@@ -6,7 +6,7 @@ Multi-tenant operations API for small and mid-size mountain operations, starting
 
 **Admin web app:** open the service URL in a browser. It is served by the same container from `public/` (plain JavaScript, no build step) and works on a phone. Roles see only the screens built for them: managers get a daily dashboard, schedule and prices; counter staff sell tickets and scan at the gate; patrol sets lift and trail status; instructors run rosters.
 
-**Stack:** Node.js 22, Express 5, MySQL 8 / MariaDB 10.6+ (Aiven MySQL in production), JWT auth, zod validation. Built for Cloud Run.
+**Stack:** Node.js 22, Express 5, MySQL 8 / MariaDB 10.6+ (Cloud SQL for MySQL in production), JWT auth, zod validation. Built for Cloud Run.
 
 ## Run locally
 

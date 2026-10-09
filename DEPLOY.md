@@ -1,6 +1,6 @@
 # Deploying SummitOps
 
-SummitOps runs on Google Cloud Run (service `summitops-api`, region `us-east1`) with an Aiven MySQL database. Secrets live in Google Secret Manager. Every update is: upload the zip, install, migrate, deploy, check.
+SummitOps runs on Google Cloud Run (service `summitops-api`, region `us-east1`) with a Cloud SQL MySQL 8.4 database (`summitops-db`, same region; reached through the Cloud SQL socket, `DB_SOCKET`). Until `move-to-cloudsql.sh` has been run it uses Aiven. Secrets live in Google Secret Manager. Every update is: upload the zip, install, migrate, deploy, check.
 
 ## First deploy
 

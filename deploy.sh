@@ -19,13 +19,30 @@ npm install --omit=dev --no-audit --no-fund
 
 step "Loading the database settings from the running service"
 SVC_JSON="$(gcloud run services describe "$SERVICE" --region "$REGION" --format=json)"
-for k in DB_HOST DB_PORT DB_USER DB_NAME; do
-  export "$k=$(echo "$SVC_JSON" | jq -r --arg k "$k" '.spec.template.spec.containers[0].env[] | select(.name==$k) | .value')"
-done
-export DB_SSL=true NODE_ENV=production
-export DB_PASSWORD="$(gcloud secrets versions access latest --secret=summitops-db-password)"
-export DB_CA="$(gcloud secrets versions access latest --secret=aiven-ca)"
-export JWT_SECRET="$(gcloud secrets versions access latest --secret=summitops-jwt)"
+envval() { echo "$SVC_JSON" | jq -r --arg k "$1" '.spec.template.spec.containers[0].env[]? | select(.name==$k) | .value // empty'; }
+secretof() { echo "$SVC_JSON" | jq -r --arg k "$1" '.spec.template.spec.containers[0].env[]? | select(.name==$k) | .valueFrom.secretKeyRef.name // empty'; }
+export DB_USER="$(envval DB_USER)" DB_NAME="$(envval DB_NAME)" NODE_ENV=production
+export DB_PASSWORD="$(gcloud secrets versions access latest --secret="$(secretof DB_PASSWORD)")"
+export JWT_SECRET="$(gcloud secrets versions access latest --secret="$(secretof JWT_SECRET)")"
+SOCKET="$(envval DB_SOCKET)"
+PROXY_PID=""
+if [ -n "$SOCKET" ]; then
+  # Cloud SQL: reach it from Cloud Shell through the Cloud SQL Auth Proxy, on a local port.
+  CONN="${SOCKET#/cloudsql/}"
+  PROXY="$HOME/cloud-sql-proxy"
+  if [ ! -x "$PROXY" ]; then
+    curl -sSfo "$PROXY" https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.26.0/cloud-sql-proxy.linux.amd64
+    chmod +x "$PROXY"
+  fi
+  "$PROXY" --gcloud-auth --port 3307 "$CONN" >/tmp/cloud-sql-proxy.log 2>&1 &
+  PROXY_PID=$!
+  trap '[ -n "$PROXY_PID" ] && kill "$PROXY_PID" 2>/dev/null || true' EXIT
+  for _ in $(seq 1 20); do (echo > /dev/tcp/127.0.0.1/3307) 2>/dev/null && break; sleep 1; done
+  export DB_HOST=127.0.0.1 DB_PORT=3307 DB_SSL=false
+else
+  export DB_HOST="$(envval DB_HOST)" DB_PORT="$(envval DB_PORT)" DB_SSL=true
+  export DB_CA="$(gcloud secrets versions access latest --secret="$(secretof DB_CA)")"
+fi
 
 step "Migrating the database"
 npm run migrate

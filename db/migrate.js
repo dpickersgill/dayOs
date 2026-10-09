@@ -307,6 +307,7 @@ async function backfillCaseNumbers(conn) {
 
 async function main() {
   const conn = await mysql.createConnection({
+    socketPath: config.db.socketPath,
     host: config.db.host,
     port: config.db.port,
     user: config.db.user,

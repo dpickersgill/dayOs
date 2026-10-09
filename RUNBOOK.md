@@ -1,12 +1,11 @@
 # SummitOps runbook: security and operations
 
 ## Before real customers
-1. **Rotate the Aiven database password** (Aiven console > service > Users > reset). Then update the secret:
-   `echo -n 'NEWPASS' | gcloud secrets versions add summitops-db-password --data-file=-`
-   and redeploy: `gcloud run deploy summitops-api --source . --region us-east1`.
+1. **Database on Cloud SQL**: run `bash move-to-cloudsql.sh` once (see "Moving the database to Cloud SQL" below). The
+   Cloud SQL login's password is made at random and kept in the `summitops-cloudsql-password` secret.
 2. **Change the owner password** in the app (Settings > Change password) and turn on two-step sign-in for every owner and manager.
-3. **Verify backups**: in Aiven confirm automated backups are on and retention is acceptable. Do a restore into a throwaway service once and check the data.
-4. **Legal**: have a lawyer review the waiver text and privacy terms. Sign BAAs (Aiven, Google Cloud) before storing patrol patient/health data (see HIPAA.md).
+3. **Verify backups**: Cloud SQL, Backups shows a daily backup and point-in-time recovery on. Restore one into a throwaway instance once and check the data.
+4. **Legal**: have a lawyer review the waiver text and privacy terms. Sign a BAA with Google Cloud before storing patrol patient/health data (see HIPAA.md).
 5. **Card payments**: pick a processor (Square or Stripe) before taking live cards through a terminal. Until then card sales are recorded manually.
 
 ## Keeping an eye on it (set up once)
@@ -28,16 +27,28 @@ Every failure is written to the logs as one line with `"severity":"ERROR"` and a
 
 ## Backups
 
-Aiven keeps its own backups (one on Hobbyist; two days of point-in-time recovery on Startup). Before a paying mountain
-relies on it, move to Startup or higher. For a copy you hold yourself, once a month (or before a risky change):
+Cloud SQL backs up the database every day at 07:00 UTC, keeps 14 backups, and can restore to any moment in the last
+week (point-in-time recovery). For a copy you hold yourself, once a month (or before a risky change):
 
 ```bash
 gsutil mb -l us-east1 gs://summitops-510715-backups 2>/dev/null || true
-mysqldump --single-transaction --routines --set-gtid-purged=OFF -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" \
-  --ssl-ca=<(echo "$DB_CA") "$DB_NAME" | gzip | gsutil cp - "gs://summitops-510715-backups/summitops-$(date +%F).sql.gz"
+gsutil iam ch "serviceAccount:$(gcloud sql instances describe summitops-db --format='value(serviceAccountEmailAddress)'):objectAdmin" gs://summitops-510715-backups
+gcloud sql export sql summitops-db "gs://summitops-510715-backups/summitops-$(date +%F).sql.gz" --database=summitops
 ```
 
-(Load the DB_* settings first, as in DEPLOY.md.) Test a restore into a scratch database once a season.
+Test a restore into a scratch instance once a season.
+
+## Moving the database to Cloud SQL
+
+The database started on Aiven's free plan, which cannot choose a region; every query crossed the country and the demo
+timed out. `move-to-cloudsql.sh` (run once, after deploying the release that contains it) creates a MySQL 8.4 server
+`summitops-db` in us-east1 next to the app, copies every row from Aiven and checks each table's row count, switches the
+app to it, and checks `/readyz`. If the app does not answer, it switches back to Aiven by itself. Aiven is left as it
+was: keep it a week, then delete the service in the Aiven console. Anything changed in the app while the copy runs
+(a few minutes) is not copied, so run it when nobody is using the app.
+
+To give the database more room later: `gcloud sql instances patch summitops-db --tier=db-custom-1-3840` (one dedicated
+CPU, 3.75 GB; a few minutes of downtime).
 
 ## Rotating keys
 

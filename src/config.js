@@ -51,6 +51,8 @@ module.exports = {
   // Where the "ask for a walkthrough" link in a demo mountain points (the marketing site's contact page). Leave unset to show no link.
   marketingUrl: env.MARKETING_URL || '',
   db: {
+    // Cloud SQL: DB_SOCKET=/cloudsql/<project>:<region>:<instance> (the socket Cloud Run provides). It replaces host and port.
+    socketPath: env.DB_SOCKET || undefined,
     host: env.DB_HOST || '127.0.0.1',
     port: Number(env.DB_PORT || 3306),
     user: env.DB_USER || 'root',
