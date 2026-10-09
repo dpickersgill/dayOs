@@ -10,7 +10,7 @@
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
-const { partialOf, z, dateStr, dateTimeStr, validate, paramId, normDateTime, setClause, todayIn, nowIn } = require('../lib/util');
+const { partialOf, z, dateStr, dateTimeStr, validate, paramId, normDateTime, setClause, todayIn, nowIn, dayRange, localDay } = require('../lib/util');
 const { notFound, bad, conflict, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const O = require('../lib/ops');
@@ -27,6 +27,10 @@ const nullable = (s) => s.nullable().optional();
 const first = (v) => String(Array.isArray(v) ? v[0] : v);
 const money = z.number().int().min(0).max(100000000000);
 const isManager = (req) => ['owner', 'manager'].includes(req.auth.role);
+// Stock is kept to 2 decimal places; a finer quantity would round in the count but not in its history.
+const qty2 = (schema) => schema.refine((v) => Math.abs(v * 100 - Math.round(v * 100)) < 1e-6, 'Up to 2 decimal places');
+// Asset prices are a manager's business; the crew sees everything else.
+const hidePrices = (req, a) => (isManager(req) ? a : { ...a, purchase_cents: undefined, salvage_cents: undefined });
 const num = (v) => (v === null || v === undefined ? null : Number(v));
 
 async function mustExist(conn, table, tenantId, id, what) {
@@ -71,8 +75,12 @@ router.post('/locations', validate(z.object(locFields)), async (req, res) => {
 });
 router.patch('/locations/:id', validate(partialOf(locFields)), async (req, res) => {
   const id = paramId(req);
-  if (req.body.parent_id === id) throw bad('A location cannot be inside itself');
   await mustExist(pool, 'asset_locations', req.auth.tenantId, req.body.parent_id, 'Location');
+  // Not inside itself, directly or further down (A in B in A).
+  for (let p = req.body.parent_id, n = 0; p && n < 20; n += 1) {
+    if (p === id) throw bad('A location cannot be inside itself');
+    p = (await one(pool, 'SELECT parent_id FROM asset_locations WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, p]) || {}).parent_id;
+  }
   const set = setClause(req.body, Object.keys(locFields));
   if (!set) throw bad('Nothing to change');
   try {
@@ -84,7 +92,10 @@ router.patch('/locations/:id', validate(partialOf(locFields)), async (req, res) 
 
 // ---------------------------------------------------------------- vendors (managers)
 const vendorFields = { name: z.string().trim().min(1).max(150), contact: nullable(z.string().max(150)), phone: nullable(z.string().max(40)), email: nullable(z.string().email().max(255)), account_no: nullable(z.string().max(60)), notes: nullable(z.string().max(500)), active: z.boolean().optional() };
-router.get('/vendors', async (req, res) => res.json({ data: await rows(pool, 'SELECT * FROM vendors WHERE tenant_id = ? ORDER BY active DESC, name', [req.auth.tenantId]) }));
+router.get('/vendors', async (req, res) => {
+  const data = await rows(pool, 'SELECT * FROM vendors WHERE tenant_id = ? ORDER BY active DESC, name', [req.auth.tenantId]);
+  res.json({ data: isManager(req) ? data : data.map((v) => ({ ...v, account_no: undefined })) });
+});
 router.post('/vendors', manager, validate(z.object(vendorFields)), async (req, res) => {
   const b = req.body;
   try {
@@ -182,7 +193,7 @@ router.get('/register', async (req, res) => {
     const mine = pm.filter((p) => p.asset_id === a.id).sort((x, y) => RANK[x.state] - RANK[y.state]);
     a.service = mine.length ? { state: mine[0].state, name: mine[0].name, count: mine.length } : null;
   }
-  res.json({ data });
+  res.json({ data: data.map((a) => hidePrices(req, a)) });
 });
 
 router.get('/tag/:tag', async (req, res) => {
@@ -194,7 +205,8 @@ router.get('/tag/:tag', async (req, res) => {
 router.get('/register/:id', async (req, res) => {
   const t = req.auth.tenantId; const id = paramId(req);
   const settings = await A.ensureSettings(pool, t);
-  const today = todayIn(await tzOf(pool, t));
+  const tz = await tzOf(pool, t);
+  const today = todayIn(tz);
   const raw = await one(pool, `${LIST_SQL} WHERE a.tenant_id = ? AND a.id = ?`, [t, id]);
   if (!raw) throw notFound('Asset');
   const a = shape(raw, today, settings.expiry_warn_days);
@@ -219,7 +231,8 @@ router.get('/register/:id', async (req, res) => {
     ...a,
     ...(see ? {} : { purchase_cents: undefined, salvage_cents: undefined }),
     children, meters, fuel: fuel.map((f) => ({ ...f, gallons: Number(f.gallons) })),
-    work_orders: orders.map((w) => ({ ...w, labor_cents: Math.round(Number(w.labor_cents)), parts_cents: Math.round(Number(w.parts_cents)) })),
+    // opened_at is UTC; the day it was opened is given on the mountain's clock.
+    work_orders: orders.map((w) => ({ ...w, opened_on: localDay(w.opened_at, tz), labor_cents: Math.round(Number(w.labor_cents)), parts_cents: Math.round(Number(w.parts_cents)) })),
     inspections: inspections.map((i) => ({ ...i, items: JSON.parse(i.items) })),
     parts_used: partsUsed.map((p) => ({ ...p, qty: -Number(p.qty) })),
     service: pm.sort((x, y) => RANK[x.state] - RANK[y.state]),
@@ -296,6 +309,8 @@ async function recordMeter(conn, req, assetId, meter, value, source, at, { corre
   await conn.query(`UPDATE ops_assets SET ${meter} = ? WHERE tenant_id = ? AND id = ?`, [value, req.auth.tenantId, assetId]);
   await conn.query('INSERT INTO asset_meters (tenant_id, asset_id, meter, value, read_at, source, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)', [req.auth.tenantId, assetId, meter, value, at, source, req.auth.userId]);
   if (correct && cur !== null && value < cur) await audit(conn, req, 'meter_correct', 'ops_assets', assetId, { meter, from: cur, to: value });
+  // A miles plan marked done before the odometer was known counts from the first reading, so it does not sit "on track" forever.
+  if (meter === 'miles') await conn.query('UPDATE pm_tasks SET last_done_miles = ? WHERE tenant_id = ? AND asset_id = ? AND interval_miles IS NOT NULL AND last_done_miles IS NULL AND last_done_on IS NOT NULL', [value, req.auth.tenantId, assetId]);
 }
 
 router.post('/register/:id/meter', validate(z.object({ hours: z.number().min(0).max(9999999).optional(), miles: z.number().min(0).max(99999999).optional(), correct: z.boolean().optional() })
@@ -423,8 +438,9 @@ router.get('/parts/:id', async (req, res) => {
     LEFT JOIN work_orders w ON w.tenant_id = m.tenant_id AND w.id = m.work_order_id WHERE m.tenant_id = ? AND m.part_id = ? ORDER BY m.at DESC, m.id DESC LIMIT 100`, [req.auth.tenantId, p.id]);
   res.json({ ...partOut(p), moves: moves.map((m) => ({ ...m, qty: Number(m.qty) })) });
 });
-router.post('/parts', validate(z.object({ ...partFields, qty_on_hand: z.number().min(0).max(1000000).optional() })), async (req, res) => {
+router.post('/parts', validate(z.object({ ...partFields, qty_on_hand: qty2(z.number().min(0).max(1000000)).optional() })), async (req, res) => {
   const b = req.body; const t = req.auth.tenantId;
+  if (b.unit_cost_cents && !isManager(req)) throw forbidden('Only a manager sets a part cost');
   const id = await tx(async (conn) => {
     await mustExist(conn, 'vendors', t, b.vendor_id, 'Vendor');
     await mustExist(conn, 'asset_locations', t, b.location_id, 'Location');
@@ -456,7 +472,7 @@ router.patch('/parts/:id', validate(partialOf(partFields)), async (req, res) => 
 });
 
 /** A stock count (set the number) or an adjustment (add or take away), with a reason. */
-router.post('/parts/:id/stock', validate(z.object({ count: z.number().min(0).max(1000000).optional(), change: z.number().min(-1000000).max(1000000).optional(), note: z.string().trim().min(3).max(255) })
+router.post('/parts/:id/stock', validate(z.object({ count: qty2(z.number().min(0).max(1000000)).optional(), change: qty2(z.number().min(-1000000).max(1000000)).optional(), note: z.string().trim().min(3).max(255) })
   .refine((v) => (v.count === undefined) !== (v.change === undefined), 'Give a count or a change, not both')), async (req, res) => {
   const t = req.auth.tenantId; const id = paramId(req);
   await tx(async (conn) => {
@@ -479,22 +495,27 @@ async function orderFor(conn, req, id) {
   return w;
 }
 
-/** Parts taken from stock for a work order, at today's cost, charged to its asset. A negative qty returns parts. */
-router.post('/work-orders/:id/parts', validate(z.object({ part_id: z.number().int().positive(), qty: z.number().min(-100000).max(100000).refine((v) => v !== 0, 'Give a quantity'), note: nullable(z.string().max(255)) })), async (req, res) => {
+/**
+ * Parts taken from stock for a work order, at today's cost, charged to its asset. A negative qty returns parts, credited
+ * at what they cost when issued. Returns still work on a cancelled order, so parts never get stuck on it.
+ */
+router.post('/work-orders/:id/parts', validate(z.object({ part_id: z.number().int().positive(), qty: qty2(z.number().min(-100000).max(100000)).refine((v) => v !== 0, 'Give a quantity'), note: nullable(z.string().max(255)) })), async (req, res) => {
   const t = req.auth.tenantId; const id = paramId(req); const b = req.body;
   await tx(async (conn) => {
     const w = await orderFor(conn, req, id);
-    if (w.status === 'cancelled') throw conflict('This work order was cancelled');
+    if (w.status === 'cancelled' && b.qty > 0) throw conflict('This work order was cancelled');
     const p = await one(conn, 'SELECT id, name, qty_on_hand, unit_cost_cents, unit FROM parts WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, b.part_id]);
     if (!p) throw notFound('Part');
     if (b.qty > 0 && Number(p.qty_on_hand) < b.qty) throw bad(`Only ${Number(p.qty_on_hand)} ${p.unit} of ${p.name} on hand`);
+    let cost = p.unit_cost_cents;
     if (b.qty < 0) {
-      const used = await one(conn, "SELECT COALESCE(SUM(-qty), 0) AS n FROM part_moves WHERE tenant_id = ? AND work_order_id = ? AND part_id = ? AND kind IN ('issue','return')", [t, id, p.id]);
+      const used = await one(conn, "SELECT COALESCE(SUM(-qty), 0) AS n, SUM(-qty * unit_cost_cents) AS c FROM part_moves WHERE tenant_id = ? AND work_order_id = ? AND part_id = ? AND kind IN ('issue','return')", [t, id, p.id]);
       if (-b.qty > Number(used.n)) throw bad(`Only ${Number(used.n)} ${p.unit} were used on this work order`);
+      cost = Math.round(Number(used.c) / Number(used.n));
     }
     await conn.query('UPDATE parts SET qty_on_hand = qty_on_hand - ? WHERE tenant_id = ? AND id = ?', [b.qty, t, p.id]);
     await conn.query('INSERT INTO part_moves (tenant_id, part_id, kind, qty, unit_cost_cents, work_order_id, asset_id, note, user_id, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [t, p.id, b.qty > 0 ? 'issue' : 'return', -b.qty, p.unit_cost_cents, id, w.asset_id, b.note ?? null, req.auth.userId, nowIn(await tzOf(conn, t))]);
+      [t, p.id, b.qty > 0 ? 'issue' : 'return', -b.qty, cost, id, w.asset_id, b.note ?? null, req.auth.userId, nowIn(await tzOf(conn, t))]);
   });
   res.status(201).json({ ok: true });
 });
@@ -502,7 +523,7 @@ router.post('/work-orders/:id/parts', validate(z.object({ part_id: z.number().in
 router.post('/work-orders/:id/labor', validate(z.object({ staff_id: nullable(z.number().int().positive()), worker: nullable(z.string().max(100)), hours: z.number().positive().max(200), worked_on: nullable(dateStr), note: nullable(z.string().max(255)) })), async (req, res) => {
   const t = req.auth.tenantId; const id = paramId(req); const b = req.body;
   const out = await tx(async (conn) => {
-    await orderFor(conn, req, id);
+    if ((await orderFor(conn, req, id)).status === 'cancelled') throw conflict('This work order was cancelled');
     await mustExist(conn, 'staff', t, b.staff_id, 'Staff member');
     const s = await A.ensureSettings(conn, t);
     const [r] = await conn.query('INSERT INTO work_order_labor (tenant_id, work_order_id, staff_id, worker, hours, rate_cents, worked_on, note, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -567,7 +588,7 @@ router.get('/work-orders/:id/costs', async (req, res) => {
 });
 
 // ---------------------------------------------------------------- purchase orders
-const lineSchema = z.object({ part_id: nullable(z.number().int().positive()), description: nullable(z.string().max(200)), qty: z.number().positive().max(1000000), unit_cost_cents: money.max(100000000).default(0), work_order_id: nullable(z.number().int().positive()) });
+const lineSchema = z.object({ part_id: nullable(z.number().int().positive()), description: nullable(z.string().max(200)), qty: qty2(z.number().positive().max(1000000)), unit_cost_cents: money.max(100000000).default(0), work_order_id: nullable(z.number().int().positive()) });
 const poSchema = z.object({ vendor_id: z.number().int().positive(), expected_on: nullable(dateStr), notes: nullable(z.string().max(500)), lines: z.array(lineSchema).min(1).max(200) });
 
 async function writeLines(conn, req, poId, lines) {
@@ -653,8 +674,11 @@ router.post('/purchase-orders/:id/cancel', manager, async (req, res) => {
   await audit(pool, req, 'cancel', 'purchase_orders', id);
   res.json({ ok: true });
 });
-/** What arrived. Parts go into stock at the price paid (which becomes the part's cost); a line can arrive in pieces. */
-router.post('/purchase-orders/:id/receive', validate(z.object({ lines: z.array(z.object({ line_id: z.number().int().positive(), qty: z.number().positive().max(1000000) })).min(1) })), async (req, res) => {
+/**
+ * What arrived. Parts go into stock at the price on the order (set by a manager), which becomes the part's cost; a line
+ * can arrive in pieces. The crew can receive, since they are the ones at the dock.
+ */
+router.post('/purchase-orders/:id/receive', validate(z.object({ lines: z.array(z.object({ line_id: z.number().int().positive(), qty: qty2(z.number().positive().max(1000000)) })).min(1) })), async (req, res) => {
   const t = req.auth.tenantId; const id = paramId(req);
   const out = await tx(async (conn) => {
     const o = await one(conn, 'SELECT status FROM purchase_orders WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, id]);
@@ -697,8 +721,8 @@ router.get('/overview', async (req, res) => {
     one(pool, `SELECT
         (SELECT COALESCE(SUM(l.hours * l.rate_cents), 0) FROM work_order_labor l WHERE l.tenant_id = ? AND l.worked_on >= ?) AS labor_month,
         (SELECT COALESCE(SUM(-m.qty * m.unit_cost_cents), 0) FROM part_moves m WHERE m.tenant_id = ? AND m.kind IN ('issue','return') AND m.at >= ?) AS parts_month,
-        (SELECT COALESCE(SUM(vendor_cost_cents), 0) FROM work_orders WHERE tenant_id = ? AND status <> 'cancelled' AND COALESCE(completed_at, opened_at) >= ?) AS vendor_month,
-        (SELECT COALESCE(SUM(cost_cents), 0) FROM asset_fuel WHERE tenant_id = ? AND filled_at >= ?) AS fuel_month`, [t, monthStart, t, monthStart, t, monthStart, t, monthStart]),
+        (SELECT COALESCE(SUM(vendor_cost_cents), 0) FROM work_orders WHERE tenant_id = ? AND status <> 'cancelled' AND IF(completed_at IS NULL, opened_at >= ?, completed_at >= ?)) AS vendor_month,
+        (SELECT COALESCE(SUM(cost_cents), 0) FROM asset_fuel WHERE tenant_id = ? AND filled_at >= ?) AS fuel_month`, [t, monthStart, t, monthStart, t, dayRange(await tzOf(pool, t), monthStart)[0], monthStart, t, monthStart]),
   ]);
   const costMap = await A.costs(pool, t, assets.map((a) => a.id), since);
   const lc = assets.map((a) => ({ a, c: costMap.get(a.id), l: A.lifecycle(a, costMap.get(a.id), today, s.replace_pct) }));
@@ -730,7 +754,8 @@ router.get('/lifecycle', manager, async (req, res) => {
   });
   if (req.query.format === 'csv') {
     const cols = ['tag', 'name', 'category', 'status', 'hours', 'miles', 'purchased_on', 'purchase_cents', 'book_value_cents', 'age_years', 'labor', 'parts', 'vendor', 'fuel', 'maintenance_12', 'total', 'cost_per_hour_cents', 'cost_per_mile_cents', 'replace'];
-    const esc = (v) => { const x = v === null || v === undefined ? '' : String(v); return /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
+    // Text that a spreadsheet would read as a formula (=, +, -, @) is kept as text.
+    const esc = (v) => { let x = v === null || v === undefined ? '' : String(v); if (typeof v === 'string' && /^[=+\-@\t\r]/.test(x)) x = `'${x}`; return /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
     await audit(pool, req, 'export', 'ops_assets', null, { rows: data.length });
     res.set('Content-Type', 'text/csv; charset=utf-8').set('Content-Disposition', 'attachment; filename="asset-costs.csv"').send([cols.join(','), ...data.map((d) => cols.map((k) => esc(d[k])).join(','))].join('\n'));
     return;

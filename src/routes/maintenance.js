@@ -43,12 +43,14 @@ const assetFields = {
   notes: nullable(z.string().max(500)),
 };
 const ASSET_COLS = ['name', 'kind', 'make_model', 'serial', 'hours', 'status', 'notes'];
+// Only the core columns: purchase prices, VINs and the rest of the Assets add-on stay behind its own (gated) routes.
+const CORE_ASSET = 'a.id, a.tenant_id, a.name, a.kind, a.make_model, a.serial, a.hours, a.status, a.notes, a.asset_tag';
 
 router.get('/assets', async (req, res) => {
   const where = ['a.tenant_id = ?']; const params = [req.auth.tenantId];
   if (req.query.kind) { where.push('a.kind = ?'); params.push(first(req.query.kind)); }
   if (req.query.all !== '1') where.push("a.status <> 'retired'");
-  const data = await rows(pool, `SELECT a.*, (SELECT COUNT(*) FROM work_orders w WHERE w.tenant_id = a.tenant_id AND w.asset_id = a.id AND w.status NOT IN ('done','cancelled')) AS open_orders
+  const data = await rows(pool, `SELECT ${CORE_ASSET} , (SELECT COUNT(*) FROM work_orders w WHERE w.tenant_id = a.tenant_id AND w.asset_id = a.id AND w.status NOT IN ('done','cancelled')) AS open_orders
     FROM ops_assets a WHERE ${where.join(' AND ')} ORDER BY a.kind, a.name`, params);
   res.json({ data: data.map((a) => ({ ...a, hours: Number(a.hours) })) });
 });
@@ -120,7 +122,8 @@ const orderFields = {
   assigned_staff_id: nullable(z.number().int().positive()),
   due_date: nullable(dateStr),
 };
-const ORDER_SQL = `SELECT w.*, a.name AS asset, l.name AS lift, CONCAT(p.first_name, ' ', p.last_name) AS assignee
+const ORDER_SQL = `SELECT w.id, w.tenant_id, w.title, w.description, w.priority, w.status, w.asset_id, w.lift_id, w.location, w.source, w.assigned_staff_id,
+    w.due_date, w.opened_at, w.opened_by, w.completed_at, w.labor_hours, w.parts_note, w.resolution, w.pm_task_id, a.name AS asset, l.name AS lift, CONCAT(p.first_name, ' ', p.last_name) AS assignee
   FROM work_orders w
   LEFT JOIN ops_assets a ON a.tenant_id = w.tenant_id AND a.id = w.asset_id
   LEFT JOIN lifts l ON l.tenant_id = w.tenant_id AND l.id = w.lift_id
@@ -194,9 +197,11 @@ router.post('/work-orders/:id/status', validate(z.object({
       [b.status, done ? nowIn(await tenantTz(req.auth.tenantId)) : null, b.labor_hours ?? null, b.parts_note ?? null, b.resolution ?? null, req.auth.tenantId, id]);
     await conn.query('INSERT INTO work_order_notes (tenant_id, work_order_id, user_id, body) VALUES (?, ?, ?, ?)', [req.auth.tenantId, id, req.auth.userId, `${STATUS_TEXT[b.status]}${b.resolution ? `: ${b.resolution}` : ''}`]);
     // A preventive work order that is completed marks its service plan done, at the meters recorded on the order.
+    // Only once per order: an order reopened and completed again does not count as a second service.
     if (b.status === 'done' && w.pm_task_id && w.status !== 'done') {
       const t = await one(conn, 'SELECT * FROM pm_tasks WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, w.pm_task_id]);
-      if (t) await markPmDone(conn, req, t, { on: todayIn(await tenantTz(req.auth.tenantId)), hours: w.meter_hours === null ? undefined : Number(w.meter_hours), miles: w.meter_miles === null ? undefined : Number(w.meter_miles), note: `Work order ${id}` });
+      const already = await one(conn, 'SELECT id FROM pm_log WHERE tenant_id = ? AND work_order_id = ?', [req.auth.tenantId, id]);
+      if (t && !already) await markPmDone(conn, req, t, { on: todayIn(await tenantTz(req.auth.tenantId)), hours: w.meter_hours === null ? undefined : Number(w.meter_hours), miles: w.meter_miles === null ? undefined : Number(w.meter_miles), note: `Work order ${id}`, workOrderId: id });
     }
     await audit(conn, req, 'status', 'work_orders', id, { from: w.status, to: b.status });
   });
@@ -270,11 +275,11 @@ router.patch('/pm/:id', validate(partialOf(pmFields)), async (req, res) => {
 });
 
 /** Marks a service plan done: on a date, at the machine's meter readings. Used by "done" and by completing its work order. */
-async function markPmDone(conn, req, t, { on, hours, miles, note }) {
+async function markPmDone(conn, req, t, { on, hours, miles, note, workOrderId = null }) {
   const a = t.asset_id ? await one(conn, 'SELECT hours, miles FROM ops_assets WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, t.asset_id]) : null;
   const h = hours ?? (a ? Number(a.hours) : null);
   const m = miles ?? (a && a.miles !== null ? Number(a.miles) : null);
-  await conn.query('INSERT INTO pm_log (tenant_id, pm_task_id, done_on, hours, user_id, note) VALUES (?, ?, ?, ?, ?, ?)', [req.auth.tenantId, t.id, on, h, req.auth.userId, note ?? null]);
+  await conn.query('INSERT INTO pm_log (tenant_id, pm_task_id, done_on, hours, user_id, note, work_order_id) VALUES (?, ?, ?, ?, ?, ?, ?)', [req.auth.tenantId, t.id, on, h, req.auth.userId, note ?? null, workOrderId]);
   await conn.query('UPDATE pm_tasks SET last_done_on = ?, last_done_hours = ?, last_done_miles = ? WHERE tenant_id = ? AND id = ?', [on, h, m, req.auth.tenantId, t.id]);
 }
 
@@ -301,7 +306,8 @@ router.get('/pm/:id/log', async (req, res) => {
 router.post('/pm/:id/work-order', async (req, res) => {
   const id = paramId(req);
   const out = await tx(async (conn) => {
-    const t = await one(conn, 'SELECT * FROM pm_tasks WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, id]);
+    // Locked, so two quick taps make one work order, not two.
+    const t = await one(conn, 'SELECT * FROM pm_tasks WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id]);
     if (!t) throw notFound('Recurring job');
     const open = await one(conn, "SELECT id FROM work_orders WHERE tenant_id = ? AND pm_task_id = ? AND status NOT IN ('done','cancelled')", [req.auth.tenantId, id]);
     if (open) return open.id; // one open work order per plan

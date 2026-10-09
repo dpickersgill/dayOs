@@ -359,6 +359,10 @@ const assetSteps = [
   ['pm_tasks miles', (c) => columnExists(c, 'pm_tasks', 'interval_miles'), 'ALTER TABLE pm_tasks ADD COLUMN interval_miles DECIMAL(9,1) NULL, ADD COLUMN last_done_miles DECIMAL(10,1) NULL, ADD COLUMN checklist VARCHAR(2000) NULL'],
   ['work_orders asset costs', (c) => columnExists(c, 'work_orders', 'pm_task_id'), 'ALTER TABLE work_orders ADD COLUMN pm_task_id BIGINT UNSIGNED NULL, ADD COLUMN meter_hours DECIMAL(10,1) NULL, ADD COLUMN meter_miles DECIMAL(10,1) NULL, ADD COLUMN vendor_id BIGINT UNSIGNED NULL, ADD COLUMN vendor_cost_cents INT UNSIGNED NULL, ADD COLUMN downtime_hours DECIMAL(7,1) NULL'],
   ['work_orders by asset', (c) => indexExists(c, 'work_orders', 'ix_wo_asset'), 'ALTER TABLE work_orders ADD INDEX ix_wo_asset (tenant_id, asset_id, status)'],
+  // Labor is now the sum of logged entries, which can pass 9,999.9 hours on a long job.
+  ['work_orders labor width', (c) => columnTypeHas(c, 'work_orders', 'labor_hours', '8,1'), 'ALTER TABLE work_orders MODIFY labor_hours DECIMAL(8,1) NULL'],
+  // A plan is marked done once per work order, even if the order is reopened and completed again.
+  ['pm_log work order', (c) => columnExists(c, 'pm_log', 'work_order_id'), 'ALTER TABLE pm_log ADD COLUMN work_order_id BIGINT UNSIGNED NULL, ADD UNIQUE KEY uq_pm_log_wo (tenant_id, work_order_id)'],
 ];
 
 async function backfillCaseNumbers(conn) {

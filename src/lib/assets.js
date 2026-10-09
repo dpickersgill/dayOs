@@ -3,7 +3,8 @@
 // Assets and fleet: the rules that are not just storage. When a date-bound paper (registration, insurance, inspection,
 // warranty) is about to run out, what a machine is worth on the books, what it has cost to keep, and whether the numbers
 // say to replace it. Plus the starting inspection checklists every mountain gets.
-const { one, rows } = require('../db');
+const { one, rows, pool, tx } = require('../db');
+const { dayRange } = require('./util');
 const { CATEGORY_OF } = require('./ops');
 
 const CATEGORIES = [['fleet', 'Fleet and vehicles'], ['lift', 'Lifts'], ['snowmaking', 'Snowmaking'], ['facility', 'Buildings and facilities'], ['equipment', 'Equipment and tools'], ['other', 'Other']]
@@ -50,13 +51,15 @@ function bookValue(a, today) {
 async function costs(conn, tenantId, assetIds, since) {
   if (!assetIds.length) return new Map();
   const ids = [assetIds];
+  // completed_at is a mountain-clock time; opened_at is a UTC timestamp, so it is compared with the same moment in UTC.
+  const sinceUtc = dayRange((await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone, since)[0];
   const [labor, parts, vendor, fuel] = await Promise.all([
     rows(conn, `SELECT w.asset_id, SUM(l.hours * l.rate_cents) AS all_c, SUM(IF(l.worked_on >= ?, l.hours * l.rate_cents, 0)) AS yr_c, SUM(l.hours) AS hours
       FROM work_order_labor l JOIN work_orders w ON w.tenant_id = l.tenant_id AND w.id = l.work_order_id WHERE l.tenant_id = ? AND w.asset_id IN (?) GROUP BY w.asset_id`, [since, tenantId, ...ids]),
     rows(conn, `SELECT m.asset_id, SUM(-m.qty * m.unit_cost_cents) AS all_c, SUM(IF(m.at >= ?, -m.qty * m.unit_cost_cents, 0)) AS yr_c
       FROM part_moves m WHERE m.tenant_id = ? AND m.asset_id IN (?) AND m.kind IN ('issue','return') GROUP BY m.asset_id`, [since, tenantId, ...ids]),
-    rows(conn, `SELECT asset_id, SUM(vendor_cost_cents) AS all_c, SUM(IF(COALESCE(completed_at, opened_at) >= ?, vendor_cost_cents, 0)) AS yr_c
-      FROM work_orders WHERE tenant_id = ? AND asset_id IN (?) AND vendor_cost_cents IS NOT NULL AND status <> 'cancelled' GROUP BY asset_id`, [since, tenantId, ...ids]),
+    rows(conn, `SELECT asset_id, SUM(vendor_cost_cents) AS all_c, SUM(IF(IF(completed_at IS NULL, opened_at >= ?, completed_at >= ?), vendor_cost_cents, 0)) AS yr_c
+      FROM work_orders WHERE tenant_id = ? AND asset_id IN (?) AND vendor_cost_cents IS NOT NULL AND status <> 'cancelled' GROUP BY asset_id`, [sinceUtc, since, tenantId, ...ids]),
     rows(conn, `SELECT asset_id, SUM(cost_cents) AS all_c, SUM(IF(filled_at >= ?, cost_cents, 0)) AS yr_c, SUM(gallons) AS gallons
       FROM asset_fuel WHERE tenant_id = ? AND asset_id IN (?) GROUP BY asset_id`, [since, tenantId, ...ids]),
   ]);
@@ -107,17 +110,23 @@ const DEFAULT_TEMPLATES = [
 /** The settings row, created on first use; also gives every untagged asset a tag (A-0001 and up), oldest first. */
 async function ensureSettings(conn, tenantId) {
   await conn.query('INSERT IGNORE INTO asset_settings (tenant_id) VALUES (?)', [tenantId]);
-  const untagged = await rows(conn, 'SELECT id FROM ops_assets WHERE tenant_id = ? AND asset_tag IS NULL ORDER BY id', [tenantId]);
-  if (untagged.length) {
-    const s = await one(conn, 'SELECT next_tag FROM asset_settings WHERE tenant_id = ? FOR UPDATE', [tenantId]);
-    let n = Number(s.next_tag);
-    for (const a of untagged) {
-      // Skip a number someone typed in by hand.
-      while (await one(conn, 'SELECT id FROM ops_assets WHERE tenant_id = ? AND asset_tag = ?', [tenantId, tagOf(n)])) n += 1;
-      await conn.query('UPDATE ops_assets SET asset_tag = ? WHERE tenant_id = ? AND id = ? AND asset_tag IS NULL', [tagOf(n), tenantId, a.id]);
-      n += 1;
-    }
-    await conn.query('UPDATE asset_settings SET next_tag = ? WHERE tenant_id = ?', [n, tenantId]);
+  if (await one(conn, 'SELECT id FROM ops_assets WHERE tenant_id = ? AND asset_tag IS NULL LIMIT 1', [tenantId])) {
+    // Tag untagged assets (made in core Maintenance, or before the add-on) in one transaction, so two screens loading at once
+    // cannot hand out the same number. Inside a caller's transaction, that one is used.
+    const backfill = async (c) => {
+      const s = await one(c, 'SELECT next_tag FROM asset_settings WHERE tenant_id = ? FOR UPDATE', [tenantId]);
+      const untagged = await rows(c, 'SELECT id FROM ops_assets WHERE tenant_id = ? AND asset_tag IS NULL ORDER BY id', [tenantId]);
+      if (!untagged.length) return;
+      let n = Number(s.next_tag);
+      for (const a of untagged) {
+        // Skip a number someone typed in by hand.
+        while (await one(c, 'SELECT id FROM ops_assets WHERE tenant_id = ? AND asset_tag = ?', [tenantId, tagOf(n)])) n += 1;
+        await c.query('UPDATE ops_assets SET asset_tag = ? WHERE tenant_id = ? AND id = ? AND asset_tag IS NULL', [tagOf(n), tenantId, a.id]);
+        n += 1;
+      }
+      await c.query('UPDATE asset_settings SET next_tag = ? WHERE tenant_id = ?', [n, tenantId]);
+    };
+    if (conn === pool) await tx(backfill); else await backfill(conn);
   }
   const { n: tpl } = await one(conn, 'SELECT COUNT(*) AS n FROM inspection_templates WHERE tenant_id = ?', [tenantId]);
   if (!Number(tpl)) {

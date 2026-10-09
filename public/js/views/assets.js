@@ -148,7 +148,7 @@ async function drawParts(box) {
       { head: 'Where', cell: (p) => [p.location, p.bin && `bin ${p.bin}`].filter(Boolean).join(', ') },
       { head: 'Vendor', cell: (p) => p.vendor || '' },
       { head: 'Cost', num: true, cell: (p) => money(p.unit_cost_cents) },
-      { head: '', actions: true, cell: (p) => button('Open', () => partSheet(p.id, vendors.data, locs.data, load), { small: true }) },
+      { head: '', actions: true, cell: (p) => button('Open', () => partSheet(p.id, vendors.data, locs.data, load), { small: true, label: `Open ${p.name}` }) },
     ], data));
   }
   let t = null;
@@ -220,7 +220,7 @@ async function drawPurchasing(box) {
       { head: 'Status', cell: (o) => state(PO_STATE[o.status][0], PO_STATE[o.status][1]) },
       { head: 'Total', num: true, cell: (o) => money(o.total_cents) },
       { head: 'Expected', cell: (o) => (o.expected_on ? fmtDate(o.expected_on) : '') },
-      { head: '', actions: true, cell: (o) => button('Open', () => poSheet(o.id, vendors.data, parts.data, load), { small: true }) },
+      { head: '', actions: true, cell: (o) => button('Open', () => poSheet(o.id, vendors.data, parts.data, load), { small: true, label: `Open purchase order ${o.po_number}` }) },
     ], data));
   }
   show.addEventListener('change', load);
@@ -330,11 +330,11 @@ async function drawSettings(box) {
       h('div', { class: 'form' }, field('Shop labor rate, per hour ($)', rate, 'Applied to time logged from now on'), field('Flag a replacement when a year of upkeep passes this % of book value', pct), field('Warn this many days before papers run out', warn)),
       h('div', { class: 'row' }, button('Save', async () => { const c = toCents(rate.value); if (c === null) throw new Error('The labor rate must be an amount'); await put('/assets/settings', { labor_rate_cents: c, replace_pct: Number(pct.value), expiry_warn_days: Number(warn.value) }); toast('Saved'); }, { kind: 'primary', small: true }))),
     h('section', { class: 'panel stack' }, h('div', { class: 'spread' }, h('h2', null, 'Places'), button('Add a place', () => locDialog(null, locs.data, again), { small: true })),
-      locs.data.length ? h('ul', { class: 'plain rows' }, locs.data.map((l) => h('li', { class: 'spread' }, h('span', null, h('b', null, l.name), h('span', { class: 'muted small' }, ` ${label(l.kind)}${l.parent ? `, in ${l.parent}` : ''} · ${l.assets} asset${Number(l.assets) === 1 ? '' : 's'}${l.active ? '' : ' · not in use'}`)), button('Edit', () => locDialog(l, locs.data, again), { small: true })))) : h('p', { class: 'muted' }, 'Add the shop, the yard, each lodge and lift terminal.')),
+      locs.data.length ? h('ul', { class: 'plain rows' }, locs.data.map((l) => h('li', { class: 'spread' }, h('span', null, h('b', null, l.name), h('span', { class: 'muted small' }, ` ${label(l.kind)}${l.parent ? `, in ${l.parent}` : ''} · ${l.assets} asset${Number(l.assets) === 1 ? '' : 's'}${l.active ? '' : ' · not in use'}`)), button('Edit', () => locDialog(l, locs.data, again), { small: true, label: `Edit ${l.name}` })))) : h('p', { class: 'muted' }, 'Add the shop, the yard, each lodge and lift terminal.')),
     h('section', { class: 'panel stack' }, h('div', { class: 'spread' }, h('h2', null, 'Vendors'), button('Add a vendor', () => vendorDialog(null, again), { small: true })),
-      vendors.data.length ? h('ul', { class: 'plain rows' }, vendors.data.map((v) => h('li', { class: 'spread' }, h('span', null, h('b', null, v.name), h('span', { class: 'muted small' }, ` ${[v.contact, v.phone, v.email, v.account_no && `account ${v.account_no}`].filter(Boolean).join(' · ')}${v.active ? '' : ' · not in use'}`)), button('Edit', () => vendorDialog(v, again), { small: true })))) : h('p', { class: 'muted' }, 'Add the dealers and suppliers you buy parts and service from.')),
+      vendors.data.length ? h('ul', { class: 'plain rows' }, vendors.data.map((v) => h('li', { class: 'spread' }, h('span', null, h('b', null, v.name), h('span', { class: 'muted small' }, ` ${[v.contact, v.phone, v.email, v.account_no && `account ${v.account_no}`].filter(Boolean).join(' · ')}${v.active ? '' : ' · not in use'}`)), button('Edit', () => vendorDialog(v, again), { small: true, label: `Edit ${v.name}` })))) : h('p', { class: 'muted' }, 'Add the dealers and suppliers you buy parts and service from.')),
     h('section', { class: 'panel stack' }, h('div', { class: 'spread' }, h('h2', null, 'Inspection checklists'), button('Add a checklist', () => tplDialog(null, meta, again), { small: true })),
-      h('ul', { class: 'plain rows' }, meta.templates.map((t) => h('li', { class: 'spread' }, h('span', null, h('b', null, t.name), h('span', { class: 'muted small' }, ` ${t.items.length} items · ${t.kinds.length ? t.kinds.map(kindLabel).join(', ') : 'anything without its own checklist'}${t.active ? '' : ' · not in use'}`)), button('Edit', () => tplDialog(t, meta, again), { small: true })))))));
+      h('ul', { class: 'plain rows' }, meta.templates.map((t) => h('li', { class: 'spread' }, h('span', null, h('b', null, t.name), h('span', { class: 'muted small' }, ` ${t.items.length} items · ${t.kinds.length ? t.kinds.map(kindLabel).join(', ') : 'anything without its own checklist'}${t.active ? '' : ' · not in use'}`)), button('Edit', () => tplDialog(t, meta, again), { small: true, label: `Edit ${t.name}` })))))));
 }
 
 function locDialog(l, all, done) {

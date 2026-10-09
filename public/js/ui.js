@@ -169,8 +169,9 @@ export function act(button, fn) {
     try { await fn(); } catch (err) { fail(err); } finally { if (button) button.disabled = false; }
   };
 }
-export function button(text, onClick, { kind, small, type = 'button' } = {}) {
-  const b = h('button', { type, class: ['btn', kind, small ? 'small' : ''].filter(Boolean).join(' ') }, text);
+export function button(text, onClick, { kind, small, type = 'button', label } = {}) {
+  // `label` names the button for screen readers when the text alone ("Open", "Edit") repeats down a list.
+  const b = h('button', { type, class: ['btn', kind, small ? 'small' : ''].filter(Boolean).join(' '), 'aria-label': label || null }, text);
   if (onClick) b.addEventListener('click', act(b, () => onClick(b)));
   return b;
 }

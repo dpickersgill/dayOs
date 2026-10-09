@@ -90,8 +90,8 @@ export async function renderAsset(root, id) {
   function ordersSection(a) {
     return h('section', { class: 'panel stack' }, h('h2', null, 'Work orders'),
       a.work_orders.length ? h('ul', { class: 'plain rows' }, a.work_orders.slice(0, 15).map((w) => h('li', { class: 'spread' },
-        h('span', null, h('b', null, w.title), ' ', state(label(w.status), w.status === 'done' ? 'good' : w.status === 'cancelled' ? 'neutral' : 'warn'), h('span', { class: 'muted small' }, ` ${fmtDate(w.opened_at)}${w.resolution ? `. ${w.resolution}` : ''}`)),
-        h('span', { class: 'row tight' }, isManager() || w.labor_cents || w.parts_cents ? h('span', { class: 'muted small' }, money(w.labor_cents + w.parts_cents + (w.vendor_cost_cents || 0))) : null, button('Open', () => workOrderSheet(w.id, a, load), { small: true }))))) : h('p', { class: 'muted' }, 'None yet.'));
+        h('span', null, h('b', null, w.title), ' ', state(label(w.status), w.status === 'done' ? 'good' : w.status === 'cancelled' ? 'neutral' : 'warn'), h('span', { class: 'muted small' }, ` ${fmtDate(w.opened_on)}${w.resolution ? `. ${w.resolution}` : ''}`)),
+        h('span', { class: 'row tight' }, isManager() || w.labor_cents || w.parts_cents ? h('span', { class: 'muted small' }, money(w.labor_cents + w.parts_cents + (w.vendor_cost_cents || 0))) : null, button('Open', () => workOrderSheet(w.id, a, load), { small: true, label: `Open work order: ${w.title}` }))))) : h('p', { class: 'muted' }, 'None yet.'));
   }
 
   function inspectionsSection(a) {
@@ -158,6 +158,11 @@ export function assetDialog(meta, a, done) {
   const cur = a || {};
   const can = isManager();
   const kinds = meta.kinds.map((k) => [k.value, k.label]);
+  // A place, lift or vendor taken out of use still shows on the asset that has it, so saving does not clear it.
+  const keep = (list, id, name) => (id && !list.some((x) => x.id === id) ? [...list, { id, name: `${name || 'Unknown'} (not in use)` }] : list);
+  const locations = keep(meta.locations, cur.location_id, cur.location);
+  const lifts = keep(meta.lifts, cur.lift_id, cur.lift);
+  const vendors = keep(meta.vendors, cur.vendor_id, cur.vendor);
   const date = (name) => input({ name, type: 'date', value: cur[name] || '' });
   formDialog(a ? `Edit ${a.name}` : 'Add an asset', h('div', { class: 'stack' },
     h('fieldset', { class: 'form' }, h('legend', null, 'What it is'),
@@ -168,8 +173,8 @@ export function assetDialog(meta, a, done) {
       field('Status', select(Object.entries(STATUS).map(([k, [t]]) => [k, t]), cur.status || 'in_service', { name: 'status' })),
       h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'critical', checked: Boolean(cur.critical) }), ' Critical (a failure stops operations; failed checks open urgent work orders)')),
     h('fieldset', { class: 'form' }, h('legend', null, 'Where'),
-      field('Location', select([['', 'Not set'], ...meta.locations.map((l) => [l.id, l.name])], cur.location_id || '', { name: 'location_id' })),
-      field('Lift', select([['', 'None'], ...meta.lifts.map((l) => [l.id, l.name])], cur.lift_id || '', { name: 'lift_id' })),
+      field('Location', select([['', 'Not set'], ...locations.map((l) => [l.id, l.name])], cur.location_id || '', { name: 'location_id' })),
+      field('Lift', select([['', 'None'], ...lifts.map((l) => [l.id, l.name])], cur.lift_id || '', { name: 'lift_id' })),
       field('Part of', select([['', 'Nothing (stands alone)'], ...meta.assets.filter((x) => x.id !== cur.id).map((x) => [x.id, `${x.name} (${x.asset_tag})`])], cur.parent_id || '', { name: 'parent_id' }), 'A gearbox is part of a lift drive, a plow is part of a truck')),
     h('fieldset', { class: 'form' }, h('legend', null, 'Identity'),
       field('Tag', input({ name: 'asset_tag', maxlength: 20, value: cur.asset_tag || '', placeholder: 'Given automatically' })),
@@ -181,7 +186,7 @@ export function assetDialog(meta, a, done) {
       field('Warranty ends', date('warranty_expires')), field('Warranty note', input({ name: 'warranty_note', maxlength: 255, value: cur.warranty_note || '' }))),
     h('fieldset', { class: 'form' }, h('legend', null, 'Purchase'),
       field('Purchased on', date('purchased_on')),
-      field('Vendor', select([['', 'Not set'], ...meta.vendors.map((v) => [v.id, v.name])], cur.vendor_id || '', { name: 'vendor_id' })),
+      field('Vendor', select([['', 'Not set'], ...vendors.map((v) => [v.id, v.name])], cur.vendor_id || '', { name: 'vendor_id' })),
       can ? field('Purchase price ($)', input({ name: 'purchase', inputmode: 'decimal', value: centsToInput(cur.purchase_cents) })) : null,
       can ? field('Useful life (years)', input({ name: 'useful_life_years', type: 'number', min: 1, max: 100, value: cur.useful_life_years || '' })) : null,
       can ? field('Salvage value ($)', input({ name: 'salvage', inputmode: 'decimal', value: centsToInput(cur.salvage_cents) })) : null),
@@ -341,11 +346,11 @@ export async function workOrderSheet(woId, a, done) {
     closed ? null : h('div', { class: 'row' }, w.status !== 'in_progress' ? st('in_progress', 'Start work') : null, w.status !== 'waiting_parts' ? st('waiting_parts', 'Waiting for parts') : null, st('done', 'Complete', 'primary')),
     h('section', { class: 'stack tight' }, h('h3', null, 'Labor'),
       c.labor.length ? h('ul', { class: 'plain' }, c.labor.map((l) => h('li', { class: 'spread' }, h('span', null, `${l.who || 'Not named'}: ${l.hours} h on ${fmtDate(l.worked_on)}`, h('span', { class: 'muted small' }, ` ${money(Math.round(l.hours * l.rate_cents))}`)),
-        l.mine || isManager() ? button('Remove', async () => { await del(`/assets/work-orders/${woId}/labor/${l.id}`); await refresh(); }, { small: true, kind: 'quiet' }) : null))) : h('p', { class: 'muted' }, 'None logged.'),
+        l.mine || isManager() ? button('Remove', async () => { await del(`/assets/work-orders/${woId}/labor/${l.id}`); await refresh(); }, { small: true, kind: 'quiet', label: `Remove ${l.hours} h by ${l.who || 'unnamed'}` }) : null))) : h('p', { class: 'muted' }, 'None logged.'),
       h('div', { class: 'row tight' }, who, hrs, button('Log time', async () => { if (!hrs.value) throw new Error('Enter the hours'); await post(`/assets/work-orders/${woId}/labor`, { worker: who.value.trim() || null, hours: Number(hrs.value) }); toast('Time logged'); await refresh(); }, { small: true }))),
     h('section', { class: 'stack tight' }, h('h3', null, 'Parts from stock'),
       c.parts.length ? h('ul', { class: 'plain' }, c.parts.map((p) => h('li', { class: 'spread' }, h('span', null, `${p.qty} ${p.unit} ${p.sku} ${p.name}`, h('span', { class: 'muted small' }, ` ${money(p.cost)}`)),
-        button('Return one', async () => { await post(`/assets/work-orders/${woId}/parts`, { part_id: p.part_id, qty: -1 }); await refresh(); }, { small: true, kind: 'quiet' })))) : h('p', { class: 'muted' }, 'None used.'),
+        button('Return one', async () => { await post(`/assets/work-orders/${woId}/parts`, { part_id: p.part_id, qty: -1 }); await refresh(); }, { small: true, kind: 'quiet', label: `Return one ${p.name}` })))) : h('p', { class: 'muted' }, 'None used.'),
       parts.data.length ? h('div', { class: 'row tight' }, partSel, partQty, button('Use part', async () => { if (!partSel.value) throw new Error('Choose a part'); await post(`/assets/work-orders/${woId}/parts`, { part_id: Number(partSel.value), qty: Number(partQty.value) }); toast('Part used'); await refresh(); }, { small: true })) : h('p', { class: 'muted small' }, 'Add parts under Parts to take them from stock here.')),
     h('section', { class: 'stack tight' }, h('h3', null, 'Meter at service and outside work'),
       h('p', { class: 'small' }, [c.meter_hours !== null ? `${n1(c.meter_hours)} h` : null, c.meter_miles !== null ? `${n1(c.meter_miles)} mi` : null].filter(Boolean).join(', ') || h('span', { class: 'muted' }, 'No meter recorded'), c.vendor_cost_cents !== null ? ` · Outside work ${money(c.vendor_cost_cents)}${c.vendor ? ` (${c.vendor})` : ''}` : ''),

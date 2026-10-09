@@ -213,3 +213,53 @@ test('the overview and the lifecycle report add it all up; staff do not see the 
   assert.equal(csv.status, 200);
   assert.match(await csv.text(), /^tag,name,category/);
 });
+
+test('review fixes: no price leaks, a plan marked once per order, returns at issue cost, places in a loop, miles from the first reading', async () => {
+  const o = T.owner; const s = T.staff;
+  // prices: the crew does not see purchase prices anywhere, including the older Maintenance routes
+  assert.equal(ok(await api('GET', '/assets/register', { token: s })).data.find((a) => a.id === D.truck).purchase_cents, undefined);
+  assert.ok(ok(await api('GET', '/assets/register', { token: o })).data.find((a) => a.id === D.truck).purchase_cents > 0);
+  const core = ok(await api('GET', '/ops/assets', { token: T.patrol })).data.find((a) => a.id === D.truck);
+  assert.equal(core.purchase_cents, undefined); assert.equal(core.vin, undefined);
+  assert.equal(ok(await api('GET', `/ops/work-orders/${D.brakeWo}`, { token: T.patrol })).vendor_cost_cents, undefined);
+  is(await api('POST', '/assets/parts', { token: s, body: { sku: 'X-1', name: 'Priced by crew', unit_cost_cents: 100 } }), 403);
+  is(await api('POST', '/assets/parts/1/stock', { token: s, body: { change: 0.005, note: 'Too fine' } }), 400, '2 decimal places');
+
+  // a preventive order reopened and completed again does not mark the plan twice
+  const logs = async () => (await pool.query('SELECT COUNT(*) AS n FROM pm_log WHERE work_order_id = ?', [D.pmWo]))[0][0].n;
+  assert.equal(Number(await logs()), 1);
+  ok(await api('POST', `/ops/work-orders/${D.pmWo}/status`, { token: s, body: { status: 'open' } }));
+  ok(await api('POST', `/ops/work-orders/${D.pmWo}/status`, { token: s, body: { status: 'done' } }));
+  assert.equal(Number(await logs()), 1);
+
+  // a return is credited at what the part cost when issued, not at today's price
+  const bolt = ok(await api('POST', '/assets/parts', { token: o, body: { sku: `BOLT-${suffix}`, name: 'Bolt', unit_cost_cents: 1000, qty_on_hand: 5 } })).id;
+  ok(await api('POST', `/assets/work-orders/${D.brakeWo}/parts`, { token: s, body: { part_id: bolt, qty: 2 } }));
+  ok(await api('PATCH', `/assets/parts/${bolt}`, { token: o, body: { unit_cost_cents: 1500 } }));
+  ok(await api('POST', `/assets/work-orders/${D.brakeWo}/parts`, { token: s, body: { part_id: bolt, qty: -1 } }));
+  const c = ok(await api('GET', `/assets/work-orders/${D.brakeWo}/costs`, { token: s }));
+  assert.equal(c.parts.find((p) => p.part_id === bolt).cost, 1000);
+  // parts come back off a cancelled order, but nothing new goes on it
+  ok(await api('POST', `/ops/work-orders/${D.brakeWo}/status`, { token: o, body: { status: 'cancelled' } }));
+  ok(await api('POST', `/assets/work-orders/${D.brakeWo}/parts`, { token: s, body: { part_id: bolt, qty: -1 } }));
+  is(await api('POST', `/assets/work-orders/${D.brakeWo}/parts`, { token: s, body: { part_id: bolt, qty: 1 } }), 409);
+  is(await api('POST', `/assets/work-orders/${D.brakeWo}/labor`, { token: s, body: { worker: 'Sam', hours: 1 } }), 409);
+
+  // places cannot sit inside each other
+  const x = ok(await api('POST', '/assets/locations', { token: s, body: { name: `Yard ${suffix}`, kind: 'yard' } })).id;
+  const y = ok(await api('POST', '/assets/locations', { token: s, body: { name: `Bay ${suffix}`, kind: 'shop', parent_id: x } })).id;
+  is(await api('PATCH', `/assets/locations/${x}`, { token: s, body: { parent_id: y } }), 400);
+
+  // a miles plan done before the odometer was known counts from the first reading
+  const van = ok(await api('POST', '/assets/register', { token: o, body: { name: `Van ${suffix}`, kind: 'truck' } })).id;
+  const plan = ok(await api('POST', '/ops/pm', { token: o, body: { name: 'Van oil', asset_id: van, interval_miles: 5000 } })).id;
+  ok(await api('POST', `/ops/pm/${plan}/done`, { token: o, body: {} }));
+  ok(await api('POST', `/assets/register/${van}/meter`, { token: s, body: { miles: 40000 } }));
+  ok(await api('POST', `/assets/register/${van}/meter`, { token: s, body: { miles: 45500 } }));
+  assert.equal(ok(await api('GET', `/assets/register/${van}`, { token: o })).service.find((p) => p.id === plan).state, 'overdue');
+
+  // a name that a spreadsheet would run as a formula goes out as text
+  ok(await api('PATCH', `/assets/register/${van}`, { token: s, body: { name: '=HYPERLINK("x")' } }));
+  const csv = await (await fetch(`${base}/api/v1/assets/lifecycle?format=csv`, { headers: { authorization: `Bearer ${o}` } })).text();
+  assert.match(csv, /"'=HYPERLINK\(""x""\)"/);
+});
