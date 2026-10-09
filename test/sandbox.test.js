@@ -163,3 +163,23 @@ test('a finished demo stops working, then is removed with everything in it', asy
   const [[lead]] = await pool.query('SELECT tenant_id FROM sandbox_signups WHERE email = ? ORDER BY id DESC LIMIT 1', [E1]);
   assert.equal(lead.tenant_id, null, 'the sign-up stays as a lead, no longer tied to a mountain');
 });
+
+test('the platform console deletes a running demo, or every demo, straight away', async () => {
+  const a = await start(`del-a-${Date.now()}@example.test`);
+  assert.equal(a.status, 201, JSON.stringify(a.body));
+  const list = await api('GET', '/platform/sandboxes', { key: KEY });
+  const row = list.body.data.find((x) => x.email === a.body.email);
+  assert.ok(row && row.active, 'listed as running');
+  assert.equal((await api('POST', `/platform/sandboxes/${row.id}/remove`, { key: KEY })).status, 200);
+  assert.equal(await tenantId(a.body.tenant), undefined, 'gone at once');
+  assert.equal((await api('POST', `/platform/sandboxes/${row.id}/remove`, { key: KEY })).status, 404, 'nothing left to delete');
+  assert.ok([401, 403].includes((await api('POST', `/platform/sandboxes/${row.id}/remove`)).status), 'needs the platform key');
+
+  const b = await start(`del-b-${Date.now()}@example.test`);
+  assert.equal(b.status, 201, JSON.stringify(b.body));
+  const all = await api('POST', '/platform/sandboxes/remove-all', { key: KEY });
+  assert.equal(all.status, 200); assert.ok(all.body.removed >= 1);
+  assert.equal(await tenantId(b.body.tenant), undefined);
+  const [[real]] = await pool.query('SELECT COUNT(*) AS n FROM tenants WHERE sandbox_expires_at IS NULL');
+  assert.ok(Number(real.n) > 0, 'real mountains are never touched');
+});

@@ -95,6 +95,24 @@ router.get('/sandboxes', async (_req, res) => {
   const [[c]] = await pool.query('SELECT COUNT(*) AS n FROM tenants WHERE sandbox_expires_at IS NOT NULL');
   res.json({ active: Number(c.n), data: data.map((r) => ({ ...r, active: Boolean(Number(r.active)) })) });
 });
+// Remove one running demo now (by its sign-up), or every demo mountain at once. Only demo mountains can be removed this way.
+router.post('/sandboxes/:id/remove', async (req, res) => {
+  const s = await one(pool, 'SELECT tenant_id, email FROM sandbox_signups WHERE id = ?', [paramId(req)]);
+  if (!s || !s.tenant_id) throw notFound('Demo');
+  const removed = await sandbox.purgeTenant(s.tenant_id);
+  if (!removed) throw notFound('Demo');
+  await log(pool, req, null, 'remove_demo', { tenant_id: s.tenant_id, email: s.email });
+  res.json({ removed: 1 });
+});
+router.post('/sandboxes/remove-all', async (req, res) => {
+  const [all] = await pool.query('SELECT id FROM tenants WHERE sandbox_expires_at IS NOT NULL');
+  let removed = 0;
+  for (const { id } of all) {
+    try { if (await sandbox.purgeTenant(id)) removed += 1; } catch (e) { console.error('Could not remove demo mountain', id, e.message); }
+  }
+  await log(pool, req, null, 'remove_all_demos', { removed });
+  res.json({ removed });
+});
 router.post('/sandboxes/purge', async (req, res) => {
   const removed = await sandbox.purgeExpired();
   await log(pool, req, null, 'purge_demos', { removed });

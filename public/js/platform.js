@@ -164,9 +164,16 @@ async function demos() {
         { head: 'Email', cell: (x) => x.email },
         { head: 'Mountain', cell: (x) => x.mountain },
         { head: 'Demo', cell: (x) => (x.active ? 'Running' : 'Ended') },
+        { head: '', cell: (x) => (x.active ? button('Delete', () => confirmDialog('Delete this demo?', `The demo mountain for ${x.email} and everything in it is removed now. They can start a new one.`, 'Delete demo', async () => {
+          try { await call('POST', `/sandboxes/${x.id}/remove`); toast('Demo deleted.'); dlg.close(); demos(); } catch (e) { fail(e); }
+        }, { danger: true }), { small: true }) : '') },
       ], data) : empty('No one has tried the demo yet.'),
-      button('Remove finished demos now', async () => { try { const r = await call('POST', '/sandboxes/purge'); toast(`${r.removed} finished demo${r.removed === 1 ? '' : 's'} removed.`); } catch (e) { fail(e); } }, { small: true }));
-    dialog('Demo sign-ups', body, { wide: true });
+      h('div', { class: 'row' },
+        button('Remove finished demos now', async () => { try { const r = await call('POST', '/sandboxes/purge'); toast(`${r.removed} finished demo${r.removed === 1 ? '' : 's'} removed.`); dlg.close(); demos(); } catch (e) { fail(e); } }, { small: true }),
+        active ? button('Delete every demo', () => confirmDialog('Delete every demo?', `All ${active} demo mountain${active === 1 ? '' : 's'} are removed now, including ones people are using. The sign-up list is kept.`, 'Delete all demos', async () => {
+          try { const r = await call('POST', '/sandboxes/remove-all'); toast(`${r.removed} demo${r.removed === 1 ? '' : 's'} deleted.`); dlg.close(); demos(); } catch (e) { fail(e); }
+        }, { danger: true }), { small: true, kind: 'danger' }) : null));
+    const dlg = dialog('Demo sign-ups', body, { wide: true });
   } catch (e) { fail(e); }
 }
 

@@ -374,7 +374,7 @@ Every guest needs a waiver for the season before they rent gear or take a lesson
 - **Demo mountains cannot send email or texts.** Every email and text names its mountain; bulk campaigns go out on a separate Postmark stream (`POSTMARK_BROADCAST_STREAM`).
 - **Online orders no longer overwrite customer records.** Buying for someone fills in blanks only, and a buyer's email goes only on their own record.
 - **Two-step sign-in lockout is kept in the database** (survives restarts and works across servers); a sign-in started before a password change is refused.
-- **Platform console:** sign in with the key, your name and (if `PLATFORM_TOTP_SECRET` is set) an authenticator code; sessions last 2 hours; `PLATFORM_ALLOW_IPS` limits where it can be used from; the audit log shows who.
+- **Platform console:** Demo sign-ups now has Delete on each running demo and "Delete every demo". Sign in with the key, your name and (if `PLATFORM_TOTP_SECRET` is set) an authenticator code; sessions last 2 hours; `PLATFORM_ALLOW_IPS` limits where it can be used from; the audit log shows who.
 - **Separate keys** for two-step codes, email links and kiosks (`TOTP_KEY`, `LINK_SECRET`, `KIOSK_SECRET`; each falls back to `JWT_SECRET`).
 - **Patrol can only look up people specifically** (3+ letters, 7+ digits or an email, 10 results) and only open people on their own cases.
 - **Lesson request status** is checked with a POST (the email is no longer in the address).
