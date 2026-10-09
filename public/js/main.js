@@ -2,6 +2,7 @@
 
 import { get, post, session, hooks, ApiError } from './api.js';
 import { mfaPanel } from './views/mfa.js';
+import { flush as flushOutbox, waitingCounts } from './outbox.js';
 import { buildFrame, GROUP_OF } from './nav.js';
 import { icon } from './icons.js';
 import { h, svg, clear, ctx, can, isManager, toast, loading, errorBox, button, field, input } from './ui.js';
@@ -203,6 +204,13 @@ function addHelpLink(holder, key) {
 }
 
 async function signOut(message) {
+  // Patrol entries kept on this phone while there was no signal go with the person who typed them. Try to send them first;
+  // if they still cannot go, say so before signing out (they stay on this phone for up to three days, for this person).
+  if (!message) {
+    try { if (waitingCounts().mine) await flushOutbox(); } catch (_) { /* still offline */ }
+    const left = waitingCounts().mine;
+    if (left && !window.confirm(`${left} patient care entr${left === 1 ? 'y has' : 'ies have'} not been sent yet (no signal). They stay on this phone and send when you sign in again with a signal. Sign out anyway?`)) return;
+  }
   session.clear();
   ctx.me = null;
   navToken += 1;

@@ -78,6 +78,7 @@ export async function renderHandoff(root, id, pid) {
     try { c = await get(`/patrol/incidents/${id}`); } catch (err) { clear(page).append(h('p', null, h('a', { href: `#/patrol/case/${id}` }, 'Back to the case')), errorBox(err)); return; }
     const p = c.patients.find((x) => x.id === Number(pid));
     if (!p) { clear(page).append(h('p', null, h('a', { href: `#/patrol/case/${id}` }, 'Back to the case')), errorBox(new Error('Patient not found on this case'))); return; }
+    if (p.voided_at) { clear(page).append(h('p', null, h('a', { href: `#/patrol/case/${id}` }, 'Back to the case')), h('p', { class: 'refusal-block' }, `This patient was marked entered in error: ${p.void_reason}. There is no hand-off sheet for them.`)); return; }
     const recv = [...c.signatures].reverse().find((x) => x.kind === 'receiving_provider' && x.patient_id === p.id);
     let recvImg = null;
     if (recv) { try { recvImg = (await get(`/patrol/incidents/${id}/signatures/${recv.id}`)).image; } catch (_) { recvImg = null; } }
@@ -155,7 +156,7 @@ export async function renderHandoff(root, id, pid) {
       h('div', { class: 'form' },
         field('Receiving provider name', input({ name: 'signer_name', maxlength: 150, placeholder: 'J. Alvarez' })),
         field('Role and unit', input({ name: 'signer_role', maxlength: 150, placeholder: 'Paramedic, Medic 12' })),
-        h('div', { class: 'wide' }, field('Care handed to (name and unit)', input({ name: 'handoff_to', required: true, maxlength: 255, placeholder: 'Medic 12, J. Alvarez, paramedic' }), 'Filled in from the two boxes above if you leave it blank')),
+        h('div', { class: 'wide' }, field('Care handed to (name and unit)', input({ name: 'handoff_to', maxlength: 255, placeholder: 'Medic 12, J. Alvarez, paramedic' }), 'Filled in from the two boxes above if you leave it blank')),
         field('Time', input({ type: 'time', name: 'handoff_time', value: t, required: true }))),
       h('div', { class: 'field' }, h('span', null, 'Receiving provider signs here'), pad.el), h('div', { class: 'row' }, clearBtn),
       h('p', { class: 'muted small' }, 'Hand the phone to the paramedic, nurse or doctor taking over. Their signature shows they received the patient and this sheet. It saves who took over, adds a Handoff time to the timeline and updates the sheet.')),
@@ -166,7 +167,10 @@ export async function renderHandoff(root, id, pid) {
       if (!to) throw new Error('Say who took over care');
       if (!pad.isEmpty() && !name) throw new Error('Print the name of the person signing');
       await patch(`/patrol/incidents/${id}/patients/${p.id}`, { form: { handoff_to: to, handoff_time: time } });
-      await post(`/patrol/incidents/${id}/events`, { kind: 'handoff', at: `${nowInput().slice(0, 10)}T${time}`, note: `Care handed to ${to}` });
+      // A time later than now (say 23:55 recorded at 00:05) was yesterday.
+      const today = nowInput().slice(0, 10);
+      const day = time > nowInput().slice(11) ? (() => { const d = new Date(`${today}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); })() : today;
+      await post(`/patrol/incidents/${id}/events`, { kind: 'handoff', at: `${day}T${time}`, patient_id: p.id, note: `Care of ${p.first_name} ${p.last_name} handed to ${to}`.replace(/\s+/g, ' ') });
       if (!pad.isEmpty()) await post(`/patrol/incidents/${id}/signatures`, { kind: 'receiving_provider', signer_name: name, signer_role: role || undefined, patient_id: p.id, image: pad.toDataUrl() });
       toast('Hand-off recorded');
       await load();

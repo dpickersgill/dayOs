@@ -14,7 +14,7 @@ import { bedsideCard, voidedNote } from './patrol-bedside.js';
 import { collisionPanel } from './patrol-collision.js';
 import { checklistPanel, loadChecklists } from './patrol-checklists.js';
 import { voidDialog, sentToast } from './patrol-tools.js';
-import { send, pending, onChange as onOutbox, flush, retry, discard } from '../outbox.js';
+import { send, pending, onChange as onOutbox, flush, retry, discard, waitingCounts } from '../outbox.js';
 import { draftNarrative } from '../narrative.js';
 import { live, lateNote, treatmentName, atTime } from '../care-text.js';
 
@@ -184,10 +184,12 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
   function outboxStrip() {
     if (version) return null;
     const list = pending(id);
-    if (!list.length) return null;
+    const others = waitingCounts(id).others;
+    if (!list.length && !others) return null;
     const waiting = list.filter((x) => !x.error);
     const refused = list.filter((x) => x.error);
     return h('section', { class: 'outbox-strip', role: 'status', 'data-area': 'outbox' },
+      others ? h('p', null, h('b', null, `${others} entr${others === 1 ? 'y' : 'ies'} for this case from another patroller ${others === 1 ? 'is' : 'are'} waiting on this phone. `), 'They send when that patroller signs in here with a signal.') : null,
       waiting.length ? h('div', { class: 'spread' }, h('span', null, h('b', null, `${waiting.length} entr${waiting.length === 1 ? 'y' : 'ies'} waiting to send. `), 'Kept on this phone with the time each was taken. They send by themselves when the signal returns.'),
         button('Send now', async () => { const n = await flush(); toast(n ? `Sent ${n}` : 'Still no connection', n ? 'ok' : 'warn'); }, { small: true })) : null,
       refused.map((x) => h('div', { class: 'spread refused' }, h('span', null, h('b', null, `Not saved: ${x.label}. `), x.error),

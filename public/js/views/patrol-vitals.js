@@ -53,8 +53,11 @@ const WHEN = [['0', 'Now'], ['5', '5 min ago'], ['10', '10 min ago'], ['other', 
 const AGAIN = [['', 'No reminder'], ['5', '5 min'], ['10', '10 min'], ['15', '15 min']];
 const GCS_E = [[4, '4 Open by themselves'], [3, '3 To voice'], [2, '2 To pain'], [1, '1 None']];
 const GCS_V = [[5, '5 Oriented'], [4, '4 Confused'], [3, '3 Words'], [2, '2 Sounds'], [1, '1 None']];
-const GCS_V_CHILD = [[5, '5 Coos, babbles'], [4, '4 Irritable, cries'], [3, '3 Cries to pain'], [2, '2 Moans to pain'], [1, '1 None']];
+// Children: a baby (under 2) and a talking young child (2 to 4) use their own verbal scale, and a baby's best motor response is moving normally.
+const GCS_V_INFANT = [[5, '5 Coos, babbles'], [4, '4 Irritable, cries'], [3, '3 Cries to pain'], [2, '2 Moans to pain'], [1, '1 None']];
+const GCS_V_YOUNG = [[5, '5 Right words, smiles'], [4, '4 Wrong words'], [3, '3 Cries or screams'], [2, '2 Grunts'], [1, '1 None']];
 const GCS_M = [[6, '6 Obeys'], [5, '5 Locates pain'], [4, '4 Withdraws'], [3, '3 Bends abnormally'], [2, '2 Straightens'], [1, '1 None']];
+const GCS_M_INFANT = [[6, '6 Moves normally'], ...GCS_M.slice(1)];
 
 /**
  * Opens the vitals sheet for one patient. `last` is the most recent set (or undefined); `age` shapes the flags.
@@ -80,12 +83,15 @@ export function openVitalsSheet({ base, caseId, patientName, age, last, onSaved 
     clear(tempBox).append(temp.el);
   };
   drawTemp();
-  const unitPick = chipGroup({ id: 'v-tunit', options: [['C', '°C'], ['F', '°F']], value: unit.now, onChange: (v) => { if (!v) { unitPick.set(unit.now); return; } const was = temp.get(); unit.now = v; setTempUnit(v); drawTemp(); if (was !== null) temp.set(v === 'F' ? cToF(was) : fToC(was)); } });
+  const unitPick = chipGroup({ id: 'v-tunit', labelledBy: 'v-tunit-l', options: [['C', '°C'], ['F', '°F']], value: unit.now, onChange: (v) => { if (!v) { unitPick.set(unit.now); return; } const was = temp.get(); unit.now = v; setTempUnit(v); drawTemp(); if (was !== null) temp.set(v === 'F' ? cToF(was) : fToC(was)); } });
 
-  const child = age !== null && age !== undefined && Number(age) < 5;
-  const gE = chipGroup({ id: 'v-gcs-e', options: GCS_E });
-  const gV = chipGroup({ id: 'v-gcs-v', options: child ? GCS_V_CHILD : GCS_V });
-  const gM = chipGroup({ id: 'v-gcs-m', options: GCS_M });
+  const known = age !== null && age !== undefined && age !== '';
+  const infant = known && Number(age) < 2;
+  const young = known && Number(age) >= 2 && Number(age) < 5;
+  const child = infant || young;
+  const gE = chipGroup({ id: 'v-gcs-e', options: GCS_E, labelledBy: 'v-gcs-e-l' });
+  const gV = chipGroup({ id: 'v-gcs-v', options: infant ? GCS_V_INFANT : young ? GCS_V_YOUNG : GCS_V, labelledBy: 'v-gcs-v-l' });
+  const gM = chipGroup({ id: 'v-gcs-m', options: infant ? GCS_M_INFANT : GCS_M, labelledBy: 'v-gcs-m-l' });
   const gcsTotal = h('span', { class: 'flag', 'aria-live': 'polite', id: 'v-gcs-total' });
   const showGcs = () => {
     const parts = [gE.get(), gV.get(), gM.get()];
@@ -94,23 +100,24 @@ export function openVitalsSheet({ base, caseId, patientName, age, last, onSaved 
   };
   for (const g of [gE, gV, gM]) g.el.addEventListener('click', showGcs);
 
-  const avpu = chipGroup({ id: 'v-avpu', options: AVPU });
+  const avpu = chipGroup({ id: 'v-avpu', options: AVPU, labelledBy: 'v-avpu-l' });
   const skin = h('div', { id: 'v-skin', class: 'stack tight' });
-  const skinParts = Object.entries(SKIN).map(([k, opts]) => { const g = chipGroup({ id: `v-skin-${k}`, options: opts }); skin.append(g.el); return g; });
-  const pL = chipGroup({ id: 'v-pupil-l', options: PUPIL_CHOICES });
-  const pR = chipGroup({ id: 'v-pupil-r', options: PUPIL_CHOICES });
+  const SKIN_NAME = { colour: 'Skin colour', temp: 'Skin temperature', moisture: 'Skin moisture' };
+  const skinParts = Object.entries(SKIN).map(([k, opts]) => { const g = chipGroup({ id: `v-skin-${k}`, options: opts }); g.el.setAttribute('aria-label', SKIN_NAME[k]); skin.append(g.el); return g; });
+  const pL = chipGroup({ id: 'v-pupil-l', options: PUPIL_CHOICES, labelledBy: 'v-pupil-l-l' });
+  const pR = chipGroup({ id: 'v-pupil-r', options: PUPIL_CHOICES, labelledBy: 'v-pupil-r-l' });
   const equal = h('button', { type: 'button', class: 'chip', id: 'v-pupils-equal' }, 'Both equal and reactive');
   equal.addEventListener('click', () => { pL.set('normal'); pR.set('normal'); });
-  const pain = chipGroup({ id: 'v-pain', options: Array.from({ length: 11 }, (_, i) => [String(i), String(i)]) });
+  const pain = chipGroup({ id: 'v-pain', options: Array.from({ length: 11 }, (_, i) => [String(i), String(i)]), labelledBy: 'v-pain-l' });
   const avpuNote = h('span', { class: 'flag', 'aria-live': 'polite' });
   avpu.el.addEventListener('click', () => { const f = flagAvpu(avpu.get()); avpuNote.textContent = f.level === 'ok' || f.level === 'none' ? '' : 'Not fully alert: check again'; avpuNote.dataset.level = f.level; });
   const painNote = h('span', { class: 'flag' });
   pain.el.addEventListener('click', () => { const f = flag('pain', pain.get() === null ? null : Number(pain.get())); painNote.textContent = f.level === 'ok' || f.level === 'none' ? '' : f.word; painNote.dataset.level = f.level; });
 
-  const whenPick = chipGroup({ id: 'v-when', options: WHEN, value: '0' });
+  const whenPick = chipGroup({ id: 'v-when', options: WHEN, value: '0', labelledBy: 'v-when-l' });
   const custom = h('input', { type: 'datetime-local', id: 'v-time', value: nowInput(), 'aria-label': 'Time taken', hidden: true });
   whenPick.el.addEventListener('click', () => { custom.hidden = whenPick.get() !== 'other'; });
-  const again = chipGroup({ id: 'v-again', options: AGAIN, value: '' });
+  const again = chipGroup({ id: 'v-again', options: AGAIN, value: '', labelledBy: 'v-again-l' });
   const notes = h('input', { id: 'v-notes', maxlength: 255, placeholder: 'Anything else (optional)', 'aria-label': 'Notes' });
   const err = h('div');
 
@@ -134,16 +141,16 @@ export function openVitalsSheet({ base, caseId, patientName, age, last, onSaved 
     h('div', { class: 'row' }, copy),
     h('div', { class: 'vgrid' }, S.pulse.el, S.resp.el, S.spo2.el),
     h('div', { class: 'vgrid two' }, S.bp_sys.el, S.bp_dia.el),
-    h('div', { class: 'vblock' }, h('h4', null, 'Responsiveness'), avpu.el, avpuNote),
-    h('div', { class: 'vblock' }, h('h4', null, 'Pain (0 to 10)'), pain.el, painNote),
+    h('div', { class: 'vblock' }, h('h4', { id: 'v-avpu-l' }, 'Responsiveness'), avpu.el, avpuNote),
+    h('div', { class: 'vblock' }, h('h4', { id: 'v-pain-l' }, 'Pain (0 to 10)'), pain.el, painNote),
     h('details', { class: 'more gcs', open: Boolean(last && last.gcs_e) }, h('summary', null, 'GCS: eyes, verbal, motor', gcsTotal),
-      child ? h('p', { class: 'muted small' }, 'Verbal uses the scale for children under 5.') : null,
-      h('div', { class: 'vblock' }, h('h4', null, 'Eyes'), gE.el), h('div', { class: 'vblock' }, h('h4', null, 'Verbal'), gV.el), h('div', { class: 'vblock' }, h('h4', null, 'Motor'), gM.el)),
+      child ? h('p', { class: 'muted small' }, infant ? 'Uses the scale for babies under 2.' : 'Verbal uses the scale for children aged 2 to 4.') : null,
+      h('div', { class: 'vblock' }, h('h4', { id: 'v-gcs-e-l' }, 'Eyes'), gE.el), h('div', { class: 'vblock' }, h('h4', { id: 'v-gcs-v-l' }, 'Verbal'), gV.el), h('div', { class: 'vblock' }, h('h4', { id: 'v-gcs-m-l' }, 'Motor'), gM.el)),
     h('div', { class: 'vblock' }, h('h4', null, 'Skin'), skin),
-    h('div', { class: 'vblock' }, h('h4', null, 'Pupils'), h('div', { class: 'row tight' }, equal), h('div', { class: 'pupil-row' }, h('span', null, 'Left'), pL.el), h('div', { class: 'pupil-row' }, h('span', null, 'Right'), pR.el)),
-    h('details', { class: 'more' }, h('summary', null, 'Temperature and blood sugar'), h('div', { class: 'row tight' }, h('span', { class: 'muted small' }, 'Unit'), unitPick.el), h('div', { class: 'vgrid two' }, tempBox, S.glucose.el)),
-    h('div', { class: 'vblock' }, h('h4', null, 'Time taken'), whenPick.el, custom),
-    h('div', { class: 'vblock' }, h('h4', null, 'Check again in'), again.el),
+    h('div', { class: 'vblock' }, h('h4', null, 'Pupils'), h('div', { class: 'row tight' }, equal), h('div', { class: 'pupil-row' }, h('span', { id: 'v-pupil-l-l' }, 'Left pupil'), pL.el), h('div', { class: 'pupil-row' }, h('span', { id: 'v-pupil-r-l' }, 'Right pupil'), pR.el)),
+    h('details', { class: 'more' }, h('summary', null, 'Temperature and blood sugar'), h('div', { class: 'row tight' }, h('span', { class: 'muted small', id: 'v-tunit-l' }, 'Temperature unit'), unitPick.el), h('div', { class: 'vgrid two' }, tempBox, S.glucose.el)),
+    h('div', { class: 'vblock' }, h('h4', { id: 'v-when-l' }, 'Time taken'), whenPick.el, custom),
+    h('div', { class: 'vblock' }, h('h4', { id: 'v-again-l' }, 'Check again in'), again.el),
     notes, err,
     h('div', { class: 'footer row' }, save));
   const dlg = dialog(`Vitals: ${patientName}`, body, { wide: true });

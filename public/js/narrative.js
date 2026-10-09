@@ -92,7 +92,11 @@ function transport(c, p) {
   const handTime = f.handoff_time || timeOf(c, 'handoff');
   if (f.handoff_to) out.push(sentence(`Care handed to ${f.handoff_to}${handTime ? ` at ${handTime}` : ''}`));
   if (p.disposition) out.push(sentence(`Outcome: ${label(p.disposition).toLowerCase()}`));
-  if (p.disposition === 'refused_care') out.push(sentence(`Refused ${f.refusal_scope ? label(f.refusal_scope).toLowerCase() : 'care'} after risks were explained${f.refusal_capacity === 'yes' ? '; alert and able to decide' : ''}${f.refusal_advice ? `. Advised: ${f.refusal_advice}` : ''}`));
+  if (p.disposition === 'refused_care') {
+    const risks = { yes: ' after the risks were explained', no: '. Risks not recorded as explained' }[f.refusal_risks_explained] || '';
+    const cap = { yes: '; alert and able to decide', no: '; recorded as NOT able to decide' }[f.refusal_capacity] || '';
+    out.push(sentence(`Refused ${f.refusal_scope ? label(f.refusal_scope).toLowerCase() : 'care'}${risks}${cap}${f.refusal_advice ? `. Advised: ${f.refusal_advice}` : ''}`));
+  }
   return out;
 }
 

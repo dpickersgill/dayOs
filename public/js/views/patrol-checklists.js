@@ -12,14 +12,14 @@ export async function loadChecklists() {
 
 const HEAD_TYPES = new Set(['concussion', 'spinal']);
 const HEAD_REGIONS = new Set(['head', 'neck', 'face']);
-const isHeadInjury = (p) => p.injuries.some((i) => HEAD_TYPES.has(i.injury_type) || HEAD_REGIONS.has(i.body_region));
+const isHeadInjury = (p) => p.injuries.some((i) => !i.voided_at && (HEAD_TYPES.has(i.injury_type) || HEAD_REGIONS.has(i.body_region)));
 
 /** The lists that fit this case, as [{ list, patient }] where patient is null for a case-level list. */
 export function suggested(c, defs) {
   const out = [];
   const by = (id) => defs.find((d) => d.id === id);
   if (c.category === 'collision' || c.collision || c.parties.length) out.push({ list: by('collision'), patient: null });
-  for (const p of c.patients) {
+  for (const p of c.patients.filter((x) => !x.voided_at)) {
     if (isHeadInjury(p)) out.push({ list: by('head_spine'), patient: p });
     if (p.age_years !== null && p.age_years !== undefined && p.age_years < 18) out.push({ list: by('minor'), patient: p });
     if (p.disposition === 'refused_care') out.push({ list: by('refusal'), patient: p });
@@ -56,7 +56,7 @@ export function checklistPanel(c, { id, editable, reload, defs }) {
       h('summary', null, h('b', null, list.title), patient ? ` for ${patient.first_name} ${patient.last_name}`.trimEnd() : '', ' ', state(`${ticked} of ${list.items.length}`, ticked === list.items.length ? 'good' : 'warn')),
       h('p', { class: 'muted small' }, list.when), h('ul', { class: 'plain' }, items));
   };
-  const options = defs.flatMap((l) => (l.scope === 'case' ? [[`${l.id}:0`, l.title]] : c.patients.map((p) => [`${l.id}:${p.id}`, `${l.title}: ${p.first_name} ${p.last_name}`.trim()])));
+  const options = defs.flatMap((l) => (l.scope === 'case' ? [[`${l.id}:0`, l.title]] : c.patients.filter((p) => !p.voided_at).map((p) => [`${l.id}:${p.id}`, `${l.title}: ${p.first_name} ${p.last_name}`.trim()])));
   const picker = select([['', 'Add a checklist…'], ...options.filter(([k]) => !seen.has(k))], '', { 'aria-label': 'Add a checklist' });
   const extra = [];
   picker.addEventListener('change', () => {

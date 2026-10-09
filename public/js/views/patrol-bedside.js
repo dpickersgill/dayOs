@@ -73,7 +73,7 @@ const queuedTag = () => h('span', { class: 'queued-tag' }, 'Waiting to send');
 export function bedsideCard(p, c, opts) {
   const { id, base, editable, def } = opts;
   const age = p.age_years;
-  const queued = pending(id).filter((x) => x.path.startsWith(base));
+  const queued = pending(id).filter((x) => x.path === base || x.path.startsWith(`${base}/`));
   const vit = live(p.vitals);
   const cur = vit[vit.length - 1]; const prev = vit[vit.length - 2];
   const name = `${p.first_name || 'Unknown'} ${p.last_name || ''}`.trim();
@@ -152,7 +152,7 @@ export function bedsideCard(p, c, opts) {
         d.effect ? h('span', { class: 'effect' }, ` Effect: ${d.effect}`) : null,
         lateTag(tr, 'performed_at'),
         !tr.voided_at && needsCms ? state('CMS after not recorded', 'warn') : null,
-        !tr.voided_at && cmsLost(d.cms_after) ? state('CMS lost after splinting', 'bad') : null,
+        !tr.voided_at && cmsLost(d.cms_after, d.cms_before) ? state('CMS lost after splinting: loosen and recheck', 'bad') : null,
         voidedNote(tr)),
       h('span', { class: 'row tight' },
         editable && !tr.voided_at && tr.kind === 'medication' && !d.effect ? button('Record effect', () => effectDialog({ base, t: tr, onDone: opts.reload }), { small: true }) : null,

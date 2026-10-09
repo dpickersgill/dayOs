@@ -20,6 +20,7 @@ export async function renderRefusal(root, id, pid) {
     try { c = await get(`/patrol/incidents/${id}`); } catch (err) { clear(page).append(h('p', null, h('a', { href: `#/patrol/case/${id}` }, 'Back to the case')), errorBox(err)); return; }
     const p = c.patients.find((x) => x.id === Number(pid));
     if (!p) { clear(page).append(h('p', null, h('a', { href: `#/patrol/case/${id}` }, 'Back to the case')), errorBox(new Error('Patient not found on this case'))); return; }
+    if (p.voided_at) { clear(page).append(h('p', null, h('a', { href: `#/patrol/case/${id}` }, 'Back to the case')), h('p', { class: 'refusal-block' }, `This patient was marked entered in error: ${p.void_reason}.`)); return; }
     const sig = [...c.signatures].reverse().find((s) => s.kind === 'refusal_of_care' && s.patient_id === p.id);
     const wsig = [...c.signatures].reverse().find((s) => s.kind === 'witness' && s.patient_id === p.id);
     const image = async (s) => { if (!s) return null; try { return (await get(`/patrol/incidents/${id}/signatures/${s.id}`)).image; } catch (_) { return null; } };

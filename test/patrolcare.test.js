@@ -192,3 +192,40 @@ test('the body map from bedside injuries', () => {
   assert.deepEqual(bodyMap([{ body_region: 'chest', side: 'na', injury_type: 'cardiac' }]), { medical: 'X' });
   assert.deepEqual(derive({ events: [] }, { form: {}, injuries: [], treatments: [], vitals: [] }), {});
 });
+
+test('an entry sent twice by a phone that lost the answer is saved once; the recheck runs from when the set was taken', async () => {
+  const c = ok(await newCase());
+  const b = `/patrol/incidents/${c.id}/patients`;
+  const p = ok(await api('POST', b, { token: T.pat, body: { first_name: 'Ida', last_name: 'Empotent' } }));
+  const body = { pulse: 90, client_ref: `r${suffix}abc`, taken_at: `${today}T09:00`, recheck_minutes: 15 };
+  const [a, a2] = await Promise.all([api('POST', `${b}/${p.id}/vitals`, { token: T.pat, body }), api('POST', `${b}/${p.id}/vitals`, { token: T.pat, body })]);
+  assert.equal(ok(a).id, ok(a2).id, 'both answers name the same row');
+  const got = ok(await api('GET', `/patrol/incidents/${c.id}`, { token: T.pat })).patients[0];
+  assert.equal(got.vitals.length, 1);
+  assert.equal(got.vitals_due_at.slice(11, 16), '09:15', 'due 15 minutes after it was taken, not after it arrived');
+  is(await api('POST', `${b}/${p.id}/vitals`, { token: T.pat, body: { pulse: 90, client_ref: 'bad ref!' } }), 400);
+  const ice = ok(await api('POST', `${b}/${p.id}/treatments`, { token: T.pat, body: { kind: 'ice' } }));
+  is(await api('POST', `${b}/${p.id}/treatments/${ice.id}/effect`, { token: T.pat, body: { effect: 'Cooler' } }), 400, 'effects are for medication');
+});
+
+test('a hand-off belongs to its patient, and a minor\'s refusal must be signed by the guardian named', async () => {
+  const c = ok(await newCase({ summary: 'Two patients' }));
+  const b = `/patrol/incidents/${c.id}/patients`;
+  const a = ok(await api('POST', b, { token: T.pat, body: { first_name: 'Ann', last_name: 'One' } }));
+  const bb = ok(await api('POST', b, { token: T.pat, body: { first_name: 'Ben', last_name: 'Two' } }));
+  ok(await api('POST', `/patrol/incidents/${c.id}/events`, { token: T.pat, body: { kind: 'handoff', at: `${today}T11:40`, patient_id: a.id } }));
+  ok(await api('POST', `/patrol/incidents/${c.id}/events`, { token: T.pat, body: { kind: 'cleared', at: `${today}T12:00` } }));
+  let got = ok(await api('GET', `/patrol/incidents/${c.id}`, { token: T.pat }));
+  assert.equal(got.patients.find((x) => x.id === a.id).derived.handoff_time, '11:40');
+  assert.equal(got.patients.find((x) => x.id === bb.id).derived.handoff_time, undefined, 'Ann\'s hand-off is not Ben\'s');
+
+  const kid = ok(await api('POST', b, { token: T.pat, body: { first_name: 'Teo', last_name: 'Teen', age_years: 16, chief_complaint: 'Ankle', disposition: 'refused_care', form: { refusal_capacity: 'yes', refusal_signer: 'guardian', refusal_guardian_name: 'Gwen Teen', refusal_guardian_relation: 'Mother' } } }));
+  ok(await api('POST', `/patrol/incidents/${c.id}/signatures`, { token: T.pat, body: { kind: 'refusal_of_care', signer_name: 'Teo Teen', patient_id: kid.id, image: PNG } }));
+  let gaps = (await api('POST', `/patrol/incidents/${c.id}/submit`, { token: T.pat })).body.details.map((x) => x.message).join(' | ');
+  assert.match(gaps, /signed by Teo Teen, not the parent or guardian/);
+  ok(await api('POST', `/patrol/incidents/${c.id}/signatures`, { token: T.pat, body: { kind: 'refusal_of_care', signer_name: 'Gwen Teen', signer_role: 'Mother', patient_id: kid.id, image: PNG } }));
+  gaps = (await api('POST', `/patrol/incidents/${c.id}/submit`, { token: T.pat })).body.details.map((x) => x.message).join(' | ');
+  assert.equal(/not the parent/.test(gaps), false, gaps);
+  got = ok(await api('GET', `/patrol/incidents/${c.id}`, { token: T.pat }));
+  assert.ok(got.signatures.every((s) => /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s.signed_at)));
+});

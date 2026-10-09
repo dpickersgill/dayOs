@@ -16,8 +16,8 @@ export function cmsText(c) {
   if (!c) return null;
   return `C ${CMS_WORD[c.c] || '?'}, M ${CMS_WORD[c.m] || '?'}, S ${CMS_WORD[c.s] || '?'}`;
 }
-/** True when a check found something missing. */
-export const cmsLost = (c) => Boolean(c && [c.c, c.m, c.s].includes('absent'));
+/** True when something present before splinting is absent after it (a loss that was there before is not new). */
+export const cmsLost = (after, before) => Boolean(after && ['c', 'm', 's'].some((k) => after[k] === 'absent' && !(before && before[k] === 'absent')));
 
 /** The name of a treatment as a patroller says it. */
 export function treatmentName(t) {

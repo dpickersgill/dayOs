@@ -42,11 +42,11 @@ export function minutesAgo(n) {
 
 /** When it was done: Now, 5 or 10 minutes ago, or a time picked. Always gives a time, so an entry saved offline keeps it. */
 export function whenPicker(id = 'when') {
-  const pick = chipGroup({ id, options: [['0', 'Now'], ['5', '5 min ago'], ['10', '10 min ago'], ['other', 'Pick a time']], value: '0' });
+  const pick = chipGroup({ id, options: [['0', 'Now'], ['5', '5 min ago'], ['10', '10 min ago'], ['other', 'Pick a time']], value: '0', labelledBy: `${id}-l` });
   const custom = h('input', { type: 'datetime-local', value: nowInput(), 'aria-label': 'Time', hidden: true });
   pick.el.addEventListener('click', () => { custom.hidden = pick.get() !== 'other'; });
   return {
-    el: h('div', { class: 'vblock' }, h('h4', null, 'When'), pick.el, custom),
+    el: h('div', { class: 'vblock' }, h('h4', { id: `${id}-l` }, 'When'), pick.el, custom),
     get: () => { const w = pick.get() || '0'; if (w === 'other') { if (!custom.value) throw new Error('Pick the time'); return custom.value; } return minutesAgo(Number(w)); },
   };
 }
@@ -162,25 +162,25 @@ export function treatmentSheet({ kind, base, caseId, roster = [], onSaved }) {
       return { kind, detail: { ...(part.value.trim() ? { body_part: part.value.trim() } : {}), ...(b ? { cms_before: b } : {}), ...(a ? { cms_after: a } : {}) } };
     };
   } else if (kind === 'oxygen') {
-    const device = chipGroup({ id: 't-o2-device', options: O2_DEVICES, value: 'non_rebreather' });
-    const lpm = chipGroup({ id: 't-o2-lpm', options: [2, 4, 6, 10, 12, 15].map((n) => [String(n), `${n}`]), value: '15' });
-    parts.push(h('div', { class: 'vblock' }, h('h4', null, 'Device'), device.el), h('div', { class: 'vblock' }, h('h4', null, 'Litres per minute'), lpm.el));
+    const device = chipGroup({ id: 't-o2-device', options: O2_DEVICES, value: 'non_rebreather', labelledBy: 't-o2-device-l' });
+    const lpm = chipGroup({ id: 't-o2-lpm', options: [2, 4, 6, 10, 12, 15].map((n) => [String(n), `${n}`]), value: '15', labelledBy: 't-o2-lpm-l' });
+    parts.push(h('div', { class: 'vblock' }, h('h4', { id: 't-o2-device-l' }, 'Device'), device.el), h('div', { class: 'vblock' }, h('h4', { id: 't-o2-lpm-l' }, 'Litres per minute'), lpm.el));
     collect = () => ({ kind, detail: { ...(device.get() ? { o2_device: device.get() } : {}), ...(lpm.get() ? { o2_lpm: Number(lpm.get()) } : {}) } });
   } else {
     const name = h('input', { id: 't-med', maxlength: 100, list: 't-med-list', autocomplete: 'off' });
     const dl = h('datalist', { id: 't-med-list' }, MEDS.map((m) => h('option', { value: m })));
     const quick = h('div', { class: 'chip-row' }, MEDS.slice(0, 5).map((m) => { const b = h('button', { type: 'button', class: 'chip' }, m); b.addEventListener('click', () => { name.value = m; }); return b; }));
     const dose = h('input', { id: 't-dose', type: 'number', inputmode: 'decimal', min: 0, step: 'any', class: 'short-num' });
-    const unit = chipGroup({ id: 't-unit', options: UNITS.map((u) => [u, u]), value: 'mg' });
-    const route = chipGroup({ id: 't-route', options: ROUTES, value: 'oral' });
+    const unit = chipGroup({ id: 't-unit', options: UNITS.map((u) => [u, u]), value: 'mg', labelledBy: 't-unit-l' });
+    const route = chipGroup({ id: 't-route', options: ROUTES, value: 'oral', labelledBy: 't-route-l' });
     const why = h('input', { id: 't-why', maxlength: 255, placeholder: 'Knee pain 7/10' });
     const auth = h('input', { id: 't-auth', maxlength: 150, list: 't-auth-list' });
     const al = h('datalist', { id: 't-auth-list' }, AUTH.map((m) => h('option', { value: m })));
     const by = h('select', { id: 't-by' }, h('option', { value: '' }, 'Not recorded'), roster.filter((m) => m.staff_status === 'active').map((m) => h('option', { value: m.staff_id }, `${m.first_name} ${m.last_name}`)));
     parts.push(
       h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-med' }, 'Medication')), name, dl, quick),
-      h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-dose' }, 'Dose')), h('div', { class: 'row tight' }, dose), unit.el),
-      h('div', { class: 'vblock' }, h('h4', null, 'Route'), route.el),
+      h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-dose' }, 'Dose')), h('div', { class: 'row tight' }, dose), h('span', { id: 't-unit-l', class: 'muted small' }, 'Unit'), unit.el),
+      h('div', { class: 'vblock' }, h('h4', { id: 't-route-l' }, 'Route'), route.el),
       h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-why' }, 'Given for')), why),
       h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-auth' }, 'Authorised by')), auth, al, h('span', { class: 'hint' }, 'Your standing order, the doctor on medical control, or the patient\'s own medication')),
       h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-by' }, 'Given by')), by),
@@ -225,23 +225,31 @@ export function arrestSheet({ def, patient, base, caseId, onClose }) {
     .sort((a, b) => (a.at < b.at ? -1 : 1));
   const list = h('ol', { class: 'arrest-log', 'aria-live': 'polite' });
   const clock = h('div', { class: 'arrest-clock' });
-  const cycle = h('div', { class: 'arrest-cycle', role: 'status' });
+  const cycle = h('div', { class: 'arrest-cycle', 'aria-hidden': 'true' });
+  const say = h('div', { class: 'visually-hidden', role: 'status', 'aria-live': 'assertive' }); // spoken once, when a rhythm check is due
   const word = (e) => (e.kind === 'rosc' ? 'Pulse returned' : e.kind === 'cpr' ? ARREST_ACTIONS[e.action] || 'CPR' : `${ARREST_ACTIONS[e.action] || 'AED'}${e.joules ? ` (${e.joules} J)` : ''}`);
   const shocks = () => log.filter((e) => e.kind === 'aed' && e.action === 'shock').length;
   const draw = () => {
     clear(list).append(...(log.length ? log.map((e) => h('li', { class: e.queued ? 'queued' : null }, h('b', null, atTime(e.at)), ` ${word(e)}`, e.queued ? h('span', { class: 'muted' }, ' (waiting to send)') : null)) : [h('li', { class: 'muted' }, 'Nothing logged yet. Tap as things happen.')]));
     tick();
   };
+  let warned = null;
   const tick = () => {
-    const start = log.find((e) => e.kind === 'cpr' && e.action === 'start');
-    const last = [...log].reverse().find((e) => (e.kind === 'aed' && ['shock', 'no_shock', 'rhythm_check'].includes(e.action)) || (e.kind === 'cpr' && e.action === 'start'));
+    // Count from the latest CPR start, so a second arrest after a pulse came back starts a fresh clock and cycle.
+    const starts = log.filter((e) => e.kind === 'cpr' && e.action === 'start');
+    const start = starts[starts.length - 1];
+    const since = start ? log.slice(log.indexOf(start)) : [];
+    const last = [...since].reverse().find((e) => (e.kind === 'aed' && ['shock', 'no_shock', 'rhythm_check'].includes(e.action)) || (e.kind === 'cpr' && e.action === 'start'));
     const sec = (at) => Math.max(0, Math.round((Date.parse(`${nowStamp()}Z`) - Date.parse(`${String(at).length === 16 ? `${at}:00` : at}Z`)) / 1000));
     const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-    clock.textContent = start ? `CPR running ${mmss(sec(start.at))} · ${shocks()} shock${shocks() === 1 ? '' : 's'}` : 'CPR not started';
-    if (start && last && !log.some((e) => e.kind === 'rosc' || (e.kind === 'cpr' && e.action === 'stop'))) {
+    const running = start && !since.some((e) => e.kind === 'rosc' || (e.kind === 'cpr' && e.action === 'stop'));
+    clock.textContent = running ? `CPR running ${mmss(sec(start.at))} · ${shocks()} shock${shocks() === 1 ? '' : 's'} in all` : start ? `CPR stopped · ${shocks()} shock${shocks() === 1 ? '' : 's'} in all` : 'CPR not started';
+    if (running && last) {
       const left = 120 - (sec(last.at) % 120);
       cycle.textContent = left <= 15 ? `Rhythm check due: ${left} s` : `Next rhythm check in ${mmss(left)}`;
       cycle.dataset.level = left <= 15 ? 'alert' : 'ok';
+      const cycleNo = Math.floor(sec(last.at) / 120);
+      if (left <= 15 && warned !== cycleNo) { warned = cycleNo; say.textContent = 'Rhythm check due'; }
     } else { cycle.textContent = ''; cycle.dataset.level = 'none'; }
   };
   const tap = (kind, action, text) => {
@@ -270,7 +278,7 @@ export function arrestSheet({ def, patient, base, caseId, onClose }) {
     try { sentToast(await send('PATCH', base, { form }, { caseId, label: 'Time down' }), 'Saved'); } catch (e) { toast(e.message, 'error'); }
   });
   const body = h('div', { class: 'arrest stack', 'data-arrest-sheet': patient.id },
-    h('div', { class: 'arrest-top' }, clock, cycle),
+    h('div', { class: 'arrest-top' }, clock, cycle, say),
     h('div', { class: 'arrest-grid' },
       tap('cpr', 'start', 'CPR started'), tap('aed', 'pads_on', 'Pads on'), tap('aed', 'shock', 'Shock delivered'), tap('aed', 'no_shock', 'No shock advised'),
       tap('aed', 'rhythm_check', 'Rhythm check'), tap('cpr', 'stop', 'CPR stopped'), tap('rosc', null, 'Pulse returned')),

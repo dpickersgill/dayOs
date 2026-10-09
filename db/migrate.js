@@ -317,6 +317,14 @@ const careSteps = [
     UNIQUE KEY uq_iversions (tenant_id, incident_id, version_no),
     CONSTRAINT fk_iversions_incident FOREIGN KEY (tenant_id, incident_id) REFERENCES incidents(tenant_id, id)
   ) ENGINE=InnoDB`],
+  // An entry sent again by a phone that lost its signal mid-send is recognised by the id the phone gave it, and saved once.
+  ['care entries client_ref', (c) => columnExists(c, 'incident_vitals', 'client_ref'), [
+    'ALTER TABLE incident_vitals ADD COLUMN client_ref VARCHAR(40) NULL, ADD UNIQUE KEY uq_ivitals_ref (tenant_id, client_ref)',
+    'ALTER TABLE incident_injuries ADD COLUMN client_ref VARCHAR(40) NULL, ADD UNIQUE KEY uq_iinjuries_ref (tenant_id, client_ref)',
+    'ALTER TABLE incident_treatments ADD COLUMN client_ref VARCHAR(40) NULL, ADD UNIQUE KEY uq_itreat_ref (tenant_id, client_ref)',
+    'ALTER TABLE incident_events ADD COLUMN client_ref VARCHAR(40) NULL, ADD UNIQUE KEY uq_ievents_ref (tenant_id, client_ref)',
+  ]],
+  ['incident_events.patient_id', (c) => columnExists(c, 'incident_events', 'patient_id'), 'ALTER TABLE incident_events ADD COLUMN patient_id BIGINT UNSIGNED NULL'],
   ['incident_versions index', (c) => indexExists(c, 'incident_versions', 'ix_iversions_incident'), 'ALTER TABLE incident_versions ADD INDEX ix_iversions_incident (tenant_id, incident_id, created_at)'],
 ];
 

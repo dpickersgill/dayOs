@@ -263,7 +263,7 @@ async function loadCase(conn, tenantId, id) {
   const [notes, patients, events, responders, witnesses, signatures, collisionRow, parties, checklist, versions] = await Promise.all([
     rows(conn, 'SELECT n.id, n.author_user, u.email AS author, n.body, n.created_at FROM incident_notes n LEFT JOIN users u ON u.id = n.author_user AND u.tenant_id = n.tenant_id WHERE n.tenant_id = ? AND n.incident_id = ? ORDER BY n.id', [tenantId, id]),
     rows(conn, `SELECT p.*, vu.email AS voided_by_email FROM incident_patients p ${VOIDED_BY('p')} WHERE p.tenant_id = ? AND p.incident_id = ? ORDER BY p.id`, [tenantId, id]),
-    rows(conn, `SELECT e.id, e.kind, e.at, e.note, e.entered_at, e.voided_at, e.void_reason, vu.email AS voided_by_email FROM incident_events e ${VOIDED_BY('e')} WHERE e.tenant_id = ? AND e.incident_id = ? ORDER BY e.at, e.id`, [tenantId, id]),
+    rows(conn, `SELECT e.id, e.kind, e.at, e.note, e.patient_id, e.entered_at, e.voided_at, e.void_reason, vu.email AS voided_by_email FROM incident_events e ${VOIDED_BY('e')} WHERE e.tenant_id = ? AND e.incident_id = ? ORDER BY e.at, e.id`, [tenantId, id]),
     rows(conn, `SELECT r.id, r.staff_id, r.role, p.first_name, p.last_name, m.patrol_number, m.callsign FROM incident_responders r JOIN staff s ON s.id = r.staff_id AND s.tenant_id = r.tenant_id JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id LEFT JOIN patrol_members m ON m.staff_id = r.staff_id AND m.tenant_id = r.tenant_id WHERE r.tenant_id = ? AND r.incident_id = ? ORDER BY FIELD(r.role, 'lead', 'assist', 'transport', 'dispatch'), r.id`, [tenantId, id]),
     rows(conn, 'SELECT id, relation, name, phone, email, address, city, region, postal, statement FROM incident_witnesses WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]),
     rows(conn, 'SELECT id, patient_id, kind, signer_name, signer_role, signed_at FROM incident_signatures WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]),
@@ -344,7 +344,8 @@ router.patch('/incidents/:id', patrol, needs('create_case'), validate(partialOf(
 router.post('/incidents/:id/notes', patrol, needs('create_case'), validate(z.object({ body: z.string().min(1).max(5000) })), async (req, res) => {
   const id = paramId(req);
   if (!(await one(pool, 'SELECT id FROM incidents WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, id]))) throw notFound('Incident');
-  const [r] = await pool.query('INSERT INTO incident_notes (tenant_id, incident_id, author_user, body) VALUES (?, ?, ?, ?)', [req.auth.tenantId, id, req.auth.userId, req.body.body]);
+  const tz = (await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone;
+  const [r] = await pool.query('INSERT INTO incident_notes (tenant_id, incident_id, author_user, body, created_at) VALUES (?, ?, ?, ?, ?)', [req.auth.tenantId, id, req.auth.userId, req.body.body, nowIn(tz)]);
   await audit(pool, req, 'add_note', 'incidents', id);
   res.status(201).json({ id: r.insertId });
 });
@@ -407,7 +408,12 @@ async function reportProblems(conn, tenantId, inc) {
       if (p.age_years !== null && p.age_years !== undefined && Number(p.age_years) < 18 && !(pf.refusal_signer === 'guardian' && pf.refusal_guardian_name && pf.refusal_guardian_relation)) {
         problem(`${who}: under 18, so a parent or guardian signs the refusal (name and relationship)`, { scope: 'patient', patient_id: p.id, section: 'refusal', field: 'refusal_signer' });
       }
-      if (!signatures.some((s) => s.kind === 'refusal_of_care' && s.patient_id === p.id)) problem(`${who}: refused care, so a refusal signature is needed`, { area: 'signatures' });
+      const signed = [...signatures].reverse().find((s) => s.kind === 'refusal_of_care' && s.patient_id === p.id);
+      if (!signed) problem(`${who}: refused care, so a refusal signature is needed`, { area: 'signatures' });
+      else if (p.age_years !== null && p.age_years !== undefined && Number(p.age_years) < 18 && pf.refusal_guardian_name
+        && String(signed.signer_name).trim().toLowerCase() !== String(pf.refusal_guardian_name).trim().toLowerCase()) {
+        problem(`${who}: the refusal was signed by ${signed.signer_name}, not the parent or guardian. Have ${pf.refusal_guardian_name} sign it`, { area: 'signatures' });
+      }
     }
   }
   if (!c.responders.some((r) => r.role === 'lead')) problem('Add the patroller who led the response', { area: 'responders' });
@@ -423,7 +429,7 @@ async function fillFromBedside(conn, req, inc) {
   const filled = [];
   for (const p of c.patients.filter((x) => !x.voided_at)) {
     const add = {};
-    for (const [k, v] of Object.entries(p.derived)) if (isEmpty(p.form[k]) && !isEmpty(v)) add[k] = v;
+    for (const [k, v] of Object.entries(p.derived)) if (isEmpty(p.form[k]) && !isEmpty(v)) add[k] = typeof v === 'string' ? v.slice(0, k.startsWith('fa_') ? 20000 : 300) : v;
     if (!Object.keys(add).length) continue;
     await conn.query('UPDATE incident_patients SET form = ? WHERE tenant_id = ? AND id = ?', [mergeForm(p.form, add), req.auth.tenantId, p.id]);
     filled.push({ patient_id: p.id, fields: Object.keys(add) });
@@ -446,7 +452,8 @@ async function keepVersion(conn, req, incidentId, kind) {
   const c = await loadCase(conn, req.auth.tenantId, incidentId);
   delete c.versions;
   const { n } = await one(conn, 'SELECT COALESCE(MAX(version_no), 0) + 1 AS n FROM incident_versions WHERE tenant_id = ? AND incident_id = ?', [req.auth.tenantId, incidentId]);
-  await conn.query('INSERT INTO incident_versions (tenant_id, incident_id, version_no, kind, snapshot, created_by) VALUES (?, ?, ?, ?, ?, ?)', [req.auth.tenantId, incidentId, n, kind, JSON.stringify(c), req.auth.userId]);
+  const tz = (await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone;
+  await conn.query('INSERT INTO incident_versions (tenant_id, incident_id, version_no, kind, snapshot, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [req.auth.tenantId, incidentId, n, kind, JSON.stringify(c), req.auth.userId, nowIn(tz)]);
   return n;
 }
 
@@ -557,6 +564,7 @@ router.post('/incidents/:id/patients/:pid/pull', patrol, needs('create_case'), v
     const inc = await editableCase(conn, req, id);
     const pat = await one(conn, 'SELECT * FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id, pid]);
     if (!pat) throw notFound('Patient');
+    if (pat.voided_at) throw conflict('This patient was marked entered in error');
     const personId = req.body.person_id || pat.person_id;
     if (!personId) throw bad('Link this patient to a guest on file first');
     const pull = await buildPull(conn, req.auth.tenantId, personId, inc.occurred_at);
@@ -659,6 +667,7 @@ const treatmentDetail = z.object({
   action: z.enum(['start', 'stop', 'pads_on', 'shock', 'no_shock', 'rhythm_check']).optional(), joules: z.number().int().min(0).max(400).optional(),
 }).strict();
 const gcsPart = (max) => z.number().int().min(1).max(max).optional();
+const clientRef = z.string().regex(/^[a-z0-9]{6,40}$/).optional(); // set by a phone that may send the same entry twice
 
 const sub = {
   vitals: {
@@ -672,15 +681,16 @@ const sub = {
       avpu: z.enum(['alert', 'verbal', 'pain', 'unresponsive']).optional(), pupils: z.string().max(40).optional(), skin: z.string().max(60).optional(),
       pupil_left: z.string().max(30).optional(), pupil_right: z.string().max(30).optional(),
       temp_c: z.number().min(20).max(45).optional(), glucose: z.number().int().min(0).max(1500).optional(), notes: z.string().max(255).optional(),
-      recheck_minutes: z.number().int().min(0).max(120).optional(),
+      recheck_minutes: z.number().int().min(0).max(120).optional(), client_ref: clientRef,
     }).refine((v) => Object.keys(v).some((k) => !['taken_at', 'notes', 'recheck_minutes'].includes(k)), 'Record at least one measurement')
       .refine((v) => [v.gcs_e, v.gcs_v, v.gcs_m].every((x) => x === undefined) || [v.gcs_e, v.gcs_v, v.gcs_m].every((x) => x !== undefined), 'Give all three parts of the GCS, or only the total')
       .transform((v) => (v.gcs_e !== undefined ? { ...v, gcs: v.gcs_e + v.gcs_v + v.gcs_m } : v)),
-    cols: ['taken_at', 'pulse', 'resp', 'bp_sys', 'bp_dia', 'spo2', 'gcs', 'gcs_e', 'gcs_v', 'gcs_m', 'pain', 'avpu', 'pupils', 'pupil_left', 'pupil_right', 'skin', 'temp_c', 'glucose', 'notes'], recorder: 'recorded_by', entered: true, voidable: true,
+    cols: ['taken_at', 'pulse', 'resp', 'bp_sys', 'bp_dia', 'spo2', 'gcs', 'gcs_e', 'gcs_v', 'gcs_m', 'pain', 'avpu', 'pupils', 'pupil_left', 'pupil_right', 'skin', 'temp_c', 'glucose', 'notes', 'client_ref'], recorder: 'recorded_by', entered: true, voidable: true,
     // The next check is kept on the patient, so every phone on the case sees the same timer.
     after: async (conn, req, parent, body, now) => {
       if (body.recheck_minutes === undefined) return;
-      await conn.query('UPDATE incident_patients SET vitals_due_at = IF(? > 0, ? + INTERVAL ? MINUTE, NULL) WHERE tenant_id = ? AND id = ?', [body.recheck_minutes, now, body.recheck_minutes, req.auth.tenantId, parent]);
+      // Due from when the set was taken, so a set entered late or sent after a dead spot does not push the next check back.
+      await conn.query('UPDATE incident_patients SET vitals_due_at = IF(? > 0, CAST(? AS DATETIME) + INTERVAL ? MINUTE, NULL) WHERE tenant_id = ? AND id = ?', [body.recheck_minutes, body.taken_at || now, body.recheck_minutes, req.auth.tenantId, parent]);
     },
   },
   injuries: {
@@ -689,9 +699,9 @@ const sub = {
       body_region: z.enum(['head', 'face', 'neck', 'shoulder', 'arm', 'elbow', 'wrist_hand', 'chest', 'back', 'abdomen', 'pelvis', 'hip', 'thigh', 'knee', 'lower_leg', 'ankle_foot', 'multiple', 'other']),
       side: z.enum(['left', 'right', 'both', 'midline', 'na']).default('na'),
       injury_type: z.enum(['fracture', 'dislocation', 'sprain_strain', 'laceration', 'contusion', 'concussion', 'spinal', 'internal', 'cold_injury', 'illness', 'cardiac', 'other']),
-      notes: z.string().max(255).optional(),
+      notes: z.string().max(255).optional(), client_ref: clientRef,
     }),
-    cols: ['body_region', 'side', 'injury_type', 'notes'], voidable: true,
+    cols: ['body_region', 'side', 'injury_type', 'notes', 'client_ref'], voidable: true,
   },
   treatments: {
     table: 'incident_treatments', level: 'patient', time: 'performed_at',
@@ -700,15 +710,15 @@ const sub = {
       kind: z.enum(['splint', 'spinal_motion_restriction', 'bandage', 'ice', 'oxygen', 'aed', 'cpr', 'airway', 'medication', 'warming', 'rosc', 'other']),
       description: z.string().max(255).optional(), medication: z.string().max(100).optional(), dose: z.string().max(50).optional(), route: z.string().max(30).optional(),
       performed_by_staff: z.number().int().positive().optional(),
-      detail: treatmentDetail.optional(),
+      detail: treatmentDetail.optional(), client_ref: clientRef,
     }).refine((v) => v.kind !== 'medication' || (v.medication && v.dose), 'A medication needs a name and a dose')
       .transform((v) => (v.detail ? { ...v, detail: Object.keys(v.detail).length ? JSON.stringify(v.detail) : undefined } : v)),
-    cols: ['performed_at', 'kind', 'description', 'medication', 'dose', 'route', 'performed_by_staff', 'detail'], recorder: 'recorded_by', entered: true, voidable: true,
+    cols: ['performed_at', 'kind', 'description', 'medication', 'dose', 'route', 'performed_by_staff', 'detail', 'client_ref'], recorder: 'recorded_by', entered: true, voidable: true,
   },
   events: {
     table: 'incident_events', level: 'incident', time: 'at',
-    schema: z.object({ ...optionalTime('at'), kind: z.enum(['call_received', 'dispatched', 'on_scene', 'patient_contact', 'transport_started', 'at_aid_room', 'handoff', 'cleared', 'other']), note: z.string().max(255).optional() }),
-    cols: ['at', 'kind', 'note'], recorder: 'recorded_by', entered: true, voidable: true,
+    schema: z.object({ ...optionalTime('at'), kind: z.enum(['call_received', 'dispatched', 'on_scene', 'patient_contact', 'transport_started', 'at_aid_room', 'handoff', 'cleared', 'other']), note: z.string().max(255).optional(), patient_id: z.number().int().positive().optional(), client_ref: clientRef }),
+    cols: ['at', 'kind', 'note', 'patient_id', 'client_ref'], recorder: 'recorded_by', entered: true, voidable: true,
   },
   witnesses: {
     table: 'incident_witnesses', level: 'incident',
@@ -737,10 +747,15 @@ for (const [name, def] of Object.entries(sub)) {
 
   router.post(base, patrol, needs('create_case'), validate(def.schema), async (req, res) => {
     const id = paramId(req);
-    const newId = await tx(async (conn) => {
+    const save = () => tx(async (conn) => {
       await editableCase(conn, req, id);
       const parent = await parentId(conn, req, id);
       const data = { ...req.body };
+      if (data.client_ref) {
+        const seen = await one(conn, `SELECT id FROM \`${def.table}\` WHERE tenant_id = ? AND client_ref = ?`, [req.auth.tenantId, data.client_ref]);
+        if (seen) return seen.id; // already saved: the phone did not hear the answer the first time
+      }
+      if (data.patient_id && !(await one(conn, 'SELECT id FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ? AND voided_at IS NULL', [req.auth.tenantId, id, data.patient_id]))) throw notFound('Patient');
       const now = nowIn((await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone);
       if (def.time && !data[def.time]) data[def.time] = now;
       if (def.entered) data.entered_at = now; // when it was typed in; a reading taken earlier shows as entered late
@@ -754,6 +769,12 @@ for (const [name, def] of Object.entries(sub)) {
       await audit(conn, req, `add_${name}`, 'incidents', id, { row: r.insertId });
       return r.insertId;
     });
+    let newId;
+    try { newId = await save(); } catch (err) {
+      // Two copies of the same entry arrived at once: the second finds the first.
+      if (err.code !== 'ER_DUP_ENTRY' || !req.body.client_ref) throw err;
+      newId = (await one(pool, `SELECT id FROM \`${def.table}\` WHERE tenant_id = ? AND client_ref = ?`, [req.auth.tenantId, req.body.client_ref])).id;
+    }
     res.status(201).json({ id: newId });
   });
 
@@ -794,9 +815,10 @@ router.post('/incidents/:id/patients/:pid/treatments/:rowId/effect', patrol, nee
   const id = paramId(req);
   await tx(async (conn) => {
     await editableCase(conn, req, id);
-    const t = await one(conn, 'SELECT t.id, t.kind, t.detail, t.voided_at FROM incident_treatments t JOIN incident_patients p ON p.id = t.patient_id AND p.tenant_id = t.tenant_id WHERE t.tenant_id = ? AND p.incident_id = ? AND t.patient_id = ? AND t.id = ?', [req.auth.tenantId, id, paramId(req, 'pid'), paramId(req, 'rowId')]);
+    const t = await one(conn, 'SELECT t.id, t.kind, t.detail, IFNULL(t.voided_at, p.voided_at) AS voided_at FROM incident_treatments t JOIN incident_patients p ON p.id = t.patient_id AND p.tenant_id = t.tenant_id WHERE t.tenant_id = ? AND p.incident_id = ? AND t.patient_id = ? AND t.id = ?', [req.auth.tenantId, id, paramId(req, 'pid'), paramId(req, 'rowId')]);
     if (!t) throw notFound('Treatment');
     if (t.voided_at) throw conflict('This entry was marked entered in error');
+    if (t.kind !== 'medication') throw bad('An effect is recorded for a medication');
     const tenant = await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId]);
     const detail = { ...parseDetail(t.detail), effect: req.body.effect, effect_at: nowIn(tenant.timezone) };
     await conn.query('UPDATE incident_treatments SET detail = ? WHERE tenant_id = ? AND id = ?', [JSON.stringify(detail), req.auth.tenantId, t.id]);
@@ -859,12 +881,15 @@ router.post(
     const b = req.body;
     const newId = await tx(async (conn) => {
       await editableCase(conn, req, id);
-      const p = b.patient_id ? await one(conn, 'SELECT id, form FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ?', [req.auth.tenantId, id, b.patient_id]) : null;
+      const p = b.patient_id ? await one(conn, 'SELECT id, form, voided_at FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ?', [req.auth.tenantId, id, b.patient_id]) : null;
       if (b.patient_id && !p) throw notFound('Patient');
+      if (p && p.voided_at) throw conflict('This patient was marked entered in error');
       if ((b.kind === 'refusal_of_care' || b.kind === 'receiving_provider') && !p) throw bad('Say which patient this signature is for');
       // A patient who cannot make the decision cannot refuse: care continues under implied consent.
       if (b.kind === 'refusal_of_care' && parseForm(p.form).refusal_capacity === 'no') throw conflict('This patient is recorded as not able to decide, so they cannot refuse care. Treat under implied consent and escalate to the lead or EMS.');
-      const [r] = await conn.query('INSERT INTO incident_signatures (tenant_id, incident_id, patient_id, kind, signer_name, signer_role, image, recorded_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [req.auth.tenantId, id, b.patient_id ?? null, b.kind, b.signer_name, b.signer_role ?? null, b.image, req.auth.userId]);
+      const tz = (await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone;
+      // signed_at is kept on the mountain clock, like every other time on the report.
+      const [r] = await conn.query('INSERT INTO incident_signatures (tenant_id, incident_id, patient_id, kind, signer_name, signer_role, image, recorded_by, signed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [req.auth.tenantId, id, b.patient_id ?? null, b.kind, b.signer_name, b.signer_role ?? null, b.image, req.auth.userId, nowIn(tz)]);
       await audit(conn, req, 'add_signature', 'incidents', id, { kind: b.kind, row: r.insertId });
       return r.insertId;
     });

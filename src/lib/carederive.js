@@ -56,7 +56,10 @@ function treatmentText(t) {
  */
 function derive(c, p) {
   const out = {};
-  const ev = live(c.events);
+  // Events stamped for another patient (a hand-off is per patient) do not count for this one. Case-wide hand-off or
+  // clear times only count when there is one patient, since they cannot say whose they were.
+  const single = live(c.patients || [p]).length <= 1;
+  const ev = live(c.events).filter((e) => (e.patient_id ? e.patient_id === p.id : !['handoff', 'cleared'].includes(e.kind) || single));
   const first = (...kinds) => { for (const k of kinds) { const e = ev.find((x) => x.kind === k); if (e) return e; } return null; };
   const scene = first('on_scene', 'patient_contact');
   const transport = first('transport_started');

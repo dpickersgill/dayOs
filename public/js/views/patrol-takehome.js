@@ -48,7 +48,7 @@ export async function renderTakehome(root, id, pid, kind) {
   try { c = await get(`/patrol/incidents/${id}`); } catch (err) { page.append(h('p', null, h('a', { href: `#/patrol/case/${id}` }, 'Back to the case')), errorBox(err)); return; }
   const p = c.patients.find((x) => x.id === Number(pid));
   if (!p) { page.append(h('p', null, h('a', { href: `#/patrol/case/${id}` }, 'Back to the case')), errorBox(new Error('Patient not found on this case'))); return; }
-  const head = c.patients.length && p.injuries.some((i) => i.injury_type === 'concussion' || i.body_region === 'head');
+  const head = p.injuries.some((i) => !i.voided_at && (i.injury_type === 'concussion' || i.body_region === 'head'));
   let current = SHEETS.find((s) => s.id === kind) || SHEETS.find((s) => s.id === (head ? 'concussion' : 'injury'));
   const resort = c.resort.legal_name || c.resort.name;
   const name = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'the patient';

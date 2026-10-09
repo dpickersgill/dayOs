@@ -2350,7 +2350,7 @@ test('patrol care: the wristband and three views, assessment tools, CMS, entered
     root.querySelector(`[data-bedside="${p.id}"] [data-act=vitals]`).click(); await settle();
     s = document.querySelector('.dialog.sheet');
     assert.match(s.textContent, /a toddler \(1 to 3\)/, 'a three-year-old is flagged against toddler ranges');
-    assert.match(s.textContent, /Coos, babbles/, 'and the GCS uses the verbal scale for young children');
+    assert.match(s.textContent, /Right words, smiles/, 'and the GCS uses the verbal scale for young children');
     s.querySelector('#v-pulse').value = '118'; s.querySelector('#v-pulse').dispatchEvent(new window.Event('input', { bubbles: true }));
     assert.equal(s.querySelector('#v-pulse').dataset.level, 'ok', '118 is normal for a toddler');
     s.querySelector('#v-gcs-e [data-value="4"]').click(); s.querySelector('#v-gcs-v [data-value="5"]').click(); s.querySelector('#v-gcs-m [data-value="6"]').click();

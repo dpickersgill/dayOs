@@ -66,7 +66,7 @@ function sceneDialog(c, { id, reload }) {
 
 function partyDialog(c, p, { id, reload }) {
   const cur = p || {};
-  const patients = [['', 'Not a patient on this report'], ...c.patients.map((x) => [x.id, `${x.first_name} ${x.last_name}`.trim()])];
+  const patients = [['', 'Not a patient on this report'], ...c.patients.filter((x) => !x.voided_at).map((x) => [x.id, `${x.first_name} ${x.last_name}`.trim()])];
   const box = (name, text, on) => h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name, checked: Boolean(on) }), ' ', text);
   formDialog(p ? 'Edit person involved' : 'Add a person involved', h('div', { class: 'form' },
     field('Role', select(ROLES, cur.role || 'skier', { name: 'role' })), field('Is this a patient?', select(patients, cur.patient_id || '', { name: 'patient_id' })),
