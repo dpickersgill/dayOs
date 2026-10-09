@@ -548,7 +548,7 @@ test('patrol: a case opens, shows the whole report, and the sign-off buttons wor
   const buttons = (root, text) => [...root.querySelectorAll('button')].filter((b) => b.textContent.trim() === text);
   let root = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id)]);
   clean(root, 'case');
-  for (const text of [c.case_number, 'Cam Carver', 'Medication: Ibuprofen 400 mg, oral', 'Wendy Witness', 'Sprain strain, Knee', 'Draft']) assert.ok(root.textContent.includes(text), `case page is missing "${text}"`);
+  for (const text of [c.case_number, 'Cam Carver', 'Medication: Ibuprofen 400 mg oral', 'Wendy Witness', 'Sprain strain, Knee', 'Draft']) assert.ok(root.textContent.includes(text), `case page is missing "${text}"`);
   await exercise(root, 'case page');
 
   // submitting an incomplete report lists what is missing
@@ -1896,7 +1896,8 @@ test('patrol: the bedside card shows allergies, latest vitals with flags, and th
   assert.equal(bed.querySelector('.vtile[data-key=pain]').dataset.level, 'watch', 'pain 8 is flagged');
   assert.equal(bed.querySelector('.vtile[data-key=pulse]').dataset.level, 'ok');
   assert.ok(bed.querySelector('[data-act=handoff]'), 'a hand-off sheet link');
-  assert.equal(root.querySelector('details.paperwork') !== null, true, 'the long form is tucked into the paperwork section');
+  assert.ok(root.querySelector('.pane[data-pane=report]').hidden, 'the long form waits in the Report view while care is going on');
+  assert.equal(root.querySelector('.wristband .wb-allergy').textContent, 'Allergy: Penicillin', 'the wristband shows the allergy at all times');
 
   // the quick vitals sheet: plus and minus start from the last reading, chips set the rest
   bed.querySelector('[data-act=vitals]').click();
@@ -1933,11 +1934,10 @@ test('patrol: the bedside card shows allergies, latest vitals with flags, and th
   assert.equal(ok(await api('GET', base, { token: o })).patients[0].vitals.length, 2);
   await closeOverlays();
 
-  // one tap logs a treatment at the current time
-  const splint = [...root.querySelectorAll('.quick button')].find((b) => b.textContent === 'Splint');
-  splint.click();
+  // one tap logs a simple treatment at the current time
+  [...root.querySelectorAll('.quick button')].find((b) => b.textContent === 'Ice').click();
   await settle();
-  assert.equal(ok(await api('GET', base, { token: o })).patients[0].treatments.some((t) => t.kind === 'splint'), true);
+  assert.equal(ok(await api('GET', base, { token: o })).patients[0].treatments.some((t) => t.kind === 'ice'), true);
   // stages: stamp "On scene" with a tap
   const stage = root.querySelector('button.stage[data-stage=on_scene]');
   assert.ok(stage, 'an unstamped stage can be tapped');
@@ -2261,7 +2261,8 @@ test('patrol: the case page guides the next step, and keeps the reader\'s place 
   assert.match(root.querySelector('[data-area=progress]').textContent, /Log injuries and treatment is next/);
 
   // saving a form section carries on to the next one and does not collapse the rest of the page
-  root.querySelector('details.paperwork').open = true;
+  [...root.querySelectorAll('.modes [role=tab]')].find((t) => t.dataset.mode === 'report').click();
+  assert.equal(root.querySelector('.pane[data-pane=report]').hidden, false, 'the Report view opens');
   const sec = root.querySelector(`[data-patient="${p.id}"] details[data-section=patient]`);
   assert.ok(sec, 'the patient section is on the page');
   sec.open = true;
@@ -2272,9 +2273,168 @@ test('patrol: the case page guides the next step, and keeps the reader\'s place 
   await settle();
   const after = document.querySelector(`[data-patient="${p.id}"] details[data-section=patient]`);
   const following = after.nextElementSibling;
-  assert.ok(document.querySelector('details.paperwork').open, 'the paperwork stays open after a save');
+  assert.equal(document.querySelector('.pane[data-pane=report]').hidden, false, 'the Report view stays open after a save');
   assert.equal(after.open, false, 'the section just saved closes');
   assert.equal(following.open, true, 'the next section opens');
+});
+
+test('patrol care: the wristband and three views, assessment tools, CMS, entered in error, offline save, the arrest log, the draft narrative and versions', skip(), async () => {
+  const o = T.owner;
+  await closeOverlays();
+  const c = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${today}T10:05`, location: 'Lower Cascade', category: 'injury', severity: 'moderate', summary: 'Skier down, leg pain' } }));
+  const base = `/patrol/incidents/${c.id}`;
+  const p = ok(await api('POST', `${base}/patients`, { token: o, body: { first_name: 'Cara', last_name: 'Care', age_years: 3, allergies: 'None', chief_complaint: 'Left leg pain' } }));
+  const pb = `${base}/patients/${p.id}`;
+  ok(await api('POST', `${base}/events`, { token: o, body: { kind: 'on_scene', at: `${today}T10:12` } }));
+  const vit = ok(await api('POST', `${pb}/vitals`, { token: o, body: { pulse: 300, taken_at: `${today}T10:15` } }));
+  ok(await api('POST', `${pb}/injuries`, { token: o, body: { body_region: 'lower_leg', side: 'left', injury_type: 'fracture' } }));
+  const get = async () => ok(await api('GET', base, { token: o }));
+  const btn = (scope, t) => [...scope.querySelectorAll('button')].find((b) => b.textContent.trim() === t);
+  const sheet = () => [...document.querySelectorAll('.overlay')].at(-1);
+
+  let root = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id)]);
+  clean(root, 'care view');
+  assert.equal(root.querySelector('.modes [aria-selected=true]').dataset.mode, 'care', 'a draft opens on Care');
+  assert.match(root.querySelector('.wristband').textContent, /Cara Care/);
+  assert.equal(root.querySelector('.wristband .wb-allergy'), null, 'no allergy band when there are none');
+  btn(root.querySelector('.modes'), 'Record').click();
+  assert.equal(root.querySelector('.pane[data-pane=record]').hidden, false);
+  assert.match(location.hash, /\/record$/, 'the view is kept in the address');
+  btn(root.querySelector('.modes'), 'Care').click();
+
+  // the primary survey sheet saves its answers and stamps a time
+  root.querySelector('[data-tool=survey]').click(); await settle();
+  let s = sheet();
+  clean(s, 'primary survey');
+  s.querySelector('#q-ps_bleeding [data-value=none]').click();
+  s.querySelector('#q-ps_airway [data-value=clear]').click();
+  s.querySelector('#q-ps_disability [data-value=alert]').click();
+  s.querySelector('[data-act=save-sheet]').click(); await settle();
+  let got = (await get()).patients[0];
+  assert.deepEqual([got.form.ps_bleeding, got.form.ps_airway, got.form.ps_disability], ['none', 'clear', 'alert']);
+  assert.match(got.form.ps_time, /^\d{2}:\d{2}$/, 'the survey time is stamped');
+  assert.ok(root.querySelector('[data-tool=survey]').classList.contains('done'));
+
+  // a splint asks for CMS before and after
+  btn(root.querySelector('.quick'), 'Splint').click(); await settle();
+  s = sheet();
+  clean(s, 'splint sheet');
+  s.querySelector('#t-part').value = 'Left lower leg';
+  btn(s.querySelector('#cms-before'), 'All present').click();
+  s.querySelector('#cms-after-c [data-value=present]').click();
+  s.querySelector('[data-act=save-treatment]').click(); await settle();
+  assert.match(s.textContent, /all three/, 'a half-answered CMS is refused');
+  btn(s.querySelector('#cms-after'), 'All present').click();
+  s.querySelector('[data-act=save-treatment]').click(); await settle();
+  got = (await get()).patients[0];
+  const splint = got.treatments.find((t) => t.kind === 'splint');
+  assert.deepEqual(splint.detail.cms_after, { c: 'present', m: 'present', s: 'present' });
+  assert.match(root.textContent, /CMS before C ok, M ok, S ok/);
+
+  // a wrong reading is marked entered in error, not deleted
+  root.querySelector(`[data-bedside="${p.id}"] details.more`).open = true;
+  const wrong = [...root.querySelectorAll('.vtable tr')].find((r) => r.textContent.includes('300'));
+  btn(wrong, 'Entered in error').click(); await settle();
+  s = sheet();
+  btn(s, 'Typed wrongly').click();
+  s.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await settle();
+  got = await get();
+  assert.equal(got.patients[0].vitals.find((v) => v.id === vit.id).void_reason, 'Typed wrongly');
+  assert.ok(root.querySelector('.vtable tr.voided'), 'struck through on the card');
+  assert.match(root.querySelector('[data-area=corrections]').textContent, /Typed wrongly/, 'and listed under Record');
+
+  // with no signal, vitals are kept on the phone and sent when it returns
+  const online = (v) => { for (const nav of [window.navigator, globalThis.navigator]) Object.defineProperty(nav, 'onLine', { value: v, configurable: true }); };
+  online(false);
+  try {
+    root.querySelector(`[data-bedside="${p.id}"] [data-act=vitals]`).click(); await settle();
+    s = document.querySelector('.dialog.sheet');
+    assert.match(s.textContent, /a toddler \(1 to 3\)/, 'a three-year-old is flagged against toddler ranges');
+    assert.match(s.textContent, /Coos, babbles/, 'and the GCS uses the verbal scale for young children');
+    s.querySelector('#v-pulse').value = '118'; s.querySelector('#v-pulse').dispatchEvent(new window.Event('input', { bubbles: true }));
+    assert.equal(s.querySelector('#v-pulse').dataset.level, 'ok', '118 is normal for a toddler');
+    s.querySelector('#v-gcs-e [data-value="4"]').click(); s.querySelector('#v-gcs-v [data-value="5"]').click(); s.querySelector('#v-gcs-m [data-value="6"]').click();
+    s.querySelector('#v-pupils-equal').click();
+    s.querySelector('#v-save').click(); await settle();
+    assert.match(root.querySelector('[data-area=outbox]').textContent, /1 entry waiting to send/);
+    assert.match(root.querySelector(`[data-bedside="${p.id}"]`).textContent, /Waiting to send/);
+    assert.equal((await get()).patients[0].vitals.length, 1, 'nothing reached the server yet');
+  } finally { online(true); }
+  const outbox = await mods.imp('outbox.js');
+  assert.equal(await outbox.flush(), 1);
+  await sleep(400); await settle();
+  got = (await get()).patients[0];
+  const sent = got.vitals.find((v) => v.pulse === 118);
+  assert.ok(sent, 'it was sent');
+  assert.deepEqual([sent.gcs, sent.gcs_e, sent.pupil_left, sent.pupil_right], [15, 4, 'normal', 'normal']);
+  assert.equal(outbox.pending(c.id).length, 0);
+
+  // cardiac arrest log: each tap is saved with its time
+  root = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id)]);
+  root.querySelector('[data-tool=arrest]').click(); await settle();
+  s = sheet();
+  clean(s, 'arrest log');
+  s.querySelector('[data-arrest=start]').click(); await settle();
+  s.querySelector('[data-arrest=shock]').click(); await settle();
+  assert.match(s.textContent, /1 shock/);
+  await closeOverlays();
+  got = (await get()).patients[0];
+  assert.deepEqual(got.treatments.filter((t) => ['cpr', 'aed'].includes(t.kind)).map((t) => t.detail.action), ['start', 'shock']);
+
+  // the Report view: form answers from the bedside card, and a draft narrative
+  root = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id), 'report']);
+  clean(root, 'report view');
+  assert.equal(root.querySelector('.pane[data-pane=report]').hidden, false);
+  const fa = root.querySelector(`[data-patient="${p.id}"] details[data-section=first_aid]`);
+  assert.match(fa.querySelector('[data-field=scene_on]').textContent, /Filled in from the bedside card/);
+  assert.equal(fa.querySelector('[data-field=scene_on] input').value, '10:12');
+  assert.match(fa.querySelector('[data-field=fa_scene] textarea').value, /Splint \(Left lower leg/);
+  assert.ok(root.querySelector(`[data-patient="${p.id}"] details[data-section=arrest]`), 'the arrest section shows once CPR is logged');
+  btn(root.querySelector('[data-area=narrative]'), 'CHART').click(); await settle();
+  const story = root.querySelector('textarea[name=narrative]').value;
+  for (const t of ['C: Left leg pain.', 'H: ', 'A: ', 'R: ', 'T: ', 'Primary survey at', 'fracture, lower leg (left)']) assert.ok(story.includes(t), `the draft has "${t}": ${story}`);
+  assert.equal(story.includes('300'), false, 'a reading entered in error is left out');
+  assert.equal((await get()).narrative, null, 'nothing is saved until the patroller saves');
+
+  // submit and approve keep frozen versions, and a version opens read only
+  ok(await api('PATCH', pb, { token: o, body: { disposition: 'transported_ambulance' } }));
+  ok(await api('PATCH', base, { token: o, body: { narrative: story } }));
+  ok(await api('POST', `${base}/responders`, { token: o, body: { staff_id: D.s1, role: 'lead' } }));
+  ok(await api('POST', `${base}/submit`, { token: o }));
+  const v = (await get()).versions[0];
+  root = await renderView('patrol', 'owner', T.owner, {}, ['version', String(c.id), String(v.id)]);
+  clean(root, 'version view');
+  assert.match(root.querySelector('.version-banner').textContent, /Version 1: as submitted/);
+  assert.equal(btn(root, 'Submit report'), undefined);
+  assert.equal(btn(root, 'Approve and lock'), undefined, 'a frozen copy has no sign-off buttons');
+  const live = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id)]);
+  assert.equal(live.querySelector('.modes [aria-selected=true]').dataset.mode, 'report', 'a submitted report opens on Report');
+  assert.ok([...live.querySelectorAll('[data-area=versions] a')].some((a) => a.getAttribute('href') === `#/patrol/version/${c.id}/${v.id}`));
+});
+
+test('patrol care: the refusal form asks every question, stops a refusal without capacity, and has a guardian sign for a child', skip(), async () => {
+  const o = T.owner;
+  await closeOverlays();
+  const c = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${today}T11:05`, location: 'Bunny hill', category: 'injury', severity: 'minor', summary: 'Child fall' } }));
+  const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: o, body: { first_name: 'Kip', last_name: 'Kid', age_years: 9, chief_complaint: 'Sore wrist' } }));
+  const root = await renderView('patrol', 'owner', T.owner, {}, ['refusal', String(c.id), String(p.id)]);
+  [...root.querySelectorAll('button')].find((b) => b.textContent === 'Record the refusal').click(); await settle();
+  const dlg = document.querySelector('.overlay');
+  clean(dlg, 'refusal dialog');
+  for (const n of ['refusal_scope', 'refusal_capacity', 'refusal_risks_explained']) assert.equal(dlg.querySelector(`[name=${n}]`).value, '', `${n} starts blank`);
+  assert.equal(dlg.querySelector('[name=refusal_signer]').value, 'guardian', 'a child: a guardian signs');
+  const cap = dlg.querySelector('[name=refusal_capacity]');
+  cap.value = 'no'; cap.dispatchEvent(new window.Event('change', { bubbles: true }));
+  assert.match(dlg.textContent, /cannot refuse care/);
+  dlg.querySelector('[name=refusal_scope]').value = 'all_care';
+  dlg.querySelector('[name=refusal_risks_explained]').value = 'yes';
+  dlg.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await settle();
+  assert.match(dlg.textContent, /implied consent/);
+  assert.equal(ok(await api('GET', `/patrol/incidents/${c.id}`, { token: o })).patients[0].disposition, null, 'nothing was saved');
+  cap.value = 'yes'; cap.dispatchEvent(new window.Event('change', { bubbles: true }));
+  dlg.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await settle();
+  assert.match(dlg.textContent, /parent or guardian.s name and relationship/);
+  await closeOverlays();
 });
 
 test('kiosk admin: add a tablet, set a PIN, print a badge, snapshots and fixing a punch', skip(), async () => {

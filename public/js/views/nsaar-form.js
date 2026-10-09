@@ -4,6 +4,7 @@
 import { get, put, patch } from '../api.js';
 import { h, clear, state, field, button, toast, formDialog, label, errorBox, fail } from '../ui.js';
 import { pinDialog } from './incident-map.js';
+import { measureText } from '../care-text.js';
 
 let cache = null;
 export async function loadForm(force = false) {
@@ -57,11 +58,24 @@ export function display(f, row, ctx) {
   if (f.type === 'multi') return v.map((x) => ((f.options || []).find((o) => o.value === x) || { label: label(x) }).label).join(', ');
   if (f.type === 'bodymap') return Object.entries(v).map(([k, s]) => `${label(k)}${s === 'X' ? '' : ` (${s})`}`).join(', ');
   if (f.type === 'time') return v;
+  if (f.type === 'measure') return measureText(v);
+  return String(v);
+}
+
+/** How a suggested value reads next to the field. */
+function suggestText(f, v) {
+  if (f.type === 'bodymap') return Object.entries(v).map(([k, s]) => `${label(k)}${s === 'X' ? '' : ` (${s})`}`).join(', ');
+  if (f.type === 'check') return 'Yes';
   return String(v);
 }
 
 /** One section as a form (editable) or a list of what was recorded (read only). */
-export function sectionPanel({ def, section, scope, row, editable, required, ctx, trails, onSave, extra, open = false }) {
+/**
+ * suggest: { key: { value, from } } answers worked out elsewhere (the bedside entries, the signed-in patroller). A blank field
+ * starts with the suggestion and says where it came from; a field that already holds something different shows what the
+ * bedside entries say, so the patroller can decide which is right.
+ */
+export function sectionPanel({ def, section, scope, row, editable, required, ctx, trails, onSave, extra, open = false, suggest = {} }) {
   const fields = def.fields.filter((f) => f.section === section.id && f.scope === scope);
   const mandatory = new Set(required[scope]);
   const base = valuesOf(def.fields.filter((f) => f.scope === scope), row);
@@ -84,7 +98,14 @@ export function sectionPanel({ def, section, scope, row, editable, required, ctx
   const naButton = (f, el) => button(f.none ? 'None' : 'N/A', () => { el.value = f.none ? 'None' : 'N/A'; reflect(); }, { small: true });
 
   function build(f) {
-    const v = valueOf(f, row);
+    const stored = valueOf(f, row);
+    const sg = suggest[f.key];
+    const useSg = sg && blank(stored) && !blank(sg.value);
+    const v = useSg ? sg.value : stored;
+    // Shown under the field: where a pre-filled answer came from, or a different answer the bedside entries give.
+    const sgNote = !sg || blank(sg.value) ? null
+      : useSg ? h('span', { class: 'from-note' }, `Filled in from ${sg.from}. Change it if it is not right.`)
+        : JSON.stringify(sg.value) !== JSON.stringify(stored) ? h('span', { class: 'from-note differs' }, `${sg.from[0].toUpperCase()}${sg.from.slice(1)} says: ${suggestText(f, sg.value)}`) : null;
     const label_ = h('span', null, f.label, mark(f));
     const hint = f.hint ? h('span', { class: 'hint' }, f.hint) : null;
     const wrapField = (el, extraEls = []) => h('label', { class: 'field' }, label_, el, ...extraEls, hint);
@@ -119,6 +140,16 @@ export function sectionPanel({ def, section, scope, row, editable, required, ctx
         get = () => el.value || null;
         wrap.collect = (out) => put_(out, f, el.value === '' ? null : f.type === 'number' ? Number(el.value) : el.value);
         el.addEventListener('input', reflect);
+        break;
+      }
+      case 'measure': {
+        const cur = v && typeof v === 'object' ? v : null;
+        const legacy = v && typeof v !== 'object' ? String(v) : '';
+        const num = h('input', { type: 'number', inputmode: 'decimal', step: 'any', min: 0, value: cur ? cur.v : '', 'aria-label': f.label, class: 'short-num' });
+        const unit = h('select', { 'aria-label': `${f.label} unit` }, f.units.map((u) => h('option', { value: u, selected: cur ? cur.u === u : u === f.units[0] }, u)));
+        wrap = h('div', { class: 'field' }, h('label', null, label_), h('div', { class: 'input-row' }, num, unit), legacy ? h('span', { class: 'hint' }, `Recorded earlier as "${legacy}"`) : null, hint);
+        get = () => (num.value === '' ? null : true);
+        wrap.collect = (out) => put_(out, f, num.value === '' ? (legacy || null) : { v: Number(num.value), u: unit.value });
         break;
       }
       case 'select': {
@@ -203,6 +234,7 @@ export function sectionPanel({ def, section, scope, row, editable, required, ctx
       default: wrap = h('div'); break;
     }
     wrap.dataset.field = f.key;
+    if (sgNote) { wrap.append(sgNote); if (useSg) wrap.classList.add('prefilled'); }
     controls.push({ f, wrap, get });
     return wrap;
   }

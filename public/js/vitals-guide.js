@@ -1,13 +1,29 @@
 // Plain guides for reading vital signs at a glance. These are prompts for a patroller, not a diagnosis: the colour and the word
 // ("High", "Low") only say "look again", and a number outside the band is never blocked from being saved.
 
-/** [alert below, watch below, watch above, alert above] for each measurement, by age group. */
+/**
+ * [alert below, watch below, watch above, alert above] for each measurement, by age group. Children's bands follow the
+ * usual paediatric normal ranges: a heart rate of 150 is fine for a baby and worrying for a ten-year-old.
+ */
+const COMMON = { spo2: [90, 94, 101, 101], temp_c: [34, 35.5, 38, 39.5], glucose: [54, 70, 180, 300] };
 const BANDS = {
-  adult: { pulse: [40, 50, 110, 130], resp: [8, 10, 24, 30], bp_sys: [80, 90, 180, 220], bp_dia: [40, 50, 110, 130], spo2: [90, 94, 101, 101], temp_c: [34, 35.5, 38, 39.5], glucose: [54, 70, 180, 300] },
-  child: { pulse: [55, 65, 130, 150], resp: [10, 14, 30, 40], bp_sys: [65, 75, 125, 145], bp_dia: [30, 40, 85, 100], spo2: [90, 94, 101, 101], temp_c: [34, 35.5, 38, 39.5], glucose: [54, 70, 180, 300] },
+  infant: { pulse: [80, 100, 160, 180], resp: [20, 30, 60, 70], bp_sys: [60, 70, 110, 130], bp_dia: [30, 35, 70, 85], ...COMMON },
+  toddler: { pulse: [70, 90, 150, 170], resp: [16, 24, 40, 50], bp_sys: [70, 80, 115, 130], bp_dia: [35, 45, 75, 90], ...COMMON },
+  preschool: { pulse: [65, 80, 140, 160], resp: [14, 22, 34, 44], bp_sys: [75, 80, 120, 135], bp_dia: [35, 45, 80, 95], ...COMMON },
+  school: { pulse: [55, 70, 120, 140], resp: [12, 18, 30, 36], bp_sys: [75, 85, 125, 145], bp_dia: [35, 45, 85, 100], ...COMMON },
+  adult: { pulse: [40, 50, 110, 130], resp: [8, 10, 24, 30], bp_sys: [80, 90, 180, 220], bp_dia: [40, 50, 110, 130], ...COMMON },
 };
+export const GROUP_LABEL = { infant: 'a baby under 1', toddler: 'a toddler (1 to 3)', preschool: 'a young child (4 to 5)', school: 'a school-age child (6 to 11)', adult: 'an adult or teenager' };
 
-export const ageGroup = (age) => (age !== null && age !== undefined && Number(age) < 12 ? 'child' : 'adult');
+export function ageGroup(age) {
+  if (age === null || age === undefined || age === '' || Number.isNaN(Number(age))) return 'adult';
+  const a = Number(age);
+  if (a < 1) return 'infant';
+  if (a < 4) return 'toddler';
+  if (a < 6) return 'preschool';
+  if (a < 12) return 'school';
+  return 'adult';
+}
 
 /** { level: 'ok' | 'watch' | 'alert', word: 'High' | 'Low' | '' } for one measurement. */
 export function flag(key, value, age) {
@@ -52,12 +68,13 @@ export function vitalsLine(v) {
   if (v.resp != null) parts.push(`R ${v.resp}`);
   if (v.bp_sys != null) parts.push(`BP ${v.bp_sys}/${v.bp_dia ?? '?'}`);
   if (v.spo2 != null) parts.push(`SpO2 ${v.spo2}%`);
-  if (v.gcs != null) parts.push(`GCS ${v.gcs}`);
+  if (v.gcs != null) parts.push(v.gcs_e ? `GCS ${v.gcs} (E${v.gcs_e} V${v.gcs_v} M${v.gcs_m})` : `GCS ${v.gcs}`);
   if (v.pain != null) parts.push(`pain ${v.pain}/10`);
   if (v.avpu) parts.push(v.avpu === 'alert' ? 'alert' : `AVPU ${v.avpu}`);
   if (v.temp_c != null) parts.push(`${v.temp_c} C`);
   if (v.glucose != null) parts.push(`glucose ${v.glucose}`);
   if (v.skin) parts.push(`skin ${v.skin}`);
-  if (v.pupils) parts.push(`pupils ${v.pupils}`);
+  if (v.pupil_left || v.pupil_right) parts.push(`pupils L ${v.pupil_left || '?'} R ${v.pupil_right || '?'}`);
+  else if (v.pupils) parts.push(`pupils ${v.pupils}`);
   return parts.join(', ');
 }

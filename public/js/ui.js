@@ -76,6 +76,8 @@ function zoned(extra) {
 }
 export const todayStr = () => { const p = zoned({}); return `${p.year}-${p.month}-${p.day}`; };
 export const nowInput = () => { const p = zoned({}); return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`; };
+/** Now on the mountain's clock to the second ('YYYY-MM-DDTHH:MM:SS'), for entries that record when they happened. */
+export const nowStamp = () => { const p = zoned({ second: '2-digit' }); return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}`; };
 
 export function addDays(date, n) {
   const [y, m, d] = date.split('-').map(Number);

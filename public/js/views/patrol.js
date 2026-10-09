@@ -23,7 +23,7 @@ const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
 /** A banner that appears when the phone loses its connection, so nobody keeps typing into a page that is not saving. */
 function connectionBanner() {
   const el = h('div', { class: 'offline-banner', role: 'status', 'aria-live': 'polite', hidden: navigator.onLine !== false },
-    h('b', null, 'No connection. '), 'What you type is not being saved. Keep the page open and it will work again when the signal returns.');
+    h('b', null, 'No connection. '), 'Vitals, treatments, time stamps and assessment answers are kept on this phone and sent when the signal returns. Other changes wait until then.');
   const sync = () => { if (!el.isConnected) { window.removeEventListener('online', sync); window.removeEventListener('offline', sync); return; } el.hidden = navigator.onLine !== false; };
   window.addEventListener('online', sync); window.addEventListener('offline', sync);
   return el;
@@ -38,8 +38,12 @@ export async function render(root, params = []) {
   root.append(connectionBanner());
   if (params[0] === 'case' && ONE.test(params[1] || '')) {
     const { data: roster } = await get('/patrol/team');
-    await renderCase(root, Number(params[1]), { roster, canLead: me.can_lead });
+    await renderCase(root, Number(params[1]), { roster, me, mode: params[2] });
     return; // no floating New case button over a case: it covered the case's own buttons
+  }
+  if (params[0] === 'version' && ONE.test(params[1] || '') && ONE.test(params[2] || '')) {
+    await renderCase(root, Number(params[1]), { me, version: Number(params[2]) }); // a frozen copy, read only
+    return;
   }
   const printPages = { handoff: renderHandoff, refusal: renderRefusal, takehome: renderTakehome };
   if (printPages[params[0]] && ONE.test(params[1] || '') && ONE.test(params[2] || '')) {

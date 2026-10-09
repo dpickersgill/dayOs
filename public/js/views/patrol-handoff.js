@@ -5,6 +5,8 @@ import { get, patch, post } from '../api.js';
 import { h, clear, button, toast, formDialog, field, input, val, nowInput, fmtTime, label, errorBox } from '../ui.js';
 import { has } from './patrol-feat.js';
 import { flag, flagAvpu, vitalsLine } from '../vitals-guide.js';
+import { signaturePad } from '../sigpad.js';
+import { live, treatmentLine, measureText, vitalsWords } from '../care-text.js';
 
 const UNKNOWN_WORDS = /^(none|no|nkda|nka|n\/a|na|nil|denies)\b/i;
 const clean = (v) => (v === null || v === undefined ? '' : String(v).trim());
@@ -15,23 +17,37 @@ const FROM_BASE = { private_car_taxi: 'Private car or taxi', company: 'Company v
 export function buildHandoff(c, p, nowText = '') {
   const f = p.form || {};
   const lead = c.responders.find((r) => r.role === 'lead');
-  const firstEvent = (k) => c.events.find((e) => e.kind === k);
-  const treatments = p.treatments;
+  const firstEvent = (k) => live(c.events).find((e) => e.kind === k);
+  const treatments = live(p.treatments);
   const meds = treatments.filter((t) => t.kind === 'medication');
   const transportBits = [f.to_first_aid && f.to_first_aid !== 'na' && `to first aid: ${label(f.to_first_aid)}`, f.from_base && FROM_BASE[f.from_base] && `from base: ${FROM_BASE[f.from_base]}${f.ambulance_code ? ` (${f.ambulance_code})` : ''}`].filter(Boolean);
   return {
     resort: c.resort.legal_name || c.resort.name, caseNumber: c.case_number || `Case ${c.id}`, prepared: nowText,
     incident: { when: c.occurred_at, location: c.location, trail: c.trail, severity: c.severity, summary: c.summary },
-    patient: { name: `${clean(p.first_name)} ${clean(p.last_name)}`.trim() || 'Name not known', age: p.age_years, sex: p.sex && p.sex !== 'unknown' ? p.sex : null, weight: clean(f.weight), height: clean(f.height) },
+    patient: { name: `${clean(p.first_name)} ${clean(p.last_name)}`.trim() || 'Name not known', age: p.age_years, sex: p.sex && p.sex !== 'unknown' ? p.sex : null, weight: measureText(f.weight), height: measureText(f.height) },
     sample: { allergies: clean(p.allergies), medications: clean(p.medications), history: clean(p.medical_history), lastIntake: clean(p.last_oral_intake) },
     complaint: clean(p.chief_complaint), mechanism: clean(p.mechanism) || clean(f.description), assessment: clean(p.assessment),
-    injuries: p.injuries.map((i) => `${label(i.injury_type)}, ${label(i.body_region)}${i.side && i.side !== 'na' ? ` (${i.side})` : ''}${i.notes ? `: ${i.notes}` : ''}`),
-    treatments, meds, vitals: p.vitals,
+    injuries: live(p.injuries).map((i) => `${label(i.injury_type)}, ${label(i.body_region)}${i.side && i.side !== 'na' ? ` (${i.side})` : ''}${i.notes ? `: ${i.notes}` : ''}`),
+    treatments, meds, vitals: live(p.vitals),
+    head: headLine(f), arrest: f.arrest_time_down ? `Collapsed about ${f.arrest_time_down}${f.arrest_witnessed ? ` (${f.arrest_witnessed})` : ''}${f.arrest_bystander_cpr === 'yes' ? ', bystander CPR' : ''}` : '',
+    receiver: [...c.signatures].reverse().find((x) => x.kind === 'receiving_provider' && x.patient_id === p.id) || null,
     times: KEY_TIMES.map((k) => [k, firstEvent(k)]).filter(([, e]) => e).map(([k, e]) => [label(k), fmtTime(e.at)]),
     transport: { how: transportBits.join('; '), destination: f.destination_type && f.destination_type !== 'na' ? label(f.destination_type) : '', facility: clean(f.hospital_name), outcome: p.disposition ? label(p.disposition) : '' },
     handoff: { to: clean(f.handoff_to), time: clean(f.handoff_time) },
     lead: lead ? `${lead.first_name} ${lead.last_name}` : '',
   };
+}
+
+/** Head injury answers in one line, for the people who will watch for a change. */
+function headLine(f) {
+  const bits = [];
+  if (f.head_loc) bits.push(f.head_loc === 'yes' ? `LOC yes${f.head_loc_minutes ? ` ~${f.head_loc_minutes} min` : ''}` : `LOC ${f.head_loc}`);
+  if (f.head_amnesia_before === 'yes' || f.head_amnesia_after === 'yes') bits.push(`amnesia ${[f.head_amnesia_before === 'yes' && 'before', f.head_amnesia_after === 'yes' && 'after'].filter(Boolean).join(' and ')}`);
+  if (f.head_repeating === 'yes') bits.push('repeating questions');
+  if (f.head_vomiting === 'yes') bits.push(`vomiting${f.head_vomit_count ? ` x${f.head_vomit_count}` : ''}`);
+  if (f.head_seizure === 'yes') bits.push('seizure');
+  if (f.head_helmet_damage === 'yes') bits.push('helmet damaged');
+  return bits.join(', ');
 }
 
 /** The same sheet as plain text, for a radio report, a message to the hospital or a note. */
@@ -42,7 +58,8 @@ export function handoffText(d) {
   add('PATIENT', [d.patient.name, d.patient.age != null && `${d.patient.age} y`, d.patient.sex && label(d.patient.sex), d.patient.weight && `${d.patient.weight}`].filter(Boolean).join(', '));
   add('ALLERGIES', d.sample.allergies || 'not recorded'); add('MEDICATIONS', d.sample.medications); add('HISTORY', d.sample.history); add('LAST ATE OR DRANK', d.sample.lastIntake);
   add('COMPLAINT', d.complaint); add('HOW IT HAPPENED', d.mechanism); add('INJURIES', d.injuries.join('; ')); add('ASSESSMENT', d.assessment);
-  add('TREATMENT', d.treatments.map((t) => `${fmtTime(t.performed_at)} ${label(t.kind)}${t.medication ? ` ${t.medication} ${t.dose}${t.route ? ` ${t.route}` : ''}` : ''}${t.description ? ` (${t.description})` : ''}`).join('; '));
+  add('HEAD INJURY', d.head); add('CARDIAC ARREST', d.arrest);
+  add('TREATMENT', d.treatments.map(treatmentLine).join('; '));
   add('VITALS', d.vitals.map((v) => `${fmtTime(v.taken_at)} ${vitalsLine(v)}`).join(' | '));
   add('KEY TIMES', d.times.map(([k, t]) => `${k} ${t}`).join(', '));
   add('TRANSPORT', [d.transport.how, d.transport.destination && `destination ${d.transport.destination}`, d.transport.facility].filter(Boolean).join('; '));
@@ -61,12 +78,15 @@ export async function renderHandoff(root, id, pid) {
     try { c = await get(`/patrol/incidents/${id}`); } catch (err) { clear(page).append(h('p', null, h('a', { href: `#/patrol/case/${id}` }, 'Back to the case')), errorBox(err)); return; }
     const p = c.patients.find((x) => x.id === Number(pid));
     if (!p) { clear(page).append(h('p', null, h('a', { href: `#/patrol/case/${id}` }, 'Back to the case')), errorBox(new Error('Patient not found on this case'))); return; }
-    clear(page).append(sheet(c, p));
+    const recv = [...c.signatures].reverse().find((x) => x.kind === 'receiving_provider' && x.patient_id === p.id);
+    let recvImg = null;
+    if (recv) { try { recvImg = (await get(`/patrol/incidents/${id}/signatures/${recv.id}`)).image; } catch (_) { recvImg = null; } }
+    clear(page).append(sheet(c, p, recvImg));
   }
 
   const logPrint = () => post(`/patrol/incidents/${id}/patients/${pid}/handoff-printed`, {}).catch(() => {});
 
-  function sheet(c, p) {
+  function sheet(c, p, recvImg) {
     const editable = c.report_state === 'draft' || (c.report_state === 'submitted' && has('approve_case'));
     const now = nowInput();
     const d = buildHandoff(c, p, `${fmtTime(`${now.slice(0, 10)} ${now.slice(11)}:00`)}`);
@@ -86,16 +106,16 @@ export async function renderHandoff(root, id, pid) {
       }),
       editable ? button('Record hand-off', () => handoffDialog(c, p)) : null);
 
-    const vitals = p.vitals.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'vtable' }, h('thead', null, h('tr', null, ['Time', 'Pulse', 'Resp', 'BP', 'SpO₂', 'GCS', 'Pain', 'Alert?', 'Other'].map((x) => h('th', { scope: 'col' }, x)))),
-      h('tbody', null, p.vitals.map((v) => {
+    const vitals = d.vitals.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'vtable' }, h('thead', null, h('tr', null, ['Time', 'Pulse', 'Resp', 'BP', 'SpO₂', 'GCS', 'Pain', 'Alert?', 'Other'].map((x) => h('th', { scope: 'col' }, x)))),
+      h('tbody', null, d.vitals.map((v) => {
         const af = flagAvpu(v.avpu);
         return h('tr', null, h('td', null, fmtTime(v.taken_at)), cell('pulse', v.pulse, age), cell('resp', v.resp, age),
-          h('td', { 'data-level': flag('bp_sys', v.bp_sys, age).level }, v.bp_sys ? `${v.bp_sys}/${v.bp_dia ?? '?'}` : ''), cell('spo2', v.spo2, age), cell('gcs', v.gcs, age), cell('pain', v.pain, age),
-          h('td', { 'data-level': af.level }, v.avpu ? label(v.avpu) : ''), h('td', null, [v.pupils && `Pupils ${v.pupils}`, v.skin, v.temp_c != null && `${v.temp_c}°C`, v.glucose != null && `Glucose ${v.glucose}`, v.notes].filter(Boolean).join(', ')));
+          h('td', { 'data-level': flag('bp_sys', v.bp_sys, age).level }, v.bp_sys ? `${v.bp_sys}/${v.bp_dia ?? '?'}` : ''), cell('spo2', v.spo2, age), h('td', { 'data-level': flag('gcs', v.gcs).level }, v.gcs == null ? '' : v.gcs_e ? `${v.gcs} (E${v.gcs_e}V${v.gcs_v}M${v.gcs_m})` : String(v.gcs)), cell('pain', v.pain, age),
+          h('td', { 'data-level': af.level }, v.avpu ? label(v.avpu) : ''), h('td', null, vitalsWords(v).filter((x) => !/^GCS|^(Alert|Verbal|Pain|Unresponsive)$/.test(x)).join(', ')));
       })))) : none('No vitals recorded.');
 
     const lines = (arr, f) => (arr.length ? h('ul', { class: 'plain' }, arr.map((x) => h('li', null, f ? f(x) : x))) : null);
-    const meds = d.meds.length ? h('div', { class: 'medbox' }, h('b', null, 'Medication given: '), d.meds.map((t) => `${fmtTime(t.performed_at)} ${t.medication} ${t.dose}${t.route ? ` ${t.route}` : ''}`).join('; ')) : h('div', { class: 'medbox none' }, h('b', null, 'Medication given: '), 'none recorded');
+    const meds = d.meds.length ? h('div', { class: 'medbox' }, h('b', null, 'Medication given: '), d.meds.map((t) => `${fmtTime(t.performed_at)} ${t.medication} ${t.dose}${t.route ? ` ${t.route}` : ''}${t.detail && t.detail.effect ? ` (effect: ${t.detail.effect})` : ''}`).join('; ')) : h('div', { class: 'medbox none' }, h('b', null, 'Medication given: '), 'none recorded');
 
     return h('article', { class: 'handoff', 'data-handoff': p.id },
       tools,
@@ -112,8 +132,8 @@ export async function renderHandoff(root, id, pid) {
       h('div', { class: 'hs-grid' },
         h('div', { class: 'stack' },
           section('What happened', h('p', null, h('b', null, 'Complaint: '), d.complaint || 'Not recorded'), d.mechanism ? h('p', null, h('b', null, 'How: '), d.mechanism) : null, h('p', { class: 'muted' }, d.incident.trail && !String(d.incident.location).toLowerCase().includes(String(d.incident.trail).toLowerCase()) ? `${d.incident.location} (${d.incident.trail})` : d.incident.location)),
-          section('Injuries and findings', lines(d.injuries) || none('None recorded.'), d.assessment ? h('p', { class: 'prewrap' }, h('b', null, 'Assessment: '), d.assessment) : null),
-          section('Treatment given', meds, d.treatments.length ? h('ul', { class: 'plain' }, d.treatments.map((t) => h('li', null, h('b', null, fmtTime(t.performed_at)), ` ${label(t.kind)}${t.medication ? `: ${t.medication} ${t.dose}${t.route ? `, ${t.route}` : ''}` : ''}`, t.description ? h('span', { class: 'muted' }, ` ${t.description}`) : null))) : none('No treatment recorded.'))),
+          section('Injuries and findings', lines(d.injuries) || none('None recorded.'), d.head ? h('p', null, h('b', null, 'Head injury: '), d.head) : null, d.assessment ? h('p', { class: 'prewrap' }, h('b', null, 'Assessment: '), d.assessment) : null),
+          section('Treatment given', meds, d.arrest ? h('p', null, h('b', null, 'Cardiac arrest: '), d.arrest) : null, d.treatments.length ? h('ul', { class: 'plain' }, d.treatments.map((t) => h('li', null, treatmentLine(t)))) : none('No treatment recorded.'))),
         h('div', { class: 'stack' },
           section('Key times', d.times.length ? h('ul', { class: 'plain times' }, d.times.map(([k, t]) => h('li', null, h('span', null, k), h('b', null, t)))) : none('No times stamped.')),
           section('Transport', h('p', null, d.transport.how || 'Not recorded'), d.transport.destination || d.transport.facility ? h('p', null, h('b', null, 'Going to: '), [d.transport.destination, d.transport.facility].filter(Boolean).join(', ')) : null, d.transport.outcome ? h('p', { class: 'muted' }, `Outcome: ${d.transport.outcome}`) : null))),
@@ -121,23 +141,36 @@ export async function renderHandoff(root, id, pid) {
         h('div', null, h('span', { class: 'k' }, 'Care handed to'), h('div', { class: 'line' }, d.handoff.to)),
         h('div', null, h('span', { class: 'k' }, 'Time'), h('div', { class: 'line' }, d.handoff.time)),
         h('div', null, h('span', { class: 'k' }, `Given by (patrol${d.lead ? `, lead ${d.lead}` : ''})`), h('div', { class: 'line' })),
-        h('div', null, h('span', { class: 'k' }, 'Received by (signature)'), h('div', { class: 'line' }))),
+        h('div', null, h('span', { class: 'k' }, 'Received by (signature)'), h('div', { class: 'line sigbox' }, recvImg ? h('img', { class: 'sig-img', src: recvImg, alt: `Signature of ${d.receiver.signer_name}` }) : null), d.receiver ? h('span', { class: 'muted small' }, `${d.receiver.signer_name}${d.receiver.signer_role ? `, ${d.receiver.signer_role}` : ''}, ${fmtTime(d.receiver.signed_at)}`) : null)),
       h('p', { class: 'hs-foot muted small' }, 'Confidential patient information. Printed and copied sheets are logged. Give it to the receiving provider and do not leave it unattended.'));
   }
 
+  /** Who took over, when, and their signature on this phone. */
   function handoffDialog(c, p) {
     const t = nowInput().slice(11);
-    formDialog('Record the hand-off', h('div', { class: 'form' },
-      h('div', { class: 'wide' }, field('Care handed to (name and unit)', input({ name: 'handoff_to', required: true, maxlength: 255, placeholder: 'Medic 12, J. Alvarez, paramedic' }))),
-      field('Time', input({ type: 'time', name: 'handoff_time', value: t, required: true })),
-      h('p', { class: 'wide muted small' }, 'This saves who took over, adds a Handoff time to the timeline and updates the hand-off sheet.')),
+    const pad = signaturePad();
+    const clearBtn = h('button', { type: 'button', class: 'btn small' }, 'Clear');
+    clearBtn.addEventListener('click', () => pad.clear());
+    formDialog('Record the hand-off', h('div', { class: 'stack' },
+      h('div', { class: 'form' },
+        field('Receiving provider name', input({ name: 'signer_name', maxlength: 150, placeholder: 'J. Alvarez' })),
+        field('Role and unit', input({ name: 'signer_role', maxlength: 150, placeholder: 'Paramedic, Medic 12' })),
+        h('div', { class: 'wide' }, field('Care handed to (name and unit)', input({ name: 'handoff_to', required: true, maxlength: 255, placeholder: 'Medic 12, J. Alvarez, paramedic' }), 'Filled in from the two boxes above if you leave it blank')),
+        field('Time', input({ type: 'time', name: 'handoff_time', value: t, required: true }))),
+      h('div', { class: 'field' }, h('span', null, 'Receiving provider signs here'), pad.el), h('div', { class: 'row' }, clearBtn),
+      h('p', { class: 'muted small' }, 'Hand the phone to the paramedic, nurse or doctor taking over. Their signature shows they received the patient and this sheet. It saves who took over, adds a Handoff time to the timeline and updates the sheet.')),
     async (fd) => {
-      const to = val(fd, 'handoff_to'); const time = val(fd, 'handoff_time');
+      const name = val(fd, 'signer_name'); const role = val(fd, 'signer_role');
+      const to = val(fd, 'handoff_to') || [role, name].filter(Boolean).join(', ');
+      const time = val(fd, 'handoff_time');
+      if (!to) throw new Error('Say who took over care');
+      if (!pad.isEmpty() && !name) throw new Error('Print the name of the person signing');
       await patch(`/patrol/incidents/${id}/patients/${p.id}`, { form: { handoff_to: to, handoff_time: time } });
-      await post(`/patrol/incidents/${id}/events`, { kind: 'handoff', note: `Care handed to ${to}` });
+      await post(`/patrol/incidents/${id}/events`, { kind: 'handoff', at: `${nowInput().slice(0, 10)}T${time}`, note: `Care handed to ${to}` });
+      if (!pad.isEmpty()) await post(`/patrol/incidents/${id}/signatures`, { kind: 'receiving_provider', signer_name: name, signer_role: role || undefined, patient_id: p.id, image: pad.toDataUrl() });
       toast('Hand-off recorded');
       await load();
-    }, { submitText: 'Record hand-off' });
+    }, { submitText: 'Record hand-off', wide: true });
   }
 
   await load();

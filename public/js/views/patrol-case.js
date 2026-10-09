@@ -1,15 +1,22 @@
-// The patient care report ("case"). One page that works on a phone: details, timeline, responders,
-// patients (history, vitals, injuries, treatments), signatures, witnesses and notes.
+// The patient care report ("case"). One page, three views, for the three jobs a patroller does with it:
+//   Care    on the hill: time stamps, the bedside card, assessment tools and treatments, built for gloved thumbs
+//   Report  the write-up: the NSAAR form (filled in from the care entries where it can be), a draft narrative, sign-off
+//   Record  the history: notes and addenda, frozen versions, and everything marked entered in error
+// A wristband bar at the top always says whose record this is and what might hurt them, and switches between the views.
 
 import { get, post, patch, del } from '../api.js';
-import { h, clear, ctx, state, input, select, field, button, toast, formDialog, dialog, confirmDialog, val, num, nowInput, fmtDateTime, fmtTime, label, empty, errorBox, fail } from '../ui.js';
+import { h, clear, state, input, select, field, button, toast, formDialog, dialog, confirmDialog, val, num, nowInput, nowStamp, fmtDateTime, fmtTime, label, empty, errorBox, fail, ctx } from '../ui.js';
 import { has } from './patrol-feat.js';
 import { signaturePad } from '../sigpad.js';
 import { personPicker } from '../widgets.js';
 import { loadForm, sectionPanel, sectionVisible } from './nsaar-form.js';
-import { bedsideCard } from './patrol-bedside.js';
+import { bedsideCard, voidedNote } from './patrol-bedside.js';
 import { collisionPanel } from './patrol-collision.js';
 import { checklistPanel, loadChecklists } from './patrol-checklists.js';
+import { voidDialog, sentToast } from './patrol-tools.js';
+import { send, pending, onChange as onOutbox, flush, retry, discard } from '../outbox.js';
+import { draftNarrative } from '../narrative.js';
+import { live, lateNote, treatmentName, atTime } from '../care-text.js';
 
 export const CATEGORIES = ['injury', 'collision', 'lost_person', 'equipment', 'medical', 'conduct', 'other'];
 export const SEVERITY = ['minor', 'moderate', 'serious', 'critical'];
@@ -17,11 +24,12 @@ const INCIDENT_DISPOSITION = ['treated_released', 'transported', 'refused_care',
 const EVENTS = [['call_received', 'Call received'], ['dispatched', 'Dispatched'], ['on_scene', 'On scene'], ['patient_contact', 'Patient contact'], ['transport_started', 'Transport started'], ['at_aid_room', 'At aid room'], ['handoff', 'Handoff'], ['cleared', 'Cleared'], ['other', 'Other']];
 const REGIONS = ['head', 'face', 'neck', 'shoulder', 'arm', 'elbow', 'wrist_hand', 'chest', 'back', 'abdomen', 'pelvis', 'hip', 'thigh', 'knee', 'lower_leg', 'ankle_foot', 'multiple', 'other'];
 const INJURY_TYPES = ['fracture', 'dislocation', 'sprain_strain', 'laceration', 'contusion', 'concussion', 'spinal', 'internal', 'cold_injury', 'illness', 'cardiac', 'other'];
-const TREATMENTS = ['splint', 'spinal_motion_restriction', 'bandage', 'ice', 'oxygen', 'aed', 'cpr', 'airway', 'medication', 'warming', 'other'];
-const SIGNATURE_KINDS = [['refusal_of_care', 'Refusal of care'], ['patient_acknowledgment', 'Patient acknowledgment'], ['witness', 'Witness'], ['patroller', 'Patroller']];
+const TREATMENTS = ['bandage', 'ice', 'warming', 'airway', 'cpr', 'aed', 'splint', 'spinal_motion_restriction', 'oxygen', 'other'];
+const SIGNATURE_KINDS = [['refusal_of_care', 'Refusal of care'], ['patient_acknowledgment', 'Patient acknowledgment'], ['witness', 'Witness'], ['patroller', 'Patroller'], ['receiving_provider', 'Receiving provider (hand-off)']];
 const sevTone = { minor: 'neutral', moderate: 'warn', serious: 'bad', critical: 'bad' };
 const stateTone = { draft: 'warn', submitted: 'neutral', approved: 'good' };
 const stateText = { draft: 'Draft', submitted: 'Waiting for approval', approved: 'Approved and locked' };
+const MODES = [['care', 'Care'], ['report', 'Report'], ['record', 'Record']];
 
 /** Drops blanks so optional API fields are simply left out. */
 export const compact = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null && v !== undefined && !Number.isNaN(v)));
@@ -30,34 +38,63 @@ const opt = (list, blank = 'Not recorded') => [['', blank], ...list.map((x) => (
 /** Set by "New case" so the next screen carries on: add the patient, then take the first vitals. */
 export const flow = { addPatient: false, vitalsNext: false };
 
-export async function renderCase(root, id, { roster }) {
+/**
+ * opts: { roster, me, mode, version }. `version` opens a frozen copy (read only); `mode` picks the first view.
+ */
+export async function renderCase(root, id, { roster = [], me = {}, mode: wanted, version } = {}) {
   const page = h('div');
   root.append(page);
   let def = null;
   let trails = null;
   let checklists = [];
+  let current = null;
+  let frozen = null;
+  let mode = MODES.some(([k]) => k === wanted) ? wanted : null;
+  let activePid = null;
 
   async function load() {
     const keep = window.scrollY;
     let c;
     try {
-      [c, def] = await Promise.all([get(`/patrol/incidents/${id}`), loadForm()]);
+      if (version) {
+        let v;
+        [v, def] = await Promise.all([get(`/patrol/incidents/${id}/versions/${version}`), loadForm()]);
+        frozen = v; c = v.case;
+      } else {
+        [c, def] = await Promise.all([get(`/patrol/incidents/${id}`), loadForm()]);
+      }
       if (!trails) trails = (await get('/schedule/trails?limit=500')).data;
       if (!checklists.length) checklists = await loadChecklists();
-    } catch (err) { clear(page).append(backLink(), errorBox(err)); return; }
+    } catch (err) {
+      // No signal: keep what is on screen. Bedside entries are kept on the phone meanwhile.
+      if (current && (globalThis.navigator && globalThis.navigator.onLine === false || !(err && err.status))) { toast('No connection. Showing what was last loaded.', 'warn'); redraw(); return; }
+      clear(page).append(backLink(), errorBox(err)); return;
+    }
     current = c;
-    const open = openSections();
-    clear(page).append(draw(c));
-    restoreSections(open);
+    if (!mode) mode = c.report_state === 'draft' && !version ? 'care' : 'report';
+    redraw();
     window.scrollTo(0, keep);
-    if (flow.addPatient && !c.patients.length && (c.report_state === 'draft')) { flow.addPatient = false; patientDialog(); }
+    if (flow.addPatient && !live(c.patients).length && c.report_state === 'draft') { flow.addPatient = false; patientDialog(); }
   }
+
+  function redraw() {
+    const open = openSections();
+    clear(page).append(draw(current));
+    restoreSections(open);
+  }
+
+  // Redraw when entries kept on the phone go out (or come back refused).
+  let outboxTimer = null;
+  const stopOutbox = onOutbox(() => {
+    if (!page.isConnected) { stopOutbox(); return; }
+    clearTimeout(outboxTimer);
+    outboxTimer = setTimeout(() => { if (!pending(id).length) load(); else redraw(); }, 200);
+  });
 
   // ---- keep the reader's place: a save redraws the page, so remember which sections were open
   const secKey = (d) => `${(d.closest('[data-patient]') || { dataset: {} }).dataset.patient || 'case'}:${d.dataset.section}`;
-  const openSections = () => ({ paperwork: Boolean(page.querySelector('details.paperwork[open]')), keys: [...page.querySelectorAll('details[data-section][open]')].map(secKey) });
+  const openSections = () => ({ keys: [...page.querySelectorAll('details[data-section][open]')].map(secKey) });
   function restoreSections(open) {
-    if (open.paperwork) { const d = page.querySelector('details.paperwork'); if (d) d.open = true; }
     const want = new Set(open.keys);
     for (const d of page.querySelectorAll('details[data-section]')) if (want.has(secKey(d))) d.open = true;
     if (goNext) {
@@ -67,7 +104,6 @@ export async function renderCase(root, id, { roster }) {
       while (next && !(next.matches && next.matches('details[data-section]'))) next = next.nextElementSibling;
       if (from && next) {
         from.open = false; next.open = true;
-        const dp = page.querySelector('details.paperwork'); if (dp) dp.open = true;
         next.scrollIntoView({ block: 'start' });
         const first = next.querySelector('input:not([type=hidden]), select, textarea');
         if (first) first.focus({ preventScroll: true });
@@ -79,33 +115,83 @@ export async function renderCase(root, id, { roster }) {
   /** Runs an API change, then redraws the whole report so what is on screen is what the server holds. */
   const change = (fn, message) => async () => { await fn(); if (message) toast(message); await load(); };
 
+  // ------------------------------------------------------------ the page
   function draw(c) {
-    const editable = c.report_state === 'draft' || (c.report_state === 'submitted' && has('approve_case'));
-    const paperwork = h('details', { class: 'paperwork panel', 'data-area': 'paperwork' },
-      h('summary', null, h('span', null, 'Report paperwork'), h('span', { class: 'muted small' }, ' Incident details, the patient form, witnesses, location, conditions, signatures and sign off')),
-      h('div', { class: 'stack' },
-        detailsPanel(c, editable),
-        c.patients.map((p) => patientCard(p, editable)),
-        caseSection(c, editable, 'witness', witnessList(c, editable)),
-        caseSection(c, editable, 'location'),
-        caseSection(c, editable, 'conditions'),
-        signaturesPanel(c, editable),
-        caseSection(c, editable, 'signoff')));
-    const showCollision = c.category === 'collision' || c.collision || c.parties.length;
-    const parts = [
-      header(c, editable),
-      // While the call is going on, the time stamps come first: they are what gets tapped most.
-      c.report_state === 'draft' ? stagesPanel(c, editable) : null,
+    const editable = !version && (c.report_state === 'draft' || (c.report_state === 'submitted' && has('approve_case')));
+    const pts = live(c.patients);
+    if (!pts.some((p) => p.id === activePid)) activePid = pts.length ? pts[0].id : null;
+    const panes = {
+      care: carePane(c, editable),
+      report: reportPane(c, editable),
+      record: recordPane(c, editable),
+    };
+    for (const [k, el] of Object.entries(panes)) { el.id = `pane-${k}`; el.hidden = k !== mode; }
+    return h('div', { class: 'stack case', 'data-mode': mode },
+      wristband(c),
+      version ? versionBanner() : null,
+      outboxStrip(c),
       progressPanel(c, editable),
-      patientsPanel(c, editable),
-      showCollision ? collisionPanel(c, { id, editable, reload: load }) : (editable ? h('div', { class: 'row' }, button('Record a collision', () => collisionStart(c), { small: true })) : null),
-      c.report_state === 'draft' ? null : stagesPanel(c, editable),
-      checklistPanel(c, { id, editable, reload: load, defs: checklists }),
-      respondersPanel(c, editable),
-      paperwork,
-      notesPanel(c),
-    ];
-    return h('div', { class: 'stack case' }, parts);
+      panes.care, panes.report, panes.record);
+  }
+
+  function setMode(next, { focus = false } = {}) {
+    mode = next;
+    const box = page.querySelector('.case');
+    if (!box) return;
+    box.dataset.mode = next;
+    for (const pane of box.querySelectorAll(':scope > .pane')) pane.hidden = pane.dataset.pane !== next;
+    for (const t of box.querySelectorAll('.modes [role=tab]')) { const on = t.dataset.mode === next; t.setAttribute('aria-selected', String(on)); t.tabIndex = on ? 0 : -1; if (on && focus) t.focus(); }
+    if (!version) { try { history.replaceState(null, '', `#/patrol/case/${id}/${next}`); } catch (_) { /* the view still switches */ } }
+  }
+
+  const backLink = () => h('p', { class: 'back' }, h('a', { href: '#/patrol/cases', 'aria-label': 'Back to cases' }, '‹ Cases'));
+
+  /** The bar at the top: whose record, what might hurt them, the report state, and the three views. */
+  function wristband(c) {
+    const pts = live(c.patients);
+    const p = pts.find((x) => x.id === activePid);
+    const allergy = p && p.allergies && !/^(none|no|nkda|nka|n\/a|na|nil|denies)\b/i.test(p.allergies.trim()) ? p.allergies : null;
+    const who = p ? h('div', { class: 'wb-who' },
+      h('b', { class: 'wb-name' }, `${p.first_name} ${p.last_name}`.trim()),
+      h('span', { class: 'wb-sub' }, [p.age_years != null && `${p.age_years} y`, p.sex && p.sex !== 'unknown' && label(p.sex)[0]].filter(Boolean).join(' ')),
+      allergy ? h('span', { class: 'wb-allergy' }, `Allergy: ${allergy}`) : (p.allergies ? null : h('span', { class: 'wb-unknown' }, 'Allergies not asked')),
+      pts.length > 1 ? h('span', { class: 'wb-more' }, `+${pts.length - 1} more`) : null)
+      : h('div', { class: 'wb-who' }, h('b', { class: 'wb-name' }, c.summary));
+    const tabs = h('div', { class: 'modes', role: 'tablist', 'aria-label': 'Case views' }, MODES.map(([k, text]) => {
+      const t = h('button', { type: 'button', role: 'tab', 'data-mode': k, id: `tab-${k}`, 'aria-controls': `pane-${k}`, 'aria-selected': String(k === mode), tabIndex: k === mode ? 0 : -1 }, text);
+      t.addEventListener('click', () => { if (mode !== k) { setMode(k); window.scrollTo(0, 0); } });
+      t.addEventListener('keydown', (e) => {
+        const i = MODES.findIndex(([x]) => x === k);
+        if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); setMode(MODES[(i + (e.key === 'ArrowRight' ? 1 : MODES.length - 1)) % MODES.length][0], { focus: true }); }
+      });
+      return t;
+    }));
+    return h('header', { class: 'wristband' },
+      h('div', { class: 'wb-top' }, backLink(),
+        h('span', { class: 'wb-case' }, c.case_number ? `Report ${c.case_number}` : `Case ${c.id}`),
+        h('span', { class: 'wb-state' }, state(stateText[c.report_state], stateTone[c.report_state]), state(label(c.severity), sevTone[c.severity]))),
+      who, tabs);
+  }
+
+  function versionBanner() {
+    return h('div', { class: 'version-banner', role: 'note' },
+      h('b', null, `Version ${frozen.version_no}: ${frozen.kind === 'approved' ? 'as approved' : 'as submitted'}`),
+      ` by ${frozen.created_by || 'unknown'}, ${fmtDateTime(frozen.created_at)}. This is a frozen copy, kept so the record shows what was signed off. `,
+      h('a', { href: `#/patrol/case/${id}/record` }, 'Open the live report'));
+  }
+
+  /** Entries kept on this phone because there was no signal, and any the server refused. */
+  function outboxStrip() {
+    if (version) return null;
+    const list = pending(id);
+    if (!list.length) return null;
+    const waiting = list.filter((x) => !x.error);
+    const refused = list.filter((x) => x.error);
+    return h('section', { class: 'outbox-strip', role: 'status', 'data-area': 'outbox' },
+      waiting.length ? h('div', { class: 'spread' }, h('span', null, h('b', null, `${waiting.length} entr${waiting.length === 1 ? 'y' : 'ies'} waiting to send. `), 'Kept on this phone with the time each was taken. They send by themselves when the signal returns.'),
+        button('Send now', async () => { const n = await flush(); toast(n ? `Sent ${n}` : 'Still no connection', n ? 'ok' : 'warn'); }, { small: true })) : null,
+      refused.map((x) => h('div', { class: 'spread refused' }, h('span', null, h('b', null, `Not saved: ${x.label}. `), x.error),
+        h('span', { class: 'row tight' }, button('Try again', () => retry(x.id), { small: true }), button('Discard', () => confirmDialog('Discard this entry?', `${x.label}, taken ${fmtDateTime(x.at)}. It was never saved to the report.`, 'Discard', () => discard(x.id), { danger: true }), { small: true, kind: 'quiet-danger' })))));
   }
 
   /** What the form needs to know about the rest of the report: who has signed and how many witnesses are on file. */
@@ -114,24 +200,23 @@ export async function renderCase(root, id, { roster }) {
     signed: (f) => c.signatures.some((x) => x.kind === f.kind && (!patient || x.patient_id === patient.id || x.patient_id === null)),
   });
 
-  function caseSection(c, editable, sectionId, extra) {
+  function caseSection(c, editable, sectionId, extra, suggest) {
     const section = def.sections.find((x) => x.id === sectionId);
-    return sectionPanel({ def, section, scope: 'case', row: c, editable, required: def.required, ctx: sigCtx(c), trails, extra,
+    return sectionPanel({ def, section, scope: 'case', row: c, editable, required: def.required, ctx: sigCtx(c), trails, extra, suggest,
       onSave: async (body, o) => { await patch(`/patrol/incidents/${id}`, body); if (o && o.next) goNext = `case:${sectionId}`; await load(); } });
   }
-
-  const backLink = () => h('p', null, h('a', { href: '#/patrol/cases' }, 'Back to cases'));
 
   /** Marks an element so a "missing" link can find it. */
   const anchor = (el, area) => { el.dataset.area = area; return el; };
 
   /**
-   * Takes the reader to the thing a "missing" item points at: opens the section, scrolls to the field, puts the cursor in it
-   * and outlines it for a moment. `where` is what the server sent with the problem.
+   * Takes the reader to the thing a "missing" item points at: switches to the view that holds it, opens the section,
+   * scrolls to the field, puts the cursor in it and outlines it for a moment. `where` is what the server sent.
    */
   function jumpTo(where) {
+    if (where.patient_id && live(current.patients).some((p) => p.id === where.patient_id) && activePid !== where.patient_id) { activePid = where.patient_id; redraw(); }
     let scope = page;
-    if (where.patient_id) scope = page.querySelector(`[data-patient="${where.patient_id}"]`) || page;
+    if (where.patient_id) scope = page.querySelector(`.pane [data-patient="${where.patient_id}"]`) || page;
     let el = null;
     if (where.section) {
       const sec = scope.querySelector(`details[data-section="${where.section}"]`);
@@ -140,6 +225,8 @@ export async function renderCase(root, id, { roster }) {
       el = page.querySelector(`[data-area="${where.area}"]`);
     }
     if (!el) return;
+    const pane = el.closest('.pane');
+    if (pane && pane.hidden) setMode(pane.dataset.pane);
     for (let d = el.closest('details'); d; d = d.parentElement && d.parentElement.closest('details')) d.open = true;
     if (el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
     const target = el.matches('input, select, textarea, button') ? el : el.querySelector('input:not([type=hidden]), select, textarea, button');
@@ -148,18 +235,133 @@ export async function renderCase(root, id, { roster }) {
     setTimeout(() => el.classList.remove('flash'), 2500);
   }
 
-  // ------------------------------------------------------------ header and sign-off
-  function header(c, editable) {
+  // ------------------------------------------------------------ progress: what is done, and the one next thing to do
+  function progressPanel(c, editable) {
+    if (c.report_state !== 'draft' || !editable) return null;
+    const pts = live(c.patients);
+    const withPatients = ['injury', 'collision', 'medical'].includes(c.category) || pts.length > 0;
+    const first = pts.find((p) => p.id === activePid) || pts[0];
+    const refused = pts.find((p) => p.disposition === 'refused_care');
+    const inCare = (fn) => () => { setMode('care'); fn(); };
+    const steps = [];
+    if (withPatients) {
+      steps.push({ key: 'patient', text: 'Add the patient', done: pts.length > 0, go: inCare(() => patientDialog()) });
+      steps.push({ key: 'vitals', text: 'Take vitals', done: pts.some((p) => live(p.vitals).length), skip: !first, go: inCare(() => { const b = page.querySelector(`[data-bedside="${first.id}"] [data-act=vitals]`); if (b) b.click(); }) });
+      steps.push({ key: 'care', text: 'Log injuries and treatment', done: pts.some((p) => live(p.injuries).length || live(p.treatments).length), skip: !first, go: inCare(() => injuryDialog(`/patrol/incidents/${id}/patients/${first.id}`)) });
+      steps.push({ key: 'outcome', text: 'Record the outcome', done: pts.length > 0 && pts.every((p) => p.disposition), skip: !first, go: () => { const p = pts.find((x) => !x.disposition) || first; jumpTo({ patient_id: p.id, section: 'transport', field: 'disposition' }); } });
+    }
+    if (refused) steps.push({ key: 'refusal', text: 'Get the refusal signed', done: c.signatures.some((x) => x.kind === 'refusal_of_care' && x.patient_id === refused.id), go: () => { location.hash = `#/patrol/refusal/${id}/${refused.id}`; } });
+    steps.push({ key: 'lead', text: 'Name the lead responder', done: c.responders.some((r) => r.role === 'lead'), go: () => { setMode('report'); responderDialog(); } });
+    steps.push({ key: 'story', text: 'Say what happened', done: Boolean(c.narrative && c.narrative.trim()), go: () => jumpTo({ area: 'narrative' }) });
+    const done = steps.filter((x) => x.done).length;
+    const next = steps.find((x) => !x.done && !x.skip);
+    const ready = !next;
+    const fill = h('i');
+    fill.style.width = `${Math.round((done / steps.length) * 100)}%`;
+    return h('section', { class: 'panel progress', 'data-area': 'progress' },
+      h('div', { class: 'progress-top' },
+        h('div', { class: 'progress-words' }, h('h2', null, ready ? 'Ready to submit' : 'Next step'), h('p', { class: 'muted' }, ready ? 'Everything the report needs is in. Check it over, then submit it for approval.' : `${done} of ${steps.length} steps done. ${next.text} is next.`)),
+        ready ? button('Submit report', () => { const b = page.querySelector('[data-act=submit]'); if (b) b.click(); }, { kind: 'primary' }) : button(next.text, () => next.go(), { kind: 'primary' })),
+      h('div', { class: 'pbar', role: 'img', 'aria-label': `${done} of ${steps.length} steps done` }, fill),
+      h('ol', { class: 'psteps' }, steps.map((st) => {
+        const b = h('button', { type: 'button', class: `pstep${st.done ? ' done' : ''}${st === next ? ' next' : ''}`, 'data-step': st.key }, st.text);
+        b.addEventListener('click', () => st.go());
+        return h('li', null, b);
+      })));
+  }
+
+  // ============================================================ CARE
+  function carePane(c, editable) {
+    const pts = live(c.patients);
+    const voided = c.patients.filter((p) => p.voided_at);
+    const callbacks = { id, editable, def, roster, reload: load, redraw, change, injuryDialog, treatmentDialog, pullDialog, followupDialog };
+    const switcher = pts.length > 1 ? h('div', { class: 'pswitch', role: 'group', 'aria-label': 'Patients' }, pts.map((p) => {
+      const b = h('button', { type: 'button', class: 'chip', 'aria-pressed': String(p.id === activePid), 'data-pid': p.id }, `${p.first_name} ${p.last_name}`.trim());
+      b.addEventListener('click', () => { activePid = p.id; redraw(); });
+      return b;
+    })) : null;
+    const addBtn = editable ? anchor(button(pts.length ? 'Add another patient' : 'Add patient', () => patientDialog(), { kind: pts.length ? undefined : 'primary', small: Boolean(pts.length) }), 'patients') : null;
+    return h('section', { class: 'pane stack', 'data-pane': 'care', role: 'tabpanel', 'aria-labelledby': 'tab-care' },
+      stagesPanel(c, editable),
+      h('div', { class: 'spread care-patients' }, h('h2', null, pts.length > 1 ? 'Patients' : 'Patient'), switcher, pts.length ? addBtn : null),
+      pts.length ? pts.map((p) => { const card = bedsideCard(p, c, { ...callbacks, base: `/patrol/incidents/${id}/patients/${p.id}` }); card.hidden = p.id !== activePid; return card; })
+        : h('div', { class: 'empty stack' }, h('p', null, c.category === 'injury' || c.category === 'medical' ? 'Add the patient to start the care record.' : 'No patients on this report.'), addBtn),
+      checklistPanel(c, { id, editable, reload: load, defs: checklists }),
+      voided.length ? h('section', { class: 'panel stack voided-patients' }, h('h3', null, 'Entered in error'), h('ul', { class: 'plain' }, voided.map((p) => h('li', { class: 'voided' }, h('span', { class: 'what' }, `${p.first_name} ${p.last_name}`), voidedNote(p))))) : null);
+  }
+
+  // ---- the call, as stages
+  const STAGES = ['call_received', 'dispatched', 'on_scene', 'patient_contact', 'transport_started', 'at_aid_room', 'handoff', 'cleared'];
+  /** The care timeline as a row of stages: each shows the time it happened, or can be tapped to stamp it now. */
+  function stagesPanel(c, editable) {
+    const ev = live(c.events);
+    const waiting = pending(id).filter((x) => x.path === `/patrol/incidents/${id}/events` && !x.error);
+    const first = (k) => ev.find((e) => e.kind === k);
+    const chip = (k) => {
+      const e = first(k);
+      const q = waiting.find((x) => x.body.kind === k);
+      if (e) return h('span', { class: 'stage done', 'data-stage': k }, h('span', { class: 'sname' }, label(k)), h('b', null, fmtTime(e.at)));
+      if (q) return h('span', { class: 'stage queued', 'data-stage': k }, h('span', { class: 'sname' }, label(k)), h('b', null, atTime(q.body.at)), h('span', { class: 'queued-tag' }, 'Waiting to send'));
+      if (!editable) return h('span', { class: 'stage', 'data-stage': k }, h('span', { class: 'sname' }, label(k)), h('span', { class: 'muted' }, 'Not recorded'));
+      const b = h('button', { type: 'button', class: 'stage todo', 'data-stage': k }, h('span', { class: 'sname' }, label(k)), h('span', null, 'Tap to stamp'));
+      b.addEventListener('click', async () => {
+        b.disabled = true;
+        try { const r = await send('POST', `/patrol/incidents/${id}/events`, { kind: k, at: nowStamp() }, { caseId: id, label: label(k) }); sentToast(r, `${label(k)} stamped`); if (r && r.queued) redraw(); else await load(); } catch (err) { fail(err); b.disabled = false; }
+      });
+      return b;
+    };
+    return h('section', { class: 'panel stack timeline-panel' }, h('div', { class: 'spread' }, h('h2', null, 'Timeline'), editable ? button('Add with a time', () => eventDialog(), { small: true }) : null),
+      h('div', { class: 'stages' }, STAGES.map(chip)),
+      c.events.length ? h('details', { class: 'more' }, h('summary', null, `All entries (${ev.length}${c.events.length > ev.length ? `, ${c.events.length - ev.length} entered in error` : ''})`), h('ol', { class: 'timeline' }, c.events.map((e) => h('li', { class: e.voided_at ? 'voided' : null },
+        h('span', null, h('b', null, fmtTime(e.at)), ' ', h('span', { class: 'what' }, label(e.kind)), e.note ? h('span', { class: 'muted' }, ` ${e.note}`) : null, lateNote(e, 'at') ? h('span', { class: 'late-tag' }, lateNote(e, 'at')) : null, voidedNote(e)),
+        editable && !e.voided_at ? button('Entered in error', () => voidDialog({ what: `${label(e.kind)} at ${fmtTime(e.at)}`, path: `/patrol/incidents/${id}/events/${e.id}`, onDone: load }), { small: true, kind: 'quiet' }) : null)))) : h('p', { class: 'muted' }, 'No times recorded yet.'));
+  }
+  function eventDialog() {
+    formDialog('Add a timeline entry', h('div', { class: 'form' }, field('What happened', select(EVENTS, 'other', { name: 'kind' })), field('Time', input({ type: 'datetime-local', name: 'at', value: nowInput(), required: true })), h('div', { class: 'wide' }, field('Note', input({ name: 'note', maxlength: 255 })))),
+      async (fd) => { const r = await send('POST', `/patrol/incidents/${id}/events`, compact({ kind: val(fd, 'kind'), at: val(fd, 'at'), note: val(fd, 'note') }), { caseId: id, label: 'Timeline entry' }); sentToast(r, 'Added'); if (r && r.queued) redraw(); else await load(); });
+  }
+
+  // ============================================================ REPORT
+  function reportPane(c, editable) {
+    const pts = live(c.patients);
+    const showCollision = c.category === 'collision' || c.collision || c.parties.length;
+    const signoffSuggest = me && me.name ? { completed_by_name: { value: me.name, from: 'your sign-in' }, ...(me.patrol_number ? { completed_by_number: { value: me.patrol_number, from: 'your sign-in' } } : {}) } : {};
+    const parts = [
+      ['details', 'Incident and narrative', detailsPanel(c, editable)],
+      ...pts.map((p) => [`patient-${p.id}`, `Patient form: ${p.first_name} ${p.last_name}`.trim(), patientCard(c, p, editable)]),
+      ['witness', 'Witnesses', caseSection(c, editable, 'witness', witnessList(c, editable))],
+      ['location', 'Location', caseSection(c, editable, 'location')],
+      ['conditions', 'Conditions', caseSection(c, editable, 'conditions')],
+      showCollision ? ['collision', 'Collision', collisionPanel(c, { id, editable, reload: load })] : null,
+      ['responders', 'Responders', respondersPanel(c, editable)],
+      ['signatures', 'Signatures', signaturesPanel(c, editable)],
+      ['signoff', 'Sign off', caseSection(c, editable, 'signoff', null, signoffSuggest)],
+    ].filter(Boolean);
+    for (const [key, , el] of parts) el.id = `r-${key}`;
+    const nav = h('nav', { class: 'report-nav', 'aria-label': 'Report sections' }, h('ol', null, parts.map(([key, text]) => {
+      const a = h('a', { href: `#r-${key}` }, text);
+      a.addEventListener('click', (e) => { e.preventDefault(); const el = page.querySelector(`#r-${key}`); if (el) { if (el.matches('details')) el.open = true; el.scrollIntoView({ block: 'start' }); } });
+      return h('li', null, a);
+    })));
+    return h('section', { class: 'pane stack', 'data-pane': 'report', role: 'tabpanel', 'aria-labelledby': 'tab-report' },
+      reportHead(c, editable),
+      h('div', { class: 'report-grid' }, nav, h('div', { class: 'stack report-main' },
+        parts.map(([, , el]) => el),
+        showCollision || !editable ? null : h('div', { class: 'row' }, button('Record a collision', () => collisionStart(), { small: true })))));
+  }
+
+  /** The report's own header: the form it follows, what state it is in, and the sign-off buttons. */
+  function reportHead(c, editable) {
     const actions = [];
-    if (c.report_state === 'draft') {
+    if (!version && c.report_state === 'draft') {
       const submit = button('Submit report', async () => {
         try { await post(`/patrol/incidents/${id}/submit`, {}); } catch (err) { showProblems(err, 'Not ready to submit', editable); return; }
         toast('Report submitted'); await load();
-      }); // the progress panel shows the main button; this one stays quiet until then
+      });
       submit.dataset.act = 'submit';
       actions.push(submit);
     }
-    if (has('approve_case') && c.report_state !== 'approved') actions.push(button('Approve and lock', () => confirmDialog('Approve this report?', 'Approved reports are locked. Corrections afterwards go in as notes, or you can reopen the report.', 'Approve', async () => {
+    if (!version && has('approve_case') && c.report_state !== 'approved') actions.push(button('Approve and lock', () => confirmDialog('Approve this report?', 'Approved reports are locked. Corrections afterwards go in as notes, or you can reopen the report.', 'Approve', async () => {
       try { await post(`/patrol/incidents/${id}/approve`, {}); } catch (err) {
         if (err.status === 409 && Array.isArray(err.details) && err.details.length) { showProblems(err, 'Not ready to approve', editable); return; }
         throw err;
@@ -167,21 +369,18 @@ export async function renderCase(root, id, { roster }) {
       toast('Report approved');
       await load();
     })));
-    if (has('approve_case') && c.report_state !== 'draft') actions.push(button(c.report_state === 'approved' ? 'Reopen' : 'Send back', () => reopenDialog(c)));
-    const note = !editable
-      ? (c.report_state === 'approved' ? 'This report is approved and locked. You can still add a note.' : 'This report is waiting for a manager. You can add a note; a manager can send it back for changes.')
+    if (!version && has('approve_case') && c.report_state !== 'draft') actions.push(button(c.report_state === 'approved' ? 'Reopen' : 'Send back', () => reopenDialog(c)));
+    const note = version ? null : !editable
+      ? (c.report_state === 'approved' ? 'This report is approved and locked. You can still add a note under Record.' : 'This report is waiting for a manager. You can add a note; a manager can send it back for changes.')
       : null;
     actions.push(button('Print', () => { for (const d of page.querySelectorAll('details')) d.open = true; window.print(); }, { small: true }));
-    return h('div', { class: 'stack' },
-      h('p', { class: 'back' }, h('a', { href: '#/patrol/cases' }, 'Back to cases')),
-      h('section', { class: 'panel case-head stack' },
-        h('div', { class: 'case-title' },
-          h('div', null, h('h1', null, c.case_number ? `Report ${c.case_number}` : `Case ${c.id}`),
-            h('p', null, `${fmtDateTime(c.occurred_at)} at ${c.location}`),
-            h('p', { class: 'muted small' }, `National Ski Area Accident Report for ${c.resort.legal_name || c.resort.name}${c.season ? `, season ${c.season}` : ''}`)),
-          h('div', { class: 'row' }, state(stateText[c.report_state], stateTone[c.report_state]), state(label(c.severity), sevTone[c.severity]))),
-        note ? h('p', { class: 'lock-note', role: 'status' }, note) : null,
-        actions.length ? h('div', { class: 'row actions' }, actions) : null));
+    return h('section', { class: 'panel case-head stack' },
+      h('div', { class: 'case-title' },
+        h('div', null, h('h1', null, c.case_number ? `Report ${c.case_number}` : `Case ${c.id}`),
+          h('p', null, `${fmtDateTime(c.occurred_at)} at ${c.location}`),
+          h('p', { class: 'muted small' }, `National Ski Area Accident Report for ${c.resort.legal_name || c.resort.name}${c.season ? `, season ${c.season}` : ''}`))),
+      note ? h('p', { class: 'lock-note', role: 'status' }, note) : null,
+      actions.length ? h('div', { class: 'row actions' }, actions) : null);
   }
 
   /** Lists what is missing. Each item is a link to the field when the report can be edited by this reader. */
@@ -202,7 +401,7 @@ export async function renderCase(root, id, { roster }) {
 
   function reopenDialog(c) {
     formDialog(c.report_state === 'approved' ? 'Reopen report' : 'Send back for changes',
-      field('Reason', h('textarea', { name: 'reason', maxlength: 500, required: true }), 'This is written into the record.'),
+      field('Reason', h('textarea', { name: 'reason', maxlength: 500, required: true }), 'This is written into the record. The approved version stays under Record as a frozen copy.'),
       async (fd) => {
         await post(`/patrol/incidents/${id}/reopen`, { reason: val(fd, 'reason') });
         toast('Report is a draft again');
@@ -210,13 +409,21 @@ export async function renderCase(root, id, { roster }) {
       }, { submitText: 'Reopen' });
   }
 
-  // ------------------------------------------------------------ details
+  // ---- incident details and the narrative
   function detailsPanel(c, editable) {
     if (!editable) {
       return h('section', { class: 'panel stack' }, h('h2', null, 'Incident'),
         kv([['Type', label(c.category)], ['Severity', label(c.severity)], ['Outcome', c.disposition && label(c.disposition)]]),
         h('p', null, h('strong', null, c.summary)), c.narrative ? h('p', { class: 'prewrap' }, c.narrative) : null);
     }
+    const story = h('textarea', { name: 'narrative', maxlength: 20000, rows: 8 }, c.narrative || '');
+    const draft = (style) => () => {
+      const text = draftNarrative(current, style);
+      if (!text) { toast('Add the patient and some care entries first', 'warn'); return; }
+      const put_ = () => { story.value = text; story.focus(); toast('Draft written. Read it, correct it, then save.'); };
+      if (story.value.trim()) confirmDialog('Replace the narrative?', 'The draft replaces what is in the box now. Nothing is saved until you choose Save details.', 'Replace', async () => put_());
+      else put_();
+    };
     const form = h('form', { class: 'stack', novalidate: true },
       h('div', { class: 'form' },
         field('Incident date and time', input({ type: 'datetime-local', name: 'occurred_at', value: String(c.occurred_at).slice(0, 16).replace(' ', 'T'), required: true }), 'The time it was reported to the first patroller or dispatch, or the time the patient gave'),
@@ -224,7 +431,11 @@ export async function renderCase(root, id, { roster }) {
         field('Severity', select(SEVERITY, c.severity, { name: 'severity' })),
         field('Outcome', select(opt(INCIDENT_DISPOSITION), c.disposition || '', { name: 'disposition' }))),
       anchor(field('Summary', input({ name: 'summary', value: c.summary, required: true, maxlength: 500 }), 'One line for the case list'), 'summary'),
-      anchor(field('Narrative', h('textarea', { name: 'narrative', maxlength: 20000, rows: 5 }, c.narrative || ''), 'What happened, in order, in plain words'), 'narrative'),
+      anchor(h('div', { class: 'field narrative-field' },
+        h('label', { for: `narr-${id}` }, 'Narrative'),
+        h('div', { class: 'row tight draft-row' }, h('span', { class: 'muted small' }, 'Draft it from the care entries:'), button('CHART', draft('chart'), { small: true }), button('SOAP', draft('soap'), { small: true })),
+        Object.assign(story, { id: `narr-${id}` }),
+        h('span', { class: 'hint' }, 'What happened, in order, in plain words. A draft only says what the record says; read it and correct it before saving.')), 'narrative'),
       h('div', { class: 'row' }, h('button', { type: 'submit', class: 'btn primary' }, 'Save details')));
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -240,68 +451,31 @@ export async function renderCase(root, id, { roster }) {
     return h('section', { class: 'panel stack' }, h('h2', null, 'Incident'), form);
   }
 
-
-  // ------------------------------------------------------------ progress: what is done, and the one next thing to do
-  function progressPanel(c, editable) {
-    if (c.report_state !== 'draft' || !editable) return null;
-    const withPatients = ['injury', 'collision', 'medical'].includes(c.category) || c.patients.length > 0;
-    const first = c.patients[0];
-    const refused = c.patients.find((p) => p.disposition === 'refused_care');
-    const steps = [];
-    if (withPatients) {
-      steps.push({ key: 'patient', text: 'Add the patient', done: c.patients.length > 0, go: () => patientDialog() });
-      steps.push({ key: 'vitals', text: 'Take vitals', done: c.patients.some((p) => p.vitals.length), skip: !first, go: () => { const b = page.querySelector('[data-act=vitals]'); if (b) b.click(); } });
-      steps.push({ key: 'care', text: 'Log injuries and treatment', done: c.patients.some((p) => p.injuries.length || p.treatments.length), skip: !first, go: () => injuryDialog(`/patrol/incidents/${id}/patients/${first.id}`) });
-      steps.push({ key: 'outcome', text: 'Record the outcome', done: c.patients.length > 0 && c.patients.every((p) => p.disposition), skip: !first, go: () => { const p = c.patients.find((x) => !x.disposition) || first; jumpTo({ patient_id: p.id, section: 'transport', field: 'disposition' }); } });
-    }
-    if (refused) steps.push({ key: 'refusal', text: 'Get the refusal signed', done: c.signatures.some((x) => x.kind === 'refusal_of_care'), go: () => signatureDialog(c) });
-    steps.push({ key: 'lead', text: 'Name the lead responder', done: c.responders.some((r) => r.role === 'lead'), go: () => responderDialog() });
-    steps.push({ key: 'story', text: 'Say what happened', done: Boolean(c.narrative && c.narrative.trim()), go: () => jumpTo({ area: 'narrative' }) });
-    const done = steps.filter((x) => x.done).length;
-    const next = steps.find((x) => !x.done && !x.skip);
-    const ready = !next;
-    const run = (st) => () => st.go();
-    const fill = h('i');
-    fill.style.width = `${Math.round((done / steps.length) * 100)}%`;
-    return h('section', { class: 'panel stack progress', 'data-area': 'progress' },
-      h('div', { class: 'progress-top' },
-        h('div', null, h('h2', null, ready ? 'Ready to submit' : 'Next step'), h('p', { class: 'muted' }, ready ? 'Everything the report needs is in. Check it over, then submit it for approval.' : `${done} of ${steps.length} steps done. ${next.text} is next.`)),
-        ready ? button('Submit report', () => { const b = page.querySelector('[data-act=submit]'); if (b) b.click(); }, { kind: 'primary' }) : button(next.text, run(next), { kind: 'primary' })),
-      h('div', { class: 'pbar', role: 'img', 'aria-label': `${done} of ${steps.length} steps done` }, fill),
-      h('ol', { class: 'psteps' }, steps.map((st) => {
-        const b = h('button', { type: 'button', class: `pstep${st.done ? ' done' : ''}${st === next ? ' next' : ''}`, 'data-step': st.key }, st.text);
-        b.addEventListener('click', run(st));
-        return h('li', null, b);
-      })));
+  /** Sections that only matter for some patients are shown when they apply, or once anything is in them. */
+  function sectionShows(section, c, p) {
+    const f = p.form || {};
+    const any = () => def.fields.some((x) => x.scope === 'patient' && x.section === section.id && f[x.key] !== undefined && f[x.key] !== null && f[x.key] !== '');
+    const inj = live(p.injuries);
+    if (section.show === 'head') return any() || inj.some((i) => ['head', 'face', 'neck'].includes(i.body_region) || i.injury_type === 'concussion') || Boolean(f.body_parts && (f.body_parts.head || f.body_parts.face));
+    if (section.show === 'spine') return any() || inj.some((i) => ['neck', 'back'].includes(i.body_region) || i.injury_type === 'spinal') || live(p.treatments).some((t) => t.kind === 'spinal_motion_restriction');
+    if (section.show === 'arrest') return any() || live(p.treatments).some((t) => ['cpr', 'aed', 'rosc'].includes(t.kind));
+    return sectionVisible(def, section, 'patient', p);
   }
 
-  // ------------------------------------------------------------ the call, as stages
-  const STAGES = ['call_received', 'dispatched', 'on_scene', 'patient_contact', 'transport_started', 'at_aid_room', 'handoff', 'cleared'];
-  /** The care timeline as a row of stages: each shows the time it happened, or can be tapped to stamp it now. */
-  function stagesPanel(c, editable) {
-    const first = (k) => c.events.find((e) => e.kind === k);
-    const chip = (k) => {
-      const e = first(k);
-      if (e) return h('span', { class: 'stage done', 'data-stage': k }, h('span', { class: 'sname' }, label(k)), h('b', null, fmtTime(e.at)));
-      if (!editable) return h('span', { class: 'stage', 'data-stage': k }, h('span', { class: 'sname' }, label(k)), h('span', { class: 'muted' }, 'Not recorded'));
-      const b = h('button', { type: 'button', class: 'stage todo', 'data-stage': k }, h('span', { class: 'sname' }, label(k)), h('span', null, 'Tap to stamp'));
-      b.addEventListener('click', async () => { b.disabled = true; try { await post(`/patrol/incidents/${id}/events`, { kind: k }); toast(`${label(k)} stamped`); await load(); } catch (err) { fail(err); b.disabled = false; } });
-      return b;
-    };
-    return h('section', { class: 'panel stack' }, h('div', { class: 'spread' }, h('h2', null, 'Timeline'), editable ? button('Add with a time', () => eventDialog(), { small: true }) : null),
-      h('div', { class: 'stages' }, STAGES.map(chip)),
-      c.events.length ? h('details', { class: 'more' }, h('summary', null, `All entries (${c.events.length})`), h('ol', { class: 'timeline' }, c.events.map((e) => h('li', null, h('b', null, fmtTime(e.at)), ' ', label(e.kind), e.note ? h('span', { class: 'muted' }, ` ${e.note}`) : null,
-        editable ? button('Remove', () => confirmDialog('Remove this entry?', `${label(e.kind)} at ${fmtTime(e.at)}`, 'Remove', change(() => del(`/patrol/incidents/${id}/events/${e.id}`)), { danger: true }), { small: true }) : null)))) : h('p', { class: 'muted' }, 'No times recorded yet.'));
-  }
-  function eventDialog() {
-    formDialog('Add a timeline entry', h('div', { class: 'form' }, field('What happened', select(EVENTS, 'other', { name: 'kind' })), field('Time', input({ type: 'datetime-local', name: 'at', value: nowInput(), required: true })), h('div', { class: 'wide' }, field('Note', input({ name: 'note', maxlength: 255 })))),
-      async (fd) => { await post(`/patrol/incidents/${id}/events`, compact({ kind: val(fd, 'kind'), at: val(fd, 'at'), note: val(fd, 'note') })); await load(); });
+  function patientCard(c, p, editable) {
+    const base = `/patrol/incidents/${id}/patients/${p.id}`;
+    const suggest = Object.fromEntries(Object.entries(p.derived || {}).map(([k, v]) => [k, { value: v, from: 'the bedside card' }]));
+    const sections = def.sections.filter((x) => x.scope === 'patient' && sectionShows(x, c, p)).map((section) => sectionPanel({
+      def, section, scope: 'patient', row: p, editable, required: def.required, ctx: sigCtx(c, p), trails, suggest, open: section.id === 'patient' && live(c.patients).length === 1 && editable && !p.chief_complaint,
+      onSave: async (body, o) => { await patch(base, body); if (o && o.next) goNext = `${p.id}:${section.id}`; await load(); },
+    }));
+    return h('article', { class: 'stack patient', 'data-patient': p.id }, h('h3', null, `Patient form: ${p.first_name} ${p.last_name}`), ...sections);
   }
 
-  // ------------------------------------------------------------ responders
+  // ---- responders
   function respondersPanel(c, editable) {
     return h('section', { class: 'panel stack' }, h('div', { class: 'spread' }, h('h2', null, 'Responders'), editable ? anchor(button('Add responder', () => responderDialog(), { small: true }), 'responders') : null),
-      c.responders.length ? h('ul', { class: 'plain' }, c.responders.map((r) => h('li', { class: 'spread' }, h('span', null, `${r.first_name} ${r.last_name} `, state(label(r.role), r.role === 'lead' ? 'good' : 'neutral')),
+      c.responders.length ? h('ul', { class: 'plain' }, c.responders.map((r) => h('li', { class: 'spread' }, h('span', null, `${r.first_name} ${r.last_name} `, state(label(r.role), r.role === 'lead' ? 'good' : 'neutral'), r.patrol_number ? h('span', { class: 'muted small' }, ` No. ${r.patrol_number}`) : null),
         editable ? button('Remove', change(() => del(`/patrol/incidents/${id}/responders/${r.id}`)), { small: true }) : null))) : h('p', { class: 'muted' }, 'No responders named yet.'));
   }
   function responderDialog() {
@@ -311,16 +485,8 @@ export async function renderCase(root, id, { roster }) {
       async (fd) => { await post(`/patrol/incidents/${id}/responders`, { staff_id: num(fd, 'staff_id'), role: val(fd, 'role') }); await load(); });
   }
 
-  // ------------------------------------------------------------ patients
-  function patientsPanel(c, editable) {
-    const callbacks = { id, editable, reload: load, change, injuryDialog, treatmentDialog, quickTreatment, pullDialog, followupDialog };
-    return h('section', { class: 'stack' },
-      h('div', { class: 'spread' }, h('h2', null, c.patients.length === 1 ? 'Patient' : 'Patients'), editable ? anchor(button('Add patient', () => patientDialog(), { kind: 'primary', small: true }), 'patients') : null),
-      c.patients.length ? c.patients.map((p) => bedsideCard(p, c, { ...callbacks, base: `/patrol/incidents/${id}/patients/${p.id}` })) : h('div', { class: 'empty' }, h('p', null, c.category === 'injury' || c.category === 'medical' ? 'Add the patient to start the care record.' : 'No patients on this report.')));
-  }
-
-  /** Marks the case as a collision and opens the scene form, so the collision panel appears. */
-  async function collisionStart(c) {
+  /** Marks the case as a collision, so the collision section appears. */
+  async function collisionStart() {
     await patch(`/patrol/incidents/${id}`, { category: 'collision' });
     toast('Collision report started');
     await load();
@@ -339,25 +505,6 @@ export async function renderCase(root, id, { roster }) {
       await load();
     });
   }
-
-  /** One tap logs a common treatment at the current time. A wrong tap is removed from the list below it. */
-  async function quickTreatment(base, kind, text) {
-    await post(`${base}/treatments`, { kind });
-    toast(`${text} logged`);
-    await load();
-  }
-
-  function patientCard(p, editable) {
-    const base = `/patrol/incidents/${id}/patients/${p.id}`;
-    const sections = def.sections.filter((x) => x.scope === 'patient' && sectionVisible(def, x, 'patient', p)).map((section) => sectionPanel({
-      def, section, scope: 'patient', row: p, editable, required: def.required, ctx: sigCtx(c0(), p), trails, open: section.id === 'patient' && c0().patients.length === 1,
-      onSave: async (body, o) => { await patch(base, body); if (o && o.next) goNext = `${p.id}:${section.id}`; await load(); },
-    }));
-    return h('article', { class: 'stack patient', 'data-patient': p.id }, h('h3', null, `Patient form: ${p.first_name} ${p.last_name}`), ...sections);
-  }
-
-  let current = null;
-  const c0 = () => current;
 
   /** What patrol can see about a guest: details on file, the ticket they hold and the gear they rented that day. */
   async function pullSummary(personId) {
@@ -386,7 +533,7 @@ export async function renderCase(root, id, { roster }) {
     }, { submitText: 'Fill blank fields' });
   }
 
-  /** Adding a patient needs only a name; everything else is on the form sections that follow. */
+  /** Adding a patient needs only a name; everything else follows. */
   function patientDialog() {
     const preview = h('div', { class: 'wide' });
     const picker = personPicker({ label: 'Find a guest on file', onPick: async (g) => {
@@ -400,68 +547,70 @@ export async function renderCase(root, id, { roster }) {
       h('p', { class: 'wide muted small' }, 'If the patient cannot tell you, leave the name blank and fill it in as soon as you can. Every effort should be made to find it out.')),
     async (fd) => {
       const guest = picker.get();
-      await post(`/patrol/incidents/${id}/patients`, compact({ first_name: val(fd, 'first_name'), last_name: val(fd, 'last_name'), person_id: guest ? guest.id : null }));
+      const out = await post(`/patrol/incidents/${id}/patients`, compact({ first_name: val(fd, 'first_name'), last_name: val(fd, 'last_name'), person_id: guest ? guest.id : null }));
       toast('Patient added');
+      activePid = out.id;
       const startVitals = flow.vitalsNext;
       flow.vitalsNext = false;
+      setMode('care');
       await load();
-      if (startVitals) { const b = page.querySelector('[data-act=vitals]'); if (b) b.click(); }
+      if (startVitals) { const b = page.querySelector(`[data-bedside="${out.id}"] [data-act=vitals]`); if (b) b.click(); }
     });
   }
 
   function injuryDialog(base) {
     formDialog('Add an injury or finding', h('div', { class: 'form' }, field('Body part', select(REGIONS, 'head', { name: 'body_region' })), field('Side', select([['na', 'Not applicable'], ['left', 'Left'], ['right', 'Right'], ['both', 'Both'], ['midline', 'Midline']], 'na', { name: 'side' })),
       field('Type', select(INJURY_TYPES, 'fracture', { name: 'injury_type' })), h('div', { class: 'wide' }, field('Notes', input({ name: 'notes', maxlength: 255 })))),
-    async (fd) => { await post(`${base}/injuries`, compact({ body_region: val(fd, 'body_region'), side: val(fd, 'side'), injury_type: val(fd, 'injury_type'), notes: val(fd, 'notes') })); await load(); });
+    async (fd) => { const r = await send('POST', `${base}/injuries`, compact({ body_region: val(fd, 'body_region'), side: val(fd, 'side'), injury_type: val(fd, 'injury_type'), notes: val(fd, 'notes') }), { caseId: id, label: 'Injury' }); sentToast(r, 'Injury added'); if (r && r.queued) redraw(); else await load(); });
   }
 
+  /** Any other treatment, with a time and who did it. Splints, oxygen and medication have their own sheets on the bedside card. */
   function treatmentDialog(base) {
     const members = roster.filter((m) => m.staff_status === 'active');
-    const kind = select(TREATMENTS, 'splint', { name: 'kind' });
-    const meds = h('div', { class: 'form wide', hidden: true }, field('Medication', input({ name: 'medication', maxlength: 100 })), field('Dose', input({ name: 'dose', maxlength: 50, placeholder: '400 mg' })), field('Route', input({ name: 'route', maxlength: 30, placeholder: 'Oral' })));
-    kind.addEventListener('change', () => { meds.hidden = kind.value !== 'medication'; });
-    formDialog('Add treatment', h('div', { class: 'form' }, field('Time', input({ type: 'datetime-local', name: 'performed_at', value: nowInput(), required: true })), field('Treatment', kind), meds,
+    formDialog('Add treatment', h('div', { class: 'form' }, field('Time', input({ type: 'datetime-local', name: 'performed_at', value: nowInput(), required: true })), field('Treatment', select(TREATMENTS, 'bandage', { name: 'kind' })),
       field('Done by', select(opt(members.map((m) => [m.staff_id, `${m.first_name} ${m.last_name}`]), 'Not recorded'), '', { name: 'performed_by_staff' })),
       h('div', { class: 'wide' }, field('Details', input({ name: 'description', maxlength: 255 })))),
     async (fd) => {
-      const med = val(fd, 'kind') === 'medication';
-      await post(`${base}/treatments`, compact({ performed_at: val(fd, 'performed_at'), kind: val(fd, 'kind'), description: val(fd, 'description'), medication: med ? val(fd, 'medication') : null, dose: med ? val(fd, 'dose') : null, route: med ? val(fd, 'route') : null, performed_by_staff: num(fd, 'performed_by_staff') }));
-      await load();
+      const r = await send('POST', `${base}/treatments`, compact({ performed_at: val(fd, 'performed_at'), kind: val(fd, 'kind'), description: val(fd, 'description'), performed_by_staff: num(fd, 'performed_by_staff') }), { caseId: id, label: label(val(fd, 'kind')) });
+      sentToast(r, 'Treatment logged');
+      if (r && r.queued) redraw(); else await load();
     });
   }
 
-  // ------------------------------------------------------------ signatures
+  // ---- signatures
   function signaturesPanel(c, editable) {
     return h('section', { class: 'panel stack' }, h('div', { class: 'spread' }, h('h2', null, 'Signatures'), editable ? anchor(button('Collect signature', () => signatureDialog(c), { small: true }), 'signatures') : null),
       c.signatures.length ? h('ul', { class: 'plain' }, c.signatures.map((s) => {
         const who = s.patient_id ? c.patients.find((p) => p.id === s.patient_id) : null;
-        return h('li', { class: 'spread' }, h('span', null, h('b', null, label(s.kind)), ` signed by ${s.signer_name}`, who ? ` for ${who.first_name} ${who.last_name}` : '', h('span', { class: 'muted' }, ` ${fmtDateTime(s.signed_at)}`)),
-          button('View', async () => { const full = await get(`/patrol/incidents/${id}/signatures/${s.id}`); dialog(`${label(s.kind)}: ${s.signer_name}`, h('img', { class: 'sig-img', src: full.image, alt: `Signature of ${s.signer_name}` })); }, { small: true }));
+        return h('li', { class: 'spread' }, h('span', null, h('b', null, (SIGNATURE_KINDS.find((k) => k[0] === s.kind) || [0, label(s.kind)])[1]), ` signed by ${s.signer_name}`, s.signer_role ? ` (${s.signer_role})` : '', who ? ` for ${who.first_name} ${who.last_name}` : '', h('span', { class: 'muted' }, ` ${fmtDateTime(s.signed_at)}`)),
+          version ? null : button('View', async () => { const full = await get(`/patrol/incidents/${id}/signatures/${s.id}`); dialog(`${label(s.kind)}: ${s.signer_name}`, h('img', { class: 'sig-img', src: full.image, alt: `Signature of ${s.signer_name}` })); }, { small: true }));
       })) : h('p', { class: 'muted' }, 'No signatures yet. A patient who refuses care needs a signed refusal before the report can be submitted.'),
-      editable ? null : null, h('p', { class: 'muted small' }, 'Signatures cannot be edited or removed once saved.'));
+      h('p', { class: 'muted small' }, 'Signatures cannot be edited or removed once saved. The refusal form and the hand-off sheet collect their own signatures.'));
   }
   function signatureDialog(c) {
     const pad = signaturePad();
-    const patients = [['', 'Not tied to one patient'], ...c.patients.map((p) => [p.id, `${p.first_name} ${p.last_name}`])];
-    const hasRefusal = c.patients.some((p) => p.disposition === 'refused_care');
+    const pts = live(c.patients);
+    const patients = [['', 'Not tied to one patient'], ...pts.map((p) => [p.id, `${p.first_name} ${p.last_name}`])];
+    const hasRefusal = pts.some((p) => p.disposition === 'refused_care');
     const name = input({ name: 'signer_name', required: true, maxlength: 150 });
+    const role = input({ name: 'signer_role', maxlength: 150, placeholder: 'Mother, paramedic Medic 12, witness' });
     const kind = select(SIGNATURE_KINDS, hasRefusal ? 'refusal_of_care' : 'patient_acknowledgment', { name: 'kind' });
-    const patientSel = select(patients, (c.patients.find((p) => p.disposition === 'refused_care') || c.patients[0] || {}).id || '', { name: 'patient_id' });
+    const patientSel = select(patients, (pts.find((p) => p.disposition === 'refused_care') || pts.find((p) => p.id === activePid) || pts[0] || {}).id || '', { name: 'patient_id' });
     const clearBtn = h('button', { type: 'button', class: 'btn small' }, 'Clear');
     clearBtn.addEventListener('click', () => pad.clear());
     formDialog('Collect a signature', h('div', { class: 'stack' },
-      h('div', { class: 'form' }, field('Kind', kind), field('Patient', patientSel), h('div', { class: 'wide' }, field('Printed name of signer', name))),
+      h('div', { class: 'form' }, field('Kind', kind), field('Patient', patientSel), field('Printed name of signer', name), field('Role or relationship (optional)', role)),
       h('div', { class: 'field' }, h('span', null, 'Signature'), pad.el), h('div', { class: 'row' }, clearBtn),
-      h('p', { class: 'muted small' }, 'The signer signs above with a finger or pen. For a refusal, read the refusal statement to the patient first.')),
+      h('p', { class: 'muted small' }, 'The signer signs above with a finger or pen. For a refusal, use the refusal form from the bedside card: it reads the statement and checks the patient can decide.')),
     async (fd) => {
       if (pad.isEmpty()) throw new Error('The signature area is empty');
-      await post(`/patrol/incidents/${id}/signatures`, compact({ kind: val(fd, 'kind'), signer_name: val(fd, 'signer_name'), patient_id: num(fd, 'patient_id'), image: pad.toDataUrl() }));
+      await post(`/patrol/incidents/${id}/signatures`, compact({ kind: val(fd, 'kind'), signer_name: val(fd, 'signer_name'), signer_role: val(fd, 'signer_role'), patient_id: num(fd, 'patient_id'), image: pad.toDataUrl() }));
       toast('Signature saved');
       await load();
     }, { submitText: 'Save signature' });
   }
 
-  // ------------------------------------------------------------ witnesses and notes
+  // ---- witnesses
   function witnessList(c, editable) {
     return h('div', { class: 'stack' }, h('div', { class: 'spread' }, h('h4', null, 'Witnesses on file'), editable ? button('Add witness', () => witnessDialog(), { small: true }) : null),
       c.witnesses.length ? h('ul', { class: 'plain' }, c.witnesses.map((w) => h('li', { class: 'stack tight' }, h('div', { class: 'spread' }, h('span', null, w.relation ? `${label(w.relation)}: ` : '', h('b', null, w.name), h('span', { class: 'muted' }, ` ${[w.phone, w.email, [w.address, w.city, w.region, w.postal].filter(Boolean).join(' ')].filter(Boolean).join(', ')}`)), editable ? button('Remove', change(() => del(`/patrol/incidents/${id}/witnesses/${w.id}`)), { small: true }) : null), w.statement ? h('p', { class: 'prewrap' }, w.statement) : null))) : h('p', { class: 'muted' }, 'No witnesses recorded.'));
@@ -475,16 +624,48 @@ export async function renderCase(root, id, { roster }) {
     async (fd) => { await post(`/patrol/incidents/${id}/witnesses`, compact({ relation: val(fd, 'relation'), name: val(fd, 'name'), phone: val(fd, 'phone'), email: val(fd, 'email'), address: val(fd, 'address'), city: val(fd, 'city'), region: val(fd, 'region'), postal: val(fd, 'postal'), statement: val(fd, 'statement') })); await load(); });
   }
 
+  // ============================================================ RECORD
+  function recordPane(c) {
+    return h('section', { class: 'pane stack', 'data-pane': 'record', role: 'tabpanel', 'aria-labelledby': 'tab-record' },
+      notesPanel(c), versionsPanel(c), correctionsPanel(c));
+  }
+
   function notesPanel(c) {
     const text = h('textarea', { maxlength: 5000, rows: 3, 'aria-label': 'New note' });
     return h('section', { class: 'panel stack' }, h('h2', null, 'Notes and addenda'),
       c.notes.length ? c.notes.map((n) => h('div', { class: 'note' }, h('div', { class: 'muted small' }, `${fmtDateTime(n.created_at)}${n.author ? `, ${n.author}` : ''}`), h('p', { class: 'prewrap' }, n.body))) : h('p', { class: 'muted' }, 'No notes yet.'),
-      field('Add a note', text, 'Notes stay open after a report is approved. Use them for corrections and follow-up.'),
-      h('div', { class: 'row' }, button('Add note', async () => {
+      version ? null : field('Add a note', text, 'Notes stay open after a report is approved. Use them for corrections and follow-up.'),
+      version ? null : h('div', { class: 'row' }, button('Add note', async () => {
         if (!text.value.trim()) throw new Error('Write a note first');
         await post(`/patrol/incidents/${id}/notes`, { body: text.value.trim() });
         await load();
       })));
+  }
+
+  function versionsPanel(c) {
+    const vs = c.versions || [];
+    return h('section', { class: 'panel stack', 'data-area': 'versions' }, h('h2', null, 'Versions'),
+      h('p', { class: 'muted small' }, 'A frozen copy is kept each time the report is submitted or approved, so what was signed off can always be shown, even after the report is reopened and changed.'),
+      vs.length ? h('ol', { class: 'plain versions' }, vs.map((v) => h('li', { class: 'spread' },
+        h('span', null, h('b', null, `Version ${v.version_no}`), ` ${v.kind === 'approved' ? 'approved' : 'submitted'} by ${v.created_by || 'unknown'}, ${fmtDateTime(v.created_at)}`),
+        h('a', { class: 'btn small', href: `#/patrol/version/${id}/${v.id}` }, 'Open')))) : h('p', { class: 'muted' }, 'None yet. The first is kept when the report is submitted.'));
+  }
+
+  /** Everything marked entered in error, in one list, with who and why. */
+  function correctionsPanel(c) {
+    const rows = [];
+    for (const e of c.events.filter((x) => x.voided_at)) rows.push([e.voided_at, `Timeline: ${label(e.kind)} at ${fmtTime(e.at)}`, e]);
+    for (const p of c.patients) {
+      const who = `${p.first_name} ${p.last_name}`.trim();
+      if (p.voided_at) rows.push([p.voided_at, `Patient: ${who}`, p]);
+      for (const v of p.vitals.filter((x) => x.voided_at)) rows.push([v.voided_at, `${who}: vitals at ${fmtTime(v.taken_at)}`, v]);
+      for (const i of p.injuries.filter((x) => x.voided_at)) rows.push([i.voided_at, `${who}: ${label(i.injury_type)}, ${label(i.body_region)}`, i]);
+      for (const t of p.treatments.filter((x) => x.voided_at)) rows.push([t.voided_at, `${who}: ${treatmentName(t)} at ${fmtTime(t.performed_at)}`, t]);
+    }
+    rows.sort((a, b) => (String(a[0]) < String(b[0]) ? -1 : 1));
+    return h('section', { class: 'panel stack', 'data-area': 'corrections' }, h('h2', null, 'Entered in error'),
+      rows.length ? h('ul', { class: 'plain log' }, rows.map(([, what, row]) => h('li', { class: 'voided' }, h('span', null, h('span', { class: 'what' }, what), voidedNote(row))))) : h('p', { class: 'muted' }, 'Nothing has been marked entered in error.'),
+      h('p', { class: 'muted small' }, 'Nothing is deleted from a patient record. A wrong entry stays, struck through, with the reason and who marked it.'));
   }
 
   await load();

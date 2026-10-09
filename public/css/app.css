@@ -237,6 +237,7 @@ tr.attention td { background: var(--hold-tint); }
 .toasts { position: fixed; left: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 80; max-width: min(420px, calc(100vw - 32px)); }
 .toast { background: var(--spruce); color: #fff; padding: 12px 16px; border-radius: var(--radius); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25); }
 .toast[data-kind='error'] { background: var(--closed); }
+.toast[data-kind='warn'] { background: #6b4300; }
 
 /* ---------- sign in ---------- */
 .signin { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
@@ -1544,3 +1545,154 @@ main:focus, main:focus-visible, #main:focus, [tabindex='-1']:focus:not(input):no
 .demo-stat b { font-size: 2rem; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .demo-stat span { font-weight: 700; }
 .demo-stat small { color: var(--quiet); }
+
+/* ---------- the case page: wristband, three views, bedside tools ----------
+   The wristband is the one bold element: a spruce band that stays at the top, so whoever holds the phone always sees whose
+   record it is and what might hurt them. Everything under it stays quiet. */
+.case { gap: var(--sp-4); }
+.wristband { position: sticky; top: 0; z-index: 30; background: var(--spruce); color: #fff; border-radius: 14px; padding: 10px 14px 0; display: grid; gap: 6px; box-shadow: 0 6px 18px rgba(8, 35, 50, 0.22); }
+.wristband .back { margin: 0; }
+.wristband .back a { color: #cfe0e7; min-height: 32px; }
+.wristband .back a:hover { color: #fff; }
+.wb-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; font-size: 0.9375rem; }
+.wb-case { font-weight: 700; letter-spacing: 0.01em; }
+.wb-state { display: inline-flex; gap: 6px; margin-left: auto; }
+.wristband .state { background: rgba(255, 255, 255, 0.94); border-radius: 999px; padding: 2px 10px; font-size: 0.8125rem; }
+.wb-who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.wb-name { font-size: 1.375rem; line-height: 1.2; }
+.wb-sub { color: #cfe0e7; font-weight: 700; }
+.wb-allergy { background: #fde7e4; color: #8e1b12; font-weight: 700; border-radius: 999px; padding: 2px 12px; }
+.wb-unknown { color: #ffd9a0; font-weight: 700; font-size: 0.9375rem; }
+.wb-more { color: #cfe0e7; font-size: 0.9375rem; }
+.modes { display: grid; grid-template-columns: repeat(3, 1fr); margin: 4px -14px 0; border-top: 1px solid rgba(255, 255, 255, 0.16); }
+.modes [role='tab'] { font: inherit; font-weight: 700; color: #cfe0e7; background: none; border: none; min-height: 48px; cursor: pointer; border-bottom: 4px solid transparent; }
+.modes [role='tab']:hover { color: #fff; }
+.modes [role='tab'][aria-selected='true'] { color: #fff; border-bottom-color: #7fb2ff; }
+.modes [role='tab']:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
+@media (max-width: 640px) {
+  .main:has(.wristband) { padding-top: 8px; }
+  .wristband { border-radius: 0 0 14px 14px; margin: 0 -16px; padding: 8px 16px 0; }
+  .modes { margin: 4px -16px 0; }
+  .wb-name { font-size: 1.25rem; }
+}
+
+.pane { gap: var(--sp-4); }
+.version-banner { background: var(--hold-tint); border: 1.5px solid #e0b560; color: #4d3200; border-radius: 12px; padding: 12px 16px; }
+.outbox-strip { display: grid; gap: 8px; background: #fff7e8; border: 1.5px solid #e0b560; border-radius: 12px; padding: 12px 16px; }
+.outbox-strip .refused { color: var(--alert); }
+.outbox-refused { background: var(--alert-tint); color: var(--alert); border-radius: 10px; padding: 10px 12px; }
+
+/* progress becomes a slim guide that sits between the wristband and the view */
+.progress { padding: var(--sp-4) var(--sp-5); gap: var(--sp-3); }
+.progress-top h2 { font-size: 1rem; color: var(--quiet); }
+.progress-words p { color: var(--spruce); font-weight: 700; }
+@media (max-width: 640px) {
+  .psteps { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+  .pstep { white-space: nowrap; }
+  .progress-top .btn { width: 100%; }
+}
+
+/* care */
+.care-patients { align-items: center; }
+.pswitch { display: flex; flex-wrap: wrap; gap: 8px; }
+.timeline-panel .stages { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+@media (max-width: 640px) {
+  .timeline-panel .stages { display: flex; overflow-x: auto; scroll-snap-type: x proximity; padding-bottom: 6px; }
+  .timeline-panel .stage { flex: 0 0 132px; scroll-snap-align: start; }
+}
+.stage.queued { border-style: dashed; border-color: #e0b560; background: #fff7e8; }
+.tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-2); padding-top: var(--sp-4); border-top: 1px solid var(--line); }
+.tool { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 14px; font: inherit; font-weight: 700; text-align: left; color: var(--spruce); background: #fff; border: 1.5px solid var(--line-strong); border-radius: 12px; cursor: pointer; }
+.tool:hover { border-color: var(--spruce); }
+.tool-dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line-strong); flex: none; }
+.tool.done { background: var(--ok-tint); border-color: #a9d8bd; }
+.tool.done .tool-dot { background: var(--open); border-color: var(--open); }
+.tool[data-tool='arrest'] { color: var(--alert); border-color: #e0908a; }
+.log li .what { font-weight: 700; }
+li.voided .what, tr.voided td:not(:last-child) { text-decoration: line-through; text-decoration-thickness: 2px; color: var(--quiet); }
+.void-note { display: block; font-size: 0.8125rem; font-weight: 700; color: var(--alert); text-decoration: none; }
+tr.voided .void-note { white-space: normal; }
+.late-tag, .queued-tag { display: inline-block; margin-left: 6px; font-size: 0.75rem; font-weight: 700; border-radius: 999px; padding: 1px 8px; vertical-align: middle; }
+.late-tag { background: #eef1f3; color: var(--quiet); }
+.queued-tag { background: #fff0d4; color: #6b4300; }
+li.queued, tr.queued { opacity: 0.85; }
+.effect { color: var(--open); font-weight: 700; }
+.btn.quiet { border-color: transparent; background: none; color: var(--quiet); font-weight: 700; }
+.btn.quiet:hover { background: var(--snowpack); color: var(--spruce); }
+.voided-patients { border-left: 6px solid var(--line-strong); }
+
+/* bedside sheets */
+.vsheet .q h4 { font-size: 0.9375rem; }
+.vsheet .q label { font-weight: 700; }
+.short-num { max-width: 140px; font-size: 1.25rem; font-weight: 700; text-align: center; }
+.band-note { background: #eef4fd; color: var(--trail-blue-dark); border-radius: 10px; padding: 8px 12px; font-weight: 700; }
+.pupil-row, .cms-row { display: grid; grid-template-columns: 88px 1fr; gap: 8px; align-items: center; }
+.cms-row { grid-template-columns: 1fr; }
+.cms-row > span { font-weight: 700; font-size: 0.9375rem; }
+fieldset.cms { border: 1.5px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+fieldset.cms legend { font-weight: 700; padding: 0 6px; }
+details.gcs summary { gap: 12px; }
+.arrest-top { display: grid; gap: 6px; background: var(--spruce); color: #fff; border-radius: 12px; padding: 14px 16px; }
+.arrest-clock { font-size: 1.5rem; font-weight: 700; }
+.arrest-cycle { font-weight: 700; }
+.arrest-cycle[data-level='alert'] { color: #ffd0c9; }
+.arrest-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 640px) { .arrest-grid { grid-template-columns: repeat(4, 1fr); } }
+.arrest-btn { min-height: 64px; font-size: 1.0625rem; font-weight: 700; }
+.arrest-btn.danger { background: var(--alert); border-color: var(--alert); color: #fff; }
+.arrest-btn.good { background: var(--open); border-color: var(--open); color: #fff; }
+.arrest-log { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.refusal-block { background: var(--alert-tint); color: #7d1810; border: 1.5px solid #e0908a; border-radius: 10px; padding: 10px 12px; }
+
+/* report: a section list beside the form on a wide screen */
+.report-grid { display: grid; gap: var(--sp-4); }
+.report-nav ol { list-style: none; margin: 0; padding: 0; display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.report-nav a { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1.5px solid var(--line-strong); background: #fff; color: var(--spruce); font-weight: 700; text-decoration: none; white-space: nowrap; }
+.report-nav a:hover { border-color: var(--spruce); }
+@media (min-width: 1000px) {
+  .report-grid { grid-template-columns: 220px minmax(0, 1fr); align-items: start; }
+  .report-nav { position: sticky; top: 190px; }
+  .report-nav ol { display: grid; gap: 2px; overflow: visible; }
+  .report-nav a { border: none; border-radius: 8px; background: none; min-height: 40px; white-space: normal; }
+  .report-nav a:hover { background: #fff; }
+}
+.from-note { font-size: 0.8125rem; font-weight: 700; color: var(--trail-blue-dark); }
+.from-note.differs { color: var(--hold); }
+.prefilled input, .prefilled textarea, .prefilled select, .prefilled .bodymap { background: #f2f7ff; }
+.draft-row { align-items: center; }
+.narrative-field textarea { min-height: 180px; }
+
+@media print {
+  .wristband { position: static; box-shadow: none; background: #fff; color: #000; border: 2px solid #000; }
+  .wristband .state { border: 1px solid #000; }
+  .modes, .progress, .outbox-strip, .tools, .bed-actions, .bed-foot, .report-nav, .chip-row.quick, .draft-row { display: none !important; }
+  .case > .pane[hidden] { display: grid !important; }
+  .case > .pane { break-before: page; }
+  .bedside[hidden] { display: grid !important; }
+  .btn.quiet, .btn.quiet-danger { display: none !important; }
+  li.voided .what, tr.voided td { color: #000; }
+}
+.offline-banner:not([hidden]) ~ div .wristband { top: 64px; }
+.bed-grid { display: grid; gap: var(--sp-5); }
+.bed-now { gap: var(--sp-4); }
+.bed-logs { gap: var(--sp-5); }
+.bed-logs > .stack.tight, .bed-more { padding-top: var(--sp-4); border-top: 1px solid var(--line); gap: var(--sp-3); }
+.bed-now .bed-actions { border-top: none; padding-top: 0; }
+.bed-now .bed-primary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.bedside .plain.log li { flex-wrap: wrap; }
+.bedside .plain.log li > span:first-child { flex: 1 1 260px; min-width: 0; }
+.bedside .plain.log li > .row, .bedside .plain.log li > .btn { margin-left: auto; flex: none; }
+@media (min-width: 1100px) {
+  .bed-grid { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; }
+  .bed-logs { border-left: 1px solid var(--line); padding-left: var(--sp-5); }
+  .bed-logs > .stack.tight:first-child { border-top: none; padding-top: 0; }
+  .bed-now .vstrip { grid-template-columns: repeat(3, 1fr); }
+  .timeline-panel .stages { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
+}
+@media (max-width: 640px) {
+  .bedside { padding: var(--sp-4); }
+  .tools { grid-template-columns: 1fr 1fr; }
+}
+/* the bedside sheets share a class name with the printed receipt; keep the app's own type in them */
+.dialog.sheet { font-family: inherit; font-size: 1rem; line-height: 1.5; color: var(--spruce); }
+.report-grid > *, .pane > * { min-width: 0; }
