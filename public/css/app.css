@@ -292,7 +292,7 @@ tr.attention td { background: var(--hold-tint); }
 .kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; }
 .kv dt { color: var(--quiet); }
 .kv dd { margin: 0; overflow-wrap: anywhere; }
-.patient { border-left: 4px solid var(--trail-blue); }
+.patient > h3 { font-size: 1.125rem; padding: var(--sp-2) 0 0; }
 .note { border-top: 1px solid var(--line); padding-top: 8px; }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .sigpad { width: 100%; max-width: 480px; aspect-ratio: 8 / 3; background: #fff; border: 2px dashed var(--line-strong); border-radius: var(--radius); touch-action: none; cursor: crosshair; }
@@ -1697,3 +1697,5 @@ details.gcs summary { gap: 12px; }
 .dialog.sheet { font-family: inherit; font-size: 1rem; line-height: 1.5; color: var(--spruce); }
 .report-grid > *, .pane > * { min-width: 0; }
 .visually-hidden { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* jumping to a section stops below the wristband instead of under it */
+.pane [id], .pane details[data-section], .pane [data-field] { scroll-margin-top: 180px; }
