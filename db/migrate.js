@@ -268,6 +268,18 @@ const kioskSteps = [
   ['tenants.kiosk_photo_days', (c) => columnExists(c, 'tenants', 'kiosk_photo_days'), 'ALTER TABLE tenants ADD COLUMN kiosk_photo_days SMALLINT UNSIGNED NOT NULL DEFAULT 30'],
 ];
 
+// Waivers signed on a screen: who signed, for whom, and the ability to void one or ask everyone to sign again.
+const waiverSteps = [
+  ['waivers.signing_id', (c) => columnExists(c, 'waivers', 'signing_id'), 'ALTER TABLE waivers ADD COLUMN signing_id BIGINT UNSIGNED NULL'],
+  ['waivers.method', (c) => columnExists(c, 'waivers', 'method'), "ALTER TABLE waivers ADD COLUMN method ENUM('signed_online','signed_counter','accepted_online','recorded_by_staff') NULL"],
+  ['waivers.voided', (c) => columnExists(c, 'waivers', 'voided_at'), 'ALTER TABLE waivers ADD COLUMN voided_at TIMESTAMP NULL, ADD COLUMN void_reason VARCHAR(300) NULL, ADD COLUMN voided_by BIGINT UNSIGNED NULL'],
+  ['waivers.recorded_by', (c) => columnExists(c, 'waivers', 'recorded_by'), 'ALTER TABLE waivers ADD COLUMN recorded_by BIGINT UNSIGNED NULL'],
+  ['tenants.waiver_resign_at', (c) => columnExists(c, 'tenants', 'waiver_resign_at'), 'ALTER TABLE tenants ADD COLUMN waiver_resign_at TIMESTAMP NULL'],
+  ['tenants.waiver_resign_id', (c) => columnExists(c, 'tenants', 'waiver_resign_id'), 'ALTER TABLE tenants ADD COLUMN waiver_resign_id BIGINT UNSIGNED NULL'],
+  ['waiver_signings.covered_names', (c) => columnExists(c, 'waiver_signings', 'covered_names'), 'ALTER TABLE waiver_signings ADD COLUMN covered_names TEXT NULL AFTER signer_dob'],
+  ['waivers index by signing', (c) => indexExists(c, 'waivers', 'ix_waivers_signing'), 'ALTER TABLE waivers ADD INDEX ix_waivers_signing (tenant_id, signing_id)'],
+];
+
 // Patrol access levels. Existing roster ranks carry over: director -> admin, leader -> manager, everyone else -> patrol.
 const accessSteps = [
   ['patrol_members.access_level', (c) => columnExists(c, 'patrol_members', 'access_level'), [
@@ -318,13 +330,16 @@ async function main() {
   await conn.query(fs.readFileSync(path.join(__dirname, 'messages.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'shop.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'weekly.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'waivers.sql'), 'utf8'));
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;
     console.log('Applied:', name);
   }
+  // Keep the wording each mountain uses today, so waivers already signed against it can be shown word for word.
+  await conn.query('INSERT IGNORE INTO waiver_texts (tenant_id, sha, body) SELECT id, SHA2(waiver_text, 256), waiver_text FROM tenants WHERE CHAR_LENGTH(waiver_text) > 0');
   const numbered = await backfillCaseNumbers(conn);
   if (numbered) console.log(`Numbered ${numbered} existing incident report${numbered === 1 ? '' : 's'}`);
   await conn.end();

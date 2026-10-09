@@ -1528,3 +1528,11 @@ main:focus, main:focus-visible, #main:focus, [tabindex='-1']:focus:not(input):no
 .btn.big-choice { min-height: 56px; font-size: 1.05rem; font-weight: 700; }
 .btn.big-choice[aria-pressed='true'] { background: var(--trail-blue); border-color: var(--trail-blue); color: #fff; }
 .sell-menu .tabs { flex-wrap: wrap; overflow-x: visible; mask-image: none; -webkit-mask-image: none; }
+
+/* ---------- waivers ---------- */
+.waiver-copy { white-space: pre-wrap; font-size: 0.9375rem; line-height: 1.55; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fafcfd; }
+.sig-image { width: 100%; max-width: 360px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.link-box { display: inline-block; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fafcfd; word-break: break-all; font-size: 0.875rem; }
+.waiver-panel { flex-wrap: wrap; align-items: center; }
+.gate-waiver { margin-top: 6px; }
+@media print { .waiver-copy { border: 0; padding: 0; background: none; } }

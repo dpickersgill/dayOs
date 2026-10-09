@@ -4,6 +4,7 @@
 const express = require('express');
 const { pool, rows, one, tx } = require('../db');
 const { requireRole } = require('../middleware/auth');
+const { VALID } = require('../lib/waivers');
 const { z, validate, paramId, seasonFor, todayIn } = require('../lib/util');
 const { notFound, conflict, bad, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
@@ -67,14 +68,14 @@ router.post(
     if (!(await one(pool, 'SELECT id FROM people WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, personId]))) throw notFound('Person');
     const tenant = await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId]);
     const season = req.body.season || seasonFor(todayIn(tenant.timezone));
-    const [r] = await pool.query('INSERT INTO waivers (tenant_id, person_id, season, kind) VALUES (?, ?, ?, ?)', [req.auth.tenantId, personId, season, req.body.kind]);
+    const [r] = await pool.query("INSERT INTO waivers (tenant_id, person_id, season, kind, method, recorded_by) VALUES (?, ?, ?, ?, 'recorded_by_staff', ?)", [req.auth.tenantId, personId, season, req.body.kind, req.auth.userId]);
     await audit(pool, req, 'sign_waiver', 'waivers', r.insertId, { person_id: personId, season });
     res.status(201).json({ id: r.insertId, person_id: personId, season, kind: req.body.kind });
   },
 );
 
 router.get('/:id/waivers', requireRole(...front), async (req, res) => {
-  res.json({ data: await rows(pool, 'SELECT * FROM waivers WHERE tenant_id = ? AND person_id = ? ORDER BY signed_at DESC', [req.auth.tenantId, paramId(req)]) });
+  res.json({ data: (await rows(pool, `SELECT w.id, w.season, w.kind, w.signed_at, w.signed_by_name, w.signer_relation, w.method, w.signing_id, w.voided_at, w.void_reason, (${VALID('w')}) AS counts FROM waivers w WHERE w.tenant_id = ? AND w.person_id = ? ORDER BY w.signed_at DESC, w.id DESC`, [req.auth.tenantId, paramId(req)])).map((w) => ({ ...w, counts: Boolean(w.counts) })) });
 });
 
 router.get('/:id/progress', requireRole('manager', 'instructor'), async (req, res) => {
@@ -96,7 +97,7 @@ router.get('/:id/activity', requireRole(...front), async (req, res) => {
     rows(pool, 'SELECT id, status, checked_out_at, due_at FROM rental_contracts WHERE tenant_id = ? AND person_id = ? ORDER BY id DESC LIMIT 25', [tenantId, id]),
     rows(pool, `SELECT e.status, p.name, p.season FROM program_enrollments e JOIN programs p ON p.id = e.program_id AND p.tenant_id = e.tenant_id
                 WHERE e.tenant_id = ? AND e.person_id = ? ORDER BY e.id DESC LIMIT 25`, [tenantId, id]),
-    rows(pool, 'SELECT season, kind, signed_at FROM waivers WHERE tenant_id = ? AND person_id = ? ORDER BY signed_at DESC LIMIT 10', [tenantId, id]),
+    rows(pool, `SELECT w.season, w.kind, w.signed_at, w.voided_at, w.void_reason, (${VALID('w')}) AS counts FROM waivers w WHERE w.tenant_id = ? AND w.person_id = ? ORDER BY w.signed_at DESC LIMIT 10`, [tenantId, id]),
     one(pool, "SELECT COUNT(*) AS orders, COALESCE(SUM(total_cents), 0) AS spend_cents FROM orders WHERE tenant_id = ? AND person_id = ? AND status = 'paid'", [tenantId, id]),
     one(pool, `SELECT COUNT(DISTINCT DATE(s.scanned_at)) AS days FROM scans s JOIN tickets t ON t.id = s.ticket_id AND t.tenant_id = s.tenant_id
                WHERE s.tenant_id = ? AND t.person_id = ? AND s.result = 'ok'`, [tenantId, id]),
@@ -144,7 +145,7 @@ router.get('/lookup', requireRole(...readers), patrolLookup, async (req, res) =>
     const today = todayIn(tenant.timezone);
     const season = seasonFor(today);
     const [waivers, tickets, rentals, flags] = await Promise.all([
-      rows(pool, 'SELECT DISTINCT person_id FROM waivers WHERE tenant_id = ? AND season = ? AND person_id IN (?)', [tenantId, season, ids]),
+      rows(pool, `SELECT DISTINCT w.person_id FROM waivers w WHERE w.tenant_id = ? AND w.season = ? AND w.person_id IN (?) AND ${VALID('w')}`, [tenantId, season, ids]),
       rows(pool, `SELECT t.person_id, pr.name FROM tickets t JOIN products pr ON pr.id = t.product_id AND pr.tenant_id = t.tenant_id
                   WHERE t.tenant_id = ? AND t.person_id IN (?) AND t.status = 'active' AND t.valid_from <= ? AND t.valid_to >= ?`, [tenantId, ids, today, today]),
       rows(pool, "SELECT DISTINCT person_id FROM rental_contracts WHERE tenant_id = ? AND person_id IN (?) AND status IN ('out','overdue')", [tenantId, ids]),
@@ -214,7 +215,7 @@ router.get('/duplicates', requireRole('manager'), async (req, res) => {
 const mergeBody = z.object({ into_id: z.coerce.number().int().positive() });
 // Tables where a person may only appear once per parent row: duplicates of the merged-away person are dropped.
 const ONCE = [['lesson_bookings', 'person_id'], ['program_enrollments', 'person_id'], ['attendance', 'person_id']];
-const MOVE = [['waivers', 'person_id'], ['waivers', 'signed_by_person_id'], ['orders', 'person_id'], ['order_items', 'person_id'], ['tickets', 'person_id'], ['gift_cards', 'purchaser_id'],
+const MOVE = [['waivers', 'person_id'], ['waivers', 'signed_by_person_id'], ['waiver_signings', 'signer_person_id'], ['orders', 'person_id'], ['order_items', 'person_id'], ['tickets', 'person_id'], ['gift_cards', 'purchaser_id'],
   ['rental_contracts', 'person_id'], ['student_progress', 'person_id'], ['incidents', 'person_id'], ['incident_patients', 'person_id'], ['program_enrollments', 'guardian_id'],
   ['consent_events', 'person_id'], ['person_notes', 'person_id'], ['person_flags', 'person_id']];
 

@@ -92,6 +92,7 @@ router.put('/tenant/profile', managers, validate(z.object({
   for (const k of PROFILE_COLS) if (b[k] !== undefined) { set.push(`${k} = ?`); vals.push(['require_mfa', 'online_booking', 'online_payment', 'online_shop', 'weekly_report', 'shop_recovery', 'quick_sale'].includes(k) ? (b[k] ? 1 : 0) : (b[k] === '' ? null : b[k])); }
   if (!set.length) throw bad('Nothing to change');
   await pool.query(`UPDATE tenants SET ${set.join(', ')} WHERE id = ?`, [...vals, req.auth.tenantId]);
+  if (b.waiver_text) await require('../lib/waivers').archive(pool, req.auth.tenantId, b.waiver_text, req.auth.userId); // every wording is kept word for word
   await audit(pool, req, 'update', 'tenants', req.auth.tenantId, Object.keys(b));
   res.json({ ok: true });
 });

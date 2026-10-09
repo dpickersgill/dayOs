@@ -165,7 +165,7 @@ async function mountainForm() {
   const form = h('form', { class: 'stack', novalidate: true, 'data-form': 'mountain' },
     h('div', { class: 'form' }, field('Mountain name', name), field('Phone', phone), field('Address', address, 'Printed at the top of receipts and ticket slips')),
     field('Receipt footer', footer, 'For example: opening hours, a thank-you, or the refund policy'),
-    field('Waiver wording', waiver, 'Shown to the customer at checkout before a waiver is signed. Have a lawyer review it before you rely on it. A fingerprint of the wording is saved with every signed waiver, so you can show which version was signed.'),
+    field('Waiver wording', waiver, 'Shown to guests before they sign. Have a lawyer review it before you rely on it. Every version is kept word for word. To ask everyone to sign a new version again, change it on the Waivers page instead.'),
     h('div', { class: 'form' },
       field('Counter staff may give away up to', comp, 'In dollars per sale. 0 means only managers can sell free of charge.'),
       field('Gate: warn if a ticket is scanned again within (seconds)', passback, '0 turns the warning off. Catches a ticket passed back across the fence.')),

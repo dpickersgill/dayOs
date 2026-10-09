@@ -1,0 +1,24 @@
+/* The public waiver page. Builds on book.css (same look as lesson booking); only the signing box and the signed copy are new. */
+.waiver-layout { max-width: 760px; margin: 0 auto; padding: 20px 16px 48px; display: grid; gap: 18px; }
+.waiver-layout .waiver-text { max-height: 46vh; font-size: 1rem; line-height: 1.55; }
+.read-more { font-size: 0.875rem; color: var(--muted); }
+.sigwrap { display: grid; gap: 8px; }
+.sigpad { width: 100%; height: auto; aspect-ratio: 480 / 180; background: #fff; border: 2px dashed var(--line-strong); border-radius: var(--r-sm); touch-action: none; cursor: crosshair; }
+.sigpad:focus-visible { outline: 3px solid var(--focus); }
+.sigline { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.kid { border: 1.5px solid var(--line); border-radius: var(--r); padding: 14px; display: grid; gap: 12px; background: #fbfcfd; }
+.kid-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.covered { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; text-align: left; }
+.covered li::before { content: '\2713'; color: var(--green); font-weight: 700; margin-right: 8px; }
+.copy-sig { max-width: 360px; width: 100%; border: 1px solid var(--line); border-radius: var(--r-sm); background: #fff; }
+.copy-meta { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; font-size: 0.9375rem; }
+.copy-meta dt { color: var(--muted); }
+.copy-meta dd { margin: 0; font-weight: 700; }
+.counter-bar { background: var(--amber-tint); color: var(--amber); font-weight: 700; text-align: center; padding: 8px 12px; font-size: 0.9375rem; }
+@media (min-width: 640px) { .waiver-layout .row2 { grid-template-columns: 1fr 1fr; } .kid .row2 { grid-template-columns: 1fr 1fr 1fr; } }
+@media print {
+  .hero, .no-print, .skip, .counter-bar { display: none !important; }
+  body { background: #fff; }
+  .card { box-shadow: none; border: 0; padding: 0; }
+  .waiver-layout .waiver-text { max-height: none; overflow: visible; background: none; padding: 0; }
+}

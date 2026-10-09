@@ -3,7 +3,8 @@
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
-const { z, dateStr, tierEnum, validate, paramId, newCode, addDays, todayIn, dayRange } = require('../lib/util');
+const { z, dateStr, tierEnum, validate, paramId, newCode, addDays, todayIn, dayRange, seasonFor } = require('../lib/util');
+const { ON_FILE } = require('../lib/waivers');
 const { unitPrice, applyPromo } = require('../lib/pricing');
 const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
@@ -349,7 +350,7 @@ router.post(
     const { tenantId } = req.auth;
     const code = req.body.code.toUpperCase();
     const out = await tx(async (conn) => {
-      const tenant = await one(conn, 'SELECT timezone, scan_passback_seconds FROM tenants WHERE id = ?', [tenantId]);
+      const tenant = await one(conn, 'SELECT timezone, scan_passback_seconds, waiver_text FROM tenants WHERE id = ?', [tenantId]);
       const today = todayIn(tenant.timezone);
       const t = await one(conn, 'SELECT * FROM tickets WHERE tenant_id = ? AND code = ? FOR UPDATE', [tenantId, code]);
 
@@ -372,8 +373,10 @@ router.post(
       await conn.query('INSERT INTO scans (tenant_id, ticket_id, code, location, result) VALUES (?, ?, ?, ?, ?)', [tenantId, t ? t.id : null, code, req.body.location ?? null, result]);
       let holder = null;
       if (t) {
-        const p = await one(conn, 'SELECT p.first_name, p.last_name, p.photo, pr.name AS product, pr.kind FROM tickets k JOIN products pr ON pr.id = k.product_id AND pr.tenant_id = k.tenant_id LEFT JOIN people p ON p.id = k.person_id AND p.tenant_id = k.tenant_id WHERE k.tenant_id = ? AND k.id = ?', [tenantId, t.id]);
+        const p = await one(conn, 'SELECT p.id, p.first_name, p.last_name, p.photo, pr.name AS product, pr.kind FROM tickets k JOIN products pr ON pr.id = k.product_id AND pr.tenant_id = k.tenant_id LEFT JOIN people p ON p.id = k.person_id AND p.tenant_id = k.tenant_id WHERE k.tenant_id = ? AND k.id = ?', [tenantId, t.id]);
         holder = { name: p && p.first_name ? `${p.first_name} ${p.last_name}` : null, photo: p ? p.photo || null : null, product: p ? p.product : null, kind: p ? p.kind : null };
+        // Only when the mountain uses waivers and the ticket has a named holder: true or false, otherwise null (nothing to show).
+        holder.waiver = tenant.waiver_text && p && p.id ? Boolean(await one(conn, ON_FILE, [tenantId, p.id, seasonFor(today)])) : null;
       }
       return { result, valid: result === 'ok', holder, scanned_before: previous ? { at: previous.scanned_at, location: previous.location } : null, ticket: t ? { valid_from: t.valid_from, valid_to: t.valid_to, uses_remaining: t.uses_remaining } : null };
     });

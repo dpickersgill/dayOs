@@ -1,5 +1,6 @@
 'use strict';
 
+const { ON_FILE } = require('../lib/waivers');
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
@@ -147,9 +148,9 @@ router.post(
       const s = await one(conn, 'SELECT * FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, sid]);
       if (s.status !== 'scheduled') throw conflict(`Session is ${s.status}`);
       const season = seasonFor(s.starts_at.slice(0, 10));
-      let waiver = await one(conn, 'SELECT id FROM waivers WHERE tenant_id = ? AND person_id = ? AND season = ? LIMIT 1', [tenantId, who.id, season]);
+      let waiver = await one(conn, ON_FILE, [tenantId, who.id, season]);
       if (!waiver && req.body.sign_waiver) {
-        const [w] = await conn.query("INSERT INTO waivers (tenant_id, person_id, season, kind) VALUES (?, ?, ?, 'general')", [tenantId, who.id, season]);
+        const [w] = await conn.query("INSERT INTO waivers (tenant_id, person_id, season, kind, method, recorded_by) VALUES (?, ?, ?, 'general', 'recorded_by_staff', ?)", [tenantId, who.id, season, req.auth.userId]);
         await audit(conn, req, 'sign_waiver', 'waivers', w.insertId, { person_id: who.id, season });
         waiver = { id: w.insertId };
       }

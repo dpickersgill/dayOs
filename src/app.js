@@ -41,6 +41,7 @@ const opsRoutes = require('./routes/ops');
 const maintenance = require('./routes/maintenance');
 const documents = require('./routes/documents');
 const availability = require('./routes/availability');
+const waiverRoutes = require('./routes/waivers');
 const programs = require('./routes/programs');
 const reports = require('./routes/reports');
 const finance = require('./routes/finance');
@@ -97,6 +98,8 @@ function createApp() {
   app.get('/shop/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'shop.html')));
   app.get('/try', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'try.html')));
   app.get('/platform', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'platform.html')));
+  // The public waiver signing page: /waiver/<mountain>, and a signed copy at /waiver/<mountain>?copy=<token>.
+  app.get('/waiver/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'waiver.html')));
   app.get('/availability/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'availability.html')));
 
   // Pages behind the follow-up email: /f/<token> (rate us, give, stop) and /give/<mountain> (give).
@@ -134,6 +137,8 @@ function createApp() {
   api.post('/public/:slug/requests', rateLimit({ windowMs: 3_600_000, max: Number(process.env.BOOKING_RATE_LIMIT) || 8, message: 'Too many requests from this address. Please call the ski school.' }));
   api.post('/public/:slug/shop/orders', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SHOP_RATE_LIMIT) || 12, message: 'Too many orders from this address. Please call the mountain.' }));
   api.post(['/public/:slug/shop/waitlist', '/public/:slug/shop/group', '/public/:slug/shop/orders/:token/change'], rateLimit({ windowMs: 3_600_000, max: Number(process.env.SHOP_RATE_LIMIT) || 12, message: 'Too many requests from this address. Please call the mountain.' }));
+  // Anyone can sign a waiver, so signing has its own limit: a family signing at the counter tablet stays well inside it.
+  api.post('/public/:slug/waiver/sign', rateLimit({ windowMs: 3_600_000, max: Number(process.env.WAIVER_RATE_LIMIT) || 40, message: 'Too many waivers from this address. Please ask at the ticket window.' }));
   api.post(['/public/followup/:token/give', '/public/:slug/give'], rateLimit({ windowMs: 600_000, max: Number(process.env.GIVE_RATE_LIMIT) || 20, message: 'Too many attempts. Please try again later.' }));
   // The kiosk has no login, so its doors are rate limited: pairing is tight, and each PIN is also locked per person after five misses.
   api.post('/kiosk/pair', rateLimit({ windowMs: 600_000, max: Number(process.env.KIOSK_PAIR_LIMIT) || 10, message: 'Too many tries. Ask a manager for a new code.' }));
@@ -141,7 +146,7 @@ function createApp() {
   api.use('/internal/jobs', rateLimit({ windowMs: 60_000, max: 10 }), followPublic.jobs);
   api.use('/trial', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SANDBOX_RATE_LIMIT) || 5, message: 'Too many demo requests from this address. Try again later, or ask us for a walkthrough.' }), sandboxRoutes);
   api.use('/platform', rateLimit({ windowMs: 60_000, max: Number(process.env.PLATFORM_RATE_LIMIT) || 60, message: 'Too many attempts' }), platform);
-  api.use('/public', rateLimit({ windowMs: 60_000, max: 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, publicRouter, dispatch.publicRouter, lessonbook, availability.publicRouter);
+  api.use('/public', rateLimit({ windowMs: 60_000, max: 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, publicRouter, dispatch.publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter);
   api.use(authRoutes); // login, tenants, users, me (each route applies authenticate itself where needed)
 
   // Everything below requires a valid token; tenant comes from the token only.
@@ -176,6 +181,7 @@ function createApp() {
   api.use('/ops', maintenance);
   api.use('/documents', documents);
   api.use('/availability', availability.router);
+  api.use('/waivers', waiverRoutes.router);
   api.use('/programs', programs);
   api.use('/reports', reports);
   api.use('/board', board);

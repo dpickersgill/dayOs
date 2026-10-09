@@ -1,5 +1,6 @@
 'use strict';
 
+const { ON_FILE } = require('../lib/waivers');
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { crud } = require('../lib/crud');
@@ -57,7 +58,7 @@ router.post(
       // everyone who will wear the gear needs a waiver, not only the person paying
       const everyone = [...new Set([person_id, ...items.map((i) => i.person_id).filter(Boolean)])];
       for (const pid of everyone) {
-        if (!(await one(conn, 'SELECT id FROM waivers WHERE tenant_id = ? AND person_id = ? AND season = ? LIMIT 1', [tenantId, pid, season]))) {
+        if (!(await one(conn, ON_FILE, [tenantId, pid, season]))) {
           const who = pid === person_id ? 'the renter' : `person ${pid}`;
           throw conflict(`No signed waiver on file for ${who} for the ${season} season`);
         }

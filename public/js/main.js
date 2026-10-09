@@ -20,6 +20,7 @@ const VIEWS = [
   ['availability', 'Instructor availability', () => can('instructor', 'counter'), () => import('./views/availability.js')],
   ['patrol', 'Patrol', () => can('patrol'), () => import('./views/patrol.js')],
   ['people', 'Customers', () => can('counter', 'instructor'), () => import('./views/people.js')],
+  ['waivers', 'Waivers', () => can('counter', 'instructor'), () => import('./views/waivers.js')],
   ['shop', 'Online shop', () => can('counter'), () => import('./views/shop.js')],
   ['catalog', 'Products and prices', () => isManager(), () => import('./views/catalog.js')],
   ['messages', 'Messages', () => isManager(), () => import('./views/messages.js')],
@@ -126,7 +127,7 @@ let navToken = 0;
 const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
 
 // An app the platform has turned off for this mountain is hidden for everyone, including the owner.
-const ALWAYS = ['dashboard', 'people', 'myshifts', 'settings', 'help'];
+const ALWAYS = ['dashboard', 'people', 'waivers', 'myshifts', 'settings', 'help'];
 const appOn = (key) => ALWAYS.includes(key) || !ctx.me.modules || ctx.me.modules.includes(key);
 function visibleViews() { return VIEWS.filter((v) => appOn(v[0]) && v[2]()); }
 

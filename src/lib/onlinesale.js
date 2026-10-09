@@ -2,6 +2,7 @@
 
 // Online lesson requests: pricing them, the cancellation policy, and turning a request into people, waivers, bookings
 // and (when it was paid by card) a real sale in the books. Used by staff confirming a request and by the payment webhook.
+const { ON_FILE } = require('./waivers');
 const crypto = require('crypto');
 const { one } = require('../db');
 const { unitPrice } = require('./pricing');
@@ -74,7 +75,7 @@ async function confirmRequest(conn, tenantId, raw, { paid = false, auditReq, pay
   const r = parse(raw);
   const s = await one(conn, 'SELECT * FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, raw.session_id]);
   if (s.status !== 'scheduled') throw conflict(`That lesson is ${s.status}`);
-  const tenant = await one(conn, 'SELECT timezone, waiver_text FROM tenants WHERE id = ?', [tenantId]);
+  const tenant = await one(conn, 'SELECT timezone, waiver_text, waiver_resign_id FROM tenants WHERE id = ?', [tenantId]);
   const day = s.starts_at.slice(0, 10);
   if (day < todayIn(tenant.timezone)) throw conflict('That lesson date has passed');
   const { n } = await one(conn, "SELECT COUNT(*) AS n FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND status IN ('booked','attended')", [tenantId, s.id]);
@@ -82,6 +83,8 @@ async function confirmRequest(conn, tenantId, raw, { paid = false, auditReq, pay
   const season = seasonFor(day);
   const sha = tenant.waiver_text ? crypto.createHash('sha256').update(tenant.waiver_text).digest('hex') : null;
 
+  // After "ask everyone to sign again", a box ticked against the old wording no longer counts as a waiver.
+  const acceptedOk = raw.waiver_accepted && !(tenant.waiver_resign_id && raw.waiver_text_sha !== sha);
   const c = r.contact;
   const contact = await contactPerson(conn, tenantId, { first_name: c.first_name, last_name: c.last_name, email: raw.contact_email, phone: raw.contact_phone });
   const waiverNeeded = [];
@@ -100,9 +103,9 @@ async function confirmRequest(conn, tenantId, raw, { paid = false, auditReq, pay
     if (!who.id) throw bad(`Could not save ${st.first_name} ${st.last_name}`);
     const guardianOk = minor && await mayActAsGuardian(conn, tenantId, contact.id, who.id, who.created);
     if (guardianOk) await addLink(conn, tenantId, contact.id, who.id, 'guardian');
-    let waiver = await one(conn, 'SELECT id FROM waivers WHERE tenant_id = ? AND person_id = ? AND season = ? LIMIT 1', [tenantId, who.id, season]);
-    if (!waiver && raw.waiver_accepted && (guardianOk || (sameAsContact && !minor)) && contact.id) {
-      await conn.query("INSERT INTO waivers (tenant_id, person_id, season, kind, signed_by_person_id, signed_by_name, signer_relation, text_sha) VALUES (?, ?, ?, 'general', ?, ?, ?, ?)", [tenantId, who.id, season, contact.id, raw.contact_name, minor ? 'guardian' : 'self', raw.waiver_text_sha || sha]);
+    let waiver = await one(conn, ON_FILE, [tenantId, who.id, season]);
+    if (!waiver && acceptedOk && (guardianOk || (sameAsContact && !minor)) && contact.id) {
+      await conn.query("INSERT INTO waivers (tenant_id, person_id, season, kind, signed_by_person_id, signed_by_name, signer_relation, text_sha, method) VALUES (?, ?, ?, 'general', ?, ?, ?, ?, 'accepted_online')", [tenantId, who.id, season, contact.id, raw.contact_name, minor ? 'guardian' : 'self', raw.waiver_text_sha || sha]);
       waiver = { id: 1 };
     }
     if (!waiver) waiverNeeded.push(`${st.first_name} ${st.last_name}`);

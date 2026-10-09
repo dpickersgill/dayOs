@@ -63,7 +63,8 @@ function gate() {
     if (who && (who.name || who.photo)) {
       panel.append(h('div', { class: 'gate-person', 'data-holder': '' },
         who.photo ? h('img', { src: who.photo, alt: `Photo of ${who.name || 'the holder'}` }) : null,
-        h('div', null, h('div', { class: 'gate-name' }, who.name || 'Guest'), h('div', null, [who.product, who.kind === 'season_pass' && !who.photo ? 'No photo on file' : null].filter(Boolean).join(' · ')))));
+        h('div', null, h('div', { class: 'gate-name' }, who.name || 'Guest'), h('div', null, [who.product, who.kind === 'season_pass' && !who.photo ? 'No photo on file' : null].filter(Boolean).join(' · ')),
+          who.waiver === false ? h('div', { class: 'gate-waiver' }, state('No waiver on file', 'warn'), ' Send them to the window to sign.') : null)));
     }
     if (out.result === 'duplicate') panel.append(button('Let them through anyway', () => scan(value, true), { kind: 'primary' }));
     history.unshift({ value, title, tone, who: who && who.name, at: new Date() });

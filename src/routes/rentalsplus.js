@@ -2,6 +2,7 @@
 
 // Rentals beyond the basic counter: settings, sizing profiles, binding chart, reservations,
 // extensions and swaps, fees, service log, reports and bulk import. Mounted inside routes/rentals.js.
+const { ON_FILE } = require('../lib/waivers');
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
@@ -423,7 +424,7 @@ router.get('/pickup', requireRole(...counter), async (req, res) => {
   for (const pid of ids) {
     const p = await one(pool, 'SELECT id, first_name, last_name, email, phone, date_of_birth, height_in, weight_lb, boot_size, stance, skier_type, photo, emergency_name, emergency_phone, discipline, ability_level FROM people WHERE tenant_id = ? AND id = ?', [tenantId, pid]);
     if (!p) continue;
-    const waiver = await one(pool, 'SELECT signed_at FROM waivers WHERE tenant_id = ? AND person_id = ? AND season = ? LIMIT 1', [tenantId, pid, season]);
+    const waiver = await one(pool, ON_FILE, [tenantId, pid, season]);
     const profile = await one(pool, 'SELECT * FROM rental_profiles WHERE tenant_id = ? AND person_id = ?', [tenantId, pid]);
     people.push({ ...p, age: ageOn(p.date_of_birth, today), is_buyer: pid === order.person_id, waiver_signed: Boolean(waiver), rental_profile: profile || null });
   }

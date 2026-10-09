@@ -8,6 +8,7 @@ const { requireRole } = require('../middleware/auth');
 const { z, validate, paramId, dateStr } = require('../lib/util');
 const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
+const { VALID } = require('../lib/waivers');
 const { CHANNELS, recordConsent, currentConsent } = require('../lib/consent');
 
 const router = express.Router();
@@ -163,7 +164,7 @@ router.get('/:id/data-export', requireRole('manager'), async (req, res) => {
     consent: await q('SELECT channel, status, source, wording, recorded_by_name, created_at FROM consent_events WHERE tenant_id = ? AND person_id = ? ORDER BY id'),
     notes: await q('SELECT category, body, author_name, created_at FROM person_notes WHERE tenant_id = ? AND person_id = ? ORDER BY id'),
     flags: await q('SELECT kind, message, expires_on, set_by_name, created_at, cleared_at FROM person_flags WHERE tenant_id = ? AND person_id = ? ORDER BY id'),
-    waivers: await q('SELECT season, kind, signed_at, signed_by_name, signer_relation FROM waivers WHERE tenant_id = ? AND person_id = ? ORDER BY id'),
+    waivers: await q(`SELECT w.season, w.kind, w.signed_at, w.signed_by_name, w.signer_relation, w.voided_at, w.void_reason, (${VALID('w')}) AS counts FROM waivers w WHERE w.tenant_id = ? AND w.person_id = ? ORDER BY w.id`),
     orders: await q('SELECT id, created_at, status, channel, total_cents FROM orders WHERE tenant_id = ? AND person_id = ? ORDER BY id'),
     tickets: await q('SELECT code, valid_from, valid_to, status, uses_remaining FROM tickets WHERE tenant_id = ? AND person_id = ? ORDER BY id'),
     lessons: await q('SELECT b.status, s.starts_at FROM lesson_bookings b JOIN lesson_sessions s ON s.id = b.session_id AND s.tenant_id = b.tenant_id WHERE b.tenant_id = ? AND b.person_id = ? ORDER BY b.id'),
@@ -198,6 +199,9 @@ router.post('/:id/anonymise', requireRole('manager'), validate(anonBody), async 
     await conn.query('DELETE FROM person_flags WHERE tenant_id = ? AND person_id = ?', [tenantId, p.id]);
     await conn.query('DELETE FROM person_links WHERE tenant_id = ? AND (adult_id = ? OR member_id = ?)', [tenantId, p.id, p.id]);
     await conn.query('DELETE FROM rental_profiles WHERE tenant_id = ? AND person_id = ?', [tenantId, p.id]);
+    // A signed waiver is the mountain's legal record, so the wording, the typed name and the signature are kept. The contact
+    // details and device of anyone this person signed as are removed.
+    await conn.query('UPDATE waiver_signings SET signer_email = NULL, signer_phone = NULL, ip = NULL, user_agent = NULL WHERE tenant_id = ? AND signer_person_id = ?', [tenantId, p.id]);
     await conn.query('INSERT INTO person_tombstones (tenant_id, old_id, kept_id, action, done_by) VALUES (?, ?, NULL, ?, ?)', [tenantId, p.id, 'anonymise', req.auth.userId]);
     await audit(conn, req, 'anonymise', 'people', p.id, null);
   });

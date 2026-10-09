@@ -343,6 +343,21 @@ A shared tablet by the staff door lets people clock in and out without an accoun
 
 Tick "Ask people to read and accept this" on a document. Everyone who can see its category gets a notice at the top of Documents until they click **I have read this**; their name and the time are recorded. Managers see **Accepted by N** and who is still waiting. Replacing the file (a new version) asks everyone again.
 
+## Waivers
+
+Every guest needs a waiver for the season before they rent gear or take a lesson, and Sell, Rentals, Ski school and the Gate show whether they have one that counts.
+
+- **Signed, not just ticked.** A signing keeps the drawn signature, the typed name, the time, the device (address and browser), and the exact wording, stored word for word in `waiver_texts`. One signing can cover the signer and their children; each person covered gets a `waivers` row pointing at it (`waiver_signings`).
+- **Four ways to sign:** the public page `/waiver/<mountain>` (at home or by QR code; works on a phone), a counter tablet mode of the same page that clears after each family, **Sign on this screen** on any guest at the counter, or **Email a link**. Staff can still **Record a paper waiver**.
+- **Children:** only an adult (18 or over) signs, for themselves and up to 10 children. A child who already has a different guardian on file is never signed for by someone else: online, that signing goes on a new record marked as a possible duplicate for staff to check; at the counter, staff are told.
+- **Who is who:** the public page cannot name an existing record. It matches a person only on first name, last name and date of birth together, never on an email alone, and never changes a matched record's contact details. The signed copy shows names as the guest typed them.
+- **The guest's copy:** a private link (`/waiver/<mountain>?copy=<token>`) shows exactly what they signed, with a Print or Save as PDF button. It is emailed only when the address is the signer's own, at most 3 times an hour per address.
+- **Waivers screen (Front desk):** search everyone signed this season, open one to see and print exactly what was signed, void a mistake with a reason (managers; it stops counting but is kept), and download a CSV (managers). Patrol do not see the register.
+- **Wording:** managers edit it under Waivers, Wording, with a sample to start from (not legal advice). Every version is kept. **Ask everyone to sign again** makes all earlier waivers stop counting, including boxes ticked against the old wording in shop baskets and lesson requests still being paid for.
+- **Next season:** a counter signing for a lesson next season is signed for that season (current or next only).
+- **Privacy:** anonymising a customer keeps their signed waivers (the mountain's legal record) but removes the signer's email, phone, address and browser from them. Merging customers moves their signings.
+- Run `npm run migrate` when upgrading: it adds `waiver_texts`, `waiver_signings` and new columns on `waivers` and `tenants`, and archives each mountain's current wording.
+
 ## Hardening release (fixes from the full app review)
 
 ### Money

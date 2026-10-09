@@ -7,6 +7,7 @@
 //   POST /checkout         sells it: one order, one payment (or a split), every booking made in one transaction
 //   GET  /gift-cards/:code balance check, and POST /gift-cards/:code/void for a manager
 // Prices always come from the server. Nothing is saved unless the whole basket can be sold.
+const { ON_FILE } = require('../lib/waivers');
 const crypto = require('crypto');
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
@@ -323,14 +324,14 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
     }
 
     const ensureWaiver = async (key, personId, season, label) => {
-      if (await one(conn, 'SELECT id FROM waivers WHERE tenant_id = ? AND person_id = ? AND season = ? LIMIT 1', [tenantId, personId, season])) return;
+      if (await one(conn, ON_FILE, [tenantId, personId, season])) return;
       const g = guardianOf.get(key);
       if (!waiverFor.get(key)) throw conflict(g ? `${label} is under 18: their guardian must sign the waiver for the ${season} season` : `${label} needs a signed waiver for the ${season} season`, { person_id: personId });
       const me = personRows.get(personId);
       const signer = g || me;
       const sha = tenant.waiver_text ? crypto.createHash('sha256').update(tenant.waiver_text).digest('hex') : null;
-      const [w] = await conn.query("INSERT INTO waivers (tenant_id, person_id, season, kind, signed_by_person_id, signed_by_name, signer_relation, text_sha) VALUES (?, ?, ?, 'general', ?, ?, ?, ?)",
-        [tenantId, personId, season, signer.id, `${signer.first_name} ${signer.last_name}`, g ? 'guardian' : 'self', sha]);
+      const [w] = await conn.query("INSERT INTO waivers (tenant_id, person_id, season, kind, signed_by_person_id, signed_by_name, signer_relation, text_sha, method, recorded_by) VALUES (?, ?, ?, 'general', ?, ?, ?, ?, 'recorded_by_staff', ?)",
+        [tenantId, personId, season, signer.id, `${signer.first_name} ${signer.last_name}`, g ? 'guardian' : 'self', sha, req.auth.userId]);
       await audit(conn, req, 'sign_waiver', 'waivers', w.insertId, { person_id: personId, season, signed_by: signer.id });
     };
 

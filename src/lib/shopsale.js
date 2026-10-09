@@ -2,6 +2,7 @@
 
 // The online shop: pricing a basket of tickets and passes, and turning a paid basket into people, waivers, an order and
 // tickets. Used by the public shop routes and by the card payment webhook. Nothing is sold until the payment lands.
+const { ON_FILE, shaOf } = require('./waivers');
 const crypto = require('crypto');
 const { pool, tx, rows, one } = require('../db');
 const { unitPrice, priceFrom, applyPromo } = require('./pricing');
@@ -227,7 +228,9 @@ async function overDays(conn, tenant, lines) {
 async function fulfil(conn, tenantId, row, { paymentIntent }) {
   let basket; try { basket = JSON.parse(row.basket); } catch (_) { throw bad('The saved basket is unreadable'); }
   const q = basket.quote; const c = basket.contact;
-  const tenant = await one(conn, 'SELECT id, timezone, waiver_text, online_daily_limit FROM tenants WHERE id = ?', [tenantId]);
+  const tenant = await one(conn, 'SELECT id, timezone, waiver_text, waiver_resign_id, online_daily_limit FROM tenants WHERE id = ?', [tenantId]);
+  // After "ask everyone to sign again", a box ticked against the old wording no longer counts as a waiver.
+  const acceptedOk = row.waiver_accepted && !(tenant.waiver_resign_id && row.waiver_text_sha !== (tenant.waiver_text ? shaOf(tenant.waiver_text) : null));
   // A payment that lands after the 40-minute hold is still honoured (the guest paid), but staff are told if it took the
   // day over its limit.
   const late = await one(conn, 'SELECT created_at < DATE_SUB(NOW(), INTERVAL 40 MINUTE) AS late FROM shop_orders WHERE tenant_id = ? AND id = ?', [tenantId, row.id]);
@@ -257,9 +260,9 @@ async function fulfil(conn, tenantId, row, { paymentIntent }) {
     if (!who.id) throw bad(`Could not save ${st.first_name} ${st.last_name}`);
     const guardianOk = minor && await mayActAsGuardian(conn, tenantId, contact.id, who.id, who.created);
     if (guardianOk) await addLink(conn, tenantId, contact.id, who.id, 'guardian');
-    let waiver = await one(conn, 'SELECT id FROM waivers WHERE tenant_id = ? AND person_id = ? AND season = ? LIMIT 1', [tenantId, who.id, season]);
-    if (!waiver && row.waiver_accepted && (guardianOk || (sameAsContact && !minor)) && contact.id) {
-      await conn.query("INSERT INTO waivers (tenant_id, person_id, season, kind, signed_by_person_id, signed_by_name, signer_relation, text_sha) VALUES (?, ?, ?, 'general', ?, ?, ?, ?)", [tenantId, who.id, season, contact.id, row.contact_name, minor ? 'guardian' : 'self', row.waiver_text_sha]);
+    let waiver = await one(conn, ON_FILE, [tenantId, who.id, season]);
+    if (!waiver && acceptedOk && (guardianOk || (sameAsContact && !minor)) && contact.id) {
+      await conn.query("INSERT INTO waivers (tenant_id, person_id, season, kind, signed_by_person_id, signed_by_name, signer_relation, text_sha, method) VALUES (?, ?, ?, 'general', ?, ?, ?, ?, 'accepted_online')", [tenantId, who.id, season, contact.id, row.contact_name, minor ? 'guardian' : 'self', row.waiver_text_sha]);
       waiver = { id: 1 };
     }
     if (!waiver && tenant.waiver_text) waiverNeeded.push(`${st.first_name} ${st.last_name}`);
