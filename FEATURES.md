@@ -343,6 +343,43 @@ A shared tablet by the staff door lets people clock in and out without an accoun
 
 Tick "Ask people to read and accept this" on a document. Everyone who can see its category gets a notice at the top of Documents until they click **I have read this**; their name and the time are recorded. Managers see **Accepted by N** and who is still waiting. Replacing the file (a new version) asks everyone again.
 
+## Hardening release (fixes from the full app review)
+
+### Money
+
+- **Card refunds can fail and be retried.** A refund to a card is recorded as pending, then sent to Stripe. If Stripe refuses, the order shows the refund as failed with **Try again**; the daily job also retries. Stripe is checked first so a guest is never refunded twice.
+- **Webhooks only act on orders still waiting for payment.** A late or repeated Stripe message cannot sell a ticket twice. If the sale can no longer be honoured (sold out, already used), nothing is saved and the card is refunded.
+- **Gift cards are never taxed.** Date-change price differences are taxed like the ticket; the change fee is its own line ("Fees" in reports).
+- **One-use promo codes hold while a guest is on the card page,** so two guests cannot both use the last one. A guest who goes back to change their basket does not lose their own code.
+- **Cash refunds name a drawer,** so drawer counts include them. Old-style `/orders` sales record tax.
+- **The daily report counts sales on the sale day and refunds on the refund day,** so a past day's figures never change.
+
+### Security
+
+- **Demo mountains cannot send email or texts.** Every email and text names its mountain; bulk campaigns go out on a separate Postmark stream (`POSTMARK_BROADCAST_STREAM`).
+- **Online orders no longer overwrite customer records.** Buying for someone fills in blanks only, and a buyer's email goes only on their own record.
+- **Two-step sign-in lockout is kept in the database** (survives restarts and works across servers); a sign-in started before a password change is refused.
+- **Platform console:** sign in with the key, your name and (if `PLATFORM_TOTP_SECRET` is set) an authenticator code; sessions last 2 hours; `PLATFORM_ALLOW_IPS` limits where it can be used from; the audit log shows who.
+- **Separate keys** for two-step codes, email links and kiosks (`TOTP_KEY`, `LINK_SECRET`, `KIOSK_SECRET`; each falls back to `JWT_SECRET`).
+- **Patrol can only look up people specifically** (3+ letters, 7+ digits or an email, 10 results) and only open people on their own cases.
+- **Lesson request status** is checked with a POST (the email is no longer in the address).
+
+### Operations
+
+- **The daily job runs once even if two schedulers fire,** retries stuck campaign sends and card refunds, and logs `daily job finished` (used for an alert, see RUNBOOK.md).
+- **`/readyz` says "run npm run migrate"** when the database is behind the code; migrate exits with an error if it could not finish.
+- **`deploy.sh`** checks sign-in, migrates, deploys with sensible limits (4 servers, 8 database connections each) and checks the new version is ready.
+- RUNBOOK.md has new sections: alerts, backups, rotating keys, platform console.
+
+### Screens
+
+- **Quick sale** at the ticket window: day tickets, multi-day, punch cards and vouchers skip the customer form (turn off in Account).
+- **Faster payment:** choose cash or card first; cash has Exact/$20/$50/$100 buttons and shows change in large type; a warning if no drawer is open.
+- **Dialogs** no longer close when you click outside them after typing.
+- **Patrol new case:** big Type and Severity buttons, trail first, "Where exactly" optional.
+- **Online shop:** a running total beside the form on desktop, promo code in the order panel.
+- **Lesson booking page** in Spanish (language switch), and clearer messages when online booking is off.
+
 ## Engineering notes
 
 ### PATCH keeps defaulted fields

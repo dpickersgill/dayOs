@@ -24,7 +24,7 @@ const addDay = (s, n) => { const d = dateOf(s); d.setUTCDate(d.getUTCDate() + n)
 const TIER = { child: 'Child', youth: 'Youth', adult: 'Adult', senior: 'Senior', military: 'Military' };
 const lab = (id, text, el, hint) => h('div', { class: 'field' }, h('label', { for: id }, text), el, hint ? h('span', { class: 'hint' }, hint) : null);
 let uid = 0;
-const ES = {"Tell me if tickets open up": "Avísame si hay boletos", "You are on the list. We will email you once, if tickets open up.": "Estás en la lista. Te escribiremos una vez si hay boletos.", "This day is sold out": "Este día está agotado", "Email": "Correo", "Name": "Nombre", "How many tickets?": "¿Cuántos boletos?", "Send enquiry": "Enviar consulta", "Thank you. We will be in touch.": "Gracias. Nos pondremos en contacto.", "Booking for a group of 6 or more?": "¿Reservas para un grupo de 6 o más?", "Schools, clubs and companies: tell us about your group and we will send a quote.": "Escuelas, clubes y empresas: cuéntanos de tu grupo y te enviaremos una cotización.", "Your name": "Tu nombre", "Group or organisation": "Grupo u organización", "Phone": "Teléfono", "How many people?": "¿Cuántas personas?", "Preferred day": "Día preferido", "Anything we should know?": "¿Algo que debamos saber?", "Promo code": "Código promocional", "Gift card": "Tarjeta de regalo", "Add-ons": "Extras", "quantity": "cantidad", "Give a gift card": "Regala una tarjeta", "Amount": "Monto", "Add gift card": "Agregar tarjeta de regalo", "Gift card amount": "Monto de la tarjeta", "Photo for the pass": "Foto para el pase", "A clear photo of the face, for the pass.": "Una foto clara del rostro, para el pase.", "Photo added.": "Foto agregada.", "Saved guests": "Invitados guardados", "Lift tickets and passes": "Boletos de remontes y pases", "Secure card payment": "Pago seguro con tarjeta", "1. Pick a day": "1. Elige un día", "2. Choose services": "2. Elige tus boletos", "3. Who is each ticket for?": "3. ¿Para quién es cada boleto?", "4. Your details": "4. Tus datos", "First name of the person using it": "Nombre de quien lo usará", "Last name": "Apellido", "First name": "Nombre", "Age group": "Grupo de edad", "Date of birth": "Fecha de nacimiento", "Sets the price": "Define el precio", "Needed for a season pass": "Necesario para un pase de temporada", "Choose…": "Elige…", "Remove": "Quitar", "Add a ticket": "Agregar boleto", "Add a ticket to start": "Agrega un boleto para empezar", "Mobile phone": "Teléfono móvil", "Email (we send the tickets here)": "Correo (aquí enviamos los boletos)", "Waiver": "Exención de responsabilidad", "Loading prices…": "Cargando precios…", "Nothing is on sale online for this day.": "No hay boletos en línea para este día.", "Online sales are closed": "Las ventas en línea están cerradas", "Online sales are not open right now.": "Las ventas en línea no están abiertas ahora.", "Everyone": "Todos", "Valid this day only.": "Válido solo este día.", "Payments are handled by Stripe. We never see or store your card number.": "Los pagos los procesa Stripe. Nunca vemos ni guardamos tu número de tarjeta.", "Taking you to the card page…": "Llevándote a la página de pago…", "Previous month": "Mes anterior", "Next month": "Mes siguiente", "Fill in your name, email and phone.": "Escribe tu nombre, correo y teléfono.", "Please read and accept the waiver.": "Lee y acepta la exención de responsabilidad.", "Please confirm you understand tickets are not refundable online.": "Confirma que entiendes que los boletos en línea no son reembolsables.", "Something went wrong. Please try again.": "Algo salió mal. Inténtalo de nuevo.", "Pick a day, choose your tickets, see the exact total, and pay by card. Your tickets arrive by email and on screen.": "Elige un día, elige tus boletos, ve el total exacto y paga con tarjeta. Recibirás los boletos por correo y en pantalla.", "Pick a day above to see what is on sale and the price for each age.": "Elige un día arriba para ver qué hay a la venta y el precio por edad.", "I understand tickets bought online are not refundable. If the mountain closes, I can call for help.": "Entiendo que los boletos comprados en línea no son reembolsables. Si la montaña cierra, puedo llamar para pedir ayuda.", "I have read the waiver. I accept it for myself and for any child under 18 in this order. Other adults in the order will sign at the mountain.": "He leído la exención. La acepto por mí y por cualquier menor de 18 años en este pedido. Los demás adultos firmarán en la montaña.", "Fill in the name and age group for every ticket.": "Completa el nombre y el grupo de edad de cada boleto.", "Leave this empty": "Deja esto vacío"};
+const ES = {"Fill in every ticket to pay": "Completa cada boleto para pagar", "item": "artículo", "items": "artículos", "About": "Aprox.", "The exact total, with tax, shows when every ticket is filled in.": "El total exacto, con impuestos, aparece al completar cada boleto.", "Your order": "Tu pedido", "Have a promo code?": "¿Tienes un código promocional?", "Tell me if tickets open up": "Avísame si hay boletos", "You are on the list. We will email you once, if tickets open up.": "Estás en la lista. Te escribiremos una vez si hay boletos.", "This day is sold out": "Este día está agotado", "Email": "Correo", "Name": "Nombre", "How many tickets?": "¿Cuántos boletos?", "Send enquiry": "Enviar consulta", "Thank you. We will be in touch.": "Gracias. Nos pondremos en contacto.", "Booking for a group of 6 or more?": "¿Reservas para un grupo de 6 o más?", "Schools, clubs and companies: tell us about your group and we will send a quote.": "Escuelas, clubes y empresas: cuéntanos de tu grupo y te enviaremos una cotización.", "Your name": "Tu nombre", "Group or organisation": "Grupo u organización", "Phone": "Teléfono", "How many people?": "¿Cuántas personas?", "Preferred day": "Día preferido", "Anything we should know?": "¿Algo que debamos saber?", "Promo code": "Código promocional", "Gift card": "Tarjeta de regalo", "Add-ons": "Extras", "quantity": "cantidad", "Give a gift card": "Regala una tarjeta", "Amount": "Monto", "Add gift card": "Agregar tarjeta de regalo", "Gift card amount": "Monto de la tarjeta", "Photo for the pass": "Foto para el pase", "A clear photo of the face, for the pass.": "Una foto clara del rostro, para el pase.", "Photo added.": "Foto agregada.", "Saved guests": "Invitados guardados", "Lift tickets and passes": "Boletos de remontes y pases", "Secure card payment": "Pago seguro con tarjeta", "1. Pick a day": "1. Elige un día", "2. Choose services": "2. Elige tus boletos", "3. Who is each ticket for?": "3. ¿Para quién es cada boleto?", "4. Your details": "4. Tus datos", "First name of the person using it": "Nombre de quien lo usará", "Last name": "Apellido", "First name": "Nombre", "Age group": "Grupo de edad", "Date of birth": "Fecha de nacimiento", "Sets the price": "Define el precio", "Needed for a season pass": "Necesario para un pase de temporada", "Choose…": "Elige…", "Remove": "Quitar", "Add a ticket": "Agregar boleto", "Add a ticket to start": "Agrega un boleto para empezar", "Mobile phone": "Teléfono móvil", "Email (we send the tickets here)": "Correo (aquí enviamos los boletos)", "Waiver": "Exención de responsabilidad", "Loading prices…": "Cargando precios…", "Nothing is on sale online for this day.": "No hay boletos en línea para este día.", "Online sales are closed": "Las ventas en línea están cerradas", "Online sales are not open right now.": "Las ventas en línea no están abiertas ahora.", "Everyone": "Todos", "Valid this day only.": "Válido solo este día.", "Payments are handled by Stripe. We never see or store your card number.": "Los pagos los procesa Stripe. Nunca vemos ni guardamos tu número de tarjeta.", "Taking you to the card page…": "Llevándote a la página de pago…", "Previous month": "Mes anterior", "Next month": "Mes siguiente", "Fill in your name, email and phone.": "Escribe tu nombre, correo y teléfono.", "Please read and accept the waiver.": "Lee y acepta la exención de responsabilidad.", "Please confirm you understand tickets are not refundable online.": "Confirma que entiendes que los boletos en línea no son reembolsables.", "Something went wrong. Please try again.": "Algo salió mal. Inténtalo de nuevo.", "Pick a day, choose your tickets, see the exact total, and pay by card. Your tickets arrive by email and on screen.": "Elige un día, elige tus boletos, ve el total exacto y paga con tarjeta. Recibirás los boletos por correo y en pantalla.", "Pick a day above to see what is on sale and the price for each age.": "Elige un día arriba para ver qué hay a la venta y el precio por edad.", "I understand tickets bought online are not refundable. If the mountain closes, I can call for help.": "Entiendo que los boletos comprados en línea no son reembolsables. Si la montaña cierra, puedo llamar para pedir ayuda.", "I have read the waiver. I accept it for myself and for any child under 18 in this order. Other adults in the order will sign at the mountain.": "He leído la exención. La acepto por mí y por cualquier menor de 18 años en este pedido. Los demás adultos firmarán en la montaña.", "Fill in the name and age group for every ticket.": "Completa el nombre y el grupo de edad de cada boleto.", "Leave this empty": "Deja esto vacío"};
 let LANG = (navigator.language || '').toLowerCase().startsWith('es') ? 'es' : 'en';
 try { const saved = localStorage.getItem('shop-lang'); if (saved === 'en' || saved === 'es') LANG = saved; } catch (_) { /* private mode */ }
 const T = (en) => (LANG === 'es' && ES[en]) || en;
@@ -313,7 +313,7 @@ async function showShop() {
       gifts.push({ amount_cents: Number(gAmt.value), recipient_name: gTo.value.trim() || undefined, message: gMsg.value.trim() || undefined });
       gTo.value = ''; gMsg.value = ''; drawGifts(); sync();
     } }, T('Add gift card'))), giftList);
-  const promoEl = h('section', { class: 'card stack' }, lab('promo', T('Promo code'), promo));
+  const promoEl = h('div', { class: 'stack' }, lab('promo', T('Promo code'), promo));
   const addonsOf = () => [...qtys].filter(([, n]) => n > 0).map(([product_id, quantity]) => ({ product_id, quantity }));
   const anything = () => basket.length > 0 || addonsOf().length > 0 || gifts.length > 0;
 
@@ -322,14 +322,30 @@ async function showShop() {
     pay.disabled = true;
     hint.hidden = basket.length > 0;
     if (!anything()) { clear(totalEl); pay.textContent = T('Add a ticket to start'); return; }
-    pay.textContent = 'Fill in every ticket to see your total';
+    pay.textContent = T('Fill in every ticket to pay');
+    showEstimate();
     timer = setTimeout(quote, 350);
   }
   const itemsOf = (withPhoto = false) => basket.map((r) => ({ product_id: r.product.id, valid_on: r.date, holder: { first_name: r.f.value.trim(), last_name: r.l.value.trim(), ...(r.pass ? { date_of_birth: r.dob.value, ...(withPhoto ? { photo: r.shot.data } : {}) } : { age_group: r.age.value }) } }));
   const basketOf = (withPhoto = false) => ({ items: itemsOf(withPhoto), addons: addonsOf(), gifts, ...(promo.value.trim() ? { promo_code: promo.value.trim() } : {}) });
+  // A running estimate from the listed prices, shown straight away; the exact total (tax, discounts) follows once every
+  // ticket is filled in.
+  function showEstimate() {
+    const priceOf = (r) => {
+      const prices = r.product.prices || [];
+      const tier = r.pass ? null : r.age.value;
+      const hit = tier && prices.find((x) => x.tier === tier);
+      if (hit) return hit.price_cents;
+      return prices.length ? Math.min(...prices.map((x) => x.price_cents)) : 0;
+    };
+    const tickets = basket.reduce((n, r) => n + priceOf(r), 0);
+    const extras = [...qtys].reduce((n, [id, q]) => n + q * ((page.addons || []).find((a) => a.id === id) || { price_cents: 0 }).price_cents, 0) + gifts.reduce((n, g) => n + g.amount_cents, 0);
+    const count = basket.length + [...qtys.values()].reduce((n, q) => n + q, 0) + gifts.length;
+    clear(totalEl).append(h('span', { class: 'muted' }, `${count} ${count === 1 ? T('item') : T('items')}`), h('span', { class: 'grand' }, `${T('About')} ${money(tickets + extras)}`), h('span', { class: 'muted small' }, T('The exact total, with tax, shows when every ticket is filled in.')));
+  }
   async function quote() {
     for (const r of basket) { r.badEl.textContent = ''; r.priceEl.textContent = ''; }
-    if (!basket.every(ready)) { clear(totalEl); return; }
+    if (!basket.every(ready)) { showEstimate(); return; }
     const mine = ++seq;
     try {
       const q = await call('POST', '/quote', basketOf());
@@ -355,18 +371,20 @@ async function showShop() {
   const hp = h('input', { name: 'website', tabindex: '-1', autocomplete: 'off', 'aria-hidden': 'true' });
   const hint = h('p', { class: 'muted' }, 'Add a ticket above, then enter the name and age group of the person who will use it.');
 
-  const form = h('form', { class: 'stack', novalidate: true },
+  const form = h('form', { class: 'shop-grid', novalidate: true }, h('div', { class: 'stack shop-main' },
     h('section', { class: 'card stack' }, h('h2', null, T('1. Pick a day')), calEl),
     h('section', { class: 'card stack' }, svcHead, h('p', { id: 'pick-hint', class: 'muted' }, T('Pick a day above to see what is on sale and the price for each age.')), svcEl),
     h('section', { class: 'card stack' }, h('h2', null, T('3. Who is each ticket for?')), rowsEl, hint),
-    addonsEl, giftEl, promoEl,
+    addonsEl,
     h('section', { class: 'card stack' }, h('h2', null, T('4. Your details')),
       h('div', { class: 'ticket-row' }, h('div', { class: 'cols' }, lab('c-first', T('First name'), bf), lab('c-last', T('Last name'), bl), lab('c-email', T('Email (we send the tickets here)'), be), lab('c-phone', T('Mobile phone'), bp))),
       page.waiver_text ? [h('h3', null, T('Waiver')), h('div', { class: 'waiver-box', tabindex: '0' }, page.waiver_text), h('label', { class: 'check-row', for: 'c-waiver' }, waiver, h('span', null, T('I have read the waiver. I accept it for myself and for any child under 18 in this order. Other adults in the order will sign at the mountain.')))] : null,
       h('label', { class: 'check-row', for: 'c-terms' }, terms, h('span', null, T('I understand tickets bought online are not refundable. If the mountain closes, I can call for help.'))),
       h('label', { class: 'check-row', for: 'c-news' }, news, h('span', null, `Email me news from ${page.mountain} (optional)`)),
       h('div', { class: 'hp' }, h('label', null, T('Leave this empty'), hp))),
-    h('section', { class: 'card stack paybar' }, totalEl, err, h('div', { class: 'row' }, pay)));
+    giftEl),
+    // The order summary: beside the form on a wide screen, stuck to the bottom on a phone.
+    h('aside', { class: 'shop-aside' }, h('section', { class: 'card stack paybar' }, h('h2', { class: 'sum-h' }, T('Your order')), totalEl, h('details', { class: 'promo-link' }, h('summary', null, T('Have a promo code?')), promoEl), err, h('div', { class: 'row' }, pay))));
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault(); showErr('');
@@ -388,6 +406,9 @@ async function showShop() {
   const firstOpen = (() => { for (let i = 0; i <= 365; i++) { const d = addDay(today, i); if (!closed(d)) return d; } return null; })();
   if (firstOpen) { shown = firstOpen.slice(0, 7); }
 
+  // Back from the card page without paying: let the basket go straight away (it held tickets and any promo use).
+  const back = qs.get('cancelled');
+  if (back && /^[0-9a-f]{32}$/.test(back)) call('POST', `/orders/${back}/abandon`).catch(() => {});
   root.append(hero(page, '', page.open ? T('Pick a day, choose your tickets, see the exact total, and pay by card. Your tickets arrive by email and on screen.') : T('Online sales are not open right now.')),
     shell(qs.get('cancelled') ? h('div', { class: 'card' }, h('strong', null, 'Payment cancelled. '), 'Nothing was charged. You can start again below.') : null,
       page.open ? form : h('section', { class: 'card stack' }, h('h2', null, T('Online sales are closed')), h('p', { class: 'muted' }, `Please buy at the ticket window${page.phone ? ` or call ${page.phone}` : ''}.`))),

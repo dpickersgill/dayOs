@@ -196,7 +196,14 @@ export function dialog(title, content, { wide = false, footer } = {}) {
     if (previous && previous.isConnected) previous.focus();
   }
   closeBtn.addEventListener('click', close);
-  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
+  // A tap outside closes the dialog only while nothing has been typed in it, so a stray tap never throws work away.
+  let dirty = false;
+  box.addEventListener('input', () => { dirty = true; });
+  overlay.addEventListener('mousedown', (e) => {
+    if (e.target !== overlay) return;
+    if (!dirty) { close(); return; }
+    box.classList.remove('nudge'); void box.offsetWidth; box.classList.add('nudge'); // a small shake: use Close or Cancel
+  });
   document.addEventListener('keydown', onKey);
   document.body.append(overlay);
   const first = box.querySelector('input:not([type=hidden]), select, textarea');

@@ -15,14 +15,18 @@ const columnExists = (conn, table, column) =>
   has(conn, 'SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?', [table, column]);
 const constraintExists = (conn, table, name) =>
   has(conn, 'SELECT 1 FROM information_schema.table_constraints WHERE table_schema = DATABASE() AND table_name = ? AND constraint_name = ?', [table, name]);
+const columnTypeHas = (conn, table, column, text) =>
+  has(conn, 'SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? AND column_type LIKE ?', [table, column, `%${text}%`]);
 const indexExists = (conn, table, name) =>
   has(conn, 'SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?', [table, name]);
 
 // Each step: [description, check that returns true when already applied, DDL to apply].
 // An index that forbids duplicates cannot be added while duplicates exist, so such a step is skipped (with a note) until they are cleaned up.
+let skipped = 0;
 const hasDuplicates = async (conn, table, col, where) => {
   const [r] = await conn.query(`SELECT 1 FROM \`${table}\` WHERE ${where} GROUP BY tenant_id, ${col} HAVING COUNT(*) > 1 LIMIT 1`);
   if (r.length) console.warn(`  Skipped a uniqueness rule on ${table}: some people already have two open rows there. Close the extras, then run the migration again.`);
+  if (r.length) skipped += 1;
   return r.length > 0;
 };
 
@@ -190,6 +194,20 @@ const patrolSteps = [
   ['tenants.shop_recovery', (c) => columnExists(c, 'tenants', 'shop_recovery'), 'ALTER TABLE tenants ADD COLUMN shop_recovery TINYINT(1) NOT NULL DEFAULT 0'],
   ['tenants.shop_change_hours', (c) => columnExists(c, 'tenants', 'shop_change_hours'), 'ALTER TABLE tenants ADD COLUMN shop_change_hours SMALLINT UNSIGNED NULL'],
   ['tenants.shop_change_fee_cents', (c) => columnExists(c, 'tenants', 'shop_change_fee_cents'), 'ALTER TABLE tenants ADD COLUMN shop_change_fee_cents INT UNSIGNED NOT NULL DEFAULT 0'],
+  ['users.mfa_failures', (c) => columnExists(c, 'users', 'mfa_failures'), 'ALTER TABLE users ADD COLUMN mfa_failures TINYINT UNSIGNED NOT NULL DEFAULT 0'],
+  ['users.mfa_locked_until', (c) => columnExists(c, 'users', 'mfa_locked_until'), 'ALTER TABLE users ADD COLUMN mfa_locked_until DATETIME NULL'],
+  ['platform_audit.actor', (c) => columnExists(c, 'platform_audit', 'actor'), 'ALTER TABLE platform_audit ADD COLUMN actor VARCHAR(100) NULL AFTER action'],
+  ['order_items.line_kind fee', (c) => columnTypeHas(c, 'order_items', 'line_kind', "'fee'"), "ALTER TABLE order_items MODIFY line_kind ENUM('ticket','lesson','rental','program','gift_card','fee') NOT NULL DEFAULT 'ticket'"],
+  ['order_items.label', (c) => columnExists(c, 'order_items', 'label'), 'ALTER TABLE order_items ADD COLUMN label VARCHAR(80) NULL'],
+  ['shop_changes.basis_cents', (c) => columnExists(c, 'shop_changes', 'basis_cents'), 'ALTER TABLE shop_changes ADD COLUMN basis_cents INT UNSIGNED NULL'],
+  ['order_refunds card status', (c) => columnExists(c, 'order_refunds', 'card_status'), [
+    "ALTER TABLE order_refunds ADD COLUMN card_status ENUM('pending','sent','failed') NULL, ADD COLUMN card_ref VARCHAR(255) NULL, ADD COLUMN card_key VARCHAR(100) NULL, ADD COLUMN card_error VARCHAR(255) NULL, ADD COLUMN card_refund_id VARCHAR(255) NULL",
+  ]],
+  ['order_refunds.till_id', (c) => columnExists(c, 'order_refunds', 'till_id'), 'ALTER TABLE order_refunds ADD COLUMN till_id BIGINT UNSIGNED NULL'],
+  ['tenants.quick_sale', (c) => columnExists(c, 'tenants', 'quick_sale'), 'ALTER TABLE tenants ADD COLUMN quick_sale TINYINT(1) NOT NULL DEFAULT 1'],
+  ['shop_orders.promo_code', (c) => columnExists(c, 'shop_orders', 'promo_code'), 'ALTER TABLE shop_orders ADD COLUMN promo_code VARCHAR(40) NULL'],
+  ['scans index by ticket', (c) => indexExists(c, 'scans', 'ix_scans_ticket'), 'ALTER TABLE scans ADD INDEX ix_scans_ticket (tenant_id, ticket_id)'],
+  ['tickets index by end date', (c) => indexExists(c, 'tickets', 'ix_tickets_valid_to'), 'ALTER TABLE tickets ADD INDEX ix_tickets_valid_to (tenant_id, valid_to)'],
   ['tenants.online_daily_limit', (c) => columnExists(c, 'tenants', 'online_daily_limit'), 'ALTER TABLE tenants ADD COLUMN online_daily_limit INT UNSIGNED NULL'],
   ['tenants.online_shop', (c) => columnExists(c, 'tenants', 'online_shop'), 'ALTER TABLE tenants ADD COLUMN online_shop TINYINT(1) NOT NULL DEFAULT 0'],
   ['tenants.shop_message', (c) => columnExists(c, 'tenants', 'shop_message'), 'ALTER TABLE tenants ADD COLUMN shop_message VARCHAR(500) NULL'],
@@ -285,6 +303,7 @@ async function main() {
     multipleStatements: true,
     ssl: config.db.sslOptions,
   });
+  await conn.query("SET time_zone = '+00:00'"); // the same clock as the app
   await conn.query(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'patrol.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'kiosk.sql'), 'utf8'));
@@ -309,6 +328,11 @@ async function main() {
   const numbered = await backfillCaseNumbers(conn);
   if (numbered) console.log(`Numbered ${numbered} existing incident report${numbered === 1 ? '' : 's'}`);
   await conn.end();
+  if (skipped) {
+    console.error(`Schema NOT complete on ${config.db.database}: ${applied} change${applied === 1 ? '' : 's'} applied, ${skipped} skipped (see the notes above). Fix them and run the migration again.`);
+    process.exitCode = 2;
+    return;
+  }
   console.log(`Schema up to date on ${config.db.database} (${applied} change${applied === 1 ? '' : 's'} applied)`);
 }
 

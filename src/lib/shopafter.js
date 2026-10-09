@@ -3,9 +3,10 @@
 // After the sale: moving a ticket to another day, the emails around a visit (basket reminder, day-before, thank you),
 // and telling the waitlist when a sold-out day opens up. The daily job calls runAll once a day.
 const { pool, tx, rows, one } = require('../db');
-const { conflict, bad, notFound } = require('./errors');
+const { conflict, bad, notFound, Unhonourable } = require('./errors');
 const { todayIn, addDays, dayRange } = require('./util');
 const { unitPrice } = require('./pricing');
+const { loadRules, applyTax } = require('./tax');
 const { allowedOn, dayName, daysText } = require('./saledays');
 const shopsale = require('./shopsale');
 const mailer = require('./mailer');
@@ -19,7 +20,8 @@ const day10 = (d) => String(d).slice(0, 10);
 // ---------------------------------------------------------------- moving a ticket to another day
 /**
  * Works out whether one ticket in a paid shop order can move to `newDate`, and what the guest owes.
- * Owed = fee + any rise in price. A lower price is not refunded. Returns { ticket, item, product, newPrice, due, fee }.
+ * Owed = the fee + any rise over the most the guest has paid for this ticket so far, plus tax on both. A lower price is
+ * not refunded. Returns { ticket, product, newPrice, lines, tax, taxes, due, basis }.
  */
 async function changeCheck(conn, tenant, shopRow, code, newDate) {
   if (tenant.shop_change_hours === null || tenant.shop_change_hours === undefined) throw conflict('This mountain does not allow date changes online. Please call.');
@@ -47,9 +49,16 @@ async function changeCheck(conn, tenant, shopRow, code, newDate) {
   if (shopsale.leftOn(use, tenant, product, newDate) < 1) throw conflict(`${product.name} is sold out for ${newDate}`);
   const base = await unitPrice(conn, tenant.id, product.id, t.tier, newDate); // a blackout day throws a 409 here
   const newPrice = shopsale.advance(product, today, newDate, base.cents).cents;
+  // What the guest has paid for this ticket so far: the original price, raised by any earlier paid change.
+  const prior = await one(conn, "SELECT basis_cents FROM shop_changes WHERE tenant_id = ? AND ticket_id = ? AND status = 'done' AND basis_cents IS NOT NULL ORDER BY id DESC LIMIT 1", [tenant.id, t.id]);
+  const paidSoFar = prior ? Math.max(prior.basis_cents, t.unit_price_cents) : t.unit_price_cents;
   const fee = Number(tenant.shop_change_fee_cents || 0);
-  const due = Math.max(0, newPrice - t.unit_price_cents) + fee;
-  return { ticket: t, product, newPrice, fee, due };
+  const rise = Math.max(0, newPrice - paidSoFar);
+  // The price difference is ticket money (taxed like a ticket); the fee is a fee. Both are recorded as fee lines.
+  const lines = [{ type: 'ticket', label: 'Price difference', unit: rise, cents: rise }, { type: 'fee', label: 'Date change fee', unit: fee, cents: fee }].filter((l) => l.cents > 0);
+  const { tax, taxes } = applyTax(lines, 0, await loadRules(conn, tenant.id));
+  const due = lines.reduce((n, l) => n + l.cents, 0) + tax;
+  return { ticket: t, product, newPrice, lines, tax, taxes, due, basis: Math.max(paidSoFar, newPrice) };
 }
 
 /** Moves the ticket now. Used for free changes and after the card payment lands. */
@@ -65,12 +74,12 @@ async function requestChange({ tenant, shopRow, code, newDate, successUrl, cance
     const c = await changeCheck(conn, tenant, shopRow, code, newDate);
     if (c.due === 0) {
       await applyChange(conn, tenant.id, c.ticket, newDate);
-      await conn.query("INSERT INTO shop_changes (tenant_id, shop_order_id, ticket_id, from_date, to_date, due_cents, status) VALUES (?, ?, ?, ?, ?, 0, 'done')", [tenant.id, shopRow.id, c.ticket.id, day10(c.ticket.valid_from), newDate]);
+      await conn.query("INSERT INTO shop_changes (tenant_id, shop_order_id, ticket_id, from_date, to_date, due_cents, basis_cents, status) VALUES (?, ?, ?, ?, ?, 0, ?, 'done')", [tenant.id, shopRow.id, c.ticket.id, day10(c.ticket.valid_from), newDate, c.basis]);
       await audit(conn, { auth: { tenantId: tenant.id, userId: null } }, 'shop_change', 'tickets', c.ticket.id, { from: day10(c.ticket.valid_from), to: newDate, due_cents: 0 });
       return { done: true, due_cents: 0 };
     }
     if (!stripe.enabled()) throw conflict('Card payment is not available right now. Please call.');
-    const [r] = await conn.query("INSERT INTO shop_changes (tenant_id, shop_order_id, ticket_id, from_date, to_date, due_cents) VALUES (?, ?, ?, ?, ?, ?)", [tenant.id, shopRow.id, c.ticket.id, day10(c.ticket.valid_from), newDate, c.due]);
+    const [r] = await conn.query("INSERT INTO shop_changes (tenant_id, shop_order_id, ticket_id, from_date, to_date, due_cents, basis_cents) VALUES (?, ?, ?, ?, ?, ?, ?)", [tenant.id, shopRow.id, c.ticket.id, day10(c.ticket.valid_from), newDate, c.due, c.basis]);
     const co = await stripe.createCheckout({
       amountCents: c.due, name: `${tenant.name}: change of day`, description: `${c.product.name}: ${day10(c.ticket.valid_from)} to ${newDate}`,
       email: shopRow.contact_email, reference: shopRow.reference,
@@ -91,31 +100,40 @@ async function handleChangeWebhook(event, obj) {
   }
   if (event.type !== 'checkout.session.completed' || obj.payment_status !== 'paid') return { ignored: true };
   let failed = null;
-  const out = await tx(async (conn) => {
-    const ch = await one(conn, 'SELECT * FROM shop_changes WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, id]);
-    if (!ch || ch.stripe_session_id !== obj.id) return { ignored: true };
-    if (ch.status === 'done') return { duplicate: true };
-    if (Number(obj.amount_total) !== ch.due_cents) { failed = 'the amount did not match'; return { problem: true }; }
-    const tenant = await one(conn, 'SELECT id, name, timezone, shop_change_hours, shop_change_fee_cents FROM tenants WHERE id = ?', [tenantId]);
-    const shopRow = await one(conn, 'SELECT * FROM shop_orders WHERE tenant_id = ? AND id = ?', [tenantId, ch.shop_order_id]);
-    try {
-      const to = day10(ch.to_date);
-      const c = await changeCheck(conn, tenant, shopRow, (await one(conn, 'SELECT code FROM tickets WHERE tenant_id = ? AND id = ?', [tenantId, ch.ticket_id])).code, to);
-      if (c.due > ch.due_cents) { failed = 'the price changed while you were paying'; return { problem: true }; }
-      await applyChange(conn, tenantId, c.ticket, to);
-      // The money is its own small order, so the card statement and the books stay in balance.
-      const orig = await one(conn, 'SELECT person_id FROM orders WHERE tenant_id = ? AND id = ?', [tenantId, shopRow.order_id]);
-      const [o] = await conn.query("INSERT INTO orders (tenant_id, person_id, user_id, status, subtotal_cents, discount_cents, tax_cents, total_cents, channel, payment_ref) VALUES (?, ?, NULL, 'paid', ?, 0, 0, ?, 'online', ?)", [tenantId, orig ? orig.person_id : null, ch.due_cents, ch.due_cents, obj.payment_intent]);
-      await conn.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents) VALUES (?, ?, NULL, 'ticket', ?, 'adult', 1, ?, ?, 0, 0)", [tenantId, o.insertId, orig ? orig.person_id : null, ch.due_cents, to]);
-      await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, processor) VALUES (?, ?, 'card', ?, ?, 'stripe')", [tenantId, o.insertId, ch.due_cents, obj.payment_intent]);
-      await conn.query("UPDATE shop_changes SET status = 'done', order_id = ? WHERE tenant_id = ? AND id = ?", [o.insertId, tenantId, id]);
-      await audit(conn, { auth: { tenantId, userId: null } }, 'shop_change', 'tickets', ch.ticket_id, { from: day10(ch.from_date), to, due_cents: ch.due_cents });
-      return { ok: true };
-    } catch (err) { if (err.status && err.status < 500) { failed = err.message; return { problem: true }; } throw err; }
-  });
+  let out;
+  try {
+    out = await tx(async (conn) => {
+      const ch = await one(conn, 'SELECT * FROM shop_changes WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, id]);
+      if (!ch || ch.stripe_session_id !== obj.id) return { ignored: true };
+      if (ch.status !== 'awaiting_payment') return { duplicate: true }; // a repeat, including one we refunded
+      if (Number(obj.amount_total) !== ch.due_cents) { failed = 'the amount did not match'; return { problem: true }; }
+      const tenant = await one(conn, 'SELECT id, name, timezone, shop_change_hours, shop_change_fee_cents FROM tenants WHERE id = ?', [tenantId]);
+      const shopRow = await one(conn, 'SELECT * FROM shop_orders WHERE tenant_id = ? AND id = ?', [tenantId, ch.shop_order_id]);
+      try {
+        const to = day10(ch.to_date);
+        const c = await changeCheck(conn, tenant, shopRow, (await one(conn, 'SELECT code FROM tickets WHERE tenant_id = ? AND id = ?', [tenantId, ch.ticket_id])).code, to);
+        if (c.due !== ch.due_cents) { failed = 'the price changed while you were paying'; return { problem: true }; }
+        await applyChange(conn, tenantId, c.ticket, to);
+        // The money is its own small order with "fee" lines (not tickets), so the card statement and the books stay in
+        // balance and ticket counts are not inflated.
+        const orig = await one(conn, 'SELECT person_id FROM orders WHERE tenant_id = ? AND id = ?', [tenantId, shopRow.order_id]);
+        const subtotal = c.lines.reduce((n, l) => n + l.cents, 0);
+        const [o] = await conn.query("INSERT INTO orders (tenant_id, person_id, user_id, status, subtotal_cents, discount_cents, tax_cents, total_cents, channel, payment_ref) VALUES (?, ?, NULL, 'paid', ?, 0, ?, ?, 'online', ?)", [tenantId, orig ? orig.person_id : null, subtotal, c.tax, c.due, obj.payment_intent]);
+        for (const l of c.lines) await conn.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, label, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents) VALUES (?, ?, NULL, 'fee', ?, ?, 'adult', 1, ?, ?, 0, ?)", [tenantId, o.insertId, l.label, orig ? orig.person_id : null, l.cents, to, l.tax || 0]);
+        for (const x of c.taxes) await conn.query('INSERT INTO order_taxes (tenant_id, order_id, name, rate_bps, amount_cents) VALUES (?, ?, ?, ?, ?)', [tenantId, o.insertId, x.name, x.rate_bps, x.amount_cents]);
+        await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, processor) VALUES (?, ?, 'card', ?, ?, 'stripe')", [tenantId, o.insertId, ch.due_cents, obj.payment_intent]);
+        await conn.query("UPDATE shop_changes SET status = 'done', order_id = ? WHERE tenant_id = ? AND id = ?", [o.insertId, tenantId, id]);
+        await audit(conn, { auth: { tenantId, userId: null } }, 'shop_change', 'tickets', ch.ticket_id, { from: day10(ch.from_date), to, due_cents: ch.due_cents });
+        return { ok: true };
+      } catch (err) { if (err.status && err.status < 500) throw new Unhonourable(err.message); throw err; }
+    });
+  } catch (err) {
+    if (!(err instanceof Unhonourable)) throw err;
+    failed = err.message; out = { problem: true }; // rolled back: nothing half-made is kept
+  }
   if (failed) {
-    await pool.query("UPDATE shop_changes SET status = 'refunded' WHERE tenant_id = ? AND id = ? AND status <> 'done'", [tenantId, id]);
     if (obj.payment_intent && stripe.enabled()) await stripe.refund({ paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), key: `shop-change-refund-${tenantId}-${id}` });
+    await pool.query("UPDATE shop_changes SET status = 'refunded' WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment'", [tenantId, id]);
     return { refunded: true };
   }
   return { ok: Boolean(out.ok), duplicate: out.duplicate, ignored: out.ignored };
@@ -125,8 +143,20 @@ async function handleChangeWebhook(event, obj) {
 const link = (base, slug, token) => `${base}/shop/${slug}${token ? `?order=${token}` : ''}`;
 const first = (name) => String(name || '').split(' ')[0] || 'there';
 
+/**
+ * Claims one email before sending it: only the run whose update changed the row sends, so two runs at once (a retry, a
+ * manual run) never send twice. If the send fails the claim is released, so the next run tries again.
+ */
+const COLS = new Set(['shop_orders.recovery_sent_at', 'shop_orders.reminder_sent_at', 'shop_orders.thanks_sent_at', 'shop_waitlist.notified_at']);
+async function claim(table, col, tenantId, id) {
+  if (!COLS.has(`${table}.${col}`)) throw new Error('unknown claim');
+  const [r] = await pool.query(`UPDATE ${table} SET ${col} = NOW() WHERE tenant_id = ? AND id = ? AND ${col} IS NULL`, [tenantId, id]);
+  return r.affectedRows === 1;
+}
+const release = (table, col, tenantId, id) => pool.query(`UPDATE ${table} SET ${col} = NULL WHERE tenant_id = ? AND id = ?`, [tenantId, id]);
+
 async function mail(tenant, to, subject, text, tag) {
-  const r = await mailer.send({ to, fromName: tenant.name, subject, text, tag });
+  const r = await mailer.send({ tenantId: tenant.id, to, fromName: tenant.name, subject, text, tag });
   return r.ok;
 }
 
@@ -139,11 +169,11 @@ async function runRecovery(tenant, base) {
      ORDER BY s.id LIMIT 200`, [tenant.id]);
   let sent = 0; const seen = new Set();
   for (const s of list) {
-    await pool.query('UPDATE shop_orders SET recovery_sent_at = NOW() WHERE tenant_id = ? AND id = ?', [tenant.id, s.id]);
+    if (!(await claim('shop_orders', 'recovery_sent_at', tenant.id, s.id))) continue;
     if (seen.has(s.contact_email)) continue; seen.add(s.contact_email);
     const text = [`Hi ${first(s.contact_name)},`, '', `You started an order at ${tenant.name} but did not finish paying, so nothing was charged and no tickets were held.`, '',
       'If you still want to go, pick your day again here:', link(base, tenant.slug), '', 'We will not send this again.'].join('\n');
-    if (await mail(tenant, s.contact_email, `Still planning a day at ${tenant.name}?`, text, 'shop-recovery')) sent += 1;
+    if (await mail(tenant, s.contact_email, `Still planning a day at ${tenant.name}?`, text, 'shop-recovery')) sent += 1; else await release('shop_orders', 'recovery_sent_at', tenant.id, s.id);
   }
   return sent;
 }
@@ -156,11 +186,11 @@ async function runReminders(tenant, base) {
      WHERE s.tenant_id = ? AND s.status = 'paid' AND s.reminder_sent_at IS NULL AND t.status = 'active' AND t.valid_from <= ? AND t.valid_to >= ? LIMIT 500`, [tenant.id, tomorrow, tomorrow]);
   let sent = 0;
   for (const s of list) {
-    await pool.query('UPDATE shop_orders SET reminder_sent_at = NOW() WHERE tenant_id = ? AND id = ?', [tenant.id, s.id]);
+    if (!(await claim('shop_orders', 'reminder_sent_at', tenant.id, s.id))) continue;
     const text = [`Hi ${first(s.contact_name)},`, '', `See you tomorrow at ${tenant.name}.`, tenant.address ? `Find us: ${tenant.address}` : '', '',
       'Your tickets (open on your phone and turn the brightness up at the gate):', link(base, tenant.slug, s.view_token), '',
       tenant.phone ? `Questions? Call ${tenant.phone}.` : ''].filter((x) => x !== null).join('\n');
-    if (await mail(tenant, s.contact_email, `Tomorrow at ${tenant.name}`, text, 'shop-reminder')) sent += 1;
+    if (await mail(tenant, s.contact_email, `Tomorrow at ${tenant.name}`, text, 'shop-reminder')) sent += 1; else await release('shop_orders', 'reminder_sent_at', tenant.id, s.id);
   }
   return sent;
 }
@@ -173,10 +203,10 @@ async function runThanks(tenant, base) {
        AND (SELECT MAX(t.valid_to) FROM order_items i JOIN tickets t ON t.order_item_id = i.id AND t.tenant_id = i.tenant_id WHERE i.order_id = s.order_id AND i.tenant_id = s.tenant_id) = ? LIMIT 500`, [tenant.id, yesterday]);
   let sent = 0;
   for (const s of list) {
-    await pool.query('UPDATE shop_orders SET thanks_sent_at = NOW() WHERE tenant_id = ? AND id = ?', [tenant.id, s.id]);
+    if (!(await claim('shop_orders', 'thanks_sent_at', tenant.id, s.id))) continue;
     const text = [`Hi ${first(s.contact_name)},`, '', `Thank you for skiing and riding with us at ${tenant.name}. We hope it was a great day.`, '',
       'Planning the next one? Buy tickets online and skip the line:', link(base, tenant.slug), '', 'You get this because you asked for our news when you bought. Reply to this email and ask us to stop any time.'].join('\n');
-    if (await mail(tenant, s.contact_email, `Thanks for visiting ${tenant.name}`, text, 'shop-thanks')) sent += 1;
+    if (await mail(tenant, s.contact_email, `Thanks for visiting ${tenant.name}`, text, 'shop-thanks')) sent += 1; else await release('shop_orders', 'thanks_sent_at', tenant.id, s.id);
   }
   return sent;
 }
@@ -191,9 +221,9 @@ async function runWaitlist(tenant, base) {
     if (!menus.has(d)) menus.set(d, (await shopsale.dayMenu(pool, tenant, d)).filter((m) => m.available && m.kind !== 'season_pass'));
     const open = menus.get(d);
     if (!open.some((m) => m.left === null || m.left >= w.party_size)) continue;
-    await pool.query('UPDATE shop_waitlist SET notified_at = NOW() WHERE tenant_id = ? AND id = ?', [tenant.id, w.id]);
+    if (!(await claim('shop_waitlist', 'notified_at', tenant.id, w.id))) continue;
     const text = [`Hi ${first(w.name)},`, '', `Good news: tickets for ${d} are on sale again at ${tenant.name}. They can go quickly.`, '', link(base, tenant.slug), ''].join('\n');
-    if (await mail(tenant, w.email, `Tickets are back for ${d}`, text, 'shop-waitlist')) sent += 1;
+    if (await mail(tenant, w.email, `Tickets are back for ${d}`, text, 'shop-waitlist')) sent += 1; else await release('shop_waitlist', 'notified_at', tenant.id, w.id);
   }
   return sent;
 }

@@ -39,8 +39,7 @@ export async function render(root, params = []) {
   if (params[0] === 'case' && ONE.test(params[1] || '')) {
     const { data: roster } = await get('/patrol/team');
     await renderCase(root, Number(params[1]), { roster, canLead: me.can_lead });
-    root.append(newCaseButton());
-    return;
+    return; // no floating New case button over a case: it covered the case's own buttons
   }
   const printPages = { handoff: renderHandoff, refusal: renderRefusal, takehome: renderTakehome };
   if (printPages[params[0]] && ONE.test(params[1] || '') && ONE.test(params[2] || '')) {
@@ -190,18 +189,30 @@ async function drawCases(box, { canAdmin } = {}) {
 const PATIENT_TYPES = ['injury', 'collision', 'medical'];
 async function newCase() {
   const { data: trails } = await get('/schedule/trails?limit=500');
-  const category = select(CATEGORIES, 'injury', { name: 'category' });
+  // Built for gloves and cold hands: big buttons for type and severity, trail first, and the spot only when it adds something.
+  const segmented = (name, options, value, ariaLabel) => {
+    const hidden = h('input', { type: 'hidden', name, value });
+    const btns = options.map((o) => h('button', { type: 'button', class: 'btn big-choice', 'aria-pressed': String(o === value), onclick: () => {
+      hidden.value = o; for (const b of btns) b.setAttribute('aria-pressed', String(b.dataset.value === o));
+    }, dataset: { value: o } }, label(o)));
+    return h('div', { class: 'choice-grid', role: 'group', 'aria-label': ariaLabel }, btns, hidden);
+  };
+  const trail = select([['', 'Not on a trail'], ...trails.map((t) => [t.id, t.name])], '', { name: 'trail_id' });
+  const where = input({ name: 'location', maxlength: 255, placeholder: 'For example "Top of Lower Ridge, skier\'s left"' });
   const summary = input({ name: 'summary', maxlength: 500, placeholder: 'Filled in for you if you leave it blank' });
-  formDialog('New case', h('div', { class: 'form' },
-    field('Type', category), field('Severity', select(SEVERITY, 'minor', { name: 'severity' })),
-    h('div', { class: 'wide' }, field('Where', input({ name: 'location', required: true, maxlength: 255, placeholder: 'Describe the spot, such as "Top of Lower Ridge"' }))),
-    field('Trail', select([['', 'Not on a trail'], ...trails.map((t) => [t.id, t.name])], '', { name: 'trail_id' })),
-    field('When', input({ type: 'datetime-local', name: 'occurred_at', value: nowInput(), required: true })),
-    h('div', { class: 'wide' }, field('One-line summary', summary, 'Optional. If you leave it, the first patient\'s chief complaint becomes the summary.'))),
+  formDialog('New case', h('div', { class: 'stack' },
+    h('div', { class: 'field' }, h('span', null, 'Type'), segmented('category', CATEGORIES, 'injury', 'Type')),
+    h('div', { class: 'field' }, h('span', null, 'Severity'), segmented('severity', SEVERITY, 'minor', 'Severity')),
+    h('div', { class: 'form' }, field('Trail', trail), field('Where exactly (optional when a trail is picked)', where)),
+    h('details', null, h('summary', null, 'Time and summary (filled in for you)'), h('div', { class: 'form' },
+      field('When', input({ type: 'datetime-local', name: 'occurred_at', value: nowInput(), required: true })),
+      h('div', { class: 'wide' }, field('One-line summary', summary, 'Optional. If you leave it, the first patient\'s chief complaint becomes the summary.'))))),
   async (fd) => {
-    const where = val(fd, 'location');
+    const trailName = trail.value ? trail.options[trail.selectedIndex].textContent : '';
+    const spot = val(fd, 'location') || trailName;
+    if (!spot) throw new Error('Pick the trail or say where it is');
     const cat = val(fd, 'category');
-    const c = await post('/patrol/incidents', compact({ occurred_at: val(fd, 'occurred_at'), location: where, trail_id: val(fd, 'trail_id') ? Number(val(fd, 'trail_id')) : null, category: cat, severity: val(fd, 'severity'), summary: val(fd, 'summary') || `${label(cat)} at ${where}` }));
+    const c = await post('/patrol/incidents', compact({ occurred_at: val(fd, 'occurred_at'), location: spot, trail_id: val(fd, 'trail_id') ? Number(val(fd, 'trail_id')) : null, category: cat, severity: val(fd, 'severity'), summary: val(fd, 'summary') || `${label(cat)} at ${spot}` }));
     toast(`Case ${c.case_number} started`);
     flow.addPatient = PATIENT_TYPES.includes(cat);
     flow.vitalsNext = flow.addPatient;

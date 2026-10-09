@@ -20,6 +20,10 @@ const pool = mysql.createPool({
   ssl: config.db.sslOptions,
 });
 
+// Every timestamp the app writes and compares is UTC (dayRange turns a mountain's local day into UTC), so each connection
+// uses UTC whatever the database server's own setting is.
+pool.pool.on('connection', (conn) => { conn.query("SET time_zone = '+00:00'"); });
+
 /**
  * Run fn(conn) inside a transaction; commits on success, rolls back on any error.
  * When the database picks this transaction as the loser of a lock collision (a "deadlock"), nothing was saved, so it is

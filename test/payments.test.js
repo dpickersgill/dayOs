@@ -215,7 +215,7 @@ test('cancelling a paid lesson refunds 100% well ahead, 50% in the middle window
   assert.equal(c.body.refund_percent, 0);
   assert.equal(c.body.refund_cents, 0);
   assert.equal(calls.slice(before).some((x) => x.path === '/v1/refunds'), false);
-  assert.equal((await pub('GET', `/requests/${info.reference}?email=pam@x.test`)).body.status, 'cancelled');
+  assert.equal((await pub('POST', `/requests/${info.reference}/status`, { body: { email: 'pam@x.test' } })).body.status, 'cancelled');
 });
 
 test('card payment is off until switched on, and another mountain cannot confirm this one\'s request', async () => {

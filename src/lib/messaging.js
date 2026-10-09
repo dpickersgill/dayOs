@@ -26,7 +26,7 @@ const AUDIENCES = [
 ];
 
 // ---------------------------------------------------------------- unsubscribe links
-const sign = (payload) => crypto.createHmac('sha256', config.jwtSecret).update(`unsub:${payload}`).digest('hex').slice(0, 32);
+const sign = (payload) => crypto.createHmac('sha256', config.linkSecret).update(`unsub:${payload}`).digest('hex').slice(0, 32);
 const unsubToken = (tenantId, personId, channel) => { const p = `${tenantId}.${personId}.${channel}`; return `${p}.${sign(p)}`; };
 function readUnsub(token) {
   const m = /^(\d{1,12})\.(\d{1,12})\.(email|sms)\.([a-f0-9]{32})$/.exec(String(token || ''));
@@ -96,7 +96,8 @@ const isSandbox = (tenantId) => sandbox.isSandbox(tenantId);
 /** Sends one message and writes its log row. Returns 'sent' | 'failed' | 'duplicate'. Never throws. */
 async function deliver({ tenant, campaign, person, kind, refId, channel, build, base }) {
   // A reminder that failed (not a campaign message) may be tried again on the next run.
-  if (kind !== 'campaign') await pool.query("DELETE FROM message_log WHERE tenant_id = ? AND kind = ? AND ref_id = ? AND person_id = ? AND channel = ? AND status = 'failed' AND error <> 'sending' AND created_at < NOW() - INTERVAL 1 HOUR", [tenant.id, kind, refId || 0, person.id, channel]);
+  // A failed reminder is tried again after an hour; so is a claim left 'sending' by a server that stopped mid-send.
+  if (kind !== 'campaign') await pool.query("DELETE FROM message_log WHERE tenant_id = ? AND kind = ? AND ref_id = ? AND person_id = ? AND channel = ? AND status = 'failed' AND created_at < NOW() - INTERVAL 1 HOUR", [tenant.id, kind, refId || 0, person.id, channel]);
   const [claim] = await pool.query(
     "INSERT IGNORE INTO message_log (tenant_id, campaign_id, person_id, kind, ref_id, channel, to_addr, status, error) VALUES (?, ?, ?, ?, ?, ?, ?, 'failed', 'sending')",
     [tenant.id, campaign ? campaign.id : null, person.id, kind, refId || 0, channel, person.addr],
@@ -106,9 +107,9 @@ async function deliver({ tenant, campaign, person, kind, refId, channel, build, 
   if (await isSandbox(tenant.id)) r = { ok: false, error: 'Demo mountains do not send messages' };
   else if (channel === 'email') {
     const m = build();
-    r = await mailer.send({ to: person.addr, fromName: tenant.name, replyTo: tenant.reply_to || undefined, subject: m.subject, text: m.text, html: m.html, tag: `msg-${kind}`,
+    r = await mailer.send({ tenantId: tenant.id, stream: kind === 'campaign' ? 'broadcast' : undefined, to: person.addr, fromName: tenant.name, replyTo: tenant.reply_to || undefined, subject: m.subject, text: m.text, html: m.html, tag: `msg-${kind}`,
       headers: m.unsubscribe ? [{ Name: 'List-Unsubscribe', Value: `<${m.unsubscribe}>` }] : undefined });
-  } else r = await sms.send({ to: person.addr, body: build() });
+  } else r = await sms.send({ tenantId: tenant.id, to: person.addr, body: build() });
   await pool.query('UPDATE message_log SET status = ?, error = ? WHERE tenant_id = ? AND id = ?', [r.ok ? 'sent' : 'failed', r.ok ? null : r.error, tenant.id, claim.insertId]);
   return r.ok ? 'sent' : 'failed';
 }

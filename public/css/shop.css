@@ -77,3 +77,21 @@
 
 .change { border-top: 1px solid var(--line); padding-top: 8px; width: 100%; text-align: left; }
 .change summary { cursor: pointer; font-weight: 600; }
+
+/* the chosen day: price in white so it reads on the dark background */
+.cal-day.on .cal-p, .cal-day.on .cal-p.few { color: #fff; }
+
+/* Desktop: the form on the left, the order summary on the right, staying in view */
+.shop-grid { display: grid; gap: 16px; }
+.shop-main { min-width: 0; }
+.paybar .sum-h { font-size: 1.125rem; }
+.promo-link > summary { cursor: pointer; color: var(--blue); font-weight: 600; }
+@media (min-width: 1000px) {
+  .shop-grid { grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
+  .shop-aside { position: sticky; top: 16px; }
+  .shop-aside .totals { justify-items: start; }
+}
+
+#shop .layout { max-width: 1180px; }
+@media (min-width: 960px) { #shop .layout { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 999px) { .shop-aside { display: contents; } }

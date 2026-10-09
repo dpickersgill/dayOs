@@ -93,7 +93,9 @@ router.post('/calendar', requireRole('manager'), validate(applySchema), async (r
 
 // ---------------------------------------------------------------- sales pace and funnel
 const sumRow = async (tenantId, startUtc, endUtc) => {
-  const r = await one(pool, "SELECT COUNT(DISTINCT o.id) AS orders, COALESCE(SUM(o.total_cents), 0) AS revenue FROM orders o WHERE o.tenant_id = ? AND o.channel = 'online' AND o.status = 'paid' AND o.created_at >= ? AND o.created_at < ?", [tenantId, startUtc, endUtc]);
+  // Revenue includes date-change fees; the order count does not (a fee is not a new booking).
+  const r = await one(pool, `SELECT COUNT(DISTINCT CASE WHEN EXISTS (SELECT 1 FROM order_items x WHERE x.tenant_id = o.tenant_id AND x.order_id = o.id AND x.line_kind <> 'fee') THEN o.id END) AS orders,
+      COALESCE(SUM(o.total_cents), 0) AS revenue FROM orders o WHERE o.tenant_id = ? AND o.channel = 'online' AND o.status = 'paid' AND o.created_at >= ? AND o.created_at < ?`, [tenantId, startUtc, endUtc]);
   const t = await one(pool, "SELECT COUNT(*) AS tickets FROM tickets t JOIN order_items i ON i.id = t.order_item_id AND i.tenant_id = t.tenant_id JOIN orders o ON o.id = i.order_id AND o.tenant_id = i.tenant_id WHERE t.tenant_id = ? AND o.channel = 'online' AND o.status = 'paid' AND t.status <> 'void' AND o.created_at >= ? AND o.created_at < ?", [tenantId, startUtc, endUtc]);
   return { orders: Number(r.orders), revenue_cents: Number(r.revenue), tickets: Number(t.tickets) };
 };

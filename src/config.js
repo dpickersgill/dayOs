@@ -37,6 +37,14 @@ module.exports = {
   map: { layers: mapLayers },
   port: Number(env.PORT || 8080),
   jwtSecret: env.JWT_SECRET || 'dev-only-secret-change-me-dev-only-secret',
+  // Separate keys so sign-in tokens can be rotated on their own. Each falls back to JWT_SECRET, which is what was used
+  // before these existed: before rotating JWT_SECRET, set all three to its current value (see RUNBOOK.md).
+  //   TOTP_KEY     encrypts two-step sign-in secrets and recovery codes
+  //   LINK_SECRET  signs unsubscribe links in emails and texts
+  //   KIOSK_SECRET signs staff badges and kiosk sessions
+  totpKey: env.TOTP_KEY || env.JWT_SECRET || 'dev-only-secret-change-me-dev-only-secret',
+  linkSecret: env.LINK_SECRET || env.JWT_SECRET || 'dev-only-secret-change-me-dev-only-secret',
+  kioskSecret: env.KIOSK_SECRET || env.JWT_SECRET || 'dev-only-secret-change-me-dev-only-secret',
   jwtTtl: env.JWT_TTL || '8h',
   // Required to create a new tenant (mountain). Leave unset to disable the endpoint.
   bootstrapKey: env.BOOTSTRAP_KEY || '',

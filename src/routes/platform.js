@@ -1,7 +1,7 @@
 'use strict';
 
 // The operator's console: add mountains, pause them, choose which apps each one has, set a storage limit and reset an owner's password.
-// Every call needs the platform key (the BOOTSTRAP_KEY setting) in the X-Platform-Key header. A mountain's own logins never work here.
+// Every call needs the platform key (the BOOTSTRAP_KEY setting) or a console session (see below). A mountain's own logins never work here.
 const crypto = require('crypto');
 const express = require('express');
 const bcrypt = require('bcryptjs');
@@ -11,6 +11,7 @@ const { z, validate, paramId, partialOf } = require('../lib/util');
 const { AppError, bad, forbidden, notFound } = require('../lib/errors');
 const M = require('../lib/modules');
 const sandbox = require('../lib/sandbox');
+const totp = require('../lib/totp');
 
 const router = express.Router();
 
@@ -18,14 +19,54 @@ const slug = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/, 'Lowercase
 const password = z.string().min(10, 'Use at least 10 characters').max(200);
 const digest = (s) => crypto.createHash('sha256').update(String(s)).digest();
 
+// How the console is protected (RUNBOOK.md, "Platform console"):
+//   - PLATFORM_ALLOW_IPS (optional): comma-separated addresses that may use the console at all.
+//   - PLATFORM_TOTP_SECRET (optional, base32): when set, the key alone is not enough. The operator signs in with the key,
+//     a six-digit code from an authenticator app and their name, and gets a session that lasts 2 hours. Every change is
+//     recorded with that name.
+//   Without PLATFORM_TOTP_SECRET the key works alone, as before.
+const SESSION_HOURS = 2;
+let lastStep = -1; // a code works once
+const keyOk = (supplied) => Boolean(config.bootstrapKey) && crypto.timingSafeEqual(digest(supplied || ''), digest(config.bootstrapKey));
+const sessionSig = (body) => crypto.createHmac('sha256', `platform-session:${config.bootstrapKey}`).update(body).digest('base64url');
+function makeSession(name) {
+  const body = Buffer.from(JSON.stringify({ n: name, exp: Date.now() + SESSION_HOURS * 3600_000 })).toString('base64url');
+  return `${body}.${sessionSig(body)}`;
+}
+function readSession(token) {
+  const [body, sig] = String(token || '').split('.');
+  if (!body || !sig) return null;
+  const want = sessionSig(body);
+  if (sig.length !== want.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return null;
+  try { const p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')); return p.exp > Date.now() ? p : null; } catch (_) { return null; }
+}
+const allowedIps = () => String(process.env.PLATFORM_ALLOW_IPS || '').split(',').map((x) => x.trim()).filter(Boolean);
+
 router.use((req, _res, next) => {
-  const expected = config.bootstrapKey;
-  const supplied = req.get('x-platform-key') || req.get('x-bootstrap-key') || '';
-  if (!expected || !crypto.timingSafeEqual(digest(supplied), digest(expected))) return next(forbidden('That platform key is not right'));
+  const ips = allowedIps();
+  if (ips.length && !ips.includes(req.ip)) return next(forbidden('The platform console is not open from this address'));
+  if (req.method === 'POST' && req.path === '/session') return next();
+  const session = readSession(req.get('x-platform-session'));
+  if (session && config.bootstrapKey) { req.operator = session.n; return next(); } // sessions are signed with the key, so a new key ends them
+  if (process.env.PLATFORM_TOTP_SECRET) return next(forbidden('Sign in to the console again'));
+  if (!keyOk(req.get('x-platform-key') || req.get('x-bootstrap-key'))) return next(forbidden('That platform key is not right'));
+  req.operator = String(req.get('x-operator') || '').slice(0, 100) || null;
   return next();
 });
 
-const log = (conn, tenantId, action, detail) => conn.query('INSERT INTO platform_audit (tenant_id, action, detail) VALUES (?, ?, ?)', [tenantId ?? null, action, detail ? JSON.stringify(detail) : null]);
+/** Opens a console session: the platform key, plus a code from the authenticator app when PLATFORM_TOTP_SECRET is set. */
+router.post('/session', validate(z.object({ key: z.string().min(1).max(500), name: z.string().trim().min(1).max(100), code: z.string().max(10).optional() })), async (req, res) => {
+  if (!keyOk(req.body.key)) throw forbidden('That platform key is not right');
+  const secret = process.env.PLATFORM_TOTP_SECRET;
+  const step = secret ? totp.verify(secret, req.body.code) : null;
+  if (secret && step === null) throw forbidden('That code is not right');
+  if (secret && step <= lastStep) throw forbidden('That code was just used. Wait for the next one.');
+  if (secret) lastStep = step;
+  await pool.query('INSERT INTO platform_audit (tenant_id, action, actor, detail) VALUES (NULL, ?, ?, NULL)', ['sign_in', req.body.name]);
+  res.json({ session: makeSession(req.body.name), hours: SESSION_HOURS, two_step: Boolean(secret) });
+});
+
+const log = (conn, req, tenantId, action, detail) => conn.query('INSERT INTO platform_audit (tenant_id, action, actor, detail) VALUES (?, ?, ?, ?)', [tenantId ?? null, action, req.operator || null, detail ? JSON.stringify(detail) : null]);
 
 async function usage(ids) {
   if (!ids.length) return new Map();
@@ -54,9 +95,9 @@ router.get('/sandboxes', async (_req, res) => {
   const [[c]] = await pool.query('SELECT COUNT(*) AS n FROM tenants WHERE sandbox_expires_at IS NOT NULL');
   res.json({ active: Number(c.n), data: data.map((r) => ({ ...r, active: Boolean(Number(r.active)) })) });
 });
-router.post('/sandboxes/purge', async (_req, res) => {
+router.post('/sandboxes/purge', async (req, res) => {
   const removed = await sandbox.purgeExpired();
-  await log(pool, null, 'purge_demos', { removed });
+  await log(pool, req, null, 'purge_demos', { removed });
   res.json({ removed });
 });
 
@@ -67,7 +108,7 @@ router.get('/tenants/:id', async (req, res) => {
   M.invalidate(id);
   const used = await usage([id]);
   const users = await rows(pool, "SELECT id, email, role, active, totp_enabled FROM users WHERE tenant_id = ? AND role IN ('owner','manager') ORDER BY role, email", [id]);
-  const history = await rows(pool, 'SELECT at, action, detail FROM platform_audit WHERE tenant_id = ? ORDER BY id DESC LIMIT 30', [id]);
+  const history = await rows(pool, 'SELECT at, action, actor, detail FROM platform_audit WHERE tenant_id = ? ORDER BY id DESC LIMIT 30', [id]);
   res.json({ ...t, storage_used_mb: Math.round(((used.get(id) || 0) / 1048576) * 10) / 10, modules: await M.enabledKeys(id), users, history });
 });
 
@@ -87,7 +128,7 @@ router.post('/tenants', validate(z.object({
     await conn.query('INSERT INTO users (tenant_id, person_id, email, password_hash, role) VALUES (?, ?, ?, ?, ?)', [t.insertId, p.insertId, b.owner.email, hash, 'owner']);
     const on = M.apply({}, b.modules || {});
     for (const k of M.KEYS) await conn.query('INSERT INTO tenant_modules (tenant_id, module, enabled) VALUES (?, ?, ?)', [t.insertId, k, on.includes(k) ? 1 : 0]);
-    await log(conn, t.insertId, 'create', { slug: b.slug, apps: on });
+    await log(conn, req, t.insertId, 'create', { slug: b.slug, apps: on });
     return { id: t.insertId, slug: b.slug };
   });
   res.status(201).json(created);
@@ -102,7 +143,7 @@ router.patch('/tenants/:id', validate(partialOf({
   if (!keys.length) throw bad('Nothing to change');
   const [r] = await pool.query(`UPDATE tenants SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, [...keys.map((k) => req.body[k]), id]);
   if (!r.affectedRows) throw notFound('Mountain');
-  await log(pool, id, keys.includes('status') ? req.body.status === 'suspended' ? 'pause' : 'resume' : 'edit', req.body);
+  await log(pool, req, id, keys.includes('status') ? req.body.status === 'suspended' ? 'pause' : 'resume' : 'edit', req.body);
   M.invalidate(id);
   res.json({ ok: true });
 });
@@ -120,7 +161,7 @@ router.put('/tenants/:id/modules', validate(z.object({ modules: z.record(z.strin
     const on = M.apply(want, req.body.modules);
     for (const k of M.KEYS) await conn.query('INSERT INTO tenant_modules (tenant_id, module, enabled) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)', [id, k, on.includes(k) ? 1 : 0]);
     const asked = Object.keys(req.body.modules).filter((k) => on.includes(k) !== req.body.modules[k]);
-    await log(conn, id, 'apps', { turned_on: on.filter((k) => !before.includes(k)), turned_off: before.filter((k) => !on.includes(k)) });
+    await log(conn, req, id, 'apps', { turned_on: on.filter((k) => !before.includes(k)), turned_off: before.filter((k) => !on.includes(k)) });
     return { modules: on, not_applied: asked };
   });
   M.invalidate(id);
@@ -139,13 +180,13 @@ router.post('/tenants/:id/reset-password', validate(z.object({ user_id: z.number
       await conn.query('UPDATE users SET totp_enabled = 0, totp_secret = NULL, totp_last_step = NULL WHERE id = ? AND tenant_id = ?', [u.id, id]);
       await conn.query('DELETE FROM user_recovery_codes WHERE user_id = ?', [u.id]);
     }
-    await log(conn, id, 'password_reset', { user_id: u.id, cleared_two_step: req.body.clear_two_step });
+    await log(conn, req, id, 'password_reset', { user_id: u.id, cleared_two_step: req.body.clear_two_step });
   });
   res.json({ ok: true });
 });
 
 router.get('/audit', async (_req, res) => {
-  res.json({ data: await rows(pool, 'SELECT a.at, a.action, a.detail, t.slug FROM platform_audit a LEFT JOIN tenants t ON t.id = a.tenant_id ORDER BY a.id DESC LIMIT 100') });
+  res.json({ data: await rows(pool, 'SELECT a.at, a.action, a.actor, a.detail, t.slug FROM platform_audit a LEFT JOIN tenants t ON t.id = a.tenant_id ORDER BY a.id DESC LIMIT 100') });
 });
 
 module.exports = router;

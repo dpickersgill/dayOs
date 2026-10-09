@@ -150,6 +150,7 @@ async function mountainForm() {
   const cancelNote = input({ name: 'cancel_note', maxlength: 500, value: t.cancel_note || '', placeholder: 'Optional extra line, for example: Groups of 6 or more, call us to change.' });
   const bookUrl = `${location.origin}/book/${t.slug}`;
   const weeklyOn = h('input', { type: 'checkbox', name: 'weekly_report', checked: t.weekly_report !== false });
+  const quickOn = h('input', { type: 'checkbox', name: 'quick_sale', checked: t.quick_sale !== false });
   const shopOn = h('input', { type: 'checkbox', name: 'online_shop', checked: Boolean(t.online_shop) });
   const shopMsg = input({ name: 'shop_message', maxlength: 500, value: t.shop_message || '', placeholder: 'For example: Show the barcode on your phone at the gate. No printing needed.' });
   const recov = h('input', { type: 'checkbox', checked: Boolean(t.shop_recovery) });
@@ -183,6 +184,7 @@ async function mountainForm() {
         field('Requests close this many hours before a lesson', notice),
         field('Guests can cancel online up to this many hours before', cancelHrs),
         field('Message shown at the top of the page', bookMsg))),
+    h('label', { class: 'check' }, quickOn, ' Quick sale at the ticket window: day tickets, punch cards and vouchers can be sold without a name (season passes, lessons and rentals always need one)'),
     h('label', { class: 'check' }, weeklyOn, ' Email the weekly report to owners and managers every Monday (also in Money > Weekly report)'),
     h('div', { class: 'stack', 'data-section': 'online-shop' },
       h('h3', null, 'Online shop (tickets and passes)'),
@@ -206,7 +208,7 @@ async function mountainForm() {
       const body = { name: name.value.trim(), address: address.value.trim() || null, phone: phone.value.trim() || null, receipt_footer: footer.value.trim() || null,
         waiver_text: waiver.value.trim() || null, comp_counter_limit_cents: limit, scan_passback_seconds: Number(passback.value || 0),
         online_booking: booking.checked, booking_notice_hours: Number(notice.value || 0), cancel_hours: Number(cancelHrs.value || 0), booking_message: bookMsg.value.trim() || null,
-        online_payment: payOn.checked, online_shop: shopOn.checked, online_daily_limit: shopLimit.value ? Number(shopLimit.value) : null, shop_recovery: recov.checked, shop_change_hours: chgOn.checked ? Number(chgHours.value || 0) : null, shop_change_fee_cents: Math.max(0, toCents(chgFee.value) || 0), weekly_report: weeklyOn.checked, shop_message: shopMsg.value.trim() || null, refund_full_hours: Number(fullHrs.value || 0), refund_half_hours: Number(halfHrs.value || 0), refund_half_percent: Number(halfPct.value || 0), cancel_note: cancelNote.value.trim() || null };
+        online_payment: payOn.checked, online_shop: shopOn.checked, online_daily_limit: shopLimit.value ? Number(shopLimit.value) : null, shop_recovery: recov.checked, shop_change_hours: chgOn.checked ? Number(chgHours.value || 0) : null, shop_change_fee_cents: Math.max(0, toCents(chgFee.value) || 0), weekly_report: weeklyOn.checked, quick_sale: quickOn.checked, shop_message: shopMsg.value.trim() || null, refund_full_hours: Number(fullHrs.value || 0), refund_half_hours: Number(halfHrs.value || 0), refund_half_percent: Number(halfPct.value || 0), cancel_note: cancelNote.value.trim() || null };
       if (isOwner) body.require_mfa = mfa.checked;
       await put('/tenant/profile', body);
       toast('Saved');

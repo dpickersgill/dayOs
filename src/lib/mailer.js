@@ -6,14 +6,28 @@
 //   POSTMARK_STREAM         message stream, default "outbound" (use a broadcast stream for bulk mail)
 //   POSTMARK_API_BASE       only for automated tests
 const env = process.env;
+const { isSandbox } = require('./sandbox');
+const { logFailure } = require('./jobs');
 const settings = { apiBase: env.POSTMARK_API_BASE || 'https://api.postmarkapp.com' };
 const token = () => env.POSTMARK_SERVER_TOKEN || '';
 const from = () => env.MAIL_FROM || '';
 const enabled = () => Boolean(token() && from());
 
-/** Returns { ok: true, id } or { ok: false, error } and never throws, so one bad address cannot stop a batch. */
-async function send({ to, fromName, replyTo, subject, text, html, tag, headers }) {
+/**
+ * Returns { ok: true, id } or { ok: false, error } and never throws, so one bad address cannot stop a batch.
+ * tenantId is required: demo (sandbox) mountains never send, whoever asks. stream 'broadcast' is for marketing campaigns,
+ * which Postmark requires to be kept apart from tickets, reminders and patrol mail. Every failure is logged.
+ */
+async function send({ tenantId, to, fromName, replyTo, subject, text, html, tag, headers, stream }) {
   if (!enabled()) return { ok: false, error: 'Email is not set up' };
+  if (!tenantId) { logFailure({ job: 'email', tag, message: 'send without a mountain' }); return { ok: false, error: 'No mountain given' }; }
+  if (await isSandbox(tenantId)) return { ok: false, error: 'Demo mountains do not send email' };
+  const r = await post({ to, fromName, replyTo, subject, text, html, tag, headers, stream });
+  if (!r.ok) logFailure({ job: 'email', tenant: tenantId, tag, message: r.error });
+  return r;
+}
+
+async function post({ to, fromName, replyTo, subject, text, html, tag, headers, stream }) {
   const safeName = String(fromName || '').replace(/["<>\r\n]/g, '').slice(0, 100);
   try {
     const res = await fetch(`${settings.apiBase}/email`, {
@@ -21,7 +35,7 @@ async function send({ to, fromName, replyTo, subject, text, html, tag, headers }
       headers: { 'content-type': 'application/json', accept: 'application/json', 'x-postmark-server-token': token() },
       body: JSON.stringify({
         From: safeName ? `${safeName} <${from()}>` : from(), To: to, ReplyTo: replyTo || undefined, Subject: subject, TextBody: text, HtmlBody: html,
-        MessageStream: env.POSTMARK_STREAM || 'outbound', Tag: tag || undefined, Headers: headers || undefined, TrackOpens: false, TrackLinks: 'None',
+        MessageStream: stream === 'broadcast' ? (env.POSTMARK_BROADCAST_STREAM || 'broadcast') : (env.POSTMARK_STREAM || 'outbound'), Tag: tag || undefined, Headers: headers || undefined, TrackOpens: false, TrackLinks: 'None',
       }),
     });
     const json = await res.json().catch(() => ({}));

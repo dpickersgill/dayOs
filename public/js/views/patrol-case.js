@@ -94,10 +94,12 @@ export async function renderCase(root, id, { roster }) {
     const showCollision = c.category === 'collision' || c.collision || c.parties.length;
     const parts = [
       header(c, editable),
+      // While the call is going on, the time stamps come first: they are what gets tapped most.
+      c.report_state === 'draft' ? stagesPanel(c, editable) : null,
       progressPanel(c, editable),
       patientsPanel(c, editable),
       showCollision ? collisionPanel(c, { id, editable, reload: load }) : (editable ? h('div', { class: 'row' }, button('Record a collision', () => collisionStart(c), { small: true })) : null),
-      stagesPanel(c, editable),
+      c.report_state === 'draft' ? null : stagesPanel(c, editable),
       checklistPanel(c, { id, editable, reload: load, defs: checklists }),
       respondersPanel(c, editable),
       paperwork,
@@ -153,7 +155,7 @@ export async function renderCase(root, id, { roster }) {
       const submit = button('Submit report', async () => {
         try { await post(`/patrol/incidents/${id}/submit`, {}); } catch (err) { showProblems(err, 'Not ready to submit', editable); return; }
         toast('Report submitted'); await load();
-      }, { kind: 'primary' });
+      }); // the progress panel shows the main button; this one stays quiet until then
       submit.dataset.act = 'submit';
       actions.push(submit);
     }

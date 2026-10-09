@@ -48,8 +48,10 @@ router.post('/', validate(z.object({
   if (await S.activeCount() >= S.MAX_ACTIVE) throw new AppError(503, 'The demo is full right now. Please try again tomorrow, or ask us for a walkthrough.');
   if (building >= MAX_BUILDING) throw new AppError(503, 'Several demos are being built. Please try again in a minute.');
 
-  // One demo per email: starting again replaces the old one.
-  for (const r of await rows(pool, 'SELECT DISTINCT tenant_id FROM sandbox_signups WHERE email = ? AND tenant_id IS NOT NULL', [email])) await S.purgeTenant(r.tenant_id).catch(() => {});
+  // One demo per email: starting again from the same address replaces the old one. Anyone else typing that email gets a
+  // new demo and leaves the first one alone (nobody proves they own an email here).
+  const ipHash = crypto.createHash('sha256').update(String(req.ip)).digest('hex').slice(0, 16);
+  for (const r of await rows(pool, 'SELECT DISTINCT tenant_id FROM sandbox_signups WHERE email = ? AND ip_hash = ? AND tenant_id IS NOT NULL', [email, ipHash])) await S.purgeTenant(r.tenant_id).catch(() => {});
 
   const slug = `try-${crypto.randomBytes(5).toString('hex')}`;
   const password = crypto.randomBytes(15).toString('base64url');
@@ -74,7 +76,6 @@ router.post('/', validate(z.object({
     building -= 1;
   }
 
-  const ipHash = crypto.createHash('sha256').update(String(req.ip)).digest('hex').slice(0, 16);
   await pool.query('INSERT INTO sandbox_signups (email, name, mountain, tenant_id, expires_at, ip_hash) VALUES (?, ?, ?, ?, ?, ?)', [email, name, mountain, created.tenantId, created.expires, ipHash]);
   res.status(201).json({
     token: signToken({ id: created.userId, tenant_id: created.tenantId, role: 'owner' }),

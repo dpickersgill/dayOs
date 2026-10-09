@@ -10,7 +10,8 @@ const { audit } = require('../lib/audit');
 const { personFields, resolvePerson, requiredFor, PURCHASER_KEY } = require('../lib/customers');
 const { money } = require('../lib/format');
 
-const stripe = require('../lib/stripe');
+const cardrefund = require('../lib/cardrefund');
+const { loadRules, applyTax } = require('../lib/tax');
 const router = express.Router();
 const sellers = ['counter', 'manager'];
 
@@ -37,9 +38,10 @@ const orderSchema = z.object({
 });
 
 /**
- * Create a paid order and issue one ticket per unit.
- * Pricing is always computed on the server; the client never supplies a price.
- * Payment capture lives outside this service: pass the processor's reference as payment_ref.
+ * Create a paid order and issue one ticket per unit (the simple API sale, for integrations; staff use /checkout).
+ * Pricing and tax are always computed on the server; the client never supplies a price. Payment is taken outside this
+ * service: pass the processor's reference as payment_ref. It is recorded as one 'other' payment, so refunds, drawers and
+ * reports treat it like any other sale.
  */
 router.post('/orders', requireRole(...sellers), validate(orderSchema), async (req, res) => {
   const { tenantId } = req.auth;
@@ -77,17 +79,22 @@ router.post('/orders', requireRole(...sellers), validate(orderSchema), async (re
       await conn.query('UPDATE promo_codes SET used_count = used_count + 1 WHERE tenant_id = ? AND id = ?', [tenantId, applied.promo.id]);
     }
 
+    const lines = priced.map((p) => ({ type: 'ticket', cents: p.cents * p.it.quantity }));
+    const { tax, taxes } = applyTax(lines, discount, await loadRules(conn, tenantId));
+    const total = subtotal - discount + tax;
     const [o] = await conn.query(
-      `INSERT INTO orders (tenant_id, person_id, status, promo_code, subtotal_cents, discount_cents, total_cents, channel, payment_ref)
-       VALUES (?, ?, 'paid', ?, ?, ?, ?, ?, ?)`,
-      [tenantId, personId, promoCode, subtotal, discount, subtotal - discount, body.channel, body.payment_ref ?? null],
+      `INSERT INTO orders (tenant_id, person_id, user_id, status, promo_code, subtotal_cents, discount_cents, tax_cents, total_cents, channel, payment_ref)
+       VALUES (?, ?, ?, 'paid', ?, ?, ?, ?, ?, ?, ?)`,
+      [tenantId, personId, req.auth.userId, promoCode, subtotal, discount, tax, total, body.channel, body.payment_ref ?? null],
     );
+    for (const t of taxes) await conn.query('INSERT INTO order_taxes (tenant_id, order_id, name, rate_bps, amount_cents) VALUES (?, ?, ?, ?, ?)', [tenantId, o.insertId, t.name, t.rate_bps, t.amount_cents]);
+    if (total > 0) await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference) VALUES (?, ?, 'other', ?, ?)", [tenantId, o.insertId, total, body.payment_ref ?? null]);
 
     const tickets = [];
-    for (const { it, product, cents, validOn } of priced) {
+    for (const [i, { it, product, cents, validOn }] of priced.entries()) {
       const [item] = await conn.query(
-        'INSERT INTO order_items (tenant_id, order_id, product_id, tier, quantity, unit_price_cents, valid_on) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [tenantId, o.insertId, product.id, it.tier, it.quantity, cents, validOn],
+        'INSERT INTO order_items (tenant_id, order_id, product_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [tenantId, o.insertId, product.id, it.tier, it.quantity, cents, validOn, lines[i].discount, lines[i].tax],
       );
       for (let n = 0; n < it.quantity; n++) {
         const code = newCode();
@@ -99,8 +106,8 @@ router.post('/orders', requireRole(...sellers), validate(orderSchema), async (re
         tickets.push({ code, product: product.name, tier: it.tier, valid_from: validOn, valid_to: validTo });
       }
     }
-    await audit(conn, req, 'create', 'orders', o.insertId, { total_cents: subtotal - discount });
-    return { id: o.insertId, person_id: personId, customer: buyer.id ? { id: buyer.id, created: buyer.created, matched: buyer.matched } : null, subtotal_cents: subtotal, discount_cents: discount, total_cents: subtotal - discount, tickets };
+    await audit(conn, req, 'create', 'orders', o.insertId, { total_cents: total });
+    return { id: o.insertId, person_id: personId, customer: buyer.id ? { id: buyer.id, created: buyer.created, matched: buyer.matched } : null, subtotal_cents: subtotal, discount_cents: discount, tax_cents: tax, total_cents: total, tickets };
   });
 
   res.status(201).json(result);
@@ -136,7 +143,7 @@ router.get('/orders/:id', requireRole(...sellers), async (req, res) => {
   const lines = await rows(
     pool,
     `SELECT i.id, i.line_kind, i.tier, i.quantity, i.unit_price_cents, i.discount_cents, i.tax_cents, i.refunded_at, i.valid_on, i.person_id, i.session_id, i.contract_id, i.gift_card_id,
-            COALESCE(pr.name, pg.name, 'Gift card') AS name, p.first_name, p.last_name
+            COALESCE(i.label, pr.name, pg.name, CASE i.line_kind WHEN 'gift_card' THEN 'Gift card' WHEN 'rental' THEN 'Rental charge' WHEN 'fee' THEN 'Fee' ELSE 'Item' END) AS name, p.first_name, p.last_name
      FROM order_items i LEFT JOIN products pr ON pr.id = i.product_id AND pr.tenant_id = i.tenant_id
      LEFT JOIN programs pg ON pg.id = i.program_id AND pg.tenant_id = i.tenant_id
      LEFT JOIN people p ON p.id = i.person_id AND p.tenant_id = i.tenant_id
@@ -145,7 +152,7 @@ router.get('/orders/:id', requireRole(...sellers), async (req, res) => {
   );
   const payments = await rows(pool, 'SELECT tender, amount_cents, tendered_cents, reference, card_brand, card_last4, comp_reason FROM order_payments WHERE tenant_id = ? AND order_id = ? ORDER BY id', [req.auth.tenantId, order.id]);
   const giftCards = await rows(pool, 'SELECT code, initial_cents, recipient_name, status FROM gift_cards WHERE tenant_id = ? AND order_id = ?', [req.auth.tenantId, order.id]);
-  const refunds = await rows(pool, 'SELECT id, reason, note, amount_cents, tax_cents, method, created_at FROM order_refunds WHERE tenant_id = ? AND order_id = ? ORDER BY id', [req.auth.tenantId, order.id]);
+  const refunds = await rows(pool, 'SELECT id, reason, note, amount_cents, tax_cents, method, created_at, card_status, card_error FROM order_refunds WHERE tenant_id = ? AND order_id = ? ORDER BY id', [req.auth.tenantId, order.id]);
   const taxes = await rows(pool, 'SELECT name, rate_bps, amount_cents FROM order_taxes WHERE tenant_id = ? AND order_id = ? ORDER BY id', [req.auth.tenantId, order.id]);
   res.json({ ...order, items, lines, tickets, payments, taxes, refunds, gift_cards: giftCards });
 });
@@ -156,6 +163,7 @@ const refundBody = z.object({
   note: z.string().trim().max(300).optional(),
   item_ids: z.array(z.number().int().positive()).min(1).max(100).optional(), // omit to refund everything not yet refunded
   method: z.enum(['cash', 'card', 'gift_card', 'other']).optional(), // omit to send the money back the way it came
+  till_id: z.number().int().positive().optional(), // the cash drawer that pays out any cash part (default: your own open drawer)
 });
 
 /**
@@ -213,8 +221,14 @@ router.post('/orders/:id/refund', requireRole('manager'), validate(refundBody), 
     const worth = lines.reduce((n, l) => n + lineValue(l), 0);
     const worthTax = lines.reduce((n, l) => n + l.tax_cents, 0);
     const ratio = order.total_cents ? realPaid / order.total_cents : 0;
-    const amount = Math.round(worth * ratio);
-    const taxPart = Math.round(worthTax * ratio);
+    let amount = Math.round(worth * ratio);
+    let taxPart = Math.round(worthTax * ratio);
+    if (lines.length === open.length) {
+      // The last of the order: return exactly what is left, so rounding on earlier part refunds can never block it.
+      const back = await one(conn, 'SELECT COALESCE(SUM(amount_cents), 0) AS cents, COALESCE(SUM(tax_cents), 0) AS tax FROM order_refunds WHERE tenant_id = ? AND order_id = ?', [tenantId, orderId]);
+      amount = Math.max(realPaid - Number(back.cents), 0);
+      taxPart = Math.max(Math.round(order.tax_cents * ratio) - Number(back.tax), 0);
+    }
 
     // Send the money back the way it came, last payment first, never more than was paid and not yet returned that way.
     const returned = await rows(conn, 'SELECT method, SUM(amount_cents) AS cents FROM order_refunds WHERE tenant_id = ? AND order_id = ? GROUP BY method', [tenantId, orderId]);
@@ -258,7 +272,10 @@ router.post('/orders/:id/refund', requireRole('manager'), validate(refundBody), 
       let remaining = giftBack.cents;
       for (const p of pays.filter((x) => x.tender === 'gift_card').reverse()) {
         if (remaining <= 0) break;
-        const put = Math.min(remaining, p.amount_cents);
+        // Each card gets back at most what it paid less what earlier refunds already put back on it.
+        const already = await one(conn, "SELECT COALESCE(SUM(delta_cents), 0) AS cents FROM gift_card_txns WHERE tenant_id = ? AND gift_card_id = ? AND order_id = ? AND kind = 'refund'", [tenantId, p.gift_card_id, orderId]);
+        const put = Math.min(remaining, Math.max(p.amount_cents - Number(already.cents), 0));
+        if (put <= 0) continue;
         const g = await one(conn, 'SELECT status, balance_cents FROM gift_cards WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, p.gift_card_id]);
         if (g && g.status === 'active') {
           const next = g.balance_cents + put;
@@ -269,31 +286,52 @@ router.post('/orders/:id/refund', requireRole('manager'), validate(refundBody), 
       }
     }
 
+    // Cash comes out of a drawer: the one chosen, or the refunder's own open drawer, so that drawer's count stays right.
+    let tillId = null;
+    if (plan.some((x) => x.method === 'cash')) {
+      const till = body.till_id
+        ? await one(conn, "SELECT id FROM till_sessions WHERE tenant_id = ? AND id = ? AND status = 'open'", [tenantId, body.till_id])
+        : await one(conn, "SELECT id FROM till_sessions WHERE tenant_id = ? AND opened_by = ? AND status = 'open' ORDER BY id DESC LIMIT 1", [tenantId, req.auth.userId]);
+      if (body.till_id && !till) throw bad('That cash drawer is not open');
+      tillId = till ? till.id : null;
+    }
+    const stripePay = await one(conn, "SELECT reference FROM order_payments WHERE tenant_id = ? AND order_id = ? AND processor = 'stripe' AND tender = 'card' AND reference IS NOT NULL ORDER BY id LIMIT 1", [tenantId, orderId]);
     // Record it: one row per way the money went back, the tax split in proportion.
     const refundIds = [];
+    const cardRows = [];
     const plans = plan.length ? plan : [{ method: 'other', cents: 0 }]; // a comp-only order has no money to return
     let taxLeft = taxPart;
     for (const [i, x] of plans.entries()) {
       const t = i === plans.length - 1 ? taxLeft : (amount ? Math.round((taxPart * x.cents) / amount) : 0);
       taxLeft -= t;
-      const [r] = await conn.query('INSERT INTO order_refunds (tenant_id, order_id, user_id, reason, note, amount_cents, tax_cents, method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [tenantId, orderId, req.auth.userId, body.reason, body.note ?? null, x.cents, t, x.method]);
+      const [r] = await conn.query('INSERT INTO order_refunds (tenant_id, order_id, user_id, reason, note, amount_cents, tax_cents, method, till_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [tenantId, orderId, req.auth.userId, body.reason, body.note ?? null, x.cents, t, x.method, x.method === 'cash' ? tillId : null]);
       refundIds.push(r.insertId);
+      // Online card sales go back through Stripe: written down as owed now, sent after this commits, retried if Stripe fails.
+      if (x.method === 'card' && x.cents > 0 && stripePay) { await cardrefund.markPending(conn, tenantId, r.insertId, stripePay.reference); cardRows.push(r.insertId); }
     }
     await conn.query('UPDATE order_items SET refunded_at = NOW(), refund_id = ? WHERE tenant_id = ? AND id IN (?)', [refundIds[0], tenantId, ids]);
     const stillOpen = open.length - lines.length;
     await conn.query('UPDATE orders SET refunded_cents = refunded_cents + ?, status = ? WHERE tenant_id = ? AND id = ?', [amount, stillOpen ? 'paid' : 'refunded', tenantId, orderId]);
     await audit(conn, req, 'refund', 'orders', orderId, { amount_cents: amount, reason: body.reason, lines: ids.length, whole: !stillOpen });
-    return { amount_cents: amount, returns: plan.map((x) => ({ method: x.method, amount_cents: x.cents })), whole_order: !stillOpen, refund_ids: refundIds };
+    return { amount_cents: amount, returns: plan.map((x) => ({ method: x.method, amount_cents: x.cents })), whole_order: !stillOpen, refund_ids: refundIds, card_rows: cardRows };
   });
-  // Online card sales: the money goes back to the guest's card through Stripe (a repeated call never refunds twice).
-  const cardBack = result.returns.filter((x) => x.method === 'card').reduce((n, x) => n + x.amount_cents, 0);
-  if (cardBack > 0 && stripe.enabled()) {
-    const pay = await one(pool, "SELECT reference FROM order_payments WHERE tenant_id = ? AND order_id = ? AND processor = 'stripe' AND tender = 'card' ORDER BY id LIMIT 1", [req.auth.tenantId, Number(req.params.id)]);
-    if (pay && pay.reference) {
-      try { await stripe.refund({ paymentIntent: pay.reference, amountCents: cardBack, key: `staff-refund-${req.auth.tenantId}-${result.refund_ids[0]}` }); result.card_refunded = true; } catch (_) { result.card_refund_failed = true; }
-    }
+  // Online card sales: the money goes back to the guest's card through Stripe. A failure is kept as owed and retried.
+  for (const id of result.card_rows) {
+    const s = await cardrefund.send(tenantId, id);
+    if (s === 'sent') result.card_refunded = true; else if (s === 'failed') result.card_refund_failed = true;
   }
+  delete result.card_rows;
   res.json({ ok: true, ...result });
+});
+
+/** A manager retries a card refund that Stripe refused or could not be reached for (same idempotency key: never twice). */
+router.post('/orders/:id/refunds/:rid/retry', requireRole('manager'), async (req, res) => {
+  const r = await one(pool, 'SELECT id, card_status FROM order_refunds WHERE tenant_id = ? AND order_id = ? AND id = ?', [req.auth.tenantId, paramId(req), Number(req.params.rid)]);
+  if (!r) throw notFound('Refund');
+  if (!['failed', 'pending'].includes(r.card_status)) throw conflict('That refund is not waiting to go back to a card');
+  const s = await cardrefund.send(req.auth.tenantId, r.id);
+  if (s !== 'sent') throw conflict('Stripe still could not send the refund. Check the Stripe dashboard, then try again.');
+  res.json({ ok: true });
 });
 
 /**

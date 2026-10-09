@@ -72,9 +72,20 @@ async function createDonationCheckout({ amountCents, monthly, name, email, metad
 }
 
 /** Sends money back to the card. A repeated call with the same key never refunds twice. */
-async function refund({ paymentIntent, amountCents, key }) {
-  const r = await call('/v1/refunds', { payment_intent: paymentIntent, amount: amountCents }, { idempotencyKey: key });
+async function refund({ paymentIntent, amountCents, key, metadata }) {
+  const r = await call('/v1/refunds', { payment_intent: paymentIntent, amount: amountCents, metadata }, { idempotencyKey: key });
   return { id: r.id };
+}
+
+/** The refunds already made on a payment (up to 100), so a retry days later can check before refunding again. */
+async function listRefunds(paymentIntent) {
+  let res;
+  try {
+    res = await fetch(`${config.stripe.apiBase}/v1/refunds?payment_intent=${encodeURIComponent(paymentIntent)}&limit=100`, { headers: { authorization: `Bearer ${config.stripe.secretKey}` } });
+  } catch (_) { throw new AppError(502, 'The card service could not be reached.'); }
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new AppError(502, 'The card service refused that request.');
+  return Array.isArray(json.data) ? json.data : [];
 }
 
 /** Checks a webhook: the signed timestamp must be recent and the HMAC of "timestamp.body" must match one of the v1 signatures. */
@@ -93,4 +104,4 @@ function signWebhook(rawBody, secret, t = Math.floor(Date.now() / 1000)) {
   return `t=${t},v1=${crypto.createHmac('sha256', secret).update(`${t}.${rawBody}`).digest('hex')}`;
 }
 
-module.exports = { enabled, createCheckout, createDonationCheckout, refund, verifyWebhook, signWebhook };
+module.exports = { enabled, createCheckout, createDonationCheckout, refund, listRefunds, verifyWebhook, signWebhook };

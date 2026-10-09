@@ -204,8 +204,8 @@ publicRouter.post('/:slug/shop/orders', validate(z.object({
       const ref = shop.reference(); const token = crypto.randomBytes(16).toString('hex');
       try {
         const [r] = await conn.query(
-          'INSERT INTO shop_orders (tenant_id, reference, view_token, contact_name, contact_email, contact_phone, basket, waiver_accepted, waiver_text_sha, news_opt_in, amount_cents) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [t.id, ref, token, `${b.contact_first_name} ${b.contact_last_name}`, b.contact_email, b.contact_phone, basket, b.waiver_accepted ? 1 : 0, sha, b.news_opt_in ? 1 : 0, quote.total]);
+          'INSERT INTO shop_orders (tenant_id, reference, view_token, contact_name, contact_email, contact_phone, basket, waiver_accepted, waiver_text_sha, news_opt_in, amount_cents, promo_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [t.id, ref, token, `${b.contact_first_name} ${b.contact_last_name}`, b.contact_email, b.contact_phone, basket, b.waiver_accepted ? 1 : 0, sha, b.news_opt_in ? 1 : 0, quote.total, quote.promo || null]);
         return { id: r.insertId, ref, token, quote };
       } catch (err) { if (err.code === 'ER_DUP_ENTRY' && attempt < 4) continue; throw err; }
     }
@@ -216,7 +216,7 @@ publicRouter.post('/:slug/shop/orders', validate(z.object({
     co = await stripe.createCheckout({
       amountCents: made.quote.total, name: `${t.name}: ${n} item${n > 1 ? 's' : ''}`, description: [...made.quote.lines.map((l) => `${l.name} ${l.valid_on}`), ...made.quote.addons.map((a) => `${a.quantity} x ${a.name}`), ...made.quote.gifts.map(() => 'Gift card')].join(', ').slice(0, 480),
       email: b.contact_email, reference: made.ref, metadata: { tenant_id: String(t.id), request_id: String(made.id), shop_order_id: String(made.id), kind: 'shop', reference: made.ref },
-      successUrl: `${baseUrl(req)}/shop/${req.params.slug}?order=${made.token}`, cancelUrl: `${baseUrl(req)}/shop/${req.params.slug}?cancelled=1`,
+      successUrl: `${baseUrl(req)}/shop/${req.params.slug}?order=${made.token}`, cancelUrl: `${baseUrl(req)}/shop/${req.params.slug}?cancelled=${made.token}`,
     });
   } catch (err) {
     await pool.query("UPDATE shop_orders SET status = 'expired' WHERE tenant_id = ? AND id = ?", [t.id, made.id]);
@@ -224,6 +224,13 @@ publicRouter.post('/:slug/shop/orders', validate(z.object({
   }
   await pool.query('UPDATE shop_orders SET stripe_session_id = ? WHERE tenant_id = ? AND id = ?', [co.id, t.id, made.id]);
   res.status(201).json({ ok: true, reference: made.ref, checkout_url: co.url, amount_cents: made.quote.total });
+});
+
+// The guest came back from the card page without paying: their basket stops holding tickets and promo uses at once.
+publicRouter.post('/:slug/shop/orders/:token/abandon', async (req, res) => {
+  const t = await tenantFor(req.params.slug);
+  await pool.query("UPDATE shop_orders SET status = 'expired' WHERE tenant_id = ? AND view_token = ? AND status = 'awaiting_payment'", [t.id, String(req.params.token)]);
+  res.json({ ok: true });
 });
 
 publicRouter.post('/:slug/shop/waitlist', validate(z.object({

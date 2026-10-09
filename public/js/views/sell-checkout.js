@@ -61,7 +61,7 @@ export async function gearDialog(line, onDone, profile = null) {
  * basket: [{ type, name, ... }] built by the Sell screen. quote: the server's quote for it (totals).
  * onSold(order) runs after a successful sale.
  */
-export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null, waiverText = null }) {
+export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null, waiverText = null, quickSale = null, drawerOpen = () => true, onOpenDrawer = null }) {
   const hasTickets = basket.some((l) => l.type === 'ticket');
   const hasLesson = basket.some((l) => l.type === 'lesson' || l.type === 'lesson_package');
   const hasRental = basket.some((l) => l.type === 'rental');
@@ -74,6 +74,9 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
     } else if (WHO_TYPES.includes(l.type)) slots.push({ line: l, text: l.name, aria: l.name });
   }
   const slotNeedsWaiver = (s) => s.line.type === 'lesson' || s.line.type === 'rental';
+  // Quick sale: a basket of only day tickets, multi-day tickets, punch cards or vouchers can be sold with no name.
+  const quickOk = Boolean(quickSale && quickSale.allowed && basket.length && basket.every((l) => l.type === 'ticket' && quickSale.kinds.includes(l.kind)));
+  let quick = false;
 
   // ---- step 1: customer and participants
   const waiverBox = () => (waiverText ? h('details', { class: 'waiver-read' }, h('summary', null, 'Read the waiver'), h('div', { class: 'waiver-text' }, waiverText)) : null);
@@ -198,7 +201,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
     customer.el, famBox, custGuardianRow, custWaiverRow, whoBox, peopleBox, step1Error);
   refreshWho();
 
-  // ---- step 2: payment
+  // ---- step 2: payment. Choose how they pay first; only that way's fields show.
   const payments = [];
   const paid = () => payments.reduce((n, p) => n + p.amount_cents, 0);
   const remaining = () => total - paid();
@@ -212,30 +215,34 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   const cardCode = input({ name: 'giftcode', autocomplete: 'off', autocapitalize: 'characters', 'aria-label': 'Gift card code' });
   const payList = h('div', { class: 'stack' });
   const due = h('div', { class: 'basket-total', role: 'status' });
+  const changeBig = h('div', { class: 'change-due', role: 'status', hidden: true });
   const step2Error = h('div');
   const complete = button('Complete sale', () => finish(), { kind: 'primary' });
 
   function drawPayments() {
     clear(payList);
     for (const [i, p] of payments.entries()) {
-      payList.append(h('div', { class: 'spread pay-row' }, h('span', null, `${label(p.tender)} ${money(p.amount_cents)}`, p.tendered_cents && p.tendered_cents > p.amount_cents ? h('small', { class: 'muted' }, `  (${money(p.tendered_cents)} handed over, ${money(p.tendered_cents - p.amount_cents)} change)`) : null, p.code ? h('small', { class: 'muted' }, `  card ${p.code}`) : null, p.card_last4 ? h('small', { class: 'muted' }, `  ending ${p.card_last4}`) : null, p.comp_reason ? h('small', { class: 'muted' }, `  (${label(p.comp_reason)})`) : null),
+      payList.append(h('div', { class: 'spread pay-row' }, h('span', null, `${label(p.tender)} ${money(p.amount_cents)}`, p.tendered_cents && p.tendered_cents > p.amount_cents ? h('small', { class: 'muted' }, `  (${money(p.tendered_cents)} handed over)`) : null, p.code ? h('small', { class: 'muted' }, `  card ${p.code}`) : null, p.card_last4 ? h('small', { class: 'muted' }, `  ending ${p.card_last4}`) : null, p.comp_reason ? h('small', { class: 'muted' }, `  (${label(p.comp_reason)})`) : null),
         button('Remove', () => { payments.splice(i, 1); drawPayments(); }, { small: true })));
     }
     const left = remaining();
     clear(due).append(left > 0 ? `Still to pay ${money(left)}` : left === 0 ? (total ? 'Paid in full' : 'Nothing to pay') : `Over by ${money(-left)}`);
     due.dataset.state = left === 0 ? 'good' : 'warn';
     amount.value = left > 0 ? centsToInput(left) : '';
+    const change = payments.reduce((n, p) => n + (p.tendered_cents ? p.tendered_cents - p.amount_cents : 0), 0);
+    changeBig.hidden = !change; changeBig.textContent = change ? `Give ${money(change)} change` : '';
     complete.disabled = left !== 0;
+    drawCashButtons();
   }
-  async function addPayment(tender) {
+  async function addPayment(tender, tenderedCents = null) {
     const cents = toCents(amount.value);
     if (!cents || cents < 1) throw new Error('Enter the amount to take');
     if (cents > remaining()) throw new Error(`That is more than the ${money(remaining())} still to pay`);
     const p = { tender, amount_cents: cents };
-    if (tender === 'cash' && tendered.value.trim()) {
-      const t = toCents(tendered.value);
-      if (t === null || t < cents) throw new Error('The cash handed over is less than the amount');
-      if (t > cents) p.tendered_cents = t;
+    if (tender === 'cash') {
+      const t = tenderedCents !== null ? tenderedCents : (tendered.value.trim() ? toCents(tendered.value) : null);
+      if (t !== null && (t === undefined || t < cents)) throw new Error('The cash handed over is less than the amount');
+      if (t && t > cents) p.tendered_cents = t;
     }
     if (tender === 'card' || tender === 'other') { if (reference.value.trim()) p.reference = reference.value.trim(); }
     if (tender === 'card') {
@@ -263,19 +270,41 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
     tendered.value = ''; reference.value = ''; cardCode.value = ''; cardLast4.value = ''; authCode.value = ''; cardBrand.value = ''; compReason.value = '';
     drawPayments();
   }
-  const tenderBtns = h('div', { class: 'row tender-row' },
-    button('Cash', () => addPayment('cash')), button('Card', () => addPayment('card')), button('Gift card', () => addPayment('gift_card')), button('Other', () => addPayment('other')),
-    comp && comp.can_comp ? button('Free of charge', () => addPayment('comp')) : null);
-  const gift = basket.some((l) => l.type === 'gift_card');
+  // Cash: one tap for the note handed over; the change shows in large type.
+  const cashButtons = h('div', { class: 'row cash-quick', role: 'group', 'aria-label': 'Cash handed over' });
+  function drawCashButtons() {
+    clear(cashButtons);
+    const left = remaining();
+    if (left <= 0) return;
+    cashButtons.append(button(`Exact ${money(left)}`, () => { amount.value = centsToInput(left); return addPayment('cash', left); }, { kind: 'primary' }));
+    for (const note of [2000, 5000, 10000]) if (note > left) cashButtons.append(button(money(note), () => { amount.value = centsToInput(left); return addPayment('cash', note); }));
+  }
+  const ways = [['cash', 'Cash'], ['card', 'Card'], ['gift_card', 'Gift card'], ['other', 'Other']];
+  if (comp && comp.can_comp) ways.push(['comp', 'Free of charge']);
+  const panel = h('div', { class: 'stack' });
+  const wayBtns = new Map();
+  function choose(way) {
+    for (const [k, b] of wayBtns) b.setAttribute('aria-pressed', String(k === way));
+    const take = (text) => button(text, () => addPayment(way), { kind: way === 'cash' ? null : 'primary' });
+    const forms = {
+      cash: () => [drawerOpen() ? null : h('div', { class: 'notice warn', role: 'alert' }, 'No cash drawer is open, so this cash will not be in any drawer count. Open your drawer first.', onOpenDrawer ? [' ', button('Open cash drawer', () => onOpenDrawer(() => choose('cash')), { small: true })] : null),
+        cashButtons, h('div', { class: 'form' }, field('Amount', amount), field('Cash handed over (other amount)', tendered)), h('div', { class: 'row' }, take('Take cash'))],
+      card: () => [h('div', { class: 'form' }, field('Amount', amount), field('Last 4 digits', cardLast4), field('Card brand', cardBrand), field('Approval code', authCode), field('Card reference', reference)), h('div', { class: 'row' }, take('Take card'))],
+      gift_card: () => [h('div', { class: 'form' }, field('Amount', amount), field('Gift card code', cardCode)), basket.some((l) => l.type === 'gift_card') ? h('p', { class: 'muted small' }, 'A gift card cannot be used to buy another gift card.') : null, h('div', { class: 'row' }, take('Use gift card'))],
+      other: () => [h('div', { class: 'form' }, field('Amount', amount), field('Reference', reference)), h('div', { class: 'row' }, take('Record payment'))],
+      comp: () => [h('div', { class: 'form' }, field('Amount', amount), field('Reason', compReason, comp && comp.counter_limit_cents ? undefined : 'Managers only')), h('div', { class: 'row' }, take('Give free of charge'))],
+    };
+    appendAll(clear(panel), forms[way]()); // built on demand: each field lives in one place at a time
+    drawCashButtons();
+    const first = panel.querySelector('input, select'); if (first && way !== 'cash') first.focus();
+  }
+  const wayRow = h('div', { class: 'seg tender-row', role: 'group', 'aria-label': 'How are they paying' }, ways.map(([k, t]) => { const b = h('button', { type: 'button', class: 'btn', 'aria-pressed': 'false', onclick: () => choose(k) }, t); wayBtns.set(k, b); return b; }));
   const step2 = h('div', { class: 'stack' },
     h('h3', null, 'Payment'),
     h('div', { class: 'spread' }, h('div', { class: 'muted' }, [quote.discount_cents ? `Discount ${money(quote.discount_cents)}` : '', quote.tax_cents ? `${quote.discount_cents ? ' · ' : ''}Tax ${money(quote.tax_cents)}` : ''].join('')), h('div', { class: 'basket-total' }, `Total ${money(total)}`)),
-    total ? h('div', { class: 'stack' },
-      h('div', { class: 'form' }, field('Amount', amount), field('Cash handed over', tendered), field('Card reference', reference), field('Card brand', cardBrand), field('Last 4 digits', cardLast4), field('Approval code', authCode), field('Gift card code', cardCode),
-        comp && comp.can_comp ? field('Free of charge: reason', compReason, comp.counter_limit_cents ? undefined : 'Managers only') : null),
-      gift ? h('p', { class: 'muted small' }, 'A gift card cannot be used to buy another gift card.') : null,
-      tenderBtns) : h('p', { class: 'muted' }, 'Nothing is due, so no payment is needed.'),
-    payList, due, step2Error);
+    total ? h('div', { class: 'stack' }, wayRow, panel) : h('p', { class: 'muted' }, 'Nothing is due, so no payment is needed.'),
+    payList, due, changeBig, step2Error);
+  if (total) choose('cash');
 
   // ---- assembling the sale
   const dlgBody = h('div', { class: 'stack' });
@@ -283,6 +312,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   let dlg;
 
   function problems() {
+    if (quick) return null;
     const uses = (id) => slots.filter((s) => assign.get(s) === id);
     const d = customer.payload('details').details;
     const has = Boolean(customer.person() || (d && (d.first_name || d.last_name)));
@@ -302,6 +332,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
 
   function build() {
     const body = { channel: 'window', promo_code: promo || undefined, lines: [], payments: payments.map((p) => ({ ...p })) };
+    if (quick) return { ...body, quick: true, lines: basket.map((l) => lineApi(l, null, null)) };
     const c = customer.payload('details');
     const gOf = (id, cap) => { const g = guardianFor(id); return cap.isMinor() && g ? { guardian: g } : {}; };
     body.customer = { ...c, ...(custWaiver.checked && !custWaiverRow.hidden ? { sign_waiver: true } : {}), ...gOf('customer', customer) };
@@ -337,7 +368,10 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
     clear(dlgBody).append(n === 1 ? step1 : step2);
     clear(nav);
     if (n === 1) {
-      nav.append(button('Cancel', () => dlg.close()), button(total ? 'Next: payment' : 'Next', () => {
+      quick = false;
+      appendAll(nav, button('Cancel', () => dlg.close()),
+        quickOk ? button('Quick sale: no name', () => { quick = true; show(2); drawPayments(); }, { kind: null }) : null,
+        button(total ? 'Next: payment' : 'Next', () => {
         clear(step1Error);
         const p = problems();
         if (p) { step1Error.append(errorBox(new Error(p))); return; }
@@ -345,6 +379,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       }, { kind: 'primary' }));
     } else {
       nav.append(button('Back', () => show(1)), complete);
+      if (quick) dlgBody.prepend(h('p', { class: 'muted small' }, 'Quick sale: nothing is saved about the guest. Use Back to add their details instead.'));
     }
   }
 

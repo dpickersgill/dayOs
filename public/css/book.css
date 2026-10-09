@@ -114,7 +114,7 @@ a { color: var(--blue); }
 .price small { font-size: 0.8125rem; font-weight: 400; color: var(--muted); display: block; margin-top: 4px; }
 .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 22px; border-radius: 999px; border: 1.5px solid var(--line-strong); background: #fff; color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; text-decoration: none; }
 .btn:hover { border-color: var(--ink); }
-.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn:disabled, .btn.primary:disabled { opacity: 1; background: #e3e7ec; border-color: #c9d0d8; color: #4a5562; cursor: not-allowed; box-shadow: none; }
 .btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
 .btn.primary:hover { background: var(--blue-dark); border-color: var(--blue-dark); }
 .btn.big { min-height: 54px; font-size: 1.0625rem; padding: 0 28px; }
@@ -181,3 +181,4 @@ details.more .row3 { display: grid; gap: 12px; margin-top: 8px; }
 .pill[aria-pressed='true'] { background: var(--ink); color: #fff; border-color: var(--ink); }
 .stack.tight { gap: 6px; }
 @media (max-width: 560px) { .slots li { grid-template-columns: 1fr; } .slots .badges { grid-column: 1; } }
+.lang { margin-left: auto; }

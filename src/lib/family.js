@@ -29,6 +29,17 @@ async function familyOf(conn, tenantId, id, today) {
   return { guardians: guardians.map(dress), dependents: dependents.map(dress), household: household.map(dress) };
 }
 
+/**
+ * May this buyer act as guardian for this child online? Yes when the child record was just made, has no guardian yet,
+ * or already lists the buyer. A stranger who knows a child's name and birth date cannot attach themselves.
+ */
+async function mayActAsGuardian(conn, tenantId, adultId, childId, justCreated) {
+  if (!adultId) return false;
+  if (justCreated) return true;
+  const g = await rows(conn, "SELECT adult_id FROM person_links WHERE tenant_id = ? AND member_id = ? AND relation = 'guardian'", [tenantId, childId]);
+  return !g.length || g.some((x) => x.adult_id === adultId);
+}
+
 const isMinor = (dob, today) => { const a = ageOn(dob, today); return a !== null && a < MINOR_AGE; };
 
-module.exports = { MINOR_AGE, addLink, familyOf, isMinor };
+module.exports = { MINOR_AGE, addLink, familyOf, isMinor, mayActAsGuardian };

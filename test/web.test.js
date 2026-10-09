@@ -755,6 +755,7 @@ test('sell: a ticket goes in the basket from the menu, the customer is added at 
   assert.equal([...dlg.querySelectorAll('button')].find((b) => b.textContent === 'Complete sale').disabled, true, 'cannot complete until it is paid');
   typeInto(dlg, 'tendered', '70');
   clickBtn(dlg, 'Cash'); await settle();
+  clickBtn(dlg, 'Take cash'); await settle();
   assert.match(dlg.textContent, /Paid in full/);
   clickBtn(dlg, 'Complete sale'); await settle();
   assert.match(dlg.textContent, /Change due \$5\.00/);
@@ -779,6 +780,7 @@ test('sell: a ticket goes in the basket from the menu, the customer is added at 
   typeInto(dlg, 'first_name', 'Wendy'); typeInto(dlg, 'last_name', 'Window'); typeInto(dlg, 'email', 'wendy@window.test'); typeInto(dlg, 'date_of_birth', '1984-05-06'); typeInto(dlg, 'sex', 'female');
   clickBtn(dlg, 'Next: payment'); await settle();
   clickBtn(dlg, 'Card'); await settle();
+  clickBtn(dlg, 'Take card'); await settle();
   clickBtn(dlg, 'Complete sale'); await settle();
   assert.ok(dlg.querySelectorAll('.code').length >= 1);
   assert.equal(ok(await api('GET', '/people?q=Wendy', { token: T.owner })).data.length, 1);
@@ -844,6 +846,7 @@ test('sell: lessons, a rental, a program place and a gift card in one basket, fo
   clickBtn(dlg, 'Next: payment'); await settle();
   assert.match(dlg.textContent, /Still to pay \$150\.00/);
   clickBtn(dlg, 'Card'); await settle();
+  clickBtn(dlg, 'Take card'); await settle();
   clickBtn(dlg, 'Complete sale'); await settle();
   const text = dlg.textContent;
   assert.match(text, /Sold \$150\.00/);
@@ -919,6 +922,7 @@ test('sell: every ticket is named, and an under-18 needs a date of birth and sex
   second.value = 'p1'; second.dispatchEvent(new window.Event('change', { bubbles: true }));
   clickBtn(dlg, 'Next: payment'); await settle();
   clickBtn(dlg, 'Cash'); await settle();
+  clickBtn(dlg, 'Take cash'); await settle();
   clickBtn(dlg, 'Complete sale'); await settle();
   assert.match(dlg.textContent, /Gus Guardian/); assert.match(dlg.textContent, /Gia Guardian/, 'the receipt names who each ticket is for');
   const gia = ok(await api('GET', '/people?q=Gia', { token: T.owner })).data[0];
@@ -976,6 +980,7 @@ test('crm: the Customers screen adds, opens and edits a customer, with history f
 
 test('crm: a new student is captured while booking a lesson, with the waiver recorded at the same time', skip(), async () => {
   const root = await renderView('school', 'counter', T.counter);
+  await openTab(root, 'Lessons'); // the school opens on Today
   const row = [...root.querySelectorAll('tr')].find((r) => [...r.querySelectorAll('button')].some((b) => b.textContent === 'Roster'));
   [...row.querySelectorAll('button')].find((b) => b.textContent === 'Roster').click();
   await settle();
@@ -1385,10 +1390,11 @@ test('sell: the basket shows tax, a manager can give it free of charge with a re
   assert.match(dlg.textContent, /Tax \$3\.90/);
   // the comp needs a reason
   document.querySelectorAll('.toast').forEach((x) => x.remove());
-  clickBtn(dlg, 'Free of charge'); await settle();
+  clickBtn(dlg, 'Free of charge'); await settle(); // choose the way to pay first
+  clickBtn(dlg, 'Give free of charge'); await settle();
   assert.match([...document.querySelectorAll('.toast[data-kind=error]')].map((x) => x.textContent).join(' '), /Say why this is free of charge/, 'a reason is needed');
   const reason = dlg.querySelector('select[name=comp_reason]');
-  reason.value = 'staff'; clickBtn(dlg, 'Free of charge'); await settle();
+  reason.value = 'staff'; clickBtn(dlg, 'Give free of charge'); await settle();
   assert.match(dlg.textContent, /Free Of Charge|Comp/i);
   clickBtn(dlg, 'Complete sale'); await settle();
   assert.match(dlg.textContent, /Sold \$68\.90/);
@@ -1667,12 +1673,12 @@ const addD = (d, n) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.ge
 test('school: every tab renders for managers, counter staff and instructors, and the dialogs open', skip(), async () => {
   await closeOverlays();
   const owner = await renderView('school', 'owner', T.owner);
-  assert.deepEqual([...owner.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Lessons', 'Today', 'Online requests', 'Levels and skills', 'Instructor hours']);
+  assert.deepEqual([...owner.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests', 'Levels and skills', 'Instructor hours']);
   await exercise(owner, 'school (owner)');
   const counter = await renderView('school', 'counter', T.counter);
-  assert.deepEqual([...counter.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Lessons', 'Today', 'Online requests']);
+  assert.deepEqual([...counter.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests']);
   const ins = await renderView('school', 'instructor', T.instructor, { staff_id: D.s2 });
-  assert.deepEqual([...ins.querySelectorAll('[role=tab]')].map((t) => t.textContent), ['Lessons', 'Today', 'Levels and skills']);
+  assert.deepEqual([...ins.querySelectorAll('[role=tab]')].map((t) => t.textContent), ['Today', 'Lessons', 'Levels and skills']);
   await exercise(ins, 'school (instructor)');
   await closeOverlays();
 });
@@ -2016,9 +2022,11 @@ test('patrol home: my open cases, a search by patient name, the New case button 
   online(true);
   window.dispatchEvent(new window.Event('online'));
   assert.equal(banner.hidden, true, 'and goes away when it returns');
-  // the case page has the button too
+  // the case page leaves the floating button out (it covered the case's own buttons) and leads with the time stamps
   const page = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id)]);
-  assert.ok(page.querySelector('button.fab'));
+  assert.equal(page.querySelector('button.fab'), null);
+  const panels = [...page.querySelectorAll('.case > section, .case > .panel')];
+  assert.ok(panels.length && page.querySelector('.stages'), 'the time stamps are on the case page');
   D.homeCase = c.id;
 });
 

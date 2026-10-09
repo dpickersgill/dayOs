@@ -169,13 +169,17 @@ test('the customer history gathers purchases, tickets and lessons in one place',
 });
 
 test('patrol can look a guest up but does not see address, emergency contact or consent', async () => {
-  const p = (await api('GET', `/people/${D.bea}`, { token: T.patrol })).body;
+  // patrol finds a guest by searching; opening a record by number is only for patients on a case
+  assert.equal((await api('GET', `/people/${D.bea}`, { token: T.patrol })).status, 404);
+  const list = (await api('GET', '/people?q=Bea', { token: T.patrol })).body.data;
+  const p = list.find((x) => x.id === D.bea);
   assert.equal(p.first_name, 'Bea');
   assert.equal(p.address_line1, undefined);
   assert.equal(p.emergency_name, undefined);
   assert.equal(p.marketing_opt_in, undefined);
-  const list = (await api('GET', '/people?q=Bea', { token: T.patrol })).body.data;
-  assert.equal(list[0].city, undefined);
+  assert.equal(p.city, undefined);
+  assert.equal((await api('GET', '/people?q=.c', { token: T.patrol })).status, 400, 'too vague to search');
+  assert.equal((await api('GET', '/people?q=Bea&offset=10', { token: T.patrol })).status, 403, 'no paging through the list');
   assert.equal((await api('GET', '/people', { token: T.staff })).status, 403);
   assert.equal((await api('GET', '/crm/form', { token: T.patrol })).status, 403);
 });

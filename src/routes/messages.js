@@ -90,11 +90,11 @@ router.post('/campaigns/:id/test', mgr, validate(z.object({ phone: z.string().ma
   if (c.channel === 'email') {
     if (!mailer.enabled()) throw conflict('Email is not set up yet');
     const m = messaging.renderEmail(t, c, person, baseUrl(req), `${baseUrl(req)}/api/v1/public/unsub/example`);
-    r = await mailer.send({ to: me.email, fromName: t.name, replyTo: t.reply_to || undefined, subject: `[Test] ${m.subject}`, text: m.text, html: m.html, tag: 'msg-test' });
+    r = await mailer.send({ tenantId: req.auth.tenantId, to: me.email, fromName: t.name, replyTo: t.reply_to || undefined, subject: `[Test] ${m.subject}`, text: m.text, html: m.html, tag: 'msg-test' });
   } else {
     if (!sms.enabled()) throw conflict('Text messages are not set up yet');
     if (!req.body.phone) throw bad('Enter the phone number to send the test to');
-    r = await sms.send({ to: req.body.phone, body: `[Test] ${messaging.renderSms(t, c, person)}` });
+    r = await sms.send({ tenantId: req.auth.tenantId, to: req.body.phone, body: `[Test] ${messaging.renderSms(t, c, person)}` });
   }
   if (!r.ok) throw conflict(r.error);
   await audit(pool, req, 'campaign_test', 'campaigns', c.id, null);

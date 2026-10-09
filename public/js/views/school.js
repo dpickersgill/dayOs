@@ -18,11 +18,12 @@ export async function render(root) {
   let pending = 0;
   if (can('counter')) { try { pending = (await get('/skischool/requests?status=pending')).pending; } catch (_) { /* leave at 0 */ } }
 
-  const items = [['lessons', 'Lessons', (b) => lessonsTab(b, { staff, certs, names })], ['today', 'Today', (b) => boardTab(b, { staff })]];
+  // Today first: on the day, the board of who teaches what is what the desk needs.
+  const items = [['today', 'Today', (b) => boardTab(b, { staff })], ['lessons', 'Lessons', (b) => lessonsTab(b, { staff, certs, names })]];
   if (can('counter')) items.push(['requests', pending ? `Online requests (${pending})` : 'Online requests', (b) => requestsTab(b)]);
   if (can('instructor')) items.push(['levels', 'Levels and skills', (b) => levelsTab(b)]);
   if (isManager()) items.push(['hours', 'Instructor hours', (b) => hoursTab(b)]);
-  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Ski school')), tabs(items, 'lessons'));
+  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Ski school')), tabs(items, 'today'));
 }
 
 // ---------------------------------------------------------------- lessons

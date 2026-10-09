@@ -320,7 +320,9 @@ test('the daily report splits takings by tender and keeps gift card sales out of
   assert.ok(r.tenders.cash > 0 && r.tenders.card > 0 && r.tenders.gift_card >= 0, JSON.stringify(r.tenders));
   assert.ok(r.gift_card_sales_cents >= 1000);
   const orders = await q("SELECT SUM(total_cents) AS t FROM orders WHERE status = 'paid' AND tenant_id = (SELECT id FROM tenants WHERE slug = ?)", [A.slug]);
-  assert.equal(r.revenue_cents, Number(orders[0].t) - r.gift_card_sales_cents);
+  // Refunded orders count as sold on the day and their refunds come off the same day, so they net to nothing here.
+  const gift = await q("SELECT COALESCE(SUM(i.unit_price_cents * i.quantity), 0) AS g FROM order_items i JOIN orders o ON o.id = i.order_id WHERE o.status = 'paid' AND i.line_kind = 'gift_card' AND o.tenant_id = (SELECT id FROM tenants WHERE slug = ?)", [A.slug]);
+  assert.equal(r.revenue_cents, Number(orders[0].t) - Number(gift[0].g));
 });
 
 test('rental pickup: scan the receipt code and see the order, the people, their waivers and the gear, then record the fitting', async () => {

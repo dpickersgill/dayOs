@@ -54,6 +54,6 @@ npm run migrate && npm test
 ## More
 
 - [FEATURES.md](FEATURES.md): what each part of the app does, grouped by area, and the known limits
-- [DEPLOY.md](DEPLOY.md): first deploy, updating, rolling back, optional settings
+- [DEPLOY.md](DEPLOY.md): first deploy, updating (`bash deploy.sh`), rolling back, optional settings
 - [RUNBOOK.md](RUNBOOK.md): security and operations checklist
 - [HIPAA.md](HIPAA.md): how patrol and patient data are protected

@@ -413,7 +413,7 @@ router.get('/pickup', requireRole(...counter), async (req, res) => {
   const today = todayIn(tz);
   const lines = await rows(
     pool,
-    `SELECT oi.id, oi.line_kind, oi.person_id, oi.tier, oi.quantity, oi.valid_on, oi.refunded_at, oi.contract_id, COALESCE(p.name, CASE oi.line_kind WHEN 'gift_card' THEN 'Gift card' ELSE '' END) AS name
+    `SELECT oi.id, oi.line_kind, oi.person_id, oi.tier, oi.quantity, oi.valid_on, oi.refunded_at, oi.contract_id, COALESCE(oi.label, p.name, CASE oi.line_kind WHEN 'gift_card' THEN 'Gift card' WHEN 'rental' THEN 'Rental charge' WHEN 'fee' THEN 'Fee' ELSE '' END) AS name
      FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id AND p.tenant_id = oi.tenant_id WHERE oi.tenant_id = ? AND oi.order_id = ? ORDER BY oi.id`,
     [tenantId, orderId],
   );

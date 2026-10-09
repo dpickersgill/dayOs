@@ -35,7 +35,7 @@ async function drawers(box) {
 }
 
 // ---------------------------------------------------------------- weekly report
-const TYPE = { ticket: 'Tickets and passes', lesson: 'Lessons', rental: 'Rentals', program: 'Programs', gift_card: 'Gift cards sold' };
+const TYPE = { ticket: 'Tickets and passes', lesson: 'Lessons', rental: 'Rentals', program: 'Programs', gift_card: 'Gift cards sold', fee: 'Fees' };
 const CHAN = { window: 'Ticket window', online: 'Online', phone: 'Phone', group: 'Groups' };
 async function weekly(box) {
   let start = null; // null: last week

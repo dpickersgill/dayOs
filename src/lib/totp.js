@@ -1,7 +1,7 @@
 'use strict';
 
 // Two-step sign-in with an authenticator app (RFC 6238: 6 digits, 30 second steps, HMAC-SHA1), plus one-time recovery codes.
-// The secret is kept encrypted in the database with a key derived from JWT_SECRET, so a copy of the database alone is not enough.
+// The secret is kept encrypted in the database with a key derived from TOTP_KEY (JWT_SECRET when unset), so a copy of the database alone is not enough.
 const crypto = require('crypto');
 const config = require('../config');
 
@@ -52,7 +52,7 @@ function verify(secret, code, nowMs = Date.now()) {
   return found;
 }
 
-const key = () => crypto.createHash('sha256').update(`summitops-totp:${config.jwtSecret}`).digest();
+const key = () => crypto.createHash('sha256').update(`summitops-totp:${config.totpKey}`).digest();
 function seal(secret) {
   const iv = crypto.randomBytes(12);
   const c = crypto.createCipheriv('aes-256-gcm', key(), iv);

@@ -36,4 +36,8 @@ function errorHandler(err, req, res, _next) {
   return res.status(500).json({ error: 'Internal server error' });
 }
 
-module.exports = { AppError, bad, unauthorized, forbidden, notFound, conflict, errorHandler };
+/** Thrown inside a payment's transaction when the sale cannot be honoured: the transaction rolls back (nothing half-made is
+ * kept) and the caller refunds the payment in full. */
+class Unhonourable extends Error {}
+
+module.exports = { Unhonourable, AppError, bad, unauthorized, forbidden, notFound, conflict, errorHandler };

@@ -19,7 +19,7 @@ const mailer = require('../src/lib/mailer');
 const { createApp } = require('../src/app');
 const { pool } = require('../src/db');
 
-let server; let base; let stripeMock; let pmMock; const calls = []; const mails = []; let n = 0;
+let server; let base; let stripeMock; let pmMock; const calls = []; const mails = []; let n = 0; let failRefunds = false; const refundsMade = [];
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const PW = 'correct-horse-battery';
 const q = async (sql, params) => (await pool.query(sql, params))[0];
@@ -66,7 +66,15 @@ test.before(async () => {
       calls.push({ path: req.url, params: Object.fromEntries(new URLSearchParams(data)), key: req.headers['idempotency-key'] });
       res.setHeader('content-type', 'application/json');
       if (req.url === '/v1/checkout/sessions') res.end(JSON.stringify({ id: `cs_shop_${++n}`, url: `https://checkout.stripe.test/c/${n}` }));
-      else if (req.url === '/v1/refunds') res.end(JSON.stringify({ id: `re_${++n}` }));
+      else if (req.url === '/v1/refunds') {
+        if (failRefunds) { res.statusCode = 500; res.end(JSON.stringify({ error: { message: 'Stripe is down' } })); return; }
+        const p = Object.fromEntries(new URLSearchParams(data));
+        const made = { id: `re_${++n}`, payment_intent: p.payment_intent, status: 'succeeded', metadata: { summitops_refund: p['metadata[summitops_refund]'] } };
+        refundsMade.push(made); res.end(JSON.stringify(made));
+      } else if (req.url.startsWith('/v1/refunds?')) {
+        const pi = new URL(`http://x${req.url}`).searchParams.get('payment_intent');
+        res.end(JSON.stringify({ data: refundsMade.filter((r) => r.payment_intent === pi) }));
+      }
       else { res.statusCode = 404; res.end('{}'); }
     });
   });
@@ -388,14 +396,15 @@ test('a guest can move a ticket to another day: free when the price is the same,
   // with a fee the guest pays on Stripe first and the ticket only moves when the payment lands
   await q('UPDATE tenants SET shop_change_fee_cents = 500 WHERE id = ?', [A.id]);
   const paid = await pub('POST', `/shop/orders/${tok}/change`, { body: { ticket_code: code, date: plus(today, 7) } });
-  assert.equal(paid.status, 200, paid.text); assert.equal(paid.body.due_cents, 500); assert.match(paid.body.checkout_url, /^https:\/\/checkout\.stripe\.test\//);
+  assert.equal(paid.status, 200, paid.text); assert.equal(paid.body.due_cents, 550, 'the $5 fee plus 10% tax'); assert.match(paid.body.checkout_url, /^https:\/\/checkout\.stripe\.test\//);
   assert.equal(String((await q('SELECT valid_from FROM tickets WHERE code = ?', [code]))[0].valid_from).slice(0, 10), plus(today, 6), 'not moved yet');
   const ch = (await q('SELECT * FROM shop_changes WHERE tenant_id = ? AND status = ? ORDER BY id DESC LIMIT 1', [A.id, 'awaiting_payment']))[0];
-  const ev = { id: `evt_${++n}`, type: 'checkout.session.completed', data: { object: { id: ch.stripe_session_id, payment_status: 'paid', amount_total: 500, payment_intent: `pi_chg_${n}`, metadata: { tenant_id: String(A.id), change_id: String(ch.id), kind: 'shop_change', request_id: `chg${ch.id}` } } } };
+  const ev = { id: `evt_${++n}`, type: 'checkout.session.completed', data: { object: { id: ch.stripe_session_id, payment_status: 'paid', amount_total: 550, payment_intent: `pi_chg_${n}`, metadata: { tenant_id: String(A.id), change_id: String(ch.id), kind: 'shop_change', request_id: `chg${ch.id}` } } } };
   assert.equal((await webhook(ev)).status, 200);
   assert.equal(String((await q('SELECT valid_from FROM tickets WHERE code = ?', [code]))[0].valid_from).slice(0, 10), plus(today, 7));
   const fo = (await q('SELECT * FROM orders WHERE tenant_id = ? AND payment_ref = ?', [A.id, `pi_chg_${n}`]))[0];
-  assert.equal(fo.total_cents, 500);
+  assert.equal(fo.total_cents, 550);
+  assert.deepEqual((await q('SELECT line_kind, label FROM order_items WHERE order_id = ?', [fo.id])).map((x) => `${x.line_kind}:${x.label}`), ['fee:Date change fee'], 'a fee line, not a ticket');
   assert.equal((await webhook(ev)).body.duplicate, true);
   // the cutoff
   await q('UPDATE tenants SET shop_change_hours = 600 WHERE id = ?', [A.id]);
@@ -518,6 +527,187 @@ test('the pace report compares this month with last year and shows the visit-to-
   assert.equal((await api('GET', '/online-shop/pace', { token: ct })).status, 403, 'managers only');
   assert.equal((await api('GET', '/online-shop/calendar', { token: ct })).status, 403);
   assert.equal((await api('GET', '/online-shop/lookup?q=abc', { token: ct })).status, 200, 'the window can use will-call');
+});
+
+// ---------------------------------------------------------------- hardening release
+test('demo mountains never send email or texts, whoever asks, and every send needs a mountain', async () => {
+  const before = mails.length;
+  await q('UPDATE tenants SET sandbox_expires_at = NOW() + INTERVAL 1 DAY WHERE id = ?', [B.id]);
+  const r = await mailer.send({ tenantId: B.id, to: 'victim@x.test', subject: 'Hi', text: 'phish' });
+  assert.equal(r.ok, false); assert.match(r.error, /Demo/);
+  assert.equal((await mailer.send({ to: 'x@x.test', subject: 'Hi', text: 'no mountain' })).ok, false);
+  const sms = require('../src/lib/sms');
+  process.env.TWILIO_ACCOUNT_SID = 'AC1'; process.env.TWILIO_AUTH_TOKEN = 't'; process.env.TWILIO_FROM = '+15550000000'; process.env.TWILIO_API_BASE = 'http://127.0.0.1:9';
+  const t = await sms.send({ tenantId: B.id, to: '2155550100', body: 'phish' });
+  assert.equal(t.ok, false); assert.match(t.error, /Demo/);
+  delete process.env.TWILIO_ACCOUNT_SID; delete process.env.TWILIO_AUTH_TOKEN; delete process.env.TWILIO_FROM; delete process.env.TWILIO_API_BASE;
+  const report = await api('POST', '/reports/weekly/email-me', { token: B.owner, body: {} });
+  assert.notEqual(report.status, 200, 'the weekly report test send is refused for a demo');
+  assert.equal(mails.length, before, 'nothing reached Postmark');
+  await q('UPDATE tenants SET sandbox_expires_at = NULL WHERE id = ?', [B.id]);
+});
+
+test('an online order never overwrites a customer on file, and a stranger cannot become a child\'s guardian', async () => {
+  const [p] = await pool.query("INSERT INTO people (tenant_id, first_name, last_name, email, phone, date_of_birth, photo) VALUES (?, 'Vic', 'Tim', 'vic@x.test', '610-555-0001', ?, 'data:image/jpeg;base64,/9j/ORIGINAL')", [A.id, `${year - 40}-01-01`]);
+  const [c] = await pool.query("INSERT INTO people (tenant_id, first_name, last_name, date_of_birth) VALUES (?, 'Kid', 'Tim', ?)", [A.id, `${year - 8}-03-03`]);
+  await pool.query("INSERT INTO person_links (tenant_id, adult_id, member_id, relation) VALUES (?, ?, ?, 'guardian')", [A.id, p.insertId, c.insertId]);
+  const { row } = await buy({ contact_first_name: 'Vic', contact_last_name: 'Tim', contact_email: 'vic@x.test', contact_phone: '999-999-9999',
+    items: [{ product_id: passP, holder: { first_name: 'Vic', last_name: 'Tim', date_of_birth: `${year - 40}-01-01`, photo: 'data:image/jpeg;base64,/9j/ATTACKER' } },
+      { product_id: passP, holder: { first_name: 'Kid', last_name: 'Tim', date_of_birth: `${year - 8}-03-03` } }] });
+  assert.equal((await webhook(paidEvent(row, A.id))).status, 200);
+  const vic = (await q('SELECT phone, photo FROM people WHERE id = ?', [p.insertId]))[0];
+  assert.equal(vic.phone, '610-555-0001', 'phone kept'); assert.match(vic.photo, /ORIGINAL/, 'gate photo kept');
+  const links = await q("SELECT adult_id FROM person_links WHERE tenant_id = ? AND member_id = ? AND relation = 'guardian'", [A.id, c.insertId]);
+  assert.deepEqual(links.map((x) => x.adult_id), [p.insertId]);
+});
+
+test('the platform console can require a code from an authenticator app, and records who acted', async () => {
+  const totp = require('../src/lib/totp');
+  const secret = totp.newSecret();
+  process.env.PLATFORM_TOTP_SECRET = secret;
+  try {
+    const plat = (m, path, o) => call('/api/v1/platform', m, path, o);
+    const headers = (h) => ({ method: 'GET', headers: h });
+    const bare = await fetch(`${base}/api/v1/platform/tenants`, headers({ 'x-platform-key': 'test-bootstrap-key' }));
+    assert.equal(bare.status, 403, 'the key alone is not enough');
+    assert.equal((await plat('POST', '/session', { body: { key: 'test-bootstrap-key', name: 'Dan', code: '000000' } })).status, 403);
+    const code = totp.hotp(secret, totp.stepAt(Date.now()));
+    const s = await plat('POST', '/session', { body: { key: 'test-bootstrap-key', name: 'Dan', code } });
+    assert.equal(s.status, 200, s.text);
+    const list = await fetch(`${base}/api/v1/platform/tenants`, headers({ 'x-platform-session': s.body.session }));
+    assert.equal(list.status, 200);
+    const audit = await (await fetch(`${base}/api/v1/platform/audit`, headers({ 'x-platform-session': s.body.session }))).json();
+    assert.equal(audit.data[0].actor, 'Dan');
+  } finally { delete process.env.PLATFORM_TOTP_SECRET; }
+});
+
+test('a repeated Stripe event after an automatic refund changes nothing', async () => {
+  const { row } = await buy({ contact_email: 'replay@x.test', items: [{ product_id: adultP, valid_on: plus(today, 33), holder: adult }] });
+  const wrong = paidEvent(row, A.id, { amount_total: row.amount_cents - 1 });
+  assert.equal((await webhook(wrong)).body.refunded, true, 'a mismatched amount is refunded');
+  const right = paidEvent(row, A.id); // the same session arriving again, now looking fine
+  assert.equal((await webhook(right)).body.duplicate, true);
+  assert.equal((await q('SELECT status FROM shop_orders WHERE id = ?', [row.id]))[0].status, 'refunded');
+  assert.equal((await q('SELECT COUNT(*) AS n FROM orders WHERE tenant_id = ? AND payment_ref = ?', [A.id, right.data.object.payment_intent]))[0].n, 0, 'nothing sold');
+});
+
+test('a payment that lands after its hold ran out is honoured, and staff are told it went over the limit', async () => {
+  const d = plus(today, 34);
+  await q('UPDATE tenants SET online_daily_limit = 1 WHERE id = ?', [A.id]);
+  try {
+    const late = await buy({ contact_email: 'late@x.test', items: [{ product_id: adultP, valid_on: d, holder: adult }] });
+    await q('UPDATE shop_orders SET created_at = DATE_SUB(NOW(), INTERVAL 2 HOUR) WHERE id = ?', [late.row.id]); // its hold has lapsed
+    const other = await buy({ contact_email: 'ontime@x.test', items: [{ product_id: adultP, valid_on: d, holder: adult }] });
+    assert.equal((await webhook(paidEvent(other.row, A.id))).status, 200);
+    assert.equal((await webhook(paidEvent(late.row, A.id))).status, 200);
+    const r = (await q('SELECT status, note FROM shop_orders WHERE id = ?', [late.row.id]))[0];
+    assert.equal(r.status, 'paid'); assert.match(r.note || '', /over the daily limit/);
+  } finally { await q('UPDATE tenants SET online_daily_limit = NULL WHERE id = ?', [A.id]); }
+});
+
+test('gift cards are never taxed, at the window or online', async () => {
+  const qt = (await pub('POST', '/shop/quote', { body: { gifts: [{ amount_cents: 10000 }] } })).body;
+  assert.equal(qt.tax_cents, 0); assert.equal(qt.total_cents, 10000);
+  const counter = await api('POST', '/checkout/quote', { token: A.owner, body: { lines: [{ type: 'gift_card', amount_cents: 10000 }] } });
+  assert.equal(counter.status, 200, counter.text); assert.equal(counter.body.tax_cents, 0); assert.equal(counter.body.total_cents, 10000);
+});
+
+test('a one-use promo code cannot be used by two online guests at once', async () => {
+  await pool.query("INSERT INTO promo_codes (tenant_id, code, percent_off, max_uses) VALUES (?, 'ONCE', 50, 1)", [A.id]);
+  const items = [{ product_id: adultP, valid_on: plus(today, 21), holder: { first_name: 'Ona', last_name: 'Once', age_group: 'adult' } }];
+  await buy({ contact_email: 'o1@x.test', items, promo_code: 'ONCE' });
+  const second = await pub('POST', '/shop/orders', { body: body({ contact_email: 'o2@x.test', items, promo_code: 'ONCE' }) });
+  assert.equal(second.status, 400); assert.match(second.body.error, /fully used/);
+});
+
+test('moving a ticket twice only charges the price rise once', async () => {
+  await q('UPDATE tenants SET shop_change_hours = 1, shop_change_fee_cents = 0 WHERE id = ?', [A.id]);
+  const d1 = plus(today, 60); const d2 = plus(today, 61); const d3 = plus(today, 62);
+  assert.equal((await api('PUT', `/products/${adultP}/calendar`, { token: A.owner, body: { entries: [{ on_date: d2, price_cents: 9000 }, { on_date: d3, price_cents: 9000 }] } })).status, 200);
+  const { tok, view } = await payOrder({ contact_email: 'twice@x.test', items: [{ product_id: adultP, valid_on: d1, holder: adult }] });
+  const code = view.tickets[0].code;
+  const up = (await pub('POST', `/shop/orders/${tok}/change`, { body: { ticket_code: code, date: d2 } })).body;
+  assert.equal(up.due_cents, 3300, 'the $30 rise plus 10% tax');
+  const ch = (await q("SELECT * FROM shop_changes WHERE tenant_id = ? AND status = 'awaiting_payment' ORDER BY id DESC LIMIT 1", [A.id]))[0];
+  const ev = { id: `evt_${++n}`, type: 'checkout.session.completed', data: { object: { id: ch.stripe_session_id, payment_status: 'paid', amount_total: 3300, payment_intent: `pi_tw_${n}`, metadata: { tenant_id: String(A.id), change_id: String(ch.id), kind: 'shop_change', request_id: `chg${ch.id}` } } } };
+  assert.equal((await webhook(ev)).status, 200);
+  const again = (await pub('POST', `/shop/orders/${tok}/change`, { body: { ticket_code: code, date: d3 } })).body;
+  assert.equal(again.done, true, 'same price as already paid: free'); assert.equal(again.due_cents, 0);
+  await q('UPDATE tenants SET shop_change_hours = NULL WHERE id = ?', [A.id]);
+});
+
+test('a card refund Stripe cannot send is kept as owed and can be retried; cash refunds come out of the chosen drawer', async () => {
+  const { row } = await payOrder({ contact_email: 'refund@x.test' });
+  const orderId = (await q('SELECT order_id FROM shop_orders WHERE id = ?', [row.id]))[0].order_id;
+  failRefunds = true;
+  const r = await api('POST', `/orders/${orderId}/refund`, { token: A.owner, body: { reason: 'weather' } });
+  failRefunds = false;
+  assert.equal(r.status, 200, r.text); assert.equal(r.body.card_refund_failed, true);
+  const rf = (await q('SELECT id, card_status FROM order_refunds WHERE order_id = ?', [orderId]))[0];
+  assert.equal(rf.card_status, 'failed');
+  assert.equal((await api('POST', `/orders/${orderId}/refunds/${rf.id}/retry`, { token: A.owner })).status, 200);
+  assert.equal((await q('SELECT card_status FROM order_refunds WHERE id = ?', [rf.id]))[0].card_status, 'sent');
+  assert.equal((await api('POST', `/orders/${orderId}/refunds/${rf.id}/retry`, { token: A.owner })).status, 409, 'never twice');
+  // cash: a counter sells from their drawer; the manager refunds and names that drawer
+  const ctr = (await api('POST', '/users', { token: A.owner, body: { email: `c3@${A.slug}.test`, password: PW, role: 'counter' } })).status;
+  assert.equal(ctr, 201);
+  const ct = (await api('POST', '/auth/login', { body: { tenant: A.slug, email: `c3@${A.slug}.test`, password: PW } })).body.token;
+  const till = (await api('POST', '/till/open', { token: ct, body: { opening_float_cents: 10000 } })).body;
+  const sale = await api('POST', '/checkout', { token: ct, body: { lines: [{ type: 'ticket', product_id: adultP, holder: 'buyer' }], customer: { details: { first_name: 'Cash', last_name: 'Guest', date_of_birth: `${year - 30}-01-01`, sex: 'female', phone: '215-555-0199' } }, payments: [{ tender: 'cash', amount_cents: 6600, tendered_cents: 6600 }] } });
+  assert.equal(sale.status, 201, sale.text);
+  const tillId = till.id || (await q("SELECT id FROM till_sessions WHERE tenant_id = ? AND status = 'open' ORDER BY id DESC LIMIT 1", [A.id]))[0].id;
+  assert.equal((await api('POST', `/orders/${sale.body.id}/refund`, { token: A.owner, body: { reason: 'customer_request', till_id: tillId } })).status, 200);
+  const cur = (await api('GET', '/till/current', { token: ct })).body.till;
+  assert.equal(cur.cash_refunds_cents, 6600, 'the counter drawer that paid out the cash');
+  assert.equal(cur.expected_cents, 10000, 'float + sale - refund');
+});
+
+test('quick sale at the window: day tickets with no name, never a season pass, and a mountain can switch it off', async () => {
+  const pay = [{ tender: 'cash', amount_cents: 6600 }];
+  const ok1 = await api('POST', '/checkout', { token: A.owner, body: { quick: true, lines: [{ type: 'ticket', product_id: adultP }], payments: pay } });
+  assert.equal(ok1.status, 201, ok1.text); assert.equal(ok1.body.person_id, null); assert.equal(ok1.body.tickets.length, 1);
+  const pass = await api('POST', '/checkout', { token: A.owner, body: { quick: true, lines: [{ type: 'ticket', product_id: passP }], payments: [{ tender: 'cash', amount_cents: 44000 }] } });
+  assert.equal(pass.status, 400, 'a season pass needs the holder');
+  assert.equal((await api('PUT', '/tenant/profile', { token: A.owner, body: { quick_sale: false } })).status, 200);
+  assert.equal((await api('POST', '/checkout', { token: A.owner, body: { quick: true, lines: [{ type: 'ticket', product_id: adultP }], payments: pay } })).status, 400);
+  assert.equal((await api('PUT', '/tenant/profile', { token: A.owner, body: { quick_sale: true } })).status, 200);
+});
+
+test('a card refund retried days later is not sent twice, and a guest who went back from the card page can use their promo code again', async () => {
+  const { row } = await payOrder({ contact_email: 'lost@x.test' });
+  const orderId = (await q('SELECT order_id FROM shop_orders WHERE id = ?', [row.id]))[0].order_id;
+  assert.equal((await api('POST', `/orders/${orderId}/refund`, { token: A.owner, body: { reason: 'weather' } })).status, 200);
+  const rf = (await q('SELECT id, card_ref FROM order_refunds WHERE order_id = ?', [orderId]))[0];
+  // pretend Stripe timed out after making the refund: the row says failed, but the refund exists at Stripe
+  await q("UPDATE order_refunds SET card_status = 'failed' WHERE id = ?", [rf.id]);
+  const before = refundsMade.length;
+  assert.equal((await api('POST', `/orders/${orderId}/refunds/${rf.id}/retry`, { token: A.owner })).status, 200);
+  assert.equal(refundsMade.length, before, 'found the earlier refund, sent nothing new');
+  // promo: the guest's own abandoned basket does not use up a one-use code, and going back lets the basket go
+  await pool.query("INSERT INTO promo_codes (tenant_id, code, percent_off, max_uses) VALUES (?, 'BACKAGAIN', 10, 1)", [A.id]);
+  const items = [{ product_id: adultP, valid_on: plus(today, 22), holder: { first_name: 'Bea', last_name: 'Back', age_group: 'adult' } }];
+  const first = await buy({ contact_email: 'back@x.test', items, promo_code: 'BACKAGAIN' });
+  assert.equal((await pub('POST', '/shop/orders', { body: body({ contact_email: 'back@x.test', items, promo_code: 'BACKAGAIN' }) })).status, 201, 'the same guest again');
+  assert.equal((await pub('POST', '/shop/orders', { body: body({ contact_email: 'other@x.test', items, promo_code: 'BACKAGAIN' }) })).status, 400, 'someone else is held off');
+  const tok = (await q('SELECT view_token FROM shop_orders WHERE id = ?', [first.row.id]))[0].view_token;
+  assert.equal((await pub('POST', `/shop/orders/${tok}/abandon`)).status, 200);
+  assert.equal((await q('SELECT status FROM shop_orders WHERE id = ?', [first.row.id]))[0].status, 'expired');
+  // a payment that lands after the guest pressed back is still honoured
+  assert.equal((await webhook(paidEvent(first.row, A.id))).status, 200);
+  assert.equal((await q('SELECT status FROM shop_orders WHERE id = ?', [first.row.id]))[0].status, 'paid');
+});
+
+test('/readyz says the database is reachable and migrated', async () => {
+  const r = await fetch(`${base}/readyz`);
+  assert.equal(r.status, 200); assert.deepEqual(await r.json(), { ok: true });
+});
+
+test('the simple /orders sale records tax and a payment, so it refunds in full', async () => {
+  const o = await api('POST', '/orders', { token: A.owner, body: { items: [{ product_id: adultP }] } });
+  assert.equal(o.status, 201, o.text);
+  assert.equal(o.body.tax_cents, 600); assert.equal(o.body.total_cents, 6600);
+  const r = await api('POST', `/orders/${o.body.id}/refund`, { token: A.owner, body: { reason: 'customer_request' } });
+  assert.equal(r.status, 200, r.text); assert.equal(r.body.amount_cents, 6600);
 });
 
 test('a mountain with the shop module off, or the shop switched off, has no page', async () => {

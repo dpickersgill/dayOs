@@ -7,7 +7,7 @@ const { one } = require('../db');
 const { unitPrice } = require('./pricing');
 const { loadRules, applyTax } = require('./tax');
 const { resolvePerson } = require('./customers');
-const { addLink, isMinor } = require('./family');
+const { addLink, isMinor, mayActAsGuardian } = require('./family');
 const { seasonFor, todayIn } = require('./util');
 const { conflict, bad } = require('./errors');
 const { audit } = require('./audit');
@@ -90,13 +90,18 @@ async function confirmRequest(conn, tenantId, raw, { paid = false, auditReq, pay
     const sameAsContact = st.first_name.toLowerCase() === String(c.first_name).toLowerCase() && st.last_name.toLowerCase() === String(c.last_name).toLowerCase();
     const minor = isMinor(st.date_of_birth, day);
     const details = { first_name: st.first_name, last_name: st.last_name, date_of_birth: st.date_of_birth, sex: st.sex };
-    if (!minor) { details.email = raw.contact_email; details.phone = raw.contact_phone; }
+    // The buyer's email is how we find the buyer's own record, so only the buyer gets it. Other adults get the contact
+    // phone for the lesson roster (a phone only matches a record with the same first and last name).
+    if (sameAsContact && !minor) { details.email = raw.contact_email; details.phone = raw.contact_phone; } else if (!minor) details.phone = raw.contact_phone;
     for (const k of ['height_in', 'weight_lb', 'boot_size', 'ability_level', 'discipline']) if (st[k] !== undefined && st[k] !== null && st[k] !== '') details[k] = st[k];
-    const who = await resolvePerson(conn, tenantId, { personId: sameAsContact && !minor ? contact.id : undefined, details, scope: 'lesson', source: 'online' });
+    // The mountain's mandatory lesson details are checked for the guest who booked; other students only give what the
+    // booking form asks for, so a paid family booking is never refused for a missing email.
+    const who = await resolvePerson(conn, tenantId, { personId: sameAsContact && !minor ? contact.id : undefined, details, scope: sameAsContact ? 'lesson' : 'none', source: 'online', fillOnly: true });
     if (!who.id) throw bad(`Could not save ${st.first_name} ${st.last_name}`);
-    if (minor && contact.id) await addLink(conn, tenantId, contact.id, who.id, 'guardian');
+    const guardianOk = minor && await mayActAsGuardian(conn, tenantId, contact.id, who.id, who.created);
+    if (guardianOk) await addLink(conn, tenantId, contact.id, who.id, 'guardian');
     let waiver = await one(conn, 'SELECT id FROM waivers WHERE tenant_id = ? AND person_id = ? AND season = ? LIMIT 1', [tenantId, who.id, season]);
-    if (!waiver && raw.waiver_accepted && (minor || sameAsContact) && contact.id) {
+    if (!waiver && raw.waiver_accepted && (guardianOk || (sameAsContact && !minor)) && contact.id) {
       await conn.query("INSERT INTO waivers (tenant_id, person_id, season, kind, signed_by_person_id, signed_by_name, signer_relation, text_sha) VALUES (?, ?, ?, 'general', ?, ?, ?, ?)", [tenantId, who.id, season, contact.id, raw.contact_name, minor ? 'guardian' : 'self', raw.waiver_text_sha || sha]);
       waiver = { id: 1 };
     }

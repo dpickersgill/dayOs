@@ -9,7 +9,7 @@ const { pool, rows, one } = require('../db');
 const { localTime } = require('./util');
 
 const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
-const hmac = (label, text) => crypto.createHmac('sha256', `${config.jwtSecret}:${label}`).update(text).digest('hex');
+const hmac = (label, text) => crypto.createHmac('sha256', `${config.kioskSecret}:${label}`).update(text).digest('hex');
 const safeEq = (a, b) => { const x = Buffer.from(String(a)); const y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
 const b64u = (s) => Buffer.from(s).toString('base64url');
 const unb64u = (s) => Buffer.from(String(s), 'base64url').toString('utf8');

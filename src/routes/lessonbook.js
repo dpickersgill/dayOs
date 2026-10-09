@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { z, dateStr, validate, nowIn, todayIn, addDays } = require('../lib/util');
-const { notFound, conflict, bad } = require('../lib/errors');
+const { notFound, conflict, bad, Unhonourable } = require('../lib/errors');
 const { isMinor } = require('../lib/family');
 const config = require('../config');
 const stripe = require('../lib/stripe');
@@ -16,6 +16,7 @@ const { audit } = require('../lib/audit');
 const { isSandbox } = require('../lib/sandbox');
 const shopsale = require('../lib/shopsale');
 const shopafter = require('../lib/shopafter');
+const cardrefund = require('../lib/cardrefund');
 
 const router = express.Router();
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I
@@ -174,10 +175,11 @@ async function findRequest(t, ref, email) {
 }
 const shape = (r) => { let n = 1; try { n = JSON.parse(r.students).students.length; } catch (_) { /* one */ } return { reference: r.reference, status: r.status, product: r.product, starts_at: r.starts_at, students: n, staff_note: r.staff_note, amount_cents: r.amount_cents, refund_cents: r.refund_cents }; };
 
-router.get('/:slug/requests/:ref', async (req, res) => {
+// The guest's email is sent in the body, not the address, so it never lands in request logs.
+router.post('/:slug/requests/:ref/status', validate(z.object({ email: z.string().max(255) })), async (req, res) => {
   const t = await tenantFor(req.params.slug);
   res.set('Cache-Control', 'no-store');
-  res.json(shape(await findRequest(t, req.params.ref, req.query.email)));
+  res.json(shape(await findRequest(t, req.params.ref, req.body.email)));
 });
 
 router.post('/:slug/requests/:ref/cancel', validate(z.object({ email: z.string().trim().max(255) })), async (req, res) => {
@@ -204,7 +206,9 @@ router.post('/:slug/requests/:ref/cancel', validate(z.object({ email: z.string()
       throw conflict(`That request is already ${cur.status}`);
     }
   });
-  if (refundInfo && refundInfo.cents > 0) await sendRefund(t, r, refundInfo);
+  // The refund is already written down as owed; if Stripe cannot be reached now it is retried, so the guest is not left
+  // with an error after their lesson was cancelled.
+  if (refundInfo && refundInfo.refundId) await cardrefund.send(t.id, refundInfo.refundId);
   res.json({ ok: true, refund_cents: refundInfo ? refundInfo.cents : 0, refund_percent: refundInfo ? refundInfo.percent : 0 });
 });
 
@@ -223,6 +227,7 @@ async function cancelPaid(conn, t, r) {
     const [rf] = await conn.query("INSERT INTO order_refunds (tenant_id, order_id, user_id, reason, note, amount_cents, tax_cents, method) VALUES (?, ?, NULL, 'customer_request', ?, ?, ?, 'card')",
       [t.id, order.id, `Online cancellation: ${percent}% refund`, cents, tax]);
     refundId = rf.insertId;
+    if (r.payment_intent) await cardrefund.markPending(conn, t.id, refundId, r.payment_intent);
     const whole = order.refunded_cents + cents >= order.total_cents;
     await conn.query('UPDATE orders SET refunded_cents = refunded_cents + ?, status = IF(?, \'refunded\', status) WHERE tenant_id = ? AND id = ?', [cents, whole ? 1 : 0, t.id, order.id]);
     if (whole) await conn.query('UPDATE order_items SET refunded_at = NOW(), refund_id = ? WHERE tenant_id = ? AND order_id = ? AND refunded_at IS NULL', [refundId, t.id, order.id]);
@@ -232,10 +237,6 @@ async function cancelPaid(conn, t, r) {
   return { cents, percent, refundId };
 }
 
-async function sendRefund(t, r, info) {
-  if (!r.payment_intent || !stripe.enabled()) return; // the money is recorded as owed; staff can refund it in Stripe by hand
-  await stripe.refund({ paymentIntent: r.payment_intent, amountCents: info.cents, key: `refund-${t.id}-${r.id}-${info.cents}` });
-}
 
 /**
  * Stripe tells us a payment finished or a checkout lapsed. Paid: confirm the request and record the sale. If the lesson
@@ -267,23 +268,32 @@ async function handleWebhook(event, base) {
   }
   if (event.type !== 'checkout.session.completed' || obj.payment_status !== 'paid') return { ignored: true };
   let failed = null;
-  const result = await tx(async (conn) => {
-    const raw = await one(conn, 'SELECT * FROM lesson_requests WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, requestId]);
-    if (!raw || raw.stripe_session_id !== obj.id) return { ignored: true };
-    if (raw.status === 'confirmed') return { duplicate: true };
-    const q = parseRequest(raw).quote;
-    if (!q || Number(obj.amount_total) !== raw.amount_cents) { failed = 'amount'; return { problem: true }; }
-    try {
-      return await confirmRequest(conn, tenantId, raw, { paid: true, paymentIntent: obj.payment_intent });
-    } catch (err) {
-      if (err.status && err.status < 500) { failed = err.message; return { problem: true }; }
-      throw err;
-    }
-  });
+  let result;
+  try {
+    result = await tx(async (conn) => {
+      const raw = await one(conn, 'SELECT * FROM lesson_requests WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, requestId]);
+      if (!raw || raw.stripe_session_id !== obj.id) return { ignored: true };
+      // Only a request still waiting for this payment is acted on. A repeat of an event we already handled, including one we
+      // refunded, changes nothing.
+      if (raw.status !== 'awaiting_payment') return { duplicate: true };
+      const q = parseRequest(raw).quote;
+      if (!q || Number(obj.amount_total) !== raw.amount_cents) { failed = 'amount'; return { problem: true }; }
+      try {
+        return await confirmRequest(conn, tenantId, raw, { paid: true, paymentIntent: obj.payment_intent });
+      } catch (err) {
+        if (err.status && err.status < 500) throw new Unhonourable(err.message);
+        throw err;
+      }
+    });
+  } catch (err) {
+    if (!(err instanceof Unhonourable)) throw err;
+    failed = err.message; result = { problem: true }; // rolled back: nothing half-made is kept
+  }
   if (failed) {
-    // We could not honour it (lesson full or cancelled, or the amount was wrong): give the money back in full.
-    await pool.query("UPDATE lesson_requests SET status = 'expired', payment_intent = ?, refund_cents = amount_cents, staff_note = ? WHERE tenant_id = ? AND id = ? AND status <> 'confirmed'", [obj.payment_intent, `Refunded automatically: ${failed}`.slice(0, 300), tenantId, requestId]);
+    // We could not honour it (lesson full or cancelled, or the amount was wrong): give the money back in full. The refund
+    // goes first; if Stripe cannot be reached this throws, Stripe sends the event again, and we try again.
     if (obj.payment_intent && stripe.enabled()) await stripe.refund({ paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), key: `autorefund-${tenantId}-${requestId}` });
+    await pool.query("UPDATE lesson_requests SET status = 'expired', payment_intent = ?, refund_cents = amount_cents, staff_note = ? WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment'", [obj.payment_intent, `Refunded automatically: ${failed}`.slice(0, 300), tenantId, requestId]);
   }
   return result;
 }

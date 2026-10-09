@@ -54,10 +54,10 @@ router.delete('/tax-rules/:id', managers, async (req, res) => {
 });
 
 // ---------------------------------------------------------------- the mountain's details (receipts, waiver text, limits)
-const PROFILE_COLS = ['name', 'address', 'phone', 'receipt_footer', 'waiver_text', 'require_mfa', 'comp_counter_limit_cents', 'scan_passback_seconds', 'online_booking', 'booking_notice_hours', 'booking_message', 'cancel_hours', 'online_payment', 'online_shop', 'shop_message', 'shop_recovery', 'shop_change_hours', 'shop_change_fee_cents', 'weekly_report', 'online_daily_limit', 'refund_full_hours', 'refund_half_hours', 'refund_half_percent', 'cancel_note', 'slug'];
+const PROFILE_COLS = ['name', 'address', 'phone', 'receipt_footer', 'waiver_text', 'require_mfa', 'comp_counter_limit_cents', 'scan_passback_seconds', 'online_booking', 'booking_notice_hours', 'booking_message', 'cancel_hours', 'online_payment', 'online_shop', 'shop_message', 'shop_recovery', 'quick_sale', 'shop_change_hours', 'shop_change_fee_cents', 'weekly_report', 'online_daily_limit', 'refund_full_hours', 'refund_half_hours', 'refund_half_percent', 'cancel_note', 'slug'];
 router.get('/tenant/profile', async (req, res) => {
   const t = await one(pool, `SELECT ${PROFILE_COLS.join(', ')}, timezone FROM tenants WHERE id = ?`, [req.auth.tenantId]);
-  res.json({ ...t, require_mfa: Boolean(t.require_mfa), online_booking: Boolean(t.online_booking), online_payment: Boolean(t.online_payment), online_shop: Boolean(t.online_shop), shop_recovery: Boolean(t.shop_recovery), weekly_report: Boolean(t.weekly_report), stripe_ready: stripe.enabled() });
+  res.json({ ...t, require_mfa: Boolean(t.require_mfa), online_booking: Boolean(t.online_booking), online_payment: Boolean(t.online_payment), online_shop: Boolean(t.online_shop), shop_recovery: Boolean(t.shop_recovery), quick_sale: Boolean(t.quick_sale), weekly_report: Boolean(t.weekly_report), stripe_ready: stripe.enabled() });
 });
 router.put('/tenant/profile', managers, validate(z.object({
   name: z.string().trim().min(2).max(255).optional(),
@@ -75,6 +75,7 @@ router.put('/tenant/profile', managers, validate(z.object({
   online_payment: z.boolean().optional(),
   online_shop: z.boolean().optional(),
   shop_recovery: z.boolean().optional(),
+  quick_sale: z.boolean().optional(),
   shop_change_hours: z.number().int().min(0).max(720).nullable().optional(),
   shop_change_fee_cents: z.number().int().min(0).max(100000).optional(),
   weekly_report: z.boolean().optional(),
@@ -88,7 +89,7 @@ router.put('/tenant/profile', managers, validate(z.object({
   const b = req.body;
   if (b.require_mfa !== undefined && req.auth.role !== 'owner') throw bad('Only the owner can require two-step sign-in');
   const set = []; const vals = [];
-  for (const k of PROFILE_COLS) if (b[k] !== undefined) { set.push(`${k} = ?`); vals.push(['require_mfa', 'online_booking', 'online_payment', 'online_shop', 'weekly_report', 'shop_recovery'].includes(k) ? (b[k] ? 1 : 0) : (b[k] === '' ? null : b[k])); }
+  for (const k of PROFILE_COLS) if (b[k] !== undefined) { set.push(`${k} = ?`); vals.push(['require_mfa', 'online_booking', 'online_payment', 'online_shop', 'weekly_report', 'shop_recovery', 'quick_sale'].includes(k) ? (b[k] ? 1 : 0) : (b[k] === '' ? null : b[k])); }
   if (!set.length) throw bad('Nothing to change');
   await pool.query(`UPDATE tenants SET ${set.join(', ')} WHERE id = ?`, [...vals, req.auth.tenantId]);
   await audit(pool, req, 'update', 'tenants', req.auth.tenantId, Object.keys(b));
@@ -104,7 +105,8 @@ async function tillSummary(conn, till) {
     WHERE p.tenant_id = ? AND o.user_id = ? AND p.created_at >= ? AND p.created_at <= ? GROUP BY p.tender`, [t.tenantId, t.user, t.from, t.to]);
   const by = (k) => Number((pay.find((x) => x.tender === k) || {}).cents || 0);
   const ord = await one(conn, 'SELECT COUNT(*) AS n, COALESCE(SUM(total_cents), 0) AS total, COALESCE(SUM(tax_cents), 0) AS tax FROM orders WHERE tenant_id = ? AND user_id = ? AND created_at >= ? AND created_at <= ? AND status <> \'cancelled\'', [t.tenantId, t.user, t.from, t.to]);
-  const refunds = await rows(conn, 'SELECT method, SUM(amount_cents) AS cents FROM order_refunds WHERE tenant_id = ? AND user_id = ? AND created_at >= ? AND created_at <= ? GROUP BY method', [t.tenantId, t.user, t.from, t.to]);
+  // Refunds paid from this drawer: those recorded against it, plus others by its cashier during the shift that name no drawer.
+  const refunds = await rows(conn, 'SELECT method, SUM(amount_cents) AS cents FROM order_refunds WHERE tenant_id = ? AND (till_id = ? OR (till_id IS NULL AND user_id = ? AND created_at >= ? AND created_at <= ?)) GROUP BY method', [t.tenantId, till.id, t.user, t.from, t.to]);
   const cashRefunds = Number((refunds.find((x) => x.method === 'cash') || {}).cents || 0);
   const moves = await rows(conn, 'SELECT kind, SUM(amount_cents) AS cents FROM till_moves WHERE tenant_id = ? AND till_id = ? GROUP BY kind', [till.tenant_id, till.id]);
   const mv = (k) => Number((moves.find((x) => x.kind === k) || {}).cents || 0);
@@ -213,7 +215,7 @@ router.get('/orders/:id/receipt', sellers, async (req, res) => {
   const order = await one(pool, 'SELECT * FROM orders WHERE tenant_id = ? AND id = ?', [tenantId, paramId(req)]);
   if (!order) throw notFound('Order');
   const t = await one(pool, 'SELECT name, address, phone, receipt_footer, timezone FROM tenants WHERE id = ?', [tenantId]);
-  const lines = await rows(pool, `SELECT i.id, i.line_kind, i.tier, i.quantity, i.unit_price_cents, i.discount_cents, i.tax_cents, i.refunded_at, i.valid_on, COALESCE(pr.name, pg.name, 'Gift card') AS name, p.first_name, p.last_name
+  const lines = await rows(pool, `SELECT i.id, i.line_kind, i.tier, i.quantity, i.unit_price_cents, i.discount_cents, i.tax_cents, i.refunded_at, i.valid_on, COALESCE(i.label, pr.name, pg.name, CASE i.line_kind WHEN 'gift_card' THEN 'Gift card' WHEN 'rental' THEN 'Rental charge' WHEN 'fee' THEN 'Fee' ELSE 'Item' END) AS name, p.first_name, p.last_name
     FROM order_items i LEFT JOIN products pr ON pr.id = i.product_id AND pr.tenant_id = i.tenant_id LEFT JOIN programs pg ON pg.id = i.program_id AND pg.tenant_id = i.tenant_id
     LEFT JOIN people p ON p.id = i.person_id AND p.tenant_id = i.tenant_id WHERE i.tenant_id = ? AND i.order_id = ? ORDER BY i.id`, [tenantId, order.id]);
   const payments = await rows(pool, 'SELECT tender, amount_cents, tendered_cents, card_brand, card_last4, comp_reason FROM order_payments WHERE tenant_id = ? AND order_id = ? ORDER BY id', [tenantId, order.id]);
@@ -247,7 +249,7 @@ const send = (res, name, body) => res.set('Content-Type', 'text/csv; charset=utf
 
 router.get('/exports/sales.csv', managers, async (req, res) => {
   const r = await range(req);
-  const data = await rows(pool, `SELECT o.id AS order_id, o.created_at, o.channel, o.status AS order_status, o.promo_code, i.line_kind, COALESCE(pr.name, pg.name, 'Gift card') AS item, i.tier, i.quantity, i.unit_price_cents, i.discount_cents, i.tax_cents,
+  const data = await rows(pool, `SELECT o.id AS order_id, o.created_at, o.channel, o.status AS order_status, o.promo_code, i.line_kind, COALESCE(i.label, pr.name, pg.name, CASE i.line_kind WHEN 'gift_card' THEN 'Gift card' WHEN 'rental' THEN 'Rental charge' WHEN 'fee' THEN 'Fee' ELSE 'Item' END) AS item, i.tier, i.quantity, i.unit_price_cents, i.discount_cents, i.tax_cents,
       i.refunded_at, p.first_name, p.last_name, u.email AS sold_by,
       (SELECT GROUP_CONCAT(CONCAT(py.tender, ' ', FORMAT(py.amount_cents / 100, 2)) SEPARATOR '; ') FROM order_payments py WHERE py.order_id = o.id AND py.tenant_id = o.tenant_id) AS paid_by
     FROM order_items i JOIN orders o ON o.id = i.order_id AND o.tenant_id = i.tenant_id LEFT JOIN products pr ON pr.id = i.product_id AND pr.tenant_id = i.tenant_id

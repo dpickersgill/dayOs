@@ -14,7 +14,7 @@ const { money, esc } = require('./format');
 const dollars = (c) => /* whole dollars, for headline numbers */ `${c < 0 ? '-' : ''}$${(Math.abs(c) / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 const weekStartOf = (date) => addDays(date, -((weekdayOf(date) + 6) % 7)); // the Monday on or before
 const pct = (now, before) => (before > 0 ? Math.round(((now - before) / before) * 100) : null);
-const LABEL = { ticket: 'Tickets and passes', lesson: 'Lessons', rental: 'Rentals', program: 'Programs', gift_card: 'Gift cards sold' };
+const LABEL = { ticket: 'Tickets and passes', lesson: 'Lessons', rental: 'Rentals', program: 'Programs', gift_card: 'Gift cards sold', fee: 'Fees' };
 const CHANNEL = { window: 'Ticket window', online: 'Online', phone: 'Phone', group: 'Groups' };
 const dayName = (d) => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(`${d}T12:00:00Z`));
 
@@ -139,7 +139,7 @@ async function runForTenant(t, { now } = {}) {
   if (!claim.affectedRows) return { skipped: 'already sent' };
   const s = JSON.parse(row.summary); const m = renderEmail(s, t); const sent = [];
   for (const r of await recipients(t.id)) {
-    const out = await mailer.send({ to: r.email, fromName: t.name, subject: m.subject, text: m.text, html: m.html, tag: 'weekly-report' });
+    const out = await mailer.send({ tenantId: t.id, to: r.email, fromName: t.name, subject: m.subject, text: m.text, html: m.html, tag: 'weekly-report' });
     if (out.ok) sent.push(r.email);
   }
   if (!sent.length) { await pool.query('UPDATE weekly_reports SET emailed_at = NULL WHERE id = ?', [row.id]); return { sent: 0 }; }

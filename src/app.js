@@ -30,6 +30,7 @@ const workforce = require('./routes/workforce');
 const skischool = require('./routes/skischool');
 const schoolplus = require('./routes/schoolplus');
 const lessonbook = require('./routes/lessonbook');
+const { logFailure } = require('./lib/jobs');
 const patrol = require('./routes/patrol');
 const patrolTeam = require('./routes/team');
 const dispatch = require('./routes/dispatch');
@@ -64,8 +65,15 @@ function createApp() {
     try {
       if (!Buffer.isBuffer(req.body) || !stripe.verifyWebhook(req.body, req.get('stripe-signature'), { secret: config.stripe.webhookSecret })) throw new Error('bad signature');
       event = JSON.parse(req.body.toString('utf8'));
-    } catch (_) { return res.status(400).json({ error: 'Bad signature' }); }
-    try { res.json({ received: true, ...(await lessonbook.handleWebhook(event, config.stripe.publicUrl || `${req.protocol}://${req.get('host')}`)) }); } catch (err) { console.error('stripe webhook failed', err.message); res.status(500).json({ error: 'Try again' }); }
+    } catch (_) {
+      // Logged so an alert fires: a wrong STRIPE_WEBHOOK_SECRET silently stops every online sale.
+      logFailure({ job: 'stripe_webhook', message: 'bad signature' });
+      return res.status(400).json({ error: 'Bad signature' });
+    }
+    try { res.json({ received: true, ...(await lessonbook.handleWebhook(event, config.stripe.publicUrl || `${req.protocol}://${req.get('host')}`)) }); } catch (err) {
+      logFailure({ job: 'stripe_webhook', event: event && event.type, message: err.message });
+      res.status(500).json({ error: 'Try again' });
+    }
   });
   app.use(/^\/api\/v1\/public\/[^/]+\/shop\/orders$/, express.json({ limit: '2mb' })); // season pass photos ride along with the basket
   app.use('/api/v1/online-shop/brand', express.json({ limit: '1200kb' })); // logo and hero photo together
@@ -101,10 +109,14 @@ function createApp() {
   app.get('/readyz', async (_req, res) => {
     try {
       await pool.query('SELECT 1');
-      res.json({ ok: true });
     } catch (_) {
-      res.status(503).json({ ok: false });
+      return res.status(503).json({ ok: false, reason: 'database' });
     }
+    // The database is reachable; is it migrated for this version?
+    const { LATEST } = require('./schema');
+    const [r] = await pool.query('SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? LIMIT 1', [LATEST.table, LATEST.index]);
+    if (!r.length) return res.status(503).json({ ok: false, reason: 'run npm run migrate' });
+    return res.json({ ok: true });
   });
 
   const api = express.Router();

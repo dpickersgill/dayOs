@@ -115,6 +115,9 @@ router.get('/lookup', requireRole(...readers), patrolLookup, async (req, res) =>
   const { tenantId } = req.auth;
   const q = String(Array.isArray(req.query.q) ? req.query.q[0] : req.query.q || '').trim().slice(0, 100);
   if (q.length < 2) return res.json({ data: [], kind: null });
+  // Patrol must search for someone specific (three letters of a name, seven digits of a phone, or an email), so the
+  // customer file cannot be read two letters at a time.
+  if (req.auth.role === 'patrol' && !(/[a-z]{3}/i.test(q.replace(/[^a-z\s'-]/gi, '')) || q.replace(/\D/g, '').length >= 7 || /\S+@\S+/.test(q))) return res.json({ data: [], kind: null, hint: 'Type at least three letters of a name, a phone number or an email' });
   const digits = q.replace(/\D/g, '');
   let kind = 'name';
   let where; let params; let rank;
@@ -159,8 +162,12 @@ router.get('/lookup', requireRole(...readers), patrolLookup, async (req, res) =>
 // ---------------------------------------------------------------- the records themselves
 router.get('/', requireRole(...readers), patrolLookup, async (req, res) => {
   // Patrol cannot browse the customer list: they must search for someone, and each search is logged.
+  // A search must be specific (three letters of a name, seven digits of a phone or an email), and there is no paging.
   if (req.auth.role === 'patrol') {
-    if (String(req.query.q || '').trim().length < 2) throw bad('Type at least two letters of a name, a phone number or an email to search');
+    const q = String(req.query.q || '').trim();
+    const specific = /[a-z]{3}/i.test(q.replace(/[^a-z\s'-]/gi, '')) || q.replace(/\D/g, '').length >= 7 || /\S+@\S+/.test(q);
+    if (!specific) throw bad('Type at least three letters of a name, a phone number or an email to search');
+    if (Number(req.query.offset) > 0) throw forbidden('Patrol searches show the first matches only. Search for a fuller name.');
     await audit(pool, req, 'lookup', 'people', null, { by: 'list' });
   }
   const where = ['tenant_id = ?'];
@@ -173,7 +180,7 @@ router.get('/', requireRole(...readers), patrolLookup, async (req, res) => {
     where.push('(first_name LIKE ? OR last_name LIKE ? OR email LIKE ? OR phone LIKE ? OR CONCAT(first_name, \' \', last_name) LIKE ?)');
     params.push(q, q, q, q, q);
   }
-  const limit = Math.min(Number(req.query.limit) || (req.auth.role === 'patrol' ? 20 : 100), req.auth.role === 'patrol' ? 20 : 500);
+  const limit = Math.min(Number(req.query.limit) || (req.auth.role === 'patrol' ? 10 : 100), req.auth.role === 'patrol' ? 10 : 500);
   const offset = Math.max(Number(req.query.offset) || 0, 0);
   const data = await rows(pool, `SELECT ${COLS} FROM people WHERE ${where.join(' AND ')} ORDER BY last_name, first_name LIMIT ? OFFSET ?`, [...params, limit, offset]);
   res.json({ data: data.map((p) => view(req, p)), limit, offset });
@@ -318,7 +325,12 @@ router.get('/:id/rental-profile', requireRole(...front), async (req, res) => {
 router.get('/:id', requireRole(...readers), patrolLookup, async (req, res) => {
   const p = await one(pool, `SELECT ${COLS} FROM people WHERE tenant_id = ? AND id = ?`, [req.auth.tenantId, paramId(req)]);
   if (!p) throw notFound('Person');
-  if (req.auth.role === 'patrol') await audit(pool, req, 'lookup', 'people', p.id, { by: 'id' });
+  if (req.auth.role === 'patrol') {
+    // Patrol opens a guest's record only once that guest is a patient on a case; finding someone goes through search.
+    const onCase = await one(pool, 'SELECT id FROM incident_patients WHERE tenant_id = ? AND person_id = ? LIMIT 1', [req.auth.tenantId, p.id]);
+    if (!onCase) throw notFound('Person');
+    await audit(pool, req, 'lookup', 'people', p.id, { by: 'id' });
+  }
   res.json(view(req, p));
 });
 

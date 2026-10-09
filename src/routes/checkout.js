@@ -71,7 +71,11 @@ const checkoutSchema = z.object({
   promo_code: z.string().max(40).optional(),
   lines: z.array(lineSchema).min(1).max(50),
   payments: z.array(paymentSchema).max(6).default([]),
+  // Quick sale: day tickets, multi-day tickets, punch cards and vouchers only, with no customer record (a mountain can
+  // switch this off in Account to require a name on every sale).
+  quick: z.boolean().optional(),
 });
+const QUICK_KINDS = ['day_ticket', 'multi_day', 'punch_card', 'voucher'];
 
 // ---------------------------------------------------------------- pricing and availability
 async function spotsLeft(conn, tenantId, sessionId, capacity) {
@@ -155,10 +159,14 @@ const describe = (p) => ({ index: p.i, type: p.type, name: p.name, detail: p.det
 // ---------------------------------------------------------------- menu
 checkout.get('/menu', requireRole(...sellers), async (req, res) => {
   const { tenantId } = req.auth;
-  const tenant = await one(pool, 'SELECT timezone, comp_counter_limit_cents, waiver_text FROM tenants WHERE id = ?', [tenantId]);
+  const tenant = await one(pool, 'SELECT timezone, comp_counter_limit_cents, waiver_text, quick_sale FROM tenants WHERE id = ?', [tenantId]);
   const today = todayIn(tenant.timezone);
   const [products, tiers, sessions, programs, stock] = await Promise.all([
-    rows(pool, 'SELECT id, kind, name, base_price_cents, valid_days, uses FROM products WHERE tenant_id = ? AND active = 1 ORDER BY name', [tenantId]),
+    // Best sellers of the last 30 days first, so the busiest tiles sit where the cashier's hand already is.
+    rows(pool, `SELECT p.id, p.kind, p.name, p.base_price_cents, p.valid_days, p.uses,
+                  (SELECT COALESCE(SUM(i.quantity), 0) FROM order_items i WHERE i.tenant_id = p.tenant_id AND i.product_id = p.id AND i.order_id IN
+                    (SELECT o.id FROM orders o WHERE o.tenant_id = p.tenant_id AND o.created_at > DATE_SUB(NOW(), INTERVAL 30 DAY))) AS sold
+                FROM products p WHERE p.tenant_id = ? AND p.active = 1 ORDER BY sold DESC, p.name`, [tenantId]),
     rows(pool, 'SELECT product_id, tier, price_cents FROM price_tiers WHERE tenant_id = ?', [tenantId]),
     rows(pool, `SELECT s.id, s.product_id, pr.name, pr.base_price_cents, s.discipline, s.ability_level, s.format, s.age_group, s.meeting_place, s.starts_at, s.ends_at, s.capacity,
                   (SELECT COUNT(*) FROM lesson_bookings b WHERE b.tenant_id = s.tenant_id AND b.session_id = s.id AND b.status IN ('booked','attended')) AS booked
@@ -180,6 +188,7 @@ checkout.get('/menu', requireRole(...sellers), async (req, res) => {
     stock: Object.fromEntries(stock.map((s) => [s.category, Number(s.available)])),
     gift_card: { min_cents: GIFT_MIN, max_cents: GIFT_MAX },
     waiver_text: tenant.waiver_text || null,
+    quick_sale: { allowed: Boolean(tenant.quick_sale), kinds: QUICK_KINDS },
     tax_rules: await rows(pool, 'SELECT name, applies_to, rate_bps FROM tax_rules WHERE tenant_id = ? AND active = 1 ORDER BY id', [tenantId]),
     comp: { reasons: COMP_REASONS, counter_limit_cents: tenant.comp_counter_limit_cents, can_comp: ['owner', 'manager'].includes(req.auth.role) || tenant.comp_counter_limit_cents > 0 },
   });
@@ -201,7 +210,7 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
   const body = req.body;
 
   const result = await tx(async (conn) => {
-    const tenant = await one(conn, 'SELECT timezone, comp_counter_limit_cents, waiver_text FROM tenants WHERE id = ?', [tenantId]);
+    const tenant = await one(conn, 'SELECT timezone, comp_counter_limit_cents, waiver_text, quick_sale FROM tenants WHERE id = ?', [tenantId]);
     const today = todayIn(tenant.timezone);
     const lines = body.lines;
 
@@ -223,11 +232,21 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
     // Free of charge: managers always; counter staff only up to the limit the manager has set (default none).
     if (compPaid && !['owner', 'manager'].includes(req.auth.role) && compPaid > tenant.comp_counter_limit_cents) throw forbidden(compPaid && tenant.comp_counter_limit_cents ? `Counter staff can comp up to ${money(tenant.comp_counter_limit_cents)}. Ask a manager.` : 'Only a manager can give things away free of charge');
 
+    // ---- quick sale: tickets only, nobody named, nothing saved about the guest
+    if (body.quick) {
+      if (!tenant.quick_sale) throw bad('Quick sale is switched off for this mountain: add the customer\'s details');
+      if (body.participants && Object.keys(body.participants).length) throw bad('A quick sale has no named guests');
+      for (const p of priced) {
+        if (p.type !== 'ticket' || !QUICK_KINDS.includes(p.product.kind)) throw bad(`${p.product ? p.product.name : 'That item'} needs the guest's details. Use the full checkout.`);
+        if ((p.line.holders || []).some((x) => x !== 'customer')) throw bad('A quick sale has no named guests');
+      }
+    }
+
     // ---- every item sold is for a named person. The customer pays and is the default for everything; a ticket
     // holder, lesson student, renter or program participant can be someone else (a key into `participants`).
     // Everyone is held to the same rule: name, date of birth and sex; adults also a phone or an email; under 18s no phone or email.
-    const cust = body.customer;
-    if (!cust || !(cust.person_id || cust.details)) throw bad("Add the customer's details: every item sold needs a name");
+    const cust = body.quick ? null : body.customer;
+    if (!body.quick && (!cust || !(cust.person_id || cust.details))) throw bad("Add the customer's details: every item sold needs a name");
     const sale = { today };
     const holdersOf = (l) => {
       const h = l.holders || [];
@@ -251,10 +270,10 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
       if (isLesson(types) && types.has('ticket')) await ensureRequired(conn, tenantId, r.person, 'ticket', sale);
       return r;
     };
-    const buyer = await resolve('customer', cust);
+    const buyer = body.quick ? { id: null, person: null, created: false, matched: false } : await resolve('customer', cust);
     const people = new Map([['customer', buyer.id]]);
-    const names = new Map([[buyer.id, `${buyer.person.first_name} ${buyer.person.last_name}`]]);
-    const waiverFor = new Map([['customer', Boolean(cust.sign_waiver)]]);
+    const names = new Map(buyer.id ? [[buyer.id, `${buyer.person.first_name} ${buyer.person.last_name}`]] : []);
+    const waiverFor = new Map([['customer', Boolean(cust && cust.sign_waiver)]]);
     for (const key of usedBy.keys()) {
       if (key === 'customer') continue;
       const spec = body.participants && body.participants[key];
@@ -268,11 +287,11 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
 
     // ---- under 18s need a parent or guardian (18 or over). They sign the waiver for the minor and are linked on file.
     const personRows = new Map();
-    for (const id of new Set(people.values())) personRows.set(id, await one(conn, 'SELECT id, first_name, last_name, date_of_birth, (photo IS NOT NULL) AS has_photo FROM people WHERE tenant_id = ? AND id = ?', [tenantId, id]));
+    for (const id of new Set(people.values())) if (id) personRows.set(id, await one(conn, 'SELECT id, first_name, last_name, date_of_birth, (photo IS NOT NULL) AS has_photo FROM people WHERE tenant_id = ? AND id = ?', [tenantId, id]));
     const guardianOf = new Map(); // key -> guardian person id
     for (const [key, id] of people) {
       const me = personRows.get(id);
-      if (!isMinor(me.date_of_birth, today)) continue;
+      if (!me || !isMinor(me.date_of_birth, today)) continue;
       const spec = key === 'customer' ? cust : body.participants[key];
       let gid = null;
       if (spec.guardian) {

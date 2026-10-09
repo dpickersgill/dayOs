@@ -107,7 +107,7 @@ async function sendOne(fu, tenant, base) {
   const pat = await one(pool, 'SELECT first_name FROM incident_patients WHERE tenant_id = ? AND id = ?', [tenant.id, fu.patient_id]);
   const m = buildEmail(tenant, fu, base, pat && pat.first_name && pat.first_name !== 'Unknown' ? pat.first_name : '');
   const r = await mailer.send({
-    to: fu.to_email, fromName: orgName(tenant), replyTo: tenant.reply_to || undefined, subject: m.subject, text: m.text, html: m.html, tag: 'patrol-followup',
+    tenantId: tenant.id, to: fu.to_email, fromName: orgName(tenant), replyTo: tenant.reply_to || undefined, subject: m.subject, text: m.text, html: m.html, tag: 'patrol-followup',
     headers: [{ Name: 'List-Unsubscribe', Value: `<${m.unsubscribe}>` }],
   });
   if (r.ok) { await pool.query("UPDATE followups SET status = 'sent', sent_at = NOW(), error = NULL WHERE id = ?", [fu.id]); return 'sent'; }
@@ -137,7 +137,7 @@ async function sendDigest(tenant, today, base) {
   const text = `${lines.join('\n')}\n\nOpen Patrol: ${base}/\n\nThis note has no patient details.`;
   let n = 0;
   if (await isSandbox(tenant.id)) return 0;
-  for (const u of to) if ((await mailer.send({ to: u.email, fromName: orgName(tenant), subject: `Patrol: ${lines.length} thing${lines.length === 1 ? '' : 's'} need attention`, text, tag: 'patrol-digest' })).ok) n += 1;
+  for (const u of to) if ((await mailer.send({ tenantId: tenant.id, to: u.email, fromName: orgName(tenant), subject: `Patrol: ${lines.length} thing${lines.length === 1 ? '' : 's'} need attention`, text, tag: 'patrol-digest' })).ok) n += 1;
   return n;
 }
 

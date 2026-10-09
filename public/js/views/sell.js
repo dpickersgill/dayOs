@@ -1,7 +1,7 @@
 // Sell: one menu for everything the mountain sells (tickets, lessons, rentals, program places, gift cards), one basket,
 // and the customer's details added at the end. The gate scanner is its own page (gate.js).
 import { get, post } from '../api.js';
-import { h, clear, isManager, money, toCents, table, state, input, select, field, button, toast, dialog, formDialog, todayStr, fmtDate, fmtDateTime, label, empty, errorBox, tabs } from '../ui.js';
+import { h, clear, isManager, money, toCents, table, state, input, select, field, button, toast, dialog, formDialog, todayStr, fmtDate, fmtDateTime, label, empty, errorBox, tabs, fail, fmtTime, addDays } from '../ui.js';
 import { loadCustomerForm } from './customer-form.js';
 import { checkoutDialog, lineApi } from './sell-checkout.js';
 import { drawerDialog } from './till.js';
@@ -9,8 +9,20 @@ import { printButtons } from '../print.js';
 
 const TIERS = ['adult', 'youth', 'child', 'senior', 'military'];
 
+// Whether this cashier has a drawer open, shown in the page header, so cash is always taken into a drawer that gets counted.
+const drawer = { open: false, float: 0 };
+const drawerBadge = h('span', { class: 'drawer-badge', role: 'status' });
+async function loadDrawer() {
+  try {
+    const { till } = await get('/till/current');
+    drawer.open = Boolean(till); drawer.float = till ? till.opening_float_cents : 0;
+  } catch (_) { drawer.open = false; }
+  clear(drawerBadge).append(drawer.open ? state(`Drawer open · float ${money(drawer.float)}`, 'good') : state('No cash drawer open', 'warn'));
+}
+
 export async function render(root) {
-  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Sell'), h('div', { class: 'row' }, button('Cash drawer', () => drawerDialog(), { small: true }), h('a', { class: 'btn', href: '#/gate' }, 'Open the gate'))));
+  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Sell'), h('div', { class: 'row' }, drawerBadge, button('Cash drawer', () => drawerDialog(loadDrawer), { small: true }), h('a', { class: 'btn', href: '#/gate' }, 'Open the gate'))));
+  await loadDrawer();
   const left = h('div', { class: 'stack sell-main' });
   const right = h('div', { class: 'stack' });
   root.append(h('div', { class: 'sell-grid' }, left, right));
@@ -39,6 +51,8 @@ async function sellPanel(root) {
     return refresh();
   };
   const price = (p, t) => (p.tiers && p.tiers[t] !== undefined ? p.tiers[t] : p.base_price_cents);
+  // A tap on a tile shows "Added" for a moment, so the cashier knows it landed even when the basket is off screen.
+  const flash = (el) => { el.classList.add('added'); el.setAttribute('data-added', 'Added'); setTimeout(() => { el.classList.remove('added'); el.removeAttribute('data-added'); }, 700); };
 
   // ---- the menu
   const items = [
@@ -48,8 +62,9 @@ async function sellPanel(root) {
       const draw = () => {
         clear(grid);
         for (const p of menu.tickets) {
-          grid.append(h('button', { type: 'button', class: 'tile', 'data-product': p.id, onclick: () => add({ type: 'ticket', product_id: p.id, kind: p.kind, name: p.name, tier: tier.value, quantity: 1, valid_on: date.value, detail: `${tier.value}, ${date.value}` }) },
-            h('strong', null, p.name), h('small', { class: 'muted' }, p.uses ? `${p.uses} rides` : p.valid_days > 1 ? `${p.valid_days} days` : 'One day'), h('span', { class: 'tile-price' }, money(price(p, tier.value)))));
+          const tile = h('button', { type: 'button', class: 'tile', 'data-product': p.id, onclick: () => { flash(tile); return add({ type: 'ticket', product_id: p.id, kind: p.kind, name: p.name, tier: tier.value, quantity: 1, valid_on: date.value, detail: `${tier.value}, ${date.value}` }); } },
+            h('strong', null, p.name), h('small', { class: 'muted' }, p.uses ? `${p.uses} rides` : p.kind === 'season_pass' ? `Valid to ${fmtDate(addDays(date.value || menu.today, Math.max(p.valid_days, 1) - 1))}` : p.valid_days > 1 ? `${p.valid_days} days` : 'One day'), h('span', { class: 'tile-price' }, money(price(p, tier.value))));
+          grid.append(tile);
         }
       };
       tier.addEventListener('change', draw);
@@ -125,6 +140,10 @@ async function sellPanel(root) {
     countBadge.hidden = !count;
     summary.hidden = !basket.length || !quote;
     checkoutBtn.disabled = !basket.length;
+    // The phone and tablet bar: what is in the basket and the way to checkout, always in reach.
+    clear(mobileBar).append(h('span', null, count ? `${count} item${count === 1 ? '' : 's'}${quote ? ` · ${money(quote.total_cents)}` : ''}` : 'Basket empty'),
+      h('button', { type: 'button', class: 'btn primary', disabled: !basket.length, onclick: () => checkoutBtn.click() }, 'Checkout'));
+    mobileBar.hidden = !count;
     if (!basket.length) { basketBox.append(h('p', { class: 'basket-empty' }, 'The basket is empty. Choose something from the menu.')); return; }
     basketBox.append(h('ul', { class: 'basket' }, basket.map((l, i) => {
       const q = quote && quote.lines[i];
@@ -152,7 +171,7 @@ async function sellPanel(root) {
   const checkoutBtn = button('Checkout', () => {
     if (!basket.length) throw new Error('Add something to the basket first');
     if (!quote) throw new Error('Fix the problem shown in the basket first');
-    checkoutDialog({ basket, quote, def, promo: promoIn.value.trim(), comp: menu.comp, waiverText: menu.waiver_text, onSold: async () => {
+    checkoutDialog({ basket, quote, def, promo: promoIn.value.trim(), comp: menu.comp, waiverText: menu.waiver_text, quickSale: menu.quick_sale, drawerOpen: () => drawer.open, onOpenDrawer: (after) => drawerDialog(async () => { await loadDrawer(); after(); }), onSold: async () => {
       basket.length = 0; promoIn.value = ''; quote = null;
       drawBasket();
       try { Object.assign(menu, await get('/checkout/menu')); } catch (_) { /* the menu refreshes on the next visit */ }
@@ -160,7 +179,8 @@ async function sellPanel(root) {
     } });
   }, { kind: 'primary big' });
 
-  root.append(menuBox);
+  const mobileBar = h('div', { class: 'mobile-basket-bar', hidden: true, role: 'region', 'aria-label': 'Basket' });
+  root.append(menuBox, mobileBar);
   const applyPromo = button('Apply', () => refresh(), { small: true });
   const basketPanel = h('section', { class: 'card basket-panel' }, h('header', { class: 'basket-head' }, h('h2', null, 'Basket'), countBadge), basketBox, quoteMsg, summary,
     h('label', { class: 'promo-row' }, h('span', { class: 'small muted' }, 'Promo code'), h('span', { class: 'promo-input' }, promoIn, applyPromo)), checkoutBtn);
@@ -172,10 +192,10 @@ async function sellPanel(root) {
   async function loadOrders() {
     try {
       const { data } = await get(`/orders?date=${todayStr()}`);
-      clear(orders).append(h('header', { class: 'card-head' }, h('h2', null, 'Sold today'), h('span', { class: 'muted small' }, data.length ? `${data.length} order${data.length === 1 ? '' : 's'}, ${money(data.filter((o) => o.status === 'paid').reduce((n, o) => n + o.total_cents, 0))}` : '')),
+      clear(orders).append(h('header', { class: 'card-head' }, h('h2', null, 'Sold today'), h('span', { class: 'muted small' }, data.length ? `${data.length} order${data.length === 1 ? '' : 's'}, ${money(data.filter((o) => o.status === 'paid').reduce((n, o) => n + o.total_cents, 0))} including tax` : '')),
         data.length ? h('ul', { class: 'order-list' }, data.map((o) => h('li', { class: 'order-row' },
           h('span', { class: 'order-id' }, `#${o.id}`),
-          h('span', { class: 'muted' }, String(o.created_at).slice(11, 16)),
+          h('span', { class: 'muted' }, fmtTime(o.created_at)),
           state(label(o.status), o.status === 'paid' ? 'good' : 'neutral'),
           h('strong', { class: 'order-total' }, money(o.total_cents)),
           h('span', { class: 'order-actions' }, button('Details', () => showOrder(o.id), { small: true }),
@@ -199,7 +219,8 @@ async function showOrder(id) {
   box.append(h('p', null, `Total ${money(o.total_cents)}${o.discount_cents ? ` (after ${money(o.discount_cents)} discount)` : ''}${o.tax_cents ? `, including ${money(o.tax_cents)} tax` : ''}. Paid by ${o.payments.length ? o.payments.map((p) => `${label(p.tender)} ${money(p.amount_cents)}${p.card_last4 ? ` (card ending ${p.card_last4})` : ''}${p.comp_reason ? ` (${label(p.comp_reason)})` : ''}`).join(', ') : 'no payment recorded'}.`));
   if (o.refunds.length) box.append(h('section', { class: 'section' }, h('header', null, h('h2', null, 'Refunds')), table([
     { head: 'When', cell: (r) => fmtDateTime(r.created_at) }, { head: 'Why', cell: (r) => [label(r.reason), r.note ? h('small', { class: 'muted' }, ` ${r.note}`) : null] },
-    { head: 'Returned by', cell: (r) => label(r.method) }, { head: 'Amount', num: true, cell: (r) => money(r.amount_cents) }], o.refunds)));
+    { head: 'Returned by', cell: (r) => [label(r.method), r.card_status === 'failed' ? h('div', { class: 'small', role: 'alert' }, state('Card refund not sent', 'bad'), ' ', isManager() ? button('Try again', async () => { try { await post(`/orders/${id}/refunds/${r.id}/retry`, {}); toast('Card refund sent'); } catch (e) { fail(e); } }, { small: true }) : null) : r.card_status === 'pending' ? h('div', { class: 'small muted' }, 'Card refund on its way') : null] },
+    { head: 'Amount', num: true, cell: (r) => money(r.amount_cents) }], o.refunds)));
   box.append(h('div', { class: 'row' }, printButtons(id, { hasTickets: o.tickets.some((t) => t.status !== 'void') })));
   if (o.tickets.length) showTickets(box, { tickets: o.tickets.map((t) => ({ code: t.code, product: 'Ticket', valid_from: t.valid_from, valid_to: t.valid_to, status: t.status })) }, true);
   if (o.gift_cards.length) box.append(h('section', { class: 'section' }, h('header', null, h('h2', null, 'Gift cards')), h('div', { class: 'codes' }, o.gift_cards.map((g) => h('div', { class: 'code' }, g.code, h('small', null, `${money(g.initial_cents)}${g.recipient_name ? ` for ${g.recipient_name}` : ''}${g.status === 'void' ? ', cancelled' : ''}`))))));
@@ -215,6 +236,11 @@ async function refund(o, done) {
   const boxes = new Map(open.map((l) => [l.id, h('input', { type: 'checkbox', checked: true, 'aria-label': `Refund ${l.name}` })]));
   const reason = select(REFUND_REASONS.map((r) => [r, label(r)]), 'customer_request', { name: 'reason', 'aria-label': 'Why is this being refunded' });
   const note = input({ name: 'note', maxlength: 300, 'aria-label': 'Note' });
+  // Any cash part comes out of a drawer, so that drawer's count stays right at closing.
+  const paidCash = full.payments.some((p) => p.tender === 'cash');
+  let drawers = [];
+  if (paidCash) { try { drawers = (await get(`/till?date=${todayStr()}`)).data.filter((t) => t.status === 'open'); } catch (_) { drawers = []; } }
+  const drawer = select([['', 'My own open drawer'], ...drawers.map((t) => [String(t.id), `${t.email.split('@')[0]}'s drawer`])], '', { name: 'till_id', 'aria-label': 'Cash comes out of' });
   const worth = h('p', { class: 'basket-total', role: 'status' });
   const total = () => open.filter((l) => boxes.get(l.id).checked).reduce((n, l) => n + (l.unit_price_cents * l.quantity - (l.discount_cents || 0) + (l.tax_cents || 0)), 0);
   const redraw = () => { worth.textContent = `Refund about ${money(total())}`; };
@@ -223,15 +249,16 @@ async function refund(o, done) {
   const f = h('div', { class: 'stack' },
     h('p', null, `Order #${o.id}, ${money(full.total_cents)}. Choose what is being refunded. Tickets are voided, lesson and program places released and unspent gift cards cancelled. Gear that is still out must be checked in first. The money goes back the way it was paid.`),
     h('div', { class: 'stack tight' }, open.map((l) => h('label', { class: 'check' }, boxes.get(l.id), ` ${l.name}${[l.first_name, l.last_name].filter(Boolean).length ? ` (${[l.first_name, l.last_name].filter(Boolean).join(' ')})` : ''}, ${money(l.unit_price_cents * l.quantity - (l.discount_cents || 0) + (l.tax_cents || 0))}`))),
-    h('div', { class: 'form' }, field('Why', reason), field('Note (needed for "Other")', note)), worth);
+    h('div', { class: 'form' }, field('Why', reason), field('Note (needed for "Other")', note), paidCash && drawers.length ? field('Cash comes out of', drawer) : null), worth);
   formDialog(`Refund order #${o.id}`, f, async () => {
     const ids = open.filter((l) => boxes.get(l.id).checked).map((l) => l.id);
     if (!ids.length) throw new Error('Choose at least one thing to refund');
     if (reason.value === 'other' && !note.value.trim()) throw new Error('Add a note saying why');
     const body = { reason: reason.value, note: note.value.trim() || undefined };
     if (ids.length !== open.length) body.item_ids = ids;
+    if (drawer.value) body.till_id = Number(drawer.value);
     const out = await post(`/orders/${o.id}/refund`, body);
-    toast(`Refunded ${money(out.amount_cents)}: ${out.returns.map((r) => `${money(r.amount_cents)} ${label(r.method)}`).join(', ')}`);
+    toast(`Refunded ${money(out.amount_cents)}: ${out.returns.map((r) => `${money(r.amount_cents)} ${label(r.method)}`).join(', ')}${out.card_refund_failed ? '. The card refund could not be sent yet; it will be retried. Open the order to try again.' : ''}`, out.card_refund_failed ? 'error' : 'ok');
     if (done) await done();
   }, { submitText: 'Refund', wide: true });
 }

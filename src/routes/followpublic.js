@@ -16,6 +16,7 @@ const kiosk = require('../lib/kiosk');
 const messaging = require('../lib/messaging');
 const weekly = require('../lib/weekly');
 const shopafter = require('../lib/shopafter');
+const cardrefund = require('../lib/cardrefund');
 const { stage } = require('../lib/jobs');
 const { requireModule } = require('../lib/modules');
 
@@ -90,14 +91,28 @@ jobs.post('/daily', async (req, res) => {
   const given = String(req.get('x-jobs-key') || '');
   const a = Buffer.from(given); const b = Buffer.from(key);
   if (!key || a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new AppError(401, 'Not allowed');
-  // Each stage runs even if an earlier one failed; a failure shows in the reply and in the logs.
-  const base = baseUrl(req);
-  const out = { ...(await stage('patrol_followups', () => followups.runDaily(base))) };
-  out.photos_purged = await stage('kiosk_photo_purge', () => kiosk.purgePhotos());
-  out.reminders = await stage('messages_reminders', () => messaging.runAll(base));
-  out.weekly_reports = await stage('weekly_report', () => weekly.runAll());
-  out.shop_emails = await stage('shop_emails', () => shopafter.runAll(base));
-  res.json(out);
+  // Only one run at a time, across every server: a second call waits up to a minute for the first to finish, then is
+  // turned away (each email is also claimed before sending, so even an overlap could not send twice).
+  const conn = await pool.getConnection();
+  try {
+    const [[got]] = await conn.query("SELECT GET_LOCK('summitops_daily_job', 60) AS ok");
+    if (!Number(got.ok)) throw new AppError(409, 'The daily job is already running');
+    const started = Date.now();
+    // Each stage runs even if an earlier one failed; a failure shows in the reply and in the logs.
+    const base = baseUrl(req);
+    const out = { ...(await stage('patrol_followups', () => followups.runDaily(base))) };
+    out.photos_purged = await stage('kiosk_photo_purge', () => kiosk.purgePhotos());
+    out.reminders = await stage('messages_reminders', () => messaging.runAll(base));
+    out.weekly_reports = await stage('weekly_report', () => weekly.runAll());
+    out.shop_emails = await stage('shop_emails', () => shopafter.runAll(base));
+    out.card_refunds = await stage('card_refunds', () => cardrefund.retryAll());
+    // One line per finished run: an alert on "no such line for 26 hours" tells you the job stopped.
+    console.log(JSON.stringify({ severity: 'INFO', job: 'daily', message: 'daily job finished', seconds: Math.round((Date.now() - started) / 1000) }));
+    res.json(out);
+  } finally {
+    await conn.query("SELECT RELEASE_LOCK('summitops_daily_job')").catch(() => {});
+    conn.release();
+  }
 });
 
 module.exports = { publicRouter, jobs };

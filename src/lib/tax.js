@@ -26,7 +26,7 @@ const split = (total, n) => share(total, Array.from({ length: n }, () => 1));
 
 /**
  * priced: [{ type, cents }] (cents is the line total before discount). discount: total promo discount in cents, shared over
- * every line except gift cards. Sets p.discount, p.tax and p.taxParts on each line.
+ * every line except gift cards. Gift cards are never taxed. Sets p.discount, p.tax and p.taxParts on each line.
  * Returns { tax, taxes: [{ name, rate_bps, amount_cents }] } for the whole basket.
  */
 function applyTax(priced, discount, rules) {
@@ -38,6 +38,7 @@ function applyTax(priced, discount, rules) {
     p.discount = shares[i];
     p.taxParts = [];
     p.tax = 0;
+    if (p.type === 'gift_card') return; // a gift card is money held for later: tax is charged when it is spent
     const taxable = p.cents - p.discount;
     for (const r of rules) {
       if (r.applies_to !== 'all' && r.applies_to !== p.type) continue;

@@ -136,10 +136,13 @@ test('a Manager cannot demote or remove an Admin; guest lookups by Patrol are ca
   // Patrol cannot page through the whole guest list: the cap of 20 holds however much is asked for
   for (let i = 0; i < 22; i++) ok(await api('POST', '/people', { token: A.owner, body: { first_name: `Cap${i}`, last_name: 'Capsule' } }), 201);
   const list = ok(await api('GET', '/people?q=Capsule&limit=500', { token: T.patrol }));
-  assert.equal(list.data.length, 20);
-  assert.equal(list.limit, 20);
+  assert.equal(list.data.length, 10);
+  assert.equal(list.limit, 10);
   assert.equal(ok(await api('GET', '/people?q=Capsule&limit=500', { token: A.owner })).data.length, 22, 'managers are not capped');
   const one = list.data[0].id;
+  is(await api('GET', `/people/${one}`, { token: T.patrol }), 404, 'a guest who is not a patient cannot be opened by number');
+  const inc = ok(await newCase(T.patrol), 201).id;
+  await pool.query("INSERT INTO incident_patients (tenant_id, incident_id, person_id, first_name, last_name) SELECT tenant_id, id, ?, 'Cap0', 'Capsule' FROM incidents WHERE id = ?", [one, inc]);
   const before = (await pool.query("SELECT COUNT(*) AS n FROM audit_log WHERE entity = 'people' AND action = 'lookup'"))[0][0].n;
   ok(await api('GET', `/people/${one}`, { token: T.patrol }));
   const after = (await pool.query("SELECT COUNT(*) AS n FROM audit_log WHERE entity = 'people' AND action = 'lookup'"))[0][0].n;

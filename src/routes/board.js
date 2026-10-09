@@ -10,6 +10,7 @@ const { bad, notFound, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const modules = require('../lib/modules');
 const { dailyReport } = require('../lib/daily');
+const patrolaccess = require('../lib/patrolaccess');
 
 const router = express.Router();
 const ROLES = ['owner', 'manager', 'staff', 'patrol', 'instructor', 'counter'];
@@ -141,7 +142,7 @@ const TILE_DATA = {
   async patrol(c) {
     const inc = await one(pool, "SELECT COUNT(*) AS n FROM incidents WHERE tenant_id = ? AND status = 'open'", [c.tenantId]);
     const calls = await one(pool, "SELECT COUNT(*) AS n FROM dispatch_calls WHERE tenant_id = ? AND status NOT IN ('closed','cancelled')", [c.tenantId]);
-    const recent = await rows(pool, "SELECT id, occurred_at, location, category, severity FROM incidents WHERE tenant_id = ? AND status = 'open' ORDER BY occurred_at DESC LIMIT 5", [c.tenantId]);
+    const recent = c.seeCases === false ? [] : await rows(pool, "SELECT id, occurred_at, location, category, severity FROM incidents WHERE tenant_id = ? AND status = 'open' ORDER BY occurred_at DESC LIMIT 5", [c.tenantId]);
     return { open_incidents: Number(inc.n), active_calls: Number(calls.n), recent: recent.map((r) => ({ ...r, id: Number(r.id) })) };
   },
   async notes(c) {
@@ -200,7 +201,9 @@ router.get('/', async (req, res) => {
   if (req.query.date && isMgr(role)) { date = String(req.query.date); if (!dateStr.safeParse(date).success) throw bad('date must be YYYY-MM-DD'); }
   const available = await availableTiles(tenantId, role);
   const layout = await resolveLayout(tenantId, userId, role, available);
-  const c = { tenantId, userId, role, tz, today, date, now: nowIn(tz) };
+  // Case details on the patrol tile follow the patroller's access level (a Host sees counts only).
+  const seeCases = role !== 'patrol' || await patrolaccess.can(pool, req, 'view_cases');
+  const c = { tenantId, userId, role, tz, today, date, now: nowIn(tz), seeCases };
   const get = dataFor(c);
   const have = new Set(available.map((t) => t.key));
   const alerts = date === today ? await alertsFor(c, (k) => have.has(k), get) : [];

@@ -55,6 +55,7 @@ export function customerFields({ def, scope = null, person = null, groups = null
     ruleNote.textContent = minor ? 'Under 18: name, date of birth and sex are all we need.' : 'Name, date of birth and sex are required. Adults also need a phone number or an email.';
   };
   const wrap = h('div', { class: 'stack' });
+  const more = h('div', { class: 'stack' });
   for (const [gid, gtitle] of def.groups) {
     if (groups && !groups.includes(gid)) continue;
     if (gid === 'sizing' && !sizing) continue;
@@ -67,8 +68,11 @@ export function customerFields({ def, scope = null, person = null, groups = null
       if (st) stars.set(f.key, st);
       return h('label', { class: f.key === 'address_line1' || f.key === 'address_line2' ? 'field wide' : 'field' }, h('span', null, f.label, st), el);
     });
-    wrap.append(h('fieldset', { class: 'stack tight cust-group', 'data-group': gid }, h('legend', null, gtitle), gid === 'contact' ? ruleNote : null, h('div', { class: 'form' }, cells)));
+    const set = h('fieldset', { class: 'stack tight cust-group', 'data-group': gid }, h('legend', null, gtitle), gid === 'contact' ? ruleNote : null, h('div', { class: 'form' }, cells));
+    // At the window, only what is needed shows: other groups wait behind "More details" unless one of their fields is required.
+    if (sale && gid !== 'contact' && gid !== 'sizing' && !fs.some(isReq)) more.append(set); else wrap.append(set);
   }
+  if (more.childElementCount) wrap.append(h('details', { class: 'more-details' }, h('summary', null, 'More details (address, emergency contact, skiing, email news)'), more));
   // A photo of the person (season passes show it at the gate). photo: true shows it, 'hidden' keeps it out of sight until needed.
   const photoCtl = photo ? photoControl({ has: Boolean(person && person.has_photo), label: 'Photo' }) : null;
   if (photoCtl) { photoCtl.el.hidden = photo === 'hidden'; wrap.append(photoCtl.el); }
@@ -94,6 +98,19 @@ export function customerFields({ def, scope = null, person = null, groups = null
     isMinor: () => isMinor(),
     /** True when nothing has been typed (the consent box alone does not count). */
     isEmpty() { return def.fields.every((f) => f.type === 'check' || !inputs.has(f.key) || read(f, inputs.get(f.key)) === null); },
+    /** Marks the blank mandatory fields (and clears the mark on the rest), so the clerk sees where to look. */
+    mark(labels) {
+      const want = new Set(labels);
+      const either = want.has('Phone or email');
+      for (const f of def.fields) {
+        const el = inputs.get(f.key);
+        if (!el) continue;
+        const bad = want.has(f.label) || (either && (f.key === 'phone' || f.key === 'email'));
+        if (bad) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid');
+      }
+      const first = [...inputs.values()].find((el) => el.getAttribute('aria-invalid') === 'true');
+      if (first) { const box = first.closest('details'); if (box) box.open = true; first.focus(); }
+    },
     /** Labels of mandatory fields that are still blank. */
     missing() {
       const v = api.values();
@@ -149,7 +166,8 @@ export function customerCapture({ def, scope, who = 'Purchaser', optionalAll = f
       if (!v.first_name) gaps.push('First name');
       if (!v.last_name) gaps.push('Last name');
       for (const g of fields.missing()) if (!gaps.includes(g)) gaps.push(g);
-      if (gaps.length) throw new Error(`Missing required details: ${gaps.join(', ')}`);
+      fields.mark(gaps);
+      if (gaps.length) throw new Error(`Missing required details (marked in red): ${gaps.join(', ')}`);
       if (photoNeeded && fields.photo && !fields.photo.hasAny()) throw new Error('A season pass needs a photo of the holder. Take one with the camera or choose a picture.');
     },
     /** { person_id?, <key>: details } where key is 'purchaser' or 'student'. */

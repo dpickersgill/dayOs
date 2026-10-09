@@ -1,14 +1,15 @@
 // The operator's console at /platform: every mountain, which apps each one has, pause and resume, storage limits and owner password resets.
-// It signs in with the platform key, which is kept only in this tab's memory.
+// It signs in with the platform key, your name and (when the service has PLATFORM_TOTP_SECRET set) a code from your
+// authenticator app. The 2-hour session is kept only in this tab's memory.
 
 import { h, clear, button, field, input, table, dialog, formDialog, confirmDialog, toast, fail, empty, errorBox } from './ui.js';
 
 const app = document.getElementById('app');
-let key = '';
+let session = '';
 let apps = [];
 
 async function call(method, path, body) {
-  const res = await fetch(`/api/v1/platform${path}`, { method, headers: { 'content-type': 'application/json', 'x-platform-key': key }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const res = await fetch(`/api/v1/platform${path}`, { method, headers: { 'content-type': 'application/json', 'x-platform-session': session }, body: body === undefined ? undefined : JSON.stringify(body) });
   const text = await res.text();
   let json = null; try { json = text ? JSON.parse(text) : null; } catch (_) { json = null; }
   if (!res.ok) { const e = new Error((json && json.error) || 'Something went wrong'); e.status = res.status; throw e; }
@@ -19,11 +20,17 @@ function signIn(message) {
   clear(app);
   const err = h('div');
   const k = input({ type: 'password', name: 'key', autocomplete: 'current-password', required: true });
+  const who = input({ name: 'name', autocomplete: 'name', required: true, maxlength: 100 });
+  const code = input({ name: 'code', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6, placeholder: '123456' });
   const go = h('button', { type: 'submit', class: 'btn primary' }, 'Open console');
-  const form = h('form', { class: 'stack', novalidate: true }, field('Platform key', k, 'The BOOTSTRAP_KEY setting for the service. It is not saved.'), err, go);
+  const form = h('form', { class: 'stack', novalidate: true }, field('Platform key', k, 'The BOOTSTRAP_KEY setting for the service. It is not saved.'),
+    field('Your name', who, 'Recorded with every change you make.'), field('Code from your authenticator app', code, 'Needed when two-step sign-in is set up for the console.'), err, go);
   form.addEventListener('submit', async (e) => {
-    e.preventDefault(); clear(err); go.disabled = true; key = k.value;
-    try { apps = (await call('GET', '/modules')).data; await home(); } catch (ex) { key = ''; err.append(errorBox(ex)); go.disabled = false; }
+    e.preventDefault(); clear(err); go.disabled = true;
+    try {
+      session = (await call('POST', '/session', { key: k.value, name: who.value.trim(), code: code.value.trim() || undefined })).session;
+      apps = (await call('GET', '/modules')).data; await home();
+    } catch (ex) { session = ''; err.append(errorBox(ex)); go.disabled = false; }
   });
   app.append(h('main', { class: 'platform-box stack' }, h('h1', null, 'SummitOps platform'), message ? h('p', { class: 'muted' }, message) : null, form));
   k.focus();
@@ -37,7 +44,7 @@ async function home() {
   const filter = input({ type: 'search', placeholder: 'Find a mountain', 'aria-label': 'Find a mountain' });
   app.append(h('main', { class: 'platform-box wide stack' },
     h('header', { class: 'row between' }, h('h1', null, 'Mountains'),
-      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), button('Demo sign-ups', () => demos(), { small: true }), button('Activity', () => activity(), { small: true }), button('Lock console', () => { key = ''; signIn('Locked.'); }, { small: true }))),
+      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), button('Demo sign-ups', () => demos(), { small: true }), button('Activity', () => activity(), { small: true }), button('Lock console', () => { session = ''; signIn('Locked.'); }, { small: true }))),
     filter, body));
   try {
     const { data: all } = await call('GET', '/tenants');
@@ -166,7 +173,7 @@ async function demos() {
 async function activity() {
   try {
     const { data } = await call('GET', '/audit');
-    dialog('Recent activity', data.length ? table([{ head: 'When', cell: (x) => String(x.at).replace('T', ' ').slice(0, 16) }, { head: 'Mountain', cell: (x) => x.slug || '' }, { head: 'What', cell: (x) => x.action }, { head: 'Details', cell: (x) => x.detail || '' }], data) : empty('Nothing yet.'), { wide: true });
+    dialog('Recent activity', data.length ? table([{ head: 'When', cell: (x) => String(x.at).replace('T', ' ').slice(0, 16) }, { head: 'Mountain', cell: (x) => x.slug || '' }, { head: 'Who', cell: (x) => x.actor || '' }, { head: 'What', cell: (x) => x.action }, { head: 'Details', cell: (x) => x.detail || '' }], data) : empty('Nothing yet.'), { wide: true });
   } catch (e) { fail(e); }
 }
 

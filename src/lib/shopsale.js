@@ -4,14 +4,14 @@
 // tickets. Used by the public shop routes and by the card payment webhook. Nothing is sold until the payment lands.
 const crypto = require('crypto');
 const { pool, tx, rows, one } = require('../db');
-const { unitPrice, applyPromo } = require('./pricing');
-const { loadRules, applyTax } = require('./tax');
+const { unitPrice, priceFrom, applyPromo } = require('./pricing');
+const { loadRules, applyTax, split } = require('./tax');
 const { resolvePerson } = require('./customers');
-const { addLink, isMinor } = require('./family');
+const { addLink, isMinor, mayActAsGuardian } = require('./family');
 const { recordConsent } = require('./consent');
 const { tierFor, contactPerson } = require('./onlinesale');
 const { addDays, todayIn, seasonFor, newCode } = require('./util');
-const { conflict, bad } = require('./errors');
+const { conflict, bad, Unhonourable } = require('./errors');
 const { allowedOn, dayName, daysText } = require('./saledays');
 const { audit } = require('./audit');
 const mailer = require('./mailer');
@@ -153,7 +153,7 @@ async function quote(conn, tenant, items, extras = {}) {
     const code = String(extras.promo_code).trim().toUpperCase();
     const eligible = priced.reduce((n, p) => n + (p.type === 'gift_card' ? 0 : p.cents), 0);
     if (!eligible) throw bad('A promo code cannot be used on a gift card');
-    discount = (await applyPromo(conn, tenant.id, code, eligible, today)).discountCents;
+    discount = (await applyPromo(conn, tenant.id, code, eligible, today, { lock: conn !== pool, excludeEmail: extras.contact_email || null })).discountCents;
     promo = code;
   }
   const { tax, taxes } = applyTax(priced, discount, await loadRules(conn, tenant.id));
@@ -203,6 +203,23 @@ async function closedDates(conn, tenant, products) {
   return out;
 }
 
+/** Days a late basket would take over the daily limit (counted before its own tickets are added). */
+async function overDays(conn, tenant, lines) {
+  const limited = lines.filter((l) => LIMITED_KINDS.includes(l.kind));
+  if (!limited.length) return [];
+  const from = limited.reduce((m, l) => (l.valid_on < m ? l.valid_on : m), limited[0].valid_on);
+  const to = limited.reduce((m, l) => { const e = addDays(l.valid_on, Math.max(l.valid_days, 1) - 1); return e > m ? e : m; }, limited[0].valid_on);
+  const use = await usage(conn, tenant.id, from, to);
+  const out = new Set();
+  for (const l of limited) {
+    for (let d = l.valid_on; d <= addDays(l.valid_on, Math.max(l.valid_days, 1) - 1); d = addDays(d, 1)) {
+      if (left(use, tenant, { id: l.product_id, kind: l.kind, online_daily_limit: l.limit }, d) < 1) out.add(d);
+      const u = use.get(d) || { all: 0, by: new Map() }; u.all += 1; u.by.set(l.product_id, (u.by.get(l.product_id) || 0) + 1); use.set(d, u);
+    }
+  }
+  return [...out];
+}
+
 /**
  * A paid basket becomes people on file, waivers where the buyer can legitimately sign, one order and one ticket per holder.
  * Runs inside the caller's transaction on a locked shop_orders row.
@@ -210,7 +227,11 @@ async function closedDates(conn, tenant, products) {
 async function fulfil(conn, tenantId, row, { paymentIntent }) {
   let basket; try { basket = JSON.parse(row.basket); } catch (_) { throw bad('The saved basket is unreadable'); }
   const q = basket.quote; const c = basket.contact;
-  const tenant = await one(conn, 'SELECT timezone, waiver_text FROM tenants WHERE id = ?', [tenantId]);
+  const tenant = await one(conn, 'SELECT id, timezone, waiver_text, online_daily_limit FROM tenants WHERE id = ?', [tenantId]);
+  // A payment that lands after the 40-minute hold is still honoured (the guest paid), but staff are told if it took the
+  // day over its limit.
+  const late = await one(conn, 'SELECT created_at < DATE_SUB(NOW(), INTERVAL 40 MINUTE) AS late FROM shop_orders WHERE tenant_id = ? AND id = ?', [tenantId, row.id]);
+  const overLimit = late && Number(late.late) ? await overDays(conn, tenant, q.lines || []) : [];
   const today = todayIn(tenant.timezone);
   const season = seasonFor(today);
   const contact = await contactPerson(conn, tenantId, { first_name: c.first_name, last_name: c.last_name, email: row.contact_email, phone: row.contact_phone });
@@ -230,12 +251,14 @@ async function fulfil(conn, tenantId, row, { paymentIntent }) {
     const details = { first_name: st.first_name, last_name: st.last_name };
     if (st.date_of_birth) details.date_of_birth = st.date_of_birth;
     if (st.photo) details.photo = st.photo;
-    if (!minor) { details.email = row.contact_email; details.phone = row.contact_phone; }
-    const who = await resolvePerson(conn, tenantId, { personId: sameAsContact && !minor ? contact.id : undefined, details, scope: 'none', source: 'online' });
+    // The buyer's email and phone belong to the buyer, so only the buyer's own record gets them.
+    if (sameAsContact && !minor) { details.email = row.contact_email; details.phone = row.contact_phone; }
+    const who = await resolvePerson(conn, tenantId, { personId: sameAsContact && !minor ? contact.id : undefined, details, scope: 'none', source: 'online', fillOnly: true });
     if (!who.id) throw bad(`Could not save ${st.first_name} ${st.last_name}`);
-    if (minor && contact.id) await addLink(conn, tenantId, contact.id, who.id, 'guardian');
+    const guardianOk = minor && await mayActAsGuardian(conn, tenantId, contact.id, who.id, who.created);
+    if (guardianOk) await addLink(conn, tenantId, contact.id, who.id, 'guardian');
     let waiver = await one(conn, 'SELECT id FROM waivers WHERE tenant_id = ? AND person_id = ? AND season = ? LIMIT 1', [tenantId, who.id, season]);
-    if (!waiver && row.waiver_accepted && (minor || sameAsContact) && contact.id) {
+    if (!waiver && row.waiver_accepted && (guardianOk || (sameAsContact && !minor)) && contact.id) {
       await conn.query("INSERT INTO waivers (tenant_id, person_id, season, kind, signed_by_person_id, signed_by_name, signer_relation, text_sha) VALUES (?, ?, ?, 'general', ?, ?, ?, ?)", [tenantId, who.id, season, contact.id, row.contact_name, minor ? 'guardian' : 'self', row.waiver_text_sha]);
       waiver = { id: 1 };
     }
@@ -248,9 +271,10 @@ async function fulfil(conn, tenantId, row, { paymentIntent }) {
   }
   // Add-ons become a voucher the guest uses at the mountain; each unit has its own code and barcode.
   for (const a of q.addons || []) {
+    const discEach = split(a.discount || 0, a.quantity); const taxEach = split(a.tax || 0, a.quantity); // shared evenly, so refunding one unit returns its share
     for (let k = 0; k < a.quantity; k++) {
       const [it] = await conn.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents) VALUES (?, ?, ?, ?, ?, 'adult', 1, ?, ?, ?, ?)",
-        [tenantId, orderId, a.product_id, a.kind === 'voucher' ? 'ticket' : a.kind, contact.id, a.unit, today, k === 0 ? (a.discount || 0) : 0, k === 0 ? (a.tax || 0) : 0]);
+        [tenantId, orderId, a.product_id, a.kind === 'voucher' ? 'ticket' : a.kind, contact.id, a.unit, today, discEach[k], taxEach[k]]);
       await conn.query('INSERT INTO tickets (tenant_id, order_item_id, person_id, product_id, code, valid_from, valid_to, uses_remaining) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         [tenantId, it.insertId, contact.id, a.product_id, newCode(), today, addDays(today, a.valid_days - 1), a.uses ?? null]);
     }
@@ -265,7 +289,7 @@ async function fulfil(conn, tenantId, row, { paymentIntent }) {
   }
   await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, processor) VALUES (?, ?, 'card', ?, ?, 'stripe')", [tenantId, orderId, q.total, paymentIntent]);
   await conn.query("UPDATE shop_orders SET status = 'paid', paid_at = NOW(), order_id = ?, payment_intent = COALESCE(?, payment_intent), note = ? WHERE tenant_id = ? AND id = ?",
-    [orderId, paymentIntent, waiverNeeded.length ? `Waiver still to sign at the gate: ${waiverNeeded.join(', ')}`.slice(0, 300) : null, tenantId, row.id]);
+    [orderId, paymentIntent, [waiverNeeded.length ? `Waiver still to sign at the gate: ${waiverNeeded.join(', ')}.` : '', overLimit.length ? `Payment arrived late: ${overLimit.join(', ')} went over the daily limit.` : ''].filter(Boolean).join(' ').slice(0, 300) || null, tenantId, row.id]);
   await audit(conn, { auth: { tenantId, userId: null } }, 'shop_paid', 'shop_orders', row.id, { tickets: tickets.length, order_id: orderId });
   return { orderId, tickets, waiverNeeded, giftCodes };
 }
@@ -298,7 +322,7 @@ async function emailTickets(tenantId, rowId, baseUrl) {
   const gifts = v.gift_cards.map((g) => `- Gift card ${g.code}, ${money(g.amount_cents)}${g.recipient_name ? ` for ${g.recipient_name}` : ''}`);
   const text = [`Hi ${row.contact_name.split(' ')[0]},`, '', `Thank you for your order at ${t.name} (reference ${row.reference}, ${money(row.amount_cents)}).`, '', ...lines, ...gifts, '',
     'Show the barcode on your phone at the gate. Your tickets are here:', link, '', ...(row.note ? [row.note, ''] : []), t.phone ? `Questions? Call ${t.phone}.` : ''].join('\n');
-  const r = await mailer.send({ to: row.contact_email, fromName: t.name, subject: `Your tickets for ${t.name}`, text, tag: 'shop-tickets' });
+  const r = await mailer.send({ tenantId, to: row.contact_email, fromName: t.name, subject: `Your tickets for ${t.name}`, text, tag: 'shop-tickets' });
   if (r.ok) await pool.query('UPDATE shop_orders SET emailed_at = NOW() WHERE tenant_id = ? AND id = ? AND emailed_at IS NULL', [tenantId, rowId]);
   return r.ok;
 }
@@ -312,19 +336,28 @@ async function handleWebhook(event, obj, baseUrl) {
   }
   if (event.type !== 'checkout.session.completed' || obj.payment_status !== 'paid') return { ignored: true };
   let failed = null;
-  const out = await tx(async (conn) => {
-    const row = await one(conn, 'SELECT * FROM shop_orders WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, id]);
-    if (!row || row.stripe_session_id !== obj.id) return { ignored: true };
-    if (row.status === 'paid') return { duplicate: true };
-    if (Number(obj.amount_total) !== row.amount_cents) { failed = 'the amount did not match'; return { problem: true }; }
-    try { return { ...(await fulfil(conn, tenantId, row, { paymentIntent: obj.payment_intent })), ok: true }; } catch (err) {
-      if (err.status && err.status < 500) { failed = err.message; return { problem: true }; }
-      throw err;
-    }
-  });
+  let out;
+  try {
+    out = await tx(async (conn) => {
+      const row = await one(conn, 'SELECT * FROM shop_orders WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, id]);
+      if (!row || row.stripe_session_id !== obj.id) return { ignored: true };
+      // Act only on a basket still waiting (or let go when the guest pressed back: their payment can still land). A repeat,
+      // including one we refunded, changes nothing.
+      if (!['awaiting_payment', 'expired'].includes(row.status)) return { duplicate: true };
+      if (Number(obj.amount_total) !== row.amount_cents) { failed = 'the amount did not match'; return { problem: true }; }
+      try { return { ...(await fulfil(conn, tenantId, row, { paymentIntent: obj.payment_intent })), ok: true }; } catch (err) {
+        if (err.status && err.status < 500) throw new Unhonourable(err.message);
+        throw err;
+      }
+    });
+  } catch (err) {
+    if (!(err instanceof Unhonourable)) throw err;
+    failed = err.message; out = { problem: true }; // rolled back: nothing half-made is kept
+  }
   if (failed) {
-    await pool.query("UPDATE shop_orders SET status = 'refunded', payment_intent = ?, note = ? WHERE tenant_id = ? AND id = ? AND status <> 'paid'", [obj.payment_intent, `Refunded automatically: ${failed}`.slice(0, 300), tenantId, id]);
+    // Refund first: if Stripe cannot be reached this throws, Stripe sends the event again, and we try again.
     if (obj.payment_intent && stripe.enabled()) await stripe.refund({ paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), key: `shop-autorefund-${tenantId}-${id}` });
+    await pool.query("UPDATE shop_orders SET status = 'refunded', payment_intent = ?, note = ? WHERE tenant_id = ? AND id = ? AND status IN ('awaiting_payment','expired')", [obj.payment_intent, `Refunded automatically: ${failed}`.slice(0, 300), tenantId, id]);
     return { refunded: true };
   }
   if (out.ok) await emailTickets(tenantId, id, baseUrl).catch(() => {});
@@ -332,25 +365,49 @@ async function handleWebhook(event, obj, baseUrl) {
 }
 
 /**
- * One month for the calendar: per day the lowest online price, and whether it is open, nearly sold out, or closed.
- * Kept for 60 seconds per mountain and month because every visitor asks for it.
+ * One month for the calendar: per day the adult price of the cheapest day ticket on sale, and whether that ticket is
+ * open, nearly sold out, or the day is closed. Worked out from a handful of queries (not one menu per day), and kept for
+ * 60 seconds per mountain and month because every visitor asks for it.
  */
 const monthCache = new Map();
+const FEW = 20;
 async function monthView(conn, tenant, ym) {
   const key = `${tenant.id}:${ym}`; const hit = monthCache.get(key);
   if (hit && Date.now() - hit.at < 60000) return hit.out;
   const today = todayIn(tenant.timezone); const last = addDays(today, MAX_DAYS_AHEAD);
+  const first = `${ym}-01`; let end = first; while (addDays(end, 1).slice(0, 7) === ym) end = addDays(end, 1);
   const out = {};
-  const prods = await rows(conn, `SELECT id, kind FROM products WHERE tenant_id = ? AND active = 1 AND online = 1 AND kind IN ('day_ticket','multi_day','season_pass')`, [tenant.id]);
+  const prods = await rows(conn, `SELECT id, kind, name, valid_days, base_price_cents, sale_days, online_daily_limit, advance_days, advance_percent FROM products
+    WHERE tenant_id = ? AND active = 1 AND online = 1 AND kind IN ('day_ticket','multi_day','season_pass')`, [tenant.id]);
   if (!prods.length) return out;
-  for (let d = `${ym}-01`; d.slice(0, 7) === ym; d = addDays(d, 1)) {
+  const tickets = prods.filter((p) => LIMITED_KINDS.includes(p.kind));
+  const ids = tickets.map((p) => p.id);
+  const cal = ids.length ? await rows(conn, 'SELECT product_id, on_date, tier, price_cents, blackout FROM price_calendar WHERE tenant_id = ? AND product_id IN (?) AND on_date >= ? AND on_date <= ?', [tenant.id, ids, first, addDays(end, 30)]) : [];
+  const tiers = ids.length ? await rows(conn, "SELECT product_id, price_cents FROM price_tiers WHERE tenant_id = ? AND product_id IN (?) AND tier = 'adult'", [tenant.id, ids]) : [];
+  const use = ids.length && await limited(conn, tenant, tickets, first) ? await usage(conn, tenant.id, first, addDays(end, 30)) : new Map();
+  const calOn = new Map();
+  for (const c of cal) { const k = `${c.product_id}|${dstr(c.on_date)}`; if (!calOn.has(k)) calOn.set(k, []); calOn.get(k).push(c); }
+  const adultTier = new Map(tiers.map((t) => [t.product_id, t.price_cents]));
+  const passOnly = !tickets.length;
+  for (let d = first; d <= end; d = addDays(d, 1)) {
     if (d < today || d > last) continue;
-    const menu = await dayMenu(conn, tenant, d);
-    const ok = menu.filter((m) => m.available && m.prices.length);
-    if (!ok.length) { out[d] = { state: menu.some((m) => /Sold out/.test(m.reason || '')) ? 'sold_out' : 'closed' }; continue; }
-    const from = Math.min(...ok.filter((m) => m.kind !== 'season_pass').flatMap((m) => m.prices.map((x) => x.price_cents)).concat([Infinity]));
-    const few = ok.some((m) => m.left !== null && m.left <= 20);
-    out[d] = { state: few ? 'few' : 'open', from_cents: Number.isFinite(from) ? from : null };
+    if (passOnly) { out[d] = { state: 'open', from_cents: null }; continue; }
+    let best = null; let soldOut = false;
+    for (const p of tickets) {
+      if (!allowedOn(p.sale_days, d)) continue;
+      const dayCal = calOn.get(`${p.id}|${d}`) || [];
+      if (dayCal.some((c) => c.blackout)) continue; // like the day's menu: a blackout on any age group closes the product
+      const price = priceFrom(p, dayCal, adultTier.get(p.id), 'adult');
+      let l = Infinity;
+      for (let k = 0; k < Math.max(p.valid_days, 1); k++) l = Math.min(l, left(use, tenant, p, addDays(d, k)));
+      if (l < 1) { soldOut = true; continue; }
+      const cents = advance(p, today, d, price.cents).cents;
+      // The calendar shows the cheapest one-day ticket when there is one, else the cheapest ticket of any length.
+      const rank = [p.kind === 'day_ticket' && Number(p.valid_days) === 1 ? 0 : 1, cents];
+      if (!best || rank[0] < best.rank[0] || (rank[0] === best.rank[0] && rank[1] < best.rank[1])) best = { rank, cents, left: l };
+    }
+    if (!best) { out[d] = { state: soldOut ? 'sold_out' : 'closed' }; continue; }
+    out[d] = { state: best.left !== Infinity && best.left <= FEW ? 'few' : 'open', from_cents: best.cents, left: best.left === Infinity ? null : best.left };
   }
   monthCache.set(key, { at: Date.now(), out });
   if (monthCache.size > 500) monthCache.clear();

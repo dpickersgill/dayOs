@@ -118,7 +118,10 @@ a { color: var(--trail-blue); }
   font-weight: 700;
 }
 .btn:hover { border-color: var(--spruce); }
-.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn:disabled, .btn.primary:disabled, .btn.danger:disabled { opacity: 1; background: #e3e7ec; border-color: #c9d0d8; color: #4a5562; cursor: not-allowed; box-shadow: none; }
+@keyframes nudge { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+.dialog.nudge { animation: nudge 0.25s ease-in-out; }
+@media (prefers-reduced-motion: reduce) { .dialog.nudge { animation: none; outline: 3px solid var(--focus, #1a5fb4); } }
 .btn.primary { background: var(--trail-blue); border-color: var(--trail-blue); color: #fff; }
 .btn.primary:hover { background: var(--trail-blue-dark); border-color: var(--trail-blue-dark); }
 .btn.danger { color: var(--closed); border-color: #e0a7a0; }
@@ -1501,3 +1504,27 @@ main:focus, main:focus-visible, #main:focus, [tabindex='-1']:focus:not(input):no
 .grid-3 { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 .card .big { font-size: 1.75rem; line-height: 1.1; }
 .pace-bars { display: block; min-width: 120px; }
+
+.more-details > summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+.more-details[open] > summary { margin-bottom: 8px; }
+.seg.tender-row .btn[aria-pressed='true'] { background: var(--trail-blue); border-color: var(--trail-blue); color: #fff; }
+.cash-quick .btn { min-height: 52px; min-width: 88px; font-size: 1.05rem; }
+.change-due { font-size: 1.6rem; font-weight: 800; }
+[aria-invalid='true'] { border-color: #b3261e !important; box-shadow: 0 0 0 2px rgba(179, 38, 30, 0.25); }
+
+/* Sell: a tap on a tile says "Added"; on phones and tablets the basket total and Checkout stay at the bottom */
+.tile.added { outline: 3px solid var(--trail-blue); position: relative; }
+.tile.added::after { content: attr(data-added); position: absolute; top: 6px; right: 8px; background: var(--trail-blue); color: #fff; font-size: .75rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+.mobile-basket-bar { display: none; }
+@media (max-width: 900px) {
+  .mobile-basket-bar:not([hidden]) { display: flex; position: sticky; bottom: 0; z-index: 20; justify-content: space-between; align-items: center; gap: 12px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); background: #fff; border-top: 1px solid #d5dbe1; box-shadow: 0 -4px 14px rgba(10, 20, 35, .12); font-weight: 700; }
+  .mobile-basket-bar .btn { min-height: 48px; }
+}
+.drawer-badge { display: inline-flex; align-items: center; }
+
+/* Patrol: choices sized for gloves */
+.choice-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+.btn.big-choice { min-height: 56px; font-size: 1.05rem; font-weight: 700; }
+.btn.big-choice[aria-pressed='true'] { background: var(--trail-blue); border-color: var(--trail-blue); color: #fff; }
+.sell-menu .tabs { flex-wrap: wrap; overflow-x: visible; mask-image: none; -webkit-mask-image: none; }

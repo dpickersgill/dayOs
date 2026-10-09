@@ -233,9 +233,9 @@ test('public booking page: closed until switched on, then requests are queued, c
   assert.equal((await pub('GET', '/booking')).body.lessons.some((l) => l.id === D.priv), false);
   assert.equal((await pub('POST', '/requests', { body: req({ contact_email: 'someone@else.test' }) })).status, 409);
   // the guest can look the request up only with the matching email
-  assert.equal((await pub('GET', `/requests/${D.ref}?email=pam.parent@x.test`)).body.status, 'pending');
-  assert.equal((await pub('GET', `/requests/${D.ref}?email=nope@x.test`)).status, 404);
-  assert.equal((await pub('GET', `/requests/AAAAAAAA?email=pam.parent@x.test`)).status, 404);
+  assert.equal((await pub('POST', `/requests/${D.ref}/status`, { body: { email: 'pam.parent@x.test' } })).body.status, 'pending');
+  assert.equal((await pub('POST', `/requests/${D.ref}/status`, { body: { email: 'nope@x.test' } })).status, 404);
+  assert.equal((await pub('POST', `/requests/AAAAAAAA/status`, { body: { email: 'pam.parent@x.test' } })).status, 404);
   // staff see it, and only staff
   const listed = await api('GET', '/skischool/requests', { token: T.counter });
   assert.equal(listed.body.pending, 1);
@@ -272,11 +272,11 @@ test('requests can be declined or cancelled, an unpaid confirmed lesson can be c
   const r1 = await mk();
   assert.equal(r1.status, 201, r1.text);
   assert.equal((await pub('POST', `/requests/${r1.body.reference}/cancel`, { body: { email: 'ANN@x.test' } })).status, 200, 'email match ignores case');
-  assert.equal((await pub('GET', `/requests/${r1.body.reference}?email=ann@x.test`)).body.status, 'cancelled');
+  assert.equal((await pub('POST', `/requests/${r1.body.reference}/status`, { body: { email: 'ann@x.test' } })).body.status, 'cancelled');
   const r2 = await mk();
   const id2 = (await api('GET', '/skischool/requests', { token: T.manager })).body.data.find((r) => r.reference === r2.body.reference).id;
   assert.equal((await api('POST', `/skischool/requests/${id2}/decline`, { token: T.manager, body: { staff_note: 'Class cancelled for wind' } })).status, 200);
-  assert.equal((await pub('GET', `/requests/${r2.body.reference}?email=ann@x.test`)).body.staff_note, 'Class cancelled for wind');
+  assert.equal((await pub('POST', `/requests/${r2.body.reference}/status`, { body: { email: 'ann@x.test' } })).body.staff_note, 'Class cancelled for wind');
   // a child cannot book themselves in
   const kid = { first_name: 'Ann', last_name: 'Adult', date_of_birth: `${Number(today.slice(0, 4)) - 10}-01-01`, sex: 'female' };
   assert.equal((await mk({ students: [kid] })).status, 400, 'the contact must be an adult');

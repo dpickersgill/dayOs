@@ -92,12 +92,14 @@ router.post(
   },
 );
 
-// Wrong second-step codes are counted per login, so guessing a six-digit code is not practical even from many addresses.
-const failures = new Map();
+// Wrong second-step codes are counted per login in the database, so guessing a six-digit code is not practical even from
+// many addresses or across several servers: 5 wrong codes lock that login's second step for 5 minutes.
 const LOCK_AFTER = 5;
-const LOCK_MS = 5 * 60_000;
-const lockedOut = (id) => { const f = failures.get(id); return f && f.count >= LOCK_AFTER && f.until > Date.now(); };
-const failed = (id) => { const f = failures.get(id); const now = Date.now(); const cur = f && f.until > now ? f : { count: 0 }; failures.set(id, { count: cur.count + 1, until: now + LOCK_MS }); };
+const lockedOut = (u) => u.mfa_failures >= LOCK_AFTER && u.mfa_locked_until && new Date(`${String(u.mfa_locked_until).replace(' ', 'T')}Z`) > new Date();
+const failed = (id) => pool.query(
+  `UPDATE users SET mfa_failures = IF(mfa_locked_until IS NOT NULL AND mfa_locked_until < UTC_TIMESTAMP(), 1, mfa_failures + 1),
+     mfa_locked_until = DATE_ADD(UTC_TIMESTAMP(), INTERVAL 5 MINUTE) WHERE id = ?`, [id]);
+const cleared = (id) => pool.query('UPDATE users SET mfa_failures = 0, mfa_locked_until = NULL WHERE id = ?', [id]);
 
 /** Checks a six-digit app code or a recovery code for this user. Returns true when accepted (and marks it used). */
 async function checkSecondStep(conn, user, code) {
@@ -116,12 +118,13 @@ router.post('/auth/mfa', validate(z.object({ mfa_token: z.string().min(10).max(2
   let payload;
   try { payload = jwt.verify(req.body.mfa_token, config.jwtSecret, { algorithms: ['HS256'] }); } catch (_) { throw unauthorized('That sign-in has timed out. Start again.'); }
   if (payload.typ !== 'mfa') throw unauthorized('Invalid sign-in');
-  const user = await one(pool, 'SELECT * FROM users WHERE id = ? AND tenant_id = ? AND active = 1', [Number(payload.sub), payload.tid]);
+  // A password change after the first step cancels the half-finished sign-in.
+  const user = await one(pool, 'SELECT * FROM users WHERE id = ? AND tenant_id = ? AND active = 1 AND (password_changed_at IS NULL OR UNIX_TIMESTAMP(password_changed_at) <= ?)', [Number(payload.sub), payload.tid, Number(payload.iat) || 0]);
   if (!user || !user.totp_enabled) throw unauthorized('Invalid sign-in');
-  if (lockedOut(user.id)) throw new AppError(429, 'Too many wrong codes. Wait a few minutes and sign in again.');
+  if (lockedOut(user)) throw new AppError(429, 'Too many wrong codes. Wait a few minutes and sign in again.');
   const how = await checkSecondStep(pool, user, req.body.code);
-  if (!how) { failed(user.id); throw unauthorized('That code is not right'); }
-  failures.delete(user.id);
+  if (!how) { await failed(user.id); throw unauthorized('That code is not right'); }
+  await cleared(user.id);
   if (how === 'recovery') {
     const left = (await one(pool, 'SELECT COUNT(*) AS n FROM user_recovery_codes WHERE user_id = ? AND used_at IS NULL', [user.id])).n;
     await pool.query("INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id, detail) VALUES (?, ?, 'mfa_recovery_used', 'users', ?, ?)", [user.tenant_id, user.id, user.id, JSON.stringify({ left })]).catch(() => {});

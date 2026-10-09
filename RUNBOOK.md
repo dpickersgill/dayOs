@@ -9,6 +9,55 @@
 4. **Legal**: have a lawyer review the waiver text and privacy terms. Sign BAAs (Aiven, Google Cloud) before storing patrol patient/health data (see HIPAA.md).
 5. **Card payments**: pick a processor (Square or Stripe) before taking live cards through a terminal. Until then card sales are recorded manually.
 
+## Keeping an eye on it (set up once)
+
+Every failure is written to the logs as one line with `"severity":"ERROR"` and a `job` name (`email`, `sms`,
+`stripe_webhook`, `card_refund`, `daily`, and the daily job stages). Each finished daily job writes `daily job finished`.
+
+1. **Uptime check:** Cloud console, Monitoring, Uptime checks, Create. Target: HTTPS, your service address, path
+   `/readyz`, every 5 minutes. Alert by email.
+2. **Error alert:** Cloud console, Logging, Logs Explorer. Query:
+   `resource.type="cloud_run_revision" AND jsonPayload.severity="ERROR"`. Choose Actions, Create log alert, notify by
+   email, at most one email every 30 minutes.
+3. **Daily job missed:** Logging, Log-based metrics, Create a counter metric named `daily_job_finished` for
+   `jsonPayload.message="daily job finished"`. Then Monitoring, Alerting, Create policy on that metric: alert when it
+   is absent for 26 hours.
+4. **Give the daily job time to finish:** it can run for several minutes as mountains grow.
+   `gcloud scheduler jobs update http summitops-daily --location us-east1 --attempt-deadline=900s`
+5. **Budget:** Billing, Budgets and alerts, a monthly budget (for example $50) with email alerts.
+
+## Backups
+
+Aiven keeps its own backups (one on Hobbyist; two days of point-in-time recovery on Startup). Before a paying mountain
+relies on it, move to Startup or higher. For a copy you hold yourself, once a month (or before a risky change):
+
+```bash
+gsutil mb -l us-east1 gs://summitops-510715-backups 2>/dev/null || true
+mysqldump --single-transaction --routines --set-gtid-purged=OFF -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" \
+  --ssl-ca=<(echo "$DB_CA") "$DB_NAME" | gzip | gsutil cp - "gs://summitops-510715-backups/summitops-$(date +%F).sql.gz"
+```
+
+(Load the DB_* settings first, as in DEPLOY.md.) Test a restore into a scratch database once a season.
+
+## Rotating keys
+
+`JWT_SECRET` signs sign-ins. Until this release it also protected two-step secrets, unsubscribe links and staff badges,
+so rotating it on its own would lock out everyone using two-step sign-in and break every printed badge. Now each has its
+own setting. To rotate `JWT_SECRET` safely:
+
+1. Set `TOTP_KEY`, `LINK_SECRET` and `KIOSK_SECRET` on Cloud Run to the **current** `JWT_SECRET` value (as secrets).
+2. Deploy, and check two-step sign-in and a badge still work.
+3. Now change `JWT_SECRET`. Everyone signs in again; nothing else changes.
+
+## Platform console
+
+The console (`/platform`) asks for the platform key and your name, and records your name with every change.
+
+- **Two-step sign-in (recommended):** create a secret with `node -e "console.log(require('./src/lib/totp').newSecret())"`,
+  add it to your authenticator app (manual entry, time-based, 6 digits), and set it on Cloud Run as
+  `PLATFORM_TOTP_SECRET`. From then on the key alone does not open the console.
+- **Address allowlist (optional):** `PLATFORM_ALLOW_IPS` = a comma-separated list of addresses allowed to use it.
+
 ## Two-step sign-in recovery
 - A user who lost their phone: use a recovery code, or an owner/manager clicks **Reset two-step** in Settings > Users.
 - If the only owner is locked out, reset in SQL (Cloud Shell, with DB env vars):

@@ -34,7 +34,7 @@ router.post('/weekly/email-me', requireRole('manager'), async (req, res) => {
   const t = await one(pool, 'SELECT name, timezone FROM tenants WHERE id = ?', [req.auth.tenantId]);
   const me = await one(pool, 'SELECT email FROM users WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, req.auth.userId]);
   const m = weekly.renderEmail(await weekly.buildWeek(req.auth.tenantId, weekly.weekStartOf(week || addDays(todayIn(t.timezone), -7))), t);
-  const r = await mailer.send({ to: me.email, fromName: t.name, subject: m.subject, text: m.text, html: m.html, tag: 'weekly-report-test' });
+  const r = await mailer.send({ tenantId: req.auth.tenantId, to: me.email, fromName: t.name, subject: m.subject, text: m.text, html: m.html, tag: 'weekly-report-test' });
   if (!r.ok) throw conflict('The email could not be sent. Please try again.');
   res.json({ ok: true, to: me.email });
 });

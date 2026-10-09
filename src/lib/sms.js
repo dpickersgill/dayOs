@@ -5,6 +5,8 @@
 //   TWILIO_FROM                             a Twilio number (+1...) or messaging service id (MG...)
 //   TWILIO_API_BASE                         only for automated tests
 const env = process.env;
+const { isSandbox } = require('./sandbox');
+const { logFailure } = require('./jobs');
 const base = () => env.TWILIO_API_BASE || 'https://api.twilio.com';
 const enabled = () => Boolean(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_FROM);
 
@@ -16,9 +18,17 @@ function e164(phone) {
   return null;
 }
 
-/** Returns { ok: true, id } or { ok: false, error } and never throws. */
-async function send({ to, body }) {
+/** Returns { ok: true, id } or { ok: false, error } and never throws. Demo (sandbox) mountains never send. Failures are logged. */
+async function send({ tenantId, to, body }) {
   if (!enabled()) return { ok: false, error: 'Text messages are not set up' };
+  if (!tenantId) { logFailure({ job: 'sms', message: 'send without a mountain' }); return { ok: false, error: 'No mountain given' }; }
+  if (await isSandbox(tenantId)) return { ok: false, error: 'Demo mountains do not send text messages' };
+  const r = await post({ to, body });
+  if (!r.ok) logFailure({ job: 'sms', tenant: tenantId, message: r.error });
+  return r;
+}
+
+async function post({ to, body }) {
   const number = e164(to);
   if (!number) return { ok: false, error: 'Not a number we can text' };
   const form = new URLSearchParams({ To: number, Body: body });

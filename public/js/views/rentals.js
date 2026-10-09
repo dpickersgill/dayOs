@@ -208,7 +208,7 @@ async function drawCounter(box) {
       const on = picked.has(i.id);
       const tile = h('button', { type: 'button', class: `gear-tile${on ? ' on' : ''}`, 'aria-pressed': String(on), 'aria-label': `${i.sku}, ${label(i.category)} ${gearName(i)}${i.tier === 'performance' ? ', performance' : ''}` },
         h('span', { class: 'size' }, i.size || '–'),
-        h('span', { class: 'what' }, [i.brand, i.model].filter(Boolean).join(' ') || label(i.category)),
+        h('span', { class: 'what' }, label(i.category), [i.brand, i.model].filter(Boolean).length ? h('small', { class: 'muted' }, ` ${[i.brand, i.model].filter(Boolean).join(' ')}`) : null), // the kind of gear first, so a 100 pole is not mistaken for a ski
         h('span', { class: 'meta' }, i.sku, i.tier === 'performance' ? h('span', { class: 'tag' }, 'Perf') : null, i.grade ? h('span', { class: 'grade' }, i.grade) : null),
         on ? h('span', { class: 'tick', 'aria-hidden': 'true' }, '✓') : null);
       tile.addEventListener('click', () => { if (picked.has(i.id)) picked.delete(i.id); else pick(i); drawPicked(); drawList(); });

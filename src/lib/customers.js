@@ -127,14 +127,14 @@ async function ensureRequired(conn, tenantId, person, scope, sale) {
 /**
  * Find or create the customer for a sale or booking, inside the caller's transaction.
  *   - person_id given: that customer is used. Any details sent with it overwrite what we hold (the clerk just
- *     confirmed them with the guest).
+ *     confirmed them with the guest). fillOnly (online orders, where nobody checked who is typing) only fills blanks.
  *   - no person_id: look for an existing customer by email, by name plus date of birth, or by name plus phone number. A match is reused and
  *     only has its blanks filled in; nothing already on file is overwritten and consent is never withdrawn by a
  *     match. No match creates a new customer.
  * Then the mountain's mandatory fields for this kind of sale are checked against the final record.
  * Returns { id, person, created, matched }.
  */
-async function resolvePerson(conn, tenantId, { personId, details, scope, source, sale }) {
+async function resolvePerson(conn, tenantId, { personId, details, scope, source, sale, fillOnly = false }) {
   const required = await requiredFor(conn, tenantId, scope);
   const d = details || {};
   const supplied = Object.keys(d).filter((k) => BY_KEY.has(k) || k === 'notes' || k === 'photo');
@@ -145,7 +145,7 @@ async function resolvePerson(conn, tenantId, { personId, details, scope, source,
   if (personId) {
     person = await one(conn, `SELECT ${COLS} FROM people WHERE tenant_id = ? AND id = ? FOR UPDATE`, [tenantId, personId]);
     if (!person) return { notFound: true };
-    if (supplied.length) await applyDetails(conn, tenantId, person, d, 'overwrite');
+    if (supplied.length) await applyDetails(conn, tenantId, person, d, fillOnly ? 'fill' : 'overwrite'); // online orders only fill blanks
   } else if (supplied.length) {
     if (isBlank(d.first_name) || isBlank(d.last_name)) throw bad('First and last name are required');
     if (!isBlank(d.email)) person = await one(conn, `SELECT ${COLS} FROM people WHERE tenant_id = ? AND email = ? ORDER BY id LIMIT 1 FOR UPDATE`, [tenantId, d.email]);
