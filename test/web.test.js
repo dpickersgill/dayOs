@@ -2437,6 +2437,93 @@ test('patrol care: the refusal form asks every question, stops a refusal without
   await closeOverlays();
 });
 
+test('assets and fleet: every tab draws, an asset is added, inspected (a failure opens a work order), fuelled, and worked with parts and labor', skip(), async () => {
+  const o = T.owner;
+  await closeOverlays();
+  await pool.query("INSERT INTO tenant_modules (tenant_id, module, enabled) SELECT id, 'assets', 1 FROM tenants WHERE slug = ? ON DUPLICATE KEY UPDATE enabled = 1", [slug]);
+  require('../src/lib/modules').invalidate();
+  const shop = ok(await api('POST', '/assets/locations', { token: o, body: { name: 'Web shop', kind: 'shop' } })).id;
+  ok(await api('POST', '/assets/vendors', { token: o, body: { name: 'Web Parts Co' } }));
+  ok(await api('POST', '/assets/parts', { token: o, body: { sku: 'WF-1', name: 'Web filter', unit_cost_cents: 1200, qty_on_hand: 5, reorder_point: 1, location_id: shop } }));
+  let root = await renderView('assets', 'owner', T.owner);
+  clean(root, 'assets overview');
+  for (const t of ['Overview', 'Assets', 'Service', 'Parts', 'Purchasing', 'Costs', 'Settings']) {
+    await openTab(root, t);
+    clean(root, `assets ${t}`);
+  }
+  // add an asset from the register
+  await openTab(root, 'Assets');
+  clickBtn(root, 'Add an asset'); await settle();
+  let dlg = topDialog();
+  clean(dlg, 'add asset');
+  typeInto(dlg, 'name', 'Web groomer'); dlg.querySelector('[name=kind]').value = 'groomer'; dlg.querySelector('[name=location_id]').value = String(shop);
+  typeInto(dlg, 'hours', '1200'); typeInto(dlg, 'registration_expires', '2001-01-01'); typeInto(dlg, 'purchase', '250000');
+  await submitForm(dlg.querySelector('[name=name]'));
+  const a = ok(await api('GET', '/assets/register?q=Web%20groomer', { token: o })).data[0];
+  assert.ok(a, 'the asset was saved');
+  assert.equal(a.location, 'Web shop');
+  assert.equal(a.hours, 1200);
+  assert.match(location.hash, new RegExp(`#/assets/a/${a.id}$`), 'it opens the new asset');
+
+  // the asset page: inspect with one failure
+  root = await renderView('assets', 'owner', T.owner, {}, ['a', String(a.id)]);
+  clean(root, 'asset page');
+  assert.match(root.textContent, /Registration expired/);
+  root.querySelector('[data-act=inspect]').click(); await settle();
+  dlg = document.querySelector('.dialog.sheet');
+  clean(dlg, 'inspection sheet');
+  assert.ok(dlg.querySelector('select').selectedOptions[0].textContent.includes('Groomer pre-shift'), 'the groomer checklist is chosen');
+  dlg.querySelector('#ins-0 [data-value=fail]').click();
+  const note = dlg.querySelector('#ins-0').nextElementSibling;
+  assert.equal(note.hidden, false, 'a failure asks what is wrong');
+  note.value = 'Coolant low';
+  clickBtn(dlg, 'Mark the rest as pass');
+  dlg.querySelector('[data-act=save-inspection]').click(); await settle();
+  const after = ok(await api('GET', `/assets/register/${a.id}`, { token: o }));
+  assert.equal(after.inspections[0].result, 'fail');
+  assert.equal(after.status, 'needs_service');
+  const wo = after.work_orders[0];
+  assert.match(wo.title, /Failed groomer pre-shift/);
+
+  // fuel
+  root = await renderView('assets', 'owner', T.owner, {}, ['a', String(a.id)]);
+  root.querySelector('[data-act=fuel]').click(); await settle();
+  dlg = topDialog();
+  typeInto(dlg, 'gallons', '40'); typeInto(dlg, 'cost', '160.00'); typeInto(dlg, 'hours', '1210');
+  await submitForm(dlg.querySelector('[name=gallons]'));
+  assert.equal(ok(await api('GET', `/assets/register/${a.id}`, { token: o })).hours, 1210);
+
+  // the work order sheet: log time, use a part, complete
+  root = await renderView('assets', 'owner', T.owner, {}, ['a', String(a.id)]);
+  [...root.querySelectorAll('button')].find((b) => b.textContent === 'Open').click(); await settle();
+  dlg = topDialog();
+  clean(dlg, 'work order sheet');
+  dlg.querySelector('input[aria-label="Hours worked"]').value = '1';
+  clickBtn(dlg, 'Log time'); await settle(); await settle();
+  dlg = topDialog();
+  const part = dlg.querySelector('select[aria-label=Part]');
+  part.value = part.options[1].value;
+  clickBtn(dlg, 'Use part'); await settle(); await settle();
+  const costs = ok(await api('GET', `/assets/work-orders/${wo.id}/costs`, { token: o }));
+  assert.equal(costs.labor.length, 1);
+  assert.equal(costs.parts_cents, 1200);
+  dlg = topDialog();
+  clickBtn(dlg, 'Complete'); await settle();
+  const done = topDialog();
+  done.querySelector('[name=resolution]').value = 'Topped up coolant, checked hoses';
+  await submitForm(done.querySelector('[name=resolution]'));
+  assert.equal(ok(await api('GET', `/ops/work-orders/${wo.id}`, { token: o })).status, 'done');
+  await closeOverlays();
+
+  // a scanned tag opens the asset, and the label sheet draws
+  root = await renderView('assets', 'staff', T.owner, {}, ['tag', a.asset_tag]);
+  assert.ok(root.querySelector('.asset-head'), 'the tag opens the asset page');
+  root = await renderView('assets', 'owner', T.owner, {}, ['labels', String(a.id)]);
+  clean(root, 'labels');
+  assert.equal(root.querySelectorAll('.label-card').length, 1);
+  assert.ok(root.querySelector('.label-card svg.qr'));
+});
+
 test('kiosk admin: add a tablet, set a PIN, print a badge, snapshots and fixing a punch', skip(), async () => {
   const o = T.owner;
   const root = await renderView('workforce', 'owner', o, {});

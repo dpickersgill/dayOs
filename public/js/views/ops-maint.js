@@ -1,5 +1,5 @@
 import { get, post, patch, del } from '../api.js';
-import { h, clear, isManager, table, state, tabs, input, select, field, button, toast, formDialog, confirmDialog, val, num, todayStr, fmtDate, fmtDateTime, empty, label } from '../ui.js';
+import { h, clear, ctx, isManager, table, state, tabs, input, select, field, button, toast, formDialog, confirmDialog, val, num, todayStr, fmtDate, fmtDateTime, empty, label } from '../ui.js';
 
 const PRIORITY_TONE = { urgent: 'bad', high: 'warn', normal: 'neutral', low: 'neutral' };
 const PM_TONE = { overdue: 'bad', soon: 'warn', ok: 'good', never: 'neutral' };
@@ -173,6 +173,8 @@ async function drawPm(box) {
 async function drawFleet(box) {
   const [{ data }, meta] = await Promise.all([get('/ops/assets'), get('/ops/meta')]);
   clear(box).append(h('header', null, h('h2', null, 'Vehicles and equipment'), button('Add equipment', () => edit(), { small: true })));
+  // With the Assets and fleet add-on, the full record (meters, fuel, inspections, parts, costs, QR tags) lives there.
+  if (ctx.me && ctx.me.modules && ctx.me.modules.includes('assets')) box.append(h('p', { class: 'note-box' }, 'Full records for each machine (meters, fuel, inspections, parts, costs and QR tags) are in ', h('a', { href: '#/assets/register' }, 'Assets and fleet'), '.'));
   if (!data.length) { box.append(empty('No equipment yet. Add your groomers, snowmobiles and trucks.')); return; }
   box.append(table([
     { head: 'Name', cell: (a) => h('span', { class: 'stack tight' }, h('strong', null, a.name), h('span', { class: 'muted small' }, a.make_model || '')) },

@@ -14,6 +14,7 @@ const VIEWS = [
   ['gate', 'Gate', () => can('counter', 'staff'), () => import('./views/gate.js')],
   ['conditions', 'Mountain status', () => true, () => import('./views/conditions.js')],
   ['park', 'Terrain park', () => true, () => import('./views/park.js')],
+  ['assets', 'Assets and fleet', () => can('staff'), () => import('./views/assets.js')],
   ['documents', 'Documents', () => true, () => import('./views/documents.js')],
   ['rentals', 'Rentals', () => can('counter'), () => import('./views/rentals.js')],
   ['school', 'Ski school', () => can('instructor', 'counter'), () => import('./views/school.js')],

@@ -1699,3 +1699,77 @@ details.gcs summary { gap: 12px; }
 .visually-hidden { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 /* jumping to a section stops below the wristband instead of under it */
 .pane [id], .pane details[data-section], .pane [data-field] { scroll-margin-top: 180px; }
+
+/* ---------- Assets and fleet ----------
+   The asset page reads like the plate on the machine: the tag, the name, the meters, then four big buttons for what
+   people do standing beside it. Lists stay quiet; colour only marks what needs attention. */
+.note-box { background: #eef4fd; border: 1px solid #c9dbf5; border-radius: 10px; padding: 10px 14px; }
+.pair { display: grid; gap: var(--sp-4); }
+.pair > * { min-width: 0; }
+@media (min-width: 900px) { .pair { grid-template-columns: 1fr 1fr; align-items: start; } }
+.plain.rows > li { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.plain.rows > li:last-child { border-bottom: none; }
+.filters { flex-wrap: wrap; gap: 8px; }
+.filters input[type=search] { min-width: min(320px, 100%); }
+.tag-cell { font-weight: 700; letter-spacing: 0.02em; white-space: nowrap; }
+tr.status-out_of_service td:first-child { box-shadow: inset 4px 0 0 var(--closed); }
+tr.status-needs_service td:first-child { box-shadow: inset 4px 0 0 #d98a00; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.stat { display: grid; gap: 2px; padding: 14px 16px; background: #fff; border: 1px solid var(--line); border-radius: 12px; color: inherit; text-decoration: none; }
+a.stat:hover { border-color: var(--spruce); }
+.stat b { font-size: 1.75rem; line-height: 1.1; }
+.stat span { color: var(--quiet); font-weight: 700; font-size: 0.9375rem; }
+.stat.bad { border-color: #e0908a; background: var(--closed-tint); }
+.stat.bad b { color: var(--closed); }
+.stat.warn { border-color: #e0b560; background: var(--hold-tint); }
+.stat.warn b { color: var(--hold); }
+.cat-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.cat-chip { border: 1.5px solid var(--line-strong); border-radius: 999px; padding: 4px 14px; background: #fff; font-weight: 700; color: var(--spruce-soft); }
+.cat-chip .down { color: var(--closed); }
+
+.asset-head { display: grid; gap: var(--sp-4); border-left: 6px solid var(--spruce); }
+.asset-title { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; align-items: flex-start; }
+.asset-title h1 { font-size: 1.625rem; }
+.asset-tag { display: inline-block; font-weight: 700; letter-spacing: 0.06em; border: 2px solid var(--spruce); border-radius: 6px; padding: 0 8px; margin-bottom: 6px; }
+.asset-state { display: flex; gap: 8px; flex-wrap: wrap; }
+.asset-meters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.asset-meters > div { background: var(--snowpack); border-radius: 10px; padding: 10px 12px; display: grid; gap: 2px; min-width: 0; }
+.asset-meters .k { font-size: 0.8125rem; color: var(--quiet); font-weight: 700; }
+.asset-meters b { font-size: 1.5rem; line-height: 1.15; overflow-wrap: anywhere; }
+.asset-meters b.small-b { font-size: 1.0625rem; }
+.asset-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+@media (min-width: 760px) { .asset-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.asset-actions .btn { width: 100%; }
+.btn.warn-btn { border-color: #e0b560; color: #6b4300; background: #fff7e8; }
+.btn.warn-btn:hover { background: var(--hold-tint); }
+.attention { border-left: 6px solid #d98a00; }
+.replace-flag { background: var(--hold-tint); border: 1.5px solid #e0b560; border-radius: 10px; padding: 10px 12px; color: #4d3200; }
+.tag-panel svg.qr { border: 1px solid var(--line); border-radius: 8px; }
+.tag-big { font-size: 1.5rem; letter-spacing: 0.06em; }
+.wo-total { border-top: 1px solid var(--line); padding-top: 10px; }
+.wo-sheet h3 { font-size: 1rem; }
+.po-line { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) 90px 110px auto; gap: 8px; align-items: center; }
+@media (max-width: 700px) { .po-line { grid-template-columns: 1fr 1fr; } }
+.ins-item { display: grid; gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.ins-label { font-weight: 700; }
+.chip.result-pass[aria-pressed='true'] { background: var(--open); border-color: var(--open); }
+.chip.result-fail[aria-pressed='true'] { background: var(--closed); border-color: var(--closed); }
+.chip.result-na[aria-pressed='true'] { background: var(--quiet); border-color: var(--quiet); }
+
+/* QR label sheet: three across on letter paper, each label about 2.6 by 1.2 inches */
+.labels { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.label-card { display: flex; gap: 10px; align-items: center; border: 1px dashed var(--line-strong); border-radius: 8px; padding: 8px; background: #fff; break-inside: avoid; }
+.label-text { display: grid; gap: 1px; min-width: 0; }
+.label-text b { font-size: 1.25rem; letter-spacing: 0.05em; }
+.label-text span { overflow-wrap: anywhere; }
+@media print {
+  .labels-tools { display: none !important; }
+  .labels { grid-template-columns: repeat(3, 2.6in); gap: 0.1in; }
+  .label-card { height: 1.2in; border: 1px solid #000; }
+  .asset-actions, .asset-page .btn { display: none !important; }
+}
+.cost-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.cost-grid > div { background: var(--snowpack); border-radius: 10px; padding: 8px 12px; display: grid; gap: 2px; }
+.cost-grid .k { font-size: 0.8125rem; color: var(--quiet); font-weight: 700; }
+.cost-grid b { font-size: 1.125rem; }

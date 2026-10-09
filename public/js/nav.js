@@ -6,7 +6,7 @@ import { icon } from './icons.js';
 // Menu groups: label, colour key, pages. Today stands alone at the top. Each group has its own accent, used on the menu, the page title and the tabs.
 const GROUPS = [
   ['Front desk', 'front', ['sell', 'gate', 'shop', 'rentals', 'people', 'waivers']],
-  ['Mountain', 'mountain', ['conditions', 'park']],
+  ['Mountain', 'mountain', ['conditions', 'park', 'assets']],
   ['Safety', 'safety', ['patrol']],
   ['Programs', 'programs', ['school', 'programs', 'availability']],
   ['Office', 'office', ['catalog', 'money', 'workforce', 'messages', 'documents']],
@@ -24,6 +24,7 @@ const ALSO = {
   shop: 'online will-call willcall pickup web orders groups waitlist reprint tickets prices calendar pace report',
   messages: 'email text sms campaign newsletter send announce reminder unsubscribe marketing',
   documents: 'files forms policies manuals handbook pdf upload library repository',
+  assets: 'fleet vehicles trucks groomers equipment maintenance parts inventory stock purchase orders vendors fuel inspection qr tag registration insurance warranty depreciation',
   waivers: 'waiver release liability sign signature signed guardian minor consent form',
   myshifts: 'my schedule clock in out', settings: 'account password security two-step sign out',
   help: 'how to guide instructions support questions articles',
