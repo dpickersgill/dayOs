@@ -3,6 +3,7 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const { pool } = require('../db');
+const demoUsage = require('../lib/demousage');
 const { unauthorized, forbidden } = require('../lib/errors');
 
 const MANAGER_ROLES = ['owner', 'manager'];
@@ -32,7 +33,7 @@ async function authenticate(req, _res, next) {
 
   const userId = Number(payload.sub);
   const [rows] = await pool.query(
-    `SELECT u.id, u.role, u.staff_id, u.totp_enabled, t.require_mfa, t.status, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over FROM users u JOIN tenants t ON t.id = u.tenant_id
+    `SELECT u.id, u.role, u.staff_id, u.totp_enabled, t.require_mfa, t.status, (t.sandbox_expires_at IS NOT NULL) AS sandbox, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over FROM users u JOIN tenants t ON t.id = u.tenant_id
      WHERE u.id = ? AND u.tenant_id = ? AND u.active = 1
        AND (u.password_changed_at IS NULL OR UNIX_TIMESTAMP(u.password_changed_at) <= ?)`,
     [userId, payload.tid, payload.iat],
@@ -48,6 +49,7 @@ async function authenticate(req, _res, next) {
   }
 
   req.auth = { tenantId: payload.tid, userId, role: rows[0].role, staffId: rows[0].staff_id };
+  if (Number(rows[0].sandbox)) demoUsage.touch(payload.tid, req.originalUrl, req.method); // for the platform's Demos dashboard
   return next();
 }
 

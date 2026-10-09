@@ -21,6 +21,10 @@ async function activeCount() {
 
 /** Removes one demo mountain and everything in it. Refuses to touch a real mountain. */
 async function purgeTenant(id) {
+  // Write down the last of the demo's usage before its data goes; the Demos dashboard keeps showing it.
+  await require('./demousage').flush();
+  await pool.query(`UPDATE sandbox_signups s SET ended_at = UTC_TIMESTAMP()
+    WHERE s.tenant_id = ? AND EXISTS (SELECT 1 FROM tenants t WHERE t.id = s.tenant_id AND t.sandbox_expires_at IS NOT NULL)`, [id]);
   const conn = await pool.getConnection();
   try {
     const [[t]] = await conn.query('SELECT id FROM tenants WHERE id = ? AND sandbox_expires_at IS NOT NULL', [id]);

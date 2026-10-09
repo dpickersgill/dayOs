@@ -277,6 +277,7 @@ const waiverSteps = [
   ['tenants.waiver_resign_at', (c) => columnExists(c, 'tenants', 'waiver_resign_at'), 'ALTER TABLE tenants ADD COLUMN waiver_resign_at TIMESTAMP NULL'],
   ['tenants.waiver_resign_id', (c) => columnExists(c, 'tenants', 'waiver_resign_id'), 'ALTER TABLE tenants ADD COLUMN waiver_resign_id BIGINT UNSIGNED NULL'],
   ['waiver_signings.covered_names', (c) => columnExists(c, 'waiver_signings', 'covered_names'), 'ALTER TABLE waiver_signings ADD COLUMN covered_names TEXT NULL AFTER signer_dob'],
+  ['sandbox_signups usage', (c) => columnExists(c, 'sandbox_signups', 'last_used_at'), 'ALTER TABLE sandbox_signups ADD COLUMN first_used_at DATETIME NULL, ADD COLUMN last_used_at DATETIME NULL, ADD COLUMN sign_ins INT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN requests INT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN changes INT UNSIGNED NULL, ADD COLUMN ended_at DATETIME NULL'],
   ['waivers index by signing', (c) => indexExists(c, 'waivers', 'ix_waivers_signing'), 'ALTER TABLE waivers ADD INDEX ix_waivers_signing (tenant_id, signing_id)'],
 ];
 

@@ -11,6 +11,7 @@ const { z, validate, paramId, partialOf } = require('../lib/util');
 const { AppError, bad, forbidden, notFound } = require('../lib/errors');
 const M = require('../lib/modules');
 const sandbox = require('../lib/sandbox');
+const demoUsage = require('../lib/demousage');
 const totp = require('../lib/totp');
 
 const router = express.Router();
@@ -88,13 +89,44 @@ router.get('/tenants', async (_req, res) => {
   res.json({ data });
 });
 
-// Demo sign-ups: who tried the demo and whether their demo is still running. Also the call to run from a daily schedule to clear finished demos.
+// The Demos dashboard: every demo anyone started, newest first, with how it was used. Running demos count changes live;
+// removed ones keep the numbers noted when they were removed.
 router.get('/sandboxes', async (_req, res) => {
-  const data = await rows(pool, `SELECT s.id, s.at, s.email, s.name, s.mountain, s.expires_at, (t.id IS NOT NULL AND t.sandbox_expires_at > NOW()) AS active
-      FROM sandbox_signups s LEFT JOIN tenants t ON t.id = s.tenant_id ORDER BY s.id DESC LIMIT 300`);
+  await demoUsage.flush();
+  const data = await rows(pool, `SELECT s.id, s.at, s.email, s.name, s.mountain, s.expires_at, s.first_used_at, s.last_used_at, s.sign_ins, s.requests, s.ended_at,
+      COALESCE(s.changes, 0) AS changes, t.id AS tenant_id, t.slug, (t.id IS NOT NULL) AS exists_now, (t.id IS NOT NULL AND t.sandbox_expires_at > NOW()) AS active
+    FROM sandbox_signups s LEFT JOIN tenants t ON t.id = s.tenant_id AND t.sandbox_expires_at IS NOT NULL ORDER BY s.id DESC LIMIT 300`);
+  const ids = data.map((r) => r.id);
+  const areas = ids.length ? await rows(pool, 'SELECT signup_id, area, requests FROM sandbox_usage WHERE signup_id IN (?) ORDER BY requests DESC', [ids]) : [];
+  const bySignup = new Map();
+  for (const a of areas) {
+    const label = demoUsage.labelOf(a.area);
+    if (label === 'Sign-in') continue;
+    const m = bySignup.get(a.signup_id) || new Map();
+    m.set(label, (m.get(label) || 0) + Number(a.requests));
+    bySignup.set(a.signup_id, m);
+  }
   const [[c]] = await pool.query('SELECT COUNT(*) AS n FROM tenants WHERE sandbox_expires_at IS NOT NULL');
-  res.json({ active: Number(c.n), data: data.map((r) => ({ ...r, active: Boolean(Number(r.active)) })) });
+  const out = data.map((r) => {
+    const used = [...(bySignup.get(r.id) || new Map()).entries()].sort((x, y) => y[1] - x[1]).map(([label, n]) => ({ label, requests: n }));
+    // "Came back": used again more than an hour after starting.
+    const back = r.last_used_at && (new Date(`${String(r.last_used_at).replace(' ', 'T')}Z`) - new Date(`${String(r.at).replace(' ', 'T')}Z`)) > 3_600_000;
+    return {
+      id: r.id, at: r.at, email: r.email, name: r.name, mountain: r.mountain, slug: r.slug || null,
+      status: r.active ? 'running' : r.exists_now ? 'expired' : 'removed', expires_at: r.expires_at, ended_at: r.ended_at,
+      first_used_at: r.first_used_at, last_used_at: r.last_used_at, sign_ins: Number(r.sign_ins || 0), requests: Number(r.requests || 0),
+      changes: r.changes === null || r.changes === undefined ? null : Number(r.changes), apps: used, came_back: Boolean(back),
+    };
+  });
+  const since = (days) => out.filter((r) => new Date(`${String(r.at).replace(' ', 'T')}Z`) > Date.now() - days * 86_400_000).length;
+  res.json({
+    active: Number(c.n),
+    summary: { running: out.filter((r) => r.status === 'running').length, last_7_days: since(7), last_30_days: since(30),
+      came_back: out.filter((r) => r.came_back).length, made_changes: out.filter((r) => r.changes > 0).length, total: out.length },
+    data: out,
+  });
 });
+
 // Remove one running demo now (by its sign-up), or every demo mountain at once. Only demo mountains can be removed this way.
 router.post('/sandboxes/:id/remove', async (req, res) => {
   const s = await one(pool, 'SELECT tenant_id, email FROM sandbox_signups WHERE id = ?', [paramId(req)]);

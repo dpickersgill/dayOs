@@ -31,3 +31,12 @@ CREATE TABLE IF NOT EXISTS sandbox_signups (
   INDEX idx_ss_email (email, at),
   INDEX idx_ss_tenant (tenant_id)
 ) ENGINE=InnoDB;
+
+-- How each demo was used: requests per part of the app, kept after the demo mountain is removed (keyed by the sign-up).
+CREATE TABLE IF NOT EXISTS sandbox_usage (
+  signup_id  BIGINT UNSIGNED NOT NULL,
+  area       VARCHAR(40)  NOT NULL,
+  requests   INT UNSIGNED NOT NULL DEFAULT 0,
+  last_at    DATETIME     NOT NULL,
+  PRIMARY KEY (signup_id, area)
+) ENGINE=InnoDB;

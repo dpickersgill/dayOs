@@ -1536,3 +1536,11 @@ main:focus, main:focus-visible, #main:focus, [tabindex='-1']:focus:not(input):no
 .waiver-panel { flex-wrap: wrap; align-items: center; }
 .gate-waiver { margin-top: 6px; }
 @media print { .waiver-copy { border: 0; padding: 0; background: none; } }
+
+/* ---------- platform console: the Demos dashboard ---------- */
+.platform-box.wider { max-width: 82rem; margin-top: 1rem; }
+.demo-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.demo-stat { display: grid; gap: 2px; background: #fff; border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 14px 16px; }
+.demo-stat b { font-size: 2rem; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.demo-stat span { font-weight: 700; }
+.demo-stat small { color: var(--quiet); }

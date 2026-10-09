@@ -2,7 +2,7 @@
 // It signs in with the platform key, your name and (when the service has PLATFORM_TOTP_SECRET set) a code from your
 // authenticator app. The 2-hour session is kept only in this tab's memory.
 
-import { h, clear, button, field, input, table, dialog, formDialog, confirmDialog, toast, fail, empty, errorBox } from './ui.js';
+import { h, clear, button, field, input, table, dialog, formDialog, confirmDialog, toast, fail, empty, errorBox, state } from './ui.js';
 
 const app = document.getElementById('app');
 let session = '';
@@ -44,7 +44,7 @@ async function home() {
   const filter = input({ type: 'search', placeholder: 'Find a mountain', 'aria-label': 'Find a mountain' });
   app.append(h('main', { class: 'platform-box wide stack' },
     h('header', { class: 'row between' }, h('h1', null, 'Mountains'),
-      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), button('Demo sign-ups', () => demos(), { small: true }), button('Activity', () => activity(), { small: true }), button('Lock console', () => { session = ''; signIn('Locked.'); }, { small: true }))),
+      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), button('Demos', () => demos(), { small: true }), button('Activity', () => activity(), { small: true }), button('Lock console', () => { session = ''; signIn('Locked.'); }, { small: true }))),
     filter, body));
   try {
     const { data: all } = await call('GET', '/tenants');
@@ -153,28 +153,98 @@ function addMountain() {
   }, { submitText: 'Add mountain', wide: true });
 }
 
+// ---------------------------------------------------------------- the Demos dashboard
+const when = (v) => (v ? new Date(`${String(v).replace(' ', 'T')}Z`) : null);
+function ago(v) {
+  const d = when(v); if (!d) return 'Never';
+  const m = Math.round((Date.now() - d) / 60000);
+  if (m < 2) return 'Just now';
+  if (m < 60) return `${m} minutes ago`;
+  const hr = Math.round(m / 60); if (hr < 24) return `${hr} hour${hr === 1 ? '' : 's'} ago`;
+  const dd = Math.round(hr / 24); return `${dd} day${dd === 1 ? '' : 's'} ago`;
+}
+const day = (v) => { const d = when(v); return d ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''; };
+const dayTime = (v) => { const d = when(v); return d ? d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''; };
+function leftOf(v) {
+  const d = when(v); if (!d) return '';
+  const days = Math.ceil((d - Date.now()) / 86_400_000);
+  return days <= 1 ? 'ends today' : `${days} days left`;
+}
+const STATUS = { running: ['Running', 'good'], expired: ['Ended, not yet removed', 'warn'], removed: ['Ended', 'neutral'] };
+
 async function demos() {
-  try {
-    const { data, active } = await call('GET', '/sandboxes');
-    const body = h('div', { class: 'stack' },
-      h('p', { class: 'muted' }, `${active} demo mountain${active === 1 ? ' is' : 's are'} running now. Everyone who tried it is listed here, newest first.`),
-      data.length ? table([
-        { head: 'When', cell: (x) => String(x.at).replace('T', ' ').slice(0, 16) },
-        { head: 'Name', cell: (x) => x.name },
-        { head: 'Email', cell: (x) => x.email },
-        { head: 'Mountain', cell: (x) => x.mountain },
-        { head: 'Demo', cell: (x) => (x.active ? 'Running' : 'Ended') },
-        { head: '', cell: (x) => (x.active ? button('Delete', () => confirmDialog('Delete this demo?', `The demo mountain for ${x.email} and everything in it is removed now. They can start a new one.`, 'Delete demo', async () => {
-          try { await call('POST', `/sandboxes/${x.id}/remove`); toast('Demo deleted.'); dlg.close(); demos(); } catch (e) { fail(e); }
-        }, { danger: true }), { small: true }) : '') },
-      ], data) : empty('No one has tried the demo yet.'),
-      h('div', { class: 'row' },
-        button('Remove finished demos now', async () => { try { const r = await call('POST', '/sandboxes/purge'); toast(`${r.removed} finished demo${r.removed === 1 ? '' : 's'} removed.`); dlg.close(); demos(); } catch (e) { fail(e); } }, { small: true }),
-        active ? button('Delete every demo', () => confirmDialog('Delete every demo?', `All ${active} demo mountain${active === 1 ? '' : 's'} are removed now, including ones people are using. The sign-up list is kept.`, 'Delete all demos', async () => {
-          try { const r = await call('POST', '/sandboxes/remove-all'); toast(`${r.removed} demo${r.removed === 1 ? '' : 's'} deleted.`); dlg.close(); demos(); } catch (e) { fail(e); }
-        }, { danger: true }), { small: true, kind: 'danger' }) : null));
-    const dlg = dialog('Demo sign-ups', body, { wide: true });
-  } catch (e) { fail(e); }
+  clear(app);
+  const body = h('div', { class: 'stack' });
+  app.append(h('main', { class: 'platform-box wider stack' },
+    h('header', { class: 'row between' },
+      h('div', { class: 'stack tight' }, h('h1', null, 'Demos'), h('p', { class: 'muted' }, 'Everyone who started a demo, newest first, and how they used it.')),
+      h('div', { class: 'row' }, button('Back to mountains', () => home(), { small: true }), button('Refresh', () => demos(), { small: true }))),
+    body));
+  let res;
+  try { res = await call('GET', '/sandboxes'); } catch (ex) { if (ex.status === 403) signIn('Your session ended. Sign in again.'); else body.append(errorBox(ex)); return; }
+  const { data, summary } = res;
+  const stat = (n, label, note) => h('div', { class: 'demo-stat' }, h('b', null, String(n)), h('span', null, label), note ? h('small', null, note) : null);
+  const pct = (n) => (summary.total ? `${Math.round((n / summary.total) * 100)}% of all demos` : '');
+  body.append(h('section', { class: 'demo-stats', 'aria-label': 'Summary' },
+    stat(summary.running, 'Running now'),
+    stat(summary.last_7_days, 'Started in the last 7 days'),
+    stat(summary.last_30_days, 'Started in the last 30 days'),
+    stat(summary.came_back, 'Came back later', pct(summary.came_back)),
+    stat(summary.made_changes, 'Made changes', pct(summary.made_changes))));
+
+  if (!data.length) { body.append(empty('No one has started a demo yet. Share /try to get the first one.')); return; }
+
+  let show = 'all';
+  let limit = 50;
+  const q = input({ type: 'search', placeholder: 'Find a name, email or mountain', 'aria-label': 'Find a demo' });
+  const filters = h('div', { class: 'chip-row', role: 'group', 'aria-label': 'Show' });
+  const list = h('div');
+  const opts = [['all', 'All'], ['running', 'Running'], ['ended', 'Ended'], ['used', 'Made changes']];
+  const drawFilters = () => {
+    clear(filters);
+    for (const [k, label] of opts) filters.append(h('button', { type: 'button', class: 'chip', 'aria-pressed': String(show === k), onclick: () => { show = k; limit = 50; drawFilters(); draw(); } }, label));
+  };
+  const remove = (x) => confirmDialog('Delete this demo?', `The demo mountain for ${x.email} and everything in it is removed now. Their usage stays on this page.`, 'Delete demo', async () => {
+    try { await call('POST', `/sandboxes/${x.id}/remove`); toast('Demo deleted.'); demos(); } catch (e) { fail(e); }
+  }, { danger: true });
+  const draw = () => {
+    const term = q.value.trim().toLowerCase();
+    const rows = data.filter((x) => (show === 'all' || (show === 'running' && x.status === 'running') || (show === 'ended' && x.status !== 'running') || (show === 'used' && x.changes > 0))
+      && (!term || `${x.name} ${x.email} ${x.mountain}`.toLowerCase().includes(term)));
+    clear(list);
+    if (!rows.length) { list.append(empty('No demo matches that.')); return; }
+    const more = rows.length > limit ? button(`Show ${Math.min(50, rows.length - limit)} more (${rows.length - limit} not shown)`, () => { limit += 50; draw(); }, { small: true }) : null;
+    list.append(table([
+      { head: 'Started', cell: (x) => h('span', { title: dayTime(x.at) }, day(x.at)) },
+      { head: 'Who', cell: (x) => h('span', { class: 'stack tight' }, h('b', null, x.name), h('a', { href: `mailto:${x.email}` }, x.email)) },
+      { head: 'Mountain', cell: (x) => x.mountain },
+      { head: 'Status', cell: (x) => h('span', { class: 'stack tight' }, state(...STATUS[x.status]), x.status === 'running' ? h('small', { class: 'muted' }, leftOf(x.expires_at)) : null) },
+      { head: 'Last used', cell: (x) => h('span', { title: dayTime(x.last_used_at) }, ago(x.last_used_at)) },
+      { head: 'Sign-ins', num: true, cell: (x) => String(x.sign_ins) },
+      { head: 'Activity', num: true, cell: (x) => h('span', { title: 'Screens opened and actions taken' }, String(x.requests)) },
+      { head: 'Changes', num: true, cell: (x) => String(x.changes) },
+      { head: 'Apps used', cell: (x) => (x.apps.length ? x.apps.slice(0, 3).map((a) => a.label).join(', ') + (x.apps.length > 3 ? ` +${x.apps.length - 3}` : '') : h('span', { class: 'muted' }, 'None yet')) },
+      { actions: true, cell: (x) => (x.status !== 'removed' ? button('Delete', () => remove(x), { small: true }) : '') },
+    ], rows.slice(0, limit)), more);
+  };
+  q.addEventListener('input', () => { limit = 50; draw(); });
+  drawFilters(); draw();
+
+  const csv = () => {
+    const cols = ['at', 'name', 'email', 'mountain', 'status', 'last_used_at', 'sign_ins', 'requests', 'changes', 'apps'];
+    const cell = (v) => { let t = v === null || v === undefined ? '' : String(v); if (/^[=+\-@]/.test(t)) t = `'${t}`; return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+    const lines = [cols.join(','), ...data.map((x) => cols.map((c) => cell(c === 'apps' ? x.apps.map((a) => a.label).join('; ') : x[c])).join(','))];
+    const a = h('a', { href: URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' })), download: 'summitops-demos.csv' });
+    document.body.append(a); a.click(); a.remove();
+  };
+  body.append(h('div', { class: 'row between' }, h('div', { class: 'row' }, filters, q), null), list,
+    h('p', { class: 'muted small' }, 'Activity counts screens opened and actions taken. Changes are things the visitor added or edited. Came back means used again more than an hour after starting.'),
+    h('div', { class: 'row' },
+      button('Download CSV', csv, { small: true }),
+      button('Remove finished demos now', async () => { try { const r = await call('POST', '/sandboxes/purge'); toast(`${r.removed} finished demo${r.removed === 1 ? '' : 's'} removed.`); demos(); } catch (e) { fail(e); } }, { small: true }),
+      summary.running ? button('Delete every demo', () => confirmDialog('Delete every demo?', `All ${res.active} demo mountain${res.active === 1 ? '' : 's'} are removed now, including ones people are using. Their usage stays on this page.`, 'Delete all demos', async () => {
+        try { const r = await call('POST', '/sandboxes/remove-all'); toast(`${r.removed} demo${r.removed === 1 ? '' : 's'} deleted.`); demos(); } catch (e) { fail(e); }
+      }, { danger: true }), { small: true, kind: 'danger' }) : null));
 }
 
 async function activity() {

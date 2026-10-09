@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const { pool, tx, one, rows } = require('../db');
+const demoUsage = require('../lib/demousage');
 const { authenticate, requireRole, signToken } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/rateLimit');
 const { z, validate, paramId, setClause } = require('../lib/util');
@@ -76,7 +77,7 @@ router.post(
     const { tenant, email, password: pw } = req.body;
     const user = await one(
       pool,
-      `SELECT u.*, t.status AS tenant_status, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE t.slug = ? AND u.email = ? AND u.active = 1`,
+      `SELECT u.*, t.status AS tenant_status, (t.sandbox_expires_at IS NOT NULL) AS sandbox, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE t.slug = ? AND u.email = ? AND u.active = 1`,
       [tenant, email],
     );
     const valid = await bcrypt.compare(pw, user ? user.password_hash : DUMMY_HASH);
@@ -88,6 +89,7 @@ router.post(
       const mfa_token = jwt.sign({ tid: user.tenant_id, typ: 'mfa' }, config.jwtSecret, { algorithm: 'HS256', subject: String(user.id), expiresIn: '5m' });
       return res.json({ mfa_required: true, mfa_token });
     }
+    if (Number(user.sandbox)) await demoUsage.signedIn(user.tenant_id);
     res.json({ token: signToken(user), role: user.role, tenant_id: user.tenant_id });
   },
 );

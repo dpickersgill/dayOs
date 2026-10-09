@@ -100,7 +100,7 @@ test('demo mountains are not mixed in with real ones, and they cannot see each o
   assert.ok((b.data || b).every((p) => !ids.has(p.id)), 'no customer or staff record is shared between two demos');
   const leads = await api('GET', '/platform/sandboxes', { key: KEY });
   assert.equal(leads.status, 200);
-  assert.ok(leads.body.data.some((s) => s.email === E1 && s.active && s.mountain === 'Test Peak'));
+  assert.ok(leads.body.data.some((s) => s.email === E1 && s.status === 'running' && s.mountain === 'Test Peak'));
   assert.equal((await api('GET', '/platform/sandboxes')).status, 403, 'the lead list needs the platform key');
 });
 
@@ -169,7 +169,7 @@ test('the platform console deletes a running demo, or every demo, straight away'
   assert.equal(a.status, 201, JSON.stringify(a.body));
   const list = await api('GET', '/platform/sandboxes', { key: KEY });
   const row = list.body.data.find((x) => x.email === a.body.email);
-  assert.ok(row && row.active, 'listed as running');
+  assert.ok(row && row.status === 'running', 'listed as running');
   assert.equal((await api('POST', `/platform/sandboxes/${row.id}/remove`, { key: KEY })).status, 200);
   assert.equal(await tenantId(a.body.tenant), undefined, 'gone at once');
   assert.equal((await api('POST', `/platform/sandboxes/${row.id}/remove`, { key: KEY })).status, 404, 'nothing left to delete');
@@ -182,4 +182,35 @@ test('the platform console deletes a running demo, or every demo, straight away'
   assert.equal(await tenantId(b.body.tenant), undefined);
   const [[real]] = await pool.query('SELECT COUNT(*) AS n FROM tenants WHERE sandbox_expires_at IS NULL');
   assert.ok(Number(real.n) > 0, 'real mountains are never touched');
+});
+
+test('the Demos dashboard shows sign-ins, activity, apps used, changes and last used, and keeps them after removal', async () => {
+  const usage = require('../src/lib/demousage');
+  const email = `use-${Date.now()}@example.test`;
+  const d = await start(email);
+  assert.equal(d.status, 201, JSON.stringify(d.body));
+  for (let i = 0; i < 3; i += 1) assert.equal((await api('GET', '/products', { token: d.body.token })).status, 200);
+  assert.equal((await api('GET', '/people?q=a', { token: d.body.token })).status, 200);
+  const made = await api('POST', '/people', { token: d.body.token, body: { first_name: 'Visitor', last_name: 'Made' } });
+  assert.equal(made.status, 201, JSON.stringify(made.body));
+  assert.equal((await api('POST', '/auth/login', { body: { tenant: d.body.tenant, email, password: d.body.password } })).status, 200);
+  await usage.flush();
+
+  const look = async () => (await api('GET', '/platform/sandboxes', { key: KEY })).body;
+  let res = await look();
+  let row = res.data.find((x) => x.email === email);
+  assert.equal(row.status, 'running');
+  assert.equal(row.sign_ins, 2, 'starting the demo, then one sign-in');
+  assert.ok(row.requests >= 5, `activity counted (${row.requests})`);
+  assert.ok(row.apps.some((a) => a.label === 'Products and prices'), JSON.stringify(row.apps));
+  assert.ok(row.apps.some((a) => a.label === 'Customers'));
+  assert.equal(row.changes, 1, 'the new customer is the one change; reading and the made-up data are not');
+  assert.ok(row.last_used_at);
+  assert.ok(res.summary.running >= 1 && res.summary.made_changes >= 1 && res.summary.total >= 1);
+
+  assert.equal((await api('POST', `/platform/sandboxes/${row.id}/remove`, { key: KEY })).status, 200);
+  res = await look();
+  row = res.data.find((x) => x.email === email);
+  assert.equal(row.status, 'removed');
+  assert.ok(row.requests >= 5 && row.changes >= 1 && row.apps.length >= 2, 'usage is kept after the demo is removed');
 });

@@ -358,6 +358,10 @@ Every guest needs a waiver for the season before they rent gear or take a lesson
 - **Privacy:** anonymising a customer keeps their signed waivers (the mountain's legal record) but removes the signer's email, phone, address and browser from them. Merging customers moves their signings.
 - Run `npm run migrate` when upgrading: it adds `waiver_texts`, `waiver_signings` and new columns on `waivers` and `tenants`, and archives each mountain's current wording.
 
+## Demos dashboard (platform console)
+
+Platform console, **Demos**: everyone who started a demo, newest first. Tiles show demos running now, started in the last 7 and 30 days, how many came back (used again more than an hour after starting) and how many made changes. Each row shows status and days left, last used, sign-ins, activity (screens opened and actions taken), changes (things added, edited or removed), the apps used most, and **Delete** for a running demo. Filter by running, ended or made changes, search, download a CSV, remove finished demos, or **Delete every demo**. Usage is kept after a demo is removed. Only demo mountains are counted; activity is written at most every 30 seconds, so it can lag slightly.
+
 ## Hardening release (fixes from the full app review)
 
 ### Money
