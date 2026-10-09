@@ -35,7 +35,7 @@ async function queueDue(tenant, today) {
   const patients = await rows(pool, `SELECT p.id, p.incident_id, p.age_years, p.email, p.guardian_email, p.no_followup, p.disposition, i.severity, DATE(i.occurred_at) AS day
     FROM incident_patients p JOIN incidents i ON i.tenant_id = p.tenant_id AND i.id = p.incident_id
     LEFT JOIN followups f ON f.tenant_id = p.tenant_id AND f.patient_id = p.id
-    WHERE p.tenant_id = ? AND f.id IS NULL AND i.report_state = 'approved' AND DATE(i.occurred_at) <= ?
+    WHERE p.tenant_id = ? AND f.id IS NULL AND p.voided_at IS NULL AND i.report_state = 'approved' AND DATE(i.occurred_at) <= ?
       AND i.category IN ('injury','medical','collision') AND DATE(i.occurred_at) >= ?
     ORDER BY p.id LIMIT 500`, [tenant.id, cutoff, addDays(today, -60)]);
   let created = 0;

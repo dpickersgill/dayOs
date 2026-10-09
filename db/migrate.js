@@ -289,6 +289,37 @@ const accessSteps = [
   ]],
 ];
 
+// Patient care: rows are marked "entered in error" instead of deleted, entries carry the time they were typed in (so late
+// entries show), vitals keep the parts of the GCS and each pupil, treatments carry structured details (CMS checks, oxygen,
+// medication), the next vitals check lives on the patient, the receiving provider signs, and each submitted or approved
+// report is kept as a frozen copy.
+const tableExists = (c, t) => has(c, 'SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?', [t]);
+const VOID_COLS = 'ADD COLUMN voided_at DATETIME NULL, ADD COLUMN void_reason VARCHAR(255) NULL, ADD COLUMN voided_by BIGINT UNSIGNED NULL';
+const careSteps = [
+  ['incident_vitals care columns', (c) => columnExists(c, 'incident_vitals', 'gcs_e'), `ALTER TABLE incident_vitals ADD COLUMN gcs_e TINYINT UNSIGNED NULL, ADD COLUMN gcs_v TINYINT UNSIGNED NULL, ADD COLUMN gcs_m TINYINT UNSIGNED NULL, ADD COLUMN pupil_left VARCHAR(30) NULL, ADD COLUMN pupil_right VARCHAR(30) NULL, ADD COLUMN entered_at DATETIME NULL, ${VOID_COLS}`],
+  ['incident_injuries entered in error', (c) => columnExists(c, 'incident_injuries', 'voided_at'), `ALTER TABLE incident_injuries ${VOID_COLS}`],
+  ['incident_treatments care columns', (c) => columnExists(c, 'incident_treatments', 'detail'), `ALTER TABLE incident_treatments ADD COLUMN detail TEXT NULL, ADD COLUMN entered_at DATETIME NULL, ${VOID_COLS}`],
+  ['incident_treatments.kind rosc', (c) => columnTypeHas(c, 'incident_treatments', 'kind', "'rosc'"), "ALTER TABLE incident_treatments MODIFY kind ENUM('splint','spinal_motion_restriction','bandage','ice','oxygen','aed','cpr','airway','medication','warming','rosc','other') NOT NULL"],
+  ['incident_events care columns', (c) => columnExists(c, 'incident_events', 'voided_at'), `ALTER TABLE incident_events ADD COLUMN entered_at DATETIME NULL, ${VOID_COLS}`],
+  ['incident_patients care columns', (c) => columnExists(c, 'incident_patients', 'voided_at'), `ALTER TABLE incident_patients ADD COLUMN vitals_due_at DATETIME NULL, ${VOID_COLS}`],
+  ['incident_signatures.signer_role', (c) => columnExists(c, 'incident_signatures', 'signer_role'), 'ALTER TABLE incident_signatures ADD COLUMN signer_role VARCHAR(150) NULL'],
+  ['incident_signatures.kind receiving_provider', (c) => columnTypeHas(c, 'incident_signatures', 'kind', "'receiving_provider'"), "ALTER TABLE incident_signatures MODIFY kind ENUM('refusal_of_care','patient_acknowledgment','witness','patroller','receiving_provider') NOT NULL"],
+  ['patrol_members.patrol_number', (c) => columnExists(c, 'patrol_members', 'patrol_number'), 'ALTER TABLE patrol_members ADD COLUMN patrol_number VARCHAR(20) NULL'],
+  ['incident_versions', (c) => tableExists(c, 'incident_versions'), `CREATE TABLE incident_versions (
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id   BIGINT UNSIGNED NOT NULL,
+    incident_id BIGINT UNSIGNED NOT NULL,
+    version_no  INT UNSIGNED NOT NULL,
+    kind        ENUM('submitted','approved') NOT NULL,
+    snapshot    MEDIUMTEXT NOT NULL,
+    created_by  BIGINT UNSIGNED NOT NULL,
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_iversions (tenant_id, incident_id, version_no),
+    CONSTRAINT fk_iversions_incident FOREIGN KEY (tenant_id, incident_id) REFERENCES incidents(tenant_id, id)
+  ) ENGINE=InnoDB`],
+  ['incident_versions index', (c) => indexExists(c, 'incident_versions', 'ix_iversions_incident'), 'ALTER TABLE incident_versions ADD INDEX ix_iversions_incident (tenant_id, incident_id, created_at)'],
+];
+
 async function backfillCaseNumbers(conn) {
   const [rows] = await conn.query('SELECT id, tenant_id, occurred_at FROM incidents WHERE seq IS NULL ORDER BY tenant_id, id');
   const next = new Map();
@@ -334,7 +365,7 @@ async function main() {
   await conn.query(fs.readFileSync(path.join(__dirname, 'weekly.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'waivers.sql'), 'utf8'));
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

@@ -134,7 +134,7 @@ router.get('/home', patrol, async (req, res) => {
   const access = await PA.accessOf(pool, req);
   const canApprove = access.features.has('approve_case');
   const canView = access.features.has('view_cases');
-  const cols = `i.id, i.season, i.seq, i.occurred_at, i.location, i.category, i.severity, i.summary, i.report_state, (SELECT COUNT(*) FROM incident_patients p WHERE p.tenant_id = i.tenant_id AND p.incident_id = i.id) AS patient_count`;
+  const cols = `i.id, i.season, i.seq, i.occurred_at, i.location, i.category, i.severity, i.summary, i.report_state, (SELECT COUNT(*) FROM incident_patients p WHERE p.tenant_id = i.tenant_id AND p.incident_id = i.id AND p.voided_at IS NULL) AS patient_count`;
   const num = (r) => ({ ...r, case_number: r.seq ? `${r.season}-${String(r.seq).padStart(4, '0')}` : null });
   const mine = staffId && canView
     ? await rows(pool, `SELECT ${cols} FROM incidents i WHERE i.tenant_id = ? AND i.report_state = 'draft' AND EXISTS (SELECT 1 FROM incident_responders r WHERE r.tenant_id = i.tenant_id AND r.incident_id = i.id AND r.staff_id = ?) ORDER BY i.occurred_at DESC LIMIT 20`, [tenantId, staffId])

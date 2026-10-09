@@ -29,7 +29,7 @@ router.get('/team', patrol, async (req, res) => {
   const seeAll = await PA.can(pool, req, 'manage_team');
 
   const [members, certs, training, led] = await Promise.all([
-    rows(pool, `SELECT m.staff_id, m.level, m.access_level, m.callsign, m.emergency_contact, m.notes, s.status AS staff_status, p.first_name, p.last_name, p.email, p.phone
+    rows(pool, `SELECT m.staff_id, m.level, m.access_level, m.callsign, m.patrol_number, m.emergency_contact, m.notes, s.status AS staff_status, p.first_name, p.last_name, p.email, p.phone
                 FROM patrol_members m JOIN staff s ON s.id = m.staff_id AND s.tenant_id = m.tenant_id JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id
                 WHERE m.tenant_id = ? ORDER BY FIELD(m.level, 'director', 'leader', 'senior', 'patroller', 'candidate'), p.last_name, p.first_name`, [tenantId]),
     rows(pool, `SELECT sc.staff_id, c.name, sc.expires_on FROM staff_certifications sc JOIN certifications c ON c.id = sc.certification_id AND c.tenant_id = sc.tenant_id
@@ -40,7 +40,7 @@ router.get('/team', patrol, async (req, res) => {
   ]);
   const soon = addDays(today, 30);
   const data = members.map((m) => ({
-    staff_id: m.staff_id, first_name: m.first_name, last_name: m.last_name, level: m.level, access_level: m.access_level, callsign: m.callsign, staff_status: m.staff_status,
+    staff_id: m.staff_id, first_name: m.first_name, last_name: m.last_name, level: m.level, access_level: m.access_level, callsign: m.callsign, patrol_number: m.patrol_number, staff_status: m.staff_status,
     phone: m.phone,
     ...(seeAll ? { email: m.email, emergency_contact: m.emergency_contact, notes: m.notes } : {}),
     certifications: certs.filter((c) => c.staff_id === m.staff_id).map((c) => ({
@@ -57,6 +57,7 @@ const memberFields = {
   level: z.enum(LEVELS),
   access_level: z.enum(PA.LEVELS).optional(),
   callsign: z.string().max(30).nullable().optional(),
+  patrol_number: z.string().max(20).nullable().optional(),
   emergency_contact: z.string().max(255).nullable().optional(),
   notes: z.string().max(500).nullable().optional(),
 };
@@ -78,7 +79,7 @@ router.post('/team', patrol, needs('manage_team'), validate(z.object({ staff_id:
   if (!(await one(pool, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, b.staff_id]))) throw notFound('Staff member');
   const access = b.access_level || PA.levelForRank(b.level);
   await checkGrant(req, access);
-  await pool.query('INSERT INTO patrol_members (tenant_id, staff_id, level, access_level, callsign, emergency_contact, notes) VALUES (?, ?, ?, ?, ?, ?, ?)', [req.auth.tenantId, b.staff_id, b.level, access, b.callsign ?? null, b.emergency_contact ?? null, b.notes ?? null]);
+  await pool.query('INSERT INTO patrol_members (tenant_id, staff_id, level, access_level, callsign, patrol_number, emergency_contact, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [req.auth.tenantId, b.staff_id, b.level, access, b.callsign ?? null, b.patrol_number ?? null, b.emergency_contact ?? null, b.notes ?? null]);
   await audit(pool, req, 'add_member', 'patrol_members', b.staff_id, { level: b.level, access_level: access });
   res.status(201).json({ staff_id: b.staff_id, access_level: access });
 });
@@ -432,7 +433,9 @@ router.delete('/training/:id', patrol, needs('manage_training'), async (req, res
 // Who can lead: the screen uses this to show or hide edit controls.
 router.get('/me', patrol, async (req, res) => {
   const access = await PA.accessOf(pool, req);
-  res.json({ can_lead: access.features.has('manage_training') || access.features.has('manage_equipment'), can_admin_form: access.features.has('manage_settings'), staff_id: req.auth.staffId, access_level: access.level, features: [...access.features] });
+  // Name and patrol number fill in "Form completed by" on a report.
+  const who = req.auth.staffId ? await one(pool, 'SELECT p.first_name, p.last_name, m.patrol_number, m.callsign FROM staff s JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id LEFT JOIN patrol_members m ON m.staff_id = s.id AND m.tenant_id = s.tenant_id WHERE s.tenant_id = ? AND s.id = ?', [req.auth.tenantId, req.auth.staffId]) : null;
+  res.json({ name: who ? `${who.first_name} ${who.last_name}` : null, patrol_number: who ? who.patrol_number || who.callsign || null : null, can_lead: access.features.has('manage_training') || access.features.has('manage_equipment'), can_admin_form: access.features.has('manage_settings'), staff_id: req.auth.staffId, access_level: access.level, features: [...access.features] });
 });
 
 // ---------------------------------------------------------------- access levels (patrol Admins only)

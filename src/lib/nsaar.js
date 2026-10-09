@@ -18,7 +18,11 @@ const UNK = [['unknown', 'Unknown'], ['na', 'N/A']];
 const SECTIONS = [
   { id: 'patient', scope: 'patient', title: 'Patient', note: 'A name is of utmost importance. If the patient is unconscious or unresponsive, make every effort to find it out. A date of birth is often the only way to find a patient later. Where something is unknown or does not apply, enter N/A rather than leaving it blank.' },
   { id: 'complaint', scope: 'patient', title: 'Complaint and treatment protocol', note: 'Mark L, R or B (both) for each body part. Name the protocol that first aid was applied to, for example a lower leg splint for a suspected fracture is Fracture. If a spine fracture is suspected, the protocol must match.' },
+  { id: 'assessment', scope: 'patient', title: 'Assessment', show: 'always', note: 'The primary survey, and the questions for a medical call. These are usually filled in from the Care tab while you work.' },
+  { id: 'head', scope: 'patient', title: 'Head injury', show: 'head', note: 'Ask every patient with a blow to the head. Repeat the questions at each set of vitals: a change matters more than one answer.' },
+  { id: 'spine', scope: 'patient', title: 'Spine', show: 'spine', note: 'Record the answers your protocol uses to decide on spinal motion restriction.' },
   { id: 'first_aid', scope: 'patient', title: 'First aid', note: 'Record first aid at the scene and at the aid room, with times. Vital signs, injuries and treatments are logged in the bedside card at the top of the patient (tick the box below when you use it). Any medication given by staff or EMS goes here.' },
+  { id: 'arrest', scope: 'patient', title: 'Cardiac arrest', show: 'arrest', note: 'CPR, pads, shocks and a returning pulse are logged with times from the arrest log on the Care tab.' },
   { id: 'witness', scope: 'case', title: 'Witnesses', note: 'Eye witness reports are essential. Take names and contact details so they can be reached later. Write statements in the witness\'s own words and do not lead them.' },
   { id: 'location', scope: 'case', title: 'Location of accident', note: 'Use a GPS fix if you have one. Without one, measure from fixed objects nearby.' },
   { id: 'activity', scope: 'patient', title: 'Activity and experience' },
@@ -40,7 +44,7 @@ const CAUSE_VALUES = CAUSES.flatMap((g) => g.items.map((i) => i[0]));
 const BODY_SIDED = [['foot', 'Foot'], ['ankle', 'Ankle'], ['lower_leg', 'Lower leg'], ['knee', 'Knee'], ['thigh', 'Thigh'], ['hip', 'Hip'], ['lower_ab', 'Lower abdomen'], ['upper_ab', 'Upper abdomen'], ['chest', 'Chest'], ['neck', 'Neck'], ['clavicle', 'Clavicle'], ['shoulder', 'Shoulder'], ['upper_arm', 'Upper arm'], ['elbow', 'Elbow'], ['lower_arm', 'Lower arm'], ['wrist', 'Wrist'], ['hand', 'Hand'], ['thumb', 'Thumb'], ['finger', 'Finger']];
 const BODY_PLAIN = [['upper_back', 'Upper back'], ['lower_back', 'Lower back'], ['tailbone', 'Tailbone'], ['head', 'Head'], ['face', 'Face'], ['medical', 'Medical'], ['no_injury', 'No injury']];
 
-// type: text | longtext | date | time | number | tel | email | select | multi | check | yesno | bodymap | trail | gps | signature | witnesses
+// type: text | longtext | date | time | number | tel | email | select | multi | check | yesno | measure | bodymap | trail | gps | signature | witnesses
 // locked 'always' = the report cannot exist without it; locked 'never' = a helper tick box that cannot be made mandatory.
 const F = [];
 const add = (scope, section, key, label, type, more = {}) => F.push({ key, scope, section, label, type, ...more });
@@ -59,8 +63,8 @@ add('patient', 'patient', 'occupation', 'Occupation or school group', 'text');
 add('patient', 'patient', 'date_of_birth', 'Date of birth', 'date', { col: 'date_of_birth' });
 add('patient', 'patient', 'age', 'Age', 'number', { col: 'age_years', min: 0, max: 120, hint: 'Worked out from the date of birth if you leave it blank' });
 add('patient', 'patient', 'gender', 'Gender', 'select', { col: 'sex', options: opts(['female', 'Female'], ['male', 'Male'], ['other', 'Other'], ['unknown', 'Unknown']), noBlank: false });
-add('patient', 'patient', 'height', 'Height', 'text', { hint: 'ft/in or cm' });
-add('patient', 'patient', 'weight', 'Weight', 'text', { hint: 'lbs or kg' });
+add('patient', 'patient', 'height', 'Height', 'measure', { units: ['cm', 'in'] });
+add('patient', 'patient', 'weight', 'Weight', 'measure', { units: ['kg', 'lb'], hint: 'Needed for a child\'s medication dose' });
 add('patient', 'patient', 'patient_type', 'Patient type', 'select', { options: opts('guest', ['staff_off', 'Staff, off duty'], ['staff_work', 'Staff, working'], 'unknown') });
 add('patient', 'patient', 'ticket_type', 'Ticket type', 'select', { options: opts(['day', 'Day ticket'], ['multi_day', 'Multi-day ticket'], ['season_pass', 'Season pass'], ['other_pass', 'Other pass'], ['na', 'Not applicable'], 'unknown'), hint: 'Resorts define members in their own ways: night pass, terrain park pass, and so on' });
 add('patient', 'patient', 'description', 'Patient\'s description of the incident', 'longtext', { hint: 'In the patient\'s own words. Ask: where were you skiing or riding, how fast, and were you in control? "Fell while skiing. Broken leg." is too little; "I was riding down the spillway real fast, lost control, caught an edge and slid with my hands in front of me" is good.' });
@@ -81,6 +85,53 @@ add('patient', 'complaint', 'chief_complaint', 'Chief complaint', 'text', { col:
 add('patient', 'complaint', 'body_parts', 'Body parts injured', 'bodymap');
 add('patient', 'complaint', 'treatment_protocol', 'Treatment protocol', 'multi', { options: opts('fracture', 'sprain', 'strain', 'bruise', 'laceration', 'dislocation', 'cardiac', 'stroke', 'concussion', 'hypothermia', 'frostbite', 'internal', 'illness', 'deceased', 'unknown', ['na', 'N/A']) });
 add('patient', 'complaint', 'other_treatment', 'Other treatment', 'text');
+
+// ---- assessment
+const AV = [['alert', 'Alert'], ['verbal', 'Responds to voice'], ['pain', 'Responds to pain'], ['unresponsive', 'Unresponsive']];
+add('patient', 'assessment', 'ps_time', 'Primary survey time (24 hour)', 'time');
+add('patient', 'assessment', 'ps_bleeding', 'Bleeding', 'select', { options: opts(['none', 'No major bleeding'], ['controlled', 'Major bleeding, controlled'], ['uncontrolled', 'Major bleeding, not controlled']) });
+add('patient', 'assessment', 'ps_airway', 'Airway', 'select', { options: opts(['clear', 'Clear'], ['managed', 'Opened or managed'], ['obstructed', 'Obstructed']) });
+add('patient', 'assessment', 'ps_breathing', 'Breathing', 'select', { options: opts(['adequate', 'Adequate'], ['laboured', 'Laboured'], ['inadequate', 'Inadequate or absent']) });
+add('patient', 'assessment', 'ps_circulation', 'Circulation', 'select', { options: opts(['normal', 'Pulse present, skin normal'], ['poor', 'Weak pulse or poor perfusion'], ['absent', 'No pulse']) });
+add('patient', 'assessment', 'ps_disability', 'Disability (responsiveness)', 'select', { options: opts(...AV) });
+add('patient', 'assessment', 'opqrst_onset', 'Onset: what were you doing when it started?', 'text');
+add('patient', 'assessment', 'opqrst_provokes', 'Provokes: what makes it better or worse?', 'text');
+add('patient', 'assessment', 'opqrst_quality', 'Quality: what does it feel like?', 'text');
+add('patient', 'assessment', 'opqrst_region', 'Region and radiation: where, and does it spread?', 'text');
+add('patient', 'assessment', 'opqrst_severity', 'Severity (0 to 10)', 'number', { min: 0, max: 10 });
+add('patient', 'assessment', 'opqrst_time', 'Time: when did it start, has it changed?', 'text');
+add('patient', 'assessment', 'stroke_face', 'Stroke check: face', 'select', { options: opts(['normal', 'Both sides move the same'], ['droop', 'One side droops']) });
+add('patient', 'assessment', 'stroke_arm', 'Stroke check: arms', 'select', { options: opts(['normal', 'Both arms stay up'], ['drift', 'One arm drifts down']) });
+add('patient', 'assessment', 'stroke_speech', 'Stroke check: speech', 'select', { options: opts(['normal', 'Clear'], ['abnormal', 'Slurred, wrong words or none']) });
+add('patient', 'assessment', 'stroke_last_well', 'Last known well (24 hour)', 'time');
+
+// ---- head injury
+const YNU = [['yes', 'Yes'], ['no', 'No'], ['unknown', 'Unknown']];
+add('patient', 'head', 'head_loc', 'Lost consciousness', 'select', { options: opts(...YNU) });
+add('patient', 'head', 'head_loc_minutes', 'For about how many minutes', 'number', { min: 0, max: 600, when: { field: 'head_loc', equals: 'yes' } });
+add('patient', 'head', 'head_amnesia_before', 'Cannot remember what happened before', 'select', { options: opts(...YNU) });
+add('patient', 'head', 'head_amnesia_after', 'Cannot remember what happened after', 'select', { options: opts(...YNU) });
+add('patient', 'head', 'head_repeating', 'Asking the same questions again', 'select', { options: opts(...YN) });
+add('patient', 'head', 'head_vomiting', 'Vomiting', 'select', { options: opts(...YN) });
+add('patient', 'head', 'head_vomit_count', 'How many times', 'number', { min: 0, max: 50, when: { field: 'head_vomiting', equals: 'yes' } });
+add('patient', 'head', 'head_headache', 'Headache', 'select', { options: opts(...YN) });
+add('patient', 'head', 'head_seizure', 'Seizure', 'select', { options: opts(...YN) });
+add('patient', 'head', 'head_helmet_damage', 'Helmet damaged', 'select', { options: opts(...YN, ['na', 'No helmet']) });
+
+// ---- spine
+add('patient', 'spine', 'spine_mechanism', 'Dangerous mechanism (high speed, fall from height, axial load)', 'select', { options: opts(...YN) });
+add('patient', 'spine', 'spine_midline', 'Tender in the middle of the neck or back', 'select', { options: opts(...YN) });
+add('patient', 'spine', 'spine_neuro', 'Numbness, tingling or weakness', 'select', { options: opts(...YN) });
+add('patient', 'spine', 'spine_alert', 'Alert, oriented and reliable', 'select', { options: opts(...YN) });
+add('patient', 'spine', 'spine_intox', 'Alcohol or drugs', 'select', { options: opts(...YN) });
+add('patient', 'spine', 'spine_distracting', 'A painful injury that could distract from neck pain', 'select', { options: opts(...YN) });
+add('patient', 'spine', 'spine_decision', 'Decision', 'select', { options: opts(['smr', 'Spinal motion restriction applied'], ['not_indicated', 'Not indicated by the criteria'], ['declined', 'Patient declined']) });
+
+// ---- cardiac arrest
+add('patient', 'arrest', 'arrest_time_down', 'Time down (24 hour)', 'time', { hint: 'When the patient collapsed, or your best estimate' });
+add('patient', 'arrest', 'arrest_witnessed', 'Collapse', 'select', { options: opts(['witnessed', 'Witnessed'], ['unwitnessed', 'Not witnessed']) });
+add('patient', 'arrest', 'arrest_bystander_cpr', 'CPR by a bystander before patrol arrived', 'select', { options: opts(...YN) });
+add('patient', 'arrest', 'arrest_outcome', 'Outcome of the resuscitation', 'select', { options: opts(['rosc', 'Pulse returned'], ['ongoing', 'CPR continuing at hand-off'], ['stopped', 'Resuscitation stopped']) });
 
 // ---- first aid
 add('patient', 'first_aid', 'scene_on', 'At scene: on scene (24 hour)', 'time');
@@ -156,6 +207,10 @@ add('patient', 'refusal', 'refusal_capacity', 'Patient alert and able to decide'
 add('patient', 'refusal', 'refusal_risks_explained', 'Risks explained, including that the condition could worsen', 'select', { when: { field: 'disposition', equals: 'refused_care' }, options: opts(...YN) });
 add('patient', 'refusal', 'refusal_reason', 'Reason given for refusing', 'text', { when: { field: 'disposition', equals: 'refused_care' } });
 add('patient', 'refusal', 'refusal_advice', 'Advice given about when to seek care', 'text', { when: { field: 'disposition', equals: 'refused_care' } });
+add('patient', 'refusal', 'refusal_care_offered', 'Care and transport offered', 'longtext', { when: { field: 'disposition', equals: 'refused_care' }, hint: 'What you offered, in plain words: for example "Splint, ambulance transport to hospital for an X-ray"' });
+add('patient', 'refusal', 'refusal_signer', 'Who signs the refusal', 'select', { when: { field: 'disposition', equals: 'refused_care' }, options: opts(['patient', 'The patient'], ['guardian', 'A parent or guardian']), hint: 'A parent or guardian signs for anyone under 18' });
+add('patient', 'refusal', 'refusal_guardian_name', 'Parent or guardian name', 'text', { when: { field: 'refusal_signer', equals: 'guardian' } });
+add('patient', 'refusal', 'refusal_guardian_relation', 'Relationship to the patient', 'text', { when: { field: 'refusal_signer', equals: 'guardian' } });
 add('patient', 'refusal', 'refusal_witness', 'Witness to the refusal (name)', 'text', { when: { field: 'disposition', equals: 'refused_care' } });
 
 // ---- sign off (case)
@@ -180,6 +235,7 @@ function valueSchema(f) {
     case 'check': return z.boolean();
     case 'select': return z.enum(f.options.map((o) => o.value));
     case 'multi': return z.array(z.enum(f.options.map((o) => o.value))).max(30);
+    case 'measure': return z.union([z.string().max(300), z.object({ v: z.number().min(0).max(1000), u: z.enum(f.units) }).strict()]);
     case 'bodymap': return z.record(z.string(), z.enum(['L', 'R', 'B', 'X'])).refine((m) => Object.keys(m).every((k) => [...BODY_SIDED, ...BODY_PLAIN].some((p) => p[0] === k)), 'Unknown body part');
     default: return null;
   }
@@ -227,7 +283,7 @@ function applies(f, values) {
 function describe() {
   return {
     sections: SECTIONS,
-    fields: FIELDS.map(({ key, scope, section, label, type, options, groups, hint, when, col, locked, none, min, max, kind, defaultRequired }) => ({ key, scope, section, label, type, options, groups, hint, when, locked: locked || null, none: Boolean(none), min, max, kind, col: col || null, stored: col ? 'column' : 'form', defaultRequired: Boolean(defaultRequired) })),
+    fields: FIELDS.map(({ key, scope, section, label, type, options, groups, hint, when, col, locked, none, min, max, kind, defaultRequired, units }) => ({ key, scope, section, label, type, options, groups, hint, when, units, locked: locked || null, none: Boolean(none), min, max, kind, col: col || null, stored: col ? 'column' : 'form', defaultRequired: Boolean(defaultRequired) })),
     body: { sided: BODY_SIDED.map(([value, label]) => ({ value, label })), plain: BODY_PLAIN.map(([value, label]) => ({ value, label })) },
   };
 }

@@ -108,8 +108,8 @@ test('collision report: parties, scene, right of way, and who can see or change 
   assert.equal((await api('POST', `${base_}/parties`, { token: pat, body: { role: 'dragon' } })).status, 400);
   assert.equal((await api('PUT', `${base_}/collision`, { token: B.pat, body: { collision_type: 'other' } })).status, 404);
   assert.equal((await api('POST', `${base_}/parties`, { token: B.pat, body: { role: 'skier' } })).status, 404);
-  // removing the patient keeps the party, unlinked
-  ok(await api('DELETE', `${base_}/patients/${hurt}`, { token: pat }));
+  // marking the patient entered in error keeps the party, unlinked
+  ok(await api('POST', `${base_}/patients/${hurt}/void`, { token: pat, body: { reason: 'Added to the wrong case' } }));
   assert.equal(ok(await api('GET', base_, { token: pat })).parties[0].patient_id, null);
   ok(await api('DELETE', `${base_}/parties/${p1}`, { token: pat }));
   assert.equal(ok(await api('GET', base_, { token: pat })).parties.length, 1);

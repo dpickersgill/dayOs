@@ -27,6 +27,7 @@ export async function drawTeam(box, { canLead }) {
     { head: 'Rank', cell: (m) => label(m.level) },
     { head: 'Access', cell: (m) => label(m.access_level || 'patrol') },
     { head: 'Callsign', cell: (m) => m.callsign || '' },
+    { head: 'Patrol no.', cell: (m) => m.patrol_number || '' },
     { head: 'Certifications', cell: (m) => (m.certifications.length ? h('span', { class: 'chips' }, m.certifications.map((c) => state(`${c.name}: ${certText[c.state]}`, certTone[c.state]))) : h('span', { class: 'muted' }, 'None on file')) },
     { head: 'Training this season', num: true, cell: (m) => `${m.training_hours_season} h` },
     { head: 'Cases led', num: true, cell: (m) => m.cases_led_season },
@@ -47,8 +48,8 @@ async function addMemberDialog(roster, again) {
   if (!options.length) { toast('Every active staff member is already on the roster. Add the person on Staff and schedule first.', 'error'); return; }
   formDialog('Add to patrol roster', h('div', { class: 'form' },
     field('Staff member', select(options.map((s) => [s.id, `${s.first_name} ${s.last_name}`]), '', { name: 'staff_id' })), field('Rank', select(LEVELS, 'patroller', { name: 'level' })),
-    field('Callsign', input({ name: 'callsign', maxlength: 30 })), field('Emergency contact', input({ name: 'emergency_contact', maxlength: 255, placeholder: 'Name and phone' }))),
-  async (fd) => { await post('/patrol/team', compact({ staff_id: num(fd, 'staff_id'), level: val(fd, 'level'), callsign: val(fd, 'callsign'), emergency_contact: val(fd, 'emergency_contact') })); toast('Added to roster'); await again(); });
+    field('Callsign', input({ name: 'callsign', maxlength: 30 })), field('Patrol number', input({ name: 'patrol_number', maxlength: 20 }), 'Printed on the reports they complete'), field('Emergency contact', input({ name: 'emergency_contact', maxlength: 255, placeholder: 'Name and phone' }))),
+  async (fd) => { await post('/patrol/team', compact({ staff_id: num(fd, 'staff_id'), level: val(fd, 'level'), callsign: val(fd, 'callsign'), patrol_number: val(fd, 'patrol_number'), emergency_contact: val(fd, 'emergency_contact') })); toast('Added to roster'); await again(); });
 }
 
 function memberDialog(m, again) {
@@ -56,9 +57,10 @@ function memberDialog(m, again) {
     field('Rank', select(LEVELS, m.level, { name: 'level' })),
     accessLevel() === 'admin' ? field('Access level', select(ACCESS, m.access_level || 'patrol', { name: 'access_level' })) : null,
     field('Callsign', input({ name: 'callsign', value: m.callsign || '', maxlength: 30 })),
+    field('Patrol number', input({ name: 'patrol_number', value: m.patrol_number || '', maxlength: 20 }), 'Printed on the reports they complete'),
     h('div', { class: 'wide' }, field('Emergency contact', input({ name: 'emergency_contact', value: m.emergency_contact || '', maxlength: 255 }))),
     h('div', { class: 'wide' }, field('Notes', input({ name: 'notes', value: m.notes || '', maxlength: 500 })))),
-  async (fd) => { if (fd.get('access_level') && fd.get('access_level') !== (m.access_level || 'patrol')) await put(`/patrol/team/${m.staff_id}/access`, { access_level: fd.get('access_level') }); await patch(`/patrol/team/${m.staff_id}`, { level: val(fd, 'level'), callsign: val(fd, 'callsign'), emergency_contact: val(fd, 'emergency_contact'), notes: val(fd, 'notes') }); toast('Saved'); await again(); });
+  async (fd) => { if (fd.get('access_level') && fd.get('access_level') !== (m.access_level || 'patrol')) await put(`/patrol/team/${m.staff_id}/access`, { access_level: fd.get('access_level') }); await patch(`/patrol/team/${m.staff_id}`, { level: val(fd, 'level'), callsign: val(fd, 'callsign'), patrol_number: val(fd, 'patrol_number'), emergency_contact: val(fd, 'emergency_contact'), notes: val(fd, 'notes') }); toast('Saved'); await again(); });
   d.body.append(button('Remove from roster', () => confirmDialog('Remove from roster?', `${m.first_name} ${m.last_name} stays in Staff and schedule. Their cases and training stay on record.`, 'Remove', async () => { await del(`/patrol/team/${m.staff_id}`); d.close(); toast('Removed from roster'); await again(); }, { danger: true }), { small: true }));
 }
 

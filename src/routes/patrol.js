@@ -15,6 +15,7 @@ const { audit } = require('../lib/audit');
 const { FIELDS, SECTIONS, formSchema, parseForm, mergeForm, isEmpty, applies } = require('../lib/nsaar');
 const { requiredFields } = require('../lib/formconfig');
 const { buildPull, ageOn } = require('../lib/patrolpull');
+const { derive, parseDetail } = require('../lib/carederive');
 
 const router = express.Router();
 // Incident records can contain injury details about guests, so access is limited to patrol and managers.
@@ -62,7 +63,7 @@ async function summaryFromComplaint(conn, tenantId, inc, complaint, previous) {
   const text = String(complaint || '').trim();
   if (!text) return;
   if (inc.summary !== autoSummary(inc) && !(previous && inc.summary === String(previous).trim())) return;
-  const { n } = await one(conn, 'SELECT COUNT(*) AS n FROM incident_patients WHERE tenant_id = ? AND incident_id = ?', [tenantId, inc.id]);
+  const { n } = await one(conn, 'SELECT COUNT(*) AS n FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND voided_at IS NULL', [tenantId, inc.id]);
   if (n !== 1) return;
   await conn.query('UPDATE incidents SET summary = ? WHERE tenant_id = ? AND id = ?', [text.slice(0, 500), tenantId, inc.id]);
 }
@@ -122,7 +123,7 @@ router.get('/incidents', patrol, needs('view_cases'), async (req, res) => {
   const data = await rows(
     pool,
     `SELECT i.id, i.season, i.seq, i.occurred_at, i.location, i.category, i.severity, i.summary, i.disposition, i.status, i.report_state,
-            (SELECT COUNT(*) FROM incident_patients p WHERE p.tenant_id = i.tenant_id AND p.incident_id = i.id) AS patient_count
+            (SELECT COUNT(*) FROM incident_patients p WHERE p.tenant_id = i.tenant_id AND p.incident_id = i.id AND p.voided_at IS NULL) AS patient_count
      FROM incidents i WHERE ${where} ORDER BY i.occurred_at DESC, i.id DESC LIMIT 500`,
     params,
   );
@@ -165,7 +166,7 @@ router.get('/incidents.csv', patrol, needs('reports'), async (req, res) => {
   const data = await rows(
     pool,
     `SELECT i.id, i.season, i.seq, i.occurred_at, i.location, i.category, i.severity, i.disposition, i.status, i.report_state,
-            (SELECT COUNT(*) FROM incident_patients p WHERE p.tenant_id = i.tenant_id AND p.incident_id = i.id) AS patients
+            (SELECT COUNT(*) FROM incident_patients p WHERE p.tenant_id = i.tenant_id AND p.incident_id = i.id AND p.voided_at IS NULL) AS patients
      FROM incidents i WHERE ${where} ORDER BY i.occurred_at`,
     params,
   );
@@ -181,9 +182,9 @@ router.get('/patients.csv', patrol, needs('reports'), async (req, res) => {
   const data = await rows(
     pool,
     `SELECT i.season, i.seq, i.occurred_at, p.age_years, p.sex, p.activity, p.ability, p.helmet, p.rental_equipment, p.disposition,
-            (SELECT GROUP_CONCAT(CONCAT(j.body_region, ':', j.injury_type) SEPARATOR ' | ') FROM incident_injuries j WHERE j.tenant_id = p.tenant_id AND j.patient_id = p.id) AS injuries
+            (SELECT GROUP_CONCAT(CONCAT(j.body_region, ':', j.injury_type) SEPARATOR ' | ') FROM incident_injuries j WHERE j.tenant_id = p.tenant_id AND j.patient_id = p.id AND j.voided_at IS NULL) AS injuries
      FROM incident_patients p JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id
-     WHERE ${where} ORDER BY i.occurred_at, p.id`,
+     WHERE ${where} AND p.voided_at IS NULL ORDER BY i.occurred_at, p.id`,
     params,
   );
   const out = data.map((r) => ({ ...r, case_number: caseNumber(r) }));
@@ -208,18 +209,18 @@ router.get('/analytics', patrol, needs('reports'), async (req, res) => {
   // Skier visits = accepted gate scans in the same dates (a rough denominator: one guest can scan more than once).
   const visits = Number((await one(pool, "SELECT COUNT(*) AS n FROM scans WHERE tenant_id = ? AND result = 'ok' AND DATE(scanned_at) BETWEEN ? AND ?", range)).n);
   const [totals, byCategory, bySeverity, byHour, byWeekday, places, disposition, activity, ability, helmet, region, injuryType, response, byLead, states] = await Promise.all([
-    one(pool, `SELECT COUNT(*) AS cases, (SELECT COUNT(*) FROM incident_patients p JOIN incidents x ON x.id = p.incident_id AND x.tenant_id = p.tenant_id WHERE x.tenant_id = ? AND DATE(x.occurred_at) BETWEEN ? AND ?) AS patients FROM incidents i WHERE ${inRange}`, [...range, ...range]),
+    one(pool, `SELECT COUNT(*) AS cases, (SELECT COUNT(*) FROM incident_patients p JOIN incidents x ON x.id = p.incident_id AND x.tenant_id = p.tenant_id WHERE x.tenant_id = ? AND DATE(x.occurred_at) BETWEEN ? AND ? AND p.voided_at IS NULL) AS patients FROM incidents i WHERE ${inRange}`, [...range, ...range]),
     group(`SELECT category AS label, COUNT(*) AS n FROM incidents i WHERE ${inRange} GROUP BY category ORDER BY n DESC`),
     group(`SELECT severity AS label, COUNT(*) AS n FROM incidents i WHERE ${inRange} GROUP BY severity ORDER BY n DESC`),
     group(`SELECT HOUR(occurred_at) AS label, COUNT(*) AS n FROM incidents i WHERE ${inRange} GROUP BY label ORDER BY label`),
     group(`SELECT DAYOFWEEK(occurred_at) - 1 AS label, COUNT(*) AS n FROM incidents i WHERE ${inRange} GROUP BY label ORDER BY label`),
     group(`SELECT COALESCE(t.name, i.location) AS label, COUNT(*) AS n FROM incidents i LEFT JOIN trails t ON t.id = i.trail_id AND t.tenant_id = i.tenant_id WHERE ${inRange} GROUP BY COALESCE(t.name, i.location) ORDER BY n DESC LIMIT 10`),
-    group(`SELECT COALESCE(p.disposition, 'not_recorded') AS label, COUNT(*) AS n FROM incident_patients p JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} GROUP BY label ORDER BY n DESC`),
-    group(`SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.form, '$.activity')), p.activity, 'not_recorded') AS label, COUNT(*) AS n FROM incident_patients p JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} GROUP BY label ORDER BY n DESC`),
-    group(`SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.form, '$.ability')), p.ability, 'not_recorded') AS label, COUNT(*) AS n FROM incident_patients p JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} GROUP BY label ORDER BY n DESC`),
-    group(`SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.form, '$.helmet')), p.helmet) AS label, COUNT(*) AS n FROM incident_patients p JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} AND (COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.form, '$.activity')), p.activity) IN ('ski','snowboard','other_snow','alpine','telemark','nordic','touring')) GROUP BY label`),
-    group(`SELECT j.body_region AS label, COUNT(*) AS n FROM incident_injuries j JOIN incident_patients p ON p.id = j.patient_id AND p.tenant_id = j.tenant_id JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} GROUP BY j.body_region ORDER BY n DESC`),
-    group(`SELECT j.injury_type AS label, COUNT(*) AS n FROM incident_injuries j JOIN incident_patients p ON p.id = j.patient_id AND p.tenant_id = j.tenant_id JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} GROUP BY j.injury_type ORDER BY n DESC`),
+    group(`SELECT COALESCE(p.disposition, 'not_recorded') AS label, COUNT(*) AS n FROM incident_patients p JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} AND p.voided_at IS NULL GROUP BY label ORDER BY n DESC`),
+    group(`SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.form, '$.activity')), p.activity, 'not_recorded') AS label, COUNT(*) AS n FROM incident_patients p JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} AND p.voided_at IS NULL GROUP BY label ORDER BY n DESC`),
+    group(`SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.form, '$.ability')), p.ability, 'not_recorded') AS label, COUNT(*) AS n FROM incident_patients p JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} AND p.voided_at IS NULL GROUP BY label ORDER BY n DESC`),
+    group(`SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.form, '$.helmet')), p.helmet) AS label, COUNT(*) AS n FROM incident_patients p JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} AND p.voided_at IS NULL AND (COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.form, '$.activity')), p.activity) IN ('ski','snowboard','other_snow','alpine','telemark','nordic','touring')) GROUP BY label`),
+    group(`SELECT j.body_region AS label, COUNT(*) AS n FROM incident_injuries j JOIN incident_patients p ON p.id = j.patient_id AND p.tenant_id = j.tenant_id JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} AND p.voided_at IS NULL AND j.voided_at IS NULL GROUP BY j.body_region ORDER BY n DESC`),
+    group(`SELECT j.injury_type AS label, COUNT(*) AS n FROM incident_injuries j JOIN incident_patients p ON p.id = j.patient_id AND p.tenant_id = j.tenant_id JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} AND p.voided_at IS NULL AND j.voided_at IS NULL GROUP BY j.injury_type ORDER BY n DESC`),
     one(pool, `SELECT
         AVG(TIMESTAMPDIFF(SECOND, call_at, scene_at)) / 60 AS call_to_scene_min,
         AVG(TIMESTAMPDIFF(SECOND, scene_at, aid_at)) / 60 AS scene_to_aid_room_min,
@@ -228,7 +229,7 @@ router.get('/analytics', patrol, needs('reports'), async (req, res) => {
               MIN(CASE WHEN e.kind = 'call_received' THEN e.at END) AS call_at,
               MIN(CASE WHEN e.kind = 'on_scene' THEN e.at END) AS scene_at,
               MIN(CASE WHEN e.kind = 'at_aid_room' THEN e.at END) AS aid_at
-            FROM incidents i JOIN incident_events e ON e.incident_id = i.id AND e.tenant_id = i.tenant_id
+            FROM incidents i JOIN incident_events e ON e.incident_id = i.id AND e.tenant_id = i.tenant_id AND e.voided_at IS NULL
             WHERE ${inRange} GROUP BY i.id) t`, range),
     group(`SELECT CONCAT(pe.first_name, ' ', pe.last_name) AS label, COUNT(*) AS n
            FROM incident_responders r JOIN incidents i ON i.id = r.incident_id AND i.tenant_id = r.tenant_id
@@ -250,37 +251,63 @@ router.get('/analytics', patrol, needs('reports'), async (req, res) => {
 });
 
 // ---------------------------------------------------------------- one case, in full
-router.get('/incidents/:id', patrol, needs('view_cases'), async (req, res) => {
-  const id = paramId(req);
-  const { tenantId } = req.auth;
-  const incident = await one(pool, 'SELECT i.*, t.name AS trail FROM incidents i LEFT JOIN trails t ON t.id = i.trail_id AND t.tenant_id = i.tenant_id WHERE i.tenant_id = ? AND i.id = ?', [tenantId, id]);
-  if (!incident) throw notFound('Incident');
-  const [notes, patients, events, responders, witnesses, signatures, collisionRow, parties, checklist] = await Promise.all([
-    rows(pool, 'SELECT n.id, n.author_user, u.email AS author, n.body, n.created_at FROM incident_notes n LEFT JOIN users u ON u.id = n.author_user AND u.tenant_id = n.tenant_id WHERE n.tenant_id = ? AND n.incident_id = ? ORDER BY n.id', [tenantId, id]),
-    rows(pool, 'SELECT * FROM incident_patients WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]),
-    rows(pool, 'SELECT id, kind, at, note FROM incident_events WHERE tenant_id = ? AND incident_id = ? ORDER BY at, id', [tenantId, id]),
-    rows(pool, `SELECT r.id, r.staff_id, r.role, p.first_name, p.last_name FROM incident_responders r JOIN staff s ON s.id = r.staff_id AND s.tenant_id = r.tenant_id JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id WHERE r.tenant_id = ? AND r.incident_id = ? ORDER BY FIELD(r.role, 'lead', 'assist', 'transport', 'dispatch'), r.id`, [tenantId, id]),
-    rows(pool, 'SELECT id, relation, name, phone, email, address, city, region, postal, statement FROM incident_witnesses WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]),
-    rows(pool, 'SELECT id, patient_id, kind, signer_name, signed_at FROM incident_signatures WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]),
-    one(pool, 'SELECT * FROM incident_collisions WHERE tenant_id = ? AND incident_id = ?', [tenantId, id]),
-    rows(pool, 'SELECT * FROM incident_parties WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]),
-    rows(pool, 'SELECT c.patient_id, c.item_key, c.done_at, u.email AS done_by FROM incident_checklist c LEFT JOIN users u ON u.id = c.done_by AND u.tenant_id = c.tenant_id WHERE c.tenant_id = ? AND c.incident_id = ? ORDER BY c.id', [tenantId, id]),
+const VOIDED_BY = (t) => `LEFT JOIN users vu ON vu.id = ${t}.voided_by AND vu.tenant_id = ${t}.tenant_id`;
+/**
+ * Everything on one case, as the case page and the frozen versions show it. Rows marked entered in error are included
+ * (with who marked them and why) so the record shows them struck through. Each patient carries `derived`: the form
+ * answers that can be worked out from the bedside entries.
+ */
+async function loadCase(conn, tenantId, id) {
+  const incident = await one(conn, 'SELECT i.*, t.name AS trail FROM incidents i LEFT JOIN trails t ON t.id = i.trail_id AND t.tenant_id = i.tenant_id WHERE i.tenant_id = ? AND i.id = ?', [tenantId, id]);
+  if (!incident) return null;
+  const [notes, patients, events, responders, witnesses, signatures, collisionRow, parties, checklist, versions] = await Promise.all([
+    rows(conn, 'SELECT n.id, n.author_user, u.email AS author, n.body, n.created_at FROM incident_notes n LEFT JOIN users u ON u.id = n.author_user AND u.tenant_id = n.tenant_id WHERE n.tenant_id = ? AND n.incident_id = ? ORDER BY n.id', [tenantId, id]),
+    rows(conn, `SELECT p.*, vu.email AS voided_by_email FROM incident_patients p ${VOIDED_BY('p')} WHERE p.tenant_id = ? AND p.incident_id = ? ORDER BY p.id`, [tenantId, id]),
+    rows(conn, `SELECT e.id, e.kind, e.at, e.note, e.entered_at, e.voided_at, e.void_reason, vu.email AS voided_by_email FROM incident_events e ${VOIDED_BY('e')} WHERE e.tenant_id = ? AND e.incident_id = ? ORDER BY e.at, e.id`, [tenantId, id]),
+    rows(conn, `SELECT r.id, r.staff_id, r.role, p.first_name, p.last_name, m.patrol_number, m.callsign FROM incident_responders r JOIN staff s ON s.id = r.staff_id AND s.tenant_id = r.tenant_id JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id LEFT JOIN patrol_members m ON m.staff_id = r.staff_id AND m.tenant_id = r.tenant_id WHERE r.tenant_id = ? AND r.incident_id = ? ORDER BY FIELD(r.role, 'lead', 'assist', 'transport', 'dispatch'), r.id`, [tenantId, id]),
+    rows(conn, 'SELECT id, relation, name, phone, email, address, city, region, postal, statement FROM incident_witnesses WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]),
+    rows(conn, 'SELECT id, patient_id, kind, signer_name, signer_role, signed_at FROM incident_signatures WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]),
+    one(conn, 'SELECT * FROM incident_collisions WHERE tenant_id = ? AND incident_id = ?', [tenantId, id]),
+    rows(conn, 'SELECT * FROM incident_parties WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]),
+    rows(conn, 'SELECT c.patient_id, c.item_key, c.done_at, u.email AS done_by FROM incident_checklist c LEFT JOIN users u ON u.id = c.done_by AND u.tenant_id = c.tenant_id WHERE c.tenant_id = ? AND c.incident_id = ? ORDER BY c.id', [tenantId, id]),
+    rows(conn, 'SELECT v.id, v.version_no, v.kind, v.created_at, u.email AS created_by FROM incident_versions v LEFT JOIN users u ON u.id = v.created_by AND u.tenant_id = v.tenant_id WHERE v.tenant_id = ? AND v.incident_id = ? ORDER BY v.version_no', [tenantId, id]),
   ]);
   const ids = patients.map((p) => p.id);
-  const byPatient = async (sql) => (ids.length ? rows(pool, sql, [tenantId, ids]) : []);
+  const byPatient = async (sql) => (ids.length ? rows(conn, sql, [tenantId, ids]) : []);
   const [vitals, injuries, treatments] = await Promise.all([
-    byPatient('SELECT * FROM incident_vitals WHERE tenant_id = ? AND patient_id IN (?) ORDER BY taken_at, id'),
-    byPatient('SELECT * FROM incident_injuries WHERE tenant_id = ? AND patient_id IN (?) ORDER BY id'),
-    byPatient('SELECT * FROM incident_treatments WHERE tenant_id = ? AND patient_id IN (?) ORDER BY performed_at, id'),
+    byPatient(`SELECT x.*, vu.email AS voided_by_email FROM incident_vitals x ${VOIDED_BY('x')} WHERE x.tenant_id = ? AND x.patient_id IN (?) ORDER BY x.taken_at, x.id`),
+    byPatient(`SELECT x.*, vu.email AS voided_by_email FROM incident_injuries x ${VOIDED_BY('x')} WHERE x.tenant_id = ? AND x.patient_id IN (?) ORDER BY x.id`),
+    byPatient(`SELECT x.*, vu.email AS voided_by_email, CONCAT(pp.first_name, ' ', pp.last_name) AS performed_by_name FROM incident_treatments x ${VOIDED_BY('x')}
+      LEFT JOIN staff st ON st.id = x.performed_by_staff AND st.tenant_id = x.tenant_id LEFT JOIN people pp ON pp.id = st.person_id AND pp.tenant_id = st.tenant_id
+      WHERE x.tenant_id = ? AND x.patient_id IN (?) ORDER BY x.performed_at, x.id`),
   ]);
+  for (const t of treatments) t.detail = parseDetail(t.detail);
   const mine = (list, pid) => list.filter((x) => x.patient_id === pid);
-  await audit(pool, req, 'view', 'incidents', id); // reads of sensitive records are logged too
-  const tenant = await one(pool, 'SELECT name, legal_name FROM tenants WHERE id = ?', [tenantId]);
-  res.json({
+  const tenant = await one(conn, 'SELECT name, legal_name FROM tenants WHERE id = ?', [tenantId]);
+  const c = {
     ...withNumber(incident), form: parseForm(incident.form), resort: { name: tenant.name, legal_name: tenant.legal_name }, notes, events, responders, witnesses, signatures,
-    collision: collisionRow || null, parties, checklist,
+    collision: collisionRow || null, parties, checklist, versions,
     patients: patients.map((p) => ({ ...p, form: parseForm(p.form), vitals: mine(vitals, p.id), injuries: mine(injuries, p.id), treatments: mine(treatments, p.id) })),
-  });
+  };
+  for (const p of c.patients) p.derived = derive(c, p);
+  return c;
+}
+
+router.get('/incidents/:id', patrol, needs('view_cases'), async (req, res) => {
+  const id = paramId(req);
+  const c = await loadCase(pool, req.auth.tenantId, id);
+  if (!c) throw notFound('Incident');
+  await audit(pool, req, 'view', 'incidents', id); // reads of sensitive records are logged too
+  res.json(c);
+});
+
+/** The frozen copies kept each time the report was submitted or approved. */
+router.get('/incidents/:id/versions/:vid', patrol, needs('view_cases'), async (req, res) => {
+  const id = paramId(req);
+  const v = await one(pool, 'SELECT v.id, v.version_no, v.kind, v.snapshot, v.created_at, u.email AS created_by FROM incident_versions v LEFT JOIN users u ON u.id = v.created_by AND u.tenant_id = v.tenant_id WHERE v.tenant_id = ? AND v.incident_id = ? AND v.id = ?', [req.auth.tenantId, id, paramId(req, 'vid')]);
+  if (!v) throw notFound('Version');
+  await audit(pool, req, 'view_version', 'incidents', id, { version: v.version_no });
+  res.json({ id: v.id, version_no: v.version_no, kind: v.kind, created_at: v.created_at, created_by: v.created_by, case: JSON.parse(v.snapshot) });
 });
 
 /**
@@ -343,10 +370,10 @@ async function reportProblems(conn, tenantId, inc) {
   if (!inc.summary || !inc.summary.trim()) problem('Add a one-line summary', { area: 'summary' });
   if (!CLINICAL_CATEGORIES.includes(inc.category)) return problems;
   const required = await requiredFields(conn, tenantId);
-  const patients = await rows(conn, 'SELECT * FROM incident_patients WHERE tenant_id = ? AND incident_id = ?', [tenantId, inc.id]);
+  const c = await loadCase(conn, tenantId, inc.id);
+  const patients = c.patients.filter((p) => !p.voided_at); // a patient entered in error is not part of the report
   if (!patients.length) problem('Add at least one patient', { area: 'patients' });
-  const signatures = await rows(conn, 'SELECT patient_id, kind FROM incident_signatures WHERE tenant_id = ? AND incident_id = ?', [tenantId, inc.id]);
-  const witnesses = await one(conn, 'SELECT COUNT(*) AS n FROM incident_witnesses WHERE tenant_id = ? AND incident_id = ?', [tenantId, inc.id]);
+  const { signatures } = c;
   const title = new Map(SECTIONS.map((x) => [x.id, x.title]));
 
   // Case-level fields (location, conditions, witnesses, sign-off)
@@ -355,16 +382,16 @@ async function reportProblems(conn, tenantId, inc) {
   for (const f of FIELDS.filter((x) => x.scope === 'case' && required.case.has(x.key))) {
     if (!applies(f, caseVals)) continue;
     let missing;
-    if (f.type === 'witnesses') missing = !Number(witnesses.n) && !caseForm.witnesses_none;
+    if (f.type === 'witnesses') missing = !c.witnesses.length && !caseForm.witnesses_none;
     else if (f.type === 'signature') missing = !signatures.some((s) => s.kind === f.kind);
     else missing = isEmpty(caseVals[f.key]);
     if (missing) problem(`${title.get(f.section)}: ${f.label}`, { scope: 'case', section: f.section, field: f.key });
   }
 
-  // Patient-level fields
+  // Patient-level fields. An answer worked out from the bedside entries counts as given.
   for (const p of patients) {
     const who = `${p.first_name} ${p.last_name}`.trim();
-    const form = parseForm(p.form);
+    const form = { ...p.derived, ...p.form };
     const vals = Object.fromEntries(FIELDS.filter((f) => f.scope === 'patient').map((f) => [f.key, fieldValue(f, p, form)]));
     for (const f of FIELDS.filter((x) => x.scope === 'patient' && required.patient.has(x.key))) {
       if (!applies(f, vals)) continue;
@@ -373,17 +400,57 @@ async function reportProblems(conn, tenantId, inc) {
       else missing = isEmpty(vals[f.key]);
       if (missing) problem(`${who}: ${f.label}`, { scope: 'patient', patient_id: p.id, section: f.section, field: f.key });
     }
-    // Safety rule that no setting can switch off: a refusal of care needs a signed refusal.
-    if (p.disposition === 'refused_care' && !signatures.some((s) => s.kind === 'refusal_of_care' && s.patient_id === p.id)) {
-      problem(`${who}: refused care, so a refusal signature is needed`, { area: 'signatures' });
+    // Safety rules that no setting can switch off.
+    if (p.disposition === 'refused_care') {
+      const pf = p.form || {};
+      if (pf.refusal_capacity === 'no') problem(`${who}: not able to decide, so cannot refuse care. Treat under implied consent and escalate`, { scope: 'patient', patient_id: p.id, section: 'refusal', field: 'refusal_capacity' });
+      if (p.age_years !== null && p.age_years !== undefined && Number(p.age_years) < 18 && !(pf.refusal_signer === 'guardian' && pf.refusal_guardian_name && pf.refusal_guardian_relation)) {
+        problem(`${who}: under 18, so a parent or guardian signs the refusal (name and relationship)`, { scope: 'patient', patient_id: p.id, section: 'refusal', field: 'refusal_signer' });
+      }
+      if (!signatures.some((s) => s.kind === 'refusal_of_care' && s.patient_id === p.id)) problem(`${who}: refused care, so a refusal signature is needed`, { area: 'signatures' });
     }
   }
-  const lead = await one(conn, "SELECT id FROM incident_responders WHERE tenant_id = ? AND incident_id = ? AND role = 'lead'", [tenantId, inc.id]);
-  if (!lead) problem('Add the patroller who led the response', { area: 'responders' });
+  if (!c.responders.some((r) => r.role === 'lead')) problem('Add the patroller who led the response', { area: 'responders' });
   return problems;
 }
 
-async function setState(req, res, { from, to, check, extra }) {
+/**
+ * At submit, answers worked out from the bedside entries are copied into blank form fields (nothing typed is replaced), and
+ * "completed by" is filled from the person submitting, so the stored report reads the same without the bedside rows.
+ */
+async function fillFromBedside(conn, req, inc) {
+  const c = await loadCase(conn, req.auth.tenantId, inc.id);
+  const filled = [];
+  for (const p of c.patients.filter((x) => !x.voided_at)) {
+    const add = {};
+    for (const [k, v] of Object.entries(p.derived)) if (isEmpty(p.form[k]) && !isEmpty(v)) add[k] = v;
+    if (!Object.keys(add).length) continue;
+    await conn.query('UPDATE incident_patients SET form = ? WHERE tenant_id = ? AND id = ?', [mergeForm(p.form, add), req.auth.tenantId, p.id]);
+    filled.push({ patient_id: p.id, fields: Object.keys(add) });
+  }
+  if (req.auth.staffId && (isEmpty(c.form.completed_by_name) || isEmpty(c.form.completed_by_number))) {
+    const me = await one(conn, 'SELECT p.first_name, p.last_name, m.patrol_number, m.callsign FROM staff s JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id LEFT JOIN patrol_members m ON m.staff_id = s.id AND m.tenant_id = s.tenant_id WHERE s.tenant_id = ? AND s.id = ?', [req.auth.tenantId, req.auth.staffId]);
+    if (me) {
+      const add = {};
+      if (isEmpty(c.form.completed_by_name)) add.completed_by_name = `${me.first_name} ${me.last_name}`;
+      if (isEmpty(c.form.completed_by_number) && (me.patrol_number || me.callsign)) add.completed_by_number = me.patrol_number || me.callsign;
+      await conn.query('UPDATE incidents SET form = ? WHERE tenant_id = ? AND id = ?', [mergeForm(c.form, add), req.auth.tenantId, inc.id]);
+      filled.push({ case: Object.keys(add) });
+    }
+  }
+  return filled;
+}
+
+/** Keeps a frozen copy of the whole report as it stands. */
+async function keepVersion(conn, req, incidentId, kind) {
+  const c = await loadCase(conn, req.auth.tenantId, incidentId);
+  delete c.versions;
+  const { n } = await one(conn, 'SELECT COALESCE(MAX(version_no), 0) + 1 AS n FROM incident_versions WHERE tenant_id = ? AND incident_id = ?', [req.auth.tenantId, incidentId]);
+  await conn.query('INSERT INTO incident_versions (tenant_id, incident_id, version_no, kind, snapshot, created_by) VALUES (?, ?, ?, ?, ?, ?)', [req.auth.tenantId, incidentId, n, kind, JSON.stringify(c), req.auth.userId]);
+  return n;
+}
+
+async function setState(req, res, { from, to, check, extra, version }) {
   const id = paramId(req);
   await tx(async (conn) => {
     const inc = await one(conn, 'SELECT * FROM incidents WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id]);
@@ -393,20 +460,22 @@ async function setState(req, res, { from, to, check, extra }) {
       const problems = await reportProblems(conn, req.auth.tenantId, inc);
       if (problems.length) throw conflict('The report is not complete yet', problems);
     }
+    const filled = check ? await fillFromBedside(conn, req, inc) : [];
     const tenant = await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId]);
     await extra(conn, inc, nowIn(tenant.timezone));
-    await audit(conn, req, to, 'incidents', id);
+    const v = version ? await keepVersion(conn, req, id, version) : null;
+    await audit(conn, req, to, 'incidents', id, { ...(v ? { version: v } : {}), ...(filled.length ? { filled_from_bedside: filled } : {}) });
   });
   res.json({ ok: true });
 }
 
 router.post('/incidents/:id/submit', patrol, needs('submit_case'), (req, res) => setState(req, res, {
-  from: ['draft'], to: 'submit', check: true,
+  from: ['draft'], to: 'submit', check: true, version: 'submitted',
   extra: (conn, inc, now) => conn.query("UPDATE incidents SET report_state = 'submitted', submitted_by = ?, submitted_at = ? WHERE tenant_id = ? AND id = ?", [req.auth.userId, now, inc.tenant_id, inc.id]),
 }));
 
 router.post('/incidents/:id/approve', patrol, needs('approve_case'), (req, res) => setState(req, res, {
-  from: ['draft', 'submitted'], to: 'approve', check: true,
+  from: ['draft', 'submitted'], to: 'approve', check: true, version: 'approved',
   extra: (conn, inc, now) => conn.query("UPDATE incidents SET report_state = 'approved', status = 'closed', approved_by = ?, approved_at = ? WHERE tenant_id = ? AND id = ?", [req.auth.userId, now, inc.tenant_id, inc.id]),
 }));
 
@@ -445,6 +514,7 @@ const patientFields = {
   guardian_name: z.string().max(150).nullable().optional(),
   guardian_email: z.string().email().max(255).nullable().optional(),
   no_followup: z.boolean().transform((v) => (v ? 1 : 0)).optional(),
+  vitals_due_at: dateTimeStr.transform(normDateTime).nullable().optional(),
   form: formSchema('patient').optional(),
 };
 const patientCols = Object.keys(patientFields);
@@ -538,8 +608,9 @@ router.patch('/incidents/:id/patients/:pid', patrol, needs('create_case'), valid
   await tx(async (conn) => {
     const inc = await editableCase(conn, req, id);
     const body = { ...req.body };
-    const cur = await one(conn, 'SELECT form, chief_complaint, age_years FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ?', [req.auth.tenantId, id, pid]);
+    const cur = await one(conn, 'SELECT form, chief_complaint, age_years, voided_at FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ?', [req.auth.tenantId, id, pid]);
     if (!cur) throw notFound('Patient');
+    if (cur.voided_at) throw conflict('This patient was marked entered in error');
     if (body.form) body.form = mergeForm(cur.form, body.form);
     if (body.date_of_birth && body.age_years === undefined) {
       const age = ageOn(body.date_of_birth, dayOf(inc.occurred_at));
@@ -555,27 +626,39 @@ router.patch('/incidents/:id/patients/:pid', patrol, needs('create_case'), valid
   res.json({ ok: true });
 });
 
-router.delete('/incidents/:id/patients/:pid', patrol, needs('create_case'), async (req, res) => {
+// Nothing clinical is deleted. A patient added by mistake is marked "entered in error" with a reason, and stays on the
+// record struck through; their vitals, injuries and treatments go with them. Follow-up emails that have not gone are dropped.
+const voidSchema = z.object({ reason: z.string().trim().min(3, 'Say why, in a few words').max(255) });
+router.post('/incidents/:id/patients/:pid/void', patrol, needs('create_case'), validate(voidSchema), async (req, res) => {
   const id = paramId(req);
   const pid = paramId(req, 'pid');
   await tx(async (conn) => {
     await editableCase(conn, req, id);
-    const p = await one(conn, 'SELECT id FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ?', [req.auth.tenantId, id, pid]);
+    const p = await one(conn, 'SELECT id, voided_at FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ?', [req.auth.tenantId, id, pid]);
     if (!p) throw notFound('Patient');
-    if (await one(conn, 'SELECT id FROM incident_signatures WHERE tenant_id = ? AND patient_id = ? LIMIT 1', [req.auth.tenantId, pid])) throw conflict('This patient has a signature on file, so the record cannot be removed');
+    if (p.voided_at) throw conflict('This patient is already marked entered in error');
+    const tenant = await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId]);
+    await conn.query('UPDATE incident_patients SET voided_at = ?, void_reason = ?, voided_by = ?, vitals_due_at = NULL WHERE tenant_id = ? AND id = ?', [nowIn(tenant.timezone), req.body.reason, req.auth.userId, req.auth.tenantId, pid]);
     await conn.query('UPDATE incident_parties SET patient_id = NULL WHERE tenant_id = ? AND patient_id = ?', [req.auth.tenantId, pid]);
-    await conn.query('DELETE FROM incident_checklist WHERE tenant_id = ? AND patient_id = ?', [req.auth.tenantId, pid]);
     await conn.query("DELETE FROM followups WHERE tenant_id = ? AND patient_id = ? AND status <> 'sent'", [req.auth.tenantId, pid]);
-    for (const t of ['incident_vitals', 'incident_injuries', 'incident_treatments']) await conn.query(`DELETE FROM ${t} WHERE tenant_id = ? AND patient_id = ?`, [req.auth.tenantId, pid]);
-    await conn.query('DELETE FROM incident_patients WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, pid]);
-    await audit(conn, req, 'remove_patient', 'incidents', id, { patient_id: pid });
+    await audit(conn, req, 'void_patient', 'incidents', id, { patient_id: pid, reason: req.body.reason });
   });
-  res.status(204).end();
+  res.json({ ok: true });
 });
 
 // ---------------------------------------------------------------- patient and case sub-records
-const timeDefault = (field) => async (conn, req, body) => (body[field] ? body[field] : nowIn((await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone));
 const optionalTime = (field) => ({ [field]: dateTimeStr.transform(normDateTime).optional() });
+
+const cms = z.object({ c: z.enum(['present', 'absent', 'not_checked']), m: z.enum(['present', 'absent', 'not_checked']), s: z.enum(['present', 'absent', 'not_checked']) }).strict();
+// Structured details on a treatment, stored as JSON beside the row.
+const treatmentDetail = z.object({
+  cms_before: cms.optional(), cms_after: cms.optional(), body_part: z.string().max(60).optional(),
+  o2_device: z.enum(['nasal_cannula', 'mask', 'non_rebreather', 'bvm', 'other']).optional(), o2_lpm: z.number().min(0).max(25).optional(),
+  dose_value: z.number().min(0).max(100000).optional(), dose_unit: z.enum(['mg', 'mcg', 'g', 'mL', 'units', 'puffs', 'tablets', 'drops']).optional(),
+  indication: z.string().max(255).optional(), authorised_by: z.string().max(150).optional(), effect: z.string().max(255).optional(), effect_at: z.string().max(19).optional(),
+  action: z.enum(['start', 'stop', 'pads_on', 'shock', 'no_shock', 'rhythm_check']).optional(), joules: z.number().int().min(0).max(400).optional(),
+}).strict();
+const gcsPart = (max) => z.number().int().min(1).max(max).optional();
 
 const sub = {
   vitals: {
@@ -585,10 +668,20 @@ const sub = {
       pulse: z.number().int().min(0).max(300).optional(), resp: z.number().int().min(0).max(80).optional(),
       bp_sys: z.number().int().min(0).max(300).optional(), bp_dia: z.number().int().min(0).max(200).optional(),
       spo2: z.number().int().min(0).max(100).optional(), gcs: z.number().int().min(3).max(15).optional(), pain: z.number().int().min(0).max(10).optional(),
+      gcs_e: gcsPart(4), gcs_v: gcsPart(5), gcs_m: gcsPart(6),
       avpu: z.enum(['alert', 'verbal', 'pain', 'unresponsive']).optional(), pupils: z.string().max(40).optional(), skin: z.string().max(60).optional(),
+      pupil_left: z.string().max(30).optional(), pupil_right: z.string().max(30).optional(),
       temp_c: z.number().min(20).max(45).optional(), glucose: z.number().int().min(0).max(1500).optional(), notes: z.string().max(255).optional(),
-    }).refine((v) => Object.keys(v).some((k) => !['taken_at', 'notes'].includes(k)), 'Record at least one measurement'),
-    cols: ['taken_at', 'pulse', 'resp', 'bp_sys', 'bp_dia', 'spo2', 'gcs', 'pain', 'avpu', 'pupils', 'skin', 'temp_c', 'glucose', 'notes'], recorder: 'recorded_by',
+      recheck_minutes: z.number().int().min(0).max(120).optional(),
+    }).refine((v) => Object.keys(v).some((k) => !['taken_at', 'notes', 'recheck_minutes'].includes(k)), 'Record at least one measurement')
+      .refine((v) => [v.gcs_e, v.gcs_v, v.gcs_m].every((x) => x === undefined) || [v.gcs_e, v.gcs_v, v.gcs_m].every((x) => x !== undefined), 'Give all three parts of the GCS, or only the total')
+      .transform((v) => (v.gcs_e !== undefined ? { ...v, gcs: v.gcs_e + v.gcs_v + v.gcs_m } : v)),
+    cols: ['taken_at', 'pulse', 'resp', 'bp_sys', 'bp_dia', 'spo2', 'gcs', 'gcs_e', 'gcs_v', 'gcs_m', 'pain', 'avpu', 'pupils', 'pupil_left', 'pupil_right', 'skin', 'temp_c', 'glucose', 'notes'], recorder: 'recorded_by', entered: true, voidable: true,
+    // The next check is kept on the patient, so every phone on the case sees the same timer.
+    after: async (conn, req, parent, body, now) => {
+      if (body.recheck_minutes === undefined) return;
+      await conn.query('UPDATE incident_patients SET vitals_due_at = IF(? > 0, ? + INTERVAL ? MINUTE, NULL) WHERE tenant_id = ? AND id = ?', [body.recheck_minutes, now, body.recheck_minutes, req.auth.tenantId, parent]);
+    },
   },
   injuries: {
     table: 'incident_injuries', level: 'patient',
@@ -598,22 +691,24 @@ const sub = {
       injury_type: z.enum(['fracture', 'dislocation', 'sprain_strain', 'laceration', 'contusion', 'concussion', 'spinal', 'internal', 'cold_injury', 'illness', 'cardiac', 'other']),
       notes: z.string().max(255).optional(),
     }),
-    cols: ['body_region', 'side', 'injury_type', 'notes'],
+    cols: ['body_region', 'side', 'injury_type', 'notes'], voidable: true,
   },
   treatments: {
     table: 'incident_treatments', level: 'patient', time: 'performed_at',
     schema: z.object({
       ...optionalTime('performed_at'),
-      kind: z.enum(['splint', 'spinal_motion_restriction', 'bandage', 'ice', 'oxygen', 'aed', 'cpr', 'airway', 'medication', 'warming', 'other']),
+      kind: z.enum(['splint', 'spinal_motion_restriction', 'bandage', 'ice', 'oxygen', 'aed', 'cpr', 'airway', 'medication', 'warming', 'rosc', 'other']),
       description: z.string().max(255).optional(), medication: z.string().max(100).optional(), dose: z.string().max(50).optional(), route: z.string().max(30).optional(),
       performed_by_staff: z.number().int().positive().optional(),
-    }).refine((v) => v.kind !== 'medication' || (v.medication && v.dose), 'A medication needs a name and a dose'),
-    cols: ['performed_at', 'kind', 'description', 'medication', 'dose', 'route', 'performed_by_staff'], recorder: 'recorded_by',
+      detail: treatmentDetail.optional(),
+    }).refine((v) => v.kind !== 'medication' || (v.medication && v.dose), 'A medication needs a name and a dose')
+      .transform((v) => (v.detail ? { ...v, detail: Object.keys(v.detail).length ? JSON.stringify(v.detail) : undefined } : v)),
+    cols: ['performed_at', 'kind', 'description', 'medication', 'dose', 'route', 'performed_by_staff', 'detail'], recorder: 'recorded_by', entered: true, voidable: true,
   },
   events: {
     table: 'incident_events', level: 'incident', time: 'at',
     schema: z.object({ ...optionalTime('at'), kind: z.enum(['call_received', 'dispatched', 'on_scene', 'patient_contact', 'transport_started', 'at_aid_room', 'handoff', 'cleared', 'other']), note: z.string().max(255).optional() }),
-    cols: ['at', 'kind', 'note'], recorder: 'recorded_by',
+    cols: ['at', 'kind', 'note'], recorder: 'recorded_by', entered: true, voidable: true,
   },
   witnesses: {
     table: 'incident_witnesses', level: 'incident',
@@ -634,7 +729,9 @@ for (const [name, def] of Object.entries(sub)) {
   const parentId = async (conn, req, id) => {
     if (def.level !== 'patient') return id;
     const pid = paramId(req, 'pid');
-    if (!(await one(conn, 'SELECT id FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ?', [req.auth.tenantId, id, pid]))) throw notFound('Patient');
+    const p = await one(conn, 'SELECT id, voided_at FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ?', [req.auth.tenantId, id, pid]);
+    if (!p) throw notFound('Patient');
+    if (p.voided_at) throw conflict('This patient was marked entered in error');
     return pid;
   };
 
@@ -644,31 +741,69 @@ for (const [name, def] of Object.entries(sub)) {
       await editableCase(conn, req, id);
       const parent = await parentId(conn, req, id);
       const data = { ...req.body };
-      if (def.time) data[def.time] = await timeDefault(def.time)(conn, req, data);
-      const keys = Object.keys(data).filter((k) => def.cols.includes(k));
+      const now = nowIn((await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone);
+      if (def.time && !data[def.time]) data[def.time] = now;
+      if (def.entered) data.entered_at = now; // when it was typed in; a reading taken earlier shows as entered late
+      const keys = Object.keys(data).filter((k) => def.cols.includes(k) || (k === 'entered_at' && def.entered));
       const extraCols = def.recorder ? [def.recorder] : [];
       const [r] = await conn.query(
         `INSERT INTO \`${def.table}\` (tenant_id, ${parentCol}, ${[...keys, ...extraCols].map((k) => `\`${k}\``).join(', ')}) VALUES (?, ?, ${[...keys, ...extraCols].map(() => '?').join(', ')})`,
         [req.auth.tenantId, parent, ...keys.map((k) => data[k]), ...(def.recorder ? [req.auth.userId] : [])],
       );
+      if (def.after) await def.after(conn, req, parent, data, now);
       await audit(conn, req, `add_${name}`, 'incidents', id, { row: r.insertId });
       return r.insertId;
     });
     res.status(201).json({ id: newId });
   });
 
-  router.delete(`${base}/:rowId`, patrol, needs('create_case'), async (req, res) => {
-    const id = paramId(req);
-    await tx(async (conn) => {
-      await editableCase(conn, req, id);
-      const parent = await parentId(conn, req, id);
-      const [r] = await conn.query(`DELETE FROM \`${def.table}\` WHERE tenant_id = ? AND ${parentCol} = ? AND id = ?`, [req.auth.tenantId, parent, paramId(req, 'rowId')]);
-      if (!r.affectedRows) throw notFound('Record');
-      await audit(conn, req, `remove_${name}`, 'incidents', id, { row: paramId(req, 'rowId') });
+  if (def.voidable) {
+    // Clinical rows are never deleted: a wrong entry is marked "entered in error" with a reason and stays on the record, struck through.
+    router.post(`${base}/:rowId/void`, patrol, needs('create_case'), validate(voidSchema), async (req, res) => {
+      const id = paramId(req);
+      await tx(async (conn) => {
+        await editableCase(conn, req, id);
+        const parent = await parentId(conn, req, id);
+        const rowId = paramId(req, 'rowId');
+        const row = await one(conn, `SELECT id, voided_at FROM \`${def.table}\` WHERE tenant_id = ? AND ${parentCol} = ? AND id = ?`, [req.auth.tenantId, parent, rowId]);
+        if (!row) throw notFound('Record');
+        if (row.voided_at) throw conflict('Already marked entered in error');
+        const tenant = await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId]);
+        await conn.query(`UPDATE \`${def.table}\` SET voided_at = ?, void_reason = ?, voided_by = ? WHERE tenant_id = ? AND id = ?`, [nowIn(tenant.timezone), req.body.reason, req.auth.userId, req.auth.tenantId, rowId]);
+        await audit(conn, req, `void_${name}`, 'incidents', id, { row: rowId, reason: req.body.reason });
+      });
+      res.json({ ok: true });
     });
-    res.status(204).end();
-  });
+  } else {
+    router.delete(`${base}/:rowId`, patrol, needs('create_case'), async (req, res) => {
+      const id = paramId(req);
+      await tx(async (conn) => {
+        await editableCase(conn, req, id);
+        const parent = await parentId(conn, req, id);
+        const [r] = await conn.query(`DELETE FROM \`${def.table}\` WHERE tenant_id = ? AND ${parentCol} = ? AND id = ?`, [req.auth.tenantId, parent, paramId(req, 'rowId')]);
+        if (!r.affectedRows) throw notFound('Record');
+        await audit(conn, req, `remove_${name}`, 'incidents', id, { row: paramId(req, 'rowId') });
+      });
+      res.status(204).end();
+    });
+  }
 }
+
+/** The effect of a medication is seen some minutes after it is given, so it is added to the row afterwards. */
+router.post('/incidents/:id/patients/:pid/treatments/:rowId/effect', patrol, needs('create_case'), validate(z.object({ effect: z.string().trim().min(1).max(255) })), async (req, res) => {
+  const id = paramId(req);
+  await tx(async (conn) => {
+    await editableCase(conn, req, id);
+    const t = await one(conn, 'SELECT t.id, t.kind, t.detail, t.voided_at FROM incident_treatments t JOIN incident_patients p ON p.id = t.patient_id AND p.tenant_id = t.tenant_id WHERE t.tenant_id = ? AND p.incident_id = ? AND t.patient_id = ? AND t.id = ?', [req.auth.tenantId, id, paramId(req, 'pid'), paramId(req, 'rowId')]);
+    if (!t) throw notFound('Treatment');
+    if (t.voided_at) throw conflict('This entry was marked entered in error');
+    const tenant = await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId]);
+    const detail = { ...parseDetail(t.detail), effect: req.body.effect, effect_at: nowIn(tenant.timezone) };
+    await conn.query('UPDATE incident_treatments SET detail = ? WHERE tenant_id = ? AND id = ?', [JSON.stringify(detail), req.auth.tenantId, t.id]);
+    await audit(conn, req, 'treatment_effect', 'incidents', id, { row: t.id });
+  });
+  res.json({ ok: true });
+});
 
 /** Printing or copying a hand-off sheet puts patient information in someone else's hands, so it is logged. */
 router.post('/incidents/:id/patients/:pid/handoff-printed', patrol, needs('view_cases'), async (req, res) => {
@@ -713,8 +848,9 @@ router.post(
   '/incidents/:id/signatures',
   patrol, needs('create_case'),
   validate(z.object({
-    kind: z.enum(['refusal_of_care', 'patient_acknowledgment', 'witness', 'patroller']),
+    kind: z.enum(['refusal_of_care', 'patient_acknowledgment', 'witness', 'patroller', 'receiving_provider']),
     signer_name: z.string().min(1).max(150),
+    signer_role: z.string().max(150).optional(),
     patient_id: z.number().int().positive().optional(),
     image: z.string().max(MAX_SIGNATURE_CHARS).regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/, 'The signature must be a PNG image'),
   })),
@@ -723,8 +859,12 @@ router.post(
     const b = req.body;
     const newId = await tx(async (conn) => {
       await editableCase(conn, req, id);
-      if (b.patient_id && !(await one(conn, 'SELECT id FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ?', [req.auth.tenantId, id, b.patient_id]))) throw notFound('Patient');
-      const [r] = await conn.query('INSERT INTO incident_signatures (tenant_id, incident_id, patient_id, kind, signer_name, image, recorded_by) VALUES (?, ?, ?, ?, ?, ?, ?)', [req.auth.tenantId, id, b.patient_id ?? null, b.kind, b.signer_name, b.image, req.auth.userId]);
+      const p = b.patient_id ? await one(conn, 'SELECT id, form FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ?', [req.auth.tenantId, id, b.patient_id]) : null;
+      if (b.patient_id && !p) throw notFound('Patient');
+      if ((b.kind === 'refusal_of_care' || b.kind === 'receiving_provider') && !p) throw bad('Say which patient this signature is for');
+      // A patient who cannot make the decision cannot refuse: care continues under implied consent.
+      if (b.kind === 'refusal_of_care' && parseForm(p.form).refusal_capacity === 'no') throw conflict('This patient is recorded as not able to decide, so they cannot refuse care. Treat under implied consent and escalate to the lead or EMS.');
+      const [r] = await conn.query('INSERT INTO incident_signatures (tenant_id, incident_id, patient_id, kind, signer_name, signer_role, image, recorded_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [req.auth.tenantId, id, b.patient_id ?? null, b.kind, b.signer_name, b.signer_role ?? null, b.image, req.auth.userId]);
       await audit(conn, req, 'add_signature', 'incidents', id, { kind: b.kind, row: r.insertId });
       return r.insertId;
     });
@@ -733,7 +873,7 @@ router.post(
 );
 
 router.get('/incidents/:id/signatures/:rowId', patrol, needs('view_cases'), async (req, res) => {
-  const row = await one(pool, 'SELECT id, patient_id, kind, signer_name, image, signed_at FROM incident_signatures WHERE tenant_id = ? AND incident_id = ? AND id = ?', [req.auth.tenantId, paramId(req), paramId(req, 'rowId')]);
+  const row = await one(pool, 'SELECT id, patient_id, kind, signer_name, signer_role, image, signed_at FROM incident_signatures WHERE tenant_id = ? AND incident_id = ? AND id = ?', [req.auth.tenantId, paramId(req), paramId(req, 'rowId')]);
   if (!row) throw notFound('Signature');
   await audit(pool, req, 'view_signature', 'incidents', paramId(req), { row: row.id });
   res.json(row);

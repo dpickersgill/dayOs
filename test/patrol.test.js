@@ -145,10 +145,15 @@ test('full report: patient, vitals, injuries, treatments, timeline, responders',
   assert.equal(d.patients[0].injuries[0].injury_type, 'fracture');
   assert.equal(d.patients[0].treatments.length, 2);
 
-  // entries can be removed while the report is a draft
+  // a wrong entry is marked entered in error with a reason, never deleted
   const ev = d.events.find((e) => e.kind === 'cleared');
-  assert.equal((await api('DELETE', `/patrol/incidents/${id}/events/${ev.id}`, { token: T.pat })).status, 204);
-  assert.equal((await api('DELETE', `/patrol/incidents/${id}/events/${ev.id}`, { token: T.pat })).status, 404);
+  assert.equal((await api('DELETE', `/patrol/incidents/${id}/events/${ev.id}`, { token: T.pat })).status, 404, 'there is no delete');
+  assert.equal((await api('POST', `/patrol/incidents/${id}/events/${ev.id}/void`, { token: T.pat, body: {} })).status, 400, 'a reason is needed');
+  ok(await api('POST', `/patrol/incidents/${id}/events/${ev.id}/void`, { token: T.pat, body: { reason: 'Stamped too early' } }));
+  assert.equal((await api('POST', `/patrol/incidents/${id}/events/${ev.id}/void`, { token: T.pat, body: { reason: 'again' } })).status, 409);
+  const after = ok(await api('GET', `/patrol/incidents/${id}`, { token: T.pat })).events.find((e) => e.id === ev.id);
+  assert.equal(after.void_reason, 'Stamped too early');
+  assert.ok(after.voided_at && after.voided_by_email, 'it stays on the record, with who and when');
   D.fullCase = id; D.fullPatient = p.id;
 });
 
@@ -196,7 +201,7 @@ test('sign-off: submit lists what is missing, managers approve, approved reports
     ['POST', `/patrol/incidents/${id}/events`, { kind: 'cleared' }],
     ['POST', `/patrol/incidents/${id}/witnesses`, { name: 'Late Witness' }],
     ['POST', `/patrol/incidents/${id}/responders`, { staff_id: D.s2 }],
-    ['DELETE', `/patrol/incidents/${id}/patients/${p.id}`, undefined],
+    ['POST', `/patrol/incidents/${id}/patients/${p.id}/void`, { reason: 'wrong patient' }],
   ]) {
     for (const token of [T.pat, A.owner]) assert.equal((await api(method, path, { token, body })).status, 409, `${method} ${path}`);
   }
@@ -231,7 +236,7 @@ test('refusal of care needs a signature, and signatures cannot be removed', asyn
   const one = ok(await api('GET', `/patrol/incidents/${id}/signatures/${s.id}`, { token: T.pat }));
   assert.equal(one.image, png);
 
-  assert.equal((await api('DELETE', `/patrol/incidents/${id}/patients/${p.id}`, { token: T.pat })).status, 409, 'signed patients stay');
+  assert.equal((await api('DELETE', `/patrol/incidents/${id}/patients/${p.id}`, { token: T.pat })).status, 404, 'patients are never deleted');
   assert.equal((await api('DELETE', `/patrol/incidents/${id}/signatures/${s.id}`, { token: T.pat })).status, 404, 'there is no way to delete a signature');
 
   ok(await api('POST', `/patrol/incidents/${id}/submit`, { token: T.pat }));
@@ -494,7 +499,7 @@ test('NSAAR form: every field is described, stored, validated and can be made ma
   const o = A.owner;
   const form = ok(await api('GET', '/patrol/form', { token: T.quinn }));
   assert.ok(form.fields.length > 80, 'the whole NSAAR is in the registry');
-  assert.deepEqual(form.sections.map((s) => s.id).slice(0, 3), ['patient', 'complaint', 'first_aid']);
+  assert.deepEqual(form.sections.map((s) => s.id).slice(0, 3), ['patient', 'complaint', 'assessment']);
   const keys = new Set(form.fields.map((f) => `${f.scope}.${f.key}`));
   for (const k of ['patient.body_parts', 'patient.treatment_protocol', 'patient.cause', 'case.weather', 'case.surface', 'patient.destination_type', 'case.completed_by_number', 'case.incident_location']) assert.ok(keys.has(k), k);
   assert.deepEqual(form.required.patient.sort(), ['chief_complaint', 'disposition'], 'defaults match the earlier sign-off rules');
