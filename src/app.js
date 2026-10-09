@@ -145,6 +145,8 @@ function createApp() {
   api.use('/kiosk', rateLimit({ windowMs: 60_000, max: Number(process.env.KIOSK_RATE_LIMIT) || 60, message: 'Too many requests, slow down' }), kiosk.publicRouter);
   api.use('/internal/jobs', rateLimit({ windowMs: 60_000, max: 10 }), followPublic.jobs);
   api.use('/trial', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SANDBOX_RATE_LIMIT) || 5, message: 'Too many demo requests from this address. Try again later, or ask us for a walkthrough.' }), sandboxRoutes);
+  // Operator sign-in has its own, tighter limit (on top of each login's lockout).
+  api.post(['/platform/login', '/platform/login/setup'], rateLimit({ windowMs: 15 * 60_000, max: Number(process.env.PLATFORM_LOGIN_RATE_LIMIT) || 20, message: 'Too many sign-in attempts from this address. Try again in 15 minutes.' }));
   api.use('/platform', rateLimit({ windowMs: 60_000, max: Number(process.env.PLATFORM_RATE_LIMIT) || 60, message: 'Too many attempts' }), platform);
   api.use('/public', rateLimit({ windowMs: 60_000, max: 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, publicRouter, dispatch.publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter);
   api.use(authRoutes); // login, tenants, users, me (each route applies authenticate itself where needed)

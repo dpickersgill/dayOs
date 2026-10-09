@@ -577,7 +577,7 @@ test('the platform console can require a code from an authenticator app, and rec
     const list = await fetch(`${base}/api/v1/platform/tenants`, headers({ 'x-platform-session': s.body.session }));
     assert.equal(list.status, 200);
     const audit = await (await fetch(`${base}/api/v1/platform/audit`, headers({ 'x-platform-session': s.body.session }))).json();
-    assert.equal(audit.data[0].actor, 'Dan');
+    assert.equal(audit.data[0].actor, 'key: Dan');
   } finally { delete process.env.PLATFORM_TOTP_SECRET; }
 });
 

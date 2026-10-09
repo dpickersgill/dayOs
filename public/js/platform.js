@@ -3,10 +3,12 @@
 // authenticator app. The 2-hour session is kept only in this tab's memory.
 
 import { h, clear, button, field, input, table, dialog, formDialog, confirmDialog, toast, fail, empty, errorBox, state } from './ui.js';
+import { qr } from './barcode.js';
 
 const app = document.getElementById('app');
 let session = '';
 let apps = [];
+let me = { name: '', operator: false }; // who is signed in, and whether with their own login (not the platform key)
 
 async function call(method, path, body) {
   const res = await fetch(`/api/v1/platform${path}`, { method, headers: { 'content-type': 'application/json', 'x-platform-session': session }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -16,23 +18,84 @@ async function call(method, path, body) {
   return json;
 }
 
+// ---------------------------------------------------------------- signing in
+async function opened(out) {
+  session = out.session;
+  me = { name: out.name || '', operator: Boolean(out.operator) };
+  apps = (await call('GET', '/modules')).data;
+  await home();
+}
+
+/** Email, password, then the code from the authenticator app. The platform key is a link underneath, for emergencies. */
 function signIn(message) {
+  session = ''; me = { name: '', operator: false };
   clear(app);
   const err = h('div');
-  const k = input({ type: 'password', name: 'key', autocomplete: 'current-password', required: true });
+  const email = input({ type: 'email', name: 'email', autocomplete: 'username', required: true, maxlength: 255 });
+  const pw = input({ type: 'password', name: 'password', autocomplete: 'current-password', required: true, maxlength: 200 });
+  const code = input({ name: 'code', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6, placeholder: '123456' });
+  const codeField = field('Code from your authenticator app', code, 'The six-digit code SummitOps platform shows in your app.');
+  codeField.hidden = true;
+  const go = h('button', { type: 'submit', class: 'btn primary' }, 'Sign in');
+  const form = h('form', { class: 'stack', novalidate: true }, field('Email', email), field('Password', pw), codeField, err, go);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault(); clear(err); go.disabled = true;
+    try {
+      const out = await call('POST', '/login', { email: email.value.trim(), password: pw.value, code: code.value.trim() || undefined });
+      if (out.setup_required) { setupTwoStep(out); return; }
+      if (out.code_required) { codeField.hidden = false; code.focus(); go.disabled = false; return; }
+      await opened(out);
+    } catch (ex) { err.append(errorBox(ex)); go.disabled = false; if (!codeField.hidden) { code.value = ''; code.focus(); } }
+  });
+  const keyLink = h('button', { type: 'button', class: 'linklike' }, 'Sign in with the platform key instead');
+  keyLink.addEventListener('click', () => keySignIn());
+  app.append(h('main', { class: 'platform-box stack' }, h('h1', null, 'SummitOps platform'), message ? h('p', { class: 'muted' }, message) : null, form,
+    h('p', { class: 'muted small' }, 'No login yet? Sign in once with the platform key and add yourself under Operators. ', keyLink)));
+  email.focus();
+}
+
+/** First sign-in: set up the authenticator app, then you are in. */
+function setupTwoStep(out) {
+  clear(app);
+  const err = h('div');
+  const code = input({ name: 'code', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6, placeholder: '123456', required: true });
+  const go = h('button', { type: 'submit', class: 'btn primary' }, 'Turn on and sign in');
+  const form = h('form', { class: 'stack', novalidate: true }, field('Code from the app', code), err, go);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault(); clear(err); go.disabled = true;
+    try { await opened(await call('POST', '/login/setup', { setup_token: out.setup_token, code: code.value.trim() })); } catch (ex) { err.append(errorBox(ex)); go.disabled = false; code.value = ''; code.focus(); }
+  });
+  app.append(h('main', { class: 'platform-box stack' }, h('h1', null, 'Set up two-step sign-in'),
+    h('p', null, 'The console needs a code from an authenticator app every time you sign in (Google Authenticator, Microsoft Authenticator, 1Password and others work).'),
+    h('ol', { class: 'stack tight' },
+      h('li', null, 'Open the app and add an account by scanning this code.'),
+      h('li', null, 'Type the six-digit code the app shows for SummitOps platform.')),
+    h('div', { class: 'qr-box' }, qr(out.otpauth_uri, { size: 200 })),
+    h('p', { class: 'muted small' }, 'Cannot scan? Choose "enter a setup key" in the app and type: ', h('code', null, out.secret.replace(/(.{4})/g, '$1 ').trim())),
+    form, button('Cancel', () => signIn(), { small: true })));
+  code.focus();
+}
+
+/** Break-glass: the platform key (the BOOTSTRAP_KEY setting), your name, and a code when PLATFORM_TOTP_SECRET is set. */
+function keySignIn(message) {
+  clear(app);
+  const err = h('div');
+  const k = input({ type: 'password', name: 'key', autocomplete: 'off', required: true });
   const who = input({ name: 'name', autocomplete: 'name', required: true, maxlength: 100 });
   const code = input({ name: 'code', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6, placeholder: '123456' });
   const go = h('button', { type: 'submit', class: 'btn primary' }, 'Open console');
   const form = h('form', { class: 'stack', novalidate: true }, field('Platform key', k, 'The BOOTSTRAP_KEY setting for the service. It is not saved.'),
-    field('Your name', who, 'Recorded with every change you make.'), field('Code from your authenticator app', code, 'Needed when two-step sign-in is set up for the console.'), err, go);
+    field('Your name', who, 'Recorded with every change you make.'), field('Code from your authenticator app', code, 'Only when two-step sign-in is set up for the platform key (PLATFORM_TOTP_SECRET).'), err, go);
   form.addEventListener('submit', async (e) => {
     e.preventDefault(); clear(err); go.disabled = true;
     try {
-      session = (await call('POST', '/session', { key: k.value, name: who.value.trim(), code: code.value.trim() || undefined })).session;
-      apps = (await call('GET', '/modules')).data; await home();
+      const out = await call('POST', '/session', { key: k.value, name: who.value.trim(), code: code.value.trim() || undefined });
+      await opened({ ...out, name: who.value.trim(), operator: false });
     } catch (ex) { session = ''; err.append(errorBox(ex)); go.disabled = false; }
   });
-  app.append(h('main', { class: 'platform-box stack' }, h('h1', null, 'SummitOps platform'), message ? h('p', { class: 'muted' }, message) : null, form));
+  app.append(h('main', { class: 'platform-box stack' }, h('h1', null, 'Sign in with the platform key'),
+    h('p', { class: 'muted' }, message || 'For setting up the first operator, or if nobody can sign in. Anyone with the key is treated as an operator, so keep it secret.'), form,
+    button('Back to email sign-in', () => signIn(), { small: true })));
   k.focus();
 }
 
@@ -44,7 +107,7 @@ async function home() {
   const filter = input({ type: 'search', placeholder: 'Find a mountain', 'aria-label': 'Find a mountain' });
   app.append(h('main', { class: 'platform-box wide stack' },
     h('header', { class: 'row between' }, h('h1', null, 'Mountains'),
-      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), button('Demos', () => demos(), { small: true }), button('Activity', () => activity(), { small: true }), button('Lock console', () => { session = ''; signIn('Locked.'); }, { small: true }))),
+      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), button('Demos', () => demos(), { small: true }), button('Activity', () => activity(), { small: true }), button('Operators', () => operators(), { small: true }), me.operator ? button('Change my password', () => myPassword(), { small: true }) : null, button('Sign out', () => signIn('Signed out.'), { small: true }))),
     filter, body));
   try {
     const { data: all } = await call('GET', '/tenants');
@@ -65,7 +128,7 @@ async function home() {
     };
     filter.addEventListener('input', draw);
     draw();
-  } catch (ex) { if (ex.status === 403) signIn('That key was not accepted.'); else body.append(errorBox(ex)); }
+  } catch (ex) { if (ex.status === 403) signIn('Your session ended. Sign in again.'); else body.append(errorBox(ex)); }
 }
 
 async function manage(id) {
@@ -252,6 +315,65 @@ async function activity() {
     const { data } = await call('GET', '/audit');
     dialog('Recent activity', data.length ? table([{ head: 'When', cell: (x) => String(x.at).replace('T', ' ').slice(0, 16) }, { head: 'Mountain', cell: (x) => x.slug || '' }, { head: 'Who', cell: (x) => x.actor || '' }, { head: 'What', cell: (x) => x.action }, { head: 'Details', cell: (x) => x.detail || '' }], data) : empty('Nothing yet.'), { wide: true });
   } catch (e) { fail(e); }
+}
+
+// ---------------------------------------------------------------- operators: who can use this console
+const newPassword = () => input({ type: 'password', name: 'password', autocomplete: 'new-password', required: true, minlength: 10, maxlength: 200 });
+
+async function operators() {
+  clear(app);
+  const body = h('div', { class: 'stack' });
+  app.append(h('main', { class: 'platform-box wide stack' },
+    h('header', { class: 'row between' },
+      h('div', { class: 'stack tight' }, h('h1', null, 'Operators'), h('p', { class: 'muted' }, 'The people who can use this console. Each signs in with their own email, password and authenticator app.')),
+      h('div', { class: 'row' }, button('Add an operator', () => addOperator(), { kind: 'primary' }), button('Back to mountains', () => home(), { small: true }))),
+    body));
+  let data;
+  try { ({ data } = await call('GET', '/operators')); } catch (ex) { if (ex.status === 403) signIn('Your session ended. Sign in again.'); else body.append(errorBox(ex)); return; }
+  if (!data.length) {
+    body.append(h('div', { class: 'callout' }, h('b', null, 'No operators yet. '), 'Add yourself first: your email, your name and a password. Then sign out and sign in with your email; it walks you through setting up your authenticator app.'));
+    return;
+  }
+  const act = (label, fn, opts) => button(label, fn, { small: true, ...opts });
+  body.append(table([
+    { head: 'Name', cell: (o) => h('span', null, h('b', null, o.name), o.you ? h('span', { class: 'muted' }, ' (you)') : null) },
+    { head: 'Email', cell: (o) => o.email },
+    { head: 'Status', cell: (o) => (!o.active ? state('Switched off', 'neutral') : o.locked ? state('Locked for a few minutes', 'warn') : state('Active', 'good')) },
+    { head: 'Two-step', cell: (o) => (o.two_step ? 'On' : 'Set up at next sign-in') },
+    { head: 'Last sign-in', cell: (o) => (o.last_login_at ? ago(o.last_login_at) : 'Never') },
+    { actions: true, cell: (o) => (o.you ? '' : h('div', { class: 'row' },
+      act('New password', () => formDialog(`New password for ${o.name}`, h('div', { class: 'form' }, field('New password', newPassword(), 'At least 10 characters. Tell them in person or by phone; they can change it after signing in.')), async (fd) => {
+        await call('POST', `/operators/${o.id}/password`, { password: fd.get('password') }); toast('Password changed. Their open sessions have ended.'); operators();
+      }, { submitText: 'Set password' })),
+      o.two_step ? act('Reset two-step', () => confirmDialog(`Reset two-step for ${o.name}?`, 'Use this when they have lost their phone. They set up their authenticator app again the next time they sign in. Their open sessions end now.', 'Reset two-step', async () => {
+        try { await call('POST', `/operators/${o.id}/reset-two-step`); toast('Two-step reset.'); operators(); } catch (e) { fail(e); }
+      }, { danger: true })) : null,
+      act(o.active ? 'Switch off' : 'Switch on', () => (o.active
+        ? confirmDialog(`Switch off ${o.name}?`, 'They can no longer sign in, and any open session ends now. You can switch them back on later.', 'Switch off', async () => {
+          try { await call('POST', `/operators/${o.id}/active`, { active: false }); toast('Switched off.'); operators(); } catch (e) { fail(e); }
+        }, { danger: true })
+        : call('POST', `/operators/${o.id}/active`, { active: true }).then(() => { toast('Switched on.'); operators(); }, fail))))) },
+  ], data));
+  if (!me.operator) body.append(h('p', { class: 'muted' }, 'You are signed in with the platform key. Once your own login works, you can turn key sign-in off (RUNBOOK.md, "Platform console").'));
+}
+
+function addOperator() {
+  formDialog('Add an operator', h('div', { class: 'form' },
+    field('Name', input({ name: 'name', required: true, maxlength: 100, autocomplete: 'off' }), 'Shown in the Activity log next to everything they do.'),
+    field('Email', input({ name: 'email', type: 'email', required: true, maxlength: 255, autocomplete: 'off' }), 'What they sign in with.'),
+    field('First password', newPassword(), 'At least 10 characters. They set up their authenticator app the first time they sign in, then can change this.')), async (fd) => {
+    await call('POST', '/operators', { name: fd.get('name'), email: fd.get('email'), password: fd.get('password') });
+    toast('Operator added.'); operators();
+  }, { submitText: 'Add operator' });
+}
+
+function myPassword() {
+  formDialog('Change my password', h('div', { class: 'form' },
+    field('Current password', input({ type: 'password', name: 'current', autocomplete: 'current-password', required: true, maxlength: 200 })),
+    field('New password', newPassword(), 'At least 10 characters.')), async (fd) => {
+    const out = await call('POST', '/me/password', { current: fd.get('current'), password: fd.get('password') });
+    session = out.session; toast('Password changed.');
+  }, { submitText: 'Change password' });
 }
 
 signIn();

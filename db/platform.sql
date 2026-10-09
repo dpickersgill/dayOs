@@ -40,3 +40,24 @@ CREATE TABLE IF NOT EXISTS sandbox_usage (
   last_at    DATETIME     NOT NULL,
   PRIMARY KEY (signup_id, area)
 ) ENGINE=InnoDB;
+
+-- People who run the platform console. Each signs in with their own email, password and authenticator code; the
+-- platform key stays as the way in for setting up the first one, or if everyone is locked out.
+CREATE TABLE IF NOT EXISTS platform_operators (
+  id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  email               VARCHAR(255) NOT NULL,
+  name                VARCHAR(100) NOT NULL,
+  password_hash       VARCHAR(100) NOT NULL,
+  password_changed_at DATETIME     NOT NULL,
+  session_epoch       INT UNSIGNED NOT NULL DEFAULT 0, -- raised to end every open session (password change, reset, switched off)
+  totp_secret         VARCHAR(300) NULL,
+  totp_enabled        TINYINT(1)   NOT NULL DEFAULT 0,
+  totp_last_step      BIGINT       NULL,
+  failures            INT UNSIGNED NOT NULL DEFAULT 0,
+  locked_until        DATETIME     NULL,
+  active              TINYINT(1)   NOT NULL DEFAULT 1,
+  last_login_at       DATETIME     NULL,
+  created_by          VARCHAR(100) NULL,
+  created_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_platform_operator_email (email)
+) ENGINE=InnoDB;

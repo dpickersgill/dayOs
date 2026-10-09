@@ -62,12 +62,26 @@ own setting. To rotate `JWT_SECRET` safely:
 
 ## Platform console
 
-The console (`/platform`) asks for the platform key and your name, and records your name with every change.
+The console (`/platform`) is for the people who run SummitOps. Each **operator** signs in with their own email, password
+and a code from an authenticator app; everything they do is in the Activity log under their name.
 
-- **Two-step sign-in (recommended):** create a secret with `node -e "console.log(require('./src/lib/totp').newSecret())"`,
-  add it to your authenticator app (manual entry, time-based, 6 digits), and set it on Cloud Run as
-  `PLATFORM_TOTP_SECRET`. From then on the key alone does not open the console.
-- **Address allowlist (optional):** `PLATFORM_ALLOW_IPS` = a comma-separated list of addresses allowed to use it.
+1. **First operator:** open `/platform`, choose "Sign in with the platform key instead" (the key is the
+   `summitops-bootstrap` secret: `gcloud secrets versions access latest --secret=summitops-bootstrap`), then
+   **Operators**, **Add an operator** with your own email, name and a password.
+2. **Sign out**, then sign in with your email and password. The first time, it shows a QR code: scan it in your
+   authenticator app and type the code. From then on you sign in with email, password and the app's code.
+3. **More operators:** Operators, Add an operator. Give them their first password by phone or in person; they set up
+   their app at their first sign-in and can change the password (Change my password).
+4. **Lost phone:** another operator chooses **Reset two-step** on them (or use the platform key). **Leaving:** Switch off.
+   Either ends their open sessions at once.
+5. **Once your own login works, turn key sign-in off** so the key alone opens nothing:
+   `gcloud run services update summitops-api --region us-east1 --update-env-vars PLATFORM_KEY_SIGNIN=off`.
+   To get back in if every operator is locked out: `gcloud run services update summitops-api --region us-east1 --remove-env-vars PLATFORM_KEY_SIGNIN`,
+   sign in with the key, fix it, and turn it off again.
+
+Five wrong passwords or codes lock that login for 15 minutes; sign-in is also limited to 20 tries per address per 15 minutes.
+Sessions last 2 hours. **Address allowlist (optional):** `PLATFORM_ALLOW_IPS` = comma-separated addresses allowed to use the console.
+`PLATFORM_TOTP_SECRET` (an authenticator code for the platform key itself) still works if you keep key sign-in on.
 
 ## Two-step sign-in recovery
 - A user who lost their phone: use a recovery code, or an owner/manager clicks **Reset two-step** in Settings > Users.
