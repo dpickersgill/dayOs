@@ -1,0 +1,264 @@
+// The incident form, drawn from the server's field registry (the National Ski Area Accident Report layout).
+// Each section is its own small form, so a patroller on a phone saves a section at a time.
+
+import { get, put, patch } from '../api.js';
+import { h, clear, state, field, button, toast, formDialog, label, errorBox, fail } from '../ui.js';
+import { pinDialog } from './incident-map.js';
+
+let cache = null;
+export async function loadForm(force = false) {
+  if (!cache || force) cache = await get('/patrol/form');
+  return cache;
+}
+export const forgetForm = () => { cache = null; };
+
+const blank = (v) => v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length) || (typeof v === 'object' && v !== null && !Array.isArray(v) && !Object.keys(v).length) || v === false;
+
+/** What the row holds for a field, wherever it is stored. */
+export function valueOf(f, row) {
+  const form = row.form || {};
+  if (f.type === 'name') return `${row.first_name || ''} ${row.last_name || ''}`.trim();
+  if (f.type === 'gps') return row.gps_lat !== null && row.gps_lat !== undefined && row.gps_lng !== null && row.gps_lng !== undefined ? `${row.gps_lat}, ${row.gps_lng}` : null;
+  if (f.col) return row[f.col];
+  return form[f.key];
+}
+const colOf = (f) => f.col;
+
+/** Values of the form for `when` checks: what is saved, as the field keys know it. */
+function valuesOf(fields, row) {
+  const v = {};
+  for (const f of fields) v[f.key] = f.type === 'signature' || f.type === 'witnesses' ? null : valueOf(f, row);
+  return v;
+}
+const holds = (f, vals) => {
+  if (!f.when) return true;
+  const v = vals[f.when.field];
+  if (f.when.equals !== undefined) return v === f.when.equals;
+  if (f.when.in) return f.when.in.includes(v);
+  return true;
+};
+
+/** A section whose every field only applies in some situation (the refusal section) is left out until one of them applies. */
+export function sectionVisible(def, section, scope, row) {
+  const fields = def.fields.filter((f) => f.section === section.id && f.scope === scope);
+  if (!fields.length || !fields.every((f) => f.when)) return true;
+  const vals = valuesOf(def.fields.filter((f) => f.scope === scope), row);
+  return fields.some((f) => holds(f, vals));
+}
+
+export function display(f, row, ctx) {
+  const v = valueOf(f, row);
+  if (f.type === 'signature') return ctx.signed(f) ? 'Signed' : null;
+  if (f.type === 'witnesses') return ctx.witnessCount ? `${ctx.witnessCount} on file` : null;
+  if (f.type === 'trail') return row.trail || null;
+  if (blank(v)) return null;
+  if (f.type === 'check') return 'Yes';
+  if (f.type === 'select') { const o = (f.options || []).find((x) => x.value === v); return o ? o.label : label(v); }
+  if (f.type === 'multi') return v.map((x) => ((f.options || []).find((o) => o.value === x) || { label: label(x) }).label).join(', ');
+  if (f.type === 'bodymap') return Object.entries(v).map(([k, s]) => `${label(k)}${s === 'X' ? '' : ` (${s})`}`).join(', ');
+  if (f.type === 'time') return v;
+  return String(v);
+}
+
+/** One section as a form (editable) or a list of what was recorded (read only). */
+export function sectionPanel({ def, section, scope, row, editable, required, ctx, trails, onSave, extra, open = false }) {
+  const fields = def.fields.filter((f) => f.section === section.id && f.scope === scope);
+  const mandatory = new Set(required[scope]);
+  const base = valuesOf(def.fields.filter((f) => f.scope === scope), row);
+  const head = [h('summary', null, section.title), section.note ? h('p', { class: 'muted small nsaar-note' }, section.note) : null];
+
+  if (!editable) {
+    const lines = fields.map((f) => [f.label, display(f, row, ctx)]).filter(([, v]) => v);
+    const viewPin = fields.some((f) => f.type === 'gps') && row.gps_lat !== null && row.gps_lat !== undefined && row.gps_lng !== null && row.gps_lng !== undefined
+      ? button('View the pin on the map', () => pinDialog({ at: { lat: Number(row.gps_lat), lng: Number(row.gps_lng) }, editable: false, title: 'Incident location' }), { small: true }) : null;
+    return h('details', { class: 'panel nsaar-sec', open, 'data-section': section.id }, ...head, extra || null, viewPin, lines.length ? h('dl', { class: 'kv' }, lines.map(([k, v]) => [h('dt', null, k), h('dd', null, v)])) : h('p', { class: 'muted' }, 'Nothing recorded.'));
+  }
+
+  const controls = []; // { f, wrap, get }
+  const reflect = () => {
+    const vals = { ...base };
+    for (const c of controls) if (c.get) vals[c.f.key] = c.get();
+    for (const c of controls) c.wrap.hidden = !holds(c.f, vals);
+  };
+  const mark = (f) => (mandatory.has(f.key) ? h('span', { class: 'req', title: 'Mandatory before the report can be submitted' }, ' *') : null);
+  const naButton = (f, el) => button(f.none ? 'None' : 'N/A', () => { el.value = f.none ? 'None' : 'N/A'; reflect(); }, { small: true });
+
+  function build(f) {
+    const v = valueOf(f, row);
+    const label_ = h('span', null, f.label, mark(f));
+    const hint = f.hint ? h('span', { class: 'hint' }, f.hint) : null;
+    const wrapField = (el, extraEls = []) => h('label', { class: 'field' }, label_, el, ...extraEls, hint);
+    let wrap; let get;
+    switch (f.type) {
+      case 'name': {
+        const a = h('input', { name: 'first_name', value: row.first_name || '', maxlength: 100, 'aria-label': 'First name', autocomplete: 'off' });
+        const b = h('input', { name: 'last_name', value: row.last_name || '', maxlength: 100, 'aria-label': 'Last name', autocomplete: 'off' });
+        wrap = h('div', { class: 'field wide' }, label_, h('div', { class: 'two' }, a, b), hint);
+        get = () => `${a.value} ${b.value}`;
+        wrap.collect = (out) => { out.cols.first_name = a.value.trim() || undefined; out.cols.last_name = b.value.trim() || undefined; };
+        break;
+      }
+      case 'text': case 'tel': case 'email': {
+        const el = h('input', { type: f.type === 'text' ? 'text' : f.type, value: v ?? '', maxlength: 300, autocomplete: 'off' });
+        wrap = h('div', { class: 'field' }, h('label', null, label_), h('div', { class: 'input-row' }, el, naButton(f, el)), hint);
+        get = () => el.value.trim() || null;
+        wrap.collect = (out) => put_(out, f, el.value.trim() || null);
+        el.addEventListener('input', reflect);
+        break;
+      }
+      case 'longtext': {
+        const el = h('textarea', { rows: 4, maxlength: 20000 }, v ?? '');
+        wrap = h('div', { class: 'field wide' }, h('label', null, label_, el), h('div', { class: 'row tight' }, naButton(f, el)), hint);
+        get = () => el.value.trim() || null;
+        wrap.collect = (out) => put_(out, f, el.value.trim() || null);
+        break;
+      }
+      case 'date': case 'time': case 'number': {
+        const el = h('input', { type: f.type, value: v ?? '', min: f.min, max: f.max, step: f.type === 'number' ? 'any' : undefined, inputmode: f.type === 'number' ? 'numeric' : undefined });
+        wrap = wrapField(el);
+        get = () => el.value || null;
+        wrap.collect = (out) => put_(out, f, el.value === '' ? null : f.type === 'number' ? Number(el.value) : el.value);
+        el.addEventListener('input', reflect);
+        break;
+      }
+      case 'select': {
+        const el = h('select', null, f.key === 'gender' ? null : h('option', { value: '' }, 'Not recorded'));
+        const opt = (o) => h('option', { value: o.value, selected: o.value === v }, o.label);
+        if (f.groups) for (const g of f.groups) el.append(h('optgroup', { label: g.group }, g.items.map(([val, lab]) => h('option', { value: val, selected: val === v }, lab))));
+        else for (const o of f.options) el.append(opt(o));
+        wrap = wrapField(el);
+        get = () => el.value || null;
+        wrap.collect = (out) => put_(out, f, el.value || (f.key === 'gender' ? 'unknown' : null));
+        el.addEventListener('change', reflect);
+        break;
+      }
+      case 'multi': {
+        const have = new Set(v || []);
+        const boxes = f.options.map((o) => h('label', { class: 'check' }, h('input', { type: 'checkbox', value: o.value, checked: have.has(o.value) }), ` ${o.label}`));
+        wrap = h('fieldset', { class: 'field wide chips-box' }, h('legend', null, label_), h('div', { class: 'checks' }, boxes), hint);
+        get = () => boxes.map((b) => b.firstChild).filter((i) => i.checked).map((i) => i.value);
+        wrap.collect = (out) => put_(out, f, get());
+        break;
+      }
+      case 'check': {
+        const el = h('input', { type: 'checkbox', checked: v === true });
+        wrap = h('label', { class: 'check wide' }, el, ' ', f.label, mark(f), hint ? h('span', { class: 'hint' }, ` ${f.hint}`) : null);
+        get = () => (el.checked ? true : null);
+        wrap.collect = (out) => put_(out, f, el.checked ? true : null);
+        break;
+      }
+      case 'bodymap': {
+        const cur = v || {};
+        const rows = [];
+        const sel = new Map();
+        for (const p of def.body.sided) {
+          const s = h('select', { 'aria-label': `${p.label}: left, right or both` }, h('option', { value: '' }, '—'), h('option', { value: 'L', selected: cur[p.value] === 'L' }, 'L'), h('option', { value: 'R', selected: cur[p.value] === 'R' }, 'R'), h('option', { value: 'B', selected: cur[p.value] === 'B' }, 'B'));
+          sel.set(p.value, () => s.value || null);
+          rows.push(h('div', { class: 'part' }, h('span', null, p.label), s));
+        }
+        for (const p of def.body.plain) {
+          const c = h('input', { type: 'checkbox', checked: cur[p.value] === 'X', 'aria-label': p.label });
+          sel.set(p.value, () => (c.checked ? 'X' : null));
+          rows.push(h('label', { class: 'part' }, h('span', null, p.label), c));
+        }
+        wrap = h('fieldset', { class: 'field wide' }, h('legend', null, label_, ' (L left, R right, B both)'), h('div', { class: 'bodymap' }, rows), hint);
+        get = () => { const m = {}; for (const [k, fn] of sel) { const x = fn(); if (x) m[k] = x; } return m; };
+        wrap.collect = (out) => put_(out, f, get());
+        break;
+      }
+      case 'trail': {
+        const el = h('select', null, h('option', { value: '' }, 'Not on a trail'));
+        for (const t of trails) el.append(h('option', { value: t.id, selected: t.id === row.trail_id }, t.name));
+        wrap = wrapField(el);
+        wrap.collect = (out) => { out.cols.trail_id = el.value ? Number(el.value) : null; };
+        break;
+      }
+      case 'gps': {
+        const lat = h('input', { type: 'number', step: 'any', value: row.gps_lat ?? '', 'aria-label': 'Latitude', placeholder: 'Latitude' });
+        const lng = h('input', { type: 'number', step: 'any', value: row.gps_lng ?? '', 'aria-label': 'Longitude', placeholder: 'Longitude' });
+        const here = button('Use my location', () => new Promise((resolve, reject) => {
+          if (!navigator.geolocation) { reject(new Error('This browser cannot share a location')); return; }
+          navigator.geolocation.getCurrentPosition((p) => { lat.value = p.coords.latitude.toFixed(6); lng.value = p.coords.longitude.toFixed(6); resolve(); }, () => reject(new Error('Location was not shared. Allow location for this site, or type the coordinates.')), { enableHighAccuracy: true, timeout: 15000 });
+        }), { small: true });
+        const pinBtn = button('Drop a pin on the map', () => pinDialog({
+          at: lat.value !== '' && lng.value !== '' ? { lat: Number(lat.value), lng: Number(lng.value) } : null,
+          title: 'Drop a pin on the incident location',
+          // Fill the coordinates and save the section, so the pin is recorded on the incident straight away.
+          onSave: ({ lat: a, lng: b }) => { lat.value = a; lng.value = b; reflect(); formEl.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); },
+        }), { small: true, kind: 'primary' });
+        wrap = h('div', { class: 'field wide' }, label_, h('div', { class: 'two' }, lat, lng), h('div', { class: 'row tight' }, pinBtn, here), hint);
+        get = () => (lat.value && lng.value ? true : null);
+        wrap.collect = (out) => { out.cols.gps_lat = lat.value === '' ? null : Number(lat.value); out.cols.gps_lng = lng.value === '' ? null : Number(lng.value); };
+        break;
+      }
+      case 'signature': {
+        const done = ctx.signed(f, row);
+        wrap = h('div', { class: 'field wide' }, label_, done ? state('Signed', 'good') : state('Not signed yet', mandatory.has(f.key) ? 'warn' : 'neutral'), f.hint ? h('span', { class: 'hint' }, ` ${f.hint}`) : null);
+        break;
+      }
+      case 'witnesses': {
+        wrap = h('div', { class: 'field wide' }, label_, ctx.witnessCount ? state(`${ctx.witnessCount} on file`, 'good') : state('None yet', mandatory.has(f.key) ? 'warn' : 'neutral'), hint ? h('span', { class: 'hint' }, ` ${f.hint}`) : null);
+        break;
+      }
+      default: wrap = h('div'); break;
+    }
+    wrap.dataset.field = f.key;
+    controls.push({ f, wrap, get });
+    return wrap;
+  }
+
+  const formEl = h('form', { class: 'stack', novalidate: true },
+    h('div', { class: 'form nsaar-grid' }, fields.map(build)),
+    h('div', { class: 'nsaar-actions' }, h('button', { type: 'submit', class: 'btn primary', 'data-next': '' }, 'Save and continue'), h('button', { type: 'submit', class: 'btn', 'data-save': '' }, 'Save and stay here')));
+  reflect();
+  formEl.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const out = { cols: {}, form: {} };
+    for (const c of controls) if (c.wrap.collect && !c.wrap.hidden) c.wrap.collect(out);
+    for (const c of controls) if (c.wrap.collect && c.wrap.hidden && c.f.stored === 'form') out.form[c.f.key] = null; // a field that no longer applies is cleared
+    const btns = [...formEl.querySelectorAll('[type=submit]')];
+    const go = Boolean(e.submitter && e.submitter.hasAttribute('data-next'));
+    for (const b of btns) b.disabled = true;
+    try {
+      const body = { ...Object.fromEntries(Object.entries(out.cols).filter(([, x]) => x !== undefined)), form: out.form };
+      await onSave(body, { next: go });
+      toast(`${section.title} saved`);
+    } catch (err) { fail(err); for (const b of btns) b.disabled = false; }
+  });
+  return h('details', { class: 'panel nsaar-sec', open, 'data-section': section.id }, ...head, extra || null, formEl);
+
+  function put_(o, f, value) {
+    if (f.stored === 'column') o.cols[colOf(f)] = value;
+    else o.form[f.key] = value;
+  }
+}
+
+// ---------------------------------------------------------------- administrator settings
+export async function formSettingsDialog(onDone) {
+  const def = await loadForm(true);
+  const mandatory = { case: new Set(def.required.case), patient: new Set(def.required.patient) };
+  const legal = h('input', { name: 'legal_name', value: def.resort.legal_name || '', maxlength: 255, placeholder: def.resort.name });
+  const boxes = [];
+  const sections = def.sections.map((s) => {
+    const fields = def.fields.filter((f) => f.section === s.id && f.scope === s.scope && f.locked !== 'never');
+    const items = fields.map((f) => {
+      const box = h('input', { type: 'checkbox', checked: f.locked === 'always' || mandatory[f.scope].has(f.key), disabled: f.locked === 'always' });
+      if (!f.locked) boxes.push([f, box]);
+      return h('label', { class: 'check setting' }, box, ` ${f.label}`, f.locked === 'always' ? h('span', { class: 'muted' }, ' (always required)') : null, f.when ? h('span', { class: 'muted' }, ' (only when it applies)') : null);
+    });
+    return h('fieldset', { class: 'stack tight' }, h('legend', null, `${s.title}`, h('span', { class: 'muted small' }, s.scope === 'patient' ? ' , asked for each patient' : ' , asked once per incident')), h('div', { class: 'settings-list' }, items));
+  });
+  formDialog('Incident form: mandatory fields', h('div', { class: 'stack' },
+    h('p', { class: 'muted' }, 'Tick the fields that must be filled in before a report can be submitted. Drafts can always be saved with gaps. N/A, Unknown and None count as an answer, as the form guide asks. Fields that depend on another answer are only checked when they apply.'),
+    field('Full legal name of the resort', legal, 'Printed on every copy of the report. Leave blank to use the mountain name.'),
+    ...sections),
+  async () => {
+    const required = { case: [], patient: [] };
+    for (const [f, box] of boxes) if (box.checked) required[f.scope].push(f.key);
+    await put('/patrol/form-config', { required, legal_name: legal.value.trim() || null });
+    forgetForm();
+    toast('Form settings saved');
+    if (onDone) await onDone();
+  }, { wide: true, submitText: 'Save settings' });
+}
+export { errorBox, clear, patch };

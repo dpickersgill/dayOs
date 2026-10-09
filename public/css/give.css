@@ -1,0 +1,29 @@
+/* The page behind the follow-up email and the mountain's giving page. Uses the booking page's look. One column, big targets. */
+.give-root { max-width: 640px; margin: 0 auto; padding-bottom: 48px; }
+.give-hero { background: linear-gradient(160deg, #0f2a33 0%, #1d4452 100%); color: #fff; padding: 28px 16px 36px; }
+.give-hero .in { max-width: 640px; margin: 0 auto; display: grid; gap: 10px; }
+.give-hero h1 { font-size: clamp(1.75rem, 6vw, 2.25rem); line-height: 1.12; }
+.give-hero p { color: #d6e6ec; font-size: 1.0625rem; }
+.give-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--lift); padding: 18px 16px; margin: -18px 12px 16px; display: grid; gap: 14px; position: relative; }
+.give-card + .give-card { margin-top: 0; }
+.give-card h2 { font-size: 1.375rem; }
+.rate { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.rate button { min-height: 64px; border-radius: 12px; border: 2px solid var(--line-strong); background: #fff; font: inherit; font-size: 1.5rem; font-weight: 700; color: var(--ink); cursor: pointer; display: grid; place-items: center; line-height: 1.1; }
+.rate button small { display: block; font-size: 0.6875rem; font-weight: 400; color: var(--muted); }
+.rate button[aria-pressed='true'] { background: var(--blue); border-color: var(--blue); color: #fff; }
+.rate button[aria-pressed='true'] small { color: #e8f0fc; }
+.amounts { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.amounts button { min-height: 64px; border-radius: 12px; border: 2px solid var(--line-strong); background: #fff; font: inherit; font-size: 1.5rem; font-weight: 700; color: var(--ink); cursor: pointer; }
+.amounts button[aria-pressed='true'] { background: var(--green); border-color: var(--green); color: #fff; }
+.give-go { min-height: 60px; font-size: 1.1875rem; background: var(--green); border-color: var(--green); color: #fff; width: 100%; }
+.give-go:hover { background: #115a32; border-color: #115a32; }
+.give-go[disabled] { opacity: 0.55; cursor: default; }
+.give-card label.f { display: grid; gap: 4px; font-weight: 700; }
+.give-card input[type=text], .give-card input[type=email], .give-card input[type=number], .give-card textarea { font: inherit; min-height: 48px; padding: 8px 12px; border: 1.5px solid var(--line-strong); border-radius: 10px; width: 100%; }
+.give-card textarea { min-height: 88px; }
+.give-card .tick { display: flex; gap: 10px; align-items: center; min-height: 44px; font-weight: 400; }
+.give-card .tick input { width: 24px; height: 24px; }
+.give-note { background: var(--green-tint); border: 1px solid #a8d5bb; border-radius: 10px; padding: 12px 14px; }
+.give-err { background: var(--red-tint); border: 1px solid #e5aaa3; border-radius: 10px; padding: 12px 14px; color: var(--red); }
+.give-fine { color: var(--muted); font-size: 0.875rem; }
+.give-stop { text-align: center; padding: 8px 16px 0; }

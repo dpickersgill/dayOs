@@ -1,0 +1,79 @@
+/* The public ticket shop (/shop/<mountain>). Builds on book.css: same look, a few shop-only pieces. */
+.prod-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.prod { display: grid; gap: 8px; align-content: start; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r-sm); background: #fff; }
+.prod h3 { font-size: 1.0625rem; }
+.prod .price { font-weight: 700; font-size: 1.25rem; }
+.prod .tiers-line { color: var(--muted); font-size: 0.875rem; }
+.ticket-row { display: grid; gap: 10px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r-sm); background: #fff; }
+.ticket-row .row-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.ticket-row .cols { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.ticket-row .line-price { font-weight: 700; }
+.ticket-row .bad { color: var(--red); font-size: 0.875rem; }
+.totals { display: grid; gap: 4px; justify-items: end; }
+.totals .grand { font-size: 1.375rem; font-weight: 700; }
+.check-row { display: flex; gap: 10px; align-items: flex-start; }
+.check-row input { margin-top: 5px; width: 20px; height: 20px; flex: none; }
+.waiver-box { max-height: 160px; overflow: auto; border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px 12px; font-size: 0.875rem; background: var(--snow); white-space: pre-wrap; }
+.hp { position: absolute; left: -9999px; height: 0; overflow: hidden; }
+.pass-card { display: grid; gap: 8px; justify-items: center; text-align: center; padding: 18px; border: 2px solid var(--ink); border-radius: var(--r); background: #fff; }
+.pass-card .who { font-weight: 700; font-size: 1.125rem; }
+.pass-card .code { font-family: ui-monospace, monospace; letter-spacing: 0.08em; }
+.pass-card svg.barcode { max-width: 100%; height: auto; }
+.pass-card .void { color: var(--red); font-weight: 700; }
+.pass-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+@media print { .hero, .steps, .aside, .no-print { display: none !important; } body { background: #fff; } .pass-card { break-inside: avoid; } }
+#shop input:not([type='checkbox']), #shop select, #shop textarea { width: 100%; font: inherit; color: var(--ink); min-height: 48px; padding: 10px 12px; border: 1.5px solid var(--line-strong); border-radius: var(--r-sm); background: #fff; }
+#shop input:focus, #shop select:focus { border-color: var(--blue); }
+#shop .check-row input { width: 24px; height: 24px; min-height: 0; accent-color: var(--blue); }
+#shop .hp input { width: auto; }
+.error-box { background: var(--red-tint); color: var(--red); border-radius: var(--r-sm); padding: 10px 14px; font-weight: 700; }
+.footer { text-align: center; color: var(--muted); font-size: 0.875rem; padding: 0 16px 32px; }
+
+/* Calendar */
+.cal { display: grid; gap: 10px; max-width: 420px; }
+.cal-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.cal-head strong { font-size: 1.125rem; }
+.cal-head .btn { min-height: 44px; min-width: 44px; padding: 0; font-size: 1.25rem; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-w { text-align: center; font-size: 0.8125rem; font-weight: 700; color: var(--muted); padding: 4px 0; }
+.cal-day { position: relative; min-height: 48px; border: 1.5px solid var(--line); border-radius: var(--r-sm); background: #fff; font: inherit; font-weight: 700; color: var(--ink); cursor: pointer; }
+.cal-day:hover:not(:disabled) { border-color: var(--ink); }
+.cal-day:disabled { background: transparent; border-color: transparent; color: #9fb1ba; cursor: not-allowed; text-decoration: line-through; }
+.cal-day.today { border-color: var(--line-strong); }
+.cal-day.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.cal-day.has::after { content: ''; position: absolute; bottom: 5px; left: 50%; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: var(--blue); }
+.cal-day.on.has::after { background: #fff; }
+.agelist { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.agelist li { display: flex; justify-content: space-between; gap: 10px; font-size: 0.9375rem; }
+.prod.off { opacity: 0.7; }
+.prod .bad { color: var(--red); font-weight: 700; font-size: 0.9375rem; }
+.prod .few { color: var(--amber); font-weight: 700; font-size: 0.9375rem; }
+
+.cal-day { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; line-height: 1.1; }
+.cal-p { font-size: 0.68rem; color: var(--muted, #5a6572); font-weight: 600; }
+.cal-p.few { color: #9a5b00; }
+.was { color: var(--muted, #5a6572); font-weight: 400; }
+.save-note { color: #1c6b3a; font-weight: 600; }
+
+.hero.has-photo { background-size: cover; background-position: center; color: #fff; }
+.hero .logo { max-height: 56px; max-width: 220px; width: auto; margin-bottom: 8px; }
+.hero .presale { background: #fff; color: var(--ink); display: inline-block; padding: 6px 12px; border-radius: var(--r-sm); font-weight: 700; }
+.conditions { display: flex; flex-wrap: wrap; gap: 6px 14px; list-style: none; padding: 0; margin: 8px 0 0; font-weight: 600; font-size: 0.9375rem; }
+.conditions li + li::before { content: ''; display: inline-block; width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: .5; margin-right: 14px; vertical-align: middle; }
+
+.saved-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip { font: inherit; min-height: 36px; padding: 4px 12px; border: 1.5px solid var(--line-strong); border-radius: 999px; background: #fff; cursor: pointer; }
+.lang { margin-left: auto; }
+@media (max-width: 720px) {
+  .paybar { position: sticky; bottom: 0; z-index: 5; border-radius: var(--r-sm) var(--r-sm) 0 0; box-shadow: 0 -4px 14px rgba(10,20,35,.14); padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+  .paybar .totals { justify-items: start; }
+}
+
+.chip.on { background: var(--blue); color: #fff; border-color: var(--blue); display: inline-flex; align-items: center; gap: 4px; }
+.chip.on .btn.link { color: #fff; }
+.totals .save-note { justify-self: end; }
+
+#shop .cols { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+
+.change { border-top: 1px solid var(--line); padding-top: 8px; width: 100%; text-align: left; }
+.change summary { cursor: pointer; font-weight: 600; }

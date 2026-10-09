@@ -1,0 +1,253 @@
+'use strict';
+
+// Paying for a lesson when reserving it online: the Stripe checkout is created against a mock Stripe server, the webhook is
+// signed like the real one, and the tiered cancellation policy decides how much comes back.
+process.env.BOOTSTRAP_KEY = 'test-bootstrap-key';
+process.env.LOGIN_RATE_LIMIT = '1000';
+process.env.BOOKING_RATE_LIMIT = '1000';
+process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+process.env.STRIPE_WEBHOOK_SECRET = 'whsec_mock';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const http = require('node:http');
+const config = require('../src/config');
+const stripe = require('../src/lib/stripe');
+const { createApp } = require('../src/app');
+const { pool } = require('../src/db');
+
+let server; let base; let mock; const calls = []; let n = 0;
+const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
+const PW = 'correct-horse-battery';
+const q = async (sql, params) => (await pool.query(sql, params))[0];
+
+async function call(prefix, method, path, { token, body } = {}) {
+  const res = await fetch(`${base}${prefix}${path}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const text = await res.text();
+  let json; try { json = JSON.parse(text); } catch (_) { json = text; }
+  return { status: res.status, body: json, text };
+}
+const api = (m, p, o) => call('/api/v1', m, p, o);
+const mountainWall = (hoursAhead) => {
+  const d = new Date(Date.now() + hoursAhead * 3_600_000);
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/New_York', dateStyle: 'short', timeStyle: 'medium' }).format(d);
+};
+async function mountain(slug) {
+  const res = await fetch(`${base}/api/v1/tenants`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-bootstrap-key': 'test-bootstrap-key' }, body: JSON.stringify({ slug, name: slug, phone: '215-555-0000', owner: { email: `owner@${slug}.test`, password: PW, first_name: 'Olive', last_name: 'Owner' } }) });
+  assert.equal(res.status, 201);
+  return { slug, owner: (await api('POST', '/auth/login', { body: { tenant: slug, email: `owner@${slug}.test`, password: PW } })).body.token };
+}
+const webhook = async (event, { secret = 'whsec_mock', t, tamper } = {}) => {
+  const raw = JSON.stringify(event);
+  const header = stripe.signWebhook(raw, secret, t);
+  const res = await fetch(`${base}/api/v1/stripe/webhook`, { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': header }, body: tamper ? raw.replace('"paid"', '"unpaid"') : raw });
+  return { status: res.status, body: await res.json().catch(() => ({})) };
+};
+const completed = (co, request, tenant, extra = {}) => ({ id: `evt_${++n}`, type: 'checkout.session.completed', data: { object: { id: co.session_id, payment_status: 'paid', amount_total: co.amount_cents, payment_intent: `pi_${co.session_id}`, metadata: { tenant_id: String(tenant), request_id: String(request) }, ...extra } } });
+
+let A; let tenantId; let sessionId; let pub;
+const kid = { first_name: 'Kit', last_name: 'Kid', date_of_birth: `${new Date().getFullYear() - 9}-02-01`, sex: 'male', discipline: 'ski' };
+const reqBody = (extra = {}) => ({ session_id: sessionId, contact_first_name: 'Pam', contact_last_name: 'Parent', contact_email: 'pam@x.test', contact_phone: '215-555-0100', students: [kid], waiver_accepted: true, policy_accepted: true, ...extra });
+const newLesson = async (hoursAhead, capacity = 4) => {
+  const [r] = await pool.query("INSERT INTO lesson_sessions (tenant_id, product_id, starts_at, ends_at, capacity, status) VALUES (?, ?, ?, ?, ?, 'scheduled')", [tenantId, A.product, mountainWall(hoursAhead), mountainWall(hoursAhead + 2), capacity]);
+  return r.insertId;
+};
+/** Reserve and pay (the webhook arrives) and return what the guest sees. */
+async function reserveAndPay(hoursAhead, { students = [kid], capacity = 4 } = {}) {
+  sessionId = await newLesson(hoursAhead, capacity);
+  const r = await pub('POST', '/requests', { body: reqBody({ students }) });
+  assert.equal(r.status, 201, r.text);
+  const row = (await q('SELECT * FROM lesson_requests WHERE tenant_id = ? AND reference = ?', [tenantId, r.body.reference]))[0];
+  const info = { reference: r.body.reference, request_id: row.id, session_id: row.stripe_session_id, amount_cents: row.amount_cents, checkout_url: r.body.checkout_url };
+  const w = await webhook(completed(info, row.id, tenantId));
+  assert.equal(w.status, 200, JSON.stringify(w.body));
+  return info;
+}
+
+test.before(async () => {
+  mock = http.createServer((req, res) => {
+    let data = '';
+    req.on('data', (c) => { data += c; });
+    req.on('end', () => {
+      const params = Object.fromEntries(new URLSearchParams(data));
+      calls.push({ path: req.url, params, auth: req.headers.authorization, key: req.headers['idempotency-key'] });
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/v1/checkout/sessions') res.end(JSON.stringify({ id: `cs_test_${++n}`, url: `https://checkout.stripe.test/c/${n}` }));
+      else if (req.url === '/v1/refunds') res.end(JSON.stringify({ id: `re_${++n}` }));
+      else { res.statusCode = 404; res.end('{}'); }
+    });
+  });
+  await new Promise((r) => mock.listen(0, '127.0.0.1', r));
+  config.stripe.apiBase = `http://127.0.0.1:${mock.address().port}`;
+  const app = createApp();
+  await new Promise((r) => { server = app.listen(0, r); });
+  base = `http://127.0.0.1:${server.address().port}`;
+  A = await mountain(`pa-${suffix}`);
+  tenantId = (await q('SELECT id FROM tenants WHERE slug = ?', [A.slug]))[0].id;
+  pub = (m, p, o) => call('/api/v1/public', m, `/${A.slug}${p}`, o);
+  A.product = (await api('POST', '/products', { token: A.owner, body: { kind: 'lesson', name: 'Group Lesson', base_price_cents: 8000 } })).body.id;
+  assert.equal((await api('POST', '/tax-rules', { token: A.owner, body: { name: 'Sales tax', applies_to: 'all', rate_percent: 6 } })).status, 201);
+  assert.equal((await api('PUT', '/tenant/profile', { token: A.owner, body: { online_booking: true, booking_notice_hours: 1, online_payment: true, refund_full_hours: 48, refund_half_hours: 24, refund_half_percent: 50 } })).status, 200);
+});
+test.after(async () => { await new Promise((r) => server.close(r)); await new Promise((r) => mock.close(r)); await pool.end(); });
+
+test('the booking page publishes the policy and takes card payment; the refund tiers must be sensible', async () => {
+  sessionId = await newLesson(100);
+  const page = (await pub('GET', '/booking')).body;
+  assert.equal(page.pay_online, true);
+  assert.ok(page.policy.join(' ').includes('48 hours'));
+  assert.ok(page.policy.join(' ').includes('50%'));
+  assert.equal((await api('PUT', '/tenant/profile', { token: A.owner, body: { refund_full_hours: 10, refund_half_hours: 20 } })).status, 400, 'partial cutoff must be later than the full cutoff');
+});
+
+test('a reservation must accept the policy, then goes to Stripe for the tax-inclusive total', async () => {
+  sessionId = await newLesson(100);
+  assert.equal((await pub('POST', '/requests', { body: reqBody({ policy_accepted: false }) })).status, 400);
+  const before = calls.length;
+  const r = await pub('POST', '/requests', { body: reqBody() });
+  assert.equal(r.status, 201, r.text);
+  assert.match(r.body.checkout_url, /^https:\/\/checkout\.stripe\.test\//);
+  assert.equal(r.body.amount_cents, 8480, '$80 plus 6% tax');
+  const c = calls.slice(before).find((x) => x.path === '/v1/checkout/sessions');
+  assert.equal(c.auth, 'Bearer sk_test_mock');
+  assert.equal(c.params['line_items[0][price_data][unit_amount]'], '8480');
+  const row = (await q('SELECT status, amount_cents FROM lesson_requests WHERE reference = ?', [r.body.reference]))[0];
+  assert.equal(row.status, 'awaiting_payment');
+  assert.equal((await q('SELECT COUNT(*) AS n FROM lesson_bookings WHERE session_id = ?', [sessionId]))[0].n, 0, 'nothing is booked until the money arrives');
+  // the spot is held while the guest pays
+  const held = (await pub('GET', '/booking')).body.lessons.find((l) => l.id === sessionId);
+  assert.equal(held.spots_left, 3);
+});
+
+test('webhooks need a valid, fresh signature, and a paid webhook books the lesson and records the sale once', async () => {
+  sessionId = await newLesson(100);
+  const r = await pub('POST', '/requests', { body: reqBody() });
+  const row = (await q('SELECT * FROM lesson_requests WHERE reference = ?', [r.body.reference]))[0];
+  const info = { session_id: row.stripe_session_id, amount_cents: row.amount_cents };
+  const ev = completed(info, row.id, tenantId);
+  assert.equal((await webhook(ev, { secret: 'whsec_wrong' })).status, 400);
+  assert.equal((await webhook(ev, { t: Math.floor(Date.now() / 1000) - 3600 })).status, 400, 'a replayed old signature is refused');
+  assert.equal((await webhook(ev, { tamper: true })).status, 400);
+  assert.equal((await q('SELECT status FROM lesson_requests WHERE id = ?', [row.id]))[0].status, 'awaiting_payment', 'bad webhooks change nothing');
+  assert.equal((await webhook(ev)).status, 200);
+  assert.equal((await webhook(ev)).body.duplicate, true, 'a repeat delivery is harmless');
+  const done = (await q('SELECT status, order_id FROM lesson_requests WHERE id = ?', [row.id]))[0];
+  assert.equal(done.status, 'confirmed');
+  const order = (await q('SELECT status, total_cents, tax_cents, channel FROM orders WHERE id = ?', [done.order_id]))[0];
+  assert.deepEqual({ ...order }, { status: 'paid', total_cents: 8480, tax_cents: 480, channel: 'online' });
+  assert.equal((await q('SELECT COUNT(*) AS n FROM orders WHERE tenant_id = ?', [tenantId]))[0].n >= 1, true);
+  const pay = (await q('SELECT tender, amount_cents, processor FROM order_payments WHERE order_id = ?', [done.order_id]))[0];
+  assert.deepEqual({ ...pay }, { tender: 'card', amount_cents: 8480, processor: 'stripe' });
+  const bk = await q('SELECT status, unpaid FROM lesson_bookings WHERE session_id = ?', [sessionId]);
+  assert.equal(bk.length, 1);
+  assert.equal(bk[0].unpaid, 0);
+});
+
+test('a payment for the wrong amount is refunded and nothing is booked', async () => {
+  sessionId = await newLesson(100);
+  const r = await pub('POST', '/requests', { body: reqBody() });
+  const row = (await q('SELECT * FROM lesson_requests WHERE reference = ?', [r.body.reference]))[0];
+  const before = calls.length;
+  const w = await webhook(completed({ session_id: row.stripe_session_id, amount_cents: 100 }, row.id, tenantId));
+  assert.equal(w.status, 200);
+  assert.equal((await q('SELECT status FROM lesson_requests WHERE id = ?', [row.id]))[0].status, 'expired');
+  assert.equal((await q('SELECT COUNT(*) AS n FROM lesson_bookings WHERE session_id = ?', [sessionId]))[0].n, 0);
+  const rf = calls.slice(before).find((x) => x.path === '/v1/refunds');
+  assert.equal(rf.params.amount, '100');
+});
+
+test('if the lesson filled up while the guest was paying, they are refunded in full', async () => {
+  sessionId = await newLesson(100, 1);
+  const r = await pub('POST', '/requests', { body: reqBody() });
+  const row = (await q('SELECT * FROM lesson_requests WHERE reference = ?', [r.body.reference]))[0];
+  // the desk sells the last place before the webhook lands
+  const [p] = await pool.query("INSERT INTO people (tenant_id, first_name, last_name) VALUES (?, 'Walk', 'In')", [tenantId]);
+  await pool.query("INSERT INTO lesson_bookings (tenant_id, session_id, person_id, status, unpaid) VALUES (?, ?, ?, 'booked', 0)", [tenantId, sessionId, p.insertId]);
+  const before = calls.length;
+  await webhook(completed({ session_id: row.stripe_session_id, amount_cents: row.amount_cents }, row.id, tenantId));
+  const after = (await q('SELECT status, refund_cents, staff_note FROM lesson_requests WHERE id = ?', [row.id]))[0];
+  assert.equal(after.status, 'expired');
+  assert.equal(after.refund_cents, 8480);
+  assert.match(after.staff_note, /Refunded automatically/);
+  assert.equal(calls.slice(before).find((x) => x.path === '/v1/refunds').params.amount, '8480');
+  assert.equal((await q('SELECT COUNT(*) AS n FROM orders WHERE payment_ref = ?', [`pi_${row.stripe_session_id}`]))[0].n, 0);
+});
+
+test('an abandoned checkout expires and frees the spot', async () => {
+  sessionId = await newLesson(100, 1);
+  const r = await pub('POST', '/requests', { body: reqBody() });
+  const row = (await q('SELECT * FROM lesson_requests WHERE reference = ?', [r.body.reference]))[0];
+  assert.equal((await pub('POST', '/requests', { body: reqBody() })).status, 409, 'held while paying');
+  const ev = { id: 'evt_x', type: 'checkout.session.expired', data: { object: { id: row.stripe_session_id, metadata: { tenant_id: String(tenantId), request_id: String(row.id) } } } };
+  assert.equal((await webhook(ev)).status, 200);
+  assert.equal((await q('SELECT status FROM lesson_requests WHERE id = ?', [row.id]))[0].status, 'expired');
+  assert.equal((await pub('POST', '/requests', { body: reqBody() })).status, 201, 'the spot is free again');
+});
+
+test('cancelling a paid lesson refunds 100% well ahead, 50% in the middle window and nothing at the last minute', async () => {
+  const cancel = (info, email = 'pam@x.test') => pub('POST', `/requests/${info.reference}/cancel`, { body: { email } });
+  // 100 hours ahead: full refund
+  let info = await reserveAndPay(100);
+  assert.equal((await cancel(info, 'wrong@x.test')).status, 404, 'needs the right email');
+  let before = calls.length;
+  let c = await cancel(info);
+  assert.equal(c.status, 200, JSON.stringify(c.body));
+  assert.equal(c.body.refund_percent, 100);
+  assert.equal(c.body.refund_cents, 8480);
+  assert.equal(calls.slice(before).find((x) => x.path === '/v1/refunds').params.amount, '8480');
+  assert.equal((await q('SELECT status, refunded_cents FROM orders WHERE payment_ref = ?', [`pi_${info.session_id}`]))[0].status, 'refunded');
+  assert.equal((await q('SELECT COUNT(*) AS n FROM lesson_bookings WHERE session_id = (SELECT session_id FROM lesson_requests WHERE reference = ?) AND status = \'booked\'', [info.reference]))[0].n, 0);
+  assert.equal((await q('SELECT COUNT(*) AS n FROM order_refunds WHERE tenant_id = ? AND method = \'card\'', [tenantId]))[0].n >= 1, true);
+  assert.equal((await cancel(info)).status, 409, 'cannot cancel twice');
+  // 30 hours ahead: half
+  info = await reserveAndPay(30);
+  before = calls.length;
+  c = await cancel(info);
+  assert.equal(c.body.refund_percent, 50);
+  assert.equal(c.body.refund_cents, 4240);
+  assert.equal(calls.slice(before).find((x) => x.path === '/v1/refunds').params.amount, '4240');
+  const o = (await q('SELECT status, refunded_cents FROM orders WHERE payment_ref = ?', [`pi_${info.session_id}`]))[0];
+  assert.deepEqual({ ...o }, { status: 'paid', refunded_cents: 4240 });
+  // 10 hours ahead: none
+  info = await reserveAndPay(10);
+  before = calls.length;
+  c = await cancel(info);
+  assert.equal(c.body.refund_percent, 0);
+  assert.equal(c.body.refund_cents, 0);
+  assert.equal(calls.slice(before).some((x) => x.path === '/v1/refunds'), false);
+  assert.equal((await pub('GET', `/requests/${info.reference}?email=pam@x.test`)).body.status, 'cancelled');
+});
+
+test('card payment is off until switched on, and another mountain cannot confirm this one\'s request', async () => {
+  const B = await mountain(`pb-${suffix}`);
+  const bid = (await q('SELECT id FROM tenants WHERE slug = ?', [B.slug]))[0].id;
+  sessionId = await newLesson(100);
+  const r = await pub('POST', '/requests', { body: reqBody() });
+  const row = (await q('SELECT * FROM lesson_requests WHERE reference = ?', [r.body.reference]))[0];
+  // an event naming the other mountain finds nothing to confirm
+  const w = await webhook(completed({ session_id: row.stripe_session_id, amount_cents: row.amount_cents }, row.id, bid));
+  assert.equal(w.status, 200);
+  assert.equal((await q('SELECT status FROM lesson_requests WHERE id = ?', [row.id]))[0].status, 'awaiting_payment');
+  await api('PUT', '/tenant/profile', { token: A.owner, body: { online_payment: false } });
+  assert.equal((await pub('GET', '/booking')).body.pay_online, false);
+  sessionId = await newLesson(100);
+  const free = await pub('POST', '/requests', { body: reqBody({ policy_accepted: undefined }) });
+  assert.equal(free.status, 201);
+  assert.equal(free.body.checkout_url, undefined, 'without card payment it is a desk request');
+});
+
+test('the quote endpoint gives the exact total, tax included, and the page lists the policy as tiers', async () => {
+  await api('PUT', '/tenant/profile', { token: A.owner, body: { online_payment: true } });
+  sessionId = await newLesson(100);
+  const adult = '1985-03-02'; const kidDob = kid.date_of_birth;
+  const one = await pub('POST', '/quote', { body: { session_id: sessionId, students: [{ date_of_birth: adult }] } });
+  assert.equal(one.status, 200, one.text);
+  assert.deepEqual({ s: one.body.subtotal_cents, t: one.body.tax_cents, total: one.body.total_cents }, { s: 8000, t: 480, total: 8480 });
+  const two = await pub('POST', '/quote', { body: { session_id: sessionId, students: [{ date_of_birth: adult }, { date_of_birth: kidDob }] } });
+  assert.equal(two.body.total_cents, 16960);
+  assert.equal((await pub('POST', '/quote', { body: { session_id: 999999999, students: [{ date_of_birth: adult }] } })).status, 404);
+  const page = (await pub('GET', '/booking')).body;
+  assert.deepEqual(page.policy_tiers.map((t) => t.percent), [100, 50, 0]);
+  assert.equal(page.policy_tiers[0].from_hours, 48);
+  assert.ok(page.policy_notes.length >= 1);
+});

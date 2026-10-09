@@ -1,0 +1,318 @@
+'use strict';
+
+// Applies db/schema.sql, then the additive steps below. Everything is idempotent, so it is safe to
+// re-run, and it upgrades an existing database in place without touching its data.
+//
+// MySQL 8 has no "ADD COLUMN IF NOT EXISTS", so each step checks information_schema first.
+const fs = require('fs');
+const path = require('path');
+const mysql = require('mysql2/promise');
+const config = require('../src/config');
+
+const has = async (conn, sql, params) => (await conn.query(sql, params))[0].length > 0;
+
+const columnExists = (conn, table, column) =>
+  has(conn, 'SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?', [table, column]);
+const constraintExists = (conn, table, name) =>
+  has(conn, 'SELECT 1 FROM information_schema.table_constraints WHERE table_schema = DATABASE() AND table_name = ? AND constraint_name = ?', [table, name]);
+const indexExists = (conn, table, name) =>
+  has(conn, 'SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?', [table, name]);
+
+// Each step: [description, check that returns true when already applied, DDL to apply].
+// An index that forbids duplicates cannot be added while duplicates exist, so such a step is skipped (with a note) until they are cleaned up.
+const hasDuplicates = async (conn, table, col, where) => {
+  const [r] = await conn.query(`SELECT 1 FROM \`${table}\` WHERE ${where} GROUP BY tenant_id, ${col} HAVING COUNT(*) > 1 LIMIT 1`);
+  if (r.length) console.warn(`  Skipped a uniqueness rule on ${table}: some people already have two open rows there. Close the extras, then run the migration again.`);
+  return r.length > 0;
+};
+
+const steps = [
+  ['documents.text_status', (c) => columnExists(c, 'documents', 'text_status'), "ALTER TABLE documents ADD COLUMN text_status ENUM('pending','indexed','needs_ocr','none','unsupported','failed') NOT NULL DEFAULT 'pending'"],
+  ['documents.text_method', (c) => columnExists(c, 'documents', 'text_method'), "ALTER TABLE documents ADD COLUMN text_method VARCHAR(10) NULL"],
+  ['documents.file_at', (c) => columnExists(c, 'documents', 'file_at'), 'ALTER TABLE documents ADD COLUMN file_at TIMESTAMP NULL'],
+  ['documents.version_note', (c) => columnExists(c, 'documents', 'version_note'), "ALTER TABLE documents ADD COLUMN version_note VARCHAR(200) NULL"],
+  ['tenants.show_instructor_availability', (c) => columnExists(c, 'tenants', 'show_instructor_availability'), 'ALTER TABLE tenants ADD COLUMN show_instructor_availability TINYINT(1) NOT NULL DEFAULT 0'],
+  ['tenants.status', (c) => columnExists(c, 'tenants', 'status'), "ALTER TABLE tenants ADD COLUMN status ENUM('active','suspended') NOT NULL DEFAULT 'active'"],
+  ['tenants.storage_cap_mb', (c) => columnExists(c, 'tenants', 'storage_cap_mb'), 'ALTER TABLE tenants ADD COLUMN storage_cap_mb INT UNSIGNED NOT NULL DEFAULT 500'],
+  ['tenants.platform_notes', (c) => columnExists(c, 'tenants', 'platform_notes'), 'ALTER TABLE tenants ADD COLUMN platform_notes VARCHAR(500) NULL'],
+  ['tenants.sandbox_expires_at', (c) => columnExists(c, 'tenants', 'sandbox_expires_at'), 'ALTER TABLE tenants ADD COLUMN sandbox_expires_at DATETIME NULL'],
+  ['rental_items.serial_no', (cn) => columnExists(cn, 'rental_items', 'serial_no'), 'ALTER TABLE rental_items ADD COLUMN serial_no VARCHAR(60) NULL'],
+  ['rental_items.tier', (cn) => columnExists(cn, 'rental_items', 'tier'), "ALTER TABLE rental_items ADD COLUMN tier ENUM('standard','performance') NOT NULL DEFAULT 'standard'"],
+  ['rental_items.boot_sole_mm', (cn) => columnExists(cn, 'rental_items', 'boot_sole_mm'), 'ALTER TABLE rental_items ADD COLUMN boot_sole_mm SMALLINT UNSIGNED NULL'],
+  ['rental_items.purchased_on', (cn) => columnExists(cn, 'rental_items', 'purchased_on'), 'ALTER TABLE rental_items ADD COLUMN purchased_on DATE NULL'],
+  ['rental_items.cost_cents', (cn) => columnExists(cn, 'rental_items', 'cost_cents'), 'ALTER TABLE rental_items ADD COLUMN cost_cents INT UNSIGNED NULL'],
+  ['rental_items.grade', (cn) => columnExists(cn, 'rental_items', 'grade'), "ALTER TABLE rental_items ADD COLUMN grade ENUM('A','B','C','D') NULL"],
+  ['rental_items.location', (cn) => columnExists(cn, 'rental_items', 'location'), 'ALTER TABLE rental_items ADD COLUMN location VARCHAR(60) NULL'],
+  ['rental_items.uses_count', (cn) => columnExists(cn, 'rental_items', 'uses_count'), 'ALTER TABLE rental_items ADD COLUMN uses_count INT UNSIGNED NOT NULL DEFAULT 0'],
+  ['rental_items.uses_at_service', (cn) => columnExists(cn, 'rental_items', 'uses_at_service'), 'ALTER TABLE rental_items ADD COLUMN uses_at_service INT UNSIGNED NOT NULL DEFAULT 0'],
+  ['rental_items.last_service_at', (cn) => columnExists(cn, 'rental_items', 'last_service_at'), 'ALTER TABLE rental_items ADD COLUMN last_service_at DATETIME NULL'],
+  ['rental_contracts.group_name', (cn) => columnExists(cn, 'rental_contracts', 'group_name'), 'ALTER TABLE rental_contracts ADD COLUMN group_name VARCHAR(120) NULL'],
+  ['rental_contracts.deposit_cents', (cn) => columnExists(cn, 'rental_contracts', 'deposit_cents'), 'ALTER TABLE rental_contracts ADD COLUMN deposit_cents INT UNSIGNED NOT NULL DEFAULT 0'],
+  ['rental_contracts.reservation_id', (cn) => columnExists(cn, 'rental_contracts', 'reservation_id'), 'ALTER TABLE rental_contracts ADD COLUMN reservation_id BIGINT UNSIGNED NULL'],
+  ['rental_contracts.notes', (cn) => columnExists(cn, 'rental_contracts', 'notes'), 'ALTER TABLE rental_contracts ADD COLUMN notes VARCHAR(300) NULL'],
+  ['rental_contract_items.person_id', (cn) => columnExists(cn, 'rental_contract_items', 'person_id'), 'ALTER TABLE rental_contract_items ADD COLUMN person_id BIGINT UNSIGNED NULL'],
+  ['rental_contract_items.boot_sole_mm', (cn) => columnExists(cn, 'rental_contract_items', 'boot_sole_mm'), 'ALTER TABLE rental_contract_items ADD COLUMN boot_sole_mm SMALLINT UNSIGNED NULL'],
+  ['rental_contract_items.skier_type', (cn) => columnExists(cn, 'rental_contract_items', 'skier_type'), 'ALTER TABLE rental_contract_items ADD COLUMN skier_type VARCHAR(4) NULL'],
+  ['rental_contract_items.tech_name', (cn) => columnExists(cn, 'rental_contract_items', 'tech_name'), 'ALTER TABLE rental_contract_items ADD COLUMN tech_name VARCHAR(100) NULL'],
+  ['rental_contract_items.set_at', (cn) => columnExists(cn, 'rental_contract_items', 'set_at'), 'ALTER TABLE rental_contract_items ADD COLUMN set_at DATETIME NULL'],
+  ['rental_contract_items.test_result', (cn) => columnExists(cn, 'rental_contract_items', 'test_result'), "ALTER TABLE rental_contract_items ADD COLUMN test_result ENUM('pass','fail') NULL"],
+  ['rental_contract_items.swap_reason', (cn) => columnExists(cn, 'rental_contract_items', 'swap_reason'), 'ALTER TABLE rental_contract_items ADD COLUMN swap_reason VARCHAR(200) NULL'],
+  ['documents.require_ack', (c) => columnExists(c, 'documents', 'require_ack'), 'ALTER TABLE documents ADD COLUMN require_ack TINYINT(1) NOT NULL DEFAULT 0'],
+  ['till_sessions.open_key', (c) => columnExists(c, 'till_sessions', 'open_key'), "ALTER TABLE till_sessions ADD COLUMN open_key BIGINT UNSIGNED AS (IF(status = 'open', opened_by, NULL)) STORED"],
+  ['till_sessions one open drawer per person', async (c) => (await indexExists(c, 'till_sessions', 'uq_till_open')) || hasDuplicates(c, 'till_sessions', 'opened_by', "status = 'open'"), 'ALTER TABLE till_sessions ADD UNIQUE KEY uq_till_open (tenant_id, open_key)'],
+  ['time_entries.open_key', (c) => columnExists(c, 'time_entries', 'open_key'), 'ALTER TABLE time_entries ADD COLUMN open_key BIGINT UNSIGNED AS (IF(clock_out IS NULL, staff_id, NULL)) STORED'],
+  ['time_entries one open punch per person', async (c) => (await indexExists(c, 'time_entries', 'uq_time_open')) || hasDuplicates(c, 'time_entries', 'staff_id', 'clock_out IS NULL'), 'ALTER TABLE time_entries ADD UNIQUE KEY uq_time_open (tenant_id, open_key)'],
+  ['users.staff_id', (c) => columnExists(c, 'users', 'staff_id'), 'ALTER TABLE users ADD COLUMN staff_id BIGINT UNSIGNED NULL AFTER person_id'],
+  ['users.password_changed_at', (c) => columnExists(c, 'users', 'password_changed_at'), 'ALTER TABLE users ADD COLUMN password_changed_at TIMESTAMP NULL'],
+  ['users unique staff link', (c) => indexExists(c, 'users', 'uq_users_staff'), 'ALTER TABLE users ADD UNIQUE KEY uq_users_staff (tenant_id, staff_id)'],
+  ['users.staff_id foreign key', (c) => constraintExists(c, 'users', 'fk_users_staff'),
+    'ALTER TABLE users ADD CONSTRAINT fk_users_staff FOREIGN KEY (tenant_id, staff_id) REFERENCES staff(tenant_id, id)'],
+];
+
+// Patrol: incidents grow into full patient care reports. Legacy rows are kept and backfilled below.
+const incidentCol = (name, ddl, after) => [`incidents.${name}`, (c) => columnExists(c, 'incidents', name), after ? [ddl, after] : ddl];
+const patrolSteps = [
+  incidentCol('season', 'ALTER TABLE incidents ADD COLUMN season VARCHAR(10) NULL'),
+  incidentCol('seq', 'ALTER TABLE incidents ADD COLUMN seq INT UNSIGNED NULL'),
+  ['incidents case number key', (c) => indexExists(c, 'incidents', 'uq_incidents_case'), 'ALTER TABLE incidents ADD UNIQUE KEY uq_incidents_case (tenant_id, season, seq)'],
+  // Reports that were already closed before sign-off existed are treated as approved.
+  incidentCol('report_state', "ALTER TABLE incidents ADD COLUMN report_state ENUM('draft','submitted','approved') NOT NULL DEFAULT 'draft'",
+    "UPDATE incidents SET report_state = 'approved' WHERE status = 'closed'"),
+  incidentCol('submitted_by', 'ALTER TABLE incidents ADD COLUMN submitted_by BIGINT UNSIGNED NULL'),
+  incidentCol('submitted_at', 'ALTER TABLE incidents ADD COLUMN submitted_at DATETIME NULL'),
+  incidentCol('approved_by', 'ALTER TABLE incidents ADD COLUMN approved_by BIGINT UNSIGNED NULL'),
+  incidentCol('approved_at', 'ALTER TABLE incidents ADD COLUMN approved_at DATETIME NULL'),
+  incidentCol('weather', 'ALTER TABLE incidents ADD COLUMN weather VARCHAR(100) NULL'),
+  incidentCol('gps_lat', 'ALTER TABLE incidents ADD COLUMN gps_lat DECIMAL(9,6) NULL'),
+  incidentCol('gps_lng', 'ALTER TABLE incidents ADD COLUMN gps_lng DECIMAL(9,6) NULL'),
+  incidentCol('trail_id', 'ALTER TABLE incidents ADD COLUMN trail_id BIGINT UNSIGNED NULL'),
+  ['incidents.trail_id foreign key', (c) => constraintExists(c, 'incidents', 'fk_incidents_trail'),
+    'ALTER TABLE incidents ADD CONSTRAINT fk_incidents_trail FOREIGN KEY (tenant_id, trail_id) REFERENCES trails(tenant_id, id)'],
+  // Guest help page: off until a manager turns it on.
+  ['tenants.guest_help_enabled', (c) => columnExists(c, 'tenants', 'guest_help_enabled'), 'ALTER TABLE tenants ADD COLUMN guest_help_enabled TINYINT(1) NOT NULL DEFAULT 0'],
+  ['tenants.guest_help_message', (c) => columnExists(c, 'tenants', 'guest_help_message'), 'ALTER TABLE tenants ADD COLUMN guest_help_message VARCHAR(300) NULL'],
+  // NSAAR incident form: form values stored as JSON text, full witness details, the resort's legal name.
+  ['incidents.form', (c) => columnExists(c, 'incidents', 'form'), 'ALTER TABLE incidents ADD COLUMN form TEXT NULL'],
+  ['incident_patients.form', (c) => columnExists(c, 'incident_patients', 'form'), 'ALTER TABLE incident_patients ADD COLUMN form TEXT NULL'],
+  ['incident_witnesses.relation', (c) => columnExists(c, 'incident_witnesses', 'relation'), "ALTER TABLE incident_witnesses ADD COLUMN relation ENUM('witnessed_by','accompanied_by','collided_with','other') NULL"],
+  ['incident_witnesses.address', (c) => columnExists(c, 'incident_witnesses', 'address'), 'ALTER TABLE incident_witnesses ADD COLUMN address VARCHAR(255) NULL'],
+  ['incident_witnesses.city', (c) => columnExists(c, 'incident_witnesses', 'city'), 'ALTER TABLE incident_witnesses ADD COLUMN city VARCHAR(100) NULL'],
+  ['incident_witnesses.region', (c) => columnExists(c, 'incident_witnesses', 'region'), 'ALTER TABLE incident_witnesses ADD COLUMN region VARCHAR(60) NULL'],
+  ['incident_witnesses.postal', (c) => columnExists(c, 'incident_witnesses', 'postal'), 'ALTER TABLE incident_witnesses ADD COLUMN postal VARCHAR(20) NULL'],
+  ['tenants.legal_name', (c) => columnExists(c, 'tenants', 'legal_name'), 'ALTER TABLE tenants ADD COLUMN legal_name VARCHAR(255) NULL'],
+  // Collision report, follow-up email and donations (Updates 2 to 4).
+  ['incident_patients.email', (c) => columnExists(c, 'incident_patients', 'email'), 'ALTER TABLE incident_patients ADD COLUMN email VARCHAR(255) NULL'],
+  ['incident_patients.guardian_name', (c) => columnExists(c, 'incident_patients', 'guardian_name'), 'ALTER TABLE incident_patients ADD COLUMN guardian_name VARCHAR(150) NULL'],
+  ['incident_patients.guardian_email', (c) => columnExists(c, 'incident_patients', 'guardian_email'), 'ALTER TABLE incident_patients ADD COLUMN guardian_email VARCHAR(255) NULL'],
+  ['incident_patients.no_followup', (c) => columnExists(c, 'incident_patients', 'no_followup'), 'ALTER TABLE incident_patients ADD COLUMN no_followup TINYINT(1) NOT NULL DEFAULT 0'],
+  ['tenants.followup_enabled', (c) => columnExists(c, 'tenants', 'followup_enabled'), 'ALTER TABLE tenants ADD COLUMN followup_enabled TINYINT(1) NOT NULL DEFAULT 0'],
+  ['tenants.followup_days', (c) => columnExists(c, 'tenants', 'followup_days'), 'ALTER TABLE tenants ADD COLUMN followup_days TINYINT UNSIGNED NOT NULL DEFAULT 5'],
+  ['tenants.patrol_org_name', (c) => columnExists(c, 'tenants', 'patrol_org_name'), 'ALTER TABLE tenants ADD COLUMN patrol_org_name VARCHAR(150) NULL'],
+  ['tenants.mail_address', (c) => columnExists(c, 'tenants', 'mail_address'), 'ALTER TABLE tenants ADD COLUMN mail_address VARCHAR(300) NULL'],
+  ['tenants.donate_amounts', (c) => columnExists(c, 'tenants', 'donate_amounts'), 'ALTER TABLE tenants ADD COLUMN donate_amounts VARCHAR(60) NOT NULL DEFAULT \'25,50,100,250\''],
+  ['tenants.donate_blurb', (c) => columnExists(c, 'tenants', 'donate_blurb'), 'ALTER TABLE tenants ADD COLUMN donate_blurb VARCHAR(600) NULL'],
+  ['tenants.tax_note', (c) => columnExists(c, 'tenants', 'tax_note'), 'ALTER TABLE tenants ADD COLUMN tax_note VARCHAR(500) NULL'],
+  ['tenants.reply_to', (c) => columnExists(c, 'tenants', 'reply_to'), 'ALTER TABLE tenants ADD COLUMN reply_to VARCHAR(255) NULL'],
+  // Patrol map: where the map opens for this mountain.
+  ['tenants.map_lat', (c) => columnExists(c, 'tenants', 'map_lat'), 'ALTER TABLE tenants ADD COLUMN map_lat DECIMAL(9,6) NULL'],
+  ['tenants.map_lng', (c) => columnExists(c, 'tenants', 'map_lng'), 'ALTER TABLE tenants ADD COLUMN map_lng DECIMAL(9,6) NULL'],
+  ['tenants.map_zoom', (c) => columnExists(c, 'tenants', 'map_zoom'), 'ALTER TABLE tenants ADD COLUMN map_zoom TINYINT UNSIGNED NULL'],
+  // Shared customer record (CRM): the people table now carries the standard contact details every module uses.
+  ['people.address_line1', (c) => columnExists(c, 'people', 'address_line1'), "ALTER TABLE people ADD COLUMN address_line1 VARCHAR(255) NULL"],
+  ['people.address_line2', (c) => columnExists(c, 'people', 'address_line2'), "ALTER TABLE people ADD COLUMN address_line2 VARCHAR(255) NULL"],
+  ['people.city', (c) => columnExists(c, 'people', 'city'), "ALTER TABLE people ADD COLUMN city VARCHAR(100) NULL"],
+  ['people.region', (c) => columnExists(c, 'people', 'region'), "ALTER TABLE people ADD COLUMN region VARCHAR(60) NULL"],
+  ['people.postal_code', (c) => columnExists(c, 'people', 'postal_code'), "ALTER TABLE people ADD COLUMN postal_code VARCHAR(20) NULL"],
+  ['people.country', (c) => columnExists(c, 'people', 'country'), "ALTER TABLE people ADD COLUMN country VARCHAR(60) NULL"],
+  ['people.emergency_name', (c) => columnExists(c, 'people', 'emergency_name'), "ALTER TABLE people ADD COLUMN emergency_name VARCHAR(150) NULL"],
+  ['people.emergency_phone', (c) => columnExists(c, 'people', 'emergency_phone'), "ALTER TABLE people ADD COLUMN emergency_phone VARCHAR(40) NULL"],
+  ['people.discipline', (c) => columnExists(c, 'people', 'discipline'), "ALTER TABLE people ADD COLUMN discipline ENUM('ski','snowboard','telemark','adaptive') NULL"],
+  ['people.ability_level', (c) => columnExists(c, 'people', 'ability_level'), "ALTER TABLE people ADD COLUMN ability_level ENUM('first_timer','beginner','intermediate','advanced') NULL"],
+  ['people.marketing_opt_in', (c) => columnExists(c, 'people', 'marketing_opt_in'), "ALTER TABLE people ADD COLUMN marketing_opt_in TINYINT(1) NOT NULL DEFAULT 0"],
+  ['people.marketing_opt_in_at', (c) => columnExists(c, 'people', 'marketing_opt_in_at'), "ALTER TABLE people ADD COLUMN marketing_opt_in_at TIMESTAMP NULL"],
+  ['people.source', (c) => columnExists(c, 'people', 'source'), "ALTER TABLE people ADD COLUMN source VARCHAR(20) NULL"],
+  ['people.notes', (c) => columnExists(c, 'people', 'notes'), "ALTER TABLE people ADD COLUMN notes VARCHAR(1000) NULL"],
+  ['people.anonymised_at', (c) => columnExists(c, 'people', 'anonymised_at'), "ALTER TABLE people ADD COLUMN anonymised_at TIMESTAMP NULL"],
+  ['people.updated_at', (c) => columnExists(c, 'people', 'updated_at'), "ALTER TABLE people ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"],
+  ['people phone index', (c) => indexExists(c, 'people', 'ix_people_phone'), 'ALTER TABLE people ADD KEY ix_people_phone (tenant_id, phone)'],
+  // One basket for everything: order lines can be tickets, lessons, rentals, programs or gift cards.
+  ['order_items.line_kind', (c) => columnExists(c, 'order_items', 'line_kind'), "ALTER TABLE order_items ADD COLUMN line_kind ENUM('ticket','lesson','rental','program','gift_card') NOT NULL DEFAULT 'ticket' AFTER product_id"],
+  ['order_items.person_id', (c) => columnExists(c, 'order_items', 'person_id'), 'ALTER TABLE order_items ADD COLUMN person_id BIGINT UNSIGNED NULL AFTER line_kind'],
+  ['order_items.session_id', (c) => columnExists(c, 'order_items', 'session_id'), 'ALTER TABLE order_items ADD COLUMN session_id BIGINT UNSIGNED NULL AFTER person_id'],
+  ['order_items.program_id', (c) => columnExists(c, 'order_items', 'program_id'), 'ALTER TABLE order_items ADD COLUMN program_id BIGINT UNSIGNED NULL AFTER session_id'],
+  ['order_items.contract_id', (c) => columnExists(c, 'order_items', 'contract_id'), 'ALTER TABLE order_items ADD COLUMN contract_id BIGINT UNSIGNED NULL AFTER program_id'],
+  ['order_items.gift_card_id', (c) => columnExists(c, 'order_items', 'gift_card_id'), 'ALTER TABLE order_items ADD COLUMN gift_card_id BIGINT UNSIGNED NULL AFTER contract_id'],
+  ['order_items.product_id optional', async (c) => (await c.query("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'order_items' AND column_name = 'product_id' AND is_nullable = 'YES'"))[0].length > 0, 'ALTER TABLE order_items MODIFY COLUMN product_id BIGINT UNSIGNED NULL'],
+  ['order_items order index', (c) => indexExists(c, 'order_items', 'ix_order_items_order'), 'ALTER TABLE order_items ADD KEY ix_order_items_order (tenant_id, order_id)'],
+  // Phone numbers compared by their last 10 digits, so (610) 555-0100 and 610-555-0100 are the same number.
+  ['audit_log time index', (c) => indexExists(c, 'audit_log', 'ix_audit_time'), 'ALTER TABLE audit_log ADD KEY ix_audit_time (tenant_id, at)'],
+  ['people.sex', (c) => columnExists(c, 'people', 'sex'), "ALTER TABLE people ADD COLUMN sex ENUM('female','male','other') NULL AFTER date_of_birth"],
+  // Tax, refunds, till, family, passes, two-step sign-in, receipts (new tables are created by schema.sql).
+  ['tenants.address', (c) => columnExists(c, 'tenants', 'address'), 'ALTER TABLE tenants ADD COLUMN address VARCHAR(255) NULL'],
+  ['tenants.phone', (c) => columnExists(c, 'tenants', 'phone'), 'ALTER TABLE tenants ADD COLUMN phone VARCHAR(40) NULL'],
+  ['tenants.receipt_footer', (c) => columnExists(c, 'tenants', 'receipt_footer'), 'ALTER TABLE tenants ADD COLUMN receipt_footer VARCHAR(500) NULL'],
+  ['tenants.waiver_text', (c) => columnExists(c, 'tenants', 'waiver_text'), 'ALTER TABLE tenants ADD COLUMN waiver_text TEXT NULL'],
+  ['tenants.require_mfa', (c) => columnExists(c, 'tenants', 'require_mfa'), 'ALTER TABLE tenants ADD COLUMN require_mfa TINYINT(1) NOT NULL DEFAULT 0'],
+  ['tenants.comp_counter_limit_cents', (c) => columnExists(c, 'tenants', 'comp_counter_limit_cents'), 'ALTER TABLE tenants ADD COLUMN comp_counter_limit_cents INT UNSIGNED NOT NULL DEFAULT 0'],
+  ['tenants.scan_passback_seconds', (c) => columnExists(c, 'tenants', 'scan_passback_seconds'), 'ALTER TABLE tenants ADD COLUMN scan_passback_seconds SMALLINT UNSIGNED NOT NULL DEFAULT 120'],
+  ['lesson_sessions.format', (c) => columnExists(c, 'lesson_sessions', 'format'), "ALTER TABLE lesson_sessions ADD COLUMN format ENUM('group','semi_private','private') NOT NULL DEFAULT 'group'"],
+  ['lesson_sessions.age_group', (c) => columnExists(c, 'lesson_sessions', 'age_group'), "ALTER TABLE lesson_sessions ADD COLUMN age_group ENUM('all','kids','teens','adults') NOT NULL DEFAULT 'all'"],
+  ['lesson_sessions.meeting_place', (c) => columnExists(c, 'lesson_sessions', 'meeting_place'), 'ALTER TABLE lesson_sessions ADD COLUMN meeting_place VARCHAR(120) NULL'],
+  ['lesson_sessions.notes', (c) => columnExists(c, 'lesson_sessions', 'notes'), 'ALTER TABLE lesson_sessions ADD COLUMN notes VARCHAR(1000) NULL'],
+  ['lesson_sessions.tip_cents', (c) => columnExists(c, 'lesson_sessions', 'tip_cents'), 'ALTER TABLE lesson_sessions ADD COLUMN tip_cents INT UNSIGNED NOT NULL DEFAULT 0'],
+  ['lesson_bookings.unpaid', (c) => columnExists(c, 'lesson_bookings', 'unpaid'), 'ALTER TABLE lesson_bookings ADD COLUMN unpaid TINYINT(1) NOT NULL DEFAULT 0'],
+  ['lesson_bookings.credit_id', (c) => columnExists(c, 'lesson_bookings', 'credit_id'), 'ALTER TABLE lesson_bookings ADD COLUMN credit_id BIGINT UNSIGNED NULL'],
+  ['lesson_bookings.instructor_notes', (c) => columnExists(c, 'lesson_bookings', 'instructor_notes'), 'ALTER TABLE lesson_bookings ADD COLUMN instructor_notes VARCHAR(1000) NULL'],
+  ['lesson_bookings.requested_instructor_id', (c) => columnExists(c, 'lesson_bookings', 'requested_instructor_id'), 'ALTER TABLE lesson_bookings ADD COLUMN requested_instructor_id BIGINT UNSIGNED NULL'],
+  ['tenants.online_booking', (c) => columnExists(c, 'tenants', 'online_booking'), 'ALTER TABLE tenants ADD COLUMN online_booking TINYINT(1) NOT NULL DEFAULT 0'],
+  ['tenants.booking_notice_hours', (c) => columnExists(c, 'tenants', 'booking_notice_hours'), 'ALTER TABLE tenants ADD COLUMN booking_notice_hours SMALLINT UNSIGNED NOT NULL DEFAULT 12'],
+  ['tenants.booking_message', (c) => columnExists(c, 'tenants', 'booking_message'), 'ALTER TABLE tenants ADD COLUMN booking_message VARCHAR(500) NULL'],
+  ['tenants.cancel_hours', (c) => columnExists(c, 'tenants', 'cancel_hours'), 'ALTER TABLE tenants ADD COLUMN cancel_hours SMALLINT UNSIGNED NOT NULL DEFAULT 24'],
+  ['lesson_bookings.request_id', (c) => columnExists(c, 'lesson_bookings', 'request_id'), 'ALTER TABLE lesson_bookings ADD COLUMN request_id BIGINT UNSIGNED NULL'],
+  ['lesson_requests.amount_cents', (c) => columnExists(c, 'lesson_requests', 'amount_cents'), 'ALTER TABLE lesson_requests ADD COLUMN amount_cents INT UNSIGNED NOT NULL DEFAULT 0'],
+  ['lesson_requests.stripe_session_id', (c) => columnExists(c, 'lesson_requests', 'stripe_session_id'), 'ALTER TABLE lesson_requests ADD COLUMN stripe_session_id VARCHAR(120) NULL'],
+  ['lesson_requests.payment_intent', (c) => columnExists(c, 'lesson_requests', 'payment_intent'), 'ALTER TABLE lesson_requests ADD COLUMN payment_intent VARCHAR(120) NULL'],
+  ['lesson_requests.order_id', (c) => columnExists(c, 'lesson_requests', 'order_id'), 'ALTER TABLE lesson_requests ADD COLUMN order_id BIGINT UNSIGNED NULL'],
+  ['lesson_requests.refund_cents', (c) => columnExists(c, 'lesson_requests', 'refund_cents'), 'ALTER TABLE lesson_requests ADD COLUMN refund_cents INT UNSIGNED NOT NULL DEFAULT 0'],
+  ['lesson_requests.policy_accepted', (c) => columnExists(c, 'lesson_requests', 'policy_accepted'), 'ALTER TABLE lesson_requests ADD COLUMN policy_accepted TINYINT(1) NOT NULL DEFAULT 0'],
+  ['lesson_requests.status awaiting_payment', async (c) => (await c.query("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'lesson_requests' AND column_name = 'status' AND column_type LIKE '%awaiting_payment%'"))[0].length > 0,
+    "ALTER TABLE lesson_requests MODIFY COLUMN status ENUM('pending','confirmed','declined','cancelled','awaiting_payment','expired') NOT NULL DEFAULT 'pending'"],
+  // Online shop: the guest page for tickets and passes. Off until a manager turns it on; each product is also opt-in.
+  ['tenants.weekly_report', (c) => columnExists(c, 'tenants', 'weekly_report'), 'ALTER TABLE tenants ADD COLUMN weekly_report TINYINT(1) NOT NULL DEFAULT 1'],
+  // Selling rules: which weekdays a product is sold (bit per day, Sunday = 1) and the most tickets for one day.
+  ['products.sale_days', (c) => columnExists(c, 'products', 'sale_days'), 'ALTER TABLE products ADD COLUMN sale_days SMALLINT UNSIGNED NULL'],
+  ['products.online_daily_limit', (c) => columnExists(c, 'products', 'online_daily_limit'), 'ALTER TABLE products ADD COLUMN online_daily_limit INT UNSIGNED NULL'],
+  ['products.advance_days', (c) => columnExists(c, 'products', 'advance_days'), 'ALTER TABLE products ADD COLUMN advance_days SMALLINT UNSIGNED NULL'],
+  ['products.advance_percent', (c) => columnExists(c, 'products', 'advance_percent'), 'ALTER TABLE products ADD COLUMN advance_percent TINYINT UNSIGNED NULL'],
+  ['shop_orders.recovery_sent_at', (c) => columnExists(c, 'shop_orders', 'recovery_sent_at'), 'ALTER TABLE shop_orders ADD COLUMN recovery_sent_at TIMESTAMP NULL'],
+  ['shop_orders.reminder_sent_at', (c) => columnExists(c, 'shop_orders', 'reminder_sent_at'), 'ALTER TABLE shop_orders ADD COLUMN reminder_sent_at TIMESTAMP NULL'],
+  ['shop_orders.thanks_sent_at', (c) => columnExists(c, 'shop_orders', 'thanks_sent_at'), 'ALTER TABLE shop_orders ADD COLUMN thanks_sent_at TIMESTAMP NULL'],
+  ['tenants.shop_recovery', (c) => columnExists(c, 'tenants', 'shop_recovery'), 'ALTER TABLE tenants ADD COLUMN shop_recovery TINYINT(1) NOT NULL DEFAULT 0'],
+  ['tenants.shop_change_hours', (c) => columnExists(c, 'tenants', 'shop_change_hours'), 'ALTER TABLE tenants ADD COLUMN shop_change_hours SMALLINT UNSIGNED NULL'],
+  ['tenants.shop_change_fee_cents', (c) => columnExists(c, 'tenants', 'shop_change_fee_cents'), 'ALTER TABLE tenants ADD COLUMN shop_change_fee_cents INT UNSIGNED NOT NULL DEFAULT 0'],
+  ['tenants.online_daily_limit', (c) => columnExists(c, 'tenants', 'online_daily_limit'), 'ALTER TABLE tenants ADD COLUMN online_daily_limit INT UNSIGNED NULL'],
+  ['tenants.online_shop', (c) => columnExists(c, 'tenants', 'online_shop'), 'ALTER TABLE tenants ADD COLUMN online_shop TINYINT(1) NOT NULL DEFAULT 0'],
+  ['tenants.shop_message', (c) => columnExists(c, 'tenants', 'shop_message'), 'ALTER TABLE tenants ADD COLUMN shop_message VARCHAR(500) NULL'],
+  ['products.online', (c) => columnExists(c, 'products', 'online'), 'ALTER TABLE products ADD COLUMN online TINYINT(1) NOT NULL DEFAULT 0'],
+  ['tenants.online_payment', (c) => columnExists(c, 'tenants', 'online_payment'), 'ALTER TABLE tenants ADD COLUMN online_payment TINYINT(1) NOT NULL DEFAULT 0'],
+  ['tenants.refund_full_hours', (c) => columnExists(c, 'tenants', 'refund_full_hours'), 'ALTER TABLE tenants ADD COLUMN refund_full_hours SMALLINT UNSIGNED NOT NULL DEFAULT 48'],
+  ['tenants.refund_half_hours', (c) => columnExists(c, 'tenants', 'refund_half_hours'), 'ALTER TABLE tenants ADD COLUMN refund_half_hours SMALLINT UNSIGNED NOT NULL DEFAULT 24'],
+  ['tenants.refund_half_percent', (c) => columnExists(c, 'tenants', 'refund_half_percent'), 'ALTER TABLE tenants ADD COLUMN refund_half_percent TINYINT UNSIGNED NOT NULL DEFAULT 50'],
+  ['tenants.cancel_note', (c) => columnExists(c, 'tenants', 'cancel_note'), 'ALTER TABLE tenants ADD COLUMN cancel_note VARCHAR(500) NULL'],
+  ['users.totp_secret', (c) => columnExists(c, 'users', 'totp_secret'), 'ALTER TABLE users ADD COLUMN totp_secret VARCHAR(255) NULL'],
+  ['users.totp_enabled', (c) => columnExists(c, 'users', 'totp_enabled'), 'ALTER TABLE users ADD COLUMN totp_enabled TINYINT(1) NOT NULL DEFAULT 0'],
+  ['users.totp_last_step', (c) => columnExists(c, 'users', 'totp_last_step'), 'ALTER TABLE users ADD COLUMN totp_last_step BIGINT NULL'],
+  ['people.height_in', (c) => columnExists(c, 'people', 'height_in'), 'ALTER TABLE people ADD COLUMN height_in SMALLINT UNSIGNED NULL'],
+  ['people.weight_lb', (c) => columnExists(c, 'people', 'weight_lb'), 'ALTER TABLE people ADD COLUMN weight_lb SMALLINT UNSIGNED NULL'],
+  ['people.boot_size', (c) => columnExists(c, 'people', 'boot_size'), 'ALTER TABLE people ADD COLUMN boot_size VARCHAR(10) NULL'],
+  ['people.stance', (c) => columnExists(c, 'people', 'stance'), "ALTER TABLE people ADD COLUMN stance ENUM('regular','goofy') NULL"],
+  ['people.skier_type', (c) => columnExists(c, 'people', 'skier_type'), 'ALTER TABLE people ADD COLUMN skier_type VARCHAR(4) NULL'],
+  ['people.photo', (c) => columnExists(c, 'people', 'photo'), 'ALTER TABLE people ADD COLUMN photo MEDIUMTEXT NULL'],
+  ['waivers.signed_by_person_id', (c) => columnExists(c, 'waivers', 'signed_by_person_id'), 'ALTER TABLE waivers ADD COLUMN signed_by_person_id BIGINT UNSIGNED NULL'],
+  ['waivers.signed_by_name', (c) => columnExists(c, 'waivers', 'signed_by_name'), 'ALTER TABLE waivers ADD COLUMN signed_by_name VARCHAR(200) NULL'],
+  ['waivers.signer_relation', (c) => columnExists(c, 'waivers', 'signer_relation'), 'ALTER TABLE waivers ADD COLUMN signer_relation VARCHAR(40) NULL'],
+  ['waivers.text_sha', (c) => columnExists(c, 'waivers', 'text_sha'), 'ALTER TABLE waivers ADD COLUMN text_sha CHAR(64) NULL'],
+  ['orders.tax_cents', (c) => columnExists(c, 'orders', 'tax_cents'), 'ALTER TABLE orders ADD COLUMN tax_cents INT UNSIGNED NOT NULL DEFAULT 0 AFTER total_cents'],
+  ['orders.refunded_cents', (c) => columnExists(c, 'orders', 'refunded_cents'), 'ALTER TABLE orders ADD COLUMN refunded_cents INT UNSIGNED NOT NULL DEFAULT 0 AFTER tax_cents'],
+  ['orders.user_id', (c) => columnExists(c, 'orders', 'user_id'), 'ALTER TABLE orders ADD COLUMN user_id BIGINT UNSIGNED NULL AFTER refunded_cents'],
+  ['order_items.discount_cents', (c) => columnExists(c, 'order_items', 'discount_cents'), 'ALTER TABLE order_items ADD COLUMN discount_cents INT UNSIGNED NOT NULL DEFAULT 0'],
+  ['order_items.tax_cents', (c) => columnExists(c, 'order_items', 'tax_cents'), 'ALTER TABLE order_items ADD COLUMN tax_cents INT UNSIGNED NOT NULL DEFAULT 0'],
+  ['order_items.refunded_at', (c) => columnExists(c, 'order_items', 'refunded_at'), 'ALTER TABLE order_items ADD COLUMN refunded_at TIMESTAMP NULL'],
+  ['order_items.refund_id', (c) => columnExists(c, 'order_items', 'refund_id'), 'ALTER TABLE order_items ADD COLUMN refund_id BIGINT UNSIGNED NULL'],
+  ['order_payments.tender comp', async (c) => (await c.query("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'order_payments' AND column_name = 'tender' AND column_type LIKE '%comp%'"))[0].length > 0,
+    "ALTER TABLE order_payments MODIFY COLUMN tender ENUM('cash','card','gift_card','other','comp') NOT NULL"],
+  ['order_payments.card_brand', (c) => columnExists(c, 'order_payments', 'card_brand'), 'ALTER TABLE order_payments ADD COLUMN card_brand VARCHAR(20) NULL'],
+  ['order_payments.card_last4', (c) => columnExists(c, 'order_payments', 'card_last4'), 'ALTER TABLE order_payments ADD COLUMN card_last4 CHAR(4) NULL'],
+  ['order_payments.auth_code', (c) => columnExists(c, 'order_payments', 'auth_code'), 'ALTER TABLE order_payments ADD COLUMN auth_code VARCHAR(30) NULL'],
+  ['order_payments.processor', (c) => columnExists(c, 'order_payments', 'processor'), 'ALTER TABLE order_payments ADD COLUMN processor VARCHAR(30) NULL'],
+  ['order_payments.comp_reason', (c) => columnExists(c, 'order_payments', 'comp_reason'), 'ALTER TABLE order_payments ADD COLUMN comp_reason VARCHAR(40) NULL'],
+  ['scans.result duplicate', async (c) => (await c.query("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'scans' AND column_name = 'result' AND column_type LIKE '%duplicate%'"))[0].length > 0,
+    "ALTER TABLE scans MODIFY COLUMN result ENUM('ok','expired','not_yet_valid','void','no_uses','unknown','duplicate') NOT NULL"],
+  ['people.phone_key', (c) => columnExists(c, 'people', 'phone_key'), "ALTER TABLE people ADD COLUMN phone_key VARCHAR(10) GENERATED ALWAYS AS (NULLIF(RIGHT(REGEXP_REPLACE(phone, '[^0-9]', ''), 10), '')) STORED AFTER phone"],
+  ['people phone_key index', (c) => indexExists(c, 'people', 'ix_people_phone_key'), 'ALTER TABLE people ADD KEY ix_people_phone_key (tenant_id, phone_key)'],
+];
+
+/** Ski season label, same rule as the API: August to July, labelled 2026-27. */
+function seasonOf(dateTime) {
+  const [y, m] = String(dateTime).slice(0, 10).split('-').map(Number);
+  const start = m >= 8 ? y : y - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
+}
+
+/** Give every report that predates case numbers one, in the order it was filed. */
+// Time clock kiosk: how each punch was made, and the per-mountain snapshot settings (snapshots stay off until a manager turns them on).
+const kioskSteps = [
+  ['time_entries.in_method', (c) => columnExists(c, 'time_entries', 'in_method'), "ALTER TABLE time_entries ADD COLUMN in_method ENUM('login','pin','badge','manager') NULL"],
+  ['time_entries.out_method', (c) => columnExists(c, 'time_entries', 'out_method'), "ALTER TABLE time_entries ADD COLUMN out_method ENUM('login','pin','badge','manager') NULL"],
+  ['time_entries.in_device_id', (c) => columnExists(c, 'time_entries', 'in_device_id'), 'ALTER TABLE time_entries ADD COLUMN in_device_id BIGINT UNSIGNED NULL'],
+  ['time_entries.out_device_id', (c) => columnExists(c, 'time_entries', 'out_device_id'), 'ALTER TABLE time_entries ADD COLUMN out_device_id BIGINT UNSIGNED NULL'],
+  ['tenants.kiosk_photos', (c) => columnExists(c, 'tenants', 'kiosk_photos'), 'ALTER TABLE tenants ADD COLUMN kiosk_photos TINYINT(1) NOT NULL DEFAULT 0'],
+  ['tenants.kiosk_photo_days', (c) => columnExists(c, 'tenants', 'kiosk_photo_days'), 'ALTER TABLE tenants ADD COLUMN kiosk_photo_days SMALLINT UNSIGNED NOT NULL DEFAULT 30'],
+];
+
+// Patrol access levels. Existing roster ranks carry over: director -> admin, leader -> manager, everyone else -> patrol.
+const accessSteps = [
+  ['patrol_members.access_level', (c) => columnExists(c, 'patrol_members', 'access_level'), [
+    "ALTER TABLE patrol_members ADD COLUMN access_level ENUM('admin','manager','approver','patrol','host') NOT NULL DEFAULT 'patrol'",
+    "UPDATE patrol_members SET access_level = CASE level WHEN 'director' THEN 'admin' WHEN 'leader' THEN 'manager' ELSE 'patrol' END",
+  ]],
+];
+
+async function backfillCaseNumbers(conn) {
+  const [rows] = await conn.query('SELECT id, tenant_id, occurred_at FROM incidents WHERE seq IS NULL ORDER BY tenant_id, id');
+  const next = new Map();
+  for (const r of rows) {
+    const season = seasonOf(r.occurred_at instanceof Date ? r.occurred_at.toISOString() : r.occurred_at);
+    const key = `${r.tenant_id}|${season}`;
+    if (!next.has(key)) {
+      const [[m]] = await conn.query('SELECT COALESCE(MAX(seq), 0) AS n FROM incidents WHERE tenant_id = ? AND season = ?', [r.tenant_id, season]);
+      next.set(key, Number(m.n));
+    }
+    const seq = next.get(key) + 1;
+    next.set(key, seq);
+    await conn.query('UPDATE incidents SET season = ?, seq = ? WHERE id = ?', [season, seq, r.id]);
+  }
+  return rows.length;
+}
+
+async function main() {
+  const conn = await mysql.createConnection({
+    host: config.db.host,
+    port: config.db.port,
+    user: config.db.user,
+    password: config.db.password,
+    database: config.db.database,
+    multipleStatements: true,
+    ssl: config.db.sslOptions,
+  });
+  await conn.query(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'patrol.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'kiosk.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'park.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'ops.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'docs.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'availability.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'platform.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'rentals.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'board.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'customers.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'messages.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'shop.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'weekly.sql'), 'utf8'));
+  let applied = 0;
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps]) {
+    if (await done(conn)) continue;
+    for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
+    applied += 1;
+    console.log('Applied:', name);
+  }
+  const numbered = await backfillCaseNumbers(conn);
+  if (numbered) console.log(`Numbered ${numbered} existing incident report${numbered === 1 ? '' : 's'}`);
+  await conn.end();
+  console.log(`Schema up to date on ${config.db.database} (${applied} change${applied === 1 ? '' : 's'} applied)`);
+}
+
+main().catch((err) => {
+  console.error('Migration failed:', err.message);
+  process.exit(1);
+});
