@@ -5,10 +5,17 @@
 const { one } = require('../db');
 const { nowIn } = require('./util');
 
+// [value, label, category]. The category groups the register: fleet, lifts, snowmaking, facilities, equipment.
 const ASSET_KINDS = [
-  ['groomer', 'Snow groomer'], ['snowmobile', 'Snowmobile'], ['utv', 'UTV or side-by-side'], ['truck', 'Truck or vehicle'],
-  ['snow_gun', 'Snow gun or lance'], ['pump', 'Pump or compressor'], ['tool', 'Tool or shop equipment'], ['building', 'Building or system'], ['other', 'Other'],
-].map(([value, label]) => ({ value, label }));
+  ['groomer', 'Snow groomer', 'fleet'], ['snowmobile', 'Snowmobile', 'fleet'], ['utv', 'UTV or side-by-side', 'fleet'], ['truck', 'Truck or vehicle', 'fleet'],
+  ['bus', 'Shuttle or bus', 'fleet'], ['golf_cart', 'Golf cart', 'fleet'], ['boat', 'Boat or watercraft', 'fleet'], ['loader', 'Loader, excavator or heavy equipment', 'fleet'], ['mower', 'Mower or turf equipment', 'fleet'],
+  ['lift_component', 'Lift or lift part (drive, gearbox, motor)', 'lift'],
+  ['snow_gun', 'Snow gun or lance', 'snowmaking'], ['pump', 'Pump or compressor', 'snowmaking'], ['generator', 'Generator', 'equipment'],
+  ['hvac', 'Heating, cooling or ventilation', 'facility'], ['boiler', 'Boiler or water heater', 'facility'], ['kitchen', 'Kitchen equipment', 'facility'],
+  ['pool', 'Pool, spa or water feature', 'facility'], ['electrical', 'Electrical or fire system', 'facility'], ['building', 'Building or system', 'facility'],
+  ['tool', 'Tool or shop equipment', 'equipment'], ['other', 'Other', 'other'],
+].map(([value, label, category]) => ({ value, label, category }));
+const CATEGORY_OF = Object.fromEntries(ASSET_KINDS.map((k) => [k.value, k.category]));
 const ASSET_KIND_KEYS = ASSET_KINDS.map((k) => k.value);
 
 const SURFACES = [
@@ -41,8 +48,8 @@ const LIFT_CHECKLIST = [
 
 /**
  * When a recurring job is next due, and how close it is.
- * `asset` is the machine (or null) so hour based jobs can compare against its hour meter.
- * Returns { due_on, hours_left, state: 'ok' | 'soon' | 'overdue' | 'never' }.
+ * `asset` is the machine (or null) so hour and mile based jobs can compare against its meters.
+ * Returns { due_on, hours_left, miles_left, state: 'ok' | 'soon' | 'overdue' | 'never' }.
  */
 function pmStatus(task, asset, today) {
   const ymd = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : v ? String(v).slice(0, 10) : null);
@@ -64,7 +71,15 @@ function pmStatus(task, asset, today) {
     if (hoursLeft <= 0) state = 'overdue';
     else if (hoursLeft <= Number(task.interval_hours) * 0.1 && state !== 'overdue') state = 'soon';
   }
-  return { due_on: dueOn, hours_left: hoursLeft, state };
+  let milesLeft = null;
+  const milesKnown = task.last_done_miles !== null && task.last_done_miles !== undefined;
+  if (task.interval_miles && !task.interval_days && !task.interval_hours && !milesKnown && !last) state = 'never';
+  if (task.interval_miles && asset && asset.miles !== null && asset.miles !== undefined && milesKnown) {
+    milesLeft = Math.round((Number(task.last_done_miles) + Number(task.interval_miles) - Number(asset.miles)) * 10) / 10;
+    if (milesLeft <= 0) state = 'overdue';
+    else if (milesLeft <= Number(task.interval_miles) * 0.1 && state !== 'overdue') state = 'soon';
+  }
+  return { due_on: dueOn, hours_left: hoursLeft, miles_left: milesLeft, state };
 }
 
 const localStamp = (timezone) => nowIn(timezone);
@@ -94,4 +109,4 @@ const latestCheck = (conn, tenantId, liftId, date) =>
   one(conn, 'SELECT id, result, kind, checked_at FROM lift_checks WHERE tenant_id = ? AND lift_id = ? AND check_date = ? AND kind = ? ORDER BY id DESC LIMIT 1', [tenantId, liftId, date, 'pre_open']);
 
 
-module.exports = { ASSET_KINDS, ASSET_KIND_KEYS, SURFACES, SURFACE_KEYS, DOWNTIME_REASONS, DEPARTMENTS, LIFT_CHECKLIST, pmStatus, localStamp, syncDowntime, latestCheck };
+module.exports = { ASSET_KINDS, ASSET_KIND_KEYS, CATEGORY_OF, SURFACES, SURFACE_KEYS, DOWNTIME_REASONS, DEPARTMENTS, LIFT_CHECKLIST, pmStatus, localStamp, syncDowntime, latestCheck };

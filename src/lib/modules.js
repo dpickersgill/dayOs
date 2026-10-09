@@ -11,6 +11,7 @@ const MODULES = [
   { key: 'catalog', label: 'Products and prices', blurb: 'The product list, promo codes and price rules.', paths: ['/products', '/pricing'] },
   { key: 'gate', label: 'Gate', blurb: 'Scanning lift tickets and passes at the gate.', paths: ['/tickets'] },
   { key: 'conditions', label: 'Lifts and trails', blurb: 'Lift and trail status, grooming, snow and weather, maintenance and daily reports.', paths: ['/schedule', '/ops'] },
+  { key: 'assets', label: 'Assets and fleet (add-on)', blurb: 'The asset register for the fleet, lifts, snowmaking and buildings: meters, fuel, inspections, parts and stock, purchase orders, costs and QR tags. Off until the operator turns it on for a mountain.', addon: true, needs: ['conditions'], paths: ['/assets'] },
   { key: 'park', label: 'Terrain park', blurb: 'Park features, areas and the park map.', paths: ['/park'] },
   { key: 'rentals', label: 'Rentals', blurb: 'Rental equipment and contracts.', paths: ['/rentals'] },
   { key: 'school', label: 'Ski school', blurb: 'Lessons, instructors, students, credits and online lesson requests.', paths: ['/skischool'] },

@@ -39,6 +39,7 @@ const patrolMap = require('./routes/map');
 const park = require('./routes/park');
 const opsRoutes = require('./routes/ops');
 const maintenance = require('./routes/maintenance');
+const assetRoutes = require('./routes/assets');
 const documents = require('./routes/documents');
 const availability = require('./routes/availability');
 const waiverRoutes = require('./routes/waivers');
@@ -181,6 +182,7 @@ function createApp() {
   api.use('/park', park);
   api.use('/ops', opsRoutes);
   api.use('/ops', maintenance);
+  api.use('/assets', assetRoutes);
   api.use('/documents', documents);
   api.use('/availability', availability.router);
   api.use('/waivers', waiverRoutes.router);

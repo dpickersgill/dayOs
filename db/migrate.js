@@ -328,6 +328,39 @@ const careSteps = [
   ['incident_versions index', (c) => indexExists(c, 'incident_versions', 'ix_iversions_incident'), 'ALTER TABLE incident_versions ADD INDEX ix_iversions_incident (tenant_id, incident_id, created_at)'],
 ];
 
+// Assets and fleet: the register grows into a full record (tag, place, parent part, year, VIN, plate, purchase, warranty,
+// registration, insurance and inspection dates, miles); service plans can count miles and link to their work orders;
+// work orders carry the meter reading, outside vendor cost and the plan they came from.
+const assetCol = (name, ddl) => [`ops_assets.${name}`, (c) => columnExists(c, 'ops_assets', name), `ALTER TABLE ops_assets ADD COLUMN ${ddl}`];
+const assetSteps = [
+  assetCol('asset_tag', 'asset_tag VARCHAR(20) NULL'),
+  ['ops_assets unique tag', (c) => indexExists(c, 'ops_assets', 'uq_ops_asset_tag'), 'ALTER TABLE ops_assets ADD UNIQUE KEY uq_ops_asset_tag (tenant_id, asset_tag)'],
+  assetCol('category', "category ENUM('fleet','lift','snowmaking','facility','equipment','other') NULL"),
+  assetCol('parent_id', 'parent_id BIGINT UNSIGNED NULL'),
+  assetCol('location_id', 'location_id BIGINT UNSIGNED NULL'),
+  assetCol('lift_id', 'lift_id BIGINT UNSIGNED NULL'),
+  assetCol('model_year', 'model_year SMALLINT UNSIGNED NULL'),
+  assetCol('vin', 'vin VARCHAR(40) NULL'),
+  assetCol('plate', 'plate VARCHAR(20) NULL'),
+  assetCol('miles', 'miles DECIMAL(10,1) NULL'),
+  assetCol('fuel_type', "fuel_type ENUM('diesel','gasoline','propane','electric','other','none') NULL"),
+  assetCol('purchased_on', 'purchased_on DATE NULL'),
+  assetCol('purchase_cents', 'purchase_cents BIGINT UNSIGNED NULL'),
+  assetCol('vendor_id', 'vendor_id BIGINT UNSIGNED NULL'),
+  assetCol('useful_life_years', 'useful_life_years TINYINT UNSIGNED NULL'),
+  assetCol('salvage_cents', 'salvage_cents BIGINT UNSIGNED NULL'),
+  assetCol('warranty_expires', 'warranty_expires DATE NULL'),
+  assetCol('warranty_note', 'warranty_note VARCHAR(255) NULL'),
+  assetCol('registration_expires', 'registration_expires DATE NULL'),
+  assetCol('insurance_expires', 'insurance_expires DATE NULL'),
+  assetCol('inspection_expires', 'inspection_expires DATE NULL'),
+  assetCol('critical', 'critical TINYINT(1) NOT NULL DEFAULT 0'),
+  assetCol('retired_on', 'retired_on DATE NULL'),
+  ['pm_tasks miles', (c) => columnExists(c, 'pm_tasks', 'interval_miles'), 'ALTER TABLE pm_tasks ADD COLUMN interval_miles DECIMAL(9,1) NULL, ADD COLUMN last_done_miles DECIMAL(10,1) NULL, ADD COLUMN checklist VARCHAR(2000) NULL'],
+  ['work_orders asset costs', (c) => columnExists(c, 'work_orders', 'pm_task_id'), 'ALTER TABLE work_orders ADD COLUMN pm_task_id BIGINT UNSIGNED NULL, ADD COLUMN meter_hours DECIMAL(10,1) NULL, ADD COLUMN meter_miles DECIMAL(10,1) NULL, ADD COLUMN vendor_id BIGINT UNSIGNED NULL, ADD COLUMN vendor_cost_cents INT UNSIGNED NULL, ADD COLUMN downtime_hours DECIMAL(7,1) NULL'],
+  ['work_orders by asset', (c) => indexExists(c, 'work_orders', 'ix_wo_asset'), 'ALTER TABLE work_orders ADD INDEX ix_wo_asset (tenant_id, asset_id, status)'],
+];
+
 async function backfillCaseNumbers(conn) {
   const [rows] = await conn.query('SELECT id, tenant_id, occurred_at FROM incidents WHERE seq IS NULL ORDER BY tenant_id, id');
   const next = new Map();
@@ -372,8 +405,9 @@ async function main() {
   await conn.query(fs.readFileSync(path.join(__dirname, 'shop.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'weekly.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'waivers.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'assets.sql'), 'utf8'));
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;
