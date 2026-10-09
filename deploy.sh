@@ -13,6 +13,8 @@ if ! gcloud auth print-access-token >/dev/null 2>&1; then
   echo "Not signed in. Run: gcloud auth login   then: gcloud config set project summitops-510715   then run this again."
   exit 1
 fi
+# A new Cloud Shell session can forget the project, so set it every time.
+gcloud config set project summitops-510715 >/dev/null 2>&1
 
 step "Installing"
 npm install --omit=dev --no-audit --no-fund
