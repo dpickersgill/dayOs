@@ -164,8 +164,17 @@ test('B cannot read anything of A: not lists, not single records, not by id', as
 test('B cannot change or delete anything of A by id', async () => {
   const bad = [];
   const jobs = [];
+  // B's reads in the test before this one can create B's own starter rows (default ski school skills, say), and an
+  // id is only unique within its table: drop any id B owns by now, so a 200 always means one of A's rows was hit.
+  const theirs = new Set();
+  for (const { t, cols } of tables) {
+    if (!cols.some((x) => x.c === 'id')) continue;
+    const [b] = await pool.query(`SELECT id FROM \`${t}\` WHERE tenant_id = ?`, [B.id]);
+    for (const r of b) theirs.add(r.id);
+  }
+  const ids = state.ids.filter((x) => !theirs.has(x));
   for (const r of state.routes.found.filter((x) => x.method !== 'GET' && x.path.includes(':'))) {
-    for (const id of state.ids) jobs.push({ r, url: fill(r.path, id) });
+    for (const id of ids) jobs.push({ r, url: fill(r.path, id) });
   }
   await pool8(jobs, async ({ r, url }) => {
     const res = await call(r.method, url, B.token, {});

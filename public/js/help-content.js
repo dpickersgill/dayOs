@@ -102,7 +102,7 @@ export const ARTICLES = [
   { id: 'gate-devices', app: 'gate', title: 'Connect gates, turnstiles and handheld readers', keywords: 'turnstile gate hardware device pair handheld offline installer access control rfid',
     intro: 'Gates and turnstiles that read cards or barcodes can check each ticket with SummitOps, and keep working from a list when the network drops.',
     steps: ['Open Gate, then Devices, and press Add a device. Give it a name and where it is.', 'A pairing code appears. Enter it on the device, or give it to the installer. It works once, within 30 minutes.', 'The device shows as Paired. Each scan it makes appears with its location in the scan records.', 'Under Settings, set how long a gate stays open and how long the same ticket is held.'],
-    tips: ['Barcode scanners and desk readers plugged into a counter computer need no pairing.', 'Switch off a device that is lost or replaced: it is shut out at once.', 'The guide for installers (ACCESS-API.md) describes what a device sends and receives. Ask SummitOps support for a copy.'], related: ['gate-cards'] },
+    tips: ['Barcode scanners and desk readers plugged into a counter computer need no pairing.', 'Remove a device that is lost or stolen: its key stops working at once. Switch off is for a short break; switching back on lets the same device in again.', 'The guide for installers (ACCESS-API.md) describes what a device sends and receives. Ask SummitOps support for a copy.'], related: ['gate-cards'] },
 
   // ------------------------------------------------------------ Mountain status
   { id: 'cond-lift', app: 'conditions', title: 'Set a lift open, on hold or closed', keywords: 'status wind hold downtime inspection',

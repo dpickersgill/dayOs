@@ -35,9 +35,10 @@ or
 { "code": "9F2C0A7E31B04D58A6C1", "client_ref": "gate1-000124" }
 ```
 
-- `uid`: the chip serial (UID) as the reader gives it: hex with or without separators (`04:A2:3B:..`), or a decimal number. Both byte orders are tried.
+- `uid`: the chip serial (UID) as the reader gives it: hex with or without separators (`04:A2:3B:..`), or a decimal number. Both byte orders are tried for each form.
 - `code`: a barcode or QR code read from a ticket.
-- `client_ref` (strongly advised): your own unique id for this scan, up to 64 characters. If the same `client_ref` is sent again (a timeout and retry), you get the first answer back with `"repeat": true`. The scan is not counted twice, and a punch card loses only one ride.
+- `client_ref` (strongly advised): your own unique id for this scan, up to 64 characters. If the same `client_ref` is sent again (a timeout and retry), you get the same yes or no back with `"repeat": true`, and the same fields (the open time, and rides left as they stand now). The scan is not counted twice, and a punch card loses only one ride.
+- If a check times out and you decide offline instead, keep the same `client_ref` for that scan when you upload it (section 4). If the server did receive the check, the upload is then recognised as the same scan and no second ride is taken.
 
 ```
 200 {
@@ -74,15 +75,19 @@ GET /api/v1/device/list
 200 {
   "date": "2026-12-19",            // the mountain's local date the list is for
   "passback_seconds": 120,
-  "items": [ { "code": "9F2C...", "uid": "04A23B4C5D6E70", "uses_remaining": null }, ... ],
-  "blocked": [ "0A0B0C0D", ... ],
-  "generated_at": "2026-12-19T14:02:11.000Z"
+  "code_hash": { "alg": "HMAC-SHA256", "key": "<today's key>", "hex_chars": 32, "input": "the ticket code in uppercase" },
+  "items": [ { "code_hash": "5b1f...", "uid": "04A23B4C5D6E70", "uses_remaining": null }, ... ],
+  "blocked": [ "0A0B0C0D", ... ]
 }
 ```
 
+Ticket codes are not sent, because a code works as a ticket. Each item has a `code_hash`: the first 32 hex characters of HMAC-SHA256 of the uppercase ticket code, using today's `key`. To check a barcode offline, hash it the same way and look for the result. Chip serials (`uid`) are sent as they are, in uppercase hex.
+
+Send `If-None-Match` with the `ETag` from the last list. While nothing has changed you get `304 Not Modified` and no body, so fetching every few minutes costs little.
+
 When SummitOps cannot be reached, decide on the device:
 
-- allow a chip or code that is in `items`;
+- allow a chip in `items` (match its serial in either byte order), or a barcode whose hash is in `items`;
 - refuse anything in `blocked`, or not in the list;
 - hold the same chip or code for `passback_seconds`;
 - for punch cards (`uses_remaining` not null), count rides down locally;
@@ -101,10 +106,12 @@ POST /api/v1/device/scans
   { "client_ref": "gate1-000126", "at": "2026-12-19T14:07:40Z", "code": "77AA...", "allowed": false }
 ] }
 
-200 { "saved": 2, "repeats": 0 }
+200 { "saved": 2, "repeats": 0, "rejected": [] }
 ```
 
 Each scan is saved once, by `client_ref`, so sending the same batch again is safe (`repeats` counts those). An allowed scan on a punch card uses one ride. The device's decision stands: this is the record of what happened.
+
+A scan dated more than 5 minutes in the future, or more than 14 days ago, is not saved. It comes back in `rejected` with its `client_ref`, so a device with a wrong clock can be spotted. Keep the device's clock set by NTP.
 
 ## 5. Health
 
@@ -116,7 +123,7 @@ The manager's Devices screen shows each device's last contact, its last list dow
 
 ## Limits and good practice
 
-- The pairing endpoint allows 10 tries per 10 minutes per address. Other device endpoints allow 600 requests a minute per address.
+- The pairing endpoint allows 10 tries per 10 minutes per address. Other device endpoints allow 600 requests a minute per address. All the gates at a mountain usually share one internet address, so tell SummitOps if your busiest minute might go past that.
 - Use HTTPS only. Keep a check's timeout short (about 1.5 s), then fall back to the offline list so the line keeps moving.
 - Reader settings: either output form of the UID works. If you can choose, use uppercase hex without separators.
 - Barcode scanners and desk RFID readers plugged into a counter computer need none of this. They type into the Gate screen like a keyboard.

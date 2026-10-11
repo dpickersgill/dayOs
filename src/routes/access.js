@@ -5,6 +5,7 @@
 // pair gates and readers. deviceRouter (/api/v1/device, no login): what a paired gate, turnstile or handheld calls. The
 // device's own key is its only credential and the mountain comes from the device, never from the request.
 
+const crypto = require('crypto');
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
@@ -57,10 +58,10 @@ adminRouter.get('/cards', desk, async (req, res) => {
 /** One card, by what a reader read off it. */
 adminRouter.get('/cards/lookup', desk, async (req, res) => {
   const t = req.auth.tenantId;
-  const cands = A.uidCandidates(req.query.uid);
+  const { card, cands } = await A.findCard(pool, t, req.query.uid);
   if (!cands.length) throw bad('That does not look like a card number');
-  const c = await one(pool, `${CARD_SQL} WHERE c.tenant_id = ? AND c.uid IN (?) LIMIT 1`, [t, cands]);
-  if (!c) return res.json({ card: null, uid: cands[0] });
+  if (!card) return res.json({ card: null, uid: cands[0] });
+  const c = await one(pool, `${CARD_SQL} WHERE c.tenant_id = ? AND c.id = ?`, [t, card.id]);
   res.json({ card: cardOut(c, await tzOf(pool, t)) });
 });
 
@@ -78,7 +79,11 @@ adminRouter.post('/cards/assign', desk, validate(z.object({ ticket_code: z.strin
     const ticket = await one(conn, 'SELECT id, code, status, valid_to FROM tickets WHERE tenant_id = ? AND code = ? FOR UPDATE', [t, b.ticket_code.toUpperCase().replace(/[\s-]/g, '')]);
     if (!ticket) throw notFound('Ticket');
     if (ticket.status === 'void') throw conflict('That ticket was voided');
-    const card = await one(conn, 'SELECT c.*, k.code AS other_code, k.status AS other_status, k.valid_to AS other_valid_to FROM rfid_cards c LEFT JOIN tickets k ON k.tenant_id = c.tenant_id AND k.id = c.ticket_id WHERE c.tenant_id = ? AND c.uid IN (?) LIMIT 1 FOR UPDATE', [t, A.uidCandidates(b.uid)]);
+    const { card } = await A.findCard(conn, t, b.uid, { lock: true });
+    if (card && card.ticket_id) {
+      const other = await one(conn, 'SELECT code, status, valid_to FROM tickets WHERE tenant_id = ? AND id = ?', [t, card.ticket_id]);
+      Object.assign(card, other ? { other_code: other.code, other_status: other.status, other_valid_to: other.valid_to } : {});
+    }
     if (card && (card.status === 'lost' || card.status === 'retired')) throw conflict(`This card is marked ${card.status}. Use another card, or have a manager mark it found.`);
     if (card && card.status === 'assigned' && card.ticket_id && card.ticket_id !== ticket.id && card.other_status === 'active' && String(card.other_valid_to) >= today && !b.replace) {
       const e = conflict('This card already carries another ticket that is still good. Replace it?');
@@ -117,7 +122,9 @@ adminRouter.post('/cards/:id/free', desk, async (req, res) => {
   const c = await one(pool, 'SELECT id, status FROM rfid_cards WHERE tenant_id = ? AND id = ?', [t, id]);
   if (!c) throw notFound('Card');
   if (['lost', 'retired'].includes(c.status) && !['owner', 'manager'].includes(req.auth.role)) throw conflict('Only a manager can unblock a lost card');
-  await pool.query("UPDATE rfid_cards SET status = 'free', ticket_id = NULL, assigned_at = NULL WHERE tenant_id = ? AND id = ?", [t, id]);
+  // Only if nobody changed it meanwhile (a card reported lost a moment ago stays blocked for a counter user).
+  const [r] = await pool.query("UPDATE rfid_cards SET status = 'free', ticket_id = NULL, assigned_at = NULL WHERE tenant_id = ? AND id = ? AND status = ?", [t, id, c.status]);
+  if (!r.affectedRows) throw conflict('This card changed a moment ago. Look at it again.');
   await audit(pool, req, 'card_free', 'rfid_cards', id, { was: c.status });
   res.json({ ok: true });
 });
@@ -137,7 +144,8 @@ adminRouter.put('/settings', manager, validate(z.object({ gate_open_ms: z.number
 const DEVICE_KINDS = ['gate', 'turnstile', 'handheld', 'reader'];
 async function issuePairCode(req, id) {
   const code = K.newPairCode();
-  await pool.query('UPDATE access_devices SET pair_hash = ?, pair_expires_at = DATE_ADD(NOW(), INTERVAL ? MINUTE), token_hash = NULL, paired_at = NULL WHERE id = ? AND tenant_id = ?', [K.pairHash(code), K.PAIR_MINUTES, id, req.auth.tenantId]);
+  // A new code is a fresh start: any old key stops working, and a switched-off or removed device is back in use.
+  await pool.query('UPDATE access_devices SET pair_hash = ?, pair_expires_at = DATE_ADD(NOW(), INTERVAL ? MINUTE), token_hash = NULL, paired_at = NULL, active = 1 WHERE id = ? AND tenant_id = ?', [K.pairHash(code), K.PAIR_MINUTES, id, req.auth.tenantId]);
   return { id, code, expires_in_minutes: K.PAIR_MINUTES };
 }
 adminRouter.get('/devices', manager, async (req, res) => {
@@ -217,20 +225,35 @@ deviceRouter.get('/ping', async (req, res) => res.json({ ok: true, device_id: re
  * One tap or scan, decided now. client_ref is the device's own id for this scan: a retry with the same id gets the
  * first answer back instead of a second entry (and never a second ride off a punch card).
  */
+/** The answer for a scan already recorded: the same yes or no, with the gate time and the ticket as they stand now. */
+async function replyFor(tenantId, scan) {
+  const tenant = await one(pool, 'SELECT gate_open_ms FROM tenants WHERE id = ?', [tenantId]);
+  const t = scan.ticket_id ? await one(pool, 'SELECT k.uses_remaining, k.valid_to, p.first_name FROM tickets k LEFT JOIN people p ON p.tenant_id = k.tenant_id AND p.id = k.person_id WHERE k.tenant_id = ? AND k.id = ?', [tenantId, scan.ticket_id]) : null;
+  const allow = scan.result === 'ok';
+  return {
+    allow, result: scan.result, message: allow && t && t.first_name ? `Welcome, ${t.first_name}` : MESSAGES[scan.result],
+    open_ms: allow ? tenant.gate_open_ms : 0, uses_remaining: t ? t.uses_remaining : null, valid_to: t ? t.valid_to : null,
+  };
+}
+const seenScan = (tenantId, deviceId, ref) => one(pool, 'SELECT result, ticket_id FROM scans WHERE tenant_id = ? AND device_id = ? AND client_ref = ?', [tenantId, deviceId, ref]);
+
+/**
+ * One tap or scan, decided now. client_ref is the device's own id for this scan: a retry with the same id gets the
+ * same answer back (repeat: true) instead of a second entry, and never a second ride off a punch card.
+ */
 deviceRouter.post('/check', validate(z.object({ uid: uidField.optional(), code: z.string().trim().min(4).max(64).optional(), client_ref: z.string().trim().min(1).max(64).optional() })
   .refine((b) => b.uid || b.code, 'Send uid or code')), async (req, res) => {
   const { tenantId, id, location } = req.device; const b = req.body;
   if (b.client_ref) {
-    const seen = await one(pool, 'SELECT result FROM scans WHERE tenant_id = ? AND device_id = ? AND client_ref = ?', [tenantId, id, b.client_ref]);
-    if (seen) return res.json({ allow: seen.result === 'ok', result: seen.result, message: MESSAGES[seen.result], repeat: true });
+    const seen = await seenScan(tenantId, id, b.client_ref);
+    if (seen) return res.json({ ...(await replyFor(tenantId, seen)), repeat: true });
   }
   let out;
   try {
     out = await tx((conn) => A.decide(conn, tenantId, { code: b.code, uid: b.uid, location, deviceId: id, clientRef: b.client_ref || null, via: 'device' }));
   } catch (err) {
-    if (err.code !== 'ER_DUP_ENTRY') throw err;
-    const seen = await one(pool, 'SELECT result FROM scans WHERE tenant_id = ? AND device_id = ? AND client_ref = ?', [tenantId, id, b.client_ref]);
-    return res.json({ allow: seen.result === 'ok', result: seen.result, message: MESSAGES[seen.result], repeat: true });
+    if (err.code !== 'ER_DUP_ENTRY' || !b.client_ref) throw err;
+    return res.json({ ...(await replyFor(tenantId, await seenScan(tenantId, id, b.client_ref))), repeat: true });
   }
   res.json({
     allow: out.valid, result: out.result, message: out.valid && out.holder && out.holder.first_name ? `Welcome, ${out.holder.first_name}` : MESSAGES[out.result],
@@ -243,41 +266,56 @@ deviceRouter.get('/list', async (req, res) => {
   const { tenantId, id } = req.device;
   const list = await A.allowlist(pool, tenantId);
   await pool.query('UPDATE access_devices SET last_list_at = NOW() WHERE id = ?', [id]);
-  res.json({ ...list, generated_at: new Date().toISOString() });
+  // The same body while nothing changes, so a device that sends If-None-Match gets 304 and no body. Done here by hand:
+  // the API marks every answer no-store, which turns off Express's own check.
+  const body = JSON.stringify(list);
+  const etag = `"${crypto.createHash('sha256').update(body).digest('base64url').slice(0, 27)}"`;
+  res.set('ETag', etag);
+  if (String(req.get('if-none-match') || '').split(',').map((x) => x.trim().replace(/^W\//, '')).includes(etag)) return res.status(304).end();
+  res.type('application/json').send(body);
 });
 
 /**
  * Scans a device decided on its own while offline, sent when it is back. Each is saved once (by client_ref), at the
  * time it happened; an allowed scan uses up a ride on a punch card. The device's decision stands: this is the record.
+ * A scan dated more than 5 minutes ahead or more than 14 days back is not saved (a gate with a wrong clock would
+ * otherwise hold tickets in the pass-back window, or rewrite old history); it is listed in `rejected`.
  */
 const offlineScan = z.object({ client_ref: z.string().trim().min(1).max(64), at: z.string().datetime({ offset: true }), uid: uidField.optional(), code: z.string().trim().min(4).max(64).optional(), allowed: z.boolean() })
   .refine((s) => s.uid || s.code, 'Each scan needs uid or code');
 deviceRouter.post('/scans', validate(z.object({ scans: z.array(offlineScan).min(1).max(500) })), async (req, res) => {
   const { tenantId, id, location } = req.device;
-  let saved = 0; let repeats = 0;
+  let saved = 0; let repeats = 0; const rejected = [];
+  const now = Date.now();
   await tx(async (conn) => {
     for (const s of req.body.scans) {
+      const when = Date.parse(s.at);
+      if (!(when <= now + 5 * 60_000 && when >= now - 14 * 864e5)) { rejected.push({ client_ref: s.client_ref, reason: 'time out of range' }); continue; }
       let ticket = null; let uid = null;
       if (s.code) ticket = await one(conn, 'SELECT id, code, uses_remaining FROM tickets WHERE tenant_id = ? AND code = ? FOR UPDATE', [tenantId, s.code.toUpperCase().replace(/[\s-]/g, '')]);
-      if (!ticket && (s.uid || s.code)) {
-        const cands = A.uidCandidates(s.uid || s.code);
-        const card = cands.length ? await one(conn, 'SELECT uid, ticket_id, status FROM rfid_cards WHERE tenant_id = ? AND uid IN (?) LIMIT 1', [tenantId, cands]) : null;
+      if (!ticket) {
+        const { card, cands } = await A.findCard(conn, tenantId, s.uid || s.code);
         if (card) {
           uid = card.uid;
           if (card.ticket_id) ticket = await one(conn, 'SELECT id, code, uses_remaining FROM tickets WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, card.ticket_id]);
         } else uid = cands[0] || null;
       }
-      const at = new Date(s.at).toISOString().slice(0, 19).replace('T', ' ');
-      const [r] = await conn.query('INSERT IGNORE INTO scans (tenant_id, ticket_id, code, location, result, scanned_at, media_uid, device_id, client_ref, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [tenantId, ticket ? ticket.id : null, ticket ? ticket.code : String(s.uid || s.code).toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 20), location, s.allowed ? 'ok' : 'unknown', at, uid, id, s.client_ref, 'offline']);
-      if (!r.affectedRows) { repeats += 1; continue; }
+      const at = new Date(when).toISOString().slice(0, 19).replace('T', ' ');
+      try {
+        await conn.query('INSERT INTO scans (tenant_id, ticket_id, code, location, result, scanned_at, media_uid, device_id, client_ref, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [tenantId, ticket ? ticket.id : null, ticket ? ticket.code : String(s.uid || s.code).toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 20), location, s.allowed ? 'ok' : 'unknown', at, uid, id, s.client_ref, 'offline']);
+      } catch (err) {
+        if (err.code !== 'ER_DUP_ENTRY') throw err;
+        repeats += 1; continue; // already saved: an earlier upload, or the online check this scan timed out on
+      }
       saved += 1;
       if (s.allowed && ticket && ticket.uses_remaining !== null && ticket.uses_remaining > 0) {
-        await conn.query("UPDATE tickets SET uses_remaining = uses_remaining - 1, status = IF(uses_remaining <= 0, 'used_up', status) WHERE tenant_id = ? AND id = ?", [tenantId, ticket.id]);
+        // status is worked out from the value before this ride, so it reads the same on every database
+        await conn.query("UPDATE tickets SET status = IF(uses_remaining <= 1, 'used_up', status), uses_remaining = uses_remaining - 1 WHERE tenant_id = ? AND id = ?", [tenantId, ticket.id]);
       }
     }
   });
-  res.json({ saved, repeats });
+  res.json({ saved, repeats, rejected });
 });
 
 module.exports = { adminRouter, deviceRouter };

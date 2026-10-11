@@ -4,34 +4,46 @@
 // serial, looked up to the ticket it carries), a hardware gate asking online, or a gate that decided offline and
 // reports later. Every scan is logged, with the card and the device when there was one.
 
+const crypto = require('crypto');
+const config = require('../config');
 const { one, rows } = require('../db');
 const { todayIn, seasonFor } = require('./util');
 const { ON_FILE } = require('./waivers');
 
 /**
  * The ways one chip serial can arrive. Readers differ: phones give "04:A2:3B:..", desk readers type hex or a decimal
- * number, and some decimal readers reverse the byte order. Cards are stored as plain uppercase hex, so every reading
- * of the same chip maps to a short list of hex forms to look up.
+ * number, and some readers give the bytes in reverse order. Cards are stored as plain uppercase hex, so every reading
+ * of the same chip maps to a short list of hex forms to look up, most likely first.
+ * A run of digits is ambiguous (it is valid hex too): ten digits is how decimal readers print a 4-byte chip, so that is
+ * read as decimal first; any other run of digits as hex first. Both readings are always tried.
  */
+const reverseBytes = (hex) => hex.match(/../g).reverse().join('');
 function uidCandidates(raw) {
   const s = String(raw || '').trim().toUpperCase().replace(/[\s:.-]/g, '');
-  const out = new Set();
-  if (/^[0-9A-F]{8,32}$/.test(s)) out.add(s);
+  const hex = [];
+  if (/^[0-9A-F]{8,32}$/.test(s)) { hex.push(s); if (s.length % 2 === 0) hex.push(reverseBytes(s)); }
+  const dec = [];
   if (/^\d{6,20}$/.test(s)) {
-    let hex = BigInt(s).toString(16).toUpperCase();
-    if (hex.length % 2) hex = `0${hex}`;
-    while (hex.length < 8) hex = `00${hex}`;
-    if (hex.length <= 32) {
-      out.add(hex);
-      out.add(hex.match(/../g).reverse().join(''));
-    }
+    let h = BigInt(s).toString(16).toUpperCase();
+    if (h.length % 2) h = `0${h}`;
+    while (h.length < 8) h = `00${h}`;
+    if (h.length <= 32) dec.push(h, reverseBytes(h));
   }
-  return [...out];
+  const ordered = /^\d{10}$/.test(s) ? [...dec, ...hex] : [...hex, ...dec];
+  return [...new Set(ordered)];
 }
 
-/** The form a card is saved under: hex as given, or the first reading of a decimal number. Null when it is not a chip serial. */
+/** The form a card is saved under: the most likely reading. Null when it is not a chip serial. */
 function normUid(raw) {
   return uidCandidates(raw)[0] || null;
+}
+
+/** Find a card by any reading of its serial: a blocked card wins (fail closed), then the most likely reading. */
+async function findCard(conn, tenantId, raw, { lock = false } = {}) {
+  const cands = uidCandidates(raw);
+  if (!cands.length) return { card: null, cands };
+  const card = await one(conn, `SELECT * FROM rfid_cards WHERE tenant_id = ? AND uid IN (?) ORDER BY FIELD(status, 'lost', 'retired', 'assigned', 'free'), FIELD(uid, ?) LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [tenantId, cands, cands]);
+  return { card, cands };
 }
 
 const looksLikeTicketCode = (s) => /^[0-9A-F]{20}$/.test(s);
@@ -42,8 +54,9 @@ const looksLikeTicketCode = (s) => /^[0-9A-F]{20}$/.test(s);
  * A code that is not a ticket is tried as a card serial, so a desk RFID reader that types into the scan box just works.
  */
 async function decide(conn, tenantId, input) {
-  const tenant = await one(conn, 'SELECT timezone, scan_passback_seconds, waiver_text, gate_open_ms FROM tenants WHERE id = ?', [tenantId]);
-  const today = todayIn(tenant.timezone);
+  // The ticket (or card) is locked before anything else is read. InnoDB takes a transaction's snapshot at its first
+  // plain read, so reading after the lock means a scan that another gate just committed for this ticket is seen, and
+  // two gates tapping the same pass at once cannot both pass the pass-back check.
   const raw = String(input.code || input.uid || '').trim().toUpperCase();
   let t = null; let card = null; let uid = null; let via = input.via || 'code';
 
@@ -52,16 +65,16 @@ async function decide(conn, tenantId, input) {
     t = await one(conn, 'SELECT * FROM tickets WHERE tenant_id = ? AND code = ? FOR UPDATE', [tenantId, code]);
   }
   if (!t) {
-    const cands = uidCandidates(raw);
-    if (cands.length) {
-      card = await one(conn, 'SELECT * FROM rfid_cards WHERE tenant_id = ? AND uid IN (?) ORDER BY FIELD(status, \'assigned\', \'lost\', \'retired\', \'free\') LIMIT 1 FOR UPDATE', [tenantId, cands]);
-      if (card) {
-        uid = card.uid;
-        if (via === 'code') via = 'rfid';
-        if (card.ticket_id && card.status === 'assigned') t = await one(conn, 'SELECT * FROM tickets WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, card.ticket_id]);
-      } else if (!looksLikeTicketCode(raw.replace(/[\s-]/g, ''))) uid = cands[0];
-    }
+    const found = await findCard(conn, tenantId, raw, { lock: true });
+    card = found.card;
+    if (card) {
+      uid = card.uid;
+      if (via === 'code') via = 'rfid';
+      if (card.ticket_id && card.status === 'assigned') t = await one(conn, 'SELECT * FROM tickets WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, card.ticket_id]);
+    } else if (found.cands.length && !looksLikeTicketCode(raw.replace(/[\s-]/g, ''))) uid = found.cands[0];
   }
+  const tenant = await one(conn, 'SELECT timezone, scan_passback_seconds, waiver_text, gate_open_ms FROM tenants WHERE id = ?', [tenantId]);
+  const today = todayIn(tenant.timezone);
 
   let result = 'ok';
   let previous = null;
@@ -105,14 +118,21 @@ async function decide(conn, tenantId, input) {
 }
 
 /**
- * What an offline gate needs to decide alone for today: every chip and code that is good today, and the chips that are
- * blocked. No names, photos or contact details leave the server.
+ * What an offline gate needs to decide alone for today: every chip and ticket that is good today, and the chips that
+ * are blocked. Ticket codes are bearer credentials, so they are sent as keyed hashes, never as codes: the device hashes
+ * the code it reads with the day's key and compares. Chip serials are readable from the card itself, so they are sent
+ * as they are. No names, photos or contact details leave the server. The body changes only when the list does, so a
+ * device that sends If-None-Match gets 304 Not Modified while nothing has changed.
  */
+const LIST_HASH_CHARS = 32;
+const listKey = (tenantId, day) => crypto.createHmac('sha256', `${config.kioskSecret}:gate-list`).update(`${tenantId}.${day}`).digest('hex');
+const codeHash = (key, code) => crypto.createHmac('sha256', key).update(String(code).toUpperCase()).digest('hex').slice(0, LIST_HASH_CHARS);
 async function allowlist(conn, tenantId) {
   const tenant = await one(conn, 'SELECT timezone, scan_passback_seconds FROM tenants WHERE id = ?', [tenantId]);
   const today = todayIn(tenant.timezone);
+  const key = listKey(tenantId, today);
   const items = await rows(conn,
-    `SELECT t.code, t.uses_remaining, t.valid_to, c.uid
+    `SELECT t.code, t.uses_remaining, c.uid
        FROM tickets t LEFT JOIN rfid_cards c ON c.tenant_id = t.tenant_id AND c.ticket_id = t.id AND c.status = 'assigned'
       WHERE t.tenant_id = ? AND t.status = 'active' AND t.valid_from <= ? AND t.valid_to >= ? AND (t.uses_remaining IS NULL OR t.uses_remaining > 0)
       ORDER BY t.id`, [tenantId, today, today]);
@@ -120,9 +140,10 @@ async function allowlist(conn, tenantId) {
   return {
     date: today,
     passback_seconds: tenant.scan_passback_seconds,
-    items: items.map((r) => ({ code: r.code, uid: r.uid || null, uses_remaining: r.uses_remaining })),
+    code_hash: { alg: 'HMAC-SHA256', key, hex_chars: LIST_HASH_CHARS, input: 'the ticket code in uppercase' },
+    items: items.map((r) => ({ code_hash: codeHash(key, r.code), uid: r.uid || null, uses_remaining: r.uses_remaining })),
     blocked: blocked.map((r) => r.uid),
   };
 }
 
-module.exports = { uidCandidates, normUid, decide, allowlist };
+module.exports = { uidCandidates, normUid, findCard, decide, allowlist, codeHash };

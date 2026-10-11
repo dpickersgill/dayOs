@@ -58,14 +58,14 @@ test('vitals: GCS in parts adds up, both pupils, the recheck timer is on the pat
   is(await api('POST', `${b}/${p.id}/vitals`, { token: T.pat, body: { gcs_e: 4, gcs_v: 4 } }), 400, 'all three parts or none');
   is(await api('POST', `${b}/${p.id}/vitals`, { token: T.pat, body: { gcs_e: 5, gcs_v: 4, gcs_m: 6 } }), 400, 'eyes go to 4');
   ok(await api('POST', `${b}/${p.id}/vitals`, { token: T.pat, body: { gcs_e: 4, gcs_v: 4, gcs_m: 6, pupil_left: 'normal', pupil_right: 'dilated', skin: 'Pale, Cool, Clammy', recheck_minutes: 10 } }));
-  ok(await api('POST', `${b}/${p.id}/vitals`, { token: T.pat, body: { pulse: 88, taken_at: `${today}T08:00` } }));
+  ok(await api('POST', `${b}/${p.id}/vitals`, { token: T.pat, body: { pulse: 88, taken_at: `${today}T00:00` } }));
   const got = ok(await api('GET', `/patrol/incidents/${c.id}`, { token: T.pat })).patients[0];
   const first = got.vitals.find((v) => v.gcs_e);
   assert.equal(first.gcs, 14, 'the total is worked out');
   assert.deepEqual([first.pupil_left, first.pupil_right, first.skin], ['normal', 'dilated', 'Pale, Cool, Clammy']);
   assert.ok(got.vitals_due_at, 'the next check is due on the patient record');
   const late = got.vitals.find((v) => v.pulse === 88);
-  assert.equal(late.taken_at.slice(11, 16), '08:00');
+  assert.equal(late.taken_at.slice(11, 16), '00:00'); // midnight, so it was typed in later whatever time the test runs
   assert.ok(late.entered_at > late.taken_at, 'the time it was typed in is kept');
   ok(await api('POST', `${b}/${p.id}/vitals`, { token: T.pat, body: { pulse: 80, recheck_minutes: 0 } }));
   assert.equal(ok(await api('GET', `/patrol/incidents/${c.id}`, { token: T.pat })).patients[0].vitals_due_at, null, 'no reminder clears it');

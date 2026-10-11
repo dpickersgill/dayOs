@@ -112,6 +112,16 @@ function gate() {
   }
   if (cameraSupported()) helpers.append(button('Scan with the camera', async () => { const v = await scanWithCamera(); if (v) scan(v); }));
   const wrap = h('section', { class: 'gate-page stack' }, form, helpers.childNodes.length ? helpers : null, panel, recent);
+  // Leaving the Scan tab or the page stops the phone reading cards, so a tap meant for something else never scans here.
+  const Observer = globalThis.MutationObserver;
+  if (Observer) {
+    const watch = new Observer(() => {
+      if (wrap.isConnected) return;
+      if (stopNfc) { stopNfc(); stopNfc = null; }
+      watch.disconnect();
+    });
+    setTimeout(() => { if (wrap.isConnected) watch.observe(document.body, { childList: true, subtree: true }); }, 0);
+  }
   setTimeout(() => code.focus(), 0);
   return { el: wrap, scan };
 }
@@ -240,7 +250,9 @@ async function drawDevices(box) {
   const setForm = () => formDialog('Gate settings', h('div', { class: 'form' },
     field('Gate stays open (seconds)', input({ name: 'open', type: 'number', min: 0.5, max: 15, step: 0.5, value: settings.gate_open_ms / 1000 })),
     field('Same ticket again is held for (seconds)', input({ name: 'passback', type: 'number', min: 0, max: 3600, step: 1, value: settings.scan_passback_seconds }), 'Catches a ticket handed back over the fence. 0 turns it off.')), async (fd) => {
-    await put('/access/settings', { gate_open_ms: Math.round(Number(val(fd, 'open')) * 1000), scan_passback_seconds: Number(val(fd, 'passback')) });
+    const open = val(fd, 'open'); const back = val(fd, 'passback');
+    if (open === null || back === null) throw new Error('Fill in both times. Use 0 to turn the pass-back hold off.');
+    await put('/access/settings', { gate_open_ms: Math.round(Number(open) * 1000), scan_passback_seconds: Number(back) });
     toast('Saved'); await again();
   });
   const status = (d) => (!d.active ? state('Switched off', 'neutral') : d.waiting ? state('Waiting to pair', 'warn') : !d.paired ? state('Not paired', 'warn') : state('Paired', 'good'));

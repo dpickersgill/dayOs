@@ -53,11 +53,28 @@ test.before(async () => {
 test.after(async () => { await new Promise((r) => server.close(r)); await pool.end(); });
 
 test('one chip, read many ways', () => {
-  assert.deepEqual(A.uidCandidates('04:a2:3b:4c'), ['04A23B4C']);
-  // a decimal reader gives the same chip as a number; some reverse the bytes
-  const c = A.uidCandidates(String(0x04A23B4C));
-  assert.ok(c.includes('04A23B4C') && c.includes('4C3BA204'));
+  assert.deepEqual(A.uidCandidates('04:a2:3b:4c'), ['04A23B4C', '4C3BA204'], 'hex, then the same bytes reversed');
+  // a ten-digit decimal reader: read as decimal first, either byte order, and as hex too
+  const c = A.uidCandidates('3735928559'); // 0xDEADBEEF
+  assert.equal(c[0], 'DEADBEEF');
+  assert.ok(c.includes('EFBEADDE') && c.includes('3735928559'));
+  // other runs of digits are hex first (a hex chip that happens to be all digits)
+  assert.equal(A.uidCandidates('12345678')[0], '12345678');
   assert.deepEqual(A.uidCandidates('not a card'), []);
+});
+
+test('a card loaded at a decimal reader opens for a phone and a hex reader, and a blocked reading wins', async () => {
+  const a = M.a;
+  const code = await sell(a);
+  ok(await api('POST', '/access/cards/assign', { token: a.desk, body: { ticket_code: code, uid: '3735928559' } }));
+  assert.equal(ok(await api('POST', '/tickets/scan', { token: a.desk, body: { uid: 'de:ad:be:ef' } })).result, 'ok');
+  assert.equal(ok(await api('GET', '/access/cards/lookup?uid=EFBEADDE', { token: a.desk })).card.ticket_code, code, 'reversed bytes find the same card');
+  // loading it again from the phone finds the same card, not a second one
+  const again = ok(await api('POST', '/access/cards/assign', { token: a.desk, body: { ticket_code: code, uid: 'DE:AD:BE:EF' } }));
+  const [[n]] = await pool.query("SELECT COUNT(*) AS n FROM rfid_cards WHERE tenant_id = ? AND uid IN ('DEADBEEF','EFBEADDE')", [a.id]);
+  assert.equal(Number(n.n), 1);
+  ok(await api('POST', `/access/cards/${again.id}/lost`, { token: a.desk }));
+  assert.equal(ok(await api('POST', '/tickets/scan', { token: a.desk, body: { uid: '3735928559' } })).result, 'card_blocked');
 });
 
 test('cards: load a ticket, tap to ride, block a lost card and move the ticket', async () => {
@@ -72,7 +89,7 @@ test('cards: load a ticket, tap to ride, block a lost card and move the ticket',
   assert.equal(tap.card.label, '1001');
   assert.equal(ok(await api('POST', '/tickets/scan', { token: a.desk, body: { code: '04A23B4C5D6E70' } })).result, 'duplicate', 'pass-back still applies to cards');
   // a card nobody registered
-  assert.equal(ok(await api('POST', '/tickets/scan', { token: a.desk, body: { uid: 'DEADBEEF' } })).result, 'unknown');
+  assert.equal(ok(await api('POST', '/tickets/scan', { token: a.desk, body: { uid: 'FEEDFACE' } })).result, 'unknown');
   // a second ticket cannot silently overwrite a card that still carries a good one
   const code2 = await sell(a);
   const clash = await api('POST', '/access/cards/assign', { token: a.desk, body: { ticket_code: code2, uid: '04A23B4C5D6E70' } });
@@ -114,22 +131,33 @@ test('devices: pair, check online, a retry is one ride, offline list and upload'
   assert.equal(first.allow, true); assert.ok(first.open_ms > 0); assert.equal(first.uses_remaining, 1);
   const retry = ok(await api('POST', '/device/check', { body: { uid: '0A0B0C0D', client_ref: 'g1-1' }, headers: H }));
   assert.equal(retry.repeat, true); assert.equal(retry.allow, true);
+  assert.equal(retry.open_ms, first.open_ms, 'a retry still says how long to open'); assert.equal(retry.uses_remaining, 1);
   const [[t]] = await pool.query('SELECT uses_remaining FROM tickets WHERE tenant_id = ? AND code = ?', [a.id, code]);
   assert.equal(t.uses_remaining, 1, 'a retried request used one ride, not two');
   const [[s]] = await pool.query('SELECT location, via, device_id FROM scans WHERE tenant_id = ? AND client_ref = ?', [a.id, 'g1-1']);
   assert.equal(s.location, 'Summit Quad'); assert.equal(s.via, 'device');
 
   // the offline list: good chips and codes, blocked chips, no names
-  const list = ok(await api('GET', '/device/list', { headers: H }));
+  const listRes = await fetch(`${base}/api/v1/device/list`, { headers: H });
+  const list = await listRes.json();
   assert.ok(list.items.some((i) => i.uid === '0A0B0C0D' && i.uses_remaining === 1));
   assert.ok(list.blocked.includes('04A23B4C5D6E70'));
   assert.ok(!JSON.stringify(list).includes('Olive'));
+  assert.ok(!JSON.stringify(list).includes(code), 'ticket codes are never sent');
+  assert.ok(list.items.some((i) => i.code_hash === A.codeHash(list.code_hash.key, code)), 'a device can check a barcode by its hash');
+  const etag = listRes.headers.get('etag');
+  assert.ok(etag);
+  const same = await fetch(`${base}/api/v1/device/list`, { headers: { ...H, 'if-none-match': etag } });
+  assert.equal(same.status, 304, 'nothing changed, nothing sent');
 
   // scans decided offline arrive later, are saved once, and use the ride
   const at = new Date(Date.now() - 60_000).toISOString();
   const up = ok(await api('POST', '/device/scans', { body: { scans: [{ client_ref: 'off-1', at, uid: '0A0B0C0D', allowed: true }, { client_ref: 'off-2', at, uid: 'FFFFFFFF', allowed: false }] }, headers: H }));
-  assert.deepEqual(up, { saved: 2, repeats: 0 });
-  assert.deepEqual(ok(await api('POST', '/device/scans', { body: { scans: [{ client_ref: 'off-1', at, uid: '0A0B0C0D', allowed: true }] }, headers: H })), { saved: 0, repeats: 1 });
+  assert.deepEqual(up, { saved: 2, repeats: 0, rejected: [] });
+  assert.deepEqual(ok(await api('POST', '/device/scans', { body: { scans: [{ client_ref: 'off-1', at, uid: '0A0B0C0D', allowed: true }] }, headers: H })), { saved: 0, repeats: 1, rejected: [] });
+  // a gate whose clock runs a day fast does not hold the ticket in the pass-back window
+  const ahead = ok(await api('POST', '/device/scans', { body: { scans: [{ client_ref: 'off-3', at: new Date(Date.now() + 864e5).toISOString(), uid: '0A0B0C0D', allowed: true }] }, headers: H }));
+  assert.equal(ahead.saved, 0); assert.equal(ahead.rejected[0].client_ref, 'off-3');
   const [[t2]] = await pool.query('SELECT uses_remaining, status FROM tickets WHERE tenant_id = ? AND code = ?', [a.id, code]);
   assert.equal(t2.uses_remaining, 0); assert.equal(t2.status, 'used_up');
   assert.equal(ok(await api('POST', '/device/check', { body: { uid: '0A0B0C0D' }, headers: H })).result, 'no_uses');
@@ -142,6 +170,28 @@ test('devices: pair, check online, a retry is one ride, offline list and upload'
   is(await api('GET', '/device/ping', { headers: H }), 401, 'a switched-off device is shut out');
   // the other mountain cannot see or change it
   is(await api('PATCH', `/access/devices/${d.id}`, { token: M.b.token, body: { active: true } }), 404);
+  // a removed device can be paired again with a new code
+  ok(await api('DELETE', `/access/devices/${d.id}`, { token: a.token }));
+  const code2 = ok(await api('POST', `/access/devices/${d.id}/pair-code`, { token: a.token })).code;
+  ok(await api('POST', '/device/pair', { body: { code: code2 } }));
+});
+
+test('two gates tapping the same pass at the same moment: one lets them through', async () => {
+  const a = M.a;
+  const d1 = ok(await api('POST', '/access/devices', { token: a.token, body: { name: 'Race gate 1' } }));
+  const d2 = ok(await api('POST', '/access/devices', { token: a.token, body: { name: 'Race gate 2' } }));
+  const k1 = ok(await api('POST', '/device/pair', { body: { code: d1.code } })).token;
+  const k2 = ok(await api('POST', '/device/pair', { body: { code: d2.code } })).token;
+  const code = await sell(a, 'season_pass', { valid_days: 100 });
+  ok(await api('POST', '/access/cards/assign', { token: a.token, body: { ticket_code: code, uid: 'ABCD0001' } }));
+  for (let round = 0; round < 3; round += 1) {
+    await pool.query("DELETE FROM scans WHERE tenant_id = ? AND media_uid = 'ABCD0001'", [a.id]);
+    const [x, y] = await Promise.all([
+      api('POST', '/device/check', { body: { uid: 'ABCD0001' }, headers: dev(k1) }),
+      api('POST', '/device/check', { body: { uid: 'ABCD0001' }, headers: dev(k2) }),
+    ]);
+    assert.deepEqual([ok(x).result, ok(y).result].sort(), ['duplicate', 'ok'], `round ${round}`);
+  }
 });
 
 test('the Gate app switched off closes cards and devices too', async () => {
