@@ -365,6 +365,15 @@ const assetSteps = [
   ['pm_log work order', (c) => columnExists(c, 'pm_log', 'work_order_id'), 'ALTER TABLE pm_log ADD COLUMN work_order_id BIGINT UNSIGNED NULL, ADD UNIQUE KEY uq_pm_log_wo (tenant_id, work_order_id)'],
 ];
 
+// Gate: a scan remembers the card and the device it came from, and a device's own id for it, so a scan sent twice
+// (from a gate that was offline) is saved once.
+const gateSteps = [
+  ['scans.media_uid', (c) => columnExists(c, 'scans', 'media_uid'), 'ALTER TABLE scans ADD COLUMN media_uid VARCHAR(32) NULL, ADD COLUMN device_id BIGINT UNSIGNED NULL, ADD COLUMN client_ref VARCHAR(64) NULL, ADD COLUMN via ENUM(\'code\',\'rfid\',\'device\',\'offline\') NULL'],
+  ['scans card_blocked result', (c) => columnTypeHas(c, 'scans', 'result', 'card_blocked'), "ALTER TABLE scans MODIFY result ENUM('ok','expired','not_yet_valid','void','no_uses','unknown','duplicate','card_blocked') NOT NULL"],
+  ['tenants.gate_open_ms', (c) => columnExists(c, 'tenants', 'gate_open_ms'), 'ALTER TABLE tenants ADD COLUMN gate_open_ms SMALLINT UNSIGNED NOT NULL DEFAULT 3000'],
+  ['scans by device ref', (c) => indexExists(c, 'scans', 'uq_scans_device_ref'), 'ALTER TABLE scans ADD UNIQUE KEY uq_scans_device_ref (tenant_id, device_id, client_ref)'],
+];
+
 async function backfillCaseNumbers(conn) {
   const [rows] = await conn.query('SELECT id, tenant_id, occurred_at FROM incidents WHERE seq IS NULL ORDER BY tenant_id, id');
   const next = new Map();
@@ -410,8 +419,9 @@ async function main() {
   await conn.query(fs.readFileSync(path.join(__dirname, 'weekly.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'waivers.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'assets.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'gate.sql'), 'utf8'));
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

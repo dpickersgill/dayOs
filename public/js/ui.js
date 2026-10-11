@@ -178,7 +178,7 @@ export function button(text, onClick, { kind, small, type = 'button', label } = 
 
 // ---------------------------------------------------------------- dialogs
 /** Opens a dialog. Returns { close, body }. */
-export function dialog(title, content, { wide = false, footer } = {}) {
+export function dialog(title, content, { wide = false, footer, onClose } = {}) {
   const previous = document.activeElement;
   const titleId = `dlg-${Math.random().toString(36).slice(2, 8)}`;
   const closeBtn = h('button', { type: 'button', class: 'btn small', 'aria-label': 'Close' }, 'Close');
@@ -193,10 +193,14 @@ export function dialog(title, content, { wide = false, footer } = {}) {
     if (all.length && all[all.length - 1] !== overlay) return;
     close();
   };
+  let closed = false;
   function close() {
+    if (closed) return;
+    closed = true;
     document.removeEventListener('keydown', onKey);
     overlay.remove();
     if (previous && previous.isConnected) previous.focus();
+    if (onClose) onClose(); // lets a dialog that holds the camera or NFC let go of it however it was closed
   }
   closeBtn.addEventListener('click', close);
   // A tap outside closes the dialog only while nothing has been typed in it, so a stray tap never throws work away.

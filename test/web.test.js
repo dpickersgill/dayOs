@@ -1543,6 +1543,55 @@ test('gate: shows the holder, warns on a repeat scan and lets staff override, an
   assert.match(root.textContent, /Gold Pass|Season Pass/);
   clean(root, 'pass lookup');
 });
+
+test('gate cards and devices: load a card, tap it at the gate, block it; a manager pairs a gate', skip(), async () => {
+  await closeOverlays();
+  const o = T.owner;
+  const sold = ok(await sellApi(o, { customer: adult('Cara', 'Card'), lines: [{ type: 'ticket', product_id: D.day }], payments: [{ tender: 'cash', amount_cents: 6890 }] }));
+  const code = sold.tickets[0].code;
+  // load a card from the Cards tab
+  let root = await renderView('gate', 'counter', T.counter, {}, ['cards']);
+  clean(root, 'cards tab, empty');
+  clickBtn(root, 'Load a card'); await settle();
+  const dlg = document.querySelector('.overlay');
+  dlg.querySelector('input[name=ticket_code]').value = code;
+  dlg.querySelector('input[name=uid]').value = 'C0:FF:EE:01';
+  dlg.querySelector('input[name=label]').value = '2001';
+  dlg.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await settle(); await settle();
+  assert.equal(document.querySelector('.overlay'), null, 'the dialog closed after loading');
+  assert.match(root.textContent, /No\. 2001/);
+  assert.match(root.textContent, /Cara Card/);
+  assert.match(root.textContent, /Has a ticket/);
+  clean(root, 'cards tab');
+  // a desk reader types the card into the scan box
+  root = await renderView('gate', 'counter', T.counter);
+  const input = root.querySelector('.scan-input'); input.value = 'C0FFEE01'; input.form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await settle();
+  assert.match(root.querySelector('.gate').textContent, /Let them ride/);
+  assert.match(root.textContent, /Card 2001/);
+  clean(root, 'gate with a card');
+  // block it
+  root = await renderView('gate', 'counter', T.counter, {}, ['cards']);
+  clickBtn(root, 'Lost'); await settle();
+  clickBtn(document.querySelector('.overlay'), 'Block card'); await settle(); await settle();
+  assert.match(root.textContent, /Lost, blocked/);
+  await closeOverlays();
+  // devices: managers only
+  root = await renderView('gate', 'counter', T.counter);
+  assert.ok(![...root.querySelectorAll('[role=tab]')].some((b) => b.textContent === 'Devices'), 'counter sees no Devices tab');
+  root = await renderView('gate', 'owner', o, {}, ['devices']);
+  clean(root, 'devices tab, empty');
+  clickBtn(root, 'Add a device'); await settle();
+  const add = document.querySelector('.overlay');
+  add.querySelector('input[name=name]').value = 'Summit gate 1';
+  add.querySelector('input[name=location]').value = 'Summit Quad';
+  add.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await settle(); await settle();
+  const pair = document.querySelector('.pair-code');
+  assert.ok(pair && /^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(pair.textContent), 'a pairing code is shown');
+  await closeOverlays();
+  assert.match(root.textContent, /Summit gate 1/);
+  assert.match(root.textContent, /Waiting to pair/);
+  clean(root, 'devices tab');
+});
 async function passProduct() {
   const list = ok(await api('GET', '/products', { token: T.owner })).data.filter((p) => p.kind === 'season_pass');
   if (list.length) { D.pass = list[0].id; return D.pass; }

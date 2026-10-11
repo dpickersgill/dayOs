@@ -146,6 +146,17 @@ The Sell screen sells tickets, lessons, rental packages, program places and gift
 - **Gate** (`#/gate`, counter, staff and managers): the ticket scanner on its own page, with a large result panel and recent scans.
 - Both pages were restyled: pill tabs, larger product tiles, and a sticky basket with a large total.
 
+### Gate: RFID cards and gate hardware
+
+- **One rule for every scan.** A barcode, a card tap at the counter or a gate asking online all go through the same check (`src/lib/access.js`): valid dates, rides left, voided, pass-back hold, and now a blocked card. Every scan is logged with the card and the device it came from.
+- **RFID cards** (Gate, Cards; counter, staff and managers): a card is known by its chip serial (UID) and carries one ticket or pass at a time; it can be loaded again next season. Load a card by scanning the ticket's code and tapping the card. A card that already carries another good ticket is not overwritten unless Replace is ticked. Moving a ticket to a new card frees the old one. **Lost** blocks a card at once (`card_blocked` at every gate); only a manager unblocks it.
+- **Reading cards with what you have.** A desk RFID reader that types like a keyboard works in the Gate scan box and every card field. The server accepts the serial as hex (with or without colons) or as a decimal number in either byte order, so readers set up differently still match. On Chrome for Android, **Tap cards on this phone** reads cards through Web NFC; where the browser has BarcodeDetector, **Scan with the camera** reads barcodes and QR codes.
+- **Gates, turnstiles and handheld readers** (Gate, Devices; managers): added with a name and location, then paired with a one-time code (30 minutes) traded for the device's own key, like the time clock tablet. A switched-off or removed device is shut out at once. Settings: how long a gate stays open, and the pass-back hold.
+- **Device API** (`/api/v1/device`, `Authorization: Device <key>`): `POST /pair`, `GET /ping`, `POST /check` (one tap decided online; `client_ref` makes a retry return the first answer and never use a second ride), `GET /list` (today's good codes and chips, and blocked chips, with no names, for deciding offline) and `POST /scans` (scans decided offline, saved once each at the time they happened; an allowed scan uses a ride). Rate limited; closed when the Gate app is off. The guide for installers is `docs/ACCESS-API.md`.
+- **Not yet:** direct links to Axess or SKIDATA gate systems. Those need a partnership and their interface documents; gates from other makers, or a reader on a small computer driving a relay, can use the device API today.
+- Fixed on the way: a punch card's "rides left" on the Gate screen showed the number before the ride was taken.
+- Run `npm run migrate` when upgrading: it adds `rfid_cards`, `access_devices`, the card, device and offline columns on `scans`, and the gate open time.
+
 ### Money, safety and records
 - **Sales tax**: rates per kind (or all) in Money > Sales tax; shown on baskets, receipts, dashboard.
 - **Card payments**: card brand, last 4 and approval code are recorded and matched against a pasted processor statement (Money > Card statement). A live terminal integration (Square/Stripe) is NOT built; it needs a processor choice and keys.

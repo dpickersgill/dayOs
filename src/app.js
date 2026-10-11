@@ -40,6 +40,7 @@ const park = require('./routes/park');
 const opsRoutes = require('./routes/ops');
 const maintenance = require('./routes/maintenance');
 const assetRoutes = require('./routes/assets');
+const accessRoutes = require('./routes/access');
 const documents = require('./routes/documents');
 const availability = require('./routes/availability');
 const waiverRoutes = require('./routes/waivers');
@@ -144,6 +145,9 @@ function createApp() {
   // The kiosk has no login, so its doors are rate limited: pairing is tight, and each PIN is also locked per person after five misses.
   api.post('/kiosk/pair', rateLimit({ windowMs: 600_000, max: Number(process.env.KIOSK_PAIR_LIMIT) || 10, message: 'Too many tries. Ask a manager for a new code.' }));
   api.use('/kiosk', rateLimit({ windowMs: 60_000, max: Number(process.env.KIOSK_RATE_LIMIT) || 60, message: 'Too many requests, slow down' }), kiosk.publicRouter);
+  // Gates, turnstiles and handheld readers: no login, the device's own key. A busy gate checks a tap every few seconds.
+  api.post('/device/pair', rateLimit({ windowMs: 600_000, max: Number(process.env.DEVICE_PAIR_LIMIT) || 10, message: 'Too many tries. Ask a manager for a new code.' }));
+  api.use('/device', rateLimit({ windowMs: 60_000, max: Number(process.env.DEVICE_RATE_LIMIT) || 600, message: 'Too many requests, slow down' }), accessRoutes.deviceRouter);
   api.use('/internal/jobs', rateLimit({ windowMs: 60_000, max: 10 }), followPublic.jobs);
   api.use('/trial', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SANDBOX_RATE_LIMIT) || 5, message: 'Too many demo requests from this address. Try again later, or ask us for a walkthrough.' }), sandboxRoutes);
   // Operator sign-in has its own, tighter limit (on top of each login's lockout).
@@ -183,6 +187,7 @@ function createApp() {
   api.use('/ops', opsRoutes);
   api.use('/ops', maintenance);
   api.use('/assets', assetRoutes);
+  api.use('/access', accessRoutes.adminRouter);
   api.use('/documents', documents);
   api.use('/availability', availability.router);
   api.use('/waivers', waiverRoutes.router);

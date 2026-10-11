@@ -3,8 +3,8 @@
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
-const { z, dateStr, tierEnum, validate, paramId, newCode, addDays, todayIn, dayRange, seasonFor } = require('../lib/util');
-const { ON_FILE } = require('../lib/waivers');
+const { z, dateStr, tierEnum, validate, paramId, newCode, addDays, todayIn, dayRange } = require('../lib/util');
+const access = require('../lib/access');
 const { unitPrice, applyPromo } = require('../lib/pricing');
 const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
@@ -338,48 +338,20 @@ router.post('/orders/:id/refunds/:rid/retry', requireRole('manager'), async (req
 /**
  * Gate / lift scan. Always returns 200 with a result so scanners can show a clear message;
  * only 'ok' means the guest may ride. Every scan is logged.
- * The same ticket scanned again within the pass-back window (a setting, default 60 s) comes back as 'duplicate' so a
+ * The ticket can be shown as its barcode (code) or as an RFID card (uid, the chip serial); a code that is not a ticket
+ * is tried as a card, so a desk RFID reader that types into the scan box works too.
+ * The same ticket scanned again within the pass-back window (a setting, default 120 s) comes back as 'duplicate' so a
  * ticket handed back across the fence is caught; staff can wave it through with override: true. The reply carries the
  * holder's name and photo so the gate can check the face against the ticket.
  */
 router.post(
   '/tickets/scan',
   requireRole('counter', 'staff', 'manager'),
-  validate(z.object({ code: z.string().min(6).max(40), location: z.string().max(100).optional(), override: z.boolean().optional() })),
+  validate(z.object({ code: z.string().trim().min(4).max(64).optional(), uid: z.string().trim().min(4).max(64).optional(), location: z.string().max(100).optional(), override: z.boolean().optional() })
+    .refine((b) => b.code || b.uid, 'Give the ticket code or the card')),
   async (req, res) => {
-    const { tenantId } = req.auth;
-    const code = req.body.code.toUpperCase();
-    const out = await tx(async (conn) => {
-      const tenant = await one(conn, 'SELECT timezone, scan_passback_seconds, waiver_text FROM tenants WHERE id = ?', [tenantId]);
-      const today = todayIn(tenant.timezone);
-      const t = await one(conn, 'SELECT * FROM tickets WHERE tenant_id = ? AND code = ? FOR UPDATE', [tenantId, code]);
-
-      let result = 'ok';
-      let previous = null;
-      if (!t) result = 'unknown';
-      else if (t.status === 'void') result = 'void';
-      else if (t.status === 'used_up' || (t.uses_remaining !== null && t.uses_remaining < 1)) result = 'no_uses';
-      else if (today < t.valid_from) result = 'not_yet_valid';
-      else if (today > t.valid_to) result = 'expired';
-      else if (tenant.scan_passback_seconds > 0 && !req.body.override) {
-        previous = await one(conn, "SELECT scanned_at, location FROM scans WHERE tenant_id = ? AND ticket_id = ? AND result = 'ok' AND scanned_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? SECOND) ORDER BY id DESC LIMIT 1", [tenantId, t.id, tenant.scan_passback_seconds]);
-        if (previous) result = 'duplicate';
-      }
-
-      if (result === 'ok' && t.uses_remaining !== null) {
-        const left = t.uses_remaining - 1;
-        await conn.query('UPDATE tickets SET uses_remaining = ?, status = ? WHERE id = ? AND tenant_id = ?', [left, left < 1 ? 'used_up' : 'active', t.id, tenantId]);
-      }
-      await conn.query('INSERT INTO scans (tenant_id, ticket_id, code, location, result) VALUES (?, ?, ?, ?, ?)', [tenantId, t ? t.id : null, code, req.body.location ?? null, result]);
-      let holder = null;
-      if (t) {
-        const p = await one(conn, 'SELECT p.id, p.first_name, p.last_name, p.photo, pr.name AS product, pr.kind FROM tickets k JOIN products pr ON pr.id = k.product_id AND pr.tenant_id = k.tenant_id LEFT JOIN people p ON p.id = k.person_id AND p.tenant_id = k.tenant_id WHERE k.tenant_id = ? AND k.id = ?', [tenantId, t.id]);
-        holder = { name: p && p.first_name ? `${p.first_name} ${p.last_name}` : null, photo: p ? p.photo || null : null, product: p ? p.product : null, kind: p ? p.kind : null };
-        // Only when the mountain uses waivers and the ticket has a named holder: true or false, otherwise null (nothing to show).
-        holder.waiver = tenant.waiver_text && p && p.id ? Boolean(await one(conn, ON_FILE, [tenantId, p.id, seasonFor(today)])) : null;
-      }
-      return { result, valid: result === 'ok', holder, scanned_before: previous ? { at: previous.scanned_at, location: previous.location } : null, ticket: t ? { valid_from: t.valid_from, valid_to: t.valid_to, uses_remaining: t.uses_remaining } : null };
-    });
+    const out = await tx((conn) => access.decide(conn, req.auth.tenantId, { code: req.body.code, uid: req.body.uid, location: req.body.location, override: req.body.override, via: req.body.uid ? 'rfid' : 'code' }));
+    delete out.open_ms;
     res.json(out);
   },
 );
