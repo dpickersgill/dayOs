@@ -66,7 +66,7 @@ test('a visitor gets a private demo mountain with every app on and made-up data 
   assert.equal(me.status, 200);
   assert.equal(me.body.role, 'owner'); assert.equal(me.body.tenant_name, 'Test Peak');
   assert.ok(me.body.sandbox && me.body.sandbox.expires_at, 'the app can tell it is a demo');
-  assert.deepEqual([...me.body.modules].sort(), M.MODULES.filter((m) => !m.addon).map((m) => m.key).sort(), 'every app is on; paid add-ons are not');
+  assert.deepEqual([...me.body.modules].sort(), M.MODULES.map((m) => m.key).sort(), 'every app is on, the paid add-ons too, so a visitor sees what they would buy');
   const lifts = await api('GET', '/schedule/lifts', { token: one.body.token });
   const products = await api('GET', '/products', { token: one.body.token });
   const people = await api('GET', '/people', { token: one.body.token });
@@ -74,6 +74,26 @@ test('a visitor gets a private demo mountain with every app on and made-up data 
   assert.ok((people.body.data || people.body).length >= 10, 'sample customers and staff are there');
   const [[t]] = await pool.query('SELECT storage_cap_mb, require_mfa FROM tenants WHERE slug = ?', [one.body.tenant]);
   assert.equal(t.storage_cap_mb, S.STORAGE_MB); assert.equal(Number(t.require_mfa), 0);
+});
+
+test('the guided tours have what they point at, and each visitor\'s progress reaches the Demos dashboard', async () => {
+  const tok = one.body.token;
+  // the gate tour taps a good card and a lost one, and shows two devices
+  const good = await api('POST', '/tickets/scan', { token: tok, body: { uid: '04A1B2C3D4E5F6' } });
+  assert.equal(good.body.result, 'ok', 'the demo card carries a ticket that has not been scanned yet');
+  assert.equal((await api('POST', '/tickets/scan', { token: tok, body: { uid: '04C0FFEE123456' } })).body.result, 'card_blocked');
+  assert.ok((await api('GET', '/access/devices', { token: tok })).body.data.length >= 2);
+  // progress: a step, then the end; a step number never goes backwards
+  assert.equal((await api('POST', '/demo-tours', { token: tok, body: { tour: 'gate', step: 3, total: 7 } })).status, 204);
+  assert.equal((await api('POST', '/demo-tours', { token: tok, body: { tour: 'gate', step: 1, total: 7 } })).status, 204);
+  assert.equal((await api('POST', '/demo-tours', { token: tok, body: { tour: 'sell', step: 8, total: 8, done: true } })).status, 204);
+  assert.equal((await api('POST', '/demo-tours', { token: tok, body: { tour: 'not-a-tour', step: 1, total: 2 } })).status, 400);
+  const dash = await api('GET', '/platform/sandboxes', { key: 'test-bootstrap-key' });
+  const row = dash.body.data.find((x) => x.slug === one.body.tenant);
+  const tours = Object.fromEntries(row.tours.map((t) => [t.tour, t]));
+  assert.deepEqual(tours.gate, { tour: 'gate', steps_seen: 3, steps_total: 7, finished: false });
+  assert.equal(tours.sell.finished, true);
+  assert.ok(dash.body.summary.took_tour >= 1);
 });
 
 test('bots, bad addresses and a full demo are turned away', async () => {

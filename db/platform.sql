@@ -61,3 +61,14 @@ CREATE TABLE IF NOT EXISTS platform_operators (
   created_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_platform_operator_email (email)
 ) ENGINE=InnoDB;
+
+-- Guided tours taken in a demo: how far each visitor got in each tour, for the Demos dashboard.
+CREATE TABLE IF NOT EXISTS sandbox_tours (
+  signup_id    BIGINT UNSIGNED NOT NULL,
+  tour         VARCHAR(40)  NOT NULL,
+  steps_seen   TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  steps_total  TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  started_at   DATETIME     NOT NULL,
+  finished_at  DATETIME     NULL,
+  PRIMARY KEY (signup_id, tour)
+) ENGINE=InnoDB;

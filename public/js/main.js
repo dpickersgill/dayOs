@@ -1,5 +1,6 @@
 // Entry point: sign-in, role-aware navigation and the hash router.
 
+import { openTourPicker, resumeTour, welcomeOnce, endTour } from './tour.js';
 import { get, post, session, hooks, ApiError } from './api.js';
 import { mfaPanel } from './views/mfa.js';
 import { flush as flushOutbox, waitingCounts } from './outbox.js';
@@ -146,6 +147,7 @@ function demoPill(sb) {
   const days = Math.max(0, Math.ceil((new Date(sb.expires_at) - Date.now()) / 86400000));
   return h('aside', { class: 'demo-pill', 'aria-label': 'Demo mountain' },
     h('span', null, `Demo mountain. ${days <= 1 ? 'Ends within a day.' : `${days} days left.`}`),
+    h('button', { type: 'button', onclick: () => openTourPicker() }, 'Guided tours'),
     sb.contact_url ? h('a', { href: sb.contact_url, target: '_blank', rel: 'noopener' }, 'Ask for a walkthrough') : null);
 }
 
@@ -205,6 +207,7 @@ function addHelpLink(holder, key) {
 }
 
 async function signOut(message) {
+  endTour();
   // Patrol entries kept on this phone while there was no signal go with the person who typed them. Try to send them first;
   // if they still cannot go, say so before signing out (they stay on this phone for up to three days, for this person).
   if (!message) {
@@ -247,6 +250,7 @@ async function start() {
   if (ctx.me.mfa_enrollment_required) { showEnrollment(); return; }
   buildShell();
   await route();
+  if (ctx.me.sandbox) { resumeTour(); welcomeOnce(); }
 }
 
 window.addEventListener('hashchange', route);

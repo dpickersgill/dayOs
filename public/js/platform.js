@@ -253,7 +253,8 @@ async function demos() {
     stat(summary.last_7_days, 'Started in the last 7 days'),
     stat(summary.last_30_days, 'Started in the last 30 days'),
     stat(summary.came_back, 'Came back later', pct(summary.came_back)),
-    stat(summary.made_changes, 'Made changes', pct(summary.made_changes))));
+    stat(summary.made_changes, 'Made changes', pct(summary.made_changes)),
+    stat(summary.took_tour || 0, 'Took a guided tour', pct(summary.took_tour || 0))));
 
   if (!data.length) { body.append(empty('No one has started a demo yet. Share /try to get the first one.')); return; }
 
@@ -286,6 +287,7 @@ async function demos() {
       { head: 'Sign-ins', num: true, cell: (x) => String(x.sign_ins) },
       { head: 'Activity', num: true, cell: (x) => h('span', { title: 'Screens opened and actions taken' }, String(x.requests)) },
       { head: 'Changes', num: true, cell: (x) => String(x.changes) },
+      { head: 'Tours', cell: (x) => (x.tours && x.tours.length ? h('span', { title: x.tours.map((t) => `${TOUR_NAMES[t.tour] || t.tour}: ${t.finished ? 'finished' : `step ${t.steps_seen} of ${t.steps_total}`}`).join('\n') }, `${x.tours.filter((t) => t.finished).length} of ${x.tours.length} finished`) : h('span', { class: 'muted' }, 'None')) },
       { head: 'Apps used', cell: (x) => (x.apps.length ? x.apps.slice(0, 3).map((a) => a.label).join(', ') + (x.apps.length > 3 ? ` +${x.apps.length - 3}` : '') : h('span', { class: 'muted' }, 'None yet')) },
       { actions: true, cell: (x) => (x.status !== 'removed' ? button('Delete', () => remove(x), { small: true }) : '') },
     ], rows.slice(0, limit)), more);
@@ -294,9 +296,9 @@ async function demos() {
   drawFilters(); draw();
 
   const csv = () => {
-    const cols = ['at', 'name', 'email', 'mountain', 'status', 'last_used_at', 'sign_ins', 'requests', 'changes', 'apps'];
+    const cols = ['at', 'name', 'email', 'mountain', 'status', 'last_used_at', 'sign_ins', 'requests', 'changes', 'apps', 'tours'];
     const cell = (v) => { let t = v === null || v === undefined ? '' : String(v); if (/^[=+\-@]/.test(t)) t = `'${t}`; return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
-    const lines = [cols.join(','), ...data.map((x) => cols.map((c) => cell(c === 'apps' ? x.apps.map((a) => a.label).join('; ') : x[c])).join(','))];
+    const lines = [cols.join(','), ...data.map((x) => cols.map((c) => cell(c === 'apps' ? x.apps.map((a) => a.label).join('; ') : c === 'tours' ? (x.tours || []).map((t) => `${t.tour} ${t.finished ? 'finished' : `${t.steps_seen}/${t.steps_total}`}`).join('; ') : x[c])).join(','))];
     const a = h('a', { href: URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' })), download: 'summitops-demos.csv' });
     document.body.append(a); a.click(); a.remove();
   };
@@ -382,6 +384,7 @@ signIn();
 // De-identified injury counts across the mountains that share, for the National Ski Patrol, NSAA and researchers.
 // Counts from 1 to 4 (and one more where needed) come back from the server already hidden; this page only shows them.
 const seasonNow = () => { const d = new Date(); const y = d.getUTCMonth() >= 7 ? d.getUTCFullYear() : d.getUTCFullYear() - 1; return `${y}-${String((y + 1) % 100).padStart(2, '0')}`; };
+const TOUR_NAMES = { morning: 'Morning', sell: 'Sell', gate: 'Gate and RFID', patrol: 'Patrol', staff: 'Staff', assets: 'Assets', waivers: 'Waivers' };
 const shown = (c) => (c.hidden ? 'Not shown' : String(c.n));
 
 async function injuryReport(query = { season: seasonNow(), region: '' }) {

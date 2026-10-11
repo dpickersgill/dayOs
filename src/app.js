@@ -33,6 +33,7 @@ const lessonbook = require('./routes/lessonbook');
 const { logFailure } = require('./lib/jobs');
 const patrol = require('./routes/patrol');
 const safetyRoutes = require('./routes/safety');
+const demoTours = require('./routes/demotours');
 const patrolTeam = require('./routes/team');
 const dispatch = require('./routes/dispatch');
 const patrolForm = require('./routes/form');
@@ -160,6 +161,7 @@ function createApp() {
   // Everything below requires a valid token; tenant comes from the token only.
   api.use(authenticate);
   api.use(modules.moduleGate);
+  api.use('/demo-tours', rateLimit({ windowMs: 60_000, max: 120 }), demoTours.router);
   api.use('/messages', messagesRoutes.router);
   api.use('/online-shop', shopRoutes.router);
   api.use('/online-shop', shopAdmin.router);

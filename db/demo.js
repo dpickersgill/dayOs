@@ -242,6 +242,18 @@ async function load(o) {
   }
   for (const code of codes.slice(0, 8)) await soft('scan', () => C('POST', '/tickets/scan', { code }));
 
+  // RFID cards (the guided gate tour taps these by typing their serials) and two gate devices
+  // the card's ticket is a fresh sale that has never been scanned, so the first tap in the tour is a clean "go"
+  const cardSale = await sale(adults[1], [{ type: 'ticket', product_id: prod.day }], 'card');
+  const cardOrder = cardSale && await soft('order detail', () => C('GET', `/orders/${cardSale.id || cardSale.order_id}`));
+  const cardCode = cardOrder && cardOrder.tickets && cardOrder.tickets[0] ? cardOrder.tickets[0].code : null;
+  if (cardCode) await soft('rfid card', () => C('POST', '/access/cards/assign', { ticket_code: cardCode, uid: '04A1B2C3D4E5F6', label: '1001' }));
+  if (codes[1]) {
+    const lost = await soft('rfid card', () => C('POST', '/access/cards/assign', { ticket_code: codes[1], uid: '04C0FFEE123456', label: '1002' }));
+    if (lost) await soft('rfid lost', () => C('POST', `/access/cards/${lost.id}/lost`));
+  }
+  for (const [name, location, kind] of [['Summit Quad gate 1', 'Summit Quad', 'turnstile'], ['Base lodge handheld', 'Base lodge', 'handheld']]) await soft(`gate device ${name}`, () => C('POST', '/access/devices', { name, location, kind }));
+
   // ---------------------------------------------------------------- patrol
   log('Patrol');
   const levels = ['director', 'leader', 'senior', 'patroller'];

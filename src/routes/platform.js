@@ -185,6 +185,9 @@ router.get('/sandboxes', async (_req, res) => {
     m.set(label, (m.get(label) || 0) + Number(a.requests));
     bySignup.set(a.signup_id, m);
   }
+  const tourRows = ids.length ? await rows(pool, 'SELECT signup_id, tour, steps_seen, steps_total, finished_at FROM sandbox_tours WHERE signup_id IN (?)', [ids]) : [];
+  const toursOf = new Map();
+  for (const t of tourRows) { const l = toursOf.get(t.signup_id) || []; l.push({ tour: t.tour, steps_seen: Number(t.steps_seen), steps_total: Number(t.steps_total), finished: Boolean(t.finished_at) }); toursOf.set(t.signup_id, l); }
   const [[c]] = await pool.query('SELECT COUNT(*) AS n FROM tenants WHERE sandbox_expires_at IS NOT NULL');
   const out = data.map((r) => {
     const used = [...(bySignup.get(r.id) || new Map()).entries()].sort((x, y) => y[1] - x[1]).map(([label, n]) => ({ label, requests: n }));
@@ -194,14 +197,14 @@ router.get('/sandboxes', async (_req, res) => {
       id: r.id, at: r.at, email: r.email, name: r.name, mountain: r.mountain, slug: r.slug || null,
       status: r.active ? 'running' : r.exists_now ? 'expired' : 'removed', expires_at: r.expires_at, ended_at: r.ended_at,
       first_used_at: r.first_used_at, last_used_at: r.last_used_at, sign_ins: Number(r.sign_ins || 0), requests: Number(r.requests || 0),
-      changes: r.changes === null || r.changes === undefined ? null : Number(r.changes), apps: used, came_back: Boolean(back),
+      changes: r.changes === null || r.changes === undefined ? null : Number(r.changes), apps: used, came_back: Boolean(back), tours: toursOf.get(r.id) || [],
     };
   });
   const since = (days) => out.filter((r) => new Date(`${String(r.at).replace(' ', 'T')}Z`) > Date.now() - days * 86_400_000).length;
   res.json({
     active: Number(c.n),
     summary: { running: out.filter((r) => r.status === 'running').length, last_7_days: since(7), last_30_days: since(30),
-      came_back: out.filter((r) => r.came_back).length, made_changes: out.filter((r) => r.changes > 0).length, total: out.length },
+      came_back: out.filter((r) => r.came_back).length, made_changes: out.filter((r) => r.changes > 0).length, took_tour: out.filter((r) => r.tours.length).length, total: out.length },
     data: out,
   });
 });

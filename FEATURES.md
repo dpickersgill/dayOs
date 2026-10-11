@@ -412,6 +412,14 @@ Every guest needs a waiver for the season before they rent gear or take a lesson
 
 The console no longer needs the shared platform key day to day. **Operators** (platform console) lists the people who can use it; each signs in with their own email, password and authenticator code (set up with a QR code at their first sign-in). Operators add, switch off, give a new password to, or reset the two-step of other operators, and change their own password; switching off or resetting ends that person's sessions at once. Every change is logged under the operator's name (key use is logged as `key: <name>`). Five wrong tries lock a login for 15 minutes. The platform key stays as the way in for the first operator or an emergency, and `PLATFORM_KEY_SIGNIN=off` shuts it out entirely. See RUNBOOK.md, "Platform console".
 
+## Guided tours (demo mountains)
+
+- A new demo opens with a welcome and a choice of seven short tours, each a few minutes: your morning (Today and mountain status), selling a lift ticket, gate scanning and RFID cards, patrol from call to report (with statistics and the injury network), staff schedule and time clock, assets and fleet, and waivers. "Explore on my own" closes it; the **Guided tours** link on the demo tag brings the list back at any time.
+- A card in the corner walks through the real app one step at a time: it opens the right page, rings the button or panel the step is about, and moves on when the visitor clicks what it asks them to. Back, Next or Skip, and End tour, are always there. A reload carries on where it was. The gate tour has "Type it for me" buttons that tap the demo's RFID cards.
+- Tours only appear in demo mountains. They never change anything on their own.
+- Demo mountains now have every app on, the paid add-ons included, and come with two RFID cards (one reported lost) and two gate devices.
+- The Demos dashboard shows, for each demo, which tours were taken and how many were finished (hover for the step each one reached), a "Took a guided tour" figure, and a tours column in the download.
+
 ## Demos dashboard (platform console)
 
 Platform console, **Demos**: everyone who started a demo, newest first. Tiles show demos running now, started in the last 7 and 30 days, how many came back (used again more than an hour after starting) and how many made changes. Each row shows status and days left, last used, sign-ins, activity (screens opened and actions taken), changes (things added, edited or removed), the apps used most, and **Delete** for a running demo. Filter by running, ended or made changes, search, download a CSV, remove finished demos, or **Delete every demo**. Usage is kept after a demo is removed. Only demo mountains are counted; activity is written at most every 30 seconds, so it can lag slightly.
