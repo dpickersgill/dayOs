@@ -32,6 +32,7 @@ const schoolplus = require('./routes/schoolplus');
 const lessonbook = require('./routes/lessonbook');
 const { logFailure } = require('./lib/jobs');
 const patrol = require('./routes/patrol');
+const safetyRoutes = require('./routes/safety');
 const patrolTeam = require('./routes/team');
 const dispatch = require('./routes/dispatch');
 const patrolForm = require('./routes/form');
@@ -183,6 +184,7 @@ function createApp() {
   api.use('/patrol', dispatch.router);
   api.use('/patrol', patrolForm);
   api.use('/patrol', patrolMap);
+  api.use('/patrol', safetyRoutes);
   api.use('/park', park);
   api.use('/ops', opsRoutes);
   api.use('/ops', maintenance);

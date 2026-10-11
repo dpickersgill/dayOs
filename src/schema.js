@@ -2,4 +2,4 @@
 
 // The last thing the migration adds (here, an index). /readyz checks it exists, so a version running against a database
 // that was not migrated for it shows up straight away instead of as errors later. Update it when db/migrate.js gains a step.
-module.exports = { LATEST: { table: 'scans', index: 'uq_scans_device_ref' } };
+module.exports = { LATEST: { table: 'safety_sharing_log', index: 'ix_safety_log_tenant' } };

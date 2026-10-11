@@ -107,7 +107,7 @@ async function home() {
   const filter = input({ type: 'search', placeholder: 'Find a mountain', 'aria-label': 'Find a mountain' });
   app.append(h('main', { class: 'platform-box wide stack' },
     h('header', { class: 'row between' }, h('h1', null, 'Mountains'),
-      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), button('Demos', () => demos(), { small: true }), button('Activity', () => activity(), { small: true }), button('Operators', () => operators(), { small: true }), me.operator ? button('Change my password', () => myPassword(), { small: true }) : null, button('Sign out', () => signIn('Signed out.'), { small: true }))),
+      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), button('Demos', () => demos(), { small: true }), button('Injury report', () => injuryReport(), { small: true }), button('Activity', () => activity(), { small: true }), button('Operators', () => operators(), { small: true }), me.operator ? button('Change my password', () => myPassword(), { small: true }) : null, button('Sign out', () => signIn('Signed out.'), { small: true }))),
     filter, body));
   try {
     const { data: all } = await call('GET', '/tenants');
@@ -377,3 +377,89 @@ function myPassword() {
 }
 
 signIn();
+
+// ---------------------------------------------------------------- injury network report
+// De-identified injury counts across the mountains that share, for the National Ski Patrol, NSAA and researchers.
+// Counts from 1 to 4 (and one more where needed) come back from the server already hidden; this page only shows them.
+const seasonNow = () => { const d = new Date(); const y = d.getUTCMonth() >= 7 ? d.getUTCFullYear() : d.getUTCFullYear() - 1; return `${y}-${String((y + 1) % 100).padStart(2, '0')}`; };
+const shown = (c) => (c.hidden ? 'Not shown' : String(c.n));
+
+async function injuryReport(query = { season: seasonNow(), region: '' }) {
+  clear(app);
+  const body = h('div', { class: 'stack' });
+  const y = Number(seasonNow().slice(0, 4));
+  const seasons = [0, 1, 2, 3].map((k) => `${y - k}-${String((y - k + 1) % 100).padStart(2, '0')}`);
+  const seasonSel = h('select', { 'aria-label': 'Season' }, seasons.map((s) => h('option', { value: s, selected: s === query.season }, `${s} season`)));
+  const regionSel = h('select', { 'aria-label': 'Region' }, h('option', { value: '' }, 'All regions'));
+  const qs = () => `season=${encodeURIComponent(query.season)}${query.region ? `&region=${query.region}` : ''}`;
+  const csv = button('Download spreadsheet', async () => {
+    const res = await fetch(`/api/v1/platform/safety.csv?${qs()}`, { headers: { 'x-platform-session': session } });
+    if (!res.ok) { let m = 'Could not download'; try { m = (await res.json()).error || m; } catch (_) { /* not JSON */ } throw new Error(m); }
+    const a = h('a', { href: URL.createObjectURL(await res.blob()), download: `injury-network-${query.season}${query.region ? `-${query.region}` : ''}.csv` });
+    document.body.append(a); a.click(); a.remove();
+  }, { small: true });
+  app.append(h('main', { class: 'platform-box wider stack injury-report' },
+    h('header', { class: 'row between no-print' },
+      h('div', { class: 'stack tight' }, h('h1', null, 'Injury network'), h('p', { class: 'muted' }, 'De-identified injury counts from the mountains that share. For the National Ski Patrol, NSAA and safety researchers.')),
+      h('div', { class: 'row' }, button('Back to mountains', () => home(), { small: true }), button('Who shares', () => sharingList(), { small: true }), csv, button('Print', () => window.print(), { small: true }))),
+    h('div', { class: 'row no-print' }, seasonSel, regionSel),
+    body));
+  seasonSel.addEventListener('change', () => injuryReport({ ...query, season: seasonSel.value }));
+  regionSel.addEventListener('change', () => injuryReport({ ...query, region: regionSel.value }));
+
+  body.append(h('p', { class: 'loading' }, 'Loading…'));
+  let r;
+  try { r = await call('GET', `/safety?${qs()}`); } catch (ex) { clear(body); if (ex.status === 403) signIn('Your session ended. Sign in again.'); else body.append(errorBox(ex)); return; }
+  clear(body);
+  for (const g of r.regions_list) regionSel.append(h('option', { value: g.value, selected: g.value === query.region }, g.label));
+  const where = query.region ? (r.regions_list.find((g) => g.value === query.region) || {}).label : 'All regions';
+  body.append(h('p', { class: 'print-only' }, `Injury network, ${r.period.from} to ${r.period.to}, ${where}.`));
+  if (r.period.partial) body.append(h('p', { class: 'muted' }, `This season so far, to the end of the last full month (${r.period.to}). Reports for a season in progress stop at a month end, so two downloads cannot be compared to give one week.`));
+  if (r.empty_period) { body.append(empty('The season has no full month yet.')); return; }
+  if (r.too_few_mountains) { body.append(empty(r.reason === 'rest_of_network' ? 'A region is shown on its own only when the rest of the network is none or at least 3 mountains. Otherwise the two reports together would show one or two mountains.' : `Nothing is shown until at least ${r.rules.min_mountains} mountains share${query.region ? ' in this region' : ''}. ${r.mountains.sharing} so far.`)); return; }
+
+  const fig = (value, name, note) => h('div', { class: 'figure' }, h('strong', null, value === null || value === undefined ? '—' : String(value)), h('span', null, name), note ? h('em', null, note) : null);
+  body.append(h('div', { class: 'figures' },
+    fig(r.mountains.sharing, 'Mountains', `${r.mountains.named} named, ${r.mountains.anonymous} anonymous`),
+    fig(r.hidden ? 'Not shown' : r.patients, 'Patients counted'),
+    fig(r.visits ? `About ${r.visits.toLocaleString()}` : null, 'Skier visits', `At the ${r.mountains.with_visits} mountains that scan tickets, to the nearest 1,000`),
+    fig(r.per_1000, 'Patients per 1,000 visits', r.per_1000 === null ? 'Needs 3 mountains with gate scans, and none or 3 without' : 'Those mountains only')));
+  body.append(h('p', { class: 'muted small' }, `Left out, as in NSAA injury studies: ${r.excluded.map((e) => `${e.label.toLowerCase()} (${e.hidden ? 'not shown' : e.n})`).join('; ')}. `,
+    `Counts from 1 to ${r.rules.min_cell - 1} are not shown, nor other counts in the same list where needed so that none can be worked out. Only reports that were submitted or approved, and not entered in error, are counted. Rates per category appear only when every mountain scans tickets.`));
+  if (r.hidden || !r.breakdowns) return;
+
+  const list = (b) => h('section', { class: 'panel stack' }, h('h3', null, b.title),
+    table([{ head: '', cell: (c) => c.label }, { head: 'Patients', num: true, cell: shown }, { head: '%', num: true, cell: (c) => (c.pct === null ? '' : `${c.pct}%`) }, { head: 'Per 1,000 visits', num: true, cell: (c) => (c.per_1000 === null ? '' : String(c.per_1000)) }],
+      b.cells.filter((c) => c.n !== 0)),
+    b.recorded_pct !== null && b.recorded_pct < 100 ? h('p', { class: 'muted small' }, `Recorded on ${b.recorded_pct}% of reports.`) : null);
+  const inj = r.injuries;
+  const grid = !inj ? null : h('section', { class: 'panel stack wide-panel' }, h('h3', null, `Injuries by body area and type (${inj.total} injuries)`),
+    h('div', { class: 'table-wrap' }, h('table', { class: 'grid' },
+      h('thead', null, h('tr', null, h('th', null, ''), inj.types.map((t) => h('th', { scope: 'col' }, t.label)))),
+      h('tbody', null, inj.body.map((b, i) => h('tr', null, h('th', { scope: 'row' }, b.label), inj.cells[i].map((n) => h('td', { class: 'num' }, n === null ? '·' : n === 0 ? '' : String(n)))))))),
+    h('p', { class: 'muted small' }, '· not shown. A patient can have more than one injury. Row and column totals are left out: with them, hidden counts could be worked out.'));
+  body.append(...(grid ? [grid] : []), h('div', { class: 'two-col' }, Object.values(r.breakdowns).map(list)));
+
+  if (r.regions.length) body.append(h('section', { class: 'panel stack' }, h('h3', null, 'By region'), table([
+    { head: 'Region', cell: (g) => g.label }, { head: 'Mountains', num: true, cell: (g) => String(g.mountains) },
+    { head: 'Patients', num: true, cell: (g) => (g.too_few_mountains ? 'Not shown: too few mountains' : g.patients === null ? 'Not shown' : String(g.patients)) },
+    { head: 'Per 1,000 visits', num: true, cell: (g) => (g.per_1000 === null || g.per_1000 === undefined ? '' : String(g.per_1000)) }], r.regions),
+    h('p', { class: 'muted small' }, 'A region is shown with at least 3 sharing mountains, and only when the mountains outside the shown regions are none or at least 3.')));
+  if (r.named.length) body.append(h('section', { class: 'panel stack' }, h('h3', null, 'Taking part, and agreed to be named'), table([
+    { head: 'Mountain', cell: (m) => m.name }, { head: 'State or province', cell: (m) => m.state || '' }, { head: 'Region', cell: (m) => m.region || '' }], r.named),
+    h('p', { class: 'muted small' }, `And ${r.mountains.anonymous} more taking part without being named. No mountain's own counts are shown.`)));
+}
+
+async function sharingList() {
+  let data;
+  try { ({ data } = await call('GET', '/safety/members')); } catch (ex) { fail(ex); return; }
+  const day = (s) => (s ? String(s).slice(0, 10) : '');
+  dialog('Who shares', data.length ? table([
+    { head: 'Mountain', cell: (m) => m.name },
+    { head: 'Sharing', cell: (m) => (m.share ? (m.named ? badge('Named', 'ok') : badge('Anonymous', 'ok')) : badge('Stopped', 'warn')) },
+    { head: 'Region', cell: (m) => [m.region, m.state].filter(Boolean).join(', ') },
+    { head: 'Agreed by', cell: (m) => [m.agreed_name, m.agreed_title].filter(Boolean).join(', ') },
+    { head: 'On', cell: (m) => day(m.agreed_at) },
+    { head: 'Terms', cell: (m) => (m.current_terms ? `Version ${m.agreement_version}` : `Old version ${m.agreement_version || ''}`) },
+  ], data) : empty('No mountain has chosen to share yet. The patrol director turns it on in Patrol, Cases, Injury network.'), { wide: true });
+}

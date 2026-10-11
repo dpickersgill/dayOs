@@ -1778,3 +1778,19 @@ a.stat:hover { border-color: var(--spruce); }
 .reader-tools { justify-content: center; gap: 8px; }
 .camera-view { width: 100%; max-height: 50vh; background: #000; border-radius: 8px; object-fit: cover; }
 .pair-code { font: 700 2.25rem/1.1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0.12em; text-align: center; padding: 12px; border: 2px dashed var(--line, #c7d9e3); border-radius: 10px; user-select: all; }
+
+/* Injury network report (platform console) */
+.print-only { display: none; }
+.injury-report table.grid { font-size: 0.875rem; }
+.injury-report table.grid th, .injury-report table.grid td { padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.injury-report table.grid thead th { vertical-align: bottom; white-space: normal; min-width: 64px; }
+.injury-report table.grid tbody tr:last-child th, .injury-report table.grid tbody tr:last-child td { font-weight: 700; }
+@media print {
+  .print-only { display: block; }
+  .injury-report .two-col { grid-template-columns: 1fr 1fr; gap: 16px; }
+  .injury-report .figure strong { font-size: 1.5rem; }
+}
+label.net-check { align-items: flex-start; font-weight: 400; }
+label.net-check input { margin-top: 3px; }
+label.net-check .hint { display: block; font-weight: 400; }
+.injury-report > .row select { width: auto; }

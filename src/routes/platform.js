@@ -13,6 +13,8 @@ const M = require('../lib/modules');
 const sandbox = require('../lib/sandbox');
 const demoUsage = require('../lib/demousage');
 const totp = require('../lib/totp');
+const safety = require('../lib/safety');
+const { toCsv } = require('../lib/csv');
 
 const router = express.Router();
 
@@ -384,6 +386,39 @@ router.post('/me/password', validate(z.object({ current: z.string().max(200), pa
   await log(pool, req, null, 'change_own_password', null);
   const [[fresh]] = await pool.query('SELECT session_epoch FROM platform_operators WHERE id = ?', [o.id]);
   res.json({ ok: true, session: makeSession(o.name, o.id, { epoch: Number(fresh.session_epoch) }) }); // a fresh session, since the change ends the old ones
+});
+
+// ---------------------------------------------------------------- injury network
+// De-identified injury counts across the mountains that share (see src/lib/safety.js for what is and is not in it).
+const safetyQuery = (q) => {
+  const period = safety.periodOf({ season: q.season ? String(q.season) : null }, new Date().toISOString().slice(0, 10), { fullMonths: true });
+  if (!period) throw bad('Use a season like 2026-27');
+  const region = q.region ? String(q.region) : null;
+  if (region && !safety.REGION_KEYS.includes(region)) throw bad('Unknown region');
+  return { period, region };
+};
+
+router.get('/safety', async (req, res) => {
+  const r = await safety.networkReport(pool, safetyQuery(req.query));
+  res.json({ ...r, regions_list: safety.REGIONS.map(([value, label]) => ({ value, label })) });
+});
+
+router.get('/safety.csv', async (req, res) => {
+  const q = safetyQuery(req.query);
+  const r = await safety.networkReport(pool, q);
+  if (r.empty_period) throw bad('The season has no full month yet');
+  if (r.too_few_mountains) throw bad(`The report needs at least ${safety.MIN_MOUNTAINS} mountains sharing${q.region ? ' in this region, and none or at least 3 elsewhere' : ''}`);
+  await log(pool, req, null, 'injury_report_download', { season: q.period.season, region: q.region });
+  res.setHeader('content-type', 'text/csv; charset=utf-8');
+  res.setHeader('content-disposition', `attachment; filename="injury-network-${q.period.season}${q.region ? `-${q.region}` : ''}.csv"`);
+  res.send(toCsv(['section', 'category', 'patients', 'percent', 'per_1000_visits'], safety.csvRows(r)));
+});
+
+router.get('/safety/members', async (_req, res) => {
+  const data = await rows(pool,
+    `SELECT t.id, t.name, t.slug, s.share, s.named, s.region, s.state, s.agreement_version, s.agreed_name, s.agreed_title, s.agreed_at, s.updated_at
+       FROM safety_sharing s JOIN tenants t ON t.id = s.tenant_id WHERE t.sandbox_expires_at IS NULL ORDER BY s.share DESC, t.name`);
+  res.json({ data: data.map((m) => ({ ...m, share: Boolean(m.share), named: Boolean(m.named), current_terms: m.agreement_version === safety.AGREEMENT_VERSION })) });
 });
 
 module.exports = router;

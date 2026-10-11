@@ -17,6 +17,7 @@ import { drawDispatch, drawPassport } from './patrol-dispatch.js';
 import { formSettingsDialog } from './nsaar-form.js';
 import { drawMapTab } from './incident-map.js';
 import { drawAccessLog } from './patrol-access.js';
+import { drawNetwork } from './patrol-network.js';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -69,13 +70,14 @@ export async function render(root, params = []) {
     ['passport', 'Passport', (b) => drawPassport(b, opts)],
     ['checks', 'Trail checks', drawChecks],
     ...only('reports', ['stats', 'Statistics', drawStats]),
+    ...only('reports', ['network', 'Injury network', drawNetwork]),
     ...only('view_access_log', ['access', 'Access log', drawAccessLog]),
     ...(me.access_level === 'admin' ? [['levels', 'Access levels', drawLevels]] : []),
   ];
   // Two levels: a few sections for what the person is doing, then the pages inside the chosen section.
   const SECTIONS = [
     ['now', 'Now', ['home', 'dispatch', 'map', 'checks']],
-    ['cases', 'Cases', ['cases', 'followup', 'stats']],
+    ['cases', 'Cases', ['cases', 'followup', 'stats', 'network']],
     ['team', 'Team', ['posts', 'team', 'equipment', 'training', 'passport']],
     ['admin', 'Admin', ['access', 'levels']],
   ].map(([id, text, keys]) => ({ id, text, items: keys.map((k) => items.find((i) => i[0] === k)).filter(Boolean) })).filter((s) => s.items.length);
