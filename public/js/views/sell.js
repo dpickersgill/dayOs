@@ -6,6 +6,7 @@ import { loadCustomerForm } from './customer-form.js';
 import { checkoutDialog, lineApi } from './sell-checkout.js';
 import { drawerDialog } from './till.js';
 import { printButtons } from '../print.js';
+import { shareButton } from '../share.js';
 
 const TIERS = ['adult', 'youth', 'child', 'senior', 'military'];
 
@@ -20,13 +21,15 @@ async function loadDrawer() {
   clear(drawerBadge).append(drawer.open ? state(`Drawer open · float ${money(drawer.float)}`, 'good') : state('No cash drawer open', 'warn'));
 }
 
-export async function render(root) {
+export async function render(root, params = []) {
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Sell'), h('div', { class: 'row' }, drawerBadge, button('Cash drawer', () => drawerDialog(loadDrawer), { small: true }), h('a', { class: 'btn', href: '#/gate' }, 'Open the gate'))));
   await loadDrawer();
   const left = h('div', { class: 'stack sell-main' });
   const right = h('div', { class: 'stack' });
   root.append(h('div', { class: 'sell-grid' }, left, right));
   right.append(await sellPanel(left));
+  // #/sell/order/12 (a shared link): open that order
+  if (params[0] === 'order' && /^\d+$/.test(params[1] || '')) showOrder(Number(params[1])).catch((err) => toast(err.message || 'Could not open that order', 'error'));
 }
 
 // ---------------------------------------------------------------- selling
@@ -221,7 +224,7 @@ async function showOrder(id) {
     { head: 'When', cell: (r) => fmtDateTime(r.created_at) }, { head: 'Why', cell: (r) => [label(r.reason), r.note ? h('small', { class: 'muted' }, ` ${r.note}`) : null] },
     { head: 'Returned by', cell: (r) => [label(r.method), r.card_status === 'failed' ? h('div', { class: 'small', role: 'alert' }, state('Card refund not sent', 'bad'), ' ', isManager() ? button('Try again', async () => { try { await post(`/orders/${id}/refunds/${r.id}/retry`, {}); toast('Card refund sent'); } catch (e) { fail(e); } }, { small: true }) : null) : r.card_status === 'pending' ? h('div', { class: 'small muted' }, 'Card refund on its way') : null] },
     { head: 'Amount', num: true, cell: (r) => money(r.amount_cents) }], o.refunds)));
-  box.append(h('div', { class: 'row' }, printButtons(id, { hasTickets: o.tickets.some((t) => t.status !== 'void') })));
+  box.append(h('div', { class: 'row' }, printButtons(id, { hasTickets: o.tickets.some((t) => t.status !== 'void') }), shareButton('order', id)));
   if (o.tickets.length) showTickets(box, { tickets: o.tickets.map((t) => ({ code: t.code, product: 'Ticket', valid_from: t.valid_from, valid_to: t.valid_to, status: t.status })) }, true);
   if (o.gift_cards.length) box.append(h('section', { class: 'section' }, h('header', null, h('h2', null, 'Gift cards')), h('div', { class: 'codes' }, o.gift_cards.map((g) => h('div', { class: 'code' }, g.code, h('small', null, `${money(g.initial_cents)}${g.recipient_name ? ` for ${g.recipient_name}` : ''}${g.status === 'void' ? ', cancelled' : ''}`))))));
   if (o.status === 'paid' && isManager()) box.append(h('div', { class: 'row' }, button('Refund…', () => refund(o, null), { small: true, kind: 'danger' })));

@@ -4,12 +4,15 @@ import { get, post, put, download } from '../api.js';
 import { h, clear, input, state, table, field, button, fmtDateTime, empty, errorBox, tabs, toast, fail, isManager, can, confirmDialog, formDialog, val, appendAll } from '../ui.js';
 import { personPicker, waiverPanel } from '../widgets.js';
 import { printDialog } from '../print.js';
+import { shareButton } from '../share.js';
 
-export async function render(root) {
+export async function render(root, params = []) {
   const items = [['signed', 'Signed', signed]];
   if (can('counter', 'instructor')) items.push(['sign', 'Sign a guest', signGuest]);
   if (isManager()) items.push(['wording', 'Wording', wording]);
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Waivers'), h('p', { class: 'muted' }, 'Everyone who has signed this season, and how they signed.')), tabs(items, 'signed'));
+  // #/waivers/w/12 (a shared link): open that signed waiver
+  if (params[0] === 'w' && /^\d+$/.test(params[1] || '')) detail(Number(params[1])).catch(() => {});
 }
 
 const methodTone = (r) => (r.has_signature ? 'good' : 'neutral');
@@ -64,7 +67,7 @@ async function detail(id, after) {
       w.voided_at ? [h('dt', null, 'Voided'), h('dd', null, `${fmtDateTime(w.voided_at)}: ${w.void_reason}`)] : null),
     w.text ? h('div', { class: 'waiver-copy' }, w.text) : h('p', { class: 'muted' }, w.text_sha ? 'This wording was not kept (it was signed before wording history started).' : 'Recorded by staff: the guest signed on paper, so the wording is on the paper copy.'),
     s ? h('div', { class: 'stack tight' }, h('strong', null, 'Signature'), h('img', { class: 'sig-image', src: s.signature, alt: `Signature of ${s.signer}` })) : null);
-  const extra = [];
+  const extra = [shareButton('waiver', id)];
   if (isManager() && !w.voided_at) {
     extra.push(button('Void', () => formDialog('Void this waiver', h('div', { class: 'form' }, h('p', { class: 'wide muted' }, `${name} will need to sign again. The signed copy is kept.`), h('label', { class: 'field wide' }, 'Why', h('input', { name: 'reason', required: true, maxlength: 300 }))), async (fd) => {
       await post(`/waivers/${id}/void`, { reason: val(fd, 'reason') });

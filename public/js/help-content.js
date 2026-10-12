@@ -5,6 +5,7 @@
 export const SECTIONS = [
   { key: 'start', label: 'Getting started', who: null, blurb: 'Finding your way around.' },
   { key: 'dashboard', label: 'Today', who: null, blurb: 'The home page and its tiles.' },
+  { key: 'inbox', label: 'Inbox', who: null, blurb: 'Messages with your team, and sharing links to records.' },
   { key: 'sell', label: 'Sell', who: ['counter'], blurb: 'Tickets, passes, lessons, gift cards and refunds.' },
   { key: 'gate', label: 'Gate', who: ['counter', 'staff'], blurb: 'Scanning tickets and passes.' },
   { key: 'conditions', label: 'Mountain status', who: null, blurb: 'Status, grooming, snow, maintenance.' },
@@ -44,6 +45,14 @@ export const ARTICLES = [
     tips: ['A wall screen on Today is a read-only display. If it signs out, sign in on that device again.'], related: ['password'] },
 
   // ------------------------------------------------------------ Today
+  { id: 'inbox-start', app: 'inbox', title: 'Message someone on your team', keywords: 'chat message dm direct group conversation team staff',
+    intro: 'Inbox holds your conversations with the people who sign in at your mountain: one-to-one, or a group.',
+    steps: ['Open Inbox (under Today, or the speech bubble at the top on a phone).', 'Choose New message and tick one person, or several for a group. A group can have a name, such as Lift ops.', 'Type and press Enter to send. Shift and Enter starts a new line.'],
+    tips: ['A blue number on Inbox shows how many messages you have not read.', 'Conversations are private to the people in them. Owners and managers cannot read conversations they are not in.', 'In a group, anyone can add people or rename it, and you can leave at any time. Remove takes back one of your own messages.'], related: ['inbox-share'] },
+  { id: 'inbox-share', app: 'inbox', title: 'Share a case, customer, order or other record', keywords: 'share link send record drill open case customer order asset work order waiver document',
+    intro: 'Share sends a link to a record. The person clicks it in their Inbox and the record opens.',
+    steps: ['Open the record: a patrol case, customer, order, asset, work order, waiver or document.', 'Choose Share, tick the people or groups, and add a note if you like.', 'Choose Send.'],
+    tips: ['You can also paste a record\'s address from the browser\'s address bar into a message. It turns into a link.', 'Each person sees only what their own access lets them open. Someone without patrol access sees "Patrol case: You cannot open this", never the case itself.', 'A link to a record that was removed shows "No longer there".'], related: ['inbox-start'] },
   { id: 'today', app: 'dashboard', title: 'Read the Today page', keywords: 'home dashboard alerts tiles overview',
     intro: 'Today is the home page: a band of alerts across the top and a grid of tiles under it.',
     steps: ['Read the alerts band first. "Blocks opening" is the most urgent: a lift that failed its inspection or is on a wind hold. "Needs a look" covers overdue rentals, open incidents and unfilled shifts.', 'Each tile shows one part of the day. Links inside a tile open the page it came from.', 'Managers can pick another date in the Day box to look at a past or future day. Everyone else sees today.'],

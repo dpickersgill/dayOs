@@ -178,6 +178,11 @@ export function button(text, onClick, { kind, small, type = 'button', label } = 
 
 // ---------------------------------------------------------------- dialogs
 /** Opens a dialog. Returns { close, body }. */
+// Every open dialog, so a move to another page can close them (a link opened from a message, then Back).
+const openDialogs = new Set();
+/** Close every open dialog, running each one's own clean-up (a camera or NFC reader is let go). */
+export function closeAllDialogs() { for (const close of [...openDialogs]) close(); }
+
 export function dialog(title, content, { wide = false, footer, onClose } = {}) {
   const previous = document.activeElement;
   const titleId = `dlg-${Math.random().toString(36).slice(2, 8)}`;
@@ -197,6 +202,7 @@ export function dialog(title, content, { wide = false, footer, onClose } = {}) {
   function close() {
     if (closed) return;
     closed = true;
+    openDialogs.delete(close);
     document.removeEventListener('keydown', onKey);
     overlay.remove();
     if (previous && previous.isConnected) previous.focus();
@@ -213,6 +219,7 @@ export function dialog(title, content, { wide = false, footer, onClose } = {}) {
   });
   document.addEventListener('keydown', onKey);
   document.body.append(overlay);
+  openDialogs.add(close);
   const first = box.querySelector('input:not([type=hidden]), select, textarea');
   (first || closeBtn).focus();
   return { close, body, box };

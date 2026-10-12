@@ -1,13 +1,14 @@
 import { get, post, patch, del } from '../api.js';
+import { shareButton } from '../share.js';
 import { h, clear, ctx, isManager, table, state, tabs, input, select, field, button, toast, formDialog, confirmDialog, val, num, todayStr, fmtDate, fmtDateTime, empty, label } from '../ui.js';
 
 const PRIORITY_TONE = { urgent: 'bad', high: 'warn', normal: 'neutral', low: 'neutral' };
 const PM_TONE = { overdue: 'bad', soon: 'warn', ok: 'good', never: 'neutral' };
 const PM_TEXT = { overdue: 'Overdue', soon: 'Due soon', ok: 'On track', never: 'Never done' };
 
-export async function drawMaintenance(root) {
+export async function drawMaintenance(root, { openOrder = null } = {}) {
   root.append(tabs([
-    ['orders', 'Work orders', drawOrders],
+    ['orders', 'Work orders', (box) => drawOrders(box, openOrder)],
     ['checks', 'Lift inspections', drawChecks],
     ['pm', 'Recurring jobs', drawPm],
     ['fleet', 'Fleet', drawFleet],
@@ -15,7 +16,7 @@ export async function drawMaintenance(root) {
 }
 
 // ---------------------------------------------------------------- work orders
-async function drawOrders(box) {
+async function drawOrders(box, openId = null) {
   const filter = select([['open', 'Open'], ['closed', 'Closed'], ['all', 'All']], 'open', { 'aria-label': 'Show' });
   const body = h('div');
   clear(box).append(h('header', null, h('h2', null, 'Work orders'), h('div', { class: 'row' }, filter, button('New work order', () => add(), { small: true }))), body);
@@ -54,7 +55,7 @@ async function drawOrders(box) {
     const list = h('ul', { class: 'wo-notes' }, ...w.notes.map((n) => h('li', null, h('span', { class: 'muted small' }, `${fmtDateTime(n.at)} ${n.author || ''}`), h('span', null, n.body))));
     const act = (status, text, kind) => button(text, () => setStatus(w, status), { small: true, kind });
     const dlg = formDialog(w.title, h('div', { class: 'stack' },
-      h('p', null, state(label(w.status), w.status === 'done' ? 'good' : 'neutral'), ' ', state(label(w.priority), PRIORITY_TONE[w.priority])),
+      h('div', { class: 'row between' }, h('p', null, state(label(w.status), w.status === 'done' ? 'good' : 'neutral'), ' ', state(label(w.priority), PRIORITY_TONE[w.priority])), shareButton('work_order', w.id)),
       w.description ? h('p', null, w.description) : null,
       h('p', { class: 'muted small' }, [w.lift, w.asset, w.location, w.assignee].filter(Boolean).join(', ')),
       w.resolution ? h('p', null, h('strong', null, 'Done: '), w.resolution) : null,
@@ -81,6 +82,8 @@ async function drawOrders(box) {
     return Promise.resolve();
   }
   await load();
+  // #/conditions/wo/12 (a shared link): open that work order
+  if (openId) detail(openId).catch((err) => toast(err.message || 'Could not open that work order', 'error'));
 }
 
 // ---------------------------------------------------------------- lift inspections

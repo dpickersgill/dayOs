@@ -5,7 +5,7 @@
  * It is per-instance memory, so on Cloud Run with several instances the effective limit is
  * (limit x instances). Replace with a shared store (Redis, Cloud Armor) before heavy production use.
  */
-function rateLimit({ windowMs, max, message = 'Too many requests, slow down' }) {
+function rateLimit({ windowMs, max, message = 'Too many requests, slow down', keyOf = (req) => req.ip }) {
   const hits = new Map();
   const timer = setInterval(() => {
     const now = Date.now();
@@ -15,7 +15,7 @@ function rateLimit({ windowMs, max, message = 'Too many requests, slow down' }) 
 
   return (req, res, next) => {
     const now = Date.now();
-    const key = req.ip;
+    const key = keyOf(req);
     let entry = hits.get(key);
     if (!entry || entry.reset <= now) {
       entry = { count: 0, reset: now + windowMs };

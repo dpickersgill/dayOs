@@ -2,11 +2,12 @@
 import { get, post, patch, download } from '../api.js';
 import { h, clear, can, isManager, money, table, state, input, field, button, toast, formDialog, dialog, fmtDate, fmtDateTime, label, empty, errorBox } from '../ui.js';
 import { waiverPanel } from '../widgets.js';
+import { shareButton } from '../share.js';
 import { loadCustomerForm, customerFields, customerSettingsDialog } from './customer-form.js';
 import { photoSection, familySection, duplicatesDialog, renewalsDialog } from './people-extra.js';
 import { alertsBanner, consentSection, notesSection, dataActions, qualityStrip, FLAG_LABELS } from './customer-care.js';
 
-export async function render(root) {
+export async function render(root, params = []) {
   const q = input({ type: 'search', placeholder: 'Name, email or phone', 'aria-label': 'Search customers' });
   const body = h('div');
   const canWrite = can('counter', 'instructor');
@@ -41,6 +42,8 @@ export async function render(root) {
     } catch (err) { clear(body).append(errorBox(err)); }
   }
   await load();
+  // #/people/12 (a shared link): open that customer straight away
+  if (/^\d+$/.test(params[0] || '')) detail({ id: Number(params[0]) }, load).catch((err) => toast(err.message || 'Could not open that customer', 'error'));
 }
 
 async function edit(p, done) {
@@ -65,6 +68,7 @@ async function detail(p, done) {
   const line = (k, v) => (v ? [h('dt', null, k), h('dd', null, v)] : []);
   const address = [fresh.address_line1, fresh.address_line2, [fresh.city, fresh.region].filter(Boolean).join(', '), [fresh.postal_code, fresh.country].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
   const parts = [
+    h('div', { class: 'row end' }, shareButton('customer', fresh.id)),
     fresh.anonymised_at ? h('p', { class: 'muted' }, 'This customer has been anonymised. Their history stays for the mountain\u2019s records.') : null,
     alertsBanner(fresh),
     h('dl', { class: 'cust-lines' },

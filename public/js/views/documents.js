@@ -1,4 +1,5 @@
 import { get, post, patch, put, del, download, openFile, uploadFile } from '../api.js';
+import { shareButton } from '../share.js';
 import { h, clear, isManager, table, state, input, select, field, button, toast, formDialog, confirmDialog, dialog, val, num, fmtDate, fmtDateTime, empty, fail } from '../ui.js';
 
 const KB = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
@@ -8,9 +9,11 @@ const MAX_VERSIONS = 10;
 const NOT_SEARCHABLE = { needs_ocr: 'Not searchable yet', none: 'No text found in file', unsupported: 'File contents are not searchable', failed: 'Could not read the file' };
 const ACCEPT = '.pdf,.png,.jpg,.jpeg,.gif,.webp,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.md,.rtf,.zip';
 
-export async function render(root) {
+export async function render(root, params = []) {
   const mgr = isManager();
   let categories = []; let roleList = []; let current = 'all'; let query = '';
+  // #/documents/d/12 (a shared link): show just that document, with a way back to everything
+  let focus = params[0] === 'd' && /^\d+$/.test(params[1] || '') ? Number(params[1]) : null;
   const search = input({ type: 'search', placeholder: 'Search inside documents', 'aria-label': 'Search documents' });
   const chips = h('div', { class: 'fchips', role: 'group', 'aria-label': 'Categories' });
   const body = h('div');
@@ -42,11 +45,13 @@ export async function render(root) {
     const params = [];
     if (current !== 'all') params.push(`category_id=${current}`);
     if (query) params.push(`q=${encodeURIComponent(query)}`);
-    const { data } = await get(`/documents/documents${params.length ? `?${params.join('&')}` : ''}`);
+    const { data: all } = await get(`/documents/documents${params.length ? `?${params.join('&')}` : ''}`);
+    const data = focus ? all.filter((d) => d.id === focus) : all;
     clear(todo);
     const waiting = data.filter((d) => d.require_ack && !d.accepted_by_me);
     if (waiting.length) todo.append(h('div', { class: 'notice', role: 'status' }, h('strong', null, `${waiting.length} document${waiting.length === 1 ? ' needs' : 's need'} your read and accept: `), waiting.slice(0, 3).map((d) => d.title).join(', '), waiting.length > 3 ? ` and ${waiting.length - 3} more.` : '.'));
     clear(body);
+    if (focus) body.append(h('div', { class: 'notice row between', role: 'status' }, h('span', null, data.length ? 'Showing the document that was shared with you.' : 'That document is not here: it was removed, or your role cannot see its category.'), button('Show all documents', () => { focus = null; history.replaceState(null, '', '#/documents'); loadDocs().catch(fail); }, { small: true })));
     const cat = categories.find((c) => c.id === current);
     if (cat) {
       body.append(h('div', { class: 'row' }, h('p', { class: 'muted' }, cat.description || ''),
@@ -75,6 +80,7 @@ export async function render(root) {
     if (d.require_ack && !d.accepted_by_me) out.push(button('I have read this', () => confirmDialog('Read and accept', `Confirm you have read "${d.title}"${d.version > 1 ? ` (version ${d.version})` : ''}. Your name and the time are recorded.`, 'I have read it', async () => { await post(`/documents/documents/${d.id}/accept`); toast('Recorded'); await refresh(); }), { small: true, kind: 'primary' }));
     if (mgr && d.require_ack) out.push(button(`Accepted by ${d.accepted_count}`, () => acceptances(d), { small: true }));
     if (d.link_url) out.push(h('a', { class: 'btn small primary', href: d.link_url, target: '_blank', rel: 'noopener noreferrer' }, 'Open link'));
+    out.push(shareButton('document', d.id));
     const cat = categories.find((c) => c.id === d.category_id);
     if (cat && cat.can_add) {
       out.push(button('Edit', () => editDocument(d), { small: true }));

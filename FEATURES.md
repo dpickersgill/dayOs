@@ -412,6 +412,15 @@ Every guest needs a waiver for the season before they rent gear or take a lesson
 
 The console no longer needs the shared platform key day to day. **Operators** (platform console) lists the people who can use it; each signs in with their own email, password and authenticator code (set up with a QR code at their first sign-in). Operators add, switch off, give a new password to, or reset the two-step of other operators, and change their own password; switching off or resetting ends that person's sessions at once. Every change is logged under the operator's name (key use is logged as `key: <name>`). Five wrong tries lock a login for 15 minutes. The platform key stays as the way in for the first operator or an emergency, and `PLATFORM_KEY_SIGNIN=off` shuts it out entirely. See RUNBOOK.md, "Platform console".
 
+## Inbox (team messages)
+
+- **Conversations between the people who sign in at a mountain:** one-to-one (two people always share one conversation) and groups with an optional name. Anyone in a group can add people or rename it; anyone can leave a group. A note marks who was added, who left and renames.
+- **Private to their members.** A conversation you are not in does not exist for you (owners and managers included). Nothing crosses to another mountain: people at another mountain cannot be messaged or listed.
+- **Links to records (drill-backs).** A **Share** button on a patrol case, asset, work order, customer, order, waiver and document sends a link to people or groups, with a note. Pasting a record's address into a message attaches it too (up to 5 links a message). Each link opens the record in the app: its page, or its window on the right page (customers, orders, work orders, waivers), or the document on its own in Documents.
+- **Each reader sees a link only as far as their access goes.** The title and details are worked out for each reader with the same rules as the page it opens, including the app being switched on, patrol access levels and document categories. Otherwise the link shows "You cannot open this", and a removed record shows "No longer there". Another mountain's record never shows its title.
+- **Unread counts** on the Inbox menu item (and the phone's top bar), checked every 30 seconds; open conversations check for new messages every 8 seconds. Remove takes back one of your own messages ("Message removed" stays in its place).
+- Moving to another page now closes any window left open on the last one, so Back from a record opened from a link returns cleanly to the conversation.
+
 ## Guided tours (demo mountains)
 
 - A new demo opens with a welcome and a choice of seven short tours, each a few minutes: your morning (Today and mountain status), selling a lift ticket, gate scanning and RFID cards, patrol from call to report (with statistics and the injury network), staff schedule and time clock, assets and fleet, and waivers. "Explore on my own" closes it; the **Guided tours** link on the demo tag brings the list back at any time.

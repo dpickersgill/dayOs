@@ -34,6 +34,7 @@ const { logFailure } = require('./lib/jobs');
 const patrol = require('./routes/patrol');
 const safetyRoutes = require('./routes/safety');
 const demoTours = require('./routes/demotours');
+const inboxRoutes = require('./routes/inbox');
 const patrolTeam = require('./routes/team');
 const dispatch = require('./routes/dispatch');
 const patrolForm = require('./routes/form');
@@ -162,6 +163,9 @@ function createApp() {
   api.use(authenticate);
   api.use(modules.moduleGate);
   api.use('/demo-tours', rateLimit({ windowMs: 60_000, max: 120 }), demoTours.router);
+  // Per person, not per address: a mountain's staff usually share one internet address. Reads (the polling) are not counted.
+  const inboxLimit = rateLimit({ windowMs: 60_000, max: Number(process.env.INBOX_RATE_LIMIT) || 120, message: 'Too many messages, slow down', keyOf: (req) => `${req.auth.tenantId}:${req.auth.userId}` });
+  api.use('/inbox', (req, res, next) => (req.method === 'GET' ? next() : inboxLimit(req, res, next)), inboxRoutes);
   api.use('/messages', messagesRoutes.router);
   api.use('/online-shop', shopRoutes.router);
   api.use('/online-shop', shopAdmin.router);

@@ -220,6 +220,7 @@ function show() {
     }
   };
   timer = setInterval(tick, 250);
+  timer.unref?.();
   tick();
 }
 

@@ -23,6 +23,7 @@ const ALSO = {
   availability: 'instructor calendar open dates times schedule days off private lessons',
   shop: 'online will-call willcall pickup web orders groups waitlist reprint tickets prices calendar pace report',
   messages: 'email text sms campaign newsletter send announce reminder unsubscribe marketing',
+  inbox: 'chat message team staff internal conversation dm direct share link talk',
   documents: 'files forms policies manuals handbook pdf upload library repository',
   assets: 'fleet vehicles trucks groomers equipment maintenance parts inventory stock purchase orders vendors fuel inspection qr tag registration insurance warranty depreciation',
   waivers: 'waiver release liability sign signature signed guardian minor consent form',
@@ -62,7 +63,7 @@ export function buildFrame({ views, main, signOut }) {
   try { const saved = read(FOLD_KEY, null); folded = saved === null ? sections.map((g) => g.id) : JSON.parse(saved); } catch (_) { folded = []; }
   const groupEls = new Map();
   const nav = h('nav', { class: 'nav', 'aria-label': 'Main' },
-    have('dashboard') ? h('div', { class: 'nav-group nav-home' }, link('dashboard')) : null,
+    have('dashboard') || have('inbox') ? h('div', { class: 'nav-group nav-home' }, have('dashboard') ? link('dashboard') : null, have('inbox') ? link('inbox') : null) : null,
     sections.map((g) => {
       const items = h('div', { class: 'nav-items', id: `nav-${g.id}` }, g.keys.map((k) => link(k)));
       const title = h('button', { type: 'button', class: 'nav-title', 'aria-expanded': String(!folded.includes(g.id)), 'aria-controls': `nav-${g.id}` }, h('span', null, g.name), icon('chevron', 14));
@@ -109,10 +110,12 @@ export function buildFrame({ views, main, signOut }) {
   const more = h('button', { type: 'button', class: 'tab', 'aria-haspopup': 'dialog' }, icon('menu', 22), h('span', null, 'More'));
   const tabbar = h('nav', { class: 'tabbar', 'aria-label': 'Quick links' }, first.map(tab), more);
   const topSearch = h('button', { type: 'button', class: 'top-search', 'aria-label': 'Jump to a page' }, icon('search', 18), h('span', null, 'Jump to a page'), h('kbd', null, /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘K' : 'Ctrl K'));
-  const topbar = h('header', { class: 'topbar' }, h('div', { class: 'top-brand' }, h('span', { class: 'brand-mark', 'aria-hidden': 'true' }, icon('conditions', 18)), h('strong', null, ctx.me.tenant_name)), topSearch);
+  const topInbox = have('inbox') ? h('a', { href: '#/inbox', class: 'top-inbox', dataset: { key: 'inbox' }, 'aria-label': 'Inbox' }, icon('inbox', 22)) : null;
+  if (topInbox) { if (!links.has('inbox')) links.set('inbox', []); links.get('inbox').push(topInbox); }
+  const topbar = h('header', { class: 'topbar' }, h('div', { class: 'top-brand' }, h('span', { class: 'brand-mark', 'aria-hidden': 'true' }, icon('conditions', 18)), h('strong', null, ctx.me.tenant_name)), topSearch, topInbox);
 
   function openSheet() {
-    const items = [['Home', have('dashboard') ? ['dashboard'] : []], ...sections.map((g) => [g.name, g.keys]), ['You', personal]].filter(([, k]) => k.length);
+    const items = [['Home', ['dashboard', 'inbox'].filter(have)], ...sections.map((g) => [g.name, g.keys]), ['You', personal]].filter(([, k]) => k.length);
     const closeBtn = h('button', { type: 'button', class: 'btn small' }, 'Close');
     const signOutBtn = h('button', { type: 'button', class: 'btn' }, 'Sign out');
     const sheet = h('div', { class: 'dialog sheet menu-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'All pages' },
@@ -232,5 +235,15 @@ export function buildFrame({ views, main, signOut }) {
     const rec = [key, ...recent().filter((k) => k !== key)].slice(0, 5);
     write(RECENT_KEY, JSON.stringify(rec));
   }
-  return { shell, setCurrent, openPalette };
+  /** A count on a page's menu links (unread messages on Inbox). 0 removes it. */
+  function setBadge(key, n) {
+    for (const a of links.get(key) || []) {
+      let b = a.querySelector('.nav-badge');
+      if (!n) { if (b) b.remove(); a.removeAttribute('aria-description'); continue; }
+      if (!b) { b = h('span', { class: 'nav-badge', 'aria-hidden': 'true' }); a.append(b); }
+      b.textContent = n > 99 ? '99+' : String(n);
+      a.setAttribute('aria-description', `${n} unread`);
+    }
+  }
+  return { shell, setCurrent, openPalette, setBadge };
 }

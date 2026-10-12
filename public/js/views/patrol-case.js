@@ -7,6 +7,7 @@
 import { get, post, patch, del } from '../api.js';
 import { h, clear, state, input, select, field, button, toast, formDialog, dialog, confirmDialog, val, num, nowInput, nowStamp, fmtDateTime, fmtTime, label, empty, errorBox, fail, ctx } from '../ui.js';
 import { has } from './patrol-feat.js';
+import { shareButton } from '../share.js';
 import { signaturePad } from '../sigpad.js';
 import { personPicker } from '../widgets.js';
 import { loadForm, sectionPanel, sectionVisible } from './nsaar-form.js';
@@ -169,7 +170,8 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
     return h('header', { class: 'wristband' },
       h('div', { class: 'wb-top' }, backLink(),
         h('span', { class: 'wb-case' }, c.case_number ? `Report ${c.case_number}` : `Case ${c.id}`),
-        h('span', { class: 'wb-state' }, state(stateText[c.report_state], stateTone[c.report_state]), state(label(c.severity), sevTone[c.severity]))),
+        h('span', { class: 'wb-state' }, state(stateText[c.report_state], stateTone[c.report_state]), state(label(c.severity), sevTone[c.severity])),
+        shareButton('patrol_case', c.id)),
       who, tabs);
   }
 

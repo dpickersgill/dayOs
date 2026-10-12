@@ -5,8 +5,9 @@ const LIFT_STATES = [['open', 'Open', 'good'], ['hold', 'On hold', 'warn'], ['wi
 const TRAIL_STATES = [['open', 'Open', 'good'], ['closed', 'Closed', 'bad']];
 const DIFFICULTY = [['green', 'Easy'], ['blue', 'Intermediate'], ['black', 'Advanced'], ['double_black', 'Expert'], ['park', 'Terrain park']];
 
-export async function render(root) {
+export async function render(root, params = []) {
   const canSet = can('patrol', 'staff');
+  const openOrder = params[0] === 'wo' && /^\d+$/.test(params[1] || '') ? Number(params[1]) : null;
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Mountain status'),
     h('p', { class: 'page-note' }, canSet ? 'Status, grooming, snow, maintenance and the daily report. Status changes show on your public conditions feed within a minute.' : 'You can see status here. Patrol and managers change it.')));
   if (!canSet) { await drawStatus(root, false); return; }
@@ -14,9 +15,9 @@ export async function render(root) {
     ['status', 'Status', (box) => drawStatus(box, true)],
     ['grooming', 'Grooming', async (box) => (await import('./ops-groom.js')).drawGrooming(box)],
     ['snow', 'Snow and weather', async (box) => (await import('./ops-weather.js')).drawSnowWeather(box)],
-    ['maint', 'Maintenance', async (box) => (await import('./ops-maint.js')).drawMaintenance(box)],
+    ['maint', 'Maintenance', async (box) => (await import('./ops-maint.js')).drawMaintenance(box, { openOrder })],
     ['reports', 'Reports', async (box) => (await import('./ops-reports.js')).drawReports(box)],
-  ], 'status'));
+  ], openOrder ? 'maint' : 'status'));
 }
 
 async function drawStatus(root, canSet) {

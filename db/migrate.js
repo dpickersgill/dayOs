@@ -372,6 +372,7 @@ const gateSteps = [
   ['scans card_blocked result', (c) => columnTypeHas(c, 'scans', 'result', 'card_blocked'), "ALTER TABLE scans MODIFY result ENUM('ok','expired','not_yet_valid','void','no_uses','unknown','duplicate','card_blocked') NOT NULL"],
   ['tenants.gate_open_ms', (c) => columnExists(c, 'tenants', 'gate_open_ms'), 'ALTER TABLE tenants ADD COLUMN gate_open_ms SMALLINT UNSIGNED NOT NULL DEFAULT 3000'],
   ['scans by device ref', (c) => indexExists(c, 'scans', 'uq_scans_device_ref'), 'ALTER TABLE scans ADD UNIQUE KEY uq_scans_device_ref (tenant_id, device_id, client_ref)'],
+  ['chat_members.visible_from_id', (c) => columnExists(c, 'chat_members', 'visible_from_id'), 'ALTER TABLE chat_members ADD COLUMN visible_from_id BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER last_read_id'],
 ];
 
 async function backfillCaseNumbers(conn) {
@@ -421,6 +422,7 @@ async function main() {
   await conn.query(fs.readFileSync(path.join(__dirname, 'assets.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'gate.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'safety.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'inbox.sql'), 'utf8'));
   let applied = 0;
   for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps]) {
     if (await done(conn)) continue;

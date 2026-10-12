@@ -6,11 +6,12 @@ import { mfaPanel } from './views/mfa.js';
 import { flush as flushOutbox, waitingCounts } from './outbox.js';
 import { buildFrame, GROUP_OF } from './nav.js';
 import { icon } from './icons.js';
-import { h, svg, clear, ctx, can, isManager, toast, loading, errorBox, button, field, input } from './ui.js';
+import { h, svg, clear, ctx, can, isManager, toast, loading, errorBox, button, field, input, closeAllDialogs } from './ui.js';
 
 const VIEWS = [
   // [hash, label, who may open it, loader]
   ['dashboard', 'Today', () => true, () => import('./views/dashboard.js')],
+  ['inbox', 'Inbox', () => true, () => import('./views/inbox.js')],
   ['sell', 'Sell', () => can('counter'), () => import('./views/sell.js')],
   ['gate', 'Gate', () => can('counter', 'staff'), () => import('./views/gate.js')],
   ['conditions', 'Mountain status', () => true, () => import('./views/conditions.js')],
@@ -130,7 +131,7 @@ let navToken = 0;
 const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
 
 // An app the platform has turned off for this mountain is hidden for everyone, including the owner.
-const ALWAYS = ['dashboard', 'people', 'waivers', 'myshifts', 'settings', 'help'];
+const ALWAYS = ['dashboard', 'inbox', 'people', 'waivers', 'myshifts', 'settings', 'help'];
 const appOn = (key) => ALWAYS.includes(key) || !ctx.me.modules || ctx.me.modules.includes(key);
 function visibleViews() { return VIEWS.filter((v) => appOn(v[0]) && v[2]()); }
 
@@ -140,7 +141,23 @@ function buildShell() {
   frame = buildFrame({ views: visibleViews().map(([key, text]) => [key, text]), main, signOut: () => signOut() });
   app.append(frame.shell);
   if (ctx.me.sandbox) app.append(demoPill(ctx.me.sandbox));
+  refreshUnread();
 }
+
+// The unread count on Inbox: checked every 30 seconds while signed in, and straight away when a conversation is read.
+let unreadTimer = null;
+let unreadBusy = false;
+async function refreshUnread() {
+  if (unreadBusy) return; // one check at a time, so the 30-second timer never doubles up
+  clearTimeout(unreadTimer);
+  if (!ctx.me || !frame) return;
+  unreadBusy = true;
+  try { const { unread } = await get('/inbox/unread'); if (frame.setBadge) frame.setBadge('inbox', unread); } catch (_) { /* try again on the next tick */ }
+  unreadBusy = false;
+  clearTimeout(unreadTimer);
+  if (ctx.me) { unreadTimer = setTimeout(refreshUnread, document.hidden ? 120_000 : 30_000); unreadTimer.unref?.(); } // (unref: test runners only)
+}
+window.addEventListener('inbox:changed', () => refreshUnread());
 
 /** A small tag on a demo mountain: how long it lasts, and a way to talk to us. */
 function demoPill(sb) {
@@ -253,7 +270,14 @@ async function start() {
   if (ctx.me.sandbox) { resumeTour(); welcomeOnce(); }
 }
 
-window.addEventListener('hashchange', route);
+// Moving to another page closes any dialog left open on the last one (for example a customer opened from an Inbox link).
+let lastPath = location.hash.split('?')[0];
+window.addEventListener('hashchange', () => {
+  const now = location.hash.split('?')[0];
+  if (now !== lastPath) closeAllDialogs();
+  lastPath = now;
+  route();
+});
 start();
 
 export { route };
