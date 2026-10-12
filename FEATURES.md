@@ -412,6 +412,20 @@ Every guest needs a waiver for the season before they rent gear or take a lesson
 
 The console no longer needs the shared platform key day to day. **Operators** (platform console) lists the people who can use it; each signs in with their own email, password and authenticator code (set up with a QR code at their first sign-in). Operators add, switch off, give a new password to, or reset the two-step of other operators, and change their own password; switching off or resetting ends that person's sessions at once. Every change is logged under the operator's name (key use is logged as `key: <name>`). Five wrong tries lock a login for 15 minutes. The platform key stays as the way in for the first operator or an emergency, and `PLATFORM_KEY_SIGNIN=off` shuts it out entirely. See RUNBOOK.md, "Platform console".
 
+## Patrol case review (review group)
+
+- **The review group** is the Patrol Director plus named backups, set under Patrol, Cases, Review by a patrol admin (owner, manager, patrol admin level) or by the group's own members. The group chooses which kinds of case it reviews (injury, collision, lost person, equipment, medical, conduct, other). Other kinds are signed off without review, and that is recorded.
+- **Sign-off** works as before (the report must be complete), then goes to the group. The group has its own Inbox conversation ("Patrol case review"), kept in step with who is in the group, where each new report arrives with a link to it. While a report waits, nobody can change it, owners included.
+- **Review**: the reviewer ticks the review checks (complete and in order, objective narrative, treatment matches protocol, signatures, refusal signed if refused, collision report if a collision), then:
+  - **Approve and lock**: the patroller gets a message.
+  - **Send back with comments**: one comment per section, with an optional note. The patroller gets them in a message and at the top of the report, makes the changes and signs off again; the group is told it was corrected.
+  - **Escalate**: the owner and managers get a message with the reason; the report still needs a decision.
+  - Every decision goes in the report's review history with who, when, the checks and the comments.
+- **Nobody reviews a report they signed off.** Only members of the group review; reopening is for approved reports only.
+- **No deadline. A reminder** lists reports waiting 72 hours or more (the number of hours can be changed), in the group's conversation, and again every 72 hours until they are reviewed. It is checked as people use the app (at most every 10 minutes per mountain) and by the daily job.
+- **The Review tab** lists reports waiting, oldest first, with how long each has waited, and marks escalated reports and reports signed off again. Patrol Home shows the same queue to reviewers.
+- With no review group set up, the earlier rule applies: whoever's patrol access level can approve reports approves them. Removing everyone from the group turns review off again.
+
 ## Inbox (team messages)
 
 - **Conversations between the people who sign in at a mountain:** one-to-one (two people always share one conversation) and groups with an optional name. Anyone in a group can add people or rename it; anyone can leave a group. A note marks who was added, who left and renames.

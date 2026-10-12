@@ -4,7 +4,7 @@ import { h, state, fmtDateTime, label } from '../ui.js';
 
 const sevTone = { minor: 'neutral', moderate: 'warn', serious: 'bad', critical: 'bad' };
 const stateTone = { draft: 'warn', submitted: 'neutral', approved: 'good' };
-const stateText = { draft: 'Draft', submitted: 'Waiting for approval', approved: 'Approved' };
+const stateText = { draft: 'Draft', submitted: 'Waiting for review', approved: 'Approved' };
 
 /** opts: { reportState: show the draft / waiting / approved chip (default false) } */
 export function caseRow(i, { reportState = false } = {}) {

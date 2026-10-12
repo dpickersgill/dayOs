@@ -568,7 +568,7 @@ test('patrol: a case opens, shows the whole report, and the sign-off buttons wor
   await settle();
   assert.equal(ok(await api('GET', base, { token: o })).report_state, 'submitted');
   assert.equal(document.querySelector('.overlay'), null, 'no dialog when the submit succeeds');
-  assert.match(root.textContent, /Waiting for approval/);
+  assert.match(root.textContent, /Waiting for review/);
 
   buttons(root, 'Approve and lock')[0].click();
   await settle();
@@ -2047,7 +2047,7 @@ test('patrol home: my open cases, a search by patient name, the New case button 
   const root = await renderView('patrol', 'owner', T.owner);
   clean(root, 'patrol home');
   assert.equal(root.querySelector('[role=tab][aria-selected=true]').textContent, 'Home', 'Home is the first tab');
-  assert.ok(root.querySelector('[data-group="Waiting for approval"]'), 'directors see the approval queue');
+  assert.ok(root.querySelector('[data-group="Waiting for review"]'), 'directors see the approval queue');
   assert.ok(root.querySelector('button.fab[data-act=new-case]'), 'a New case button stays in reach');
   const q = root.querySelector('input[type=search]');
   q.value = 'Quixote'; q.dispatchEvent(new window.Event('input', { bubbles: true }));
@@ -2056,7 +2056,7 @@ test('patrol home: my open cases, a search by patient name, the New case button 
   assert.ok([...root.querySelectorAll('a.case-row')].some((a) => a.getAttribute('href') === `#/patrol/case/${c.id}`), 'the search finds the case by patient name');
   // a plain patroller has no approval queue
   const plain = await renderView('patrol', 'patrol', T.patrol);
-  assert.equal(plain.querySelector('[data-group="Waiting for approval"]'), null);
+  assert.equal(plain.querySelector('[data-group="Waiting for review"]'), null);
   assert.equal((await patNames(plain)).includes('Follow-up'), false, 'follow-up is for directors');
   assert.equal((await patNames(root)).includes('Follow-up'), true);
   // the connection banner

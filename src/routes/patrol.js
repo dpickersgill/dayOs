@@ -10,7 +10,8 @@ const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
 const { partialOf, z, dateStr, dateTimeStr, validate, paramId, normDateTime, setClause, seasonFor, todayIn, nowIn } = require('../lib/util');
-const { notFound, bad, conflict } = require('../lib/errors');
+const { notFound, bad, conflict, forbidden } = require('../lib/errors');
+const R = require('../lib/review');
 const { audit } = require('../lib/audit');
 const { FIELDS, SECTIONS, formSchema, parseForm, mergeForm, isEmpty, applies } = require('../lib/nsaar');
 const { requiredFields } = require('../lib/formconfig');
@@ -298,6 +299,7 @@ router.get('/incidents/:id', patrol, needs('view_cases'), async (req, res) => {
   const c = await loadCase(pool, req.auth.tenantId, id);
   if (!c) throw notFound('Incident');
   await audit(pool, req, 'view', 'incidents', id); // reads of sensitive records are logged too
+  c.review = await R.caseInfo(pool, req, c);
   res.json(c);
 });
 
@@ -318,7 +320,13 @@ async function editableCase(conn, req, id) {
   const inc = await one(conn, 'SELECT * FROM incidents WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id]);
   if (!inc) throw notFound('Incident');
   if (inc.report_state === 'approved') throw conflict('This report is approved and locked. Add a note, or ask a manager to reopen it.');
-  if (inc.report_state === 'submitted' && !(await PA.can(pool, req, 'approve_case'))) throw conflict('This report is waiting for an approver. Ask them to send it back if it needs changes.');
+  if (inc.report_state === 'submitted') {
+    // With a review group, nobody edits a signed-off report: the reviewer sends it back with comments, so the
+    // patroller's own account is never changed by someone else. Without one, approvers may still correct it.
+    const s = await R.settingsOf(conn, req.auth.tenantId);
+    if (s.enabled) throw conflict('This report is waiting for the review group. A reviewer can send it back with comments if it needs changes.');
+    if (!(await PA.can(pool, req, 'approve_case'))) throw conflict('This report is waiting for an approver. Ask them to send it back if it needs changes.');
+  }
   return inc;
 }
 
@@ -327,6 +335,8 @@ router.patch('/incidents/:id', patrol, needs('create_case'), validate(partialOf(
   await tx(async (conn) => {
     const inc = await editableCase(conn, req, id);
     const body = { ...req.body };
+    // Once a report has been signed off, its kind of case stays: changing it could take it out of review.
+    if (body.category && body.category !== inc.category && Number(inc.review_round) > 0) throw conflict('The type of case cannot change after the report has been signed off. Add a note if it was recorded wrongly.');
     if (body.occurred_at && seasonFor(body.occurred_at.slice(0, 10)) !== inc.season) delete body.occurred_at; // the case number stays with its season
     if (body.trail_id && !(body.form && body.form.run_classification) && !parseForm(inc.form).run_classification) {
       const cls = await runClassFor(conn, req.auth.tenantId, body.trail_id);
@@ -459,6 +469,7 @@ async function keepVersion(conn, req, incidentId, kind) {
 
 async function setState(req, res, { from, to, check, extra, version }) {
   const id = paramId(req);
+  let out = { ok: true };
   await tx(async (conn) => {
     const inc = await one(conn, 'SELECT * FROM incidents WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id]);
     if (!inc) throw notFound('Incident');
@@ -469,30 +480,103 @@ async function setState(req, res, { from, to, check, extra, version }) {
     }
     const filled = check ? await fillFromBedside(conn, req, inc) : [];
     const tenant = await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId]);
-    await extra(conn, inc, nowIn(tenant.timezone));
-    const v = version ? await keepVersion(conn, req, id, version) : null;
-    await audit(conn, req, to, 'incidents', id, { ...(v ? { version: v } : {}), ...(filled.length ? { filled_from_bedside: filled } : {}) });
+    const result = await extra(conn, inc, nowIn(tenant.timezone));
+    const vk = typeof version === 'function' ? version(result) : version;
+    const v = vk ? await keepVersion(conn, req, id, vk) : null;
+    await audit(conn, req, to, 'incidents', id, { ...(v ? { version: v } : {}), ...(filled.length ? { filled_from_bedside: filled } : {}), ...(result && result.audit ? result.audit : {}) });
+    out = { ok: true, ...(result && result.reply ? result.reply : {}) };
   });
-  res.json({ ok: true });
+  res.json(out);
 }
 
+/** Review rights: a member of the review group; with no group, the approve_case access level. */
+const reviewer = async (req, _res, next) => {
+  try {
+    if (!(await R.canReview(pool, req))) throw forbidden('Only the review group can review reports');
+    next();
+  } catch (err) { next(err); }
+};
+
 router.post('/incidents/:id/submit', patrol, needs('submit_case'), (req, res) => setState(req, res, {
-  from: ['draft'], to: 'submit', check: true, version: 'submitted',
-  extra: (conn, inc, now) => conn.query("UPDATE incidents SET report_state = 'submitted', submitted_by = ?, submitted_at = ? WHERE tenant_id = ? AND id = ?", [req.auth.userId, now, inc.tenant_id, inc.id]),
-}));
-
-router.post('/incidents/:id/approve', patrol, needs('approve_case'), (req, res) => setState(req, res, {
-  from: ['draft', 'submitted'], to: 'approve', check: true, version: 'approved',
-  extra: (conn, inc, now) => conn.query("UPDATE incidents SET report_state = 'approved', status = 'closed', approved_by = ?, approved_at = ? WHERE tenant_id = ? AND id = ?", [req.auth.userId, now, inc.tenant_id, inc.id]),
-}));
-
-router.post('/incidents/:id/reopen', patrol, needs('approve_case'), validate(z.object({ reason: z.string().min(3).max(500) })), (req, res) => setState(req, res, {
-  from: ['submitted', 'approved'], to: 'reopen', check: false,
-  extra: async (conn, inc) => {
-    await conn.query("UPDATE incidents SET report_state = 'draft', status = 'open', approved_by = NULL, approved_at = NULL WHERE tenant_id = ? AND id = ?", [inc.tenant_id, inc.id]);
-    await conn.query('INSERT INTO incident_notes (tenant_id, incident_id, author_user, body) VALUES (?, ?, ?, ?)', [inc.tenant_id, inc.id, req.auth.userId, `Reopened by a manager: ${req.body.reason}`]);
+  // a kind of case the review group does not review is signed off and approved at once: keep the approved copy
+  from: ['draft'], to: 'submit', check: true, version: (r) => (r && r.reply && r.reply.review === 'not_required' ? 'approved' : 'submitted'),
+  extra: async (conn, inc, now) => {
+    await conn.query("UPDATE incidents SET report_state = 'submitted', submitted_by = ?, submitted_at = ? WHERE tenant_id = ? AND id = ?", [req.auth.userId, now, inc.tenant_id, inc.id]);
+    const routed = await R.afterSubmit(conn, req, { ...inc, submitted_by: req.auth.userId }, now);
+    return { reply: { review: routed }, audit: { review: routed } };
   },
 }));
+
+const checklist = z.record(z.enum(R.CHECK_KEYS), z.boolean());
+router.post('/incidents/:id/approve', patrol, reviewer, validate(z.object({ checklist: checklist.optional(), note: z.string().trim().max(1000).optional() }).default({})), async (req, res, next) => {
+  const s = await R.settingsOf(pool, req.auth.tenantId);
+  if (s.enabled && R.CHECK_KEYS.some((k) => !(req.body.checklist || {})[k])) return next(bad('Tick every review check before approving. If a check does not apply, it is fine: tick it.'));
+  return setState(req, res, {
+    // With a review group, only a signed-off report can be approved, and never by the person who signed it off.
+    from: s.enabled ? ['submitted'] : ['draft', 'submitted'], to: 'approve', check: true, version: 'approved',
+    extra: async (conn, inc, now) => {
+      // With a review group, never your own report. (Without one, a small patrol may have a single approver; turning the
+      // group off to get round this takes a patrol admin.)
+      if (s.enabled && Number(inc.submitted_by) === req.auth.userId) throw forbidden('You signed off this report, so another member of the review group must review it');
+      await conn.query("UPDATE incidents SET report_state = 'approved', status = 'closed', approved_by = ?, approved_at = ? WHERE tenant_id = ? AND id = ?", [req.auth.userId, now, inc.tenant_id, inc.id]);
+      if (!s.enabled) return null;
+      await R.record(conn, inc, 'approved', req.auth.userId, { checklist: req.body.checklist, note: req.body.note || null });
+      const me = await R.nameOf(conn, inc.tenant_id, req.auth.userId);
+      const link = [{ type: 'patrol_case', id: inc.id }];
+      await R.direct(conn, inc.tenant_id, req.auth.userId, Number(inc.submitted_by), `Your report, Case ${R.caseNo(inc)}, was reviewed and approved.${req.body.note ? ` Note: ${req.body.note}` : ''}`, link);
+      await R.postSystem(conn, inc.tenant_id, s.thread_id, `${me || 'A reviewer'} approved Case ${R.caseNo(inc)}.`, link);
+      return { audit: { checklist: req.body.checklist } };
+    },
+  });
+});
+
+const comment = z.object({ section: z.enum(R.SECTIONS), text: z.string().trim().min(3).max(1000) });
+router.post('/incidents/:id/return', patrol, reviewer, validate(z.object({ comments: z.array(comment).min(1).max(30), note: z.string().trim().max(1000).optional() })), (req, res) => setState(req, res, {
+  from: ['submitted'], to: 'return', check: false,
+  extra: async (conn, inc, now) => {
+    if (Number(inc.submitted_by) === req.auth.userId) throw forbidden('You signed off this report, so another member of the review group must review it');
+    await conn.query("UPDATE incidents SET report_state = 'draft', status = 'open', returned_at = ?, returned_by = ? WHERE tenant_id = ? AND id = ?", [now, req.auth.userId, inc.tenant_id, inc.id]);
+    await R.record(conn, inc, 'returned', req.auth.userId, { comments: req.body.comments, note: req.body.note || null });
+    const s = await R.settingsOf(conn, inc.tenant_id);
+    const me = await R.nameOf(conn, inc.tenant_id, req.auth.userId);
+    const link = [{ type: 'patrol_case', id: inc.id }];
+    const lines = req.body.comments.map((c) => `• ${c.section}: ${c.text}`).join('\n');
+    await R.direct(conn, inc.tenant_id, req.auth.userId, Number(inc.submitted_by), `Your report, Case ${R.caseNo(inc)}, needs changes before it can be approved:\n${lines}${req.body.note ? `\n${req.body.note}` : ''}\nOpen the case, make the changes, then sign off again.`, link);
+    await R.postSystem(conn, inc.tenant_id, s.thread_id, `${me || 'A reviewer'} sent Case ${R.caseNo(inc)} back for changes.`, link);
+    return { audit: { comments: req.body.comments.length } };
+  },
+}));
+
+router.post('/incidents/:id/escalate', patrol, reviewer, validate(z.object({ note: z.string().trim().min(3).max(1000) })), (req, res) => setState(req, res, {
+  from: ['submitted'], to: 'escalate', check: false,
+  extra: async (conn, inc, now) => {
+    if (Number(inc.submitted_by) === req.auth.userId) throw forbidden('You signed off this report, so another member of the review group must decide on it');
+    if (inc.escalated_at) throw conflict('This report has already been escalated');
+    await conn.query('UPDATE incidents SET escalated_at = ?, escalated_by = ?, escalation_note = ? WHERE tenant_id = ? AND id = ?', [now, req.auth.userId, req.body.note, inc.tenant_id, inc.id]);
+    await R.record(conn, inc, 'escalated', req.auth.userId, { note: req.body.note });
+    const s = await R.settingsOf(conn, inc.tenant_id);
+    const me = await R.nameOf(conn, inc.tenant_id, req.auth.userId);
+    const link = [{ type: 'patrol_case', id: inc.id }];
+    // The owner and managers hear about it directly; the report stays with the review group to finish.
+    const bosses = await rows(conn, "SELECT id FROM users WHERE tenant_id = ? AND active = 1 AND role IN ('owner','manager') AND id <> ?", [inc.tenant_id, req.auth.userId]);
+    for (const b of bosses) await R.direct(conn, inc.tenant_id, req.auth.userId, Number(b.id), `Escalated: Case ${R.caseNo(inc)} (${inc.severity} ${inc.category.replace('_', ' ')}). ${req.body.note}`, link);
+    await R.postSystem(conn, inc.tenant_id, s.thread_id, `${me || 'A reviewer'} escalated Case ${R.caseNo(inc)} to the owner and managers. It still needs a review decision.`, link);
+    return { reply: { told: bosses.length } };
+  },
+}));
+
+// Reopen an approved report (its approved copy stays under Record). With a review group, a report waiting for review
+// is sent back with comments instead (/return), so this only reopens approved ones.
+router.post('/incidents/:id/reopen', patrol, reviewer, validate(z.object({ reason: z.string().min(3).max(500) })), async (req, res) => {
+  const s = await R.settingsOf(pool, req.auth.tenantId);
+  return setState(req, res, {
+    from: s.enabled ? ['approved'] : ['submitted', 'approved'], to: 'reopen', check: false,
+    extra: async (conn, inc) => {
+      await conn.query("UPDATE incidents SET report_state = 'draft', status = 'open', approved_by = NULL, approved_at = NULL, returned_at = NULL, returned_by = NULL WHERE tenant_id = ? AND id = ?", [inc.tenant_id, inc.id]);
+      await conn.query('INSERT INTO incident_notes (tenant_id, incident_id, author_user, body) VALUES (?, ?, ?, ?)', [inc.tenant_id, inc.id, req.auth.userId, `Reopened: ${req.body.reason}`]);
+    },
+  });
+});
 
 // ---------------------------------------------------------------- patients
 const patientFields = {

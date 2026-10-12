@@ -8,6 +8,7 @@ const { pool, tx, rows, one } = require('../db');
 const { z, validate, paramId } = require('../lib/util');
 const { bad, notFound, forbidden } = require('../lib/errors');
 const L = require('../lib/chatlinks');
+const review = require('../lib/review');
 
 const router = express.Router();
 const MAX_REFS = 5;
@@ -85,6 +86,7 @@ router.get('/threads', async (req, res) => {
 
 router.get('/unread', async (req, res) => {
   const { tenantId: t, userId: me } = req.auth;
+  review.maybeNudge(t); // reports waiting too long for the patrol review group (checked at most every 10 minutes)
   // Driven from this person's memberships (index tenant_id, user_id), then each thread's messages after the read mark.
   const r = await one(pool, `SELECT COUNT(*) AS n FROM chat_members m
     JOIN chat_messages x ON x.tenant_id = m.tenant_id AND x.thread_id = m.thread_id AND x.id > GREATEST(m.last_read_id, m.visible_from_id)
@@ -187,6 +189,8 @@ router.patch('/threads/:id', validate(z.object({ name: z.string().trim().max(80)
   await tx(async (conn) => {
     const th = await memberOf(conn, req, paramId(req), { lock: true });
     if (th.kind !== 'group') throw bad('Only a group conversation has a name');
+    const rs = await review.settingsOf(conn, req.auth.tenantId);
+    if (rs.thread_id && Number(rs.thread_id) === Number(th.id)) throw forbidden('This conversation belongs to the patrol review group and keeps its name');
     await conn.query('UPDATE chat_threads SET name = ? WHERE tenant_id = ? AND id = ?', [req.body.name || null, req.auth.tenantId, th.id]);
     const me = (await namesOf(conn, req.auth.tenantId, [req.auth.userId])).get(req.auth.userId);
     await addMessage(conn, req, th.id, req.body.name ? `${me ? me.name : 'Someone'} named the conversation "${req.body.name}"` : `${me ? me.name : 'Someone'} removed the conversation name`, [], { system: true });
@@ -198,6 +202,8 @@ router.post('/threads/:id/members', validate(z.object({ user_ids: z.array(z.numb
   await tx(async (conn) => {
     const th = await memberOf(conn, req, paramId(req), { lock: true });
     if (th.kind !== 'group') throw bad('Start a group to add more people');
+    const rs = await review.settingsOf(conn, req.auth.tenantId);
+    if (rs.thread_id && Number(rs.thread_id) === Number(th.id)) throw forbidden('Who is in this conversation follows the patrol review group. Change the group in Patrol, Cases, Review.');
     const asked = [...new Set(req.body.user_ids)];
     const ok = await activeUsers(conn, req.auth.tenantId, asked);
     if (ok.length !== asked.length) throw bad('Someone in that list cannot receive messages');
@@ -220,6 +226,8 @@ router.post('/threads/:id/leave', async (req, res) => {
   await tx(async (conn) => {
     const th = await memberOf(conn, req, paramId(req), { lock: true });
     if (th.kind !== 'group') throw forbidden('A one-to-one conversation cannot be left');
+    const rs = await review.settingsOf(conn, req.auth.tenantId);
+    if (rs.thread_id && Number(rs.thread_id) === Number(th.id)) throw forbidden('This is the patrol review group\'s conversation. To leave it, leave the review group in Patrol, Admin, Review group.');
     await conn.query('UPDATE chat_members SET left_at = UTC_TIMESTAMP() WHERE tenant_id = ? AND thread_id = ? AND user_id = ?', [req.auth.tenantId, th.id, req.auth.userId]);
     const me = (await namesOf(conn, req.auth.tenantId, [req.auth.userId])).get(req.auth.userId);
     await addMessage(conn, req, th.id, `${me ? me.name : 'Someone'} left the conversation`, [], { system: true });

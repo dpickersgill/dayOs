@@ -18,6 +18,7 @@ import { formSettingsDialog } from './nsaar-form.js';
 import { drawMapTab } from './incident-map.js';
 import { drawAccessLog } from './patrol-access.js';
 import { drawNetwork } from './patrol-network.js';
+import { drawReview } from './patrol-review.js';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -71,13 +72,14 @@ export async function render(root, params = []) {
     ['checks', 'Trail checks', drawChecks],
     ...only('reports', ['stats', 'Statistics', drawStats]),
     ...only('reports', ['network', 'Injury network', drawNetwork]),
+    ...(me.is_reviewer || me.can_manage_review ? [['review', me.review_group ? 'Review' : 'Review group', (b) => drawReview(b, me)]] : []),
     ...only('view_access_log', ['access', 'Access log', drawAccessLog]),
     ...(me.access_level === 'admin' ? [['levels', 'Access levels', drawLevels]] : []),
   ];
   // Two levels: a few sections for what the person is doing, then the pages inside the chosen section.
   const SECTIONS = [
     ['now', 'Now', ['home', 'dispatch', 'map', 'checks']],
-    ['cases', 'Cases', ['cases', 'followup', 'stats', 'network']],
+    ['cases', 'Cases', ['cases', 'review', 'followup', 'stats', 'network']],
     ['team', 'Team', ['posts', 'team', 'equipment', 'training', 'passport']],
     ['admin', 'Admin', ['access', 'levels']],
   ].map(([id, text, keys]) => ({ id, text, items: keys.map((k) => items.find((i) => i[0] === k)).filter(Boolean) })).filter((s) => s.items.length);
@@ -111,7 +113,7 @@ export async function render(root, params = []) {
 const REMEMBER = { report_state: '', category: '', severity: '', range: '', from: '', to: '', q: '' };
 const dayStr = (back) => addDays(todayStr(), -back);
 const RANGES = [['', 'Any time'], ['today', 'Today'], ['week', 'Last 7 days'], ['month', 'Last 30 days'], ['custom', 'Pick dates']];
-const STATES = [['', 'All'], ['draft', 'Drafts'], ['submitted', 'Waiting for approval'], ['approved', 'Approved']];
+const STATES = [['', 'All'], ['draft', 'Drafts'], ['submitted', 'Waiting for review'], ['approved', 'Approved']];
 
 async function drawCases(box, { canAdmin } = {}) {
   const f = { ...REMEMBER, ...(drawCases.last || {}) };   // the filters are kept while the page stays open

@@ -435,7 +435,9 @@ router.get('/me', patrol, async (req, res) => {
   const access = await PA.accessOf(pool, req);
   // Name and patrol number fill in "Form completed by" on a report.
   const who = req.auth.staffId ? await one(pool, 'SELECT p.first_name, p.last_name, m.patrol_number, m.callsign FROM staff s JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id LEFT JOIN patrol_members m ON m.staff_id = s.id AND m.tenant_id = s.tenant_id WHERE s.tenant_id = ? AND s.id = ?', [req.auth.tenantId, req.auth.staffId]) : null;
-  res.json({ name: who ? `${who.first_name} ${who.last_name}` : null, patrol_number: who ? who.patrol_number || who.callsign || null : null, can_lead: access.features.has('manage_training') || access.features.has('manage_equipment'), can_admin_form: access.features.has('manage_settings'), staff_id: req.auth.staffId, access_level: access.level, features: [...access.features] });
+  const R = require('../lib/review');
+  const rs = await R.settingsOf(pool, req.auth.tenantId);
+  res.json({ review_group: rs.enabled, is_reviewer: await R.canReview(pool, req, rs), can_manage_review: await R.canManage(pool, req, rs), name: who ? `${who.first_name} ${who.last_name}` : null, patrol_number: who ? who.patrol_number || who.callsign || null : null, can_lead: access.features.has('manage_training') || access.features.has('manage_equipment'), can_admin_form: access.features.has('manage_settings'), staff_id: req.auth.staffId, access_level: access.level, features: [...access.features] });
 });
 
 // ---------------------------------------------------------------- access levels (patrol Admins only)

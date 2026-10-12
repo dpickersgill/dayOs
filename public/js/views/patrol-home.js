@@ -43,6 +43,6 @@ export async function drawHome(box) {
       : h('div', { class: 'home-top' }, h('div', { class: 'grow search' }, q)),
     results, nudges.length ? h('div', { class: 'nudges' }, nudges) : null,
     home.can_view_cases === false ? null : group('My open cases', home.mine, 'none. Start one with New case, or open a case and add yourself as a responder.', 'warn'),
-    home.can_approve ? group('Waiting for approval', home.waiting, 'nothing is waiting.', 'warn') : null,
+    home.can_approve ? group('Waiting for review', home.waiting, 'nothing is waiting.', 'warn') : null,
     others.length ? group('Other cases in draft', others, '') : null));
 }

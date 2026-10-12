@@ -35,6 +35,7 @@ const patrol = require('./routes/patrol');
 const safetyRoutes = require('./routes/safety');
 const demoTours = require('./routes/demotours');
 const inboxRoutes = require('./routes/inbox');
+const patrolReview = require('./routes/patrolreview');
 const patrolTeam = require('./routes/team');
 const dispatch = require('./routes/dispatch');
 const patrolForm = require('./routes/form');
@@ -191,6 +192,7 @@ function createApp() {
   api.use('/patrol', patrolForm);
   api.use('/patrol', patrolMap);
   api.use('/patrol', safetyRoutes);
+  api.use('/patrol', patrolReview);
   api.use('/park', park);
   api.use('/ops', opsRoutes);
   api.use('/ops', maintenance);

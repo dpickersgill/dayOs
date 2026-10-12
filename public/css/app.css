@@ -1899,3 +1899,21 @@ body:has(.tour-card) .demo-pill { display: none; }
   .msg-scroll { padding: 12px; }
   .composer { padding: 10px 12px; }
 }
+
+/* Patrol case review */
+.review-box { border: 2px solid var(--trail-blue); border-radius: 12px; padding: 16px; background: #f4f8fe; }
+.review-box h2, .review-changes h2 { font-size: 1.0625rem; margin: 0; }
+.review-box .check { font-weight: 400; align-items: flex-start; }
+.review-box .check input { margin-top: 3px; }
+.review-changes { border-left: 4px solid var(--hold); background: var(--hold-tint); border-radius: 8px; padding: 12px 16px; display: grid; gap: 6px; }
+.review-changes ul { margin: 0; padding-left: 20px; }
+.review-flag { border-left: 4px solid var(--closed); background: var(--closed-tint); border-radius: 8px; padding: 10px 14px; margin: 0; }
+.review-history summary { cursor: pointer; color: var(--quiet); }
+.review-history ol { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 6px; }
+.comment-row { display: grid; grid-template-columns: minmax(150px, 220px) 1fr auto; gap: 8px; align-items: center; }
+.review-person { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); padding: 4px 0; }
+.review-person:last-child { border-bottom: 0; }
+.review-person .lead-pick { font-weight: 400; color: var(--quiet); min-height: 0; }
+.review-people { max-height: 360px; }
+.row.wrap { flex-wrap: wrap; }
+@media (max-width: 760px) { .comment-row { grid-template-columns: 1fr; } .review-person { flex-wrap: wrap; } }

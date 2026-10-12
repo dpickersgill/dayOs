@@ -29,7 +29,7 @@ const TREATMENTS = ['bandage', 'ice', 'warming', 'airway', 'cpr', 'aed', 'splint
 const SIGNATURE_KINDS = [['refusal_of_care', 'Refusal of care'], ['patient_acknowledgment', 'Patient acknowledgment'], ['witness', 'Witness'], ['patroller', 'Patroller'], ['receiving_provider', 'Receiving provider (hand-off)']];
 const sevTone = { minor: 'neutral', moderate: 'warn', serious: 'bad', critical: 'bad' };
 const stateTone = { draft: 'warn', submitted: 'neutral', approved: 'good' };
-const stateText = { draft: 'Draft', submitted: 'Waiting for approval', approved: 'Approved and locked' };
+const stateText = { draft: 'Draft', submitted: 'Waiting for review', approved: 'Approved and locked' };
 const MODES = [['care', 'Care'], ['report', 'Report'], ['record', 'Record']];
 
 /** Drops blanks so optional API fields are simply left out. */
@@ -118,7 +118,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
 
   // ------------------------------------------------------------ the page
   function draw(c) {
-    const editable = !version && (c.report_state === 'draft' || (c.report_state === 'submitted' && has('approve_case')));
+    const editable = !version && (c.report_state === 'draft' || (c.report_state === 'submitted' && has('approve_case') && !(c.review && c.review.group)));
     const pts = live(c.patients);
     if (!pts.some((p) => p.id === activePid)) activePid = pts.length ? pts[0].id : null;
     const panes = {
@@ -365,17 +365,27 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       submit.dataset.act = 'submit';
       actions.push(submit);
     }
-    if (!version && has('approve_case') && c.report_state !== 'approved') actions.push(button('Approve and lock', () => confirmDialog('Approve this report?', 'Approved reports are locked. Corrections afterwards go in as notes, or you can reopen the report.', 'Approve', async () => {
-      try { await post(`/patrol/incidents/${id}/approve`, {}); } catch (err) {
-        if (err.status === 409 && Array.isArray(err.details) && err.details.length) { showProblems(err, 'Not ready to approve', editable); return; }
-        throw err;
-      }
-      toast('Report approved');
-      await load();
-    })));
-    if (!version && has('approve_case') && c.report_state !== 'draft') actions.push(button(c.report_state === 'approved' ? 'Reopen' : 'Send back', () => reopenDialog(c)));
+    const rv = c.review || {};
+    let reviewPanel = null;
+    if (!version && rv.group) {
+      // The review group: approve with the review checks, send back with comments, or escalate.
+      if (rv.can_review && !rv.own_report) reviewPanel = reviewBox(c);
+      if (rv.can_reopen) actions.push(button('Reopen', () => reopenDialog(c)));
+    } else if (!version) {
+      if (has('approve_case') && c.report_state !== 'approved') actions.push(button('Approve and lock', () => confirmDialog('Approve this report?', 'Approved reports are locked. Corrections afterwards go in as notes, or you can reopen the report.', 'Approve', async () => {
+        try { await post(`/patrol/incidents/${id}/approve`, {}); } catch (err) {
+          if (err.status === 409 && Array.isArray(err.details) && err.details.length) { showProblems(err, 'Not ready to approve', editable); return; }
+          throw err;
+        }
+        toast('Report approved');
+        await load();
+      })));
+      if (has('approve_case') && c.report_state !== 'draft') actions.push(button(c.report_state === 'approved' ? 'Reopen' : 'Send back', () => reopenDialog(c)));
+    }
     const note = version ? null : !editable
-      ? (c.report_state === 'approved' ? 'This report is approved and locked. You can still add a note under Record.' : 'This report is waiting for a manager. You can add a note; a manager can send it back for changes.')
+      ? (c.report_state === 'approved' ? 'This report is approved and locked. You can still add a note under Record.'
+        : rv.group ? (rv.can_review && rv.own_report ? 'You signed off this report, so another member of the review group will review it.' : rv.can_review ? null : 'Signed off and waiting for the review group. You can add a note under Record; a reviewer can send it back with comments.')
+        : 'This report is waiting for a manager. You can add a note; a manager can send it back for changes.')
       : null;
     actions.push(button('Print', () => { for (const d of page.querySelectorAll('details')) d.open = true; window.print(); }, { small: true }));
     return h('section', { class: 'panel case-head stack' },
@@ -384,7 +394,87 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
           h('p', null, `${fmtDateTime(c.occurred_at)} at ${c.location}`),
           h('p', { class: 'muted small' }, `National Ski Area Accident Report for ${c.resort.legal_name || c.resort.name}${c.season ? `, season ${c.season}` : ''}`))),
       note ? h('p', { class: 'lock-note', role: 'status' }, note) : null,
-      actions.length ? h('div', { class: 'row actions' }, actions) : null);
+      !version && rv.changes_requested ? changesBox(rv.changes_requested) : null,
+      !version && rv.escalated && c.report_state === 'submitted' ? h('p', { class: 'review-flag', role: 'status' }, h('strong', null, 'Escalated'), ` by ${rv.escalated.by || 'a reviewer'}: ${rv.escalated.note}`) : null,
+      reviewPanel,
+      actions.length ? h('div', { class: 'row actions' }, actions) : null,
+      !version && rv.history && rv.history.length ? reviewHistory(rv.history) : null);
+  }
+
+  /** What the reviewer asked to change, shown to the patroller at the top of the report until it is signed off again. */
+  function changesBox(cr) {
+    return h('section', { class: 'review-changes', role: 'status' },
+      h('h2', null, 'Changes requested'),
+      h('p', { class: 'muted small' }, `${cr.by || 'A reviewer'} sent this back on ${fmtDateTime(cr.at)}. Make the changes, then sign off again.`),
+      h('ul', null, cr.comments.map((x) => h('li', null, h('strong', null, `${x.section}: `), x.text))),
+      cr.note ? h('p', null, cr.note) : null);
+  }
+
+  /** The reviewer's panel: the review checks, then approve, send back or escalate. */
+  function reviewBox(c) {
+    const boxes = c.review.checks.map((k) => {
+      const cb = h('input', { type: 'checkbox', name: k.key });
+      return [k.key, cb, h('label', { class: 'check' }, cb, ' ', k.label)];
+    });
+    const note = h('textarea', { rows: 2, maxlength: 1000, placeholder: 'A note for the patroller (optional)', 'aria-label': 'Note for the patroller' });
+    const err = h('div');
+    const approve = button('Approve and lock', async () => {
+      clear(err);
+      const checklist = Object.fromEntries(boxes.map(([k, cb]) => [k, cb.checked]));
+      if (Object.values(checklist).some((v) => !v)) { err.append(h('p', { class: 'error-box', role: 'alert' }, 'Tick every review check first. If one does not apply to this case, tick it.')); return; }
+      try { await post(`/patrol/incidents/${id}/approve`, { checklist, note: note.value.trim() || undefined }); } catch (ex) {
+        if (ex.status === 409 && Array.isArray(ex.details) && ex.details.length) { showProblems(ex, 'Not ready to approve', false); return; }
+        err.append(errorBox(ex)); return;
+      }
+      toast('Approved. The patroller has been told.');
+      await load();
+    }, { kind: 'primary' });
+    return h('section', { class: 'review-box stack' },
+      h('h2', null, 'Review'),
+      h('p', { class: 'muted small' }, `Signed off by the patroller${c.review.signed_again ? ' again, after changes' : ''}. Read the report, then tick each check.`),
+      h('div', { class: 'stack tight' }, boxes.map((b) => b[2])),
+      note, err,
+      h('div', { class: 'row' }, approve, button('Send back with comments', () => sendBackDialog(c)), button('Escalate', () => escalateDialog(c), { small: true })));
+  }
+
+  function sendBackDialog(c) {
+    const list = h('div', { class: 'stack' });
+    const addRow = () => {
+      const sec = select(c.review.sections.map((x) => [x, x]), 'Narrative', { 'aria-label': 'Section' });
+      const text = input({ maxlength: 1000, placeholder: 'What needs changing', 'aria-label': 'What needs changing' });
+      const row = h('div', { class: 'comment-row' }, sec, text, h('button', { type: 'button', class: 'linklike', onclick: () => { if (list.children.length > 1) row.remove(); } }, 'Remove'));
+      list.append(row);
+      text.focus();
+    };
+    addRow();
+    formDialog('Send back with comments', h('div', { class: 'stack' },
+      h('p', { class: 'muted' }, 'Say what needs changing, section by section. The patroller gets these in their Inbox and at the top of the report.'),
+      list, h('div', null, button('Add another comment', addRow, { small: true })),
+      field('Note (optional)', h('textarea', { name: 'note', rows: 2, maxlength: 1000 }))), async (fd) => {
+      const comments = [...list.querySelectorAll('.comment-row')].map((r) => ({ section: r.querySelector('select').value, text: r.querySelector('input').value.trim() })).filter((x) => x.text);
+      if (!comments.length) throw new Error('Write at least one comment');
+      await post(`/patrol/incidents/${id}/return`, { comments, note: val(fd, 'note') || undefined });
+      toast('Sent back. The patroller has been told.');
+      await load();
+    }, { submitText: 'Send back', wide: true });
+  }
+
+  function escalateDialog() {
+    formDialog('Escalate this report', h('div', { class: 'stack' },
+      h('p', { class: 'muted' }, 'For a serious injury or a possible claim. The owner and managers get a message with a link to the case. The report stays with the review group for a decision.'),
+      field('Why', h('textarea', { name: 'note', rows: 3, maxlength: 1000, required: true }))), async (fd) => {
+      const out = await post(`/patrol/incidents/${id}/escalate`, { note: val(fd, 'note') });
+      toast(`Escalated to ${out.told} ${out.told === 1 ? 'person' : 'people'}`);
+      await load();
+    }, { submitText: 'Escalate' });
+  }
+
+  function reviewHistory(list) {
+    const words = { approved: 'Approved', returned: 'Sent back', escalated: 'Escalated', not_required: 'Signed off without review' };
+    return h('details', { class: 'review-history' }, h('summary', null, `Review history (${list.length})`),
+      h('ol', null, list.map((x) => h('li', null, h('strong', null, words[x.outcome] || x.outcome), ` ${x.reviewer ? `by ${x.reviewer} ` : ''}on ${fmtDateTime(x.created_at)}`,
+        x.comments && x.comments.length ? h('ul', null, x.comments.map((cm) => h('li', null, `${cm.section}: ${cm.text}`))) : null,
+        x.note ? h('div', { class: 'muted small' }, x.note) : null))));
   }
 
   /** Lists what is missing. Each item is a link to the field when the report can be edited by this reader. */

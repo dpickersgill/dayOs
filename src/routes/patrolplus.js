@@ -132,7 +132,9 @@ router.post('/incidents/:id/checklist', patrol, needs('create_case'), validate(z
 router.get('/home', patrol, async (req, res) => {
   const { tenantId, staffId } = req.auth;
   const access = await PA.accessOf(pool, req);
-  const canApprove = access.features.has('approve_case');
+  const reviewSet = await require('../lib/review').settingsOf(pool, tenantId);
+  const canApprove = await require('../lib/review').canReview(pool, req, reviewSet);
+  const reviewCats = reviewSet.enabled ? reviewSet.categories : null;
   const canView = access.features.has('view_cases');
   const cols = `i.id, i.season, i.seq, i.occurred_at, i.location, i.category, i.severity, i.summary, i.report_state, (SELECT COUNT(*) FROM incident_patients p WHERE p.tenant_id = i.tenant_id AND p.incident_id = i.id AND p.voided_at IS NULL) AS patient_count`;
   const num = (r) => ({ ...r, case_number: r.seq ? `${r.season}-${String(r.seq).padStart(4, '0')}` : null });
@@ -140,7 +142,8 @@ router.get('/home', patrol, async (req, res) => {
     ? await rows(pool, `SELECT ${cols} FROM incidents i WHERE i.tenant_id = ? AND i.report_state = 'draft' AND EXISTS (SELECT 1 FROM incident_responders r WHERE r.tenant_id = i.tenant_id AND r.incident_id = i.id AND r.staff_id = ?) ORDER BY i.occurred_at DESC LIMIT 20`, [tenantId, staffId])
     : [];
   const recent = canView ? await rows(pool, `SELECT ${cols} FROM incidents i WHERE i.tenant_id = ? AND i.report_state = 'draft' ORDER BY i.occurred_at DESC LIMIT 10`, [tenantId]) : [];
-  const waiting = canApprove && canView ? await rows(pool, `SELECT ${cols} FROM incidents i WHERE i.tenant_id = ? AND i.report_state = 'submitted' ORDER BY i.submitted_at LIMIT 30`, [tenantId]) : [];
+  // a reviewer's own reports are reviewed by someone else, so they are not in their own queue
+  const waiting = canApprove && canView ? await rows(pool, `SELECT ${cols} FROM incidents i WHERE i.tenant_id = ? AND i.report_state = 'submitted'${reviewCats ? ' AND (i.submitted_by IS NULL OR i.submitted_by <> ?)' : ''} ORDER BY i.submitted_at LIMIT 30`, reviewCats ? [tenantId, req.auth.userId] : [tenantId]) : [];
   const [held] = canApprove ? await rows(pool, "SELECT COUNT(*) AS n FROM followups WHERE tenant_id = ? AND status = 'held'", [tenantId]) : [{ n: 0 }];
   const t = await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId]);
   const today = todayIn(t.timezone);
