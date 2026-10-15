@@ -20,9 +20,16 @@ function weekOf(date) {
   return addDays(date, -((wd + 6) % 7));
 }
 
-/** Scheduled minutes per person for the week starting on `start` (Monday), from filled shifts that are not cancelled. */
+/**
+ * Scheduled minutes per person for the week starting on `start` (Monday): filled work shifts and patrol shifts that are
+ * not cancelled (a paid patroller's patrol time counts toward their week and overtime).
+ */
 async function weekMinutes(db, tenantId, start, ignoreShiftId = 0) {
-  const list = await rows(db, "SELECT staff_id, starts_at, ends_at FROM shifts WHERE tenant_id = ? AND staff_id IS NOT NULL AND status <> 'cancelled' AND id <> ? AND starts_at >= ? AND starts_at < ?", [tenantId, ignoreShiftId, `${start} 00:00:00`, `${addDays(start, 7)} 00:00:00`]);
+  const range = [`${start} 00:00:00`, `${addDays(start, 7)} 00:00:00`];
+  const list = [
+    ...await rows(db, "SELECT staff_id, starts_at, ends_at FROM shifts WHERE tenant_id = ? AND staff_id IS NOT NULL AND status <> 'cancelled' AND id <> ? AND starts_at >= ? AND starts_at < ?", [tenantId, ignoreShiftId, ...range]),
+    ...await rows(db, "SELECT staff_id, starts_at, ends_at FROM patrol_shifts WHERE tenant_id = ? AND staff_id IS NOT NULL AND status <> 'cancelled' AND starts_at >= ? AND starts_at < ?", [tenantId, ...range]),
+  ];
   const out = new Map();
   for (const s of list) out.set(Number(s.staff_id), (out.get(Number(s.staff_id)) || 0) + minutesBetween(s.starts_at, s.ends_at));
   return out;
@@ -34,7 +41,7 @@ async function weekMinutes(db, tenantId, start, ignoreShiftId = 0) {
  * each with the reasons. Within a group, fewest hours booked that week first.
  */
 async function candidates(db, tenantId, shift) {
-  const staff = await rows(db, "SELECT s.id, p.first_name, p.last_name FROM staff s JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE s.tenant_id = ? AND s.status = 'active' ORDER BY p.last_name, p.first_name LIMIT 500", [tenantId]);
+  const staff = await rows(db, "SELECT s.id, p.first_name, p.last_name FROM staff s JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE s.tenant_id = ? AND s.status = 'active' AND s.in_workforce = 1 ORDER BY p.last_name, p.first_name LIMIT 500", [tenantId]);
   const trained = new Set((await rows(db, 'SELECT staff_id FROM staff_positions WHERE tenant_id = ? AND position_id = ?', [tenantId, shift.position_id])).map((r) => Number(r.staff_id)));
   const anyTrained = (await one(db, 'SELECT COUNT(*) AS n FROM staff_positions WHERE tenant_id = ? AND position_id = ?', [tenantId, shift.position_id])).n > 0;
   const hours = await weekMinutes(db, tenantId, weekOf(String(shift.starts_at).slice(0, 10)), shift.id || 0);
@@ -62,7 +69,9 @@ async function candidates(db, tenantId, shift) {
 async function makeDrafts(conn, tenantId, list) {
   let created = 0; let unfilled = 0; let skipped = 0;
   const leftOpen = [];
+  const patrolPositions = new Set((await rows(conn, "SELECT id FROM positions WHERE tenant_id = ? AND department = 'patrol'", [tenantId])).map((r) => Number(r.id)));
   for (const s of list) {
+    if (patrolPositions.has(Number(s.position_id))) { skipped += 1; continue; } // patrol is scheduled in Patrol
     let staffId = s.staff_id ? Number(s.staff_id) : null;
     const same = await one(conn, "SELECT id FROM shifts WHERE tenant_id = ? AND position_id = ? AND starts_at = ? AND ends_at = ? AND status <> 'cancelled' AND (staff_id <=> ?) LIMIT 1", [tenantId, s.position_id, s.starts_at, s.ends_at, staffId]);
     if (same) { skipped += 1; continue; }
@@ -122,7 +131,19 @@ async function notifyChange(conn, tenantId, fromUser, before, after) {
   }
 }
 
+/**
+ * The shift a clock-in is for: the published work shift closest to now that starts up to 3 hours ahead or is under way;
+ * failing that, a published patrol shift the same way (a paid patroller clocking in for patrol).
+ */
+async function shiftForPunch(db, tenantId, staffId, local) {
+  const near = "staff_id = ? AND status = 'published' AND ? BETWEEN DATE_SUB(starts_at, INTERVAL 3 HOUR) AND ends_at ORDER BY ABS(TIMESTAMPDIFF(MINUTE, starts_at, ?)) LIMIT 1";
+  const w = await one(db, `SELECT id FROM shifts WHERE tenant_id = ? AND ${near}`, [tenantId, staffId, local, local]);
+  if (w) return { shift_id: w.id, patrol_shift_id: null };
+  const p = await one(db, `SELECT id FROM patrol_shifts WHERE tenant_id = ? AND ${near}`, [tenantId, staffId, local, local]);
+  return { shift_id: null, patrol_shift_id: p ? p.id : null };
+}
+
 /** A shift with its position name, for messages and responses. */
 const shiftRow = (db, tenantId, id) => one(db, 'SELECT s.*, pos.name AS position FROM shifts s JOIN positions pos ON pos.tenant_id = s.tenant_id AND pos.id = s.position_id WHERE s.tenant_id = ? AND s.id = ?', [tenantId, id]);
 
-module.exports = { candidates, makeDrafts, notifyPublished, notifyChange, tell, shiftRow, weekOf, weekMinutes, minutesBetween, shiftDt, plusMinutes, loginOf };
+module.exports = { shiftForPunch, candidates, makeDrafts, notifyPublished, notifyChange, tell, describe, shiftRow, weekOf, weekMinutes, minutesBetween, shiftDt, plusMinutes, loginOf };

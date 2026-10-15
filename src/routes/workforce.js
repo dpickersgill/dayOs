@@ -109,7 +109,8 @@ router.post(
 
 router.get('/staff', requireRole(...mgr), async (req, res) => {
   const t = req.auth.tenantId;
-  const where = ['s.tenant_id = ?'];
+  // Patrol-only people (volunteers on the patrol roster) are kept in Patrol, not on the staff list.
+  const where = ['s.tenant_id = ?', 's.in_workforce = 1'];
   const params = [t];
   if (req.query.status) { where.push('s.status = ?'); params.push(String(req.query.status)); }
   if (req.query.q) {
@@ -258,7 +259,7 @@ router.get('/certifications-expiring', requireRole(...mgr), async (req, res) => 
       pool,
       `SELECT sc.staff_id, p.first_name, p.last_name, c.name AS certification, sc.expires_on
        FROM staff_certifications sc
-       JOIN staff s ON s.id = sc.staff_id AND s.tenant_id = sc.tenant_id AND s.status = 'active'
+       JOIN staff s ON s.id = sc.staff_id AND s.tenant_id = sc.tenant_id AND s.status = 'active' AND s.in_workforce = 1
        JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id
        JOIN certifications c ON c.id = sc.certification_id AND c.tenant_id = sc.tenant_id
        WHERE sc.tenant_id = ? AND sc.expires_on IS NOT NULL AND sc.expires_on <= DATE_ADD(CURDATE(), INTERVAL ? DAY)
@@ -296,13 +297,20 @@ const shiftSchema = z.object({
 });
 const tooLong = (a, b) => SH.minutesBetween(a, b) > 24 * 60;
 
+/** Patrol is scheduled in Patrol (its own roster and schedule), so a Patrol-department position cannot get work shifts. */
+async function notPatrol(conn, tenantId, positionId) {
+  const pos = await one(conn, 'SELECT department FROM positions WHERE tenant_id = ? AND id = ?', [tenantId, positionId]);
+  if (!pos) throw notFound('Position');
+  if (pos.department === 'patrol') throw bad('Patrol shifts are scheduled in Patrol, on its Schedule tab');
+}
+
 router.post('/shifts', requireRole(...mgr), validate(shiftSchema), async (req, res) => {
   const { tenantId } = req.auth;
   const b = req.body;
   if (b.ends_at <= b.starts_at) throw bad('The shift must end after it starts');
   if (tooLong(b.starts_at, b.ends_at)) throw bad('A shift can be at most 24 hours');
   const id = await tx(async (conn) => {
-    if (!(await one(conn, 'SELECT id FROM positions WHERE tenant_id = ? AND id = ?', [tenantId, b.position_id]))) throw notFound('Position');
+    await notPatrol(conn, tenantId, b.position_id);
     if (b.staff_id) {
       const problems = await staffProblems(conn, tenantId, { staffId: b.staff_id, positionId: b.position_id, startsAt: b.starts_at, endsAt: b.ends_at, skipAvailability: b.override_availability });
       if (problems.length) throw conflict('Cannot assign this person to the shift', problems);
@@ -327,7 +335,7 @@ async function changeShift(req, shiftId, changes, override) {
     const next = { ...before, ...Object.fromEntries(Object.entries(changes).filter(([, v]) => v !== undefined)) };
     if (next.ends_at <= next.starts_at) throw bad('The shift must end after it starts');
     if (tooLong(next.starts_at, next.ends_at)) throw bad('A shift can be at most 24 hours');
-    if (changes.position_id && !(await one(conn, 'SELECT id FROM positions WHERE tenant_id = ? AND id = ?', [tenantId, changes.position_id]))) throw notFound('Position');
+    if (changes.position_id) await notPatrol(conn, tenantId, changes.position_id);
     if (next.staff_id) {
       const problems = await staffProblems(conn, tenantId, { staffId: next.staff_id, positionId: next.position_id, startsAt: next.starts_at, endsAt: next.ends_at, ignoreShiftId: shiftId, skipAvailability: override });
       if (problems.length) throw conflict('Cannot assign this person to the shift', problems);
@@ -428,6 +436,16 @@ router.post('/shifts/copy', requireRole(...mgr), validate(z.object({ from: dateS
   res.json(out);
 });
 
+/** Patrol coverage for the schedule grid: read only here, because patrol is scheduled in Patrol. */
+router.get('/patrol-coverage', requireRole(...mgr), async (req, res) => {
+  const from = String(req.query.from || ''); const to = String(req.query.to || '');
+  if (!dateStr.safeParse(from).success || !dateStr.safeParse(to).success) throw bad('from and to are required');
+  res.json({ data: await rows(pool, `SELECT ps.id, ps.staff_id, ps.starts_at, ps.ends_at, ps.status, ps.role_label, st.name AS station, p.first_name, p.last_name, s.in_workforce
+    FROM patrol_shifts ps LEFT JOIN staff s ON s.tenant_id = ps.tenant_id AND s.id = ps.staff_id LEFT JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id
+    LEFT JOIN patrol_stations st ON st.tenant_id = ps.tenant_id AND st.id = ps.station_id
+    WHERE ps.tenant_id = ? AND ps.status <> 'cancelled' AND DATE(ps.starts_at) BETWEEN ? AND ? ORDER BY ps.starts_at`, [req.auth.tenantId, from, to]) });
+});
+
 // ---------------------------------------------------------------- week templates
 router.get('/shift-templates', requireRole(...mgr), async (req, res) => {
   res.json({ data: await rows(pool, 'SELECT t.id, t.name, t.created_at, COUNT(i.id) AS shifts FROM shift_templates t LEFT JOIN shift_template_items i ON i.tenant_id = t.tenant_id AND i.template_id = t.id WHERE t.tenant_id = ? GROUP BY t.id ORDER BY t.name', [req.auth.tenantId]) });
@@ -486,13 +504,9 @@ router.post('/time/clock-in', requireRole(...selfRoles, ...mgr), validate(z.obje
     if (await one(conn, 'SELECT id FROM time_entries WHERE tenant_id = ? AND staff_id = ? AND clock_out IS NULL', [tenantId, staffId])) throw conflict('Already clocked in');
     try {
       // Link the punch to the shift it is for (as the kiosk does): the published shift closest to now, starting up to 3 hours ahead.
-      let shiftId = req.body.shift_id ?? null;
-      if (!shiftId) {
-        const local = nowIn((await tenantOf(conn, tenantId)).timezone);
-        const sh = await one(conn, "SELECT id FROM shifts WHERE tenant_id = ? AND staff_id = ? AND status = 'published' AND ? BETWEEN DATE_SUB(starts_at, INTERVAL 3 HOUR) AND ends_at ORDER BY ABS(TIMESTAMPDIFF(MINUTE, starts_at, ?)) LIMIT 1", [tenantId, staffId, local, local]);
-        shiftId = sh ? sh.id : null;
-      }
-      const [r] = await conn.query("INSERT INTO time_entries (tenant_id, staff_id, shift_id, clock_in, in_method) VALUES (?, ?, ?, NOW(), 'login')", [tenantId, staffId, shiftId]);
+      let link = { shift_id: req.body.shift_id ?? null, patrol_shift_id: null };
+      if (!link.shift_id) link = await SH.shiftForPunch(conn, tenantId, staffId, nowIn((await tenantOf(conn, tenantId)).timezone));
+      const [r] = await conn.query("INSERT INTO time_entries (tenant_id, staff_id, shift_id, patrol_shift_id, clock_in, in_method) VALUES (?, ?, ?, ?, NOW(), 'login')", [tenantId, staffId, link.shift_id, link.patrol_shift_id]);
       return r.insertId;
     } catch (e) { if (e.code === 'ER_DUP_ENTRY') throw conflict('Already clocked in'); throw e; }
   });
@@ -514,11 +528,15 @@ router.get('/me', requireRole(...selfRoles, ...mgr), async (req, res) => {
     one(pool, 'SELECT id, clock_in FROM time_entries WHERE tenant_id = ? AND staff_id = ? AND clock_out IS NULL', [tenantId, staffId]),
     rows(
       pool,
-      `SELECT s.id, s.starts_at, s.ends_at, pos.name AS position FROM shifts s
+      `SELECT s.id, s.starts_at, s.ends_at, pos.name AS position, 'work' AS kind FROM shifts s
        JOIN positions pos ON pos.id = s.position_id AND pos.tenant_id = s.tenant_id
        WHERE s.tenant_id = ? AND s.staff_id = ? AND s.status = 'published' AND s.ends_at >= NOW() - INTERVAL 1 DAY
-       ORDER BY s.starts_at LIMIT 30`,
-      [tenantId, staffId],
+       UNION ALL
+       SELECT ps.id, ps.starts_at, ps.ends_at, CONCAT('Patrol', IF(st.name IS NULL, '', CONCAT(', ', st.name)), IF(ps.role_label IS NULL, '', CONCAT(', ', ps.role_label))) AS position, 'patrol' AS kind
+       FROM patrol_shifts ps LEFT JOIN patrol_stations st ON st.tenant_id = ps.tenant_id AND st.id = ps.station_id
+       WHERE ps.tenant_id = ? AND ps.staff_id = ? AND ps.status = 'published' AND ps.ends_at >= NOW() - INTERVAL 1 DAY
+       ORDER BY starts_at LIMIT 30`,
+      [tenantId, staffId, tenantId, staffId],
     ),
   ]);
   // Clock times are kept on the database clock; show them as the mountain's local time.
@@ -567,6 +585,9 @@ router.get('/staffing-suggestion', requireRole(...mgr), async (req, res) => {
   const positions = await rows(pool, 'SELECT id, name, department, visits_per_staff FROM positions WHERE tenant_id = ? AND visits_per_staff IS NOT NULL ORDER BY department, name', [tenantId]);
   const scheduled = await rows(pool, "SELECT position_id, SUM(staff_id IS NOT NULL) AS filled, SUM(staff_id IS NULL) AS empty FROM shifts WHERE tenant_id = ? AND status <> 'cancelled' AND DATE(starts_at) = ? GROUP BY position_id", [tenantId, date]);
   const have = new Map(scheduled.map((s) => [Number(s.position_id), s]));
+  // Patrol positions are staffed from the patrol schedule.
+  const pat = await one(pool, "SELECT SUM(staff_id IS NOT NULL) AS filled, SUM(staff_id IS NULL) AS empty FROM patrol_shifts WHERE tenant_id = ? AND status <> 'cancelled' AND DATE(starts_at) = ?", [tenantId, date]);
+  for (const p of positions) if (p.department === 'patrol') have.set(Number(p.id), { filled: Number(pat.filled || 0), empty: Number(pat.empty || 0) });
   const data = positions.map((p) => {
     const suggested = forecast > 0 ? Math.max(1, Math.ceil(forecast / p.visits_per_staff)) : 0;
     const h = have.get(Number(p.id)) || { filled: 0, empty: 0 };

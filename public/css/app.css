@@ -2068,3 +2068,10 @@ body:has(.tour-card) .demo-pill { display: none; }
 .sg-cell:has(.shift-block) { padding-bottom: 8px; }
 .sg-cell { min-height: 48px; }
 .sg-row.sg-toggle { grid-template-columns: 1fr; }
+.sg-patrol { background: #fbf5f4; }
+.shift-block.is-readonly { cursor: pointer; text-decoration: none; background: #fff; border-style: solid; }
+.shift-block.is-readonly.is-open { background: var(--hold-tint); }
+.shift-block.is-mine { border-width: 2px; border-color: var(--spruce); border-left-width: 4px; }
+.shift-block:disabled { cursor: default; opacity: 1; color: var(--spruce); }
+.sg-row.is-me .sg-name b { text-decoration: underline; }
+.shift-when.two { grid-template-columns: 1fr 1fr; }

@@ -1,5 +1,6 @@
 // Patrol team management: roster, today's posts, equipment checks, training log.
 
+import { daysDialog } from './patrol-schedule.js';
 import { get, post, patch, put, del } from '../api.js';
 import { h, clear, state, input, select, field, button, toast, formDialog, confirmDialog, dialog, table, val, num, todayStr, addDays, fmtDate, fmtDateLong, fmtDateTime, fmtTime, label, empty, isManager } from '../ui.js';
 import { has, accessLevel } from './patrol-feat.js';
@@ -24,7 +25,7 @@ export async function drawTeam(box, { canLead }) {
   const again = refresh(box, (n) => drawTeam(n, { canLead }));
   const cols = [
     // One roster: managers can open the person's full staff record (certifications, availability, shifts) from here.
-    { head: 'Name', cell: (m) => h('span', null, isManager() ? h('a', { href: `#/workforce/staff/${m.staff_id}` }, h('b', null, `${m.first_name} ${m.last_name}`)) : h('b', null, `${m.first_name} ${m.last_name}`), m.staff_status !== 'active' ? h('span', { class: 'muted' }, ' (not active)') : null) },
+    { head: 'Name', cell: (m) => h('span', null, isManager() && m.on_staff_list ? h('a', { href: `#/workforce/staff/${m.staff_id}` }, h('b', null, `${m.first_name} ${m.last_name}`)) : h('b', null, `${m.first_name} ${m.last_name}`), m.staff_status !== 'active' ? h('span', { class: 'muted' }, ' (not active)') : null, h('small', { class: 'muted' }, m.on_staff_list ? ' Paid' : ' Volunteer')) },
     { head: 'Rank', cell: (m) => label(m.level) },
     { head: 'Access', cell: (m) => label(m.access_level || 'patrol') },
     { head: 'Callsign', cell: (m) => m.callsign || '' },
@@ -38,31 +39,66 @@ export async function drawTeam(box, { canLead }) {
     cols.push({ head: '', actions: true, cell: (m) => button('Edit', () => memberDialog(m, again), { small: true }) });
   }
   clear(box).append(h('div', { class: 'stack' },
-    h('div', { class: 'spread' }, h('p', { class: 'muted' }, 'Certifications come from Staff and schedule, so there is one record per person.'), mgr ? button('Add to roster', () => addMemberDialog(data, again), { kind: 'primary' }) : null),
-    data.length ? table(cols, data) : empty(mgr ? 'No one is on the patrol roster yet. Add staff members who patrol.' : 'The patrol roster is empty.')));
+    h('div', { class: 'spread' }, h('p', { class: 'muted' }, 'The patrol roster is kept here. Volunteers are on it only; paid patrollers are also on the staff list.'),
+      h('div', { class: 'row' }, button('Days patrolled', () => daysDialog(), { small: true }), mgr ? button('Add to roster', () => addMemberDialog(data, again), { kind: 'primary' }) : null)),
+    data.length ? table(cols, data) : empty(mgr ? 'No one is on the patrol roster yet. Add your patrollers, volunteers included.' : 'The patrol roster is empty.')));
 }
 
+/**
+ * Put someone on the roster: a new person (a volunteer, or anyone not on the staff list), or someone already on the
+ * staff list (a paid patroller, whose pay and time clock stay in Staff and schedule).
+ */
 async function addMemberDialog(roster, again) {
-  const { data: staff } = await get('/workforce/staff?status=active');
-  const onRoster = new Set(roster.map((m) => m.staff_id));
-  const options = staff.filter((s) => !onRoster.has(s.id));
-  if (!options.length) { toast('Every active staff member is already on the roster. Add the person on Staff and schedule first.', 'error'); return; }
-  formDialog('Add to patrol roster', h('div', { class: 'form' },
-    field('Staff member', select(options.map((s) => [s.id, `${s.first_name} ${s.last_name}`]), '', { name: 'staff_id' })), field('Rank', select(LEVELS, 'patroller', { name: 'level' })),
-    field('Callsign', input({ name: 'callsign', maxlength: 30 })), field('Patrol number', input({ name: 'patrol_number', maxlength: 20 }), 'Printed on the reports they complete'), field('Emergency contact', input({ name: 'emergency_contact', maxlength: 255, placeholder: 'Name and phone' }))),
-  async (fd) => { await post('/patrol/team', compact({ staff_id: num(fd, 'staff_id'), level: val(fd, 'level'), callsign: val(fd, 'callsign'), patrol_number: val(fd, 'patrol_number'), emergency_contact: val(fd, 'emergency_contact') })); toast('Added to roster'); await again(); });
+  let staff = [];
+  try { staff = (await get('/workforce/staff?status=active')).data; } catch (_) { /* no access to the staff list: new people only */ }
+  const onRoster = new Set(roster.map((m) => Number(m.staff_id)));
+  const options = staff.filter((s) => !onRoster.has(Number(s.id)));
+  let mode = 'new';
+  const modeBox = h('div', { class: 'seg day-seg', role: 'group', 'aria-label': 'Who' });
+  const newBox = h('div', { class: 'form' }, field('First name', input({ name: 'first_name', maxlength: 100 })), field('Last name', input({ name: 'last_name', maxlength: 100 })),
+    field('Email', input({ name: 'email', type: 'email', maxlength: 255 }), 'Optional. Needed for a login.'), field('Phone', input({ name: 'phone', type: 'tel', maxlength: 40 })));
+  const staffBox = h('div', { class: 'form', hidden: true }, options.length ? field('Staff member', select(options.map((s) => [s.id, `${s.first_name} ${s.last_name}`]), '', { name: 'staff_id' }))
+    : h('p', { class: 'muted' }, 'Everyone on the staff list is already on the roster.'));
+  const drawMode = () => {
+    clear(modeBox).append(...[['new', 'New patroller'], ['staff', 'From the staff list (paid)']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': String(mode === k), onclick: () => { mode = k; newBox.hidden = k !== 'new'; staffBox.hidden = k !== 'staff'; drawMode(); } }, t)));
+  };
+  drawMode();
+  formDialog('Add to patrol roster', h('div', { class: 'stack' }, modeBox,
+    h('p', { class: 'muted small' }, 'A new patroller is kept in Patrol only (right for volunteers). Someone from the staff list is also paid and clocks in through Staff and schedule.'),
+    newBox, staffBox,
+    h('div', { class: 'form' }, field('Rank', select(LEVELS, 'patroller', { name: 'level' })), field('Callsign', input({ name: 'callsign', maxlength: 30 })),
+      field('Patrol number', input({ name: 'patrol_number', maxlength: 20 }), 'Printed on the reports they complete'), field('Emergency contact', input({ name: 'emergency_contact', maxlength: 255 })))),
+  async (fd) => {
+    const who = mode === 'staff' ? { staff_id: num(fd, 'staff_id') } : { person: compact({ first_name: val(fd, 'first_name'), last_name: val(fd, 'last_name'), email: val(fd, 'email'), phone: val(fd, 'phone') }) };
+    if (mode === 'staff' && !who.staff_id) throw new Error('Choose someone from the staff list');
+    if (mode === 'new' && (!who.person.first_name || !who.person.last_name)) throw new Error('Enter their first and last name');
+    await post('/patrol/team', compact({ ...who, level: val(fd, 'level'), callsign: val(fd, 'callsign'), patrol_number: val(fd, 'patrol_number'), emergency_contact: val(fd, 'emergency_contact') }));
+    toast('Added to roster');
+    await again();
+  }, { submitText: 'Add to roster' });
 }
 
 function memberDialog(m, again) {
   const d = formDialog(`${m.first_name} ${m.last_name}`, h('div', { class: 'form' },
+    field('First name', input({ name: 'first_name', value: m.first_name || '', maxlength: 100, required: true })),
+    field('Last name', input({ name: 'last_name', value: m.last_name || '', maxlength: 100, required: true })),
+    field('Email', input({ name: 'email', type: 'email', value: m.email || '', maxlength: 255 })),
+    field('Phone', input({ name: 'phone', type: 'tel', value: m.phone || '', maxlength: 40 })),
     field('Rank', select(LEVELS, m.level, { name: 'level' })),
     accessLevel() === 'admin' ? field('Access level', select(ACCESS, m.access_level || 'patrol', { name: 'access_level' })) : null,
     field('Callsign', input({ name: 'callsign', value: m.callsign || '', maxlength: 30 })),
     field('Patrol number', input({ name: 'patrol_number', value: m.patrol_number || '', maxlength: 20 }), 'Printed on the reports they complete'),
     h('div', { class: 'wide' }, field('Emergency contact', input({ name: 'emergency_contact', value: m.emergency_contact || '', maxlength: 255 }))),
-    h('div', { class: 'wide' }, field('Notes', input({ name: 'notes', value: m.notes || '', maxlength: 500 })))),
-  async (fd) => { if (fd.get('access_level') && fd.get('access_level') !== (m.access_level || 'patrol')) await put(`/patrol/team/${m.staff_id}/access`, { access_level: fd.get('access_level') }); await patch(`/patrol/team/${m.staff_id}`, { level: val(fd, 'level'), callsign: val(fd, 'callsign'), patrol_number: val(fd, 'patrol_number'), emergency_contact: val(fd, 'emergency_contact'), notes: val(fd, 'notes') }); toast('Saved'); await again(); });
-  d.body.append(button('Remove from roster', () => confirmDialog('Remove from roster?', `${m.first_name} ${m.last_name} stays in Staff and schedule. Their cases and training stay on record.`, 'Remove', async () => { await del(`/patrol/team/${m.staff_id}`); d.close(); toast('Removed from roster'); await again(); }, { danger: true }), { small: true }));
+    h('div', { class: 'wide' }, field('Notes', input({ name: 'notes', value: m.notes || '', maxlength: 500 }))),
+    h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name: 'on_staff_list', checked: Boolean(m.on_staff_list) }), ' Paid: also on the staff list, for pay and the time clock')),
+  async (fd) => {
+    if (fd.get('access_level') && fd.get('access_level') !== (m.access_level || 'patrol')) await put(`/patrol/team/${m.staff_id}/access`, { access_level: fd.get('access_level') });
+    await patch(`/patrol/team/${m.staff_id}`, { first_name: val(fd, 'first_name'), last_name: val(fd, 'last_name'), email: val(fd, 'email'), phone: val(fd, 'phone'), on_staff_list: Boolean(fd.get('on_staff_list')),
+      level: val(fd, 'level'), callsign: val(fd, 'callsign'), patrol_number: val(fd, 'patrol_number'), emergency_contact: val(fd, 'emergency_contact'), notes: val(fd, 'notes') });
+    toast('Saved');
+    await again();
+  });
+  d.body.append(button('Remove from roster', () => confirmDialog('Remove from roster?', `${m.first_name} ${m.last_name} comes off the patrol shifts still ahead (left open for someone else). Their cases and training stay on record.`, 'Remove', async () => { await del(`/patrol/team/${m.staff_id}`); d.close(); toast('Removed from roster'); await again(); }, { danger: true }), { small: true }));
 }
 
 // ---------------------------------------------------------------- today's posts

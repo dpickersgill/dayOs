@@ -379,7 +379,27 @@ const gateSteps = [
   ['shifts.notes', (c) => columnExists(c, 'shifts', 'notes'), 'ALTER TABLE shifts ADD COLUMN notes VARCHAR(200) NULL'],
   ['time_entries approval and corrections', (c) => columnExists(c, 'time_entries', 'edit_note'), 'ALTER TABLE time_entries ADD COLUMN approved_at DATETIME NULL, ADD COLUMN approved_by BIGINT UNSIGNED NULL, ADD COLUMN edited_at DATETIME NULL, ADD COLUMN edited_by BIGINT UNSIGNED NULL, ADD COLUMN edit_note VARCHAR(200) NULL'],
   ['time entries by day', (c) => indexExists(c, 'time_entries', 'ix_time_day'), 'ALTER TABLE time_entries ADD KEY ix_time_day (tenant_id, clock_in)'],
+  // Patrol keeps its own roster and schedule. A staff record with in_workforce = 0 is a patroller only (often a
+  // volunteer): on the patrol roster, not in Staff and schedule. Paid patrollers stay on the staff list.
+  ['staff.in_workforce', (c) => columnExists(c, 'staff', 'in_workforce'), 'ALTER TABLE staff ADD COLUMN in_workforce TINYINT(1) NOT NULL DEFAULT 1'],
+  ['time_entries.patrol_shift_id', (c) => columnExists(c, 'time_entries', 'patrol_shift_id'), 'ALTER TABLE time_entries ADD COLUMN patrol_shift_id BIGINT UNSIGNED NULL'],
 ];
+
+/**
+ * Patrol shifts used to be made in Staff and schedule, as shifts for a Patrol-department position. Upcoming ones move to
+ * the Patrol schedule (same person, times, note and status) and the originals are cancelled with a note saying where
+ * they went. Past ones stay where they are, as history. Safe to re-run: a moved shift is cancelled, so it is not seen again.
+ */
+async function movePatrolShifts(conn) {
+  const [list] = await conn.query(`SELECT s.id, s.tenant_id, s.staff_id, s.starts_at, s.ends_at, s.notes, s.status, pos.name AS position FROM shifts s
+    JOIN positions pos ON pos.tenant_id = s.tenant_id AND pos.id = s.position_id AND pos.department = 'patrol'
+    WHERE s.status <> 'cancelled' AND s.ends_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY)`);
+  for (const s of list) {
+    await conn.query('INSERT INTO patrol_shifts (tenant_id, staff_id, starts_at, ends_at, role_label, notes, status) VALUES (?, ?, ?, ?, ?, ?, ?)', [s.tenant_id, s.staff_id, s.starts_at, s.ends_at, s.position === 'Patroller' ? null : String(s.position).slice(0, 60), s.notes, s.status]);
+    await conn.query("UPDATE shifts SET status = 'cancelled', notes = LEFT(CONCAT('Moved to the Patrol schedule. ', COALESCE(notes, '')), 200) WHERE id = ?", [s.id]);
+  }
+  return list.length;
+}
 
 async function backfillCaseNumbers(conn) {
   const [rows] = await conn.query('SELECT id, tenant_id, occurred_at FROM incidents WHERE seq IS NULL ORDER BY tenant_id, id');
@@ -439,6 +459,8 @@ async function main() {
     applied += 1;
     console.log('Applied:', name);
   }
+  const moved = await movePatrolShifts(conn);
+  if (moved) console.log(`Moved ${moved} upcoming patrol shift${moved === 1 ? '' : 's'} to the Patrol schedule`);
   // Keep the wording each mountain uses today, so waivers already signed against it can be shown word for word.
   await conn.query('INSERT IGNORE INTO waiver_texts (tenant_id, sha, body) SELECT id, SHA2(waiver_text, 256), waiver_text FROM tenants WHERE CHAR_LENGTH(waiver_text) > 0');
   const numbered = await backfillCaseNumbers(conn);

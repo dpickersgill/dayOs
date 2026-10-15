@@ -1,12 +1,16 @@
 'use strict';
 
 // Ski patrol team management: roster, stations, daily deployment, equipment checks and training.
-// Patrollers are ordinary staff records. This adds what only patrol needs (level, callsign, where they
-// are posted today, the gear they check, and the training they have logged).
+// The patrol roster is kept in Patrol. Each patroller has a person record underneath (a staff record, so cases,
+// training and posts all point at one id), but a volunteer's record is patrol only (staff.in_workforce = 0) and never
+// appears in Staff and schedule. A paid patroller is "on the staff list" too, for pay and the time clock.
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole, isManager } = require('../middleware/auth');
-const { partialOf, z, dateStr, validate, paramId, setClause, seasonFor, todayIn, addDays } = require('../lib/util');
+const { partialOf, z, dateStr, validate, paramId, setClause, seasonFor, todayIn, nowIn, addDays } = require('../lib/util');
+const SH = require('../lib/shifts');
+const { span } = require('../lib/workforce');
+const describe = (s) => `patrol ${span(s.starts_at, s.ends_at)}${s.station ? ` at ${s.station}` : ''}${s.role_label ? `, ${s.role_label}` : ''}`;
 const { notFound, bad, forbidden, conflict } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 
@@ -29,7 +33,7 @@ router.get('/team', patrol, async (req, res) => {
   const seeAll = await PA.can(pool, req, 'manage_team');
 
   const [members, certs, training, led] = await Promise.all([
-    rows(pool, `SELECT m.staff_id, m.level, m.access_level, m.callsign, m.patrol_number, m.emergency_contact, m.notes, s.status AS staff_status, p.first_name, p.last_name, p.email, p.phone
+    rows(pool, `SELECT m.staff_id, m.level, m.access_level, m.callsign, m.patrol_number, m.emergency_contact, m.notes, s.status AS staff_status, s.in_workforce, p.first_name, p.last_name, p.email, p.phone
                 FROM patrol_members m JOIN staff s ON s.id = m.staff_id AND s.tenant_id = m.tenant_id JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id
                 WHERE m.tenant_id = ? ORDER BY FIELD(m.level, 'director', 'leader', 'senior', 'patroller', 'candidate'), p.last_name, p.first_name`, [tenantId]),
     rows(pool, `SELECT sc.staff_id, c.name, sc.expires_on FROM staff_certifications sc JOIN certifications c ON c.id = sc.certification_id AND c.tenant_id = sc.tenant_id
@@ -40,7 +44,7 @@ router.get('/team', patrol, async (req, res) => {
   ]);
   const soon = addDays(today, 30);
   const data = members.map((m) => ({
-    staff_id: m.staff_id, first_name: m.first_name, last_name: m.last_name, level: m.level, access_level: m.access_level, callsign: m.callsign, patrol_number: m.patrol_number, staff_status: m.staff_status,
+    staff_id: m.staff_id, first_name: m.first_name, last_name: m.last_name, level: m.level, access_level: m.access_level, callsign: m.callsign, patrol_number: m.patrol_number, staff_status: m.staff_status, on_staff_list: Boolean(m.in_workforce),
     phone: m.phone,
     ...(seeAll ? { email: m.email, emergency_contact: m.emergency_contact, notes: m.notes } : {}),
     certifications: certs.filter((c) => c.staff_id === m.staff_id).map((c) => ({
@@ -74,19 +78,51 @@ async function checkTarget(req, currentLevel) {
   if (currentLevel === 'admin' && (await PA.levelOf(pool, req)) !== 'admin') throw forbidden('Only a patrol Admin can change or remove an Admin');
 }
 
-router.post('/team', patrol, needs('manage_team'), validate(z.object({ staff_id: z.number().int().positive(), ...memberFields, level: memberFields.level.default('patroller') })), async (req, res) => {
+/**
+ * Put someone on the roster: a new person (a volunteer, or anyone not on the staff list: their record is patrol only)
+ * or someone already on the staff list (staff_id).
+ */
+const personFields = { first_name: z.string().trim().min(1).max(100), last_name: z.string().trim().min(1).max(100), email: z.string().trim().email().max(255).optional().or(z.literal('').transform(() => undefined)), phone: z.string().trim().max(40).optional() };
+router.post('/team', patrol, needs('manage_team'), validate(z.object({ staff_id: z.number().int().positive().optional(), person: z.object(personFields).optional(), ...memberFields, level: memberFields.level.default('patroller') })), async (req, res) => {
+  const t = req.auth.tenantId;
   const b = req.body;
-  if (!(await one(pool, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, b.staff_id]))) throw notFound('Staff member');
+  if (!b.staff_id && !b.person) throw bad('Choose someone on the staff list, or enter a new person');
   const access = b.access_level || PA.levelForRank(b.level);
   await checkGrant(req, access);
-  await pool.query('INSERT INTO patrol_members (tenant_id, staff_id, level, access_level, callsign, patrol_number, emergency_contact, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [req.auth.tenantId, b.staff_id, b.level, access, b.callsign ?? null, b.patrol_number ?? null, b.emergency_contact ?? null, b.notes ?? null]);
-  await audit(pool, req, 'add_member', 'patrol_members', b.staff_id, { level: b.level, access_level: access });
-  res.status(201).json({ staff_id: b.staff_id, access_level: access });
+  const staffId = await tx(async (conn) => {
+    let id = b.staff_id;
+    if (id) {
+      if (!(await one(conn, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ?', [t, id]))) throw notFound('Staff member');
+    } else {
+      const [p] = await conn.query('INSERT INTO people (tenant_id, first_name, last_name, email, phone) VALUES (?, ?, ?, ?, ?)', [t, b.person.first_name, b.person.last_name, b.person.email || null, b.person.phone || null]);
+      const [s] = await conn.query("INSERT INTO staff (tenant_id, person_id, status, in_workforce) VALUES (?, ?, 'active', 0)", [t, p.insertId]);
+      id = s.insertId;
+    }
+    try {
+      await conn.query('INSERT INTO patrol_members (tenant_id, staff_id, level, access_level, callsign, patrol_number, emergency_contact, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [t, id, b.level, access, b.callsign ?? null, b.patrol_number ?? null, b.emergency_contact ?? null, b.notes ?? null]);
+    } catch (err) { if (err.code === 'ER_DUP_ENTRY') throw conflict('Already on the roster'); throw err; }
+    await audit(conn, req, 'add_member', 'patrol_members', id, { level: b.level, access_level: access, new_person: !b.staff_id });
+    return id;
+  });
+  res.status(201).json({ staff_id: staffId, access_level: access });
 });
 
-router.patch('/team/:staffId', patrol, needs('manage_team'), validate(partialOf(memberFields)), async (req, res) => {
+router.patch('/team/:staffId', patrol, needs('manage_team'), validate(partialOf(memberFields).extend({
+  first_name: personFields.first_name.optional(), last_name: personFields.last_name.optional(), email: z.string().trim().email().max(255).nullable().optional().or(z.literal('').transform(() => null)), phone: z.string().trim().max(40).nullable().optional(),
+  on_staff_list: z.boolean().optional(),
+})), async (req, res) => {
   const staffId = paramId(req, 'staffId');
-  const body = { ...req.body };
+  const { first_name, last_name, email, phone, on_staff_list, ...body } = req.body;
+  // The person's name and contact, and whether they are also on the staff list (paid, for pay and the time clock).
+  const person = setClause({ first_name, last_name, email, phone }, ['first_name', 'last_name', 'email', 'phone']);
+  if (person || on_staff_list !== undefined) {
+    const st = await one(pool, 'SELECT s.person_id FROM patrol_members m JOIN staff s ON s.tenant_id = m.tenant_id AND s.id = m.staff_id WHERE m.tenant_id = ? AND m.staff_id = ?', [req.auth.tenantId, staffId]);
+    if (!st) throw notFound('Patrol member');
+    if (person) await pool.query(`UPDATE people SET ${person.sql} WHERE tenant_id = ? AND id = ?`, [...person.values, req.auth.tenantId, st.person_id]);
+    if (on_staff_list !== undefined) await pool.query('UPDATE staff SET in_workforce = ? WHERE tenant_id = ? AND id = ?', [on_staff_list ? 1 : 0, req.auth.tenantId, staffId]);
+    await audit(pool, req, 'update_member_person', 'patrol_members', staffId, { first_name, last_name, email, phone, on_staff_list });
+    if (!Object.keys(body).length) { res.json({ ok: true }); return; }
+  }
   const cur = await one(pool, 'SELECT level, access_level FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [req.auth.tenantId, staffId]);
   if (!cur) throw notFound('Patrol member');
   if (body.access_level) { if (body.access_level !== cur.access_level) { await checkGrant(req, body.access_level); await checkTarget(req, cur.access_level); } else delete body.access_level; }
@@ -105,9 +141,20 @@ router.patch('/team/:staffId', patrol, needs('manage_team'), validate(partialOf(
 router.delete('/team/:staffId', patrol, needs('manage_team'), async (req, res) => {
   const cur = await one(pool, 'SELECT access_level FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [req.auth.tenantId, paramId(req, 'staffId')]);
   if (cur) await checkTarget(req, cur.access_level);
-  const [r] = await pool.query('DELETE FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [req.auth.tenantId, paramId(req, 'staffId')]);
-  if (!r.affectedRows) throw notFound('Patrol member');
-  await audit(pool, req, 'remove_member', 'patrol_members', paramId(req, 'staffId'));
+  const t = req.auth.tenantId; const staffId = paramId(req, 'staffId');
+  await tx(async (conn) => {
+    const [r] = await conn.query('DELETE FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [t, staffId]);
+    if (!r.affectedRows) throw notFound('Patrol member');
+    // Off the roster means off the patrol shifts still ahead: they are left open for someone else, and the person is told.
+    const now = nowIn((await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [t])).timezone);
+    const ahead = await rows(conn, `SELECT ps.*, st.name AS station FROM patrol_shifts ps LEFT JOIN patrol_stations st ON st.tenant_id = ps.tenant_id AND st.id = ps.station_id
+      WHERE ps.tenant_id = ? AND ps.staff_id = ? AND ps.status <> 'cancelled' AND ps.starts_at >= ?`, [t, staffId, now]);
+    for (const s of ahead) {
+      await conn.query('UPDATE patrol_shifts SET staff_id = NULL WHERE tenant_id = ? AND id = ?', [t, s.id]);
+      if (s.status === 'published') await SH.tell(conn, t, req.auth.userId, staffId, `You are no longer on ${describe(s)}.`);
+    }
+    await audit(conn, req, 'remove_member', 'patrol_members', staffId, { unassigned: ahead.length });
+  });
   res.status(204).end();
 });
 
@@ -146,10 +193,16 @@ router.get('/deployments', patrol, async (req, res) => {
                 FROM patrol_deployments d JOIN staff s ON s.id = d.staff_id AND s.tenant_id = d.tenant_id JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id
                 LEFT JOIN patrol_stations st ON st.id = d.station_id AND st.tenant_id = d.tenant_id
                 WHERE d.tenant_id = ? AND d.on_date = ? ORDER BY st.name, p.last_name`, [tenantId, date]),
-    rows(pool, `SELECT DISTINCT sh.staff_id, p.first_name, p.last_name, pos.name AS position, sh.starts_at, sh.ends_at
+    // Who is on the patrol schedule that day (and, for days before patrol had its own schedule, patrol shifts made in Staff and schedule).
+    rows(pool, `SELECT ps.staff_id, p.first_name, p.last_name, COALESCE(ps.role_label, 'Patrol') AS position, ps.starts_at, ps.ends_at, ps.station_id
+                FROM patrol_shifts ps JOIN staff s ON s.id = ps.staff_id AND s.tenant_id = ps.tenant_id JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id
+                WHERE ps.tenant_id = ? AND ps.status <> 'cancelled' AND DATE(ps.starts_at) = ?
+                UNION ALL
+                SELECT sh.staff_id, p.first_name, p.last_name, pos.name AS position, sh.starts_at, sh.ends_at, NULL AS station_id
                 FROM shifts sh JOIN positions pos ON pos.id = sh.position_id AND pos.tenant_id = sh.tenant_id AND pos.department = 'patrol'
                 JOIN staff s ON s.id = sh.staff_id AND s.tenant_id = sh.tenant_id JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id
-                WHERE sh.tenant_id = ? AND sh.status <> 'cancelled' AND sh.staff_id IS NOT NULL AND DATE(sh.starts_at) = ? ORDER BY sh.starts_at, p.last_name`, [tenantId, date]),
+                WHERE sh.tenant_id = ? AND sh.status <> 'cancelled' AND sh.staff_id IS NOT NULL AND DATE(sh.starts_at) = ?
+                ORDER BY starts_at, last_name`, [tenantId, date, tenantId, date]),
   ]);
   const posted = new Set(assignments.map((a) => a.staff_id));
   res.json({ date, assignments, scheduled: scheduled.map((s) => ({ ...s, deployed: posted.has(s.staff_id) })) });
@@ -176,7 +229,7 @@ router.put(
     await tx(async (conn) => {
       if (list.length) {
         const active = await rows(conn, "SELECT id FROM staff WHERE tenant_id = ? AND status = 'active' AND id IN (?)", [tenantId, list.map((a) => a.staff_id)]);
-        if (active.length !== list.length) throw conflict('Everyone posted must be an active staff member');
+        if (active.length !== list.length) throw conflict('Everyone posted must be active on the roster');
       }
       await conn.query('DELETE FROM patrol_deployments WHERE tenant_id = ? AND on_date = ?', [tenantId, date]);
       for (const a of list) {

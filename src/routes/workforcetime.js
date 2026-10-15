@@ -33,27 +33,31 @@ const dbNow = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 /** The week's punches and shifts, per person, with totals and anything that needs a look. */
 async function weekOf(t, tz, start) {
   const [from, to] = [dayRange(tz, start)[0], dayRange(tz, addDays(start, 6))[1]];
-  const [entries, shifts, people] = await Promise.all([
+  const week = [`${start} 00:00:00`, `${addDays(start, 7)} 00:00:00`];
+  const [entries, shifts, patrolShifts, people] = await Promise.all([
     rows(pool, 'SELECT * FROM time_entries WHERE tenant_id = ? AND clock_in >= ? AND clock_in < ? ORDER BY clock_in', [t, from, to]),
-    rows(pool, "SELECT s.id, s.staff_id, s.starts_at, s.ends_at, pos.name AS position FROM shifts s JOIN positions pos ON pos.tenant_id = s.tenant_id AND pos.id = s.position_id WHERE s.tenant_id = ? AND s.staff_id IS NOT NULL AND s.status <> 'cancelled' AND s.starts_at >= ? AND s.starts_at < ?", [t, `${start} 00:00:00`, `${addDays(start, 7)} 00:00:00`]),
+    rows(pool, "SELECT s.id, s.staff_id, s.starts_at, s.ends_at, pos.name AS position FROM shifts s JOIN positions pos ON pos.tenant_id = s.tenant_id AND pos.id = s.position_id WHERE s.tenant_id = ? AND s.staff_id IS NOT NULL AND s.status <> 'cancelled' AND s.starts_at >= ? AND s.starts_at < ?", [t, ...week]),
+    // a paid patroller's patrol shifts count toward their scheduled hours; volunteers (not on the staff list) are not paid
+    rows(pool, "SELECT ps.id, ps.staff_id, ps.starts_at, ps.ends_at, 'Patrol' AS position FROM patrol_shifts ps JOIN staff s ON s.tenant_id = ps.tenant_id AND s.id = ps.staff_id AND s.in_workforce = 1 WHERE ps.tenant_id = ? AND ps.status <> 'cancelled' AND ps.starts_at >= ? AND ps.starts_at < ?", [t, ...week]),
     rows(pool, 'SELECT s.id, s.status, p.first_name, p.last_name FROM staff s JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE s.tenant_id = ? ORDER BY p.last_name, p.first_name', [t]),
   ]);
   const shiftById = new Map(shifts.map((s) => [Number(s.id), s]));
+  const patrolById = new Map(patrolShifts.map((s) => [Number(s.id), s]));
   const now = dbNow();
   const by = new Map();
   const row = (id) => {
     if (!by.has(id)) by.set(id, { staff_id: id, scheduled_minutes: 0, worked_minutes: 0, entries: [], shifts: [] });
     return by.get(id);
   };
-  for (const s of shifts) { const r = row(Number(s.staff_id)); r.scheduled_minutes += SH.minutesBetween(s.starts_at, s.ends_at); r.shifts.push(s); }
+  for (const s of [...shifts, ...patrolShifts]) { const r = row(Number(s.staff_id)); r.scheduled_minutes += SH.minutesBetween(s.starts_at, s.ends_at); r.shifts.push(s); }
   for (const e of entries) {
     const r = row(Number(e.staff_id));
     const minutes = SH.minutesBetween(e.clock_in, e.clock_out || now);
-    const shift = e.shift_id ? shiftById.get(Number(e.shift_id)) : null;
+    const shift = e.shift_id ? shiftById.get(Number(e.shift_id)) : e.patrol_shift_id ? patrolById.get(Number(e.patrol_shift_id)) : null;
     const flags = [];
     if (!e.clock_out) flags.push(minutes > LONG_SHIFT ? 'missed_clock_out' : 'clocked_in');
     else if (minutes > LONG_SHIFT) flags.push('long');
-    if (!e.shift_id) flags.push('no_shift');
+    if (!e.shift_id && !e.patrol_shift_id) flags.push('no_shift');
     r.worked_minutes += minutes;
     r.entries.push({
       id: e.id, clock_in: localTime(e.clock_in, tz), clock_out: e.clock_out ? localTime(e.clock_out, tz) : null, minutes, shift: shift ? { id: shift.id, position: shift.position, starts_at: shift.starts_at, ends_at: shift.ends_at } : null,

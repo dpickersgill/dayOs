@@ -1,6 +1,75 @@
 {
   "releases": [
     {
+      "version": "2026.10.6",
+      "date": "2026-10-15",
+      "title": "Patrol keeps its own roster and schedule",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Patrol has its own schedule (Team, Schedule): a weekly grid of the roster, built and published by the patrol director and leads. Volunteers and paid patrollers are both scheduled here, and publishing messages each patroller their shifts.",
+          "help": "patrol-schedule"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Add patrollers straight to the roster, volunteers included, without a staff record. Paid patrollers can be on the staff list too, for pay and the time clock.",
+          "help": "patrol-roster"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Days patrolled: each person’s days and hours this season, with a download for volunteer credit.",
+          "help": "patrol-roster"
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Today’s posts now lists who is on the patrol schedule for the day.",
+          "help": null
+        },
+        {
+          "kind": "improved",
+          "app": "workforce",
+          "who": null,
+          "text": "Staff and schedule shows patrol coverage in a read-only Patrol row; patrol shifts are made in Patrol. A paid patroller’s patrol time counts toward their hours, and they cannot be booked on a work shift and patrol at the same time.",
+          "help": "patrol-schedule"
+        },
+        {
+          "kind": "improved",
+          "app": "workforce",
+          "who": [
+            "staff",
+            "counter",
+            "instructor",
+            "patrol"
+          ],
+          "text": "My shifts shows your published patrol shifts alongside your work shifts.",
+          "help": null
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "The migration moves upcoming patrol shifts from Staff and schedule into the new patrol schedule and cancels the originals with a note; past ones stay as history.",
+          "help": null
+        }
+      ]
+    },
+    {
       "version": "2026.10.5",
       "date": "2026-10-15",
       "title": "A better Staff and schedule",

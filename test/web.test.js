@@ -440,8 +440,7 @@ test('patrol: the team, posts, equipment and training tabs show real data', skip
   ok(await api('POST', '/patrol/team', { token: o, body: { staff_id: D.s2, callsign: 'Patrol 2' } }));
   D.station = ok(await api('POST', '/patrol/stations', { token: o, body: { name: 'Summit hut', kind: 'hut' } })).id;
   ok(await api('PUT', `/patrol/deployments/${today}`, { token: o, body: { assignments: [{ staff_id: D.s1, station_id: D.station, role_label: 'Leader' }] } }));
-  const pp = ok(await api('POST', '/workforce/positions', { token: o, body: { name: 'Patroller', department: 'patrol' } })).id;
-  ok(await api('POST', '/workforce/shifts', { token: o, body: { position_id: pp, staff_id: D.s2, starts_at: `${today}T13:00`, ends_at: `${today}T16:00` } }));
+  ok(await api('POST', '/patrol/schedule', { token: o, body: { staff_id: D.s2, starts_at: `${today}T13:00`, ends_at: `${today}T16:00` } }));
   D.aed = ok(await api('POST', '/patrol/equipment', { token: o, body: { name: 'AED summit hut', kind: 'aed', serial: 'A-1' } })).id;
   ok(await api('POST', `/patrol/equipment/${D.aed}/checks`, { token: o, body: { result: 'needs_attention', notes: 'Pads old' } }));
   ok(await api('POST', '/patrol/training', { token: o, body: { staff_id: D.s2, title: 'Toboggan refresher', kind: 'toboggan', hours: 3, completed_on: today } }));

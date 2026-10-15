@@ -14,7 +14,7 @@ const timePart = (dt) => dt.slice(11, 19);
  *   - has no overlapping shift or lesson
  *   - falls inside declared availability (only if they declared any; skipped with skipAvailability)
  */
-async function staffProblems(db, tenantId, { staffId, positionId, certificationIds = [], startsAt, endsAt, ignoreShiftId = null, ignoreLessonId = null, skipAvailability = false }) {
+async function staffProblems(db, tenantId, { staffId, positionId, certificationIds = [], startsAt, endsAt, ignoreShiftId = null, ignoreLessonId = null, ignorePatrolShiftId = null, skipAvailability = false }) {
   const problems = [];
   const staff = await one(db, 'SELECT id, status FROM staff WHERE tenant_id = ? AND id = ?', [tenantId, staffId]);
   if (!staff) return ['Staff member not found'];
@@ -48,6 +48,11 @@ async function staffProblems(db, tenantId, { staffId, positionId, certificationI
     [tenantId, staffId, ignoreShiftId || 0, endsAt, startsAt],
   );
   if (shiftClash) problems.push(`Already on ${shiftClash.position} ${span(shiftClash.starts_at, shiftClash.ends_at)}`);
+
+  // The patrol schedule is kept in Patrol, but a paid patroller is one person: no work shift on top of a patrol shift.
+  const patrolClash = await one(db, "SELECT id, starts_at, ends_at FROM patrol_shifts WHERE tenant_id = ? AND staff_id = ? AND status <> 'cancelled' AND id <> ? AND starts_at < ? AND ends_at > ? LIMIT 1",
+    [tenantId, staffId, ignorePatrolShiftId || 0, endsAt, startsAt]);
+  if (patrolClash) problems.push(`On patrol ${span(patrolClash.starts_at, patrolClash.ends_at)}`);
 
   const lessonClash = await one(
     db,

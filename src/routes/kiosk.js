@@ -137,8 +137,8 @@ publicRouter.post('/punch', validate(z.object({ session: z.string().max(400), ac
     if (action === 'in') {
       if (open) throw conflict('You are already clocked in');
       const local = nowIn(t.timezone);
-      const shift = await one(conn, `SELECT id FROM shifts WHERE tenant_id = ? AND staff_id = ? AND status = 'published' AND ? BETWEEN DATE_SUB(starts_at, INTERVAL 3 HOUR) AND ends_at ORDER BY ABS(TIMESTAMPDIFF(MINUTE, starts_at, ?)) LIMIT 1`, [tenantId, s.staffId, local, local]);
-      const [r] = await conn.query('INSERT INTO time_entries (tenant_id, staff_id, shift_id, clock_in, in_method, in_device_id) VALUES (?, ?, ?, ?, ?, ?)', [tenantId, s.staffId, shift ? shift.id : null, now, s.method, deviceId]);
+      const link = await require('../lib/shifts').shiftForPunch(conn, tenantId, s.staffId, local);
+      const [r] = await conn.query('INSERT INTO time_entries (tenant_id, staff_id, shift_id, patrol_shift_id, clock_in, in_method, in_device_id) VALUES (?, ?, ?, ?, ?, ?, ?)', [tenantId, s.staffId, link.shift_id, link.patrol_shift_id, now, s.method, deviceId]);
       entryId = r.insertId;
     } else {
       if (!open) throw conflict('You are already clocked out');
@@ -173,7 +173,7 @@ adminRouter.get('/overview', async (req, res) => {
               EXISTS (SELECT 1 FROM time_entries te WHERE te.tenant_id = s.tenant_id AND te.staff_id = s.id AND te.clock_out IS NULL) AS clocked_in
          FROM staff s JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id
          LEFT JOIN kiosk_credentials c ON c.tenant_id = s.tenant_id AND c.staff_id = s.id
-        WHERE s.tenant_id = ? AND s.status = 'active' ORDER BY p.last_name, p.first_name LIMIT 500`, [tenantId]),
+        WHERE s.tenant_id = ? AND s.status = 'active' AND s.in_workforce = 1 ORDER BY p.last_name, p.first_name LIMIT 500`, [tenantId]),
   ]);
   res.json({
     mountain: { name: t.name },

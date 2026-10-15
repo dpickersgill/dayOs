@@ -322,9 +322,10 @@ test('team: stations and daily deployment, with leaders allowed to post people',
   assert.equal((await api('POST', '/patrol/stations', { token: T.quinn, body: { name: 'Quinn hut' } })).status, 403, 'Quinn is not a leader');
   assert.equal((await api('POST', '/patrol/stations', { token: o, body: { name: 'Aid room' } })).status, 409, 'duplicate names are refused');
 
-  // a patrol shift puts Quinn on today's schedule
+  // a shift on the patrol schedule puts Quinn on today's list (patrol is scheduled in Patrol, not Staff and schedule)
   const pos = ok(await api('POST', '/workforce/positions', { token: o, body: { name: 'Patroller', department: 'patrol' } }), 201);
-  ok(await api('POST', '/workforce/shifts', { token: o, body: { position_id: pos.id, staff_id: D.s2, starts_at: `${today}T08:00`, ends_at: `${today}T16:00` } }), 201);
+  assert.equal((await api('POST', '/workforce/shifts', { token: o, body: { position_id: pos.id, staff_id: D.s2, starts_at: `${today}T08:00`, ends_at: `${today}T16:00` } })).status, 400, 'patrol positions get no work shifts');
+  ok(await api('POST', '/patrol/schedule', { token: o, body: { staff_id: D.s2, starts_at: `${today}T08:00`, ends_at: `${today}T16:00` } }), 201);
 
   const before = ok(await api('GET', `/patrol/deployments?date=${today}`, { token: T.quinn }));
   assert.deepEqual(before.assignments, []);

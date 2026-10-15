@@ -1,7 +1,7 @@
 // Staff and schedule: the week as a grid of people by day (one day at a time on a phone), hours worked and approval,
 // the staff list with a page for each person, and setup (positions, certifications, templates, the time clock kiosk).
 import { get } from '../api.js';
-import { h, clear, select, button, tabs, todayStr, addDays, weekStart, label, empty, errorBox } from '../ui.js';
+import { h, clear, select, button, toast, tabs, todayStr, addDays, weekStart, label, empty, errorBox } from '../ui.js';
 import { hm, spanShort, minutes, hrs, dayShort, dayLong, weekLabel, weekDays, DEPARTMENTS, fullName } from './workforce-common.js';
 import { shiftDialog, copyWeek, templatesDialog, publishWeek, staffingNeeds } from './workforce-shift.js';
 import { drawHours } from './workforce-hours.js';
@@ -24,7 +24,9 @@ async function drawSchedule(box) {
   let dept = '';
   let phoneDay = today;
   let showIdle = false;
-  const { data: positions } = await get('/workforce/positions?limit=500');
+  let patrolShifts = [];
+  // Patrol is scheduled in Patrol: its positions are not offered here, and its shifts show read only.
+  const positions = (await get('/workforce/positions?limit=500')).data.filter((p) => p.department !== 'patrol');
   const head = h('div', { class: 'sched-head' });
   const body = h('div', { class: 'sched-body' });
   clear(box).append(head, body);
@@ -32,10 +34,12 @@ async function drawSchedule(box) {
   async function load() {
     clear(body).append(h('p', { class: 'loading' }, 'Loading the week…'));
     try {
-      const [{ data: shifts }, { data: staff }] = await Promise.all([
+      const [{ data: shifts }, { data: staff }, { data: patrol }] = await Promise.all([
         get(`/workforce/shifts?from=${start}&to=${addDays(start, 6)}`),
         get('/workforce/staff?status=active'),
+        get(`/workforce/patrol-coverage?from=${start}&to=${addDays(start, 6)}`).catch(() => ({ data: [] })),
       ]);
+      patrolShifts = patrol;
       draw(shifts, staff);
     } catch (err) { clear(body).append(errorBox(err)); }
   }
@@ -77,7 +81,8 @@ async function drawSchedule(box) {
     const byPerson = new Map();
     for (const s of shifts) if (s.staff_id) { const k = Number(s.staff_id); if (!byPerson.has(k)) byPerson.set(k, []); byPerson.get(k).push(s); }
     const weekMin = new Map();
-    for (const s of all) if (s.staff_id) weekMin.set(Number(s.staff_id), (weekMin.get(Number(s.staff_id)) || 0) + minutes(s.starts_at, s.ends_at));
+    // a paid patroller's patrol shifts count toward their week too
+    for (const s of [...all, ...patrolShifts]) if (s.staff_id) weekMin.set(Number(s.staff_id), (weekMin.get(Number(s.staff_id)) || 0) + minutes(s.starts_at, s.ends_at));
     const people = staff.map((p) => ({ ...p, id: Number(p.id) }));
     // people on a shift this week who are not active any more still show, so their shifts are not hidden
     for (const s of shifts) if (s.staff_id && !people.some((p) => p.id === Number(s.staff_id))) people.push({ id: Number(s.staff_id), first_name: s.first_name, last_name: s.last_name, positions: [] });
@@ -87,7 +92,7 @@ async function drawSchedule(box) {
     const block = (s, showName) => h('button', {
       type: 'button', class: `shift-block${s.status === 'draft' ? ' is-draft' : ''}${s.staff_id ? '' : ' is-open'}`, 'data-dept': s.department,
       'aria-label': `${s.position}, ${dayLong(s.starts_at.slice(0, 10))}, ${hm(s.starts_at)} to ${hm(s.ends_at)}, ${s.staff_id ? `${s.first_name} ${s.last_name}` : 'unfilled'}${s.status === 'draft' ? ', draft' : ''}`,
-      onclick: () => open(s),
+      onclick: () => (s.department === 'patrol' ? toast('Patrol shifts are kept in Patrol. This one is from before patrol had its own schedule.') : open(s)),
     }, h('b', null, spanShort(s.starts_at, s.ends_at)), h('span', null, showName && s.staff_id ? `${s.first_name} ${s.last_name}` : s.position),
     showName && s.staff_id ? h('span', { class: 'sb-sub' }, s.position) : null,
     s.status === 'draft' || s.notes ? h('span', { class: 'sb-sub' }, [s.status === 'draft' ? 'Draft' : null, s.notes].filter(Boolean).join('. ')) : null);
@@ -107,6 +112,15 @@ async function drawSchedule(box) {
       grid.append(h('div', { class: 'sg-row sg-open', role: 'row' },
         h('div', { class: 'sg-name', role: 'rowheader' }, h('b', null, 'Unfilled'), h('small', null, `${unfilled.length} to fill`)),
         ...days.map((d) => h('div', { class: 'sg-cell', role: 'cell' }, unfilled.filter((s) => s.starts_at.startsWith(d)).map((s) => block(s, false)))),
+        h('div', { class: 'sg-hours', role: 'cell' })));
+    }
+    const showPatrol = (!dept || dept === 'patrol') && patrolShifts.length;
+    if (showPatrol) {
+      const pblock = (s) => h('a', { class: `shift-block is-readonly${s.staff_id ? '' : ' is-open'}${s.status === 'draft' ? ' is-draft' : ''}`, 'data-dept': 'patrol', href: '#/patrol/schedule', title: 'Scheduled in Patrol' },
+        h('b', null, spanShort(s.starts_at, s.ends_at)), h('span', null, s.staff_id ? `${s.first_name} ${s.last_name}` : 'Open'), s.station ? h('span', { class: 'sb-sub' }, s.station) : null);
+      grid.append(h('div', { class: 'sg-row sg-patrol', role: 'row' },
+        h('div', { class: 'sg-name', role: 'rowheader' }, h('b', null, 'Patrol'), h('small', null, 'Scheduled in Patrol. ', h('a', { href: '#/patrol/schedule' }, 'Open'))),
+        ...days.map((d) => h('div', { class: 'sg-cell', role: 'cell' }, patrolShifts.filter((s) => s.starts_at.startsWith(d)).map(pblock))),
         h('div', { class: 'sg-hours', role: 'cell' })));
     }
     const personRow = (p) => {
@@ -143,7 +157,7 @@ async function drawSchedule(box) {
     }
 
     clear(body).append(h('div', { class: 'sched-wide' }, grid), phone,
-      h('p', { class: 'muted small sched-key' }, 'A dashed outline is a draft that staff cannot see yet. Hours over 40 in a week are marked as overtime.'));
+      h('p', { class: 'muted small sched-key' }, 'A dashed outline is a draft that staff cannot see yet. Hours over 40 in a week are marked as overtime, and include a paid patroller\'s patrol shifts. Patrol is scheduled in Patrol and shown here read only.'));
   }
 
   await load();

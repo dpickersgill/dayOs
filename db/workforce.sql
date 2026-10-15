@@ -38,3 +38,23 @@ CREATE TABLE IF NOT EXISTS shift_template_items (
   CONSTRAINT fk_template_items_template FOREIGN KEY (tenant_id, template_id) REFERENCES shift_templates(tenant_id, id) ON DELETE CASCADE,
   CONSTRAINT fk_template_items_position FOREIGN KEY (tenant_id, position_id) REFERENCES positions(tenant_id, id)
 ) ENGINE=InnoDB;
+
+-- The patrol schedule, kept apart from Staff and schedule: built in Patrol by those with the schedule permission. A
+-- shift can be left open (no one on it yet). Volunteers are on it as well as paid patrollers.
+CREATE TABLE IF NOT EXISTS patrol_shifts (
+  id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  tenant_id   BIGINT UNSIGNED NOT NULL,
+  staff_id    BIGINT UNSIGNED NULL,
+  starts_at   DATETIME NOT NULL,            -- the mountain's local time, like Staff and schedule shifts
+  ends_at     DATETIME NOT NULL,
+  station_id  BIGINT UNSIGNED NULL,
+  role_label  VARCHAR(60) NULL,             -- "Patrol leader", "Sweep", "Aid room"
+  notes       VARCHAR(200) NULL,
+  status      ENUM('draft','published','cancelled') NOT NULL DEFAULT 'draft',
+  created_by  BIGINT UNSIGNED NULL,
+  UNIQUE KEY uq_patrol_shifts_tenant_id (tenant_id, id),
+  KEY ix_patrol_shifts_time (tenant_id, starts_at),
+  KEY ix_patrol_shifts_staff (tenant_id, staff_id, starts_at),
+  CONSTRAINT fk_patrol_shifts_staff FOREIGN KEY (tenant_id, staff_id) REFERENCES staff(tenant_id, id),
+  CONSTRAINT fk_patrol_shifts_station FOREIGN KEY (tenant_id, station_id) REFERENCES patrol_stations(tenant_id, id)
+) ENGINE=InnoDB;
