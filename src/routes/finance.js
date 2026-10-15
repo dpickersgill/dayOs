@@ -173,7 +173,7 @@ router.get('/till', managers, async (req, res) => {
   const date = req.query.date ? String(req.query.date) : todayIn(zone);
   if (!dateStr.safeParse(date).success) throw bad('date must be YYYY-MM-DD');
   const [from, to] = dayRange(zone, date);
-  const sessions = await rows(pool, `SELECT s.*, u.email FROM till_sessions s JOIN users u ON u.id = s.opened_by WHERE s.tenant_id = ? AND ((s.opened_at >= ? AND s.opened_at < ?) OR s.status = 'open') ORDER BY s.id DESC LIMIT 100`, [req.auth.tenantId, from, to]);
+  const sessions = await rows(pool, `SELECT s.*, COALESCE(u.email, u.username) AS email FROM till_sessions s JOIN users u ON u.id = s.opened_by WHERE s.tenant_id = ? AND ((s.opened_at >= ? AND s.opened_at < ?) OR s.status = 'open') ORDER BY s.id DESC LIMIT 100`, [req.auth.tenantId, from, to]);
   const data = [];
   for (const s of sessions) data.push({ ...(await tillSummary(pool, s)), email: s.email });
   res.json({ date, data });
@@ -226,7 +226,7 @@ router.get('/orders/:id/receipt', sellers, async (req, res) => {
     LEFT JOIN people p ON p.id = tk.person_id AND p.tenant_id = tk.tenant_id WHERE tk.tenant_id = ? AND i.order_id = ? ORDER BY tk.id`, [tenantId, order.id]);
   const giftCards = await rows(pool, 'SELECT code, initial_cents, recipient_name FROM gift_cards WHERE tenant_id = ? AND order_id = ?', [tenantId, order.id]);
   const buyer = order.person_id ? await one(pool, 'SELECT first_name, last_name, email FROM people WHERE tenant_id = ? AND id = ?', [tenantId, order.person_id]) : null;
-  const cashier = order.user_id ? await one(pool, 'SELECT email FROM users WHERE tenant_id = ? AND id = ?', [tenantId, order.user_id]) : null;
+  const cashier = order.user_id ? await one(pool, 'SELECT COALESCE(email, username) AS email FROM users WHERE tenant_id = ? AND id = ?', [tenantId, order.user_id]) : null;
   const change = payments.filter((p) => p.tender === 'cash' && p.tendered_cents > p.amount_cents).reduce((n, p) => n + p.tendered_cents - p.amount_cents, 0);
   res.json({
     mountain: { name: t.name, address: t.address, phone: t.phone, footer: t.receipt_footer },
@@ -251,7 +251,7 @@ const send = (res, name, body) => res.set('Content-Type', 'text/csv; charset=utf
 router.get('/exports/sales.csv', managers, async (req, res) => {
   const r = await range(req);
   const data = await rows(pool, `SELECT o.id AS order_id, o.created_at, o.channel, o.status AS order_status, o.promo_code, i.line_kind, COALESCE(i.label, pr.name, pg.name, CASE i.line_kind WHEN 'gift_card' THEN 'Gift card' WHEN 'rental' THEN 'Rental charge' WHEN 'fee' THEN 'Fee' ELSE 'Item' END) AS item, i.tier, i.quantity, i.unit_price_cents, i.discount_cents, i.tax_cents,
-      i.refunded_at, p.first_name, p.last_name, u.email AS sold_by,
+      i.refunded_at, p.first_name, p.last_name, COALESCE(u.email, u.username) AS sold_by,
       (SELECT GROUP_CONCAT(CONCAT(py.tender, ' ', FORMAT(py.amount_cents / 100, 2)) SEPARATOR '; ') FROM order_payments py WHERE py.order_id = o.id AND py.tenant_id = o.tenant_id) AS paid_by
     FROM order_items i JOIN orders o ON o.id = i.order_id AND o.tenant_id = i.tenant_id LEFT JOIN products pr ON pr.id = i.product_id AND pr.tenant_id = i.tenant_id
     LEFT JOIN programs pg ON pg.id = i.program_id AND pg.tenant_id = i.tenant_id LEFT JOIN people p ON p.id = i.person_id AND p.tenant_id = i.tenant_id LEFT JOIN users u ON u.id = o.user_id
@@ -276,7 +276,7 @@ router.get('/exports/payments.csv', managers, async (req, res) => {
 
 router.get('/exports/refunds.csv', managers, async (req, res) => {
   const r = await range(req);
-  const data = await rows(pool, `SELECT f.created_at, f.order_id, f.reason, f.note, f.amount_cents, f.tax_cents, f.method, u.email AS by_user FROM order_refunds f LEFT JOIN users u ON u.id = f.user_id
+  const data = await rows(pool, `SELECT f.created_at, f.order_id, f.reason, f.note, f.amount_cents, f.tax_cents, f.method, COALESCE(u.email, u.username) AS by_user FROM order_refunds f LEFT JOIN users u ON u.id = f.user_id
     WHERE f.tenant_id = ? AND f.created_at >= ? AND f.created_at < ? ORDER BY f.id`, [req.auth.tenantId, r.start, r.end]);
   const out = data.map((d) => ({ date: localDay(d.created_at, r.zone), order: d.order_id, reason: d.reason, note: d.note, amount: dollars(d.amount_cents), tax: dollars(d.tax_cents), method: d.method, refunded_by: d.by_user }));
   await audit(pool, req, 'export', 'refunds', null, { from: r.from, to: r.to, rows: out.length });

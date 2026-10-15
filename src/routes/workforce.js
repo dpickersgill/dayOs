@@ -120,7 +120,7 @@ router.get('/staff', requireRole(...mgr), async (req, res) => {
   if (req.query.position_id) { where.push('EXISTS (SELECT 1 FROM staff_positions sp WHERE sp.tenant_id = s.tenant_id AND sp.staff_id = s.id AND sp.position_id = ?)'); params.push(Number(req.query.position_id)); }
   const data = await rows(
     pool,
-    `SELECT s.*, p.first_name, p.last_name, p.email, p.phone, (SELECT u.email FROM users u WHERE u.tenant_id = s.tenant_id AND u.staff_id = s.id AND u.active = 1 ORDER BY u.id LIMIT 1) AS login_email
+    `SELECT s.*, p.first_name, p.last_name, p.email, p.phone, (SELECT COALESCE(u.username, u.email) FROM users u WHERE u.tenant_id = s.tenant_id AND u.staff_id = s.id AND u.active = 1 ORDER BY u.id LIMIT 1) AS login_name
      FROM staff s JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id
      WHERE ${where.join(' AND ')} ORDER BY p.last_name, p.first_name LIMIT 500`,
     params,
@@ -144,7 +144,7 @@ router.get('/staff/:id', requireRole(...mgr), async (req, res) => {
     rows(pool, 'SELECT pos.id, pos.name, pos.department FROM staff_positions sp JOIN positions pos ON pos.tenant_id = sp.tenant_id AND pos.id = sp.position_id WHERE sp.tenant_id = ? AND sp.staff_id = ? ORDER BY pos.name', [t, id]),
     rows(pool, 'SELECT c.id, c.name, sc.issued_on, sc.expires_on FROM staff_certifications sc JOIN certifications c ON c.id = sc.certification_id AND c.tenant_id = sc.tenant_id WHERE sc.tenant_id = ? AND sc.staff_id = ? ORDER BY c.name', [t, id]),
     rows(pool, 'SELECT weekday, start_time, end_time FROM availability WHERE tenant_id = ? AND staff_id = ? ORDER BY weekday, start_time', [t, id]),
-    one(pool, 'SELECT id, email, role FROM users WHERE tenant_id = ? AND staff_id = ? AND active = 1 ORDER BY id LIMIT 1', [t, id]),
+    one(pool, 'SELECT id, email, username, role FROM users WHERE tenant_id = ? AND staff_id = ? AND active = 1 ORDER BY id LIMIT 1', [t, id]),
     one(pool, 'SELECT level, callsign FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [t, id]),
     one(pool, 'SELECT is_public, display_name, disciplines, levels FROM instructor_profiles WHERE tenant_id = ? AND staff_id = ?', [t, id]),
     rows(pool, 'SELECT open_date, start_time, end_time FROM instructor_open WHERE tenant_id = ? AND staff_id = ? AND open_date >= ? ORDER BY open_date, start_time LIMIT 10', [t, id, now.slice(0, 10)]),

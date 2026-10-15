@@ -383,7 +383,32 @@ const gateSteps = [
   // volunteer): on the patrol roster, not in Staff and schedule. Paid patrollers stay on the staff list.
   ['staff.in_workforce', (c) => columnExists(c, 'staff', 'in_workforce'), 'ALTER TABLE staff ADD COLUMN in_workforce TINYINT(1) NOT NULL DEFAULT 1'],
   ['time_entries.patrol_shift_id', (c) => columnExists(c, 'time_entries', 'patrol_shift_id'), 'ALTER TABLE time_entries ADD COLUMN patrol_shift_id BIGINT UNSIGNED NULL'],
+  // Sign in with a username or an email. Email is optional except for owners and managers (checked by the app).
+  ['users.username', (c) => columnExists(c, 'users', 'username'), 'ALTER TABLE users ADD COLUMN username VARCHAR(40) NULL AFTER email'],
+  ['users.must_change_password', (c) => columnExists(c, 'users', 'must_change_password'), 'ALTER TABLE users ADD COLUMN must_change_password TINYINT(1) NOT NULL DEFAULT 0'],
+  ['users.email optional', (c) => has(c, "SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'email' AND is_nullable = 'YES'"), 'ALTER TABLE users MODIFY email VARCHAR(255) NULL'],
 ];
+// The unique username index is added after every login has a username (backfillUsernames), so it is the last step.
+const usernameIndex = ['users one username per mountain', (c) => indexExists(c, 'users', 'uq_users_username'), 'ALTER TABLE users ADD UNIQUE KEY uq_users_username (tenant_id, username)'];
+
+/**
+ * Every login gets a username so it can sign in without an email: first initial and last name ("mellis"), else the part
+ * of the email before the @, else "user" and its number; a number is added when the name is taken at that mountain.
+ * Only logins without one are touched, so it is safe to re-run.
+ */
+async function backfillUsernames(conn) {
+  const { suggestUsername } = require('../src/lib/usernames');
+  const [list] = await conn.query(`SELECT u.id, u.tenant_id, u.email, COALESCE(p.first_name, sp.first_name) AS first_name, COALESCE(p.last_name, sp.last_name) AS last_name
+    FROM users u LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id
+    LEFT JOIN staff s ON s.tenant_id = u.tenant_id AND s.id = u.staff_id LEFT JOIN people sp ON sp.tenant_id = s.tenant_id AND sp.id = s.person_id
+    WHERE u.username IS NULL ORDER BY u.id`);
+  for (const u of list) {
+    const [taken] = await conn.query('SELECT username FROM users WHERE tenant_id = ? AND username IS NOT NULL', [u.tenant_id]);
+    const name = suggestUsername(u, new Set(taken.map((r) => r.username)));
+    await conn.query('UPDATE users SET username = ? WHERE id = ?', [name, u.id]);
+  }
+  return list.length;
+}
 
 /**
  * Patrol shifts used to be made in Staff and schedule, as shifts for a Patrol-department position. Upcoming ones move to
@@ -459,6 +484,9 @@ async function main() {
     applied += 1;
     console.log('Applied:', name);
   }
+  const named = await backfillUsernames(conn);
+  if (named) console.log(`Gave ${named} existing login${named === 1 ? '' : 's'} a username (their email still signs in too)`);
+  if (!(await usernameIndex[1](conn))) { await conn.query(usernameIndex[2]); applied += 1; console.log('Applied:', usernameIndex[0]); }
   const moved = await movePatrolShifts(conn);
   if (moved) console.log(`Moved ${moved} upcoming patrol shift${moved === 1 ? '' : 's'} to the Patrol schedule`);
   // Keep the wording each mountain uses today, so waivers already signed against it can be shown word for word.

@@ -18,7 +18,7 @@ async function main() {
     const [t] = await c.query('INSERT INTO tenants (slug, name, timezone) VALUES (?, ?, ?)', [slug, 'Demo Mountain', 'America/New_York']);
     const tid = t.insertId;
     const [p] = await c.query('INSERT INTO people (tenant_id, first_name, last_name, email) VALUES (?, ?, ?, ?)', [tid, 'Demo', 'Owner', `owner@${slug}.test`]);
-    await c.query('INSERT INTO users (tenant_id, person_id, email, password_hash, role) VALUES (?, ?, ?, ?, ?)', [tid, p.insertId, `owner@${slug}.test`, await bcrypt.hash(password, 12), 'owner']);
+    await c.query('INSERT INTO users (tenant_id, person_id, email, username, password_hash, role) VALUES (?, ?, ?, ?, ?, ?)', [tid, p.insertId, `owner@${slug}.test`, 'downer', await bcrypt.hash(password, 12), 'owner']);
 
     const product = async (kind, name, cents, extra = {}) => {
       const [r] = await c.query('INSERT INTO products (tenant_id, kind, name, base_price_cents, valid_days, uses) VALUES (?, ?, ?, ?, ?, ?)', [tid, kind, name, cents, extra.valid_days ?? 1, extra.uses ?? null]);

@@ -35,7 +35,7 @@ export async function drawStaff(box) {
         { head: 'Name', cell: (s) => h('a', { href: `#/workforce/staff/${s.id}` }, h('b', null, fullName(s))) },
         { head: 'Works as', cell: (s) => (s.positions.length ? s.positions.map((p) => p.name).join(', ') : h('span', { class: 'muted' }, 'Not set')) },
         { head: 'Contact', cell: (s) => [s.email, s.phone].filter(Boolean).join(', ') },
-        { head: 'Sign-in', cell: (s) => (s.login_email ? s.login_email : h('span', { class: 'muted' }, 'No login')) },
+        { head: 'Sign-in', cell: (s) => (s.login_name ? s.login_name : h('span', { class: 'muted' }, 'No login')) },
         { head: 'Status', cell: (s) => state(label(s.status), STATUS_TONE[s.status]) },
       ], data) : empty(q.value || pos.value ? 'Nobody matches that.' : 'No staff here yet.'));
     } catch (err) { clear(list).append(errorBox(err)); }
@@ -98,7 +98,7 @@ export async function personPage(root, id) {
           p.instructor && p.instructor.open_dates.length ? [h('p', { class: 'muted small' }, 'Also open on these dates (from Instructor availability):'),
             h('ul', { class: 'plain-list' }, p.instructor.open_dates.map((d) => h('li', null, `${dayShort(String(d.open_date).slice(0, 10))} ${monthDay(String(d.open_date).slice(0, 10))}, ${tod(d.start_time)} to ${tod(d.end_time)}`)))] : null),
         card('Sign-in', p.login ? null : button('Link a login', () => linkLogin(p, draw), { small: true }),
-          p.login ? h('p', null, h('b', null, p.login.email), ` (${label(p.login.role)}). They see their shifts in My shifts, clock in, and get schedule messages in their Inbox.`)
+          p.login ? h('p', null, h('b', null, p.login.username || p.login.email), ` (${label(p.login.role)}${p.login.email && p.login.username ? `, ${p.login.email}` : ''}). They see their shifts in My shifts, clock in, and get schedule messages in their Inbox.`)
             : h('p', { class: 'muted' }, 'No login linked. Without one they use the time clock kiosk and do not get schedule messages.')),
         card('Other roles', null, h('ul', { class: 'plain-list' },
           h('li', null, p.patrol ? [h('b', null, 'Patrol: '), `${label(p.patrol.level)}${p.patrol.callsign ? `, call sign ${p.patrol.callsign}` : ''}. `, h('a', { href: '#/patrol/team' }, 'Patrol team')] : h('span', { class: 'muted' }, 'Not on the patrol roster.')),
@@ -165,7 +165,7 @@ async function linkLogin(p, done) {
     dialog('Link a login', [h('p', null, 'Every login is already linked to someone. Add a login for them in Account, and choose their staff record there.'), h('p', null, h('a', { href: '#/settings' }, 'Open Account'))]);
     return;
   }
-  formDialog(`Link a login to ${fullName(p)}`, h('div', { class: 'form' }, field('Login', select(free.map((u) => [u.id, `${u.email} (${label(u.role)})`]), free[0].id, { name: 'user' }), 'Only logins not linked to anyone are listed. To make a new login, use Account.')), async (fd) => {
+  formDialog(`Link a login to ${fullName(p)}`, h('div', { class: 'form' }, field('Login', select(free.map((u) => [u.id, `${u.username || u.email} (${label(u.role)})`]), free[0].id, { name: 'user' }), 'Only logins not linked to anyone are listed. To make a new login, use Account.')), async (fd) => {
     await patch(`/users/${fd.get('user')}`, { staff_id: p.id });
     toast('Login linked');
     await done();

@@ -253,7 +253,7 @@ router.delete('/layout/role/:role', requireRole('manager'), async (req, res) => 
 // ------------------------------------------------------------------ shift notes
 router.post('/notes', validate(z.object({ body: z.string().trim().min(1).max(1000), pinned: z.boolean().optional() })), async (req, res) => {
   const { tenantId, userId, role } = req.auth;
-  const who = await one(pool, "SELECT COALESCE(NULLIF(TRIM(CONCAT(p.first_name, ' ', p.last_name)), ''), u.email) AS name FROM users u LEFT JOIN people p ON p.id = u.person_id AND p.tenant_id = u.tenant_id WHERE u.tenant_id = ? AND u.id = ?", [tenantId, userId]);
+  const who = await one(pool, "SELECT COALESCE(NULLIF(TRIM(CONCAT(p.first_name, ' ', p.last_name)), ''), u.email, u.username) AS name FROM users u LEFT JOIN people p ON p.id = u.person_id AND p.tenant_id = u.tenant_id WHERE u.tenant_id = ? AND u.id = ?", [tenantId, userId]);
   const pinned = req.body.pinned && isMgr(role) ? 1 : 0;
   const [r] = await pool.query('INSERT INTO board_notes (tenant_id, body, pinned, user_id, author) VALUES (?, ?, ?, ?, ?)', [tenantId, req.body.body, pinned, userId, (who && who.name || '').slice(0, 100)]);
   res.status(201).json({ id: r.insertId });

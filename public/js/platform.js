@@ -158,7 +158,7 @@ async function manage(id) {
   };
   draw();
   const people = t.users.length ? table([
-    { head: 'Login', cell: (u) => u.email }, { head: 'Role', cell: (u) => u.role },
+    { head: 'Login', cell: (u) => [u.username || '', u.email ? h('span', { class: 'muted' }, ` ${u.email}`) : null] }, { head: 'Role', cell: (u) => u.role },
     { head: 'Two-step', cell: (u) => (u.totp_enabled ? 'On' : 'Off') },
     { actions: true, cell: (u) => button('Reset password', () => resetPassword(id, u), { small: true }) },
   ], t.users) : empty('No owner or manager logins.');
@@ -187,9 +187,11 @@ function editBasics(t, done) {
 function resetPassword(id, u) {
   const pw = input({ name: 'pw', type: 'password', autocomplete: 'new-password', required: true });
   const clearTwo = h('input', { type: 'checkbox' });
-  formDialog(`Reset password for ${u.email}`, h('div', { class: 'stack' }, field('New password', pw, 'At least 10 characters. Tell them in person or by phone, and ask them to change it.'),
+  const temp = h('input', { type: 'checkbox', checked: true });
+  formDialog(`Reset password for ${u.username || u.email}`, h('div', { class: 'stack' }, field('New password', pw, 'At least 10 characters. Tell them in person or by phone.'),
+    h('label', { class: 'check' }, temp, 'Temporary: they choose their own password when they next sign in'),
     u.totp_enabled ? h('label', { class: 'check' }, clearTwo, 'Also turn off their two-step sign-in (use when they lost their phone)') : null), async () => {
-    await call('POST', `/tenants/${id}/reset-password`, { user_id: u.id, password: pw.value, clear_two_step: Boolean(u.totp_enabled && clearTwo.checked) });
+    await call('POST', `/tenants/${id}/reset-password`, { user_id: u.id, password: pw.value, clear_two_step: Boolean(u.totp_enabled && clearTwo.checked), temporary: temp.checked });
     toast('Password reset. They are signed out everywhere.');
   }, { submitText: 'Reset password' });
 }

@@ -1,6 +1,41 @@
 {
   "releases": [
     {
+      "version": "2026.10.7",
+      "date": "2026-10-15",
+      "title": "Sign in with a username",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Sign in with your username or your email. Everyone now has a username (you can change yours on Account), and your email still works if you have one.",
+          "help": "sign-in"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Logins no longer need an email, except for owners and managers, so volunteers and seasonal staff can have their own sign-in.",
+          "help": "sign-in"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Forgot your password? A manager sets a temporary one and tells you; you choose your own the next time you sign in.",
+          "help": "sign-in"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "Owner and manager password resets from the console can be temporary too. Existing logins were given usernames by the migration (first initial and last name, or the email before the @).",
+          "help": null
+        }
+      ]
+    },
+    {
       "version": "2026.10.6",
       "date": "2026-10-15",
       "title": "Patrol keeps its own roster and schedule",

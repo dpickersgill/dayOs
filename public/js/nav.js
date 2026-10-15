@@ -98,8 +98,8 @@ export function buildFrame({ views, main, signOut }) {
   out.addEventListener('click', () => signOut());
   // One account button replaces four stacked rows: it opens My shifts, Account, Help and Sign out.
   const whoMenu = h('div', { class: 'who-menu', id: 'who-menu', hidden: true }, h('nav', { class: 'nav nav-personal', 'aria-label': 'Your pages' }, h('div', { class: 'nav-group' }, personal.map((k) => link(k)))), out, whoVersion());
-  const whoBtn = h('button', { type: 'button', class: 'who', 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-controls': 'who-menu', title: ctx.me.email },
-    h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(ctx.me.email)), h('span', { class: 'who-text' }, h('b', null, ctx.me.email), h('span', null, label(ctx.me.role))), icon('chevron', 14));
+  const whoBtn = h('button', { type: 'button', class: 'who', 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-controls': 'who-menu', title: ctx.me.login_name || ctx.me.email },
+    h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(ctx.me.username || ctx.me.email)), h('span', { class: 'who-text' }, h('b', null, ctx.me.login_name || ctx.me.email), h('span', null, label(ctx.me.role))), icon('chevron', 14));
   const setWho = (open) => { whoMenu.hidden = !open; whoBtn.setAttribute('aria-expanded', String(open)); };
   whoBtn.addEventListener('click', (e) => { e.stopPropagation(); setWho(whoMenu.hidden); });
   document.addEventListener('click', (e) => { if (!whoMenu.hidden && !whoMenu.contains(e.target)) setWho(false); });

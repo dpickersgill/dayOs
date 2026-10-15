@@ -405,7 +405,7 @@ test('sign in through the real form, move around, and sign out', skip(), async (
 
   const form = document.querySelector('.signin form');
   const bad = (name, v) => { form.querySelector(`input[name=${name}]`).value = v; };
-  bad('tenant', slug); bad('email', `owner@${slug}.test`); bad('password', 'wrong-password-here');
+  bad('tenant', slug); bad('login', `owner@${slug}.test`); bad('password', 'wrong-password-here');
   form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await settle();
   assert.match(document.querySelector('.signin').textContent, /Invalid credentials/);
@@ -1675,7 +1675,7 @@ test('two-step sign-in: set up from Account, then the sign-in form asks for the 
   await bootMain();
   const form = document.querySelector('.signin form');
   const set = (name, v) => { form.querySelector(`input[name=${name}]`).value = v; };
-  set('tenant', slug); set('email', email); set('password', PW);
+  set('tenant', slug); set('login', email); set('password', PW);
   form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await settle();
   const step = document.querySelector('form[data-step=mfa]');

@@ -19,7 +19,7 @@ router.get('/review/settings', patrol, async (req, res) => {
   const s = await R.settingsOf(pool, t);
   const canEdit = await R.canManage(pool, req, s);
   // Who could be in the group: anyone who can open Patrol (patrol logins, owners and managers).
-  const candidates = canEdit ? await rows(pool, `SELECT u.id, COALESCE(NULLIF(TRIM(CONCAT(COALESCE(p.first_name, sp.first_name, ''), ' ', COALESCE(p.last_name, sp.last_name, ''))), ''), u.email) AS name, u.role
+  const candidates = canEdit ? await rows(pool, `SELECT u.id, COALESCE(NULLIF(TRIM(CONCAT(COALESCE(p.first_name, sp.first_name, ''), ' ', COALESCE(p.last_name, sp.last_name, ''))), ''), u.email, u.username) AS name, u.role
       FROM users u LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id LEFT JOIN staff st ON st.tenant_id = u.tenant_id AND st.id = u.staff_id LEFT JOIN people sp ON sp.tenant_id = st.tenant_id AND sp.id = st.person_id
       WHERE u.tenant_id = ? AND u.active = 1 AND u.role IN ('owner','manager','patrol') ORDER BY name`, [t]) : [];
   res.json({
@@ -66,7 +66,7 @@ router.get('/review/queue', patrol, async (req, res) => {
   const now = Date.parse(`${nowIn(tz).replace(' ', 'T')}Z`);
   // Every report waiting, whatever its kind: one submitted before the group changed its kinds still needs a decision.
   const list = await rows(pool, `SELECT i.id, i.season, i.seq, i.occurred_at, i.location, i.category, i.severity, i.summary, i.submitted_at, i.submitted_by, i.escalated_at, i.review_round,
-      COALESCE(NULLIF(TRIM(CONCAT(COALESCE(p.first_name, sp.first_name, ''), ' ', COALESCE(p.last_name, sp.last_name, ''))), ''), u.email) AS submitted_by_name
+      COALESCE(NULLIF(TRIM(CONCAT(COALESCE(p.first_name, sp.first_name, ''), ' ', COALESCE(p.last_name, sp.last_name, ''))), ''), u.email, u.username) AS submitted_by_name
     FROM incidents i LEFT JOIN users u ON u.tenant_id = i.tenant_id AND u.id = i.submitted_by
       LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id LEFT JOIN staff st ON st.tenant_id = u.tenant_id AND st.id = u.staff_id LEFT JOIN people sp ON sp.tenant_id = st.tenant_id AND sp.id = st.person_id
     WHERE i.tenant_id = ? AND i.report_state = 'submitted' ORDER BY i.submitted_at LIMIT 200`, [t]);

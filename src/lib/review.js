@@ -27,7 +27,7 @@ const SECTIONS = ['Patient', 'Complaint and treatment', 'Assessment', 'First aid
 const THREAD_NAME = 'Patrol case review';
 
 const caseNo = (i) => (i.seq ? `${i.season}-${String(i.seq).padStart(4, '0')}` : String(i.id));
-const NAME = "COALESCE(NULLIF(TRIM(CONCAT(COALESCE(p.first_name, sp.first_name, ''), ' ', COALESCE(p.last_name, sp.last_name, ''))), ''), u.email)";
+const NAME = "COALESCE(NULLIF(TRIM(CONCAT(COALESCE(p.first_name, sp.first_name, ''), ' ', COALESCE(p.last_name, sp.last_name, ''))), ''), u.email, u.username)";
 const USER_JOIN = 'LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id LEFT JOIN staff s ON s.tenant_id = u.tenant_id AND s.id = u.staff_id LEFT JOIN people sp ON sp.tenant_id = s.tenant_id AND sp.id = s.person_id';
 async function nameOf(db, tenantId, userId) {
   if (!userId) return null;

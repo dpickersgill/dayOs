@@ -305,7 +305,7 @@ router.post(
 
 router.get('/equipment/:id/checks', patrol, async (req, res) => {
   res.json({
-    data: await rows(pool, `SELECT c.id, c.checked_at, c.result, c.reading, c.notes, u.email AS checked_by FROM equipment_checks c LEFT JOIN users u ON u.id = c.checked_by AND u.tenant_id = c.tenant_id
+    data: await rows(pool, `SELECT c.id, c.checked_at, c.result, c.reading, c.notes, COALESCE(u.email, u.username) AS checked_by FROM equipment_checks c LEFT JOIN users u ON u.id = c.checked_by AND u.tenant_id = c.tenant_id
                             WHERE c.tenant_id = ? AND c.equipment_id = ? ORDER BY c.checked_at DESC, c.id DESC LIMIT 100`, [req.auth.tenantId, paramId(req)]),
   });
 });
@@ -375,7 +375,7 @@ function passportState(row, today) {
 async function passportFor(tenantId, staffId, tz) {
   const today = todayIn(tz);
   const list = await rows(pool, `SELECT c.id AS competency_id, c.name, c.category, c.description, c.valid_months,
-                                        so.status, so.signed_on, so.expires_on, so.notes, u.email AS signed_by
+                                        so.status, so.signed_on, so.expires_on, so.notes, COALESCE(u.email, u.username) AS signed_by
                                  FROM patrol_competencies c LEFT JOIN patrol_signoffs so ON so.competency_id = c.id AND so.tenant_id = c.tenant_id AND so.staff_id = ?
                                  LEFT JOIN users u ON u.id = so.signed_by AND u.tenant_id = so.tenant_id
                                  WHERE c.tenant_id = ? AND c.active = 1 ORDER BY c.category, c.name`, [staffId, tenantId]);

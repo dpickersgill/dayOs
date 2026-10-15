@@ -392,7 +392,7 @@ router.post('/register/:id/inspections', validate(z.object({
       woId = await maintenance.createOrder(conn, req, { title: `Failed ${tpl.name.toLowerCase()}: ${a.name}`, description: failed.map((i) => `${i.label}: ${i.note}`).join('\n'), priority: a.critical ? 'urgent' : 'high', asset_id: id }, 'inspection');
       if (a.status === 'in_service') await conn.query("UPDATE ops_assets SET status = 'needs_service' WHERE tenant_id = ? AND id = ?", [t, id]);
     }
-    const who = b.inspector || (await one(conn, "SELECT COALESCE(NULLIF(CONCAT(p.first_name, ' ', p.last_name), ' '), u.email) AS n FROM users u LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id WHERE u.tenant_id = ? AND u.id = ?", [t, req.auth.userId]) || {}).n || null;
+    const who = b.inspector || (await one(conn, "SELECT COALESCE(NULLIF(CONCAT(p.first_name, ' ', p.last_name), ' '), u.email, u.username) AS n FROM users u LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id WHERE u.tenant_id = ? AND u.id = ?", [t, req.auth.userId]) || {}).n || null;
     const [r] = await conn.query('INSERT INTO asset_inspections (tenant_id, asset_id, template_id, template_name, result, items, hours, miles, inspector, note, work_order_id, user_id, done_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [t, id, tpl.id, tpl.name, failed.length ? 'fail' : 'pass', JSON.stringify(items), b.hours ?? null, b.miles ?? null, who, b.note ?? null, woId, req.auth.userId, at]);
     await audit(conn, req, 'inspect', 'ops_assets', id, { result: failed.length ? 'fail' : 'pass', work_order_id: woId });

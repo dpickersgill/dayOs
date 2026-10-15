@@ -61,18 +61,18 @@ function showSignIn(message) {
   clear(app);
   const err = h('div');
   const slug = input({ name: 'tenant', autocomplete: 'organization', autocapitalize: 'none', spellcheck: 'false', value: readSlug(), required: true });
-  const email = input({ name: 'email', type: 'email', autocomplete: 'username', required: true });
+  const email = input({ name: 'login', type: 'text', autocomplete: 'username', autocapitalize: 'none', spellcheck: 'false', required: true });
   const pw = input({ name: 'password', type: 'password', autocomplete: 'current-password', required: true });
   const go = h('button', { type: 'submit', class: 'btn primary' }, 'Sign in');
   const form = h('form', { novalidate: true },
     field('Mountain', slug, 'The short name you were given, such as spring-mountain'),
-    field('Email', email), field('Password', pw), err, go);
+    field('Username or email', email), field('Password', pw), err, go);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     clear(err);
     go.disabled = true;
     try {
-      const out = await post('/auth/login', { tenant: slug.value.trim().toLowerCase(), email: email.value.trim(), password: pw.value });
+      const out = await post('/auth/login', { tenant: slug.value.trim().toLowerCase(), login: email.value.trim(), password: pw.value });
       saveSlug(slug.value.trim().toLowerCase());
       if (out.mfa_required) { showSecondStep(out.mfa_token); return; }
       session.token = out.token;
@@ -130,6 +130,33 @@ function showEnrollment() {
   const done = async () => { await start(); };
   app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('strong', null, 'SummitOps')), h('h1', null, 'Protect your account.'), h('p', null, 'Your mountain requires two-step sign-in.')), ridge()),
     h('section', { class: 'signin-form stack' }, mfaPanel(done), button('Sign out', () => signOut(), { small: true }))));
+}
+
+/** A manager set a temporary password: the person chooses their own before anything else opens. */
+function showPasswordChange() {
+  clear(app);
+  const err = h('div');
+  const cur = input({ name: 'current', type: 'password', autocomplete: 'current-password', required: true });
+  const next = input({ name: 'new', type: 'password', autocomplete: 'new-password', required: true, minlength: 10 });
+  const again = input({ name: 'again', type: 'password', autocomplete: 'new-password', required: true, minlength: 10 });
+  const go = h('button', { type: 'submit', class: 'btn primary' }, 'Save my password');
+  const form = h('form', { novalidate: true, 'data-step': 'new-password' }, field('Temporary password', cur, 'The one you were given'), field('New password', next, 'At least 10 characters'), field('New password again', again), err, h('div', { class: 'row' }, go, button('Sign out', () => signOut(), { small: true })));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    clear(err);
+    if (next.value.length < 10) { err.append(errorBox(new Error('Use at least 10 characters'))); return; }
+    if (next.value !== again.value) { err.append(errorBox(new Error('The two new passwords are not the same'))); return; }
+    go.disabled = true;
+    try {
+      const out = await post('/auth/change-password', { current_password: cur.value, new_password: next.value });
+      session.token = out.token;
+      toast('Password saved');
+      await start();
+    } catch (ex) { err.append(errorBox(ex)); go.disabled = false; }
+  });
+  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('strong', null, 'SummitOps')), h('h1', null, 'Choose your password.'), h('p', null, `Signed in as ${ctx.me.username || ctx.me.email}. Your password was set by a manager; choose your own to continue.`)), ridge()),
+    h('section', { class: 'signin-form' }, h('h2', null, 'New password'), form)));
+  cur.focus();
 }
 
 // ---------------------------------------------------------------- shell
@@ -277,6 +304,7 @@ async function start() {
     return;
   }
   ctx.tz = ctx.me.timezone || ctx.tz;
+  if (ctx.me.must_change_password) { showPasswordChange(); return; }
   if (ctx.me.mfa_enrollment_required) { showEnrollment(); return; }
   buildShell();
   await route();

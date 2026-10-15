@@ -25,7 +25,7 @@ const stamp = (v) => (v instanceof Date ? v.toISOString().slice(0, 19).replace('
 router.get('/meta', (_req, res) => res.json({ asset_kinds: O.ASSET_KINDS, surfaces: O.SURFACES, downtime_reasons: O.DOWNTIME_REASONS, departments: O.DEPARTMENTS, lift_checklist: O.LIFT_CHECKLIST }));
 
 async function whoIs(conn, req) {
-  const u = await one(conn, "SELECT COALESCE(NULLIF(CONCAT(p.first_name, ' ', p.last_name), ' '), u.email) AS name FROM users u LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id WHERE u.tenant_id = ? AND u.id = ?", [req.auth.tenantId, req.auth.userId]);
+  const u = await one(conn, "SELECT COALESCE(NULLIF(CONCAT(p.first_name, ' ', p.last_name), ' '), u.email, u.username) AS name FROM users u LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id WHERE u.tenant_id = ? AND u.id = ?", [req.auth.tenantId, req.auth.userId]);
   return u ? u.name : null;
 }
 async function mustExist(conn, table, tenantId, id, what) {
@@ -157,7 +157,7 @@ router.get('/work-orders/:id', async (req, res) => {
   const id = paramId(req);
   const w = await one(pool, `${ORDER_SQL} WHERE w.tenant_id = ? AND w.id = ?`, [req.auth.tenantId, id]);
   if (!w) throw notFound('Work order');
-  const notes = await rows(pool, "SELECT n.id, n.at, n.body, COALESCE(NULLIF(CONCAT(p.first_name, ' ', p.last_name), ' '), u.email) AS author FROM work_order_notes n LEFT JOIN users u ON u.tenant_id = n.tenant_id AND u.id = n.user_id LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id WHERE n.tenant_id = ? AND n.work_order_id = ? ORDER BY n.id", [req.auth.tenantId, id]);
+  const notes = await rows(pool, "SELECT n.id, n.at, n.body, COALESCE(NULLIF(CONCAT(p.first_name, ' ', p.last_name), ' '), u.email, u.username) AS author FROM work_order_notes n LEFT JOIN users u ON u.tenant_id = n.tenant_id AND u.id = n.user_id LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id WHERE n.tenant_id = ? AND n.work_order_id = ? ORDER BY n.id", [req.auth.tenantId, id]);
   res.json({ ...w, notes });
 });
 

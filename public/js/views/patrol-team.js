@@ -56,7 +56,7 @@ async function addMemberDialog(roster, again) {
   let mode = 'new';
   const modeBox = h('div', { class: 'seg day-seg', role: 'group', 'aria-label': 'Who' });
   const newBox = h('div', { class: 'form' }, field('First name', input({ name: 'first_name', maxlength: 100 })), field('Last name', input({ name: 'last_name', maxlength: 100 })),
-    field('Email', input({ name: 'email', type: 'email', maxlength: 255 }), 'Optional. Needed for a login.'), field('Phone', input({ name: 'phone', type: 'tel', maxlength: 40 })));
+    field('Email', input({ name: 'email', type: 'email', maxlength: 255 }), 'Optional'), field('Phone', input({ name: 'phone', type: 'tel', maxlength: 40 })));
   const staffBox = h('div', { class: 'form', hidden: true }, options.length ? field('Staff member', select(options.map((s) => [s.id, `${s.first_name} ${s.last_name}`]), '', { name: 'staff_id' }))
     : h('p', { class: 'muted' }, 'Everyone on the staff list is already on the roster.'));
   const drawMode = () => {

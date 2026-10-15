@@ -33,7 +33,7 @@ async function authenticate(req, _res, next) {
 
   const userId = Number(payload.sub);
   const [rows] = await pool.query(
-    `SELECT u.id, u.role, u.staff_id, u.totp_enabled, t.require_mfa, t.status, (t.sandbox_expires_at IS NOT NULL) AS sandbox, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over FROM users u JOIN tenants t ON t.id = u.tenant_id
+    `SELECT u.id, u.role, u.staff_id, u.totp_enabled, u.must_change_password, t.require_mfa, t.status, (t.sandbox_expires_at IS NOT NULL) AS sandbox, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over FROM users u JOIN tenants t ON t.id = u.tenant_id
      WHERE u.id = ? AND u.tenant_id = ? AND u.active = 1
        AND (u.password_changed_at IS NULL OR UNIX_TIMESTAMP(u.password_changed_at) <= ?)`,
     [userId, payload.tid, payload.iat],
@@ -45,6 +45,13 @@ async function authenticate(req, _res, next) {
   if (rows[0].require_mfa && !rows[0].totp_enabled && !/\/auth\/(me|mfa\/(setup|enable|status)|change-password)$/.test(req.originalUrl.split('?')[0])) {
     const err = forbidden('Set up two-step sign-in to continue');
     err.details = { code: 'mfa_enrollment_required' };
+    return next(err);
+  }
+
+  // A temporary password (set by a manager) has to be replaced before anything else.
+  if (rows[0].must_change_password && !/\/auth\/(me|change-password|mfa\/(setup|enable|status))$/.test(req.originalUrl.split('?')[0])) {
+    const err = forbidden('Choose a new password to continue');
+    err.details = { code: 'password_change_required' };
     return next(err);
   }
 

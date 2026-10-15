@@ -40,7 +40,13 @@ function passwordForm() {
       go.disabled = false;
     }
   });
-  return h('section', { class: 'panel stack' }, h('h2', null, 'Change your password'), h('p', { class: 'muted' }, `Signed in as ${ctx.me.email}.`), form);
+  const myName = h('div', { class: 'row' }, h('span', null, 'Username: ', h('b', null, ctx.me.username || '')), ctx.me.username ? button('Change', () => formDialog('Change your username', h('div', { class: 'form' },
+    field('Username', input({ name: 'username', value: ctx.me.username, required: true, maxlength: 40, autocapitalize: 'none', spellcheck: 'false' }), 'What you type to sign in. Letters, numbers, dots and dashes.')), async (fd) => {
+    const r = await post('/auth/username', { username: String(fd.get('username') || '') });
+    ctx.me.username = r.username;
+    toast(`You now sign in as ${r.username}`);
+  }), { small: true }) : null);
+  return h('section', { class: 'panel stack' }, h('h2', null, 'Change your password'), myName, h('p', { class: 'muted' }, `Signed in as ${ctx.me.username || ctx.me.email}${ctx.me.username && ctx.me.email ? ` (${ctx.me.email}). You can sign in with either.` : '.'}`), form);
 }
 
 // ---------------------------------------------------------------- manage logins
@@ -52,15 +58,17 @@ async function drawLogins(box) {
   const canManage = (u) => u.role !== 'owner' && (isOwner || u.role !== 'manager');
 
   clear(box).append(
-    h('header', null, h('div', null, h('h2', null, 'Logins'), h('p', null, 'Who can sign in to this mountain. Link a login to a staff member so they can see their shifts and clock in.')),
+    h('header', null, h('div', null, h('h2', null, 'Logins'), h('p', null, 'Who can sign in to this mountain. Everyone signs in with their username, or their email if they have one; only managers must have an email. Link a login to a staff member so they can see their shifts and clock in.')),
       button('Add login', () => addLogin(staff, isOwner, reload), { kind: 'primary', small: true })),
     users.length ? table([
-      { head: 'Email', cell: (u) => h('strong', null, u.email) },
+      { head: 'Username', cell: (u) => [h('strong', null, u.username || ''), u.must_change_password ? h('small', { class: 'muted' }, ' (temporary password)') : null] },
+      { head: 'Email', cell: (u) => u.email || h('span', { class: 'muted' }, 'None') },
       { head: 'Role', cell: (u) => label(u.role) },
       { head: 'Staff record', cell: (u) => (u.staff_id ? staffName.get(u.staff_id) || `#${u.staff_id}` : h('span', { class: 'muted' }, 'Not linked')) },
       { head: 'Status', cell: (u) => state(u.active ? 'Active' : 'Deactivated', u.active ? 'good' : 'neutral') },
       { head: 'Two-step', cell: (u) => (u.mfa_enabled ? state('On', 'good') : h('span', { class: 'muted' }, 'Off')) },
       { head: '', actions: true, cell: (u) => (canManage(u) ? [
+        button('Edit', () => editLogin(u, reload), { small: true, label: `Edit ${u.username}` }),
         button('Link staff', () => linkStaff(u, staff, reload), { small: true }),
         button('Role', () => changeRole(u, isOwner, reload), { small: true }),
         button('New password', () => resetPassword(u), { small: true }),
@@ -72,21 +80,53 @@ async function drawLogins(box) {
 
 function roleOptions(isOwner) { return (isOwner ? ROLES : ROLES.filter((r) => r !== 'manager')); }
 
+const who = (u) => u.username || u.email;
+const needsEmail = (role) => ['owner', 'manager'].includes(role);
+
+/** A new login: a username (filled in from the staff member's name), an email if they have one (managers must). */
 function addLogin(staff, isOwner, done) {
+  const uname = input({ name: 'username', required: true, autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', maxlength: 40 });
+  const email = input({ name: 'email', type: 'email', autocomplete: 'off' });
+  const role = select(roleOptions(isOwner).map((r) => [r, label(r)]), 'staff', { name: 'role' });
+  const staffSel = select([['', 'Not linked'], ...staff.map((s) => [s.id, `${s.first_name} ${s.last_name}`])], '', { name: 'staff_id' });
+  const emailHint = h('span', { class: 'hint' });
+  let typed = false;
+  uname.addEventListener('input', () => { typed = true; });
+  const suggest = async () => {
+    if (typed) return;
+    try { uname.value = (await get(`/users/suggest-username?staff_id=${staffSel.value || ''}&email=${encodeURIComponent(email.value.trim())}`)).username; } catch (_) { /* leave it */ }
+  };
+  const syncHint = () => { emailHint.textContent = needsEmail(role.value) ? 'Required for managers.' : 'Optional. They can sign in with either.'; };
+  staffSel.addEventListener('change', suggest); email.addEventListener('change', suggest); role.addEventListener('change', syncHint);
+  syncHint();
   const f = h('div', { class: 'form' },
-    field('Email', input({ name: 'email', type: 'email', required: true, autocomplete: 'off' })),
-    field('Temporary password', input({ name: 'password', type: 'text', required: true, minlength: 10, autocomplete: 'off' }), 'At least 10 characters. Tell them to change it after signing in.'),
-    field('Role', select(roleOptions(isOwner).map((r) => [r, label(r)]), 'staff', { name: 'role' })),
-    field('Staff record', select([['', 'Not linked'], ...staff.map((s) => [s.id, `${s.first_name} ${s.last_name}`])], '', { name: 'staff_id' })));
+    field('Staff record', staffSel, 'Linking lets them see their shifts and clock in'),
+    field('Username', uname, 'What they type to sign in. Letters, numbers, dots and dashes.'),
+    h('label', { class: 'field' }, 'Email', email, emailHint),
+    field('Role', role),
+    field('Temporary password', input({ name: 'password', type: 'text', required: true, minlength: 10, autocomplete: 'off' }), 'At least 10 characters. Tell them in person or by phone.'),
+    h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name: 'temporary', checked: true }), ' They choose their own password when they first sign in'));
   formDialog('Add a login', f, async (fd) => {
-    await post('/users', { email: val(fd, 'email'), password: fd.get('password'), role: val(fd, 'role'), staff_id: num(fd, 'staff_id') || undefined });
-    toast('Login created');
+    if (needsEmail(val(fd, 'role')) && !val(fd, 'email')) throw new Error('Managers need an email');
+    const r = await post('/users', { username: val(fd, 'username') || undefined, email: val(fd, 'email') || undefined, password: fd.get('password'), role: val(fd, 'role'), staff_id: num(fd, 'staff_id') || undefined, temporary: Boolean(fd.get('temporary')) });
+    toast(`Login created. They sign in as ${r.username}`);
     await done();
   }, { submitText: 'Create login' });
+  suggest();
+}
+
+function editLogin(u, done) {
+  formDialog(`Edit ${who(u)}`, h('div', { class: 'form' },
+    field('Username', input({ name: 'username', value: u.username || '', required: true, maxlength: 40, autocapitalize: 'none', spellcheck: 'false' }), 'Letters, numbers, dots and dashes'),
+    field('Email', input({ name: 'email', type: 'email', value: u.email || '' }), needsEmail(u.role) ? 'Required for managers.' : 'Optional. Leave blank if they have none.')), async (fd) => {
+    await patch(`/users/${u.id}`, { username: val(fd, 'username'), email: val(fd, 'email') });
+    toast('Saved');
+    await done();
+  });
 }
 
 function linkStaff(u, staff, done) {
-  formDialog(`Staff record for ${u.email}`, h('div', { class: 'form' },
+  formDialog(`Staff record for ${who(u)}`, h('div', { class: 'form' },
     field('Staff member', select([['', 'Not linked'], ...staff.map((s) => [s.id, `${s.first_name} ${s.last_name}`])], u.staff_id || '', { name: 'staff_id' }), 'Each staff member can have one login')), async (fd) => {
     await patch(`/users/${u.id}`, { staff_id: num(fd, 'staff_id') || null });
     toast('Saved');
@@ -95,7 +135,7 @@ function linkStaff(u, staff, done) {
 }
 
 function changeRole(u, isOwner, done) {
-  formDialog(`Role for ${u.email}`, h('div', { class: 'form' }, field('Role', select(roleOptions(isOwner).map((r) => [r, label(r)]), u.role, { name: 'role' }))), async (fd) => {
+  formDialog(`Role for ${who(u)}`, h('div', { class: 'form' }, field('Role', select(roleOptions(isOwner).map((r) => [r, label(r)]), u.role, { name: 'role' }))), async (fd) => {
     await patch(`/users/${u.id}`, { role: val(fd, 'role') });
     toast('Role changed. It applies right away');
     await done();
@@ -103,16 +143,17 @@ function changeRole(u, isOwner, done) {
 }
 
 function resetPassword(u) {
-  formDialog(`New password for ${u.email}`, h('div', { class: 'form' },
-    field('New password', input({ name: 'password', type: 'text', required: true, minlength: 10, autocomplete: 'off' }), 'They are signed out everywhere until they use it')), async (fd) => {
-    await post(`/users/${u.id}/reset-password`, { new_password: fd.get('password') });
-    toast('Password reset');
+  formDialog(`New password for ${who(u)}`, h('div', { class: 'form' },
+    field('New password', input({ name: 'password', type: 'text', required: true, minlength: 10, autocomplete: 'off' }), 'They are signed out everywhere until they use it. Tell them in person or by phone.'),
+    h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name: 'temporary', checked: true }), ' Temporary: they choose their own password when they next sign in')), async (fd) => {
+    await post(`/users/${u.id}/reset-password`, { new_password: fd.get('password'), temporary: Boolean(fd.get('temporary')) });
+    toast(`Password reset. They sign in as ${who(u)}`);
   }, { submitText: 'Reset password' });
 }
 
 function toggleActive(u, done) {
   const off = u.active;
-  confirmDialog(off ? 'Deactivate this login?' : 'Reactivate this login?', off ? `${u.email} is signed out immediately and cannot sign in.` : `${u.email} can sign in again.`, off ? 'Deactivate' : 'Reactivate', async () => {
+  confirmDialog(off ? 'Deactivate this login?' : 'Reactivate this login?', off ? `${who(u)} is signed out immediately and cannot sign in.` : `${who(u)} can sign in again.`, off ? 'Deactivate' : 'Reactivate', async () => {
     await patch(`/users/${u.id}`, { active: !off });
     toast(off ? 'Login deactivated' : 'Login reactivated');
     await done();
@@ -120,7 +161,7 @@ function toggleActive(u, done) {
 }
 
 function resetMfa(u, done) {
-  confirmDialog('Reset two-step sign-in?', `${u.email} will sign in with just their password until they set two-step up again. Do this when they have lost their phone and their recovery codes.`, 'Reset two-step', async () => {
+  confirmDialog('Reset two-step sign-in?', `${who(u)} will sign in with just their password until they set two-step up again. Do this when they have lost their phone and their recovery codes.`, 'Reset two-step', async () => {
     await post(`/users/${u.id}/reset-mfa`);
     toast('Two-step sign-in reset');
     await done();

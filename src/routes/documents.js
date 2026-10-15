@@ -53,7 +53,7 @@ async function needDocument(conn, req, id, level) {
   return d;
 }
 async function who(conn, req) {
-  const u = await one(conn, "SELECT COALESCE(NULLIF(CONCAT(p.first_name, ' ', p.last_name), ' '), u.email) AS name FROM users u LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id WHERE u.tenant_id = ? AND u.id = ?", [req.auth.tenantId, req.auth.userId]);
+  const u = await one(conn, "SELECT COALESCE(NULLIF(CONCAT(p.first_name, ' ', p.last_name), ' '), u.email, u.username) AS name FROM users u LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id WHERE u.tenant_id = ? AND u.id = ?", [req.auth.tenantId, req.auth.userId]);
   return u ? u.name : null;
 }
 const cleanName = (n) => String(n || 'file').replace(/[^\w.\- ()]/g, '_').slice(0, 150);
@@ -373,7 +373,7 @@ router.post('/documents/:id/accept', async (req, res) => {
 router.get('/documents/:id/acceptances', manager, async (req, res) => {
   const id = paramId(req);
   const d = await needDocument(pool, req, id, 'view');
-  const people = await rows(pool, `SELECT u.id AS user_id, u.email, u.role, COALESCE(NULLIF(CONCAT(p.first_name, ' ', p.last_name), ' '), u.email) AS name, a.accepted_at
+  const people = await rows(pool, `SELECT u.id AS user_id, u.email, u.role, COALESCE(NULLIF(CONCAT(p.first_name, ' ', p.last_name), ' '), u.email, u.username) AS name, a.accepted_at
       FROM users u LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id
       LEFT JOIN document_acks a ON a.tenant_id = u.tenant_id AND a.document_id = ? AND a.version = ? AND a.user_id = u.id
      WHERE u.tenant_id = ? AND u.active = 1

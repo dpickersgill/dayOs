@@ -10,7 +10,7 @@ const WORDING = 'v1';
 /** Adds a consent row. `by` is { userId, name } or null for something the guest did or a system step. */
 async function recordConsent(conn, tenantId, personId, channel, status, source, by) {
   let name = by ? by.name || null : null;
-  if (by && by.userId && !name) name = (await one(conn, 'SELECT email FROM users WHERE tenant_id = ? AND id = ?', [tenantId, by.userId]) || {}).email || null;
+  if (by && by.userId && !name) name = (await one(conn, 'SELECT COALESCE(email, username) AS email FROM users WHERE tenant_id = ? AND id = ?', [tenantId, by.userId]) || {}).email || null;
   await conn.query(
     'INSERT INTO consent_events (tenant_id, person_id, channel, status, source, wording, recorded_by, recorded_by_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     [tenantId, personId, channel, status, source, WORDING, by ? by.userId || null : null, name],

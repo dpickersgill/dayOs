@@ -144,7 +144,7 @@ router.get('/access-log', patrol, needs('view_access_log'), async (req, res) => 
   if (req.query.user_id) { where.push('a.user_id = ?'); params.push(Number(req.query.user_id)); }
   if (req.query.incident_id) { where.push("a.entity = 'incidents' AND a.entity_id = ?"); params.push(Number(req.query.incident_id)); }
   const limit = Math.min(Number(req.query.limit) || 200, 1000);
-  const data = await rows(pool, `SELECT a.id, a.at, a.action, a.entity, a.entity_id, a.detail, a.user_id, u.email AS user_email, i.season, i.seq
+  const data = await rows(pool, `SELECT a.id, a.at, a.action, a.entity, a.entity_id, a.detail, a.user_id, COALESCE(u.email, u.username) AS user_email, i.season, i.seq
                                  FROM audit_log a LEFT JOIN users u ON u.id = a.user_id AND u.tenant_id = a.tenant_id
                                  LEFT JOIN incidents i ON a.entity = 'incidents' AND i.id = a.entity_id AND i.tenant_id = a.tenant_id
                                  WHERE ${where.join(' AND ')} ORDER BY a.id DESC LIMIT ?`, [...params, limit]);
@@ -262,23 +262,23 @@ async function loadCase(conn, tenantId, id) {
   const incident = await one(conn, 'SELECT i.*, t.name AS trail FROM incidents i LEFT JOIN trails t ON t.id = i.trail_id AND t.tenant_id = i.tenant_id WHERE i.tenant_id = ? AND i.id = ?', [tenantId, id]);
   if (!incident) return null;
   const [notes, patients, events, responders, witnesses, signatures, collisionRow, parties, checklist, versions] = await Promise.all([
-    rows(conn, 'SELECT n.id, n.author_user, u.email AS author, n.body, n.created_at FROM incident_notes n LEFT JOIN users u ON u.id = n.author_user AND u.tenant_id = n.tenant_id WHERE n.tenant_id = ? AND n.incident_id = ? ORDER BY n.id', [tenantId, id]),
-    rows(conn, `SELECT p.*, vu.email AS voided_by_email FROM incident_patients p ${VOIDED_BY('p')} WHERE p.tenant_id = ? AND p.incident_id = ? ORDER BY p.id`, [tenantId, id]),
-    rows(conn, `SELECT e.id, e.kind, e.at, e.note, e.patient_id, e.entered_at, e.voided_at, e.void_reason, vu.email AS voided_by_email FROM incident_events e ${VOIDED_BY('e')} WHERE e.tenant_id = ? AND e.incident_id = ? ORDER BY e.at, e.id`, [tenantId, id]),
+    rows(conn, 'SELECT n.id, n.author_user, COALESCE(u.email, u.username) AS author, n.body, n.created_at FROM incident_notes n LEFT JOIN users u ON u.id = n.author_user AND u.tenant_id = n.tenant_id WHERE n.tenant_id = ? AND n.incident_id = ? ORDER BY n.id', [tenantId, id]),
+    rows(conn, `SELECT p.*, COALESCE(vu.email, vu.username) AS voided_by_email FROM incident_patients p ${VOIDED_BY('p')} WHERE p.tenant_id = ? AND p.incident_id = ? ORDER BY p.id`, [tenantId, id]),
+    rows(conn, `SELECT e.id, e.kind, e.at, e.note, e.patient_id, e.entered_at, e.voided_at, e.void_reason, COALESCE(vu.email, vu.username) AS voided_by_email FROM incident_events e ${VOIDED_BY('e')} WHERE e.tenant_id = ? AND e.incident_id = ? ORDER BY e.at, e.id`, [tenantId, id]),
     rows(conn, `SELECT r.id, r.staff_id, r.role, p.first_name, p.last_name, m.patrol_number, m.callsign FROM incident_responders r JOIN staff s ON s.id = r.staff_id AND s.tenant_id = r.tenant_id JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id LEFT JOIN patrol_members m ON m.staff_id = r.staff_id AND m.tenant_id = r.tenant_id WHERE r.tenant_id = ? AND r.incident_id = ? ORDER BY FIELD(r.role, 'lead', 'assist', 'transport', 'dispatch'), r.id`, [tenantId, id]),
     rows(conn, 'SELECT id, relation, name, phone, email, address, city, region, postal, statement FROM incident_witnesses WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]),
     rows(conn, 'SELECT id, patient_id, kind, signer_name, signer_role, signed_at FROM incident_signatures WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]),
     one(conn, 'SELECT * FROM incident_collisions WHERE tenant_id = ? AND incident_id = ?', [tenantId, id]),
     rows(conn, 'SELECT * FROM incident_parties WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]),
-    rows(conn, 'SELECT c.patient_id, c.item_key, c.done_at, u.email AS done_by FROM incident_checklist c LEFT JOIN users u ON u.id = c.done_by AND u.tenant_id = c.tenant_id WHERE c.tenant_id = ? AND c.incident_id = ? ORDER BY c.id', [tenantId, id]),
-    rows(conn, 'SELECT v.id, v.version_no, v.kind, v.created_at, u.email AS created_by FROM incident_versions v LEFT JOIN users u ON u.id = v.created_by AND u.tenant_id = v.tenant_id WHERE v.tenant_id = ? AND v.incident_id = ? ORDER BY v.version_no', [tenantId, id]),
+    rows(conn, 'SELECT c.patient_id, c.item_key, c.done_at, COALESCE(u.email, u.username) AS done_by FROM incident_checklist c LEFT JOIN users u ON u.id = c.done_by AND u.tenant_id = c.tenant_id WHERE c.tenant_id = ? AND c.incident_id = ? ORDER BY c.id', [tenantId, id]),
+    rows(conn, 'SELECT v.id, v.version_no, v.kind, v.created_at, COALESCE(u.email, u.username) AS created_by FROM incident_versions v LEFT JOIN users u ON u.id = v.created_by AND u.tenant_id = v.tenant_id WHERE v.tenant_id = ? AND v.incident_id = ? ORDER BY v.version_no', [tenantId, id]),
   ]);
   const ids = patients.map((p) => p.id);
   const byPatient = async (sql) => (ids.length ? rows(conn, sql, [tenantId, ids]) : []);
   const [vitals, injuries, treatments] = await Promise.all([
-    byPatient(`SELECT x.*, vu.email AS voided_by_email FROM incident_vitals x ${VOIDED_BY('x')} WHERE x.tenant_id = ? AND x.patient_id IN (?) ORDER BY x.taken_at, x.id`),
-    byPatient(`SELECT x.*, vu.email AS voided_by_email FROM incident_injuries x ${VOIDED_BY('x')} WHERE x.tenant_id = ? AND x.patient_id IN (?) ORDER BY x.id`),
-    byPatient(`SELECT x.*, vu.email AS voided_by_email, CONCAT(pp.first_name, ' ', pp.last_name) AS performed_by_name FROM incident_treatments x ${VOIDED_BY('x')}
+    byPatient(`SELECT x.*, COALESCE(vu.email, vu.username) AS voided_by_email FROM incident_vitals x ${VOIDED_BY('x')} WHERE x.tenant_id = ? AND x.patient_id IN (?) ORDER BY x.taken_at, x.id`),
+    byPatient(`SELECT x.*, COALESCE(vu.email, vu.username) AS voided_by_email FROM incident_injuries x ${VOIDED_BY('x')} WHERE x.tenant_id = ? AND x.patient_id IN (?) ORDER BY x.id`),
+    byPatient(`SELECT x.*, COALESCE(vu.email, vu.username) AS voided_by_email, CONCAT(pp.first_name, ' ', pp.last_name) AS performed_by_name FROM incident_treatments x ${VOIDED_BY('x')}
       LEFT JOIN staff st ON st.id = x.performed_by_staff AND st.tenant_id = x.tenant_id LEFT JOIN people pp ON pp.id = st.person_id AND pp.tenant_id = st.tenant_id
       WHERE x.tenant_id = ? AND x.patient_id IN (?) ORDER BY x.performed_at, x.id`),
   ]);
@@ -306,7 +306,7 @@ router.get('/incidents/:id', patrol, needs('view_cases'), async (req, res) => {
 /** The frozen copies kept each time the report was submitted or approved. */
 router.get('/incidents/:id/versions/:vid', patrol, needs('view_cases'), async (req, res) => {
   const id = paramId(req);
-  const v = await one(pool, 'SELECT v.id, v.version_no, v.kind, v.snapshot, v.created_at, u.email AS created_by FROM incident_versions v LEFT JOIN users u ON u.id = v.created_by AND u.tenant_id = v.tenant_id WHERE v.tenant_id = ? AND v.incident_id = ? AND v.id = ?', [req.auth.tenantId, id, paramId(req, 'vid')]);
+  const v = await one(pool, 'SELECT v.id, v.version_no, v.kind, v.snapshot, v.created_at, COALESCE(u.email, u.username) AS created_by FROM incident_versions v LEFT JOIN users u ON u.id = v.created_by AND u.tenant_id = v.tenant_id WHERE v.tenant_id = ? AND v.incident_id = ? AND v.id = ?', [req.auth.tenantId, id, paramId(req, 'vid')]);
   if (!v) throw notFound('Version');
   await audit(pool, req, 'view_version', 'incidents', id, { version: v.version_no });
   res.json({ id: v.id, version_no: v.version_no, kind: v.kind, created_at: v.created_at, created_by: v.created_by, case: JSON.parse(v.snapshot) });

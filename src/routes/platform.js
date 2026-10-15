@@ -239,7 +239,7 @@ router.get('/tenants/:id', async (req, res) => {
   if (!t) throw notFound('Mountain');
   M.invalidate(id);
   const used = await usage([id]);
-  const users = await rows(pool, "SELECT id, email, role, active, totp_enabled FROM users WHERE tenant_id = ? AND role IN ('owner','manager') ORDER BY role, email", [id]);
+  const users = await rows(pool, "SELECT id, email, username, role, active, totp_enabled FROM users WHERE tenant_id = ? AND role IN ('owner','manager') ORDER BY role, email", [id]);
   const history = await rows(pool, 'SELECT at, action, actor, detail FROM platform_audit WHERE tenant_id = ? ORDER BY id DESC LIMIT 30', [id]);
   res.json({ ...t, storage_used_mb: Math.round(((used.get(id) || 0) / 1048576) * 10) / 10, modules: await M.enabledKeys(id), users, history });
 });
@@ -257,7 +257,7 @@ router.post('/tenants', validate(z.object({
   const created = await tx(async (conn) => {
     const [t] = await conn.query('INSERT INTO tenants (slug, name, timezone, storage_cap_mb) VALUES (?, ?, ?, ?)', [b.slug, b.name, b.timezone, b.storage_cap_mb ?? 500]);
     const [p] = await conn.query('INSERT INTO people (tenant_id, first_name, last_name, email) VALUES (?, ?, ?, ?)', [t.insertId, b.owner.first_name, b.owner.last_name, b.owner.email]);
-    await conn.query('INSERT INTO users (tenant_id, person_id, email, password_hash, role) VALUES (?, ?, ?, ?, ?)', [t.insertId, p.insertId, b.owner.email, hash, 'owner']);
+    await conn.query('INSERT INTO users (tenant_id, person_id, email, username, password_hash, role) VALUES (?, ?, ?, ?, ?, ?)', [t.insertId, p.insertId, b.owner.email, require('../lib/usernames').suggestUsername(b.owner), hash, 'owner']);
     const on = M.apply({}, b.modules || {});
     for (const k of M.KEYS) await conn.query('INSERT INTO tenant_modules (tenant_id, module, enabled) VALUES (?, ?, ?)', [t.insertId, k, on.includes(k) ? 1 : 0]);
     await log(conn, req, t.insertId, 'create', { slug: b.slug, apps: on });
@@ -301,18 +301,18 @@ router.put('/tenants/:id/modules', validate(z.object({ modules: z.record(z.strin
 });
 
 /** Set a new password for one of a mountain's owner or manager logins. Signs that person out everywhere. */
-router.post('/tenants/:id/reset-password', validate(z.object({ user_id: z.number().int().positive(), password, clear_two_step: z.boolean().default(false) })), async (req, res) => {
+router.post('/tenants/:id/reset-password', validate(z.object({ user_id: z.number().int().positive(), password, clear_two_step: z.boolean().default(false), temporary: z.boolean().default(false) })), async (req, res) => {
   const id = paramId(req);
   const u = await one(pool, "SELECT id FROM users WHERE id = ? AND tenant_id = ? AND role IN ('owner','manager')", [req.body.user_id, id]);
   if (!u) throw notFound('Login');
   const hash = await bcrypt.hash(req.body.password, 12);
   await tx(async (conn) => {
-    await conn.query('UPDATE users SET password_hash = ?, password_changed_at = NOW() WHERE id = ? AND tenant_id = ?', [hash, u.id, id]);
+    await conn.query('UPDATE users SET password_hash = ?, password_changed_at = NOW(), must_change_password = ? WHERE id = ? AND tenant_id = ?', [hash, req.body.temporary ? 1 : 0, u.id, id]);
     if (req.body.clear_two_step) {
       await conn.query('UPDATE users SET totp_enabled = 0, totp_secret = NULL, totp_last_step = NULL WHERE id = ? AND tenant_id = ?', [u.id, id]);
       await conn.query('DELETE FROM user_recovery_codes WHERE user_id = ?', [u.id]);
     }
-    await log(conn, req, id, 'password_reset', { user_id: u.id, cleared_two_step: req.body.clear_two_step });
+    await log(conn, req, id, 'password_reset', { user_id: u.id, cleared_two_step: req.body.clear_two_step, temporary: req.body.temporary });
   });
   res.json({ ok: true });
 });

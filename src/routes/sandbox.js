@@ -60,7 +60,7 @@ router.post('/', validate(z.object({
   const created = await tx(async (conn) => {
     const [t] = await conn.query('INSERT INTO tenants (slug, name, timezone, storage_cap_mb, sandbox_expires_at) VALUES (?, ?, ?, ?, NOW() + INTERVAL ? DAY)', [slug, mountain, 'America/New_York', S.STORAGE_MB, S.DAYS]);
     const [p] = await conn.query('INSERT INTO people (tenant_id, first_name, last_name, email) VALUES (?, ?, ?, ?)', [t.insertId, first.slice(0, 100), (rest.join(' ') || 'Visitor').slice(0, 100), email]);
-    const [u] = await conn.query("INSERT INTO users (tenant_id, person_id, email, password_hash, role) VALUES (?, ?, ?, ?, 'owner')", [t.insertId, p.insertId, email, hash]);
+    const [u] = await conn.query("INSERT INTO users (tenant_id, person_id, email, username, password_hash, role) VALUES (?, ?, ?, ?, ?, 'owner')", [t.insertId, p.insertId, email, require('../lib/usernames').suggestUsername({ first_name: first, last_name: rest.join(' ') || 'Visitor', email }), hash]);
     // A demo shows everything, the paid add-ons included, so a visitor can see what they would be buying.
     for (const k of M.KEYS) await conn.query('INSERT INTO tenant_modules (tenant_id, module, enabled) VALUES (?, ?, ?)', [t.insertId, k, 1]);
     const [[exp]] = await conn.query('SELECT sandbox_expires_at AS e FROM tenants WHERE id = ?', [t.insertId]);

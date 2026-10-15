@@ -233,7 +233,7 @@ router.post('/features/:id/inspections', crew, validate(z.object({ result: z.enu
 });
 
 router.get('/features/:id/inspections', async (req, res) => {
-  res.json({ data: await rows(pool, `SELECT i.id, i.inspected_at, i.result, i.notes, u.email AS inspected_by FROM park_inspections i LEFT JOIN users u ON u.id = i.inspected_by AND u.tenant_id = i.tenant_id
+  res.json({ data: await rows(pool, `SELECT i.id, i.inspected_at, i.result, i.notes, COALESCE(u.email, u.username) AS inspected_by FROM park_inspections i LEFT JOIN users u ON u.id = i.inspected_by AND u.tenant_id = i.tenant_id
     WHERE i.tenant_id = ? AND i.feature_id = ? ORDER BY i.inspected_at DESC, i.id DESC LIMIT 100`, [req.auth.tenantId, paramId(req)]) });
 });
 
