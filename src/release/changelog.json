@@ -1,0 +1,49 @@
+{
+  "releases": [
+    {
+      "version": "2026.10.4",
+      "date": "2026-10-15",
+      "title": "Version numbers and What's new",
+      "notes": [
+        { "kind": "new", "app": null, "who": null, "text": "SummitOps now has a version number, shown in Help and in your account menu, so you can tell at a glance which version you are using.", "help": null },
+        { "kind": "new", "app": null, "who": null, "text": "Help has a What's new page listing each update. Only the changes for your role and your mountain's apps are shown, and a small badge on Help tells you when there is something new.", "help": null },
+        { "kind": "new", "app": null, "who": "platform", "text": "The console shows the version that is live and every version that has been deployed, with when it first started and who deployed it.", "help": null },
+        { "kind": "improved", "app": null, "who": "platform", "text": "deploy.sh says which version it is replacing, refuses to put an older version over a newer one (bash deploy.sh --allow-older to do it anyway), and checks that the new version is the one answering afterwards.", "help": null }
+      ]
+    },
+    {
+      "version": "2026.10.3",
+      "date": "2026-10-12",
+      "title": "Inbox and case review",
+      "notes": [
+        { "kind": "new", "app": null, "who": null, "text": "Inbox: send messages to one person or a group at your mountain, with links that open a customer, an order, a work order, a waiver, a document, an asset or a patrol case. Each person sees only the links their role can open.", "help": "inbox-start" },
+        { "kind": "new", "app": null, "who": null, "text": "A Share button on records sends a link to that record to someone in the Inbox.", "help": "inbox-share" },
+        { "kind": "new", "app": "patrol", "who": ["patrol"], "text": "Case review: when a patroller signs off a case, it goes to the review group (the Patrol Director and named backups), who approve it, send it back with comments or escalate it. The group chooses which kinds of case it reviews and gets a reminder after 72 hours.", "help": "patrol-review" }
+      ]
+    },
+    {
+      "version": "2026.10.2",
+      "date": "2026-10-11",
+      "title": "RFID cards and the injury network",
+      "notes": [
+        { "kind": "new", "app": "gate", "who": ["counter", "staff"], "text": "Gate: RFID cards. Load a pass onto a card, move it to a new card, and block a lost one. Cards are read by desk readers, by phone (NFC) or by camera.", "help": "gate-cards" },
+        { "kind": "new", "app": "gate", "who": null, "text": "Paired gates, turnstiles and handhelds check passes online and keep working from an offline list when the connection drops.", "help": "gate-devices" },
+        { "kind": "fixed", "app": "gate", "who": ["counter", "staff"], "text": "Two gates can no longer both let the same single-use ticket through, and a blocked card is always refused.", "help": null },
+        { "kind": "new", "app": "patrol", "who": ["patrol"], "text": "Injury network: mountains can choose to share de-identified injury counts and compare their numbers with similar mountains.", "help": "patrol-network" },
+        { "kind": "new", "app": null, "who": "platform", "text": "Guided tours walk new demo mountains through selling, the gate, patrol and more. The console has the network injury report.", "help": null }
+      ]
+    },
+    {
+      "version": "2026.10.1",
+      "date": "2026-10-09",
+      "title": "Waivers, the new case page, and assets",
+      "notes": [
+        { "kind": "new", "app": null, "who": ["counter", "instructor"], "text": "Waivers: guests sign on a phone or tablet, with guardians for minors. You can look up who has signed, and every signed copy keeps the exact wording it was signed against.", "help": "waiver-sign" },
+        { "kind": "new", "app": "patrol", "who": ["patrol"], "text": "A new patrol case page, with Care, Report and Record views, assessment tools, vitals, oxygen, medications, refusal and hand-off signatures. It saves on the phone when there is no signal.", "help": "patrol-case" },
+        { "kind": "new", "app": "assets", "who": ["staff"], "text": "Assets and fleet: one register for vehicles, lifts, snowmaking and buildings, with meters, fuel, inspections, service plans, parts, purchase orders, costs and QR labels.", "help": "assets-register" },
+        { "kind": "improved", "app": null, "who": null, "text": "Many small fixes and safety improvements from a full review of the app.", "help": null },
+        { "kind": "new", "app": null, "who": "platform", "text": "The database moved to Cloud SQL. Console operators sign in with their own email, password and authenticator, and the Demos page shows usage and lets you delete demos.", "help": null }
+      ]
+    }
+  ]
+}

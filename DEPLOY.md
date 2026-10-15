@@ -16,24 +16,48 @@ Run `npm run migrate` against the Aiven database (Cloud Shell works) before the 
 
 ## Updating (every new zip)
 
-Run these in Cloud Shell.
+Every zip is named after its version, for example `summitops-2026.10.4.zip` (see Versions, below). Run these in Cloud Shell.
 
 1. Unzip the newest zip into a clean folder:
    ```bash
    rm -rf ~/summitops-new && mkdir ~/summitops-new
-   unzip -oq "$(ls -t ~/summitops-rentals*.zip | head -1)" -d ~/summitops-new
+   unzip -oq "$(ls -t ~/summitops-2*.zip | head -1)" -d ~/summitops-new
    cd ~/summitops-new
    ```
-2. Run the deploy script. It installs, loads the database settings, migrates (and stops if that fails), deploys with
-   the right limits, and checks the new version:
+2. Check it is the version you expect:
+   ```bash
+   grep '"version"' package.json
+   ```
+3. Run the deploy script. It says which version it is replacing and refuses to put an older version over a newer one,
+   then installs, loads the database settings, migrates (and stops if that fails), deploys with the right limits, and
+   checks the new version is the one answering:
    ```bash
    bash deploy.sh
    ```
-   It ends with `Done. <address> is up and migrated.` If it stops earlier, nothing was deployed; send the last lines.
+   It ends with `Done. <address> is running <version>, migrated.` If it stops earlier, nothing was deployed; send the last lines.
 
 If it says you are not signed in, run `gcloud auth login`, then `gcloud config set project summitops-510715`, and run it again.
 
 `/readyz` answers `{"ok":false,"reason":"run npm run migrate"}` when a version is running against a database that was not migrated for it.
+`/version` answers with the version and build that is live, for example `{"version":"2026.10.4","build":"1a2b3c4"}`.
+
+## Versions
+
+Versions are calendar versions, YEAR.MONTH.N: `2026.10.4` is the fourth release of October 2026. The count starts
+again at 1 each month. The build is the short git commit the zip was made from.
+
+- The number is in `package.json` (and `package-lock.json`). Every zip that is deployed gets a new number.
+- Each release has an entry at the top of `src/release/changelog.json`, in plain words for the people who use the app.
+  Each note says its kind (`new`, `improved`, `fixed`), its app (or `null` for everyone) and who sees it (`null` for
+  every role, a list of roles, or `"platform"` for the console only). Owners and managers see every note for the apps
+  their mountain has. People see these in Help > What's new, and a small dot on Help tells them when there is
+  something new for them.
+- Making a zip: bump the version, add the change log entry, commit, then `node scripts/stamp-build.js` (writes
+  `src/release/build.json` and refuses if the change log has no entry for this version), then zip.
+- The app shows the version on the sign-in screen, in the account menu and at the foot of Help. The console's
+  **Releases** shows the live version, every version that has started (with who deployed it) and the full change log.
+- `deploy.sh` stops if the live site is newer than this folder. To go back to an older version on purpose (better: use
+  Rolling back, below, which needs no rebuild), run `bash deploy.sh --allow-older`.
 
 ## Rolling back
 

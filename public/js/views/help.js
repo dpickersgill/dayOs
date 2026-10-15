@@ -1,5 +1,6 @@
 // Help: short how-to articles for each app, searchable, shown only for what this person can use.
-import { h, clear, ctx, can, input, empty } from '../ui.js';
+import { h, clear, ctx, can, input, empty, errorBox, state, label } from '../ui.js';
+import { get, post } from '../api.js';
 import { SECTIONS, ARTICLES, articleById } from '../help-content.js';
 
 const ALWAYS_ON = ['start', 'dashboard', 'people', 'myshifts', 'settings'];
@@ -44,8 +45,42 @@ function home(root) {
     results.append(found.length ? h('ul', { class: 'help-results' }, found.map((a) => articleLink(a, true))) : empty('Nothing matches that. Try a shorter word, or look through the topics.'));
   };
   q.addEventListener('input', draw);
+  const news = h('a', { class: 'whatsnew-link', href: '#/help/whats-new' }, h('b', null, "What's new"), h('span', { class: 'muted' }, ' The latest changes to SummitOps'));
+  get('/whats-new/count').then((c) => { if (c.unseen) news.append(h('span', { class: 'new-pill' }, 'New')); }).catch(() => {});
   root.append(h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Help'), h('p', { class: 'muted' }, 'How to do things in SummitOps. You see what your role can use.'))),
-    h('div', { class: 'help-search' }, q), results, grid, stuck());
+    news, h('div', { class: 'help-search' }, q), results, grid, stuck(), versionLine());
+}
+
+/** "SummitOps 2026.10.4 (build ac9a72f)": the version this screen is running, for telling support or checking an update. */
+function versionLine() {
+  const line = h('p', { class: 'version-line muted small' });
+  fetch('/version').then((r) => r.json()).then((v) => { line.textContent = `SummitOps ${v.version}${v.build && v.build !== 'dev' ? ` (build ${v.build})` : ''}`; }).catch(() => {});
+  return line;
+}
+
+const KIND = { new: ['New', 'good'], improved: ['Improved', 'neutral'], fixed: ['Fixed', 'neutral'] };
+const newer = (a, b) => { const x = String(a).split('.').map(Number); const y = String(b || '0').split('.').map(Number); for (let i = 0; i < 3; i += 1) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
+const longDate = (d) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+
+/** Help > What's new: each release, newest first, with only the changes for this person's role and apps. Opening it clears the badge. */
+async function whatsNew(root) {
+  root.append(back('#/help', 'All help'), h('div', { class: 'page-head' }, h('div', null, h('h1', null, "What's new"), h('p', { class: 'muted' }, 'Changes to SummitOps, newest first. You see the ones for your role and the apps your mountain has.'))));
+  let w;
+  try { w = await get('/whats-new'); } catch (err) { root.append(errorBox(err)); return; }
+  // Highlight what arrived since this person last looked (someone who never looked: the newest release).
+  const isNew = (r, i) => (w.seen ? newer(r.version, w.seen) : i === 0) && w.unseen > 0;
+  if (!w.releases.length) root.append(empty('Nothing to show yet.'));
+  root.append(h('div', { class: 'releases' }, w.releases.map((r, i) => h('section', { class: `release${isNew(r, i) ? ' is-new' : ''}` },
+    h('header', null, h('h2', null, r.title || `Version ${r.version}`), h('p', { class: 'muted small' }, `Version ${r.version}, ${longDate(r.date)}`, isNew(r, i) ? h('span', { class: 'new-pill' }, 'New to you') : null)),
+    h('ul', { class: 'release-notes' }, r.notes.map((n) => {
+      const art = n.help ? articleById(n.help) : null;
+      const sec = n.app ? sectionOf(n.app) : null;
+      return h('li', null, state(KIND[n.kind] ? KIND[n.kind][0] : label(n.kind), KIND[n.kind] ? KIND[n.kind][1] : 'neutral'),
+        h('span', null, sec ? h('b', null, `${sec.label}: `) : null, n.text, art && articleOpen(art) ? [' ', h('a', { href: `#/help/${art.id}` }, 'How it works')] : null));
+    }))))), stuck(), versionLine());
+  if (w.unseen || w.seen !== w.version) {
+    post('/whats-new/seen').then(() => window.dispatchEvent(new Event('whatsnew:seen'))).catch(() => {});
+  }
 }
 
 function stuck() {
@@ -79,6 +114,7 @@ function article(root, id) {
 export async function render(root, params = []) {
   const [id] = params;
   if (!id) home(root);
+  else if (id === 'whats-new') await whatsNew(root);
   else if (id.startsWith('for-')) section(root, id.slice(4));
   else article(root, id);
 }

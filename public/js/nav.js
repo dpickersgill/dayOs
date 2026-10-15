@@ -42,6 +42,13 @@ const initials = (email) => String(email || '?').split('@')[0].split(/[._-]/).ma
  * Builds the page frame. views: [[key, label]] already filtered for this person.
  * Returns { shell, main, setCurrent(key), openPalette() }.
  */
+/** The version under Sign out in the account menu: "SummitOps 2026.10.4", linking to What's new. */
+function whoVersion() {
+  const a = h('a', { class: 'who-version', href: '#/help/whats-new' });
+  fetch('/version').then((r) => r.json()).then((v) => { if (v && v.version) a.textContent = `SummitOps ${v.version}`; }).catch(() => {});
+  return a;
+}
+
 export function buildFrame({ views, main, signOut }) {
   const byKey = new Map(views);
   const have = (k) => byKey.has(k);
@@ -90,7 +97,7 @@ export function buildFrame({ views, main, signOut }) {
   const out = h('button', { type: 'button', class: 'rail-out', title: 'Sign out' }, icon('signout', 18), h('span', { class: 'nav-label' }, 'Sign out'));
   out.addEventListener('click', () => signOut());
   // One account button replaces four stacked rows: it opens My shifts, Account, Help and Sign out.
-  const whoMenu = h('div', { class: 'who-menu', id: 'who-menu', hidden: true }, h('nav', { class: 'nav nav-personal', 'aria-label': 'Your pages' }, h('div', { class: 'nav-group' }, personal.map((k) => link(k)))), out);
+  const whoMenu = h('div', { class: 'who-menu', id: 'who-menu', hidden: true }, h('nav', { class: 'nav nav-personal', 'aria-label': 'Your pages' }, h('div', { class: 'nav-group' }, personal.map((k) => link(k)))), out, whoVersion());
   const whoBtn = h('button', { type: 'button', class: 'who', 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-controls': 'who-menu', title: ctx.me.email },
     h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(ctx.me.email)), h('span', { class: 'who-text' }, h('b', null, ctx.me.email), h('span', null, label(ctx.me.role))), icon('chevron', 14));
   const setWho = (open) => { whoMenu.hidden = !open; whoBtn.setAttribute('aria-expanded', String(open)); };
@@ -121,7 +128,7 @@ export function buildFrame({ views, main, signOut }) {
     const sheet = h('div', { class: 'dialog sheet menu-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'All pages' },
       h('header', null, h('h2', null, 'Go to'), closeBtn),
       items.map(([name, keys]) => h('div', { class: 'sheet-group' }, h('p', { class: 'nav-title' }, name),
-        h('div', { class: 'sheet-grid' }, keys.map((k) => { const a = h('a', { href: `#/${k}`, class: 'sheet-item', 'data-current': String(currentKey === k) }, icon(k, 22), h('span', null, byKey.get(k))); a.addEventListener('click', close); return a; })))),
+        h('div', { class: 'sheet-grid' }, keys.map((k) => { const a = h('a', { href: `#/${k}`, class: 'sheet-item', 'data-current': String(currentKey === k) }, icon(k, 22), h('span', null, byKey.get(k)), dots.has(k) ? h('span', { class: 'nav-badge dot', 'aria-label': 'new' }) : null); a.addEventListener('click', close); return a; })))),
       signOutBtn);
     const overlay = h('div', { class: 'overlay' }, sheet);
     function close() { overlay.remove(); document.removeEventListener('keydown', onKey); }
@@ -235,14 +242,27 @@ export function buildFrame({ views, main, signOut }) {
     const rec = [key, ...recent().filter((k) => k !== key)].slice(0, 5);
     write(RECENT_KEY, JSON.stringify(rec));
   }
-  /** A count on a page's menu links (unread messages on Inbox). 0 removes it. */
-  function setBadge(key, n) {
+  /**
+   * A count on a page's menu links (unread messages on Inbox). 0 removes it. With { dot: true } it is a small dot
+   * instead of a number (Help, when What's new has something): quiet, and repeated on the account button and the
+   * phone's More tab, since Help sits inside those.
+   */
+  const dots = new Set();
+  function setBadge(key, n, { dot = false, says = 'unread' } = {}) {
     for (const a of links.get(key) || []) {
       let b = a.querySelector('.nav-badge');
       if (!n) { if (b) b.remove(); a.removeAttribute('aria-description'); continue; }
       if (!b) { b = h('span', { class: 'nav-badge', 'aria-hidden': 'true' }); a.append(b); }
-      b.textContent = n > 99 ? '99+' : String(n);
-      a.setAttribute('aria-description', `${n} unread`);
+      b.classList.toggle('dot', dot);
+      b.textContent = dot ? '' : n > 99 ? '99+' : String(n);
+      a.setAttribute('aria-description', dot ? says : `${n} ${says}`);
+    }
+    if (personal.includes(key)) {
+      if (n) dots.add(key); else dots.delete(key);
+      for (const el of [whoBtn, more]) {
+        el.classList.toggle('has-new', dots.size > 0);
+        if (dots.size) el.setAttribute('aria-description', 'Something new in Help'); else el.removeAttribute('aria-description');
+      }
     }
   }
   return { shell, setCurrent, openPalette, setBadge };

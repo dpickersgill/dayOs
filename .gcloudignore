@@ -1,0 +1,9 @@
+# What `gcloud run deploy --source .` leaves out of the upload. Written out in full (instead of reading .gitignore)
+# so src/release/build.json, which git ignores, still goes up with the code.
+.gcloudignore
+.git
+.gitignore
+node_modules
+.env
+*.log
+test

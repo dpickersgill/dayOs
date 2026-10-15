@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One command for every update, run from the unzipped folder in Cloud Shell:   bash deploy.sh
-# It installs, loads the database settings, migrates (and stops if that fails), deploys with sensible limits, then
-# checks the new version is up and migrated. Nothing is deployed if any step fails.
+# It checks this folder is not older than what is live, installs, loads the database settings, migrates (and stops if
+# that fails), deploys with sensible limits, then checks the new version is the one answering and is migrated.
+# Nothing is deployed if any step fails. To go back to an older version on purpose:   bash deploy.sh --allow-older
 set -euo pipefail
 SERVICE=summitops-api
 REGION=us-east1
@@ -15,6 +16,12 @@ if ! gcloud auth print-access-token >/dev/null 2>&1; then
 fi
 # A new Cloud Shell session can forget the project, so set it every time.
 gcloud config set project summitops-510715 >/dev/null 2>&1
+
+step "Checking the version"
+NEW_VERSION="$(node -p "require('./package.json').version")"
+LIVE_URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')"
+LIVE_VERSION="$(curl -s --max-time 15 "$LIVE_URL/version" | jq -r '.version // empty' 2>/dev/null || true)"
+node scripts/check-version.js "$LIVE_VERSION" "$@"
 
 step "Installing"
 npm install --omit=dev --no-audit --no-fund
@@ -54,7 +61,7 @@ step "Deploying (this takes a few minutes)"
 # requests for the daily job, and a faster start. In season, add --min-instances=1 so the first guest never waits.
 gcloud run deploy "$SERVICE" --source . --region "$REGION" --quiet \
   --max-instances=4 --concurrency=40 --memory=1Gi --cpu-boost --timeout=900 \
-  --update-env-vars DB_POOL=8
+  --update-env-vars "DB_POOL=8,DEPLOYED_BY=$(gcloud config get-value account 2>/dev/null || echo unknown)"
 
 step "Checking the new version"
 URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')"
@@ -62,6 +69,7 @@ sleep 5
 OUT="$(curl -s "$URL/readyz" || true)"
 echo "$OUT"
 case "$OUT" in
-  *'"ok":true'*) echo "Done. $URL is up and migrated." ;;
+  *'"ok":true'*'"version":"'"$NEW_VERSION"'"'*) echo "Done. $URL is running $NEW_VERSION, migrated." ;;
+  *'"ok":true'*) echo "The site is up but is not answering as $NEW_VERSION yet. Wait a minute and run: curl -s $URL/version"; exit 1 ;;
   *) echo "The new version did not answer as expected. To go back, see DEPLOY.md, Rolling back."; exit 1 ;;
 esac

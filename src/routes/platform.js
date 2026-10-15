@@ -317,6 +317,14 @@ router.post('/tenants/:id/reset-password', validate(z.object({ user_id: z.number
   res.json({ ok: true });
 });
 
+// ---------------------------------------------------------------- releases: what is live, what was deployed, what changed
+router.get('/releases', async (_req, res) => {
+  const V = require('../lib/version');
+  let deploys = [];
+  try { deploys = await rows(pool, 'SELECT version, build, first_started_at, last_started_at, deployed_by FROM app_deploys ORDER BY first_started_at DESC LIMIT 100'); } catch (_) { /* not migrated yet */ }
+  res.json({ version: V.VERSION, build: V.BUILD, built_at: V.BUILT_AT, deploys, releases: V.RELEASES });
+});
+
 router.get('/audit', async (_req, res) => {
   res.json({ data: await rows(pool, 'SELECT a.at, a.action, a.actor, a.detail, t.slug FROM platform_audit a LEFT JOIN tenants t ON t.id = a.tenant_id ORDER BY a.id DESC LIMIT 100') });
 });

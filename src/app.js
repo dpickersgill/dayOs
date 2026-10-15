@@ -54,6 +54,8 @@ const finance = require('./routes/finance');
 const platform = require('./routes/platform');
 const sandboxRoutes = require('./routes/sandbox');
 const modules = require('./lib/modules');
+const release = require('./lib/version');
+const whatsNew = require('./routes/whatsnew');
 
 function createApp() {
   const app = express();
@@ -123,10 +125,14 @@ function createApp() {
     }
     // The database is reachable; is it migrated for this version?
     const { LATEST } = require('./schema');
-    const [r] = await pool.query('SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? LIMIT 1', [LATEST.table, LATEST.index]);
-    if (!r.length) return res.status(503).json({ ok: false, reason: 'run npm run migrate' });
-    return res.json({ ok: true });
+    const [r] = LATEST.column
+      ? await pool.query('SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? LIMIT 1', [LATEST.table, LATEST.column])
+      : await pool.query('SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? LIMIT 1', [LATEST.table, LATEST.index]);
+    if (!r.length) return res.status(503).json({ ok: false, reason: 'run npm run migrate', version: release.VERSION, build: release.BUILD });
+    return res.json({ ok: true, version: release.VERSION, build: release.BUILD });
   });
+  // Which version is running: open to anyone (the sign-in screen shows it, and deploy.sh reads it before deploying).
+  app.get('/version', (_req, res) => { res.set('Cache-Control', 'no-store'); res.json({ version: release.VERSION, build: release.BUILD, built_at: release.BUILT_AT }); });
 
   const api = express.Router();
   // Responses can hold guest and patient details: tell browsers and proxies never to keep a copy.
@@ -163,6 +169,7 @@ function createApp() {
   // Everything below requires a valid token; tenant comes from the token only.
   api.use(authenticate);
   api.use(modules.moduleGate);
+  api.use('/whats-new', whatsNew);
   api.use('/demo-tours', rateLimit({ windowMs: 60_000, max: 120 }), demoTours.router);
   // Per person, not per address: a mountain's staff usually share one internet address. Reads (the polling) are not counted.
   const inboxLimit = rateLimit({ windowMs: 60_000, max: Number(process.env.INBOX_RATE_LIMIT) || 120, message: 'Too many messages, slow down', keyOf: (req) => `${req.auth.tenantId}:${req.auth.userId}` });

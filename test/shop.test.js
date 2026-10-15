@@ -699,7 +699,10 @@ test('a card refund retried days later is not sent twice, and a guest who went b
 
 test('/readyz says the database is reachable and migrated', async () => {
   const r = await fetch(`${base}/readyz`);
-  assert.equal(r.status, 200); assert.deepEqual(await r.json(), { ok: true });
+  assert.equal(r.status, 200);
+  const body = await r.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.version, require('../package.json').version, 'it also says which version is running');
 });
 
 test('the simple /orders sale records tax and a payment, so it refunds in full', async () => {

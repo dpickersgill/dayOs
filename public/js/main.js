@@ -86,8 +86,14 @@ function showSignIn(message) {
     h('section', { class: 'signin-side' },
       h('div', null, h('p', { class: 'brand' }, h('strong', null, 'SummitOps')), h('h1', null, 'Run the mountain from one screen.'),
         h('p', null, 'Tickets, lifts, rentals, lessons, patrol and staff schedules for your mountain.')), ridge()),
-    h('section', { class: 'signin-form' }, h('h2', null, 'Sign in'), message ? h('p', { class: 'muted', role: 'status' }, message) : null, form)));
+    h('section', { class: 'signin-form' }, h('h2', null, 'Sign in'), message ? h('p', { class: 'muted', role: 'status' }, message) : null, form, signInVersion())));
   (slug.value ? email : slug).focus();
+}
+
+function signInVersion() {
+  const p = h('p', { class: 'signin-version' });
+  fetch('/version').then((r) => r.json()).then((v) => { if (v && v.version) p.textContent = `Version ${v.version}`; }).catch(() => {});
+  return p;
 }
 
 /** Password was right and the login has two-step sign-in: ask for the six-digit code (or a recovery code). */
@@ -142,7 +148,14 @@ function buildShell() {
   app.append(frame.shell);
   if (ctx.me.sandbox) app.append(demoPill(ctx.me.sandbox));
   refreshUnread();
+  refreshWhatsNew();
 }
+
+// The quiet dot on Help when What's new has changes for this person: checked when the app opens, cleared when they look.
+async function refreshWhatsNew() {
+  try { const { unseen } = await get('/whats-new/count'); if (frame && frame.setBadge) frame.setBadge('help', unseen, { dot: true, says: 'new' }); } catch (_) { /* no dot */ }
+}
+window.addEventListener('whatsnew:seen', () => { if (frame && frame.setBadge) frame.setBadge('help', 0, { dot: true }); });
 
 // The unread count on Inbox: checked every 30 seconds while signed in, and straight away when a conversation is read.
 let unreadTimer = null;

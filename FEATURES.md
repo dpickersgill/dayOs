@@ -53,6 +53,14 @@ The side menu has Today at the top and five groups (Front desk, Mountain, Safety
 - The articles are plain data in `public/js/help-content.js` (a section per app, then articles with `steps`, `tips` and `related`). To add or change one, edit that file; `test/help.test.js` checks that ids are unique, links point at real articles and every section is a real screen.
 - No server or database changes.
 
+### Versions and What's new
+Every release has a calendar version (YEAR.MONTH.N, for example 2026.10.4) and a build (the git commit). The version shows on the sign-in screen, in the account menu and at the foot of Help; `/version` and `/readyz` report it.
+- **Help > What's new** lists each release, newest first, with only the notes for the person's role and the apps their mountain has on. Releases that hold nothing for them are left out.
+- A small dot on Help (and on the account button, and the phone's More tab) means there is something new since they last looked. Opening What's new clears it. Someone who has never opened it sees the dot for the newest release only. Stored per login in `users.seen_version`.
+- The notes live in `src/release/changelog.json`; `test/release.test.js` checks it is well formed, newest first, and matches `package.json`.
+- The console's **Releases** shows the live version, the deploy history (`app_deploys`: each version and build, first and last start, who deployed it) and every note, including console-only ones.
+- `deploy.sh` refuses to deploy an older version over a newer one unless given `--allow-older`, and checks afterwards that the new version is the one answering.
+
 ### API overview (`/api/v1`)
 
 | Area | Endpoints |

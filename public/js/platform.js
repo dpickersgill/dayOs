@@ -107,7 +107,7 @@ async function home() {
   const filter = input({ type: 'search', placeholder: 'Find a mountain', 'aria-label': 'Find a mountain' });
   app.append(h('main', { class: 'platform-box wide stack' },
     h('header', { class: 'row between' }, h('h1', null, 'Mountains'),
-      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), button('Demos', () => demos(), { small: true }), button('Injury report', () => injuryReport(), { small: true }), button('Activity', () => activity(), { small: true }), button('Operators', () => operators(), { small: true }), me.operator ? button('Change my password', () => myPassword(), { small: true }) : null, button('Sign out', () => signIn('Signed out.'), { small: true }))),
+      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), button('Demos', () => demos(), { small: true }), button('Injury report', () => injuryReport(), { small: true }), button('Releases', () => releases(), { small: true }), button('Activity', () => activity(), { small: true }), button('Operators', () => operators(), { small: true }), me.operator ? button('Change my password', () => myPassword(), { small: true }) : null, button('Sign out', () => signIn('Signed out.'), { small: true }))),
     filter, body));
   try {
     const { data: all } = await call('GET', '/tenants');
@@ -310,6 +310,24 @@ async function demos() {
       summary.running ? button('Delete every demo', () => confirmDialog('Delete every demo?', `All ${res.active} demo mountain${res.active === 1 ? '' : 's'} are removed now, including ones people are using. Their usage stays on this page.`, 'Delete all demos', async () => {
         try { const r = await call('POST', '/sandboxes/remove-all'); toast(`${r.removed} demo${r.removed === 1 ? '' : 's'} deleted.`); demos(); } catch (e) { fail(e); }
       }, { danger: true }), { small: true, kind: 'danger' }) : null));
+}
+
+/** What is live, every version that has started, and the full change log (including the notes only the console sees). */
+async function releases() {
+  try {
+    const r = await call('GET', '/releases');
+    const when = (v) => (v ? String(v).replace('T', ' ').slice(0, 16) : '');
+    const who = { null: 'Everyone', platform: 'Console only' };
+    dialog('Releases', h('div', { class: 'stack' },
+      h('p', null, h('b', null, `Live: ${r.version}`), ` build ${r.build}${r.built_at ? `, made ${when(r.built_at)}` : ''}`),
+      h('h3', null, 'Deploy history'),
+      r.deploys.length ? table([{ head: 'Version', cell: (d) => h('b', null, d.version) }, { head: 'Build', cell: (d) => d.build }, { head: 'First started', cell: (d) => when(d.first_started_at) }, { head: 'Last started', cell: (d) => when(d.last_started_at) }, { head: 'Deployed by', cell: (d) => d.deployed_by || '' }], r.deploys)
+        : empty('Nothing recorded yet. Each version is recorded when it first starts.'),
+      h('h3', null, 'Change log'),
+      ...r.releases.map((x) => h('section', { class: 'stack tight' }, h('h4', null, `${x.version}, ${x.date}${x.title ? `: ${x.title}` : ''}`),
+        table([{ head: 'Kind', cell: (n) => n.kind }, { head: 'App', cell: (n) => n.app || '' }, { head: 'Who sees it', cell: (n) => (Array.isArray(n.who) ? n.who.join(', ') : who[String(n.who)]) }, { head: 'Note', cell: (n) => n.text }], x.notes)))),
+    { wide: true });
+  } catch (ex) { fail(ex); }
 }
 
 async function activity() {

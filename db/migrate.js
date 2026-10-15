@@ -375,6 +375,7 @@ const gateSteps = [
   ['incidents review columns', (c) => columnExists(c, 'incidents', 'review_round'), 'ALTER TABLE incidents ADD COLUMN review_round SMALLINT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN returned_at DATETIME NULL, ADD COLUMN returned_by BIGINT UNSIGNED NULL, ADD COLUMN escalated_at DATETIME NULL, ADD COLUMN escalated_by BIGINT UNSIGNED NULL, ADD COLUMN escalation_note VARCHAR(1000) NULL, ADD COLUMN last_nudge_at DATETIME NULL'],
   ['incidents waiting for review', (c) => indexExists(c, 'incidents', 'ix_incidents_review'), 'ALTER TABLE incidents ADD KEY ix_incidents_review (tenant_id, report_state, submitted_at)'],
   ['chat_members.visible_from_id', (c) => columnExists(c, 'chat_members', 'visible_from_id'), 'ALTER TABLE chat_members ADD COLUMN visible_from_id BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER last_read_id'],
+  ['users.seen_version', (c) => columnExists(c, 'users', 'seen_version'), 'ALTER TABLE users ADD COLUMN seen_version VARCHAR(20) NULL'],
 ];
 
 async function backfillCaseNumbers(conn) {
@@ -426,6 +427,7 @@ async function main() {
   await conn.query(fs.readFileSync(path.join(__dirname, 'safety.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'inbox.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'review.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'release.sql'), 'utf8'));
   let applied = 0;
   for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps]) {
     if (await done(conn)) continue;
