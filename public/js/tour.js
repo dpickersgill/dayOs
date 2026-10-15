@@ -71,7 +71,7 @@ export const TOURS = [
     id: 'staff', title: 'Staff schedule and time clock', minutes: 3,
     blurb: 'Build the week, publish it, and clock in at the kiosk.',
     steps: [
-      { route: '#/workforce', at: '.page-head h1', title: 'The week', body: 'Every shift for the week, by day. Certifications are checked as you schedule: a lift operator without a current cert is flagged.' },
+      { route: '#/workforce', at: '.page-head h1', title: 'The week', body: 'The week as a grid: people down the side, days across. Click a shift to change it, or an empty day to add one. The person picker puts first whoever can work it, and says why anyone else cannot (a missing certification, a clash, their availability).' },
       { at: 'button.btn', text: 'Add shift', title: 'Add a shift', body: 'Pick the person, the position and the hours.' },
       { at: 'button.btn', text: 'Publish this week', title: 'Publish', body: 'Publishing sends staff their shifts. Until then, the week is a draft only managers see.' },
       { at: 'button', text: 'Time clock kiosk', click: true, title: 'The time clock', body: 'Click Time clock kiosk. A tablet at the staff entrance becomes a time clock: staff clock in with a PIN.' },

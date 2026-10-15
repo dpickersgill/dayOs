@@ -1,262 +1,151 @@
-import { get, post, put, patch, del } from '../api.js';
-import { h, clear, table, state, input, select, field, button, toast, formDialog, confirmDialog, dialog, tabs, val, num, todayStr, addDays, weekStart, fmtDate, fmtDateLong, fmtTime, fmtDateTime, dayOf, label, empty, errorBox } from '../ui.js';
-import { availabilityDialog } from './myshifts.js';
-import { drawKiosk } from './kiosk-admin.js';
+// Staff and schedule: the week as a grid of people by day (one day at a time on a phone), hours worked and approval,
+// the staff list with a page for each person, and setup (positions, certifications, templates, the time clock kiosk).
+import { get } from '../api.js';
+import { h, clear, select, button, tabs, todayStr, addDays, weekStart, label, empty, errorBox } from '../ui.js';
+import { hm, spanShort, minutes, hrs, dayShort, dayLong, weekLabel, weekDays, DEPARTMENTS, fullName } from './workforce-common.js';
+import { shiftDialog, copyWeek, templatesDialog, publishWeek, staffingNeeds } from './workforce-shift.js';
+import { drawHours } from './workforce-hours.js';
+import { drawStaff, personPage } from './workforce-staff.js';
+import { drawSetup } from './workforce-setup.js';
 
-const DEPARTMENTS = ['lifts', 'rentals', 'ski_school', 'patrol', 'food', 'guest_services', 'grooming', 'maintenance', 'admin'];
-const STAFF_STATUS = ['applicant', 'onboarding', 'active', 'inactive'];
-const fullName = (s) => `${s.first_name} ${s.last_name}`;
+const OVERTIME = 40 * 60;
 
-export async function render(root) {
+export async function render(root, params = []) {
+  if (params[0] === 'staff' && /^\d+$/.test(params[1] || '')) { await personPage(root, Number(params[1])); return; }
+  const initial = ['hours', 'staff', 'setup'].includes(params[0]) ? params[0] : 'schedule';
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Staff and schedule')),
-    tabs([['schedule', 'Schedule', drawSchedule], ['staff', 'Staff', drawStaff], ['positions', 'Positions and certifications', drawPositions], ['time', 'Hours worked', drawTime], ['kiosk', 'Time clock kiosk', drawKiosk]]));
+    tabs([['schedule', 'Schedule', drawSchedule], ['hours', 'Hours', drawHours], ['staff', 'Staff', drawStaff], ['setup', 'Setup', drawSetup]], initial));
 }
 
-// ---------------------------------------------------------------- schedule
+// ---------------------------------------------------------------- the week
 async function drawSchedule(box) {
-  let start = weekStart(todayStr());
-  const [positions, staff] = await Promise.all([get('/workforce/positions?limit=500'), get('/workforce/staff?status=active')]);
-  const body = h('div');
-  const label_ = h('h2');
-  const nav = h('div', { class: 'week-nav' },
-    button('Previous week', () => { start = addDays(start, -7); return load(); }, { small: true }),
-    button('This week', () => { start = weekStart(todayStr()); return load(); }, { small: true }),
-    button('Next week', () => { start = addDays(start, 7); return load(); }, { small: true }), label_);
-  const tools = h('div', { class: 'row' },
-    button('Add shift', () => addShift(positions.data, staff.data, start, load), { kind: 'primary' }),
-    button('Publish this week', () => publish(start, load)),
-    button('Staffing needs', () => needs(start)));
-  clear(box).append(h('div', { class: 'stack' }, nav, tools, body));
+  const today = todayStr();
+  let start = weekStart(today);
+  let dept = '';
+  let phoneDay = today;
+  let showIdle = false;
+  const { data: positions } = await get('/workforce/positions?limit=500');
+  const head = h('div', { class: 'sched-head' });
+  const body = h('div', { class: 'sched-body' });
+  clear(box).append(head, body);
 
   async function load() {
-    const end = addDays(start, 6);
-    label_.textContent = `${fmtDate(start)} to ${fmtDate(end)}`;
-    clear(body).append(h('p', { class: 'loading' }, 'Loading…'));
+    clear(body).append(h('p', { class: 'loading' }, 'Loading the week…'));
     try {
-      const { data } = await get(`/workforce/shifts?from=${start}&to=${end}`);
-      clear(body);
-      if (!data.length) { body.append(empty('No shifts this week. Add the first one.')); return; }
-      const draft = data.filter((s) => s.status === 'draft').length;
-      const unfilled = data.filter((s) => !s.staff_id).length;
-      body.append(h('p', { class: 'muted' }, `${data.length} shifts, ${unfilled} unfilled, ${draft} not yet published.`));
-      for (let i = 0; i < 7; i++) {
-        const d = addDays(start, i);
-        const day = data.filter((s) => dayOf(s.starts_at) === d);
-        if (!day.length) continue;
-        body.append(h('div', { class: 'day-block' }, h('h3', null, fmtDateLong(d)), table([
-          { head: 'Time', cell: (s) => `${fmtTime(s.starts_at)} to ${fmtTime(s.ends_at)}` },
-          { head: 'Position', cell: (s) => h('span', null, h('strong', null, s.position), h('span', { class: 'muted' }, `  ${label(s.department)}`)) },
-          { head: 'Assigned', cell: (s) => (s.staff_id ? `${s.first_name} ${s.last_name}` : state('Unfilled', 'warn')) },
-          { head: 'Status', cell: (s) => state(label(s.status), s.status === 'published' ? 'good' : 'neutral') },
-          { head: '', actions: true, cell: (s) => [
-            button(s.staff_id ? 'Change' : 'Assign', () => assign(s, staff.data, load), { small: true }),
-            button('Cancel shift', () => confirmDialog('Cancel this shift?', `${s.position}, ${fmtDateTime(s.starts_at)}.`, 'Cancel shift', async () => { await del(`/workforce/shifts/${s.id}`); toast('Shift cancelled'); await load(); }, { danger: true }), { small: true, kind: 'danger' }),
-          ] },
-        ], day, { rowClass: (s) => (s.staff_id ? null : 'attention') })));
-      }
+      const [{ data: shifts }, { data: staff }] = await Promise.all([
+        get(`/workforce/shifts?from=${start}&to=${addDays(start, 6)}`),
+        get('/workforce/staff?status=active'),
+      ]);
+      draw(shifts, staff);
     } catch (err) { clear(body).append(errorBox(err)); }
   }
+  const go = (d) => { start = d; if (!weekDays(start).includes(phoneDay)) phoneDay = start; return load(); };
+
+  function draw(all, staff) {
+    const days = weekDays(start);
+    const shifts = dept ? all.filter((s) => s.department === dept) : all;
+    const drafts = all.filter((s) => s.status === 'draft').length;
+    const unfilled = shifts.filter((s) => !s.staff_id);
+    const open = (s) => shiftDialog({ shift: s, positions, onDone: load });
+    const add = (date, staffId) => shiftDialog({ date, staffId, positions, onDone: load });
+
+    // ---- header: week, then actions
+    clear(head).append(
+      h('div', { class: 'week-bar' },
+        h('div', { class: 'week-nav' },
+          h('button', { type: 'button', class: 'btn small icon-btn', 'aria-label': 'Previous week', onclick: () => go(addDays(start, -7)) }, '‹'),
+          h('h2', { class: 'week-title' }, weekLabel(start)),
+          h('button', { type: 'button', class: 'btn small icon-btn', 'aria-label': 'Next week', onclick: () => go(addDays(start, 7)) }, '›'),
+          start !== weekStart(today) ? button('This week', () => go(weekStart(today)), { small: true }) : null),
+        h('div', { class: 'week-actions' },
+          button('Add shift', () => add(days.includes(today) ? today : start, null), { kind: 'primary' }),
+          button('Copy last week', () => copyWeek(start, load)),
+          button('Templates', () => templatesDialog(start, load)),
+          button('Staffing needs', () => staffingNeeds(start, today)),
+          drafts ? button(`Publish ${drafts} draft${drafts === 1 ? '' : 's'}`, () => publishWeek(start, drafts, load), { kind: 'primary' }) : null)),
+      h('div', { class: 'week-filter' },
+        (() => { const s = select([['', 'All departments'], ...DEPARTMENTS.map((d) => [d, label(d)])], dept, { 'aria-label': 'Department' }); s.addEventListener('change', () => { dept = s.value; draw(all, staff); }); return s; })(),
+        h('p', { class: 'muted' }, shifts.length ? [`${shifts.length} shift${shifts.length === 1 ? '' : 's'}`, unfilled.length ? `${unfilled.length} unfilled` : 'all filled', drafts ? `${drafts} not published yet` : 'all published'].join(', ') : '')));
+
+    if (!all.length) {
+      clear(body).append(empty(`Nothing scheduled for ${weekLabel(start)}.`, h('div', { class: 'row' },
+        button('Add shift', () => add(days.includes(today) ? today : start, null), { kind: 'primary' }), button('Copy last week', () => copyWeek(start, load)), button('Templates', () => templatesDialog(start, load)))));
+      return;
+    }
+
+    // ---- who is on what
+    const byPerson = new Map();
+    for (const s of shifts) if (s.staff_id) { const k = Number(s.staff_id); if (!byPerson.has(k)) byPerson.set(k, []); byPerson.get(k).push(s); }
+    const weekMin = new Map();
+    for (const s of all) if (s.staff_id) weekMin.set(Number(s.staff_id), (weekMin.get(Number(s.staff_id)) || 0) + minutes(s.starts_at, s.ends_at));
+    const people = staff.map((p) => ({ ...p, id: Number(p.id) }));
+    // people on a shift this week who are not active any more still show, so their shifts are not hidden
+    for (const s of shifts) if (s.staff_id && !people.some((p) => p.id === Number(s.staff_id))) people.push({ id: Number(s.staff_id), first_name: s.first_name, last_name: s.last_name, positions: [] });
+    const working = people.filter((p) => byPerson.has(p.id)).sort((a, b) => fullName(a).localeCompare(fullName(b)));
+    const idle = people.filter((p) => !byPerson.has(p.id) && (!dept || (p.positions || []).some((x) => positions.find((q) => q.id === x.id && q.department === dept))));
+
+    const block = (s, showName) => h('button', {
+      type: 'button', class: `shift-block${s.status === 'draft' ? ' is-draft' : ''}${s.staff_id ? '' : ' is-open'}`, 'data-dept': s.department,
+      'aria-label': `${s.position}, ${dayLong(s.starts_at.slice(0, 10))}, ${hm(s.starts_at)} to ${hm(s.ends_at)}, ${s.staff_id ? `${s.first_name} ${s.last_name}` : 'unfilled'}${s.status === 'draft' ? ', draft' : ''}`,
+      onclick: () => open(s),
+    }, h('b', null, spanShort(s.starts_at, s.ends_at)), h('span', null, showName && s.staff_id ? `${s.first_name} ${s.last_name}` : s.position),
+    showName && s.staff_id ? h('span', { class: 'sb-sub' }, s.position) : null,
+    s.status === 'draft' || s.notes ? h('span', { class: 'sb-sub' }, [s.status === 'draft' ? 'Draft' : null, s.notes].filter(Boolean).join('. ')) : null);
+    const cellAdd = (d, p) => h('button', { type: 'button', class: 'cell-add', 'aria-label': `Add a shift${p ? ` for ${fullName(p)}` : ''} on ${dayLong(d)}`, onclick: () => add(d, p ? p.id : null) }, '+');
+
+    // ---- the grid (wide screens)
+    const grid = h('div', { class: 'sched-grid', role: 'table', 'aria-label': `Schedule for ${weekLabel(start)}` });
+    grid.append(h('div', { class: 'sg-row sg-headrow', role: 'row' },
+      h('div', { class: 'sg-name', role: 'columnheader' }, 'Person'),
+      ...days.map((d) => {
+        const n = shifts.filter((s) => s.starts_at.startsWith(d));
+        const open_ = n.filter((s) => !s.staff_id).length;
+        return h('div', { class: `sg-day${d === today ? ' is-today' : ''}`, role: 'columnheader' }, h('b', null, `${dayShort(d)} ${Number(d.slice(8))}`), h('small', null, n.length ? `${n.length} shift${n.length === 1 ? '' : 's'}${open_ ? `, ${open_} open` : ''}` : 'None'));
+      }),
+      h('div', { class: 'sg-hours', role: 'columnheader' }, 'Hours')));
+    if (unfilled.length) {
+      grid.append(h('div', { class: 'sg-row sg-open', role: 'row' },
+        h('div', { class: 'sg-name', role: 'rowheader' }, h('b', null, 'Unfilled'), h('small', null, `${unfilled.length} to fill`)),
+        ...days.map((d) => h('div', { class: 'sg-cell', role: 'cell' }, unfilled.filter((s) => s.starts_at.startsWith(d)).map((s) => block(s, false)))),
+        h('div', { class: 'sg-hours', role: 'cell' })));
+    }
+    const personRow = (p) => {
+      const mine = byPerson.get(p.id) || [];
+      const m = weekMin.get(p.id) || 0;
+      return h('div', { class: 'sg-row', role: 'row' },
+        h('div', { class: 'sg-name', role: 'rowheader' }, h('a', { href: `#/workforce/staff/${p.id}` }, fullName(p)), h('small', null, (p.positions || []).map((x) => x.name).join(', '))),
+        ...days.map((d) => h('div', { class: 'sg-cell', role: 'cell' }, mine.filter((s) => s.starts_at.startsWith(d)).map((s) => block(s, false)), cellAdd(d, p))),
+        h('div', { class: `sg-hours${m > OVERTIME ? ' is-over' : ''}`, role: 'cell', title: m > OVERTIME ? 'Over 40 hours: overtime' : '' }, m ? hrs(m) : ''));
+    };
+    grid.append(...working.map(personRow));
+    if (idle.length) {
+      grid.append(h('div', { class: 'sg-row sg-toggle', role: 'row' }, h('div', { role: 'cell' },
+        h('button', { type: 'button', class: 'linkish', 'aria-expanded': String(showIdle), onclick: () => { showIdle = !showIdle; draw(all, staff); } },
+          showIdle ? `Hide the ${idle.length} not scheduled` : `Show ${idle.length} more ${idle.length === 1 ? 'person' : 'people'} not scheduled this week`))));
+      if (showIdle) grid.append(...idle.sort((a, b) => fullName(a).localeCompare(fullName(b))).map(personRow));
+    }
+
+    // ---- one day at a time (phones)
+    const phone = h('div', { class: 'sched-phone' });
+    const dayShifts = shifts.filter((s) => s.starts_at.startsWith(phoneDay));
+    phone.append(h('div', { class: 'day-strip', role: 'tablist', 'aria-label': 'Day' }, ...days.map((d) => {
+      const n = shifts.filter((s) => s.starts_at.startsWith(d));
+      return h('button', { type: 'button', role: 'tab', 'aria-selected': String(d === phoneDay), class: d === today ? 'is-today' : null, onclick: () => { phoneDay = d; draw(all, staff); } },
+        h('span', null, dayShort(d)), h('b', null, String(Number(d.slice(8)))), h('small', { class: n.some((s) => !s.staff_id) ? 'has-open' : null }, n.length ? String(n.length) : ''));
+    })), h('h3', { class: 'day-title' }, dayLong(phoneDay)));
+    if (!dayShifts.length) phone.append(empty('No shifts this day.', button('Add shift', () => add(phoneDay, null), { kind: 'primary' })));
+    else {
+      const open_ = dayShifts.filter((s) => !s.staff_id);
+      if (open_.length) phone.append(h('p', { class: 'day-group' }, `Unfilled (${open_.length})`), h('div', { class: 'day-list' }, open_.map((s) => block(s, false))));
+      const filled = dayShifts.filter((s) => s.staff_id).sort((a, b) => a.starts_at.localeCompare(b.starts_at) || a.position.localeCompare(b.position));
+      if (filled.length) phone.append(h('p', { class: 'day-group' }, `On shift (${filled.length})`), h('div', { class: 'day-list' }, filled.map((s) => block(s, true))));
+      phone.append(h('div', { class: 'row' }, button('Add shift', () => add(phoneDay, null), { small: true })));
+    }
+
+    clear(body).append(h('div', { class: 'sched-wide' }, grid), phone,
+      h('p', { class: 'muted small sched-key' }, 'A dashed outline is a draft that staff cannot see yet. Hours over 40 in a week are marked as overtime.'));
+  }
+
   await load();
 }
 
-function staffOptions(staff, blank) {
-  return [...(blank ? [['', blank]] : []), ...staff.map((s) => [s.id, fullName(s)])];
-}
-
-function addShift(positions, staff, start, done) {
-  if (!positions.length) { toast('Add a position first, on the Positions tab', 'error'); return; }
-  const f = h('div', { class: 'form' },
-    field('Position', select(positions.map((p) => [p.id, `${p.name} (${label(p.department)})`]), positions[0].id, { name: 'position_id' })),
-    field('Starts', input({ type: 'datetime-local', name: 'starts_at', value: `${todayStr()}T08:00`, required: true })),
-    field('Ends', input({ type: 'datetime-local', name: 'ends_at', value: `${todayStr()}T16:00`, required: true })),
-    field('Assign now', select(staffOptions(staff, 'Leave unfilled'), '', { name: 'staff_id' })),
-    h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'override' }), 'Allow outside their availability'));
-  formDialog('Add a shift', f, async (fd) => {
-    await post('/workforce/shifts', { position_id: num(fd, 'position_id'), starts_at: val(fd, 'starts_at'), ends_at: val(fd, 'ends_at'), staff_id: num(fd, 'staff_id') || undefined, override_availability: Boolean(fd.get('override')) });
-    toast('Shift added as a draft');
-    await done();
-  }, { submitText: 'Add shift' });
-}
-
-function assign(shift, staff, done) {
-  const f = h('div', { class: 'stack' },
-    field('Who', select(staffOptions(staff, 'Nobody (unassign)'), shift.staff_id || '', { name: 'staff_id' })),
-    h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'override' }), 'Allow outside their availability'),
-    h('p', { class: 'muted small' }, 'Certifications, overlapping shifts and lessons are always checked.'));
-  formDialog(`${shift.position}, ${fmtDateTime(shift.starts_at)}`, f, async (fd) => {
-    await patch(`/workforce/shifts/${shift.id}/assign`, { staff_id: num(fd, 'staff_id') || null, override_availability: Boolean(fd.get('override')) });
-    toast('Shift updated');
-    await done();
-  }, { submitText: 'Save' });
-}
-
-function publish(start, done) {
-  const end = addDays(start, 6);
-  confirmDialog('Publish this week?', `Every draft shift from ${fmtDate(start)} to ${fmtDate(end)} becomes visible to staff.`, 'Publish', async () => {
-    const out = await post('/workforce/shifts/publish', { from: start, to: end });
-    toast(`${out.published} shift${out.published === 1 ? '' : 's'} published`);
-    await done();
-  });
-}
-
-async function needs(start) {
-  const date = input({ type: 'date', value: todayStr() });
-  const forecast = input({ type: 'number', min: 0, placeholder: 'Use tickets sold' });
-  const out = h('div');
-  async function run() {
-    clear(out);
-    try {
-      const q = `date=${date.value}${forecast.value !== '' ? `&forecast=${forecast.value}` : ''}`;
-      const r = await get(`/workforce/staffing-suggestion?${q}`);
-      out.append(h('p', { class: 'muted' }, `${r.forecast_visits} expected guests (${r.basis === 'override' ? 'your number' : 'tickets already sold for this day'}).`),
-        r.data.length ? table([
-          { head: 'Position', cell: (p) => p.position },
-          { head: 'Needed', num: true, cell: (p) => String(p.suggested) },
-          { head: 'Scheduled', num: true, cell: (p) => String(p.scheduled) },
-          { head: 'Gap', num: true, cell: (p) => (p.gap > 0 ? state(`${p.gap} short`, 'warn') : state('Covered', 'good')) },
-        ], r.data) : empty('No positions have "guests per staff member" set yet. Set it on the Positions tab.'));
-    } catch (err) { out.append(errorBox(err)); }
-  }
-  dialog('Staffing needs for a day', [h('div', { class: 'inline-form' }, field('Day', date), field('Expected guests', forecast), button('Check', run, { kind: 'primary' })), out], { wide: true });
-}
-
-// ---------------------------------------------------------------- staff
-async function drawStaff(box) {
-  const [{ data }, expiring, certs] = await Promise.all([get('/workforce/staff'), get('/workforce/certifications-expiring?days=45'), get('/workforce/certifications?limit=500')]);
-  const reload = async () => { const n = h('div'); await drawStaff(n); clear(box).append(...n.childNodes); };
-  const parts = [h('div', { class: 'row' }, button('Add staff member', () => addStaff(reload), { kind: 'primary' }))];
-  if (expiring.data.length) {
-    parts.push(h('section', { class: 'section' }, h('header', null, h('h2', null, 'Certifications expiring within 45 days')),
-      table([{ head: 'Person', cell: (r) => `${r.first_name} ${r.last_name}` }, { head: 'Certification', cell: (r) => r.certification }, { head: 'Expires', cell: (r) => fmtDate(r.expires_on) }], expiring.data)));
-  }
-  parts.push(data.length ? table([
-    { head: 'Name', cell: (s) => h('strong', null, fullName(s)) },
-    { head: 'Contact', cell: (s) => [s.email, s.phone].filter(Boolean).join('  ') },
-    { head: 'Status', cell: (s) => state(label(s.status), s.status === 'active' ? 'good' : 'neutral') },
-    { head: 'Housing', cell: (s) => (s.needs_housing ? 'Needs housing' : '') },
-    { head: '', actions: true, cell: (s) => [
-      button('Status', () => setStatus(s, reload), { small: true }),
-      button('Certifications', () => staffCerts(s, certs.data), { small: true }),
-      button('Availability', () => availabilityDialog(s.id, fullName(s)), { small: true }),
-    ] },
-  ], data) : empty('No staff yet. Add your first team member.'));
-  clear(box).append(h('div', { class: 'stack' }, parts));
-}
-
-function addStaff(done) {
-  const f = h('div', { class: 'form' },
-    field('First name', input({ name: 'first', required: true })), field('Last name', input({ name: 'last', required: true })),
-    field('Email', input({ name: 'email', type: 'email' })), field('Phone', input({ name: 'phone', type: 'tel' })),
-    field('Status', select(STAFF_STATUS, 'onboarding', { name: 'status' })), field('Hired on', input({ name: 'hired_on', type: 'date' })),
-    h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'housing' }), 'Needs staff housing'));
-  formDialog('Add a staff member', f, async (fd) => {
-    await post('/workforce/staff', { person: { first_name: val(fd, 'first'), last_name: val(fd, 'last'), email: val(fd, 'email') || undefined, phone: val(fd, 'phone') || undefined }, status: val(fd, 'status'), hired_on: val(fd, 'hired_on') || undefined, needs_housing: Boolean(fd.get('housing')) });
-    toast('Staff member added');
-    await done();
-  }, { submitText: 'Add' });
-}
-
-function setStatus(s, done) {
-  formDialog(`Status for ${fullName(s)}`, h('div', { class: 'form' },
-    field('Status', select(STAFF_STATUS, s.status, { name: 'status' })),
-    h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'housing', checked: Boolean(s.needs_housing) }), 'Needs staff housing')), async (fd) => {
-    await patch(`/workforce/staff/${s.id}`, { status: val(fd, 'status'), needs_housing: Boolean(fd.get('housing')) });
-    toast('Saved');
-    await done();
-  });
-}
-
-async function staffCerts(s, certs) {
-  const list = h('div');
-  async function load() {
-    const { data } = await get(`/workforce/staff/${s.id}/certifications`);
-    clear(list).append(data.length ? table([
-      { head: 'Certification', cell: (c) => c.name }, { head: 'Issued', cell: (c) => (c.issued_on ? fmtDate(c.issued_on) : '') }, { head: 'Expires', cell: (c) => (c.expires_on ? fmtDate(c.expires_on) : 'No expiry') },
-    ], data) : h('p', { class: 'muted' }, 'No certifications recorded.'));
-  }
-  const cert = select(certs.map((c) => [c.id, c.name]), certs[0] && certs[0].id, { name: 'cert' });
-  const issued = input({ type: 'date' });
-  const expires = input({ type: 'date' });
-  const add = button('Save certification', async () => {
-    if (!certs.length) throw new Error('Add certification types on the Positions tab first');
-    await put(`/workforce/staff/${s.id}/certifications`, { certification_id: Number(cert.value), issued_on: issued.value || undefined, expires_on: expires.value || null });
-    toast('Certification saved');
-    await load();
-  }, { kind: 'primary' });
-  dialog(`Certifications for ${fullName(s)}`, [list, h('h3', null, 'Add or renew'), h('div', { class: 'form' }, field('Certification', cert), field('Issued', issued), field('Expires', expires)), h('div', { class: 'row' }, add)], { wide: true });
-  await load();
-}
-
-// ---------------------------------------------------------------- positions and certification types
-async function drawPositions(box) {
-  const [positions, certs] = await Promise.all([get('/workforce/positions?limit=500'), get('/workforce/certifications?limit=500')]);
-  const reload = async () => { const n = h('div'); await drawPositions(n); clear(box).append(...n.childNodes); };
-  clear(box).append(h('div', { class: 'stack' },
-    h('section', null, h('header', { class: 'spread' }, h('h2', null, 'Positions'), button('Add position', () => editPosition(null, reload), { kind: 'primary', small: true })),
-      positions.data.length ? table([
-        { head: 'Position', cell: (p) => h('strong', null, p.name) }, { head: 'Department', cell: (p) => label(p.department) },
-        { head: 'Guests per staff member', num: true, cell: (p) => (p.visits_per_staff ? String(p.visits_per_staff) : '') },
-        { head: '', actions: true, cell: (p) => [button('Edit', () => editPosition(p, reload), { small: true }), button('Required certifications', () => requirements(p, certs.data), { small: true })] },
-      ], positions.data) : empty('No positions yet, such as Lift operator or Rental tech.')),
-    h('section', { class: 'section' }, h('header', { class: 'spread' }, h('h2', null, 'Certification types'), button('Add certification', () => addCert(reload), { small: true })),
-      certs.data.length ? table([{ head: 'Name', cell: (c) => c.name }], certs.data) : empty('No certification types yet, such as Outdoor emergency care.'))));
-}
-
-function editPosition(p, done) {
-  formDialog(p ? `Edit ${p.name}` : 'Add a position', h('div', { class: 'form' },
-    field('Name', input({ name: 'name', required: true, value: p ? p.name : '' })),
-    field('Department', select(DEPARTMENTS, p ? p.department : 'lifts', { name: 'department' })),
-    field('Guests per staff member', input({ name: 'visits', type: 'number', min: 1, value: p && p.visits_per_staff ? p.visits_per_staff : '' }), 'Used to suggest how many people to schedule')), async (fd) => {
-    const body = { name: val(fd, 'name'), department: val(fd, 'department'), visits_per_staff: num(fd, 'visits') };
-    if (p) await patch(`/workforce/positions/${p.id}`, body); else await post('/workforce/positions', body);
-    toast('Position saved');
-    await done();
-  });
-}
-function addCert(done) {
-  formDialog('Add a certification type', h('div', { class: 'form' }, field('Name', input({ name: 'name', required: true, maxlength: 100 }))), async (fd) => {
-    await post('/workforce/certifications', { name: val(fd, 'name') });
-    toast('Certification added');
-    await done();
-  });
-}
-function requirements(p, certs) {
-  if (!certs.length) { toast('Add certification types first', 'error'); return; }
-  const boxes = certs.map((c) => ({ c, cb: h('input', { type: 'checkbox' }) }));
-  const save = button('Save requirements', async () => {
-    await put(`/workforce/positions/${p.id}/requirements`, { certification_ids: boxes.filter((b) => b.cb.checked).map((b) => b.c.id) });
-    toast('Requirements saved');
-    dlg.close();
-  }, { kind: 'primary' });
-  const dlg = dialog(`Required for ${p.name}`, [
-    h('p', { class: 'muted' }, 'Tick every certification this position needs. Saving replaces the earlier list. Leave all unticked for none.'),
-    h('div', { class: 'checks' }, boxes.map((b) => h('label', { class: 'check' }, b.cb, b.c.name))), h('div', { class: 'footer row' }, save)]);
-}
-
-// ---------------------------------------------------------------- hours
-async function drawTime(box) {
-  const from = input({ type: 'date', value: addDays(todayStr(), -14) });
-  const to = input({ type: 'date', value: todayStr() });
-  const staff = (await get('/workforce/staff')).data;
-  const names = new Map(staff.map((s) => [s.id, fullName(s)]));
-  const out = h('div');
-  async function load() {
-    clear(out);
-    try {
-      const { data } = await get(`/workforce/time/entries?from=${from.value}&to=${to.value}`);
-      if (!data.length) { out.append(empty('No time entries in this range.')); return; }
-      const totals = new Map();
-      for (const e of data) totals.set(e.staff_id, (totals.get(e.staff_id) || 0) + Number(e.minutes));
-      const hrs = (m) => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
-      out.append(h('h3', null, 'Totals'), table([{ head: 'Person', cell: (r) => names.get(r[0]) || `Staff #${r[0]}` }, { head: 'Hours', num: true, cell: (r) => hrs(r[1]) }], [...totals.entries()]),
-        h('h3', null, 'Entries'), table([
-          { head: 'Person', cell: (e) => names.get(e.staff_id) || `Staff #${e.staff_id}` },
-          { head: 'In', cell: (e) => fmtDateTime(e.clock_in) },
-          { head: 'Out', cell: (e) => (e.clock_out ? fmtDateTime(e.clock_out) : state('Still clocked in', 'good')) },
-          { head: 'Hours', num: true, cell: (e) => hrs(Number(e.minutes)) },
-        ], data));
-    } catch (err) { out.append(errorBox(err)); }
-  }
-  clear(box).append(h('div', { class: 'stack' }, h('div', { class: 'inline-form' }, field('From', from), field('To', to), button('Show', load, { kind: 'primary' })), out));
-  await load();
-}

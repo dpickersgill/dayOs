@@ -3,9 +3,15 @@ import { h, clear, table, state, input, select, field, button, toast, dialog, fm
 
 export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-/** Weekly availability editor. The API only replaces the whole pattern, so this says so. */
-export function availabilityDialog(staffId, name) {
+/**
+ * Weekly availability editor. It opens with what is saved (saving replaces the whole pattern, so it must start from it),
+ * and an empty pattern means "can work any time".
+ */
+export async function availabilityDialog(staffId, name, onSaved) {
+  const { windows: saved } = await get(`/workforce/staff/${staffId}/availability`);
   const rows = h('div', { class: 'stack' });
+  const none = h('p', { class: 'muted' }, 'No windows: can be scheduled any time.');
+  const sync = () => { none.hidden = rows.children.length > 0; };
   const addRow = (w = { weekday: 1, start_time: '08:00', end_time: '17:00' }) => {
     const day = select(WEEKDAYS.map((d, i) => [i, d]), w.weekday, { 'aria-label': 'Day' });
     const s = input({ type: 'time', value: String(w.start_time).slice(0, 5), 'aria-label': 'From' });
@@ -13,20 +19,23 @@ export function availabilityDialog(staffId, name) {
     const rm = h('button', { type: 'button', class: 'btn small' }, 'Remove');
     const row = h('div', { class: 'inline-form' }, field('Day', day), field('From', s), field('Until', e), rm);
     row.get = () => ({ weekday: Number(day.value), start_time: s.value, end_time: e.value });
-    rm.addEventListener('click', () => row.remove());
+    rm.addEventListener('click', () => { row.remove(); sync(); });
     rows.append(row);
+    sync();
   };
-  addRow();
+  saved.forEach((w) => addRow(w));
+  sync();
   const save = button('Save availability', async () => {
     const windows = [...rows.children].map((r) => r.get());
     for (const w of windows) if (!w.start_time || !w.end_time || w.end_time <= w.start_time) throw new Error('Each window needs a start before its end');
     await put(`/workforce/staff/${staffId}/availability`, { windows });
     toast('Availability saved');
     dlg.close();
+    if (onSaved) await onSaved();
   }, { kind: 'primary' });
   const dlg = dialog(`Weekly availability${name ? ` for ${name}` : ''}`, [
-    h('p', { class: 'muted' }, 'Add every window you can work each week. Saving replaces the whole pattern you had before. Leave it empty to say you can work any time.'),
-    rows, h('div', { class: 'row' }, button('Add a window', () => addRow(), { small: true })), h('div', { class: 'footer row' }, save)], { wide: true });
+    h('p', { class: 'muted' }, 'The times in each week this person can work. Shifts outside them are flagged when scheduling (a manager can still choose them). Dates marked open on Instructor availability count too.'),
+    none, rows, h('div', { class: 'row' }, button('Add a window', () => addRow(), { small: true })), h('div', { class: 'footer row' }, save)], { wide: true });
 }
 
 export async function render(root) {

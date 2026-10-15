@@ -222,7 +222,7 @@ test('workforce: certification gating, overlap and availability checks', async (
   const sug = await api('GET', `/workforce/staffing-suggestion?date=${tomorrow}&forecast=450`, { token: A.token });
   const row = sug.body.data.find((d) => d.position_id === ctx.liftPos);
   assert.equal(row.suggested, 5); // ceil(450 / 100)
-  assert.ok(row.scheduled >= 3);
+  assert.ok(row.scheduled + row.unfilled >= 3); // filled shifts count as staffed; empty ones are listed apart
   const unfilled = await api('GET', `/workforce/shifts?from=${tomorrow}&to=${tomorrow}&unfilled=true`, { token: A.token });
   assert.equal(unfilled.body.data.length, 1);
 });

@@ -189,6 +189,7 @@ function createApp() {
   api.use('/rentals', rentals);
   api.use('/schedule', schedule);
   api.use('/workforce', workforce);
+  api.use('/workforce', require('./routes/workforcetime'));
   api.use('/kiosk-admin', kiosk.adminRouter);
   api.use('/skischool', skischool);
   api.use('/skischool', schoolplus);

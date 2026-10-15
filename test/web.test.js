@@ -2576,7 +2576,7 @@ test('assets and fleet: every tab draws, an asset is added, inspected (a failure
 test('kiosk admin: add a tablet, set a PIN, print a badge, snapshots and fixing a punch', skip(), async () => {
   const o = T.owner;
   const root = await renderView('workforce', 'owner', o, {});
-  await openTab(root, 'Time clock kiosk');
+  await openTab(root, 'Setup');
   clean(root, 'kiosk tab');
   assert.ok(root.querySelector('[data-kiosk=tablets]') && root.querySelector('[data-kiosk=people]') && root.querySelector('[data-kiosk=settings]'));
 

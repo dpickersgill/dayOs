@@ -9,7 +9,8 @@ const { notFound, conflict, bad, forbidden } = require('../lib/errors');
 const { staffProblems } = require('../lib/workforce');
 const { audit } = require('../lib/audit');
 const { tenantOf, localTime } = require('../lib/kiosk');
-const { dayRange } = require('../lib/util');
+const { dayRange, addDays, nowIn, todayIn } = require('../lib/util');
+const SH = require('../lib/shifts');
 
 const router = express.Router();
 const mgr = ['manager'];
@@ -40,6 +41,26 @@ router.use('/positions', crud({ table: 'positions', entity: 'Position', createSc
 
 const certFields = { name: z.string().min(1).max(100) };
 router.use('/certifications', crud({ table: 'certifications', entity: 'Certification', createSchema: z.object(certFields), updateSchema: partialOf(certFields), columns: ['name'], orderBy: 'name', readRoles: ['staff', 'counter', 'instructor', 'patrol'], writeRoles: mgr }));
+
+/** What a position requires, read before it is edited (saving replaces the list, so the form must start from it). */
+router.get('/positions/:id/requirements', requireRole(...mgr), async (req, res) => {
+  const pid = paramId(req);
+  if (!(await one(pool, 'SELECT id FROM positions WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, pid]))) throw notFound('Position');
+  const r = await rows(pool, 'SELECT certification_id FROM position_certifications WHERE tenant_id = ? AND position_id = ?', [req.auth.tenantId, pid]);
+  res.json({ certification_ids: r.map((x) => Number(x.certification_id)) });
+});
+
+/** Positions with what each requires and who is trained for it, for the Setup tab. */
+router.get('/positions-overview', requireRole(...mgr), async (req, res) => {
+  const t = req.auth.tenantId;
+  const [positions, reqs, trained] = await Promise.all([
+    rows(pool, 'SELECT id, name, department, visits_per_staff FROM positions WHERE tenant_id = ? ORDER BY department, name', [t]),
+    rows(pool, 'SELECT pc.position_id, c.id, c.name FROM position_certifications pc JOIN certifications c ON c.tenant_id = pc.tenant_id AND c.id = pc.certification_id WHERE pc.tenant_id = ? ORDER BY c.name', [t]),
+    rows(pool, "SELECT sp.position_id, COUNT(*) AS n FROM staff_positions sp JOIN staff s ON s.tenant_id = sp.tenant_id AND s.id = sp.staff_id AND s.status = 'active' WHERE sp.tenant_id = ? GROUP BY sp.position_id", [t]),
+  ]);
+  const n = new Map(trained.map((r) => [Number(r.position_id), Number(r.n)]));
+  res.json({ data: positions.map((p) => ({ ...p, requires: reqs.filter((r) => Number(r.position_id) === Number(p.id)).map((r) => ({ id: Number(r.id), name: r.name })), trained: n.get(Number(p.id)) || 0 })) });
+});
 
 router.put('/positions/:id/requirements', requireRole(...mgr), validate(z.object({ certification_ids: z.array(z.number().int().positive()).max(20) })), async (req, res) => {
   const pid = paramId(req);
@@ -87,32 +108,106 @@ router.post(
 );
 
 router.get('/staff', requireRole(...mgr), async (req, res) => {
+  const t = req.auth.tenantId;
   const where = ['s.tenant_id = ?'];
-  const params = [req.auth.tenantId];
-  if (req.query.status) {
-    where.push('s.status = ?');
-    params.push(String(req.query.status));
+  const params = [t];
+  if (req.query.status) { where.push('s.status = ?'); params.push(String(req.query.status)); }
+  if (req.query.q) {
+    const q = `%${String(req.query.q).trim().replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+    where.push("(CONCAT(p.first_name, ' ', p.last_name) LIKE ? OR p.email LIKE ? OR p.phone LIKE ?)"); params.push(q, q, q);
   }
+  if (req.query.position_id) { where.push('EXISTS (SELECT 1 FROM staff_positions sp WHERE sp.tenant_id = s.tenant_id AND sp.staff_id = s.id AND sp.position_id = ?)'); params.push(Number(req.query.position_id)); }
   const data = await rows(
     pool,
-    `SELECT s.*, p.first_name, p.last_name, p.email, p.phone FROM staff s JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id
+    `SELECT s.*, p.first_name, p.last_name, p.email, p.phone, (SELECT u.email FROM users u WHERE u.tenant_id = s.tenant_id AND u.staff_id = s.id AND u.active = 1 ORDER BY u.id LIMIT 1) AS login_email
+     FROM staff s JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id
      WHERE ${where.join(' AND ')} ORDER BY p.last_name, p.first_name LIMIT 500`,
     params,
   );
-  res.json({ data });
+  const pos = await rows(pool, 'SELECT sp.staff_id, pos.id, pos.name FROM staff_positions sp JOIN positions pos ON pos.tenant_id = sp.tenant_id AND pos.id = sp.position_id WHERE sp.tenant_id = ? ORDER BY pos.name', [t]);
+  const by = new Map();
+  for (const r of pos) { const k = Number(r.staff_id); if (!by.has(k)) by.set(k, []); by.get(k).push({ id: Number(r.id), name: r.name }); }
+  res.json({ data: data.map((r) => ({ ...r, positions: by.get(Number(r.id)) || [] })) });
+});
+
+/** One person: everything about them in one place, whichever app they work in (one roster). */
+router.get('/staff/:id', requireRole(...mgr), async (req, res) => {
+  const t = req.auth.tenantId;
+  const id = paramId(req);
+  const s = await one(pool, 'SELECT s.*, p.first_name, p.last_name, p.email, p.phone FROM staff s JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id WHERE s.tenant_id = ? AND s.id = ?', [t, id]);
+  if (!s) throw notFound('Staff member');
+  const tz = (await tenantOf(pool, t)).timezone;
+  const now = nowIn(tz);
+  const week = SH.weekOf(todayIn(tz));
+  const [positions, certs, windows, login, patrol, instructor, openDates, upcoming, future, worked] = await Promise.all([
+    rows(pool, 'SELECT pos.id, pos.name, pos.department FROM staff_positions sp JOIN positions pos ON pos.tenant_id = sp.tenant_id AND pos.id = sp.position_id WHERE sp.tenant_id = ? AND sp.staff_id = ? ORDER BY pos.name', [t, id]),
+    rows(pool, 'SELECT c.id, c.name, sc.issued_on, sc.expires_on FROM staff_certifications sc JOIN certifications c ON c.id = sc.certification_id AND c.tenant_id = sc.tenant_id WHERE sc.tenant_id = ? AND sc.staff_id = ? ORDER BY c.name', [t, id]),
+    rows(pool, 'SELECT weekday, start_time, end_time FROM availability WHERE tenant_id = ? AND staff_id = ? ORDER BY weekday, start_time', [t, id]),
+    one(pool, 'SELECT id, email, role FROM users WHERE tenant_id = ? AND staff_id = ? AND active = 1 ORDER BY id LIMIT 1', [t, id]),
+    one(pool, 'SELECT level, callsign FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [t, id]),
+    one(pool, 'SELECT is_public, display_name, disciplines, levels FROM instructor_profiles WHERE tenant_id = ? AND staff_id = ?', [t, id]),
+    rows(pool, 'SELECT open_date, start_time, end_time FROM instructor_open WHERE tenant_id = ? AND staff_id = ? AND open_date >= ? ORDER BY open_date, start_time LIMIT 10', [t, id, now.slice(0, 10)]),
+    rows(pool, "SELECT s.id, s.starts_at, s.ends_at, s.status, pos.name AS position FROM shifts s JOIN positions pos ON pos.tenant_id = s.tenant_id AND pos.id = s.position_id WHERE s.tenant_id = ? AND s.staff_id = ? AND s.status <> 'cancelled' AND s.ends_at >= ? ORDER BY s.starts_at LIMIT 20", [t, id, now]),
+    one(pool, "SELECT COUNT(*) AS n FROM shifts WHERE tenant_id = ? AND staff_id = ? AND status <> 'cancelled' AND starts_at >= ?", [t, id, now]),
+    rows(pool, 'SELECT clock_in, clock_out FROM time_entries WHERE tenant_id = ? AND staff_id = ? AND clock_in >= ? AND clock_in < ?', [t, id, dayRange(tz, week)[0], dayRange(tz, addDays(week, 6))[1]]),
+  ]);
+  const scheduled = (await SH.weekMinutes(pool, t, week)).get(id) || 0;
+  const workedMin = worked.reduce((n, e) => n + SH.minutesBetween(e.clock_in, e.clock_out || nowIn('UTC')), 0);
+  res.json({
+    ...s, positions, certifications: certs, availability: windows, login: login || null,
+    patrol: patrol || null, instructor: instructor ? { ...instructor, open_dates: openDates } : null,
+    upcoming, future_shifts: Number(future.n), week: { start: week, scheduled_minutes: scheduled, worked_minutes: workedMin },
+  });
+});
+
+router.put('/staff/:id/positions', requireRole(...mgr), validate(z.object({ position_ids: z.array(z.number().int().positive()).max(50) })), async (req, res) => {
+  const t = req.auth.tenantId;
+  const id = paramId(req);
+  await tx(async (conn) => {
+    if (!(await one(conn, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ?', [t, id]))) throw notFound('Staff member');
+    const ids = [...new Set(req.body.position_ids)];
+    if (ids.length && (await rows(conn, 'SELECT id FROM positions WHERE tenant_id = ? AND id IN (?)', [t, ids])).length !== ids.length) throw bad('Unknown position');
+    await conn.query('DELETE FROM staff_positions WHERE tenant_id = ? AND staff_id = ?', [t, id]);
+    for (const pid of ids) await conn.query('INSERT INTO staff_positions (tenant_id, staff_id, position_id) VALUES (?, ?, ?)', [t, id, pid]);
+    await audit(conn, req, 'set_positions', 'staff', id, { position_ids: ids });
+  });
+  res.json({ ok: true });
 });
 
 router.patch(
   '/staff/:id',
   requireRole(...mgr),
-  validate(z.object({ status: z.enum(['applicant', 'onboarding', 'active', 'inactive']).optional(), hired_on: dateStr.nullable().optional(), needs_housing: z.boolean().optional() }).transform((v) => ({ ...v, needs_housing: v.needs_housing === undefined ? undefined : v.needs_housing ? 1 : 0 }))),
+  validate(z.object({
+    status: z.enum(['applicant', 'onboarding', 'active', 'inactive']).optional(), hired_on: dateStr.nullable().optional(), needs_housing: z.boolean().optional(),
+    first_name: z.string().trim().min(1).max(100).optional(), last_name: z.string().trim().min(1).max(100).optional(),
+    email: z.string().trim().email().max(255).nullable().optional().or(z.literal('').transform(() => null)), phone: z.string().trim().max(40).nullable().optional(),
+  })),
   async (req, res) => {
-    const set = setClause(req.body, ['status', 'hired_on', 'needs_housing']);
-    if (!set) throw bad('No updatable fields supplied');
-    const [r] = await pool.query(`UPDATE staff SET ${set.sql} WHERE tenant_id = ? AND id = ?`, [...set.values, req.auth.tenantId, paramId(req)]);
-    if (!r.affectedRows) throw notFound('Staff member');
-    await audit(pool, req, 'update', 'staff', paramId(req), req.body);
-    res.json({ ok: true });
+    const t = req.auth.tenantId;
+    const id = paramId(req);
+    const b = req.body;
+    let unassigned = 0;
+    await tx(async (conn) => {
+      const st = await one(conn, 'SELECT id, person_id, status FROM staff WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, id]);
+      if (!st) throw notFound('Staff member');
+      const set = setClause({ ...b, needs_housing: b.needs_housing === undefined ? undefined : b.needs_housing ? 1 : 0 }, ['status', 'hired_on', 'needs_housing']);
+      const pset = setClause(b, ['first_name', 'last_name', 'email', 'phone']);
+      if (!set && !pset) throw bad('No updatable fields supplied');
+      if (set) await conn.query(`UPDATE staff SET ${set.sql} WHERE tenant_id = ? AND id = ?`, [...set.values, t, id]);
+      if (pset) await conn.query(`UPDATE people SET ${pset.sql} WHERE tenant_id = ? AND id = ?`, [...pset.values, t, st.person_id]);
+      // Someone who stops working here comes off every shift still ahead, which are left unfilled for someone else.
+      if (b.status && b.status !== 'active' && st.status === 'active') {
+        const now = nowIn((await tenantOf(conn, t)).timezone);
+        const ahead = await rows(conn, "SELECT s.*, pos.name AS position FROM shifts s JOIN positions pos ON pos.tenant_id = s.tenant_id AND pos.id = s.position_id WHERE s.tenant_id = ? AND s.staff_id = ? AND s.status <> 'cancelled' AND s.starts_at >= ?", [t, id, now]);
+        for (const sh of ahead) {
+          await conn.query('UPDATE shifts SET staff_id = NULL WHERE tenant_id = ? AND id = ?', [t, sh.id]);
+          await SH.notifyChange(conn, t, req.auth.userId, sh, { ...sh, staff_id: null });
+        }
+        unassigned = ahead.length;
+      }
+      await audit(conn, req, 'update', 'staff', id, { ...b, unassigned });
+    });
+    res.json({ ok: true, unassigned });
   },
 );
 
@@ -125,6 +220,22 @@ router.put('/staff/:id/certifications', requireRole(...mgr), validate(z.object({
   );
   await audit(pool, req, 'set_certification', 'staff', paramId(req), b);
   res.json({ ok: true });
+});
+
+router.delete('/staff/:id/certifications/:cid', requireRole(...mgr), async (req, res) => {
+  const [r] = await pool.query('DELETE FROM staff_certifications WHERE tenant_id = ? AND staff_id = ? AND certification_id = ?', [req.auth.tenantId, paramId(req), paramId(req, 'cid')]);
+  if (!r.affectedRows) throw notFound('Certification');
+  await audit(pool, req, 'remove_certification', 'staff', paramId(req), { certification_id: paramId(req, 'cid') });
+  res.status(204).end();
+});
+
+/** Someone's weekly availability, read before it is edited (saving replaces the whole pattern). */
+router.get('/staff/:id/availability', requireRole(...selfRoles, ...mgr), async (req, res) => {
+  const staffId = paramId(req);
+  actingStaffId(req, staffId);
+  if (!(await one(pool, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, staffId]))) throw notFound('Staff member');
+  const windows = await rows(pool, 'SELECT weekday, TIME_FORMAT(start_time, \'%H:%i\') AS start_time, TIME_FORMAT(end_time, \'%H:%i\') AS end_time FROM availability WHERE tenant_id = ? AND staff_id = ? ORDER BY weekday, start_time', [req.auth.tenantId, staffId]);
+  res.json({ windows });
 });
 
 router.get('/staff/:id/certifications', requireRole(...selfRoles, ...mgr), async (req, res) => {
@@ -180,57 +291,102 @@ const shiftSchema = z.object({
   staff_id: z.number().int().positive().optional(),
   starts_at: dateTimeStr.transform(normDateTime),
   ends_at: dateTimeStr.transform(normDateTime),
+  notes: z.string().trim().max(200).optional(),
   override_availability: z.boolean().default(false),
 });
+const tooLong = (a, b) => SH.minutesBetween(a, b) > 24 * 60;
 
 router.post('/shifts', requireRole(...mgr), validate(shiftSchema), async (req, res) => {
   const { tenantId } = req.auth;
   const b = req.body;
-  if (b.ends_at <= b.starts_at) throw bad('ends_at must be after starts_at');
+  if (b.ends_at <= b.starts_at) throw bad('The shift must end after it starts');
+  if (tooLong(b.starts_at, b.ends_at)) throw bad('A shift can be at most 24 hours');
   const id = await tx(async (conn) => {
     if (!(await one(conn, 'SELECT id FROM positions WHERE tenant_id = ? AND id = ?', [tenantId, b.position_id]))) throw notFound('Position');
     if (b.staff_id) {
       const problems = await staffProblems(conn, tenantId, { staffId: b.staff_id, positionId: b.position_id, startsAt: b.starts_at, endsAt: b.ends_at, skipAvailability: b.override_availability });
       if (problems.length) throw conflict('Cannot assign this person to the shift', problems);
     }
-    const [r] = await conn.query('INSERT INTO shifts (tenant_id, position_id, staff_id, starts_at, ends_at) VALUES (?, ?, ?, ?, ?)', [tenantId, b.position_id, b.staff_id ?? null, b.starts_at, b.ends_at]);
+    const [r] = await conn.query('INSERT INTO shifts (tenant_id, position_id, staff_id, starts_at, ends_at, notes) VALUES (?, ?, ?, ?, ?, ?)', [tenantId, b.position_id, b.staff_id ?? null, b.starts_at, b.ends_at, b.notes || null]);
     await audit(conn, req, 'create', 'shifts', r.insertId);
     return r.insertId;
   });
   res.status(201).json({ id, status: 'draft' });
 });
 
-router.patch(
-  '/shifts/:id/assign',
-  requireRole(...mgr),
-  validate(z.object({ staff_id: z.number().int().positive().nullable(), override_availability: z.boolean().default(false) })),
-  async (req, res) => {
-    const { tenantId } = req.auth;
-    const shiftId = paramId(req);
-    await tx(async (conn) => {
-      const shift = await one(conn, 'SELECT * FROM shifts WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, shiftId]);
-      if (!shift) throw notFound('Shift');
-      if (req.body.staff_id) {
-        const problems = await staffProblems(conn, tenantId, { staffId: req.body.staff_id, positionId: shift.position_id, startsAt: shift.starts_at, endsAt: shift.ends_at, ignoreShiftId: shiftId, skipAvailability: req.body.override_availability });
-        if (problems.length) throw conflict('Cannot assign this person to the shift', problems);
-      }
-      await conn.query('UPDATE shifts SET staff_id = ? WHERE tenant_id = ? AND id = ?', [req.body.staff_id, tenantId, shiftId]);
-      await audit(conn, req, 'assign', 'shifts', shiftId, { staff_id: req.body.staff_id });
-    });
-    res.json({ ok: true });
-  },
-);
+/**
+ * Change a shift: its time, position, person or note. Every check runs again for whoever is on it afterwards. When the
+ * shift is already published, the people it affects are told in the Inbox.
+ */
+async function changeShift(req, shiftId, changes, override) {
+  const { tenantId } = req.auth;
+  return tx(async (conn) => {
+    const before = await one(conn, 'SELECT s.*, pos.name AS position FROM shifts s JOIN positions pos ON pos.tenant_id = s.tenant_id AND pos.id = s.position_id WHERE s.tenant_id = ? AND s.id = ? FOR UPDATE', [tenantId, shiftId]);
+    if (!before) throw notFound('Shift');
+    if (before.status === 'cancelled') throw conflict('This shift is cancelled');
+    const next = { ...before, ...Object.fromEntries(Object.entries(changes).filter(([, v]) => v !== undefined)) };
+    if (next.ends_at <= next.starts_at) throw bad('The shift must end after it starts');
+    if (tooLong(next.starts_at, next.ends_at)) throw bad('A shift can be at most 24 hours');
+    if (changes.position_id && !(await one(conn, 'SELECT id FROM positions WHERE tenant_id = ? AND id = ?', [tenantId, changes.position_id]))) throw notFound('Position');
+    if (next.staff_id) {
+      const problems = await staffProblems(conn, tenantId, { staffId: next.staff_id, positionId: next.position_id, startsAt: next.starts_at, endsAt: next.ends_at, ignoreShiftId: shiftId, skipAvailability: override });
+      if (problems.length) throw conflict('Cannot assign this person to the shift', problems);
+    }
+    await conn.query('UPDATE shifts SET position_id = ?, staff_id = ?, starts_at = ?, ends_at = ?, notes = ? WHERE tenant_id = ? AND id = ?', [next.position_id, next.staff_id || null, next.starts_at, next.ends_at, next.notes || null, tenantId, shiftId]);
+    const after = await SH.shiftRow(conn, tenantId, shiftId);
+    await SH.notifyChange(conn, tenantId, req.auth.userId, before, after);
+    await audit(conn, req, 'update', 'shifts', shiftId, changes);
+    return after;
+  });
+}
+
+router.patch('/shifts/:id', requireRole(...mgr), validate(z.object({
+  position_id: z.number().int().positive().optional(),
+  staff_id: z.number().int().positive().nullable().optional(),
+  starts_at: dateTimeStr.transform(normDateTime).optional(),
+  ends_at: dateTimeStr.transform(normDateTime).optional(),
+  notes: z.string().trim().max(200).nullable().optional(),
+  override_availability: z.boolean().default(false),
+})), async (req, res) => {
+  const { override_availability: o, ...changes } = req.body;
+  res.json(await changeShift(req, paramId(req), changes, o));
+});
+
+router.patch('/shifts/:id/assign', requireRole(...mgr), validate(z.object({ staff_id: z.number().int().positive().nullable(), override_availability: z.boolean().default(false) })), async (req, res) => {
+  await changeShift(req, paramId(req), { staff_id: req.body.staff_id }, req.body.override_availability);
+  res.json({ ok: true });
+});
+
+/** Who could work this shift, best first, with the reasons anyone cannot. An unsaved shift can be checked too. */
+router.get('/shifts/:id/candidates', requireRole(...mgr), async (req, res) => {
+  const s = await SH.shiftRow(pool, req.auth.tenantId, paramId(req));
+  if (!s) throw notFound('Shift');
+  res.json({ data: await SH.candidates(pool, req.auth.tenantId, s) });
+});
+router.post('/shifts/candidates', requireRole(...mgr), validate(z.object({ position_id: z.number().int().positive(), starts_at: dateTimeStr.transform(normDateTime), ends_at: dateTimeStr.transform(normDateTime) })), async (req, res) => {
+  if (req.body.ends_at <= req.body.starts_at) throw bad('The shift must end after it starts');
+  res.json({ data: await SH.candidates(pool, req.auth.tenantId, { ...req.body, id: 0, staff_id: null }) });
+});
 
 router.post('/shifts/publish', requireRole(...mgr), validate(z.object({ from: dateStr, to: dateStr })), async (req, res) => {
-  const [r] = await pool.query("UPDATE shifts SET status = 'published' WHERE tenant_id = ? AND status = 'draft' AND DATE(starts_at) BETWEEN ? AND ?", [req.auth.tenantId, req.body.from, req.body.to]);
-  await audit(pool, req, 'publish', 'shifts', null, req.body);
-  res.json({ published: r.affectedRows });
+  const out = await tx(async (conn) => {
+    const [r] = await conn.query("UPDATE shifts SET status = 'published' WHERE tenant_id = ? AND status = 'draft' AND DATE(starts_at) BETWEEN ? AND ?", [req.auth.tenantId, req.body.from, req.body.to]);
+    await audit(conn, req, 'publish', 'shifts', null, req.body);
+    const told = r.affectedRows ? await SH.notifyPublished(conn, req.auth.tenantId, req.auth.userId, req.body.from, req.body.to) : 0;
+    return { published: r.affectedRows, notified: told };
+  });
+  res.json(out);
 });
 
 router.delete('/shifts/:id', requireRole(...mgr), async (req, res) => {
-  const [r] = await pool.query("UPDATE shifts SET status = 'cancelled' WHERE tenant_id = ? AND id = ?", [req.auth.tenantId, paramId(req)]);
-  if (!r.affectedRows) throw notFound('Shift');
-  await audit(pool, req, 'cancel', 'shifts', paramId(req));
+  const t = req.auth.tenantId;
+  await tx(async (conn) => {
+    const before = await one(conn, 'SELECT s.*, pos.name AS position FROM shifts s JOIN positions pos ON pos.tenant_id = s.tenant_id AND pos.id = s.position_id WHERE s.tenant_id = ? AND s.id = ? FOR UPDATE', [t, paramId(req)]);
+    if (!before) throw notFound('Shift');
+    await conn.query("UPDATE shifts SET status = 'cancelled' WHERE tenant_id = ? AND id = ?", [t, paramId(req)]);
+    if (before.status !== 'cancelled') await SH.notifyChange(conn, t, req.auth.userId, before, null);
+    await audit(conn, req, 'cancel', 'shifts', paramId(req));
+  });
   res.status(204).end();
 });
 
@@ -255,6 +411,71 @@ router.get('/shifts', requireRole('staff', 'counter', 'instructor', 'patrol', ..
   res.json({ data });
 });
 
+/** Copy one week's shifts into another as drafts. People are kept where they can still work the shift. */
+router.post('/shifts/copy', requireRole(...mgr), validate(z.object({ from: dateStr, to: dateStr, keep_people: z.boolean().default(true) })), async (req, res) => {
+  const t = req.auth.tenantId;
+  const from = SH.weekOf(req.body.from); const to = SH.weekOf(req.body.to);
+  if (from === to) throw bad('Choose a different week to copy into');
+  const days = Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000);
+  const out = await tx(async (conn) => {
+    const src = await rows(conn, "SELECT position_id, staff_id, starts_at, ends_at, notes FROM shifts WHERE tenant_id = ? AND status <> 'cancelled' AND starts_at >= ? AND starts_at < ? ORDER BY starts_at", [t, `${from} 00:00:00`, `${addDays(from, 7)} 00:00:00`]);
+    if (!src.length) throw bad('That week has no shifts to copy');
+    const list = src.map((s) => ({ ...s, staff_id: req.body.keep_people ? s.staff_id : null, starts_at: SH.plusMinutes(s.starts_at, days * 1440), ends_at: SH.plusMinutes(s.ends_at, days * 1440) }));
+    const r = await SH.makeDrafts(conn, t, list);
+    await audit(conn, req, 'copy_week', 'shifts', null, { from, to, ...r, left_open: undefined });
+    return r;
+  });
+  res.json(out);
+});
+
+// ---------------------------------------------------------------- week templates
+router.get('/shift-templates', requireRole(...mgr), async (req, res) => {
+  res.json({ data: await rows(pool, 'SELECT t.id, t.name, t.created_at, COUNT(i.id) AS shifts FROM shift_templates t LEFT JOIN shift_template_items i ON i.tenant_id = t.tenant_id AND i.template_id = t.id WHERE t.tenant_id = ? GROUP BY t.id ORDER BY t.name', [req.auth.tenantId]) });
+});
+
+/** Save a week's shifts (Monday to Sunday) as a template. Saving under an existing name replaces it. */
+router.post('/shift-templates', requireRole(...mgr), validate(z.object({ name: z.string().trim().min(1).max(80), from: dateStr, keep_people: z.boolean().default(true) })), async (req, res) => {
+  const t = req.auth.tenantId;
+  const week = SH.weekOf(req.body.from);
+  const id = await tx(async (conn) => {
+    const src = await rows(conn, "SELECT position_id, staff_id, starts_at, ends_at, notes FROM shifts WHERE tenant_id = ? AND status <> 'cancelled' AND starts_at >= ? AND starts_at < ? ORDER BY starts_at", [t, `${week} 00:00:00`, `${addDays(week, 7)} 00:00:00`]);
+    if (!src.length) throw bad('That week has no shifts to save');
+    await conn.query('INSERT INTO shift_templates (tenant_id, name, created_by) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE created_by = VALUES(created_by), created_at = CURRENT_TIMESTAMP', [t, req.body.name, req.auth.userId]);
+    const tpl = await one(conn, 'SELECT id FROM shift_templates WHERE tenant_id = ? AND name = ?', [t, req.body.name]);
+    await conn.query('DELETE FROM shift_template_items WHERE tenant_id = ? AND template_id = ?', [t, tpl.id]);
+    for (const s of src) {
+      const offset = Math.round((Date.parse(String(s.starts_at).slice(0, 10)) - Date.parse(week)) / 86_400_000);
+      await conn.query('INSERT INTO shift_template_items (tenant_id, template_id, day_offset, start_time, minutes, position_id, staff_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [t, tpl.id, offset, String(s.starts_at).slice(11, 19), SH.minutesBetween(s.starts_at, s.ends_at), s.position_id, req.body.keep_people ? s.staff_id : null, s.notes]);
+    }
+    await audit(conn, req, 'save_template', 'shift_templates', tpl.id, { name: req.body.name, week, shifts: src.length });
+    return tpl.id;
+  });
+  res.status(201).json({ id });
+});
+
+router.post('/shift-templates/:id/apply', requireRole(...mgr), validate(z.object({ week: dateStr })), async (req, res) => {
+  const t = req.auth.tenantId;
+  const week = SH.weekOf(req.body.week);
+  const out = await tx(async (conn) => {
+    const tpl = await one(conn, 'SELECT id, name FROM shift_templates WHERE tenant_id = ? AND id = ?', [t, paramId(req)]);
+    if (!tpl) throw notFound('Template');
+    const items = await rows(conn, 'SELECT * FROM shift_template_items WHERE tenant_id = ? AND template_id = ? ORDER BY day_offset, start_time', [t, tpl.id]);
+    const list = items.map((i) => { const starts = SH.shiftDt(addDays(week, i.day_offset), i.start_time); return { position_id: i.position_id, staff_id: i.staff_id, notes: i.notes, starts_at: starts, ends_at: SH.plusMinutes(starts, i.minutes) }; });
+    const r = await SH.makeDrafts(conn, t, list);
+    await audit(conn, req, 'apply_template', 'shift_templates', tpl.id, { week, ...r, left_open: undefined });
+    return r;
+  });
+  res.json(out);
+});
+
+router.delete('/shift-templates/:id', requireRole(...mgr), async (req, res) => {
+  const [r] = await pool.query('DELETE FROM shift_templates WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, paramId(req)]);
+  if (!r.affectedRows) throw notFound('Template');
+  await audit(pool, req, 'delete', 'shift_templates', paramId(req));
+  res.status(204).end();
+});
+
 // ---------------------------------------------------------------- time clock
 router.post('/time/clock-in', requireRole(...selfRoles, ...mgr), validate(z.object({ staff_id: z.number().int().positive().optional(), shift_id: z.number().int().positive().optional() })), async (req, res) => {
   const { tenantId } = req.auth;
@@ -264,7 +485,14 @@ router.post('/time/clock-in', requireRole(...selfRoles, ...mgr), validate(z.obje
     if (!(await one(conn, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, staffId]))) throw notFound('Staff member');
     if (await one(conn, 'SELECT id FROM time_entries WHERE tenant_id = ? AND staff_id = ? AND clock_out IS NULL', [tenantId, staffId])) throw conflict('Already clocked in');
     try {
-      const [r] = await conn.query('INSERT INTO time_entries (tenant_id, staff_id, shift_id, clock_in) VALUES (?, ?, ?, NOW())', [tenantId, staffId, req.body.shift_id ?? null]);
+      // Link the punch to the shift it is for (as the kiosk does): the published shift closest to now, starting up to 3 hours ahead.
+      let shiftId = req.body.shift_id ?? null;
+      if (!shiftId) {
+        const local = nowIn((await tenantOf(conn, tenantId)).timezone);
+        const sh = await one(conn, "SELECT id FROM shifts WHERE tenant_id = ? AND staff_id = ? AND status = 'published' AND ? BETWEEN DATE_SUB(starts_at, INTERVAL 3 HOUR) AND ends_at ORDER BY ABS(TIMESTAMPDIFF(MINUTE, starts_at, ?)) LIMIT 1", [tenantId, staffId, local, local]);
+        shiftId = sh ? sh.id : null;
+      }
+      const [r] = await conn.query("INSERT INTO time_entries (tenant_id, staff_id, shift_id, clock_in, in_method) VALUES (?, ?, ?, NOW(), 'login')", [tenantId, staffId, shiftId]);
       return r.insertId;
     } catch (e) { if (e.code === 'ER_DUP_ENTRY') throw conflict('Already clocked in'); throw e; }
   });
@@ -273,7 +501,7 @@ router.post('/time/clock-in', requireRole(...selfRoles, ...mgr), validate(z.obje
 
 router.post('/time/clock-out', requireRole(...selfRoles, ...mgr), validate(z.object({ staff_id: z.number().int().positive().optional() })), async (req, res) => {
   const staffId = actingStaffId(req, req.body.staff_id);
-  const [r] = await pool.query('UPDATE time_entries SET clock_out = NOW() WHERE tenant_id = ? AND staff_id = ? AND clock_out IS NULL', [req.auth.tenantId, staffId]);
+  const [r] = await pool.query("UPDATE time_entries SET clock_out = NOW(), out_method = 'login' WHERE tenant_id = ? AND staff_id = ? AND clock_out IS NULL", [req.auth.tenantId, staffId]);
   if (!r.affectedRows) throw conflict('Not clocked in');
   res.json({ ok: true });
 });
@@ -312,31 +540,39 @@ router.get('/time/entries', requireRole(...mgr), async (req, res) => {
 
 // ---------------------------------------------------------------- demand-aware staffing
 /**
- * Suggested headcount per position for a date, from forecast visits.
- * Forecast = tickets valid that day (sold, not void) + season passes' average usage is not modeled here;
- * pass a `forecast` query value to override. Positions need visits_per_staff set to be included.
+ * Suggested headcount per position for a date, from expected guests: day tickets sold for that date plus pass holders
+ * (the average number of passes scanned on the same weekday over the last four weeks). Pass `forecast` to use your own
+ * number. Only filled shifts count as staffed; empty ones are listed apart. Positions need "guests per staff member".
  */
 router.get('/staffing-suggestion', requireRole(...mgr), async (req, res) => {
   const date = String(req.query.date || '');
   if (!dateStr.safeParse(date).success) throw bad('date=YYYY-MM-DD is required');
   const { tenantId } = req.auth;
+  const tz = (await tenantOf(pool, tenantId)).timezone;
 
   let forecast = Number(req.query.forecast);
   let basis = 'override';
-  if (!Number.isFinite(forecast)) {
-    const sold = await one(pool, "SELECT COUNT(*) AS n FROM tickets t JOIN products p ON p.id = t.product_id AND p.tenant_id = t.tenant_id WHERE t.tenant_id = ? AND t.status = 'active' AND p.kind IN ('day_ticket','multi_day') AND ? BETWEEN t.valid_from AND t.valid_to", [tenantId, date]);
-    forecast = sold.n;
-    basis = 'tickets_sold_for_date';
+  let tickets = null; let passes = null;
+  if (!Number.isFinite(forecast) || req.query.forecast === '' || req.query.forecast === undefined) {
+    tickets = Number((await one(pool, "SELECT COUNT(*) AS n FROM tickets t JOIN products p ON p.id = t.product_id AND p.tenant_id = t.tenant_id WHERE t.tenant_id = ? AND t.status = 'active' AND p.kind IN ('day_ticket','multi_day') AND ? BETWEEN t.valid_from AND t.valid_to", [tenantId, date])).n);
+    let total = 0;
+    for (let w = 1; w <= 4; w += 1) {
+      const [a, b] = dayRange(tz, addDays(date, -7 * w));
+      total += Number((await one(pool, "SELECT COUNT(DISTINCT sc.ticket_id) AS n FROM scans sc JOIN tickets t ON t.tenant_id = sc.tenant_id AND t.id = sc.ticket_id JOIN products p ON p.tenant_id = t.tenant_id AND p.id = t.product_id WHERE sc.tenant_id = ? AND sc.result = 'ok' AND sc.scanned_at >= ? AND sc.scanned_at < ? AND p.kind IN ('season_pass','punch_card')", [tenantId, a, b])).n);
+    }
+    passes = Math.round(total / 4);
+    forecast = tickets + passes;
+    basis = 'tickets_and_passes';
   }
   const positions = await rows(pool, 'SELECT id, name, department, visits_per_staff FROM positions WHERE tenant_id = ? AND visits_per_staff IS NOT NULL ORDER BY department, name', [tenantId]);
-  const scheduled = await rows(pool, "SELECT position_id, COUNT(*) AS n FROM shifts WHERE tenant_id = ? AND status <> 'cancelled' AND DATE(starts_at) = ? GROUP BY position_id", [tenantId, date]);
-  const have = new Map(scheduled.map((s) => [s.position_id, s.n]));
+  const scheduled = await rows(pool, "SELECT position_id, SUM(staff_id IS NOT NULL) AS filled, SUM(staff_id IS NULL) AS empty FROM shifts WHERE tenant_id = ? AND status <> 'cancelled' AND DATE(starts_at) = ? GROUP BY position_id", [tenantId, date]);
+  const have = new Map(scheduled.map((s) => [Number(s.position_id), s]));
   const data = positions.map((p) => {
-    const suggested = Math.max(1, Math.ceil(forecast / p.visits_per_staff));
-    const scheduledCount = have.get(p.id) || 0;
-    return { position_id: p.id, position: p.name, department: p.department, suggested, scheduled: scheduledCount, gap: suggested - scheduledCount };
+    const suggested = forecast > 0 ? Math.max(1, Math.ceil(forecast / p.visits_per_staff)) : 0;
+    const h = have.get(Number(p.id)) || { filled: 0, empty: 0 };
+    return { position_id: p.id, position: p.name, department: p.department, suggested, scheduled: Number(h.filled), unfilled: Number(h.empty), gap: suggested - Number(h.filled) };
   });
-  res.json({ date, forecast_visits: forecast, basis, data });
+  res.json({ date, forecast_visits: forecast, tickets, pass_estimate: passes, basis, data });
 });
 
 module.exports = router;

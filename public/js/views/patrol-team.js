@@ -1,7 +1,7 @@
 // Patrol team management: roster, today's posts, equipment checks, training log.
 
 import { get, post, patch, put, del } from '../api.js';
-import { h, clear, state, input, select, field, button, toast, formDialog, confirmDialog, dialog, table, val, num, todayStr, addDays, fmtDate, fmtDateLong, fmtDateTime, fmtTime, label, empty } from '../ui.js';
+import { h, clear, state, input, select, field, button, toast, formDialog, confirmDialog, dialog, table, val, num, todayStr, addDays, fmtDate, fmtDateLong, fmtDateTime, fmtTime, label, empty, isManager } from '../ui.js';
 import { has, accessLevel } from './patrol-feat.js';
 import { compact } from './patrol-case.js';
 
@@ -23,7 +23,8 @@ export async function drawTeam(box, { canLead }) {
   const mgr = has('manage_team');
   const again = refresh(box, (n) => drawTeam(n, { canLead }));
   const cols = [
-    { head: 'Name', cell: (m) => h('span', null, h('b', null, `${m.first_name} ${m.last_name}`), m.staff_status !== 'active' ? h('span', { class: 'muted' }, ' (not active)') : null) },
+    // One roster: managers can open the person's full staff record (certifications, availability, shifts) from here.
+    { head: 'Name', cell: (m) => h('span', null, isManager() ? h('a', { href: `#/workforce/staff/${m.staff_id}` }, h('b', null, `${m.first_name} ${m.last_name}`)) : h('b', null, `${m.first_name} ${m.last_name}`), m.staff_status !== 'active' ? h('span', { class: 'muted' }, ' (not active)') : null) },
     { head: 'Rank', cell: (m) => label(m.level) },
     { head: 'Access', cell: (m) => label(m.access_level || 'patrol') },
     { head: 'Callsign', cell: (m) => m.callsign || '' },
