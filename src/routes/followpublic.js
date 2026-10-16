@@ -107,6 +107,8 @@ jobs.post('/daily', async (req, res) => {
     out.shop_emails = await stage('shop_emails', () => shopafter.runAll(base));
     out.card_refunds = await stage('card_refunds', () => cardrefund.retryAll());
     out.review_nudges = await stage('review_nudges', () => require('../lib/review').nudgeAll());
+    out.patrol_day_reminders = await stage('patrol_day_reminders', () => require('./patrolduty').remindAll());
+    out.patrol_stock_flags = await stage('patrol_stock_flags', () => require('./patrolmeds').flagAll());
     // One line per finished run: an alert on "no such line for 26 hours" tells you the job stopped.
     console.log(JSON.stringify({ severity: 'INFO', job: 'daily', message: 'daily job finished', seconds: Math.round((Date.now() - started) / 1000) }));
     res.json(out);

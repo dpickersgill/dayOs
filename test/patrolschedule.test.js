@@ -202,7 +202,7 @@ test('days patrolled this season, with a CSV; paid patrollers\' patrol time coun
   }
   assert.equal(vic.paid, false);
   const csv = await api('GET', '/patrol/schedule/days?format=csv', { token: M.owner });
-  assert.match(csv.text, /^name,patrol_number,rank,paid,days_patrolled,hours_scheduled/);
+  assert.match(csv.text, /^name,patrol_number,rank,paid,days_patrolled,days_required,hours/);
   assert.match(csv.text, /"Vic Volunteer"/);
   // Paula clocks in for a patrol shift: the punch is linked to it, and Hours counts it as scheduled
   const now = nowIn(tz);

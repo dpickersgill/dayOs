@@ -166,12 +166,12 @@ function publish(start, n, onDone) {
 export async function daysDialog() {
   const r = await get('/patrol/schedule/days');
   dialog(`Days patrolled, ${r.season} season`, [
-    h('p', { class: 'muted' }, 'A day counts when someone was on a published patrol shift that has ended, or posted on Today\'s posts. Hours are from patrol shifts.'),
+    h('p', { class: 'muted' }, 'A day counts when someone signed in on duty or was posted on Today\'s posts (before sign-in was used, a published patrol shift that ended). Hours are signed-in time.'),
     r.data.length ? table([
       { head: 'Patroller', cell: (d) => d.name },
       { head: 'Rank', cell: (d) => label(d.level) },
       { head: '', cell: (d) => (d.paid ? 'Paid' : 'Volunteer') },
-      { head: 'Days', num: true, cell: (d) => String(d.days) },
+      { head: 'Days', num: true, cell: (d) => (d.target ? `${d.days} of ${d.target}` : String(d.days)) },
       { head: 'Hours', num: true, cell: (d) => (d.minutes ? hrs(d.minutes) : '') },
     ], r.data) : empty('No one on the roster yet.'),
     h('div', { class: 'footer row' }, button('Download', () => download('/patrol/schedule/days?format=csv', `patrol-days-${r.season}.csv`), { kind: 'primary' }))], { wide: true });

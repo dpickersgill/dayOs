@@ -3,7 +3,7 @@
 import { openTourPicker, resumeTour, welcomeOnce, endTour } from './tour.js';
 import { get, post, session, hooks, ApiError } from './api.js';
 import { mfaPanel } from './views/mfa.js';
-import { flush as flushOutbox, waitingCounts } from './outbox.js';
+import { flush as flushOutbox, waitingCounts, forgetCases } from './outbox.js';
 import { buildFrame, GROUP_OF } from './nav.js';
 import { icon } from './icons.js';
 import { h, svg, clear, ctx, can, isManager, toast, loading, errorBox, button, field, input, closeAllDialogs } from './ui.js';
@@ -272,6 +272,7 @@ async function signOut(message) {
     const left = waitingCounts().mine;
     if (left && !window.confirm(`${left} patient care entr${left === 1 ? 'y has' : 'ies have'} not been sent yet (no signal). They stay on this phone and send when you sign in again with a signal. Sign out anyway?`)) return;
   }
+  if (!message) forgetCases(); // signing out on purpose clears the cases kept for a dead spot
   session.clear();
   ctx.me = null;
   navToken += 1;
@@ -287,7 +288,8 @@ let idleTimer = null;
 function resetIdle() {
   clearTimeout(idleTimer);
   if (!ctx.me) return;
-  idleTimer = setTimeout(() => { if (ctx.me) signOut(`Signed out after ${IDLE_MINUTES} minutes without activity.`); }, IDLE_MINUTES * 60_000);
+  // The patrol-room sign-in screen stays up all day on a shared tablet; it shows names only, never patient details.
+  idleTimer = setTimeout(() => { if (location.hash.startsWith('#/patrol/room')) { resetIdle(); return; } if (ctx.me) signOut(`Signed out after ${IDLE_MINUTES} minutes without activity.`); }, IDLE_MINUTES * 60_000);
   if (idleTimer && idleTimer.unref) idleTimer.unref(); // (test runners only: a pending timer must not keep the process alive)
 }
 for (const ev of ['pointerdown', 'keydown', 'scroll', 'touchstart']) document.addEventListener(ev, resetIdle, { passive: true, capture: true });

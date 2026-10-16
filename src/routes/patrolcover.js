@@ -16,6 +16,8 @@ const { postSystem, direct } = require('../lib/review');
 const SH = require('../lib/shifts');
 const PA = require('../lib/patrolaccess');
 const { problemsFor } = require('./patrolschedule');
+const PUSH = require('../lib/push');
+const OPS = require('../lib/patrolops');
 
 const router = express.Router();
 const patrol = requireRole('patrol', 'manager');
@@ -129,8 +131,19 @@ router.get('/cover', patrol, async (req, res) => {
     WHERE ps.tenant_id = ? AND ps.staff_id = ? AND ps.status = 'published' AND ps.starts_at > ? ORDER BY ps.starts_at LIMIT 60`, [t, me, now]) : [];
   const history = await rows(pool, `${SELECT} WHERE r.tenant_id = ? AND (r.status IN ('covered', 'withdrawn', 'closed') OR ps.starts_at <= ?) AND r.updated_at >= UTC_TIMESTAMP() - INTERVAL 14 DAY
     ${canManage ? '' : 'AND (r.staff_id = ? OR r.taken_by = ? OR r.status = \'covered\')'} ORDER BY r.updated_at DESC LIMIT 40`, canManage ? [t, now] : [t, now, me || 0, me || 0]);
+  // Open published shifts patrollers may put themselves on, when the schedule builders allow it.
+  const ops = await OPS.settingsOf(pool, t);
+  let openShifts = [];
+  if (ops.self_signup) {
+    const list = await rows(pool, `SELECT ps.id, ps.starts_at, ps.ends_at, ps.role_label, ps.notes, st.name AS station FROM patrol_shifts ps LEFT JOIN patrol_stations st ON st.tenant_id = ps.tenant_id AND st.id = ps.station_id
+      WHERE ps.tenant_id = ? AND ps.status = 'published' AND ps.staff_id IS NULL AND ps.starts_at > ? ORDER BY ps.starts_at LIMIT 60`, [t, now]);
+    for (const s of list) {
+      const problems = !onRoster ? ['You are not an active member of the patrol roster'] : await problemsFor(pool, t, me, s.starts_at, s.ends_at, Number(s.id));
+      openShifts.push({ ...s, id: Number(s.id), problems, can_take: Boolean(onRoster) && !problems.length });
+    }
+  }
   res.json({
-    me, on_roster: Boolean(onRoster), can_manage: canManage, needs_approval: settings.needs_approval,
+    me, on_roster: Boolean(onRoster), can_manage: canManage, needs_approval: settings.needs_approval, self_signup: ops.self_signup, open_shifts: openShifts,
     open, pending, history: history.map((x) => shape(x, now)),
     my_shifts: myShifts.map((s) => ({ ...s, id: Number(s.id), request_id: s.request_id ? Number(s.request_id) : null })),
   });
@@ -170,6 +183,7 @@ async function handOver(conn, req, r, takerId, approver) {
   await SH.tell(conn, t, req.auth.userId, Number(r.staff_id), `${done.taken_by_name} is covering your patrol shift ${when(done)}. You are off it.`);
   if (approver) await SH.tell(conn, t, req.auth.userId, takerId, `Approved: you are covering ${done.name}'s patrol shift ${when(done)}.${done.shift_notes ? ` Note: ${done.shift_notes}` : ''}`);
   await announce(conn, t, req.auth.userId, `Covered: ${when(done)}. ${done.taken_by_name} is covering for ${done.name}.`);
+  PUSH.notifyStaff(t, [Number(r.staff_id)], { title: 'Your patrol shift is covered', body: `${done.taken_by_name} is covering ${when(done)}.`, url: '#/patrol/cover', tag: `cover-${r.id}` });
   return done;
 }
 
@@ -197,7 +211,9 @@ router.post('/cover/:id/take', patrol, async (req, res) => {
     await audit(conn, req, 'offer_cover', 'patrol_cover_requests', r.id);
     const row = await requestOf(conn, t, r.id);
     await SH.tell(conn, t, req.auth.userId, Number(r.staff_id), `${row.taken_by_name} offered to cover your patrol shift ${when(row)}. It is yours until it is approved.`);
-    await tellUsers(conn, t, req.auth.userId, (await schedulers(conn, t)).filter((u) => u !== req.auth.userId),
+    const approvers = (await schedulers(conn, t)).filter((u) => u !== req.auth.userId);
+    PUSH.notifyUsers(t, approvers, { title: 'Shift cover to approve', body: `${row.taken_by_name} offered to cover ${row.name}, ${when(row)}.`, url: '#/patrol/cover', tag: `cover-${r.id}` });
+    await tellUsers(conn, t, req.auth.userId, approvers,
       `Shift cover to approve: ${row.taken_by_name} offered to cover ${row.name}'s patrol shift ${when(row)}. Approve or decline it in Patrol, Team, Cover.`);
     return { status: 'pending' };
   });
@@ -253,6 +269,29 @@ router.post('/cover/:id/withdraw', patrol, async (req, res) => {
     await announce(conn, t, req.auth.userId, `No longer needed: ${when(r)} (${r.name}).`);
   });
   res.json({ status: 'withdrawn' });
+});
+
+/** Put myself on an open published shift, when the schedule builders allow it (Patrol settings). */
+router.post('/cover/open/:shiftId/take', patrol, async (req, res) => {
+  const t = req.auth.tenantId;
+  const me = req.auth.staffId ? Number(req.auth.staffId) : null;
+  if (!me) throw forbidden('Your login is not linked to anyone on the patrol roster');
+  if (!(await OPS.settingsOf(pool, t)).self_signup) throw forbidden('Patrollers do not sign up for open shifts here. Ask whoever builds the schedule.');
+  const out = await tx(async (conn) => {
+    const s = await one(conn, 'SELECT ps.*, st.name AS station FROM patrol_shifts ps LEFT JOIN patrol_stations st ON st.tenant_id = ps.tenant_id AND st.id = ps.station_id WHERE ps.tenant_id = ? AND ps.id = ? FOR UPDATE', [t, paramId(req, 'shiftId')]);
+    if (!s) throw notFound('Patrol shift');
+    if (s.status !== 'published') throw conflict('This shift is not published');
+    if (s.staff_id) throw conflict('Someone is already on this shift');
+    if (String(s.starts_at) <= nowIn(await tzOf(conn, t))) throw conflict('This shift has already started');
+    const problems = await problemsFor(conn, t, me, s.starts_at, s.ends_at, Number(s.id));
+    if (problems.length) throw conflict('You cannot take this shift', problems);
+    await conn.query('UPDATE patrol_shifts SET staff_id = ? WHERE tenant_id = ? AND id = ?', [me, t, s.id]);
+    await audit(conn, req, 'self_signup', 'patrol_shifts', s.id);
+    const who = await one(conn, `SELECT ${NAME} AS name FROM staff s JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE s.tenant_id = ? AND s.id = ?`, [t, me]);
+    await announce(conn, t, req.auth.userId, `Open shift taken: ${when(s)}. ${who.name} is on it.`);
+    return { ok: true };
+  });
+  res.json(out);
 });
 
 /** Whether a schedule builder approves each swap before the shift moves. */

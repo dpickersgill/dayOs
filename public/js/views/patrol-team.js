@@ -15,6 +15,7 @@ const certTone = { current: 'good', expiring: 'warn', expired: 'bad', no_expiry:
 const certText = { current: 'current', expiring: 'expires soon', expired: 'expired', no_expiry: 'no expiry' };
 const statusTone = { in_service: 'good', needs_attention: 'warn', out_of_service: 'bad', retired: 'neutral' };
 
+const CERTS = [['none', 'No medical certification'], ['oec', 'OEC'], ['emr', 'EMR'], ['emt', 'EMT'], ['aemt', 'Advanced EMT'], ['paramedic', 'Paramedic'], ['rn', 'Nurse'], ['md', 'Doctor']];
 const ACCESS = [['admin', 'Admin'], ['manager', 'Manager'], ['approver', 'Approver'], ['patrol', 'Patrol'], ['host', 'Host']];
 const refresh = (box, draw) => async () => { const n = h('div'); await draw(n); clear(box).append(...n.childNodes); };
 
@@ -89,6 +90,7 @@ function memberDialog(m, again) {
     field('Rank', select(LEVELS, m.level, { name: 'level' })),
     accessLevel() === 'admin' ? field('Access level', select(ACCESS, m.access_level || 'patrol', { name: 'access_level' }), 'What they can do in Patrol. Press Permissions on their row to change single permissions.')
       : field('Access level', input({ value: label(m.access_level || 'patrol'), disabled: true }), 'Only a patrol Admin, an owner or a manager can change this.'),
+    field('Medical certification', select(CERTS, m.cert_level || 'oec', { name: 'cert_level' }), 'Decides which medications on the formulary they may give'),
     field('Callsign', input({ name: 'callsign', value: m.callsign || '', maxlength: 30 })),
     field('Patrol number', input({ name: 'patrol_number', value: m.patrol_number || '', maxlength: 20 }), 'Printed on the reports they complete'),
     h('div', { class: 'wide' }, field('Emergency contact', input({ name: 'emergency_contact', value: m.emergency_contact || '', maxlength: 255 }))),
@@ -97,7 +99,7 @@ function memberDialog(m, again) {
   async (fd) => {
     if (fd.get('access_level') && fd.get('access_level') !== (m.access_level || 'patrol')) await put(`/patrol/team/${m.staff_id}/access`, { access_level: fd.get('access_level') });
     await patch(`/patrol/team/${m.staff_id}`, { first_name: val(fd, 'first_name'), last_name: val(fd, 'last_name'), email: val(fd, 'email'), phone: val(fd, 'phone'), on_staff_list: Boolean(fd.get('on_staff_list')),
-      level: val(fd, 'level'), callsign: val(fd, 'callsign'), patrol_number: val(fd, 'patrol_number'), emergency_contact: val(fd, 'emergency_contact'), notes: val(fd, 'notes') });
+      level: val(fd, 'level'), cert_level: val(fd, 'cert_level'), callsign: val(fd, 'callsign'), patrol_number: val(fd, 'patrol_number'), emergency_contact: val(fd, 'emergency_contact'), notes: val(fd, 'notes') });
     toast('Saved');
     await again();
   });
@@ -197,17 +199,37 @@ export async function drawEquipment(box, { canLead }) {
       { head: 'Item', cell: (e) => h('span', null, h('b', null, e.name), e.serial ? h('span', { class: 'muted' }, ` ${e.serial}`) : null) },
       { head: 'Kind', cell: (e) => label(e.kind) }, { head: 'Where', cell: (e) => e.station || '' },
       { head: 'Status', cell: (e) => state(label(e.status), statusTone[e.status]) },
+      { head: 'Due', cell: (e) => dueLine(e) },
       { head: 'Last check', cell: (e) => (e.last_checked_at ? `${fmtDateTime(e.last_checked_at)}, ${label(e.last_result)}${e.last_reading ? ` (${e.last_reading})` : ''}` : h('span', { class: 'muted' }, 'Never checked')) },
       { head: '', actions: true, cell: (e) => h('span', { class: 'row' }, e.status !== 'retired' ? button('Log check', () => checkDialog(e, again, canLead), { small: true }) : null, canLead && ['needs_attention', 'out_of_service'].includes(e.status) ? button('Clear for use', () => clearDialog(e, again), { small: true, kind: 'primary' }) : null, button('History', () => historyDialog(e), { small: true }), canLead ? button('Edit', () => equipmentDialog(e, stations, again), { small: true }) : null) },
     ], data) : empty(canLead ? 'No equipment yet. Add toboggans, AEDs, oxygen and radios so checks can be logged.' : 'No equipment has been added yet.')));
 }
 
+/** Dates and readings that matter on the item: AED pads and battery, any expiry, oxygen pressure, a download owed. */
+function dueLine(e) {
+  const today = todayStr(); const soon = addDays(today, 30);
+  const bits = [];
+  for (const [k, word] of [['pads_expire_on', 'Pads'], ['battery_expire_on', 'Battery'], ['expires_on', 'Expires']]) {
+    const d = e[k] ? String(e[k]).slice(0, 10) : null;
+    if (d) bits.push(state(`${word} ${fmtDate(d)}`, d < today ? 'bad' : d <= soon ? 'warn' : 'neutral'));
+  }
+  if (e.kind === 'oxygen' && e.o2_psi != null) bits.push(state(`${e.o2_psi} psi`, 'neutral'));
+  if (Number(e.needs_download)) bits.push(state('Download data', 'bad'));
+  return bits.length ? h('span', { class: 'row tight' }, bits) : '';
+}
+
 function checkDialog(e, again, canLeadHere = false) {
+  const psi = e.kind === 'oxygen' ? input({ name: 'psi', type: 'number', inputmode: 'numeric', min: 0, max: 3000, placeholder: e.o2_psi != null ? `Last: ${e.o2_psi}` : '' }) : null;
   formDialog(`Check: ${e.name}`, h('div', { class: 'form' },
+    psi ? field('Pressure (psi)', psi, 'Below the refill level, the cylinder is flagged for refill') : null,
+    e.kind === 'aed' && Number(e.needs_download) ? h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name: 'downloaded' }), ' Data downloaded for the medical director and new pads fitted') : null,
     field('Result', select([...(e.status === 'in_service' || canLeadHere ? [['ok', 'OK, ready to use']] : []), ['needs_attention', 'Needs attention'], ['out_of_service', 'Out of service']], e.status === 'in_service' || canLeadHere ? 'ok' : 'needs_attention', { name: 'result' })),
     field('Reading', input({ name: 'reading', maxlength: 40, placeholder: e.kind === 'aed' ? 'Battery 100%' : e.kind === 'oxygen' ? 'Tank 2000 psi' : '' })),
     h('div', { class: 'wide' }, field('Notes', input({ name: 'notes', maxlength: 255 })))),
-  async (fd) => { await post(`/patrol/equipment/${e.id}/checks`, compact({ result: val(fd, 'result'), reading: val(fd, 'reading'), notes: val(fd, 'notes') })); toast('Check logged'); await again(); });
+  async (fd) => {
+    const out = await post(`/patrol/equipment/${e.id}/checks`, compact({ result: val(fd, 'result'), reading: val(fd, 'reading'), notes: val(fd, 'notes'), psi: num(fd, 'psi') ?? undefined, downloaded: fd.get('downloaded') ? true : undefined }));
+    toast(out.status === 'in_service' ? 'Check logged' : `Check logged: ${label(out.status)}`); await again();
+  });
 }
 
 function clearDialog(e, again) {
@@ -226,9 +248,13 @@ function equipmentDialog(e, stations, again) {
   formDialog(e ? 'Edit equipment' : 'Add equipment', h('div', { class: 'form' },
     field('Name', input({ name: 'name', value: e ? e.name : '', required: true, maxlength: 100 })), field('Kind', select(EQUIPMENT_KINDS, e ? e.kind : 'other', { name: 'kind' })),
     field('Serial number', input({ name: 'serial', value: e && e.serial ? e.serial : '', maxlength: 60 })), field('Stored at', select([['', 'Not assigned'], ...stations.map((s) => [s.id, s.name])], e && e.station_id ? e.station_id : '', { name: 'station_id' })),
-    e ? field('Status', select(EQUIPMENT_STATUS, e.status, { name: 'status' })) : null),
+    e ? field('Status', select(EQUIPMENT_STATUS, e.status, { name: 'status' })) : null,
+    field('Expires', input({ name: 'expires_on', type: 'date', value: e && e.expires_on ? String(e.expires_on).slice(0, 10) : '' }), 'Optional: the earliest date on anything in it'),
+    field('AED pads expire', input({ name: 'pads_expire_on', type: 'date', value: e && e.pads_expire_on ? String(e.pads_expire_on).slice(0, 10) : '' }), 'AEDs only'),
+    field('AED battery expires', input({ name: 'battery_expire_on', type: 'date', value: e && e.battery_expire_on ? String(e.battery_expire_on).slice(0, 10) : '' }), 'AEDs only'),
+    field('Oxygen cylinder size', select([['', 'Not oxygen'], ['M6', 'M6'], ['C', 'C'], ['D', 'D'], ['E', 'E'], ['M60', 'M60'], ['other', 'Other']], e && e.o2_size ? e.o2_size : '', { name: 'o2_size' }))),
   async (fd) => {
-    const body = { name: val(fd, 'name'), kind: val(fd, 'kind'), serial: val(fd, 'serial'), station_id: num(fd, 'station_id') };
+    const body = { name: val(fd, 'name'), kind: val(fd, 'kind'), serial: val(fd, 'serial'), station_id: num(fd, 'station_id'), expires_on: val(fd, 'expires_on'), pads_expire_on: val(fd, 'pads_expire_on'), battery_expire_on: val(fd, 'battery_expire_on'), o2_size: val(fd, 'o2_size') };
     if (e) await patch(`/patrol/equipment/${e.id}`, { ...body, status: val(fd, 'status') }); else await post('/patrol/equipment', compact({ ...body, serial: body.serial, station_id: body.station_id }));
     toast('Saved');
     await again();

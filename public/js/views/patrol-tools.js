@@ -5,7 +5,7 @@
 //   voidDialog     marks a wrong entry "entered in error" with a reason (nothing clinical is deleted)
 // Everything is sent through the outbox, so it is kept on the phone when there is no signal.
 
-import { post } from '../api.js';
+import { post, get } from '../api.js';
 import { h, clear, dialog, toast, nowInput, nowStamp, fmtTime, errorBox, label, formDialog, field, input } from '../ui.js';
 import { send, pending } from '../outbox.js';
 import { O2_DEVICES, ARREST_ACTIONS, atTime } from '../care-text.js';
@@ -135,21 +135,24 @@ function cmsBlock(id, title) {
   };
 }
 
-const MEDS = ['Acetaminophen', 'Ibuprofen', 'Aspirin', 'Oral glucose', 'Epinephrine auto-injector', 'Albuterol inhaler', 'Naloxone', 'Nitroglycerin'];
+const LIMBS = [['left_arm', 'Left arm'], ['right_arm', 'Right arm'], ['left_leg', 'Left leg'], ['right_leg', 'Right leg'], ['junctional', 'Junctional (groin, armpit)']];
+const NO_ALLERGY = /^(none|no|nkda|nka|n\/a|na|nil|denies)\b/i;
+let formularyCache = null; // the last formulary seen, for a sheet opened with no signal
 const UNITS = ['mg', 'mcg', 'g', 'mL', 'units', 'puffs', 'tablets', 'drops'];
 const ROUTES = [['oral', 'Oral'], ['chewed', 'Chewed'], ['sublingual', 'Under the tongue'], ['inhaled', 'Inhaled'], ['intramuscular', 'Injection (IM)'], ['intranasal', 'Nasal'], ['other', 'Other']];
 const AUTH = ['Standing order', 'Medical control (by radio or phone)', 'Patient\'s own medication'];
+const AUTH_FOR = { standing_order: 'Standing order', assist_own: 'Patient\'s own medication', medical_control: 'Medical control (by radio or phone)' };
 
 /**
  * kind: splint | spinal_motion_restriction | oxygen | medication. roster gives "done by" for a medication.
  * A splint or spinal motion restriction asks for circulation, motor and sensation before and after.
  */
-export function treatmentSheet({ kind, base, caseId, roster = [], onSaved }) {
+export function treatmentSheet({ kind, base, caseId, roster = [], patient = null, onSaved }) {
   const when = whenPicker(`t-when-${kind}`);
   const err = h('div');
   const parts = [];
   let collect;
-  const titles = { splint: 'Splint', spinal_motion_restriction: 'Spinal motion restriction', oxygen: 'Oxygen', medication: 'Medication' };
+  const titles = { splint: 'Splint', spinal_motion_restriction: 'Spinal motion restriction', oxygen: 'Oxygen', medication: 'Medication', tourniquet: 'Tourniquet' };
   if (kind === 'splint' || kind === 'spinal_motion_restriction') {
     const part = h('input', { id: 't-part', maxlength: 60, placeholder: kind === 'splint' ? 'Left lower leg' : 'Whole spine' });
     const before = cmsBlock('cms-before', 'CMS before');
@@ -161,38 +164,101 @@ export function treatmentSheet({ kind, base, caseId, roster = [], onSaved }) {
       if (b === 'partial' || a === 'partial') throw new Error('Answer all three of circulation, motor and sensation, or none');
       return { kind, detail: { ...(part.value.trim() ? { body_part: part.value.trim() } : {}), ...(b ? { cms_before: b } : {}), ...(a ? { cms_after: a } : {}) } };
     };
+  } else if (kind === 'tourniquet') {
+    const limb = chipGroup({ id: 't-limb', options: LIMBS, labelledBy: 't-limb-l' });
+    parts.push(h('div', { class: 'vblock' }, h('h4', { id: 't-limb-l' }, 'Where'), limb.el),
+      h('p', { class: 'muted small' }, 'The time it went on is shown at the top of the patient and the hand-off sheet. Write it on the tourniquet too.'));
+    collect = () => { if (!limb.get()) throw new Error('Say which limb'); return { kind, detail: { limb: limb.get() } }; };
   } else if (kind === 'oxygen') {
     const device = chipGroup({ id: 't-o2-device', options: O2_DEVICES, value: 'non_rebreather', labelledBy: 't-o2-device-l' });
     const lpm = chipGroup({ id: 't-o2-lpm', options: [2, 4, 6, 10, 12, 15].map((n) => [String(n), `${n}`]), value: '15', labelledBy: 't-o2-lpm-l' });
     parts.push(h('div', { class: 'vblock' }, h('h4', { id: 't-o2-device-l' }, 'Device'), device.el), h('div', { class: 'vblock' }, h('h4', { id: 't-o2-lpm-l' }, 'Litres per minute'), lpm.el));
     collect = () => ({ kind, detail: { ...(device.get() ? { o2_device: device.get() } : {}), ...(lpm.get() ? { o2_lpm: Number(lpm.get()) } : {}) } });
   } else {
+    // The patrol's formulary decides what can be given, how, and who may give it; the server checks it again.
+    const allergies = patient && patient.allergies && !NO_ALLERGY.test(String(patient.allergies).trim()) ? String(patient.allergies).trim() : '';
+    const vitals = patient ? (patient.vitals || []).filter((v) => !v.voided_at && v.bp_sys != null) : [];
+    const lastBp = vitals[vitals.length - 1] || null;
+    let drugs = formularyCache ? formularyCache.formulary : [];
+    let stock = formularyCache ? formularyCache.stock : [];
+    let chosen = null;
     const name = h('input', { id: 't-med', maxlength: 100, list: 't-med-list', autocomplete: 'off' });
-    const dl = h('datalist', { id: 't-med-list' }, MEDS.map((m) => h('option', { value: m })));
-    const quick = h('div', { class: 'chip-row' }, MEDS.slice(0, 5).map((m) => { const b = h('button', { type: 'button', class: 'chip' }, m); b.addEventListener('click', () => { name.value = m; }); return b; }));
+    const dl = h('datalist', { id: 't-med-list' });
+    const quick = h('div', { class: 'chip-row' });
+    const about = h('p', { class: 'muted small' });
     const dose = h('input', { id: 't-dose', type: 'number', inputmode: 'decimal', min: 0, step: 'any', class: 'short-num' });
     const unit = chipGroup({ id: 't-unit', options: UNITS.map((u) => [u, u]), value: 'mg', labelledBy: 't-unit-l' });
     const route = chipGroup({ id: 't-route', options: ROUTES, value: 'oral', labelledBy: 't-route-l' });
     const why = h('input', { id: 't-why', maxlength: 255, placeholder: 'Knee pain 7/10' });
     const auth = h('input', { id: 't-auth', maxlength: 150, list: 't-auth-list' });
     const al = h('datalist', { id: 't-auth-list' }, AUTH.map((m) => h('option', { value: m })));
-    const by = h('select', { id: 't-by' }, h('option', { value: '' }, 'Not recorded'), roster.filter((m) => m.staff_status === 'active').map((m) => h('option', { value: m.staff_id }, `${m.first_name} ${m.last_name}`)));
+    const by = h('select', { id: 't-by' }, h('option', { value: '' }, 'Me'), roster.filter((m) => m.staff_status === 'active').map((m) => h('option', { value: m.staff_id }, `${m.first_name} ${m.last_name}`)));
+    const lot = h('select', { id: 't-lot' }, h('option', { value: '' }, 'Not from patrol stock'));
+    // allergies: shown in red and confirmed before anything is given
+    const allergyOk = h('input', { type: 'checkbox', id: 't-allergy-ok' });
+    const allergyWhy = h('input', { maxlength: 255, placeholder: 'Why it is safe to give anyway', hidden: true, 'aria-label': 'Reason to give despite the allergy' });
+    const allergyBox = allergies ? h('div', { class: 'vblock allergy-box', role: 'alert' }, h('h4', null, `Allergies: ${allergies}`), h('label', { class: 'check' }, allergyOk, ' I checked this medication against the allergies'), allergyWhy) : null;
+    // nitroglycerin: blood pressure and erectile dysfunction medication
+    const pde5 = chipGroup({ id: 't-pde5', options: [['no', 'No'], ['yes', 'Yes']], labelledBy: 't-pde5-l' });
+    const bpWhy = h('input', { maxlength: 255, placeholder: 'Only on medical control: who said to go ahead' });
+    const nitroBox = h('div', { class: 'vblock', hidden: true },
+      h('h4', null, lastBp ? `Last BP ${lastBp.bp_sys}/${lastBp.bp_dia ?? '?'} at ${fmtTime(String(lastBp.taken_at).replace(' ', 'T'))}` : 'No blood pressure recorded'),
+      h('p', { class: 'muted small' }, 'Not under 100, and take a fresh one within 5 minutes before giving.'),
+      h('h4', { id: 't-pde5-l' }, 'Viagra, Cialis or Levitra in the last 48 hours?'), pde5.el, h('label', null, 'Override (medical control only)', bpWhy));
+    const pick = (n) => {
+      name.value = n;
+      chosen = drugs.find((f) => f.name.toLowerCase() === n.trim().toLowerCase()) || null;
+      clear(about);
+      clear(lot).append(h('option', { value: '' }, 'Not from patrol stock'));
+      nitroBox.hidden = !/nitro/i.test(n);
+      if (allergies) {
+        const hit = n && allergies.toLowerCase().includes(n.trim().toLowerCase().split(/[\s-]/)[0]);
+        allergyWhy.hidden = !hit;
+        allergyBox.dataset.hit = hit ? 'yes' : 'no';
+      }
+      if (!chosen) { if (n && drugs.length) about.append(h('b', null, `${n} is not on the formulary.`), ' It cannot be recorded as given.'); return; }
+      about.append(`${({ standing_order: 'Standing order', assist_own: 'Assist with the patient\'s own only', medical_control: 'Medical control only' })[chosen.authority]}`,
+        chosen.max_dose !== null ? `. Largest dose ${chosen.max_dose} ${chosen.dose_unit || ''}` : '', chosen.notes ? `. ${chosen.notes}` : '');
+      auth.value = AUTH_FOR[chosen.authority];
+      if (chosen.dose_unit && UNITS.includes(chosen.dose_unit)) unit.set(chosen.dose_unit);
+      if (chosen.routes.length) route.set(chosen.routes[0]);
+      for (const k of stock.filter((x) => x.formulary_id === chosen.id)) lot.append(h('option', { value: k.id }, `Lot ${k.lot || k.id}${k.station ? `, ${k.station}` : ''}${k.expires_on ? `, exp ${String(k.expires_on).slice(0, 10)}` : ''} (${k.quantity} ${k.unit})`));
+    };
+    name.addEventListener('change', () => pick(name.value));
+    const drawList = () => {
+      clear(dl).append(...drugs.map((f) => h('option', { value: f.name })));
+      clear(quick).append(...drugs.slice(0, 6).map((f) => { const b = h('button', { type: 'button', class: 'chip' }, f.name); b.addEventListener('click', () => pick(f.name)); return b; }));
+    };
+    drawList();
+    get('/patrol/meds/for-case').then((r) => { formularyCache = r; drugs = r.formulary; stock = r.stock; drawList(); if (name.value) pick(name.value); }).catch(() => {});
     parts.push(
-      h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-med' }, 'Medication')), name, dl, quick),
+      allergyBox,
+      h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-med' }, 'Medication')), name, dl, quick, about),
+      nitroBox,
       h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-dose' }, 'Dose')), h('div', { class: 'row tight' }, dose), h('span', { id: 't-unit-l', class: 'muted small' }, 'Unit'), unit.el),
       h('div', { class: 'vblock' }, h('h4', { id: 't-route-l' }, 'Route'), route.el),
       h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-why' }, 'Given for')), why),
       h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-auth' }, 'Authorised by')), auth, al, h('span', { class: 'hint' }, 'Your standing order, the doctor on medical control, or the patient\'s own medication')),
       h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-by' }, 'Given by')), by),
+      h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-lot' }, 'From stock')), lot),
       h('p', { class: 'muted small' }, 'Record the effect from the treatment log once you have seen it.'));
     collect = () => {
       if (!name.value.trim()) throw new Error('Say which medication');
+      if (drugs.length && !chosen) throw new Error(`${name.value.trim()} is not on this patrol's formulary`);
       if (dose.value === '' || !unit.get()) throw new Error('Give the dose and its unit');
+      if (allergies && !allergyOk.checked) throw new Error('Check the medication against the allergies first');
+      if (allergies && !allergyWhy.hidden && !allergyWhy.value.trim()) throw new Error(`The patient is allergic to "${allergies}". Say why it is safe, or do not give it.`);
+      if (!nitroBox.hidden && !pde5.get()) throw new Error('Ask about erectile dysfunction medication first');
       const r = route.get();
       return {
-        kind, medication: name.value.trim(), dose: `${Number(dose.value)} ${unit.get()}`, ...(r ? { route: (ROUTES.find((x) => x[0] === r) || [r, r])[0] } : {}),
+        kind, medication: chosen ? chosen.name : name.value.trim(), dose: `${Number(dose.value)} ${unit.get()}`, ...(r ? { route: (ROUTES.find((x) => x[0] === r) || [r, r])[0] } : {}),
         ...(by.value ? { performed_by_staff: Number(by.value) } : {}),
-        detail: { dose_value: Number(dose.value), dose_unit: unit.get(), ...(why.value.trim() ? { indication: why.value.trim() } : {}), ...(auth.value.trim() ? { authorised_by: auth.value.trim() } : {}) },
+        detail: {
+          dose_value: Number(dose.value), dose_unit: unit.get(), ...(why.value.trim() ? { indication: why.value.trim() } : {}), ...(auth.value.trim() ? { authorised_by: auth.value.trim() } : {}),
+          ...(allergies ? { allergy_checked: true } : {}), ...(allergyWhy.value.trim() ? { allergy_override: allergyWhy.value.trim() } : {}),
+          ...(!nitroBox.hidden ? { pde5: pde5.get(), ...(bpWhy.value.trim() ? { bp_override: bpWhy.value.trim() } : {}) } : {}),
+          ...(lot.value ? { stock_id: Number(lot.value) } : {}),
+        },
       };
     };
   }

@@ -41,6 +41,7 @@ function treatmentText(t) {
   if (t.kind === 'oxygen' && (d.o2_lpm != null || d.o2_device)) bits.push([d.o2_lpm != null ? `${d.o2_lpm} L/min` : null, d.o2_device ? O2[d.o2_device] : null].filter(Boolean).join(' by '));
   if (d.action) bits.push(ACTION[d.action] || d.action);
   if (d.joules) bits.push(`${d.joules} J`);
+  if (d.limb) bits.push(String(d.limb).replace('_', ' '));
   if (d.body_part) bits.push(d.body_part);
   if (d.cms_before || d.cms_after) bits.push(`CMS before ${cmsText(d.cms_before) || 'not recorded'}; after ${cmsText(d.cms_after) || 'not recorded'}`);
   if (d.indication) bits.push(`for ${d.indication}`);

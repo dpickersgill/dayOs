@@ -15,9 +15,11 @@ import { bedsideCard, voidedNote } from './patrol-bedside.js';
 import { collisionPanel } from './patrol-collision.js';
 import { checklistPanel, loadChecklists } from './patrol-checklists.js';
 import { voidDialog, sentToast } from './patrol-tools.js';
-import { send, pending, onChange as onOutbox, flush, retry, discard, waitingCounts } from '../outbox.js';
+import { send, pending, onChange as onOutbox, flush, retry, discard, waitingCounts, keepCase, keptCase } from '../outbox.js';
 import { draftNarrative } from '../narrative.js';
 import { live, lateNote, treatmentName, atTime } from '../care-text.js';
+import { searchPanel, recordsPanel } from './patrol-search.js';
+import { legalHoldControl } from './patrol-records.js';
 
 export const CATEGORIES = ['injury', 'collision', 'lost_person', 'equipment', 'medical', 'conduct', 'other'];
 export const SEVERITY = ['minor', 'moderate', 'serious', 'critical'];
@@ -25,7 +27,7 @@ const INCIDENT_DISPOSITION = ['treated_released', 'transported', 'refused_care',
 const EVENTS = [['call_received', 'Call received'], ['dispatched', 'Dispatched'], ['on_scene', 'On scene'], ['patient_contact', 'Patient contact'], ['transport_started', 'Transport started'], ['at_aid_room', 'At aid room'], ['handoff', 'Handoff'], ['cleared', 'Cleared'], ['other', 'Other']];
 const REGIONS = ['head', 'face', 'neck', 'shoulder', 'arm', 'elbow', 'wrist_hand', 'chest', 'back', 'abdomen', 'pelvis', 'hip', 'thigh', 'knee', 'lower_leg', 'ankle_foot', 'multiple', 'other'];
 const INJURY_TYPES = ['fracture', 'dislocation', 'sprain_strain', 'laceration', 'contusion', 'concussion', 'spinal', 'internal', 'cold_injury', 'illness', 'cardiac', 'other'];
-const TREATMENTS = ['bandage', 'ice', 'warming', 'airway', 'cpr', 'aed', 'splint', 'spinal_motion_restriction', 'oxygen', 'other'];
+const TREATMENTS = ['bandage', 'ice', 'warming', 'airway', 'cpr', 'aed', 'splint', 'spinal_motion_restriction', 'oxygen', 'pelvic_binder', 'other'];
 const SIGNATURE_KINDS = [['refusal_of_care', 'Refusal of care'], ['patient_acknowledgment', 'Patient acknowledgment'], ['witness', 'Witness'], ['patroller', 'Patroller'], ['receiving_provider', 'Receiving provider (hand-off)']];
 const sevTone = { minor: 'neutral', moderate: 'warn', serious: 'bad', critical: 'bad' };
 const stateTone = { draft: 'warn', submitted: 'neutral', approved: 'good' };
@@ -68,9 +70,19 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       if (!checklists.length) checklists = await loadChecklists();
     } catch (err) {
       // No signal: keep what is on screen. Bedside entries are kept on the phone meanwhile.
-      if (current && (globalThis.navigator && globalThis.navigator.onLine === false || !(err && err.status))) { toast('No connection. Showing what was last loaded.', 'warn'); redraw(); return; }
+      const offline = (globalThis.navigator && globalThis.navigator.onLine === false) || !(err && err.status);
+      if (current && offline) { toast('No connection. Showing what was last loaded.', 'warn'); redraw(); return; }
+      // Opened in a dead spot: the copy kept on this phone the last time it was opened (up to 12 hours).
+      const kept = offline && !version ? keptCase(id) : null;
+      if (kept) {
+        ({ c, def, trails, checklists } = kept.data);
+        current = c; if (!mode) mode = 'care';
+        toast(`No connection. Showing the copy on this phone from ${new Date(kept.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}; new entries are sent when the signal returns.`, 'warn');
+        redraw(); return;
+      }
       clear(page).append(backLink(), errorBox(err)); return;
     }
+    if (!version) keepCase(id, { c, def, trails, checklists });
     current = c;
     if (!mode) mode = c.report_state === 'draft' && !version ? 'care' : 'report';
     redraw();
@@ -226,7 +238,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       const sec = scope.querySelector(`details[data-section="${where.section}"]`);
       if (sec) { sec.open = true; el = (where.field && sec.querySelector(`[data-field="${where.field}"]`)) || sec; }
     } else if (where.area) {
-      el = page.querySelector(`[data-area="${where.area}"]`);
+      el = scope.querySelector(`[data-area="${where.area}"]`) || page.querySelector(`[data-area="${where.area}"]`);
     }
     if (!el) return;
     const pane = el.closest('.pane');
@@ -290,6 +302,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       h('div', { class: 'spread care-patients' }, h('h2', null, pts.length > 1 ? 'Patients' : 'Patient'), switcher, pts.length ? addBtn : null),
       pts.length ? pts.map((p) => { const card = bedsideCard(p, c, { ...callbacks, base: `/patrol/incidents/${id}/patients/${p.id}` }); card.hidden = p.id !== activePid; return card; })
         : h('div', { class: 'empty stack' }, h('p', null, c.category === 'injury' || c.category === 'medical' ? 'Add the patient to start the care record.' : 'No patients on this report.'), addBtn),
+      c.category === 'lost_person' && !version ? searchPanel(c, { editable, roster, trails: trails || [] }) : null,
       checklistPanel(c, { id, editable, reload: load, defs: checklists }),
       voided.length ? h('section', { class: 'panel stack voided-patients' }, h('h3', null, 'Entered in error'), h('ul', { class: 'plain' }, voided.map((p) => h('li', { class: 'voided' }, h('span', { class: 'what' }, `${p.first_name} ${p.last_name}`), voidedNote(p))))) : null);
   }
@@ -721,7 +734,11 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
   // ============================================================ RECORD
   function recordPane(c) {
     return h('section', { class: 'pane stack', 'data-pane': 'record', role: 'tabpanel', 'aria-labelledby': 'tab-record' },
-      notesPanel(c), versionsPanel(c), correctionsPanel(c));
+      c.protocol_stamp ? h('p', { class: 'muted small' }, c.protocol_stamp) : null,
+      notesPanel(c), versionsPanel(c),
+      !version && has('records') ? legalHoldControl({ ...c, legal_hold: Boolean(Number(c.legal_hold)) }, load) : (Number(c.legal_hold) ? h('p', { class: 'warn-note' }, `On legal hold: ${c.legal_hold_note || ''}`) : null),
+      !version && has('view_cases') ? recordsPanel(c, { canManage: has('records') }) : null,
+      correctionsPanel(c));
   }
 
   function notesPanel(c) {

@@ -117,6 +117,7 @@ add('patient', 'head', 'head_vomit_count', 'How many times', 'number', { min: 0,
 add('patient', 'head', 'head_headache', 'Headache', 'select', { options: opts(...YN) });
 add('patient', 'head', 'head_seizure', 'Seizure', 'select', { options: opts(...YN) });
 add('patient', 'head', 'head_helmet_damage', 'Helmet damaged', 'select', { options: opts(...YN, ['na', 'No helmet']) });
+add('patient', 'head', 'return_cleared_note', 'Cleared to return to skiing by (name and reason)', 'text', { hint: 'Only when someone with the authority cleared a patient with head injury signs to ski again' });
 
 // ---- spine
 add('patient', 'spine', 'spine_mechanism', 'Dangerous mechanism (high speed, fall from height, axial load)', 'select', { options: opts(...YN) });
@@ -204,6 +205,7 @@ add('patient', 'transport', 'disposition', 'Outcome', 'select', { col: 'disposit
 // ---- refusal of care (patient)
 add('patient', 'refusal', 'refusal_scope', 'What was refused', 'select', { when: { field: 'disposition', equals: 'refused_care' }, options: opts(['all_care', 'All care'], ['transport', 'Transport to higher care'], ['some_treatment', 'Some treatment'], ['further_evaluation', 'Further evaluation']) });
 add('patient', 'refusal', 'refusal_capacity', 'Patient alert and able to decide', 'select', { when: { field: 'disposition', equals: 'refused_care' }, options: opts(...YN) });
+add('patient', 'refusal', 'refusal_capacity_note', 'How you judged they could decide', 'text', { when: { field: 'disposition', equals: 'refused_care' }, hint: 'Needed when drugs or alcohol, loss of consciousness, amnesia or a GCS under 15 is recorded. For example: "Oriented to person, place, time; repeated back the risks."' });
 add('patient', 'refusal', 'refusal_risks_explained', 'Risks explained, including that the condition could worsen', 'select', { when: { field: 'disposition', equals: 'refused_care' }, options: opts(...YN) });
 add('patient', 'refusal', 'refusal_reason', 'Reason given for refusing', 'text', { when: { field: 'disposition', equals: 'refused_care' } });
 add('patient', 'refusal', 'refusal_advice', 'Advice given about when to seek care', 'text', { when: { field: 'disposition', equals: 'refused_care' } });

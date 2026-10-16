@@ -30,21 +30,26 @@ export async function drawDispatch(box, { canLead }) {
   let timer = null;
   const mgr = has('manage_settings');
 
+  const mine = h('div');
   async function load() {
     if (!box.isConnected && timer) { clearInterval(timer); timer = null; return; }
     try {
-      const [{ data }, a] = await Promise.all([get('/patrol/dispatch'), get('/patrol/dispatch/available')]);
+      const [{ data }, a, m] = await Promise.all([get('/patrol/dispatch'), get('/patrol/dispatch/available'), get('/patrol/dispatch-mine')]);
+      // The calls I am sent to, with "On my way" so dispatch knows the alert was seen.
+      clear(mine).append(...m.data.map((c) => h('div', { class: `my-call${c.acked_at ? '' : ' is-new'}`, role: c.acked_at ? null : 'alert' },
+        h('b', null, `You are sent to call ${c.call_no}: `), c.location, c.description ? ` (${c.description})` : '',
+        c.acked_at ? h('span', { class: 'muted' }, ' On your way') : button('On my way', async () => { await post(`/patrol/dispatch/${c.id}/ack`); toast('Dispatch knows you are on your way'); await load(); }, { kind: 'primary' }))));
       clear(board).append(data.length ? h('div', { class: 'call-grid' }, data.map((c) => callCard(c, () => openCall(c.id, load)))) : empty('No active calls.'));
-      clear(avail).append(h('p', null, h('b', null, 'Patrollers clocked in: '), a.data.length
-        ? a.data.map((p) => `${p.callsign || `${p.first_name} ${p.last_name}`}${p.state === 'on_call' ? ' (on a call)' : ''}`).join(', ')
-        : h('span', { class: 'muted' }, 'nobody is clocked in')));
+      clear(avail).append(h('p', null, h('b', null, 'On duty: '), a.data.length
+        ? a.data.map((p) => `${p.callsign || `${p.first_name} ${p.last_name}`}${p.radio ? ` (radio ${p.radio})` : ''}${p.state === 'on_call' ? ' (on a call)' : ''}`).join(', ')
+        : h('span', { class: 'muted' }, 'nobody is signed in. Patrollers sign in on Now, On duty.')));
     } catch (err) { clear(board).append(errorBox(err)); }
   }
 
   clear(box).append(h('div', { class: 'stack' },
     h('div', { class: 'spread' }, h('p', { class: 'muted' }, 'The board refreshes every 15 seconds. Guest requests arrive here as New calls.'),
       h('div', { class: 'row' }, mgr ? button('Guest help page', () => guestHelpDialog(), {}) : null, button('History', () => historyDialog(), {}), button('New call', () => newCallDialog(load), { kind: 'primary' }))),
-    avail, board));
+    mine, avail, board));
   await load();
   timer = setInterval(load, 15000);
   if (timer && timer.unref) timer.unref(); // Node (tests) only; browsers return a number
@@ -76,9 +81,11 @@ async function openCall(id, again) {
       h('p', null, h('b', null, c.location), c.description ? ` · ${c.description}` : ''),
       h('p', { class: 'muted' }, `${fmtDateTime(c.received_at)} · ${c.source === 'guest' ? 'Guest request' : label(c.source)}${c.caller_name ? ` · ${c.caller_name}` : ''}${c.caller_phone ? ` · ${c.caller_phone}` : ''}`),
       h('h3', null, 'Responders'),
-      c.responders.length ? h('ul', null, c.responders.map((r) => h('li', null, `${r.callsign ? `${r.callsign}: ` : ''}${r.first_name} ${r.last_name}`, live ? button('Remove', async () => { await del(`/patrol/dispatch/${id}/responders/${r.staff_id}`); await draw(); await again(); }, { small: true }) : null))) : h('p', { class: 'muted' }, 'No one sent yet.'),
+      c.responders.length ? h('ul', null, c.responders.map((r) => h('li', null, `${r.callsign ? `${r.callsign}: ` : ''}${r.first_name} ${r.last_name}`,
+        ' ', r.acked_at ? state('On the way', 'good') : r.notified_at ? state('Alerted, not answered', 'warn') : state('No phone alert', 'neutral'), r.texted_at ? state('Texted', 'neutral') : null,
+        live && !r.acked_at ? button('Text them', async () => { await post(`/patrol/dispatch/${id}/responders/${r.staff_id}/text`); toast('Text sent'); await draw(); }, { small: true, kind: 'ghost' }) : null, live ? button('Remove', async () => { await del(`/patrol/dispatch/${id}/responders/${r.staff_id}`); await draw(); await again(); }, { small: true }) : null))) : h('p', { class: 'muted' }, 'No one sent yet.'),
       live ? h('div', { class: 'row' }, pick, button('Send', async () => { if (!pick.value) { toast('Choose a patroller first', 'error'); return; } await post(`/patrol/dispatch/${id}/responders`, { staff_id: Number(pick.value) }); await draw(); await again(); }, { kind: 'primary' })) : null,
-      live && !choices.length ? h('p', { class: 'muted' }, 'Only patrollers who are clocked in appear here.') : null,
+      live && !choices.length ? h('p', { class: 'muted' }, 'Only patrollers on duty appear here: signed in on Patrol, or clocked in for a patrol shift.') : null,
       live ? h('div', { class: 'row' }, (NEXT[c.status] || []).map(([k, t]) => button(t, () => step(k)))) : null,
       h('h3', null, 'Timeline'),
       h('ul', { class: 'timeline' }, c.events.map((e) => h('li', null, h('span', { class: 'muted' }, fmtTime(e.at)), h('span', null, kindText[e.kind], e.first_name ? `: ${e.first_name} ${e.last_name}` : '', e.note ? ` (${e.note})` : '')))),

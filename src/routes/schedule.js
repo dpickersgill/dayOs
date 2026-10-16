@@ -41,7 +41,8 @@ const liftFields = { name: z.string().min(1).max(100), status: z.enum(['open', '
 const trailFields = {
   name: z.string().min(1).max(100),
   difficulty: z.enum(['green', 'blue', 'black', 'double_black', 'park']).optional(),
-  status: z.enum(['open', 'closed']).optional(),
+  status: z.enum(['open', 'hold', 'closed']).optional(),
+  closure_reason: z.string().max(200).nullable().optional(),
   groomed: z.coerce.number().int().min(0).max(1).optional(),
 };
 const eventFields = {
@@ -74,7 +75,7 @@ schedule.patch('/lifts/:id', async (req, res, next) => {
   } catch (err) { return next(err); }
 });
 schedule.use('/lifts', crud({ table: 'lifts', entity: 'Lift', createSchema: z.object(liftFields), updateSchema: partialOf(liftFields), columns: ['name', 'status'], filters: ['status'], orderBy: 'name', readRoles: 'any', writeRoles: ['manager', 'patrol', 'staff'] }));
-schedule.use('/trails', crud({ table: 'trails', entity: 'Trail', createSchema: z.object(trailFields), updateSchema: partialOf(trailFields), columns: ['name', 'difficulty', 'status', 'groomed'], filters: ['status', 'difficulty'], orderBy: 'name', readRoles: 'any', writeRoles: ['manager', 'patrol', 'staff'] }));
+schedule.use('/trails', crud({ table: 'trails', entity: 'Trail', createSchema: z.object(trailFields), updateSchema: partialOf(trailFields), columns: ['name', 'difficulty', 'status', 'closure_reason', 'groomed'], filters: ['status', 'difficulty'], orderBy: 'name', readRoles: 'any', writeRoles: ['manager', 'patrol', 'staff'] }));
 schedule.use('/events', crud({ table: 'events', entity: 'Event', createSchema: z.object(eventFields), updateSchema: partialOf(eventFields), columns: ['title', 'starts_at', 'ends_at', 'description'], orderBy: 'starts_at', readRoles: 'any', writeRoles: ['manager'] }));
 
 /**

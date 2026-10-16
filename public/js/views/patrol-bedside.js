@@ -8,10 +8,10 @@ import { flag, flagAvpu, trend, ARROW, ARROW_WORD, STRIP } from '../vitals-guide
 import { openVitalsSheet, dueAt } from './patrol-vitals.js';
 import { assessSheet, treatmentSheet, arrestSheet, voidDialog, effectDialog, sheetDone, sentToast } from './patrol-tools.js';
 import { send, pending } from '../outbox.js';
-import { live, atTime, treatmentName, treatmentDetail, cmsLost, lateNote, vitalsWords, gcsText, pupilsText, tempText } from '../care-text.js';
+import { LIMB, live, atTime, treatmentName, treatmentDetail, cmsLost, lateNote, vitalsWords, gcsText, pupilsText, tempText } from '../care-text.js';
 
 /** Quick treatments. A sheet opens for those with details worth recording; the rest log with one tap. */
-const QUICK = [['splint', 'Splint', 'sheet'], ['spinal_motion_restriction', 'Spine', 'sheet'], ['oxygen', 'Oxygen', 'sheet'], ['ice', 'Ice'], ['bandage', 'Bandage'], ['warming', 'Warming']];
+const QUICK = [['splint', 'Splint', 'sheet'], ['spinal_motion_restriction', 'Spine', 'sheet'], ['oxygen', 'Oxygen', 'sheet'], ['tourniquet', 'Tourniquet', 'sheet'], ['pelvic_binder', 'Pelvic binder'], ['ice', 'Ice'], ['bandage', 'Bandage'], ['warming', 'Warming']];
 
 /** Minutes between a mountain-clock timestamp ('YYYY-MM-DD HH:MM:SS') and now. */
 export function minutesSince(ts) {
@@ -98,7 +98,7 @@ export function bedsideCard(p, c, opts) {
   const t = setInterval(() => { if (!due.isConnected) { clearInterval(t); return; } drawDue(); }, 15000);
   if (t && t.unref) t.unref();
 
-  const openVitals = () => openVitalsSheet({ base, caseId: id, patientName: name, age, last: cur, onSaved: after });
+  const openVitals = () => openVitalsSheet({ base, caseId: id, patientName: name, age, last: cur, severity: c.severity, onSaved: after });
 
   const strip = h('div', { class: 'vstrip' }, STRIP.map((s) => tile(s, cur, prev, age)));
   const avpuF = cur ? flagAvpu(cur.avpu) : { level: 'none' };
@@ -135,13 +135,13 @@ export function bedsideCard(p, c, opts) {
 
   // ---- treatments
   const quickTap = ([k, text, sheet]) => button(text, async () => {
-    if (sheet) { treatmentSheet({ kind: k, base, caseId: id, roster: opts.roster, onSaved: after }); return; }
+    if (sheet) { treatmentSheet({ kind: k, base, caseId: id, roster: opts.roster, patient: p, onSaved: after }); return; }
     const r = await send('POST', `${base}/treatments`, { kind: k, performed_at: nowStamp() }, { caseId: id, label: text });
     sentToast(r, `${text} logged`);
     await after(r);
   }, { small: true });
   const quick = editable ? h('div', { class: 'chip-row quick', role: 'group', 'aria-label': 'Log a treatment now' }, QUICK.map(quickTap),
-    button('Medication', () => treatmentSheet({ kind: 'medication', base, caseId: id, roster: opts.roster, onSaved: after }), { small: true }),
+    button('Medication', () => treatmentSheet({ kind: 'medication', base, caseId: id, roster: opts.roster, patient: p, onSaved: after }), { small: true }),
     button('Other…', () => opts.treatmentDialog(base), { small: true })) : null;
   const trRow = (tr) => {
     const d = tr.detail || {};
@@ -182,6 +182,7 @@ export function bedsideCard(p, c, opts) {
       h('div', { class: 'row' }, p.disposition ? state(label(p.disposition), 'neutral') : state('No outcome yet', 'warn'))),
     p.chief_complaint ? h('p', { class: 'complaint' }, h('b', null, 'Complaint: '), p.chief_complaint) : h('p', { class: 'muted' }, 'No chief complaint yet.'),
     h('div', { class: 'row sample' }, sampleChip('Allergies', p.allergies, { danger: true }), sampleChip('Medications', p.medications), sampleChip('History', p.medical_history)),
+    ...live(p.treatments).filter((tr) => tr.kind === 'tourniquet').map((tr) => h('p', { class: 'tq-banner', role: 'alert' }, h('b', null, `Tourniquet on ${LIMB[(tr.detail || {}).limb] || ''} since ${fmtTime(tr.performed_at)}`), ` (${agoText(minutesSince(String(tr.performed_at)))})`)),
     refused.length ? h('div', { class: 'outbox-refused', role: 'alert' }, h('b', null, `${refused.length} entr${refused.length === 1 ? 'y' : 'ies'} could not be saved. `), refused.map((x) => `${x.label}: ${x.error}`).join('; ')) : null,
     h('div', { class: 'bed-grid' },
       h('div', { class: 'bed-now stack' },

@@ -54,6 +54,7 @@ test.before(async () => {
   const staff = async (first) => ok(await api('POST', '/workforce/staff', { token: o, body: { person: { first_name: first, last_name: 'Patroller' }, status: 'active' } }), 201).id;
   D.s1 = await staff('Pat'); D.s2 = await staff('Quinn'); D.s3 = await staff('Riley');
   D.inactive = ok(await api('POST', '/workforce/staff', { token: o, body: { person: { first_name: 'Old', last_name: 'Timer' }, status: 'inactive' } }), 201).id;
+  await api('POST', '/patrol/meds/formulary', { token: o, body: { name: 'Ibuprofen', authority: 'standing_order', routes: ['oral'], max_dose: 800, dose_unit: 'mg', min_cert: 'none' } }); // this patrol's medical director allows it
   T.pat = await addUser(A, `pat@${A.slug}.test`, 'patrol', { staff_id: D.s1 });
   T.quinn = await addUser(A, `quinn@${A.slug}.test`, 'patrol', { staff_id: D.s2 });
   T.unlinked = await addUser(A, `unlinked@${A.slug}.test`, 'patrol');
@@ -516,6 +517,7 @@ test('NSAAR form: every field is described, stored, validated and can be made ma
   assert.deepEqual(got.form, { weather: 'snowing', light: 'flat', temperature: 'minus10_to_0', surface: 'groomed', snow: '0_to_5', run_classification: 'more_difficult' }, 'merged, null removes a field, and the run class comes from the trail');
 
   const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: T.pat, body: { first_name: 'Dana', last_name: 'Rider', chief_complaint: 'Wrist pain', disposition: 'transported_ambulance', form: { activity: 'snowboard', body_parts: { wrist: 'L', head: 'X' }, treatment_protocol: ['fracture'], from_base: 'ambulance', helmet: 'owned' } } }), 201);
+  ok(await api('POST', `/patrol/incidents/${c.id}/patients/${p.id}/vitals`, { token: T.pat, body: { pulse: 88, bp_sys: 124, bp_dia: 80 } }), 201); // sent to higher care: vitals are needed
   assert.equal((await api('PATCH', `/patrol/incidents/${c.id}/patients/${p.id}`, { token: T.pat, body: { form: { body_parts: { elbow: 'Q' } } } })).status, 400);
   assert.equal((await api('PATCH', `/patrol/incidents/${c.id}/patients/${p.id}`, { token: T.pat, body: { form: { scene_on: '25:99' } } })).status, 400, '24 hour time');
   const mine = ok(await api('GET', `/patrol/incidents/${c.id}`, { token: T.pat })).patients[0];

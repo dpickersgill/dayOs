@@ -34,7 +34,7 @@ router.get('/team', patrol, async (req, res) => {
 
   const excepted = new Map((await rows(pool, 'SELECT staff_id, COUNT(*) AS n FROM patrol_member_access WHERE tenant_id = ? GROUP BY staff_id', [tenantId])).map((r) => [Number(r.staff_id), Number(r.n)]));
   const [members, certs, training, led] = await Promise.all([
-    rows(pool, `SELECT m.staff_id, m.level, m.access_level, m.callsign, m.patrol_number, m.emergency_contact, m.notes, s.status AS staff_status, s.in_workforce, p.first_name, p.last_name, p.email, p.phone
+    rows(pool, `SELECT m.staff_id, m.level, m.access_level, m.cert_level, m.callsign, m.patrol_number, m.emergency_contact, m.notes, s.status AS staff_status, s.in_workforce, p.first_name, p.last_name, p.email, p.phone
                 FROM patrol_members m JOIN staff s ON s.id = m.staff_id AND s.tenant_id = m.tenant_id JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id
                 WHERE m.tenant_id = ? ORDER BY FIELD(m.level, 'director', 'leader', 'senior', 'patroller', 'candidate'), p.last_name, p.first_name`, [tenantId]),
     rows(pool, `SELECT sc.staff_id, c.name, sc.expires_on FROM staff_certifications sc JOIN certifications c ON c.id = sc.certification_id AND c.tenant_id = sc.tenant_id
@@ -45,7 +45,7 @@ router.get('/team', patrol, async (req, res) => {
   ]);
   const soon = addDays(today, 30);
   const data = members.map((m) => ({
-    staff_id: m.staff_id, first_name: m.first_name, last_name: m.last_name, level: m.level, access_level: m.access_level, exceptions: excepted.get(Number(m.staff_id)) || 0, callsign: m.callsign, patrol_number: m.patrol_number, staff_status: m.staff_status, on_staff_list: Boolean(m.in_workforce),
+    staff_id: m.staff_id, first_name: m.first_name, last_name: m.last_name, level: m.level, access_level: m.access_level, cert_level: m.cert_level, exceptions: excepted.get(Number(m.staff_id)) || 0, callsign: m.callsign, patrol_number: m.patrol_number, staff_status: m.staff_status, on_staff_list: Boolean(m.in_workforce),
     phone: m.phone,
     ...(seeAll ? { email: m.email, emergency_contact: m.emergency_contact, notes: m.notes } : {}),
     certifications: certs.filter((c) => c.staff_id === m.staff_id).map((c) => ({
@@ -65,6 +65,8 @@ const memberFields = {
   patrol_number: z.string().max(20).nullable().optional(),
   emergency_contact: z.string().max(255).nullable().optional(),
   notes: z.string().max(500).nullable().optional(),
+  // Highest medical certification: the formulary uses it to say who may give which medication.
+  cert_level: z.enum(['none', 'oec', 'emr', 'emt', 'aemt', 'paramedic', 'rn', 'md']).optional(),
 };
 
 /** Anyone who can manage the roster may make someone Patrol or Host; the higher levels are set by an Admin. */
@@ -252,13 +254,17 @@ const equipmentFields = {
   station_id: z.number().int().positive().nullable().optional(),
   serial: z.string().max(60).nullable().optional(),
   status: z.enum(['in_service', 'needs_attention', 'out_of_service', 'retired']).optional(),
+  expires_on: dateStr.nullable().optional(),        // any item with a date: a trauma bag's earliest expiry, a splint kit
+  pads_expire_on: dateStr.nullable().optional(),    // AED
+  battery_expire_on: dateStr.nullable().optional(), // AED
+  o2_size: z.enum(['M6', 'C', 'D', 'E', 'M60', 'other']).nullable().optional(), // oxygen cylinder
 };
 
 router.get('/equipment', patrol, async (req, res) => {
   const { tenantId } = req.auth;
   const data = await rows(
     pool,
-    `SELECT e.id, e.name, e.kind, e.serial, e.status, e.station_id, st.name AS station,
+    `SELECT e.id, e.name, e.kind, e.serial, e.status, e.station_id, st.name AS station, e.expires_on, e.pads_expire_on, e.battery_expire_on, e.o2_size, e.o2_psi, e.needs_download,
             c.checked_at AS last_checked_at, c.result AS last_result, c.reading AS last_reading, c.notes AS last_notes
      FROM patrol_equipment e LEFT JOIN patrol_stations st ON st.id = e.station_id AND st.tenant_id = e.tenant_id
      LEFT JOIN equipment_checks c ON c.id = (SELECT c2.id FROM equipment_checks c2 WHERE c2.tenant_id = e.tenant_id AND c2.equipment_id = e.id ORDER BY c2.checked_at DESC, c2.id DESC LIMIT 1)
@@ -270,7 +276,8 @@ router.get('/equipment', patrol, async (req, res) => {
 
 router.post('/equipment', patrol, needs('manage_equipment'), validate(z.object(equipmentFields)), async (req, res) => {
   const b = req.body;
-  const [r] = await pool.query('INSERT INTO patrol_equipment (tenant_id, name, kind, station_id, serial, status) VALUES (?, ?, ?, ?, ?, ?)', [req.auth.tenantId, b.name, b.kind, b.station_id ?? null, b.serial ?? null, b.status ?? 'in_service']);
+  const [r] = await pool.query('INSERT INTO patrol_equipment (tenant_id, name, kind, station_id, serial, status, expires_on, pads_expire_on, battery_expire_on, o2_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [req.auth.tenantId, b.name, b.kind, b.station_id ?? null, b.serial ?? null, b.status ?? 'in_service', b.expires_on ?? null, b.pads_expire_on ?? null, b.battery_expire_on ?? null, b.o2_size ?? null]);
   await audit(pool, req, 'create', 'patrol_equipment', r.insertId);
   res.status(201).json({ id: r.insertId });
 });
@@ -288,14 +295,24 @@ router.patch('/equipment/:id', patrol, needs('manage_equipment'), validate(parti
 router.post(
   '/equipment/:id/checks',
   patrol,
-  validate(z.object({ result: z.enum(['ok', 'needs_attention', 'out_of_service']), reading: z.string().max(40).optional(), notes: z.string().max(255).optional() })),
+  validate(z.object({ result: z.enum(['ok', 'needs_attention', 'out_of_service']), reading: z.string().max(40).optional(), notes: z.string().max(255).optional(), psi: z.number().int().min(0).max(3000).optional(), downloaded: z.boolean().optional() })),
   async (req, res) => {
     const id = paramId(req);
     const b = req.body;
     const out = await tx(async (conn) => {
-      const e = await one(conn, 'SELECT id, status FROM patrol_equipment WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id]);
+      const e = await one(conn, 'SELECT id, kind, status, needs_download FROM patrol_equipment WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id]);
       if (!e) throw notFound('Equipment');
       if (e.status === 'retired') throw conflict('This item is retired');
+      // Oxygen: the pressure is kept on the cylinder, and one below the refill level cannot pass as "ok".
+      if (e.kind === 'oxygen' && b.psi !== undefined) {
+        const { o2_refill_psi: refill } = await require('../lib/patrolops').settingsOf(conn, req.auth.tenantId);
+        await conn.query('UPDATE patrol_equipment SET o2_psi = ? WHERE tenant_id = ? AND id = ?', [b.psi, req.auth.tenantId, id]);
+        if (!b.reading) b.reading = `${b.psi} psi`;
+        if (b.psi < refill && b.result === 'ok') { b.result = 'needs_attention'; b.notes = [b.notes, `Below ${refill} psi: refill`].filter(Boolean).join('. '); }
+      }
+      // AED: after use on a patient the data is downloaded for the medical director before it goes back in service.
+      if (e.kind === 'aed' && Number(e.needs_download) && b.result === 'ok' && !b.downloaded) throw conflict('This AED was used on a patient. Download its data for the medical director and fit new pads, then tick Downloaded.');
+      if (e.kind === 'aed' && b.downloaded) await conn.query('UPDATE patrol_equipment SET needs_download = 0 WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, id]);
       if (b.result === 'ok' && ['needs_attention', 'out_of_service'].includes(e.status) && !(await PA.can(pool, req, 'manage_equipment'))) throw forbidden('A flagged item has to be cleared by someone who manages equipment');
       const [r] = await conn.query('INSERT INTO equipment_checks (tenant_id, equipment_id, checked_by, result, reading, notes) VALUES (?, ?, ?, ?, ?, ?)', [req.auth.tenantId, id, req.auth.userId, b.result, b.reading ?? null, b.notes ?? null]);
       const status = b.result === 'ok' ? 'in_service' : b.result;
@@ -494,7 +511,7 @@ router.get('/me', patrol, async (req, res) => {
   const who = req.auth.staffId ? await one(pool, 'SELECT p.first_name, p.last_name, m.patrol_number, m.callsign FROM staff s JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id LEFT JOIN patrol_members m ON m.staff_id = s.id AND m.tenant_id = s.tenant_id WHERE s.tenant_id = ? AND s.id = ?', [req.auth.tenantId, req.auth.staffId]) : null;
   const R = require('../lib/review');
   const rs = await R.settingsOf(pool, req.auth.tenantId);
-  res.json({ review_group: rs.enabled, is_reviewer: await R.canReview(pool, req, rs), can_manage_review: await R.canManage(pool, req, rs), name: who ? `${who.first_name} ${who.last_name}` : null, patrol_number: who ? who.patrol_number || who.callsign || null : null, can_lead: access.features.has('manage_training') || access.features.has('manage_equipment'), can_admin_form: access.features.has('manage_settings'), staff_id: req.auth.staffId, access_level: access.level, features: [...access.features] });
+  res.json({ review_group: rs.enabled, is_reviewer: await R.canReview(pool, req, rs), can_manage_review: await R.canManage(pool, req, rs), name: who ? `${who.first_name} ${who.last_name}` : null, patrol_number: who ? who.patrol_number || who.callsign || null : null, can_lead: access.features.has('manage_training') || access.features.has('manage_equipment'), can_admin_form: access.features.has('manage_settings'), staff_id: req.auth.staffId, access_level: access.level, features: [...access.features], avalanche: (await require('../lib/patrolops').settingsOf(pool, req.auth.tenantId)).avalanche });
 });
 
 // ---------------------------------------------------------------- access levels (patrol Admins only)

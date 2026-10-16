@@ -1,6 +1,193 @@
 {
   "releases": [
     {
+      "version": "2026.10.11",
+      "date": "2026-10-16",
+      "title": "Patrol operations, and fixes from an EMS review",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "On duty: patrollers sign in when they reach the patrol room and out when they leave, on their phone or a shared patrol-room tablet. Dispatch now lists volunteers as well as paid patrollers, with their radio and station.",
+          "help": "patrol-duty"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Phone alerts: turn them on for each phone, and you are alerted when dispatch sends you to a call, with On my way to answer. Critical calls alert everyone on duty, and can text responders too.",
+          "help": "patrol-duty"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Closing sweep: set up routes of lifts and runs, give each to someone on duty, mark each stop as it is swept, call in anyone found, and call the mountain clear with the time. A late sweep raises an alert.",
+          "help": "patrol-sweep"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Opening checks: check each run (hazards marked, ropes and signs, padding) before opening it, or hold or close it with a reason. Mountain status updates at once, and runs now have a Hold status and a closure reason.",
+          "help": "patrol-sweep"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Medications: a formulary set by the medical director (authority, routes, largest dose, who may give it), stock by lot and expiry taken from as doses are given, controlled counts, and oxygen pressure and AED pad, battery and download tracking.",
+          "help": "patrol-meds"
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Giving a medication now checks the patient's allergies, and for nitroglycerin a recent blood pressure of at least 100 and no erectile dysfunction medication. Each patroller has a medical certification on the roster.",
+          "help": "patrol-meds"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Tourniquet and pelvic binder treatments. A tourniquet's time shows at the top of the patient and of the hand-off sheet.",
+          "help": "patrol-case"
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "The hand-off sheet puts time-critical items first (tourniquet, stroke with last known well, cardiac arrest), then follows the MIST order, and now includes the primary survey, spinal motion restriction, and drugs or alcohol.",
+          "help": "patrol-case"
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Reports check more before they are submitted: a head injury with loss of consciousness, amnesia or a low GCS does not go back to skiing without a written refusal or a named clearance; a refusal with drugs, alcohol or head injury signs needs a note on capacity; serious and transported patients need vitals.",
+          "help": "patrol-case"
+        },
+        {
+          "kind": "fixed",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Times in the future (23:45 typed for 13:45) are refused, and the vitals reminder stops once a patient has an outcome or is handed off.",
+          "help": null
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Lost-person search on a case: who is missing and where last seen, search areas assigned to patrollers (who are alerted) and marked searched, and when and where they were found.",
+          "help": "patrol-case"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Checklists for a patroller or employee injured or exposed on duty, and for lift-related incidents (including notifying the state tramway inspector).",
+          "help": null
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Daily log: one page per day built from everything recorded, with the leaders' notes, a sign-off, addenda after it, and search.",
+          "help": "patrol-log"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Lift evacuation: each lift's plan, equipment and patrollers needed, who on duty is ready, and drills that add a training record for each patroller.",
+          "help": "patrol-lifts"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Volunteer days: set the season's minimum, and each patroller sees their progress; reminders go to anyone short. Patrollers can be allowed to take open shifts themselves on Team, Cover.",
+          "help": "patrol-duty"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Avalanche work, for mountains that turn it on: snow and hazard observations, and control shots by slide path with results, which can hold or close the run.",
+          "help": "patrol-avalanche"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Records requests: log who asked for a report and on what authority, and release the approved report with a release number and a printable release pack. Cases can be put on legal hold.",
+          "help": "patrol-records"
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Patrol settings: the medical director and protocol version, stamped on each report at sign-off, and the settings for the features above.",
+          "help": "patrol-settings"
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "No signal: the last cases you opened can still be opened on your phone for 12 hours, and a new case started with no signal is sent when the signal returns.",
+          "help": null
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Days patrolled now count the days people signed in on duty, and show each volunteer's days against the minimum.",
+          "help": null
+        }
+      ]
+    },
+    {
       "version": "2026.10.10",
       "date": "2026-10-16",
       "title": "Patrol access from the staff page",

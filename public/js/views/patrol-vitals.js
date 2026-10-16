@@ -63,7 +63,7 @@ const GCS_M_INFANT = [[6, '6 Moves normally'], ...GCS_M.slice(1)];
  * Opens the vitals sheet for one patient. `last` is the most recent set (or undefined); `age` shapes the flags.
  * onSaved runs after the set is stored so the page can redraw.
  */
-export function openVitalsSheet({ base, caseId, patientName, age, last, onSaved }) {
+export function openVitalsSheet({ base, caseId, patientName, age, last, severity, onSaved }) {
   const unit = { now: tempUnit() };
   const S = {
     pulse: stepper({ key: 'pulse', label: 'Pulse', min: 0, max: 300, start: 80, last: last && last.pulse, age }),
@@ -117,7 +117,8 @@ export function openVitalsSheet({ base, caseId, patientName, age, last, onSaved 
   const whenPick = chipGroup({ id: 'v-when', options: WHEN, value: '0', labelledBy: 'v-when-l' });
   const custom = h('input', { type: 'datetime-local', id: 'v-time', value: nowInput(), 'aria-label': 'Time taken', hidden: true });
   whenPick.el.addEventListener('click', () => { custom.hidden = whenPick.get() !== 'other'; });
-  const again = chipGroup({ id: 'v-again', options: AGAIN, value: '', labelledBy: 'v-again-l' });
+  // Every 5 minutes for a serious or critical patient, every 15 otherwise (the usual teaching); either can be changed.
+  const again = chipGroup({ id: 'v-again', options: AGAIN, value: AGAIN.some((a) => String(a[0]) === '5') && ['serious', 'critical'].includes(severity) ? '5' : AGAIN.some((a) => String(a[0]) === '15') ? '15' : '', labelledBy: 'v-again-l' });
   const notes = h('input', { id: 'v-notes', maxlength: 255, placeholder: 'Anything else (optional)', 'aria-label': 'Notes' });
   const err = h('div');
 

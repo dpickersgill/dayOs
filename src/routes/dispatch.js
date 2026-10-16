@@ -12,6 +12,9 @@ const { z, dateStr, validate, paramId, nowIn } = require('../lib/util');
 const { notFound, bad, conflict } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const patrolCases = require('./patrol');
+const OPS = require('../lib/patrolops');
+const PUSH = require('../lib/push');
+const SMS = require('../lib/sms');
 
 const router = express.Router();
 const publicRouter = express.Router();
@@ -71,26 +74,49 @@ router.get('/dispatch', patrol, needs('dispatch'), async (req, res) => {
   res.json({ data: calls.map((c) => ({ ...withNo(c), responders: responders.filter((r) => r.call_id === c.id) })) });
 });
 
-/** Patrollers who are clocked in right now, and whether they are already out on a call. */
+/**
+ * Patrollers on duty right now: signed in on Patrol (volunteers and paid alike), or clocked in on the time clock for a
+ * patrol shift. Each says whether they are already out on a call.
+ */
 router.get('/dispatch/available', patrol, needs('dispatch'), async (req, res) => {
   const { tenantId } = req.auth;
-  const data = await rows(
-    pool,
-    `SELECT DISTINCT s.id AS staff_id, p.first_name, p.last_name, m.callsign, te.clock_in,
-            (SELECT c.id FROM dispatch_responders r JOIN dispatch_calls c ON c.id = r.call_id AND c.tenant_id = r.tenant_id
-              WHERE r.tenant_id = s.tenant_id AND r.staff_id = s.id AND c.status IN ('dispatched','on_scene','transporting') LIMIT 1) AS on_call_id
-     FROM time_entries te
-     JOIN staff s ON s.id = te.staff_id AND s.tenant_id = te.tenant_id AND s.status = 'active'
+  const duty = await OPS.onDuty(pool, tenantId);
+  const clocked = await rows(pool, `SELECT DISTINCT s.id AS staff_id, p.first_name, p.last_name, m.callsign, te.clock_in
+     FROM time_entries te JOIN staff s ON s.id = te.staff_id AND s.tenant_id = te.tenant_id AND s.status = 'active'
      JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id
      LEFT JOIN patrol_members m ON m.staff_id = s.id AND m.tenant_id = s.tenant_id
      LEFT JOIN shifts sh ON sh.id = te.shift_id AND sh.tenant_id = te.tenant_id
      LEFT JOIN positions pos ON pos.id = sh.position_id AND pos.tenant_id = sh.tenant_id
-     WHERE te.tenant_id = ? AND te.clock_out IS NULL AND (m.id IS NOT NULL OR pos.department = 'patrol')
-     ORDER BY p.last_name, p.first_name`,
-    [tenantId],
-  );
-  res.json({ data: data.map((a) => ({ ...a, state: a.on_call_id ? 'on_call' : 'available' })) });
+     WHERE te.tenant_id = ? AND te.clock_out IS NULL AND (m.id IS NOT NULL OR pos.department = 'patrol')`, [tenantId]);
+  const byId = new Map();
+  for (const d of duty) byId.set(Number(d.staff_id), { staff_id: Number(d.staff_id), first_name: d.first_name, last_name: d.last_name, callsign: d.callsign, radio: d.radio, station: d.station, since: d.signed_in_at, via: 'signed_in' });
+  for (const c of clocked) if (!byId.has(Number(c.staff_id))) byId.set(Number(c.staff_id), { staff_id: Number(c.staff_id), first_name: c.first_name, last_name: c.last_name, callsign: c.callsign, since: c.clock_in, via: 'time_clock' });
+  const ids = [...byId.keys()];
+  const busy = ids.length ? await rows(pool, `SELECT r.staff_id, c.id FROM dispatch_responders r JOIN dispatch_calls c ON c.id = r.call_id AND c.tenant_id = r.tenant_id
+     WHERE r.tenant_id = ? AND r.staff_id IN (?) AND c.status IN ('dispatched','on_scene','transporting')`, [tenantId, ids]) : [];
+  const onCall = new Map(busy.map((b) => [Number(b.staff_id), b.id]));
+  const data = [...byId.values()].map((a) => ({ ...a, on_call_id: onCall.get(a.staff_id) || null, state: onCall.has(a.staff_id) ? 'on_call' : 'available' }))
+    .sort((a, b) => `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`));
+  res.json({ data });
 });
+
+/** Alert the people sent to a call on their phones, and text them too on a critical call when the mountain allows it. */
+async function alertResponders(tenantId, call, staffIds, { text = false } = {}) {
+  const msg = { title: `${call.priority === 'critical' ? 'CRITICAL: ' : ''}Patrol call ${callNo(call)}`, body: `${call.location}${call.description ? `. ${call.description}` : ''}`, url: '#/patrol/dispatch', tag: `call-${call.id}` };
+  await PUSH.notifyStaff(tenantId, staffIds, msg);
+  await pool.query('UPDATE dispatch_responders SET notified_at = UTC_TIMESTAMP() WHERE tenant_id = ? AND call_id = ? AND staff_id IN (?)', [tenantId, call.id, staffIds]);
+  if (!text) return 0;
+  let texted = 0;
+  if (!(SMS.enabled())) return 0;
+  const phones = await rows(pool, 'SELECT s.id, p.phone FROM staff s JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE s.tenant_id = ? AND s.id IN (?) AND p.phone IS NOT NULL', [tenantId, staffIds]);
+  for (const ph of phones) {
+    const r = await SMS.send({ tenantId, to: ph.phone, body: `${msg.title}: ${msg.body}`.slice(0, 300) });
+    if (!r.ok) continue;
+    await pool.query('UPDATE dispatch_responders SET texted_at = UTC_TIMESTAMP() WHERE tenant_id = ? AND call_id = ? AND staff_id = ?', [tenantId, call.id, ph.id]);
+    texted += 1;
+  }
+  return texted;
+}
 
 const callFields = z.object({
   location: z.string().min(1).max(255),
@@ -107,6 +133,11 @@ router.post('/dispatch', patrol, needs('dispatch'), validate(callFields), async 
   const tenant = await one(pool, 'SELECT id, timezone FROM tenants WHERE id = ?', [req.auth.tenantId]);
   const out = await createCall(tenant, req.body, { source: req.body.source, userId: req.auth.userId, staffId: req.auth.staffId });
   await audit(pool, req, 'create', 'dispatch_calls', out.id, { source: req.body.source, priority: req.body.priority });
+  // A critical call goes to everyone on duty at once, so the nearest can answer on the radio.
+  if (req.body.priority === 'critical') {
+    const call = await loadCall(pool, tenant.id, out.id);
+    out.alerted = await PUSH.notifyStaff(tenant.id, await OPS.onDutyIds(pool, tenant.id), { title: `CRITICAL: Patrol call ${callNo(call)}`, body: `${call.location}${call.description ? `. ${call.description}` : ''}`, url: '#/patrol/dispatch', tag: `call-${call.id}` });
+  }
   res.status(201).json(out);
 });
 
@@ -123,7 +154,7 @@ router.get('/dispatch/:id', patrol, needs('dispatch'), async (req, res) => {
     rows(pool, `SELECT e.id, e.at, e.kind, e.note, e.staff_id, p.first_name, p.last_name FROM dispatch_events e
                 LEFT JOIN staff s ON s.id = e.staff_id AND s.tenant_id = e.tenant_id LEFT JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id
                 WHERE e.tenant_id = ? AND e.call_id = ? ORDER BY e.at, e.id`, [req.auth.tenantId, id]),
-    rows(pool, `SELECT r.staff_id, p.first_name, p.last_name, m.callsign FROM dispatch_responders r JOIN staff s ON s.id = r.staff_id AND s.tenant_id = r.tenant_id
+    rows(pool, `SELECT r.staff_id, r.notified_at, r.acked_at, r.texted_at, p.first_name, p.last_name, m.callsign FROM dispatch_responders r JOIN staff s ON s.id = r.staff_id AND s.tenant_id = r.tenant_id
                 JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id LEFT JOIN patrol_members m ON m.staff_id = r.staff_id AND m.tenant_id = r.tenant_id
                 WHERE r.tenant_id = ? AND r.call_id = ?`, [req.auth.tenantId, id]),
     c.incident_id ? one(pool, 'SELECT id, season, seq FROM incidents WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, c.incident_id]) : null,
@@ -180,7 +211,44 @@ router.post('/dispatch/:id/responders', patrol, needs('dispatch'), validate(z.ob
     if (c.status === 'new') await conn.query("UPDATE dispatch_calls SET status = 'dispatched' WHERE tenant_id = ? AND id = ?", [tenantId, c.id]);
     await audit(conn, req, 'dispatch', 'dispatch_calls', c.id, { staff_id: req.body.staff_id });
   });
+  const call = await loadCall(pool, tenantId, paramId(req));
+  const settings = await OPS.settingsOf(pool, tenantId);
+  await alertResponders(tenantId, call, [req.body.staff_id], { text: call.priority === 'critical' && settings.sms_critical });
   res.status(201).json({ ok: true });
+});
+
+/** "On my way": the responder acknowledges the alert, so dispatch knows it was seen. */
+router.post('/dispatch/:id/ack', patrol, async (req, res) => {
+  const { tenantId, staffId } = req.auth;
+  if (!staffId) throw bad('Your login is not linked to anyone on the roster');
+  const c = await loadCall(pool, tenantId, paramId(req));
+  const [r] = await pool.query('UPDATE dispatch_responders SET acked_at = COALESCE(acked_at, UTC_TIMESTAMP()) WHERE tenant_id = ? AND call_id = ? AND staff_id = ?', [tenantId, c.id, staffId]);
+  if (!r.affectedRows) throw notFound('You are not sent to this call');
+  const tz = (await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone;
+  await pool.query("INSERT INTO dispatch_events (tenant_id, call_id, at, kind, staff_id, note, user_id) VALUES (?, ?, ?, 'note', ?, 'On the way', ?)", [tenantId, c.id, nowIn(tz), staffId, req.auth.userId]);
+  res.json({ ok: true });
+});
+
+/** My calls: the ones I am sent to that are still open, for the alert screen and my phone. */
+router.get('/dispatch-mine', patrol, async (req, res) => {
+  const { tenantId, staffId } = req.auth;
+  if (!staffId) return res.json({ data: [] });
+  const list = await rows(pool, `SELECT c.*, r.acked_at FROM dispatch_responders r JOIN dispatch_calls c ON c.tenant_id = r.tenant_id AND c.id = r.call_id
+    WHERE r.tenant_id = ? AND r.staff_id = ? AND c.status IN ('new','dispatched','on_scene','transporting') ORDER BY c.received_at DESC`, [tenantId, staffId]);
+  res.json({ data: list.map(withNo) });
+});
+
+/** Text a responder who has not acknowledged (the dispatcher's backup when the phone alert was missed). */
+router.post('/dispatch/:id/responders/:staffId/text', patrol, needs('dispatch'), async (req, res) => {
+  const { tenantId } = req.auth;
+  const c = await loadCall(pool, tenantId, paramId(req));
+  const sid = paramId(req, 'staffId');
+  if (!(await one(pool, 'SELECT staff_id FROM dispatch_responders WHERE tenant_id = ? AND call_id = ? AND staff_id = ?', [tenantId, c.id, sid]))) throw notFound('Responder');
+  if (!(SMS.enabled())) throw bad('Text messages are not set up for SummitOps yet');
+  const n = await alertResponders(tenantId, c, [sid], { text: true });
+  if (!n) throw bad('Could not text them: check the phone number on their staff record');
+  await audit(pool, req, 'text_responder', 'dispatch_calls', c.id, { staff_id: sid });
+  res.json({ ok: true });
 });
 
 router.delete('/dispatch/:id/responders/:staffId', patrol, needs('dispatch'), async (req, res) => {
@@ -250,4 +318,4 @@ publicRouter.post(
   },
 );
 
-module.exports = { router, publicRouter };
+module.exports = { router, publicRouter, createCall };

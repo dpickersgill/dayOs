@@ -1,12 +1,13 @@
-// The hand-off sheet: one printable page that goes with a patient to the next level of care. It follows the order a paramedic
-// or emergency nurse wants it in: who, what hurts, what we found and did, the numbers over time, then who took over.
+// The hand-off sheet: one printable page that goes with a patient to the next level of care. Anything time-critical comes
+// first (a tourniquet time, a stroke's last known well, a cardiac arrest), then the MIST order a paramedic or emergency
+// nurse reports in: mechanism, injuries, signs (the vitals over time and the assessment), treatment, then SAMPLE history.
 
 import { get, patch, post } from '../api.js';
 import { h, clear, button, toast, formDialog, field, input, val, nowInput, fmtTime, label, errorBox } from '../ui.js';
 import { has } from './patrol-feat.js';
 import { flag, flagAvpu, vitalsLine } from '../vitals-guide.js';
 import { signaturePad } from '../sigpad.js';
-import { live, treatmentLine, measureText, vitalsWords } from '../care-text.js';
+import { live, treatmentLine, measureText, vitalsWords, LIMB } from '../care-text.js';
 
 const UNKNOWN_WORDS = /^(none|no|nkda|nka|n\/a|na|nil|denies)\b/i;
 const clean = (v) => (v === null || v === undefined ? '' : String(v).trim());
@@ -29,13 +30,37 @@ export function buildHandoff(c, p, nowText = '') {
     complaint: clean(p.chief_complaint), mechanism: clean(p.mechanism) || clean(f.description), assessment: clean(p.assessment),
     injuries: live(p.injuries).map((i) => `${label(i.injury_type)}, ${label(i.body_region)}${i.side && i.side !== 'na' ? ` (${i.side})` : ''}${i.notes ? `: ${i.notes}` : ''}`),
     treatments, meds, vitals: live(p.vitals),
-    head: headLine(f), arrest: f.arrest_time_down ? `Collapsed about ${f.arrest_time_down}${f.arrest_witnessed ? ` (${f.arrest_witnessed})` : ''}${f.arrest_bystander_cpr === 'yes' ? ', bystander CPR' : ''}` : '',
+    head: headLine(f), stroke: strokeLine(f), spine: spineLine(f), survey: surveyLine(f),
+    drugs: clean(f.drugs_alcohol) && !UNKNOWN_WORDS.test(clean(f.drugs_alcohol)) ? clean(f.drugs_alcohol) : '',
+    tourniquets: treatments.filter((t) => t.kind === 'tourniquet').map((t) => `${LIMB[(t.detail || {}).limb] || 'limb'} at ${fmtTime(t.performed_at)}`),
+    arrest: f.arrest_time_down ? `Collapsed about ${f.arrest_time_down}${f.arrest_witnessed ? ` (${f.arrest_witnessed})` : ''}${f.arrest_bystander_cpr === 'yes' ? ', bystander CPR' : ''}` : '',
     receiver: [...c.signatures].reverse().find((x) => x.kind === 'receiving_provider' && x.patient_id === p.id) || null,
     times: KEY_TIMES.map((k) => [k, firstEvent(k)]).filter(([, e]) => e).map(([k, e]) => [label(k), fmtTime(e.at)]),
     transport: { how: transportBits.join('; '), destination: f.destination_type && f.destination_type !== 'na' ? label(f.destination_type) : '', facility: clean(f.hospital_name), outcome: p.disposition ? label(p.disposition) : '' },
     handoff: { to: clean(f.handoff_to), time: clean(f.handoff_time) },
     lead: lead ? `${lead.first_name} ${lead.last_name}` : '',
   };
+}
+
+/** Stroke check in one line, with last known well first: it decides what the stroke team can do. */
+function strokeLine(f) {
+  const abn = [f.stroke_face === 'droop' && 'face droop', f.stroke_arm === 'drift' && 'arm drift', f.stroke_speech === 'abnormal' && 'speech abnormal'].filter(Boolean);
+  const normal = [f.stroke_face, f.stroke_arm, f.stroke_speech].some((x) => x === 'normal');
+  if (!f.stroke_last_well && !abn.length && !normal) return '';
+  return [f.stroke_last_well && `LAST KNOWN WELL ${f.stroke_last_well}`, abn.length ? abn.join(', ') : 'face, arms and speech normal'].filter(Boolean).join('; ');
+}
+const SPINE_DECISION = { smr: 'spinal motion restriction applied', not_indicated: 'SMR not indicated by the criteria', declined: 'patient declined SMR' };
+/** Spine: the decision and the answers that led to it. */
+function spineLine(f) {
+  const yes = [f.spine_mechanism === 'yes' && 'dangerous mechanism', f.spine_midline === 'yes' && 'midline tenderness', f.spine_neuro === 'yes' && 'numbness, tingling or weakness', f.spine_alert === 'no' && 'not alert or reliable', f.spine_intox === 'yes' && 'alcohol or drugs', f.spine_distracting === 'yes' && 'distracting injury'].filter(Boolean);
+  if (!f.spine_decision && !yes.length) return '';
+  return [SPINE_DECISION[f.spine_decision], yes.length && `findings: ${yes.join(', ')}`].filter(Boolean).join('; ');
+}
+const PS = { ps_bleeding: 'bleeding', ps_airway: 'airway', ps_breathing: 'breathing', ps_circulation: 'circulation', ps_disability: 'responsiveness' };
+/** The primary survey in one line. */
+function surveyLine(f) {
+  const bits = Object.entries(PS).filter(([k]) => f[k]).map(([k, w]) => `${w} ${label(f[k]).toLowerCase()}`);
+  return bits.length ? `${f.ps_time ? `${f.ps_time}: ` : ''}${bits.join(', ')}` : '';
 }
 
 /** Head injury answers in one line, for the people who will watch for a change. */
@@ -56,11 +81,13 @@ export function handoffText(d) {
   const add = (k, v) => { if (v) L.push(`${k}: ${v}`); };
   L.push(`PATIENT HAND-OFF, ${d.resort}, ${d.caseNumber}${d.prepared ? `, prepared ${d.prepared}` : ''}`);
   add('PATIENT', [d.patient.name, d.patient.age != null && `${d.patient.age} y`, d.patient.sex && label(d.patient.sex), d.patient.weight && `${d.patient.weight}`].filter(Boolean).join(', '));
-  add('ALLERGIES', d.sample.allergies || 'not recorded'); add('MEDICATIONS', d.sample.medications); add('HISTORY', d.sample.history); add('LAST ATE OR DRANK', d.sample.lastIntake);
-  add('COMPLAINT', d.complaint); add('HOW IT HAPPENED', d.mechanism); add('INJURIES', d.injuries.join('; ')); add('ASSESSMENT', d.assessment);
-  add('HEAD INJURY', d.head); add('CARDIAC ARREST', d.arrest);
-  add('TREATMENT', d.treatments.map(treatmentLine).join('; '));
+  add('ALLERGIES', d.sample.allergies || 'not recorded');
+  add('TOURNIQUET', d.tourniquets.join('; ')); add('STROKE', d.stroke); add('CARDIAC ARREST', d.arrest);
+  add('COMPLAINT', d.complaint); add('MECHANISM', d.mechanism); add('INJURIES', d.injuries.join('; '));
   add('VITALS', d.vitals.map((v) => `${fmtTime(v.taken_at)} ${vitalsLine(v)}`).join(' | '));
+  add('PRIMARY SURVEY', d.survey); add('HEAD INJURY', d.head); add('SPINE', d.spine); add('ASSESSMENT', d.assessment); add('DRUGS OR ALCOHOL', d.drugs);
+  add('TREATMENT', d.treatments.map(treatmentLine).join('; '));
+  add('MEDICATIONS', d.sample.medications); add('HISTORY', d.sample.history); add('LAST ATE OR DRANK', d.sample.lastIntake);
   add('KEY TIMES', d.times.map(([k, t]) => `${k} ${t}`).join(', '));
   add('TRANSPORT', [d.transport.how, d.transport.destination && `destination ${d.transport.destination}`, d.transport.facility].filter(Boolean).join('; '));
   add('HANDED TO', [d.handoff.to, d.handoff.time && `at ${d.handoff.time}`].filter(Boolean).join(' '));
@@ -124,17 +151,28 @@ export async function renderHandoff(root, id, pid) {
         h('div', null, h('p', { class: 'eyebrow' }, 'Patient hand-off'), h('h1', null, d.patient.name),
           h('p', null, [d.patient.age != null && `${d.patient.age} years`, d.patient.sex && label(d.patient.sex), d.patient.weight && `${d.patient.weight}`, d.patient.height && `${d.patient.height}`].filter(Boolean).join(', ') || 'Age not recorded')),
         h('div', { class: 'hs-meta' }, h('b', null, d.resort), h('span', null, d.caseNumber), h('span', null, `Incident ${fmtTime(c.occurred_at)}`, ` · ${label(c.severity)}`), h('span', { class: 'muted' }, `Prepared ${d.prepared}`))),
-      h('div', { class: 'hs-alert' },
-        h('div', null, h('span', { class: 'k' }, 'Allergies'), sampleVal(d.sample.allergies, true)),
-        h('div', null, h('span', { class: 'k' }, 'Medications'), sampleVal(d.sample.medications)),
-        h('div', null, h('span', { class: 'k' }, 'History'), sampleVal(d.sample.history)),
-        h('div', null, h('span', { class: 'k' }, 'Last ate or drank'), sampleVal(d.sample.lastIntake))),
-      section('Vitals over time', vitals),
+      d.tourniquets.length || d.stroke || d.arrest ? h('div', { class: 'hs-critical', role: 'alert' },
+        d.tourniquets.length ? h('p', null, h('b', null, 'Tourniquet: '), d.tourniquets.join('; ')) : null,
+        d.stroke ? h('p', null, h('b', null, 'Stroke: '), d.stroke) : null,
+        d.arrest ? h('p', null, h('b', null, 'Cardiac arrest: '), d.arrest) : null) : null,
+      h('p', { class: 'hs-allergy' }, h('span', { class: 'k' }, 'Allergies '), sampleVal(d.sample.allergies, true)),
       h('div', { class: 'hs-grid' },
         h('div', { class: 'stack' },
           section('What happened', h('p', null, h('b', null, 'Complaint: '), d.complaint || 'Not recorded'), d.mechanism ? h('p', null, h('b', null, 'How: '), d.mechanism) : null, h('p', { class: 'muted' }, d.incident.trail && !String(d.incident.location).toLowerCase().includes(String(d.incident.trail).toLowerCase()) ? `${d.incident.location} (${d.incident.trail})` : d.incident.location)),
-          section('Injuries and findings', lines(d.injuries) || none('None recorded.'), d.head ? h('p', null, h('b', null, 'Head injury: '), d.head) : null, d.assessment ? h('p', { class: 'prewrap' }, h('b', null, 'Assessment: '), d.assessment) : null),
-          section('Treatment given', meds, d.arrest ? h('p', null, h('b', null, 'Cardiac arrest: '), d.arrest) : null, d.treatments.length ? h('ul', { class: 'plain' }, d.treatments.map((t) => h('li', null, treatmentLine(t)))) : none('No treatment recorded.'))),
+          section('Injuries and findings', lines(d.injuries) || none('None recorded.'),  d.assessment ? h('p', { class: 'prewrap' }, h('b', null, 'Assessment: '), d.assessment) : null)),
+        h('div', { class: 'stack' },
+          section('Signs and assessment', d.survey ? h('p', null, h('b', null, 'Primary survey: '), d.survey) : null, d.head ? h('p', null, h('b', null, 'Head injury: '), d.head) : null,
+            d.spine ? h('p', null, h('b', null, 'Spine: '), d.spine) : null, d.drugs ? h('p', null, h('b', null, 'Drugs or alcohol: '), d.drugs) : null,
+            !d.survey && !d.head && !d.spine && !d.drugs ? none('No assessment answers recorded.') : null))),
+      section('Vitals over time', vitals),
+      h('div', { class: 'hs-grid' },
+        h('div', { class: 'stack' },
+          section('Treatment given', meds,  d.treatments.length ? h('ul', { class: 'plain' }, d.treatments.map((t) => h('li', null, treatmentLine(t)))) : none('No treatment recorded.')),
+          section('SAMPLE history', h('div', { class: 'hs-alert' },
+            h('div', null, h('span', { class: 'k' }, 'Allergies'), sampleVal(d.sample.allergies, true)),
+            h('div', null, h('span', { class: 'k' }, 'Medications'), sampleVal(d.sample.medications)),
+            h('div', null, h('span', { class: 'k' }, 'History'), sampleVal(d.sample.history)),
+            h('div', null, h('span', { class: 'k' }, 'Last ate or drank'), sampleVal(d.sample.lastIntake))))),
         h('div', { class: 'stack' },
           section('Key times', d.times.length ? h('ul', { class: 'plain times' }, d.times.map(([k, t]) => h('li', null, h('span', null, k), h('b', null, t)))) : none('No times stamped.')),
           section('Transport', h('p', null, d.transport.how || 'Not recorded'), d.transport.destination || d.transport.facility ? h('p', null, h('b', null, 'Going to: '), [d.transport.destination, d.transport.facility].filter(Boolean).join(', ')) : null, d.transport.outcome ? h('p', { class: 'muted' }, `Outcome: ${d.transport.outcome}`) : null))),

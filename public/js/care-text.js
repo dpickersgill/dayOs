@@ -19,6 +19,8 @@ export function cmsText(c) {
 /** True when something present before splinting is absent after it (a loss that was there before is not new). */
 export const cmsLost = (after, before) => Boolean(after && ['c', 'm', 's'].some((k) => after[k] === 'absent' && !(before && before[k] === 'absent')));
 
+export const LIMB = { left_arm: 'left arm', right_arm: 'right arm', left_leg: 'left leg', right_leg: 'right leg', junctional: 'junctional' };
+
 /** The name of a treatment as a patroller says it. */
 export function treatmentName(t) {
   if (t.kind === 'rosc') return 'Pulse returned';
@@ -37,6 +39,8 @@ export function treatmentDetail(t) {
   if (d.action && t.kind === 'aed') bits.push(ARREST_ACTIONS[d.action].toLowerCase());
   if (d.action && t.kind === 'cpr') bits.push(d.action === 'start' ? 'started' : d.action === 'stop' ? 'stopped' : ARREST_ACTIONS[d.action].toLowerCase());
   if (d.joules) bits.push(`${d.joules} J`);
+  if (d.limb) bits.push(LIMB[d.limb] || d.limb);
+  if (d.lot) bits.push(`lot ${d.lot}`);
   if (d.body_part) bits.push(d.body_part);
   if (d.cms_before || d.cms_after) bits.push(`CMS before ${cmsText(d.cms_before) || 'not recorded'}; after ${cmsText(d.cms_after) || 'not recorded'}`);
   if (d.indication) bits.push(`for ${d.indication}`);

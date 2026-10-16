@@ -498,7 +498,7 @@ test('patrol: the Access levels tab edits the matrix, and a Host sees only the t
 
   const host = await renderView('patrol', 'patrol', T.host);
   const names = await tabNames(host);
-  assert.ok(names.includes('Trail checks') && names.includes('Map'), 'a Host has trail checks and the map');
+  assert.ok(names.includes('Opening') && names.includes('Map'), 'a Host has run checks (Opening) and the map');
   for (const gone of ['All cases', 'Dispatch', 'Follow-up', 'Statistics', 'Access log', 'Access levels']) assert.equal(names.includes(gone), false, `a Host has no ${gone} tab`);
   assert.equal(host.querySelector('[data-act=new-case]'), null, 'a Host cannot start a case');
   const pat = await renderView('patrol', 'patrol', T.patrol);
@@ -539,6 +539,7 @@ test('patrol: a case opens, shows the whole report, and the sign-off buttons wor
   const p = ok(await api('POST', `${base}/patients`, { token: o, body: { first_name: 'Cam', last_name: 'Carver', age_years: 34, activity: 'ski', helmet: 'yes' } }));
   ok(await api('POST', `${base}/patients/${p.id}/vitals`, { token: o, body: { pulse: 92, spo2: 97, pain: 5 } }));
   ok(await api('POST', `${base}/patients/${p.id}/injuries`, { token: o, body: { body_region: 'knee', side: 'left', injury_type: 'sprain_strain' } }));
+  await api('POST', '/patrol/meds/formulary', { token: o, body: { name: 'Ibuprofen', authority: 'standing_order', routes: ['oral'], max_dose: 800, dose_unit: 'mg', min_cert: 'none' } }); // this patrol's medical director allows it
   ok(await api('POST', `${base}/patients/${p.id}/treatments`, { token: o, body: { kind: 'medication', medication: 'Ibuprofen', dose: '400 mg', route: 'oral' } }));
   ok(await api('POST', `${base}/events`, { token: o, body: { kind: 'on_scene' } }));
   ok(await api('POST', `${base}/responders`, { token: o, body: { staff_id: D.s1, role: 'lead' } }));
@@ -2000,7 +2001,7 @@ test('patrol: the hand-off sheet gathers the injuries, treatment and vitals, rec
   const id = D.bedCase; const pid = D.bedPatient;
   const base = `/patrol/incidents/${id}`;
   ok(await api('POST', `${base}/patients/${pid}/injuries`, { token: o, body: { body_region: 'shoulder', side: 'right', injury_type: 'dislocation', notes: 'Visible deformity' } }));
-  ok(await api('POST', `${base}/patients/${pid}/treatments`, { token: o, body: { kind: 'medication', medication: 'Ibuprofen', dose: '400 mg', route: 'oral' } }));
+  ok(await api('POST', `${base}/patients/${pid}/treatments`, { token: o, body: { kind: 'medication', medication: 'Ibuprofen', dose: '400 mg', route: 'oral', detail: { allergy_checked: true } } }));
   await api('PATCH', `${base}/patients/${pid}`, { token: o, body: { form: { from_base: 'ambulance', ambulance_code: 'Medic 12', destination_type: 'hospital', hospital_name: 'Phoenixville Hospital' } } });
 
   const root = await renderView('patrol', 'owner', T.owner, {}, ['handoff', String(id), String(pid)]);

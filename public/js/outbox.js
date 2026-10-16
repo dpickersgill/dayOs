@@ -15,7 +15,7 @@ const listeners = new Set();
 let timer = null;
 let flushing = null;
 
-function who() {
+export function who() {
   try {
     const t = session.token;
     if (!t) return null;
@@ -118,3 +118,26 @@ if (typeof window !== 'undefined') {
   window.addEventListener('online', () => { flush(); });
   if (all().length) schedule();
 }
+
+// ---------------------------------------------------------------- cases kept for a dead spot
+// The last few cases this person opened are kept on the phone for 12 hours, so a case can still be opened (to read it
+// and keep adding bedside entries) where there is no signal. They belong to the person signed in and are cleared on
+// sign-out with the rest of the outbox.
+const CASES = 'so.patrol.cases';
+const CASE_HOURS = 12; const CASE_MAX = 5;
+export function keepCase(id, data) {
+  try {
+    const me = who(); if (!me) return;
+    const cut = Date.now() - CASE_HOURS * 3600000;
+    const list = JSON.parse(globalThis.localStorage.getItem(CASES) || '[]').filter((x) => x.who === me && x.at > cut && x.id !== Number(id));
+    list.unshift({ id: Number(id), who: me, at: Date.now(), data });
+    globalThis.localStorage.setItem(CASES, JSON.stringify(list.slice(0, CASE_MAX)));
+  } catch (_) { /* storage full or blocked: the case simply is not kept */ }
+}
+export function keptCase(id) {
+  try {
+    const me = who(); const cut = Date.now() - CASE_HOURS * 3600000;
+    return JSON.parse(globalThis.localStorage.getItem(CASES) || '[]').find((x) => x.who === me && x.id === Number(id) && x.at > cut) || null;
+  } catch (_) { return null; }
+}
+export function forgetCases() { try { globalThis.localStorage.removeItem(CASES); } catch (_) { /* nothing kept */ } }

@@ -62,6 +62,18 @@ export async function drawCover(box) {
           r.can_take ? button(c.needs_approval ? 'Offer to take it' : 'Take this shift', () => take(r, c.needs_approval, load), { kind: 'primary', small: true }) : null].filter(Boolean))))
         : empty('Nobody needs cover right now.')));
 
+    // Open shifts patrollers may take themselves (when the schedule builders allow it)
+    if (c.self_signup && c.on_roster) {
+      parts.push(h('section', { class: 'cover-section' }, h('h3', null, c.open_shifts.length ? `Open shifts (${c.open_shifts.length})` : 'Open shifts'),
+        c.open_shifts.length ? h('div', { class: 'cover-list' }, c.open_shifts.map((s) => item(s, [
+          h('p', { class: 'cover-who' }, h('b', null, 'Open shift')),
+          !s.can_take ? h('p', { class: 'cover-why' }, `You can’t take it: ${s.problems.join('. ')}`) : null,
+        ], s.can_take ? [button('Take this shift', () => confirmDialog('Take this open shift?', `${dayLong(s.starts_at.slice(0, 10))}, ${span(s.starts_at, s.ends_at)}${where(s) ? `, ${where(s)}` : ''}. It goes on your schedule and My shifts.`, 'Take this shift', async () => {
+          await post(`/patrol/cover/open/${s.id}/take`); toast('The shift is yours'); await load();
+        }), { kind: 'primary', small: true })] : [])))
+          : empty('No open shifts right now.')));
+    }
+
     // My upcoming shifts
     if (c.me && c.on_roster) {
       const asked = new Set([...c.open, ...c.pending].map((r) => r.id));

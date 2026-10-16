@@ -367,6 +367,19 @@ const assetSteps = [
 
 // Gate: a scan remembers the card and the device it came from, and a device's own id for it, so a scan sent twice
 // (from a gate that was offline) is saved once.
+// Patrol operations (2026.10.11): trail holds, certification level, equipment expiry and oxygen, legal hold, offline
+// case starts, responder alerts, tourniquet and pelvic binder.
+const opsSteps = [
+  ['trails hold status', (c) => columnTypeHas(c, 'trails', 'status', "'hold'"), "ALTER TABLE trails MODIFY status ENUM('open','hold','closed') NOT NULL DEFAULT 'closed'"],
+  ['trails.closure_reason', (c) => columnExists(c, 'trails', 'closure_reason'), 'ALTER TABLE trails ADD COLUMN closure_reason VARCHAR(200) NULL, ADD COLUMN status_by BIGINT UNSIGNED NULL'],
+  ['patrol_members.cert_level', (c) => columnExists(c, 'patrol_members', 'cert_level'), "ALTER TABLE patrol_members ADD COLUMN cert_level ENUM('none','oec','emr','emt','aemt','paramedic','rn','md') NOT NULL DEFAULT 'oec'"],
+  ['patrol_equipment expiry and oxygen', (c) => columnExists(c, 'patrol_equipment', 'pads_expire_on'), 'ALTER TABLE patrol_equipment ADD COLUMN expires_on DATE NULL, ADD COLUMN pads_expire_on DATE NULL, ADD COLUMN battery_expire_on DATE NULL, ADD COLUMN o2_size VARCHAR(10) NULL, ADD COLUMN o2_psi SMALLINT UNSIGNED NULL, ADD COLUMN needs_download TINYINT(1) NOT NULL DEFAULT 0'],
+  ['incidents.legal_hold', (c) => columnExists(c, 'incidents', 'legal_hold'), 'ALTER TABLE incidents ADD COLUMN legal_hold TINYINT(1) NOT NULL DEFAULT 0, ADD COLUMN legal_hold_note VARCHAR(255) NULL, ADD COLUMN protocol_stamp VARCHAR(255) NULL'],
+  ['incidents.client_ref', (c) => columnExists(c, 'incidents', 'client_ref'), 'ALTER TABLE incidents ADD COLUMN client_ref VARCHAR(40) NULL, ADD UNIQUE KEY uq_incidents_client_ref (tenant_id, client_ref)'],
+  ['dispatch_responders alerts', (c) => columnExists(c, 'dispatch_responders', 'acked_at'), 'ALTER TABLE dispatch_responders ADD COLUMN notified_at DATETIME NULL, ADD COLUMN acked_at DATETIME NULL, ADD COLUMN texted_at DATETIME NULL'],
+  ['incident_treatments tourniquet', (c) => columnTypeHas(c, 'incident_treatments', 'kind', "'tourniquet'"), "ALTER TABLE incident_treatments MODIFY kind ENUM('splint','spinal_motion_restriction','bandage','ice','oxygen','aed','cpr','airway','medication','warming','rosc','tourniquet','pelvic_binder','other') NOT NULL"],
+];
+
 const gateSteps = [
   ['scans.media_uid', (c) => columnExists(c, 'scans', 'media_uid'), 'ALTER TABLE scans ADD COLUMN media_uid VARCHAR(32) NULL, ADD COLUMN device_id BIGINT UNSIGNED NULL, ADD COLUMN client_ref VARCHAR(64) NULL, ADD COLUMN via ENUM(\'code\',\'rfid\',\'device\',\'offline\') NULL'],
   ['scans card_blocked result', (c) => columnTypeHas(c, 'scans', 'result', 'card_blocked'), "ALTER TABLE scans MODIFY result ENUM('ok','expired','not_yet_valid','void','no_uses','unknown','duplicate','card_blocked') NOT NULL"],
@@ -477,8 +490,9 @@ async function main() {
   await conn.query(fs.readFileSync(path.join(__dirname, 'review.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'release.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'workforce.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'patrolops.sql'), 'utf8'));
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

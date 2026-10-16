@@ -40,6 +40,7 @@ test.before(async () => {
   ok(await api('POST', '/patrol/team', { token: T.owner, body: { staff_id: D.s1, callsign: 'Patrol 4', patrol_number: '417' } }));
   ok(await api('POST', '/users', { token: T.owner, body: { email: `pat@${slug}.test`, password: PW, role: 'patrol', staff_id: D.s1 } }));
   T.pat = (await api('POST', '/auth/login', { body: { tenant: slug, email: `pat@${slug}.test`, password: PW } })).body.token;
+  await api('POST', '/patrol/meds/formulary', { token: T.owner, body: { name: 'Acetaminophen', authority: 'standing_order', routes: ['oral'], max_dose: 1000, dose_unit: 'mg' } });
 });
 test.after(async () => { await new Promise((r) => server.close(r)); await pool.end(); });
 
@@ -147,6 +148,7 @@ test('the receiving provider signs, submit fills the form from the bedside, and 
   const id = c.id;
   const b = `/patrol/incidents/${id}/patients`;
   const p = ok(await api('POST', b, { token: T.pat, body: { first_name: 'Han', last_name: 'Doff', chief_complaint: 'Left knee pain' } }));
+  for (const pulse of [92, 88]) ok(await api('POST', `${b}/${p.id}/vitals`, { token: T.pat, body: { pulse } })); // two sets: on scene a long time
   is(await api('POST', `/patrol/incidents/${id}/signatures`, { token: T.pat, body: { kind: 'receiving_provider', signer_name: 'J. Alvarez', image: PNG } }), 400, 'it belongs to a patient');
   ok(await api('POST', `/patrol/incidents/${id}/events`, { token: T.pat, body: { kind: 'on_scene', at: `${today}T10:20` } }));
   ok(await api('POST', `/patrol/incidents/${id}/events`, { token: T.pat, body: { kind: 'at_aid_room', at: `${today}T10:50` } }));

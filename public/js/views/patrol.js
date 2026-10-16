@@ -1,9 +1,9 @@
 // Patrol: cases (patient care reports), team, posts, equipment, training, trail checks and statistics.
 
-import { get, post, download } from '../api.js';
+import { get, download } from '../api.js';
 import { setAccess, has } from './patrol-feat.js';
 import { drawLevels } from './patrol-levels.js';
-import { h, clear, table, state, input, select, field, button, toast, formDialog, tabs, val, nowInput, todayStr, addDays, fmtDateTime, label, empty, errorBox } from '../ui.js';
+import { h, clear, input, select, field, button, toast, formDialog, tabs, val, num, nowInput, todayStr, addDays, label, errorBox } from '../ui.js';
 import { renderCase, CATEGORIES, SEVERITY, compact, flow } from './patrol-case.js';
 import { renderHandoff } from './patrol-handoff.js';
 import { renderCollisionReport } from './patrol-collision.js';
@@ -21,6 +21,15 @@ import { drawNetwork } from './patrol-network.js';
 import { drawReview } from './patrol-review.js';
 import { drawSchedule } from './patrol-schedule.js';
 import { drawCover } from './patrol-cover.js';
+import { drawDuty, renderRoom } from './patrol-duty.js';
+import { drawSweep, drawOpening } from './patrol-sweep.js';
+import { drawMeds } from './patrol-meds.js';
+import { drawLifts } from './patrol-lifts.js';
+import { drawLog } from './patrol-log.js';
+import { drawAvy } from './patrol-avy.js';
+import { drawRecords, renderRelease } from './patrol-records.js';
+import { drawOpsSettings } from './patrol-settings.js';
+import { send as queue } from '../outbox.js';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -49,6 +58,8 @@ export async function render(root, params = []) {
     await renderCase(root, Number(params[1]), { me, version: Number(params[2]) }); // a frozen copy, read only
     return;
   }
+  if (params[0] === 'room') { await renderRoom(root); return; } // the patrol-room sign-in screen
+  if (params[0] === 'release' && ONE.test(params[1] || '')) { await renderRelease(root, Number(params[1])); return; }
   const printPages = { handoff: renderHandoff, refusal: renderRefusal, takehome: renderTakehome };
   if (printPages[params[0]] && ONE.test(params[1] || '') && ONE.test(params[2] || '')) {
     await printPages[params[0]](root, Number(params[1]), Number(params[2]), params[3]);
@@ -62,6 +73,11 @@ export async function render(root, params = []) {
   const only = (feature, item) => (has(feature) ? [item] : []);
   const items = [
     ['home', 'Home', (b) => drawHome(b, opts)],
+    ['duty', 'On duty', drawDuty],
+    ['sweep', 'Sweep', drawSweep],
+    ['opening', 'Opening', drawOpening],
+    ['log', 'Daily log', drawLog],
+    ...(me.avalanche ? [['avalanche', 'Avalanche', drawAvy]] : []),
     ...only('dispatch', ['dispatch', 'Dispatch', (b) => drawDispatch(b, opts)]),
     ...only('view_cases', ['cases', 'All cases', (b) => drawCases(b, opts)]),
     ...only('followups', ['followup', 'Follow-up', drawFollowup]),
@@ -71,9 +87,12 @@ export async function render(root, params = []) {
     ['posts', 'Today\'s posts', (b) => drawPosts(b, opts)],
     ['team', 'Team', (b) => drawTeam(b, opts)],
     ['equipment', 'Equipment', (b) => drawEquipment(b, opts)],
+    ['meds', 'Medications', drawMeds],
+    ['lifts', 'Lift evacuation', drawLifts],
     ['training', 'Training', (b) => drawTraining(b, opts)],
     ['passport', 'Passport', (b) => drawPassport(b, opts)],
-    ['checks', 'Trail checks', drawChecks],
+    ...only('records', ['records', 'Records requests', drawRecords]),
+    ...(['manage_settings', 'manage_schedule', 'manage_meds', 'run_sweep', 'avalanche'].some(has) ? [['settings', 'Patrol settings', drawOpsSettings]] : []),
     ...only('reports', ['stats', 'Statistics', drawStats]),
     ...only('reports', ['network', 'Injury network', drawNetwork]),
     ...(me.is_reviewer || me.can_manage_review ? [['review', me.review_group ? 'Review' : 'Review group', (b) => drawReview(b, me)]] : []),
@@ -82,10 +101,10 @@ export async function render(root, params = []) {
   ];
   // Two levels: a few sections for what the person is doing, then the pages inside the chosen section.
   const SECTIONS = [
-    ['now', 'Now', ['home', 'dispatch', 'map', 'checks']],
-    ['cases', 'Cases', ['cases', 'review', 'followup', 'stats', 'network']],
-    ['team', 'Team', ['schedule', 'cover', 'posts', 'team', 'equipment', 'training', 'passport']],
-    ['admin', 'Admin', ['access', 'levels']],
+    ['now', 'Now', ['home', 'duty', 'dispatch', 'map', 'opening', 'sweep', 'avalanche', 'log']],
+    ['cases', 'Cases', ['cases', 'review', 'followup', 'stats', 'network', 'records']],
+    ['team', 'Team', ['schedule', 'cover', 'posts', 'team', 'equipment', 'meds', 'lifts', 'training', 'passport']],
+    ['admin', 'Admin', ['settings', 'access', 'levels']],
   ].map(([id, text, keys]) => ({ id, text, items: keys.map((k) => items.find((i) => i[0] === k)).filter(Boolean) })).filter((s) => s.items.length);
   const wanted = SECTIONS.find((s) => s.items.some((i) => i[0] === params[0])) || SECTIONS[0];
   const body = h('div', { class: 'pbody' });
@@ -216,6 +235,9 @@ async function newCase() {
     h('div', { class: 'field' }, h('span', null, 'Type'), segmented('category', CATEGORIES, 'injury', 'Type')),
     h('div', { class: 'field' }, h('span', null, 'Severity'), segmented('severity', SEVERITY, 'minor', 'Severity')),
     h('div', { class: 'form' }, field('Trail', trail), field('Where exactly (optional when a trail is picked)', where)),
+    h('details', null, h('summary', null, 'Patient (optional, add more on the case)'), h('div', { class: 'form' },
+      field('First name', input({ name: 'p_first', maxlength: 100 })), field('Last name', input({ name: 'p_last', maxlength: 100 })),
+      field('Age', input({ name: 'p_age', type: 'number', min: 0, max: 120, inputmode: 'numeric' })), field('Chief complaint', input({ name: 'p_complaint', maxlength: 255 })))),
     h('details', null, h('summary', null, 'Time and summary (filled in for you)'), h('div', { class: 'form' },
       field('When', input({ type: 'datetime-local', name: 'occurred_at', value: nowInput(), required: true })),
       h('div', { class: 'wide' }, field('One-line summary', summary, 'Optional. If you leave it, the first patient\'s chief complaint becomes the summary.'))))),
@@ -224,28 +246,17 @@ async function newCase() {
     const spot = val(fd, 'location') || trailName;
     if (!spot) throw new Error('Pick the trail or say where it is');
     const cat = val(fd, 'category');
-    const c = await post('/patrol/incidents', compact({ occurred_at: val(fd, 'occurred_at'), location: spot, trail_id: val(fd, 'trail_id') ? Number(val(fd, 'trail_id')) : null, category: cat, severity: val(fd, 'severity'), summary: val(fd, 'summary') || `${label(cat)} at ${spot}` }));
+    const patient = compact({ first_name: val(fd, 'p_first'), last_name: val(fd, 'p_last'), age_years: num(fd, 'p_age') ?? undefined, chief_complaint: val(fd, 'p_complaint') });
+    const body = compact({ occurred_at: val(fd, 'occurred_at'), location: spot, trail_id: val(fd, 'trail_id') ? Number(val(fd, 'trail_id')) : null, category: cat, severity: val(fd, 'severity'),
+      summary: val(fd, 'summary') || patient.chief_complaint || `${label(cat)} at ${spot}`, patient: Object.keys(patient).length ? patient : undefined });
+    // No signal: the case waits on this phone and is made when the signal returns (the phone's id stops it being made twice).
+    const c = await queue('POST', '/patrol/incidents', body, { caseId: 0, label: `New case at ${spot}` });
+    if (c.queued) { toast('No signal: the case is saved on this phone and will be sent when the signal returns. Keep notes and add it in when it appears.', 'warn'); return; }
     toast(`Case ${c.case_number} started`);
-    flow.addPatient = PATIENT_TYPES.includes(cat);
-    flow.vitalsNext = flow.addPatient;
+    flow.addPatient = PATIENT_TYPES.includes(cat) && !body.patient;
+    flow.vitalsNext = PATIENT_TYPES.includes(cat);
     location.hash = `#/patrol/case/${c.id}`;
   }, { submitText: 'Start case' });
-}
-
-// ---------------------------------------------------------------- trail checks
-async function drawChecks(box) {
-  const [{ data: trails }, { data }] = await Promise.all([get('/schedule/trails?limit=500'), get('/patrol/trail-checks')]);
-  const trailSel = select(trails.map((t) => [t.id, t.name]), trails[0] && trails[0].id, { name: 'trail', 'aria-label': 'Trail' });
-  const hazards = input({ maxlength: 500, placeholder: 'Leave blank if clear' });
-  const log = button('Record trail check', async () => {
-    if (!trails.length) throw new Error('Add trails first, on Mountain status');
-    await post('/patrol/trail-checks', { trail_id: Number(trailSel.value), hazards: hazards.value.trim() || undefined });
-    toast('Trail check recorded');
-    const n = h('div'); await drawChecks(n); clear(box).append(...n.childNodes);
-  }, { kind: 'primary' });
-  clear(box).append(h('div', { class: 'stack' },
-    h('div', { class: 'form' }, field('Trail', trailSel), field('Hazards found', hazards)), h('div', { class: 'row' }, log),
-    data.length ? table([{ head: 'Checked', cell: (c) => fmtDateTime(c.checked_at) }, { head: 'Trail', cell: (c) => c.trail }, { head: 'Hazards', cell: (c) => c.hazards || state('Clear', 'good') }], data) : empty('No trail checks recorded yet.')));
 }
 
 // ---------------------------------------------------------------- statistics

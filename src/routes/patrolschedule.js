@@ -8,7 +8,7 @@
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
-const { z, dateStr, dateTimeStr, validate, paramId, normDateTime, addDays, todayIn, nowIn, seasonFor } = require('../lib/util');
+const { z, dateStr, dateTimeStr, validate, paramId, normDateTime, addDays, todayIn, seasonFor } = require('../lib/util');
 const { notFound, bad, conflict } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { span } = require('../lib/workforce');
@@ -227,25 +227,15 @@ router.get('/schedule/days', patrol, async (req, res) => {
   const tz = await tzOf(t);
   const today = todayIn(tz);
   const season = /^\d{4}-\d{2}$/.test(String(req.query.season || '')) ? String(req.query.season) : seasonFor(today);
-  const start = `${season.slice(0, 4)}-08-01`; const end = `${Number(season.slice(0, 4)) + 1}-08-01`;
-  const now = nowIn(tz);
-  const [members, shifts, posts] = await Promise.all([
-    rows(pool, `SELECT m.staff_id, m.level, m.patrol_number, s.in_workforce, ${NAME} AS name FROM patrol_members m JOIN staff s ON s.tenant_id = m.tenant_id AND s.id = m.staff_id JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE m.tenant_id = ? ORDER BY p.last_name, p.first_name`, [t]),
-    rows(pool, `SELECT staff_id, starts_at, ends_at FROM patrol_shifts WHERE tenant_id = ? AND status = 'published' AND staff_id IS NOT NULL AND starts_at >= ? AND starts_at < ? AND ends_at <= ?
-      UNION ALL
-      SELECT s.staff_id, s.starts_at, s.ends_at FROM shifts s JOIN positions pos ON pos.tenant_id = s.tenant_id AND pos.id = s.position_id AND pos.department = 'patrol'
-      WHERE s.tenant_id = ? AND s.status = 'published' AND s.staff_id IS NOT NULL AND s.starts_at >= ? AND s.starts_at < ? AND s.ends_at <= ?`, [t, start, end, now, t, start, end, now]), // and patrol shifts made in Staff and schedule before patrol had its own
-    rows(pool, 'SELECT staff_id, on_date FROM patrol_deployments WHERE tenant_id = ? AND on_date >= ? AND on_date < ? AND on_date <= ?', [t, start, end, today]),
-  ]);
-  const days = new Map(); const mins = new Map();
-  const addDay = (id, d) => { if (!days.has(id)) days.set(id, new Set()); days.get(id).add(d); };
-  for (const s of shifts) { const id = Number(s.staff_id); addDay(id, String(s.starts_at).slice(0, 10)); mins.set(id, (mins.get(id) || 0) + SH.minutesBetween(s.starts_at, s.ends_at)); }
-  for (const d of posts) addDay(Number(d.staff_id), String(d.on_date).slice(0, 10));
-  const data = members.map((m) => ({ staff_id: Number(m.staff_id), name: m.name, level: m.level, patrol_number: m.patrol_number, paid: Boolean(m.in_workforce), days: (days.get(Number(m.staff_id)) || new Set()).size, minutes: mins.get(Number(m.staff_id)) || 0 }));
+  const members = await rows(pool, `SELECT m.staff_id, m.level, m.patrol_number, s.in_workforce, ${NAME} AS name FROM patrol_members m JOIN staff s ON s.tenant_id = m.tenant_id AND s.id = m.staff_id JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE m.tenant_id = ? ORDER BY p.last_name, p.first_name`, [t]);
+  // Signed-in days (and, before sign-in was used here, ended shifts) and Today's posts; see lib/patrolops.
+  const { days, minutes: mins } = await require('../lib/patrolops').seasonDays(pool, t, season);
+  const settings = await require('../lib/patrolops').settingsOf(pool, t);
+  const data = members.map((m) => ({ staff_id: Number(m.staff_id), name: m.name, level: m.level, patrol_number: m.patrol_number, paid: Boolean(Number(m.in_workforce)), days: (days.get(Number(m.staff_id)) || new Set()).size, minutes: mins.get(Number(m.staff_id)) || 0, target: require('../lib/patrolops').targetFor(settings, m) }));
   if (req.query.format === 'csv') {
     res.set('Content-Type', 'text/csv; charset=utf-8');
     res.set('Content-Disposition', `attachment; filename="patrol-days-${season}.csv"`);
-    return res.send(toCsv(['name', 'patrol_number', 'rank', 'paid', 'days_patrolled', 'hours_scheduled'], data.map((d) => ({ name: d.name, patrol_number: d.patrol_number || '', rank: d.level, paid: d.paid ? 'yes' : 'no', days_patrolled: d.days, hours_scheduled: (d.minutes / 60).toFixed(2) }))));
+    return res.send(toCsv(['name', 'patrol_number', 'rank', 'paid', 'days_patrolled', 'days_required', 'hours'], data.map((d) => ({ name: d.name, patrol_number: d.patrol_number || '', rank: d.level, paid: d.paid ? 'yes' : 'no', days_patrolled: d.days, days_required: d.target ?? '', hours: (d.minutes / 60).toFixed(2) }))));
   }
   res.json({ season, data });
 });

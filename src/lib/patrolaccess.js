@@ -38,6 +38,10 @@ const FEATURES = [
   ['assign_posts', "Today's posts", 'Set who is posted where today.', 'Team'],
   ['manage_equipment', 'Equipment and stations', 'Add and change equipment and stations, and clear flagged items.', 'Team'],
   ['manage_training', 'Training', "Edit competencies and record or remove anyone's training.", 'Team'],
+  ['run_sweep', 'Sweep and opening', 'Start the closing sweep, assign routes, call the mountain clear, and set up sweep routes and opening checks.', 'Mountain'],
+  ['manage_meds', 'Medications and oxygen', 'Set the formulary, receive and count stock, and record oxygen and AED checks.', 'Team'],
+  ['avalanche', 'Avalanche work', 'Record snow observations and control results, and set up slide paths.', 'Mountain'],
+  ['records', 'Records requests', 'Log requests for a report, release it, and put a case on legal hold.', 'Settings'],
   ['manage_settings', 'Form, map and guest help', 'Choose mandatory fields, set where the map opens and edit the guest help page.', 'Settings'],
   ['view_access_log', 'Access log', 'Read who looked at which patient record.', 'Settings'],
 ];
@@ -58,6 +62,10 @@ const DEFAULTS = {
   assign_posts: grant('admin', 'manager'),
   manage_equipment: grant('admin', 'manager'),
   manage_training: grant('admin', 'manager'),
+  run_sweep: grant('admin', 'manager'),
+  manage_meds: grant('admin', 'manager'),
+  avalanche: grant('admin', 'manager'),
+  records: grant('admin'),
   manage_settings: grant('admin'),
   view_access_log: grant('admin'),
 };
