@@ -2,7 +2,7 @@
 // details, positions they work, certifications, availability (weekly and instructor open dates), their login, their
 // patrol and ski school roles, this week's hours and upcoming shifts.
 import { get, post, put, patch, del } from '../api.js';
-import { h, clear, input, select, field, button, toast, formDialog, confirmDialog, dialog, table, state, label, empty, errorBox, fmtDate, todayStr, addDays } from '../ui.js';
+import { h, clear, input, select, field, button, toast, formDialog, confirmDialog, dialog, table, state, label, empty, errorBox, fmtDate, todayStr, addDays, isManager } from '../ui.js';
 import { availabilityDialog, WEEKDAYS } from './myshifts.js';
 import { span, hrs, dayShort, monthDay, tod, STAFF_STATUS, STATUS_TONE, fullName } from './workforce-common.js';
 
@@ -55,6 +55,7 @@ export async function drawStaff(box) {
 }
 
 const RANKS = ['candidate', 'patroller', 'senior', 'leader', 'director'];
+const PATROL_ACCESS = [['admin', 'Admin: everything, including access'], ['manager', 'Manager: runs the team'], ['approver', 'Approver: signs off reports'], ['patrol', 'Patrol: works cases'], ['host', 'Host: guests only, no case details']];
 
 /** Add anyone who works here, paid or volunteer, and put them on ski patrol at the same time if they patrol. */
 function addStaff() {
@@ -68,10 +69,9 @@ function addStaff() {
     field('Email', input({ name: 'email', type: 'email' })), field('Phone', input({ name: 'phone', type: 'tel' })),
     field('Paid or volunteer', select([['employee', 'Employee (paid)'], ['volunteer', 'Volunteer']], 'employee', { name: 'kind' }), 'Volunteers do not use the time clock or appear in payroll'),
     field('Status', select(STAFF_STATUS, 'active', { name: 'status' }), 'Only active people can be scheduled'), field('Hired on', input({ name: 'hired_on', type: 'date' })),
-    h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'housing' }), ' Needs staff housing'),
     h('label', { class: 'check wide' }, patrol, ' On ski patrol (they appear in Patrol, where the director sets their access)'), rankField), async (fd) => {
     const v = (k) => String(fd.get(k) || '').trim() || undefined;
-    const r = await post('/workforce/staff', { person: { first_name: v('first'), last_name: v('last'), email: v('email'), phone: v('phone') }, employee: fd.get('kind') !== 'volunteer', status: v('status'), hired_on: v('hired_on'), needs_housing: Boolean(fd.get('housing')) });
+    const r = await post('/workforce/staff', { person: { first_name: v('first'), last_name: v('last'), email: v('email'), phone: v('phone') }, employee: fd.get('kind') !== 'volunteer', status: v('status'), hired_on: v('hired_on') });
     if (fd.get('patrol')) await post('/patrol/team', { staff_id: Number(r.id), level: v('rank') || 'patroller' });
     toast('Staff member added');
     location.hash = `#/workforce/staff/${r.id}`;
@@ -90,7 +90,7 @@ export async function personPage(root, id) {
 
     clear(holder).append(
       h('div', { class: 'page-head' }, h('div', null, h('h1', null, name), h('p', { class: 'person-meta' }, state(label(p.status), STATUS_TONE[p.status]), h('span', { class: 'tag' }, p.employee ? 'Employee' : 'Volunteer'), p.patrol ? h('span', { class: 'tag', 'data-kind': 'patrol' }, 'Ski patrol') : null,
-        p.hired_on ? ` Hired ${fmtDate(String(p.hired_on).slice(0, 10))}.` : '', p.needs_housing ? ' Needs staff housing.' : '')),
+        p.hired_on ? ` Hired ${fmtDate(String(p.hired_on).slice(0, 10))}.` : '')),
       h('div', { class: 'row' }, button('Edit details', () => editDetails(p, draw)), button('Change status', () => changeStatus(p, draw)))),
       h('div', { class: 'pgrid' },
         card('This week', null,
@@ -116,7 +116,7 @@ export async function personPage(root, id) {
             : h('p', { class: 'muted' }, p.employee ? 'No login. Without one they use the time clock kiosk and do not get schedule messages.' : 'No login. A volunteer patroller needs one to write cases and see the patrol schedule.')),
         card('Ski patrol', p.patrol ? h('div', { class: 'row' }, h('a', { class: 'btn small', href: '#/patrol/team' }, 'Open in Patrol'), button('Take off patrol', () => offPatrol(p, draw), { small: true, kind: 'danger' })) : button('Put on ski patrol', () => onPatrol(p, draw), { small: true }),
           p.patrol ? [h('p', null, h('b', null, label(p.patrol.level)), p.patrol.callsign ? `, call sign ${p.patrol.callsign}` : '', p.patrol.patrol_number ? `, patrol number ${p.patrol.patrol_number}` : '', '.'),
-            h('p', { class: 'muted small' }, `Patrol access: ${label(p.patrol.access_level || 'patrol')}${Number(p.patrol.exceptions) ? `, with ${p.patrol.exceptions} exception${Number(p.patrol.exceptions) === 1 ? '' : 's'}` : ''}. The patrol director sets access and permissions in Patrol, Team.`),
+            h('p', { class: 'muted small' }, `Patrol access: ${label(p.patrol.access_level || 'patrol')}${Number(p.patrol.exceptions) ? `, with ${p.patrol.exceptions} exception${Number(p.patrol.exceptions) === 1 ? '' : 's'}` : ''}. ${isManager() ? 'Change it with Edit details, or single permissions in Patrol, Team.' : 'A patrol Admin sets access and permissions in Patrol, Team.'}`),
             p.login ? null : h('p', { class: 'muted small' }, 'They need a login to open Patrol. Create one under Sign-in.')]
             : h('p', { class: 'muted' }, 'Not on ski patrol. Putting them on adds them to the patrol roster and lets them open Patrol with their login.')),
         card('Ski school', null, h('ul', { class: 'plain-list' },
@@ -132,9 +132,13 @@ function editDetails(p, done) {
     field('Email', input({ name: 'email', type: 'email', value: p.email || '' })), field('Phone', input({ name: 'phone', type: 'tel', value: p.phone || '' })),
     field('Hired on', input({ name: 'hired_on', type: 'date', value: p.hired_on ? String(p.hired_on).slice(0, 10) : '' })),
     field('Paid or volunteer', select([['employee', 'Employee (paid)'], ['volunteer', 'Volunteer']], p.employee ? 'employee' : 'volunteer', { name: 'kind' })),
-    h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'housing', checked: Boolean(p.needs_housing) }), ' Needs staff housing')), async (fd) => {
+    // On ski patrol: their rank, and (owners and managers, who are patrol Admins) their patrol access level
+    p.patrol ? field('Patrol rank', select(RANKS, p.patrol.level, { name: 'rank' })) : null,
+    p.patrol && isManager() ? field('Patrol access', select(PATROL_ACCESS, p.patrol.access_level || 'patrol', { name: 'access' }), 'What they can do in Patrol. Single permissions are set in Patrol, Team, Permissions.') : null), async (fd) => {
     const v = (k) => String(fd.get(k) || '').trim();
-    await patch(`/workforce/staff/${p.id}`, { first_name: v('first_name'), last_name: v('last_name'), email: v('email') || null, phone: v('phone') || null, hired_on: v('hired_on') || null, needs_housing: Boolean(fd.get('housing')), employee: fd.get('kind') !== 'volunteer' });
+    await patch(`/workforce/staff/${p.id}`, { first_name: v('first_name'), last_name: v('last_name'), email: v('email') || null, phone: v('phone') || null, hired_on: v('hired_on') || null, employee: fd.get('kind') !== 'volunteer' });
+    if (p.patrol && v('rank') && v('rank') !== p.patrol.level) await patch(`/patrol/team/${p.id}`, { level: v('rank') });
+    if (p.patrol && v('access') && v('access') !== (p.patrol.access_level || 'patrol')) await put(`/patrol/team/${p.id}/access`, { access_level: v('access') });
     toast('Saved');
     await done();
   });

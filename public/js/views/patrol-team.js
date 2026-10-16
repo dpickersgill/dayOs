@@ -87,7 +87,8 @@ function memberDialog(m, again) {
     field('Email', input({ name: 'email', type: 'email', value: m.email || '', maxlength: 255 })),
     field('Phone', input({ name: 'phone', type: 'tel', value: m.phone || '', maxlength: 40 })),
     field('Rank', select(LEVELS, m.level, { name: 'level' })),
-    accessLevel() === 'admin' ? field('Access level', select(ACCESS, m.access_level || 'patrol', { name: 'access_level' })) : null,
+    accessLevel() === 'admin' ? field('Access level', select(ACCESS, m.access_level || 'patrol', { name: 'access_level' }), 'What they can do in Patrol. Press Permissions on their row to change single permissions.')
+      : field('Access level', input({ value: label(m.access_level || 'patrol'), disabled: true }), 'Only a patrol Admin, an owner or a manager can change this.'),
     field('Callsign', input({ name: 'callsign', value: m.callsign || '', maxlength: 30 })),
     field('Patrol number', input({ name: 'patrol_number', value: m.patrol_number || '', maxlength: 20 }), 'Printed on the reports they complete'),
     h('div', { class: 'wide' }, field('Emergency contact', input({ name: 'emergency_contact', value: m.emergency_contact || '', maxlength: 255 }))),

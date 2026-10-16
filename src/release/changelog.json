@@ -1,6 +1,36 @@
 {
   "releases": [
     {
+      "version": "2026.10.10",
+      "date": "2026-10-16",
+      "title": "Patrol access from the staff page",
+      "notes": [
+        {
+          "kind": "improved",
+          "app": "workforce",
+          "who": null,
+          "text": "Edit details on a patroller’s staff page now has their patrol rank and patrol access level, so owners and managers can change them without going into Patrol.",
+          "help": "patrol-roster"
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Edit on the patrol roster always shows the access level. Patrol Admins, owners and managers can change it; everyone else sees who can.",
+          "help": "patrol-roster"
+        },
+        {
+          "kind": "improved",
+          "app": "workforce",
+          "who": null,
+          "text": "The Needs staff housing option is gone from adding and editing staff.",
+          "help": null
+        }
+      ]
+    },
+    {
       "version": "2026.10.9",
       "date": "2026-10-16",
       "title": "Shift cover for ski patrol",
