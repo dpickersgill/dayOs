@@ -2082,3 +2082,29 @@ body:has(.tour-card) .demo-pill { display: none; }
 @media (max-width: 560px) { .perm-row { grid-template-columns: 1fr; gap: 4px; } }
 .tag { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line-strong); font-size: .75rem; font-weight: 700; color: var(--quiet); vertical-align: middle; }
 .tag[data-kind='patrol'] { border-color: #e0a7a0; color: var(--closed); }
+
+/* Patrol > Team > Cover */
+.cover-setting { display: flex; align-items: center; gap: 8px; font-size: .875rem; color: var(--spruce); background: var(--powder); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; cursor: pointer; }
+.cover-setting input { width: 18px; height: 18px; }
+.cover-section { margin-top: 24px; }
+.cover-section > h3 { font-size: 1rem; margin: 0 0 10px; }
+.cover-list { display: grid; gap: 8px; }
+.cover-item { display: grid; grid-template-columns: 56px 1fr auto; gap: 14px; align-items: center; background: var(--powder); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px 10px 10px; }
+.cover-leaf { display: grid; justify-items: center; align-content: center; width: 56px; height: 60px; border-radius: 6px; background: var(--spruce); color: #fff; line-height: 1.05; }
+.cover-leaf span { font-size: .6875rem; opacity: .85; }
+.cover-leaf b { font-size: 1.375rem; font-variant-numeric: tabular-nums; }
+.cover-main { min-width: 0; display: grid; gap: 2px; }
+.cover-main p { margin: 0; }
+.cover-when b { font-size: .9375rem; }
+.cover-who { font-size: .9375rem; }
+.cover-why { font-size: .8125rem; color: var(--hold); }
+.cover-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.cover-history summary { cursor: pointer; font-weight: 600; }
+.cover-past { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 6px; font-size: .875rem; }
+.shift-block .sb-cover { justify-self: start; font-size: .6875rem; font-weight: 600; color: var(--hold); background: var(--hold-tint); border-radius: 999px; padding: 0 6px; }
+@media (max-width: 640px) {
+  .cover-item { grid-template-columns: 48px 1fr; padding: 10px; }
+  .cover-leaf { width: 48px; height: 54px; }
+  .cover-actions { grid-column: 1 / -1; justify-content: stretch; }
+  .cover-actions .btn { flex: 1; }
+}

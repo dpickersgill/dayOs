@@ -153,7 +153,10 @@ router.delete('/team/:staffId', patrol, needs('manage_team'), async (req, res) =
     for (const s of ahead) {
       await conn.query('UPDATE patrol_shifts SET staff_id = NULL WHERE tenant_id = ? AND id = ?', [t, s.id]);
       if (s.status === 'published') await SH.tell(conn, t, req.auth.userId, staffId, `You are no longer on ${describe(s)}.`);
+      await require('./patrolcover').afterShiftChange(conn, req, s, { ...s, staff_id: null });
     }
+    // Offers they made to cover someone else's shift are withdrawn, and those shifts are open for others again.
+    await conn.query("UPDATE patrol_cover_requests SET status = 'open', taken_by = NULL, taken_at = NULL WHERE tenant_id = ? AND taken_by = ? AND status = 'pending'", [t, staffId]);
     await audit(conn, req, 'remove_member', 'patrol_members', staffId, { unassigned: ahead.length });
   });
   res.status(204).end();

@@ -18,11 +18,16 @@ const PA = require('../lib/patrolaccess');
 
 const router = express.Router();
 const patrol = requireRole('patrol', 'manager');
+// Shift cover requests on a shift close when the schedule cancels it or puts someone else on it (required late: the
+// cover routes use problemsFor from here).
+const coverAfterChange = (...a) => require('./patrolcover').afterShiftChange(...a);
 const editor = PA.needs(pool, 'manage_schedule', 'Only those who build the patrol schedule can change it');
 const tzOf = async (t) => (await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [t])).timezone;
 const NAME = "CONCAT(p.first_name, ' ', p.last_name)";
 
-const SELECT = `SELECT ps.*, ${NAME} AS name, st.name AS station FROM patrol_shifts ps
+const SELECT = `SELECT ps.*, ${NAME} AS name, st.name AS station,
+    (SELECT cr.status FROM patrol_cover_requests cr WHERE cr.tenant_id = ps.tenant_id AND cr.patrol_shift_id = ps.id AND cr.status IN ('open', 'pending') ORDER BY cr.id DESC LIMIT 1) AS cover_status
+  FROM patrol_shifts ps
   LEFT JOIN staff s ON s.tenant_id = ps.tenant_id AND s.id = ps.staff_id LEFT JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id
   LEFT JOIN patrol_stations st ON st.tenant_id = ps.tenant_id AND st.id = ps.station_id`;
 const shiftOf = (db, t, id) => one(db, `${SELECT} WHERE ps.tenant_id = ? AND ps.id = ?`, [t, id]);
@@ -143,6 +148,7 @@ router.patch('/schedule/:id', patrol, editor, validate(z.object(fields).partial(
       [next.staff_id || null, next.starts_at, next.ends_at, next.station_id || null, next.role_label || null, next.notes || null, t, id]);
     const now = await shiftOf(conn, t, id);
     await tellChange(conn, t, req.auth.userId, before, now);
+    await coverAfterChange(conn, req, before, now);
     await audit(conn, req, 'update', 'patrol_shifts', id, req.body);
     return now;
   });
@@ -156,6 +162,7 @@ router.delete('/schedule/:id', patrol, editor, async (req, res) => {
     if (!before) throw notFound('Patrol shift');
     await conn.query("UPDATE patrol_shifts SET status = 'cancelled' WHERE tenant_id = ? AND id = ?", [t, before.id]);
     if (before.status !== 'cancelled') await tellChange(conn, t, req.auth.userId, before, null);
+    await coverAfterChange(conn, req, before, null);
     await audit(conn, req, 'cancel', 'patrol_shifts', before.id);
   });
   res.status(204).end();

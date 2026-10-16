@@ -47,11 +47,12 @@ export async function drawSchedule(box) {
 
     const block = (s, withName) => h('button', {
       type: 'button', class: `shift-block${s.status === 'draft' ? ' is-draft' : ''}${s.staff_id ? '' : ' is-open'}${w.me && s.staff_id && Number(s.staff_id) === Number(w.me) ? ' is-mine' : ''}`, 'data-dept': 'patrol', disabled: !edit,
-      'aria-label': `Patrol, ${dayLong(s.starts_at.slice(0, 10))}, ${span(s.starts_at, s.ends_at)}, ${s.staff_id ? s.name : 'open'}${s.station ? `, ${s.station}` : ''}${s.status === 'draft' ? ', draft' : ''}`,
+      'aria-label': `Patrol, ${dayLong(s.starts_at.slice(0, 10))}, ${span(s.starts_at, s.ends_at)}, ${s.staff_id ? s.name : 'open'}${s.station ? `, ${s.station}` : ''}${s.status === 'draft' ? ', draft' : ''}${s.cover_status ? ', needs cover' : ''}`,
       onclick: () => change(s),
     }, h('b', null, spanShort(s.starts_at, s.ends_at)), h('span', null, withName ? (s.staff_id ? s.name : 'Open') : [s.station, s.role_label].filter(Boolean).join(', ') || 'Patrol'),
     withName && (s.station || s.role_label) ? h('span', { class: 'sb-sub' }, [s.station, s.role_label].filter(Boolean).join(', ')) : null,
-    s.status === 'draft' || s.notes ? h('span', { class: 'sb-sub' }, [s.status === 'draft' ? 'Draft' : null, s.notes].filter(Boolean).join('. ')) : null);
+    s.status === 'draft' || s.notes ? h('span', { class: 'sb-sub' }, [s.status === 'draft' ? 'Draft' : null, s.notes].filter(Boolean).join('. ')) : null,
+    s.cover_status ? h('span', { class: 'sb-cover' }, s.cover_status === 'pending' ? 'Cover offered' : 'Needs cover') : null);
     const cellAdd = (d, m) => (edit ? h('button', { type: 'button', class: 'cell-add', 'aria-label': `Add a patrol shift${m ? ` for ${m.name}` : ''} on ${dayLong(d)}`, onclick: () => add(d, m ? m.staff_id : null) }, '+') : null);
 
     const grid = h('div', { class: 'sched-grid', role: 'table', 'aria-label': `Patrol schedule for ${weekLabel(start)}` });
@@ -125,6 +126,7 @@ function shiftDialog({ shift, date, staffId, stations, onDone }) {
     h('div', { class: 'shift-when' }, field('Day', day), field('Starts', from), field('Ends', to)),
     h('div', { class: 'shift-when two' }, field('Station', station), field('Role', role)), field('Note', notes),
     h('fieldset', { class: 'cand-box' }, h('legend', null, 'Who'), who),
+    editing && shift.cover_status ? h('p', { class: 'cover-why' }, `${shift.name} has asked for cover on this shift (see the Cover tab). Putting someone else on it counts as covered; leaving it open or cancelling it closes the request.`) : null,
     editing ? h('p', { class: 'muted small' }, shift.status === 'published' ? 'Published: anyone taken off, put on, or whose shift changes gets a message in their Inbox.' : 'A draft: patrollers see it once you publish.') : null), async () => {
     const [s, e] = times();
     const body = { starts_at: s, ends_at: e, station_id: station.value ? Number(station.value) : null, role_label: role.value.trim() || null, notes: notes.value.trim() || null, staff_id: chosen || null };

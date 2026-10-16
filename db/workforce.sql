@@ -71,3 +71,43 @@ CREATE TABLE IF NOT EXISTS patrol_member_access (
   PRIMARY KEY (tenant_id, staff_id, feature),
   CONSTRAINT fk_pma_staff FOREIGN KEY (tenant_id, staff_id) REFERENCES staff(tenant_id, id)
 ) ENGINE=InnoDB;
+
+-- Shift cover: a patroller who cannot work a published patrol shift asks for cover, and someone else on the roster
+-- takes it. With approval on, a schedule builder confirms the swap before the shift changes hands.
+--   open       waiting for someone to take it
+--   pending    someone offered to take it; waiting for a schedule builder (approval on)
+--   covered    the shift now belongs to taken_by
+--   withdrawn  the patroller who asked took it back
+--   closed     the shift was cancelled or reassigned on the schedule, so the request no longer applies
+-- A request whose shift has started without being covered is shown as expired; nothing needs to change it.
+CREATE TABLE IF NOT EXISTS patrol_cover_requests (
+  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  tenant_id       BIGINT UNSIGNED NOT NULL,
+  patrol_shift_id BIGINT UNSIGNED NOT NULL,
+  staff_id        BIGINT UNSIGNED NOT NULL,          -- who asked (on the shift when they asked)
+  reason          VARCHAR(200) NULL,
+  status          ENUM('open','pending','covered','withdrawn','closed') NOT NULL DEFAULT 'open',
+  taken_by        BIGINT UNSIGNED NULL,              -- staff who took it or offered to
+  taken_at        DATETIME NULL,
+  decided_by      BIGINT UNSIGNED NULL,              -- the login that approved, declined or closed it
+  decided_note    VARCHAR(200) NULL,
+  created_by      BIGINT UNSIGNED NULL,
+  created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_pcr_tenant_id (tenant_id, id),
+  KEY ix_pcr_status (tenant_id, status),
+  KEY ix_pcr_shift (tenant_id, patrol_shift_id),
+  CONSTRAINT fk_pcr_shift FOREIGN KEY (tenant_id, patrol_shift_id) REFERENCES patrol_shifts(tenant_id, id),
+  CONSTRAINT fk_pcr_staff FOREIGN KEY (tenant_id, staff_id) REFERENCES staff(tenant_id, id),
+  CONSTRAINT fk_pcr_taker FOREIGN KEY (tenant_id, taken_by) REFERENCES staff(tenant_id, id)
+) ENGINE=InnoDB;
+
+-- How shift cover works at a mountain, and the patrol's Inbox conversation where requests are announced.
+CREATE TABLE IF NOT EXISTS patrol_cover_settings (
+  tenant_id       BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  needs_approval  TINYINT(1) NOT NULL DEFAULT 0,
+  thread_id       BIGINT UNSIGNED NULL,
+  updated_by      BIGINT UNSIGNED NULL,
+  updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_pcs_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+) ENGINE=InnoDB;

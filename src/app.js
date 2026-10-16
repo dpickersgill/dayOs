@@ -202,6 +202,7 @@ function createApp() {
   api.use('/patrol', safetyRoutes);
   api.use('/patrol', patrolReview);
   api.use('/patrol', require('./routes/patrolschedule').router);
+  api.use('/patrol', require('./routes/patrolcover').router);
   api.use('/park', park);
   api.use('/ops', opsRoutes);
   api.use('/ops', maintenance);

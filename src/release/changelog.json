@@ -1,6 +1,40 @@
 {
   "releases": [
     {
+      "version": "2026.10.9",
+      "date": "2026-10-16",
+      "title": "Shift cover for ski patrol",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Can’t make a patrol shift? Ask for cover on Patrol, Team, Cover. Everyone on the roster sees it there and in the Patrol shift cover conversation in the Inbox, and anyone free at that time can take it. The shift moves to them and you both get a message.",
+          "help": "patrol-cover"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Those who build the patrol schedule can choose to approve each swap first. Taking a shift then sends an offer, and the shift moves once it is approved.",
+          "help": "patrol-cover"
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Shifts waiting for cover are marked Needs cover on the patrol schedule. Putting someone else on one from the schedule counts as covered.",
+          "help": "patrol-schedule"
+        }
+      ]
+    },
+    {
       "version": "2026.10.8",
       "date": "2026-10-16",
       "title": "Patrollers from the staff page, and patrol permissions",
