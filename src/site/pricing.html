@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pricing: SummitOps plans and add-ons</title>
+<meta name="description" content="Three plans for independent ski areas, add-ons when you want them, monthly or yearly. Pay by card, bank account or invoice. Every plan starts with a 14-day free trial.">
+<link rel="canonical" href="{{CANONICAL}}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="SummitOps">
+<meta property="og:title" content="SummitOps pricing: priced by what you run">
+<meta property="og:description" content="Plans plus add-ons, monthly or yearly, with a 14-day free trial.">
+<meta property="og:url" content="{{CANONICAL}}">
+<meta property="og:image" content="{{ROOT}}/site/img/share.png">
+<meta name="theme-color" content="#12303a">
+<link rel="icon" href="/site/img/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/icon-180.png">
+<link rel="stylesheet" href="/site/site.css">
+<script src="/site/site.js" defer></script>
+</head>
+<body>
+<div class="sx">
+<!--HEADER:pricing-->
+
+<main id="main" data-page="pricing">
+  <section class="pagehead" style="padding-bottom:40px" aria-labelledby="h-pr">
+    <div class="wrap">
+      <h1 id="h-pr">Priced by what you run.</h1>
+      <p>Three plans, named for the trail signs because they get steeper. Pick the set of apps that fits your mountain, add what you want on top, and change it later without starting over. Every plan starts with 14 days free.</p>
+      <div class="bill" role="group" aria-label="Billing period">
+        <button type="button" aria-pressed="true" data-interval="month">Pay monthly</button>
+        <button type="button" aria-pressed="false" data-interval="year">Pay yearly<small id="yearsave">save 15%</small></button>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding:0 0 88px" aria-label="Plans">
+    <div class="wrap">
+      <div class="plans" id="plans">
+        <div class="plan"><div class="sym"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="15" fill="#2C7A57"/></svg><h2>Lodge</h2></div><p class="who">Small hills and community areas that need to sell, scan and keep the lifts honest.</p><div class="price"><b>$199</b><span>per month</span></div><p class="setup">Billed monthly</p><ul><li>Sell, with Products and prices</li><li>Gate scanning</li><li>Lifts and trails</li><li>Documents</li></ul><a class="btn ghost go" href="{{SITE}}/contact?kind=trial&amp;plan=Lodge">Start a Lodge trial</a></div>
+        <div class="plan feat"><div class="sym"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect x="2" y="2" width="30" height="30" rx="2" fill="#1B5FC1"/></svg><h2>Mountain</h2></div><p class="who">The typical independent mountain, with a ski school, a rental shop and a crew to schedule.</p><div class="price"><b>$449</b><span>per month</span></div><p class="setup">Billed monthly</p><ul><li class="plus">Everything in Lodge, plus:</li><li>Rentals</li><li>Ski school and instructor availability</li><li>Clubs and programs</li><li>Staff and schedule</li><li>Money</li></ul><a class="btn go" href="{{SITE}}/contact?kind=trial&amp;plan=Mountain">Start a Mountain trial</a></div>
+        <div class="plan"><div class="sym"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><path d="M17 1 L33 17 L17 33 L1 17 Z" fill="#12303A"/></svg><h2>Resort</h2></div><p class="who">Larger operations with a patrol department, a terrain park and many hands.</p><div class="price"><b>$799</b><span>per month</span></div><p class="setup">Billed monthly</p><ul><li class="plus">Everything in Mountain, plus:</li><li>Patrol</li><li>Terrain park</li><li>Online shop</li></ul><a class="btn ghost go" href="{{SITE}}/contact?kind=trial&amp;plan=Resort">Start a Resort trial</a></div>
+      </div>
+      <p class="fine" id="planfine">Prices are in US dollars, before any sales tax. Yearly billing is charged once a year.</p>
+    </div>
+  </section>
+
+  <section class="sec alt" aria-labelledby="h-cmp">
+    <div class="wrap">
+      <div class="sh"><h2 id="h-cmp">What is in each plan.</h2><p>Today, Inbox, Customers, Waivers, My shifts and Help come with every plan.</p></div>
+      <div class="tblwrap" tabindex="0" role="region" aria-label="Plan comparison table, scrolls sideways on small screens" id="cmpwrap">
+        <p class="fine">The comparison loads with the plans.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" id="addons" aria-labelledby="h-add">
+    <div class="wrap">
+      <div class="sh">
+        <h2 id="h-add">Add-ons.</h2>
+        <p>Extra apps you switch on when your mountain wants them, on top of any plan. The owner adds or removes them on the Billing page, and Stripe charges or credits the difference. Turning one off never deletes its records.</p>
+      </div>
+      <div class="addons" id="addonlist"></div>
+    </div>
+  </section>
+
+  <section class="sec alt" aria-labelledby="h-how">
+    <div class="wrap">
+      <div class="sh"><h2 id="h-how">How paying works.</h2><p>No contract to sign. The owner runs it all from the Billing page inside SummitOps.</p></div>
+      <div class="steps-line">
+        <div><b>14 days free</b><span>Ask for a trial and we set up your mountain with everything on. No card needed to start.</span></div>
+        <div><b>Pick a plan</b><span>Choose a plan, any add-ons, and monthly or yearly, before the trial ends. Paying early does not shorten the trial.</span></div>
+        <div><b>Pay your way</b><span>Card, US bank account or invoice. Receipts and invoices are on the Billing page.</span></div>
+        <div><b>Change any time</b><span>Move up or down a plan, or add and remove add-ons. Stripe charges or credits the difference.</span></div>
+      </div>
+      <div class="paygrid">
+        <div class="payway"><h3>Card</h3><p>Credit or debit card, renewing automatically each month or year. Change the card whenever you like.</p></div>
+        <div class="payway"><h3>Bank account (ACH)</h3><p>Link a US bank account once and it renews automatically. The first payment takes a few business days to clear.</p></div>
+        <div class="payway"><h3>Invoice</h3><p>We email an invoice each period, due in 30 days. Pay by card, bank transfer or check. Good for boards and town-run areas.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="h-ex">
+    <div class="wrap">
+      <div class="sh"><h2 id="h-ex">What costs extra, and what doesn't.</h2></div>
+      <div class="extras">
+        <div><h3>Moving in</h3><p>We import your customers and products, set up your staff and roles, and train your crew. Tell us what you have and we will quote it in writing before you sign up.</p></div>
+        <div><h3>Card processing</h3><p>The online shop, lesson payments and patrol giving run through Stripe. Stripe's processing fees pass through to you at cost, and SummitOps adds nothing on top. Text messages are charged at the text provider's cost.</p></div>
+        <div><h3>Logins and storage</h3><p>Every plan has as many staff logins as you need. Each mountain starts with 500 MB for documents and their versions; ask us if you need more.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" style="padding-top:0" aria-labelledby="h-found">
+    <div class="wrap">
+      <div class="found">
+        <div><b id="h-found">Founding mountains pay half in their first season.</b><span>We are opening a small founding group. In return, we ask for your honest feedback and a say in what we build next.</span></div>
+        <a class="btn onink" href="{{SITE}}/contact?kind=founding">Join the founding group</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec alt" aria-labelledby="h-pf">
+    <div class="wrap">
+      <div class="sh"><h2 id="h-pf">Pricing questions.</h2></div>
+      <div class="faq">
+        <details><summary>Is there a contract?</summary><p>No. Monthly billing is month to month, and yearly billing is paid once a year. Cancel from the Billing page and you keep everything until the end of the period you paid for.</p></details>
+        <details><summary>What happens when the trial ends?</summary><p>If you have chosen a plan and a way to pay, nothing changes. If not, everything keeps working for 14 more days with a note at the top of every page, then SummitOps becomes read only until you pay.</p></details>
+        <details><summary>What does read only mean?</summary><p>Everyone can still sign in, see and export everything. Nothing new is sold, booked or added, and the online shop stops taking orders. Patrol, the time clock and the team Inbox keep working, because care records and hours should never wait on a bill. Paying turns everything back on straight away.</p></details>
+        <details><summary>Can we buy just a few apps?</summary><p>Start with the plan nearest to what you run and add what you need. If none fits, tell us what you run and we will price it with you.</p></details>
+        <details><summary>We need Patrol but not the bigger plan.</summary><p>Patrol is an add-on for Lodge and Mountain, and included in Resort. Many volunteer patrols start there.</p></details>
+        <details><summary>Can we change plans or switch apps on and off?</summary><p>Yes. The owner changes the plan and add-ons on the Billing page, and the apps change to match. Turning an app off hides it from your crew without deleting anything.</p></details>
+        <details><summary>What happens to our data if we leave?</summary><p>It is yours. Customers, sales, payments, refunds and incident reports download as spreadsheets whenever you want them.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" aria-labelledby="h-prc">
+    <div class="wrap">
+      <h2 id="h-prc">Not sure which plan fits?</h2>
+      <p>Tell us what you run and we will tell you, even if the answer is the smaller one.</p>
+      <div class="ctas"><a class="btn onink" href="{{SITE}}/contact">Request a walkthrough</a><a class="btn ghost" style="color:#fff!important;border-color:#fff" href="{{TRY}}">Try the demo</a></div>
+    </div>
+  </section>
+</main>
+<!--FOOTER-->
+</div>
+</body>
+</html>

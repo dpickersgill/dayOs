@@ -270,6 +270,7 @@ router.post('/billing/plans', validate(z.object(planFields)), async (req, res) =
   try {
     const [r] = await pool.query(`INSERT INTO billing_plans (${Object.keys(c).join(', ')}) VALUES (${Object.keys(c).map(() => '?').join(', ')})`, Object.values(c));
     await log(pool, req, null, 'billing_plan_create', req.body);
+    require('./site').forgetPlans();
     res.status(201).json({ id: r.insertId });
   } catch (e) { if (e.code === 'ER_DUP_ENTRY') throw bad('That code is already used'); throw e; }
 });
@@ -282,6 +283,7 @@ router.patch('/billing/plans/:id', validate(planEdit), async (req, res) => {
   const [r] = await pool.query(`UPDATE billing_plans SET ${Object.keys(c).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, [...Object.values(c), paramId(req)]);
   if (!r.affectedRows) throw notFound('Plan');
   await log(pool, req, null, 'billing_plan_edit', { id: paramId(req), ...req.body });
+  require('./site').forgetPlans();
   res.json({ ok: true });
 });
 /** Make the plan's product and prices in Stripe (a changed price makes a new Stripe price; existing subscribers keep theirs). */
@@ -291,6 +293,23 @@ router.post('/billing/plans/:id/sync', async (req, res) => {
   const out = await BL.syncPlan(BL.parsePlan(p));
   await log(pool, req, null, 'billing_plan_sync', { id: p.id });
   res.json({ stripe_product: out.stripe_product, stripe_month: out.stripe_month, stripe_year: out.stripe_year });
+});
+
+// ---------------------------------------------------------------- website leads (Contact page)
+router.get('/leads', async (req, res) => {
+  const status = ['new', 'contacted', 'trial', 'won', 'lost'].includes(req.query.status) ? req.query.status : null;
+  const data = await rows(pool, `SELECT l.id, l.created_at, l.kind, l.name, l.mountain, l.role, l.email, l.phone, l.lifts, l.plan_interest, l.message, l.founding, l.status, l.operator_note, l.tenant_id, l.emailed, t.slug
+    FROM site_leads l LEFT JOIN tenants t ON t.id = l.tenant_id ${status ? 'WHERE l.status = ?' : ''} ORDER BY l.id DESC LIMIT 200`, status ? [status] : []);
+  const [[c]] = await pool.query("SELECT COUNT(*) AS n FROM site_leads WHERE status = 'new'");
+  res.json({ data: data.map((l) => ({ ...l, founding: Boolean(l.founding), emailed: Boolean(l.emailed) })), new_count: Number(c.n) });
+});
+router.patch('/leads/:id', validate(z.object({ status: z.enum(['new', 'contacted', 'trial', 'won', 'lost']).optional(), operator_note: z.string().max(1000).nullable().optional(), tenant_id: z.number().int().positive().nullable().optional() })), async (req, res) => {
+  const set = Object.entries(req.body).filter(([, v]) => v !== undefined);
+  if (!set.length) throw bad('Nothing to change');
+  const [r] = await pool.query(`UPDATE site_leads SET ${set.map(([k]) => `${k} = ?`).join(', ')} WHERE id = ?`, [...set.map(([, v]) => v), paramId(req)]);
+  if (!r.affectedRows) throw notFound('Request');
+  await log(pool, req, req.body.tenant_id || null, 'lead', { id: paramId(req), ...req.body });
+  res.json({ ok: true });
 });
 
 /** One mountain's billing, as the operator sets it: plan, trial end, free (comped), paid outside Stripe until a date. */

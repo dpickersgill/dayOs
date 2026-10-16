@@ -107,7 +107,7 @@ async function home() {
   const filter = input({ type: 'search', placeholder: 'Find a mountain', 'aria-label': 'Find a mountain' });
   app.append(h('main', { class: 'platform-box wide stack' },
     h('header', { class: 'row between' }, h('h1', null, 'Mountains'),
-      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), button('Plans and prices', () => billingPlans(), { small: true }), button('Demos', () => demos(), { small: true }), button('Injury report', () => injuryReport(), { small: true }), button('Releases', () => releases(), { small: true }), button('Activity', () => activity(), { small: true }), button('Operators', () => operators(), { small: true }), me.operator ? button('Change my password', () => myPassword(), { small: true }) : null, button('Sign out', () => signIn('Signed out.'), { small: true }))),
+      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), leadsButton(), button('Plans and prices', () => billingPlans(), { small: true }), button('Demos', () => demos(), { small: true }), button('Injury report', () => injuryReport(), { small: true }), button('Releases', () => releases(), { small: true }), button('Activity', () => activity(), { small: true }), button('Operators', () => operators(), { small: true }), me.operator ? button('Change my password', () => myPassword(), { small: true }) : null, button('Sign out', () => signIn('Signed out.'), { small: true }))),
     filter, body));
   try {
     const { data: all } = await call('GET', '/tenants');
@@ -198,11 +198,11 @@ function resetPassword(id, u) {
   }, { submitText: 'Reset password' });
 }
 
-function addMountain() {
+function addMountain(pre = {}, after) {
   const f = {
-    name: input({ name: 'name', required: true }), slug: input({ name: 'slug', required: true, autocapitalize: 'none', spellcheck: 'false' }),
-    tz: input({ name: 'tz', value: 'America/New_York' }), first: input({ name: 'first', required: true }), last: input({ name: 'last', required: true }),
-    email: input({ name: 'email', type: 'email', required: true }), pw: input({ name: 'pw', type: 'password', autocomplete: 'new-password', required: true }),
+    name: input({ name: 'name', required: true, value: pre.name || '' }), slug: input({ name: 'slug', required: true, autocapitalize: 'none', spellcheck: 'false' }),
+    tz: input({ name: 'tz', value: 'America/New_York' }), first: input({ name: 'first', required: true, value: pre.first || '' }), last: input({ name: 'last', required: true, value: pre.last || '' }),
+    email: input({ name: 'email', type: 'email', required: true, value: pre.email || '' }), pw: input({ name: 'pw', type: 'password', autocomplete: 'new-password', required: true }),
     cap: input({ name: 'cap', type: 'number', min: 10, max: 100000, value: 500 }),
     billing: h('select', { name: 'billing' }, h('option', { value: 'trial' }, '14-day free trial, then they pay'), h('option', { value: 'comped' }, 'Free (no charge)')),
   };
@@ -215,10 +215,36 @@ function addMountain() {
     h('div', { class: 'grid2' }, field('Owner first name', f.first), field('Owner last name', f.last)), field('Owner email', f.email), field('Owner password', f.pw, 'At least 10 characters.'),
     field('Document storage limit (MB)', f.cap), field('Billing', f.billing, 'You can change this later on the mountain\'s Manage page.'), h('fieldset', { class: 'stack tight' }, h('legend', null, 'Apps to turn on'), ...checks)), async () => {
     const modules = Object.fromEntries([...picks].map(([k, cb]) => [k, cb.checked]));
-    await call('POST', '/tenants', { slug: f.slug.value.trim(), name: f.name.value.trim(), timezone: f.tz.value.trim(), storage_cap_mb: Number(f.cap.value), modules, billing: f.billing.value,
+    const made = await call('POST', '/tenants', { slug: f.slug.value.trim(), name: f.name.value.trim(), timezone: f.tz.value.trim(), storage_cap_mb: Number(f.cap.value), modules, billing: f.billing.value,
       owner: { email: f.email.value.trim(), password: f.pw.value, first_name: f.first.value.trim(), last_name: f.last.value.trim() } });
-    toast('Mountain added.'); home();
+    toast('Mountain added.'); if (after) await after(made); home();
   }, { submitText: 'Add mountain', wide: true });
+  if (pre.name) f.name.dispatchEvent(new Event('input'));
+}
+
+// ---------------------------------------------------------------- website leads: walkthrough and trial requests from the Contact page
+function leadsButton() {
+  const b = button('Leads', () => leads(), { small: true });
+  call('GET', '/leads?status=new').then((r) => { if (r.new_count) b.append(' ', badge(String(r.new_count), 'warn')); }).catch(() => {});
+  return b;
+}
+const LEAD_KIND = { walkthrough: 'Walkthrough', trial: 'Trial', founding: 'Founding group', question: 'Question' };
+const LEAD_STATUS = [['new', 'New'], ['contacted', 'Contacted'], ['trial', 'On a trial'], ['won', 'Paying'], ['lost', 'Not now']];
+async function leads() {
+  let r;
+  try { r = await call('GET', '/leads'); } catch (ex) { fail(ex); return; }
+  const dlg = dialog('Leads from the website', r.data.length ? h('div', { class: 'stack' },
+    h('p', { class: 'hint' }, 'Requests sent from the Contact page, newest first. Each was also emailed to SITE_CONTACT_EMAIL when email is set up.'),
+    table([
+      { head: 'When', cell: (l) => dayTime(l.created_at) },
+      { head: 'Who', cell: (l) => h('span', null, h('b', null, l.mountain), h('br'), `${l.name}${l.role ? `, ${l.role}` : ''}`, h('br'), h('a', { href: `mailto:${l.email}` }, l.email), l.phone ? ` ${l.phone}` : '') },
+      { head: 'Wants', cell: (l) => h('span', null, LEAD_KIND[l.kind] || l.kind, l.founding && l.kind !== 'founding' ? ', founding group' : '', l.plan_interest ? h('span', { class: 'muted small' }, ` (${l.plan_interest})`) : null, l.lifts ? h('span', { class: 'muted small' }, `, ${l.lifts} lifts`) : null, l.message ? h('p', { class: 'small' }, l.message) : null) },
+      { head: 'Status', cell: (l) => { const sel = h('select', { 'aria-label': `Status for ${l.mountain}`, style: 'min-width:9.5em' }, ...LEAD_STATUS.map(([v, t]) => { const o = h('option', { value: v }, t); o.selected = l.status === v; return o; })); sel.addEventListener('change', async () => { try { await call('PATCH', `/leads/${l.id}`, { status: sel.value }); toast('Saved.'); } catch (ex) { fail(ex); } }); return h('span', null, sel, l.slug ? h('div', { class: 'small muted' }, `Mountain: ${l.slug}`) : null, l.operator_note ? h('div', { class: 'small' }, l.operator_note) : null); } },
+      { actions: true, cell: (l) => h('span', { class: 'row' }, ...[
+        !l.tenant_id ? button('Make their mountain', () => { const [first, ...rest] = l.name.split(' '); addMountain({ name: l.mountain, email: l.email, first, last: rest.join(' ') || first }, async (made) => { await call('PATCH', `/leads/${l.id}`, { tenant_id: made.id, status: 'trial' }); dlg.close(); }); }, { small: true }) : null,
+        button('Note', () => { const n = input({ name: 'note', maxlength: 1000, value: l.operator_note || '' }); formDialog(`Note on ${l.mountain}`, field('Your note', n, 'Only operators see this.'), async () => { await call('PATCH', `/leads/${l.id}`, { operator_note: n.value.trim() || null }); toast('Saved.'); dlg.close(); leads(); }); }, { small: true }),
+      ].filter(Boolean)) },
+    ], r.data)) : empty('No requests yet. They appear here when someone sends the form on the Contact page.'), { wide: true });
 }
 
 // ---------------------------------------------------------------- billing: plans, prices and each mountain's subscription

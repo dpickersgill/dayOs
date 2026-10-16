@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security: how SummitOps protects your data</title>
+<meta name="description" content="How SummitOps keeps guest and patient information with the people who need it: separate mountains, access by role, two-step sign-in, records that hold up, payments through Stripe, and your data yours to take.">
+<link rel="canonical" href="{{CANONICAL}}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="SummitOps">
+<meta property="og:title" content="SummitOps security: careful with guest and patient information">
+<meta property="og:url" content="{{CANONICAL}}">
+<meta property="og:image" content="{{ROOT}}/site/img/share.png">
+<meta name="theme-color" content="#12303a">
+<link rel="icon" href="/site/img/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/icon-180.png">
+<link rel="stylesheet" href="/site/site.css">
+<script src="/site/site.js" defer></script>
+</head>
+<body>
+<div class="sx">
+<!--HEADER:security-->
+
+<main id="main">
+  <section class="pagehead" aria-labelledby="h-sec">
+    <div class="wrap">
+      <h1 id="h-sec">Careful with guest and patient information.</h1>
+      <p>You hold names, birthdays, payments and injury details. SummitOps is built to keep that with the people who need it, and to show who touched what.</p>
+    </div>
+  </section>
+
+  <section class="sec" style="padding-top:0" aria-label="How it is protected">
+    <div class="wrap">
+      <div class="sg">
+        <div><h2>Each mountain is walled off.</h2><p class="lead">One mountain can never see another's records.</p></div>
+        <div>
+          <ul>
+            <li>Every record belongs to one mountain, and every request is checked against the mountain you are signed in to.</li>
+            <li>Signing in to one mountain gives no way to ask for another's data, by name or by number.</li>
+          </ul>
+          <p class="proof">Every release is tested by creating a second mountain, signing in as it, and trying every page and action against the first mountain's records. A release does not ship if any of them get through.</p>
+        </div>
+      </div>
+      <div class="sg">
+        <div><h2>Access by role.</h2><p class="lead">People see what their job needs.</p></div>
+        <div>
+          <ul>
+            <li>Counter, patrol, instructor, staff and manager roles each get their own menu.</li>
+            <li>Within patrol, the director sets what each access level can do: open cases, approve them, manage medications, release records.</li>
+            <li>Each document category lists which roles can see it and which can add to it.</li>
+            <li>Only managers see what assets cost, what they are worth, and vendor account numbers.</li>
+            <li>Turn off an app and its pages stop working for everyone at that mountain, not only the menu.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="sg">
+        <div><h2>Signing in.</h2><p class="lead">Strong where you need it, quiet where you don't.</p></div>
+        <div>
+          <ul>
+            <li>Two-step sign-in with an authenticator app, which you can require for everyone at your mountain.</li>
+            <li>Screens sign themselves out after 15 minutes without activity.</li>
+            <li>Passwords are stored hashed, never readable. Changing one signs out every other device.</li>
+            <li>The employee-entrance time clock is paired to your mountain by a manager before it works.</li>
+            <li>Our own operator console needs a named login with a password and an authenticator code.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="sg">
+        <div><h2>A record of what happened.</h2><p class="lead">Questions about who did what have answers.</p></div>
+        <div>
+          <ul>
+            <li>Changes are logged with who made them and when.</li>
+            <li>Refunds need a reason, and the reason is kept.</li>
+            <li>Policies and manuals keep up to 10 versions each, and you can restore an older one.</li>
+            <li>Ask people to confirm they have read a policy, and see who has.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="sg">
+        <div><h2>Patient records that hold up.</h2><p class="lead">A care record should show what happened, including the corrections.</p></div>
+        <div>
+          <ul>
+            <li>Nothing is deleted. A wrong vital, injury or treatment is marked entered in error, with a reason, and stays on the record struck through.</li>
+            <li>Every submit and every approval keeps a frozen copy of the whole report.</li>
+            <li>An entry typed long after the time it records says when it was typed, and times in the future are refused.</li>
+            <li>Refusal of care and the hand-off to EMS are signed on the phone. A patient who cannot decide cannot refuse, and a guardian signs for under-18s.</li>
+            <li>Medications can only be recorded as given by someone your medical director allows, from your formulary.</li>
+            <li>Records requests are logged, and only the approved version is released, with a release number. A legal hold stops any change to the case.</li>
+            <li>Entries made without signal are kept on that phone for the person who typed them, and sent once. Signing out on purpose clears them from the phone.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="sg">
+        <div><h2>Phone alerts.</h2><p class="lead">Fast, without carrying the chart.</p></div>
+        <div>
+          <ul>
+            <li>Alerts go only to the phones a patroller turned them on for, and are encrypted from our servers to the phone.</li>
+            <li>An alert says where the call is and what was reported. The patient's record stays behind the sign-in.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="sg">
+        <div><h2>Waivers you can stand behind.</h2><p class="lead">Signed, not just ticked.</p></div>
+        <div>
+          <ul>
+            <li>Each signing keeps the drawn signature, the typed name, the time, the device, and the exact wording signed.</li>
+            <li>Every version of your wording is kept, and a mistaken waiver is voided with a reason, never erased.</li>
+            <li>Removing a guest's personal details keeps their signed waivers, the mountain's legal record.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="sg">
+        <div><h2>Payments.</h2><p class="lead">Card and bank numbers never touch SummitOps.</p></div>
+        <div>
+          <ul>
+            <li>Guests pay for tickets, lessons and gifts on Stripe's own checkout page.</li>
+            <li>Your SummitOps subscription is paid the same way, by card, bank account or Stripe invoice.</li>
+            <li>We keep only what Stripe tells us happened: paid, refunded, failed.</li>
+            <li>A double tap is not a double charge: each payment request is sent to Stripe once.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="sg">
+        <div><h2>Your data is yours.</h2><p class="lead">Leaving should not mean losing your records.</p></div>
+        <div>
+          <ul>
+            <li>Customers, sales, payments, refunds, incident reports, signed waivers and asset costs download as spreadsheets whenever you want them.</li>
+            <li>Turning an app off never deletes its records.</li>
+            <li>If a subscription lapses, everything stays readable and exportable, and patrol keeps working.</li>
+            <li>SummitOps runs on Google Cloud in the United States, with daily database backups.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec alt" aria-labelledby="h-honest">
+    <div class="wrap">
+      <div class="honest">
+        <h2 id="h-honest">What we have not done yet.</h2>
+        <p>SummitOps has not had an outside security audit or a formal certification. If your board, your insurer or your state needs one, tell us when you ask for a walkthrough and we will say plainly where we are.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" aria-labelledby="h-secc">
+    <div class="wrap">
+      <h2 id="h-secc">Have a question your insurer will ask?</h2>
+      <p>Send it with your walkthrough request and we will answer it in writing.</p>
+      <div class="ctas"><a class="btn onink" href="{{SITE}}/contact?kind=question">Ask a security question</a><a class="btn ghost" style="color:#fff!important;border-color:#fff" href="{{TRY}}">Try the demo</a></div>
+    </div>
+  </section>
+</main>
+<!--FOOTER-->
+</div>
+</body>
+</html>

@@ -50,6 +50,17 @@ module.exports = {
   bootstrapKey: env.BOOTSTRAP_KEY || '',
   // Where the "ask for a walkthrough" link in a demo mountain points (the marketing site's contact page). Leave unset to show no link.
   marketingUrl: env.MARKETING_URL || '',
+  // The product website (public/site), served by this same service.
+  //   SITE_HOSTS          the website's own addresses, comma separated (www.summitops.com,summitops.com). On those,
+  //                       / is the website's home page; everywhere it is also at /site.
+  //   APP_URL             where the app lives (https://app.summitops.com), for the website's Sign in and Try the demo
+  //                       links. Unset: the same address the website is on.
+  //   SITE_CONTACT_EMAIL  who gets walkthrough and trial requests from the Contact page (they are also in the console, Leads)
+  site: {
+    hosts: String(env.SITE_HOSTS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean),
+    appUrl: (env.APP_URL || '').replace(/\/$/, ''),
+    contactEmail: env.SITE_CONTACT_EMAIL || '',
+  },
   db: {
     // Cloud SQL: DB_SOCKET=/cloudsql/<project>:<region>:<instance> (the socket Cloud Run provides). It replaces host and port.
     socketPath: env.DB_SOCKET || undefined,

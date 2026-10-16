@@ -456,6 +456,31 @@ async function backfillCaseNumbers(conn) {
   return rows.length;
 }
 
+// The launch plans and add-ons, as the product website lists them, made once when there are none. Prices and what each
+// includes are changed afterwards in the console (Plans and prices), and the website follows.
+async function seedPlans(conn) {
+  const [[n]] = await conn.query('SELECT COUNT(*) AS n FROM billing_plans');
+  if (Number(n.n)) return;
+  const yearly = (m) => Math.round(m * 12 * 0.85) * 100; // 15% off, charged once a year
+  const base = ['sell', 'catalog', 'gate', 'conditions', 'documents'];
+  const mid = [...base, 'rentals', 'school', 'availability', 'programs', 'workforce', 'money'];
+  const rows = [
+    ['lodge', 'Lodge', 'Small hills and community areas that need to sell, scan and keep the lifts honest.', 'plan', base, 199, 1],
+    ['mountain', 'Mountain', 'The typical independent mountain, with a ski school, a rental shop and a crew to schedule.', 'plan', mid, 449, 2],
+    ['resort', 'Resort', 'Larger operations with a patrol department, a terrain park and many hands.', 'plan', [...mid, 'patrol', 'park', 'shop'], 799, 3],
+    ['patrol', 'Patrol', 'Patient care reports, dispatch, duty, the closing sweep, medications and records, for any plan.', 'addon', ['patrol'], 179, 1],
+    ['shop', 'Online shop', 'Guests buy lift tickets, passes and gift cards online, picking the day first.', 'addon', ['shop'], 79, 2],
+    ['assets', 'Assets and fleet', 'Every machine and building system on one register, serviced on time and costed.', 'addon', ['assets'], 89, 3],
+    ['messages', 'Messages', 'Email and texts to the guests who agreed to hear from you.', 'addon', ['messages'], 39, 4],
+    ['doc-ocr', 'Document text recognition', 'Scanned PDFs and photos of paper become searchable.', 'addon', ['doc_ocr'], 29, 5],
+    ['park', 'Terrain park', 'Features, daily inspections and the park map.', 'addon', ['park'], 49, 6],
+  ];
+  for (const [code, name, blurb, kind, modules, monthly, sort] of rows) {
+    await conn.query('INSERT IGNORE INTO billing_plans (code, name, blurb, kind, modules, monthly_cents, yearly_cents, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [code, name, blurb, kind, modules.join(','), monthly * 100, yearly(monthly), sort]);
+  }
+  console.log('Added the launch plans and add-ons (change them in the console, Plans and prices)');
+}
+
 async function main() {
   const conn = await mysql.createConnection({
     socketPath: config.db.socketPath,
@@ -492,6 +517,8 @@ async function main() {
   await conn.query(fs.readFileSync(path.join(__dirname, 'workforce.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'patrolops.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'billing.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'site.sql'), 'utf8'));
+  await seedPlans(conn);
   let applied = 0;
   for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps]) {
     if (await done(conn)) continue;

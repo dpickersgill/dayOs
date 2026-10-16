@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contact: request a walkthrough or a free trial of SummitOps</title>
+<meta name="description" content="Book a 20-minute SummitOps walkthrough, ask for a 14-day free trial on your own mountain, or join the founding group.">
+<link rel="canonical" href="{{CANONICAL}}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="SummitOps">
+<meta property="og:title" content="See your mountain on the board">
+<meta property="og:url" content="{{CANONICAL}}">
+<meta property="og:image" content="{{ROOT}}/site/img/share.png">
+<meta name="theme-color" content="#12303a">
+<link rel="icon" href="/site/img/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/icon-180.png">
+<link rel="stylesheet" href="/site/site.css">
+<script src="/site/site.js" defer></script>
+</head>
+<body>
+<div class="sx">
+<!--HEADER:contact-->
+
+<main id="main">
+  <section class="pagehead" style="padding-bottom:56px" aria-labelledby="h-ct">
+    <div class="wrap">
+      <h1 id="h-ct">See your mountain on the board.</h1>
+      <p>Book a 20-minute walkthrough, or ask for a free trial on your own mountain. Tell us what you run and which part of the day is hardest, and we will start there.</p>
+    </div>
+  </section>
+
+  <section style="padding:0 0 96px" aria-label="Contact form">
+    <div class="wrap cgrid">
+      <div>
+        <ol class="steps">
+          <li><b>You send a few details.</b><span>Your mountain, your role and what you are curious about. It takes two minutes.</span></li>
+          <li><b>A person replies within one business day.</b><span>To set a time for a 20-minute video call, or to set up your trial mountain.</span></li>
+          <li><b>You see your hardest part first.</b><span>If it is lift checks, we start there. If it is patrol, lessons or the fleet, we start there.</span></li>
+          <li><b>You decide, with no pressure.</b><span>The trial is free for 14 days with no card. We will tell you which plan fits, even when it is the smaller one.</span></li>
+        </ol>
+        <p style="margin-top:26px;font-size:18px"><b>Want to look around first?</b> <a href="{{TRY}}">Start a demo mountain</a>. It takes about 20 seconds and needs no card.</p>
+      </div>
+
+      <form class="form" id="leadform" novalidate>
+        <h2>How can we help?</h2>
+        <fieldset style="border:0;padding:0;margin:0">
+          <legend class="vh">What you would like</legend>
+          <div class="kinds">
+            <label><input type="radio" name="kind" value="walkthrough" checked> A walkthrough</label>
+            <label><input type="radio" name="kind" value="trial"> A 14-day trial</label>
+            <label><input type="radio" name="kind" value="founding"> The founding group</label>
+            <label><input type="radio" name="kind" value="question"> A question</label>
+          </div>
+        </fieldset>
+        <div class="fr">
+          <div class="fld"><label for="f-name">Your name</label><input id="f-name" name="name" type="text" autocomplete="name" required maxlength="150"><span class="err" id="e-name">Add your name.</span></div>
+          <div class="fld"><label for="f-mountain">Mountain name</label><input id="f-mountain" name="mountain" type="text" autocomplete="organization" required maxlength="150"><span class="err" id="e-mountain">Add your mountain's name.</span></div>
+          <div class="fld"><label for="f-role">Your role <span class="opt">(optional)</span></label><input id="f-role" name="role" type="text" maxlength="100" placeholder="General manager, patrol director"></div>
+          <div class="fld"><label for="f-email">Email</label><input id="f-email" name="email" type="email" autocomplete="email" required maxlength="255"><span class="err" id="e-email">Add an email we can reply to.</span></div>
+          <div class="fld"><label for="f-phone">Phone <span class="opt">(optional)</span></label><input id="f-phone" name="phone" type="tel" autocomplete="tel" maxlength="40"></div>
+          <div class="fld"><label for="f-lifts">How many lifts do you run?</label>
+            <select id="f-lifts" name="lifts">
+              <option value="">Choose one</option>
+              <option value="1 to 2">1 to 2</option>
+              <option value="3 to 5">3 to 5</option>
+              <option value="6 or more">6 or more</option>
+            </select></div>
+          <div class="fld full"><label for="f-plan">Plan you are looking at <span class="opt">(optional)</span></label>
+            <select id="f-plan" name="plan_interest">
+              <option value="">Not sure yet</option>
+              <option value="Lodge">Lodge</option>
+              <option value="Mountain">Mountain</option>
+              <option value="Resort">Resort</option>
+              <option value="Patrol only">Patrol only</option>
+            </select></div>
+          <div class="fld full"><label for="f-msg" id="l-msg">Which part of the day is hardest right now? <span class="opt">(optional)</span></label>
+            <textarea id="f-msg" name="message" maxlength="2000"></textarea></div>
+        </div>
+        <div class="hp" aria-hidden="true"><label for="f-website">Leave this empty</label><input id="f-website" name="website" type="text" tabindex="-1" autocomplete="off"></div>
+        <label class="chk" for="f-found"><input id="f-found" name="founding" type="checkbox"><span>We would like to be considered for the founding group.</span></label>
+        <div class="send">
+          <button class="btn" type="submit" id="f-send">Send</button>
+          <span class="hint">We reply from a person, usually within one business day.</span>
+        </div>
+        <div class="status" id="f-status" role="status" aria-live="polite" tabindex="-1"></div>
+        <p class="hint" style="margin-top:14px">We use these details only to answer you. See our <a href="{{SITE}}/privacy">privacy policy</a>.</p>
+      </form>
+    </div>
+  </section>
+</main>
+<!--FOOTER-->
+</div>
+</body>
+</html>

@@ -91,6 +91,10 @@ function createApp() {
   app.use('/api/v1/online-shop/brand', express.json({ limit: '1200kb' })); // logo and hero photo together
   app.use(express.json({ limit: '400kb' })); // a customer photo is about 40 KB; a card statement a few hundred rows
 
+  // The product website: its pages at /site everywhere, and at / on its own addresses (SITE_HOSTS).
+  const site = require('./routes/site');
+  app.use(site.pages);
+
   // The admin web app: plain files, no build step. HTML/JS/CSS revalidate on every load so an update
   // shows up immediately; fonts never change and cache for a year.
   app.use(
@@ -166,6 +170,7 @@ function createApp() {
   // Operator sign-in has its own, tighter limit (on top of each login's lockout).
   api.post(['/platform/login', '/platform/login/setup'], rateLimit({ windowMs: 15 * 60_000, max: Number(process.env.PLATFORM_LOGIN_RATE_LIMIT) || 20, message: 'Too many sign-in attempts from this address. Try again in 15 minutes.' }));
   api.use('/platform', rateLimit({ windowMs: 60_000, max: Number(process.env.PLATFORM_RATE_LIMIT) || 60, message: 'Too many attempts' }), platform);
+  api.use(site.api); // the website's plans and contact form (no sign-in)
   api.use('/public', rateLimit({ windowMs: 60_000, max: 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, publicRouter, dispatch.publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter);
   api.use(authRoutes); // login, tenants, users, me (each route applies authenticate itself where needed)
 
@@ -226,6 +231,7 @@ function createApp() {
   api.use(finance); // tax rules, tenant profile, till, reconciliation, receipts, exports
 
   app.use('/api/v1', api);
+  app.use(site.notFound);
   app.use((_req, _res, next) => next(new AppError(404, 'Not found')));
   app.use(errorHandler);
   return app;

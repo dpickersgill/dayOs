@@ -552,6 +552,16 @@ Platform console, **Demos**: everyone who started a demo, newest first. Tiles sh
 - Standing: ok (free, trial, subscribed, paid manually), grace (14 days after a failed payment or the trial or paid time ends, with a banner on every page), read only (writes refused with 402 except billing, patrol, time clock, Inbox, kiosk; the online shop and lesson booking stop taking orders). Reminder emails to the owner 3 days before the trial ends, when grace starts, 3 days before read only, and at read only.
 - Console: Billing column on the mountain list; Change billing per mountain (free, plan, add-ons, period, trial end, paid until for a check, billing email, operator notes, optionally set the apps to the plan).
 
+## Product website
+
+- Pages: Home, Product, Pricing, Security, Contact, Privacy, Terms and a not-found page, in `src/site/*.html` with shared header and footer filled in by `src/routes/site.js`; styles, script, pictures and the share image in `public/site/`. Fonts are served from `public/fonts` (no Google Fonts).
+- Where: `/site/...` on every address; on the addresses in `SITE_HOSTS`, at the top (`/`, `/pricing`...), with `robots.txt`, `sitemap.xml` and a not-found page. The app is also at `/app` there; links to sign in and the demo use `APP_URL`.
+- Pricing is live: `GET /api/v1/site/plans` lists the console's active plans and add-ons (names, blurbs, prices, apps), cached for a minute and cleared when a plan changes. The page builds the plan cards, the comparison table and the add-on cards from it, monthly or yearly; without it the page's own copy stays.
+- Contact: `POST /api/v1/site/contact` (walkthrough, trial, founding group or question). A hidden field catches bots, 8 per address per hour (`SITE_CONTACT_LIMIT`). Kept in `site_leads` (the address only as a salted hash), emailed to `SITE_CONTACT_EMAIL` with reply-to the visitor, and a copy to the visitor.
+- Console: **Leads** lists requests (a count of new ones on the button), with status (new, contacted, on a trial, paying, not now), a note, and **Make their mountain**, which opens Add a mountain filled in and links the lead to it.
+- The migration adds the launch plans and add-ons once, when there are none.
+- `test/site.test.js` covers the pages on both kinds of address, the live plans, the contact form and Leads.
+
 ## Engineering notes
 
 ### PATCH keeps defaulted fields

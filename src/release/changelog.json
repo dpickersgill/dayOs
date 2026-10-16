@@ -1,6 +1,31 @@
 {
   "releases": [
     {
+      "version": "2026.10.13",
+      "date": "2026-10-16",
+      "title": "The product website goes live",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "The product website is now part of SummitOps: Home, Product, Pricing, Security, Contact, Privacy and Terms, updated with patrol operations, billing, RFID and the Inbox. It is at /site everywhere, and at the top of its own domain once SITE_HOSTS is set."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "Pricing on the website comes from the console's Plans and prices, so changing a price there changes the website. The launch plans and add-ons are added for you."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "Console: Leads lists walkthrough and trial requests from the Contact page, with status, notes and Make their mountain. Each is also emailed to SITE_CONTACT_EMAIL."
+        }
+      ]
+    },
+    {
       "version": "2026.10.12",
       "date": "2026-10-16",
       "title": "Billing, and printing fixed",

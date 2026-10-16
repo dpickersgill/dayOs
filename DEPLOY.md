@@ -82,6 +82,21 @@ Migrations only add tables and columns, so the previous revision keeps working a
 | `DB_POOL` | Database connections per server (deploy.sh sets 8; with at most 4 servers that is 32 connections) |
 | `POSTMARK_BROADCAST_STREAM` | The Postmark stream for marketing messages (default `broadcast`); tickets, reminders and patrol mail use `POSTMARK_STREAM` (default `outbound`) |
 | `TOTP_KEY`, `LINK_SECRET`, `KIOSK_SECRET` | Separate keys for two-step secrets, unsubscribe links and staff badges. Each falls back to `JWT_SECRET`. See RUNBOOK.md before rotating `JWT_SECRET`. |
+| `SITE_HOSTS`, `APP_URL`, `SITE_CONTACT_EMAIL` | The product website on its own domain. `SITE_HOSTS` lists the website's addresses (`www.summitops.com,summitops.com`): on those, `/` is the website. `APP_URL` is where staff sign in (`https://app.summitops.com`). `SITE_CONTACT_EMAIL` gets the Contact page's requests (they are also in the console, Leads). The website is always at `/site` too. See "Putting the website live" below. |
 | `PLATFORM_TOTP_SECRET`, `PLATFORM_ALLOW_IPS` | Two-step sign-in and an address allowlist for the platform console. See RUNBOOK.md. |
 
 See RUNBOOK.md for rotating secrets, the scheduler command and the security checklist.
+
+## Putting the website live
+
+The product website (Home, Product, Pricing, Security, Contact, Privacy, Terms) is served by this same service. Check it first at `https://<service address>/site/`.
+
+1. **Domains.** In Cloud Run, Manage custom domains, map the website address (for example `www.summitops.com`, and the bare `summitops.com`) and the app address (`app.summitops.com`) to `summitops-api`. Add the DNS records it shows at your domain registrar. The certificates follow on their own, usually within an hour.
+2. **Settings.** Set the website's settings once (they are kept by every later deploy):
+   ```
+   gcloud run services update summitops-api --region us-east1 --update-env-vars "^@^SITE_HOSTS=www.summitops.com,summitops.com@APP_URL=https://app.summitops.com@PUBLIC_URL=https://app.summitops.com@SITE_CONTACT_EMAIL=you@yourdomain.com"
+   ```
+   The `^@^` at the start lets the website list hold a comma. `PUBLIC_URL` is used for Stripe's return links, so it should be the app address.
+3. **Email.** The Contact page emails `SITE_CONTACT_EMAIL` and sends the visitor a copy through Postmark, so `POSTMARK_SERVER_TOKEN` and `MAIL_FROM` must be set and the sender verified. Without email, requests still land in the console under Leads.
+4. **Prices.** The Pricing page shows the active plans and add-ons from the console (Plans and prices). The first migration adds the launch set (Lodge, Mountain, Resort and six add-ons); change them there and the website follows within a minute. Press Sync to Stripe on each before mountains pay.
+5. **Legal pages.** Privacy and Terms are plain-language starting points. Have a lawyer read them before launch, especially the governing law (Pennsylvania), the 60-day export window and the liability limit.
