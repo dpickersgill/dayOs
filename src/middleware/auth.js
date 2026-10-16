@@ -33,7 +33,9 @@ async function authenticate(req, _res, next) {
 
   const userId = Number(payload.sub);
   const [rows] = await pool.query(
-    `SELECT u.id, u.role, u.staff_id, u.totp_enabled, u.must_change_password, t.require_mfa, t.status, (t.sandbox_expires_at IS NOT NULL) AS sandbox, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over FROM users u JOIN tenants t ON t.id = u.tenant_id
+    `SELECT u.id, u.role, u.staff_id, u.totp_enabled, u.must_change_password,
+       (u.staff_id IS NOT NULL AND EXISTS (SELECT 1 FROM patrol_members m JOIN staff s ON s.tenant_id = m.tenant_id AND s.id = m.staff_id AND s.status = 'active' WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id)) AS on_patrol,
+       t.require_mfa, t.status, (t.sandbox_expires_at IS NOT NULL) AS sandbox, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over FROM users u JOIN tenants t ON t.id = u.tenant_id
      WHERE u.id = ? AND u.tenant_id = ? AND u.active = 1
        AND (u.password_changed_at IS NULL OR UNIX_TIMESTAMP(u.password_changed_at) <= ?)`,
     [userId, payload.tid, payload.iat],
@@ -55,7 +57,8 @@ async function authenticate(req, _res, next) {
     return next(err);
   }
 
-  req.auth = { tenantId: payload.tid, userId, role: rows[0].role, staffId: rows[0].staff_id };
+  // onPatrol: this login's person is on the patrol roster, so they can use Patrol whatever their login role is.
+  req.auth = { tenantId: payload.tid, userId, role: rows[0].role, staffId: rows[0].staff_id, onPatrol: Boolean(Number(rows[0].on_patrol)) };
   if (Number(rows[0].sandbox)) demoUsage.touch(payload.tid, req.originalUrl, req.method); // for the platform's Demos dashboard
   return next();
 }
@@ -67,6 +70,8 @@ function requireRole(...roles) {
   return (req, _res, next) => {
     if (!req.auth) return next(unauthorized());
     if (req.auth.role === 'owner' || roles.includes(req.auth.role)) return next();
+    // Someone on the patrol roster can do what a patrol login can, whatever their login role (a lift operator who also patrols).
+    if (req.auth.onPatrol && roles.includes('patrol')) return next();
     return next(forbidden('Your role cannot do that'));
   };
 }

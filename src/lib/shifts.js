@@ -41,7 +41,7 @@ async function weekMinutes(db, tenantId, start, ignoreShiftId = 0) {
  * each with the reasons. Within a group, fewest hours booked that week first.
  */
 async function candidates(db, tenantId, shift) {
-  const staff = await rows(db, "SELECT s.id, p.first_name, p.last_name FROM staff s JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE s.tenant_id = ? AND s.status = 'active' AND s.in_workforce = 1 ORDER BY p.last_name, p.first_name LIMIT 500", [tenantId]);
+  const staff = await rows(db, "SELECT s.id, s.in_workforce, p.first_name, p.last_name FROM staff s JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE s.tenant_id = ? AND s.status = 'active' ORDER BY p.last_name, p.first_name LIMIT 500", [tenantId]);
   const trained = new Set((await rows(db, 'SELECT staff_id FROM staff_positions WHERE tenant_id = ? AND position_id = ?', [tenantId, shift.position_id])).map((r) => Number(r.staff_id)));
   const anyTrained = (await one(db, 'SELECT COUNT(*) AS n FROM staff_positions WHERE tenant_id = ? AND position_id = ?', [tenantId, shift.position_id])).n > 0;
   const hours = await weekMinutes(db, tenantId, weekOf(String(shift.starts_at).slice(0, 10)), shift.id || 0);
@@ -53,7 +53,7 @@ async function candidates(db, tenantId, shift) {
     const works = trained.has(id);
     out.push({
       staff_id: id, name: `${s.first_name} ${s.last_name}`, ok: problems.length === 0, overridable: onlyAvailability, problems,
-      trained: works, trained_known: anyTrained, week_minutes: hours.get(id) || 0, current: Number(shift.staff_id) === id,
+      trained: works, trained_known: anyTrained, week_minutes: hours.get(id) || 0, current: Number(shift.staff_id) === id, volunteer: !Number(s.in_workforce),
     });
   }
   const rank = (c) => (c.ok ? (c.trained ? 0 : 1) : c.overridable ? 2 : 3);

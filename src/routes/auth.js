@@ -153,7 +153,7 @@ router.get('/auth/me', authenticate, async (req, res) => {
   const { totp_enabled: on, require_mfa: req_ } = user;
   const modules = await moduleGate.enabledKeys(req.auth.tenantId);
   const sandbox = user.sandbox_expires_at ? { expires_at: user.sandbox_expires_at, contact_url: config.marketingUrl || null } : null;
-  res.json({ ...user, must_change_password: Boolean(user.must_change_password), login_name: user.email || user.username, sandbox_expires_at: undefined, sandbox, modules, totp_enabled: undefined, require_mfa: undefined, mfa_enabled: Boolean(on), mfa_required_by_mountain: Boolean(req_), mfa_enrollment_required: Boolean(req_ && !on) });
+  res.json({ ...user, must_change_password: Boolean(user.must_change_password), login_name: user.email || user.username, on_patrol: Boolean(req.auth.onPatrol), sandbox_expires_at: undefined, sandbox, modules, totp_enabled: undefined, require_mfa: undefined, mfa_enabled: Boolean(on), mfa_required_by_mountain: Boolean(req_), mfa_enrollment_required: Boolean(req_ && !on) });
 });
 
 /** Change your own password. Signs out every other session and returns a fresh token for this one. */

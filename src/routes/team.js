@@ -32,6 +32,7 @@ router.get('/team', patrol, async (req, res) => {
   const seasonStart = `${seasonFor(today).slice(0, 4)}-08-01`;
   const seeAll = await PA.can(pool, req, 'manage_team');
 
+  const excepted = new Map((await rows(pool, 'SELECT staff_id, COUNT(*) AS n FROM patrol_member_access WHERE tenant_id = ? GROUP BY staff_id', [tenantId])).map((r) => [Number(r.staff_id), Number(r.n)]));
   const [members, certs, training, led] = await Promise.all([
     rows(pool, `SELECT m.staff_id, m.level, m.access_level, m.callsign, m.patrol_number, m.emergency_contact, m.notes, s.status AS staff_status, s.in_workforce, p.first_name, p.last_name, p.email, p.phone
                 FROM patrol_members m JOIN staff s ON s.id = m.staff_id AND s.tenant_id = m.tenant_id JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id
@@ -44,7 +45,7 @@ router.get('/team', patrol, async (req, res) => {
   ]);
   const soon = addDays(today, 30);
   const data = members.map((m) => ({
-    staff_id: m.staff_id, first_name: m.first_name, last_name: m.last_name, level: m.level, access_level: m.access_level, callsign: m.callsign, patrol_number: m.patrol_number, staff_status: m.staff_status, on_staff_list: Boolean(m.in_workforce),
+    staff_id: m.staff_id, first_name: m.first_name, last_name: m.last_name, level: m.level, access_level: m.access_level, exceptions: excepted.get(Number(m.staff_id)) || 0, callsign: m.callsign, patrol_number: m.patrol_number, staff_status: m.staff_status, on_staff_list: Boolean(m.in_workforce),
     phone: m.phone,
     ...(seeAll ? { email: m.email, emergency_contact: m.emergency_contact, notes: m.notes } : {}),
     certifications: certs.filter((c) => c.staff_id === m.staff_id).map((c) => ({
@@ -83,7 +84,7 @@ async function checkTarget(req, currentLevel) {
  * or someone already on the staff list (staff_id).
  */
 const personFields = { first_name: z.string().trim().min(1).max(100), last_name: z.string().trim().min(1).max(100), email: z.string().trim().email().max(255).optional().or(z.literal('').transform(() => undefined)), phone: z.string().trim().max(40).optional() };
-router.post('/team', patrol, needs('manage_team'), validate(z.object({ staff_id: z.number().int().positive().optional(), person: z.object(personFields).optional(), ...memberFields, level: memberFields.level.default('patroller') })), async (req, res) => {
+router.post('/team', patrol, needs('manage_team'), validate(z.object({ staff_id: z.number().int().positive().optional(), person: z.object(personFields).optional(), employee: z.boolean().default(false), ...memberFields, level: memberFields.level.default('patroller') })), async (req, res) => {
   const t = req.auth.tenantId;
   const b = req.body;
   if (!b.staff_id && !b.person) throw bad('Choose someone on the staff list, or enter a new person');
@@ -95,7 +96,7 @@ router.post('/team', patrol, needs('manage_team'), validate(z.object({ staff_id:
       if (!(await one(conn, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ?', [t, id]))) throw notFound('Staff member');
     } else {
       const [p] = await conn.query('INSERT INTO people (tenant_id, first_name, last_name, email, phone) VALUES (?, ?, ?, ?, ?)', [t, b.person.first_name, b.person.last_name, b.person.email || null, b.person.phone || null]);
-      const [s] = await conn.query("INSERT INTO staff (tenant_id, person_id, status, in_workforce) VALUES (?, ?, 'active', 0)", [t, p.insertId]);
+      const [s] = await conn.query("INSERT INTO staff (tenant_id, person_id, status, in_workforce) VALUES (?, ?, 'active', ?)", [t, p.insertId, b.employee ? 1 : 0]);
       id = s.insertId;
     }
     try {
@@ -510,6 +511,42 @@ router.get('/access', patrol, adminOnly, async (req, res) => {
     matrix: await PA.matrix(pool, tenantId),
     people: people.map((m) => ({ staff_id: m.staff_id, name: `${m.first_name} ${m.last_name}`, access_level: m.access_level, rank_level: m.rank_level, callsign: m.callsign })),
   });
+});
+
+/**
+ * One patroller's permissions: what their level gives, and their exceptions (a feature added or taken away for them
+ * alone). Patrol Admins only, like the levels themselves.
+ */
+router.get('/team/:staffId/permissions', patrol, adminOnly, async (req, res) => {
+  const t = req.auth.tenantId; const staffId = paramId(req, 'staffId');
+  const m = await one(pool, `SELECT m.access_level, p.first_name, p.last_name FROM patrol_members m JOIN staff s ON s.tenant_id = m.tenant_id AND s.id = m.staff_id JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE m.tenant_id = ? AND m.staff_id = ?`, [t, staffId]);
+  if (!m) throw notFound('Patrol member');
+  const level = m.access_level || 'patrol';
+  const fromLevel = (await PA.matrix(pool, t))[level];
+  const exceptions = await PA.exceptionsOf(pool, t, staffId);
+  const has = PA.effective(fromLevel, level, exceptions);
+  res.json({
+    name: `${m.first_name} ${m.last_name}`, level, level_label: PA.LEVEL_LABEL[level],
+    features: PA.FEATURES.map(([key, label, about, group]) => ({ key, label, about, group, from_level: level === 'admin' || Boolean(fromLevel[key]), exception: key in exceptions ? exceptions[key] : null, has: has.has(key) })),
+  });
+});
+
+router.put('/team/:staffId/permissions', patrol, adminOnly, validate(z.object({
+  exceptions: z.array(z.object({ feature: z.string().max(40), allowed: z.boolean().nullable() })).max(50),
+})), async (req, res) => {
+  const t = req.auth.tenantId; const staffId = paramId(req, 'staffId');
+  const m = await one(pool, 'SELECT access_level FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [t, staffId]);
+  if (!m) throw notFound('Patrol member');
+  if (m.access_level === 'admin') throw bad('A patrol Admin already has every permission');
+  for (const e of req.body.exceptions) if (!PA.KEYS.includes(e.feature)) throw bad(`Unknown feature "${e.feature}"`);
+  await tx(async (conn) => {
+    for (const e of req.body.exceptions) {
+      if (e.allowed === null) await conn.query('DELETE FROM patrol_member_access WHERE tenant_id = ? AND staff_id = ? AND feature = ?', [t, staffId, e.feature]);
+      else await conn.query('INSERT INTO patrol_member_access (tenant_id, staff_id, feature, allowed, set_by) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE allowed = VALUES(allowed), set_by = VALUES(set_by)', [t, staffId, e.feature, e.allowed ? 1 : 0, req.auth.userId]);
+    }
+    await audit(conn, req, 'set_member_permissions', 'patrol_members', staffId, { exceptions: req.body.exceptions });
+  });
+  res.json({ ok: true });
 });
 
 /** Switch features on or off for a level. The Admin level always has everything. */

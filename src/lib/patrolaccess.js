@@ -70,10 +70,26 @@ const isSystemAdmin = (req) => ['owner', 'manager'].includes(req.auth.role);
 /** The person's patrol access level: admin for owners and managers; the roster record for patrol logins. */
 async function levelOf(pool, req) {
   if (isSystemAdmin(req)) return 'admin';
-  if (req.auth.role !== 'patrol') return null;
+  if (req.auth.role !== 'patrol' && !req.auth.onPatrol) return null;
   if (!req.auth.staffId) return 'patrol';
   const m = await one(pool, 'SELECT access_level FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [req.auth.tenantId, req.auth.staffId]);
   return m ? m.access_level : 'patrol';
+}
+
+/** One person's exceptions to their level: { feature: true (added) | false (taken away) }. */
+async function exceptionsOf(pool, tenantId, staffId) {
+  const out = {};
+  if (!staffId) return out;
+  for (const r of await rows(pool, 'SELECT feature, allowed FROM patrol_member_access WHERE tenant_id = ? AND staff_id = ?', [tenantId, staffId])) if (KEYS.includes(r.feature)) out[r.feature] = Boolean(r.allowed);
+  return out;
+}
+
+/** What a level gives, with a person's exceptions applied on top (Admins always have everything). */
+function effective(levelFeatures, level, exceptions) {
+  if (level === 'admin') return new Set(KEYS);
+  const out = new Set(KEYS.filter((k) => levelFeatures[k]));
+  for (const [k, on] of Object.entries(exceptions || {})) { if (on) out.add(k); else out.delete(k); }
+  return out;
 }
 
 /** The saved choices for a mountain, as { 'level|feature': true/false }. */
@@ -104,7 +120,8 @@ async function accessOf(pool, req) {
   if (!level) return { level: null, features: new Set() };
   if (level === 'admin') return { level, features: new Set(KEYS) };
   const m = await matrix(pool, req.auth.tenantId);
-  return { level, features: new Set(KEYS.filter((k) => m[level][k])) };
+  const exceptions = isSystemAdmin(req) ? {} : await exceptionsOf(pool, req.auth.tenantId, req.auth.staffId);
+  return { level, features: effective(m[level], level, exceptions), exceptions };
 }
 
 const can = async (pool, req, feature) => (await accessOf(pool, req)).features.has(feature);
@@ -120,4 +137,4 @@ function needs(pool, feature, message) {
   };
 }
 
-module.exports = { LEVELS, LEVEL_LABEL, LEVEL_ABOUT, FEATURES, KEYS, DEFAULTS, levelForRank, levelOf, matrix, accessOf, can, needs, isSystemAdmin };
+module.exports = { LEVELS, LEVEL_LABEL, LEVEL_ABOUT, FEATURES, KEYS, DEFAULTS, levelForRank, levelOf, matrix, accessOf, can, needs, isSystemAdmin, exceptionsOf, effective };

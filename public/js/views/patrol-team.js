@@ -25,9 +25,9 @@ export async function drawTeam(box, { canLead }) {
   const again = refresh(box, (n) => drawTeam(n, { canLead }));
   const cols = [
     // One roster: managers can open the person's full staff record (certifications, availability, shifts) from here.
-    { head: 'Name', cell: (m) => h('span', null, isManager() && m.on_staff_list ? h('a', { href: `#/workforce/staff/${m.staff_id}` }, h('b', null, `${m.first_name} ${m.last_name}`)) : h('b', null, `${m.first_name} ${m.last_name}`), m.staff_status !== 'active' ? h('span', { class: 'muted' }, ' (not active)') : null, h('small', { class: 'muted' }, m.on_staff_list ? ' Paid' : ' Volunteer')) },
+    { head: 'Name', cell: (m) => h('span', null, isManager() ? h('a', { href: `#/workforce/staff/${m.staff_id}` }, h('b', null, `${m.first_name} ${m.last_name}`)) : h('b', null, `${m.first_name} ${m.last_name}`), m.staff_status !== 'active' ? h('span', { class: 'muted' }, ' (not active)') : null, h('small', { class: 'muted' }, m.on_staff_list ? ' Employee' : ' Volunteer')) },
     { head: 'Rank', cell: (m) => label(m.level) },
-    { head: 'Access', cell: (m) => label(m.access_level || 'patrol') },
+    { head: 'Access', cell: (m) => [label(m.access_level || 'patrol'), m.exceptions ? h('small', { class: 'muted' }, ` +${m.exceptions} exception${m.exceptions === 1 ? '' : 's'}`) : null] },
     { head: 'Callsign', cell: (m) => m.callsign || '' },
     { head: 'Patrol no.', cell: (m) => m.patrol_number || '' },
     { head: 'Certifications', cell: (m) => (m.certifications.length ? h('span', { class: 'chips' }, m.certifications.map((c) => state(`${c.name}: ${certText[c.state]}`, certTone[c.state]))) : h('span', { class: 'muted' }, 'None on file')) },
@@ -36,10 +36,11 @@ export async function drawTeam(box, { canLead }) {
   ];
   if (mgr) {
     cols.splice(3, 0, { head: 'Contact', cell: (m) => [m.phone, m.email].filter(Boolean).join(', ') }, { head: 'Emergency contact', cell: (m) => m.emergency_contact || '' });
-    cols.push({ head: '', actions: true, cell: (m) => button('Edit', () => memberDialog(m, again), { small: true }) });
+    cols.push({ head: '', actions: true, cell: (m) => [button('Edit', () => memberDialog(m, again), { small: true, label: `Edit ${m.first_name} ${m.last_name}` }),
+      accessLevel() === 'admin' ? button('Permissions', () => permissionsDialog(m, again), { small: true, label: `Permissions for ${m.first_name} ${m.last_name}` }) : null] });
   }
   clear(box).append(h('div', { class: 'stack' },
-    h('div', { class: 'spread' }, h('p', { class: 'muted' }, 'The patrol roster is kept here. Volunteers are on it only; paid patrollers are also on the staff list.'),
+    h('div', { class: 'spread' }, h('p', { class: 'muted' }, 'Everyone on patrol is on the staff list too, as an employee or a volunteer. Turn patrol on from their staff page, or add someone new here.'),
       h('div', { class: 'row' }, button('Days patrolled', () => daysDialog(), { small: true }), mgr ? button('Add to roster', () => addMemberDialog(data, again), { kind: 'primary' }) : null)),
     data.length ? table(cols, data) : empty(mgr ? 'No one is on the patrol roster yet. Add your patrollers, volunteers included.' : 'The patrol roster is empty.')));
 }
@@ -57,19 +58,20 @@ async function addMemberDialog(roster, again) {
   const modeBox = h('div', { class: 'seg day-seg', role: 'group', 'aria-label': 'Who' });
   const newBox = h('div', { class: 'form' }, field('First name', input({ name: 'first_name', maxlength: 100 })), field('Last name', input({ name: 'last_name', maxlength: 100 })),
     field('Email', input({ name: 'email', type: 'email', maxlength: 255 }), 'Optional'), field('Phone', input({ name: 'phone', type: 'tel', maxlength: 40 })));
-  const staffBox = h('div', { class: 'form', hidden: true }, options.length ? field('Staff member', select(options.map((s) => [s.id, `${s.first_name} ${s.last_name}`]), '', { name: 'staff_id' }))
+  newBox.append(h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name: 'employee' }), ' Employee (paid: time clock and payroll). Leave unticked for a volunteer.'));
+  const staffBox = h('div', { class: 'form', hidden: true }, options.length ? field('Staff member', select(options.map((s) => [s.id, `${s.first_name} ${s.last_name}${s.employee ? '' : ' (volunteer)'}`]), '', { name: 'staff_id' }))
     : h('p', { class: 'muted' }, 'Everyone on the staff list is already on the roster.'));
   const drawMode = () => {
-    clear(modeBox).append(...[['new', 'New patroller'], ['staff', 'From the staff list (paid)']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': String(mode === k), onclick: () => { mode = k; newBox.hidden = k !== 'new'; staffBox.hidden = k !== 'staff'; drawMode(); } }, t)));
+    clear(modeBox).append(...[['new', 'Someone new'], ['staff', 'Already on the staff list']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': String(mode === k), onclick: () => { mode = k; newBox.hidden = k !== 'new'; staffBox.hidden = k !== 'staff'; drawMode(); } }, t)));
   };
   drawMode();
   formDialog('Add to patrol roster', h('div', { class: 'stack' }, modeBox,
-    h('p', { class: 'muted small' }, 'A new patroller is kept in Patrol only (right for volunteers). Someone from the staff list is also paid and clocks in through Staff and schedule.'),
+    h('p', { class: 'muted small' }, 'Someone new is added to the staff list as well, as a volunteer unless you tick Employee.'),
     newBox, staffBox,
     h('div', { class: 'form' }, field('Rank', select(LEVELS, 'patroller', { name: 'level' })), field('Callsign', input({ name: 'callsign', maxlength: 30 })),
       field('Patrol number', input({ name: 'patrol_number', maxlength: 20 }), 'Printed on the reports they complete'), field('Emergency contact', input({ name: 'emergency_contact', maxlength: 255 })))),
   async (fd) => {
-    const who = mode === 'staff' ? { staff_id: num(fd, 'staff_id') } : { person: compact({ first_name: val(fd, 'first_name'), last_name: val(fd, 'last_name'), email: val(fd, 'email'), phone: val(fd, 'phone') }) };
+    const who = mode === 'staff' ? { staff_id: num(fd, 'staff_id') } : { person: compact({ first_name: val(fd, 'first_name'), last_name: val(fd, 'last_name'), email: val(fd, 'email'), phone: val(fd, 'phone') }), employee: Boolean(fd.get('employee')) };
     if (mode === 'staff' && !who.staff_id) throw new Error('Choose someone from the staff list');
     if (mode === 'new' && (!who.person.first_name || !who.person.last_name)) throw new Error('Enter their first and last name');
     await post('/patrol/team', compact({ ...who, level: val(fd, 'level'), callsign: val(fd, 'callsign'), patrol_number: val(fd, 'patrol_number'), emergency_contact: val(fd, 'emergency_contact') }));
@@ -90,7 +92,7 @@ function memberDialog(m, again) {
     field('Patrol number', input({ name: 'patrol_number', value: m.patrol_number || '', maxlength: 20 }), 'Printed on the reports they complete'),
     h('div', { class: 'wide' }, field('Emergency contact', input({ name: 'emergency_contact', value: m.emergency_contact || '', maxlength: 255 }))),
     h('div', { class: 'wide' }, field('Notes', input({ name: 'notes', value: m.notes || '', maxlength: 500 }))),
-    h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name: 'on_staff_list', checked: Boolean(m.on_staff_list) }), ' Paid: also on the staff list, for pay and the time clock')),
+    h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name: 'on_staff_list', checked: Boolean(m.on_staff_list) }), ' Employee (paid: time clock and payroll). Unticked: volunteer.')),
   async (fd) => {
     if (fd.get('access_level') && fd.get('access_level') !== (m.access_level || 'patrol')) await put(`/patrol/team/${m.staff_id}/access`, { access_level: fd.get('access_level') });
     await patch(`/patrol/team/${m.staff_id}`, { first_name: val(fd, 'first_name'), last_name: val(fd, 'last_name'), email: val(fd, 'email'), phone: val(fd, 'phone'), on_staff_list: Boolean(fd.get('on_staff_list')),
@@ -99,6 +101,31 @@ function memberDialog(m, again) {
     await again();
   });
   d.body.append(button('Remove from roster', () => confirmDialog('Remove from roster?', `${m.first_name} ${m.last_name} comes off the patrol shifts still ahead (left open for someone else). Their cases and training stay on record.`, 'Remove', async () => { await del(`/patrol/team/${m.staff_id}`); d.close(); toast('Removed from roster'); await again(); }, { danger: true }), { small: true }));
+}
+
+/**
+ * One patroller's permissions: each feature shows what their level gives, and a patrol Admin can add it or take it away
+ * for this person alone. Everyone else at the same level is unchanged.
+ */
+async function permissionsDialog(m, again) {
+  const p = await get(`/patrol/team/${m.staff_id}/permissions`);
+  if (p.level === 'admin') { dialog(`Permissions for ${p.name}`, h('p', null, `${p.name} is a patrol Admin and has every permission. Change their access level to give them less.`)); return; }
+  const choice = new Map(p.features.map((f) => [f.key, f.exception]));
+  const rows = [];
+  const groups = [...new Set(p.features.map((f) => f.group))];
+  for (const f of groups.flatMap((g) => p.features.filter((x) => x.group === g))) {
+    if (!rows.some((r) => r.dataset && r.dataset.group === f.group)) rows.push(h('h3', { class: 'perm-group', 'data-group': f.group }, f.group));
+    const sel = select([['', `As ${p.level_label}: ${f.from_level ? 'yes' : 'no'}`], ['allow', 'Yes, for this person'], ['deny', 'No, for this person']], f.exception === null ? '' : f.exception ? 'allow' : 'deny', { 'aria-label': f.label });
+    sel.addEventListener('change', () => choice.set(f.key, sel.value === '' ? null : sel.value === 'allow'));
+    rows.push(h('div', { class: 'perm-row' }, h('div', null, h('b', null, f.label), h('small', { class: 'muted' }, ` ${f.about}`)), sel));
+  }
+  formDialog(`Permissions for ${p.name}`, h('div', { class: 'stack' },
+    h('p', { class: 'muted' }, `${p.name} is ${p.level_label}. Leave a permission as their level has it, or change it for ${m.first_name} alone. To change what every ${p.level_label} can do, use Access levels.`),
+    h('div', { class: 'perm-list' }, rows)), async () => {
+    await put(`/patrol/team/${m.staff_id}/permissions`, { exceptions: [...choice.entries()].map(([feature, allowed]) => ({ feature, allowed })) });
+    toast('Permissions saved');
+    await again();
+  }, { wide: true, submitText: 'Save permissions' });
 }
 
 // ---------------------------------------------------------------- today's posts

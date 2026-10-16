@@ -58,3 +58,16 @@ CREATE TABLE IF NOT EXISTS patrol_shifts (
   CONSTRAINT fk_patrol_shifts_staff FOREIGN KEY (tenant_id, staff_id) REFERENCES staff(tenant_id, id),
   CONSTRAINT fk_patrol_shifts_station FOREIGN KEY (tenant_id, station_id) REFERENCES patrol_stations(tenant_id, id)
 ) ENGINE=InnoDB;
+
+-- One patroller's exceptions to their access level, set by a patrol Admin: allowed = 1 adds a feature their level does
+-- not have, allowed = 0 takes one away. Patrol Admins, owners and managers always have everything.
+CREATE TABLE IF NOT EXISTS patrol_member_access (
+  tenant_id  BIGINT UNSIGNED NOT NULL,
+  staff_id   BIGINT UNSIGNED NOT NULL,
+  feature    VARCHAR(40) NOT NULL,
+  allowed    TINYINT(1) NOT NULL,
+  set_by     BIGINT UNSIGNED NULL,
+  set_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (tenant_id, staff_id, feature),
+  CONSTRAINT fk_pma_staff FOREIGN KEY (tenant_id, staff_id) REFERENCES staff(tenant_id, id)
+) ENGINE=InnoDB;

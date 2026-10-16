@@ -87,6 +87,7 @@ router.post(
       status: z.enum(['applicant', 'onboarding', 'active', 'inactive']).default('onboarding'),
       hired_on: dateStr.optional(),
       needs_housing: z.boolean().default(false),
+      employee: z.boolean().default(true), // false: a volunteer (not paid: no time clock, hours or payroll)
     }),
   ),
   async (req, res) => {
@@ -99,7 +100,7 @@ router.post(
         const [p] = await conn.query('INSERT INTO people (tenant_id, first_name, last_name, email, phone) VALUES (?, ?, ?, ?, ?)', [tenantId, b.person.first_name, b.person.last_name, b.person.email ?? null, b.person.phone ?? null]);
         personId = p.insertId;
       }
-      const [s] = await conn.query('INSERT INTO staff (tenant_id, person_id, status, hired_on, needs_housing) VALUES (?, ?, ?, ?, ?)', [tenantId, personId, b.status, b.hired_on ?? null, b.needs_housing ? 1 : 0]);
+      const [s] = await conn.query('INSERT INTO staff (tenant_id, person_id, status, hired_on, needs_housing, in_workforce) VALUES (?, ?, ?, ?, ?, ?)', [tenantId, personId, b.status, b.hired_on ?? null, b.needs_housing ? 1 : 0, b.employee ? 1 : 0]);
       await audit(conn, req, 'create', 'staff', s.insertId);
       return s.insertId;
     });
@@ -109,9 +110,12 @@ router.post(
 
 router.get('/staff', requireRole(...mgr), async (req, res) => {
   const t = req.auth.tenantId;
-  // Patrol-only people (volunteers on the patrol roster) are kept in Patrol, not on the staff list.
-  const where = ['s.tenant_id = ?', 's.in_workforce = 1'];
+  // Everyone is on the staff list: employees (paid) and volunteers. ?type=employee or ?type=volunteer narrows it.
+  const where = ['s.tenant_id = ?'];
   const params = [t];
+  if (req.query.type === 'employee') where.push('s.in_workforce = 1');
+  if (req.query.type === 'volunteer') where.push('s.in_workforce = 0');
+  if (req.query.patrol === '1') where.push('EXISTS (SELECT 1 FROM patrol_members m WHERE m.tenant_id = s.tenant_id AND m.staff_id = s.id)');
   if (req.query.status) { where.push('s.status = ?'); params.push(String(req.query.status)); }
   if (req.query.q) {
     const q = `%${String(req.query.q).trim().replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
@@ -120,7 +124,8 @@ router.get('/staff', requireRole(...mgr), async (req, res) => {
   if (req.query.position_id) { where.push('EXISTS (SELECT 1 FROM staff_positions sp WHERE sp.tenant_id = s.tenant_id AND sp.staff_id = s.id AND sp.position_id = ?)'); params.push(Number(req.query.position_id)); }
   const data = await rows(
     pool,
-    `SELECT s.*, p.first_name, p.last_name, p.email, p.phone, (SELECT COALESCE(u.username, u.email) FROM users u WHERE u.tenant_id = s.tenant_id AND u.staff_id = s.id AND u.active = 1 ORDER BY u.id LIMIT 1) AS login_name
+    `SELECT s.*, p.first_name, p.last_name, p.email, p.phone, (SELECT COALESCE(u.username, u.email) FROM users u WHERE u.tenant_id = s.tenant_id AND u.staff_id = s.id AND u.active = 1 ORDER BY u.id LIMIT 1) AS login_name,
+     EXISTS (SELECT 1 FROM patrol_members m WHERE m.tenant_id = s.tenant_id AND m.staff_id = s.id) AS on_patrol
      FROM staff s JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id
      WHERE ${where.join(' AND ')} ORDER BY p.last_name, p.first_name LIMIT 500`,
     params,
@@ -128,7 +133,7 @@ router.get('/staff', requireRole(...mgr), async (req, res) => {
   const pos = await rows(pool, 'SELECT sp.staff_id, pos.id, pos.name FROM staff_positions sp JOIN positions pos ON pos.tenant_id = sp.tenant_id AND pos.id = sp.position_id WHERE sp.tenant_id = ? ORDER BY pos.name', [t]);
   const by = new Map();
   for (const r of pos) { const k = Number(r.staff_id); if (!by.has(k)) by.set(k, []); by.get(k).push({ id: Number(r.id), name: r.name }); }
-  res.json({ data: data.map((r) => ({ ...r, positions: by.get(Number(r.id)) || [] })) });
+  res.json({ data: data.map((r) => ({ ...r, employee: Boolean(r.in_workforce), on_patrol: Boolean(Number(r.on_patrol)), positions: by.get(Number(r.id)) || [] })) });
 });
 
 /** One person: everything about them in one place, whichever app they work in (one roster). */
@@ -145,17 +150,19 @@ router.get('/staff/:id', requireRole(...mgr), async (req, res) => {
     rows(pool, 'SELECT c.id, c.name, sc.issued_on, sc.expires_on FROM staff_certifications sc JOIN certifications c ON c.id = sc.certification_id AND c.tenant_id = sc.tenant_id WHERE sc.tenant_id = ? AND sc.staff_id = ? ORDER BY c.name', [t, id]),
     rows(pool, 'SELECT weekday, start_time, end_time FROM availability WHERE tenant_id = ? AND staff_id = ? ORDER BY weekday, start_time', [t, id]),
     one(pool, 'SELECT id, email, username, role FROM users WHERE tenant_id = ? AND staff_id = ? AND active = 1 ORDER BY id LIMIT 1', [t, id]),
-    one(pool, 'SELECT level, callsign FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [t, id]),
+    one(pool, 'SELECT level, callsign, access_level, patrol_number, (SELECT COUNT(*) FROM patrol_member_access a WHERE a.tenant_id = m.tenant_id AND a.staff_id = m.staff_id) AS exceptions FROM patrol_members m WHERE tenant_id = ? AND staff_id = ?', [t, id]),
     one(pool, 'SELECT is_public, display_name, disciplines, levels FROM instructor_profiles WHERE tenant_id = ? AND staff_id = ?', [t, id]),
     rows(pool, 'SELECT open_date, start_time, end_time FROM instructor_open WHERE tenant_id = ? AND staff_id = ? AND open_date >= ? ORDER BY open_date, start_time LIMIT 10', [t, id, now.slice(0, 10)]),
-    rows(pool, "SELECT s.id, s.starts_at, s.ends_at, s.status, pos.name AS position FROM shifts s JOIN positions pos ON pos.tenant_id = s.tenant_id AND pos.id = s.position_id WHERE s.tenant_id = ? AND s.staff_id = ? AND s.status <> 'cancelled' AND s.ends_at >= ? ORDER BY s.starts_at LIMIT 20", [t, id, now]),
+    rows(pool, `SELECT s.id, s.starts_at, s.ends_at, s.status, pos.name AS position FROM shifts s JOIN positions pos ON pos.tenant_id = s.tenant_id AND pos.id = s.position_id WHERE s.tenant_id = ? AND s.staff_id = ? AND s.status <> 'cancelled' AND s.ends_at >= ?
+      UNION ALL SELECT ps.id, ps.starts_at, ps.ends_at, ps.status, CONCAT('Patrol', IF(st.name IS NULL, '', CONCAT(', ', st.name))) AS position FROM patrol_shifts ps LEFT JOIN patrol_stations st ON st.tenant_id = ps.tenant_id AND st.id = ps.station_id
+      WHERE ps.tenant_id = ? AND ps.staff_id = ? AND ps.status <> 'cancelled' AND ps.ends_at >= ? ORDER BY starts_at LIMIT 20`, [t, id, now, t, id, now]),
     one(pool, "SELECT COUNT(*) AS n FROM shifts WHERE tenant_id = ? AND staff_id = ? AND status <> 'cancelled' AND starts_at >= ?", [t, id, now]),
     rows(pool, 'SELECT clock_in, clock_out FROM time_entries WHERE tenant_id = ? AND staff_id = ? AND clock_in >= ? AND clock_in < ?', [t, id, dayRange(tz, week)[0], dayRange(tz, addDays(week, 6))[1]]),
   ]);
   const scheduled = (await SH.weekMinutes(pool, t, week)).get(id) || 0;
   const workedMin = worked.reduce((n, e) => n + SH.minutesBetween(e.clock_in, e.clock_out || nowIn('UTC')), 0);
   res.json({
-    ...s, positions, certifications: certs, availability: windows, login: login || null,
+    ...s, employee: Boolean(s.in_workforce), positions, certifications: certs, availability: windows, login: login || null,
     patrol: patrol || null, instructor: instructor ? { ...instructor, open_dates: openDates } : null,
     upcoming, future_shifts: Number(future.n), week: { start: week, scheduled_minutes: scheduled, worked_minutes: workedMin },
   });
@@ -179,7 +186,7 @@ router.patch(
   '/staff/:id',
   requireRole(...mgr),
   validate(z.object({
-    status: z.enum(['applicant', 'onboarding', 'active', 'inactive']).optional(), hired_on: dateStr.nullable().optional(), needs_housing: z.boolean().optional(),
+    status: z.enum(['applicant', 'onboarding', 'active', 'inactive']).optional(), hired_on: dateStr.nullable().optional(), needs_housing: z.boolean().optional(), employee: z.boolean().optional(),
     first_name: z.string().trim().min(1).max(100).optional(), last_name: z.string().trim().min(1).max(100).optional(),
     email: z.string().trim().email().max(255).nullable().optional().or(z.literal('').transform(() => null)), phone: z.string().trim().max(40).nullable().optional(),
   })),
@@ -191,7 +198,7 @@ router.patch(
     await tx(async (conn) => {
       const st = await one(conn, 'SELECT id, person_id, status FROM staff WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, id]);
       if (!st) throw notFound('Staff member');
-      const set = setClause({ ...b, needs_housing: b.needs_housing === undefined ? undefined : b.needs_housing ? 1 : 0 }, ['status', 'hired_on', 'needs_housing']);
+      const set = setClause({ ...b, needs_housing: b.needs_housing === undefined ? undefined : b.needs_housing ? 1 : 0, in_workforce: b.employee === undefined ? undefined : b.employee ? 1 : 0 }, ['status', 'hired_on', 'needs_housing', 'in_workforce']);
       const pset = setClause(b, ['first_name', 'last_name', 'email', 'phone']);
       if (!set && !pset) throw bad('No updatable fields supplied');
       if (set) await conn.query(`UPDATE staff SET ${set.sql} WHERE tenant_id = ? AND id = ?`, [...set.values, t, id]);
@@ -259,7 +266,7 @@ router.get('/certifications-expiring', requireRole(...mgr), async (req, res) => 
       pool,
       `SELECT sc.staff_id, p.first_name, p.last_name, c.name AS certification, sc.expires_on
        FROM staff_certifications sc
-       JOIN staff s ON s.id = sc.staff_id AND s.tenant_id = sc.tenant_id AND s.status = 'active' AND s.in_workforce = 1
+       JOIN staff s ON s.id = sc.staff_id AND s.tenant_id = sc.tenant_id AND s.status = 'active'
        JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id
        JOIN certifications c ON c.id = sc.certification_id AND c.tenant_id = sc.tenant_id
        WHERE sc.tenant_id = ? AND sc.expires_on IS NOT NULL AND sc.expires_on <= DATE_ADD(CURDATE(), INTERVAL ? DAY)
@@ -500,7 +507,9 @@ router.post('/time/clock-in', requireRole(...selfRoles, ...mgr), validate(z.obje
   const staffId = actingStaffId(req, req.body.staff_id);
   // The person's row is locked while we look, so two taps at once cannot both clock them in (and the database refuses a second open punch anyway).
   const id = await tx(async (conn) => {
-    if (!(await one(conn, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, staffId]))) throw notFound('Staff member');
+    const st = await one(conn, 'SELECT id, in_workforce FROM staff WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, staffId]);
+    if (!st) throw notFound('Staff member');
+    if (!st.in_workforce) throw bad('Volunteers do not clock in. Patrol counts their days from the patrol schedule and Today\'s posts.');
     if (await one(conn, 'SELECT id FROM time_entries WHERE tenant_id = ? AND staff_id = ? AND clock_out IS NULL', [tenantId, staffId])) throw conflict('Already clocked in');
     try {
       // Link the punch to the shift it is for (as the kiosk does): the published shift closest to now, starting up to 3 hours ahead.

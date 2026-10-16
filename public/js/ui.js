@@ -96,7 +96,8 @@ export function seasonFor(date) {
 }
 
 export const isManager = () => ['owner', 'manager'].includes(ctx.me && ctx.me.role);
-export const can = (...roles) => isManager() || roles.includes(ctx.me && ctx.me.role);
+// Someone on the patrol roster can use Patrol whatever their login role (a lift operator who also patrols).
+export const can = (...roles) => isManager() || roles.includes(ctx.me && ctx.me.role) || Boolean(roles.includes('patrol') && ctx.me && ctx.me.on_patrol);
 
 export const label = (s) => String(s || '').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 

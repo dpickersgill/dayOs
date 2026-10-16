@@ -2075,3 +2075,10 @@ body:has(.tour-card) .demo-pill { display: none; }
 .shift-block:disabled { cursor: default; opacity: 1; color: var(--spruce); }
 .sg-row.is-me .sg-name b { text-decoration: underline; }
 .shift-when.two { grid-template-columns: 1fr 1fr; }
+.perm-list { display: grid; gap: 4px; max-height: 60vh; overflow-y: auto; }
+.perm-group { margin: 10px 0 2px; font-size: .875rem; color: var(--quiet); }
+.perm-row { display: grid; grid-template-columns: 1fr minmax(180px, 230px); gap: 12px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.perm-row select { min-height: 40px; }
+@media (max-width: 560px) { .perm-row { grid-template-columns: 1fr; gap: 4px; } }
+.tag { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line-strong); font-size: .75rem; font-weight: 700; color: var(--quiet); vertical-align: middle; }
+.tag[data-kind='patrol'] { border-color: #e0a7a0; color: var(--closed); }

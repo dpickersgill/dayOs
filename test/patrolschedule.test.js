@@ -41,6 +41,7 @@ test.before(async () => {
   await new Promise((r) => { server = createApp().listen(0, r); });
   base = `http://127.0.0.1:${server.address().port}`;
   const slug = `ps-${suffix}`;
+  M.slug = slug;
   const res = await fetch(`${base}/api/v1/tenants`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-bootstrap-key': 'test-bootstrap-key' }, body: JSON.stringify({ slug, name: 'Patrol Peak', owner: { email: `owner@${slug}.test`, password: PW, first_name: 'Olive', last_name: 'Owner' } }) });
   assert.equal(res.status, 201);
   const login = async (email) => (await api('POST', '/auth/login', { body: { tenant: slug, email, password: PW } })).body.token;
@@ -61,23 +62,61 @@ test.before(async () => {
 });
 test.after(async () => { await new Promise((r) => server.close(r)); await pool.end(); });
 
-test('volunteers are on the patrol roster only; paid patrollers are on both', async () => {
+test('everyone is on the staff list, marked employee or volunteer; volunteers stay off the time clock', async () => {
   const roster = ok(await api('GET', '/patrol/team', { token: M.owner })).data;
   assert.deepEqual(roster.map((m) => [m.first_name, m.on_staff_list]).sort(), [['Paula', true], ['Val', false], ['Vic', false]]);
-  const staff = ok(await api('GET', '/workforce/staff', { token: M.owner })).data.map((s) => s.first_name);
-  assert.deepEqual(staff, ['Paula'], 'volunteers do not appear on the staff list');
+  const staff = ok(await api('GET', '/workforce/staff', { token: M.owner })).data;
+  assert.deepEqual(staff.map((s) => [s.first_name, s.employee, s.on_patrol]).sort(), [['Paula', true, true], ['Val', false, true], ['Vic', false, true]]);
+  assert.deepEqual(ok(await api('GET', '/workforce/staff?type=volunteer', { token: M.owner })).data.map((s) => s.first_name).sort(), ['Val', 'Vic']);
+  assert.deepEqual(ok(await api('GET', '/workforce/staff?type=employee', { token: M.owner })).data.map((s) => s.first_name), ['Paula']);
   const kiosk = ok(await api('GET', '/kiosk-admin/overview', { token: M.owner })).people.map((p) => p.first_name);
-  assert.ok(!kiosk.includes('Vic'), 'nor on the time clock');
-  const c = ok(await api('POST', '/workforce/shifts/candidates', { token: M.owner, body: { position_id: M.lift, starts_at: at(0, '08:00'), ends_at: at(0, '16:00') } })).data.map((x) => x.name);
-  assert.deepEqual(c, ['Paula Paid'], 'nor among people to put on work shifts');
-  // details are kept in Patrol, and a volunteer can be moved onto the staff list (and back)
+  assert.ok(!kiosk.includes('Vic'), 'volunteers are not on the time clock');
+  const c = ok(await api('POST', '/workforce/shifts/candidates', { token: M.owner, body: { position_id: M.lift, starts_at: at(0, '08:00'), ends_at: at(0, '16:00') } })).data;
+  assert.equal(c.find((x) => x.name === 'Vic Volunteer').volunteer, true, 'volunteers can be scheduled, and are marked');
+  is(await api('POST', '/workforce/time/clock-in', { token: M.vicT }), 400, 'volunteers do not clock in');
+  // details are kept in Patrol, and a volunteer can become an employee (and back)
   ok(await api('PATCH', `/patrol/team/${M.val}`, { token: M.owner, body: { phone: '555-0199', first_name: 'Valerie' } }));
   ok(await api('PATCH', `/patrol/team/${M.val}`, { token: M.owner, body: { on_staff_list: true } }));
-  assert.ok(ok(await api('GET', '/workforce/staff', { token: M.owner })).data.some((s) => s.first_name === 'Valerie'));
-  ok(await api('PATCH', `/patrol/team/${M.val}`, { token: M.owner, body: { on_staff_list: false } }));
-  assert.ok(!ok(await api('GET', '/workforce/staff', { token: M.owner })).data.some((s) => s.first_name === 'Valerie'));
+  assert.ok(ok(await api('GET', '/workforce/staff?type=employee', { token: M.owner })).data.some((s) => s.first_name === 'Valerie'));
+  ok(await api('PATCH', `/workforce/staff/${M.val}`, { token: M.owner, body: { employee: false } }));
+  assert.ok(ok(await api('GET', '/workforce/staff?type=volunteer', { token: M.owner })).data.some((s) => s.first_name === 'Valerie'));
   is(await api('POST', '/patrol/team', { token: M.owner, body: { staff_id: M.vic } }), 409, 'already on the roster');
   is(await api('POST', '/patrol/team', { token: M.owner, body: {} }), 400);
+  // someone new added in Patrol as an employee
+  const e = ok(await api('POST', '/patrol/team', { token: M.owner, body: { person: { first_name: 'Eve', last_name: 'Employee' }, employee: true } }));
+  assert.equal(ok(await api('GET', `/workforce/staff/${e.staff_id}`, { token: M.owner })).employee, true);
+  is(await api('DELETE', `/patrol/team/${e.staff_id}`, { token: M.owner }), 204);
+});
+
+test('a patroller turned on from the staff page can open Patrol whatever their login role', async () => {
+  const lift = Number(ok(await api('POST', '/workforce/staff', { token: M.owner, body: { person: { first_name: 'Lou', last_name: 'Lift' }, status: 'active' } })).id);
+  ok(await api('POST', '/users', { token: M.owner, body: { username: 'loulift', password: PW, role: 'staff', staff_id: lift } }));
+  const t = (await api('POST', '/auth/login', { body: { tenant: M.slug, login: 'loulift', password: PW } })).body.token;
+  is(await api('GET', '/patrol/me', { token: t }), 403, 'a staff login cannot open Patrol');
+  ok(await api('POST', '/patrol/team', { token: M.owner, body: { staff_id: lift, level: 'patroller' } }));
+  assert.equal(ok(await api('GET', '/auth/me', { token: t })).on_patrol, true);
+  const me = ok(await api('GET', '/patrol/me', { token: t }));
+  assert.equal(me.access_level, 'patrol');
+  ok(await api('GET', `/patrol/schedule?${week()}`, { token: t }));
+  is(await api('POST', '/patrol/schedule', { token: t, body: { starts_at: at(21, '08:00'), ends_at: at(21, '12:00') } }), 403, 'their level decides what they can do');
+  // a patrol Admin gives Lou the schedule permission alone; everyone else at his level is unchanged
+  ok(await api('PUT', `/patrol/team/${lift}/permissions`, { token: M.owner, body: { exceptions: [{ feature: 'manage_schedule', allowed: true }, { feature: 'dispatch', allowed: false }] } }));
+  const perms = ok(await api('GET', `/patrol/team/${lift}/permissions`, { token: M.owner }));
+  const f = (k) => perms.features.find((x) => x.key === k);
+  assert.deepEqual([f('manage_schedule').from_level, f('manage_schedule').exception, f('manage_schedule').has], [false, true, true]);
+  assert.deepEqual([f('dispatch').from_level, f('dispatch').exception, f('dispatch').has], [true, false, false]);
+  ok(await api('POST', '/patrol/schedule', { token: t, body: { starts_at: at(21, '08:00'), ends_at: at(21, '12:00') } }));
+  assert.ok(!ok(await api('GET', '/patrol/me', { token: t })).features.includes('dispatch'));
+  assert.ok(!ok(await api('GET', '/patrol/me', { token: M.vicT })).features.includes('manage_schedule'), 'Vic, also Patrol level, is unchanged');
+  assert.equal(ok(await api('GET', '/patrol/team', { token: M.owner })).data.find((m) => Number(m.staff_id) === lift).exceptions, 2);
+  // only a patrol Admin sets permissions; clearing an exception goes back to the level
+  is(await api('PUT', `/patrol/team/${lift}/permissions`, { token: M.vicT, body: { exceptions: [] } }), 403);
+  ok(await api('PUT', `/patrol/team/${lift}/permissions`, { token: M.owner, body: { exceptions: [{ feature: 'dispatch', allowed: null }] } }));
+  assert.ok(ok(await api('GET', '/patrol/me', { token: t })).features.includes('dispatch'));
+  is(await api('PUT', `/patrol/team/${lift}/permissions`, { token: M.owner, body: { exceptions: [{ feature: 'not_a_thing', allowed: true }] } }), 400);
+  // taken off patrol: Patrol closes again
+  is(await api('DELETE', `/patrol/team/${lift}`, { token: M.owner }), 204);
+  is(await api('GET', '/patrol/me', { token: t }), 403);
 });
 
 test('patrol shifts are built in Patrol, not in Staff and schedule', async () => {

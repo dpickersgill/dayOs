@@ -1,6 +1,52 @@
 {
   "releases": [
     {
+      "version": "2026.10.8",
+      "date": "2026-10-16",
+      "title": "Patrollers from the staff page, and patrol permissions",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "workforce",
+          "who": null,
+          "text": "Add everyone on the staff page, as an employee or a volunteer. Tick On ski patrol, or press Put on ski patrol on their staff page, and they appear in Patrol.",
+          "help": "patrol-roster"
+        },
+        {
+          "kind": "new",
+          "app": "workforce",
+          "who": null,
+          "text": "Create login right from a person’s staff page, with a username filled in from their name and a temporary password.",
+          "help": "wf-people"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Anyone on the patrol roster with a login can open Patrol, whatever their login role, so staff who also patrol no longer need a separate patrol login.",
+          "help": "patrol-roster"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Patrol Admins can give one patroller extra permissions, or take one away, without changing everyone at the same access level (Team, Permissions).",
+          "help": "patrol-roster"
+        },
+        {
+          "kind": "improved",
+          "app": "workforce",
+          "who": null,
+          "text": "The staff list shows who is a volunteer and who is on ski patrol, with a filter for each. Volunteers stay off the time clock and payroll.",
+          "help": null
+        }
+      ]
+    },
+    {
       "version": "2026.10.7",
       "date": "2026-10-15",
       "title": "Sign in with a username",

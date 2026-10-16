@@ -20,6 +20,7 @@ export async function drawStaff(box) {
   const q = input({ type: 'search', placeholder: 'Find by name, email or phone', 'aria-label': 'Find staff' });
   const status = select([['active', 'Active'], ['onboarding', 'Onboarding'], ['applicant', 'Applicants'], ['inactive', 'Inactive'], ['', 'Everyone']], 'active', { 'aria-label': 'Status' });
   const pos = select([['', 'Any position'], ...positions.map((p) => [p.id, p.name])], '', { 'aria-label': 'Position' });
+  const kind = select([['', 'Employees and volunteers'], ['employee', 'Employees'], ['volunteer', 'Volunteers'], ['patrol', 'On ski patrol']], '', { 'aria-label': 'Type' });
   const list = h('div');
   let token = 0;
   async function load() {
@@ -28,11 +29,12 @@ export async function drawStaff(box) {
     if (status.value) params.set('status', status.value);
     if (q.value.trim()) params.set('q', q.value.trim());
     if (pos.value) params.set('position_id', pos.value);
+    if (kind.value === 'patrol') params.set('patrol', '1'); else if (kind.value) params.set('type', kind.value);
     try {
       const { data } = await get(`/workforce/staff?${params}`);
       if (my !== token) return;
       clear(list).append(data.length ? table([
-        { head: 'Name', cell: (s) => h('a', { href: `#/workforce/staff/${s.id}` }, h('b', null, fullName(s))) },
+        { head: 'Name', cell: (s) => [h('a', { href: `#/workforce/staff/${s.id}` }, h('b', null, fullName(s))), s.employee ? null : h('span', { class: 'tag' }, 'Volunteer'), s.on_patrol ? h('span', { class: 'tag', 'data-kind': 'patrol' }, 'Patrol') : null] },
         { head: 'Works as', cell: (s) => (s.positions.length ? s.positions.map((p) => p.name).join(', ') : h('span', { class: 'muted' }, 'Not set')) },
         { head: 'Contact', cell: (s) => [s.email, s.phone].filter(Boolean).join(', ') },
         { head: 'Sign-in', cell: (s) => (s.login_name ? s.login_name : h('span', { class: 'muted' }, 'No login')) },
@@ -44,21 +46,33 @@ export async function drawStaff(box) {
   q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 250); });
   status.addEventListener('change', load);
   pos.addEventListener('change', load);
+  kind.addEventListener('change', load);
   clear(box).append(h('div', { class: 'stack' },
     expiring.data.length ? h('section', { class: 'section notice-box' }, h('h2', null, `Certifications to renew (${expiring.data.length})`),
       table([{ head: 'Person', cell: (r) => h('a', { href: `#/workforce/staff/${r.staff_id}` }, `${r.first_name} ${r.last_name}`) }, { head: 'Certification', cell: (r) => r.certification }, { head: 'Expires', cell: (r) => certState(r) }], expiring.data)) : null,
-    h('div', { class: 'filter-bar' }, q, status, pos, button('Add staff member', () => addStaff(), { kind: 'primary' })), list));
+    h('div', { class: 'filter-bar' }, q, status, kind, pos, button('Add staff member', () => addStaff(), { kind: 'primary' })), list));
   await load();
 }
 
+const RANKS = ['candidate', 'patroller', 'senior', 'leader', 'director'];
+
+/** Add anyone who works here, paid or volunteer, and put them on ski patrol at the same time if they patrol. */
 function addStaff() {
+  const patrol = h('input', { type: 'checkbox', name: 'patrol' });
+  const rank = select(RANKS, 'patroller', { name: 'rank' });
+  const rankField = field('Patrol rank', rank);
+  rankField.hidden = true;
+  patrol.addEventListener('change', () => { rankField.hidden = !patrol.checked; });
   formDialog('Add a staff member', h('div', { class: 'form' },
     field('First name', input({ name: 'first', required: true })), field('Last name', input({ name: 'last', required: true })),
     field('Email', input({ name: 'email', type: 'email' })), field('Phone', input({ name: 'phone', type: 'tel' })),
-    field('Status', select(STAFF_STATUS, 'onboarding', { name: 'status' })), field('Hired on', input({ name: 'hired_on', type: 'date' })),
-    h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'housing' }), ' Needs staff housing')), async (fd) => {
+    field('Paid or volunteer', select([['employee', 'Employee (paid)'], ['volunteer', 'Volunteer']], 'employee', { name: 'kind' }), 'Volunteers do not use the time clock or appear in payroll'),
+    field('Status', select(STAFF_STATUS, 'active', { name: 'status' }), 'Only active people can be scheduled'), field('Hired on', input({ name: 'hired_on', type: 'date' })),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'housing' }), ' Needs staff housing'),
+    h('label', { class: 'check wide' }, patrol, ' On ski patrol (they appear in Patrol, where the director sets their access)'), rankField), async (fd) => {
     const v = (k) => String(fd.get(k) || '').trim() || undefined;
-    const r = await post('/workforce/staff', { person: { first_name: v('first'), last_name: v('last'), email: v('email'), phone: v('phone') }, status: v('status'), hired_on: v('hired_on'), needs_housing: Boolean(fd.get('housing')) });
+    const r = await post('/workforce/staff', { person: { first_name: v('first'), last_name: v('last'), email: v('email'), phone: v('phone') }, employee: fd.get('kind') !== 'volunteer', status: v('status'), hired_on: v('hired_on'), needs_housing: Boolean(fd.get('housing')) });
+    if (fd.get('patrol')) await post('/patrol/team', { staff_id: Number(r.id), level: v('rank') || 'patroller' });
     toast('Staff member added');
     location.hash = `#/workforce/staff/${r.id}`;
   }, { submitText: 'Add and open' });
@@ -75,7 +89,7 @@ export async function personPage(root, id) {
     const card = (title, action, ...content) => h('section', { class: 'card pcard' }, h('header', { class: 'card-head' }, h('h2', null, title), action), ...content);
 
     clear(holder).append(
-      h('div', { class: 'page-head' }, h('div', null, h('h1', null, name), h('p', { class: 'person-meta' }, state(label(p.status), STATUS_TONE[p.status]),
+      h('div', { class: 'page-head' }, h('div', null, h('h1', null, name), h('p', { class: 'person-meta' }, state(label(p.status), STATUS_TONE[p.status]), h('span', { class: 'tag' }, p.employee ? 'Employee' : 'Volunteer'), p.patrol ? h('span', { class: 'tag', 'data-kind': 'patrol' }, 'Ski patrol') : null,
         p.hired_on ? ` Hired ${fmtDate(String(p.hired_on).slice(0, 10))}.` : '', p.needs_housing ? ' Needs staff housing.' : '')),
       h('div', { class: 'row' }, button('Edit details', () => editDetails(p, draw)), button('Change status', () => changeStatus(p, draw)))),
       h('div', { class: 'pgrid' },
@@ -97,11 +111,15 @@ export async function personPage(root, id) {
             : h('p', { class: 'muted' }, 'No weekly pattern: can be scheduled any time.'),
           p.instructor && p.instructor.open_dates.length ? [h('p', { class: 'muted small' }, 'Also open on these dates (from Instructor availability):'),
             h('ul', { class: 'plain-list' }, p.instructor.open_dates.map((d) => h('li', null, `${dayShort(String(d.open_date).slice(0, 10))} ${monthDay(String(d.open_date).slice(0, 10))}, ${tod(d.start_time)} to ${tod(d.end_time)}`)))] : null),
-        card('Sign-in', p.login ? null : button('Link a login', () => linkLogin(p, draw), { small: true }),
+        card('Sign-in', p.login ? null : h('div', { class: 'row' }, button('Create login', () => createLogin(p, draw), { small: true, kind: 'primary' }), button('Link existing', () => linkLogin(p, draw), { small: true })),
           p.login ? h('p', null, h('b', null, p.login.username || p.login.email), ` (${label(p.login.role)}${p.login.email && p.login.username ? `, ${p.login.email}` : ''}). They see their shifts in My shifts, clock in, and get schedule messages in their Inbox.`)
-            : h('p', { class: 'muted' }, 'No login linked. Without one they use the time clock kiosk and do not get schedule messages.')),
-        card('Other roles', null, h('ul', { class: 'plain-list' },
-          h('li', null, p.patrol ? [h('b', null, 'Patrol: '), `${label(p.patrol.level)}${p.patrol.callsign ? `, call sign ${p.patrol.callsign}` : ''}. `, h('a', { href: '#/patrol/team' }, 'Patrol team')] : h('span', { class: 'muted' }, 'Not on the patrol roster.')),
+            : h('p', { class: 'muted' }, p.employee ? 'No login. Without one they use the time clock kiosk and do not get schedule messages.' : 'No login. A volunteer patroller needs one to write cases and see the patrol schedule.')),
+        card('Ski patrol', p.patrol ? h('div', { class: 'row' }, h('a', { class: 'btn small', href: '#/patrol/team' }, 'Open in Patrol'), button('Take off patrol', () => offPatrol(p, draw), { small: true, kind: 'danger' })) : button('Put on ski patrol', () => onPatrol(p, draw), { small: true }),
+          p.patrol ? [h('p', null, h('b', null, label(p.patrol.level)), p.patrol.callsign ? `, call sign ${p.patrol.callsign}` : '', p.patrol.patrol_number ? `, patrol number ${p.patrol.patrol_number}` : '', '.'),
+            h('p', { class: 'muted small' }, `Patrol access: ${label(p.patrol.access_level || 'patrol')}${Number(p.patrol.exceptions) ? `, with ${p.patrol.exceptions} exception${Number(p.patrol.exceptions) === 1 ? '' : 's'}` : ''}. The patrol director sets access and permissions in Patrol, Team.`),
+            p.login ? null : h('p', { class: 'muted small' }, 'They need a login to open Patrol. Create one under Sign-in.')]
+            : h('p', { class: 'muted' }, 'Not on ski patrol. Putting them on adds them to the patrol roster and lets them open Patrol with their login.')),
+        card('Ski school', null, h('ul', { class: 'plain-list' },
           h('li', null, p.instructor ? [h('b', null, 'Ski school: '), p.instructor.is_public ? 'public instructor profile' : 'instructor profile (not public)', p.instructor.disciplines ? `, ${p.instructor.disciplines}` : '', '. ', h('a', { href: '#/availability' }, 'Instructor availability')] : h('span', { class: 'muted' }, 'No instructor profile.')))),
         card('Contact', null, h('p', null, [p.email, p.phone].filter(Boolean).join(', ') || h('span', { class: 'muted' }, 'No email or phone.')))));
   }
@@ -113,9 +131,10 @@ function editDetails(p, done) {
     field('First name', input({ name: 'first_name', required: true, value: p.first_name })), field('Last name', input({ name: 'last_name', required: true, value: p.last_name })),
     field('Email', input({ name: 'email', type: 'email', value: p.email || '' })), field('Phone', input({ name: 'phone', type: 'tel', value: p.phone || '' })),
     field('Hired on', input({ name: 'hired_on', type: 'date', value: p.hired_on ? String(p.hired_on).slice(0, 10) : '' })),
+    field('Paid or volunteer', select([['employee', 'Employee (paid)'], ['volunteer', 'Volunteer']], p.employee ? 'employee' : 'volunteer', { name: 'kind' })),
     h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'housing', checked: Boolean(p.needs_housing) }), ' Needs staff housing')), async (fd) => {
     const v = (k) => String(fd.get(k) || '').trim();
-    await patch(`/workforce/staff/${p.id}`, { first_name: v('first_name'), last_name: v('last_name'), email: v('email') || null, phone: v('phone') || null, hired_on: v('hired_on') || null, needs_housing: Boolean(fd.get('housing')) });
+    await patch(`/workforce/staff/${p.id}`, { first_name: v('first_name'), last_name: v('last_name'), email: v('email') || null, phone: v('phone') || null, hired_on: v('hired_on') || null, needs_housing: Boolean(fd.get('housing')), employee: fd.get('kind') !== 'volunteer' });
     toast('Saved');
     await done();
   });
@@ -156,6 +175,38 @@ function certDialog(p, certTypes, current, done) {
     toast('Certification saved');
     await done();
   });
+}
+
+function onPatrol(p, done) {
+  formDialog(`Put ${p.first_name} on ski patrol`, h('div', { class: 'form' }, field('Rank', select(RANKS, 'patroller', { name: 'rank' }), 'The patrol director sets their access and permissions in Patrol')), async (fd) => {
+    await post('/patrol/team', { staff_id: Number(p.id), level: String(fd.get('rank')) });
+    toast(`${p.first_name} is on the patrol roster`);
+    await done();
+  }, { submitText: 'Put on patrol' });
+}
+
+function offPatrol(p, done) {
+  confirmDialog(`Take ${p.first_name} off ski patrol?`, 'They come off the patrol roster and any patrol shifts still ahead (left open), and can no longer open Patrol unless their login role is Patrol. Their cases and training stay on record.', 'Take off patrol', async () => {
+    await del(`/patrol/team/${p.id}`);
+    toast('Taken off patrol');
+    await done();
+  }, { danger: true });
+}
+
+/** A login for this person: username from their name, email optional (managers need one), a temporary password. */
+async function createLogin(p, done) {
+  const { username } = await get(`/users/suggest-username?staff_id=${p.id}`);
+  const role = select([['staff', 'Staff'], ['counter', 'Counter'], ['instructor', 'Instructor'], ['patrol', 'Patrol'], ['manager', 'Manager']], p.patrol ? 'patrol' : 'staff', { name: 'role' });
+  formDialog(`Create a login for ${fullName(p)}`, h('div', { class: 'form' },
+    field('Username', input({ name: 'username', value: username, required: true, maxlength: 40, autocapitalize: 'none', spellcheck: 'false' }), 'What they type to sign in'),
+    field('Email', input({ name: 'email', type: 'email', value: p.email || '' }), 'Optional, except for managers'),
+    field('Role', role, p.patrol ? 'Being on ski patrol already opens Patrol; the role decides what else they use' : 'What they use in SummitOps'),
+    field('Temporary password', input({ name: 'password', type: 'text', required: true, minlength: 10, autocomplete: 'off' }), 'At least 10 characters. Tell them in person or by phone.'),
+    h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name: 'temporary', checked: true }), ' They choose their own password when they first sign in')), async (fd) => {
+    const r = await post('/users', { username: String(fd.get('username') || '').trim(), email: String(fd.get('email') || '').trim() || undefined, password: String(fd.get('password')), role: String(fd.get('role')), staff_id: Number(p.id), temporary: Boolean(fd.get('temporary')) });
+    toast(`Login created. They sign in as ${r.username}`);
+    await done();
+  }, { submitText: 'Create login' });
 }
 
 async function linkLogin(p, done) {
