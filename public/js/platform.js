@@ -107,7 +107,7 @@ async function home() {
   const filter = input({ type: 'search', placeholder: 'Find a mountain', 'aria-label': 'Find a mountain' });
   app.append(h('main', { class: 'platform-box wide stack' },
     h('header', { class: 'row between' }, h('h1', null, 'Mountains'),
-      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), button('Demos', () => demos(), { small: true }), button('Injury report', () => injuryReport(), { small: true }), button('Releases', () => releases(), { small: true }), button('Activity', () => activity(), { small: true }), button('Operators', () => operators(), { small: true }), me.operator ? button('Change my password', () => myPassword(), { small: true }) : null, button('Sign out', () => signIn('Signed out.'), { small: true }))),
+      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), button('Plans and prices', () => billingPlans(), { small: true }), button('Demos', () => demos(), { small: true }), button('Injury report', () => injuryReport(), { small: true }), button('Releases', () => releases(), { small: true }), button('Activity', () => activity(), { small: true }), button('Operators', () => operators(), { small: true }), me.operator ? button('Change my password', () => myPassword(), { small: true }) : null, button('Sign out', () => signIn('Signed out.'), { small: true }))),
     filter, body));
   try {
     const { data: all } = await call('GET', '/tenants');
@@ -120,6 +120,7 @@ async function home() {
       body.append(table([
       { head: 'Mountain', cell: (t) => h('span', null, h('b', null, t.name), h('span', { class: 'muted' }, ` ${t.slug}`)) },
       { head: 'Status', cell: (t) => t.status === 'active' ? badge('Active', 'ok') : badge('Paused', 'warn') },
+      { head: 'Billing', cell: (t) => billBadge(t.billing) },
       { head: 'Apps', cell: (t) => `${t.modules.length} of ${apps.length} on` },
       { head: 'Logins', num: true, cell: (t) => String(t.users) },
       { head: 'Storage', cell: (t) => `${t.storage_used_mb} of ${t.storage_cap_mb} MB` },
@@ -168,6 +169,7 @@ async function manage(id) {
     h('div', { class: 'row' },
       button(paused ? 'Resume mountain' : 'Pause mountain', () => confirmDialog(paused ? 'Resume this mountain?' : 'Pause this mountain?', paused ? 'People can sign in again.' : 'Everyone is signed out and its public pages stop working. Nothing is deleted.', paused ? 'Resume' : 'Pause', async () => { await call('PATCH', `/tenants/${id}`, { status: paused ? 'active' : 'suspended' }); dlg.close(); home(); manage(id); }, { danger: !paused })),
       button('Rename or set storage', () => editBasics(t, () => { dlg.close(); home(); manage(id); }), { small: true })),
+    h('h3', null, 'Billing'), billingPanel(t, () => { dlg.close(); home(); manage(id); }),
     h('h3', null, 'Apps'), h('p', { class: 'hint' }, 'Changes apply within a few seconds. Turning an app off hides it and refuses its requests; its data is kept.'), list,
     h('h3', null, 'Storage'), h('p', null, `${t.storage_used_mb} MB used of ${t.storage_cap_mb} MB for document files.`),
     h('h3', null, 'Owner and manager logins'), people,
@@ -202,6 +204,7 @@ function addMountain() {
     tz: input({ name: 'tz', value: 'America/New_York' }), first: input({ name: 'first', required: true }), last: input({ name: 'last', required: true }),
     email: input({ name: 'email', type: 'email', required: true }), pw: input({ name: 'pw', type: 'password', autocomplete: 'new-password', required: true }),
     cap: input({ name: 'cap', type: 'number', min: 10, max: 100000, value: 500 }),
+    billing: h('select', { name: 'billing' }, h('option', { value: 'trial' }, '14-day free trial, then they pay'), h('option', { value: 'comped' }, 'Free (no charge)')),
   };
   const picks = new Map();
   const checks = apps.map((a) => { const cb = h('input', { type: 'checkbox' }); cb.checked = true; picks.set(a.key, cb); return h('label', { class: 'check' }, cb, a.label); });
@@ -210,12 +213,117 @@ function addMountain() {
   formDialog('Add a mountain', h('div', { class: 'stack' },
     field('Mountain name', f.name), field('Web name', f.slug, 'Lowercase letters, numbers and dashes. People type this to sign in.'), field('Time zone', f.tz),
     h('div', { class: 'grid2' }, field('Owner first name', f.first), field('Owner last name', f.last)), field('Owner email', f.email), field('Owner password', f.pw, 'At least 10 characters.'),
-    field('Document storage limit (MB)', f.cap), h('fieldset', { class: 'stack tight' }, h('legend', null, 'Apps to turn on'), ...checks)), async () => {
+    field('Document storage limit (MB)', f.cap), field('Billing', f.billing, 'You can change this later on the mountain\'s Manage page.'), h('fieldset', { class: 'stack tight' }, h('legend', null, 'Apps to turn on'), ...checks)), async () => {
     const modules = Object.fromEntries([...picks].map(([k, cb]) => [k, cb.checked]));
-    await call('POST', '/tenants', { slug: f.slug.value.trim(), name: f.name.value.trim(), timezone: f.tz.value.trim(), storage_cap_mb: Number(f.cap.value), modules,
+    await call('POST', '/tenants', { slug: f.slug.value.trim(), name: f.name.value.trim(), timezone: f.tz.value.trim(), storage_cap_mb: Number(f.cap.value), modules, billing: f.billing.value,
       owner: { email: f.email.value.trim(), password: f.pw.value, first_name: f.first.value.trim(), last_name: f.last.value.trim() } });
     toast('Mountain added.'); home();
   }, { submitText: 'Add mountain', wide: true });
+}
+
+// ---------------------------------------------------------------- billing: plans, prices and each mountain's subscription
+const dollars = (c) => `$${(Number(c || 0) / 100).toFixed(2).replace(/\.00$/, '')}`;
+const BILL_WORDS = { comped: 'Free', subscribed: 'Paying', cancelling: 'Cancelling', paid_manually: 'Paid manually', trial: 'Trial', payment_failed: 'Payment failed', trial_ended: 'Trial ended', paid_time_ended: 'Paid time ended', canceled: 'Cancelled' };
+function billBadge(b) {
+  if (!b) return '';
+  const text = `${BILL_WORDS[b.kind] || b.kind}${b.kind === 'trial' && b.days_left != null ? `, ${b.days_left} days left` : ''}${b.read_only ? ', read only' : b.state === 'grace' ? `, grace to ${b.until}` : ''}`;
+  return h('span', null, badge(text, b.read_only ? 'bad' : b.state === 'grace' ? 'warn' : b.kind === 'comped' ? '' : 'ok'), b.plan ? h('span', { class: 'muted small' }, ` ${b.plan}${b.interval === 'year' ? ', yearly' : ''}`) : null);
+}
+
+async function billingPlans() {
+  let r;
+  try { r = await call('GET', '/billing/plans'); } catch (ex) { fail(ex); return; }
+  const body = h('div', { class: 'stack' });
+  const dlg = dialog('Plans and prices', body, { wide: true });
+  const reload = async () => { dlg.close(); await billingPlans(); };
+  const appName = (k) => (r.modules.find((m) => m.key === k) || { label: k }).label;
+  const rowsOf = (kind) => r.data.filter((p) => p.kind === kind);
+  const synced = (p) => (p.stripe_product && (!p.monthly_cents || (p.stripe_month && Number(p.stripe_month_cents) === p.monthly_cents)) && (!p.yearly_cents || (p.stripe_year && Number(p.stripe_year_cents) === p.yearly_cents)));
+  const list = (kind) => (rowsOf(kind).length ? table([
+    { head: 'Name', cell: (p) => h('span', null, h('b', null, p.name), h('span', { class: 'muted' }, ` ${p.code}`), p.active ? null : h('span', null, ' ', badge('Hidden', 'warn'))) },
+    { head: 'Monthly', num: true, cell: (p) => (p.monthly_cents ? dollars(p.monthly_cents) : '') },
+    { head: 'Yearly', num: true, cell: (p) => (p.yearly_cents ? dollars(p.yearly_cents) : '') },
+    { head: kind === 'plan' ? 'Apps' : 'App', cell: (p) => p.modules.map(appName).join(', ') },
+    { head: 'Stripe', cell: (p) => (synced(p) ? badge('Ready', 'ok') : badge('Not synced', 'warn')) },
+    { actions: true, cell: (p) => h('span', { class: 'row' }, button('Edit', () => planForm(p, r, reload), { small: true }), r.stripe ? button('Sync to Stripe', async () => { await call('POST', `/billing/plans/${p.id}/sync`); toast('Synced with Stripe.'); await reload(); }, { small: true }) : null) },
+  ], rowsOf(kind)) : empty(kind === 'plan' ? 'No plans yet. Add one so mountains can pay.' : 'No add-ons.'));
+  body.append(
+    r.stripe ? h('p', { class: 'hint' }, 'Mountains see active plans on Settings, Billing. Prices are in US dollars. Changing a price makes a new Stripe price for new subscribers; current subscribers keep theirs until you move them.')
+      : h('p', { class: 'hint' }, 'Stripe is not set up on this service (STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET), so mountains cannot pay online yet. You can still set plans, and mark mountains paid or free.'),
+    h('div', { class: 'row between' }, h('h3', null, 'Plans'), button('Add a plan', () => planForm({ kind: 'plan' }, r, reload), { small: true, kind: 'primary' })), list('plan'),
+    h('div', { class: 'row between' }, h('h3', null, 'Add-ons'), button('Add an add-on', () => planForm({ kind: 'addon' }, r, reload), { small: true })), list('addon'));
+}
+
+function planForm(p, r, done) {
+  const isNew = !p.id; const addon = p.kind === 'addon';
+  const f = {
+    name: input({ name: 'name', required: true, maxlength: 100, value: p.name || '' }),
+    code: input({ name: 'code', required: true, maxlength: 40, pattern: '[a-z0-9_-]{2,40}', value: p.code || '', disabled: !isNew }),
+    blurb: input({ name: 'blurb', maxlength: 500, value: p.blurb || '' }),
+    monthly: input({ name: 'monthly', type: 'number', min: 0, step: '0.01', value: p.monthly_cents ? (p.monthly_cents / 100).toFixed(2) : '' }),
+    yearly: input({ name: 'yearly', type: 'number', min: 0, step: '0.01', value: p.yearly_cents ? (p.yearly_cents / 100).toFixed(2) : '' }),
+    sort: input({ name: 'sort', type: 'number', min: 0, max: 999, value: p.sort ?? 0 }),
+    active: h('input', { type: 'checkbox' }),
+  };
+  f.active.checked = p.active !== false;
+  if (isNew) f.name.addEventListener('input', () => { if (!f.code.dataset.touched) f.code.value = f.name.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40); });
+  f.code.addEventListener('input', () => { f.code.dataset.touched = '1'; });
+  const have = new Set(p.modules || []);
+  const picks = r.modules.map((m) => { const cb = h('input', { type: addon ? 'radio' : 'checkbox', name: 'apps', value: m.key }); cb.checked = have.has(m.key); return h('label', { class: 'check' }, cb, m.label); });
+  const cents = (el) => Math.round(Number(el.value || 0) * 100);
+  formDialog(isNew ? (addon ? 'Add an add-on' : 'Add a plan') : `Edit ${p.name}`, h('div', { class: 'stack' },
+    field('Name', f.name, 'What mountains see, such as Base, Full mountain or Patrol only'), field('Code', f.code, isNew ? 'Lowercase letters, numbers and dashes. It cannot change later.' : 'Cannot change.'),
+    field('Short description', f.blurb), h('div', { class: 'grid2' }, field('Monthly price ($)', f.monthly, 'Leave empty if not offered monthly'), field('Yearly price ($)', f.yearly, 'Leave empty if not offered yearly')),
+    field('Order on the page', f.sort, 'Lower numbers show first'), h('label', { class: 'check' }, f.active, 'Show to mountains'),
+    h('fieldset', { class: 'stack tight' }, h('legend', null, addon ? 'The app this add-on turns on' : 'Apps in this plan'), ...picks)), async () => {
+    const modules = picks.map((l) => l.querySelector('input')).filter((cb) => cb.checked).map((cb) => cb.value);
+    if (!cents(f.monthly) && !cents(f.yearly)) throw new Error('Give a monthly or yearly price');
+    const body = { name: f.name.value.trim(), blurb: f.blurb.value.trim() || null, monthly_cents: cents(f.monthly), yearly_cents: cents(f.yearly), sort: Number(f.sort.value || 0), active: f.active.checked, modules };
+    if (isNew) await call('POST', '/billing/plans', { ...body, code: f.code.value.trim(), kind: p.kind });
+    else await call('PATCH', `/billing/plans/${p.id}`, body);
+    toast('Saved.'); await done();
+  }, { submitText: 'Save', wide: true });
+}
+
+function billingPanel(t, done) {
+  const b = t.billing || {}; const s = t.billing_standing || {};
+  const words = s.kind === 'trial' ? `Trial to ${s.until}` : s.kind === 'subscribed' ? `Paying through Stripe${b.pay_method ? ` by ${b.pay_method}` : ''}, renews ${String(b.period_end || '').slice(0, 10)}` : s.kind === 'paid_manually' ? `Paid through ${s.until}` : s.kind === 'comped' ? 'Free (no charge)' : `${BILL_WORDS[s.kind] || s.kind}${s.read_only ? '. Read only.' : s.until ? `. Grace until ${s.until}.` : ''}`;
+  return h('div', { class: 'stack tight' },
+    h('p', null, billBadge({ ...s, plan: null }), ' ', words),
+    b.stripe_customer_id ? h('p', { class: 'small muted' }, `Stripe customer ${b.stripe_customer_id}${b.stripe_subscription_id ? `, subscription ${b.stripe_subscription_id} (${b.sub_status})` : ''}`) : null,
+    b.notes ? h('p', { class: 'small' }, `Notes: ${b.notes}`) : null,
+    h('div', { class: 'row' }, button('Change billing', () => billingForm(t, done), { small: true })),
+    (t.billing_events || []).length ? h('details', null, h('summary', null, 'Billing history'), ...t.billing_events.slice(0, 15).map((e) => h('p', { class: 'small muted' }, `${String(e.at).replace('T', ' ').slice(0, 16)}  ${e.kind}${e.by_operator ? ` (${e.by_operator})` : ''}  ${e.detail || ''}`))) : null);
+}
+
+async function billingForm(t, done) {
+  let r;
+  try { r = await call('GET', '/billing/plans'); } catch (ex) { fail(ex); return; }
+  const b = t.billing || {};
+  const opt = (v, text, on) => { const o = h('option', { value: String(v) }, text); o.selected = Boolean(on); return o; };
+  const plan = h('select', { name: 'plan' }, opt('', 'None chosen', !b.plan_id), ...r.data.filter((p) => p.kind === 'plan' && (p.active || Number(b.plan_id) === p.id)).map((p) => opt(p.id, `${p.name} (${dollars(p.monthly_cents)}/mo, ${dollars(p.yearly_cents)}/yr)`, Number(b.plan_id) === p.id)));
+  const interval = h('select', { name: 'interval' }, opt('month', 'Monthly', b.billing_interval !== 'year'), opt('year', 'Yearly', b.billing_interval === 'year'));
+  const addonBoxes = r.data.filter((p) => p.kind === 'addon' && (p.active || (b.addons || []).includes(p.id))).map((p) => { const cb = h('input', { type: 'checkbox', value: String(p.id) }); cb.checked = (b.addons || []).includes(p.id); return h('label', { class: 'check' }, cb, p.name); });
+  const comped = h('input', { type: 'checkbox' }); comped.checked = t.billing ? Boolean(b.comped) : true;
+  const trial = input({ name: 'trial', type: 'date', value: b.trial_ends_on || '' });
+  const paid = input({ name: 'paid', type: 'date', value: b.paid_until || '' });
+  const email = input({ name: 'email', type: 'email', maxlength: 255, value: b.billing_email || '' });
+  const notes = input({ name: 'notes', maxlength: 500, value: b.notes || '' });
+  const applyApps = h('input', { type: 'checkbox' });
+  formDialog(`Billing for ${t.name}`, h('div', { class: 'stack' },
+    h('label', { class: 'check' }, comped, 'Free: this mountain is never charged'),
+    h('div', { class: 'grid2' }, field('Plan', plan), field('Billing period', interval)),
+    addonBoxes.length ? h('fieldset', { class: 'stack tight' }, h('legend', null, 'Add-ons'), ...addonBoxes) : null,
+    h('div', { class: 'grid2' }, field('Trial ends', trial, 'Extend a trial by moving this date'), field('Paid until', paid, 'For a payment taken outside Stripe, such as a check')),
+    field('Billing email', email), field('Notes', notes, 'Only operators see this'),
+    h('label', { class: 'check' }, applyApps, 'Also set the mountain\'s apps to match the plan and add-ons now')), async () => {
+    await call('PUT', `/tenants/${t.id}/billing`, {
+      comped: comped.checked, plan_id: plan.value ? Number(plan.value) : null, interval: interval.value,
+      addons: addonBoxes.map((l) => l.querySelector('input')).filter((cb) => cb.checked).map((cb) => Number(cb.value)),
+      trial_ends_on: trial.value || null, paid_until: paid.value || null, billing_email: email.value.trim() || null, notes: notes.value.trim() || null, apply_apps: applyApps.checked,
+    });
+    toast('Billing saved.'); done();
+  }, { submitText: 'Save', wide: true });
 }
 
 // ---------------------------------------------------------------- the Demos dashboard

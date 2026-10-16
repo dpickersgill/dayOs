@@ -542,6 +542,16 @@ Platform console, **Demos**: everyone who started a demo, newest first. Tiles sh
 - **Online shop:** a running total beside the form on desktop, promo code in the order panel.
 - **Lesson booking page** in Spanish (language switch), and clearer messages when online booking is off.
 
+## Billing (the mountain's SummitOps subscription)
+
+- Plans and add-ons are set in the console (Plans and prices), each with a monthly and yearly price and the apps it includes. Sync to Stripe makes the matching Stripe product and prices; a changed price makes a new Stripe price.
+- New mountains made in the console start on a 14-day free trial with everything on (or are marked free). Mountains made before billing, and demos, are free.
+- Billing page (owners and managers see it, only the owner changes or pays): plan, add-ons, monthly or yearly, total; pay by card or US bank account (Stripe Checkout, trial days kept) or by emailed invoice due in 30 days; Manage payment opens Stripe's customer portal; invoices with links and PDFs; history.
+- Changing plan with a live subscription updates it in Stripe with prorations, and the apps follow the plan (an app brings what it needs).
+- Stripe webhooks (checkout.session.completed, customer.subscription.created/updated/deleted, invoice.paid, invoice.payment_failed) keep it in step; each event is recorded once.
+- Standing: ok (free, trial, subscribed, paid manually), grace (14 days after a failed payment or the trial or paid time ends, with a banner on every page), read only (writes refused with 402 except billing, patrol, time clock, Inbox, kiosk; the online shop and lesson booking stop taking orders). Reminder emails to the owner 3 days before the trial ends, when grace starts, 3 days before read only, and at read only.
+- Console: Billing column on the mountain list; Change billing per mountain (free, plan, add-ons, period, trial end, paid until for a check, billing email, operator notes, optionally set the apps to the plan).
+
 ## Engineering notes
 
 ### PATCH keeps defaulted fields

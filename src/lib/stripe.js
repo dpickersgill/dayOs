@@ -39,6 +39,15 @@ async function call(path, body, { idempotencyKey } = {}) {
   return json;
 }
 
+/** A GET to Stripe (a subscription, a customer's invoices). */
+async function get(path) {
+  let res;
+  try { res = await fetch(`${config.stripe.apiBase}${path}`, { headers: { authorization: `Bearer ${config.stripe.secretKey}` } }); } catch (_) { throw new AppError(502, 'The card service could not be reached.'); }
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) { console.error('Stripe error', res.status, json && json.error && json.error.message); throw new AppError(502, 'The card service refused that request.'); }
+  return json;
+}
+
 /** A hosted payment page for one amount (tax included). Returns { id, url }. */
 async function createCheckout({ amountCents, name, description, email, reference, metadata, successUrl, cancelUrl }) {
   const s = await call('/v1/checkout/sessions', {
@@ -104,4 +113,4 @@ function signWebhook(rawBody, secret, t = Math.floor(Date.now() / 1000)) {
   return `t=${t},v1=${crypto.createHmac('sha256', secret).update(`${t}.${rawBody}`).digest('hex')}`;
 }
 
-module.exports = { enabled, createCheckout, createDonationCheckout, refund, listRefunds, verifyWebhook, signWebhook };
+module.exports = { call, get, enabled, createCheckout, createDonationCheckout, refund, listRefunds, verifyWebhook, signWebhook };

@@ -146,6 +146,8 @@ test('a demo can never send email or take a card payment', async () => {
   assert.match((await pool.query('SELECT error FROM followups WHERE id = ?', [fu.id]))[0][0].error, /switched off in the demo/);
   assert.equal(require('../src/lib/mailer').enabled(), true, 'the mail service was switched on for this test, so the block is the demo guard');
   await pool.query('DELETE FROM tenant_modules WHERE tenant_id = ?', [real.body.id]);
+  await pool.query('DELETE FROM billing_events WHERE tenant_id = ?', [real.body.id]);
+  await pool.query('DELETE FROM tenant_billing WHERE tenant_id = ?', [real.body.id]);
   await pool.query('DELETE FROM users WHERE tenant_id = ?', [real.body.id]);
   await pool.query('DELETE FROM people WHERE tenant_id = ?', [real.body.id]);
   await pool.query('DELETE FROM tenants WHERE id = ?', [real.body.id]);

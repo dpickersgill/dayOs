@@ -417,7 +417,7 @@ test('sign in through the real form, move around, and sign out', skip(), async (
   assert.equal(document.querySelector('.nav a[aria-current=page]').textContent, 'Today');
 
   const links = [...document.querySelectorAll('.nav a')];
-  assert.equal(links.length, 22, 'owner sees every screen, Inbox, Waivers and Help included');
+  assert.equal(links.length, 23, 'owner sees every screen, Inbox, Waivers, Billing and Help included');
   for (const a of links) {
     window.location.hash = a.getAttribute('href').slice(1);
     await settle();

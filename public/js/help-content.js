@@ -26,6 +26,7 @@ export const SECTIONS = [
   { key: 'workforce', label: 'Staff and schedule', who: [], blurb: 'Shifts, certifications and the time clock.' },
   { key: 'myshifts', label: 'My shifts', who: null, blurb: 'Your own schedule and clock.' },
   { key: 'settings', label: 'Account', who: null, blurb: 'Your password and two-step sign-in.' },
+  { key: 'billing', label: 'Billing', who: [], blurb: 'Your SummitOps plan, paying by card, bank or invoice, and invoices.' },
 ];
 
 // steps: numbered; tips: short notes; related: other article ids.
@@ -478,6 +479,11 @@ export const ARTICLES = [
   { id: 'my-shifts', app: 'myshifts', title: 'See my shifts and clock in', keywords: 'schedule hours time clock',
     intro: 'My shifts shows your own schedule and your hours.',
     steps: ['Open My shifts to see what is coming up.', 'Use the clock button to clock in and out where your mountain allows it.'] },
+  { id: 'billing', app: 'billing', title: 'Choose a plan and pay for SummitOps', keywords: 'billing subscription plan add-on pay payment card bank ach invoice trial renew cancel receipt read only lapsed grace monthly yearly',
+    intro: 'New mountains get a 14-day free trial with everything on. Before it ends, the owner chooses a plan, any add-ons and monthly or yearly, and a way to pay. Managers can see the Billing page; only the owner can change or pay.',
+    steps: ['Open Billing from the menu under your name (or type Billing in Jump to).', 'Pick Monthly or Yearly, then a plan, then tick any add-ons. The total shows underneath.', 'Choose how to pay: Pay by card or Pay by bank opens Stripe\'s secure page; Send me invoices emails an invoice each period, due in 30 days. Paying during the trial does not shorten it.', 'Once paid, your apps match the plan. To change plan later, pick the new one and press Change plan: Stripe charges or credits the difference.', 'Manage payment opens Stripe\'s page to change the card or bank account, see receipts, or cancel.'],
+    tips: ['If a payment fails, or the trial or paid time ends, everything keeps working for 14 more days with a notice at the top of every page.', 'After those 14 days SummitOps becomes read only: everyone can sign in, see and export everything, but nothing new is sold, booked or added, and the online shop stops taking orders. Patrol, the time clock and the Inbox always keep working.', 'Paying turns everything back on straight away.', 'To pay by check, contact SummitOps: we mark you paid.'],
+    related: ['password'] },
   { id: 'sign-in', app: 'settings', title: 'Sign in with a username, and add logins', keywords: 'username login email sign in temporary password forgot reset new login',
     intro: 'Everyone signs in with their username, or their email if they have one. Only owners and managers must have an email.',
     steps: ['On the sign-in page, enter the mountain, then your username or email, then your password.', 'To add a login (managers): open Account, then Add login. Choose their staff record and a username is filled in from their name. Add an email only if they have one.', 'Set a temporary password and tell them in person or by phone. With "They choose their own password" ticked, they pick a new one the first time they sign in.', 'Someone forgot their password? Press New password on their login, keep Temporary ticked, and tell them the new one.'],

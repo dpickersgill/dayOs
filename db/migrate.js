@@ -491,6 +491,7 @@ async function main() {
   await conn.query(fs.readFileSync(path.join(__dirname, 'release.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'workforce.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'patrolops.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'billing.sql'), 'utf8'));
   let applied = 0;
   for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps]) {
     if (await done(conn)) continue;

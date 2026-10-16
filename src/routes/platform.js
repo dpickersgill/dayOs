@@ -15,6 +15,7 @@ const demoUsage = require('../lib/demousage');
 const totp = require('../lib/totp');
 const safety = require('../lib/safety');
 const { toCsv } = require('../lib/csv');
+const BL = require('../lib/billing');
 
 const router = express.Router();
 
@@ -164,7 +165,11 @@ router.get('/tenants', async (_req, res) => {
       (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id AND u.active = 1) AS users FROM tenants t WHERE t.sandbox_expires_at IS NULL ORDER BY t.name`);
   const used = await usage(t.map((x) => x.id));
   const data = [];
-  for (const x of t) data.push({ ...x, users: Number(x.users), storage_used_mb: Math.round(((used.get(x.id) || 0) / 1048576) * 10) / 10, modules: await M.enabledKeys(x.id) });
+  const bills = new Map((await rows(pool, 'SELECT b.*, p.name AS plan FROM tenant_billing b LEFT JOIN billing_plans p ON p.id = b.plan_id')).map((b) => [Number(b.tenant_id), b]));
+  for (const x of t) {
+    const b = bills.get(Number(x.id));
+    data.push({ ...x, users: Number(x.users), storage_used_mb: Math.round(((used.get(x.id) || 0) / 1048576) * 10) / 10, modules: await M.enabledKeys(x.id), billing: { ...(await BL.standingOf(x.id)), plan: b ? b.plan : null, interval: b ? b.billing_interval : null, pay_method: b ? b.pay_method : null } });
+  }
   res.json({ data });
 });
 
@@ -241,7 +246,76 @@ router.get('/tenants/:id', async (req, res) => {
   const used = await usage([id]);
   const users = await rows(pool, "SELECT id, email, username, role, active, totp_enabled FROM users WHERE tenant_id = ? AND role IN ('owner','manager') ORDER BY role, email", [id]);
   const history = await rows(pool, 'SELECT at, action, actor, detail FROM platform_audit WHERE tenant_id = ? ORDER BY id DESC LIMIT 30', [id]);
-  res.json({ ...t, storage_used_mb: Math.round(((used.get(id) || 0) / 1048576) * 10) / 10, modules: await M.enabledKeys(id), users, history });
+  const bill = await one(pool, 'SELECT * FROM tenant_billing WHERE tenant_id = ?', [id]);
+  const billEvents = await rows(pool, 'SELECT at, kind, detail, by_operator FROM billing_events WHERE tenant_id = ? ORDER BY id DESC LIMIT 30', [id]);
+  BL.invalidate(id);
+  res.json({ ...t, storage_used_mb: Math.round(((used.get(id) || 0) / 1048576) * 10) / 10, modules: await M.enabledKeys(id), users, history,
+    billing: bill ? { ...bill, addons: BL.ids(bill.addons), trial_ends_on: BL.dateOf(bill.trial_ends_on), paid_until: BL.dateOf(bill.paid_until), comped: Boolean(Number(bill.comped)) } : null,
+    billing_standing: await BL.standingOf(id), billing_events: billEvents });
+});
+
+// ---------------------------------------------------------------- what mountains pay SummitOps
+router.get('/billing/plans', async (_req, res) => res.json({ data: await BL.plans(), modules: M.MODULES.map(({ key, label, addon }) => ({ key, label, addon: Boolean(addon) })), stripe: require('../lib/stripe').enabled() }));
+
+const planFields = {
+  code: z.string().regex(/^[a-z0-9_-]{2,40}$/, 'Lowercase letters, numbers, dashes'), name: z.string().trim().min(1).max(100), blurb: z.string().max(500).nullable().optional(),
+  kind: z.enum(['plan', 'addon']).default('plan'), modules: z.array(z.string()).max(40).default([]),
+  monthly_cents: z.number().int().min(0).max(100000000).default(0), yearly_cents: z.number().int().min(0).max(1000000000).default(0),
+  active: z.boolean().optional(), sort: z.number().int().min(0).max(999).optional(),
+};
+const planCols = (b) => Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined).map(([k, v]) => [k, k === 'modules' ? v.join(',') : typeof v === 'boolean' ? Number(v) : v]));
+router.post('/billing/plans', validate(z.object(planFields)), async (req, res) => {
+  for (const k of req.body.modules) if (!M.KEYS.includes(k)) throw bad(`Unknown app: ${k}`);
+  const c = planCols(req.body);
+  try {
+    const [r] = await pool.query(`INSERT INTO billing_plans (${Object.keys(c).join(', ')}) VALUES (${Object.keys(c).map(() => '?').join(', ')})`, Object.values(c));
+    await log(pool, req, null, 'billing_plan_create', req.body);
+    res.status(201).json({ id: r.insertId });
+  } catch (e) { if (e.code === 'ER_DUP_ENTRY') throw bad('That code is already used'); throw e; }
+});
+// Editing: only the fields sent change (no defaults, so changing the description never resets a price).
+const planEdit = z.object({ ...planFields, kind: z.enum(['plan', 'addon']), modules: z.array(z.string()).max(40), monthly_cents: z.number().int().min(0).max(100000000), yearly_cents: z.number().int().min(0).max(1000000000) }).partial();
+router.patch('/billing/plans/:id', validate(planEdit), async (req, res) => {
+  for (const k of req.body.modules || []) if (!M.KEYS.includes(k)) throw bad(`Unknown app: ${k}`);
+  const c = planCols(req.body); delete c.kind;
+  if (!Object.keys(c).length) throw bad('Nothing to change');
+  const [r] = await pool.query(`UPDATE billing_plans SET ${Object.keys(c).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, [...Object.values(c), paramId(req)]);
+  if (!r.affectedRows) throw notFound('Plan');
+  await log(pool, req, null, 'billing_plan_edit', { id: paramId(req), ...req.body });
+  res.json({ ok: true });
+});
+/** Make the plan's product and prices in Stripe (a changed price makes a new Stripe price; existing subscribers keep theirs). */
+router.post('/billing/plans/:id/sync', async (req, res) => {
+  const p = await one(pool, 'SELECT * FROM billing_plans WHERE id = ?', [paramId(req)]);
+  if (!p) throw notFound('Plan');
+  const out = await BL.syncPlan(BL.parsePlan(p));
+  await log(pool, req, null, 'billing_plan_sync', { id: p.id });
+  res.json({ stripe_product: out.stripe_product, stripe_month: out.stripe_month, stripe_year: out.stripe_year });
+});
+
+/** One mountain's billing, as the operator sets it: plan, trial end, free (comped), paid outside Stripe until a date. */
+router.put('/tenants/:id/billing', validate(z.object({
+  plan_id: z.number().int().positive().nullable().optional(), addons: z.array(z.number().int().positive()).max(20).optional(), interval: z.enum(['month', 'year']).optional(),
+  comped: z.boolean().optional(), trial_ends_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), paid_until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  billing_email: z.string().trim().email().max(255).nullable().optional(), notes: z.string().max(500).nullable().optional(), apply_apps: z.boolean().default(false),
+})), async (req, res) => {
+  const id = paramId(req); const b = req.body;
+  if (!(await one(pool, 'SELECT id FROM tenants WHERE id = ?', [id]))) throw notFound('Mountain');
+  const all = await BL.plans();
+  if (b.plan_id && !all.some((p) => p.id === b.plan_id && p.kind === 'plan')) throw bad('Unknown plan');
+  for (const a of b.addons || []) if (!all.some((p) => p.id === a && p.kind === 'addon')) throw bad('Unknown add-on');
+  await tx(async (conn) => {
+    await conn.query('INSERT IGNORE INTO tenant_billing (tenant_id) VALUES (?)', [id]);
+    const set = { plan_id: b.plan_id, addons: b.addons ? b.addons.join(',') : undefined, billing_interval: b.interval, comped: b.comped === undefined ? undefined : Number(b.comped), trial_ends_on: b.trial_ends_on, paid_until: b.paid_until, billing_email: b.billing_email, notes: b.notes };
+    const keys = Object.keys(set).filter((k) => set[k] !== undefined);
+    if (keys.length) await conn.query(`UPDATE tenant_billing SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE tenant_id = ?`, [...keys.map((k) => set[k]), id]);
+    const now = await one(conn, 'SELECT * FROM tenant_billing WHERE tenant_id = ?', [id]);
+    if (b.apply_apps) await BL.applyModules(conn, id, now);
+    await BL.event(conn, id, 'operator_change', JSON.stringify(b), { operator: req.operator });
+    await log(conn, req, id, 'billing', b);
+  });
+  BL.invalidate(id);
+  res.json({ standing: await BL.standingOf(id) });
 });
 
 router.post('/tenants', validate(z.object({
@@ -249,6 +323,7 @@ router.post('/tenants', validate(z.object({
   storage_cap_mb: z.number().int().min(10).max(100000).optional(),
   modules: z.record(z.string(), z.boolean()).optional(),
   owner: z.object({ email: z.string().email(), password, first_name: z.string().min(1), last_name: z.string().min(1) }),
+  billing: z.enum(['trial', 'comped']).default('trial'), plan_id: z.number().int().positive().nullable().optional(),
 })), async (req, res) => {
   const b = req.body;
   try { new Intl.DateTimeFormat('en-US', { timeZone: b.timezone }); } catch (_) { throw new AppError(400, 'Unknown time zone'); }
@@ -260,7 +335,9 @@ router.post('/tenants', validate(z.object({
     await conn.query('INSERT INTO users (tenant_id, person_id, email, username, password_hash, role) VALUES (?, ?, ?, ?, ?, ?)', [t.insertId, p.insertId, b.owner.email, require('../lib/usernames').suggestUsername(b.owner), hash, 'owner']);
     const on = M.apply({}, b.modules || {});
     for (const k of M.KEYS) await conn.query('INSERT INTO tenant_modules (tenant_id, module, enabled) VALUES (?, ?, ?)', [t.insertId, k, on.includes(k) ? 1 : 0]);
-    await log(conn, req, t.insertId, 'create', { slug: b.slug, apps: on });
+    if (b.billing === 'trial') await BL.startTrial(conn, t.insertId, { planId: b.plan_id || null, email: b.owner.email });
+    else await conn.query('INSERT INTO tenant_billing (tenant_id, comped, plan_id) VALUES (?, 1, ?)', [t.insertId, b.plan_id || null]);
+    await log(conn, req, t.insertId, 'create', { slug: b.slug, apps: on, billing: b.billing });
     return { id: t.insertId, slug: b.slug };
   });
   res.status(201).json(created);

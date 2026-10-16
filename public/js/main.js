@@ -32,6 +32,7 @@ const VIEWS = [
   ['workforce', 'Staff and schedule', () => isManager(), () => import('./views/workforce.js')],
   ['myshifts', 'My shifts', () => true, () => import('./views/myshifts.js')],
   ['settings', 'Account', () => true, () => import('./views/settings.js')],
+  ['billing', 'Billing', () => isManager(), () => import('./views/billing.js')],
   ['help', 'Help', () => true, () => import('./views/help.js')],
 ];
 
@@ -164,7 +165,7 @@ let navToken = 0;
 const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
 
 // An app the platform has turned off for this mountain is hidden for everyone, including the owner.
-const ALWAYS = ['dashboard', 'inbox', 'people', 'waivers', 'myshifts', 'settings', 'help'];
+const ALWAYS = ['dashboard', 'inbox', 'people', 'waivers', 'myshifts', 'settings', 'billing', 'help'];
 const appOn = (key) => ALWAYS.includes(key) || !ctx.me.modules || ctx.me.modules.includes(key);
 function visibleViews() { return VIEWS.filter((v) => appOn(v[0]) && v[2]()); }
 
@@ -174,8 +175,18 @@ function buildShell() {
   frame = buildFrame({ views: visibleViews().map(([key, text]) => [key, text]), main, signOut: () => signOut() });
   app.append(frame.shell);
   if (ctx.me.sandbox) app.append(demoPill(ctx.me.sandbox));
+  showBillingBanner();
   refreshUnread();
   refreshWhatsNew();
+}
+
+// Grace days, read only, or the last days of the trial: a strip above every page (managers get the Billing link).
+async function showBillingBanner() {
+  const s = ctx.me.billing;
+  if (!s || (s.state === 'ok' && !(s.kind === 'trial' && s.days_left <= 3))) return;
+  const { billingBanner } = await import('./views/billing.js');
+  const el = billingBanner(s, { canFix: isManager() });
+  if (el && main.parentElement) main.before(el);
 }
 
 // The quiet dot on Help when What's new has changes for this person: checked when the app opens, cleared when they look.

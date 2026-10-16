@@ -502,7 +502,7 @@ fieldset.field legend { font-weight: 700; padding: 0 6px; }
 .slip.wristband { width: 420px; padding: 8px 12px; grid-template-columns: 1fr auto; text-align: left; align-items: center; }
 .slip.wristband header, .slip.wristband .slip-when, .slip.wristband .slip-code { grid-column: 1 / -1; }
 @media print {
-  body > *:not(.print-overlay) { display: none !important; }
+  body:has(.print-overlay) > *:not(.print-overlay) { display: none !important; } /* only while a receipt or slip is open */
   .print-overlay { position: static; background: none; padding: 0; display: block; overflow: visible; }
   .print-overlay .dialog { box-shadow: none; border: 0; max-width: none; width: auto; padding: 0; }
   .print-overlay .dialog > header, .no-print { display: none !important; }
@@ -2172,3 +2172,39 @@ body:has(.tour-card) .demo-pill { display: none; }
   .sweep-grid, .lift-grid, .log-grid { grid-template-columns: 1fr; }
   .room-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ---------- Billing: the mountain's SummitOps subscription ---------- */
+.billing-standing.is-grace { border-left: 5px solid #f2b33d; }
+.billing-standing.is-read_only { border-left: 5px solid var(--closed); }
+.plan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.plan-card { display: grid; gap: 6px; align-content: start; text-align: left; font: inherit; color: inherit; background: #fff; border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 14px 16px; cursor: pointer; min-height: 132px; }
+.plan-card:hover:not(:disabled) { border-color: var(--spruce); }
+.plan-card.on { border: 2px solid var(--open); padding: 13px 15px; background: var(--open-tint); }
+.plan-card:disabled { cursor: default; }
+.plan-card:disabled:not(.on) { opacity: 0.7; }
+.plan-name { font-weight: 700; font-size: 1.05rem; }
+.plan-price { font-size: 1.5rem; font-weight: 700; line-height: 1.1; }
+.plan-price small { font-size: 0.875rem; font-weight: 400; color: var(--quiet); }
+.plan-blurb { font-size: 0.9rem; }
+.plan-apps { font-size: 0.8rem; color: var(--quiet); }
+.plan-current { justify-self: start; font-size: 0.8rem; font-weight: 700; color: var(--open); }
+.addon-list { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 14px; margin: 0; display: grid; gap: 2px; }
+.addon-list legend { font-weight: 700; padding: 0 6px; }
+.addon { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; min-height: 44px; cursor: pointer; }
+.addon input { width: 20px; height: 20px; }
+.addon-price { white-space: nowrap; font-weight: 700; }
+.plan-total { font-size: 1.1rem; margin: 0; }
+.pay-ways { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.pay-way { display: grid; gap: 4px; align-content: start; border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; background: #fff; }
+.pay-way p { margin: 0 0 8px; }
+.pay-way .btn { justify-self: start; }
+.billing-banner { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; padding: 10px 20px; font-size: 0.925rem; background: var(--hold-tint); color: #4a2d00; border-bottom: 1px solid #e9c98a; }
+.billing-banner.is-read_only { background: var(--closed-tint); color: #6b130c; border-bottom-color: #efb3ab; }
+.billing-banner.is-trial { background: #e8f0fb; color: var(--trail-blue-dark); border-bottom-color: #bcd0ee; }
+.billing-banner a { font-weight: 700; color: inherit; text-underline-offset: 3px; }
+@media print { .billing-banner { display: none; } }
+/* Console badges (mountain status, billing) */
+.badge { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 0.8rem; font-weight: 700; background: var(--snowpack); color: var(--quiet); border: 1px solid var(--line); }
+.badge.ok { background: var(--open-tint); color: var(--open); border-color: #b9dfc8; }
+.badge.warn { background: var(--hold-tint); color: var(--hold); border-color: #e9c98a; }
+.badge.bad { background: var(--closed-tint); color: var(--closed); border-color: #efb3ab; }

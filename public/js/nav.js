@@ -12,7 +12,7 @@ const GROUPS = [
   ['Office', 'office', ['catalog', 'money', 'workforce', 'messages', 'documents']],
 ];
 export const GROUP_OF = Object.fromEntries(GROUPS.flatMap(([name, id, keys]) => keys.map((k) => [k, { id, name }])));
-const PERSONAL = ['myshifts', 'settings', 'help'];
+const PERSONAL = ['myshifts', 'settings', 'billing', 'help'];
 const PHONE_FIRST = ['dashboard', 'sell', 'gate', 'patrol', 'school', 'conditions', 'myshifts'];
 // Words people might type that are not in the page's name.
 const ALSO = {
@@ -28,6 +28,7 @@ const ALSO = {
   assets: 'fleet vehicles trucks groomers equipment maintenance parts inventory stock purchase orders vendors fuel inspection qr tag registration insurance warranty depreciation',
   waivers: 'waiver release liability sign signature signed guardian minor consent form',
   myshifts: 'my schedule clock in out', settings: 'account password security two-step sign out',
+  billing: 'subscription plan pay payment invoice card bank ach trial renew upgrade receipt summitops',
   help: 'how to guide instructions support questions articles',
 };
 const RAIL_KEY = 'so.rail';

@@ -1,6 +1,41 @@
 {
   "releases": [
     {
+      "version": "2026.10.12",
+      "date": "2026-10-16",
+      "title": "Billing, and printing fixed",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": [],
+          "text": "Billing: choose your SummitOps plan, add-ons and monthly or yearly, and pay by card, US bank account or emailed invoice. Manage payment changes the card, shows receipts or cancels. New mountains start with a 14-day free trial.",
+          "help": "billing"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": [],
+          "text": "If a payment fails or the trial ends, everything keeps working for 14 days with a notice at the top. After that SummitOps is read only until paid; patrol, the time clock and the Inbox always keep working.",
+          "help": "billing"
+        },
+        {
+          "kind": "fixed",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Printing works again: the hand-off report, take-home instructions, refusal form and other patrol printouts were coming out blank."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "Console: Plans and prices (with Sync to Stripe), a Billing column on the mountain list, and Change billing on each mountain for trials, free mountains and payments taken by check."
+        }
+      ]
+    },
+    {
       "version": "2026.10.11",
       "date": "2026-10-16",
       "title": "Patrol operations, and fixes from an EMS review",

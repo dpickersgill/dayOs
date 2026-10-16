@@ -79,7 +79,10 @@ function createApp() {
       logFailure({ job: 'stripe_webhook', message: 'bad signature' });
       return res.status(400).json({ error: 'Bad signature' });
     }
-    try { res.json({ received: true, ...(await lessonbook.handleWebhook(event, config.stripe.publicUrl || `${req.protocol}://${req.get('host')}`)) }); } catch (err) {
+    try {
+      const billed = await require('./routes/billing').handleWebhook(event); // the mountain's own SummitOps subscription
+      if (billed) return res.json({ received: true, ...billed });
+      res.json({ received: true, ...(await lessonbook.handleWebhook(event, config.stripe.publicUrl || `${req.protocol}://${req.get('host')}`)) }); } catch (err) {
       logFailure({ job: 'stripe_webhook', event: event && event.type, message: err.message });
       res.status(500).json({ error: 'Try again' });
     }
@@ -169,6 +172,8 @@ function createApp() {
   // Everything below requires a valid token; tenant comes from the token only.
   api.use(authenticate);
   api.use(modules.moduleGate);
+  api.use(require('./lib/billing').gate); // a lapsed subscription: read only, except patrol, the time clock and billing
+  api.use(require('./routes/billing').router);
   api.use('/whats-new', whatsNew);
   api.use('/demo-tours', rateLimit({ windowMs: 60_000, max: 120 }), demoTours.router);
   // Per person, not per address: a mountain's staff usually share one internet address. Reads (the polling) are not counted.
