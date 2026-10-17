@@ -1,8 +1,48 @@
 // Patrol > Admin > Patrol settings: the medical director and protocol version (stamped on each report at sign-off),
 // volunteer days, self sign-up for open shifts, the sweep's late alert, oxygen refill level, controlled counts,
 // avalanche work and text messages on critical calls. Each part is changed by whoever runs that part of patrol.
-import { get, put } from '../api.js';
-import { h, clear, input, field, button, toast, errorBox } from '../ui.js';
+import { get, put, post, patch, del } from '../api.js';
+import { h, clear, input, select, field, button, toast, errorBox, confirmDialog, formDialog, ctx } from '../ui.js';
+
+const DIFFICULTY = [['green', 'Green'], ['blue', 'Blue'], ['black', 'Black'], ['double_black', 'Double black'], ['park', 'Park']];
+
+/**
+ * Runs and lifts: the list incidents, trail checks and sweep routes point at. A patrol on its own (no Lifts and trails
+ * app) keeps it here; with that app on, it is the same list, kept by the mountain.
+ */
+export function runsPanel(canEdit) {
+  const box = h('section', { class: 'panel stack', 'data-panel': 'runs' });
+  async function draw() {
+    let lifts; let trails;
+    try { [lifts, trails] = await Promise.all([get('/schedule/lifts'), get('/schedule/trails')]); } catch (err) { clear(box).append(errorBox(err)); return; }
+    lifts = lifts.data || lifts; trails = trails.data || trails;
+    const shared = (ctx.me.modules || []).includes('conditions');
+    const list = (kind, items, extra) => h('ul', { class: 'plain stack tight', 'data-list': kind }, ...items.map((x) => h('li', { class: 'row between' },
+      h('span', null, h('b', null, x.name), x.difficulty ? h('span', { class: 'muted small' }, ` ${(DIFFICULTY.find((d) => d[0] === x.difficulty) || [0, x.difficulty])[1]}`) : null),
+      canEdit ? h('span', { class: 'row' },
+        button('Rename', () => formDialog(`Rename ${x.name}`, h('div', { class: 'form' }, field('Name', input({ name: 'name', value: x.name, maxlength: 100, required: true }))), async (fd) => { await patch(`/schedule/${kind}/${x.id}`, { name: String(fd.get('name') || '').trim() }); await draw(); }), { small: true }),
+        button('Remove', () => confirmDialog(`Remove ${x.name}?`, 'Past cases keep the name they were written with.', 'Remove', async () => { await del(`/schedule/${kind}/${x.id}`); await draw(); }, { danger: true }), { small: true })) : null)),
+    items.length ? null : h('li', { class: 'muted' }, extra));
+    const addForm = (kind) => {
+      const name = input({ name: 'name', maxlength: 100, required: true, placeholder: kind === 'lifts' ? 'For example: Summit Quad' : 'For example: Upper Ridge' });
+      const diff = kind === 'trails' ? select(DIFFICULTY, 'blue', { name: 'difficulty', 'aria-label': 'Difficulty' }) : null;
+      const f = h('form', { class: 'row', novalidate: true }, name, diff, button(kind === 'lifts' ? 'Add lift' : 'Add run', null, { type: 'submit', small: true }));
+      f.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!name.value.trim()) return;
+        try { await post(`/schedule/${kind}`, { name: name.value.trim(), ...(diff ? { difficulty: diff.value } : {}), status: 'closed' }); await draw(); } catch (err) { toast(err.message, 'error'); }
+      });
+      return f;
+    };
+    clear(box).append(h('h3', null, 'Runs and lifts'),
+      h('p', { class: 'muted small' }, shared ? 'The same list the mountain keeps in Lifts and trails. Cases, trail checks and sweep routes point at it.' : 'Cases, trail checks and sweep routes point at these. Add each run and lift once.'),
+      h('div', { class: 'grid2' },
+        h('div', { class: 'stack tight' }, h('h4', null, `Runs (${trails.length})`), list('trails', trails, 'No runs yet.'), canEdit ? addForm('trails') : ''),
+        h('div', { class: 'stack tight' }, h('h4', null, `Lifts (${lifts.length})`), list('lifts', lifts, 'No lifts yet.'), canEdit ? addForm('lifts') : '')));
+  }
+  draw();
+  return box;
+}
 
 export async function drawOpsSettings(box) {
   const body = h('div', { class: 'stack' });
@@ -24,6 +64,7 @@ export async function drawOpsSettings(box) {
     const check = (name, text, on) => h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name, checked: on }), ` ${text}`);
     const numOrNull = (fd, k) => (fd.get(k) === '' || fd.get(k) === null ? null : Number(fd.get(k)));
     clear(body).append(
+      runsPanel(Boolean(s.can.settings)),
       group('Medical oversight', s.can.settings, [
         field('Medical director', input({ name: 'medical_director', maxlength: 150, value: s.medical_director || '', placeholder: 'Dr. Jane Smith, St. Luke\'s ED' })),
         field('Protocol version', input({ name: 'protocol_version', maxlength: 60, value: s.protocol_version || '', placeholder: 'OEC 6th ed. with 2026 local protocols' })),

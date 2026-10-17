@@ -208,13 +208,13 @@ api.get('/site/plans', async (_req, res) => res.set('Cache-Control', 'public, ma
 const forgetPlans = () => { planCache = { at: 0, body: null }; };
 
 const contactBody = z.object({
-  kind: z.enum(['walkthrough', 'trial', 'founding', 'question']).default('walkthrough'),
+  kind: z.enum(['walkthrough', 'trial', 'founding', 'question', 'patrol']).default('walkthrough'),
   name: z.string().trim().min(1).max(150), mountain: z.string().trim().min(1).max(150), role: z.string().trim().max(100).optional().default(''),
   email: z.string().trim().email().max(255), phone: z.string().trim().max(40).optional().default(''), lifts: z.string().trim().max(20).optional().default(''),
   plan_interest: z.string().trim().max(60).optional().default(''), message: z.string().trim().max(2000).optional().default(''),
   founding: z.boolean().optional().default(false), website: z.string().max(200).optional().default(''), // a field people never see: bots fill it
 });
-const KINDS = { walkthrough: 'Walkthrough request', trial: '14-day trial request', founding: 'Founding group request', question: 'Question' };
+const KINDS = { walkthrough: 'Walkthrough request', trial: '14-day trial request', founding: 'Founding group request', question: 'Question', patrol: 'Patrol only sign-up' };
 
 api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SITE_CONTACT_LIMIT) || 8, message: 'Too many messages from this address. Try again later, or email us.' }), validate(contactBody), async (req, res) => {
   const b = req.body;
@@ -234,7 +234,7 @@ api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.e
     if (sent.ok) {
       await pool.query('UPDATE site_leads SET emailed = 1 WHERE id = ?', [r.insertId]);
       copy = (await mailer.sendPlatform({ to: b.email, replyTo: config.site.contactEmail, subject: 'We have your SummitOps request', tag: 'site-lead-thanks',
-        text: `Hello ${b.name},\n\nThank you for writing about ${b.mountain}. A person will reply within one business day${b.kind === 'trial' ? ' to set up your trial' : ' to set a time'}.\n\nTo look around in the meantime, start a demo mountain: ${config.site.appUrl || `${req.protocol}://${req.get('host')}`}/try\n\nSummitOps` })).ok;
+        text: `Hello ${b.name},\n\nThank you for writing about ${b.mountain}. A person will reply within one business day${b.kind === 'trial' ? ' to set up your trial' : b.kind === 'patrol' ? ' to set up your patrol, with a 14-day trial' : ' to set a time'}.\n\nTo look around in the meantime, start a demo mountain: ${config.site.appUrl || `${req.protocol}://${req.get('host')}`}/try\n\nSummitOps` })).ok;
     }
   }
   res.status(201).json({ ok: true, copy });

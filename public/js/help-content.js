@@ -27,6 +27,7 @@ export const SECTIONS = [
   { key: 'myshifts', label: 'My shifts', who: null, blurb: 'Your own schedule and clock.' },
   { key: 'settings', label: 'Account', who: null, blurb: 'Your password and two-step sign-in.' },
   { key: 'billing', label: 'Billing', who: [], blurb: 'Your SummitOps plan, paying by card, bank or invoice, and invoices.' },
+  { key: 'area', label: 'Patrol summary', who: ['area'], blurb: 'For the ski area: the patrol\'s day in numbers and approved reports.' },
 ];
 
 // steps: numbered; tips: short notes; related: other article ids.
@@ -497,6 +498,14 @@ export const ARTICLES = [
     intro: 'On a computer several people use, counter, instructor and lift staff switch in with their username and a personal PIN, so nobody shares a login.',
     steps: ['A manager opens Account on the shared computer itself and presses Make this computer a shared terminal, then names it.', 'Each person signs in once with their password on their own device, opens Account and sets a PIN of 6 to 8 digits.', 'At the terminal, type your username and PIN, then press Start. Sign out when you step away.'],
     tips: ['Managers and patrol still sign in with their passkey or two-step, even on a terminal.', 'A terminal\'s sign-in ends after 15 minutes unused.', 'Five wrong PINs lock that person\'s PIN for 15 minutes. A manager can clear a forgotten PIN under Logins.', 'Season end (under Logins) stops seasonal logins working after the last day of the season. Edit one person\'s date to bring them back.'] },
+  { id: 'area-summary', app: 'area', title: 'See your patrol\'s day and approved reports', keywords: 'ski area read only summary approved reports patrol only general manager insurance',
+    intro: 'A ski area whose patrol is on the Patrol only plan gets a free read-only login: the day in numbers and every approved report, never a case still being written.',
+    steps: ['Sign in with the login the patrol set up for you. You set up a passkey or authenticator app first, because the reports hold patient details.', 'Patrol summary shows today: patrollers on duty, runs checked, calls by kind and severity, and reports approved or still in progress. Pick another day to look back.', 'Under Approved reports, press Open to read one. You see the copy frozen when patrol approved it, including any entries marked as entered in error.', 'Print or save it as a PDF from the report, if your records policy allows.'],
+    tips: ['Every report you open is recorded, like any access to patient records.', 'A report only appears here once patrol has approved it.', 'This login cannot change anything. To ask for a change, contact the patrol director.'] },
+  { id: 'patrol-only', app: 'patrol', title: 'Set up a patrol on its own (Patrol only)', keywords: 'patrol only standalone runs lifts trails import roster spreadsheet csv ski area login read only',
+    intro: 'On the Patrol only plan, patrol keeps its own list of runs and lifts, brings its roster in from a spreadsheet, and gives the ski area a free read-only login.',
+    steps: ['Open Patrol, Admin, Patrol settings, and add each run and lift under Runs and lifts. Cases, trail checks and sweep routes point at them.', 'Open Patrol, Team, Team, and press Import from a spreadsheet. Save your roster as CSV with First name and Last name columns (Email, Phone, Level, Certification, Callsign and Patrol number are used when present).', 'Set leaders and directors one by one afterwards: they control access.', 'For the ski area, open Account, Logins, Add login, and choose Ski area (read-only). It needs an email and is free.'],
+    tips: ['If the ski area later adds Lifts and trails, the same list of runs and lifts carries on.', 'Anyone already on the roster is skipped when you import again, so it is safe to run twice.'] },
 ];
 
 export const articleById = (id) => ARTICLES.find((a) => a.id === id) || null;

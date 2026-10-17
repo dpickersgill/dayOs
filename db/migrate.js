@@ -378,6 +378,9 @@ const securitySteps = [
   ['user_sessions.method', (c) => columnExists(c, 'user_sessions', 'method'), "ALTER TABLE user_sessions ADD COLUMN method VARCHAR(12) NOT NULL DEFAULT 'password', ADD COLUMN device_hash CHAR(64) NULL, ADD COLUMN terminal_id BIGINT UNSIGNED NULL, ADD COLUMN stepped_up_at DATETIME NULL"],
   ['users.pin_hash', (c) => columnExists(c, 'users', 'pin_hash'), 'ALTER TABLE users ADD COLUMN pin_hash VARCHAR(100) NULL, ADD COLUMN pin_failures SMALLINT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN pin_locked_until DATETIME NULL'],
   ['users.access_ends_on', (c) => columnExists(c, 'users', 'access_ends_on'), 'ALTER TABLE users ADD COLUMN access_ends_on DATE NULL'],
+  // 2026.10.18: the ski area's free read-only login for a patrol on DAY/OS Patrol.
+  ['site_leads patrol kind', (c) => columnTypeHas(c, 'site_leads', 'kind', "'patrol'"), "ALTER TABLE site_leads MODIFY kind ENUM('walkthrough','trial','founding','question','patrol') NOT NULL DEFAULT 'walkthrough'"],
+  ['users.role area', (c) => columnTypeHas(c, 'users', 'role', "'area'"), "ALTER TABLE users MODIFY role ENUM('owner','manager','staff','patrol','instructor','counter','area') NOT NULL DEFAULT 'staff'"],
   // Patrollers must use two-step too; mountains that already exist get two weeks before it is enforced.
   ['tenants.mfa_for_patrol', (c) => columnExists(c, 'tenants', 'mfa_for_patrol'), [
     'ALTER TABLE tenants ADD COLUMN mfa_for_patrol TINYINT(1) NOT NULL DEFAULT 1, ADD COLUMN patrol_mfa_from DATE NULL, ADD COLUMN season_ends_on DATE NULL',
@@ -496,6 +499,16 @@ async function seedPlans(conn) {
   console.log('Added the launch plans and add-ons (change them in the console, Plans and prices)');
 }
 
+// DAY/OS Patrol (2026.10.18): the plan for a patrol on its own, added once to installs that already have plans.
+async function seedPatrolPlan(conn) {
+  const [[has]] = await conn.query("SELECT COUNT(*) AS n FROM billing_plans WHERE code = 'patrol-only'");
+  if (Number(has.n)) return;
+  const [[top]] = await conn.query("SELECT COALESCE(MAX(sort), 0) AS s FROM billing_plans WHERE kind = 'plan'");
+  await conn.query("INSERT INTO billing_plans (code, name, blurb, kind, modules, monthly_cents, yearly_cents, sort) VALUES ('patrol-only', 'Patrol only', ?, 'plan', 'patrol,documents', 14900, 150000, ?)",
+    ['For a ski patrol on its own: patient care reports, dispatch, the roster and schedule, training, equipment, the closing sweep and records. The ski area gets a free read-only login.', Number(top.s) + 1]);
+  console.log('Added the Patrol plan (for a patrol on its own)');
+}
+
 async function main() {
   const conn = await mysql.createConnection({
     socketPath: config.db.socketPath,
@@ -536,6 +549,7 @@ async function main() {
   await conn.query(fs.readFileSync(path.join(__dirname, 'security.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'zerotrust.sql'), 'utf8'));
   await seedPlans(conn);
+  await seedPatrolPlan(conn);
   let applied = 0;
   for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps]) {
     if (await done(conn)) continue;

@@ -8,6 +8,13 @@
 4. **Legal**: have a lawyer review the waiver text and privacy terms. Sign a BAA with Google Cloud before storing patrol patient/health data (see HIPAA.md).
 5. **Card payments**: pick a processor (Square or Stripe) before taking live cards through a terminal. Until then card sales are recorded manually.
 
+## Setting up a patrol on its own (Patrol only)
+
+1. A patrol sign-up arrives in the console's Leads (kind Patrol).
+2. Add the mountain in the console with the patrol's name and the director as owner, then under Billing choose the Patrol only plan with "apply apps", so only Patrol and Documents are on. The 14-day trial works as for any plan.
+3. The director adds runs and lifts (Patrol, Admin, Patrol settings), imports the roster (Patrol, Team), and adds the ski area's read-only login (Account, Logins, role Ski area). That login is free.
+4. If the ski area later buys a full plan, change the plan on the same mountain: the patrol keeps everything.
+
 ## Tiered sign-in (2026.10.17)
 
 Who signs in how:

@@ -23,6 +23,7 @@ function mfaRule(row) {
   if (Number(row.require_mfa)) return 'mountain';
   if (!config.requireAdminMfa || Number(row.sandbox)) return null;
   if (MANAGER_ROLES.includes(row.role)) return 'manager';
+  if (row.role === 'area') return 'area'; // reads approved patient reports
   if (Number(row.patrol_lead)) return 'patrol_lead';
   if ((row.role === 'patrol' || Number(row.on_patrol)) && !Number(row.patrol_host) && Number(row.mfa_for_patrol ?? 1) && Number(row.patrol_mfa_due ?? 1)) return 'patrol';
   return null;
@@ -36,6 +37,9 @@ const TIER_SQL = `(u.totp_enabled = 1 OR EXISTS (SELECT 1 FROM user_passkeys k W
   (u.staff_id IS NOT NULL AND EXISTS (SELECT 1 FROM patrol_members m WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id AND m.access_level = 'host')) AS patrol_host,
   t.require_mfa, t.mfa_for_patrol, (t.patrol_mfa_from IS NULL OR t.patrol_mfa_from <= CURDATE()) AS patrol_mfa_due, t.patrol_mfa_from,
   (t.sandbox_expires_at IS NOT NULL) AS sandbox`;
+
+// The ski area's read-only login reaches its own sign-in settings and the patrol summary, and nothing else.
+const AREA_PATHS = /^\/api\/v1\/(auth\/|area(\/|$)|whats-new)/;
 
 // While two-step is still to be set up, or a temporary password replaced, only these are open.
 const SETUP_PATHS = /\/auth\/(me|logout|change-password|mfa\/(setup|enable|status)|passkeys(\/options)?)$/;
@@ -98,6 +102,8 @@ async function authenticate(req, _res, next) {
     err.details = { code: 'password_change_required' };
     return next(err);
   }
+
+  if (row.role === 'area' && !AREA_PATHS.test(path)) return next(forbidden('This login shows the patrol summary and approved reports only'));
 
   // onPatrol: this login's person is on the patrol roster, so they can use Patrol whatever their login role is.
   req.auth = {

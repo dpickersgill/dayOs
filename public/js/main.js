@@ -38,13 +38,19 @@ const VIEWS = [
   ['settings', 'Account', () => true, () => import('./views/settings.js')],
   ['billing', 'Billing', () => isManager(), () => import('./views/billing.js')],
   ['help', 'Help', () => true, () => import('./views/help.js')],
+  ['area', 'Patrol summary', () => ctx.me.role === 'area', () => import('./views/area.js')],
 ];
 
 const app = document.getElementById('app');
 const SLUG_KEY = 'so.mountain';
 
+// DAY/OS Patrol: a mountain with Patrol and none of the front-desk or mountain apps is a patrol on its own.
+const patrolOnly = () => Boolean(ctx.me.modules) && ctx.me.modules.includes('patrol') && !['sell', 'conditions', 'rentals', 'school'].some((k) => ctx.me.modules.includes(k));
+
 function defaultView() {
   const role = ctx.me.role;
+  if (role === 'area') return 'area';
+  if (patrolOnly()) return visibleViews().some((v) => v[0] === 'patrol') ? 'patrol' : 'settings';
   if (isManager()) return 'dashboard';
   const home = { counter: 'sell', instructor: 'school', patrol: 'patrol' }[role] || 'conditions';
   return visibleViews().some((v) => v[0] === home) ? home : (visibleViews()[0] || ['settings'])[0];
@@ -233,9 +239,15 @@ let navToken = 0;
 const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
 
 // An app the platform has turned off for this mountain is hidden for everyone, including the owner.
-const ALWAYS = ['dashboard', 'inbox', 'people', 'waivers', 'myshifts', 'settings', 'billing', 'help'];
+const ALWAYS = ['dashboard', 'inbox', 'people', 'waivers', 'myshifts', 'settings', 'billing', 'help', 'area'];
 const appOn = (key) => ALWAYS.includes(key) || !ctx.me.modules || ctx.me.modules.includes(key);
-function visibleViews() { return VIEWS.filter((v) => appOn(v[0]) && v[2]()); }
+function visibleViews() {
+  // The ski area's read-only login sees the patrol summary and its own account, nothing else.
+  if (ctx.me.role === 'area') return VIEWS.filter((v) => ['area', 'settings', 'help'].includes(v[0]));
+  // A patrol on its own has no customers, waivers or day board to keep.
+  const hide = patrolOnly() ? ['dashboard', 'people', 'waivers', 'myshifts'] : [];
+  return VIEWS.filter((v) => !hide.includes(v[0]) && appOn(v[0]) && v[2]());
+}
 
 let frame = null;
 function buildShell() {
@@ -269,7 +281,7 @@ let unreadBusy = false;
 async function refreshUnread() {
   if (unreadBusy) return; // one check at a time, so the 30-second timer never doubles up
   clearTimeout(unreadTimer);
-  if (!ctx.me || !frame) return;
+  if (!ctx.me || !frame || ctx.me.role === 'area') return; // the ski area's read-only login has no Inbox
   unreadBusy = true;
   try { const { unread } = await get('/inbox/unread'); if (frame.setBadge) frame.setBadge('inbox', unread); } catch (_) { /* try again on the next tick */ }
   unreadBusy = false;

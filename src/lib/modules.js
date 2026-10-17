@@ -31,6 +31,8 @@ const DEFAULTS = Object.fromEntries(MODULES.map((m) => [m.key, !m.addon]));
 const BY_KEY = Object.fromEntries(MODULES.map((m) => [m.key, m]));
 
 // Reference data other apps read: the lift and trail list is open to anyone who has an app that uses it.
+// A patrol on its own (Patrol on, Lifts and trails off) still keeps its list of runs and lifts.
+const SHARED_WRITES = [{ re: /^\/schedule\/(lifts|trails)(\/|$)/, any: ['patrol'] }];
 const SHARED_READS = [
   { re: /^\/schedule\/(lifts|trails|days|events)(\/|$)/, any: ['conditions', 'patrol', 'park', 'gate'] },
   { re: /^\/(products|pricing)(\/|$)/, any: ['catalog', 'sell', 'rentals', 'school', 'programs'] },
@@ -96,6 +98,7 @@ function moduleGate(req, _res, next) {
     const { on } = await stateOf(req.auth.tenantId);
     if (on.has(key)) return;
     if (req.method === 'GET') { const shared = SHARED_READS.find((s) => s.re.test(path)); if (shared && shared.any.some((k) => on.has(k))) return; }
+    else { const shared = SHARED_WRITES.find((s) => s.re.test(path)); if (shared && shared.any.some((k) => on.has(k))) return; }
     throw off(key);
   })().then(() => next(), next);
 }

@@ -80,7 +80,8 @@ test('lifts and trails stay readable to the apps that use them', async () => {
   assert.equal((await api('GET', '/schedule/lifts', { token: owner })).status, 403);
   await plat('PUT', `/tenants/${id}/modules`, { modules: { patrol: true } });
   assert.equal((await api('GET', '/schedule/lifts', { token: owner })).status, 200, 'patrol reads the lift list');
-  assert.equal((await api('POST', '/schedule/lifts', { token: owner, body: { name: 'X', status: 'closed' } })).status, 403, 'but cannot change it');
+  assert.equal((await api('POST', '/schedule/lifts', { token: owner, body: { name: 'X', status: 'closed' } })).status, 201, 'and a patrol on its own keeps the list');
+  assert.equal((await api('POST', '/schedule/days', { token: owner, body: { on_date: '2030-01-01', status: 'open' } })).status, 403, 'but the rest of Lifts and trails stays off');
   const help = await api('GET', `/public/${slug}/help`);
   assert.notEqual(help.body.error, 'Page not found', 'with Patrol on, the help page answers for itself');
 });

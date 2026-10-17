@@ -30,6 +30,7 @@ const password = PWR.schema;
 const UN = require('../lib/usernames');
 const username = z.string().trim().toLowerCase().regex(UN.PATTERN, UN.RULE);
 const MANAGERS = ['owner', 'manager'];
+const NEEDS_EMAIL = [...MANAGERS, 'area']; // security notices and getting back in
 
 // A real bcrypt hash of a throwaway string, compared against when the user is unknown so that
 // response time does not reveal whether a username or email exists.
@@ -440,7 +441,7 @@ router.post(
       username: username.optional(),
       email: z.string().trim().email().max(255).optional().or(z.literal('').transform(() => undefined)),
       password,
-      role: z.enum(['manager', 'staff', 'patrol', 'instructor', 'counter']),
+      role: z.enum(['manager', 'staff', 'patrol', 'instructor', 'counter', 'area']),
       person_id: z.coerce.number().int().positive().optional(),
       staff_id: z.coerce.number().int().positive().optional(),
       temporary: z.boolean().default(false), // they must choose their own password when they first sign in
@@ -452,7 +453,7 @@ router.post(
     const { email, password: pw, role, person_id, staff_id, temporary } = req.body;
     if (role === 'manager' && req.auth.role !== 'owner') throw forbidden('Only the owner can create managers');
     if (role === 'manager') stepUpCheck(req, 'add a manager');
-    if (MANAGERS.includes(role) && !email) throw bad('Managers need an email, for security notices and getting back into their account');
+    if (NEEDS_EMAIL.includes(role) && !email) throw bad('Managers and ski area logins need an email, for security notices and getting back into their account');
     let personId = person_id ?? null;
     let named = null;
     if (staff_id) {
@@ -508,7 +509,7 @@ router.patch(
   validate(
     z.object({
       active: z.boolean().optional(),
-      role: z.enum(['manager', 'staff', 'patrol', 'instructor', 'counter']).optional(),
+      role: z.enum(['manager', 'staff', 'patrol', 'instructor', 'counter', 'area']).optional(),
       staff_id: z.number().int().positive().nullable().optional(),
       username: username.optional(),
       email: z.string().trim().email().max(255).nullable().optional().or(z.literal('').transform(() => null)),
@@ -521,7 +522,7 @@ router.patch(
     const cur = await one(pool, 'SELECT email FROM users WHERE id = ?', [target.id]);
     const nextRole = req.body.role || target.role;
     const nextEmail = req.body.email === undefined ? cur.email : req.body.email;
-    if (MANAGERS.includes(nextRole) && !nextEmail) throw bad('Managers need an email, for security notices and getting back into their account');
+    if (NEEDS_EMAIL.includes(nextRole) && !nextEmail) throw bad('Managers and ski area logins need an email, for security notices and getting back into their account');
     if (target.id === req.auth.userId && (req.body.active === false || req.body.role)) throw forbidden('You cannot deactivate or re-role your own login');
     if (req.body.role === 'manager' && req.auth.role !== 'owner') throw forbidden('Only the owner can create managers');
     const set = setClause({ ...req.body, active: req.body.active === undefined ? undefined : req.body.active ? 1 : 0 }, ['active', 'role', 'staff_id', 'username', 'email', 'access_ends_on']);

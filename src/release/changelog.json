@@ -1,6 +1,48 @@
 {
   "releases": [
     {
+      "version": "2026.10.18",
+      "date": "2026-10-17",
+      "title": "Patrol on its own",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "A Patrol only plan, for a ski patrol that signs up on its own: Patrol and Documents, $149 a month or $1,500 a year. It is on the website's Pricing page, and the Ski patrol page and Contact form take patrol sign-ups."
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [],
+          "text": "Runs and lifts in Patrol settings: a patrol without the Lifts and trails app keeps its own list, which cases, trail checks and sweep routes point at.",
+          "help": "patrol-only"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [],
+          "text": "Import the patrol roster from a spreadsheet (Team, Import from a spreadsheet). People already on the roster are skipped, and leaders and directors are set by hand.",
+          "help": "patrol-only"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": [],
+          "text": "A free read-only login for the ski area (Account, Logins, role Ski area): the patrol's day in numbers and every approved report, nothing else. It uses two-step sign-in and every report it opens is recorded.",
+          "help": "area-summary"
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "On the Patrol only plan, signing in opens Patrol, and the menu shows only what a patrol uses."
+        }
+      ]
+    },
+    {
       "version": "2026.10.17",
       "date": "2026-10-17",
       "title": "Passkeys and tiered sign-in",

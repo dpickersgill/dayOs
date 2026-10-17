@@ -4,7 +4,9 @@ import { signInSection } from './security.js';
 import { brandPanel } from './shopbrand.js';
 import { h, clear, ctx, isManager, table, state, input, select, field, button, toast, formDialog, confirmDialog, val, num, label, empty, errorBox, toCents, centsToInput } from '../ui.js';
 
-const ROLES = ['manager', 'staff', 'counter', 'instructor', 'patrol'];
+const ROLES = ['manager', 'staff', 'counter', 'instructor', 'patrol', 'area'];
+// The ski area's free read-only login: the patrol summary and approved reports only.
+const roleName = (r) => (r === 'area' ? 'Ski area (read-only)' : label(r));
 
 export async function render(root) {
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Account')));
@@ -64,7 +66,7 @@ async function drawLogins(box) {
     users.length ? table([
       { head: 'Username', cell: (u) => [h('strong', null, u.username || ''), u.must_change_password ? h('small', { class: 'muted' }, ' (temporary password)') : null] },
       { head: 'Email', cell: (u) => u.email || h('span', { class: 'muted' }, 'None') },
-      { head: 'Role', cell: (u) => label(u.role) },
+      { head: 'Role', cell: (u) => roleName(u.role) },
       { head: 'Staff record', cell: (u) => (u.staff_id ? staffName.get(u.staff_id) || `#${u.staff_id}` : h('span', { class: 'muted' }, 'Not linked')) },
       { head: 'Status', cell: (u) => state(u.active ? 'Active' : 'Deactivated', u.active ? 'good' : 'neutral') },
       { head: 'Two-step', cell: (u) => (u.mfa_enabled ? state(Number(u.passkeys) ? (u.app_enabled ? 'Passkey and app' : 'Passkey') : 'App', 'good') : h('span', { class: 'muted' }, 'Off')) },
@@ -84,13 +86,13 @@ async function drawLogins(box) {
 function roleOptions(isOwner) { return (isOwner ? ROLES : ROLES.filter((r) => r !== 'manager')); }
 
 const who = (u) => u.username || u.email;
-const needsEmail = (role) => ['owner', 'manager'].includes(role);
+const needsEmail = (role) => ['owner', 'manager', 'area'].includes(role);
 
 /** A new login: a username (filled in from the staff member's name), an email if they have one (managers must). */
 function addLogin(staff, isOwner, done) {
   const uname = input({ name: 'username', required: true, autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', maxlength: 40 });
   const email = input({ name: 'email', type: 'email', autocomplete: 'off' });
-  const role = select(roleOptions(isOwner).map((r) => [r, label(r)]), 'staff', { name: 'role' });
+  const role = select(roleOptions(isOwner).map((r) => [r, roleName(r)]), 'staff', { name: 'role' });
   const staffSel = select([['', 'Not linked'], ...staff.map((s) => [s.id, `${s.first_name} ${s.last_name}`])], '', { name: 'staff_id' });
   const emailHint = h('span', { class: 'hint' });
   let typed = false;
@@ -99,7 +101,7 @@ function addLogin(staff, isOwner, done) {
     if (typed) return;
     try { uname.value = (await get(`/users/suggest-username?staff_id=${staffSel.value || ''}&email=${encodeURIComponent(email.value.trim())}`)).username; } catch (_) { /* leave it */ }
   };
-  const syncHint = () => { emailHint.textContent = needsEmail(role.value) ? 'Required for managers.' : 'Optional. They can sign in with either.'; };
+  const syncHint = () => { emailHint.textContent = role.value === 'area' ? 'Required. A ski area login sees the patrol summary and approved reports only, uses two-step sign-in, and is free.' : needsEmail(role.value) ? 'Required for managers.' : 'Optional. They can sign in with either.'; };
   staffSel.addEventListener('change', suggest); email.addEventListener('change', suggest); role.addEventListener('change', syncHint);
   syncHint();
   const f = h('div', { class: 'form' },
@@ -110,7 +112,7 @@ function addLogin(staff, isOwner, done) {
     field('Temporary password', input({ name: 'password', type: 'text', required: true, minlength: 12, autocomplete: 'off' }), 'At least 12 characters. Tell them in person or by phone.'),
     h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name: 'temporary', checked: true }), ' They choose their own password when they first sign in'));
   formDialog('Add a login', f, async (fd) => {
-    if (needsEmail(val(fd, 'role')) && !val(fd, 'email')) throw new Error('Managers need an email');
+    if (needsEmail(val(fd, 'role')) && !val(fd, 'email')) throw new Error(val(fd, 'role') === 'area' ? 'A ski area login needs an email' : 'Managers need an email');
     const r = await post('/users', { username: val(fd, 'username') || undefined, email: val(fd, 'email') || undefined, password: fd.get('password'), role: val(fd, 'role'), staff_id: num(fd, 'staff_id') || undefined, temporary: Boolean(fd.get('temporary')) });
     toast(`Login created. They sign in as ${r.username}`);
     await done();
@@ -156,7 +158,7 @@ function linkStaff(u, staff, done) {
 }
 
 function changeRole(u, isOwner, done) {
-  formDialog(`Role for ${who(u)}`, h('div', { class: 'form' }, field('Role', select(roleOptions(isOwner).map((r) => [r, label(r)]), u.role, { name: 'role' }))), async (fd) => {
+  formDialog(`Role for ${who(u)}`, h('div', { class: 'form' }, field('Role', select(roleOptions(isOwner).map((r) => [r, roleName(r)]), u.role, { name: 'role' }))), async (fd) => {
     await patch(`/users/${u.id}`, { role: val(fd, 'role') });
     toast('Role changed. It applies right away');
     await done();

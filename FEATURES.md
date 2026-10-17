@@ -517,6 +517,15 @@ Platform console, **Demos**: everyone who started a demo, newest first. Tiles sh
 - **Cash refunds name a drawer,** so drawer counts include them. Old-style `/orders` sales record tax.
 - **The daily report counts sales on the sale day and refunds on the refund day,** so a past day's figures never change.
 
+### Patrol on its own (2026.10.18)
+
+- **Patrol only plan** (`patrol-only`: Patrol and Documents, $149 a month, $1,500 a year), seeded once on existing installs; on the website's Pricing page.
+- **Runs and lifts in Patrol settings**: with Lifts and trails off, a patrol may still add, rename and remove lifts and trails (`/schedule/lifts`, `/schedule/trails`); the rest of that app stays off.
+- **Roster import** (`POST /patrol/team/import`, CSV in the Team page): up to 300 rows; existing people (same email or name) and leader or director rows are skipped and listed.
+- **Ski area read-only login** (role `area`, free, email required): only `/area/summary`, `/area/reports` and an approved report's frozen copy (`/area/reports/:id`, audit `area_view`), plus its own account; two-step required in production; everything else is refused.
+- **Patrol-only menu**: signing in opens Patrol; Today, Customers, Waivers and My shifts are hidden.
+- **Website**: Contact takes a "Patrol only" sign-up (lead kind `patrol`); the Ski patrol page explains patrol-only and the free ski area login.
+
 ### Security
 
 - **Tiered sign-in (2026.10.17):** passkeys (WebAuthn, `@simplewebauthn/server`) for sign-in, as the second step and for the second check; owners, managers, patrol leads and (after two weeks, owner can turn off) patrollers must have a passkey or an app; crew use a password or a PIN on an enrolled terminal; a new device gets an email alert and, without two-step, an emailed code; Account lists sessions and devices; season end stops seasonal logins; the console's operators sign in with a passkey only once they have one and open a mountain with a reason for up to 8 hours (`src/lib/passkeys.js`, `src/lib/stepup.js`, `src/routes/security.js`, `db/zerotrust.sql`).

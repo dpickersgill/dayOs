@@ -193,6 +193,7 @@ function createApp() {
   api.use(require('./lib/billing').gate); // a lapsed subscription: read only, except patrol, the time clock and billing
   api.use(require('./routes/billing').router);
   api.use('/whats-new', whatsNew);
+  api.use('/area', require('./routes/areaview')); // the ski area's read-only patrol view
   api.use('/demo-tours', rateLimit({ windowMs: 60_000, max: 120 }), demoTours.router);
   // Per person, not per address: a mountain's staff usually share one internet address. Reads (the polling) are not counted.
   const inboxLimit = rateLimit({ windowMs: 60_000, max: Number(process.env.INBOX_RATE_LIMIT) || 120, message: 'Too many messages, slow down', keyOf: (req) => `${req.auth.tenantId}:${req.auth.userId}` });

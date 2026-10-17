@@ -7,13 +7,13 @@ import { icon } from './icons.js';
 const GROUPS = [
   ['Front desk', 'front', ['sell', 'gate', 'shop', 'rentals', 'people', 'waivers']],
   ['Mountain', 'mountain', ['conditions', 'park', 'assets']],
-  ['Safety', 'safety', ['patrol']],
+  ['Safety', 'safety', ['patrol', 'area']],
   ['Programs', 'programs', ['school', 'programs', 'availability']],
   ['Office', 'office', ['catalog', 'money', 'workforce', 'messages', 'documents']],
 ];
 export const GROUP_OF = Object.fromEntries(GROUPS.flatMap(([name, id, keys]) => keys.map((k) => [k, { id, name }])));
 const PERSONAL = ['myshifts', 'settings', 'billing', 'help'];
-const PHONE_FIRST = ['dashboard', 'sell', 'gate', 'patrol', 'school', 'conditions', 'myshifts'];
+const PHONE_FIRST = ['dashboard', 'sell', 'gate', 'patrol', 'area', 'school', 'conditions', 'myshifts'];
 // Words people might type that are not in the page's name.
 const ALSO = {
   dashboard: 'home overview numbers today', sell: 'ticket pos register checkout basket', gate: 'scan lift ticket scanner check in',
@@ -100,7 +100,7 @@ export function buildFrame({ views, main, signOut }) {
   // One account button replaces four stacked rows: it opens My shifts, Account, Help and Sign out.
   const whoMenu = h('div', { class: 'who-menu', id: 'who-menu', hidden: true }, h('nav', { class: 'nav nav-personal', 'aria-label': 'Your pages' }, h('div', { class: 'nav-group' }, personal.map((k) => link(k)))), out, whoVersion());
   const whoBtn = h('button', { type: 'button', class: 'who', 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-controls': 'who-menu', title: ctx.me.login_name || ctx.me.email },
-    h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(ctx.me.username || ctx.me.email)), h('span', { class: 'who-text' }, h('b', null, ctx.me.login_name || ctx.me.email), h('span', null, label(ctx.me.role))), icon('chevron', 14));
+    h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(ctx.me.username || ctx.me.email)), h('span', { class: 'who-text' }, h('b', null, ctx.me.login_name || ctx.me.email), h('span', null, ctx.me.role === 'area' ? 'Ski area (read-only)' : label(ctx.me.role))), icon('chevron', 14));
   const setWho = (open) => { whoMenu.hidden = !open; whoBtn.setAttribute('aria-expanded', String(open)); };
   whoBtn.addEventListener('click', (e) => { e.stopPropagation(); setWho(whoMenu.hidden); });
   document.addEventListener('click', (e) => { if (!whoMenu.hidden && !whoMenu.contains(e.target)) setWho(false); });

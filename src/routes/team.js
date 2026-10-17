@@ -110,6 +110,47 @@ router.post('/team', patrol, needs('manage_team'), validate(z.object({ staff_id:
   res.status(201).json({ staff_id: staffId, access_level: access });
 });
 
+/**
+ * Bring a roster in from a spreadsheet (a patrol moving to DAY/OS from paper or another system). Each row is a new person
+ * on the roster. Someone already on it (the same email, or the same first and last name) is skipped and listed, and so is
+ * a row that would make someone a leader or director: those are set one by one, by someone allowed to. Up to 300 rows.
+ */
+const IMPORT_LEVELS = ['candidate', 'patroller', 'senior'];
+const CERTS = ['none', 'oec', 'emr', 'emt', 'aemt', 'paramedic', 'rn', 'md'];
+router.post('/team/import', patrol, needs('manage_team'), validate(z.object({ rows: z.array(z.object({
+  first_name: z.string().trim().min(1).max(100), last_name: z.string().trim().min(1).max(100),
+  email: z.string().trim().max(255).optional().nullable(), phone: z.string().trim().max(40).optional().nullable(),
+  level: z.string().trim().toLowerCase().optional().nullable(), cert_level: z.string().trim().toLowerCase().optional().nullable(),
+  callsign: z.string().trim().max(30).optional().nullable(), patrol_number: z.string().trim().max(30).optional().nullable(),
+})).min(1).max(300) })), async (req, res) => {
+  const t = req.auth.tenantId;
+  const on = await rows(pool, `SELECT LOWER(p.email) AS email, LOWER(CONCAT(p.first_name, ' ', p.last_name)) AS name FROM patrol_members m
+    JOIN staff s ON s.tenant_id = m.tenant_id AND s.id = m.staff_id JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE m.tenant_id = ?`, [t]);
+  const emails = new Set(on.map((r) => r.email).filter(Boolean));
+  const names = new Set(on.map((r) => r.name));
+  const skipped = [];
+  let added = 0;
+  for (const [i, r] of req.body.rows.entries()) {
+    const email = r.email && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(r.email) ? r.email.toLowerCase() : null;
+    const name = `${r.first_name} ${r.last_name}`.toLowerCase();
+    const level = r.level ? r.level : 'patroller';
+    const cert = r.cert_level && CERTS.includes(r.cert_level) ? r.cert_level : null;
+    if ((email && emails.has(email)) || names.has(name)) { skipped.push({ row: i + 1, name: `${r.first_name} ${r.last_name}`, why: 'Already on the roster' }); continue; }
+    if (!IMPORT_LEVELS.includes(level)) { skipped.push({ row: i + 1, name: `${r.first_name} ${r.last_name}`, why: `Level "${r.level}" is set by hand (use candidate, patroller or senior here)` }); continue; }
+    await tx(async (conn) => {
+      const [p] = await conn.query('INSERT INTO people (tenant_id, first_name, last_name, email, phone) VALUES (?, ?, ?, ?, ?)', [t, r.first_name, r.last_name, email, r.phone || null]);
+      const [st] = await conn.query("INSERT INTO staff (tenant_id, person_id, status, in_workforce) VALUES (?, ?, 'active', 0)", [t, p.insertId]);
+      await conn.query('INSERT INTO patrol_members (tenant_id, staff_id, level, access_level, cert_level, callsign, patrol_number) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [t, st.insertId, level, PA.levelForRank(level), cert || 'oec', r.callsign || null, r.patrol_number || null]);
+    });
+    if (email) emails.add(email);
+    names.add(name);
+    added += 1;
+  }
+  await audit(pool, req, 'import_roster', 'patrol_members', null, { added, skipped: skipped.length });
+  res.json({ added, skipped });
+});
+
 router.patch('/team/:staffId', patrol, needs('manage_team'), validate(partialOf(memberFields).extend({
   first_name: personFields.first_name.optional(), last_name: personFields.last_name.optional(), email: z.string().trim().email().max(255).nullable().optional().or(z.literal('').transform(() => null)), phone: z.string().trim().max(40).nullable().optional(),
   on_staff_list: z.boolean().optional(),

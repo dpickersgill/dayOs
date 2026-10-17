@@ -42,7 +42,7 @@ export async function drawTeam(box, { canLead }) {
   }
   clear(box).append(h('div', { class: 'stack' },
     h('div', { class: 'spread' }, h('p', { class: 'muted' }, 'Everyone on patrol is on the staff list too, as an employee or a volunteer. Turn patrol on from their staff page, or add someone new here.'),
-      h('div', { class: 'row' }, button('Days patrolled', () => daysDialog(), { small: true }), mgr ? button('Add to roster', () => addMemberDialog(data, again), { kind: 'primary' }) : null)),
+      h('div', { class: 'row' }, button('Days patrolled', () => daysDialog(), { small: true }), mgr ? button('Import from a spreadsheet', () => importDialog(again), { small: true }) : null, mgr ? button('Add to roster', () => addMemberDialog(data, again), { kind: 'primary' }) : null)),
     data.length ? table(cols, data) : empty(mgr ? 'No one is on the patrol roster yet. Add your patrollers, volunteers included.' : 'The patrol roster is empty.')));
 }
 
@@ -283,4 +283,58 @@ function trainingDialog(roster, { canLead, staffId }, again) {
     field('Kind', select(TRAINING_KINDS, 'other', { name: 'kind' })), field('Hours', input({ name: 'hours', type: 'number', step: '0.25', min: 0, max: 200, required: true })),
     h('div', { class: 'wide' }, field('Notes', input({ name: 'notes', maxlength: 255 })))),
   async (fd) => { await post('/patrol/training', compact({ staff_id: canLead ? num(fd, 'staff_id') : null, completed_on: val(fd, 'completed_on'), title: val(fd, 'title'), kind: val(fd, 'kind'), hours: num(fd, 'hours'), notes: val(fd, 'notes') })); toast('Training logged'); await again(); });
+}
+
+// ---------------------------------------------------------------- roster import
+/** Splits CSV text into rows of cells (quoted cells, commas and line breaks inside quotes). */
+export function parseCsv(text) {
+  const out = []; let row = []; let cell = ''; let q = false;
+  const s = String(text).replace(/^\uFEFF/, '');
+  for (let i = 0; i < s.length; i += 1) {
+    const c = s[i];
+    if (q) { if (c === '"' && s[i + 1] === '"') { cell += '"'; i += 1; } else if (c === '"') q = false; else cell += c; continue; }
+    if (c === '"') q = true;
+    else if (c === ',') { row.push(cell); cell = ''; } else if (c === '\n' || c === '\r') { if (c === '\r' && s[i + 1] === '\n') i += 1; row.push(cell); out.push(row); row = []; cell = ''; } else cell += c;
+  }
+  if (cell !== '' || row.length) { row.push(cell); out.push(row); }
+  return out.filter((r) => r.some((x) => x.trim() !== ''));
+}
+
+// Column headings people use, mapped to the roster's fields.
+const HEADINGS = { first_name: /^first/i, last_name: /^(last|surname)/i, email: /mail/i, phone: /(phone|mobile|cell)/i, level: /^(level|rank)/i, cert_level: /cert/i, callsign: /call ?sign/i, patrol_number: /(number|nsp|id)$/i };
+
+/** Reads a spreadsheet saved as CSV into roster rows: { rows, missing } (missing = required columns not found). */
+export function rosterFromCsv(text) {
+  const [head, ...body] = parseCsv(text);
+  if (!head) return { rows: [], missing: ['first name', 'last name'] };
+  const col = {};
+  for (const [key, re] of Object.entries(HEADINGS)) { const i = head.findIndex((x) => re.test(x.trim())); if (i >= 0 && !Object.values(col).includes(i)) col[key] = i; }
+  const missing = ['first_name', 'last_name'].filter((k) => col[k] === undefined).map((k) => k.replace('_', ' '));
+  const rows = missing.length ? [] : body.map((r) => Object.fromEntries(Object.entries(col).map(([k, i]) => [k, (r[i] || '').trim() || null]))).filter((r) => r.first_name && r.last_name);
+  return { rows, missing };
+}
+
+function importDialog(done) {
+  const file = h('input', { type: 'file', accept: '.csv,text/csv', name: 'file' });
+  const preview = h('div', { class: 'stack tight' });
+  let rows = [];
+  file.addEventListener('change', async () => {
+    clear(preview); rows = [];
+    const f = file.files && file.files[0];
+    if (!f) return;
+    const r = rosterFromCsv(await f.text());
+    if (r.missing.length) { preview.append(h('p', { class: 'error' }, `This file has no ${r.missing.join(' or ')} column. The first row must name the columns.`)); return; }
+    rows = r.rows.slice(0, 300);
+    preview.append(h('p', null, `${rows.length} ${rows.length === 1 ? 'person' : 'people'} found${r.rows.length > 300 ? ' (the first 300 are imported)' : ''}. For example: ${rows.slice(0, 3).map((x) => `${x.first_name} ${x.last_name}`).join(', ')}.`));
+  });
+  formDialog('Import the roster from a spreadsheet', h('div', { class: 'stack' },
+    h('p', null, 'Save the spreadsheet as CSV. The first row names the columns: First name and Last name are needed; Email, Phone, Level (candidate, patroller or senior), Certification (OEC, EMT and so on), Callsign and Patrol number are used when present.'),
+    h('p', { class: 'muted small' }, 'Anyone already on the roster is skipped. Leaders and directors are set one by one afterwards, because they control access.'),
+    field('CSV file', file), preview), async () => {
+    if (!rows.length) throw new Error('Choose a CSV file with at least one person');
+    const out = await post('/patrol/team/import', { rows });
+    toast(`${out.added} added to the roster${out.skipped.length ? `, ${out.skipped.length} skipped` : ''}`);
+    if (out.skipped.length) dialog('Skipped rows', h('ul', { class: 'plain stack tight' }, ...out.skipped.map((x) => h('li', null, h('b', null, `Line ${x.row + 1}, ${x.name}: `), x.why))));
+    await done();
+  }, { submitText: 'Import' });
 }
