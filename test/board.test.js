@@ -51,13 +51,14 @@ test('each role gets its own starting tiles, and only ones it may see', async ()
   const mgr = await api('GET', '/board', { token: T.manager });
   assert.equal(mgr.status, 200, JSON.stringify(mgr.body));
   assert.equal(mgr.body.layout.source, 'default');
-  for (const k of ['lifts', 'sales', 'staffing', 'notes']) assert.ok(keys(mgr).includes(k), k);
+  for (const k of ['morning', 'sales', 'staffing', 'notes']) assert.ok(keys(mgr).includes(k), k);
+  assert.equal(keys(mgr)[0], 'morning', 'the morning board leads');
   const counter = await api('GET', '/board', { token: T.counter });
   assert.ok(keys(counter).includes('rentals') && keys(counter).includes('lessons'));
   assert.ok(!keys(counter).includes('sales') && !keys(counter).includes('staffing'), 'money and staffing are for managers');
   assert.equal(counter.body.data.sales, undefined);
   const patrol = await api('GET', '/board', { token: T.patrol });
-  assert.equal(keys(patrol)[0], 'patrol');
+  assert.deepEqual(keys(patrol).slice(0, 2), ['morning', 'patrol']);
   assert.ok(!patrol.body.catalog.some((c) => c.key === 'sales'));
 });
 
@@ -66,10 +67,34 @@ test('alerts: a failed inspection and a wind hold lead the band', async () => {
   assert.equal(r.body.alerts[0].level, 'stop');
   assert.match(r.body.alerts[0].text, /Valley Double failed its inspection/);
   assert.ok(r.body.alerts.some((a) => a.level === 'warn' && /Ridge Triple is on a wind hold/.test(a.text)));
-  const lifts = r.body.data.lifts.lifts;
+  const lifts = r.body.data.morning.lifts;
   assert.equal(lifts.find((l) => l.name === 'Summit Quad').check, 'pass');
   assert.equal(lifts.find((l) => l.name === 'Valley Double').check, 'fail');
-  assert.deepEqual((await api('GET', '/board', { token: B.token })).body.data.lifts.lifts, [], 'another mountain sees none of them');
+  assert.deepEqual((await api('GET', '/board', { token: B.token })).body.data.morning.lifts, [], 'another mountain sees none of them');
+});
+
+test('the morning board: why each lift is or is not open, patrol opening, service due, and the three numbers', async () => {
+  const [[ridge]] = await pool.query("SELECT id FROM lifts WHERE tenant_id = ? AND name = 'Ridge Triple'", [A.id]);
+  await pool.query("INSERT INTO lift_downtime (tenant_id, lift_id, started_at, reason, note) VALUES (?, ?, ?, 'wind', 'Gusts over 35 at the top terminal')", [A.id, ridge.id, `${today} 09:10:00`]);
+  await pool.query("UPDATE lift_checks SET note = 'North stop slow to trip' WHERE tenant_id = ? AND result = 'fail'", [A.id]);
+  const [run] = await pool.query("INSERT INTO trails (tenant_id, name, status, closure_reason) VALUES (?, 'Upper Ridge', 'hold', 'Rope line down at the cat track')", [A.id]);
+  await pool.query("INSERT INTO trails (tenant_id, name, status) VALUES (?, 'Lower Ridge', 'open')", [A.id]);
+  const [[owner]] = await pool.query('SELECT id FROM users WHERE tenant_id = ? ORDER BY id LIMIT 1', [A.id]);
+  await pool.query("INSERT INTO patrol_opening_checks (tenant_id, on_date, trail_id, checked_at, by_user, decision, reason) VALUES (?, ?, ?, ?, ?, 'hold', 'Rope line down')", [A.id, today, run.insertId, `${today} 07:30:00`, owner.id]);
+  await pool.query("INSERT INTO pm_tasks (tenant_id, name, lift_id, interval_days, last_done_on) VALUES (?, 'Gearbox oil', ?, 30, DATE_SUB(?, INTERVAL 40 DAY))", [A.id, ridge.id, today]);
+  const m = (await api('GET', '/board', { token: T.manager })).body.data.morning;
+  const lift = (n) => m.lifts.find((l) => l.name === n);
+  assert.match(lift('Valley Double').detail, /Inspection failed: North stop slow to trip/);
+  assert.match(lift('Ridge Triple').detail, /^Wind hold since 09:10: Gusts over 35/);
+  assert.match(lift('Summit Quad').detail, /^Passed inspection at \d\d:\d\d/);
+  assert.equal(m.patrol.checked, 1); assert.equal(m.patrol.trails, 2); assert.equal(m.patrol.on_duty, 0);
+  assert.deepEqual(m.patrol.holds, [{ name: 'Upper Ridge', reason: 'Rope line down at the cat track' }]);
+  const due = m.fleet.due.find((f) => f.task === 'Gearbox oil');
+  assert.ok(due && due.state === 'overdue' && due.name === 'Ridge Triple');
+  assert.equal(typeof m.counts.open_orders, 'number'); assert.equal(typeof m.counts.incidents, 'number'); assert.equal(typeof m.counts.unfilled, 'number');
+  const staff = (await api('GET', '/board', { token: T.staff })).body;
+  assert.equal(staff.layout.tiles[0], 'morning', 'staff see it too');
+  assert.ok(!JSON.stringify(staff.data.morning).includes('patient'), 'counts only, no patients');
 });
 
 test('a person can choose, reorder and reset their own tiles', async () => {

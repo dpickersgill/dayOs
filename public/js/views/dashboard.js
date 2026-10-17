@@ -99,7 +99,61 @@ const big = (n, text, sub) => h('div', { class: 'figure' }, h('strong', null, St
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many || `${one}s`}`;
 const LIFT = { open: ['Open', 'good'], hold: ['On hold', 'warn'], wind_hold: ['Wind hold', 'warn'], closed: ['Closed', 'neutral'] };
 
+// The morning board: one dark card with every lift and why, patrol's opening, grooming, machines due, and three numbers.
+const SHAPE = { good: '<circle cx="6" cy="6" r="5"/>', warn: '<rect x="1" y="1" width="10" height="10"/>', bad: '<path d="M6 0.5 L11.5 6 L6 11.5 L0.5 6 Z"/>', neutral: '<circle cx="6" cy="6" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/>' };
+function chip(text, kind) {
+  const c = h('span', { class: `mb-chip ${kind}` });
+  c.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" fill="currentColor">${SHAPE[kind] || SHAPE.neutral}</svg>`;
+  c.append(text);
+  return c;
+}
+const mbRow = (name, detail, chipEl) => h('div', { class: 'mb-row' }, h('div', null, h('div', { class: 'mb-n' }, name), detail ? h('div', { class: 'mb-d' }, detail) : null), chipEl || h('span'));
+const mbHead = (text, href) => h('div', { class: 'mb-t' }, href ? h('a', { href: `#/${href}` }, text) : text);
+function serviceWhen(f) {
+  if (f.hours_left !== null && f.hours_left !== undefined) return f.hours_left <= 0 ? `${f.task}: ${Math.abs(f.hours_left)} hours overdue` : `${f.task} due in ${f.hours_left} hours`;
+  if (f.miles_left !== null && f.miles_left !== undefined) return f.miles_left <= 0 ? `${f.task}: ${Math.abs(f.miles_left)} miles overdue` : `${f.task} due in ${f.miles_left} miles`;
+  return f.due_on ? `${f.task} ${f.state === 'overdue' ? 'overdue since' : 'due'} ${fmtDate(`${f.due_on}T12:00:00`)}` : f.task;
+}
+
 const TILES = {
+  morning: (d) => {
+    const LIFTCHIP = { open: ['Open', 'good'], hold: ['On hold', 'warn'], wind_hold: ['Wind hold', 'warn'], closed: ['Closed', 'neutral'] };
+    const liftCol = [mbHead('Lifts', 'conditions')];
+    if (!d.lifts.length) liftCol.push(mbRow('No lifts set up yet', null, null));
+    for (const l of d.lifts) {
+      const [t, k] = l.check === 'fail' ? ['Cannot open', 'bad'] : LIFTCHIP[l.status] || [label(l.status), 'neutral'];
+      liftCol.push(mbRow(l.name, l.detail, chip(t, k)));
+    }
+    const parts = [];
+    if (d.patrol) {
+      const p = d.patrol; const done = p.trails && p.checked >= p.trails;
+      parts.push(mbHead('Patrol', 'patrol'));
+      parts.push(mbRow(`${p.on_duty} on duty, ${p.checked} of ${p.trails} runs checked`,
+        p.holds.length ? `${p.holds.map((x) => `${x.name} on hold${x.reason ? `: ${x.reason}` : ''}`).join('; ')}` : (done ? 'Every run checked today' : null),
+        chip(p.holds.length ? `${p.holds.length} on hold` : done ? 'Checked' : p.checked ? 'Opening' : 'Not started', p.holds.length ? 'warn' : done ? 'good' : 'warn')));
+    }
+    const g = d.grooming; const planned = Object.values(g.plan || {}).reduce((a, b) => a + b, 0);
+    parts.push(mbHead('Grooming', 'conditions'));
+    if (planned) {
+      const left = (g.plan.planned || 0) + (g.plan.in_progress || 0);
+      parts.push(mbRow(`${g.plan.done || 0} of ${planned} trails groomed`, left ? `${left} still to do${g.plan.in_progress ? `, ${g.plan.in_progress} in progress` : ''}` : `${g.open} of ${g.total} trails open`, chip(left ? 'In progress' : 'Done', left ? 'warn' : 'good')));
+    } else parts.push(mbRow(`${g.open} of ${g.total} trails open`, 'No grooming plan for today', null));
+    if (d.fleet && (d.fleet.due.length || d.fleet.out_of_service)) {
+      parts.push(mbHead('Fleet and service', 'assets'));
+      for (const f of d.fleet.due) parts.push(mbRow(f.name, serviceWhen(f), chip(f.state === 'overdue' ? 'Overdue' : 'Service soon', f.state === 'overdue' ? 'bad' : 'warn')));
+      const more = d.fleet.due_count - d.fleet.due.length;
+      if (more > 0 || d.fleet.out_of_service) parts.push(mbRow([more > 0 ? `${more} more due for service` : null, d.fleet.out_of_service ? `${d.fleet.out_of_service} out of service` : null].filter(Boolean).join(', '), null, null));
+    }
+    const nums = [
+      d.counts.unfilled !== undefined ? [d.counts.unfilled, d.counts.unfilled === 1 ? 'shift still unfilled today' : 'shifts still unfilled today', 'workforce'] : null,
+      [d.counts.open_orders, d.counts.open_orders === 1 ? 'open work order' : 'open work orders', 'conditions'],
+      d.counts.incidents !== undefined ? [d.counts.incidents, d.counts.incidents === 1 ? 'incident open' : 'incidents open', 'patrol'] : null,
+    ].filter(Boolean);
+    return h('div', { class: 'mboard' },
+      h('div', { class: 'mb-h' }, h('b', null, 'Morning board'), h('span', null, d.as_of ? `As of ${fmtTime(String(d.as_of).replace(' ', 'T'))}` : '')),
+      h('div', { class: 'mb-s' }, h('div', { class: 'mb-col' }, ...liftCol), h('div', { class: 'mb-col' }, ...parts)),
+      h('div', { class: 'mb-foot', style: `grid-template-columns:repeat(${nums.length},1fr)` }, ...nums.map(([n, t, href]) => h('a', { href: `#/${href}` }, h('b', null, String(n)), h('span', null, t)))));
+  },
   lifts: (d) => {
     if (!d.lifts.length) return empty('No lifts set up yet.', link('Add lifts', 'conditions'));
     return h('ul', { class: 'bd-list' }, d.lifts.map((l) => {

@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "version": "2026.10.15",
+      "date": "2026-10-17",
+      "title": "The morning board on Today",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "conditions",
+          "who": null,
+          "text": "Today now opens with the morning board: every lift with why it is open, on hold or cannot open; patrollers on duty and runs checked, with any run on hold and why; tonight's grooming; machines and lifts due for service; and unfilled shifts, open work orders and open incidents. Press any heading or number to open that page. If you chose your own tiles before, add it with Customize.",
+          "help": "today"
+        }
+      ]
+    },
+    {
       "version": "2026.10.14",
       "date": "2026-10-16",
       "title": "Website search engine setup and a ski patrol page",

@@ -11,6 +11,7 @@ const { audit } = require('../lib/audit');
 const modules = require('../lib/modules');
 const { dailyReport } = require('../lib/daily');
 const patrolaccess = require('../lib/patrolaccess');
+const { pmStatus } = require('../lib/ops');
 
 const router = express.Router();
 const ROLES = ['owner', 'manager', 'staff', 'patrol', 'instructor', 'counter'];
@@ -18,6 +19,7 @@ const isMgr = (role) => role === 'owner' || role === 'manager';
 
 // who: null = everyone; a list = those roles (owners and managers always qualify); [] = managers only.
 const TILES = [
+  { key: 'morning', label: 'Morning board', module: 'conditions', who: null },
   { key: 'lifts', label: 'Lifts', module: 'conditions', who: null },
   { key: 'trails', label: 'Trails and grooming', module: 'conditions', who: null },
   { key: 'snow', label: 'Snow and weather', module: 'conditions', who: null },
@@ -34,11 +36,11 @@ const TILES = [
 const KEYS = TILES.map((t) => t.key);
 
 const BUILTIN = {
-  owner: ['lifts', 'trails', 'snow', 'sales', 'rentals', 'lessons', 'staffing', 'patrol', 'maintenance', 'certs', 'notes'],
+  owner: ['morning', 'snow', 'sales', 'rentals', 'lessons', 'staffing', 'patrol', 'maintenance', 'certs', 'notes'],
   counter: ['notes', 'rentals', 'lessons', 'gate', 'lifts', 'snow'],
   instructor: ['lessons', 'notes', 'snow', 'lifts'],
-  patrol: ['patrol', 'lifts', 'snow', 'notes'],
-  staff: ['lifts', 'trails', 'snow', 'notes'],
+  patrol: ['morning', 'patrol', 'snow', 'notes'],
+  staff: ['morning', 'snow', 'notes'],
 };
 BUILTIN.manager = BUILTIN.owner;
 
@@ -80,7 +82,64 @@ function dataFor(c) {
   return get;
 }
 
+const hhmm = (local) => String(local || '').slice(11, 16);
+const REASON = { wind: 'wind', mechanical: 'a mechanical problem', electrical: 'an electrical problem', weather: 'weather', rescue: 'a rescue', staffing: 'staffing', inspection: 'inspection', scheduled: 'scheduled work', other: 'another reason' };
+
 const TILE_DATA = {
+  /**
+   * The morning board: the whole mountain on one card, as the website shows it. Each lift with why it is or isn't
+   * open, patrol's opening (who is on duty, runs checked, holds), tonight's grooming, machines due for service, and
+   * the three numbers that need someone: unfilled shifts, open work orders, open incidents. Only the apps the
+   * mountain has on; patrol is counts and run names only, never patients.
+   */
+  async morning(c, get) {
+    const on = new Set(await modules.enabledKeys(c.tenantId));
+    const [{ lifts }, trails] = await Promise.all([get('lifts'), get('trails')]);
+    const ids = lifts.map((l) => l.id);
+    const [checks, downs] = ids.length ? await Promise.all([
+      rows(pool, 'SELECT lift_id, result, checked_at, note FROM lift_checks WHERE tenant_id = ? AND check_date = ? ORDER BY checked_at, id', [c.tenantId, c.today]),
+      rows(pool, 'SELECT lift_id, started_at, reason, note FROM lift_downtime WHERE tenant_id = ? AND ended_at IS NULL ORDER BY started_at', [c.tenantId]),
+    ]) : [[], []];
+    const lastCheck = new Map(checks.map((k) => [Number(k.lift_id), k]));
+    const down = new Map(downs.map((d) => [Number(d.lift_id), d]));
+    const liftRows = lifts.map((l) => {
+      const k = lastCheck.get(l.id); const d = down.get(l.id);
+      let detail;
+      if (k && k.result === 'fail') detail = `Inspection failed${k.note ? `: ${k.note}` : ''}`;
+      else if (d && l.status !== 'open') detail = `${l.status === 'wind_hold' ? 'Wind hold' : 'Stopped'} since ${String(d.started_at).slice(11, 16)}${d.note ? `: ${d.note}` : d.reason ? `, ${REASON[d.reason] || d.reason}` : ''}`;
+      else if (k) detail = `Passed inspection at ${hhmm(localFromUtc(k.checked_at, c.tz))}`;
+      else detail = 'Not inspected yet today';
+      return { name: l.name, status: l.status, check: l.check, detail };
+    });
+    const out = { lifts: liftRows, grooming: { plan: trails.plan, groomed: trails.groomed, total: trails.total, open: trails.open } };
+    if (on.has('patrol')) {
+      const [duty, checked, holds] = await Promise.all([
+        one(pool, 'SELECT COUNT(*) AS n FROM patrol_duty WHERE tenant_id = ? AND on_date = ? AND signed_out_at IS NULL', [c.tenantId, c.today]),
+        one(pool, 'SELECT COUNT(DISTINCT trail_id) AS n FROM patrol_opening_checks WHERE tenant_id = ? AND on_date = ?', [c.tenantId, c.today]),
+        rows(pool, "SELECT name, closure_reason FROM trails WHERE tenant_id = ? AND status = 'hold' ORDER BY name LIMIT 5", [c.tenantId]),
+      ]);
+      out.patrol = { on_duty: Number(duty.n), checked: Number(checked.n), trails: trails.total, holds: holds.map((x) => ({ name: x.name, reason: x.closure_reason })) };
+    }
+    // Machines and lifts due for service (by days, hours or miles), the most pressing first
+    const tasks = await rows(pool, `SELECT t.*, a.name AS asset, a.asset_tag, a.hours AS asset_hours, a.miles AS asset_miles, a.status AS asset_status, l.name AS lift
+      FROM pm_tasks t LEFT JOIN ops_assets a ON a.tenant_id = t.tenant_id AND a.id = t.asset_id LEFT JOIN lifts l ON l.tenant_id = t.tenant_id AND l.id = t.lift_id
+      WHERE t.tenant_id = ? AND t.active = 1 AND (a.id IS NULL OR a.status <> 'retired')`, [c.tenantId]);
+    const num = (v) => (v === null || v === undefined ? null : Number(v));
+    const due = tasks.map((t) => ({ t, s: pmStatus(t, t.asset_id ? { hours: num(t.asset_hours), miles: num(t.asset_miles) } : null, c.today) }))
+      .filter((x) => x.s.state === 'overdue' || x.s.state === 'soon')
+      .sort((x, y) => (x.s.state === y.s.state ? 0 : x.s.state === 'overdue' ? -1 : 1));
+    const downAssets = on.has('assets') ? await one(pool, "SELECT COUNT(*) AS n FROM ops_assets WHERE tenant_id = ? AND status = 'out_of_service'", [c.tenantId]) : { n: 0 };
+    out.fleet = {
+      due: due.slice(0, 3).map(({ t, s }) => ({ name: t.asset ? `${t.asset}${t.asset_tag ? `, ${t.asset_tag}` : ''}` : t.lift || t.name, task: t.name, state: s.state, due_on: s.due_on, hours_left: s.hours_left, miles_left: s.miles_left })),
+      due_count: due.length, out_of_service: Number(downAssets.n),
+    };
+    const m = await get('maintenance');
+    out.counts = { open_orders: m.open, urgent_orders: m.urgent };
+    if (on.has('workforce')) out.counts.unfilled = (await one(pool, "SELECT COUNT(*) AS n FROM shifts WHERE tenant_id = ? AND status <> 'cancelled' AND staff_id IS NULL AND DATE(starts_at) = ?", [c.tenantId, c.date])).n * 1;
+    if (on.has('patrol')) out.counts.incidents = (await one(pool, "SELECT COUNT(*) AS n FROM incidents WHERE tenant_id = ? AND status = 'open'", [c.tenantId])).n * 1;
+    out.as_of = c.now;
+    return out;
+  },
   async lifts(c) {
     const lifts = await rows(pool, 'SELECT id, name, status FROM lifts WHERE tenant_id = ? ORDER BY name', [c.tenantId]);
     const checks = await rows(pool, 'SELECT lift_id, result FROM lift_checks WHERE tenant_id = ? AND check_date = ? ORDER BY checked_at, id', [c.tenantId, c.today]);
