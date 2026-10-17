@@ -2330,12 +2330,14 @@ test('patrol: the case page guides the next step, and keeps the reader\'s place 
 test('patrol care: the wristband and three views, assessment tools, CMS, entered in error, offline save, the arrest log, the draft narrative and versions', skip(), async () => {
   const o = T.owner;
   await closeOverlays();
-  const c = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${today}T10:05`, location: 'Lower Cascade', category: 'injury', severity: 'moderate', summary: 'Skier down, leg pain' } }));
+  // Yesterday, so the morning times are never "in the future" when the suite runs early in the day
+  const caseDay = new Date(Date.parse(`${today}T12:00:00Z`) - 86400000).toISOString().slice(0, 10);
+  const c = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${caseDay}T10:05`, location: 'Lower Cascade', category: 'injury', severity: 'moderate', summary: 'Skier down, leg pain' } }));
   const base = `/patrol/incidents/${c.id}`;
   const p = ok(await api('POST', `${base}/patients`, { token: o, body: { first_name: 'Cara', last_name: 'Care', age_years: 3, allergies: 'None', chief_complaint: 'Left leg pain' } }));
   const pb = `${base}/patients/${p.id}`;
-  ok(await api('POST', `${base}/events`, { token: o, body: { kind: 'on_scene', at: `${today}T10:12` } }));
-  const vit = ok(await api('POST', `${pb}/vitals`, { token: o, body: { pulse: 300, taken_at: `${today}T10:15` } }));
+  ok(await api('POST', `${base}/events`, { token: o, body: { kind: 'on_scene', at: `${caseDay}T10:12` } }));
+  const vit = ok(await api('POST', `${pb}/vitals`, { token: o, body: { pulse: 300, taken_at: `${caseDay}T10:15` } }));
   ok(await api('POST', `${pb}/injuries`, { token: o, body: { body_region: 'lower_leg', side: 'left', injury_type: 'fracture' } }));
   const get = async () => ok(await api('GET', base, { token: o }));
   const btn = (scope, t) => [...scope.querySelectorAll('button')].find((b) => b.textContent.trim() === t);

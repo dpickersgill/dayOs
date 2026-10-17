@@ -1,6 +1,25 @@
 {
   "releases": [
     {
+      "version": "2026.10.14",
+      "date": "2026-10-16",
+      "title": "Website search engine setup and a ski patrol page",
+      "notes": [
+        {
+          "kind": "improved",
+          "app": null,
+          "who": "platform",
+          "text": "The website is set up for search engines: titles and descriptions for what ski areas search for, one address per page, link previews, a sitemap, and structured data with your live prices and each page's questions. The app and console stay out of search results."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "A Ski patrol page on the website, for patrol directors, linked from the menu. Set GOOGLE_SITE_VERIFICATION to prove the website to Google Search Console."
+        }
+      ]
+    },
+    {
       "version": "2026.10.13",
       "date": "2026-10-16",
       "title": "The product website goes live",

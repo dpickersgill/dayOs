@@ -11,7 +11,8 @@ const stub = http.createServer((req, res) => {
 process.env.BOOTSTRAP_KEY = 'test-bootstrap-key';
 process.env.PLATFORM_RATE_LIMIT = '1000';
 process.env.SITE_CONTACT_LIMIT = '1000';
-process.env.SITE_HOSTS = 'www.site.test';
+process.env.SITE_HOSTS = 'www.site.test,site.test';
+process.env.GOOGLE_SITE_VERIFICATION = 'g-verify-123';
 process.env.SITE_CONTACT_EMAIL = 'sales@site.test';
 process.env.POSTMARK_SERVER_TOKEN = 'pm-test';
 process.env.MAIL_FROM = 'hello@site.test';
@@ -32,7 +33,7 @@ function onHost(path, host = 'www.site.test') {
   return new Promise((resolve, reject) => {
     const u = new URL(base);
     http.get({ hostname: u.hostname, port: u.port, path, headers: { host, accept: 'text/html' } }, (res) => {
-      let t = ''; res.on('data', (c) => { t += c; }); res.on('end', () => resolve({ status: res.statusCode, text: t, type: res.headers['content-type'] || '' }));
+      let t = ''; res.on('data', (c) => { t += c; }); res.on('end', () => resolve({ status: res.statusCode, text: t, type: res.headers['content-type'] || '', location: res.headers.location, robots: res.headers['x-robots-tag'] }));
     }).on('error', reject);
   });
 }
@@ -55,11 +56,12 @@ test.after(async () => { await new Promise((r) => server.close(r)); await new Pr
 
 test('every page is at /site, with its links kept under /site', async () => {
   assert.equal((await get('/site')).status, 301);
-  for (const p of ['/site/', '/site/product', '/site/pricing', '/site/security', '/site/contact', '/site/privacy', '/site/terms']) {
+  for (const p of ['/site/', '/site/product', '/site/ski-patrol', '/site/pricing', '/site/security', '/site/contact', '/site/privacy', '/site/terms']) {
     const r = await get(p);
     assert.equal(r.status, 200, p);
     assert.match(r.type, /text\/html/);
-    assert.ok(!r.text.includes('{{') && !r.text.includes('<!--HEADER') && !r.text.includes('<!--FOOTER'), `${p} has every token filled`);
+    assert.ok(!r.text.includes('{{') && !r.text.includes('<!--HEADER') && !r.text.includes('<!--FOOTER') && !r.text.includes('<!--HEAD'), `${p} has every token filled`);
+    assert.equal((r.text.match(/<h1[ >]/g) || []).length, 1, `${p} has one main heading`);
     assert.ok(r.text.includes('href="/site/pricing"'), `${p} links within /site`);
   }
   assert.equal((await get('/site/nope')).status, 404);
@@ -72,18 +74,51 @@ test('on the website address, the pages are at the top, with robots, a sitemap a
   assert.equal(home.status, 200);
   assert.ok(home.text.includes('Open the mountain from one screen.'));
   assert.ok(home.text.includes('href="/pricing"') && home.text.includes('href="/app"') && home.text.includes('href="/try"'));
-  assert.ok(home.text.includes('rel="canonical" href="http://www.site.test/"'));
+  assert.ok(home.text.includes('rel="canonical" href="https://www.site.test/"'));
+  assert.ok(home.text.includes('<meta name="robots" content="index, follow'));
+  assert.ok(home.text.includes('<meta name="google-site-verification" content="g-verify-123">'));
+  assert.ok(home.text.includes('og:image" content="https://www.site.test/site/img/share.png"') && home.text.includes('twitter:card'));
+  // the bare address and a trailing slash send people to the one address
+  const bare = await onHost('/pricing?x=1', 'site.test');
+  assert.equal(bare.status, 301); assert.equal(bare.location, 'https://www.site.test/pricing?x=1');
+  const slash = await onHost('/pricing/');
+  assert.equal(slash.status, 301); assert.equal(slash.location, '/pricing');
   assert.equal((await onHost('/pricing')).status, 200);
-  assert.equal((await onHost('/pricing/')).status, 200);
   const robots = await onHost('/robots.txt');
-  assert.match(robots.text, /Sitemap: http:\/\/www\.site\.test\/sitemap\.xml/);
+  assert.match(robots.text, /Sitemap: https:\/\/www\.site\.test\/sitemap\.xml/);
+  assert.match(robots.text, /Disallow: \/platform/);
   const map = await onHost('/sitemap.xml');
-  assert.ok(map.text.includes('<loc>http://www.site.test/security</loc>'));
+  assert.ok(map.text.includes('<loc>https://www.site.test/ski-patrol</loc>') && map.text.includes('<lastmod>'));
   const lost = await onHost('/no-such-page');
   assert.equal(lost.status, 404);
   assert.ok(lost.text.includes('isn\'t on the map'));
   assert.ok((await onHost('/app')).text.includes('/js/main.js'), 'the app is at /app on the website address');
   assert.equal((await onHost('/try')).status, 200, 'the demo page still works there');
+  assert.match((await onHost('/app')).robots, /noindex/, 'the app is kept out of search results');
+  assert.match(lost.robots, /noindex/);
+});
+
+test('search engines get one copy of each page, with structured data from the page itself', async () => {
+  // On the app's own address, the /site copies point to the website and are kept out of search results
+  const copy = await onHost('/site/pricing', 'app.site.test');
+  assert.equal(copy.status, 200);
+  assert.match(copy.robots, /noindex/);
+  assert.ok(copy.text.includes('rel="canonical" href="https://www.site.test/pricing"'));
+  const appRobots = await onHost('/robots.txt', 'app.site.test');
+  assert.match(appRobots.text, /Disallow: \/site/); assert.match(appRobots.text, /Disallow: \/platform/);
+  assert.match((await onHost('/', 'app.site.test')).robots, /noindex/, 'the sign-in page is not a search result');
+  // Structured data: the software with its live prices, breadcrumbs, and the page's own questions
+  const page = await onHost('/ski-patrol');
+  const ld = JSON.parse(page.text.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1]);
+  const types = ld['@graph'].map((g) => g['@type']);
+  for (const t of ['Organization', 'WebSite', 'WebPage', 'BreadcrumbList', 'FAQPage']) assert.ok(types.includes(t), t);
+  const faq = ld['@graph'].find((g) => g['@type'] === 'FAQPage');
+  assert.ok(faq.mainEntity.some((q) => q.name === 'Does it work for a volunteer patrol?'));
+  assert.ok(page.text.includes('<title>Ski Patrol Software'));
+  const pricing = await onHost('/pricing');
+  const app = JSON.parse(pricing.text.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1])['@graph'].find((g) => g['@type'] === 'SoftwareApplication');
+  assert.ok(app && app.offers.offers.length >= 1 && app.offers.priceCurrency === 'USD');
+  assert.match(pricing.text, /<title>Pricing: Ski Area Software from \$[\d,]+\/month/);
 });
 
 test('the Pricing page reads the active plans and add-ons set in the console', async () => {

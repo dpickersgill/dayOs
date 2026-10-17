@@ -17,7 +17,8 @@ const config = require('../config');
 const { rateLimit } = require('../middleware/rateLimit');
 
 const DIR = path.join(__dirname, '..', 'site');
-const PAGES = { '': 'index', product: 'product', pricing: 'pricing', security: 'security', contact: 'contact', privacy: 'privacy', terms: 'terms' };
+const PAGES = { '': 'index', product: 'product', 'ski-patrol': 'skipatrol', pricing: 'pricing', security: 'security', contact: 'contact', privacy: 'privacy', terms: 'terms' };
+const SEO = require('../lib/seo');
 const cache = new Map();
 
 const hostOf = (req) => String(req.get('host') || '').toLowerCase().replace(/:\d+$/, '');
@@ -29,7 +30,7 @@ function template(name) {
 }
 
 const LOGO = (bg, fg) => `<svg width="34" height="34" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="${bg}"/><path d="M3 25 L12 11 L17 18 L21 13 L29 25 Z" fill="${fg}"/></svg>`;
-const NAV = [['product', 'Product'], ['pricing', 'Pricing'], ['security', 'Security']];
+const NAV = [['product', 'Product'], ['ski-patrol', 'Ski patrol'], ['pricing', 'Pricing'], ['security', 'Security']];
 
 /** The top of every page: logo, Product, Pricing, Security, Try the demo, Sign in, Request a walkthrough. */
 function header(current) {
@@ -68,6 +69,7 @@ const FOOTER = `<footer class="sf">
         <ul>
           <li><a href="{{HOME}}">Home</a></li>
           <li><a href="{{SITE}}/product">Product</a></li>
+          <li><a href="{{SITE}}/ski-patrol">Ski patrol software</a></li>
           <li><a href="{{SITE}}/pricing">Pricing</a></li>
           <li><a href="{{SITE}}/security">Security</a></li>
         </ul>
@@ -87,59 +89,103 @@ const FOOTER = `<footer class="sf">
   </div>
 </footer>`;
 
-/** Fill in the page's links for where it is being served. */
-function render(req, name, slug) {
+/** The address search engines should treat as the page's own: the website's first address once it has one. */
+function canonicalOrigin(req) {
+  if (config.site.hosts.length) return `https://${config.site.hosts[0]}`;
+  return `${req.protocol}://${req.get('host')}/site`;
+}
+/** Served at /site on an address that is not the website, once the website has its own: a copy search engines skip. */
+const isCopy = (req) => config.site.hosts.length > 0 && !onSite(req);
+
+/** Fill in the page's head and links for where it is being served. */
+async function render(req, name, slug) {
   const site = onSite(req);
   const base = site ? '' : '/site';
   const origin = `${req.protocol}://${req.get('host')}`;
   const app = config.site.appUrl || (site ? '/app' : '');
-  const canonical = `${site ? origin : `${origin}/site`}${slug ? `/${slug}` : '/'}`;
-  return template(name)
-    .replace(/<!--HEADER:?([a-z]*)-->/, (_m, cur) => header(cur))
-    .replace('<!--FOOTER-->', FOOTER)
+  let html = template(name);
+  const plans = await loadPlans().catch(() => null);
+  const head = SEO.head({ slug: name === 'notfound' ? 'notfound' : slug, origin: canonicalOrigin(req), html, plans, verify: config.site.verify, noindex: isCopy(req) });
+  html = html.replace('<!--HEAD-->', head)
+    .replace(/<!--HEADER:?([a-z-]*)-->/, (_m, cur) => header(cur))
+    .replace('<!--FOOTER-->', FOOTER);
+  return html
     .replaceAll('{{HOME}}', `${base}/`)
     .replaceAll('{{SITE}}', base)
     .replaceAll('{{APP}}', app || '/')
     .replaceAll('{{TRY}}', `${config.site.appUrl}/try`)
-    .replaceAll('{{CANONICAL}}', canonical)
     .replaceAll('{{ROOT}}', origin)
-    .replaceAll('{{ORIGIN}}', site ? origin : `${origin}/site`)
     .replaceAll('{{YEAR}}', String(new Date().getUTCFullYear()));
 }
 
-function send(req, res, name, slug, status = 200) {
-  res.status(status).set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=300' }).send(render(req, name, slug));
+async function send(req, res, name, slug, status = 200) {
+  const body = await render(req, name, slug);
+  res.status(status).set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=300' });
+  if (isCopy(req) || name === 'notfound') res.set('X-Robots-Tag', 'noindex, follow');
+  res.send(body);
 }
 
+/** When each page last changed, for the sitemap. */
+const modified = (name) => { try { return fs.statSync(path.join(DIR, `${name}.html`)).mtime.toISOString().slice(0, 10); } catch (_) { return null; } };
+const PRIORITY = { '': '1.0', product: '0.9', 'ski-patrol': '0.9', pricing: '0.9', contact: '0.8', security: '0.6', privacy: '0.2', terms: '0.2' };
+
 const pages = express.Router();
+// Never in search results: the app's sign-in, the operator console and the time clock.
+pages.use((req, res, next) => {
+  if (/^\/(app|platform|kiosk)(\/|$)/.test(req.path) || (req.path === '/' && config.site.hosts.length && !onSite(req))) res.set('X-Robots-Tag', 'noindex, nofollow');
+  next();
+});
+// The website's other addresses (summitops.com when www.summitops.com is first) send people to the first one.
+pages.use((req, res, next) => {
+  const h = hostOf(req);
+  if (config.site.hosts.length > 1 && config.site.hosts.slice(1).includes(h) && ['GET', 'HEAD'].includes(req.method)) return res.redirect(301, `https://${config.site.hosts[0]}${req.originalUrl}`);
+  next();
+});
 // Everywhere: /site and its pages.
 pages.get('/site', (req, res, next) => (req.path === '/site' ? res.redirect(301, '/site/') : next()));
+pages.get('/site/sitemap.xml', (req, res) => sitemap(req, res));
 pages.get('/site/{:page}', (req, res, next) => {
   const slug = req.params.page || '';
   if (!(slug in PAGES)) return next();
-  send(req, res, PAGES[slug], slug);
+  send(req, res, PAGES[slug], slug).catch(next);
 });
 // The app itself, at /app, for a website address where / is the home page.
 pages.get('/app', (_req, res) => res.set('Cache-Control', 'no-cache').sendFile(path.join(__dirname, '..', '..', 'public', 'index.html')));
 
-// On the website's own addresses: the pages at the top, robots.txt and the sitemap.
-pages.use((req, res, next) => {
-  if (req.method !== 'GET' || !onSite(req)) return next();
-  const p = req.path.replace(/\/+$/, '') || '/';
-  if (p === '/robots.txt') return res.type('text/plain').send(`User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /app\nSitemap: ${req.protocol}://${req.get('host')}/sitemap.xml\n`);
-  if (p === '/sitemap.xml') {
-    const origin = `${req.protocol}://${req.get('host')}`;
-    const urls = Object.keys(PAGES).map((s) => `  <url><loc>${origin}/${s}</loc></url>`).join('\n');
-    return res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`);
+/** robots.txt: on the website, everything but the app; on the app's address, the mountains' public pages only. */
+pages.get('/robots.txt', (req, res) => {
+  const lines = ['User-agent: *'];
+  if (onSite(req)) lines.push('Allow: /', 'Disallow: /api/', 'Disallow: /app', 'Disallow: /platform', 'Disallow: /kiosk', `Sitemap: https://${config.site.hosts[0]}/sitemap.xml`);
+  else {
+    lines.push('Disallow: /api/', 'Disallow: /app', 'Disallow: /platform', 'Disallow: /kiosk');
+    if (config.site.hosts.length) lines.push('Disallow: /site');
+    else lines.push(`Sitemap: ${req.protocol}://${req.get('host')}/site/sitemap.xml`);
   }
-  const slug = p === '/' ? '' : p.slice(1);
-  if (slug in PAGES) return send(req, res, PAGES[slug], slug);
+  res.type('text/plain').set('Cache-Control', 'public, max-age=3600').send(`${lines.join('\n')}\n`);
+});
+function sitemap(req, res) {
+  const origin = canonicalOrigin(req);
+  const urls = Object.entries(PAGES).map(([slug, name]) => `  <url><loc>${origin}/${slug}</loc>${modified(name) ? `<lastmod>${modified(name)}</lastmod>` : ''}<priority>${PRIORITY[slug] || '0.5'}</priority></url>`).join('\n');
+  res.type('application/xml').set('Cache-Control', 'public, max-age=3600').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`);
+}
+
+// On the website's own addresses: the pages at the top, with one address each (no trailing slash).
+pages.use((req, res, next) => {
+  if (!['GET', 'HEAD'].includes(req.method) || !onSite(req)) return next();
+  if (req.path === '/sitemap.xml') return sitemap(req, res);
+  if (req.path.length > 1 && req.path.endsWith('/')) {
+    const bare = req.path.replace(/\/+$/, '');
+    const q = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
+    if (bare.slice(1) in PAGES) return res.redirect(301, bare + q);
+  }
+  const slug = req.path === '/' ? '' : req.path.slice(1);
+  if (slug in PAGES) return send(req, res, PAGES[slug], slug).catch(next);
   return next();
 });
 
 /** The website's "not found", for website addresses only (the app keeps its own). */
 function notFound(req, res, next) {
-  if (req.method === 'GET' && onSite(req) && !req.path.startsWith('/api/') && (req.accepts(['html', 'json']) === 'html')) return send(req, res, 'notfound', '', 404);
+  if (req.method === 'GET' && onSite(req) && !req.path.startsWith('/api/') && (req.accepts(['html', 'json']) === 'html')) return send(req, res, 'notfound', '', 404).catch(next);
   return next();
 }
 
@@ -149,15 +195,16 @@ const M = require('../lib/modules');
 let planCache = { at: 0, body: null };
 
 /** The plans and add-ons mountains can buy, for the Pricing page. Only what the console marks active. */
-api.get('/site/plans', async (_req, res) => {
+async function loadPlans() {
   if (!planCache.body || Date.now() - planCache.at > 60_000) {
     const all = (await rows(pool, 'SELECT id, code, name, blurb, kind, modules, monthly_cents, yearly_cents, sort FROM billing_plans WHERE active = 1 ORDER BY kind, sort, monthly_cents, id'));
     const label = (k) => (M.MODULES.find((m) => m.key === k) || { label: k }).label.replace(/\s*\(add-on\)/i, '');
     const shape = (p) => ({ code: p.code, name: p.name, blurb: p.blurb, monthly_cents: Number(p.monthly_cents), yearly_cents: Number(p.yearly_cents), apps: String(p.modules || '').split(',').filter(Boolean).map((k) => ({ key: k, label: label(k) })) });
     planCache = { at: Date.now(), body: { plans: all.filter((p) => p.kind === 'plan').map(shape), addons: all.filter((p) => p.kind === 'addon').map(shape), trial_days: require('../lib/billing').TRIAL_DAYS } };
   }
-  res.set('Cache-Control', 'public, max-age=60').json(planCache.body);
-});
+  return planCache.body;
+}
+api.get('/site/plans', async (_req, res) => res.set('Cache-Control', 'public, max-age=60').json(await loadPlans()));
 const forgetPlans = () => { planCache = { at: 0, body: null }; };
 
 const contactBody = z.object({

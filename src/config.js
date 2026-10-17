@@ -60,6 +60,8 @@ module.exports = {
     hosts: String(env.SITE_HOSTS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean),
     appUrl: (env.APP_URL || '').replace(/\/$/, ''),
     contactEmail: env.SITE_CONTACT_EMAIL || '',
+    // Search Console and Bing Webmaster ownership checks (the code from their "HTML tag" option)
+    verify: { google: env.GOOGLE_SITE_VERIFICATION || '', bing: env.BING_SITE_VERIFICATION || '' },
   },
   db: {
     // Cloud SQL: DB_SOCKET=/cloudsql/<project>:<region>:<instance> (the socket Cloud Run provides). It replaces host and port.

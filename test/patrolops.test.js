@@ -193,7 +193,9 @@ test('tourniquet with its limb, times in the future refused, and the vitals time
   const b = `/patrol/incidents/${M.case}/patients/${M.patient}`;
   is(await api('POST', `${b}/treatments`, { token: M.valT, body: { kind: 'tourniquet' } }), 400, 'which limb');
   ok(await api('POST', `${b}/treatments`, { token: M.valT, body: { kind: 'tourniquet', detail: { limb: 'left_leg' } } }));
+  const slack = process.env.PATROL_FUTURE_SLACK_MIN; process.env.PATROL_FUTURE_SLACK_MIN = '5'; // the real rule, whatever the suite set
   is(await api('POST', `${b}/vitals`, { token: M.valT, body: { pulse: 90, taken_at: at(120) } }), 400, 'two hours ahead');
+  if (slack === undefined) delete process.env.PATROL_FUTURE_SLACK_MIN; else process.env.PATROL_FUTURE_SLACK_MIN = slack;
   ok(await api('POST', `${b}/vitals`, { token: M.valT, body: { pulse: 90, recheck_minutes: 5 } }));
   assert.ok(ok(await api('GET', `/patrol/incidents/${M.case}`, { token: M.valT })).patients[0].vitals_due_at);
   ok(await api('POST', `/patrol/incidents/${M.case}/events`, { token: M.valT, body: { kind: 'handoff', patient_id: M.patient } }));

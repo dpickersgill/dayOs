@@ -64,6 +64,8 @@ function createApp() {
   // The patrol map loads tile images from the configured tile servers, so only those hosts are added to img-src.
   const tileHosts = [...new Set(config.map.layers.map((l) => (l.url.match(/^https:\/\/[^/]+/) || [''])[0].replace('{s}', '*')).filter(Boolean))];
   app.use(helmet({ contentSecurityPolicy: { directives: { ...helmet.contentSecurityPolicy.getDefaultDirectives(), 'img-src': ["'self'", 'data:', ...tileHosts] } } }));
+  // Smaller pages for slow mountain connections and faster loads (search engines rank on it). Event streams are left alone.
+  app.use(require('compression')({ filter: (req, res) => !String(res.getHeader('Content-Type') || '').includes('event-stream') && require('compression').filter(req, res) }));
   const origins = (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
   app.use(cors({ origin: origins.length ? origins : false }));
   // Stripe signs the exact bytes it sends, so this one route reads the raw body before the JSON parser sees anything.

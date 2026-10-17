@@ -927,7 +927,8 @@ for (const [name, def] of Object.entries(sub)) {
       const now = nowIn((await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone);
       if (def.time && !data[def.time]) data[def.time] = now;
       // A time in the future is a typing slip (23:45 for 13:45), and it would put the record out of order.
-      if (def.time && data[def.time] > plusMin(now, 5)) throw bad(`That time (${String(data[def.time]).slice(11, 16)}) is in the future. Check the hour.`);
+      // (PATROL_FUTURE_SLACK_MIN only widens the 5 minutes for the test suite, whose cases are written at fixed morning times.)
+      if (def.time && data[def.time] > plusMin(now, Number(process.env.PATROL_FUTURE_SLACK_MIN || 5))) throw bad(`That time (${String(data[def.time]).slice(11, 16)}) is in the future. Check the hour.`);
       const checked = def.check ? await def.check(conn, req, parent, data) : null;
       if (def.entered) data.entered_at = now; // when it was typed in; a reading taken earlier shows as entered late
       const keys = Object.keys(data).filter((k) => def.cols.includes(k) || (k === 'entered_at' && def.entered));
