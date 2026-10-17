@@ -169,7 +169,7 @@
   // ---------------------------------------------------------------- Contact
   const LABELS = {
     walkthrough: 'Which part of the day is hardest right now?', trial: 'Anything we should set up for your trial? (lifts, apps you want first)',
-    founding: 'Tell us about your mountain and what you would want from SummitOps', question: 'Your question',
+    founding: 'Tell us about your mountain and what you would want from DAY/OS', question: 'Your question',
     patrol: 'About your patrol: how many patrollers, volunteer or paid, and who at the ski area should get the read-only login',
   };
   function contact() {

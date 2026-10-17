@@ -2,7 +2,7 @@
 
 // What makes an acceptable password (NIST SP 800-63B): length, not character rules. At least 12 characters, up to 128,
 // any characters at all (spaces and passphrases welcome), never one seen in a data breach, and never built from the
-// person's own login, the mountain's name or "summitops". Nobody is made to change a password on a schedule; only after
+// person's own login, the mountain's name or the product's (DAY/OS, runmyresort, and the old name SummitOps). Nobody is made to change a password on a schedule; only after
 // a reset or a suspected leak.
 const { z } = require('./util');
 const { bad } = require('./errors');
@@ -21,10 +21,10 @@ async function refuseWeak(pw, { username, email, tenantSlug, tenantName } = {}) 
   if (p.length > MAX) throw bad(`Use at most ${MAX} characters`);
   const f = fold(p);
   if (/^(.)\1+$/.test(p) || new Set(p).size < 4) throw bad('That password repeats too few characters. Use a phrase of a few words.');
-  const words = [username, email && String(email).split('@')[0], tenantSlug, tenantName, 'summitops']
+  const words = [username, email && String(email).split('@')[0], tenantSlug, tenantName, 'summitops', 'dayos', 'runmyresort']
     .map(fold).filter((w) => w.length >= 4);
   for (const w of words) {
-    if (f.includes(w)) throw bad('Do not use your username, your email, the mountain\'s name or "SummitOps" in your password');
+    if (f.includes(w)) throw bad('Do not use your username, your email, the mountain\'s name or "DAY/OS" in your password');
   }
   await refuseBreached(p);
 }

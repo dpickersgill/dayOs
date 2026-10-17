@@ -46,10 +46,10 @@ async function post({ to, fromName, replyTo, subject, text, html, tag, headers, 
   }
 }
 
-/** Mail from SummitOps itself, not from a mountain (the website's contact form, operator notices). */
+/** Mail from DAY/OS itself, not from a mountain (the website's contact form, operator notices). */
 async function sendPlatform({ to, replyTo, subject, text, tag }) {
   if (!enabled()) return { ok: false, error: 'Email is not set up' };
-  const r = await post({ to, fromName: 'SummitOps', replyTo, subject, text, tag });
+  const r = await post({ to, fromName: 'DAY/OS', replyTo, subject, text, tag });
   if (!r.ok) logFailure({ job: 'email', tag, message: r.error });
   return r;
 }

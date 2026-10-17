@@ -8,43 +8,43 @@
 // title: under ~60 characters, the search phrase first. description: under ~160 characters, a reason to click.
 const META = {
   '': {
-    title: 'Ski Area Management Software | SummitOps',
+    title: 'Ski Area Management Software | DAY/OS',
     description: 'Run lifts, ski patrol, tickets, waivers, rentals, lessons and staff from one screen. Built for independent ski areas. Plans from {{FROM}}/month, 14 days free.',
     og: 'Open the mountain from one screen',
   },
   product: {
-    title: 'Ski Resort Software: POS, Lifts, Patrol, Rentals | SummitOps',
-    description: 'Every SummitOps app: ticket sales and RFID gate, online shop, lift inspections, grooming, fleet maintenance, rentals, ski school, ski patrol and scheduling.',
+    title: 'Ski Resort Software: POS, Lifts, Patrol, Rentals | DAY/OS',
+    description: 'Every DAY/OS app: ticket sales and RFID gate, online shop, lift inspections, grooming, fleet maintenance, rentals, ski school, ski patrol and scheduling.',
     og: 'Every part of the mountain. Run the parts you need.',
     crumb: 'Product',
   },
   'ski-patrol': {
-    title: 'Ski Patrol Software: Incident Reports and Dispatch | SummitOps',
+    title: 'Ski Patrol Software: Incident Reports and Dispatch | DAY/OS',
     description: 'Patient care reports written at the bedside, dispatch with phone alerts, opening checks, the closing sweep and volunteer days, for paid and volunteer patrols.',
     og: 'Ski patrol software, from the first call to the closing sweep',
     crumb: 'Ski patrol',
   },
   pricing: {
-    title: 'Pricing: Ski Area Software from {{FROM}}/month | SummitOps',
+    title: 'Pricing: Ski Area Software from {{FROM}}/month | DAY/OS',
     description: 'Three plans for independent ski areas plus add-ons, monthly or 15% less yearly. Pay by card, bank or invoice. No contract, and 14 days free.',
-    og: 'SummitOps pricing: priced by what you run',
+    og: 'DAY/OS pricing: priced by what you run',
     crumb: 'Pricing',
   },
   security: {
-    title: 'Security and Patient Data Protection | SummitOps',
-    description: 'How SummitOps protects guest and ski patrol patient records: separate mountains, access by role, two-step sign-in, nothing deleted, payments via Stripe.',
+    title: 'Security and Patient Data Protection | DAY/OS',
+    description: 'How DAY/OS protects guest and ski patrol patient records: separate mountains, access by role, two-step sign-in, nothing deleted, payments via Stripe.',
     og: 'Careful with guest and patient information',
     crumb: 'Security',
   },
   contact: {
-    title: 'Request a Demo or a Free 14-Day Trial | SummitOps',
-    description: 'Book a 20-minute walkthrough of SummitOps, start a 14-day free trial on your own mountain, or join the founding group of independent ski areas.',
+    title: 'Request a Demo or a Free 14-Day Trial | DAY/OS',
+    description: 'Book a 20-minute walkthrough of DAY/OS, start a 14-day free trial on your own mountain, or join the founding group of independent ski areas.',
     og: 'See your mountain on the board',
     crumb: 'Contact',
   },
-  privacy: { title: 'Privacy Policy | SummitOps', description: 'What SummitOps collects, why, who it is shared with, how long it is kept, and the choices you have.', crumb: 'Privacy' },
-  terms: { title: 'Terms of Service | SummitOps', description: 'The terms for using SummitOps: trials, subscriptions and payment, your data, and what each side is responsible for.', crumb: 'Terms' },
-  notfound: { title: 'Page Not Found | SummitOps', description: 'That page is not here.', noindex: true },
+  privacy: { title: 'Privacy Policy | DAY/OS', description: 'What DAY/OS collects, why, who it is shared with, how long it is kept, and the choices you have.', crumb: 'Privacy' },
+  terms: { title: 'Terms of Service | DAY/OS', description: 'The terms for using DAY/OS: trials, subscriptions and payment, your data, and what each side is responsible for.', crumb: 'Terms' },
+  notfound: { title: 'Page Not Found | DAY/OS', description: 'That page is not here.', noindex: true },
 };
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -75,13 +75,13 @@ function head({ slug, origin, html, plans, verify = {}, noindex = false }) {
   const robots = noindex || m.noindex ? 'noindex, follow' : 'index, follow, max-image-preview:large';
 
   const graph = [
-    { '@type': 'Organization', '@id': `${origin}/#org`, name: 'SummitOps', url: `${origin}/`, logo: `${origin.replace(/\/site$/, '')}/icons/icon-512.png` },
-    { '@type': 'WebSite', '@id': `${origin}/#site`, name: 'SummitOps', url: `${origin}/`, publisher: { '@id': `${origin}/#org` }, inLanguage: 'en-US' },
+    { '@type': 'Organization', '@id': `${origin}/#org`, name: 'DAY/OS', url: `${origin}/`, logo: `${origin.replace(/\/site$/, '')}/icons/icon-512.png` },
+    { '@type': 'WebSite', '@id': `${origin}/#site`, name: 'DAY/OS', url: `${origin}/`, publisher: { '@id': `${origin}/#org` }, inLanguage: 'en-US' },
     { '@type': 'WebPage', '@id': `${url}#page`, url, name: title, description, isPartOf: { '@id': `${origin}/#site` }, inLanguage: 'en-US' },
   ];
   if (['', 'pricing', 'product', 'ski-patrol'].includes(key) && plans && plans.plans.length) {
     graph.push({
-      '@type': 'SoftwareApplication', '@id': `${origin}/#software`, name: 'SummitOps', applicationCategory: 'BusinessApplication', applicationSubCategory: 'Ski area management software',
+      '@type': 'SoftwareApplication', '@id': `${origin}/#software`, name: 'DAY/OS', applicationCategory: 'BusinessApplication', applicationSubCategory: 'Ski area management software',
       operatingSystem: 'Web browser; iOS; Android', url: `${origin}/`, image, publisher: { '@id': `${origin}/#org` },
       description: 'Operations software for independent ski areas: lift inspections, ski patrol, ticket sales, waivers, rentals, ski school and staff scheduling.',
       offers: { '@type': 'AggregateOffer', priceCurrency: 'USD', lowPrice: (Math.min(...plans.plans.map((p) => p.monthly_cents)) / 100).toFixed(2), highPrice: (Math.max(...plans.plans.map((p) => p.monthly_cents)) / 100).toFixed(2), offerCount: plans.plans.length,
@@ -101,7 +101,7 @@ function head({ slug, origin, html, plans, verify = {}, noindex = false }) {
     `<meta name="robots" content="${robots}">`,
     key === 'notfound' ? null : `<link rel="canonical" href="${esc(url)}">`,
     '<meta property="og:type" content="website">',
-    '<meta property="og:site_name" content="SummitOps">',
+    '<meta property="og:site_name" content="DAY/OS">',
     '<meta property="og:locale" content="en_US">',
     `<meta property="og:title" content="${esc(fill(m.og || title))}">`,
     `<meta property="og:description" content="${esc(description)}">`,
@@ -109,7 +109,7 @@ function head({ slug, origin, html, plans, verify = {}, noindex = false }) {
     `<meta property="og:image" content="${esc(image)}">`,
     '<meta property="og:image:width" content="1200">',
     '<meta property="og:image:height" content="630">',
-    '<meta property="og:image:alt" content="SummitOps: Open the mountain from one screen">',
+    '<meta property="og:image:alt" content="DAY/OS: Open the mountain from one screen">',
     '<meta name="twitter:card" content="summary_large_image">',
     `<meta name="twitter:title" content="${esc(fill(m.og || title))}">`,
     `<meta name="twitter:description" content="${esc(description)}">`,

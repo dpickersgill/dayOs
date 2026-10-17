@@ -18,7 +18,7 @@ node scripts/check-version.js "$LIVE_VERSION" "$@"
 
 step "Checking the packages for known security problems"
 # Stops on a high or critical problem in anything that runs in production. Fix by updating the package, or (only if
-# it truly cannot affect SummitOps) run with SKIP_AUDIT=1 and note why in the release.
+# it truly cannot affect DAY/OS) run with SKIP_AUDIT=1 and note why in the release.
 if [ "${SKIP_AUDIT:-}" != 1 ]; then npm audit --omit=dev --audit-level=high; fi
 
 step "Installing"

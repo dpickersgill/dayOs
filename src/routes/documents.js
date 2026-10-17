@@ -255,7 +255,7 @@ async function checkRoom(conn, tenantId, adding) {
   const used = await storageUsed(conn, tenantId);
   if (used + adding > cap) {
     const mb = (n) => (n / 1048576).toFixed(1);
-    throw new AppError(413, `Your document storage is full (${mb(used)} of ${t.storage_cap_mb} MB used, and this file is ${mb(adding)} MB). Delete documents you no longer need, or ask SummitOps to raise your limit.`);
+    throw new AppError(413, `Your document storage is full (${mb(used)} of ${t.storage_cap_mb} MB used, and this file is ${mb(adding)} MB). Delete documents you no longer need, or ask DAY/OS to raise your limit.`);
   }
 }
 

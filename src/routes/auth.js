@@ -104,8 +104,8 @@ const accessOver = (u) => Boolean(u.access_ends_on) && String(u.access_ends_on).
 const USER_SQL = `SELECT u.*, t.status AS tenant_status, t.slug AS tenant_slug, (t.sandbox_expires_at IS NOT NULL) AS sandbox, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over
   FROM users u JOIN tenants t ON t.id = u.tenant_id`;
 function refuseClosed(user) {
-  if (user.tenant_status !== 'active') throw forbidden('This mountain is paused. Contact SummitOps.');
-  if (user.sandbox_over) throw forbidden('This demo has ended. Start a new one, or ask SummitOps for a walkthrough.');
+  if (user.tenant_status !== 'active') throw forbidden('This mountain is paused. Contact DAY/OS.');
+  if (user.sandbox_over) throw forbidden('This demo has ended. Start a new one, or ask DAY/OS for a walkthrough.');
   if (accessOver(user)) throw forbidden(ACCESS_OVER);
 }
 const mask = (email) => String(email).replace(/^(.)(.*)(@.*)$/, (_m, a, b, c) => `${a}${'*'.repeat(Math.min(6, b.length))}${c}`);
@@ -150,8 +150,8 @@ router.post(
       const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
       const handle = await challenges.put('email_code', challenges.hash(`${user.id}:${code}`), { tenantId: user.tenant_id, userId: user.id, minutes: 10 });
       const t = await one(pool, 'SELECT name FROM tenants WHERE id = ?', [user.tenant_id]);
-      const sent = await mailer.send({ tenantId: user.tenant_id, to: user.email, fromName: `${t.name} (SummitOps)`, tag: 'sign-in-code', subject: `${code} is your SummitOps sign-in code`,
-        text: `Your code to finish signing in to SummitOps at ${t.name} on a new device: ${code}\n\nIt works for 10 minutes. If you did not just sign in, change your password and tell your manager.` });
+      const sent = await mailer.send({ tenantId: user.tenant_id, to: user.email, fromName: `${t.name} (DAY/OS)`, tag: 'sign-in-code', subject: `${code} is your DAY/OS sign-in code`,
+        text: `Your code to finish signing in to DAY/OS at ${t.name} on a new device: ${code}\n\nIt works for 10 minutes. If you did not just sign in, change your password and tell your manager.` });
       if (sent.ok) return res.json({ mfa_required: true, mfa_token: halfToken(user, { via: 'email', h: handle }), methods: { email: true }, sent_to: mask(user.email) });
     }
     await finishSignIn(user, req, res, { method: 'password' });
@@ -366,7 +366,7 @@ router.post('/auth/mfa/setup', authenticate, mfaLimit, async (req, res) => {
   const secret = totp.newSecret();
   await pool.query('UPDATE users SET totp_secret = ?, totp_last_step = NULL WHERE id = ? AND tenant_id = ?', [totp.seal(secret), user.id, user.tenant_id]);
   const t = await one(pool, 'SELECT name FROM tenants WHERE id = ?', [user.tenant_id]);
-  res.json({ secret, otpauth_uri: totp.otpauthUri(secret, user.email || user.username, `SummitOps ${t.name}`) });
+  res.json({ secret, otpauth_uri: totp.otpauthUri(secret, user.email || user.username, `DAY/OS ${t.name}`) });
 });
 
 /** Step 2: prove the app shows the right code. Turns it on and returns ten recovery codes, shown only this once. */

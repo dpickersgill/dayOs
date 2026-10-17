@@ -4,8 +4,8 @@
 // device's own PIN. It cannot be phished (the browser only offers it to this site), reused or guessed, and the server
 // keeps only a public key. Used for signing in, as the second step, and for the second check before sensitive actions.
 //
-// The site a passkey belongs to is the address it was made on, or WEBAUTHN_RP_ID (for example summitops.com, so one
-// passkey works on app.summitops.com and any other address under it).
+// The site a passkey belongs to is the address it was made on, or WEBAUTHN_RP_ID (for example runmyresort.com, so one
+// passkey works on app.runmyresort.com and any other address under it).
 const W = require('@simplewebauthn/server');
 const { pool, rows, one } = require('../db');
 const challenges = require('./challenges');
@@ -17,7 +17,7 @@ function rp(req) {
   const host = String(req.get('host') || '');
   const id = process.env.WEBAUTHN_RP_ID || req.hostname;
   const origins = String(process.env.WEBAUTHN_ORIGINS || '').split(',').map((x) => x.trim()).filter(Boolean);
-  return { id, name: 'SummitOps', origin: origins.length ? origins : `${req.protocol}://${host}` };
+  return { id, name: 'DAY/OS', origin: origins.length ? origins : `${req.protocol}://${host}` };
 }
 
 // Which table: the mountains' logins, or the console's operators.

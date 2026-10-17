@@ -45,16 +45,16 @@ function home(root) {
     results.append(found.length ? h('ul', { class: 'help-results' }, found.map((a) => articleLink(a, true))) : empty('Nothing matches that. Try a shorter word, or look through the topics.'));
   };
   q.addEventListener('input', draw);
-  const news = h('a', { class: 'whatsnew-link', href: '#/help/whats-new' }, h('b', null, "What's new"), h('span', { class: 'muted' }, ' The latest changes to SummitOps'));
+  const news = h('a', { class: 'whatsnew-link', href: '#/help/whats-new' }, h('b', null, "What's new"), h('span', { class: 'muted' }, ' The latest changes to DAY/OS'));
   get('/whats-new/count').then((c) => { if (c.unseen) news.append(h('span', { class: 'new-pill' }, 'New')); }).catch(() => {});
-  root.append(h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Help'), h('p', { class: 'muted' }, 'How to do things in SummitOps. You see what your role can use.'))),
+  root.append(h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Help'), h('p', { class: 'muted' }, 'How to do things in DAY/OS. You see what your role can use.'))),
     news, h('div', { class: 'help-search' }, q), results, grid, stuck(), versionLine());
 }
 
-/** "SummitOps 2026.10.4 (build ac9a72f)": the version this screen is running, for telling support or checking an update. */
+/** "DAY/OS 2026.10.4 (build ac9a72f)": the version this screen is running, for telling support or checking an update. */
 function versionLine() {
   const line = h('p', { class: 'version-line muted small' });
-  fetch('/version', { headers: session.token ? { authorization: `Bearer ${session.token}` } : {} }).then((r) => r.json()).then((v) => { line.textContent = `SummitOps ${v.version}${v.build && v.build !== 'dev' ? ` (build ${v.build})` : ''}`; }).catch(() => {});
+  fetch('/version', { headers: session.token ? { authorization: `Bearer ${session.token}` } : {} }).then((r) => r.json()).then((v) => { line.textContent = `DAY/OS ${v.version}${v.build && v.build !== 'dev' ? ` (build ${v.build})` : ''}`; }).catch(() => {});
   return line;
 }
 
@@ -64,7 +64,7 @@ const longDate = (d) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, 
 
 /** Help > What's new: each release, newest first, with only the changes for this person's role and apps. Opening it clears the badge. */
 async function whatsNew(root) {
-  root.append(back('#/help', 'All help'), h('div', { class: 'page-head' }, h('div', null, h('h1', null, "What's new"), h('p', { class: 'muted' }, 'Changes to SummitOps, newest first. You see the ones for your role and the apps your mountain has.'))));
+  root.append(back('#/help', 'All help'), h('div', { class: 'page-head' }, h('div', null, h('h1', null, "What's new"), h('p', { class: 'muted' }, 'Changes to DAY/OS, newest first. You see the ones for your role and the apps your mountain has.'))));
   let w;
   try { w = await get('/whats-new'); } catch (err) { root.append(errorBox(err)); return; }
   // Highlight what arrived since this person last looked (someone who never looked: the newest release).
@@ -84,7 +84,7 @@ async function whatsNew(root) {
 }
 
 function stuck() {
-  return h('aside', { class: 'help-stuck' }, h('b', null, 'Still stuck? '), 'Ask your manager or owner. For a problem with SummitOps itself, they can reach whoever set up your mountain.');
+  return h('aside', { class: 'help-stuck' }, h('b', null, 'Still stuck? '), 'Ask your manager or owner. For a problem with DAY/OS itself, they can reach whoever set up your mountain.');
 }
 
 function section(root, key) {

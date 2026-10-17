@@ -36,7 +36,7 @@ export function passkeysPanel(onChange) {
       passkey.supported()
         ? h('div', { class: 'row' }, button(sec.passkeys.length ? 'Add a passkey on this device' : 'Add a passkey', () => {
           const name = input({ name: 'name', maxlength: 60, placeholder: 'For example: My iPhone' });
-          formDialog('Add a passkey', h('div', { class: 'stack' }, h('p', null, 'Your phone or computer will ask for your fingerprint, face or its own PIN. The passkey stays on the device; SummitOps keeps only a public key.'), h('div', { class: 'form' }, field('Name for this passkey', name, 'So you can tell your devices apart'))),
+          formDialog('Add a passkey', h('div', { class: 'stack' }, h('p', null, 'Your phone or computer will ask for your fingerprint, face or its own PIN. The passkey stays on the device; DAY/OS keeps only a public key.'), h('div', { class: 'form' }, field('Name for this passkey', name, 'So you can tell your devices apart'))),
             async () => { await addPasskey(name.value.trim()); toast('Passkey added. Next time, press "Sign in with a passkey"'); await draw(); if (onChange) await onChange(); }, { submitText: 'Continue' });
         }, { kind: sec.passkeys.length ? undefined : 'primary' }))
         : h('p', { class: 'muted small' }, 'This browser cannot make passkeys. Use a recent Chrome, Safari, Edge or Firefox, or use an authenticator app below.'));

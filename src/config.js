@@ -53,9 +53,9 @@ module.exports = {
   // Where the "ask for a walkthrough" link in a demo mountain points (the marketing site's contact page). Leave unset to show no link.
   marketingUrl: env.MARKETING_URL || '',
   // The product website (public/site), served by this same service.
-  //   SITE_HOSTS          the website's own addresses, comma separated (www.summitops.com,summitops.com). On those,
+  //   SITE_HOSTS          the website's own addresses, comma separated (www.runmyresort.com,runmyresort.com). On those,
   //                       / is the website's home page; everywhere it is also at /site.
-  //   APP_URL             where the app lives (https://app.summitops.com), for the website's Sign in and Try the demo
+  //   APP_URL             where the app lives (https://app.runmyresort.com), for the website's Sign in and Try the demo
   //                       links. Unset: the same address the website is on.
   //   SITE_CONTACT_EMAIL  who gets walkthrough and trial requests from the Contact page (they are also in the console, Leads)
   site: {

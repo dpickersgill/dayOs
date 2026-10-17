@@ -1,12 +1,12 @@
 // Phone alerts. The server sends an encrypted Web Push message; this shows it as a notification, and a tap opens
-// SummitOps at the page it points to (a dispatch call, the sweep, a cover request). Nothing is cached here.
+// DAY/OS at the page it points to (a dispatch call, the sweep, a cover request). Nothing is cached here.
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 
 self.addEventListener('push', (event) => {
   let m = {};
-  try { m = event.data ? event.data.json() : {}; } catch (_) { m = { title: 'SummitOps', body: event.data ? event.data.text() : '' }; }
-  event.waitUntil(self.registration.showNotification(m.title || 'SummitOps', {
+  try { m = event.data ? event.data.json() : {}; } catch (_) { m = { title: 'DAY/OS', body: event.data ? event.data.text() : '' }; }
+  event.waitUntil(self.registration.showNotification(m.title || 'DAY/OS', {
     body: m.body || '', tag: m.tag || undefined, renotify: Boolean(m.tag), requireInteraction: /CRITICAL/.test(m.title || ''),
     icon: '/icons/icon-192.png', badge: '/icons/icon-192.png', data: { url: m.url || '#/patrol' },
   }));

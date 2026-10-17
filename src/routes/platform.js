@@ -151,7 +151,7 @@ router.post('/login', validate(z.object({ email: z.string().trim().toLowerCase()
     // and to the operator's current session epoch, so a newer sign-in, a password reset or switching them off voids it.
     const secret = totp.newSecret();
     await pool.query('UPDATE platform_operators SET totp_secret = ?, totp_last_step = NULL WHERE id = ?', [totp.seal(secret), op.id]);
-    return res.json({ setup_required: true, setup_token: makeSession(op.name, op.id, { typ: 'setup', minutes: 10, epoch: Number(op.session_epoch), secretPrint: printOf(secret) }), secret, otpauth_uri: totp.otpauthUri(secret, op.email, 'SummitOps platform') });
+    return res.json({ setup_required: true, setup_token: makeSession(op.name, op.id, { typ: 'setup', minutes: 10, epoch: Number(op.session_epoch), secretPrint: printOf(secret) }), secret, otpauth_uri: totp.otpauthUri(secret, op.email, 'DAY/OS platform') });
   }
   if (!req.body.code) return res.json({ code_required: true });
   const step = totp.verify(totp.open(op.totp_secret), req.body.code);
@@ -335,7 +335,7 @@ router.get('/tenants/:id', async (req, res) => {
     billing_standing: await BL.standingOf(id), billing_events: billEvents });
 });
 
-// ---------------------------------------------------------------- what mountains pay SummitOps
+// ---------------------------------------------------------------- what mountains pay DAY/OS
 router.get('/billing/plans', async (_req, res) => res.json({ data: await BL.plans(), modules: M.MODULES.map(({ key, label, addon }) => ({ key, label, addon: Boolean(addon) })), stripe: require('../lib/stripe').enabled() }));
 
 const planFields = {
@@ -610,7 +610,7 @@ router.get('/me/passkeys', async (req, res) => {
 router.post('/me/passkeys/options', async (req, res) => {
   opOnly(req);
   const o = await operatorOr404(req.operatorId);
-  res.json(await passkeys.registrationOptions(req, { kind: 'operator', ownerId: o.id, userName: `${o.email} (SummitOps console)`, displayName: o.name }));
+  res.json(await passkeys.registrationOptions(req, { kind: 'operator', ownerId: o.id, userName: `${o.email} (DAY/OS console)`, displayName: o.name }));
 });
 router.post('/me/passkeys', validate(z.object({ handle: z.string().max(100), response: z.any(), name: z.string().trim().max(60).optional() })), async (req, res) => {
   opOnly(req);

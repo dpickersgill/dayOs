@@ -1,4 +1,4 @@
--- SummitOps subscriptions: what each mountain pays SummitOps (not the mountain's own sales).
+-- DAY/OS subscriptions: what each mountain pays DAY/OS (not the mountain's own sales).
 -- Plans and add-ons are set by the operator in the console, with monthly and yearly prices; Stripe holds the matching
 -- products and prices (made by "Sync to Stripe") and collects by card, US bank account (ACH) or emailed invoice.
 

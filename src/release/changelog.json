@@ -1,6 +1,25 @@
 {
   "releases": [
     {
+      "version": "2026.10.19",
+      "date": "2026-10-17",
+      "title": "SummitOps is now DAY/OS",
+      "notes": [
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "SummitOps is now called DAY/OS, the operating system for your day. Nothing else changes: your sign-in, your data and every app work as before. The website moves to runmyresort.com."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": "platform",
+          "text": "The website, emails, the app, the console and the link preview image all use the new name. Set the runmyresort.com addresses on the service as DEPLOY.md, Putting the website live, describes."
+        }
+      ]
+    },
+    {
       "version": "2026.10.18",
       "date": "2026-10-17",
       "title": "Patrol on its own",

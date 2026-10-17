@@ -1,6 +1,6 @@
 'use strict';
 
-// Copies every row from one SummitOps database into another that `npm run migrate` has just set up (used to move from
+// Copies every row from one DAY/OS database into another that `npm run migrate` has just set up (used to move from
 // Aiven to Cloud SQL). The target's tables are emptied first, then filled table by table, keeping every id, so nothing
 // that points at something else changes. Afterwards each table's row count is compared, and the script exits 1 if any
 // differ.

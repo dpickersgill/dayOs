@@ -15,7 +15,7 @@
 // a prior condition), and patients found to have no injury.
 //
 // The rate is patients per 1,000 skier visits. A skier visit is a ticket's first accepted gate scan on a local day,
-// so only mountains that scan tickets with SummitOps have a rate. Their patients alone are used for rates.
+// so only mountains that scan tickets with DAY/OS have a rate. Their patients alone are used for rates.
 //
 // Reports are by whole season, and per-mountain counts are never published, because two reports that differ a
 // little (a day, a region, one mountain joining) could otherwise be subtracted to reveal what the hiding protects.

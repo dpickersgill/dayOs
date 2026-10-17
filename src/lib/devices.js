@@ -44,9 +44,9 @@ async function remember(user, req, deviceHash, { method } = {}) {
     const t = await one(pool, 'SELECT name FROM tenants WHERE id = ?', [user.tenant_id]);
     const when = new Date().toUTCString().replace(' GMT', ' UTC');
     await require('./mailer').send({
-      tenantId: user.tenant_id, to: user.email, fromName: `${t ? t.name : 'SummitOps'} (SummitOps)`, tag: 'new-device',
-      subject: 'New sign-in to SummitOps',
-      text: `Someone signed in to your SummitOps login at ${t ? t.name : 'your mountain'} from a device not used before:\n\n${label(agent)}\n${when}\n\nIf this was you, there is nothing to do.\nIf it was not, sign in, change your password, and in Account, under "Where you're signed in", sign out everywhere else. Then tell your manager.`,
+      tenantId: user.tenant_id, to: user.email, fromName: `${t ? t.name : 'DAY/OS'} (DAY/OS)`, tag: 'new-device',
+      subject: 'New sign-in to DAY/OS',
+      text: `Someone signed in to your DAY/OS login at ${t ? t.name : 'your mountain'} from a device not used before:\n\n${label(agent)}\n${when}\n\nIf this was you, there is nothing to do.\nIf it was not, sign in, change your password, and in Account, under "Where you're signed in", sign out everywhere else. Then tell your manager.`,
     });
   } catch (e) { console.error('Could not note sign-in device', e.message); }
 }

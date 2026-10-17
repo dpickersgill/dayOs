@@ -1,6 +1,6 @@
-# Deploying SummitOps
+# Deploying DAY/OS
 
-SummitOps runs on Google Cloud Run (service `summitops-api`, region `us-east1`) with a Cloud SQL MySQL 8.4 database (`summitops-db`, same region; reached through the Cloud SQL socket, `DB_SOCKET`). Until `move-to-cloudsql.sh` has been run it uses Aiven. Secrets live in Google Secret Manager. Every update is: upload the zip, install, migrate, deploy, check.
+DAY/OS runs on Google Cloud Run (service `summitops-api`, region `us-east1`) with a Cloud SQL MySQL 8.4 database (`summitops-db`, same region; reached through the Cloud SQL socket, `DB_SOCKET`). Until `move-to-cloudsql.sh` has been run it uses Aiven. Secrets live in Google Secret Manager. Every update is: upload the zip, install, migrate, deploy, check.
 
 ## First deploy
 
@@ -82,11 +82,11 @@ Migrations only add tables and columns, so the previous revision keeps working a
 | `DB_POOL` | Database connections per server (deploy.sh sets 8; with at most 4 servers that is 32 connections) |
 | `POSTMARK_BROADCAST_STREAM` | The Postmark stream for marketing messages (default `broadcast`); tickets, reminders and patrol mail use `POSTMARK_STREAM` (default `outbound`) |
 | `TOTP_KEY`, `LINK_SECRET`, `KIOSK_SECRET` | Separate keys for two-step secrets, unsubscribe links and staff badges. Each falls back to `JWT_SECRET`. See RUNBOOK.md before rotating `JWT_SECRET`. |
-| `SITE_HOSTS`, `APP_URL`, `SITE_CONTACT_EMAIL` | The product website on its own domain. `SITE_HOSTS` lists the website's addresses (`www.summitops.com,summitops.com`): on those, `/` is the website. `APP_URL` is where staff sign in (`https://app.summitops.com`). `SITE_CONTACT_EMAIL` gets the Contact page's requests (they are also in the console, Leads). The website is always at `/site` too. See "Putting the website live" below. |
+| `SITE_HOSTS`, `APP_URL`, `SITE_CONTACT_EMAIL` | The product website on its own domain. `SITE_HOSTS` lists the website's addresses (`www.runmyresort.com,runmyresort.com`): on those, `/` is the website. `APP_URL` is where staff sign in (`https://app.runmyresort.com`). `SITE_CONTACT_EMAIL` gets the Contact page's requests (they are also in the console, Leads). The website is always at `/site` too. See "Putting the website live" below. |
 | `GOOGLE_SITE_VERIFICATION`, `BING_SITE_VERIFICATION` | The ownership codes from Google Search Console and Bing Webmaster Tools (their "HTML tag" option), added to every website page. |
 | `PLATFORM_TOTP_SECRET`, `PLATFORM_ALLOW_IPS` | Two-step sign-in and an address allowlist for the platform console. See RUNBOOK.md. |
 | `SESSION_IDLE_MINUTES`, `LOGIN_LOCK_AFTER`, `REQUIRE_ADMIN_MFA`, `PWNED_CHECK`, `PLATFORM_KEY_SIGNIN` | Security settings, all with safe defaults: sign-out after 60 idle minutes, a 15-minute lock after 10 wrong passwords, two-step required for owners and managers in production, breached passwords refused, and the platform key off once an operator has two-step. See RUNBOOK.md, Security setup. |
-| `WEBAUTHN_RP_ID`, `WEBAUTHN_ORIGINS`, `STEP_UP_MINUTES`, `STEP_UP_REFUND_CENTS`, `TERMINAL_IDLE_MINUTES` | Passkeys and the second check. Set `WEBAUTHN_RP_ID` to your own domain (for example `summitops.com`) once the app is on it, before people add passkeys. See RUNBOOK.md, Tiered sign-in. |
+| `WEBAUTHN_RP_ID`, `WEBAUTHN_ORIGINS`, `STEP_UP_MINUTES`, `STEP_UP_REFUND_CENTS`, `TERMINAL_IDLE_MINUTES` | Passkeys and the second check. Set `WEBAUTHN_RP_ID` to your own domain (for example `runmyresort.com`) once the app is on it, before people add passkeys. See RUNBOOK.md, Tiered sign-in. |
 | `TRUST_PROXY_HOPS`, `PUSH_EXTRA_HOSTS`, `AUDIT_LOG_STDOUT` | Set by cloud-armor.sh (2 behind the load balancer); extra push service hosts; `off` stops audit events going to Cloud Logging. |
 
 See RUNBOOK.md for rotating secrets, the scheduler command, the one-time security setup (`bash scripts/harden.sh`) and the security checklist.
@@ -95,13 +95,14 @@ See RUNBOOK.md for rotating secrets, the scheduler command, the one-time securit
 
 The product website (Home, Product, Pricing, Security, Contact, Privacy, Terms) is served by this same service. Check it first at `https://<service address>/site/`.
 
-1. **Domains.** In Cloud Run, Manage custom domains, map the website address (for example `www.summitops.com`, and the bare `summitops.com`) and the app address (`app.summitops.com`) to `summitops-api`. Add the DNS records it shows at your domain registrar. The certificates follow on their own, usually within an hour.
+1. **Domains.** In Cloud Run, Manage custom domains, map the website address (for example `www.runmyresort.com`, and the bare `runmyresort.com`) and the app address (`app.runmyresort.com`) to `summitops-api`. Add the DNS records it shows at your domain registrar. The certificates follow on their own, usually within an hour.
 2. **Settings.** Set the website's settings once (they are kept by every later deploy):
    ```
-   gcloud run services update summitops-api --region us-east1 --update-env-vars "^@^SITE_HOSTS=www.summitops.com,summitops.com@APP_URL=https://app.summitops.com@PUBLIC_URL=https://app.summitops.com@SITE_CONTACT_EMAIL=you@yourdomain.com"
+   gcloud run services update summitops-api --region us-east1 --update-env-vars "^@^SITE_HOSTS=www.runmyresort.com,runmyresort.com@APP_URL=https://app.runmyresort.com@PUBLIC_URL=https://app.runmyresort.com@WEBAUTHN_RP_ID=runmyresort.com@SITE_CONTACT_EMAIL=you@yourdomain.com"
    ```
-   The `^@^` at the start lets the website list hold a comma. `PUBLIC_URL` is used for Stripe's return links, so it should be the app address.
+   The `^@^` at the start lets the website list hold a comma. `PUBLIC_URL` is used for Stripe's return links, so it should be the app address. `WEBAUTHN_RP_ID` makes passkeys belong to the domain, so one passkey works on every address under it; passkeys made earlier on the run.app address stop working and are added again.
 3. **Email.** The Contact page emails `SITE_CONTACT_EMAIL` and sends the visitor a copy through Postmark, so `POSTMARK_SERVER_TOKEN` and `MAIL_FROM` must be set and the sender verified. Without email, requests still land in the console under Leads.
 4. **Prices.** The Pricing page shows the active plans and add-ons from the console (Plans and prices). The first migration adds the launch set (Lodge, Mountain, Resort and six add-ons); change them there and the website follows within a minute. Press Sync to Stripe on each before mountains pay.
 5. **Legal pages.** Privacy and Terms are plain-language starting points. Have a lawyer read them before launch, especially the governing law (Pennsylvania), the 60-day export window and the liability limit.
-6. **Search engines.** In [Google Search Console](https://search.google.com/search-console), add the website as a URL-prefix property (`https://www.summitops.com/`), choose the HTML tag check, and set its code as `GOOGLE_SITE_VERIFICATION` (same `gcloud run services update ... --update-env-vars` as above). Once verified, submit `https://www.summitops.com/sitemap.xml` under Sitemaps. Do the same in Bing Webmaster Tools with `BING_SITE_VERIFICATION` (it can also import from Search Console). Check the structured data with Google's Rich Results Test.
+6. **Moving addresses.** Point the Stripe webhooks (card payments and subscriptions) at `https://app.runmyresort.com/api/v1/stripe/webhook`, and the daily job: `gcloud scheduler jobs update http summitops-daily --location us-east1 --uri https://app.runmyresort.com/api/v1/internal/jobs/daily`.
+7. **Search engines.** In [Google Search Console](https://search.google.com/search-console), add the website as a URL-prefix property (`https://www.runmyresort.com/`), choose the HTML tag check, and set its code as `GOOGLE_SITE_VERIFICATION` (same `gcloud run services update ... --update-env-vars` as above). Once verified, submit `https://www.runmyresort.com/sitemap.xml` under Sitemaps. Do the same in Bing Webmaster Tools with `BING_SITE_VERIFICATION` (it can also import from Search Console). Check the structured data with Google's Rich Results Test.

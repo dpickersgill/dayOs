@@ -80,8 +80,8 @@ async function alertsPanel() {
     const text = {
       on: 'This phone gets an alert when dispatch sends you to a call, when your sweep route is late, and when a cover request needs you.',
       off: 'Get an alert on this phone when dispatch sends you to a call. Each phone you use needs turning on.',
-      blocked: 'Alerts are blocked for SummitOps in this browser. Allow notifications in the site settings, then come back.',
-      unsupported: alerts.isIos() && !alerts.standalone() ? 'On an iPhone: tap Share, then Add to Home Screen, and open SummitOps from your Home Screen. Then turn alerts on here.' : 'This browser cannot show alerts. Use Chrome, Edge, Firefox or Safari.',
+      blocked: 'Alerts are blocked for DAY/OS in this browser. Allow notifications in the site settings, then come back.',
+      unsupported: alerts.isIos() && !alerts.standalone() ? 'On an iPhone: tap Share, then Add to Home Screen, and open DAY/OS from your Home Screen. Then turn alerts on here.' : 'This browser cannot show alerts. Use Chrome, Edge, Firefox or Safari.',
     }[s];
     clear(box).append(h('div', { class: 'spread' }, h('div', null, h('h3', null, 'Phone alerts'), h('p', { class: 'muted small' }, text)),
       h('div', { class: 'row' },

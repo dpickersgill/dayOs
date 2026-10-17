@@ -139,7 +139,7 @@ export async function drawSettings(box) {
       field('Default deposit ($)', f.dep), field('Service every (rentals)', f.svc, 'Zero turns service reminders off'),
       h('label', { class: 'check' }, f.bind, 'Require binding setting and technician for skis')), h('div', { class: 'row' }, save),
     h('h3', null, 'Binding chart'),
-    h('p', { class: 'muted' }, 'Enter the release settings your shop uses, from your binding manufacturer and the standard you follow. SummitOps does not supply values. The Chart button at the counter only looks up what you enter here, and the technician still records what they set.'),
+    h('p', { class: 'muted' }, 'Enter the release settings your shop uses, from your binding manufacturer and the standard you follow. DAY/OS does not supply values. The Chart button at the counter only looks up what you enter here, and the technician still records what they set.'),
     h('div', { class: 'row muted small' }, 'Type · Weight min · max (lb) · Sole min · max (mm) · Setting'),
     rowsEl,
     h('div', { class: 'row' }, button('Add row', () => { rows.push({ skier_type: '', din: '' }); drawRows(); }, { small: true }),

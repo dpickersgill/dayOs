@@ -32,7 +32,7 @@ gcloud services enable secretmanager.googleapis.com sqladmin.googleapis.com iam.
 
 step "1. The app's own service account"
 if ! gcloud iam service-accounts describe "$RUN_SA" >/dev/null 2>&1; then
-  gcloud iam service-accounts create summitops-run --display-name "SummitOps app (Cloud Run)"
+  gcloud iam service-accounts create summitops-run --display-name "DAY/OS app (Cloud Run)"
   sleep 5
 fi
 for role in roles/cloudsql.client roles/logging.logWriter roles/monitoring.metricWriter roles/cloudtrace.agent; do
@@ -118,7 +118,7 @@ fi
 
 step "5. Audit events kept outside the database"
 if ! gcloud logging buckets describe summitops-audit --location=global >/dev/null 2>&1; then
-  gcloud logging buckets create summitops-audit --location=global --retention-days=400 --description "SummitOps audit events (sign-ins, console actions, record changes)"
+  gcloud logging buckets create summitops-audit --location=global --retention-days=400 --description "DAY/OS audit events (sign-ins, console actions, record changes)"
 fi
 FILTER='logName="projects/'"$PROJECT"'/logs/summitops-audit" OR jsonPayload.logName="summitops-audit"'
 if gcloud logging sinks describe summitops-audit >/dev/null 2>&1; then

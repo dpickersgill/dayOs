@@ -84,7 +84,7 @@ function createApp() {
       return res.status(400).json({ error: 'Bad signature' });
     }
     try {
-      const billed = await require('./routes/billing').handleWebhook(event); // the mountain's own SummitOps subscription
+      const billed = await require('./routes/billing').handleWebhook(event); // the mountain's own DAY/OS subscription
       if (billed) return res.json({ received: true, ...billed });
       res.json({ received: true, ...(await lessonbook.handleWebhook(event, config.stripe.publicUrl || `${req.protocol}://${req.get('host')}`)) }); } catch (err) {
       logFailure({ job: 'stripe_webhook', event: event && event.type, message: err.message });

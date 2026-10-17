@@ -244,7 +244,7 @@ router.post('/dispatch/:id/responders/:staffId/text', patrol, needs('dispatch'),
   const c = await loadCall(pool, tenantId, paramId(req));
   const sid = paramId(req, 'staffId');
   if (!(await one(pool, 'SELECT staff_id FROM dispatch_responders WHERE tenant_id = ? AND call_id = ? AND staff_id = ?', [tenantId, c.id, sid]))) throw notFound('Responder');
-  if (!(SMS.enabled())) throw bad('Text messages are not set up for SummitOps yet');
+  if (!(SMS.enabled())) throw bad('Text messages are not set up for DAY/OS yet');
   const n = await alertResponders(tenantId, c, [sid], { text: true });
   if (!n) throw bad('Could not text them: check the phone number on their staff record');
   await audit(pool, req, 'text_responder', 'dispatch_calls', c.id, { staff_id: sid });

@@ -204,7 +204,7 @@ async function createLogin(p, done) {
   formDialog(`Create a login for ${fullName(p)}`, h('div', { class: 'form' },
     field('Username', input({ name: 'username', value: username, required: true, maxlength: 40, autocapitalize: 'none', spellcheck: 'false' }), 'What they type to sign in'),
     field('Email', input({ name: 'email', type: 'email', value: p.email || '' }), 'Optional, except for managers'),
-    field('Role', role, p.patrol ? 'Being on ski patrol already opens Patrol; the role decides what else they use' : 'What they use in SummitOps'),
+    field('Role', role, p.patrol ? 'Being on ski patrol already opens Patrol; the role decides what else they use' : 'What they use in DAY/OS'),
     field('Temporary password', input({ name: 'password', type: 'text', required: true, minlength: 10, autocomplete: 'off' }), 'At least 10 characters. Tell them in person or by phone.'),
     h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name: 'temporary', checked: true }), ' They choose their own password when they first sign in')), async (fd) => {
     const r = await post('/users', { username: String(fd.get('username') || '').trim(), email: String(fd.get('email') || '').trim() || undefined, password: String(fd.get('password')), role: String(fd.get('role')), staff_id: Number(p.id), temporary: Boolean(fd.get('temporary')) });

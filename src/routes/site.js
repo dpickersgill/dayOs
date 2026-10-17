@@ -39,7 +39,7 @@ function header(current) {
   return `<a class="skip" href="#main">Skip to the content</a>
 <header class="sn">
   <div class="wrap sn-in">
-    <a class="sn-brand" href="{{HOME}}" aria-label="SummitOps, home">${LOGO('#12303A', '#FFFFFF')}<span>SummitOps</span></a>
+    <a class="sn-brand" href="{{HOME}}" aria-label="DAY/OS, home">${LOGO('#12303A', '#FFFFFF')}<span>DAY/OS</span></a>
     <nav class="sn-links" aria-label="Main">
       ${links}
       ${extra}
@@ -61,7 +61,7 @@ const FOOTER = `<footer class="sf">
   <div class="wrap">
     <div class="sf-grid">
       <div>
-        <div class="sf-brand">${LOGO('#FFFFFF', '#12303A')}SummitOps</div>
+        <div class="sf-brand">${LOGO('#FFFFFF', '#12303A')}DAY/OS</div>
         <p>Operations software for independent ski areas. Lifts, the fleet, tickets, rentals, lessons, patrol and staff in one place.</p>
       </div>
       <div>
@@ -85,7 +85,7 @@ const FOOTER = `<footer class="sf">
         </ul>
       </div>
     </div>
-    <div class="sf-base"><span>&copy; {{YEAR}} SummitOps. All rights reserved. Prices in US dollars.</span><span class="sf-legal"><a href="{{SITE}}/privacy">Privacy</a><a href="{{SITE}}/terms">Terms</a></span></div>
+    <div class="sf-base"><span>&copy; {{YEAR}} DAY/OS. All rights reserved. Prices in US dollars.</span><span class="sf-legal"><a href="{{SITE}}/privacy">Privacy</a><a href="{{SITE}}/terms">Terms</a></span></div>
   </div>
 </footer>`;
 
@@ -135,7 +135,7 @@ pages.use((req, res, next) => {
   if (/^\/(app|platform|kiosk)(\/|$)/.test(req.path) || (req.path === '/' && config.site.hosts.length && !onSite(req))) res.set('X-Robots-Tag', 'noindex, nofollow');
   next();
 });
-// The website's other addresses (summitops.com when www.summitops.com is first) send people to the first one.
+// The website's other addresses (runmyresort.com when www.runmyresort.com is first) send people to the first one.
 pages.use((req, res, next) => {
   const h = hostOf(req);
   if (config.site.hosts.length > 1 && config.site.hosts.slice(1).includes(h) && ['GET', 'HEAD'].includes(req.method)) return res.redirect(301, `https://${config.site.hosts[0]}${req.originalUrl}`);
@@ -233,8 +233,8 @@ api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.e
     const sent = await mailer.sendPlatform({ to: config.site.contactEmail, replyTo: b.email, subject: `${KINDS[b.kind]}: ${b.mountain}`, text: lines.join('\n'), tag: 'site-lead' });
     if (sent.ok) {
       await pool.query('UPDATE site_leads SET emailed = 1 WHERE id = ?', [r.insertId]);
-      copy = (await mailer.sendPlatform({ to: b.email, replyTo: config.site.contactEmail, subject: 'We have your SummitOps request', tag: 'site-lead-thanks',
-        text: `Hello ${b.name},\n\nThank you for writing about ${b.mountain}. A person will reply within one business day${b.kind === 'trial' ? ' to set up your trial' : b.kind === 'patrol' ? ' to set up your patrol, with a 14-day trial' : ' to set a time'}.\n\nTo look around in the meantime, start a demo mountain: ${config.site.appUrl || `${req.protocol}://${req.get('host')}`}/try\n\nSummitOps` })).ok;
+      copy = (await mailer.sendPlatform({ to: b.email, replyTo: config.site.contactEmail, subject: 'We have your DAY/OS request', tag: 'site-lead-thanks',
+        text: `Hello ${b.name},\n\nThank you for writing about ${b.mountain}. A person will reply within one business day${b.kind === 'trial' ? ' to set up your trial' : b.kind === 'patrol' ? ' to set up your patrol, with a 14-day trial' : ' to set a time'}.\n\nTo look around in the meantime, start a demo mountain: ${config.site.appUrl || `${req.protocol}://${req.get('host')}`}/try\n\nDAY/OS` })).ok;
     }
   }
   res.status(201).json({ ok: true, copy });

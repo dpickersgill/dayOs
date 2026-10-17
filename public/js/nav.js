@@ -43,10 +43,10 @@ const initials = (email) => String(email || '?').split('@')[0].split(/[._-]/).ma
  * Builds the page frame. views: [[key, label]] already filtered for this person.
  * Returns { shell, main, setCurrent(key), openPalette() }.
  */
-/** The version under Sign out in the account menu: "SummitOps 2026.10.4", linking to What's new. */
+/** The version under Sign out in the account menu: "DAY/OS 2026.10.4", linking to What's new. */
 function whoVersion() {
   const a = h('a', { class: 'who-version', href: '#/help/whats-new' });
-  fetch('/version').then((r) => r.json()).then((v) => { if (v && v.version) a.textContent = `SummitOps ${v.version}`; }).catch(() => {});
+  fetch('/version').then((r) => r.json()).then((v) => { if (v && v.version) a.textContent = `DAY/OS ${v.version}`; }).catch(() => {});
   return a;
 }
 
@@ -107,7 +107,7 @@ export function buildFrame({ views, main, signOut }) {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !whoMenu.hidden) { setWho(false); whoBtn.focus(); } });
   whoMenu.addEventListener('click', (e) => { if (e.target.closest('a')) setWho(false); });
   const rail = h('aside', { class: 'rail' },
-    h('div', { class: 'brand' }, h('span', { class: 'brand-mark', 'aria-hidden': 'true' }, icon('conditions', 20)), h('div', { class: 'brand-text' }, h('strong', null, 'SummitOps'), h('span', null, ctx.me.tenant_name)), toggle),
+    h('div', { class: 'brand' }, h('span', { class: 'brand-mark', 'aria-hidden': 'true' }, icon('conditions', 20)), h('div', { class: 'brand-text' }, h('strong', null, 'DAY/OS'), h('span', null, ctx.me.tenant_name)), toggle),
     search, nav,
     h('div', { class: 'rail-foot' }, whoMenu, whoBtn));
 

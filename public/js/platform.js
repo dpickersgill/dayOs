@@ -56,7 +56,7 @@ function signIn(message) {
   const email = input({ type: 'email', name: 'email', autocomplete: 'username', required: true, maxlength: 255 });
   const pw = input({ type: 'password', name: 'password', autocomplete: 'current-password', required: true, maxlength: 200 });
   const code = input({ name: 'code', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6, placeholder: '123456' });
-  const codeField = field('Code from your authenticator app', code, 'The six-digit code SummitOps platform shows in your app.');
+  const codeField = field('Code from your authenticator app', code, 'The six-digit code DAY/OS platform shows in your app.');
   codeField.hidden = true;
   const go = h('button', { type: 'submit', class: 'btn primary' }, 'Sign in');
   const form = h('form', { class: 'stack', novalidate: true }, field('Email', email), field('Password', pw), codeField, err, go);
@@ -79,7 +79,7 @@ function signIn(message) {
   }, { kind: 'primary' }) : null;
   const keyLink = h('button', { type: 'button', class: 'linklike' }, 'Sign in with the platform key instead');
   keyLink.addEventListener('click', () => keySignIn());
-  app.append(h('main', { class: 'platform-box stack' }, h('h1', null, 'SummitOps platform'), message ? h('p', { class: 'muted' }, message) : null,
+  app.append(h('main', { class: 'platform-box stack' }, h('h1', null, 'DAY/OS platform'), message ? h('p', { class: 'muted' }, message) : null,
     pk ? h('div', { class: 'stack tight' }, pk, pkErr, h('p', { class: 'muted small' }, 'Once you add a passkey, the console signs you in with it only. First time? Sign in with your email below.')) : null, form,
     h('p', { class: 'muted small' }, 'No login yet? Sign in once with the platform key and add yourself under Operators. ', keyLink)));
   email.focus();
@@ -100,7 +100,7 @@ function setupTwoStep(out) {
     h('p', null, 'The console needs a code from an authenticator app every time you sign in (Google Authenticator, Microsoft Authenticator, 1Password and others work).'),
     h('ol', { class: 'stack tight' },
       h('li', null, 'Open the app and add an account by scanning this code.'),
-      h('li', null, 'Type the six-digit code the app shows for SummitOps platform.')),
+      h('li', null, 'Type the six-digit code the app shows for DAY/OS platform.')),
     h('div', { class: 'qr-box' }, qr(out.otpauth_uri, { size: 200 })),
     h('p', { class: 'muted small' }, 'Cannot scan? Choose "enter a setup key" in the app and type: ', h('code', null, out.secret.replace(/(.{4})/g, '$1 ').trim())),
     form, button('Cancel', () => signIn(), { small: true })));

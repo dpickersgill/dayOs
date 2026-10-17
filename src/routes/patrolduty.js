@@ -229,7 +229,7 @@ router.post('/alerts/unsubscribe', patrol, validate(z.object({ endpoint: z.strin
 
 /** A test alert to my own phones. */
 router.post('/alerts/test', patrol, async (req, res) => {
-  const n = await PUSH.notifyUsers(req.auth.tenantId, [req.auth.userId], { title: 'SummitOps alerts are on', body: 'You will be alerted here when you are sent to a call.', url: '#/patrol/duty', tag: 'test' });
+  const n = await PUSH.notifyUsers(req.auth.tenantId, [req.auth.userId], { title: 'DAY/OS alerts are on', body: 'You will be alerted here when you are sent to a call.', url: '#/patrol/duty', tag: 'test' });
   const { c } = await one(pool, 'SELECT COUNT(*) AS c FROM push_subscriptions WHERE tenant_id = ? AND user_id = ?', [req.auth.tenantId, req.auth.userId]);
   res.json({ sent: n, phones: Number(c) });
 });

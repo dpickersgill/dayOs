@@ -1,6 +1,6 @@
 'use strict';
 
-// Settings, Billing: the mountain's SummitOps subscription. Owners and managers see it; only the owner changes the plan
+// Settings, Billing: the mountain's DAY/OS subscription. Owners and managers see it; only the owner changes the plan
 // or pays. Paying is through Stripe: Checkout for a card or US bank account, an emailed invoice, and Stripe's customer
 // portal for the card, invoices and cancelling. Stripe tells us what happened through the webhook (handleWebhook).
 const express = require('express');
@@ -38,7 +38,7 @@ router.get('/billing', managers, async (req, res) => {
       invoices = (list.data || []).map((i) => ({ id: i.id, number: i.number, status: i.status, amount_cents: i.amount_due, paid_cents: i.amount_paid, created: new Date(i.created * 1000).toISOString(), due: i.due_date ? new Date(i.due_date * 1000).toISOString() : null, url: i.hosted_invoice_url, pdf: i.invoice_pdf }));
     } catch (_) { invoices = null; } // Stripe unreachable: the page says so
   }
-  // The operator's own notes stay in the console: the mountain sees only that SummitOps changed something.
+  // The operator's own notes stay in the console: the mountain sees only that DAY/OS changed something.
   const events = (await rows(pool, "SELECT at, kind, detail FROM billing_events WHERE tenant_id = ? AND kind NOT LIKE 'stripe:%' ORDER BY id DESC LIMIT 20", [t])).map((e) => (e.kind === 'operator_change' ? { ...e, detail: null } : e));
   res.json({
     standing,
@@ -94,8 +94,8 @@ router.put('/billing/choice', managers, ownerOnly, validate(choiceBody), async (
 });
 
 /** Pay by card or US bank account: Stripe's hosted page. Any trial days left are kept. */
-router.post('/billing/checkout', managers, ownerOnly, stepUp('change how SummitOps is paid'), validate(z.object({ method: z.enum(['card', 'bank']).default('card') })), async (req, res) => {
-  if (!stripe.enabled()) throw conflict('Payments are not set up yet. Contact SummitOps.');
+router.post('/billing/checkout', managers, ownerOnly, stepUp('change how DAY/OS is paid'), validate(z.object({ method: z.enum(['card', 'bank']).default('card') })), async (req, res) => {
+  if (!stripe.enabled()) throw conflict('Payments are not set up yet. Contact DAY/OS.');
   const t = req.auth.tenantId;
   const b = await rowOf(pool, t);
   if (b.stripe_subscription_id && ['active', 'trialing', 'past_due'].includes(b.sub_status)) throw conflict('You already have a subscription. Use Manage payment to change the card or bank account.');
@@ -117,7 +117,7 @@ router.post('/billing/checkout', managers, ownerOnly, stepUp('change how SummitO
 
 /** Pay by invoice: Stripe emails an invoice each period, due in 30 days, payable by card, bank transfer or check. */
 router.post('/billing/invoice', managers, ownerOnly, validate(z.object({ billing_email: z.string().trim().email().max(255) })), async (req, res) => {
-  if (!stripe.enabled()) throw conflict('Payments are not set up yet. Contact SummitOps.');
+  if (!stripe.enabled()) throw conflict('Payments are not set up yet. Contact DAY/OS.');
   const t = req.auth.tenantId;
   let b = await rowOf(pool, t);
   if (b.stripe_subscription_id && ['active', 'trialing', 'past_due'].includes(b.sub_status)) throw conflict('You already have a subscription');
@@ -141,8 +141,8 @@ router.post('/billing/invoice', managers, ownerOnly, validate(z.object({ billing
 });
 
 /** Stripe's customer portal: change the card or bank account, see and pay invoices, cancel. */
-router.post('/billing/portal', managers, ownerOnly, stepUp('change how SummitOps is paid'), async (req, res) => {
-  if (!stripe.enabled()) throw conflict('Payments are not set up yet. Contact SummitOps.');
+router.post('/billing/portal', managers, ownerOnly, stepUp('change how DAY/OS is paid'), async (req, res) => {
+  if (!stripe.enabled()) throw conflict('Payments are not set up yet. Contact DAY/OS.');
   const b = await one(pool, 'SELECT stripe_customer_id FROM tenant_billing WHERE tenant_id = ?', [req.auth.tenantId]);
   if (!b || !b.stripe_customer_id) throw bad('There is nothing to manage yet: choose a plan and pay first');
   const s = await stripe.call('/v1/billing_portal/sessions', { customer: b.stripe_customer_id, return_url: `${baseUrl(req)}/#/billing` });
@@ -156,7 +156,7 @@ const periodEnd = (sub) => {
 };
 const subIdOf = (obj) => obj.subscription || (obj.parent && obj.parent.subscription_details && obj.parent.subscription_details.subscription) || null;
 
-/** Is this event about a SummitOps subscription? Returns the result, or null for events that belong elsewhere. */
+/** Is this event about a DAY/OS subscription? Returns the result, or null for events that belong elsewhere. */
 async function handleWebhook(event) {
   const obj = event && event.data && event.data.object;
   if (!obj) return null;

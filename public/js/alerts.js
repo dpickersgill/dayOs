@@ -1,5 +1,5 @@
 // Phone alerts: turn them on for this phone (a service worker plus a Web Push subscription), off, or send a test.
-// On an iPhone this only works once SummitOps is added to the Home Screen and opened from there (an Apple rule).
+// On an iPhone this only works once DAY/OS is added to the Home Screen and opened from there (an Apple rule).
 import { get, post } from './api.js';
 
 export const supported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
@@ -28,7 +28,7 @@ export async function status() {
 }
 
 export async function turnOn() {
-  if (!supported()) throw new Error(isIos() && !standalone() ? 'On an iPhone, add SummitOps to your Home Screen (Share, Add to Home Screen) and open it from there first.' : 'This browser cannot show alerts.');
+  if (!supported()) throw new Error(isIos() && !standalone() ? 'On an iPhone, add DAY/OS to your Home Screen (Share, Add to Home Screen) and open it from there first.' : 'This browser cannot show alerts.');
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') throw new Error('Alerts were not allowed. You can allow them in this browser\'s site settings.');
   const reg = await registration();

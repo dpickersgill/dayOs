@@ -1,4 +1,4 @@
--- SummitOps schema (MySQL 8 / MariaDB 10.6+, InnoDB, utf8mb4)
+-- DAY/OS schema (MySQL 8 / MariaDB 10.6+, InnoDB, utf8mb4)
 -- Multi-tenant by shared schema: every business table carries tenant_id, and
 -- every composite foreign key includes tenant_id so rows cannot cross tenants.
 

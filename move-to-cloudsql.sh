@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Moves the SummitOps database from Aiven to Cloud SQL (MySQL 8.4 in us-east1, next to the app). Run it once, from the
+# Moves the DAY/OS database from Aiven to Cloud SQL (MySQL 8.4 in us-east1, next to the app). Run it once, from the
 # unzipped folder in Cloud Shell, after `bash deploy.sh` has put this release live:
 #   bash move-to-cloudsql.sh
 # Safe to run again if it stops part way: each step checks what is already done. The Aiven database is not changed, so
@@ -51,7 +51,7 @@ else
 fi
 CONN="$(gcloud sql instances describe "$INSTANCE" --format='value(connectionName)')"
 
-step "Creating the SummitOps database and its login"
+step "Creating the DAY/OS database and its login"
 if ! gcloud sql databases describe "$DBNAME" --instance="$INSTANCE" >/dev/null 2>&1; then
   gcloud sql databases create "$DBNAME" --instance="$INSTANCE" --charset=utf8mb4 --collation=utf8mb4_0900_ai_ci
 fi
@@ -114,7 +114,7 @@ echo "$OUT"
 case "$OUT" in
   *'"ok":true'*)
     echo
-    echo "Done. SummitOps now runs on Cloud SQL ($CONN)."
+    echo "Done. DAY/OS now runs on Cloud SQL ($CONN)."
     echo "Keep the Aiven database for a week. If anything looks wrong, go back to it with:"
     echo "  gcloud run services update $SERVICE --region $REGION --remove-env-vars DB_SOCKET --update-env-vars DB_USER=$SRC_USER,DB_NAME=$SRC_NAME,DB_SSL=true --update-secrets DB_PASSWORD=$OLD_PW_SECRET:latest --remove-cloudsql-instances $CONN"
     ;;

@@ -8,7 +8,7 @@ const app = createApp();
 const release = require('./lib/version');
 
 const server = app.listen(config.port, () => {
-  console.log(`SummitOps ${release.VERSION} (build ${release.BUILD}) listening on :${config.port}`);
+  console.log(`DAY/OS ${release.VERSION} (build ${release.BUILD}) listening on :${config.port}`);
   recordStart();
 });
 
