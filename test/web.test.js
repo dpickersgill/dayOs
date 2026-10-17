@@ -1649,7 +1649,7 @@ test('two-step sign-in: set up from Account, then the sign-in form asks for the 
   const root = await renderView('settings', 'counter', await login2(email), { email });
   const panel = root.querySelector('[data-panel=mfa]');
   assert.ok(panel);
-  clickBtn(panel, 'Set up two-step sign-in'); await settle();
+  clickBtn(panel, 'Set up an authenticator app'); await settle();
   const dlg = topDialog();
   assert.ok(dlg.querySelector('svg.qr'), 'a QR code to scan');
   const secret = dlg.querySelector('[data-secret]').textContent.replace(/\s/g, '');

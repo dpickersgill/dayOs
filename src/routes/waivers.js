@@ -6,6 +6,7 @@
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
+const { stepUp } = require('../lib/stepup');
 const { z, validate, paramId, todayIn, seasonFor, dateStr, dayRange } = require('../lib/util');
 const { notFound, bad, AppError } = require('../lib/errors');
 const { audit } = require('../lib/audit');
@@ -123,7 +124,7 @@ router.get('/', readers, async (req, res) => {
   res.json({ season, more: data.length > 50, data: data.slice(0, 50).map((r) => ({ ...r, counts: Boolean(r.counts), method_label: methodOf(r), has_signature: Boolean(r.signing_id) })) });
 });
 
-router.get('/export.csv', managers, async (req, res) => {
+router.get('/export.csv', managers, stepUp('download signed waivers'), async (req, res) => {
   const t = await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId]);
   const season = String(req.query.season || seasonFor(todayIn(t.timezone))).slice(0, 20);
   const data = await rows(pool, `SELECT w.id, w.season, w.signed_at, p.first_name, p.last_name, p.date_of_birth, w.signed_by_name AS signed_by, w.signer_relation AS relation,

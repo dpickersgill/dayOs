@@ -20,7 +20,9 @@ const BL = require('../lib/billing');
 const router = express.Router();
 
 const slug = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/, 'Lowercase letters, numbers and dashes');
-const password = z.string().min(10, 'Use at least 10 characters').max(200);
+const PWR = require('../lib/passwords');
+const password = PWR.schema;
+const passkeys = require('../lib/passkeys');
 const digest = (s) => crypto.createHash('sha256').update(String(s)).digest();
 
 // How the console is protected (RUNBOOK.md, "Platform console"):
@@ -72,7 +74,7 @@ async function keyAllowed() {
 const forgetKeyGate = () => { keyGate = { at: 0, open: true }; };
 const KEY_OFF = 'The platform key is turned off now that operators sign in by name. Sign in with your email and authenticator code.';
 
-const OPEN = new Set(['/session', '/login', '/login/setup']);
+const OPEN = new Set(['/session', '/login', '/login/setup', '/login/passkey/options', '/login/passkey']);
 router.use(async (req, _res, next) => {
   try {
     const ips = allowedIps();
@@ -142,6 +144,8 @@ router.post('/login', validate(z.object({ email: z.string().trim().toLowerCase()
   const okPw = await bcrypt.compare(req.body.password, op ? op.password_hash : DUMMY_HASH);
   if (op && opLocked(op)) throw forbidden(NO_MATCH); // the same answer as a wrong password, so it does not show which emails exist
   if (!op || !okPw) { if (op) await opFailed(op.id); throw forbidden(NO_MATCH); }
+  // An operator with a passkey signs in with it only: a password and code can be phished, a passkey cannot.
+  if (await passkeys.count('operator', op.id)) throw forbidden('Sign in with your passkey (the "Sign in with a passkey" button).');
   if (!op.totp_enabled) {
     // First sign-in (or after a reset): set up the authenticator app before anything else. The ticket is tied to this secret
     // and to the operator's current session epoch, so a newer sign-in, a password reset or switching them off voids it.
@@ -170,10 +174,42 @@ router.post('/login/setup', validate(z.object({ setup_token: z.string().max(1000
   res.json(await opSignedIn(op, step));
 });
 
+// Signing in with a passkey alone (no email, password or code to type). Only operators who added one in the console.
+router.post('/login/passkey/options', async (req, res) => {
+  res.json(await passkeys.authenticationOptions(req, { kind: 'operator', purpose: 'signin' }));
+});
+router.post('/login/passkey', validate(z.object({ handle: z.string().max(100), response: z.any() })), async (req, res) => {
+  const cred = await passkeys.authenticate(req, { kind: 'operator', purpose: 'signin', handle: req.body.handle, response: req.body.response });
+  const op = await one(pool, 'SELECT * FROM platform_operators WHERE id = ? AND active = 1', [cred.operator_id]);
+  if (!op) throw forbidden('That operator is switched off');
+  await pool.query('UPDATE platform_operators SET failures = 0, locked_until = NULL, last_login_at = UTC_TIMESTAMP() WHERE id = ?', [op.id]);
+  await pool.query('INSERT INTO platform_audit (tenant_id, action, actor, detail) VALUES (NULL, ?, ?, ?)', ['sign_in', op.name, JSON.stringify({ operator: op.email, with: 'passkey' })]);
+  require('../lib/audit').trail({ console: true, action: 'sign_in', actor: op.name, detail: 'passkey' });
+  res.json({ session: makeSession(op.name, op.id, { epoch: Number(op.session_epoch) }), hours: SESSION_HOURS, two_step: true, name: op.name, operator: true, passkey: true });
+});
+
 const log = async (conn, req, tenantId, action, detail) => {
   await conn.query('INSERT INTO platform_audit (tenant_id, action, actor, detail) VALUES (?, ?, ?, ?)', [tenantId ?? null, action, req.operator || null, detail ? JSON.stringify(detail) : null]);
   require('../lib/audit').trail({ console: true, tenant: tenantId ?? null, actor: req.operator || null, action, detail: detail ? JSON.stringify(detail) : null, ip: req.ip || null });
 };
+
+// ---------------------------------------------------------------- opening one mountain, for a while and for a reason
+// A named operator changes a mountain only after opening it: a reason (a support ticket, "owner asked to add Rentals")
+// and a time, up to 8 hours. Every opening is in the console's history and the mountain's. The platform key (break-glass)
+// is not asked, but everything it does is recorded the same way.
+const ACCESS_HOURS = 8;
+async function accessOpen(operatorId, tenantId) {
+  return one(pool, 'SELECT id, reason, opened_at, expires_at FROM platform_access WHERE operator_id = ? AND tenant_id = ? AND closed_at IS NULL AND expires_at > UTC_TIMESTAMP() ORDER BY id DESC LIMIT 1', [operatorId, tenantId]);
+}
+async function needsAccess(req, _res, next) {
+  try {
+    if (!req.operatorId) return next(); // the platform key: break-glass, recorded
+    if (await accessOpen(req.operatorId, paramId(req))) return next();
+    const err = forbidden('Open this mountain first: say why, and for how long');
+    err.details = { code: 'access_required' };
+    return next(err);
+  } catch (e) { return next(e); }
+}
 
 async function usage(ids) {
   if (!ids.length) return new Map();
@@ -264,6 +300,25 @@ router.post('/sandboxes/purge', async (req, res) => {
   res.json({ removed });
 });
 
+router.get('/tenants/:id/access', async (req, res) => {
+  res.json({ open: req.operatorId ? await accessOpen(req.operatorId, paramId(req)) : null, by_key: !req.operatorId });
+});
+router.post('/tenants/:id/access', validate(z.object({ reason: z.string().trim().min(5, 'Say why, in a few words').max(300), hours: z.number().int().min(1).max(ACCESS_HOURS).default(2) })), async (req, res) => {
+  if (!req.operatorId) throw bad('The platform key does not need this');
+  const id = paramId(req);
+  if (!(await one(pool, 'SELECT id FROM tenants WHERE id = ?', [id]))) throw notFound('Mountain');
+  await pool.query('UPDATE platform_access SET closed_at = UTC_TIMESTAMP() WHERE operator_id = ? AND tenant_id = ? AND closed_at IS NULL', [req.operatorId, id]);
+  await pool.query('INSERT INTO platform_access (operator_id, tenant_id, reason, opened_at, expires_at) VALUES (?, ?, ?, UTC_TIMESTAMP(), DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? HOUR))', [req.operatorId, id, req.body.reason, req.body.hours]);
+  await log(pool, req, id, 'open_access', { reason: req.body.reason, hours: req.body.hours });
+  res.status(201).json({ open: await accessOpen(req.operatorId, id) });
+});
+router.post('/tenants/:id/access/close', async (req, res) => {
+  if (!req.operatorId) throw bad('The platform key does not need this');
+  const [r] = await pool.query('UPDATE platform_access SET closed_at = UTC_TIMESTAMP() WHERE operator_id = ? AND tenant_id = ? AND closed_at IS NULL', [req.operatorId, paramId(req)]);
+  if (r.affectedRows) await log(pool, req, paramId(req), 'close_access', null);
+  res.json({ ok: true });
+});
+
 router.get('/tenants/:id', async (req, res) => {
   const id = paramId(req);
   const t = await one(pool, 'SELECT id, slug, name, status, timezone, created_at, storage_cap_mb, platform_notes, closed_at, delete_after FROM tenants WHERE id = ?', [id]);
@@ -339,7 +394,7 @@ router.patch('/leads/:id', validate(z.object({ status: z.enum(['new', 'contacted
 });
 
 /** One mountain's billing, as the operator sets it: plan, trial end, free (comped), paid outside Stripe until a date. */
-router.put('/tenants/:id/billing', validate(z.object({
+router.put('/tenants/:id/billing', needsAccess, validate(z.object({
   plan_id: z.number().int().positive().nullable().optional(), addons: z.array(z.number().int().positive()).max(20).optional(), interval: z.enum(['month', 'year']).optional(),
   comped: z.boolean().optional(), trial_ends_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), paid_until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   billing_email: z.string().trim().email().max(255).nullable().optional(), notes: z.string().max(500).nullable().optional(), apply_apps: z.boolean().default(false),
@@ -373,6 +428,7 @@ router.post('/tenants', validate(z.object({
   const b = req.body;
   try { new Intl.DateTimeFormat('en-US', { timeZone: b.timezone }); } catch (_) { throw new AppError(400, 'Unknown time zone'); }
   for (const k of Object.keys(b.modules || {})) if (!M.KEYS.includes(k)) throw bad(`Unknown app: ${k}`);
+  await PWR.refuseWeak(b.owner.password, { email: b.owner.email, tenantSlug: b.slug, tenantName: b.name });
   const hash = await bcrypt.hash(b.owner.password, 12);
   const created = await tx(async (conn) => {
     const [t] = await conn.query('INSERT INTO tenants (slug, name, timezone, storage_cap_mb) VALUES (?, ?, ?, ?)', [b.slug, b.name, b.timezone, b.storage_cap_mb ?? 500]);
@@ -388,7 +444,7 @@ router.post('/tenants', validate(z.object({
   res.status(201).json(created);
 });
 
-router.patch('/tenants/:id', validate(partialOf({
+router.patch('/tenants/:id', needsAccess, validate(partialOf({
   name: z.string().min(2).max(255), status: z.enum(['active', 'suspended']), storage_cap_mb: z.number().int().min(10).max(100000),
   platform_notes: z.string().max(500).nullable(),
 })), async (req, res) => {
@@ -407,7 +463,7 @@ router.patch('/tenants/:id', validate(partialOf({
  * Close a mountain that has left: it is paused straight away, its people can no longer sign in, and everything in it is
  * deleted by the daily job once the export window (days, 60 by default) has passed. Reopening before then cancels it.
  */
-router.post('/tenants/:id/close', validate(z.object({ days: z.number().int().min(7).max(365).default(60), confirm_slug: z.string() })), async (req, res) => {
+router.post('/tenants/:id/close', needsAccess, validate(z.object({ days: z.number().int().min(7).max(365).default(60), confirm_slug: z.string() })), async (req, res) => {
   const id = paramId(req);
   const t = await one(pool, 'SELECT id, slug, sandbox_expires_at FROM tenants WHERE id = ?', [id]);
   if (!t) throw notFound('Mountain');
@@ -421,7 +477,7 @@ router.post('/tenants/:id/close', validate(z.object({ days: z.number().int().min
   const [[row]] = await pool.query('SELECT delete_after FROM tenants WHERE id = ?', [id]);
   res.json({ ok: true, delete_after: row.delete_after });
 });
-router.post('/tenants/:id/reopen', async (req, res) => {
+router.post('/tenants/:id/reopen', needsAccess, async (req, res) => {
   const id = paramId(req);
   const [r] = await pool.query("UPDATE tenants SET status = 'active', closed_at = NULL, delete_after = NULL WHERE id = ? AND closed_at IS NOT NULL", [id]);
   if (!r.affectedRows) throw notFound('Closed mountain');
@@ -431,7 +487,7 @@ router.post('/tenants/:id/reopen', async (req, res) => {
 });
 
 /** Choose which apps a mountain has. Send { modules: { rentals: false, patrol: true } }; anything left out keeps its setting. */
-router.put('/tenants/:id/modules', validate(z.object({ modules: z.record(z.string(), z.boolean()) })), async (req, res) => {
+router.put('/tenants/:id/modules', needsAccess, validate(z.object({ modules: z.record(z.string(), z.boolean()) })), async (req, res) => {
   const id = paramId(req);
   for (const k of Object.keys(req.body.modules)) if (!M.KEYS.includes(k)) throw bad(`Unknown app: ${k}`);
   const result = await tx(async (conn) => {
@@ -451,10 +507,11 @@ router.put('/tenants/:id/modules', validate(z.object({ modules: z.record(z.strin
 });
 
 /** Set a new password for one of a mountain's owner or manager logins. Signs that person out everywhere. */
-router.post('/tenants/:id/reset-password', validate(z.object({ user_id: z.number().int().positive(), password, clear_two_step: z.boolean().default(false), temporary: z.boolean().default(false) })), async (req, res) => {
+router.post('/tenants/:id/reset-password', needsAccess, validate(z.object({ user_id: z.number().int().positive(), password, clear_two_step: z.boolean().default(false), temporary: z.boolean().default(false) })), async (req, res) => {
   const id = paramId(req);
-  const u = await one(pool, "SELECT id FROM users WHERE id = ? AND tenant_id = ? AND role IN ('owner','manager')", [req.body.user_id, id]);
+  const u = await one(pool, "SELECT u.id, u.username, u.email, t.slug, t.name FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE u.id = ? AND u.tenant_id = ? AND u.role IN ('owner','manager')", [req.body.user_id, id]);
   if (!u) throw notFound('Login');
+  await PWR.refuseWeak(req.body.password, { username: u.username, email: u.email, tenantSlug: u.slug, tenantName: u.name });
   const hash = await bcrypt.hash(req.body.password, 12);
   await tx(async (conn) => {
     await conn.query('UPDATE users SET password_hash = ?, password_changed_at = NOW(), must_change_password = ?, login_failures = 0, login_locked_until = NULL WHERE id = ? AND tenant_id = ?', [hash, req.body.temporary ? 1 : 0, u.id, id]);
@@ -462,6 +519,7 @@ router.post('/tenants/:id/reset-password', validate(z.object({ user_id: z.number
     if (req.body.clear_two_step) {
       await conn.query('UPDATE users SET totp_enabled = 0, totp_secret = NULL, totp_last_step = NULL WHERE id = ? AND tenant_id = ?', [u.id, id]);
       await conn.query('DELETE FROM user_recovery_codes WHERE user_id = ?', [u.id]);
+      await conn.query('DELETE FROM user_passkeys WHERE user_id = ?', [u.id]);
     }
     await log(conn, req, id, 'password_reset', { user_id: u.id, cleared_two_step: req.body.clear_two_step, temporary: req.body.temporary });
   });
@@ -481,7 +539,7 @@ router.get('/audit', async (_req, res) => {
 });
 
 // ---------------------------------------------------------------- operators: who can use the console
-const opView = (o) => ({ id: o.id, email: o.email, name: o.name, active: Boolean(o.active), two_step: Boolean(o.totp_enabled), locked: Boolean(opLocked(o)),
+const opView = (o) => ({ id: o.id, email: o.email, name: o.name, active: Boolean(o.active), two_step: Boolean(o.totp_enabled), passkeys: Number(o.passkeys || 0), locked: Boolean(opLocked(o)),
   last_login_at: o.last_login_at, created_at: o.created_at, created_by: o.created_by, you: false });
 
 router.get('/me', async (req, res) => {
@@ -489,11 +547,12 @@ router.get('/me', async (req, res) => {
 });
 
 router.get('/operators', async (req, res) => {
-  const data = await rows(pool, 'SELECT * FROM platform_operators ORDER BY active DESC, name');
+  const data = await rows(pool, 'SELECT o.*, (SELECT COUNT(*) FROM platform_operator_passkeys k WHERE k.operator_id = o.id) AS passkeys FROM platform_operators o ORDER BY o.active DESC, o.name');
   res.json({ data: data.map((o) => ({ ...opView(o), you: o.id === req.operatorId })) });
 });
 
 router.post('/operators', validate(z.object({ email: z.string().trim().toLowerCase().email().max(255), name: z.string().trim().min(1).max(100), password })), async (req, res) => {
+  await PWR.refuseWeak(req.body.password, { email: req.body.email, username: req.body.name });
   const hash = await bcrypt.hash(req.body.password, 12);
   try {
     const [r] = await pool.query('INSERT INTO platform_operators (email, name, password_hash, password_changed_at, created_by) VALUES (?, ?, ?, UTC_TIMESTAMP(), ?)', [req.body.email, req.body.name, hash, req.operator || null]);
@@ -528,6 +587,7 @@ router.post('/operators/:id/active', validate(z.object({ active: z.boolean() }))
 router.post('/operators/:id/password', validate(z.object({ password })), async (req, res) => {
   const o = await operatorOr404(paramId(req));
   if (o.id === req.operatorId) throw bad('Use "Change my password" for your own');
+  await PWR.refuseWeak(req.body.password, { email: o.email, username: o.name });
   await pool.query('UPDATE platform_operators SET password_hash = ?, password_changed_at = UTC_TIMESTAMP(), session_epoch = session_epoch + 1, totp_secret = IF(totp_enabled = 1, totp_secret, NULL), failures = 0, locked_until = NULL WHERE id = ?', [await bcrypt.hash(req.body.password, 12), o.id]);
   await log(pool, req, null, 'reset_operator_password', { email: o.email });
   res.json({ ok: true });
@@ -536,7 +596,33 @@ router.post('/operators/:id/reset-two-step', async (req, res) => {
   const o = await operatorOr404(paramId(req));
   if (o.id === req.operatorId) throw bad('Ask another operator to reset yours, or use the platform key');
   await pool.query('UPDATE platform_operators SET totp_enabled = 0, totp_secret = NULL, totp_last_step = NULL, session_epoch = session_epoch + 1, failures = 0, locked_until = NULL WHERE id = ?', [o.id]);
+  await pool.query('DELETE FROM platform_operator_passkeys WHERE operator_id = ?', [o.id]); // a lost phone's passkeys go too
   await log(pool, req, null, 'reset_operator_two_step', { email: o.email });
+  res.json({ ok: true });
+});
+
+// Your own passkeys. Once you have one, the console signs you in with it only.
+const opOnly = (req) => { if (!req.operatorId) throw bad('You signed in with the platform key. Sign in with your email to add a passkey.'); };
+router.get('/me/passkeys', async (req, res) => {
+  opOnly(req);
+  res.json({ data: (await passkeys.listFor('operator', req.operatorId)).map((k) => ({ id: k.id, name: k.name, created_at: k.created_at, last_used_at: k.last_used_at })) });
+});
+router.post('/me/passkeys/options', async (req, res) => {
+  opOnly(req);
+  const o = await operatorOr404(req.operatorId);
+  res.json(await passkeys.registrationOptions(req, { kind: 'operator', ownerId: o.id, userName: `${o.email} (SummitOps console)`, displayName: o.name }));
+});
+router.post('/me/passkeys', validate(z.object({ handle: z.string().max(100), response: z.any(), name: z.string().trim().max(60).optional() })), async (req, res) => {
+  opOnly(req);
+  const id = await passkeys.register(req, { kind: 'operator', ownerId: req.operatorId, handle: req.body.handle, response: req.body.response, name: req.body.name || 'Passkey' });
+  await log(pool, req, null, 'add_passkey', { passkey: id });
+  res.status(201).json({ id });
+});
+router.delete('/me/passkeys/:id', async (req, res) => {
+  opOnly(req);
+  const [r] = await pool.query('DELETE FROM platform_operator_passkeys WHERE id = ? AND operator_id = ?', [paramId(req), req.operatorId]);
+  if (!r.affectedRows) throw notFound('Passkey');
+  await log(pool, req, null, 'remove_passkey', { passkey: paramId(req) });
   res.json({ ok: true });
 });
 
@@ -544,6 +630,7 @@ router.post('/me/password', validate(z.object({ current: z.string().max(200), pa
   if (!req.operatorId) throw bad('You signed in with the platform key. Sign in with your email to change your password.');
   const o = await operatorOr404(req.operatorId);
   if (!(await bcrypt.compare(req.body.current, o.password_hash))) throw bad('Your current password is not right');
+  await PWR.refuseWeak(req.body.password, { email: o.email, username: o.name });
   await pool.query('UPDATE platform_operators SET password_hash = ?, password_changed_at = UTC_TIMESTAMP(), session_epoch = session_epoch + 1 WHERE id = ?', [await bcrypt.hash(req.body.password, 12), o.id]);
   await log(pool, req, null, 'change_own_password', null);
   const [[fresh]] = await pool.query('SELECT session_epoch FROM platform_operators WHERE id = ?', [o.id]);

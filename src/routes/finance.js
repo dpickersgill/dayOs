@@ -88,6 +88,10 @@ router.put('/tenant/profile', managers, validate(z.object({
 }).refine((x) => x.refund_half_hours === undefined || x.refund_full_hours === undefined || x.refund_half_hours <= x.refund_full_hours, { message: 'The partial-refund cutoff must be later than (fewer hours than) the full-refund cutoff' })), async (req, res) => {
   const b = req.body;
   if (b.require_mfa !== undefined && req.auth.role !== 'owner') throw bad('Only the owner can require two-step sign-in');
+  if (b.require_mfa === false) {
+    const cur = await one(pool, 'SELECT require_mfa FROM tenants WHERE id = ?', [req.auth.tenantId]);
+    if (cur && cur.require_mfa) require('../lib/stepup').require(req, 'stop requiring two-step sign-in');
+  }
   const set = []; const vals = [];
   for (const k of PROFILE_COLS) if (b[k] !== undefined) { set.push(`${k} = ?`); vals.push(['require_mfa', 'online_booking', 'online_payment', 'online_shop', 'weekly_report', 'shop_recovery', 'quick_sale'].includes(k) ? (b[k] ? 1 : 0) : (b[k] === '' ? null : b[k])); }
   if (!set.length) throw bad('Nothing to change');

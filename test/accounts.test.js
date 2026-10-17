@@ -102,12 +102,12 @@ test('deactivating a login ends its session immediately', async () => {
   assert.equal((await login(`gone@${slug}.test`)).status, 200, 'reactivated login can sign in again');
 });
 
-test('a role change applies to a token that was already issued', async () => {
+test('a role change ends the sessions that were already issued', async () => {
   const u = await addLogin(`role@${slug}.test`, 'counter');
   const products = await api('GET', '/products', { token: u.token });
   assert.equal(products.status, 200);
   assert.equal((await api('PATCH', `/users/${u.id}`, { token: owner, body: { role: 'patrol' } })).status, 200);
-  assert.equal((await api('GET', '/products', { token: u.token })).status, 403, 'same token, new role');
+  assert.equal((await api('GET', '/products', { token: u.token })).status, 401, 'they sign in again, with the new role');
 });
 
 test('managers reset passwords for staff but not for the owner or other managers', async () => {

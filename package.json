@@ -1,6 +1,6 @@
 {
   "name": "summitops-backend",
-  "version": "2026.10.16",
+  "version": "2026.10.17",
   "description": "Multi-tenant operations backend for small and mid-size ski areas",
   "main": "src/server.js",
   "directories": {
@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.10",
+    "@simplewebauthn/server": "^13.3.3",
     "@tesseract.js-data/eng": "^1.0.0",
     "bcryptjs": "^3.0.3",
     "compression": "^1.8.2",

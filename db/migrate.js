@@ -373,6 +373,16 @@ const assetSteps = [
 const securitySteps = [
   ['users.login_failures', (c) => columnExists(c, 'users', 'login_failures'), 'ALTER TABLE users ADD COLUMN login_failures SMALLINT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN login_locked_until DATETIME NULL'],
   ['tenants.delete_after', (c) => columnExists(c, 'tenants', 'delete_after'), 'ALTER TABLE tenants ADD COLUMN closed_at DATETIME NULL, ADD COLUMN delete_after DATE NULL'],
+  // 2026.10.17: how each session was opened (password, two-step, passkey, emailed code or PIN), on which device or
+  // terminal, and when the person last proved it was them for a sensitive action.
+  ['user_sessions.method', (c) => columnExists(c, 'user_sessions', 'method'), "ALTER TABLE user_sessions ADD COLUMN method VARCHAR(12) NOT NULL DEFAULT 'password', ADD COLUMN device_hash CHAR(64) NULL, ADD COLUMN terminal_id BIGINT UNSIGNED NULL, ADD COLUMN stepped_up_at DATETIME NULL"],
+  ['users.pin_hash', (c) => columnExists(c, 'users', 'pin_hash'), 'ALTER TABLE users ADD COLUMN pin_hash VARCHAR(100) NULL, ADD COLUMN pin_failures SMALLINT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN pin_locked_until DATETIME NULL'],
+  ['users.access_ends_on', (c) => columnExists(c, 'users', 'access_ends_on'), 'ALTER TABLE users ADD COLUMN access_ends_on DATE NULL'],
+  // Patrollers must use two-step too; mountains that already exist get two weeks before it is enforced.
+  ['tenants.mfa_for_patrol', (c) => columnExists(c, 'tenants', 'mfa_for_patrol'), [
+    'ALTER TABLE tenants ADD COLUMN mfa_for_patrol TINYINT(1) NOT NULL DEFAULT 1, ADD COLUMN patrol_mfa_from DATE NULL, ADD COLUMN season_ends_on DATE NULL',
+    'UPDATE tenants SET patrol_mfa_from = DATE_ADD(CURDATE(), INTERVAL 14 DAY)',
+  ]],
 ];
 const opsSteps = [
   ['trails hold status', (c) => columnTypeHas(c, 'trails', 'status', "'hold'"), "ALTER TABLE trails MODIFY status ENUM('open','hold','closed') NOT NULL DEFAULT 'closed'"],
@@ -524,6 +534,7 @@ async function main() {
   await conn.query(fs.readFileSync(path.join(__dirname, 'billing.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'site.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'security.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'zerotrust.sql'), 'utf8'));
   await seedPlans(conn);
   let applied = 0;
   for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps]) {

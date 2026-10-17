@@ -1,5 +1,6 @@
-import { get, post, put, patch, session } from '../api.js';
+import { get, post, put, patch, del, session } from '../api.js';
 import { mfaPanel } from './mfa.js';
+import { signInSection } from './security.js';
 import { brandPanel } from './shopbrand.js';
 import { h, clear, ctx, isManager, table, state, input, select, field, button, toast, formDialog, confirmDialog, val, num, label, empty, errorBox, toCents, centsToInput } from '../ui.js';
 
@@ -7,7 +8,7 @@ const ROLES = ['manager', 'staff', 'counter', 'instructor', 'patrol'];
 
 export async function render(root) {
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Account')));
-  root.append(passwordForm(), mfaPanel());
+  root.append(passwordForm(), await signInSection(() => mfaPanel()));
   if (isManager()) {
     root.append(await mountainForm());
     root.append(await brandPanel());
@@ -19,11 +20,11 @@ export async function render(root) {
 
 function passwordForm() {
   const cur = input({ type: 'password', name: 'current', autocomplete: 'current-password', required: true });
-  const next = input({ type: 'password', name: 'next', autocomplete: 'new-password', required: true, minlength: 10 });
+  const next = input({ type: 'password', name: 'next', autocomplete: 'new-password', required: true, minlength: 12 });
   const again = input({ type: 'password', name: 'again', autocomplete: 'new-password', required: true });
   const slot = h('div');
   const go = h('button', { type: 'submit', class: 'btn primary' }, 'Change password');
-  const form = h('form', { class: 'stack', novalidate: true }, h('div', { class: 'form' }, field('Current password', cur), field('New password', next, 'At least 10 characters'), field('Repeat new password', again)), slot, h('div', { class: 'row' }, go));
+  const form = h('form', { class: 'stack', novalidate: true }, h('div', { class: 'form' }, field('Current password', cur), field('New password', next, 'At least 12 characters. A short phrase of a few words is easiest to remember. Not your name or the mountain\'s.'), field('Repeat new password', again)), slot, h('div', { class: 'row' }, go));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     clear(slot);
@@ -59,20 +60,22 @@ async function drawLogins(box) {
 
   clear(box).append(
     h('header', null, h('div', null, h('h2', null, 'Logins'), h('p', null, 'Who can sign in to this mountain. Everyone signs in with their username, or their email if they have one; only managers must have an email. Link a login to a staff member so they can see their shifts and clock in.')),
-      button('Add login', () => addLogin(staff, isOwner, reload), { kind: 'primary', small: true })),
+      h('div', { class: 'row' }, button('Season end', () => seasonEnd(reload), { small: true }), button('Add login', () => addLogin(staff, isOwner, reload), { kind: 'primary', small: true }))),
     users.length ? table([
       { head: 'Username', cell: (u) => [h('strong', null, u.username || ''), u.must_change_password ? h('small', { class: 'muted' }, ' (temporary password)') : null] },
       { head: 'Email', cell: (u) => u.email || h('span', { class: 'muted' }, 'None') },
       { head: 'Role', cell: (u) => label(u.role) },
       { head: 'Staff record', cell: (u) => (u.staff_id ? staffName.get(u.staff_id) || `#${u.staff_id}` : h('span', { class: 'muted' }, 'Not linked')) },
       { head: 'Status', cell: (u) => state(u.active ? 'Active' : 'Deactivated', u.active ? 'good' : 'neutral') },
-      { head: 'Two-step', cell: (u) => (u.mfa_enabled ? state('On', 'good') : h('span', { class: 'muted' }, 'Off')) },
+      { head: 'Two-step', cell: (u) => (u.mfa_enabled ? state(Number(u.passkeys) ? (u.app_enabled ? 'Passkey and app' : 'Passkey') : 'App', 'good') : h('span', { class: 'muted' }, 'Off')) },
+      { head: 'Access ends', cell: (u) => (u.access_ends_on ? (String(u.access_ends_on).slice(0, 10) < today() ? state(`Ended ${String(u.access_ends_on).slice(0, 10)}`, 'neutral') : String(u.access_ends_on).slice(0, 10)) : h('span', { class: 'muted' }, '-')) },
       { head: '', actions: true, cell: (u) => (canManage(u) ? [
         button('Edit', () => editLogin(u, reload), { small: true, label: `Edit ${u.username}` }),
         button('Link staff', () => linkStaff(u, staff, reload), { small: true }),
         button('Role', () => changeRole(u, isOwner, reload), { small: true }),
         button('New password', () => resetPassword(u), { small: true }),
         u.mfa_enabled ? button('Reset two-step', () => resetMfa(u, reload), { small: true }) : null,
+        u.pin_set ? button('Clear PIN', () => confirmDialog(`Clear ${who(u)}'s PIN?`, 'They are switched out of any shared terminal now and set a new PIN in Account.', 'Clear PIN', async () => { await del(`/users/${u.id}/pin`); toast('PIN cleared'); await reload(); }), { small: true }) : null,
         u.id === ctx.me.id ? null : button(u.active ? 'Deactivate' : 'Reactivate', () => toggleActive(u, reload), { small: true, kind: u.active ? 'danger' : undefined }),
       ] : null) },
     ], users) : empty('No logins.'));
@@ -104,7 +107,7 @@ function addLogin(staff, isOwner, done) {
     field('Username', uname, 'What they type to sign in. Letters, numbers, dots and dashes.'),
     h('label', { class: 'field' }, 'Email', email, emailHint),
     field('Role', role),
-    field('Temporary password', input({ name: 'password', type: 'text', required: true, minlength: 10, autocomplete: 'off' }), 'At least 10 characters. Tell them in person or by phone.'),
+    field('Temporary password', input({ name: 'password', type: 'text', required: true, minlength: 12, autocomplete: 'off' }), 'At least 12 characters. Tell them in person or by phone.'),
     h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name: 'temporary', checked: true }), ' They choose their own password when they first sign in'));
   formDialog('Add a login', f, async (fd) => {
     if (needsEmail(val(fd, 'role')) && !val(fd, 'email')) throw new Error('Managers need an email');
@@ -115,14 +118,32 @@ function addLogin(staff, isOwner, done) {
   suggest();
 }
 
+const today = () => new Date().toISOString().slice(0, 10);
+
 function editLogin(u, done) {
   formDialog(`Edit ${who(u)}`, h('div', { class: 'form' },
     field('Username', input({ name: 'username', value: u.username || '', required: true, maxlength: 40, autocapitalize: 'none', spellcheck: 'false' }), 'Letters, numbers, dots and dashes'),
-    field('Email', input({ name: 'email', type: 'email', value: u.email || '' }), needsEmail(u.role) ? 'Required for managers.' : 'Optional. Leave blank if they have none.')), async (fd) => {
-    await patch(`/users/${u.id}`, { username: val(fd, 'username'), email: val(fd, 'email') });
+    field('Email', input({ name: 'email', type: 'email', value: u.email || '' }), needsEmail(u.role) ? 'Required for managers.' : 'Optional. Leave blank if they have none.'),
+    needsEmail(u.role) ? null : field('Access ends after', input({ name: 'access_ends_on', type: 'date', value: u.access_ends_on ? String(u.access_ends_on).slice(0, 10) : '' }), 'They cannot sign in after this day. Leave blank for no end. Clear it to bring someone back.')), async (fd) => {
+    await patch(`/users/${u.id}`, { username: val(fd, 'username'), email: val(fd, 'email'), ...(needsEmail(u.role) ? {} : { access_ends_on: val(fd, 'access_ends_on') }) });
     toast('Saved');
     await done();
   });
+}
+
+/** The last day of the season: seasonal logins stop working after it, and new ones get it too. */
+async function seasonEnd(done) {
+  const r = await get('/tenant/sign-in-rules');
+  const date = input({ name: 'date', type: 'date', value: r.season_ends_on || '', min: today() });
+  const now = h('input', { type: 'checkbox', name: 'now', checked: true });
+  formDialog('Season end', h('div', { class: 'stack' },
+    h('p', null, 'Seasonal staff stop being able to sign in after this day, so logins do not linger over the summer. Owners and managers are never affected. To bring someone back, edit their login and clear or move the date.'),
+    h('div', { class: 'form' }, field('Last day of the season', date, 'Leave blank to have no season end for new logins')),
+    h('label', { class: 'check' }, now, ' Also set it on every current counter, instructor, staff and patrol login')), async () => {
+    const out = await post('/users/season-end', { date: date.value || null, apply_to_current: now.checked });
+    toast(out.season_ends_on ? `Season ends ${out.season_ends_on}. ${out.changed} login${out.changed === 1 ? '' : 's'} updated` : 'No season end for new logins');
+    await done();
+  }, { submitText: 'Save' });
 }
 
 function linkStaff(u, staff, done) {
@@ -144,7 +165,7 @@ function changeRole(u, isOwner, done) {
 
 function resetPassword(u) {
   formDialog(`New password for ${who(u)}`, h('div', { class: 'form' },
-    field('New password', input({ name: 'password', type: 'text', required: true, minlength: 10, autocomplete: 'off' }), 'They are signed out everywhere until they use it. Tell them in person or by phone.'),
+    field('New password', input({ name: 'password', type: 'text', required: true, minlength: 12, autocomplete: 'off' }), 'At least 12 characters. They are signed out everywhere until they use it. Tell them in person or by phone.'),
     h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name: 'temporary', checked: true }), ' Temporary: they choose their own password when they next sign in')), async (fd) => {
     await post(`/users/${u.id}/reset-password`, { new_password: fd.get('password'), temporary: Boolean(fd.get('temporary')) });
     toast(`Password reset. They sign in as ${who(u)}`);

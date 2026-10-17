@@ -8,6 +8,31 @@
 4. **Legal**: have a lawyer review the waiver text and privacy terms. Sign a BAA with Google Cloud before storing patrol patient/health data (see HIPAA.md).
 5. **Card payments**: pick a processor (Square or Stripe) before taking live cards through a terminal. Until then card sales are recorded manually.
 
+## Tiered sign-in (2026.10.17)
+
+Who signs in how:
+
+| Who | How | Extra checks |
+| --- | --- | --- |
+| Owners, managers, patrol Admins and Managers | Passkey, or password plus authenticator app (always, in production) | Second check before sensitive actions; new-device email |
+| Patrollers | Passkey, or password plus app (on by default; existing mountains get two weeks, `tenants.patrol_mfa_from`) | Second check before releasing or exporting records |
+| Counter, instructor, lift staff | Password, or a PIN on an enrolled shared terminal | New device: code by email (when they have one); access ends at season end |
+| Console operators | Passkey only, once they have one (password plus code until then) | Open each mountain with a reason, up to 8 hours |
+
+- **Passkeys** belong to the address they were made on. If the app moves to its own domain (for example from the run.app
+  address to app.yourdomain.com), people add their passkey again. Set `WEBAUTHN_RP_ID=yourdomain.com` before people add
+  passkeys so one passkey works on every address under that domain. `WEBAUTHN_ORIGINS` (comma-separated
+  `https://...` addresses) pins which pages may use them; by default it is the address the request came to.
+- **Second check** (`STEP_UP_MINUTES`, 10): refunds over `STEP_UP_REFUND_CENTS` (20000 = $200), changing a role,
+  switching a login off, adding a manager, resetting someone's password or two-step, customer, waiver and patrol
+  downloads, releasing a patient record, billing, turning off the two-step rules, removing a passkey, and enrolling or
+  removing a terminal. Straight after a sign-in counts.
+- **Shared terminals** end after `TERMINAL_IDLE_MINUTES` (15) unused. Removing one in Account signs out everyone on it.
+  A lost or stolen terminal: remove it, nothing else to do.
+- **Lost phone**: a manager presses Reset two-step on that login (it removes their passkeys and authenticator app); for a
+  manager, the owner does it; for the owner, the console's Reset password with "clear two-step".
+- **Patrollers who must not be forced yet**: the owner can turn the patrol rule off in Account (needs their second check).
+
 ## Security setup (once, after 2026.10.16)
 
 From the unzipped folder in Cloud Shell, after `bash deploy.sh`:

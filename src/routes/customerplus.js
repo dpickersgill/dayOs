@@ -5,6 +5,7 @@
 const express = require('express');
 const { pool, rows, one, tx } = require('../db');
 const { requireRole } = require('../middleware/auth');
+const { stepUp } = require('../lib/stepup');
 const { z, validate, paramId, dateStr } = require('../lib/util');
 const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
@@ -151,7 +152,7 @@ router.delete('/:id/notes/:noteId', requireRole('manager'), async (req, res) => 
 });
 
 // ---------------------------------------------------------------- one person's data: download it, or anonymise it
-router.get('/:id/data-export', requireRole('manager'), async (req, res) => {
+router.get('/:id/data-export', requireRole('manager'), stepUp('download everything about a guest'), async (req, res) => {
   const { tenantId } = req.auth;
   const p = await person(req);
   const id = p.id;

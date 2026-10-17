@@ -230,12 +230,12 @@ export function dialog(title, content, { wide = false, footer, onClose } = {}) {
  * A form in a dialog. build(form) returns the field elements; submit(values) does the work and the dialog
  * closes when it resolves. Errors stay in the dialog so nothing typed is lost.
  */
-export function formDialog(title, fieldsEl, submit, { submitText = 'Save', wide = false } = {}) {
+export function formDialog(title, fieldsEl, submit, { submitText = 'Save', wide = false, onClose } = {}) {
   const errorSlot = h('div');
   const save = h('button', { type: 'submit', class: 'btn primary' }, submitText);
   const cancel = h('button', { type: 'button', class: 'btn' }, 'Cancel');
   const form = h('form', { class: 'stack', novalidate: true }, fieldsEl, errorSlot, h('div', { class: 'footer row' }, cancel, save));
-  const dlg = dialog(title, form, { wide });
+  const dlg = dialog(title, form, { wide, onClose });
   cancel.addEventListener('click', dlg.close);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();

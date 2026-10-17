@@ -3,6 +3,10 @@
 import { openTourPicker, resumeTour, welcomeOnce, endTour } from './tour.js';
 import { get, post, session, hooks, ApiError } from './api.js';
 import { mfaPanel } from './views/mfa.js';
+import * as passkey from './passkey.js';
+import { confirmItsYou } from './stepup.js';
+import { readTerminal, saveTerminal } from './terminal.js';
+import { passkeysPanel } from './views/security.js';
 import { flush as flushOutbox, waitingCounts, forgetCases, setDeviceKey, dropDeviceKey } from './outbox.js';
 import { buildFrame, GROUP_OF } from './nav.js';
 import { icon } from './icons.js';
@@ -58,6 +62,13 @@ function ridge() {
 function readSlug() { try { return localStorage.getItem(SLUG_KEY) || ''; } catch (_) { return ''; } }
 function saveSlug(v) { try { localStorage.setItem(SLUG_KEY, v); } catch (_) { /* private mode */ } }
 
+/** Signed in: keep the token and open the app. */
+async function signedIn(out) {
+  session.token = out.token;
+  if (out.recovery_codes_left !== undefined && out.recovery_codes_left < 3) toast(`Recovery code used. ${out.recovery_codes_left} left: make new ones in Account.`);
+  await start();
+}
+
 function showSignIn(message) {
   clear(app);
   const err = h('div');
@@ -75,19 +86,37 @@ function showSignIn(message) {
     try {
       const out = await post('/auth/login', { tenant: slug.value.trim().toLowerCase(), login: email.value.trim(), password: pw.value });
       saveSlug(slug.value.trim().toLowerCase());
-      if (out.mfa_required) { showSecondStep(out.mfa_token); return; }
-      session.token = out.token;
-      await start();
+      if (out.mfa_required) { showSecondStep(out); return; }
+      await signedIn(out);
     } catch (ex) {
       err.append(errorBox(ex instanceof ApiError && ex.status === 429 ? new Error('Too many attempts. Wait a minute and try again.') : ex));
       go.disabled = false;
     }
   });
+  // A passkey signs in on its own: no username or password to type (the phone asks for a fingerprint, face or PIN).
+  const pkErr = h('div');
+  const pk = passkey.supported() ? button('Sign in with a passkey', async () => {
+    clear(pkErr);
+    const tenant = slug.value.trim().toLowerCase();
+    if (!tenant) { pkErr.append(errorBox(new Error('Type your mountain first'))); slug.focus(); return; }
+    pk.disabled = true;
+    try {
+      const { handle, options } = await post('/auth/passkey/options', { tenant });
+      const response = await passkey.use(options);
+      const out = await post('/auth/passkey', { tenant, handle, response });
+      saveSlug(tenant);
+      await signedIn(out);
+    } catch (ex) { pkErr.append(errorBox(ex)); pk.disabled = false; }
+  }, { small: false }) : null;
+  const term = readTerminal();
   app.append(h('div', { class: 'signin' },
     h('section', { class: 'signin-side' },
       h('div', null, h('p', { class: 'brand' }, h('strong', null, 'SummitOps')), h('h1', null, 'Run the mountain from one screen.'),
         h('p', null, 'Tickets, lifts, rentals, lessons, patrol and staff schedules for your mountain.')), ridge()),
-    h('section', { class: 'signin-form' }, h('h2', null, 'Sign in'), message ? h('p', { class: 'muted', role: 'status' }, message) : null, form, signInVersion())));
+    h('section', { class: 'signin-form' }, h('h2', null, 'Sign in'), message ? h('p', { class: 'muted', role: 'status' }, message) : null, form,
+      pk ? h('div', { class: 'stack tight signin-passkey' }, h('p', { class: 'muted small' }, 'Or, if you added a passkey on this phone or computer:'), pk, pkErr) : null,
+      term ? h('p', { class: 'small' }, button(`Back to the PIN screen (${term.name})`, () => showPinSignIn(), { small: true })) : null,
+      signInVersion())));
   (slug.value ? email : slug).focus();
 }
 
@@ -97,40 +126,79 @@ function signInVersion() {
   return p;
 }
 
-/** Password was right and the login has two-step sign-in: ask for the six-digit code (or a recovery code). */
-function showSecondStep(mfaToken) {
+/**
+ * Password was right; the second step is still to do: their passkey, the code from their app (or a recovery code), or on a
+ * device they have not used before, the code emailed to them.
+ */
+function showSecondStep(first) {
+  clear(app);
+  const methods = first.methods || { app: true };
+  const err = h('div');
+  const parts = [];
+  if (methods.passkey) {
+    const b = button('Use my passkey', async () => {
+      clear(err); b.disabled = true;
+      try {
+        const { handle, options } = await post('/auth/mfa/passkey-options', { mfa_token: first.mfa_token });
+        const response = await passkey.use(options);
+        await signedIn(await post('/auth/mfa', { mfa_token: first.mfa_token, handle, response }));
+      } catch (ex) { err.append(errorBox(ex)); b.disabled = false; }
+    }, { kind: 'primary' });
+    parts.push(h('div', { class: 'row' }, b));
+  }
+  let code = null;
+  if (methods.app || methods.email) {
+    code = input({ name: 'code', inputmode: methods.email ? 'numeric' : 'text', autocomplete: 'one-time-code', autocapitalize: 'characters', spellcheck: 'false', required: true, 'aria-label': 'Code' });
+    const go = h('button', { type: 'submit', class: methods.passkey ? 'btn' : 'btn primary' }, 'Verify');
+    const hint = methods.email ? `We emailed a six-digit code to ${first.sent_to}, because this device has not signed in before. It works for 10 minutes.` : 'From your authenticator app. Lost your phone? Type one of your recovery codes instead.';
+    const form = h('form', { novalidate: true, 'data-step': 'mfa' }, field(methods.email ? 'Code from your email' : methods.passkey ? 'Or the six-digit code' : 'Six-digit code', code, hint), h('div', { class: 'row' }, go));
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clear(err);
+      go.disabled = true;
+      try { await signedIn(await post('/auth/mfa', { mfa_token: first.mfa_token, code: code.value.trim() })); } catch (ex) { err.append(errorBox(ex)); go.disabled = false; code.select(); }
+    });
+    parts.push(form);
+  }
+  const lead = methods.email ? 'Check your email.' : 'One more step.';
+  const say = methods.email ? 'This device has not signed in to your account before.' : methods.passkey ? 'Use your passkey to finish signing in.' : 'Enter the code from your authenticator app to finish signing in.';
+  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('strong', null, 'SummitOps')), h('h1', null, lead), h('p', null, say)), ridge()),
+    h('section', { class: 'signin-form stack' }, h('h2', null, methods.email ? 'New device' : 'Two-step sign-in'), ...parts, err, button('Start again', () => showSignIn(), { small: true }))));
+  const first_ = app.querySelector('.signin-form .btn.primary, .signin-form input');
+  if (first_) first_.focus();
+}
+
+/** A shared terminal: pick yourself by username and type your PIN. Managers and patrol sign in properly instead. */
+async function showPinSignIn(message) {
+  const term = readTerminal();
+  if (!term) { showSignIn(message); return; }
   clear(app);
   const err = h('div');
-  const code = input({ name: 'code', inputmode: 'text', autocomplete: 'one-time-code', autocapitalize: 'characters', spellcheck: 'false', required: true, 'aria-label': 'Code' });
-  const go = h('button', { type: 'submit', class: 'btn primary' }, 'Verify');
-  const back = button('Start again', () => showSignIn(), { small: true });
-  const form = h('form', { novalidate: true, 'data-step': 'mfa' }, field('Six-digit code', code, 'From your authenticator app. Lost your phone? Type one of your recovery codes instead.'), err, h('div', { class: 'row' }, go, back));
+  const who = input({ name: 'login', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', required: true });
+  const pin = input({ name: 'pin', type: 'password', inputmode: 'numeric', autocomplete: 'off', pattern: '[0-9]*', maxlength: 8, required: true });
+  const go = h('button', { type: 'submit', class: 'btn primary' }, 'Start');
+  const form = h('form', { novalidate: true, 'data-step': 'pin' }, field('Username', who), field('PIN', pin, 'Your 6 to 8 digit PIN. Set it in Account after signing in with your password.'), err, go);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     clear(err);
     go.disabled = true;
-    try {
-      const out = await post('/auth/mfa', { mfa_token: mfaToken, code: code.value.trim() });
-      session.token = out.token;
-      if (out.recovery_codes_left !== undefined && out.recovery_codes_left < 3) toast(`Recovery code used. ${out.recovery_codes_left} left: make new ones in Account.`);
-      await start();
-    } catch (ex) {
-      err.append(errorBox(ex));
-      go.disabled = false;
-      code.select();
-    }
+    try { await signedIn(await post('/auth/pin-login', { tenant: term.tenant, terminal: term.secret, login: who.value.trim(), pin: pin.value.trim() })); } catch (ex) { pin.value = ''; err.append(errorBox(ex)); go.disabled = false; pin.focus(); }
   });
-  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('strong', null, 'SummitOps')), h('h1', null, 'One more step.'), h('p', null, 'Enter the code from your authenticator app to finish signing in.')), ridge()),
-    h('section', { class: 'signin-form' }, h('h2', null, 'Two-step sign-in'), form)));
-  code.focus();
+  const title = h('h2', null, term.name);
+  app.append(h('div', { class: 'signin terminal' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('strong', null, 'SummitOps')), h('h1', null, 'Shared terminal.'), h('p', null, 'Switch in with your username and PIN. Sign out when you step away, so the next person starts as themselves.')), ridge()),
+    h('section', { class: 'signin-form' }, title, message ? h('p', { class: 'muted', role: 'status' }, message) : null, form,
+      h('p', { class: 'small' }, button('Sign in with a password or passkey', () => showSignIn(), { small: true })))));
+  who.focus();
+  // Check this computer is still enrolled (a manager can remove it); if not, it goes back to the normal sign-in.
+  try { const t = await post('/auth/terminal', { tenant: term.tenant, terminal: term.secret }); title.textContent = `${t.name}, ${t.mountain}`; } catch (ex) { if (ex.status === 403) { saveTerminal(null); showSignIn(ex.message); } }
 }
 
 /** The mountain requires two-step sign-in and this login does not have it yet: nothing else opens until it is set up. */
 function showEnrollment() {
   clear(app);
   const done = async () => { await start(); };
-  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('strong', null, 'SummitOps')), h('h1', null, 'Protect your account.'), h('p', null, 'Your mountain requires two-step sign-in.')), ridge()),
-    h('section', { class: 'signin-form stack' }, mfaPanel(done), button('Sign out', () => signOut(), { small: true }))));
+  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('strong', null, 'SummitOps')), h('h1', null, 'Protect your account.'), h('p', null, ctx.me.mfa_rule === 'mountain' ? 'Your mountain requires two-step sign-in.' : ctx.me.mfa_rule === 'patrol' ? 'Patrol holds patient details, so patrollers use two-step sign-in.' : 'Owners, managers and patrol leads use two-step sign-in, because they can change everything.')), ridge()),
+    h('section', { class: 'signin-form stack' }, h('p', null, 'Add a passkey (quickest: your fingerprint or face) or an authenticator app. Either one works.'), passkeysPanel(done), mfaPanel(done), button('Sign out', () => signOut(), { small: true }))));
 }
 
 /** A manager set a temporary password: the person chooses their own before anything else opens. */
@@ -138,14 +206,14 @@ function showPasswordChange() {
   clear(app);
   const err = h('div');
   const cur = input({ name: 'current', type: 'password', autocomplete: 'current-password', required: true });
-  const next = input({ name: 'new', type: 'password', autocomplete: 'new-password', required: true, minlength: 10 });
-  const again = input({ name: 'again', type: 'password', autocomplete: 'new-password', required: true, minlength: 10 });
+  const next = input({ name: 'new', type: 'password', autocomplete: 'new-password', required: true, minlength: 12 });
+  const again = input({ name: 'again', type: 'password', autocomplete: 'new-password', required: true, minlength: 12 });
   const go = h('button', { type: 'submit', class: 'btn primary' }, 'Save my password');
-  const form = h('form', { novalidate: true, 'data-step': 'new-password' }, field('Temporary password', cur, 'The one you were given'), field('New password', next, 'At least 10 characters'), field('New password again', again), err, h('div', { class: 'row' }, go, button('Sign out', () => signOut(), { small: true })));
+  const form = h('form', { novalidate: true, 'data-step': 'new-password' }, field('Temporary password', cur, 'The one you were given'), field('New password', next, 'At least 12 characters'), field('New password again', again), err, h('div', { class: 'row' }, go, button('Sign out', () => signOut(), { small: true })));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     clear(err);
-    if (next.value.length < 10) { err.append(errorBox(new Error('Use at least 10 characters'))); return; }
+    if (next.value.length < 12) { err.append(errorBox(new Error('Use at least 12 characters'))); return; }
     if (next.value !== again.value) { err.append(errorBox(new Error('The two new passwords are not the same'))); return; }
     go.disabled = true;
     try {
@@ -293,10 +361,11 @@ async function signOut(message) {
   ctx.me = null;
   navToken += 1;
   history.replaceState(null, '', location.pathname);
-  showSignIn(message);
+  if (readTerminal()) showPinSignIn(message); else showSignIn(message);
 }
 
 hooks.onSignedOut = () => { if (ctx.me) signOut('Your session ended. Sign in again.'); };
+hooks.stepUp = (details) => confirmItsYou(details);
 
 // Automatic sign-out: a phone or screen left open should not leave guest and patient details on display.
 const IDLE_MINUTES = 15;
@@ -313,12 +382,12 @@ for (const ev of ['pointerdown', 'keydown', 'scroll', 'touchstart']) document.ad
 setInterval(() => { if (ctx.me && !idleTimer) resetIdle(); if (!ctx.me) { clearTimeout(idleTimer); idleTimer = null; } }, 5_000).unref?.();
 
 async function start() {
-  if (!session.token) { showSignIn(); return; }
+  if (!session.token) { if (readTerminal()) showPinSignIn(); else showSignIn(); return; }
   try {
     ctx.me = await get('/auth/me');
   } catch (_) {
     session.clear();
-    showSignIn();
+    if (readTerminal()) showPinSignIn(); else showSignIn();
     return;
   }
   ctx.tz = ctx.me.timezone || ctx.tz;
@@ -327,6 +396,10 @@ async function start() {
   if (ctx.me.must_change_password) { showPasswordChange(); return; }
   if (ctx.me.mfa_enrollment_required) { showEnrollment(); return; }
   buildShell();
+  if (ctx.me.mfa_starts_on && !ctx.me.mfa_enabled) {
+    main.before(h('div', { class: 'banner warn', role: 'status', 'data-banner': 'mfa-soon' }, `From ${new Date(`${ctx.me.mfa_starts_on}T12:00:00`).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}, patrollers need two-step sign-in, because Patrol holds patient details. `,
+      h('a', { href: '#/settings' }, 'Set it up now in Account'), ' (a passkey takes a minute).'));
+  }
   await route();
   if (ctx.me.sandbox) { resumeTour(); welcomeOnce(); }
 }

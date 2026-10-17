@@ -15,18 +15,18 @@ export function mfaPanel(onChange) {
     let me;
     try { me = await get('/auth/me'); } catch (err) { box.append(errorBox(err)); return; }
     ctx.me = { ...ctx.me, ...me };
-    box.append(h('h2', null, 'Two-step sign-in'));
-    if (me.mfa_enabled) {
-      box.append(h('p', null, state('On', 'good'), ' You enter a code from your authenticator app each time you sign in.'),
+    box.append(h('h2', null, 'Authenticator app'));
+    if (me.app_enabled) {
+      box.append(h('p', null, state('On', 'good'), me.passkeys ? ' You can sign in with a passkey, or with your password and a code from the app.' : ' You enter a code from your authenticator app each time you sign in.'),
         h('div', { class: 'row' },
           button('New recovery codes', () => newCodes(), { small: true }),
-          me.mfa_required_by_mountain ? h('span', { class: 'muted small' }, 'Your mountain requires two-step sign-in, so it cannot be turned off.') : button('Turn off', () => turnOff(), { small: true, kind: 'danger' })));
+          me.mfa_required && !me.passkeys ? h('span', { class: 'muted small' }, 'You must have two-step sign-in, so it can only be turned off once you have a passkey.') : button('Turn off', () => turnOff(), { small: true, kind: 'danger' })));
       return;
     }
-    box.append(h('p', null, me.mfa_required_by_mountain
-      ? 'Your mountain requires two-step sign-in. Set it up now to carry on.'
-      : 'Add a second step to sign in: a six-digit code from an app on your phone. It protects guest and patient information even if a password is guessed or leaked.'),
-    h('div', { class: 'row' }, button('Set up two-step sign-in', () => setup(), { kind: 'primary' })));
+    box.append(h('p', null, me.passkeys
+      ? 'Optional, as a backup to your passkey: a six-digit code from an app on your phone.'
+      : 'A six-digit code from an app on your phone, as a second step after your password. It protects guest and patient information even if a password is guessed or leaked.'),
+    h('div', { class: 'row' }, button('Set up an authenticator app', () => setup(), { kind: me.passkeys ? undefined : 'primary', small: Boolean(me.passkeys) })));
   }
 
   async function setup() {

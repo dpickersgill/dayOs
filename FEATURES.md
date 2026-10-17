@@ -519,6 +519,8 @@ Platform console, **Demos**: everyone who started a demo, newest first. Tiles sh
 
 ### Security
 
+- **Tiered sign-in (2026.10.17):** passkeys (WebAuthn, `@simplewebauthn/server`) for sign-in, as the second step and for the second check; owners, managers, patrol leads and (after two weeks, owner can turn off) patrollers must have a passkey or an app; crew use a password or a PIN on an enrolled terminal; a new device gets an email alert and, without two-step, an emailed code; Account lists sessions and devices; season end stops seasonal logins; the console's operators sign in with a passkey only once they have one and open a mountain with a reason for up to 8 hours (`src/lib/passkeys.js`, `src/lib/stepup.js`, `src/routes/security.js`, `db/zerotrust.sql`).
+- **Passwords:** 12 to 128 characters, not built from the username, email name, mountain or "summitops" (`src/lib/passwords.js`).
 - **Sessions the server can end** (`user_sessions`, only a hash of each id kept): signing out, an hour unused (`SESSION_IDLE_MINUTES`), a password change, a console reset or closing a mountain ends them. `POST /api/v1/auth/logout`.
 - **Login lockout:** 10 wrong passwords in a row lock that login for 15 minutes (`LOGIN_LOCK_AFTER`), written to the audit log; a console password reset unlocks it.
 - **Breached passwords refused** (Pwned Passwords range API, k-anonymity; allowed if the service is unreachable; `PWNED_CHECK=off`).

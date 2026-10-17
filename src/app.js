@@ -158,6 +158,7 @@ function createApp() {
   // 10 sign-in attempts a minute per address. LOGIN_RATE_LIMIT exists so automated tests can raise it.
   api.use('/auth/login', rateLimit({ windowMs: 60_000, max: Number(process.env.LOGIN_RATE_LIMIT) || 10, message: 'Too many login attempts' }));
   api.use('/auth/mfa', rateLimit({ windowMs: 60_000, max: Number(process.env.LOGIN_RATE_LIMIT) || 20, message: 'Too many attempts' }));
+  api.use(['/auth/passkey', '/auth/pin-login', '/auth/terminal'], rateLimit({ windowMs: 60_000, max: Number(process.env.LOGIN_RATE_LIMIT) || 20, message: 'Too many sign-in attempts' }));
   api.use('/tenants', rateLimit({ windowMs: 60_000, max: 5 }));
   api.use('/auth/change-password', rateLimit({ windowMs: 60_000, max: 10, message: 'Too many attempts' }));
   api.use('/users', rateLimit({ windowMs: 60_000, max: 60 }));
@@ -179,11 +180,12 @@ function createApp() {
   api.use('/internal/jobs', rateLimit({ windowMs: 60_000, max: 10 }), followPublic.jobs);
   api.use('/trial', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SANDBOX_RATE_LIMIT) || 5, message: 'Too many demo requests from this address. Try again later, or ask us for a walkthrough.' }), sandboxRoutes);
   // Operator sign-in has its own, tighter limit (on top of each login's lockout).
-  api.post(['/platform/login', '/platform/login/setup'], rateLimit({ windowMs: 15 * 60_000, max: Number(process.env.PLATFORM_LOGIN_RATE_LIMIT) || 20, message: 'Too many sign-in attempts from this address. Try again in 15 minutes.' }));
+  api.post(['/platform/login', '/platform/login/setup', '/platform/login/passkey', '/platform/login/passkey/options'], rateLimit({ windowMs: 15 * 60_000, max: Number(process.env.PLATFORM_LOGIN_RATE_LIMIT) || 20, message: 'Too many sign-in attempts from this address. Try again in 15 minutes.' }));
   api.use('/platform', rateLimit({ windowMs: 60_000, max: Number(process.env.PLATFORM_RATE_LIMIT) || 60, message: 'Too many attempts' }), platform);
   api.use(site.api); // the website's plans and contact form (no sign-in)
   api.use('/public', rateLimit({ windowMs: 60_000, max: 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, publicRouter, dispatch.publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter);
   api.use(authRoutes); // login, tenants, users, me (each route applies authenticate itself where needed)
+  api.use(require('./routes/security')); // passkeys, the second check, sessions, devices, PINs, terminals (each route authenticates)
 
   // Everything below requires a valid token; tenant comes from the token only.
   api.use(authenticate);

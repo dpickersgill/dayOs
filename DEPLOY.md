@@ -86,6 +86,7 @@ Migrations only add tables and columns, so the previous revision keeps working a
 | `GOOGLE_SITE_VERIFICATION`, `BING_SITE_VERIFICATION` | The ownership codes from Google Search Console and Bing Webmaster Tools (their "HTML tag" option), added to every website page. |
 | `PLATFORM_TOTP_SECRET`, `PLATFORM_ALLOW_IPS` | Two-step sign-in and an address allowlist for the platform console. See RUNBOOK.md. |
 | `SESSION_IDLE_MINUTES`, `LOGIN_LOCK_AFTER`, `REQUIRE_ADMIN_MFA`, `PWNED_CHECK`, `PLATFORM_KEY_SIGNIN` | Security settings, all with safe defaults: sign-out after 60 idle minutes, a 15-minute lock after 10 wrong passwords, two-step required for owners and managers in production, breached passwords refused, and the platform key off once an operator has two-step. See RUNBOOK.md, Security setup. |
+| `WEBAUTHN_RP_ID`, `WEBAUTHN_ORIGINS`, `STEP_UP_MINUTES`, `STEP_UP_REFUND_CENTS`, `TERMINAL_IDLE_MINUTES` | Passkeys and the second check. Set `WEBAUTHN_RP_ID` to your own domain (for example `summitops.com`) once the app is on it, before people add passkeys. See RUNBOOK.md, Tiered sign-in. |
 | `TRUST_PROXY_HOPS`, `PUSH_EXTRA_HOSTS`, `AUDIT_LOG_STDOUT` | Set by cloud-armor.sh (2 behind the load balancer); extra push service hosts; `off` stops audit events going to Cloud Logging. |
 
 See RUNBOOK.md for rotating secrets, the scheduler command, the one-time security setup (`bash scripts/harden.sh`) and the security checklist.

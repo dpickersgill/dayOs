@@ -6,6 +6,7 @@
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
+const { stepUp } = require('../lib/stepup');
 const { z, validate } = require('../lib/util');
 const { bad, forbidden, conflict } = require('../lib/errors');
 const { audit } = require('../lib/audit');
@@ -93,7 +94,7 @@ router.put('/billing/choice', managers, ownerOnly, validate(choiceBody), async (
 });
 
 /** Pay by card or US bank account: Stripe's hosted page. Any trial days left are kept. */
-router.post('/billing/checkout', managers, ownerOnly, validate(z.object({ method: z.enum(['card', 'bank']).default('card') })), async (req, res) => {
+router.post('/billing/checkout', managers, ownerOnly, stepUp('change how SummitOps is paid'), validate(z.object({ method: z.enum(['card', 'bank']).default('card') })), async (req, res) => {
   if (!stripe.enabled()) throw conflict('Payments are not set up yet. Contact SummitOps.');
   const t = req.auth.tenantId;
   const b = await rowOf(pool, t);
@@ -140,7 +141,7 @@ router.post('/billing/invoice', managers, ownerOnly, validate(z.object({ billing
 });
 
 /** Stripe's customer portal: change the card or bank account, see and pay invoices, cancel. */
-router.post('/billing/portal', managers, ownerOnly, async (req, res) => {
+router.post('/billing/portal', managers, ownerOnly, stepUp('change how SummitOps is paid'), async (req, res) => {
   if (!stripe.enabled()) throw conflict('Payments are not set up yet. Contact SummitOps.');
   const b = await one(pool, 'SELECT stripe_customer_id FROM tenant_billing WHERE tenant_id = ?', [req.auth.tenantId]);
   if (!b || !b.stripe_customer_id) throw bad('There is nothing to manage yet: choose a plan and pay first');

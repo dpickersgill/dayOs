@@ -24,6 +24,7 @@ const router = express.Router();
 // Incident records can contain injury details about guests, so access is limited to patrol and managers.
 const patrol = requireRole('patrol', 'manager');
 const PA = require('../lib/patrolaccess');
+const { stepUp } = require('../lib/stepup');
 const needs = (feature, message) => PA.needs(pool, feature, message);
 
 const CLINICAL_CATEGORIES = ['injury', 'medical'];
@@ -180,7 +181,7 @@ const csvCell = (v) => {
 const toCsv = (cols, data) => [cols.join(','), ...data.map((r) => cols.map((c) => csvCell(r[c])).join(','))].join('\r\n');
 
 /** CSV for insurers and state reporting. Names and free text (the summary can hold a name) stay out of it. */
-router.get('/incidents.csv', patrol, needs('reports'), async (req, res) => {
+router.get('/incidents.csv', patrol, needs('reports'), stepUp('download case records'), async (req, res) => {
   const { where, params } = filters(req);
   const data = await rows(
     pool,
@@ -196,7 +197,7 @@ router.get('/incidents.csv', patrol, needs('reports'), async (req, res) => {
 });
 
 /** One row per patient with structured fields only (no names, no free text), for injury statistics. */
-router.get('/patients.csv', patrol, needs('reports'), async (req, res) => {
+router.get('/patients.csv', patrol, needs('reports'), stepUp('download patient statistics'), async (req, res) => {
   const { where, params } = filters(req);
   const data = await rows(
     pool,

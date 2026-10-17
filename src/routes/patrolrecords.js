@@ -9,6 +9,7 @@ const { z, validate, paramId, dateStr, dateTimeStr, normDateTime } = require('..
 const { notFound, bad, conflict, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const PA = require('../lib/patrolaccess');
+const { stepUp } = require('../lib/stepup');
 const OPS = require('../lib/patrolops');
 
 const router = express.Router();
@@ -53,7 +54,7 @@ router.post('/records', patrol, needs('records'), validate(z.object({
  * Release a report: the approved version, frozen, with a release number. Without an authorization on file (a signed
  * release, a subpoena, a court order, a police request, or the patient asking for their own) it cannot be released.
  */
-router.post('/records/:id/release', patrol, needs('records'), validate(z.object({ note: z.string().trim().max(500).nullable().optional() })), async (req, res) => {
+router.post('/records/:id/release', patrol, needs('records'), stepUp('release a patient record'), validate(z.object({ note: z.string().trim().max(500).nullable().optional() })), async (req, res) => {
   const t = req.auth.tenantId;
   const out = await tx(async (conn) => {
     const r = await one(conn, 'SELECT * FROM patrol_records_requests WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, paramId(req)]);

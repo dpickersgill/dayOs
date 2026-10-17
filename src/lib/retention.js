@@ -8,8 +8,13 @@ const { trail } = require('./audit');
 const LEAD_YEARS = 2;
 
 async function runAll() {
-  const out = { sessions: 0, leads: 0, demos: 0, mountains: 0 };
+  const out = { sessions: 0, challenges: 0, access_ended: 0, leads: 0, demos: 0, mountains: 0 };
   out.sessions = await require('./sessions').prune();
+  out.challenges = await require('./challenges').prune();
+  // Seasonal logins whose last day has passed: their sessions end now (signing in is already refused).
+  const [ended] = await pool.query("UPDATE user_sessions s JOIN users u ON u.id = s.user_id SET s.ended_at = UTC_TIMESTAMP(), s.ended_why = 'access_ended' WHERE s.ended_at IS NULL AND u.access_ends_on IS NOT NULL AND u.access_ends_on < CURDATE()");
+  out.access_ended = ended.affectedRows;
+  // Operators' openings of a mountain that ran out are kept as history; nothing to delete.
   const [l] = await pool.query('DELETE FROM site_leads WHERE created_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? YEAR)', [LEAD_YEARS]);
   out.leads = l.affectedRows;
   const S = require('./sandbox');

@@ -8,14 +8,42 @@ const sessions = require('../lib/sessions');
 const { unauthorized, forbidden } = require('../lib/errors');
 
 const MANAGER_ROLES = ['owner', 'manager'];
+const CREW_ROLES = ['counter', 'instructor', 'staff'];
 
-/** Must this login use two-step sign-in? (row: { role, require_mfa, sandbox }) */
-const mfaRequired = (row) => Boolean(Number(row.require_mfa)) || (config.requireAdminMfa && MANAGER_ROLES.includes(row.role) && !Number(row.sandbox));
+/**
+ * Who must use two-step sign-in (an authenticator app or a passkey), tier by tier. Returns why, or null.
+ *   mountain     the owner turned it on for everyone
+ *   manager      owners and managers (REQUIRE_ADMIN_MFA, on in production)
+ *   patrol_lead  patrol Admins and Managers (they run the team and its records)
+ *   patrol       patrollers, who see patient details (unless the owner turned it off, and after a two-week start)
+ * Counter, instructor and lift staff are not forced: they use a password, or a PIN on an enrolled terminal.
+ * Demo mountains are exempt from the tiers. row: the sign-in check's columns.
+ */
+function mfaRule(row) {
+  if (Number(row.require_mfa)) return 'mountain';
+  if (!config.requireAdminMfa || Number(row.sandbox)) return null;
+  if (MANAGER_ROLES.includes(row.role)) return 'manager';
+  if (Number(row.patrol_lead)) return 'patrol_lead';
+  if ((row.role === 'patrol' || Number(row.on_patrol)) && !Number(row.patrol_host) && Number(row.mfa_for_patrol ?? 1) && Number(row.patrol_mfa_due ?? 1)) return 'patrol';
+  return null;
+}
+const mfaRequired = (row) => Boolean(mfaRule(row));
+
+/** The columns mfaRule needs, for a query over users u JOIN tenants t. */
+const TIER_SQL = `(u.totp_enabled = 1 OR EXISTS (SELECT 1 FROM user_passkeys k WHERE k.user_id = u.id)) AS strong,
+  (u.staff_id IS NOT NULL AND EXISTS (SELECT 1 FROM patrol_members m JOIN staff s2 ON s2.tenant_id = m.tenant_id AND s2.id = m.staff_id AND s2.status = 'active' WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id)) AS on_patrol,
+  (u.staff_id IS NOT NULL AND EXISTS (SELECT 1 FROM patrol_members m WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id AND m.access_level IN ('admin','manager'))) AS patrol_lead,
+  (u.staff_id IS NOT NULL AND EXISTS (SELECT 1 FROM patrol_members m WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id AND m.access_level = 'host')) AS patrol_host,
+  t.require_mfa, t.mfa_for_patrol, (t.patrol_mfa_from IS NULL OR t.patrol_mfa_from <= CURDATE()) AS patrol_mfa_due, t.patrol_mfa_from,
+  (t.sandbox_expires_at IS NOT NULL) AS sandbox`;
+
+// While two-step is still to be set up, or a temporary password replaced, only these are open.
+const SETUP_PATHS = /\/auth\/(me|logout|change-password|mfa\/(setup|enable|status)|passkeys(\/options)?)$/;
 
 /**
  * Verifies the bearer token, then re-checks the user in the database on every request, so that
  * deactivating a login, changing a role, or changing a password takes effect immediately instead of
- * after the token expires. Sets req.auth = { tenantId, userId, role, staffId }.
+ * after the token expires. Sets req.auth = { tenantId, userId, role, staffId, onPatrol, sid, method, terminalId, steppedUp, strong }.
  *
  * tenantId comes ONLY from the signed token, never from the request body, query or URL,
  * so one mountain can never read or write another mountain's rows.
@@ -36,40 +64,48 @@ async function authenticate(req, _res, next) {
   if (payload.typ) return next(unauthorized('Invalid or expired token'));
 
   const userId = Number(payload.sub);
-  const [rows] = await pool.query(
-    `SELECT u.id, u.role, u.staff_id, u.totp_enabled, u.must_change_password,
-       (u.staff_id IS NOT NULL AND EXISTS (SELECT 1 FROM patrol_members m JOIN staff s ON s.tenant_id = m.tenant_id AND s.id = m.staff_id AND s.status = 'active' WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id)) AS on_patrol,
-       t.require_mfa, t.status, (t.sandbox_expires_at IS NOT NULL) AS sandbox, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over,
-       ${sessions.OPEN_SQL} AS session_open FROM users u JOIN tenants t ON t.id = u.tenant_id
-     WHERE u.id = ? AND u.tenant_id = ? AND u.active = 1
-       AND (u.password_changed_at IS NULL OR UNIX_TIMESTAMP(u.password_changed_at) <= ?)`,
-    [...sessions.openParams(payload.sid), userId, payload.tid, payload.iat],
-  );
+  let rows;
+  try {
+    [rows] = await pool.query(
+      `SELECT u.id, u.role, u.staff_id, u.totp_enabled, u.must_change_password, (u.access_ends_on IS NOT NULL AND u.access_ends_on < CURDATE()) AS access_over,
+         ${TIER_SQL}, t.status, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over,
+         ${sessions.STATE_SQL}
+       FROM users u JOIN tenants t ON t.id = u.tenant_id ${sessions.JOIN_SQL}
+       WHERE u.id = ? AND u.tenant_id = ? AND u.active = 1
+         AND (u.password_changed_at IS NULL OR UNIX_TIMESTAMP(u.password_changed_at) <= ?)`,
+      [...sessions.stateParams(), sessions.hash(payload.sid || ''), userId, payload.tid, payload.iat],
+    );
+  } catch (err) { return next(err); }
   if (!rows.length) return next(unauthorized('Session ended. Sign in again.'));
+  const row = rows[0];
   // The server's own record of the session: signed out, idle too long, or ended from elsewhere.
-  if (!payload.sid || !Number(rows[0].session_open)) return next(unauthorized('Session ended. Sign in again.'));
+  if (!payload.sid || !Number(row.session_open)) return next(unauthorized('Session ended. Sign in again.'));
+  if (Number(row.access_over)) return next(unauthorized('Your access has ended for the season. Ask a manager if you are coming back.'));
   sessions.touch(payload.sid);
-  if (rows[0].status !== 'active') return next(forbidden('This mountain is paused. Contact SummitOps.'));
-  if (rows[0].sandbox_over) return next(forbidden('This demo has ended. Start a new one, or ask SummitOps for a walkthrough.'));
-  // When the mountain requires two-step sign-in, someone who has not set it up can only reach the setup screens.
-  // Two-step sign-in is required when the mountain asks for it, and always for owners and managers (REQUIRE_ADMIN_MFA,
-  // on in production), except in demo mountains.
-  if (mfaRequired(rows[0]) && !rows[0].totp_enabled && !/\/auth\/(me|logout|mfa\/(setup|enable|status)|change-password)$/.test(req.originalUrl.split('?')[0])) {
+  if (row.status !== 'active') return next(forbidden('This mountain is paused. Contact SummitOps.'));
+  if (row.sandbox_over) return next(forbidden('This demo has ended. Start a new one, or ask SummitOps for a walkthrough.'));
+  const path = req.originalUrl.split('?')[0];
+  // Two-step sign-in, tier by tier (mfaRule): someone who must have it and has not set it up can only reach the setup screens.
+  if (mfaRequired(row) && !Number(row.strong) && !SETUP_PATHS.test(path)) {
     const err = forbidden('Set up two-step sign-in to continue');
-    err.details = { code: 'mfa_enrollment_required' };
+    err.details = { code: 'mfa_enrollment_required', why: mfaRule(row) };
     return next(err);
   }
 
   // A temporary password (set by a manager) has to be replaced before anything else.
-  if (rows[0].must_change_password && !/\/auth\/(me|logout|change-password|mfa\/(setup|enable|status))$/.test(req.originalUrl.split('?')[0])) {
+  if (row.must_change_password && !SETUP_PATHS.test(path)) {
     const err = forbidden('Choose a new password to continue');
     err.details = { code: 'password_change_required' };
     return next(err);
   }
 
   // onPatrol: this login's person is on the patrol roster, so they can use Patrol whatever their login role is.
-  req.auth = { tenantId: payload.tid, userId, role: rows[0].role, staffId: rows[0].staff_id, onPatrol: Boolean(Number(rows[0].on_patrol)), sid: payload.sid };
-  if (Number(rows[0].sandbox)) demoUsage.touch(payload.tid, req.originalUrl, req.method); // for the platform's Demos dashboard
+  req.auth = {
+    tenantId: payload.tid, userId, role: row.role, staffId: row.staff_id, onPatrol: Boolean(Number(row.on_patrol)), sid: payload.sid,
+    method: row.session_method, terminalId: row.session_terminal ? Number(row.session_terminal) : null, deviceHash: row.session_device || null,
+    steppedUp: Boolean(Number(row.stepped_up)), strong: Boolean(Number(row.strong)), mfaRule: mfaRule(row),
+  };
+  if (Number(row.sandbox)) demoUsage.touch(payload.tid, req.originalUrl, req.method); // for the platform's Demos dashboard
   return next();
 }
 
@@ -87,8 +123,8 @@ function requireRole(...roles) {
 }
 
 /** A new session's token. Async: the session is recorded first, so the server can end it later. */
-function signToken(user, req) {
-  return sessions.open(user, req);
+function signToken(user, req, opts) {
+  return sessions.open(user, req, opts);
 }
 
-module.exports = { authenticate, requireRole, signToken, isManager, mfaRequired };
+module.exports = { authenticate, requireRole, signToken, isManager, mfaRequired, mfaRule, TIER_SQL, MANAGER_ROLES, CREW_ROLES };

@@ -230,6 +230,9 @@ router.post('/orders/:id/refund', requireRole('manager'), validate(refundBody), 
       amount = Math.max(realPaid - Number(back.cents), 0);
       taxPart = Math.max(Math.round(order.tax_cents * ratio) - Number(back.tax), 0);
     }
+    // A large refund needs the second check (STEP_UP_REFUND_CENTS, $200 by default).
+    const big = Number(process.env.STEP_UP_REFUND_CENTS || 20000);
+    if (amount > big) require('../lib/stepup').require(req, `refund more than $${(big / 100).toFixed(0)}`);
 
     // Send the money back the way it came, last payment first, never more than was paid and not yet returned that way.
     const returned = await rows(conn, 'SELECT method, SUM(amount_cents) AS cents FROM order_refunds WHERE tenant_id = ? AND order_id = ? GROUP BY method', [tenantId, orderId]);

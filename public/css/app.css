@@ -2237,3 +2237,12 @@ body:has(.tour-card) .demo-pill { display: none; }
 .mb-foot span { display: block; font-size: 0.8125rem; color: #a9c2cd; margin-top: 4px; }
 @media (max-width: 640px) { .mb-row { grid-template-columns: minmax(0, 1fr); } .mb-chip { justify-self: start; } .mb-foot a { padding: 12px 12px; } .mb-foot b { font-size: 1.6rem; } .mb-s { grid-template-columns: minmax(0, 1fr); } }
 .wall .mboard { font-size: 1.15rem; }
+
+/* ---- sign-in tiers (2026.10.17): passkey sign-in, shared terminals, the patrol two-step notice, console access */
+.signin-passkey { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.signin-passkey .btn { width: 100%; justify-content: center; }
+.signin.terminal .signin-form h2 { font-size: 1.5rem; }
+.signin.terminal input[name="pin"] { font-size: 1.4rem; letter-spacing: .3em; }
+.banner.warn { margin: 0 0 12px; padding: 10px 14px; border: 1px solid var(--line-strong); border-left: 6px solid #d98a00; border-radius: var(--radius); background: #fff6df; }
+.callout.row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+[data-step-up] .row .btn.primary { min-width: 12rem; }

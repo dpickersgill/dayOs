@@ -7,7 +7,7 @@ const VIEWABLE = /^(application\/pdf|image\/(png|jpeg|gif|webp))$/;
 const ROLE_NAME = { staff: 'Staff', patrol: 'Patrol', instructor: 'Instructors', counter: 'Counter' };
 const MAX_VERSIONS = 10;
 const NOT_SEARCHABLE = { needs_ocr: 'Not searchable yet', none: 'No text found in file', unsupported: 'File contents are not searchable', failed: 'Could not read the file' };
-const ACCEPT = '.pdf,.png,.jpg,.jpeg,.gif,.webp,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.md,.rtf,.zip';
+const ACCEPT = '.pdf,.png,.jpg,.jpeg,.gif,.webp,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.md,.rtf';
 
 export async function render(root, params = []) {
   const mgr = isManager();

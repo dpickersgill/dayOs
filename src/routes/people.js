@@ -4,6 +4,7 @@
 const express = require('express');
 const { pool, rows, one, tx } = require('../db');
 const { requireRole } = require('../middleware/auth');
+const { stepUp } = require('../lib/stepup');
 const { VALID } = require('../lib/waivers');
 const { z, validate, paramId, seasonFor, todayIn } = require('../lib/util');
 const { notFound, conflict, bad, forbidden } = require('../lib/errors');
@@ -47,7 +48,7 @@ const csvCell = (v) => {
   if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return `"${s.replace(/"/g, '""')}"`;
 };
-router.get('/export.csv', requireRole('manager'), async (req, res) => {
+router.get('/export.csv', requireRole('manager'), stepUp('download the customer list'), async (req, res) => {
   const where = ['tenant_id = ?'];
   const params = [req.auth.tenantId];
   if (req.query.marketing === '1') where.push('marketing_opt_in = 1 AND email IS NOT NULL');

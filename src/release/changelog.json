@@ -1,6 +1,67 @@
 {
   "releases": [
     {
+      "version": "2026.10.17",
+      "date": "2026-10-17",
+      "title": "Passkeys and tiered sign-in",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Passkeys: sign in with your fingerprint, face or your device's PIN instead of a password and code. Nobody can phish or guess a passkey. Add one in Account, then press \"Sign in with a passkey\". A passkey also counts as two-step sign-in.",
+          "help": "password"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": [],
+          "text": "Before sensitive actions you are asked to confirm it is you, even when signed in: refunds over $200, changing someone's role or password, switching a login off, downloading customer, waiver or patient lists, releasing a patient record, changing billing, and weakening sign-in rules. It lasts 10 minutes, and straight after signing in counts.",
+          "help": "password"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Account shows where you are signed in and the devices you have used, so you can sign out anywhere else. A sign-in from a new device is emailed to you; without two-step sign-in, a code is emailed first."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": [],
+          "text": "Shared terminals: enroll the ticket window, rental counter or other shared computers in Account. Counter, instructor and lift staff then switch in with their username and a personal PIN, so nobody shares a login. A terminal's sign-in ends after 15 minutes unused.",
+          "help": "terminals"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": [],
+          "text": "Season end: set the last day of the season under Logins, and seasonal logins stop working after it (owners and managers are never affected). Change one person's date in Edit to bring them back.",
+          "help": "terminals"
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Patrollers will need two-step sign-in (a passkey takes a minute), because Patrol holds patient details. Mountains already on SummitOps have two weeks; you will see a reminder until then. Patrol Admins and Managers need it now."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "New passwords must be at least 12 characters and must not contain your username, email name or the mountain's name. A short phrase of a few words is easiest."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "Console: operators can add passkeys (then they sign in with the passkey only), and changing a mountain now needs it opened first with a reason, for up to 8 hours, recorded in its history."
+        }
+      ]
+    },
+    {
       "version": "2026.10.16",
       "date": "2026-10-17",
       "title": "Security hardening",

@@ -1,7 +1,24 @@
 // Talks to the SummitOps API. The token lives in sessionStorage, so closing the tab signs you out.
 
 export const config = { base: '' };
-export const hooks = { onSignedOut() {} };
+// stepUp(details): asks the person to confirm it is them (passkey, app code or password) and resolves when they have,
+// or rejects if they cancel. Set by main.js.
+export const hooks = { onSignedOut() {}, stepUp: null };
+
+// A random id this browser keeps, so the server can tell a sign-in from a new device (it stores only a keyed hash).
+const DEVICE_KEY = 'so.device';
+export function deviceId() {
+  try {
+    let id = localStorage.getItem(DEVICE_KEY);
+    if (!id || !/^[A-Za-z0-9_-]{20,64}$/.test(id)) {
+      const b = crypto.getRandomValues(new Uint8Array(24));
+      id = btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      localStorage.setItem(DEVICE_KEY, id);
+    }
+    return id;
+  } catch (_) { return ''; }
+}
+const isStepUp = (status, data) => status === 403 && data && data.details && data.details.code === 'step_up_required';
 
 const TOKEN_KEY = 'so.token';
 const store = () => globalThis.sessionStorage;
@@ -20,19 +37,26 @@ export class ApiError extends Error {
   }
 }
 
-export async function api(method, path, body) {
+export async function api(method, path, body, retried = false) {
   const headers = {};
   if (body !== undefined) headers['content-type'] = 'application/json';
   if (session.token) headers.authorization = `Bearer ${session.token}`;
+  const dev = deviceId();
+  if (dev) headers['x-device'] = dev;
   const res = await fetch(`${config.base}/api/v1${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   if (res.status === 204) return null;
   const isJson = (res.headers.get('content-type') || '').includes('json');
   const data = isJson ? await res.json() : await res.text();
   if (!res.ok) {
     const signedIn = Boolean(session.token);
-    if (res.status === 401 && signedIn && path !== '/auth/login' && path !== '/auth/change-password') {
+    if (res.status === 401 && signedIn && path !== '/auth/login' && path !== '/auth/change-password' && !path.startsWith('/auth/step-up')) {
       session.clear();
       hooks.onSignedOut();
+    }
+    // A sensitive action: confirm it is you, then the same request goes again.
+    if (!retried && hooks.stepUp && isJson && isStepUp(res.status, data)) {
+      await hooks.stepUp(data.details);
+      return api(method, path, body, true);
     }
     throw new ApiError(res.status, (isJson && data.error) || 'Request failed', isJson ? data.details : undefined);
   }
@@ -46,9 +70,13 @@ export const put = (p, b) => api('PUT', p, b);
 export const del = (p, b) => api('DELETE', p, b);
 
 /** Download a protected file (the browser cannot attach the token to a plain link). */
-export async function download(path, filename) {
+export async function download(path, filename, retried = false) {
   const res = await fetch(`${config.base}/api/v1${path}`, { headers: { authorization: `Bearer ${session.token}` } });
-  if (!res.ok) throw new ApiError(res.status, 'Download failed');
+  if (!res.ok) {
+    const data = (res.headers.get('content-type') || '').includes('json') ? await res.json().catch(() => null) : null;
+    if (!retried && hooks.stepUp && isStepUp(res.status, data)) { await hooks.stepUp(data.details); return download(path, filename, true); }
+    throw new ApiError(res.status, (data && data.error) || 'Download failed');
+  }
   const url = URL.createObjectURL(await res.blob());
   const a = document.createElement('a');
   a.href = url;

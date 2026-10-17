@@ -4,18 +4,40 @@
 
 import { h, clear, button, field, input, table, dialog, formDialog, confirmDialog, toast, fail, empty, errorBox, state } from './ui.js';
 import { qr } from './barcode.js';
+import * as passkey from './passkey.js';
 
 const app = document.getElementById('app');
 let session = '';
 let apps = [];
 let me = { name: '', operator: false }; // who is signed in, and whether with their own login (not the platform key)
 
-async function call(method, path, body) {
+async function call(method, path, body, retried = false) {
   const res = await fetch(`/api/v1/platform${path}`, { method, headers: { 'content-type': 'application/json', 'x-platform-session': session }, body: body === undefined ? undefined : JSON.stringify(body) });
   const text = await res.text();
   let json = null; try { json = text ? JSON.parse(text) : null; } catch (_) { json = null; }
+  // Changing a mountain needs it opened first (a reason and a time): ask, then send the same change again.
+  if (!res.ok && !retried && json && json.details && json.details.code === 'access_required') {
+    const m = /^\/tenants\/(\d+)/.exec(path);
+    if (m) { await openAccess(Number(m[1])); return call(method, path, body, true); }
+  }
   if (!res.ok) { const e = new Error((json && json.error) || 'Something went wrong'); e.status = res.status; throw e; }
   return json;
+}
+
+/** Opening one mountain: why, and for how long (up to 8 hours). Resolves once open; rejects if cancelled. */
+function openAccess(id, name) {
+  return new Promise((resolve, reject) => {
+    let ok = false;
+    const reason = input({ name: 'reason', required: true, maxlength: 300, placeholder: 'For example: owner asked to turn on Rentals (ticket 412)' });
+    const hours = input({ name: 'hours', type: 'number', min: 1, max: 8, value: 2 });
+    formDialog(`Open ${name || 'this mountain'}`, h('div', { class: 'stack' },
+      h('p', null, 'Changes to a mountain need a reason and a time limit. Both go in its history, which its owner can ask to see.'),
+      h('div', { class: 'form' }, field('Why', reason), field('For how many hours', hours, '1 to 8'))), async () => {
+      await call('POST', `/tenants/${id}/access`, { reason: reason.value.trim(), hours: Number(hours.value || 2) }, true);
+      ok = true; resolve();
+    }, { submitText: 'Open', onClose: () => { if (!ok) reject(new Error('Not opened, so nothing was changed')); } });
+    reason.focus();
+  });
 }
 
 // ---------------------------------------------------------------- signing in
@@ -47,9 +69,18 @@ function signIn(message) {
       await opened(out);
     } catch (ex) { err.append(errorBox(ex)); go.disabled = false; if (!codeField.hidden) { code.value = ''; code.focus(); } }
   });
+  const pkErr = h('div');
+  const pk = passkey.supported() ? button('Sign in with a passkey', async () => {
+    clear(pkErr); pk.disabled = true;
+    try {
+      const { handle, options } = await call('POST', '/login/passkey/options');
+      await opened(await call('POST', '/login/passkey', { handle, response: await passkey.use(options) }));
+    } catch (ex) { pkErr.append(errorBox(ex)); pk.disabled = false; }
+  }, { kind: 'primary' }) : null;
   const keyLink = h('button', { type: 'button', class: 'linklike' }, 'Sign in with the platform key instead');
   keyLink.addEventListener('click', () => keySignIn());
-  app.append(h('main', { class: 'platform-box stack' }, h('h1', null, 'SummitOps platform'), message ? h('p', { class: 'muted' }, message) : null, form,
+  app.append(h('main', { class: 'platform-box stack' }, h('h1', null, 'SummitOps platform'), message ? h('p', { class: 'muted' }, message) : null,
+    pk ? h('div', { class: 'stack tight' }, pk, pkErr, h('p', { class: 'muted small' }, 'Once you add a passkey, the console signs you in with it only. First time? Sign in with your email below.')) : null, form,
     h('p', { class: 'muted small' }, 'No login yet? Sign in once with the platform key and add yourself under Operators. ', keyLink)));
   email.focus();
 }
@@ -107,7 +138,7 @@ async function home() {
   const filter = input({ type: 'search', placeholder: 'Find a mountain', 'aria-label': 'Find a mountain' });
   app.append(h('main', { class: 'platform-box wide stack' },
     h('header', { class: 'row between' }, h('h1', null, 'Mountains'),
-      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), leadsButton(), button('Plans and prices', () => billingPlans(), { small: true }), button('Demos', () => demos(), { small: true }), button('Injury report', () => injuryReport(), { small: true }), button('Releases', () => releases(), { small: true }), button('Activity', () => activity(), { small: true }), button('Operators', () => operators(), { small: true }), me.operator ? button('Change my password', () => myPassword(), { small: true }) : null, button('Sign out', () => signIn('Signed out.'), { small: true }))),
+      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), leadsButton(), button('Plans and prices', () => billingPlans(), { small: true }), button('Demos', () => demos(), { small: true }), button('Injury report', () => injuryReport(), { small: true }), button('Releases', () => releases(), { small: true }), button('Activity', () => activity(), { small: true }), button('Operators', () => operators(), { small: true }), me.operator ? button('My passkeys', () => myPasskeys(), { small: true }) : null, me.operator ? button('Change my password', () => myPassword(), { small: true }) : null, button('Sign out', () => signIn('Signed out.'), { small: true }))),
     filter, body));
   try {
     const { data: all } = await call('GET', '/tenants');
@@ -164,7 +195,21 @@ async function manage(id) {
     { actions: true, cell: (u) => button('Reset password', () => resetPassword(id, u), { small: true }) },
   ], t.users) : empty('No owner or manager logins.');
   const paused = t.status === 'suspended';
-  const dlg = dialog(t.name, h('div', { class: 'stack' },
+  // Whether this operator has the mountain open for changes (a reason and a time limit), with a way to open or close it.
+  const access = h('div', { class: 'callout row', 'data-access': '' });
+  const drawAccess = async () => {
+    clear(access);
+    let a; try { a = await call('GET', `/tenants/${id}/access`); } catch (_) { return; }
+    if (a.by_key) { access.append(h('span', null, 'Signed in with the platform key: changes are recorded but not asked for a reason.')); return; }
+    if (a.open) {
+      access.append(h('span', null, h('b', null, 'Open for changes'), ` until ${new Date(`${String(a.open.expires_at).replace(' ', 'T')}Z`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}: ${a.open.reason}`),
+        button('Close now', async () => { await call('POST', `/tenants/${id}/access/close`); drawAccess(); }, { small: true }));
+    } else {
+      access.append(h('span', null, 'Not open for changes. Changing anything asks why first.'), button('Open for changes', () => openAccess(id, t.name).then(drawAccess, () => {}), { small: true }));
+    }
+  };
+  drawAccess();
+  const dlg = dialog(t.name, h('div', { class: 'stack' }, access,
     h('p', { class: 'muted' }, `${t.slug}. Added ${String(t.created_at).slice(0, 10)}. ${t.delete_after ? `Closed: everything in it is deleted on ${String(t.delete_after).slice(0, 10)}. Resume it before then to keep it.` : paused ? 'Paused: nobody can sign in and public pages are off.' : 'Active.'}`),
     h('div', { class: 'row' },
       button(paused ? 'Resume mountain' : 'Pause mountain', () => confirmDialog(paused ? 'Resume this mountain?' : 'Pause this mountain?', paused ? 'People can sign in again.' : 'Everyone is signed out and its public pages stop working. Nothing is deleted.', paused ? 'Resume' : 'Pause', async () => { await call('PATCH', `/tenants/${id}`, { status: paused ? 'active' : 'suspended' }); dlg.close(); home(); manage(id); }, { danger: !paused })),
@@ -203,7 +248,7 @@ function resetPassword(id, u) {
   const pw = input({ name: 'pw', type: 'password', autocomplete: 'new-password', required: true });
   const clearTwo = h('input', { type: 'checkbox' });
   const temp = h('input', { type: 'checkbox', checked: true });
-  formDialog(`Reset password for ${u.username || u.email}`, h('div', { class: 'stack' }, field('New password', pw, 'At least 10 characters. Tell them in person or by phone.'),
+  formDialog(`Reset password for ${u.username || u.email}`, h('div', { class: 'stack' }, field('New password', pw, 'At least 12 characters. Tell them in person or by phone.'),
     h('label', { class: 'check' }, temp, 'Temporary: they choose their own password when they next sign in'),
     u.totp_enabled ? h('label', { class: 'check' }, clearTwo, 'Also turn off their two-step sign-in (use when they lost their phone)') : null), async () => {
     await call('POST', `/tenants/${id}/reset-password`, { user_id: u.id, password: pw.value, clear_two_step: Boolean(u.totp_enabled && clearTwo.checked), temporary: temp.checked });
@@ -225,7 +270,7 @@ function addMountain(pre = {}, after) {
   f.slug.addEventListener('input', () => { f.slug.dataset.touched = '1'; });
   formDialog('Add a mountain', h('div', { class: 'stack' },
     field('Mountain name', f.name), field('Web name', f.slug, 'Lowercase letters, numbers and dashes. People type this to sign in.'), field('Time zone', f.tz),
-    h('div', { class: 'grid2' }, field('Owner first name', f.first), field('Owner last name', f.last)), field('Owner email', f.email), field('Owner password', f.pw, 'At least 10 characters.'),
+    h('div', { class: 'grid2' }, field('Owner first name', f.first), field('Owner last name', f.last)), field('Owner email', f.email), field('Owner password', f.pw, 'At least 12 characters.'),
     field('Document storage limit (MB)', f.cap), field('Billing', f.billing, 'You can change this later on the mountain\'s Manage page.'), h('fieldset', { class: 'stack tight' }, h('legend', null, 'Apps to turn on'), ...checks)), async () => {
     const modules = Object.fromEntries([...picks].map(([k, cb]) => [k, cb.checked]));
     const made = await call('POST', '/tenants', { slug: f.slug.value.trim(), name: f.name.value.trim(), timezone: f.tz.value.trim(), storage_cap_mb: Number(f.cap.value), modules, billing: f.billing.value,
@@ -487,7 +532,7 @@ async function activity() {
 }
 
 // ---------------------------------------------------------------- operators: who can use this console
-const newPassword = () => input({ type: 'password', name: 'password', autocomplete: 'new-password', required: true, minlength: 10, maxlength: 200 });
+const newPassword = () => input({ type: 'password', name: 'password', autocomplete: 'new-password', required: true, minlength: 12, maxlength: 200 });
 
 async function operators() {
   clear(app);
@@ -508,10 +553,10 @@ async function operators() {
     { head: 'Name', cell: (o) => h('span', null, h('b', null, o.name), o.you ? h('span', { class: 'muted' }, ' (you)') : null) },
     { head: 'Email', cell: (o) => o.email },
     { head: 'Status', cell: (o) => (!o.active ? state('Switched off', 'neutral') : o.locked ? state('Locked for a few minutes', 'warn') : state('Active', 'good')) },
-    { head: 'Two-step', cell: (o) => (o.two_step ? 'On' : 'Set up at next sign-in') },
+    { head: 'Two-step', cell: (o) => (o.passkeys ? `Passkey only (${o.passkeys})` : o.two_step ? 'Authenticator app' : 'Set up at next sign-in') },
     { head: 'Last sign-in', cell: (o) => (o.last_login_at ? ago(o.last_login_at) : 'Never') },
     { actions: true, cell: (o) => (o.you ? '' : h('div', { class: 'row' },
-      act('New password', () => formDialog(`New password for ${o.name}`, h('div', { class: 'form' }, field('New password', newPassword(), 'At least 10 characters. Tell them in person or by phone; they can change it after signing in.')), async (fd) => {
+      act('New password', () => formDialog(`New password for ${o.name}`, h('div', { class: 'form' }, field('New password', newPassword(), 'At least 12 characters. Tell them in person or by phone; they can change it after signing in.')), async (fd) => {
         await call('POST', `/operators/${o.id}/password`, { password: fd.get('password') }); toast('Password changed. Their open sessions have ended.'); operators();
       }, { submitText: 'Set password' })),
       o.two_step ? act('Reset two-step', () => confirmDialog(`Reset two-step for ${o.name}?`, 'Use this when they have lost their phone. They set up their authenticator app again the next time they sign in. Their open sessions end now.', 'Reset two-step', async () => {
@@ -530,16 +575,46 @@ function addOperator() {
   formDialog('Add an operator', h('div', { class: 'form' },
     field('Name', input({ name: 'name', required: true, maxlength: 100, autocomplete: 'off' }), 'Shown in the Activity log next to everything they do.'),
     field('Email', input({ name: 'email', type: 'email', required: true, maxlength: 255, autocomplete: 'off' }), 'What they sign in with.'),
-    field('First password', newPassword(), 'At least 10 characters. They set up their authenticator app the first time they sign in, then can change this.')), async (fd) => {
+    field('First password', newPassword(), 'At least 12 characters. They set up their authenticator app the first time they sign in, then can change this.')), async (fd) => {
     await call('POST', '/operators', { name: fd.get('name'), email: fd.get('email'), password: fd.get('password') });
     toast('Operator added.'); operators();
   }, { submitText: 'Add operator' });
 }
 
+/** Your passkeys. With one, you sign in to the console with it only (no password or code to type, nothing to phish). */
+async function myPasskeys() {
+  let data;
+  try { ({ data } = await call('GET', '/me/passkeys')); } catch (e) { fail(e); return; }
+  const list = h('div', { class: 'stack' });
+  const draw = () => {
+    clear(list).append(data.length ? table([
+      { head: 'Name', cell: (k) => h('b', null, k.name) },
+      { head: 'Added', cell: (k) => String(k.created_at).slice(0, 10) },
+      { head: 'Last used', cell: (k) => (k.last_used_at ? ago(k.last_used_at) : 'Never') },
+      { actions: true, cell: (k) => button('Remove', () => confirmDialog('Remove this passkey?', data.length === 1 ? 'It is your only passkey: you will sign in with your email, password and app code again.' : 'That device will no longer sign you in.', 'Remove', async () => { await call('DELETE', `/me/passkeys/${k.id}`); data = data.filter((x) => x.id !== k.id); draw(); }, { danger: true }), { small: true }) },
+    ], data) : empty('No passkeys yet. Add one and the console signs you in with it only.'));
+  };
+  draw();
+  const name = input({ name: 'name', maxlength: 60, placeholder: 'For example: Work laptop' });
+  const err = h('div');
+  const add = button('Add a passkey on this device', async () => {
+    clear(err); add.disabled = true;
+    try {
+      const { handle, options } = await call('POST', '/me/passkeys/options');
+      const { id } = await call('POST', '/me/passkeys', { handle, response: await passkey.create(options), name: name.value.trim() || undefined });
+      data = [...data, { id, name: name.value.trim() || 'Passkey', created_at: new Date().toISOString(), last_used_at: null }];
+      name.value = ''; toast('Passkey added. From now on, sign in with it.'); draw();
+    } catch (e) { err.append(errorBox(e)); }
+    add.disabled = false;
+  }, { kind: 'primary' });
+  dialog('My passkeys', h('div', { class: 'stack' }, h('p', null, 'A passkey signs you in with your fingerprint, face or device PIN. Once you have one, the console no longer accepts your password and code, so a phished password is useless. Add one on a second device too, in case you lose one.'),
+    list, passkey.supported() ? h('div', { class: 'form' }, field('Name', name), h('div', { class: 'row' }, add), err) : h('p', { class: 'muted' }, 'This browser cannot make passkeys.')), { wide: true });
+}
+
 function myPassword() {
   formDialog('Change my password', h('div', { class: 'form' },
     field('Current password', input({ type: 'password', name: 'current', autocomplete: 'current-password', required: true, maxlength: 200 })),
-    field('New password', newPassword(), 'At least 10 characters.')), async (fd) => {
+    field('New password', newPassword(), 'At least 12 characters.')), async (fd) => {
     const out = await call('POST', '/me/password', { current: fd.get('current'), password: fd.get('password') });
     session = out.session; toast('Password changed.');
   }, { submitText: 'Change password' });
