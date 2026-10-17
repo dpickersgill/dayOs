@@ -1,6 +1,6 @@
 // Help: short how-to articles for each app, searchable, shown only for what this person can use.
 import { h, clear, ctx, can, input, empty, errorBox, state, label } from '../ui.js';
-import { get, post } from '../api.js';
+import { get, post, session } from '../api.js';
 import { SECTIONS, ARTICLES, articleById } from '../help-content.js';
 
 const ALWAYS_ON = ['start', 'dashboard', 'people', 'myshifts', 'settings'];
@@ -54,7 +54,7 @@ function home(root) {
 /** "SummitOps 2026.10.4 (build ac9a72f)": the version this screen is running, for telling support or checking an update. */
 function versionLine() {
   const line = h('p', { class: 'version-line muted small' });
-  fetch('/version').then((r) => r.json()).then((v) => { line.textContent = `SummitOps ${v.version}${v.build && v.build !== 'dev' ? ` (build ${v.build})` : ''}`; }).catch(() => {});
+  fetch('/version', { headers: session.token ? { authorization: `Bearer ${session.token}` } : {} }).then((r) => r.json()).then((v) => { line.textContent = `SummitOps ${v.version}${v.build && v.build !== 'dev' ? ` (build ${v.build})` : ''}`; }).catch(() => {});
   return line;
 }
 

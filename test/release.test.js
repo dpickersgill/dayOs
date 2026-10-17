@@ -77,7 +77,7 @@ test('compare orders calendar versions by number, not as text', () => {
 test('/version and /readyz say which version is running', async () => {
   const v = await (await fetch(`${base}/version`)).json();
   assert.equal(v.version, V.VERSION);
-  assert.ok(v.build);
+  assert.ok(!('build' in v), 'the build is only for someone signed in');
   const r = await (await fetch(`${base}/readyz`)).json();
   assert.equal(r.ok, true);
   assert.equal(r.version, V.VERSION);

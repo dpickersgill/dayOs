@@ -46,6 +46,8 @@ module.exports = {
   linkSecret: env.LINK_SECRET || env.JWT_SECRET || 'dev-only-secret-change-me-dev-only-secret',
   kioskSecret: env.KIOSK_SECRET || env.JWT_SECRET || 'dev-only-secret-change-me-dev-only-secret',
   jwtTtl: env.JWT_TTL || '8h',
+  // Owners and managers must use two-step sign-in. On in production unless REQUIRE_ADMIN_MFA=off; off elsewhere unless =on.
+  requireAdminMfa: env.REQUIRE_ADMIN_MFA ? env.REQUIRE_ADMIN_MFA === 'on' : isProd,
   // Required to create a new tenant (mountain). Leave unset to disable the endpoint.
   bootstrapKey: env.BOOTSTRAP_KEY || '',
   // Where the "ask for a walkthrough" link in a demo mountain points (the marketing site's contact page). Leave unset to show no link.

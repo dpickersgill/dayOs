@@ -1,6 +1,6 @@
 {
   "name": "summitops-backend",
-  "version": "2026.10.15",
+  "version": "2026.10.16",
   "description": "Multi-tenant operations backend for small and mid-size ski areas",
   "main": "src/server.js",
   "directories": {
@@ -11,13 +11,13 @@
     "dev": "node --watch src/server.js",
     "migrate": "node db/migrate.js",
     "seed": "node db/seed.js",
-    "test": "PATROL_FUTURE_SLACK_MIN=1440 node --test \"test/*.test.js\""
+    "test": "PATROL_FUTURE_SLACK_MIN=1440 PLATFORM_KEY_SIGNIN=on PWNED_CHECK=off node --test \"test/*.test.js\""
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.10",
     "@tesseract.js-data/eng": "^1.0.0",
     "bcryptjs": "^3.0.3",
-    "compression": "^1.8.1",
+    "compression": "^1.8.2",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "fflate": "^0.8.3",

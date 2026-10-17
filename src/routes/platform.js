@@ -53,6 +53,25 @@ function readSession(token) {
 }
 const allowedIps = () => String(process.env.PLATFORM_ALLOW_IPS || '').split(',').map((x) => x.trim()).filter(Boolean);
 
+/**
+ * May the platform key be used at all? Only until the first named operator has two-step sign-in set up (so a new
+ * install can be reached), or when PLATFORM_KEY_SIGNIN=on is set deliberately as a break-glass. After that, everyone
+ * signs in by name with an authenticator code, and the key alone opens nothing. PLATFORM_KEY_SIGNIN=off turns it off always.
+ */
+let keyGate = { at: 0, open: true };
+async function keyAllowed() {
+  const mode = process.env.PLATFORM_KEY_SIGNIN;
+  if (mode === 'on') return true;
+  if (mode === 'off' || !config.bootstrapKey) return false;
+  if (Date.now() - keyGate.at > 30_000) {
+    const [[r]] = await pool.query('SELECT COUNT(*) AS n FROM platform_operators WHERE active = 1 AND totp_enabled = 1');
+    keyGate = { at: Date.now(), open: Number(r.n) === 0 };
+  }
+  return keyGate.open;
+}
+const forgetKeyGate = () => { keyGate = { at: 0, open: true }; };
+const KEY_OFF = 'The platform key is turned off now that operators sign in by name. Sign in with your email and authenticator code.';
+
 const OPEN = new Set(['/session', '/login', '/login/setup']);
 router.use(async (req, _res, next) => {
   try {
@@ -68,13 +87,14 @@ router.use(async (req, _res, next) => {
         if (!op || !op.active || Number(op.session_epoch) !== Number(session.e || 0)) return next(forbidden('Sign in to the console again'));
         req.operatorId = op.id; req.operator = op.name;
       } else {
-        if (process.env.PLATFORM_KEY_SIGNIN === 'off' || !config.bootstrapKey || session.k !== keyPrint()) return next(forbidden('Sign in to the console again'));
+        if (!(await keyAllowed()) || session.k !== keyPrint()) return next(forbidden('Sign in to the console again'));
         req.operator = `key: ${session.n}`; // someone using the platform key, never mistaken for a named operator
       }
       return next();
     }
   } catch (err) { return next(err); }
-  if (process.env.PLATFORM_TOTP_SECRET || process.env.PLATFORM_KEY_SIGNIN === 'off') return next(forbidden('Sign in to the console again'));
+  if (process.env.PLATFORM_TOTP_SECRET) return next(forbidden('Sign in to the console again'));
+  try { if (!(await keyAllowed())) return next(forbidden(KEY_OFF)); } catch (err) { return next(err); }
   if (!keyOk(req.get('x-platform-key') || req.get('x-bootstrap-key'))) return next(forbidden('That platform key is not right'));
   req.operator = `key: ${String(req.get('x-operator') || '').slice(0, 90) || 'unnamed'}`;
   return next();
@@ -82,7 +102,7 @@ router.use(async (req, _res, next) => {
 
 /** Opens a console session: the platform key, plus a code from the authenticator app when PLATFORM_TOTP_SECRET is set. */
 router.post('/session', validate(z.object({ key: z.string().min(1).max(500), name: z.string().trim().min(1).max(100), code: z.string().max(10).optional() })), async (req, res) => {
-  if (process.env.PLATFORM_KEY_SIGNIN === 'off') throw forbidden('Signing in with the platform key is turned off. Sign in with your email.');
+  if (!(await keyAllowed())) throw forbidden(KEY_OFF);
   if (!keyOk(req.body.key)) throw forbidden('That platform key is not right');
   const secret = process.env.PLATFORM_TOTP_SECRET;
   const step = secret ? totp.verify(secret, req.body.code) : null;
@@ -90,6 +110,7 @@ router.post('/session', validate(z.object({ key: z.string().min(1).max(500), nam
   if (secret && step <= lastStep) throw forbidden('That code was just used. Wait for the next one.');
   if (secret) lastStep = step;
   await pool.query('INSERT INTO platform_audit (tenant_id, action, actor, detail) VALUES (NULL, ?, ?, NULL)', ['sign_in', `key: ${req.body.name}`]);
+  require('../lib/audit').trail({ console: true, action: 'sign_in', actor: `key: ${req.body.name}`, ip: req.ip || null });
   res.json({ session: makeSession(req.body.name), hours: SESSION_HOURS, two_step: Boolean(secret) });
 });
 
@@ -112,6 +133,7 @@ async function opSignedIn(op, step) {
     WHERE id = ? AND active = 1 AND session_epoch = ? AND (totp_last_step IS NULL OR totp_last_step < ?) AND (locked_until IS NULL OR locked_until < UTC_TIMESTAMP())`, [step, op.id, op.session_epoch, step]);
   if (r.affectedRows !== 1) throw forbidden('That code was just used. Wait for the next one in your app.');
   await pool.query('INSERT INTO platform_audit (tenant_id, action, actor, detail) VALUES (NULL, ?, ?, ?)', ['sign_in', op.name, JSON.stringify({ operator: op.email })]);
+  require('../lib/audit').trail({ console: true, action: 'sign_in', actor: op.name });
   return { session: makeSession(op.name, op.id, { epoch: Number(op.session_epoch) }), hours: SESSION_HOURS, two_step: true, name: op.name, operator: true };
 }
 
@@ -142,12 +164,16 @@ router.post('/login/setup', validate(z.object({ setup_token: z.string().max(1000
   const step = totp.verify(totp.open(op.totp_secret), req.body.code);
   if (step === null) { await opFailed(op.id); throw bad('That code is not right. Check the app and type the newest code.'); }
   const [on] = await pool.query('UPDATE platform_operators SET totp_enabled = 1 WHERE id = ? AND totp_enabled = 0 AND session_epoch = ?', [op.id, op.session_epoch]);
+  forgetKeyGate(); // the first operator with two-step turns the platform key off
   if (on.affectedRows !== 1) throw forbidden('Sign in again');
   await pool.query('INSERT INTO platform_audit (tenant_id, action, actor, detail) VALUES (NULL, ?, ?, NULL)', ['two_step_on', op.name]);
   res.json(await opSignedIn(op, step));
 });
 
-const log = (conn, req, tenantId, action, detail) => conn.query('INSERT INTO platform_audit (tenant_id, action, actor, detail) VALUES (?, ?, ?, ?)', [tenantId ?? null, action, req.operator || null, detail ? JSON.stringify(detail) : null]);
+const log = async (conn, req, tenantId, action, detail) => {
+  await conn.query('INSERT INTO platform_audit (tenant_id, action, actor, detail) VALUES (?, ?, ?, ?)', [tenantId ?? null, action, req.operator || null, detail ? JSON.stringify(detail) : null]);
+  require('../lib/audit').trail({ console: true, tenant: tenantId ?? null, actor: req.operator || null, action, detail: detail ? JSON.stringify(detail) : null, ip: req.ip || null });
+};
 
 async function usage(ids) {
   if (!ids.length) return new Map();
@@ -161,7 +187,7 @@ async function usage(ids) {
 router.get('/modules', (_req, res) => res.json({ data: M.MODULES.map(({ key, label, blurb, needs, addon }) => ({ key, label, blurb, needs: needs || [], addon: Boolean(addon) })) }));
 
 router.get('/tenants', async (_req, res) => {
-  const t = await rows(pool, `SELECT t.id, t.slug, t.name, t.status, t.timezone, t.created_at, t.storage_cap_mb, t.platform_notes,
+  const t = await rows(pool, `SELECT t.id, t.slug, t.name, t.status, t.timezone, t.created_at, t.storage_cap_mb, t.platform_notes, t.delete_after,
       (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id AND u.active = 1) AS users FROM tenants t WHERE t.sandbox_expires_at IS NULL ORDER BY t.name`);
   const used = await usage(t.map((x) => x.id));
   const data = [];
@@ -240,7 +266,7 @@ router.post('/sandboxes/purge', async (req, res) => {
 
 router.get('/tenants/:id', async (req, res) => {
   const id = paramId(req);
-  const t = await one(pool, 'SELECT id, slug, name, status, timezone, created_at, storage_cap_mb, platform_notes FROM tenants WHERE id = ?', [id]);
+  const t = await one(pool, 'SELECT id, slug, name, status, timezone, created_at, storage_cap_mb, platform_notes, closed_at, delete_after FROM tenants WHERE id = ?', [id]);
   if (!t) throw notFound('Mountain');
   M.invalidate(id);
   const used = await usage([id]);
@@ -369,9 +395,37 @@ router.patch('/tenants/:id', validate(partialOf({
   const id = paramId(req);
   const keys = Object.keys(req.body);
   if (!keys.length) throw bad('Nothing to change');
-  const [r] = await pool.query(`UPDATE tenants SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, [...keys.map((k) => req.body[k]), id]);
+  const extra = req.body.status === 'active' ? ', closed_at = NULL, delete_after = NULL' : ''; // resuming cancels a pending deletion
+  const [r] = await pool.query(`UPDATE tenants SET ${keys.map((k) => `${k} = ?`).join(', ')}${extra} WHERE id = ?`, [...keys.map((k) => req.body[k]), id]);
   if (!r.affectedRows) throw notFound('Mountain');
   await log(pool, req, id, keys.includes('status') ? req.body.status === 'suspended' ? 'pause' : 'resume' : 'edit', req.body);
+  M.invalidate(id);
+  res.json({ ok: true });
+});
+
+/**
+ * Close a mountain that has left: it is paused straight away, its people can no longer sign in, and everything in it is
+ * deleted by the daily job once the export window (days, 60 by default) has passed. Reopening before then cancels it.
+ */
+router.post('/tenants/:id/close', validate(z.object({ days: z.number().int().min(7).max(365).default(60), confirm_slug: z.string() })), async (req, res) => {
+  const id = paramId(req);
+  const t = await one(pool, 'SELECT id, slug, sandbox_expires_at FROM tenants WHERE id = ?', [id]);
+  if (!t) throw notFound('Mountain');
+  if (t.sandbox_expires_at) throw bad('Demo mountains are removed on their own');
+  if (req.body.confirm_slug !== t.slug) throw bad('Type the mountain\'s address to confirm');
+  await pool.query("UPDATE tenants SET status = 'suspended', closed_at = UTC_TIMESTAMP(), delete_after = DATE_ADD(CURDATE(), INTERVAL ? DAY) WHERE id = ?", [req.body.days, id]);
+  const [u] = await pool.query('SELECT id FROM users WHERE tenant_id = ?', [id]);
+  for (const x of u) await require('../lib/sessions').endAll(pool, x.id, 'mountain_closed');
+  await log(pool, req, id, 'close', { days: req.body.days });
+  M.invalidate(id);
+  const [[row]] = await pool.query('SELECT delete_after FROM tenants WHERE id = ?', [id]);
+  res.json({ ok: true, delete_after: row.delete_after });
+});
+router.post('/tenants/:id/reopen', async (req, res) => {
+  const id = paramId(req);
+  const [r] = await pool.query("UPDATE tenants SET status = 'active', closed_at = NULL, delete_after = NULL WHERE id = ? AND closed_at IS NOT NULL", [id]);
+  if (!r.affectedRows) throw notFound('Closed mountain');
+  await log(pool, req, id, 'reopen', {});
   M.invalidate(id);
   res.json({ ok: true });
 });
@@ -403,7 +457,8 @@ router.post('/tenants/:id/reset-password', validate(z.object({ user_id: z.number
   if (!u) throw notFound('Login');
   const hash = await bcrypt.hash(req.body.password, 12);
   await tx(async (conn) => {
-    await conn.query('UPDATE users SET password_hash = ?, password_changed_at = NOW(), must_change_password = ? WHERE id = ? AND tenant_id = ?', [hash, req.body.temporary ? 1 : 0, u.id, id]);
+    await conn.query('UPDATE users SET password_hash = ?, password_changed_at = NOW(), must_change_password = ?, login_failures = 0, login_locked_until = NULL WHERE id = ? AND tenant_id = ?', [hash, req.body.temporary ? 1 : 0, u.id, id]);
+    await require('../lib/sessions').endAll(conn, u.id, 'console_reset');
     if (req.body.clear_two_step) {
       await conn.query('UPDATE users SET totp_enabled = 0, totp_secret = NULL, totp_last_step = NULL WHERE id = ? AND tenant_id = ?', [u.id, id]);
       await conn.query('DELETE FROM user_recovery_codes WHERE user_id = ?', [u.id]);
@@ -529,3 +584,5 @@ router.get('/safety/members', async (_req, res) => {
 });
 
 module.exports = router;
+module.exports.keyAllowed = keyAllowed;
+module.exports.forgetKeyGate = forgetKeyGate;

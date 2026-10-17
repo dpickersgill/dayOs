@@ -31,7 +31,7 @@ test.before(async () => {
   await new Promise((r) => { server = app.listen(0, r); });
   base = `http://127.0.0.1:${server.address().port}`;
 });
-test.after(async () => { delete process.env.PLATFORM_KEY_SIGNIN; await new Promise((r) => server.close(r)); await pool.end(); });
+test.after(async () => { await new Promise((r) => server.close(r)); await pool.end(); });
 
 const ada = `ada-${suffix}@example.test`; const bo = `bo-${suffix}@example.test`;
 let adaSecret; let adaSession; let boId; let adaId;
@@ -120,6 +120,7 @@ test('five wrong passwords lock an operator for a while', async () => {
 test('key sign-in can be turned off once operators work', async () => {
   const keySession = (await api('POST', '/session', { body: { key: KEY, name: 'Key holder' } })).body.session;
   is(await api('GET', '/tenants', { session: keySession }), 200);
+  const before = process.env.PLATFORM_KEY_SIGNIN;
   process.env.PLATFORM_KEY_SIGNIN = 'off';
   try {
     is(await api('POST', '/session', { body: { key: KEY, name: 'Key holder' } }), 403);
@@ -129,7 +130,24 @@ test('key sign-in can be turned off once operators work', async () => {
     const [[row]] = await pool.query('SELECT totp_last_step FROM platform_operators WHERE id = ?', [adaId]);
     const fresh = Number(row.totp_last_step) >= totp.stepAt(Date.now()) + 1 ? null : code;
     if (fresh) is(await api('POST', '/login', { body: { email: ada, password: 'another-long-password', code: fresh } }), 200, 'operators still sign in');
-  } finally { delete process.env.PLATFORM_KEY_SIGNIN; }
+  } finally { if (before === undefined) delete process.env.PLATFORM_KEY_SIGNIN; else process.env.PLATFORM_KEY_SIGNIN = before; }
+});
+
+test('the platform key turns itself off once an operator signs in by name with two-step', async () => {
+  const before = process.env.PLATFORM_KEY_SIGNIN;
+  delete process.env.PLATFORM_KEY_SIGNIN; // the default: automatic
+  require('../src/routes/platform').forgetKeyGate();
+  try {
+    // Ada has two-step set up, so the key alone opens nothing, and new mountains cannot be made with it either
+    const raw = await api('GET', '/tenants', { key: KEY });
+    is(raw, 403); assert.match(raw.body.error, /turned off/);
+    is(await api('POST', '/session', { body: { key: KEY, name: 'Key holder' } }), 403);
+    const made = await fetch(`${base}/api/v1/tenants`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-bootstrap-key': KEY }, body: JSON.stringify({ slug: `nokey-${Date.now().toString(36)}`, name: 'No key', owner: { email: 'o@nokey.test', password: 'correct-horse-battery', first_name: 'N', last_name: 'K' } }) });
+    assert.equal(made.status, 403);
+    // break-glass: set deliberately, it works again
+    process.env.PLATFORM_KEY_SIGNIN = 'on';
+    is(await api('GET', '/tenants', { key: KEY }), 200);
+  } finally { if (before === undefined) delete process.env.PLATFORM_KEY_SIGNIN; else process.env.PLATFORM_KEY_SIGNIN = before; require('../src/routes/platform').forgetKeyGate(); }
 });
 
 test('a lock that has run out starts counting again, so five more wrong tries lock it again', async () => {

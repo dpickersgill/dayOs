@@ -80,7 +80,7 @@ router.post('/', validate(z.object({
   // Starting the demo signs them straight in, so that counts as the first sign-in and first use.
   await pool.query('INSERT INTO sandbox_signups (email, name, mountain, tenant_id, expires_at, ip_hash, sign_ins, first_used_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP())', [email, name, mountain, created.tenantId, created.expires, ipHash]);
   res.status(201).json({
-    token: signToken({ id: created.userId, tenant_id: created.tenantId, role: 'owner' }),
+    token: await signToken({ id: created.userId, tenant_id: created.tenantId, role: 'owner' }, req),
     role: 'owner', tenant: slug, email, password, expires_at: created.expires, mountain,
   });
 });

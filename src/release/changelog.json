@@ -1,6 +1,64 @@
 {
   "releases": [
     {
+      "version": "2026.10.16",
+      "date": "2026-10-17",
+      "title": "Security hardening",
+      "notes": [
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Signing out now ends the session on the server, so a copy of the sign-in kept on another device stops working too. A session left unused for an hour ends, and changing your password signs you out everywhere else. Everyone signs in again once after this update."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Ten wrong passwords in a row lock that login for 15 minutes, and a password already exposed in a data breach elsewhere can no longer be chosen."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": [],
+          "text": "Owners and managers must set up two-step sign-in. You are taken to set it up the next time you sign in; it takes a minute with an authenticator app.",
+          "help": "password"
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Reports and notes saved on a phone while offline are now locked with a key tied to your login, kept separately for each person, and cannot be read once you sign out."
+        },
+        {
+          "kind": "improved",
+          "app": "documents",
+          "who": null,
+          "text": "Uploaded files are checked to be what their name says. Zip files and Office files with macros are no longer accepted."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "Close mountain in the console: the mountain is paused and everyone signed out at once, and everything in it is deleted after the export window (60 days unless you choose). Resuming it before then cancels the deletion."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": "platform",
+          "text": "The platform key turns itself off once an operator has two-step sign-in. Console actions and sign-ins are also written to Cloud Logging. The daily job now clears website requests older than two years and old sign-in records."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "A one-time security setup script for Google Cloud (bash scripts/harden.sh) and an optional web firewall (bash scripts/cloud-armor.sh). Deploys now stop if a package has a known serious security problem."
+        }
+      ]
+    },
+    {
       "version": "2026.10.15",
       "date": "2026-10-17",
       "title": "The morning board on Today",

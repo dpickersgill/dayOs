@@ -7,7 +7,9 @@ const jwt = require('jsonwebtoken');
 const config = require('../config');
 const { pool, tx, one, rows } = require('../db');
 const demoUsage = require('../lib/demousage');
-const { authenticate, requireRole, signToken } = require('../middleware/auth');
+const { authenticate, requireRole, signToken, mfaRequired } = require('../middleware/auth');
+const sessions = require('../lib/sessions');
+const { refuseBreached } = require('../lib/pwned');
 const { rateLimit } = require('../middleware/rateLimit');
 const { z, validate, paramId, setClause } = require('../lib/util');
 const { AppError, unauthorized, forbidden, notFound, bad, conflict } = require('../lib/errors');
@@ -29,12 +31,8 @@ const MANAGERS = ['owner', 'manager'];
 const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(8).toString('hex'), 10);
 
 /** Token issued at an explicit second, so it is never older than the password change that created it. */
-function tokenIssuedAt(user, iat) {
-  return jwt.sign({ tid: user.tenant_id, role: user.role, iat }, config.jwtSecret, {
-    algorithm: 'HS256',
-    subject: String(user.id),
-    expiresIn: config.jwtTtl,
-  });
+function tokenIssuedAt(user, iat, req) {
+  return sessions.open(user, req, { iat });
 }
 
 /**
@@ -56,6 +54,7 @@ router.post(
     const expected = config.bootstrapKey;
     const ok = expected && supplied.length === expected.length && crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
     if (!ok) throw forbidden('Tenant creation is not enabled for this key');
+    if (!(await require('./platform').keyAllowed())) throw forbidden('The platform key is turned off. Add mountains from the console, signed in by name.');
 
     const { slug: s, name, timezone, owner } = req.body;
     try {
@@ -63,6 +62,7 @@ router.post(
     } catch (_) {
       throw new AppError(400, 'Unknown time zone');
     }
+    await refuseBreached(owner.password);
     const hash = await bcrypt.hash(owner.password, 12);
     const created = await tx(async (conn) => {
       const [t] = await conn.query('INSERT INTO tenants (slug, name, timezone) VALUES (?, ?, ?)', [s, name, timezone]);
@@ -88,8 +88,23 @@ router.post(
       `SELECT u.*, t.status AS tenant_status, (t.sandbox_expires_at IS NOT NULL) AS sandbox, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE t.slug = ? AND ${byEmail ? 'u.email' : 'u.username'} = ? AND u.active = 1`,
       [tenant, byEmail ? who : UN.normalize(who)],
     );
+    // A login is locked for 15 minutes after 10 wrong passwords in a row, whatever address they come from (so guessing
+    // from many machines is slowed too). The answer stays "Invalid credentials", so it does not reveal which logins exist.
+    if (user && user.login_locked_until && new Date(`${String(user.login_locked_until).replace(' ', 'T')}Z`) > new Date()) {
+      await bcrypt.compare(pw, DUMMY_HASH);
+      throw new AppError(429, 'Too many wrong passwords for this login. Wait 15 minutes, or ask your manager to reset it.');
+    }
     const valid = await bcrypt.compare(pw, user ? user.password_hash : DUMMY_HASH);
+    if (user && !valid) {
+      // MySQL applies SET left to right, so login_failures below is already the new count.
+      await pool.query(`UPDATE users SET login_failures = login_failures + 1,
+        login_locked_until = IF(login_failures >= ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 15 MINUTE), login_locked_until) WHERE id = ?`, [LOGIN_LOCK_AFTER, user.id]);
+      if (Number(user.login_failures) + 1 >= LOGIN_LOCK_AFTER) {
+        await pool.query("INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id, detail) VALUES (?, NULL, 'login_locked', 'users', ?, ?)", [user.tenant_id, user.id, JSON.stringify({ after: LOGIN_LOCK_AFTER })]).catch(() => {});
+      }
+    }
     if (!user || !valid) throw unauthorized('Invalid credentials');
+    if (Number(user.login_failures) || user.login_locked_until) await pool.query('UPDATE users SET login_failures = 0, login_locked_until = NULL WHERE id = ?', [user.id]);
     if (user.tenant_status !== 'active') throw forbidden('This mountain is paused. Contact SummitOps.');
     if (user.sandbox_over) throw forbidden('This demo has ended. Start a new one, or ask SummitOps for a walkthrough.');
     if (user.totp_enabled) {
@@ -98,13 +113,14 @@ router.post(
       return res.json({ mfa_required: true, mfa_token });
     }
     if (Number(user.sandbox)) await demoUsage.signedIn(user.tenant_id);
-    res.json({ token: signToken(user), role: user.role, tenant_id: user.tenant_id, must_change_password: Boolean(user.must_change_password) });
+    res.json({ token: await signToken(user, req), role: user.role, tenant_id: user.tenant_id, must_change_password: Boolean(user.must_change_password) });
   },
 );
 
 // Wrong second-step codes are counted per login in the database, so guessing a six-digit code is not practical even from
 // many addresses or across several servers: 5 wrong codes lock that login's second step for 5 minutes.
 const LOCK_AFTER = 5;
+const LOGIN_LOCK_AFTER = Number(process.env.LOGIN_LOCK_AFTER || 10);
 const lockedOut = (u) => u.mfa_failures >= LOCK_AFTER && u.mfa_locked_until && new Date(`${String(u.mfa_locked_until).replace(' ', 'T')}Z`) > new Date();
 const failed = (id) => pool.query(
   `UPDATE users SET mfa_failures = IF(mfa_locked_until IS NOT NULL AND mfa_locked_until < UTC_TIMESTAMP(), 1, mfa_failures + 1),
@@ -139,7 +155,7 @@ router.post('/auth/mfa', validate(z.object({ mfa_token: z.string().min(10).max(2
     const left = (await one(pool, 'SELECT COUNT(*) AS n FROM user_recovery_codes WHERE user_id = ? AND used_at IS NULL', [user.id])).n;
     await pool.query("INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id, detail) VALUES (?, ?, 'mfa_recovery_used', 'users', ?, ?)", [user.tenant_id, user.id, user.id, JSON.stringify({ left })]).catch(() => {});
   }
-  res.json({ token: signToken(user), role: user.role, tenant_id: user.tenant_id, must_change_password: Boolean(user.must_change_password), recovery_codes_left: how === 'recovery' ? Number((await one(pool, 'SELECT COUNT(*) AS n FROM user_recovery_codes WHERE user_id = ? AND used_at IS NULL', [user.id])).n) : undefined });
+  res.json({ token: await signToken(user, req), role: user.role, tenant_id: user.tenant_id, must_change_password: Boolean(user.must_change_password), recovery_codes_left: how === 'recovery' ? Number((await one(pool, 'SELECT COUNT(*) AS n FROM user_recovery_codes WHERE user_id = ? AND used_at IS NULL', [user.id])).n) : undefined });
 });
 
 router.get('/auth/me', authenticate, async (req, res) => {
@@ -151,10 +167,13 @@ router.get('/auth/me', authenticate, async (req, res) => {
   );
   if (!user) throw unauthorized();
   const { totp_enabled: on, require_mfa: req_ } = user;
+  const must = mfaRequired({ role: user.role, require_mfa: req_, sandbox: user.sandbox_expires_at ? 1 : 0 });
+  // The key that seals this person's patrol entries kept on a phone (see public/js/outbox.js); the same for every sign-in.
+  const deviceKey = crypto.createHmac('sha256', config.linkSecret).update(`device:${req.auth.tenantId}:${req.auth.userId}`).digest('base64');
   const modules = await moduleGate.enabledKeys(req.auth.tenantId);
   const sandbox = user.sandbox_expires_at ? { expires_at: user.sandbox_expires_at, contact_url: config.marketingUrl || (config.site.hosts[0] ? `https://${config.site.hosts[0]}/contact` : null) } : null;
   const billing = await require('../lib/billing').standingOf(req.auth.tenantId);
-  res.json({ ...user, billing, must_change_password: Boolean(user.must_change_password), login_name: user.email || user.username, on_patrol: Boolean(req.auth.onPatrol), sandbox_expires_at: undefined, sandbox, modules, totp_enabled: undefined, require_mfa: undefined, mfa_enabled: Boolean(on), mfa_required_by_mountain: Boolean(req_), mfa_enrollment_required: Boolean(req_ && !on) });
+  res.json({ ...user, billing, must_change_password: Boolean(user.must_change_password), login_name: user.email || user.username, on_patrol: Boolean(req.auth.onPatrol), sandbox_expires_at: undefined, sandbox, modules, totp_enabled: undefined, require_mfa: undefined, mfa_enabled: Boolean(on), mfa_required_by_mountain: Boolean(req_), mfa_required: must, mfa_enrollment_required: Boolean(must && !on), device_key: deviceKey });
 });
 
 /** Change your own password. Signs out every other session and returns a fresh token for this one. */
@@ -167,14 +186,22 @@ router.post(
     const user = await one(pool, 'SELECT * FROM users WHERE id = ? AND tenant_id = ?', [req.auth.userId, req.auth.tenantId]);
     if (!user || !(await bcrypt.compare(current_password, user.password_hash))) throw forbidden('Current password is not correct');
     if (current_password === new_password) throw bad('Choose a password different from the current one');
+    await refuseBreached(new_password);
     const now = Math.floor(Date.now() / 1000);
     await pool.query('UPDATE users SET password_hash = ?, password_changed_at = FROM_UNIXTIME(?), must_change_password = 0 WHERE id = ? AND tenant_id = ?', [
       await bcrypt.hash(new_password, 12), now, user.id, user.tenant_id,
     ]);
     await audit(pool, req, 'change_password', 'users', user.id);
-    res.json({ token: tokenIssuedAt(user, now) });
+    await sessions.endAll(pool, user.id, 'password_changed');
+    res.json({ token: await tokenIssuedAt(user, now, req) });
   },
 );
+
+/** Sign out: the server ends this session, so the token stops working even if a copy was kept somewhere. */
+router.post('/auth/logout', authenticate, async (req, res) => {
+  if (req.auth.sid) await sessions.end(req.auth.sid, 'signed_out');
+  res.status(204).end();
+});
 
 /** Change your own username (what you type to sign in). */
 router.post('/auth/username', authenticate, validate(z.object({ username })), async (req, res) => {
@@ -296,6 +323,7 @@ router.post(
     const taken = new Set((await rows(pool, 'SELECT username FROM users WHERE tenant_id = ? AND username IS NOT NULL', [t])).map((r) => r.username));
     const uname = req.body.username || UN.suggestUsername({ ...(named || {}), email }, taken);
     if (req.body.username && taken.has(uname)) throw conflict('That username is taken at this mountain');
+    await refuseBreached(pw);
     const hash = await bcrypt.hash(pw, 12);
     let r;
     try {
@@ -367,10 +395,12 @@ router.patch(
 // no email back in: the manager tells them the temporary one in person or by phone).
 router.post('/users/:id/reset-password', authenticate, adminOnly, validate(z.object({ new_password: password, temporary: z.boolean().default(false) })), async (req, res) => {
   const target = await loadTarget(req);
+  await refuseBreached(req.body.new_password);
   const now = Math.floor(Date.now() / 1000);
-  await pool.query('UPDATE users SET password_hash = ?, password_changed_at = FROM_UNIXTIME(?), must_change_password = ? WHERE tenant_id = ? AND id = ?', [
+  await pool.query('UPDATE users SET password_hash = ?, password_changed_at = FROM_UNIXTIME(?), must_change_password = ?, login_failures = 0, login_locked_until = NULL WHERE tenant_id = ? AND id = ?', [
     await bcrypt.hash(req.body.new_password, 12), now, req.body.temporary ? 1 : 0, req.auth.tenantId, target.id,
   ]);
+  await sessions.endAll(pool, target.id, 'password_reset');
   await audit(pool, req, 'reset_password', 'users', target.id, { temporary: req.body.temporary });
   res.json({ ok: true });
 });
@@ -382,6 +412,7 @@ router.post('/users/:id/reset-mfa', authenticate, adminOnly, async (req, res) =>
     await conn.query('UPDATE users SET totp_enabled = 0, totp_secret = NULL, totp_last_step = NULL WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, target.id]);
     await conn.query('DELETE FROM user_recovery_codes WHERE user_id = ?', [target.id]);
   });
+  await sessions.endAll(pool, target.id, 'mfa_reset');
   await audit(pool, req, 'mfa_reset', 'users', target.id);
   res.json({ ok: true });
 });

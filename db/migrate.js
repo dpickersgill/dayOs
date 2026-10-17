@@ -369,6 +369,11 @@ const assetSteps = [
 // (from a gate that was offline) is saved once.
 // Patrol operations (2026.10.11): trail holds, certification level, equipment expiry and oxygen, legal hold, offline
 // case starts, responder alerts, tourniquet and pelvic binder.
+// Security hardening: password lockout per login, and a date after which a closed mountain's data is deleted.
+const securitySteps = [
+  ['users.login_failures', (c) => columnExists(c, 'users', 'login_failures'), 'ALTER TABLE users ADD COLUMN login_failures SMALLINT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN login_locked_until DATETIME NULL'],
+  ['tenants.delete_after', (c) => columnExists(c, 'tenants', 'delete_after'), 'ALTER TABLE tenants ADD COLUMN closed_at DATETIME NULL, ADD COLUMN delete_after DATE NULL'],
+];
 const opsSteps = [
   ['trails hold status', (c) => columnTypeHas(c, 'trails', 'status', "'hold'"), "ALTER TABLE trails MODIFY status ENUM('open','hold','closed') NOT NULL DEFAULT 'closed'"],
   ['trails.closure_reason', (c) => columnExists(c, 'trails', 'closure_reason'), 'ALTER TABLE trails ADD COLUMN closure_reason VARCHAR(200) NULL, ADD COLUMN status_by BIGINT UNSIGNED NULL'],
@@ -518,9 +523,10 @@ async function main() {
   await conn.query(fs.readFileSync(path.join(__dirname, 'patrolops.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'billing.sql'), 'utf8'));
   await conn.query(fs.readFileSync(path.join(__dirname, 'site.sql'), 'utf8'));
+  await conn.query(fs.readFileSync(path.join(__dirname, 'security.sql'), 'utf8'));
   await seedPlans(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

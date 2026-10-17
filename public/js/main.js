@@ -3,7 +3,7 @@
 import { openTourPicker, resumeTour, welcomeOnce, endTour } from './tour.js';
 import { get, post, session, hooks, ApiError } from './api.js';
 import { mfaPanel } from './views/mfa.js';
-import { flush as flushOutbox, waitingCounts, forgetCases } from './outbox.js';
+import { flush as flushOutbox, waitingCounts, forgetCases, setDeviceKey, dropDeviceKey } from './outbox.js';
 import { buildFrame, GROUP_OF } from './nav.js';
 import { icon } from './icons.js';
 import { h, svg, clear, ctx, can, isManager, toast, loading, errorBox, button, field, input, closeAllDialogs } from './ui.js';
@@ -284,7 +284,12 @@ async function signOut(message) {
     if (left && !window.confirm(`${left} patient care entr${left === 1 ? 'y has' : 'ies have'} not been sent yet (no signal). They stay on this phone and send when you sign in again with a signal. Sign out anyway?`)) return;
   }
   if (!message) forgetCases(); // signing out on purpose clears the cases kept for a dead spot
+  dropDeviceKey(); // what stays on the phone is sealed, and the key goes with the session
+  // End the session on the server too (also after an idle sign-out). Sent with the token directly, so a session the server
+  // already ended cannot bounce back into another sign-out.
+  const ending = session.token;
   session.clear();
+  if (ending) fetch('/api/v1/auth/logout', { method: 'POST', headers: { authorization: `Bearer ${ending}` }, keepalive: true }).catch(() => { /* offline: it expires on its own */ });
   ctx.me = null;
   navToken += 1;
   history.replaceState(null, '', location.pathname);
@@ -317,6 +322,8 @@ async function start() {
     return;
   }
   ctx.tz = ctx.me.timezone || ctx.tz;
+  // Opens (and sends) any patrol entries this person left waiting on this phone; they are sealed with this key.
+  try { if (await setDeviceKey(ctx.me.device_key) && waitingCounts().mine) flushOutbox(); } catch (_) { /* nothing waiting */ }
   if (ctx.me.must_change_password) { showPasswordChange(); return; }
   if (ctx.me.mfa_enrollment_required) { showEnrollment(); return; }
   buildShell();

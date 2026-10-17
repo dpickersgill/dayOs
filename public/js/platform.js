@@ -119,7 +119,7 @@ async function home() {
       if (!data.length) { body.append(empty('No mountain matches that.')); return; }
       body.append(table([
       { head: 'Mountain', cell: (t) => h('span', null, h('b', null, t.name), h('span', { class: 'muted' }, ` ${t.slug}`)) },
-      { head: 'Status', cell: (t) => t.status === 'active' ? badge('Active', 'ok') : badge('Paused', 'warn') },
+      { head: 'Status', cell: (t) => t.status === 'active' ? badge('Active', 'ok') : t.delete_after ? badge(`Closed, deleted ${String(t.delete_after).slice(0, 10)}`, 'bad') : badge('Paused', 'warn') },
       { head: 'Billing', cell: (t) => billBadge(t.billing) },
       { head: 'Apps', cell: (t) => `${t.modules.length} of ${apps.length} on` },
       { head: 'Logins', num: true, cell: (t) => String(t.users) },
@@ -165,15 +165,28 @@ async function manage(id) {
   ], t.users) : empty('No owner or manager logins.');
   const paused = t.status === 'suspended';
   const dlg = dialog(t.name, h('div', { class: 'stack' },
-    h('p', { class: 'muted' }, `${t.slug}. Added ${String(t.created_at).slice(0, 10)}. ${paused ? 'Paused: nobody can sign in and public pages are off.' : 'Active.'}`),
+    h('p', { class: 'muted' }, `${t.slug}. Added ${String(t.created_at).slice(0, 10)}. ${t.delete_after ? `Closed: everything in it is deleted on ${String(t.delete_after).slice(0, 10)}. Resume it before then to keep it.` : paused ? 'Paused: nobody can sign in and public pages are off.' : 'Active.'}`),
     h('div', { class: 'row' },
       button(paused ? 'Resume mountain' : 'Pause mountain', () => confirmDialog(paused ? 'Resume this mountain?' : 'Pause this mountain?', paused ? 'People can sign in again.' : 'Everyone is signed out and its public pages stop working. Nothing is deleted.', paused ? 'Resume' : 'Pause', async () => { await call('PATCH', `/tenants/${id}`, { status: paused ? 'active' : 'suspended' }); dlg.close(); home(); manage(id); }, { danger: !paused })),
-      button('Rename or set storage', () => editBasics(t, () => { dlg.close(); home(); manage(id); }), { small: true })),
+      button('Rename or set storage', () => editBasics(t, () => { dlg.close(); home(); manage(id); }), { small: true }),
+      t.delete_after ? null : button('Close mountain', () => closeMountain(t, () => { dlg.close(); home(); manage(id); }), { small: true })),
     h('h3', null, 'Billing'), billingPanel(t, () => { dlg.close(); home(); manage(id); }),
     h('h3', null, 'Apps'), h('p', { class: 'hint' }, 'Changes apply within a few seconds. Turning an app off hides it and refuses its requests; its data is kept.'), list,
     h('h3', null, 'Storage'), h('p', null, `${t.storage_used_mb} MB used of ${t.storage_cap_mb} MB for document files.`),
     h('h3', null, 'Owner and manager logins'), people,
     t.history.length ? h('div', { class: 'stack tight' }, h('h3', null, 'Recent changes'), ...t.history.slice(0, 8).map((x) => h('p', { class: 'small muted' }, `${String(x.at).replace('T', ' ').slice(0, 16)}  ${x.action}  ${x.detail || ''}`))) : null), { wide: true });
+}
+
+// A mountain that has left: paused now, deleted for good once its export window passes.
+function closeMountain(t, done) {
+  const days = input({ name: 'days', type: 'number', min: 7, max: 365, value: 60 });
+  const slug = input({ name: 'slug', required: true, autocomplete: 'off' });
+  formDialog(`Close ${t.name}`, h('div', { class: 'stack' },
+    h('p', null, 'Everyone is signed out and the mountain is paused now. After the number of days below, everything in it is deleted for good: people, sales, patrol records and files. Give the owner time to export first.'),
+    field('Delete after (days)', days), field(`Type ${t.slug} to confirm`, slug)), async () => {
+    const out = await call('POST', `/tenants/${t.id}/close`, { days: Number(days.value), confirm_slug: slug.value.trim() });
+    toast(`Closed. Deleted on ${String(out.delete_after).slice(0, 10)} unless resumed.`); done();
+  });
 }
 
 function editBasics(t, done) {

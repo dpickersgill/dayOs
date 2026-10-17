@@ -212,7 +212,7 @@ async function remindAll() {
 // ---------------------------------------------------------------- phone alerts
 router.get('/alerts/key', patrol, async (_req, res) => { res.json({ key: (await PUSH.vapid()).publicKey }); });
 
-router.post('/alerts/subscribe', patrol, validate(z.object({ endpoint: z.string().url().max(600).refine((u) => u.startsWith('https://'), 'Must be https'), keys: z.object({ p256dh: z.string().max(200), auth: z.string().max(60) }) })), async (req, res) => {
+router.post('/alerts/subscribe', patrol, validate(z.object({ endpoint: z.string().url().max(600).refine((u) => require('../lib/push').pushHostOk(u), 'That is not a phone alert service'), keys: z.object({ p256dh: z.string().max(200), auth: z.string().max(60) }) })), async (req, res) => {
   const b = req.body;
   const hash = crypto.createHash('sha256').update(b.endpoint).digest('hex');
   await pool.query(`INSERT INTO push_subscriptions (tenant_id, user_id, endpoint, endpoint_hash, p256dh, auth) VALUES (?, ?, ?, ?, ?, ?)

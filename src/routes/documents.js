@@ -24,8 +24,33 @@ const TYPES = {
   doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  txt: 'text/plain', csv: 'text/csv', md: 'text/markdown', rtf: 'application/rtf', zip: 'application/zip',
+  txt: 'text/plain', csv: 'text/csv', md: 'text/markdown', rtf: 'application/rtf',
 };
+
+/**
+ * Is the file what its name says? Checked from its first bytes, so a program renamed to .pdf, or an Office file carrying
+ * macros, is refused before anyone opens it. (Zip archives are no longer accepted: they are how malware usually travels.)
+ */
+function contentMatches(ext, buf) {
+  const head = buf.subarray(0, 16);
+  const starts = (...bytes) => bytes.every((b, i) => head[i] === b);
+  const text = () => !buf.subarray(0, 8192).includes(0); // no NUL bytes in a text file
+  const zipHas = (dir) => buf.includes(Buffer.from(dir)) && !buf.includes(Buffer.from('vbaProject.bin'));
+  switch (ext) {
+    case 'pdf': return buf.subarray(0, 5).toString() === '%PDF-';
+    case 'png': return starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+    case 'jpg': case 'jpeg': return starts(0xff, 0xd8, 0xff);
+    case 'gif': return buf.subarray(0, 4).toString() === 'GIF8';
+    case 'webp': return buf.subarray(0, 4).toString() === 'RIFF' && buf.subarray(8, 12).toString() === 'WEBP';
+    case 'docx': return starts(0x50, 0x4b, 0x03, 0x04) && zipHas('word/');
+    case 'xlsx': return starts(0x50, 0x4b, 0x03, 0x04) && zipHas('xl/');
+    case 'pptx': return starts(0x50, 0x4b, 0x03, 0x04) && zipHas('ppt/');
+    case 'doc': case 'xls': case 'ppt': return starts(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1);
+    case 'rtf': return buf.subarray(0, 5).toString() === '{\\rtf';
+    case 'txt': case 'csv': case 'md': return text();
+    default: return false;
+  }
+}
 const INLINE = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 const nullable = (s) => s.nullable().optional();
 
@@ -259,6 +284,7 @@ router.put('/documents/:id/file', express.raw({ type: () => true, limit: MAX_BYT
   const ext = path.extname(name).slice(1).toLowerCase();
   if (!TYPES[ext]) throw bad(`That file type is not allowed. Use ${Object.keys(TYPES).join(', ')}.`);
   if (ext === 'pdf' && buf.slice(0, 5).toString() !== '%PDF-') throw bad('That file does not look like a PDF');
+  if (!contentMatches(ext, buf)) throw bad(`That file is not a real .${ext} file, or it carries macros. Save it again as a plain .${ext} and upload that.`);
   name = name || `file.${ext}`;
   const note = req.get('x-note') ? decodeURIComponent(String(req.get('x-note'))).trim().slice(0, 200) : null;
   const version = await tx(async (conn) => storeFile(conn, req, await lockDocument(conn, req, id), { buf, name, mime: TYPES[ext], note }));

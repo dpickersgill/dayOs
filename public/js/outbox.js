@@ -5,11 +5,20 @@
 //
 // Only the person who typed an entry can send it: entries are tagged with the signed-in user and stay put if someone else
 // signs in on the same phone. Entries are removed from the phone once the server has them.
+//
+// Encrypted on the phone: what is kept is sealed (AES-GCM) with a key that belongs to the signed-in person and comes from
+// the server at sign-in (GET /auth/me, device_key). The key lives only in this tab's memory and session storage, so a lost
+// phone, a shared tablet or another person signing in finds sealed data it cannot read. Until the key arrives, entries are
+// held in memory only, never written in the clear. Each person's entries are sealed separately; the only thing kept in the
+// clear is how many entries each person has waiting (for the sign-out warning).
 
 import { api, session, ApiError } from './api.js';
 import { nowStamp } from './ui.js';
 
-const KEY = 'so.patrol.outbox';
+const LEGACY = 'so.patrol.outbox'; // plain text, before 2026.10.16: read once, sealed, then removed
+const BOX = (w) => `so.patrol.outbox.${w}`;
+const COUNTS = 'so.patrol.outbox.counts';
+const KEY_SLOT = 'so.dk';
 const KEEP_HOURS = 72; // an entry nobody has sent in three days is dropped, so patient details do not sit on a phone
 const listeners = new Set();
 let timer = null;
@@ -23,21 +32,104 @@ export function who() {
     return `${p.tid}.${p.sub}`;
   } catch (_) { return null; }
 }
-function read() {
+
+// ---------------------------------------------------------------- sealing
+const subtle = () => (globalThis.crypto && globalThis.crypto.subtle) || null;
+const store = () => { try { return globalThis.localStorage; } catch (_) { return null; } };
+const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+let key = null; let keyOwner = null;
+
+async function seal(value) {
+  const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
+  const ct = await subtle().encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(value)));
+  return JSON.stringify({ v: 1, iv: b64(iv), ct: b64(ct) });
+}
+async function open(text) {
+  const o = JSON.parse(text);
+  const pt = await subtle().decrypt({ name: 'AES-GCM', iv: unb64(o.iv) }, key, unb64(o.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+/**
+ * The signed-in person's key, from the server. Opens what this person has waiting on the phone (and seals any entries
+ * an older version left in the clear). Call after sign-in, and on page load with the copy kept for this tab.
+ */
+export async function setDeviceKey(raw) {
+  const me = who();
+  if (!raw || !me || !subtle()) return false;
   try {
-    const list = JSON.parse(globalThis.localStorage.getItem(KEY) || '[]');
-    const cut = Date.now() - KEEP_HOURS * 3600000;
-    const fresh = list.filter((x) => Date.parse(x.queued || 0) > cut);
-    if (fresh.length !== list.length) globalThis.localStorage.setItem(KEY, JSON.stringify(fresh));
-    return fresh;
-  } catch (_) { return []; }
+    key = await subtle().importKey('raw', unb64(raw), 'AES-GCM', false, ['encrypt', 'decrypt']);
+    keyOwner = me;
+    try { globalThis.sessionStorage.setItem(KEY_SLOT, raw); } catch (_) { /* kept in memory only */ }
+    const st = store();
+    let mine = [];
+    const sealed = st && st.getItem(BOX(me));
+    if (sealed) { try { mine = await open(sealed); } catch (_) { mine = []; } }
+    const legacy = st && st.getItem(LEGACY);
+    if (legacy) {
+      const old = JSON.parse(legacy || '[]');
+      mine = [...mine, ...old.filter((x) => x.who === me && !mine.some((m) => m.id === x.id))];
+      const rest = old.filter((x) => x.who !== me);
+      if (rest.length) st.setItem(LEGACY, JSON.stringify(rest)); else st.removeItem(LEGACY);
+    }
+    memory = [...mine, ...(memory || []).filter((x) => x.who === me && !mine.some((m) => m.id === x.id))];
+    const kept = st && st.getItem(CASES_BOX(me));
+    cases = []; if (kept) { try { cases = await open(kept); } catch (_) { cases = []; } }
+    const plainCases = st && st.getItem(CASES_LEGACY);
+    if (plainCases) st.removeItem(CASES_LEGACY);
+    await persist();
+    await persistCases();
+    for (const fn of listeners) { try { fn(); } catch (_) { /* keep going */ } }
+    if (memory.length) schedule();
+    return true;
+  } catch (_) { key = null; keyOwner = null; return false; }
+}
+/** On page load: the key kept for this tab, if the same person is still signed in. */
+export function restoreDeviceKey() {
+  try { const raw = globalThis.sessionStorage.getItem(KEY_SLOT); if (raw) return setDeviceKey(raw); } catch (_) { /* none */ }
+  return Promise.resolve(false);
+}
+/** On sign-out: forget the key (the sealed entries stay, unreadable, until this person signs in again). */
+export function dropDeviceKey() {
+  key = null; keyOwner = null; memory = null; cases = [];
+  try { globalThis.sessionStorage.removeItem(KEY_SLOT); } catch (_) { /* none */ }
+}
+
+let memory = null;
+const ready = () => key && keyOwner === who();
+function read() {
+  const cut = Date.now() - KEEP_HOURS * 3600000;
+  memory = (memory || []).filter((x) => Date.parse(x.queued || 0) > cut);
+  return memory;
+}
+async function persist() {
+  const st = store(); const me = who();
+  if (!st || !me || !ready()) return; // no key yet: memory only, never in the clear
+  const mine = (memory || []).filter((x) => x.who === me);
+  try {
+    if (mine.length) st.setItem(BOX(me), await seal(mine)); else st.removeItem(BOX(me));
+    const counts = JSON.parse(st.getItem(COUNTS) || '{}');
+    if (mine.length) counts[me] = mine.length; else delete counts[me];
+    st.setItem(COUNTS, JSON.stringify(counts));
+  } catch (_) { /* storage full or blocked: entries stay in memory */ }
 }
 function write(list) {
-  try { if (list.length) globalThis.localStorage.setItem(KEY, JSON.stringify(list)); else globalThis.localStorage.removeItem(KEY); } catch (_) { /* storage blocked: entries live in memory only */ memory = list; }
+  memory = list;
+  persist();
   for (const fn of listeners) { try { fn(); } catch (_) { /* a listener that fails does not stop the others */ } }
 }
-let memory = null;
-const all = () => memory || read();
+const all = () => read();
+/** How many entries other people left on this phone (sealed; only the count is known). */
+function othersWaiting() {
+  try {
+    const me = who(); const counts = JSON.parse((store() && store().getItem(COUNTS)) || '{}');
+    let n = Object.entries(counts).filter(([w]) => w !== me).reduce((a, [, c]) => a + Number(c || 0), 0);
+    const legacy = store() && store().getItem(LEGACY);
+    if (legacy) n += JSON.parse(legacy).filter((x) => x.who !== me).length;
+    return n;
+  } catch (_) { return 0; }
+}
 
 /** Entries for one case that have not reached the server yet: [{ id, method, path, body, label, at, error }]. */
 export function pending(caseId) {
@@ -48,7 +140,7 @@ export function pending(caseId) {
 export function waitingCounts(caseId) {
   const me = who();
   const list = all().filter((x) => caseId === undefined || x.caseId === Number(caseId));
-  return { mine: list.filter((x) => x.who === me).length, others: list.filter((x) => x.who !== me).length };
+  return { mine: list.filter((x) => x.who === me).length, others: caseId === undefined ? othersWaiting() : 0 };
 }
 export const onChange = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
 
@@ -116,28 +208,35 @@ function schedule() {
 }
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => { flush(); });
-  if (all().length) schedule();
 }
 
 // ---------------------------------------------------------------- cases kept for a dead spot
 // The last few cases this person opened are kept on the phone for 12 hours, so a case can still be opened (to read it
-// and keep adding bedside entries) where there is no signal. They belong to the person signed in and are cleared on
-// sign-out with the rest of the outbox.
-const CASES = 'so.patrol.cases';
+// and keep adding bedside entries) where there is no signal. They are sealed with the same key, belong to the person
+// signed in, and are cleared on sign-out.
+const CASES_LEGACY = 'so.patrol.cases';
+const CASES_BOX = (w) => `so.patrol.cases.${w}`;
 const CASE_HOURS = 12; const CASE_MAX = 5;
+let cases = [];
+async function persistCases() {
+  const st = store(); const me = who();
+  if (!st || !me || !ready()) return;
+  try { if (cases.length) st.setItem(CASES_BOX(me), await seal(cases)); else st.removeItem(CASES_BOX(me)); } catch (_) { /* not kept */ }
+}
 export function keepCase(id, data) {
-  try {
-    const me = who(); if (!me) return;
-    const cut = Date.now() - CASE_HOURS * 3600000;
-    const list = JSON.parse(globalThis.localStorage.getItem(CASES) || '[]').filter((x) => x.who === me && x.at > cut && x.id !== Number(id));
-    list.unshift({ id: Number(id), who: me, at: Date.now(), data });
-    globalThis.localStorage.setItem(CASES, JSON.stringify(list.slice(0, CASE_MAX)));
-  } catch (_) { /* storage full or blocked: the case simply is not kept */ }
+  const me = who(); if (!me) return;
+  const cut = Date.now() - CASE_HOURS * 3600000;
+  cases = cases.filter((x) => x.who === me && x.at > cut && x.id !== Number(id));
+  cases.unshift({ id: Number(id), who: me, at: Date.now(), data });
+  cases = cases.slice(0, CASE_MAX);
+  persistCases();
 }
 export function keptCase(id) {
-  try {
-    const me = who(); const cut = Date.now() - CASE_HOURS * 3600000;
-    return JSON.parse(globalThis.localStorage.getItem(CASES) || '[]').find((x) => x.who === me && x.id === Number(id) && x.at > cut) || null;
-  } catch (_) { return null; }
+  const me = who(); const cut = Date.now() - CASE_HOURS * 3600000;
+  return cases.find((x) => x.who === me && x.id === Number(id) && x.at > cut) || null;
 }
-export function forgetCases() { try { globalThis.localStorage.removeItem(CASES); } catch (_) { /* nothing kept */ } }
+export function forgetCases() {
+  cases = [];
+  const st = store(); const me = who();
+  try { if (st) { st.removeItem(CASES_LEGACY); if (me) st.removeItem(CASES_BOX(me)); } } catch (_) { /* nothing kept */ }
+}

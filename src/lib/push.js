@@ -82,6 +82,17 @@ function decrypt(body, uaKeys, auth) {
 }
 
 // Tests replace this to see what would be sent without reaching a push service.
+/**
+ * Alerts go only to the browsers' own push services, so a registered address can never point the server at something
+ * else (an internal address, another website). PUSH_EXTRA_HOSTS adds hosts if a browser maker adds a service.
+ */
+const PUSH_HOSTS = [/^fcm\.googleapis\.com$/, /^android\.googleapis\.com$/, /^updates\.push\.services\.mozilla\.com$/, /^web\.push\.apple\.com$/, /\.notify\.windows\.com$/, /^push\.services\.mozilla\.com$/];
+function pushHostOk(url) {
+  let u; try { u = new URL(url); } catch (_) { return false; }
+  if (u.protocol !== 'https:' || u.port) return false;
+  const extra = String(process.env.PUSH_EXTRA_HOSTS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+  return PUSH_HOSTS.some((r) => r.test(u.hostname)) || extra.includes(u.hostname);
+}
 let transport = async (endpoint, init) => fetch(endpoint, init);
 const setTransport = (fn) => { transport = fn; };
 
@@ -89,6 +100,7 @@ const setTransport = (fn) => { transport = fn; };
 async function sendOne(sub, message, { urgency = 'high', ttl = 120 } = {}) {
   try {
     const body = encrypt(JSON.stringify(message), sub.p256dh, sub.auth);
+    if (!pushHostOk(sub.endpoint)) { await pool.query('DELETE FROM push_subscriptions WHERE id = ?', [sub.id]); return 'gone'; } // not a push service: never sent
     const res = await transport(sub.endpoint, {
       method: 'POST',
       headers: { Authorization: await authHeader(sub.endpoint), 'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream', TTL: String(ttl), Urgency: urgency },
@@ -128,4 +140,4 @@ async function notifyStaff(tenantId, staffIds, message, opts) {
   return notifyUsers(tenantId, users.map((u) => u.id), message, opts);
 }
 
-module.exports = { vapid, encrypt, decrypt, authHeader, notifyUsers, notifyStaff, setTransport, sendOne };
+module.exports = { vapid, encrypt, decrypt, authHeader, notifyUsers, notifyStaff, setTransport, sendOne, pushHostOk };

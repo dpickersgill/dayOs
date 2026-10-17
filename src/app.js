@@ -59,7 +59,9 @@ const whatsNew = require('./routes/whatsnew');
 
 function createApp() {
   const app = express();
-  app.set('trust proxy', 1); // Cloud Run terminates TLS in front of the container
+  // Cloud Run terminates TLS in front of the container (one hop). Behind the Cloud Armor load balancer there are two, so
+  // cloud-armor.sh sets TRUST_PROXY_HOPS=2; otherwise every visitor would share the load balancer's address for rate limits.
+  app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS || 1));
   app.disable('x-powered-by');
   // The patrol map loads tile images from the configured tile servers, so only those hosts are added to img-src.
   const tileHosts = [...new Set(config.map.layers.map((l) => (l.url.match(/^https:\/\/[^/]+/) || [''])[0].replace('{s}', '*')).filter(Boolean))];
@@ -137,11 +139,18 @@ function createApp() {
     const [r] = LATEST.column
       ? await pool.query('SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? LIMIT 1', [LATEST.table, LATEST.column])
       : await pool.query('SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? LIMIT 1', [LATEST.table, LATEST.index]);
-    if (!r.length) return res.status(503).json({ ok: false, reason: 'run npm run migrate', version: release.VERSION, build: release.BUILD });
-    return res.json({ ok: true, version: release.VERSION, build: release.BUILD });
+    if (!r.length) return res.status(503).json({ ok: false, reason: 'run npm run migrate', version: release.VERSION });
+    return res.json({ ok: true, version: release.VERSION });
   });
   // Which version is running: open to anyone (the sign-in screen shows it, and deploy.sh reads it before deploying).
-  app.get('/version', (_req, res) => { res.set('Cache-Control', 'no-store'); res.json({ version: release.VERSION, build: release.BUILD, built_at: release.BUILT_AT }); });
+  // The build and its date only for someone signed in (Help shows them); everyone else sees the release number alone.
+  app.get('/version', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    let signedIn = false;
+    const m = /^Bearer (.+)$/.exec(req.get('authorization') || '');
+    if (m) { try { signedIn = !require('jsonwebtoken').verify(m[1], config.jwtSecret, { algorithms: ['HS256'] }).typ; } catch (_) { signedIn = false; } }
+    res.json(signedIn ? { version: release.VERSION, build: release.BUILD, built_at: release.BUILT_AT } : { version: release.VERSION });
+  });
 
   const api = express.Router();
   // Responses can hold guest and patient details: tell browsers and proxies never to keep a copy.

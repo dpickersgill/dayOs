@@ -519,6 +519,17 @@ Platform console, **Demos**: everyone who started a demo, newest first. Tiles sh
 
 ### Security
 
+- **Sessions the server can end** (`user_sessions`, only a hash of each id kept): signing out, an hour unused (`SESSION_IDLE_MINUTES`), a password change, a console reset or closing a mountain ends them. `POST /api/v1/auth/logout`.
+- **Login lockout:** 10 wrong passwords in a row lock that login for 15 minutes (`LOGIN_LOCK_AFTER`), written to the audit log; a console password reset unlocks it.
+- **Breached passwords refused** (Pwned Passwords range API, k-anonymity; allowed if the service is unreachable; `PWNED_CHECK=off`).
+- **Two-step required for owners and managers** in production (`REQUIRE_ADMIN_MFA`); demo mountains are exempt.
+- **Offline patrol store sealed** with AES-GCM using a per-person key from `/auth/me` (`device_key`), kept per person, plain-text copies migrated and removed.
+- **Uploads checked by content:** the first bytes must match the type; no zip; Office files must be the right kind and carry no macros.
+- **Push alerts** go only to the known push services over https; other addresses are refused and removed.
+- **`/version`** shows the build only to someone signed in; `/readyz` shows no build.
+- **Platform key** stops working once an operator has two-step (`PLATFORM_KEY_SIGNIN=on` to break glass). Console actions and every audit event also go to Cloud Logging (`summitops-audit`).
+- **Close mountain** in the console: paused now, deleted after its window by the daily job, which also deletes website requests over two years old and old sessions (`src/lib/retention.js`).
+- **Cloud setup:** `scripts/harden.sh` (own service account, Secret Manager, limited database login, encrypted-only Cloud SQL, locked audit bucket), `scripts/cloud-armor.sh` (web firewall), `deploy.sh` stops on a high `npm audit` finding, and `.github/workflows/ci.yml` runs tests, audit and CodeQL.
 - **Demo mountains cannot send email or texts.** Every email and text names its mountain; bulk campaigns go out on a separate Postmark stream (`POSTMARK_BROADCAST_STREAM`).
 - **Online orders no longer overwrite customer records.** Buying for someone fills in blanks only, and a buyer's email goes only on their own record.
 - **Two-step sign-in lockout is kept in the database** (survives restarts and works across servers); a sign-in started before a password change is refused.

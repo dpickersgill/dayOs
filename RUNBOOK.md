@@ -8,6 +8,40 @@
 4. **Legal**: have a lawyer review the waiver text and privacy terms. Sign a BAA with Google Cloud before storing patrol patient/health data (see HIPAA.md).
 5. **Card payments**: pick a processor (Square or Stripe) before taking live cards through a terminal. Until then card sales are recorded manually.
 
+## Security setup (once, after 2026.10.16)
+
+From the unzipped folder in Cloud Shell, after `bash deploy.sh`:
+
+1. `bash scripts/harden.sh` gives the app its own service account (`summitops-run`) with only the roles it needs, moves
+   every key still held as a plain setting (Stripe, Postmark, `JOBS_KEY` and the rest) into Secret Manager, makes a
+   database login for the app (`summitops_app`) that can change rows but not tables, keeps the current login for
+   migrations only (secret `summitops-db-migrator`, which the app cannot read), makes Cloud SQL refuse unencrypted
+   connections and protects it from deletion, sends audit events to a log bucket kept 400 days, and redeploys.
+   It is safe to run again. From then on `deploy.sh` migrates with the migration login and deploys as `summitops-run`.
+2. `bash scripts/harden.sh --lock-audit` locks that log bucket so nobody can shorten or delete it. Cannot be undone.
+3. `bash scripts/harden.sh --remove-editor` takes Editor away from the default compute account (builds keep working:
+   it gets the build roles first). If a deploy then fails at the build step, the script prints the command to undo it.
+4. Optional web firewall: `bash scripts/cloud-armor.sh www.yourdomain.com app.yourdomain.com` builds a load balancer
+   with Cloud Armor (about $20 a month extra) and prints the address for your domains' A records. When the certificate
+   is ACTIVE, `bash scripts/cloud-armor.sh --lock <same domains>` makes the attack rules block, lets only the load
+   balancer reach the app and sends the daily job through it. Change the Stripe webhook address to your domain first.
+   `bash scripts/cloud-armor.sh --unlock` opens the run.app address again if something goes wrong.
+
+What changed in the app with this release:
+- Sign-ins are sessions the server can end: signing out, an hour unused (`SESSION_IDLE_MINUTES`), a password change,
+  a console password reset or closing a mountain ends them. Everyone signs in again once after the update.
+- Owners and managers must use two-step sign-in in production (`REQUIRE_ADMIN_MFA=off` turns that off, not advised).
+- A login is locked for 15 minutes after 10 wrong passwords in a row (`LOGIN_LOCK_AFTER`); a console password reset
+  unlocks it. Passwords seen in data breaches are refused (Pwned Passwords; only five characters of the hash are sent;
+  `PWNED_CHECK=off` skips it).
+- The platform key stops working once any operator has two-step sign-in. `PLATFORM_KEY_SIGNIN=on` is the break-glass
+  setting if every operator is locked out; set it back afterwards.
+- Offline patrol notes on phones are sealed with a key made from `LINK_SECRET` and the person's login. Before rotating
+  `LINK_SECRET`, make sure patrol phones have sent everything waiting, or those notes cannot be opened afterwards.
+- Close mountain (console, Manage): paused now, deleted by the daily job after the window. The console's history of it is kept.
+- The daily job also deletes website requests older than two years and sign-in records over a month old.
+- Every push to GitHub runs `.github/workflows/ci.yml`: the tests, `npm audit` and CodeQL.
+
 ## Keeping an eye on it (set up once)
 
 Every failure is written to the logs as one line with `"severity":"ERROR"` and a `job` name (`email`, `sms`,
@@ -59,6 +93,8 @@ own setting. To rotate `JWT_SECRET` safely:
 1. Set `TOTP_KEY`, `LINK_SECRET` and `KIOSK_SECRET` on Cloud Run to the **current** `JWT_SECRET` value (as secrets).
 2. Deploy, and check two-step sign-in and a badge still work.
 3. Now change `JWT_SECRET`. Everyone signs in again; nothing else changes.
+
+Before changing `LINK_SECRET`, have patrol phones send any reports waiting offline (they are sealed with a key made from it).
 
 ## Platform console
 

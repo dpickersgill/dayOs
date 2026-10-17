@@ -492,7 +492,7 @@ export const ARTICLES = [
   { id: 'password', app: 'settings', title: 'Change my password and turn on two-step sign-in', keywords: 'security authenticator recovery codes mfa 2fa account',
     intro: 'Two-step sign-in asks for a code from an authenticator app as well as your password.',
     steps: ['Open Account.', 'To change your password, enter the old one and the new one.', 'To turn on two-step sign-in, scan the QR code with an authenticator app and enter the code it shows.', 'Save the recovery codes somewhere safe. They are the way back in if you lose your phone.'],
-    tips: ['Your mountain may require two-step sign-in. If so, nothing else opens until it is set up.', 'If you are locked out, a manager can help you recover.'] },
+    tips: ['Owners and managers always need two-step sign-in, and your mountain may require it for everyone. Until it is set up, nothing else opens.', 'Changing your password signs you out on every other device.', 'A password that has turned up in a data breach elsewhere is refused. Choose one you have not used anywhere else.', 'After 10 wrong passwords in a row the login is locked for 15 minutes. A manager can reset the password to unlock it sooner.', 'You are signed out after an hour without using the app, and signing out ends the session everywhere it was copied.'] },
 ];
 
 export const articleById = (id) => ARTICLES.find((a) => a.id === id) || null;

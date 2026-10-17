@@ -329,7 +329,8 @@ test('phone alerts: subscribing, and the message is encrypted for that phone onl
   const auth = crypto.randomBytes(16).toString('base64url');
   const seen = [];
   PUSH.setTransport(async (endpoint, init) => { seen.push({ endpoint, init }); return { status: 201 }; });
-  ok(await api('POST', '/patrol/alerts/subscribe', { token: M.valT, body: { endpoint: 'https://push.example.test/abc', keys: { p256dh: ua.getPublicKey().toString('base64url'), auth } } }));
+  is(await api('POST', '/patrol/alerts/subscribe', { token: M.valT, body: { endpoint: 'https://internal.example.test/abc', keys: { p256dh: ua.getPublicKey().toString('base64url'), auth } } }), 400, 'only the browsers\' push services');
+  ok(await api('POST', '/patrol/alerts/subscribe', { token: M.valT, body: { endpoint: 'https://fcm.googleapis.com/fcm/send/abc', keys: { p256dh: ua.getPublicKey().toString('base64url'), auth } } }));
   const r = ok(await api('POST', '/patrol/alerts/test', { token: M.valT }));
   assert.equal(r.sent, 1);
   const msg = JSON.parse(PUSH.decrypt(Buffer.from(seen[0].init.body), ua, auth));
