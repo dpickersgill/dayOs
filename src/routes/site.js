@@ -17,7 +17,14 @@ const config = require('../config');
 const { rateLimit } = require('../middleware/rateLimit');
 
 const DIR = path.join(__dirname, '..', 'site');
-const PAGES = { '': 'index', product: 'product', 'ski-patrol': 'skipatrol', pricing: 'pricing', security: 'security', contact: 'contact', privacy: 'privacy', terms: 'terms' };
+const PAGES = {
+  '': 'index', product: 'product', 'ski-patrol': 'skipatrol', 'lift-ticket-software': 'lifttickets', 'ski-school-software': 'skischool',
+  'ski-rental-software': 'skirental', 'ski-waiver-software': 'skiwaivers', 'lift-maintenance-software': 'liftmaintenance',
+  pricing: 'pricing', security: 'security', contact: 'contact', privacy: 'privacy', terms: 'terms',
+};
+// The pages written for one search each ("ski school software"), linked from the menu and the footer.
+const SOLUTIONS = [['ski-patrol', 'Ski patrol'], ['lift-ticket-software', 'Lift tickets and passes'], ['ski-school-software', 'Ski school'],
+  ['ski-rental-software', 'Ski rentals'], ['ski-waiver-software', 'Online waivers'], ['lift-maintenance-software', 'Lift and fleet maintenance']];
 const SEO = require('../lib/seo');
 const cache = new Map();
 
@@ -32,10 +39,14 @@ function template(name) {
 const LOGO = (bg, fg) => `<svg width="34" height="34" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="${bg}"/><path d="M3 25 L12 11 L17 18 L21 13 L29 25 Z" fill="${fg}"/></svg>`;
 const NAV = [['product', 'Product'], ['ski-patrol', 'Ski patrol'], ['pricing', 'Pricing'], ['security', 'Security']];
 
-/** The top of every page: logo, Product, Pricing, Security, Try the demo, Sign in, Request a walkthrough. */
+/** The top of every page: logo, Product, Pricing, Security, Try the demo, Sign in, Request a walkthrough; on phones a
+ * full-screen menu with every solution page, and a bar at the bottom with the two things people came to do. */
 function header(current) {
   const links = NAV.map(([s, t]) => `<a href="{{SITE}}/${s}"${s === current ? ' aria-current="page"' : ''}>${t}</a>`).join('\n      ');
   const extra = '<a href="{{TRY}}">Try the demo</a>\n      <a href="{{APP}}">Sign in</a>';
+  const solutions = SOLUTIONS.filter(([s]) => s !== 'ski-patrol').map(([s, t]) => `<a href="{{SITE}}/${s}"${s === current ? ' aria-current="page"' : ''}>${t}</a>`).join('');
+  const bar = current === 'contact' ? '' : `
+<div class="mcta"><a class="btn ghost" href="{{TRY}}">Try the demo</a><a class="btn" href="{{SITE}}/contact">Book a walkthrough</a></div>`;
   return `<a class="skip" href="#main">Skip to the content</a>
 <header class="sn">
   <div class="wrap sn-in">
@@ -46,15 +57,17 @@ function header(current) {
       <a class="btn" href="{{SITE}}/contact">Request a walkthrough</a>
     </nav>
     <details class="sn-m">
-      <summary>Menu</summary>
+      <summary><i aria-hidden="true"></i>Menu</summary>
       <nav class="sn-menu" aria-label="Main">
+        <a href="{{HOME}}"${current === '' ? ' aria-current="page"' : ''}>Home</a>
         ${links}
+        <div class="sub">${solutions}</div>
         ${extra}
         <a class="btn" href="{{SITE}}/contact">Request a walkthrough</a>
       </nav>
     </details>
   </div>
-</header>`;
+</header>${bar}`;
 }
 
 const FOOTER = `<footer class="sf">
@@ -69,9 +82,14 @@ const FOOTER = `<footer class="sf">
         <ul>
           <li><a href="{{HOME}}">Home</a></li>
           <li><a href="{{SITE}}/product">Product</a></li>
-          <li><a href="{{SITE}}/ski-patrol">Ski patrol software</a></li>
           <li><a href="{{SITE}}/pricing">Pricing</a></li>
           <li><a href="{{SITE}}/security">Security</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Solutions</h2>
+        <ul>
+          ${SOLUTIONS.map(([s, t]) => `<li><a href="{{SITE}}/${s}">${t}</a></li>`).join('\n          ')}
         </ul>
       </div>
       <div>
@@ -89,6 +107,40 @@ const FOOTER = `<footer class="sf">
   </div>
 </footer>`;
 
+// ---------------------------------------------------------------- plans in the page itself
+// Home and Pricing show the live plans in the HTML, so search engines and people without JavaScript see the real prices.
+// site.js draws the same cards again (and the yearly prices) once it runs.
+const escHtml = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const dollars = (cents) => `$${Math.round(cents / 100).toLocaleString('en-US')}`;
+const SYMS = ['<circle cx="17" cy="17" r="15" fill="#2C7A57"/>', '<rect x="2" y="2" width="30" height="30" rx="2" fill="#1B5FC1"/>', '<path d="M17 1 L33 17 L17 33 L1 17 Z" fill="#12303A"/>'];
+const sym = (i) => `<svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">${SYMS[Math.min(i, 2)]}</svg>`;
+function homePlansHtml(d) {
+  return d.plans.map((p, i) => `<div class="plan${i === 1 ? ' feat' : ''}"><div class="sym">${sym(i)}<h3>${escHtml(p.name)}</h3></div><p class="who">${escHtml(p.blurb)}</p><div class="price"><b>${dollars(p.monthly_cents)}</b><span>per month</span></div></div>`).join('\n        ');
+}
+function homeAddonsHtml(d) {
+  return `<b>Add when you want them:</b>${d.addons.map((a) => `<span>${escHtml(a.name)}</span>`).join('')}<a href="{{SITE}}/pricing#addons">See add-on prices</a>`;
+}
+function pricingPlansHtml(d) {
+  return d.plans.map((p, i) => {
+    // "Everything in Lodge, plus" only when this plan really holds all of the one before it (Patrol only does not).
+    const before = d.plans[i - 1];
+    const prev = before && before.apps.every((a) => p.apps.some((x) => x.key === a.key)) ? before : null;
+    const added = prev ? p.apps.filter((a) => !prev.apps.some((x) => x.key === a.key)) : p.apps;
+    const items = [prev ? `<li class="plus">Everything in ${escHtml(prev.name)}, plus:</li>` : '', ...added.map((a) => `<li>${escHtml(a.label)}</li>`)].join('');
+    return `<div class="plan${i === 1 ? ' feat' : ''}"><div class="sym">${sym(i)}<h2>${escHtml(p.name)}</h2></div><p class="who">${escHtml(p.blurb)}</p>`
+      + `<div class="price"><b>${p.monthly_cents ? dollars(p.monthly_cents) : 'Ask us'}</b><span>${p.monthly_cents ? 'per month' : ''}</span></div><p class="setup">Billed monthly</p>`
+      + `<ul>${items}</ul><a class="btn go${i === 1 ? '' : ' ghost'}" href="{{SITE}}/contact?kind=trial&amp;plan=${encodeURIComponent(p.name)}">Start a ${escHtml(p.name)} trial</a></div>`;
+  }).join('\n        ');
+}
+function fillPlans(html, d) {
+  if (!d || !d.plans.length) return html;
+  const cols = ` style="--n:${Math.min(d.plans.length, 4)}"`;
+  return html
+    .replace(/(id="homeplans")>(<!--PLANS:home-->)[\s\S]*?<!--\/PLANS-->/, (_m, id, mark) => `${id}${cols}>${mark}${homePlansHtml(d)}<!--/PLANS-->`)
+    .replace(/(id="plans")>(<!--PLANS:pricing-->)[\s\S]*?<!--\/PLANS-->/, (_m, id, mark) => `${id}${cols}>${mark}${pricingPlansHtml(d)}<!--/PLANS-->`)
+    .replace(/<!--ADDONS:home-->[\s\S]*?<!--\/ADDONS-->/, () => (d.addons.length ? homeAddonsHtml(d) : ''));
+}
+
 /** The address search engines should treat as the page's own: the website's first address once it has one. */
 function canonicalOrigin(req) {
   if (config.site.hosts.length) return `https://${config.site.hosts[0]}`;
@@ -105,8 +157,10 @@ async function render(req, name, slug) {
   const app = config.site.appUrl || (site ? '/app' : '');
   let html = template(name);
   const plans = await loadPlans().catch(() => null);
-  const head = SEO.head({ slug: name === 'notfound' ? 'notfound' : slug, origin: canonicalOrigin(req), html, plans, verify: config.site.verify, noindex: isCopy(req) });
+  const head = SEO.head({ slug: name === 'notfound' ? 'notfound' : slug, origin: canonicalOrigin(req), html, plans, verify: config.site.verify, noindex: isCopy(req), modified: modified(name), asset: ASSET_V });
+  html = fillPlans(html, plans).replace(/<!--\/?(PLANS|ADDONS)(:[a-z]+)?-->/g, '');
   html = html.replace('<!--HEAD-->', head)
+    .replace('<div class="sx">', name === 'contact' ? '<div class="sx">' : '<div class="sx has-mcta">')
     .replace(/<!--HEADER:?([a-z-]*)-->/, (_m, cur) => header(cur))
     .replace('<!--FOOTER-->', FOOTER);
   return html
@@ -125,9 +179,14 @@ async function send(req, res, name, slug, status = 200) {
   res.send(body);
 }
 
+// The website's stylesheet and script are fetched as /site/site.css?v=<version>, so browsers can keep them for a year
+// and still get the new ones the moment a release changes the address.
+const ASSET_V = require('../../package.json').version;
+
 /** When each page last changed, for the sitemap. */
 const modified = (name) => { try { return fs.statSync(path.join(DIR, `${name}.html`)).mtime.toISOString().slice(0, 10); } catch (_) { return null; } };
-const PRIORITY = { '': '1.0', product: '0.9', 'ski-patrol': '0.9', pricing: '0.9', contact: '0.8', security: '0.6', privacy: '0.2', terms: '0.2' };
+const PRIORITY = { '': '1.0', product: '0.9', 'ski-patrol': '0.9', pricing: '0.9', contact: '0.7', security: '0.6', privacy: '0.2', terms: '0.2' };
+for (const [s] of SOLUTIONS) if (!PRIORITY[s]) PRIORITY[s] = '0.8';
 
 const pages = express.Router();
 // Never in search results: the app's sign-in, the operator console and the time clock.
@@ -163,6 +222,49 @@ pages.get('/robots.txt', (req, res) => {
   }
   res.type('text/plain').set('Cache-Control', 'public, max-age=3600').send(`${lines.join('\n')}\n`);
 });
+/** /llms.txt: a plain-text guide to the website for AI assistants and answer engines (llmstxt.org). */
+pages.get('/llms.txt', async (req, res, next) => {
+  if (!onSite(req) && config.site.hosts.length) return next();
+  const origin = canonicalOrigin(req);
+  const d = await loadPlans().catch(() => null);
+  const price = d && d.plans.length ? d.plans.map((p) => `- ${p.name}: ${dollars(p.monthly_cents)} a month. ${p.blurb || ''}`.trim()).join('\n') : '- See the pricing page.';
+  const addons = d && d.addons.length ? d.addons.map((a) => `- ${a.name}: ${dollars(a.monthly_cents)} a month`).join('\n') : '';
+  const page = (slug) => `${origin}/${slug}`;
+  const text = `# DAY/OS
+
+> DAY/OS is web-based operations software for independent ski areas in the United States: lift and trail status and inspections, grooming, fleet maintenance, ticket and season pass sales with RFID gate scanning, an online ticket shop, waivers, ski and snowboard rentals, ski school and lesson booking, ski patrol (patient care reports, dispatch, the closing sweep) and staff scheduling. Each mountain turns on only the apps it runs. Every plan starts with a 14-day free trial, with no contract.
+
+DAY/OS runs in a web browser on counter computers, phones and tablets, with nothing to install. Payments go through Stripe. Each mountain's data is kept separate, patient records are never deleted (mistakes are marked entered in error), and every mountain can export its data as spreadsheets at any time.
+
+## Pages
+
+- [Home](${page('')}): what DAY/OS does, one day at a ski area from first chair to closing
+- [Product](${page('product')}): every app and the pages guests use
+- [Ski patrol software](${page('ski-patrol')}): patient care reports, dispatch, opening checks, the closing sweep, volunteers
+- [Lift ticket and season pass software](${page('lift-ticket-software')}): the counter, the gate, RFID cards and the online shop
+- [Ski school software](${page('ski-school-software')}): lessons, online booking and instructors
+- [Ski rental software](${page('ski-rental-software')}): rental contracts, sizing, binding records and barcoded gear
+- [Online ski waivers](${page('ski-waiver-software')}): waivers signed on a phone or counter tablet
+- [Lift inspection and maintenance software](${page('lift-maintenance-software')}): lift checks, grooming, work orders and the fleet
+- [Pricing](${page('pricing')}): plans, add-ons and how paying works
+- [Security](${page('security')}): how guest and patient information is protected
+- [Contact](${page('contact')}): book a walkthrough or start a free trial
+
+## Plans (US dollars, before sales tax)
+
+${price}
+${addons ? `\nAdd-ons, on any plan:\n\n${addons}\n` : ''}
+Yearly billing costs less. Pay by card, US bank account or invoice. 14 days free, no card needed to start.
+
+## Optional
+
+- [Privacy policy](${page('privacy')})
+- [Terms of service](${page('terms')})
+- [Try a demo mountain](${config.site.appUrl || origin}/try): your own made-up mountain in about 20 seconds
+`;
+  res.type('text/plain').set('Cache-Control', 'public, max-age=3600').send(text);
+});
+
 function sitemap(req, res) {
   const origin = canonicalOrigin(req);
   const urls = Object.entries(PAGES).map(([slug, name]) => `  <url><loc>${origin}/${slug}</loc>${modified(name) ? `<lastmod>${modified(name)}</lastmod>` : ''}<priority>${PRIORITY[slug] || '0.5'}</priority></url>`).join('\n');

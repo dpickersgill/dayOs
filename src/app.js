@@ -104,7 +104,9 @@ function createApp() {
   app.use(
     express.static(path.join(__dirname, '..', 'public'), {
       setHeaders(res, file) {
-        res.setHeader('Cache-Control', file.endsWith('.woff2') ? 'public, max-age=31536000, immutable' : 'no-cache');
+        // Fonts never change. The website's own files are asked for with ?v=<version>, so they can be kept a year too.
+        const versioned = res.req && res.req.query && res.req.query.v && /[\\/]public[\\/]site[\\/]/.test(file);
+        res.setHeader('Cache-Control', file.endsWith('.woff2') || versioned ? 'public, max-age=31536000, immutable' : 'no-cache');
       },
     }),
   );

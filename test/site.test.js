@@ -56,11 +56,11 @@ test.after(async () => { await new Promise((r) => server.close(r)); await new Pr
 
 test('every page is at /site, with its links kept under /site', async () => {
   assert.equal((await get('/site')).status, 301);
-  for (const p of ['/site/', '/site/product', '/site/ski-patrol', '/site/pricing', '/site/security', '/site/contact', '/site/privacy', '/site/terms']) {
+  for (const p of ['/site/', '/site/product', '/site/ski-patrol', '/site/lift-ticket-software', '/site/ski-school-software', '/site/ski-rental-software', '/site/ski-waiver-software', '/site/lift-maintenance-software', '/site/pricing', '/site/security', '/site/contact', '/site/privacy', '/site/terms']) {
     const r = await get(p);
     assert.equal(r.status, 200, p);
     assert.match(r.type, /text\/html/);
-    assert.ok(!r.text.includes('{{') && !r.text.includes('<!--HEADER') && !r.text.includes('<!--FOOTER') && !r.text.includes('<!--HEAD'), `${p} has every token filled`);
+    assert.ok(!r.text.includes('{{') && !r.text.includes('<!--HEADER') && !r.text.includes('<!--FOOTER') && !r.text.includes('<!--HEAD') && !r.text.includes('<!--PLANS'), `${p} has every token filled`);
     assert.equal((r.text.match(/<h1[ >]/g) || []).length, 1, `${p} has one main heading`);
     assert.ok(r.text.includes('href="/site/pricing"'), `${p} links within /site`);
   }
@@ -135,6 +135,56 @@ test('the Pricing page reads the active plans and add-ons set in the console', a
   assert.ok(!('id' in p) && !('stripe_product' in p), 'nothing internal');
   await api('PATCH', `/platform/billing/plans/${made.body.id}`, { active: false }, KEY);
   assert.ok(!(await api('GET', '/site/plans')).body.plans.some((x) => x.code === code), 'a hidden plan leaves the website');
+});
+
+test('pages written for each search are linked from every page, in the sitemap, and described for AI assistants', async () => {
+  const slugs = ['ski-patrol', 'lift-ticket-software', 'ski-school-software', 'ski-rental-software', 'ski-waiver-software', 'lift-maintenance-software'];
+  const home = await onHost('/');
+  const map = await onHost('/sitemap.xml');
+  for (const s of slugs) {
+    assert.ok(home.text.includes(`href="/${s}"`), `${s} is linked from the footer`);
+    assert.ok(map.text.includes(`<loc>https://www.site.test/${s}</loc>`), `${s} is in the sitemap`);
+    const page = await onHost(`/${s}`);
+    assert.equal(page.status, 200, s);
+    const graph = JSON.parse(page.text.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1])['@graph'];
+    assert.ok(graph.some((g) => g['@type'] === 'BreadcrumbList') && graph.some((g) => g['@type'] === 'FAQPage'), `${s} has breadcrumbs and questions`);
+    assert.ok(page.text.includes('class="mcta"'), `${s} has the phone action bar`);
+  }
+  assert.ok(!(await onHost('/contact')).text.includes('class="mcta"'), 'the Contact page needs no bar to itself');
+  // llms.txt: what DAY/OS is, every page, and the live prices, on the website's address only
+  const llms = await onHost('/llms.txt');
+  assert.equal(llms.status, 200);
+  assert.match(llms.type, /text\/plain/);
+  assert.match(llms.text, /^# DAY\/OS\n\n> /);
+  for (const s of slugs) assert.ok(llms.text.includes(`https://www.site.test/${s}`), s);
+  assert.match(llms.text, /- Lodge: \$[\d,]+ a month/);
+  assert.ok(home.text.includes('rel="alternate" type="text/plain" href="/llms.txt"'));
+  assert.ok(!(await onHost('/llms.txt', 'app.site.test')).text.startsWith('# DAY/OS'), 'not on the app address');
+  // The stylesheet is fetched by version, so browsers keep it for a year and still see a new release at once
+  const css = home.text.match(/href="(\/site\/site\.css\?v=[^"]+)"/);
+  assert.ok(css, 'versioned stylesheet');
+  const cssRes = await fetch(`${base}${css[1]}`);
+  assert.match(cssRes.headers.get('cache-control'), /max-age=31536000/);
+  assert.match((await fetch(`${base}/site/site.css`)).headers.get('cache-control'), /no-cache/);
+});
+
+test('the live plans are in the page itself, for search engines and people without JavaScript', async () => {
+  const d = (await api('GET', '/site/plans')).body;
+  const home = await onHost('/');
+  const pricing = await onHost('/pricing');
+  for (const p of d.plans) {
+    const price = `<b>$${Math.round(p.monthly_cents / 100).toLocaleString('en-US')}</b>`;
+    assert.ok(home.text.includes(`<h3>${p.name}</h3>`) && home.text.includes(price), `${p.name} on Home`);
+    assert.ok(pricing.text.includes(`<h2>${p.name}</h2>`) && pricing.text.includes(price), `${p.name} on Pricing`);
+  }
+  for (const a of d.addons) assert.ok(home.text.includes(`<span>${a.name}</span>`), a.name);
+  // A plan that is not a step up from the one before lists its own apps, not "Everything in Resort, plus" and nothing
+  const own = d.plans.find((p, i) => i > 0 && !d.plans[i - 1].apps.every((a) => p.apps.some((x) => x.key === a.key)));
+  if (own) {
+    const card = pricing.text.slice(pricing.text.indexOf(`<h2>${own.name}</h2>`)).split('</ul>')[0];
+    assert.ok(!card.includes('Everything in'), `${own.name} stands on its own`);
+    for (const a of own.apps) assert.ok(card.includes(`<li>${a.label}</li>`), a.label);
+  }
 });
 
 test('the Contact form keeps the request for Leads and emails it, and bots and bad input are turned away', async () => {

@@ -99,6 +99,7 @@
   async function homePlans() {
     const box = $('#homeplans'); if (!box) return;
     const d = await loadPlans(); if (!d || !d.plans.length) return;
+    box.style.setProperty('--n', String(Math.min(d.plans.length, 4)));
     box.replaceChildren(...d.plans.map((p, i) => el('div', { class: `plan${i === 1 ? ' feat' : ''}` },
       el('div', { class: 'sym' }, sym(i), el('h3', null, p.name)), el('p', { class: 'who' }, p.blurb || ''),
       el('div', { class: 'price' }, el('b', null, dollars(p.monthly_cents)), el('span', null, 'per month')))));
@@ -125,8 +126,12 @@
       if (!d || !d.plans.length) return; // the page's own copy stays
       const allApps = [];
       for (const p of d.plans) for (const a of p.apps) if (!allApps.some((x) => x.key === a.key)) allApps.push(a);
+      $('#plans').style.setProperty('--n', String(Math.min(d.plans.length, 4)));
+      $('#cmpwrap').style.setProperty('--n', String(d.plans.length));
       $('#plans').replaceChildren(...d.plans.map((p, i) => {
-        const prev = d.plans[i - 1];
+        // "Everything in Lodge, plus" only when this plan really holds all of the one before it (Patrol only does not).
+        const before = d.plans[i - 1];
+        const prev = before && before.apps.every((a) => p.apps.some((x) => x.key === a.key)) ? before : null;
         const added = prev ? p.apps.filter((a) => !prev.apps.some((x) => x.key === a.key)) : p.apps;
         const offered = interval === 'year' ? p.yearly_cents : p.monthly_cents;
         return el('div', { class: `plan${i === 1 ? ' feat' : ''}` },
@@ -213,5 +218,34 @@
     });
   }
 
+
+  // ---------------------------------------------------------------- every page: header, phone menu, phone action bar, folding lists
+  function chrome() {
+    const head = $('.sn');
+    const bar = $('.mcta');
+    const onScroll = () => {
+      const y = window.scrollY;
+      if (head) head.classList.toggle('scrolled', y > 8);
+      if (bar) bar.classList.toggle('show', y > Math.min(560, window.innerHeight * 0.7));
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    // The phone menu covers the page: the page underneath stops scrolling, Escape or a link closes it.
+    const menu = $('.sn-m');
+    if (menu) {
+      menu.addEventListener('toggle', () => { document.documentElement.style.overflow = menu.open ? 'hidden' : ''; if (head) head.classList.toggle('open', menu.open); if (bar) bar.hidden = menu.open; });
+      menu.addEventListener('click', (e) => { if (e.target.closest('a')) menu.open = false; });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && menu.open) { menu.open = false; menu.querySelector('summary').focus(); } });
+      window.matchMedia('(min-width: 961px)').addEventListener('change', (m) => { if (m.matches) menu.open = false; });
+    }
+    // Long lists of what an app does fold away on phones, behind "What it does". Open everywhere else.
+    const phone = window.matchMedia('(max-width: 640px)');
+    const fold = () => document.querySelectorAll('details.more').forEach((d) => { d.open = !phone.matches; });
+    phone.addEventListener('change', fold);
+    fold();
+  }
+
+  // The script is deferred, so the page is already parsed: fold the lists now, before the first paint where possible.
+  chrome();
   document.addEventListener('DOMContentLoaded', () => { switchboard(); homePlans(); pricing(); contact(); });
 }());

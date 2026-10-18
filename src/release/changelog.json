@@ -1,6 +1,37 @@
 {
   "releases": [
     {
+      "version": "2026.10.20",
+      "date": "2026-10-18",
+      "title": "A faster, phone-first website",
+      "notes": [
+        {
+          "kind": "improved",
+          "app": null,
+          "who": "platform",
+          "text": "The runmyresort.com website is rebuilt for phones: a sticky header, a full-screen menu, a Try the demo and Book a walkthrough bar at the bottom, long feature lists folded behind \"What it does\", and rows that swipe sideways. Home is about half as long on a phone."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "Six pages written for what ski areas search for: ski patrol, lift tickets and passes, ski school, ski rentals, online waivers, and lift and fleet maintenance. Each has its own title, questions and links, and is in the sitemap, the menu and the footer."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": "platform",
+          "text": "Search engines now see the live plans and prices in Home and Pricing, richer structured data on every page, and /llms.txt, a plain summary for AI assistants. The website's styles and script are kept by browsers for a year and refreshed by each release."
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": "platform",
+          "text": "The Patrol only plan on Pricing listed \"Everything in Resort, plus\" with nothing under it. It now lists its own apps."
+        }
+      ]
+    },
+    {
       "version": "2026.10.19",
       "date": "2026-10-17",
       "title": "SummitOps is now DAY/OS",
