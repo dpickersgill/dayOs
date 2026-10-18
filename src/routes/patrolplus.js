@@ -15,7 +15,6 @@ const patrolRouter = require('./patrol');
 const router = express.Router();
 const patrol = requireRole('patrol', 'manager');
 const PA = require('../lib/patrolaccess');
-const stripe = require('../lib/stripe');
 const { baseUrl } = require('../lib/baseurl');
 const needs = (feature, message) => PA.needs(pool, feature, message);
 const editable = (conn, req, id) => patrolRouter.editableCase(conn, req, id);
@@ -163,7 +162,7 @@ const settingCols = ['followup_enabled', 'followup_days', 'patrol_org_name', 'ma
 router.get('/followup-settings', patrol, needs('followups'), async (req, res) => {
   await admin(req);
   const t = await one(pool, `SELECT name, slug, ${settingCols.join(', ')}, (SELECT COUNT(*) FROM donations d WHERE d.tenant_id = tenants.id) AS donation_count FROM tenants WHERE id = ?`, [req.auth.tenantId]);
-  res.json({ ...t, followup_enabled: Boolean(t.followup_enabled), email_ready: mailer.enabled(), card_ready: Boolean(stripe.enabled()) });
+  res.json({ ...t, followup_enabled: Boolean(t.followup_enabled), email_ready: mailer.enabled(), card_ready: (await require('../lib/connect').payee(req.auth.tenantId)).ok });
 });
 
 router.put('/followup-settings', patrol, needs('followups'), validate(settingsSchema), async (req, res) => {

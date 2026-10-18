@@ -216,6 +216,7 @@ async function manage(id) {
       button('Rename or set storage', () => editBasics(t, () => { dlg.close(); home(); manage(id); }), { small: true }),
       t.delete_after ? null : button('Close mountain', () => closeMountain(t, () => { dlg.close(); home(); manage(id); }), { small: true })),
     h('h3', null, 'Billing'), billingPanel(t, () => { dlg.close(); home(); manage(id); }),
+    h('h3', null, 'Guest card payments'), cardPanel(t, () => { dlg.close(); home(); manage(id); }),
     h('h3', null, 'Apps'), h('p', { class: 'hint' }, 'Changes apply within a few seconds. Turning an app off hides it and refuses its requests; its data is kept.'), list,
     h('h3', null, 'Storage'), h('p', null, `${t.storage_used_mb} MB used of ${t.storage_cap_mb} MB for document files.`),
     h('h3', null, 'Owner and manager logins'), people,
@@ -367,6 +368,29 @@ function planForm(p, r, done) {
     else await call('PATCH', `/billing/plans/${p.id}`, body);
     toast('Saved.'); await done();
   }, { submitText: 'Save', wide: true });
+}
+
+// Where this mountain's guest card payments go (its own Stripe account, connected by the owner) and DAY/OS's fee on them.
+const CARD_WORDS = { ready: 'Connected: guest card payments go to the mountain\'s own Stripe account', unfinished: 'Connected, but Stripe still needs details from the owner before it can take payments', not_connected: 'Not connected: online card payments are off until the owner connects Stripe (Billing, Guest card payments)', off: 'Stripe is not set up on this service' };
+function cardPanel(t, done) {
+  const c = t.card_payments || {}; const f = t.platform_fees || {};
+  const fee = c.platform_fee_bps || c.platform_fee_cents ? `${(c.platform_fee_bps / 100).toFixed(2).replace(/\.?0+$/, '')}%${c.platform_fee_cents ? ` + ${dollars(c.platform_fee_cents)}` : ''} per payment` : 'none';
+  return h('div', { class: 'stack tight' },
+    h('p', null, CARD_WORDS[c.status] || c.status, c.account ? h('span', { class: 'small muted' }, ` (${c.account}${c.payouts_enabled ? ', payouts on' : ''})`) : null),
+    h('p', null, `DAY/OS fee: ${fee}. Gifts to the patrol never carry a fee.`),
+    Number(f.payments) ? h('p', { class: 'small muted' }, `${f.payments} card payments on the mountain's account, ${dollars(f.amount_cents)} in all; DAY/OS fees kept ${dollars(f.fee_cents)}.`) : null,
+    h('div', { class: 'row' }, button('Set the fee', () => feeForm(t, done), { small: true })));
+}
+function feeForm(t, done) {
+  const c = t.card_payments || {};
+  const pct = input({ name: 'pct', type: 'number', min: 0, max: 10, step: 0.05, value: String((c.platform_fee_bps || 0) / 100) });
+  const fixed = input({ name: 'fixed', type: 'number', min: 0, max: 5, step: 0.05, value: ((c.platform_fee_cents || 0) / 100).toFixed(2) });
+  formDialog(`DAY/OS fee for ${t.name}`, h('div', { class: 'stack' },
+    h('p', null, 'Kept by Stripe from each guest card payment on this mountain\'s own account (the online shop, lessons and date changes), on top of Stripe\'s own fees, which the mountain pays. Refunds give it back in proportion. Gifts to the patrol never carry it. Leave both at 0 for none.'),
+    h('div', { class: 'grid2' }, field('Share of each payment (%)', pct, 'At most 10%.'), field('Fixed amount per payment ($)', fixed, 'At most $5.'))), async () => {
+    await call('PATCH', `/tenants/${t.id}`, { platform_fee_bps: Math.round(Number(pct.value || 0) * 100), platform_fee_cents: Math.round(Number(fixed.value || 0) * 100) });
+    toast('Saved. New payments use it straight away.'); done();
+  });
 }
 
 function billingPanel(t, done) {

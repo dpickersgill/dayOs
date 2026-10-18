@@ -205,4 +205,51 @@ async function handleWebhook(event) {
   return { billing: out };
 }
 
+// ---------------------------------------------------------------- guest card payments: the mountain's own Stripe account
+// Guests' card payments (the online shop, lessons, date changes, patrol giving) go to the mountain's own Stripe account,
+// connected here. Owners and managers can look; only the owner connects or disconnects it, after confirming it is them,
+// because it decides where the mountain's money goes.
+const connect = require('../lib/connect');
+const appUrl = (req) => (config.site && config.site.appUrl) || baseUrl(req);
+
+router.get('/payments/stripe', managers, async (req, res) => {
+  const t = req.auth.tenantId;
+  let s = await connect.state(t);
+  // Coming back from Stripe (or asked to): read the account now rather than wait for its webhook.
+  if (s.connected && stripe.enabled() && req.query.refresh === '1') {
+    try { s = await connect.refresh(t); } catch (_) { s = { ...s, check_failed: true }; }
+  }
+  res.json({ ...s, can_connect: req.auth.role === 'owner', sandbox: await require('../lib/sandbox').isSandbox(t) });
+});
+
+router.post('/payments/stripe/link', managers, ownerOnly, stepUp('connect where guest card payments go'), async (req, res) => {
+  const t = req.auth.tenantId;
+  if (!stripe.enabled()) throw conflict('Card payments are not switched on for DAY/OS yet. Ask DAY/OS to set up Stripe.');
+  if (await require('../lib/sandbox').isSandbox(t)) throw conflict('A demo mountain cannot take real card payments.');
+  const m = await one(pool, 'SELECT name, stripe_account FROM tenants WHERE id = ?', [t]);
+  let account = m.stripe_account;
+  if (!account) {
+    const owner = await one(pool, 'SELECT email FROM users WHERE id = ?', [req.auth.userId]);
+    account = await stripe.createAccount({ email: owner && owner.email, name: m.name, tenantId: t });
+    // Only set when still empty, so two clicks at once cannot leave the mountain pointing at two accounts.
+    const [u] = await pool.query('UPDATE tenants SET stripe_account = ?, stripe_charges_enabled = 0, stripe_payouts_enabled = 0, stripe_details_submitted = 0 WHERE id = ? AND stripe_account IS NULL', [account, t]);
+    if (!u.affectedRows) account = (await one(pool, 'SELECT stripe_account FROM tenants WHERE id = ?', [t])).stripe_account;
+    await audit(pool, req, 'stripe_connect_start', 'tenants', t, { account });
+  }
+  const back = `${appUrl(req)}/#/billing?stripe=`;
+  const url = await stripe.accountLink({ account, refreshUrl: `${back}again`, returnUrl: `${back}return` });
+  res.json({ url });
+});
+
+router.post('/payments/stripe/disconnect', managers, ownerOnly, stepUp('stop guest card payments going to this Stripe account'), async (req, res) => {
+  const t = req.auth.tenantId;
+  const m = await one(pool, 'SELECT stripe_account FROM tenants WHERE id = ?', [t]);
+  if (!m.stripe_account) return res.json(await connect.state(t));
+  // The Stripe account itself is the mountain's and stays as it is; DAY/OS just stops sending payments to it. Refunds of
+  // earlier payments still go back through the account each payment was taken on.
+  await pool.query('UPDATE tenants SET stripe_account = NULL, stripe_charges_enabled = 0, stripe_payouts_enabled = 0, stripe_details_submitted = 0, stripe_connected_at = NULL, stripe_checked_at = NULL WHERE id = ?', [t]);
+  await audit(pool, req, 'stripe_disconnect', 'tenants', t, { account: m.stripe_account });
+  res.json(await connect.state(t));
+});
+
 module.exports = { router, handleWebhook, periodEnd };

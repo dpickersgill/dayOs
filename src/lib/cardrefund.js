@@ -9,13 +9,15 @@ const { logFailure } = require('./jobs');
 
 /** Marks a refund row as owed back to a card, inside the caller's transaction. */
 async function markPending(conn, tenantId, refundId, paymentIntent) {
-  await conn.query("UPDATE order_refunds SET card_status = 'pending', card_ref = ?, card_key = ? WHERE tenant_id = ? AND id = ?",
-    [paymentIntent, `card-refund-${tenantId}-${refundId}`, tenantId, refundId]);
+  // The refund goes back through the Stripe account the payment was taken on: the mountain's own, or the platform's.
+  const account = await require('./connect').accountOfPayment(conn, tenantId, paymentIntent);
+  await conn.query("UPDATE order_refunds SET card_status = 'pending', card_ref = ?, card_key = ?, card_account = ? WHERE tenant_id = ? AND id = ?",
+    [paymentIntent, `card-refund-${tenantId}-${refundId}`, account, tenantId, refundId]);
 }
 
 /** Sends one pending or failed card refund to Stripe. Returns 'sent', 'failed' or 'skipped'. Never throws. */
 async function send(tenantId, refundId) {
-  const r = await one(pool, "SELECT id, amount_cents, card_status, card_ref, card_key FROM order_refunds WHERE tenant_id = ? AND id = ?", [tenantId, refundId]);
+  const r = await one(pool, "SELECT id, amount_cents, card_status, card_ref, card_key, card_account FROM order_refunds WHERE tenant_id = ? AND id = ?", [tenantId, refundId]);
   if (!r || !['pending', 'failed'].includes(r.card_status) || !r.card_ref || r.amount_cents <= 0) return 'skipped';
   if (!stripe.enabled()) { await pool.query("UPDATE order_refunds SET card_status = 'failed', card_error = ? WHERE tenant_id = ? AND id = ?", ['Card payment is not set up', tenantId, r.id]); return 'failed'; }
   try {
@@ -24,9 +26,9 @@ async function send(tenantId, refundId) {
     let done = null;
     if (r.card_status === 'failed') {
       // A retry must be able to check first; if it cannot, it waits for the next try rather than risk refunding twice.
-      done = (await stripe.listRefunds(r.card_ref)).find((x) => x.metadata && x.metadata.summitops_refund === String(r.id) && x.status !== 'failed' && x.status !== 'canceled') || null;
+      done = (await stripe.listRefunds(r.card_ref, { account: r.card_account || null })).find((x) => x.metadata && x.metadata.summitops_refund === String(r.id) && x.status !== 'failed' && x.status !== 'canceled') || null;
     }
-    const out = done ? { id: done.id } : await stripe.refund({ paymentIntent: r.card_ref, amountCents: r.amount_cents, key: r.card_key, metadata: { summitops_refund: String(r.id), tenant: String(tenantId) } });
+    const out = done ? { id: done.id } : await stripe.refund({ paymentIntent: r.card_ref, amountCents: r.amount_cents, key: r.card_key, metadata: { summitops_refund: String(r.id), tenant: String(tenantId) }, account: r.card_account || null });
     await pool.query("UPDATE order_refunds SET card_status = 'sent', card_error = NULL, card_refund_id = ? WHERE tenant_id = ? AND id = ?", [out.id || null, tenantId, r.id]);
     return 'sent';
   } catch (err) {

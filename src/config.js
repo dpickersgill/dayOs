@@ -24,9 +24,15 @@ const mapLayers = env.MAP_TILE_URL
 //   STRIPE_WEBHOOK_SECRET  the signing secret of the webhook endpoint (whsec_...)
 //   PUBLIC_URL             this service's public address, used for Stripe's return links (defaults to the request's own host)
 //   STRIPE_API_BASE        only for automated tests
+//   STRIPE_CONNECT_WEBHOOK_SECRET  the signing secret of the Connect webhook endpoint (events from mountains' own accounts)
+//   STRIPE_GUEST_FALLBACK  'on' lets a mountain with no connected Stripe account take guest card payments into the
+//                          platform's own account (the old way). Off in production, where guest money only ever goes to
+//                          the mountain's own account; on elsewhere so tests and local runs need no Connect setup.
 const stripe = {
   secretKey: env.STRIPE_SECRET_KEY || '',
   webhookSecret: env.STRIPE_WEBHOOK_SECRET || '',
+  connectWebhookSecret: env.STRIPE_CONNECT_WEBHOOK_SECRET || '',
+  guestFallback: env.STRIPE_GUEST_FALLBACK ? env.STRIPE_GUEST_FALLBACK === 'on' : !isProd,
   apiBase: env.STRIPE_API_BASE || 'https://api.stripe.com',
   publicUrl: (env.PUBLIC_URL || '').replace(/\/$/, ''),
 };

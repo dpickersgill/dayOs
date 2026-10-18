@@ -1,6 +1,31 @@
 {
   "releases": [
     {
+      "version": "2026.10.22",
+      "date": "2026-10-18",
+      "title": "Guest payments go to your own Stripe account",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": [],
+          "text": "Guests' card payments (the online shop, lesson payments, date changes and patrol giving) now go straight into your mountain's own Stripe account, and Stripe pays them out to your bank. Connect it under Billing, Guest card payments. Card payments open as soon as Stripe has what it needs."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": [],
+          "text": "Billing shows whether guest card payments are on, which Stripe account they go to, and whether payouts are set up. Only the owner can connect or disconnect the account, after confirming it is them."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "Stripe Connect: each mountain's guest payments are direct charges on its own Standard account. The console shows each mountain's connection and can set a DAY/OS fee per mountain (a share and a fixed amount, 0 unless set), kept by Stripe and returned in proportion on refunds; gifts never carry it. Events from a mountain's account only ever count for that mountain. Set up the Connect webhook as DEPLOY.md, Guest card payments, describes."
+        }
+      ]
+    },
+    {
       "version": "2026.10.21",
       "date": "2026-10-18",
       "title": "The new DAY/OS logo",

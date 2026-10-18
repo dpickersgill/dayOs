@@ -11,6 +11,7 @@ const { notFound, conflict, bad, Unhonourable } = require('../lib/errors');
 const { isMinor } = require('../lib/family');
 const config = require('../config');
 const stripe = require('../lib/stripe');
+const connect = require('../lib/connect');
 const { quoteFor, hoursUntil, refundPercent, policyText, policyTiers, policyNotes, confirmRequest, parse: parseRequest } = require('../lib/onlinesale');
 const { audit } = require('../lib/audit');
 const { isSandbox } = require('../lib/sandbox');
@@ -25,9 +26,10 @@ const MAX_PENDING_PER_LESSON = 12;
 const MAX_PENDING_TOTAL = 80;
 
 async function tenantFor(slug) {
-  const t = await one(pool, 'SELECT id, name, phone, timezone, waiver_text, online_booking, booking_notice_hours, booking_message, cancel_hours, online_payment, refund_full_hours, refund_half_hours, refund_half_percent, cancel_note FROM tenants WHERE slug = ?', [slug]);
+  const t = await one(pool, 'SELECT id, name, phone, timezone, waiver_text, online_booking, booking_notice_hours, booking_message, cancel_hours, online_payment, refund_full_hours, refund_half_hours, refund_half_percent, cancel_note, stripe_account, stripe_charges_enabled FROM tenants WHERE slug = ?', [slug]);
   if (!t || !t.online_booking) throw notFound('Booking page');
-  t.pay_online = Boolean(t.online_payment) && stripe.enabled() && !(await isSandbox(t.id));
+  t.pay_online = Boolean(t.online_payment) && connect.readyRow(t) && !(await isSandbox(t.id)); // to the mountain's own Stripe account
+  delete t.stripe_account; delete t.stripe_charges_enabled;
   return t;
 }
 const HOLD = "('pending','awaiting_payment')";
@@ -148,10 +150,10 @@ router.post('/:slug/requests', validate(requestSchema), async (req, res) => {
     // Card payment: the guest finishes on Stripe's page. The spot is held for about half an hour while they pay.
     let co;
     try {
+      const pay = connect.checkoutFor(await connect.payeeOrThrow(t.id), out.quote.total, { tenant_id: String(t.id), request_id: String(out.id), reference: out.ref });
       co = await stripe.createCheckout({
         amountCents: out.quote.total, name: `${out.quote.name} (${b.students.length} student${b.students.length > 1 ? 's' : ''})`,
-        description: `${t.name}: ${out.session.starts_at.slice(0, 16).replace('T', ' ')}`, email: b.contact_email, reference: out.ref,
-        metadata: { tenant_id: String(t.id), request_id: String(out.id), reference: out.ref },
+        description: `${t.name}: ${out.session.starts_at.slice(0, 16).replace('T', ' ')}`, email: b.contact_email, reference: out.ref, ...pay,
         successUrl: `${baseUrl(req)}/book/${req.params.slug}?paid=${out.ref}`, cancelUrl: `${baseUrl(req)}/book/${req.params.slug}?cancelled=${out.ref}`,
       });
     } catch (err) {
@@ -292,7 +294,7 @@ async function handleWebhook(event, base) {
   if (failed) {
     // We could not honour it (lesson full or cancelled, or the amount was wrong): give the money back in full. The refund
     // goes first; if Stripe cannot be reached this throws, Stripe sends the event again, and we try again.
-    if (obj.payment_intent && stripe.enabled()) await stripe.refund({ paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), key: `autorefund-${tenantId}-${requestId}` });
+    if (obj.payment_intent && stripe.enabled()) await stripe.refund({ paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), key: `autorefund-${tenantId}-${requestId}`, account: event.account || null });
     await pool.query("UPDATE lesson_requests SET status = 'expired', payment_intent = ?, refund_cents = amount_cents, staff_note = ? WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment'", [obj.payment_intent, `Refunded automatically: ${failed}`.slice(0, 300), tenantId, requestId]);
   }
   return result;

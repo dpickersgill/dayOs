@@ -332,7 +332,8 @@ router.get('/tenants/:id', async (req, res) => {
   BL.invalidate(id);
   res.json({ ...t, storage_used_mb: Math.round(((used.get(id) || 0) / 1048576) * 10) / 10, modules: await M.enabledKeys(id), users, history,
     billing: bill ? { ...bill, addons: BL.ids(bill.addons), trial_ends_on: BL.dateOf(bill.trial_ends_on), paid_until: BL.dateOf(bill.paid_until), comped: Boolean(Number(bill.comped)) } : null,
-    billing_standing: await BL.standingOf(id), billing_events: billEvents });
+    billing_standing: await BL.standingOf(id), billing_events: billEvents, card_payments: await require('../lib/connect').state(id),
+    platform_fees: await one(pool, "SELECT COUNT(*) AS payments, COALESCE(SUM(platform_fee_cents), 0) AS fee_cents, COALESCE(SUM(amount_cents), 0) AS amount_cents FROM order_payments WHERE tenant_id = ? AND processor = 'stripe' AND processor_account IS NOT NULL", [id]) });
 });
 
 // ---------------------------------------------------------------- what mountains pay DAY/OS
@@ -447,6 +448,9 @@ router.post('/tenants', validate(z.object({
 router.patch('/tenants/:id', needsAccess, validate(partialOf({
   name: z.string().min(2).max(255), status: z.enum(['active', 'suspended']), storage_cap_mb: z.number().int().min(10).max(100000),
   platform_notes: z.string().max(500).nullable(),
+  // DAY/OS's fee on this mountain's guest card payments (not gifts): a share in basis points (100 = 1%, at most 10%) and
+  // a fixed amount in cents per payment (at most $5). Both 0 unless set here; Stripe keeps it from each payment.
+  platform_fee_bps: z.number().int().min(0).max(1000), platform_fee_cents: z.number().int().min(0).max(500),
 })), async (req, res) => {
   const id = paramId(req);
   const keys = Object.keys(req.body);
@@ -454,7 +458,7 @@ router.patch('/tenants/:id', needsAccess, validate(partialOf({
   const extra = req.body.status === 'active' ? ', closed_at = NULL, delete_after = NULL' : ''; // resuming cancels a pending deletion
   const [r] = await pool.query(`UPDATE tenants SET ${keys.map((k) => `${k} = ?`).join(', ')}${extra} WHERE id = ?`, [...keys.map((k) => req.body[k]), id]);
   if (!r.affectedRows) throw notFound('Mountain');
-  await log(pool, req, id, keys.includes('status') ? req.body.status === 'suspended' ? 'pause' : 'resume' : 'edit', req.body);
+  await log(pool, req, id, keys.includes('status') ? req.body.status === 'suspended' ? 'pause' : 'resume' : keys.some((k) => k.startsWith('platform_fee')) ? 'platform_fee' : 'edit', req.body);
   M.invalidate(id);
   res.json({ ok: true });
 });

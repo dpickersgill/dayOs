@@ -359,7 +359,7 @@ async function handleWebhook(event, obj, baseUrl) {
   }
   if (failed) {
     // Refund first: if Stripe cannot be reached this throws, Stripe sends the event again, and we try again.
-    if (obj.payment_intent && stripe.enabled()) await stripe.refund({ paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), key: `shop-autorefund-${tenantId}-${id}` });
+    if (obj.payment_intent && stripe.enabled()) await stripe.refund({ paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), key: `shop-autorefund-${tenantId}-${id}`, account: event.account || null });
     await pool.query("UPDATE shop_orders SET status = 'refunded', payment_intent = ?, note = ? WHERE tenant_id = ? AND id = ? AND status IN ('awaiting_payment','expired')", [obj.payment_intent, `Refunded automatically: ${failed}`.slice(0, 300), tenantId, id]);
     return { refunded: true };
   }

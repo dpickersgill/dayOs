@@ -76,7 +76,9 @@ Migrations only add tables and columns, so the previous revision keeps working a
 | --- | --- |
 | `POSTMARK_SERVER_TOKEN`, `MAIL_FROM` | Email (tickets, reminders, patrol follow-ups, weekly report, messages) |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | Text messages |
-| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `PUBLIC_URL` | Online card payment (shop, lessons, donations). The Stripe webhook must send `checkout.session.completed` and `checkout.session.expired` to `/api/v1/stripe/webhook`. |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `PUBLIC_URL` | Stripe: the platform's own account (mountains' DAY/OS subscriptions). Its webhook sends `checkout.session.completed`, `checkout.session.expired`, `customer.subscription.*` and `invoice.*` to `/api/v1/stripe/webhook`. |
+| `STRIPE_CONNECT_WEBHOOK_SECRET` | Guest card payments (shop, lessons, date changes, patrol giving) go to each mountain's own Stripe account through Stripe Connect. This is the signing secret of the Connect webhook. See "Guest card payments (Stripe Connect)" below. |
+| `STRIPE_GUEST_FALLBACK` | Leave unset. In production a mountain takes guest card payments only once it has connected its own Stripe account. `on` would let unconnected mountains take payments into the platform's account (tests and local runs only). |
 | `JOBS_KEY` | The daily job (`POST /api/v1/internal/jobs/daily` with header `x-jobs-key`), called by Cloud Scheduler once a day |
 | `BOOTSTRAP_KEY` | Creating mountains and the platform console |
 | `DB_POOL` | Database connections per server (deploy.sh sets 8; with at most 4 servers that is 32 connections) |
@@ -107,3 +109,20 @@ The product website (Home, Product, the solution pages for ski patrol, lift tick
 6. **Moving addresses.** Point the Stripe webhooks (card payments and subscriptions) at `https://app.runmyresort.com/api/v1/stripe/webhook`, and the daily job: `gcloud scheduler jobs update http summitops-daily --location us-east1 --uri https://app.runmyresort.com/api/v1/internal/jobs/daily`.
 7. **Search engines.** In [Google Search Console](https://search.google.com/search-console), add the website as a URL-prefix property (`https://www.runmyresort.com/`), choose the HTML tag check, and set its code as `GOOGLE_SITE_VERIFICATION` (same `gcloud run services update ... --update-env-vars` as above). Once verified, submit `https://www.runmyresort.com/sitemap.xml` under Sitemaps. Do the same in Bing Webmaster Tools with `BING_SITE_VERIFICATION` (it can also import from Search Console). Check the structured data with Google's Rich Results Test. If the domain is already verified as a Domain property (a DNS TXT record), skip the tag and go straight to Sitemaps.
 8. **What search engines get.** Every page has its own title, description, canonical address, link-preview card and structured data (the organisation, the software with its live prices, breadcrumbs, and each page's questions). Plans and prices are written into Home and Pricing on the server, so crawlers see the real prices. `/sitemap.xml` lists every page, `/robots.txt` keeps the app, console and API out, and `/llms.txt` is a plain summary for AI assistants. The app address (`app.runmyresort.com`) is never indexed apart from each mountain's own public pages.
+
+## Guest card payments (Stripe Connect)
+
+Guests' card payments go straight into each mountain's own Stripe account (a Standard account the mountain controls), never into the DAY/OS account. The mountain pays Stripe's card fees on its own account and gets Stripe's payouts to its own bank. DAY/OS can keep a platform fee per mountain, set in the console (mountain, Guest card payments, Set the fee); it is 0 unless you set it, it is returned in proportion on refunds, and gifts to the patrol never carry it.
+
+Set up once, in the Stripe dashboard of the DAY/OS account:
+
+1. **Turn on Connect.** Connect, Get started: choose to build a platform where your users (the mountains) take payments, and fill in the platform profile. The mountains use Standard accounts, which they run themselves in their own Stripe dashboard.
+2. **The Connect webhook.** Developers, Webhooks (or Workbench, Event destinations), Add a destination: choose **Connected accounts** (events on your users' accounts), the address `https://app.runmyresort.com/api/v1/stripe/webhook`, and the events `checkout.session.completed`, `checkout.session.expired`, `account.updated` and `account.application.deauthorized`. Copy its signing secret (`whsec_...`).
+3. **Give the secret to the service**, from the unzipped folder in Cloud Shell:
+   ```
+   bash scripts/stripe-connect.sh whsec_...
+   ```
+4. **Each mountain connects.** The owner opens Billing, Guest card payments, Connect Stripe, confirms it is them, and finishes Stripe's pages (the business, a person and a bank account; an existing Stripe login works). Card payments open as soon as Stripe says the account can take them. Until then the online shop, lesson payments and patrol giving show as not taking cards.
+
+Payments taken into the DAY/OS account before this release (if any) still refund through the DAY/OS account; everything new goes to the mountain's own.
+

@@ -11,6 +11,7 @@ const { z, dateStr, validate, todayIn, addDays } = require('../lib/util');
 const { notFound, conflict, bad } = require('../lib/errors');
 const { baseUrl } = require('../lib/baseurl');
 const stripe = require('../lib/stripe');
+const connect = require('../lib/connect');
 const sandbox = require('../lib/sandbox');
 const shop = require('../lib/shopsale');
 const after = require('../lib/shopafter');
@@ -102,9 +103,9 @@ router.put('/brand', requireRole('manager'), validate(brandSchema), async (req, 
 
 // ---------------------------------------------------------------- public
 async function tenantFor(slug) {
-  const t = await one(pool, 'SELECT id, name, slug, address, phone, timezone, waiver_text, online_shop, shop_message, online_daily_limit, shop_change_hours, shop_change_fee_cents FROM tenants WHERE slug = ?', [slug]);
+  const t = await one(pool, 'SELECT id, name, slug, address, phone, timezone, waiver_text, online_shop, shop_message, online_daily_limit, shop_change_hours, shop_change_fee_cents, stripe_account, stripe_charges_enabled FROM tenants WHERE slug = ?', [slug]);
   if (!t || !t.online_shop) throw notFound('Shop');
-  t.open = stripe.enabled() && !(await sandbox.isSandbox(t.id));
+  t.open = connect.readyRow(t) && !(await sandbox.isSandbox(t.id)); // card payments go to the mountain's own Stripe account
   return t;
 }
 
@@ -212,10 +213,11 @@ publicRouter.post('/:slug/shop/orders', validate(z.object({
   });
   let co;
   try {
+    const pay = connect.checkoutFor(await connect.payeeOrThrow(t.id), made.quote.total, { tenant_id: String(t.id), request_id: String(made.id), shop_order_id: String(made.id), kind: 'shop', reference: made.ref });
     const n = made.quote.lines.length + made.quote.addons.reduce((x, a) => x + a.quantity, 0) + made.quote.gifts.length;
     co = await stripe.createCheckout({
       amountCents: made.quote.total, name: `${t.name}: ${n} item${n > 1 ? 's' : ''}`, description: [...made.quote.lines.map((l) => `${l.name} ${l.valid_on}`), ...made.quote.addons.map((a) => `${a.quantity} x ${a.name}`), ...made.quote.gifts.map(() => 'Gift card')].join(', ').slice(0, 480),
-      email: b.contact_email, reference: made.ref, metadata: { tenant_id: String(t.id), request_id: String(made.id), shop_order_id: String(made.id), kind: 'shop', reference: made.ref },
+      email: b.contact_email, reference: made.ref, ...pay,
       successUrl: `${baseUrl(req)}/shop/${req.params.slug}?order=${made.token}`, cancelUrl: `${baseUrl(req)}/shop/${req.params.slug}?cancelled=${made.token}`,
     });
   } catch (err) {

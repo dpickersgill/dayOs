@@ -9,7 +9,6 @@ const { z, dateStr, validate, paramId, todayIn, addDays, dayRange, localDay, loc
 const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { toCsv, dollars } = require('../lib/csv');
-const stripe = require('../lib/stripe');
 
 const router = express.Router();
 const sellers = requireRole('counter', 'manager');
@@ -57,7 +56,7 @@ router.delete('/tax-rules/:id', managers, async (req, res) => {
 const PROFILE_COLS = ['name', 'address', 'phone', 'receipt_footer', 'waiver_text', 'require_mfa', 'comp_counter_limit_cents', 'scan_passback_seconds', 'online_booking', 'booking_notice_hours', 'booking_message', 'cancel_hours', 'online_payment', 'online_shop', 'shop_message', 'shop_recovery', 'quick_sale', 'shop_change_hours', 'shop_change_fee_cents', 'weekly_report', 'online_daily_limit', 'refund_full_hours', 'refund_half_hours', 'refund_half_percent', 'cancel_note', 'slug'];
 router.get('/tenant/profile', async (req, res) => {
   const t = await one(pool, `SELECT ${PROFILE_COLS.join(', ')}, timezone FROM tenants WHERE id = ?`, [req.auth.tenantId]);
-  res.json({ ...t, require_mfa: Boolean(t.require_mfa), online_booking: Boolean(t.online_booking), online_payment: Boolean(t.online_payment), online_shop: Boolean(t.online_shop), shop_recovery: Boolean(t.shop_recovery), quick_sale: Boolean(t.quick_sale), weekly_report: Boolean(t.weekly_report), stripe_ready: stripe.enabled() });
+  res.json({ ...t, require_mfa: Boolean(t.require_mfa), online_booking: Boolean(t.online_booking), online_payment: Boolean(t.online_payment), online_shop: Boolean(t.online_shop), shop_recovery: Boolean(t.shop_recovery), quick_sale: Boolean(t.quick_sale), weekly_report: Boolean(t.weekly_report), stripe_ready: (await require('../lib/connect').payee(req.auth.tenantId)).ok, stripe_connect: await require('../lib/connect').state(req.auth.tenantId) });
 });
 router.put('/tenant/profile', managers, validate(z.object({
   name: z.string().trim().min(2).max(255).optional(),

@@ -1,7 +1,11 @@
 'use strict';
 
-// A small Stripe client: hosted Checkout sessions, refunds and webhook signature checks. It talks to the REST API
-// directly (no SDK), so there is nothing extra to install. Money only moves when STRIPE_SECRET_KEY is set.
+// A small Stripe client: hosted Checkout sessions, refunds, Connect accounts and webhook signature checks. It talks to
+// the REST API directly (no SDK), so there is nothing extra to install. Money only moves when STRIPE_SECRET_KEY is set.
+//
+// Guest payments are "direct charges" on the mountain's own connected Stripe account: every call that takes `account`
+// sends it as the Stripe-Account header, so the payment, its refunds and Stripe's fees all belong to that mountain.
+// Without `account` the call acts on the platform's own account (DAY/OS subscriptions, and the old guest payments).
 const crypto = require('crypto');
 const config = require('../config');
 const { AppError } = require('./errors');
@@ -20,12 +24,19 @@ function encode(obj, prefix = '', out = new URLSearchParams()) {
   return out;
 }
 
-async function call(path, body, { idempotencyKey } = {}) {
+const ACCOUNT = /^acct_[A-Za-z0-9]{6,60}$/;
+const onAccount = (account) => {
+  if (!account) return {};
+  if (!ACCOUNT.test(account)) throw new AppError(500, 'That Stripe account is not valid');
+  return { 'stripe-account': account };
+};
+
+async function call(path, body, { idempotencyKey, account } = {}) {
   let res;
   try {
     res = await fetch(`${config.stripe.apiBase}${path}`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${config.stripe.secretKey}`, 'content-type': 'application/x-www-form-urlencoded', ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}) },
+      headers: { authorization: `Bearer ${config.stripe.secretKey}`, 'content-type': 'application/x-www-form-urlencoded', ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}), ...onAccount(account) },
       body: encode(body).toString(),
     });
   } catch (_) {
@@ -40,16 +51,19 @@ async function call(path, body, { idempotencyKey } = {}) {
 }
 
 /** A GET to Stripe (a subscription, a customer's invoices). */
-async function get(path) {
+async function get(path, { account } = {}) {
   let res;
-  try { res = await fetch(`${config.stripe.apiBase}${path}`, { headers: { authorization: `Bearer ${config.stripe.secretKey}` } }); } catch (_) { throw new AppError(502, 'The card service could not be reached.'); }
+  try { res = await fetch(`${config.stripe.apiBase}${path}`, { headers: { authorization: `Bearer ${config.stripe.secretKey}`, ...onAccount(account) } }); } catch (_) { throw new AppError(502, 'The card service could not be reached.'); }
   const json = await res.json().catch(() => ({}));
   if (!res.ok) { console.error('Stripe error', res.status, json && json.error && json.error.message); throw new AppError(502, 'The card service refused that request.'); }
   return json;
 }
 
-/** A hosted payment page for one amount (tax included). Returns { id, url }. */
-async function createCheckout({ amountCents, name, description, email, reference, metadata, successUrl, cancelUrl }) {
+/**
+ * A hosted payment page for one amount (tax included). Returns { id, url }. account: the mountain's connected account
+ * (the payment is theirs); feeCents: the platform's fee on it, kept by Stripe from the payment (0 means none).
+ */
+async function createCheckout({ amountCents, name, description, email, reference, metadata, successUrl, cancelUrl, account = null, feeCents = 0 }) {
   const s = await call('/v1/checkout/sessions', {
     mode: 'payment',
     'payment_method_types': ['card'],
@@ -60,13 +74,13 @@ async function createCheckout({ amountCents, name, description, email, reference
     expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
     line_items: [{ quantity: 1, price_data: { currency: 'usd', unit_amount: amountCents, product_data: { name, description } } }],
     metadata,
-    payment_intent_data: { metadata },
-  }, { idempotencyKey: `checkout-${metadata.request_id}-${amountCents}` });
+    payment_intent_data: { metadata, ...(account && feeCents > 0 ? { application_fee_amount: Math.min(feeCents, amountCents) } : {}) },
+  }, { idempotencyKey: `checkout-${metadata.request_id}-${amountCents}`, account });
   return { id: s.id, url: s.url };
 }
 
 /** A hosted page for a gift: one time, or every month. Returns { id, url }. */
-async function createDonationCheckout({ amountCents, monthly, name, email, metadata, successUrl, cancelUrl, nonce }) {
+async function createDonationCheckout({ amountCents, monthly, name, email, metadata, successUrl, cancelUrl, nonce, account = null }) {
   const s = await call('/v1/checkout/sessions', {
     mode: monthly ? 'subscription' : 'payment',
     payment_method_types: ['card'],
@@ -76,25 +90,46 @@ async function createDonationCheckout({ amountCents, monthly, name, email, metad
     line_items: [{ quantity: 1, price_data: { currency: 'usd', unit_amount: amountCents, product_data: { name }, ...(monthly ? { recurring: { interval: 'month' } } : {}) } }],
     metadata,
     ...(monthly ? { subscription_data: { metadata } } : { payment_intent_data: { metadata } }),
-  }, { idempotencyKey: `donate-${nonce}` });
+  }, { idempotencyKey: `donate-${nonce}`, account }); // gifts to the patrol carry no platform fee
   return { id: s.id, url: s.url };
 }
 
 /** Sends money back to the card. A repeated call with the same key never refunds twice. */
-async function refund({ paymentIntent, amountCents, key, metadata }) {
-  const r = await call('/v1/refunds', { payment_intent: paymentIntent, amount: amountCents, metadata }, { idempotencyKey: key });
+async function refund({ paymentIntent, amountCents, key, metadata, account = null }) {
+  // On a connected account the platform's fee goes back too, in proportion, so a refunded guest costs the mountain nothing extra.
+  const r = await call('/v1/refunds', { payment_intent: paymentIntent, amount: amountCents, metadata, ...(account ? { refund_application_fee: true } : {}) }, { idempotencyKey: key, account });
   return { id: r.id };
 }
 
 /** The refunds already made on a payment (up to 100), so a retry days later can check before refunding again. */
-async function listRefunds(paymentIntent) {
+async function listRefunds(paymentIntent, { account = null } = {}) {
   let res;
   try {
-    res = await fetch(`${config.stripe.apiBase}/v1/refunds?payment_intent=${encodeURIComponent(paymentIntent)}&limit=100`, { headers: { authorization: `Bearer ${config.stripe.secretKey}` } });
+    res = await fetch(`${config.stripe.apiBase}/v1/refunds?payment_intent=${encodeURIComponent(paymentIntent)}&limit=100`, { headers: { authorization: `Bearer ${config.stripe.secretKey}`, ...onAccount(account) } });
   } catch (_) { throw new AppError(502, 'The card service could not be reached.'); }
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new AppError(502, 'The card service refused that request.');
   return Array.isArray(json.data) ? json.data : [];
+}
+
+// ---------------------------------------------------------------- Connect: each mountain's own Stripe account
+/** A new Standard account for a mountain: theirs to run in their own Stripe dashboard. Returns the account id. */
+async function createAccount({ email, name, tenantId }) {
+  const a = await call('/v1/accounts', { type: 'standard', country: 'US', email: email || undefined, business_profile: { name: name || undefined }, metadata: { tenant_id: String(tenantId) } },
+    { idempotencyKey: `connect-account-${tenantId}` });
+  return a.id;
+}
+/** A one-time Stripe page where the owner finishes (or updates) the account. Expires in minutes; ask for a new one each time. */
+async function accountLink({ account, refreshUrl, returnUrl }) {
+  const l = await call('/v1/account_links', { account, refresh_url: refreshUrl, return_url: returnUrl, type: 'account_onboarding' });
+  return l.url;
+}
+/** The account as Stripe sees it now: whether it can take payments and receive payouts. */
+async function getAccount(account) {
+  if (!ACCOUNT.test(String(account || ''))) throw new AppError(400, 'That Stripe account is not valid');
+  const a = await get(`/v1/accounts/${account}`);
+  return { id: a.id, charges_enabled: Boolean(a.charges_enabled), payouts_enabled: Boolean(a.payouts_enabled), details_submitted: Boolean(a.details_submitted), email: a.email || null,
+    name: (a.business_profile && a.business_profile.name) || (a.settings && a.settings.dashboard && a.settings.dashboard.display_name) || null };
 }
 
 /** Checks a webhook: the signed timestamp must be recent and the HMAC of "timestamp.body" must match one of the v1 signatures. */
@@ -113,4 +148,4 @@ function signWebhook(rawBody, secret, t = Math.floor(Date.now() / 1000)) {
   return `t=${t},v1=${crypto.createHmac('sha256', secret).update(`${t}.${rawBody}`).digest('hex')}`;
 }
 
-module.exports = { call, get, enabled, createCheckout, createDonationCheckout, refund, listRefunds, verifyWebhook, signWebhook };
+module.exports = { call, get, enabled, createCheckout, createDonationCheckout, refund, listRefunds, createAccount, accountLink, getAccount, verifyWebhook, signWebhook, ACCOUNT };

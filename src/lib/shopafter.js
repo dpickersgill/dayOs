@@ -78,12 +78,13 @@ async function requestChange({ tenant, shopRow, code, newDate, successUrl, cance
       await audit(conn, { auth: { tenantId: tenant.id, userId: null } }, 'shop_change', 'tickets', c.ticket.id, { from: day10(c.ticket.valid_from), to: newDate, due_cents: 0 });
       return { done: true, due_cents: 0 };
     }
-    if (!stripe.enabled()) throw conflict('Card payment is not available right now. Please call.');
+    const payTo = await require('./connect').payee(tenant.id, conn);
+    if (!payTo.ok) throw conflict('Card payment is not available right now. Please call.');
     const [r] = await conn.query("INSERT INTO shop_changes (tenant_id, shop_order_id, ticket_id, from_date, to_date, due_cents, basis_cents) VALUES (?, ?, ?, ?, ?, ?, ?)", [tenant.id, shopRow.id, c.ticket.id, day10(c.ticket.valid_from), newDate, c.due, c.basis]);
     const co = await stripe.createCheckout({
       amountCents: c.due, name: `${tenant.name}: change of day`, description: `${c.product.name}: ${day10(c.ticket.valid_from)} to ${newDate}`,
       email: shopRow.contact_email, reference: shopRow.reference,
-      metadata: { tenant_id: String(tenant.id), request_id: `chg${r.insertId}`, change_id: String(r.insertId), kind: 'shop_change', reference: shopRow.reference },
+      ...require('./connect').checkoutFor(payTo, c.due, { tenant_id: String(tenant.id), request_id: `chg${r.insertId}`, change_id: String(r.insertId), kind: 'shop_change', reference: shopRow.reference }),
       successUrl, cancelUrl,
     });
     await conn.query('UPDATE shop_changes SET stripe_session_id = ? WHERE tenant_id = ? AND id = ?', [co.id, tenant.id, r.insertId]);
@@ -132,7 +133,7 @@ async function handleChangeWebhook(event, obj) {
     failed = err.message; out = { problem: true }; // rolled back: nothing half-made is kept
   }
   if (failed) {
-    if (obj.payment_intent && stripe.enabled()) await stripe.refund({ paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), key: `shop-change-refund-${tenantId}-${id}` });
+    if (obj.payment_intent && stripe.enabled()) await stripe.refund({ paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), key: `shop-change-refund-${tenantId}-${id}`, account: event.account || null });
     await pool.query("UPDATE shop_changes SET status = 'refunded' WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment'", [tenantId, id]);
     return { refunded: true };
   }

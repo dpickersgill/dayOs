@@ -76,7 +76,11 @@ function createApp() {
     if (!stripe.enabled()) return res.status(404).json({ error: 'Not found' });
     let event;
     try {
-      if (!Buffer.isBuffer(req.body) || !stripe.verifyWebhook(req.body, req.get('stripe-signature'), { secret: config.stripe.webhookSecret })) throw new Error('bad signature');
+      // Two endpoints in Stripe can point here: the platform's own events, and Connect events from the mountains' accounts.
+      const sig = req.get('stripe-signature');
+      const okSig = Buffer.isBuffer(req.body) && (stripe.verifyWebhook(req.body, sig, { secret: config.stripe.webhookSecret })
+        || (config.stripe.connectWebhookSecret && stripe.verifyWebhook(req.body, sig, { secret: config.stripe.connectWebhookSecret })));
+      if (!okSig) throw new Error('bad signature');
       event = JSON.parse(req.body.toString('utf8'));
     } catch (_) {
       // Logged so an alert fires: a wrong STRIPE_WEBHOOK_SECRET silently stops every online sale.
@@ -84,9 +88,16 @@ function createApp() {
       return res.status(400).json({ error: 'Bad signature' });
     }
     try {
-      const billed = await require('./routes/billing').handleWebhook(event); // the mountain's own DAY/OS subscription
-      if (billed) return res.json({ received: true, ...billed });
-      res.json({ received: true, ...(await lessonbook.handleWebhook(event, config.stripe.publicUrl || `${req.protocol}://${req.get('host')}`)) }); } catch (err) {
+      const connect = require('./lib/connect');
+      const screened = await connect.screen(event); // an event from a mountain's own account only counts for that mountain
+      if (screened.done) return res.json({ received: true, ...screened.done });
+      if (!event.account) {
+        const billed = await require('./routes/billing').handleWebhook(event); // the mountain's own DAY/OS subscription
+        if (billed) return res.json({ received: true, ...billed });
+      }
+      const out = await lessonbook.handleWebhook(event, config.stripe.publicUrl || `${req.protocol}://${req.get('host')}`);
+      await connect.stamp(event);
+      res.json({ received: true, ...out }); } catch (err) {
       logFailure({ job: 'stripe_webhook', event: event && event.type, message: err.message });
       res.status(500).json({ error: 'Try again' });
     }

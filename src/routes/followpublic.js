@@ -9,6 +9,7 @@ const { pool, one } = require('../db');
 const { z, validate } = require('../lib/util');
 const { notFound, AppError } = require('../lib/errors');
 const stripe = require('../lib/stripe');
+const connect = require('../lib/connect');
 const followups = require('../lib/followups');
 const { baseUrl } = require('../lib/baseurl');
 const { isSandbox } = require('../lib/sandbox');
@@ -26,7 +27,7 @@ const jobs = express.Router();
 const MIN_GIFT = 5; const MAX_GIFT = 10000;
 const publicInfo = (t) => ({
   org: followups.orgName(t), mountain: t.name, amounts: followups.amountsOf(t), blurb: t.donate_blurb || null, tax_note: t.tax_note || null,
-  giving: Boolean(stripe.enabled()), slug: t.slug,
+  giving: connect.readyRow(t), slug: t.slug,
 });
 const tokenOk = (s) => /^[a-f0-9]{32}$/.test(s);
 async function byToken(token) {
@@ -59,14 +60,15 @@ publicRouter.post('/followup/:token/stop', async (req, res) => {
 // A gift can start from a follow-up email (token) or from the mountain's public giving page (slug).
 const giftSchema = z.object({ amount: z.number().int().min(MIN_GIFT).max(MAX_GIFT), monthly: z.boolean().optional(), email: z.string().email().max(255).optional() });
 async function startGift(req, res, tenant, followupId, email) {
-  if (!stripe.enabled() || await isSandbox(tenant.id)) throw new AppError(503, 'Online giving is not switched on yet. Please contact the patrol.');
+  const payTo = await connect.payee(tenant.id);
+  if (!payTo.ok || await isSandbox(tenant.id)) throw new AppError(503, 'Online giving is not switched on yet. Please contact the patrol.');
   const base = baseUrl(req);
   const back = followupId ? `${base}/f/${req.params.token}` : `${base}/give/${tenant.slug}`;
   const org = followups.orgName(tenant);
   const s = await stripe.createDonationCheckout({
     amountCents: req.body.amount * 100, monthly: Boolean(req.body.monthly), name: `${req.body.monthly ? 'Monthly gift' : 'Gift'} to the ${org}`, email: req.body.email || email || undefined,
     metadata: { kind: 'donation', tenant_id: String(tenant.id), ...(followupId ? { followup_id: String(followupId) } : {}) },
-    successUrl: `${back}?thanks=1`, cancelUrl: back, nonce: crypto.randomBytes(8).toString('hex'),
+    successUrl: `${back}?thanks=1`, cancelUrl: back, nonce: crypto.randomBytes(8).toString('hex'), account: payTo.account, // to the mountain's own account, no platform fee
   });
   res.json({ url: s.url });
 }

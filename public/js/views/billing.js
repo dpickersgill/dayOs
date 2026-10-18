@@ -1,4 +1,4 @@
-// Billing: the mountain's DAY/OS subscription. Where it stands (trial, paid, grace, read only), the plan and add-ons
+// Billing: the mountain's DAY/OS subscription, and where guests' card payments go (the mountain's own Stripe account). Where it stands (trial, paid, grace, read only), the plan and add-ons
 // with monthly or yearly prices, paying by card, US bank account or invoice, Stripe's portal for the card and
 // cancelling, past invoices and the history. Owners change and pay; managers can look.
 import { get, post, put } from '../api.js';
@@ -39,6 +39,7 @@ export async function render(root) {
       standingPanel(s, b, word, kind),
       b.comped && !live ? h('section', { class: 'panel' }, h('p', null, 'This mountain is on DAY/OS at no charge. There is nothing to pay.'), d.plans.length && owner ? h('p', { class: 'muted small' }, 'You can still choose a plan below if you would like to start paying.') : null) : null,
       d.plans.length ? planPanel(choice, { owner, live, b }) : h('section', { class: 'panel' }, h('p', { class: 'muted' }, 'Plans have not been set up yet. Contact DAY/OS.')),
+      cardPaymentsPanel(query),
       invoicesPanel(),
       historyPanel(),
     ].filter(Boolean));
@@ -144,6 +145,50 @@ export async function render(root) {
     return h('section', { class: 'panel stack' }, h('h2', null, 'History'),
       h('ul', { class: 'duty-list' }, shown.map((e) => h('li', null, h('span', { class: 'muted small' }, fmtDateTime(e.at)), ' ', h('b', null, words[e.kind] || label(e.kind)), e.detail && !quiet.includes(e.kind) ? h('span', null, ` ${e.detail}`) : null))));
   }
+}
+
+// Guest card payments: the online shop, lesson payments, date changes and patrol giving are paid into the mountain's own
+// Stripe account. The owner connects it here (Stripe's own pages collect the business and bank details); managers can look.
+const CARD_STATE = {
+  ready: ['Taking card payments', 'good'], unfinished: ['Stripe needs more details', 'warn'], not_connected: ['Not connected', 'neutral'], off: ['Not available yet', 'neutral'],
+};
+function cardPaymentsPanel(query) {
+  const sec = h('section', { class: 'panel stack' }, h('h2', null, 'Guest card payments'), loading('Checking Stripe'));
+  const back = query.get('stripe');
+  (async () => {
+    let s;
+    try { s = await get(`/payments/stripe${back ? '?refresh=1' : ''}`); } catch (err) { clear(sec).append(h('h2', null, 'Guest card payments'), errorBox(err)); return; }
+    const draw = () => {
+      const [word, kind] = CARD_STATE[s.status] || [s.status, 'neutral'];
+      const fee = s.platform_fee_bps || s.platform_fee_cents ? `${(s.platform_fee_bps / 100).toFixed(2).replace(/\.?0+$/, '')}%${s.platform_fee_cents ? ` plus ${money(s.platform_fee_cents)}` : ''} of each guest card payment` : null;
+      const go = async () => { const r = await post('/payments/stripe/link', {}); location.href = r.url; };
+      const text = {
+        ready: `Online shop orders, lesson payments, date changes and gifts to the patrol are paid straight into your own Stripe account${s.business_name ? ` (${s.business_name})` : ''}, and Stripe pays them out to your bank. ${s.payouts_enabled ? '' : 'Payouts are not on yet: finish your bank details in Stripe. '}Refunds come back out of the same account.`,
+        unfinished: 'Your Stripe account is connected, but Stripe still needs some details (the business, a person, a bank account) before it can take payments. Card payments open as soon as Stripe is happy.',
+        not_connected: 'Guests\' card payments go into your mountain\'s own Stripe account, never through DAY/OS. Connect one to open the online shop, lesson payments and patrol giving. Stripe asks for the business, a contact and the bank account payouts go to; if you already use Stripe, sign in with that login.',
+        off: 'Card payments are not switched on for DAY/OS yet. Contact DAY/OS.',
+      }[s.status];
+      clear(sec).append(...[
+        h('div', { class: 'spread' }, h('h2', null, 'Guest card payments'), state(word, kind)),
+        h('p', null, text),
+        h('p', { class: 'muted small' }, `Stripe's own card fees are charged by Stripe to your account. ${fee ? `DAY/OS's fee: ${fee}, kept by Stripe from the payment and returned in proportion on refunds. Gifts to the patrol carry no DAY/OS fee.` : 'DAY/OS adds no fee of its own.'}`),
+        s.fallback ? h('p', { class: 'muted small' }, 'Until you connect, this test service takes card payments into the DAY/OS test account.') : null,
+        s.sandbox ? h('p', { class: 'muted small' }, 'This is a demo mountain, so it cannot take real card payments.') : null,
+        s.check_failed ? h('p', { class: 'muted small' }, 'Stripe could not be reached just now to check the account. Try again in a minute.') : null,
+        s.can_connect && s.enabled && !s.sandbox ? h('div', { class: 'row' },
+          s.status === 'not_connected' ? button('Connect Stripe', go, { kind: 'primary' }) : null,
+          s.status === 'unfinished' ? button('Finish in Stripe', go, { kind: 'primary' }) : null,
+          s.status === 'ready' ? button('Update details in Stripe', go) : null,
+          s.connected ? button('Check again', async () => { s = { ...s, ...(await get('/payments/stripe?refresh=1')) }; draw(); }) : null,
+          s.connected ? button('Disconnect', () => confirmDialog('Stop taking card payments into this Stripe account?', 'The online shop, lesson payments and patrol giving stop taking cards until you connect an account again. Your Stripe account and the money in it are not touched, and refunds of earlier payments still work.', 'Disconnect', async () => { s = { ...s, ...(await post('/payments/stripe/disconnect', {})) }; toast('Disconnected'); draw(); }, { danger: true })) : null)
+          : !s.can_connect && s.status !== 'ready' ? h('p', { class: 'muted small' }, 'Only the mountain\'s owner can connect Stripe.') : null,
+      ].filter(Boolean));
+    };
+    draw();
+    if (back === 'return') toast(s.status === 'ready' ? 'Stripe is connected. Card payments are open.' : 'Back from Stripe. If it still needs details, finish them there.');
+    if (back === 'again' && s.can_connect) toast('That Stripe page timed out. Press the button to carry on.');
+  })();
+  return sec;
 }
 
 function payWay(title, text, btn) {

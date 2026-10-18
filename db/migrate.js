@@ -387,6 +387,15 @@ const securitySteps = [
     'UPDATE tenants SET patrol_mfa_from = DATE_ADD(CURDATE(), INTERVAL 14 DAY)',
   ]],
 ];
+// 2026.10.22: Stripe Connect. Each mountain's guest card payments go to its own Stripe account (a Standard account it
+// controls), with an optional platform fee per mountain, 0 unless the console sets one.
+const connectSteps = [
+  ['tenants.stripe_account', (c) => columnExists(c, 'tenants', 'stripe_account'), 'ALTER TABLE tenants ADD COLUMN stripe_account VARCHAR(64) NULL, ADD COLUMN stripe_charges_enabled TINYINT(1) NOT NULL DEFAULT 0, ADD COLUMN stripe_payouts_enabled TINYINT(1) NOT NULL DEFAULT 0, ADD COLUMN stripe_details_submitted TINYINT(1) NOT NULL DEFAULT 0, ADD COLUMN stripe_connected_at DATETIME NULL, ADD COLUMN stripe_checked_at DATETIME NULL, ADD UNIQUE KEY uq_tenants_stripe_account (stripe_account)'],
+  ['tenants.platform_fee_bps', (c) => columnExists(c, 'tenants', 'platform_fee_bps'), 'ALTER TABLE tenants ADD COLUMN platform_fee_bps SMALLINT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN platform_fee_cents SMALLINT UNSIGNED NOT NULL DEFAULT 0'],
+  ['order_payments.processor_account', (c) => columnExists(c, 'order_payments', 'processor_account'), 'ALTER TABLE order_payments ADD COLUMN processor_account VARCHAR(64) NULL, ADD COLUMN platform_fee_cents INT UNSIGNED NOT NULL DEFAULT 0'],
+  ['order_refunds.card_account', (c) => columnExists(c, 'order_refunds', 'card_account'), 'ALTER TABLE order_refunds ADD COLUMN card_account VARCHAR(64) NULL'],
+  ['donations.stripe_account', (c) => columnExists(c, 'donations', 'stripe_account'), 'ALTER TABLE donations ADD COLUMN stripe_account VARCHAR(64) NULL'],
+];
 const opsSteps = [
   ['trails hold status', (c) => columnTypeHas(c, 'trails', 'status', "'hold'"), "ALTER TABLE trails MODIFY status ENUM('open','hold','closed') NOT NULL DEFAULT 'closed'"],
   ['trails.closure_reason', (c) => columnExists(c, 'trails', 'closure_reason'), 'ALTER TABLE trails ADD COLUMN closure_reason VARCHAR(200) NULL, ADD COLUMN status_by BIGINT UNSIGNED NULL'],
@@ -551,7 +560,7 @@ async function main() {
   await seedPlans(conn);
   await seedPatrolPlan(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;
