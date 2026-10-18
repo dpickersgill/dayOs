@@ -1,6 +1,25 @@
 {
   "releases": [
     {
+      "version": "2026.10.21",
+      "date": "2026-10-18",
+      "title": "The new DAY/OS logo",
+      "notes": [
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "DAY/OS has a new logo: day/os with a mountain peak for the slash. It is on the sign-in screen, at the top of the menu, and as the app icon when you add DAY/OS to a phone's home screen."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": "platform",
+          "text": "The website uses the new logo in its header and footer, its browser icon and its link preview image. The logo files, for light and dark backgrounds, are in public/brand."
+        }
+      ]
+    },
+    {
       "version": "2026.10.20",
       "date": "2026-10-18",
       "title": "A faster, phone-first website",

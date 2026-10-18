@@ -117,7 +117,7 @@ function showSignIn(message) {
   const term = readTerminal();
   app.append(h('div', { class: 'signin' },
     h('section', { class: 'signin-side' },
-      h('div', null, h('p', { class: 'brand' }, h('strong', null, 'DAY/OS')), h('h1', null, 'Run the mountain from one screen.'),
+      h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/dayos-logo-dark.svg', alt: 'DAY/OS, resort operating system', width: '220', height: '77' })), h('h1', null, 'Run the mountain from one screen.'),
         h('p', null, 'Tickets, lifts, rentals, lessons, patrol and staff schedules for your mountain.')), ridge()),
     h('section', { class: 'signin-form' }, h('h2', null, 'Sign in'), message ? h('p', { class: 'muted', role: 'status' }, message) : null, form,
       pk ? h('div', { class: 'stack tight signin-passkey' }, h('p', { class: 'muted small' }, 'Or, if you added a passkey on this phone or computer:'), pk, pkErr) : null,
@@ -168,7 +168,7 @@ function showSecondStep(first) {
   }
   const lead = methods.email ? 'Check your email.' : 'One more step.';
   const say = methods.email ? 'This device has not signed in to your account before.' : methods.passkey ? 'Use your passkey to finish signing in.' : 'Enter the code from your authenticator app to finish signing in.';
-  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('strong', null, 'DAY/OS')), h('h1', null, lead), h('p', null, say)), ridge()),
+  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/dayos-logo-dark.svg', alt: 'DAY/OS, resort operating system', width: '220', height: '77' })), h('h1', null, lead), h('p', null, say)), ridge()),
     h('section', { class: 'signin-form stack' }, h('h2', null, methods.email ? 'New device' : 'Two-step sign-in'), ...parts, err, button('Start again', () => showSignIn(), { small: true }))));
   const first_ = app.querySelector('.signin-form .btn.primary, .signin-form input');
   if (first_) first_.focus();
@@ -191,7 +191,7 @@ async function showPinSignIn(message) {
     try { await signedIn(await post('/auth/pin-login', { tenant: term.tenant, terminal: term.secret, login: who.value.trim(), pin: pin.value.trim() })); } catch (ex) { pin.value = ''; err.append(errorBox(ex)); go.disabled = false; pin.focus(); }
   });
   const title = h('h2', null, term.name);
-  app.append(h('div', { class: 'signin terminal' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('strong', null, 'DAY/OS')), h('h1', null, 'Shared terminal.'), h('p', null, 'Switch in with your username and PIN. Sign out when you step away, so the next person starts as themselves.')), ridge()),
+  app.append(h('div', { class: 'signin terminal' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/dayos-logo-dark.svg', alt: 'DAY/OS, resort operating system', width: '220', height: '77' })), h('h1', null, 'Shared terminal.'), h('p', null, 'Switch in with your username and PIN. Sign out when you step away, so the next person starts as themselves.')), ridge()),
     h('section', { class: 'signin-form' }, title, message ? h('p', { class: 'muted', role: 'status' }, message) : null, form,
       h('p', { class: 'small' }, button('Sign in with a password or passkey', () => showSignIn(), { small: true })))));
   who.focus();
@@ -203,7 +203,7 @@ async function showPinSignIn(message) {
 function showEnrollment() {
   clear(app);
   const done = async () => { await start(); };
-  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('strong', null, 'DAY/OS')), h('h1', null, 'Protect your account.'), h('p', null, ctx.me.mfa_rule === 'mountain' ? 'Your mountain requires two-step sign-in.' : ctx.me.mfa_rule === 'patrol' ? 'Patrol holds patient details, so patrollers use two-step sign-in.' : 'Owners, managers and patrol leads use two-step sign-in, because they can change everything.')), ridge()),
+  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/dayos-logo-dark.svg', alt: 'DAY/OS, resort operating system', width: '220', height: '77' })), h('h1', null, 'Protect your account.'), h('p', null, ctx.me.mfa_rule === 'mountain' ? 'Your mountain requires two-step sign-in.' : ctx.me.mfa_rule === 'patrol' ? 'Patrol holds patient details, so patrollers use two-step sign-in.' : 'Owners, managers and patrol leads use two-step sign-in, because they can change everything.')), ridge()),
     h('section', { class: 'signin-form stack' }, h('p', null, 'Add a passkey (quickest: your fingerprint or face) or an authenticator app. Either one works.'), passkeysPanel(done), mfaPanel(done), button('Sign out', () => signOut(), { small: true }))));
 }
 
@@ -229,7 +229,7 @@ function showPasswordChange() {
       await start();
     } catch (ex) { err.append(errorBox(ex)); go.disabled = false; }
   });
-  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('strong', null, 'DAY/OS')), h('h1', null, 'Choose your password.'), h('p', null, `Signed in as ${ctx.me.username || ctx.me.email}. Your password was set by a manager; choose your own to continue.`)), ridge()),
+  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/dayos-logo-dark.svg', alt: 'DAY/OS, resort operating system', width: '220', height: '77' })), h('h1', null, 'Choose your password.'), h('p', null, `Signed in as ${ctx.me.username || ctx.me.email}. Your password was set by a manager; choose your own to continue.`)), ridge()),
     h('section', { class: 'signin-form' }, h('h2', null, 'New password'), form)));
   cur.focus();
 }

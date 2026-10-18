@@ -7,7 +7,7 @@
 :root {
   --snowpack: #edf1f3;
   --powder: #ffffff;
-  --spruce: #12303a;
+  --spruce: #0e2632;
   --spruce-soft: #1d4452;
   --quiet: #4f636d;
   --line: #d3dce1;
@@ -910,7 +910,9 @@ tr.row-warn td { background: #fff4e0; }
 
 .rail { background: #0e2830; padding: 20px 14px 16px; gap: 14px; border-right: 1px solid rgba(255,255,255,.04); }
 .rail .brand { display: flex; align-items: center; gap: 12px; padding: 4px 6px 4px 8px; }
-.brand-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(145deg, #2a6f86, #17485a); color: #fff; flex: none; }
+.brand-mark { display: block; width: 36px; height: 36px; border-radius: 10px; flex: none; }
+.brand-word { display: block; height: 23px; width: auto; margin: 0 0 3px; }
+.brand-logo-full { display: block; width: 220px; max-width: 100%; height: auto; }
 .brand-text { min-width: 0; flex: 1; }
 .rail .brand strong { font-size: 1.0625rem; line-height: 1.2; letter-spacing: 0; }
 .rail .brand span { font-size: .8125rem; margin-top: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

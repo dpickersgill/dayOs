@@ -36,7 +36,8 @@ function template(name) {
   return cache.get(name);
 }
 
-const LOGO = (bg, fg) => `<svg width="34" height="34" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="${bg}"/><path d="M3 25 L12 11 L17 18 L21 13 L29 25 Z" fill="${fg}"/></svg>`;
+// The DAY/OS wordmark (public/brand): the light version on snow, the dark one on navy.
+const WORDMARK = (theme, h) => `<img class="wordmark" src="/brand/dayos-wordmark-${theme}.svg" alt="DAY/OS" width="${Math.round(h * 3.07)}" height="${h}">`;
 const NAV = [['product', 'Product'], ['ski-patrol', 'Ski patrol'], ['pricing', 'Pricing'], ['security', 'Security']];
 
 /** The top of every page: logo, Product, Pricing, Security, Try the demo, Sign in, Request a walkthrough; on phones a
@@ -50,7 +51,7 @@ function header(current) {
   return `<a class="skip" href="#main">Skip to the content</a>
 <header class="sn">
   <div class="wrap sn-in">
-    <a class="sn-brand" href="{{HOME}}" aria-label="DAY/OS, home">${LOGO('#12303A', '#FFFFFF')}<span>DAY/OS</span></a>
+    <a class="sn-brand" href="{{HOME}}" aria-label="DAY/OS, home">${WORDMARK('light', 42)}</a>
     <nav class="sn-links" aria-label="Main">
       ${links}
       ${extra}
@@ -74,7 +75,7 @@ const FOOTER = `<footer class="sf">
   <div class="wrap">
     <div class="sf-grid">
       <div>
-        <div class="sf-brand">${LOGO('#FFFFFF', '#12303A')}DAY/OS</div>
+        <div class="sf-brand"><img src="/brand/dayos-logo-dark.svg" alt="DAY/OS, resort operating system" width="220" height="77"></div>
         <p>Operations software for independent ski areas. Lifts, the fleet, tickets, rentals, lessons, patrol and staff in one place.</p>
       </div>
       <div>

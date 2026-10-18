@@ -107,7 +107,7 @@ export function buildFrame({ views, main, signOut }) {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !whoMenu.hidden) { setWho(false); whoBtn.focus(); } });
   whoMenu.addEventListener('click', (e) => { if (e.target.closest('a')) setWho(false); });
   const rail = h('aside', { class: 'rail' },
-    h('div', { class: 'brand' }, h('span', { class: 'brand-mark', 'aria-hidden': 'true' }, icon('conditions', 20)), h('div', { class: 'brand-text' }, h('strong', null, 'DAY/OS'), h('span', null, ctx.me.tenant_name)), toggle),
+    h('div', { class: 'brand' }, h('img', { class: 'brand-mark', src: '/brand/dayos-mark.svg', alt: '', width: '36', height: '36' }), h('div', { class: 'brand-text' }, h('img', { class: 'brand-word', src: '/brand/dayos-wordmark-dark.svg', alt: 'DAY/OS', width: '72', height: '23' }), h('span', null, ctx.me.tenant_name)), toggle),
     search, nav,
     h('div', { class: 'rail-foot' }, whoMenu, whoBtn));
 
@@ -120,7 +120,7 @@ export function buildFrame({ views, main, signOut }) {
   const topSearch = h('button', { type: 'button', class: 'top-search', 'aria-label': 'Jump to a page' }, icon('search', 18), h('span', null, 'Jump to a page'), h('kbd', null, /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘K' : 'Ctrl K'));
   const topInbox = have('inbox') ? h('a', { href: '#/inbox', class: 'top-inbox', dataset: { key: 'inbox' }, 'aria-label': 'Inbox' }, icon('inbox', 22)) : null;
   if (topInbox) { if (!links.has('inbox')) links.set('inbox', []); links.get('inbox').push(topInbox); }
-  const topbar = h('header', { class: 'topbar' }, h('div', { class: 'top-brand' }, h('span', { class: 'brand-mark', 'aria-hidden': 'true' }, icon('conditions', 18)), h('strong', null, ctx.me.tenant_name)), topSearch, topInbox);
+  const topbar = h('header', { class: 'topbar' }, h('div', { class: 'top-brand' }, h('img', { class: 'brand-mark', src: '/brand/dayos-mark.svg', alt: 'DAY/OS', width: '30', height: '30' }), h('strong', null, ctx.me.tenant_name)), topSearch, topInbox);
 
   function openSheet() {
     const items = [['Home', ['dashboard', 'inbox'].filter(have)], ...sections.map((g) => [g.name, g.keys]), ['You', personal]].filter(([, k]) => k.length);
