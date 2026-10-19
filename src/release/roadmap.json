@@ -31,6 +31,7 @@
       "label": "Later",
       "when": "After the holidays",
       "items": [
+        { "app": "dashboard", "title": "Visitor forecast", "text": "How busy the next 10 days will be, as a range, from the day of the week, holidays and school breaks, new snow, the weather forecast and tickets already sold online. It suggests crew sizes, rental and lesson staffing, and says why in plain words." },
         { "app": "money", "title": "Payroll export, and café and retail totals", "text": "Hours out to your payroll, and food and retail sales into Money." },
         { "app": "patrol", "title": "Drop a pin for hazards and equipment", "text": "Mark a hazard or a piece of equipment on the map from where you stand." },
         { "app": null, "title": "Satellite map view", "text": "Aerial imagery under your trail map." },
