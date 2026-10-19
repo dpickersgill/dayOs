@@ -1941,6 +1941,17 @@ body:has(.tour-card) .demo-pill { display: none; }
 .release-notes { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
 .release-notes li { display: grid; grid-template-columns: 6.5rem 1fr; gap: 10px; align-items: start; line-height: 1.5; }
 .release-notes .state { justify-self: start; }
+.help-news { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0 12px; max-width: 980px; }
+.help-news .whatsnew-link { max-width: none; }
+.roadmap { display: grid; gap: 28px; max-width: 46rem; }
+.roadmap-stage header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 10px; }
+.roadmap-stage header h2 { margin: 0; font-size: 1.25rem; }
+.roadmap-stage header p { margin: 0; }
+.roadmap-stage.is-now { padding-left: 14px; border-left: 4px solid var(--trail-blue); }
+.roadmap-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.roadmap-items li { line-height: 1.5; }
+.roadmap-items li p { margin: 2px 0 0; }
+.roadmap-app { margin-left: 8px; white-space: nowrap; }
 @media (max-width: 520px) { .release-notes li { grid-template-columns: 1fr; gap: 4px; } }
 
 /* ---------- Staff and schedule ---------- */

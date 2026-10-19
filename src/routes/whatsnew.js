@@ -6,6 +6,7 @@ const express = require('express');
 const { pool, one } = require('../db');
 const moduleGate = require('../lib/modules');
 const V = require('../lib/version');
+const { requireRole, MANAGER_ROLES } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -30,6 +31,14 @@ router.get('/count', async (req, res) => {
 router.post('/seen', async (req, res) => {
   await pool.query('UPDATE users SET seen_version = ? WHERE id = ? AND tenant_id = ?', [V.VERSION, req.auth.userId, req.auth.tenantId]);
   res.json({ ok: true, seen: V.VERSION });
+});
+
+/**
+ * Help > Coming to DAY/OS: what is being built now, next and later (src/release/roadmap.json), for owners and managers.
+ * Only here, behind sign-in: the roadmap is not on the website. Kept in step with the working roadmap by hand.
+ */
+router.get('/roadmap', requireRole(...MANAGER_ROLES), (_req, res) => {
+  res.set('Cache-Control', 'private, no-cache').json(V.roadmap());
 });
 
 module.exports = router;

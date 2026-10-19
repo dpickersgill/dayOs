@@ -1,5 +1,5 @@
 // Help: short how-to articles for each app, searchable, shown only for what this person can use.
-import { h, clear, ctx, can, input, empty, errorBox, state, label } from '../ui.js';
+import { h, clear, ctx, can, isManager, input, empty, errorBox, state, label } from '../ui.js';
 import { get, post, session } from '../api.js';
 import { SECTIONS, ARTICLES, articleById } from '../help-content.js';
 
@@ -47,8 +47,9 @@ function home(root) {
   q.addEventListener('input', draw);
   const news = h('a', { class: 'whatsnew-link', href: '#/help/whats-new' }, h('b', null, "What's new"), h('span', { class: 'muted' }, ' The latest changes to DAY/OS'));
   get('/whats-new/count').then((c) => { if (c.unseen) news.append(h('span', { class: 'new-pill' }, 'New')); }).catch(() => {});
+  const coming = isManager() ? h('a', { class: 'whatsnew-link', href: '#/help/coming' }, h('b', null, 'Coming to DAY/OS'), h('span', { class: 'muted' }, ' What we are building now, next and later')) : null;
   root.append(h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Help'), h('p', { class: 'muted' }, 'How to do things in DAY/OS. You see what your role can use.'))),
-    news, h('div', { class: 'help-search' }, q), results, grid, stuck(), versionLine());
+    h('div', { class: 'help-news' }, news, coming), h('div', { class: 'help-search' }, q), results, grid, stuck(), versionLine());
 }
 
 /** "DAY/OS 2026.10.4 (build ac9a72f)": the version this screen is running, for telling support or checking an update. */
@@ -83,6 +84,24 @@ async function whatsNew(root) {
   }
 }
 
+/** Help > Coming to DAY/OS: the roadmap, for owners and managers. Not on the website. */
+async function coming(root) {
+  root.append(back('#/help', 'All help'), h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Coming to DAY/OS'),
+    h('p', { class: 'muted' }, 'What we are building now, next and later. Plans change with what mountains ask for, so the order can move.'))));
+  if (!isManager()) { root.append(empty('The roadmap is for owners and managers.')); return; }
+  let r;
+  try { r = await get('/whats-new/roadmap'); } catch (err) { root.append(errorBox(err)); return; }
+  if (!r.stages.length) { root.append(empty('Nothing planned to show yet.')); return; }
+  root.append(h('div', { class: 'roadmap' }, r.stages.map((st) => h('section', { class: `roadmap-stage is-${st.key}` },
+    h('header', null, h('h2', null, st.label), st.when ? h('p', { class: 'muted small' }, st.when) : null),
+    h('ul', { class: 'roadmap-items' }, st.items.map((it) => {
+      const sec = it.app ? sectionOf(it.app) : null;
+      return h('li', null, h('b', null, it.title), sec ? h('span', { class: 'roadmap-app muted small' }, sec.label) : null, h('p', null, it.text));
+    }))))),
+  h('aside', { class: 'help-stuck' }, h('b', null, 'Something you need? '), 'Tell us what would help your mountain most. What mountains ask for moves up the list.'),
+  r.updated ? h('p', { class: 'version-line muted small' }, `Last updated ${longDate(r.updated)}`) : null);
+}
+
 function stuck() {
   return h('aside', { class: 'help-stuck' }, h('b', null, 'Still stuck? '), 'Ask your manager or owner. For a problem with DAY/OS itself, they can reach whoever set up your mountain.');
 }
@@ -115,6 +134,7 @@ export async function render(root, params = []) {
   const [id] = params;
   if (!id) home(root);
   else if (id === 'whats-new') await whatsNew(root);
+  else if (id === 'coming') await coming(root);
   else if (id.startsWith('for-')) section(root, id.slice(4));
   else article(root, id);
 }

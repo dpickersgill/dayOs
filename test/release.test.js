@@ -107,6 +107,23 @@ test("What's new shows each person only their role's notes and their mountain's 
   modules.invalidate(M.id);
 });
 
+test('the roadmap is in Help for owners and managers only, behind sign-in, and not on the website', async () => {
+  const r = ok(await api('GET', '/whats-new/roadmap', { token: M.owner }));
+  assert.deepEqual(r.stages.map((st) => st.key), ['now', 'next', 'later']);
+  for (const st of r.stages) {
+    assert.ok(st.label && st.items.length, `${st.key} has items`);
+    for (const it of st.items) {
+      assert.ok(it.title && it.text, 'each item has a title and a line');
+      assert.ok(it.app === null || modules.MODULES.some((m) => m.key === it.app) || ['dashboard', 'sell', 'catalog', 'money'].includes(it.app), `${it.title}: app ${it.app}`);
+      assert.ok(!/\u2014|TODO|Dan\b|platform fee|\$\d/.test(`${it.title} ${it.text}`), `${it.title}: written for mountains`);
+    }
+  }
+  assert.equal((await api('GET', '/whats-new/roadmap', { token: M.counter })).status, 403, 'staff do not see it');
+  assert.equal((await api('GET', '/whats-new/roadmap')).status, 401, 'not without signing in');
+  assert.equal((await fetch(`${base}/site/roadmap`)).status, 404, 'not a website page');
+  assert.ok(!fs.existsSync(path.join(__dirname, '..', 'public', 'roadmap.json')), 'not a public file');
+});
+
 test('the badge: the newest release for someone who never looked, nothing once they have, more when a release arrives', async () => {
   const first = ok(await api('GET', '/whats-new/count', { token: M.instructor }));
   const mine = ok(await api('GET', '/whats-new', { token: M.instructor }));

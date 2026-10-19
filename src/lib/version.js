@@ -26,6 +26,8 @@ const stamp = readJson('build.json', {});
 const BUILD = typeof stamp.build === 'string' && stamp.build ? stamp.build : 'dev';
 const BUILT_AT = stamp.built_at || null;
 const RELEASES = readJson('changelog.json', { releases: [] }).releases;
+/** What is planned (src/release/roadmap.json): stages (now, next, later), each with plain-language items. */
+const roadmap = () => readJson('roadmap.json', { updated: null, stages: [] });
 
 /** Compares two calendar versions: negative when a is older, 0 when the same, positive when newer. Missing counts as oldest. */
 function compare(a, b) {
@@ -64,4 +66,4 @@ function unseenCount(releases, seen) {
   return releases.filter((r) => compare(r.version, seen) > 0 && compare(r.version, VERSION) <= 0).reduce((n, r) => n + r.notes.length, 0);
 }
 
-module.exports = { VERSION, BUILD, BUILT_AT, RELEASES, compare, noteFor, releasesFor, unseenCount };
+module.exports = { VERSION, BUILD, BUILT_AT, RELEASES, roadmap, compare, noteFor, releasesFor, unseenCount };

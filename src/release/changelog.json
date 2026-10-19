@@ -1,6 +1,19 @@
 {
   "releases": [
     {
+      "version": "2026.10.24",
+      "date": "2026-10-19",
+      "title": "See what's coming",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": [],
+          "text": "Help now has Coming to DAY/OS: what we're building now, next and later. Tell us what your mountain needs most and it moves up the list."
+        }
+      ]
+    },
+    {
       "version": "2026.10.23",
       "date": "2026-10-19",
       "title": "Faster schedule pickers",
