@@ -6,9 +6,21 @@
       "label": "Building now",
       "when": "October",
       "items": [
-        { "app": "school", "title": "Cancel or delete lessons", "text": "Cancel one lesson or every lesson on a storm day. Card payments are refunded, package lessons get their credit back, and every booked guest gets an email. A lesson added by mistake with nobody booked can be deleted." },
-        { "app": "park", "title": "Better pin dropping in the terrain park", "text": "Waits for a good GPS fix, shows how close the pin is, lets you drag it into place, and lets you walk the park dropping features as you go." },
-        { "app": "catalog", "title": "Your own guest types", "text": "Add, rename, hide and reorder the guest types you price by, such as College or Local, instead of the fixed Adult, Youth, Child, Senior and Military." }
+        {
+          "app": "school",
+          "title": "Cancel or delete lessons",
+          "text": "Cancel one lesson or every lesson on a storm day. Card payments are refunded, package lessons get their credit back, and every booked guest gets an email. A lesson added by mistake with nobody booked can be deleted."
+        },
+        {
+          "app": "park",
+          "title": "Better pin dropping in the terrain park",
+          "text": "Waits for a good GPS fix, shows how close the pin is, lets you drag it into place, and lets you walk the park dropping features as you go."
+        },
+        {
+          "app": "catalog",
+          "title": "Your own guest types",
+          "text": "Add, rename, hide and reorder the guest types you price by, such as College or Local, instead of the fixed Adult, Youth, Child, Senior and Military."
+        }
       ]
     },
     {
@@ -16,14 +28,51 @@
       "label": "Coming next",
       "when": "November and December",
       "items": [
-        { "app": null, "title": "Help centre and contact support", "text": "Search the help from anywhere and reach support from inside DAY/OS." },
-        { "app": "sell", "title": "Card reader at the counter", "text": "Tap or insert a card on a reader at the ticket window, paid straight into your own Stripe account." },
-        { "app": "sell", "title": "Partner passes", "text": "Record Indy Pass and reciprocal pass visits at the window and see them in your reports." },
-        { "app": "money", "title": "Accounting export", "text": "Send each day's sales to QuickBooks Online or Xero instead of typing them in." },
-        { "app": "shop", "title": "Tickets in Apple and Google Wallet", "text": "Guests add their ticket or pass to their phone's wallet and scan it at the lift." },
-        { "app": "shop", "title": "Season pass payment plans", "text": "Sell a pass with a deposit and monthly payments, taken automatically." },
-        { "app": null, "title": "Help assistant", "text": "Ask a question in plain words and get the steps for this screen." },
-        { "app": "dashboard", "title": "This season against last", "text": "Visits, sales, lessons and incidents side by side with the same day last season." }
+        {
+          "app": null,
+          "title": "Help centre and contact support",
+          "text": "Search the help from anywhere and reach support from inside DAY/OS."
+        },
+        {
+          "app": null,
+          "title": "Bring your data with you",
+          "text": "Upload what your old system or spreadsheets export, such as customers, pass holders, products, staff and the rental fleet. DAY/OS matches the columns, flags duplicates and problems, and shows you a preview before anything is saved."
+        },
+        {
+          "app": "sell",
+          "title": "Card reader at the counter",
+          "text": "Tap or insert a card on a reader at the ticket window, paid straight into your own Stripe account."
+        },
+        {
+          "app": "sell",
+          "title": "Partner passes",
+          "text": "Record Indy Pass and reciprocal pass visits at the window and see them in your reports."
+        },
+        {
+          "app": "money",
+          "title": "Accounting export",
+          "text": "Send each day's sales to QuickBooks Online or Xero instead of typing them in."
+        },
+        {
+          "app": "shop",
+          "title": "Tickets in Apple and Google Wallet",
+          "text": "Guests add their ticket or pass to their phone's wallet and scan it at the lift."
+        },
+        {
+          "app": "shop",
+          "title": "Season pass payment plans",
+          "text": "Sell a pass with a deposit and monthly payments, taken automatically."
+        },
+        {
+          "app": null,
+          "title": "Help assistant",
+          "text": "Ask a question in plain words and get the steps for this screen."
+        },
+        {
+          "app": "dashboard",
+          "title": "This season against last",
+          "text": "Visits, sales, lessons and incidents side by side with the same day last season."
+        }
       ]
     },
     {
@@ -31,13 +80,66 @@
       "label": "Later",
       "when": "After the holidays",
       "items": [
-        { "app": "dashboard", "title": "Visitor forecast", "text": "How busy the next 10 days will be, as a range, from the day of the week, holidays and school breaks, new snow, the weather forecast and tickets already sold online. It suggests crew sizes, rental and lesson staffing, and says why in plain words." },
-        { "app": "money", "title": "Payroll export, and café and retail totals", "text": "Hours out to your payroll, and food and retail sales into Money." },
-        { "app": "patrol", "title": "Drop a pin for hazards and equipment", "text": "Mark a hazard or a piece of equipment on the map from where you stand." },
-        { "app": null, "title": "Satellite map view", "text": "Aerial imagery under your trail map." },
-        { "app": null, "title": "One login for groups of mountains", "text": "Move between mountains you work at without signing in again." },
-        { "app": null, "title": "Connect your other systems", "text": "An API and event notifications for the tools you already use." },
-        { "app": "catalog", "title": "Suggested prices", "text": "Price ideas for busy and quiet days, based on how fast tickets are selling." }
+        {
+          "app": "dashboard",
+          "title": "Visitor forecast",
+          "text": "How busy the next 10 days will be, as a range, from the day of the week, holidays and school breaks, new snow, the weather forecast and tickets already sold online. It suggests crew sizes, rental and lesson staffing, and says why in plain words."
+        },
+        {
+          "app": "conditions",
+          "title": "Snow report that writes itself",
+          "text": "Each morning, the day's conditions update for your website, email and social media, written from lifts, trails, grooming, new snow and weather. You check it and post it."
+        },
+        {
+          "app": "dashboard",
+          "title": "Morning brief for managers",
+          "text": "One short read each morning: yesterday against last year, today's forecast and staffing gaps, lifts on hold, open work orders and open incidents."
+        },
+        {
+          "app": "patrol",
+          "title": "Patrol report check and spoken reports",
+          "text": "Before a patient care report is submitted, DAY/OS points out anything missing or that doesn't add up. Patrollers can speak what happened and DAY/OS fills in the fields it can. It only suggests; the patroller and director decide."
+        },
+        {
+          "app": "documents",
+          "title": "Ask your data and your documents",
+          "text": "Ask in plain words, like \"How did lessons do this February against last?\" or \"What does our lift evacuation plan say about the double chair?\""
+        },
+        {
+          "app": "messages",
+          "title": "Suggested replies to guests",
+          "text": "A drafted answer to each guest message or email, for staff to edit and send."
+        },
+        {
+          "app": "money",
+          "title": "Payroll export, and café and retail totals",
+          "text": "Hours out to your payroll, and food and retail sales into Money."
+        },
+        {
+          "app": "patrol",
+          "title": "Drop a pin for hazards and equipment",
+          "text": "Mark a hazard or a piece of equipment on the map from where you stand."
+        },
+        {
+          "app": null,
+          "title": "Satellite map view",
+          "text": "Aerial imagery under your trail map."
+        },
+        {
+          "app": null,
+          "title": "One login for groups of mountains",
+          "text": "Move between mountains you work at without signing in again."
+        },
+        {
+          "app": null,
+          "title": "Connect your other systems",
+          "text": "An API and event notifications for the tools you already use."
+        },
+        {
+          "app": "catalog",
+          "title": "Suggested prices",
+          "text": "Price ideas for busy and quiet days, based on how fast tickets are selling."
+        }
       ]
     }
   ]
