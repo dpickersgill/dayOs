@@ -42,7 +42,7 @@ Who signs in how:
 
 ## Security setup (once, after 2026.10.16)
 
-From the unzipped folder in Cloud Shell, after `bash deploy.sh`:
+From the unzipped folder in Cloud Shell, after `bash promote.sh`:
 
 1. `bash scripts/harden.sh` gives the app its own service account (`summitops-run`) with only the roles it needs, moves
    every key still held as a plain setting (Stripe, Postmark, `JOBS_KEY` and the rest) into Secret Manager, makes a

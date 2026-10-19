@@ -1,6 +1,7 @@
 // The time clock kiosk. It has no login: a manager pairs the tablet once, then people tap their name and enter a PIN
 // (or hold up a QR badge), confirm, and they are clocked in or out. Text is always set with textContent.
 
+import './stage.js'; // the staging band (shows only on staging)
 const KEY = 'summitops.kiosk';
 const root = document.getElementById('kiosk');
 

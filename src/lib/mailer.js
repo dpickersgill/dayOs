@@ -27,7 +27,21 @@ async function send({ tenantId, to, fromName, replyTo, subject, text, html, tag,
   return r;
 }
 
-async function post({ to, fromName, replyTo, subject, text, html, tag, headers, stream }) {
+/**
+ * On staging, every email goes to STAGING_INBOX instead of the person it names, with that person in the subject, so a
+ * release can be checked end to end without mailing a real guest. No inbox set: nothing is sent at all.
+ */
+function stagingRoute(to, subject) {
+  if (env.STAGE !== 'staging') return { to, subject };
+  const inbox = env.STAGING_INBOX || '';
+  if (!inbox) return null;
+  return { to: inbox, subject: `[Staging, for ${String(to).replace(/[\r\n]/g, '').slice(0, 200)}] ${subject}` };
+}
+
+async function post({ to: named, fromName, replyTo, subject: asked, text, html, tag, headers, stream }) {
+  const route = stagingRoute(named, asked);
+  if (!route) return { ok: false, error: 'Staging sends no email until STAGING_INBOX is set' };
+  const { to, subject } = route;
   const safeName = String(fromName || '').replace(/["<>\r\n]/g, '').slice(0, 100);
   try {
     const res = await fetch(`${settings.apiBase}/email`, {
@@ -54,4 +68,4 @@ async function sendPlatform({ to, replyTo, subject, text, tag }) {
   return r;
 }
 
-module.exports = { send, sendPlatform, enabled, settings };
+module.exports = { send, sendPlatform, enabled, settings, stagingRoute };

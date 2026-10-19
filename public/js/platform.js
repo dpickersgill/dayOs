@@ -2,6 +2,7 @@
 // It signs in with the platform key, your name and (when the service has PLATFORM_TOTP_SECRET set) a code from your
 // authenticator app. The 2-hour session is kept only in this tab's memory.
 
+import './stage.js'; // the staging band (shows only on staging)
 import { h, clear, button, field, input, table, dialog, formDialog, confirmDialog, toast, fail, empty, errorBox, state } from './ui.js';
 import { qr } from './barcode.js';
 import * as passkey from './passkey.js';

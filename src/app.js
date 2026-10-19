@@ -70,6 +70,8 @@ function createApp() {
   app.use(require('compression')({ filter: (req, res) => !String(res.getHeader('Content-Type') || '').includes('event-stream') && require('compression').filter(req, res) }));
   const origins = (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
   app.use(cors({ origin: origins.length ? origins : false }));
+  // Staging: kept out of search engines and, with STAGING_GATE, behind a shared password (middleware/staging.js).
+  app.use(require('./middleware/staging').staging());
   // Stripe signs the exact bytes it sends, so this one route reads the raw body before the JSON parser sees anything.
   app.post('/api/v1/stripe/webhook', express.raw({ type: '*/*', limit: '200kb' }), async (req, res) => {
     const stripe = require('./lib/stripe');
@@ -153,7 +155,8 @@ function createApp() {
       ? await pool.query('SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? LIMIT 1', [LATEST.table, LATEST.column])
       : await pool.query('SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? LIMIT 1', [LATEST.table, LATEST.index]);
     if (!r.length) return res.status(503).json({ ok: false, reason: 'run npm run migrate', version: release.VERSION });
-    return res.json({ ok: true, version: release.VERSION });
+    // Staging also says which build it runs, so promote.sh can check it is putting live exactly what was checked.
+    return res.json({ ok: true, version: release.VERSION, ...(config.staging ? { stage: 'staging', build: release.BUILD } : {}) });
   });
   // Which version is running: open to anyone (the sign-in screen shows it, and deploy.sh reads it before deploying).
   // The build and its date only for someone signed in (Help shows them); everyone else sees the release number alone.
@@ -162,7 +165,8 @@ function createApp() {
     let signedIn = false;
     const m = /^Bearer (.+)$/.exec(req.get('authorization') || '');
     if (m) { try { signedIn = !require('jsonwebtoken').verify(m[1], config.jwtSecret, { algorithms: ['HS256'] }).typ; } catch (_) { signedIn = false; } }
-    res.json(signedIn ? { version: release.VERSION, build: release.BUILD, built_at: release.BUILT_AT } : { version: release.VERSION });
+    const stage = config.staging ? { stage: 'staging' } : {};
+    res.json(signedIn ? { version: release.VERSION, build: release.BUILD, built_at: release.BUILT_AT, ...stage } : { version: release.VERSION, ...stage });
   });
 
   const api = express.Router();

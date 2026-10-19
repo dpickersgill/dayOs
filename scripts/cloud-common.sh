@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Shared by deploy.sh, scripts/harden.sh and scripts/cloud-armor.sh: signs in, reads the running service's settings and
-# opens a database connection on 127.0.0.1:3307 (through the Cloud SQL Auth Proxy). Source it; do not run it.
-SERVICE=summitops-api
+# Shared by deploy.sh, promote.sh, scripts/staging-setup.sh, scripts/harden.sh and scripts/cloud-armor.sh: signs in, reads
+# a service's settings and opens a database connection on 127.0.0.1:3307 (through the Cloud SQL Auth Proxy). Source it;
+# do not run it. SERVICE is the live service unless the script sets DAYOS_TARGET to the staging one first.
+PROD_SERVICE=summitops-api
+STAGING_SERVICE=summitops-staging
+SERVICE="${DAYOS_TARGET:-$PROD_SERVICE}"
 REGION=us-east1
 PROJECT=summitops-510715
 RUN_SA="summitops-run@${PROJECT}.iam.gserviceaccount.com"
@@ -32,11 +35,12 @@ check_url() {
 }
 
 # Opens the database for this shell: exports DB_HOST, DB_PORT, DB_SSL (and DB_CA), DB_USER, DB_PASSWORD, DB_NAME.
-# With AS=migrator it uses the migration login (summitops-db-migrator) when harden.sh has made one.
+# With AS=migrator it uses the migration login (summitops-db-migrator) when harden.sh has made one, for the live service
+# only: staging migrates with its own login, which can reach the staging database and nothing else.
 PROXY_PID=""
 open_db() {
   export DB_NAME="$(envval DB_NAME)" NODE_ENV=production
-  if [ "${AS:-}" = migrator ] && secret_exists summitops-db-migrator; then
+  if [ "${AS:-}" = migrator ] && [ "$SERVICE" = "$PROD_SERVICE" ] && secret_exists summitops-db-migrator; then
     local m; m="$(secret_read summitops-db-migrator)"
     export DB_USER="$(echo "$m" | jq -r .user)" DB_PASSWORD="$(echo "$m" | jq -r .password)"
   else

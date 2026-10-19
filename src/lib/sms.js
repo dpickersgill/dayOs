@@ -28,7 +28,13 @@ async function send({ tenantId, to, body }) {
   return r;
 }
 
-async function post({ to, body }) {
+async function post({ to: named, body: written }) {
+  // On staging, texts go to STAGING_SMS_TO, saying who they were for, or nowhere. Never to a real guest or patroller.
+  let to = named; let body = written;
+  if (env.STAGE === 'staging') {
+    if (!env.STAGING_SMS_TO) return { ok: false, error: 'Staging sends no text messages unless STAGING_SMS_TO is set' };
+    to = env.STAGING_SMS_TO; body = `[Staging, for ${named}] ${written}`;
+  }
   const number = e164(to);
   if (!number) return { ok: false, error: 'Not a number we can text' };
   const form = new URLSearchParams({ To: number, Body: body });

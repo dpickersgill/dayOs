@@ -1,6 +1,25 @@
 {
   "releases": [
     {
+      "version": "2026.10.25",
+      "date": "2026-10-19",
+      "title": "Every release is checked on staging first",
+      "notes": [
+        {
+          "kind": "improved",
+          "app": null,
+          "who": [],
+          "text": "Coming to DAY/OS in Help now lists data import from your old system and the new assistants: the snow report, the morning brief, patrol report checks, asking your data and documents, and suggested guest replies."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "Staging: a private test copy with its own database, Stripe in test mode, email to the team only and a shared password. deploy.sh now puts a release on staging; promote.sh puts that exact build live after a typed confirmation."
+        }
+      ]
+    },
+    {
       "version": "2026.10.24",
       "date": "2026-10-19",
       "title": "See what's coming",

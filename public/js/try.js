@@ -1,5 +1,6 @@
 // The public "try it" page at /try: a visitor asks for a demo mountain, we build one with made-up data, and they land inside it.
 
+import './stage.js'; // the staging band (shows only on staging)
 import { session } from './api.js';
 import { h, clear, field, input, errorBox } from './ui.js';
 

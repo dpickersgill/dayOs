@@ -1,6 +1,7 @@
 // The page behind the follow-up email (/f/<token>) and a mountain's giving page (/give/<mountain>).
 // It never shows anything about a case. Text is always set with textContent.
 
+import './stage.js'; // the staging band (shows only on staging)
 const path = location.pathname.split('/').filter(Boolean);
 const mode = path[0] === 'f' ? 'followup' : 'give';
 const key = decodeURIComponent(path[1] || '');

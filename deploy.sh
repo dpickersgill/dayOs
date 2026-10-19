@@ -1,20 +1,31 @@
 #!/usr/bin/env bash
-# One command for every update, run from the unzipped folder in Cloud Shell:   bash deploy.sh
-# It checks this folder is not older than what is live, checks the packages for known security problems, installs,
-# migrates (with the migration login when scripts/harden.sh has made one, and stops if that fails), deploys with
-# sensible limits as the summitops-run service account (when it exists), then checks the new version is answering and
-# is migrated. Nothing is deployed if any step fails. To go back to an older version on purpose:   bash deploy.sh --allow-older
+# Step 1 of every release, run from the unzipped folder in Cloud Shell:   bash deploy.sh
+# It puts this release on STAGING (the private test copy of DAY/OS), never on the live site. Check it there, then run
+# bash promote.sh to put exactly the same build live. The live site only ever gets a build that ran on staging first.
+#
+# It checks this folder is not older than what staging runs, checks the packages for known security problems, installs,
+# migrates the staging database (with the staging login, which cannot reach the live database), deploys, then checks
+# staging answers as this exact build and is migrated. Nothing is deployed if any step fails.
+# The first time, run bash scripts/staging-setup.sh instead: it creates staging and puts this release on it.
 set -euo pipefail
+DAYOS_TARGET=summitops-staging
 source "$(dirname "$0")/scripts/cloud-common.sh"
 
 step "Checking you are signed in to Google Cloud"
 signed_in
 
+step "Checking staging exists"
+if ! gcloud run services describe "$SERVICE" --region "$REGION" >/dev/null 2>&1; then
+  echo "There is no staging yet. Run this once first:   bash scripts/staging-setup.sh"
+  exit 1
+fi
+
 step "Checking the version"
 NEW_VERSION="$(node -p "require('./package.json').version")"
+NEW_BUILD="$(node -p "(()=>{try{return require('./src/release/build.json').build||'dev'}catch(_){return 'dev'}})()")"
 load_service
-LIVE_VERSION="$(curl -s --max-time 15 "$(check_url)/version" | jq -r '.version // empty' 2>/dev/null || true)"
-node scripts/check-version.js "$LIVE_VERSION" "$@"
+STAGING_VERSION="$(curl -s --max-time 15 "$(check_url)/version" | jq -r '.version // empty' 2>/dev/null || true)"
+node scripts/check-version.js "$STAGING_VERSION" "$@"
 
 step "Checking the packages for known security problems"
 # Stops on a high or critical problem in anything that runs in production. Fix by updating the package, or (only if
@@ -24,31 +35,29 @@ if [ "${SKIP_AUDIT:-}" != 1 ]; then npm audit --omit=dev --audit-level=high; fi
 step "Installing"
 npm install --omit=dev --no-audit --no-fund
 
-step "Migrating the database"
+step "Migrating the staging database"
 AS=migrator open_db
 npm run migrate
-if secret_exists summitops-db-migrator && [ "$(envval DB_USER)" = summitops_app ]; then
-  node scripts/db-runtime-user.js summitops_app # new tables from this migration
-fi
 
-step "Deploying (this takes a few minutes)"
-# At most 4 servers (so the database never runs out of connections), 8 connections each, 1 GiB each, 15-minute
-# requests for the daily job, and a faster start. In season, add --min-instances=1 so the first guest never waits.
+step "Deploying to staging (this takes a few minutes)"
+# One server is plenty for checking a release, and it shuts down when nobody is using it, so staging costs almost nothing.
 SA_FLAG=()
 if gcloud iam service-accounts describe "$RUN_SA" >/dev/null 2>&1; then SA_FLAG=(--service-account "$RUN_SA"); fi
 gcloud run deploy "$SERVICE" --source . --region "$REGION" --quiet "${SA_FLAG[@]}" \
-  --max-instances=4 --concurrency=40 --memory=1Gi --cpu-boost --timeout=900 \
-  --update-env-vars "DB_POOL=8,DEPLOYED_BY=$(gcloud config get-value account 2>/dev/null || echo unknown)"
+  --min-instances=0 --max-instances=1 --concurrency=40 --memory=1Gi --cpu-boost --timeout=900 \
+  --update-env-vars "DB_POOL=4,DEPLOYED_BY=$(gcloud config get-value account 2>/dev/null || echo unknown)"
 
-step "Checking the new version"
+step "Checking staging"
 load_service
 URL="$(check_url)"
 sleep 5
 OUT="$(curl -s "$URL/readyz" || true)"
 echo "$OUT"
 case "$OUT" in
-  *'"ok":true'*'"version":"'"$NEW_VERSION"'"'*) echo "Done. $URL is running $NEW_VERSION, migrated." ;;
-  *'"ok":true'*) echo "The site is up but is not answering as $NEW_VERSION yet. Wait a minute and run: curl -s $URL/version"; exit 1 ;;
-  *) echo "The new version did not answer as expected. To go back, see DEPLOY.md, Rolling back."; exit 1 ;;
+  *'"ok":true'*'"version":"'"$NEW_VERSION"'"'*'"build":"'"$NEW_BUILD"'"'*)
+    echo ""
+    echo "Staging is running $NEW_VERSION (build $NEW_BUILD): $URL"
+    echo "Check it there. When everything is right, put this same build live with:   bash promote.sh" ;;
+  *'"ok":true'*) echo "Staging is up but is not answering as $NEW_VERSION build $NEW_BUILD yet. Wait a minute and run: curl -s $URL/readyz"; exit 1 ;;
+  *) echo "Staging did not answer as expected. Look at its logs: gcloud run services logs read $SERVICE --region $REGION --limit 50"; exit 1 ;;
 esac
-if [ ${#SA_FLAG[@]} -eq 0 ]; then echo "Note: the one-time security setup has not been run yet. See RUNBOOK.md, Security setup (bash scripts/harden.sh)."; fi

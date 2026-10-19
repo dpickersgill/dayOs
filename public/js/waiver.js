@@ -2,6 +2,7 @@
 // both), types their name and signs with a finger. They get an emailed copy. /waiver/<mountain>?copy=<token> shows that copy;
 // ?counter=1 is for a tablet at the ticket window: after each signing it clears itself for the next guest.
 
+import './stage.js'; // the staging band (shows only on staging)
 import { h, clear } from './ui.js';
 import { signaturePad } from './sigpad.js';
 

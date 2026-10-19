@@ -1,5 +1,6 @@
 // Entry point: sign-in, role-aware navigation and the hash router.
 
+import './stage.js'; // the staging band (shows only on staging)
 import { openTourPicker, resumeTour, welcomeOnce, endTour } from './tour.js';
 import { get, post, session, hooks, ApiError } from './api.js';
 import { mfaPanel } from './views/mfa.js';

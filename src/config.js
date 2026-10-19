@@ -3,6 +3,16 @@
 const env = process.env;
 const isProd = env.NODE_ENV === 'production';
 
+// Staging (STAGE=staging): the private copy of DAY/OS where each release is checked before it goes live. It runs like
+// production, with its own database, and three guards so nothing on it can reach a real guest or real money:
+//   Stripe live keys are refused (test keys only), every email goes to STAGING_INBOX instead of the person it names,
+//   and texts go to STAGING_SMS_TO (or nowhere). STAGING_GATE, a shared password, keeps the public out, and search
+//   engines are told to keep away.
+const staging = env.STAGE === 'staging';
+if (staging && /^(sk|rk)_live_/.test(env.STRIPE_SECRET_KEY || '')) {
+  throw new Error('Staging must use a Stripe test key (sk_test_...), never a live one');
+}
+
 if (isProd && (!env.JWT_SECRET || env.JWT_SECRET.length < 32)) {
   throw new Error('JWT_SECRET must be set to at least 32 characters in production');
 }
@@ -39,6 +49,8 @@ const stripe = {
 
 module.exports = {
   isProd,
+  staging,
+  stagingSettings: { inbox: env.STAGING_INBOX || '', smsTo: env.STAGING_SMS_TO || '', gate: env.STAGING_GATE || '' },
   stripe,
   map: { layers: mapLayers },
   port: Number(env.PORT || 8080),

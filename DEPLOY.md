@@ -14,9 +14,14 @@ gcloud run deploy summitops-api --source . --region us-east1 --allow-unauthentic
 
 Run `npm run migrate` against the Aiven database (Cloud Shell works) before the first request, and again after every update: it only adds what is missing and never touches data. Health checks: `GET /healthz` (process) and `GET /readyz` (database).
 
-## Updating (every new zip)
+## Updating (every new zip): staging first, then live
 
-Every zip is named after its version, for example `summitops-2026.10.4.zip` (see Versions, below). Run these in Cloud Shell.
+Every release goes to **staging** first, the private test copy of DAY/OS, and only goes live once it has been checked
+there. The live site only ever gets the exact build (the same container image) that ran on staging.
+
+**Once, before the first release that uses it:** `bash scripts/staging-setup.sh` (see Staging, below).
+
+Every zip is named after its version, for example `summitops-2026.10.25.zip` (see Versions, below). Run these in Cloud Shell.
 
 1. Unzip the newest zip into a clean folder:
    ```bash
@@ -28,13 +33,22 @@ Every zip is named after its version, for example `summitops-2026.10.4.zip` (see
    ```bash
    grep '"version"' package.json
    ```
-3. Run the deploy script. It says which version it is replacing and refuses to put an older version over a newer one,
-   then installs, loads the database settings, migrates (and stops if that fails), deploys with the right limits, and
-   checks the new version is the one answering:
+3. Put it on staging. It refuses to put an older version over a newer one, checks the packages, installs, migrates the
+   staging database (and stops if that fails), deploys, and checks staging answers as this exact build:
    ```bash
    bash deploy.sh
    ```
-   It ends with `Done. <address> is running <version>, migrated.` If it stops earlier, nothing was deployed; send the last lines.
+   It ends with `Staging is running <version> (build <build>): <address>`. If it stops earlier, nothing was deployed.
+4. Check the release on staging (the release notes say what to try).
+5. From the same folder, put that same build live. It stops unless staging runs this folder's release and build, asks
+   you to type the version, migrates the live database, deploys the staging image, checks the live site, and prints the
+   command that switches back:
+   ```bash
+   bash promote.sh
+   ```
+   It ends with `Done. <address> is running <version>, migrated.`
+
+Releases go live on Sunday night. Urgent fixes still go through staging, just faster.
 
 If it says you are not signed in, run `gcloud auth login`, then `gcloud config set project summitops-510715`, and run it again.
 
@@ -56,8 +70,9 @@ again at 1 each month. The build is the short git commit the zip was made from.
   `src/release/build.json` and refuses if the change log has no entry for this version), then zip.
 - The app shows the version on the sign-in screen, in the account menu and at the foot of Help. The console's
   **Releases** shows the live version, every version that has started (with who deployed it) and the full change log.
-- `deploy.sh` stops if the live site is newer than this folder. To go back to an older version on purpose (better: use
-  Rolling back, below, which needs no rebuild), run `bash deploy.sh --allow-older`.
+- `deploy.sh` stops if staging is newer than this folder, and `promote.sh` stops if the live site is. To go back to an
+  older version on purpose (better: use Rolling back, below, which needs no rebuild), run `bash deploy.sh --allow-older`
+  and then `bash promote.sh --allow-older`.
 
 ## Rolling back
 
@@ -68,7 +83,26 @@ gcloud run revisions list --service summitops-api --region us-east1
 gcloud run services update-traffic summitops-api --region us-east1 --to-revisions=<previous-revision>=100
 ```
 
-Migrations only add tables and columns, so the previous revision keeps working after a rollback.
+Migrations only add tables and columns, so the previous revision keeps working after a rollback. `promote.sh` prints
+the exact command for the revision it replaced.
+
+## Staging
+
+`bash scripts/staging-setup.sh`, once, from an unzipped release folder, creates:
+
+| | Live | Staging |
+|---|---|---|
+| Cloud Run service | `summitops-api` | `summitops-staging` (one server at most, none when idle) |
+| Database | the live one | `summitops_staging` on the same server, with a login (`summitops_stg`) that can reach nothing else |
+| Keys | live secrets | `summitops-staging-*` secrets: sign-in key, bootstrap key, database password, staging password |
+| Stripe | live keys | test keys only (a live key stops staging from starting), with its own test-mode webhooks |
+| Email and texts | to guests and staff | every email to `STAGING_INBOX`, with who it was for in the subject; no texts unless `STAGING_SMS_TO` is set |
+| Visitors | everyone | a shared password (`STAGING_GATE`) first; hidden from search engines; a yellow band on every page |
+
+Staging starts empty. Use its `/try` page for a full demo mountain, or its bootstrap key to create a mountain or sign
+in to its console the first time. Read the staging password or the bootstrap key with
+`gcloud secrets versions access latest --secret=summitops-staging-gate` (or `summitops-staging-bootstrap`). The script
+is safe to run again: it keeps what exists and fills in anything missing (for example Stripe, if it was skipped).
 
 ## Optional settings (Cloud Run environment)
 

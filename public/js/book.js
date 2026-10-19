@@ -2,6 +2,7 @@
 // reserves. With card payment on, they pay on Stripe's page and the lesson is booked when the payment lands; otherwise the
 // request waits for staff and is paid at the desk. It shows no private data.
 
+import './stage.js'; // the staging band (shows only on staging)
 import { h, clear, label } from './ui.js';
 
 const slug = decodeURIComponent(location.pathname.split('/').filter(Boolean)[1] || '');
