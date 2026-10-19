@@ -136,9 +136,4 @@ async function ensureSettings(conn, tenantId) {
 }
 const tagOf = (n) => `A-${String(n).padStart(4, '0')}`;
 
-/** The checklist that suits an asset: the first whose kinds include it, or the general one. */
-function templateFor(templates, kind) {
-  return templates.find((t) => t.kinds && String(t.kinds).split(',').includes(kind)) || templates.find((t) => !t.kinds) || templates[0] || null;
-}
-
-module.exports = { CATEGORIES, categoryOf, papers, bookValue, costs, lifecycle, ensureSettings, tagOf, templateFor, DEFAULT_TEMPLATES, yearsBetween, addDays, ymd };
+module.exports = { CATEGORIES, categoryOf, papers, bookValue, costs, lifecycle, ensureSettings, tagOf, DEFAULT_TEMPLATES, yearsBetween, addDays, ymd };

@@ -103,9 +103,8 @@ async function sweepLeads(db, t) {
   if (!on.length) return [];
   const m = await PA.matrix(db, t);
   const list = await rows(db, 'SELECT m.staff_id, m.access_level, u.id AS user_id FROM patrol_members m JOIN users u ON u.tenant_id = m.tenant_id AND u.staff_id = m.staff_id AND u.active = 1 WHERE m.tenant_id = ? AND m.staff_id IN (?)', [t, on]);
-  const out = [];
-  for (const r of list) if (PA.effective(m[r.access_level] || {}, r.access_level, await PA.exceptionsOf(db, t, r.staff_id)).has('run_sweep')) out.push(Number(r.user_id));
-  return out;
+  const ex = await PA.exceptionsFor(db, t, list.map((r) => Number(r.staff_id)));
+  return list.filter((r) => PA.effective(m[r.access_level] || {}, r.access_level, ex.get(Number(r.staff_id)) || {}).has('run_sweep')).map((r) => Number(r.user_id));
 }
 
 async function loadSweep(db, t, date) {

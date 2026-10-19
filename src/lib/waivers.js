@@ -39,18 +39,6 @@ const ON_FILE = `SELECT w.id, w.signed_at FROM waivers w WHERE w.tenant_id = ? A
 
 const shaOf = (text) => crypto.createHash('sha256').update(String(text)).digest('hex');
 
-/** True when the person has a waiver that counts for the season. */
-async function hasValid(conn, tenantId, personId, season) {
-  return Boolean(await one(conn, `SELECT w.id FROM waivers w WHERE w.tenant_id = ? AND w.person_id = ? AND w.season = ? AND ${VALID('w')} LIMIT 1`, [tenantId, personId, season]));
-}
-
-/** The ids, out of personIds, that have a waiver that counts for the season. */
-async function validSet(conn, tenantId, personIds, season) {
-  if (!personIds.length) return new Set();
-  const r = await rows(conn, `SELECT DISTINCT w.person_id FROM waivers w WHERE w.tenant_id = ? AND w.season = ? AND w.person_id IN (?) AND ${VALID('w')}`, [tenantId, season, personIds]);
-  return new Set(r.map((x) => x.person_id));
-}
-
 /** Keep a wording word for word, once. */
 async function archive(conn, tenantId, text, userId = null) {
   if (!text) return null;
@@ -210,4 +198,4 @@ async function signingDetail(conn, tenantId, where, params) {
   return { signing: s, text: text ? text.body : null, covered };
 }
 
-module.exports = { VALID, ON_FILE, MAX_SIGNATURE_CHARS, nextSeason, shaOf, hasValid, validSet, archive, sign, emailCopy, signingDetail };
+module.exports = { VALID, ON_FILE, MAX_SIGNATURE_CHARS, nextSeason, shaOf, archive, sign, emailCopy, signingDetail };

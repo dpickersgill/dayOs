@@ -116,7 +116,19 @@ const partialOf = (shape) => z.object(Object.fromEntries(
   Object.entries(shape).map(([k, v]) => [k, (v instanceof z.ZodDefault ? v.unwrap() : v).optional()]),
 ));
 
+/**
+ * fn over every item, at most `limit` at a time, results in the items' order. For read-only checks against the pool
+ * (not a transaction's single connection): 200 people checked 6 at a time instead of one after another.
+ */
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => { while (next < items.length) { const i = next++; out[i] = await fn(items[i], i); } };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
 module.exports = {
-  partialOf, z, dateStr, dateTimeStr, timeStr, id, tierEnum,
+  mapLimit, partialOf, z, dateStr, dateTimeStr, timeStr, id, tierEnum,
   validate, paramId, normDateTime, todayIn, nowIn, dayRange, localDay, localTime, addDays, weekdayOf, seasonFor, newCode, setClause,
 };

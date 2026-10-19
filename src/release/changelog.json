@@ -1,6 +1,33 @@
 {
   "releases": [
     {
+      "version": "2026.10.23",
+      "date": "2026-10-19",
+      "title": "Faster schedule pickers",
+      "notes": [
+        {
+          "kind": "improved",
+          "app": "workforce",
+          "who": [],
+          "text": "Choosing who to put on a shift is quicker for a big crew: everyone's availability, training and clashes are now checked several people at a time."
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "The patrol schedule's who-can-take-this list and the open shifts page load faster on a big roster."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": "platform",
+          "text": "Code sweep: package updates (no known vulnerabilities), unused code removed, patrol access checks for a whole roster in one query, and a smaller container image."
+        }
+      ]
+    },
+    {
       "version": "2026.10.22",
       "date": "2026-10-18",
       "title": "Guest payments go to your own Stripe account",

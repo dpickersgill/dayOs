@@ -85,6 +85,16 @@ async function levelOf(pool, req) {
 }
 
 /** One person's exceptions to their level: { feature: true (added) | false (taken away) }. */
+/** The same, for many people at once: Map staffId -> exceptions (one query instead of one per person). */
+async function exceptionsFor(pool, tenantId, staffIds) {
+  const out = new Map(staffIds.map((id) => [Number(id), {}]));
+  if (!staffIds.length) return out;
+  for (const r of await rows(pool, 'SELECT staff_id, feature, allowed FROM patrol_member_access WHERE tenant_id = ? AND staff_id IN (?)', [tenantId, staffIds])) {
+    if (KEYS.includes(r.feature) && out.has(Number(r.staff_id))) out.get(Number(r.staff_id))[r.feature] = Boolean(r.allowed);
+  }
+  return out;
+}
+
 async function exceptionsOf(pool, tenantId, staffId) {
   const out = {};
   if (!staffId) return out;
@@ -145,4 +155,4 @@ function needs(pool, feature, message) {
   };
 }
 
-module.exports = { LEVELS, LEVEL_LABEL, LEVEL_ABOUT, FEATURES, KEYS, DEFAULTS, levelForRank, levelOf, matrix, accessOf, can, needs, isSystemAdmin, exceptionsOf, effective };
+module.exports = { LEVELS, LEVEL_LABEL, LEVEL_ABOUT, FEATURES, KEYS, DEFAULTS, levelForRank, levelOf, matrix, accessOf, can, needs, isSystemAdmin, exceptionsOf, exceptionsFor, effective };

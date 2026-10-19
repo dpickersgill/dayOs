@@ -222,8 +222,6 @@ add('case', 'signoff', 'patroller_signature', 'Patroller signature', 'signature'
 
 const FIELDS = F;
 const BY_KEY = (scope) => new Map(FIELDS.filter((f) => f.scope === scope).map((f) => [f.key, f]));
-const KEYS = new Set(FIELDS.map((f) => `${f.scope}.${f.key}`));
-const isKey = (scope, key) => KEYS.has(`${scope}.${key}`);
 
 function valueSchema(f) {
   switch (f.type) {
@@ -290,4 +288,4 @@ function describe() {
   };
 }
 
-module.exports = { FIELDS, SECTIONS, BY_KEY, isKey, formSchema, parseForm, mergeForm, isEmpty, applies, describe, BODY_SIDED, BODY_PLAIN };
+module.exports = { FIELDS, SECTIONS, BY_KEY, formSchema, parseForm, mergeForm, isEmpty, applies, describe, BODY_SIDED, BODY_PLAIN };

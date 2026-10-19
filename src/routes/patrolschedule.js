@@ -8,7 +8,7 @@
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
-const { z, dateStr, dateTimeStr, validate, paramId, normDateTime, addDays, todayIn, seasonFor } = require('../lib/util');
+const { z, mapLimit, dateStr, dateTimeStr, validate, paramId, normDateTime, addDays, todayIn, seasonFor } = require('../lib/util');
 const { notFound, bad, conflict } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { span } = require('../lib/workforce');
@@ -94,11 +94,11 @@ router.post('/schedule/candidates', patrol, editor, validate(z.object({ starts_a
   const week = SH.weekOf(b.starts_at.slice(0, 10));
   const mins = await SH.weekMinutes(pool, t, week);
   const current = b.shift_id ? await one(pool, 'SELECT staff_id FROM patrol_shifts WHERE tenant_id = ? AND id = ?', [t, b.shift_id]) : null;
-  const out = [];
-  for (const r of roster) {
+  // Each patroller's checks are separate reads; six at a time keeps the dialog quick for a big roster.
+  const out = await mapLimit(roster, 6, async (r) => {
     const problems = await problemsFor(pool, t, Number(r.staff_id), b.starts_at, b.ends_at, b.shift_id || 0);
-    out.push({ staff_id: Number(r.staff_id), name: r.name, level: r.level, ok: !problems.length, problems, week_minutes: mins.get(Number(r.staff_id)) || 0, current: Boolean(current && Number(current.staff_id) === Number(r.staff_id)) });
-  }
+    return { staff_id: Number(r.staff_id), name: r.name, level: r.level, ok: !problems.length, problems, week_minutes: mins.get(Number(r.staff_id)) || 0, current: Boolean(current && Number(current.staff_id) === Number(r.staff_id)) };
+  });
   out.sort((a, c) => (a.ok === c.ok ? 0 : a.ok ? -1 : 1) || a.week_minutes - c.week_minutes || a.name.localeCompare(c.name));
   res.json({ data: out });
 });

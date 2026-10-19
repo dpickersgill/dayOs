@@ -7,7 +7,7 @@
 // time and are converted where the two meet.
 const { rows, one } = require('../db');
 const { staffProblems, span, AVAILABILITY } = require('./workforce');
-const { addDays } = require('./util');
+const { addDays, mapLimit } = require('./util');
 const { direct } = require('./review');
 
 const minutesBetween = (a, b) => Math.round((Date.parse(`${String(b).replace(' ', 'T')}Z`) - Date.parse(`${String(a).replace(' ', 'T')}Z`)) / 60000);
@@ -45,17 +45,16 @@ async function candidates(db, tenantId, shift) {
   const trained = new Set((await rows(db, 'SELECT staff_id FROM staff_positions WHERE tenant_id = ? AND position_id = ?', [tenantId, shift.position_id])).map((r) => Number(r.staff_id)));
   const anyTrained = (await one(db, 'SELECT COUNT(*) AS n FROM staff_positions WHERE tenant_id = ? AND position_id = ?', [tenantId, shift.position_id])).n > 0;
   const hours = await weekMinutes(db, tenantId, weekOf(String(shift.starts_at).slice(0, 10)), shift.id || 0);
-  const out = [];
-  for (const s of staff) {
+  // Each person's checks are separate reads; six people at a time keeps the dialog quick for a big crew.
+  const out = await mapLimit(staff, 6, async (s) => {
     const id = Number(s.id);
     const problems = await staffProblems(db, tenantId, { staffId: id, positionId: shift.position_id, startsAt: shift.starts_at, endsAt: shift.ends_at, ignoreShiftId: shift.id || 0 });
     const onlyAvailability = problems.length === 1 && problems[0] === AVAILABILITY;
-    const works = trained.has(id);
-    out.push({
+    return {
       staff_id: id, name: `${s.first_name} ${s.last_name}`, ok: problems.length === 0, overridable: onlyAvailability, problems,
-      trained: works, trained_known: anyTrained, week_minutes: hours.get(id) || 0, current: Number(shift.staff_id) === id, volunteer: !Number(s.in_workforce),
-    });
-  }
+      trained: trained.has(id), trained_known: anyTrained, week_minutes: hours.get(id) || 0, current: Number(shift.staff_id) === id, volunteer: !Number(s.in_workforce),
+    };
+  });
   const rank = (c) => (c.ok ? (c.trained ? 0 : 1) : c.overridable ? 2 : 3);
   out.sort((a, b) => rank(a) - rank(b) || a.week_minutes - b.week_minutes || a.name.localeCompare(b.name));
   return out;

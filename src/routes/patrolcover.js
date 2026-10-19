@@ -8,7 +8,7 @@
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
-const { z, validate, paramId, nowIn } = require('../lib/util');
+const { z, validate, paramId, nowIn, mapLimit } = require('../lib/util');
 const { notFound, bad, conflict, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { span } = require('../lib/workforce');
@@ -81,11 +81,9 @@ async function announce(conn, t, byUser, text) {
 /** Logins that build the patrol schedule (roster members whose access includes it); owners and managers if none. */
 async function schedulers(db, t) {
   const m = await PA.matrix(db, t);
-  const out = [];
-  for (const r of await rosterLogins(db, t)) {
-    const ex = await PA.exceptionsOf(db, t, r.staff_id);
-    if (PA.effective(m[r.level] || {}, r.level, ex).has('manage_schedule')) out.push(r.user_id);
-  }
+  const roster = await rosterLogins(db, t);
+  const ex = await PA.exceptionsFor(db, t, roster.map((r) => Number(r.staff_id)).filter(Boolean)); // one query for the whole roster
+  const out = roster.filter((r) => PA.effective(m[r.level] || {}, r.level, ex.get(Number(r.staff_id)) || {}).has('manage_schedule')).map((r) => r.user_id);
   if (out.length) return out;
   return (await rows(db, "SELECT id FROM users WHERE tenant_id = ? AND active = 1 AND role IN ('owner', 'manager')", [t])).map((u) => Number(u.id));
 }
@@ -137,10 +135,11 @@ router.get('/cover', patrol, async (req, res) => {
   if (ops.self_signup) {
     const list = await rows(pool, `SELECT ps.id, ps.starts_at, ps.ends_at, ps.role_label, ps.notes, st.name AS station FROM patrol_shifts ps LEFT JOIN patrol_stations st ON st.tenant_id = ps.tenant_id AND st.id = ps.station_id
       WHERE ps.tenant_id = ? AND ps.status = 'published' AND ps.staff_id IS NULL AND ps.starts_at > ? ORDER BY ps.starts_at LIMIT 60`, [t, now]);
-    for (const s of list) {
+    // Each open shift's checks are separate reads; six at a time keeps the page quick with many open shifts.
+    openShifts = await mapLimit(list, 6, async (s) => {
       const problems = !onRoster ? ['You are not an active member of the patrol roster'] : await problemsFor(pool, t, me, s.starts_at, s.ends_at, Number(s.id));
-      openShifts.push({ ...s, id: Number(s.id), problems, can_take: Boolean(onRoster) && !problems.length });
-    }
+      return { ...s, id: Number(s.id), problems, can_take: Boolean(onRoster) && !problems.length };
+    });
   }
   res.json({
     me, on_roster: Boolean(onRoster), can_manage: canManage, needs_approval: settings.needs_approval, self_signup: ops.self_signup, open_shifts: openShifts,
