@@ -7,6 +7,11 @@
       "when": "October",
       "items": [
         {
+          "app": "sell",
+          "title": "Card reader at the counter",
+          "text": "Tap, insert or swipe on a Stripe smart reader at the ticket window, paid straight into your own Stripe account."
+        },
+        {
           "app": "school",
           "title": "Cancel or delete lessons",
           "text": "Cancel one lesson or every lesson on a storm day. Card payments are refunded, package lessons get their credit back, and every booked guest gets an email. A lesson added by mistake with nobody booked can be deleted."
@@ -37,11 +42,6 @@
           "app": null,
           "title": "Bring your data with you",
           "text": "Upload what your old system or spreadsheets export, such as customers, pass holders, products, staff and the rental fleet. DAY/OS matches the columns, flags duplicates and problems, and shows you a preview before anything is saved."
-        },
-        {
-          "app": "sell",
-          "title": "Card reader at the counter",
-          "text": "Tap or insert a card on a reader at the ticket window, paid straight into your own Stripe account."
         },
         {
           "app": "sell",
