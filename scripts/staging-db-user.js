@@ -13,7 +13,8 @@ async function main() {
   if (db === process.env.DB_NAME) throw new Error('The staging database must not be the live one');
   await pool.query("CREATE USER IF NOT EXISTS ?@'%' IDENTIFIED BY ?", [user, password]);
   await pool.query("ALTER USER ?@'%' IDENTIFIED BY ?", [user, password]);
-  await pool.query("REVOKE ALL PRIVILEGES, GRANT OPTION FROM ?@'%'", [user]);
+  // No REVOKE ALL first: Cloud SQL refuses it even to its admin login (it would touch Google's own system schemas). A new
+  // login has nothing to revoke, and the check below stops if this one can reach anything but the staging database.
   await pool.query(`GRANT ALL PRIVILEGES ON \`${db}\`.* TO ?@'%'`, [user]);
   const [grants] = await pool.query("SHOW GRANTS FOR ?@'%'", [user]);
   const lines = grants.map((g) => Object.values(g)[0]);
