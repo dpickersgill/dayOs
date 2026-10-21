@@ -34,7 +34,7 @@ router.post('/seen', async (req, res) => {
 });
 
 /**
- * Help > Coming to DAY/OS: what is being built now, next and later (src/release/roadmap.json), for owners and managers.
+ * Help > Coming to Verdynt/OS: what is being built now, next and later (src/release/roadmap.json), for owners and managers.
  * Only here, behind sign-in: the roadmap is not on the website. Kept in step with the working roadmap by hand.
  */
 router.get('/roadmap', requireRole(...MANAGER_ROLES), (_req, res) => {

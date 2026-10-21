@@ -1,4 +1,4 @@
-# DAY/OS runbook: security and operations
+# Verdynt/OS runbook: security and operations
 
 ## Before real customers
 1. **Database on Cloud SQL**: run `bash move-to-cloudsql.sh` once (see "Moving the database to Cloud SQL" below). The
@@ -130,7 +130,7 @@ Before changing `LINK_SECRET`, have patrol phones send any reports waiting offli
 
 ## Platform console
 
-The console (`/platform`) is for the people who run DAY/OS. Each **operator** signs in with their own email, password
+The console (`/platform`) is for the people who run Verdynt/OS. Each **operator** signs in with their own email, password
 and a code from an authenticator app; everything they do is in the Activity log under their name.
 
 1. **First operator:** open `/platform`, choose "Sign in with the platform key instead" (the key is the
@@ -180,11 +180,11 @@ Guests can pay for a lesson when they reserve it on `/book/<slug>`. Test with St
    `printf '%s' 'sk_test_...' | gcloud secrets create stripe-secret-key --data-file=-` and the same for `stripe-webhook-secret`, then
    `gcloud run services update summitops-api --region us-east1 --update-secrets STRIPE_SECRET_KEY=stripe-secret-key:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret:latest`
    (the service account needs the Secret Accessor role on both secrets, as it has for the database password).
-4. In DAY/OS > Settings, tick "Guests pay by card when they reserve" and set the refund tiers.
+4. In Verdynt/OS > Settings, tick "Guests pay by card when they reserve" and set the refund tiers.
 
 How it behaves: reserving holds the place for about 30 minutes while the guest pays. A signed webhook from Stripe books the lesson and records an order (channel online, tender card, tax included). If the lesson filled up meanwhile, or the amount does not match, the payment is refunded in full automatically. Cancelling online refunds 100% / the partial percent / 0% by hours before the lesson, and the refund is sent to Stripe and recorded in the books.
 
-Limits to know: all money goes to the one Stripe account whose key you set (several mountains each need their own account or Stripe Connect, which is not built). A refund you issue from Sell > Orders on a card sale is recorded in DAY/OS but is **not** sent to Stripe: issue it in the Stripe dashboard too. No confirmation emails are sent by DAY/OS (Stripe can email receipts from its settings). Have a lawyer review the cancellation policy and waiver wording.
+Limits to know: all money goes to the one Stripe account whose key you set (several mountains each need their own account or Stripe Connect, which is not built). A refund you issue from Sell > Orders on a card sale is recorded in Verdynt/OS but is **not** sent to Stripe: issue it in the Stripe dashboard too. No confirmation emails are sent by Verdynt/OS (Stripe can email receipts from its settings). Have a lawyer review the cancellation policy and waiver wording.
 
 ## Patrol follow-up emails and giving
 

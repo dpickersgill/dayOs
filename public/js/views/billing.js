@@ -1,4 +1,4 @@
-// Billing: the mountain's DAY/OS subscription, and where guests' card payments go (the mountain's own Stripe account). Where it stands (trial, paid, grace, read only), the plan and add-ons
+// Billing: the mountain's Verdynt/OS subscription, and where guests' card payments go (the mountain's own Stripe account). Where it stands (trial, paid, grace, read only), the plan and add-ons
 // with monthly or yearly prices, paying by card, US bank account or invoice, Stripe's portal for the card and
 // cancelling, past invoices and the history. Owners change and pay; managers can look.
 import { get, post, put } from '../api.js';
@@ -37,8 +37,8 @@ export async function render(root) {
 
     clear(box).append(...[
       standingPanel(s, b, word, kind),
-      b.comped && !live ? h('section', { class: 'panel' }, h('p', null, 'This mountain is on DAY/OS at no charge. There is nothing to pay.'), d.plans.length && owner ? h('p', { class: 'muted small' }, 'You can still choose a plan below if you would like to start paying.') : null) : null,
-      d.plans.length ? planPanel(choice, { owner, live, b }) : h('section', { class: 'panel' }, h('p', { class: 'muted' }, 'Plans have not been set up yet. Contact DAY/OS.')),
+      b.comped && !live ? h('section', { class: 'panel' }, h('p', null, 'This mountain is on Verdynt/OS at no charge. There is nothing to pay.'), d.plans.length && owner ? h('p', { class: 'muted small' }, 'You can still choose a plan below if you would like to start paying.') : null) : null,
+      d.plans.length ? planPanel(choice, { owner, live, b }) : h('section', { class: 'panel' }, h('p', { class: 'muted' }, 'Plans have not been set up yet. Contact Verdynt/OS.')),
       cardPaymentsPanel(query),
       invoicesPanel(),
       historyPanel(),
@@ -52,11 +52,11 @@ export async function render(root) {
     if (s.kind === 'cancelling' && s.until) lines.push(`Ends ${dateText(s.until)}. Use Manage payment to keep it going.`);
     if (s.kind === 'paid_manually' && s.until) lines.push(`Paid through ${dateText(s.until)}.`);
     if (s.state === 'grace') lines.push(`Everything keeps working until ${dateText(s.until)} (${s.days_left} day${s.days_left === 1 ? '' : 's'}). After that the mountain becomes read only: people can sign in, see and export everything, but nothing new is sold, booked or added. Patrol, the time clock and the Inbox keep working.`);
-    if (s.read_only) lines.push('DAY/OS is read only. Everything can be seen and exported, and patrol, the time clock and the Inbox keep working, but nothing new is sold, booked or added. Pay below to turn everything back on straight away.');
+    if (s.read_only) lines.push('Verdynt/OS is read only. Everything can be seen and exported, and patrol, the time clock and the Inbox keep working, but nothing new is sold, booked or added. Pay below to turn everything back on straight away.');
     return h('section', { class: `panel billing-standing is-${s.state}` },
       h('div', { class: 'spread' }, h('h2', null, 'Subscription'), state(word, kind)),
       ...lines.map((t) => h('p', null, t)),
-      !d.stripe ? h('p', { class: 'muted small' }, 'Online payment is not switched on yet. Contact DAY/OS to pay.') : null);
+      !d.stripe ? h('p', { class: 'muted small' }, 'Online payment is not switched on yet. Contact Verdynt/OS to pay.') : null);
   }
 
   function planPanel(choice, { owner, live, b }) {
@@ -110,7 +110,7 @@ export async function render(root) {
           payWay('Bank account (ACH)', 'Link a US bank account. Takes a few business days to clear the first time.', button('Pay by bank', pay('bank'))),
           payWay('Invoice', 'We email an invoice each period, due in 30 days. Pay by card, bank transfer or check.', button('Send me invoices', () => invoiceDialog()))),
         changed && choice.plan_id ? h('div', { class: 'row' }, button('Save choice without paying', async () => { await saveChoice(); toast('Choice saved'); await load(); }, { small: true })) : null,
-        !d.stripe ? h('p', { class: 'muted small' }, 'Payment buttons work once DAY/OS switches on online payment.') : null);
+        !d.stripe ? h('p', { class: 'muted small' }, 'Payment buttons work once Verdynt/OS switches on online payment.') : null);
     }
     function invoiceDialog() {
       formDialog('Pay by invoice', h('div', { class: 'form' },
@@ -140,7 +140,7 @@ export async function render(root) {
   function historyPanel() {
     const shown = d.events.filter((e) => !e.kind.startsWith('stripe:'));
     if (!shown.length) return null;
-    const words = { trial_started: 'Trial started', plan_chosen: 'Plan chosen', subscribed: 'Subscribed', paid: 'Payment received', payment_failed: 'Payment failed', operator_change: 'Updated by DAY/OS' };
+    const words = { trial_started: 'Trial started', plan_chosen: 'Plan chosen', subscribed: 'Subscribed', paid: 'Payment received', payment_failed: 'Payment failed', operator_change: 'Updated by Verdynt/OS' };
     const quiet = ['plan_chosen', 'operator_change']; // their details are internal
     return h('section', { class: 'panel stack' }, h('h2', null, 'History'),
       h('ul', { class: 'duty-list' }, shown.map((e) => h('li', null, h('span', { class: 'muted small' }, fmtDateTime(e.at)), ' ', h('b', null, words[e.kind] || label(e.kind)), e.detail && !quiet.includes(e.kind) ? h('span', null, ` ${e.detail}`) : null))));
@@ -165,14 +165,14 @@ function cardPaymentsPanel(query) {
       const text = {
         ready: `Online shop orders, lesson payments, date changes and gifts to the patrol are paid straight into your own Stripe account${s.business_name ? ` (${s.business_name})` : ''}, and Stripe pays them out to your bank. ${s.payouts_enabled ? '' : 'Payouts are not on yet: finish your bank details in Stripe. '}Refunds come back out of the same account.`,
         unfinished: 'Your Stripe account is connected, but Stripe still needs some details (the business, a person, a bank account) before it can take payments. Card payments open as soon as Stripe is happy.',
-        not_connected: 'Guests\' card payments go into your mountain\'s own Stripe account, never through DAY/OS. Connect one to open the online shop, lesson payments and patrol giving. Stripe asks for the business, a contact and the bank account payouts go to; if you already use Stripe, sign in with that login.',
-        off: 'Card payments are not switched on for DAY/OS yet. Contact DAY/OS.',
+        not_connected: 'Guests\' card payments go into your mountain\'s own Stripe account, never through Verdynt/OS. Connect one to open the online shop, lesson payments and patrol giving. Stripe asks for the business, a contact and the bank account payouts go to; if you already use Stripe, sign in with that login.',
+        off: 'Card payments are not switched on for Verdynt/OS yet. Contact Verdynt/OS.',
       }[s.status];
       clear(sec).append(...[
         h('div', { class: 'spread' }, h('h2', null, 'Guest card payments'), state(word, kind)),
         h('p', null, text),
-        h('p', { class: 'muted small' }, `Stripe's own card fees are charged by Stripe to your account. ${fee ? `DAY/OS's fee: ${fee}, kept by Stripe from the payment and returned in proportion on refunds. Gifts to the patrol carry no DAY/OS fee.` : 'DAY/OS adds no fee of its own.'}`),
-        s.fallback ? h('p', { class: 'muted small' }, 'Until you connect, this test service takes card payments into the DAY/OS test account.') : null,
+        h('p', { class: 'muted small' }, `Stripe's own card fees are charged by Stripe to your account. ${fee ? `Verdynt/OS's fee: ${fee}, kept by Stripe from the payment and returned in proportion on refunds. Gifts to the patrol carry no Verdynt/OS fee.` : 'Verdynt/OS adds no fee of its own.'}`),
+        s.fallback ? h('p', { class: 'muted small' }, 'Until you connect, this test service takes card payments into the Verdynt/OS test account.') : null,
         s.sandbox ? h('p', { class: 'muted small' }, 'This is a demo mountain, so it cannot take real card payments.') : null,
         s.check_failed ? h('p', { class: 'muted small' }, 'Stripe could not be reached just now to check the account. Try again in a minute.') : null,
         s.can_connect && s.enabled && !s.sandbox ? h('div', { class: 'row' },
@@ -198,9 +198,9 @@ function payWay(title, text, btn) {
 /** The strip across the top of the app when billing needs attention: grace days or read only. Owners get a link. */
 export function billingBanner(s, { canFix }) {
   if (!s || (s.state === 'ok' && !(s.kind === 'trial' && s.days_left <= 3))) return null;
-  const text = s.read_only ? 'DAY/OS is read only because the subscription has lapsed. Patrol, the time clock and the Inbox still work.'
-    : s.state === 'grace' ? `${s.kind === 'payment_failed' ? 'The last DAY/OS payment did not go through.' : 'The DAY/OS trial or paid time has ended.'} Everything keeps working until ${dateText(s.until)}.`
-      : `The DAY/OS trial ends ${s.days_left === 0 ? 'today' : s.days_left === 1 ? 'tomorrow' : `in ${s.days_left} days`}.`;
+  const text = s.read_only ? 'Verdynt/OS is read only because the subscription has lapsed. Patrol, the time clock and the Inbox still work.'
+    : s.state === 'grace' ? `${s.kind === 'payment_failed' ? 'The last Verdynt/OS payment did not go through.' : 'The Verdynt/OS trial or paid time has ended.'} Everything keeps working until ${dateText(s.until)}.`
+      : `The Verdynt/OS trial ends ${s.days_left === 0 ? 'today' : s.days_left === 1 ? 'tomorrow' : `in ${s.days_left} days`}.`;
   return h('div', { class: `billing-banner is-${s.read_only ? 'read_only' : s.state === 'grace' ? 'grace' : 'trial'}`, role: s.read_only ? 'alert' : 'status' },
     h('span', null, text), canFix ? h('a', { href: '#/billing' }, s.read_only || s.state === 'grace' ? 'Pay now' : 'Choose a plan') : h('span', { class: 'small' }, ' Ask the owner to renew.'));
 }

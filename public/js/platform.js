@@ -57,7 +57,7 @@ function signIn(message) {
   const email = input({ type: 'email', name: 'email', autocomplete: 'username', required: true, maxlength: 255 });
   const pw = input({ type: 'password', name: 'password', autocomplete: 'current-password', required: true, maxlength: 200 });
   const code = input({ name: 'code', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6, placeholder: '123456' });
-  const codeField = field('Code from your authenticator app', code, 'The six-digit code DAY/OS platform shows in your app.');
+  const codeField = field('Code from your authenticator app', code, 'The six-digit code Verdynt/OS platform shows in your app.');
   codeField.hidden = true;
   const go = h('button', { type: 'submit', class: 'btn primary' }, 'Sign in');
   const form = h('form', { class: 'stack', novalidate: true }, field('Email', email), field('Password', pw), codeField, err, go);
@@ -80,7 +80,7 @@ function signIn(message) {
   }, { kind: 'primary' }) : null;
   const keyLink = h('button', { type: 'button', class: 'linklike' }, 'Sign in with the platform key instead');
   keyLink.addEventListener('click', () => keySignIn());
-  app.append(h('main', { class: 'platform-box stack' }, h('h1', null, 'DAY/OS platform'), message ? h('p', { class: 'muted' }, message) : null,
+  app.append(h('main', { class: 'platform-box stack' }, h('h1', null, 'Verdynt/OS platform'), message ? h('p', { class: 'muted' }, message) : null,
     pk ? h('div', { class: 'stack tight' }, pk, pkErr, h('p', { class: 'muted small' }, 'Once you add a passkey, the console signs you in with it only. First time? Sign in with your email below.')) : null, form,
     h('p', { class: 'muted small' }, 'No login yet? Sign in once with the platform key and add yourself under Operators. ', keyLink)));
   email.focus();
@@ -101,7 +101,7 @@ function setupTwoStep(out) {
     h('p', null, 'The console needs a code from an authenticator app every time you sign in (Google Authenticator, Microsoft Authenticator, 1Password and others work).'),
     h('ol', { class: 'stack tight' },
       h('li', null, 'Open the app and add an account by scanning this code.'),
-      h('li', null, 'Type the six-digit code the app shows for DAY/OS platform.')),
+      h('li', null, 'Type the six-digit code the app shows for Verdynt/OS platform.')),
     h('div', { class: 'qr-box' }, qr(out.otpauth_uri, { size: 200 })),
     h('p', { class: 'muted small' }, 'Cannot scan? Choose "enter a setup key" in the app and type: ', h('code', null, out.secret.replace(/(.{4})/g, '$1 ').trim())),
     form, button('Cancel', () => signIn(), { small: true })));
@@ -371,22 +371,22 @@ function planForm(p, r, done) {
   }, { submitText: 'Save', wide: true });
 }
 
-// Where this mountain's guest card payments go (its own Stripe account, connected by the owner) and DAY/OS's fee on them.
+// Where this mountain's guest card payments go (its own Stripe account, connected by the owner) and Verdynt/OS's fee on them.
 const CARD_WORDS = { ready: 'Connected: guest card payments go to the mountain\'s own Stripe account', unfinished: 'Connected, but Stripe still needs details from the owner before it can take payments', not_connected: 'Not connected: online card payments are off until the owner connects Stripe (Billing, Guest card payments)', off: 'Stripe is not set up on this service' };
 function cardPanel(t, done) {
   const c = t.card_payments || {}; const f = t.platform_fees || {};
   const fee = c.platform_fee_bps || c.platform_fee_cents ? `${(c.platform_fee_bps / 100).toFixed(2).replace(/\.?0+$/, '')}%${c.platform_fee_cents ? ` + ${dollars(c.platform_fee_cents)}` : ''} per payment` : 'none';
   return h('div', { class: 'stack tight' },
     h('p', null, CARD_WORDS[c.status] || c.status, c.account ? h('span', { class: 'small muted' }, ` (${c.account}${c.payouts_enabled ? ', payouts on' : ''})`) : null),
-    h('p', null, `DAY/OS fee: ${fee}. Gifts to the patrol never carry a fee.`),
-    Number(f.payments) ? h('p', { class: 'small muted' }, `${f.payments} card payments on the mountain's account, ${dollars(f.amount_cents)} in all; DAY/OS fees kept ${dollars(f.fee_cents)}.`) : null,
+    h('p', null, `Verdynt/OS fee: ${fee}. Gifts to the patrol never carry a fee.`),
+    Number(f.payments) ? h('p', { class: 'small muted' }, `${f.payments} card payments on the mountain's account, ${dollars(f.amount_cents)} in all; Verdynt/OS fees kept ${dollars(f.fee_cents)}.`) : null,
     h('div', { class: 'row' }, button('Set the fee', () => feeForm(t, done), { small: true })));
 }
 function feeForm(t, done) {
   const c = t.card_payments || {};
   const pct = input({ name: 'pct', type: 'number', min: 0, max: 10, step: 0.05, value: String((c.platform_fee_bps || 0) / 100) });
   const fixed = input({ name: 'fixed', type: 'number', min: 0, max: 5, step: 0.05, value: ((c.platform_fee_cents || 0) / 100).toFixed(2) });
-  formDialog(`DAY/OS fee for ${t.name}`, h('div', { class: 'stack' },
+  formDialog(`Verdynt/OS fee for ${t.name}`, h('div', { class: 'stack' },
     h('p', null, 'Kept by Stripe from each guest card payment on this mountain\'s own account (the online shop, lessons and date changes), on top of Stripe\'s own fees, which the mountain pays. Refunds give it back in proportion. Gifts to the patrol never carry it. Leave both at 0 for none.'),
     h('div', { class: 'grid2' }, field('Share of each payment (%)', pct, 'At most 10%.'), field('Fixed amount per payment ($)', fixed, 'At most $5.'))), async () => {
     await call('PATCH', `/tenants/${t.id}`, { platform_fee_bps: Math.round(Number(pct.value || 0) * 100), platform_fee_cents: Math.round(Number(fixed.value || 0) * 100) });

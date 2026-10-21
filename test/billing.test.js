@@ -1,6 +1,6 @@
 'use strict';
 
-// The mountain's DAY/OS subscription: plans and add-ons set in the console, a 14-day trial, paying by card, bank or
+// The mountain's Verdynt/OS subscription: plans and add-ons set in the console, a 14-day trial, paying by card, bank or
 // invoice through a mock Stripe, the webhook keeping it in step, then grace days and read only (patrol still works).
 process.env.BOOTSTRAP_KEY = 'test-bootstrap-key';
 process.env.LOGIN_RATE_LIMIT = '1000';

@@ -73,7 +73,7 @@ test('passwords: 12 or more characters, not built from the login or the mountain
   const add = (password, username = `pw${Math.floor(Math.random() * 1e6)}`) => api('POST', '/users', { token: A.token, body: { username, password, role: 'staff' } });
   is(await add('elevenchars'), 400, 'too short');
   is(await add(`my-${A.slug}-password`), 400, 'the mountain\'s address');
-  is(await add('summitops-forever-1'), 400, '"DAY/OS"');
+  is(await add('summitops-forever-1'), 400, '"Verdynt/OS"');
   is(await add('liftie-jordan-2026', 'jordan.liftie'), 201, 'a word that is not the whole username is fine');
   is(await add('jordanl-is-my-name', 'jordanl'), 400, 'their own username');
   is(await add('aaaaaaaaaaaaaaaa'), 400, 'one character over and over');
@@ -193,7 +193,7 @@ test('a new device: noted, emailed, and without two-step a code goes to email fi
     const ok = await api('POST', '/auth/mfa', { body: { mfa_token: fresh.body.mfa_token, code }, device: DEV.b });
     is(ok, 200);
     is(await api('POST', '/auth/mfa', { body: { mfa_token: fresh.body.mfa_token, code }, device: DEV.b }), 401, 'a code works once');
-    assert.ok(mails.some((m) => m.Subject === 'New sign-in to DAY/OS' && m.To === email), 'and they are told');
+    assert.ok(mails.some((m) => m.Subject === 'New sign-in to Verdynt/OS' && m.To === email), 'and they are told');
     assert.equal((await api('GET', '/auth/me', { token: ok.body.token })).body.signed_in_with, 'email');
     const sec = await api('GET', '/auth/security', { token: ok.body.token });
     assert.equal(sec.body.devices.length, 2);

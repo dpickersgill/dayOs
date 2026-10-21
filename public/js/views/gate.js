@@ -234,7 +234,7 @@ function pairDialog(d) {
   dialog(`Pair ${d.name}`, h('div', { class: 'stack' },
     h('p', null, 'Enter this code on the device (or give it to the installer). It works once, within 30 minutes.'),
     h('p', { class: 'pair-code', 'aria-label': `Pairing code ${d.code.split('').join(' ')}` }, d.code),
-    h('p', { class: 'muted small' }, 'The device trades the code for its own key, then checks every tap with DAY/OS and keeps a list of today\'s good cards for when the network drops. The guide for installers is in Help.')));
+    h('p', { class: 'muted small' }, 'The device trades the code for its own key, then checks every tap with Verdynt/OS and keeps a list of today\'s good cards for when the network drops. The guide for installers is in Help.')));
 }
 
 async function drawDevices(box) {

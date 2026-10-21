@@ -1,4 +1,4 @@
-# DAY/OS features
+# Verdynt/OS features
 
 What each part of the app does and the rules it enforces, grouped by area. For running the app see [README.md](README.md); for deploying see [DEPLOY.md](DEPLOY.md); for security and operations see [RUNBOOK.md](RUNBOOK.md).
 
@@ -317,7 +317,7 @@ Every patrol roster member has one of five access levels: **Admin, Manager, Appr
   - Transports and serious or critical cases are **held** for a director to approve or skip. Everything else sends on its own.
   - The email never mentions an injury, treatment or case details. It has a postal address footer, a stop link and a `List-Unsubscribe` header.
   - The page behind it (`/f/<token>`) takes a 1 to 5 rating and a comment, offers one-tap gift amounts and a stop button.
-- **Giving.** `/f/<token>?give=50` and `/give/<mountain>` open Stripe Checkout for one-time or monthly gifts ($5 to $10,000). The existing Stripe webhook records paid gifts once (`donations` table, unique per Checkout session). Only the first payment of a monthly gift is recorded in DAY/OS; the rest are in Stripe.
+- **Giving.** `/f/<token>?give=50` and `/give/<mountain>` open Stripe Checkout for one-time or monthly gifts ($5 to $10,000). The existing Stripe webhook records paid gifts once (`donations` table, unique per Checkout session). Only the first payment of a monthly gift is recorded in Verdynt/OS; the rest are in Stripe.
 - **The daily job**: `POST /api/v1/internal/jobs/daily` with header `x-jobs-key: $JOBS_KEY`. It queues and sends due follow-ups and emails managers a short note (no patient details) when reports or drafts are waiting.
 - **New settings** (all optional; nothing is sent until the first two are set): `POSTMARK_SERVER_TOKEN`, `MAIL_FROM` (a sender address verified in Postmark), `POSTMARK_STREAM` (default `outbound`), `JOBS_KEY` (a long random string), and `PUBLIC_URL` (the service address, used for links in emails; falls back to the request host). Giving needs the existing `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`.
 - Run `npm run migrate` (about 12 changes: collision, parties, checklist, follow-up, suppression and donation tables, plus patient email and mountain follow-up settings).
@@ -565,7 +565,7 @@ Platform console, **Demos**: everyone who started a demo, newest first. Tiles sh
 - **Online shop:** a running total beside the form on desktop, promo code in the order panel.
 - **Lesson booking page** in Spanish (language switch), and clearer messages when online booking is off.
 
-## Billing (the mountain's DAY/OS subscription)
+## Billing (the mountain's Verdynt/OS subscription)
 
 - Plans and add-ons are set in the console (Plans and prices), each with a monthly and yearly price and the apps it includes. Sync to Stripe makes the matching Stripe product and prices; a changed price makes a new Stripe price.
 - New mountains made in the console start on a 14-day free trial with everything on (or are marked free). Mountains made before billing, and demos, are free.

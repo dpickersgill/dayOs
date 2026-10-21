@@ -151,7 +151,7 @@ router.post('/login', validate(z.object({ email: z.string().trim().toLowerCase()
     // and to the operator's current session epoch, so a newer sign-in, a password reset or switching them off voids it.
     const secret = totp.newSecret();
     await pool.query('UPDATE platform_operators SET totp_secret = ?, totp_last_step = NULL WHERE id = ?', [totp.seal(secret), op.id]);
-    return res.json({ setup_required: true, setup_token: makeSession(op.name, op.id, { typ: 'setup', minutes: 10, epoch: Number(op.session_epoch), secretPrint: printOf(secret) }), secret, otpauth_uri: totp.otpauthUri(secret, op.email, 'DAY/OS platform') });
+    return res.json({ setup_required: true, setup_token: makeSession(op.name, op.id, { typ: 'setup', minutes: 10, epoch: Number(op.session_epoch), secretPrint: printOf(secret) }), secret, otpauth_uri: totp.otpauthUri(secret, op.email, 'Verdynt/OS platform') });
   }
   if (!req.body.code) return res.json({ code_required: true });
   const step = totp.verify(totp.open(op.totp_secret), req.body.code);
@@ -336,7 +336,7 @@ router.get('/tenants/:id', async (req, res) => {
     platform_fees: await one(pool, "SELECT COUNT(*) AS payments, COALESCE(SUM(platform_fee_cents), 0) AS fee_cents, COALESCE(SUM(amount_cents), 0) AS amount_cents FROM order_payments WHERE tenant_id = ? AND processor = 'stripe' AND processor_account IS NOT NULL", [id]) });
 });
 
-// ---------------------------------------------------------------- what mountains pay DAY/OS
+// ---------------------------------------------------------------- what mountains pay Verdynt/OS
 router.get('/billing/plans', async (_req, res) => res.json({ data: await BL.plans(), modules: M.MODULES.map(({ key, label, addon }) => ({ key, label, addon: Boolean(addon) })), stripe: require('../lib/stripe').enabled() }));
 
 const planFields = {
@@ -448,7 +448,7 @@ router.post('/tenants', validate(z.object({
 router.patch('/tenants/:id', needsAccess, validate(partialOf({
   name: z.string().min(2).max(255), status: z.enum(['active', 'suspended']), storage_cap_mb: z.number().int().min(10).max(100000),
   platform_notes: z.string().max(500).nullable(),
-  // DAY/OS's fee on this mountain's guest card payments (not gifts): a share in basis points (100 = 1%, at most 10%) and
+  // Verdynt/OS's fee on this mountain's guest card payments (not gifts): a share in basis points (100 = 1%, at most 10%) and
   // a fixed amount in cents per payment (at most $5). Both 0 unless set here; Stripe keeps it from each payment.
   platform_fee_bps: z.number().int().min(0).max(1000), platform_fee_cents: z.number().int().min(0).max(500),
 })), async (req, res) => {
@@ -614,7 +614,7 @@ router.get('/me/passkeys', async (req, res) => {
 router.post('/me/passkeys/options', async (req, res) => {
   opOnly(req);
   const o = await operatorOr404(req.operatorId);
-  res.json(await passkeys.registrationOptions(req, { kind: 'operator', ownerId: o.id, userName: `${o.email} (DAY/OS console)`, displayName: o.name }));
+  res.json(await passkeys.registrationOptions(req, { kind: 'operator', ownerId: o.id, userName: `${o.email} (Verdynt/OS console)`, displayName: o.name }));
 });
 router.post('/me/passkeys', validate(z.object({ handle: z.string().max(100), response: z.any(), name: z.string().trim().max(60).optional() })), async (req, res) => {
   opOnly(req);

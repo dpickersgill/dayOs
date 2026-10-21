@@ -1,14 +1,14 @@
 # Gate device API
 
-For installers and makers of gates, turnstiles and handheld readers that check DAY/OS tickets and RFID cards.
+For installers and makers of gates, turnstiles and handheld readers that check Verdynt/OS tickets and RFID cards.
 
-A device asks DAY/OS about each tap or scan and gets a yes or no. It also keeps a list of today's good tickets and cards, so it can decide on its own when the network drops, and sends those offline scans later.
+A device asks Verdynt/OS about each tap or scan and gets a yes or no. It also keeps a list of today's good tickets and cards, so it can decide on its own when the network drops, and sends those offline scans later.
 
-Base URL: `https://<your DAY/OS address>/api/v1/device`. Requests and answers are JSON. All times are UTC (ISO 8601).
+Base URL: `https://<your Verdynt/OS address>/api/v1/device`. Requests and answers are JSON. All times are UTC (ISO 8601).
 
 ## 1. Pair the device
 
-A manager adds the device in DAY/OS (Gate, Devices, Add a device) and gets a pairing code such as `K7QM-3XRP`. The code works once and expires after 30 minutes.
+A manager adds the device in Verdynt/OS (Gate, Devices, Add a device) and gets a pairing code such as `K7QM-3XRP`. The code works once and expires after 30 minutes.
 
 ```
 POST /api/v1/device/pair
@@ -85,7 +85,7 @@ Ticket codes are not sent, because a code works as a ticket. Each item has a `co
 
 Send `If-None-Match` with the `ETag` from the last list. While nothing has changed you get `304 Not Modified` and no body, so fetching every few minutes costs little.
 
-When DAY/OS cannot be reached, decide on the device:
+When Verdynt/OS cannot be reached, decide on the device:
 
 - allow a chip in `items` (match its serial in either byte order), or a barcode whose hash is in `items`;
 - refuse anything in `blocked`, or not in the list;
@@ -123,7 +123,7 @@ The manager's Devices screen shows each device's last contact, its last list dow
 
 ## Limits and good practice
 
-- The pairing endpoint allows 10 tries per 10 minutes per address. Other device endpoints allow 600 requests a minute per address. All the gates at a mountain usually share one internet address, so tell DAY/OS if your busiest minute might go past that.
+- The pairing endpoint allows 10 tries per 10 minutes per address. Other device endpoints allow 600 requests a minute per address. All the gates at a mountain usually share one internet address, so tell Verdynt/OS if your busiest minute might go past that.
 - Use HTTPS only. Keep a check's timeout short (about 1.5 s), then fall back to the offline list so the line keeps moving.
 - Reader settings: either output form of the UID works. If you can choose, use uppercase hex without separators.
 - Barcode scanners and desk RFID readers plugged into a counter computer need none of this. They type into the Gate screen like a keyboard.

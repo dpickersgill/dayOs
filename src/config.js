@@ -3,7 +3,7 @@
 const env = process.env;
 const isProd = env.NODE_ENV === 'production';
 
-// Staging (STAGE=staging): the private copy of DAY/OS where each release is checked before it goes live. It runs like
+// Staging (STAGE=staging): the private copy of Verdynt/OS where each release is checked before it goes live. It runs like
 // production, with its own database, and three guards so nothing on it can reach a real guest or real money:
 //   Stripe live keys are refused (test keys only), every email goes to STAGING_INBOX instead of the person it names,
 //   and texts go to STAGING_SMS_TO (or nowhere). STAGING_GATE, a shared password, keeps the public out, and search

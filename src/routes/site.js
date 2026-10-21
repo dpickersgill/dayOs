@@ -36,8 +36,8 @@ function template(name) {
   return cache.get(name);
 }
 
-// The DAY/OS wordmark (public/brand): the light version on snow, the dark one on navy.
-const WORDMARK = (theme, h) => `<img class="wordmark" src="/brand/dayos-wordmark-${theme}.svg" alt="DAY/OS" width="${Math.round(h * 3.07)}" height="${h}">`;
+// The Verdynt/OS wordmark (public/brand): the light version on snow, the dark one on navy.
+const WORDMARK = (theme, h) => `<img class="wordmark" src="/brand/verdynt-lockup-${theme}.png" alt="Verdynt/OS" width="${Math.round(h * 6.06)}" height="${h}">`;
 const NAV = [['product', 'Product'], ['ski-patrol', 'Ski patrol'], ['pricing', 'Pricing'], ['security', 'Security']];
 
 /** The top of every page: logo, Product, Pricing, Security, Try the demo, Sign in, Request a walkthrough; on phones a
@@ -51,7 +51,7 @@ function header(current) {
   return `<a class="skip" href="#main">Skip to the content</a>
 <header class="sn">
   <div class="wrap sn-in">
-    <a class="sn-brand" href="{{HOME}}" aria-label="DAY/OS, home">${WORDMARK('light', 42)}</a>
+    <a class="sn-brand" href="{{HOME}}" aria-label="Verdynt/OS, home">${WORDMARK('light', 42)}</a>
     <nav class="sn-links" aria-label="Main">
       ${links}
       ${extra}
@@ -75,7 +75,7 @@ const FOOTER = `<footer class="sf">
   <div class="wrap">
     <div class="sf-grid">
       <div>
-        <div class="sf-brand"><img src="/brand/dayos-logo-dark.svg" alt="DAY/OS, resort operating system" width="220" height="77"></div>
+        <div class="sf-brand"><img src="/brand/verdynt-logo-dark.png" alt="Verdynt/OS, resort operating system" width="220" height="109"></div>
         <p>Operations software for independent ski areas. Lifts, the fleet, tickets, rentals, lessons, patrol and staff in one place.</p>
       </div>
       <div>
@@ -104,7 +104,7 @@ const FOOTER = `<footer class="sf">
         </ul>
       </div>
     </div>
-    <div class="sf-base"><span>&copy; {{YEAR}} DAY/OS. All rights reserved. Prices in US dollars.</span><span class="sf-legal"><a href="{{SITE}}/privacy">Privacy</a><a href="{{SITE}}/terms">Terms</a></span></div>
+    <div class="sf-base"><span>&copy; {{YEAR}} Verdynt/OS. All rights reserved. Prices in US dollars.</span><span class="sf-legal"><a href="{{SITE}}/privacy">Privacy</a><a href="{{SITE}}/terms">Terms</a></span></div>
   </div>
 </footer>`;
 
@@ -231,15 +231,15 @@ pages.get('/llms.txt', async (req, res, next) => {
   const price = d && d.plans.length ? d.plans.map((p) => `- ${p.name}: ${dollars(p.monthly_cents)} a month. ${p.blurb || ''}`.trim()).join('\n') : '- See the pricing page.';
   const addons = d && d.addons.length ? d.addons.map((a) => `- ${a.name}: ${dollars(a.monthly_cents)} a month`).join('\n') : '';
   const page = (slug) => `${origin}/${slug}`;
-  const text = `# DAY/OS
+  const text = `# Verdynt/OS
 
-> DAY/OS is web-based operations software for independent ski areas in the United States: lift and trail status and inspections, grooming, fleet maintenance, ticket and season pass sales with RFID gate scanning, an online ticket shop, waivers, ski and snowboard rentals, ski school and lesson booking, ski patrol (patient care reports, dispatch, the closing sweep) and staff scheduling. Each mountain turns on only the apps it runs. Every plan starts with a 14-day free trial, with no contract.
+> Verdynt/OS is web-based operations software for independent ski areas in the United States: lift and trail status and inspections, grooming, fleet maintenance, ticket and season pass sales with RFID gate scanning, an online ticket shop, waivers, ski and snowboard rentals, ski school and lesson booking, ski patrol (patient care reports, dispatch, the closing sweep) and staff scheduling. Each mountain turns on only the apps it runs. Every plan starts with a 14-day free trial, with no contract.
 
-DAY/OS runs in a web browser on counter computers, phones and tablets, with nothing to install. Guest card payments go straight into each mountain's own Stripe account; DAY/OS never holds the money. Each mountain's data is kept separate, patient records are never deleted (mistakes are marked entered in error), and every mountain can export its data as spreadsheets at any time.
+Verdynt/OS runs in a web browser on counter computers, phones and tablets, with nothing to install. Guest card payments go straight into each mountain's own Stripe account; Verdynt/OS never holds the money. Each mountain's data is kept separate, patient records are never deleted (mistakes are marked entered in error), and every mountain can export its data as spreadsheets at any time.
 
 ## Pages
 
-- [Home](${page('')}): what DAY/OS does, one day at a ski area from first chair to closing
+- [Home](${page('')}): what Verdynt/OS does, one day at a ski area from first chair to closing
 - [Product](${page('product')}): every app and the pages guests use
 - [Ski patrol software](${page('ski-patrol')}): patient care reports, dispatch, opening checks, the closing sweep, volunteers
 - [Lift ticket and season pass software](${page('lift-ticket-software')}): the counter, the gate, RFID cards and the online shop
@@ -336,8 +336,8 @@ api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.e
     const sent = await mailer.sendPlatform({ to: config.site.contactEmail, replyTo: b.email, subject: `${KINDS[b.kind]}: ${b.mountain}`, text: lines.join('\n'), tag: 'site-lead' });
     if (sent.ok) {
       await pool.query('UPDATE site_leads SET emailed = 1 WHERE id = ?', [r.insertId]);
-      copy = (await mailer.sendPlatform({ to: b.email, replyTo: config.site.contactEmail, subject: 'We have your DAY/OS request', tag: 'site-lead-thanks',
-        text: `Hello ${b.name},\n\nThank you for writing about ${b.mountain}. A person will reply within one business day${b.kind === 'trial' ? ' to set up your trial' : b.kind === 'patrol' ? ' to set up your patrol, with a 14-day trial' : ' to set a time'}.\n\nTo look around in the meantime, start a demo mountain: ${config.site.appUrl || `${req.protocol}://${req.get('host')}`}/try\n\nDAY/OS` })).ok;
+      copy = (await mailer.sendPlatform({ to: b.email, replyTo: config.site.contactEmail, subject: 'We have your Verdynt/OS request', tag: 'site-lead-thanks',
+        text: `Hello ${b.name},\n\nThank you for writing about ${b.mountain}. A person will reply within one business day${b.kind === 'trial' ? ' to set up your trial' : b.kind === 'patrol' ? ' to set up your patrol, with a 14-day trial' : ' to set a time'}.\n\nTo look around in the meantime, start a demo mountain: ${config.site.appUrl || `${req.protocol}://${req.get('host')}`}/try\n\nVerdynt/OS` })).ok;
     }
   }
   res.status(201).json({ ok: true, copy });

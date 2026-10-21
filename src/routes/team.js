@@ -111,7 +111,7 @@ router.post('/team', patrol, needs('manage_team'), validate(z.object({ staff_id:
 });
 
 /**
- * Bring a roster in from a spreadsheet (a patrol moving to DAY/OS from paper or another system). Each row is a new person
+ * Bring a roster in from a spreadsheet (a patrol moving to Verdynt/OS from paper or another system). Each row is a new person
  * on the roster. Someone already on it (the same email, or the same first and last name) is skipped and listed, and so is
  * a row that would make someone a leader or director: those are set one by one, by someone allowed to. Up to 300 rows.
  */

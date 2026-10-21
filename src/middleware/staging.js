@@ -16,11 +16,11 @@ const safeNext = (n) => (typeof n === 'string' && /^\/(?!\/)[^\s]*$/.test(n) ? n
 
 function page(next, wrong) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex, nofollow">
-<title>DAY/OS staging</title><style>body{font-family:system-ui,sans-serif;background:#0e2632;color:#eaf3f7;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px}
+<title>Verdynt/OS staging</title><style>body{font-family:system-ui,sans-serif;background:#0e2632;color:#eaf3f7;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px}
 form{background:#fff;color:#12303a;border-radius:14px;padding:28px;max-width:360px;width:100%;box-sizing:border-box}h1{margin:0 0 6px;font-size:1.4rem}p{margin:0 0 16px;color:#4b6570}
 label{display:block;font-weight:700;margin-bottom:6px}input{width:100%;box-sizing:border-box;font:inherit;padding:10px 12px;border:1px solid #b5ccd9;border-radius:8px}
 button{margin-top:14px;width:100%;font:inherit;font-weight:700;padding:11px;border:0;border-radius:8px;background:#1b5fc1;color:#fff;cursor:pointer}.bad{color:#8a1f17;font-weight:700}</style></head>
-<body><form method="post" action="/__staging"><h1>DAY/OS staging</h1><p>The test copy of DAY/OS, for checking a release before it goes live. Payments are in test mode and email goes to the team.</p>
+<body><form method="post" action="/__staging"><h1>Verdynt/OS staging</h1><p>The test copy of Verdynt/OS, for checking a release before it goes live. Payments are in test mode and email goes to the team.</p>
 ${wrong ? '<p class="bad">That password is not right.</p>' : ''}<label for="pw">Staging password</label><input id="pw" name="password" type="password" autocomplete="current-password" required autofocus>
 <input type="hidden" name="next" value="${String(next).replace(/[&"<>]/g, '')}"><button>Open staging</button></form></body></html>`;
 }
@@ -40,7 +40,7 @@ function staging() {
   router.use((req, res, next) => {
     if (OPEN.some((r) => r.test(req.path)) || same(cookieOf(req), pass())) return next();
     if (req.method === 'GET' && req.accepts(['html', 'json']) === 'html') return res.status(401).type('html').send(page(req.originalUrl, false));
-    return res.status(401).json({ error: 'This is DAY/OS staging. Open it in a browser and enter the staging password first.' });
+    return res.status(401).json({ error: 'This is Verdynt/OS staging. Open it in a browser and enter the staging password first.' });
   });
   return router;
 }

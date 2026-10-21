@@ -1,4 +1,4 @@
-// Talks to the DAY/OS API. The token lives in sessionStorage, so closing the tab signs you out.
+// Talks to the Verdynt/OS API. The token lives in sessionStorage, so closing the tab signs you out.
 
 export const config = { base: '' };
 // stepUp(details): asks the person to confirm it is them (passkey, app code or password) and resolves when they have,

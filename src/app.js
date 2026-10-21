@@ -94,7 +94,7 @@ function createApp() {
       const screened = await connect.screen(event); // an event from a mountain's own account only counts for that mountain
       if (screened.done) return res.json({ received: true, ...screened.done });
       if (!event.account) {
-        const billed = await require('./routes/billing').handleWebhook(event); // the mountain's own DAY/OS subscription
+        const billed = await require('./routes/billing').handleWebhook(event); // the mountain's own Verdynt/OS subscription
         if (billed) return res.json({ received: true, ...billed });
       }
       const out = await lessonbook.handleWebhook(event, config.stripe.publicUrl || `${req.protocol}://${req.get('host')}`);

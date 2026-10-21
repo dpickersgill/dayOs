@@ -151,15 +151,15 @@ test('pages written for each search are linked from every page, in the sitemap, 
     assert.ok(page.text.includes('class="mcta"'), `${s} has the phone action bar`);
   }
   assert.ok(!(await onHost('/contact')).text.includes('class="mcta"'), 'the Contact page needs no bar to itself');
-  // llms.txt: what DAY/OS is, every page, and the live prices, on the website's address only
+  // llms.txt: what Verdynt/OS is, every page, and the live prices, on the website's address only
   const llms = await onHost('/llms.txt');
   assert.equal(llms.status, 200);
   assert.match(llms.type, /text\/plain/);
-  assert.match(llms.text, /^# DAY\/OS\n\n> /);
+  assert.match(llms.text, /^# Verdynt\/OS\n\n> /);
   for (const s of slugs) assert.ok(llms.text.includes(`https://www.site.test/${s}`), s);
   assert.match(llms.text, /- Lodge: \$[\d,]+ a month/);
   assert.ok(home.text.includes('rel="alternate" type="text/plain" href="/llms.txt"'));
-  assert.ok(!(await onHost('/llms.txt', 'app.site.test')).text.startsWith('# DAY/OS'), 'not on the app address');
+  assert.ok(!(await onHost('/llms.txt', 'app.site.test')).text.startsWith('# Verdynt/OS'), 'not on the app address');
   // The stylesheet is fetched by version, so browsers keep it for a year and still see a new release at once
   const css = home.text.match(/href="(\/site\/site\.css\?v=[^"]+)"/);
   assert.ok(css, 'versioned stylesheet');

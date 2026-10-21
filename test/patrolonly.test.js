@@ -1,6 +1,6 @@
 'use strict';
 
-// DAY/OS Patrol: a patrol on its own. The Patrol only plan, runs and lifts kept from Patrol when Lifts and trails is
+// Verdynt/OS Patrol: a patrol on its own. The Patrol only plan, runs and lifts kept from Patrol when Lifts and trails is
 // off, the roster imported from a spreadsheet, the website's patrol sign-up, and the ski area's free read-only login
 // (the day's patrol in numbers and approved reports only, nothing else).
 process.env.BOOTSTRAP_KEY = 'test-bootstrap-key';

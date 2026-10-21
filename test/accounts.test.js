@@ -173,7 +173,7 @@ test('the admin web app is served with strict security headers', async () => {
   assert.equal(home.status, 200);
   assert.match(home.headers.get('content-type'), /text\/html/);
   assert.match(home.body, /<script type="module" src="\/js\/main\.js">/);
-  assert.doesNotMatch(home.body.replace(/<script type="module" src="[^"]*"><\/script>/g, ''), /<script/i, 'no inline scripts');
+  assert.doesNotMatch(home.body.replace(/<script (?:type="module" )?src="\/js\/[^"]*"><\/script>/g, ''), /<script/i, 'no inline scripts');
   const csp = home.headers.get('content-security-policy');
   assert.match(csp, /script-src 'self'/);
   assert.doesNotMatch(csp.match(/script-src[^;]*/)[0], /unsafe-inline/);

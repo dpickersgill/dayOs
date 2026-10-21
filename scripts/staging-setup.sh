@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run once, from an unzipped release folder in Cloud Shell:   bash scripts/staging-setup.sh
-# Creates STAGING, the private test copy of DAY/OS, and puts this release on it. After this, every release goes:
+# Creates STAGING, the private test copy of Verdynt/OS, and puts this release on it. After this, every release goes:
 #   bash deploy.sh    puts it on staging, to check
 #   bash promote.sh   puts that same build live
 #
@@ -108,7 +108,7 @@ if [ -n "$STRIPE_KEY" ] && ! secret_exists summitops-staging-stripe-webhook; the
   step "5. Stripe test-mode webhooks for staging"
   hook() { # extra curl args: creates a webhook endpoint at staging and prints its signing secret
     curl -sS -u "$STRIPE_KEY:" https://api.stripe.com/v1/webhook_endpoints -d "url=$URL/api/v1/stripe/webhook" \
-      -d "description=DAY/OS staging" "$@" | jq -r '.secret // empty'
+      -d "description=Verdynt/OS staging" "$@" | jq -r '.secret // empty'
   }
   W1="$(hook -d 'enabled_events[]=checkout.session.completed' -d 'enabled_events[]=checkout.session.expired' \
     -d 'enabled_events[]=customer.subscription.created' -d 'enabled_events[]=customer.subscription.updated' -d 'enabled_events[]=customer.subscription.deleted' \

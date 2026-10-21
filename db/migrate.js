@@ -378,7 +378,7 @@ const securitySteps = [
   ['user_sessions.method', (c) => columnExists(c, 'user_sessions', 'method'), "ALTER TABLE user_sessions ADD COLUMN method VARCHAR(12) NOT NULL DEFAULT 'password', ADD COLUMN device_hash CHAR(64) NULL, ADD COLUMN terminal_id BIGINT UNSIGNED NULL, ADD COLUMN stepped_up_at DATETIME NULL"],
   ['users.pin_hash', (c) => columnExists(c, 'users', 'pin_hash'), 'ALTER TABLE users ADD COLUMN pin_hash VARCHAR(100) NULL, ADD COLUMN pin_failures SMALLINT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN pin_locked_until DATETIME NULL'],
   ['users.access_ends_on', (c) => columnExists(c, 'users', 'access_ends_on'), 'ALTER TABLE users ADD COLUMN access_ends_on DATE NULL'],
-  // 2026.10.18: the ski area's free read-only login for a patrol on DAY/OS Patrol.
+  // 2026.10.18: the ski area's free read-only login for a patrol on Verdynt/OS Patrol.
   ['site_leads patrol kind', (c) => columnTypeHas(c, 'site_leads', 'kind', "'patrol'"), "ALTER TABLE site_leads MODIFY kind ENUM('walkthrough','trial','founding','question','patrol') NOT NULL DEFAULT 'walkthrough'"],
   ['users.role area', (c) => columnTypeHas(c, 'users', 'role', "'area'"), "ALTER TABLE users MODIFY role ENUM('owner','manager','staff','patrol','instructor','counter','area') NOT NULL DEFAULT 'staff'"],
   // Patrollers must use two-step too; mountains that already exist get two weeks before it is enforced.
@@ -508,7 +508,7 @@ async function seedPlans(conn) {
   console.log('Added the launch plans and add-ons (change them in the console, Plans and prices)');
 }
 
-// DAY/OS Patrol (2026.10.18): the plan for a patrol on its own, added once to installs that already have plans.
+// Verdynt/OS Patrol (2026.10.18): the plan for a patrol on its own, added once to installs that already have plans.
 async function seedPatrolPlan(conn) {
   const [[has]] = await conn.query("SELECT COUNT(*) AS n FROM billing_plans WHERE code = 'patrol-only'");
   if (Number(has.n)) return;

@@ -86,8 +86,8 @@ async function authenticate(req, _res, next) {
   if (!payload.sid || !Number(row.session_open)) return next(unauthorized('Session ended. Sign in again.'));
   if (Number(row.access_over)) return next(unauthorized('Your access has ended for the season. Ask a manager if you are coming back.'));
   sessions.touch(payload.sid);
-  if (row.status !== 'active') return next(forbidden('This mountain is paused. Contact DAY/OS.'));
-  if (row.sandbox_over) return next(forbidden('This demo has ended. Start a new one, or ask DAY/OS for a walkthrough.'));
+  if (row.status !== 'active') return next(forbidden('This mountain is paused. Contact Verdynt/OS.'));
+  if (row.sandbox_over) return next(forbidden('This demo has ended. Start a new one, or ask Verdynt/OS for a walkthrough.'));
   const path = req.originalUrl.split('?')[0];
   // Two-step sign-in, tier by tier (mfaRule): someone who must have it and has not set it up can only reach the setup screens.
   if (mfaRequired(row) && !Number(row.strong) && !SETUP_PATHS.test(path)) {

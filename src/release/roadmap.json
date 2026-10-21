@@ -36,12 +36,12 @@
         {
           "app": null,
           "title": "Help centre and contact support",
-          "text": "Search the help from anywhere and reach support from inside DAY/OS."
+          "text": "Search the help from anywhere and reach support from inside Verdynt/OS."
         },
         {
           "app": null,
           "title": "Bring your data with you",
-          "text": "Upload what your old system or spreadsheets export, such as customers, pass holders, products, staff and the rental fleet. DAY/OS matches the columns, flags duplicates and problems, and shows you a preview before anything is saved."
+          "text": "Upload what your old system or spreadsheets export, such as customers, pass holders, products, staff and the rental fleet. Verdynt/OS matches the columns, flags duplicates and problems, and shows you a preview before anything is saved."
         },
         {
           "app": "sell",
@@ -98,7 +98,7 @@
         {
           "app": "patrol",
           "title": "Patrol report check and spoken reports",
-          "text": "Before a patient care report is submitted, DAY/OS points out anything missing or that doesn't add up. Patrollers can speak what happened and DAY/OS fills in the fields it can. It only suggests; the patroller and director decide."
+          "text": "Before a patient care report is submitted, Verdynt/OS points out anything missing or that doesn't add up. Patrollers can speak what happened and Verdynt/OS fills in the fields it can. It only suggests; the patroller and director decide."
         },
         {
           "app": "documents",

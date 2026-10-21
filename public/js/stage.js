@@ -1,4 +1,4 @@
-// On staging (the test copy of DAY/OS), a band across the top of every page says so, and the tab title starts with
+// On staging (the test copy of Verdynt/OS), a band across the top of every page says so, and the tab title starts with
 // "Staging", so nobody mistakes it for the live site. Production shows nothing.
 fetch('/version', { cache: 'no-store' }).then((r) => r.json()).then((v) => {
   if (!v || v.stage !== 'staging' || document.getElementById('stage-band')) return;

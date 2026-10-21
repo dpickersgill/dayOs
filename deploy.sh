@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Step 1 of every release, run from the unzipped folder in Cloud Shell:   bash deploy.sh
-# It puts this release on STAGING (the private test copy of DAY/OS), never on the live site. Check it there, then run
+# It puts this release on STAGING (the private test copy of Verdynt/OS), never on the live site. Check it there, then run
 # bash promote.sh to put exactly the same build live. The live site only ever gets a build that ran on staging first.
 #
 # It checks this folder is not older than what staging runs, checks the packages for known security problems, installs,
@@ -29,7 +29,7 @@ node scripts/check-version.js "$STAGING_VERSION" "$@"
 
 step "Checking the packages for known security problems"
 # Stops on a high or critical problem in anything that runs in production. Fix by updating the package, or (only if
-# it truly cannot affect DAY/OS) run with SKIP_AUDIT=1 and note why in the release.
+# it truly cannot affect Verdynt/OS) run with SKIP_AUDIT=1 and note why in the release.
 if [ "${SKIP_AUDIT:-}" != 1 ]; then npm audit --omit=dev --audit-level=high; fi
 
 step "Installing"

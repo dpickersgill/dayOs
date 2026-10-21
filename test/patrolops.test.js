@@ -334,7 +334,7 @@ test('phone alerts: subscribing, and the message is encrypted for that phone onl
   const r = ok(await api('POST', '/patrol/alerts/test', { token: M.valT }));
   assert.equal(r.sent, 1);
   const msg = JSON.parse(PUSH.decrypt(Buffer.from(seen[0].init.body), ua, auth));
-  assert.equal(msg.title, 'DAY/OS alerts are on');
+  assert.equal(msg.title, 'Verdynt/OS alerts are on');
   assert.match(seen[0].init.headers.Authorization, /^vapid t=[\w-]+\.[\w-]+\.[\w-]+, k=[\w-]+$/);
   // a phone that is gone is forgotten
   PUSH.setTransport(async () => ({ status: 410 }));

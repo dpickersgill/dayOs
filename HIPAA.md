@@ -1,13 +1,13 @@
 # Patient information: safeguards and what is still on you
 
-DAY/OS can be built and run so that patient information is protected the way HIPAA expects. Software alone cannot make a
+Verdynt/OS can be built and run so that patient information is protected the way HIPAA expects. Software alone cannot make a
 mountain "HIPAA compliant": compliance is also about contracts, policies, training and how people behave. This file lists
 what the software does, and what the mountain still has to do.
 
 **First, find out whether HIPAA applies to you.** HIPAA covers "covered entities" (for example, providers that bill
 health insurers electronically) and their business associates. Many ski patrols are not covered entities, but some are
 (a patrol that bills insurance or runs a clinic, for instance), and state privacy and medical-records laws can apply either
-way. Ask your lawyer. DAY/OS is built to the stricter standard regardless.
+way. Ask your lawyer. Verdynt/OS is built to the stricter standard regardless.
 
 ## What the software does (technical safeguards)
 

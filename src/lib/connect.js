@@ -1,8 +1,8 @@
 'use strict';
 
 // Stripe Connect: each mountain's guest card payments (the online shop, lesson payments, date changes and patrol
-// giving) go to the mountain's own Stripe account, connected from Settings, Card payments. DAY/OS never holds a
-// mountain's money. The mountain pays Stripe's own fees on its account; DAY/OS adds a platform fee only when the
+// giving) go to the mountain's own Stripe account, connected from Settings, Card payments. Verdynt/OS never holds a
+// mountain's money. The mountain pays Stripe's own fees on its account; Verdynt/OS adds a platform fee only when the
 // console sets one for that mountain (platform_fee_bps and platform_fee_cents, both 0 unless changed), and never on
 // gifts to the patrol.
 //
@@ -108,7 +108,7 @@ async function screen(event) {
     return { done: { account: tenantId ? 'updated' : 'unknown' } };
   }
   if (event.type === 'account.application.deauthorized') {
-    // The mountain disconnected DAY/OS from its Stripe dashboard: card payments stop until it connects again.
+    // The mountain disconnected Verdynt/OS from its Stripe dashboard: card payments stop until it connects again.
     if (tenantId) await pool.query('UPDATE tenants SET stripe_charges_enabled = 0, stripe_payouts_enabled = 0 WHERE id = ?', [tenantId]);
     return { done: { account: tenantId ? 'disconnected' : 'unknown' } };
   }

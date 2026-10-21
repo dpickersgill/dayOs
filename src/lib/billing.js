@@ -1,6 +1,6 @@
 'use strict';
 
-// What a mountain pays DAY/OS, and what happens when it does not.
+// What a mountain pays Verdynt/OS, and what happens when it does not.
 //
 // Each mountain is on a plan (a set of apps) with any add-ons, monthly or yearly. New mountains start with a 14-day
 // trial. They pay through Stripe: card or US bank account (Stripe Checkout), or an emailed invoice due in 30 days.
@@ -68,7 +68,7 @@ async function standingOf(tenantId) {
 // What still works in read-only: billing itself, signing in and accounts, patrol (care and safety), the time clock,
 // the Inbox, and What's new. Everything can still be read and exported.
 const WRITABLE = [/^\/billing(\/|$)/, /^\/patrol(\/|$)/, /^\/inbox(\/|$)/, /^\/whats-new(\/|$)/, /^\/demo-tours(\/|$)/, /^\/workforce\/time\/clock-(in|out)$/, /^\/kiosk(\/|$)/];
-const readOnlyError = () => { const e = new AppError(402, 'Your DAY/OS subscription has lapsed, so this mountain is read only. The owner can renew on Settings, Billing.'); e.details = { code: 'billing_read_only' }; return e; };
+const readOnlyError = () => { const e = new AppError(402, 'Your Verdynt/OS subscription has lapsed, so this mountain is read only. The owner can renew on Settings, Billing.'); e.details = { code: 'billing_read_only' }; return e; };
 
 /** Signed-in requests: in read-only, only reads and the writable areas above go through. */
 function gate(req, _res, next) {
@@ -128,7 +128,7 @@ async function syncPlan(p) {
   if (!stripe.enabled()) throw new AppError(409, 'Stripe is not set up (STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET)');
   let product = p.stripe_product;
   if (!product) {
-    product = (await stripe.call('/v1/products', { name: `DAY/OS ${p.name}`, metadata: { kind: 'billing_plan', plan_id: String(p.id), code: p.code } }, { idempotencyKey: `plan-product-${p.id}` })).id;
+    product = (await stripe.call('/v1/products', { name: `Verdynt/OS ${p.name}`, metadata: { kind: 'billing_plan', plan_id: String(p.id), code: p.code } }, { idempotencyKey: `plan-product-${p.id}` })).id;
     await pool.query('UPDATE billing_plans SET stripe_product = ? WHERE id = ?', [product, p.id]);
   }
   for (const [col, centsCol, amountCol, interval] of [['stripe_month', 'stripe_month_cents', 'monthly_cents', 'month'], ['stripe_year', 'stripe_year_cents', 'yearly_cents', 'year']]) {
@@ -183,15 +183,15 @@ async function remindAll(base = '') {
     const today = todayIn(b.timezone);
     const s = standing(b, today);
     let step = null; let subject = ''; let text = '';
-    if (s.kind === 'trial' && s.days_left <= 3) { step = `trial3:${s.until}`; subject = `Your DAY/OS trial ends ${s.until}`; text = `Your DAY/OS trial for ${b.name} ends on ${s.until}. Choose a plan and add a card, bank account or invoice on Settings, Billing to keep everything running.`; }
-    else if (s.state === 'grace' && s.days_left > 3) { step = `grace:${s.until}`; subject = s.kind === 'payment_failed' ? 'A DAY/OS payment did not go through' : 'Your DAY/OS subscription needs attention'; text = `${b.name}: ${s.kind === 'payment_failed' ? 'the last payment did not go through' : 'your trial or paid time has ended'}. Everything keeps working until ${s.until}; after that DAY/OS becomes read only (patrol keeps working). Fix it on Settings, Billing.`; }
-    else if (s.state === 'grace') { step = `grace3:${s.until}`; subject = `DAY/OS becomes read only on ${s.until}`; text = `${b.name}: DAY/OS becomes read only after ${s.until} unless the subscription is paid. Sales, bookings and new records stop; patrol keeps working. Pay on Settings, Billing.`; }
-    else if (s.read_only) { step = `readonly:${s.until}`; subject = 'DAY/OS is now read only'; text = `${b.name}: your DAY/OS subscription has lapsed, so it is read only. Everything can still be seen and exported, and patrol keeps working. Pay on Settings, Billing to turn everything back on.`; }
+    if (s.kind === 'trial' && s.days_left <= 3) { step = `trial3:${s.until}`; subject = `Your Verdynt/OS trial ends ${s.until}`; text = `Your Verdynt/OS trial for ${b.name} ends on ${s.until}. Choose a plan and add a card, bank account or invoice on Settings, Billing to keep everything running.`; }
+    else if (s.state === 'grace' && s.days_left > 3) { step = `grace:${s.until}`; subject = s.kind === 'payment_failed' ? 'A Verdynt/OS payment did not go through' : 'Your Verdynt/OS subscription needs attention'; text = `${b.name}: ${s.kind === 'payment_failed' ? 'the last payment did not go through' : 'your trial or paid time has ended'}. Everything keeps working until ${s.until}; after that Verdynt/OS becomes read only (patrol keeps working). Fix it on Settings, Billing.`; }
+    else if (s.state === 'grace') { step = `grace3:${s.until}`; subject = `Verdynt/OS becomes read only on ${s.until}`; text = `${b.name}: Verdynt/OS becomes read only after ${s.until} unless the subscription is paid. Sales, bookings and new records stop; patrol keeps working. Pay on Settings, Billing.`; }
+    else if (s.read_only) { step = `readonly:${s.until}`; subject = 'Verdynt/OS is now read only'; text = `${b.name}: your Verdynt/OS subscription has lapsed, so it is read only. Everything can still be seen and exported, and patrol keeps working. Pay on Settings, Billing to turn everything back on.`; }
     if (!step || b.reminded === step) continue;
     const owners = (await rows(pool, "SELECT email FROM users WHERE tenant_id = ? AND role = 'owner' AND active = 1 AND email IS NOT NULL", [b.tenant_id])).map((u) => u.email);
     const to = [...new Set([...owners, b.billing_email].filter(Boolean))];
     if (!to.length) continue;
-    for (const addr of to) await mailer.send({ tenantId: b.tenant_id, to: addr, fromName: 'DAY/OS', subject, text: `${text}\n\n${base ? `${base}/#/billing` : ''}`, tag: 'billing' });
+    for (const addr of to) await mailer.send({ tenantId: b.tenant_id, to: addr, fromName: 'Verdynt/OS', subject, text: `${text}\n\n${base ? `${base}/#/billing` : ''}`, tag: 'billing' });
     await pool.query('UPDATE tenant_billing SET reminded = ? WHERE tenant_id = ?', [step, b.tenant_id]);
     sent += 1;
   }

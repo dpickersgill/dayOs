@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A web firewall (Google Cloud Armor) in front of DAY/OS, run from the unzipped folder in Cloud Shell [review M3].
+# A web firewall (Google Cloud Armor) in front of Verdynt/OS, run from the unzipped folder in Cloud Shell [review M3].
 # It costs extra (a load balancer, roughly $20 a month plus traffic). Two stages, because the domain has to move first:
 #
 #   bash scripts/cloud-armor.sh www.example.com app.example.com
@@ -39,7 +39,7 @@ if [ "$MODE" = build ]; then
 
   step "Cloud Armor policy"
   if ! gcloud compute security-policies describe "$P-armor" >/dev/null 2>&1; then
-    gcloud compute security-policies create "$P-armor" --description "DAY/OS web firewall"
+    gcloud compute security-policies create "$P-armor" --description "Verdynt/OS web firewall"
   fi
   gcloud compute security-policies update "$P-armor" --enable-layer7-ddos-defense --log-level=VERBOSE --quiet
   # Rule 100: one address sending more than 600 requests a minute gets "too many requests" for that minute.
@@ -115,4 +115,4 @@ if gcloud scheduler jobs describe summitops-daily --location "$REGION" >/dev/nul
   gcloud scheduler jobs update http summitops-daily --location "$REGION" --uri "$PUBLIC/api/v1/internal/jobs/daily" --quiet
   echo "The daily job now goes through $PUBLIC."
 fi
-echo "Done. Visitors reach DAY/OS only through Cloud Armor at ${DOMAINS[*]}. If anything breaks: bash scripts/cloud-armor.sh --unlock"
+echo "Done. Visitors reach Verdynt/OS only through Cloud Armor at ${DOMAINS[*]}. If anything breaks: bash scripts/cloud-armor.sh --unlock"

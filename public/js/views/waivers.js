@@ -110,7 +110,7 @@ async function wording(box) {
     else await go();
   }
   appendAll(box, 
-    h('div', { class: 'callout' }, 'Have your lawyer approve this wording. DAY/OS keeps every version word for word, with who signed which.'),
+    h('div', { class: 'callout' }, 'Have your lawyer approve this wording. Verdynt/OS keeps every version word for word, with who signed which.'),
     sum.text ? null : h('div', { class: 'row' }, button('Start from a sample', () => { text.value = SAMPLE; text.focus(); }, { small: true }), h('span', { class: 'muted small' }, 'A starting point only. It is not legal advice.')),
     field('Waiver wording', text, 'Guests see this exactly as written, with line breaks kept.'),
     h('label', { class: 'check' }, again, ' Ask everyone to sign again (use this when the change matters, for example new risks or a new legal entity)'),

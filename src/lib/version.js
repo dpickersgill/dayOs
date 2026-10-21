@@ -1,6 +1,6 @@
 'use strict';
 
-// Which version of DAY/OS this is, and what changed in each release.
+// Which version of Verdynt/OS this is, and what changed in each release.
 //
 // Version numbers are calendar versions: YEAR.MONTH.N, where N counts the releases in that month (2026.10.4 is the
 // fourth release of October 2026). The number lives in package.json and goes up by one with every zip that is deployed.

@@ -17,7 +17,7 @@ function rp(req) {
   const host = String(req.get('host') || '');
   const id = process.env.WEBAUTHN_RP_ID || req.hostname;
   const origins = String(process.env.WEBAUTHN_ORIGINS || '').split(',').map((x) => x.trim()).filter(Boolean);
-  return { id, name: 'DAY/OS', origin: origins.length ? origins : `${req.protocol}://${host}` };
+  return { id, name: 'Verdynt/OS', origin: origins.length ? origins : `${req.protocol}://${host}` };
 }
 
 // Which table: the mountains' logins, or the console's operators.

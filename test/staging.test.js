@@ -46,7 +46,7 @@ const html = { accept: 'text/html' };
 test('a shared password stands in front of staging, and search engines are kept out', async () => {
   const home = await fetch(`${base}/`, { headers: html });
   assert.equal(home.status, 401);
-  assert.match(await home.text(), /DAY\/OS staging/);
+  assert.match(await home.text(), /Verdynt\/OS staging/);
   assert.match(home.headers.get('x-robots-tag'), /noindex/);
   assert.equal((await fetch(`${base}/api/v1/site/plans`)).status, 401, 'the API too');
   assert.match(await (await fetch(`${base}/robots.txt`)).text(), /Disallow: \/\n/);

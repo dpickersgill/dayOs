@@ -16,7 +16,7 @@ async function timesSeen(password) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), settings.timeoutMs);
   try {
-    const res = await fetch(`${settings.apiBase}/range/${sha.slice(0, 5)}`, { headers: { 'Add-Padding': 'true', 'User-Agent': 'DAY/OS' }, signal: ctrl.signal });
+    const res = await fetch(`${settings.apiBase}/range/${sha.slice(0, 5)}`, { headers: { 'Add-Padding': 'true', 'User-Agent': 'Verdynt/OS' }, signal: ctrl.signal });
     if (!res.ok) return null;
     const rest = sha.slice(5);
     for (const line of (await res.text()).split('\n')) {

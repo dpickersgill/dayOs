@@ -1,6 +1,6 @@
-# Deploying DAY/OS
+# Deploying Verdynt/OS
 
-DAY/OS runs on Google Cloud Run (service `summitops-api`, region `us-east1`) with a Cloud SQL MySQL 8.4 database (`summitops-db`, same region; reached through the Cloud SQL socket, `DB_SOCKET`). Until `move-to-cloudsql.sh` has been run it uses Aiven. Secrets live in Google Secret Manager. Every update is: upload the zip, install, migrate, deploy, check.
+Verdynt/OS runs on Google Cloud Run (service `summitops-api`, region `us-east1`) with a Cloud SQL MySQL 8.4 database (`summitops-db`, same region; reached through the Cloud SQL socket, `DB_SOCKET`). Until `move-to-cloudsql.sh` has been run it uses Aiven. Secrets live in Google Secret Manager. Every update is: upload the zip, install, migrate, deploy, check.
 
 ## First deploy
 
@@ -16,7 +16,7 @@ Run `npm run migrate` against the Aiven database (Cloud Shell works) before the 
 
 ## Updating (every new zip): staging first, then live
 
-Every release goes to **staging** first, the private test copy of DAY/OS, and only goes live once it has been checked
+Every release goes to **staging** first, the private test copy of Verdynt/OS, and only goes live once it has been checked
 there. The live site only ever gets the exact build (the same container image) that ran on staging.
 
 **Once, before the first release that uses it:** `bash scripts/staging-setup.sh` (see Staging, below).
@@ -110,7 +110,7 @@ is safe to run again: it keeps what exists and fills in anything missing (for ex
 | --- | --- |
 | `POSTMARK_SERVER_TOKEN`, `MAIL_FROM` | Email (tickets, reminders, patrol follow-ups, weekly report, messages) |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | Text messages |
-| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `PUBLIC_URL` | Stripe: the platform's own account (mountains' DAY/OS subscriptions). Its webhook sends `checkout.session.completed`, `checkout.session.expired`, `customer.subscription.*` and `invoice.*` to `/api/v1/stripe/webhook`. |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `PUBLIC_URL` | Stripe: the platform's own account (mountains' Verdynt/OS subscriptions). Its webhook sends `checkout.session.completed`, `checkout.session.expired`, `customer.subscription.*` and `invoice.*` to `/api/v1/stripe/webhook`. |
 | `STRIPE_CONNECT_WEBHOOK_SECRET` | Guest card payments (shop, lessons, date changes, patrol giving) go to each mountain's own Stripe account through Stripe Connect. This is the signing secret of the Connect webhook. See "Guest card payments (Stripe Connect)" below. |
 | `STRIPE_GUEST_FALLBACK` | Leave unset. In production a mountain takes guest card payments only once it has connected its own Stripe account. `on` would let unconnected mountains take payments into the platform's account (tests and local runs only). |
 | `JOBS_KEY` | The daily job (`POST /api/v1/internal/jobs/daily` with header `x-jobs-key`), called by Cloud Scheduler once a day |
@@ -146,9 +146,9 @@ The product website (Home, Product, the solution pages for ski patrol, lift tick
 
 ## Guest card payments (Stripe Connect)
 
-Guests' card payments go straight into each mountain's own Stripe account (a Standard account the mountain controls), never into the DAY/OS account. The mountain pays Stripe's card fees on its own account and gets Stripe's payouts to its own bank. DAY/OS can keep a platform fee per mountain, set in the console (mountain, Guest card payments, Set the fee); it is 0 unless you set it, it is returned in proportion on refunds, and gifts to the patrol never carry it.
+Guests' card payments go straight into each mountain's own Stripe account (a Standard account the mountain controls), never into the Verdynt/OS account. The mountain pays Stripe's card fees on its own account and gets Stripe's payouts to its own bank. Verdynt/OS can keep a platform fee per mountain, set in the console (mountain, Guest card payments, Set the fee); it is 0 unless you set it, it is returned in proportion on refunds, and gifts to the patrol never carry it.
 
-Set up once, in the Stripe dashboard of the DAY/OS account:
+Set up once, in the Stripe dashboard of the Verdynt/OS account:
 
 1. **Turn on Connect.** Connect, Get started: choose to build a platform where your users (the mountains) take payments, and fill in the platform profile. The mountains use Standard accounts, which they run themselves in their own Stripe dashboard.
 2. **The Connect webhook.** Developers, Webhooks (or Workbench, Event destinations), Add a destination: choose **Connected accounts** (events on your users' accounts), the address `https://app.runmyresort.com/api/v1/stripe/webhook`, and the events `checkout.session.completed`, `checkout.session.expired`, `account.updated` and `account.application.deauthorized`. Copy its signing secret (`whsec_...`).
@@ -158,5 +158,5 @@ Set up once, in the Stripe dashboard of the DAY/OS account:
    ```
 4. **Each mountain connects.** The owner opens Billing, Guest card payments, Connect Stripe, confirms it is them, and finishes Stripe's pages (the business, a person and a bank account; an existing Stripe login works). Card payments open as soon as Stripe says the account can take them. Until then the online shop, lesson payments and patrol giving show as not taking cards.
 
-Payments taken into the DAY/OS account before this release (if any) still refund through the DAY/OS account; everything new goes to the mountain's own.
+Payments taken into the Verdynt/OS account before this release (if any) still refund through the Verdynt/OS account; everything new goes to the mountain's own.
 

@@ -20,7 +20,7 @@ function ridge() {
 
 function side() {
   return h('section', { class: 'signin-side' },
-    h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/dayos-logo-dark.svg', alt: 'DAY/OS, resort operating system', width: '220', height: '77' })), h('h1', null, 'Try it on a mountain of your own.'),
+    h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-logo-dark.png', alt: 'Verdynt/OS, resort operating system', width: '220', height: '109' })), h('h1', null, 'Try it on a mountain of your own.'),
       h('p', null, 'You get a private demo mountain with every app switched on and made-up lifts, tickets, lessons, patrol cases and staff. Click anything.')), ridge());
 }
 

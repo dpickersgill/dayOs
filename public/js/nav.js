@@ -43,11 +43,25 @@ const initials = (email) => String(email || '?').split('@')[0].split(/[._-]/).ma
  * Builds the page frame. views: [[key, label]] already filtered for this person.
  * Returns { shell, main, setCurrent(key), openPalette() }.
  */
-/** The version under Sign out in the account menu: "DAY/OS 2026.10.4", linking to What's new. */
+/** The version under Sign out in the account menu: "Verdynt/OS 2026.10.4", linking to What's new. */
 function whoVersion() {
   const a = h('a', { class: 'who-version', href: '#/help/whats-new' });
-  fetch('/version').then((r) => r.json()).then((v) => { if (v && v.version) a.textContent = `DAY/OS ${v.version}`; }).catch(() => {});
+  fetch('/version').then((r) => r.json()).then((v) => { if (v && v.version) a.textContent = `Verdynt/OS ${v.version}`; }).catch(() => {});
   return a;
+}
+
+/** Dark (the Verdynt/OS look) or Light, chosen per device in the account menu. theme.js applies it before the page paints. */
+function themeToggle(cls) {
+  const now = () => document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  const text = () => (now() === 'dark' ? 'Light mode' : 'Dark mode');
+  const btn = h('button', { type: 'button', class: cls }, cls === 'rail-out' ? [icon('settings', 18), h('span', { class: 'nav-label' }, text())] : text());
+  btn.addEventListener('click', () => {
+    const next = now() === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('verdynt.theme', next); } catch (_) { /* this device only, best effort */ }
+    const label = btn.querySelector('.nav-label') || btn; label.textContent = text();
+  });
+  return btn;
 }
 
 export function buildFrame({ views, main, signOut }) {
@@ -97,8 +111,9 @@ export function buildFrame({ views, main, signOut }) {
   const search = h('button', { type: 'button', class: 'rail-search', 'aria-label': 'Jump to a page' }, icon('search', 18), h('span', { class: 'nav-label' }, 'Jump to'), h('kbd', null, /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘K' : 'Ctrl K'));
   const out = h('button', { type: 'button', class: 'rail-out', title: 'Sign out' }, icon('signout', 18), h('span', { class: 'nav-label' }, 'Sign out'));
   out.addEventListener('click', () => signOut());
+  const themeBtn = themeToggle('rail-out');
   // One account button replaces four stacked rows: it opens My shifts, Account, Help and Sign out.
-  const whoMenu = h('div', { class: 'who-menu', id: 'who-menu', hidden: true }, h('nav', { class: 'nav nav-personal', 'aria-label': 'Your pages' }, h('div', { class: 'nav-group' }, personal.map((k) => link(k)))), out, whoVersion());
+  const whoMenu = h('div', { class: 'who-menu', id: 'who-menu', hidden: true }, h('nav', { class: 'nav nav-personal', 'aria-label': 'Your pages' }, h('div', { class: 'nav-group' }, personal.map((k) => link(k)))), themeBtn, out, whoVersion());
   const whoBtn = h('button', { type: 'button', class: 'who', 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-controls': 'who-menu', title: ctx.me.login_name || ctx.me.email },
     h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(ctx.me.username || ctx.me.email)), h('span', { class: 'who-text' }, h('b', null, ctx.me.login_name || ctx.me.email), h('span', null, ctx.me.role === 'area' ? 'Ski area (read-only)' : label(ctx.me.role))), icon('chevron', 14));
   const setWho = (open) => { whoMenu.hidden = !open; whoBtn.setAttribute('aria-expanded', String(open)); };
@@ -107,7 +122,7 @@ export function buildFrame({ views, main, signOut }) {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !whoMenu.hidden) { setWho(false); whoBtn.focus(); } });
   whoMenu.addEventListener('click', (e) => { if (e.target.closest('a')) setWho(false); });
   const rail = h('aside', { class: 'rail' },
-    h('div', { class: 'brand' }, h('img', { class: 'brand-mark', src: '/brand/dayos-mark.svg', alt: '', width: '36', height: '36' }), h('div', { class: 'brand-text' }, h('img', { class: 'brand-word', src: '/brand/dayos-wordmark-dark.svg', alt: 'DAY/OS', width: '72', height: '23' }), h('span', null, ctx.me.tenant_name)), toggle),
+    h('div', { class: 'brand' }, h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: '', width: '64', height: '36' }), h('div', { class: 'brand-text' }, h('img', { class: 'brand-word', src: '/brand/verdynt-word-dark.png', alt: 'Verdynt/OS', width: '126', height: '23' }), h('span', null, ctx.me.tenant_name)), toggle),
     search, nav,
     h('div', { class: 'rail-foot' }, whoMenu, whoBtn));
 
@@ -120,7 +135,7 @@ export function buildFrame({ views, main, signOut }) {
   const topSearch = h('button', { type: 'button', class: 'top-search', 'aria-label': 'Jump to a page' }, icon('search', 18), h('span', null, 'Jump to a page'), h('kbd', null, /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘K' : 'Ctrl K'));
   const topInbox = have('inbox') ? h('a', { href: '#/inbox', class: 'top-inbox', dataset: { key: 'inbox' }, 'aria-label': 'Inbox' }, icon('inbox', 22)) : null;
   if (topInbox) { if (!links.has('inbox')) links.set('inbox', []); links.get('inbox').push(topInbox); }
-  const topbar = h('header', { class: 'topbar' }, h('div', { class: 'top-brand' }, h('img', { class: 'brand-mark', src: '/brand/dayos-mark.svg', alt: 'DAY/OS', width: '30', height: '30' }), h('strong', null, ctx.me.tenant_name)), topSearch, topInbox);
+  const topbar = h('header', { class: 'topbar' }, h('div', { class: 'top-brand' }, h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: 'Verdynt/OS', width: '53', height: '30' }), h('strong', null, ctx.me.tenant_name)), topSearch, topInbox);
 
   function openSheet() {
     const items = [['Home', ['dashboard', 'inbox'].filter(have)], ...sections.map((g) => [g.name, g.keys]), ['You', personal]].filter(([, k]) => k.length);
@@ -130,7 +145,7 @@ export function buildFrame({ views, main, signOut }) {
       h('header', null, h('h2', null, 'Go to'), closeBtn),
       items.map(([name, keys]) => h('div', { class: 'sheet-group' }, h('p', { class: 'nav-title' }, name),
         h('div', { class: 'sheet-grid' }, keys.map((k) => { const a = h('a', { href: `#/${k}`, class: 'sheet-item', 'data-current': String(currentKey === k) }, icon(k, 22), h('span', null, byKey.get(k)), dots.has(k) ? h('span', { class: 'nav-badge dot', 'aria-label': 'new' }) : null); a.addEventListener('click', close); return a; })))),
-      signOutBtn);
+      h('div', { class: 'row' }, themeToggle('btn'), signOutBtn));
     const overlay = h('div', { class: 'overlay' }, sheet);
     function close() { overlay.remove(); document.removeEventListener('keydown', onKey); }
     const onKey = (e) => { if (e.key === 'Escape') close(); };

@@ -115,7 +115,7 @@ function publicGate(req, _res, next) {
       if (!t) return; // the page itself answers "not found"
       const s = await stateOf(t.id);
       if (s.status !== 'active' || !s.on.has(module)) throw new AppError(404, 'Page not found');
-      // A mountain whose DAY/OS subscription has lapsed takes no online orders or bookings (waivers and help still work).
+      // A mountain whose Verdynt/OS subscription has lapsed takes no online orders or bookings (waivers and help still work).
       if (['shop', 'school'].includes(module) && await require('./billing').publicBlocked(t.id, req.method)) throw new AppError(409, 'This mountain is not taking online orders right now. Please contact them directly.');
     }
   })().then(() => next(), next);

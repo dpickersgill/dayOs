@@ -5,7 +5,7 @@
 //
 // Guest payments are "direct charges" on the mountain's own connected Stripe account: every call that takes `account`
 // sends it as the Stripe-Account header, so the payment, its refunds and Stripe's fees all belong to that mountain.
-// Without `account` the call acts on the platform's own account (DAY/OS subscriptions, and the old guest payments).
+// Without `account` the call acts on the platform's own account (Verdynt/OS subscriptions, and the old guest payments).
 const crypto = require('crypto');
 const config = require('../config');
 const { AppError } = require('./errors');

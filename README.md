@@ -1,8 +1,8 @@
-# DAY/OS backend
+# Verdynt/OS backend
 
 Multi-tenant operations API for small and mid-size mountain operations, starting with ski areas. One deployment serves many mountains; each mountain's data is isolated by `tenant_id`.
 
-**Modules:** ticketing and passes, pricing, rentals, schedule and conditions, ski school, ski patrol, clubs and programs, workforce (staff, certifications, shifts, time clock). "DAY/OS" is a working name; trademark and domain availability are not checked.
+**Modules:** ticketing and passes, pricing, rentals, schedule and conditions, ski school, ski patrol, clubs and programs, workforce (staff, certifications, shifts, time clock). "Verdynt/OS" is a working name; trademark and domain availability are not checked.
 
 **Admin web app:** open the service URL in a browser. It is served by the same container from `public/` (plain JavaScript, no build step) and works on a phone. Roles see only the screens built for them: managers get a daily dashboard, schedule and prices; counter staff sell tickets and scan at the gate; patrol sets lift and trail status; instructors run rosters.
 
