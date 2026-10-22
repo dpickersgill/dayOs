@@ -5,6 +5,7 @@ const { pool, rows, one } = require('../db');
 const { crud } = require('../lib/crud');
 const { requireRole } = require('../middleware/auth');
 const { partialOf, z, dateStr, tierEnum, validate, paramId } = require('../lib/util');
+const GT = require('../lib/guesttypes');
 const { unitPrice, applyPromo } = require('../lib/pricing');
 const { notFound } = require('../lib/errors');
 const { audit } = require('../lib/audit');
@@ -39,10 +40,11 @@ products.get('/:id/pricing', requireRole('manager', 'counter'), async (req, res)
 products.put(
   '/:id/tiers',
   requireRole('manager'),
-  validate(z.object({ tiers: z.array(z.object({ tier: tierEnum, price_cents: z.number().int().min(0) })).max(5) })),
+  validate(z.object({ tiers: z.array(z.object({ tier: tierEnum, price_cents: z.number().int().min(0) })).max(40) })),
   async (req, res) => {
     const pid = paramId(req);
     if (!(await one(pool, 'SELECT id FROM products WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, pid]))) throw notFound('Product');
+    await GT.assertKnown(pool, req.auth.tenantId, req.body.tiers.map((t) => t.tier));
     for (const t of req.body.tiers) {
       await pool.query(
         'INSERT INTO price_tiers (tenant_id, product_id, tier, price_cents) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE price_cents = VALUES(price_cents)',
@@ -69,6 +71,7 @@ products.put(
   async (req, res) => {
     const pid = paramId(req);
     if (!(await one(pool, 'SELECT id FROM products WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, pid]))) throw notFound('Product');
+    await GT.assertKnown(pool, req.auth.tenantId, req.body.entries.map((e) => e.tier));
     for (const e of req.body.entries) {
       if (!e.blackout && e.price_cents === undefined) continue;
       // MySQL unique keys treat NULL tier as distinct, so clear the old row first.

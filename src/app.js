@@ -222,6 +222,7 @@ function createApp() {
   api.use('/people', people);
   api.use('/checkout', checkout);
   api.use('/terminal', require('./routes/terminal').router); // card readers at the counter
+  api.use('/guest-types', require('./routes/guesttypes')); // the kinds of guest a mountain prices by
   // Gift card codes are the secret, so balance checks are rate limited against guessing.
   api.use('/gift-cards', rateLimit({ windowMs: 60_000, max: 40, message: 'Too many gift card checks, slow down' }), giftCards);
   api.use('/crm', crm);

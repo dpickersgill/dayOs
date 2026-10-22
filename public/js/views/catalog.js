@@ -1,12 +1,57 @@
 import { get, post, put, patch, del } from '../api.js';
-import { h, clear, money, toCents, centsToInput, table, state, input, select, field, button, toast, formDialog, confirmDialog, dialog, tabs, val, num, fmtDate, label, empty } from '../ui.js';
+import { h, clear, money, toCents, centsToInput, table, state, input, select, field, button, toast, formDialog, confirmDialog, dialog, tabs, val, num, fmtDate, label, empty, isManager, errorBox } from '../ui.js';
+import { loadTypes, typeName, forget } from '../guesttypes.js';
 
 const KINDS = ['day_ticket', 'multi_day', 'season_pass', 'punch_card', 'lesson', 'rental', 'program', 'voucher'];
-const TIERS = ['adult', 'youth', 'child', 'senior', 'military'];
 
 export async function render(root) {
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Products and prices')),
-    tabs([['products', 'Products', drawProducts], ['promos', 'Promo codes', drawPromos]]));
+    tabs([['products', 'Products', drawProducts], ['types', 'Guest types', drawTypes], ['promos', 'Promo codes', drawPromos]]));
+}
+
+// ---------------------------------------------------------------- guest types (routes/guesttypes.js)
+const ageText = (t) => (t.min_age == null && t.max_age == null ? 'Any age (chosen at the counter)' : t.max_age == null ? `${t.min_age} and over` : !t.min_age ? `Under ${t.max_age + 1}` : `${t.min_age} to ${t.max_age}`);
+const off = (b, no) => { b.disabled = no; return b; };
+async function drawTypes(box) {
+  let types;
+  try { types = await loadTypes(true); } catch (err) { clear(box).append(errorBox(err)); return; }
+  const again = async () => { forget(); await drawTypes(box); };
+  const mgr = isManager();
+  const move = async (i, by) => {
+    const codes = types.map((t) => t.code); const [c] = codes.splice(i, 1); codes.splice(i + by, 0, c);
+    await post('/guest-types/order', { codes }); await again();
+  };
+  clear(box).append(h('div', { class: 'stack' },
+    h('p', { class: 'muted' }, 'The kinds of guest you price by. Each product can have its own price for each type; a type with no price uses the product’s base price. Online, a guest’s age on the day picks their type (the narrowest age range wins); types marked Online can also be chosen by guests who give no date of birth.'),
+    mgr ? h('div', { class: 'row' }, button('Add a guest type', () => editType(null, again), { kind: 'primary' })) : null,
+    table([
+      { head: 'Guest type', cell: (t) => h('span', null, h('strong', null, t.name), t.hidden ? [' ', state('Hidden', 'neutral')] : null) },
+      { head: 'Ages online', cell: (t) => ageText(t) },
+      { head: 'Online', cell: (t) => (t.online ? 'Can be chosen' : 'Counter only') },
+      { head: '', actions: true, cell: (t) => (mgr ? [
+        off(button('↑', () => move(types.indexOf(t), -1), { small: true, label: `Move ${t.name} up` }), types.indexOf(t) === 0),
+        off(button('↓', () => move(types.indexOf(t), 1), { small: true, label: `Move ${t.name} down` }), types.indexOf(t) === types.length - 1),
+        button('Edit', () => editType(t, again), { small: true }),
+        button(t.hidden ? 'Show' : 'Hide', async () => { await patch(`/guest-types/${t.code}`, { hidden: !t.hidden }); toast(t.hidden ? `${t.name} is back` : `${t.name} is hidden: no longer sold`); await again(); }, { small: true }),
+        button('Delete', () => confirmDialog(`Delete ${t.name}?`, 'Only a type that has never had a price or a sale can be deleted. Otherwise, hide it.', 'Delete', async () => { await del(`/guest-types/${t.code}`); toast('Deleted'); await again(); }, { danger: true }), { small: true }),
+      ] : null) },
+    ], types)));
+}
+function editType(t, done) {
+  const name = input({ name: 'name', required: true, maxlength: 60, value: t ? t.name : '', placeholder: 'For example: College, Local, Twilight' });
+  const min = input({ name: 'min_age', type: 'number', min: 0, max: 120, value: t && t.min_age != null ? String(t.min_age) : '' });
+  const max = input({ name: 'max_age', type: 'number', min: 0, max: 120, value: t && t.max_age != null ? String(t.max_age) : '' });
+  const online = h('input', { type: 'checkbox', name: 'online', checked: t ? t.online : true });
+  formDialog(t ? `Edit ${t.name}` : 'Add a guest type', h('div', { class: 'stack' }, field('Name', name),
+    h('div', { class: 'form' }, field('From age (optional)', min), field('To age (optional)', max)),
+    h('p', { class: 'muted small' }, 'Leave the ages blank for a type staff choose at the counter, like Military or Local.'),
+    h('label', { class: 'check-row' }, online, h('span', null, 'Guests can choose it online when they give no date of birth'))), async (fd) => {
+    const n = (k) => (val(fd, k) === '' || val(fd, k) === undefined ? null : Number(val(fd, k)));
+    const body = { name: val(fd, 'name'), min_age: n('min_age'), max_age: n('max_age'), online: online.checked };
+    if (t) await patch(`/guest-types/${t.code}`, body); else await post('/guest-types', body);
+    toast(t ? 'Saved' : 'Guest type added');
+    await done();
+  }, { submitText: t ? 'Save' : 'Add guest type' });
 }
 
 function need(cents, name) {
@@ -79,13 +124,16 @@ function editProduct(p, done) {
 }
 
 async function pricing(p) {
-  const { tiers, calendar } = await get(`/products/${p.id}/pricing`);
+  const [{ tiers, calendar }, types] = await Promise.all([get(`/products/${p.id}/pricing`), loadTypes(true)]);
   const have = new Map(tiers.map((t) => [t.tier, t.price_cents]));
+  // The visible guest types, plus any hidden one that still has a price here (so it can be seen and cleared).
+  const TIERS = types.filter((t) => !t.hidden || have.has(t.code)).map((t) => t.code);
+  const nameOf = (c) => { const t = types.find((x) => x.code === c); return t ? `${t.name}${t.hidden ? ' (hidden)' : ''}` : typeName(c); };
   const tierInputs = TIERS.map((t) => input({ name: `tier_${t}`, inputmode: 'decimal', value: have.has(t) ? centsToInput(have.get(t)) : '', placeholder: money(p.base_price_cents) }));
-  const tierForm = h('div', { class: 'form' }, TIERS.map((t, i) => field(label(t), tierInputs[i])));
+  const tierForm = h('div', { class: 'form' }, TIERS.map((t, i) => field(nameOf(t), tierInputs[i])));
   const saveTiers = button('Save prices by guest type', async () => {
     const out = [];
-    TIERS.forEach((t, i) => { const v = tierInputs[i].value.trim(); if (v) out.push({ tier: t, price_cents: need(toCents(v), `${label(t)} price`) }); });
+    TIERS.forEach((t, i) => { const v = tierInputs[i].value.trim(); if (v) out.push({ tier: t, price_cents: need(toCents(v), `${nameOf(t)} price`) }); });
     await put(`/products/${p.id}/tiers`, { tiers: out });
     toast('Prices saved');
   }, { kind: 'primary' });
@@ -94,13 +142,13 @@ async function pricing(p) {
   const drawCal = (rows) => {
     clear(calBody).append(rows.length ? table([
       { head: 'Date', cell: (r) => fmtDate(r.on_date) },
-      { head: 'Guest type', cell: (r) => (r.tier ? label(r.tier) : 'Everyone') },
+      { head: 'Guest type', cell: (r) => (r.tier ? nameOf(r.tier) : 'Everyone') },
       { head: 'Price', num: true, cell: (r) => (r.blackout ? 'Not sold' : money(r.price_cents)) },
     ], rows) : h('p', { class: 'muted' }, 'No date-specific prices yet.'));
   };
   drawCal(calendar);
   const d = input({ type: 'date', name: 'date' });
-  const tierSel = select([['', 'Everyone'], ...TIERS.map((t) => [t, label(t)])], '', { name: 'tier' });
+  const tierSel = select([['', 'Everyone'], ...TIERS.map((t) => [t, nameOf(t)])], '', { name: 'tier' });
   const price = input({ name: 'price', inputmode: 'decimal', placeholder: '79.00' });
   const black = h('input', { type: 'checkbox', name: 'blackout' });
   const addDate = button('Set date price', async () => {

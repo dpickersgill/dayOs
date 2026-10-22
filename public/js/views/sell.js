@@ -1,5 +1,6 @@
 // Sell: one menu for everything the mountain sells (tickets, lessons, rentals, program places, gift cards), one basket,
 // and the customer's details added at the end. The gate scanner is its own page (gate.js).
+import { loadTypes, saleOptions, typeName } from '../guesttypes.js';
 import { get, post } from '../api.js';
 import { h, clear, isManager, money, toCents, table, state, input, select, field, button, toast, dialog, formDialog, todayStr, fmtDate, fmtDateTime, label, empty, errorBox, tabs, fail, fmtTime, addDays } from '../ui.js';
 import { loadCustomerForm } from './customer-form.js';
@@ -8,7 +9,6 @@ import { drawerDialog } from './till.js';
 import { printButtons } from '../print.js';
 import { shareButton } from '../share.js';
 
-const TIERS = ['adult', 'youth', 'child', 'senior', 'military'];
 
 // Whether this cashier has a drawer open, shown in the page header, so cash is always taken into a drawer that gets counted.
 const drawer = { open: false, float: 0 };
@@ -36,7 +36,8 @@ export async function render(root, params = []) {
 const ICON = { ticket: 'Ticket', lesson: 'Lesson', lesson_package: 'Lesson package', rental: 'Rental', program: 'Program', gift_card: 'Gift card' };
 
 async function sellPanel(root) {
-  const [menu, def] = await Promise.all([get('/checkout/menu'), loadCustomerForm(true)]);
+  const [menu, def, types] = await Promise.all([get('/checkout/menu'), loadCustomerForm(true), loadTypes()]);
+  const { options: TIERS, first: FIRST } = saleOptions(types);
   const basket = [];
   const promoIn = input({ name: 'promo', autocapitalize: 'characters', placeholder: 'Promo code', 'aria-label': 'Promo code' });
   const basketBox = h('div', { class: 'stack', 'aria-live': 'polite' });
@@ -44,7 +45,7 @@ async function sellPanel(root) {
   const countBadge = h('span', { class: 'count', hidden: true });
   const quoteMsg = h('div');
   let quote = null;
-  const tier = select(TIERS, 'adult', { name: 'tier', 'aria-label': 'Guest type' });
+  const tier = select(TIERS, FIRST, { name: 'tier', 'aria-label': 'Guest type' });
   const date = input({ type: 'date', value: menu.today, min: menu.today, name: 'date', 'aria-label': 'Valid on' });
 
   const same = (a, b) => a.type === b.type && (a.type === 'ticket' ? a.product_id === b.product_id && a.tier === b.tier && a.valid_on === b.valid_on : false);
@@ -76,7 +77,7 @@ async function sellPanel(root) {
     }],
     ['lessons', 'Lessons', (b) => {
       if (!menu.lessons.length && !(menu.packages || []).length) { b.append(empty('No lessons are scheduled in the next two weeks.', isManager() ? h('a', { class: 'btn primary', href: '#/school' }, 'Schedule a lesson') : null)); return; }
-      const t = select(TIERS, 'adult', { name: 'lesson-tier', 'aria-label': 'Student type' });
+      const t = select(TIERS, FIRST, { name: 'lesson-tier', 'aria-label': 'Student type' });
       b.append(h('div', { class: 'menu-tools' }, field('Student type', t)), table([
         { head: 'When', cell: (s) => fmtDateTime(s.starts_at) },
         { head: 'Lesson', cell: (s) => h('span', null, `${s.name}, ${label(s.discipline)}, ${label(s.ability_level)}`, s.format && s.format !== 'group' ? h('span', { class: 'muted' }, `  ${label(s.format)}`) : null, s.meeting_place ? h('div', { class: 'muted small' }, `Meet: ${s.meeting_place}`) : null) },
@@ -92,7 +93,7 @@ async function sellPanel(root) {
     }],
     ['rentals', 'Rentals', (b) => {
       if (!menu.rentals.length) { b.append(empty('No rental packages yet. Add a product of type "rental", such as "Adult ski package".', isManager() ? h('a', { class: 'btn primary', href: '#/catalog' }, 'Add a package') : null)); return; }
-      const t = select(TIERS, 'adult', { name: 'rental-tier', 'aria-label': 'Renter type' });
+      const t = select(TIERS, FIRST, { name: 'rental-tier', 'aria-label': 'Renter type' });
       const stock = Object.entries(menu.stock).map(([k, n]) => `${label(k)} ${n}`).join(', ');
       b.append(h('div', { class: 'menu-tools' }, field('Renter type', t)), h('p', { class: 'muted small' }, stock ? `Available now: ${stock}.` : 'No gear is available right now.'),
         h('div', { class: 'tiles' }, menu.rentals.map((p) => h('button', { type: 'button', class: 'tile', 'data-product': p.id, onclick: () => add({ type: 'rental', product_id: p.id, name: p.name, tier: t.value, quantity: 1, items: [], detail: `${t.value}, ${menu.today}${p.valid_days > 1 ? `, ${p.valid_days} days` : ''}` }) },
@@ -268,6 +269,6 @@ async function refund(o, done) {
 
 function showTickets(box, out, append = false) {
   const sec = h('section', { class: 'section' }, h('header', null, h('h2', null, `${out.tickets.length} ticket${out.tickets.length === 1 ? '' : 's'}`), h('p', null, 'Give each guest their code or print it.')),
-    h('div', { class: 'codes' }, out.tickets.map((t) => h('div', { class: 'code' }, t.code, h('small', null, [t.product, t.tier ? label(t.tier) : null, t.valid_from === t.valid_to ? fmtDate(t.valid_from) : `${fmtDate(t.valid_from)} to ${fmtDate(t.valid_to)}`, t.status && t.status !== 'active' ? label(t.status) : null].filter(Boolean).join(', '))))));
+    h('div', { class: 'codes' }, out.tickets.map((t) => h('div', { class: 'code' }, t.code, h('small', null, [t.product, t.tier ? typeName(t.tier) : null, t.valid_from === t.valid_to ? fmtDate(t.valid_from) : `${fmtDate(t.valid_from)} to ${fmtDate(t.valid_to)}`, t.status && t.status !== 'active' ? label(t.status) : null].filter(Boolean).join(', '))))));
   if (append) box.append(sec); else clear(box).append(sec);
 }

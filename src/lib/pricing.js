@@ -13,6 +13,7 @@ const { allowedOn, dayName, daysText } = require('./saledays');
  * A blackout row for that date (tier-specific or all tiers) blocks the sale.
  */
 async function unitPrice(db, tenantId, productId, tier, date) {
+  await require('./guesttypes').assertKnown(db, tenantId, [tier], { forSale: true });
   const product = await one(db, 'SELECT * FROM products WHERE tenant_id = ? AND id = ?', [tenantId, productId]);
   if (!product) throw notFound('Product');
   if (!product.active) throw conflict('Product is not on sale');

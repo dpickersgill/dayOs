@@ -458,6 +458,27 @@ const pinSteps = [
   ['park_placements.accuracy_m', (c) => columnExists(c, 'park_placements', 'accuracy_m'), "ALTER TABLE park_placements ADD COLUMN accuracy_m SMALLINT UNSIGNED NULL, ADD COLUMN placed_how ENUM('gps','map','drag','copy') NULL"],
 ];
 
+// Guest types each mountain can edit (2026.10.29). The fixed list of five becomes a table per mountain (made with the
+// same five the first time it is read), and the three columns that held a type take any code, keeping every value.
+const guestTypeSteps = [
+  ['guest_types', (c) => tableExists(c, 'guest_types'), `CREATE TABLE guest_types (
+    id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id  BIGINT UNSIGNED NOT NULL,
+    code       VARCHAR(30) NOT NULL,
+    name       VARCHAR(60) NOT NULL,
+    min_age    TINYINT UNSIGNED NULL,
+    max_age    TINYINT UNSIGNED NULL,
+    online     TINYINT(1) NOT NULL DEFAULT 1,
+    hidden     TINYINT(1) NOT NULL DEFAULT 0,
+    sort       SMALLINT NOT NULL DEFAULT 100,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_guest_type (tenant_id, code)
+  ) ENGINE=InnoDB`],
+  ['price_tiers.tier any code', (c) => columnTypeHas(c, 'price_tiers', 'tier', 'varchar'), "ALTER TABLE price_tiers MODIFY tier VARCHAR(30) NOT NULL"],
+  ['price_calendar.tier any code', (c) => columnTypeHas(c, 'price_calendar', 'tier', 'varchar'), 'ALTER TABLE price_calendar MODIFY tier VARCHAR(30) NULL'],
+  ['order_items.tier any code', (c) => columnTypeHas(c, 'order_items', 'tier', 'varchar'), "ALTER TABLE order_items MODIFY tier VARCHAR(30) NOT NULL DEFAULT 'adult'"],
+];
+
 const lessonCancelSteps = [
   ['lesson_sessions.cancel_reason', (c) => columnExists(c, 'lesson_sessions', 'cancel_reason'), 'ALTER TABLE lesson_sessions ADD COLUMN cancel_reason VARCHAR(300) NULL, ADD COLUMN cancelled_at DATETIME NULL, ADD COLUMN cancelled_by BIGINT UNSIGNED NULL'],
 ];
@@ -626,7 +647,7 @@ async function main() {
   await seedPlans(conn);
   await seedPatrolPlan(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

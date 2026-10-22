@@ -2,6 +2,7 @@
 // Pages are built on screen in a dialog and printed with the browser's own print command; the print style sheet hides
 // everything but the sheet, so any printer works, including a receipt printer.
 
+import { typeName } from './guesttypes.js';
 import { get } from './api.js';
 import { h, clear, money, label, fmtDate, fmtDateTime, button, dialog, toast, loading, errorBox } from './ui.js';
 import { code128, qr } from './barcode.js';
@@ -13,7 +14,7 @@ const cardText = (p) => (p.card_last4 ? `${p.card_brand ? `${label(p.card_brand)
 /** One line of the receipt: what it was, who for, and what it cost after its share of any discount and its tax. */
 function lineText(l) {
   const bits = [l.name];
-  if (l.line_kind === 'ticket' || l.line_kind === 'rental') bits.push(label(l.tier));
+  if (l.line_kind === 'ticket' || l.line_kind === 'rental') bits.push(typeName(l.tier));
   return bits.join(', ');
 }
 
@@ -50,7 +51,7 @@ export function ticketSlips(data, { wristband = false } = {}) {
   const m = data.mountain;
   return data.tickets.filter((t) => t.status !== 'void').map((t) => h('article', { class: wristband ? 'sheet slip wristband' : 'sheet slip', 'data-sheet': 'ticket', 'data-code': t.code },
     h('header', null, h('strong', null, m.name), h('span', null, t.product)),
-    h('div', { class: 'slip-who' }, nameOf(t) || 'Guest', h('small', null, [label(t.tier), t.kind === 'season_pass' ? 'Season pass' : null].filter(Boolean).join(', '))),
+    h('div', { class: 'slip-who' }, nameOf(t) || 'Guest', h('small', null, [typeName(t.tier), t.kind === 'season_pass' ? 'Season pass' : null].filter(Boolean).join(', '))),
     h('div', { class: 'slip-when' }, range(t.valid_from, t.valid_to), t.uses_remaining !== null && t.uses_remaining !== undefined ? ` · ${t.uses_remaining} ride${t.uses_remaining === 1 ? '' : 's'}` : ''),
     h('div', { class: 'slip-codes' }, code128(t.code, { height: wristband ? 36 : 54, module: wristband ? 1 : 2 }), wristband ? null : qr(t.code, { size: 96 })),
     h('div', { class: 'slip-code' }, t.code)));

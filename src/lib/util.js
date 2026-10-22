@@ -10,7 +10,8 @@ const dateTimeStr = z
   .regex(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/, 'Use YYYY-MM-DDTHH:MM[:SS]');
 const timeStr = z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, 'Use HH:MM[:SS]');
 const id = z.coerce.number().int().positive();
-const tierEnum = z.enum(['adult', 'youth', 'child', 'senior', 'military']);
+// A guest type's code (lib/guesttypes.js): each mountain has its own list; routes check the code is one of them.
+const tierEnum = z.string().trim().toLowerCase().regex(/^[a-z0-9_]{1,30}$/, 'Choose a guest type');
 
 /** Express middleware: validate req.body with a zod schema and replace it with the parsed value. */
 function validate(schema) {

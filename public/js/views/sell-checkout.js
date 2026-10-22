@@ -2,6 +2,7 @@
 // rental or program place is for), then how it is paid. The counter builds the basket first; this is where the
 // customer's details are added. The receipt at the end shows ticket and gift card codes, change due and bookings.
 
+import { typeName } from '../guesttypes.js';
 import { get, post } from '../api.js';
 import { h, clear, money, toCents, centsToInput, state, input, select, field, button, toast, dialog, label, errorBox, fmtDateTime, appendAll } from '../ui.js';
 import { customerCapture } from './customer-form.js';
@@ -458,7 +459,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       h('div', { class: 'row print-actions' }, printButtons(out.id, { hasTickets: out.tickets.length > 0 })),
       out.change_due_cents ? h('div', { class: 'change-due', role: 'status' }, `Change due ${money(out.change_due_cents)}`) : null,
       out.customer ? h('p', { class: 'muted' }, out.customer.created ? 'New customer saved.' : 'Customer record updated.') : null,
-      codes(out.tickets.map((t) => h('div', { class: 'code' }, t.code, h('small', null, [t.holder, t.product, label(t.tier), t.valid_from === t.valid_to ? t.valid_from : `${t.valid_from} to ${t.valid_to}`].join(', ')))), `${out.tickets.length} ticket${out.tickets.length === 1 ? '' : 's'}`),
+      codes(out.tickets.map((t) => h('div', { class: 'code' }, t.code, h('small', null, [t.holder, t.product, typeName(t.tier), t.valid_from === t.valid_to ? t.valid_from : `${t.valid_from} to ${t.valid_to}`].join(', ')))), `${out.tickets.length} ticket${out.tickets.length === 1 ? '' : 's'}`),
       codes(out.gift_cards.map((g) => h('div', { class: 'code' }, g.code, h('small', null, `${money(g.amount_cents)}${g.recipient_name ? ` for ${g.recipient_name}` : ''}`))), 'Gift cards (give the guest the code)'),
       out.lessons.length ? h('section', { class: 'stack' }, h('h3', null, 'Lessons booked'), h('ul', { class: 'plain' }, out.lessons.map((l) => h('li', null, `${l.name}, ${fmtDateTime(l.starts_at)}`)))) : null,
       out.rentals.length ? h('section', { class: 'stack' }, h('h3', null, 'Gear out'), h('ul', { class: 'plain' }, out.rentals.map((r) => h('li', null, `${r.items.join(', ')}, due back ${fmtDateTime(r.due_at)}`)))) : null,

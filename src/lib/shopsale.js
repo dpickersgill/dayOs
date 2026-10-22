@@ -30,7 +30,8 @@ const { money } = require('./format');
 const ADDON_KINDS = ['lesson', 'rental', 'voucher'];
 const MAX_ADDON_QTY = 10;
 const GIFT_MIN = 500; const GIFT_MAX = 100000; // same limits as the ticket window
-const AGE_GROUPS = ['child', 'youth', 'adult', 'senior'];
+// The age groups a guest without a date of birth can pick online: the mountain's visible guest types marked for online.
+const onlineTypes = async (db, tenantId) => (await require('./guesttypes').list(db, tenantId, { visibleOnly: true })).filter((t) => t.online).map((t) => t.code);
 const LIMITED_KINDS = ['day_ticket', 'multi_day']; // passes are not counted against a day's limit
 /** "Buy online and save": percent off when the visit is at least advance_days away. Online only. */
 function advance(product, today, day, cents) {
@@ -104,9 +105,9 @@ async function quote(conn, tenant, items, extras = {}) {
     const h = it.holder;
     if (h.date_of_birth && h.date_of_birth > today) throw bad('Date of birth cannot be in the future');
     if (product.kind === 'season_pass' && !h.date_of_birth) throw bad('A season pass needs the holder\'s date of birth');
-    if (!h.date_of_birth && !AGE_GROUPS.includes(h.age_group)) throw bad('Pick an age group for each ticket');
+    if (!h.date_of_birth && !(await onlineTypes(conn, tenant.id)).includes(h.age_group)) throw bad('Pick an age group for each ticket');
     if (h.photo && product.kind !== 'season_pass') delete h.photo;
-    const tier = h.date_of_birth ? tierFor(h.date_of_birth, day) : h.age_group;
+    const tier = h.date_of_birth ? await tierFor(conn, tenant.id, h.date_of_birth, day) : h.age_group;
     const base = await unitPrice(conn, tenant.id, product.id, tier, day);
     const adv = advance(product, today, day, base.cents);
     const cents = adv.cents;

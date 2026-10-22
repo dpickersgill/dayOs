@@ -113,7 +113,7 @@ const holderSchema = z.object({
   first_name: z.string().trim().min(1).max(60),
   last_name: z.string().trim().min(1).max(60),
   date_of_birth: dateStr.optional(),
-  age_group: z.enum(['child', 'youth', 'adult', 'senior']).optional(),
+  age_group: z.string().trim().toLowerCase().max(30).optional(), // a guest type code marked for online sale
   photo: z.string().max(120000).regex(/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/, 'The photo must be a JPEG').optional(), // season pass holders only
 });
 const itemSchema = z.object({ product_id: z.number().int().positive(), valid_on: dateStr.optional(), holder: holderSchema });
@@ -140,6 +140,7 @@ publicRouter.get('/:slug/shop', async (req, res) => {
     out.push({ id: p.id, kind: p.kind, name: p.name, valid_days: p.valid_days, uses: p.uses, base_price_cents: p.base_price_cents, sale_days: p.sale_days, online_daily_limit: p.online_daily_limit, kind_limited: false, prices: tiers, blackout_dates: blackouts.map((b) => String(b.on_date).slice(0, 10)) });
   }
   const closed = await shop.closedDates(pool, t, out);
+  const guestTypes = (await require('../lib/guesttypes').list(pool, t.id, { visibleOnly: true })).map((g) => ({ code: g.code, name: g.name, online: g.online, min_age: g.min_age, max_age: g.max_age }));
   for (const p of out) { p.closed_dates = closed.get(p.id); delete p.sale_days; delete p.online_daily_limit; delete p.kind_limited; }
   const brand = await one(pool, 'SELECT color, logo, hero, opening_day, opening_note FROM shop_brand WHERE tenant_id = ?', [t.id]);
   const [cal, snow, lifts, trails] = await Promise.all([
@@ -150,7 +151,7 @@ publicRouter.get('/:slug/shop', async (req, res) => {
   ]);
   const conditions = (cal || snow || Number(lifts.total)) ? { status: cal ? cal.status : null, open_time: cal ? cal.open_time : null, close_time: cal ? cal.close_time : null, base_in: snow ? snow.base_in : null, new_snow_in: snow ? snow.new_snow_in : null, lifts_open: Number(lifts.total) ? Number(lifts.open || 0) : null, lifts_total: Number(lifts.total), trails_open: Number(trails.total) ? Number(trails.open || 0) : null, trails_total: Number(trails.total) } : null;
   const addons = await rows(pool, `SELECT id, kind, name, valid_days, base_price_cents FROM products WHERE tenant_id = ? AND active = 1 AND online = 1 AND kind IN ('lesson','rental','voucher') ORDER BY FIELD(kind, 'lesson','rental','voucher'), name`, [t.id]);
-  res.json({ addons: addons.map((a) => ({ id: a.id, kind: a.kind, name: a.name, valid_days: a.valid_days, price_cents: a.base_price_cents })), gift: { min_cents: 500, max_cents: 100000 }, mountain: t.name, brand: brand ? { ...brand, opening_day: brand.opening_day ? String(brand.opening_day).slice(0, 10) : null } : null, conditions, phone: t.phone, message: t.shop_message, open: t.open, today, waiver_text: t.waiver_text || null, products: out });
+  res.json({ addons: addons.map((a) => ({ id: a.id, kind: a.kind, name: a.name, valid_days: a.valid_days, price_cents: a.base_price_cents })), gift: { min_cents: 500, max_cents: 100000 }, mountain: t.name, brand: brand ? { ...brand, opening_day: brand.opening_day ? String(brand.opening_day).slice(0, 10) : null } : null, conditions, phone: t.phone, message: t.shop_message, open: t.open, today, waiver_text: t.waiver_text || null, products: out, guest_types: guestTypes });
 });
 
 publicRouter.get('/:slug/shop/month', async (req, res) => {

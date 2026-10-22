@@ -22,7 +22,9 @@ const money = (c) => (c % 100 === 0 ? `$${c / 100}` : `$${(c / 100).toFixed(2)}`
 const dateOf = (s) => new Date(Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)));
 const dayLong = (s) => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }).format(dateOf(s.slice(0, 10)));
 const addDay = (s, n) => { const d = dateOf(s); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+// Guest type names: the mountain's own (sent with the shop), falling back to the five every mountain starts with.
 const TIER = { child: 'Child', youth: 'Youth', adult: 'Adult', senior: 'Senior', military: 'Military' };
+let ONLINE_TYPES = ['child', 'youth', 'adult', 'senior'];
 const lab = (id, text, el, hint) => h('div', { class: 'field' }, h('label', { for: id }, text), el, hint ? h('span', { class: 'hint' }, hint) : null);
 let uid = 0;
 const ES = {"Fill in every ticket to pay": "Completa cada boleto para pagar", "item": "artículo", "items": "artículos", "About": "Aprox.", "The exact total, with tax, shows when every ticket is filled in.": "El total exacto, con impuestos, aparece al completar cada boleto.", "Your order": "Tu pedido", "Have a promo code?": "¿Tienes un código promocional?", "Tell me if tickets open up": "Avísame si hay boletos", "You are on the list. We will email you once, if tickets open up.": "Estás en la lista. Te escribiremos una vez si hay boletos.", "This day is sold out": "Este día está agotado", "Email": "Correo", "Name": "Nombre", "How many tickets?": "¿Cuántos boletos?", "Send enquiry": "Enviar consulta", "Thank you. We will be in touch.": "Gracias. Nos pondremos en contacto.", "Booking for a group of 6 or more?": "¿Reservas para un grupo de 6 o más?", "Schools, clubs and companies: tell us about your group and we will send a quote.": "Escuelas, clubes y empresas: cuéntanos de tu grupo y te enviaremos una cotización.", "Your name": "Tu nombre", "Group or organisation": "Grupo u organización", "Phone": "Teléfono", "How many people?": "¿Cuántas personas?", "Preferred day": "Día preferido", "Anything we should know?": "¿Algo que debamos saber?", "Promo code": "Código promocional", "Gift card": "Tarjeta de regalo", "Add-ons": "Extras", "quantity": "cantidad", "Give a gift card": "Regala una tarjeta", "Amount": "Monto", "Add gift card": "Agregar tarjeta de regalo", "Gift card amount": "Monto de la tarjeta", "Photo for the pass": "Foto para el pase", "A clear photo of the face, for the pass.": "Una foto clara del rostro, para el pase.", "Photo added.": "Foto agregada.", "Saved guests": "Invitados guardados", "Lift tickets and passes": "Boletos de remontes y pases", "Secure card payment": "Pago seguro con tarjeta", "1. Pick a day": "1. Elige un día", "2. Choose services": "2. Elige tus boletos", "3. Who is each ticket for?": "3. ¿Para quién es cada boleto?", "4. Your details": "4. Tus datos", "First name of the person using it": "Nombre de quien lo usará", "Last name": "Apellido", "First name": "Nombre", "Age group": "Grupo de edad", "Date of birth": "Fecha de nacimiento", "Sets the price": "Define el precio", "Needed for a season pass": "Necesario para un pase de temporada", "Choose…": "Elige…", "Remove": "Quitar", "Add a ticket": "Agregar boleto", "Add a ticket to start": "Agrega un boleto para empezar", "Mobile phone": "Teléfono móvil", "Email (we send the tickets here)": "Correo (aquí enviamos los boletos)", "Waiver": "Exención de responsabilidad", "Loading prices…": "Cargando precios…", "Nothing is on sale online for this day.": "No hay boletos en línea para este día.", "Online sales are closed": "Las ventas en línea están cerradas", "Online sales are not open right now.": "Las ventas en línea no están abiertas ahora.", "Everyone": "Todos", "Valid this day only.": "Válido solo este día.", "Payments are handled by Stripe. We never see or store your card number.": "Los pagos los procesa Stripe. Nunca vemos ni guardamos tu número de tarjeta.", "Taking you to the card page…": "Llevándote a la página de pago…", "Previous month": "Mes anterior", "Next month": "Mes siguiente", "Fill in your name, email and phone.": "Escribe tu nombre, correo y teléfono.", "Please read and accept the waiver.": "Lee y acepta la exención de responsabilidad.", "Please confirm you understand tickets are not refundable online.": "Confirma que entiendes que los boletos en línea no son reembolsables.", "Something went wrong. Please try again.": "Algo salió mal. Inténtalo de nuevo.", "Pick a day, choose your tickets, see the exact total, and pay by card. Your tickets arrive by email and on screen.": "Elige un día, elige tus boletos, ve el total exacto y paga con tarjeta. Recibirás los boletos por correo y en pantalla.", "Pick a day above to see what is on sale and the price for each age.": "Elige un día arriba para ver qué hay a la venta y el precio por edad.", "I understand tickets bought online are not refundable. If the mountain closes, I can call for help.": "Entiendo que los boletos comprados en línea no son reembolsables. Si la montaña cierra, puedo llamar para pedir ayuda.", "I have read the waiver. I accept it for myself and for any child under 18 in this order. Other adults in the order will sign at the mountain.": "He leído la exención. La acepto por mí y por cualquier menor de 18 años en este pedido. Los demás adultos firmarán en la montaña.", "Fill in the name and age group for every ticket.": "Completa el nombre y el grupo de edad de cada boleto.", "Leave this empty": "Deja esto vacío"};
@@ -117,7 +119,16 @@ async function showOrder(token) {
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const AGE_ES = { child: 'Niño (menor de 13)', youth: 'Joven (13 a 17)', adult: 'Adulto (18 a 64)', senior: 'Mayor (65 o más)' };
 const AGE_EN = { child: 'Child (under 13)', youth: 'Youth (13 to 17)', adult: 'Adult (18 to 64)', senior: 'Senior (65 and over)' };
-const AGE = new Proxy({}, { get: (_, k) => (LANG === 'es' ? AGE_ES : AGE_EN)[k] });
+// A type the mountain renamed or added shows its own name and ages; the five it started with keep their translations.
+let TYPES = null;
+const DEFAULT_NAMES = { child: 'Child', youth: 'Youth', adult: 'Adult', senior: 'Senior', military: 'Military' };
+const ages = (t) => (t.min_age == null && t.max_age == null ? '' : t.max_age == null ? (LANG === 'es' ? ` (${t.min_age} o más)` : ` (${t.min_age} and over)`)
+  : !t.min_age ? (LANG === 'es' ? ` (menor de ${t.max_age + 1})` : ` (under ${t.max_age + 1})`) : (LANG === 'es' ? ` (${t.min_age} a ${t.max_age})` : ` (${t.min_age} to ${t.max_age})`));
+const AGE = new Proxy({}, { get: (_, k) => {
+  const t = TYPES && TYPES.find((x) => x.code === k);
+  if (t && !(DEFAULT_NAMES[k] === t.name && (LANG === 'es' ? AGE_ES : AGE_EN)[k])) return `${t.name}${ages(t)}`;
+  return (LANG === 'es' ? AGE_ES : AGE_EN)[k] || (t ? t.name : DEFAULT_NAMES[k] || k);
+} });
 
 function groupBox() {
   const f = (id, props = {}) => h('input', { id, maxlength: 150, ...props });
@@ -140,7 +151,10 @@ function groupBox() {
 
 async function showShop() {
   let page;
-  try { page = await call('GET', ''); } catch (_) {
+  try {
+    page = await call('GET', '');
+    if (page.guest_types) { TYPES = page.guest_types; ONLINE_TYPES = TYPES.filter((t) => t.online).map((t) => t.code); for (const t of TYPES) TIER[t.code] = t.name; }
+  } catch (_) {
     clear(root).append(shell(h('section', { class: 'card stack' }, h('h1', null, 'Online sales are not available'), h('p', { class: 'muted' }, 'Please buy at the ticket window.')))); return;
   }
   document.title = `${page.mountain}: ${LANG === 'es' ? 'boletos y pases' : 'buy tickets and passes'}`;
@@ -246,7 +260,7 @@ async function showShop() {
     const l = h('input', { id: `l${id}`, autocomplete: 'off', maxlength: 60, required: true });
     const pass = p.kind === 'season_pass';
     const dob = h('input', { type: 'date', id: `b${id}`, max: today, required: true });
-    const age = h('select', { id: `a${id}`, required: true }, h('option', { value: '' }, T('Choose…')), ['child', 'youth', 'adult', 'senior'].map((k) => [k, AGE[k]]).map(([k, v]) => h('option', { value: k }, v)));
+    const age = h('select', { id: `a${id}`, required: true }, h('option', { value: '' }, T('Choose…')), ONLINE_TYPES.map((k) => [k, AGE[k]]).map(([k, v]) => h('option', { value: k }, v)));
     const priceEl = h('span', { class: 'line-price' });
     const badEl = h('span', { class: 'bad', role: 'alert' });
     const shot = { data: null };

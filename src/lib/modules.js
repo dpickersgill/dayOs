@@ -8,7 +8,7 @@ const { AppError } = require('./errors');
 // paths are matched against the API path after /api/v1 (for example /rentals/items).
 const MODULES = [
   { key: 'sell', label: 'Sell', blurb: 'Point of sale: tickets, passes, orders, gift cards and refunds.', needs: ['catalog'], paths: ['/checkout', '/gift-cards', '/orders', '/passes', '/terminal'] },
-  { key: 'catalog', label: 'Products and prices', blurb: 'The product list, promo codes and price rules.', paths: ['/products', '/pricing'] },
+  { key: 'catalog', label: 'Products and prices', blurb: 'The product list, promo codes and price rules.', paths: ['/products', '/pricing', '/guest-types'] },
   { key: 'gate', label: 'Gate', blurb: 'Scanning lift tickets and passes at the gate: barcodes, RFID cards and gate hardware.', paths: ['/tickets', '/access'] },
   { key: 'conditions', label: 'Lifts and trails', blurb: 'Lift and trail status, grooming, snow and weather, maintenance and daily reports.', paths: ['/schedule', '/ops'] },
   { key: 'assets', label: 'Assets and fleet (add-on)', blurb: 'The asset register for the fleet, lifts, snowmaking and buildings: meters, fuel, inspections, parts and stock, purchase orders, costs and QR tags. Off until the operator turns it on for a mountain.', addon: true, needs: ['conditions'], paths: ['/assets'] },

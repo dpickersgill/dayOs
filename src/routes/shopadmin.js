@@ -50,7 +50,7 @@ const applySchema = z.object({
   product_id: z.number().int().positive().nullable().optional(), // null or missing: every online day-ticket product (limits: the whole mountain)
   action: z.enum(['price', 'close', 'open', 'clear', 'limit', 'clear_limit']),
   price_cents: z.number().int().min(1).max(10000000).optional(),
-  tier: z.enum(['adult', 'youth', 'child', 'senior', 'military']).nullable().optional(),
+  tier: z.string().trim().toLowerCase().regex(/^[a-z0-9_]{1,30}$/).nullable().optional(), // a guest type code (lib/guesttypes.js)
   limit: z.number().int().min(0).max(1000000).optional(),
 });
 router.post('/calendar', requireRole('manager'), validate(applySchema), async (req, res) => {

@@ -59,6 +59,7 @@ router.get('/:slug/booking', async (req, res) => {
   const tiers = await rows(pool, 'SELECT product_id, tier, price_cents FROM price_tiers WHERE tenant_id = ?', [t.id]);
   res.set('Cache-Control', 'no-store');
   res.json({
+    guest_types: (await require('../lib/guesttypes').list(pool, t.id, { visibleOnly: true })).map((g) => ({ code: g.code, name: g.name })),
     mountain: t.name, phone: t.phone, message: t.booking_message, notice_hours: t.booking_notice_hours, cancel_hours: t.cancel_hours, waiver_text: t.waiver_text, pay_online: t.pay_online, policy: policyText(t), policy_tiers: policyTiers(t), policy_notes: policyNotes(t),
     lessons: sessions.map((s) => ({
       id: s.id, starts_at: s.starts_at, ends_at: s.ends_at, product: s.product, discipline: s.discipline, ability_level: s.ability_level, format: s.format, age_group: s.age_group, meeting_place: s.meeting_place,
