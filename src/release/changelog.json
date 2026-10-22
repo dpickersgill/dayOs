@@ -1,6 +1,25 @@
 {
   "releases": [
     {
+      "version": "2026.10.26",
+      "date": "2026-10-22",
+      "title": "Verdynt/OS: a new name and a new look",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "DAY/OS is now Verdynt/OS, with a new logo and a dark slate and gold look. Prefer the light look? Choose Light in the account menu. Printing always stays light."
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": null,
+          "text": "Adding Verdynt/OS to a phone's home screen works again, with the new icon."
+        }
+      ]
+    },
+    {
       "version": "2026.10.25",
       "date": "2026-10-19",
       "title": "Every release is checked on staging first",
