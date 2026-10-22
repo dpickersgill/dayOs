@@ -31,7 +31,8 @@ async function lessonsTab(root, { staff, certs, names }) {
   const from = input({ type: 'date', value: todayStr() });
   const to = input({ type: 'date', value: addDays(todayStr(), 14) });
   const body = h('div');
-  root.append(h('div', { class: 'row' }, isManager() ? button('Add lesson session', () => addSession(staff, certs, load), { kind: 'primary' }) : null, isManager() ? button('Add a series of days', () => addSeries(staff, certs, load)) : null),
+  root.append(h('div', { class: 'row' }, isManager() ? button('Add lesson session', () => addSession(staff, certs, load), { kind: 'primary' }) : null, isManager() ? button('Add a series of days', () => addSeries(staff, certs, load)) : null,
+    isManager() ? button('Cancel a day', () => cancelDays(load)) : null),
     h('div', { class: 'inline-form' }, field('From', from), field('To', to), button('Show', () => load(), { kind: 'primary' })), body);
 
   async function load() {
@@ -43,15 +44,84 @@ async function lessonsTab(root, { staff, certs, names }) {
         { head: 'Lesson', cell: (s) => h('span', null, h('strong', null, s.product), h('div', { class: 'muted small' }, `${label(s.discipline)}, ${label(s.ability_level)}`), pill(s), s.meeting_place ? h('div', { class: 'muted small' }, `Meet: ${s.meeting_place}`) : null) },
         { head: 'Instructor', cell: (s) => (s.instructor_id ? names.get(s.instructor_id) || 'Assigned' : state('Needs an instructor', 'warn')) },
         { head: 'Booked', num: true, cell: (s) => `${s.booked} of ${s.capacity}` },
-        { head: 'Status', cell: (s) => state(label(s.status), s.status === 'scheduled' ? 'good' : 'neutral') },
+        { head: 'Status', cell: (s) => h('span', null, state(label(s.status), s.status === 'scheduled' ? 'good' : s.status === 'cancelled' ? 'bad' : 'neutral'), s.cancel_reason ? h('div', { class: 'muted small' }, s.cancel_reason) : null) },
         { head: '', actions: true, cell: (s) => [
           button('Roster', () => roster(s, load), { small: true }),
-          isManager() ? button('Instructor', () => setInstructor(s, load), { small: true }) : null,
+          isManager() && s.status === 'scheduled' ? button('Instructor', () => setInstructor(s, load), { small: true }) : null,
+          isManager() && s.status === 'scheduled' ? button('Cancel', () => cancelOne(s, load), { small: true }) : null,
         ] },
       ], data, { rowClass: (s) => (s.status === 'scheduled' && !s.instructor_id ? 'attention' : null) }) : empty('No lessons in this range.'));
     } catch (err) { clear(body).append(errorBox(err)); }
   }
   await load();
+}
+
+// ---- cancelling lessons (routes/skischool.js, lib/lessoncancel.js)
+/** What cancelling does to the people on a lesson, in plain words, from the preview counts. */
+function consequences(list) {
+  const sum = (k) => list.reduce((n, s) => n + Number(s[k] || 0), 0);
+  const booked = sum('booked'); const pack = sum('on_package'); const online = sum('paid_online');
+  if (!booked) return h('p', null, 'Nobody is booked, so nobody needs telling.');
+  return h('ul', { class: 'plain stack' },
+    h('li', null, `${booked} booking${booked === 1 ? '' : 's'} cancelled, and everyone booked gets an email.`),
+    pack ? h('li', null, `${pack} package lesson${pack === 1 ? '' : 's'} go back on the package.`) : null,
+    online ? h('li', null, `${online} online payment${online === 1 ? ' is' : 's are'} refunded in full to the card.`) : null,
+    booked - pack - online > 0 ? h('li', null, 'Anyone who paid at the desk is listed afterwards, to refund at the counter.') : null);
+}
+/** After cancelling: who still needs a refund at the desk. */
+function afterCancel(results) {
+  const desk = results.flatMap((r) => r.desk_refunds || []);
+  const cards = results.flatMap((r) => r.card_refunds || []);
+  const body = h('div', { class: 'stack' },
+    h('p', null, `${results.length} lesson${results.length === 1 ? '' : 's'} cancelled. ${results.reduce((n, r) => n + r.emailed, 0)} email${results.reduce((n, r) => n + r.emailed, 0) === 1 ? '' : 's'} sent.`),
+    cards.length ? h('p', null, `Refunded to cards: ${cards.map((c) => `${c.name} ${money(c.amount_cents)}`).join(', ')}.`) : null,
+    desk.length ? h('div', { class: 'notice warn stack' }, h('b', null, 'Refund these at the desk'), h('ul', { class: 'plain' }, desk.map((d) => h('li', null, `${d.name}: ${money(d.amount_cents)}, order #${d.order_id}`))),
+      h('p', { class: 'small' }, 'Open each order under Sell, Sold today or Find an order, and refund the lesson.')) : null);
+  dialog('Lessons cancelled', body);
+}
+async function cancelOne(s, done) {
+  let p;
+  try { p = await get(`/skischool/sessions/${s.id}/cancel-preview`); } catch (err) { fail(err); return; }
+  const reason = input({ name: 'reason', required: true, maxlength: 300, placeholder: 'For example: high winds, lifts closed' });
+  const f = h('div', { class: 'stack' }, h('p', null, h('strong', null, `${s.product}, ${fmtRange(s.starts_at, s.ends_at)}`)), consequences([p]),
+    field('Reason', reason, 'Kept on the record and included in the email to guests.'));
+  const deletable = Number(p.ever_booked) === 0;
+  formDialog(deletable ? 'Cancel or delete this lesson' : 'Cancel this lesson', h('div', { class: 'stack' }, f,
+    deletable ? h('p', { class: 'muted small' }, 'Nobody has ever booked it. If it was added by mistake, you can delete it instead: ', button('Delete lesson', async () => {
+      await del(`/skischool/sessions/${s.id}`); toast('Lesson deleted'); document.querySelectorAll('.overlay').forEach((o) => o.remove()); await done();
+    }, { small: true })) : null), async (fd) => {
+    const r = await post(`/skischool/sessions/${s.id}/cancel`, { reason: val(fd, 'reason') });
+    toast('Lesson cancelled');
+    await done();
+    if (r.bookings) afterCancel([r]);
+  }, { submitText: 'Cancel lesson' });
+}
+async function cancelDays(done) {
+  const from = input({ type: 'date', name: 'from', value: todayStr(), required: true });
+  const to = input({ type: 'date', name: 'to', value: todayStr(), required: true });
+  const reason = input({ name: 'reason', required: true, maxlength: 300, placeholder: 'For example: storm, the mountain is closed' });
+  const list = h('div', { 'aria-live': 'polite' });
+  let seen = null;
+  const look = async () => {
+    clear(list);
+    try {
+      const r = await post('/skischool/sessions/cancel-days', { from: from.value, to: to.value, reason: reason.value.trim() || 'checking', preview: true });
+      seen = `${from.value}|${to.value}`;
+      appendAll(list, r.sessions.length ? [h('p', null, h('strong', null, `${r.sessions.length} lesson${r.sessions.length === 1 ? '' : 's'} will be cancelled:`)),
+        h('ul', { class: 'plain' }, r.sessions.map((s) => h('li', null, `${fmtRange(s.starts_at, s.ends_at)}, ${s.product}: ${s.booked} booked`))), consequences(r.sessions)]
+        : [empty('No lessons are scheduled on those days.')]);
+    } catch (err) { list.append(errorBox(err)); }
+  };
+  from.addEventListener('change', look); to.addEventListener('change', look);
+  formDialog('Cancel every lesson on a day', h('div', { class: 'stack' }, h('p', { class: 'muted' }, 'For a storm or a closure: every lesson from the first day to the last is cancelled, with refunds and emails as for one lesson.'),
+    h('div', { class: 'form' }, field('First day', from), field('Last day', to)), field('Reason', reason, 'Kept on the record and included in the email to guests.'), list), async (fd) => {
+    if (seen !== `${from.value}|${to.value}`) { await look(); throw new Error('Check the list of lessons, then press Cancel lessons again.'); }
+    const r = await post('/skischool/sessions/cancel-days', { from: val(fd, 'from'), to: val(fd, 'to'), reason: val(fd, 'reason') });
+    toast(`${r.cancelled} lesson${r.cancelled === 1 ? '' : 's'} cancelled`);
+    await done();
+    afterCancel(r.sessions);
+  }, { submitText: 'Cancel lessons', wide: true });
+  look();
 }
 
 const sessionFields = (products, staff, certs) => [

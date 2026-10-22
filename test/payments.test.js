@@ -251,3 +251,56 @@ test('the quote endpoint gives the exact total, tax included, and the page lists
   assert.equal(page.policy_tiers[0].from_hours, 48);
   assert.ok(page.policy_notes.length >= 1);
 });
+
+test('the mountain cancels a lesson: paid online refunded in full, package lesson given back, desk payment listed', async () => {
+  // Five hours out: a guest cancelling now would get nothing back, but the mountain cancelling refunds everything.
+  const info = await reserveAndPay(5);
+  const sid = sessionId;
+  const person = async (first) => (await pool.query('INSERT INTO people (tenant_id, first_name, last_name, email) VALUES (?, ?, ?, ?)', [tenantId, first, 'Guest', `${first.toLowerCase()}@x.test`]))[0].insertId;
+  const pack = await person('Pack');
+  const [cr] = await pool.query('INSERT INTO lesson_credits (tenant_id, person_id, product_id, total, used) VALUES (?, ?, ?, 3, 1)', [tenantId, pack, A.product]);
+  await pool.query("INSERT INTO lesson_bookings (tenant_id, session_id, person_id, credit_id, status) VALUES (?, ?, ?, ?, 'booked')", [tenantId, sid, pack, cr.insertId]);
+  const desk = await person('Desk');
+  const [o] = await pool.query("INSERT INTO orders (tenant_id, person_id, status, subtotal_cents, total_cents, tax_cents, channel) VALUES (?, ?, 'paid', 8000, 8480, 480, 'window')", [tenantId, desk]);
+  await pool.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, session_id, unit_price_cents, tax_cents) VALUES (?, ?, ?, 'lesson', ?, ?, 8000, 480)", [tenantId, o.insertId, A.product, desk, sid]);
+  await pool.query("INSERT INTO lesson_bookings (tenant_id, session_id, person_id, status) VALUES (?, ?, ?, 'booked')", [tenantId, sid, desk]);
+
+  const preview = await api('GET', `/skischool/sessions/${sid}/cancel-preview`, { token: A.owner });
+  assert.equal(preview.status, 200, preview.text);
+  assert.deepEqual([Number(preview.body.booked), Number(preview.body.on_package), Number(preview.body.paid_online)], [3, 1, 1]);
+  assert.equal((await api('POST', `/skischool/sessions/${sid}/cancel`, { token: A.owner, body: { reason: '' } })).status, 400, 'a reason is required');
+  assert.equal((await api('DELETE', `/skischool/sessions/${sid}`, { token: A.owner })).status, 409, 'a booked lesson cannot be deleted');
+
+  const before = calls.length;
+  const c = await api('POST', `/skischool/sessions/${sid}/cancel`, { token: A.owner, body: { reason: 'High winds, lifts closed' } });
+  assert.equal(c.status, 200, c.text);
+  assert.equal(c.body.bookings, 3); assert.equal(c.body.credits_returned, 1);
+  assert.deepEqual(c.body.card_refunds.map((r) => r.amount_cents), [8480], 'the full amount, whatever the tiers say');
+  assert.equal(calls.slice(before).find((x) => x.path === '/v1/refunds').params.amount, '8480');
+  assert.deepEqual(c.body.desk_refunds.map((r) => [r.order_id, r.amount_cents]), [[o.insertId, 8480]]);
+  assert.equal(c.body.emailed, 3, 'one email per address');
+  const [s] = await q('SELECT status, cancel_reason, cancelled_by FROM lesson_sessions WHERE id = ?', [sid]);
+  assert.equal(s.status, 'cancelled'); assert.equal(s.cancel_reason, 'High winds, lifts closed'); assert.ok(s.cancelled_by);
+  assert.equal((await q("SELECT COUNT(*) AS n FROM lesson_bookings WHERE session_id = ? AND status = 'booked'", [sid]))[0].n, 0);
+  assert.equal((await q('SELECT used FROM lesson_credits WHERE id = ?', [cr.insertId]))[0].used, 0, 'the package lesson is back');
+  assert.equal((await pub('POST', `/requests/${info.reference}/status`, { body: { email: 'pam@x.test' } })).body.status, 'cancelled');
+  const page = await pub('GET', '/booking');
+  assert.equal(page.status, 200); assert.ok(Array.isArray(page.body.lessons));
+  assert.ok(!page.body.lessons.some((x) => Number(x.id) === Number(sid)), 'off the booking page');
+  assert.equal((await api('POST', `/skischool/sessions/${sid}/cancel`, { token: A.owner, body: { reason: 'Again' } })).status, 409, 'not twice');
+});
+
+test('a storm day cancels every lesson on it; a lesson nobody booked can be deleted; staff cannot cancel', async () => {
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(Date.now() + 30 * 86_400_000));
+  const add = async (hour) => (await pool.query("INSERT INTO lesson_sessions (tenant_id, product_id, starts_at, ends_at, capacity, status) VALUES (?, ?, ?, ?, 4, 'scheduled')", [tenantId, A.product, `${day} ${hour}:00:00`, `${day} ${hour + 2}:00:00`]))[0].insertId;
+  const a = await add(9); const b = await add(13); const lonely = await add(16);
+  const look = await api('POST', '/skischool/sessions/cancel-days', { token: A.owner, body: { from: day, to: day, reason: 'Storm', preview: true } });
+  assert.deepEqual(look.body.sessions.map((s) => Number(s.id)), [a, b, lonely]);
+  assert.equal((await q('SELECT status FROM lesson_sessions WHERE id = ?', [a]))[0].status, 'scheduled', 'a preview changes nothing');
+  assert.equal((await api('DELETE', `/skischool/sessions/${lonely}`, { token: A.owner })).status, 200, 'never booked: deleted');
+  assert.equal((await q('SELECT COUNT(*) AS n FROM lesson_sessions WHERE id = ?', [lonely]))[0].n, 0);
+  const done = await api('POST', '/skischool/sessions/cancel-days', { token: A.owner, body: { from: day, to: day, reason: 'Storm' } });
+  assert.equal(done.status, 200, done.text); assert.equal(done.body.cancelled, 2);
+  assert.deepEqual((await q('SELECT DISTINCT status FROM lesson_sessions WHERE id IN (?, ?)', [a, b])).map((r) => r.status), ['cancelled']);
+  assert.equal((await api('POST', '/skischool/sessions/cancel-days', { token: A.owner, body: { from: day, to: day, reason: 'Storm' } })).status, 400, 'nothing left to cancel');
+});

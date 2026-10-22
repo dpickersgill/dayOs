@@ -182,6 +182,38 @@ router.post(
   },
 );
 
+// ---------------------------------------------------------------- cancelling and deleting lessons (lib/lessoncancel.js)
+const LC = require('../lib/lessoncancel');
+const reasonSchema = z.object({ reason: z.string().trim().min(3, 'Say why the lesson is cancelled').max(300) });
+
+/** What cancelling one lesson would do: bookings, package lessons and online payments on it. */
+router.get('/sessions/:id/cancel-preview', requireRole('manager'), async (req, res) => {
+  const [s] = await LC.preview(req.auth.tenantId, 's.id = ?', [paramId(req)]);
+  if (!s) throw notFound('Lesson');
+  res.json(s);
+});
+router.post('/sessions/:id/cancel', requireRole('manager'), validate(reasonSchema), async (req, res) => {
+  res.json(await LC.cancelSession(req.auth.tenantId, paramId(req), req.body.reason, req));
+});
+router.delete('/sessions/:id', requireRole('manager'), async (req, res) => {
+  await LC.deleteSession(req.auth.tenantId, paramId(req), req);
+  res.json({ ok: true });
+});
+
+/** A storm day: every lesson from one date to another. preview: true lists them; otherwise each is cancelled in turn. */
+router.post('/sessions/cancel-days', requireRole('manager'), validate(reasonSchema.extend({
+  from: dateStr, to: dateStr, preview: z.boolean().optional(),
+})), async (req, res) => {
+  const { from, to } = req.body;
+  if (to < from) throw bad('The last day is before the first');
+  const list = await LC.preview(req.auth.tenantId, 'DATE(s.starts_at) BETWEEN ? AND ?', [from, to]);
+  if (req.body.preview) return res.json({ sessions: list });
+  if (!list.length) throw bad('No lessons are scheduled on those days');
+  const done = [];
+  for (const s of list) done.push(await LC.cancelSession(req.auth.tenantId, s.id, req.body.reason, req));
+  res.json({ cancelled: done.length, sessions: done });
+});
+
 router.patch('/bookings/:id', requireRole(...school), validate(z.object({ status: z.enum(['booked', 'attended', 'no_show', 'cancelled']) })), async (req, res) => {
   const { tenantId } = req.auth;
   await tx(async (conn) => {
