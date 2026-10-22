@@ -219,11 +219,70 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   const step2Error = h('div');
   const complete = button('Complete sale', () => finish(), { kind: 'primary' });
 
+  // ---- card readers at the counter (routes/terminal.js): the amount goes to the reader, the guest taps, inserts or swipes.
+  let readers = []; let readerTest = false; let currentWay = null; let sold = false; let charging = null;
+  const readerPick = select([], '', { name: 'reader', 'aria-label': 'Card reader' });
+  const readerBox = h('div', { class: 'stack', 'aria-live': 'polite' });
+  get('/terminal/readers').then((r) => {
+    readers = r.readers || []; readerTest = Boolean(r.test_mode);
+    clear(readerPick).append(...readers.map((x) => h('option', { value: String(x.id) }, x.label)));
+    if (currentWay === 'card') choose('card');
+  }).catch(() => {});
+  const BRAND_OK = ['visa', 'mastercard', 'amex', 'discover', 'other'];
+  async function chargeOnReader() {
+    clear(readerBox);
+    const cents = toCents(amount.value);
+    if (!cents || cents < 50) throw new Error('Enter the amount to take (at least $0.50)');
+    if (cents > remaining()) throw new Error(`That is more than the ${money(remaining())} still to pay`);
+    const reader = readers.find((x) => String(x.id) === readerPick.value) || readers[0];
+    const pay = await post('/terminal/charges', { reader_id: reader.id, amount_cents: cents });
+    charging = pay.id;
+    const line = h('p', { role: 'status' }, h('strong', null, `Waiting for the card on ${reader.label}.`), ` Ask the guest to tap, insert or swipe for ${money(cents)}.`);
+    const stop = button('Cancel', async () => {
+      try { await post(`/terminal/payments/${pay.id}/cancel`, {}); } catch (err) { readerBox.append(errorBox(err)); return; }
+      charging = null; clear(readerBox).append(h('p', { class: 'muted' }, 'Stopped. Nothing was charged.'));
+    }, { small: true });
+    const sim = reader.simulated && readerTest ? [
+      button('Simulate a tap', () => post(`/terminal/payments/${pay.id}/simulate`, { outcome: 'approve' }).catch((err) => readerBox.append(errorBox(err))), { small: true }),
+      button('Simulate a decline', () => post(`/terminal/payments/${pay.id}/simulate`, { outcome: 'decline' }).catch((err) => readerBox.append(errorBox(err))), { small: true })] : [];
+    appendAll(clear(readerBox), h('div', { class: 'notice reader-wait' }, line, h('div', { class: 'row' }, stop, ...sim)));
+    const started = Date.now();
+    while (charging === pay.id && Date.now() - started < 180_000) {
+      await new Promise((r) => { setTimeout(r, 1500); });
+      if (charging !== pay.id) return;
+      let st;
+      try { st = await get(`/terminal/payments/${pay.id}`); } catch (_) { continue; }
+      if (st.status === 'waiting') continue;
+      charging = null;
+      if (st.status === 'succeeded') {
+        const p = { tender: 'card', amount_cents: st.amount_cents, terminal_payment_id: st.id, on_reader: true };
+        if (st.card_last4) p.card_last4 = st.card_last4;
+        if (st.card_brand && BRAND_OK.includes(st.card_brand)) p.card_brand = st.card_brand;
+        payments.push(p); clear(readerBox); drawPayments();
+        toast(`Card approved: ${money(st.amount_cents)}`);
+      } else if (st.status === 'failed') {
+        clear(readerBox).append(errorBox(new Error(`${st.failure || 'The card was not accepted.'} Try again, or take another payment.`)));
+      } else {
+        clear(readerBox).append(h('p', { class: 'muted' }, 'The payment was cancelled. Nothing was charged.'));
+      }
+      return;
+    }
+    if (charging === pay.id) { charging = null; clear(readerBox).append(errorBox(new Error('The reader did not answer in 3 minutes. Check it is on and online, then try again.'))); post(`/terminal/payments/${pay.id}/cancel`, {}).catch(() => {}); }
+  }
+  /** A reader payment taken off the sale, or a sale given up: the card is refunded, never left charged. */
+  async function giveBack(p) {
+    await post(`/terminal/payments/${p.terminal_payment_id}/cancel`, {});
+    toast(`Refunded ${money(p.amount_cents)} to the card`);
+  }
+
   function drawPayments() {
     clear(payList);
     for (const [i, p] of payments.entries()) {
       payList.append(h('div', { class: 'spread pay-row' }, h('span', null, `${label(p.tender)} ${money(p.amount_cents)}`, p.tendered_cents && p.tendered_cents > p.amount_cents ? h('small', { class: 'muted' }, `  (${money(p.tendered_cents)} handed over)`) : null, p.code ? h('small', { class: 'muted' }, `  card ${p.code}`) : null, p.card_last4 ? h('small', { class: 'muted' }, `  ending ${p.card_last4}`) : null, p.comp_reason ? h('small', { class: 'muted' }, `  (${label(p.comp_reason)})`) : null),
-        button('Remove', () => { payments.splice(i, 1); drawPayments(); }, { small: true })));
+        button(p.on_reader ? 'Refund and remove' : 'Remove', async () => {
+          if (p.on_reader) { try { await giveBack(p); } catch (err) { step2Error.append(errorBox(err)); return; } }
+          payments.splice(i, 1); drawPayments();
+        }, { small: true })));
     }
     const left = remaining();
     clear(due).append(left > 0 ? `Still to pay ${money(left)}` : left === 0 ? (total ? 'Paid in full' : 'Nothing to pay') : `Over by ${money(-left)}`);
@@ -284,12 +343,19 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   const panel = h('div', { class: 'stack' });
   const wayBtns = new Map();
   function choose(way) {
+    currentWay = way;
     for (const [k, b] of wayBtns) b.setAttribute('aria-pressed', String(k === way));
     const take = (text) => button(text, () => addPayment(way), { kind: way === 'cash' ? null : 'primary' });
     const forms = {
       cash: () => [drawerOpen() ? null : h('div', { class: 'notice warn', role: 'alert' }, 'No cash drawer is open, so this cash will not be in any drawer count. Open your drawer first.', onOpenDrawer ? [' ', button('Open cash drawer', () => onOpenDrawer(() => choose('cash')), { small: true })] : null),
         cashButtons, h('div', { class: 'form' }, field('Amount', amount), field('Cash handed over (other amount)', tendered)), h('div', { class: 'row' }, take('Take cash'))],
-      card: () => [h('div', { class: 'form' }, field('Amount', amount), field('Last 4 digits', cardLast4), field('Card brand', cardBrand), field('Approval code', authCode), field('Card reference', reference)), h('div', { class: 'row' }, take('Take card'))],
+      card: () => {
+        const manual = [h('div', { class: 'form' }, field('Amount', amount), field('Last 4 digits', cardLast4), field('Card brand', cardBrand), field('Approval code', authCode), field('Card reference', reference)), h('div', { class: 'row' }, take('Take card'))];
+        if (!readers.length) return manual;
+        return [h('div', { class: 'form' }, field('Amount', amount), readers.length > 1 ? field('Card reader', readerPick) : null),
+          h('div', { class: 'row' }, button('Charge on reader', () => chargeOnReader(), { kind: 'primary' })), readerBox,
+          h('details', { class: 'more-pay' }, h('summary', null, 'Card taken another way'), h('div', { class: 'stack' }, h('div', { class: 'form' }, field('Last 4 digits', cardLast4), field('Card brand', cardBrand), field('Approval code', authCode), field('Card reference', reference)), h('div', { class: 'row' }, take('Record card'))))];
+      },
       gift_card: () => [h('div', { class: 'form' }, field('Amount', amount), field('Gift card code', cardCode)), basket.some((l) => l.type === 'gift_card') ? h('p', { class: 'muted small' }, 'A gift card cannot be used to buy another gift card.') : null, h('div', { class: 'row' }, take('Use gift card'))],
       other: () => [h('div', { class: 'form' }, field('Amount', amount), field('Reference', reference)), h('div', { class: 'row' }, take('Record payment'))],
       comp: () => [h('div', { class: 'form' }, field('Amount', amount), field('Reason', compReason, comp && comp.counter_limit_cents ? undefined : 'Managers only')), h('div', { class: 'row' }, take('Give free of charge'))],
@@ -356,6 +422,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
     complete.disabled = true;
     try {
       const out = await post('/checkout', build());
+      sold = true;
       receipt(out);
       onSold(out);
     } catch (err) {
@@ -399,7 +466,13 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
     nav.append(button('New sale', () => dlg.close(), { kind: 'primary' }));
   }
 
-  dlg = dialog('Checkout', h('div', { class: 'stack' }, dlgBody, nav), { wide: true });
+  // Closed without completing the sale: a card already charged on the reader goes back to the guest.
+  const onClose = () => {
+    charging = null;
+    if (sold) return;
+    for (const p of payments.filter((x) => x.on_reader)) giveBack(p).catch(() => toast('A card reader payment could not be refunded. A manager can refund it under Billing, Card readers.', 'error'));
+  };
+  dlg = dialog('Checkout', h('div', { class: 'stack' }, dlgBody, nav), { wide: true, onClose });
   show(1);
   return dlg;
 }

@@ -1,7 +1,7 @@
 // Billing: the mountain's Verdynt/OS subscription, and where guests' card payments go (the mountain's own Stripe account). Where it stands (trial, paid, grace, read only), the plan and add-ons
 // with monthly or yearly prices, paying by card, US bank account or invoice, Stripe's portal for the card and
 // cancelling, past invoices and the history. Owners change and pay; managers can look.
-import { get, post, put } from '../api.js';
+import { get, post, put, del } from '../api.js';
 import { h, clear, ctx, money, state, button, table, toast, formDialog, field, input, errorBox, loading, label, fmtDate, fmtDateTime, confirmDialog } from '../ui.js';
 
 const STATUS_WORDS = {
@@ -40,6 +40,7 @@ export async function render(root) {
       b.comped && !live ? h('section', { class: 'panel' }, h('p', null, 'This mountain is on Verdynt/OS at no charge. There is nothing to pay.'), d.plans.length && owner ? h('p', { class: 'muted small' }, 'You can still choose a plan below if you would like to start paying.') : null) : null,
       d.plans.length ? planPanel(choice, { owner, live, b }) : h('section', { class: 'panel' }, h('p', { class: 'muted' }, 'Plans have not been set up yet. Contact Verdynt/OS.')),
       cardPaymentsPanel(query),
+      readersPanel(),
       invoicesPanel(),
       historyPanel(),
     ].filter(Boolean));
@@ -188,6 +189,51 @@ function cardPaymentsPanel(query) {
     if (back === 'return') toast(s.status === 'ready' ? 'Stripe is connected. Card payments are open.' : 'Back from Stripe. If it still needs details, finish them there.');
     if (back === 'again' && s.can_connect) toast('That Stripe page timed out. Press the button to carry on.');
   })();
+  return sec;
+}
+
+// Card readers at the counter (routes/terminal.js): Stripe smart readers paired to this mountain's Stripe account.
+// Managers pair and remove them; the ticket window then shows Charge on reader at checkout.
+function readersPanel() {
+  const sec = h('section', { class: 'panel stack' }, h('h2', null, 'Card readers'), loading('Checking readers'));
+  const draw = async () => {
+    let r; let stray = { payments: [] };
+    try { r = await get('/terminal/readers'); stray = await get('/terminal/unattached').catch(() => stray); } catch (err) { clear(sec).append(h('h2', null, 'Card readers'), errorBox(err)); return; }
+    const manager = ['owner', 'manager'].includes(ctx.me && ctx.me.role);
+    const pair = (simulated) => {
+      const code = input({ name: 'registration_code', required: true, autocomplete: 'off', maxlength: '60', placeholder: 'For example, apple-grape-orange' });
+      const name = input({ name: 'label', required: true, maxlength: '100', value: simulated ? 'Test reader' : '', placeholder: 'For example, Ticket window 1' });
+      const addr = r.has_location ? null : h('div', { class: 'stack' }, h('p', { class: 'muted small' }, 'Stripe needs the mountain’s street address for its first card reader.'),
+        field('Street address', input({ name: 'line1', required: true, maxlength: '200', autocomplete: 'address-line1' })),
+        h('div', { class: 'form' }, field('Town', input({ name: 'city', required: true, maxlength: '100', autocomplete: 'address-level2' })),
+          field('State', input({ name: 'state', required: true, maxlength: '2', placeholder: 'PA', autocomplete: 'address-level1' })),
+          field('ZIP code', input({ name: 'postal_code', required: true, maxlength: '10', inputmode: 'numeric', autocomplete: 'postal-code' }))));
+      if (simulated) code.value = 'simulated-wpe';
+      formDialog(simulated ? 'Add a test reader' : 'Pair a card reader', h('div', { class: 'stack' },
+        simulated ? h('p', { class: 'muted small' }, 'A pretend reader for trying the counter in Stripe’s test mode. At checkout, Simulate a tap stands in for a real card.')
+          : h('p', { class: 'muted small' }, 'On the reader, open its settings, choose Generate pairing code, and type the three words it shows.'),
+        simulated ? null : field('Pairing code', code), field('Name it', name, 'Shown at checkout when there is more than one reader.'), addr), async (fd) => {
+        const body = { registration_code: simulated ? 'simulated-wpe' : String(fd.get('registration_code') || '').trim(), label: String(fd.get('label') || '').trim() };
+        if (addr) body.address = { line1: fd.get('line1'), city: fd.get('city'), state: String(fd.get('state') || '').trim(), postal_code: String(fd.get('postal_code') || '').trim() };
+        await post('/terminal/readers', body);
+        toast('Card reader paired');
+        draw();
+      }, { submitText: simulated ? 'Add test reader' : 'Pair reader' });
+    };
+    clear(sec).append(...[
+      h('h2', null, 'Card readers'),
+      h('p', null, 'A Stripe card reader on the counter takes tap, chip and swipe for sales at the ticket window, paid straight into your own Stripe account. Order one from your Stripe dashboard (Terminal, Shop); the Stripe Reader S700 is a good choice.'),
+      !r.enabled ? h('p', { class: 'muted small' }, 'Connect Stripe above first.') : null,
+      r.readers.length ? table(['Reader', 'Type', ''], r.readers.map((x) => [h('span', null, x.label, x.simulated ? h('small', { class: 'muted' }, ' (test)') : null), x.device_type ? label(x.device_type.replace(/_/g, ' ')) : '',
+        manager ? button('Remove', () => confirmDialog(`Remove ${x.label}?`, 'It stops taking payments here. You can pair it again later with a new code.', 'Remove', async () => { await del(`/terminal/readers/${x.id}`); toast('Removed'); draw(); }, { danger: true }), { small: true }) : ''])) : r.enabled ? h('p', { class: 'muted' }, 'No card readers paired yet.') : null,
+      manager && r.enabled ? h('div', { class: 'row' }, button('Pair a card reader', () => pair(false), { kind: 'primary' }), r.test_mode ? button('Add a test reader', () => pair(true)) : null) : null,
+      stray.payments.length ? h('div', { class: 'notice warn stack' }, h('b', null, 'Card payments not part of a sale'),
+        h('p', { class: 'small' }, 'These were charged on a reader but the sale was never completed. Refund them so the guest is not charged.'),
+        ...stray.payments.map((p) => h('div', { class: 'spread' }, h('span', null, `${money(p.amount_cents)}${p.card_last4 ? `, card ending ${p.card_last4}` : ''}`),
+          button('Refund', async () => { await post(`/terminal/payments/${p.id}/cancel`, {}); toast('Refunded'); draw(); }, { small: true })))) : null,
+    ].filter(Boolean));
+  };
+  draw();
   return sec;
 }
 

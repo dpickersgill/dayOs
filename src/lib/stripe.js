@@ -59,6 +59,29 @@ async function get(path, { account } = {}) {
   return json;
 }
 
+/** A DELETE to Stripe (a card reader taken off an account). */
+async function del(path, { account } = {}) {
+  let res;
+  try { res = await fetch(`${config.stripe.apiBase}${path}`, { method: 'DELETE', headers: { authorization: `Bearer ${config.stripe.secretKey}`, ...onAccount(account) } }); } catch (_) { throw new AppError(502, 'The card service could not be reached.'); }
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok && res.status !== 404) { console.error('Stripe error', res.status, json && json.error && json.error.message); throw new AppError(502, 'The card service refused that request.'); }
+  return json;
+}
+
+/** Stripe's own words on why a call failed, for the person at the counter (null when there are none). */
+async function tryCall(path, body, opts) {
+  let res;
+  try {
+    res = await fetch(`${config.stripe.apiBase}${path}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${config.stripe.secretKey}`, 'content-type': 'application/x-www-form-urlencoded', ...(opts && opts.idempotencyKey ? { 'idempotency-key': opts.idempotencyKey } : {}), ...onAccount(opts && opts.account) },
+      body: encode(body || {}).toString(),
+    });
+  } catch (_) { return { ok: false, status: 0, error: 'The card service could not be reached.' }; }
+  const json = await res.json().catch(() => ({}));
+  return res.ok ? { ok: true, json } : { ok: false, status: res.status, error: (json && json.error && json.error.message) || `Stripe said ${res.status}`, code: json && json.error && json.error.code };
+}
+
 /**
  * A hosted payment page for one amount (tax included). Returns { id, url }. account: the mountain's connected account
  * (the payment is theirs); feeCents: the platform's fee on it, kept by Stripe from the payment (0 means none).
@@ -148,4 +171,4 @@ function signWebhook(rawBody, secret, t = Math.floor(Date.now() / 1000)) {
   return `t=${t},v1=${crypto.createHmac('sha256', secret).update(`${t}.${rawBody}`).digest('hex')}`;
 }
 
-module.exports = { call, get, enabled, createCheckout, createDonationCheckout, refund, listRefunds, createAccount, accountLink, getAccount, verifyWebhook, signWebhook, ACCOUNT };
+module.exports = { call, get, del, tryCall, enabled, createCheckout, createDonationCheckout, refund, listRefunds, createAccount, accountLink, getAccount, verifyWebhook, signWebhook, ACCOUNT };

@@ -20,6 +20,7 @@ const { personFields, resolvePerson, ensureRequired } = require('../lib/customer
 const { loadRules, applyTax, split } = require('../lib/tax');
 const { addLink, isMinor } = require('../lib/family');
 const R = require('../lib/rentals');
+const terminal = require('./terminal');
 
 const checkout = express.Router();
 const giftCards = express.Router();
@@ -62,6 +63,7 @@ const paymentSchema = z.object({
   tendered_cents: z.number().int().min(1).max(10_000_000).optional(), // cash handed over, when it is more than the amount (change is due)
   reference: z.string().max(100).optional(),
   code: z.string().max(40).optional(), // gift card code
+  terminal_payment_id: z.number().int().positive().optional(), // a card taken on the counter's card reader (routes/terminal.js)
 });
 
 const quoteSchema = z.object({ date: dateStr.optional(), promo_code: z.string().max(40).optional(), lines: z.array(lineSchema).min(1).max(50) });
@@ -447,6 +449,14 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
         cardId = card.id;
       }
       if (p.tender === 'cash' && p.tendered_cents && p.tendered_cents > p.amount_cents) change += p.tendered_cents - p.amount_cents;
+      if (p.terminal_payment_id) {
+        // Paid on the card reader: the payment Stripe took, on the mountain's account, so it refunds like an online one.
+        if (p.tender !== 'card') throw bad('A card reader payment must be recorded as a card');
+        const tp = await terminal.attach(conn, tenantId, p.terminal_payment_id, p.amount_cents, orderId);
+        await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, card_brand, card_last4, processor, processor_account, platform_fee_cents) VALUES (?, ?, 'card', ?, ?, ?, ?, 'stripe', ?, ?)",
+          [tenantId, orderId, p.amount_cents, tp.intent, tp.brand, tp.last4, tp.account, tp.fee]);
+        continue;
+      }
       await conn.query('INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, tendered_cents, reference, gift_card_id, card_brand, card_last4, auth_code, processor, comp_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [tenantId, orderId, p.tender, p.amount_cents, p.tendered_cents ?? null, p.reference ?? null, cardId, p.card_brand ?? null, p.card_last4 ?? null, p.auth_code ?? null, p.processor ?? null, p.comp_reason ?? null]);
     }
