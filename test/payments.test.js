@@ -290,7 +290,7 @@ test('the mountain cancels a lesson: paid online refunded in full, package lesso
   assert.equal((await api('POST', `/skischool/sessions/${sid}/cancel`, { token: A.owner, body: { reason: 'Again' } })).status, 409, 'not twice');
 });
 
-test('a storm day cancels every lesson on it; a lesson nobody booked can be deleted; staff cannot cancel', async () => {
+test('a storm day cancels every lesson on it; a lesson nobody booked can be deleted', async () => {
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(Date.now() + 30 * 86_400_000));
   const add = async (hour) => (await pool.query("INSERT INTO lesson_sessions (tenant_id, product_id, starts_at, ends_at, capacity, status) VALUES (?, ?, ?, ?, 4, 'scheduled')", [tenantId, A.product, `${day} ${hour}:00:00`, `${day} ${hour + 2}:00:00`]))[0].insertId;
   const a = await add(9); const b = await add(13); const lonely = await add(16);
