@@ -1207,7 +1207,9 @@ span.park-row { cursor: default; }
   table.rt tr:last-child { border-bottom: 0; }
   table.rt td { display: flex; gap: 12px; justify-content: space-between; align-items: baseline; padding: 3px 0; border: 0; text-align: right; white-space: normal; overflow-wrap: anywhere; }
   table.rt td[data-label]::before { content: attr(data-label); flex: none; max-width: 42%; text-align: left; font-weight: 700; font-size: 0.8125rem; color: var(--quiet); }
-  table.rt td.actions { justify-content: flex-end; padding-top: 6px; }
+  table.rt td.actions { justify-content: flex-end; flex-wrap: wrap; gap: 6px; padding-top: 6px; }
+  table.rt td.actions .btn { flex: none; white-space: nowrap; overflow-wrap: normal; }
+  table.rt td.actions .btn + .btn { margin-left: 0; }
   .levels .matrix th:first-child, .levels .matrix td:first-child { width: 138px; }
   .levels .matrix th.center, .levels .matrix td.center { width: 58px; padding: 5px 2px; }
   .levels .matrix .lv-admin { display: none; }
