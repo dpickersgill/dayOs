@@ -10,7 +10,12 @@ process.env.SANDBOX_RATE_LIMIT = '1000';
 const http = require('http');
 const stubPort = 41000 + Math.floor(Math.random() * 2000);
 let mailHits = 0;
-const stub = http.createServer((_req, res) => { mailHits += 1; res.setHeader('content-type', 'application/json'); res.end('{"ErrorCode":0,"MessageID":"x"}'); }).listen(stubPort, '127.0.0.1');
+const mails = []; // what reached the mail service, for the emailed demo code
+const stub = http.createServer((req, res) => {
+  mailHits += 1;
+  let body = ''; req.on('data', (c) => { body += c; });
+  req.on('end', () => { try { mails.push(JSON.parse(body)); } catch (_) { /* not JSON */ } res.setHeader('content-type', 'application/json'); res.end('{"ErrorCode":0,"MessageID":"x"}'); });
+}).listen(stubPort, '127.0.0.1');
 process.env.POSTMARK_API_BASE = `http://127.0.0.1:${stubPort}`;
 process.env.POSTMARK_SERVER_TOKEN = 'test-token';
 process.env.MAIL_FROM = 'patrol@example.org';
@@ -151,6 +156,48 @@ test('a demo can never send email or take a card payment', async () => {
   await pool.query('DELETE FROM users WHERE tenant_id = ?', [real.body.id]);
   await pool.query('DELETE FROM people WHERE tenant_id = ?', [real.body.id]);
   await pool.query('DELETE FROM tenants WHERE id = ?', [real.body.id]);
+});
+
+test('with the email check on, a demo only builds with the code emailed to that address', async () => {
+  process.env.TRY_EMAIL_CHECK = 'on';
+  const email = `check-${suffix}@example.org`;
+  const who = { name: 'Cora Check', email, mountain: 'Code Peak' };
+  try {
+    assert.equal((await api('POST', '/trial', { body: who })).status, 400, 'no code, no demo');
+    assert.match((await api('POST', '/trial/code', { body: { ...who, email: `x-${suffix}@mailinator.com` } })).body.error, /Throwaway/, 'throwaway inboxes are turned away');
+    const before = mails.length;
+    const sent = await api('POST', '/trial/code', { body: who });
+    assert.equal(sent.status, 200); assert.equal(sent.body.required, true);
+    const mail = mails.slice(before).find((m) => m.To === email);
+    assert.ok(mail, 'the code went to that address');
+    const code = /(\d{6})/.exec(mail.Subject)[1];
+    assert.equal(mail.TextBody.includes(code), true);
+    const [[stored]] = await pool.query('SELECT code_hash FROM sandbox_codes WHERE email = ? ORDER BY id DESC LIMIT 1', [email]);
+    assert.ok(!stored.code_hash.includes(code), 'the code is kept hashed');
+
+    const wrong = String((Number(code) + 1) % 1000000).padStart(6, '0');
+    const bad = await api('POST', '/trial', { body: { ...who, code: wrong } });
+    assert.equal(bad.status, 400); assert.match(bad.body.error, /not right/);
+    const other = await api('POST', '/trial', { body: { ...who, email: `other-${suffix}@example.org`, code } });
+    assert.equal(other.status, 400, 'a code only works for the address it was sent to');
+
+    const ok = await start(email, { name: who.name, mountain: who.mountain, code });
+    assert.equal(ok.status, 201, JSON.stringify(ok.body));
+    const [[signup]] = await pool.query('SELECT email_verified FROM sandbox_signups WHERE email = ? ORDER BY id DESC LIMIT 1', [email]);
+    assert.equal(Number(signup.email_verified), 1);
+    assert.equal((await api('POST', '/trial', { body: { ...who, code } })).status, 400, 'a code works once');
+
+    // A newer code replaces the older one, and five wrong tries use a code up.
+    const c1 = await api('POST', '/trial/code', { body: who }); assert.equal(c1.status, 200);
+    const first = /(\d{6})/.exec(mails.at(-1).Subject)[1];
+    await api('POST', '/trial/code', { body: who });
+    const second = /(\d{6})/.exec(mails.at(-1).Subject)[1];
+    if (first !== second) assert.match((await api('POST', '/trial', { body: { ...who, code: first } })).body.error, /not right|expired/);
+    for (let i = 0; i < 5; i += 1) await api('POST', '/trial', { body: { ...who, code: '000000' === second ? '111111' : '000000' } });
+    assert.match((await api('POST', '/trial', { body: { ...who, code: second } })).body.error, /Too many wrong codes/);
+  } finally { delete process.env.TRY_EMAIL_CHECK; }
+  const off = await api('POST', '/trial/code', { body: who });
+  assert.equal(off.body.required, false, 'outside production, with no override, demos start straight away');
 });
 
 test('starting again with the same email replaces the old demo', async () => {

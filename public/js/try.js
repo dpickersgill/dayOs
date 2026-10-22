@@ -32,31 +32,62 @@ function form() {
   const mountain = input({ name: 'mountain', autocomplete: 'organization', placeholder: 'For example, Spring Mountain', maxlength: '80' });
   const trap = h('div', { class: 'sr', 'aria-hidden': 'true' }, h('label', null, 'Leave this empty', input({ name: 'website', tabindex: '-1', autocomplete: 'off' })));
   const status = h('p', { class: 'muted', role: 'status' });
-  const go = h('button', { type: 'submit', class: 'btn primary' }, 'Start my demo');
+  const go = h('button', { type: 'submit', class: 'btn primary' }, 'Continue');
   const f = h('form', { novalidate: true },
     field('Your name', name), field('Email', email, 'We use it as your demo login.'),
     field('Your mountain’s name (optional)', mountain, 'It shows at the top of your demo.'),
     trap, err, go, status);
+  const fail = (res, out) => new Error(res.status === 429 ? (out.error || 'Too many demo requests from this address. Try again later.') : (out.error || 'Something went wrong. Please try again.'));
+  const post = async (path, body) => {
+    const res = await fetch(`/api/v1/trial${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) throw fail(res, out);
+    return out;
+  };
+  const details = () => ({ name: name.value.trim(), email: email.value.trim(), mountain: mountain.value.trim() || undefined, website: trap.querySelector('input').value });
+  // Builds the demo (with the emailed code when there is one) and lands the visitor inside it.
+  const build = async (code, button, line, box) => {
+    button.disabled = true;
+    line.textContent = 'Building your mountain. This takes about 20 seconds.';
+    try { done(await post('', { ...details(), ...(code ? { code } : {}) })); } catch (ex) { line.textContent = ''; box.append(errorBox(ex)); button.disabled = false; }
+  };
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
     clear(err);
     if (!name.value.trim() || !/^\S+@\S+\.\S+$/.test(email.value.trim())) { err.append(errorBox(new Error('Add your name and a valid email address.'))); return; }
     go.disabled = true;
-    status.textContent = 'Building your mountain. This takes about 20 seconds.';
-    try {
-      const res = await fetch('/api/v1/trial', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: name.value.trim(), email: email.value.trim(), mountain: mountain.value.trim() || undefined, website: trap.querySelector('input').value }),
-      });
-      const out = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(res.status === 429 ? 'Too many demo requests from this address. Try again later.' : (out.error || 'Something went wrong. Please try again.'));
-      done(out);
-    } catch (ex) {
-      status.textContent = '';
-      err.append(errorBox(ex));
-      go.disabled = false;
-    }
+    status.textContent = 'Checking your email address.';
+    let step;
+    try { step = await post('/code', details()); } catch (ex) { status.textContent = ''; err.append(errorBox(ex)); go.disabled = false; return; }
+    if (!step.required) { await build(null, go, status, err); return; }
+    codeStep(step.minutes || 15);
   });
+  // Step 2 when the email check is on: the 6-digit code from the email.
+  function codeStep(minutes) {
+    const box = h('div');
+    const line = h('p', { class: 'muted', role: 'status' });
+    const code = input({ name: 'code', inputmode: 'numeric', autocomplete: 'one-time-code', pattern: '[0-9]*', maxlength: '6', required: true, class: 'code-input', 'aria-describedby': 'code-hint' });
+    const start = h('button', { type: 'submit', class: 'btn primary' }, 'Start my demo');
+    const again = h('button', { type: 'button', class: 'btn' }, 'Send a new code');
+    const back = h('button', { type: 'button', class: 'btn' }, 'Use a different email');
+    const cf = h('form', { novalidate: true },
+      h('p', null, 'We emailed a 6-digit code to ', h('b', null, email.value.trim()), '. Type it here to start your demo.'),
+      field('Code', code, `It works for ${minutes} minutes. Not there? Check your spam folder.`), box, start, line,
+      h('div', { class: 'row-actions' }, again, back));
+    cf.addEventListener('submit', (ev) => {
+      ev.preventDefault(); clear(box);
+      if (!/^\d{6}$/.test(code.value.trim())) { box.append(errorBox(new Error('Enter the 6 digits from the email.'))); return; }
+      build(code.value.trim(), start, line, box);
+    });
+    again.addEventListener('click', async () => {
+      clear(box); again.disabled = true;
+      try { await post('/code', details()); line.textContent = 'A new code is on its way. Only the newest code works.'; } catch (ex) { box.append(errorBox(ex)); }
+      again.disabled = false;
+    });
+    back.addEventListener('click', () => { cf.replaceWith(f); go.disabled = false; status.textContent = ''; email.focus(); });
+    f.replaceWith(cf);
+    code.focus();
+  }
   app.append(h('div', { class: 'signin' }, side(),
     h('section', { class: 'signin-form' }, h('h2', null, 'Start your demo'), f,
       h('p', { class: 'muted small' }, 'Everything in it is made up. Email and card payments are switched off. It deletes itself after 7 days.'))));

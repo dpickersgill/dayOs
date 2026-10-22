@@ -2343,3 +2343,7 @@ body:has(.tour-card) .demo-pill { display: none; }
 :root[data-theme='dark'] .topbar { background: rgba(14, 26, 33, 0.94); }
 :root[data-theme='dark'] .tabbar { background: rgba(14, 26, 33, 0.96); }
 :root[data-theme='dark'] .tabbar .tab[aria-current='page'], :root[data-theme='dark'] .tabbar .tab.on { background: var(--surface); color: var(--trail-blue); }
+
+/* The try page's code step: six digits, spaced so they're easy to check against the email. */
+.code-input { font-size: 1.5rem; letter-spacing: 0.4em; font-variant-numeric: tabular-nums; max-width: 12ch; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 8px; }

@@ -396,6 +396,23 @@ const connectSteps = [
   ['order_refunds.card_account', (c) => columnExists(c, 'order_refunds', 'card_account'), 'ALTER TABLE order_refunds ADD COLUMN card_account VARCHAR(64) NULL'],
   ['donations.stripe_account', (c) => columnExists(c, 'donations', 'stripe_account'), 'ALTER TABLE donations ADD COLUMN stripe_account VARCHAR(64) NULL'],
 ];
+// Demo sign-up email check (2026.10.28): a 6-digit code is emailed before a demo is built, so every demo lead is a real,
+// reachable address. Codes are kept hashed and expire after 15 minutes.
+const trySteps = [
+  ['sandbox_codes', (c) => tableExists(c, 'sandbox_codes'), `CREATE TABLE sandbox_codes (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(255) NOT NULL,
+    code_hash CHAR(64) NOT NULL,
+    ip_hash CHAR(16) NOT NULL,
+    attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL,
+    used_at DATETIME NULL,
+    KEY ix_sandbox_codes_email (email, created_at)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`],
+  ['sandbox_signups.email_verified', (c) => columnExists(c, 'sandbox_signups', 'email_verified'), 'ALTER TABLE sandbox_signups ADD COLUMN email_verified TINYINT(1) NOT NULL DEFAULT 0'],
+];
+
 const opsSteps = [
   ['trails hold status', (c) => columnTypeHas(c, 'trails', 'status', "'hold'"), "ALTER TABLE trails MODIFY status ENUM('open','hold','closed') NOT NULL DEFAULT 'closed'"],
   ['trails.closure_reason', (c) => columnExists(c, 'trails', 'closure_reason'), 'ALTER TABLE trails ADD COLUMN closure_reason VARCHAR(200) NULL, ADD COLUMN status_by BIGINT UNSIGNED NULL'],
@@ -560,7 +577,7 @@ async function main() {
   await seedPlans(conn);
   await seedPatrolPlan(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

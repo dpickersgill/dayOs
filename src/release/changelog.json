@@ -1,6 +1,19 @@
 {
   "releases": [
     {
+      "version": "2026.10.28",
+      "date": "2026-10-22",
+      "title": "Demo sign-ups confirm their email",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "The try page emails a 6-digit code before it builds a demo, so every demo lead is a real address. Codes last 15 minutes, only the newest works, five wrong tries use it up, and throwaway inboxes are turned away. On in production and staging whenever email is set up; TRY_EMAIL_CHECK=off turns it off."
+        }
+      ]
+    },
+    {
       "version": "2026.10.27",
       "date": "2026-10-22",
       "title": "Demo mountains on staging",
