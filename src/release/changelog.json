@@ -1,6 +1,19 @@
 {
   "releases": [
     {
+      "version": "2026.10.27",
+      "date": "2026-10-22",
+      "title": "Demo mountains on staging",
+      "notes": [
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": "platform",
+          "text": "Demo mountains can be built on staging again: the demo builder's own internal requests were being stopped by the staging password page."
+        }
+      ]
+    },
+    {
       "version": "2026.10.26",
       "date": "2026-10-22",
       "title": "Verdynt/OS: a new name and a new look",
