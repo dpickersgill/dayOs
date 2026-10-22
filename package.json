@@ -1,6 +1,6 @@
 {
   "name": "summitops-backend",
-  "version": "2026.10.28",
+  "version": "2026.10.29",
   "description": "Multi-tenant operations backend for small and mid-size ski areas",
   "main": "src/server.js",
   "directories": {

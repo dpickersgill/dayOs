@@ -1,6 +1,49 @@
 {
   "releases": [
     {
+      "version": "2026.10.29",
+      "date": "2026-10-25",
+      "title": "Card reader, lesson cancelling, pin dropping, your own guest types",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "sell",
+          "who": null,
+          "text": "Take cards on a Stripe smart reader at the ticket window. Pair a reader under Billing, then choose Charge on reader at checkout: the guest taps, inserts or swipes, and the money goes straight into your own Stripe account. Refunds work the same as online card payments. If the sale is closed before it finishes, the reader payment is refunded for you."
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "Cancel a lesson, or every lesson on a storm day. Package lessons get their credit back, lessons paid online are refunded in full to the card, counter sales are listed for a refund at the desk, and every booked guest gets one email. A lesson added by mistake with nobody booked can be deleted instead."
+        },
+        {
+          "kind": "improved",
+          "app": "park",
+          "who": null,
+          "text": "Dropping feature pins in the terrain park waits for a good GPS fix and shows how close it is, drops the pin by itself once the fix is good, and lets you drag it into place. Walk the park drops one feature after another as you reach each one. Each pin shows how it was placed."
+        },
+        {
+          "kind": "new",
+          "app": "catalog",
+          "who": [],
+          "text": "Your own guest types, under Products and prices, Guest types. Add types like College or Local, rename them, set the ages that pick them online, hide them and change their order. Your current Adult, Youth, Child, Senior and Military prices carry straight over."
+        },
+        {
+          "kind": "new",
+          "app": "conditions",
+          "who": [],
+          "text": "Day by day, under Mountain status, Snow and weather: each finished day is written down every night with the weather at the mountain, new snow, whether you were open, visits, tickets, lessons and revenue. Fill in the past year with one button. This is the history the visitor forecast will learn from."
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": null,
+          "text": "On a phone, buttons in a list no longer break their words across two lines."
+        }
+      ]
+    },
+    {
       "version": "2026.10.28",
       "date": "2026-10-22",
       "title": "Demo sign-ups confirm their email",

@@ -1,30 +1,15 @@
 {
-  "updated": "2026-10-19",
+  "updated": "2026-10-22",
   "stages": [
     {
       "key": "now",
       "label": "Building now",
-      "when": "October",
+      "when": "November",
       "items": [
         {
-          "app": "sell",
-          "title": "Card reader at the counter",
-          "text": "Tap, insert or swipe on a Stripe smart reader at the ticket window, paid straight into your own Stripe account."
-        },
-        {
-          "app": "school",
-          "title": "Cancel or delete lessons",
-          "text": "Cancel one lesson or every lesson on a storm day. Card payments are refunded, package lessons get their credit back, and every booked guest gets an email. A lesson added by mistake with nobody booked can be deleted."
-        },
-        {
-          "app": "park",
-          "title": "Better pin dropping in the terrain park",
-          "text": "Waits for a good GPS fix, shows how close the pin is, lets you drag it into place, and lets you walk the park dropping features as you go."
-        },
-        {
-          "app": "catalog",
-          "title": "Your own guest types",
-          "text": "Add, rename, hide and reorder the guest types you price by, such as College or Local, instead of the fixed Adult, Youth, Child, Senior and Military."
+          "app": null,
+          "title": "Help centre and contact support",
+          "text": "Search the help from anywhere and reach support from inside Verdynt/OS."
         }
       ]
     },
@@ -33,11 +18,6 @@
       "label": "Coming next",
       "when": "November and December",
       "items": [
-        {
-          "app": null,
-          "title": "Help centre and contact support",
-          "text": "Search the help from anywhere and reach support from inside Verdynt/OS."
-        },
         {
           "app": null,
           "title": "Bring your data with you",
@@ -83,7 +63,7 @@
         {
           "app": "dashboard",
           "title": "Visitor forecast",
-          "text": "How busy the next 10 days will be, as a range, from the day of the week, holidays and school breaks, new snow, the weather forecast and tickets already sold online. It suggests crew sizes, rental and lesson staffing, and says why in plain words."
+          "text": "How busy the next 10 days will be, as a range, from the day of the week, holidays and school breaks, new snow, the weather forecast and tickets already sold online. It suggests crew sizes, rental and lesson staffing, and says why in plain words. Verdynt/OS already writes down each day’s weather, snow, visits and sales every night, so the forecast starts with your own history."
         },
         {
           "app": "conditions",
