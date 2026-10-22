@@ -34,6 +34,12 @@ export async function render(root, params = []) {
 }
 
 // ---------------------------------------------------------------- the daily map
+// A phone's GPS is good to a few metres in the open and much worse under trees or beside the lodge. A pin goes down by
+// itself once the fix is within GOOD_M; past OK_M the crew is warned and can drop anyway or tap the map instead.
+const GOOD_M = 8; const OK_M = 15; const WAIT_MS = 20000;
+const ft = (m) => `${Math.max(1, Math.round(Number(m) * 3.281))} ft`;
+const PLACED = { gps: (p) => (p.accuracy_m != null ? `Placed by GPS, within ${ft(p.accuracy_m)}` : 'Placed by GPS'), map: () => 'Placed by tapping the map', drag: () => 'Moved by hand on the map', copy: () => 'Copied from another day' };
+
 async function drawLayout(box, list) {
   const canEdit = can('staff');
   let date = todayStr();
@@ -83,6 +89,7 @@ async function drawLayout(box, list) {
       h('b', null, p.name), h('div', { class: 'muted small' }, `${k.label}${p.dimensions ? `, ${p.dimensions}` : ''}`),
       h('div', null, statusChip(p.feature_status)),
       p.area ? h('div', null, `Area: ${p.area}`) : null, p.note ? h('div', null, p.note) : null,
+      p.placed_how ? h('div', { class: 'muted small' }, PLACED[p.placed_how](p)) : null,
       h('div', { class: 'muted small' }, p.inspected_result ? `Inspected: ${RESULT[p.inspected_result]}` : date === cfg.today ? 'Not inspected yet today' : ''));
     if (canEdit) {
       const row = h('div', { class: 'row' }, button('Inspect', () => inspectDialog(p, refresh), { small: true }));
@@ -104,7 +111,7 @@ async function drawLayout(box, list) {
       m.bindPopup(() => popup(p));
       m.on('dragend', async () => {
         const at = m.getLatLng();
-        try { await putPlacement(p.feature_id, at.lat, at.lng, { area_id: p.area_id, note: p.note }); toast(`${p.name} moved`); } catch (err) { fail(err); }
+        try { await putPlacement(p.feature_id, at.lat, at.lng, { area_id: p.area_id, note: p.note, how: 'drag' }); toast(`${p.name} moved`); } catch (err) { fail(err); }
         await refresh();
       });
       markers.set(p.feature_id, m);
@@ -115,13 +122,42 @@ async function drawLayout(box, list) {
   function drawLists() {
     const mark = (p) => h('li', null, h('button', { type: 'button', class: 'park-row', onclick: () => { const m = markers.get(p.feature_id); if (m) { map.setView(m.getLatLng(), Math.max(map.getZoom(), 18)); m.openPopup(); } } },
       h('b', null, p.name), ' ', statusChip(p.feature_status), p.inspected_result ? h('span', { class: 'muted small' }, ` ${RESULT[p.inspected_result]}`) : date === cfg.today ? h('span', { class: 'muted small' }, ' not inspected') : null));
-    clear(onMap).append(data.placed.length ? h('ul', null, data.placed.map(mark)) : h('p', { class: 'muted small' }, 'Nothing is on the map for this day yet.'));
+    clear(onMap).append(data.placed.length ? h('ul', null, data.placed.map(mark)) : h('p', { class: 'muted small' }, 'Nothing is on the map for this day yet.'),
+      data.placed.length && canEdit && data.editable ? h('p', { class: 'muted small' }, 'Drag a pin to fine-tune where it is.') : null);
     const todo = (f) => h('li', null, h('span', { class: 'park-row' }, h('b', null, f.name), ' ', statusChip(f.status), h('span', { class: 'muted small' }, ` ${kindInfo(list, f.kind).label}`),
       canEdit && data.editable ? button('Place', () => startPlacing(f), { small: true }) : null));
-    clear(waiting).append(data.unplaced.length ? h('ul', null, data.unplaced.map(todo)) : h('p', { class: 'muted small' }, 'Every feature is on the map.'));
+    clear(waiting).append(data.unplaced.length && canEdit && data.editable && navigator.geolocation && !walking
+      ? h('div', { class: 'row' }, button('Walk the park', startWalk, { kind: 'primary', small: true }), h('span', { class: 'muted small' }, 'Go feature to feature and drop each pin where you stand.')) : null,
+    data.unplaced.length ? h('ul', null, data.unplaced.map(todo)) : h('p', { class: 'muted small' }, 'Every feature is on the map.'));
     const missing = date === cfg.today ? data.placed.filter((p) => !p.inspected_result).length : 0;
     summary.textContent = `${data.placed.length} on the map, ${data.unplaced.length} not placed${missing ? `, ${missing} not inspected yet` : ''}.${!data.editable ? ' This day is over, so it is a record. A manager can change it.' : ''}`;
   }
+
+  // ---- GPS: a pin only goes down from a fix that is close enough, and the crew sees how close it is as it improves.
+  let watchId = null; let fix = null; let meDot = null; let meRing = null; let gpsLine = null; let waitTimer = null;
+  function drawMe() {
+    if (!fix) return;
+    const at = [fix.lat, fix.lng];
+    if (!meRing) meRing = L.circle(at, { radius: fix.acc, className: 'gps-ring', interactive: false }).addTo(map); else meRing.setLatLng(at).setRadius(fix.acc);
+    if (!meDot) meDot = L.circleMarker(at, { radius: 7, className: 'gps-dot', interactive: false }).addTo(map); else meDot.setLatLng(at);
+  }
+  function startGps(onFix) {
+    if (watchId !== null || !navigator.geolocation) return;
+    fix = null;
+    watchId = navigator.geolocation.watchPosition((pos) => {
+      fix = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy || 999 };
+      drawMe();
+      if (onFix) onFix(fix);
+    }, (err) => { if (gpsLine) gpsLine.textContent = err.code === 1 ? 'Location is switched off for this site. Allow it in the browser, or tap the map instead.' : 'No GPS signal yet. Step into the open, or tap the map instead.'; },
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
+  }
+  function stopGps() {
+    if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    watchId = null; fix = null; clearTimeout(waitTimer);
+    if (meDot) { meDot.remove(); meDot = null; }
+    if (meRing) { meRing.remove(); meRing = null; }
+  }
+  const quality = (f) => (!f ? 'Finding your location…' : f.acc <= GOOD_M ? `GPS good: within ${ft(f.acc)}` : f.acc <= OK_M ? `GPS fair: within ${ft(f.acc)}` : `GPS weak: within ${ft(f.acc)}. Step into the open, away from trees and buildings.`);
 
   function startPlacing(f) {
     placing = f;
@@ -130,20 +166,71 @@ async function drawLayout(box, list) {
     banner.hidden = false;
     mapEl.classList.add('placing');
   }
-  function stopPlacing() { placing = null; banner.hidden = true; mapEl.classList.remove('placing'); }
-  async function dropAt(lat, lng) {
+  function stopPlacing() { placing = null; banner.hidden = true; mapEl.classList.remove('placing'); if (!walking) stopGps(); }
+  async function dropAt(lat, lng, extra = { how: 'map' }) {
     const f = placing;
     if (!f) return;
     stopPlacing();
-    try { await putPlacement(f.id, lat, lng); toast(`${f.name} is on the map`); } catch (err) { fail(err); }
+    try { await putPlacement(f.id, lat, lng, extra); toast(`${f.name} is on the map${extra.how === 'gps' ? ` (within ${ft(extra.accuracy_m)})` : ''}`); } catch (err) { fail(err); }
     await refresh();
     const m = markers.get(f.id);
     if (m) m.openPopup();
   }
+  /** Waits for a fix within GOOD_M and drops the pin itself; after WAIT_MS the crew can drop on what there is, or tap the map. */
   function useMyLocation() {
-    navigator.geolocation.getCurrentPosition((p) => dropAt(p.coords.latitude, p.coords.longitude), () => toast('Your location is not available. Tap the map instead.', 'error'), { enableHighAccuracy: true, timeout: 10000 });
+    const f = placing;
+    gpsLine = h('span', { class: 'gps-line' }, quality(null));
+    const now = button('Drop here now', () => { if (fix) dropAt(fix.lat, fix.lng, { how: 'gps', accuracy_m: Math.round(fix.acc) }); }, { small: true });
+    now.disabled = true;
+    appendAll(clear(banner), h('b', null, `Putting down ${f.name}. `), gpsLine, ' ', now, button('Cancel', stopPlacing, { small: true }));
+    startGps((x) => {
+      gpsLine.textContent = quality(x);
+      now.disabled = false;
+      if (x.acc <= GOOD_M && placing === f) dropAt(x.lat, x.lng, { how: 'gps', accuracy_m: Math.round(x.acc) });
+    });
+    waitTimer = setTimeout(() => { if (placing === f && fix && fix.acc > GOOD_M) gpsLine.textContent = `${quality(fix)} You can drop it now, or tap the map.`; }, WAIT_MS);
   }
-  map.on('click', (e) => { if (placing) dropAt(e.latlng.lat, e.latlng.lng); });
+
+  // ---- Walk the park: feature after feature, each pin dropped from where the crew member is standing.
+  let walking = null;
+  function startWalk() {
+    stopPlacing();
+    walking = { skipped: new Set(), done: 0 };
+    gpsLine = h('span', { class: 'gps-line' }, quality(null));
+    startGps((x) => { if (gpsLine) gpsLine.textContent = quality(x); drawWalk(); });
+    drawWalk();
+    drawLists();
+    mapEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  function stopWalk(msg) {
+    const n = walking ? walking.done : 0;
+    walking = null; stopGps(); banner.hidden = true; drawLists();
+    if (msg || n) toast(msg || `${n} feature${n === 1 ? '' : 's'} placed`);
+  }
+  function nextFeature() { return data.unplaced.find((f) => !walking.skipped.has(f.id)); }
+  function drawWalk() {
+    if (!walking) return;
+    const f = nextFeature();
+    if (!f) { stopWalk(data.unplaced.length ? 'Walk finished. The skipped features are still waiting.' : 'Every feature is on the map.'); return; }
+    const left = data.unplaced.filter((x) => !walking.skipped.has(x.id)).length;
+    const drop = button(fix && fix.acc > OK_M ? 'Drop here (weak signal)' : 'Drop here', async () => {
+      if (!fix) return;
+      const at = { ...fix };
+      drop.disabled = true;
+      try { await putPlacement(f.id, at.lat, at.lng, { how: 'gps', accuracy_m: Math.round(at.acc) }); walking.done += 1; toast(`${f.name} placed, within ${ft(at.acc)}`); } catch (err) { fail(err); }
+      await refresh();
+      drawWalk();
+    }, { kind: 'primary', small: true });
+    drop.disabled = !fix;
+    appendAll(clear(banner), h('div', { class: 'stack' },
+      h('div', null, h('b', null, `Walking the park: next is ${f.name}`), h('span', { class: 'muted' }, ` (${left} to go). Stand at it, then press Drop here.`)),
+      gpsLine,
+      h('div', { class: 'row' }, drop, button('Skip', () => { walking.skipped.add(f.id); drawWalk(); }, { small: true }), button('Stop', () => stopWalk(), { small: true }))));
+    banner.hidden = false;
+  }
+  removeWhenGone(mapEl, { remove: stopGps });
+
+  map.on('click', (e) => { if (placing) dropAt(e.latlng.lat, e.latlng.lng, { how: 'map' }); });
 
   async function removeFromMap(p) {
     confirmDialog('Take it off the map?', `${p.name} stays in your list of features.`, 'Take off', async () => { await del(`/park/placements/${date}/${p.feature_id}`); map.closePopup(); toast('Taken off the map'); await refresh(); });
@@ -175,7 +262,7 @@ async function drawLayout(box, list) {
       drawLists();
     } catch (err) { summary.textContent = err.message; }
   }
-  async function go(d) { if (!d) return; date = d; dateInput.value = d; stopPlacing(); await refresh(true); }
+  async function go(d) { if (!d) return; if (walking) stopWalk(); date = d; dateInput.value = d; stopPlacing(); await refresh(true); }
   dateInput.addEventListener('change', () => go(dateInput.value));
   await refresh(true);
 }

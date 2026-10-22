@@ -89,6 +89,22 @@ test('placing features on the map for a day, moving them, and taking them off', 
   for (const a of ['place', 'move', 'unplace']) assert.ok(audits.includes(a), `${a} is audited`);
 });
 
+test('a pin remembers how it was put down: GPS with its accuracy, a tap, or a drag; editing the note keeps it', async () => {
+  const at = spot(7);
+  is(await api('PUT', `/park/placements/${today}/${D.rail}`, { token: T.staff, body: { ...at, how: 'gps', accuracy_m: 4.6 } }), 201);
+  const pin = async () => ok(await api('GET', `/park/placements/${today}`, { token: T.staff })).placed.find((p) => p.feature_id === D.rail);
+  let p = await pin();
+  assert.equal(p.placed_how, 'gps'); assert.equal(p.accuracy_m, 5);
+  ok(await api('PUT', `/park/placements/${today}/${D.rail}`, { token: T.staff, body: { ...at, note: 'Kicker on the left' } }));
+  p = await pin();
+  assert.equal(p.placed_how, 'gps', 'same spot: still placed by GPS'); assert.equal(p.accuracy_m, 5); assert.equal(p.note, 'Kicker on the left');
+  ok(await api('PUT', `/park/placements/${today}/${D.rail}`, { token: T.staff, body: { ...spot(8), how: 'drag', accuracy_m: 50 } }));
+  p = await pin();
+  assert.equal(p.placed_how, 'drag'); assert.equal(p.accuracy_m, null, 'a dragged pin has no GPS accuracy');
+  is(await api('PUT', `/park/placements/${today}/${D.rail}`, { token: T.staff, body: { ...at, how: 'teleport' } }), 400);
+  ok(await api('DELETE', `/park/placements/${today}/${D.rail}`, { token: T.staff }));
+});
+
 test('a past day is a record: crew cannot change it but a manager can; tomorrow can be planned; copy a day forward', async () => {
   is(await api('PUT', `/park/placements/${yesterday}/${D.box}`, { token: T.staff, body: spot() }), 403, 'crew cannot edit yesterday');
   is(await api('PUT', `/park/placements/${yesterday}/${D.box}`, { token: T.manager, body: spot() }), 201, 'a manager can');

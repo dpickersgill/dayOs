@@ -37,6 +37,8 @@ const placeSchema = z.object({
   lng: z.number().min(-180).max(180),
   area_id: z.number().int().positive().nullable().optional(),
   note: z.string().max(255).nullable().optional(),
+  accuracy_m: z.number().min(0).max(5000).nullable().optional(), // how close the GPS fix was, when placed by GPS
+  how: z.enum(['gps', 'map', 'drag']).optional(),
 });
 
 const tenantToday = async (tenantId) => {
@@ -126,11 +128,13 @@ router.patch('/features/:id', crew, validate(partialOf(featureFields)), async (r
 });
 
 // ---------------------------------------------------------------- daily placements
-const placementSelect = `SELECT p.id, p.on_date, p.feature_id, p.area_id, p.lat, p.lng, p.note, p.updated_at, a.name AS area,
+const placementSelect = `SELECT p.id, p.on_date, p.feature_id, p.area_id, p.lat, p.lng, p.note, p.updated_at, p.accuracy_m, p.placed_how, a.name AS area,
     f.name, f.kind, f.size, f.dimensions, f.status AS feature_status,
     (SELECT i.result FROM park_inspections i WHERE i.tenant_id = p.tenant_id AND i.feature_id = p.feature_id AND i.inspected_on = p.on_date ORDER BY i.inspected_at DESC, i.id DESC LIMIT 1) AS inspected_result
   FROM park_placements p JOIN park_features f ON f.id = p.feature_id AND f.tenant_id = p.tenant_id LEFT JOIN park_areas a ON a.id = p.area_id AND a.tenant_id = p.tenant_id`;
-const placementOut = (p) => ({ ...p, lat: Number(p.lat), lng: Number(p.lng) });
+// (Saving a pin: accuracy_m and placed_how are only replaced when the position changes, and are set before lat/lng in
+// the update because MySQL assigns left to right. Editing just the area or note keeps how the pin was put down.)
+const placementOut = (p) => ({ ...p, lat: Number(p.lat), lng: Number(p.lng), accuracy_m: p.accuracy_m === null ? null : Number(p.accuracy_m) });
 
 /** The layout for one day, plus the features that are free to place (ready or flagged, not retired, not already on the map that day). */
 router.get('/placements/:date', async (req, res) => {
@@ -158,11 +162,14 @@ router.put('/placements/:date/:featureId', crew, validate(placeSchema), async (r
     }
     const prior = await one(conn, 'SELECT id FROM park_placements WHERE tenant_id = ? AND on_date = ? AND feature_id = ?', [tenantId, date, featureId]);
     await conn.query(
-      `INSERT INTO park_placements (tenant_id, on_date, feature_id, area_id, lat, lng, note, placed_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE lat = VALUES(lat), lng = VALUES(lng), area_id = VALUES(area_id), note = VALUES(note), placed_by = VALUES(placed_by)`,
-      [tenantId, date, featureId, b.area_id ?? null, b.lat, b.lng, b.note ?? null, req.auth.userId],
+      `INSERT INTO park_placements (tenant_id, on_date, feature_id, area_id, lat, lng, note, placed_by, accuracy_m, placed_how) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         accuracy_m = IF(VALUES(lat) = lat AND VALUES(lng) = lng, accuracy_m, VALUES(accuracy_m)),
+         placed_how = IF(VALUES(lat) = lat AND VALUES(lng) = lng, placed_how, VALUES(placed_how)),
+         lat = VALUES(lat), lng = VALUES(lng), area_id = VALUES(area_id), note = VALUES(note), placed_by = VALUES(placed_by)`,
+      [tenantId, date, featureId, b.area_id ?? null, b.lat, b.lng, b.note ?? null, req.auth.userId, b.how === 'gps' && b.accuracy_m != null ? Math.round(b.accuracy_m) : null, b.how || null],
     );
-    await audit(conn, req, prior ? 'move' : 'place', 'park_placements', featureId, { date, lat: b.lat, lng: b.lng });
+    await audit(conn, req, prior ? 'move' : 'place', 'park_placements', featureId, { date, lat: b.lat, lng: b.lng, how: b.how || null, accuracy_m: b.accuracy_m ?? null });
     return { moved: Boolean(prior) };
   });
   res.status(out.moved ? 200 : 201).json({ ok: true, ...out });
@@ -187,8 +194,8 @@ router.post('/placements/:date/copy', crew, validate(z.object({ from: dateStr })
   await assertEditableDay(req, date);
   const out = await tx(async (conn) => {
     const [r] = await conn.query(
-      `INSERT INTO park_placements (tenant_id, on_date, feature_id, area_id, lat, lng, note, placed_by)
-       SELECT p.tenant_id, ?, p.feature_id, p.area_id, p.lat, p.lng, p.note, ? FROM park_placements p JOIN park_features f ON f.id = p.feature_id AND f.tenant_id = p.tenant_id
+      `INSERT INTO park_placements (tenant_id, on_date, feature_id, area_id, lat, lng, note, placed_by, accuracy_m, placed_how)
+       SELECT p.tenant_id, ?, p.feature_id, p.area_id, p.lat, p.lng, p.note, ?, p.accuracy_m, 'copy' FROM park_placements p JOIN park_features f ON f.id = p.feature_id AND f.tenant_id = p.tenant_id
        WHERE p.tenant_id = ? AND p.on_date = ? AND f.status <> 'retired'
          AND p.feature_id NOT IN (SELECT feature_id FROM (SELECT feature_id FROM park_placements WHERE tenant_id = ? AND on_date = ?) already)`,
       [date, req.auth.userId, tenantId, req.body.from, tenantId, date],

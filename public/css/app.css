@@ -2347,3 +2347,8 @@ body:has(.tour-card) .demo-pill { display: none; }
 /* The try page's code step: six digits, spaced so they're easy to check against the email. */
 .code-input { font-size: 1.5rem; letter-spacing: 0.4em; font-variant-numeric: tabular-nums; max-width: 12ch; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Terrain park: where you are while dropping pins, and how close the GPS is. */
+.gps-ring { stroke: #4ea1ff; stroke-width: 1.5; fill: #4ea1ff; fill-opacity: 0.12; }
+.gps-dot { stroke: #ffffff; stroke-width: 3; fill: #1b74e4; fill-opacity: 1; }
+.gps-line { font-weight: 700; }

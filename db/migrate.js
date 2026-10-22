@@ -453,6 +453,11 @@ const terminalSteps = [
 ];
 
 // Cancelling lessons (2026.10.29): a cancelled lesson keeps who cancelled it, when and why.
+// Better pin dropping (2026.10.29): how a pin was put down (GPS, a tap on the map, a drag) and how close the GPS was.
+const pinSteps = [
+  ['park_placements.accuracy_m', (c) => columnExists(c, 'park_placements', 'accuracy_m'), "ALTER TABLE park_placements ADD COLUMN accuracy_m SMALLINT UNSIGNED NULL, ADD COLUMN placed_how ENUM('gps','map','drag','copy') NULL"],
+];
+
 const lessonCancelSteps = [
   ['lesson_sessions.cancel_reason', (c) => columnExists(c, 'lesson_sessions', 'cancel_reason'), 'ALTER TABLE lesson_sessions ADD COLUMN cancel_reason VARCHAR(300) NULL, ADD COLUMN cancelled_at DATETIME NULL, ADD COLUMN cancelled_by BIGINT UNSIGNED NULL'],
 ];
@@ -621,7 +626,7 @@ async function main() {
   await seedPlans(conn);
   await seedPatrolPlan(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;
