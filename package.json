@@ -11,7 +11,7 @@
     "dev": "node --watch src/server.js",
     "migrate": "node db/migrate.js",
     "seed": "node db/seed.js",
-    "test": "PATROL_FUTURE_SLACK_MIN=1440 PLATFORM_KEY_SIGNIN=on PWNED_CHECK=off node --test \"test/*.test.js\""
+    "test": "WEATHER=off DAY_RECORDS=off PATROL_FUTURE_SLACK_MIN=1440 PLATFORM_KEY_SIGNIN=on PWNED_CHECK=off node --test \"test/*.test.js\""
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.10",

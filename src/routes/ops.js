@@ -5,7 +5,8 @@
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
-const { partialOf, z, dateStr, dateTimeStr, validate, paramId, normDateTime, setClause, todayIn, nowIn } = require('../lib/util');
+const { partialOf, z, dateStr, dateTimeStr, validate, paramId, normDateTime, setClause, todayIn, nowIn, addDays } = require('../lib/util');
+const dayrecord = require('../lib/dayrecord');
 const { notFound, bad, conflict } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { SURFACE_KEYS } = require('../lib/ops');
@@ -302,6 +303,35 @@ router.post('/weather', validate(z.object(weatherFields)), async (req, res) => {
     [req.auth.tenantId, b.logged_at || nowIn(await tenantTz(req.auth.tenantId)), b.place, b.temp_f ?? null, b.wind_mph ?? null, b.gust_mph ?? null, b.wind_dir ?? null, b.sky ?? null, b.precip_in ?? null, b.note ?? null, req.auth.userId]);
   await audit(pool, req, 'create', 'weather_logs', r.insertId);
   res.status(201).json({ id: r.insertId });
+});
+
+// ---------------------------------------------------------------- day by day (lib/dayrecord.js)
+// How each day went, recorded every night: weather, new snow, open or closed, visits, tickets and lessons.
+router.get('/days', manager, async (req, res) => {
+  const tz = await tenantTz(req.auth.tenantId);
+  const today = todayIn(tz);
+  const to = dateStr.safeParse(first(req.query.to)).success ? first(req.query.to) : addDays(today, -1);
+  const from = dateStr.safeParse(first(req.query.from)).success ? first(req.query.from) : addDays(to, -29);
+  if (from > to) throw bad('The start date is after the end date');
+  if (addDays(from, 400) < to) throw bad('Ask for up to 400 days at a time');
+  const t = await one(pool, 'SELECT map_lat FROM tenants WHERE id = ?', [req.auth.tenantId]);
+  res.json({ from, to, has_location: t.map_lat !== null, days: await dayrecord.list(req.auth.tenantId, from, to) });
+});
+
+/** Where the weather is looked up: the mountain's map point. Set here when no map has set it yet. */
+router.put('/days/location', manager, validate(z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) })), async (req, res) => {
+  await pool.query('UPDATE tenants SET map_lat = ?, map_lng = ?, map_zoom = COALESCE(map_zoom, 14) WHERE id = ?', [req.body.lat, req.body.lng, req.auth.tenantId]);
+  await audit(pool, req, 'update', 'tenants', req.auth.tenantId, { map_lat: req.body.lat, map_lng: req.body.lng });
+  res.json({ ok: true });
+});
+
+/** Fills in past days (up to a year back) from sales, scans and the weather archive: once, so the forecast has history. */
+router.post('/days/backfill', manager, validate(z.object({ days: z.number().int().min(1).max(366).default(365) })), async (req, res) => {
+  const tz = await tenantTz(req.auth.tenantId);
+  const today = todayIn(tz);
+  const out = await dayrecord.recordRange(req.auth.tenantId, addDays(today, -req.body.days), addDays(today, -1));
+  await audit(pool, req, 'backfill', 'day_records', null, { days: req.body.days, ...out });
+  res.json(out);
 });
 
 router.delete('/weather/:id', manager, async (req, res) => {

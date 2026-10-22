@@ -1,5 +1,5 @@
-import { get, post, del } from '../api.js';
-import { h, clear, isManager, table, input, select, field, button, toast, formDialog, val, num, fmtDate, fmtTime, empty, label } from '../ui.js';
+import { get, post, put, del } from '../api.js';
+import { h, clear, isManager, table, input, select, field, button, toast, formDialog, val, num, fmtDate, fmtTime, empty, label, money } from '../ui.js';
 
 const SKY = [['', 'Not set'], ['clear', 'Clear'], ['partly', 'Partly cloudy'], ['overcast', 'Overcast'], ['snow', 'Snowing'], ['rain', 'Raining'], ['mixed', 'Mixed'], ['fog', 'Fog']];
 const DIRS = [['', 'Not set'], 'N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
@@ -8,8 +8,60 @@ const QUALITY = [['', 'Not set'], ['poor', 'Poor'], ['fair', 'Fair'], ['good', '
 export async function drawSnowWeather(root) {
   const snow = h('section', { class: 'section' });
   const wx = h('section', { class: 'section' });
+  const days = h('section', { class: 'section' });
   root.append(snow, wx);
-  await Promise.all([drawSnow(snow), drawWeather(wx)]);
+  if (isManager()) root.append(days);
+  await Promise.all([drawSnow(snow), drawWeather(wx), isManager() ? drawDays(days) : null]);
+}
+
+// Open-Meteo weather codes, in words.
+const SKY_CODE = (c) => {
+  if (c === null || c === undefined) return '';
+  if (c === 0) return 'Clear';
+  if (c <= 2) return 'Partly cloudy';
+  if (c === 3) return 'Overcast';
+  if (c <= 48) return 'Fog';
+  if (c <= 57) return 'Drizzle';
+  if (c <= 67) return 'Rain';
+  if (c <= 77) return 'Snow';
+  if (c <= 82) return 'Showers';
+  if (c <= 86) return 'Snow showers';
+  return 'Thunderstorms';
+};
+const inches = (v) => (v === null ? '' : `${Math.round(v * 10) / 10} in`);
+
+/** How each day went, recorded every night: the history the visitor forecast learns from. */
+async function drawDays(box) {
+  const r = await get('/ops/days');
+  const head = h('header', null, h('h2', null, 'Day by day'));
+  clear(box).append(head, h('p', { class: 'muted' }, 'Recorded every night: the weather at the mountain, new snow, whether you were open, visits, tickets and lessons. This history is what the visitor forecast will learn from.'));
+  if (!r.has_location) {
+    const use = button('Use this device’s location', () => new Promise((resolve, reject) => {
+      if (!navigator.geolocation) { reject(new Error('This device cannot share its location')); return; }
+      navigator.geolocation.getCurrentPosition(async (p) => {
+        try { await put('/ops/days/location', { lat: Math.round(p.coords.latitude * 1e6) / 1e6, lng: Math.round(p.coords.longitude * 1e6) / 1e6 }); toast('Weather will be recorded for this spot'); await drawDays(box); resolve(); } catch (e) { reject(e); }
+      }, () => reject(new Error('Location was not shared')), { enableHighAccuracy: false, timeout: 15000 });
+    }), { small: true });
+    box.append(h('div', { class: 'callout' }, h('p', null, 'Weather needs the mountain’s location. Save a view on the patrol or park map, or stand at the base area and use this device’s location.'), h('div', { class: 'row' }, use)));
+  }
+  const fill = button(r.days.length ? 'Refill the past year' : 'Fill in the past year', async (b) => {
+    b.textContent = 'Filling in, this can take a minute…';
+    try { const o = await post('/ops/days/backfill', { days: 365 }); toast(`${o.days} days recorded${o.weather ? `, ${o.weather} with weather` : ''}`); await drawDays(box); } finally { b.textContent = 'Refill the past year'; }
+  }, { small: true });
+  head.append(fill);
+  if (!r.days.length) { box.append(empty('Nothing recorded yet. Days are added each night, or fill in the past year from your sales and the weather archive.')); return; }
+  box.append(table([
+    { head: 'Day', cell: (d) => fmtDate(d.on_date) },
+    { head: 'Open', cell: (d) => label(d.status) || '' },
+    { head: 'Weather', cell: (d) => [SKY_CODE(d.weather_code), d.high_f !== null ? `${Math.round(d.low_f)}° to ${Math.round(d.high_f)}°F` : ''].filter(Boolean).join(', ') },
+    { head: 'Snowfall', cell: (d) => inches(d.snowfall_in) },
+    { head: 'Crew new snow', cell: (d) => inches(d.crew_new_snow_in) },
+    { head: 'Wind', cell: (d) => (d.wind_mph === null ? '' : `${Math.round(d.wind_mph)} mph${d.gust_mph ? `, gusts ${Math.round(d.gust_mph)}` : ''}`) },
+    { head: 'Visits', cell: (d) => String(d.visits) },
+    { head: 'Tickets for the day', cell: (d) => `${d.tickets_for_day}${d.presold_online ? ` (${d.presold_online} ahead online)` : ''}` },
+    { head: 'Lessons', cell: (d) => String(d.lesson_students) },
+    { head: 'Revenue', cell: (d) => money(d.revenue_cents) },
+  ], r.days));
 }
 
 async function drawSnow(box) {

@@ -460,6 +460,37 @@ const pinSteps = [
 
 // Guest types each mountain can edit (2026.10.29). The fixed list of five becomes a table per mountain (made with the
 // same five the first time it is read), and the three columns that held a type take any code, keeping every value.
+// Every night the daily job writes down how each day went: the weather (from Open-Meteo, at the mountain's map point),
+// the crew's new-snow reading, whether the mountain was open, visits, tickets sold and sold ahead online, and lesson
+// students. A year of these is what the visitor forecast learns from.
+const dayRecordSteps = [
+  ['day_records', (c) => tableExists(c, 'day_records'), `CREATE TABLE day_records (
+    tenant_id        BIGINT UNSIGNED NOT NULL,
+    on_date          DATE NOT NULL,
+    weekday          TINYINT UNSIGNED NOT NULL,
+    status           VARCHAR(10) NULL,
+    high_f           DECIMAL(5,1) NULL,
+    low_f            DECIMAL(5,1) NULL,
+    snowfall_in      DECIMAL(5,1) NULL,
+    precip_in        DECIMAL(5,2) NULL,
+    wind_mph         DECIMAL(5,1) NULL,
+    gust_mph         DECIMAL(5,1) NULL,
+    weather_code     SMALLINT NULL,
+    weather_source   VARCHAR(20) NULL,
+    crew_new_snow_in DECIMAL(5,1) NULL,
+    crew_base_in     DECIMAL(5,1) NULL,
+    visits           INT UNSIGNED NOT NULL DEFAULT 0,
+    tickets_sold     INT UNSIGNED NOT NULL DEFAULT 0,
+    tickets_for_day  INT UNSIGNED NOT NULL DEFAULT 0,
+    presold_online   INT UNSIGNED NOT NULL DEFAULT 0,
+    lesson_students  INT UNSIGNED NOT NULL DEFAULT 0,
+    revenue_cents    BIGINT NOT NULL DEFAULT 0,
+    recorded_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, on_date),
+    CONSTRAINT fk_day_records_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  )`],
+];
+
 const guestTypeSteps = [
   ['guest_types', (c) => tableExists(c, 'guest_types'), `CREATE TABLE guest_types (
     id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -647,7 +678,7 @@ async function main() {
   await seedPlans(conn);
   await seedPatrolPlan(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;
