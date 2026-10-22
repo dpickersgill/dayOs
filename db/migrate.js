@@ -396,6 +396,44 @@ const connectSteps = [
   ['order_refunds.card_account', (c) => columnExists(c, 'order_refunds', 'card_account'), 'ALTER TABLE order_refunds ADD COLUMN card_account VARCHAR(64) NULL'],
   ['donations.stripe_account', (c) => columnExists(c, 'donations', 'stripe_account'), 'ALTER TABLE donations ADD COLUMN stripe_account VARCHAR(64) NULL'],
 ];
+// Card readers at the counter (2026.10.26): Stripe Terminal smart readers on each mountain's own Stripe account.
+const terminalSteps = [
+  ['tenants.terminal_location', (c) => columnExists(c, 'tenants', 'terminal_location'), 'ALTER TABLE tenants ADD COLUMN terminal_location VARCHAR(64) NULL, ADD COLUMN terminal_location_account VARCHAR(64) NULL'],
+  ['terminal_readers', (c) => tableExists(c, 'terminal_readers'), `CREATE TABLE terminal_readers (
+    id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id      BIGINT UNSIGNED NOT NULL,
+    stripe_reader  VARCHAR(64) NOT NULL,
+    account        VARCHAR(64) NULL,
+    label          VARCHAR(100) NOT NULL,
+    device_type    VARCHAR(40) NULL,
+    serial         VARCHAR(64) NULL,
+    simulated      TINYINT(1) NOT NULL DEFAULT 0,
+    active         TINYINT(1) NOT NULL DEFAULT 1,
+    created_by     BIGINT UNSIGNED NULL,
+    created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_terminal_reader (stripe_reader),
+    KEY ix_terminal_readers_tenant (tenant_id, active)
+  ) ENGINE=InnoDB`],
+  ['terminal_payments', (c) => tableExists(c, 'terminal_payments'), `CREATE TABLE terminal_payments (
+    id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id      BIGINT UNSIGNED NOT NULL,
+    reader_id      BIGINT UNSIGNED NOT NULL,
+    intent         VARCHAR(64) NOT NULL,
+    account        VARCHAR(64) NULL,
+    amount_cents   INT UNSIGNED NOT NULL,
+    fee_cents      INT UNSIGNED NOT NULL DEFAULT 0,
+    status         ENUM('waiting','succeeded','failed','canceled','refunded') NOT NULL DEFAULT 'waiting',
+    failure        VARCHAR(255) NULL,
+    card_brand     VARCHAR(20) NULL,
+    card_last4     CHAR(4) NULL,
+    order_id       BIGINT UNSIGNED NULL,
+    created_by     BIGINT UNSIGNED NULL,
+    created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_terminal_intent (intent),
+    KEY ix_terminal_payments_tenant (tenant_id, status, created_at)
+  ) ENGINE=InnoDB`],
+];
 const opsSteps = [
   ['trails hold status', (c) => columnTypeHas(c, 'trails', 'status', "'hold'"), "ALTER TABLE trails MODIFY status ENUM('open','hold','closed') NOT NULL DEFAULT 'closed'"],
   ['trails.closure_reason', (c) => columnExists(c, 'trails', 'closure_reason'), 'ALTER TABLE trails ADD COLUMN closure_reason VARCHAR(200) NULL, ADD COLUMN status_by BIGINT UNSIGNED NULL'],
@@ -560,7 +598,7 @@ async function main() {
   await seedPlans(conn);
   await seedPatrolPlan(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...terminalSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;
