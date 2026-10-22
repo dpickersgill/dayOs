@@ -66,6 +66,17 @@ test('a shared password stands in front of staging, and search engines are kept 
   assert.equal(away.headers.get('location'), '/', 'never sends people off-site');
 });
 
+test('a demo mountain builds on staging (its loader is not stopped by the staging password)', async () => {
+  const right = await fetch(`${base}/__staging`, { method: 'POST', body: new URLSearchParams({ password: 'staging-gate-password-1', next: '/' }), redirect: 'manual' });
+  const cookie = right.headers.get('set-cookie').split(';')[0];
+  const r = await fetch(`${base}/api/v1/trial`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Stan Staging', email: `stage-${Date.now()}@dayos.test`, mountain: 'Staging Hill' }) });
+  const out = await r.json();
+  assert.equal(r.status, 201, JSON.stringify(out));
+  assert.ok(out.token && out.tenant);
+  const lifts = await fetch(`${base}/api/v1/board`, { headers: { cookie, authorization: `Bearer ${out.token}` } });
+  assert.equal(lifts.status, 200, 'the demo mountain is filled and usable');
+});
+
 test('the health check, the version and Stripe stay open, and say which build is on staging', async () => {
   const ready = await (await fetch(`${base}/readyz`)).json();
   assert.equal(ready.ok, true); assert.equal(ready.stage, 'staging'); assert.ok(ready.build);

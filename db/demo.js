@@ -5,6 +5,9 @@
 // Run db/reset.js first for a clean start; running this twice adds a second set of staff and customers.
 // It uses a short-lived owner login that it removes when it finishes, so no password is needed.
 // Everything is made up. Orders and punches are stamped with the current time.
+// It talks to its own private copy of the app on 127.0.0.1, so staging's shared password (STAGING_GATE) must not stand
+// in front of that copy: without this, every demo built on staging failed. Set before anything reads the settings.
+delete process.env.STAGING_GATE;
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { pool } = require('../src/db');

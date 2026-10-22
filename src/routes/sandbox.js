@@ -24,7 +24,7 @@ const clean = (s) => String(s).replace(/[\u0000-\u001f<>]/g, '').trim();
 /** Fills a new demo mountain by running the same loader an operator would run by hand. */
 function seed(slug) {
   return new Promise((resolve, reject) => {
-    execFile(process.execPath, [SEED, slug], { timeout: 170_000, maxBuffer: 4 * 1024 * 1024, env: process.env }, (err, _out, errOut) => {
+    execFile(process.execPath, [SEED, slug], { timeout: 170_000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, STAGING_GATE: '' } }, (err, _out, errOut) => {
       if (err) { console.error('Demo loader failed for', slug, String(errOut || err.message).slice(0, 400)); return reject(err); }
       return resolve();
     });
