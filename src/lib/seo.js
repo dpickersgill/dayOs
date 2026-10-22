@@ -19,19 +19,19 @@ const META = {
     crumb: 'Product',
   },
   'ski-patrol': {
-    title: 'Ski Patrol Software: Incident Reports and Dispatch | Verdynt/OS',
+    title: 'Ski Patrol Software: Incident Reports, Dispatch | Verdynt/OS',
     description: 'Patient care reports written at the bedside, dispatch with phone alerts, opening checks, the closing sweep and volunteer days, for paid and volunteer patrols.',
     og: 'Ski patrol software, from the first call to the closing sweep',
     crumb: 'Ski patrol',
   },
   'lift-ticket-software': {
-    title: 'Lift Ticket and Season Pass Software for Ski Areas | Verdynt/OS',
+    title: 'Lift Ticket and Season Pass Software | Verdynt/OS',
     description: 'Sell lift tickets, season passes and gift cards at the counter and online, scan them at the lift with RFID cards, and stop a pass that was just used.',
     og: 'Lift tickets and passes: sell it, scan it, move on',
     crumb: 'Lift tickets and passes',
   },
   'ski-school-software': {
-    title: 'Ski School Software: Lesson Booking and Instructors | Verdynt/OS',
+    title: 'Ski School Software: Lesson Booking | Verdynt/OS',
     description: 'Lesson sessions with rosters, online lesson booking and payment in English or Spanish, packages that count down, and instructors who post their own open days.',
     og: 'Ski school software: sessions that fill without the phone tag',
     crumb: 'Ski school',
@@ -53,6 +53,30 @@ const META = {
     description: 'Lift inspection checklists on a phone, wind holds and downtime, grooming plans, work orders and service plans for groomers, snowmobiles, snowmaking and lifts.',
     og: "Lift inspections and maintenance: know what's safe to open",
     crumb: 'Lift and fleet maintenance',
+  },
+  'ski-area-pos': {
+    title: 'Ski Area POS: Tickets, Card Reader, Gift Cards | Verdynt/OS',
+    description: 'Point of sale for ski areas: lift tickets, passes, lessons and rentals in one basket, cards on a Stripe smart reader, cash, gift cards and the till counted.',
+    og: 'Ski area POS: a fast ticket window on a busy Saturday',
+    crumb: 'Ski area POS',
+  },
+  'online-lift-ticket-sales': {
+    title: 'Sell Lift Tickets Online: Ski Area Ticket Shop | Verdynt/OS',
+    description: 'Your own online ticket shop: guests pick a day, see its price and buy tickets, passes and gift cards by card. Daily limits, a waitlist and date changes.',
+    og: 'Sell lift tickets online, on your own page',
+    crumb: 'Online ticket sales',
+  },
+  'terrain-park-software': {
+    title: 'Terrain Park Software: Feature Map, Inspections | Verdynt/OS',
+    description: 'A catalog of rails, boxes and jumps, a daily park map with GPS pins dropped from a phone, and inspections that close a feature everywhere when it fails.',
+    og: 'Terrain park software: every feature, where it is, and whether it passed',
+    crumb: 'Terrain park',
+  },
+  'ski-area-staff-scheduling': {
+    title: 'Ski Area Staff Scheduling and Time Clock | Verdynt/OS',
+    description: 'Schedule lifts, rentals, ski school and food staff by the week, see staffing needs from tickets sold, clock in with a PIN or badge, and track certifications.',
+    og: 'Ski area staff scheduling: every shift covered before the first chair',
+    crumb: 'Staff scheduling',
   },
   pricing: {
     title: 'Pricing: Ski Area Software from {{FROM}}/month | Verdynt/OS',
@@ -95,7 +119,7 @@ const dollars = (cents) => `$${Math.round(cents / 100).toLocaleString('en-US')}`
  * ctx: { slug, origin (the canonical origin, no trailing slash), base (link prefix), html (the page body), plans, verify }
  */
 // Pages that describe the software itself carry its structured data (name, category, prices).
-const SOFTWARE_PAGES = ['', 'pricing', 'product', 'ski-patrol', 'lift-ticket-software', 'ski-school-software', 'ski-rental-software', 'ski-waiver-software', 'lift-maintenance-software'];
+const SOFTWARE_PAGES = ['', 'pricing', 'product', 'ski-patrol', 'lift-ticket-software', 'ski-school-software', 'ski-rental-software', 'ski-waiver-software', 'lift-maintenance-software', 'ski-area-pos', 'online-lift-ticket-sales', 'terrain-park-software', 'ski-area-staff-scheduling'];
 const FEATURES = ['Lift and trail status and inspections', 'Grooming and snowmaking logs', 'Ticket and season pass sales', 'RFID gate scanning', 'Online ticket shop',
   'Online waivers', 'Ski and snowboard rentals', 'Ski school and lesson booking', 'Ski patrol patient care reports and dispatch', 'Staff scheduling and time clock', 'Fleet and equipment maintenance'];
 

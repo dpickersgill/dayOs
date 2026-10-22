@@ -1,6 +1,25 @@
 {
   "releases": [
     {
+      "version": "2026.10.30",
+      "date": "2026-10-25",
+      "title": "Four new website pages for search",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "Four new website pages, each written for a search ski area managers make: Ski area POS, Online lift ticket sales, Terrain park software and Ski area staff scheduling. Each has its own title, description, questions and answers for Google, and is in the menu, the footer, the sitemap and llms.txt."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": "platform",
+          "text": "Shorter search titles on the ski patrol, lift ticket and ski school pages, so Google shows them whole. The product page links to each new page and mentions the card reader."
+        }
+      ]
+    },
+    {
       "version": "2026.10.29",
       "date": "2026-10-25",
       "title": "Card reader, lesson cancelling, pin dropping, your own guest types",

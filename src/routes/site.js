@@ -20,11 +20,13 @@ const DIR = path.join(__dirname, '..', 'site');
 const PAGES = {
   '': 'index', product: 'product', 'ski-patrol': 'skipatrol', 'lift-ticket-software': 'lifttickets', 'ski-school-software': 'skischool',
   'ski-rental-software': 'skirental', 'ski-waiver-software': 'skiwaivers', 'lift-maintenance-software': 'liftmaintenance',
+  'ski-area-pos': 'skiareapos', 'online-lift-ticket-sales': 'onlinetickets', 'terrain-park-software': 'terrainpark', 'ski-area-staff-scheduling': 'staffscheduling',
   pricing: 'pricing', security: 'security', contact: 'contact', privacy: 'privacy', terms: 'terms',
 };
 // The pages written for one search each ("ski school software"), linked from the menu and the footer.
 const SOLUTIONS = [['ski-patrol', 'Ski patrol'], ['lift-ticket-software', 'Lift tickets and passes'], ['ski-school-software', 'Ski school'],
-  ['ski-rental-software', 'Ski rentals'], ['ski-waiver-software', 'Online waivers'], ['lift-maintenance-software', 'Lift and fleet maintenance']];
+  ['ski-rental-software', 'Ski rentals'], ['ski-waiver-software', 'Online waivers'], ['lift-maintenance-software', 'Lift and fleet maintenance'],
+  ['ski-area-pos', 'Ski area POS'], ['online-lift-ticket-sales', 'Online ticket sales'], ['terrain-park-software', 'Terrain park'], ['ski-area-staff-scheduling', 'Staff scheduling']];
 const SEO = require('../lib/seo');
 const cache = new Map();
 
@@ -247,6 +249,10 @@ Verdynt/OS runs in a web browser on counter computers, phones and tablets, with 
 - [Ski rental software](${page('ski-rental-software')}): rental contracts, sizing, binding records and barcoded gear
 - [Online ski waivers](${page('ski-waiver-software')}): waivers signed on a phone or counter tablet
 - [Lift inspection and maintenance software](${page('lift-maintenance-software')}): lift checks, grooming, work orders and the fleet
+- [Ski area POS](${page('ski-area-pos')}): the ticket window, card payments on a Stripe smart reader, gift cards and the till
+- [Online lift ticket sales](${page('online-lift-ticket-sales')}): the online shop, day-first pricing, daily limits and the waitlist
+- [Terrain park software](${page('terrain-park-software')}): park features, the daily map with GPS pins, and inspections
+- [Ski area staff scheduling](${page('ski-area-staff-scheduling')}): shifts, the time clock and certifications
 - [Pricing](${page('pricing')}): plans, add-ons and how paying works
 - [Security](${page('security')}): how guest and patient information is protected
 - [Contact](${page('contact')}): book a walkthrough or start a free trial

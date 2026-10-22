@@ -56,7 +56,7 @@ test.after(async () => { await new Promise((r) => server.close(r)); await new Pr
 
 test('every page is at /site, with its links kept under /site', async () => {
   assert.equal((await get('/site')).status, 301);
-  for (const p of ['/site/', '/site/product', '/site/ski-patrol', '/site/lift-ticket-software', '/site/ski-school-software', '/site/ski-rental-software', '/site/ski-waiver-software', '/site/lift-maintenance-software', '/site/pricing', '/site/security', '/site/contact', '/site/privacy', '/site/terms']) {
+  for (const p of ['/site/', '/site/product', '/site/ski-patrol', '/site/lift-ticket-software', '/site/ski-school-software', '/site/ski-rental-software', '/site/ski-waiver-software', '/site/lift-maintenance-software', '/site/ski-area-pos', '/site/online-lift-ticket-sales', '/site/terrain-park-software', '/site/ski-area-staff-scheduling', '/site/pricing', '/site/security', '/site/contact', '/site/privacy', '/site/terms']) {
     const r = await get(p);
     assert.equal(r.status, 200, p);
     assert.match(r.type, /text\/html/);
@@ -138,7 +138,7 @@ test('the Pricing page reads the active plans and add-ons set in the console', a
 });
 
 test('pages written for each search are linked from every page, in the sitemap, and described for AI assistants', async () => {
-  const slugs = ['ski-patrol', 'lift-ticket-software', 'ski-school-software', 'ski-rental-software', 'ski-waiver-software', 'lift-maintenance-software'];
+  const slugs = ['ski-patrol', 'lift-ticket-software', 'ski-school-software', 'ski-rental-software', 'ski-waiver-software', 'lift-maintenance-software', 'ski-area-pos', 'online-lift-ticket-sales', 'terrain-park-software', 'ski-area-staff-scheduling'];
   const home = await onHost('/');
   const map = await onHost('/sitemap.xml');
   for (const s of slugs) {
