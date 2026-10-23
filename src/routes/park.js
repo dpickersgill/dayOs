@@ -68,7 +68,7 @@ router.get('/map', async (req, res) => {
     const a = await one(pool, 'SELECT AVG(lat) AS lat, AVG(lng) AS lng FROM (SELECT lat, lng FROM park_placements WHERE tenant_id = ? ORDER BY on_date DESC, id DESC LIMIT 50) x', [tenantId]);
     if (a && a.lat !== null) center = { lat: Number(a.lat), lng: Number(a.lng), zoom: DEFAULT_ZOOM, source: 'park' };
   }
-  res.json({ layers: config.map.layers, center, can_edit: ['owner', 'manager', 'staff'].includes(req.auth.role), today: await tenantToday(tenantId) });
+  res.json({ layers: config.map.layers, max_zoom: config.map.maxZoom, center, can_edit: ['owner', 'manager', 'staff'].includes(req.auth.role), today: await tenantToday(tenantId) });
 });
 
 // ---------------------------------------------------------------- areas

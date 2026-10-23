@@ -28,11 +28,20 @@ const US_VIEW = { lat: 39.8283, lng: -98.5795, zoom: 4 };
 const round6 = (n) => Math.round(n * 1e6) / 1e6;
 const fmtCoord = (lat, lng) => `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 
-/** A map with the mountain's tile layers (and a switch when there is more than one). */
-export function makeMap(L, el, cfg, view) {
-  const map = L.map(el, { zoomControl: true, attributionControl: true }).setView([view.lat, view.lng], view.zoom);
-  const layers = cfg.layers.map((l) => [l.name, L.tileLayer(l.url, { attribution: l.attribution, maxZoom: l.maxZoom, referrerPolicy: 'origin' })]);
-  layers[0][1].addTo(map);
+/**
+ * A map with the mountain's tile layers (and a switch when there is more than one). Each layer is drawn from its own
+ * deepest tiles and enlarged past them, so every map zooms in far enough to place a single valve. `base` picks the
+ * layer it opens on (the asset map opens on Satellite); the person's last choice on that map is remembered.
+ */
+export function makeMap(L, el, cfg, view, { base, remember } = {}) {
+  const deepest = cfg.max_zoom || 21;
+  const map = L.map(el, { zoomControl: true, attributionControl: true, maxZoom: deepest }).setView([view.lat, view.lng], view.zoom);
+  const layers = cfg.layers.map((l) => [l.name, L.tileLayer(l.url, { attribution: l.attribution, maxNativeZoom: l.maxZoom, maxZoom: deepest, referrerPolicy: 'origin' })]);
+  let saved = null;
+  try { saved = remember ? localStorage.getItem(`so.map.${remember}`) : null; } catch (_) { /* private mode */ }
+  const first = layers.find(([n]) => n === saved) || layers.find(([n]) => n === base) || layers[0];
+  first[1].addTo(map);
+  if (remember) map.on('baselayerchange', (e) => { try { localStorage.setItem(`so.map.${remember}`, e.name); } catch (_) { /* private mode */ } });
   if (layers.length > 1) L.control.layers(Object.fromEntries(layers), null, { collapsed: true }).addTo(map);
   // The map is often built while its box is still detached from the page or being sized, so Leaflet measures it at zero.
   // When the box gets a real size, re-measure it and put the view back where it was asked to be.

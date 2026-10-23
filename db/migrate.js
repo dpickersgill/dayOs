@@ -491,6 +491,35 @@ const dayRecordSteps = [
   )`],
 ];
 
+// The asset map: points, lines and areas for what lies where (valves, pipes, power lines, ponds), each optionally tied to
+// an asset in the register.
+const mapFeatureSteps = [
+  ['map_features', (c) => tableExists(c, 'map_features'), `CREATE TABLE map_features (
+    id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id      BIGINT UNSIGNED NOT NULL,
+    kind           VARCHAR(30) NOT NULL,
+    geometry       ENUM('point','line','area') NOT NULL,
+    name           VARCHAR(100) NULL,
+    points         MEDIUMTEXT NOT NULL,
+    lat            DECIMAL(10,7) NOT NULL,
+    lng            DECIMAL(10,7) NOT NULL,
+    size           VARCHAR(40) NULL,
+    material       VARCHAR(40) NULL,
+    depth_ft       DECIMAL(5,1) NULL,
+    installed_year SMALLINT UNSIGNED NULL,
+    status         ENUM('in_service','out_of_service','abandoned','planned') NOT NULL DEFAULT 'in_service',
+    notes          VARCHAR(1000) NULL,
+    asset_id       BIGINT UNSIGNED NULL,
+    accuracy_m     DECIMAL(6,1) NULL,
+    placed_how     ENUM('gps','map','walk','import') NOT NULL DEFAULT 'map',
+    created_by     BIGINT UNSIGNED NULL,
+    created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY ix_map_features_tenant (tenant_id, kind),
+    KEY ix_map_features_asset (tenant_id, asset_id),
+    CONSTRAINT fk_map_features_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  )`],
+];
 const guestTypeSteps = [
   ['guest_types', (c) => tableExists(c, 'guest_types'), `CREATE TABLE guest_types (
     id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -678,7 +707,7 @@ async function main() {
   await seedPlans(conn);
   await seedPatrolPlan(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

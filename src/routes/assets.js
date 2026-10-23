@@ -21,6 +21,8 @@ const router = express.Router();
 const crew = requireRole('staff', 'manager');
 const manager = requireRole('manager');
 router.use(crew);
+// The asset map: points, lines and areas for what lies where (routes/assetmap.js).
+router.use('/map', require('./assetmap'));
 
 const tzOf = async (conn, tenantId) => (await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone;
 const nullable = (s) => s.nullable().optional();
@@ -227,8 +229,10 @@ router.get('/register/:id', async (req, res) => {
   ]);
   const c = costMap.get(id);
   const see = isManager(req);
+  const onMap = await one(pool, 'SELECT COUNT(*) AS n FROM map_features WHERE tenant_id = ? AND asset_id = ?', [t, id]);
   res.json({
     ...a,
+    on_map: Number(onMap.n),
     ...(see ? {} : { purchase_cents: undefined, salvage_cents: undefined }),
     children, meters, fuel: fuel.map((f) => ({ ...f, gallons: Number(f.gallons) })),
     // opened_at is UTC; the day it was opened is given on the mountain's clock.

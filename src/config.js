@@ -22,12 +22,23 @@ if (isProd && (!env.JWT_SECRET || env.JWT_SECRET.length < 32)) {
 // provider (MapTiler, Stadia, Mapbox and others) and set MAP_TILE_URL, for example
 //   https://api.maptiler.com/maps/outdoor/{z}/{x}/{y}.png?key=YOUR_KEY
 // {s} may be used for subdomains. MAP_TILE_ATTRIBUTION must carry the provider's required credit.
+// Every map also offers Satellite: by default the USGS National Map's aerial imagery (public domain, the whole US, no key
+// or account), or MAP_IMAGERY_URL from a paid provider. maxZoom is the deepest level the provider has tiles for; the map
+// zooms further by enlarging those (up to MAP_MAX_ZOOM), which is what pinning a single valve needs.
+const imagery = {
+  name: 'Satellite',
+  url: env.MAP_IMAGERY_URL || 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
+  attribution: env.MAP_IMAGERY_URL ? (env.MAP_IMAGERY_ATTRIBUTION || '') : 'Imagery: <a href="https://www.usgs.gov/programs/national-geospatial-program/national-map">USGS The National Map</a>, USDA NAIP',
+  maxZoom: Number(env.MAP_IMAGERY_MAX_ZOOM || 16),
+};
 const mapLayers = env.MAP_TILE_URL
-  ? [{ name: env.MAP_TILE_NAME || 'Map', url: env.MAP_TILE_URL, attribution: env.MAP_TILE_ATTRIBUTION || '', maxZoom: Number(env.MAP_TILE_MAX_ZOOM || 19) }]
+  ? [{ name: env.MAP_TILE_NAME || 'Map', url: env.MAP_TILE_URL, attribution: env.MAP_TILE_ATTRIBUTION || '', maxZoom: Number(env.MAP_TILE_MAX_ZOOM || 19) }, imagery]
   : [
       { name: 'Street map', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors', maxZoom: 19 },
+      imagery,
       { name: 'Terrain', url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', attribution: 'Map data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, SRTM | Style &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)', maxZoom: 17 },
     ];
+const mapMaxZoom = Math.min(22, Math.max(18, Number(env.MAP_MAX_ZOOM || 21)));
 
 // Card payments for online lesson booking (Stripe Checkout). Leave STRIPE_SECRET_KEY unset and online payment stays off.
 //   STRIPE_SECRET_KEY      the secret key (sk_live_... or sk_test_...)
@@ -52,7 +63,7 @@ module.exports = {
   staging,
   stagingSettings: { inbox: env.STAGING_INBOX || '', smsTo: env.STAGING_SMS_TO || '', gate: env.STAGING_GATE || '' },
   stripe,
-  map: { layers: mapLayers },
+  map: { layers: mapLayers, maxZoom: mapMaxZoom },
   port: Number(env.PORT || 8080),
   jwtSecret: env.JWT_SECRET || 'dev-only-secret-change-me-dev-only-secret',
   // Separate keys so sign-in tokens can be rotated on their own. Each falls back to JWT_SECRET, which is what was used

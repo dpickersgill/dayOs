@@ -2354,3 +2354,12 @@ body:has(.tour-card) .demo-pill { display: none; }
 .gps-ring { stroke: #4ea1ff; stroke-width: 1.5; fill: #4ea1ff; fill-opacity: 0.12; }
 .gps-dot { stroke: #ffffff; stroke-width: 3; fill: #1b74e4; fill-opacity: 1; }
 .gps-line { font-weight: 700; }
+
+/* Asset map: points as coloured dots (by system), the layer list with swatches, and drag handles when reshaping */
+.amap-dot-wrap { background: none; border: 0; }
+.amap-dot { display: block; width: 18px; height: 18px; margin: 4px; border-radius: 50%; background: var(--c); border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6); }
+.amap-dot.off { background: #fff; border-color: var(--c); border-style: dashed; }
+.amap-swatch { display: inline-block; width: 14px; height: 14px; border-radius: 3px; background: var(--c); vertical-align: -2px; }
+.amap-legend { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 6px; }
+.amap-legend label { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; cursor: pointer; }
+.amap-handle { background: #fff; border: 3px solid #12303a; border-radius: 50%; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5); }

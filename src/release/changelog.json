@@ -1,6 +1,31 @@
 {
   "releases": [
     {
+      "version": "2026.10.32",
+      "date": "2026-10-25",
+      "title": "A map of your pipes, valves and equipment, and a satellite view on every map",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "assets",
+          "who": null,
+          "text": "Assets and fleet has a Map: put valves, hydrants, pumps, pump houses and transformers on it as points, snowmaking water and air lines, power, sewer and fibre runs as lines, and ponds and buildings as areas. Each system has its own colour and can be switched on and off. Place things with your phone's location, tap the map, or record a pipe run by walking it. Tie a point to an asset in the register, and its page links straight to it. Managers can download the whole map for GIS software or a contractor."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Every map (patrol, terrain park and assets) now has a Satellite view of the ground, and zooms in further, close enough to place a single valve."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "Map settings: the satellite layer is the USGS National Map's aerial imagery by default (free, public domain, US only). MAP_IMAGERY_URL and MAP_IMAGERY_ATTRIBUTION swap in a paid provider, MAP_IMAGERY_MAX_ZOOM sets its deepest tile level (default 16), and MAP_MAX_ZOOM how far every map zooms (default 21)."
+        }
+      ]
+    },
+    {
       "version": "2026.10.31",
       "date": "2026-10-25",
       "title": "Guides, checklists and search improvements on the website",

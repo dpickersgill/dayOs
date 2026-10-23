@@ -9,6 +9,7 @@
 // One asset opens on its own page (asset-page.js), which is also where a scanned QR tag lands.
 
 import { get, post, patch, put, download } from '../api.js';
+import { drawMap } from './asset-map.js';
 import { h, clear, state, button, toast, formDialog, dialog, confirmDialog, field, input, select, val, num, money, toCents, centsToInput, fmtDate, label, empty, table, tabs, isManager, errorBox } from '../ui.js';
 import { renderAsset, renderLabels, assetDialog, fullMeta, STATUS, SERVICE, workOrderSheet, fmtDay, leftText } from './asset-page.js';
 
@@ -25,7 +26,7 @@ export async function render(root, params = []) {
   if (params[0] === 'labels') { await renderLabels(root, params[1] || 'all'); return; }
   const items = [
     ['overview', 'Overview', drawOverview], ['register', 'Assets', drawRegister], ['service', 'Service', drawService],
-    ['parts', 'Parts', drawParts], ['purchasing', 'Purchasing', drawPurchasing],
+    ['map', 'Map', (b) => drawMap(b, params[0] === 'map' ? params[1] : '')], ['parts', 'Parts', drawParts], ['purchasing', 'Purchasing', drawPurchasing],
     ...(isManager() ? [['costs', 'Costs', drawCosts], ['settings', 'Settings', drawSettings]] : []),
   ];
   const want = items.some((i) => i[0] === params[0]) ? params[0] : 'overview';

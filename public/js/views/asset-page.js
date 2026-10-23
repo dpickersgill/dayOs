@@ -2,6 +2,7 @@
 // standing next to it (log meters, fuel, run an inspection, report a problem). Opened from the register or by scanning
 // the QR tag on the machine (#/assets/tag/A-0042). Also: the label sheet, and the work order costs sheet.
 
+import { assetMapLink } from './asset-map.js';
 import { get, post, patch, del } from '../api.js';
 import { h, clear, appendAll, state, button, toast, formDialog, dialog, confirmDialog, field, input, select, val, num, money, toCents, centsToInput, fmtDate, fmtDateTime, label, errorBox, empty, isManager, todayStr, ctx } from '../ui.js';
 import { qr } from '../barcode.js';
@@ -62,7 +63,7 @@ export async function renderAsset(root, id) {
       h('section', { class: 'panel asset-head' },
         h('div', { class: 'asset-title' },
           h('div', null, h('p', { class: 'asset-tag' }, a.asset_tag), h('h1', null, a.name), h('p', { class: 'muted' }, [kind, a.make_model, a.model_year].filter(Boolean).join(' · '))),
-          h('div', { class: 'asset-state' }, state(stText, stTone), a.critical ? state('Critical', 'warn') : null, shareButton('asset', a.id))),
+          h('div', { class: 'asset-state' }, state(stText, stTone), a.critical ? state('Critical', 'warn') : null, shareButton('asset', a.id), assetMapLink(a.id, a.on_map > 0))),
         h('div', { class: 'asset-meters' },
           h('div', null, h('span', { class: 'k' }, 'Hours'), h('b', null, a.hours ? n1(a.hours).toLocaleString() : '–')),
           h('div', null, h('span', { class: 'k' }, 'Miles'), h('b', null, a.miles !== null ? n1(a.miles).toLocaleString() : '–')),

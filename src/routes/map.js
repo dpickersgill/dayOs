@@ -29,13 +29,13 @@ async function mapCenter(tenantId) {
 
 router.get('/map', patrol, async (req, res) => {
   const [center, admin] = await Promise.all([mapCenter(req.auth.tenantId), isPatrolAdmin(pool, req)]);
-  res.json({ layers: config.map.layers, center, can_admin: admin });
+  res.json({ layers: config.map.layers, max_zoom: config.map.maxZoom, center, can_admin: admin });
 });
 
 router.put(
   '/map-config',
   patrol,
-  validate(z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180), zoom: z.number().int().min(1).max(19) })),
+  validate(z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180), zoom: z.number().int().min(1).max(22) })),
   async (req, res) => {
     if (!(await isPatrolAdmin(pool, req))) throw forbidden('Only a manager or the patrol director can set where the map opens');
     await pool.query('UPDATE tenants SET map_lat = ?, map_lng = ?, map_zoom = ? WHERE id = ?', [req.body.lat, req.body.lng, req.body.zoom, req.auth.tenantId]);
