@@ -11,6 +11,7 @@ const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { todayIn, addDays } = require('../lib/util');
 const PS = require('../lib/programsessions');
+const PP = require('../lib/programplus');
 
 const manager = requireRole('manager');
 const coord = requireRole('manager', 'instructor');
@@ -24,7 +25,14 @@ const day = z.object({
   start_time: time.nullable().optional(),
   end_time: time.nullable().optional(),
   coach_staff_id: z.number().int().positive().nullable().optional(),
+  discipline: z.enum(['any', 'ski', 'snowboard']).optional(),
 });
+const cents = z.number().int().min(0).max(10000000);
+const pickup = z.array(z.object({ name: z.string().trim().min(1).max(100), phone: z.string().trim().max(40).optional(), relation: z.string().trim().max(40).optional() })).max(6);
+const answers = {
+  discipline: z.enum(['ski', 'snowboard']).optional(), has_pass: z.boolean().optional(), needs_rental: z.boolean().optional(), needs_helmet: z.boolean().optional(),
+  allergies: z.string().trim().max(300).nullable().optional(), medical: z.string().trim().max(500).nullable().optional(), pickup: pickup.optional(),
+};
 const termFields = {
   name: z.string().trim().min(1).max(100),
   starts_on: dateStr,
@@ -33,6 +41,9 @@ const termFields = {
   start_time: time,
   end_time: time,
   price_cents: z.number().int().min(0).max(10000000),
+  ticket_cents: cents.default(0),
+  rental_cents: cents.default(0),
+  helmet_cents: cents.default(0),
   price_steps: z.array(step).max(6).default([]),
   skip_dates: z.array(dateStr).max(30).default([]),
   reg_opens_on: dateStr.nullable().optional(),
@@ -52,8 +63,8 @@ function checkTerm(b) {
 }
 
 async function addDay(conn, tenantId, term, d) {
-  const [r] = await conn.query('INSERT INTO program_groups (tenant_id, term_id, weekday, start_time, end_time, capacity, price_cents, coach_staff_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [tenantId, term.id, d.weekday, d.start_time || null, d.end_time || null, d.capacity ?? null, d.price_cents ?? null, d.coach_staff_id ?? null]);
+  const [r] = await conn.query('INSERT INTO program_groups (tenant_id, term_id, weekday, start_time, end_time, capacity, price_cents, coach_staff_id, discipline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [tenantId, term.id, d.weekday, d.start_time || null, d.end_time || null, d.capacity ?? null, d.price_cents ?? null, d.coach_staff_id ?? null, d.discipline || 'any']);
   const group = await groupOf(conn, tenantId, r.insertId);
   await PS.buildMeetings(conn, tenantId, term, group);
   return group;
@@ -80,8 +91,8 @@ module.exports = function mount(router) {
     if (new Set(b.days.map((d) => d.weekday)).size !== b.days.length) throw bad('Each weekday once');
     const id = await tx(async (conn) => {
       const program = await programOf(conn, t, paramId(req));
-      const [r] = await conn.query('INSERT INTO program_terms (tenant_id, program_id, name, starts_on, weeks, makeup_weeks, start_time, end_time, price_cents, price_steps, skip_dates, reg_opens_on, reg_closes_on, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [t, program.id, b.name, b.starts_on, b.weeks, b.makeup_weeks, b.start_time, b.end_time, b.price_cents, JSON.stringify(b.price_steps), JSON.stringify(b.skip_dates), b.reg_opens_on || null, b.reg_closes_on || null, b.status]);
+      const [r] = await conn.query('INSERT INTO program_terms (tenant_id, program_id, name, starts_on, weeks, makeup_weeks, start_time, end_time, price_cents, ticket_cents, rental_cents, helmet_cents, price_steps, skip_dates, reg_opens_on, reg_closes_on, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [t, program.id, b.name, b.starts_on, b.weeks, b.makeup_weeks, b.start_time, b.end_time, b.price_cents, b.ticket_cents, b.rental_cents, b.helmet_cents, JSON.stringify(b.price_steps), JSON.stringify(b.skip_dates), b.reg_opens_on || null, b.reg_closes_on || null, b.status]);
       const term = await termOf(conn, t, r.insertId);
       for (const d of b.days) await addDay(conn, t, term, d);
       await audit(conn, req, 'create_session', 'programs', program.id, { term_id: term.id, days: b.days.map((d) => d.weekday) });
@@ -129,13 +140,13 @@ module.exports = function mount(router) {
       const src = await termOf(conn, t, paramId(req, 'tid'));
       const shift = Math.round((Date.parse(`${req.body.starts_on}T12:00:00Z`) - Date.parse(`${PS.dstr(src.starts_on)}T12:00:00Z`)) / 86400000);
       const steps = PS.parseJson(src.price_steps, []).map((s) => ({ ...s, until: addDays(PS.dstr(s.until), shift) }));
-      const [r] = await conn.query("INSERT INTO program_terms (tenant_id, program_id, name, starts_on, weeks, makeup_weeks, start_time, end_time, price_cents, price_steps, skip_dates, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', 'draft')",
-        [t, src.program_id, req.body.name, req.body.starts_on, src.weeks, src.makeup_weeks, src.start_time, src.end_time, src.price_cents, JSON.stringify(steps)]);
+      const [r] = await conn.query("INSERT INTO program_terms (tenant_id, program_id, name, starts_on, weeks, makeup_weeks, start_time, end_time, price_cents, ticket_cents, rental_cents, helmet_cents, price_steps, skip_dates, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', 'draft')",
+        [t, src.program_id, req.body.name, req.body.starts_on, src.weeks, src.makeup_weeks, src.start_time, src.end_time, src.price_cents, src.ticket_cents, src.rental_cents, src.helmet_cents, JSON.stringify(steps)]);
       const term = await termOf(conn, t, r.insertId);
       for (const g of await rows(conn, 'SELECT * FROM program_groups WHERE tenant_id = ? AND term_id = ? ORDER BY weekday', [t, src.id])) {
-        const ng = await addDay(conn, t, term, { weekday: g.weekday, capacity: g.capacity, price_cents: g.price_cents, start_time: g.start_time ? PS.tstr(g.start_time) : null, end_time: g.end_time ? PS.tstr(g.end_time) : null, coach_staff_id: g.coach_staff_id });
-        for (const l of await rows(conn, 'SELECT name, coach_staff_id, sort FROM program_levels WHERE tenant_id = ? AND group_id = ? ORDER BY sort, id', [t, g.id])) {
-          await conn.query('INSERT INTO program_levels (tenant_id, group_id, name, coach_staff_id, sort) VALUES (?, ?, ?, ?, ?)', [t, ng.id, l.name, l.coach_staff_id, l.sort]);
+        const ng = await addDay(conn, t, term, { weekday: g.weekday, discipline: g.discipline, capacity: g.capacity, price_cents: g.price_cents, start_time: g.start_time ? PS.tstr(g.start_time) : null, end_time: g.end_time ? PS.tstr(g.end_time) : null, coach_staff_id: g.coach_staff_id });
+        for (const l of await rows(conn, 'SELECT name, coach_staff_id, sort, school_level_id FROM program_levels WHERE tenant_id = ? AND group_id = ? ORDER BY sort, id', [t, g.id])) {
+          await conn.query('INSERT INTO program_levels (tenant_id, group_id, name, coach_staff_id, sort, school_level_id) VALUES (?, ?, ?, ?, ?, ?)', [t, ng.id, l.name, l.coach_staff_id, l.sort, l.school_level_id]);
         }
       }
       await audit(conn, req, 'copy_session', 'programs', src.program_id, { from: src.id, to: term.id });
@@ -187,19 +198,20 @@ module.exports = function mount(router) {
     const term = await termOf(pool, t, g.term_id);
     const program = await programOf(pool, t, term.program_id);
     const data = await rows(pool, `SELECT e.id AS enrollment_id, e.status, e.level_id, e.any_day, e.price_cents, e.discount_cents, e.paid_cents, e.created_at, e.bundle_id,
+        e.discipline, e.pass_status, e.needs_rental, e.needs_helmet, e.lesson_cents, e.ticket_cents, e.rental_cents, e.helmet_cents, e.allergies, e.medical, e.pickup, e.adjust_cents, e.adjust_how,
         p.id AS person_id, p.first_name, p.last_name, p.date_of_birth, p.ability_level, p.height_in, p.weight_lb, p.boot_size, p.stance, p.emergency_name, p.emergency_phone,
         g.first_name AS guardian_first_name, g.last_name AS guardian_last_name, g.email AS guardian_email, g.phone AS guardian_phone, tk.code AS ticket_code
       FROM program_enrollments e JOIN people p ON p.tenant_id = e.tenant_id AND p.id = e.person_id
       LEFT JOIN people g ON g.tenant_id = e.tenant_id AND g.id = e.guardian_id
       LEFT JOIN tickets tk ON tk.tenant_id = e.tenant_id AND tk.id = e.ticket_id
       WHERE e.tenant_id = ? AND e.group_id = ? AND e.status <> 'withdrawn' ORDER BY e.status, p.last_name, p.first_name`, [t, g.id]);
-    const levels = await rows(pool, 'SELECT id, name, coach_staff_id, sort FROM program_levels WHERE tenant_id = ? AND group_id = ? ORDER BY sort, id', [t, g.id]);
-    res.json({ group: { ...g, day: PS.WEEKDAYS[g.weekday] }, term: PS.shapeTerm(term), program: { id: program.id, name: program.name, includes_ticket: Boolean(program.includes_ticket), includes_rental: Boolean(program.includes_rental), level_mode: program.level_mode }, levels,
-      data: data.map((r) => ({ ...r, date_of_birth: r.date_of_birth ? PS.dstr(r.date_of_birth) : null, owes_cents: Math.max(0, Number(r.price_cents || 0) - Number(r.discount_cents || 0) - Number(r.paid_cents || 0)) })) });
+    const levels = await rows(pool, 'SELECT l.id, l.name, l.coach_staff_id, l.sort, l.school_level_id, sl.discipline, sl.rank_no FROM program_levels l LEFT JOIN school_levels sl ON sl.tenant_id = l.tenant_id AND sl.id = l.school_level_id WHERE l.tenant_id = ? AND l.group_id = ? ORDER BY l.sort, l.id', [t, g.id]);
+    res.json({ group: { ...g, day: PS.WEEKDAYS[g.weekday] }, term: PS.shapeTerm(term), program: { id: program.id, name: program.name, includes_ticket: Boolean(program.includes_ticket), includes_rental: Boolean(program.includes_rental), offers_helmet: Boolean(program.offers_helmet), level_mode: program.level_mode }, levels,
+      data: data.map((r) => ({ ...r, pickup: PS.parseJson(r.pickup, []), needs_rental: Boolean(r.needs_rental), needs_helmet: Boolean(r.needs_helmet), date_of_birth: r.date_of_birth ? PS.dstr(r.date_of_birth) : null, owes_cents: Math.max(0, Number(r.price_cents || 0) - Number(r.discount_cents || 0) - Number(r.paid_cents || 0)) })) });
   });
 
   /** Staff put a child in a day of a session (at the desk or on the phone). Paying is separate: the basket, or Record payment. */
-  router.post('/terms/:tid/enroll', desk, validate(z.object({ person_id: z.number().int().positive(), group_id: z.number().int().positive(), guardian_id: z.number().int().positive().nullable().optional(), any_day: z.boolean().optional() })), async (req, res) => {
+  router.post('/terms/:tid/enroll', desk, validate(z.object({ person_id: z.number().int().positive(), group_id: z.number().int().positive(), guardian_id: z.number().int().positive().nullable().optional(), any_day: z.boolean().optional(), ...answers })), async (req, res) => {
     const t = req.auth.tenantId; const b = req.body;
     const today = todayIn(await tz(t));
     const out = await tx(async (conn) => {
@@ -208,7 +220,10 @@ module.exports = function mount(router) {
       if (g.term_id !== term.id) throw bad('That day is not part of this session');
       const program = await programOf(conn, t, term.program_id);
       if (!(await one(conn, 'SELECT id FROM people WHERE tenant_id = ? AND id = ?', [t, b.person_id]))) throw notFound('Person');
-      const r = await PS.enroll(conn, t, { program, term, group: g, personId: b.person_id, guardianId: b.guardian_id || null, priceCents: PS.priceNow(term, g, today).cents, anyDay: b.any_day });
+      const reg = await PS.priceRegistration(conn, t, { program_id: program.id, term_id: term.id, group_id: g.id, discipline: b.discipline, needs_rental: b.needs_rental, needs_helmet: b.needs_helmet },
+        today, { pass: PP.passResolver(conn, t, { personId: b.person_id }, Boolean(b.has_pass)) });
+      const x = reg.parts[0];
+      const r = await PS.enroll(conn, t, { program, term, group: g, personId: b.person_id, guardianId: b.guardian_id || null, priceCents: x.list_cents, anyDay: b.any_day, details: PS.detailsOf(reg, x, b) });
       await audit(conn, req, 'enroll', 'programs', program.id, { term_id: term.id, group_id: g.id, person_id: b.person_id, status: r.status });
       return r;
     });
@@ -222,19 +237,9 @@ module.exports = function mount(router) {
       const e = await one(conn, 'SELECT * FROM program_enrollments WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, paramId(req, 'eid')]);
       if (!e || !e.group_id) throw notFound('Place');
       if (e.status === 'withdrawn') throw conflict('This place was withdrawn');
-      const to = await groupOf(conn, t, req.body.group_id);
-      if (to.term_id !== e.term_id) throw bad('Moves stay within the same session');
-      if (to.id === e.group_id) return { ok: true, promoted: null };
-      await conn.query('SELECT id FROM program_groups WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, to.id]);
-      const { n } = await one(conn, "SELECT COUNT(*) AS n FROM program_enrollments WHERE tenant_id = ? AND group_id = ? AND status = 'enrolled'", [t, to.id]);
-      if (to.capacity != null && Number(n) >= to.capacity) throw conflict(`${PS.WEEKDAYS[to.weekday]} is full`);
-      const from = await groupOf(conn, t, e.group_id);
-      await conn.query("UPDATE program_enrollments SET group_id = ?, level_id = NULL, status = 'enrolled' WHERE tenant_id = ? AND id = ?", [to.id, t, e.id]);
-      if (e.ticket_id) {
-        const span = await PS.groupSpan(conn, t, to.id);
-        await conn.query('UPDATE tickets SET valid_from = ?, valid_to = ?, uses_remaining = ? WHERE tenant_id = ? AND id = ?', [span.first, span.last, span.count, t, e.ticket_id]);
-      }
-      const promoted = e.status === 'enrolled' ? await PS.promoteWaitlist(conn, t, from) : null;
+      const fromDay = (await groupOf(conn, t, e.group_id)).weekday;
+      const promoted = await PS.moveDay(conn, t, e, req.body.group_id);
+      const from = { weekday: fromDay }; const to = await groupOf(conn, t, req.body.group_id);
       await audit(conn, req, 'move_day', 'programs', e.program_id, { enrollment_id: e.id, from: from.weekday, to: to.weekday });
       return { ok: true, promoted: promoted ? promoted.person_id : null };
     });
@@ -242,11 +247,19 @@ module.exports = function mount(router) {
   });
 
   // ---------------------------------------------------------------- level classes within a day
-  router.post('/groups/:gid/levels', coord, validate(z.object({ name: z.string().trim().min(1).max(60), coach_staff_id: z.number().int().positive().nullable().optional() })), async (req, res) => {
+  router.post('/groups/:gid/levels', coord, validate(z.object({ name: z.string().trim().min(1).max(60).optional(), school_level_id: z.number().int().positive().nullable().optional(), coach_staff_id: z.number().int().positive().nullable().optional() })), async (req, res) => {
     const t = req.auth.tenantId;
     const g = await groupOf(pool, t, paramId(req, 'gid'));
+    // A class can be one of the ski school's levels, so report cards carry on from lessons into the program and back.
+    let name = req.body.name;
+    if (req.body.school_level_id) {
+      const sl = await one(pool, 'SELECT name, discipline FROM school_levels WHERE tenant_id = ? AND id = ?', [t, req.body.school_level_id]);
+      if (!sl) throw notFound('School level');
+      name = name || (g.discipline === 'any' ? `${sl.discipline === 'ski' ? 'Ski' : 'Snowboard'}: ${sl.name}` : sl.name);
+    }
+    if (!name) throw bad('Name the class, or choose a school level');
     const { n } = await one(pool, 'SELECT COUNT(*) AS n FROM program_levels WHERE tenant_id = ? AND group_id = ?', [t, g.id]);
-    const [r] = await pool.query('INSERT INTO program_levels (tenant_id, group_id, name, coach_staff_id, sort) VALUES (?, ?, ?, ?, ?)', [t, g.id, req.body.name, req.body.coach_staff_id ?? null, Number(n)]);
+    const [r] = await pool.query('INSERT INTO program_levels (tenant_id, group_id, name, coach_staff_id, sort, school_level_id) VALUES (?, ?, ?, ?, ?, ?)', [t, g.id, name.slice(0, 60), req.body.coach_staff_id ?? null, Number(n), req.body.school_level_id ?? null]);
     res.status(201).json({ id: r.insertId });
   });
   router.patch('/levels/:lid', coord, validate(z.object({ name: z.string().trim().min(1).max(60).optional(), coach_staff_id: z.number().int().positive().nullable().optional() })), async (req, res) => {
@@ -289,7 +302,10 @@ module.exports = function mount(router) {
     const levels = await rows(pool, 'SELECT id, name FROM program_levels WHERE tenant_id = ? AND group_id = ?', [t, g.id]);
     if (!levels.length) throw conflict('Add the classes for this day first');
     const byName = new Map(levels.map((l) => [l.name.trim().toLowerCase(), l.id]));
-    const kids = await rows(pool, `SELECT e.id, e.person_id, p.ability_level,
+    // Classes that are school levels: the child's current level on their report card for their discipline goes first.
+    const linked = await rows(pool, 'SELECT l.id, sl.discipline, sl.rank_no FROM program_levels l JOIN school_levels sl ON sl.tenant_id = l.tenant_id AND sl.id = l.school_level_id WHERE l.tenant_id = ? AND l.group_id = ?', [t, g.id]);
+    const kids = await rows(pool, `SELECT e.id, e.person_id, e.discipline, p.ability_level,
+        (SELECT sp.level FROM student_progress sp WHERE sp.tenant_id = e.tenant_id AND sp.person_id = e.person_id AND sp.discipline = COALESCE(e.discipline, 'ski') ORDER BY sp.recorded_at DESC, sp.id DESC LIMIT 1) AS school_level,
         (SELECT l.name FROM program_enrollments pe JOIN program_terms pt ON pt.tenant_id = pe.tenant_id AND pt.id = pe.term_id JOIN program_levels l ON l.tenant_id = pe.tenant_id AND l.id = pe.level_id
           WHERE pe.tenant_id = e.tenant_id AND pe.person_id = e.person_id AND pe.program_id = e.program_id AND pt.starts_on < ? ORDER BY pt.starts_on DESC LIMIT 1) AS last_level
       FROM program_enrollments e JOIN people p ON p.tenant_id = e.tenant_id AND p.id = e.person_id
@@ -297,7 +313,8 @@ module.exports = function mount(router) {
     let placed = 0;
     for (const k of kids) {
       const want = [k.last_level, k.ability_level].filter(Boolean).map((x) => String(x).trim().toLowerCase());
-      const hit = want.map((w) => byName.get(w) || [...byName].find(([n]) => n.includes(w) || w.includes(n))?.[1]).find(Boolean);
+      const bySchool = k.school_level != null ? linked.find((l) => l.discipline === (k.discipline || 'ski') && Number(l.rank_no) === Number(k.school_level)) : null;
+      const hit = (bySchool && bySchool.id) || want.map((w) => byName.get(w) || [...byName].find(([n]) => n.includes(w) || w.includes(n))?.[1]).find(Boolean);
       if (!hit) continue;
       await pool.query('UPDATE program_enrollments SET level_id = ? WHERE tenant_id = ? AND id = ?', [hit, t, k.id]);
       placed += 1;
@@ -324,8 +341,9 @@ module.exports = function mount(router) {
     const t = req.auth.tenantId;
     const m = await one(pool, 'SELECT * FROM program_sessions WHERE tenant_id = ? AND id = ?', [t, paramId(req, 'mid')]);
     if (!m) throw notFound('Lesson date');
-    const kids = m.group_id ? await rows(pool, `SELECT e.id AS enrollment_id, e.level_id, p.id AS person_id, p.first_name, p.last_name, a.present
+    const kids = m.group_id ? await rows(pool, `SELECT e.id AS enrollment_id, e.level_id, e.allergies, e.medical, e.pass_status, p.id AS person_id, p.first_name, p.last_name, a.present, tk.code AS ticket_code
       FROM program_enrollments e JOIN people p ON p.tenant_id = e.tenant_id AND p.id = e.person_id
+      LEFT JOIN tickets tk ON tk.tenant_id = e.tenant_id AND tk.id = e.ticket_id
       LEFT JOIN attendance a ON a.tenant_id = e.tenant_id AND a.session_id = ? AND a.person_id = e.person_id
       WHERE e.tenant_id = ? AND e.group_id = ? AND e.status = 'enrolled' ORDER BY p.last_name, p.first_name`, [m.id, t, m.group_id]) : [];
     res.json({ ...m, date: PS.dstr(m.starts_at), data: kids.map((k) => ({ ...k, present: k.present === null ? null : Boolean(k.present) })) });
@@ -405,6 +423,78 @@ module.exports = function mount(router) {
     const keys = Object.keys(req.body);
     if (!keys.length) throw bad('Nothing to change');
     await pool.query(`UPDATE program_bundles SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE tenant_id = ? AND id = ?`, [...keys.map((k) => (k === 'term_ids' ? JSON.stringify(req.body[k]) : req.body[k])), t, bundle.id]);
+    res.json({ ok: true });
+  });
+
+  // ---------------------------------------------------------------- program types (the mountain's own list)
+  router.get('/types', desk, async (req, res) => { res.json({ data: await PP.listTypes(pool, req.auth.tenantId) }); });
+  router.post('/types', manager, validate(z.object({ name: z.string().trim().min(1).max(60) })), async (req, res) => {
+    const t = req.auth.tenantId;
+    await PP.listTypes(pool, t);
+    const { n } = await one(pool, 'SELECT COALESCE(MAX(sort_no), 0) AS n FROM program_types WHERE tenant_id = ?', [t]);
+    try {
+      const [r] = await pool.query('INSERT INTO program_types (tenant_id, name, sort_no) VALUES (?, ?, ?)', [t, req.body.name, Number(n) + 1]);
+      res.status(201).json({ id: r.insertId });
+    } catch (err) { if (err.code === 'ER_DUP_ENTRY') throw conflict('There is already a type with that name'); throw err; }
+  });
+  router.patch('/types/:id', manager, validate(z.object({ name: z.string().trim().min(1).max(60).optional(), hidden: z.boolean().optional() })), async (req, res) => {
+    const keys = Object.keys(req.body);
+    if (!keys.length) throw bad('Nothing to change');
+    try {
+      const [r] = await pool.query(`UPDATE program_types SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE tenant_id = ? AND id = ?`, [...keys.map((k) => req.body[k]), req.auth.tenantId, paramId(req)]);
+      if (!r.affectedRows) throw notFound('Type');
+    } catch (err) { if (err.code === 'ER_DUP_ENTRY') throw conflict('There is already a type with that name'); throw err; }
+    res.json({ ok: true });
+  });
+  /** The order types are listed in, here and on the registration page. */
+  router.put('/types/order', manager, validate(z.object({ ids: z.array(z.number().int().positive()).min(1).max(100) })), async (req, res) => {
+    await tx(async (conn) => { for (const [i, id] of req.body.ids.entries()) await conn.query('UPDATE program_types SET sort_no = ? WHERE tenant_id = ? AND id = ?', [i + 1, req.auth.tenantId, id]); });
+    res.json({ ok: true });
+  });
+
+  // ---------------------------------------------------------------- the mountain's program settings
+  router.get('/settings', desk, async (req, res) => { res.json(await PP.settingsOf(pool, req.auth.tenantId)); });
+  router.put('/settings', manager, validate(z.object({ pass_later: z.enum(['none', 'refund', 'credit']).optional(), pass_later_share: z.enum(['unused', 'full']).optional(), reminders: z.enum(['off', 'first', 'every']).optional(), text_cancellations: z.boolean().optional() })), async (req, res) => {
+    const t = req.auth.tenantId; const next = { ...(await PP.settingsOf(pool, t)), ...req.body };
+    await pool.query(`INSERT INTO program_settings (tenant_id, pass_later, pass_later_share, reminders, text_cancellations) VALUES (?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE pass_later = VALUES(pass_later), pass_later_share = VALUES(pass_later_share), reminders = VALUES(reminders), text_cancellations = VALUES(text_cancellations)`,
+    [t, next.pass_later, next.pass_later_share, next.reminders, next.text_cancellations ? 1 : 0]);
+    await audit(pool, req, 'update', 'program_settings', null, req.body);
+    res.json(next);
+  });
+
+  // ---------------------------------------------------------------- one place: the pass check, and the child's details
+  /**
+   * The season pass a parent said their child has, checked at the first lesson: seen ('verified'), or not ('no_pass':
+   * the lift ticket part is added to what they owe and the program ticket is issued).
+   */
+  router.post('/enrollments/:eid/pass', desk, validate(z.object({ result: z.enum(['verified', 'no_pass']) })), async (req, res) => {
+    const t = req.auth.tenantId;
+    const out = await tx(async (conn) => {
+      const e = await one(conn, 'SELECT * FROM program_enrollments WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, paramId(req, 'eid')]);
+      if (!e || !e.term_id) throw notFound('Place');
+      if (req.body.result === 'verified') {
+        await conn.query("UPDATE program_enrollments SET pass_status = 'verified' WHERE tenant_id = ? AND id = ?", [t, e.id]);
+        return { pass_status: 'verified', owes_added_cents: 0 };
+      }
+      const term = await termOf(conn, t, e.term_id);
+      const program = await programOf(conn, t, e.program_id);
+      const add = program.includes_ticket ? Number(term.ticket_cents) : 0;
+      await conn.query("UPDATE program_enrollments SET pass_status = 'no_pass', ticket_cents = ?, price_cents = COALESCE(price_cents, 0) + ? WHERE tenant_id = ? AND id = ?", [add, add, t, e.id]);
+      const ticket = await PS.issueTicket(conn, t, { program, group: await groupOf(conn, t, e.group_id), personId: e.person_id, orderId: e.order_id, enrollmentId: e.id });
+      await audit(conn, req, 'pass_not_found', 'programs', e.program_id, { enrollment_id: e.id, added_cents: add });
+      return { pass_status: 'no_pass', owes_added_cents: add, ticket: ticket ? ticket.code : null };
+    });
+    res.json(out);
+  });
+
+  /** The child's details on a place: discipline, rental and helmet, allergies, medical notes, who may pick them up. */
+  router.patch('/enrollments/:eid/details', desk, validate(z.object({ discipline: answers.discipline, allergies: answers.allergies, medical: answers.medical, pickup: answers.pickup, needs_rental: answers.needs_rental, needs_helmet: answers.needs_helmet })), async (req, res) => {
+    const t = req.auth.tenantId;
+    const e = await one(pool, 'SELECT id, program_id FROM program_enrollments WHERE tenant_id = ? AND id = ?', [t, paramId(req, 'eid')]);
+    if (!e) throw notFound('Place');
+    await PS.saveDetails(pool, t, e.id, req.body);
+    await audit(pool, req, 'update_place', 'programs', e.program_id, { enrollment_id: e.id, fields: Object.keys(req.body) });
     res.json({ ok: true });
   });
 };

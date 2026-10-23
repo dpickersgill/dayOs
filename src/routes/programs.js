@@ -14,7 +14,7 @@ const coord = ['manager', 'instructor'];
 
 const programFields = {
   name: z.string().min(1).max(255),
-  kind: z.enum(['club', 'race_team', 'school_program', 'camp', 'league']),
+  kind: z.enum(['club', 'race_team', 'school_program', 'camp', 'league']).default('school_program'), // kept for older reports; the type_id is what staff see
   season: z.string().min(4).max(20),
   capacity: z.number().int().min(1).nullable().optional(),
   price_cents: z.number().int().min(0).default(0),
@@ -32,8 +32,20 @@ const programFields = {
   sibling_mode: z.enum(['none', 'percent', 'amount']).optional(),
   sibling_value: z.number().int().min(0).max(100000).optional(),
   level_mode: z.enum(['on_arrival', 'preset']).optional(),
+  type_id: z.number().int().positive().nullable().optional(),
+  offers_helmet: z.boolean().optional(),
+  meeting_place: z.string().trim().max(160).nullable().optional(),
+  what_to_bring: z.string().trim().max(300).nullable().optional(),
+  policy_text: z.string().trim().max(1000).nullable().optional(),
+  cancel_days: z.number().int().min(0).max(365).nullable().optional(),
+  cancel_fee_cents: z.number().int().min(0).max(1000000).optional(),
+  allow_switch: z.boolean().optional(),
+  late_join: z.enum(['closed', 'prorate', 'full']).optional(),
+  disciplines: z.enum(['ski,snowboard', 'ski', 'snowboard']).optional(),
+  snowboard_age_min: z.number().int().min(0).max(99).nullable().optional(),
+  ask_safety: z.boolean().optional(),
 };
-const PROGRAM_COLUMNS = ['name', 'kind', 'season', 'capacity', 'price_cents', 'starts_on', 'ends_on', 'description', 'age_min', 'age_max', 'online', 'active', 'includes_ticket', 'ticket_product_id', 'includes_rental', 'rental_product_id', 'sibling_mode', 'sibling_value', 'level_mode'];
+const PROGRAM_COLUMNS = ['name', 'kind', 'season', 'capacity', 'price_cents', 'starts_on', 'ends_on', 'description', 'age_min', 'age_max', 'online', 'active', 'includes_ticket', 'ticket_product_id', 'includes_rental', 'rental_product_id', 'sibling_mode', 'sibling_value', 'level_mode', 'type_id', 'offers_helmet', 'meeting_place', 'what_to_bring', 'policy_text', 'cancel_days', 'cancel_fee_cents', 'allow_switch', 'late_join', 'disciplines', 'snowboard_age_min', 'ask_safety'];
 
 /** Enroll a participant. When the program is full they go on the waitlist instead of being rejected. */
 router.post('/:id/enrollments', requireRole(...coord, 'counter'), validate(z.object({ person_id: z.number().int().positive(), guardian_id: z.number().int().positive().optional() })), async (req, res) => {
@@ -136,6 +148,6 @@ router.put('/sessions/:sessionId/attendance', requireRole(...coord), validate(z.
 
 require('./programterms')(router);
 
-router.use('/', crud({ table: 'programs', entity: 'Program', createSchema: z.object(programFields), updateSchema: partialOf(programFields), columns: PROGRAM_COLUMNS, filters: ['kind', 'season'], orderBy: 'season DESC, name', readRoles: ['counter', ...coord], writeRoles: ['manager'], allowDelete: false }));
+router.use('/', crud({ table: 'programs', entity: 'Program', createSchema: z.object(programFields), updateSchema: partialOf(programFields), columns: PROGRAM_COLUMNS, filters: ['kind', 'season', 'type_id'], orderBy: 'season DESC, name', readRoles: ['counter', ...coord], writeRoles: ['manager'], allowDelete: false }));
 
 module.exports = router;

@@ -2428,3 +2428,9 @@ button.pdate { cursor: pointer; min-height: 36px; min-width: 56px; }
 .attend { display: grid; gap: 4px; }
 .prog-sell { padding: 6px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; gap: 8px; }
 .prog-sell-box { margin-bottom: 14px; }
+.ptype-head { display: flex; align-items: baseline; gap: 8px; font-size: 1.15rem; margin: 14px 0 0; }
+.ptypes { display: grid; gap: 6px; }
+.ptype { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.ptype.is-hidden b { color: var(--muted); }
+.pday-disc { justify-self: start; font-size: 0.8rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line-strong); }
+.care-flag { display: inline-block; font-size: 0.82rem; font-weight: 700; color: var(--hold-ink, var(--hold)); background: var(--hold-tint); border-radius: 6px; padding: 1px 6px; }

@@ -1,0 +1,23 @@
+/* The family page: a card per child, each program place with its dates as a strip. */
+#fam input:not([type='checkbox']), #fam select, #fam textarea, dialog input:not([type='checkbox']), dialog textarea { width: 100%; font: inherit; color: var(--ink); min-height: 48px; padding: 10px 12px; border: 1.5px solid var(--line-strong); border-radius: var(--r-sm); background: #fff; }
+#fam select { width: auto; }
+.fam-child h2 { font-size: 1.5rem; }
+.fam-place { border-top: 1px solid var(--line); padding-top: 14px; }
+.fam-place:first-of-type { border-top: 0; padding-top: 0; }
+.fam-place h3 { margin: 0; font-size: 1.125rem; }
+.fam-next { background: var(--snow); border-radius: var(--r-sm); padding: 10px 12px; }
+.fam-dates { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.fam-date { font-size: 0.875rem; font-weight: 700; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line-strong); font-variant-numeric: tabular-nums; }
+.fam-date.here { background: #e3f3ea; border-color: #17703f; color: #17543a; }
+.fam-date.away { color: var(--muted); }
+.fam-date.off { text-decoration: line-through; color: var(--muted); }
+.fam-date.reserve { border-style: dashed; color: var(--muted); font-weight: 400; }
+.fam-chip { font-size: 0.8125rem; font-weight: 700; border-radius: 999px; padding: 3px 10px; }
+.fam-chip.warn { background: #fbefd6; color: #6b4300; }
+.fam-card { background: var(--snow); border-radius: var(--r); padding: 14px; display: grid; gap: 10px; }
+.fam-card h3 { margin: 0; }
+.fam-skills { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; }
+.fam-skills li.done { color: #17543a; }
+.btn.onink { background: transparent; color: #fff; border-color: rgba(255, 255, 255, 0.5); min-height: 40px; }
+.btn.small { min-height: 40px; padding: 0 14px; font-size: 0.9375rem; }
+.visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

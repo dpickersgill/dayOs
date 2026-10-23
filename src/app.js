@@ -135,6 +135,7 @@ function createApp() {
   app.get('/book/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'book.html')));
   app.get('/shop/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'shop.html')));
   app.get('/programs/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'register.html')));
+  app.get('/family/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'family.html')));
   app.get('/try', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'try.html')));
   app.get('/platform', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'platform.html')));
   // The public waiver signing page: /waiver/<mountain>, and a signed copy at /waiver/<mountain>?copy=<token>.
@@ -195,7 +196,7 @@ function createApp() {
   // Online lesson requests take a name and contact details from anyone, so they get a tight limit too: 8 a hour per address.
   api.post('/public/:slug/requests', rateLimit({ windowMs: 3_600_000, max: Number(process.env.BOOKING_RATE_LIMIT) || 8, message: 'Too many requests from this address. Please call the ski school.' }));
   api.post('/public/:slug/shop/orders', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SHOP_RATE_LIMIT) || 12, message: 'Too many orders from this address. Please call the mountain.' }));
-  api.post(['/public/:slug/programs/register', '/public/:slug/programs/waitlist'], rateLimit({ windowMs: 3_600_000, max: Number(process.env.SHOP_RATE_LIMIT) || 12, message: 'Too many registrations from this address. Please call the mountain.' }));
+  api.post(['/public/:slug/programs/register', '/public/:slug/programs/waitlist', '/public/:slug/family/link', '/public/:slug/family/session'], rateLimit({ windowMs: 3_600_000, max: Number(process.env.SHOP_RATE_LIMIT) || 12, message: 'Too many registrations from this address. Please call the mountain.' }));
   api.post(['/public/:slug/shop/waitlist', '/public/:slug/shop/group', '/public/:slug/shop/orders/:token/change'], rateLimit({ windowMs: 3_600_000, max: Number(process.env.SHOP_RATE_LIMIT) || 12, message: 'Too many requests from this address. Please call the mountain.' }));
   // Anyone can sign a waiver, so signing has its own limit: a family signing at the counter tablet stays well inside it.
   api.post('/public/:slug/waiver/sign', rateLimit({ windowMs: 3_600_000, max: Number(process.env.WAIVER_RATE_LIMIT) || 40, message: 'Too many waivers from this address. Please ask at the ticket window.' }));
@@ -212,7 +213,7 @@ function createApp() {
   api.post(['/platform/login', '/platform/login/setup', '/platform/login/passkey', '/platform/login/passkey/options'], rateLimit({ windowMs: 15 * 60_000, max: Number(process.env.PLATFORM_LOGIN_RATE_LIMIT) || 20, message: 'Too many sign-in attempts from this address. Try again in 15 minutes.' }));
   api.use('/platform', rateLimit({ windowMs: 60_000, max: Number(process.env.PLATFORM_RATE_LIMIT) || 60, message: 'Too many attempts' }), platform);
   api.use(site.api); // the website's plans and contact form (no sign-in)
-  api.use('/public', rateLimit({ windowMs: 60_000, max: 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, publicRouter, dispatch.publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter);
+  api.use('/public', rateLimit({ windowMs: 60_000, max: 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, publicRouter, dispatch.publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter);
   api.use(authRoutes); // login, tenants, users, me (each route applies authenticate itself where needed)
   api.use(require('./routes/security')); // passkeys, the second check, sessions, devices, PINs, terminals (each route authenticates)
 

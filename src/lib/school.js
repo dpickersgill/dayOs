@@ -72,7 +72,15 @@ async function studentCard(conn, tenantId, personId) {
     disciplines.push({ discipline: d, current_level: latest ? latest.level : null, next_level: next ? next.rank_no : null, levels });
   }
   const credits = await rows(conn, "SELECT c.id, c.total, c.used, c.expires_on, pr.name AS product FROM lesson_credits c JOIN products pr ON pr.id = c.product_id AND pr.tenant_id = c.tenant_id WHERE c.tenant_id = ? AND c.person_id = ? AND c.status = 'active' ORDER BY c.id DESC", [tenantId, personId]);
-  return { person, disciplines, history, lessons, credits: credits.map((c) => ({ ...c, left: c.total - c.used })) };
+  // Programs run in sessions count on the report card too: each place, its class and how many lessons attended.
+  const programs = await rows(conn, `SELECT e.id, pr.name AS program, pt.name AS term, g.weekday, l.name AS class_name, e.discipline,
+      (SELECT COUNT(*) FROM attendance a JOIN program_sessions s ON s.tenant_id = a.tenant_id AND s.id = a.session_id WHERE a.tenant_id = e.tenant_id AND a.person_id = e.person_id AND s.group_id = e.group_id AND a.present = 1) AS attended,
+      (SELECT COUNT(*) FROM program_sessions s WHERE s.tenant_id = e.tenant_id AND s.group_id = e.group_id AND s.status = 'scheduled') AS lessons
+    FROM program_enrollments e JOIN programs pr ON pr.tenant_id = e.tenant_id AND pr.id = e.program_id
+    JOIN program_terms pt ON pt.tenant_id = e.tenant_id AND pt.id = e.term_id JOIN program_groups g ON g.tenant_id = e.tenant_id AND g.id = e.group_id
+    LEFT JOIN program_levels l ON l.tenant_id = e.tenant_id AND l.id = e.level_id
+    WHERE e.tenant_id = ? AND e.person_id = ? AND e.status = 'enrolled' ORDER BY pt.starts_on DESC LIMIT 50`, [tenantId, personId]);
+  return { person, disciplines, history, lessons, programs: programs.map((p) => ({ ...p, attended: Number(p.attended), lessons: Number(p.lessons) })), credits: credits.map((c) => ({ ...c, left: c.total - c.used })) };
 }
 
 module.exports = { DISCIPLINES, ensureLadder, ladder, studentCard };

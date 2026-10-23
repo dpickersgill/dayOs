@@ -23,6 +23,7 @@ const { contactPerson } = require('../lib/onlinesale');
 const { ON_FILE, shaOf } = require('../lib/waivers');
 const { money } = require('../lib/format');
 const PS = require('../lib/programsessions');
+const PP = require('../lib/programplus');
 
 const publicRouter = express.Router();
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -37,7 +38,13 @@ async function tenantFor(slug) {
 }
 
 const child = z.object({ first_name: z.string().trim().min(1).max(60), last_name: z.string().trim().min(1).max(60), date_of_birth: dateStr });
+const pickup = z.array(z.object({ name: z.string().trim().min(1).max(100), phone: z.string().trim().max(40).optional(), relation: z.string().trim().max(40).optional() })).max(6);
+const sizes = z.object({ height_in: z.number().int().min(20).max(90).optional(), weight_lb: z.number().int().min(20).max(400).optional(), boot_size: z.string().trim().max(10).optional() });
 const regSchema = z.object({
+  // The child's answers: ski or snowboard, a season pass (no lift ticket part), rental (with sizes), a helmet, and
+  // the safety details the instructors see: allergies, medical notes, who may pick them up.
+  discipline: z.enum(['ski', 'snowboard']).optional(), has_pass: z.boolean().optional(), needs_rental: z.boolean().optional(), needs_helmet: z.boolean().optional(),
+  sizes: sizes.optional(), allergies: z.string().trim().max(300).optional(), medical: z.string().trim().max(500).optional(), pickup: pickup.optional(),
   program_id: z.number().int().positive(),
   term_id: z.number().int().positive().optional(), group_id: z.number().int().positive().optional(),
   bundle_id: z.number().int().positive().optional(), groups: z.array(z.object({ term_id: z.number().int().positive(), group_id: z.number().int().positive() })).max(8).optional(),
@@ -51,12 +58,13 @@ async function quote(conn, t, regs, today, { paying = false } = {}) {
   const priced = [];
   for (const r of regs) {
     if (!r.term_id && !r.bundle_id) throw bad('Choose a session');
-    const p = await PS.priceRegistration(conn, t.id, r, today, { online: !paying }); // once paid, a session that just closed still counts
     const age = Math.floor((Date.parse(`${today}T12:00:00Z`) - Date.parse(`${r.child.date_of_birth}T12:00:00Z`)) / (365.25 * 86400000));
+    // once paid, a session that just closed still counts
+    const p = await PS.priceRegistration(conn, t.id, { ...r, age }, today, { online: !paying, pass: PP.passResolver(conn, t.id, { child: r.child }, Boolean(r.has_pass)) });
     if ((p.program.age_min != null && age < p.program.age_min) || (p.program.age_max != null && age > p.program.age_max)) {
       throw bad(`${r.child.first_name} is ${age}. ${p.program.name} is for ages ${p.program.age_min ?? 0} to ${p.program.age_max ?? 99}.`);
     }
-    priced.push({ ...p, child: childKey(r.child), childDetails: r.child });
+    priced.push({ ...p, child: childKey(r.child), childDetails: r.child, answers: r });
   }
   const seen = new Set();
   for (const p of priced) for (const x of p.parts) {
@@ -74,7 +82,9 @@ async function quote(conn, t, regs, today, { paying = false } = {}) {
 }
 
 const shapeQuote = (q) => ({
-  lines: q.priced.map((p) => ({ name: p.name, detail: p.detail, child: `${p.childDetails.first_name} ${p.childDetails.last_name}`, list_cents: p.list_cents, sibling_cents: p.sibling_cents, unit_cents: p.unit_cents, tax_cents: p.tax_cents, step: p.step })),
+  lines: q.priced.map((p) => ({ name: p.name, detail: p.detail, child: `${p.childDetails.first_name} ${p.childDetails.last_name}`, list_cents: p.list_cents, sibling_cents: p.sibling_cents, unit_cents: p.unit_cents, tax_cents: p.tax_cents, step: p.step,
+    lesson_cents: p.lesson_cents, ticket_cents: p.ticket_cents, rental_cents: p.rental_cents, helmet_cents: p.helmet_cents, late: p.late,
+    pass: p.program.includes_ticket ? (p.parts.every((x) => x.pass_status === 'verified') ? 'found' : p.parts.some((x) => x.pass_status === 'claimed') ? 'check' : 'none') : null })),
   subtotal_cents: q.subtotal, tax_cents: q.tax, total_cents: q.total,
 });
 
@@ -84,6 +94,8 @@ publicRouter.get('/:slug/programs', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   const today = todayIn(t.timezone);
   const programs = await rows(pool, 'SELECT * FROM programs WHERE tenant_id = ? AND online = 1 AND active = 1 ORDER BY name', [t.id]);
+  const types = await PP.listTypes(pool, t.id);
+  const typeName = new Map(types.map((x) => [x.id, x.name])); const typeSort = new Map(types.map((x) => [x.id, x.sort]));
   const out = [];
   for (const p of programs) {
     const terms = (await rows(pool, "SELECT * FROM program_terms WHERE tenant_id = ? AND program_id = ? AND status = 'open' ORDER BY starts_on", [t.id, p.id])).filter((x) => PS.regOpen(x, today));
@@ -91,15 +103,19 @@ publicRouter.get('/:slug/programs', async (req, res) => {
     const detail = [];
     for (const x of terms) {
       const d = await PS.termDetail(pool, t.id, x.id, today);
-      detail.push({ ...d, groups: d.groups.map((g) => ({ id: g.id, weekday: g.weekday, day: g.day, start_time: g.start_time, end_time: g.end_time, left: g.left, price_now: g.price_now,
+      const groupsRaw = new Map((await rows(pool, 'SELECT id, discipline FROM program_groups WHERE tenant_id = ? AND term_id = ?', [t.id, x.id])).map((g) => [g.id, g]));
+      detail.push({ ...d, ticket_cents: x.ticket_cents, rental_cents: x.rental_cents, helmet_cents: x.helmet_cents, groups: d.groups.map((g) => ({ id: g.id, weekday: g.weekday, day: g.day, discipline: (groupsRaw.get(g.id) || {}).discipline || 'any', start_time: g.start_time, end_time: g.end_time, left: g.left, price_now: g.price_now,
         dates: g.meetings.filter((m) => m.status === 'scheduled').map((m) => m.date), makeup_dates: g.meetings.filter((m) => m.status === 'standby').map((m) => m.date) })) });
     }
     const open = new Set(terms.map((x) => x.id));
     const bundles = (await rows(pool, 'SELECT id, name, price_cents, term_ids FROM program_bundles WHERE tenant_id = ? AND program_id = ? AND active = 1', [t.id, p.id]))
       .map((b) => ({ id: b.id, name: b.name, price_cents: b.price_cents, term_ids: PS.parseJson(b.term_ids, []).map(Number) })).filter((b) => b.term_ids.every((id) => open.has(id)));
-    out.push({ id: p.id, name: p.name, description: p.description, age_min: p.age_min, age_max: p.age_max, includes_ticket: Boolean(p.includes_ticket), includes_rental: Boolean(p.includes_rental),
+    out.push({ id: p.id, name: p.name, type: typeName.get(p.type_id) || null, type_sort: typeSort.get(p.type_id) ?? 999, description: p.description, age_min: p.age_min, age_max: p.age_max, includes_ticket: Boolean(p.includes_ticket), includes_rental: Boolean(p.includes_rental),
+      offers_helmet: Boolean(p.offers_helmet), disciplines: String(p.disciplines || 'ski,snowboard').split(','), snowboard_age_min: p.snowboard_age_min, meeting_place: p.meeting_place, what_to_bring: p.what_to_bring,
+      policy_text: p.policy_text, cancel_days: p.cancel_days, cancel_fee_cents: p.cancel_fee_cents, allow_switch: Boolean(p.allow_switch), ask_safety: Boolean(p.ask_safety),
       sibling: p.sibling_mode === 'none' || !p.sibling_value ? null : { mode: p.sibling_mode, value: p.sibling_value }, terms: detail, bundles });
   }
+  out.sort((a, b) => a.type_sort - b.type_sort || a.name.localeCompare(b.name));
   res.json({ mountain: t.name, phone: t.phone, open: t.open, today, waiver_text: t.waiver_text || null, programs: out });
 });
 
@@ -174,8 +190,10 @@ publicRouter.post('/:slug/programs/waitlist', validate(z.object({ ...contactShap
   res.status(201).json(out);
 });
 
-async function childPerson(conn, tenantId, contact, c, today) {
-  const who = await resolvePerson(conn, tenantId, { details: { first_name: c.first_name, last_name: c.last_name, date_of_birth: c.date_of_birth }, scope: 'none', source: 'online', fillOnly: true });
+async function childPerson(conn, tenantId, contact, c, today, sizes = null) {
+  const details = { first_name: c.first_name, last_name: c.last_name, date_of_birth: c.date_of_birth };
+  if (sizes) for (const k of ['height_in', 'weight_lb', 'boot_size']) if (sizes[k] != null && sizes[k] !== '') details[k] = sizes[k];
+  const who = await resolvePerson(conn, tenantId, { details, scope: 'none', source: 'online', fillOnly: true });
   if (!who.id) throw bad(`Could not save ${c.first_name} ${c.last_name}`);
   if (isMinor(c.date_of_birth, today) && await mayActAsGuardian(conn, tenantId, contact.id, who.id, who.created)) await addLink(conn, tenantId, contact.id, who.id, 'guardian');
   return who.id;
@@ -230,7 +248,7 @@ async function fulfil(conn, tenantId, row, { paymentIntent }) {
   for (const tx_ of q.taxes) await conn.query('INSERT INTO order_taxes (tenant_id, order_id, name, rate_bps, amount_cents) VALUES (?, ?, ?, ?, ?)', [tenantId, orderId, tx_.name, tx_.rate_bps, tx_.amount_cents]);
   const waiverNeeded = [];
   for (const p of q.priced) {
-    const kid = await childPerson(conn, tenantId, contact, p.childDetails, today);
+    const kid = await childPerson(conn, tenantId, contact, p.childDetails, today, p.answers.sizes);
     const season = seasonFor(PS.dstr(p.parts[0].term.starts_on));
     if (!(await one(conn, ON_FILE, [tenantId, kid, season]))) {
       if (waiverOk && t.waiver_text) {
@@ -241,7 +259,8 @@ async function fulfil(conn, tenantId, row, { paymentIntent }) {
       [tenantId, orderId, kid, p.program.id, p.unit_cents, p.tax_cents, p.name.slice(0, 80)]);
     const share = p.parts.map((x) => x.list_cents - (x.discount_cents || 0));
     for (const [k, x] of p.parts.entries()) {
-      const e = await PS.enroll(conn, tenantId, { program: p.program, term: x.term, group: x.group, personId: kid, guardianId: contact.id, priceCents: x.list_cents, discountCents: x.discount_cents || 0, paidCents: share[k], bundleId: p.bundle ? p.bundle.id : null, orderId, mustFit: true });
+      if (x.pass_status === 'claimed') x.pass_status = await PP.passStatus(conn, tenantId, { personId: kid }, (await PP.termStart(conn, tenantId, x.term.id)) || PS.dstr(x.term.starts_on), true);
+      const e = await PS.enroll(conn, tenantId, { program: p.program, term: x.term, group: x.group, personId: kid, guardianId: contact.id, priceCents: x.list_cents, discountCents: x.discount_cents || 0, paidCents: share[k], bundleId: p.bundle ? p.bundle.id : null, orderId, mustFit: true, details: PS.detailsOf(p, x, p.answers) });
       await PS.issueTicket(conn, tenantId, { program: p.program, group: x.group, personId: kid, orderId, enrollmentId: e.id });
     }
     await audit(conn, { auth: { tenantId, userId: null } }, 'register_online', 'programs', p.program.id, { order_id: orderId, order_item: it.insertId });
@@ -262,7 +281,7 @@ async function emailConfirmation(tenantId, id, base) {
     ...(p.makeup_reserve.length ? [`  Makeup date if a lesson is cancelled for weather: ${p.makeup_reserve.map(PS.longDay).join('; ')}`] : []),
     ...(p.ticket_code ? [`  Lift ticket: ${p.ticket_code}`] : []), '']);
   const text = [`Hi ${row.contact_name.split(' ')[0]},`, '', `Thank you for registering at ${t.name} (reference ${row.reference}, ${money(row.amount_cents)}).`, '', ...lines,
-    `Your registration: ${base}/programs/${t.slug}?registration=${row.view_token}`, '', ...(row.note ? [row.note, ''] : []), t.phone ? `Questions? Call ${t.phone}.` : ''].join('\n');
+    `Your registration: ${base}/programs/${t.slug}?registration=${row.view_token}`, `Your family page (dates, weather changes, report cards): ${base}/family/${t.slug}`, '', ...(row.note ? [row.note, ''] : []), t.phone ? `Questions? Call ${t.phone}.` : ''].join('\n');
   const r = await mailer.send({ tenantId, to: row.contact_email, fromName: t.name, subject: `You are registered: ${t.name}`, text, tag: 'program-registered' });
   return r.ok;
 }

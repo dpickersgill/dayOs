@@ -1,6 +1,66 @@
 {
   "releases": [
     {
+      "version": "2026.10.36",
+      "date": "2026-11-01",
+      "title": "Best-of-breed programs: your own types, season pass pricing, a family page",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "programs",
+          "who": [],
+          "text": "Program types are your own: add, rename, hide and order them (Multi-week lessons, Race team, Homeschool...). Programs are grouped under them here and online.",
+          "help": "prog-types"
+        },
+        {
+          "kind": "new",
+          "app": "programs",
+          "who": null,
+          "text": "A place is priced from parts: lessons, a lift ticket part that a season pass holder does not pay, and rental and a helmet when asked for. Online, a pass on file is found at once; if not, the child is marked to check at the first lesson, with Seen or No pass on the roster.",
+          "help": "prog-pass"
+        },
+        {
+          "kind": "new",
+          "app": "programs",
+          "who": [],
+          "text": "A season pass bought after registering, at the window or online: your choice in Program settings of nothing, a refund of the lift ticket part to the card, or a credit. The program ticket is voided."
+        },
+        {
+          "kind": "new",
+          "app": "programs",
+          "who": null,
+          "text": "Ski or snowboard for each child, days that are ski or snowboard only, and a snowboard minimum age. Classes can be the ski school's levels: preset from the report card, and the program shows on the report card."
+        },
+        {
+          "kind": "new",
+          "app": "programs",
+          "who": null,
+          "text": "Allergies, medical notes and who may pick up, asked at registration and shown on the roster and attendance sheet. Scan a child's program ticket to mark them here."
+        },
+        {
+          "kind": "new",
+          "app": "programs",
+          "who": [],
+          "text": "Rules for families: cancel online up to a number of days before the first lesson (less a fee), switch to a day with room, and whether late joiners pay for the lessons left. A reminder email the day before (meeting place, what to bring), and weather cancellations by text as well."
+        },
+        {
+          "kind": "new",
+          "app": "programs",
+          "who": [],
+          "text": "The family page at /family/your-mountain: parents sign in with an email link and see every child's dates, weather changes, attendance, class, lift ticket, balance and report card; they update allergies and pickup, switch day and cancel within your rules.",
+          "help": "prog-family"
+        },
+        {
+          "kind": "new",
+          "app": "sell",
+          "who": [
+            "counter"
+          ],
+          "text": "Selling a program place asks ski or snowboard, season pass, rental and helmet. Selling a season pass to a child in a program applies the mountain's refund or credit choice."
+        }
+      ]
+    },
+    {
       "version": "2026.10.35",
       "date": "2026-11-01",
       "title": "Lesson programs in sessions: pick a weekday, makeup weeks for weather, online registration",

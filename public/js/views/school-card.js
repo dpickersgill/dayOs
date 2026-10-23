@@ -29,7 +29,8 @@ export function cardSheet(card, mountain) {
   return h('article', { class: 'sheet report-card', 'data-sheet': 'report-card' },
     h('header', null, h('strong', null, mountain || 'Ski school'), h('h2', null, 'Student report card'), h('div', null, `${p.first_name} ${p.last_name}`), h('div', { class: 'muted small' }, `Printed ${fmtDate(todayStr())}`)),
     blocks.length ? blocks : h('p', null, 'No levels recorded yet.'),
-    notes.length ? h('section', { class: 'rcard-block' }, h('h3', null, 'Instructor notes'), h('ul', null, notes.map((n) => h('li', null, `${fmtDate(n.starts_at)}: ${n.instructor_notes}`)))) : null);
+    card.programs && card.programs.length ? h('section', { class: 'rcard-block' }, h('h3', null, 'Programs'), h('ul', null, card.programs.map((x) => h('li', null, `${x.program}, ${x.term}${x.class_name ? `, ${x.class_name}` : ''}: ${x.attended} of ${x.lessons} lessons attended`)))) : null,
+        notes.length ? h('section', { class: 'rcard-block' }, h('h3', null, 'Instructor notes'), h('ul', null, notes.map((n) => h('li', null, `${fmtDate(n.starts_at)}: ${n.instructor_notes}`)))) : null);
 }
 
 export async function cardDialog(personId, { onChange } = {}) {

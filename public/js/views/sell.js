@@ -105,6 +105,16 @@ async function sellPanel(root) {
       const sessioned = menu.programs.filter((p) => p.terms && p.terms.length);
       // A program run in sessions: pick the day for the session (or a day per session for a bundle), then Add.
       for (const p of sessioned) {
+        // The child's answers change the price: ski or board, a season pass (no lift ticket part), rental, helmet.
+        const discs = String(p.disciplines || 'ski,snowboard').split(',');
+        const disc = select(discs.map((d) => [d, label(d)]), discs[0], { 'aria-label': `${p.name}: ski or snowboard` });
+        const passCb = h('input', { type: 'checkbox' }); const rentCb = h('input', { type: 'checkbox' }); const helmCb = h('input', { type: 'checkbox' });
+        const answers = () => ({ discipline: disc.value, ...(p.includes_ticket ? { has_pass: passCb.checked } : {}), ...(p.includes_rental ? { needs_rental: rentCb.checked } : {}), ...(p.offers_helmet ? { needs_helmet: helmCb.checked } : {}) });
+        const answerText = () => [label(disc.value), p.includes_ticket && passCb.checked ? 'has a season pass' : null, p.includes_rental && rentCb.checked ? 'rental' : null, p.offers_helmet && helmCb.checked ? 'helmet' : null].filter(Boolean).join(', ');
+        const answerRow = h('div', { class: 'row tight prog-answers' }, discs.length > 1 ? disc : null,
+          p.includes_ticket ? h('label', { class: 'check' }, passCb, ' Has a season pass') : null,
+          p.includes_rental ? h('label', { class: 'check' }, rentCb, ' Rental') : null,
+          p.offers_helmet ? h('label', { class: 'check' }, helmCb, ' Helmet') : null);
         const dayPick = (t) => select(t.groups.map((g) => [g.id, `${g.day}s, ${money(g.price_cents)}${g.left === 0 ? ' (full)' : g.left != null ? ` (${g.left} left)` : ''}`]), '', { 'aria-label': `Day for ${t.name}` });
         const rowsEl = p.terms.map((t) => {
           const pick = dayPick(t);
@@ -112,15 +122,15 @@ async function sellPanel(root) {
             button('Add', () => {
               const g = t.groups.find((x) => x.id === Number(pick.value));
               if (g.left === 0) { toast(`${g.day}s are full. Add the child to the waitlist from Programs.`, 'error'); return; }
-              add({ type: 'program', program_id: p.id, term_id: t.id, group_id: g.id, name: `${p.name}: ${t.name}`, quantity: 1, detail: `${g.day}s` });
+              add({ type: 'program', program_id: p.id, term_id: t.id, group_id: g.id, ...answers(), name: `${p.name}: ${t.name}`, quantity: 1, detail: `${g.day}s, ${answerText()}` });
             }, { small: true })));
         });
         const bundleEls = (p.bundles || []).map((bd) => {
           const picks = bd.term_ids.map((tid) => { const t = p.terms.find((x) => x.id === tid); return [t, dayPick(t)]; });
           return h('div', { class: 'spread prog-sell' }, h('span', null, h('b', null, bd.name), ` ${money(bd.price_cents)}`), h('div', { class: 'row' }, picks.map(([t, s]) => h('label', { class: 'small' }, `${t.name} `, s)),
-            button('Add', () => add({ type: 'program', program_id: p.id, bundle_id: bd.id, groups: picks.map(([t, s]) => ({ term_id: t.id, group_id: Number(s.value) })), name: `${p.name}: ${bd.name}`, quantity: 1, detail: picks.map(([t, s]) => `${t.name} ${s.selectedOptions[0].textContent.split(',')[0]}`).join(', ') }), { small: true })));
+            button('Add', () => add({ type: 'program', program_id: p.id, bundle_id: bd.id, groups: picks.map(([t, s]) => ({ term_id: t.id, group_id: Number(s.value) })), ...answers(), name: `${p.name}: ${bd.name}`, quantity: 1, detail: picks.map(([t, s]) => `${t.name} ${s.selectedOptions[0].textContent.split(',')[0]}`).join(', ') }), { small: true })));
         });
-        b.append(h('section', { class: 'stack tight prog-sell-box' }, h('h3', null, p.name), rowsEl, bundleEls));
+        b.append(h('section', { class: 'stack tight prog-sell-box' }, h('h3', null, p.name), answerRow, rowsEl, bundleEls));
       }
       if (simple.length) b.append(table([
         { head: 'Program', cell: (p) => `${p.name} (${p.season})` },

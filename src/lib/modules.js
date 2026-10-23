@@ -39,7 +39,7 @@ const SHARED_READS = [
 ];
 
 // Public pages, by the word after the mountain's web name.
-const PUBLIC = { conditions: 'conditions', booking: 'school', quote: 'school', requests: 'school', 'instructor-availability': 'availability', help: 'patrol', give: 'patrol', shop: 'shop', programs: 'programs' };
+const PUBLIC = { conditions: 'conditions', booking: 'school', quote: 'school', requests: 'school', 'instructor-availability': 'availability', help: 'patrol', give: 'patrol', shop: 'shop', programs: 'programs', family: 'programs' };
 
 /** Turning one app on turns on what it needs; turning one off turns off what needs it. */
 function settle(want) {

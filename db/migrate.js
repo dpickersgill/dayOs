@@ -628,6 +628,69 @@ const programSessionSteps = [
     CONSTRAINT fk_preg_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
   )`],
 ];
+const programPlusSteps = [
+  // Program types each mountain names for itself (Multi-week lessons, Race team, Homeschool...), in place of the fixed kinds.
+  ['program_types', (c) => tableExists(c, 'program_types'), `CREATE TABLE program_types (
+    id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id  BIGINT UNSIGNED NOT NULL,
+    name       VARCHAR(60) NOT NULL,
+    sort_no    SMALLINT NOT NULL DEFAULT 0,
+    hidden     TINYINT(1) NOT NULL DEFAULT 0,
+    UNIQUE KEY uq_ptypes_name (tenant_id, name),
+    UNIQUE KEY uq_ptypes_tenant_id (tenant_id, id),
+    CONSTRAINT fk_ptypes_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  )`],
+  ['programs best of breed', (c) => columnExists(c, 'programs', 'type_id'), `ALTER TABLE programs
+    ADD COLUMN type_id BIGINT UNSIGNED NULL, ADD COLUMN offers_helmet TINYINT(1) NOT NULL DEFAULT 0,
+    ADD COLUMN meeting_place VARCHAR(160) NULL, ADD COLUMN what_to_bring VARCHAR(300) NULL, ADD COLUMN policy_text VARCHAR(1000) NULL,
+    ADD COLUMN cancel_days SMALLINT UNSIGNED NULL, ADD COLUMN cancel_fee_cents INT UNSIGNED NOT NULL DEFAULT 0,
+    ADD COLUMN allow_switch TINYINT(1) NOT NULL DEFAULT 1, ADD COLUMN late_join ENUM('closed','prorate','full') NOT NULL DEFAULT 'prorate',
+    ADD COLUMN disciplines VARCHAR(40) NOT NULL DEFAULT 'ski,snowboard', ADD COLUMN snowboard_age_min TINYINT UNSIGNED NULL,
+    ADD COLUMN ask_safety TINYINT(1) NOT NULL DEFAULT 1`],
+  // The price of a place is built from parts: lessons, a lift ticket (not for a season pass holder), rental, a helmet.
+  ['program_terms price parts', (c) => columnExists(c, 'program_terms', 'ticket_cents'), `ALTER TABLE program_terms
+    ADD COLUMN ticket_cents INT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN rental_cents INT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN helmet_cents INT UNSIGNED NOT NULL DEFAULT 0`],
+  ['program_groups.discipline', (c) => columnExists(c, 'program_groups', 'discipline'), "ALTER TABLE program_groups ADD COLUMN discipline ENUM('any','ski','snowboard') NOT NULL DEFAULT 'any'"],
+  ['program_levels.school_level_id', (c) => columnExists(c, 'program_levels', 'school_level_id'), 'ALTER TABLE program_levels ADD COLUMN school_level_id BIGINT UNSIGNED NULL'],
+  ['program_enrollments child details', (c) => columnExists(c, 'program_enrollments', 'pass_status'), `ALTER TABLE program_enrollments
+    ADD COLUMN discipline ENUM('ski','snowboard') NULL,
+    ADD COLUMN pass_status ENUM('none','verified','claimed','no_pass') NOT NULL DEFAULT 'none',
+    ADD COLUMN needs_rental TINYINT(1) NOT NULL DEFAULT 0, ADD COLUMN needs_helmet TINYINT(1) NOT NULL DEFAULT 0,
+    ADD COLUMN lesson_cents INT UNSIGNED NULL, ADD COLUMN ticket_cents INT UNSIGNED NOT NULL DEFAULT 0,
+    ADD COLUMN rental_cents INT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN helmet_cents INT UNSIGNED NOT NULL DEFAULT 0,
+    ADD COLUMN allergies VARCHAR(300) NULL, ADD COLUMN medical VARCHAR(500) NULL, ADD COLUMN pickup TEXT NULL,
+    ADD COLUMN adjust_cents INT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN adjust_how VARCHAR(20) NULL, ADD COLUMN adjust_ref VARCHAR(60) NULL, ADD COLUMN adjusted_at DATETIME NULL,
+    ADD COLUMN withdrawn_at DATETIME NULL, ADD COLUMN refund_cents INT UNSIGNED NOT NULL DEFAULT 0`],
+  ['program_settings', (c) => tableExists(c, 'program_settings'), `CREATE TABLE program_settings (
+    tenant_id          BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+    pass_later         ENUM('none','refund','credit') NOT NULL DEFAULT 'none',
+    pass_later_share   ENUM('unused','full') NOT NULL DEFAULT 'unused',
+    reminders          ENUM('off','first','every') NOT NULL DEFAULT 'first',
+    text_cancellations TINYINT(1) NOT NULL DEFAULT 1,
+    CONSTRAINT fk_progsettings_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  )`],
+  ['program_reminders', (c) => tableExists(c, 'program_reminders'), `CREATE TABLE program_reminders (
+    tenant_id  BIGINT UNSIGNED NOT NULL,
+    meeting_id BIGINT UNSIGNED NOT NULL,
+    email      VARCHAR(255) NOT NULL,
+    sent_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, meeting_id, email)
+  )`],
+  // The parent account: a sign-in link by email, then a session kept on the parent's phone.
+  ['family_tokens', (c) => tableExists(c, 'family_tokens'), `CREATE TABLE family_tokens (
+    id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id  BIGINT UNSIGNED NOT NULL,
+    email      VARCHAR(255) NOT NULL,
+    token_hash CHAR(64) NOT NULL,
+    kind       ENUM('link','session') NOT NULL,
+    expires_at DATETIME NOT NULL,
+    used_at    DATETIME NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_family_token (token_hash),
+    KEY ix_family_email (tenant_id, email, created_at),
+    CONSTRAINT fk_family_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  )`],
+];
 const storyFillSteps = [
   ['patrol_settings.story_fill', (c) => columnExists(c, 'patrol_settings', 'story_fill'), 'ALTER TABLE patrol_settings ADD COLUMN story_fill TINYINT(1) NOT NULL DEFAULT 0'],
 ];
@@ -818,7 +881,7 @@ async function main() {
   await seedPlans(conn);
   await seedPatrolPlan(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

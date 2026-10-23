@@ -17,6 +17,7 @@ const { unitPrice, applyPromo } = require('../lib/pricing');
 const { notFound, conflict, bad, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const PS = require('../lib/programsessions');
+const PP = require('../lib/programplus');
 const { personFields, resolvePerson, ensureRequired } = require('../lib/customers');
 const { loadRules, applyTax, split } = require('../lib/tax');
 const { addLink, isMinor } = require('../lib/family');
@@ -53,6 +54,8 @@ const lineSchema = z.discriminatedUnion('type', [
     // A program run in sessions: one day of one session, or a bundle with a day for each of its sessions.
     term_id: z.number().int().positive().optional(), group_id: z.number().int().positive().optional(),
     bundle_id: z.number().int().positive().optional(), groups: z.array(z.object({ term_id: z.number().int().positive(), group_id: z.number().int().positive() })).max(8).optional(),
+    // The child's answers: ski or snowboard, a season pass (no lift ticket part; checked when the sale is made), rental, helmet.
+    discipline: z.enum(['ski', 'snowboard']).optional(), has_pass: z.boolean().optional(), needs_rental: z.boolean().optional(), needs_helmet: z.boolean().optional(),
   }),
   z.object({ type: z.literal('gift_card'), amount_cents: z.number().int().min(GIFT_MIN).max(GIFT_MAX), recipient_name: z.string().max(150).optional(), message: z.string().max(300).optional() }),
 ]);
@@ -95,7 +98,7 @@ async function withSessions(tenantId, programs, today) {
     p.terms = [];
     for (const t of terms.filter((x) => x.program_id === p.id)) {
       const d = await PS.termDetail(pool, tenantId, t.id, today);
-      p.terms.push({ id: d.id, name: d.name, starts_on: d.starts_on, status: d.status, groups: d.groups.map((g) => ({ id: g.id, day: g.day, left: g.left, price_cents: g.price_now.cents, waiting: g.waiting })) });
+      p.terms.push({ id: d.id, name: d.name, starts_on: d.starts_on, status: d.status, groups: d.groups.map((g) => ({ id: g.id, day: g.day, discipline: g.discipline, left: g.left, price_cents: g.price_now.cents, waiting: g.waiting })) });
     }
     const ids = new Set(p.terms.map((t) => t.id));
     p.bundles = bundles.filter((b) => b.program_id === p.id).map((b) => ({ id: b.id, name: b.name, price_cents: b.price_cents, term_ids: PS.parseJson(b.term_ids, []).map(Number) })).filter((b) => b.term_ids.every((x) => ids.has(x)));
@@ -144,7 +147,7 @@ async function priceLines(conn, tenantId, lines, today) {
       if (product.kind !== 'rental') throw bad(`${product.name} is not a rental package`);
       out.push({ i, line: ln, type: 'rental', name: product.name, detail: `${ln.tier}, ${validOn}${product.valid_days > 1 ? ` for ${product.valid_days} days` : ''}`, quantity: 1, unit: cents, product, validOn });
     } else if (ln.type === 'program' && (ln.term_id || ln.bundle_id)) {
-      const reg = await PS.priceRegistration(conn, tenantId, ln, today);
+      const reg = await PS.priceRegistration(conn, tenantId, ln, today, { pass: async () => (ln.has_pass ? 'claimed' : 'none') });
       out.push({ i, line: ln, type: 'program', name: reg.name, detail: reg.detail, quantity: 1, unit: reg.list_cents, program: reg.program, reg: { ...reg, child: ln.participant || 'customer' } });
     } else if (ln.type === 'program') {
       const program = await one(conn, 'SELECT * FROM programs WHERE tenant_id = ? AND id = ?', [tenantId, ln.program_id]);
@@ -211,7 +214,7 @@ checkout.get('/menu', requireRole(...sellers), async (req, res) => {
                   (SELECT COUNT(*) FROM lesson_bookings b WHERE b.tenant_id = s.tenant_id AND b.session_id = s.id AND b.status IN ('booked','attended')) AS booked
                 FROM lesson_sessions s JOIN products pr ON pr.id = s.product_id AND pr.tenant_id = s.tenant_id
                 WHERE s.tenant_id = ? AND s.status = 'scheduled' AND DATE(s.starts_at) BETWEEN ? AND ? ORDER BY s.starts_at LIMIT 200`, [tenantId, today, addDays(today, 14)]),
-    rows(pool, `SELECT p.id, p.name, p.kind, p.season, p.capacity, p.price_cents, p.starts_on, p.ends_on,
+    rows(pool, `SELECT p.id, p.name, p.kind, p.season, p.capacity, p.price_cents, p.starts_on, p.ends_on, p.includes_ticket, p.includes_rental, p.offers_helmet, p.disciplines,
                   (SELECT COUNT(*) FROM program_enrollments e WHERE e.tenant_id = p.tenant_id AND e.program_id = p.id AND e.status = 'enrolled') AS enrolled
                 FROM programs p WHERE p.tenant_id = ? AND (p.ends_on IS NULL OR p.ends_on >= ?) ORDER BY p.name`, [tenantId, today]),
     rows(pool, "SELECT category, COUNT(*) AS available FROM rental_items WHERE tenant_id = ? AND status = 'available' GROUP BY category", [tenantId]),
@@ -381,7 +384,7 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
     );
     const orderId = o.insertId;
     for (const tx_ of t.taxes) await conn.query('INSERT INTO order_taxes (tenant_id, order_id, name, rate_bps, amount_cents) VALUES (?, ?, ?, ?, ?)', [tenantId, orderId, tx_.name, tx_.rate_bps, tx_.amount_cents]);
-    const done = { tickets: [], lessons: [], packages: [], rentals: [], programs: [], gift_cards: [] };
+    const done = { tickets: [], lessons: [], packages: [], rentals: [], programs: [], gift_cards: [], program_adjustments: [] };
 
     for (const p of priced) {
       const ln = p.line;
@@ -402,6 +405,8 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
           const code = newCode();
           await conn.query('INSERT INTO tickets (tenant_id, order_item_id, person_id, product_id, code, valid_from, valid_to, uses_remaining) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [tenantId, itemId, holder, p.product.id, code, p.validOn, validTo, p.product.uses ?? null]);
           done.tickets.push({ code, product: p.product.name, tier: ln.tier, valid_from: p.validOn, valid_to: validTo, person_id: holder, holder: names.get(holder) });
+          // A season pass for a child already in a program with a lift ticket part: refund or credit it, per the mountain.
+          if (p.product.kind === 'season_pass') done.program_adjustments.push(...await PP.passBought(conn, tenantId, holder, { passFrom: p.validOn, passTo: validTo, userId: req.auth.userId }));
         }
       } else if (p.type === 'lesson' && p.pkg) {
         const owner = personOf(ln);
@@ -446,7 +451,9 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
         const itemId = await item({ person_id: participant, program_id: p.program.id });
         const paidShare = split(p.unit - (p.discount || 0) + (p.tax || 0), p.reg.parts.length);
         for (const [k, x] of p.reg.parts.entries()) {
-          const e = await PS.enroll(conn, tenantId, { program: p.program, term: x.term, group: x.group, personId: participant, guardianId: guardian, priceCents: x.list_cents, discountCents: x.discount_cents || 0, paidCents: paidShare[k], bundleId: p.reg.bundle ? p.reg.bundle.id : null, orderId, mustFit: true });
+          // A pass the cashier was told about is looked up now the child is known: found, or flagged for the first lesson.
+          if (x.pass_status === 'claimed') x.pass_status = await PP.passStatus(conn, tenantId, { personId: participant }, (await PP.termStart(conn, tenantId, x.term.id)) || PS.dstr(x.term.starts_on), true);
+          const e = await PS.enroll(conn, tenantId, { program: p.program, term: x.term, group: x.group, personId: participant, guardianId: guardian, priceCents: x.list_cents, discountCents: x.discount_cents || 0, paidCents: paidShare[k], bundleId: p.reg.bundle ? p.reg.bundle.id : null, orderId, mustFit: true, details: PS.detailsOf(p.reg, x, ln) });
           const ticket = await PS.issueTicket(conn, tenantId, { program: p.program, group: x.group, personId: participant, orderId, enrollmentId: e.id });
           await audit(conn, req, 'enroll', 'programs', p.program.id, { person_id: participant, term_id: x.term.id, group_id: x.group.id, order_id: orderId, order_item: itemId });
           done.programs.push({ enrollment_id: e.id, program_id: p.program.id, person_id: participant, name: `${p.program.name}: ${x.term.name}, ${PS.WEEKDAYS[x.group.weekday]}s`, ticket: ticket ? ticket.code : null });
@@ -518,6 +525,7 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
     };
   });
 
+  if (result.program_adjustments && result.program_adjustments.length) await PP.afterPassBought(tenantId, result.program_adjustments).catch(() => {});
   res.status(201).json(result);
 });
 

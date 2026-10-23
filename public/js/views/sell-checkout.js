@@ -15,7 +15,7 @@ export const lineApi = (l, who, holders) => {
   if (type === 'lesson') return { type, session_id: l.session_id, tier: l.tier, ...(who ? { participant: who } : {}) };
   if (type === 'lesson_package') return { type, product_id: l.product_id, tier: l.tier, ...(who ? { participant: who } : {}) };
   if (type === 'rental') return { type, product_id: l.product_id, tier: l.tier, items: l.items || [], ...(who ? { participant: who } : {}) };
-  if (type === 'program') return { type, program_id: l.program_id, ...(l.term_id ? { term_id: l.term_id, group_id: l.group_id } : {}), ...(l.bundle_id ? { bundle_id: l.bundle_id, groups: l.groups } : {}), ...(who ? { participant: who } : {}) };
+  if (type === 'program') return { type, program_id: l.program_id, ...(l.term_id ? { term_id: l.term_id, group_id: l.group_id } : {}), ...(l.bundle_id ? { bundle_id: l.bundle_id, groups: l.groups } : {}), ...['discipline', 'has_pass', 'needs_rental', 'needs_helmet'].reduce((o, k) => (l[k] !== undefined ? { ...o, [k]: l[k] } : o), {}), ...(who ? { participant: who } : {}) };
   return { type, amount_cents: l.amount_cents, recipient_name: l.recipient_name, message: l.message };
 };
 

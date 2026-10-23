@@ -30,3 +30,12 @@ dialog.card { max-width: min(640px, calc(100vw - 32px)); border: 1px solid var(-
 dialog::backdrop { background: rgba(10, 20, 35, 0.5); }
 #reg input:not([type='checkbox']), #reg select, #reg textarea { width: 100%; font: inherit; color: var(--ink); min-height: 48px; padding: 10px 12px; border: 1.5px solid var(--line-strong); border-radius: var(--r-sm); background: #fff; }
 #reg input:focus, #reg select:focus { border-color: var(--blue); outline: 2px solid var(--blue); outline-offset: 1px; }
+.reg-type { font-size: 0.95rem; color: var(--muted); margin: 6px 0 0; }
+.reg-day .disc { font-size: 0.8125rem; font-weight: 700; justify-self: start; border: 1px solid var(--line-strong); border-radius: 999px; padding: 2px 8px; }
+.reg-safety summary { cursor: pointer; font-weight: 700; min-height: 44px; display: flex; align-items: center; }
+.reg-safety[open] { display: grid; gap: 12px; }
+.reg-line .ok { color: #17703f; }
+.reg-line .note { color: #8a3b00; }
+.reg-policy { background: var(--snow); border-radius: var(--r-sm); padding: 12px 14px; }
+.reg-policy h3 { margin: 0 0 6px; font-size: 1rem; }
+.reg-policy p { margin: 4px 0; }

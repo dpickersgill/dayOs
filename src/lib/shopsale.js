@@ -247,7 +247,7 @@ async function fulfil(conn, tenantId, row, { paymentIntent }) {
   const orderId = o.insertId;
   if (q.promo) await conn.query('UPDATE promo_codes SET used_count = used_count + 1 WHERE tenant_id = ? AND code = ?', [tenantId, q.promo]);
   for (const t of q.taxes) await conn.query('INSERT INTO order_taxes (tenant_id, order_id, name, rate_bps, amount_cents) VALUES (?, ?, ?, ?, ?)', [tenantId, orderId, t.name, t.rate_bps, t.amount_cents]);
-  const waiverNeeded = []; const tickets = [];
+  const waiverNeeded = []; const tickets = []; const programAdjustments = [];
   for (const ln of q.lines) {
     const st = ln.holder;
     const sameAsContact = st.first_name.toLowerCase() === String(c.first_name).toLowerCase() && st.last_name.toLowerCase() === String(c.last_name).toLowerCase();
@@ -272,6 +272,9 @@ async function fulfil(conn, tenantId, row, { paymentIntent }) {
     const validTo = addDays(ln.valid_on, Math.max(ln.valid_days, 1) - 1);
     await conn.query('INSERT INTO tickets (tenant_id, order_item_id, person_id, product_id, code, valid_from, valid_to, uses_remaining) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [tenantId, it.insertId, who.id, ln.product_id, code, ln.valid_on, validTo, ln.uses ?? null]);
     tickets.push(code);
+    // A season pass for a child already in a program that charged a lift ticket part: refund or credit it, per the mountain.
+    const kind = await one(conn, 'SELECT kind FROM products WHERE tenant_id = ? AND id = ?', [tenantId, ln.product_id]);
+    if (kind && kind.kind === 'season_pass') programAdjustments.push(...await require('./programplus').passBought(conn, tenantId, who.id, { passFrom: ln.valid_on, passTo: validTo }));
   }
   // Add-ons become a voucher the guest uses at the mountain; each unit has its own code and barcode.
   for (const a of q.addons || []) {
@@ -295,7 +298,7 @@ async function fulfil(conn, tenantId, row, { paymentIntent }) {
   await conn.query("UPDATE shop_orders SET status = 'paid', paid_at = NOW(), order_id = ?, payment_intent = COALESCE(?, payment_intent), note = ? WHERE tenant_id = ? AND id = ?",
     [orderId, paymentIntent, [waiverNeeded.length ? `Waiver still to sign at the gate: ${waiverNeeded.join(', ')}.` : '', overLimit.length ? `Payment arrived late: ${overLimit.join(', ')} went over the daily limit.` : ''].filter(Boolean).join(' ').slice(0, 300) || null, tenantId, row.id]);
   await audit(conn, { auth: { tenantId, userId: null } }, 'shop_paid', 'shop_orders', row.id, { tickets: tickets.length, order_id: orderId });
-  return { orderId, tickets, waiverNeeded, giftCodes };
+  return { orderId, tickets, waiverNeeded, giftCodes, programAdjustments };
 }
 
 /** What the guest sees for their order: only reachable with the secret link token. */
@@ -365,6 +368,7 @@ async function handleWebhook(event, obj, baseUrl) {
     return { refunded: true };
   }
   if (out.ok) await emailTickets(tenantId, id, baseUrl).catch(() => {});
+  if (out.ok && out.programAdjustments && out.programAdjustments.length) await require('./programplus').afterPassBought(tenantId, out.programAdjustments).catch(() => {});
   return { ok: Boolean(out.ok), duplicate: out.duplicate, ignored: out.ignored };
 }
 

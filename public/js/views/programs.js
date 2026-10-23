@@ -8,8 +8,8 @@
 import { get, post, put, patch, del } from '../api.js';
 import { h, clear, can, isManager, money, toCents, centsToInput, table, state, input, select, field, button, toast, formDialog, confirmDialog, dialog, tabs, val, num, todayStr, fmtDate, fmtRange, label, empty, errorBox } from '../ui.js';
 import { personPicker } from '../widgets.js';
+import { cardDialog } from './school-card.js';
 
-const KINDS = ['club', 'race_team', 'school_program', 'camp', 'league'];
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const ageOf = (dob) => { if (!dob) return ''; const d = new Date(`${dob}T12:00:00Z`); const n = new Date(); let a = n.getUTCFullYear() - d.getUTCFullYear(); if (n.getUTCMonth() < d.getUTCMonth() || (n.getUTCMonth() === d.getUTCMonth() && n.getUTCDate() < d.getUTCDate())) a -= 1; return String(a); };
@@ -27,69 +27,139 @@ export async function render(root, params = []) {
 }
 
 // ================================================================ every program
+let typesCache = null;
+async function types(force = false) {
+  if (!typesCache || force) { try { typesCache = (await get('/programs/types')).data; } catch (_) { typesCache = []; } }
+  return typesCache;
+}
+
 async function listView(root) {
-  const body = h('div');
+  const body = h('div', { class: 'stack' });
   const seasonIn = input({ placeholder: 'All seasons', 'aria-label': 'Season' });
+  const all = await types(true);
+  const typeIn = select([['', 'All types'], ...all.filter((x) => !x.hidden).map((x) => [x.id, x.name])], '', { 'aria-label': 'Type' });
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Programs'),
     h('div', { class: 'row' }, can('instructor') ? h('a', { class: 'btn', href: '#/programs/today' }, "Today's lessons") : null,
+      isManager() ? button('Program types', () => typesDialog(load)) : null,
+      isManager() ? button('Program settings', () => settingsDialog()) : null,
       isManager() ? button('Add program', () => editProgram(null, (id) => { location.hash = `#/programs/${id}`; }), { kind: 'primary' }) : null)),
-  h('div', { class: 'inline-form' }, field('Season', seasonIn, 'Such as 2026-27'), button('Filter', () => load())), body);
+  h('div', { class: 'inline-form' }, field('Type', typeIn), field('Season', seasonIn, 'Such as 2026-27'), button('Filter', () => load())), body);
 
   async function load() {
     clear(body).append(h('p', { class: 'loading' }, 'Loading…'));
     try {
-      const qs = seasonIn.value.trim() ? `&season=${encodeURIComponent(seasonIn.value.trim())}` : '';
+      const ts = await types();
+      const qs = `${seasonIn.value.trim() ? `&season=${encodeURIComponent(seasonIn.value.trim())}` : ''}${typeIn.value ? `&type_id=${typeIn.value}` : ''}`;
       const { data } = await get(`/programs?limit=200${qs}`);
-      clear(body).append(data.length ? table([
-        { head: 'Program', cell: (p) => h('a', { href: `#/programs/${p.id}` }, h('strong', null, p.name)) },
-        { head: 'Kind', cell: (p) => label(p.kind) },
-        { head: 'Season', cell: (p) => p.season },
-        { head: 'Online', cell: (p) => (p.online ? state('Registration on', 'good') : '') },
-        { head: '', actions: true, cell: (p) => [h('a', { class: 'btn small primary', href: `#/programs/${p.id}` }, 'Open')] },
-      ], data) : empty('No programs yet. Add one to set up its sessions.'));
+      if (!data.length) { clear(body).append(empty('No programs yet. Add one to set up its sessions.')); return; }
+      // Grouped by type, in the mountain's order: the same headings parents see online.
+      const groups = [...ts.map((x) => [x, data.filter((p) => p.type_id === x.id)]), [{ id: null, name: 'No type' }, data.filter((p) => !p.type_id || !ts.some((x) => x.id === p.type_id))]].filter(([, list]) => list.length);
+      clear(body).append(...groups.map(([x, list]) => h('section', { class: 'stack tight' }, h('h2', { class: 'ptype-head' }, x.name, h('span', { class: 'muted small' }, ` ${list.length}`)),
+        table([
+          { head: 'Program', cell: (p) => h('a', { href: `#/programs/${p.id}` }, h('strong', null, p.name)) },
+          { head: 'Season', cell: (p) => p.season },
+          { head: 'Online', cell: (p) => (p.online ? state('Registration on', 'good') : '') },
+          { head: '', actions: true, cell: (p) => [h('a', { class: 'btn small primary', href: `#/programs/${p.id}` }, 'Open')] },
+        ], list))));
     } catch (err) { clear(body).append(errorBox(err)); }
   }
   await load();
 }
 
-/** A program's own settings: what it is, who it is for, what is included, discounts and how classes are made. */
+/** The mountain's own list of program types: add, rename, hide, put in order. */
+async function typesDialog(reload) {
+  const list = h('ol', { class: 'plain ptypes' });
+  const dlg = dialog('Program types', [h('p', { class: 'muted' }, 'The headings programs are grouped under, here and on the registration page. Hide a type you no longer use; its programs keep it.'), list,
+    h('div', { class: 'row' }, button('Add a type', () => formDialog('Add a type', field('Name', input({ name: 'name', required: true, maxlength: 60, placeholder: 'Homeschool, Scouts, Women\'s clinic' })), async (fd) => { await post('/programs/types', { name: val(fd, 'name') }); await draw(); }), { kind: 'primary' }))],
+  { onClose: () => reload() });
+  async function draw() {
+    const ts = await types(true);
+    clear(list).append(...ts.map((x, i) => h('li', { class: `spread ptype${x.hidden ? ' is-hidden' : ''}` }, h('span', null, h('b', null, x.name), x.hidden ? h('span', { class: 'muted small' }, ' hidden') : null),
+      h('span', { class: 'row tight' },
+        button('Up', async () => { const ids = ts.map((y) => y.id); [ids[i - 1], ids[i]] = [ids[i], ids[i - 1]]; await put('/programs/types/order', { ids }); await draw(); }, { small: true, label: `Move ${x.name} up` }),
+        button('Rename', () => formDialog(`Rename ${x.name}`, field('Name', input({ name: 'name', required: true, maxlength: 60, value: x.name })), async (fd) => { await patch(`/programs/types/${x.id}`, { name: val(fd, 'name') }); await draw(); }), { small: true }),
+        button(x.hidden ? 'Show' : 'Hide', async () => { await patch(`/programs/types/${x.id}`, { hidden: !x.hidden }); await draw(); }, { small: true, kind: 'quiet' })))));
+    const firstUp = list.querySelector('li button'); if (firstUp) firstUp.disabled = true;
+  }
+  await draw();
+  return dlg;
+}
+
+/** The mountain's program settings: a pass bought after registering, reminders, weather texts. */
+async function settingsDialog() {
+  const s = await get('/programs/settings');
+  formDialog('Program settings', h('div', { class: 'stack' },
+    h('fieldset', { class: 'plain-set' }, h('legend', null, 'A season pass bought after registering'),
+      h('p', { class: 'muted small' }, 'When a child in a program that charged a lift ticket part gets a season pass, at the window or online:'),
+      field('Then', select([['none', 'Nothing changes'], ['refund', 'Refund the lift ticket part (to the card it was paid with)'], ['credit', 'Give the family a credit (as a gift card)']], s.pass_later, { name: 'pass_later' })),
+      field('How much', select([['unused', 'The share for lessons still to come'], ['full', 'The whole lift ticket part']], s.pass_later_share, { name: 'pass_later_share' }))),
+    h('fieldset', { class: 'plain-set' }, h('legend', null, 'Telling families'),
+      field('Reminder the day before', select([['first', 'Before the first lesson (and any makeup)'], ['every', 'Before every lesson'], ['off', 'Off']], s.reminders, { name: 'reminders' }), 'By email, with the time, the meeting place and what to bring'),
+      h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'text_cancellations', checked: s.text_cancellations }), ' Text families when a lesson is cancelled for weather (needs text messages set up)'))),
+  async (fd) => {
+    await put('/programs/settings', { pass_later: val(fd, 'pass_later'), pass_later_share: val(fd, 'pass_later_share'), reminders: val(fd, 'reminders'), text_cancellations: Boolean(fd.get('text_cancellations')) });
+    toast('Program settings saved');
+  }, { wide: true });
+}
+
+/** A program's own settings: type, who it is for, what the price is made of, discounts, classes and its rules. */
 async function editProgram(p, done) {
   let products = [];
   try { products = (await get('/products?limit=200')).data || []; } catch (_) { products = []; }
+  const ts = (await types(true)).filter((x) => !x.hidden || (p && p.type_id === x.id));
   const tickets = products.filter((x) => ['day_ticket', 'multi_day', 'punch_card', 'season_pass'].includes(x.kind));
   const rentals = products.filter((x) => x.kind === 'rental');
   const chk = (name, on, text) => h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name, checked: Boolean(on) }), ` ${text}`);
   const f = h('div', { class: 'stack' },
     h('div', { class: 'form' },
       field('Name', input({ name: 'name', required: true, maxlength: 255, value: p ? p.name : '', placeholder: 'After-School Ski & Ride' })),
-      field('Kind', select(KINDS, p ? p.kind : 'school_program', { name: 'kind' })),
+      field('Type', select([['', 'Choose a type'], ...ts.map((x) => [x.id, x.name])], p ? p.type_id || '' : '', { name: 'type_id' }), 'Manage the list in Program types'),
       field('Season', input({ name: 'season', required: true, value: p ? p.season : '', placeholder: '2026-27' })),
       field('Youngest age', input({ name: 'age_min', type: 'number', min: 0, max: 99, value: p && p.age_min != null ? p.age_min : '' })),
       field('Oldest age', input({ name: 'age_max', type: 'number', min: 0, max: 99, value: p && p.age_max != null ? p.age_max : '' })),
+      field('Ski or snowboard', select([['ski,snowboard', 'Both'], ['ski', 'Ski only'], ['snowboard', 'Snowboard only']], p ? p.disciplines : 'ski,snowboard', { name: 'disciplines' })),
+      field('Snowboard from age', input({ name: 'snowboard_age_min', type: 'number', min: 0, max: 99, value: p && p.snowboard_age_min != null ? p.snowboard_age_min : '' }), 'Blank: the same as skiing'),
+      field('Meeting place', input({ name: 'meeting_place', maxlength: 160, value: p ? p.meeting_place || '' : '', placeholder: 'The bell outside the ski school' })),
+      field('What to bring', input({ name: 'what_to_bring', maxlength: 300, value: p ? p.what_to_bring || '' : '', placeholder: 'Helmet, goggles, a snack' })),
       h('div', { class: 'wide' }, field('Description for parents', h('textarea', { name: 'description', rows: 3, maxlength: 2000 }, p && p.description ? p.description : ''), 'Shown on the online registration page'))),
-    h('fieldset', { class: 'plain-set' }, h('legend', null, 'Included in the price'),
-      chk('includes_ticket', p && p.includes_ticket, 'A lift ticket for every lesson date'),
-      field('Ticket product', select([['', 'Choose the ticket'], ...tickets.map((x) => [x.id, x.name])], p ? p.ticket_product_id || '' : '', { name: 'ticket_product_id' }), 'Issued at no charge, good on the session\'s dates'),
-      chk('includes_rental', p && p.includes_rental, 'Rental equipment (the roster shows each child\'s sizes)'),
-      rentals.length ? field('Rental package', select([['', 'None in particular'], ...rentals.map((x) => [x.id, x.name])], p ? p.rental_product_id || '' : '', { name: 'rental_product_id' })) : null),
+    h('fieldset', { class: 'plain-set' }, h('legend', null, 'What the price is made of'),
+      h('p', { class: 'muted small' }, 'Lessons always. Set each part\'s price on the session.'),
+      chk('includes_ticket', p && p.includes_ticket, 'A lift ticket part: not charged when the child has a season pass'),
+      field('Ticket product', select([['', 'Choose the ticket'], ...tickets.map((x) => [x.id, x.name])], p ? p.ticket_product_id || '' : '', { name: 'ticket_product_id' }), 'Issued at no extra charge, good on the lesson dates'),
+      chk('includes_rental', p && p.includes_rental, 'Rental gear, for those who ask (sizes are taken at registration)'),
+      rentals.length ? field('Rental package', select([['', 'None in particular'], ...rentals.map((x) => [x.id, x.name])], p ? p.rental_product_id || '' : '', { name: 'rental_product_id' })) : null,
+      chk('offers_helmet', p && p.offers_helmet, 'A helmet, for those who ask')),
     h('fieldset', { class: 'plain-set' }, h('legend', null, 'Discounts and classes'),
       h('div', { class: 'form' },
-        field('Sibling discount', select([['none', 'None'], ['percent', 'Percent off'], ['amount', 'Dollars off']], p ? p.sibling_mode : 'none', { name: 'sibling_mode' }), 'For the second and later child in the same family'),
+        field('Sibling discount', select([['none', 'None'], ['percent', 'Percent off'], ['amount', 'Dollars off']], p ? p.sibling_mode : 'none', { name: 'sibling_mode' }), 'On the lessons, for the second and later child'),
         field('Discount', input({ name: 'sibling_value', inputmode: 'decimal', value: p ? (p.sibling_mode === 'amount' ? centsToInput(p.sibling_value) : p.sibling_value || '') : '' }), '10 for 10%, or 25.00 for $25 off'),
-        field('Classes by level', select([['on_arrival', 'Split on the first day'], ['preset', 'Preset by the school before the first day']], p ? p.level_mode : 'on_arrival', { name: 'level_mode' }))),
-      chk('online', p && p.online, 'Parents can register online')));
+        field('Classes by level', select([['on_arrival', 'Split on the first day'], ['preset', 'Preset by the school before the first day']], p ? p.level_mode : 'on_arrival', { name: 'level_mode' })))),
+    h('fieldset', { class: 'plain-set' }, h('legend', null, 'Rules for families'),
+      h('div', { class: 'form' },
+        field('Cancel online up to (days before the first lesson)', input({ name: 'cancel_days', type: 'number', min: 0, max: 365, value: p && p.cancel_days != null ? p.cancel_days : '' }), 'Blank: families call to cancel'),
+        field('Cancellation fee ($)', input({ name: 'cancel_fee', inputmode: 'decimal', value: p ? centsToInput(p.cancel_fee_cents || 0) : '0.00' })),
+        field('Joining after the first lesson', select([['prorate', 'Allowed: pay for the lessons left'], ['full', 'Allowed: full price'], ['closed', 'Not online (staff can still add)']], p ? p.late_join : 'prorate', { name: 'late_join' }))),
+      chk('allow_switch', p ? p.allow_switch : true, 'Families can switch to another day with room, from their family page'),
+      chk('ask_safety', p ? p.ask_safety : true, 'Ask for allergies, medical notes and who may pick up'),
+      field('Policy shown to parents', h('textarea', { name: 'policy_text', rows: 2, maxlength: 1000 }, p && p.policy_text ? p.policy_text : ''), 'Missed lessons, makeups, refunds: in your words')),
+    chk('online', p && p.online, 'Parents can register online'));
   formDialog(p ? `Settings: ${p.name}` : 'Add a program', f, async (fd) => {
     const mode = val(fd, 'sibling_mode');
     const raw = String(fd.get('sibling_value') || '').trim();
     const sv = mode === 'amount' ? toCents(raw || '0') : Number(raw || 0);
     if (sv === null || !Number.isFinite(sv)) throw new Error('The sibling discount is a number, like 10 or 25.00');
-    if (fd.get('includes_ticket') && !fd.get('ticket_product_id')) throw new Error('Choose which ticket is included');
+    if (fd.get('includes_ticket') && !fd.get('ticket_product_id')) throw new Error('Choose which ticket is issued');
+    const fee = toCents(fd.get('cancel_fee') || '0');
+    if (fee === null) throw new Error('The cancellation fee is an amount like 25.00');
+    const text = (k) => String(fd.get(k) || '').trim() || null;
     const body = {
-      name: val(fd, 'name'), kind: val(fd, 'kind'), season: val(fd, 'season'), age_min: num(fd, 'age_min'), age_max: num(fd, 'age_max'),
-      description: String(fd.get('description') || '').trim() || null, online: Boolean(fd.get('online')),
+      name: val(fd, 'name'), type_id: fd.get('type_id') ? Number(fd.get('type_id')) : null, season: val(fd, 'season'), age_min: num(fd, 'age_min'), age_max: num(fd, 'age_max'),
+      disciplines: val(fd, 'disciplines'), snowboard_age_min: num(fd, 'snowboard_age_min'), meeting_place: text('meeting_place'), what_to_bring: text('what_to_bring'),
+      description: text('description'), online: Boolean(fd.get('online')),
       includes_ticket: Boolean(fd.get('includes_ticket')), ticket_product_id: fd.get('ticket_product_id') ? Number(fd.get('ticket_product_id')) : null,
-      includes_rental: Boolean(fd.get('includes_rental')), rental_product_id: fd.get('rental_product_id') ? Number(fd.get('rental_product_id')) : null,
+      includes_rental: Boolean(fd.get('includes_rental')), rental_product_id: fd.get('rental_product_id') ? Number(fd.get('rental_product_id')) : null, offers_helmet: Boolean(fd.get('offers_helmet')),
       sibling_mode: mode, sibling_value: mode === 'none' ? 0 : sv, level_mode: val(fd, 'level_mode'),
+      cancel_days: num(fd, 'cancel_days'), cancel_fee_cents: fee, late_join: val(fd, 'late_join'), allow_switch: Boolean(fd.get('allow_switch')), ask_safety: Boolean(fd.get('ask_safety')), policy_text: text('policy_text'),
     };
     const out = p ? await patch(`/programs/${p.id}`, body) : await post('/programs', { ...body, price_cents: 0 });
     toast('Program saved');
@@ -101,6 +171,7 @@ async function editProgram(p, done) {
 async function programView(root, id) {
   const page = h('div', { class: 'stack' });
   root.append(page);
+  await types();
   async function load() {
     let o;
     try { o = await get(`/programs/${id}/overview`); } catch (err) { clear(page).append(back('#/programs', 'All programs'), errorBox(err)); return; }
@@ -108,15 +179,18 @@ async function programView(root, id) {
     const chips = [
       p.age_min != null || p.age_max != null ? state(`Ages ${p.age_min ?? 0} to ${p.age_max ?? '99'}`) : null,
       p.online ? state('Online registration on', 'good') : state('Not sold online'),
-      p.includes_ticket ? state('Lift ticket included') : null,
-      p.includes_rental ? state('Rental included') : null,
+      p.includes_ticket ? state('Lift ticket part (not for pass holders)') : null,
+      p.includes_rental ? state('Rental on request') : null,
+      p.offers_helmet ? state('Helmet on request') : null,
+      p.disciplines !== 'ski,snowboard' ? state(p.disciplines === 'ski' ? 'Ski only' : 'Snowboard only') : null,
+      p.cancel_days != null ? state(`Cancel online up to ${p.cancel_days} days before`) : null,
       p.sibling_mode !== 'none' && p.sibling_value ? state(`Siblings ${p.sibling_mode === 'percent' ? `${p.sibling_value}%` : money(p.sibling_value)} off`) : null,
       state(p.level_mode === 'preset' ? 'Classes preset by the school' : 'Classes split on the first day'),
     ];
     const link = `${location.origin}/programs/${o.slug}`;
     clear(page).append(
       back('#/programs', 'All programs'),
-      h('div', { class: 'page-head' }, h('div', null, h('h1', null, p.name), h('p', { class: 'muted' }, `${label(p.kind)}, ${p.season}`)),
+      h('div', { class: 'page-head' }, h('div', null, h('h1', null, p.name), h('p', { class: 'muted' }, `${(typesCache || []).find((x) => x.id === p.type_id)?.name || 'No type'}, ${p.season}${p.meeting_place ? `. Meet at ${p.meeting_place}` : ''}`)),
         h('div', { class: 'row' },
           isManager() ? button('New session', () => termDialog(p, null, load), { kind: 'primary' }) : null,
           isManager() ? button('Settings', () => editProgram(p, load)) : null,
@@ -147,7 +221,8 @@ function termPanel(p, t, today, reload) {
     h('div', { class: 'spread' },
       h('div', null, h('h2', null, t.name, ' ', state(label(t.status), STATUS_TONE[t.status])),
         h('p', { class: 'muted' }, `${dayWord}. ${shortDate(t.starts_on)} to ${last ? shortDate(last) : '…'}: ${t.weeks} week${t.weeks === 1 ? '' : 's'}${t.makeup_weeks ? ` plus ${t.makeup_weeks} makeup week${t.makeup_weeks === 1 ? '' : 's'}` : ''}, ${time12(t.start_time)} to ${time12(t.end_time)}.`),
-        h('p', null, h('b', null, money(t.price_cents)), step ? ` · ${step.label || 'Early bird'} ${money(step.price_cents)} until ${shortDate(step.until)}` : '',
+        h('p', null, h('b', null, `Lessons ${money(t.price_cents)}`), step ? ` (${step.label || 'early bird'} ${money(step.price_cents)} until ${shortDate(step.until)})` : '',
+          p.includes_ticket ? ` + lift ticket ${money(t.ticket_cents)}` : '', p.includes_rental ? ` + rental ${money(t.rental_cents)}` : '', p.offers_helmet ? ` + helmet ${money(t.helmet_cents)}` : '',
           t.reg_opens_on || t.reg_closes_on ? h('span', { class: 'muted' }, ` · Registration ${t.reg_opens_on ? `opens ${shortDate(t.reg_opens_on)}` : ''}${t.reg_opens_on && t.reg_closes_on ? ', ' : ''}${t.reg_closes_on ? `closes ${shortDate(t.reg_closes_on)}` : ''}`) : null)),
       isManager() ? h('div', { class: 'row' },
         button('Edit', () => termDialog(p, t, reload), { small: true }),
@@ -162,6 +237,7 @@ function dayCard(p, t, g) {
   const full = g.capacity != null && g.enrolled >= g.capacity;
   return h('a', { class: `pday${full ? ' is-full' : ''}`, href: `#/programs/${p.id}/day/${g.id}`, 'aria-label': `${g.day}s: ${g.enrolled} enrolled${g.capacity ? ` of ${g.capacity}` : ''}` },
     h('div', { class: 'pday-head' }, h('span', { class: 'pday-name' }, `${g.day}s`), h('span', { class: 'pday-time' }, `${time12(g.start_time)}–${time12(g.end_time)}`)),
+    g.discipline && g.discipline !== 'any' ? h('span', { class: 'pday-disc' }, g.discipline === 'ski' ? 'Ski only' : 'Snowboard only') : null,
     h('div', { class: 'pday-fill' },
       h('div', { class: 'pday-count' }, h('b', null, String(g.enrolled)), g.capacity ? ` of ${g.capacity}` : ' enrolled', g.waiting ? h('span', { class: 'pday-wait' }, ` · ${g.waiting} waiting`) : null),
       g.capacity ? h('div', { class: 'pday-bar', role: 'presentation' }, h('i', { style: `width:${pct}%` })) : null),
@@ -198,8 +274,11 @@ function termDialog(p, t, reload) {
       field('Starts at', input({ name: 'start_time', type: 'time', required: true, value: t ? t.start_time : '15:45' })),
       field('Ends at', input({ name: 'end_time', type: 'time', required: true, value: t ? t.end_time : '17:45' })),
       t ? null : field('Spots per day', input({ name: 'capacity', type: 'number', min: 1, max: 2000, placeholder: 'No limit' }), 'Change any day afterwards'),
-      field('Price ($)', input({ name: 'price', inputmode: 'decimal', required: true, value: t ? centsToInput(t.price_cents) : '' })),
-      field('Early bird price ($)', input({ name: 'early_price', inputmode: 'decimal', value: step ? centsToInput(step.price_cents) : '' }), 'Blank for none'),
+      field('Lessons price ($)', input({ name: 'price', inputmode: 'decimal', required: true, value: t ? centsToInput(t.price_cents) : '' })),
+      p.includes_ticket ? field('Lift ticket part ($)', input({ name: 'ticket', inputmode: 'decimal', value: t ? centsToInput(t.ticket_cents) : '' }), 'Not charged to season pass holders') : null,
+      p.includes_rental ? field('Rental ($)', input({ name: 'rental', inputmode: 'decimal', value: t ? centsToInput(t.rental_cents) : '' }), 'For those who ask') : null,
+      p.offers_helmet ? field('Helmet ($)', input({ name: 'helmet', inputmode: 'decimal', value: t ? centsToInput(t.helmet_cents) : '' })) : null,
+      field('Early bird lessons price ($)', input({ name: 'early_price', inputmode: 'decimal', value: step ? centsToInput(step.price_cents) : '' }), 'Blank for none'),
       field('Early bird until', input({ name: 'early_until', type: 'date', value: step ? step.until : '' })),
       field('Registration opens', input({ name: 'reg_opens_on', type: 'date', value: t && t.reg_opens_on ? t.reg_opens_on : '' })),
       field('Registration closes', input({ name: 'reg_closes_on', type: 'date', value: t && t.reg_closes_on ? t.reg_closes_on : '' })),
@@ -217,9 +296,11 @@ function termDialog(p, t, reload) {
     }
     const skip = String(fd.get('skip') || '').split(/[\s,]+/).filter(Boolean);
     if (skip.some((d) => !/^\d{4}-\d{2}-\d{2}$/.test(d))) throw new Error('Write skipped dates as YYYY-MM-DD');
+    const part = (k) => { const raw = String(fd.get(k) || '').trim(); if (!raw) return 0; const c = toCents(raw); if (c === null) throw new Error('Prices are amounts like 80.00'); return c; };
     const body = {
       name: val(fd, 'name'), status: val(fd, 'status'), starts_on: val(fd, 'starts_on'), weeks: num(fd, 'weeks'), makeup_weeks: num(fd, 'makeup_weeks') ?? 0,
       start_time: val(fd, 'start_time'), end_time: val(fd, 'end_time'), price_cents: price, price_steps: steps, skip_dates: skip,
+      ticket_cents: part('ticket'), rental_cents: part('rental'), helmet_cents: part('helmet'),
       reg_opens_on: val(fd, 'reg_opens_on') || null, reg_closes_on: val(fd, 'reg_closes_on') || null,
     };
     if (t) await patch(`/programs/terms/${t.id}`, body);
@@ -249,9 +330,10 @@ function addDayDialog(t, reload) {
   const used = new Set(t.groups.map((g) => g.weekday));
   formDialog(`Add a day to ${t.name}`, h('div', { class: 'form' },
     field('Day', select([1, 2, 3, 4, 5, 6, 0].filter((d) => !used.has(d)).map((d) => [d, DAYS[d]]), '', { name: 'weekday' })),
-    field('Spots', input({ name: 'capacity', type: 'number', min: 1, max: 2000, placeholder: 'No limit' }))),
+    field('Spots', input({ name: 'capacity', type: 'number', min: 1, max: 2000, placeholder: 'No limit' })),
+    field('Who', select([['any', 'Ski and snowboard'], ['ski', 'Ski only'], ['snowboard', 'Snowboard only']], 'any', { name: 'discipline' }))),
   async (fd) => {
-    await post(`/programs/terms/${t.id}/days`, { weekday: Number(fd.get('weekday')), capacity: num(fd, 'capacity') });
+    await post(`/programs/terms/${t.id}/days`, { weekday: Number(fd.get('weekday')), capacity: num(fd, 'capacity'), discipline: val(fd, 'discipline') });
     toast('Day added, with its dates');
     await reload();
   }, { submitText: 'Add day' });
@@ -341,16 +423,30 @@ async function dayView(root, programId, groupId) {
       });
       return s;
     };
+    // The pass column: found on file, said so and to check at the first lesson (with the two answers), or a ticket.
+    const passCell = (x) => {
+      if (x.pass_status === 'verified') return state('Season pass', 'good');
+      if (x.pass_status === 'claimed') {
+        return h('span', { class: 'stack tight' }, state('Says pass: check it', 'warn'), h('span', { class: 'row tight' },
+          button('Seen', async () => { await post(`/programs/enrollments/${x.enrollment_id}/pass`, { result: 'verified' }); toast('Pass checked'); await load(); }, { small: true }),
+          button('No pass', () => confirmDialog(`No season pass for ${x.first_name}?`, 'The lift ticket part is added to what the family owes, and the program ticket is issued.', 'Add ticket part', async () => { const o = await post(`/programs/enrollments/${x.enrollment_id}/pass`, { result: 'no_pass' }); toast(`${money(o.owes_added_cents)} added`); await load(); }), { small: true, kind: 'quiet' })));
+      }
+      return x.ticket_code ? h('code', null, x.ticket_code) : h('span', { class: 'muted' }, x.pass_status === 'no_pass' ? 'Ticket owed' : 'At payment');
+    };
+    const care = (x) => [x.allergies ? h('span', { class: 'care-flag', title: `Allergies: ${x.allergies}` }, `Allergy: ${x.allergies}`) : null, x.medical ? h('span', { class: 'care-flag', title: x.medical }, 'Medical note') : null,
+      x.pickup && x.pickup.length ? h('span', { class: 'muted small' }, `Pickup: ${x.pickup.map((p) => p.name).join(', ')}`) : null];
     const cols = [
-      { head: 'Child', cell: (x) => h('span', null, h('strong', null, `${x.first_name} ${x.last_name}`), x.any_day ? h('span', { class: 'muted small' }, ' any day') : null) },
+      { head: 'Child', cell: (x) => h('span', { class: 'stack tight' }, h('span', null, h('strong', null, `${x.first_name} ${x.last_name}`), x.any_day ? h('span', { class: 'muted small' }, ' any day') : null),
+        x.guardian_first_name ? h('span', { class: 'muted small' }, `${x.guardian_first_name} ${x.guardian_last_name}${x.guardian_phone ? `, ${x.guardian_phone}` : ''}`) : null, ...care(x).filter(Boolean)) },
       { head: 'Age', num: true, cell: (x) => ageOf(x.date_of_birth) },
-      { head: 'Ability', cell: (x) => (x.ability_level ? label(x.ability_level) : '') },
-      r.program.includes_rental ? { head: 'Sizes', cell: (x) => [x.height_in ? `${x.height_in} in` : '', x.weight_lb ? `${x.weight_lb} lb` : '', x.boot_size ? `boot ${x.boot_size}` : ''].filter(Boolean).join(', ') || h('span', { class: 'muted' }, 'Not on file') } : null,
-      { head: 'Parent', cell: (x) => (x.guardian_first_name ? h('span', null, `${x.guardian_first_name} ${x.guardian_last_name}`, h('br'), h('span', { class: 'muted small' }, x.guardian_phone || x.guardian_email || '')) : h('span', { class: 'muted' }, x.emergency_name || '')) },
+      { head: 'Ski or board', cell: (x) => (x.discipline ? label(x.discipline) : h('span', { class: 'muted' }, 'Not said')) },
+      (r.program.includes_rental || r.program.offers_helmet) ? { head: 'Gear', cell: (x) => (x.needs_rental || x.needs_helmet ? h('span', null, [x.needs_rental ? 'Rental' : null, x.needs_helmet ? 'Helmet' : null].filter(Boolean).join(', '), x.needs_rental ? h('span', { class: 'muted small' }, ` ${[x.height_in ? `${x.height_in} in` : '', x.weight_lb ? `${x.weight_lb} lb` : '', x.boot_size ? `boot ${x.boot_size}` : ''].filter(Boolean).join(', ') || 'sizes not on file'}`) : null) : h('span', { class: 'muted' }, 'Own gear')) } : null,
       { head: 'Paid', cell: (x) => (x.owes_cents ? state(`Owes ${money(x.owes_cents)}`, 'warn') : state('Paid', 'good')) },
-      r.program.includes_ticket ? { head: 'Ticket', cell: (x) => (x.ticket_code ? h('code', null, x.ticket_code) : h('span', { class: 'muted' }, 'At payment')) } : null,
-      { head: 'Class', cell: (x) => (levels.length ? levelPick(x) : h('span', { class: 'muted' }, 'No classes yet')) },
-      { head: '', actions: true, cell: (x) => [button('Move day', () => moveDialog(x, term, groupId, load), { small: true }), isManager() || can('instructor') ? button('Withdraw', () => withdraw(x, load), { small: true, kind: 'danger' }) : null] },
+      r.program.includes_ticket ? { head: 'Pass or ticket', cell: passCell } : null,
+      levels.length ? { head: 'Class', cell: levelPick } : null,
+      { head: '', actions: true, cell: (x) => [
+        button('Report card', () => cardDialog(x.person_id, { onChange: load }), { small: true }),
+        button('More', () => detailsDialog(x, r.program, load, { move: () => moveDialog(x, term, groupId, load), withdraw: () => withdraw(x, load) }), { small: true, label: `More for ${x.first_name}` })] },
     ].filter(Boolean);
     const byLevel = [...levels.map((l) => [l.name, enrolled.filter((x) => x.level_id === l.id), l]), ['Not placed yet', enrolled.filter((x) => !x.level_id || !levels.some((l) => l.id === x.level_id)), null]].filter(([, list, l]) => list.length || l);
     clear(page).append(
@@ -420,22 +516,66 @@ function withdraw(x, reload) {
 function dayEdit(g, reload) {
   formDialog(`${g.day}s`, h('div', { class: 'form' },
     field('Spots', input({ name: 'capacity', type: 'number', min: 1, max: 2000, value: g.capacity ?? '', placeholder: 'No limit' }), 'More spots move children up from the waitlist'),
-    field('This day\'s price ($)', input({ name: 'price', inputmode: 'decimal', value: g.price_cents != null ? centsToInput(g.price_cents) : '' }), 'Blank: the session price')),
+    field('This day\'s lessons price ($)', input({ name: 'price', inputmode: 'decimal', value: g.price_cents != null ? centsToInput(g.price_cents) : '' }), 'Blank: the session price'),
+    field('Who', select([['any', 'Ski and snowboard'], ['ski', 'Ski only'], ['snowboard', 'Snowboard only']], g.discipline || 'any', { name: 'discipline' }))),
   async (fd) => {
     const raw = String(fd.get('price') || '').trim();
     const cents = raw ? toCents(raw) : null;
     if (raw && cents === null) throw new Error('The price is an amount like 210.00');
-    const out = await patch(`/programs/groups/${g.id}`, { capacity: num(fd, 'capacity'), price_cents: cents });
+    const out = await patch(`/programs/groups/${g.id}`, { capacity: num(fd, 'capacity'), price_cents: cents, discipline: val(fd, 'discipline') });
     toast(out.promoted ? `Saved. ${out.promoted} moved in off the waitlist` : 'Saved');
     await reload();
   });
 }
 
-function levelDialog(groupId, reload, l) {
-  formDialog(l ? `Rename ${l.name}` : 'Add a class', field('Name', input({ name: 'name', required: true, maxlength: 60, value: l ? l.name : '', placeholder: 'Beginner, Green, Never-ever' })), async (fd) => {
-    if (l) await patch(`/programs/levels/${l.id}`, { name: val(fd, 'name') }); else await post(`/programs/groups/${groupId}/levels`, { name: val(fd, 'name') });
+/** A class: one of the ski school's levels (so report cards carry over), or a name of the school's own choosing. */
+async function levelDialog(groupId, reload, l) {
+  if (l) {
+    formDialog(`Rename ${l.name}`, field('Name', input({ name: 'name', required: true, maxlength: 60, value: l.name })), async (fd) => { await patch(`/programs/levels/${l.id}`, { name: val(fd, 'name') }); await reload(); });
+    return;
+  }
+  let ladder = [];
+  try { ladder = (await get('/skischool/levels')).data || []; } catch (_) { ladder = []; }
+  const opts = [['', 'Not a school level: name it below'], ...ladder.filter((x) => ['ski', 'snowboard'].includes(x.discipline)).map((x) => [x.id, `${label(x.discipline)} ${x.rank_no}: ${x.name}`])];
+  formDialog('Add a class', h('div', { class: 'stack' },
+    ladder.length ? field('School level', select(opts, '', { name: 'school_level_id' }), 'Children are preset from their report card, and their progress carries on') : null,
+    field('Name', input({ name: 'name', maxlength: 60, placeholder: 'Beginner, Green, Never-ever' }), 'Leave blank to use the level\'s name')), async (fd) => {
+    const sl = fd.get('school_level_id') ? Number(fd.get('school_level_id')) : null;
+    const name = String(fd.get('name') || '').trim();
+    if (!sl && !name) throw new Error('Choose a school level or name the class');
+    await post(`/programs/groups/${groupId}/levels`, { ...(name ? { name } : {}), ...(sl ? { school_level_id: sl } : {}) });
     await reload();
   });
+}
+
+/** The child's details for this place: ski or board, gear, allergies, medical notes, who may pick them up. */
+function detailsDialog(x, program, reload, more = {}) {
+  const pick = (x.pickup || []).concat([{}, {}]).slice(0, Math.max(2, (x.pickup || []).length + 1));
+  formDialog(`${x.first_name} ${x.last_name}`, h('div', { class: 'stack' },
+    h('div', { class: 'form' },
+      field('Ski or snowboard', select([['', 'Not said'], ['ski', 'Ski'], ['snowboard', 'Snowboard']], x.discipline || '', { name: 'discipline' })),
+      program.includes_rental ? h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'needs_rental', checked: x.needs_rental }), ' Rental gear') : null,
+      program.offers_helmet ? h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'needs_helmet', checked: x.needs_helmet }), ' Helmet') : null,
+      field('Allergies', input({ name: 'allergies', maxlength: 300, value: x.allergies || '' })),
+      h('div', { class: 'wide' }, field('Medical notes', h('textarea', { name: 'medical', rows: 2, maxlength: 500 }, x.medical || '')))),
+    h('p', { class: 'field-label' }, 'Who may pick up'),
+    ...pick.map((p, i) => h('div', { class: 'form' }, field('Name', input({ name: `pn${i}`, maxlength: 100, value: p.name || '' })), field('Phone', input({ name: `pp${i}`, maxlength: 40, value: p.phone || '' })), field('Relation', input({ name: `pr${i}`, maxlength: 40, value: p.relation || '' }))))),
+  async (fd) => {
+    const pickup = pick.map((_, i) => ({ name: String(fd.get(`pn${i}`) || '').trim(), phone: String(fd.get(`pp${i}`) || '').trim() || undefined, relation: String(fd.get(`pr${i}`) || '').trim() || undefined })).filter((p) => p.name);
+    await patch(`/programs/enrollments/${x.enrollment_id}/details`, {
+      ...(fd.get('discipline') ? { discipline: val(fd, 'discipline') } : {}), allergies: String(fd.get('allergies') || '').trim() || null, medical: String(fd.get('medical') || '').trim() || null, pickup,
+      ...(program.includes_rental ? { needs_rental: Boolean(fd.get('needs_rental')) } : {}), ...(program.offers_helmet ? { needs_helmet: Boolean(fd.get('needs_helmet')) } : {}),
+    });
+    toast('Saved');
+    await reload();
+  }, { wide: true });
+  // Moving day and withdrawing sit with the child's details, so the roster row stays short.
+  const foot = [...document.querySelectorAll('.overlay')].at(-1)?.querySelector('form .footer');
+  if (foot && (more.move || more.withdraw)) {
+    const close = () => [...document.querySelectorAll('.overlay')].at(-1)?.querySelector('header button')?.click();
+    if (more.withdraw) foot.prepend(button('Withdraw', () => { close(); more.withdraw(); }, { small: true, kind: 'danger' }));
+    if (more.move) foot.prepend(button('Move day', () => { close(); more.move(); }, { small: true }));
+  }
 }
 
 function addDate(groupId, reload) {
@@ -476,13 +616,24 @@ async function attendance(meetingId) {
   try { m = await get(`/programs/meetings/${meetingId}`); } catch (err) { toast(err.message, 'error'); return; }
   if (!m.data.length) { toast('No one is enrolled on this day', 'error'); return; }
   const rows = m.data.map((k) => ({ k, cb: h('input', { type: 'checkbox', checked: k.present !== false, 'aria-label': `${k.first_name} ${k.last_name} here` }) }));
+  // Scan or type the code on a child's program ticket to tick them.
+  const scan = input({ placeholder: 'Scan or type a ticket code', 'aria-label': 'Ticket code', autocomplete: 'off' });
+  const said = h('p', { class: 'small', role: 'status' });
+  scan.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const code = scan.value.trim().toUpperCase(); scan.value = '';
+    const hit = rows.find((x) => x.k.ticket_code && x.k.ticket_code.toUpperCase() === code);
+    said.textContent = hit ? `${hit.k.first_name} ${hit.k.last_name}: here` : 'That ticket is not in this group';
+    if (hit) hit.cb.checked = true;
+  });
   const save = button('Save attendance', async () => {
     await put(`/programs/sessions/${meetingId}/attendance`, { marks: rows.map((x) => ({ person_id: x.k.person_id, present: x.cb.checked })) });
     toast('Attendance saved');
     dlg.close();
   }, { kind: 'primary' });
-  const dlg = dialog(`Attendance, ${fmtDate(m.date)}`, [h('p', { class: 'muted' }, 'Untick anyone who is not here.'),
-    h('ul', { class: 'plain attend' }, rows.map((x) => h('li', null, h('label', { class: 'check big' }, x.cb, ` ${x.k.first_name} ${x.k.last_name}`)))), h('div', { class: 'footer row' }, save)]);
+  const dlg = dialog(`Attendance, ${fmtDate(m.date)}`, [h('p', { class: 'muted' }, 'Untick anyone who is not here.'), h('div', { class: 'row' }, scan), said,
+    h('ul', { class: 'plain attend' }, rows.map((x) => h('li', null, h('label', { class: 'check big' }, x.cb, ` ${x.k.first_name} ${x.k.last_name}`), x.k.allergies ? h('span', { class: 'care-flag' }, ` Allergy: ${x.k.allergies}`) : null, x.k.medical ? h('span', { class: 'care-flag', title: x.k.medical }, ' Medical note') : null))), h('div', { class: 'footer row' }, save)]);
 }
 
 // ================================================================ today
