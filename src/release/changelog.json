@@ -15,7 +15,7 @@
           "kind": "new",
           "app": null,
           "who": "platform",
-          "text": "The website shows hello@runmyresort.com for sales and questions and support@runmyresort.com for customers (footer, Contact, Privacy, Terms, Security, and the company details search engines read), and serves /.well-known/security.txt. Replies to Verdynt/OS's own emails go to support@ unless a reply address is set. SITE_HELLO_EMAIL and SITE_SUPPORT_EMAIL change them."
+          "text": "The website shows hello@runmyresort.com for sales and questions and support@runmyresort.com for customers (footer, Contact, Privacy, Terms, Security, and the company details search engines read), and serves /.well-known/security.txt. Contact page requests and replies to Verdynt/OS's own emails go to hello@. SITE_HELLO_EMAIL, SITE_SUPPORT_EMAIL and SITE_CONTACT_EMAIL change them."
         }
       ]
     },
