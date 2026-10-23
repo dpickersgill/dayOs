@@ -21,6 +21,8 @@ const PAGES = {
   '': 'index', product: 'product', 'ski-patrol': 'skipatrol', 'lift-ticket-software': 'lifttickets', 'ski-school-software': 'skischool',
   'ski-rental-software': 'skirental', 'ski-waiver-software': 'skiwaivers', 'lift-maintenance-software': 'liftmaintenance',
   'ski-area-pos': 'skiareapos', 'online-lift-ticket-sales': 'onlinetickets', 'terrain-park-software': 'terrainpark', 'ski-area-staff-scheduling': 'staffscheduling',
+  resources: 'resources', 'chairlift-inspection-checklist': 'guide-chairlift', 'terrain-park-inspection-checklist': 'guide-terrainpark',
+  'ski-area-incident-report-guide': 'guide-incident', 'how-to-choose-ski-area-software': 'guide-choosing', about: 'about',
   pricing: 'pricing', security: 'security', contact: 'contact', privacy: 'privacy', terms: 'terms',
 };
 // The pages written for one search each ("ski school software"), linked from the menu and the footer.
@@ -40,7 +42,7 @@ function template(name) {
 
 // The Verdynt/OS wordmark (public/brand): the light version on snow, the dark one on navy.
 const WORDMARK = (theme, h) => `<img class="wordmark" src="/brand/verdynt-lockup-${theme}.png" alt="Verdynt/OS" width="${Math.round(h * 6.06)}" height="${h}">`;
-const NAV = [['product', 'Product'], ['ski-patrol', 'Ski patrol'], ['pricing', 'Pricing'], ['security', 'Security']];
+const NAV = [['product', 'Product'], ['ski-patrol', 'Ski patrol'], ['pricing', 'Pricing'], ['resources', 'Resources']];
 
 /** The top of every page: logo, Product, Pricing, Security, Try the demo, Sign in, Request a walkthrough; on phones a
  * full-screen menu with every solution page, and a bar at the bottom with the two things people came to do. */
@@ -87,6 +89,8 @@ const FOOTER = `<footer class="sf">
           <li><a href="{{SITE}}/product">Product</a></li>
           <li><a href="{{SITE}}/pricing">Pricing</a></li>
           <li><a href="{{SITE}}/security">Security</a></li>
+          <li><a href="{{SITE}}/resources">Guides and checklists</a></li>
+          <li><a href="{{SITE}}/about">About</a></li>
         </ul>
       </div>
       <div>
@@ -106,7 +110,7 @@ const FOOTER = `<footer class="sf">
         </ul>
       </div>
     </div>
-    <div class="sf-base"><span>&copy; {{YEAR}} Verdynt/OS. All rights reserved. Prices in US dollars.</span><span class="sf-legal"><a href="{{SITE}}/privacy">Privacy</a><a href="{{SITE}}/terms">Terms</a></span></div>
+    <div class="sf-base"><span>&copy; {{YEAR}} Verdynt/OS. All rights reserved. Prices in US dollars.</span><span class="sf-legal">{{SOCIAL}}<a href="{{SITE}}/privacy">Privacy</a><a href="{{SITE}}/terms">Terms</a></span></div>
   </div>
 </footer>`;
 
@@ -160,7 +164,7 @@ async function render(req, name, slug) {
   const app = config.site.appUrl || (site ? '/app' : '');
   let html = template(name);
   const plans = await loadPlans().catch(() => null);
-  const head = SEO.head({ slug: name === 'notfound' ? 'notfound' : slug, origin: canonicalOrigin(req), html, plans, verify: config.site.verify, noindex: isCopy(req), modified: modified(name), asset: ASSET_V });
+  const head = SEO.head({ slug: name === 'notfound' ? 'notfound' : slug, origin: canonicalOrigin(req), html, plans, verify: config.site.verify, sameAs: config.site.sameAs, noindex: isCopy(req), modified: modified(name), asset: ASSET_V });
   html = fillPlans(html, plans).replace(/<!--\/?(PLANS|ADDONS)(:[a-z]+)?-->/g, '');
   html = html.replace('<!--HEAD-->', head)
     .replace('<div class="sx">', name === 'contact' ? '<div class="sx">' : '<div class="sx has-mcta">')
@@ -172,6 +176,7 @@ async function render(req, name, slug) {
     .replaceAll('{{APP}}', app || '/')
     .replaceAll('{{TRY}}', `${config.site.appUrl}/try`)
     .replaceAll('{{ROOT}}', origin)
+    .replaceAll('{{SOCIAL}}', config.site.sameAs.filter((u) => /linkedin\.com/i.test(u)).slice(0, 1).map((u) => `<a href="${escHtml(u)}" rel="me noopener">LinkedIn</a>`).join(''))
     .replaceAll('{{YEAR}}', String(new Date().getUTCFullYear()));
 }
 
@@ -188,8 +193,9 @@ const ASSET_V = require('../../package.json').version;
 
 /** When each page last changed, for the sitemap. */
 const modified = (name) => { try { return fs.statSync(path.join(DIR, `${name}.html`)).mtime.toISOString().slice(0, 10); } catch (_) { return null; } };
-const PRIORITY = { '': '1.0', product: '0.9', 'ski-patrol': '0.9', pricing: '0.9', contact: '0.7', security: '0.6', privacy: '0.2', terms: '0.2' };
+const PRIORITY = { '': '1.0', product: '0.9', 'ski-patrol': '0.9', pricing: '0.9', resources: '0.7', about: '0.6', contact: '0.7', security: '0.6', privacy: '0.2', terms: '0.2' };
 for (const [s] of SOLUTIONS) if (!PRIORITY[s]) PRIORITY[s] = '0.8';
+for (const s of ['chairlift-inspection-checklist', 'terrain-park-inspection-checklist', 'ski-area-incident-report-guide', 'how-to-choose-ski-area-software']) PRIORITY[s] = '0.7';
 
 const pages = express.Router();
 // Never in search results: the app's sign-in, the operator console and the time clock.
@@ -253,9 +259,18 @@ Verdynt/OS runs in a web browser on counter computers, phones and tablets, with 
 - [Online lift ticket sales](${page('online-lift-ticket-sales')}): the online shop, day-first pricing, daily limits and the waitlist
 - [Terrain park software](${page('terrain-park-software')}): park features, the daily map with GPS pins, and inspections
 - [Ski area staff scheduling](${page('ski-area-staff-scheduling')}): shifts, the time clock and certifications
+- [About](${page('about')}): who Verdynt/OS is for and how it works with ski areas
 - [Pricing](${page('pricing')}): plans, add-ons and how paying works
 - [Security](${page('security')}): how guest and patient information is protected
 - [Contact](${page('contact')}): book a walkthrough or start a free trial
+
+## Guides and checklists
+
+- [Resources](${page('resources')}): free guides and printable checklists for ski areas
+- [Chairlift daily inspection checklist](${page('chairlift-inspection-checklist')}): the pre-opening lift check and the daily record
+- [Terrain park daily inspection checklist](${page('terrain-park-inspection-checklist')}): features, landings, signs and the daily park record
+- [How to write a ski area incident report](${page('ski-area-incident-report-guide')}): what to record, what to leave out, and a review checklist
+- [How to choose ski area management software](${page('how-to-choose-ski-area-software')}): when to switch, what to compare, questions for vendors
 
 ## Plans (US dollars, before sales tax)
 
@@ -287,6 +302,8 @@ pages.use((req, res, next) => {
     const q = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
     if (bare.slice(1) in PAGES) return res.redirect(301, bare + q);
   }
+  // One address per page: /Pricing goes to /pricing.
+  if (/[A-Z]/.test(req.path) && req.path.toLowerCase().slice(1) in PAGES) return res.redirect(301, req.originalUrl.replace(req.path, req.path.toLowerCase()));
   const slug = req.path === '/' ? '' : req.path.slice(1);
   if (slug in PAGES) return send(req, res, PAGES[slug], slug).catch(next);
   return next();

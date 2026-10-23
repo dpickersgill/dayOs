@@ -65,7 +65,11 @@ function createApp() {
   app.disable('x-powered-by');
   // The patrol map loads tile images from the configured tile servers, so only those hosts are added to img-src.
   const tileHosts = [...new Set(config.map.layers.map((l) => (l.url.match(/^https:\/\/[^/]+/) || [''])[0].replace('{s}', '*')).filter(Boolean))];
-  app.use(helmet({ contentSecurityPolicy: { directives: { ...helmet.contentSecurityPolicy.getDefaultDirectives(), 'img-src': ["'self'", 'data:', ...tileHosts] } } }));
+  // On the product website's own addresses only, Cloudflare Web Analytics may load its beacon and report visits (no
+  // cookies); the app, the console and the mountains' pages keep the strict policy.
+  const siteOnly = (value) => (req) => (config.site.hosts.includes(String(req.hostname || '').toLowerCase()) ? value : "'self'");
+  app.use(helmet({ contentSecurityPolicy: { directives: { ...helmet.contentSecurityPolicy.getDefaultDirectives(), 'img-src': ["'self'", 'data:', ...tileHosts],
+    'script-src': ["'self'", siteOnly('https://static.cloudflareinsights.com')], 'connect-src': ["'self'", siteOnly('https://cloudflareinsights.com')] } } }));
   // Smaller pages for slow mountain connections and faster loads (search engines rank on it). Event streams are left alone.
   app.use(require('compression')({ filter: (req, res) => !String(res.getHeader('Content-Type') || '').includes('event-stream') && require('compression').filter(req, res) }));
   const origins = (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);

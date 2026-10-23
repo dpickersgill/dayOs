@@ -1,6 +1,31 @@
 {
   "releases": [
     {
+      "version": "2026.10.31",
+      "date": "2026-10-25",
+      "title": "Guides, checklists and search improvements on the website",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "A Resources section on the website with free, printable guides for ski areas: a chairlift daily inspection checklist, a terrain park inspection checklist, how to write an incident report, and how to choose ski area software. Each is marked up as an article for Google."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "An About page, and the LinkedIn company page linked from the footer and in the structured data once SITE_SAME_AS is set."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": "platform",
+          "text": "The home page heading now carries \"Ski area management software\", page addresses in capitals redirect to the lowercase page, and Cloudflare Web Analytics is allowed on the website (not in the app)."
+        }
+      ]
+    },
+    {
       "version": "2026.10.30",
       "date": "2026-10-25",
       "title": "Four new website pages for search",

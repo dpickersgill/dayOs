@@ -82,6 +82,9 @@ module.exports = {
     contactEmail: env.SITE_CONTACT_EMAIL || '',
     // Search Console and Bing Webmaster ownership checks (the code from their "HTML tag" option)
     verify: { google: env.GOOGLE_SITE_VERIFICATION || '', bing: env.BING_SITE_VERIFICATION || '' },
+    // SITE_SAME_AS: the company's own profiles elsewhere (the LinkedIn page), comma-separated. Search engines use them to
+    // tie the profiles to the website; a LinkedIn address is also linked from the footer.
+    sameAs: String(env.SITE_SAME_AS || '').split(',').map((u) => u.trim()).filter((u) => /^https:\/\/[^\s"<>]+$/.test(u)),
   },
   db: {
     // Cloud SQL: DB_SOCKET=/cloudsql/<project>:<region>:<instance> (the socket Cloud Run provides). It replaces host and port.

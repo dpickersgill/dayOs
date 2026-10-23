@@ -243,6 +243,8 @@
     const fold = () => document.querySelectorAll('details.more').forEach((d) => { d.open = !phone.matches; });
     phone.addEventListener('change', fold);
     fold();
+    // Guides: a Print button prints the checklist (the page hides its menus and links when printed).
+    document.querySelectorAll('[data-print]').forEach((b) => b.addEventListener('click', () => window.print()));
   }
 
   // The script is deferred, so the page is already parsed: fold the lists now, before the first paint where possible.

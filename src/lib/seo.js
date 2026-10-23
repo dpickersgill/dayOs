@@ -78,6 +78,46 @@ const META = {
     og: 'Ski area staff scheduling: every shift covered before the first chair',
     crumb: 'Staff scheduling',
   },
+  resources: {
+    title: 'Ski Area Guides and Checklists | Verdynt/OS',
+    description: 'Free, printable guides and checklists for independent ski areas: chairlift and terrain park inspections, incident reports, and choosing ski area software.',
+    og: 'Guides and checklists for running a ski area',
+    crumb: 'Resources',
+  },
+  'chairlift-inspection-checklist': {
+    title: 'Chairlift Daily Inspection Checklist (Printable) | Verdynt/OS',
+    description: 'A printable chairlift pre-opening inspection checklist for ski areas, and how to keep the documented daily record ANSI B77.1 and state inspectors expect.',
+    og: 'Chairlift daily inspection checklist for ski areas',
+    crumb: 'Chairlift inspection checklist', parent: 'resources',
+    article: { published: '2026-10-23', headline: 'Chairlift daily inspection checklist for ski areas' },
+  },
+  'terrain-park-inspection-checklist': {
+    title: 'Terrain Park Daily Inspection Checklist | Verdynt/OS',
+    description: 'A printable terrain park inspection checklist: every jump, rail and landing, the signs and Park SMART messages, and a daily record of what was open.',
+    og: 'Terrain park daily inspection checklist',
+    crumb: 'Terrain park inspection checklist', parent: 'resources',
+    article: { published: '2026-10-23', headline: 'Terrain park daily inspection checklist' },
+  },
+  'ski-area-incident-report-guide': {
+    title: 'How to Write a Ski Area Incident Report | Verdynt/OS',
+    description: 'What a ski patrol incident report should record, what to leave out, and a printable checklist for reviewing every report before it is filed.',
+    og: 'How to write a ski area incident report',
+    crumb: 'Incident report guide', parent: 'resources',
+    article: { published: '2026-10-23', headline: 'How to write a ski area incident report' },
+  },
+  'how-to-choose-ski-area-software': {
+    title: 'How to Choose Ski Area Management Software | Verdynt/OS',
+    description: 'A buyer\'s guide for independent ski areas: when to switch, what to compare, and twelve questions to ask every ski area software vendor before you sign.',
+    og: 'How to choose ski area management software',
+    crumb: 'Choosing ski area software', parent: 'resources',
+    article: { published: '2026-10-23', headline: 'How to choose ski area management software' },
+  },
+  about: {
+    title: 'About Verdynt/OS: Software for Independent Ski Areas',
+    description: 'Verdynt/OS is operations software built for independent ski areas: family-owned hills, community areas and nonprofit mountains. What we believe and how we work.',
+    og: 'Software for the ski areas the big systems forgot',
+    crumb: 'About',
+  },
   pricing: {
     title: 'Pricing: Ski Area Software from {{FROM}}/month | Verdynt/OS',
     description: 'Plans for independent ski areas and ski patrols, plus add-ons, monthly or less yearly. Pay by card, bank or invoice. No contract, and 14 days free.',
@@ -123,7 +163,7 @@ const SOFTWARE_PAGES = ['', 'pricing', 'product', 'ski-patrol', 'lift-ticket-sof
 const FEATURES = ['Lift and trail status and inspections', 'Grooming and snowmaking logs', 'Ticket and season pass sales', 'RFID gate scanning', 'Online ticket shop',
   'Online waivers', 'Ski and snowboard rentals', 'Ski school and lesson booking', 'Ski patrol patient care reports and dispatch', 'Staff scheduling and time clock', 'Fleet and equipment maintenance'];
 
-function head({ slug, origin, html, plans, verify = {}, noindex = false, modified = null, asset = '' }) {
+function head({ slug, origin, html, plans, verify = {}, sameAs = [], noindex = false, modified = null, asset = '' }) {
   const key = slug in META ? slug : 'notfound';
   const m = META[key];
   const from = plans && plans.plans.length ? dollars(Math.min(...plans.plans.map((p) => p.monthly_cents).filter(Boolean))) : '$199';
@@ -135,7 +175,7 @@ function head({ slug, origin, html, plans, verify = {}, noindex = false, modifie
 
   const graph = [
     { '@type': 'Organization', '@id': `${origin}/#org`, name: 'Verdynt/OS', url: `${origin}/`, logo: `${origin.replace(/\/site$/, '')}/icons/icon-512.png`,
-      description: 'Operations software for independent ski areas.', contactPoint: { '@type': 'ContactPoint', contactType: 'sales', url: `${origin}/contact`, availableLanguage: ['English'] } },
+      description: 'Operations software for independent ski areas.', ...(sameAs.length ? { sameAs } : {}), contactPoint: { '@type': 'ContactPoint', contactType: 'sales', url: `${origin}/contact`, availableLanguage: ['English'] } },
     { '@type': 'WebSite', '@id': `${origin}/#site`, name: 'Verdynt/OS', url: `${origin}/`, publisher: { '@id': `${origin}/#org` }, inLanguage: 'en-US' },
     { '@type': 'WebPage', '@id': `${url}#page`, url, name: title, description, isPartOf: { '@id': `${origin}/#site` }, inLanguage: 'en-US',
       primaryImageOfPage: { '@type': 'ImageObject', url: image, width: 1200, height: 630 }, ...(modified ? { dateModified: modified } : {}) },
@@ -151,7 +191,17 @@ function head({ slug, origin, html, plans, verify = {}, noindex = false, modifie
           priceSpecification: { '@type': 'UnitPriceSpecification', price: (p.monthly_cents / 100).toFixed(2), priceCurrency: 'USD', unitText: 'MONTH', billingDuration: 'P1M' } })) },
     });
   }
-  if (key !== '' && m.crumb) graph.push({ '@type': 'BreadcrumbList', itemListElement: [{ '@type': 'ListItem', position: 1, name: 'Home', item: `${origin}/` }, { '@type': 'ListItem', position: 2, name: m.crumb, item: url }] });
+  if (key !== '' && m.crumb) {
+    // Home, then the section (Resources) for a guide, then the page itself.
+    const trail = [{ name: 'Home', item: `${origin}/` }, ...(m.parent && META[m.parent] ? [{ name: META[m.parent].crumb, item: `${origin}/${m.parent}` }] : []), { name: m.crumb, item: url }];
+    graph.push({ '@type': 'BreadcrumbList', itemListElement: trail.map((t, i) => ({ '@type': 'ListItem', position: i + 1, ...t })) });
+  }
+  // Guides are articles: who published them and when, so search engines can show them as such.
+  if (m.article) {
+    graph.push({ '@type': 'Article', '@id': `${url}#article`, headline: m.article.headline, description, url, mainEntityOfPage: { '@id': `${url}#page` }, image,
+      datePublished: m.article.published, dateModified: modified && modified > m.article.published ? modified : m.article.published,
+      author: { '@id': `${origin}/#org` }, publisher: { '@id': `${origin}/#org` }, inLanguage: 'en-US', isAccessibleForFree: true });
+  }
   const faqs = faqsOf(html || '');
   if (faqs.length) graph.push({ '@type': 'FAQPage', '@id': `${url}#faq`, mainEntity: faqs.map((f) => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } })) });
 
@@ -162,7 +212,7 @@ function head({ slug, origin, html, plans, verify = {}, noindex = false, modifie
     `<meta name="description" content="${esc(description)}">`,
     `<meta name="robots" content="${robots}">`,
     key === 'notfound' ? null : `<link rel="canonical" href="${esc(url)}">`,
-    '<meta property="og:type" content="website">',
+    `<meta property="og:type" content="${m.article ? 'article' : 'website'}">`,
     '<meta property="og:site_name" content="Verdynt/OS">',
     '<meta property="og:locale" content="en_US">',
     `<meta property="og:title" content="${esc(fill(m.og || title))}">`,

@@ -16,6 +16,7 @@ process.env.GOOGLE_SITE_VERIFICATION = 'g-verify-123';
 process.env.SITE_CONTACT_EMAIL = 'sales@site.test';
 process.env.POSTMARK_SERVER_TOKEN = 'pm-test';
 process.env.MAIL_FROM = 'hello@site.test';
+process.env.SITE_SAME_AS = 'https://www.linkedin.com/company/verdynt-test, not a url';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -73,6 +74,7 @@ test('on the website address, the pages are at the top, with robots, a sitemap a
   const home = await onHost('/');
   assert.equal(home.status, 200);
   assert.ok(home.text.includes('Open the mountain from one screen.'));
+  assert.match(home.text, /<h1[^>]*><span class="kicker">Ski area management software<\/span>/, 'the head search term is in the main heading');
   assert.ok(home.text.includes('href="/pricing"') && home.text.includes('href="/app"') && home.text.includes('href="/try"'));
   assert.ok(home.text.includes('rel="canonical" href="https://www.site.test/"'));
   assert.ok(home.text.includes('<meta name="robots" content="index, follow'));
@@ -212,4 +214,42 @@ test('the Contact form keeps the request for Leads and emails it, and bots and b
   assert.equal((await api('PATCH', `/platform/leads/${lead.id}`, { status: 'contacted', operator_note: 'Called Tuesday' }, KEY)).status, 200);
   const after = (await api('GET', '/platform/leads?status=contacted', null, KEY)).body.data.find((l) => l.id === lead.id);
   assert.equal(after.operator_note, 'Called Tuesday');
+});
+
+test('the guides are articles in a Resources section, with three-level breadcrumbs, and the company profile is linked', async () => {
+  const guides = ['chairlift-inspection-checklist', 'terrain-park-inspection-checklist', 'ski-area-incident-report-guide', 'how-to-choose-ski-area-software'];
+  const hub = await onHost('/resources');
+  assert.equal(hub.status, 200);
+  const map = await onHost('/sitemap.xml');
+  for (const g of guides) {
+    assert.ok(hub.text.includes(`href="/${g}"`), `${g} is on the Resources page`);
+    assert.ok(map.text.includes(`<loc>https://www.site.test/${g}</loc>`), `${g} is in the sitemap`);
+    const page = await onHost(`/${g}`);
+    assert.equal(page.status, 200, g);
+    const graph = JSON.parse(page.text.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1])['@graph'];
+    const art = graph.find((x) => x['@type'] === 'Article');
+    assert.ok(art && art.headline && art.datePublished && art.author['@id'].endsWith('#org'), `${g} is an article`);
+    const crumbs = graph.find((x) => x['@type'] === 'BreadcrumbList').itemListElement.map((i) => i.name);
+    assert.deepEqual(crumbs.slice(0, 2), ['Home', 'Resources']);
+    assert.equal(crumbs.length, 3);
+    assert.ok(page.text.includes('<meta property="og:type" content="article">'));
+    assert.ok(page.text.includes('data-print'), `${g} can be printed`);
+  }
+  const home = await onHost('/');
+  assert.ok(home.text.includes('href="/resources"') && home.text.includes('href="/about"'), 'Resources and About are linked from every page');
+  assert.equal((await onHost('/about')).status, 200);
+  // The company's LinkedIn page: in the structured data and the footer; anything that is not an https address is ignored.
+  const org = JSON.parse(home.text.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1])['@graph'].find((x) => x['@type'] === 'Organization');
+  assert.deepEqual(org.sameAs, ['https://www.linkedin.com/company/verdynt-test']);
+  assert.ok(home.text.includes('href="https://www.linkedin.com/company/verdynt-test" rel="me noopener">LinkedIn</a>'));
+  // One address per page
+  const upper = await onHost('/Resources');
+  assert.equal(upper.status, 301);
+  assert.equal(upper.location, '/resources');
+  assert.ok((await onHost('/llms.txt')).text.includes('https://www.site.test/chairlift-inspection-checklist'));
+  // Cloudflare Web Analytics may run on the website, never in the app
+  const csp = await new Promise((resolve) => http.get({ hostname: new URL(base).hostname, port: new URL(base).port, path: '/', headers: { host: 'www.site.test' } }, (r) => { r.resume(); resolve(r.headers['content-security-policy']); }));
+  assert.match(csp, /script-src 'self' https:\/\/static\.cloudflareinsights\.com/);
+  const appCsp = (await fetch(`${base}/app`)).headers.get('content-security-policy');
+  assert.ok(!appCsp.includes('cloudflareinsights'), 'not on the app');
 });
