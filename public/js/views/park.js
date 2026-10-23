@@ -122,11 +122,11 @@ async function drawLayout(box, list) {
   function drawLists() {
     const mark = (p) => h('li', null, h('button', { type: 'button', class: 'park-row', onclick: () => { const m = markers.get(p.feature_id); if (m) { map.setView(m.getLatLng(), Math.max(map.getZoom(), 18)); m.openPopup(); } } },
       h('b', null, p.name), ' ', statusChip(p.feature_status), p.inspected_result ? h('span', { class: 'muted small' }, ` ${RESULT[p.inspected_result]}`) : date === cfg.today ? h('span', { class: 'muted small' }, ' not inspected') : null));
-    clear(onMap).append(data.placed.length ? h('ul', null, data.placed.map(mark)) : h('p', { class: 'muted small' }, 'Nothing is on the map for this day yet.'),
-      data.placed.length && canEdit && data.editable ? h('p', { class: 'muted small' }, 'Drag a pin to fine-tune where it is.') : null);
+    appendAll(clear(onMap), data.placed.length ? h('ul', null, data.placed.map(mark)) : h('p', { class: 'muted small' }, 'Nothing is on the map for this day yet.'),
+      data.placed.length > 0 && canEdit && data.editable ? h('p', { class: 'muted small' }, 'Drag a pin to fine-tune where it is.') : null);
     const todo = (f) => h('li', null, h('span', { class: 'park-row' }, h('b', null, f.name), ' ', statusChip(f.status), h('span', { class: 'muted small' }, ` ${kindInfo(list, f.kind).label}`),
       canEdit && data.editable ? button('Place', () => startPlacing(f), { small: true }) : null));
-    clear(waiting).append(data.unplaced.length && canEdit && data.editable && navigator.geolocation && !walking
+    appendAll(clear(waiting), data.unplaced.length > 0 && canEdit && data.editable && navigator.geolocation && !walking
       ? h('div', { class: 'row' }, button('Walk the park', startWalk, { kind: 'primary', small: true }), h('span', { class: 'muted small' }, 'Go feature to feature and drop each pin where you stand.')) : null,
     data.unplaced.length ? h('ul', null, data.unplaced.map(todo)) : h('p', { class: 'muted small' }, 'Every feature is on the map.'));
     const missing = date === cfg.today ? data.placed.filter((p) => !p.inspected_result).length : 0;

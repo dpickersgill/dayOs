@@ -749,6 +749,7 @@ function assistantPanel(t, done) {
   }, { small: true });
   return h('div', { class: 'stack tight' },
     h('p', null, `This month: ${a.questions} questions (${a.guest_questions} from guests), ${dollars(a.cost_micros)} of the $${(a.cap_cents / 100).toFixed(0)} cap. ${a.unanswered} not answered, ${a.unhelpful} marked unhelpful, ${a.escalated} passed on.`),
+    a.last_error ? h('p', { class: 'error-box' }, `Last error from Anthropic (any mountain), ${a.last_error.at.replace('T', ' ').slice(0, 16)} UTC: ${a.last_error.reason || a.last_error.said || a.last_error.status}`) : null,
     h('p', { class: 'hint' }, `Staff ${a.staff_on ? 'on' : 'off'}. Guest pages: ${a.guest_pages.length ? a.guest_pages.join(', ') : 'none'}.`),
     a.recent.length ? h('ul', { class: 'small' }, a.recent.map((r) => h('li', null, `${String(r.created_at).replace('T', ' ').slice(0, 16)} ${r.audience}${r.page ? ` on ${r.page}` : ''}: ${r.question}${r.unanswered ? ' (not answered)' : ''}${r.rating === -1 ? ' (did not help)' : ''}${r.escalated_at ? ' (passed on)' : ''}`))) : null,
     h('div', { class: 'row' }, capBtn));

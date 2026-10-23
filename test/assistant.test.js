@@ -49,7 +49,9 @@ test.before(async () => {
       if (req.url === '/email') { mail.push(body); return res.end(JSON.stringify({ ErrorCode: 0, MessageID: `m${mail.length}` })); }
       calls.push({ headers: req.headers, body });
       const next = replies.length ? replies.shift() : text('Fine.');
-      return res.end(JSON.stringify(typeof next === 'function' ? next(body) : next));
+      const out = typeof next === 'function' ? next(body) : next;
+      if (out.__status) { res.statusCode = out.__status; delete out.__status; }
+      return res.end(JSON.stringify(out));
     });
   });
   await new Promise((r) => { fake.listen(0, r); });
@@ -218,4 +220,17 @@ test('managers can turn it off for staff', async () => {
   is(await api('POST', '/assistant/ask', { token: T.counter, body: { question: 'How do I sell?' } }), 403);
   is(await api('PUT', '/assistant/settings', { token: T.counter, body: { staff_on: true, guest_pages: [] } }), 403);
   ok(await api('PUT', '/assistant/settings', { token: T.owner, body: { staff_on: true, guest_pages: [] } }));
+});
+
+test('an Anthropic error tells staff only that it is unavailable; the reason goes to the console', async () => {
+  replies = [{ __status: 400, type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API.' } }];
+  const r = await api('POST', '/assistant/ask', { token: T.counter, body: { question: 'How do I sell a ticket?' } });
+  is(r, 502);
+  assert.match(JSON.stringify(r.body), /Help still has every article/);
+  assert.doesNotMatch(JSON.stringify(r.body), /credit/);
+  const { lastFailure } = require('../src/lib/assistant');
+  assert.match(lastFailure().reason, /out of credit/);
+  replies = [{ __status: 404, type: 'error', error: { type: 'not_found_error', message: 'model: claude-nope' } }];
+  is(await api('POST', '/assistant/ask', { token: T.counter, body: { question: 'How do I sell a ticket?' } }), 502);
+  assert.match(lastFailure().reason, /does not know the model/);
 });

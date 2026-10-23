@@ -453,7 +453,7 @@ async function assistantUse(id) {
   const m = await one(pool, `SELECT COUNT(*) AS n, COALESCE(SUM(cost_micros), 0) AS c, SUM(audience = 'guest') AS guests, SUM(unanswered) AS unanswered, SUM(rating = -1) AS unhelpful, SUM(escalated_at IS NOT NULL) AS escalated
     FROM assistant_log WHERE tenant_id = ? AND created_at >= DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-01')`, [id]);
   const recent = await rows(pool, "SELECT id, audience, page, question, unanswered, rating, escalated_at, created_at FROM assistant_log WHERE tenant_id = ? AND (unanswered = 1 OR rating = -1 OR escalated_at IS NOT NULL) ORDER BY id DESC LIMIT 10", [id]);
-  return { staff_on: s.staff_on, guest_pages: s.guest_pages, cap_cents: s.monthly_cap_cents, questions: Number(m.n), guest_questions: Number(m.guests || 0), cost_micros: Number(m.c), unanswered: Number(m.unanswered || 0), unhelpful: Number(m.unhelpful || 0), escalated: Number(m.escalated || 0), recent };
+  return { staff_on: s.staff_on, guest_pages: s.guest_pages, cap_cents: s.monthly_cap_cents, questions: Number(m.n), guest_questions: Number(m.guests || 0), last_error: A.lastFailure(), cost_micros: Number(m.c), unanswered: Number(m.unanswered || 0), unhelpful: Number(m.unhelpful || 0), escalated: Number(m.escalated || 0), recent };
 }
 
 /** The assistant's monthly spending cap for one mountain, in cents (default $50). */

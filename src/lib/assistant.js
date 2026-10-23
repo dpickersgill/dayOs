@@ -144,8 +144,30 @@ async function callModel({ model, system, messages, tools: toolDefs }) {
   try {
     res = await fetch(`${c.apiBase}/v1/messages`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': c.key, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(body), signal: AbortSignal.timeout(45000) });
   } catch (_) { throw new AppError(502, 'The assistant could not be reached. Try again in a moment.'); }
-  if (!res.ok) throw new AppError(502, `The assistant is not available right now (${res.status}).`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const said = String((err.error && err.error.message) || '').slice(0, 300);
+    require('./jobs').logFailure({ job: 'assistant', status: res.status, model, message: said || `HTTP ${res.status}` });
+    const e = new AppError(502, `The assistant is not available right now (${res.status}).`);
+    e.reason = reasonFor(res.status, said, model);
+    lastError = { at: new Date().toISOString(), status: res.status, model, reason: e.reason, said };
+    throw e;
+  }
   return res.json();
+}
+
+/** The last error from Anthropic, for the operator's console. Mountains only see that the assistant is unavailable. */
+let lastError = null;
+const lastFailure = () => lastError;
+
+/** What the operator can do about an error from Anthropic, in plain words. */
+function reasonFor(status, said, model) {
+  if (/credit balance/i.test(said)) return 'The assistant\'s Anthropic account is out of credit. Add credit under Billing in the Anthropic Console.';
+  if (status === 401 || /api.key|x-api-key|authentication/i.test(said)) return 'The assistant\'s Anthropic key was not accepted. Set it again with scripts/assistant-key.sh.';
+  if (status === 403) return 'The assistant\'s Anthropic key is not allowed to do this. Check the key\'s workspace and limits in the Anthropic Console.';
+  if (status === 404 || /model/i.test(said)) return `Anthropic does not know the model "${model}". Set ASSISTANT_MODEL to a current model name.`;
+  if (status === 429 || status === 529 || status >= 500) return 'Anthropic is busy right now. Try again in a minute.';
+  return said ? `Anthropic said: ${said}` : null;
 }
 
 const RULES = (staff) => `Rules:
@@ -210,7 +232,10 @@ async function ask(who, question, { history = [], extra = '' } = {}) {
   let inT = 0; let outT = 0; const used = [];
   let reply;
   for (let round = 0; round < 4; round += 1) {
-    reply = await callModel({ model, system, messages, tools: toolDefs });
+    try { reply = await callModel({ model, system, messages, tools: toolDefs }); } catch (e) {
+      if (e.reason) e.message = isStaff ? 'The assistant is not available right now. Verdynt/OS has been told, and Help still has every article.' : 'Sorry, questions are not available right now. Please call the mountain.';
+      throw e;
+    }
     inT += Number((reply.usage || {}).input_tokens || 0); outT += Number((reply.usage || {}).output_tokens || 0);
     const calls = (reply.content || []).filter((b) => b.type === 'tool_use');
     if (!calls.length || reply.stop_reason !== 'tool_use') break;
@@ -244,4 +269,4 @@ async function draftReply(row, mountain) {
   } catch (_) { return null; }
 }
 
-module.exports = { ask, findArticles, facts, settingsOf, spentThisMonth, costMicros, shape, GUEST_PAGES, help, draftReply, SETTING_DEFAULTS };
+module.exports = { lastFailure, ask, findArticles, facts, settingsOf, spentThisMonth, costMicros, shape, GUEST_PAGES, help, draftReply, SETTING_DEFAULTS };

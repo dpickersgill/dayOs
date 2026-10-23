@@ -1,6 +1,31 @@
 {
   "releases": [
     {
+      "version": "2026.10.38",
+      "date": "2026-11-08",
+      "title": "Fixes: the park map list, clearer assistant errors",
+      "notes": [
+        {
+          "kind": "fixed",
+          "app": "park",
+          "who": null,
+          "text": "The daily park map no longer shows the word \"null\" under \"Nothing is on the map for this day yet\"."
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": null,
+          "text": "When the assistant cannot answer because of a problem on our side, it now says so plainly and points you to Help."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "Console: the Assistant section shows the last error from Anthropic in plain words (out of credit, key not accepted, unknown model, busy), and every error is logged as job \"assistant\"."
+        }
+      ]
+    },
+    {
       "version": "2026.10.37",
       "date": "2026-11-08",
       "title": "The assistant: ask how to do anything, and Assistant Plus",
