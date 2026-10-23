@@ -16,6 +16,7 @@ const { z, dateStr, dateTimeStr, tierEnum, validate, newCode, addDays, todayIn, 
 const { unitPrice, applyPromo } = require('../lib/pricing');
 const { notFound, conflict, bad, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
+const PS = require('../lib/programsessions');
 const { personFields, resolvePerson, ensureRequired } = require('../lib/customers');
 const { loadRules, applyTax, split } = require('../lib/tax');
 const { addLink, isMinor } = require('../lib/family');
@@ -47,7 +48,12 @@ const lineSchema = z.discriminatedUnion('type', [
     type: z.literal('rental'), product_id: z.number().int().positive(), tier: tierEnum.default('adult'), valid_on: dateStr.optional(), due_at: dateTimeStr.optional(), participant: who,
     items: z.array(R.gearLine).max(60).optional(),
   }),
-  z.object({ type: z.literal('program'), program_id: z.number().int().positive(), participant: who }),
+  z.object({
+    type: z.literal('program'), program_id: z.number().int().positive(), participant: who,
+    // A program run in sessions: one day of one session, or a bundle with a day for each of its sessions.
+    term_id: z.number().int().positive().optional(), group_id: z.number().int().positive().optional(),
+    bundle_id: z.number().int().positive().optional(), groups: z.array(z.object({ term_id: z.number().int().positive(), group_id: z.number().int().positive() })).max(8).optional(),
+  }),
   z.object({ type: z.literal('gift_card'), amount_cents: z.number().int().min(GIFT_MIN).max(GIFT_MAX), recipient_name: z.string().max(150).optional(), message: z.string().max(300).optional() }),
 ]);
 
@@ -79,6 +85,23 @@ const checkoutSchema = z.object({
   quick: z.boolean().optional(),
 });
 const QUICK_KINDS = ['day_ticket', 'multi_day', 'punch_card', 'voucher'];
+
+/** For the Sell menu: each program's sessions still running (not closed or archived), with each day's places and price now. */
+async function withSessions(tenantId, programs, today) {
+  if (!programs.length) return programs;
+  const terms = await rows(pool, "SELECT id, program_id FROM program_terms WHERE tenant_id = ? AND program_id IN (?) AND status IN ('draft','open') ORDER BY starts_on", [tenantId, programs.map((p) => p.id)]);
+  const bundles = await rows(pool, 'SELECT id, program_id, name, price_cents, term_ids FROM program_bundles WHERE tenant_id = ? AND program_id IN (?) AND active = 1', [tenantId, programs.map((p) => p.id)]);
+  for (const p of programs) {
+    p.terms = [];
+    for (const t of terms.filter((x) => x.program_id === p.id)) {
+      const d = await PS.termDetail(pool, tenantId, t.id, today);
+      p.terms.push({ id: d.id, name: d.name, starts_on: d.starts_on, status: d.status, groups: d.groups.map((g) => ({ id: g.id, day: g.day, left: g.left, price_cents: g.price_now.cents, waiting: g.waiting })) });
+    }
+    const ids = new Set(p.terms.map((t) => t.id));
+    p.bundles = bundles.filter((b) => b.program_id === p.id).map((b) => ({ id: b.id, name: b.name, price_cents: b.price_cents, term_ids: PS.parseJson(b.term_ids, []).map(Number) })).filter((b) => b.term_ids.every((x) => ids.has(x)));
+  }
+  return programs;
+}
 
 // ---------------------------------------------------------------- pricing and availability
 async function spotsLeft(conn, tenantId, sessionId, capacity) {
@@ -120,9 +143,13 @@ async function priceLines(conn, tenantId, lines, today) {
       const { product, cents } = await unitPrice(conn, tenantId, ln.product_id, ln.tier, validOn);
       if (product.kind !== 'rental') throw bad(`${product.name} is not a rental package`);
       out.push({ i, line: ln, type: 'rental', name: product.name, detail: `${ln.tier}, ${validOn}${product.valid_days > 1 ? ` for ${product.valid_days} days` : ''}`, quantity: 1, unit: cents, product, validOn });
+    } else if (ln.type === 'program' && (ln.term_id || ln.bundle_id)) {
+      const reg = await PS.priceRegistration(conn, tenantId, ln, today);
+      out.push({ i, line: ln, type: 'program', name: reg.name, detail: reg.detail, quantity: 1, unit: reg.list_cents, program: reg.program, reg: { ...reg, child: ln.participant || 'customer' } });
     } else if (ln.type === 'program') {
       const program = await one(conn, 'SELECT * FROM programs WHERE tenant_id = ? AND id = ?', [tenantId, ln.program_id]);
       if (!program) throw notFound('Program');
+      if (await one(conn, 'SELECT id FROM program_terms WHERE tenant_id = ? AND program_id = ? LIMIT 1', [tenantId, program.id])) throw bad(`Choose the session and day for ${program.name}`);
       if (program.ends_on && program.ends_on < today) throw conflict(`${program.name} has ended`);
       if (program.capacity !== null) {
         const { n } = await one(conn, "SELECT COUNT(*) AS n FROM program_enrollments WHERE tenant_id = ? AND program_id = ? AND status = 'enrolled'", [tenantId, program.id]);
@@ -131,6 +158,15 @@ async function priceLines(conn, tenantId, lines, today) {
       out.push({ i, line: ln, type: 'program', name: program.name, detail: program.season, quantity: 1, unit: program.price_cents, program });
     } else {
       out.push({ i, line: ln, type: 'gift_card', name: 'Gift card', detail: ln.recipient_name ? `for ${ln.recipient_name}` : '', quantity: 1, unit: ln.amount_cents });
+    }
+  }
+  // Sibling discounts on programs run in sessions: the second and later child in the same program pay less.
+  const regs = out.filter((p) => p.reg).map((p) => p.reg);
+  if (regs.length) {
+    PS.applySiblings(regs);
+    for (const p of out.filter((x) => x.reg)) {
+      p.unit = p.reg.unit_cents;
+      if (p.reg.sibling_cents) p.detail = `${p.detail}, sibling discount ${(p.reg.sibling_cents / 100).toFixed(2)}`;
     }
   }
   return out;
@@ -187,7 +223,7 @@ checkout.get('/menu', requireRole(...sellers), async (req, res) => {
     rentals: products.filter((p) => p.kind === 'rental').map(withTiers),
     packages: products.filter((p) => p.kind === 'lesson' && p.uses > 1).map(withTiers),
     lessons: sessions.map((s) => ({ ...s, spots_left: Math.max(s.capacity - Number(s.booked), 0) })),
-    programs: programs.map((p) => ({ ...p, spots_left: p.capacity === null ? null : Math.max(p.capacity - Number(p.enrolled), 0) })),
+    programs: await withSessions(tenantId, programs.map((p) => ({ ...p, spots_left: p.capacity === null ? null : Math.max(p.capacity - Number(p.enrolled), 0) })), today),
     stock: Object.fromEntries(stock.map((s) => [s.category, Number(s.available)])),
     gift_card: { min_cents: GIFT_MIN, max_cents: GIFT_MAX },
     waiver_text: tenant.waiver_text || null,
@@ -403,6 +439,18 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
         await item({ product_id: p.product.id, person_id: renter, contract_id: c.insertId, valid_on: p.validOn });
         await audit(conn, req, 'checkout', 'rental_contracts', c.insertId, { items: ids, order_id: orderId });
         done.rentals.push({ contract_id: c.insertId, person_id: renter, due_at: dueAt, items: locked.map((l) => l.sku) });
+      } else if (p.type === 'program' && p.reg) {
+        const participant = personOf(ln);
+        const guardian = buyer.id && buyer.id !== participant ? buyer.id : null;
+        // One order line for the registration; one place per session. Each place carries its share of the price paid.
+        const itemId = await item({ person_id: participant, program_id: p.program.id });
+        const paidShare = split(p.unit - (p.discount || 0) + (p.tax || 0), p.reg.parts.length);
+        for (const [k, x] of p.reg.parts.entries()) {
+          const e = await PS.enroll(conn, tenantId, { program: p.program, term: x.term, group: x.group, personId: participant, guardianId: guardian, priceCents: x.list_cents, discountCents: x.discount_cents || 0, paidCents: paidShare[k], bundleId: p.reg.bundle ? p.reg.bundle.id : null, orderId, mustFit: true });
+          const ticket = await PS.issueTicket(conn, tenantId, { program: p.program, group: x.group, personId: participant, orderId, enrollmentId: e.id });
+          await audit(conn, req, 'enroll', 'programs', p.program.id, { person_id: participant, term_id: x.term.id, group_id: x.group.id, order_id: orderId, order_item: itemId });
+          done.programs.push({ enrollment_id: e.id, program_id: p.program.id, person_id: participant, name: `${p.program.name}: ${x.term.name}, ${PS.WEEKDAYS[x.group.weekday]}s`, ticket: ticket ? ticket.code : null });
+        }
       } else if (p.type === 'program') {
         const participant = personOf(ln);
         const pg = await one(conn, 'SELECT * FROM programs WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, p.program.id]);

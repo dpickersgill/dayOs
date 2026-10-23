@@ -2644,3 +2644,34 @@ test('kiosk page: loads without a login and asks for a pairing code', skip(), as
   assert.equal((await fetch(`${base}/vendor/jsqr/jsQR.js`)).status, 200, 'the QR reader is served');
   assert.equal((await fetch(`${base}/kiosk/ABCD-EFGH`)).status, 200);
 });
+
+test('programs: a session shows a card per weekday with its dates; the day page sorts children into classes and cancels a date', skip(), async () => {
+  const o = T.owner;
+  await closeOverlays();
+  let monday = today; while (new Date(`${monday}T12:00:00Z`).getUTCDay() !== 1 || monday <= today) { const d = new Date(`${monday}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); monday = d.toISOString().slice(0, 10); }
+  const pid = ok(await api('POST', '/programs', { token: o, body: { name: 'After-School Ski', kind: 'school_program', season: '2026-27', price_cents: 0, online: true } })).id;
+  const term = ok(await api('POST', `/programs/${pid}/terms`, { token: o, body: { name: 'Session 1', starts_on: monday, weeks: 4, makeup_weeks: 1, start_time: '15:45', end_time: '17:45', price_cents: 20000, status: 'open', days: [{ weekday: 1, capacity: 8 }, { weekday: 3, capacity: 8 }] } }));
+  ok(await api('POST', `/programs/terms/${term.id}/enroll`, { token: o, body: { person_id: D.ann, group_id: term.groups[0].id } }));
+  let root = await renderView('programs', 'owner', o, {}, [String(pid)]);
+  const cards = [...root.querySelectorAll('.pday')];
+  assert.deepEqual(cards.map((c) => c.querySelector('.pday-name').textContent), ['Mondays', 'Wednesdays']);
+  assert.equal(cards[0].querySelectorAll('.pdate').length, 5, 'four lessons and the makeup date');
+  assert.equal(cards[0].querySelectorAll('.pdate.is-reserve').length, 1);
+  assert.match(cards[0].textContent, /1 of 8/);
+  assert.ok(root.textContent.includes(`/programs/`), 'the online link is shown');
+
+  root = await renderView('programs', 'owner', o, {}, [String(pid), 'day', String(term.groups[0].id)]);
+  assert.match(root.querySelector('h1').textContent, /Mondays, Session 1/);
+  clickBtn(root, 'Add a class'); await settle();
+  let dlg = topDialog(); dlg.querySelector('[name=name]').value = 'Green'; dlg.querySelector('form').dispatchEvent(new window.Event('submit', { cancelable: true })); await settle(); await settle();
+  assert.ok([...root.querySelectorAll('h3')].some((x) => /Green \(0\)/.test(x.textContent)), 'the class is on the page');
+  const pick = root.querySelector('select[aria-label^="Class for"]');
+  pick.value = pick.querySelector('option:not([value=""])').value; pick.dispatchEvent(new window.Event('change')); await settle(); await settle();
+  assert.ok([...root.querySelectorAll('h3')].some((x) => /Green \(1\)/.test(x.textContent)), 'placed in Green');
+  root.querySelector('button.pdate').click(); await settle();
+  dlg = topDialog(); clickBtn(dlg, 'Cancel this date'); await settle();
+  dlg = topDialog(); dlg.querySelector('[name=reason]').value = 'Ice storm'; dlg.querySelector('[name=notify]').checked = false;
+  dlg.querySelector('form').dispatchEvent(new window.Event('submit', { cancelable: true })); await settle(); await settle();
+  assert.ok(root.querySelector('.pdate.is-off'), 'the date is struck through');
+  assert.equal(root.querySelectorAll('.pdate.is-reserve').length, 0, 'the makeup date is now a lesson');
+});

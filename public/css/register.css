@@ -1,0 +1,32 @@
+/* Program registration (/programs/<mountain>): sessions, a card per weekday with its dates, then each child. */
+.reg-sessions { display: flex; flex-wrap: wrap; gap: 8px; }
+.reg-days { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.reg-day { text-align: left; display: grid; gap: 8px; padding: 14px; border: 1.5px solid var(--line-strong); border-radius: var(--r); background: #fff; color: var(--ink); font: inherit; cursor: pointer; min-height: 44px; }
+.reg-day:hover { border-color: var(--blue); }
+.reg-day[aria-pressed='true'] { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue); }
+.reg-day .d { font-size: 1.25rem; font-weight: 700; }
+.reg-day .t { color: var(--muted); }
+.reg-day .dates { display: flex; flex-wrap: wrap; gap: 4px; }
+.reg-day .dates span { font-size: 0.8125rem; font-weight: 700; border: 1px solid var(--line-strong); border-radius: 6px; padding: 2px 6px; font-variant-numeric: tabular-nums; }
+.reg-day .dates span.mk { border-style: dashed; color: var(--muted); font-weight: 400; }
+.reg-day .p { font-weight: 700; }
+.reg-day .left { font-size: 0.875rem; color: var(--muted); }
+.reg-day.full .left { color: #8a3b00; font-weight: 700; }
+.reg-kid { border-top: 1px solid var(--line); padding-top: 14px; display: grid; gap: 12px; }
+.reg-kid:first-child { border-top: 0; padding-top: 0; }
+.reg-kid-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.reg-lines { display: grid; gap: 6px; }
+.reg-line { display: flex; justify-content: space-between; gap: 12px; }
+.reg-line .off { color: #17703f; }
+.reg-includes { display: flex; flex-wrap: wrap; gap: 6px; }
+.reg-includes span { font-size: 0.875rem; background: var(--snow); border-radius: 999px; padding: 4px 10px; }
+.reg-place { border-top: 1px solid var(--line); padding-top: 12px; }
+.reg-place:first-of-type { border-top: 0; }
+.reg-place ol { margin: 6px 0 0; padding-left: 20px; }
+.reg-hp { position: absolute; left: -9999px; }
+.spread { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+dialog.card { max-width: min(640px, calc(100vw - 32px)); border: 1px solid var(--line); }
+dialog::backdrop { background: rgba(10, 20, 35, 0.5); }
+#reg input:not([type='checkbox']), #reg select, #reg textarea { width: 100%; font: inherit; color: var(--ink); min-height: 48px; padding: 10px 12px; border: 1.5px solid var(--line-strong); border-radius: var(--r-sm); background: #fff; }
+#reg input:focus, #reg select:focus { border-color: var(--blue); outline: 2px solid var(--blue); outline-offset: 1px; }

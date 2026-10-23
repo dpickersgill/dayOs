@@ -39,7 +39,7 @@ const SHARED_READS = [
 ];
 
 // Public pages, by the word after the mountain's web name.
-const PUBLIC = { conditions: 'conditions', booking: 'school', quote: 'school', requests: 'school', 'instructor-availability': 'availability', help: 'patrol', give: 'patrol', shop: 'shop' };
+const PUBLIC = { conditions: 'conditions', booking: 'school', quote: 'school', requests: 'school', 'instructor-availability': 'availability', help: 'patrol', give: 'patrol', shop: 'shop', programs: 'programs' };
 
 /** Turning one app on turns on what it needs; turning one off turns off what needs it. */
 function settle(want) {
@@ -116,7 +116,7 @@ function publicGate(req, _res, next) {
       const s = await stateOf(t.id);
       if (s.status !== 'active' || !s.on.has(module)) throw new AppError(404, 'Page not found');
       // A mountain whose Verdynt/OS subscription has lapsed takes no online orders or bookings (waivers and help still work).
-      if (['shop', 'school'].includes(module) && await require('./billing').publicBlocked(t.id, req.method)) throw new AppError(409, 'This mountain is not taking online orders right now. Please contact them directly.');
+      if (['shop', 'school', 'programs'].includes(module) && await require('./billing').publicBlocked(t.id, req.method)) throw new AppError(409, 'This mountain is not taking online orders right now. Please contact them directly.');
     }
   })().then(() => next(), next);
 }

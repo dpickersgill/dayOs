@@ -261,6 +261,7 @@ async function handleWebhook(event, base) {
   const obj = event && event.data && event.data.object;
   if (obj && obj.metadata && obj.metadata.kind === 'shop_change') return shopafter.handleChangeWebhook(event, obj);
   if (obj && obj.metadata && obj.metadata.kind === 'shop') return shopsale.handleWebhook(event, obj, base || config.stripe.publicUrl || '');
+  if (obj && obj.metadata && obj.metadata.kind === 'program') return require('./programreg').handleWebhook(event, obj, base || config.stripe.publicUrl || '');
   if (obj && obj.metadata && obj.metadata.kind === 'donation') return recordDonation(event, obj);
   if (!obj || !obj.metadata || !obj.metadata.request_id) return { ignored: true };
   const tenantId = Number(obj.metadata.tenant_id);

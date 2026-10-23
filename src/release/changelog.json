@@ -1,6 +1,54 @@
 {
   "releases": [
     {
+      "version": "2026.10.35",
+      "date": "2026-11-01",
+      "title": "Lesson programs in sessions: pick a weekday, makeup weeks for weather, online registration",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "programs",
+          "who": null,
+          "text": "Programs run in sessions: set up Session 1 once (first week, number of weeks, makeup weeks, times, price and the weekdays it runs) and every day's lesson dates are made, each day its own group with its own spots and waitlist. Copy it to set up Session 2. Holidays you skip move the run on a week.",
+          "help": "prog-sessions"
+        },
+        {
+          "kind": "new",
+          "app": "programs",
+          "who": null,
+          "text": "Weather: cancel one date, or every program lesson on a storm day. That group's makeup date becomes a lesson and families are emailed. When the makeup weeks are used up you see each family's share of one lesson, and can add a date.",
+          "help": "prog-weather"
+        },
+        {
+          "kind": "new",
+          "app": "programs",
+          "who": null,
+          "text": "Classes by level within each day: split on the first day, or preset from last session's class or the ability on file. Instructors take attendance from the lesson date.",
+          "help": "prog-classes"
+        },
+        {
+          "kind": "new",
+          "app": "programs",
+          "who": [],
+          "text": "Prices: early bird prices with an end date, a different price for one day, a sibling discount (percent or dollars) for the second and later child, and bundles that sell several sessions at one price. A program can include a lift ticket for every lesson (issued at no charge) and rental gear (the roster shows each child's sizes)."
+        },
+        {
+          "kind": "new",
+          "app": "programs",
+          "who": [],
+          "text": "Parents register online at /programs/your-mountain: choose the session or bundle and the day, add each child, accept the waiver and pay by card. The confirmation email lists every lesson date and the makeup date. A full day offers its waitlist, and a day that fills while someone pays is refunded automatically."
+        },
+        {
+          "kind": "new",
+          "app": "sell",
+          "who": [
+            "counter"
+          ],
+          "text": "Sell, Programs: choose the session and day (or a bundle) for programs run in sessions. Sibling discounts apply in the basket."
+        }
+      ]
+    },
+    {
       "version": "2026.10.34",
       "date": "2026-10-25",
       "title": "Email us: hello@ and support@runmyresort.com",

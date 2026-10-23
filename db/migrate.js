@@ -520,6 +520,114 @@ const mapFeatureSteps = [
     CONSTRAINT fk_map_features_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
   )`],
 ];
+const programSessionSteps = [
+  // A program runs as one or more sessions a season (Session 1 in January, Session 2 in February). Each session meets on
+  // one or more weekdays, each its own group with its own spots (the parent picks the day), for a number of weeks, plus
+  // makeup weeks that are held in reserve and only used when a meeting is cancelled for weather.
+  ['programs session settings', (c) => columnExists(c, 'programs', 'level_mode'), `ALTER TABLE programs
+    ADD COLUMN description TEXT NULL, ADD COLUMN age_min TINYINT UNSIGNED NULL, ADD COLUMN age_max TINYINT UNSIGNED NULL,
+    ADD COLUMN online TINYINT(1) NOT NULL DEFAULT 0, ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1,
+    ADD COLUMN includes_ticket TINYINT(1) NOT NULL DEFAULT 0, ADD COLUMN ticket_product_id BIGINT UNSIGNED NULL,
+    ADD COLUMN includes_rental TINYINT(1) NOT NULL DEFAULT 0, ADD COLUMN rental_product_id BIGINT UNSIGNED NULL,
+    ADD COLUMN sibling_mode ENUM('none','percent','amount') NOT NULL DEFAULT 'none', ADD COLUMN sibling_value INT UNSIGNED NOT NULL DEFAULT 0,
+    ADD COLUMN level_mode ENUM('on_arrival','preset') NOT NULL DEFAULT 'on_arrival'`],
+  ['program_terms', (c) => tableExists(c, 'program_terms'), `CREATE TABLE program_terms (
+    id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id      BIGINT UNSIGNED NOT NULL,
+    program_id     BIGINT UNSIGNED NOT NULL,
+    name           VARCHAR(100) NOT NULL,
+    starts_on      DATE NOT NULL,
+    weeks          TINYINT UNSIGNED NOT NULL,
+    makeup_weeks   TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    start_time     TIME NOT NULL,
+    end_time       TIME NOT NULL,
+    price_cents    INT UNSIGNED NOT NULL,
+    price_steps    TEXT NULL,
+    skip_dates     TEXT NULL,
+    reg_opens_on   DATE NULL,
+    reg_closes_on  DATE NULL,
+    status         ENUM('draft','open','closed','archived') NOT NULL DEFAULT 'draft',
+    created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_pterms_tenant_id (tenant_id, id),
+    KEY ix_pterms_program (tenant_id, program_id, starts_on),
+    CONSTRAINT fk_pterms_program FOREIGN KEY (tenant_id, program_id) REFERENCES programs(tenant_id, id)
+  )`],
+  ['program_groups', (c) => tableExists(c, 'program_groups'), `CREATE TABLE program_groups (
+    id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id      BIGINT UNSIGNED NOT NULL,
+    term_id        BIGINT UNSIGNED NOT NULL,
+    weekday        TINYINT UNSIGNED NOT NULL,
+    start_time     TIME NULL,
+    end_time       TIME NULL,
+    capacity       SMALLINT UNSIGNED NULL,
+    price_cents    INT UNSIGNED NULL,
+    coach_staff_id BIGINT UNSIGNED NULL,
+    UNIQUE KEY uq_pgroups_tenant_id (tenant_id, id),
+    UNIQUE KEY uq_pgroups_day (tenant_id, term_id, weekday),
+    CONSTRAINT fk_pgroups_term FOREIGN KEY (tenant_id, term_id) REFERENCES program_terms(tenant_id, id)
+  )`],
+  ['program_levels', (c) => tableExists(c, 'program_levels'), `CREATE TABLE program_levels (
+    id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id      BIGINT UNSIGNED NOT NULL,
+    group_id       BIGINT UNSIGNED NOT NULL,
+    name           VARCHAR(60) NOT NULL,
+    coach_staff_id BIGINT UNSIGNED NULL,
+    sort           SMALLINT NOT NULL DEFAULT 0,
+    UNIQUE KEY uq_plevels_tenant_id (tenant_id, id),
+    CONSTRAINT fk_plevels_group FOREIGN KEY (tenant_id, group_id) REFERENCES program_groups(tenant_id, id)
+  )`],
+  ['program_bundles', (c) => tableExists(c, 'program_bundles'), `CREATE TABLE program_bundles (
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id   BIGINT UNSIGNED NOT NULL,
+    program_id  BIGINT UNSIGNED NOT NULL,
+    name        VARCHAR(100) NOT NULL,
+    price_cents INT UNSIGNED NOT NULL,
+    term_ids    TEXT NOT NULL,
+    active      TINYINT(1) NOT NULL DEFAULT 1,
+    UNIQUE KEY uq_pbundles_tenant_id (tenant_id, id),
+    CONSTRAINT fk_pbundles_program FOREIGN KEY (tenant_id, program_id) REFERENCES programs(tenant_id, id)
+  )`],
+  ['program_sessions meeting columns', (c) => columnExists(c, 'program_sessions', 'group_id'), `ALTER TABLE program_sessions
+    ADD COLUMN term_id BIGINT UNSIGNED NULL, ADD COLUMN group_id BIGINT UNSIGNED NULL,
+    ADD COLUMN kind ENUM('regular','makeup','extra') NOT NULL DEFAULT 'regular',
+    ADD COLUMN status ENUM('scheduled','standby','cancelled') NOT NULL DEFAULT 'scheduled',
+    ADD COLUMN cancel_reason VARCHAR(255) NULL, ADD COLUMN cancelled_at DATETIME NULL,
+    ADD KEY ix_psessions_group (tenant_id, group_id, starts_at), ADD KEY ix_psessions_day (tenant_id, starts_at)`],
+  ['program_enrollments session columns', (c) => columnExists(c, 'program_enrollments', 'group_id'), `ALTER TABLE program_enrollments
+    ADD COLUMN term_id BIGINT UNSIGNED NULL, ADD COLUMN group_id BIGINT UNSIGNED NULL, ADD COLUMN level_id BIGINT UNSIGNED NULL,
+    ADD COLUMN bundle_id BIGINT UNSIGNED NULL, ADD COLUMN any_day TINYINT(1) NOT NULL DEFAULT 0,
+    ADD COLUMN price_cents INT UNSIGNED NULL, ADD COLUMN discount_cents INT UNSIGNED NOT NULL DEFAULT 0,
+    ADD COLUMN order_id BIGINT UNSIGNED NULL, ADD COLUMN ticket_id BIGINT UNSIGNED NULL,
+    ADD COLUMN term_key BIGINT UNSIGNED AS (IFNULL(term_id, 0)) STORED,
+    ADD KEY ix_penroll_group (tenant_id, group_id, status)`],
+  // One place per person per session (a program without sessions keeps one place per person, as before).
+  ['program_enrollments one per session', (c) => indexExists(c, 'program_enrollments', 'uq_enrollment_term'), [
+    'ALTER TABLE program_enrollments ADD UNIQUE KEY uq_enrollment_term (tenant_id, program_id, term_key, person_id)',
+    'ALTER TABLE program_enrollments DROP INDEX uq_enrollment',
+  ]],
+  ['program_registrations', (c) => tableExists(c, 'program_registrations'), `CREATE TABLE program_registrations (
+    id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id         BIGINT UNSIGNED NOT NULL,
+    reference         VARCHAR(12) NOT NULL,
+    view_token        CHAR(32) NOT NULL,
+    contact_name      VARCHAR(150) NOT NULL,
+    contact_email     VARCHAR(255) NOT NULL,
+    contact_phone     VARCHAR(40) NOT NULL,
+    basket            MEDIUMTEXT NOT NULL,
+    amount_cents      INT UNSIGNED NOT NULL,
+    waiver_accepted   TINYINT(1) NOT NULL DEFAULT 0,
+    status            ENUM('awaiting_payment','paid','expired','refunded') NOT NULL DEFAULT 'awaiting_payment',
+    stripe_session_id VARCHAR(255) NULL,
+    payment_intent    VARCHAR(255) NULL,
+    order_id          BIGINT UNSIGNED NULL,
+    note              VARCHAR(300) NULL,
+    created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    paid_at           DATETIME NULL,
+    UNIQUE KEY uq_preg_ref (tenant_id, reference),
+    UNIQUE KEY uq_preg_token (view_token),
+    CONSTRAINT fk_preg_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  )`],
+];
 const storyFillSteps = [
   ['patrol_settings.story_fill', (c) => columnExists(c, 'patrol_settings', 'story_fill'), 'ALTER TABLE patrol_settings ADD COLUMN story_fill TINYINT(1) NOT NULL DEFAULT 0'],
 ];
@@ -710,7 +818,7 @@ async function main() {
   await seedPlans(conn);
   await seedPatrolPlan(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

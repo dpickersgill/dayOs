@@ -7,6 +7,7 @@ const { requireRole } = require('../middleware/auth');
 const { partialOf, z, dateStr, dateTimeStr, validate, paramId, normDateTime } = require('../lib/util');
 const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
+const PS = require('../lib/programsessions');
 
 const router = express.Router();
 const coord = ['manager', 'instructor'];
@@ -19,7 +20,20 @@ const programFields = {
   price_cents: z.number().int().min(0).default(0),
   starts_on: dateStr.nullable().optional(),
   ends_on: dateStr.nullable().optional(),
+  description: z.string().trim().max(2000).nullable().optional(),
+  age_min: z.number().int().min(0).max(99).nullable().optional(),
+  age_max: z.number().int().min(0).max(99).nullable().optional(),
+  online: z.boolean().optional(),
+  active: z.boolean().optional(),
+  includes_ticket: z.boolean().optional(),
+  ticket_product_id: z.number().int().positive().nullable().optional(),
+  includes_rental: z.boolean().optional(),
+  rental_product_id: z.number().int().positive().nullable().optional(),
+  sibling_mode: z.enum(['none', 'percent', 'amount']).optional(),
+  sibling_value: z.number().int().min(0).max(100000).optional(),
+  level_mode: z.enum(['on_arrival', 'preset']).optional(),
 };
+const PROGRAM_COLUMNS = ['name', 'kind', 'season', 'capacity', 'price_cents', 'starts_on', 'ends_on', 'description', 'age_min', 'age_max', 'online', 'active', 'includes_ticket', 'ticket_product_id', 'includes_rental', 'rental_product_id', 'sibling_mode', 'sibling_value', 'level_mode'];
 
 /** Enroll a participant. When the program is full they go on the waitlist instead of being rejected. */
 router.post('/:id/enrollments', requireRole(...coord, 'counter'), validate(z.object({ person_id: z.number().int().positive(), guardian_id: z.number().int().positive().optional() })), async (req, res) => {
@@ -62,8 +76,10 @@ router.post('/:id/enrollments/:enrollmentId/withdraw', requireRole(...coord), as
     if (e.status === 'withdrawn') throw conflict('Already withdrawn');
     await conn.query("UPDATE program_enrollments SET status = 'withdrawn' WHERE tenant_id = ? AND id = ?", [tenantId, eid]);
     let next = null;
-    if (e.status === 'enrolled') {
-      next = await one(conn, "SELECT id, person_id FROM program_enrollments WHERE tenant_id = ? AND program_id = ? AND status = 'waitlist' ORDER BY id LIMIT 1", [tenantId, pid]);
+    if (e.status === 'enrolled' && e.group_id) {
+      next = await PS.promoteWaitlist(conn, tenantId, await one(conn, 'SELECT * FROM program_groups WHERE tenant_id = ? AND id = ?', [tenantId, e.group_id]));
+    } else if (e.status === 'enrolled') {
+      next = await one(conn, "SELECT id, person_id FROM program_enrollments WHERE tenant_id = ? AND program_id = ? AND term_id IS NULL AND status = 'waitlist' ORDER BY id LIMIT 1", [tenantId, pid]);
       if (next) await conn.query("UPDATE program_enrollments SET status = 'enrolled' WHERE tenant_id = ? AND id = ?", [tenantId, next.id]);
     }
     await audit(conn, req, 'withdraw', 'programs', pid, { enrollment_id: eid, promoted: next ? next.person_id : null });
@@ -118,6 +134,8 @@ router.put('/sessions/:sessionId/attendance', requireRole(...coord), validate(z.
   res.json({ ok: true });
 });
 
-router.use('/', crud({ table: 'programs', entity: 'Program', createSchema: z.object(programFields), updateSchema: partialOf(programFields), columns: ['name', 'kind', 'season', 'capacity', 'price_cents', 'starts_on', 'ends_on'], filters: ['kind', 'season'], orderBy: 'season DESC, name', readRoles: ['counter', ...coord], writeRoles: ['manager'], allowDelete: false }));
+require('./programterms')(router);
+
+router.use('/', crud({ table: 'programs', entity: 'Program', createSchema: z.object(programFields), updateSchema: partialOf(programFields), columns: PROGRAM_COLUMNS, filters: ['kind', 'season'], orderBy: 'season DESC, name', readRoles: ['counter', ...coord], writeRoles: ['manager'], allowDelete: false }));
 
 module.exports = router;

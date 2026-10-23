@@ -101,12 +101,33 @@ async function sellPanel(root) {
     }],
     ['programs', 'Programs', (b) => {
       if (!menu.programs.length) { b.append(empty('No programs are open.', isManager() ? h('a', { class: 'btn primary', href: '#/programs' }, 'Add a program') : null)); return; }
-      b.append(table([
+      const simple = menu.programs.filter((p) => !(p.terms && p.terms.length));
+      const sessioned = menu.programs.filter((p) => p.terms && p.terms.length);
+      // A program run in sessions: pick the day for the session (or a day per session for a bundle), then Add.
+      for (const p of sessioned) {
+        const dayPick = (t) => select(t.groups.map((g) => [g.id, `${g.day}s, ${money(g.price_cents)}${g.left === 0 ? ' (full)' : g.left != null ? ` (${g.left} left)` : ''}`]), '', { 'aria-label': `Day for ${t.name}` });
+        const rowsEl = p.terms.map((t) => {
+          const pick = dayPick(t);
+          return h('div', { class: 'spread prog-sell' }, h('span', null, h('b', null, t.name), t.status === 'draft' ? h('span', { class: 'muted small' }, ' (not on sale online yet)') : null), h('div', { class: 'row' }, pick,
+            button('Add', () => {
+              const g = t.groups.find((x) => x.id === Number(pick.value));
+              if (g.left === 0) { toast(`${g.day}s are full. Add the child to the waitlist from Programs.`, 'error'); return; }
+              add({ type: 'program', program_id: p.id, term_id: t.id, group_id: g.id, name: `${p.name}: ${t.name}`, quantity: 1, detail: `${g.day}s` });
+            }, { small: true })));
+        });
+        const bundleEls = (p.bundles || []).map((bd) => {
+          const picks = bd.term_ids.map((tid) => { const t = p.terms.find((x) => x.id === tid); return [t, dayPick(t)]; });
+          return h('div', { class: 'spread prog-sell' }, h('span', null, h('b', null, bd.name), ` ${money(bd.price_cents)}`), h('div', { class: 'row' }, picks.map(([t, s]) => h('label', { class: 'small' }, `${t.name} `, s)),
+            button('Add', () => add({ type: 'program', program_id: p.id, bundle_id: bd.id, groups: picks.map(([t, s]) => ({ term_id: t.id, group_id: Number(s.value) })), name: `${p.name}: ${bd.name}`, quantity: 1, detail: picks.map(([t, s]) => `${t.name} ${s.selectedOptions[0].textContent.split(',')[0]}`).join(', ') }), { small: true })));
+        });
+        b.append(h('section', { class: 'stack tight prog-sell-box' }, h('h3', null, p.name), rowsEl, bundleEls));
+      }
+      if (simple.length) b.append(table([
         { head: 'Program', cell: (p) => `${p.name} (${p.season})` },
         { head: 'Places', num: true, cell: (p) => (p.spots_left === null ? 'Open' : p.spots_left ? String(p.spots_left) : state('Full', 'bad')) },
         { head: 'Price', num: true, cell: (p) => money(p.price_cents) },
         { head: '', actions: true, cell: (p) => (p.spots_left === 0 ? null : button('Add', () => add({ type: 'program', program_id: p.id, name: p.name, quantity: 1, detail: p.season }), { small: true })) },
-      ], menu.programs));
+      ], simple));
     }],
     ['gift', 'Gift cards', (b) => {
       const amt = input({ name: 'gift-amount', inputmode: 'decimal', placeholder: '0.00', 'aria-label': 'Gift card amount' });
