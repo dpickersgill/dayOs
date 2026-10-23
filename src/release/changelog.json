@@ -1,6 +1,25 @@
 {
   "releases": [
     {
+      "version": "2026.10.34",
+      "date": "2026-10-25",
+      "title": "Email us: hello@ and support@runmyresort.com",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": [],
+          "text": "Help now gives owners and managers an address for Verdynt/OS support: support@runmyresort.com. Say what you were doing and include the version number shown at the bottom of Help."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "The website shows hello@runmyresort.com for sales and questions and support@runmyresort.com for customers (footer, Contact, Privacy, Terms, Security, and the company details search engines read), and serves /.well-known/security.txt. Replies to Verdynt/OS's own emails go to support@ unless a reply address is set. SITE_HELLO_EMAIL and SITE_SUPPORT_EMAIL change them."
+        }
+      ]
+    },
+    {
       "version": "2026.10.33",
       "date": "2026-10-25",
       "title": "A second look before you submit, fill-in from the story, and a clearer Patrol menu",

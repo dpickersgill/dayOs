@@ -63,7 +63,7 @@ async function post({ to: named, fromName, replyTo, subject: asked, text, html, 
 /** Mail from Verdynt/OS itself, not from a mountain (the website's contact form, operator notices). */
 async function sendPlatform({ to, replyTo, subject, text, tag }) {
   if (!enabled()) return { ok: false, error: 'Email is not set up' };
-  const r = await post({ to, fromName: 'Verdynt/OS', replyTo, subject, text, tag });
+  const r = await post({ to, fromName: 'Verdynt/OS', replyTo: replyTo || require('../config').site.supportEmail, subject, text, tag });
   if (!r.ok) logFailure({ job: 'email', tag, message: r.error });
   return r;
 }

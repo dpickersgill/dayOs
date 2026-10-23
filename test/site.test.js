@@ -253,3 +253,17 @@ test('the guides are articles in a Resources section, with three-level breadcrum
   const appCsp = (await fetch(`${base}/app`)).headers.get('content-security-policy');
   assert.ok(!appCsp.includes('cloudflareinsights'), 'not on the app');
 });
+
+test('the sales and support addresses are on every page, the Contact page, in the company details and in security.txt', async () => {
+  const home = await onHost('/');
+  assert.ok(home.text.includes('href="mailto:hello@runmyresort.com"') && home.text.includes('href="mailto:support@runmyresort.com"'), 'in the footer');
+  const contact = await onHost('/contact');
+  assert.match(contact.text, /Rather email\?/);
+  const org = JSON.parse(home.text.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1])['@graph'].find((x) => x['@type'] === 'Organization');
+  assert.deepEqual(org.contactPoint.map((c) => [c.contactType, c.email]), [['sales', 'hello@runmyresort.com'], ['customer support', 'support@runmyresort.com']]);
+  const sec = await get('/.well-known/security.txt');
+  assert.match(sec.text, /^Contact: mailto:support@runmyresort\.com$/m);
+  assert.match(sec.text, /^Expires: \d{4}-/m);
+  const v = await (await fetch(`${base}/version`)).json();
+  assert.equal(v.support_email, 'support@runmyresort.com', 'the app’s Help reads the support address from here');
+});

@@ -162,6 +162,11 @@ function createApp() {
     // Staging also says which build it runs, so promote.sh can check it is putting live exactly what was checked.
     return res.json({ ok: true, version: release.VERSION, ...(config.staging ? { stage: 'staging', build: release.BUILD } : {}) });
   });
+  // security.txt (RFC 9116): where to report a security problem.
+  app.get('/.well-known/security.txt', (_req, res) => {
+    const exp = new Date(Date.now() + 180 * 86400000).toISOString().replace(/\.\d+Z$/, 'Z');
+    res.type('text/plain').set('Cache-Control', 'public, max-age=86400').send(`Contact: mailto:${config.site.supportEmail}\nExpires: ${exp}\nPreferred-Languages: en\n`);
+  });
   // Which version is running: open to anyone (the sign-in screen shows it, and deploy.sh reads it before deploying).
   // The build and its date only for someone signed in (Help shows them); everyone else sees the release number alone.
   app.get('/version', (req, res) => {
@@ -170,7 +175,8 @@ function createApp() {
     const m = /^Bearer (.+)$/.exec(req.get('authorization') || '');
     if (m) { try { signedIn = !require('jsonwebtoken').verify(m[1], config.jwtSecret, { algorithms: ['HS256'] }).typ; } catch (_) { signedIn = false; } }
     const stage = config.staging ? { stage: 'staging' } : {};
-    res.json(signedIn ? { version: release.VERSION, build: release.BUILD, built_at: release.BUILT_AT, ...stage } : { version: release.VERSION, ...stage });
+    const support = { support_email: config.site.supportEmail };
+    res.json(signedIn ? { version: release.VERSION, build: release.BUILD, built_at: release.BUILT_AT, ...support, ...stage } : { version: release.VERSION, ...support, ...stage });
   });
 
   const api = express.Router();

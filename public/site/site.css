@@ -419,6 +419,11 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 .sf li a:hover{color:#fff;text-decoration:underline}
 .sf-base{margin-top:44px;padding-top:22px;border-top:1px solid rgba(255,255,255,.18);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:14.5px;color:var(--onink2)}
 .sf-legal{display:flex;gap:18px;flex-wrap:wrap}
+.sf p.sf-mail{font-size:15px;margin-top:16px;overflow-wrap:break-word}
+@media (max-width:700px){.sf-grid>div:last-child{grid-column:1 / -1}}
+.sf-mail a{color:var(--glacier)}
+.sf-mail a:hover{color:#fff}
+.contact-mail{margin-top:14px;font-size:17px;overflow-wrap:anywhere}
 .sf-legal a{color:var(--onink3);display:inline-block;padding:8px 0}
 
 /* ================================================================ tablet */

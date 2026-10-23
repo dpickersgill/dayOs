@@ -108,6 +108,7 @@ const FOOTER = `<footer class="sf">
           <li><a href="{{SITE}}/contact?kind=founding">Become a founding mountain</a></li>
           <li><a href="{{APP}}">Sign in</a></li>
         </ul>
+        <p class="sf-mail">Sales and questions: <a href="mailto:{{HELLO}}">{{HELLO}}</a><br>Customer support: <a href="mailto:{{SUPPORT}}">{{SUPPORT}}</a></p>
       </div>
     </div>
     <div class="sf-base"><span>&copy; {{YEAR}} Verdynt/OS. All rights reserved. Prices in US dollars.</span><span class="sf-legal">{{SOCIAL}}<a href="{{SITE}}/privacy">Privacy</a><a href="{{SITE}}/terms">Terms</a></span></div>
@@ -177,6 +178,8 @@ async function render(req, name, slug) {
     .replaceAll('{{TRY}}', `${config.site.appUrl}/try`)
     .replaceAll('{{ROOT}}', origin)
     .replaceAll('{{SOCIAL}}', config.site.sameAs.filter((u) => /linkedin\.com/i.test(u)).slice(0, 1).map((u) => `<a href="${escHtml(u)}" rel="me noopener">LinkedIn</a>`).join(''))
+    .replaceAll('{{HELLO}}', escHtml(config.site.helloEmail))
+    .replaceAll('{{SUPPORT}}', escHtml(config.site.supportEmail))
     .replaceAll('{{YEAR}}', String(new Date().getUTCFullYear()));
 }
 

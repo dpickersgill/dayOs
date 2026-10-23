@@ -175,7 +175,10 @@ function head({ slug, origin, html, plans, verify = {}, sameAs = [], noindex = f
 
   const graph = [
     { '@type': 'Organization', '@id': `${origin}/#org`, name: 'Verdynt/OS', url: `${origin}/`, logo: `${origin.replace(/\/site$/, '')}/icons/icon-512.png`,
-      description: 'Operations software for independent ski areas.', ...(sameAs.length ? { sameAs } : {}), contactPoint: { '@type': 'ContactPoint', contactType: 'sales', url: `${origin}/contact`, availableLanguage: ['English'] } },
+      description: 'Operations software for independent ski areas.', ...(sameAs.length ? { sameAs } : {}), contactPoint: [
+        { '@type': 'ContactPoint', contactType: 'sales', email: require('../config').site.helloEmail, url: `${origin}/contact`, availableLanguage: ['English'] },
+        { '@type': 'ContactPoint', contactType: 'customer support', email: require('../config').site.supportEmail, availableLanguage: ['English'] },
+      ] },
     { '@type': 'WebSite', '@id': `${origin}/#site`, name: 'Verdynt/OS', url: `${origin}/`, publisher: { '@id': `${origin}/#org` }, inLanguage: 'en-US' },
     { '@type': 'WebPage', '@id': `${url}#page`, url, name: title, description, isPartOf: { '@id': `${origin}/#site` }, inLanguage: 'en-US',
       primaryImageOfPage: { '@type': 'ImageObject', url: image, width: 1200, height: 630 }, ...(modified ? { dateModified: modified } : {}) },

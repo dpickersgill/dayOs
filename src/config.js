@@ -99,6 +99,9 @@ module.exports = {
     hosts: String(env.SITE_HOSTS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean),
     appUrl: (env.APP_URL || '').replace(/\/$/, ''),
     contactEmail: env.SITE_CONTACT_EMAIL || '',
+    // The public addresses on the website and in the app: sales and general questions, and help for customers.
+    helloEmail: env.SITE_HELLO_EMAIL || 'hello@runmyresort.com',
+    supportEmail: env.SITE_SUPPORT_EMAIL || 'support@runmyresort.com',
     // Search Console and Bing Webmaster ownership checks (the code from their "HTML tag" option)
     verify: { google: env.GOOGLE_SITE_VERIFICATION || '', bing: env.BING_SITE_VERIFICATION || '' },
     // SITE_SAME_AS: the company's own profiles elsewhere (the LinkedIn page), comma-separated. Search engines use them to

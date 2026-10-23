@@ -102,8 +102,14 @@ async function coming(root) {
   r.updated ? h('p', { class: 'version-line muted small' }, `Last updated ${longDate(r.updated)}`) : null);
 }
 
+/** "Still stuck?": everyone can ask their manager; managers and owners get the support address (from /version). */
 function stuck() {
-  return h('aside', { class: 'help-stuck' }, h('b', null, 'Still stuck? '), 'Ask your manager or owner. For a problem with Verdynt/OS itself, they can reach whoever set up your mountain.');
+  const box = h('aside', { class: 'help-stuck' }, h('b', null, 'Still stuck? '));
+  if (!isManager()) { box.append('Ask your manager or owner. They can reach Verdynt/OS support for a problem with Verdynt/OS itself.'); return box; }
+  const mail = (addr) => h('a', { href: `mailto:${addr}?subject=${encodeURIComponent('Verdynt/OS help')}` }, addr);
+  const fill = (addr) => box.append('Email ', mail(addr), '. Say what you were doing, what you expected and what happened, and include the version number at the bottom of this page.');
+  fetch('/version').then((r) => r.json()).then((v) => fill(v.support_email || 'support@runmyresort.com')).catch(() => fill('support@runmyresort.com'));
+  return box;
 }
 
 function section(root, key) {
