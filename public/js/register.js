@@ -2,6 +2,7 @@
 // weekday, adds each child, accepts the waiver and pays on Stripe's page. The page shows every lesson date and the makeup
 // date held in reserve. A full day offers its waitlist instead. Prices come from the server; this page only shows them.
 import './stage.js';
+import { mountGuestAssistant } from './guest-assistant.js';
 import { h, clear } from './ui.js';
 
 const slug = decodeURIComponent(location.pathname.split('/').filter(Boolean)[1] || '');
@@ -267,3 +268,5 @@ async function showRegistration(token) {
 }
 
 main();
+
+mountGuestAssistant('programs');

@@ -333,6 +333,7 @@ router.get('/tenants/:id', async (req, res) => {
   res.json({ ...t, storage_used_mb: Math.round(((used.get(id) || 0) / 1048576) * 10) / 10, modules: await M.enabledKeys(id), users, history,
     billing: bill ? { ...bill, addons: BL.ids(bill.addons), trial_ends_on: BL.dateOf(bill.trial_ends_on), paid_until: BL.dateOf(bill.paid_until), comped: Boolean(Number(bill.comped)) } : null,
     billing_standing: await BL.standingOf(id), billing_events: billEvents, card_payments: await require('../lib/connect').state(id),
+    assistant: await assistantUse(id),
     platform_fees: await one(pool, "SELECT COUNT(*) AS payments, COALESCE(SUM(platform_fee_cents), 0) AS fee_cents, COALESCE(SUM(amount_cents), 0) AS amount_cents FROM order_payments WHERE tenant_id = ? AND processor = 'stripe' AND processor_account IS NOT NULL", [id]) });
 });
 
@@ -443,6 +444,26 @@ router.post('/tenants', validate(z.object({
     return { id: t.insertId, slug: b.slug };
   });
   res.status(201).json(created);
+});
+
+/** The assistant this month: questions, what it cost, the cap, and the ones that went to support or were not answered. */
+async function assistantUse(id) {
+  const A = require('../lib/assistant');
+  const s = await A.settingsOf(pool, id);
+  const m = await one(pool, `SELECT COUNT(*) AS n, COALESCE(SUM(cost_micros), 0) AS c, SUM(audience = 'guest') AS guests, SUM(unanswered) AS unanswered, SUM(rating = -1) AS unhelpful, SUM(escalated_at IS NOT NULL) AS escalated
+    FROM assistant_log WHERE tenant_id = ? AND created_at >= DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-01')`, [id]);
+  const recent = await rows(pool, "SELECT id, audience, page, question, unanswered, rating, escalated_at, created_at FROM assistant_log WHERE tenant_id = ? AND (unanswered = 1 OR rating = -1 OR escalated_at IS NOT NULL) ORDER BY id DESC LIMIT 10", [id]);
+  return { staff_on: s.staff_on, guest_pages: s.guest_pages, cap_cents: s.monthly_cap_cents, questions: Number(m.n), guest_questions: Number(m.guests || 0), cost_micros: Number(m.c), unanswered: Number(m.unanswered || 0), unhelpful: Number(m.unhelpful || 0), escalated: Number(m.escalated || 0), recent };
+}
+
+/** The assistant's monthly spending cap for one mountain, in cents (default $50). */
+router.put('/tenants/:id/assistant-cap', needsAccess, validate(z.object({ cap_cents: z.number().int().min(0).max(1000000) })), async (req, res) => {
+  const id = paramId(req);
+  const t = await one(pool, 'SELECT id FROM tenants WHERE id = ?', [id]);
+  if (!t) throw notFound('Mountain');
+  await pool.query('INSERT INTO assistant_settings (tenant_id, monthly_cap_cents) VALUES (?, ?) ON DUPLICATE KEY UPDATE monthly_cap_cents = VALUES(monthly_cap_cents)', [id, req.body.cap_cents]);
+  await log(pool, req, id, 'assistant_cap', req.body);
+  res.json({ ok: true });
 });
 
 router.patch('/tenants/:id', needsAccess, validate(partialOf({

@@ -109,6 +109,14 @@ export function buildFrame({ views, main, signOut }) {
     toggle.setAttribute('aria-label', closed ? 'Expand menu' : 'Collapse menu');
   });
   const search = h('button', { type: 'button', class: 'rail-search', 'aria-label': 'Jump to a page' }, icon('search', 18), h('span', { class: 'nav-label' }, 'Jump to'), h('kbd', null, /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘K' : 'Ctrl K'));
+  // Ask: the assistant's side panel, loaded the first time it is opened. Hidden until the server says it is on.
+  const viewKeys = views.map(([k]) => k);
+  ctx.views = viewKeys;
+  const openAsk = () => import('./assistant.js').then((m) => m.openAssistant({ page: currentKey, views: viewKeys }));
+  const ask = h('button', { type: 'button', class: 'rail-search rail-ask', 'aria-label': 'Ask the assistant', hidden: true }, icon('ask', 18), h('span', { class: 'nav-label' }, 'Ask'));
+  const topAsk = h('button', { type: 'button', class: 'top-inbox top-ask', 'aria-label': 'Ask the assistant', hidden: true }, icon('ask', 22));
+  ask.addEventListener('click', openAsk); topAsk.addEventListener('click', openAsk);
+  if (ctx.me.role !== 'area') import('./assistant.js').then((m) => m.assistantOn()).then((yes) => { ask.hidden = !yes; topAsk.hidden = !yes; }).catch(() => {});
   const out = h('button', { type: 'button', class: 'rail-out', title: 'Sign out' }, icon('signout', 18), h('span', { class: 'nav-label' }, 'Sign out'));
   out.addEventListener('click', () => signOut());
   const themeBtn = themeToggle('rail-out');
@@ -123,7 +131,7 @@ export function buildFrame({ views, main, signOut }) {
   whoMenu.addEventListener('click', (e) => { if (e.target.closest('a')) setWho(false); });
   const rail = h('aside', { class: 'rail' },
     h('div', { class: 'brand' }, h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: '', width: '64', height: '36' }), h('div', { class: 'brand-text' }, h('img', { class: 'brand-word', src: '/brand/verdynt-word-dark.png', alt: 'Verdynt/OS', width: '126', height: '23' }), h('span', null, ctx.me.tenant_name)), toggle),
-    search, nav,
+    search, ask, nav,
     h('div', { class: 'rail-foot' }, whoMenu, whoBtn));
 
   // ---- phone: slim top bar, bottom tabs, and a sheet with everything
@@ -135,7 +143,7 @@ export function buildFrame({ views, main, signOut }) {
   const topSearch = h('button', { type: 'button', class: 'top-search', 'aria-label': 'Jump to a page' }, icon('search', 18), h('span', null, 'Jump to a page'), h('kbd', null, /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘K' : 'Ctrl K'));
   const topInbox = have('inbox') ? h('a', { href: '#/inbox', class: 'top-inbox', dataset: { key: 'inbox' }, 'aria-label': 'Inbox' }, icon('inbox', 22)) : null;
   if (topInbox) { if (!links.has('inbox')) links.set('inbox', []); links.get('inbox').push(topInbox); }
-  const topbar = h('header', { class: 'topbar' }, h('div', { class: 'top-brand' }, h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: 'Verdynt/OS', width: '53', height: '30' }), h('strong', null, ctx.me.tenant_name)), topSearch, topInbox);
+  const topbar = h('header', { class: 'topbar' }, h('div', { class: 'top-brand' }, h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: 'Verdynt/OS', width: '53', height: '30' }), h('strong', null, ctx.me.tenant_name)), topSearch, topAsk, topInbox);
 
   function openSheet() {
     const items = [['Home', ['dashboard', 'inbox'].filter(have)], ...sections.map((g) => [g.name, g.keys]), ['You', personal]].filter(([, k]) => k.length);
@@ -164,6 +172,7 @@ export function buildFrame({ views, main, signOut }) {
     const list = [];
     if (isManager()) list.push({ id: 'kiosk', title: 'Open the time clock kiosk page', hint: 'New tab', icon: 'clock', words: 'kiosk tablet punch', run: () => window.open('/kiosk', '_blank', 'noopener') });
     list.push({ id: 'rail', title: shell.classList.contains('collapsed') ? 'Expand the menu' : 'Collapse the menu', hint: '', icon: 'collapse', words: 'sidebar rail', run: () => toggle.click() });
+    if (!ask.hidden) list.push({ id: 'ask', title: 'Ask the assistant', hint: '', icon: 'ask', words: 'assistant question how do i ai chat', run: () => openAsk() });
     list.push({ id: 'out', title: 'Sign out', hint: '', icon: 'signout', words: 'log out leave', run: () => signOut() });
     return list;
   }

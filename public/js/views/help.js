@@ -44,12 +44,21 @@ function home(root) {
     const found = search(q.value);
     results.append(found.length ? h('ul', { class: 'help-results' }, found.map((a) => articleLink(a, true))) : empty('Nothing matches that. Try a shorter word, or look through the topics.'));
   };
+  // The assistant, when it is on: ask the words typed as a question, beside the articles that match them.
+  const askRow = h('p', { class: 'help-ask', hidden: true });
+  import('../assistant.js').then((m) => m.assistantOn().then((yes) => {
+    if (!yes) return;
+    const b = h('button', { type: 'button', class: 'btn small' }, 'Ask the assistant');
+    b.addEventListener('click', () => m.openAssistant({ page: 'help', question: q.value.trim() || undefined }));
+    askRow.append(b, h('span', { class: 'muted small' }, ' Type a question and it answers from these articles and your mountain\'s setup.'));
+    askRow.hidden = false;
+  })).catch(() => {});
   q.addEventListener('input', draw);
   const news = h('a', { class: 'whatsnew-link', href: '#/help/whats-new' }, h('b', null, "What's new"), h('span', { class: 'muted' }, ' The latest changes to Verdynt/OS'));
   get('/whats-new/count').then((c) => { if (c.unseen) news.append(h('span', { class: 'new-pill' }, 'New')); }).catch(() => {});
   const coming = isManager() ? h('a', { class: 'whatsnew-link', href: '#/help/coming' }, h('b', null, 'Coming to Verdynt/OS'), h('span', { class: 'muted' }, ' What we are building now, next and later')) : null;
   root.append(h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Help'), h('p', { class: 'muted' }, 'How to do things in Verdynt/OS. You see what your role can use.'))),
-    h('div', { class: 'help-news' }, news, coming), h('div', { class: 'help-search' }, q), results, grid, stuck(), versionLine());
+    h('div', { class: 'help-news' }, news, coming), h('div', { class: 'help-search' }, q), askRow, results, grid, stuck(), versionLine());
 }
 
 /** "Verdynt/OS 2026.10.4 (build ac9a72f)": the version this screen is running, for telling support or checking an update. */

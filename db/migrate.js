@@ -691,6 +691,39 @@ const programPlusSteps = [
     CONSTRAINT fk_family_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
   )`],
 ];
+const assistantSteps = [
+  // The Verdynt/OS Assistant: what each mountain turned on, and every question asked (for the cap, the console and feedback).
+  ['assistant_settings', (c) => tableExists(c, 'assistant_settings'), `CREATE TABLE assistant_settings (
+    tenant_id         BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+    staff_on          TINYINT(1) NOT NULL DEFAULT 1,
+    guest_pages       VARCHAR(100) NOT NULL DEFAULT '',
+    contact_email     VARCHAR(255) NULL,
+    monthly_cap_cents INT UNSIGNED NOT NULL DEFAULT 5000,
+    CONSTRAINT fk_asettings_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  )`],
+  ['assistant_log', (c) => tableExists(c, 'assistant_log'), `CREATE TABLE assistant_log (
+    id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id     BIGINT UNSIGNED NOT NULL,
+    audience      ENUM('staff','guest') NOT NULL,
+    user_id       BIGINT UNSIGNED NULL,
+    page          VARCHAR(40) NULL,
+    question      VARCHAR(1000) NOT NULL,
+    answer        TEXT NULL,
+    sources       TEXT NULL,
+    tools         TEXT NULL,
+    model         VARCHAR(60) NULL,
+    input_tokens  INT UNSIGNED NOT NULL DEFAULT 0,
+    output_tokens INT UNSIGNED NOT NULL DEFAULT 0,
+    cost_micros   INT UNSIGNED NOT NULL DEFAULT 0,
+    unanswered    TINYINT(1) NOT NULL DEFAULT 0,
+    rating        TINYINT NULL,
+    escalated_at  DATETIME NULL,
+    created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY ix_alog_tenant (tenant_id, created_at),
+    KEY ix_alog_flags (rating, escalated_at),
+    CONSTRAINT fk_alog_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  )`],
+];
 const storyFillSteps = [
   ['patrol_settings.story_fill', (c) => columnExists(c, 'patrol_settings', 'story_fill'), 'ALTER TABLE patrol_settings ADD COLUMN story_fill TINYINT(1) NOT NULL DEFAULT 0'],
 ];
@@ -839,6 +872,18 @@ async function seedPatrolPlan(conn) {
   console.log('Added the Patrol plan (for a patrol on its own)');
 }
 
+// The Assistant Plus add-on (2026.10.37): live questions about the mountain's own data, and the guest assistant.
+async function seedAssistantAddon(conn) {
+  const [[has]] = await conn.query("SELECT COUNT(*) AS n FROM billing_plans WHERE code = 'assistant-plus'");
+  if (Number(has.n)) return;
+  const [[any]] = await conn.query('SELECT COUNT(*) AS n FROM billing_plans');
+  if (!Number(any.n)) return; // a fresh install seeds its plans first; this runs on the next migration
+  const [[top]] = await conn.query("SELECT COALESCE(MAX(sort), 0) AS s FROM billing_plans WHERE kind = 'addon'");
+  await conn.query("INSERT INTO billing_plans (code, name, blurb, kind, modules, monthly_cents, yearly_cents, sort) VALUES ('assistant-plus', 'Assistant Plus', ?, 'addon', 'assistant_plus', 6900, 70400, ?)",
+    ['Ask about your own numbers (sales, rosters, lessons, who is on), and an assistant for guests on your online pages.', Number(top.s) + 1]);
+  console.log('Added the Assistant Plus add-on');
+}
+
 async function main() {
   const conn = await mysql.createConnection({
     socketPath: config.db.socketPath,
@@ -880,8 +925,9 @@ async function main() {
   await conn.query(fs.readFileSync(path.join(__dirname, 'zerotrust.sql'), 'utf8'));
   await seedPlans(conn);
   await seedPatrolPlan(conn);
+  await seedAssistantAddon(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

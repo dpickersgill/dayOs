@@ -20,6 +20,7 @@ const MODULES = [
   { key: 'patrol', label: 'Patrol', blurb: 'Incidents, dispatch, checklists, follow-up, training and the guest help page.', paths: ['/patrol'] },
   { key: 'documents', label: 'Documents', blurb: 'Files by category with versions, search and read-and-accepted tracking.', paths: ['/documents'] },
   { key: 'doc_ocr', label: 'Document text recognition (add-on)', blurb: 'Reads the words in scanned PDFs and pictures so they can be searched. Off until the operator turns it on for a mountain.', addon: true, needs: ['documents'], paths: [] },
+  { key: 'assistant_plus', label: 'Assistant Plus (add-on)', blurb: 'Staff ask about the mountain\'s own numbers (sales, rosters, lessons, who is on), and guests get an assistant on the online pages.', addon: true, paths: [] },
   { key: 'messages', label: 'Messages', blurb: 'Email and text messages to customers who agreed to hear from you, and automatic rental and pass reminders.', paths: ['/messages'] },
   { key: 'shop', label: 'Online shop', blurb: 'A public page where guests buy lift tickets and passes by card, and the list of those orders.', needs: ['catalog'], paths: ['/online-shop'] },
   { key: 'money', label: 'Money', blurb: 'Tax rules, till, card reconciliation and exports.', paths: ['/tax-rules', '/till', '/reconcile', '/exports'] },
@@ -39,7 +40,7 @@ const SHARED_READS = [
 ];
 
 // Public pages, by the word after the mountain's web name.
-const PUBLIC = { conditions: 'conditions', booking: 'school', quote: 'school', requests: 'school', 'instructor-availability': 'availability', help: 'patrol', give: 'patrol', shop: 'shop', programs: 'programs', family: 'programs' };
+const PUBLIC = { conditions: 'conditions', booking: 'school', quote: 'school', requests: 'school', 'instructor-availability': 'availability', help: 'patrol', give: 'patrol', shop: 'shop', programs: 'programs', family: 'programs', assistant: 'assistant_plus' };
 
 /** Turning one app on turns on what it needs; turning one off turns off what needs it. */
 function settle(want) {

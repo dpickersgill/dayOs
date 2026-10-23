@@ -197,6 +197,9 @@ function createApp() {
   api.post('/public/:slug/requests', rateLimit({ windowMs: 3_600_000, max: Number(process.env.BOOKING_RATE_LIMIT) || 8, message: 'Too many requests from this address. Please call the ski school.' }));
   api.post('/public/:slug/shop/orders', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SHOP_RATE_LIMIT) || 12, message: 'Too many orders from this address. Please call the mountain.' }));
   api.post(['/public/:slug/programs/register', '/public/:slug/programs/waitlist', '/public/:slug/family/link', '/public/:slug/family/session'], rateLimit({ windowMs: 3_600_000, max: Number(process.env.SHOP_RATE_LIMIT) || 12, message: 'Too many registrations from this address. Please call the mountain.' }));
+  // The guest assistant costs money per question: 20 questions and 5 messages to the mountain an hour per address.
+  api.post('/public/:slug/assistant/ask', rateLimit({ windowMs: 3_600_000, max: Number(process.env.ASSISTANT_GUEST_LIMIT) || 20, message: 'That is a lot of questions. Please call the mountain.' }));
+  api.post('/public/:slug/assistant/contact', rateLimit({ windowMs: 3_600_000, max: 5, message: 'Too many messages from this address. Please call the mountain.' }));
   api.post(['/public/:slug/shop/waitlist', '/public/:slug/shop/group', '/public/:slug/shop/orders/:token/change'], rateLimit({ windowMs: 3_600_000, max: Number(process.env.SHOP_RATE_LIMIT) || 12, message: 'Too many requests from this address. Please call the mountain.' }));
   // Anyone can sign a waiver, so signing has its own limit: a family signing at the counter tablet stays well inside it.
   api.post('/public/:slug/waiver/sign', rateLimit({ windowMs: 3_600_000, max: Number(process.env.WAIVER_RATE_LIMIT) || 40, message: 'Too many waivers from this address. Please ask at the ticket window.' }));
@@ -213,7 +216,7 @@ function createApp() {
   api.post(['/platform/login', '/platform/login/setup', '/platform/login/passkey', '/platform/login/passkey/options'], rateLimit({ windowMs: 15 * 60_000, max: Number(process.env.PLATFORM_LOGIN_RATE_LIMIT) || 20, message: 'Too many sign-in attempts from this address. Try again in 15 minutes.' }));
   api.use('/platform', rateLimit({ windowMs: 60_000, max: Number(process.env.PLATFORM_RATE_LIMIT) || 60, message: 'Too many attempts' }), platform);
   api.use(site.api); // the website's plans and contact form (no sign-in)
-  api.use('/public', rateLimit({ windowMs: 60_000, max: 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, publicRouter, dispatch.publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter);
+  api.use('/public', rateLimit({ windowMs: 60_000, max: 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter);
   api.use(authRoutes); // login, tenants, users, me (each route applies authenticate itself where needed)
   api.use(require('./routes/security')); // passkeys, the second check, sessions, devices, PINs, terminals (each route authenticates)
 
@@ -223,6 +226,7 @@ function createApp() {
   api.use(require('./lib/billing').gate); // a lapsed subscription: read only, except patrol, the time clock and billing
   api.use(require('./routes/billing').router);
   api.use('/whats-new', whatsNew);
+  api.use('/assistant', require('./routes/assistant').router);
   api.use('/area', require('./routes/areaview')); // the ski area's read-only patrol view
   api.use('/demo-tours', rateLimit({ windowMs: 60_000, max: 120 }), demoTours.router);
   // Per person, not per address: a mountain's staff usually share one internet address. Reads (the polling) are not counted.

@@ -72,6 +72,15 @@ module.exports = {
     model: env.PATROL_AI_MODEL || 'claude-sonnet-5-5',
     apiBase: (env.ANTHROPIC_API_BASE || 'https://api.anthropic.com').replace(/\/$/, ''),
   },
+  // The Verdynt/OS Assistant (staff and guests). Off until ASSISTANT_API_KEY is set (a plain key: it never sees patient
+  // data). A small model answers how-to and setup questions; a stronger one when it looks up the mountain's data.
+  assistant: {
+    on: Boolean(env.ASSISTANT_API_KEY) && env.ASSISTANT !== 'off',
+    key: env.ASSISTANT_API_KEY || '',
+    apiBase: (env.ASSISTANT_API_BASE || env.ANTHROPIC_API_BASE || 'https://api.anthropic.com').replace(/\/$/, ''),
+    model: env.ASSISTANT_MODEL || 'claude-haiku-5-5',
+    dataModel: env.ASSISTANT_DATA_MODEL || 'claude-sonnet-5-5',
+  },
   port: Number(env.PORT || 8080),
   jwtSecret: env.JWT_SECRET || 'dev-only-secret-change-me-dev-only-secret',
   // Separate keys so sign-in tokens can be rotated on their own. Each falls back to JWT_SECRET, which is what was used

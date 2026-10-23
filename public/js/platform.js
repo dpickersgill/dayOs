@@ -220,6 +220,7 @@ async function manage(id) {
     h('h3', null, 'Guest card payments'), cardPanel(t, () => { dlg.close(); home(); manage(id); }),
     h('h3', null, 'Apps'), h('p', { class: 'hint' }, 'Changes apply within a few seconds. Turning an app off hides it and refuses its requests; its data is kept.'), list,
     h('h3', null, 'Storage'), h('p', null, `${t.storage_used_mb} MB used of ${t.storage_cap_mb} MB for document files.`),
+    h('h3', null, 'Assistant'), assistantPanel(t, () => { dlg.close(); home(); manage(id); }),
     h('h3', null, 'Owner and manager logins'), people,
     t.history.length ? h('div', { class: 'stack tight' }, h('h3', null, 'Recent changes'), ...t.history.slice(0, 8).map((x) => h('p', { class: 'small muted' }, `${String(x.at).replace('T', ' ').slice(0, 16)}  ${x.action}  ${x.detail || ''}`))) : null), { wide: true });
 }
@@ -732,4 +733,23 @@ async function sharingList() {
     { head: 'On', cell: (m) => day(m.agreed_at) },
     { head: 'Terms', cell: (m) => (m.current_terms ? `Version ${m.agreement_version}` : `Old version ${m.agreement_version || ''}`) },
   ], data) : empty('No mountain has chosen to share yet. The patrol director turns it on in Patrol, Cases, Injury network.'), { wide: true });
+}
+
+// The assistant for one mountain: this month's questions and cost against its cap, and the ones worth a look.
+function assistantPanel(t, done) {
+  const a = t.assistant;
+  if (!a) return h('p', { class: 'hint' }, 'Not used yet.');
+  const dollars = (micros) => `$${(micros / 1e6).toFixed(2)}`;
+  const capBtn = button('Change the cap', () => {
+    const cap = input({ name: 'cap', type: 'number', min: 0, max: 10000, step: 1, value: Math.round(a.cap_cents / 100) });
+    formDialog('Assistant monthly cap', h('div', { class: 'stack' }, field('Most it may spend a month ($)', cap, 'At the cap the assistant rests until the 1st, for staff and guests. Help keeps working.')), async () => {
+      await call('PUT', `/tenants/${t.id}/assistant-cap`, { cap_cents: Math.round(Number(cap.value) * 100) });
+      toast('Saved.'); done();
+    });
+  }, { small: true });
+  return h('div', { class: 'stack tight' },
+    h('p', null, `This month: ${a.questions} questions (${a.guest_questions} from guests), ${dollars(a.cost_micros)} of the $${(a.cap_cents / 100).toFixed(0)} cap. ${a.unanswered} not answered, ${a.unhelpful} marked unhelpful, ${a.escalated} passed on.`),
+    h('p', { class: 'hint' }, `Staff ${a.staff_on ? 'on' : 'off'}. Guest pages: ${a.guest_pages.length ? a.guest_pages.join(', ') : 'none'}.`),
+    a.recent.length ? h('ul', { class: 'small' }, a.recent.map((r) => h('li', null, `${String(r.created_at).replace('T', ' ').slice(0, 16)} ${r.audience}${r.page ? ` on ${r.page}` : ''}: ${r.question}${r.unanswered ? ' (not answered)' : ''}${r.rating === -1 ? ' (did not help)' : ''}${r.escalated_at ? ' (passed on)' : ''}`))) : null,
+    h('div', { class: 'row' }, capBtn));
 }

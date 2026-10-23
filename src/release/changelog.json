@@ -1,6 +1,55 @@
 {
   "releases": [
     {
+      "version": "2026.10.37",
+      "date": "2026-11-08",
+      "title": "The assistant: ask how to do anything, and Assistant Plus",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Ask, in the menu under Jump to, opens an assistant beside any screen. Ask in your own words and it answers from Help and your mountain's own setup, with buttons to the Help article and the screen. It explains and links; it never changes anything.",
+          "help": "ask"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "An answer that did not help has Ask support: your question, the answer and the screen go to Verdynt/OS support, who reply to your email."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": [],
+          "text": "Assistant Plus (add-on, $69 a month): staff can also ask about today's scans and sales, lessons, program days, lifts and trails, and who is working. It only looks up what that person's role can already see, and never patient care records.",
+          "help": "assistant-setup"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": [],
+          "text": "With Assistant Plus, guests get a Questions button on the pages you choose (online shop, program registration, lesson booking, family page). It answers from your public information only, and what it cannot answer comes to your email with the guest's address to reply to. Set it up under Account, Assistant, where you can also see every question asked.",
+          "help": "assistant-setup"
+        },
+        {
+          "kind": "fixed",
+          "app": "sell",
+          "who": [
+            "counter"
+          ],
+          "text": "The Help article on taking payment now covers the card reader (Charge on reader) instead of saying cards are taken on a separate machine.",
+          "help": "sell-pay"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "Console: each mountain shows the assistant's questions and cost this month against its cap, the ones not answered or passed on, and Change the cap."
+        }
+      ]
+    },
+    {
       "version": "2026.10.36",
       "date": "2026-11-01",
       "title": "Best-of-breed programs: your own types, season pass pricing, a family page",

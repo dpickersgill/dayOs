@@ -2,7 +2,8 @@
 // total, then pays on Stripe's page. Tickets appear on this page (with a barcode for the gate) and by email once paid.
 // Prices always come from the server; this page only shows them. It shows no private data.
 
-import './stage.js'; // the staging band (shows only on staging)
+import './stage.js';
+import { mountGuestAssistant } from './guest-assistant.js'; // the staging band (shows only on staging)
 import { h, clear, appendAll } from './ui.js';
 import { code128, qr } from './barcode.js';
 import { shrink } from './photo.js';
@@ -437,3 +438,5 @@ async function showShop() {
   const token = qs.get('order');
   if (token) await showOrder(token); else await showShop();
 })();
+
+mountGuestAssistant('shop');

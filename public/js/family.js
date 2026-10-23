@@ -3,6 +3,7 @@
 // what is owed and the report card. They can update allergies and pickup, switch day and withdraw within the rules.
 // The session is kept in this browser only (a convenience: without it, the parent signs in again).
 import './stage.js';
+import { mountGuestAssistant } from './guest-assistant.js';
 import { h, clear, appendAll } from './ui.js';
 
 const slug = decodeURIComponent(location.pathname.split('/').filter(Boolean)[1] || '');
@@ -150,3 +151,5 @@ function editDetails(p, pl) {
 }
 
 start();
+
+mountGuestAssistant('family', { session: () => store.get() });

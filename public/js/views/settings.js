@@ -2,7 +2,7 @@ import { get, post, put, patch, del, session } from '../api.js';
 import { mfaPanel } from './mfa.js';
 import { signInSection } from './security.js';
 import { brandPanel } from './shopbrand.js';
-import { h, clear, ctx, isManager, table, state, input, select, field, button, toast, formDialog, confirmDialog, val, num, label, empty, errorBox, toCents, centsToInput } from '../ui.js';
+import { h, clear, ctx, isManager, table, state, input, select, field, button, toast, formDialog, confirmDialog, val, num, label, empty, errorBox, toCents, centsToInput, money, fmtDateTime, dialog } from '../ui.js';
 
 const ROLES = ['manager', 'staff', 'counter', 'instructor', 'patrol', 'area'];
 // The ski area's free read-only login: the patrol summary and approved reports only.
@@ -14,6 +14,7 @@ export async function render(root) {
   if (isManager()) {
     root.append(await mountainForm());
     root.append(await brandPanel());
+    root.append(await assistantPanel());
     const box = h('section', { class: 'section' });
     root.append(box);
     await drawLogins(box);
@@ -279,4 +280,48 @@ async function mountainForm() {
     } catch (err) { slot.append(errorBox(err)); } finally { go.disabled = false; }
   });
   return h('section', { class: 'panel stack' }, h('h2', null, 'Mountain details and rules'), form);
+}
+
+// ---- the assistant: on for staff, which guest pages show it (Assistant Plus), where guest questions go, this month's use
+const PAGE_NAMES = { shop: 'Online ticket shop', programs: 'Program registration', booking: 'Lesson booking', family: 'Family page' };
+async function assistantPanel() {
+  let a;
+  try { a = await get('/assistant/settings'); } catch (err) { return h('section', { class: 'panel stack' }, h('h2', null, 'Assistant'), errorBox(err)); }
+  const staffOn = h('input', { type: 'checkbox', checked: a.staff_on });
+  const pages = a.pages.map((p) => [p, h('input', { type: 'checkbox', checked: a.guest_pages.includes(p), disabled: !a.plus })]);
+  const contact = input({ type: 'email', value: a.contact_email || '', placeholder: a.owner_email || 'you@yourmountain.com', disabled: !a.plus });
+  const slot = h('div');
+  const go = h('button', { type: 'submit', class: 'btn primary' }, 'Save');
+  const used = h('p', { class: 'muted small' }, `This month: ${a.month.questions} question${a.month.questions === 1 ? '' : 's'}, ${money(a.month.spent_cents)} of the ${money(a.month.cap_cents)} included. At the limit it rests until the 1st; Help keeps working.`);
+  const form = h('form', { class: 'stack' },
+    a.available ? null : h('p', { class: 'muted' }, 'The assistant is not switched on for Verdynt/OS yet.'),
+    h('label', { class: 'check' }, staffOn, ' Staff can ask the assistant how to do things (the Ask button in the menu)'),
+    h('p', { class: 'muted small' }, a.plus
+      ? 'Assistant Plus is on: staff can also ask about today\'s numbers, lessons, programs and who is working. It only looks up what that person could already see, and never sees patient care records.'
+      : 'Assistant Plus (add-on, under Billing) adds questions about today\'s numbers, lessons, programs and who is working, and the assistant for guests.'),
+    h('fieldset', { class: 'stack', disabled: !a.plus }, h('legend', null, 'Guests can ask on these pages'),
+      pages.map(([p, box]) => h('label', { class: 'check' }, box, ` ${PAGE_NAMES[p]}`)),
+      field('Guest questions it cannot answer go to', contact, 'Guests give their email, and your reply goes straight to them. Blank: the owner\'s email.')),
+    used, slot, h('div', { class: 'row' }, go, h('a', { href: '#/settings', class: 'btn', id: 'ask-questions' }, 'See questions asked')));
+  form.querySelector('#ask-questions').addEventListener('click', (e) => { e.preventDefault(); questionsDialog(); });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault(); clear(slot); go.disabled = true;
+    try {
+      await put('/assistant/settings', { staff_on: staffOn.checked, guest_pages: pages.filter(([, b]) => b.checked).map(([p]) => p), contact_email: contact.value.trim() || null });
+      toast('Saved');
+    } catch (err) { slot.append(errorBox(err)); } finally { go.disabled = false; }
+  });
+  return h('section', { class: 'panel stack' }, h('h2', null, 'Assistant'), form);
+}
+async function questionsDialog() {
+  const body = h('div', { class: 'stack' }, h('p', { class: 'loading' }, 'Loading…'));
+  dialog('Questions asked in the last month', body, { wide: true });
+  try {
+    const { data } = await get('/assistant/questions');
+    clear(body);
+    if (!data.length) { body.append(empty('Nobody has asked anything yet.')); return; }
+    body.append(h('p', { class: 'muted small' }, 'What staff and guests wanted to know. Ones it could not answer are worth a line in your own notes, or a word to support.'),
+      table([{ head: 'When', cell: (r) => fmtDateTime(r.created_at) }, { head: 'Who', cell: (r) => (r.audience === 'guest' ? `Guest, ${PAGE_NAMES[r.page] || r.page}` : r.username || 'Staff') }, { head: 'Question', cell: (r) => r.question },
+        { head: 'How it went', cell: (r) => [r.unanswered ? state('Not answered', 'hold') : null, r.rating === -1 ? state('Did not help', 'closed') : r.rating === 1 ? state('Helped', 'open') : null, r.escalated_at ? state('Passed on', 'neutral') : null] }], data));
+  } catch (err) { clear(body); body.append(errorBox(err)); }
 }
