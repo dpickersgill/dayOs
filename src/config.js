@@ -64,6 +64,14 @@ module.exports = {
   stagingSettings: { inbox: env.STAGING_INBOX || '', smsTo: env.STAGING_SMS_TO || '', gate: env.STAGING_GATE || '' },
   stripe,
   map: { layers: mapLayers, maxZoom: mapMaxZoom },
+  // Patrol "fill in from the story": off unless PATROL_AI=on and a key is set. The story holds patient health
+  // information, so turn it on only once the AI provider has signed a business associate agreement.
+  patrolAi: {
+    on: env.PATROL_AI === 'on' && Boolean(env.ANTHROPIC_API_KEY),
+    key: env.ANTHROPIC_API_KEY || '',
+    model: env.PATROL_AI_MODEL || 'claude-sonnet-5-5',
+    apiBase: (env.ANTHROPIC_API_BASE || 'https://api.anthropic.com').replace(/\/$/, ''),
+  },
   port: Number(env.PORT || 8080),
   jwtSecret: env.JWT_SECRET || 'dev-only-secret-change-me-dev-only-secret',
   // Separate keys so sign-in tokens can be rotated on their own. Each falls back to JWT_SECRET, which is what was used

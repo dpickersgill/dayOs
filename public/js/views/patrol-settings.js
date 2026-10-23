@@ -70,7 +70,8 @@ export async function drawOpsSettings(box) {
         field('Protocol version', input({ name: 'protocol_version', maxlength: 60, value: s.protocol_version || '', placeholder: 'OEC 6th ed. with 2026 local protocols' })),
         check('sms_critical', 'Text responders as well as the phone alert on critical calls (needs text messages set up)', s.sms_critical),
         check('avalanche', 'This mountain does avalanche work (shows the Avalanche page)', s.avalanche),
-      ], (fd) => ({ medical_director: String(fd.get('medical_director') || '').trim() || null, protocol_version: String(fd.get('protocol_version') || '').trim() || null, sms_critical: Boolean(fd.get('sms_critical')), avalanche: Boolean(fd.get('avalanche')) }),
+        s.story_fill_available ? check('story_fill', 'Fill in from the story: read the patroller\'s narrative and suggest answers for empty report fields. The narrative is sent to the AI provider; turn this on only once your medical director agrees.', s.story_fill) : null,
+      ], (fd) => ({ medical_director: String(fd.get('medical_director') || '').trim() || null, protocol_version: String(fd.get('protocol_version') || '').trim() || null, sms_critical: Boolean(fd.get('sms_critical')), avalanche: Boolean(fd.get('avalanche')), ...(s.story_fill_available ? { story_fill: Boolean(fd.get('story_fill')) } : {}) }),
       'The medical director and protocol version are stamped on each report when it is signed off.'),
       group('Volunteer days and shifts', s.can.schedule, [
         field('Days a season', input({ name: 'min_days', type: 'number', min: 0, max: 200, value: s.min_days ?? '' }), 'Leave blank for no minimum'),

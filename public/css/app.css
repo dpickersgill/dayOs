@@ -2363,3 +2363,39 @@ body:has(.tour-card) .demo-pill { display: none; }
 .amap-legend { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 6px; }
 .amap-legend label { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; cursor: pointer; }
 .amap-handle { background: #fff; border: 3px solid #12303a; border-radius: 50%; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5); }
+
+/* Patrol menu (2026.10.32): New case always in the header; on phones the five sections fill the width and every page in
+   a section is a large wrapped button, so nothing is hidden off the edge and gloved fingers hit their target. */
+.patrol-head { flex-wrap: wrap; align-items: center; }
+.patrol-new { margin-left: auto; min-height: 44px; font-size: 1rem; gap: 6px; }
+.patrol-new span { font-size: 1.35rem; line-height: 1; }
+.pbody > div > div > .tabs button { min-height: 44px; font-size: 1rem; }
+@media (min-width: 901px) { .fab[data-act='new-case'] { display: none; } }
+@media (max-width: 900px) {
+  .patrol-head { gap: 10px; }
+  .patrol-head h1 { flex: 1 1 auto; }
+  .patrol-new { margin-left: 0; }
+  .patrol-head .psections { order: 3; flex: 1 1 100%; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; overflow: visible; }
+  .patrol-head .psections button { justify-content: center; min-height: 44px; padding: 0 6px; }
+  .pbody > div > div > .tabs { mask-image: none; -webkit-mask-image: none; flex-wrap: wrap; overflow: visible; gap: 8px; border-bottom: none; padding-bottom: 4px; margin-bottom: 16px; scroll-snap-type: none; }
+  .pbody > div > div > .tabs button { flex: 1 1 calc(33.333% - 8px); min-width: 0; justify-content: center; text-align: center; white-space: normal; line-height: 1.2; padding: 8px 10px; border: 1.5px solid var(--line-strong); border-radius: 10px; margin: 0; background: var(--surface); color: var(--ink-2); }
+  .pbody > div > div > .tabs button[aria-selected='true'] { background: var(--sel-bg); border-color: var(--sel-bg); color: var(--sel-ink); }
+}
+@media (max-width: 420px) { .pbody > div > div > .tabs button { flex-basis: calc(50% - 8px); } }
+
+/* ---- patrol report check and fill in from the story */
+.report-check { border-left: 4px solid var(--hold); background: var(--hold-tint); border-radius: 8px; padding: 10px 14px; }
+.report-check > summary { cursor: pointer; min-height: 32px; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.report-check > summary .muted { font-size: 0.9em; }
+.check-items { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 10px; }
+.check-items li { line-height: 1.35; }
+.check-why { display: block; color: var(--muted); font-size: 0.92em; margin-top: 2px; }
+.story-fill { margin-top: 6px; }
+.fill-group { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }
+.fill-group legend { font-weight: 700; margin-bottom: 4px; }
+.fill-row { display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: start; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; min-height: 44px; }
+.fill-row input { width: 22px; height: 22px; margin: 2px 0 0; }
+.fill-row:has(input:not(:checked)) { opacity: 0.6; }
+.fill-text { display: grid; gap: 2px; }
+.fill-value { font-size: 1.05em; }
+.fill-quote { color: var(--muted); font-style: italic; font-size: 0.92em; }

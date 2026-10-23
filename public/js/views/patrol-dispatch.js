@@ -138,7 +138,7 @@ export async function drawPassport(box, { canLead, staffId }) {
     parts.push(overview.length ? table([
       { head: 'Name', cell: (m) => `${m.first_name} ${m.last_name}` }, { head: 'Signed off', num: true, cell: (m) => `${m.signed_off} of ${m.skills}` },
       { head: 'Expired', num: true, cell: (m) => (m.expired ? state(String(m.expired), 'bad') : '0') }, { head: 'In progress', num: true, cell: (m) => m.in_progress },
-      { head: '', actions: true, cell: (m) => button('Passport', () => passportDialog(m.staff_id, `${m.first_name} ${m.last_name}`, true, again), { small: true }) },
+      { head: '', actions: true, cell: (m) => button('Skills', () => passportDialog(m.staff_id, `${m.first_name} ${m.last_name}`, true, again), { small: true }) },
     ], overview) : empty('Add patrollers to the roster first.'));
     parts.push(h('h3', null, 'Skills'), skills.length ? table([
       { head: 'Skill', cell: (k) => k.name }, { head: 'Group', cell: (k) => k.category || '' }, { head: 'Valid for', cell: (k) => (k.valid_months ? `${k.valid_months} months` : 'Does not lapse') },

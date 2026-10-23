@@ -238,7 +238,9 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       const sec = scope.querySelector(`details[data-section="${where.section}"]`);
       if (sec) { sec.open = true; el = (where.field && sec.querySelector(`[data-field="${where.field}"]`)) || sec; }
     } else if (where.area) {
-      el = scope.querySelector(`[data-area="${where.area}"]`) || page.querySelector(`[data-area="${where.area}"]`);
+      el = scope.querySelector(`[data-area="${where.area}"]`)
+        || (where.patient_id && page.querySelector(`[data-bedside="${where.patient_id}"] [data-area="${where.area}"]`))
+        || page.querySelector(`[data-area="${where.area}"]`);
     }
     if (!el) return;
     const pane = el.closest('.pane');
@@ -327,7 +329,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       });
       return b;
     };
-    return h('section', { class: 'panel stack timeline-panel' }, h('div', { class: 'spread' }, h('h2', null, 'Timeline'), editable ? button('Add with a time', () => eventDialog(), { small: true }) : null),
+    return h('section', { class: 'panel stack timeline-panel', 'data-area': 'events' }, h('div', { class: 'spread' }, h('h2', null, 'Timeline'), editable ? button('Add with a time', () => eventDialog(), { small: true }) : null),
       h('div', { class: 'stages' }, STAGES.map(chip)),
       c.events.length ? h('details', { class: 'more' }, h('summary', null, `All entries (${ev.length}${c.events.length > ev.length ? `, ${c.events.length - ev.length} entered in error` : ''})`), h('ol', { class: 'timeline' }, c.events.map((e) => h('li', { class: e.voided_at ? 'voided' : null },
         h('span', null, h('b', null, fmtTime(e.at)), ' ', h('span', { class: 'what' }, label(e.kind)), e.note ? h('span', { class: 'muted' }, ` ${e.note}`) : null, lateNote(e, 'at') ? h('span', { class: 'late-tag' }, lateNote(e, 'at')) : null, voidedNote(e)),
@@ -371,9 +373,15 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
   function reportHead(c, editable) {
     const actions = [];
     if (!version && c.report_state === 'draft') {
-      const submit = button('Submit report', async () => {
+      const send_ = async () => {
         try { await post(`/patrol/incidents/${id}/submit`, {}); } catch (err) { showProblems(err, 'Not ready to submit', editable); return; }
         toast('Report submitted'); await load();
+      };
+      const submit = button('Submit report', async () => {
+        // The report check is advice: if it cannot be fetched, the submit goes ahead and the required-field check still runs.
+        let items = [];
+        try { items = (await get(`/patrol/incidents/${id}/check`)).data || []; } catch (_) { items = []; }
+        if (items.length) checkDialog(items, send_); else await send_();
       });
       submit.dataset.act = 'submit';
       actions.push(submit);
@@ -410,6 +418,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       !version && rv.changes_requested ? changesBox(rv.changes_requested) : null,
       !version && rv.escalated && c.report_state === 'submitted' ? h('p', { class: 'review-flag', role: 'status' }, h('strong', null, 'Escalated'), ` by ${rv.escalated.by || 'a reviewer'}: ${rv.escalated.note}`) : null,
       reviewPanel,
+      !version && c.report_state !== 'approved' ? checkList(c.check, c.report_state === 'draft' ? editable : true) : null,
       actions.length ? h('div', { class: 'row actions' }, actions) : null,
       !version && rv.history && rv.history.length ? reviewHistory(rv.history) : null);
   }
@@ -491,6 +500,37 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
   }
 
   /** Lists what is missing. Each item is a link to the field when the report can be edited by this reader. */
+  /** One suggestion from the report check: a link to the field when there is one, and why it matters. */
+  function checkItem(x, onGo) {
+    const where = x.section || x.area;
+    const text = where ? h('button', { type: 'button', class: 'problem-link' }, x.message) : h('span', null, x.message);
+    if (where) text.addEventListener('click', () => { if (onGo) onGo(); jumpTo(x); });
+    return h('li', null, text, x.why ? h('span', { class: 'check-why' }, x.why) : null);
+  }
+
+  /** "Things to check" at the top of the report: the patroller sees it while writing, the review group while reviewing. */
+  function checkList(items, canJump) {
+    if (!items || !items.length) return null;
+    const n = items.length;
+    return h('details', { class: 'report-check', 'data-area': 'report-check' },
+      h('summary', null, h('b', null, `${n} thing${n === 1 ? '' : 's'} to check`), h('span', { class: 'muted' }, ' Suggestions only. The patroller and the review group decide.')),
+      h('ul', { class: 'check-items' }, items.map((x) => (canJump ? checkItem(x) : h('li', null, x.message, x.why ? h('span', { class: 'check-why' }, x.why) : null)))));
+  }
+
+  /** Before submitting: what the check found, with the choice to fix it first or submit as it is. */
+  function checkDialog(items, onSubmit) {
+    let dlg;
+    const fix = h('button', { type: 'button', class: 'btn primary' }, 'Fix first');
+    const anyway = h('button', { type: 'button', class: 'btn' }, 'Submit anyway');
+    const n = items.length;
+    dlg = dialog(`${n} thing${n === 1 ? '' : 's'} to check`, [
+      h('p', { class: 'muted' }, 'These are suggestions, not requirements. Select one to go straight to it, or submit the report as it is. You decide.'),
+      h('ul', { class: 'check-items' }, items.map((x) => checkItem(x, () => dlg.close()))),
+      h('div', { class: 'footer row' }, anyway, fix)]);
+    fix.addEventListener('click', () => { dlg.close(); const first = items.find((x) => x.section || x.area); if (first) jumpTo(first); });
+    anyway.addEventListener('click', async () => { anyway.disabled = true; dlg.close(); await onSubmit(); });
+  }
+
   function showProblems(err, title = 'Not ready to submit', canJump = true) {
     const list = err && err.details && err.details.length ? err.details : [err.message || 'The report is not complete yet'];
     let dlg;
@@ -514,6 +554,44 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
         toast('Report is a draft again');
         await load();
       }, { submitText: 'Reopen' });
+  }
+
+  /**
+   * Fill in from the story: the server reads the narrative and proposes answers for empty patient fields, each with the
+   * words it came from. The patroller ticks the right ones; only those are saved, through the normal patient update.
+   */
+  async function storyFill(story) {
+    try {
+      if (story.value.trim() !== String(current.narrative || '').trim()) await patch(`/patrol/incidents/${id}`, { narrative: story.value });
+    } catch (err) { fail(err); return; }
+    toast('Reading the story…');
+    let props;
+    try { props = (await post(`/patrol/incidents/${id}/story-fill`, {})).data || []; } catch (err) { fail(err); return; }
+    if (!props.length) { toast('The story does not answer any of the empty fields', 'warn'); await load(); return; }
+    const people = [...new Set(props.map((x) => x.patient_id))];
+    const groups = people.map((pid) => {
+      const mine = props.map((x, i) => [x, i]).filter(([x]) => x.patient_id === pid);
+      return h('fieldset', { class: 'fill-group' },
+        people.length > 1 ? h('legend', null, mine[0][0].patient) : null,
+        mine.map(([x, i]) => h('label', { class: 'fill-row' },
+          h('input', { type: 'checkbox', name: `p${i}`, checked: true }),
+          h('span', { class: 'fill-text' }, h('b', null, x.label), h('span', { class: 'fill-value' }, x.value_label), h('q', { class: 'fill-quote' }, x.quote)))));
+    });
+    formDialog('Fill in from the story', h('div', { class: 'stack' },
+      h('p', { class: 'muted' }, 'Each answer shows the words it came from. Untick anything that is not right; only ticked answers are saved, and you can change them afterwards like any other field.'),
+      groups), async (fd) => {
+      const byPatient = new Map();
+      let n = 0;
+      props.forEach((x, i) => {
+        if (!fd.get(`p${i}`)) return;
+        const body = byPatient.get(x.patient_id) || {};
+        if (x.col) body[x.col] = x.value; else (body.form = body.form || {})[x.field] = x.value;
+        byPatient.set(x.patient_id, body); n += 1;
+      });
+      for (const [pid, body] of byPatient) await patch(`/patrol/incidents/${id}/patients/${pid}`, body);
+      toast(n ? `${n} answer${n === 1 ? '' : 's'} filled in` : 'Nothing filled in');
+      await load();
+    }, { submitText: 'Fill in ticked answers', wide: true, onClose: () => load() });
   }
 
   // ---- incident details and the narrative
@@ -542,7 +620,9 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
         h('label', { for: `narr-${id}` }, 'Narrative'),
         h('div', { class: 'row tight draft-row' }, h('span', { class: 'muted small' }, 'Draft it from the care entries:'), button('CHART', draft('chart'), { small: true }), button('SOAP', draft('soap'), { small: true })),
         Object.assign(story, { id: `narr-${id}` }),
-        h('span', { class: 'hint' }, 'What happened, in order, in plain words. A draft only says what the record says; read it and correct it before saving.')), 'narrative'),
+        h('span', { class: 'hint' }, 'What happened, in order, in plain words: what you saw, what the patient and witnesses said, what you did, how the patient changed. To speak it, tap the microphone on your phone\'s keyboard. A draft only says what the record says; read it and correct it before saving.'),
+        c.story_fill && live(c.patients).length ? h('div', { class: 'row tight story-fill' }, button('Fill in from the story', () => storyFill(story), { small: true }),
+          h('span', { class: 'muted small' }, 'Suggests answers for empty fields. Nothing is saved until you tick it.')) : null), 'narrative'),
       h('div', { class: 'row' }, h('button', { type: 'submit', class: 'btn primary' }, 'Save details')));
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -587,7 +667,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
   }
   function responderDialog() {
     const members = roster.filter((m) => m.staff_status === 'active');
-    if (!members.length) { toast('Add patrollers to the Team list first', 'error'); return; }
+    if (!members.length) { toast('Add patrollers to the Roster first', 'error'); return; }
     formDialog('Add a responder', h('div', { class: 'form' }, field('Patroller', select(members.map((m) => [m.staff_id, `${m.first_name} ${m.last_name}`]), '', { name: 'staff_id' })), field('Role', select([['assist', 'Assist'], ['lead', 'Lead (replaces the current lead)'], ['transport', 'Transport'], ['dispatch', 'Dispatch']], 'assist', { name: 'role' }))),
       async (fd) => { await post(`/patrol/incidents/${id}/responders`, { staff_id: num(fd, 'staff_id'), role: val(fd, 'role') }); await load(); });
   }

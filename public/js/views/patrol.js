@@ -74,8 +74,8 @@ export async function render(root, params = []) {
   const items = [
     ['home', 'Home', (b) => drawHome(b, opts)],
     ['duty', 'On duty', drawDuty],
-    ['sweep', 'Sweep', drawSweep],
-    ['opening', 'Opening', drawOpening],
+    ['sweep', 'Closing sweep', drawSweep],
+    ['opening', 'Opening checks', drawOpening],
     ['log', 'Daily log', drawLog],
     ...(me.avalanche ? [['avalanche', 'Avalanche', drawAvy]] : []),
     ...only('dispatch', ['dispatch', 'Dispatch', (b) => drawDispatch(b, opts)]),
@@ -83,14 +83,14 @@ export async function render(root, params = []) {
     ...only('followups', ['followup', 'Follow-up', drawFollowup]),
     ['map', 'Map', (b) => drawMapTab(b, opts)],
     ['schedule', 'Schedule', drawSchedule],
-    ['cover', 'Cover', drawCover],
+    ['cover', 'Shift cover', drawCover],
     ['posts', 'Today\'s posts', (b) => drawPosts(b, opts)],
-    ['team', 'Team', (b) => drawTeam(b, opts)],
+    ['team', 'Roster', (b) => drawTeam(b, opts)],
     ['equipment', 'Equipment', (b) => drawEquipment(b, opts)],
     ['meds', 'Medications', drawMeds],
     ['lifts', 'Lift evacuation', drawLifts],
     ['training', 'Training', (b) => drawTraining(b, opts)],
-    ['passport', 'Passport', (b) => drawPassport(b, opts)],
+    ['passport', 'Skills', (b) => drawPassport(b, opts)],
     ...only('records', ['records', 'Records requests', drawRecords]),
     ...(['manage_settings', 'manage_schedule', 'manage_meds', 'run_sweep', 'avalanche'].some(has) ? [['settings', 'Patrol settings', drawOpsSettings]] : []),
     ...only('reports', ['stats', 'Statistics', drawStats]),
@@ -99,11 +99,13 @@ export async function render(root, params = []) {
     ...only('view_access_log', ['access', 'Access log', drawAccessLog]),
     ...(me.access_level === 'admin' ? [['levels', 'Access levels', drawLevels]] : []),
   ];
-  // Two levels: a few sections for what the person is doing, then the pages inside the chosen section.
+  // Two levels: a few sections for what the person is doing, then the pages inside the chosen section. On a phone the
+  // pages show as large buttons that wrap, so none hides off the edge of the screen.
   const SECTIONS = [
     ['now', 'Now', ['home', 'duty', 'dispatch', 'map', 'opening', 'sweep', 'avalanche', 'log']],
-    ['cases', 'Cases', ['cases', 'review', 'followup', 'stats', 'network', 'records']],
-    ['team', 'Team', ['schedule', 'cover', 'posts', 'team', 'equipment', 'meds', 'lifts', 'training', 'passport']],
+    ['cases', 'Cases', ['cases', 'review', 'followup', 'records', 'stats', 'network']],
+    ['people', 'People', ['schedule', 'cover', 'posts', 'team', 'training', 'passport']],
+    ['gear', 'Gear', ['equipment', 'meds', 'lifts']],
     ['admin', 'Admin', ['settings', 'access', 'levels']],
   ].map(([id, text, keys]) => ({ id, text, items: keys.map((k) => items.find((i) => i[0] === k)).filter(Boolean) })).filter((s) => s.items.length);
   const wanted = SECTIONS.find((s) => s.items.some((i) => i[0] === params[0])) || SECTIONS[0];
@@ -119,7 +121,9 @@ export async function render(root, params = []) {
     for (const [id, b] of buttons) { if (id === section.id) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
     clear(body).append(h('div', { class: section.items.length === 1 ? 'solo' : null }, tabs(section.items, key && section.items.some((i) => i[0] === key) ? key : section.items[0][0])));
   }
-  root.append(h('div', { class: 'page-head patrol-head' }, h('h1', null, 'Patrol'), nav), body, newCaseButton());
+  // New case is the one thing a patroller must always find: in the header on every screen size, and floating on a phone.
+  const headNew = has('create_case') ? h('button', { type: 'button', class: 'btn primary patrol-new', 'data-act': 'new-case-head', onclick: () => newCase() }, h('span', { 'aria-hidden': 'true' }, '+'), ' New case') : null;
+  root.append(h('div', { class: 'page-head patrol-head' }, h('h1', null, 'Patrol'), nav, headNew), body, newCaseButton());
   open(wanted, params[0]);
   // A small count on Cases when reports are waiting for this person to approve.
   if (has('approve_case') && buttons.has('cases')) {

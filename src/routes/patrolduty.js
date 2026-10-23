@@ -26,13 +26,13 @@ const NAME = "CONCAT(p.first_name, ' ', p.last_name)";
 router.get('/ops-settings', patrol, async (req, res) => {
   const s = await OPS.settingsOf(pool, req.auth.tenantId);
   const features = (await PA.accessOf(pool, req)).features;
-  res.json({ ...s, can: { settings: features.has('manage_settings'), schedule: features.has('manage_schedule'), meds: features.has('manage_meds'), sweep: features.has('run_sweep'), avalanche: features.has('avalanche') } });
+  res.json({ ...s, story_fill_available: require('../lib/storyfill').available(), can: { settings: features.has('manage_settings'), schedule: features.has('manage_schedule'), meds: features.has('manage_meds'), sweep: features.has('run_sweep'), avalanche: features.has('avalanche') } });
 });
 
 const nul = (s) => s.nullable().optional();
 // Each setting is changed by those who run that part of patrol.
 const GROUPS = {
-  manage_settings: { medical_director: nul(z.string().trim().max(150)), protocol_version: nul(z.string().trim().max(60)), avalanche: z.boolean().optional(), sms_critical: z.boolean().optional() },
+  manage_settings: { medical_director: nul(z.string().trim().max(150)), protocol_version: nul(z.string().trim().max(60)), avalanche: z.boolean().optional(), sms_critical: z.boolean().optional(), story_fill: z.boolean().optional() },
   manage_schedule: { min_days: nul(z.number().int().min(0).max(200)), min_days_candidate: nul(z.number().int().min(0).max(200)), self_signup: z.boolean().optional(), remind_dates: z.string().regex(/^(\d{2}-\d{2})(,\d{2}-\d{2}){0,5}$/, 'Dates as MM-DD, separated by commas').optional() },
   manage_meds: { controlled_counts: z.boolean().optional(), o2_refill_psi: z.number().int().min(0).max(3000).optional() },
   run_sweep: { sweep_late_minutes: z.number().int().min(5).max(240).optional() },

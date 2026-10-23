@@ -446,7 +446,7 @@ test('patrol: the team, posts, equipment and training tabs show real data', skip
   ok(await api('POST', '/patrol/training', { token: o, body: { staff_id: D.s2, title: 'Toboggan refresher', kind: 'toboggan', hours: 3, completed_on: today } }));
   const root = await renderView('patrol', 'owner', T.owner);
   const tab = async (name) => { (await patTab(root, name)).click(); await settle(); clean(root, name); };
-  await tab('Team');
+  await tab('Roster');
   assert.match(root.textContent, /Sam Staffer/);
   assert.match(root.textContent, /Outdoor Emergency Care: current/);
   assert.match(root.textContent, /3 h/);
@@ -498,7 +498,7 @@ test('patrol: the Access levels tab edits the matrix, and a Host sees only the t
 
   const host = await renderView('patrol', 'patrol', T.host);
   const names = await tabNames(host);
-  assert.ok(names.includes('Opening') && names.includes('Map'), 'a Host has run checks (Opening) and the map');
+  assert.ok(names.includes('Opening checks') && names.includes('Map'), 'a Host has run checks (Opening checks) and the map');
   for (const gone of ['All cases', 'Dispatch', 'Follow-up', 'Statistics', 'Access log', 'Access levels']) assert.equal(names.includes(gone), false, `a Host has no ${gone} tab`);
   assert.equal(host.querySelector('[data-act=new-case]'), null, 'a Host cannot start a case');
   const pat = await renderView('patrol', 'patrol', T.patrol);
@@ -526,7 +526,7 @@ test('patrol: the dispatch board and training passport show real data and their 
   btn('Guest help page').click(); await settle();
   assert.match(document.body.textContent, new RegExp(`/help/`));
   await closeOverlays();
-  (await patTab(root, 'Passport')).click(); await settle();
+  (await patTab(root, 'Skills')).click(); await settle();
   clean(root, 'passport');
   assert.match(root.textContent, /Toboggan handling/);
   assert.match(root.textContent, /Sam Staffer/);
@@ -551,9 +551,16 @@ test('patrol: a case opens, shows the whole report, and the sign-off buttons wor
   for (const text of [c.case_number, 'Cam Carver', 'Medication: Ibuprofen 400 mg oral', 'Wendy Witness', 'Sprain strain, Knee', 'Draft']) assert.ok(root.textContent.includes(text), `case page is missing "${text}"`);
   await exercise(root, 'case page');
 
-  // submitting an incomplete report lists what is missing
+  // submitting first shows the report check (suggestions only); "Submit anyway" goes on, and an incomplete report lists what is missing
+  const pastCheck = async () => {
+    const anyway = [...document.querySelectorAll('.overlay button')].find((b) => b.textContent.trim() === 'Submit anyway');
+    if (anyway) { anyway.click(); await settle(); }
+  };
   buttons(root, 'Submit report')[0].click();
   await settle();
+  assert.match(document.querySelector('.overlay').textContent, /to check/, 'the report check comes first');
+  assert.ok([...document.querySelectorAll('.overlay button')].some((b) => b.textContent.trim() === 'Fix first'));
+  await pastCheck();
   const dlg = document.querySelector('.overlay');
   assert.ok(dlg, 'a dialog explains why it cannot be submitted');
   assert.match(dlg.textContent, /chief complaint/i);
@@ -566,6 +573,7 @@ test('patrol: a case opens, shows the whole report, and the sign-off buttons wor
   root = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id)]);
   buttons(root, 'Submit report')[0].click();
   await settle();
+  await pastCheck();
   assert.equal(ok(await api('GET', base, { token: o })).report_state, 'submitted');
   assert.equal(document.querySelector('.overlay'), null, 'no dialog when the submit succeeds');
   assert.match(root.textContent, /Waiting for review/);
@@ -1014,9 +1022,15 @@ test('patrol: items in the "not ready" list link to the missing field, for both 
   const root = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id)]);
   const btn = (t) => [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === t);
   const links = () => [...document.querySelectorAll('.overlay button.problem-link')];
+  // The report check comes first and only suggests: "Submit anyway" goes on to the required-field check.
+  const submitPast = async () => {
+    btn('Submit report').click(); await settle();
+    const anyway = [...document.querySelectorAll('.overlay button')].find((b) => b.textContent.trim() === 'Submit anyway');
+    if (anyway) { assert.match(document.querySelector('.overlay').textContent, /to check/); anyway.click(); await settle(); }
+  };
 
   // Submit: choose "Chief complaint" and land in it
-  btn('Submit report').click(); await settle();
+  await submitPast();
   assert.match(document.querySelector('.overlay').textContent, /Not ready to submit/);
   links().find((b) => /chief complaint/i.test(b.textContent)).click();
   assert.equal(document.querySelector('.overlay'), null, 'the list closes when a link is used');
@@ -1027,7 +1041,7 @@ test('patrol: items in the "not ready" list link to the missing field, for both 
   assert.ok(field.contains(document.activeElement), 'the cursor is in it');
 
   // Submit again: the missing lead goes to the Add responder button
-  btn('Submit report').click(); await settle();
+  await submitPast();
   links().find((b) => /led the response/i.test(b.textContent)).click();
   assert.equal(document.activeElement.textContent.trim(), 'Add responder');
 

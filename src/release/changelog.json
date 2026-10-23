@@ -1,6 +1,43 @@
 {
   "releases": [
     {
+      "version": "2026.10.33",
+      "date": "2026-10-25",
+      "title": "A second look before you submit, fill-in from the story, and a clearer Patrol menu",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Before a patient care report is submitted, Verdynt/OS points out gaps a reviewer would notice: a head injury without AVPU or GCS, a splint without CMS before and after, oxygen without the flow, a medication without its effect, abnormal last vitals with no repeat set, times out of order, or words like \"drunk\" or \"his fault\" in the narrative. Each one links straight to the field and says why it matters. They are suggestions only: fix them, or submit anyway. The review group sees the same list."
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Speak the story: tap the microphone on your phone's keyboard in the narrative box. Where the mountain has turned it on, Fill in from the story suggests answers for the empty fields (helmet, lost consciousness, activity and more), each with the words it came from. Nothing is saved until you tick it."
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "The Patrol menu is easier to find your way around: five groups (Now, Cases, People, Gear, Admin) with clearer names, every page visible on a phone without scrolling sideways, bigger buttons for gloved hands, and New case always at the top."
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": "platform",
+          "text": "Fill in from the story needs PATROL_AI=on and ANTHROPIC_API_KEY (optional PATROL_AI_MODEL). The narrative is sent to the AI provider, so set these only once a business associate agreement is in place; each mountain then turns it on in Patrol, Settings."
+        }
+      ]
+    },
+    {
       "version": "2026.10.32",
       "date": "2026-10-25",
       "title": "A map of your pipes, valves and equipment, and a satellite view on every map",

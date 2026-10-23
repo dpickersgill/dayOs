@@ -19,6 +19,8 @@ const { buildPull, ageOn } = require('../lib/patrolpull');
 const { derive, parseDetail } = require('../lib/carederive');
 const MEDS = require('./patrolmeds');
 const OPS = require('../lib/patrolops');
+const { checkCase } = require('../lib/reportcheck');
+const SF = require('../lib/storyfill');
 
 const router = express.Router();
 // Incident records can contain injury details about guests, so access is limited to patrol and managers.
@@ -319,7 +321,33 @@ router.get('/incidents/:id', patrol, needs('view_cases'), async (req, res) => {
   if (!c) throw notFound('Incident');
   await audit(pool, req, 'view', 'incidents', id); // reads of sensitive records are logged too
   c.review = await R.caseInfo(pool, req, c);
+  c.check = checkCase(c); // suggestions only: the patroller and the review group decide
+  c.story_fill = SF.available() && (await OPS.settingsOf(pool, req.auth.tenantId)).story_fill;
   res.json(c);
+});
+
+/** The report check: gaps worth a second look before submitting. Never blocks; reportProblems decides what is required. */
+router.get('/incidents/:id/check', patrol, needs('view_cases'), async (req, res) => {
+  const c = await loadCase(pool, req.auth.tenantId, paramId(req));
+  if (!c) throw notFound('Incident');
+  res.json({ data: checkCase(c) });
+});
+
+/**
+ * Fill in from the story: proposals for empty patient fields, read from the narrative. Nothing is saved here; the
+ * patroller ticks what is right and the screen saves it through the patient update. Off unless the server has a key
+ * and the mountain turned it on (Patrol, Settings), because the story is sent to the AI provider.
+ */
+router.post('/incidents/:id/story-fill', patrol, needs('create_case'), async (req, res) => {
+  const id = paramId(req);
+  if (!SF.available()) throw forbidden('Filling in from the story is not set up on this server');
+  if (!(await OPS.settingsOf(pool, req.auth.tenantId)).story_fill) throw forbidden('Filling in from the story is turned off for this mountain. The patrol director can turn it on in Patrol, Settings.');
+  const c = await loadCase(pool, req.auth.tenantId, id);
+  if (!c) throw notFound('Incident');
+  if (c.report_state === 'approved') throw conflict('This report is approved and locked');
+  const data = await SF.propose(c);
+  await audit(pool, req, 'story_fill', 'incidents', id, { proposals: data.length }); // the count only: no health details in the log
+  res.json({ data });
 });
 
 /** The frozen copies kept each time the report was submitted or approved. */

@@ -7,9 +7,9 @@ const { nowIn, todayIn, addDays, seasonFor } = require('./util');
 const DEFAULTS = {
   min_days: null, min_days_candidate: null, self_signup: false, remind_dates: '01-15,03-01', last_reminded: null,
   medical_director: null, protocol_version: null, sweep_late_minutes: 45, controlled_counts: false, avalanche: false,
-  sms_critical: true, o2_refill_psi: 500,
+  sms_critical: true, o2_refill_psi: 500, story_fill: false,
 };
-const BOOLS = ['self_signup', 'controlled_counts', 'avalanche', 'sms_critical'];
+const BOOLS = ['self_signup', 'controlled_counts', 'avalanche', 'sms_critical', 'story_fill'];
 
 async function settingsOf(db, t) {
   const s = await one(db, 'SELECT * FROM patrol_settings WHERE tenant_id = ?', [t]);

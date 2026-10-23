@@ -130,7 +130,7 @@ export function bedsideCard(p, c, opts) {
   const injuryRow = (i) => h('li', { class: i.voided_at ? 'voided' : null }, h('span', null, h('span', { class: 'what' }, `${label(i.injury_type)}, ${label(i.body_region)}${i.side && i.side !== 'na' ? ` (${i.side})` : ''}`), i.notes ? h('span', { class: 'muted' }, ` ${i.notes}`) : null, voidedNote(i)),
     editable && !i.voided_at ? button('Entered in error', () => voidDialog({ what: `${label(i.injury_type)}, ${label(i.body_region)}`, path: `${base}/injuries/${i.id}`, onDone: opts.reload }), { small: true, kind: 'quiet' }) : null);
   const queuedInj = queued.filter((x) => x.path.endsWith('/injuries'));
-  const injuries = h('div', { class: 'stack tight' }, h('div', { class: 'spread' }, h('h4', null, 'Injuries and findings'), editable ? button('Add injury', () => opts.injuryDialog(base), { small: true }) : null),
+  const injuries = h('div', { class: 'stack tight', 'data-area': 'injuries' }, h('div', { class: 'spread' }, h('h4', null, 'Injuries and findings'), editable ? button('Add injury', () => opts.injuryDialog(base), { small: true }) : null),
     p.injuries.length || queuedInj.length ? h('ul', { class: 'plain log' }, p.injuries.map(injuryRow), queuedInj.map((x) => h('li', { class: 'queued' }, h('span', null, `${label(x.body.injury_type)}, ${label(x.body.body_region)} `, queuedTag())))) : h('p', { class: 'muted' }, 'None recorded.'));
 
   // ---- treatments
@@ -159,7 +159,7 @@ export function bedsideCard(p, c, opts) {
         editable && !tr.voided_at ? button('Entered in error', () => voidDialog({ what: `${treatmentName(tr)} at ${fmtTime(tr.performed_at)}`, path: `${base}/treatments/${tr.id}`, onDone: opts.reload }), { small: true, kind: 'quiet' }) : null));
   };
   const queuedTr = queued.filter((x) => x.path.endsWith('/treatments'));
-  const treatments = h('div', { class: 'stack tight' }, h('div', { class: 'spread' }, h('h4', null, 'Treatment log')), quick,
+  const treatments = h('div', { class: 'stack tight', 'data-area': 'treatments' }, h('div', { class: 'spread' }, h('h4', null, 'Treatment log')), quick,
     p.treatments.length || queuedTr.length ? h('ul', { class: 'plain log' }, p.treatments.map(trRow),
       queuedTr.map((x) => h('li', { class: 'queued' }, h('span', null, h('b', null, atTime(x.body.performed_at)), ` ${treatmentName(x.body)} `, queuedTag())))) : h('p', { class: 'muted' }, 'None recorded.'));
 
@@ -185,7 +185,7 @@ export function bedsideCard(p, c, opts) {
     ...live(p.treatments).filter((tr) => tr.kind === 'tourniquet').map((tr) => h('p', { class: 'tq-banner', role: 'alert' }, h('b', null, `Tourniquet on ${LIMB[(tr.detail || {}).limb] || ''} since ${fmtTime(tr.performed_at)}`), ` (${agoText(minutesSince(String(tr.performed_at)))})`)),
     refused.length ? h('div', { class: 'outbox-refused', role: 'alert' }, h('b', null, `${refused.length} entr${refused.length === 1 ? 'y' : 'ies'} could not be saved. `), refused.map((x) => `${x.label}: ${x.error}`).join('; ')) : null,
     h('div', { class: 'bed-grid' },
-      h('div', { class: 'bed-now stack' },
+      h('div', { class: 'bed-now stack', 'data-area': 'vitals' },
         h('div', { class: 'vhead spread' }, h('h4', null, cur ? `Vitals at ${fmtTime(cur.taken_at)} (${agoText(minutesSince(String(cur.taken_at)))})` : 'Vitals'), due),
         cur ? strip : h('p', { class: 'muted' }, queuedVitals.length ? 'Vitals are waiting to send.' : 'No vitals recorded yet.'),
         extras ? h('p', { class: 'small muted' }, extras) : null,
