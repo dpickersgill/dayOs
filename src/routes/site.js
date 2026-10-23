@@ -246,7 +246,7 @@ pages.get('/llms.txt', async (req, res, next) => {
 
 > Verdynt/OS is web-based operations software for independent ski areas in the United States: lift and trail status and inspections, grooming, fleet maintenance, ticket and season pass sales with RFID gate scanning, an online ticket shop, waivers, ski and snowboard rentals, ski school and lesson booking, ski patrol (patient care reports, dispatch, the closing sweep) and staff scheduling. Each mountain turns on only the apps it runs. Every plan starts with a 14-day free trial, with no contract.
 
-Verdynt/OS runs in a web browser on counter computers, phones and tablets, with nothing to install. Guest card payments go straight into each mountain's own Stripe account; Verdynt/OS never holds the money. Each mountain's data is kept separate, patient records are never deleted (mistakes are marked entered in error), and every mountain can export its data as spreadsheets at any time.
+Verdynt/OS runs in a web browser on counter computers, phones and tablets, with nothing to install. Guest card payments go straight into each mountain's own Stripe account; Verdynt/OS never holds the money. Each mountain's data is kept separate, patient records are never deleted (mistakes are marked entered in error), and every mountain can export its data as spreadsheets at any time. Every plan includes Ask, an in-app assistant that answers staff how-to questions from Help; the Assistant Plus add-on adds questions about the mountain's own day and a Questions button for guests. The assistant never sees patient care records.
 
 ## Pages
 

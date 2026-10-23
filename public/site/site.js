@@ -155,7 +155,7 @@
         el('thead', null, el('tr', null, el('th', { scope: 'col' }, el('span', { class: 'vh' }, 'App')), ...d.plans.map((p) => el('th', { scope: 'col' }, p.name)))),
         el('tbody', null, ...rows, addRows.length ? el('tr', { class: 'sub' }, el('th', { scope: 'rowgroup', colspan: String(d.plans.length + 1) }, 'Add-ons')) : null, ...addRows,
           el('tr', { class: 'sub' }, el('th', { scope: 'rowgroup', colspan: String(d.plans.length + 1) }, 'With every plan')),
-          ...['Today, Inbox, Customers and Waivers', 'Staff logins: as many as you need', 'Billing by card, bank account or invoice', '14-day free trial'].map((t) => el('tr', null, el('th', { scope: 'row' }, t), ...d.plans.map(() => el('td', null, yes())))))));
+          ...['Today, Inbox, Customers and Waivers', 'Ask: the in-app assistant for how-to questions', 'Staff logins: as many as you need', 'Billing by card, bank account or invoice', '14-day free trial'].map((t) => el('tr', null, el('th', { scope: 'row' }, t), ...d.plans.map(() => el('td', null, yes())))))));
       // Add-on cards
       $('#addonlist').replaceChildren(...d.addons.map((a) => {
         const inPlans = d.plans.filter((p) => a.apps.length && a.apps.every((x) => p.apps.some((y) => y.key === x.key))).map((p) => p.name);

@@ -46,6 +46,12 @@
           "app": null,
           "who": "platform",
           "text": "Console: each mountain shows the assistant's questions and cost this month against its cap, the ones not answered or passed on, and Change the cap."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "Website: the assistant on the home page (guest pages, FAQ), Product (New this season, the Questions button page, Always there), Pricing (included with every plan, an Assistant Plus question) and Security (what it can and cannot see). The home page guest pages also gain Program registration and the Family page."
         }
       ]
     },
