@@ -98,11 +98,11 @@ async function useCode(email, code) {
 // for the one they pick, its lifts and runs as a small drawing. The demo is then built on those lifts and runs.
 const mapLimit = rateLimit({ windowMs: 600_000, max: Number(process.env.TRY_MAP_LIMIT) || 30, message: 'Too many map lookups from this address. Try again in a few minutes, or start with a sample mountain.' });
 const STATE = z.enum(Object.keys(skiArea.STATES));
-const REF = z.string().regex(/^(way|relation)\/\d{1,12}$/);
+const REF = z.string().regex(/^(way|relation|node|osm|skimap)\/\d{1,12}$/); // an OpenStreetMap or Skimap.org id
 
 router.post('/find', mapLimit, validate(z.object({ mountain: z.string().trim().min(2).max(80), state: STATE })), async (req, res) => {
   try {
-    res.json({ data: await skiArea.find(clean(req.body.mountain), req.body.state), credit: '\u00a9 OpenStreetMap contributors' });
+    res.json({ data: await skiArea.find(clean(req.body.mountain), req.body.state), credit: skiArea.credit() });
   } catch (e) {
     if (e.unavailable) return res.json({ data: [], unavailable: true });
     throw bad(e.message);
@@ -114,7 +114,7 @@ router.post('/area', mapLimit, validate(z.object({ ref: REF, state: STATE })), a
   try { d = await skiArea.details(req.body.ref, req.body.state); } catch (e) { if (e.unavailable) throw new AppError(503, 'The map service is not answering right now. Try again, or start with a sample mountain.'); throw e; }
   if (!d) throw new AppError(404, 'That ski area was not found on the map');
   const { preview, lifts, trails, ...rest } = d;
-  res.json({ ...rest, lifts: lifts.map((l) => l.name), trails: trails.map((t) => ({ name: t.name, difficulty: t.difficulty })), preview, usable: lifts.length + trails.length >= 3, credit: '\u00a9 OpenStreetMap contributors' });
+  res.json({ ...rest, lifts: lifts.map((l) => l.name), trails: trails.map((t) => ({ name: t.name, difficulty: t.difficulty })), preview, usable: lifts.length + trails.length >= 3, credit: skiArea.credit() });
 });
 
 /** Fills a new demo mountain by running the same loader an operator would run by hand (with the real mountain's lifts and runs, when chosen). */

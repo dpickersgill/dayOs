@@ -7,6 +7,7 @@ process.env.BOOTSTRAP_KEY = 'test-bootstrap-key';
 process.env.LOGIN_RATE_LIMIT = '1000';
 process.env.SANDBOX_RATE_LIMIT = '1000';
 process.env.TRY_EMAIL_CHECK = 'off';
+process.env.SKI_AREAS_FILE = '/nonexistent/ski-areas.json.gz'; // these tests are about the live map lookup; our own copy is tested in skiareacopy.test.js
 const http = require('http');
 
 const asked = [];
@@ -76,7 +77,7 @@ test('the name search leaves out words every ski area has, and ranks the closest
   const q = SA.searchQuery('Spring Mountain Adventures', 'PA');
   assert.match(q, /"ISO3166-2"="US-PA"/); assert.match(q, /"name"~"spring",i/);
   assert.throws(() => SA.searchQuery('  ', 'PA'));
-  const r = SA.rank('Spring Mountain', SEARCH);
+  const r = SA.rank('Spring Mountain', SA.itemsOf(SEARCH));
   assert.deepEqual(r.map((x) => x.name), ['Spring Mountain', 'Spring Valley Snow Park'], 'duplicates joined, non-matches dropped');
   assert.equal(r[0].ref, 'way/1001'); assert.equal(r[0].city, 'Spring Mount');
   assert.throws(() => SA.detailQuery('node/5; out;'), /Not a ski area/);
@@ -111,7 +112,8 @@ test('the demo page finds the mountain, shows its lifts and runs, and says when 
   const n = asked.length;
   ok(await api('POST', '/trial/area', { body: { ref: 'way/1001', state: 'PA' } }));
   assert.equal(asked.length, n, 'kept for a week, not asked again');
-  assert.equal((await api('POST', '/trial/area', { body: { ref: 'node/1', state: 'PA' } })).status, 400);
+  assert.equal((await api('POST', '/trial/area', { body: { ref: 'node/1', state: 'PA' } })).status, 404);
+  assert.equal((await api('POST', '/trial/area', { body: { ref: 'node/1; out;', state: 'PA' } })).status, 400);
   down = true;
   try {
     const d = ok(await api('POST', '/trial/find', { body: { mountain: 'Blue Knob', state: 'PA' } }));

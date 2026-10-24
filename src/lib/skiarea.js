@@ -10,6 +10,9 @@
 //
 // OVERPASS_URLS (comma separated) overrides the servers, tried in order; tests point it at a stub. Data © OpenStreetMap
 // contributors, under the Open Database License: the demo and the "is this you?" step both say so.
+const fs = require('fs');
+const path = require('path');
+const zlib = require('zlib');
 const { pool, one } = require('../db');
 const { logFailure } = require('./jobs');
 
@@ -54,22 +57,27 @@ area["ISO3166-2"="US-${state}"]["admin_level"="4"]->.s;
 out center 60;`;
 }
 
-/** Ranks matches by how many of the typed words each name has, then by having the whole phrase. */
-function rank(typed, elements) {
+/** Overpass elements as search items: { ref, name, lat, lng, city, website }. */
+const itemsOf = (elements) => (elements || []).map((e) => {
+  const c = e.center || (e.lat !== undefined ? { lat: e.lat, lon: e.lon } : null);
+  return e.tags && e.tags.name && c ? { ref: `${e.type}/${e.id}`, name: e.tags.name, lat: c.lat, lng: c.lon, city: e.tags['addr:city'] || null, website: e.tags.website || null } : null;
+}).filter(Boolean);
+
+/** Ranks ski areas by how many of the typed words each name has, then by having the whole phrase. */
+function rank(typed, items) {
   const want = words(typed);
   const telling = keyWords(typed);
   const seen = new Map();
-  for (const e of elements || []) {
-    const name = e.tags && e.tags.name;
-    const c = e.center || (e.lat !== undefined ? { lat: e.lat, lon: e.lon } : null);
-    if (!name || !c) continue;
+  for (const e of items || []) {
+    const { name } = e;
+    if (!name) continue;
     const have = new Set(words(name));
     const score = telling.filter((w) => have.has(w)).length * 10 + want.filter((w) => have.has(w)).length + (String(name).toLowerCase().includes(String(typed).toLowerCase().trim()) ? 5 : 0);
     if (!telling.some((w) => have.has(w))) continue;
     const key = String(name).toLowerCase();
     // One ski area is often several polygons with the same name: keep the first (the search lists bigger ones first often enough)
     if (seen.has(key)) continue;
-    seen.set(key, { ref: `${e.type}/${e.id}`, name: String(name).slice(0, 80), lat: round(c.lat), lng: round(c.lon), city: (e.tags['addr:city'] || null), website: e.tags.website || null, score });
+    seen.set(key, { ref: e.ref, name: String(name).slice(0, 80), lat: round(e.lat), lng: round(e.lng), city: e.city || null, website: e.website || null, score });
   }
   return [...seen.values()].sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)).slice(0, 6).map(({ score, ...r }) => r);
 }
@@ -114,9 +122,9 @@ out geom;`;
 
 const LIFT_KINDS = { cable_car: 'Tram', gondola: 'Gondola', mixed_lift: 'Chondola', chair_lift: 'Chairlift', drag_lift: 'Surface lift', 't-bar': 'T-bar', 'j-bar': 'J-bar', platter: 'Platter lift', rope_tow: 'Rope tow', magic_carpet: 'Magic carpet' };
 const SEATS = { 2: 'Double', 3: 'Triple', 4: 'Quad', 6: 'Six-pack', 8: 'Eight-pack' };
-function difficultyOf(tags, name) {
+function difficultyOf(raw, name) {
   if (/\b(terrain park|park|jib|rail garden|half ?pipe|superpipe)\b/i.test(name || '')) return 'park';
-  const d = String(tags['piste:difficulty'] || '').toLowerCase();
+  const d = String(raw || '').toLowerCase();
   if (['novice', 'easy'].includes(d)) return 'green';
   if (d === 'intermediate') return 'blue';
   if (d === 'advanced') return 'black';
@@ -126,42 +134,52 @@ function difficultyOf(tags, name) {
 const RANK = { green: 0, blue: 1, park: 1, black: 2, double_black: 3 };
 const mid = (g) => (g && g.length ? g[Math.floor(g.length / 2)] : null);
 
-/** The area's name and centre, its lifts and runs (named runs only; segments of one run are joined), and a small drawing. */
+/** An Overpass answer for one area, as the shared shape assemble() takes. */
 function parseDetails(ref, elements, state) {
   const area = (elements || []).find((e) => `${e.type}/${e.id}` === ref);
   if (!area || !area.tags) return null;
-  const lifts = []; const trails = new Map(); const lines = [];
-  let unnamed = 0;
-  const liftN = {};
+  const lifts = []; const runs = [];
   for (const e of elements) {
     if (e.type !== 'way' || !e.tags || !Array.isArray(e.geometry)) continue;
     const t = e.tags;
-    if (t.aerialway && LIFT_KINDS[t.aerialway]) {
-      const occ = Number(t['aerialway:occupancy']);
-      const label = t.aerialway === 'chair_lift' && SEATS[occ] ? SEATS[occ] : LIFT_KINDS[t.aerialway];
-      if (!t.name) liftN[label] = (liftN[label] || 0) + 1; // an unnamed lift is called by its kind: "Double 1"
-      const name = String(t.name || `${label} ${liftN[label]}`).slice(0, 100);
-      if (!lifts.some((l) => l.name.toLowerCase() === name.toLowerCase())) lifts.push({ name, kind: t.aerialway, small: ['rope_tow', 'magic_carpet', 'platter', 'j-bar'].includes(t.aerialway) });
-      lines.push({ k: 'lift', g: e.geometry });
-    } else if (t['piste:type'] === 'downhill') {
-      const name = t['piste:name'] || t.name;
-      const difficulty = difficultyOf(t, name);
-      lines.push({ k: difficulty, g: e.geometry });
-      if (!name) { unnamed += 1; continue; }
-      const key = String(name).toLowerCase().trim();
-      const p = mid(e.geometry);
-      const had = trails.get(key);
-      if (!had) trails.set(key, { name: String(name).trim().slice(0, 100), difficulty, lat: p ? round(p.lat) : null, lng: p ? round(p.lon) : null });
-      else if (had.difficulty !== 'park' && RANK[difficulty] > RANK[had.difficulty]) had.difficulty = difficulty; // a run is as hard as its hardest part
-    }
+    if (t.aerialway && LIFT_KINDS[t.aerialway]) lifts.push({ name: t.name || null, kind: t.aerialway, occupancy: Number(t['aerialway:occupancy']) || null, g: e.geometry });
+    else if (t['piste:type'] === 'downhill') runs.push({ name: t['piste:name'] || t.name || null, difficulty: t['piste:difficulty'] || null, g: e.geometry });
   }
   const c = area.center || {};
-  const all = lines.flatMap((l) => l.g);
-  const zoom = zoomFor(all) || 15;
+  return assemble({ ref, name: area.tags.name, lat: c.lat, lng: c.lon, city: area.tags['addr:city'] || null, website: area.tags.website || null, state }, lifts, runs);
+}
+
+/**
+ * The area's name and centre, its lifts (unnamed ones called by their kind, "Double 1") and named runs (segments of one run
+ * joined, as hard as their hardest part), and a small drawing. Lines are [{ lat, lon }].
+ */
+function assemble(meta, liftLines, runLines) {
+  const lifts = []; const trails = new Map(); const lines = [];
+  let unnamed = 0;
+  const liftN = {};
+  for (const l of liftLines) {
+    if (!LIFT_KINDS[l.kind]) continue;
+    const label = l.kind === 'chair_lift' && SEATS[l.occupancy] ? SEATS[l.occupancy] : LIFT_KINDS[l.kind];
+    if (!l.name) liftN[label] = (liftN[label] || 0) + 1;
+    const name = String(l.name || `${label} ${liftN[label]}`).slice(0, 100);
+    if (!lifts.some((x) => x.name.toLowerCase() === name.toLowerCase())) lifts.push({ name, kind: l.kind, small: ['rope_tow', 'magic_carpet', 'platter', 'j-bar'].includes(l.kind) });
+    if (l.g.length) lines.push({ k: 'lift', g: l.g });
+  }
+  for (const r of runLines) {
+    const difficulty = difficultyOf(r.difficulty, r.name);
+    if (r.g.length) lines.push({ k: difficulty, g: r.g });
+    if (!r.name) { unnamed += 1; continue; }
+    const key = String(r.name).toLowerCase().trim();
+    const p = mid(r.g);
+    const had = trails.get(key);
+    if (!had) trails.set(key, { name: String(r.name).trim().slice(0, 100), difficulty, lat: p ? round(p.lat) : null, lng: p ? round(p.lon) : null });
+    else if (had.difficulty !== 'park' && RANK[difficulty] > RANK[had.difficulty]) had.difficulty = difficulty;
+  }
+  const zoom = zoomFor(lines.flatMap((l) => l.g)) || 15;
   const trailList = [...trails.values()].sort((a, b) => RANK[a.difficulty] - RANK[b.difficulty] || a.name.localeCompare(b.name)).slice(0, MAX_TRAILS);
   return {
-    ref, name: String(area.tags.name || 'Ski area').slice(0, 80), lat: round(c.lat), lng: round(c.lon), zoom, state, timezone: zoneOf(state),
-    city: area.tags['addr:city'] || null, website: area.tags.website || null,
+    ref: meta.ref, name: String(meta.name || 'Ski area').slice(0, 80), lat: round(meta.lat), lng: round(meta.lng), zoom, state: meta.state, timezone: zoneOf(meta.state),
+    city: meta.city || null, website: meta.website || null,
     lifts: lifts.slice(0, MAX_LIFTS), trails: trailList, unnamed_runs: unnamed,
     preview: drawing(lines),
   };
@@ -219,9 +237,34 @@ async function overpass(query) {
   const err = new Error('The map service is not answering right now'); err.unavailable = true; throw err;
 }
 
+// ---------------------------------------------------------------- our own copy
+// scripts/ski-areas-build.js makes data/ski-areas-us.json.gz from OpenSkiData's daily files. When it is there, the demo
+// page searches it and never waits on a public map server; when it is not, the live Overpass lookup is used instead.
+let bundle; // undefined until first needed; null when there is no file
+function ownCopy() {
+  if (bundle !== undefined) return bundle;
+  const file = process.env.SKI_AREAS_FILE || path.join(__dirname, '..', '..', 'data', 'ski-areas-us.json.gz');
+  try {
+    const d = JSON.parse(zlib.gunzipSync(fs.readFileSync(file)).toString('utf8'));
+    const byState = {};
+    for (const a of d.areas) (byState[a.state] = byState[a.state] || []).push(a);
+    bundle = { builtAt: d.built_at, credit: d.credit, byState, byRef: new Map(d.areas.map((a) => [a.ref, a])) };
+  } catch (_) { bundle = null; }
+  return bundle;
+}
+const pts = (line) => (line || []).map((p) => ({ lat: p[0], lon: p[1] }));
+function fromCopy(a) {
+  return assemble(a,
+    a.lifts.map(([name, kind, occupancy, line]) => ({ name, kind, occupancy, g: pts(line) })),
+    a.runs.map(([name, difficulty, line]) => ({ name, difficulty, g: pts(line) })));
+}
+
 async function find(name, state) {
   if (!STATES[state]) throw new Error('Choose a state');
-  const list = rank(name, await overpass(searchQuery(name, state)));
+  if (!keyWords(name).length) throw new Error('Type your mountain\u2019s name');
+  const own = ownCopy();
+  if (own) return rank(name, own.byState[state] || []).map((r) => ({ ...r, state }));
+  const list = rank(name, itemsOf(await overpass(searchQuery(name, state))));
   const need = list.filter((r) => !r.city);
   if (need.length) {
     try {
@@ -234,6 +277,9 @@ async function find(name, state) {
 
 /** The details for one area, from the cache when fresh. */
 async function details(ref, state) {
+  const own = ownCopy();
+  if (own) { const a = own.byRef.get(ref); return a && (!state || a.state === state) ? fromCopy(a) : null; }
+  if (!/^(way|relation)\/\d{1,12}$/.test(String(ref))) return null; // the live map only knows OpenStreetMap ways and relations
   const hit = await one(pool, 'SELECT data FROM ski_area_cache WHERE ref = ? AND fetched_at > NOW() - INTERVAL ? DAY', [ref, CACHE_DAYS]);
   if (hit) { const d = JSON.parse(hit.data); if (!state || d.state === state) return d; }
   const d = parseDetails(ref, await overpass(detailQuery(ref)), state);
@@ -245,4 +291,6 @@ async function details(ref, state) {
 /** What the demo loader needs (small enough to pass in an environment variable). */
 const forLoader = (d) => ({ name: d.name, lat: d.lat, lng: d.lng, zoom: d.zoom, city: d.city, state: d.state, timezone: d.timezone, lifts: d.lifts, trails: d.trails });
 
-module.exports = { STATES, zoneOf, keyWords, searchQuery, rank, placesQuery, parsePlaces, detailQuery, difficultyOf, parseDetails, drawing, find, details, forLoader };
+const reload = () => { bundle = undefined; };
+const credit = () => { const own = ownCopy(); return own && own.credit ? own.credit : '\u00a9 OpenStreetMap contributors'; };
+module.exports = { reload, ownCopy, credit, itemsOf, STATES, zoneOf, keyWords, searchQuery, rank, placesQuery, parsePlaces, detailQuery, difficultyOf, parseDetails, drawing, find, details, forLoader };

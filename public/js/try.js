@@ -137,7 +137,7 @@ function chooseArea(formEl, typed, st) {
     sample.addEventListener('click', () => finish(null));
     const back = h('button', { type: 'button', class: 'btn quiet' }, 'Change the name or state');
     back.addEventListener('click', () => finish('back'));
-    const credit = h('p', { class: 'muted small' }, 'Map data \u00a9 OpenStreetMap contributors.');
+    const credit = h('p', { class: 'muted small' }, 'Map data \u00a9 OpenStreetMap contributors, via OpenSkiMap.org.');
     formEl.replaceWith(box);
     const show = (...els) => { clear(box).append(...els.filter(Boolean)); };
     const stateName = (STATES.find((x) => x[0] === st) || [st, st])[1];

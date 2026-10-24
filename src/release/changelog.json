@@ -1,6 +1,19 @@
 {
   "releases": [
     {
+      "version": "2026.10.45",
+      "date": "2026-11-08",
+      "title": "Demo mountains from our own copy of the ski area map",
+      "notes": [
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": "platform",
+          "text": "The demo page now searches our own copy of every US ski area, built from OpenSkiData (OpenSkiMap.org, from OpenStreetMap) by scripts/ski-areas-build.js, instead of asking the public map servers, which are often too busy to answer. Without the file it falls back to the live lookup."
+        }
+      ]
+    },
+    {
       "version": "2026.10.44",
       "date": "2026-11-08",
       "title": "Demo map lookup: more servers, and the reason when it fails",
