@@ -122,9 +122,93 @@ function showSignIn(message) {
         h('p', null, 'Tickets, lifts, rentals, lessons, patrol and staff schedules for your mountain.')), ridge()),
     h('section', { class: 'signin-form' }, h('h2', null, 'Sign in'), message ? h('p', { class: 'muted', role: 'status' }, message) : null, form,
       pk ? h('div', { class: 'stack tight signin-passkey' }, h('p', { class: 'muted small' }, 'Or, if you added a passkey on this phone or computer:'), pk, pkErr) : null,
+      h('div', { class: 'row signin-email' },
+        button('Email me a code instead', () => showEmailCode('signin', slug.value.trim().toLowerCase(), email.value.trim()), { small: true }),
+        button('Forgot password?', () => showEmailCode('reset', slug.value.trim().toLowerCase(), email.value.trim()), { small: true, kind: 'quiet' })),
       term ? h('p', { class: 'small' }, button(`Back to the PIN screen (${term.name})`, () => showPinSignIn(), { small: true })) : null,
       signInVersion())));
   (slug.value ? email : slug).focus();
+}
+
+/** The sign-in page frame used by the email screens: the ridge on one side, the form on the other. */
+function signInFrame(lead, say, title, ...body) {
+  clear(app);
+  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-logo-dark.png', alt: 'Verdynt/OS, resort operating system', width: '220', height: '109' })), h('h1', null, lead), h('p', null, say)), ridge()),
+    h('section', { class: 'signin-form stack' }, h('h2', null, title), ...body)));
+}
+
+/**
+ * Sign in with a code from your email, or reset a forgotten password. Step one asks who you are; step two takes the code
+ * (and, for a reset, the new password). The email also has a link that does the same on whichever device opens it.
+ */
+function showEmailCode(purpose, tenant0 = readSlug(), login0 = '') {
+  const reset = purpose === 'reset';
+  const err = h('div');
+  const slug = input({ name: 'tenant', autocomplete: 'organization', autocapitalize: 'none', spellcheck: 'false', value: tenant0 || readSlug(), required: true });
+  const who = input({ name: 'login', type: 'text', autocomplete: 'username', autocapitalize: 'none', spellcheck: 'false', value: login0, required: true });
+  const go = h('button', { type: 'submit', class: 'btn primary' }, 'Email me a code');
+  const form = h('form', { novalidate: true, 'data-step': 'email-ask' }, field('Mountain', slug), field('Username or email', who, 'The code goes to the email on your login. No email on your login? Ask a manager to add one, or sign in with your password.'), err, h('div', { class: 'row' }, go, button('Back to sign in', () => showSignIn(), { small: true })));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault(); clear(err);
+    const tenant = slug.value.trim().toLowerCase(); const login = who.value.trim();
+    if (!tenant || !login) { err.append(errorBox(new Error('Enter your mountain and your username or email'))); return; }
+    go.disabled = true;
+    try {
+      const out = await post('/auth/email-code', { tenant, login, purpose });
+      saveSlug(tenant);
+      showEmailCodeEntry(purpose, { tenant, login, request: out.request, minutes: out.minutes });
+    } catch (ex) { err.append(errorBox(ex)); go.disabled = false; }
+  });
+  signInFrame(reset ? 'Forgot your password?' : 'Sign in by email.', reset ? 'We email you a code to choose a new one.' : 'No password to remember: we email you a code, or a link you can tap.', reset ? 'Reset your password' : 'Email me a code', form);
+  (slug.value ? who : slug).focus();
+}
+
+function showEmailCodeEntry(purpose, { tenant, login, request, minutes = 10, link = null }) {
+  const reset = purpose === 'reset';
+  const err = h('div');
+  const code = link ? null : input({ name: 'code', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 7, required: true, 'aria-label': 'Code' });
+  const next = reset ? input({ name: 'new', type: 'password', autocomplete: 'new-password', minlength: 12, required: true }) : null;
+  const again = reset ? input({ name: 'again', type: 'password', autocomplete: 'new-password', minlength: 12, required: true }) : null;
+  const go = h('button', { type: 'submit', class: 'btn primary' }, reset ? 'Save my new password' : 'Sign in');
+  const form = h('form', { novalidate: true, 'data-step': reset ? 'email-reset' : 'email-code' },
+    code ? field('Code from your email', code, `If there is a login for ${login} at this mountain with an email, we sent a six-digit code to it. It works for ${minutes} minutes. Check spam if it is not there in a minute.`) : null,
+    reset ? field('New password', next, 'At least 12 characters') : null, reset ? field('New password again', again) : null,
+    err, h('div', { class: 'row' }, go, button('Start again', () => showSignIn(), { small: true })));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault(); clear(err);
+    if (reset && next.value.length < 12) { err.append(errorBox(new Error('Use at least 12 characters'))); return; }
+    if (reset && next.value !== again.value) { err.append(errorBox(new Error('The two new passwords are not the same'))); return; }
+    const proof = link ? { link } : { request, code: code.value.trim() };
+    go.disabled = true;
+    try {
+      if (!reset) {
+        const out = await post('/auth/email-code/verify', proof);
+        if (out.mfa_required) { showSecondStep(out); return; }
+        await signedIn(out);
+        return;
+      }
+      const out = await post('/auth/password-reset', { ...proof, new_password: next.value });
+      toast('Password saved. Every other device was signed out.');
+      if (out.mfa_required) { showSecondStep(out); return; }
+      await signedIn(out);
+    } catch (ex) { err.append(errorBox(ex)); go.disabled = false; if (code) code.select(); }
+  });
+  signInFrame(reset ? 'Choose a new password.' : 'Check your email.', reset ? 'Every other device is signed out when you save it.' : 'Type the code from the email, or open its link on this device.', reset ? 'New password' : 'Enter the code', form);
+  (code || next).focus();
+}
+
+/** Opened from the link in a sign-in or reset email (#email-link=… or #reset-link=…). Returns true when it took over. */
+async function fromEmailLink() {
+  const m = /^#(email-link|reset-link)=([A-Za-z0-9_-]+\.\d{6})$/.exec(location.hash);
+  if (!m) return false;
+  history.replaceState(null, '', location.pathname + location.search); // the link works once: keep it out of history
+  if (m[1] === 'reset-link') { showEmailCodeEntry('reset', { link: m[2] }); return true; }
+  try {
+    const out = await post('/auth/email-code/verify', { link: m[2] });
+    if (out.mfa_required) { showSecondStep(out); return true; }
+    session.token = out.token;
+    return false; // signed in: start() carries on
+  } catch (ex) { showSignIn(ex.message); return true; }
 }
 
 function signInVersion() {
@@ -395,6 +479,7 @@ for (const ev of ['pointerdown', 'keydown', 'scroll', 'touchstart']) document.ad
 setInterval(() => { if (ctx.me && !idleTimer) resetIdle(); if (!ctx.me) { clearTimeout(idleTimer); idleTimer = null; } }, 5_000).unref?.();
 
 async function start() {
+  if (/^#(email|reset)-link=/.test(location.hash) && await fromEmailLink()) return;
   if (!session.token) { if (readTerminal()) showPinSignIn(); else showSignIn(); return; }
   try {
     ctx.me = await get('/auth/me');

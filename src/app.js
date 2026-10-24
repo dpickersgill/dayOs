@@ -190,6 +190,9 @@ function createApp() {
   api.use('/auth/login', rateLimit({ windowMs: 60_000, max: Number(process.env.LOGIN_RATE_LIMIT) || 10, message: 'Too many login attempts' }));
   api.use('/auth/mfa', rateLimit({ windowMs: 60_000, max: Number(process.env.LOGIN_RATE_LIMIT) || 20, message: 'Too many attempts' }));
   api.use(['/auth/passkey', '/auth/pin-login', '/auth/terminal'], rateLimit({ windowMs: 60_000, max: Number(process.env.LOGIN_RATE_LIMIT) || 20, message: 'Too many sign-in attempts' }));
+  // Emailed sign-in and reset codes: asking for one is limited per address (each sends an email), and so is trying them.
+  api.post('/auth/email-code', rateLimit({ windowMs: 600_000, max: Number(process.env.LOGIN_RATE_LIMIT) || 6, message: 'Too many codes asked for from here. Wait a few minutes, or sign in with your password.' }));
+  api.use(['/auth/email-code/verify', '/auth/password-reset'], rateLimit({ windowMs: 60_000, max: Number(process.env.LOGIN_RATE_LIMIT) || 10, message: 'Too many attempts' }));
   api.use('/tenants', rateLimit({ windowMs: 60_000, max: 5 }));
   api.use('/auth/change-password', rateLimit({ windowMs: 60_000, max: 10, message: 'Too many attempts' }));
   api.use('/users', rateLimit({ windowMs: 60_000, max: 60 }));

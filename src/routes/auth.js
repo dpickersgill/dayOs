@@ -244,6 +244,87 @@ router.post('/auth/passkey', validate(z.object({ tenant: slug, handle: z.string(
   await finishSignIn(user, req, res, { method: 'passkey' });
 });
 
+// ---------------------------------------------------------------- signing in by email, and "Forgot password?"
+// Anyone whose login has an email can ask for a six-digit code. The same email carries a link that signs in (or opens the
+// new-password form) on whichever device it is opened. The answer never says whether a login exists: an unknown name gets
+// a request handle like any other, and its code is simply never right. Codes last 10 minutes, are used once, and 5 wrong
+// tries spend them. At most 3 codes go to one login in 15 minutes. Someone with a passkey or an authenticator app still
+// does that second step: the email code only stands in for the password.
+const EMAIL_PURPOSES = { signin: 'email_signin', reset: 'email_reset' };
+const EMAIL_MINUTES = 10;
+const appBase = (req) => require('../lib/baseurl').baseUrl(req);
+
+async function sendLoginEmail(user, req, purpose, code, handle) {
+  const t = await one(pool, 'SELECT name FROM tenants WHERE id = ?', [user.tenant_id]);
+  const link = `${appBase(req)}/#${purpose === 'reset' ? 'reset-link' : 'email-link'}=${handle}.${code}`;
+  const text = purpose === 'reset'
+    ? `Your code to choose a new password for Verdynt/OS at ${t.name}: ${code}\n\nOr open this link to choose it on this device:\n${link}\n\nBoth work for ${EMAIL_MINUTES} minutes, once. If you did not ask for this, ignore this email: your password has not changed.`
+    : `Your code to sign in to Verdynt/OS at ${t.name}: ${code}\n\nOr open this link to sign in on this device:\n${link}\n\nBoth work for ${EMAIL_MINUTES} minutes, once. If you did not ask for this, ignore this email; nobody can sign in without the code.`;
+  return mailer.send({ tenantId: user.tenant_id, to: user.email, fromName: `${t.name} (Verdynt/OS)`, tag: purpose === 'reset' ? 'password-reset' : 'email-sign-in',
+    subject: purpose === 'reset' ? `${code} is your code to reset your Verdynt/OS password` : `${code} is your Verdynt/OS sign-in code`, text });
+}
+
+router.post('/auth/email-code', validate(z.object({ tenant: slug, login: z.string().trim().min(1).max(255), purpose: z.enum(['signin', 'reset']).default('signin') })), async (req, res) => {
+  const { tenant, login: who, purpose } = req.body;
+  const byEmail = who.includes('@');
+  const user = await one(pool, `${USER_SQL} WHERE t.slug = ? AND ${byEmail ? 'u.email' : 'u.username'} = ? AND u.active = 1`, [tenant, byEmail ? who : UN.normalize(who)]);
+  const usable = user && user.email && user.tenant_status === 'active' && !Number(user.sandbox_over) && !accessOver(user);
+  if (!usable) return res.json({ request: crypto.randomBytes(24).toString('base64url'), minutes: EMAIL_MINUTES });
+  const recent = await one(pool, 'SELECT COUNT(*) AS n FROM auth_challenges WHERE user_id = ? AND purpose = ? AND expires_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? MINUTE)', [user.id, EMAIL_PURPOSES[purpose], 15 - EMAIL_MINUTES]); // codes made in the last 15 minutes
+  if (Number(recent.n) >= 3) return res.json({ request: crypto.randomBytes(24).toString('base64url'), minutes: EMAIL_MINUTES });
+  const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+  const handle = await challenges.put(EMAIL_PURPOSES[purpose], challenges.hash(`${user.id}:${code}`), { tenantId: user.tenant_id, userId: user.id, minutes: EMAIL_MINUTES });
+  // Sent without waiting, so a real login and an unknown one answer in the same time.
+  sendLoginEmail(user, req, purpose, code, handle).catch(() => {});
+  res.json({ request: handle, minutes: EMAIL_MINUTES });
+});
+
+/** The login behind an emailed code (typed with its request, or both from the link). Spends the code when right. */
+async function emailCodeUser(purpose, { request, code, link }, beforeSpend) {
+  let handle = request; let given = code;
+  if (link) { const at = String(link).lastIndexOf('.'); handle = String(link).slice(0, at); given = String(link).slice(at + 1); }
+  given = String(given || '').replace(/\s/g, '');
+  const ch = handle ? await challenges.peek(EMAIL_PURPOSES[purpose], handle) : null;
+  const RUN_OUT = link ? 'That link has run out or was already used. Ask for a new one.' : 'That code is not right, or it has run out. Ask for a new one.';
+  if (!ch) throw unauthorized(RUN_OUT);
+  const user = await one(pool, `${USER_SQL} WHERE u.id = ? AND u.tenant_id = ? AND u.active = 1`, [ch.user_id, ch.tenant_id]);
+  if (!user) throw unauthorized(RUN_OUT);
+  if (lockedOut(user)) throw new AppError(429, 'Too many wrong codes. Wait a few minutes and ask for a new one.');
+  if (ch.challenge !== challenges.hash(`${user.id}:${given}`)) { await challenges.wrongTry(handle); await failed(user.id); throw unauthorized(RUN_OUT); }
+  refuseClosed(user);
+  if (beforeSpend) await beforeSpend(user); // a new password that is refused leaves the code usable
+  await challenges.spend(handle);
+  await cleared(user.id);
+  return user;
+}
+
+router.post('/auth/email-code/verify', validate(z.object({ request: z.string().max(100).optional(), code: z.string().max(20).optional(), link: z.string().max(140).optional() })
+  .refine((b) => b.link || (b.request && b.code), { message: 'Enter the code', path: ['code'] })), async (req, res) => {
+  const user = await emailCodeUser('signin', req.body);
+  const keys = await passkeys.count('user', user.id);
+  if (user.totp_enabled || keys) return res.json({ mfa_required: true, mfa_token: halfToken(user), methods: { app: Boolean(user.totp_enabled), passkey: keys > 0 } });
+  await finishSignIn(user, req, res, { method: 'email' });
+});
+
+/** Forgot password: the emailed code (or link) and a new password. Every other session ends, and this device is signed in. */
+router.post('/auth/password-reset', validate(z.object({ request: z.string().max(100).optional(), code: z.string().max(20).optional(), link: z.string().max(140).optional(), new_password: password })
+  .refine((b) => b.link || (b.request && b.code), { message: 'Enter the code', path: ['code'] })), async (req, res) => {
+  const user = await emailCodeUser('reset', req.body, (u) => refuseWeakFor(u, req.body.new_password));
+  const now = Math.floor(Date.now() / 1000);
+  await pool.query('UPDATE users SET password_hash = ?, password_changed_at = FROM_UNIXTIME(?), must_change_password = 0, login_failures = 0, login_locked_until = NULL WHERE id = ?',
+    [await bcrypt.hash(req.body.new_password, 12), now, user.id]);
+  await sessions.endAll(pool, user.id, 'password_reset');
+  await pool.query("INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id, detail) VALUES (?, ?, 'password_reset_by_email', 'users', ?, NULL)", [user.tenant_id, user.id, user.id]).catch(() => {});
+  const t = await one(pool, 'SELECT name FROM tenants WHERE id = ?', [user.tenant_id]);
+  mailer.send({ tenantId: user.tenant_id, to: user.email, fromName: `${t.name} (Verdynt/OS)`, tag: 'password-changed', subject: 'Your Verdynt/OS password was changed',
+    text: `The password for your Verdynt/OS login at ${t.name} was just changed, using a code sent to this email. Every device was signed out.\n\nIf this was not you, tell your manager straight away.` }).catch(() => {});
+  // They proved the email just now: signed straight in, or on to their passkey or app code if they have one.
+  const fresh = { ...user, password_changed_at: null };
+  const keys = await passkeys.count('user', user.id);
+  if (user.totp_enabled || keys) return res.json({ password_saved: true, mfa_required: true, mfa_token: halfToken(fresh), methods: { app: Boolean(user.totp_enabled), passkey: keys > 0 } });
+  await finishSignIn({ ...fresh, must_change_password: 0 }, req, res, { method: 'email', extra: { password_saved: true } });
+});
+
 // ---------------------------------------------------------------- shared terminals: switching in with a PIN
 // A computer a manager enrolled (ticket window, rental counter) holds a terminal key. Counter, instructor and lift staff
 // switch in there with their username and a personal PIN. Five wrong PINs lock that person's PIN for 15 minutes.

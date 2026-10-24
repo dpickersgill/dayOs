@@ -1,6 +1,33 @@
 {
   "releases": [
     {
+      "version": "2026.10.42",
+      "date": "2026-11-08",
+      "title": "Sign in with a code from your email, and Forgot password?",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Sign in without a password: on the sign-in page, press Email me a code instead, then type the six-digit code or tap the link in the email. It works once, for 10 minutes. If you use a passkey or an authenticator app, you still do that step.",
+          "help": "email-sign-in"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Forgot password? on the sign-in page: we email a code, you choose a new password, and you are signed in. Every other device is signed out, and you get an email saying the password changed.",
+          "help": "email-sign-in"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": [],
+          "text": "Staff with an email on their login can now reset a forgotten password themselves, so managers set fewer temporary passwords. Add an email to a login in Account to give them this."
+        }
+      ]
+    },
+    {
       "version": "2026.10.41",
       "date": "2026-11-08",
       "title": "Staff injuries, first step: who the patient is, and the owner is told",
