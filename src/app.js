@@ -217,7 +217,9 @@ function createApp() {
   api.post('/device/pair', rateLimit({ windowMs: 600_000, max: Number(process.env.DEVICE_PAIR_LIMIT) || 10, message: 'Too many tries. Ask a manager for a new code.' }));
   api.use('/device', rateLimit({ windowMs: 60_000, max: Number(process.env.DEVICE_RATE_LIMIT) || 600, message: 'Too many requests, slow down' }), accessRoutes.deviceRouter);
   api.use('/internal/jobs', rateLimit({ windowMs: 60_000, max: 10 }), followPublic.jobs);
-  api.use('/trial', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SANDBOX_RATE_LIMIT) || 15, message: 'Too many demo requests from this address. Try again later, or ask us for a walkthrough.' }), sandboxRoutes);
+  // Map lookups on the demo page ("Is this you?") have their own limit, so looking for your mountain does not use up demos.
+  const trialLimit = rateLimit({ windowMs: 3_600_000, max: Number(process.env.SANDBOX_RATE_LIMIT) || 15, message: 'Too many demo requests from this address. Try again later, or ask us for a walkthrough.' });
+  api.use('/trial', (req, res, next) => (['/find', '/area'].includes(req.path) ? next() : trialLimit(req, res, next)), sandboxRoutes);
   // Operator sign-in has its own, tighter limit (on top of each login's lockout).
   api.post(['/platform/login', '/platform/login/setup', '/platform/login/passkey', '/platform/login/passkey/options'], rateLimit({ windowMs: 15 * 60_000, max: Number(process.env.PLATFORM_LOGIN_RATE_LIMIT) || 20, message: 'Too many sign-in attempts from this address. Try again in 15 minutes.' }));
   api.use('/platform', rateLimit({ windowMs: 60_000, max: Number(process.env.PLATFORM_RATE_LIMIT) || 60, message: 'Too many attempts' }), platform);

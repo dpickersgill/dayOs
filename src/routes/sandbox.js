@@ -17,6 +17,8 @@ const config = require('../config');
 const mailer = require('../lib/mailer');
 const demoMail = require('../lib/demomail');
 const { baseUrl } = require('../lib/baseurl');
+const skiArea = require('../lib/skiarea');
+const { rateLimit } = require('../middleware/rateLimit');
 
 const router = express.Router();
 const SEED = path.join(__dirname, '..', '..', 'db', 'demo.js');
@@ -91,10 +93,34 @@ async function useCode(email, code) {
   return row.id;
 }
 
-/** Fills a new demo mountain by running the same loader an operator would run by hand. */
-function seed(slug) {
+// ---------------------------------------------------------------- your own mountain
+// "Is this you?": the visitor types their mountain's name and state, we look it up on OpenStreetMap, show the matches, and
+// for the one they pick, its lifts and runs as a small drawing. The demo is then built on those lifts and runs.
+const mapLimit = rateLimit({ windowMs: 600_000, max: Number(process.env.TRY_MAP_LIMIT) || 30, message: 'Too many map lookups from this address. Try again in a few minutes, or start with a sample mountain.' });
+const STATE = z.enum(Object.keys(skiArea.STATES));
+const REF = z.string().regex(/^(way|relation)\/\d{1,12}$/);
+
+router.post('/find', mapLimit, validate(z.object({ mountain: z.string().trim().min(2).max(80), state: STATE })), async (req, res) => {
+  try {
+    res.json({ data: await skiArea.find(clean(req.body.mountain), req.body.state), credit: '\u00a9 OpenStreetMap contributors' });
+  } catch (e) {
+    if (e.unavailable) return res.json({ data: [], unavailable: true });
+    throw bad(e.message);
+  }
+});
+
+router.post('/area', mapLimit, validate(z.object({ ref: REF, state: STATE })), async (req, res) => {
+  let d;
+  try { d = await skiArea.details(req.body.ref, req.body.state); } catch (e) { if (e.unavailable) throw new AppError(503, 'The map service is not answering right now. Try again, or start with a sample mountain.'); throw e; }
+  if (!d) throw new AppError(404, 'That ski area was not found on the map');
+  const { preview, lifts, trails, ...rest } = d;
+  res.json({ ...rest, lifts: lifts.map((l) => l.name), trails: trails.map((t) => ({ name: t.name, difficulty: t.difficulty })), preview, usable: lifts.length + trails.length >= 3, credit: '\u00a9 OpenStreetMap contributors' });
+});
+
+/** Fills a new demo mountain by running the same loader an operator would run by hand (with the real mountain's lifts and runs, when chosen). */
+function seed(slug, area) {
   return new Promise((resolve, reject) => {
-    execFile(process.execPath, [SEED, slug], { timeout: 170_000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, STAGING_GATE: '' } }, (err, _out, errOut) => {
+    execFile(process.execPath, [SEED, slug], { timeout: 170_000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, STAGING_GATE: '', DEMO_AREA: area ? JSON.stringify(skiArea.forLoader(area)) : '' } }, (err, _out, errOut) => {
       if (err) { console.error('Demo loader failed for', slug, String(errOut || err.message).slice(0, 400)); return reject(err); }
       return resolve();
     });
@@ -107,11 +133,19 @@ router.post('/', validate(z.object({
   mountain: z.string().max(80).optional(),
   website: z.string().max(200).optional(), // a hidden field: people leave it empty, scripts fill it in
   code: z.string().max(12).optional(), // the emailed code, when the email check is on
+  area_ref: REF.optional(), // the real ski area they picked on the map ("Is this you?")
+  state: STATE.optional(),
 })), async (req, res) => {
   const b = req.body;
   if (b.website) throw bad('Could not start the demo');
   const name = clean(b.name);
-  const mountain = clean(b.mountain || '') || 'Demo Mountain';
+  // Their own mountain, when they picked one on the map. A lookup that fails now falls back to the sample mountain.
+  let area = null;
+  if (b.area_ref && b.state) {
+    area = await skiArea.details(b.area_ref, b.state).catch(() => null);
+    if (area && area.lifts.length + area.trails.length < 3) area = null;
+  }
+  const mountain = (area && area.name) || clean(b.mountain || '') || 'Demo Mountain';
   const email = b.email.trim().toLowerCase();
   if (!name) throw bad('Please tell us your name');
   if (throwaway(email)) throw bad(THROWAWAY);
@@ -132,7 +166,8 @@ router.post('/', validate(z.object({
   const hash = await bcrypt.hash(password, 10);
   const [first, ...rest] = name.split(/\s+/);
   const created = await tx(async (conn) => {
-    const [t] = await conn.query('INSERT INTO tenants (slug, name, timezone, storage_cap_mb, sandbox_expires_at) VALUES (?, ?, ?, ?, NOW() + INTERVAL ? DAY)', [slug, mountain, 'America/New_York', S.STORAGE_MB, S.DAYS]);
+    const [t] = await conn.query('INSERT INTO tenants (slug, name, timezone, storage_cap_mb, sandbox_expires_at, map_lat, map_lng, map_zoom) VALUES (?, ?, ?, ?, NOW() + INTERVAL ? DAY, ?, ?, ?)',
+      [slug, mountain, area ? area.timezone : 'America/New_York', S.STORAGE_MB, S.DAYS, area ? area.lat : null, area ? area.lng : null, area ? area.zoom : null]);
     const [p] = await conn.query('INSERT INTO people (tenant_id, first_name, last_name, email) VALUES (?, ?, ?, ?)', [t.insertId, first.slice(0, 100), (rest.join(' ') || 'Visitor').slice(0, 100), email]);
     const [u] = await conn.query("INSERT INTO users (tenant_id, person_id, email, username, password_hash, role) VALUES (?, ?, ?, ?, ?, 'owner')", [t.insertId, p.insertId, email, require('../lib/usernames').suggestUsername({ first_name: first, last_name: rest.join(' ') || 'Visitor', email }), hash]);
     // A demo shows everything, the paid add-ons included, so a visitor can see what they would be buying.
@@ -143,7 +178,7 @@ router.post('/', validate(z.object({
 
   building += 1;
   try {
-    await seed(slug);
+    await seed(slug, area);
   } catch (_) {
     await S.purgeTenant(created.tenantId).catch(() => {});
     await giveBack(); // the code still works for another try
@@ -153,12 +188,12 @@ router.post('/', validate(z.object({
   }
 
   // Starting the demo signs them straight in, so that counts as the first sign-in and first use.
-  const [su] = await pool.query('INSERT INTO sandbox_signups (email, name, mountain, tenant_id, expires_at, ip_hash, sign_ins, first_used_at, last_used_at, email_verified) VALUES (?, ?, ?, ?, ?, ?, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?)', [email, name, mountain, created.tenantId, created.expires, ipHash, codeId ? 1 : 0]);
+  const [su] = await pool.query('INSERT INTO sandbox_signups (email, name, mountain, tenant_id, expires_at, ip_hash, sign_ins, first_used_at, last_used_at, email_verified, area_ref) VALUES (?, ?, ?, ?, ?, ?, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?, ?)', [email, name, mountain, created.tenantId, created.expires, ipHash, codeId ? 1 : 0, area ? area.ref : null]);
   // The welcome email (a sign-in link, what to try first), from the founder. Sent after the reply so the demo opens at once.
   setImmediate(() => { demoMail.welcome(baseUrl(req), su.insertId).catch(() => {}); });
   res.status(201).json({
     token: await signToken({ id: created.userId, tenant_id: created.tenantId, role: 'owner' }, req),
-    role: 'owner', tenant: slug, email, password, expires_at: created.expires, mountain,
+    role: 'owner', tenant: slug, email, password, expires_at: created.expires, mountain, real_map: Boolean(area),
   });
 });
 

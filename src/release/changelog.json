@@ -1,6 +1,19 @@
 {
   "releases": [
     {
+      "version": "2026.10.43",
+      "date": "2026-11-08",
+      "title": "Demos built on the visitor's own mountain",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "The demo page asks for the mountain's name and state, finds it on OpenStreetMap, and asks \"Is this you?\" with a drawing of its lifts and trails. The demo is then built on those real lift and trail names, centred on the real hill, in its time zone, with made-up prices, staff, guests and patrol cases. If the map has too little, or is not answering, the sample mountain is built as before."
+        }
+      ]
+    },
+    {
       "version": "2026.10.42",
       "date": "2026-11-08",
       "title": "Sign in with a code from your email, and Forgot password?",

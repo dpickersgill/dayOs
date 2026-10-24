@@ -14,6 +14,10 @@ const { pool } = require('../src/db');
 const { createApp } = require('../src/app');
 
 const slug = process.argv[2];
+// A demo on a real mountain (the visitor picked it on the map): its lifts and runs from OpenStreetMap, its place and map.
+// Everything else stays made up. Set by routes/sandbox.js; see src/lib/skiarea.js.
+let AREA = null;
+try { AREA = process.env.DEMO_AREA ? JSON.parse(process.env.DEMO_AREA) : null; } catch (_) { AREA = null; }
 if (!slug || slug.startsWith('--')) { console.error('Usage: node db/demo.js <mountain-slug>'); process.exit(1); }
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -30,6 +34,7 @@ const ago = (min) => { const t = Math.max(nowMin - min, 0); return `${today}T${h
 const AVATAR = 'data:image/jpeg;base64,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';
 
 let api; const failures = [];
+let mountainName = 'the mountain';
 const log = (s) => console.log(s);
 async function call(method, path, body, token) {
   const r = await fetch(`${api}/api/v1${path}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -48,9 +53,49 @@ const nextName = () => { const i = nameAt++; return [FIRST[i % FIRST.length], LA
 let emailN = 0;
 const emailOf = (f, l) => `${f}.${l}${++emailN}@example.com`.toLowerCase();
 
+/**
+ * The lifts and runs the demo uses, and which of them play each part in the made-up day (the lift on hold, the run where a
+ * child hurt a wrist). The sample mountain's own names, or a real mountain's from the map.
+ */
+function names() {
+  const SAMPLE = {
+    lifts: [['Summit Quad', 'open'], ['Ridge Triple', 'open'], ['Valley Double', 'hold'], ['Magic Carpet', 'open'], ['T-Bar', 'closed']],
+    trails: [['Bunny Hill', 'green'], ['Easy Does It', 'green'], ['Apple Orchard', 'green'], ['Ridge Run', 'blue'], ['Switchback', 'blue'], ['Lower Meadow', 'blue'], ['Cliffhanger', 'black'], ['Gnar', 'black'], ['Widowmaker', 'double_black'], ['The Chute', 'double_black'], ['Terrain Park', 'park'], ['Jib Garden', 'park']],
+    summit: 'Summit Quad', second: 'Ridge Triple', hold: 'Valley Double', small: 'Magic Carpet',
+    bunny: 'Bunny Hill', green2: 'Easy Does It', blue1: 'Ridge Run', blue2: 'Lower Meadow', black1: 'Cliffhanger', black2: 'Gnar', park: 'Terrain Park',
+    closed: ['Widowmaker', 'The Chute'], where: {},
+  };
+  if (!AREA || !(AREA.lifts || []).length || !(AREA.trails || []).length) return SAMPLE;
+  const L = AREA.lifts.map((l) => l.name);
+  const big = AREA.lifts.filter((l) => !l.small).map((l) => l.name);
+  const small = AREA.lifts.filter((l) => l.small).map((l) => l.name);
+  const summit = big[0] || L[0];
+  const second = big[1] || L.find((n) => n !== summit) || summit;
+  const hold = big[2] || L.find((n) => ![summit, second].includes(n)) || second;
+  const smallOne = small[0] || L[L.length - 1];
+  const status = (n, i) => (n === hold && L.length > 1 ? 'hold' : i === L.length - 1 && L.length > 4 && n !== smallOne ? 'closed' : 'open');
+  const T = AREA.trails;
+  const of = (d) => T.filter((x) => x.difficulty === d).map((x) => x.name);
+  const any = T.map((x) => x.name);
+  const pick = (list, i, fallback) => list[i] || fallback;
+  const greens = of('green'); const blues = of('blue'); const blacks = [...of('black'), ...of('double_black')];
+  const bunny = pick(greens, 0, any[0]);
+  const hardest = [...of('double_black'), ...of('black')].slice(0, 2).filter(() => T.length > 6);
+  const where = {};
+  for (const x of T) if (x.lat !== null && x.lng !== null) where[x.name] = [x.lat, x.lng];
+  return {
+    lifts: L.map((n, i) => [n, status(n, i)]), trails: T.map((x) => [x.name, x.difficulty]),
+    summit, second, hold, small: smallOne,
+    bunny, green2: pick(greens, 1, bunny), blue1: pick(blues, 0, any[1] || bunny), blue2: pick(blues, 1, pick(blues, 0, any[2] || bunny)),
+    black1: pick(blacks, 0, any[any.length - 1]), black2: pick(blacks, 1, pick(blacks, 0, any[any.length - 1])),
+    park: pick(of('park'), 0, pick(blacks, 0, any[any.length - 1])), closed: hardest, where,
+  };
+}
+
 async function main() {
   const [[t]] = await pool.query('SELECT id, name, require_mfa FROM tenants WHERE slug = ?', [slug]);
   if (!t) throw new Error(`No mountain with the slug "${slug}"`);
+  mountainName = t.name;
   if (t.require_mfa) throw new Error('This mountain requires two-step sign-in, so the demo loader cannot sign in. Turn that off in Account while loading the demo, then back on.');
 
   const server = await new Promise((resolve) => { const s = createApp().listen(0, '127.0.0.1', () => resolve(s)); });
@@ -73,16 +118,16 @@ async function load(o) {
 
   // ---------------------------------------------------------------- the mountain
   log('Mountain');
-  await soft('settings', () => C('PUT', '/tenant/profile', { address: '1200 Summit Road, Spring Mountain, PA', phone: '(610) 555-0142', receipt_footer: 'Thank you for skiing Spring Mountain. Ski safe.' }));
+  const place = AREA ? [AREA.city, AREA.state].filter(Boolean).join(', ') : '1200 Summit Road, Spring Mountain, PA';
+  await soft('settings', () => C('PUT', '/tenant/profile', { address: place, phone: '(610) 555-0142', receipt_footer: `Thank you for skiing ${mountainName}. Ski safe.` }));
   for (let i = 0; i < 14; i++) {
     const d = addDays(today, i);
     const weekend = [0, 6].includes(new Date(`${d}T12:00:00Z`).getUTCDay());
     await soft(`day ${d}`, () => C('PUT', `/schedule/days/${d}`, { status: i === 5 ? 'closed' : 'open', open_time: weekend ? '08:30' : '09:00', close_time: weekend ? '16:30' : '21:00', notes: i === 0 ? 'Fresh groomers, 4 inches overnight' : i === 5 ? 'Closed for high wind' : weekend ? 'Weekend hours' : 'Night skiing until 9' }));
   }
-  const lifts = [['Summit Quad', 'open'], ['Ridge Triple', 'open'], ['Valley Double', 'hold'], ['Magic Carpet', 'open'], ['T-Bar', 'closed']];
-  for (const [name, status] of lifts) await soft(`lift ${name}`, () => C('POST', '/schedule/lifts', { name, status }));
-  const trails = [['Bunny Hill', 'green'], ['Easy Does It', 'green'], ['Apple Orchard', 'green'], ['Ridge Run', 'blue'], ['Switchback', 'blue'], ['Lower Meadow', 'blue'], ['Cliffhanger', 'black'], ['Gnar', 'black'], ['Widowmaker', 'double_black'], ['The Chute', 'double_black'], ['Terrain Park', 'park'], ['Jib Garden', 'park']];
-  for (const [name, difficulty] of trails) await soft(`trail ${name}`, () => C('POST', '/schedule/trails', { name, difficulty, status: ['Widowmaker', 'The Chute'].includes(name) ? 'closed' : 'open' }));
+  const N = names();
+  for (const [name, status] of N.lifts) await soft(`lift ${name}`, () => C('POST', '/schedule/lifts', { name, status }));
+  for (const [name, difficulty] of N.trails) await soft(`trail ${name}`, () => C('POST', '/schedule/trails', { name, difficulty, status: N.closed.includes(name) ? 'closed' : 'open' }));
 
   // ---------------------------------------------------------------- products
   log('Products and prices');
@@ -106,7 +151,7 @@ async function load(o) {
   await addProduct('helmet', { kind: 'rental', name: 'Helmet rental', base_price_cents: 1200 });
   await addProduct('program', { kind: 'program', name: 'Junior race team season', base_price_cents: 62000 });
   for (const [code, pct] of [['WELCOME10', 10], ['SENIORS15', 15], ['FRIENDS20', 20]]) await soft(`promo ${code}`, () => C('POST', '/pricing/promos', { code, percent_off: pct }));
-  await soft('tax', () => C('POST', '/tax-rules', { name: 'PA sales tax', applies_to: 'all', rate_percent: 6 }));
+  await soft('tax', () => C('POST', '/tax-rules', { name: AREA ? `Sales tax (sample: set your own rate)` : 'PA sales tax', applies_to: 'all', rate_percent: 6 }));
 
   // ---------------------------------------------------------------- staff
   log('Staff');
@@ -156,7 +201,7 @@ async function load(o) {
   const mkGuest = async (age, extra = {}) => {
     const [f, l] = nextName();
     const dob = `${Number(today.slice(0, 4)) - age}-0${1 + (guests.length % 9)}-${pad(3 + (guests.length * 5) % 25)}`;
-    const body = { first_name: f, last_name: l, email: age >= 18 ? emailOf(f, l) : undefined, phone: age >= 18 ? `484555${String(2000 + guests.length * 13).slice(0, 4)}` : undefined, date_of_birth: dob, sex: guests.length % 2 ? 'male' : 'female', city: 'Phoenixville', region: 'PA', postal_code: '19460', discipline: guests.length % 3 ? 'ski' : 'snowboard', ability_level: ['beginner', 'intermediate', 'advanced'][guests.length % 3], ...extra };
+    const body = { first_name: f, last_name: l, email: age >= 18 ? emailOf(f, l) : undefined, phone: age >= 18 ? `484555${String(2000 + guests.length * 13).slice(0, 4)}` : undefined, date_of_birth: dob, sex: guests.length % 2 ? 'male' : 'female', city: AREA && AREA.city ? AREA.city : 'Phoenixville', region: AREA ? AREA.state : 'PA', postal_code: AREA ? undefined : '19460', discipline: guests.length % 3 ? 'ski' : 'snowboard', ability_level: ['beginner', 'intermediate', 'advanced'][guests.length % 3], ...extra };
     const r = await soft(`guest ${f}`, () => C('POST', '/people', body));
     if (!r) return null;
     const g = { id: r.id, name: `${f} ${l}`, first: f, last: l, age, dob, sex: body.sex, email: body.email };
@@ -255,25 +300,26 @@ async function load(o) {
     const lost = await soft('rfid card', () => C('POST', '/access/cards/assign', { ticket_code: codes[1], uid: '04C0FFEE123456', label: '1002' }));
     if (lost) await soft('rfid lost', () => C('POST', `/access/cards/${lost.id}/lost`));
   }
-  for (const [name, location, kind] of [['Summit Quad gate 1', 'Summit Quad', 'turnstile'], ['Base lodge handheld', 'Base lodge', 'handheld']]) await soft(`gate device ${name}`, () => C('POST', '/access/devices', { name, location, kind }));
+  for (const [name, location, kind] of [[`${N.summit} gate 1`.slice(0, 100), N.summit, 'turnstile'], ['Base lodge handheld', 'Base lodge', 'handheld']]) await soft(`gate device ${name}`, () => C('POST', '/access/devices', { name, location, kind }));
 
   // ---------------------------------------------------------------- patrol
   log('Patrol');
   const levels = ['director', 'leader', 'senior', 'patroller'];
   const patrollers = by('patrol');
   for (let i = 0; i < patrollers.length; i++) await soft('roster', () => C('POST', '/patrol/team', { staff_id: patrollers[i].id, level: levels[i % levels.length], callsign: `Patrol ${i + 1}` }));
-  for (const [name, kind] of [['Summit hut', 'hut'], ['Base aid room', 'aid_room'], ['Lower Meadow zone', 'zone']]) await soft(`station ${name}`, () => C('POST', '/patrol/stations', { name, kind }));
+  for (const [name, kind] of [['Summit hut', 'hut'], ['Base aid room', 'aid_room'], [`${N.blue2} zone`.slice(0, 100), 'zone']]) await soft(`station ${name}`, () => C('POST', '/patrol/stations', { name, kind }));
   for (const [name, kind, serial] of [['AED summit hut', 'aed', 'A-1001'], ['AED base aid room', 'aed', 'A-1002'], ['Oxygen kit 1', 'oxygen', 'O-2001'], ['Toboggan 1', 'toboggan', 'T-3001'], ['Toboggan 2', 'toboggan', 'T-3002'], ['Trauma bag A', 'trauma_bag', 'B-4001']]) await soft(`equipment ${name}`, () => C('POST', '/patrol/equipment', { name, kind, serial }));
   const cases = [
-    { cat: 'injury', sev: 'minor', where: 'Easy Does It', sum: 'Child fell, sore wrist', patient: [kids[0], 'Wrist pain after a fall', 'wrist_hand', 'right', 'sprain_strain', { kind: 'ice', description: 'Ice pack applied' }, 'treated_released'], minutesAgo: 240 },
-    { cat: 'injury', sev: 'moderate', where: 'Ridge Run', sum: 'Skier caught an edge, knee injury', patient: [adults[3], 'Knee pain and swelling', 'knee', 'left', 'sprain_strain', { kind: 'splint', description: 'Knee immobilized' }, 'transported_ambulance'], minutesAgo: 180 },
-    { cat: 'collision', sev: 'moderate', where: 'Lower Meadow', sum: 'Two skiers collided at the merge', patient: [adults[6], 'Shoulder pain', 'shoulder', 'right', 'dislocation', { kind: 'spinal_motion_restriction', description: 'Collar and board, precaution' }, 'transported_ambulance'], minutesAgo: 120 },
+    { cat: 'injury', sev: 'minor', where: N.green2, sum: 'Child fell, sore wrist', patient: [kids[0], 'Wrist pain after a fall', 'wrist_hand', 'right', 'sprain_strain', { kind: 'ice', description: 'Ice pack applied' }, 'treated_released'], minutesAgo: 240 },
+    { cat: 'injury', sev: 'moderate', where: N.blue1, sum: 'Skier caught an edge, knee injury', patient: [adults[3], 'Knee pain and swelling', 'knee', 'left', 'sprain_strain', { kind: 'splint', description: 'Knee immobilized' }, 'transported_ambulance'], minutesAgo: 180 },
+    { cat: 'collision', sev: 'moderate', where: N.blue2, sum: 'Two skiers collided at the merge', patient: [adults[6], 'Shoulder pain', 'shoulder', 'right', 'dislocation', { kind: 'spinal_motion_restriction', description: 'Collar and board, precaution' }, 'transported_ambulance'], minutesAgo: 120 },
     { cat: 'medical', sev: 'minor', where: 'Summit hut', sum: 'Lightheaded after a hard run', patient: [adults[9], 'Dizziness', 'other', 'na', 'illness', { kind: 'warming', description: 'Warm drink, rested in hut' }, 'treated_released'], minutesAgo: 90 },
-    { cat: 'injury', sev: 'serious', where: 'Terrain Park', sum: 'Rider landed hard, possible fracture', patient: [adults[11], 'Ankle pain, unable to bear weight', 'ankle_foot', 'left', 'fracture', { kind: 'splint', description: 'Vacuum splint' }, 'transported_ambulance'], minutesAgo: 45 },
-    { cat: 'injury', sev: 'minor', where: 'Bunny Hill', sum: 'Beginner fall, bruised hip', patient: [kids[3], 'Sore hip', 'hip', 'right', 'contusion', { kind: 'ice', description: 'Ice pack' }, 'treated_released'], minutesAgo: 20 },
+    { cat: 'injury', sev: 'serious', where: N.park, sum: 'Rider landed hard, possible fracture', patient: [adults[11], 'Ankle pain, unable to bear weight', 'ankle_foot', 'left', 'fracture', { kind: 'splint', description: 'Vacuum splint' }, 'transported_ambulance'], minutesAgo: 45 },
+    { cat: 'injury', sev: 'minor', where: N.bunny, sum: 'Beginner fall, bruised hip', patient: [kids[3], 'Sore hip', 'hip', 'right', 'contusion', { kind: 'ice', description: 'Ice pack' }, 'treated_released'], minutesAgo: 20 },
   ];
   for (const c of cases) {
-    const inc = await soft(`case ${c.sum}`, () => C('POST', '/patrol/incidents', { occurred_at: ago(c.minutesAgo), location: c.where, category: c.cat, severity: c.sev, summary: c.sum }));
+    const at = N.where[c.where]; // on a real mountain, a pin on the run itself
+    const inc = await soft(`case ${c.sum}`, () => C('POST', '/patrol/incidents', { occurred_at: ago(c.minutesAgo), location: c.where, category: c.cat, severity: c.sev, summary: c.sum, ...(at ? { gps_lat: at[0], gps_lng: at[1] } : {}) }));
     if (!inc) continue;
     const [g, complaint, region, side, type, treat, dispo] = c.patient;
     const pat = await soft('patient', () => C('POST', `/patrol/incidents/${inc.id}/patients`, { first_name: g.first, last_name: g.last, date_of_birth: g.dob, sex: g.sex }));
@@ -313,7 +359,8 @@ async function load(o) {
     ['A-frame box', 'a_frame', 'm', '10 ft', main], ['Tabletop', 'tabletop', 'l', '30 ft', main], ['Step-up', 'step_up', 'l', '22 ft', main],
     ['Rollers', 'roller', 's', null, mini], ['Mini hip', 'hip', 's', '12 ft', mini], ['Barrel', 'barrel', 's', '8 ft', mini],
   ];
-  const baseLat = 40.2689; const baseLng = -75.4417; // a made-up spot; set the map's opening view from the Terrain park screen
+  // Near the middle of the real mountain when there is one, else a made-up spot; set the map's opening view from the Terrain park screen
+  const baseLat = AREA ? AREA.lat : 40.2689; const baseLng = AREA ? AREA.lng : -75.4417;
   for (const [i, [name, kind, size, dimensions, area]] of parkFeatures.entries()) {
     const f = await soft(`park feature ${name}`, () => C('POST', '/park/features', { name, kind, size, dimensions }));
     if (!f) continue;
@@ -342,29 +389,29 @@ async function load(o) {
   await soft('snow reading', () => C('POST', '/ops/snow', { base_in: 38, new_snow_in: 4, surface: 'packed_powder', quality: 'good', note: 'Light snow overnight' }));
   await soft('weather', () => C('POST', '/ops/weather', { place: 'Base', temp_f: 24, wind_mph: 8, gust_mph: 15, wind_dir: 'NW', sky: 'partly', precip_in: 0 }));
   await soft('weather', () => C('POST', '/ops/weather', { place: 'Summit', temp_f: 17, wind_mph: 22, gust_mph: 34, wind_dir: 'NW', sky: 'snow', precip_in: 0.1 }));
-  const lowTrail = trailList.find((t) => t.name === 'Bunny Hill');
+  const lowTrail = trailList.find((x) => x.name === N.bunny);
   if (lowTrail) {
     const run = await soft('snowmaking', () => C('POST', '/ops/snowmaking', { trail_id: lowTrail.id, guns: 8, temp_f: 21 }));
     if (run) await soft('snowmaking stop', () => C('POST', `/ops/snowmaking/${run.id}/stop`, { water_gal: 120000 }));
   }
   const wo = await soft('work order', () => C('POST', '/ops/work-orders', { title: 'Replace left track on Groomer 2', priority: 'high', asset_id: assetIds['Groomer 2'] || null, description: 'Track is cracking at the third cleat.' }));
-  await soft('work order', () => C('POST', '/ops/work-orders', { title: 'Re-grease Magic Carpet bearings', priority: 'normal', lift_id: (liftList.find((l) => l.name === 'Magic Carpet') || {}).id || null }));
+  await soft('work order', () => C('POST', '/ops/work-orders', { title: `Re-grease ${N.small} bearings`.slice(0, 200), priority: 'normal', lift_id: (liftList.find((l) => l.name === N.small) || {}).id || null }));
   if (wo) await soft('work order note', () => C('POST', `/ops/work-orders/${wo.id}/notes`, { body: 'Track ordered, arrives Thursday' }));
   await soft('pm', () => C('POST', '/ops/pm', { name: 'Groomer oil change', asset_id: assetIds['Groomer 1'], interval_hours: 250, interval_days: 180 }));
-  await soft('pm', () => C('POST', '/ops/pm', { name: 'Annual rope inspection', lift_id: (liftList.find((l) => l.name === 'Summit Quad') || {}).id, interval_days: 365 }));
+  await soft('pm', () => C('POST', '/ops/pm', { name: 'Annual rope inspection', lift_id: (liftList.find((l) => l.name === N.summit) || {}).id, interval_days: 365 }));
   await soft('pm', () => C('POST', '/ops/pm', { name: 'Snowmobile belt check', asset_id: assetIds['Snowmobile 1'], interval_hours: 100 }));
   const meta = await soft('ops meta', () => C('GET', '/ops/meta'));
   if (meta) {
     for (const lift of liftList) {
-      const failIt = lift.name === 'Valley Double';
+      const failIt = lift.name === N.hold;
       const items = meta.lift_checklist.map((i) => ({ key: i.key, result: failIt && i.key === 'estop' ? 'fail' : 'pass', note: failIt && i.key === 'estop' ? 'North terminal stop is slow to trip' : null }));
       await soft(`inspect ${lift.name}`, () => C('POST', '/ops/lift-checks', { lift_id: lift.id, items }));
     }
   }
-  const tl = liftList.find((l) => l.name === 'Ridge Triple');
+  const tl = liftList.find((l) => l.name === N.second);
   if (tl) await soft('downtime', () => C('POST', '/ops/downtime', { lift_id: tl.id, started_at: `${today} 08:10`, ended_at: `${today} 08:55`, reason: 'wind', note: 'Gusts over 35 at the top' }));
-  await soft('handoff', () => C('POST', '/ops/handoffs', { dept: 'grooming', shift: 'night', body: 'Cliffhanger and Gnar still need a second pass. Groomer 2 is down for the track.' }));
-  await soft('handoff', () => C('POST', '/ops/handoffs', { dept: 'lifts', shift: 'day', body: 'Valley Double stays on hold until the north stop is fixed and re-inspected.' }));
+  await soft('handoff', () => C('POST', '/ops/handoffs', { dept: 'grooming', shift: 'night', body: `${N.black1} and ${N.black2} still need a second pass. Groomer 2 is down for the track.` }));
+  await soft('handoff', () => C('POST', '/ops/handoffs', { dept: 'lifts', shift: 'day', body: `${N.hold} stays on hold until the north stop is fixed and re-inspected.` }));
 
   log('Documents and instructor availability');
   // ---- documents: a few categories with who may see them, and short files that can be searched

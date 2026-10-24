@@ -735,6 +735,17 @@ const fieldKitSteps = [
 ];
 
 // Staff injuries, first step: when the owner and GM were told a patient is staff, and told again when they went to hospital.
+// Demos built on a real mountain: what OpenStreetMap says about a ski area, kept a week so a visitor's choice is quick.
+const skiAreaSteps = [
+  ['ski_area_cache', (c) => tableExists(c, 'ski_area_cache'), `CREATE TABLE ski_area_cache (
+    ref        VARCHAR(40) NOT NULL PRIMARY KEY,
+    name       VARCHAR(100) NOT NULL,
+    data       MEDIUMTEXT NOT NULL,
+    fetched_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB`],
+  ['sandbox_signups.area_ref', (c) => columnExists(c, 'sandbox_signups', 'area_ref'), 'ALTER TABLE sandbox_signups ADD COLUMN area_ref VARCHAR(40) NULL'],
+];
+
 const staffInjurySteps = [
   ['incident_patients staff notices', (c) => columnExists(c, 'incident_patients', 'staff_serious_noted_at'), 'ALTER TABLE incident_patients ADD COLUMN staff_noted_at DATETIME NULL, ADD COLUMN staff_serious_noted_at DATETIME NULL'],
 ];
@@ -982,7 +993,7 @@ async function main() {
   await seedPatrolPlan(conn);
   await seedAssistantAddon(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;
