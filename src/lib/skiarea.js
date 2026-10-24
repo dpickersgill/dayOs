@@ -13,7 +13,8 @@
 const { pool, one } = require('../db');
 const { logFailure } = require('./jobs');
 
-const SERVERS = () => (process.env.OVERPASS_URLS || 'https://overpass-api.de/api/interpreter,https://overpass.private.coffee/api/interpreter').split(',').map((s) => s.trim()).filter(Boolean);
+// Public Overpass servers, tried in order: the main one is often busy, so there are two others behind it.
+const SERVERS = () => (process.env.OVERPASS_URLS || 'https://overpass-api.de/api/interpreter,https://overpass.kumi.systems/api/interpreter,https://overpass.private.coffee/api/interpreter').split(',').map((s) => s.trim()).filter(Boolean);
 const UA = 'Verdynt/OS demo builder (https://www.runmyresort.com; hello@runmyresort.com)';
 const CACHE_DAYS = 7;
 const MAX_LIFTS = 25;
@@ -50,7 +51,7 @@ area["ISO3166-2"="US-${state}"]["admin_level"="4"]->.s;
   way["landuse"="winter_sports"]["name"~"${re}",i](area.s);
   relation["landuse"="winter_sports"]["name"~"${re}",i](area.s);
 );
-out tags center 60;`;
+out center 60;`;
 }
 
 /** Ranks matches by how many of the typed words each name has, then by having the whole phrase. */
@@ -76,7 +77,7 @@ const round = (n) => Math.round(Number(n) * 1e6) / 1e6;
 
 /** For each match without a town, the town or county it is in (one request for all of them). */
 function placesQuery(list) {
-  const parts = list.map((r, i) => `is_in(${r.lat},${r.lng})->.p${i};area.p${i}["boundary"="administrative"]["admin_level"~"^(6|7|8)$"];out tags;make sep i="${i}";out;`);
+  const parts = list.map((r, i) => `is_in(${r.lat},${r.lng})->.p${i};area.p${i}["boundary"="administrative"]["admin_level"~"^(6|7|8)$"];out;make sep i="${i}";out;`);
   return `[out:json][timeout:20];\n${parts.join('\n')}`;
 }
 function parsePlaces(elements, count) {
@@ -99,7 +100,7 @@ function detailQuery(ref) {
   if (!m) throw new Error('Not a ski area');
   return `[out:json][timeout:30];
 ${m[1]}(${m[2]})->.a;
-.a out tags center;
+.a out center;
 (.a; .a >;)->.g;
 .a map_to_area->.aa;
 (
@@ -108,7 +109,7 @@ ${m[1]}(${m[2]})->.a;
   way["aerialway"](area.aa);
   way["aerialway"](around.g:250);
 );
-out tags geom;`;
+out geom;`;
 }
 
 const LIFT_KINDS = { cable_car: 'Tram', gondola: 'Gondola', mixed_lift: 'Chondola', chair_lift: 'Chairlift', drag_lift: 'Surface lift', 't-bar': 'T-bar', 'j-bar': 'J-bar', platter: 'Platter lift', rope_tow: 'Rope tow', magic_carpet: 'Magic carpet' };
@@ -196,17 +197,25 @@ function drawing(lines) {
   };
 }
 
+/** Why one server did not answer, in a line for the log: its status and the start of what it said, or the network error. */
+const plain = (t) => String(t || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
 async function overpass(query) {
-  let last;
+  const tried = [];
   for (const url of SERVERS()) {
+    const host = (() => { try { return new URL(url).host; } catch (_) { return url; } })();
     try {
-      const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': UA, accept: 'application/json' }, body: new URLSearchParams({ data: query }), signal: AbortSignal.timeout(35_000) });
-      if (!r.ok) throw new Error(`${url} answered ${r.status}`);
-      const j = await r.json();
+      const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': UA }, body: new URLSearchParams({ data: query }), signal: AbortSignal.timeout(35_000) });
+      const text = await r.text();
+      if (!r.ok) { tried.push(`${host} ${r.status}: ${plain(text)}`); continue; }
+      let j;
+      try { j = JSON.parse(text); } catch (_) { tried.push(`${host} ${r.status}, not JSON: ${plain(text)}`); continue; }
+      if (j.remark && !(j.elements || []).length) { tried.push(`${host} remark: ${plain(j.remark)}`); continue; } // a timeout or query error inside a 200
       return j.elements || [];
-    } catch (e) { last = e; }
+    } catch (e) {
+      tried.push(`${host}: ${e.name === 'TimeoutError' ? 'no answer in 35 seconds' : `${(e.cause && e.cause.code) || e.name} ${e.message}`}`);
+    }
   }
-  logFailure({ job: 'ski_area_lookup', message: last ? last.message : 'no Overpass server' });
+  logFailure({ job: 'ski_area_lookup', message: tried.join(' | ') || 'no Overpass server set', query: query.slice(0, 600) });
   const err = new Error('The map service is not answering right now'); err.unavailable = true; throw err;
 }
 
