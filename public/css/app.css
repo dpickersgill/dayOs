@@ -710,7 +710,7 @@ a.btn { text-decoration: none; }
 .fab { position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 40; display: inline-flex; align-items: center; gap: 6px; min-height: 52px; padding: 0 20px; border-radius: 999px; border: none; background: var(--trail-blue); color: var(--on-accent); font: inherit; font-weight: 700; font-size: 1.0625rem; box-shadow: 0 6px 18px rgba(8, 35, 60, 0.35); cursor: pointer; }
 .fab span { font-size: 1.5rem; line-height: 1; margin-top: -2px; }
 .fab:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
-.offline-banner { position: sticky; top: 0; z-index: 60; background: #8a1f11; color: #fff; padding: 10px 14px; border-radius: 10px; margin-bottom: 12px; }
+.offline-banner { position: sticky; top: 0; z-index: 49; /* under open dialogs (50), over the page */ background: #8a1f11; color: #fff; padding: 10px 14px; border-radius: 10px; margin-bottom: 12px; }
 .offline-banner[hidden] { display: none; }
 .home-top { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .home-top .grow { flex: 1 1 260px; }

@@ -2093,6 +2093,23 @@ test('patrol home: my open cases, a search by patient name, the New case button 
   D.homeCase = c.id;
 });
 
+test('a case started with no signal opens even when no case was opened since the app loaded', skip(), async () => {
+  // Opening Patrol with a signal keeps the report form's layout on the phone...
+  await renderView('patrol', 'patrol', T.patrol);
+  await new Promise((r) => setTimeout(r, 300)); await settle();
+  const nf = await mods.view('nsaar-form');
+  nf.forgetForm(); // ...so after a reload, with nothing in memory,
+  const kept = nf.keptForm();
+  assert.ok(kept && Array.isArray(kept.fields) && kept.sections.length, 'the layout is still on the phone');
+  // and a case kept on the phone with no layout of its own is drawn from it, not the "reading 'fields'" crash.
+  const tmp = -(Date.now() % 1e9);
+  const ob = await mods.imp('outbox.js');
+  ob.keepCase(tmp, { c: { id: tmp, offline: true, status: 'open', report_state: 'draft', occurred_at: `${today} 10:42:00`, location: 'Upper Ridge', category: 'injury', severity: 'moderate', summary: 'Skier down', resort: { name: 'X', legal_name: null }, form: {}, notes: [], events: [], responders: [], witnesses: [], signatures: [], collision: null, parties: [], checklist: [], versions: [], photos: [], review: null, check: [], patients: [] }, def: null, trails: [], checklists: [] });
+  const page = await renderView('patrol', 'patrol', T.patrol, {}, ['case', String(tmp)]);
+  assert.doesNotMatch(page.textContent, /reading 'fields'|Cannot read/);
+  assert.match(page.textContent, /Started with no signal/);
+});
+
 test('patrol: a collision is recorded by person and by scene, ticked off with a checklist, and printed without medical details', skip(), async () => {
   const o = T.owner;
   const c = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${today}T13:10`, location: 'Cascade merge', category: 'collision', severity: 'moderate', summary: 'Two riders collided at the merge' } }));

@@ -1,6 +1,30 @@
 {
   "releases": [
     {
+      "version": "2026.10.47",
+      "date": "2026-11-08",
+      "title": "Starting a case with no signal, fixed",
+      "notes": [
+        {
+          "kind": "fixed",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Starting a case with no signal now always opens it. Before, if no case had been opened since the app was loaded, the new case showed an error instead. The report form's layout is now kept on the phone whenever Patrol is opened with a signal.",
+          "help": "patrol-offline"
+        },
+        {
+          "kind": "fixed",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "The red No connection banner no longer covers the top of an open window, such as New case."
+        }
+      ]
+    },
+    {
       "version": "2026.10.46",
       "date": "2026-11-08",
       "title": "The ski area copy goes into the server image",

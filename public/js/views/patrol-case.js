@@ -10,7 +10,7 @@ import { has } from './patrol-feat.js';
 import { shareButton } from '../share.js';
 import { signaturePad } from '../sigpad.js';
 import { personPicker } from '../widgets.js';
-import { loadForm, sectionPanel, sectionVisible } from './nsaar-form.js';
+import { loadForm, keptForm, sectionPanel, sectionVisible } from './nsaar-form.js';
 import { bedsideCard, voidedNote } from './patrol-bedside.js';
 import { collisionPanel } from './patrol-collision.js';
 import { checklistPanel, loadChecklists } from './patrol-checklists.js';
@@ -66,6 +66,8 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       const kept = keptCase(id);
       if (!kept) { clear(page).append(backLink(), errorBox(new Error('This case is not on this phone. If it was sent already, open it from the case list.'))); return; }
       ({ c, def, trails, checklists } = kept.data);
+      def = def || keptForm();
+      if (!def) { clear(page).append(backLink(), errorBox(new Error('This phone has not loaded the report form yet. The case is kept here: open it again once there is a signal.'))); return; }
       current = c; mode = 'care';
       redraw(); return;
     }

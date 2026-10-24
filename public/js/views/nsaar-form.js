@@ -2,14 +2,31 @@
 // Each section is its own small form, so a patroller on a phone saves a section at a time.
 
 import { get, put, patch } from '../api.js';
-import { h, clear, state, field, button, toast, formDialog, label, errorBox, fail } from '../ui.js';
+import { h, clear, state, field, button, toast, formDialog, label, errorBox, fail, ctx } from '../ui.js';
 import { pinDialog } from './incident-map.js';
 import { measureText } from '../care-text.js';
 
 let cache = null;
+// The form's layout is kept on the phone too (it holds no patient details), so a case started where there is no signal
+// can still be drawn, even when no case has been opened since the app was loaded.
+const STORE = () => `so.patrol.form.${(ctx.me && ctx.me.tenant) || ''}`;
 export async function loadForm(force = false) {
-  if (!cache || force) cache = await get('/patrol/form');
+  if (!cache || force) {
+    try {
+      cache = await get('/patrol/form');
+      try { localStorage.setItem(STORE(), JSON.stringify(cache)); } catch (_) { /* private mode */ }
+    } catch (err) {
+      const kept = keptForm();
+      if (!kept) throw err;
+      cache = kept;
+    }
+  }
   return cache;
+}
+/** The form layout last loaded on this phone, without asking the server; null if it never was. */
+export function keptForm() {
+  if (cache) return cache;
+  try { const s = localStorage.getItem(STORE()); return s ? JSON.parse(s) : null; } catch (_) { return null; }
 }
 export const forgetForm = () => { cache = null; };
 

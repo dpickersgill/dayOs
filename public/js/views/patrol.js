@@ -14,7 +14,7 @@ import { caseRow } from './case-list.js';
 import { drawFollowup } from './patrol-followup.js';
 import { drawTeam, drawPosts, drawEquipment, drawTraining } from './patrol-team.js';
 import { drawDispatch, drawPassport } from './patrol-dispatch.js';
-import { formSettingsDialog } from './nsaar-form.js';
+import { formSettingsDialog, loadForm, keptForm } from './nsaar-form.js';
 import { drawMapTab } from './incident-map.js';
 import { drawAccessLog } from './patrol-access.js';
 import { drawNetwork } from './patrol-network.js';
@@ -52,6 +52,8 @@ export async function render(root, params = []) {
   let me;
   try { me = await get('/patrol/me'); lastMe = me; } catch (err) { if (!lastMe || (err && err.status && err.status < 500)) throw err; me = lastMe; }
   setAccess(me);
+  // Keep the report form's layout on this phone while there is a signal, so a case can be started where there is none.
+  if (has('create_case')) loadForm().catch(() => {});
   root.append(connectionBanner());
   if (params[0] === 'case' && CASE_ID.test(params[1] || '')) {
     let roster = lastRoster;
@@ -243,7 +245,7 @@ function startOffline(tmp, body, trailName) {
     patients: p ? [{ id: tmp - 1, incident_id: tmp, first_name: p.first_name || 'Unknown', last_name: p.last_name || 'Patient', age_years: p.age_years ?? null, chief_complaint: p.chief_complaint || null,
       sex: 'unknown', allergies: null, form: {}, vitals: [], injuries: [], treatments: [], derived: {} }] : [],
   };
-  keepCase(tmp, { c, def: prev ? prev.def : null, trails: prev ? prev.trails : lastTrails, checklists: prev ? prev.checklists : [] });
+  keepCase(tmp, { c, def: (prev && prev.def) || keptForm(), trails: prev ? prev.trails : lastTrails, checklists: prev ? prev.checklists : [] });
 }
 
 async function newCase() {
