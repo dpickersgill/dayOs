@@ -669,7 +669,33 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       def, section, scope: 'patient', row: p, editable, required: def.required, ctx: sigCtx(c, p), trails, suggest, open: section.id === 'patient' && live(c.patients).length === 1 && editable && !p.chief_complaint,
       onSave: async (body, o) => { await patch(base, body); if (o && o.next) goNext = `${p.id}:${section.id}`; await load(); },
     }));
-    return h('article', { class: 'stack patient', 'data-patient': p.id }, h('h3', null, `Patient form: ${p.first_name} ${p.last_name}`), ...sections);
+    return h('article', { class: 'stack patient', 'data-patient': p.id }, h('h3', null, `Patient form: ${p.first_name} ${p.last_name}`), whoRow(p, editable), ...sections);
+  }
+
+  /**
+   * Guest, staff on duty, staff off duty or volunteer on duty, as one row of buttons at the top of the patient, because it
+   * changes what happens next: the owner and GM are told about staff, and staff hurt while working are not counted as guests
+   * and get no guest follow-up email.
+   */
+  function whoRow(p, editable) {
+    const cur = (p.form && p.form.patient_type) || (p.activity === 'staff' ? 'staff_work' : 'guest');
+    const choices = [['guest', 'Guest'], ['staff_work', 'Staff member, on duty'], ['staff_off', 'Staff member, off duty'], ['volunteer_work', 'Volunteer, on duty']];
+    const notes = {
+      staff_work: 'The owner and GM are told. Not counted as a guest injury, and no guest follow-up email.',
+      volunteer_work: 'The owner and GM are told, and decide whether it counts as a staff injury. Not counted as a guest injury, and no guest follow-up email.',
+      staff_off: 'Stays a guest case. The owner and GM are told.',
+    };
+    const row = h('div', { class: 'seg', role: 'group', 'aria-label': `Who is ${p.first_name} ${p.last_name}` }, choices.map(([v, t]) => {
+      const b = h('button', { type: 'button', 'aria-pressed': String(cur === v), disabled: !editable, dataset: { tone: v === 'guest' ? 'good' : 'warn' } }, t);
+      b.addEventListener('click', async () => {
+        if (v === cur) return;
+        try { await patch(`/patrol/incidents/${id}/patients/${p.id}`, { form: { patient_type: v } }); } catch (e) { toast(e.message, 'error'); return; }
+        toast(v === 'guest' ? 'Marked as a guest' : `Marked: ${t}. ${v === 'staff_off' ? 'The owner and GM are told.' : 'The owner and GM have been told.'}`);
+        await load();
+      });
+      return b;
+    }));
+    return h('div', { class: 'stack tight patient-who' }, h('span', { class: 'muted small' }, 'Who is this patient?'), row, notes[cur] ? h('p', { class: 'muted small' }, notes[cur]) : null);
   }
 
   // ---- responders

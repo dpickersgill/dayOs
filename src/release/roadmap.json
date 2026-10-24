@@ -30,8 +30,8 @@
       "items": [
         {
           "app": "patrol",
-          "title": "Staff injuries",
-          "text": "Patrol marks an injured patient as a staff member on duty. The owner or GM gets a private staff injury record with the OSHA log and summary, a first report for your workers' comp insurer, and an alert with the deadline when an injury must be reported to OSHA."
+          "title": "Staff injury records for the owner",
+          "text": "Patrol already marks a patient as staff and the owner is told. Next: a private record for the owner or GM, including injuries patrol never sees, with the OSHA log and yearly summary, a first report for your workers' comp insurer to print or email, your state's deadline, a heads-up to the person's manager, and a reminder each February to post the summary."
         },
         {
           "app": "shop",

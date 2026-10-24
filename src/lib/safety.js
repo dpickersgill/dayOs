@@ -61,7 +61,7 @@ const BODY_OF = Object.fromEntries(BODY.flatMap(([k, , parts]) => parts.map((p) 
 const INJURY = [['fracture', 'Fracture'], ['dislocation', 'Dislocation'], ['sprain_strain', 'Sprain or strain'], ['laceration', 'Cut'], ['contusion', 'Bruise'], ['concussion', 'Concussion'], ['spinal', 'Spinal'], ['internal', 'Internal'], ['cold_injury', 'Cold injury'], ['other', 'Other']];
 const MEDICAL_TYPES = new Set(['illness', 'cardiac']);
 
-const EXCLUSIONS = [['staff', 'Staff injured while working'], ['competition', 'Racing and race training'], ['medical', 'Medical calls (illness, cardiac, prior condition)'], ['no_injury', 'No injury found']];
+const EXCLUSIONS = [['staff', 'Staff and volunteers injured while working'], ['competition', 'Racing and race training'], ['medical', 'Medical calls (illness, cardiac, prior condition)'], ['no_injury', 'No injury found']];
 const EXCLUSION_KEYS = EXCLUSIONS.map((e) => e[0]);
 
 const parse = (v) => { if (!v) return {}; if (typeof v === 'object') return v; try { const o = JSON.parse(v); return o && typeof o === 'object' ? o : {}; } catch (_) { return {}; } };
@@ -121,7 +121,7 @@ function classify(r, injuries) {
   const disposition = r.disposition || null;
 
   const excluded = [];
-  if (patientType === 'staff_work' || r.activity === 'staff') excluded.push('staff');
+  if (patientType === 'staff_work' || patientType === 'volunteer_work' || r.activity === 'staff') excluded.push('staff');
   if (involvement === 'competition' || involvement === 'training') excluded.push('competition');
   const onlyMedicalInjuries = types.length > 0 && types.every((t) => MEDICAL_TYPES.has(t));
   const medicalChart = parts.length > 0 && parts.every((p) => p === 'medical');

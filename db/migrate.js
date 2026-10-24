@@ -734,6 +734,11 @@ const fieldKitSteps = [
     ADD COLUMN locate_sent_at DATETIME NULL, ADD COLUMN located_at DATETIME NULL, ADD COLUMN located_accuracy_m INT UNSIGNED NULL, ADD UNIQUE KEY uq_dcall_locate (locate_token)`],
 ];
 
+// Staff injuries, first step: when the owner and GM were told a patient is staff, and told again when they went to hospital.
+const staffInjurySteps = [
+  ['incident_patients staff notices', (c) => columnExists(c, 'incident_patients', 'staff_serious_noted_at'), 'ALTER TABLE incident_patients ADD COLUMN staff_noted_at DATETIME NULL, ADD COLUMN staff_serious_noted_at DATETIME NULL'],
+];
+
 const demoMailSteps = [
   // Demo emails from the founder: the welcome with a sign-in link, a nudge on day 2, a note before the demo ends.
   // open_nonce makes the sign-in link (changing it, from the console, retires every link sent before).
@@ -977,7 +982,7 @@ async function main() {
   await seedPatrolPlan(conn);
   await seedAssistantAddon(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

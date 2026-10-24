@@ -276,6 +276,8 @@ tr.attention td { background: var(--hold-tint); }
 .seg button[aria-pressed='true'][data-tone='warn'] { background: #f2b33d; color: #2c1c00; }
 .seg button[aria-pressed='true'][data-tone='bad'] { background: var(--closed); color: #fff; }
 .seg button:disabled { cursor: default; }
+.patient-who .seg { display: flex; flex-wrap: wrap; width: fit-content; max-width: 100%; }
+@media (max-width: 640px) { .patient-who .seg { flex-direction: column; width: 100%; } .patient-who .seg button { border-right: none; border-bottom: 1px solid var(--line-strong); text-align: left; } .patient-who .seg button:last-child { border-bottom: none; } }
 .page-note { color: var(--quiet); max-width: 62ch; }
 .basket-total { font-size: 1.5rem; font-weight: 700; }
 .week-nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

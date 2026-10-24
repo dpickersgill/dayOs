@@ -3,4 +3,4 @@
 // The last thing the migration adds (an index, a column or a table's key). /readyz checks it exists, so a version running
 // against a database that was not migrated for it shows up straight away instead of as errors later. Update it when the
 // migration gains a step.
-module.exports = { LATEST: { table: 'dispatch_calls', column: 'located_at' } };
+module.exports = { LATEST: { table: 'incident_patients', column: 'staff_serious_noted_at' } };

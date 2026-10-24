@@ -21,6 +21,8 @@ const MEDS = require('./patrolmeds');
 const OPS = require('../lib/patrolops');
 const { checkCase } = require('../lib/reportcheck');
 const SF = require('../lib/storyfill');
+const staffInjury = require('../lib/staffinjury');
+const { baseUrl } = require('../lib/baseurl');
 
 const router = express.Router();
 // Incident records can contain injury details about guests, so access is limited to patrol and managers.
@@ -235,16 +237,17 @@ router.get('/analytics', patrol, needs('reports'), async (req, res) => {
   // Skier visits = accepted gate scans in the same dates (a rough denominator: one guest can scan more than once).
   const visits = Number((await one(pool, "SELECT COUNT(*) AS n FROM scans WHERE tenant_id = ? AND result = 'ok' AND DATE(scanned_at) BETWEEN ? AND ?", range)).n);
   const [totals, byCategory, bySeverity, byHour, byWeekday, places, disposition, activity, ability, helmet, region, injuryType, response, byLead, states] = await Promise.all([
-    one(pool, `SELECT COUNT(*) AS cases, (SELECT COUNT(*) FROM incident_patients p JOIN incidents x ON x.id = p.incident_id AND x.tenant_id = p.tenant_id WHERE x.tenant_id = ? AND DATE(x.occurred_at) BETWEEN ? AND ? AND p.voided_at IS NULL) AS patients FROM incidents i WHERE ${inRange}`, [...range, ...range]),
+    one(pool, `SELECT COUNT(*) AS cases, (SELECT COUNT(*) FROM incident_patients p JOIN incidents x ON x.id = p.incident_id AND x.tenant_id = p.tenant_id WHERE x.tenant_id = ? AND DATE(x.occurred_at) BETWEEN ? AND ? AND p.voided_at IS NULL) AS patients,
+      (SELECT COUNT(*) FROM incident_patients p JOIN incidents x ON x.id = p.incident_id AND x.tenant_id = p.tenant_id WHERE x.tenant_id = ? AND DATE(x.occurred_at) BETWEEN ? AND ? AND p.voided_at IS NULL AND NOT ${staffInjury.GUEST_SQL}) AS staff_patients FROM incidents i WHERE ${inRange}`, [...range, ...range, ...range]),
     group(`SELECT category AS label, COUNT(*) AS n FROM incidents i WHERE ${inRange} GROUP BY category ORDER BY n DESC`),
     group(`SELECT severity AS label, COUNT(*) AS n FROM incidents i WHERE ${inRange} GROUP BY severity ORDER BY n DESC`),
     group(`SELECT HOUR(occurred_at) AS label, COUNT(*) AS n FROM incidents i WHERE ${inRange} GROUP BY label ORDER BY label`),
     group(`SELECT DAYOFWEEK(occurred_at) - 1 AS label, COUNT(*) AS n FROM incidents i WHERE ${inRange} GROUP BY label ORDER BY label`),
     group(`SELECT COALESCE(t.name, i.location) AS label, COUNT(*) AS n FROM incidents i LEFT JOIN trails t ON t.id = i.trail_id AND t.tenant_id = i.tenant_id WHERE ${inRange} GROUP BY COALESCE(t.name, i.location) ORDER BY n DESC LIMIT 10`),
     group(`SELECT COALESCE(p.disposition, 'not_recorded') AS label, COUNT(*) AS n FROM incident_patients p JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} AND p.voided_at IS NULL GROUP BY label ORDER BY n DESC`),
-    group(`SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.form, '$.activity')), p.activity, 'not_recorded') AS label, COUNT(*) AS n FROM incident_patients p JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} AND p.voided_at IS NULL GROUP BY label ORDER BY n DESC`),
-    group(`SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.form, '$.ability')), p.ability, 'not_recorded') AS label, COUNT(*) AS n FROM incident_patients p JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} AND p.voided_at IS NULL GROUP BY label ORDER BY n DESC`),
-    group(`SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.form, '$.helmet')), p.helmet) AS label, COUNT(*) AS n FROM incident_patients p JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} AND p.voided_at IS NULL AND (COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.form, '$.activity')), p.activity) IN ('ski','snowboard','other_snow','alpine','telemark','nordic','touring')) GROUP BY label`),
+    group(`SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.form, '$.activity')), p.activity, 'not_recorded') AS label, COUNT(*) AS n FROM incident_patients p JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} AND p.voided_at IS NULL AND ${staffInjury.GUEST_SQL} GROUP BY label ORDER BY n DESC`),
+    group(`SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.form, '$.ability')), p.ability, 'not_recorded') AS label, COUNT(*) AS n FROM incident_patients p JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} AND p.voided_at IS NULL AND ${staffInjury.GUEST_SQL} GROUP BY label ORDER BY n DESC`),
+    group(`SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.form, '$.helmet')), p.helmet) AS label, COUNT(*) AS n FROM incident_patients p JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} AND p.voided_at IS NULL AND ${staffInjury.GUEST_SQL} AND (COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.form, '$.activity')), p.activity) IN ('ski','snowboard','other_snow','alpine','telemark','nordic','touring')) GROUP BY label`),
     group(`SELECT j.body_region AS label, COUNT(*) AS n FROM incident_injuries j JOIN incident_patients p ON p.id = j.patient_id AND p.tenant_id = j.tenant_id JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} AND p.voided_at IS NULL AND j.voided_at IS NULL GROUP BY j.body_region ORDER BY n DESC`),
     group(`SELECT j.injury_type AS label, COUNT(*) AS n FROM incident_injuries j JOIN incident_patients p ON p.id = j.patient_id AND p.tenant_id = j.tenant_id JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id WHERE ${inRange} AND p.voided_at IS NULL AND j.voided_at IS NULL GROUP BY j.injury_type ORDER BY n DESC`),
     one(pool, `SELECT
@@ -267,7 +270,10 @@ router.get('/analytics', patrol, needs('reports'), async (req, res) => {
   res.json({
     from, to,
     cases: totals.cases, patients: totals.patients, visits,
-    patients_per_1000_visits: visits ? Math.round((Number(totals.patients) / visits) * 10000) / 10 : null,
+    // Staff and volunteers hurt while working are patrol's work too, but they are not guests: they are left out of the
+    // rate per 1,000 visits and the guest activity, ability and helmet figures.
+    staff_patients_on_duty: Number(totals.staff_patients),
+    patients_per_1000_visits: visits ? Math.round(((Number(totals.patients) - Number(totals.staff_patients)) / visits) * 10000) / 10 : null,
     by_category: byCategory, by_severity: bySeverity, by_hour: byHour, by_weekday: byWeekday, top_places: places,
     patients_by_disposition: disposition, patients_by_activity: activity, patients_by_ability: ability, helmet_use_on_snow: helmet,
     injuries_by_region: region, injuries_by_type: injuryType,
@@ -386,6 +392,11 @@ async function editableCase(conn, req, id) {
   return inc;
 }
 
+/** After a change that could make a staff patient's case serious, tells the owner and GM if they have not been told. */
+async function staffNotices(req, id) {
+  for (const p of await rows(pool, 'SELECT id FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND voided_at IS NULL', [req.auth.tenantId, id])) await staffInjury.notifyIfDue(req.auth.tenantId, id, p.id, baseUrl(req));
+}
+
 router.patch('/incidents/:id', patrol, needs('create_case'), validate(partialOf(incidentFields).extend({ status: z.enum(['open', 'closed']).optional() })), async (req, res) => {
   const id = paramId(req);
   await tx(async (conn) => {
@@ -404,6 +415,7 @@ router.patch('/incidents/:id', patrol, needs('create_case'), validate(partialOf(
     await conn.query(`UPDATE incidents SET ${set.sql} WHERE tenant_id = ? AND id = ?`, [...set.values, req.auth.tenantId, id]);
     await audit(conn, req, 'update', 'incidents', id, { fields: Object.keys(req.body).map((k) => (k === 'form' ? `form:${Object.keys(req.body.form).join('|')}` : k)) });
   });
+  if (req.body.severity) await staffNotices(req, id);
   res.json({ ok: true });
 });
 
@@ -775,6 +787,7 @@ router.post('/incidents/:id/patients', patrol, needs('create_case'), validate(z.
     await audit(conn, req, 'add_patient', 'incidents', id, { patient_id: r.insertId, ...(pulled.length ? { pulled_from_customer: data.person_id, pulled } : {}) });
     return r.insertId;
   });
+  await staffInjury.notifyIfDue(req.auth.tenantId, id, out, baseUrl(req));
   res.status(201).json({ id: out });
 });
 
@@ -801,6 +814,7 @@ router.patch('/incidents/:id/patients/:pid', patrol, needs('create_case'), valid
     if (body.disposition) await conn.query('UPDATE incident_patients SET vitals_due_at = NULL WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, pid]);
     await audit(conn, req, 'update_patient', 'incidents', id, { patient_id: pid, fields: Object.keys(req.body) });
   });
+  if (req.body.form || req.body.disposition || req.body.activity) await staffInjury.notifyIfDue(req.auth.tenantId, id, pid, baseUrl(req));
   res.json({ ok: true });
 });
 

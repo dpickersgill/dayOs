@@ -15,6 +15,7 @@ const mailer = require('./mailer');
 const { todayIn, addDays } = require('./util');
 
 const { esc } = require('./format');
+const staffInjury = require('./staffinjury');
 const orgName = (t) => t.patrol_org_name || `${t.name} Ski Patrol`;
 const amountsOf = (t) => String(t.donate_amounts || '25,50,100,250').split(',').map((x) => Number(x.trim())).filter((n) => Number.isInteger(n) && n >= 1 && n <= 5000).slice(0, 6);
 const newToken = () => crypto.randomBytes(16).toString('hex');
@@ -32,7 +33,7 @@ const needsDirector = (p) => ['serious', 'critical'].includes(p.severity) || ['t
 /** Creates follow-up rows for patients whose time has come. Safe to run any number of times. */
 async function queueDue(tenant, today) {
   const cutoff = addDays(today, -Number(tenant.followup_days || 5));
-  const patients = await rows(pool, `SELECT p.id, p.incident_id, p.age_years, p.email, p.guardian_email, p.no_followup, p.disposition, i.severity, DATE(i.occurred_at) AS day
+  const patients = await rows(pool, `SELECT p.id, p.incident_id, p.form, p.activity, p.age_years, p.email, p.guardian_email, p.no_followup, p.disposition, i.severity, DATE(i.occurred_at) AS day
     FROM incident_patients p JOIN incidents i ON i.tenant_id = p.tenant_id AND i.id = p.incident_id
     LEFT JOIN followups f ON f.tenant_id = p.tenant_id AND f.patient_id = p.id
     WHERE p.tenant_id = ? AND f.id IS NULL AND p.voided_at IS NULL AND i.report_state = 'approved' AND DATE(i.occurred_at) <= ?
@@ -40,6 +41,7 @@ async function queueDue(tenant, today) {
     ORDER BY p.id LIMIT 500`, [tenant.id, cutoff, addDays(today, -60)]);
   let created = 0;
   for (const p of patients) {
+    if (staffInjury.onDuty(p)) continue; // staff and volunteers hurt while working never get the guest email
     const to = recipientFor(p);
     if (!to) continue;
     if (await one(pool, 'SELECT 1 AS x FROM email_suppressions WHERE tenant_id = ? AND email = ?', [tenant.id, to.email.toLowerCase()])) continue;

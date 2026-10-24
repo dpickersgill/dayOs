@@ -1,6 +1,41 @@
 {
   "releases": [
     {
+      "version": "2026.10.41",
+      "date": "2026-11-08",
+      "title": "Staff injuries, first step: who the patient is, and the owner is told",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "At the top of each patient, choose Guest, Staff member on duty, Staff member off duty, or Volunteer on duty. Staff and volunteers hurt while working are not counted as guest injuries and never get the guest follow-up email.",
+          "help": "patrol-staff"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [],
+          "text": "When patrol marks a patient as staff, the owner and GM get an email straight away (and a text when texting is set up), with no injury details. If someone on duty goes to hospital, a second note gives OSHA's 8 and 24 hour deadlines. A volunteer is flagged for you to decide.",
+          "help": "patrol-staff"
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [],
+          "text": "Patrol statistics show staff hurt on duty as their own figure, outside the guest rate per 1,000 visits and the activity, ability and helmet figures."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "The roadmap in the app is now plain Now, Next and Later, with no dates."
+        }
+      ]
+    },
+    {
       "version": "2026.10.40",
       "date": "2026-11-08",
       "title": "Patrol field kit: case photos, cases started with no signal, locating a caller, readings in checks",

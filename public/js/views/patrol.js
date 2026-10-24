@@ -314,7 +314,7 @@ async function drawStats(box) {
       const helmetAll = a.helmet_use_on_snow.reduce((s, x) => s + x.n, 0);
       clear(out).append(
         h('div', { class: 'figures' },
-          fig('Cases', a.cases), fig('Patients', a.patients), fig('Call to on scene', mins(a.response_times.call_to_scene_min)), fig('On scene to aid room', mins(a.response_times.scene_to_aid_room_min)),
+          fig('Cases', a.cases), fig('Patients', a.patients), a.staff_patients_on_duty ? fig('Staff hurt on duty', a.staff_patients_on_duty) : null, fig('Call to on scene', mins(a.response_times.call_to_scene_min)), fig('On scene to aid room', mins(a.response_times.scene_to_aid_room_min)),
           fig('Helmet use on snow', helmetAll ? `${Math.round((helmetYes / helmetAll) * 100)}%` : 'No data')),
         h('div', { class: 'two-col' },
           bars('Cases by type', a.by_category.map(lab)), bars('Cases by severity', a.by_severity.map(lab)),
