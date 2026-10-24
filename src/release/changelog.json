@@ -22,6 +22,12 @@
           "app": null,
           "who": "platform",
           "text": "Console, Demos: an Emails column shows what each person was sent, and Send sign-in link emails a fresh link (older links stop working) for anyone who lost theirs."
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": "platform",
+          "text": "Security: body-parser updated to 2.4.0 (a denial-of-service fix for compressed request bodies), so the deploy's package check passes."
         }
       ]
     },
