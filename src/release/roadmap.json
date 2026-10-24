@@ -1,42 +1,42 @@
 {
-  "updated": "2026-10-22",
+  "updated": "2026-10-24",
   "stages": [
     {
       "key": "now",
       "label": "Building now",
-      "when": "November",
+      "when": null,
       "items": [
         {
-          "app": null,
-          "title": "Help centre and contact support",
-          "text": "Search the help from anywhere and reach support from inside Verdynt/OS."
-        }
-      ]
-    },
-    {
-      "key": "next",
-      "label": "Coming next",
-      "when": "November and December",
-      "items": [
+          "app": "sell",
+          "title": "Keep selling when the internet drops",
+          "text": "The ticket window keeps selling cash and card-reader sales if the lodge loses its connection, and catches everything up as soon as it is back."
+        },
         {
           "app": null,
           "title": "Bring your data with you",
           "text": "Upload what your old system or spreadsheets export, such as customers, pass holders, products, staff and the rental fleet. Verdynt/OS matches the columns, flags duplicates and problems, and shows you a preview before anything is saved."
         },
         {
-          "app": "sell",
-          "title": "Partner passes",
-          "text": "Record Indy Pass and reciprocal pass visits at the window and see them in your reports."
-        },
-        {
           "app": "money",
-          "title": "Accounting export",
-          "text": "Send each day's sales to QuickBooks Online or Xero instead of typing them in."
+          "title": "Sales into QuickBooks Online",
+          "text": "Each day's sales, refunds and payments go to QuickBooks Online instead of being typed in."
+        }
+      ]
+    },
+    {
+      "key": "next",
+      "label": "Coming next",
+      "when": null,
+      "items": [
+        {
+          "app": "patrol",
+          "title": "Staff injuries",
+          "text": "Patrol marks an injured patient as a staff member on duty. The owner or GM gets a private staff injury record with the OSHA log and summary, a first report for your workers' comp insurer, and an alert with the deadline when an injury must be reported to OSHA."
         },
         {
           "app": "shop",
-          "title": "Tickets in Apple and Google Wallet",
-          "text": "Guests add their ticket or pass to their phone's wallet and scan it at the lift."
+          "title": "Reload a card online, straight to the lift",
+          "text": "Guests with a lift card buy their day online and go straight to the lift, without stopping at the window."
         },
         {
           "app": "shop",
@@ -44,31 +44,66 @@
           "text": "Sell a pass with a deposit and monthly payments, taken automatically."
         },
         {
-          "app": null,
-          "title": "Help assistant",
-          "text": "Ask a question in plain words and get the steps for this screen."
+          "app": "shop",
+          "title": "Tickets in Apple and Google Wallet",
+          "text": "Guests add their ticket or pass to their phone's wallet and scan it at the lift."
+        },
+        {
+          "app": "money",
+          "title": "Café and retail sales from Square or Toast",
+          "text": "Food, drink and shop sales from Square or Toast appear in Money next to tickets and lessons, so the day adds up in one place."
         },
         {
           "app": "dashboard",
           "title": "This season against last",
           "text": "Visits, sales, lessons and incidents side by side with the same day last season."
+        },
+        {
+          "app": null,
+          "title": "Lost and found",
+          "text": "Log what is handed in, match it to what guests report missing, and let them know it has been found."
+        },
+        {
+          "app": "sell",
+          "title": "Partner passes",
+          "text": "Record Indy Pass and reciprocal pass visits at the window and see them in your reports."
         }
       ]
     },
     {
       "key": "later",
       "label": "Later",
-      "when": "After the holidays",
+      "when": null,
       "items": [
+        {
+          "app": "conditions",
+          "title": "Snowmaking log",
+          "text": "Which guns ran on which trails, for how long, with the water used and the conditions, so you can see what each foot of snow cost."
+        },
+        {
+          "app": "workforce",
+          "title": "Hiring seasonal staff",
+          "text": "An application form, then the paperwork and checklist for each new hire, before their first shift."
+        },
+        {
+          "app": null,
+          "title": "Season-end survey help",
+          "text": "The visits, lifts and injury figures the industry's end-of-season survey asks for, gathered for you."
+        },
+        {
+          "app": "conditions",
+          "title": "Lift inspection reports for your state",
+          "text": "Your lift checks printed in the layout your state's lift inspectors ask for."
+        },
         {
           "app": "dashboard",
           "title": "Visitor forecast",
-          "text": "How busy the next 10 days will be, as a range, from the day of the week, holidays and school breaks, new snow, the weather forecast and tickets already sold online. It suggests crew sizes, rental and lesson staffing, and says why in plain words. Verdynt/OS already writes down each day’s weather, snow, visits and sales every night, so the forecast starts with your own history."
+          "text": "How busy the next 10 days will be, as a range, from the day of the week, holidays and school breaks, new snow, the weather forecast and the tickets already sold."
         },
         {
           "app": "conditions",
           "title": "Snow report that writes itself",
-          "text": "Each morning, the day's conditions update for your website, email and social media, written from lifts, trails, grooming, new snow and weather. You check it and post it."
+          "text": "Each morning, the day's conditions update for your website, email and social media, written from lifts, trails, grooming and new snow."
         },
         {
           "app": "dashboard",
@@ -77,33 +112,13 @@
         },
         {
           "app": "patrol",
-          "title": "Patrol report check and spoken reports",
-          "text": "Before a patient care report is submitted, Verdynt/OS points out anything missing or that doesn't add up. Patrollers can speak what happened and Verdynt/OS fills in the fields it can. It only suggests; the patroller and director decide."
+          "title": "Patrol on the map",
+          "text": "See where patrollers are on the map during a call, and group them into crews for race days and events."
         },
         {
-          "app": "documents",
-          "title": "Ask your data and your documents",
-          "text": "Ask in plain words, like \"How did lessons do this February against last?\" or \"What does our lift evacuation plan say about the double chair?\""
-        },
-        {
-          "app": "messages",
-          "title": "Suggested replies to guests",
-          "text": "A drafted answer to each guest message or email, for staff to edit and send."
-        },
-        {
-          "app": "money",
-          "title": "Payroll export, and café and retail totals",
-          "text": "Hours out to your payroll, and food and retail sales into Money."
-        },
-        {
-          "app": "patrol",
-          "title": "Drop a pin for hazards and equipment",
-          "text": "Mark a hazard or a piece of equipment on the map from where you stand."
-        },
-        {
-          "app": null,
-          "title": "Satellite map view",
-          "text": "Aerial imagery under your trail map."
+          "app": "workforce",
+          "title": "Hours into your payroll",
+          "text": "Approved hours sent straight to your payroll service instead of a spreadsheet."
         },
         {
           "app": null,
