@@ -38,7 +38,7 @@ function stagingRoute(to, subject) {
   return { to: inbox, subject: `[Staging, for ${String(to).replace(/[\r\n]/g, '').slice(0, 200)}] ${subject}` };
 }
 
-async function post({ to: named, fromName, replyTo, subject: asked, text, html, tag, headers, stream }) {
+async function post({ to: named, fromName, fromAddress, replyTo, subject: asked, text, html, tag, headers, stream }) {
   const route = stagingRoute(named, asked);
   if (!route) return { ok: false, error: 'Staging sends no email until STAGING_INBOX is set' };
   const { to, subject } = route;
@@ -48,7 +48,7 @@ async function post({ to: named, fromName, replyTo, subject: asked, text, html, 
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json', 'x-postmark-server-token': token() },
       body: JSON.stringify({
-        From: safeName ? `${safeName} <${from()}>` : from(), To: to, ReplyTo: replyTo || undefined, Subject: subject, TextBody: text, HtmlBody: html,
+        From: safeName ? `${safeName} <${fromAddress || from()}>` : (fromAddress || from()), To: to, ReplyTo: replyTo || undefined, Subject: subject, TextBody: text, HtmlBody: html,
         MessageStream: stream === 'broadcast' ? (env.POSTMARK_BROADCAST_STREAM || 'broadcast') : (env.POSTMARK_STREAM || 'outbound'), Tag: tag || undefined, Headers: headers || undefined, TrackOpens: false, TrackLinks: 'None',
       }),
     });
@@ -61,9 +61,9 @@ async function post({ to: named, fromName, replyTo, subject: asked, text, html, 
 }
 
 /** Mail from Verdynt/OS itself, not from a mountain (the website's contact form, operator notices). */
-async function sendPlatform({ to, replyTo, subject, text, tag }) {
+async function sendPlatform({ to, replyTo, subject, text, tag, fromName, fromAddress }) {
   if (!enabled()) return { ok: false, error: 'Email is not set up' };
-  const r = await post({ to, fromName: 'Verdynt/OS', replyTo: replyTo || require('../config').site.helloEmail, subject, text, tag });
+  const r = await post({ to, fromName: fromName || 'Verdynt/OS', fromAddress, replyTo: replyTo || require('../config').site.helloEmail, subject, text, tag });
   if (!r.ok) logFailure({ job: 'email', tag, message: r.error });
   return r;
 }

@@ -1,6 +1,31 @@
 {
   "releases": [
     {
+      "version": "2026.10.39",
+      "date": "2026-11-08",
+      "title": "Demo emails from Dan",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "Everyone who starts a demo gets a welcome email from Dan (SITE_FOUNDER_NAME), replies to hello@: a link that signs them straight in for the life of the demo, three things to try first, and what Verdynt/OS is. The password is never emailed."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "The daily job sends two follow-ups: on day 2 a note about one part they have not opened yet (with a link straight to it), and two days before the demo ends a note with the next steps. Nobody gets them after pressing the stop link or asking for a walkthrough or trial."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "Console, Demos: an Emails column shows what each person was sent, and Send sign-in link emails a fresh link (older links stop working) for anyone who lost theirs."
+        }
+      ]
+    },
+    {
       "version": "2026.10.38",
       "date": "2026-11-08",
       "title": "Fixes: the park map list, clearer assistant errors",

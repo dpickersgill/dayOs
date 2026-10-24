@@ -44,6 +44,15 @@ const start = async (email, extra = {}) => {
   if (r.status === 201) made.push(await tenantId(r.body.tenant));
   return r;
 };
+const welcomed = async (email) => {
+  for (let i = 0; i < 50; i += 1) {
+    const [[r]] = await pool.query('SELECT welcome_sent_at FROM sandbox_signups WHERE email = ? ORDER BY id DESC LIMIT 1', [email]);
+    if (r && r.welcome_sent_at) return;
+    await new Promise((ok) => { setTimeout(ok, 100); });
+  }
+  throw new Error(`no welcome email for ${email}`);
+};
+const mailTo = (email) => mails.filter((m) => m.To === email);
 const E1 = `tess1-${suffix}@example.org`;
 const E2 = `tess2-${suffix}@example.org`;
 let one;
@@ -145,6 +154,7 @@ test('a demo can never send email or take a card payment', async () => {
   await pool.query('DELETE FROM followups WHERE tenant_id = ? AND patient_id = ?', [sbId, pt.id]);
   const [ins] = await pool.query("INSERT INTO followups (tenant_id, incident_id, patient_id, to_email, due_on, status, token) VALUES (?, ?, ?, 'guest@example.com', CURDATE(), 'queued', ?)", [sbId, pt.incident_id, pt.id, 'f'.repeat(32)]);
   const [[fu]] = await pool.query('SELECT * FROM followups WHERE id = ?', [ins.insertId]);
+  await welcomed(one.body.email || E1); // the welcome email goes out just after a demo is built; let it land first
   mailHits = 0;
   assert.equal(await followups.sendOne(fu, sbTenant, 'http://localhost'), 'failed');
   assert.equal(mailHits, 0, 'nothing reached the mail service');
@@ -282,4 +292,68 @@ test('the Demos dashboard shows sign-ins, activity, apps used, changes and last 
   row = res.data.find((x) => x.email === email);
   assert.equal(row.status, 'removed');
   assert.ok(row.requests >= 5 && row.changes >= 1 && row.apps.length >= 2, 'usage is kept after the demo is removed');
+});
+
+test('the demo welcome email comes from the founder, with a sign-in link that works until the demo ends', async () => {
+  const email = `wendy-${suffix}@example.org`;
+  const r = await start(email, { name: 'Wendy Welcome' });
+  assert.equal(r.status, 201);
+  await welcomed(email);
+  const m = mailTo(email).find((x) => /demo mountain is ready/.test(x.Subject));
+  assert.ok(m, 'a welcome email');
+  assert.match(m.From, /^Dan Pickersgill </);
+  assert.equal(m.ReplyTo, require('../src/config').site.helloEmail);
+  assert.match(m.TextBody, /^Hi Wendy,/);
+  assert.match(m.TextBody, /Three things I'd try first/);
+  assert.doesNotMatch(m.TextBody, new RegExp(r.body.password), 'the password is never emailed');
+  const token = decodeURIComponent(/try\?open=([^\s&]+)/.exec(m.TextBody)[1]);
+  const opened = await api('POST', '/trial/open', { body: { token } });
+  assert.equal(opened.status, 200);
+  assert.equal(opened.body.tenant, r.body.tenant);
+  assert.equal((await api('GET', '/auth/me', { token: opened.body.token })).status, 200, 'the link signs them in');
+  assert.equal((await api('POST', '/trial/open', { body: { token: `${token.split('.')[0]}.${'x'.repeat(40)}` } })).status, 410, 'a forged link does nothing');
+  // From the console, a new link retires the old ones.
+  const [[su]] = await pool.query('SELECT id FROM sandbox_signups WHERE email = ? ORDER BY id DESC LIMIT 1', [email]);
+  assert.equal((await api('POST', `/platform/sandboxes/${su.id}/send-link`, { key: KEY })).status, 200);
+  const again = mailTo(email).find((x) => /sign-in link/.test(x.Subject));
+  const fresh = decodeURIComponent(/try\?open=([^\s&]+)/.exec(again.TextBody)[1]);
+  assert.equal((await api('POST', '/trial/open', { body: { token } })).status, 410, 'the first link no longer works');
+  assert.equal((await api('POST', '/trial/open', { body: { token: fresh } })).status, 200);
+  const dash = (await api('GET', '/platform/sandboxes', { key: KEY })).body.data.find((x) => x.id === su.id);
+  assert.ok(dash.emails.welcome);
+});
+
+test('the daily job sends one day-2 nudge about a part not opened, one note before the end, and respects stop and leads', async () => {
+  const demoMail = require('../src/lib/demomail');
+  const email = `nora-${suffix}@example.org`;
+  assert.equal((await start(email, { name: 'Nora Nudge' })).status, 201);
+  await welcomed(email);
+  const [[su]] = await pool.query('SELECT id FROM sandbox_signups WHERE email = ? ORDER BY id DESC LIMIT 1', [email]);
+  await pool.query("INSERT INTO sandbox_usage (signup_id, area, requests, last_at) VALUES (?, 'patrol', 5, UTC_TIMESTAMP())", [su.id]);
+  await pool.query('UPDATE sandbox_signups SET at = UTC_TIMESTAMP() - INTERVAL 50 HOUR WHERE id = ?', [su.id]);
+  await demoMail.runAll('http://localhost');
+  const nudges = mailTo(email).filter((x) => /worth a look/.test(x.Subject));
+  assert.equal(nudges.length, 1);
+  assert.match(nudges[0].Subject, /the Gate/, 'patrol was opened, so it points at the next part');
+  assert.match(nudges[0].TextBody, /&to=gate/);
+  await demoMail.runAll('http://localhost');
+  assert.equal(mailTo(email).filter((x) => /worth a look/.test(x.Subject)).length, 1, 'never twice');
+  // Two days before the end.
+  await pool.query('UPDATE sandbox_signups SET at = UTC_TIMESTAMP() - INTERVAL 5 DAY, expires_at = UTC_TIMESTAMP() + INTERVAL 40 HOUR WHERE id = ?', [su.id]);
+  await demoMail.runAll('http://localhost');
+  const ending = mailTo(email).filter((x) => /Your demo ends/.test(x.Subject));
+  assert.equal(ending.length, 1);
+  assert.match(ending[0].TextBody, /deleted then/);
+  // The stop link stops them; so does asking for a walkthrough.
+  const stopTok = /try\?stop=([^\s]+)/.exec(ending[0].TextBody)[1];
+  assert.equal((await api('POST', '/trial/stop', { body: { token: stopTok } })).status, 200);
+  await pool.query('UPDATE sandbox_signups SET ending_sent_at = NULL WHERE id = ?', [su.id]);
+  await demoMail.runAll('http://localhost');
+  assert.equal(mailTo(email).filter((x) => /Your demo ends/.test(x.Subject)).length, 1, 'nothing after stop');
+  await pool.query('UPDATE sandbox_signups SET emails_stopped_at = NULL WHERE id = ?', [su.id]);
+  await pool.query("INSERT INTO site_leads (kind, name, mountain, email, message) VALUES ('walkthrough', 'Nora Nudge', 'Nora Peak', ?, 'Show me')", [email]);
+  await demoMail.runAll('http://localhost');
+  assert.equal(mailTo(email).filter((x) => /Your demo ends/.test(x.Subject)).length, 1, 'nothing once they asked for a walkthrough');
+  await pool.query('DELETE FROM site_leads WHERE email = ?', [email]);
+  assert.equal((await api('POST', '/trial/stop', { body: { token: `${su.id}.${'y'.repeat(40)}` } })).status, 400);
 });

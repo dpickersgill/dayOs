@@ -116,6 +116,11 @@ module.exports = {
     verify: { google: env.GOOGLE_SITE_VERIFICATION || '', bing: env.BING_SITE_VERIFICATION || '' },
     // SITE_SAME_AS: the company's own profiles elsewhere (the LinkedIn page), comma-separated. Search engines use them to
     // tie the profiles to the website; a LinkedIn address is also linked from the footer.
+    // Demo emails come personally from the founder: the name they show, and optionally a verified sender address of
+    // their own (DEMO_MAIL_FROM, e.g. dan@runmyresort.com; otherwise MAIL_FROM). Replies go to hello@.
+    founderName: env.SITE_FOUNDER_NAME || 'Dan Pickersgill',
+    founderFirst: (env.SITE_FOUNDER_NAME || 'Dan Pickersgill').split(' ')[0],
+    demoFrom: env.DEMO_MAIL_FROM || '',
     sameAs: String(env.SITE_SAME_AS || '').split(',').map((u) => u.trim()).filter((u) => /^https:\/\/[^\s"<>]+$/.test(u)),
   },
   db: {

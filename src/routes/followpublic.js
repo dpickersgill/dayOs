@@ -115,6 +115,7 @@ jobs.post('/daily', async (req, res) => {
     out.day_records = await stage('day_records', () => require('../lib/dayrecord').runAll());
     out.program_reminders = await stage('program_reminders', () => require('../lib/programplus').remindAll());
     out.retention = await stage('retention', () => require('../lib/retention').runAll());
+    out.demo_emails = await stage('demo_emails', () => require('../lib/demomail').runAll(base));
     // One line per finished run: an alert on "no such line for 26 hours" tells you the job stopped.
     console.log(JSON.stringify({ severity: 'INFO', job: 'daily', message: 'daily job finished', seconds: Math.round((Date.now() - started) / 1000) }));
     res.json(out);

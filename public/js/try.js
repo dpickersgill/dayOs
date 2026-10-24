@@ -105,8 +105,33 @@ function done(out) {
       h('p', null, `${out.mountain} is open for about ${days} days. You are already signed in.`),
       h('div', { class: 'cred' }, h('p', { class: 'cred-h' }, 'To come back later, sign in with'),
         h('dl', null, row('Mountain', h('code', null, out.tenant)), row('Email', out.email), row('Password', h('code', null, out.password)))),
-      h('p', { class: 'muted small' }, 'Save this password now. It is shown only once.'),
+      h('p', { class: 'muted small' }, 'Save this password now. It is shown only once. We have also emailed you a link that signs you straight in.'),
       h('a', { class: 'btn primary', href: '/' }, 'Open my demo'))));
 }
 
-form();
+// Links from the demo emails: ?open=<token> signs straight in (and &to=<screen> opens that screen); ?stop=<token>
+// stops the emails about the demo.
+async function fromEmail(kind, token) {
+  clear(app);
+  const msg = h('p', { role: 'status' }, kind === 'open' ? 'Opening your demo mountain\u2026' : 'One moment\u2026');
+  const box = h('section', { class: 'signin-form' }, msg);
+  app.append(h('div', { class: 'signin' }, side(), box));
+  history.replaceState(null, '', '/try');
+  try {
+    const res = await fetch(`/api/v1/trial/${kind}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token }) });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(out.error || out.message || 'That link did not work.');
+    if (kind === 'stop') { clear(box).append(h('h2', null, 'Done'), h('p', null, 'You will not get any more emails about your demo.'), h('a', { class: 'btn', href: '/' }, 'Open my demo')); return; }
+    session.token = out.token;
+    try { localStorage.setItem(SLUG_KEY, out.tenant); } catch (_) { /* private mode */ }
+    const to = params.get('to');
+    location.replace(to && /^[a-z-]{2,30}$/.test(to) ? `/#/${to}` : '/');
+  } catch (err) {
+    clear(box).append(h('h2', null, 'That link did not work'), errorBox(err), h('a', { class: 'btn primary', href: '/try' }, 'Start a new demo'));
+  }
+}
+
+const params = new URLSearchParams(location.search);
+if (params.get('open')) fromEmail('open', params.get('open'));
+else if (params.get('stop')) fromEmail('stop', params.get('stop'));
+else form();

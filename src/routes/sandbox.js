@@ -15,6 +15,8 @@ const M = require('../lib/modules');
 const S = require('../lib/sandbox');
 const config = require('../config');
 const mailer = require('../lib/mailer');
+const demoMail = require('../lib/demomail');
+const { baseUrl } = require('../lib/baseurl');
 
 const router = express.Router();
 const SEED = path.join(__dirname, '..', '..', 'db', 'demo.js');
@@ -151,11 +153,29 @@ router.post('/', validate(z.object({
   }
 
   // Starting the demo signs them straight in, so that counts as the first sign-in and first use.
-  await pool.query('INSERT INTO sandbox_signups (email, name, mountain, tenant_id, expires_at, ip_hash, sign_ins, first_used_at, last_used_at, email_verified) VALUES (?, ?, ?, ?, ?, ?, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?)', [email, name, mountain, created.tenantId, created.expires, ipHash, codeId ? 1 : 0]);
+  const [su] = await pool.query('INSERT INTO sandbox_signups (email, name, mountain, tenant_id, expires_at, ip_hash, sign_ins, first_used_at, last_used_at, email_verified) VALUES (?, ?, ?, ?, ?, ?, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?)', [email, name, mountain, created.tenantId, created.expires, ipHash, codeId ? 1 : 0]);
+  // The welcome email (a sign-in link, what to try first), from the founder. Sent after the reply so the demo opens at once.
+  setImmediate(() => { demoMail.welcome(baseUrl(req), su.insertId).catch(() => {}); });
   res.status(201).json({
     token: await signToken({ id: created.userId, tenant_id: created.tenantId, role: 'owner' }, req),
     role: 'owner', tenant: slug, email, password, expires_at: created.expires, mountain,
   });
+});
+
+/** The sign-in link from a demo email: signs the visitor into their demo as its owner. */
+router.post('/open', validate(z.object({ token: z.string().max(80) })), async (req, res) => {
+  const s = await demoMail.signupForToken(req.body.token);
+  if (!s) throw new AppError(410, 'This link has expired, or the demo has ended. Start a new demo, or reply to the email and we will help.');
+  const [[u]] = await pool.query("SELECT id, tenant_id, role FROM users WHERE tenant_id = ? AND role = 'owner' AND active = 1 ORDER BY id LIMIT 1", [s.tenant_id]);
+  if (!u) throw new AppError(410, 'This demo has no sign-in any more. Start a new demo.');
+  await require('../lib/demousage').signedIn(s.tenant_id);
+  res.json({ token: await signToken({ id: u.id, tenant_id: u.tenant_id, role: u.role }, req), tenant: s.slug, role: u.role });
+});
+
+/** "No more emails about it": the stop link at the foot of every demo email. */
+router.post('/stop', validate(z.object({ token: z.string().max(80) })), async (req, res) => {
+  if (!(await demoMail.stop(req.body.token))) throw bad('That link is not valid');
+  res.json({ ok: true });
 });
 
 module.exports = router;

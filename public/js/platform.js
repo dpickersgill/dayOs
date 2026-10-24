@@ -491,6 +491,9 @@ async function demos() {
   const remove = (x) => confirmDialog('Delete this demo?', `The demo mountain for ${x.email} and everything in it is removed now. Their usage stays on this page.`, 'Delete demo', async () => {
     try { await call('POST', `/sandboxes/${x.id}/remove`); toast('Demo deleted.'); demos(); } catch (e) { fail(e); }
   }, { danger: true });
+  const sendLink = (x) => confirmDialog('Email a new sign-in link?', `${x.email} gets a new link that signs them straight into their demo. Links sent before stop working.`, 'Send link', async () => {
+    try { await call('POST', `/sandboxes/${x.id}/send-link`); toast(`Sign-in link sent to ${x.email}.`); } catch (e) { fail(e); }
+  });
   const draw = () => {
     const term = q.value.trim().toLowerCase();
     const rows = data.filter((x) => (show === 'all' || (show === 'running' && x.status === 'running') || (show === 'ended' && x.status !== 'running') || (show === 'used' && x.changes > 0))
@@ -509,7 +512,8 @@ async function demos() {
       { head: 'Changes', num: true, cell: (x) => String(x.changes) },
       { head: 'Tours', cell: (x) => (x.tours && x.tours.length ? h('span', { title: x.tours.map((t) => `${TOUR_NAMES[t.tour] || t.tour}: ${t.finished ? 'finished' : `step ${t.steps_seen} of ${t.steps_total}`}`).join('\n') }, `${x.tours.filter((t) => t.finished).length} of ${x.tours.length} finished`) : h('span', { class: 'muted' }, 'None')) },
       { head: 'Apps used', cell: (x) => (x.apps.length ? x.apps.slice(0, 3).map((a) => a.label).join(', ') + (x.apps.length > 3 ? ` +${x.apps.length - 3}` : '') : h('span', { class: 'muted' }, 'None yet')) },
-      { actions: true, cell: (x) => (x.status !== 'removed' ? button('Delete', () => remove(x), { small: true }) : '') },
+      { head: 'Emails', cell: (x) => { const e = x.emails || {}; const sent = [e.welcome && 'Welcome', e.nudge && 'Nudge', e.ending && 'Ending'].filter(Boolean); return h('span', { class: 'stack tight' }, sent.length ? sent.join(', ') : h('span', { class: 'muted' }, 'None'), e.stopped ? h('small', { class: 'muted' }, 'Stopped by them') : null); } },
+      { actions: true, cell: (x) => (x.status === 'running' ? h('span', { class: 'row' }, button('Send sign-in link', () => sendLink(x), { small: true }), button('Delete', () => remove(x), { small: true })) : x.status !== 'removed' ? button('Delete', () => remove(x), { small: true }) : '') },
     ], rows.slice(0, limit)), more);
   };
   q.addEventListener('input', () => { limit = 50; draw(); });

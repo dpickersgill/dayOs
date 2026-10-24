@@ -691,6 +691,13 @@ const programPlusSteps = [
     CONSTRAINT fk_family_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
   )`],
 ];
+const demoMailSteps = [
+  // Demo emails from the founder: the welcome with a sign-in link, a nudge on day 2, a note before the demo ends.
+  // open_nonce makes the sign-in link (changing it, from the console, retires every link sent before).
+  ['sandbox_signups demo emails', (c) => columnExists(c, 'sandbox_signups', 'emails_stopped_at'), `ALTER TABLE sandbox_signups ADD COLUMN open_nonce CHAR(16) NULL,
+    ADD COLUMN welcome_sent_at DATETIME NULL, ADD COLUMN nudge_sent_at DATETIME NULL, ADD COLUMN ending_sent_at DATETIME NULL, ADD COLUMN emails_stopped_at DATETIME NULL`],
+];
+
 const assistantSteps = [
   // The Verdynt/OS Assistant: what each mountain turned on, and every question asked (for the cap, the console and feedback).
   ['assistant_settings', (c) => tableExists(c, 'assistant_settings'), `CREATE TABLE assistant_settings (
@@ -927,7 +934,7 @@ async function main() {
   await seedPatrolPlan(conn);
   await seedAssistantAddon(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

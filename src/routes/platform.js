@@ -239,7 +239,7 @@ router.get('/tenants', async (_req, res) => {
 // removed ones keep the numbers noted when they were removed.
 router.get('/sandboxes', async (_req, res) => {
   await demoUsage.flush();
-  const data = await rows(pool, `SELECT s.id, s.at, s.email, s.name, s.mountain, s.expires_at, s.first_used_at, s.last_used_at, s.sign_ins, s.requests, s.ended_at,
+  const data = await rows(pool, `SELECT s.id, s.at, s.email, s.name, s.mountain, s.expires_at, s.first_used_at, s.last_used_at, s.sign_ins, s.requests, s.ended_at, s.welcome_sent_at, s.nudge_sent_at, s.ending_sent_at, s.emails_stopped_at,
       COALESCE(s.changes, 0) AS changes, t.id AS tenant_id, t.slug, (t.id IS NOT NULL) AS exists_now, (t.id IS NOT NULL AND t.sandbox_expires_at > NOW()) AS active
     FROM sandbox_signups s LEFT JOIN tenants t ON t.id = s.tenant_id AND t.sandbox_expires_at IS NOT NULL ORDER BY s.id DESC LIMIT 300`);
   const ids = data.map((r) => r.id);
@@ -265,6 +265,7 @@ router.get('/sandboxes', async (_req, res) => {
       status: r.active ? 'running' : r.exists_now ? 'expired' : 'removed', expires_at: r.expires_at, ended_at: r.ended_at,
       first_used_at: r.first_used_at, last_used_at: r.last_used_at, sign_ins: Number(r.sign_ins || 0), requests: Number(r.requests || 0),
       changes: r.changes === null || r.changes === undefined ? null : Number(r.changes), apps: used, came_back: Boolean(back), tours: toursOf.get(r.id) || [],
+      emails: { welcome: r.welcome_sent_at, nudge: r.nudge_sent_at, ending: r.ending_sent_at, stopped: r.emails_stopped_at },
     };
   });
   const since = (days) => out.filter((r) => new Date(`${String(r.at).replace(' ', 'T')}Z`) > Date.now() - days * 86_400_000).length;
@@ -274,6 +275,14 @@ router.get('/sandboxes', async (_req, res) => {
       came_back: out.filter((r) => r.came_back).length, made_changes: out.filter((r) => r.changes > 0).length, took_tour: out.filter((r) => r.tours.length).length, total: out.length },
     data: out,
   });
+});
+
+// A new sign-in link for a running demo, emailed to the person who started it; every earlier link stops working.
+router.post('/sandboxes/:id/send-link', async (req, res) => {
+  const r = await require('../lib/demomail').sendLink(require('../lib/baseurl').baseUrl(req), paramId(req));
+  if (!r.ok) throw new AppError(409, r.error || 'The email could not be sent');
+  await log(pool, req, null, 'demo_send_link', { signup_id: paramId(req) });
+  res.json({ ok: true });
 });
 
 // Remove one running demo now (by its sign-up), or every demo mountain at once. Only demo mountains can be removed this way.

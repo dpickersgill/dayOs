@@ -95,7 +95,7 @@ test('the ski area\'s read-only login sees the day in numbers and approved repor
   // An approved report (with its frozen copy) and one still in progress.
   const [[staff]] = await pool.query('SELECT s.id FROM staff s WHERE s.tenant_id = ? LIMIT 1', [T]);
   void staff;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date()); // the mountain's day, not UTC's
   const [a] = await pool.query("INSERT INTO incidents (tenant_id, occurred_at, location, category, severity, summary, report_state, status, season, seq) VALUES (?, ?, 'Upper Ridge', 'injury', 'moderate', 'Fall on ice', 'approved', 'closed', '2026-27', 901)", [T, `${today} 10:15:00`]);
   const [b] = await pool.query("INSERT INTO incidents (tenant_id, occurred_at, location, category, severity, summary, report_state, status) VALUES (?, ?, 'Base', 'medical', 'minor', 'Feeling faint', 'draft', 'open')", [T, `${today} 11:00:00`]);
   const snapshot = { occurred_at: `${today} 10:15:00`, location: 'Upper Ridge', category: 'injury', severity: 'moderate', summary: 'Fall on ice', narrative: 'Caught an edge.', patients: [{ first_name: 'Pat', last_name: 'Guest', age_years: 34, injuries: [{ injury_type: 'fracture', body_region: 'wrist_hand', side: 'left' }], treatments: [], vitals: [] }], responders: [] };
