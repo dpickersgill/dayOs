@@ -1,5 +1,6 @@
 // Patrol team management: roster, today's posts, equipment checks, training log.
 
+import { stepsEditor, answerSheet, resultChips } from '../checksteps.js';
 import { daysDialog } from './patrol-schedule.js';
 import { get, post, patch, put, del } from '../api.js';
 import { h, clear, state, input, select, field, button, toast, formDialog, confirmDialog, dialog, table, val, num, todayStr, addDays, fmtDate, fmtDateLong, fmtDateTime, fmtTime, label, empty, isManager } from '../ui.js';
@@ -189,11 +190,11 @@ function stationsDialog(stations, again) {
 
 // ---------------------------------------------------------------- equipment
 export async function drawEquipment(box, { canLead }) {
-  const [{ data }, { data: stations }] = await Promise.all([get('/patrol/equipment'), get('/patrol/stations')]);
+  const [{ data }, { data: stations }, { data: steps }] = await Promise.all([get('/patrol/equipment'), get('/patrol/stations'), get('/patrol/gear-checklists')]);
   const again = refresh(box, (n) => drawEquipment(n, { canLead }));
   const bad = data.filter((e) => ['needs_attention', 'out_of_service'].includes(e.status));
   clear(box).append(h('div', { class: 'stack' },
-    h('div', { class: 'spread' }, h('p', { class: 'muted' }, 'Any patroller can log a check. A failed check shows here for everyone.'), canLead ? button('Add equipment', () => equipmentDialog(null, stations, again), { kind: 'primary' }) : null),
+    h('div', { class: 'spread' }, h('p', { class: 'muted' }, 'Any patroller can log a check. A failed check shows here for everyone.'), canLead ? h('span', { class: 'row' }, button('Check steps', () => stepsDialog(steps, again), { small: true }), button('Add equipment', () => equipmentDialog(null, stations, again), { kind: 'primary' })) : null),
     bad.length ? h('p', { class: 'warn-note', role: 'status' }, `${bad.length} item${bad.length === 1 ? '' : 's'} need attention: ${bad.map((e) => e.name).join(', ')}`) : null,
     data.length ? table([
       { head: 'Item', cell: (e) => h('span', null, h('b', null, e.name), e.serial ? h('span', { class: 'muted' }, ` ${e.serial}`) : null) },
@@ -201,7 +202,7 @@ export async function drawEquipment(box, { canLead }) {
       { head: 'Status', cell: (e) => state(label(e.status), statusTone[e.status]) },
       { head: 'Due', cell: (e) => dueLine(e) },
       { head: 'Last check', cell: (e) => (e.last_checked_at ? `${fmtDateTime(e.last_checked_at)}, ${label(e.last_result)}${e.last_reading ? ` (${e.last_reading})` : ''}` : h('span', { class: 'muted' }, 'Never checked')) },
-      { head: '', actions: true, cell: (e) => h('span', { class: 'row' }, e.status !== 'retired' ? button('Log check', () => checkDialog(e, again, canLead), { small: true }) : null, canLead && ['needs_attention', 'out_of_service'].includes(e.status) ? button('Clear for use', () => clearDialog(e, again), { small: true, kind: 'primary' }) : null, button('History', () => historyDialog(e), { small: true }), canLead ? button('Edit', () => equipmentDialog(e, stations, again), { small: true }) : null) },
+      { head: '', actions: true, cell: (e) => h('span', { class: 'row' }, e.status !== 'retired' ? button('Log check', () => checkDialog(e, again, canLead, (steps[e.kind] || {}).steps || []), { small: true }) : null, canLead && ['needs_attention', 'out_of_service'].includes(e.status) ? button('Clear for use', () => clearDialog(e, again), { small: true, kind: 'primary' }) : null, button('History', () => historyDialog(e), { small: true }), canLead ? button('Edit', () => equipmentDialog(e, stations, again), { small: true }) : null) },
     ], data) : empty(canLead ? 'No equipment yet. Add toboggans, AEDs, oxygen and radios so checks can be logged.' : 'No equipment has been added yet.')));
 }
 
@@ -218,7 +219,22 @@ function dueLine(e) {
   return bits.length ? h('span', { class: 'row tight' }, bits) : '';
 }
 
-function checkDialog(e, again, canLeadHere = false) {
+/** The steps each kind of gear's check asks for: pass or fail, a reading with its OK range, a date with its warning. */
+function stepsDialog(all, again) {
+  const kinds = [['aed', 'AED'], ['oxygen', 'Oxygen'], ['trauma_bag', 'Trauma bag'], ['toboggan', 'Toboggan'], ['radio', 'Radio'], ['splint_kit', 'Splint kit'], ['other', 'Other']];
+  const pick = select(kinds, 'aed', { 'aria-label': 'Kind of gear' });
+  const holder = h('div');
+  let ed = null;
+  const draw = () => { ed = stepsEditor((all[pick.value] || {}).steps || []); clear(holder).append(ed.el); };
+  pick.addEventListener('change', draw); draw();
+  formDialog('Check steps for each kind of gear', h('div', { class: 'stack' },
+    h('p', { class: 'muted' }, 'What a check asks for. A reading outside its OK range, or a date inside its warning, fails the check by itself and flags the item. Pressure, pad and battery dates also update the item.'),
+    h('label', { class: 'field' }, h('span', null, 'Kind of gear'), pick), holder),
+  async () => { await put(`/patrol/gear-checklists/${pick.value}`, { items: ed.get() }); toast('Check steps saved'); await again(); }, { wide: true, submitText: 'Save steps' });
+}
+
+function checkDialog(e, again, canLeadHere = false, steps = []) {
+  if (steps.length) return stepCheckDialog(e, again, canLeadHere, steps);
   const psi = e.kind === 'oxygen' ? input({ name: 'psi', type: 'number', inputmode: 'numeric', min: 0, max: 3000, placeholder: e.o2_psi != null ? `Last: ${e.o2_psi}` : '' }) : null;
   formDialog(`Check: ${e.name}`, h('div', { class: 'form' },
     psi ? field('Pressure (psi)', psi, 'Below the refill level, the cylinder is flagged for refill') : null,
@@ -230,6 +246,31 @@ function checkDialog(e, again, canLeadHere = false) {
     const out = await post(`/patrol/equipment/${e.id}/checks`, compact({ result: val(fd, 'result'), reading: val(fd, 'reading'), notes: val(fd, 'notes'), psi: num(fd, 'psi') ?? undefined, downloaded: fd.get('downloaded') ? true : undefined }));
     toast(out.status === 'in_service' ? 'Check logged' : `Check logged: ${label(out.status)}`); await again();
   });
+}
+
+function stepCheckDialog(e, again, canLeadHere, steps) {
+  const sheet = answerSheet(steps, resultChips);
+  const notes = input({ name: 'notes', maxlength: 255 });
+  const flagged = ['needs_attention', 'out_of_service'].includes(e.status);
+  const outOf = h('input', { type: 'checkbox', name: 'out' });
+  formDialog(`Check: ${e.name}`, h('div', { class: 'stack' },
+    flagged && !canLeadHere ? h('p', { class: 'warn-note' }, `This item is flagged ${label(e.status).toLowerCase()}. A passing check is logged, but someone who manages equipment clears it for use.`) : null,
+    e.kind === 'aed' && Number(e.needs_download) ? h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'downloaded' }), ' Data downloaded for the medical director and new pads fitted') : null,
+    sheet.el,
+    h('div', { class: 'row' }, button('Mark the rest as pass', () => sheet.markRestPass(), { small: true })),
+    field('Notes', notes),
+    h('label', { class: 'check' }, outOf, ' Take it out of service')),
+  async (fd) => {
+    const missing = sheet.answers.filter((a) => a.missing());
+    if (missing.length) { missing[0].focus(); throw new Error(`Answer every step (${missing.length} left)`); }
+    const noNote = sheet.answers.filter((a) => a.needsNote());
+    if (noNote.length) { noNote[0].focus(); throw new Error('Say what is wrong with each step that failed'); }
+    const anyFail = sheet.answers.some((a) => a.get().result === 'fail');
+    const result = outOf.checked ? 'out_of_service' : anyFail || (flagged && !canLeadHere) ? 'needs_attention' : 'ok';
+    const out = await post(`/patrol/equipment/${e.id}/checks`, compact({ result, items: sheet.answers.map((a) => a.get()), notes: notes.value.trim() || undefined, downloaded: fd.get('downloaded') ? true : undefined }));
+    toast(out.status === 'in_service' ? 'Check logged: ready to use' : `Check logged: ${label(out.status)}${out.failed && out.failed.length ? `. ${out.failed.map((f) => f.note).join('. ')}` : ''}`, out.status === 'in_service' ? 'ok' : 'warn');
+    await again();
+  }, { wide: true, submitText: 'Log check' });
 }
 
 function clearDialog(e, again) {

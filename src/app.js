@@ -68,7 +68,7 @@ function createApp() {
   // On the product website's own addresses only, Cloudflare Web Analytics may load its beacon and report visits (no
   // cookies); the app, the console and the mountains' pages keep the strict policy.
   const siteOnly = (value) => (req) => (config.site.hosts.includes(String(req.hostname || '').toLowerCase()) ? value : "'self'");
-  app.use(helmet({ contentSecurityPolicy: { directives: { ...helmet.contentSecurityPolicy.getDefaultDirectives(), 'img-src': ["'self'", 'data:', ...tileHosts],
+  app.use(helmet({ contentSecurityPolicy: { directives: { ...helmet.contentSecurityPolicy.getDefaultDirectives(), 'img-src': ["'self'", 'data:', 'blob:', ...tileHosts],
     'script-src': ["'self'", siteOnly('https://static.cloudflareinsights.com')], 'connect-src': ["'self'", siteOnly('https://cloudflareinsights.com')] } } }));
   // Smaller pages for slow mountain connections and faster loads (search engines rank on it). Event streams are left alone.
   app.use(require('compression')({ filter: (req, res) => !String(res.getHeader('Content-Type') || '').includes('event-stream') && require('compression').filter(req, res) }));
@@ -129,6 +129,8 @@ function createApp() {
   );
 
   // The guest help page (opened from a QR code on a trail sign). It is a static page that reads its mountain from the URL.
+  // Locating a caller: the one-time link dispatch texts to a guest.
+  app.get('/locate/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'locate.html')));
   app.get('/help/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'help.html')));
 
   // The public lesson booking page, one per mountain, read from the URL like the help page.
@@ -192,6 +194,7 @@ function createApp() {
   api.use('/auth/change-password', rateLimit({ windowMs: 60_000, max: 10, message: 'Too many attempts' }));
   api.use('/users', rateLimit({ windowMs: 60_000, max: 60 }));
   // The guest help form is open to anyone with the link, so it gets its own tight limit: 5 requests per 10 minutes per address.
+  api.post('/public/locate/:token', rateLimit({ windowMs: 600_000, max: 30, message: 'Too many tries. Please call patrol.' }));
   api.post('/public/:slug/help', rateLimit({ windowMs: 600_000, max: Number(process.env.HELP_RATE_LIMIT) || 5, message: 'Too many requests. Please call patrol or flag down a patroller.' }));
   // Online lesson requests take a name and contact details from anyone, so they get a tight limit too: 8 a hour per address.
   api.post('/public/:slug/requests', rateLimit({ windowMs: 3_600_000, max: Number(process.env.BOOKING_RATE_LIMIT) || 8, message: 'Too many requests from this address. Please call the ski school.' }));
@@ -254,6 +257,7 @@ function createApp() {
   api.use('/skischool', skischool);
   api.use('/skischool', schoolplus);
   api.use('/patrol', patrol);
+  api.use('/patrol', require('./routes/patrolmedia')); // photos on a case
   api.use('/patrol', patrolPlus);
   api.use('/patrol', patrolTeam);
   api.use('/patrol', dispatch.router);

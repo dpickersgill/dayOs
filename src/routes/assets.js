@@ -8,6 +8,7 @@
 // Staff and managers read and log (meters, fuel, inspections, parts issued, labor). Managers change money: purchase
 // prices, the labor rate, vendors and purchase orders. Patrol does not use this app.
 const express = require('express');
+const CR = require('../lib/checkrules');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
 const { partialOf, z, dateStr, dateTimeStr, validate, paramId, normDateTime, setClause, todayIn, nowIn, dayRange, localDay } = require('../lib/util');
@@ -347,7 +348,7 @@ router.post('/register/:id/fuel', validate(z.object({
 });
 
 // ---------------------------------------------------------------- inspections
-const tplFields = { name: z.string().trim().min(1).max(120), kinds: z.array(z.string().refine((k) => O.ASSET_KIND_KEYS.includes(k), 'Unknown type')).max(30).default([]), items: z.array(z.object({ key: z.string().regex(/^[a-z0-9_]{1,30}$/), label: z.string().trim().min(1).max(150) })).min(1).max(60), active: z.boolean().optional() };
+const tplFields = { name: z.string().trim().min(1).max(120), kinds: z.array(z.string().refine((k) => O.ASSET_KIND_KEYS.includes(k), 'Unknown type')).max(30).default([]), items: z.array(CR.stepSchema).min(1).max(60), active: z.boolean().optional() };
 router.post('/templates', manager, validate(z.object(tplFields)), async (req, res) => {
   const b = req.body;
   if (new Set(b.items.map((i) => i.key)).size !== b.items.length) throw bad('Each item needs its own key');
@@ -371,7 +372,7 @@ router.patch('/templates/:id', manager, validate(partialOf(tplFields)), async (r
 /** A completed checklist. Every item is answered; a failed one needs a note, opens a work order and flags the asset. */
 router.post('/register/:id/inspections', validate(z.object({
   template_id: z.number().int().positive(),
-  items: z.array(z.object({ key: z.string(), result: z.enum(['pass', 'fail', 'na']), note: nullable(z.string().max(255)) })).min(1),
+  items: z.array(CR.answerSchema).min(1),
   hours: nullable(z.number().min(0).max(9999999)), miles: nullable(z.number().min(0).max(99999999)),
   inspector: nullable(z.string().max(100)), note: nullable(z.string().max(500)),
 })), async (req, res) => {
@@ -381,19 +382,15 @@ router.post('/register/:id/inspections', validate(z.object({
     if (!a) throw notFound('Asset');
     const tpl = await one(conn, 'SELECT * FROM inspection_templates WHERE tenant_id = ? AND id = ?', [t, b.template_id]);
     if (!tpl) throw notFound('Checklist');
-    const list = JSON.parse(tpl.items);
-    const given = new Map(b.items.map((i) => [i.key, i]));
-    if ([...given.keys()].some((k) => !list.some((i) => i.key === k))) throw bad('An answer is for an item that is not on this checklist');
-    const missing = list.filter((i) => !given.has(i.key));
-    if (missing.length) throw bad(`Answer every item. Missing: ${missing.map((m) => m.label).join('; ')}`);
-    const items = list.map((i) => ({ key: i.key, label: i.label, result: given.get(i.key).result, note: given.get(i.key).note || null }));
-    const failed = items.filter((i) => i.result === 'fail');
-    if (failed.some((i) => !i.note)) throw bad('Say what is wrong with each item that failed');
+    // Readings and dates are checked against their rules here: one outside its range fails by itself, with the reason.
     const at = nowIn(await tzOf(conn, t));
+    let items;
+    try { items = CR.evaluateAll(JSON.parse(tpl.items), b.items, at.slice(0, 10)); } catch (e) { throw bad(e.message); }
+    const failed = items.filter((i) => i.result === 'fail');
     for (const m of ['hours', 'miles']) if (b[m] !== null && b[m] !== undefined) await recordMeter(conn, req, id, m, b[m], 'inspection', at);
     let woId = null;
     if (failed.length) {
-      woId = await maintenance.createOrder(conn, req, { title: `Failed ${tpl.name.toLowerCase()}: ${a.name}`, description: failed.map((i) => `${i.label}: ${i.note}`).join('\n'), priority: a.critical ? 'urgent' : 'high', asset_id: id }, 'inspection');
+      woId = await maintenance.createOrder(conn, req, { title: `Failed ${tpl.name.toLowerCase()}: ${a.name}`, description: failed.map((i) => `${i.label}${i.value != null ? ` (${i.value}${i.unit ? ` ${i.unit}` : ''})` : ''}: ${i.note}`).join('\n'), priority: a.critical ? 'urgent' : 'high', asset_id: id }, 'inspection');
       if (a.status === 'in_service') await conn.query("UPDATE ops_assets SET status = 'needs_service' WHERE tenant_id = ? AND id = ?", [t, id]);
     }
     const who = b.inspector || (await one(conn, "SELECT COALESCE(NULLIF(CONCAT(p.first_name, ' ', p.last_name), ' '), u.email, u.username) AS n FROM users u LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id WHERE u.tenant_id = ? AND u.id = ?", [t, req.auth.userId]) || {}).n || null;

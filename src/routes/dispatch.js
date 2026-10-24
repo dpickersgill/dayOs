@@ -50,7 +50,7 @@ async function createCall(tenant, b, { source, userId = null, staffId = null }) 
   }
 }
 
-const withNo = (c) => ({ ...c, call_no: callNo(c) });
+const withNo = (c) => { const out = { ...c, call_no: callNo(c) }; delete out.locate_token; return out; };
 
 // ---------------------------------------------------------------- the board
 router.get('/dispatch', patrol, needs('dispatch'), async (req, res) => {
@@ -303,6 +303,7 @@ publicRouter.post(
     description: z.string().trim().max(300).optional(),
     name: z.string().trim().max(60).optional(),
     phone: z.string().trim().max(30).optional(),
+    gps_lat: z.number().min(-90).max(90).optional(), gps_lng: z.number().min(-180).max(180).optional(), // when the guest lets the page share where they are
     website: z.string().max(200).optional(), // hidden field: real people leave it empty, form-filling bots do not
   })),
   async (req, res) => {
@@ -313,9 +314,66 @@ publicRouter.post(
     // Beyond the per-address limit, never let a flood bury the board: at most 20 untouched guest calls at once.
     const { n } = await one(pool, "SELECT COUNT(*) AS n FROM dispatch_calls WHERE tenant_id = ? AND source = 'guest' AND status = 'new'", [t.id]);
     if (n >= 20) return res.status(503).json({ error: 'Patrol is busy. Please call the patrol phone number or flag down a patroller.' });
-    const out = await createCall(t, { location: req.body.location, description: req.body.description, caller_name: req.body.name, caller_phone: req.body.phone, priority: 'normal' }, { source: 'guest' });
+    const out = await createCall(t, { location: req.body.location, description: req.body.description, caller_name: req.body.name, caller_phone: req.body.phone, gps_lat: req.body.gps_lat, gps_lng: req.body.gps_lng, priority: 'normal' }, { source: 'guest' });
     return res.status(201).json({ ok: true, reference: out.call_no });
   },
 );
+
+// ---------------------------------------------------------------- locating a caller
+// A guest who cannot say where they are: dispatch texts them a one-time link, and when they tap it and allow it, their
+// phone sends back its position, which lands on the call (and the dispatch map) with how accurate it is. The link works
+// for 2 hours and only while the call is open; it shows the guest nothing about the call but the mountain's name.
+const LOCATE_HOURS = 2;
+const locateUrl = (req, token) => `${require('../lib/baseurl').baseUrl(req)}/locate/${token}`;
+
+router.post('/dispatch/:id/locate', patrol, needs('dispatch'), validate(z.object({ phone: z.string().trim().max(30).optional() })), async (req, res) => {
+  const { tenantId } = req.auth;
+  const c = await loadCall(pool, tenantId, paramId(req));
+  if (!ACTIVE.includes(c.status)) throw conflict('This call is closed');
+  const phone = req.body.phone || c.caller_phone;
+  if (!phone || !SMS.e164(phone)) throw bad('Add the caller\'s mobile number first');
+  const token = require('crypto').randomBytes(16).toString('hex');
+  const t = await one(pool, 'SELECT name, timezone FROM tenants WHERE id = ?', [tenantId]);
+  const now = nowIn(t.timezone);
+  await pool.query('UPDATE dispatch_calls SET locate_token = ?, locate_sent_at = ?, caller_phone = ? WHERE tenant_id = ? AND id = ?', [token, now, phone, tenantId, c.id]);
+  const link = locateUrl(req, token);
+  const sent = SMS.enabled()
+    ? await SMS.send({ tenantId, to: phone, body: `${t.name} ski patrol: tap this link and allow location so we can find you: ${link} If it is life threatening, also call 911.` })
+    : { ok: false, error: 'Text messages are not set up' };
+  await pool.query("INSERT INTO dispatch_events (tenant_id, call_id, at, kind, note, user_id) VALUES (?, ?, ?, 'note', ?, ?)", [tenantId, c.id, now, sent.ok ? `Location link texted to ${phone}` : `Location link made (not texted: ${sent.error})`, req.auth.userId]);
+  await audit(pool, req, 'locate_caller', 'dispatch_calls', c.id, { texted: sent.ok });
+  res.json({ texted: Boolean(sent.ok), error: sent.ok ? null : sent.error, link });
+});
+
+async function locateCall(token) {
+  if (!/^[0-9a-f]{32}$/.test(String(token || ''))) return null;
+  const c = await one(pool, `SELECT c.*, t.name AS mountain, t.timezone FROM dispatch_calls c JOIN tenants t ON t.id = c.tenant_id
+    WHERE c.locate_token = ? AND c.status IN ('new','dispatched','on_scene','transporting') AND t.status = 'active'`, [token]);
+  if (!c) return null;
+  const sent = Date.parse(`${String(c.locate_sent_at).replace(' ', 'T')}Z`);
+  const now = Date.parse(`${nowIn(c.timezone).replace(' ', 'T')}Z`);
+  return now - sent <= LOCATE_HOURS * 3600000 ? c : null;
+}
+
+publicRouter.get('/locate/:token', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const c = await locateCall(req.params.token);
+  if (!c) throw notFound('This link has expired');
+  res.json({ mountain: c.mountain, located: Boolean(c.located_at) });
+});
+
+publicRouter.post('/locate/:token', validate(z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180), accuracy: z.number().min(0).max(100000).optional() })), async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const c = await locateCall(req.params.token);
+  if (!c) throw notFound('This link has expired');
+  const now = nowIn(c.timezone);
+  const acc = req.body.accuracy === undefined ? null : Math.round(req.body.accuracy);
+  await pool.query('UPDATE dispatch_calls SET gps_lat = ?, gps_lng = ?, located_at = ?, located_accuracy_m = ? WHERE id = ?', [req.body.lat, req.body.lng, now, acc, c.id]);
+  await pool.query("INSERT INTO dispatch_events (tenant_id, call_id, at, kind, note) VALUES (?, ?, ?, 'note', ?)", [c.tenant_id, c.id, now, `Caller shared their location${acc !== null ? ` (within about ${acc} m)` : ''}`]);
+  // Everyone on the call sees it at once.
+  const staff = (await rows(pool, 'SELECT staff_id FROM dispatch_responders WHERE tenant_id = ? AND call_id = ?', [c.tenant_id, c.id])).map((r) => r.staff_id);
+  if (staff.length) await PUSH.notifyStaff(c.tenant_id, staff, { title: `Call ${callNo(c)}: caller located`, body: `Within about ${acc ?? '?'} m. Open the call for the map.`, url: '#/patrol/dispatch', tag: `call-${c.id}-loc` }).catch(() => {});
+  res.json({ ok: true, mountain: c.mountain });
+});
 
 module.exports = { router, publicRouter, createCall };

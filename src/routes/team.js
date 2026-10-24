@@ -5,6 +5,7 @@
 // training and posts all point at one id), but a volunteer's record is patrol only (staff.in_workforce = 0) and never
 // appears in Staff and schedule. A paid patroller is "on the staff list" too, for pay and the time clock.
 const express = require('express');
+const CR = require('../lib/checkrules');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole, isManager } = require('../middleware/auth');
 const { partialOf, z, dateStr, validate, paramId, setClause, seasonFor, todayIn, nowIn, addDays } = require('../lib/util');
@@ -332,11 +333,58 @@ router.patch('/equipment/:id', patrol, needs('manage_equipment'), validate(parti
   res.json({ ok: true });
 });
 
+// ---- check steps for each kind of gear: what a check asks for, with readings and dates checked against their rules
+const GEAR_KINDS = ['toboggan', 'aed', 'oxygen', 'trauma_bag', 'radio', 'splint_kit', 'other'];
+/** Where a patrol has not set its own: sensible steps for each kind. The oxygen minimum is the refill level in Patrol settings. */
+function defaultSteps(kind, refillPsi) {
+  return {
+    aed: [
+      { key: 'status_ok', label: 'Status indicator shows ready', type: 'pass' },
+      { key: 'pads_expiry', label: 'Pads expire on', type: 'date', within_days: 30 },
+      { key: 'battery_expiry', label: 'Battery expires on', type: 'date', within_days: 30 },
+      { key: 'kit_ok', label: 'Razor, scissors, gloves and mask in the case', type: 'pass' },
+    ],
+    oxygen: [
+      { key: 'pressure', label: 'Cylinder pressure', type: 'number', unit: 'psi', min: refillPsi, max: 3000 },
+      { key: 'regulator_ok', label: 'Regulator, mask and cannula present and clean', type: 'pass' },
+    ],
+    trauma_bag: [
+      { key: 'contents_ok', label: 'Contents complete and seal intact', type: 'pass' },
+      { key: 'earliest_expiry', label: 'Earliest expiry date in the bag', type: 'date', within_days: 30 },
+    ],
+    toboggan: [
+      { key: 'handles_ok', label: 'Handles, chains and brakes work', type: 'pass' },
+      { key: 'kit_ok', label: 'Blankets, straps and backboard in place', type: 'pass' },
+    ],
+    radio: [{ key: 'battery_ok', label: 'Battery charged, spare in place', type: 'pass' }, { key: 'check_ok', label: 'Radio check with dispatch', type: 'pass' }],
+    splint_kit: [{ key: 'contents_ok', label: 'Splints and padding complete', type: 'pass' }],
+    other: [],
+  }[kind] || [];
+}
+async function gearSteps(conn, tenantId) {
+  const { o2_refill_psi: refill } = await require('../lib/patrolops').settingsOf(conn, tenantId);
+  const own = new Map((await rows(conn, 'SELECT kind, items FROM patrol_gear_checklists WHERE tenant_id = ?', [tenantId])).map((r) => [r.kind, JSON.parse(r.items)]));
+  return Object.fromEntries(GEAR_KINDS.map((k) => [k, { steps: own.get(k) || defaultSteps(k, Number(refill) || 500), own: own.has(k) }]));
+}
+router.get('/gear-checklists', patrol, async (req, res) => {
+  const all = await gearSteps(pool, req.auth.tenantId);
+  for (const v of Object.values(all)) v.steps = v.steps.map((s) => ({ ...s, rule: CR.ruleText(s) }));
+  res.json({ data: all });
+});
+router.put('/gear-checklists/:kind', patrol, needs('manage_equipment'), validate(z.object({ items: z.array(CR.stepSchema).max(30) })), async (req, res) => {
+  const kind = req.params.kind;
+  if (!GEAR_KINDS.includes(kind)) throw notFound('Kind of gear');
+  if (new Set(req.body.items.map((i) => i.key)).size !== req.body.items.length) throw bad('Each step needs its own key');
+  await pool.query('INSERT INTO patrol_gear_checklists (tenant_id, kind, items) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE items = VALUES(items)', [req.auth.tenantId, kind, JSON.stringify(req.body.items)]);
+  await audit(pool, req, 'set_gear_checklist', 'patrol_equipment', null, { kind, steps: req.body.items.length });
+  res.json({ ok: true });
+});
+
 /** Any patroller can log a check. The result moves the item's status, so a failed AED shows up for everyone. */
 router.post(
   '/equipment/:id/checks',
   patrol,
-  validate(z.object({ result: z.enum(['ok', 'needs_attention', 'out_of_service']), reading: z.string().max(40).optional(), notes: z.string().max(255).optional(), psi: z.number().int().min(0).max(3000).optional(), downloaded: z.boolean().optional() })),
+  validate(z.object({ result: z.enum(['ok', 'needs_attention', 'out_of_service']), reading: z.string().max(40).optional(), notes: z.string().max(255).optional(), psi: z.number().int().min(0).max(3000).optional(), downloaded: z.boolean().optional(), items: z.array(CR.answerSchema).max(30).optional() })),
   async (req, res) => {
     const id = paramId(req);
     const b = req.body;
@@ -344,6 +392,24 @@ router.post(
       const e = await one(conn, 'SELECT id, kind, status, needs_download FROM patrol_equipment WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id]);
       if (!e) throw notFound('Equipment');
       if (e.status === 'retired') throw conflict('This item is retired');
+      // The kind's check steps: readings and dates are checked against their rules, and one outside them fails the check.
+      let items = null;
+      if (b.items && b.items.length) {
+        const steps = (await gearSteps(conn, req.auth.tenantId))[e.kind].steps;
+        const tz = (await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone;
+        try { items = CR.evaluateAll(steps, b.items, todayIn(tz)); } catch (err) { throw bad(err.message); }
+        const failed = items.filter((i) => i.result === 'fail');
+        if (failed.length && b.result === 'ok') b.result = 'needs_attention';
+        if (failed.length) b.notes = [b.notes, ...failed.map((i) => `${i.label}: ${i.note}`)].filter(Boolean).join('. ').slice(0, 255);
+        const reading = items.filter((i) => i.type === 'number').map((i) => `${i.value}${i.unit ? ` ${i.unit}` : ''}`).join(', ');
+        if (!b.reading && reading) b.reading = reading.slice(0, 40);
+        // Readings that belong on the item itself: the cylinder's pressure, the AED's pad and battery dates.
+        const val = (k) => (items.find((i) => i.key === k && i.result !== 'na') || {}).value;
+        if (e.kind === 'oxygen' && typeof val('pressure') === 'number') await conn.query('UPDATE patrol_equipment SET o2_psi = ? WHERE tenant_id = ? AND id = ?', [Math.round(val('pressure')), req.auth.tenantId, id]);
+        if (e.kind === 'aed' && val('pads_expiry')) await conn.query('UPDATE patrol_equipment SET pads_expire_on = ? WHERE tenant_id = ? AND id = ?', [val('pads_expiry'), req.auth.tenantId, id]);
+        if (e.kind === 'aed' && val('battery_expiry')) await conn.query('UPDATE patrol_equipment SET battery_expire_on = ? WHERE tenant_id = ? AND id = ?', [val('battery_expiry'), req.auth.tenantId, id]);
+        if (e.kind === 'trauma_bag' && val('earliest_expiry')) await conn.query('UPDATE patrol_equipment SET expires_on = ? WHERE tenant_id = ? AND id = ?', [val('earliest_expiry'), req.auth.tenantId, id]);
+      }
       // Oxygen: the pressure is kept on the cylinder, and one below the refill level cannot pass as "ok".
       if (e.kind === 'oxygen' && b.psi !== undefined) {
         const { o2_refill_psi: refill } = await require('../lib/patrolops').settingsOf(conn, req.auth.tenantId);
@@ -355,11 +421,11 @@ router.post(
       if (e.kind === 'aed' && Number(e.needs_download) && b.result === 'ok' && !b.downloaded) throw conflict('This AED was used on a patient. Download its data for the medical director and fit new pads, then tick Downloaded.');
       if (e.kind === 'aed' && b.downloaded) await conn.query('UPDATE patrol_equipment SET needs_download = 0 WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, id]);
       if (b.result === 'ok' && ['needs_attention', 'out_of_service'].includes(e.status) && !(await PA.can(pool, req, 'manage_equipment'))) throw forbidden('A flagged item has to be cleared by someone who manages equipment');
-      const [r] = await conn.query('INSERT INTO equipment_checks (tenant_id, equipment_id, checked_by, result, reading, notes) VALUES (?, ?, ?, ?, ?, ?)', [req.auth.tenantId, id, req.auth.userId, b.result, b.reading ?? null, b.notes ?? null]);
+      const [r] = await conn.query('INSERT INTO equipment_checks (tenant_id, equipment_id, checked_by, result, reading, notes, items) VALUES (?, ?, ?, ?, ?, ?, ?)', [req.auth.tenantId, id, req.auth.userId, b.result, b.reading ?? null, b.notes ?? null, items ? JSON.stringify(items) : null]);
       const status = b.result === 'ok' ? 'in_service' : b.result;
       await conn.query('UPDATE patrol_equipment SET status = ? WHERE tenant_id = ? AND id = ?', [status, req.auth.tenantId, id]);
       await audit(conn, req, 'check', 'patrol_equipment', id, { result: b.result });
-      return { id: r.insertId, status };
+      return { id: r.insertId, status, failed: items ? items.filter((i) => i.result === 'fail').map((i) => ({ label: i.label, note: i.note })) : [] };
     });
     res.status(201).json(out);
   },
@@ -367,7 +433,7 @@ router.post(
 
 router.get('/equipment/:id/checks', patrol, async (req, res) => {
   res.json({
-    data: await rows(pool, `SELECT c.id, c.checked_at, c.result, c.reading, c.notes, COALESCE(u.email, u.username) AS checked_by FROM equipment_checks c LEFT JOIN users u ON u.id = c.checked_by AND u.tenant_id = c.tenant_id
+    data: await rows(pool, `SELECT c.id, c.checked_at, c.result, c.reading, c.notes, c.items, COALESCE(u.email, u.username) AS checked_by FROM equipment_checks c LEFT JOIN users u ON u.id = c.checked_by AND u.tenant_id = c.tenant_id
                             WHERE c.tenant_id = ? AND c.equipment_id = ? ORDER BY c.checked_at DESC, c.id DESC LIMIT 100`, [req.auth.tenantId, paramId(req)]),
   });
 });

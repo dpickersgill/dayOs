@@ -691,6 +691,49 @@ const programPlusSteps = [
     CONSTRAINT fk_family_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
   )`],
 ];
+const fieldKitSteps = [
+  // Photos on a patrol case. The file is kept exactly as uploaded, with its SHA-256 recorded at upload, so anyone can show
+  // it has not changed since; a smaller preview is shown first. Never deleted: a wrong photo is marked entered in error.
+  ['incident_media', (c) => tableExists(c, 'incident_media'), `CREATE TABLE incident_media (
+    id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id     BIGINT UNSIGNED NOT NULL,
+    incident_id   BIGINT UNSIGNED NOT NULL,
+    patient_id    BIGINT UNSIGNED NULL,
+    mime          VARCHAR(60) NOT NULL,
+    file_name     VARCHAR(200) NULL,
+    bytes         INT UNSIGNED NOT NULL,
+    sha256        CHAR(64) NOT NULL,
+    original      MEDIUMBLOB NOT NULL,
+    preview       MEDIUMBLOB NULL,
+    caption       VARCHAR(255) NULL,
+    taken_at      DATETIME NULL,
+    taken_lat     DECIMAL(9,6) NULL,
+    taken_lng     DECIMAL(9,6) NULL,
+    client_ref    VARCHAR(40) NULL,
+    uploaded_by   BIGINT UNSIGNED NULL,
+    uploaded_at   DATETIME NOT NULL,
+    voided_at     DATETIME NULL,
+    voided_by     BIGINT UNSIGNED NULL,
+    void_reason   VARCHAR(255) NULL,
+    UNIQUE KEY uq_media_ref (tenant_id, client_ref),
+    KEY ix_media_incident (tenant_id, incident_id, id),
+    CONSTRAINT fk_media_incident FOREIGN KEY (tenant_id, incident_id) REFERENCES incidents(tenant_id, id)
+  ) ENGINE=InnoDB`],
+  // Check steps for each kind of patrol gear (readings with ranges, dates with expiry rules), and the answers on a check.
+  ['patrol_gear_checklists', (c) => tableExists(c, 'patrol_gear_checklists'), `CREATE TABLE patrol_gear_checklists (
+    tenant_id   BIGINT UNSIGNED NOT NULL,
+    kind        VARCHAR(30) NOT NULL,
+    items       TEXT NOT NULL,
+    updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, kind),
+    CONSTRAINT fk_gearcl_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  ) ENGINE=InnoDB`],
+  ['equipment_checks items', (c) => columnExists(c, 'equipment_checks', 'items'), 'ALTER TABLE equipment_checks ADD COLUMN items TEXT NULL'],
+  // Locating a caller: dispatch texts a one-time link, and the guest's phone sends back where it is.
+  ['dispatch_calls locate', (c) => columnExists(c, 'dispatch_calls', 'located_at'), `ALTER TABLE dispatch_calls ADD COLUMN locate_token CHAR(32) NULL,
+    ADD COLUMN locate_sent_at DATETIME NULL, ADD COLUMN located_at DATETIME NULL, ADD COLUMN located_accuracy_m INT UNSIGNED NULL, ADD UNIQUE KEY uq_dcall_locate (locate_token)`],
+];
+
 const demoMailSteps = [
   // Demo emails from the founder: the welcome with a sign-in link, a nudge on day 2, a note before the demo ends.
   // open_nonce makes the sign-in link (changing it, from the console, retires every link sent before).
@@ -934,7 +977,7 @@ async function main() {
   await seedPatrolPlan(conn);
   await seedAssistantAddon(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

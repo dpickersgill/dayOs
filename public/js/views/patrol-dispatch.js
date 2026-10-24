@@ -80,6 +80,7 @@ async function openCall(id, again) {
       h('div', { class: 'spread' }, h('h2', null, `Call ${c.call_no}`), h('span', { class: 'row' }, state(label(c.priority), prioTone[c.priority]), state(statusText[c.status], statusTone[c.status]))),
       h('p', null, h('b', null, c.location), c.description ? ` · ${c.description}` : ''),
       h('p', { class: 'muted' }, `${fmtDateTime(c.received_at)} · ${c.source === 'guest' ? 'Guest request' : label(c.source)}${c.caller_name ? ` · ${c.caller_name}` : ''}${c.caller_phone ? ` · ${c.caller_phone}` : ''}`),
+      whereBlock(c, live),
       h('h3', null, 'Responders'),
       c.responders.length ? h('ul', null, c.responders.map((r) => h('li', null, `${r.callsign ? `${r.callsign}: ` : ''}${r.first_name} ${r.last_name}`,
         ' ', r.acked_at ? state('On the way', 'good') : r.notified_at ? state('Alerted, not answered', 'warn') : state('No phone alert', 'neutral'), r.texted_at ? state('Texted', 'neutral') : null,
@@ -94,6 +95,37 @@ async function openCall(id, again) {
         c.case ? h('a', { href: `#/patrol/case/${c.case.id}`, onclick: () => d.close() }, `Open case ${c.case.case_number}`) : button('Start a patient care report', async () => { const m = await post(`/patrol/dispatch/${id}/case`, {}); toast(`Case ${m.case_number} started`); d.close(); location.hash = `#/patrol/case/${m.id}`; }),
         live ? button('Close call', async () => { await step('closed'); }, { kind: 'primary' }) : null,
         live ? button('Cancel call', async () => { await step('cancelled', 'Cancelled'); }, { kind: 'danger' }) : null));
+  }
+  // Where the caller is: from the guest help page, or from the location link dispatch texts them.
+  function whereBlock(c, live) {
+    const has = c.gps_lat !== null && c.gps_lat !== undefined;
+    const pos = has ? `${Number(c.gps_lat).toFixed(5)}, ${Number(c.gps_lng).toFixed(5)}` : null;
+    const waiting = live && c.locate_sent_at && !c.located_at;
+    if (waiting) watch();
+    return h('div', { class: 'locate-box' },
+      has ? h('p', null, h('b', null, 'Caller\'s phone: '), pos, c.located_accuracy_m ? ` (within about ${c.located_accuracy_m} m${c.located_at ? `, ${fmtTime(c.located_at)}` : ''})` : '', ' ',
+        h('a', { href: `https://www.google.com/maps/search/?api=1&query=${c.gps_lat},${c.gps_lng}`, target: '_blank', rel: 'noopener' }, 'Open in maps')) : null,
+      waiting ? h('p', { class: 'muted' }, `Location link sent at ${fmtTime(c.locate_sent_at)}. Waiting for the caller to tap it…`) : null,
+      live ? button(has ? 'Ask for their location again' : 'Locate caller', () => locateDialog(c), { small: true, kind: has ? 'ghost' : null }) : null);
+  }
+  function locateDialog(c) {
+    const phone = input({ name: 'phone', type: 'tel', maxlength: 30, value: c.caller_phone || '', required: true });
+    formDialog('Locate caller', h('div', { class: 'stack' },
+      h('p', null, 'We text the caller a link. When they tap it and allow location, their phone\'s position appears here, with how accurate it is.'),
+      field('Caller\'s mobile number', phone)), async () => {
+      const r = await post(`/patrol/dispatch/${id}/locate`, { phone: phone.value.trim() });
+      if (r.texted) toast('Location link texted'); else { toast(`Not texted: ${r.error}. Read them the link instead.`, 'warn'); dialog('Location link', h('div', { class: 'stack' }, h('p', null, 'Text messages are not working, so give the caller this link another way:'), h('p', null, h('code', null, r.link)))); }
+      await draw(); watch();
+    }, { submitText: 'Text the link' });
+  }
+  // While a location link is out, check every 8 seconds until the caller answers or the call is closed.
+  let poll = null;
+  function watch() {
+    if (poll) return;
+    poll = setInterval(async () => {
+      if (!holder.isConnected) { clearInterval(poll); poll = null; return; }
+      try { const c = await get(`/patrol/dispatch/${id}`); if (c.located_at || !c.locate_sent_at) { clearInterval(poll); poll = null; await draw(); if (c.located_at) toast('Caller located'); } } catch (_) { /* try again next time */ }
+    }, 8000);
   }
   try { await draw(); } catch (err) { clear(holder).append(errorBox(err)); }
 }

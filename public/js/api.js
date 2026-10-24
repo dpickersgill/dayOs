@@ -108,6 +108,21 @@ export async function uploadFile(path, file, note) {
   return data;
 }
 
+/** Sends bytes (a photo) as the raw body, with query parameters; returns the JSON answer. */
+export async function sendBytes(method, path, blob) {
+  const res = await fetch(`${config.base}/api/v1${path}`, { method, headers: { authorization: `Bearer ${session.token}`, 'content-type': 'application/octet-stream' }, body: blob });
+  const isJson = (res.headers.get('content-type') || '').includes('json');
+  const data = isJson ? await res.json() : null;
+  if (!res.ok) throw new ApiError(res.status, (data && data.error) || (res.status === 413 ? 'That file is too large' : 'Upload failed'), data ? data.details : undefined);
+  return data;
+}
+/** A protected file as a Blob (to show an image that needs the sign-in token). */
+export async function fetchBlob(path) {
+  const res = await fetch(`${config.base}/api/v1${path}`, { headers: { authorization: `Bearer ${session.token}` } });
+  if (!res.ok) throw new ApiError(res.status, 'Could not load the file');
+  return res.blob();
+}
+
 /** One readable sentence for any API error, including the lists of reasons the server sends back. */
 export function describeError(err) {
   if (!(err instanceof ApiError)) return err && err.message ? err.message : 'Something went wrong';

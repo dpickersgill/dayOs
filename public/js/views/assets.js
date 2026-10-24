@@ -8,6 +8,7 @@
 //   Settings    places, vendors, checklists and the shop labor rate (managers)
 // One asset opens on its own page (asset-page.js), which is also where a scanned QR tag lands.
 
+import { stepsEditor } from '../checksteps.js';
 import { get, post, patch, put, download } from '../api.js';
 import { drawMap } from './asset-map.js';
 import { h, clear, state, button, toast, formDialog, dialog, confirmDialog, field, input, select, val, num, money, toCents, centsToInput, fmtDate, label, empty, table, tabs, isManager, errorBox } from '../ui.js';
@@ -370,23 +371,15 @@ function vendorDialog(v, done) {
 function tplDialog(t, meta, done) {
   const cur = t || { kinds: [], items: [] };
   const boxes = meta.kinds.map((k) => h('label', { class: 'check' }, h('input', { type: 'checkbox', value: k.value, checked: cur.kinds.includes(k.value) }), ` ${k.label}`));
+  const ed = stepsEditor(cur.items);
   formDialog(t ? `Edit ${t.name}` : 'Add a checklist', h('div', { class: 'stack' },
     field('Name', input({ name: 'name', required: true, maxlength: 120, value: cur.name || '' })),
-    field('Items, one per line', h('textarea', { name: 'items', rows: 8, required: true }, cur.items.map((i) => i.label).join('\n')), 'Each line is one thing to check: pass, fail or not applicable'),
+    h('fieldset', { class: 'stack tight' }, h('legend', null, 'Steps'), h('p', { class: 'muted small' }, 'Each step is pass or fail, a reading with the range that is OK (a reading outside it fails by itself), or a date that fails as it gets close.'), ed.el),
     h('fieldset', { class: 'stack tight' }, h('legend', null, 'Used for these types (none: for anything without its own)'), h('div', { class: 'checks' }, boxes)),
     t ? h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'active', checked: Boolean(cur.active) }), ' In use') : null),
   async (fd) => {
-    const lines = String(fd.get('items') || '').split('\n').map((x) => x.trim()).filter(Boolean);
-    if (!lines.length) throw new Error('Add at least one item');
-    // Keep the keys of items that stay, so past inspections still line up.
-    const used = new Set();
-    const items = lines.map((labelText, i) => {
-      const old = cur.items.find((x) => x.label === labelText);
-      let key = old ? old.key : labelText.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 24) || `item_${i + 1}`;
-      while (used.has(key)) key = `${key.slice(0, 26)}_${i + 1}`;
-      used.add(key);
-      return { key, label: labelText.slice(0, 150) };
-    });
+    const items = ed.get();
+    if (!items.length) throw new Error('Add at least one step');
     const body = { name: val(fd, 'name'), items, kinds: boxes.map((b) => b.firstChild).filter((x) => x.checked).map((x) => x.value) };
     if (t) await patch(`/assets/templates/${t.id}`, { ...body, active: fd.get('active') === 'on' }); else await post('/assets/templates', body);
     toast('Saved'); await done();

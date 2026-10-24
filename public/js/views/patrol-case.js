@@ -15,11 +15,12 @@ import { bedsideCard, voidedNote } from './patrol-bedside.js';
 import { collisionPanel } from './patrol-collision.js';
 import { checklistPanel, loadChecklists } from './patrol-checklists.js';
 import { voidDialog, sentToast } from './patrol-tools.js';
-import { send, pending, onChange as onOutbox, flush, retry, discard, waitingCounts, keepCase, keptCase } from '../outbox.js';
+import { send, pending, onChange as onOutbox, flush, retry, discard, waitingCounts, keepCase, keptCase, realCaseId } from '../outbox.js';
 import { draftNarrative } from '../narrative.js';
 import { live, lateNote, treatmentName, atTime } from '../care-text.js';
 import { searchPanel, recordsPanel } from './patrol-search.js';
 import { legalHoldControl } from './patrol-records.js';
+import { photosPanel } from './patrol-photos.js';
 
 export const CATEGORIES = ['injury', 'collision', 'lost_person', 'equipment', 'medical', 'conduct', 'other'];
 export const SEVERITY = ['minor', 'moderate', 'serious', 'critical'];
@@ -58,6 +59,16 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
   async function load() {
     const keep = window.scrollY;
     let c;
+    // A case started with no signal: shown from this phone until it reaches the server, then the page moves to it.
+    if (id < 0 && !version) {
+      const real = realCaseId(id);
+      if (real) { location.replace(`#/patrol/case/${real}/${mode || 'care'}`); return; }
+      const kept = keptCase(id);
+      if (!kept) { clear(page).append(backLink(), errorBox(new Error('This case is not on this phone. If it was sent already, open it from the case list.'))); return; }
+      ({ c, def, trails, checklists } = kept.data);
+      current = c; mode = 'care';
+      redraw(); return;
+    }
     try {
       if (version) {
         let v;
@@ -142,6 +153,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
     return h('div', { class: 'stack case', 'data-mode': mode },
       wristband(c),
       version ? versionBanner() : null,
+      c.offline ? h('div', { class: 'warn-note', role: 'status' }, h('b', null, 'Started with no signal. '), 'Time stamps and bedside entries (vitals, injuries, treatments, assessments) are kept on this phone and sent with the case when the signal returns. The rest of the report waits until then.') : null,
       outboxStrip(c),
       progressPanel(c, editable),
       panes.care, panes.report, panes.record);
@@ -181,9 +193,9 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
     }));
     return h('header', { class: 'wristband' },
       h('div', { class: 'wb-top' }, backLink(),
-        h('span', { class: 'wb-case' }, c.case_number ? `Report ${c.case_number}` : `Case ${c.id}`),
+        h('span', { class: 'wb-case' }, c.case_number ? `Report ${c.case_number}` : c.offline ? 'New case, not sent yet' : `Case ${c.id}`),
         h('span', { class: 'wb-state' }, state(stateText[c.report_state], stateTone[c.report_state]), state(label(c.severity), sevTone[c.severity])),
-        shareButton('patrol_case', c.id)),
+        c.offline ? null : shareButton('patrol_case', c.id)),
       who, tabs);
   }
 
@@ -306,6 +318,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
         : h('div', { class: 'empty stack' }, h('p', null, c.category === 'injury' || c.category === 'medical' ? 'Add the patient to start the care record.' : 'No patients on this report.'), addBtn),
       c.category === 'lost_person' && !version ? searchPanel(c, { editable, roster, trails: trails || [] }) : null,
       checklistPanel(c, { id, editable, reload: load, defs: checklists }),
+      id > 0 ? photosPanel(c, { id, editable, reload: load, readOnly: Boolean(version) }) : null,
       voided.length ? h('section', { class: 'panel stack voided-patients' }, h('h3', null, 'Entered in error'), h('ul', { class: 'plain' }, voided.map((p) => h('li', { class: 'voided' }, h('span', { class: 'what' }, `${p.first_name} ${p.last_name}`), voidedNote(p))))) : null);
   }
 

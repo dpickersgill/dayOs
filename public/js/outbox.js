@@ -152,12 +152,12 @@ const newRef = () => `${Date.now().toString(36)}${Math.random().toString(36).sli
  * Sends one change. If the phone is offline (or the request cannot get through) it is kept and sent later, and the
  * result is { queued: true }. A refusal from the server (a mistake in the entry, a locked report) is thrown as usual.
  */
-export async function send(method, path, body, { caseId, label: text }) {
+export async function send(method, path, body, { caseId, label: text, temp, offlineBody }) {
   // A new entry carries an id from this phone, so if the answer is lost and it is sent again the server keeps one copy.
   const ref = newRef();
   const sendBody = method === 'POST' ? { ...body, client_ref: ref } : body;
   const queue = () => {
-    const item = { id: ref, who: who(), caseId: Number(caseId), method, path, body: sendBody, label: text, at: nowStamp(), queued: new Date().toISOString() };
+    const item = { id: ref, who: who(), caseId: Number(caseId), method, path, body: offlineBody ? { ...offlineBody, client_ref: ref } : sendBody, label: text, at: nowStamp(), queued: new Date().toISOString(), ...(temp ? { temp } : {}) };
     write([...all(), item]);
     schedule();
     return { queued: true };
@@ -173,11 +173,14 @@ export function flush() {
   const run = async () => {
     let sent = 0;
     const me = who();
-    for (const item of all().filter((x) => x.who === me && !x.error)) {
-      if (!all().some((x) => x.id === item.id)) continue; // another tab sent it meanwhile
+    for (const queued of all().filter((x) => x.who === me && !x.error)) {
+      // Read it again: another tab may have sent it, or a case started offline may have just been given its real id.
+      const item = all().find((x) => x.id === queued.id);
+      if (!item || item.error) continue;
       try {
-        await api(item.method, item.path, item.body);
+        const out = await api(item.method, item.path, item.body);
         write(all().filter((x) => x.id !== item.id));
+        if (item.temp && out && out.id) settle(item.temp, out);
         sent += 1;
       } catch (err) {
         if (unreachable(err) || err.status === 401) break; // no signal, or signed out: try again later
@@ -191,6 +194,27 @@ export function flush() {
   const locks = globalThis.navigator && globalThis.navigator.locks;
   flushing = (locks ? locks.request('so-patrol-outbox', run) : run()).finally(() => { flushing = null; });
   return flushing;
+}
+
+// ---------------------------------------------------------------- cases started with no signal
+// A case started offline has a temporary negative id (and its first patient another). When the case reaches the server,
+// the entries waiting behind it are pointed at the real ids, and the page moves to the real case.
+const MAP_KEY = 'so.patrol.tmpcases';
+function settle(temp, out) {
+  const fromCase = `/patrol/incidents/${temp.caseId}/`;
+  const fromPatient = temp.patientId && out.patient_id ? `/patients/${temp.patientId}` : null;
+  write(all().map((x) => {
+    if (x.caseId !== temp.caseId) return x;
+    let path = x.path.startsWith(fromCase) ? `/patrol/incidents/${out.id}/${x.path.slice(fromCase.length)}` : x.path;
+    if (fromPatient && (path.includes(`${fromPatient}/`) || path.endsWith(fromPatient))) path = path.replace(fromPatient, `/patients/${out.patient_id}`);
+    return { ...x, caseId: out.id, path };
+  }));
+  try { const m = JSON.parse(globalThis.sessionStorage.getItem(MAP_KEY) || '{}'); m[temp.caseId] = out.id; globalThis.sessionStorage.setItem(MAP_KEY, JSON.stringify(m)); } catch (_) { /* the page reloads the list instead */ }
+  cases = cases.filter((x) => x.id !== temp.caseId); persistCases();
+}
+/** The real id of a case started with no signal, once it has reached the server. */
+export function realCaseId(tmp) {
+  try { return JSON.parse(globalThis.sessionStorage.getItem(MAP_KEY) || '{}')[tmp] || null; } catch (_) { return null; }
 }
 
 /** Tries a refused entry again (after the report was sent back to draft, say). */
@@ -230,6 +254,11 @@ export function keepCase(id, data) {
   cases.unshift({ id: Number(id), who: me, at: Date.now(), data });
   cases = cases.slice(0, CASE_MAX);
   persistCases();
+}
+/** The case most recently kept on this phone (for its report form and lists, when a new case starts with no signal). */
+export function latestKept() {
+  const me = who();
+  return cases.find((x) => x.who === me && x.id > 0) ? cases.find((x) => x.who === me && x.id > 0).data : null;
 }
 export function keptCase(id) {
   const me = who(); const cut = Date.now() - CASE_HOURS * 3600000;

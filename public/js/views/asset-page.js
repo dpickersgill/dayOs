@@ -2,6 +2,7 @@
 // standing next to it (log meters, fuel, run an inspection, report a problem). Opened from the register or by scanning
 // the QR tag on the machine (#/assets/tag/A-0042). Also: the label sheet, and the work order costs sheet.
 
+import { answerSheet, resultChips } from '../checksteps.js';
 import { assetMapLink } from './asset-map.js';
 import { get, post, patch, del } from '../api.js';
 import { h, clear, appendAll, state, button, toast, formDialog, dialog, confirmDialog, field, input, select, val, num, money, toCents, centsToInput, fmtDate, fmtDateTime, label, errorBox, empty, isManager, todayStr, ctx } from '../ui.js';
@@ -21,16 +22,6 @@ const meterText = (a) => [a.hours ? `${n1(a.hours).toLocaleString()} h` : null, 
 export const tagUrl = (tag) => `${location.origin}${location.pathname}#/assets/tag/${encodeURIComponent(tag)}`;
 
 /** A row of tap-chips for pass, fail and N/A. */
-function resultChips(id, labelledBy) {
-  let cur = '';
-  const row = h('div', { class: 'chip-row', role: 'group', id, 'aria-labelledby': labelledBy });
-  for (const [v, t] of [['pass', 'Pass'], ['fail', 'Fail'], ['na', 'N/A']]) {
-    const b = h('button', { type: 'button', class: `chip result-${v}`, 'data-value': v, 'aria-pressed': 'false' }, t);
-    b.addEventListener('click', () => { cur = cur === v ? '' : v; for (const x of row.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x.dataset.value === cur)); row.dispatchEvent(new window.Event('change', { bubbles: true })); });
-    row.append(b);
-  }
-  return { el: row, get: () => cur || null, set: (v) => { cur = v; for (const x of row.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x.dataset.value === cur)); } };
-}
 
 /** Everything the asset forms choose from: types, checklists, places, lifts, other assets and vendors. */
 export async function fullMeta() {
@@ -100,7 +91,8 @@ export async function renderAsset(root, id) {
     return h('section', { class: 'panel stack' }, h('h2', null, 'Inspections'),
       a.inspections.length ? h('ul', { class: 'plain rows' }, a.inspections.map((i) => h('li', null,
         h('span', null, state(i.result === 'pass' ? 'Passed' : 'Failed', i.result === 'pass' ? 'good' : 'bad'), ' ', h('b', null, i.template_name), h('span', { class: 'muted small' }, ` ${fmtDateTime(i.done_at)}${i.inspector ? `, ${i.inspector}` : ''}`)),
-        i.result === 'fail' ? h('p', { class: 'small' }, i.items.filter((x) => x.result === 'fail').map((x) => `${x.label}: ${x.note}`).join('; ')) : null))) : h('p', { class: 'muted' }, 'No inspections recorded.'));
+        i.result === 'fail' ? h('p', { class: 'small' }, i.items.filter((x) => x.result === 'fail').map((x) => `${x.label}: ${x.note}`).join('; ')) : null,
+        i.items.some((x) => x.value != null && x.result !== 'fail') ? h('p', { class: 'small muted' }, i.items.filter((x) => x.value != null && x.result !== 'fail').map((x) => `${x.label}: ${x.value}${x.unit ? ` ${x.unit}` : ''}`).join('; ')) : null))) : h('p', { class: 'muted' }, 'No inspections recorded.'));
   }
 
   function historySection(a) {
@@ -278,21 +270,17 @@ export function inspectSheet(a, meta, done) {
   const box = h('div', { class: 'stack' });
   const err = h('div');
   let answers = [];
+  let sheet = null;
   const drawItems = () => {
     const t = active.find((x) => String(x.id) === chooser.value);
-    answers = t.items.map((it, i) => {
-      const id = `ins-${i}`;
-      const c = resultChips(id, `${id}-l`);
-      const note = input({ maxlength: 255, placeholder: 'What is wrong', 'aria-label': `What is wrong: ${it.label}`, hidden: true });
-      c.el.addEventListener('change', () => { note.hidden = c.get() !== 'fail'; if (!note.hidden) note.focus(); });
-      return { key: it.key, c, note, el: h('div', { class: 'ins-item' }, h('span', { id: `${id}-l`, class: 'ins-label' }, it.label), c.el, note) };
-    });
-    clear(box).append(...answers.map((x) => x.el));
+    sheet = answerSheet(t.items, resultChips);
+    answers = sheet.answers;
+    clear(box).append(sheet.el);
   };
   chooser.addEventListener('change', drawItems);
   drawItems();
   const allPass = h('button', { type: 'button', class: 'btn small' }, 'Mark the rest as pass');
-  allPass.addEventListener('click', () => { for (const x of answers) if (!x.c.get()) x.c.set('pass'); });
+  allPass.addEventListener('click', () => sheet.markRestPass());
   const hours = input({ type: 'number', step: '0.1', min: 0, inputmode: 'decimal', 'aria-label': 'Hours now', placeholder: a.hours ? String(n1(a.hours)) : 'Hours now' });
   const miles = input({ type: 'number', step: '0.1', min: 0, inputmode: 'decimal', 'aria-label': 'Miles now', placeholder: a.miles !== null && a.miles !== undefined ? String(n1(a.miles)) : 'Miles now' });
   const save = h('button', { type: 'button', class: 'btn primary big', 'data-act': 'save-inspection' }, 'Save inspection');
@@ -300,13 +288,13 @@ export function inspectSheet(a, meta, done) {
   dlg.box.classList.add('sheet');
   save.addEventListener('click', async () => {
     clear(err);
-    const missing = answers.filter((x) => !x.c.get());
-    if (missing.length) { err.append(errorBox(new Error(`Answer every item (${missing.length} left)`))); return; }
-    const noNote = answers.filter((x) => x.c.get() === 'fail' && !x.note.value.trim());
-    if (noNote.length) { err.append(errorBox(new Error('Say what is wrong with each item that failed'))); noNote[0].note.focus(); return; }
+    const missing = answers.filter((x) => x.missing());
+    if (missing.length) { err.append(errorBox(new Error(`Answer every item (${missing.length} left)`))); missing[0].focus(); return; }
+    const noNote = answers.filter((x) => x.needsNote());
+    if (noNote.length) { err.append(errorBox(new Error('Say what is wrong with each item that failed'))); noNote[0].focus(); return; }
     save.disabled = true;
     try {
-      const r = await post(`/assets/register/${a.id}/inspections`, { template_id: Number(chooser.value), items: answers.map((x) => ({ key: x.key, result: x.c.get(), note: x.note.value.trim() || null })), hours: hours.value === '' ? null : Number(hours.value), miles: miles.value === '' ? null : Number(miles.value) });
+      const r = await post(`/assets/register/${a.id}/inspections`, { template_id: Number(chooser.value), items: answers.map((x) => x.get()), hours: hours.value === '' ? null : Number(hours.value), miles: miles.value === '' ? null : Number(miles.value) });
       dlg.close();
       toast(r.result === 'pass' ? 'Inspection passed' : 'Inspection failed: a work order was opened', r.result === 'pass' ? 'ok' : 'warn');
       await done();

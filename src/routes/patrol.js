@@ -90,7 +90,10 @@ async function createCase(req, body) {
         const { patient, ...rest } = body;
         if (rest.client_ref) {
           const seen = await one(conn, 'SELECT id, season, seq FROM incidents WHERE tenant_id = ? AND client_ref = ?', [req.auth.tenantId, rest.client_ref]);
-          if (seen) return { id: seen.id, case_number: `${seen.season}-${String(seen.seq).padStart(4, '0')}`, status: 'open', report_state: 'draft', repeat: true };
+          if (seen) {
+            const first = await one(conn, 'SELECT id FROM incident_patients WHERE tenant_id = ? AND incident_id = ? ORDER BY id LIMIT 1', [req.auth.tenantId, seen.id]);
+            return { id: seen.id, case_number: `${seen.season}-${String(seen.seq).padStart(4, '0')}`, status: 'open', report_state: 'draft', repeat: true, patient_id: first ? first.id : null };
+          }
         }
         const data = { ...rest, season, seq: n };
         const cls = body.trail_id && !(body.form && body.form.run_classification) ? await runClassFor(conn, req.auth.tenantId, body.trail_id) : null;
@@ -105,13 +108,14 @@ async function createCase(req, body) {
         if (req.auth.staffId) {
           await conn.query("INSERT INTO incident_responders (tenant_id, incident_id, staff_id, role) VALUES (?, ?, ?, 'lead')", [req.auth.tenantId, r.insertId, req.auth.staffId]);
         }
+        let patientId = null;
         if (patient && (patient.first_name || patient.last_name || patient.chief_complaint)) {
-          await conn.query('INSERT INTO incident_patients (tenant_id, incident_id, first_name, last_name, age_years, chief_complaint) VALUES (?, ?, ?, ?, ?, ?)',
+          [{ insertId: patientId }] = await conn.query('INSERT INTO incident_patients (tenant_id, incident_id, first_name, last_name, age_years, chief_complaint) VALUES (?, ?, ?, ?, ?, ?)',
             [req.auth.tenantId, r.insertId, patient.first_name || 'Unknown', patient.last_name || 'Patient', patient.age_years ?? null, patient.chief_complaint || null]);
           if (patient.chief_complaint && !body.summary) await conn.query('UPDATE incidents SET summary = ? WHERE tenant_id = ? AND id = ?', [patient.chief_complaint.slice(0, 500), req.auth.tenantId, r.insertId]);
         }
         await audit(conn, req, 'create', 'incidents', r.insertId, { category: body.category, severity: body.severity, case: `${season}-${n}`, ...(body.client_ref ? { offline: true } : {}) });
-        return { id: r.insertId, case_number: `${season}-${String(n).padStart(4, '0')}`, status: 'open', report_state: 'draft' };
+        return { id: r.insertId, case_number: `${season}-${String(n).padStart(4, '0')}`, status: 'open', report_state: 'draft', patient_id: patientId };
       });
     } catch (err) {
       if (err.code === 'ER_DUP_ENTRY' && attempt < 4) continue;
@@ -306,9 +310,14 @@ async function loadCase(conn, tenantId, id) {
   for (const t of treatments) t.detail = parseDetail(t.detail);
   const mine = (list, pid) => list.filter((x) => x.patient_id === pid);
   const tenant = await one(conn, 'SELECT name, legal_name FROM tenants WHERE id = ?', [tenantId]);
+  // Photos without their bytes: a frozen version records each one's fingerprint, so the approved report names the exact files.
+  const photos = (await rows(conn, `SELECT m.id, m.patient_id, m.mime, m.bytes, m.sha256, m.caption, m.taken_at, m.taken_lat, m.taken_lng, m.uploaded_at, (m.preview IS NOT NULL) AS has_preview,
+      m.voided_at, m.void_reason, COALESCE(u.email, u.username) AS uploaded_by_name, COALESCE(vu.email, vu.username) AS voided_by_email
+    FROM incident_media m LEFT JOIN users u ON u.id = m.uploaded_by AND u.tenant_id = m.tenant_id ${VOIDED_BY('m')} WHERE m.tenant_id = ? AND m.incident_id = ? ORDER BY m.id`, [tenantId, id]))
+    .map((m) => ({ ...m, has_preview: Boolean(m.has_preview), taken_lat: m.taken_lat === null ? null : Number(m.taken_lat), taken_lng: m.taken_lng === null ? null : Number(m.taken_lng) }));
   const c = {
     ...withNumber(incident), form: parseForm(incident.form), resort: { name: tenant.name, legal_name: tenant.legal_name }, notes, events, responders, witnesses, signatures,
-    collision: collisionRow || null, parties, checklist, versions,
+    collision: collisionRow || null, parties, checklist, versions, photos,
     patients: patients.map((p) => ({ ...p, form: parseForm(p.form), vitals: mine(vitals, p.id), injuries: mine(injuries, p.id), treatments: mine(treatments, p.id) })),
   };
   for (const p of c.patients) p.derived = derive(c, p);

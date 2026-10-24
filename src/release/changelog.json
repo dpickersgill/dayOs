@@ -1,6 +1,63 @@
 {
   "releases": [
     {
+      "version": "2026.10.40",
+      "date": "2026-11-08",
+      "title": "Patrol field kit: case photos, cases started with no signal, locating a caller, readings in checks",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Photos on a case: added at full size and kept exactly as taken, with a fingerprint recorded when added. When and where come from the photo itself. Open one to Verify it is unchanged or download the original; a wrong one is marked entered in error, never deleted.",
+          "help": "patrol-photos"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Start a case with no signal: New case opens it on your phone straight away, with a patient to record on. Time stamps and bedside entries wait with it, and it all sends in order when the signal returns.",
+          "help": "patrol-offline"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Locate caller, on a call in Dispatch: we text the caller a link, and when they tap it their phone's position appears on the call with how accurate it is. The guest help page can send the guest's position with the request too.",
+          "help": "patrol-locate"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Gear checks ask for readings and dates: oxygen pressure, AED pads and battery, a trauma bag's earliest expiry. One outside its OK range or inside its warning fails the check and flags the item. Set the steps for each kind of gear under Gear, Equipment, Check steps."
+        },
+        {
+          "kind": "new",
+          "app": "assets",
+          "who": null,
+          "text": "Checklists can ask for a reading with its OK range (extinguisher pressure, battery volts) or a date that fails as it gets close. A reading outside the range fails the item by itself and opens a work order.",
+          "help": "assets-inspect"
+        },
+        {
+          "kind": "fixed",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "A case kept on the phone now also opens in a dead spot when the Patrol page itself has to be reloaded."
+        }
+      ]
+    },
+    {
       "version": "2026.10.39",
       "date": "2026-11-08",
       "title": "Demo emails from Dan",

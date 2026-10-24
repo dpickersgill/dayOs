@@ -3,7 +3,7 @@
 import { get, download } from '../api.js';
 import { setAccess, has } from './patrol-feat.js';
 import { drawLevels } from './patrol-levels.js';
-import { h, clear, input, select, field, button, toast, formDialog, tabs, val, num, nowInput, todayStr, addDays, label, errorBox } from '../ui.js';
+import { h, clear, input, select, field, button, toast, formDialog, tabs, val, num, nowInput, todayStr, addDays, label, errorBox, ctx } from '../ui.js';
 import { renderCase, CATEGORIES, SEVERITY, compact, flow } from './patrol-case.js';
 import { renderHandoff } from './patrol-handoff.js';
 import { renderCollisionReport } from './patrol-collision.js';
@@ -29,7 +29,7 @@ import { drawLog } from './patrol-log.js';
 import { drawAvy } from './patrol-avy.js';
 import { drawRecords, renderRelease } from './patrol-records.js';
 import { drawOpsSettings } from './patrol-settings.js';
-import { send as queue } from '../outbox.js';
+import { send as queue, keepCase, latestKept } from '../outbox.js';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -45,12 +45,17 @@ function connectionBanner() {
 const newCaseButton = () => !has('create_case') ? null : h('button', { type: 'button', class: 'fab', 'data-act': 'new-case', onclick: () => newCase() }, h('span', { 'aria-hidden': 'true' }, '+'), ' New case');
 
 const ONE = /^\d+$/;
+const CASE_ID = /^-?\d+$/; // a case started with no signal has a temporary negative id until it reaches the server
+// The last answers from the server, so a case can still be opened in a dead spot (the app itself is already loaded).
+let lastMe = null; let lastRoster = [];
 export async function render(root, params = []) {
-  const me = await get('/patrol/me');
+  let me;
+  try { me = await get('/patrol/me'); lastMe = me; } catch (err) { if (!lastMe || (err && err.status && err.status < 500)) throw err; me = lastMe; }
   setAccess(me);
   root.append(connectionBanner());
-  if (params[0] === 'case' && ONE.test(params[1] || '')) {
-    const { data: roster } = await get('/patrol/team');
+  if (params[0] === 'case' && CASE_ID.test(params[1] || '')) {
+    let roster = lastRoster;
+    try { roster = (await get('/patrol/team')).data; lastRoster = roster; } catch (_) { /* no signal: the roster last seen */ }
     await renderCase(root, Number(params[1]), { roster, me, mode: params[2] });
     return; // no floating New case button over a case: it covered the case's own buttons
   }
@@ -222,8 +227,28 @@ async function drawCases(box, { canAdmin } = {}) {
 }
 
 const PATIENT_TYPES = ['injury', 'collision', 'medical'];
+let lastTrails = [];
+/**
+ * A case started with no signal, as the case page needs it, kept (sealed) on this phone under its temporary id. The
+ * report form, trails and checklists come from the last case opened here, so the bedside card works the same.
+ */
+function startOffline(tmp, body, trailName) {
+  const prev = latestKept();
+  const p = body.patient;
+  const c = {
+    id: tmp, case_number: null, offline: true, status: 'open', report_state: 'draft', occurred_at: body.occurred_at.replace('T', ' '), location: body.location,
+    trail_id: body.trail_id || null, trail: trailName || null, category: body.category, severity: body.severity, summary: body.summary, narrative: null, disposition: null,
+    resort: prev && prev.c && prev.c.resort ? prev.c.resort : { name: ctx.me.tenant_name, legal_name: null },
+    form: {}, notes: [], events: [], responders: [], witnesses: [], signatures: [], collision: null, parties: [], checklist: [], versions: [], photos: [], review: null, check: [], story_fill: false,
+    patients: p ? [{ id: tmp - 1, incident_id: tmp, first_name: p.first_name || 'Unknown', last_name: p.last_name || 'Patient', age_years: p.age_years ?? null, chief_complaint: p.chief_complaint || null,
+      sex: 'unknown', allergies: null, form: {}, vitals: [], injuries: [], treatments: [], derived: {} }] : [],
+  };
+  keepCase(tmp, { c, def: prev ? prev.def : null, trails: prev ? prev.trails : lastTrails, checklists: prev ? prev.checklists : [] });
+}
+
 async function newCase() {
-  const { data: trails } = await get('/schedule/trails?limit=500');
+  let trails = lastTrails;
+  try { trails = (await get('/schedule/trails?limit=500')).data; lastTrails = trails; } catch (_) { /* no signal: the trails last seen */ }
   // Built for gloves and cold hands: big buttons for type and severity, trail first, and the spot only when it adds something.
   const segmented = (name, options, value, ariaLabel) => {
     const hidden = h('input', { type: 'hidden', name, value });
@@ -253,9 +278,19 @@ async function newCase() {
     const patient = compact({ first_name: val(fd, 'p_first'), last_name: val(fd, 'p_last'), age_years: num(fd, 'p_age') ?? undefined, chief_complaint: val(fd, 'p_complaint') });
     const body = compact({ occurred_at: val(fd, 'occurred_at'), location: spot, trail_id: val(fd, 'trail_id') ? Number(val(fd, 'trail_id')) : null, category: cat, severity: val(fd, 'severity'),
       summary: val(fd, 'summary') || patient.chief_complaint || `${label(cat)} at ${spot}`, patient: Object.keys(patient).length ? patient : undefined });
-    // No signal: the case waits on this phone and is made when the signal returns (the phone's id stops it being made twice).
-    const c = await queue('POST', '/patrol/incidents', body, { caseId: 0, label: `New case at ${spot}` });
-    if (c.queued) { toast('No signal: the case is saved on this phone and will be sent when the signal returns. Keep notes and add it in when it appears.', 'warn'); return; }
+    // No signal: the case is started on this phone with a temporary id and opens straight away, so time stamps and
+    // bedside entries can be added at once. Everything waits, in order, and is sent when the signal returns; the case
+    // then gets its real number and the page moves to it. The phone's id stops it being made twice.
+    const tmp = -(Date.now() % 2000000000);
+    // Offline, a patient record is made with the case (a placeholder name if none was given) so vitals can go on it at once.
+    const offlineBody = PATIENT_TYPES.includes(cat) && !body.patient ? { ...body, patient: { first_name: 'Unknown', last_name: 'Patient' } } : body;
+    const c = await queue('POST', '/patrol/incidents', body, { caseId: tmp, label: `New case at ${spot}`, offlineBody, temp: { caseId: tmp, patientId: offlineBody.patient ? tmp - 1 : null } });
+    if (c.queued) {
+      startOffline(tmp, offlineBody, trailName);
+      toast('No signal: the case is started on this phone. Keep working; it is sent with everything you add when the signal returns.', 'warn');
+      location.hash = `#/patrol/case/${tmp}/care`;
+      return;
+    }
     toast(`Case ${c.case_number} started`);
     flow.addPatient = PATIENT_TYPES.includes(cat) && !body.patient;
     flow.vitalsNext = PATIENT_TYPES.includes(cat);
