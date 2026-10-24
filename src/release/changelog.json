@@ -1,6 +1,19 @@
 {
   "releases": [
     {
+      "version": "2026.10.46",
+      "date": "2026-11-08",
+      "title": "The ski area copy goes into the server image",
+      "notes": [
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": "platform",
+          "text": "The server image now includes the data folder, so the demo page uses our own copy of the US ski areas instead of the busy public map servers. If the copy is missing, that is logged once."
+        }
+      ]
+    },
+    {
       "version": "2026.10.45",
       "date": "2026-11-08",
       "title": "Demo mountains from our own copy of the ski area map",

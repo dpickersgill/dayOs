@@ -7,6 +7,8 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY src ./src
 COPY db ./db
 COPY public ./public
+# Our own copy of the US ski areas for demos (made by scripts/ski-areas-build.js; the demo page falls back without it)
+COPY data ./data
 USER node
 EXPOSE 8080
 CMD ["node", "src/server.js"]

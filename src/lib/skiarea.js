@@ -249,7 +249,7 @@ function ownCopy() {
     const byState = {};
     for (const a of d.areas) (byState[a.state] = byState[a.state] || []).push(a);
     bundle = { builtAt: d.built_at, credit: d.credit, byState, byRef: new Map(d.areas.map((a) => [a.ref, a])) };
-  } catch (_) { bundle = null; }
+  } catch (e) { bundle = null; logFailure({ job: 'ski_area_copy', message: `No ski area copy at ${file}: ${e.code || e.message}. The demo page uses the live map lookup instead.` }); }
   return bundle;
 }
 const pts = (line) => (line || []).map((p) => ({ lat: p[0], lon: p[1] }));
