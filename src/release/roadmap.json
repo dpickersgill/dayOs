@@ -1,11 +1,16 @@
 {
-  "updated": "2026-10-24",
+  "updated": "2026-10-25",
   "stages": [
     {
       "key": "now",
       "label": "Building now",
       "when": null,
       "items": [
+        {
+          "app": "patrol",
+          "title": "Patrol reports your director sets the rules for",
+          "text": "Your patrol director chooses which questions must be answered before a report is submitted or approved, and when (for example only for transports, collisions or minors). A short checklist before the patient leaves makes sure contact details, signatures and witness names are taken while they still can be, with a reason recorded if they cannot. Start from a ready-made set, such as the NSAA standard, and adjust it."
+        },
         {
           "app": "sell",
           "title": "Keep selling when the internet drops",
@@ -32,6 +37,11 @@
           "app": "patrol",
           "title": "Staff injury records for the owner",
           "text": "Patrol already marks a patient as staff and the owner is told. Next: a private record for the owner or GM, including injuries patrol never sees, with the OSHA log and yearly summary, a first report for your workers' comp insurer to print or email, your state's deadline, a heads-up to the person's manager, and a reminder each February to post the summary."
+        },
+        {
+          "app": "patrol",
+          "title": "Conditions and calls on every patrol report",
+          "text": "Each report keeps the trail's status, grooming, snow and weather at the time of the incident, and a timed log of who was told: management, your insurer, a parent or guardian."
         },
         {
           "app": "shop",
@@ -75,6 +85,11 @@
       "label": "Later",
       "when": null,
       "items": [
+        {
+          "app": "patrol",
+          "title": "Rental gear and lifts linked to patrol reports",
+          "text": "When rental gear was involved, the report shows the rental, its binding setting and the technician, and the gear is held until it is inspected. When a lift was involved, that day's inspection is attached."
+        },
         {
           "app": "conditions",
           "title": "Snowmaking log",
