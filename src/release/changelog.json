@@ -2,7 +2,7 @@
   "releases": [
     {
       "version": "2026.10.47",
-      "date": "2026-11-08",
+      "date": "2026-10-25",
       "title": "Starting a case with no signal, fixed",
       "notes": [
         {
@@ -26,7 +26,7 @@
     },
     {
       "version": "2026.10.46",
-      "date": "2026-11-08",
+      "date": "2026-10-25",
       "title": "The ski area copy goes into the server image",
       "notes": [
         {
@@ -39,7 +39,7 @@
     },
     {
       "version": "2026.10.45",
-      "date": "2026-11-08",
+      "date": "2026-10-25",
       "title": "Demo mountains from our own copy of the ski area map",
       "notes": [
         {
@@ -52,7 +52,7 @@
     },
     {
       "version": "2026.10.44",
-      "date": "2026-11-08",
+      "date": "2026-10-25",
       "title": "Demo map lookup: more servers, and the reason when it fails",
       "notes": [
         {
@@ -65,7 +65,7 @@
     },
     {
       "version": "2026.10.43",
-      "date": "2026-11-08",
+      "date": "2026-10-25",
       "title": "Demos built on the visitor's own mountain",
       "notes": [
         {
@@ -78,7 +78,7 @@
     },
     {
       "version": "2026.10.42",
-      "date": "2026-11-08",
+      "date": "2026-10-25",
       "title": "Sign in with a code from your email, and Forgot password?",
       "notes": [
         {
@@ -105,7 +105,7 @@
     },
     {
       "version": "2026.10.41",
-      "date": "2026-11-08",
+      "date": "2026-10-25",
       "title": "Staff injuries, first step: who the patient is, and the owner is told",
       "notes": [
         {
@@ -140,7 +140,7 @@
     },
     {
       "version": "2026.10.40",
-      "date": "2026-11-08",
+      "date": "2026-10-25",
       "title": "Patrol field kit: case photos, cases started with no signal, locating a caller, readings in checks",
       "notes": [
         {
@@ -197,7 +197,7 @@
     },
     {
       "version": "2026.10.39",
-      "date": "2026-11-08",
+      "date": "2026-10-25",
       "title": "Demo emails from Dan",
       "notes": [
         {
@@ -228,7 +228,7 @@
     },
     {
       "version": "2026.10.38",
-      "date": "2026-11-08",
+      "date": "2026-10-25",
       "title": "Fixes: the park map list, clearer assistant errors",
       "notes": [
         {
@@ -253,7 +253,7 @@
     },
     {
       "version": "2026.10.37",
-      "date": "2026-11-08",
+      "date": "2026-10-25",
       "title": "The assistant: ask how to do anything, and Assistant Plus",
       "notes": [
         {
@@ -308,7 +308,7 @@
     },
     {
       "version": "2026.10.36",
-      "date": "2026-11-01",
+      "date": "2026-10-25",
       "title": "Best-of-breed programs: your own types, season pass pricing, a family page",
       "notes": [
         {
@@ -368,7 +368,7 @@
     },
     {
       "version": "2026.10.35",
-      "date": "2026-11-01",
+      "date": "2026-10-25",
       "title": "Lesson programs in sessions: pick a weekday, makeup weeks for weather, online registration",
       "notes": [
         {
