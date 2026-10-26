@@ -61,7 +61,7 @@ async function checkMedication(conn, t, patient, data, latestVitals) {
   const detail = data.detail || {};
   const list = await formularyOf(conn, t);
   const drug = list.find((f) => norm(f.name) === norm(data.medication));
-  if (!drug || !drug.active) throw conflict(`${data.medication} is not on this patrol's formulary. The medical director adds medications on Patrol, Team, Medications.`);
+  if (!drug || !drug.active) throw conflict(`${data.medication} is not on this patrol's formulary. The medical director adds medications on Patrol, Gear, Medications.`);
   if (data.route && drug.routes.length && !drug.routes.includes(data.route)) throw conflict(`${drug.name} is given ${drug.routes.join(' or ')} here, not ${data.route}.`);
   if (drug.max_dose !== null && detail.dose_unit && drug.dose_unit && detail.dose_unit === drug.dose_unit && Number(detail.dose_value) > drug.max_dose) {
     throw conflict(`${drug.name}: ${detail.dose_value} ${detail.dose_unit} is more than the formulary's single dose of ${drug.max_dose} ${drug.dose_unit}.`);

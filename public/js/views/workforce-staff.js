@@ -116,7 +116,7 @@ export async function personPage(root, id) {
             : h('p', { class: 'muted' }, p.employee ? 'No login. Without one they use the time clock kiosk and do not get schedule messages.' : 'No login. A volunteer patroller needs one to write cases and see the patrol schedule.')),
         card('Ski patrol', p.patrol ? h('div', { class: 'row' }, h('a', { class: 'btn small', href: '#/patrol/team' }, 'Open in Patrol'), button('Take off patrol', () => offPatrol(p, draw), { small: true, kind: 'danger' })) : button('Put on ski patrol', () => onPatrol(p, draw), { small: true }),
           p.patrol ? [h('p', null, h('b', null, label(p.patrol.level)), p.patrol.callsign ? `, call sign ${p.patrol.callsign}` : '', p.patrol.patrol_number ? `, patrol number ${p.patrol.patrol_number}` : '', '.'),
-            h('p', { class: 'muted small' }, `Patrol access: ${label(p.patrol.access_level || 'patrol')}${Number(p.patrol.exceptions) ? `, with ${p.patrol.exceptions} exception${Number(p.patrol.exceptions) === 1 ? '' : 's'}` : ''}. ${isManager() ? 'Change it with Edit details, or single permissions in Patrol, Team.' : 'A patrol Admin sets access and permissions in Patrol, Team.'}`),
+            h('p', { class: 'muted small' }, `Patrol access: ${label(p.patrol.access_level || 'patrol')}${Number(p.patrol.exceptions) ? `, with ${p.patrol.exceptions} exception${Number(p.patrol.exceptions) === 1 ? '' : 's'}` : ''}. ${isManager() ? 'Change it with Edit details, or single permissions in Patrol, People, Roster.' : 'A patrol Admin sets access and permissions in Patrol, People, Roster.'}`),
             p.login ? null : h('p', { class: 'muted small' }, 'They need a login to open Patrol. Create one under Sign-in.')]
             : h('p', { class: 'muted' }, 'Not on ski patrol. Putting them on adds them to the patrol roster and lets them open Patrol with their login.')),
         card('Ski school', null, h('ul', { class: 'plain-list' },
@@ -134,7 +134,7 @@ function editDetails(p, done) {
     field('Paid or volunteer', select([['employee', 'Employee (paid)'], ['volunteer', 'Volunteer']], p.employee ? 'employee' : 'volunteer', { name: 'kind' })),
     // On ski patrol: their rank, and (owners and managers, who are patrol Admins) their patrol access level
     p.patrol ? field('Patrol rank', select(RANKS, p.patrol.level, { name: 'rank' })) : null,
-    p.patrol && isManager() ? field('Patrol access', select(PATROL_ACCESS, p.patrol.access_level || 'patrol', { name: 'access' }), 'What they can do in Patrol. Single permissions are set in Patrol, Team, Permissions.') : null), async (fd) => {
+    p.patrol && isManager() ? field('Patrol access', select(PATROL_ACCESS, p.patrol.access_level || 'patrol', { name: 'access' }), 'What they can do in Patrol. Single permissions are set in Patrol, People, Roster, Permissions.') : null), async (fd) => {
     const v = (k) => String(fd.get(k) || '').trim();
     await patch(`/workforce/staff/${p.id}`, { first_name: v('first_name'), last_name: v('last_name'), email: v('email') || null, phone: v('phone') || null, hired_on: v('hired_on') || null, employee: fd.get('kind') !== 'volunteer' });
     if (p.patrol && v('rank') && v('rank') !== p.patrol.level) await patch(`/patrol/team/${p.id}`, { level: v('rank') });

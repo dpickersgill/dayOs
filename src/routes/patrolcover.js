@@ -167,7 +167,7 @@ router.post('/cover', patrol, validate(z.object({ patrol_shift_id: z.number().in
     const [r] = await conn.query('INSERT INTO patrol_cover_requests (tenant_id, patrol_shift_id, staff_id, reason, created_by) VALUES (?, ?, ?, ?, ?)', [t, s.id, s.staff_id, req.body.reason || null, req.auth.userId]);
     await audit(conn, req, 'request_cover', 'patrol_cover_requests', r.insertId, { patrol_shift_id: Number(s.id) });
     const row = await requestOf(conn, t, r.insertId);
-    await announce(conn, t, req.auth.userId, `Cover needed: ${when(row)}, for ${row.name}.${row.reason ? ` "${row.reason}"` : ''}\nOpen Patrol, Team, Cover to take it.`);
+    await announce(conn, t, req.auth.userId, `Cover needed: ${when(row)}, for ${row.name}.${row.reason ? ` "${row.reason}"` : ''}\nOpen Patrol, People, Shift cover to take it.`);
     if (!mine) await SH.tell(conn, t, req.auth.userId, Number(s.staff_id), `Cover has been asked for on your patrol shift ${when(row)}. You stay on it until someone takes it.`);
     return { id: r.insertId, status: 'open' };
   });
@@ -216,7 +216,7 @@ router.post('/cover/:id/take', patrol, async (req, res) => {
     const approvers = (await schedulers(conn, t)).filter((u) => u !== req.auth.userId);
     PUSH.notifyUsers(t, approvers, { title: 'Shift cover to approve', body: `${row.taken_by_name} offered to cover ${row.name}, ${when(row)}.`, url: '#/patrol/cover', tag: `cover-${r.id}` });
     await tellUsers(conn, t, req.auth.userId, approvers,
-      `Shift cover to approve: ${row.taken_by_name} offered to cover ${row.name}'s patrol shift ${when(row)}. Approve or decline it in Patrol, Team, Cover.`);
+      `Shift cover to approve: ${row.taken_by_name} offered to cover ${row.name}'s patrol shift ${when(row)}. Approve or decline it in Patrol, People, Shift cover.`);
     return { status: 'pending' };
   });
   res.json(out);
@@ -288,13 +288,13 @@ router.post('/cover/open/:shiftId/take', patrol, async (req, res) => {
     if (String(s.starts_at) <= nowIn(await tzOf(conn, t))) throw conflict('This shift has already started');
     const problems = await problemsFor(conn, t, me, s.starts_at, s.ends_at, Number(s.id));
     if (problems.length) throw conflict('You cannot take this shift', problems);
-    // With sign-up approval on, the spot stays open until a schedule builder approves (Patrol, Team, Schedule).
+    // With sign-up approval on, the spot stays open until a schedule builder approves (Patrol, People, Schedule).
     if (ops.signup_approval) {
       if (await one(conn, "SELECT id FROM patrol_signups WHERE tenant_id = ? AND patrol_shift_id = ? AND staff_id = ? AND status = 'pending'", [t, s.id, me])) throw conflict('You have already asked for this shift');
       const [r] = await conn.query("INSERT INTO patrol_signups (tenant_id, patrol_shift_id, staff_id, status) VALUES (?, ?, ?, 'pending')", [t, s.id, me]);
       await audit(conn, req, 'signup_request', 'patrol_shifts', s.id);
       const who = await one(conn, `SELECT ${NAME} AS name FROM staff s JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE s.tenant_id = ? AND s.id = ?`, [t, me]);
-      await tellUsers(conn, t, req.auth.userId, (await schedulers(conn, t)).filter((u) => u !== Number(req.auth.userId)), `${who.name} asked for the open patrol shift ${when(s)}. Approve or decline it on Patrol, Team, Schedule.`);
+      await tellUsers(conn, t, req.auth.userId, (await schedulers(conn, t)).filter((u) => u !== Number(req.auth.userId)), `${who.name} asked for the open patrol shift ${when(s)}. Approve or decline it on Patrol, People, Schedule.`);
       return { ok: true, status: 'pending', signup_id: r.insertId };
     }
     await conn.query('UPDATE patrol_shifts SET staff_id = ? WHERE tenant_id = ? AND id = ?', [me, t, s.id]);

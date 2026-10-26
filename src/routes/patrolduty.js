@@ -205,7 +205,7 @@ async function remindAll() {
     for (const m of members) {
       const target = OPS.targetFor(st, m); const n = (days.get(Number(m.staff_id)) || new Set()).size;
       if (!target || n >= target) continue;
-      if (await SH.tell(pool, t, Number(from.id), Number(m.staff_id), `Patrol days this season: you have ${n} of the ${target} the patrol asks for. Open shifts and cover requests are on Patrol, Team, Cover.`)) sent += 1;
+      if (await SH.tell(pool, t, Number(from.id), Number(m.staff_id), `Patrol days this season: you have ${n} of the ${target} the patrol asks for. Open shifts and cover requests are on Patrol, People, Shift cover.`)) sent += 1;
     }
   }
   return sent;

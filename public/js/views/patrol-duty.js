@@ -47,7 +47,7 @@ export async function drawDuty(box) {
       const pct = Math.min(100, Math.round((c.me.days / c.me.target) * 100));
       parts.push(h('section', { class: 'panel' }, h('div', { class: 'spread' }, h('h3', null, `Your days this season: ${c.me.days} of ${c.me.target}`), state(c.me.short ? `${c.me.short} to go` : 'Done', c.me.short ? 'warn' : 'good')),
         h('div', { class: 'meter-bar', role: 'img', 'aria-label': `${pct}% of the days the patrol asks for` }, h('span', { style: `width:${pct}%` })),
-        h('p', { class: 'muted small' }, c.self_signup ? 'Open shifts you can take are on Team, Cover.' : 'Ask whoever builds the schedule for more shifts, or take a cover request on Team, Cover.')));
+        h('p', { class: 'muted small' }, c.self_signup ? 'Open shifts you can take are on People, Shift cover.' : 'Ask whoever builds the schedule for more shifts, or take a cover request on People, Shift cover.')));
     }
     // ---- alerts
     parts.push(await alertsPanel());

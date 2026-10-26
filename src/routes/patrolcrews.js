@@ -332,7 +332,7 @@ router.get('/crews/coverage', patrol, async (req, res) => {
 
 /**
  * The storm-day call: add extra open spots to a crew's day (published at once) and message everyone on the roster who is
- * free that day and not already on it. They sign up on Team, Cover as for any open shift.
+ * free that day and not already on it. They sign up on People, Shift cover as for any open shift.
  */
 router.post('/crews/call', patrol, editor, validate(z.object({ crew_id: z.number().int().positive(), date: dateStr, extra: z.number().int().min(1).max(20), note: z.string().trim().max(200).nullable().optional() })), async (req, res) => {
   const t = req.auth.tenantId;
@@ -347,7 +347,7 @@ router.post('/crews/call', patrol, editor, validate(z.object({ crew_id: z.number
     }
     const roster = await rows(conn, "SELECT m.staff_id FROM patrol_members m JOIN staff s ON s.tenant_id = m.tenant_id AND s.id = m.staff_id WHERE m.tenant_id = ? AND s.status = 'active'", [t]);
     const ops = await OPS.settingsOf(conn, t);
-    const how = ops.self_signup ? 'Sign up on Patrol, Team, Cover.' : 'Reply here or tell whoever builds the schedule.';
+    const how = ops.self_signup ? 'Sign up on Patrol, People, Shift cover.' : 'Reply here or tell whoever builds the schedule.';
     const text = `Extra patrollers needed: ${crew.name}, ${C.DAY_LABEL[C.dayOf(b.date)]} ${b.date.slice(5).replace('-', '/')}, ${span(s, e)}. ${b.extra} more spot${b.extra === 1 ? '' : 's'}.${b.note ? ` ${b.note}` : ''} ${how}`;
     let told = 0;
     for (const r of roster) {
@@ -383,7 +383,7 @@ router.post('/signups/:id/approve', patrol, editor, async (req, res) => {
     const others = await rows(conn, "SELECT id, staff_id FROM patrol_signups WHERE tenant_id = ? AND patrol_shift_id = ? AND status = 'pending' AND id <> ?", [t, s.id, su.id]);
     for (const o of others) {
       await conn.query("UPDATE patrol_signups SET status = 'declined', decided_by = ?, decided_at = UTC_TIMESTAMP(), note = 'Filled by someone else' WHERE tenant_id = ? AND id = ?", [req.auth.userId, t, o.id]);
-      await SH.tell(conn, t, req.auth.userId, Number(o.staff_id), `The patrol shift ${when(s)} you asked for went to someone else. Other open shifts are on Patrol, Team, Cover.`);
+      await SH.tell(conn, t, req.auth.userId, Number(o.staff_id), `The patrol shift ${when(s)} you asked for went to someone else. Other open shifts are on Patrol, People, Shift cover.`);
     }
     await audit(conn, req, 'signup_approve', 'patrol_shifts', s.id, { staff_id: Number(su.staff_id) });
     return { ok: true };
@@ -437,9 +437,9 @@ async function shortAlertAll({ force = null, today: on = null } = {}) {
     const line = (d) => `- ${C.DAY_LABEL[C.dayOf(d.date)]} ${d.crew}: ${d.filled} of ${d.target}${d.filled < d.minimum ? ` (below the ${d.minimum} it can run with)` : ''}${d.missing.length ? `, no ${d.missing.join(', no ')}` : ''}${d.published ? '' : ', not published yet'}`;
     const conn = await pool.getConnection();
     try {
-      await cover().tellUsers(conn, t, Number(from.id), await cover().schedulers(conn, t), `This weekend's patrol is short:\n${short.map(line).join('\n')}\nSee Patrol, Team, Schedule.`);
+      await cover().tellUsers(conn, t, Number(from.id), await cover().schedulers(conn, t), `This weekend's patrol is short:\n${short.map(line).join('\n')}\nSee Patrol, People, Schedule.`);
       const open = short.filter((d) => d.published && d.open);
-      if (open.length && st.self_signup) await cover().announce(conn, t, Number(from.id), `Open patrol spots this weekend:\n${open.map((d) => `- ${C.DAY_LABEL[C.dayOf(d.date)]} ${d.crew}: ${d.open} open`).join('\n')}\nSign up on Patrol, Team, Cover.`);
+      if (open.length && st.self_signup) await cover().announce(conn, t, Number(from.id), `Open patrol spots this weekend:\n${open.map((d) => `- ${C.DAY_LABEL[C.dayOf(d.date)]} ${d.crew}: ${d.open} open`).join('\n')}\nSign up on Patrol, People, Shift cover.`);
       sent += 1;
     } finally { conn.release(); }
   }
