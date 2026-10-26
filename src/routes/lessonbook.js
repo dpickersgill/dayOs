@@ -202,7 +202,7 @@ router.post('/:slug/requests/:ref/cancel', validate(z.object({ email: z.string()
       // Free to cancel if nobody has paid yet and the lesson is far enough away; otherwise the school sorts it out.
       const paid = await one(conn, "SELECT COUNT(*) AS n FROM lesson_bookings WHERE tenant_id = ? AND request_id = ? AND status <> 'cancelled' AND unpaid = 0", [t.id, r.id]);
       if (Number(paid.n) > 0) throw conflict(`This lesson is already paid for. Please call the ski school${t.phone ? ` on ${t.phone}` : ''} to change it.`);
-      if (r.starts_at < inHours(t.timezone, t.cancel_hours)) throw conflict(`Lessons can be cancelled online up to ${t.cancel_hours} hours before they start. Please call the ski school${t.phone ? ` on ${t.phone}` : ''}.`);
+      if (r.starts_at < inHours(t.timezone, t.cancel_hours)) throw conflict(`Lessons can be canceled online up to ${t.cancel_hours} hours before they start. Please call the ski school${t.phone ? ` on ${t.phone}` : ''}.`);
       await conn.query("UPDATE lesson_bookings SET status = 'cancelled' WHERE tenant_id = ? AND request_id = ? AND status = 'booked' AND unpaid = 1", [t.id, r.id]);
       await conn.query("UPDATE lesson_requests SET status = 'cancelled', decided_at = NOW() WHERE tenant_id = ? AND id = ?", [t.id, r.id]);
     } else {
@@ -210,7 +210,7 @@ router.post('/:slug/requests/:ref/cancel', validate(z.object({ email: z.string()
     }
   });
   // The refund is already written down as owed; if Stripe cannot be reached now it is retried, so the guest is not left
-  // with an error after their lesson was cancelled.
+  // with an error after their lesson was canceled.
   if (refundInfo && refundInfo.refundId) await cardrefund.send(t.id, refundInfo.refundId);
   res.json({ ok: true, refund_cents: refundInfo ? refundInfo.cents : 0, refund_percent: refundInfo ? refundInfo.percent : 0 });
 });
@@ -294,7 +294,7 @@ async function handleWebhook(event, base) {
     failed = err.message; result = { problem: true }; // rolled back: nothing half-made is kept
   }
   if (failed) {
-    // We could not honour it (lesson full or cancelled, or the amount was wrong): give the money back in full. The refund
+    // We could not honor it (lesson full or canceled, or the amount was wrong): give the money back in full. The refund
     // goes first; if Stripe cannot be reached this throws, Stripe sends the event again, and we try again.
     if (obj.payment_intent && stripe.enabled()) await stripe.refund({ paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), key: `autorefund-${tenantId}-${requestId}`, account: event.account || null });
     await pool.query("UPDATE lesson_requests SET status = 'expired', payment_intent = ?, refund_cents = amount_cents, staff_note = ? WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment'", [obj.payment_intent, `Refunded automatically: ${failed}`.slice(0, 300), tenantId, requestId]);

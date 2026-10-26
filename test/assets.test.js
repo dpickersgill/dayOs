@@ -239,7 +239,7 @@ test('review fixes: no price leaks, a plan marked once per order, returns at iss
   ok(await api('POST', `/assets/work-orders/${D.brakeWo}/parts`, { token: s, body: { part_id: bolt, qty: -1 } }));
   const c = ok(await api('GET', `/assets/work-orders/${D.brakeWo}/costs`, { token: s }));
   assert.equal(c.parts.find((p) => p.part_id === bolt).cost, 1000);
-  // parts come back off a cancelled order, but nothing new goes on it
+  // parts come back off a canceled order, but nothing new goes on it
   ok(await api('POST', `/ops/work-orders/${D.brakeWo}/status`, { token: o, body: { status: 'cancelled' } }));
   ok(await api('POST', `/assets/work-orders/${D.brakeWo}/parts`, { token: s, body: { part_id: bolt, qty: -1 } }));
   is(await api('POST', `/assets/work-orders/${D.brakeWo}/parts`, { token: s, body: { part_id: bolt, qty: 1 } }), 409);

@@ -122,7 +122,7 @@ async function notifyChange(conn, tenantId, fromUser, before, after) {
   if (before.status !== 'published') return;
   const was = before.staff_id ? Number(before.staff_id) : null;
   const now = after && after.status !== 'cancelled' && after.staff_id ? Number(after.staff_id) : null;
-  if (!after || after.status === 'cancelled') { if (was) await tell(conn, tenantId, fromUser, was, `Your shift ${describe(before)} is cancelled.`); return; }
+  if (!after || after.status === 'cancelled') { if (was) await tell(conn, tenantId, fromUser, was, `Your shift ${describe(before)} is canceled.`); return; }
   if (was && was !== now) await tell(conn, tenantId, fromUser, was, `You are no longer on ${describe(before)}.`);
   if (now && was !== now) await tell(conn, tenantId, fromUser, now, `You have a new shift: ${describe(after)}.${after.notes ? ` Note: ${after.notes}` : ''}`);
   if (now && was === now && (before.starts_at !== after.starts_at || before.ends_at !== after.ends_at || before.position !== after.position)) {

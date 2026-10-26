@@ -3,7 +3,7 @@
 // Program sessions: a program (After-School Ski & Ride) runs as sessions through the season (Session 1, Session 2).
 // A session meets once a week for a number of weeks, on one or more weekdays; each weekday is its own group with its own
 // spots, and the parent picks the day. After the regular weeks come makeup weeks, held in reserve ("standby"): when a
-// day's meeting is cancelled for weather, that group's first standby date becomes a real lesson.
+// day's meeting is canceled for weather, that group's first standby date becomes a real lesson.
 //
 // Prices: the session price, or a day's own price, with optional price steps by date (early bird, regular, late), and an
 // optional sibling discount on the second and later child in the same program. Bundles sell several sessions at once.
@@ -203,7 +203,7 @@ async function stretchTickets(conn, tenantId, groupId) {
 async function cancelMeeting(conn, tenantId, meetingId, reason) {
   const m = await one(conn, 'SELECT s.*, t.weeks, t.price_cents AS term_price FROM program_sessions s LEFT JOIN program_terms t ON t.tenant_id = s.tenant_id AND t.id = s.term_id WHERE s.tenant_id = ? AND s.id = ? FOR UPDATE', [tenantId, meetingId]);
   if (!m) throw notFound('Lesson date');
-  if (m.status === 'cancelled') throw conflict('That date is already cancelled');
+  if (m.status === 'cancelled') throw conflict('That date is already canceled');
   if (m.status === 'standby') throw conflict('That is a makeup date that is not in use. There is nothing to cancel.');
   await conn.query("UPDATE program_sessions SET status = 'cancelled', cancel_reason = ?, cancelled_at = NOW() WHERE tenant_id = ? AND id = ?", [reason, tenantId, meetingId]);
   let makeup = null;
@@ -245,7 +245,7 @@ async function notifyCancel(conn, tenantId, out, reason) {
     const text = [`Hi ${f.to_first},`, '', `${pg.name} on ${longDay(out.date)} is cancelled${reason ? ` (${reason})` : ''}.`, '',
       out.makeup ? `The makeup lesson for ${kids.join(' and ')} is ${longDay(out.makeup.date)}, same time and place.` : 'We will be in touch about a makeup lesson or a credit.',
       '', t.phone ? `Questions? Call ${t.phone}.` : '', t.name].join('\n');
-    const r = await mailer.send({ tenantId, to: f.email, fromName: t.name, subject: `${pg.name}: ${longDay(out.date)} is cancelled`, text, tag: 'program-cancelled' }).catch(() => ({ ok: false }));
+    const r = await mailer.send({ tenantId, to: f.email, fromName: t.name, subject: `${pg.name}: ${longDay(out.date)} is canceled`, text, tag: 'program-cancelled' }).catch(() => ({ ok: false }));
     if (r.ok) sent += 1;
   }
   return sent;

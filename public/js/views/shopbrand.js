@@ -34,7 +34,7 @@ export async function brandPanel() {
   draw();
   return h('section', { class: 'section stack', 'data-section': 'shop-look' },
     h('h2', null, 'Look of the online shop'),
-    h('label', { class: 'check' }, useColor, ' Use our brand colour for buttons and highlights'), field('Brand colour', color, 'Must be dark enough for white text.'),
+    h('label', { class: 'check' }, useColor, ' Use our brand color for buttons and highlights'), field('Brand color', color, 'Must be dark enough for white text.'),
     field('Logo', pick('logo'), 'A PNG with a clear background works best.'), logoBox,
     field('Hero photo', pick('hero'), 'A wide photo of the mountain. It sits behind the mountain name.'), heroBox,
     h('div', { class: 'form' }, field('Opening day (shows a banner until this day)', open), field('Banner note', note)),

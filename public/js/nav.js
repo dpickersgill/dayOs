@@ -3,9 +3,9 @@
 import { h, clear, ctx, label, isManager } from './ui.js';
 import { icon } from './icons.js';
 
-// Menu groups: label, colour key, pages. Today stands alone at the top. Each group has its own accent, used on the menu, the page title and the tabs.
+// Menu groups: label, color key, pages. Today stands alone at the top. Each group has its own accent, used on the menu, the page title and the tabs.
 const GROUPS = [
-  ['Front desk', 'front', ['sell', 'gate', 'shop', 'rentals', 'people', 'waivers']],
+  ['Front desk', 'front', ['sell', 'gate', 'shop', 'rentals', 'people', 'waivers', 'lostfound']],
   ['Mountain', 'mountain', ['conditions', 'park', 'assets']],
   ['Safety', 'safety', ['patrol', 'area']],
   ['Programs', 'programs', ['school', 'programs', 'availability']],
@@ -27,6 +27,7 @@ const ALSO = {
   documents: 'files forms policies manuals handbook pdf upload library repository',
   assets: 'fleet vehicles trucks groomers equipment maintenance parts inventory stock purchase orders vendors fuel inspection qr tag registration insurance warranty depreciation',
   waivers: 'waiver release liability sign signature signed guardian minor consent form',
+  lostfound: 'lost found missing handed in phone wallet keys gloves goggles claim return guest services',
   myshifts: 'my schedule clock in out', settings: 'account password security two-step sign out',
   billing: 'subscription plan pay payment invoice card bank ach trial renew upgrade receipt summitops',
   help: 'how to guide instructions support questions articles',

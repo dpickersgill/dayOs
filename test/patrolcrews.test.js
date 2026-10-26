@@ -66,7 +66,8 @@ test('the rules: days, spots, who fits a role, coverage and no-shows', () => {
   assert.equal(C.isNoShow(s, '2026-12-05 08:14:00', false), false);
   assert.equal(C.isNoShow(s, '2026-12-05 08:15:00', false), true);
   assert.equal(C.isNoShow(s, '2026-12-05 09:00:00', true), false);
-  assert.equal(C.summary(crew), 'Sat, Sun, 08:00 to 16:30');
+  assert.equal(C.summary(crew), 'Sat, Sun, 8:00 AM to 4:30 PM');
+  assert.equal(C.clock12('00:15'), '12:15 AM'); assert.equal(C.clock12('12:00:00'), '12:00 PM');
 });
 
 test.before(async () => {

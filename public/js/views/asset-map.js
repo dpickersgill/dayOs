@@ -1,5 +1,5 @@
 // Assets and fleet, Map: what lies where on the mountain. Points (valves, hydrants, pumps), lines (water, air and
-// power lines) and areas (ponds, buildings), each in its system's colour and switched on and off as a layer. The crew
+// power lines) and areas (ponds, buildings), each in its system's color and switched on and off as a layer. The crew
 // adds them from the snow with the phone's GPS, or by tapping the map; a line can be recorded by walking it.
 // Deep links: #/assets/map/f<id> opens one item; #/assets/map/a<assetId> shows an asset's items, or starts putting it on.
 
@@ -18,7 +18,7 @@ const GEO_WORD = { point: 'point', line: 'line', area: 'area' };
 // The asset register's kinds that have a natural map kind, for "put this asset on the map".
 const FROM_ASSET = { pump: 'pump', snow_gun: 'hydrant', generator: 'other_point', electrical: 'panel', building: 'structure', boiler: 'structure', hvac: 'structure' };
 
-/** Distance in metres between two [lat, lng]. */
+/** Distance in meters between two [lat, lng]. */
 function dist(a, b) {
   const r = (d) => (d * Math.PI) / 180;
   const s = Math.sin(r(b[0] - a[0]) / 2) ** 2 + Math.cos(r(a[0])) * Math.cos(r(b[0])) * Math.sin(r(b[1] - a[1]) / 2) ** 2;
@@ -31,7 +31,7 @@ export async function drawMap(box, deep = '') {
   try { [L, cfg] = await Promise.all([loadLeaflet(), get('/assets/map')]); } catch (err) { clear(box).append(errorBox(err)); return; }
   const sys = Object.fromEntries(cfg.systems.map((s) => [s.key, s]));
   const kindOf = (k) => cfg.kinds.find((x) => x.key === k) || { key: k, label: label(k), geometry: 'point', system: 'other' };
-  const colour = (f) => (sys[f.system] || sys.other).color;
+  const color = (f) => (sys[f.system] || sys.other).color;
   const shown = new Set(cfg.systems.map((s) => s.key));
   let features = cfg.features;
   const drawn = new Map(); // id -> leaflet layer
@@ -63,8 +63,8 @@ export async function drawMap(box, deep = '') {
   if (!cfg.center && navigator.geolocation) navigator.geolocation.getCurrentPosition((p) => { if (!features.length) map.setView([p.coords.latitude, p.coords.longitude], 17); }, () => {}, { timeout: 5000 });
 
   // ---- drawing what is there
-  const dotIcon = (f) => L.divIcon({ className: 'amap-dot-wrap', html: `<span class="amap-dot${f.status !== 'in_service' ? ' off' : ''}" style="--c:${colour(f)}"></span>`, iconSize: [26, 26], iconAnchor: [13, 13], popupAnchor: [0, -12] });
-  const lineStyle = (f) => ({ color: colour(f), weight: 5, opacity: 0.95, dashArray: f.status === 'in_service' ? null : '8 8', lineCap: 'round' });
+  const dotIcon = (f) => L.divIcon({ className: 'amap-dot-wrap', html: `<span class="amap-dot${f.status !== 'in_service' ? ' off' : ''}" style="--c:${color(f)}"></span>`, iconSize: [26, 26], iconAnchor: [13, 13], popupAnchor: [0, -12] });
+  const lineStyle = (f) => ({ color: color(f), weight: 5, opacity: 0.95, dashArray: f.status === 'in_service' ? null : '8 8', lineCap: 'round' });
   function layerFor(f) {
     const pts = f.points;
     const lyr = f.geometry === 'point' ? L.marker(pts[0], { icon: dotIcon(f), title: f.name || f.kind_label, keyboard: true })
@@ -125,7 +125,7 @@ export async function drawMap(box, deep = '') {
     if (!features.length) layersEl.append(h('p', { class: 'muted small' }, 'Nothing on the map yet. Start with the pump house and the main water line.'));
     const hits = features.filter((f) => !q || [f.name, f.kind_label, f.asset_name, f.asset_tag, f.size, f.material, f.notes].some((v) => v && String(v).toLowerCase().includes(q)));
     clear(listEl).append(hits.length ? h('ul', null, hits.slice(0, 200).map((f) => h('li', null, h('button', { type: 'button', class: 'park-row', onclick: () => focus(f) },
-      h('span', { class: 'amap-swatch', style: `--c:${colour(f)}` }), ' ', h('b', null, title(f)), h('span', { class: 'muted small' }, ` ${f.name ? f.kind_label : ''}${measure(f) ? ` ${measure(f)}` : ''}`)))))
+      h('span', { class: 'amap-swatch', style: `--c:${color(f)}` }), ' ', h('b', null, title(f)), h('span', { class: 'muted small' }, ` ${f.name ? f.kind_label : ''}${measure(f) ? ` ${measure(f)}` : ''}`)))))
       : h('p', { class: 'muted small' }, q ? 'Nothing matches.' : ''));
   }
   search.addEventListener('input', drawSide);
@@ -180,7 +180,7 @@ export async function drawMap(box, deep = '') {
   function previewShape() {
     if (!drawing) return;
     if (drawing.preview) drawing.preview.remove();
-    const style = { color: colour({ system: kindOf(drawing.kind).system, status: 'in_service' }), weight: 5, dashArray: '2 8', lineCap: 'round' };
+    const style = { color: color({ system: kindOf(drawing.kind).system, status: 'in_service' }), weight: 5, dashArray: '2 8', lineCap: 'round' };
     if (drawing.pts.length >= 2) drawing.preview = (drawing.geometry === 'area' ? L.polygon(drawing.pts, { ...style, fillOpacity: 0.15 }) : L.polyline(drawing.pts, style)).addTo(map);
     else if (drawing.pts.length === 1) drawing.preview = L.circleMarker(drawing.pts[0], { radius: 6, color: style.color }).addTo(map);
     else drawing.preview = null;

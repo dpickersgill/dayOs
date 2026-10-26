@@ -161,7 +161,7 @@ router.post('/cover', patrol, validate(z.object({ patrol_shift_id: z.number().in
     if (!s.staff_id) throw bad('This shift is open, so there is no one to cover for. Anyone can be put on it from the schedule.');
     const mine = req.auth.staffId && Number(req.auth.staffId) === Number(s.staff_id);
     if (!mine && !canManage) throw forbidden('You can only ask for cover on your own shifts');
-    if (s.status !== 'published') throw bad(s.status === 'draft' ? 'This shift is not published yet. Change it on the schedule instead.' : 'This shift is cancelled');
+    if (s.status !== 'published') throw bad(s.status === 'draft' ? 'This shift is not published yet. Change it on the schedule instead.' : 'This shift is canceled');
     if (String(s.starts_at) <= nowIn(await tzOf(conn, t))) throw bad('This shift has already started');
     if (await one(conn, "SELECT id FROM patrol_cover_requests WHERE tenant_id = ? AND patrol_shift_id = ? AND status IN ('open', 'pending')", [t, s.id])) throw conflict('Cover has already been asked for on this shift');
     const [r] = await conn.query('INSERT INTO patrol_cover_requests (tenant_id, patrol_shift_id, staff_id, reason, created_by) VALUES (?, ?, ?, ?, ?)', [t, s.id, s.staff_id, req.body.reason || null, req.auth.userId]);
@@ -318,7 +318,7 @@ router.put('/cover/settings', patrol, PA.needs(pool, 'manage_schedule', 'Only th
 });
 
 /**
- * The schedule changed a shift under a live request (cancelled it, or put someone else on it): the request no longer
+ * The schedule changed a shift under a live request (canceled it, or put someone else on it): the request no longer
  * applies. Called from the schedule routes inside their transaction. When the schedule gives the shift to someone other
  * than the person who asked, that counts as covered by them.
  */
@@ -326,17 +326,17 @@ async function afterShiftChange(conn, req, before, after) {
   const t = req.auth.tenantId;
   const live = await rows(conn, "SELECT id, status, staff_id, taken_by FROM patrol_cover_requests WHERE tenant_id = ? AND patrol_shift_id = ? AND status IN ('open', 'pending') FOR UPDATE", [t, before.id]);
   if (!live.length) return;
-  const cancelled = !after || after.status === 'cancelled';
-  const newStaff = !cancelled && after.staff_id ? Number(after.staff_id) : null;
-  if (!cancelled && newStaff === Number(before.staff_id)) return; // times or station changed; the request still applies
+  const canceled = !after || after.status === 'cancelled';
+  const newStaff = !canceled && after.staff_id ? Number(after.staff_id) : null;
+  if (!canceled && newStaff === Number(before.staff_id)) return; // times or station changed; the request still applies
   for (const r of live) {
-    if (!cancelled && newStaff && newStaff !== Number(r.staff_id)) {
+    if (!canceled && newStaff && newStaff !== Number(r.staff_id)) {
       await conn.query("UPDATE patrol_cover_requests SET status = 'covered', taken_by = ?, taken_at = UTC_TIMESTAMP(), decided_by = ? WHERE tenant_id = ? AND id = ?", [newStaff, req.auth.userId, t, r.id]);
     } else {
       await conn.query("UPDATE patrol_cover_requests SET status = 'closed', decided_by = ? WHERE tenant_id = ? AND id = ?", [req.auth.userId, t, r.id]);
     }
     if (r.status === 'pending' && Number(r.taken_by) !== newStaff) {
-      await SH.tell(conn, t, req.auth.userId, Number(r.taken_by), `The patrol shift ${when({ ...before })} you offered to cover was ${cancelled ? 'cancelled' : 'changed on the schedule'}, so your offer is closed.`);
+      await SH.tell(conn, t, req.auth.userId, Number(r.taken_by), `The patrol shift ${when({ ...before })} you offered to cover was ${canceled ? 'canceled' : 'changed on the schedule'}, so your offer is closed.`);
     }
   }
 }

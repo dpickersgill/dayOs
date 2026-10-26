@@ -2,7 +2,7 @@
 
 // Search engines and link previews for the product website: each page's title and description (written for what ski
 // area managers search for), the one canonical address, Open Graph and X cards, and structured data (JSON-LD) that
-// Google reads: the organisation, the website, the software with its live prices, breadcrumbs, and each page's
+// Google reads: the organization, the website, the software with its live prices, breadcrumbs, and each page's
 // questions and answers, read from the page itself so they never drift from what visitors see.
 
 // title: under ~60 characters, the search phrase first. description: under ~160 characters, a reason to click.

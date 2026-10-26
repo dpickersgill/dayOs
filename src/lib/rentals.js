@@ -19,11 +19,11 @@ const gearLine = z.object({
   test_result: z.enum(['pass', 'fail']).optional(),
 });
 
-const DEFAULTS = { late_fee_cents_per_day: 0, late_grace_minutes: 60, require_binding_record: 0, service_every_uses: 0, default_deposit_cents: 0, hold_until_hour: 12 };
+const DEFAULTS = { late_fee_cents_per_day: 0, late_grace_minutes: 60, require_binding_record: 0, service_every_uses: 0, default_deposit_cents: 0, hold_until_hour: 12, hold_after_incident: 1 };
 
 async function getSettings(conn, tenantId) {
   const r = await one(conn, 'SELECT * FROM rental_settings WHERE tenant_id = ?', [tenantId]);
-  return { ...DEFAULTS, ...(r || {}), require_binding_record: Boolean(r && r.require_binding_record) };
+  return { ...DEFAULTS, ...(r || {}), require_binding_record: Boolean(r && r.require_binding_record), hold_after_incident: r ? Boolean(Number(r.hold_after_incident)) : true };
 }
 
 /**
@@ -68,4 +68,18 @@ function lateFee(dueAt, settings, timeZone) {
   return { days, cents: days * settings.late_fee_cents_per_day };
 }
 
-module.exports = { CATEGORIES, TIERS, gearLine, getSettings, insertGear, lateFee };
+/**
+ * The open patrol hold on a rental item, if any: gear involved in a patrol case waits for the shop's inspection before it
+ * goes back on the rack. Returns { id, incident_id, case_number } or null.
+ */
+async function patrolHold(conn, tenantId, itemId) {
+  const [[r]] = await conn.query(`SELECT r.id, r.incident_id, CONCAT(i.season, '-', LPAD(i.seq, 4, '0')) AS case_number FROM incident_rentals r JOIN incidents i ON i.tenant_id = r.tenant_id AND i.id = r.incident_id
+    WHERE r.tenant_id = ? AND r.rental_item_id = ? AND r.held = 1 AND r.released_at IS NULL ORDER BY r.id DESC LIMIT 1`, [tenantId, itemId]);
+  return r || null;
+}
+/** The status gear goes to when it comes back: a patrol hold sends it to the shop instead of the rack. */
+async function returnStatus(conn, tenantId, itemId, wanted) {
+  return wanted === 'available' && (await patrolHold(conn, tenantId, itemId)) ? 'maintenance' : wanted;
+}
+
+module.exports = { CATEGORIES, TIERS, gearLine, getSettings, insertGear, lateFee, patrolHold, returnStatus };

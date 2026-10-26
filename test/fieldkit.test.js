@@ -85,7 +85,7 @@ test.after(async () => { await new Promise((r) => server.close(r)); await pool.e
 
 const newCase = (over = {}) => api('POST', '/patrol/incidents', { token: T.pat, body: { occurred_at: `${today}T10:15`, location: 'Upper Ridge', category: 'injury', severity: 'moderate', summary: 'Skier down', ...over } });
 
-test('EXIF: when and where a photo was taken come from the file; other formats are recognised but carry none', () => {
+test('EXIF: when and where a photo was taken come from the file; other formats are recognized but carry none', () => {
   const f = photoFacts(jpegWithExif());
   assert.equal(f.taken_at, '2026-01-17 10:42:05');
   assert.equal(f.lat, 44.504167); assert.equal(f.lng, -72.791667);

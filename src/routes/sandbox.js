@@ -127,6 +127,9 @@ function seed(slug, area) {
   });
 }
 
+/** A zone name the server knows (America/Denver), or null. */
+const validZone = (tz) => { try { if (!tz) return null; new Intl.DateTimeFormat('en-US', { timeZone: tz }); return tz; } catch { return null; } };
+
 router.post('/', validate(z.object({
   name: z.string().min(1).max(100),
   email: z.string().email().max(255),
@@ -135,6 +138,7 @@ router.post('/', validate(z.object({
   code: z.string().max(12).optional(), // the emailed code, when the email check is on
   area_ref: REF.optional(), // the real ski area they picked on the map ("Is this you?")
   state: STATE.optional(),
+  timezone: z.string().max(64).optional(), // the visitor's own zone, from their browser, used when no real ski area is picked
 })), async (req, res) => {
   const b = req.body;
   if (b.website) throw bad('Could not start the demo');
@@ -144,6 +148,7 @@ router.post('/', validate(z.object({
   if (b.area_ref && b.state) {
     area = await skiArea.details(b.area_ref, b.state).catch(() => null);
     if (area && area.lifts.length + area.trails.length < 3) area = null;
+    if (area) area.timezone = skiArea.zoneAt(area.state, area.lat, area.lng); // a cached lookup may hold the older one-zone-per-state answer
   }
   const mountain = (area && area.name) || clean(b.mountain || '') || 'Demo Mountain';
   const email = b.email.trim().toLowerCase();
@@ -167,7 +172,7 @@ router.post('/', validate(z.object({
   const [first, ...rest] = name.split(/\s+/);
   const created = await tx(async (conn) => {
     const [t] = await conn.query('INSERT INTO tenants (slug, name, timezone, storage_cap_mb, sandbox_expires_at, map_lat, map_lng, map_zoom) VALUES (?, ?, ?, ?, NOW() + INTERVAL ? DAY, ?, ?, ?)',
-      [slug, mountain, area ? area.timezone : 'America/New_York', S.STORAGE_MB, S.DAYS, area ? area.lat : null, area ? area.lng : null, area ? area.zoom : null]);
+      [slug, mountain, area ? area.timezone : validZone(b.timezone) || 'America/New_York', S.STORAGE_MB, S.DAYS, area ? area.lat : null, area ? area.lng : null, area ? area.zoom : null]);
     const [p] = await conn.query('INSERT INTO people (tenant_id, first_name, last_name, email) VALUES (?, ?, ?, ?)', [t.insertId, first.slice(0, 100), (rest.join(' ') || 'Visitor').slice(0, 100), email]);
     const [u] = await conn.query("INSERT INTO users (tenant_id, person_id, email, username, password_hash, role) VALUES (?, ?, ?, ?, ?, 'owner')", [t.insertId, p.insertId, email, require('../lib/usernames').suggestUsername({ first_name: first, last_name: rest.join(' ') || 'Visitor', email }), hash]);
     // A demo shows everything, the paid add-ons included, so a visitor can see what they would be buying.

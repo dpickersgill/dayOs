@@ -498,13 +498,13 @@ async function orderFor(conn, req, id) {
 
 /**
  * Parts taken from stock for a work order, at today's cost, charged to its asset. A negative qty returns parts, credited
- * at what they cost when issued. Returns still work on a cancelled order, so parts never get stuck on it.
+ * at what they cost when issued. Returns still work on a canceled order, so parts never get stuck on it.
  */
 router.post('/work-orders/:id/parts', validate(z.object({ part_id: z.number().int().positive(), qty: qty2(z.number().min(-100000).max(100000)).refine((v) => v !== 0, 'Give a quantity'), note: nullable(z.string().max(255)) })), async (req, res) => {
   const t = req.auth.tenantId; const id = paramId(req); const b = req.body;
   await tx(async (conn) => {
     const w = await orderFor(conn, req, id);
-    if (w.status === 'cancelled' && b.qty > 0) throw conflict('This work order was cancelled');
+    if (w.status === 'cancelled' && b.qty > 0) throw conflict('This work order was canceled');
     const p = await one(conn, 'SELECT id, name, qty_on_hand, unit_cost_cents, unit FROM parts WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, b.part_id]);
     if (!p) throw notFound('Part');
     if (b.qty > 0 && Number(p.qty_on_hand) < b.qty) throw bad(`Only ${Number(p.qty_on_hand)} ${p.unit} of ${p.name} on hand`);
@@ -524,7 +524,7 @@ router.post('/work-orders/:id/parts', validate(z.object({ part_id: z.number().in
 router.post('/work-orders/:id/labor', validate(z.object({ staff_id: nullable(z.number().int().positive()), worker: nullable(z.string().max(100)), hours: z.number().positive().max(200), worked_on: nullable(dateStr), note: nullable(z.string().max(255)) })), async (req, res) => {
   const t = req.auth.tenantId; const id = paramId(req); const b = req.body;
   const out = await tx(async (conn) => {
-    if ((await orderFor(conn, req, id)).status === 'cancelled') throw conflict('This work order was cancelled');
+    if ((await orderFor(conn, req, id)).status === 'cancelled') throw conflict('This work order was canceled');
     await mustExist(conn, 'staff', t, b.staff_id, 'Staff member');
     const s = await A.ensureSettings(conn, t);
     const [r] = await conn.query('INSERT INTO work_order_labor (tenant_id, work_order_id, staff_id, worker, hours, rate_cents, worked_on, note, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -671,7 +671,7 @@ router.post('/purchase-orders/:id/order', manager, async (req, res) => {
 router.post('/purchase-orders/:id/cancel', manager, async (req, res) => {
   const t = req.auth.tenantId; const id = paramId(req);
   const [r] = await pool.query("UPDATE purchase_orders o SET status = 'cancelled' WHERE tenant_id = ? AND id = ? AND status IN ('draft','ordered') AND NOT EXISTS (SELECT 1 FROM po_lines l WHERE l.tenant_id = o.tenant_id AND l.po_id = o.id AND l.received_qty > 0)", [t, id]);
-  if (!r.affectedRows) throw conflict('A purchase order with anything received cannot be cancelled');
+  if (!r.affectedRows) throw conflict('A purchase order with anything received cannot be canceled');
   await audit(pool, req, 'cancel', 'purchase_orders', id);
   res.json({ ok: true });
 });

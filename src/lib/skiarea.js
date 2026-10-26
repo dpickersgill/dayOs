@@ -3,7 +3,7 @@
 // A demo built on the visitor's own mountain. OpenStreetMap volunteers have mapped most ski areas: the area itself
 // (landuse=winter_sports), its lifts (aerialway=*) and its runs (piste:type=downhill, with piste:difficulty). We ask the
 // public Overpass API for them, by name within a US state, and the demo is then built with those real lifts and runs,
-// centred on the real hill. Prices, staff, guests and cases stay made up.
+// centered on the real hill. Prices, staff, guests and cases stay made up.
 //
 //   find(name, state)   -> up to 6 ski areas whose name matches, best first, each with a county or town when known
 //   details(ref)        -> { name, lat, lng, zoom, city, state, lifts, trails, preview } (cached for 7 days)
@@ -36,6 +36,29 @@ const ZONE = { AK: 'America/Anchorage', HI: 'Pacific/Honolulu', AZ: 'America/Pho
   AL: 'America/Chicago', AR: 'America/Chicago', IA: 'America/Chicago', IL: 'America/Chicago', KS: 'America/Chicago', LA: 'America/Chicago', MN: 'America/Chicago', MO: 'America/Chicago', MS: 'America/Chicago',
   ND: 'America/Chicago', NE: 'America/Chicago', OK: 'America/Chicago', SD: 'America/Chicago', TN: 'America/Chicago', TX: 'America/Chicago', WI: 'America/Chicago' };
 const zoneOf = (st) => ZONE[st] || 'America/New_York';
+/**
+ * The zone at a ski area's position. Most states have one zone; in the states split between two, the side of the line
+ * decides (the lines here are close enough for ski country: north Idaho, the Black Hills, Michigan's western Upper
+ * Peninsula, east Tennessee, eastern Oregon and the western plains).
+ */
+function zoneAt(st, lat, lng) {
+  const y = Number(lat); const x = Number(lng);
+  if (!Number.isFinite(y) || !Number.isFinite(x)) return zoneOf(st);
+  switch (st) {
+    case 'ID': return y >= 45.5 ? 'America/Los_Angeles' : 'America/Boise';
+    case 'OR': return x > -117.6 && y < 44.3 ? 'America/Boise' : 'America/Los_Angeles';
+    case 'SD': return x < -100.6 ? 'America/Denver' : 'America/Chicago';
+    case 'ND': return x < -101.0 && y < 47.5 ? 'America/Denver' : 'America/Chicago';
+    case 'NE': return x < -101.5 ? 'America/Denver' : 'America/Chicago';
+    case 'KS': return x < -101.3 ? 'America/Denver' : 'America/Chicago';
+    case 'TX': return x < -104.9 ? 'America/Denver' : 'America/Chicago';
+    case 'MI': return x < -87.4 && y > 45.0 ? 'America/Chicago' : 'America/Detroit';
+    case 'TN': return x > -85.3 ? 'America/New_York' : 'America/Chicago';
+    case 'KY': return x > -86.0 ? 'America/New_York' : 'America/Chicago';
+    case 'IN': return x < -87.0 && y < 38.5 ? 'America/Chicago' : 'America/Indiana/Indianapolis';
+    default: return zoneOf(st);
+  }
+}
 
 // Words that do not tell one ski area from another, left out of the name search (but still used to rank).
 const STOP = new Set(['ski', 'skiing', 'area', 'resort', 'resorts', 'the', 'and', 'at', 'of', 'mountain', 'mountains', 'mt', 'mount', 'hill', 'hills', 'valley',
@@ -150,7 +173,7 @@ function parseDetails(ref, elements, state) {
 }
 
 /**
- * The area's name and centre, its lifts (unnamed ones called by their kind, "Double 1") and named runs (segments of one run
+ * The area's name and center, its lifts (unnamed ones called by their kind, "Double 1") and named runs (segments of one run
  * joined, as hard as their hardest part), and a small drawing. Lines are [{ lat, lon }].
  */
 function assemble(meta, liftLines, runLines) {
@@ -178,7 +201,7 @@ function assemble(meta, liftLines, runLines) {
   const zoom = zoomFor(lines.flatMap((l) => l.g)) || 15;
   const trailList = [...trails.values()].sort((a, b) => RANK[a.difficulty] - RANK[b.difficulty] || a.name.localeCompare(b.name)).slice(0, MAX_TRAILS);
   return {
-    ref: meta.ref, name: String(meta.name || 'Ski area').slice(0, 80), lat: round(meta.lat), lng: round(meta.lng), zoom, state: meta.state, timezone: zoneOf(meta.state),
+    ref: meta.ref, name: String(meta.name || 'Ski area').slice(0, 80), lat: round(meta.lat), lng: round(meta.lng), zoom, state: meta.state, timezone: zoneAt(meta.state, meta.lat, meta.lng),
     city: meta.city || null, website: meta.website || null,
     lifts: lifts.slice(0, MAX_LIFTS), trails: trailList, unnamed_runs: unnamed,
     preview: drawing(lines),
@@ -293,4 +316,4 @@ const forLoader = (d) => ({ name: d.name, lat: d.lat, lng: d.lng, zoom: d.zoom, 
 
 const reload = () => { bundle = undefined; };
 const credit = () => { const own = ownCopy(); return own && own.credit ? own.credit : '\u00a9 OpenStreetMap contributors'; };
-module.exports = { reload, ownCopy, credit, itemsOf, STATES, zoneOf, keyWords, searchQuery, rank, placesQuery, parsePlaces, detailQuery, difficultyOf, parseDetails, drawing, find, details, forLoader };
+module.exports = { reload, ownCopy, credit, itemsOf, STATES, zoneOf, zoneAt, keyWords, searchQuery, rank, placesQuery, parsePlaces, detailQuery, difficultyOf, parseDetails, drawing, find, details, forLoader };

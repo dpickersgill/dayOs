@@ -258,7 +258,7 @@ async function showOrder(id) {
     { head: 'Amount', num: true, cell: (r) => money(r.amount_cents) }], o.refunds)));
   box.append(h('div', { class: 'row' }, printButtons(id, { hasTickets: o.tickets.some((t) => t.status !== 'void') }), shareButton('order', id)));
   if (o.tickets.length) showTickets(box, { tickets: o.tickets.map((t) => ({ code: t.code, product: 'Ticket', valid_from: t.valid_from, valid_to: t.valid_to, status: t.status })) }, true);
-  if (o.gift_cards.length) box.append(h('section', { class: 'section' }, h('header', null, h('h2', null, 'Gift cards')), h('div', { class: 'codes' }, o.gift_cards.map((g) => h('div', { class: 'code' }, g.code, h('small', null, `${money(g.initial_cents)}${g.recipient_name ? ` for ${g.recipient_name}` : ''}${g.status === 'void' ? ', cancelled' : ''}`))))));
+  if (o.gift_cards.length) box.append(h('section', { class: 'section' }, h('header', null, h('h2', null, 'Gift cards')), h('div', { class: 'codes' }, o.gift_cards.map((g) => h('div', { class: 'code' }, g.code, h('small', null, `${money(g.initial_cents)}${g.recipient_name ? ` for ${g.recipient_name}` : ''}${g.status === 'void' ? ', canceled' : ''}`))))));
   if (o.status === 'paid' && isManager()) box.append(h('div', { class: 'row' }, button('Refund…', () => refund(o, null), { small: true, kind: 'danger' })));
   dialog(`Order #${id}`, box, { wide: true });
 }
@@ -282,7 +282,7 @@ async function refund(o, done) {
   for (const b of boxes.values()) b.addEventListener('change', redraw);
   redraw();
   const f = h('div', { class: 'stack' },
-    h('p', null, `Order #${o.id}, ${money(full.total_cents)}. Choose what is being refunded. Tickets are voided, lesson and program places released and unspent gift cards cancelled. Gear that is still out must be checked in first. The money goes back the way it was paid.`),
+    h('p', null, `Order #${o.id}, ${money(full.total_cents)}. Choose what is being refunded. Tickets are voided, lesson and program places released and unspent gift cards canceled. Gear that is still out must be checked in first. The money goes back the way it was paid.`),
     h('div', { class: 'stack tight' }, open.map((l) => h('label', { class: 'check' }, boxes.get(l.id), ` ${l.name}${[l.first_name, l.last_name].filter(Boolean).length ? ` (${[l.first_name, l.last_name].filter(Boolean).join(' ')})` : ''}, ${money(l.unit_price_cents * l.quantity - (l.discount_cents || 0) + (l.tax_cents || 0))}`))),
     h('div', { class: 'form' }, field('Why', reason), field('Note (needed for "Other")', note), paidCash && drawers.length ? field('Cash comes out of', drawer) : null), worth);
   formDialog(`Refund order #${o.id}`, f, async () => {

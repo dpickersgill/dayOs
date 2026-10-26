@@ -167,7 +167,7 @@ router.post(
       }
       const prior = await one(conn, 'SELECT id, status FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND person_id = ?', [tenantId, sid, who.id]);
       if (prior && ['booked', 'attended'].includes(prior.status) && creditId) throw conflict('That student is already booked into this lesson');
-      // A cancelled booking can be revived; otherwise insert.
+      // A canceled booking can be revived; otherwise insert.
       const [r] = await conn.query(
         `INSERT INTO lesson_bookings (tenant_id, session_id, person_id, credit_id, requested_instructor_id) VALUES (?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE status = IF(status = 'cancelled', 'booked', status), credit_id = IF(status = 'booked' AND credit_id IS NULL, VALUES(credit_id), credit_id),
@@ -182,11 +182,11 @@ router.post(
   },
 );
 
-// ---------------------------------------------------------------- cancelling and deleting lessons (lib/lessoncancel.js)
+// ---------------------------------------------------------------- canceling and deleting lessons (lib/lessoncancel.js)
 const LC = require('../lib/lessoncancel');
-const reasonSchema = z.object({ reason: z.string().trim().min(3, 'Say why the lesson is cancelled').max(300) });
+const reasonSchema = z.object({ reason: z.string().trim().min(3, 'Say why the lesson is canceled').max(300) });
 
-/** What cancelling one lesson would do: bookings, package lessons and online payments on it. */
+/** What canceling one lesson would do: bookings, package lessons and online payments on it. */
 router.get('/sessions/:id/cancel-preview', requireRole('manager'), async (req, res) => {
   const [s] = await LC.preview(req.auth.tenantId, 's.id = ?', [paramId(req)]);
   if (!s) throw notFound('Lesson');
@@ -200,7 +200,7 @@ router.delete('/sessions/:id', requireRole('manager'), async (req, res) => {
   res.json({ ok: true });
 });
 
-/** A storm day: every lesson from one date to another. preview: true lists them; otherwise each is cancelled in turn. */
+/** A storm day: every lesson from one date to another. preview: true lists them; otherwise each is canceled in turn. */
 router.post('/sessions/cancel-days', requireRole('manager'), validate(reasonSchema.extend({
   from: dateStr, to: dateStr, preview: z.boolean().optional(),
 })), async (req, res) => {
@@ -219,7 +219,7 @@ router.patch('/bookings/:id', requireRole(...school), validate(z.object({ status
   await tx(async (conn) => {
     const b = await one(conn, 'SELECT id, status, credit_id, session_id FROM lesson_bookings WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, paramId(req)]);
     if (!b) throw notFound('Booking');
-    // Bringing a cancelled booking back takes a seat again: lock the lesson and check it still has one.
+    // Bringing a canceled booking back takes a seat again: lock the lesson and check it still has one.
     if (b.status === 'cancelled' && req.body.status !== 'cancelled') {
       const s = await one(conn, 'SELECT capacity, status FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, b.session_id]);
       if (s.status !== 'scheduled') throw conflict(`Session is ${s.status}`);
@@ -227,7 +227,7 @@ router.patch('/bookings/:id', requireRole(...school), validate(z.object({ status
       if (n >= s.capacity) throw conflict('Session is full');
     }
     await conn.query('UPDATE lesson_bookings SET status = ? WHERE tenant_id = ? AND id = ?', [req.body.status, tenantId, b.id]);
-    // Cancelling gives a package lesson back.
+    // Canceling gives a package lesson back.
     if (req.body.status === 'cancelled' && b.status !== 'cancelled' && b.credit_id) {
       await conn.query('UPDATE lesson_credits SET used = GREATEST(used - 1, 0) WHERE tenant_id = ? AND id = ?', [tenantId, b.credit_id]);
       await conn.query('UPDATE lesson_bookings SET credit_id = NULL WHERE tenant_id = ? AND id = ?', [tenantId, b.id]);

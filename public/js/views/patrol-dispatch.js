@@ -7,9 +7,9 @@ import { compact } from './patrol-case.js';
 
 const PRIORITY = ['low', 'normal', 'high', 'critical'];
 const statusTone = { new: 'bad', dispatched: 'warn', on_scene: 'warn', transporting: 'warn', closed: 'neutral', cancelled: 'neutral' };
-const statusText = { new: 'New', dispatched: 'Dispatched', on_scene: 'On scene', transporting: 'Transporting', closed: 'Closed', cancelled: 'Cancelled' };
+const statusText = { new: 'New', dispatched: 'Dispatched', on_scene: 'On scene', transporting: 'Transporting', closed: 'Closed', cancelled: 'Canceled' };
 const prioTone = { low: 'neutral', normal: 'neutral', high: 'warn', critical: 'bad' };
-const kindText = { received: 'Call received', dispatched: 'Dispatched', on_scene: 'On scene', transporting: 'Transporting', at_aid_room: 'At aid room', note: 'Note', closed: 'Closed', cancelled: 'Cancelled' };
+const kindText = { received: 'Call received', dispatched: 'Dispatched', on_scene: 'On scene', transporting: 'Transporting', at_aid_room: 'At aid room', note: 'Note', closed: 'Closed', cancelled: 'Canceled' };
 // The next step a dispatcher usually takes from each status.
 const NEXT = { new: [], dispatched: [['on_scene', 'On scene']], on_scene: [['transporting', 'Transporting'], ['at_aid_room', 'At aid room']], transporting: [['at_aid_room', 'At aid room']] };
 
@@ -94,7 +94,7 @@ async function openCall(id, again) {
       h('div', { class: 'row' },
         c.case ? h('a', { href: `#/patrol/case/${c.case.id}`, onclick: () => d.close() }, `Open case ${c.case.case_number}`) : button('Start a patient care report', async () => { const m = await post(`/patrol/dispatch/${id}/case`, {}); toast(`Case ${m.case_number} started`); d.close(); location.hash = `#/patrol/case/${m.id}`; }),
         live ? button('Close call', async () => { await step('closed'); }, { kind: 'primary' }) : null,
-        live ? button('Cancel call', async () => { await step('cancelled', 'Cancelled'); }, { kind: 'danger' }) : null));
+        live ? button('Cancel call', async () => { await step('cancelled', 'Canceled'); }, { kind: 'danger' }) : null));
   }
   // Where the caller is: from the guest help page, or from the location link dispatch texts them.
   function whereBlock(c, live) {

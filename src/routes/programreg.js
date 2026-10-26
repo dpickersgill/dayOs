@@ -278,7 +278,7 @@ async function emailConfirmation(tenantId, id, base) {
   const v = await viewOf(tenantId, row.view_token);
   const lines = v.places.flatMap((p) => [`${p.first_name} ${p.last_name}: ${p.program}, ${p.term}, ${p.day}s`,
     `  Lessons: ${p.dates.map((d) => PS.longDay(d.date)).join('; ')}`,
-    ...(p.makeup_reserve.length ? [`  Makeup date if a lesson is cancelled for weather: ${p.makeup_reserve.map(PS.longDay).join('; ')}`] : []),
+    ...(p.makeup_reserve.length ? [`  Makeup date if a lesson is canceled for weather: ${p.makeup_reserve.map(PS.longDay).join('; ')}`] : []),
     ...(p.ticket_code ? [`  Lift ticket: ${p.ticket_code}`] : []), '']);
   const text = [`Hi ${row.contact_name.split(' ')[0]},`, '', `Thank you for registering at ${t.name} (reference ${row.reference}, ${money(row.amount_cents)}).`, '', ...lines,
     `Your registration: ${base}/programs/${t.slug}?registration=${row.view_token}`, `Your family page (dates, weather changes, report cards): ${base}/family/${t.slug}`, '', ...(row.note ? [row.note, ''] : []), t.phone ? `Questions? Call ${t.phone}.` : ''].join('\n');

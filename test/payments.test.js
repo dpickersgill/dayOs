@@ -184,7 +184,7 @@ test('an abandoned checkout expires and frees the spot', async () => {
   assert.equal((await pub('POST', '/requests', { body: reqBody() })).status, 201, 'the spot is free again');
 });
 
-test('cancelling a paid lesson refunds 100% well ahead, 50% in the middle window and nothing at the last minute', async () => {
+test('canceling a paid lesson refunds 100% well ahead, 50% in the middle window and nothing at the last minute', async () => {
   const cancel = (info, email = 'pam@x.test') => pub('POST', `/requests/${info.reference}/cancel`, { body: { email } });
   // 100 hours ahead: full refund
   let info = await reserveAndPay(100);
@@ -253,7 +253,7 @@ test('the quote endpoint gives the exact total, tax included, and the page lists
 });
 
 test('the mountain cancels a lesson: paid online refunded in full, package lesson given back, desk payment listed', async () => {
-  // Five hours out: a guest cancelling now would get nothing back, but the mountain cancelling refunds everything.
+  // Five hours out: a guest canceling now would get nothing back, but the mountain canceling refunds everything.
   const info = await reserveAndPay(5);
   const sid = sessionId;
   const person = async (first) => (await pool.query('INSERT INTO people (tenant_id, first_name, last_name, email) VALUES (?, ?, ?, ?)', [tenantId, first, 'Guest', `${first.toLowerCase()}@x.test`]))[0].insertId;

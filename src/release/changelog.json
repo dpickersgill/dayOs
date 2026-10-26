@@ -3,7 +3,7 @@
     {
       "version": "2026.10.49",
       "date": "2026-11-08",
-      "title": "Patrol crews your patrollers sign up for",
+      "title": "Patrol crews and kits, conditions on every report, staff injuries, lost and found",
       "notes": [
         {
           "kind": "new",
@@ -49,6 +49,79 @@
           ],
           "help": "patrol-crews",
           "text": "On Thursday, the schedule builders get a message when a weekend crew is short, and open spots are posted to the shift cover conversation. On duty and the Schedule mark anyone not signed in 15 minutes after their shift starts."
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-conditions",
+          "text": "Every patrol report keeps the conditions at the time from your own records: the trail and whether it was groomed, the latest snow and weather readings, and the lift's status and any stop when a lift was involved. The report's Conditions answers are filled in from them for the patroller to check."
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-conditions",
+          "text": "Who was told, on every report: management, the insurer, a parent or guardian, EMS, police or the owner, with how and when. It works with no signal, and the patrol director can require it, for example the insurer told on serious cases."
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-rentals",
+          "text": "Rental gear on a case: find it by contract number, the item's number or the renter's name. The report keeps the binding setting, who set it and the last service, and the gear is held until the rental shop logs an inspection."
+        },
+        {
+          "kind": "new",
+          "app": "rentals",
+          "who": [],
+          "help": "patrol-rentals",
+          "text": "Rental gear involved in a patrol case is held for inspection: it shows in Service with the case number, and goes back on the rack only after an inspection is logged. Turn it off in Rentals, Settings."
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-kits",
+          "text": "Kits: trauma bags, packed toboggans and lift evacuation kits, each with its contents, quantities, expiry dates and how often it is checked. Scan a kit's QR label to check or restock it, with no signal if need be; supplies used on a case come off the kit; and one board shows which kits are ready. Optional seals sign off an unopened kit in one tap."
+        },
+        {
+          "kind": "new",
+          "app": "workforce",
+          "who": [],
+          "help": "staff-injuries",
+          "text": "The staff injury register, under Staff and schedule, Injuries: work injuries with the fields of OSHA's Forms 300 and 301, patrol cases with a staff patient added automatically, and the year summary in the Form 300A layout. Only the owner and those the owner names can open it."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "help": "lost-found",
+          "text": "Lost and found, under Front desk: log what is handed in with a photo, take reports at the counter or on your website, see likely matches, tell the guest when it is found, and hand it back with an ID check.",
+          "who": [
+            "counter",
+            "staff"
+          ]
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "help": "time-zone",
+          "text": "Times follow your mountain's own time zone. A demo uses your own zone, the owner can set the zone in Account, and when you are somewhere else times show the mountain's zone, for example 10:15 AM MT.",
+          "who": null
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "text": "Everything is now in US English: color, canceled, organization, inquiries, and Fahrenheit and inches first on patrol reports.",
+          "who": null
         }
       ]
     },
@@ -181,7 +254,7 @@
           "kind": "new",
           "app": null,
           "who": "platform",
-          "text": "The demo page asks for the mountain's name and state, finds it on OpenStreetMap, and asks \"Is this you?\" with a drawing of its lifts and trails. The demo is then built on those real lift and trail names, centred on the real hill, in its time zone, with made-up prices, staff, guests and patrol cases. If the map has too little, or is not answering, the sample mountain is built as before."
+          "text": "The demo page asks for the mountain's name and state, finds it on OpenStreetMap, and asks \"Is this you?\" with a drawing of its lifts and trails. The demo is then built on those real lift and trail names, centered on the real hill, in its time zone, with made-up prices, staff, guests and patrol cases. If the map has too little, or is not answering, the sample mountain is built as before."
         }
       ]
     },
@@ -588,7 +661,7 @@
           "kind": "new",
           "app": "assets",
           "who": null,
-          "text": "Assets and fleet has a Map: put valves, hydrants, pumps, pump houses and transformers on it as points, snowmaking water and air lines, power, sewer and fibre runs as lines, and ponds and buildings as areas. Each system has its own colour and can be switched on and off. Place things with your phone's location, tap the map, or record a pipe run by walking it. Tie a point to an asset in the register, and its page links straight to it. Managers can download the whole map for GIS software or a contractor."
+          "text": "Assets and fleet has a Map: put valves, hydrants, pumps, pump houses and transformers on it as points, snowmaking water and air lines, power, sewer and fibre runs as lines, and ponds and buildings as areas. Each system has its own color and can be switched on and off. Place things with your phone's location, tap the map, or record a pipe run by walking it. Tie a point to an asset in the register, and its page links straight to it. Managers can download the whole map for GIS software or a contractor."
         },
         {
           "kind": "new",
@@ -651,7 +724,7 @@
     {
       "version": "2026.10.29",
       "date": "2026-10-25",
-      "title": "Card reader, lesson cancelling, pin dropping, your own guest types",
+      "title": "Card reader, lesson canceling, pin dropping, your own guest types",
       "notes": [
         {
           "kind": "new",
@@ -1579,7 +1652,7 @@
             "instructor",
             "patrol"
           ],
-          "text": "When your manager publishes the schedule, you get a message in your Inbox listing your shifts, and another if one of your published shifts changes or is cancelled.",
+          "text": "When your manager publishes the schedule, you get a message in your Inbox listing your shifts, and another if one of your published shifts changes or is canceled.",
           "help": null
         },
         {

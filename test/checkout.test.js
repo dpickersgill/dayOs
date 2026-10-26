@@ -127,8 +127,8 @@ test('one basket: tickets, a child\'s lesson, a rental, a program place and a gi
   const parentId = b.person_id;
   const kidId = b.lessons[0].person_id;
   assert.notEqual(parentId, kidId);
-  const enrol = (await q('SELECT * FROM program_enrollments WHERE person_id = ?', [kidId]))[0];
-  assert.equal(enrol.guardian_id, parentId); assert.equal(enrol.paid_cents, 45000); assert.equal(enrol.status, 'enrolled');
+  const enroll = (await q('SELECT * FROM program_enrollments WHERE person_id = ?', [kidId]))[0];
+  assert.equal(enroll.guardian_id, parentId); assert.equal(enroll.paid_cents, 45000); assert.equal(enroll.status, 'enrolled');
   assert.equal((await q('SELECT COUNT(*) AS n FROM waivers WHERE person_id = ?', [kidId]))[0].n, 1, 'the waiver was signed once for the child');
   assert.equal((await q('SELECT status FROM rental_items WHERE id = ?', [D.ski]))[0].status, 'rented');
   assert.equal((await q('SELECT person_id FROM rental_contracts WHERE order_id = ?', [b.id]))[0].person_id, kidId);
@@ -294,7 +294,7 @@ test('refunding an order puts everything back: bookings, places, gear and gift c
   assert.equal((await api('POST', `/orders/${D.order}/refund`, { token: m, body: { reason: 'customer_request' } })).status, 409, 'already refunded');
 });
 
-test('gift cards can be cancelled by a manager, and a cancelled card pays nothing', async () => {
+test('gift cards can be canceled by a manager, and a canceled card pays nothing', async () => {
   const lines = [{ type: 'ticket', product_id: D.day }];
   const r = await sell(T.counter, { lines: [{ type: 'gift_card', amount_cents: 1000 }], payments: [{ tender: 'cash', amount_cents: 1000 }] });
   const code = r.body.gift_cards[0].code;

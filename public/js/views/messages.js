@@ -50,7 +50,7 @@ async function editor(id, status, done) {
   const reach = h('p', { class: 'muted', 'aria-live': 'polite' }, '');
   const subjectField = field('Subject', subject);
   const counter = h('small', { class: 'muted' });
-  const syncChannel = () => { subjectField.hidden = channel.value === 'sms'; counter.textContent = channel.value === 'sms' ? `${bodyBox.value.length} of 320 characters. We add the mountain name and how to stop.` : 'Use {first_name} and {mountain} to personalise. We add the unsubscribe link.'; };
+  const syncChannel = () => { subjectField.hidden = channel.value === 'sms'; counter.textContent = channel.value === 'sms' ? `${bodyBox.value.length} of 320 characters. We add the mountain name and how to stop.` : 'Use {first_name} and {mountain} to personalize. We add the unsubscribe link.'; };
   async function count() {
     syncChannel();
     try {

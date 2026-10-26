@@ -53,6 +53,7 @@ function message(tenant, inc, p, kind, serious, link) {
     lines.push('', 'What to do now: tell your workers\' comp insurer. Most states set a deadline of a few days, and some much less.');
     lines.push('', serious ? `This patient went to hospital or the case is critical. ${OSHA}` : `If this becomes serious: ${OSHA}`);
   }
+  if (k.onDuty) lines.push('', 'It is in your staff injury register (Staff and schedule, Injuries), ready for the OSHA log details.');
   lines.push('', `The case: ${link}`, '', 'This note has no injury or treatment details. Open the case to see them.');
   const subject = serious && k.onDuty ? `Staff injury, went to hospital: check OSHA's deadline (${name})` : `Staff injury: ${name} (${k.label.toLowerCase()})`;
   return { subject, text: lines.join('\n'), sms: `${tenant.name}: ${name} (${k.label.toLowerCase()}) seen by patrol, case ${inc.case_number || inc.id}.${serious && k.onDuty ? ' Went to hospital: OSHA 24h rule if admitted, 8h for a death, 1-800-321-6742.' : ''} Details in email.` };
@@ -64,11 +65,13 @@ function message(tenant, inc, p, kind, serious, link) {
  */
 async function notifyIfDue(tenantId, incidentId, patientId, base) {
   try {
-    const p = await one(pool, `SELECT p.id, p.first_name, p.last_name, p.form, p.activity, p.disposition, p.voided_at, p.staff_noted_at, p.staff_serious_noted_at
+    const p = await one(pool, `SELECT p.id, p.person_id, p.first_name, p.last_name, p.form, p.activity, p.disposition, p.voided_at, p.staff_noted_at, p.staff_serious_noted_at
       FROM incident_patients p WHERE p.tenant_id = ? AND p.incident_id = ? AND p.id = ?`, [tenantId, incidentId, patientId]);
     if (!p || p.voided_at) return { sent: 0 };
     const kind = kindOf(p);
     if (!kind) return { sent: 0 };
+    // On duty: a record in the owner's staff injury register (Staff and schedule, Injuries), made once.
+    if (KINDS[kind].onDuty) await require('./injuryregister').fromPatrol(tenantId, incidentId, p, kind);
     const row = await one(pool, 'SELECT id, season, seq, occurred_at, location, severity FROM incidents WHERE tenant_id = ? AND id = ?', [tenantId, incidentId]);
     const inc = { ...row, case_number: row.seq ? `${row.season}-${String(row.seq).padStart(4, '0')}` : null };
     const serious = HOSPITAL.includes(p.disposition) || inc.severity === 'critical';

@@ -1,13 +1,13 @@
 // Billing: the mountain's Verdynt/OS subscription, and where guests' card payments go (the mountain's own Stripe account). Where it stands (trial, paid, grace, read only), the plan and add-ons
 // with monthly or yearly prices, paying by card, US bank account or invoice, Stripe's portal for the card and
-// cancelling, past invoices and the history. Owners change and pay; managers can look.
+// canceling, past invoices and the history. Owners change and pay; managers can look.
 import { get, post, put, del } from '../api.js';
 import { h, clear, ctx, money, state, button, table, toast, formDialog, field, input, errorBox, loading, label, fmtDate, fmtDateTime, confirmDialog } from '../ui.js';
 
 const STATUS_WORDS = {
-  comped: ['Included at no charge', 'good'], subscribed: ['Paid and up to date', 'good'], cancelling: ['Cancelling at the end of the period', 'warn'],
+  comped: ['Included at no charge', 'good'], subscribed: ['Paid and up to date', 'good'], cancelling: ['Canceling at the end of the period', 'warn'],
   paid_manually: ['Paid', 'good'], trial: ['Free trial', 'neutral'], payment_failed: ['Payment did not go through', 'bad'],
-  trial_ended: ['Trial ended', 'bad'], paid_time_ended: ['Paid time ended', 'bad'], canceled: ['Subscription cancelled', 'bad'],
+  trial_ended: ['Trial ended', 'bad'], paid_time_ended: ['Paid time ended', 'bad'], canceled: ['Subscription canceled', 'bad'],
 };
 const dateText = (d) => (d ? fmtDate(`${String(d).slice(0, 10)}T12:00:00`) : '');
 

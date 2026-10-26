@@ -61,7 +61,7 @@ function fitProblems(member, spot) {
 const fits = (member, spot) => !fitProblems(member, spot).length;
 
 /**
- * Coverage of one crew on one day from its spots (patrol_shifts rows with crew_id, not cancelled): how many are filled
+ * Coverage of one crew on one day from its spots (patrol_shifts rows with crew_id, not canceled): how many are filled
  * against the target and the minimum, which roles have nobody, and a tone: good (at target), short (below target, at
  * or above the minimum) or critical (below the minimum, or a role with nobody). Extra spots from a storm call count.
  */
@@ -81,7 +81,9 @@ function coverage(crew, spots, members = new Map()) {
 }
 
 /** "Sat and Sun, 8:00 to 16:30" for lists. */
-const summary = (crew) => `${daysOf(crew).sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map((d) => DAY_LABEL[d]).join(', ') || 'No days'}, ${hhmm(crew.start_time)} to ${hhmm(crew.end_time)}`;
+/** '16:30' as '4:30 PM'. */
+const clock12 = (t) => { const [hh, mm] = hhmm(t).split(':').map(Number); return `${((hh + 11) % 12) + 1}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`; };
+const summary = (crew) => `${daysOf(crew).sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map((d) => DAY_LABEL[d]).join(', ') || 'No days'}, ${clock12(crew.start_time)} to ${clock12(crew.end_time)}`;
 
 /** Whether a sign-in counts as a no-show: a published, filled spot that started over 15 minutes ago with nobody signed in. */
 const NO_SHOW_MIN = 15;
@@ -91,4 +93,4 @@ function isNoShow(spot, now, signedIn) {
   return String(now) >= late;
 }
 
-module.exports = { RANKS, RANK_LABEL, CERTS, CERT_LABEL, DAY_LABEL, dayOf, addDays, daysOf, rolesOf, skipsOf, datesFor, timesOn, spotsFor, fitProblems, fits, coverage, summary, isNoShow, NO_SHOW_MIN };
+module.exports = { clock12, RANKS, RANK_LABEL, CERTS, CERT_LABEL, DAY_LABEL, dayOf, addDays, daysOf, rolesOf, skipsOf, datesFor, timesOn, spotsFor, fitProblems, fits, coverage, summary, isNoShow, NO_SHOW_MIN };

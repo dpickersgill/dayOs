@@ -84,6 +84,7 @@ router.put('/tenant/profile', managers, validate(z.object({
   refund_half_hours: z.number().int().min(0).max(720).optional(),
   refund_half_percent: z.number().int().min(0).max(100).optional(),
   cancel_note: z.string().max(500).nullable().optional(),
+  timezone: z.string().max(64).optional(),
 }).refine((x) => x.refund_half_hours === undefined || x.refund_full_hours === undefined || x.refund_half_hours <= x.refund_full_hours, { message: 'The partial-refund cutoff must be later than (fewer hours than) the full-refund cutoff' })), async (req, res) => {
   const b = req.body;
   if (b.require_mfa !== undefined && req.auth.role !== 'owner') throw bad('Only the owner can require two-step sign-in');
@@ -92,6 +93,12 @@ router.put('/tenant/profile', managers, validate(z.object({
     if (cur && cur.require_mfa) require('../lib/stepup').require(req, 'stop requiring two-step sign-in');
   }
   const set = []; const vals = [];
+  // The mountain's time zone: every time on its records is on this clock. Only the owner changes it.
+  if (b.timezone !== undefined) {
+    if (req.auth.role !== 'owner') throw bad('Only the owner can change the time zone');
+    try { new Intl.DateTimeFormat('en-US', { timeZone: b.timezone }); } catch { throw bad('That is not a time zone'); }
+    set.push('timezone = ?'); vals.push(b.timezone);
+  }
   for (const k of PROFILE_COLS) if (b[k] !== undefined) { set.push(`${k} = ?`); vals.push(['require_mfa', 'online_booking', 'online_payment', 'online_shop', 'weekly_report', 'shop_recovery', 'quick_sale'].includes(k) ? (b[k] ? 1 : 0) : (b[k] === '' ? null : b[k])); }
   if (!set.length) throw bad('Nothing to change');
   await pool.query(`UPDATE tenants SET ${set.join(', ')} WHERE id = ?`, [...vals, req.auth.tenantId]);

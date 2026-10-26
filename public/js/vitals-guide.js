@@ -1,4 +1,4 @@
-// Plain guides for reading vital signs at a glance. These are prompts for a patroller, not a diagnosis: the colour and the word
+// Plain guides for reading vital signs at a glance. These are prompts for a patroller, not a diagnosis: the color and the word
 // ("High", "Low") only say "look again", and a number outside the band is never blocked from being saved.
 
 /**

@@ -64,7 +64,7 @@ export async function drawSchedule(box) {
     grid.append(h('div', { class: 'sg-row sg-headrow', role: 'row' }, h('div', { class: 'sg-name', role: 'columnheader' }, 'Patroller'),
       ...days.map((d) => { const n = w.shifts.filter((s) => s.starts_at.startsWith(d)); const o = n.filter((s) => !s.staff_id).length; return h('div', { class: `sg-day${d === today ? ' is-today' : ''}`, role: 'columnheader' }, h('b', null, `${dayShort(d)} ${Number(d.slice(8))}`), h('small', null, n.length ? `${n.length - o} on patrol${o ? `, ${o} open` : ''}` : 'None')); }),
       h('div', { class: 'sg-hours', role: 'columnheader' }, 'Hours')));
-    // Each crew's coverage by day: filled against needed, short days in colour; select one to call for extra patrollers.
+    // Each crew's coverage by day: filled against needed, short days in color; select one to call for extra patrollers.
     const cov = w.coverage || [];
     const covOn = (d) => cov.filter((c) => c.date === d && (edit || c.generated));
     const covClick = (c) => (edit && c.generated && c.date >= today ? () => callDialog(c, load) : null);
@@ -140,7 +140,7 @@ function shiftDialog({ shift, date, staffId, stations, onDone }) {
     h('div', { class: 'shift-when' }, field('Day', day), field('Starts', from), field('Ends', to)),
     h('div', { class: 'shift-when two' }, field('Station', station), field('Role', role)), field('Note', notes),
     h('fieldset', { class: 'cand-box' }, h('legend', null, 'Who'), who),
-    editing && shift.cover_status ? h('p', { class: 'cover-why' }, `${shift.name} has asked for cover on this shift (see the Cover tab). Putting someone else on it counts as covered; leaving it open or cancelling it closes the request.`) : null,
+    editing && shift.cover_status ? h('p', { class: 'cover-why' }, `${shift.name} has asked for cover on this shift (see the Cover tab). Putting someone else on it counts as covered; leaving it open or canceling it closes the request.`) : null,
     editing ? h('p', { class: 'muted small' }, shift.status === 'published' ? 'Published: anyone taken off, put on, or whose shift changes gets a message in their Inbox.' : 'A draft: patrollers see it once you publish.') : null), async () => {
     const [s, e] = times();
     const body = { starts_at: s, ends_at: e, station_id: station.value ? Number(station.value) : null, role_label: role.value.trim() || null, notes: notes.value.trim() || null, staff_id: chosen || null };
@@ -149,7 +149,7 @@ function shiftDialog({ shift, date, staffId, stations, onDone }) {
   }, { submitText: editing ? 'Save shift' : 'Add shift', wide: true });
   if (editing) {
     const cancel = button('Cancel this shift', () => confirmDialog('Cancel this patrol shift?', `${dayShort(shift.starts_at.slice(0, 10))} ${span(shift.starts_at, shift.ends_at)}.${shift.status === 'published' && shift.staff_id ? ' The patroller on it gets a message.' : ''}`, 'Cancel shift', async () => {
-      await del(`/patrol/schedule/${shift.id}`); toast('Patrol shift cancelled'); dlg.close(); await onDone();
+      await del(`/patrol/schedule/${shift.id}`); toast('Patrol shift canceled'); dlg.close(); await onDone();
     }, { danger: true }), { kind: 'danger' });
     cancel.classList.add('footer-start');
     dlg.box.querySelector('form .footer').prepend(cancel);

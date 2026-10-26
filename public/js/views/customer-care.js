@@ -8,7 +8,7 @@ const NOTE_LABELS = { general: 'General', service: 'Service', complaint: 'Compla
 const SOURCE_LABELS = { counter: 'At the counter', phone: 'By phone', in_writing: 'In writing', online: 'Online', guest_request: 'Guest asked', staff_form: 'Customer form', sale: 'At a sale', earlier_record: 'Earlier record', erasure: 'Erasure' };
 const CHANNEL = { email: 'Email', sms: 'Text messages' };
 
-/** Coloured alerts for staff: shown first in a customer's record. */
+/** Colored alerts for staff: shown first in a customer's record. */
 export function alertsBanner(person, onChange) {
   const box = h('div', { class: 'cust-alerts' });
   async function load() {

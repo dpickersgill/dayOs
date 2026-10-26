@@ -181,7 +181,7 @@ router.patch('/work-orders/:id', validate(partialOf(orderFields)), async (req, r
   res.json({ ok: true });
 });
 
-const STATUS_TEXT = { open: 'Reopened', in_progress: 'Work started', waiting_parts: 'Waiting for parts', done: 'Completed', cancelled: 'Cancelled' };
+const STATUS_TEXT = { open: 'Reopened', in_progress: 'Work started', waiting_parts: 'Waiting for parts', done: 'Completed', cancelled: 'Canceled' };
 router.post('/work-orders/:id/status', validate(z.object({
   status: z.enum(['open', 'in_progress', 'waiting_parts', 'done', 'cancelled']),
   labor_hours: nullable(z.number().min(0).max(999)), parts_note: nullable(z.string().max(255)), resolution: nullable(z.string().max(500)),

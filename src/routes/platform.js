@@ -222,9 +222,26 @@ async function usage(ids) {
 
 router.get('/modules', (_req, res) => res.json({ data: M.MODULES.map(({ key, label, blurb, needs, addon }) => ({ key, label, blurb, needs: needs || [], addon: Boolean(addon) })) }));
 
+/**
+ * A mountain whose time zone does not fit its map position (a mountain left on Eastern in Colorado): the zone's winter
+ * offset against the offset its longitude suggests. Two hours or more apart is flagged; a zone border is never that wide.
+ */
+function zoneWarning(x) {
+  if (x.map_lng === null || x.map_lng === undefined) return null;
+  try {
+    const jan = new Date(Date.UTC(new Date().getUTCFullYear(), 0, 15, 12));
+    const name = new Intl.DateTimeFormat('en-US', { timeZone: x.timezone, timeZoneName: 'longOffset' }).formatToParts(jan).find((p) => p.type === 'timeZoneName').value;
+    const m = /GMT([+-])(\d{2}):?(\d{2})?/.exec(name);
+    const offset = m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) + Number(m[3] || 0) / 60) : 0;
+    const expected = Number(x.map_lng) / 15;
+    return Math.abs(offset - expected) >= 2 ? `Its time zone (${x.timezone}) does not fit where it is on the map. Check it with the owner.` : null;
+  } catch { return null; }
+}
+
 router.get('/tenants', async (_req, res) => {
-  const t = await rows(pool, `SELECT t.id, t.slug, t.name, t.status, t.timezone, t.created_at, t.storage_cap_mb, t.platform_notes, t.delete_after,
+  const t = await rows(pool, `SELECT t.id, t.slug, t.name, t.status, t.timezone, t.map_lat, t.map_lng, t.created_at, t.storage_cap_mb, t.platform_notes, t.delete_after,
       (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id AND u.active = 1) AS users FROM tenants t WHERE t.sandbox_expires_at IS NULL ORDER BY t.name`);
+  for (const x of t) { x.zone_warning = zoneWarning(x); delete x.map_lat; delete x.map_lng; }
   const used = await usage(t.map((x) => x.id));
   const data = [];
   const bills = new Map((await rows(pool, 'SELECT b.*, p.name AS plan FROM tenant_billing b LEFT JOIN billing_plans p ON p.id = b.plan_id')).map((b) => [Number(b.tenant_id), b]));

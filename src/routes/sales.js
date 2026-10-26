@@ -169,7 +169,7 @@ const refundBody = z.object({
 
 /**
  * Refund the whole order or just some of its lines. Every refund records why. Unused tickets are voided, lesson bookings
- * cancelled, program places withdrawn, unspent gift cards cancelled. Gear that is still out, a gift card that has been spent,
+ * canceled, program places withdrawn, unspent gift cards canceled. Gear that is still out, a gift card that has been spent,
  * a ticket already scanned or a lesson already attended stops the refund, so staff sort that out first. The money goes back the
  * way it came (cash, card, gift card); gift card money is put back on the card, the rest happens at the till or processor.
  */
@@ -270,7 +270,7 @@ router.post('/orders/:id/refund', requireRole('manager'), validate(refundBody), 
         await conn.query("INSERT INTO gift_card_txns (tenant_id, gift_card_id, order_id, kind, delta_cents, balance_after_cents) VALUES (?, ?, ?, 'void', ?, 0)", [tenantId, l.gift_card_id, orderId, -g.balance_cents]);
       }
     }
-    // Gift card money goes back on the card (unless the card itself has since been cancelled).
+    // Gift card money goes back on the card (unless the card itself has since been canceled).
     const giftBack = plan.find((x) => x.method === 'gift_card');
     if (giftBack) {
       let remaining = giftBack.cents;

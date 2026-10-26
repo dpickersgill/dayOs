@@ -28,7 +28,7 @@ const tokenFor = (s) => (s.open_nonce ? `${s.id}.${sig('open', s.id, s.open_nonc
 async function signupForToken(token) {
   const m = /^(\d{1,12})\.([A-Za-z0-9_-]{40})$/.exec(String(token || ''));
   if (!m) return null;
-  const s = await one(pool, `SELECT s.*, t.slug FROM sandbox_signups s JOIN tenants t ON t.id = s.tenant_id
+  const s = await one(pool, `SELECT s.*, t.slug, (SELECT tz.timezone FROM tenants tz WHERE tz.id = s.tenant_id) AS tz FROM sandbox_signups s JOIN tenants t ON t.id = s.tenant_id
     WHERE s.id = ? AND s.ended_at IS NULL AND t.sandbox_expires_at > NOW()`, [Number(m[1])]);
   if (!s || !s.open_nonce || !same(m[2], sig('open', s.id, s.open_nonce))) return null;
   return s;
@@ -47,7 +47,9 @@ const appBase = (base) => config.site.appUrl || base;
 const siteBase = (base) => (config.site.hosts.length ? `https://${config.site.hosts[0]}` : `${base}/site`);
 const openUrl = (base, token, to) => `${appBase(base)}/try?open=${encodeURIComponent(token)}${to ? `&to=${to}` : ''}`;
 const firstName = (s) => String(s.name || '').trim().split(/\s+/)[0] || 'there';
-const dayName = (d) => new Date(d).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'America/New_York' });
+// Dates in the demo mountain's own zone (the visitor's, unless they picked a real ski area), never assumed Eastern.
+const zoneOk = (tz) => { try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return tz; } catch { return 'America/New_York'; } };
+const dayName = (d, tz) => new Date(d).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: zoneOk(tz || 'America/New_York') });
 
 async function fromPrice() {
   const r = await one(pool, "SELECT MIN(monthly_cents) AS c FROM billing_plans WHERE kind = 'plan' AND active = 1 AND code <> 'patrol-only'").catch(() => null);
@@ -65,7 +67,7 @@ async function welcomeText(base, s, token) {
     subject: `Your demo mountain is ready, ${firstName(s)}`,
     text: `Hi ${firstName(s)},
 
-Thanks for trying Verdynt/OS. Your demo mountain, ${s.mountain}, is ready and stays open until ${dayName(s.expires_at)}.
+Thanks for trying Verdynt/OS. Your demo mountain, ${s.mountain}, is ready and stays open until ${dayName(s.expires_at, s.tz)}.
 
 This link signs you straight in, from any computer or phone:
 ${openUrl(base, token)}
@@ -130,10 +132,10 @@ ${signature()}${footer(base, s)}`,
 
 async function endingText(base, s) {
   return {
-    subject: `Your demo ends ${new Date(s.expires_at).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'America/New_York' })}`,
+    subject: `Your demo ends ${new Date(s.expires_at).toLocaleDateString('en-US', { weekday: 'long', timeZone: zoneOk(s.tz || 'America/New_York') })}`,
     text: `Hi ${firstName(s)},
 
-Your demo mountain, ${s.mountain}, closes on ${dayName(s.expires_at)}, and everything in it is deleted then.
+Your demo mountain, ${s.mountain}, closes on ${dayName(s.expires_at, s.tz)}, and everything in it is deleted then.
 
 If it looks like a fit, there are two easy next steps:
 
@@ -153,7 +155,7 @@ async function send(s, { subject, text }, tag) {
 /** The welcome, right after a demo is built. Never throws: a demo works without it. */
 async function welcome(base, signupId) {
   try {
-    const s = await one(pool, 'SELECT * FROM sandbox_signups WHERE id = ?', [signupId]);
+    const s = await one(pool, 'SELECT s.*, (SELECT tz.timezone FROM tenants tz WHERE tz.id = s.tenant_id) AS tz FROM sandbox_signups s WHERE s.id = ?', [signupId]);
     if (!s) return false;
     const token = await newOpenToken(s.id);
     const r = await send(s, await welcomeText(base, s, token), 'demo-welcome');
@@ -164,12 +166,12 @@ async function welcome(base, signupId) {
 
 /** From the console: a new sign-in link, retiring the old ones. */
 async function sendLink(base, signupId) {
-  const s = await one(pool, `SELECT s.* FROM sandbox_signups s JOIN tenants t ON t.id = s.tenant_id WHERE s.id = ? AND s.ended_at IS NULL AND t.sandbox_expires_at > NOW()`, [signupId]);
+  const s = await one(pool, `SELECT s.*, (SELECT tz.timezone FROM tenants tz WHERE tz.id = s.tenant_id) AS tz FROM sandbox_signups s JOIN tenants t ON t.id = s.tenant_id WHERE s.id = ? AND s.ended_at IS NULL AND t.sandbox_expires_at > NOW()`, [signupId]);
   if (!s) return { ok: false, error: 'That demo has ended' };
   const token = await newOpenToken(s.id);
   return send(s, { subject: 'Your sign-in link for the Verdynt/OS demo', text: `Hi ${firstName(s)},
 
-Here's a new link to your demo mountain, ${s.mountain}. It signs you straight in, and it works until the demo ends on ${dayName(s.expires_at)}:
+Here's a new link to your demo mountain, ${s.mountain}. It signs you straight in, and it works until the demo ends on ${dayName(s.expires_at, s.tz)}:
 ${openUrl(base, token)}
 
 Any links I sent before no longer work.
@@ -185,7 +187,7 @@ const ELIGIBLE = `s.ended_at IS NULL AND s.emails_stopped_at IS NULL AND s.welco
 /** The daily job: day-2 nudges and before-it-ends notes. Each email is claimed before it is sent, so none goes twice. */
 async function runAll(base) {
   const out = { nudges: 0, endings: 0, failed: 0 };
-  const ending = await rows(pool, `SELECT s.* FROM sandbox_signups s WHERE ${ELIGIBLE} AND s.ending_sent_at IS NULL
+  const ending = await rows(pool, `SELECT s.*, (SELECT tz.timezone FROM tenants tz WHERE tz.id = s.tenant_id) AS tz FROM sandbox_signups s WHERE ${ELIGIBLE} AND s.ending_sent_at IS NULL
     AND s.expires_at BETWEEN UTC_TIMESTAMP() AND UTC_TIMESTAMP() + INTERVAL 60 HOUR AND s.at <= UTC_TIMESTAMP() - INTERVAL 72 HOUR`);
   for (const s of ending) {
     const [c] = await pool.query('UPDATE sandbox_signups SET ending_sent_at = UTC_TIMESTAMP(), nudge_sent_at = COALESCE(nudge_sent_at, UTC_TIMESTAMP()) WHERE id = ? AND ending_sent_at IS NULL', [s.id]);
@@ -193,7 +195,7 @@ async function runAll(base) {
     const r = await send(s, await endingText(base, s), 'demo-ending');
     if (r.ok) out.endings += 1; else out.failed += 1;
   }
-  const nudge = await rows(pool, `SELECT s.* FROM sandbox_signups s WHERE ${ELIGIBLE} AND s.nudge_sent_at IS NULL AND s.ending_sent_at IS NULL
+  const nudge = await rows(pool, `SELECT s.*, (SELECT tz.timezone FROM tenants tz WHERE tz.id = s.tenant_id) AS tz FROM sandbox_signups s WHERE ${ELIGIBLE} AND s.nudge_sent_at IS NULL AND s.ending_sent_at IS NULL
     AND s.at <= UTC_TIMESTAMP() - INTERVAL 40 HOUR AND s.expires_at > UTC_TIMESTAMP() + INTERVAL 60 HOUR`);
   for (const s of nudge) {
     const [c] = await pool.query('UPDATE sandbox_signups SET nudge_sent_at = UTC_TIMESTAMP() WHERE id = ? AND nudge_sent_at IS NULL', [s.id]);

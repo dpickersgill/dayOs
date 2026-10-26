@@ -89,7 +89,7 @@ export function shiftDialog({ shift, date, staffId, positions, onDone }) {
   if (editing) {
     const cancel = button('Cancel this shift', () => confirmDialog('Cancel this shift?', `${shift.position}, ${dayShort(shift.starts_at.slice(0, 10))} ${span(shift.starts_at, shift.ends_at)}.${shift.status === 'published' && shift.staff_id ? ' The person on it gets a message.' : ''}`, 'Cancel shift', async () => {
       await del(`/workforce/shifts/${shift.id}`);
-      toast('Shift cancelled');
+      toast('Shift canceled');
       dlg.close();
       await onDone();
     }, { danger: true }), { kind: 'danger' });

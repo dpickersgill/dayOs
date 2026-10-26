@@ -338,7 +338,7 @@ async function changeShift(req, shiftId, changes, override) {
   return tx(async (conn) => {
     const before = await one(conn, 'SELECT s.*, pos.name AS position FROM shifts s JOIN positions pos ON pos.tenant_id = s.tenant_id AND pos.id = s.position_id WHERE s.tenant_id = ? AND s.id = ? FOR UPDATE', [tenantId, shiftId]);
     if (!before) throw notFound('Shift');
-    if (before.status === 'cancelled') throw conflict('This shift is cancelled');
+    if (before.status === 'cancelled') throw conflict('This shift is canceled');
     const next = { ...before, ...Object.fromEntries(Object.entries(changes).filter(([, v]) => v !== undefined)) };
     if (next.ends_at <= next.starts_at) throw bad('The shift must end after it starts');
     if (tooLong(next.starts_at, next.ends_at)) throw bad('A shift can be at most 24 hours');

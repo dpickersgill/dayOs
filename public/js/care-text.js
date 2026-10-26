@@ -44,7 +44,7 @@ export function treatmentDetail(t) {
   if (d.body_part) bits.push(d.body_part);
   if (d.cms_before || d.cms_after) bits.push(`CMS before ${cmsText(d.cms_before) || 'not recorded'}; after ${cmsText(d.cms_after) || 'not recorded'}`);
   if (d.indication) bits.push(`for ${d.indication}`);
-  if (d.authorised_by) bits.push(`authorised by ${d.authorised_by}`);
+  if (d.authorised_by) bits.push(`authorized by ${d.authorised_by}`);
   if (t.description) bits.push(t.description);
   return bits.join('; ');
 }

@@ -33,7 +33,7 @@ async function quoteFor(conn, tenantId, session, students) {
 /** Hours from `nowLocal` ('YYYY-MM-DD HH:MM:SS') to the lesson start, both in the mountain's wall-clock time. */
 const hoursUntil = (startsAt, nowLocal) => (new Date(`${startsAt.slice(0, 19).replace(' ', 'T')}Z`) - new Date(`${nowLocal.replace(' ', 'T')}Z`)) / 3_600_000;
 
-/** The refund a guest gets for cancelling now: { percent, ... } under the mountain's tiers. */
+/** The refund a guest gets for canceling now: { percent, ... } under the mountain's tiers. */
 function refundPercent(tenant, hoursLeft) {
   if (hoursLeft >= tenant.refund_full_hours) return 100;
   if (hoursLeft >= tenant.refund_half_hours) return tenant.refund_half_percent;

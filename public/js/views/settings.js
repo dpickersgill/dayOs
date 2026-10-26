@@ -198,6 +198,13 @@ async function mountainForm() {
   const t = await get('/tenant/profile');
   const isOwner = ctx.me.role === 'owner';
   const name = input({ name: 'name', value: t.name || '', maxlength: 255, required: true });
+  // The mountain's clock: every time on its records is shown on it. The common North American zones first.
+  const ZONES = [['America/New_York', 'Eastern'], ['America/Detroit', 'Eastern (Michigan)'], ['America/Chicago', 'Central'], ['America/Denver', 'Mountain'], ['America/Boise', 'Mountain (Idaho)'], ['America/Phoenix', 'Arizona (no daylight saving)'],
+    ['America/Los_Angeles', 'Pacific'], ['America/Anchorage', 'Alaska'], ['Pacific/Honolulu', 'Hawaii'], ['America/Halifax', 'Atlantic'], ['America/Toronto', 'Eastern (Canada)'], ['America/Winnipeg', 'Central (Canada)'], ['America/Edmonton', 'Mountain (Canada)'], ['America/Vancouver', 'Pacific (Canada)']];
+  const zoneSel = select([...(ZONES.some((z) => z[0] === t.timezone) ? [] : [[t.timezone, t.timezone]]), ...ZONES.map(([z, l]) => [z, `${l} (${z})`])], t.timezone, { name: 'timezone', disabled: !isOwner });
+  const clockNow = h('span', { class: 'muted small' });
+  const showClock = () => { try { clockNow.textContent = `It is ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: zoneSel.value, timeZoneName: 'short' })} there now.`; } catch (_) { clockNow.textContent = ''; } };
+  zoneSel.addEventListener('change', showClock); showClock();
   const address = input({ name: 'address', value: t.address || '', maxlength: 255, placeholder: 'Street, town, state' });
   const phone = input({ name: 'phone', value: t.phone || '', maxlength: 40 });
   const footer = h('textarea', { name: 'receipt_footer', rows: 2, maxlength: 500 }, t.receipt_footer || '');
@@ -229,6 +236,7 @@ async function mountainForm() {
   const go = h('button', { type: 'submit', class: 'btn primary' }, 'Save');
   const form = h('form', { class: 'stack', novalidate: true, 'data-form': 'mountain' },
     h('div', { class: 'form' }, field('Mountain name', name), field('Phone', phone), field('Address', address, 'Printed at the top of receipts and ticket slips')),
+    h('div', { class: 'stack tight', 'data-section': 'timezone' }, field('Time zone', zoneSel, isOwner ? 'Every time on your records is on the mountain\u2019s clock. Check it shows the right local time.' : 'Only the owner can change this.'), clockNow),
     field('Receipt footer', footer, 'For example: opening hours, a thank-you, or the refund policy'),
     field('Waiver wording', waiver, 'Shown to guests before they sign. Have a lawyer review it before you rely on it. Every version is kept word for word. To ask everyone to sign a new version again, change it on the Waivers page instead.'),
     h('div', { class: 'form' },
@@ -242,8 +250,8 @@ async function mountainForm() {
       t.stripe_ready ? null : h('p', { class: 'muted small' }, 'Card payment is not connected yet. Add your Stripe keys first (see RUNBOOK.md, "Online card payment").'),
       h('h4', null, 'Cancellation and refunds (card payments)'),
       h('div', { class: 'form' },
-        field('Full refund if cancelled at least this many hours before', fullHrs),
-        field('Partial refund if cancelled at least this many hours before', halfHrs, 'Must be fewer hours than the full refund. Later than this: no refund.'),
+        field('Full refund if canceled at least this many hours before', fullHrs),
+        field('Partial refund if canceled at least this many hours before', halfHrs, 'Must be fewer hours than the full refund. Later than this: no refund.'),
         field('Partial refund percent', halfPct), field('Extra line for the policy', cancelNote)),
       h('div', { class: 'form' },
         field('Requests close this many hours before a lesson', notice),
@@ -274,8 +282,9 @@ async function mountainForm() {
         waiver_text: waiver.value.trim() || null, comp_counter_limit_cents: limit, scan_passback_seconds: Number(passback.value || 0),
         online_booking: booking.checked, booking_notice_hours: Number(notice.value || 0), cancel_hours: Number(cancelHrs.value || 0), booking_message: bookMsg.value.trim() || null,
         online_payment: payOn.checked, online_shop: shopOn.checked, online_daily_limit: shopLimit.value ? Number(shopLimit.value) : null, shop_recovery: recov.checked, shop_change_hours: chgOn.checked ? Number(chgHours.value || 0) : null, shop_change_fee_cents: Math.max(0, toCents(chgFee.value) || 0), weekly_report: weeklyOn.checked, quick_sale: quickOn.checked, shop_message: shopMsg.value.trim() || null, refund_full_hours: Number(fullHrs.value || 0), refund_half_hours: Number(halfHrs.value || 0), refund_half_percent: Number(halfPct.value || 0), cancel_note: cancelNote.value.trim() || null };
-      if (isOwner) body.require_mfa = mfa.checked;
+      if (isOwner) { body.require_mfa = mfa.checked; body.timezone = zoneSel.value; }
       await put('/tenant/profile', body);
+      if (body.timezone) { ctx.tz = body.timezone; ctx.me.timezone = body.timezone; }
       toast('Saved');
     } catch (err) { slot.append(errorBox(err)); } finally { go.disabled = false; }
   });

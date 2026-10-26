@@ -3,7 +3,7 @@
 // Card readers at the counter: a manager pairs a Stripe smart reader (the first one needs the mountain's address, for
 // Stripe's location), the ticket window sends the amount to the reader, the payment is checked with Stripe until it
 // settles, and a completed sale records it like an online card payment (on the mountain's account, refundable). A
-// declined card, an offline reader and a cancelled charge never record money; a charge that never became part of a
+// declined card, an offline reader and a canceled charge never record money; a charge that never became part of a
 // sale is refunded; and one mountain can never use or see another's readers or payments. Stripe is a mock server.
 process.env.BOOTSTRAP_KEY = 'test-bootstrap-key';
 process.env.LOGIN_RATE_LIMIT = '1000';
@@ -154,7 +154,7 @@ test('a tap at the reader pays for the sale, recorded like an online card paymen
   is(await sale(B, c.body.id), 400, 'another mountain cannot use it');
 });
 
-test('a declined card, an offline reader and a cancelled charge take no money', async () => {
+test('a declined card, an offline reader and a canceled charge take no money', async () => {
   const c = await api('POST', '/terminal/charges', { token: A.counter, body: { reader_id: A.reader, amount_cents: 6000 } });
   await api('POST', `/terminal/payments/${c.body.id}/simulate`, { token: A.counter, body: { outcome: 'decline' } });
   const failed = await waitFor(A, c.body.id, 'failed');

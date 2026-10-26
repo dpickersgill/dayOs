@@ -92,7 +92,7 @@ async function requestChange({ tenant, shopRow, code, newDate, successUrl, cance
   });
 }
 
-/** Stripe webhook for a paid change (metadata.kind === 'shop_change'). Anything we cannot honour is refunded in full. */
+/** Stripe webhook for a paid change (metadata.kind === 'shop_change'). Anything we cannot honor is refunded in full. */
 async function handleChangeWebhook(event, obj) {
   const tenantId = Number(obj.metadata.tenant_id); const id = Number(obj.metadata.change_id);
   if (event.type === 'checkout.session.expired') {

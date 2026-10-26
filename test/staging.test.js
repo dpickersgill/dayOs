@@ -93,7 +93,7 @@ test('every email goes to the team inbox, saying who it was for; no texts are se
   assert.equal(m.Subject, '[Staging, for guest@example.com] Your lesson');
 
   const sms = require('../src/lib/sms');
-  const t = await sms.send({ tenantId: 987654321, to: '+12155550123', body: 'Your lesson is cancelled' });
+  const t = await sms.send({ tenantId: 987654321, to: '+12155550123', body: 'Your lesson is canceled' });
   assert.equal(t.ok, false);
   assert.equal(sent.sms.length, 0, 'nothing reached the text service');
 });

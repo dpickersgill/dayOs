@@ -172,7 +172,7 @@ export function treatmentSheet({ kind, base, caseId, roster = [], patient = null
   } else if (kind === 'oxygen') {
     const device = chipGroup({ id: 't-o2-device', options: O2_DEVICES, value: 'non_rebreather', labelledBy: 't-o2-device-l' });
     const lpm = chipGroup({ id: 't-o2-lpm', options: [2, 4, 6, 10, 12, 15].map((n) => [String(n), `${n}`]), value: '15', labelledBy: 't-o2-lpm-l' });
-    parts.push(h('div', { class: 'vblock' }, h('h4', { id: 't-o2-device-l' }, 'Device'), device.el), h('div', { class: 'vblock' }, h('h4', { id: 't-o2-lpm-l' }, 'Litres per minute'), lpm.el));
+    parts.push(h('div', { class: 'vblock' }, h('h4', { id: 't-o2-device-l' }, 'Device'), device.el), h('div', { class: 'vblock' }, h('h4', { id: 't-o2-lpm-l' }, 'Liters per minute'), lpm.el));
     collect = () => ({ kind, detail: { ...(device.get() ? { o2_device: device.get() } : {}), ...(lpm.get() ? { o2_lpm: Number(lpm.get()) } : {}) } });
   } else {
     // The patrol's formulary decides what can be given, how, and who may give it; the server checks it again.
@@ -238,7 +238,7 @@ export function treatmentSheet({ kind, base, caseId, roster = [], patient = null
       h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-dose' }, 'Dose')), h('div', { class: 'row tight' }, dose), h('span', { id: 't-unit-l', class: 'muted small' }, 'Unit'), unit.el),
       h('div', { class: 'vblock' }, h('h4', { id: 't-route-l' }, 'Route'), route.el),
       h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-why' }, 'Given for')), why),
-      h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-auth' }, 'Authorised by')), auth, al, h('span', { class: 'hint' }, 'Your standing order, the doctor on medical control, or the patient\'s own medication')),
+      h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-auth' }, 'Authorized by')), auth, al, h('span', { class: 'hint' }, 'Your standing order, the doctor on medical control, or the patient\'s own medication')),
       h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-by' }, 'Given by')), by),
       h('div', { class: 'vblock' }, h('h4', null, h('label', { for: 't-lot' }, 'From stock')), lot),
       h('p', { class: 'muted small' }, 'Record the effect from the treatment log once you have seen it.'));

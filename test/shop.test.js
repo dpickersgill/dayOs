@@ -591,7 +591,7 @@ test('a repeated Stripe event after an automatic refund changes nothing', async 
   assert.equal((await q('SELECT COUNT(*) AS n FROM orders WHERE tenant_id = ? AND payment_ref = ?', [A.id, right.data.object.payment_intent]))[0].n, 0, 'nothing sold');
 });
 
-test('a payment that lands after its hold ran out is honoured, and staff are told it went over the limit', async () => {
+test('a payment that lands after its hold ran out is honored, and staff are told it went over the limit', async () => {
   const d = plus(today, 34);
   await q('UPDATE tenants SET online_daily_limit = 1 WHERE id = ?', [A.id]);
   try {
@@ -692,7 +692,7 @@ test('a card refund retried days later is not sent twice, and a guest who went b
   const tok = (await q('SELECT view_token FROM shop_orders WHERE id = ?', [first.row.id]))[0].view_token;
   assert.equal((await pub('POST', `/shop/orders/${tok}/abandon`)).status, 200);
   assert.equal((await q('SELECT status FROM shop_orders WHERE id = ?', [first.row.id]))[0].status, 'expired');
-  // a payment that lands after the guest pressed back is still honoured
+  // a payment that lands after the guest pressed back is still honored
   assert.equal((await webhook(paidEvent(first.row, A.id))).status, 200);
   assert.equal((await q('SELECT status FROM shop_orders WHERE id = ?', [first.row.id]))[0].status, 'paid');
 });

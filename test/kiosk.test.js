@@ -218,7 +218,7 @@ test('badges: a printed code identifies someone, a copied or altered one does no
   assert.equal((await scan(devB, samBadge.code)).status, 401, 'another mountain\'s tablet does not know this badge');
   const re = ok(await adm('POST', `/people/${sam}/badge/reissue`, { token: A.owner }));
   assert.match(re.code, /\.2\./);
-  assert.equal((await scan(devA, samBadge.code)).status, 401, 'the old card is cancelled');
+  assert.equal((await scan(devA, samBadge.code)).status, 401, 'the old card is canceled');
   assert.equal((await scan(devA, re.code)).status, 200);
   assert.equal((await scan(devA, out.find((b) => b.staff_id === ava).code)).status, 200, 'other badges are unaffected');
   // someone with no badge issued cannot be matched even with a well-formed code

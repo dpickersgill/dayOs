@@ -33,10 +33,16 @@ const isCare = (type) => CARE.has(type);
  * Parts of the report that are not form fields, so the director can require them too. scope 'case', section 'report'.
  * test(c) is true when the case has it.
  */
+const told = (c, who) => (c.contacts || []).some((x) => !x.voided_at && x.who === who);
 const EXTRA = [
   { key: 'narrative', label: 'Narrative (what happened, in your own words)', test: (c) => !isEmpty(String(c.narrative || '').trim()) },
   { key: 'photos', label: 'At least one photo', test: (c) => (c.photos || []).some((m) => !m.voided_at) },
   { key: 'collision_report', label: 'Collision report', types: ['collision'], test: (c) => Boolean(c.collision) },
+  // Who was told (the calls log on the report).
+  { key: 'told_management', label: 'Management told', test: (c) => told(c, 'management') },
+  { key: 'told_insurer', label: 'Insurer told', test: (c) => told(c, 'insurer') },
+  { key: 'told_parent', label: 'Parent or guardian told', care: true, test: (c) => told(c, 'parent') },
+  { key: 'told_ems', label: 'EMS told', care: true, test: (c) => told(c, 'ems') },
 ];
 
 // ---------------------------------------------------------------- conditions ("only when")
@@ -60,8 +66,8 @@ const CONDITIONS = [
   ['collision', 'A collision', (p) => formOf(p).collided === 'yes', (c) => c.category === 'collision'],
   ['refused', 'Care refused', (p) => p.disposition === 'refused_care', null],
   ['staff', 'Staff or volunteer on duty', (p) => ['staff_work', 'volunteer_work'].includes(formOf(p).patient_type) || p.activity === 'staff', null],
-  ['rental', 'Rental or demo gear', (p) => RENTAL.includes(formOf(p).equipment) || p.rental_equipment === 'yes', null],
-  ['lift', 'A lift involved', (p) => String(formOf(p).cause || '').startsWith('lift_'), (c) => parseForm(c.form).incident_location === 'lift_incident'],
+  ['rental', 'Rental or demo gear', (p) => RENTAL.includes(formOf(p).equipment) || p.rental_equipment === 'yes', (c) => (c.rentals || []).length > 0],
+  ['lift', 'A lift involved', (p) => String(formOf(p).cause || '').startsWith('lift_'), (c) => parseForm(c.form).incident_location === 'lift_incident' || Boolean(c.lift_id)],
 ];
 const CONDITION_KEYS = CONDITIONS.map((x) => x[0]);
 /** Conditions that make sense for a kind of case: those about patients only where the case has patients. */
@@ -92,6 +98,7 @@ function itemsFor(type) {
   }
   for (const x of EXTRA) {
     if (x.types && !x.types.includes(type)) continue;
+    if (x.care && !isCare(type)) continue;
     out.push({ id: `case.${x.key}`, scope: 'case', key: x.key, section: 'report', label: x.label, type: 'extra', locked: null, extra: x });
   }
   return out;
@@ -230,6 +237,10 @@ function insurerCare(type) {
     ...only(p('rental_boot', 'rental_ski', 'binding_release'), 'submit', ['rental']),
     ...all(cs('patroller_signature', 'trail_id', 'map_grid', 'photos'), 'submit'),
     ...all(cs('gps'), 'approve'),
+    // Insurers want to know they, and management, were told promptly on a serious case, and a parent on a minor's.
+    ...only(cs('told_management'), 'submit', ['serious']),
+    ...only(cs('told_insurer'), 'approve', ['serious']),
+    ...only(cs('told_parent'), 'approve', ['minor']),
   };
 }
 /** Cases with no patient: where, what was seen, who saw it, who wrote it. */
@@ -340,7 +351,7 @@ function evaluate(rules, c, { exceptions = [] } = {}) {
 /** The plain message for one unmet item, as the problem list and the reviewer show it. */
 const message = (i) => `${i.who ? `${i.who}: ` : `${i.section_title}: `}${i.label}`;
 /** Where the case screen should jump for an item. */
-const where = (i) => (i.key === 'narrative' ? { area: 'narrative' } : i.key === 'photos' ? { area: 'photos' } : i.key === 'collision_report' ? { area: 'collision' }
+const where = (i) => (i.key === 'narrative' ? { area: 'narrative' } : i.key === 'photos' ? { area: 'photos' } : i.key === 'collision_report' ? { area: 'collision' } : i.key.startsWith('told_') ? { area: 'contacts' }
   : { scope: i.scope, section: i.section, field: i.key, ...(i.patient_id ? { patient_id: i.patient_id } : {}) });
 
 /** Counts of what is left, by section, for the Report tab. */

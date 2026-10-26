@@ -95,7 +95,7 @@ async function settingsDialog() {
       field('How much', select([['unused', 'The share for lessons still to come'], ['full', 'The whole lift ticket part']], s.pass_later_share, { name: 'pass_later_share' }))),
     h('fieldset', { class: 'plain-set' }, h('legend', null, 'Telling families'),
       field('Reminder the day before', select([['first', 'Before the first lesson (and any makeup)'], ['every', 'Before every lesson'], ['off', 'Off']], s.reminders, { name: 'reminders' }), 'By email, with the time, the meeting place and what to bring'),
-      h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'text_cancellations', checked: s.text_cancellations }), ' Text families when a lesson is cancelled for weather (needs text messages set up)'))),
+      h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'text_cancellations', checked: s.text_cancellations }), ' Text families when a lesson is canceled for weather (needs text messages set up)'))),
   async (fd) => {
     await put('/programs/settings', { pass_later: val(fd, 'pass_later'), pass_later_share: val(fd, 'pass_later_share'), reminders: val(fd, 'reminders'), text_cancellations: Boolean(fd.get('text_cancellations')) });
     toast('Program settings saved');
@@ -245,7 +245,7 @@ function dayCard(p, t, g) {
     h('div', { class: 'pday-foot muted small' }, money(g.price_now.cents), g.price_now.label ? ` ${g.price_now.label.toLowerCase()}` : '', g.price_cents != null ? ' (this day\'s own price)' : ''));
 }
 
-/** Every lesson date: a lesson, a cancelled one (struck through) and a makeup held in reserve (dashed). */
+/** Every lesson date: a lesson, a canceled one (struck through) and a makeup held in reserve (dashed). */
 function dateStrip(meetings, onPick) {
   return h('ol', { class: 'pdates', 'aria-label': 'Lesson dates' }, meetings.map((m) => {
     const cls = m.status === 'cancelled' ? 'is-off' : m.status === 'standby' ? 'is-reserve' : m.kind !== 'regular' ? 'is-makeup' : '';
@@ -270,7 +270,7 @@ function termDialog(p, t, reload) {
       field('Status', select([['draft', 'Draft (not on sale)'], ['open', 'Open for registration'], ['closed', 'Closed'], ['archived', 'Archived']], t ? t.status : 'draft', { name: 'status' })),
       field('First week starts', input({ name: 'starts_on', type: 'date', required: true, value: t ? t.starts_on : '' }), 'Each day group starts on its first weekday from here'),
       field('Weeks', input({ name: 'weeks', type: 'number', min: 1, max: 40, required: true, value: t ? t.weeks : 4 })),
-      field('Makeup weeks', input({ name: 'makeup_weeks', type: 'number', min: 0, max: 6, value: t ? t.makeup_weeks : 1 }), 'Held in reserve, used only when a lesson is cancelled'),
+      field('Makeup weeks', input({ name: 'makeup_weeks', type: 'number', min: 0, max: 6, value: t ? t.makeup_weeks : 1 }), 'Held in reserve, used only when a lesson is canceled'),
       field('Starts at', input({ name: 'start_time', type: 'time', required: true, value: t ? t.start_time : '15:45' })),
       field('Ends at', input({ name: 'end_time', type: 'time', required: true, value: t ? t.end_time : '17:45' })),
       t ? null : field('Spots per day', input({ name: 'capacity', type: 'number', min: 1, max: 2000, placeholder: 'No limit' }), 'Change any day afterwards'),
@@ -358,7 +358,7 @@ function stormDialog(reload) {
     h('div', { class: 'form' }, field('Date', date), field('Reason', reason, 'Goes in the email to families')),
     h('label', { class: 'check' }, tell, ' Email the families'),
     h('h3', null, 'Lessons that day'), list,
-    h('p', { class: 'muted small' }, 'Only this date is cancelled. Each day group\'s makeup date becomes a lesson; a group with no makeup left is listed so you can add a date or credit the families.')),
+    h('p', { class: 'muted small' }, 'Only this date is canceled. Each day group\'s makeup date becomes a lesson; a group with no makeup left is listed so you can add a date or credit the families.')),
   async (fd) => {
     const out = await post('/programs/cancel-day', { date: val(fd, 'date'), reason: val(fd, 'reason'), notify: Boolean(fd.get('notify')) });
     const short = out.data.filter((x) => x.no_makeup_left);
@@ -459,7 +459,7 @@ async function dayView(root, programId, groupId) {
       h('section', { class: 'panel stack' },
         h('div', { class: 'spread' }, h('h2', null, 'Lesson dates'), isManager() ? button('Add a date', () => addDate(groupId, load), { small: true }) : null),
         dateStrip(g.meetings, (m) => dateMenu(m, load)),
-        h('p', { class: 'muted small' }, 'Select a date for attendance or to cancel it. Dashed: makeup date held in reserve. Struck through: cancelled.')),
+        h('p', { class: 'muted small' }, 'Select a date for attendance or to cancel it. Dashed: makeup date held in reserve. Struck through: canceled.')),
       h('section', { class: 'panel stack' },
         h('div', { class: 'spread' }, h('h2', null, 'Classes'),
           h('div', { class: 'row' }, button('Add a class', () => levelDialog(groupId, load), { small: true }),
@@ -588,7 +588,7 @@ function addDate(groupId, reload) {
 
 /** A lesson date: take attendance, or cancel it (weather). */
 function dateMenu(m, reload) {
-  const status = m.status === 'cancelled' ? `Cancelled${m.cancel_reason ? `: ${m.cancel_reason}` : ''}` : m.status === 'standby' ? 'Makeup date held in reserve. It becomes a lesson when an earlier date is cancelled.' : m.kind === 'regular' ? 'Lesson' : m.kind === 'makeup' ? 'Makeup lesson' : 'Added date';
+  const status = m.status === 'cancelled' ? `Cancelled${m.cancel_reason ? `: ${m.cancel_reason}` : ''}` : m.status === 'standby' ? 'Makeup date held in reserve. It becomes a lesson when an earlier date is canceled.' : m.kind === 'regular' ? 'Lesson' : m.kind === 'makeup' ? 'Makeup lesson' : 'Added date';
   const items = [h('p', null, status)];
   let dlg;
   const row = h('div', { class: 'footer row' });
@@ -606,7 +606,7 @@ function cancelDate(m, reload) {
     h('p', { class: 'muted small' }, 'The first makeup date held in reserve becomes a lesson.')),
   async (fd) => {
     const out = await post(`/programs/meetings/${m.id}/cancel`, { reason: val(fd, 'reason'), notify: Boolean(fd.get('notify')) });
-    toast(out.makeup ? `Cancelled. Makeup lesson on ${fmtDate(out.makeup.date)}${out.emailed ? `, ${out.emailed} families emailed` : ''}` : 'Cancelled. No makeup date is left: add a date, or credit the families', out.makeup ? 'success' : 'warn');
+    toast(out.makeup ? `Canceled. Makeup lesson on ${fmtDate(out.makeup.date)}${out.emailed ? `, ${out.emailed} families emailed` : ''}` : 'Canceled. No makeup date is left: add a date, or credit the families', out.makeup ? 'success' : 'warn');
     await reload();
   }, { submitText: 'Cancel date' });
 }

@@ -1,6 +1,6 @@
 // Quick vitals: a sheet built for gloved thumbs. Big plus and minus buttons that start from the last reading, tap-chips for
 // responsiveness, skin, pupils and pain, one tap for "now", a flag on anything outside the usual range, and an optional
-// reminder to check again. Nothing here blocks saving: the numbers are the patroller's, the colours are only a prompt.
+// reminder to check again. Nothing here blocks saving: the numbers are the patroller's, the colors are only a prompt.
 
 import { h, clear, dialog, nowInput, errorBox } from '../ui.js';
 import { flag, flagAvpu, ageGroup, GROUP_LABEL } from '../vitals-guide.js';
@@ -48,7 +48,7 @@ function stepper({ key, label, min, max, step = 1, start, last, age, width, flag
 }
 
 const AVPU = [['alert', 'Alert'], ['verbal', 'Voice'], ['pain', 'Pain'], ['unresponsive', 'Unresponsive']];
-const SKIN = { colour: [['Normal', 'Normal colour'], ['Pale', 'Pale'], ['Flushed', 'Flushed'], ['Cyanotic', 'Blue']], temp: [['Warm', 'Warm'], ['Cool', 'Cool'], ['Hot', 'Hot']], moisture: [['Dry', 'Dry'], ['Clammy', 'Clammy'], ['Sweaty', 'Sweaty']] };
+const SKIN = { colour: [['Normal', 'Normal color'], ['Pale', 'Pale'], ['Flushed', 'Flushed'], ['Cyanotic', 'Blue']], temp: [['Warm', 'Warm'], ['Cool', 'Cool'], ['Hot', 'Hot']], moisture: [['Dry', 'Dry'], ['Clammy', 'Clammy'], ['Sweaty', 'Sweaty']] };
 const WHEN = [['0', 'Now'], ['5', '5 min ago'], ['10', '10 min ago'], ['other', 'Pick a time']];
 const AGAIN = [['', 'No reminder'], ['5', '5 min'], ['10', '10 min'], ['15', '15 min']];
 const GCS_E = [[4, '4 Open by themselves'], [3, '3 To voice'], [2, '2 To pain'], [1, '1 None']];
@@ -102,7 +102,7 @@ export function openVitalsSheet({ base, caseId, patientName, age, last, severity
 
   const avpu = chipGroup({ id: 'v-avpu', options: AVPU, labelledBy: 'v-avpu-l' });
   const skin = h('div', { id: 'v-skin', class: 'stack tight' });
-  const SKIN_NAME = { colour: 'Skin colour', temp: 'Skin temperature', moisture: 'Skin moisture' };
+  const SKIN_NAME = { colour: 'Skin color', temp: 'Skin temperature', moisture: 'Skin moisture' };
   const skinParts = Object.entries(SKIN).map(([k, opts]) => { const g = chipGroup({ id: `v-skin-${k}`, options: opts }); g.el.setAttribute('aria-label', SKIN_NAME[k]); skin.append(g.el); return g; });
   const pL = chipGroup({ id: 'v-pupil-l', options: PUPIL_CHOICES, labelledBy: 'v-pupil-l-l' });
   const pR = chipGroup({ id: 'v-pupil-r', options: PUPIL_CHOICES, labelledBy: 'v-pupil-r-l' });

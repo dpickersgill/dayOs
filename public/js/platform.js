@@ -25,7 +25,7 @@ async function call(method, path, body, retried = false) {
   return json;
 }
 
-/** Opening one mountain: why, and for how long (up to 8 hours). Resolves once open; rejects if cancelled. */
+/** Opening one mountain: why, and for how long (up to 8 hours). Resolves once open; rejects if canceled. */
 function openAccess(id, name) {
   return new Promise((resolve, reject) => {
     let ok = false;
@@ -155,6 +155,7 @@ async function home() {
       { head: 'Billing', cell: (t) => billBadge(t.billing) },
       { head: 'Apps', cell: (t) => `${t.modules.length} of ${apps.length} on` },
       { head: 'Logins', num: true, cell: (t) => String(t.users) },
+      { head: 'Time zone', cell: (t) => h('span', { class: 'stack tight' }, t.timezone, t.zone_warning ? h('small', { class: 'cover-why' }, t.zone_warning) : null) },
       { head: 'Storage', cell: (t) => `${t.storage_used_mb} of ${t.storage_cap_mb} MB` },
       { actions: true, cell: (t) => button('Manage', () => manage(t.id), { small: true }) },
     ], data));
@@ -259,10 +260,13 @@ function resetPassword(id, u) {
   }, { submitText: 'Reset password' });
 }
 
+const browserZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York'; } catch (_) { return 'America/New_York'; } };
+
 function addMountain(pre = {}, after) {
   const f = {
     name: input({ name: 'name', required: true, value: pre.name || '' }), slug: input({ name: 'slug', required: true, autocapitalize: 'none', spellcheck: 'false' }),
-    tz: input({ name: 'tz', value: 'America/New_York' }), first: input({ name: 'first', required: true, value: pre.first || '' }), last: input({ name: 'last', required: true, value: pre.last || '' }),
+    // Starts from this browser's zone, never silently Eastern; pick the mountain's own zone if it is somewhere else.
+    tz: h('select', { name: 'tz' }, ...[...new Set([browserZone(), 'America/New_York', 'America/Detroit', 'America/Chicago', 'America/Denver', 'America/Boise', 'America/Phoenix', 'America/Los_Angeles', 'America/Anchorage', 'Pacific/Honolulu', 'America/Toronto', 'America/Edmonton', 'America/Vancouver'])].map((z) => h('option', { value: z }, z))), first: input({ name: 'first', required: true, value: pre.first || '' }), last: input({ name: 'last', required: true, value: pre.last || '' }),
     email: input({ name: 'email', type: 'email', required: true, value: pre.email || '' }), pw: input({ name: 'pw', type: 'password', autocomplete: 'new-password', required: true }),
     cap: input({ name: 'cap', type: 'number', min: 10, max: 100000, value: 500 }),
     billing: h('select', { name: 'billing' }, h('option', { value: 'trial' }, '14-day free trial, then they pay'), h('option', { value: 'comped' }, 'Free (no charge)')),
@@ -272,7 +276,7 @@ function addMountain(pre = {}, after) {
   f.name.addEventListener('input', () => { if (!f.slug.dataset.touched) f.slug.value = f.name.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); });
   f.slug.addEventListener('input', () => { f.slug.dataset.touched = '1'; });
   formDialog('Add a mountain', h('div', { class: 'stack' },
-    field('Mountain name', f.name), field('Web name', f.slug, 'Lowercase letters, numbers and dashes. People type this to sign in.'), field('Time zone', f.tz),
+    field('Mountain name', f.name), field('Web name', f.slug, 'Lowercase letters, numbers and dashes. People type this to sign in.'), field('Time zone', f.tz, 'The mountain\u2019s own clock: every time on its records uses it'),
     h('div', { class: 'grid2' }, field('Owner first name', f.first), field('Owner last name', f.last)), field('Owner email', f.email), field('Owner password', f.pw, 'At least 12 characters.'),
     field('Document storage limit (MB)', f.cap), field('Billing', f.billing, 'You can change this later on the mountain\'s Manage page.'), h('fieldset', { class: 'stack tight' }, h('legend', null, 'Apps to turn on'), ...checks)), async () => {
     const modules = Object.fromEntries([...picks].map(([k, cb]) => [k, cb.checked]));
@@ -310,7 +314,7 @@ async function leads() {
 
 // ---------------------------------------------------------------- billing: plans, prices and each mountain's subscription
 const dollars = (c) => `$${(Number(c || 0) / 100).toFixed(2).replace(/\.00$/, '')}`;
-const BILL_WORDS = { comped: 'Free', subscribed: 'Paying', cancelling: 'Cancelling', paid_manually: 'Paid manually', trial: 'Trial', payment_failed: 'Payment failed', trial_ended: 'Trial ended', paid_time_ended: 'Paid time ended', canceled: 'Cancelled' };
+const BILL_WORDS = { comped: 'Free', subscribed: 'Paying', cancelling: 'Canceling', paid_manually: 'Paid manually', trial: 'Trial', payment_failed: 'Payment failed', trial_ended: 'Trial ended', paid_time_ended: 'Paid time ended', canceled: 'Canceled' };
 function billBadge(b) {
   if (!b) return '';
   const text = `${BILL_WORDS[b.kind] || b.kind}${b.kind === 'trial' && b.days_left != null ? `, ${b.days_left} days left` : ''}${b.read_only ? ', read only' : b.state === 'grace' ? `, grace to ${b.until}` : ''}`;

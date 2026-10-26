@@ -62,7 +62,7 @@ const TYPES = {
 };
 const TYPE_KEYS = Object.keys(TYPES);
 
-/** The app address a link opens, to recognise links pasted into a message. Returns { type, id } or null. */
+/** The app address a link opens, to recognize links pasted into a message. Returns { type, id } or null. */
 const PATTERNS = [
   [/#\/patrol\/case\/(\d+)/, 'patrol_case'], [/#\/assets\/a\/(\d+)/, 'asset'], [/#\/conditions\/wo\/(\d+)/, 'work_order'],
   [/#\/people\/(\d+)/, 'customer'], [/#\/sell\/order\/(\d+)/, 'order'], [/#\/waivers\/w\/(\d+)/, 'waiver'], [/#\/documents\/d\/(\d+)/, 'document'],

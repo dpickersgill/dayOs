@@ -265,7 +265,7 @@ test('public booking page: closed until switched on, then requests are queued, c
   assert.equal(cancel.status, 409);
 });
 
-test('requests can be declined or cancelled, an unpaid confirmed lesson can be cancelled online, and rules are enforced', async () => {
+test('requests can be declined or canceled, an unpaid confirmed lesson can be canceled online, and rules are enforced', async () => {
   const pub = (m, p, o) => call('/api/v1/public', m, `/${A.slug}${p}`, o);
   const adult = { first_name: 'Ann', last_name: 'Adult', ...ADULT, sex: 'female' };
   const mk = (extra = {}) => pub('POST', '/requests', { body: { session_id: D.g, contact_first_name: 'Ann', contact_last_name: 'Adult', contact_email: 'ann@x.test', contact_phone: '215-555-0111', students: [adult], waiver_accepted: true, ...extra } });
@@ -275,8 +275,8 @@ test('requests can be declined or cancelled, an unpaid confirmed lesson can be c
   assert.equal((await pub('POST', `/requests/${r1.body.reference}/status`, { body: { email: 'ann@x.test' } })).body.status, 'cancelled');
   const r2 = await mk();
   const id2 = (await api('GET', '/skischool/requests', { token: T.manager })).body.data.find((r) => r.reference === r2.body.reference).id;
-  assert.equal((await api('POST', `/skischool/requests/${id2}/decline`, { token: T.manager, body: { staff_note: 'Class cancelled for wind' } })).status, 200);
-  assert.equal((await pub('POST', `/requests/${r2.body.reference}/status`, { body: { email: 'ann@x.test' } })).body.staff_note, 'Class cancelled for wind');
+  assert.equal((await api('POST', `/skischool/requests/${id2}/decline`, { token: T.manager, body: { staff_note: 'Class canceled for wind' } })).status, 200);
+  assert.equal((await pub('POST', `/requests/${r2.body.reference}/status`, { body: { email: 'ann@x.test' } })).body.staff_note, 'Class canceled for wind');
   // a child cannot book themselves in
   const kid = { first_name: 'Ann', last_name: 'Adult', date_of_birth: `${Number(today.slice(0, 4)) - 10}-01-01`, sex: 'female' };
   assert.equal((await mk({ students: [kid] })).status, 400, 'the contact must be an adult');

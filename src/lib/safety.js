@@ -197,7 +197,7 @@ async function patientsOf(db, tenantIds, period) {
 /**
  * Skier visits per mountain: each ticket's first accepted scan on a local day. Days are cut at local midnight using the
  * offset in force in mid-January, the heart of the season (in the weeks on the other side of a daylight-saving change,
- * a scan in the hour around midnight may land on the neighbouring day; lifts are not running then). Mountains with no
+ * a scan in the hour around midnight may land on the neighboring day; lifts are not running then). Mountains with no
  * scans are left out.
  */
 async function visitsOf(db, tenantIds, period) {

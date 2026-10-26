@@ -13,7 +13,7 @@ export const supported = () => Boolean(globalThis.PublicKeyCredential && navigat
 // What the person sees when the browser refuses: plain words, not "NotAllowedError".
 function plain(err) {
   const name = err && err.name;
-  if (name === 'NotAllowedError' || name === 'AbortError') return new Error('The passkey was cancelled or took too long. Try again.');
+  if (name === 'NotAllowedError' || name === 'AbortError') return new Error('The passkey was canceled or took too long. Try again.');
   if (name === 'InvalidStateError') return new Error('This device already has a passkey for this login.');
   if (name === 'SecurityError') return new Error('Passkeys only work on the app\'s secure address (https).');
   if (name === 'NotSupportedError') return new Error('This browser cannot make a passkey. Try another browser or device.');

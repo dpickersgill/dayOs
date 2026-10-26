@@ -90,8 +90,8 @@ test('standing walks from trial to grace to read only, and payment brings it bac
   assert.equal(failed.state, 'grace'); assert.equal(failed.kind, 'payment_failed'); assert.equal(failed.until, '2026-11-24');
   assert.equal(B.standing({ comped: 0, sub_status: 'past_due', past_due_since: '2026-11-01 08:00:00', stripe_subscription_id: 'sub' }, today).state, 'read_only');
   assert.equal(B.standing({ comped: 0, sub_status: 'past_due', past_due_since: '2026-11-01', paid_until: '2026-12-31', stripe_subscription_id: 'sub' }, today).kind, 'paid_manually', 'a check the operator recorded covers it');
-  const cancelled = B.standing({ comped: 0, sub_status: 'canceled', period_end: '2026-11-18 00:00:00', stripe_subscription_id: 'sub' }, today);
-  assert.equal(cancelled.kind, 'canceled'); assert.equal(cancelled.until, '2026-12-02');
+  const canceled = B.standing({ comped: 0, sub_status: 'canceled', period_end: '2026-11-18 00:00:00', stripe_subscription_id: 'sub' }, today);
+  assert.equal(canceled.kind, 'canceled'); assert.equal(canceled.until, '2026-12-02');
   assert.equal(B.standing({ comped: 0, paid_until: '2026-11-10' }, today).kind, 'paid_time_ended');
 });
 
@@ -182,7 +182,7 @@ test('changing plans updates the Stripe subscription; the portal opens; failures
 });
 
 test('read only: sales and new records stop, patrol and billing keep working, the shop stops taking orders', async () => {
-  // The subscription is cancelled and the trial long gone
+  // The subscription is canceled and the trial long gone
   await webhook({ id: `evt_${suffix}_5`, type: 'customer.subscription.deleted', data: { object: { id: `sub_${suffix}`, status: 'canceled', current_period_end: Math.floor(Date.now() / 1000) - 20 * 86400 } } });
   assert.equal((await plat('PUT', `/tenants/${tenantId}/billing`, { trial_ends_on: daysFrom(-40) })).status, 200);
   const me = await api('GET', '/auth/me', { token: owner });

@@ -2,7 +2,7 @@
 
 // The parent account (/family/<mountain>): one page for a family's program places. No password: the parent asks for a
 // sign-in link by email, and the page keeps a session on their phone for 30 days. They see every child's sessions, day,
-// class, every lesson date (cancelled, makeup), attendance, what they owe, the lift ticket and the report card; they can
+// class, every lesson date (canceled, makeup), attendance, what they owe, the lift ticket and the report card; they can
 // update allergies, medical notes and who may pick up, switch day and withdraw within the program's rules.
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');

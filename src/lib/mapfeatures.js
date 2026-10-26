@@ -3,7 +3,7 @@
 // The asset map (Assets and fleet, Map): what lies where on the mountain. Points for things in one place (a valve, a
 // hydrant, a pump house, a transformer), lines for what runs between places (a snowmaking water or air line, a power
 // line, a sewer or fibre run) and areas for what covers ground (a pond, a building). Each belongs to a system, drawn in
-// that system's colour and toggled as a layer. A point or area can be tied to an asset in the register, so the map and
+// that system's color and toggled as a layer. A point or area can be tied to an asset in the register, so the map and
 // the asset's record point at each other.
 
 // [key, label, geometry, system]
@@ -24,7 +24,7 @@ const KINDS = [
   ['other_point', 'Other point', 'point', 'other'], ['other_line', 'Other line', 'line', 'other'],
 ].map(([key, name, geometry, system]) => ({ key, label: name, geometry, system }));
 
-// Colours follow the common utility-marking colours where there is one (APWA): blue drinking water, red power,
+// Colors follow the common utility-marking colors where there is one (APWA): blue drinking water, red power,
 // yellow gas and fuel, orange comms, green sewer, purple reclaimed and pond water.
 const SYSTEMS = [
   ['water', 'Snowmaking water', '#7B3FA0'], ['air', 'Snowmaking air', '#0E8FA6'], ['potable', 'Drinking water', '#1F5FD1'],
@@ -36,15 +36,15 @@ const SYSTEMS = [
 const KIND_KEYS = KINDS.map((k) => k.key);
 const kindOf = (key) => KINDS.find((k) => k.key === key);
 
-const R = 6371008.8; // metres
+const R = 6371008.8; // meters
 const rad = (d) => (d * Math.PI) / 180;
-/** Great-circle distance in metres between two [lat, lng] points. */
+/** Great-circle distance in meters between two [lat, lng] points. */
 function distance(a, b) {
   const dLat = rad(b[0] - a[0]); const dLng = rad(b[1] - a[1]);
   const s = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a[0])) * Math.cos(rad(b[0])) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
 }
-/** Length of a line in metres. */
+/** Length of a line in meters. */
 const lengthOf = (pts) => pts.slice(1).reduce((m, p, i) => m + distance(pts[i], p), 0);
 /** Area of a small polygon in square metres (flat-earth approximation, fine at ski-area scale). */
 function areaOf(pts) {

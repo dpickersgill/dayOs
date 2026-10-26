@@ -34,7 +34,7 @@ export async function render(root, params = []) {
 }
 
 // ---------------------------------------------------------------- the daily map
-// A phone's GPS is good to a few metres in the open and much worse under trees or beside the lodge. A pin goes down by
+// A phone's GPS is good to a few meters in the open and much worse under trees or beside the lodge. A pin goes down by
 // itself once the fix is within GOOD_M; past OK_M the crew is warned and can drop anyway or tap the map instead.
 const GOOD_M = 8; const OK_M = 15; const WAIT_MS = 20000;
 const ft = (m) => `${Math.max(1, Math.round(Number(m) * 3.281))} ft`;

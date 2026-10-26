@@ -4,7 +4,7 @@
 //
 // Each mountain is on a plan (a set of apps) with any add-ons, monthly or yearly. New mountains start with a 14-day
 // trial. They pay through Stripe: card or US bank account (Stripe Checkout), or an emailed invoice due in 30 days.
-// Stripe's customer portal handles changing the card, seeing invoices and cancelling.
+// Stripe's customer portal handles changing the card, seeing invoices and canceling.
 //
 // Standing (see standingOf):
 //   ok         comped, a live subscription, a manual payment that covers today, or in the trial
@@ -46,7 +46,7 @@ function standing(b, today) {
   if (dateOf(b.trial_ends_on) && dateOf(b.trial_ends_on) >= today && !b.stripe_subscription_id) {
     return { state: 'ok', kind: 'trial', read_only: false, trial: true, until: dateOf(b.trial_ends_on), days_left: daysBetween(today, dateOf(b.trial_ends_on)) };
   }
-  // Nothing covers today: the trial, a manual payment or a cancelled subscription ran out.
+  // Nothing covers today: the trial, a manual payment or a canceled subscription ran out.
   const ended = maxDate(dateOf(b.trial_ends_on), dateOf(b.paid_until), dateOf(b.period_end)) || today;
   const until = addDays(ended, GRACE_DAYS);
   const kind = b.sub_status === 'canceled' ? 'canceled' : dateOf(b.paid_until) === ended ? 'paid_time_ended' : 'trial_ended';

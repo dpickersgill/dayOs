@@ -61,7 +61,7 @@ export async function drawService(box) {
   const cols = (shop) => [
     { head: 'SKU', cell: (i) => h('strong', null, i.sku) },
     { head: 'Gear', cell: (i) => `${label(i.category)} ${[i.brand, i.model, i.size].filter(Boolean).join(' ')}` },
-    { head: shop ? 'Notes' : 'Rentals since service', cell: (i) => (shop ? i.notes || '' : String(i.uses_count - i.uses_at_service)) },
+    { head: shop ? 'Notes' : 'Rentals since service', cell: (i) => (shop ? (i.patrol_case ? h('span', null, state(`Held after patrol case ${i.patrol_case}`, 'warn'), i.status === 'rented' ? ' Still out on the contract.' : ' Log an inspection to release it.') : i.notes || '') : String(i.uses_count - i.uses_at_service)) },
     { head: '', actions: true, cell: (i) => button('Log work', () => logWork(i, reload), { small: true, kind: 'primary' }) },
   ];
   clear(box).append(h('div', { class: 'stack' },
@@ -72,7 +72,8 @@ export async function drawService(box) {
 function logWork(i, done) {
   const rack = h('input', { type: 'checkbox', name: 'rack', checked: i.status === 'maintenance' });
   formDialog(`Service ${i.sku}`, h('div', { class: 'form' },
-    field('Work done', select([['tune', 'Tune'], ['wax', 'Wax'], ['repair', 'Repair'], ['binding_test', 'Binding test'], ['inspection', 'Inspection'], ['other', 'Other']], 'tune', { name: 'kind' })),
+    i.patrol_case ? h('p', { class: 'wide warn-note' }, `Held after patrol case ${i.patrol_case}. Log an inspection, saying what you found, to release it.`) : null,
+    field('Work done', select([['tune', 'Tune'], ['wax', 'Wax'], ['repair', 'Repair'], ['binding_test', 'Binding test'], ['inspection', 'Inspection'], ['other', 'Other']], i.patrol_case ? 'inspection' : 'tune', { name: 'kind' })),
     field('Done by', input({ name: 'by', maxlength: 100 })), field('Cost ($)', input({ name: 'cost', type: 'number', min: '0', step: '0.01' })), field('Notes', input({ name: 'notes', maxlength: 500 })),
     i.status === 'maintenance' ? h('label', { class: 'check' }, rack, 'Back on the rack when saved') : null), async (fd) => {
     await post(`/rentals/items/${i.id}/service`, { kind: val(fd, 'kind'), done_by: val(fd, 'by') || undefined, cost_cents: val(fd, 'cost') ? toCents(val(fd, 'cost')) : undefined, notes: val(fd, 'notes') || undefined, return_to_rack: rack.checked });
@@ -95,7 +96,7 @@ export async function drawReports(box) {
       h('div', { class: 'tiles' },
         stat('Contracts', r.contracts), stat('Pieces out', r.pieces.reduce((a, p) => a + p.n, 0)), stat('Fleet', total),
         stat('Late fees', money(fee('late'))), stat('Damage and loss fees', money(fee('damage') + fee('loss'))), stat('Fees unpaid', money(r.fees.filter((f) => f.status === 'due' && f.kind !== 'deposit').reduce((a, f) => a + Number(f.cents), 0))),
-        stat('Damaged returns', r.damaged), stat('No-shows', nres('no_show')), stat('Cancelled', nres('cancelled'))),
+        stat('Damaged returns', r.damaged), stat('No-shows', nres('no_show')), stat('Canceled', nres('cancelled'))),
       h('h3', null, 'Pieces rented by type'), r.pieces.length ? table([{ head: 'Type', cell: (p) => label(p.category) }, { head: 'Pieces', cell: (p) => String(p.n) }], r.pieces) : empty('No rentals in this period.'),
       h('h3', null, 'Most rented gear'), r.top_items.length ? table([{ head: 'SKU', cell: (i) => i.sku }, { head: 'Gear', cell: (i) => `${label(i.category)} ${[i.brand, i.model].filter(Boolean).join(' ')}` }, { head: 'Rentals', cell: (i) => String(i.n) }], r.top_items) : null,
       h('h3', null, 'Overdue now'), r.overdue.length ? table([{ head: 'Contract', cell: (c) => `#${c.id}` }, { head: 'Renter', cell: (c) => `${c.first_name} ${c.last_name}` }, { head: 'Was due', cell: (c) => fmtDateTime(c.due_at) }], r.overdue) : h('p', { class: 'muted' }, 'Nothing is overdue.'),
@@ -116,9 +117,10 @@ export async function drawSettings(box) {
     dep: input({ type: 'number', min: '0', step: '0.01', value: centsToInput(s.default_deposit_cents) }),
     svc: input({ type: 'number', min: '0', max: '1000', value: s.service_every_uses }),
     bind: h('input', { type: 'checkbox', checked: s.require_binding_record }),
+    hold: h('input', { type: 'checkbox', checked: s.hold_after_incident }),
   };
   const save = button('Save settings', async () => {
-    await put('/rentals/settings', { late_fee_cents_per_day: toCents(f.fee.value || '0'), late_grace_minutes: Number(f.grace.value || 0), default_deposit_cents: toCents(f.dep.value || '0'), service_every_uses: Number(f.svc.value || 0), require_binding_record: f.bind.checked });
+    await put('/rentals/settings', { late_fee_cents_per_day: toCents(f.fee.value || '0'), late_grace_minutes: Number(f.grace.value || 0), default_deposit_cents: toCents(f.dep.value || '0'), service_every_uses: Number(f.svc.value || 0), require_binding_record: f.bind.checked, hold_after_incident: f.hold.checked });
     toast('Settings saved');
   }, { kind: 'primary' });
   const rowsEl = h('div', { class: 'stack' });
@@ -137,7 +139,8 @@ export async function drawSettings(box) {
     h('div', { class: 'form' },
       field('Late fee per day ($)', f.fee, 'Zero means no late fee'), field('Grace period (minutes)', f.grace, 'Time after the due time before fees start'),
       field('Default deposit ($)', f.dep), field('Service every (rentals)', f.svc, 'Zero turns service reminders off'),
-      h('label', { class: 'check' }, f.bind, 'Require binding setting and technician for skis')), h('div', { class: 'row' }, save),
+      h('label', { class: 'check' }, f.bind, 'Require binding setting and technician for skis'),
+      h('label', { class: 'check' }, f.hold, 'Hold gear involved in a patrol case until the shop inspects it')), h('div', { class: 'row' }, save),
     h('h3', null, 'Binding chart'),
     h('p', { class: 'muted' }, 'Enter the release settings your shop uses, from your binding manufacturer and the standard you follow. Verdynt/OS does not supply values. The Chart button at the counter only looks up what you enter here, and the technician still records what they set.'),
     h('div', { class: 'row muted small' }, 'Type · Weight min · max (lb) · Sole min · max (mm) · Setting'),

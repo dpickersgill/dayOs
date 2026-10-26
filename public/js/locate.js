@@ -33,7 +33,7 @@ async function main() {
         const res = await fetch(api, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy }) });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Could not send');
         clear(root).append(h('div', { class: 'help-done' }, h('h1', null, 'Patrol has your location'),
-          h('p', null, `Accurate to about ${Math.round(p.coords.accuracy)} metres. Stay where you are if it is safe, keep warm, and keep your phone on.`),
+          h('p', null, `Accurate to about ${Math.round(p.coords.accuracy)} meters. Stay where you are if it is safe, keep warm, and keep your phone on.`),
           h('p', null, 'If you move, or things get worse, call patrol or 911.')));
       } catch (err) { go.disabled = false; go.textContent = 'Try again'; msg.append(h('p', { class: 'error-box', role: 'alert' }, `${err.message}. Tell patrol where you are by phone.`)); }
     }, (err) => {

@@ -15,7 +15,7 @@ export function rolesText(roles, ranks = [], certs = []) {
   return roles.map((r) => `${r.count > 1 ? `${r.count} ` : ''}${r.label}${r.rank || r.cert ? ` (${[r.rank ? `${name(ranks, r.rank)} or above` : null, r.cert ? `${name(certs, r.cert)} or higher` : null].filter(Boolean).join(', ')})` : ''}`).join(', ');
 }
 
-/** One crew-day's coverage as a small chip: "Day crew 3 of 4", coloured and worded by how short it is. */
+/** One crew-day's coverage as a small chip: "Day crew 3 of 4", colored and worded by how short it is. */
 export function coverChip(d, onClick) {
   const words = `${d.crew} ${d.filled} of ${d.target}`;
   const why = [d.filled < d.minimum ? `Below the ${d.minimum} it can run with` : d.filled < d.target ? `Needs ${d.target - d.filled} more` : 'Full', d.missing.length ? `No ${d.missing.join(', no ')}` : null, d.drafts ? `${d.drafts} not published` : null].filter(Boolean).join('. ');
@@ -155,7 +155,7 @@ function generateDialog(k, onDone) {
   const from = input({ type: 'date', required: true, value: k.from_date && k.from_date > today ? k.from_date : today });
   const to = input({ type: 'date', required: true, value: k.to_date || addDays(today, 120) });
   formDialog(`Make the days for ${k.name}`, h('div', { class: 'stack' },
-    h('p', { class: 'muted' }, `Makes ${k.target} spot${k.target === 1 ? '' : 's'} on each ${k.summary.split(',').slice(0, -1).join(',') || 'day'} as drafts, standing members on first. Days already made are left alone. Publish them from the Schedule when ready.`),
+    h('p', { class: 'muted' }, `Makes ${k.target} spot${k.target === 1 ? '' : 's'} on each of its days (${k.summary}) as drafts, standing members on first. Days already made are left alone. Publish them from the Schedule when ready.`),
     h('div', { class: 'shift-when two' }, field('From', from), field('To', to))), async () => {
     const r = await post(`/patrol/crews/${k.id}/generate`, { from: from.value, to: to.value });
     await onDone();

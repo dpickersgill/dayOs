@@ -99,7 +99,7 @@ async function facts(db, tenantId, { audience, modules }) {
       }
       lines.push(`Program "${p.name}"${p.type_name ? ` (${p.type_name})` : ''}${p.age_min != null || p.age_max != null ? `, ages ${p.age_min ?? 0}-${p.age_max ?? 99}` : ''}${p.description ? `. ${p.description}` : ''}${p.meeting_place ? `. Meet at ${p.meeting_place}` : ''}${p.what_to_bring ? `. Bring ${p.what_to_bring}` : ''}.`
         + `${p.sibling_mode !== 'none' && p.sibling_value ? ` Sibling discount: ${p.sibling_mode === 'percent' ? `${p.sibling_value}%` : money(p.sibling_value)} off lessons for the second and later child.` : ''}`
-        + `${p.cancel_days != null ? ` Families can cancel online up to ${p.cancel_days} days before the first lesson${p.cancel_fee_cents ? ` (${money(p.cancel_fee_cents)} fee)` : ''}.` : ' Cancelling is by calling the mountain.'}`
+        + `${p.cancel_days != null ? ` Families can cancel online up to ${p.cancel_days} days before the first lesson${p.cancel_fee_cents ? ` (${money(p.cancel_fee_cents)} fee)` : ''}.` : ' Canceling is by calling the mountain.'}`
         + `${p.allow_switch ? ' Families can switch to another day with room from the family page.' : ''}${p.late_join === 'prorate' ? ' Joining late: pay for the lessons left.' : p.late_join === 'closed' ? ' No joining online after the first lesson.' : ''}`
         + `${p.policy_text ? ` Policy: ${p.policy_text}` : ''} Sessions: ${tl.join(' | ') || 'none open'}.`);
     }

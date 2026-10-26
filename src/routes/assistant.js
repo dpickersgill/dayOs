@@ -121,7 +121,7 @@ async function familyContext(t, session) {
   for (const e of places) {
     const m = await rows(pool, 'SELECT starts_at, status FROM program_sessions WHERE tenant_id = ? AND group_id = ? ORDER BY starts_at', [t.id, e.group_id]);
     const owes = Math.max(0, Number(e.price_cents || 0) - Number(e.discount_cents || 0) - Number(e.paid_cents || 0));
-    out.push(`${e.first_name}: ${e.program}, ${e.term}, ${PS.WEEKDAYS[e.weekday]}s, ${e.status === 'waitlist' ? 'on the waitlist' : 'enrolled'}${e.class_name ? `, class ${e.class_name}` : ''}. Dates: ${m.filter((x) => x.status !== 'standby').map((x) => `${PS.dstr(x.starts_at)}${x.status === 'cancelled' ? ' (cancelled)' : ''}`).join(', ')}${m.some((x) => x.status === 'standby') ? `; makeup if needed ${m.filter((x) => x.status === 'standby').map((x) => PS.dstr(x.starts_at)).join(', ')}` : ''}.${owes ? ` Still to pay $${(owes / 100).toFixed(2)}.` : ''}${e.includes_ticket && ['verified', 'claimed'].includes(e.pass_status) ? ' Season pass noted, so no lift ticket charged.' : ''}`);
+    out.push(`${e.first_name}: ${e.program}, ${e.term}, ${PS.WEEKDAYS[e.weekday]}s, ${e.status === 'waitlist' ? 'on the waitlist' : 'enrolled'}${e.class_name ? `, class ${e.class_name}` : ''}. Dates: ${m.filter((x) => x.status !== 'standby').map((x) => `${PS.dstr(x.starts_at)}${x.status === 'cancelled' ? ' (canceled)' : ''}`).join(', ')}${m.some((x) => x.status === 'standby') ? `; makeup if needed ${m.filter((x) => x.status === 'standby').map((x) => PS.dstr(x.starts_at)).join(', ')}` : ''}.${owes ? ` Still to pay $${(owes / 100).toFixed(2)}.` : ''}${e.includes_ticket && ['verified', 'claimed'].includes(e.pass_status) ? ' Season pass noted, so no lift ticket charged.' : ''}`);
   }
   return out.join('\n');
 }

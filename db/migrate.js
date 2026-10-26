@@ -250,7 +250,7 @@ const patrolSteps = [
   ['people phone_key index', (c) => indexExists(c, 'people', 'ix_people_phone_key'), 'ALTER TABLE people ADD KEY ix_people_phone_key (tenant_id, phone_key)'],
 ];
 
-/** Ski season label, same rule as the API: August to July, labelled 2026-27. */
+/** Ski season label, same rule as the API: August to July, labeled 2026-27. */
 function seasonOf(dateTime) {
   const [y, m] = String(dateTime).slice(0, 10).split('-').map(Number);
   const start = m >= 8 ? y : y - 1;
@@ -317,7 +317,7 @@ const careSteps = [
     UNIQUE KEY uq_iversions (tenant_id, incident_id, version_no),
     CONSTRAINT fk_iversions_incident FOREIGN KEY (tenant_id, incident_id) REFERENCES incidents(tenant_id, id)
   ) ENGINE=InnoDB`],
-  // An entry sent again by a phone that lost its signal mid-send is recognised by the id the phone gave it, and saved once.
+  // An entry sent again by a phone that lost its signal mid-send is recognized by the id the phone gave it, and saved once.
   ['care entries client_ref', (c) => columnExists(c, 'incident_vitals', 'client_ref'), [
     'ALTER TABLE incident_vitals ADD COLUMN client_ref VARCHAR(40) NULL, ADD UNIQUE KEY uq_ivitals_ref (tenant_id, client_ref)',
     'ALTER TABLE incident_injuries ADD COLUMN client_ref VARCHAR(40) NULL, ADD UNIQUE KEY uq_iinjuries_ref (tenant_id, client_ref)',
@@ -452,7 +452,7 @@ const terminalSteps = [
   ) ENGINE=InnoDB`],
 ];
 
-// Cancelling lessons (2026.10.29): a cancelled lesson keeps who cancelled it, when and why.
+// Canceling lessons (2026.10.29): a canceled lesson keeps who canceled it, when and why.
 // Better pin dropping (2026.10.29): how a pin was put down (GPS, a tap on the map, a drag) and how close the GPS was.
 const pinSteps = [
   ['park_placements.accuracy_m', (c) => columnExists(c, 'park_placements', 'accuracy_m'), "ALTER TABLE park_placements ADD COLUMN accuracy_m SMALLINT UNSIGNED NULL, ADD COLUMN placed_how ENUM('gps','map','drag','copy') NULL"],
@@ -523,7 +523,7 @@ const mapFeatureSteps = [
 const programSessionSteps = [
   // A program runs as one or more sessions a season (Session 1 in January, Session 2 in February). Each session meets on
   // one or more weekdays, each its own group with its own spots (the parent picks the day), for a number of weeks, plus
-  // makeup weeks that are held in reserve and only used when a meeting is cancelled for weather.
+  // makeup weeks that are held in reserve and only used when a meeting is canceled for weather.
   ['programs session settings', (c) => columnExists(c, 'programs', 'level_mode'), `ALTER TABLE programs
     ADD COLUMN description TEXT NULL, ADD COLUMN age_min TINYINT UNSIGNED NULL, ADD COLUMN age_max TINYINT UNSIGNED NULL,
     ADD COLUMN online TINYINT(1) NOT NULL DEFAULT 0, ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1,
@@ -842,6 +842,226 @@ const crewSteps = [
     'ALTER TABLE patrol_settings ADD COLUMN signup_approval TINYINT(1) NOT NULL DEFAULT 0, ADD COLUMN short_alert TINYINT(1) NOT NULL DEFAULT 1, ADD COLUMN short_alert_last DATE NULL'],
 ];
 
+// Patrol reports: the conditions at the time (a snapshot of the mountain's own records), who was told and when, and the
+// lift and rental gear involved. Rental gear on a case is held until the rental shop inspects it.
+const caseLinkSteps = [
+  ['incidents.conditions', (c) => columnExists(c, 'incidents', 'conditions'),
+    'ALTER TABLE incidents ADD COLUMN conditions TEXT NULL, ADD COLUMN lift_id BIGINT UNSIGNED NULL, ADD COLUMN lift_chair VARCHAR(12) NULL'],
+  ['incident_contacts', (c) => tableExists(c, 'incident_contacts'), `CREATE TABLE incident_contacts (
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id   BIGINT UNSIGNED NOT NULL,
+    incident_id BIGINT UNSIGNED NOT NULL,
+    patient_id  BIGINT UNSIGNED NULL,
+    who         ENUM('management','insurer','parent','ems','police','owner','other') NOT NULL,
+    who_name    VARCHAR(120) NULL,
+    method      ENUM('phone','in_person','text','radio','email') NOT NULL DEFAULT 'phone',
+    at          DATETIME NOT NULL,
+    note        VARCHAR(300) NULL,
+    recorded_by BIGINT UNSIGNED NOT NULL,
+    entered_at  DATETIME NULL,
+    voided_at   DATETIME NULL,
+    void_reason VARCHAR(255) NULL,
+    voided_by   BIGINT UNSIGNED NULL,
+    client_ref  VARCHAR(40) NULL,
+    UNIQUE KEY uq_icontact_ref (tenant_id, client_ref),
+    KEY ix_icontacts_case (tenant_id, incident_id, at),
+    CONSTRAINT fk_icontacts_incident FOREIGN KEY (tenant_id, incident_id) REFERENCES incidents(tenant_id, id)
+  ) ENGINE=InnoDB`],
+  ['incident_rentals', (c) => tableExists(c, 'incident_rentals'), `CREATE TABLE incident_rentals (
+    id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id       BIGINT UNSIGNED NOT NULL,
+    incident_id     BIGINT UNSIGNED NOT NULL,
+    patient_id      BIGINT UNSIGNED NULL,
+    contract_id     BIGINT UNSIGNED NULL,
+    rental_item_id  BIGINT UNSIGNED NOT NULL,
+    detail          TEXT NULL,
+    held            TINYINT(1) NOT NULL DEFAULT 0,
+    status_before   VARCHAR(20) NULL,
+    released_at     DATETIME NULL,
+    released_by     BIGINT UNSIGNED NULL,
+    inspection_note VARCHAR(500) NULL,
+    added_by        BIGINT UNSIGNED NOT NULL,
+    added_at        DATETIME NOT NULL,
+    UNIQUE KEY uq_irental (tenant_id, incident_id, rental_item_id),
+    KEY ix_irental_item (tenant_id, rental_item_id, held),
+    CONSTRAINT fk_irental_incident FOREIGN KEY (tenant_id, incident_id) REFERENCES incidents(tenant_id, id)
+  ) ENGINE=InnoDB`],
+  ['rental_settings.hold_after_incident', (c) => columnExists(c, 'rental_settings', 'hold_after_incident'), 'ALTER TABLE rental_settings ADD COLUMN hold_after_incident TINYINT(1) NOT NULL DEFAULT 1'],
+];
+
+// The staff injury register: work injuries and illnesses for the owner, with the fields of OSHA's Forms 300 and 301. Patrol
+// cases where the patient is staff or a volunteer on duty appear on their own; others are added by hand. Only the owner and
+// those the owner names can open it, and every look is logged.
+const injuryRegisterSteps = [
+  ['staff_injuries', (c) => tableExists(c, 'staff_injuries'), `CREATE TABLE staff_injuries (
+    id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id       BIGINT UNSIGNED NOT NULL,
+    year            SMALLINT UNSIGNED NOT NULL,
+    seq             SMALLINT UNSIGNED NOT NULL,
+    source          ENUM('patrol','manual') NOT NULL DEFAULT 'manual',
+    incident_id     BIGINT UNSIGNED NULL,
+    patient_id      BIGINT UNSIGNED NULL,
+    staff_id        BIGINT UNSIGNED NULL,
+    volunteer       TINYINT(1) NOT NULL DEFAULT 0,
+    employee_name   VARCHAR(150) NOT NULL,
+    job_title       VARCHAR(100) NULL,
+    occurred_at     DATETIME NOT NULL,
+    place           VARCHAR(150) NULL,
+    description     VARCHAR(500) NULL,
+    kind            ENUM('injury','skin','respiratory','poisoning','hearing','other_illness') NOT NULL DEFAULT 'injury',
+    outcome         ENUM('death','days_away','restricted','other_recordable','not_recordable') NULL,
+    days_away       SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    days_restricted SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    privacy_case    TINYINT(1) NOT NULL DEFAULT 0,
+    began_work_at   TIME NULL,
+    activity        VARCHAR(500) NULL,
+    how_happened    VARCHAR(1000) NULL,
+    object          VARCHAR(255) NULL,
+    treated_by      VARCHAR(150) NULL,
+    facility        VARCHAR(200) NULL,
+    er              TINYINT(1) NOT NULL DEFAULT 0,
+    overnight       TINYINT(1) NOT NULL DEFAULT 0,
+    died_on         DATE NULL,
+    status          ENUM('open','closed') NOT NULL DEFAULT 'open',
+    created_by      BIGINT UNSIGNED NULL,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_sinj_seq (tenant_id, year, seq),
+    UNIQUE KEY uq_sinj_patient (tenant_id, patient_id),
+    KEY ix_sinj_year (tenant_id, year),
+    CONSTRAINT fk_sinj_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  ) ENGINE=InnoDB`],
+  ['staff_injury_access', (c) => tableExists(c, 'staff_injury_access'), `CREATE TABLE staff_injury_access (
+    tenant_id  BIGINT UNSIGNED NOT NULL,
+    user_id    BIGINT UNSIGNED NOT NULL,
+    granted_by BIGINT UNSIGNED NULL,
+    granted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, user_id)
+  ) ENGINE=InnoDB`],
+  ['staff_injury_years', (c) => tableExists(c, 'staff_injury_years'), `CREATE TABLE staff_injury_years (
+    tenant_id     BIGINT UNSIGNED NOT NULL,
+    year          SMALLINT UNSIGNED NOT NULL,
+    hours_worked  INT UNSIGNED NULL,
+    avg_employees SMALLINT UNSIGNED NULL,
+    certified_by  VARCHAR(150) NULL,
+    certified_at  DATE NULL,
+    PRIMARY KEY (tenant_id, year)
+  ) ENGINE=InnoDB`],
+];
+
+// Lost and found: what is handed in, what guests report missing (at the counter or on the website), matches between
+// them, and how each found item left (returned with an ID check, donated or thrown away).
+const lostFoundSteps = [
+  ['lost_items', (c) => tableExists(c, 'lost_items'), `CREATE TABLE lost_items (
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id   BIGINT UNSIGNED NOT NULL,
+    number      INT UNSIGNED NOT NULL,
+    kind        VARCHAR(20) NOT NULL,
+    description VARCHAR(255) NULL,
+    brand       VARCHAR(60) NULL,
+    color       VARCHAR(40) NULL,
+    found_where VARCHAR(150) NULL,
+    found_at    DATETIME NOT NULL,
+    found_by    VARCHAR(150) NULL,
+    bin         VARCHAR(40) NULL,
+    valuable    TINYINT(1) NOT NULL DEFAULT 0,
+    photo       MEDIUMTEXT NULL,
+    status      ENUM('held','matched','returned','donated','discarded') NOT NULL DEFAULT 'held',
+    report_id   BIGINT UNSIGNED NULL,
+    returned_to VARCHAR(150) NULL,
+    id_checked  TINYINT(1) NOT NULL DEFAULT 0,
+    closed_at   DATETIME NULL,
+    closed_by   BIGINT UNSIGNED NULL,
+    created_by  BIGINT UNSIGNED NULL,
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_lost_number (tenant_id, number),
+    KEY ix_lost_status (tenant_id, status, found_at),
+    CONSTRAINT fk_lost_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  ) ENGINE=InnoDB`],
+  ['lost_reports', (c) => tableExists(c, 'lost_reports'), `CREATE TABLE lost_reports (
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id   BIGINT UNSIGNED NOT NULL,
+    kind        VARCHAR(20) NOT NULL,
+    description VARCHAR(255) NULL,
+    brand       VARCHAR(60) NULL,
+    color       VARCHAR(40) NULL,
+    lost_where  VARCHAR(150) NULL,
+    lost_on     DATE NOT NULL,
+    name        VARCHAR(120) NOT NULL,
+    email       VARCHAR(255) NULL,
+    phone       VARCHAR(40) NULL,
+    source      ENUM('counter','web') NOT NULL DEFAULT 'counter',
+    status      ENUM('open','found','closed') NOT NULL DEFAULT 'open',
+    item_id     BIGINT UNSIGNED NULL,
+    told_at     DATETIME NULL,
+    created_by  BIGINT UNSIGNED NULL,
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY ix_lostrep_status (tenant_id, status, lost_on),
+    CONSTRAINT fk_lostrep_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  ) ENGINE=InnoDB`],
+  ['lost_found_settings', (c) => tableExists(c, 'lost_found_settings'), `CREATE TABLE lost_found_settings (
+    tenant_id  BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+    keep_days  SMALLINT UNSIGNED NOT NULL DEFAULT 60,
+    web_form   TINYINT(1) NOT NULL DEFAULT 1,
+    pickup     VARCHAR(255) NULL
+  ) ENGINE=InnoDB`],
+];
+
+// Patrol kits: trauma bags, packed toboggans and lift evacuation kits. Each kind has its contents (with quantities and
+// which items expire) and how often it is checked; each kit has a number, a place and a QR label. Checks, restocks and
+// supplies used on a case are logged per kit, and work with no signal (client_ref).
+const kitSteps = [
+  ['patrol_kit_types', (c) => tableExists(c, 'patrol_kit_types'), `CREATE TABLE patrol_kit_types (
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id   BIGINT UNSIGNED NOT NULL,
+    name        VARCHAR(80) NOT NULL,
+    prefix      VARCHAR(8) NOT NULL,
+    every_days  SMALLINT UNSIGNED NOT NULL DEFAULT 7,
+    contents    TEXT NOT NULL,
+    active      TINYINT(1) NOT NULL DEFAULT 1,
+    updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY ix_kittypes (tenant_id, active),
+    CONSTRAINT fk_kittypes_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  ) ENGINE=InnoDB`],
+  ['patrol_kits', (c) => tableExists(c, 'patrol_kits'), `CREATE TABLE patrol_kits (
+    id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id       BIGINT UNSIGNED NOT NULL,
+    type_id         BIGINT UNSIGNED NOT NULL,
+    label           VARCHAR(20) NOT NULL,
+    location        VARCHAR(120) NULL,
+    station_id      BIGINT UNSIGNED NULL,
+    lift_id         BIGINT UNSIGNED NULL,
+    status          ENUM('ready','not_ready','needs_restock','out_of_service') NOT NULL DEFAULT 'not_ready',
+    sealed          TINYINT(1) NOT NULL DEFAULT 0,
+    seal_no         VARCHAR(30) NULL,
+    stock           TEXT NULL,
+    earliest_expiry DATE NULL,
+    last_check_at   DATETIME NULL,
+    active          TINYINT(1) NOT NULL DEFAULT 1,
+    UNIQUE KEY uq_kit_label (tenant_id, label),
+    KEY ix_kits_type (tenant_id, type_id),
+    CONSTRAINT fk_kits_type FOREIGN KEY (type_id) REFERENCES patrol_kit_types(id)
+  ) ENGINE=InnoDB`],
+  ['patrol_kit_checks', (c) => tableExists(c, 'patrol_kit_checks'), `CREATE TABLE patrol_kit_checks (
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id   BIGINT UNSIGNED NOT NULL,
+    kit_id      BIGINT UNSIGNED NOT NULL,
+    kind        ENUM('full','seal','restock','use') NOT NULL,
+    result      ENUM('ready','not_ready','needs_restock') NOT NULL,
+    items       TEXT NULL,
+    seal_no     VARCHAR(30) NULL,
+    note        VARCHAR(300) NULL,
+    incident_id BIGINT UNSIGNED NULL,
+    done_by     BIGINT UNSIGNED NOT NULL,
+    done_at     DATETIME NOT NULL,
+    client_ref  VARCHAR(40) NULL,
+    UNIQUE KEY uq_kitcheck_ref (tenant_id, client_ref),
+    KEY ix_kitchecks (tenant_id, kit_id, done_at),
+    KEY ix_kitchecks_case (tenant_id, incident_id)
+  ) ENGINE=InnoDB`],
+  ['patrol_settings.kit_seals', (c) => columnExists(c, 'patrol_settings', 'kit_seals'), 'ALTER TABLE patrol_settings ADD COLUMN kit_seals TINYINT(1) NOT NULL DEFAULT 0'],
+];
+
 const skiAreaSteps = [
   ['ski_area_cache', (c) => tableExists(c, 'ski_area_cache'), `CREATE TABLE ski_area_cache (
     ref        VARCHAR(40) NOT NULL PRIMARY KEY,
@@ -978,8 +1198,8 @@ async function backfillUsernames(conn) {
 
 /**
  * Patrol shifts used to be made in Staff and schedule, as shifts for a Patrol-department position. Upcoming ones move to
- * the Patrol schedule (same person, times, note and status) and the originals are cancelled with a note saying where
- * they went. Past ones stay where they are, as history. Safe to re-run: a moved shift is cancelled, so it is not seen again.
+ * the Patrol schedule (same person, times, note and status) and the originals are canceled with a note saying where
+ * they went. Past ones stay where they are, as history. Safe to re-run: a moved shift is canceled, so it is not seen again.
  */
 async function movePatrolShifts(conn) {
   const [list] = await conn.query(`SELECT s.id, s.tenant_id, s.staff_id, s.starts_at, s.ends_at, s.notes, s.status, pos.name AS position FROM shifts s
@@ -1099,7 +1319,7 @@ async function main() {
   await seedPatrolPlan(conn);
   await seedAssistantAddon(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps, ...crewSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps, ...crewSteps, ...caseLinkSteps, ...injuryRegisterSteps, ...lostFoundSteps, ...kitSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

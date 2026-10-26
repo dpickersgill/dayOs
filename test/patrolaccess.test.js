@@ -186,14 +186,14 @@ test('an Admin sees the whole table and changes what a level can do; every chang
   assert.equal(Number(stored), 0, 'defaults are stored as no rows');
 });
 
-test('an Admin moves a person between levels, and a new rank carries the level along only when it was not customised', async () => {
+test('an Admin moves a person between levels, and a new rank carries the level along only when it was not customized', async () => {
   is(await api('PUT', `/patrol/team/${D.patrol}/access`, { token: T.patrol, body: { access_level: 'admin' } }), 403, 'cannot promote yourself');
   is(await api('PUT', `/patrol/team/${D.patrol}/access`, { token: T.admin, body: { access_level: 'approver' } }), 200);
   assert.equal((await api('GET', '/patrol/me', { token: T.patrol })).body.access_level, 'approver', 'a token that was already issued sees it at once');
   is(await api('PUT', `/patrol/team/${D.patrol}/access`, { token: T.admin, body: { access_level: 'patrol' } }), 200);
   is(await api('PUT', '/patrol/team/999999/access', { token: T.admin, body: { access_level: 'patrol' } }), 404);
 
-  // rank follows: a new member made a leader starts as Manager; a customised level is left alone
+  // rank follows: a new member made a leader starts as Manager; a customized level is left alone
   const o = A.owner;
   ok(await api('POST', '/patrol/team', { token: o, body: { staff_id: D.extra, level: 'leader' } }), 201);
   assert.equal(ok(await api('GET', '/patrol/team', { token: o })).data.find((m) => m.staff_id === D.extra).access_level, 'manager');

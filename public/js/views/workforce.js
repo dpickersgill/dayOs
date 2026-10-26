@@ -1,20 +1,23 @@
 // Staff and schedule: the week as a grid of people by day (one day at a time on a phone), hours worked and approval,
 // the staff list with a page for each person, and setup (positions, certifications, templates, the time clock kiosk).
 import { get } from '../api.js';
-import { h, clear, select, button, toast, tabs, todayStr, addDays, weekStart, label, empty, errorBox } from '../ui.js';
+import { h, clear, select, button, toast, tabs, todayStr, addDays, weekStart, label, empty, errorBox, ctx } from '../ui.js';
 import { hm, spanShort, minutes, hrs, dayShort, dayLong, weekLabel, weekDays, DEPARTMENTS, fullName } from './workforce-common.js';
 import { shiftDialog, copyWeek, templatesDialog, publishWeek, staffingNeeds } from './workforce-shift.js';
 import { drawHours } from './workforce-hours.js';
 import { drawStaff, personPage } from './workforce-staff.js';
 import { drawSetup } from './workforce-setup.js';
+import { drawInjuries } from './staff-injuries.js';
 
 const OVERTIME = 40 * 60;
 
 export async function render(root, params = []) {
   if (params[0] === 'staff' && /^\d+$/.test(params[1] || '')) { await personPage(root, Number(params[1])); return; }
-  const initial = ['hours', 'staff', 'setup'].includes(params[0]) ? params[0] : 'schedule';
+  // The staff injury register is private: its tab shows only to the owner and those the owner names.
+  const injuries = Boolean(ctx.me && ctx.me.staff_injuries);
+  const initial = ['hours', 'staff', 'setup', ...(injuries ? ['injuries'] : [])].includes(params[0]) ? params[0] : 'schedule';
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Staff and schedule')),
-    tabs([['schedule', 'Schedule', drawSchedule], ['hours', 'Hours', drawHours], ['staff', 'Staff', drawStaff], ['setup', 'Setup', drawSetup]], initial));
+    tabs([['schedule', 'Schedule', drawSchedule], ['hours', 'Hours', drawHours], ['staff', 'Staff', drawStaff], ['setup', 'Setup', drawSetup], ...(injuries ? [['injuries', 'Injuries', drawInjuries]] : [])], initial));
 }
 
 // ---------------------------------------------------------------- the week

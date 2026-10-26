@@ -417,7 +417,7 @@ test('sign in through the real form, move around, and sign out', skip(), async (
   assert.equal(document.querySelector('.nav a[aria-current=page]').textContent, 'Today');
 
   const links = [...document.querySelectorAll('.nav a')];
-  assert.equal(links.length, 23, 'owner sees every screen, Inbox, Waivers, Billing and Help included');
+  assert.equal(links.length, 24, 'owner sees every screen, Inbox, Waivers, Lost and found, Billing and Help included');
   for (const a of links) {
     window.location.hash = a.getAttribute('href').slice(1);
     await settle();
@@ -1904,7 +1904,7 @@ test('public booking page: lists open lessons, takes a request, and lets the gue
     assert.match(page.querySelector('#book-lookup').textContent, /Waiting for the ski school to confirm/);
     page.querySelector('#l-cancel').click();
     await settle();
-    assert.match(page.querySelector('#book-lookup').textContent, /Cancelled/);
+    assert.match(page.querySelector('#book-lookup').textContent, /Canceled/);
   } finally {
     globalThis.fetch = realFetch;
     dom.reconfigure({ url: `${base}/` });
@@ -2034,7 +2034,7 @@ test('patrol: the hand-off sheet gathers the injuries, treatment and vitals, rec
   const sheet = root.querySelector(`[data-handoff="${pid}"]`);
   assert.ok(sheet);
   for (const t of ['Dana Drift', 'Penicillin', 'Right shoulder pain', 'Dislocation, Shoulder (right)', 'Ibuprofen 400 mg', 'Medic 12', 'Phoenixville Hospital', 'Vitals over time', 'Care handed to']) assert.ok(sheet.textContent.includes(t), `hand-off sheet is missing "${t}"`);
-  assert.match(sheet.textContent, /High/, 'a flagged reading is marked in words as well as colour');
+  assert.match(sheet.textContent, /High/, 'a flagged reading is marked in words as well as color');
 
   // the plain text copy says the same thing
   const mod = await mods.view('patrol-handoff');

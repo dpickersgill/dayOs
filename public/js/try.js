@@ -50,7 +50,9 @@ function form() {
     if (!res.ok) throw fail(res, out);
     return out;
   };
-  const details = () => ({ name: name.value.trim(), email: email.value.trim(), mountain: mountain.value.trim() || undefined, website: trap.querySelector('input').value, ...(area ? { area_ref: area.ref, state: area.state } : {}) });
+  // The visitor's own zone: a demo with no real ski area picked runs on their clock, not Eastern.
+  const browserZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined; } catch (_) { return undefined; } };
+  const details = () => ({ name: name.value.trim(), email: email.value.trim(), mountain: mountain.value.trim() || undefined, website: trap.querySelector('input').value, timezone: browserZone(), ...(area ? { area_ref: area.ref, state: area.state } : {}) });
   // Builds the demo (with the emailed code when there is one) and lands the visitor inside it.
   const build = async (code, button, line, box) => {
     button.disabled = true;

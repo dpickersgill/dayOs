@@ -82,7 +82,7 @@ function programForm(page, p) {
     const el = h('button', { type: 'button', class: `reg-day${full ? ' full' : ''}`, 'aria-pressed': String(picked) },
       h('span', { class: 'd' }, `${g.day}s`), h('span', { class: 't' }, `${t12(g.start_time)} to ${t12(g.end_time)}`),
       g.discipline && g.discipline !== 'any' ? h('span', { class: 'disc' }, g.discipline === 'ski' ? 'Ski only' : 'Snowboard only') : null,
-      h('span', { class: 'dates', 'aria-label': `Lessons ${g.dates.map(long).join(', ')}` }, g.dates.map((d) => h('span', null, short(d))), g.makeup_dates.map((d) => h('span', { class: 'mk', title: 'Makeup date, used only if a lesson is cancelled' }, short(d)))),
+      h('span', { class: 'dates', 'aria-label': `Lessons ${g.dates.map(long).join(', ')}` }, g.dates.map((d) => h('span', null, short(d))), g.makeup_dates.map((d) => h('span', { class: 'mk', title: 'Makeup date, used only if a lesson is canceled' }, short(d)))),
       choice.term ? h('span', { class: 'p' }, `Lessons ${money(g.price_now.cents)}`, g.price_now.label ? ` ${g.price_now.label.toLowerCase()} until ${short(g.price_now.until)}` : '') : null,
       h('span', { class: 'left' }, full ? 'Full: join the waitlist' : g.left != null && g.left <= 5 ? `${g.left} place${g.left === 1 ? '' : 's'} left` : 'Places available'));
     el.addEventListener('click', () => onPick(g));
@@ -92,7 +92,7 @@ function programForm(page, p) {
     clear(daysEl);
     for (const t of termsNow()) {
       daysEl.append(h('div', { class: 'stack' }, h('h3', null, choice.bundle ? t.name : 'Which day?'),
-        h('p', { class: 'muted small' }, `${t.weeks} weekly lessons${t.makeup_weeks ? `, and a makeup date (dashed) held in case one is cancelled for weather` : ''}.`),
+        h('p', { class: 'muted small' }, `${t.weeks} weekly lessons${t.makeup_weeks ? `, and a makeup date (dashed) held in case one is canceled for weather` : ''}.`),
         h('div', { class: 'reg-days' }, t.groups.map((g) => dayCard(t, g, false, () => {
           if (g.left === 0) { waitlist(page, p, t, g); return; }
           // Picking a day here sets it for every child who has not chosen yet.
@@ -261,7 +261,7 @@ async function showRegistration(token) {
     v.note ? h('p', { class: 'error-box' }, v.note) : null,
     v.places.map((pl) => h('div', { class: 'reg-place' }, h('h3', null, `${pl.first_name} ${pl.last_name}`), h('p', null, `${pl.program}, ${pl.term}, ${pl.day}s`),
       h('ol', null, pl.dates.map((d) => h('li', null, `${long(d.date)}, ${t12(d.time)}${d.makeup ? ' (makeup)' : ''}`))),
-      pl.makeup_reserve.length ? h('p', { class: 'muted small' }, `Makeup date if a lesson is cancelled for weather: ${pl.makeup_reserve.map(long).join(', ')}`) : null,
+      pl.makeup_reserve.length ? h('p', { class: 'muted small' }, `Makeup date if a lesson is canceled for weather: ${pl.makeup_reserve.map(long).join(', ')}`) : null,
       pl.ticket_code ? h('p', null, 'Lift ticket: ', h('code', null, pl.ticket_code)) : null)),
     h('p', { class: 'muted small' }, 'A copy is in your email. ', h('a', { href: `/family/${encodeURIComponent(slug)}` }, 'Your family page'), ' shows every date, weather changes and report cards.'))));
   if (waiting) setTimeout(() => showRegistration(token), 3000);

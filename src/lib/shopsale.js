@@ -334,7 +334,7 @@ async function emailTickets(tenantId, rowId, baseUrl) {
   return r.ok;
 }
 
-/** Stripe webhook for shop baskets (metadata.kind === 'shop'). A repeated event changes nothing; a basket we cannot honour is refunded in full. */
+/** Stripe webhook for shop baskets (metadata.kind === 'shop'). A repeated event changes nothing; a basket we cannot honor is refunded in full. */
 async function handleWebhook(event, obj, baseUrl) {
   const tenantId = Number(obj.metadata.tenant_id); const id = Number(obj.metadata.shop_order_id);
   if (event.type === 'checkout.session.expired') {

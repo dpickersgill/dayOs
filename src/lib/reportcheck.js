@@ -112,7 +112,7 @@ function patientChecks(c, p, add) {
     if (['splint', 'spinal_motion_restriction'].includes(t.kind) && (!d.cms_before || !d.cms_after)) {
       add(`${who}: ${t.kind === 'splint' ? 'splint' : 'motion restriction'} at ${when} without CMS ${!d.cms_before && !d.cms_after ? 'before and after' : !d.cms_before ? 'before' : 'after'}`, 'Circulation, motor and sensation before and after shows the treatment did no harm.', at({ area: 'treatments' }));
     }
-    if (t.kind === 'oxygen' && (!d.o2_device || d.o2_lpm == null)) add(`${who}: oxygen at ${when} without the ${!d.o2_device ? 'device' : 'flow rate'}`, 'Device and litres per minute are what the next provider needs.', at({ area: 'treatments' }));
+    if (t.kind === 'oxygen' && (!d.o2_device || d.o2_lpm == null)) add(`${who}: oxygen at ${when} without the ${!d.o2_device ? 'device' : 'flow rate'}`, 'Device and liters per minute are what the next provider needs.', at({ area: 'treatments' }));
     if (t.kind === 'medication') {
       if (blank(d.indication)) add(`${who}: ${t.medication || 'medication'} at ${when} without the reason it was given`, 'Every medication needs its indication.', at({ area: 'treatments' }));
       if (blank(d.effect)) add(`${who}: ${t.medication || 'medication'} at ${when} without the effect`, 'Record how the patient responded, even "no change".', at({ area: 'treatments' }));

@@ -1,5 +1,5 @@
 // The family page (/family/<mountain>): a parent signs in with a link sent to their email, then sees each child's
-// program places: the day, every lesson date (cancelled for weather, the makeup), attendance, the class, the lift ticket,
+// program places: the day, every lesson date (canceled for weather, the makeup), attendance, the class, the lift ticket,
 // what is owed and the report card. They can update allergies and pickup, switch day and withdraw within the rules.
 // The session is kept in this browser only (a convenience: without it, the parent signs in again).
 import './stage.js';
@@ -104,15 +104,15 @@ function placeBlock(p, pl, d) {
       try { const r = await call('POST', `/places/${pl.id}/withdraw`); alertAfter(r); await show(); } catch (e) { msg.textContent = e.message; }
     });
     actions.append(w);
-  } else if (pl.policy.withdraw_until) actions.append(h('span', { class: 'small muted' }, `Online cancelling closed ${short(pl.policy.withdraw_until)}. Call to cancel.`));
+  } else if (pl.policy.withdraw_until) actions.append(h('span', { class: 'small muted' }, `Online canceling closed ${short(pl.policy.withdraw_until)}. Call to cancel.`));
   appendAll(box,
     h('div', { class: 'spread' }, h('h3', null, `${pl.program}: ${pl.term}`), pl.status === 'waitlist' ? h('span', { class: 'fam-chip warn' }, `Waitlist, number ${pl.waitlist_position}`) : null),
     h('p', null, `${pl.day}s, ${t12(pl.start_time)} to ${t12(pl.end_time)}${pl.discipline ? `, ${pl.discipline}` : ''}${pl.class_name ? `. Class: ${pl.class_name}` : ''}`),
     next && pl.status === 'enrolled' ? h('p', { class: 'fam-next' }, h('b', null, 'Next lesson: '), `${long(next.date)}${next.kind === 'makeup' ? ' (makeup)' : ''}`, pl.meeting_place ? `. Meet at ${pl.meeting_place}` : '', pl.what_to_bring ? `. Bring ${pl.what_to_bring}` : '') : null,
     h('ol', { class: 'fam-dates', 'aria-label': 'Lesson dates' }, pl.dates.map((x) => h('li', { class: `fam-date ${x.status === 'cancelled' ? 'off' : x.present === true ? 'here' : x.present === false ? 'away' : ''}`, title: x.status === 'cancelled' ? `Cancelled${x.reason ? `: ${x.reason}` : ''}` : x.present === true ? 'Attended' : x.present === false ? 'Absent' : x.kind !== 'regular' ? 'Makeup lesson' : 'Lesson' },
-      short(x.date), x.status === 'cancelled' ? h('span', { class: 'visually-hidden' }, ' cancelled') : x.present === true ? h('span', { class: 'visually-hidden' }, ' attended') : null)),
-    pl.makeup_reserve.map((x) => h('li', { class: 'fam-date reserve', title: 'Makeup date, used if a lesson is cancelled' }, short(x)))),
-    h('p', { class: 'small muted' }, [attended ? `${attended} lesson${attended === 1 ? '' : 's'} attended.` : null, pl.makeup_reserve.length ? `Dashed: makeup date, used only if a lesson is cancelled for weather.` : null].filter(Boolean).join(' ')),
+      short(x.date), x.status === 'cancelled' ? h('span', { class: 'visually-hidden' }, ' canceled') : x.present === true ? h('span', { class: 'visually-hidden' }, ' attended') : null)),
+    pl.makeup_reserve.map((x) => h('li', { class: 'fam-date reserve', title: 'Makeup date, used if a lesson is canceled' }, short(x)))),
+    h('p', { class: 'small muted' }, [attended ? `${attended} lesson${attended === 1 ? '' : 's'} attended.` : null, pl.makeup_reserve.length ? `Dashed: makeup date, used only if a lesson is canceled for weather.` : null].filter(Boolean).join(' ')),
     h('p', { class: 'small' }, [pl.ticket_code ? `Lift ticket: ${pl.ticket_code}.` : pl.pass_status === 'verified' ? 'Using their season pass.' : pl.pass_status === 'claimed' ? 'Bring the season pass to the first lesson.' : null,
       pl.needs_rental ? 'Rental gear is ready for them.' : null, pl.owes_cents ? `To pay: ${money(pl.owes_cents)} at the ticket window.` : null].filter(Boolean).join(' ')),
     pl.allergies || pl.pickup.length ? h('p', { class: 'small muted' }, [pl.allergies ? `Allergies: ${pl.allergies}.` : null, pl.pickup.length ? `Also may pick up: ${pl.pickup.map((x) => x.name).join(', ')}.` : null].filter(Boolean).join(' ')) : null,

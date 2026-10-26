@@ -5,7 +5,7 @@
 // A wristband bar at the top always says whose record this is and what might hurt them, and switches between the views.
 
 import { get, post, patch, del } from '../api.js';
-import { h, clear, state, input, select, field, button, toast, formDialog, dialog, confirmDialog, val, num, nowInput, nowStamp, fmtDateTime, fmtTime, label, empty, errorBox, fail, ctx } from '../ui.js';
+import { h, clear, state, input, select, field, button, toast, formDialog, dialog, confirmDialog, val, num, nowInput, nowStamp, fmtDateTime, fmtTime, fmtDate, fmtTimeZoned, label, empty, errorBox, fail, ctx } from '../ui.js';
 import { has } from './patrol-feat.js';
 import { shareButton } from '../share.js';
 import { signaturePad } from '../sigpad.js';
@@ -22,6 +22,8 @@ import { searchPanel, recordsPanel } from './patrol-search.js';
 import { legalHoldControl } from './patrol-records.js';
 import { photosPanel } from './patrol-photos.js';
 import { leaveDialog, leavePanel, skipLabel } from '../leavecheck.js';
+import { conditionsBox, contactsPanel, liftBox, rentalsPanel } from './patrol-conditions.js';
+import { kitUsePanel } from './patrol-kits.js';
 
 export const CATEGORIES = ['injury', 'collision', 'lost_person', 'equipment', 'medical', 'conduct', 'other'];
 export const SEVERITY = ['minor', 'moderate', 'serious', 'critical'];
@@ -51,6 +53,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
   root.append(page);
   let def = null;
   let trails = null;
+  let lifts = null;
   let checklists = [];
   let current = null;
   let frozen = null;
@@ -66,7 +69,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       if (real) { location.replace(`#/patrol/case/${real}/${mode || 'care'}`); return; }
       const kept = keptCase(id);
       if (!kept) { clear(page).append(backLink(), errorBox(new Error('This case is not on this phone. If it was sent already, open it from the case list.'))); return; }
-      ({ c, def, trails, checklists } = kept.data);
+      ({ c, def, trails, checklists } = kept.data); lifts = kept.data.lifts || [];
       def = def || keptForm();
       if (!def) { clear(page).append(backLink(), errorBox(new Error('This phone has not loaded the report form yet. The case is kept here: open it again once there is a signal.'))); return; }
       current = c; mode = 'care';
@@ -81,6 +84,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
         [c, def] = await Promise.all([get(`/patrol/incidents/${id}`), loadForm()]);
       }
       if (!trails) trails = (await get('/schedule/trails?limit=500')).data;
+      if (!lifts) lifts = (await get('/schedule/lifts?limit=200').catch(() => ({ data: [] }))).data;
       if (!checklists.length) checklists = await loadChecklists();
     } catch (err) {
       // No signal: keep what is on screen. Bedside entries are kept on the phone meanwhile.
@@ -89,14 +93,14 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       // Opened in a dead spot: the copy kept on this phone the last time it was opened (up to 12 hours).
       const kept = offline && !version ? keptCase(id) : null;
       if (kept) {
-        ({ c, def, trails, checklists } = kept.data);
+        ({ c, def, trails, checklists } = kept.data); lifts = kept.data.lifts || [];
         current = c; if (!mode) mode = 'care';
         toast(`No connection. Showing the copy on this phone from ${new Date(kept.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}; new entries are sent when the signal returns.`, 'warn');
         redraw(); return;
       }
       clear(page).append(backLink(), errorBox(err)); return;
     }
-    if (!version) keepCase(id, { c, def, trails, checklists });
+    if (!version) keepCase(id, { c, def, trails, checklists, lifts });
     current = c;
     if (!mode) mode = c.report_state === 'draft' && !version ? 'care' : 'report';
     redraw();
@@ -433,8 +437,11 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       ['details', 'Incident and narrative', detailsPanel(c, editable)],
       ...pts.map((p) => [`patient-${p.id}`, `Patient form: ${p.first_name} ${p.last_name}`.trim(), patientCard(c, p, editable)]),
       ['witness', 'Witnesses', caseSection(c, editable, 'witness', witnessList(c, editable))],
-      ['location', 'Location', caseSection(c, editable, 'location')],
-      ['conditions', 'Conditions', caseSection(c, editable, 'conditions')],
+      ['location', 'Location', caseSection(c, editable, 'location', liftBox({ c, editable, lifts, id, onDone: load }))],
+      ['conditions', 'Conditions', caseSection(c, editable, 'conditions', conditionsBox({ c, editable, id, onDone: load }), editable ? c.conditions_suggest || {} : {})],
+      ['contacts', 'Who was told', contactsPanel({ c, editable, id, onDone: load, redraw })],
+      ['rentals', 'Rental gear', rentalsPanel({ c, editable, id, onDone: load })],
+      version ? null : ['kituse', 'Kit supplies used', kitUsePanel({ c, editable, id })],
       showCollision ? ['collision', 'Collision', collisionPanel(c, { id, editable, reload: load })] : null,
       ['responders', 'Responders', respondersPanel(c, editable)],
       ['signatures', 'Signatures', signaturesPanel(c, editable)],
@@ -505,7 +512,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
     return h('section', { class: 'panel case-head stack' },
       h('div', { class: 'case-title' },
         h('div', null, h('h1', null, c.case_number ? `Report ${c.case_number}` : `Case ${c.id}`),
-          h('p', null, `${fmtDateTime(c.occurred_at)} at ${c.location}`),
+          h('p', null, `${fmtDate(c.occurred_at)}, ${fmtTimeZoned(c.occurred_at)} at ${c.location}`),
           h('p', { class: 'muted small' }, `National Ski Area Accident Report for ${c.resort.legal_name || c.resort.name}${c.season ? `, season ${c.season}` : ''}`))),
       note ? h('p', { class: 'lock-note', role: 'status' }, note) : null,
       !version && rv.changes_requested ? changesBox(rv.changes_requested) : null,

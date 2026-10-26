@@ -15,7 +15,7 @@ import { h, clear, state, button, toast, formDialog, dialog, confirmDialog, fiel
 import { renderAsset, renderLabels, assetDialog, fullMeta, STATUS, SERVICE, workOrderSheet, fmtDay, leftText } from './asset-page.js';
 
 const PAPER = { expired: 'bad', soon: 'warn' };
-const PO_STATE = { draft: ['Draft', 'neutral'], ordered: ['Ordered', 'warn'], partial: ['Part received', 'warn'], received: ['Received', 'good'], cancelled: ['Cancelled', 'neutral'] };
+const PO_STATE = { draft: ['Draft', 'neutral'], ordered: ['Ordered', 'warn'], partial: ['Part received', 'warn'], received: ['Received', 'good'], cancelled: ['Canceled', 'neutral'] };
 const n1 = (v) => (v === null || v === undefined ? null : Math.round(Number(v) * 10) / 10);
 
 export async function render(root, params = []) {
@@ -298,7 +298,7 @@ async function poSheet(id, vendors, parts, done) {
         toast(r.status === 'received' ? 'All received. Stock updated.' : 'Received. Stock updated; the rest is still to come.');
         dlg.close(); await done();
       }, { kind: 'primary', small: true }) : null,
-      ['draft', 'ordered'].includes(o.status) && isManager() ? button('Cancel order', () => confirmDialog(`Cancel PO ${o.po_number}?`, 'It stays on the list as cancelled.', 'Cancel order', async () => { await post(`/assets/purchase-orders/${o.id}/cancel`, {}); dlg.close(); await done(); }, { danger: true }), { small: true, kind: 'quiet-danger' }) : null)), { wide: true });
+      ['draft', 'ordered'].includes(o.status) && isManager() ? button('Cancel order', () => confirmDialog(`Cancel PO ${o.po_number}?`, 'It stays on the list as canceled.', 'Cancel order', async () => { await post(`/assets/purchase-orders/${o.id}/cancel`, {}); dlg.close(); await done(); }, { danger: true }), { small: true, kind: 'quiet-danger' }) : null)), { wide: true });
 }
 
 // ---------------------------------------------------------------- costs (managers)

@@ -30,6 +30,7 @@ const VIEWS = [
   ['patrol', 'Patrol', () => can('patrol'), () => import('./views/patrol.js')],
   ['people', 'Customers', () => can('counter', 'instructor'), () => import('./views/people.js')],
   ['waivers', 'Waivers', () => can('counter', 'instructor'), () => import('./views/waivers.js')],
+  ['lostfound', 'Lost and found', () => can('counter', 'staff'), () => import('./views/lostfound.js')],
   ['shop', 'Online shop', () => can('counter'), () => import('./views/shop.js')],
   ['catalog', 'Products and prices', () => isManager(), () => import('./views/catalog.js')],
   ['messages', 'Messages', () => isManager(), () => import('./views/messages.js')],
@@ -324,13 +325,13 @@ let navToken = 0;
 const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
 
 // An app the platform has turned off for this mountain is hidden for everyone, including the owner.
-const ALWAYS = ['dashboard', 'inbox', 'people', 'waivers', 'myshifts', 'settings', 'billing', 'help', 'area'];
+const ALWAYS = ['dashboard', 'inbox', 'people', 'waivers', 'lostfound', 'myshifts', 'settings', 'billing', 'help', 'area'];
 const appOn = (key) => ALWAYS.includes(key) || !ctx.me.modules || ctx.me.modules.includes(key);
 function visibleViews() {
   // The ski area's read-only login sees the patrol summary and its own account, nothing else.
   if (ctx.me.role === 'area') return VIEWS.filter((v) => ['area', 'settings', 'help'].includes(v[0]));
   // A patrol on its own has no customers, waivers or day board to keep.
-  const hide = patrolOnly() ? ['dashboard', 'people', 'waivers', 'myshifts'] : [];
+  const hide = patrolOnly() ? ['dashboard', 'people', 'waivers', 'lostfound', 'myshifts'] : [];
   return VIEWS.filter((v) => !hide.includes(v[0]) && appOn(v[0]) && v[2]());
 }
 
@@ -414,7 +415,7 @@ async function route() {
   }
 }
 
-/** Colour, icon and area name on the page title, so every page says which part of the app it belongs to. */
+/** Color, icon and area name on the page title, so every page says which part of the app it belongs to. */
 function markArea(holder, key) {
   const area = key === 'dashboard' ? { id: 'home', name: 'Today' } : GROUP_OF[key];
   if (!area) return;

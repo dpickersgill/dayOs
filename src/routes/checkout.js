@@ -495,7 +495,7 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
       if (p.tender === 'gift_card') {
         const card = await one(conn, 'SELECT * FROM gift_cards WHERE tenant_id = ? AND code = ? FOR UPDATE', [tenantId, cleanCode(p.code)]);
         if (!card) throw bad('That gift card code was not found');
-        if (card.status !== 'active') throw conflict('That gift card has been cancelled');
+        if (card.status !== 'active') throw conflict('That gift card has been canceled');
         if (card.expires_on && card.expires_on < today) throw conflict('That gift card has expired');
         if (card.balance_cents < p.amount_cents) throw conflict(`That gift card only has ${money(card.balance_cents)} left`, { balance_cents: card.balance_cents });
         const left = card.balance_cents - p.amount_cents;
@@ -547,7 +547,7 @@ giftCards.post('/:code/void', requireRole('manager'), async (req, res) => {
   await tx(async (conn) => {
     const card = await one(conn, 'SELECT * FROM gift_cards WHERE tenant_id = ? AND code = ? FOR UPDATE', [req.auth.tenantId, cleanCode(req.params.code)]);
     if (!card) throw notFound('Gift card');
-    if (card.status === 'void') throw conflict('Already cancelled');
+    if (card.status === 'void') throw conflict('Already canceled');
     await conn.query("UPDATE gift_cards SET status = 'void', balance_cents = 0 WHERE id = ? AND tenant_id = ?", [card.id, req.auth.tenantId]);
     await conn.query("INSERT INTO gift_card_txns (tenant_id, gift_card_id, kind, delta_cents, balance_after_cents) VALUES (?, ?, 'void', ?, 0)", [req.auth.tenantId, card.id, -card.balance_cents]);
     await audit(conn, req, 'void', 'gift_cards', card.id, { balance_cents: card.balance_cents });

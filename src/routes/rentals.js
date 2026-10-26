@@ -114,7 +114,7 @@ router.post(
       const fees = [];
       for (const line of returning) {
         const d = details.get(line.rental_item_id) || {};
-        const newStatus = d.lost ? 'lost' : d.damage_notes ? 'maintenance' : 'available';
+        const newStatus = await R.returnStatus(conn, tenantId, line.rental_item_id, d.lost ? 'lost' : d.damage_notes ? 'maintenance' : 'available'); // held after a patrol case: to the shop
         await conn.query('UPDATE rental_contract_items SET returned_at = NOW(), damage_notes = ? WHERE id = ? AND tenant_id = ?', [d.damage_notes ?? null, line.id, tenantId]);
         await conn.query('UPDATE rental_items SET status = ? WHERE tenant_id = ? AND id = ?', [newStatus, tenantId, line.rental_item_id]);
         if (d.fee_cents > 0) {

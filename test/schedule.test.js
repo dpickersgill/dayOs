@@ -149,7 +149,7 @@ async function inboxText(token) {
   return out.join('\n');
 }
 
-test('publishing tells each person their shifts; changing or cancelling a published shift tells whoever it affects', async () => {
+test('publishing tells each person their shifts; changing or canceling a published shift tells whoever it affects', async () => {
   const pub = ok(await api('POST', '/workforce/shifts/publish', { token: M.owner, body: { from: monday, to: addDays(monday, 6) } }));
   assert.equal(pub.published, 2);
   assert.equal(pub.notified, 1, 'Ann has a login and a shift; nobody else is on one');
@@ -161,8 +161,8 @@ test('publishing tells each person their shifts; changing or cancelling a publis
   ok(await api('PATCH', `/workforce/shifts/${M.shiftA}`, { token: M.owner, body: { starts_at: at(0, '09:00') } }));
   assert.match(await inboxText(M.bobT), /Your shift changed\. It was Lift operator 8:00 AM.*It is now Lift operator 9:00 AM/s);
   is(await api('DELETE', `/workforce/shifts/${M.shiftA}`, { token: M.owner }), 204);
-  assert.match(await inboxText(M.bobT), /is cancelled/);
-  is(await api('PATCH', `/workforce/shifts/${M.shiftA}`, { token: M.owner, body: { notes: 'x' } }), 409, 'a cancelled shift stays cancelled');
+  assert.match(await inboxText(M.bobT), /is canceled/);
+  is(await api('PATCH', `/workforce/shifts/${M.shiftA}`, { token: M.owner, body: { notes: 'x' } }), 409, 'a canceled shift stays canceled');
 });
 
 test('someone who stops working comes off future shifts, left unfilled, and is told', async () => {

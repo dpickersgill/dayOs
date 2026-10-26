@@ -24,6 +24,7 @@ const settingsSchema = z.object({
   service_every_uses: z.number().int().min(0).max(1000),
   default_deposit_cents: z.number().int().min(0).max(1000000),
   hold_until_hour: z.number().int().min(0).max(23),
+  hold_after_incident: z.boolean(),
 });
 
 router.get('/settings', requireRole(...counter), async (req, res) => res.json(await R.getSettings(pool, req.auth.tenantId)));
@@ -32,10 +33,10 @@ router.put('/settings', requireRole(...manager), validate(settingsSchema.partial
   const { tenantId } = req.auth;
   const next = { ...(await R.getSettings(pool, tenantId)), ...req.body };
   await pool.query(
-    `INSERT INTO rental_settings (tenant_id, late_fee_cents_per_day, late_grace_minutes, require_binding_record, service_every_uses, default_deposit_cents, hold_until_hour)
-     VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE late_fee_cents_per_day = VALUES(late_fee_cents_per_day), late_grace_minutes = VALUES(late_grace_minutes),
-     require_binding_record = VALUES(require_binding_record), service_every_uses = VALUES(service_every_uses), default_deposit_cents = VALUES(default_deposit_cents), hold_until_hour = VALUES(hold_until_hour)`,
-    [tenantId, next.late_fee_cents_per_day, next.late_grace_minutes, next.require_binding_record ? 1 : 0, next.service_every_uses, next.default_deposit_cents, next.hold_until_hour],
+    `INSERT INTO rental_settings (tenant_id, late_fee_cents_per_day, late_grace_minutes, require_binding_record, service_every_uses, default_deposit_cents, hold_until_hour, hold_after_incident)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE late_fee_cents_per_day = VALUES(late_fee_cents_per_day), late_grace_minutes = VALUES(late_grace_minutes),
+     require_binding_record = VALUES(require_binding_record), service_every_uses = VALUES(service_every_uses), default_deposit_cents = VALUES(default_deposit_cents), hold_until_hour = VALUES(hold_until_hour), hold_after_incident = VALUES(hold_after_incident)`,
+    [tenantId, next.late_fee_cents_per_day, next.late_grace_minutes, next.require_binding_record ? 1 : 0, next.service_every_uses, next.default_deposit_cents, next.hold_until_hour, next.hold_after_incident ? 1 : 0],
   );
   await audit(pool, req, 'update', 'rental_settings', tenantId, req.body);
   res.json(await R.getSettings(pool, tenantId));
@@ -257,7 +258,7 @@ router.post(
       if (!line) throw bad('That item is not outstanding on this contract');
       const incoming = await R.insertGear(conn, tenantId, id, [{ person_id: line.person_id ?? undefined, ...req.body.replacement }], await R.getSettings(conn, tenantId));
       await conn.query('UPDATE rental_contract_items SET returned_at = NOW(), swap_reason = ? WHERE id = ? AND tenant_id = ?', [req.body.reason ?? 'Swapped', line.id, tenantId]);
-      await conn.query('UPDATE rental_items SET status = ? WHERE tenant_id = ? AND id = ?', [req.body.damaged ? 'maintenance' : 'available', tenantId, req.body.out_item_id]);
+      await conn.query('UPDATE rental_items SET status = ? WHERE tenant_id = ? AND id = ?', [await R.returnStatus(conn, tenantId, req.body.out_item_id, req.body.damaged ? 'maintenance' : 'available'), tenantId, req.body.out_item_id]);
       await audit(conn, req, 'swap', 'rental_contracts', id, { out: req.body.out_item_id, in: incoming[0].id });
     });
     res.json({ ok: true });
@@ -329,7 +330,11 @@ router.get('/charges', requireRole(...counter), async (req, res) => {
 router.get('/service', requireRole(...counter), async (req, res) => {
   const { tenantId } = req.auth;
   const settings = await R.getSettings(pool, tenantId);
-  const inShop = await rows(pool, "SELECT * FROM rental_items WHERE tenant_id = ? AND status = 'maintenance' ORDER BY category, sku", [tenantId]);
+  // Gear held after a patrol case shows with the case, and is released by logging an inspection.
+  const inShop = await rows(pool, `SELECT ri.*, h.incident_id AS patrol_incident_id, CONCAT(i.season, '-', LPAD(i.seq, 4, '0')) AS patrol_case FROM rental_items ri
+    LEFT JOIN incident_rentals h ON h.tenant_id = ri.tenant_id AND h.rental_item_id = ri.id AND h.held = 1 AND h.released_at IS NULL
+    LEFT JOIN incidents i ON i.tenant_id = h.tenant_id AND i.id = h.incident_id
+    WHERE ri.tenant_id = ? AND (ri.status = 'maintenance' OR h.id IS NOT NULL) ORDER BY (h.id IS NULL), ri.category, ri.sku`, [tenantId]);
   const due = settings.service_every_uses
     ? await rows(pool, "SELECT * FROM rental_items WHERE tenant_id = ? AND status IN ('available','maintenance') AND uses_count - uses_at_service >= ? ORDER BY uses_count - uses_at_service DESC LIMIT 200", [tenantId, settings.service_every_uses])
     : [];
@@ -346,9 +351,17 @@ router.post(
     await tx(async (conn) => {
       const it = await one(conn, 'SELECT * FROM rental_items WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, id]);
       if (!it) throw notFound('Rental item');
-      await conn.query('INSERT INTO rental_service_log (tenant_id, rental_item_id, kind, notes, cost_cents, done_by) VALUES (?, ?, ?, ?, ?, ?)', [tenantId, id, req.body.kind, req.body.notes ?? null, req.body.cost_cents ?? 0, req.body.done_by ?? null]);
+      // Held after a patrol case: only an inspection releases it, and it goes back on the rack only once released.
+      const hold = await R.patrolHold(conn, tenantId, id);
+      if (hold && req.body.kind !== 'inspection' && req.body.return_to_rack) throw conflict(`Held after patrol case ${hold.case_number}. Log an inspection to release it.`);
+      if (hold && req.body.kind === 'inspection' && !req.body.notes) throw bad('Say what the inspection found');
+      await conn.query('INSERT INTO rental_service_log (tenant_id, rental_item_id, kind, notes, cost_cents, done_by) VALUES (?, ?, ?, ?, ?, ?)', [tenantId, id, req.body.kind, hold && req.body.kind === 'inspection' ? `After patrol case ${hold.case_number}: ${req.body.notes}`.slice(0, 500) : req.body.notes ?? null, req.body.cost_cents ?? 0, req.body.done_by ?? null]);
       await conn.query('UPDATE rental_items SET uses_at_service = uses_count, last_service_at = NOW() WHERE tenant_id = ? AND id = ?', [tenantId, id]);
-      if (req.body.return_to_rack && it.status === 'maintenance') await conn.query("UPDATE rental_items SET status = 'available' WHERE tenant_id = ? AND id = ?", [tenantId, id]);
+      if (hold && req.body.kind === 'inspection') {
+        await conn.query('UPDATE incident_rentals SET released_at = NOW(), released_by = ?, inspection_note = ? WHERE tenant_id = ? AND rental_item_id = ? AND held = 1 AND released_at IS NULL', [req.auth.userId, req.body.notes, tenantId, id]);
+      }
+      const onContract = await one(conn, 'SELECT id FROM rental_contract_items WHERE tenant_id = ? AND rental_item_id = ? AND returned_at IS NULL LIMIT 1', [tenantId, id]);
+      if (req.body.return_to_rack && it.status === 'maintenance' && !onContract) await conn.query("UPDATE rental_items SET status = 'available' WHERE tenant_id = ? AND id = ?", [tenantId, id]);
       await audit(conn, req, 'service', 'rental_items', id, { kind: req.body.kind });
     });
     res.status(201).json({ ok: true });

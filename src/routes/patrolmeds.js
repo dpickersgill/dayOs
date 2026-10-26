@@ -66,7 +66,7 @@ async function checkMedication(conn, t, patient, data, latestVitals) {
   if (drug.max_dose !== null && detail.dose_unit && drug.dose_unit && detail.dose_unit === drug.dose_unit && Number(detail.dose_value) > drug.max_dose) {
     throw conflict(`${drug.name}: ${detail.dose_value} ${detail.dose_unit} is more than the formulary's single dose of ${drug.max_dose} ${drug.dose_unit}.`);
   }
-  if (drug.authority === 'medical_control' && !/medical control/i.test(detail.authorised_by || '')) throw conflict(`${drug.name} is only given on medical control. Record who authorised it.`);
+  if (drug.authority === 'medical_control' && !/medical control/i.test(detail.authorised_by || '')) throw conflict(`${drug.name} is only given on medical control. Record who authorized it.`);
   if (drug.authority === 'assist_own' && !/own/i.test(detail.authorised_by || '')) throw conflict(`Patrol only helps with the patient's own ${drug.name}. Record it as the patient's own medication.`);
   // Who gave it: the named patroller, or the person recording it.
   const giver = data.performed_by_staff || data._recorder_staff;

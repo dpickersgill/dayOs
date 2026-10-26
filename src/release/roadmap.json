@@ -8,8 +8,8 @@
       "items": [
         {
           "app": "patrol",
-          "title": "Supplies and gear ready every morning",
-          "text": "Every aid room, top shack, toboggan cache and pack has its list of what should be there. A case takes out what it used, a QR check on each cache works with no signal, and one board shows what is expired, out of service or low, including ropes and harnesses past their life and patrollers whose certifications are due."
+          "title": "Aid room supplies and patroller readiness",
+          "text": "Each aid room and top shack keeps its own supply levels, with reorder points, and one morning board adds patrollers whose certifications are due, next to the kits that are not ready."
         },
         {
           "app": "sell",
@@ -33,16 +33,6 @@
       "label": "Coming next",
       "when": null,
       "items": [
-        {
-          "app": "patrol",
-          "title": "Staff injury records for the owner",
-          "text": "Patrol already marks a patient as staff and the owner is told. Next: a private record for the owner or GM, including injuries patrol never sees, with the OSHA log and yearly summary, a first report for your workers' comp insurer to print or email, your state's deadline, a heads-up to the person's manager, and a reminder each February to post the summary."
-        },
-        {
-          "app": "patrol",
-          "title": "Conditions and calls on every patrol report",
-          "text": "Each report keeps the trail's status, grooming, snow and weather at the time of the incident, and a timed log of who was told: management, your insurer, a parent or guardian."
-        },
         {
           "app": "shop",
           "title": "Reload a card online, straight to the lift",
@@ -69,11 +59,6 @@
           "text": "Visits, sales, lessons and incidents side by side with the same day last season."
         },
         {
-          "app": null,
-          "title": "Lost and found",
-          "text": "Log what is handed in, match it to what guests report missing, and let them know it has been found."
-        },
-        {
           "app": "sell",
           "title": "Partner passes",
           "text": "Record Indy Pass and reciprocal pass visits at the window and see them in your reports."
@@ -85,11 +70,6 @@
       "label": "Later",
       "when": null,
       "items": [
-        {
-          "app": "patrol",
-          "title": "Rental gear and lifts linked to patrol reports",
-          "text": "When rental gear was involved, the report shows the rental, its binding setting and the technician, and the gear is held until it is inspected. When a lift was involved, that day's inspection is attached."
-        },
         {
           "app": "conditions",
           "title": "Snowmaking log",

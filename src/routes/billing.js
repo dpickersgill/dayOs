@@ -2,7 +2,7 @@
 
 // Settings, Billing: the mountain's Verdynt/OS subscription. Owners and managers see it; only the owner changes the plan
 // or pays. Paying is through Stripe: Checkout for a card or US bank account, an emailed invoice, and Stripe's customer
-// portal for the card, invoices and cancelling. Stripe tells us what happened through the webhook (handleWebhook).
+// portal for the card, invoices and canceling. Stripe tells us what happened through the webhook (handleWebhook).
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');

@@ -82,6 +82,9 @@ export async function drawOpsSettings(box) {
         check('short_alert', 'On Thursday, message the schedule builders when a weekend crew is short', s.short_alert),
       ], (fd) => ({ min_days: numOrNull(fd, 'min_days'), min_days_candidate: numOrNull(fd, 'min_days_candidate'), remind_dates: String(fd.get('remind_dates')).trim(), self_signup: Boolean(fd.get('self_signup')), signup_approval: Boolean(fd.get('signup_approval')), short_alert: Boolean(fd.get('short_alert')) })),
       group('Sweep', s.can.sweep, [field('Alert when routes are not clear after (minutes)', input({ name: 'sweep_late_minutes', type: 'number', min: 5, max: 240, value: s.sweep_late_minutes }))], (fd) => ({ sweep_late_minutes: Number(fd.get('sweep_late_minutes')) })),
+      group('Kits', s.can.equipment, [
+        check('kit_seals', 'Seal kits: a kit whose seal number is unchanged is signed off in one tap', s.kit_seals),
+      ], (fd) => ({ kit_seals: Boolean(fd.get('kit_seals')) })),
       group('Medications and oxygen', s.can.meds, [
         field('Refill oxygen below (psi)', input({ name: 'o2_refill_psi', type: 'number', min: 0, max: 3000, value: s.o2_refill_psi })),
         check('controlled_counts', 'Keep two-person counts of controlled medications', s.controlled_counts),

@@ -22,6 +22,7 @@ import { drawReview } from './patrol-review.js';
 import { drawSchedule } from './patrol-schedule.js';
 import { drawCover } from './patrol-cover.js';
 import { drawCrews } from './patrol-crews.js';
+import { drawKits, renderKitPage, renderKitLabels } from './patrol-kits.js';
 import { drawDuty, renderRoom } from './patrol-duty.js';
 import { drawSweep, drawOpening } from './patrol-sweep.js';
 import { drawMeds } from './patrol-meds.js';
@@ -69,6 +70,8 @@ export async function render(root, params = []) {
   }
   if (params[0] === 'room') { await renderRoom(root); return; } // the patrol-room sign-in screen
   if (params[0] === 'release' && ONE.test(params[1] || '')) { await renderRelease(root, Number(params[1])); return; }
+  if (params[0] === 'kit' && ONE.test(params[1] || '')) { await renderKitPage(root, Number(params[1])); return; }
+  if (params[0] === 'kit-labels') { await renderKitLabels(root); return; }
   const printPages = { handoff: renderHandoff, refusal: renderRefusal, takehome: renderTakehome };
   // the refusal can be signed on a case started with no signal (temporary negative ids, kept on the phone)
   if (printPages[params[0]] && (params[0] === 'refusal' ? CASE_ID : ONE).test(params[1] || '') && (params[0] === 'refusal' ? CASE_ID : ONE).test(params[2] || '')) {
@@ -97,6 +100,7 @@ export async function render(root, params = []) {
     ['cover', 'Shift cover', drawCover],
     ['posts', 'Today\'s posts', (b) => drawPosts(b, opts)],
     ['team', 'Roster', (b) => drawTeam(b, opts)],
+    ['kits', 'Kits', drawKits],
     ['equipment', 'Equipment', (b) => drawEquipment(b, opts)],
     ['meds', 'Medications', drawMeds],
     ['lifts', 'Lift evacuation', drawLifts],
@@ -117,7 +121,7 @@ export async function render(root, params = []) {
     ['now', 'Now', ['home', 'duty', 'dispatch', 'map', 'opening', 'sweep', 'avalanche', 'log']],
     ['cases', 'Cases', ['cases', 'review', 'followup', 'records', 'stats', 'network']],
     ['people', 'People', ['schedule', 'crews', 'cover', 'posts', 'team', 'training', 'passport']],
-    ['gear', 'Gear', ['equipment', 'meds', 'lifts']],
+    ['gear', 'Gear', ['kits', 'equipment', 'meds', 'lifts']],
     ['admin', 'Admin', ['settings', 'requirements', 'access', 'levels']],
   ].map(([id, text, keys]) => ({ id, text, items: keys.map((k) => items.find((i) => i[0] === k)).filter(Boolean) })).filter((s) => s.items.length);
   const wanted = SECTIONS.find((s) => s.items.some((i) => i[0] === params[0])) || SECTIONS[0];

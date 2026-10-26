@@ -63,29 +63,29 @@ router.get('/lookup', requireRole('manager', 'counter'), async (req, res) => {
   res.json({ data: out.map((o) => ({ ...o, link: `${baseUrl(req)}/shop/${slug}?order=${o.view_token}`, view_token: undefined })) });
 });
 
-// Group enquiries and the waitlist.
+// Group inquiries and the waitlist.
 router.get('/groups', requireRole('manager', 'counter'), async (req, res) => {
   res.json({ data: await rows(pool, "SELECT id, contact_name, organisation, email, phone, group_size, preferred_on, note, status, created_at FROM group_enquiries WHERE tenant_id = ? ORDER BY FIELD(status, 'new','contacted','booked','closed'), id DESC LIMIT 200", [req.auth.tenantId]) });
 });
 router.patch('/groups/:id', requireRole('manager', 'counter'), validate(z.object({ status: z.enum(['new', 'contacted', 'booked', 'closed']) })), async (req, res) => {
   const [r] = await pool.query('UPDATE group_enquiries SET status = ? WHERE tenant_id = ? AND id = ?', [req.body.status, req.auth.tenantId, Number(req.params.id)]);
-  if (!r.affectedRows) throw notFound('Enquiry');
+  if (!r.affectedRows) throw notFound('Inquiry');
   res.json({ ok: true });
 });
 router.get('/waitlist', requireRole('manager', 'counter'), async (req, res) => {
   res.json({ data: await rows(pool, 'SELECT on_date, SUM(party_size) AS people, COUNT(*) AS entries, SUM(notified_at IS NOT NULL) AS told FROM shop_waitlist WHERE tenant_id = ? AND on_date >= CURDATE() - INTERVAL 1 DAY GROUP BY on_date ORDER BY on_date LIMIT 60', [req.auth.tenantId]) });
 });
 
-// Look of the public page: brand colour, logo, hero photo, and the opening-day banner.
+// Look of the public page: brand color, logo, hero photo, and the opening-day banner.
 const imageUrl = z.string().max(450000).regex(/^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/, 'Use a JPEG or PNG picture');
 const brandSchema = z.object({
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Colour must look like #1a5fb4').nullable().optional(),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Color must look like #1a5fb4').nullable().optional(),
   logo: imageUrl.nullable().optional(),
   hero: imageUrl.nullable().optional(),
   opening_day: dateStr.nullable().optional(),
   opening_note: z.string().trim().max(200).nullable().optional(),
 });
-/** Brand colours must stay readable with white text on buttons. */
+/** Brand colors must stay readable with white text on buttons. */
 const luminance = (hex) => { const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
 router.get('/brand', requireRole('manager'), async (req, res) => {
   const b = await one(pool, 'SELECT color, logo, hero, opening_day, opening_note FROM shop_brand WHERE tenant_id = ?', [req.auth.tenantId]);
@@ -93,7 +93,7 @@ router.get('/brand', requireRole('manager'), async (req, res) => {
 });
 router.put('/brand', requireRole('manager'), validate(brandSchema), async (req, res) => {
   const b = req.body;
-  if (b.color && (1.05) / (luminance(b.color) + 0.05) < 4.5) throw bad('That colour is too light for white button text. Pick a darker one.');
+  if (b.color && (1.05) / (luminance(b.color) + 0.05) < 4.5) throw bad('That color is too light for white button text. Pick a darker one.');
   const cur = await one(pool, 'SELECT color, logo, hero, opening_day, opening_note FROM shop_brand WHERE tenant_id = ?', [req.auth.tenantId]) || {};
   const pick = (k) => (b[k] === undefined ? (cur[k] ?? null) : b[k]);
   await pool.query('INSERT INTO shop_brand (tenant_id, color, logo, hero, opening_day, opening_note) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE color = VALUES(color), logo = VALUES(logo), hero = VALUES(hero), opening_day = VALUES(opening_day), opening_note = VALUES(opening_note)',

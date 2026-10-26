@@ -192,7 +192,7 @@ test('a fee set in the console is kept by Stripe from each payment, and given ba
   is(await api('PATCH', `/platform/tenants/${A.id}`, { headers: { 'x-platform-key': KEY }, body: { platform_fee_bps: 0, platform_fee_cents: 0 } }), 200);
 });
 
-test('a payment we cannot honour is refunded on the account it was paid on', async () => {
+test('a payment we cannot honor is refunded on the account it was paid on', async () => {
   const { row } = await buy(A, productA);
   const mark = calls.length;
   const w = await webhook(paid(row, A.id, acctA, {}), 'whsec_connect');

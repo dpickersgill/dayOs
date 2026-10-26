@@ -56,14 +56,14 @@ async function lessonsTab(root, { staff, certs, names }) {
   await load();
 }
 
-// ---- cancelling lessons (routes/skischool.js, lib/lessoncancel.js)
-/** What cancelling does to the people on a lesson, in plain words, from the preview counts. */
+// ---- canceling lessons (routes/skischool.js, lib/lessoncancel.js)
+/** What canceling does to the people on a lesson, in plain words, from the preview counts. */
 function consequences(list) {
   const sum = (k) => list.reduce((n, s) => n + Number(s[k] || 0), 0);
   const booked = sum('booked'); const pack = sum('on_package'); const online = sum('paid_online');
   if (!booked) return h('p', null, 'Nobody is booked, so nobody needs telling.');
   return h('ul', { class: 'plain stack' },
-    h('li', null, `${booked} booking${booked === 1 ? '' : 's'} cancelled, and everyone booked gets an email.`),
+    h('li', null, `${booked} booking${booked === 1 ? '' : 's'} canceled, and everyone booked gets an email.`),
     pack ? h('li', null, `${pack} package lesson${pack === 1 ? '' : 's'} go back on the package.`) : null,
     online ? h('li', null, `${online} online payment${online === 1 ? ' is' : 's are'} refunded in full to the card.`) : null,
     booked - pack - online > 0 ? h('li', null, 'Anyone who paid at the desk is listed afterwards, to refund at the counter.') : null);
@@ -73,11 +73,11 @@ function afterCancel(results) {
   const desk = results.flatMap((r) => r.desk_refunds || []);
   const cards = results.flatMap((r) => r.card_refunds || []);
   const body = h('div', { class: 'stack' },
-    h('p', null, `${results.length} lesson${results.length === 1 ? '' : 's'} cancelled. ${results.reduce((n, r) => n + r.emailed, 0)} email${results.reduce((n, r) => n + r.emailed, 0) === 1 ? '' : 's'} sent.`),
+    h('p', null, `${results.length} lesson${results.length === 1 ? '' : 's'} canceled. ${results.reduce((n, r) => n + r.emailed, 0)} email${results.reduce((n, r) => n + r.emailed, 0) === 1 ? '' : 's'} sent.`),
     cards.length ? h('p', null, `Refunded to cards: ${cards.map((c) => `${c.name} ${money(c.amount_cents)}`).join(', ')}.`) : null,
     desk.length ? h('div', { class: 'notice warn stack' }, h('b', null, 'Refund these at the desk'), h('ul', { class: 'plain' }, desk.map((d) => h('li', null, `${d.name}: ${money(d.amount_cents)}, order #${d.order_id}`))),
       h('p', { class: 'small' }, 'Open each order under Sell, Sold today or Find an order, and refund the lesson.')) : null);
-  dialog('Lessons cancelled', body);
+  dialog('Lessons canceled', body);
 }
 async function cancelOne(s, done) {
   let p;
@@ -91,7 +91,7 @@ async function cancelOne(s, done) {
       await del(`/skischool/sessions/${s.id}`); toast('Lesson deleted'); document.querySelectorAll('.overlay').forEach((o) => o.remove()); await done();
     }, { small: true })) : null), async (fd) => {
     const r = await post(`/skischool/sessions/${s.id}/cancel`, { reason: val(fd, 'reason') });
-    toast('Lesson cancelled');
+    toast('Lesson canceled');
     await done();
     if (r.bookings) afterCancel([r]);
   }, { submitText: 'Cancel lesson' });
@@ -113,11 +113,11 @@ async function cancelDays(done) {
     } catch (err) { list.append(errorBox(err)); }
   };
   from.addEventListener('change', look); to.addEventListener('change', look);
-  formDialog('Cancel every lesson on a day', h('div', { class: 'stack' }, h('p', { class: 'muted' }, 'For a storm or a closure: every lesson from the first day to the last is cancelled, with refunds and emails as for one lesson.'),
+  formDialog('Cancel every lesson on a day', h('div', { class: 'stack' }, h('p', { class: 'muted' }, 'For a storm or a closure: every lesson from the first day to the last is canceled, with refunds and emails as for one lesson.'),
     h('div', { class: 'form' }, field('First day', from), field('Last day', to)), field('Reason', reason, 'Kept on the record and included in the email to guests.'), list), async (fd) => {
     if (seen !== `${from.value}|${to.value}`) { await look(); throw new Error('Check the list of lessons, then press Cancel lessons again.'); }
     const r = await post('/skischool/sessions/cancel-days', { from: val(fd, 'from'), to: val(fd, 'to'), reason: val(fd, 'reason') });
-    toast(`${r.cancelled} lesson${r.cancelled === 1 ? '' : 's'} cancelled`);
+    toast(`${r.cancelled} lesson${r.cancelled === 1 ? '' : 's'} canceled`);
     await done();
     afterCancel(r.sessions);
   }, { submitText: 'Cancel lessons', wide: true });
@@ -314,7 +314,7 @@ function bookingNote(r, done) {
 
 // ---------------------------------------------------------------- requests from the online booking page
 async function requestsTab(root) {
-  const status = select([['pending', 'Waiting'], ['confirmed', 'Confirmed'], ['awaiting_payment', 'Paying now'], ['declined', 'Declined'], ['cancelled', 'Cancelled by guest'], ['expired', 'Not completed']], 'pending', { name: 'req-status', 'aria-label': 'Show requests' });
+  const status = select([['pending', 'Waiting'], ['confirmed', 'Confirmed'], ['awaiting_payment', 'Paying now'], ['declined', 'Declined'], ['cancelled', 'Canceled by guest'], ['expired', 'Not completed']], 'pending', { name: 'req-status', 'aria-label': 'Show requests' });
   const body = h('div', { class: 'stack' });
   root.append(h('p', { class: 'muted' }, 'Guests ask for a lesson on the public booking page. A request holds a place but takes no payment: confirm it, then they pay at the desk. Turn the page on in Settings.'), field('Show', status), body);
   status.addEventListener('change', load);

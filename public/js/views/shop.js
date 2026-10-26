@@ -1,10 +1,10 @@
-// Online shop desk: find a guest's order at the window (will-call), follow up group enquiries, see who is waiting for a
+// Online shop desk: find a guest's order at the window (will-call), follow up group inquiries, see who is waiting for a
 // sold-out day, and (managers) edit prices and limits for many days at once and watch ticket sales pace.
 import { get, post, patch } from '../api.js';
 import { h, clear, fail, money, toCents, table, state, input, select, field, button, toast, tabs, fmtDate, fmtDateTime, todayStr, addDays, empty, errorBox, isManager } from '../ui.js';
 
 export async function render(root) {
-  const items = [['willcall', 'Will-call', willcall], ['groups', 'Group enquiries', groups], ['waitlist', 'Waitlist', waitlist]];
+  const items = [['willcall', 'Will-call', willcall], ['groups', 'Group inquiries', groups], ['waitlist', 'Waitlist', waitlist]];
   if (isManager()) items.push(['calendar', 'Prices and limits', calendar], ['pace', 'Sales pace', pace]);
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Online shop')), tabs(items, 'willcall'));
 }
@@ -29,7 +29,7 @@ async function willcall(box) {
       { head: 'Ticket', cell: (t) => [h('strong', null, t.product), h('div', { class: 'muted small' }, `${t.first_name || ''} ${t.last_name || ''}`.trim())] },
       { head: 'Valid', cell: (t) => (t.valid_from === t.valid_to ? fmtDate(t.valid_from) : `${fmtDate(t.valid_from)} to ${fmtDate(t.valid_to)}`) },
       { head: 'Code', cell: (t) => h('code', null, t.code) },
-      { head: 'Status', cell: (t) => (t.status === 'void' ? state('Cancelled', 'bad') : t.scans ? state(`Used ${t.scans}x`, 'warn') : state('Not used', 'good')) },
+      { head: 'Status', cell: (t) => (t.status === 'void' ? state('Canceled', 'bad') : t.scans ? state(`Used ${t.scans}x`, 'warn') : state('Not used', 'good')) },
     ], o.tickets),
     h('div', { class: 'row' },
       h('a', { class: 'btn', href: o.link, target: '_blank', rel: 'noopener' }, 'Open and print tickets'),
@@ -57,7 +57,7 @@ async function groups(box) {
         sel.addEventListener('change', async () => { try { await patch(`/online-shop/groups/${g.id}`, { status: sel.value }); toast('Saved'); } catch (e) { fail(e); } });
         return sel;
       } },
-    ], r.data) : empty('No group enquiries yet.'));
+    ], r.data) : empty('No group inquiries yet.'));
 }
 
 // ---------------------------------------------------------------- waitlist

@@ -61,7 +61,7 @@ async function tellChange(conn, t, from, before, after) {
   if (before.status !== 'published') return;
   const was = before.staff_id ? Number(before.staff_id) : null;
   const now = after && after.status !== 'cancelled' && after.staff_id ? Number(after.staff_id) : null;
-  if (!after || after.status === 'cancelled') { if (was) await SH.tell(conn, t, from, was, `Your ${describe(before)} is cancelled.`); return; }
+  if (!after || after.status === 'cancelled') { if (was) await SH.tell(conn, t, from, was, `Your ${describe(before)} is canceled.`); return; }
   if (was && was !== now) await SH.tell(conn, t, from, was, `You are no longer on ${describe(before)}.`);
   if (now && was !== now) await SH.tell(conn, t, from, now, `You are on ${describe(after)}.${after.notes ? ` Note: ${after.notes}` : ''}`);
   if (now && was === now && (before.starts_at !== after.starts_at || before.ends_at !== after.ends_at || before.station_id !== after.station_id || before.role_label !== after.role_label)) {
@@ -146,7 +146,7 @@ router.patch('/schedule/:id', patrol, editor, validate(z.object(fields).partial(
   const after = await tx(async (conn) => {
     const before = await one(conn, `${SELECT} WHERE ps.tenant_id = ? AND ps.id = ? FOR UPDATE`, [t, id]);
     if (!before) throw notFound('Patrol shift');
-    if (before.status === 'cancelled') throw conflict('This shift is cancelled');
+    if (before.status === 'cancelled') throw conflict('This shift is canceled');
     const next = { ...before, ...Object.fromEntries(Object.entries(req.body).filter(([, v]) => v !== undefined)) };
     await check(conn, t, next, id);
     await conn.query('UPDATE patrol_shifts SET staff_id = ?, starts_at = ?, ends_at = ?, station_id = ?, role_label = ?, notes = ? WHERE tenant_id = ? AND id = ?',

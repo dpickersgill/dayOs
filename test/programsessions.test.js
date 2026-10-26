@@ -151,7 +151,7 @@ test('staff enroll by day; a full day takes a waitlist; withdrawing moves the ne
   M.kids = { a, b, c, d };
 });
 
-test('weather: cancelling a day uses that group\'s makeup date and tells the families; with none left, the manager adds a date', async () => {
+test('weather: canceling a day uses that group\'s makeup date and tells the families; with none left, the manager adds a date', async () => {
   const before = mails.length;
   const first = M.mon.meetings[0];
   is(await api('POST', `/programs/meetings/${first.id}/cancel`, { token: M.inst, body: { reason: 'Ice storm' } }), 403);
@@ -159,14 +159,14 @@ test('weather: cancelling a day uses that group\'s makeup date and tells the fam
   assert.equal(out.makeup.date, plus(monday, 28), 'the makeup Monday is now a lesson');
   assert.equal(out.emailed, 2, 'both Monday families');
   const sent = mails.slice(before);
-  assert.ok(sent.every((m) => /cancelled/.test(m.Subject) && m.TextBody.includes('makeup lesson')));
+  assert.ok(sent.every((m) => /canceled/.test(m.Subject) && m.TextBody.includes('makeup lesson')));
   const tue = ok(await api('GET', `/programs/terms/${M.s1}`, { token: M.owner })).groups.find((g) => g.id === M.tue.id);
   assert.deepEqual(tue.meetings.map((m) => m.status), ['scheduled', 'scheduled', 'scheduled', 'scheduled', 'standby'], 'Tuesday is untouched');
   const again = ok(await api('POST', `/programs/meetings/${M.mon.meetings[1].id}/cancel`, { token: M.owner, body: { reason: 'Wind hold', notify: false } }));
   assert.equal(again.makeup, null);
   assert.equal(again.no_makeup_left, true);
   assert.equal(again.per_lesson_cents, 5000, '$200 over 4 lessons');
-  is(await api('POST', `/programs/meetings/${M.mon.meetings[1].id}/cancel`, { token: M.owner, body: { reason: 'Wind hold' } }), 409, 'already cancelled');
+  is(await api('POST', `/programs/meetings/${M.mon.meetings[1].id}/cancel`, { token: M.owner, body: { reason: 'Wind hold' } }), 409, 'already canceled');
   ok(await api('POST', `/programs/groups/${M.mon.id}/meetings`, { token: M.owner, body: { date: plus(monday, 35) } }), 201);
   const mon = ok(await api('GET', `/programs/terms/${M.s1}`, { token: M.owner })).groups.find((g) => g.id === M.mon.id);
   assert.equal(mon.meetings.filter((m) => m.status === 'scheduled').length, 4, 'still four lessons');

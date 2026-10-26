@@ -172,8 +172,8 @@ add('patient', 'activity', 'times_when', 'When', 'text');
 // ---- conditions (case)
 add('case', 'conditions', 'weather', 'Weather', 'select', { options: opts(['clear', 'Clear (clear sky or some clouds)'], ['overcast', 'Overcast'], ['snowing', 'Snowing'], ['raining', 'Raining'], ['fog', 'Fog'], ...UNK) });
 add('case', 'conditions', 'light', 'Light', 'select', { options: opts(['sharp', 'Sharp (distinct shadows)'], ['flat', 'Flat (shadows not distinct)'], ['whiteout', 'Whiteout (hard to judge depth)'], ['lights', 'Lights (night lights)'], ['dark', 'Dark (no lighting)'], ...UNK) });
-add('case', 'conditions', 'temperature', 'Temperature', 'select', { options: opts(['above_10', 'Above 10 °C (above 50 °F)'], ['0_to_10', '0 to 10 °C (32 to 50 °F)'], ['minus10_to_0', '-10 to 0 °C (14 to 32 °F)'], ['minus20_to_minus11', '-20 to -11 °C (-4 to 12 °F)'], ['below_minus20', 'Below -20 °C (below -4 °F)'], ...UNK) });
-add('case', 'conditions', 'snow', 'New snow, last 24 hours', 'select', { options: opts(['none', 'No new snow'], ['0_to_5', '0 to 5 cm (0 to 2 in)'], ['5_to_10', '5 to 10 cm (2 to 4 in)'], ['10_to_15', '10 to 15 cm (4 to 6 in)'], ['over_15', 'Over 15 cm (over 6 in)'], ...UNK) });
+add('case', 'conditions', 'temperature', 'Temperature', 'select', { options: opts(['above_10', 'Above 50 °F (above 10 °C)'], ['0_to_10', '32 to 50 °F (0 to 10 °C)'], ['minus10_to_0', '14 to 32 °F (-10 to 0 °C)'], ['minus20_to_minus11', '-4 to 12 °F (-20 to -11 °C)'], ['below_minus20', 'Below -4 °F (below -20 °C)'], ...UNK) });
+add('case', 'conditions', 'snow', 'New snow, last 24 hours', 'select', { options: opts(['none', 'No new snow'], ['0_to_5', '0 to 2 in (0 to 5 cm)'], ['5_to_10', '2 to 4 in (5 to 10 cm)'], ['10_to_15', '4 to 6 in (10 to 15 cm)'], ['over_15', 'Over 6 in (over 15 cm)'], ...UNK) });
 add('case', 'conditions', 'surface', 'Surface', 'select', { options: opts(['groomed', 'Groomed'], ['moguls', 'Moguls'], ['powder', 'Powder (new snow on the old surface)'], ['variable', 'Variable (slush or cut-up powder)'], ['granular', 'Granular (corn snow)'], ['hard', 'Hard (resists poles and edges)'], ...UNK) });
 
 // ---- equipment and ability (patient)

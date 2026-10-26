@@ -65,9 +65,35 @@ function asUtc(s) {
 }
 export const fmtDate = (s) => { const d = asUtc(s); return d ? parts(d, { weekday: 'short', month: 'short', day: 'numeric' }) : ''; };
 export const fmtDateLong = (s) => { const d = asUtc(s); return d ? parts(d, { weekday: 'long', month: 'long', day: 'numeric' }) : ''; };
-export const fmtTime = (s) => { const d = asUtc(s); return d ? parts(d, { hour: 'numeric', minute: '2-digit' }) : ''; };
+// ---- the mountain's time zone on screen
+// Times are the mountain's clock. When this device is on a different clock (an owner traveling, a reviewer in another
+// state), each time carries the mountain's zone (10:15 AM MT), so nobody reads it as their own local time.
+const offsetOf = (tz, at = new Date()) => {
+  try {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(at).map((x) => [x.type, x.value]));
+    return Math.round((Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute) - at.getTime()) / 60000);
+  } catch (_) { return null; }
+};
+const deviceZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (_) { return null; } };
+/** True when this device's clock is not the mountain's. */
+export const awayFromMountain = () => { const d = deviceZone(); return Boolean(d && ctx.tz && d !== ctx.tz && offsetOf(d) !== offsetOf(ctx.tz)); };
+/** The mountain's zone as people say it: MT, PT, ET (or MST where the browser has no short name). */
+export function zoneName(s) {
+  const d = asUtc(s) || new Date();
+  for (const style of ['shortGeneric', 'short']) {
+    try {
+      const v = new Intl.DateTimeFormat('en-US', { timeZone: ctx.tz, timeZoneName: style }).formatToParts(d).find((x) => x.type === 'timeZoneName');
+      if (v && v.value) return v.value;
+    } catch (_) { /* try the next style */ }
+  }
+  return ctx.tz;
+}
+const zoneTail = (s) => (awayFromMountain() ? ` ${zoneName(s)}` : '');
+export const fmtTime = (s) => { const d = asUtc(s); return d ? `${parts(d, { hour: 'numeric', minute: '2-digit' })}${zoneTail(s)}` : ''; };
+/** The time with the mountain's zone always shown (reports, printouts, copies sent outside). */
+export const fmtTimeZoned = (s) => { const d = asUtc(s); return d ? `${parts(d, { hour: 'numeric', minute: '2-digit' })} ${zoneName(s)}` : ''; };
 export const fmtDateTime = (s) => (s ? `${fmtDate(s)}, ${fmtTime(s)}` : '');
-export const fmtRange = (a, b) => `${fmtDate(a)}, ${fmtTime(a)} to ${fmtTime(b)}`;
+export const fmtRange = (a, b) => { const d = asUtc(b); return `${fmtDate(a)}, ${fmtTime(a).replace(zoneTail(a), '')} to ${d ? parts(d, { hour: 'numeric', minute: '2-digit' }) : ''}${zoneTail(b)}`; };
 export const dayOf = (s) => String(s || '').slice(0, 10);
 
 function zoned(extra) {
@@ -88,7 +114,7 @@ export function weekStart(date) {
   const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
   return addDays(date, -((wd + 6) % 7)); // Monday
 }
-/** Same rule the server uses: August to July, labelled 2026-27. */
+/** Same rule the server uses: August to July, labeled 2026-27. */
 export function seasonFor(date) {
   const [y, m] = date.split('-').map(Number);
   const start = m >= 8 ? y : y - 1;
@@ -99,7 +125,9 @@ export const isManager = () => ['owner', 'manager'].includes(ctx.me && ctx.me.ro
 // Someone on the patrol roster can use Patrol whatever their login role (a lift operator who also patrols).
 export const can = (...roles) => isManager() || roles.includes(ctx.me && ctx.me.role) || Boolean(roles.includes('patrol') && ctx.me && ctx.me.on_patrol);
 
-export const label = (s) => String(s || '').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+// Stored values keep their spelling ("cancelled"); on screen they read in US English.
+const US_WORDS = { cancelled: 'canceled', cancelling: 'canceling', colour: 'color', organisation: 'organization' }; // spelling-ok
+export const label = (s) => String(s || '').replace(/_/g, ' ').replace(/\b(cancelled|cancelling|colour|organisation)\b/gi, (w) => { const u = US_WORDS[w.toLowerCase()]; return w[0] === w[0].toUpperCase() ? u[0].toUpperCase() + u.slice(1) : u; }).replace(/^./, (c) => c.toUpperCase()); // spelling-ok
 
 // ---------------------------------------------------------------- small pieces
 export function state(text, kind = 'neutral') {
@@ -113,7 +141,7 @@ const TRAIL_LOOK = {
   double_black: { name: 'Expert', draw: () => svg('g', {}, svg('path', { d: 'M5 2 L10 9 L5 16 L0 9 Z', fill: '#111' }), svg('path', { d: 'M13 2 L18 9 L13 16 L8 9 Z', fill: '#111', stroke: '#fff', 'stroke-width': 1 })) },
   park: { name: 'Terrain park', draw: () => svg('path', { d: 'M9 2 L17 16 L1 16 Z', fill: '#e07a00' }) },
 };
-/** Trail-sign shape plus a word, so difficulty never depends on colour alone. */
+/** Trail-sign shape plus a word, so difficulty never depends on color alone. */
 export function trailMark(difficulty) {
   const look = TRAIL_LOOK[difficulty] || TRAIL_LOOK.green;
   const icon = svg('svg', { width: 20, height: 18, viewBox: '0 0 20 18', 'aria-hidden': 'true', focusable: 'false' }, look.draw());

@@ -14,7 +14,7 @@ function hashOf(req) {
   return crypto.createHmac('sha256', config.linkSecret).update(`device:${raw}`).digest('hex');
 }
 
-/** "Safari on iPhone", "Chrome on Windows": enough for a person to recognise their own device. */
+/** "Safari on iPhone", "Chrome on Windows": enough for a person to recognize their own device. */
 function label(agent) {
   const a = String(agent || '');
   const browser = /Edg\//.test(a) ? 'Edge' : /OPR\//.test(a) ? 'Opera' : /Firefox\//.test(a) ? 'Firefox' : /Chrome\//.test(a) ? 'Chrome' : /Safari\//.test(a) ? 'Safari' : 'A browser';

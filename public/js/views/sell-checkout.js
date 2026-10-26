@@ -264,7 +264,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       } else if (st.status === 'failed') {
         clear(readerBox).append(errorBox(new Error(`${st.failure || 'The card was not accepted.'} Try again, or take another payment.`)));
       } else {
-        clear(readerBox).append(h('p', { class: 'muted' }, 'The payment was cancelled. Nothing was charged.'));
+        clear(readerBox).append(h('p', { class: 'muted' }, 'The payment was canceled. Nothing was charged.'));
       }
       return;
     }
@@ -321,7 +321,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       const code = cardCode.value.trim();
       if (!code) throw new Error('Enter the gift card code');
       const card = await get(`/gift-cards/${encodeURIComponent(code)}`);
-      if (card.status !== 'active') throw new Error('That gift card has been cancelled');
+      if (card.status !== 'active') throw new Error('That gift card has been canceled');
       if (card.balance_cents < cents) throw new Error(`That gift card only has ${money(card.balance_cents)} left. Take that amount, then pay the rest another way.`);
       p.code = code;
       toast(`Gift card balance after this: ${money(card.balance_cents - cents)}`);

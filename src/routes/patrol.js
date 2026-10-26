@@ -23,6 +23,7 @@ const OPS = require('../lib/patrolops');
 const { checkCase } = require('../lib/reportcheck');
 const SF = require('../lib/storyfill');
 const staffInjury = require('../lib/staffinjury');
+const COND = require('../lib/caseconditions');
 const { baseUrl } = require('../lib/baseurl');
 
 const router = express.Router();
@@ -52,8 +53,22 @@ const incidentFields = {
   gps_lat: z.number().min(-90).max(90).nullable().optional(),
   gps_lng: z.number().min(-180).max(180).nullable().optional(),
   trail_id: z.number().int().positive().nullable().optional(),
+  lift_id: z.number().int().positive().nullable().optional(),
+  lift_chair: z.string().trim().max(12).nullable().optional(),
   form: formSchema('case').optional(),
 };
+
+/**
+ * Saves the conditions at the time of the case (lib/caseconditions): what the mountain's records said about the trail,
+ * grooming, snow, weather and the lift. Taken when the case is opened and again when its time, trail or lift changes.
+ */
+async function takeConditions(conn, tenantId, id) {
+  const inc = await one(conn, 'SELECT occurred_at, trail_id, lift_id FROM incidents WHERE tenant_id = ? AND id = ?', [tenantId, id]);
+  const now = nowIn((await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone);
+  const snap = await COND.snapshot(conn, tenantId, { at: inc.occurred_at, trailId: inc.trail_id, liftId: inc.lift_id, now });
+  await conn.query('UPDATE incidents SET conditions = ? WHERE tenant_id = ? AND id = ?', [JSON.stringify(snap), tenantId, id]);
+  return snap;
+}
 // Started on a phone with no signal: the phone's own id makes a repeat send find the case it already made.
 const quickFields = {
   client_ref: z.string().regex(/^[a-z0-9]{6,40}$/).optional(),
@@ -117,6 +132,7 @@ async function createCase(req, body) {
             [req.auth.tenantId, r.insertId, patient.first_name || 'Unknown', patient.last_name || 'Patient', patient.age_years ?? null, patient.chief_complaint || null]);
           if (patient.chief_complaint && !body.summary) await conn.query('UPDATE incidents SET summary = ? WHERE tenant_id = ? AND id = ?', [patient.chief_complaint.slice(0, 500), req.auth.tenantId, r.insertId]);
         }
+        await takeConditions(conn, req.auth.tenantId, r.insertId);
         await audit(conn, req, 'create', 'incidents', r.insertId, { category: body.category, severity: body.severity, case: `${season}-${n}`, ...(body.client_ref ? { offline: true } : {}) });
         return { id: r.insertId, case_number: `${season}-${String(n).padStart(4, '0')}`, status: 'open', report_state: 'draft', patient_id: patientId };
       });
@@ -295,7 +311,7 @@ const VOIDED_BY = (t) => `LEFT JOIN users vu ON vu.id = ${t}.voided_by AND vu.te
  * answers that can be worked out from the bedside entries.
  */
 async function loadCase(conn, tenantId, id) {
-  const incident = await one(conn, 'SELECT i.*, t.name AS trail FROM incidents i LEFT JOIN trails t ON t.id = i.trail_id AND t.tenant_id = i.tenant_id WHERE i.tenant_id = ? AND i.id = ?', [tenantId, id]);
+  const incident = await one(conn, 'SELECT i.*, t.name AS trail, l.name AS lift FROM incidents i LEFT JOIN trails t ON t.id = i.trail_id AND t.tenant_id = i.tenant_id LEFT JOIN lifts l ON l.id = i.lift_id AND l.tenant_id = i.tenant_id WHERE i.tenant_id = ? AND i.id = ?', [tenantId, id]);
   if (!incident) return null;
   const [notes, patients, events, responders, witnesses, signatures, collisionRow, parties, checklist, versions] = await Promise.all([
     rows(conn, 'SELECT n.id, n.author_user, COALESCE(u.email, u.username) AS author, n.body, n.created_at FROM incident_notes n LEFT JOIN users u ON u.id = n.author_user AND u.tenant_id = n.tenant_id WHERE n.tenant_id = ? AND n.incident_id = ? ORDER BY n.id', [tenantId, id]),
@@ -328,12 +344,18 @@ async function loadCase(conn, tenantId, id) {
     .map((m) => ({ ...m, has_preview: Boolean(m.has_preview), taken_lat: m.taken_lat === null ? null : Number(m.taken_lat), taken_lng: m.taken_lng === null ? null : Number(m.taken_lng) }));
   // Items answered N/A (with the reason), checklist items skipped before the patient left, and items approved with an
   // exception. All three are part of the report: they travel with every frozen copy, including copies released outside.
-  const [skips, exceptions] = await Promise.all([
+  const [skips, exceptions, contacts, rentals] = await Promise.all([
     rows(conn, `SELECT s.id, s.patient_id, s.gate, s.item_key, s.reason, s.note, s.skipped_at, ${PERSON_NAME('s.skipped_by')} AS skipped_by FROM incident_skips s WHERE s.tenant_id = ? AND s.incident_id = ? ORDER BY s.id`, [tenantId, id]),
     rows(conn, `SELECT e.id, e.patient_id, e.scope, e.item_key AS \`key\`, e.label, e.reason, e.approved_at, ${PERSON_NAME('e.approved_by')} AS approved_by FROM incident_exceptions e WHERE e.tenant_id = ? AND e.incident_id = ? ORDER BY e.id`, [tenantId, id]),
+    rows(conn, `SELECT x.id, x.patient_id, x.who, x.who_name, x.method, x.at, x.note, x.entered_at, x.voided_at, x.void_reason, ${PERSON_NAME('x.recorded_by')} AS recorded_by, COALESCE(vu.email, vu.username) AS voided_by_email
+      FROM incident_contacts x ${VOIDED_BY('x')} WHERE x.tenant_id = ? AND x.incident_id = ? ORDER BY x.at, x.id`, [tenantId, id]),
+    rows(conn, `SELECT r.id, r.patient_id, r.contract_id, r.rental_item_id, r.detail, r.held, r.released_at, r.inspection_note, r.added_at, ${PERSON_NAME('r.released_by')} AS released_by
+      FROM incident_rentals r WHERE r.tenant_id = ? AND r.incident_id = ? ORDER BY r.id`, [tenantId, id]),
   ]);
   const c = {
     ...withNumber(incident), form: parseForm(incident.form), na: RQ.naOf(incident), resort: { name: tenant.name, legal_name: tenant.legal_name }, notes, events, responders, witnesses, signatures,
+    conditions: COND.parse(incident.conditions), contacts: contacts.map((x) => ({ ...x, patient_id: x.patient_id === null ? null : Number(x.patient_id) })),
+    rentals: rentals.map((r) => ({ ...r, detail: COND.parse(r.detail) || {}, held: Boolean(Number(r.held)), patient_id: r.patient_id === null ? null : Number(r.patient_id) })),
     collision: collisionRow || null, parties, checklist, versions, photos, skips, exceptions: exceptions.map((e) => ({ ...e, patient_id: e.patient_id === null ? null : Number(e.patient_id) })),
     patients: patients.map((p) => ({ ...p, form: parseForm(p.form), na: RQ.naOf(p), vitals: mine(vitals, p.id), injuries: mine(injuries, p.id), treatments: mine(treatments, p.id) })),
   };
@@ -351,6 +373,7 @@ router.get('/incidents/:id', patrol, needs('view_cases'), async (req, res) => {
   c.leave = RQ.optionsOf((await RQ.current(pool, req.auth.tenantId)).rules).leave ? LEAVE.items(c) : [];
   c.check = [...checkCase(c), ...recommendedChecks(c.requirements.items)]; // suggestions only: the patroller and the review group decide
   c.story_fill = SF.available() && (await OPS.settingsOf(pool, req.auth.tenantId)).story_fill;
+  c.conditions_suggest = COND.suggest(c.conditions); // answers the Conditions section can take, for the patroller to confirm
   res.json(c);
 });
 
@@ -470,11 +493,108 @@ router.patch('/incidents/:id', patrol, needs('create_case'), validate(partialOf(
     if (body.form) body.form = mergeForm(inc.form, body.form);
     const set = setClause(body, [...Object.keys(incidentFields), 'status']);
     if (!set) throw bad('No updatable fields supplied');
+    if (body.lift_id && !(await one(conn, 'SELECT id FROM lifts WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, body.lift_id]))) throw notFound('Lift');
     await conn.query(`UPDATE incidents SET ${set.sql} WHERE tenant_id = ? AND id = ?`, [...set.values, req.auth.tenantId, id]);
+    // A new time, trail or lift: the conditions are taken again for it while the report is still being written.
+    if (['occurred_at', 'trail_id', 'lift_id'].some((k) => k in body && String(body[k] ?? '') !== String(inc[k] ?? '')) && inc.report_state === 'draft') await takeConditions(conn, req.auth.tenantId, id);
     await audit(conn, req, 'update', 'incidents', id, { fields: Object.keys(req.body).map((k) => (k === 'form' ? `form:${Object.keys(req.body.form).join('|')}` : k)) });
   });
   if (req.body.severity) await staffNotices(req, id);
   res.json({ ok: true });
+});
+
+/** Take the conditions again now (records added since, such as a late weather reading). Only while the report is open. */
+router.post('/incidents/:id/conditions', patrol, needs('create_case'), async (req, res) => {
+  const id = paramId(req);
+  const snap = await tx(async (conn) => { await editableCase(conn, req, id); return takeConditions(conn, req.auth.tenantId, id); });
+  res.json({ conditions: snap, suggest: COND.suggest(snap) });
+});
+
+// ---------------------------------------------------------------- rental gear on a case
+const RENTALS = require('../lib/rentals');
+/** One rental item as the report shows it: the gear, its binding setting and who set it, and its last service. */
+async function rentalDetail(db, t, itemId, contractId) {
+  const it = await one(db, 'SELECT id, sku, category, brand, model, size, status FROM rental_items WHERE tenant_id = ? AND id = ?', [t, itemId]);
+  if (!it) return null;
+  const line = await one(db, `SELECT ci.contract_id, ci.din_setting, ci.skier_type, ci.boot_sole_mm, ci.tech_name, ci.set_at, ci.test_result, rc.checked_out_at, rc.person_id,
+      CONCAT(pp.first_name, ' ', pp.last_name) AS renter FROM rental_contract_items ci JOIN rental_contracts rc ON rc.tenant_id = ci.tenant_id AND rc.id = ci.contract_id
+      LEFT JOIN people pp ON pp.tenant_id = rc.tenant_id AND pp.id = rc.person_id
+    WHERE ci.tenant_id = ? AND ci.rental_item_id = ? ${contractId ? 'AND ci.contract_id = ?' : ''} ORDER BY ci.id DESC LIMIT 1`, contractId ? [t, itemId, contractId] : [t, itemId]);
+  const svc = await one(db, 'SELECT kind, notes, done_by, done_at FROM rental_service_log WHERE tenant_id = ? AND rental_item_id = ? ORDER BY done_at DESC, id DESC LIMIT 1', [t, itemId]);
+  const num = (v) => (v === null || v === undefined ? null : Number(v));
+  return {
+    item: { id: Number(it.id), sku: it.sku, category: it.category, brand: it.brand, model: it.model, size: it.size, status: it.status },
+    contract: line ? { id: Number(line.contract_id), renter: line.renter, person_id: line.person_id ? Number(line.person_id) : null, checked_out_at: line.checked_out_at } : null,
+    binding: line ? { din_setting: num(line.din_setting), skier_type: line.skier_type, boot_sole_mm: num(line.boot_sole_mm), tech_name: line.tech_name, set_at: line.set_at, test_result: line.test_result } : null,
+    last_service: svc ? { kind: svc.kind, notes: svc.notes, done_by: svc.done_by, done_at: svc.done_at } : null,
+  };
+}
+
+/**
+ * Find rental gear for a case: by contract number, by the item's number (a scan), or by the patient's name on a contract
+ * out today. Each contract comes with its gear and their binding settings.
+ */
+router.get('/rental-lookup', patrol, needs('create_case'), async (req, res) => {
+  const t = req.auth.tenantId;
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) throw bad('Type a contract number, an item number, or the renter\'s name');
+  const ids = new Set();
+  if (/^\d+$/.test(q)) for (const r of await rows(pool, 'SELECT id FROM rental_contracts WHERE tenant_id = ? AND id = ?', [t, Number(q)])) ids.add(Number(r.id));
+  for (const r of await rows(pool, 'SELECT ci.contract_id FROM rental_contract_items ci JOIN rental_items ri ON ri.tenant_id = ci.tenant_id AND ri.id = ci.rental_item_id WHERE ci.tenant_id = ? AND ri.sku = ? ORDER BY ci.id DESC LIMIT 3', [t, q])) ids.add(Number(r.contract_id));
+  if (!/^\d+$/.test(q)) {
+    for (const r of await rows(pool, `SELECT rc.id FROM rental_contracts rc JOIN people p ON p.tenant_id = rc.tenant_id AND p.id = rc.person_id
+      WHERE rc.tenant_id = ? AND (rc.status IN ('out', 'overdue') OR rc.checked_out_at >= UTC_TIMESTAMP() - INTERVAL 1 DAY) AND CONCAT(p.first_name, ' ', p.last_name) LIKE ? ORDER BY rc.id DESC LIMIT 10`, [t, `%${q}%`])) ids.add(Number(r.id));
+  }
+  const out = [];
+  for (const cid of [...ids].slice(0, 10)) {
+    const c = await one(pool, "SELECT rc.id, rc.status, rc.checked_out_at, CONCAT(p.first_name, ' ', p.last_name) AS renter FROM rental_contracts rc JOIN people p ON p.tenant_id = rc.tenant_id AND p.id = rc.person_id WHERE rc.tenant_id = ? AND rc.id = ?", [t, cid]);
+    const items = await rows(pool, 'SELECT rental_item_id FROM rental_contract_items WHERE tenant_id = ? AND contract_id = ? ORDER BY id', [t, cid]);
+    out.push({ ...c, id: Number(c.id), items: await Promise.all(items.map((x) => rentalDetail(pool, t, Number(x.rental_item_id), cid))) });
+  }
+  res.json({ data: out });
+});
+
+/** Put rental gear on the case. The report keeps what it was at the time; the gear is held for inspection (Rentals setting). */
+router.post('/incidents/:id/rentals', patrol, needs('create_case'), validate(z.object({ rental_item_id: z.number().int().positive(), contract_id: z.number().int().positive().nullable().optional(), patient_id: z.number().int().positive().nullable().optional() })), async (req, res) => {
+  const t = req.auth.tenantId;
+  const id = paramId(req);
+  const b = req.body;
+  const out = await tx(async (conn) => {
+    await editableCase(conn, req, id);
+    if (b.patient_id && !(await one(conn, 'SELECT id FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ? AND voided_at IS NULL', [t, id, b.patient_id]))) throw notFound('Patient');
+    const it = await one(conn, 'SELECT id, sku, status FROM rental_items WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, b.rental_item_id]);
+    if (!it) throw notFound('Rental item');
+    if (await one(conn, 'SELECT id FROM incident_rentals WHERE tenant_id = ? AND incident_id = ? AND rental_item_id = ?', [t, id, it.id])) throw conflict(`${it.sku} is already on this case`);
+    const detail = await rentalDetail(conn, t, it.id, b.contract_id || null);
+    const settings = await RENTALS.getSettings(conn, t);
+    const hold = settings.hold_after_incident;
+    const now = nowIn((await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [t])).timezone);
+    const [r] = await conn.query('INSERT INTO incident_rentals (tenant_id, incident_id, patient_id, contract_id, rental_item_id, detail, held, status_before, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [t, id, b.patient_id || null, (detail.contract && detail.contract.id) || b.contract_id || null, it.id, JSON.stringify(detail), hold ? 1 : 0, it.status, req.auth.userId, now]);
+    // Back on the rack only after the shop inspects it. Gear still out on the contract goes to the shop when it is returned.
+    if (hold && it.status === 'available') await conn.query("UPDATE rental_items SET status = 'maintenance' WHERE tenant_id = ? AND id = ?", [t, it.id]);
+    await audit(conn, req, 'add_rental', 'incidents', id, { rental_item_id: it.id, held: hold });
+    return { id: r.insertId, held: hold };
+  });
+  res.status(201).json(out);
+});
+
+/** Take gear off the case (added by mistake), while the report is open and before the shop has inspected it. */
+router.delete('/incidents/:id/rentals/:rowId', patrol, needs('create_case'), async (req, res) => {
+  const t = req.auth.tenantId;
+  const id = paramId(req);
+  await tx(async (conn) => {
+    await editableCase(conn, req, id);
+    const r = await one(conn, 'SELECT * FROM incident_rentals WHERE tenant_id = ? AND incident_id = ? AND id = ? FOR UPDATE', [t, id, paramId(req, 'rowId')]);
+    if (!r) throw notFound('Rental gear on this case');
+    if (r.released_at) throw conflict('The rental shop has already inspected this gear, so it stays on the report');
+    await conn.query('DELETE FROM incident_rentals WHERE tenant_id = ? AND id = ?', [t, r.id]);
+    if (Number(r.held) && r.status_before === 'available' && !(await RENTALS.patrolHold(conn, t, r.rental_item_id))) {
+      await conn.query("UPDATE rental_items SET status = 'available' WHERE tenant_id = ? AND id = ? AND status = 'maintenance'", [t, r.rental_item_id]);
+    }
+    await audit(conn, req, 'remove_rental', 'incidents', id, { rental_item_id: Number(r.rental_item_id) });
+  });
+  res.status(204).end();
 });
 
 router.post('/incidents/:id/notes', patrol, needs('create_case'), validate(z.object({ body: z.string().min(1).max(5000) })), async (req, res) => {
@@ -1017,6 +1137,15 @@ const sub = {
       if (body.patient_id) await conn.query('UPDATE incident_patients SET vitals_due_at = NULL WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, body.patient_id]);
       else await conn.query('UPDATE incident_patients SET vitals_due_at = NULL WHERE tenant_id = ? AND incident_id = ?', [req.auth.tenantId, incidentId]);
     },
+  },
+  // Who was told about the incident, and when: management, the insurer, a parent, EMS, police, the owner.
+  contacts: {
+    table: 'incident_contacts', level: 'incident', time: 'at',
+    schema: z.object({
+      ...optionalTime('at'), who: z.enum(['management', 'insurer', 'parent', 'ems', 'police', 'owner', 'other']), who_name: z.string().trim().max(120).optional(),
+      method: z.enum(['phone', 'in_person', 'text', 'radio', 'email']).default('phone'), note: z.string().trim().max(300).optional(), patient_id: z.number().int().positive().optional(), client_ref: clientRef,
+    }).refine((v) => v.who !== 'other' || v.who_name, 'Say who, when it is someone else'),
+    cols: ['at', 'who', 'who_name', 'method', 'note', 'patient_id', 'client_ref'], recorder: 'recorded_by', entered: true, voidable: true,
   },
   witnesses: {
     table: 'incident_witnesses', level: 'incident',

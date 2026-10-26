@@ -1,13 +1,13 @@
 'use strict';
 
 // The mountain cancels a lesson: one session, or every lesson in a stretch of days (a storm). The session stays on the
-// record as Cancelled with who cancelled it, when and why, and comes off the online booking page. Every booking on it is
-// cancelled in the same step:
+// record as Canceled with who canceled it, when and why, and comes off the online booking page. Every booking on it is
+// canceled in the same step:
 //   - a package lesson gets its credit back;
 //   - a lesson paid online is refunded in full to the card, whatever the usual cancellation tiers say, because the
 //     mountain cancelled (written down as owed first, then sent to Stripe after the commit, and retried if Stripe is slow);
 //   - a lesson paid at the counter is listed for a refund at the desk (cash, or a card taken another way);
-//   - an online request not yet paid is simply cancelled;
+//   - an online request not yet paid is simply canceled;
 // and everyone booked gets one email per address. A lesson nobody ever booked can instead be deleted outright.
 const { pool, tx, one, rows } = require('../db');
 const { conflict, notFound } = require('./errors');
@@ -22,7 +22,7 @@ async function cancelIn(conn, tenantId, sessionId, reason, req) {
   const s = await one(conn, `SELECT s.*, p.name AS product FROM lesson_sessions s JOIN products p ON p.id = s.product_id AND p.tenant_id = s.tenant_id
     WHERE s.tenant_id = ? AND s.id = ? FOR UPDATE`, [tenantId, sessionId]);
   if (!s) throw notFound('Lesson');
-  if (s.status === 'cancelled') throw conflict('That lesson is already cancelled');
+  if (s.status === 'cancelled') throw conflict('That lesson is already canceled');
   if (s.status === 'completed') throw conflict('That lesson has already happened');
   const bookings = await rows(conn, `SELECT b.id, b.person_id, b.credit_id, b.request_id, b.unpaid, p.first_name, p.last_name, p.email
     FROM lesson_bookings b JOIN people p ON p.id = b.person_id AND p.tenant_id = b.tenant_id
@@ -49,7 +49,7 @@ async function cancelIn(conn, tenantId, sessionId, reason, req) {
           if (cents > 0) {
             const tax = Math.round((Number(order.tax_cents) * cents) / Number(order.total_cents));
             const [rf] = await conn.query("INSERT INTO order_refunds (tenant_id, order_id, user_id, reason, note, amount_cents, tax_cents, method) VALUES (?, ?, ?, 'lesson_cancelled', ?, ?, ?, 'card')",
-              [tenantId, order.id, req.auth.userId || null, `Lesson cancelled by the mountain: ${reason}`.slice(0, 255), cents, tax]);
+              [tenantId, order.id, req.auth.userId || null, `Lesson canceled by the mountain: ${reason}`.slice(0, 255), cents, tax]);
             if (r.payment_intent) await cardrefund.markPending(conn, tenantId, rf.insertId, r.payment_intent);
             await conn.query("UPDATE orders SET refunded_cents = total_cents, status = 'refunded' WHERE tenant_id = ? AND id = ?", [tenantId, order.id]);
             await conn.query('UPDATE order_items SET refunded_at = NOW(), refund_id = ? WHERE tenant_id = ? AND order_id = ? AND refunded_at IS NULL', [rf.insertId, tenantId, order.id]);
@@ -92,9 +92,9 @@ async function notify(tenantId, out, reason) {
   const t = await one(pool, 'SELECT name, phone FROM tenants WHERE id = ?', [tenantId]);
   for (const [email, info] of out.emails) {
     const lines = [...info.how].map((h) => HOW[h]).filter(Boolean);
-    const text = [`Hello,`, '', `We're sorry: ${t.name} has cancelled the ${out.product} lesson on ${when(out.starts_at)}${info.names.length ? ` (booked for ${[...new Set(info.names)].join(', ')})` : ''}.`,
+    const text = [`Hello,`, '', `We're sorry: ${t.name} has canceled the ${out.product} lesson on ${when(out.starts_at)}${info.names.length ? ` (booked for ${[...new Set(info.names)].join(', ')})` : ''}.`,
       reason ? `Reason: ${reason}` : null, '', ...lines, '', `To book another day, reply to this email${t.phone ? ` or call ${t.phone}` : ''}.`, '', t.name].filter((x) => x !== null).join('\n');
-    await mailer.send({ tenantId, to: email, subject: `Your lesson on ${when(out.starts_at).split(',').slice(0, 2).join(',')} is cancelled`, text, tag: 'lesson-cancelled' }).catch(() => {});
+    await mailer.send({ tenantId, to: email, subject: `Your lesson on ${when(out.starts_at).split(',').slice(0, 2).join(',')} is canceled`, text, tag: 'lesson-cancelled' }).catch(() => {});
   }
 }
 
@@ -109,7 +109,7 @@ async function cancelSession(tenantId, sessionId, reason, req) {
 const summary = (o) => ({ session_id: o.session_id, product: o.product, starts_at: o.starts_at, bookings: o.bookings, credits_returned: o.credits_returned,
   card_refunds: o.card_refunds, desk_refunds: o.desk_refunds, unpaid_cancelled: o.unpaid_cancelled, emailed: o.emails.size });
 
-/** What cancelling would do, without doing it: for the confirm screen and the storm-day preview. */
+/** What canceling would do, without doing it: for the confirm screen and the storm-day preview. */
 async function preview(tenantId, where, params) {
   return rows(pool, `SELECT s.id, s.starts_at, s.ends_at, p.name AS product, s.capacity,
       (SELECT COUNT(*) FROM lesson_bookings b WHERE b.tenant_id = s.tenant_id AND b.session_id = s.id AND b.status = 'booked') AS booked,
@@ -121,7 +121,7 @@ async function preview(tenantId, where, params) {
     WHERE s.tenant_id = ? AND s.status = 'scheduled' AND ${where} ORDER BY s.starts_at, s.id LIMIT 300`, [tenantId, ...params]);
 }
 
-/** Deletes a lesson nobody has ever booked or asked for (one added by mistake). Anything else must be cancelled. */
+/** Deletes a lesson nobody has ever booked or asked for (one added by mistake). Anything else must be canceled. */
 async function deleteSession(tenantId, sessionId, req) {
   await tx(async (conn) => {
     const s = await one(conn, 'SELECT id, status FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, sessionId]);
