@@ -1085,6 +1085,89 @@ const teamSteps = [
   ['patrol_shifts.team_id', (c) => columnExists(c, 'patrol_shifts', 'team_id'), 'ALTER TABLE patrol_shifts ADD COLUMN team_id BIGINT UNSIGNED NULL'],
 ];
 
+// Prospects in the platform console: the ski areas we sell to, the people there, and the pipeline (src/lib/prospects.js).
+const prospectSteps = [
+  ['prospects', (c) => tableExists(c, 'prospects'), `CREATE TABLE prospects (
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name        VARCHAR(150) NOT NULL,
+    state       CHAR(2) NULL,
+    town        VARCHAR(120) NULL,
+    region      VARCHAR(60) NULL,
+    website     VARCHAR(500) NULL,
+    phone       VARCHAR(60) NULL,
+    ownership   VARCHAR(600) NULL,
+    indy_pass   TINYINT(1) NULL,
+    vertical_ft INT NULL,
+    lifts       INT NULL,
+    trails      INT NULL,
+    acres       INT NULL,
+    offers      TEXT NULL,
+    patrol      VARCHAR(20) NULL,
+    software    TEXT NULL,
+    fit_notes   TEXT NULL,
+    sources     TEXT NULL,
+    stage       VARCHAR(20) NOT NULL DEFAULT 'research',
+    priority    TINYINT NOT NULL DEFAULT 2,
+    plan_interest VARCHAR(60) NULL,
+    next_step   VARCHAR(300) NULL,
+    next_on     DATE NULL,
+    owner_name  VARCHAR(100) NULL,
+    tenant_id   BIGINT UNSIGNED NULL,
+    lead_id     BIGINT UNSIGNED NULL,
+    checked_on  DATE NULL,
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_prospect (name, state),
+    KEY ix_prospect_stage (stage, priority),
+    KEY ix_prospect_next (next_on)
+  ) ENGINE=InnoDB`],
+  ['prospect_contacts', (c) => tableExists(c, 'prospect_contacts'), `CREATE TABLE prospect_contacts (
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    prospect_id BIGINT UNSIGNED NOT NULL,
+    role        VARCHAR(30) NOT NULL DEFAULT 'other',
+    name        VARCHAR(120) NULL,
+    title       VARCHAR(200) NULL,
+    email       VARCHAR(200) NULL,
+    phone       VARCHAR(80) NULL,
+    source_url  VARCHAR(500) NULL,
+    note        VARCHAR(500) NULL,
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY ix_pc_prospect (prospect_id),
+    CONSTRAINT fk_pc_prospect FOREIGN KEY (prospect_id) REFERENCES prospects(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`],
+  ['prospect_notes', (c) => tableExists(c, 'prospect_notes'), `CREATE TABLE prospect_notes (
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    prospect_id BIGINT UNSIGNED NOT NULL,
+    kind        VARCHAR(20) NOT NULL DEFAULT 'note',
+    body        TEXT NOT NULL,
+    actor       VARCHAR(120) NULL,
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY ix_pn_prospect (prospect_id, id),
+    CONSTRAINT fk_pn_prospect FOREIGN KEY (prospect_id) REFERENCES prospects(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`],
+  ['prospect_batches', (c) => tableExists(c, 'prospect_batches'), `CREATE TABLE prospect_batches (
+    name       VARCHAR(100) NOT NULL PRIMARY KEY,
+    added      INT NOT NULL DEFAULT 0,
+    loaded_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB`],
+];
+
+// Research batches shipped in db/data are loaded once each (by batch name), so deleting a prospect never brings it back.
+async function loadProspectBatches(conn) {
+  const dir = path.join(__dirname, 'data');
+  if (!fs.existsSync(dir)) return;
+  const { importBatch } = require('../src/lib/prospects');
+  for (const f of fs.readdirSync(dir).filter((x) => /^prospects-.*\.json$/.test(x)).sort()) {
+    const file = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+    const name = String(file.batch || f).slice(0, 100);
+    const [[done]] = await conn.query('SELECT name FROM prospect_batches WHERE name = ?', [name]);
+    if (done) continue;
+    const r = await importBatch(conn, file.prospects || [], { checkedOn: file.checked_on || null });
+    await conn.query('INSERT INTO prospect_batches (name, added) VALUES (?, ?)', [name, r.added]);
+    console.log(`Prospects: loaded "${name}" (${r.added} new, ${r.contacts} contacts)`);
+  }
+}
+
 const skiAreaSteps = [
   ['ski_area_cache', (c) => tableExists(c, 'ski_area_cache'), `CREATE TABLE ski_area_cache (
     ref        VARCHAR(40) NOT NULL PRIMARY KEY,
@@ -1342,7 +1425,7 @@ async function main() {
   await seedPatrolPlan(conn);
   await seedAssistantAddon(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps, ...crewSteps, ...caseLinkSteps, ...injuryRegisterSteps, ...lostFoundSteps, ...kitSteps, ...teamSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps, ...crewSteps, ...caseLinkSteps, ...injuryRegisterSteps, ...lostFoundSteps, ...kitSteps, ...teamSteps, ...prospectSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;
@@ -1355,6 +1438,7 @@ async function main() {
   if (moved) console.log(`Moved ${moved} upcoming patrol shift${moved === 1 ? '' : 's'} to the Patrol schedule`);
   // Keep the wording each mountain uses today, so waivers already signed against it can be shown word for word.
   await conn.query('INSERT IGNORE INTO waiver_texts (tenant_id, sha, body) SELECT id, SHA2(waiver_text, 256), waiver_text FROM tenants WHERE CHAR_LENGTH(waiver_text) > 0');
+  await loadProspectBatches(conn);
   const numbered = await backfillCaseNumbers(conn);
   if (numbered) console.log(`Numbered ${numbered} existing incident report${numbered === 1 ? '' : 's'}`);
   await conn.end();

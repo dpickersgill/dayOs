@@ -131,6 +131,12 @@
           "app": null,
           "text": "Everything is now in US English: color, canceled, organization, inquiries, and Fahrenheit and inches first on patrol reports.",
           "who": null
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "text": "Prospects in the platform console: the ski areas we sell to, who runs them, the sales pipeline with next steps and follow-ups due, a timeline of calls and emails, research imports and a spreadsheet download. Starts with 92 researched independent ski areas.",
+          "who": "platform"
         }
       ]
     },

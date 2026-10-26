@@ -110,6 +110,7 @@ function createApp() {
   });
   app.use(/^\/api\/v1\/public\/[^/]+\/shop\/orders$/, express.json({ limit: '2mb' })); // season pass photos ride along with the basket
   app.use('/api/v1/online-shop/brand', express.json({ limit: '1200kb' })); // logo and hero photo together
+  app.use('/api/v1/platform/prospects/import', express.json({ limit: '2mb' })); // a research batch of ski areas
   app.use(express.json({ limit: '400kb' })); // a customer photo is about 40 KB; a card statement a few hundred rows
 
   // The product website: its pages at /site everywhere, and at / on its own addresses (SITE_HOSTS).

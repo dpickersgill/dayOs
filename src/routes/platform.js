@@ -404,6 +404,9 @@ router.post('/billing/plans/:id/sync', async (req, res) => {
   res.json({ stripe_product: out.stripe_product, stripe_month: out.stripe_month, stripe_year: out.stripe_year });
 });
 
+// ---------------------------------------------------------------- prospects: the ski areas we are selling to
+router.use('/prospects', require('./platformprospects')(log));
+
 // ---------------------------------------------------------------- website leads (Contact page)
 router.get('/leads', async (req, res) => {
   const status = ['new', 'contacted', 'trial', 'won', 'lost'].includes(req.query.status) ? req.query.status : null;

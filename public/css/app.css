@@ -307,6 +307,9 @@ tr.attention td { background: var(--hold-tint); }
 .kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; }
 .kv dt { color: var(--quiet); }
 .kv dd { margin: 0; overflow-wrap: anywhere; }
+.prospect-log li { display: block; }
+.prospect-filters > * { width: auto; flex: 1 1 170px; }
+.prospect-filters > input[type=search] { flex-basis: 260px; }
 .patient > h3 { font-size: 1.125rem; padding: var(--sp-2) 0 0; }
 .note { border-top: 1px solid var(--line); padding-top: 8px; }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
