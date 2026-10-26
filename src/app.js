@@ -135,6 +135,8 @@ function createApp() {
   app.get('/help/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'help.html')));
   app.get('/lost/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'lost.html')));
   app.get('/reserve/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'reserve.html')));
+  app.get('/c/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'claim-share.html'))); // a claim file or season report shared with an insurer
+  app.get('/w/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'witness.html'))); // a witness writes their own statement
   // An outreach email's "not interested" link: the page, and a mail app's one-click unsubscribe (a POST to the same address).
   app.get('/o/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'outreach-stop.html')));
   app.post('/o/:token', rateLimit({ windowMs: 60_000, max: 30 }), async (req, res, next) => {
