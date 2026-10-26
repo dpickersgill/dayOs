@@ -128,17 +128,25 @@ function homePlansHtml(d) {
 function homeAddonsHtml(d) {
   return `<b>Add when you want them:</b>${d.addons.map((a) => `<span>${escHtml(a.name)}</span>`).join('')}<a href="{{SITE}}/pricing#addons">See add-on prices</a>`;
 }
+const PATROL_ONLY = ['Patient care reports and the report check', 'Requirements your patrol director sets', 'Dispatch and phone alerts', 'Duty, the patrol schedule and shift cover', 'Opening checks and the closing sweep', 'Medications, oxygen and AEDs', 'Records requests and legal hold', 'Documents', 'A free read-only login for the ski area'];
 function pricingPlansHtml(d) {
   return d.plans.map((p, i) => {
     // "Everything in Lodge, plus" only when this plan really holds all of the one before it (Patrol only does not).
     const before = d.plans[i - 1];
     const prev = before && before.apps.every((a) => p.apps.some((x) => x.key === a.key)) ? before : null;
     const added = prev ? p.apps.filter((a) => !prev.apps.some((x) => x.key === a.key)) : p.apps;
-    const items = [prev ? `<li class="plus">Everything in ${escHtml(prev.name)}, plus:</li>` : '', ...added.map((a) => `<li>${escHtml(a.label)}</li>`)].join('');
+    // Patrol only is one app, so its card says what that app holds for a patrol, not just "Patrol".
+    const list = p.code === 'patrol-only' ? PATROL_ONLY.map((t) => `<li>${t}</li>`) : added.map((a) => `<li>${escHtml(a.label)}</li>`);
+    const items = [prev ? `<li class="plus">Everything in ${escHtml(prev.name)}, plus:</li>` : '', ...list].join('');
     return `<div class="plan${i === 1 ? ' feat' : ''}"><div class="sym">${sym(i)}<h2>${escHtml(p.name)}</h2></div><p class="who">${escHtml(p.blurb)}</p>`
       + `<div class="price"><b>${p.monthly_cents ? dollars(p.monthly_cents) : 'Ask us'}</b><span>${p.monthly_cents ? 'per month' : ''}</span></div><p class="setup">Billed monthly</p>`
       + `<ul>${items}</ul><a class="btn go${i === 1 ? '' : ' ghost'}" href="{{SITE}}/contact?kind=trial&amp;plan=${encodeURIComponent(p.name)}">Start a ${escHtml(p.name)} trial</a></div>`;
   }).join('\n        ');
+}
+/** "$149": the Patrol only plan's monthly price, or the Patrol add-on's when there is no such plan. */
+function patrolFrom(d) {
+  const p = d && (d.plans.find((x) => x.code === 'patrol-only') || d.addons.find((x) => x.code === 'patrol'));
+  return p && p.monthly_cents ? dollars(p.monthly_cents) : '$149';
 }
 function fillPlans(html, d) {
   if (!d || !d.plans.length) return html;
@@ -176,6 +184,8 @@ async function render(req, name, slug) {
     .replaceAll('{{SITE}}', base)
     .replaceAll('{{APP}}', app || '/')
     .replaceAll('{{TRY}}', `${config.site.appUrl}/try`)
+    // the Patrol only price, from the plans the console marks active (so the website never shows an old price)
+    .replaceAll('{{PATROL_FROM}}', patrolFrom(plans))
     .replaceAll('{{ROOT}}', origin)
     .replaceAll('{{SOCIAL}}', config.site.sameAs.filter((u) => /linkedin\.com/i.test(u)).slice(0, 1).map((u) => `<a href="${escHtml(u)}" rel="me noopener">LinkedIn</a>`).join(''))
     .replaceAll('{{HELLO}}', escHtml(config.site.helloEmail))

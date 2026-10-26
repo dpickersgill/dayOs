@@ -48,6 +48,12 @@
             "patrol"
           ],
           "text": "Signatures, witnesses and contact details can be taken with no signal: they wait on the phone, with the time they were taken, and are sent once when the signal returns. The refusal of care can be signed on a case started with no signal."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": "platform",
+          "text": "Website: the demo is described as built on the visitor's own mountain; the home page points patrol directors to the Patrol only plan and its price (read from the console's plans); the Patrol only card on Pricing lists what a patrol gets; a How switching works section on Pricing; \"No card, no contract, your data exports any time\" beside the buttons; the patrol page lists report requirements, the before-the-patient-leaves checklist, the report check, photo evidence, Locate caller and staff injury alerts."
         }
       ]
     },
