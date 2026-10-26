@@ -56,6 +56,15 @@
           "who": [
             "patrol"
           ],
+          "help": "patrol-crews",
+          "text": "Rotating teams: set up your patrol's teams (A team, B team) under Crews, Teams, and let them take turns on a crew, a new team each week or each day it runs. The team whose turn it is goes on the crew's spots first, and each crew day shows whose turn it is."
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
           "help": "patrol-conditions",
           "text": "Every patrol report keeps the conditions at the time from your own records: the trail and whether it was groomed, the latest snow and weather readings, and the lift's status and any stop when a lift was involved. The report's Conditions answers are filled in from them for the patroller to check."
         },

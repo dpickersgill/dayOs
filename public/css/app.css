@@ -2639,3 +2639,7 @@ button.crew-chip:hover { border-color: currentColor; }
 .kit-item-row { display: grid; grid-template-columns: 1fr 80px auto auto; gap: 8px; align-items: center; }
 .kit-contents li { padding: 4px 0; border-bottom: 1px solid var(--line); }
 @media (max-width: 640px) { .kit-check-row { grid-template-columns: 1fr 70px; } .kit-check-row > :last-child { grid-column: 1 / -1; } }
+.crew-chip .cc-team { font-style: italic; }
+.team-row { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.rot-n { min-width: 1.5rem; font-weight: 600; }
+.rot-row { display: grid; grid-template-columns: 2rem 1fr auto; gap: 8px; align-items: center; }

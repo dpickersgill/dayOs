@@ -214,3 +214,29 @@ test('sign-in matches the scheduled spot, and a spot nobody signed in for is a n
   const w2 = ok(await api('GET', `/patrol/schedule?from=${today}&to=${today}`, { token: M.owner }));
   assert.equal(w2.shifts.find((x) => Number(x.id) === id).no_show, false);
 });
+
+test('rotating teams take turns on a crew, by week or by each day it runs', async () => {
+  assert.deepEqual([C.teamFor({ days: '6,0', rotation: { teams: [1, 2], start: '2026-12-05', every: 'week' } }, '2026-12-13')], [2]);
+  const tA = ok(await api('POST', '/patrol/teams', { token: M.owner, body: { name: 'A team' } })).id;
+  const tB = ok(await api('POST', '/patrol/teams', { token: M.owner, body: { name: 'B team' } })).id;
+  is(await api('POST', '/patrol/teams', { token: M.owner, body: { name: 'A team' } }), 409);
+  is(await api('POST', '/patrol/teams', { token: M.patT, body: { name: 'C team' } }), 403);
+  ok(await api('PUT', `/patrol/teams/${tA}/members`, { token: M.owner, body: { members: [{ staff_id: M.lee, role_label: 'Hill captain' }, { staff_id: M.ema }] } }));
+  ok(await api('PUT', `/patrol/teams/${tB}/members`, { token: M.owner, body: { members: [{ staff_id: M.pat }, { staff_id: M.cal }] } }));
+  // a new crew three weeks on, rotating A then B each week
+  let wk = addDays(sat, 21);
+  const crew = ok(await api('POST', '/patrol/crews', { token: M.owner, body: { name: 'Night crew', days: [6], start_time: '17:00', end_time: '21:00', target: 3, minimum: 2, roles: [], rotation: { teams: [tA, tB], start: wk, every: 'week' } } }));
+  assert.deepEqual(crew.rotation, { teams: [tA, tB], start: wk, every: 'week' });
+  is(await api('PATCH', `/patrol/crews/${crew.id}`, { token: M.owner, body: { rotation: { teams: [tA, tA], start: wk, every: 'week' } } }), 400, 'one turn each');
+  is(await api('PATCH', `/patrol/crews/${crew.id}`, { token: M.owner, body: { rotation: { teams: [tA, 999999], start: wk, every: 'week' } } }), 404);
+  ok(await api('POST', `/patrol/crews/${crew.id}/generate`, { token: M.owner, body: { from: wk, to: addDays(wk, 7) } }));
+  const on = async (d) => (await spots(crew.id, d)).filter((x) => x.staff_id).map((x) => Number(x.staff_id)).sort();
+  assert.deepEqual(await on(wk), [M.ema, M.lee].sort(), 'A team first');
+  assert.deepEqual(await on(addDays(wk, 7)), [M.cal, M.pat].sort(), 'then B team');
+  assert.equal(Number((await spots(crew.id, wk))[0].team_id), tA);
+  const cov = ok(await api('GET', `/patrol/crews/coverage?from=${wk}&to=${addDays(wk, 7)}`, { token: M.owner })).days.filter((d) => d.crew_id === crew.id);
+  assert.deepEqual(cov.map((d) => d.team), ['A team', 'B team']);
+  const list = ok(await api('GET', '/patrol/crews', { token: M.patT }));
+  assert.equal(list.teams.length, 2); assert.equal(list.teams.find((x) => x.id === tA).members.length, 2);
+  wk = null;
+});

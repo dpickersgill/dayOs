@@ -30,7 +30,7 @@ const shape = (c) => ({
   id: Number(c.id), name: c.name, days: C.daysOf(c), start_time: String(c.start_time).slice(0, 5), end_time: String(c.end_time).slice(0, 5),
   station_id: c.station_id ? Number(c.station_id) : null, station: c.station || null, target: Number(c.target), minimum: Number(c.minimum), roles: C.rolesOf(c),
   from_date: c.from_date ? String(c.from_date).slice(0, 10) : null, to_date: c.to_date ? String(c.to_date).slice(0, 10) : null,
-  skip_dates: [...C.skipsOf(c)].sort(), active: Boolean(Number(c.active)), summary: C.summary(c),
+  skip_dates: [...C.skipsOf(c)].sort(), active: Boolean(Number(c.active)), summary: C.summary(c), rotation: C.rotationOf(c),
 });
 const crewsOf = async (db, t, all = false) => (await rows(db, `SELECT c.*, st.name AS station FROM patrol_crews c LEFT JOIN patrol_stations st ON st.tenant_id = c.tenant_id AND st.id = c.station_id
   WHERE c.tenant_id = ? ${all ? '' : 'AND c.active = 1'} ORDER BY c.active DESC, c.start_time, c.name`, [t])).map(shape);
@@ -50,13 +50,15 @@ async function coverageRange(db, t, from, to, { shifts = null, drafts = true } =
   if (!crews.length) return { crews: [], days: [] };
   const list = shifts || await rows(db, `SELECT id, crew_id, staff_id, status, role_label, starts_at FROM patrol_shifts WHERE tenant_id = ? AND crew_id IS NOT NULL AND status ${drafts ? "<> 'cancelled'" : "= 'published'"} AND DATE(starts_at) BETWEEN ? AND ?`, [t, from, to]);
   const members = await membersOf(db, t);
+  const teamNames = new Map((await rows(db, 'SELECT id, name FROM patrol_teams WHERE tenant_id = ?', [t])).map((x) => [Number(x.id), x.name]));
   const days = [];
   for (const crew of crews) {
     const mine = list.filter((s) => Number(s.crew_id) === crew.id);
     const dates = new Set([...C.datesFor(crew, from, to), ...mine.map((s) => String(s.starts_at).slice(0, 10))]);
     for (const date of [...dates].sort()) {
       const spots = mine.filter((s) => String(s.starts_at).startsWith(date));
-      days.push({ date, crew_id: crew.id, crew: crew.name, generated: spots.length > 0, ...C.coverage(crew, spots, members) });
+      const team = C.teamFor(crew, date);
+      days.push({ date, crew_id: crew.id, crew: crew.name, team_id: team, team: team ? (teamNames.get(team) || null) : null, generated: spots.length > 0, ...C.coverage(crew, spots, members) });
     }
   }
   days.sort((a, b) => a.date.localeCompare(b.date) || a.crew.localeCompare(b.crew));
@@ -112,6 +114,7 @@ const crewFields = {
   from_date: dateStr.nullable().optional(),
   to_date: dateStr.nullable().optional(),
   skip_dates: z.array(dateStr).max(120).default([]),
+  rotation: z.object({ teams: z.array(z.number().int().positive()).min(2).max(12), start: dateStr, every: z.enum(['week', 'day']) }).nullable().optional(),
 };
 
 async function checkCrew(conn, t, c) {
@@ -119,10 +122,15 @@ async function checkCrew(conn, t, c) {
   if (c.start_time === c.end_time) throw bad('The crew must end after it starts');
   if (c.from_date && c.to_date && c.to_date < c.from_date) throw bad('The season must end after it starts');
   if (c.station_id && !(await one(conn, 'SELECT id FROM patrol_stations WHERE tenant_id = ? AND id = ?', [t, c.station_id]))) throw notFound('Station');
+  if (c.rotation) {
+    if (new Set(c.rotation.teams).size !== c.rotation.teams.length) throw bad('Each team takes one turn in the rotation');
+    const found = await rows(conn, 'SELECT id FROM patrol_teams WHERE tenant_id = ? AND id IN (?)', [t, c.rotation.teams]);
+    if (found.length !== c.rotation.teams.length) throw notFound('Team');
+  }
   const labels = c.roles.map((r) => r.label.toLowerCase());
   if (new Set(labels).size !== labels.length) throw bad('Each role needs its own name');
 }
-const row = (c) => [c.name, [...new Set(c.days)].sort().join(','), `${c.start_time}:00`, `${c.end_time}:00`, c.station_id || null, c.target, c.minimum, JSON.stringify(c.roles || []), c.from_date || null, c.to_date || null, [...new Set(c.skip_dates || [])].sort().join(',') || null];
+const row = (c) => [c.name, [...new Set(c.days)].sort().join(','), `${c.start_time}:00`, `${c.end_time}:00`, c.station_id || null, c.target, c.minimum, JSON.stringify(c.roles || []), c.from_date || null, c.to_date || null, [...new Set(c.skip_dates || [])].sort().join(',') || null, c.rotation ? JSON.stringify(c.rotation) : null];
 
 /** The crews, each with its standing members, and what the forms need (roster with rank and certification, stations). */
 router.get('/crews', patrol, async (req, res) => {
@@ -135,8 +143,10 @@ router.get('/crews', patrol, async (req, res) => {
       JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE m.tenant_id = ? AND s.status = 'active' ORDER BY p.last_name, p.first_name`, [t]),
     rows(pool, 'SELECT id, name FROM patrol_stations WHERE tenant_id = ? ORDER BY name', [t]),
   ]);
+  const teams = await teamsOf(pool, t);
   res.json({
     can_edit: await PA.can(pool, req, 'manage_schedule'),
+    teams,
     crews: crews.map((c) => ({ ...c, members: standing.filter((m) => Number(m.crew_id) === c.id).map((m) => ({ staff_id: Number(m.staff_id), name: m.name, role_label: m.role_label })) })),
     roster: roster.map((r) => ({ ...r, staff_id: Number(r.staff_id) })), stations,
     ranks: C.RANKS.map((k) => [k, C.RANK_LABEL[k]]), certs: C.CERTS.filter((k) => k !== 'none').map((k) => [k, C.CERT_LABEL[k]]),
@@ -147,7 +157,7 @@ router.post('/crews', patrol, editor, validate(z.object(crewFields)), async (req
   const t = req.auth.tenantId;
   const id = await tx(async (conn) => {
     await checkCrew(conn, t, req.body);
-    const [r] = await conn.query('INSERT INTO patrol_crews (tenant_id, name, days, start_time, end_time, station_id, target, minimum, roles, from_date, to_date, skip_dates, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [t, ...row(req.body), req.auth.userId]);
+    const [r] = await conn.query('INSERT INTO patrol_crews (tenant_id, name, days, start_time, end_time, station_id, target, minimum, roles, from_date, to_date, skip_dates, rotation, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [t, ...row(req.body), req.auth.userId]);
     await audit(conn, req, 'create', 'patrol_crews', r.insertId, { name: req.body.name });
     return r.insertId;
   });
@@ -165,7 +175,7 @@ router.patch('/crews/:id', patrol, editor, validate(z.object({ ...crewFields, ac
     const before = await crewOf(conn, t, id);
     const next = { ...before, ...Object.fromEntries(Object.entries(req.body).filter(([, v]) => v !== undefined)) };
     await checkCrew(conn, t, next);
-    await conn.query('UPDATE patrol_crews SET name = ?, days = ?, start_time = ?, end_time = ?, station_id = ?, target = ?, minimum = ?, roles = ?, from_date = ?, to_date = ?, skip_dates = ?, active = ? WHERE tenant_id = ? AND id = ?',
+    await conn.query('UPDATE patrol_crews SET name = ?, days = ?, start_time = ?, end_time = ?, station_id = ?, target = ?, minimum = ?, roles = ?, from_date = ?, to_date = ?, skip_dates = ?, rotation = ?, active = ? WHERE tenant_id = ? AND id = ?',
       [...row(next), next.active ? 1 : 0, t, id]);
     await audit(conn, req, 'update', 'patrol_crews', id, req.body);
   });
@@ -179,6 +189,44 @@ router.delete('/crews/:id', patrol, editor, async (req, res) => {
   if (!r.affectedRows) throw notFound('Crew');
   await audit(pool, req, 'retire', 'patrol_crews', paramId(req));
   res.status(204).end();
+});
+
+// ---------------------------------------------------------------- rotating teams
+async function teamsOf(db, t) {
+  const teams = await rows(db, 'SELECT id, name, active FROM patrol_teams WHERE tenant_id = ? ORDER BY active DESC, name', [t]);
+  const mem = await rows(db, `SELECT tm.team_id, tm.staff_id, tm.role_label, ${NAME} AS name FROM patrol_team_members tm JOIN staff s ON s.tenant_id = tm.tenant_id AND s.id = tm.staff_id
+    JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE tm.tenant_id = ? ORDER BY p.last_name, p.first_name`, [t]);
+  return teams.map((x) => ({ id: Number(x.id), name: x.name, active: Boolean(Number(x.active)), members: mem.filter((m) => Number(m.team_id) === Number(x.id)).map((m) => ({ staff_id: Number(m.staff_id), name: m.name, role_label: m.role_label })) }));
+}
+router.get('/teams', patrol, async (req, res) => { res.json({ data: await teamsOf(pool, req.auth.tenantId) }); });
+router.post('/teams', patrol, editor, validate(z.object({ name: z.string().trim().min(1).max(60) })), async (req, res) => {
+  try {
+    const [r] = await pool.query('INSERT INTO patrol_teams (tenant_id, name) VALUES (?, ?)', [req.auth.tenantId, req.body.name]);
+    await audit(pool, req, 'create', 'patrol_teams', r.insertId);
+    res.status(201).json({ id: r.insertId });
+  } catch (e) { if (e.code === 'ER_DUP_ENTRY') throw conflict('There is already a team with that name'); throw e; }
+});
+router.patch('/teams/:id', patrol, editor, validate(z.object({ name: z.string().trim().min(1).max(60).optional(), active: z.boolean().optional() })), async (req, res) => {
+  const sets = []; const vals = [];
+  if (req.body.name) { sets.push('name = ?'); vals.push(req.body.name); }
+  if (req.body.active !== undefined) { sets.push('active = ?'); vals.push(req.body.active ? 1 : 0); }
+  if (!sets.length) throw bad('Nothing to change');
+  const [r] = await pool.query(`UPDATE patrol_teams SET ${sets.join(', ')} WHERE tenant_id = ? AND id = ?`, [...vals, req.auth.tenantId, paramId(req)]);
+  if (!r.affectedRows) throw notFound('Team');
+  res.json({ ok: true });
+});
+/** A team's members, each with the role they hold when it is their turn (a team's own hill captain, say). */
+router.put('/teams/:id/members', patrol, editor, validate(z.object({ members: z.array(z.object({ staff_id: z.number().int().positive(), role_label: z.string().trim().max(60).nullable().optional() })).max(80) })), async (req, res) => {
+  const t = req.auth.tenantId;
+  const id = paramId(req);
+  await tx(async (conn) => {
+    if (!(await one(conn, 'SELECT id FROM patrol_teams WHERE tenant_id = ? AND id = ?', [t, id]))) throw notFound('Team');
+    for (const m of req.body.members) if (!(await one(conn, 'SELECT staff_id FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [t, m.staff_id]))) throw bad('Everyone on a team must be on the patrol roster');
+    await conn.query('DELETE FROM patrol_team_members WHERE tenant_id = ? AND team_id = ?', [t, id]);
+    for (const m of req.body.members) await conn.query('INSERT IGNORE INTO patrol_team_members (tenant_id, team_id, staff_id, role_label) VALUES (?, ?, ?, ?)', [t, id, m.staff_id, m.role_label || null]);
+    await audit(conn, req, 'team_members', 'patrol_teams', id, { count: req.body.members.length });
+  });
+  res.json({ ok: true });
 });
 
 /** The crew's standing members: put on its spots first whenever its days are generated (each to their role, if any). */
@@ -219,6 +267,16 @@ router.post('/crews/:id/generate', patrol, editor, validate(z.object({ from: dat
     const standing = (await rows(conn, `SELECT cm.staff_id, cm.role_label, ${NAME} AS name FROM patrol_crew_members cm JOIN staff s ON s.tenant_id = cm.tenant_id AND s.id = cm.staff_id
       JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE cm.tenant_id = ? AND cm.crew_id = ? AND s.status = 'active'`, [t, id]))
       .map((m) => ({ ...m, staff_id: Number(m.staff_id), ...members.get(Number(m.staff_id)) }));
+    // Rotating teams: each team's members, put on their crew's days in turn alongside the standing members.
+    const teamMembers = new Map();
+    if (crew.rotation) {
+      for (const r of await rows(conn, `SELECT tm.team_id, tm.staff_id, tm.role_label, ${NAME} AS name FROM patrol_team_members tm JOIN patrol_teams pt ON pt.id = tm.team_id AND pt.active = 1
+        JOIN staff s ON s.tenant_id = tm.tenant_id AND s.id = tm.staff_id JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE tm.tenant_id = ? AND tm.team_id IN (?) AND s.status = 'active'`, [t, crew.rotation.teams])) {
+        const k = Number(r.team_id);
+        if (!teamMembers.has(k)) teamMembers.set(k, []);
+        teamMembers.get(k).push({ ...r, staff_id: Number(r.staff_id), ...members.get(Number(r.staff_id)) });
+      }
+    }
     const spots = C.spotsFor(crew);
     let made = 0; let created = 0; let filled = 0; let skipped = 0;
     const notPut = [];
@@ -228,7 +286,9 @@ router.post('/crews/:id/generate', patrol, editor, validate(z.object({ from: dat
       // Standing members by preference: their own role's spot, then any plain spot they fit.
       const who = new Array(spots.length).fill(null);
       const left = [];
-      for (const m of standing) {
+      const team = C.teamFor(crew, date);
+      const todays = [...standing, ...(teamMembers.get(team) || []).filter((m) => !standing.some((x) => x.staff_id === m.staff_id))];
+      for (const m of todays) {
         const problems = await problemsFor(conn, t, m.staff_id, s, e, 0, { need_rank: null, need_cert: null });
         if (problems.length) { notPut.push({ date, staff_id: m.staff_id, name: m.name, reason: problems[0] }); continue; }
         left.push(m);
@@ -239,8 +299,8 @@ router.post('/crews/:id/generate', patrol, editor, validate(z.object({ from: dat
       for (const m of left) if (!who.includes(m)) notPut.push({ date, staff_id: m.staff_id, name: m.name, reason: 'Every spot they fit was already taken' });
       for (let k = 0; k < spots.length; k += 1) {
         const sp = spots[k];
-        await conn.query('INSERT INTO patrol_shifts (tenant_id, staff_id, starts_at, ends_at, station_id, role_label, crew_id, need_rank, need_cert, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [t, who[k] ? who[k].staff_id : null, s, e, crew.station_id, sp.role_label, id, sp.need_rank, sp.need_cert, req.auth.userId]);
+        await conn.query('INSERT INTO patrol_shifts (tenant_id, staff_id, starts_at, ends_at, station_id, role_label, crew_id, team_id, need_rank, need_cert, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [t, who[k] ? who[k].staff_id : null, s, e, crew.station_id, sp.role_label, id, team || null, sp.need_rank, sp.need_cert, req.auth.userId]);
         created += 1; if (who[k]) filled += 1;
       }
       made += 1;

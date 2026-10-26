@@ -80,6 +80,27 @@ function coverage(crew, spots, members = new Map()) {
   return { filled, target, minimum, open: live.filter((s) => !s.staff_id).length, missing, tone, published: live.some((s) => s.status === 'published'), drafts: live.filter((s) => s.status === 'draft').length };
 }
 
+/** A crew's rotation: { teams: [team ids in order], start: 'YYYY-MM-DD', every: 'week' | 'day' }, or null. */
+const rotationOf = (crew) => {
+  const r = typeof crew.rotation === 'object' && crew.rotation ? crew.rotation : (() => { try { return JSON.parse(crew.rotation || 'null'); } catch { return null; } })();
+  return r && Array.isArray(r.teams) && r.teams.length && r.start ? { teams: r.teams.map(Number), start: String(r.start).slice(0, 10), every: r.every === 'day' ? 'day' : 'week' } : null;
+};
+const monday = (date) => addDays(date, -((dayOf(date) + 6) % 7));
+const mod = (a, n) => ((a % n) + n) % n;
+/**
+ * The team whose turn it is on a date. By week: the first team has the week of the start date, the next team the week
+ * after, and so on. By day: each day the crew runs (skipped days do not count) goes to the next team in turn.
+ */
+function teamFor(crew, date) {
+  const r = rotationOf(crew);
+  if (!r) return null;
+  const n = r.teams.length;
+  if (r.every === 'week') return r.teams[mod(Math.round((Date.parse(`${monday(date)}T12:00:00Z`) - Date.parse(`${monday(r.start)}T12:00:00Z`)) / (7 * 86_400_000)), n)];
+  const runs = { ...crew, from_date: null, to_date: null };
+  const steps = date >= r.start ? datesFor(runs, r.start, addDays(date, -1)).length : -datesFor(runs, date, addDays(r.start, -1)).length;
+  return r.teams[mod(steps, n)];
+}
+
 /** "Sat and Sun, 8:00 to 16:30" for lists. */
 /** '16:30' as '4:30 PM'. */
 const clock12 = (t) => { const [hh, mm] = hhmm(t).split(':').map(Number); return `${((hh + 11) % 12) + 1}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`; };
@@ -93,4 +114,4 @@ function isNoShow(spot, now, signedIn) {
   return String(now) >= late;
 }
 
-module.exports = { clock12, RANKS, RANK_LABEL, CERTS, CERT_LABEL, DAY_LABEL, dayOf, addDays, daysOf, rolesOf, skipsOf, datesFor, timesOn, spotsFor, fitProblems, fits, coverage, summary, isNoShow, NO_SHOW_MIN };
+module.exports = { rotationOf, teamFor, clock12, RANKS, RANK_LABEL, CERTS, CERT_LABEL, DAY_LABEL, dayOf, addDays, daysOf, rolesOf, skipsOf, datesFor, timesOn, spotsFor, fitProblems, fits, coverage, summary, isNoShow, NO_SHOW_MIN };

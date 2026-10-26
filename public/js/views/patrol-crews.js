@@ -3,7 +3,7 @@
 // days for the season as drafts and publish them from the Schedule; patrollers sign up for the open spots. Below the
 // crews, the coming weeks by day: filled against needed, so short days stand out.
 import { get, post, patch, put, del } from '../api.js';
-import { h, clear, input, select, field, button, toast, formDialog, confirmDialog, dialog, empty, errorBox, todayStr, addDays, state, fail } from '../ui.js';
+import { h, clear, input, select, field, button, toast, formDialog, confirmDialog, dialog, empty, errorBox, todayStr, addDays, state, fail, closeAllDialogs } from '../ui.js';
 import { dayShort, monthDay } from './workforce-common.js';
 
 const WEEK = [[1, 'Mon'], [2, 'Tue'], [3, 'Wed'], [4, 'Thu'], [5, 'Fri'], [6, 'Sat'], [0, 'Sun']];
@@ -20,7 +20,7 @@ export function coverChip(d, onClick) {
   const words = `${d.crew} ${d.filled} of ${d.target}`;
   const why = [d.filled < d.minimum ? `Below the ${d.minimum} it can run with` : d.filled < d.target ? `Needs ${d.target - d.filled} more` : 'Full', d.missing.length ? `No ${d.missing.join(', no ')}` : null, d.drafts ? `${d.drafts} not published` : null].filter(Boolean).join('. ');
   return h(onClick ? 'button' : 'span', { type: onClick ? 'button' : undefined, class: 'crew-chip', 'data-tone': d.generated ? d.tone : 'none', title: d.generated ? why : 'Days not made yet', 'aria-label': `${words}. ${d.generated ? why : 'Days not made yet'}`, onclick: onClick || undefined },
-    h('b', null, d.crew), h('span', null, d.generated ? `${d.filled}/${d.target}` : 'not made'), d.missing.length && d.generated ? h('span', { class: 'cc-miss' }, `no ${d.missing.join(', ')}`) : null);
+    h('b', null, d.crew), d.team ? h('span', { class: 'cc-team' }, d.team) : null, h('span', null, d.generated ? `${d.filled}/${d.target}` : 'not made'), d.missing.length && d.generated ? h('span', { class: 'cc-miss' }, `no ${d.missing.join(', ')}`) : null);
 }
 
 export async function drawCrews(box) {
@@ -44,7 +44,7 @@ export async function drawCrews(box) {
         h('p', { class: 'muted' }, edit
           ? 'A crew is a shift your patrol runs again and again. Say how many it needs and the roles it must have, then make its days for the season. Patrollers sign up for the open spots.'
           : 'The shifts your patrol runs again and again, and how full each day is.')),
-      edit ? h('div', { class: 'week-actions' }, button('Add crew', () => crewDialog(c, null, load), { kind: 'primary' })) : null)];
+      edit ? h('div', { class: 'week-actions' }, button('Add crew', () => crewDialog(c, null, load), { kind: 'primary' }), button('Teams', () => teamsDialog(c, load))) : null)];
 
     if (!c.crews.length) parts.push(empty(edit ? 'No crews yet. Add your first, such as a weekend day crew.' : 'No crews set up yet.', edit ? button('Add crew', () => crewDialog(c, null, load), { kind: 'primary' }) : null));
     else {
@@ -54,6 +54,7 @@ export async function drawCrews(box) {
           h('p', null, h('b', null, k.summary), k.station ? `, ${k.station}` : ''),
           h('p', { class: 'muted small' }, `Needs ${k.target}, can run with ${k.minimum}.${k.roles.length ? ` Must have: ${rolesText(k.roles, c.ranks, c.certs)}.` : ''}`),
           h('p', { class: 'muted small' }, [k.from_date || k.to_date ? `Season ${k.from_date ? monthDay(k.from_date) : 'now'} to ${k.to_date ? monthDay(k.to_date) : 'open'}` : 'No season dates', k.skip_dates.length ? `${k.skip_dates.length} day${k.skip_dates.length === 1 ? '' : 's'} skipped` : null].filter(Boolean).join('. ')),
+          k.rotation ? h('p', { class: 'small' }, `Rotates ${k.rotation.teams.map((id) => (c.teams.find((x) => x.id === id) || { name: 'a team' }).name).join(', ')}, a new team each ${k.rotation.every === 'day' ? 'day it runs' : 'week'}, from ${monthDay(k.rotation.start)}`) : null,
           h('p', { class: 'small' }, k.members.length ? `Standing: ${k.members.map((m) => (m.role_label ? `${m.name} (${m.role_label})` : m.name)).join(', ')}` : h('span', { class: 'muted' }, 'No standing members'))),
         edit ? h('div', { class: 'crew-actions' },
           button('Make the days', () => generateDialog(k, load), { kind: 'primary', small: true }),
@@ -97,6 +98,21 @@ function crewDialog(c, crew, onDone) {
   const season1 = input({ type: 'date', value: k.from_date || '' });
   const season2 = input({ type: 'date', value: k.to_date || '' });
   const skips = h('textarea', { rows: 3, placeholder: 'One date per line, for example 2026-12-25' }, k.skip_dates.join('\n'));
+  // Rotating teams: the teams in turn, from a start date, a new team each week or each day the crew runs.
+  const activeTeams = (c.teams || []).filter((x) => x.active);
+  const rot = k.rotation || null;
+  const rotOn = h('input', { type: 'checkbox', checked: Boolean(rot), disabled: activeTeams.length < 2 });
+  const rotList = h('div', { class: 'stack tight' });
+  const rotRow = (id) => { const sel = select(activeTeams.map((x) => [x.id, x.name]), id || (activeTeams[0] || {}).id, { class: 'rot-team', 'aria-label': 'Team' }); const r = h('div', { class: 'rot-row' }, h('span', { class: 'rot-n' }), sel, h('button', { type: 'button', class: 'btn small icon-btn', 'aria-label': 'Remove', onclick: () => { r.remove(); number(); } }, '×')); rotList.append(r); number(); };
+  const number = () => [...rotList.querySelectorAll('.rot-n')].forEach((x, i) => { x.textContent = `${i + 1}.`; });
+  (rot ? rot.teams : activeTeams.slice(0, 2).map((x) => x.id)).forEach(rotRow);
+  const rotStart = input({ type: 'date', value: rot ? rot.start : (k.from_date || '') });
+  const rotEvery = select([['week', 'Each week (all its days that week)'], ['day', 'Each day it runs']], rot ? rot.every : 'week');
+  const rotBox = h('fieldset', null, h('legend', null, 'Rotating teams'),
+    activeTeams.length < 2 ? h('p', { class: 'muted small' }, 'Set up at least two teams (Teams, on the Crews page) to rotate them.')
+      : h('div', { class: 'stack tight' }, h('label', { class: 'check' }, rotOn, 'Teams take turns on this crew'), rotList, button('Add a turn', () => rotRow(), { small: true }),
+        h('div', { class: 'shift-when two' }, field('First turn starts', rotStart), field('A new team', rotEvery)),
+        h('p', { class: 'muted small' }, 'The team whose turn it is goes on the crew\u2019s spots first, with the standing members, when its days are made.')));
   const roleBox = h('div', { class: 'role-rows' });
   const roleRow = (r = { label: '', count: 1, rank: null, cert: null }) => {
     const row = h('div', { class: 'role-row' },
@@ -117,6 +133,7 @@ function crewDialog(c, crew, onDone) {
     h('fieldset', null, h('legend', null, 'Roles it must have'), h('p', { class: 'muted small' }, 'Each role gets its own spot when the days are made. Only someone with the rank or certification can take it.'), roleBox, button('Add a role', () => roleRow(), { small: true })),
     h('div', { class: 'shift-when two' }, field('Season starts', season1), field('Season ends', season2)),
     field('Days it does not run', skips),
+    rotBox,
     crew ? h('p', { class: 'muted small' }, 'Changes apply to days made from now on. To change days already made, take back the drafts and make them again.') : null), async () => {
     const skipList = skips.value.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
     const bad = skipList.find((x) => !/^\d{4}-\d{2}-\d{2}$/.test(x));
@@ -126,11 +143,47 @@ function crewDialog(c, crew, onDone) {
       station_id: station.value ? Number(station.value) : null, target: Number(target.value), minimum: Number(minimum.value),
       roles: [...roleBox.querySelectorAll('.role-row')].map((r) => ({ label: r.querySelector('.r-label').value.trim(), count: Number(r.querySelector('.r-count').value) || 1, rank: r.querySelector('.r-rank').value || null, cert: r.querySelector('.r-cert').value || null })).filter((r) => r.label),
       from_date: season1.value || null, to_date: season2.value || null, skip_dates: skipList,
+      rotation: rotOn.checked && activeTeams.length >= 2 ? { teams: [...rotList.querySelectorAll('.rot-team')].map((x) => Number(x.value)), start: rotStart.value, every: rotEvery.value } : null,
     };
     if (!body.days.length) throw new Error('Choose at least one day');
+    if (body.rotation && body.rotation.teams.length < 2) throw new Error('A rotation needs at least two turns');
+    if (body.rotation && new Set(body.rotation.teams).size !== body.rotation.teams.length) throw new Error('Each team takes one turn');
+    if (body.rotation && !body.rotation.start) throw new Error('Say when the first turn starts');
     if (crew) { await patch(`/patrol/crews/${crew.id}`, body); toast('Crew saved'); } else { await post('/patrol/crews', body); toast('Crew added. Next, make its days.'); }
     await onDone();
   }, { submitText: crew ? 'Save crew' : 'Add crew', wide: true });
+}
+
+/** The patrol's teams (A team, B team) and who is on each, with the role each holds on their turn. */
+function teamsDialog(c, onDone) {
+  const list = h('div', { class: 'stack' });
+  const draw = () => clear(list).append(
+    ...(c.teams.length ? c.teams.map((t) => h('div', { class: 'spread team-row' }, h('span', null, h('b', null, t.name), h('small', { class: 'muted' }, ` ${t.members.length} member${t.members.length === 1 ? '' : 's'}${t.active ? '' : ', retired'}`)),
+      h('span', { class: 'row tight' }, button('Members', () => teamMembersDialog(c, t, onDone), { small: true }),
+        button(t.active ? 'Retire' : 'Bring back', async () => { await patch(`/patrol/teams/${t.id}`, { active: !t.active }); toast(t.active ? 'Team retired' : 'Team back'); dlg.close(); await onDone(); }, { small: true }))))
+      : [h('p', { class: 'muted' }, 'No teams yet. Add two or more, then set a crew to rotate them.')]));
+  const name = input({ maxlength: 60, placeholder: 'A team' });
+  const dlg = dialog('Teams', [h('p', { class: 'muted' }, 'Teams take turns on a crew, such as A team one weekend and B team the next. Set the turns in each crew.'), list,
+    h('div', { class: 'row tight' }, name, button('Add team', async () => {
+      if (!name.value.trim()) return;
+      try { await post('/patrol/teams', { name: name.value.trim() }); toast('Team added'); dlg.close(); await onDone(); } catch (err) { fail(err); }
+    }, { kind: 'primary' }))], { wide: true });
+  draw();
+}
+
+function teamMembersDialog(c, t, onDone) {
+  const current = new Map(t.members.map((m) => [m.staff_id, m.role_label || '']));
+  const roles = [...new Set(c.crews.flatMap((k) => k.roles.map((r) => r.label)))];
+  const rows = c.roster.map((r) => {
+    const box = h('input', { type: 'checkbox', checked: current.has(r.staff_id) });
+    const role = select([['', 'Any spot'], ...roles.map((x) => [x, x])], current.get(r.staff_id) || '', { 'aria-label': `${r.name}'s role` });
+    return { r, box, role, el: h('div', { class: 'member-row' }, h('label', { class: 'chk' }, box, h('span', null, h('b', null, r.name), h('small', { class: 'muted' }, ` ${r.level}`))), roles.length ? role : null) };
+  });
+  formDialog(`${t.name}: members`, h('div', { class: 'stack' },
+    rows.length ? h('div', { class: 'member-list' }, rows.map((x) => x.el)) : empty('No one is on the patrol roster yet.')), async () => {
+    await put(`/patrol/teams/${t.id}/members`, { members: rows.filter((x) => x.box.checked).map((x) => ({ staff_id: x.r.staff_id, role_label: x.role.value || null })) });
+    toast('Team saved'); closeAllDialogs(); await onDone();
+  }, { submitText: 'Save', wide: true });
 }
 
 /** Who is on the crew every time (put on first when its days are made), each with a role if they hold one. */

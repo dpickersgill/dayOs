@@ -1062,6 +1062,29 @@ const kitSteps = [
   ['patrol_settings.kit_seals', (c) => columnExists(c, 'patrol_settings', 'kit_seals'), 'ALTER TABLE patrol_settings ADD COLUMN kit_seals TINYINT(1) NOT NULL DEFAULT 0'],
 ];
 
+// Rotating teams: a patrol's teams (A team, B team) take turns on a crew, by week or by each day it runs. The team on a
+// day is put on its spots first, with the crew's standing members.
+const teamSteps = [
+  ['patrol_teams', (c) => tableExists(c, 'patrol_teams'), `CREATE TABLE patrol_teams (
+    id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id  BIGINT UNSIGNED NOT NULL,
+    name       VARCHAR(60) NOT NULL,
+    active     TINYINT(1) NOT NULL DEFAULT 1,
+    UNIQUE KEY uq_pteam_name (tenant_id, name),
+    CONSTRAINT fk_pteam_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  ) ENGINE=InnoDB`],
+  ['patrol_team_members', (c) => tableExists(c, 'patrol_team_members'), `CREATE TABLE patrol_team_members (
+    tenant_id  BIGINT UNSIGNED NOT NULL,
+    team_id    BIGINT UNSIGNED NOT NULL,
+    staff_id   BIGINT UNSIGNED NOT NULL,
+    role_label VARCHAR(60) NULL,
+    PRIMARY KEY (tenant_id, team_id, staff_id),
+    CONSTRAINT fk_ptm_team FOREIGN KEY (team_id) REFERENCES patrol_teams(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`],
+  ['patrol_crews.rotation', (c) => columnExists(c, 'patrol_crews', 'rotation'), 'ALTER TABLE patrol_crews ADD COLUMN rotation TEXT NULL'],
+  ['patrol_shifts.team_id', (c) => columnExists(c, 'patrol_shifts', 'team_id'), 'ALTER TABLE patrol_shifts ADD COLUMN team_id BIGINT UNSIGNED NULL'],
+];
+
 const skiAreaSteps = [
   ['ski_area_cache', (c) => tableExists(c, 'ski_area_cache'), `CREATE TABLE ski_area_cache (
     ref        VARCHAR(40) NOT NULL PRIMARY KEY,
@@ -1319,7 +1342,7 @@ async function main() {
   await seedPatrolPlan(conn);
   await seedAssistantAddon(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps, ...crewSteps, ...caseLinkSteps, ...injuryRegisterSteps, ...lostFoundSteps, ...kitSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps, ...crewSteps, ...caseLinkSteps, ...injuryRegisterSteps, ...lostFoundSteps, ...kitSteps, ...teamSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;
