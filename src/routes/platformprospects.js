@@ -115,6 +115,7 @@ module.exports = function prospectsRouter(log) {
     const b = req.body;
     const [[dupe]] = await pool.query('SELECT id FROM prospects WHERE name = ? AND state <=> ?', [b.name, b.state ?? null]);
     if (dupe) throw bad(`${b.name} is already on the list`);
+    if (b.indy_pass === true) throw bad('Indy Pass resorts are left off the prospect list');
     const cols = Object.keys(b).filter((k) => b[k] !== undefined);
     const [r] = await pool.query(`INSERT INTO prospects (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, cols.map((k) => (k === 'indy_pass' && b[k] !== null ? (b[k] ? 1 : 0) : b[k])));
     await log(pool, req, null, 'prospect_add', { id: r.insertId, name: b.name });

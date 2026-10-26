@@ -85,14 +85,14 @@ async function download() {
 function importDialog() {
   const file = input({ type: 'file', name: 'file', accept: '.json,application/json', required: true });
   formDialog('Import research', [
-    h('p', null, 'A research file of ski areas (JSON, in the same format as the first batch). Ski areas already on the list keep what you have changed: only empty facts are filled in, and only new people are added.'),
+    h('p', null, 'A research file of ski areas (JSON, in the same format as the first batch). Ski areas already on the list keep what you have changed: only empty facts are filled in, and only new people are added. Indy Pass resorts are left out.'),
     field('File', file),
   ], async () => {
     if (!file.files[0]) throw new Error('Choose a file');
     let body;
     try { body = JSON.parse(await file.files[0].text()); } catch (_) { throw new Error('That file is not JSON'); }
     const r = await ctx.call('POST', '/prospects/import', body);
-    toast(`Added ${r.added} ski area${r.added === 1 ? '' : 's'}, filled in ${r.updated}, and added ${r.contacts} ${r.contacts === 1 ? 'person' : 'people'}.`);
+    toast(`Added ${r.added} ski area${r.added === 1 ? '' : 's'}, filled in ${r.updated}, and added ${r.contacts} ${r.contacts === 1 ? 'person' : 'people'}.${r.skipped ? ` Left out ${r.skipped} Indy Pass resort${r.skipped === 1 ? '' : 's'}.` : ''}`);
     draw();
   }, { submitText: 'Import' });
 }

@@ -1166,6 +1166,18 @@ async function loadProspectBatches(conn) {
     await conn.query('INSERT INTO prospect_batches (name, added) VALUES (?, ?)', [name, r.added]);
     console.log(`Prospects: loaded "${name}" (${r.added} new, ${r.contacts} contacts)`);
   }
+  // Indy Pass partner resorts came off the list (Oct 26, 2026). Where the first batch was loaded before that, the ones
+  // nobody has worked on yet are removed once: still being researched, with nothing on their timeline.
+  const cleanup = 'cleanup: Indy Pass resorts 2026-10';
+  const [[cleaned]] = await conn.query('SELECT name FROM prospect_batches WHERE name = ?', [cleanup]);
+  if (!cleaned) {
+    const first = path.join(dir, 'prospects-2026-10.json');
+    const names = fs.existsSync(first) ? JSON.parse(fs.readFileSync(first, 'utf8')).excluded_indy_pass || [] : [];
+    const [r] = await conn.query(`DELETE FROM prospects WHERE stage = 'research' AND (indy_pass = 1${names.length ? ` OR name IN (${names.map(() => '?').join(', ')})` : ''})
+      AND NOT EXISTS (SELECT 1 FROM prospect_notes n WHERE n.prospect_id = prospects.id)`, names);
+    await conn.query('INSERT INTO prospect_batches (name, added) VALUES (?, 0)', [cleanup]);
+    if (r.affectedRows) console.log(`Prospects: removed ${r.affectedRows} Indy Pass resort${r.affectedRows === 1 ? '' : 's'}`);
+  }
 }
 
 const skiAreaSteps = [

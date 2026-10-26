@@ -5,7 +5,7 @@
 // to, a stage in the sales pipeline, the next step with a date, and a timeline of notes.
 //
 // A research batch (a JSON file in the format of db/data/prospects-2026-10.json) is loaded once by the migration, and
-// later batches can be imported from the console. Importing never overwrites what an operator has changed: a known
+// later batches can be imported from the console. Indy Pass partner resorts are never added. Importing never overwrites what an operator has changed: a known
 // prospect (same name and state) only gets facts that are still empty, and contacts it does not have yet.
 
 const STAGES = [
@@ -106,12 +106,14 @@ const FACTS = ['town', 'region', 'website', 'phone', 'ownership', 'indy_pass', '
  * Adds a research batch. conn is a pool or a connection (anything with query). Returns { added, updated, contacts }.
  * A prospect already there (same name and state) keeps everything an operator set; only empty facts are filled, and only
  * contacts not there yet (same role and name, or same role and email when unnamed) are added.
+ * Indy Pass partner resorts are left out: we do not sell to them (skipped counts them).
  */
 async function importBatch(conn, list, { region = null, checkedOn = null } = {}) {
-  let added = 0; let updated = 0; let contacts = 0;
+  let added = 0; let updated = 0; let contacts = 0; let skipped = 0;
   for (const raw of list) {
     const p = fromResearch(raw || {}, { region, checkedOn });
     if (!p.name) continue;
+    if (p.indy_pass === 1) { skipped += 1; continue; }
     const [[have]] = await conn.query('SELECT * FROM prospects WHERE name = ? AND state <=> ?', [p.name, p.state]);
     let id;
     if (have) {
@@ -139,7 +141,7 @@ async function importBatch(conn, list, { region = null, checkedOn = null } = {})
       contacts += 1;
     }
   }
-  return { added, updated, contacts };
+  return { added, updated, contacts, skipped };
 }
 
 /** A prospect row as the console shows it. */

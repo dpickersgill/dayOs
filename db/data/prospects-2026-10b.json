@@ -1,0 +1,2363 @@
+{
+ "batch": "2026-10 research, round 2",
+ "checked_on": "2026-10-26",
+ "note": "Independent ski areas not on the Indy Pass (checked against indyskipass.com/our-resorts on 2026-10-26).",
+ "prospects": [
+  {
+   "name": "Boyce Park Ski Area",
+   "state": "PA",
+   "town": "Plum (Pittsburgh area)",
+   "website": "https://www.alleghenycounty.us/parks/boyce/index.aspx",
+   "phone": "724-733-4665",
+   "ownership": "Allegheny County (county park)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 180,
+    "lifts": null,
+    "trails": 10,
+    "skiable_acres": null
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": null,
+    "terrain_park": true,
+    "night_skiing": true,
+    "tubing": true,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [],
+   "fit_notes": "County-run community hill (two chairlifts, tubing, terrain parks, lessons) sold through online registration links on the county site; a government operator with no dedicated ski-ops tech stack is a natural fit for an all-in-one platform and the standalone patrol module.",
+   "sources": [
+    "https://www.alleghenycounty.us/News-Articles/Allegheny-County-Press-Releases/December-2025-Press-Releases/12-17-2025-Boyce-Park-Winter-Facilities-Open-Saturday-December-20",
+    "https://visitpa.com/pa-skiing-winter-sports/boyce-park-ski-area",
+    "https://en.wikipedia.org/wiki/Boyce_Park"
+   ],
+   "region": "Mid-Atlantic and Southeast",
+   "priority": 1
+  },
+  {
+   "name": "Mystic Mountain at Nemacolin",
+   "state": "PA",
+   "town": "Farmington",
+   "website": null,
+   "phone": "866-344-6957",
+   "ownership": "Part of Nemacolin resort (single-property resort owner; owner not confirmed)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 300,
+    "lifts": 3,
+    "trails": 6,
+    "skiable_acres": 25
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": null,
+    "night_skiing": true,
+    "tubing": true,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [],
+   "fit_notes": "Small amenity ski hill inside a luxury resort; reportedly restricted to overnight guests and members since 2021-22 and open mostly Fri-Sun, so a weaker fit (the patrol module alone is the likely angle).",
+   "sources": [
+    "https://www.dcski.com/resorts/mysticmountain",
+    "https://snocountry.com/snow-report/pennsylvania/mystic-mountain-at-nemacolin-woodlands"
+   ],
+   "region": "Mid-Atlantic and Southeast",
+   "priority": 3
+  },
+  {
+   "name": "Holiday Valley Resort",
+   "state": "NY",
+   "town": "Ellicottville",
+   "website": "https://www.holidayvalley.com",
+   "phone": "716-699-2345",
+   "ownership": "Win-Sum Ski Corp (independent corporation with local board; calls itself an independent resort)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 750,
+    "lifts": 13,
+    "trails": 60,
+    "skiable_acres": 290
+   },
+   "offers": {
+    "ski_school": null,
+    "rentals": true,
+    "terrain_park": true,
+    "night_skiing": true,
+    "tubing": true,
+    "summer_ops": true
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Dennis Eshbaugh",
+     "title": "President and General Manager",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.holidayvalley.com/press-releases/three-leadership-promotions/"
+    },
+    {
+     "role": "other",
+     "name": "Bonnie Koschir",
+     "title": "Chair, Win-Sum Ski Corp Board of Directors",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.holidayvalley.com/press-releases/three-leadership-promotions/"
+    },
+    {
+     "role": "operations",
+     "name": "Niki Klein",
+     "title": "Vice President of Resort Services",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.holidayvalley.com/press-releases/three-leadership-promotions/"
+    },
+    {
+     "role": "operations",
+     "name": "Kate Rauber",
+     "title": "Vice President of Skier Services; Secretary, Win-Sum Ski Corp",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.holidayvalley.com/press-releases/three-leadership-promotions/"
+    },
+    {
+     "role": "marketing",
+     "name": "Dash Hegeman",
+     "title": "Director of Marketing",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.holidayvalley.com/press-releases/three-leadership-promotions/"
+    }
+   ],
+   "fit_notes": "Largest independent in western NY, with a year-round business (golf, adventure park, coaster) and a leadership team reshuffled in Feb 2026. It sits at the top of the size range (13 lifts), so it's a bigger-ticket full-platform deal.",
+   "sources": [
+    "https://www.holidayvalley.com/press-releases/three-leadership-promotions/",
+    "https://www.iskiny.com/holiday-valley-resort",
+    "https://en.wikipedia.org/wiki/Holiday_Valley_(ski_resort)"
+   ],
+   "region": "Northeast",
+   "priority": 2
+  },
+  {
+   "name": "HoliMont",
+   "state": "NY",
+   "town": "Ellicottville",
+   "website": "https://holimont.com",
+   "phone": "716-699-2320",
+   "ownership": "Private members-only ski club (founded by William Merk; structure not confirmed)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": null,
+    "lifts": null,
+    "trails": null,
+    "skiable_acres": null
+   },
+   "offers": {
+    "ski_school": null,
+    "rentals": null,
+    "terrain_park": null,
+    "night_skiing": null,
+    "tubing": null,
+    "summer_ops": true
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [],
+   "fit_notes": "Described as North America's largest private ski club. It's investing about $1M (2025) in snowmaking, electrical, and cats with IDA tax breaks, and its member billing and access needs differ from a public mountain. It also runs a bike park in summer.",
+   "sources": [
+    "https://holimont.com/explore/history/",
+    "https://www.btpm.org/local/2025-05-21/holimont-plans-their-own-ski-resort-upgrades",
+    "https://unofficialnetworks.com/2026/10/20/north-americas-largest-private-ski-club-new-york/"
+   ],
+   "region": "Northeast",
+   "priority": 2
+  },
+  {
+   "name": "Kissing Bridge",
+   "state": "NY",
+   "town": "Glenwood",
+   "website": "https://kissingbridge.com",
+   "phone": "716-592-4963",
+   "ownership": "Kissing Bridge All Seasons Resort Inc. (Rhett McNulty, California tech investor; bought Nov 2024)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 550,
+    "lifts": 9,
+    "trails": 37,
+    "skiable_acres": 700
+   },
+   "offers": {
+    "ski_school": null,
+    "rentals": true,
+    "terrain_park": null,
+    "night_skiing": null,
+    "tubing": true,
+    "summer_ops": true
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Matt Thomas",
+     "title": "General Manager (hired March 2026; ex-Telluride risk management director, ex-Roundtop VP/GM)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.saminfo.com/faces-and-places/kissing-bridge-hires-matt-thomas-as-general-manager"
+    },
+    {
+     "role": "owner",
+     "name": "Rhett McNulty",
+     "title": "Owner",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.saminfo.com/news/sam-headline-news/kissing-bridge-sold-to-new-owner-with-plans-for-four-season-operation"
+    },
+    {
+     "role": "president",
+     "name": "Richard Fanelli",
+     "title": "President (as of Dec 2024)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://wkbw.com/news/local-news/southern-tier/big-things-are-happening-kissing-bridge-opens-for-season-under-new-ownership"
+    }
+   ],
+   "fit_notes": "Top prospect: a tech-investor owner since late 2024 who publicly plans technology investments and a four-season operation, plus a new GM (March 2026) with a risk-management/patrol background who should value a deep patrol module. It's also expanding snowmaking and summer biking.",
+   "sources": [
+    "https://www.saminfo.com/news/sam-headline-news/kissing-bridge-sold-to-new-owner-with-plans-for-four-season-operation",
+    "https://www.saminfo.com/faces-and-places/kissing-bridge-hires-matt-thomas-as-general-manager",
+    "https://wkbw.com/news/local-news/southern-tier/big-things-are-happening-kissing-bridge-opens-for-season-under-new-ownership",
+    "https://www.iloveny.com/listing/kissing-bridge/6424"
+   ],
+   "region": "Northeast",
+   "priority": 1
+  },
+  {
+   "name": "Bristol Mountain",
+   "state": "NY",
+   "town": "South Bristol (Canandaigua)",
+   "website": "https://www.bristolmountain.com",
+   "phone": "585-374-6000",
+   "ownership": "Independent, family-run (founded by Fred Sarkis 1964; GM Dan Fuller); current owner entity not confirmed",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 1200,
+    "lifts": 6,
+    "trails": 39,
+    "skiable_acres": 138
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": null,
+    "night_skiing": true,
+    "tubing": null,
+    "summer_ops": true
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Dan Fuller",
+     "title": "General Manager",
+     "email": null,
+     "phone": null,
+     "source_url": "https://iskiny.com/news/bristol-mountain-welcomes-skiers-and-snowboarders-its-opening-day-marking-60th-season-winter"
+    }
+   ],
+   "fit_notes": "Biggest vertical between the Catskills and the Rockies, with ski school, rentals, retail shop, race programs, and summer aerial adventure park/zip lines, so lots of modules apply. Long-tenured independent management.",
+   "sources": [
+    "https://www.bristolmountain.com/about-the-mountain/",
+    "https://en.wikipedia.org/wiki/Bristol_Mountain_Ski_Resort",
+    "https://iskiny.com/news/bristol-mountain-welcomes-skiers-and-snowboarders-its-opening-day-marking-60th-season-winter",
+    "https://www.13wham.com/news/local/bristol-mountain-welcomes-thousands-amid-snow-rescue-after-warm-december"
+   ],
+   "region": "Northeast",
+   "priority": 2
+  },
+  {
+   "name": "Windham Mountain Club",
+   "state": "NY",
+   "town": "Windham",
+   "website": "http://www.windhammountain.com",
+   "phone": "518-734-4300",
+   "ownership": "Private investor group (majority: Beall Investment Partners and Kemmons Wilson Hospitality Partners since April 2023)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 1600,
+    "lifts": 11,
+    "trails": 54,
+    "skiable_acres": 285
+   },
+   "offers": {
+    "ski_school": null,
+    "rentals": null,
+    "terrain_park": null,
+    "night_skiing": true,
+    "tubing": null,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "president",
+     "name": "Kristen Leach",
+     "title": "President (promoted from Director of Membership, April 2025)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.saminfo.com/news/sam-headline-news/windham-president-chip-seamans-retires-kristen-leach-named-successor"
+    },
+    {
+     "role": "operations",
+     "name": "Ian Peters",
+     "title": "Vice President of Operations (formerly Director of Technology)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.saminfo.com/news/sam-headline-news/windham-president-chip-seamans-retires-kristen-leach-named-successor"
+    },
+    {
+     "role": "other",
+     "name": "Chip Seamans",
+     "title": "Chairman, advisory role through 2025-26 (former president)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.saminfo.com/news/sam-headline-news/windham-president-chip-seamans-retires-kristen-leach-named-successor"
+    }
+   ],
+   "fit_notes": "Semi-private membership club since 2023 that dropped Ikon for 2025-26; the new VP Ops came up through technology. Membership/access control plus public ticketing is a strong angle, though at 1,600 ft and 11 lifts it's near the size ceiling.",
+   "sources": [
+    "https://www.saminfo.com/news/sam-headline-news/windham-president-chip-seamans-retires-kristen-leach-named-successor",
+    "https://en.wikipedia.org/wiki/Windham_Mountain_Club",
+    "https://web.nyshta.org/Parks-Attractions/Windham-Mountain-1036"
+   ],
+   "region": "Northeast",
+   "priority": 2
+  },
+  {
+   "name": "Toggenburg Mountain",
+   "state": "NY",
+   "town": "Fabius",
+   "website": null,
+   "phone": null,
+   "ownership": "Wheeler family of Countryside Excavation (local; bought Oct 2026 after NY AG antitrust win against prior owner Intermountain)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 700,
+    "lifts": 5,
+    "trails": 22,
+    "skiable_acres": 85
+   },
+   "offers": {
+    "ski_school": null,
+    "rentals": null,
+    "terrain_park": null,
+    "night_skiing": true,
+    "tubing": null,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "owner",
+     "name": "James Wheeler",
+     "title": "Owner, Countryside Excavation (lead of new ownership group; another outlet names Douglas Wheeler)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://cnycentral.com/news/local/toggenburg-mountain-will-reopen-under-new-owners-after-years-long-legal-battle-wheeler-family-of-countryside-excavation-attorney-general-james-greek-peak-intermountain"
+    }
+   ],
+   "fit_notes": "Greenfield opportunity: closed since 2021, new local owners plan to rebuild and reopen for 2027-28 with no legacy systems. Owner asked the public not to call, so approach later via a formal channel.",
+   "sources": [
+    "https://cnycentral.com/news/local/toggenburg-mountain-will-reopen-under-new-owners-after-years-long-legal-battle-wheeler-family-of-countryside-excavation-attorney-general-james-greek-peak-intermountain",
+    "https://mynews13.com/fl/orlando/business/2026/10/16/toggenburg-mountain-sale-planned-reopening",
+    "https://www.onthesnow.com/new-york/toggenburg-mountain/ski-resort.html"
+   ],
+   "region": "Northeast",
+   "priority": 3
+  },
+  {
+   "name": "Campgaw Mountain Ski Area",
+   "state": "NJ",
+   "town": "Mahwah",
+   "website": "https://www.skicampgaw.com",
+   "phone": "201-327-7800",
+   "ownership": "Bergen County park (Campgaw Mountain Reservation); ski operator entity not confirmed",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 270,
+    "lifts": 5,
+    "trails": 8,
+    "skiable_acres": 18
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": null,
+    "night_skiing": true,
+    "tubing": true,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [
+    {
+     "area": "online store / season passes",
+     "vendor": "inTouch Elevate (campgaw-ecom.intouchelevate.com)"
+    }
+   ],
+   "contacts": [],
+   "fit_notes": "Small, busy NYC-metro learning hill with lessons, adaptive program, rentals, night skiing, and a large tubing park. It has a ski patrol page and uses a third-party e-commerce vendor that could be displaced.",
+   "sources": [
+    "https://www.skicampgaw.com/the-mountain",
+    "https://en.wikipedia.org/wiki/Campgaw_Mountain"
+   ],
+   "region": "Mid-Atlantic and Southeast",
+   "priority": 2
+  },
+  {
+   "name": "Wachusett Mountain",
+   "state": "MA",
+   "town": "Princeton",
+   "website": "https://www.wachusett.com",
+   "phone": "978-464-2300",
+   "ownership": "Crowley family (Wachusett Mountain Associates; operates on state DCR reservation under lease)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 1006,
+    "lifts": 8,
+    "trails": 26,
+    "skiable_acres": 110
+   },
+   "offers": {
+    "ski_school": null,
+    "rentals": null,
+    "terrain_park": null,
+    "night_skiing": true,
+    "tubing": null,
+    "summer_ops": true
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "president",
+     "name": "Jeff Crowley",
+     "title": "President",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.patch.com/connecticut/vernon/snow-business-wachusett-mountains-new-lift-should-be-ready-vacation-week"
+    }
+   ],
+   "fit_notes": "High-volume family-owned day area near Boston with heavy night skiing and ski-club traffic. It just put in a ~$20M six-pack (2025-26), so it's investing in capacity and crowd management.",
+   "sources": [
+    "https://www.patch.com/connecticut/vernon/snow-business-wachusett-mountains-new-lift-should-be-ready-vacation-week",
+    "https://www.wachusett.com/the-mountain/your-visit/david-crowley-sr/",
+    "https://en.wikipedia.org/wiki/Wachusett_Mountain_(ski_area)",
+    "https://newenglandskihistory.com/Massachusetts/wachusett.php",
+    "https://www.schneehoehen.de/skigebiete/kontakt/wachusett-mountain"
+   ],
+   "region": "Northeast",
+   "priority": 2
+  },
+  {
+   "name": "Nashoba Valley Ski Area",
+   "state": "MA",
+   "town": "Westford",
+   "website": "https://skinashoba.com",
+   "phone": "978-692-3033",
+   "ownership": "Fletcher family (founded by Al Fletcher 1964; run by Al Jr. and Pam Fletcher per 2015 report)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 240,
+    "lifts": 11,
+    "trails": 17,
+    "skiable_acres": null
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": true,
+    "night_skiing": true,
+    "tubing": true,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "owner",
+     "name": "Al Fletcher Jr.",
+     "title": "Co-operator, family business (source from 2015, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.bostonglobe.com/sports/2015/02/26/nashoba-valley-founder-receives-lifetime-achievement-award/8D9x6IudmkHwn12SlJi38L/story.html"
+    },
+    {
+     "role": "owner",
+     "name": "Pam Fletcher",
+     "title": "Co-operator, family business (source from 2015, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.bostonglobe.com/sports/2015/02/26/nashoba-valley-founder-receives-lifetime-achievement-award/8D9x6IudmkHwn12SlJi38L/story.html"
+    }
+   ],
+   "fit_notes": "Family-owned suburban learning hill with a big lesson program (Pre-K through adaptive), rentals, night skiing, and New England's largest tubing park, which means high transaction volume on a small footprint.",
+   "sources": [
+    "https://skinashoba.com/about-nashoba-valley-ski-area/",
+    "https://en.wikipedia.org/wiki/Nashoba_Valley_Ski_Area",
+    "https://www.bostonglobe.com/sports/2015/02/26/nashoba-valley-founder-receives-lifetime-achievement-award/8D9x6IudmkHwn12SlJi38L/story.html"
+   ],
+   "region": "Northeast",
+   "priority": 2
+  },
+  {
+   "name": "Ski Ward",
+   "state": "MA",
+   "town": "Shrewsbury",
+   "website": null,
+   "phone": null,
+   "ownership": "LaCroix family (Ski Ward, Inc., since 1990; land leased from Ward family)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 220,
+    "lifts": 5,
+    "trails": 9,
+    "skiable_acres": null
+   },
+   "offers": {
+    "ski_school": null,
+    "rentals": null,
+    "terrain_park": true,
+    "night_skiing": null,
+    "tubing": true,
+    "summer_ops": true
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "owner",
+     "name": "John LaCroix",
+     "title": "Owner/operator",
+     "email": null,
+     "phone": null,
+     "source_url": "https://newenglandskihistory.com/Massachusetts/ward.php"
+    }
+   ],
+   "fit_notes": "Tiny family-owned hill with heavy school-team racing, summer snow/tubing ops, and a 2025-26 opening on Oct 18. Small staff is a good match for a simple all-in-one or patrol-only plan.",
+   "sources": [
+    "https://newenglandskihistory.com/Massachusetts/ward.php",
+    "https://en.wikipedia.org/wiki/Ski_Ward",
+    "https://spectrumnews1.com/ma/worcester/news/2023/08/07/ski-ward-making-snow-in-summer-thanks-to-new-snowmaking-machine"
+   ],
+   "region": "Northeast",
+   "priority": 2
+  },
+  {
+   "name": "Yawgoo Valley Ski Area",
+   "state": "RI",
+   "town": "Exeter",
+   "website": null,
+   "phone": "401-294-3802",
+   "ownership": "de Wardener family (owned since 1980)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 245,
+    "lifts": 3,
+    "trails": 12,
+    "skiable_acres": null
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": null,
+    "night_skiing": true,
+    "tubing": true,
+    "summer_ops": true
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Tracy Hartman",
+     "title": "General Manager",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.bostonglobe.com/2024/02/08/metro/yawgoo-tiny-rhode-island-ski-area-with-huge-devoted-following"
+    },
+    {
+     "role": "ski_school_director",
+     "name": "Patti Davis",
+     "title": "Director of the Snow Sports School",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.bostonglobe.com/2024/02/08/metro/yawgoo-tiny-rhode-island-ski-area-with-huge-devoted-following"
+    },
+    {
+     "role": "operations",
+     "name": "Joel Daglieri",
+     "title": "Operations Manager",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.bostonglobe.com/2024/02/08/metro/yawgoo-tiny-rhode-island-ski-area-with-huge-devoted-following"
+    },
+    {
+     "role": "operations",
+     "name": "Danielle D'Andrea",
+     "title": "Operations Manager",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.bostonglobe.com/2024/02/08/metro/yawgoo-tiny-rhode-island-ski-area-with-huge-devoted-following"
+    }
+   ],
+   "fit_notes": "Rhode Island's only ski area, family-run, with 95 instructors, about 1,200 students a week, and a 900-name lesson waitlist run by lottery. That is a clear pain point for ski-school scheduling and registration. It also has a summer water park.",
+   "sources": [
+    "https://www.bostonglobe.com/2024/02/08/metro/yawgoo-tiny-rhode-island-ski-area-with-huge-devoted-following",
+    "https://newenglandskihistory.com/RhodeIsland/yawgoovalley.php",
+    "https://www.visitrhodeisland.com/listing/yawgoo-valley-ski-area/8607/"
+   ],
+   "region": "Northeast",
+   "priority": 1
+  },
+  {
+   "name": "Mount Southington Ski Area",
+   "state": "CT",
+   "town": "Plantsville (Southington)",
+   "website": "https://mountsouthington.com",
+   "phone": null,
+   "ownership": "Independent private ownership (founded by Richman family/investors; current owner not confirmed)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 425,
+    "lifts": 8,
+    "trails": 14,
+    "skiable_acres": 51
+   },
+   "offers": {
+    "ski_school": null,
+    "rentals": null,
+    "terrain_park": null,
+    "night_skiing": true,
+    "tubing": null,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [],
+   "fit_notes": "Fully lit night-skiing day area in central CT that keeps reinvesting (new Partek chairs 2021-22 and 2023-24). It's independent and small, so a good full-platform candidate; GM name not found.",
+   "sources": [
+    "https://en.wikipedia.org/wiki/Mount_Southington",
+    "https://newenglandskihistory.com/Connecticut/mtsouthington.php",
+    "https://www.onthesnow.com/connecticut/mount-southington-ski-area/ski-resort.html",
+    "https://snowology.com/240118-mount-southington/"
+   ],
+   "region": "Northeast",
+   "priority": 2
+  },
+  {
+   "name": "Gunstock Mountain Resort",
+   "state": "NH",
+   "town": "Gilford",
+   "website": "https://www.gunstock.com",
+   "phone": "603-293-4341",
+   "ownership": "Belknap County (overseen by the Gunstock Area Commission)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 1400,
+    "lifts": 7,
+    "trails": 55,
+    "skiable_acres": null
+   },
+   "offers": {
+    "ski_school": null,
+    "rentals": null,
+    "terrain_park": null,
+    "night_skiing": true,
+    "tubing": true,
+    "summer_ops": true
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Robert Drake",
+     "title": "President and General Manager (started Aug 2024; ex-Middlebury Snowbowl, Bridger Bowl)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.saminfo.com/faces-and-places/robert-drake-named-as-president-and-gm-of-gunstock-mountain-resort"
+    },
+    {
+     "role": "other",
+     "name": "Doug Lambert",
+     "title": "Chair, Gunstock Area Commission (as of July 2024)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.saminfo.com/faces-and-places/robert-drake-named-as-president-and-gm-of-gunstock-mountain-resort"
+    }
+   ],
+   "fit_notes": "County-owned with public procurement and governance scrutiny after the 2022 management walkout; a GM since 2024 who comes from community/nonprofit areas. It runs year-round (coaster, summer park).",
+   "sources": [
+    "https://www.saminfo.com/faces-and-places/robert-drake-named-as-president-and-gm-of-gunstock-mountain-resort",
+    "https://en.wikipedia.org/wiki/Gunstock_Mountain_Resort",
+    "https://business.lakesregionchamber.org/list/member/gunstock-mountain-resort"
+   ],
+   "region": "Northeast",
+   "priority": 2
+  },
+  {
+   "name": "Cochran's Ski Area",
+   "state": "VT",
+   "town": "Richmond",
+   "website": "http://www.cochranskiarea.com",
+   "phone": null,
+   "ownership": "Nonprofit (Cochran's Ski Area, Inc., 501(c)(3)); Cochran family remains involved",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 500,
+    "lifts": null,
+    "trails": null,
+    "skiable_acres": null
+   },
+   "offers": {
+    "ski_school": null,
+    "rentals": null,
+    "terrain_park": null,
+    "night_skiing": true,
+    "tubing": null,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Jimmy Cochran",
+     "title": "Runs the ski area (formal title not published)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.wcax.com/2025/01/11/cochrans-ski-area-starts-their-season-with-new-ski-lift"
+    }
+   ],
+   "fit_notes": "Tiny donor-funded nonprofit hill ($19 weekend ticket), with surface lifts, night lights, and race programs. It's price-sensitive, so the $149/month patrol module or a lightweight plan is the realistic sale.",
+   "sources": [
+    "https://www.wcax.com/2025/01/11/cochrans-ski-area-starts-their-season-with-new-ski-lift",
+    "https://newenglandskihistory.com/Vermont/cochrans.php",
+    "https://www.guidestar.org/profile/03-0357742"
+   ],
+   "region": "Northeast",
+   "priority": 2
+  },
+  {
+   "name": "Snow Trails",
+   "state": "OH",
+   "town": "Mansfield",
+   "website": "https://www.snowtrails.com",
+   "phone": "419-774-9818",
+   "ownership": "family-owned (Carto family); privately owned, same management since inception",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 301,
+    "lifts": 9,
+    "trails": 21,
+    "skiable_acres": 200
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": true,
+    "night_skiing": true,
+    "tubing": true,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [
+    {
+     "area": "online tickets/passes",
+     "vendor": "unidentified platform on a 'connectintouch' domain"
+    },
+    {
+     "area": "email marketing",
+     "vendor": "Infusionsoft (Keap)"
+    }
+   ],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Scott Crislip",
+     "title": "General Manager (source from 2022, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.stormskiing.com/p/podcast-88-snow-trails-ohio-general"
+    },
+    {
+     "role": "marketing",
+     "name": "Nate Wolleson",
+     "title": "Marketing Manager",
+     "email": null,
+     "phone": "419-756-7768 x108",
+     "source_url": "https://www.snowtrails.com/footer/media-resources"
+    }
+   ],
+   "fit_notes": "Ohio's only family-owned winter resort, not on Indy, and investing steadily (new rope tow, SMI guns, PistenBully, rental fleet refresh for 2025-26). Mid-size operation with ski school, rental center, tubing and night skiing, all of which a single platform could unify.",
+   "sources": [
+    "https://www.stormskiing.com/p/podcast-88-snow-trails-ohio-general",
+    "https://www.snowtrails.com/footer/media-resources",
+    "https://www.snowtrails.com/blog/2025/10/27/resort-improvements-for-2025-26-season",
+    "https://www.cleveland19.com/2025/12/11/snow-trails-mansfield-celebrates-65th-season-operation"
+   ],
+   "region": "Midwest",
+   "priority": 2
+  },
+  {
+   "name": "Welch Village",
+   "state": "MN",
+   "town": "Welch (Red Wing area)",
+   "website": "https://www.welchvillage.com",
+   "phone": "651-258-4567",
+   "ownership": "family-owned (Nelson family); operated by Peter Zotalis, grandson of late owner Leigh Nelson",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 360,
+    "lifts": 11,
+    "trails": 50,
+    "skiable_acres": 140
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": true,
+    "night_skiing": null,
+    "tubing": true,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [
+    {
+     "area": "ticketing / online store",
+     "vendor": "accesso (welch.secure-cdn.na3.accessoticketing.com)"
+    }
+   ],
+   "contacts": [
+    {
+     "role": "owner",
+     "name": "Peter Zotalis",
+     "title": "Operator (grandson of late owner Leigh Nelson) (source from 2023, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://en.wikipedia.org/wiki/Welch_Village"
+    }
+   ],
+   "fit_notes": "Third-generation family area that just added a new quad for 2025-26, large lesson/camp/race programs, and runs on accesso, so a displacement play. Generational ownership transition after the founder's 2023 death is a natural moment to re-evaluate systems.",
+   "sources": [
+    "https://en.wikipedia.org/wiki/Welch_Village",
+    "https://www.welchvillage.com/one-day-lesson-programs.cfm",
+    "https://skiandboardmn.com/member-areas/name/welch-village-ski-snowboard-area"
+   ],
+   "region": "Midwest",
+   "priority": 2
+  },
+  {
+   "name": "Buck Hill",
+   "state": "MN",
+   "town": "Burnsville",
+   "website": "https://buckhill.com",
+   "phone": "952-435-7174",
+   "ownership": "privately owned (David and Corrine Solner; Don McClure was a co-buyer in 2015)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 310,
+    "lifts": 10,
+    "trails": 14,
+    "skiable_acres": null
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": null,
+    "terrain_park": true,
+    "night_skiing": true,
+    "tubing": true,
+    "summer_ops": true
+   },
+   "patrol": "NSP volunteer",
+   "current_software": [
+    {
+     "area": "lesson booking",
+     "vendor": "OnlySky (buckhill.onlysky.io)"
+    }
+   ],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Don McClure",
+     "title": "General Manager and co-owner (source from 2015, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.saminfo.com/news/sam-headline-news/17116-9-buck-hill-ski-area-has-new-owners"
+    },
+    {
+     "role": "owner",
+     "name": "David Solner",
+     "title": "Co-owner (source from 2015, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.saminfo.com/news/sam-headline-news/17116-9-buck-hill-ski-area-has-new-owners"
+    }
+   ],
+   "fit_notes": "Suburban Twin Cities hill with a large volunteer NSP patrol (80+ members, own website), heavy race and lesson programs, tubing and summer biking. A volunteer patrol of that size is a strong fit for the $149/month patrol module.",
+   "sources": [
+    "https://www.saminfo.com/news/sam-headline-news/17116-9-buck-hill-ski-area-has-new-owners",
+    "https://en.wikipedia.org/wiki/Buck_Hill",
+    "https://buckhill.com/",
+    "https://www.buckhillskipatrol.org/join",
+    "https://skiandboardmn.com/member-areas/name/buck-hill"
+   ],
+   "region": "Midwest",
+   "priority": 1
+  },
+  {
+   "name": "Wild Mountain",
+   "state": "MN",
+   "town": "Taylors Falls",
+   "website": "http://www.wildmountain.com",
+   "phone": "651-465-6365",
+   "ownership": "family-owned (Larsen family)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 300,
+    "lifts": 8,
+    "trails": 26,
+    "skiable_acres": 100
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": null,
+    "terrain_park": true,
+    "night_skiing": null,
+    "tubing": true,
+    "summer_ops": true
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Nathan Hakseth",
+     "title": "General Manager (also oversees Snowsports School and Competitions)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.saminfo.com/news/sam-headline-news/nathan-hakseth-promoted-to-gm-at-wild-mountain"
+    },
+    {
+     "role": "president",
+     "name": "Sara Larsen",
+     "title": "President",
+     "email": null,
+     "phone": null,
+     "source_url": "https://en.wikipedia.org/wiki/Wild_Mountain"
+    }
+   ],
+   "fit_notes": "Family-owned, year-round business (ski area plus summer waterpark) with a GM promoted in 2024 from ski school, so lessons and staff scheduling are close to his heart. Recent lift and base-area investment shows willingness to spend.",
+   "sources": [
+    "https://www.saminfo.com/news/sam-headline-news/nathan-hakseth-promoted-to-gm-at-wild-mountain",
+    "https://en.wikipedia.org/wiki/Wild_Mountain",
+    "https://skiandboardmn.com/member-areas/name/wild-mountain"
+   ],
+   "region": "Midwest",
+   "priority": 2
+  },
+  {
+   "name": "Cannonsburg Ski Area",
+   "state": "MI",
+   "town": "Cannonsburg (Grand Rapids area)",
+   "website": "https://cannonsburg.com",
+   "phone": "616-874-6711",
+   "ownership": "privately owned and operated (owner not named in sources); same operators bought Pando Winter Sports Park in 2015",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 250,
+    "lifts": 10,
+    "trails": 22,
+    "skiable_acres": 100
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": true,
+    "night_skiing": null,
+    "tubing": true,
+    "summer_ops": true
+   },
+   "patrol": null,
+   "current_software": [
+    {
+     "area": "online store",
+     "vendor": "RTP|One-style eStore (cannonsburg.resortstore.net)"
+    },
+    {
+     "area": "waivers",
+     "vendor": "1Risk (apps.1risk.cloud)"
+    }
+   ],
+   "contacts": [
+    {
+     "role": "marketing",
+     "name": "Danielle Musto",
+     "title": "Marketing Director",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.wgvunews.org/news/2024-01-18/cannonsburg-ski-area-opens-for-season-today"
+    },
+    {
+     "role": "patrol_director",
+     "name": "Matt Chapman",
+     "title": "Ski Patrol Director (source from 2022, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://fox17online.com/homepage-showcase/new-ski-patrol-pup-at-cannonsburg-ski-area"
+    }
+   ],
+   "fit_notes": "Busy Grand Rapids-area hill with the state's largest tubing facility, multiple parks, junior academy and real summer program (bike team, disc golf). Kent County tried to buy it in 2023, so ownership/strategy may be in flux.",
+   "sources": [
+    "https://cannonsburg.com/about/",
+    "https://www.onthesnow.com/midwest/cannonsburg/ski-resort",
+    "https://www.wgvunews.org/news/2024-01-18/cannonsburg-ski-area-opens-for-season-today",
+    "https://fox17online.com/homepage-showcase/new-ski-patrol-pup-at-cannonsburg-ski-area",
+    "https://fox17online.com/2015/11/13/pando-winter-sports-park-sold-to-cannonsburg",
+    "https://wgrd.com/kent-county-wants-to-buy-cannonsburg-ski-area-but-funding-is-denied/"
+   ],
+   "region": "Midwest",
+   "priority": 2
+  },
+  {
+   "name": "Mt. Holly",
+   "state": "MI",
+   "town": "Holly (Groveland Township)",
+   "website": "https://www.skimtholly.com",
+   "phone": null,
+   "ownership": "privately owned; current owner not identified in sources (not Vail, which owns nearby Mt. Brighton)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 350,
+    "lifts": 13,
+    "trails": 20,
+    "skiable_acres": 100
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": true,
+    "night_skiing": true,
+    "tubing": null,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Mark Tibbitts",
+     "title": "General Manager (GM since 1997)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.mycitymag.com/?p=70361"
+    },
+    {
+     "role": "operations",
+     "name": "Michael Arkell",
+     "title": "Assistant General Manager",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.mycitymag.com/?p=70361"
+    }
+   ],
+   "fit_notes": "Detroit-area learn-to-ski hub (70th season in 2025-26) with heavy school/student patch programs and night operations, so ski school and staff scheduling volume is high. Long-tenured GM; ownership should be confirmed before outreach.",
+   "sources": [
+    "https://www.mycitymag.com/?p=70361",
+    "https://lakeorionreview.com/?p=14360",
+    "https://oaklandcountyblog.com/2019/01/07/oakland-county-skiing-and-snowboarding-at-mt-holly/"
+   ],
+   "region": "Midwest",
+   "priority": 2
+  },
+  {
+   "name": "Bittersweet Ski Resort",
+   "state": "MI",
+   "town": "Otsego",
+   "website": null,
+   "phone": null,
+   "ownership": "family-owned (family not named in sources)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 350,
+    "lifts": 11,
+    "trails": 18,
+    "skiable_acres": 100
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": null,
+    "night_skiing": true,
+    "tubing": null,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Nicholas Ross",
+     "title": "General Manager",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.woodtv.com/news/allegan-county/bittersweet-prepares-to-open-with-staff-hopeful-after-difficult-winters/amp/"
+    }
+   ],
+   "fit_notes": "Family-owned southwest Michigan hill where lift tickets are reportedly sold on-site only, a clear gap for online ticketing and passes. GM in his third season as of late 2024 after several tough winters, so efficiency gains matter.",
+   "sources": [
+    "https://www.woodtv.com/news/allegan-county/bittersweet-prepares-to-open-with-staff-hopeful-after-difficult-winters/amp/",
+    "https://www.islands.com/1733784/bittersweet-resort-michigan-quaint-snowy-slopes-cozy-vibes-picture-perfect-getaway",
+    "https://www.onthesnow.com/chicago/bittersweet-ski-area/ski-resort",
+    "https://digital-release.woodtv.com/news/bittersweet-ski-resort-hopes-for-bounce-back-season/"
+   ],
+   "region": "Midwest",
+   "priority": 2
+  },
+  {
+   "name": "Timber Ridge Ski Area",
+   "state": "MI",
+   "town": "Gobles",
+   "website": "https://timberridgeski.com",
+   "phone": null,
+   "ownership": "family-owned (operating since 1961; family not named in sources)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 240,
+    "lifts": 8,
+    "trails": 15,
+    "skiable_acres": 50
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": null,
+    "terrain_park": null,
+    "night_skiing": true,
+    "tubing": true,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "operations",
+     "name": "Luke Schrab",
+     "title": "Operations Manager",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.wwmt.com/news/local/timber-ridge-snow-tubing-michigan-winter-season-fun-entertainment-gobles-hills-early-opening-state"
+    }
+   ],
+   "fit_notes": "Small family-owned Kalamazoo-area hill with night skiing, tubing and lessons sold through local parks departments. Classic community hill with a small staff that would benefit from an all-in-one system.",
+   "sources": [
+    "https://en.wikipedia.org/wiki/Timber_Ridge_Ski_Area",
+    "https://www.wwmt.com/news/local/timber-ridge-snow-tubing-michigan-winter-season-fun-entertainment-gobles-hills-early-opening-state",
+    "https://www.news3lv.com/news/nation-world/gallery/michigan-winter-sports-industry-recovery-timber-ridge-snowsports-industries-association-luke-schrab-climate-change-weather",
+    "https://apm.activecommunities.com/cityofportageparks/Activity_Search/downhill-snowboard-lessons-at-timber-ridge/116"
+   ],
+   "region": "Midwest",
+   "priority": 2
+  },
+  {
+   "name": "Snow Snake Ski & Golf",
+   "state": "MI",
+   "town": "Harrison",
+   "website": "https://snowsnake.net",
+   "phone": "989-539-6583",
+   "ownership": "family-owned (Brockway family since 1957)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 210,
+    "lifts": 6,
+    "trails": 10,
+    "skiable_acres": null
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": true,
+    "night_skiing": null,
+    "tubing": true,
+    "summer_ops": true
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Mick Haley",
+     "title": "Manager",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.wnem.com/2024/01/12/why-this-winter-storm-is-good-news-snow-snake-ski-golf-harrison"
+    }
+   ],
+   "fit_notes": "Small family hill with a 30+ PSIA/AASI instructor staff, sizable rental fleet and a four-lane tubing park, plus summer golf. Lots of moving parts for a small team.",
+   "sources": [
+    "https://meetmtp.com/places/snow-snake-mountain-ski-area/",
+    "https://www.wnem.com/2024/01/12/why-this-winter-storm-is-good-news-snow-snake-ski-golf-harrison"
+   ],
+   "region": "Midwest",
+   "priority": 2
+  },
+  {
+   "name": "Seven Oaks Recreation",
+   "state": "IA",
+   "town": "Boone",
+   "website": null,
+   "phone": null,
+   "ownership": "family-owned (Bryan family; owner Joel Bryan)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": null,
+    "lifts": null,
+    "trails": null,
+    "skiable_acres": null
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": null,
+    "terrain_park": null,
+    "night_skiing": true,
+    "tubing": true,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "owner",
+     "name": "Joel Bryan",
+     "title": "Owner",
+     "email": null,
+     "phone": null,
+     "source_url": "https://digital-release.who13.com/?p=1596527"
+    }
+   ],
+   "fit_notes": "Owner-operated central Iowa hill investing in snowmaking (23 guns, new ones added 2024) and running night skiing, tubing and lessons. Owner is the decision-maker, so the sales cycle should be short.",
+   "sources": [
+    "https://digital-release.who13.com/?p=1596527",
+    "https://unofficialnetworks.com/2024/09/06/seven-oaks-snowmaking/"
+   ],
+   "region": "Midwest",
+   "priority": 2
+  },
+  {
+   "name": "Crescent Hill at Hitchcock (formerly Mt. Crescent Ski Area)",
+   "state": "IA",
+   "town": "Honey Creek",
+   "website": "https://explorecrescenthill.com",
+   "phone": "712-227-0023",
+   "ownership": "Pottawattamie County Conservation (county-owned since Dec 31, 2021)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": null,
+    "lifts": null,
+    "trails": 11,
+    "skiable_acres": null
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": null,
+    "night_skiing": true,
+    "tubing": false,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Chris Andrew",
+     "title": "Site Manager, Crescent Hill at Hitchcock",
+     "email": null,
+     "phone": "712-545-9135",
+     "source_url": "https://pottconservation.com/page/mcsa"
+    },
+    {
+     "role": "operations",
+     "name": "Ray Mehaffy",
+     "title": "Maintenance & Operations Technician (former ski patroller)",
+     "email": null,
+     "phone": "712-545-9135",
+     "source_url": "https://pottconservation.com/page/mcsa"
+    },
+    {
+     "role": "other",
+     "name": "Mark Shoemaker",
+     "title": "Executive Director, Pottawattamie County Conservation Board (source from 2022, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.3newsnow.com/news/local-news/mt-crescent-ski-area-announces-transfer-in-ownership-to-pottawattamie-county"
+    }
+   ],
+   "fit_notes": "County-run hill near Omaha, recently rebranded, with its own ski patrol and online rental reservations; government owners value auditable patrol/incident records. Public procurement may mean an RFP, but budgets and decision-makers are visible.",
+   "sources": [
+    "https://pottconservation.com/page/mcsa",
+    "https://www.3newsnow.com/news/local-news/mt-crescent-ski-area-announces-transfer-in-ownership-to-pottawattamie-county",
+    "https://www.wowt.com/2023/03/04/mt-crescent-ski-area-sees-boom-business-under-countys-new-ownership"
+   ],
+   "region": "Midwest",
+   "priority": 2
+  },
+  {
+   "name": "Alpine Valley Resort",
+   "state": "WI",
+   "town": "Elkhorn",
+   "website": "https://alpinevalleyresort.com",
+   "phone": "262-642-7374",
+   "ownership": "Wisconsin Resorts, Inc. (privately held; no other ski areas found)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": null,
+    "lifts": 12,
+    "trails": 21,
+    "skiable_acres": 90
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": true,
+    "night_skiing": true,
+    "tubing": null,
+    "summer_ops": true
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Jamison Stachel",
+     "title": "General Manager",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.tmj4.com/sports/olympics/local-skiers-experience-olympic-style-winter-sports-at-alpine-valley-in-elkhorn"
+    }
+   ],
+   "fit_notes": "Independent ski-in/ski-out resort with on-slope lodging and golf, in the Chicago/Milwaukee market next to Vail's Wilmot. Larger lift count (12) is at the upper end of the size range; hotel plus ski ops makes it a bigger multi-module deal.",
+   "sources": [
+    "https://en.wikipedia.org/wiki/Alpine_Valley_Resort_(Wisconsin)",
+    "https://travelwisconsin.com/resorts-lodges/alpine-valley-resort-193732",
+    "https://www.tmj4.com/sports/olympics/local-skiers-experience-olympic-style-winter-sports-at-alpine-valley-in-elkhorn"
+   ],
+   "region": "Midwest",
+   "priority": 2
+  },
+  {
+   "name": "Hanson Hills Recreation Area",
+   "state": "MI",
+   "town": "Grayling",
+   "website": "https://hansonhills.org",
+   "phone": "989-348-9266",
+   "ownership": "nonprofit Grayling Recreation Authority (consortium of Grayling Township, Crawford County, Crawford AuSable Schools and at-large members); land under State Military Board",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": null,
+    "lifts": null,
+    "trails": null,
+    "skiable_acres": null
+   },
+   "offers": {
+    "ski_school": null,
+    "rentals": null,
+    "terrain_park": null,
+    "night_skiing": null,
+    "tubing": null,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [],
+   "fit_notes": "Nonprofit, government-consortium community hill (Michigan's first downhill area, 1929) with very small staff and volunteer roots. A natural fit for the standalone $149/month patrol module or a lightweight all-in-one.",
+   "sources": [
+    "https://www.graylingchamber.com/connections/67577-hanson-hills-recreation-area-grayling-recreational-authority/"
+   ],
+   "region": "Midwest",
+   "priority": 2
+  },
+  {
+   "name": "Otsego Resort (Otsego Club)",
+   "state": "MI",
+   "town": "Gaylord",
+   "website": "https://www.otsegoclub.com",
+   "phone": "989-732-5181",
+   "ownership": "Osprey Recreational Properties (bought 2007; golf/resort company, no other ski areas found; current ownership should be confirmed)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": null,
+    "lifts": null,
+    "trails": null,
+    "skiable_acres": null
+   },
+   "offers": {
+    "ski_school": null,
+    "rentals": null,
+    "terrain_park": true,
+    "night_skiing": null,
+    "tubing": null,
+    "summer_ops": true
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Mike Bedells",
+     "title": "General Manager (source from 2017, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.gaylordmichigan.net/blog/otsego-club-skiing-opens-to-the-public/"
+    },
+    {
+     "role": "operations",
+     "name": "Jeff Morrison",
+     "title": "Director of Ski Operations (source from 2015, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.saminfo.com/news/sam-headline-news/17726-738-morrison-to-direct-ski-operations-at-otsego-club-resort"
+    }
+   ],
+   "fit_notes": "Historic (1939) former private ski club turned public resort with lodging and two golf courses; mixes members, resort guests and day skiers. Contacts are dated, so verify leadership first.",
+   "sources": [
+    "https://www.gaylordmichigan.net/blog/otsego-club-skiing-opens-to-the-public/",
+    "https://gam.org/?p=3824",
+    "https://www.saminfo.com/news/sam-headline-news/17726-738-morrison-to-direct-ski-operations-at-otsego-club-resort"
+   ],
+   "region": "Midwest",
+   "priority": 2
+  },
+  {
+   "name": "Mt. Zion Recreational Complex",
+   "state": "MI",
+   "town": "Ironwood",
+   "website": "https://www.gogebic.edu/community/mtzion.html",
+   "phone": "906-932-3718",
+   "ownership": "Gogebic Community College (college ski hill, home of its Ski Area Management program)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 300,
+    "lifts": null,
+    "trails": 10,
+    "skiable_acres": null
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": null,
+    "night_skiing": true,
+    "tubing": true,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [],
+   "fit_notes": "College-owned hill that trains future ski area managers through the SAM program; the long-time manager/SAM director retired Oct 2023 and no successor was found. No online ticket purchase on its page, and a reference customer here would put Verdynt/OS in front of future industry managers.",
+   "sources": [
+    "https://www.gogebic.edu/community/mtzion.html",
+    "https://yourdailyglobe.com/story/2023/03/23/news/master-of-mt-zion/17465.html",
+    "https://www.yourdailyglobe.com/story/2023/03/09/news/vander-spoel-retiring-from-gcc-ski-area-management-program/17438.html",
+    "https://gogebic.edu/news/mt_zion_campaign.html"
+   ],
+   "region": "Midwest",
+   "priority": 2
+  },
+  {
+   "name": "Wolf Creek Ski Area",
+   "state": "CO",
+   "town": "Pagosa Springs",
+   "website": "https://wolfcreekski.com",
+   "phone": "970-264-5639",
+   "ownership": "family-owned (Pitcher family; Davey Pitcher CEO)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 1604,
+    "lifts": 10,
+    "trails": 77,
+    "skiable_acres": 1600
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": null,
+    "night_skiing": null,
+    "tubing": null,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "owner",
+     "name": "Davey Pitcher",
+     "title": "CEO (family owner)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://coloradosun.com/2025/01/16/outsider-20250116/"
+    },
+    {
+     "role": "marketing",
+     "name": "Rosanne Pitcher",
+     "title": "Vice President of Marketing and Sales (undated source, approx. 2022-23, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.the-journal.com/?p=78719"
+    }
+   ],
+   "fit_notes": "Fiercely independent family-run area with ~260,000 visits, own season pass only (no Epic/Ikon/Indy), and a strong old-school ticket-window culture; large enough to need a deep patrol module and scheduling but unlikely to buy a big-resort suite.",
+   "sources": [
+    "https://en.wikipedia.org/wiki/Wolf_Creek_ski_area",
+    "https://coloradosun.com/2025/01/16/outsider-20250116/",
+    "https://www.the-journal.com/?p=78719",
+    "https://www.uncovercolorado.com/skiing-snowboarding/wolf-creek-ski-area/"
+   ],
+   "region": "Rockies",
+   "priority": 2
+  },
+  {
+   "name": "Mt. Baker Ski Area",
+   "state": "WA",
+   "town": "Glacier",
+   "website": "https://www.mtbaker.us",
+   "phone": "(360) 734-6771",
+   "ownership": "independent, family/locally owned (Mt. Baker Ski Area, Inc.; Howat/Haskell families on board)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 1589,
+    "lifts": 10,
+    "trails": 31,
+    "skiable_acres": 1000
+   },
+   "offers": {
+    "ski_school": null,
+    "rentals": null,
+    "terrain_park": null,
+    "night_skiing": null,
+    "tubing": null,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [
+    {
+     "area": "HR/recruiting",
+     "vendor": "Paylocity (pro patroller job postings)"
+    }
+   ],
+   "contacts": [
+    {
+     "role": "president",
+     "name": "Evan Haskell",
+     "title": "President and CEO",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.cascadiadaily.com/2025/may/01/mt-baker-ski-area-ceo-gwyn-howat-stepping-back-from-role/"
+    },
+    {
+     "role": "general_manager",
+     "name": "Mike Trowbridge",
+     "title": "General Manager (since Sept 2024)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.cascadiadaily.com/2025/may/01/mt-baker-ski-area-ceo-gwyn-howat-stepping-back-from-role/"
+    },
+    {
+     "role": "other",
+     "name": "Gwyn Howat",
+     "title": "Senior Adviser and board member (former President/CEO)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.cascadiadaily.com/2025/may/01/mt-baker-ski-area-ceo-gwyn-howat-stepping-back-from-role/"
+    }
+   ],
+   "fit_notes": "Brand-new leadership in 2024-25 (new CEO and first new GM since 1968) after a generational handoff, and publicly committed to staying independent; heavy avalanche terrain makes the patrol module a strong angle.",
+   "sources": [
+    "https://www.cascadiadaily.com/2025/may/01/mt-baker-ski-area-ceo-gwyn-howat-stepping-back-from-role/",
+    "https://mtbaker.us/contact-info",
+    "https://en.wikipedia.org/wiki/Mt._Baker_Ski_Area",
+    "https://recruiting.paylocity.com/Recruiting/Jobs/Details/3462018"
+   ],
+   "region": "West Coast and Alaska",
+   "priority": 2
+  },
+  {
+   "name": "Great Divide Ski Area",
+   "state": "MT",
+   "town": "Marysville",
+   "website": "https://www.skigd.com",
+   "phone": "(406) 449-3746",
+   "ownership": "family-owned (Crawford and Moran families, since Jan 2020)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 1500,
+    "lifts": 6,
+    "trails": 127,
+    "skiable_acres": 1500
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": true,
+    "night_skiing": true,
+    "tubing": null,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Travis Crawford",
+     "title": "Co-Owner and General Manager (source from 2023, check current)",
+     "email": "info@skigd.com (general)",
+     "phone": "(406) 449-3746 (main)",
+     "source_url": "https://www.stormskiing.com/p/podcast-142-great-divide-general"
+    },
+    {
+     "role": "owner",
+     "name": "Betsy Moran",
+     "title": "Co-Owner",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.ktvh.com/news/helena-news/new-owners-take-over-at-great-divide-ski-area"
+    }
+   ],
+   "fit_notes": "Small family operation near Helena with Friday night skiing, rail jams and youth programs; owner-GM makes a single decision maker, and no pass affiliations means it runs all its own ticketing and passes.",
+   "sources": [
+    "https://www.skigd.com/about-us",
+    "https://www.stormskiing.com/p/podcast-142-great-divide-general",
+    "https://www.ktvh.com/news/helena-news/new-owners-take-over-at-great-divide-ski-area",
+    "https://en.wikipedia.org/wiki/Great_Divide_Montana"
+   ],
+   "region": "Rockies",
+   "priority": 2
+  },
+  {
+   "name": "Lookout Pass Ski & Recreation Area",
+   "state": "ID",
+   "town": "Mullan",
+   "website": "https://skilookout.com",
+   "phone": "208-744-1301",
+   "ownership": "family-owned (Lookout Associates, headed by Phil Edholm, since 1999)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 1650,
+    "lifts": 5,
+    "trails": 52,
+    "skiable_acres": 1023
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": true,
+    "night_skiing": false,
+    "tubing": null,
+    "summer_ops": true
+   },
+   "patrol": null,
+   "current_software": [
+    {
+     "area": "POS",
+     "vendor": "White Peaks or similar (named as preferred experience in finance job posting)"
+    },
+    {
+     "area": "accounting",
+     "vendor": "Sage (named as preferred in job posting)"
+    }
+   ],
+   "contacts": [
+    {
+     "role": "owner",
+     "name": "Phil Edholm",
+     "title": "Head of owner Lookout Associates (undated source, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://en.wikipedia.org/wiki/Lookout_Pass_Ski_and_Recreation_Area"
+    },
+    {
+     "role": "ski_school_director",
+     "name": "Abby (last name not published)",
+     "title": "Ski School Director",
+     "email": "abby@skilookout.com",
+     "phone": null,
+     "source_url": "https://skilookout.com/media-kit/"
+    },
+    {
+     "role": "marketing",
+     "name": "Matt Sawyer",
+     "title": "Marketing and Sales Manager (undated source, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://inlander.com/special-guides/lookout-pass-ski-and-recreation-area-18427901"
+    }
+   ],
+   "fit_notes": "Small family operation (<100 staff) with a famous volunteer-run free ski school, its own patrol and a rental shop, plus summer Hiawatha bike trail ops; job posts point to a small-vendor POS stack.",
+   "sources": [
+    "https://skilookout.com/contact/",
+    "https://skilookout.com/media-kit/",
+    "https://skilookout.com/about-lookout-pass/",
+    "https://www.coolworks.com/lookout-pass-ski-and-recreation/profile",
+    "https://en.wikipedia.org/wiki/Lookout_Pass_Ski_and_Recreation_Area",
+    "https://thesnowpros.org/job/lookout-pass-ski-area-lookout-pass-ski-area-mullan-id-full-time-assistant-snow-sports-director-snow-sports-supervisor/",
+    "https://inlander.com/special-guides/lookout-pass-ski-and-recreation-area-18427901"
+   ],
+   "region": "Rockies",
+   "priority": 2
+  },
+  {
+   "name": "Bogus Basin Mountain Recreation Area",
+   "state": "ID",
+   "town": "Boise",
+   "website": "https://bogusbasin.org",
+   "phone": "(208) 332-5100",
+   "ownership": "nonprofit (Bogus Basin Recreation Association)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 1800,
+    "lifts": 10,
+    "trails": 88,
+    "skiable_acres": 2600
+   },
+   "offers": {
+    "ski_school": null,
+    "rentals": null,
+    "terrain_park": null,
+    "night_skiing": true,
+    "tubing": true,
+    "summer_ops": true
+   },
+   "patrol": "mixed",
+   "current_software": [
+    {
+     "area": "HR/recruiting",
+     "vendor": "Paylocity"
+    }
+   ],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Brad Wilson",
+     "title": "General Manager",
+     "email": null,
+     "phone": null,
+     "source_url": "https://snowbrains.com/bogus-basin-general-managir-honored-with-governors-lifetime-achievement-in-recreation-and-tourism-award/"
+    },
+    {
+     "role": "patrol_director",
+     "name": "Denise McLaughlin",
+     "title": "Director of Ski Patrol and Risk Management (source from 2021, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.kivitv.com/news/outdoors/bogus-basins-26-lady-patrollers-and-first-ever-woman-director-are-inspiring-others-to-pursue-their-dreams"
+    },
+    {
+     "role": "operations",
+     "name": "Jamie Zolber",
+     "title": "Director of Skier Services",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.boisestate.edu/cobe-emba/2026/01/26/mountain-leadership-how-an-executive-mba-shapes-jamie-zolbers-impact-at-bogus-basin/"
+    }
+   ],
+   "fit_notes": "Large nonprofit (600k+ visits) with a ~120-person pro and volunteer patrol, seven-night night skiing, tubing and year-round coaster; top of the size range but the patrol module alone is an easy entry point.",
+   "sources": [
+    "https://snowbrains.com/bogus-basin-general-managir-honored-with-governors-lifetime-achievement-in-recreation-and-tourism-award/",
+    "https://en.wikipedia.org/wiki/Bogus_Basin",
+    "https://www.stormskiing.com/p/podcast-95-bogus-basin-general-manager",
+    "https://visitboise.com/bogus-basin/",
+    "https://www.kivitv.com/news/outdoors/bogus-basins-26-lady-patrollers-and-first-ever-woman-director-are-inspiring-others-to-pursue-their-dreams",
+    "https://www.boisestate.edu/cobe-emba/2026/01/26/mountain-leadership-how-an-executive-mba-shapes-jamie-zolbers-impact-at-bogus-basin/"
+   ],
+   "region": "Rockies",
+   "priority": 2
+  },
+  {
+   "name": "Discovery Ski Area",
+   "state": "MT",
+   "town": "Philipsburg",
+   "website": "https://www.skidiscovery.com",
+   "phone": "406-563-2184",
+   "ownership": "family-owned (Pitcher family; Peter and Beatriz Pitcher bought it in 1984)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 2388,
+    "lifts": 8,
+    "trails": 67,
+    "skiable_acres": 2200
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": true,
+    "night_skiing": null,
+    "tubing": null,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "owner",
+     "name": "Ciche Pitcher",
+     "title": "Owner (source from 2020, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.kpax.com/news/western-montana-news/persistent-marketing-turns-footballs-biggest-sunday-into-skiing-success"
+    },
+    {
+     "role": "owner",
+     "name": "Peter Pitcher",
+     "title": "Owner/operator (undated source, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.inlandnwroutes.com/discovery-ski-area.html"
+    }
+   ],
+   "fit_notes": "Family-owned, low-price mountain (same family as Wolf Creek) with 8 lifts and expert backside terrain; a classic owner-operated area likely running lean admin systems.",
+   "sources": [
+    "https://www.inlandnwroutes.com/discovery-ski-area.html",
+    "https://en.wikipedia.org/wiki/Discovery_Ski_Area",
+    "https://www.bozemandailychronicle.com/townnews/mountaineering/this-is-montana-discovery-ski-area-gem-of-the-flint-creek-range/article_a61d40b2-e7cf-11ef-a00b-cf6d3dd35249.html",
+    "https://www.kpax.com/news/western-montana-news/persistent-marketing-turns-footballs-biggest-sunday-into-skiing-success",
+    "https://southwestmt.com/listings/885.htm",
+    "https://coloradosun.com/2025/01/16/outsider-20250116/"
+   ],
+   "region": "Rockies",
+   "priority": 2
+  },
+  {
+   "name": "Bridger Bowl",
+   "state": "MT",
+   "town": "Bozeman",
+   "website": "https://bridgerbowl.com",
+   "phone": "(406) 587-2111",
+   "ownership": "nonprofit (member-based, board of directors)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 2600,
+    "lifts": 8,
+    "trails": null,
+    "skiable_acres": 2000
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": null,
+    "night_skiing": null,
+    "tubing": null,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Hiram Towle",
+     "title": "General Manager",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.bozemandailychronicle.com/townnews/mountaineering/bridgerbowl-closure-skiing-snowpack/article_da7b1987-7563-40fe-801d-17ebf820f72b.html"
+    },
+    {
+     "role": "marketing",
+     "name": "Erin O'Connor",
+     "title": "Marketing and Communications Director",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.bozemandailychronicle.com/townnews/mountaineering/bridgerbowl-closure-skiing-snowpack/article_da7b1987-7563-40fe-801d-17ebf820f72b.html"
+    }
+   ],
+   "fit_notes": "Community nonprofit (~600 staff, ~$20M revenue) with serious avalanche terrain and an early 2026 closure that put pressure on budgets; bigger vertical than the target but only 8 lifts, and patrol is a natural wedge.",
+   "sources": [
+    "https://www.bridgerbowl.com/whoweare/nonprofit",
+    "https://www.livingstonenterprise.com/news/local/the-ski-eo-of-bridger-bowl/article_1d03c8c0-c9af-11ef-9715-5f8f919ff73f.html",
+    "https://www.bozemandailychronicle.com/townnews/mountaineering/bridgerbowl-closure-skiing-snowpack/article_da7b1987-7563-40fe-801d-17ebf820f72b.html",
+    "https://ashland.news/hiram-towle-leaving-mt-ashland-ski-area/"
+   ],
+   "region": "Rockies",
+   "priority": 2
+  },
+  {
+   "name": "Blacktail Mountain Ski Area",
+   "state": "MT",
+   "town": "Lakeside",
+   "website": "https://blacktailmountain.com",
+   "phone": "(406) 844-0999",
+   "ownership": "owned by Mission Ridge (Wenatchee, WA) since Nov 2021; 2-area owner",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 1553,
+    "lifts": 4,
+    "trails": 26,
+    "skiable_acres": null
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": null,
+    "night_skiing": null,
+    "tubing": null,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Jessi Wood",
+     "title": "General Manager",
+     "email": null,
+     "phone": null,
+     "source_url": "https://flatheadbeacon.com/2025/12/22/blacktail-mountain-to-open-christmas-eve/"
+    }
+   ],
+   "fit_notes": "Small 175-staff hill with a GM promoted from the founding family; owned by Mission Ridge (2 areas total, so still in bounds), and a sale to Mission Ridge's prospects could be bundled.",
+   "sources": [
+    "https://flatheadbeacon.com/2025/12/22/blacktail-mountain-to-open-christmas-eve/",
+    "https://nbcmontana.com/news/local/new-ownership-takes-over-at-blacktail-ski-area",
+    "https://www.coolworks.com/blacktail-mountain/profile",
+    "https://en.wikipedia.org/wiki/Blacktail_Mountain_Ski_Area"
+   ],
+   "region": "Rockies",
+   "priority": 2
+  },
+  {
+   "name": "Mt. Hood Skibowl",
+   "state": "OR",
+   "town": "Government Camp",
+   "website": "https://skibowl.com",
+   "phone": "503-272-3206",
+   "ownership": "privately owned (Kirk Hanna, owner/president of Mt. Hood Skibowl LLC)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 1500,
+    "lifts": 9,
+    "trails": 65,
+    "skiable_acres": 960
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": true,
+    "night_skiing": true,
+    "tubing": true,
+    "summer_ops": true
+   },
+   "patrol": null,
+   "current_software": [
+    {
+     "area": "payroll/HR",
+     "vendor": "Paycom"
+    }
+   ],
+   "contacts": [
+    {
+     "role": "owner",
+     "name": "Kirk Hanna",
+     "title": "Owner and President, Mt. Hood Skibowl LLC (source from 2018, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.saminfo.com/news/sam-headline-news/mike-quinn-named-vp-gm-at-mt-hood-skibowl"
+    },
+    {
+     "role": "general_manager",
+     "name": "Mike Quinn",
+     "title": "Vice President and General Manager (source from 2018, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.saminfo.com/news/sam-headline-news/mike-quinn-named-vp-gm-at-mt-hood-skibowl"
+    },
+    {
+     "role": "hr",
+     "name": null,
+     "title": "Human Resources",
+     "email": "hr@skibowl.com",
+     "phone": "503-272-3206 ext. 1106",
+     "source_url": "https://skibowl.com/about-summer/join-our-team/"
+    }
+   ],
+   "fit_notes": "Largest night-ski area in the US plus tubing, a big summer adventure park and lodging, so multi-product ticketing and staff scheduling are core needs; suspended ski operations early in 2026 for lack of snow, which may push cost scrutiny.",
+   "sources": [
+    "https://en.wikipedia.org/wiki/Mount_Hood_Skibowl",
+    "https://www.saminfo.com/news/sam-headline-news/mike-quinn-named-vp-gm-at-mt-hood-skibowl",
+    "https://skibowl.com/about-summer/join-our-team/",
+    "https://www.kptv.com/2026/01/31/mt-hood-skibowl-suspending-ski-ride-operations-after-this-weekend/"
+   ],
+   "region": "West Coast and Alaska",
+   "priority": 2
+  },
+  {
+   "name": "Sugar Bowl Resort",
+   "state": "CA",
+   "town": "Norden",
+   "website": "https://www.sugarbowl.com",
+   "phone": "(530) 426-9000",
+   "ownership": "privately held, family/shareholder-owned (Sugar Bowl Corporation; also runs Royal Gorge XC)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 1500,
+    "lifts": 13,
+    "trails": 103,
+    "skiable_acres": 1650
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": null,
+    "terrain_park": true,
+    "night_skiing": null,
+    "tubing": null,
+    "summer_ops": null
+   },
+   "patrol": "paid",
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "president",
+     "name": "Bridget Legnavsky",
+     "title": "President and CEO (source from 2022, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.sugarbowl.com/welcome-bridget-legnavsky"
+    },
+    {
+     "role": "hr",
+     "name": "Karen Plank",
+     "title": "Hiring manager (listed on patroller job posting)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://jobs.sugarbowl.com/jobs/rgxc-nordic-cross-country-ski-patroller-1023731977"
+    }
+   ],
+   "fit_notes": "One of the last independent Tahoe resorts; paid patrol on both alpine and Royal Gorge Nordic. At 13 lifts it is at the top of the size range, so pitch the standalone patrol module first.",
+   "sources": [
+    "https://www.sugarbowl.com/welcome-bridget-legnavsky",
+    "https://www.kolotv.com/2022/09/25/sugar-bowl-names-new-president-ceo/",
+    "https://en.wikipedia.org/wiki/Sugar_Bowl_Ski_Resort",
+    "https://jobs.sugarbowl.com/jobs/rgxc-nordic-cross-country-ski-patroller-1023731977"
+   ],
+   "region": "West Coast and Alaska",
+   "priority": 2
+  },
+  {
+   "name": "Sundance Mountain Resort",
+   "state": "UT",
+   "town": "Sundance",
+   "website": "https://www.sundanceresort.com",
+   "phone": "801-225-4107",
+   "ownership": "private equity (Broadreach Capital Partners and Cedar Capital Partners, bought from Robert Redford in 2020); single-resort owner",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 2150,
+    "lifts": 6,
+    "trails": 44,
+    "skiable_acres": 450
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": true,
+    "terrain_park": null,
+    "night_skiing": true,
+    "tubing": null,
+    "summer_ops": true
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Chad Linebaugh",
+     "title": "President and General Manager",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.heraldextra.com/news/local/2025/may/27/sundance-mountain-resort-to-build-new-lift-add-back-mountain-trails/"
+    },
+    {
+     "role": "operations",
+     "name": "Czar Johnson",
+     "title": "Chief Operating Officer",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.heraldextra.com/news/local/2025/may/27/sundance-mountain-resort-to-build-new-lift-add-back-mountain-trails/"
+    }
+   ],
+   "fit_notes": "Mid-expansion: new Electric Horseman Express lift, 165 new acres and a new inn in 2025-26, under owners who have stated they want to stay independent; a period of change is a good moment to replace systems.",
+   "sources": [
+    "https://www.heraldextra.com/news/local/2025/may/27/sundance-mountain-resort-to-build-new-lift-add-back-mountain-trails/",
+    "https://en.wikipedia.org/wiki/Sundance_Resort",
+    "https://www.sundanceresort.com/llms.txt",
+    "https://www.kpcw.org/post/sundance-mountain-resort-aims-upgrade-facilities-and-amenities-keep-its-independence"
+   ],
+   "region": "Rockies",
+   "priority": 2
+  },
+  {
+   "name": "Angel Fire Resort",
+   "state": "NM",
+   "town": "Angel Fire",
+   "website": "https://www.angelfireresort.com",
+   "phone": "(575) 377-6401",
+   "ownership": "privately owned (Angel Fire Resort Operations, LLC); parent company not confirmed",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 2077,
+    "lifts": 7,
+    "trails": 82,
+    "skiable_acres": 560
+   },
+   "offers": {
+    "ski_school": null,
+    "rentals": null,
+    "terrain_park": null,
+    "night_skiing": true,
+    "tubing": true,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "president",
+     "name": "John Kitts",
+     "title": "CEO, Angel Fire Resort Operations LLC (source from 2010, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.firsttracksonline.com/2010/07/08/new-ceo-for-new-mexicos-angel-fire-resort/"
+    },
+    {
+     "role": "marketing",
+     "name": "Wolfe Ashcraft",
+     "title": "Marketing Director",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.taosnews.com/magazines/angel-fire-winter/what-s-new-at-angel-fire-resort/article_e97593ad-f680-5583-8720-61703950af59.html"
+    }
+   ],
+   "fit_notes": "Independent four-season resort (tubing, night skiing on weekends, though night skiing is reported paused for 2026-27); verify ownership before outreach, since the parent company could not be confirmed.",
+   "sources": [
+    "https://discovertaos.com/angel-fire-3/",
+    "https://en.wikipedia.org/wiki/Angel_Fire_Resort",
+    "https://open.winmo.com/open/company/travel-and-hospitality-hotels-motels-and-resorts/nm/angel-fire/angel-fire-resort-operations-llc/48822",
+    "https://www.firsttracksonline.com/2010/07/08/new-ceo-for-new-mexicos-angel-fire-resort/",
+    "https://www.taosnews.com/magazines/angel-fire-winter/what-s-new-at-angel-fire-resort/article_e97593ad-f680-5583-8720-61703950af59.html",
+    "https://unofficialnetworks.com/2026/09/17/angel-fire-night-skiing-paused-2026-27/"
+   ],
+   "region": "Rockies",
+   "priority": 2
+  },
+  {
+   "name": "Mount Aurora Skiland",
+   "state": "AK",
+   "town": "Fairbanks (Cleary Summit)",
+   "website": "https://www.skilandfairbanks.com",
+   "phone": null,
+   "ownership": "nonprofit (Fairbanks Ski Coalition, 501(c)(3), since 2021)",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 1027,
+    "lifts": 2,
+    "trails": 46,
+    "skiable_acres": null
+   },
+   "offers": {
+    "ski_school": true,
+    "rentals": null,
+    "terrain_park": null,
+    "night_skiing": null,
+    "tubing": null,
+    "summer_ops": null
+   },
+   "patrol": null,
+   "current_software": [
+    {
+     "area": "tickets/tours/eGift",
+     "vendor": "FareHarbor"
+    },
+    {
+     "area": "eGift checkout",
+     "vendor": "Square"
+    }
+   ],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Devin Larson",
+     "title": "General Manager and founder of Fairbanks Ski Coalition (undated source, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://en.wikipedia.org/wiki/Skiland"
+    }
+   ],
+   "fit_notes": "Tiny nonprofit hill selling tickets through a tour-booking tool (FareHarbor) plus Square, with its own ski school and patrol; a purpose-built ski-area system would be a clear upgrade.",
+   "sources": [
+    "https://en.wikipedia.org/wiki/Skiland",
+    "https://www.skilandfairbanks.com/",
+    "https://www.alaskapublic.org/2016/10/13/ski-land-renaissance"
+   ],
+   "region": "West Coast and Alaska",
+   "priority": 2
+  },
+  {
+   "name": "Bear Paw Ski Bowl",
+   "state": "MT",
+   "town": "Havre (Rocky Boy's Reservation)",
+   "website": "https://www.bearpawskibowl.org",
+   "phone": null,
+   "ownership": "tribal-owned (Chippewa Cree Tribe), operated by nonprofit Snow Dance Ski Association",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 900,
+    "lifts": 2,
+    "trails": 24,
+    "skiable_acres": null
+   },
+   "offers": {
+    "ski_school": null,
+    "rentals": true,
+    "terrain_park": null,
+    "night_skiing": false,
+    "tubing": null,
+    "summer_ops": null
+   },
+   "patrol": "NSP volunteer",
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "president",
+     "name": "Claire Stoner",
+     "title": "President, Snow Dance Ski Association (also 30-year NSP patroller)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.onlyinyourstate.com/experiences/montana/tribal-run-ski-area-mt"
+    }
+   ],
+   "fit_notes": "Volunteer-run weekend hill with 4 paid staff, cash-only tickets and a volunteer patrol (Eagle Creek Ski Patrol); low budget, so pitch only the $149/mo patrol module.",
+   "sources": [
+    "https://www.onlyinyourstate.com/experiences/montana/tribal-run-ski-area-mt",
+    "https://en.wikipedia.org/wiki/Bear_Paw_Ski_Bowl"
+   ],
+   "region": "Rockies",
+   "priority": 2
+  },
+  {
+   "name": "Meadowlark Ski Lodge",
+   "state": "WY",
+   "town": "Ten Sleep",
+   "website": "https://www.meadowlarklodge.com",
+   "phone": null,
+   "ownership": "MAS Tierra (new venture of Miami-based MAS Alpha Securities; Jose Mas named as owner), acquired May 2026",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": 1000,
+    "lifts": 2,
+    "trails": 14,
+    "skiable_acres": 300
+   },
+   "offers": {
+    "ski_school": null,
+    "rentals": null,
+    "terrain_park": null,
+    "night_skiing": null,
+    "tubing": null,
+    "summer_ops": true
+   },
+   "patrol": null,
+   "current_software": [],
+   "contacts": [
+    {
+     "role": "owner",
+     "name": "Jose Mas",
+     "title": "Owner",
+     "email": null,
+     "phone": null,
+     "source_url": "https://cowboystatedaily.com/2026/05/15/new-owner-of-meadowlark-ski-resort-says-he-wants-to-keep-it-small/"
+    }
+   ],
+   "fit_notes": "Brand-new owners (May 2026) reopening for the 2026-27 winter after summer repairs and adding summer activities; new owners setting up operations are an ideal moment to sell a full system.",
+   "sources": [
+    "https://cowboystatedaily.com/2026/05/15/new-owner-of-meadowlark-ski-resort-says-he-wants-to-keep-it-small/",
+    "https://www.wyodaily.com/story/2026/05/14/news/new-ownership-for-meadowlark-ski-and-lake-lodge/17826.html",
+    "https://www.onthesnow.com/wyoming/meadowlark-ski-lodge/ski-resort.html",
+    "https://opensnow.com/location/meadowlark/info"
+   ],
+   "region": "Rockies",
+   "priority": 1
+  },
+  {
+   "name": "Alyeska Resort",
+   "state": "AK",
+   "town": "Girdwood",
+   "website": "https://www.alyeskaresort.com",
+   "phone": "800-880-3880",
+   "ownership": "Pomeroy Lodging (Canadian hospitality group; not a multi-ski-area operator), since Dec 2018",
+   "indy_pass": false,
+   "size": {
+    "vertical_ft": null,
+    "lifts": null,
+    "trails": 76,
+    "skiable_acres": 1610
+   },
+   "offers": {
+    "ski_school": null,
+    "rentals": null,
+    "terrain_park": null,
+    "night_skiing": null,
+    "tubing": null,
+    "summer_ops": true
+   },
+   "patrol": null,
+   "current_software": [
+    {
+     "area": "recruiting",
+     "vendor": "TalentNest"
+    }
+   ],
+   "contacts": [
+    {
+     "role": "general_manager",
+     "name": "Sacha Jurva",
+     "title": "General Manager (source from 2022, check current)",
+     "email": null,
+     "phone": null,
+     "source_url": "https://www.akbizmag.com/industry/tourism/international-hospitality-leader-sacha-jurva-joins-alyeska-resort-as-general-manager"
+    },
+    {
+     "role": "marketing",
+     "name": "Ben Napolitano",
+     "title": "Director of Marketing (media contact)",
+     "email": "bnapolitano@alyeskaresort.com",
+     "phone": null,
+     "source_url": "https://www.alyeskaresort.com/wp-content/uploads/2025/10/alyeska-resort-overview.pdf"
+    }
+   ],
+   "fit_notes": "Hotel-led destination resort owned by a lodging company rather than a ski group; bigger than the target profile, so pitch patrol and staff scheduling rather than ticketing, since a hotel PMS stack is likely already in place.",
+   "sources": [
+    "https://www.alyeskaresort.com/wp-content/uploads/2025/10/alyeska-resort-overview.pdf",
+    "https://www.akbizmag.com/industry/tourism/international-hospitality-leader-sacha-jurva-joins-alyeska-resort-as-general-manager",
+    "https://travellingforbusiness.co.uk/?p=20789",
+    "https://www.adn.com/business-economy/2018/12/13/canadian-company-set-to-close-deal-friday-on-purchase-of-girdwoods-alyeska-resort",
+    "https://alyeskaresort.talentnest.com/posting/242154"
+   ],
+   "region": "West Coast and Alaska",
+   "priority": 2
+  }
+ ]
+}

@@ -34,7 +34,7 @@ test.after(async () => { await new Promise((r) => server.close(r)); await pool.e
 
 test('the shipped research batch is well formed and was loaded by the migration', async () => {
   const file = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'db', 'data', 'prospects-2026-10.json'), 'utf8'));
-  assert.ok(file.batch && Array.isArray(file.prospects) && file.prospects.length >= 50);
+  assert.ok(file.batch && Array.isArray(file.prospects) && file.prospects.length >= 20);
   for (const p of file.prospects) {
     assert.ok(P.fromResearch(p).name, 'every ski area has a name');
     for (const c of p.contacts || []) assert.ok(!c.name || c.source_url, `${p.name}: ${c.name} needs a source`);
@@ -43,7 +43,9 @@ test('the shipped research batch is well formed and was loaded by the migration'
   assert.ok(b, 'the migration loaded the batch');
   const list = await plat('GET', '/prospects?stage=');
   assert.equal(list.status, 200);
-  assert.ok(list.body.data.length >= 50);
+  assert.ok(list.body.data.length >= 20);
+  assert.ok(!list.body.data.some((p) => p.indy_pass), 'no Indy Pass resorts');
+  for (const n of file.excluded_indy_pass || []) assert.ok(!list.body.data.some((p) => p.name === n), `${n} is not on the list`);
   assert.ok(list.body.data.some((p) => p.leader && p.leader.name), 'the list shows who runs each area');
 });
 
@@ -54,7 +56,8 @@ test('only the console sees prospects', async () => {
 
 test('add, pipeline, people and timeline', async () => {
   const name = `Test Hill ${suffix}`;
-  const made = await plat('POST', '/prospects', { name, state: 'pa', town: 'Testville', vertical_ft: 400, lifts: 3, indy_pass: true, website: '' });
+  assert.equal((await plat('POST', '/prospects', { name, state: 'PA', indy_pass: true })).status, 400, 'Indy Pass resorts stay off the list');
+  const made = await plat('POST', '/prospects', { name, state: 'pa', town: 'Testville', vertical_ft: 400, lifts: 3, indy_pass: false, website: '' });
   assert.equal(made.status, 201, JSON.stringify(made.body));
   const id = made.body.id;
   assert.equal((await plat('POST', '/prospects', { name, state: 'PA' })).status, 400, 'no duplicates');
@@ -70,7 +73,7 @@ test('add, pipeline, people and timeline', async () => {
   let one = await plat('GET', `/prospects/${id}`);
   assert.equal(one.body.stage, 'contacted');
   assert.equal(one.body.state, 'PA');
-  assert.equal(one.body.indy_pass, true);
+  assert.equal(one.body.indy_pass, false);
   assert.equal(one.body.website, null);
   assert.equal(one.body.contacts[0].role, 'general_manager', 'the GM comes first');
   const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
@@ -104,11 +107,11 @@ test('importing again fills gaps and adds new people, but keeps what an operator
   const name = `Import Hill ${suffix}`;
   const first = await plat('POST', '/prospects/import', { prospects: [{ name, state: 'VT', town: null, size: { vertical_ft: 900 }, contacts: [{ role: 'general_manager', name: 'Old GM', title: 'GM', source_url: 'https://x.test' }] }] });
   assert.equal(first.status, 200, JSON.stringify(first.body));
-  assert.deepEqual(first.body, { added: 1, updated: 0, contacts: 1 });
+  assert.deepEqual(first.body, { added: 1, updated: 0, contacts: 1, skipped: 0 });
   const id = (await plat('GET', `/prospects?q=${encodeURIComponent(name)}&stage=`)).body.data[0].id;
   await plat('PATCH', `/prospects/${id}`, { vertical_ft: 950, stage: 'talking' });
-  const again = await plat('POST', '/prospects/import', [{ name, state: 'VT', town: 'Newtown', size: { vertical_ft: 100 }, contacts: [{ role: 'general_manager', name: 'Old GM' }, { role: 'marketing', name: 'Mia Marketing' }] }]);
-  assert.deepEqual(again.body, { added: 0, updated: 1, contacts: 1 });
+  const again = await plat('POST', '/prospects/import', [{ name, state: 'VT', town: 'Newtown', size: { vertical_ft: 100 }, contacts: [{ role: 'general_manager', name: 'Old GM' }, { role: 'marketing', name: 'Mia Marketing' }] }, { name: `Indy Hill ${suffix}`, state: 'VT', indy_pass: true }]);
+  assert.deepEqual(again.body, { added: 0, updated: 1, contacts: 1, skipped: 1 });
   const one = (await plat('GET', `/prospects/${id}`)).body;
   assert.equal(one.vertical_ft, 950, 'an operator\'s change stays');
   assert.equal(one.town, 'Newtown', 'an empty fact is filled');
