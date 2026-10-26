@@ -15,6 +15,7 @@ const { span } = require('../lib/workforce');
 const { toCsv } = require('../lib/csv');
 const SH = require('../lib/shifts');
 const PA = require('../lib/patrolaccess');
+const CREWS = require('../lib/patrolcrews');
 
 const router = express.Router();
 const patrol = requireRole('patrol', 'manager');
@@ -39,11 +40,14 @@ const describe = (s) => `patrol ${span(s.starts_at, s.ends_at)}${s.station ? ` a
  * another patrol shift, a work shift (a paid patroller) or a lesson at the same time. There is no availability check:
  * patrol keeps its own sign-up habits.
  */
-async function problemsFor(db, t, staffId, startsAt, endsAt, ignoreId = 0) {
+async function problemsFor(db, t, staffId, startsAt, endsAt, ignoreId = 0, need = null) {
   const out = [];
-  const m = await one(db, 'SELECT s.status FROM patrol_members m JOIN staff s ON s.tenant_id = m.tenant_id AND s.id = m.staff_id WHERE m.tenant_id = ? AND m.staff_id = ?', [t, staffId]);
+  const m = await one(db, 'SELECT s.status, m.level, m.cert_level FROM patrol_members m JOIN staff s ON s.tenant_id = m.tenant_id AND s.id = m.staff_id WHERE m.tenant_id = ? AND m.staff_id = ?', [t, staffId]);
   if (!m) return ['Not on the patrol roster'];
   if (m.status !== 'active') out.push(`Their record is ${m.status}, not active`);
+  // A crew's role spot needs a rank or a certification (see lib/patrolcrews).
+  const spot = need || (ignoreId ? await one(db, 'SELECT role_label, need_rank, need_cert FROM patrol_shifts WHERE tenant_id = ? AND id = ?', [t, ignoreId]) : null);
+  if (spot) out.push(...CREWS.fitProblems(m, spot));
   const p = await one(db, "SELECT starts_at, ends_at FROM patrol_shifts WHERE tenant_id = ? AND staff_id = ? AND status <> 'cancelled' AND id <> ? AND starts_at < ? AND ends_at > ? LIMIT 1", [t, staffId, ignoreId, endsAt, startsAt]);
   if (p) out.push(`Already on patrol ${span(p.starts_at, p.ends_at)}`);
   const w = await one(db, "SELECT s.starts_at, s.ends_at, pos.name AS position FROM shifts s JOIN positions pos ON pos.tenant_id = s.tenant_id AND pos.id = s.position_id WHERE s.tenant_id = ? AND s.staff_id = ? AND s.status <> 'cancelled' AND s.starts_at < ? AND s.ends_at > ? LIMIT 1", [t, staffId, endsAt, startsAt]);
@@ -82,7 +86,8 @@ router.get('/schedule', patrol, async (req, res) => {
       WHERE m.tenant_id = ? ORDER BY FIELD(m.level, 'director', 'leader', 'senior', 'patroller', 'candidate'), p.last_name, p.first_name`, [t]),
     rows(pool, 'SELECT id, name FROM patrol_stations WHERE tenant_id = ? ORDER BY name', [t]),
   ]);
-  res.json({ can_edit: canEdit, me: req.auth.staffId || null, shifts, roster: roster.map((r) => ({ ...r, in_workforce: Boolean(r.in_workforce) })), stations });
+  const extra = await require('./patrolcrews').weekExtras(pool, t, from, to, shifts, canEdit);
+  res.json({ can_edit: canEdit, me: req.auth.staffId || null, shifts, roster: roster.map((r) => ({ ...r, in_workforce: Boolean(r.in_workforce) })), stations, ...extra });
 });
 
 /** Who on the roster could take a shift at this time, best first (free, fewest patrol hours that week), with reasons. */
@@ -204,11 +209,12 @@ router.post('/schedule/copy', patrol, editor, validate(z.object({ from: dateStr,
       const starts = SH.plusMinutes(s.starts_at, days * 1440); const ends = SH.plusMinutes(s.ends_at, days * 1440);
       let staffId = s.staff_id ? Number(s.staff_id) : null;
       if (await one(conn, "SELECT id FROM patrol_shifts WHERE tenant_id = ? AND starts_at = ? AND ends_at = ? AND status <> 'cancelled' AND (staff_id <=> ?) AND (station_id <=> ?) LIMIT 1", [t, starts, ends, staffId, s.station_id])) { skipped += 1; continue; }
+      if (s.extra) { skipped += 1; continue; } // a storm call's extra spots were for that day only
       if (staffId) {
-        const problems = await problemsFor(conn, t, staffId, starts, ends);
+        const problems = await problemsFor(conn, t, staffId, starts, ends, 0, s);
         if (problems.length) { leftOpen.push({ staff_id: staffId, starts_at: starts, reason: problems[0] }); staffId = null; }
       }
-      await conn.query('INSERT INTO patrol_shifts (tenant_id, staff_id, starts_at, ends_at, station_id, role_label, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [t, staffId, starts, ends, s.station_id, s.role_label, s.notes, req.auth.userId]);
+      await conn.query('INSERT INTO patrol_shifts (tenant_id, staff_id, starts_at, ends_at, station_id, role_label, notes, crew_id, need_rank, need_cert, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [t, staffId, starts, ends, s.station_id, s.role_label, s.notes, s.crew_id || null, s.need_rank || null, s.need_cert || null, req.auth.userId]);
       created += 1; if (!staffId) unfilled += 1;
     }
     await audit(conn, req, 'copy_week', 'patrol_shifts', null, { from, to, created, unfilled, skipped });

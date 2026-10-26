@@ -4,6 +4,7 @@
 import { get, post, patch, del, download } from '../api.js';
 import { h, clear, input, select, field, button, toast, formDialog, confirmDialog, dialog, table, label, empty, errorBox, todayStr, addDays, weekStart } from '../ui.js';
 import { spanShort, span, minutes, hrs, dayShort, dayLong, monthDay, weekLabel, weekDays } from './workforce-common.js';
+import { coverChip, callDialog, signupsDialog } from './patrol-crews.js';
 
 export async function drawSchedule(box) {
   const today = todayStr();
@@ -37,7 +38,9 @@ export async function drawSchedule(box) {
         edit ? button('Add shift', () => add(days.includes(today) ? today : start, null), { kind: 'primary' }) : null,
         edit ? button('Copy last week', () => copyWeek(start, load)) : null,
         button('Days patrolled', () => daysDialog()),
-        edit && drafts ? button(`Publish ${drafts} draft${drafts === 1 ? '' : 's'}`, () => publish(start, drafts, load), { kind: 'primary' }) : null)),
+        edit && w.signups && w.signups.length ? button(`Sign-ups waiting (${w.signups.length})`, () => signupsDialog(w.signups, load), { kind: 'primary' }) : null,
+        edit && drafts ? button(`Publish ${drafts} draft${drafts === 1 ? '' : 's'}`, () => publish(start, drafts, load), { kind: 'primary' }) : null,
+        edit && (w.crews || []).length ? button('Publish more', () => publishMore(start, w.crews, load)) : null)),
     h('p', { class: 'muted' }, edit
       ? `${w.shifts.length} patrol shift${w.shifts.length === 1 ? '' : 's'}${open.length ? `, ${open.length} open` : ''}${drafts ? `, ${drafts} not published yet` : ''}. This schedule is kept in Patrol; Staff and schedule shows it but cannot change it.`
       : 'The published patrol schedule. Your shifts are marked.'));
@@ -47,18 +50,28 @@ export async function drawSchedule(box) {
 
     const block = (s, withName) => h('button', {
       type: 'button', class: `shift-block${s.status === 'draft' ? ' is-draft' : ''}${s.staff_id ? '' : ' is-open'}${w.me && s.staff_id && Number(s.staff_id) === Number(w.me) ? ' is-mine' : ''}`, 'data-dept': 'patrol', disabled: !edit,
-      'aria-label': `Patrol, ${dayLong(s.starts_at.slice(0, 10))}, ${span(s.starts_at, s.ends_at)}, ${s.staff_id ? s.name : 'open'}${s.station ? `, ${s.station}` : ''}${s.status === 'draft' ? ', draft' : ''}${s.cover_status ? ', needs cover' : ''}`,
+      'aria-label': `Patrol, ${dayLong(s.starts_at.slice(0, 10))}, ${span(s.starts_at, s.ends_at)}, ${s.staff_id ? s.name : 'open'}${s.station ? `, ${s.station}` : ''}${s.status === 'draft' ? ', draft' : ''}${s.cover_status ? ', needs cover' : ''}${s.no_show ? ', not signed in' : ''}`,
       onclick: () => change(s),
     }, h('b', null, spanShort(s.starts_at, s.ends_at)), h('span', null, withName ? (s.staff_id ? s.name : 'Open') : [s.station, s.role_label].filter(Boolean).join(', ') || 'Patrol'),
     withName && (s.station || s.role_label) ? h('span', { class: 'sb-sub' }, [s.station, s.role_label].filter(Boolean).join(', ')) : null,
     s.status === 'draft' || s.notes ? h('span', { class: 'sb-sub' }, [s.status === 'draft' ? 'Draft' : null, s.notes].filter(Boolean).join('. ')) : null,
-    s.cover_status ? h('span', { class: 'sb-cover' }, s.cover_status === 'pending' ? 'Cover offered' : 'Needs cover') : null);
+    s.cover_status ? h('span', { class: 'sb-cover' }, s.cover_status === 'pending' ? 'Cover offered' : 'Needs cover') : null,
+    s.no_show ? h('span', { class: 'sb-noshow' }, 'Not signed in') : null,
+    Number(s.extra) && !s.staff_id ? h('span', { class: 'sb-sub' }, 'Extra spot') : null);
     const cellAdd = (d, m) => (edit ? h('button', { type: 'button', class: 'cell-add', 'aria-label': `Add a patrol shift${m ? ` for ${m.name}` : ''} on ${dayLong(d)}`, onclick: () => add(d, m ? m.staff_id : null) }, '+') : null);
 
     const grid = h('div', { class: 'sched-grid', role: 'table', 'aria-label': `Patrol schedule for ${weekLabel(start)}` });
     grid.append(h('div', { class: 'sg-row sg-headrow', role: 'row' }, h('div', { class: 'sg-name', role: 'columnheader' }, 'Patroller'),
       ...days.map((d) => { const n = w.shifts.filter((s) => s.starts_at.startsWith(d)); const o = n.filter((s) => !s.staff_id).length; return h('div', { class: `sg-day${d === today ? ' is-today' : ''}`, role: 'columnheader' }, h('b', null, `${dayShort(d)} ${Number(d.slice(8))}`), h('small', null, n.length ? `${n.length - o} on patrol${o ? `, ${o} open` : ''}` : 'None')); }),
       h('div', { class: 'sg-hours', role: 'columnheader' }, 'Hours')));
+    // Each crew's coverage by day: filled against needed, short days in colour; select one to call for extra patrollers.
+    const cov = w.coverage || [];
+    const covOn = (d) => cov.filter((c) => c.date === d && (edit || c.generated));
+    const covClick = (c) => (edit && c.generated && c.date >= today ? () => callDialog(c, load) : null);
+    if (cov.length) {
+      grid.append(h('div', { class: 'sg-row sg-crews', role: 'row' }, h('div', { class: 'sg-name', role: 'rowheader' }, h('b', null, 'Crews'), h('small', null, 'Filled of needed')),
+        ...days.map((d) => h('div', { class: 'sg-cell', role: 'cell' }, covOn(d).map((c) => coverChip(c, covClick(c))))), h('div', { class: 'sg-hours', role: 'cell' })));
+    }
     if (open.length || edit) {
       grid.append(h('div', { class: 'sg-row sg-open', role: 'row' }, h('div', { class: 'sg-name', role: 'rowheader' }, h('b', null, 'Open'), h('small', null, open.length ? `${open.length} to fill` : 'None')),
         ...days.map((d) => h('div', { class: 'sg-cell', role: 'cell' }, open.filter((s) => s.starts_at.startsWith(d)).map((s) => block(s, false)), cellAdd(d, null))), h('div', { class: 'sg-hours', role: 'cell' })));
@@ -81,13 +94,14 @@ export async function drawSchedule(box) {
       return h('button', { type: 'button', role: 'tab', 'aria-selected': String(d === phoneDay), class: d === today ? 'is-today' : null, onclick: () => { phoneDay = d; draw(w); } },
         h('span', null, dayShort(d)), h('b', null, String(Number(d.slice(8)))), h('small', { class: n.some((s) => !s.staff_id) ? 'has-open' : null }, n.length ? String(n.length) : ''));
     })), h('h3', { class: 'day-title' }, dayLong(phoneDay)));
+    if (covOn(phoneDay).length) phone.append(h('div', { class: 'crew-chips' }, covOn(phoneDay).map((c) => coverChip(c, covClick(c)))));
     if (!dayShifts.length) phone.append(empty('No patrol shifts this day.', edit ? button('Add shift', () => add(phoneDay, null), { kind: 'primary' }) : null));
     else {
       phone.append(h('div', { class: 'day-list' }, dayShifts.map((s) => block(s, true))));
       if (edit) phone.append(h('div', { class: 'row' }, button('Add shift', () => add(phoneDay, null), { small: true })));
     }
     clear(body).append(h('div', { class: 'sched-wide' }, grid), phone,
-      h('p', { class: 'muted small sched-key' }, edit ? 'A dashed outline is a draft that patrollers cannot see yet. Volunteers and paid patrollers are both scheduled here.' : 'Shifts with a thick outline are yours.'));
+      h('p', { class: 'muted small sched-key' }, edit ? 'A dashed outline is a draft that patrollers cannot see yet. Volunteers and paid patrollers are both scheduled here. Crews and their spots are set up on the Crews tab.' : 'Shifts with a thick outline are yours.'));
   }
   await load();
 }
@@ -160,6 +174,21 @@ function publish(start, n, onDone) {
     toast(`${r.published} published${r.notified ? `, ${r.notified} told` : ''}`);
     await onDone();
   });
+}
+
+/** Publish a month or the rest of the season at once (the crews' days are usually made for the whole season). */
+function publishMore(start, crews, onDone) {
+  const ends = crews.map((c) => c.to_date).filter(Boolean).sort();
+  const seasonEnd = ends.length ? ends[ends.length - 1] : addDays(start, 120);
+  const monthEnd = (() => { const d = new Date(`${start}T12:00:00Z`); return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0, 12)).toISOString().slice(0, 10); })();
+  const pick = select([['week', `This week (${weekLabel(start)})`], ['month', `To the end of the month (${monthDay(monthEnd)})`], ['season', `To the end of the season (${monthDay(seasonEnd)})`]], 'month');
+  formDialog('Publish drafts', h('div', { class: 'stack' }, field('Publish', pick),
+    h('p', { class: 'muted small' }, 'Patrollers see the published days on the Schedule and can sign up for open spots. Each patroller on a spot gets one Inbox message listing theirs.')), async () => {
+    const to = pick.value === 'week' ? addDays(start, 6) : pick.value === 'month' ? monthEnd : seasonEnd;
+    const r = await post('/patrol/schedule/publish', { from: start, to });
+    toast(`${r.published} published${r.notified ? `, ${r.notified} told` : ''}`);
+    await onDone();
+  }, { submitText: 'Publish' });
 }
 
 /** Days and hours patrolled this season, per person, with a download (volunteer credit, the season report). */

@@ -1,6 +1,58 @@
 {
   "releases": [
     {
+      "version": "2026.10.49",
+      "date": "2026-11-08",
+      "title": "Patrol crews your patrollers sign up for",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-crews",
+          "text": "Crews: under Patrol, People, Crews, set up the shifts your patrol runs again and again, such as a weekend day crew from 8:00 to 4:30 at the summit hut. Give each the days, the season, the days it does not run, how many patrollers it needs, the fewest it can run with, and the roles it must have (a hill captain at least a Leader, an EMT or higher)."
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-crews",
+          "text": "Make the days: one button makes a crew's spots for the whole season as drafts, with its standing members put on first, each in their role. Publish a week, a month or the rest of the season at once from the Schedule."
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-crews",
+          "text": "Patrollers sign up for open spots under Shift cover. A role spot can only be taken by someone with the rank or certification it needs. The patrol director chooses whether sign-ups go straight on or wait for a schedule builder to approve them (Patrol settings)."
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-crews",
+          "text": "The Schedule and the Crews page show each crew day as filled of needed: green when full, amber when short, red when below the fewest it can run with or missing a role. Select a day to call for extra patrollers on a storm day: the extra spots are published at once and everyone free that day is messaged."
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-crews",
+          "text": "On Thursday, the schedule builders get a message when a weekend crew is short, and open spots are posted to the shift cover conversation. On duty and the Schedule mark anyone not signed in 15 minutes after their shift starts."
+        }
+      ]
+    },
+    {
       "version": "2026.10.48",
       "date": "2026-11-01",
       "title": "Patrol reports your patrol director sets the rules for",

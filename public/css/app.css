@@ -2563,3 +2563,40 @@ button.pdate { cursor: pointer; min-height: 36px; min-width: 56px; }
 .record-gaps h3 { font-size: 1rem; margin: 2px 0 4px; }
 .record-gaps ul { margin: 0; padding-left: 20px; }
 @media print { .record-gaps { break-inside: avoid; } }
+
+/* Patrol crews: coverage chips (filled of needed), the crew cards, the coming weeks, and sign-ups waiting */
+.crew-chip { display: inline-flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font: inherit; font-size: .75rem; line-height: 1.3; padding: 2px 8px; margin: 0 4px 4px 0; border-radius: 6px; border: 1px solid var(--line, #c9d3d8); background: var(--surface, #fff); color: inherit; text-align: left; }
+button.crew-chip { cursor: pointer; }
+button.crew-chip:hover { border-color: currentColor; }
+.crew-chip b { font-weight: 600; }
+.crew-chip span { font-variant-numeric: tabular-nums; }
+.crew-chip .cc-miss { flex-basis: 100%; font-weight: 600; }
+.crew-chip[data-tone='good'] { background: var(--ok-tint); border-color: #8cc5a4; color: var(--open, #17603a); }
+.crew-chip[data-tone='short'] { background: var(--hold-tint); border-color: #d9a441; color: var(--hold); }
+.crew-chip[data-tone='critical'] { background: var(--alert-tint); border-color: #e0908a; color: var(--alert); }
+.crew-chip[data-tone='none'] { border-style: dashed; color: var(--muted, #5b6b73); }
+.crew-chips { margin: 4px 0 10px; }
+.sg-crews .sg-cell { align-content: start; }
+.shift-block .sb-noshow { justify-self: start; font-size: .6875rem; font-weight: 600; color: var(--alert); background: var(--alert-tint); border-radius: 999px; padding: 0 6px; }
+.crew-list { display: grid; gap: 12px; margin: 12px 0 24px; }
+.crew-card { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 14px 16px; border: 1px solid var(--line, #c9d3d8); border-radius: var(--radius); background: var(--surface, #fff); }
+.crew-main h3 { margin: 0 0 4px; }
+.crew-main p { margin: 2px 0; }
+.crew-actions { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+.crew-days { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 4px; }
+.crew-days li { display: grid; grid-template-columns: 110px 1fr auto; gap: 10px; align-items: start; padding: 6px 8px; border-bottom: 1px solid var(--line, #e3e8eb); }
+.crew-days li.is-today { background: var(--ok-tint); }
+.cd-date { font-variant-numeric: tabular-nums; padding-top: 2px; }
+.day-picks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.role-rows { display: grid; gap: 8px; margin-bottom: 8px; }
+.role-row { display: grid; grid-template-columns: 2fr 80px 1.3fr 1.3fr auto; gap: 8px; align-items: end; }
+.member-list { display: grid; gap: 6px; max-height: 50vh; overflow: auto; }
+.member-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.signup-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.signup-row { display: flex; justify-content: space-between; gap: 12px; align-items: start; padding-bottom: 10px; border-bottom: 1px solid var(--line, #e3e8eb); }
+@media (max-width: 640px) {
+  .crew-card { grid-template-columns: 1fr; }
+  .crew-actions { flex-direction: row; flex-wrap: wrap; }
+  .crew-days li { grid-template-columns: 1fr; gap: 4px; }
+  .role-row { grid-template-columns: 1fr 1fr; }
+}

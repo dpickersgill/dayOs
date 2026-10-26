@@ -789,6 +789,59 @@ const reportRuleSteps = [
   ['incident_patients.na', (c) => columnExists(c, 'incident_patients', 'na'), 'ALTER TABLE incident_patients ADD COLUMN na TEXT NULL'],
 ];
 
+// Patrol crews: a repeating shift (Saturday day crew) with how many it needs, the least it can run with, and the roles it
+// must have. Generating a season makes one open spot per person needed; patrollers sign up for the spots (with approval
+// when the patrol wants it), and standing members are put on their crew's days first.
+const crewSteps = [
+  ['patrol_crews', (c) => tableExists(c, 'patrol_crews'), `CREATE TABLE patrol_crews (
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id   BIGINT UNSIGNED NOT NULL,
+    name        VARCHAR(80) NOT NULL,
+    days        VARCHAR(20) NOT NULL,
+    start_time  TIME NOT NULL,
+    end_time    TIME NOT NULL,
+    station_id  BIGINT UNSIGNED NULL,
+    target      SMALLINT UNSIGNED NOT NULL,
+    minimum     SMALLINT UNSIGNED NOT NULL,
+    roles       TEXT NULL,
+    from_date   DATE NULL,
+    to_date     DATE NULL,
+    skip_dates  TEXT NULL,
+    active      TINYINT(1) NOT NULL DEFAULT 1,
+    created_by  BIGINT UNSIGNED NULL,
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY ix_crews_tenant (tenant_id, active),
+    CONSTRAINT fk_crews_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  ) ENGINE=InnoDB`],
+  ['patrol_crew_members', (c) => tableExists(c, 'patrol_crew_members'), `CREATE TABLE patrol_crew_members (
+    tenant_id  BIGINT UNSIGNED NOT NULL,
+    crew_id    BIGINT UNSIGNED NOT NULL,
+    staff_id   BIGINT UNSIGNED NOT NULL,
+    role_label VARCHAR(60) NULL,
+    PRIMARY KEY (tenant_id, crew_id, staff_id),
+    CONSTRAINT fk_pcm_crew FOREIGN KEY (crew_id) REFERENCES patrol_crews(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`],
+  // Each spot knows its crew, and what a role spot needs (a rank or a medical certification at least).
+  ['patrol_shifts.crew_id', (c) => columnExists(c, 'patrol_shifts', 'crew_id'),
+    'ALTER TABLE patrol_shifts ADD COLUMN crew_id BIGINT UNSIGNED NULL, ADD COLUMN need_rank VARCHAR(12) NULL, ADD COLUMN need_cert VARCHAR(12) NULL, ADD COLUMN extra TINYINT(1) NOT NULL DEFAULT 0, ADD KEY ix_ps_crew (tenant_id, crew_id, starts_at)'],
+  ['patrol_signups', (c) => tableExists(c, 'patrol_signups'), `CREATE TABLE patrol_signups (
+    id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id       BIGINT UNSIGNED NOT NULL,
+    patrol_shift_id BIGINT UNSIGNED NOT NULL,
+    staff_id        BIGINT UNSIGNED NOT NULL,
+    status          ENUM('pending','approved','declined','withdrawn') NOT NULL DEFAULT 'pending',
+    decided_by      BIGINT UNSIGNED NULL,
+    decided_at      DATETIME NULL,
+    note            VARCHAR(200) NULL,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY ix_signups_shift (tenant_id, patrol_shift_id, status),
+    KEY ix_signups_status (tenant_id, status)
+  ) ENGINE=InnoDB`],
+  ['patrol_settings.signup_approval', (c) => columnExists(c, 'patrol_settings', 'signup_approval'),
+    'ALTER TABLE patrol_settings ADD COLUMN signup_approval TINYINT(1) NOT NULL DEFAULT 0, ADD COLUMN short_alert TINYINT(1) NOT NULL DEFAULT 1, ADD COLUMN short_alert_last DATE NULL'],
+];
+
 const skiAreaSteps = [
   ['ski_area_cache', (c) => tableExists(c, 'ski_area_cache'), `CREATE TABLE ski_area_cache (
     ref        VARCHAR(40) NOT NULL PRIMARY KEY,
@@ -1046,7 +1099,7 @@ async function main() {
   await seedPatrolPlan(conn);
   await seedAssistantAddon(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps, ...crewSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

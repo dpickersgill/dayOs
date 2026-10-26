@@ -13,6 +13,7 @@ const { notFound, bad, conflict, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const PA = require('../lib/patrolaccess');
 const OPS = require('../lib/patrolops');
+const CREWS = require('../lib/patrolcrews');
 const SH = require('../lib/shifts');
 const PUSH = require('../lib/push');
 const crypto = require('crypto');
@@ -33,7 +34,7 @@ const nul = (s) => s.nullable().optional();
 // Each setting is changed by those who run that part of patrol.
 const GROUPS = {
   manage_settings: { medical_director: nul(z.string().trim().max(150)), protocol_version: nul(z.string().trim().max(60)), avalanche: z.boolean().optional(), sms_critical: z.boolean().optional(), story_fill: z.boolean().optional() },
-  manage_schedule: { min_days: nul(z.number().int().min(0).max(200)), min_days_candidate: nul(z.number().int().min(0).max(200)), self_signup: z.boolean().optional(), remind_dates: z.string().regex(/^(\d{2}-\d{2})(,\d{2}-\d{2}){0,5}$/, 'Dates as MM-DD, separated by commas').optional() },
+  manage_schedule: { min_days: nul(z.number().int().min(0).max(200)), min_days_candidate: nul(z.number().int().min(0).max(200)), self_signup: z.boolean().optional(), signup_approval: z.boolean().optional(), short_alert: z.boolean().optional(), remind_dates: z.string().regex(/^(\d{2}-\d{2})(,\d{2}-\d{2}){0,5}$/, 'Dates as MM-DD, separated by commas').optional() },
   manage_meds: { controlled_counts: z.boolean().optional(), o2_refill_psi: z.number().int().min(0).max(3000).optional() },
   run_sweep: { sweep_late_minutes: z.number().int().min(5).max(240).optional() },
 };
@@ -95,7 +96,7 @@ router.get('/duty', patrol, async (req, res) => {
     date, today, now, stations,
     on_duty: open.map((e) => ({ ...e, staff_id: Number(e.staff_id) })),
     signed_out: entries.filter((e) => e.signed_out_at).map((e) => ({ ...e, staff_id: Number(e.staff_id) })),
-    scheduled_not_in: date === today ? scheduled.filter((s) => !onIds.has(Number(s.staff_id)) && !entries.some((e) => Number(e.staff_id) === Number(s.staff_id))).map((s) => ({ ...s, name: (roster.find((r) => Number(r.staff_id) === Number(s.staff_id)) || {}).name })) : [],
+    scheduled_not_in: date === today ? scheduled.filter((s) => !onIds.has(Number(s.staff_id)) && !entries.some((e) => Number(e.staff_id) === Number(s.staff_id))).map((s) => ({ ...s, name: (roster.find((r) => Number(r.staff_id) === Number(s.staff_id)) || {}).name, late: CREWS.isNoShow({ ...s, status: 'published' }, now, false) })) : [],
     roster: roster.map((r) => ({ ...r, staff_id: Number(r.staff_id), on_duty: onIds.has(Number(r.staff_id)), paid: Boolean(Number(r.in_workforce)) })),
     me: me ? { staff_id: me, on_duty: onIds.has(me), entry: open.find((e) => Number(e.staff_id) === me) || null, on_roster: roster.some((r) => Number(r.staff_id) === me) } : null,
     can_sign_others: await PA.can(pool, req, 'assign_posts'),

@@ -133,16 +133,19 @@ router.get('/cover', patrol, async (req, res) => {
   const ops = await OPS.settingsOf(pool, t);
   let openShifts = [];
   if (ops.self_signup) {
-    const list = await rows(pool, `SELECT ps.id, ps.starts_at, ps.ends_at, ps.role_label, ps.notes, st.name AS station FROM patrol_shifts ps LEFT JOIN patrol_stations st ON st.tenant_id = ps.tenant_id AND st.id = ps.station_id
+    const list = await rows(pool, `SELECT ps.id, ps.starts_at, ps.ends_at, ps.role_label, ps.notes, ps.extra, st.name AS station, cr.name AS crew FROM patrol_shifts ps LEFT JOIN patrol_stations st ON st.tenant_id = ps.tenant_id AND st.id = ps.station_id
+      LEFT JOIN patrol_crews cr ON cr.tenant_id = ps.tenant_id AND cr.id = ps.crew_id
       WHERE ps.tenant_id = ? AND ps.status = 'published' AND ps.staff_id IS NULL AND ps.starts_at > ? ORDER BY ps.starts_at LIMIT 60`, [t, now]);
     // Each open shift's checks are separate reads; six at a time keeps the page quick with many open shifts.
+    const asked = new Map(me ? (await rows(pool, "SELECT id, patrol_shift_id FROM patrol_signups WHERE tenant_id = ? AND staff_id = ? AND status = 'pending'", [t, me])).map((x) => [Number(x.patrol_shift_id), Number(x.id)]) : []);
     openShifts = await mapLimit(list, 6, async (s) => {
+      if (asked.has(Number(s.id))) return { ...s, id: Number(s.id), problems: [], can_take: false, asked: true, signup_id: asked.get(Number(s.id)) };
       const problems = !onRoster ? ['You are not an active member of the patrol roster'] : await problemsFor(pool, t, me, s.starts_at, s.ends_at, Number(s.id));
       return { ...s, id: Number(s.id), problems, can_take: Boolean(onRoster) && !problems.length };
     });
   }
   res.json({
-    me, on_roster: Boolean(onRoster), can_manage: canManage, needs_approval: settings.needs_approval, self_signup: ops.self_signup, open_shifts: openShifts,
+    me, on_roster: Boolean(onRoster), can_manage: canManage, needs_approval: settings.needs_approval, self_signup: ops.self_signup, signup_approval: ops.signup_approval, open_shifts: openShifts,
     open, pending, history: history.map((x) => shape(x, now)),
     my_shifts: myShifts.map((s) => ({ ...s, id: Number(s.id), request_id: s.request_id ? Number(s.request_id) : null })),
   });
@@ -275,7 +278,8 @@ router.post('/cover/open/:shiftId/take', patrol, async (req, res) => {
   const t = req.auth.tenantId;
   const me = req.auth.staffId ? Number(req.auth.staffId) : null;
   if (!me) throw forbidden('Your login is not linked to anyone on the patrol roster');
-  if (!(await OPS.settingsOf(pool, t)).self_signup) throw forbidden('Patrollers do not sign up for open shifts here. Ask whoever builds the schedule.');
+  const ops = await OPS.settingsOf(pool, t);
+  if (!ops.self_signup) throw forbidden('Patrollers do not sign up for open shifts here. Ask whoever builds the schedule.');
   const out = await tx(async (conn) => {
     const s = await one(conn, 'SELECT ps.*, st.name AS station FROM patrol_shifts ps LEFT JOIN patrol_stations st ON st.tenant_id = ps.tenant_id AND st.id = ps.station_id WHERE ps.tenant_id = ? AND ps.id = ? FOR UPDATE', [t, paramId(req, 'shiftId')]);
     if (!s) throw notFound('Patrol shift');
@@ -284,11 +288,21 @@ router.post('/cover/open/:shiftId/take', patrol, async (req, res) => {
     if (String(s.starts_at) <= nowIn(await tzOf(conn, t))) throw conflict('This shift has already started');
     const problems = await problemsFor(conn, t, me, s.starts_at, s.ends_at, Number(s.id));
     if (problems.length) throw conflict('You cannot take this shift', problems);
+    // With sign-up approval on, the spot stays open until a schedule builder approves (Patrol, Team, Schedule).
+    if (ops.signup_approval) {
+      if (await one(conn, "SELECT id FROM patrol_signups WHERE tenant_id = ? AND patrol_shift_id = ? AND staff_id = ? AND status = 'pending'", [t, s.id, me])) throw conflict('You have already asked for this shift');
+      const [r] = await conn.query("INSERT INTO patrol_signups (tenant_id, patrol_shift_id, staff_id, status) VALUES (?, ?, ?, 'pending')", [t, s.id, me]);
+      await audit(conn, req, 'signup_request', 'patrol_shifts', s.id);
+      const who = await one(conn, `SELECT ${NAME} AS name FROM staff s JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE s.tenant_id = ? AND s.id = ?`, [t, me]);
+      await tellUsers(conn, t, req.auth.userId, (await schedulers(conn, t)).filter((u) => u !== Number(req.auth.userId)), `${who.name} asked for the open patrol shift ${when(s)}. Approve or decline it on Patrol, Team, Schedule.`);
+      return { ok: true, status: 'pending', signup_id: r.insertId };
+    }
     await conn.query('UPDATE patrol_shifts SET staff_id = ? WHERE tenant_id = ? AND id = ?', [me, t, s.id]);
+    await conn.query("INSERT INTO patrol_signups (tenant_id, patrol_shift_id, staff_id, status, decided_at) VALUES (?, ?, ?, 'approved', UTC_TIMESTAMP())", [t, s.id, me]);
     await audit(conn, req, 'self_signup', 'patrol_shifts', s.id);
     const who = await one(conn, `SELECT ${NAME} AS name FROM staff s JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE s.tenant_id = ? AND s.id = ?`, [t, me]);
     await announce(conn, t, req.auth.userId, `Open shift taken: ${when(s)}. ${who.name} is on it.`);
-    return { ok: true };
+    return { ok: true, status: 'approved' };
   });
   res.json(out);
 });
@@ -327,4 +341,4 @@ async function afterShiftChange(conn, req, before, after) {
   }
 }
 
-module.exports = { router, afterShiftChange, syncThread, THREAD_NAME };
+module.exports = { router, afterShiftChange, syncThread, THREAD_NAME, announce, schedulers, tellUsers };

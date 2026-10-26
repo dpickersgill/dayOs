@@ -21,6 +21,7 @@ import { drawNetwork } from './patrol-network.js';
 import { drawReview } from './patrol-review.js';
 import { drawSchedule } from './patrol-schedule.js';
 import { drawCover } from './patrol-cover.js';
+import { drawCrews } from './patrol-crews.js';
 import { drawDuty, renderRoom } from './patrol-duty.js';
 import { drawSweep, drawOpening } from './patrol-sweep.js';
 import { drawMeds } from './patrol-meds.js';
@@ -92,6 +93,7 @@ export async function render(root, params = []) {
     ...only('followups', ['followup', 'Follow-up', drawFollowup]),
     ['map', 'Map', (b) => drawMapTab(b, opts)],
     ['schedule', 'Schedule', drawSchedule],
+    ['crews', 'Crews', drawCrews],
     ['cover', 'Shift cover', drawCover],
     ['posts', 'Today\'s posts', (b) => drawPosts(b, opts)],
     ['team', 'Roster', (b) => drawTeam(b, opts)],
@@ -114,7 +116,7 @@ export async function render(root, params = []) {
   const SECTIONS = [
     ['now', 'Now', ['home', 'duty', 'dispatch', 'map', 'opening', 'sweep', 'avalanche', 'log']],
     ['cases', 'Cases', ['cases', 'review', 'followup', 'records', 'stats', 'network']],
-    ['people', 'People', ['schedule', 'cover', 'posts', 'team', 'training', 'passport']],
+    ['people', 'People', ['schedule', 'crews', 'cover', 'posts', 'team', 'training', 'passport']],
     ['gear', 'Gear', ['equipment', 'meds', 'lifts']],
     ['admin', 'Admin', ['settings', 'requirements', 'access', 'levels']],
   ].map(([id, text, keys]) => ({ id, text, items: keys.map((k) => items.find((i) => i[0] === k)).filter(Boolean) })).filter((s) => s.items.length);

@@ -1,7 +1,7 @@
 // Patrol > Team > Cover: shift cover. A patroller who cannot work one of their published patrol shifts asks for cover;
 // everyone else on the roster sees it here (and in the "Patrol shift cover" Inbox conversation) and takes it if they are
 // free. With approval on, those who build the schedule approve each swap first.
-import { get, post, put } from '../api.js';
+import { get, post, put, del } from '../api.js';
 import { h, clear, input, field, button, toast, formDialog, confirmDialog, empty, errorBox, state, fmtDateTime, act, fail } from '../ui.js';
 import { span, hrs, minutes, dayShort, monthDay, dayLong } from './workforce-common.js';
 
@@ -66,11 +66,13 @@ export async function drawCover(box) {
     if (c.self_signup && c.on_roster) {
       parts.push(h('section', { class: 'cover-section' }, h('h3', null, c.open_shifts.length ? `Open shifts (${c.open_shifts.length})` : 'Open shifts'),
         c.open_shifts.length ? h('div', { class: 'cover-list' }, c.open_shifts.map((s) => item(s, [
-          h('p', { class: 'cover-who' }, h('b', null, 'Open shift')),
-          !s.can_take ? h('p', { class: 'cover-why' }, `You can’t take it: ${s.problems.join('. ')}`) : null,
-        ], s.can_take ? [button('Take this shift', () => confirmDialog('Take this open shift?', `${dayLong(s.starts_at.slice(0, 10))}, ${span(s.starts_at, s.ends_at)}${where(s) ? `, ${where(s)}` : ''}. It goes on your schedule and My shifts.`, 'Take this shift', async () => {
-          await post(`/patrol/cover/open/${s.id}/take`); toast('The shift is yours'); await load();
-        }), { kind: 'primary', small: true })] : [])))
+          h('p', { class: 'cover-who' }, h('b', null, s.crew ? `Open spot, ${s.crew}` : 'Open shift'), Number(s.extra) ? h('span', { class: 'muted' }, ' (extra patrollers needed)') : null),
+          s.asked ? h('p', null, state('Asked, waiting for approval', 'warn')) : null,
+          !s.can_take && !s.asked ? h('p', { class: 'cover-why' }, `You can’t take it: ${s.problems.join('. ')}`) : null,
+        ], s.asked ? [button('Withdraw', async () => { await del(`/patrol/signups/${s.signup_id}`); toast('Withdrawn'); await load(); }, { small: true })]
+          : s.can_take ? [button(c.signup_approval ? 'Ask for this shift' : 'Take this shift', () => confirmDialog(c.signup_approval ? 'Ask for this open shift?' : 'Take this open shift?', `${dayLong(s.starts_at.slice(0, 10))}, ${span(s.starts_at, s.ends_at)}${where(s) ? `, ${where(s)}` : ''}. ${c.signup_approval ? 'Whoever builds the schedule approves it, and you get a message either way.' : 'It goes on your schedule and My shifts.'}`, c.signup_approval ? 'Ask for it' : 'Take this shift', async () => {
+            const r = await post(`/patrol/cover/open/${s.id}/take`); toast(r.status === 'pending' ? 'Asked. You will hear when it is approved.' : 'The shift is yours'); await load();
+          }), { kind: 'primary', small: true })] : [])))
           : empty('No open shifts right now.')));
     }
 

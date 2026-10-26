@@ -8,11 +8,6 @@
       "items": [
         {
           "app": "patrol",
-          "title": "Patrol shifts your patrollers sign up for",
-          "text": "Set up the season's shifts once (Saturday AM, Weekday PM and so on) with how many patrollers each needs and which roles, such as a hill captain or someone lift-evacuation certified. Patrollers sign up for open spots from their phone, the director sees at a glance which shifts are short, and short weekend shifts are flagged on Thursday."
-        },
-        {
-          "app": "patrol",
           "title": "Supplies and gear ready every morning",
           "text": "Every aid room, top shack, toboggan cache and pack has its list of what should be there. A case takes out what it used, a QR check on each cache works with no signal, and one board shows what is expired, out of service or low, including ropes and harnesses past their life and patrollers whose certifications are due."
         },
