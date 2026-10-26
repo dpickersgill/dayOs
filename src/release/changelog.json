@@ -1,6 +1,57 @@
 {
   "releases": [
     {
+      "version": "2026.10.48",
+      "date": "2026-11-01",
+      "title": "Patrol reports your patrol director sets the rules for",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-requirements",
+          "text": "Report requirements: under Patrol, Admin, the patrol director chooses what each kind of report must hold, and when. Each item is Off, Recommended, Required to approve or Required to submit, and can be limited to some cases: serious, transported, under 18, a collision, refused care, staff on duty, rental gear or a lift. Start from NSAA standard, Lean volunteer patrol or Insurer-ready (a draft), see every change before it is loaded, and adjust it. Mandatory fields set before are kept as they were."
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-requirements",
+          "text": "In a report, each field shows Required, For approval or Recommended, each section says how many are left, and Next missing item goes straight to the next gap. A required field that cannot be answered can be marked N/A with a reason (declined, could not answer, left before it was asked), which the report shows instead of a blank."
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-requirements",
+          "text": "Before the patient leaves (when the patrol director turns it on): recording an outcome, or stamping hand-off or transport, opens a short checklist for contact details, a parent or guardian for anyone under 18, the signed refusal, the rental number and witnesses. Each is done there and then or skipped with a reason. It works with no signal, never holds up care, and the reviewer sees every skip."
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-requirements",
+          "text": "Reviewing: the review box lists what is missing for approval, every N/A answer and every skip. The Patrol Director can approve with an exception, with a reason for each missing item; other reviewers send it back. Exceptions, N/A answers and skips show on every copy of the report, including released copies. A report is always judged against the rules in force when it was submitted."
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Signatures, witnesses and contact details can be taken with no signal: they wait on the phone, with the time they were taken, and are sent once when the signal returns. The refusal of care can be signed on a case started with no signal."
+        }
+      ]
+    },
+    {
       "version": "2026.10.47",
       "date": "2026-10-25",
       "title": "Starting a case with no signal, fixed",

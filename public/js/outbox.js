@@ -1,5 +1,6 @@
-// Offline save for bedside entries. On the hill the signal comes and goes, so a vitals set, a treatment, a time stamp or
-// an assessment answer that cannot reach the server is kept on this phone, shown as "waiting to send", and sent in order
+// Offline save for bedside entries. On the hill the signal comes and goes, so a vitals set, a treatment, a time stamp,
+// an assessment answer, or what is collected before the patient leaves (contact details, a signature, a witness, a skip),
+// that cannot reach the server is kept on this phone, shown as "waiting to send", and sent in order
 // as soon as the signal returns. Each entry carries the time it was taken, so the record shows when it really happened
 // (and the server marks when it arrived).
 //
@@ -207,7 +208,9 @@ function settle(temp, out) {
     if (x.caseId !== temp.caseId) return x;
     let path = x.path.startsWith(fromCase) ? `/patrol/incidents/${out.id}/${x.path.slice(fromCase.length)}` : x.path;
     if (fromPatient && (path.includes(`${fromPatient}/`) || path.endsWith(fromPatient))) path = path.replace(fromPatient, `/patients/${out.patient_id}`);
-    return { ...x, caseId: out.id, path };
+    // a signature, a skip or an N/A answer names its patient in the body too
+    const body = temp.patientId && out.patient_id && x.body && x.body.patient_id === temp.patientId ? { ...x.body, patient_id: out.patient_id } : x.body;
+    return { ...x, caseId: out.id, path, body };
   }));
   try { const m = JSON.parse(globalThis.sessionStorage.getItem(MAP_KEY) || '{}'); m[temp.caseId] = out.id; globalThis.sessionStorage.setItem(MAP_KEY, JSON.stringify(m)); } catch (_) { /* the page reloads the list instead */ }
   cases = cases.filter((x) => x.id !== temp.caseId); persistCases();

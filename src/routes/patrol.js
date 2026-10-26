@@ -13,8 +13,9 @@ const { partialOf, z, dateStr, dateTimeStr, validate, paramId, normDateTime, set
 const { notFound, bad, conflict, forbidden } = require('../lib/errors');
 const R = require('../lib/review');
 const { audit } = require('../lib/audit');
-const { FIELDS, SECTIONS, formSchema, parseForm, mergeForm, isEmpty, applies } = require('../lib/nsaar');
-const { requiredFields } = require('../lib/formconfig');
+const { formSchema, parseForm, mergeForm, isEmpty } = require('../lib/nsaar');
+const RQ = require('../lib/requirements');
+const LEAVE = require('../lib/leavecheck');
 const { buildPull, ageOn } = require('../lib/patrolpull');
 const { derive, parseDetail } = require('../lib/carederive');
 const MEDS = require('./patrolmeds');
@@ -283,6 +284,10 @@ router.get('/analytics', patrol, needs('reports'), async (req, res) => {
 });
 
 // ---------------------------------------------------------------- one case, in full
+/** The name of a login, for "who did this" columns: their person record, then their email or username. */
+const PERSON_NAME = (col) => `(SELECT COALESCE(NULLIF(TRIM(CONCAT(COALESCE(pp.first_name, sp.first_name, ''), ' ', COALESCE(pp.last_name, sp.last_name, ''))), ''), uu.email, uu.username)
+  FROM users uu LEFT JOIN people pp ON pp.tenant_id = uu.tenant_id AND pp.id = uu.person_id LEFT JOIN staff st2 ON st2.tenant_id = uu.tenant_id AND st2.id = uu.staff_id LEFT JOIN people sp ON sp.tenant_id = st2.tenant_id AND sp.id = st2.person_id
+  WHERE uu.id = ${col})`;
 const VOIDED_BY = (t) => `LEFT JOIN users vu ON vu.id = ${t}.voided_by AND vu.tenant_id = ${t}.tenant_id`;
 /**
  * Everything on one case, as the case page and the frozen versions show it. Rows marked entered in error are included
@@ -321,10 +326,16 @@ async function loadCase(conn, tenantId, id) {
       m.voided_at, m.void_reason, COALESCE(u.email, u.username) AS uploaded_by_name, COALESCE(vu.email, vu.username) AS voided_by_email
     FROM incident_media m LEFT JOIN users u ON u.id = m.uploaded_by AND u.tenant_id = m.tenant_id ${VOIDED_BY('m')} WHERE m.tenant_id = ? AND m.incident_id = ? ORDER BY m.id`, [tenantId, id]))
     .map((m) => ({ ...m, has_preview: Boolean(m.has_preview), taken_lat: m.taken_lat === null ? null : Number(m.taken_lat), taken_lng: m.taken_lng === null ? null : Number(m.taken_lng) }));
+  // Items answered N/A (with the reason), checklist items skipped before the patient left, and items approved with an
+  // exception. All three are part of the report: they travel with every frozen copy, including copies released outside.
+  const [skips, exceptions] = await Promise.all([
+    rows(conn, `SELECT s.id, s.patient_id, s.gate, s.item_key, s.reason, s.note, s.skipped_at, ${PERSON_NAME('s.skipped_by')} AS skipped_by FROM incident_skips s WHERE s.tenant_id = ? AND s.incident_id = ? ORDER BY s.id`, [tenantId, id]),
+    rows(conn, `SELECT e.id, e.patient_id, e.scope, e.item_key AS \`key\`, e.label, e.reason, e.approved_at, ${PERSON_NAME('e.approved_by')} AS approved_by FROM incident_exceptions e WHERE e.tenant_id = ? AND e.incident_id = ? ORDER BY e.id`, [tenantId, id]),
+  ]);
   const c = {
-    ...withNumber(incident), form: parseForm(incident.form), resort: { name: tenant.name, legal_name: tenant.legal_name }, notes, events, responders, witnesses, signatures,
-    collision: collisionRow || null, parties, checklist, versions, photos,
-    patients: patients.map((p) => ({ ...p, form: parseForm(p.form), vitals: mine(vitals, p.id), injuries: mine(injuries, p.id), treatments: mine(treatments, p.id) })),
+    ...withNumber(incident), form: parseForm(incident.form), na: RQ.naOf(incident), resort: { name: tenant.name, legal_name: tenant.legal_name }, notes, events, responders, witnesses, signatures,
+    collision: collisionRow || null, parties, checklist, versions, photos, skips, exceptions: exceptions.map((e) => ({ ...e, patient_id: e.patient_id === null ? null : Number(e.patient_id) })),
+    patients: patients.map((p) => ({ ...p, form: parseForm(p.form), na: RQ.naOf(p), vitals: mine(vitals, p.id), injuries: mine(injuries, p.id), treatments: mine(treatments, p.id) })),
   };
   for (const p of c.patients) p.derived = derive(c, p);
   return c;
@@ -336,7 +347,9 @@ router.get('/incidents/:id', patrol, needs('view_cases'), async (req, res) => {
   if (!c) throw notFound('Incident');
   await audit(pool, req, 'view', 'incidents', id); // reads of sensitive records are logged too
   c.review = await R.caseInfo(pool, req, c);
-  c.check = checkCase(c); // suggestions only: the patroller and the review group decide
+  c.requirements = await requirementsOf(pool, req, c);
+  c.leave = RQ.optionsOf((await RQ.current(pool, req.auth.tenantId)).rules).leave ? LEAVE.items(c) : [];
+  c.check = [...checkCase(c), ...recommendedChecks(c.requirements.items)]; // suggestions only: the patroller and the review group decide
   c.story_fill = SF.available() && (await OPS.settingsOf(pool, req.auth.tenantId)).story_fill;
   res.json(c);
 });
@@ -345,7 +358,52 @@ router.get('/incidents/:id', patrol, needs('view_cases'), async (req, res) => {
 router.get('/incidents/:id/check', patrol, needs('view_cases'), async (req, res) => {
   const c = await loadCase(pool, req.auth.tenantId, paramId(req));
   if (!c) throw notFound('Incident');
-  res.json({ data: checkCase(c) });
+  const reqs = await requirementsOf(pool, req, c);
+  res.json({ data: [...checkCase(c), ...recommendedChecks(reqs.items)] });
+});
+
+/**
+ * What the patrol director requires of this case, answered or not, for the Report tab: counts by section, the next
+ * missing item and the N/A answers. A submitted or approved report is shown against the rules it was submitted under.
+ */
+async function requirementsOf(db, req, c) {
+  const set = c.report_state === 'draft' || !c.rules_version_id ? await RQ.current(db, req.auth.tenantId) : await RQ.version(db, req.auth.tenantId, c.rules_version_id);
+  const items = RQ.evaluate(set.rules, c, { exceptions: c.exceptions || [] }).map((i) => ({ ...i, where: RQ.where(i), na_allowed: RQ.naAllowed(RQ.TYPE_KEYS.includes(c.category) ? c.category : 'other', i.id) }));
+  return { rules_version_id: set.id, items, summary: RQ.summary(items), na_reasons: RQ.N_A.map(([value, label]) => ({ value, label })), can_except: c.report_state === 'submitted' ? await mayExcept(req) : false };
+}
+/** Recommended fields not answered yet join the report check: a suggestion, never a block. */
+const recommendedChecks = (items) => items.filter((i) => i.level === 'recommended' && !i.met)
+  .map((i) => ({ message: `${RQ.message(i)} is not filled in`, why: 'Your patrol director recommends this for every report like this one. Fill it in, or leave it if it really cannot be known.', ...RQ.where(i) }));
+
+/**
+ * N/A with a reason for a required item ("patient declined to answer", "left before it was asked"). The report shows the
+ * reason instead of a blank. reason null takes the N/A away. Works from the outbox, so a phone with no signal can send it later.
+ */
+router.put('/incidents/:id/na', patrol, needs('create_case'), validate(z.object({
+  scope: z.enum(['case', 'patient']), field: z.string().max(40), patient_id: z.number().int().positive().nullable().optional(),
+  reason: z.enum(RQ.NA_KEYS).nullable(), note: z.string().trim().max(300).nullable().optional(),
+})), async (req, res) => {
+  const id = paramId(req);
+  const b = req.body;
+  await tx(async (conn) => {
+    const inc = await editableCase(conn, req, id);
+    const type = RQ.TYPE_KEYS.includes(inc.category) ? inc.category : 'other';
+    if (!RQ.naAllowed(type, `${b.scope}.${b.field}`)) throw bad('That item cannot be answered N/A');
+    if (b.reason === 'other' && !b.note) throw bad('Say why, when the reason is Other');
+    const value = b.reason ? { reason: b.reason, ...(b.note ? { note: b.note } : {}), by: req.auth.userId, at: nowIn((await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [inc.tenant_id])).timezone) } : null;
+    let row; let table;
+    if (b.scope === 'patient') {
+      if (!b.patient_id) throw bad('Say which patient');
+      row = await one(conn, 'SELECT id, na FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ?', [inc.tenant_id, id, b.patient_id]);
+      if (!row) throw notFound('Patient');
+      table = 'incident_patients';
+    } else { row = inc; table = 'incidents'; }
+    const na = RQ.naOf(row);
+    if (value) na[b.field] = value; else delete na[b.field];
+    await conn.query(`UPDATE ${table} SET na = ? WHERE tenant_id = ? AND id = ?`, [Object.keys(na).length ? JSON.stringify(na) : null, inc.tenant_id, row.id]);
+    await audit(conn, req, b.reason ? 'set_na' : 'clear_na', 'incidents', id, { scope: b.scope, field: b.field, patient_id: b.patient_id || null, reason: b.reason });
+  });
+  res.json({ ok: true });
 });
 
 /**
@@ -429,57 +487,37 @@ router.post('/incidents/:id/notes', patrol, needs('create_case'), validate(z.obj
 });
 
 // ---------------------------------------------------------------- submit, approve, reopen
-/** The value the form holds for one field of a case or patient row, whether it lives in a column or in the form JSON. */
-function fieldValue(f, row, form) {
-  if (f.type === 'gps') return row.gps_lat !== null && row.gps_lat !== undefined && row.gps_lng !== null && row.gps_lng !== undefined ? true : null;
-  if (f.col) return row[f.col];
-  return form[f.key];
-}
-
 /**
- * What a finished report must contain. Returned as a list so the screen can show every gap at once.
- * The patrol administrator decides which form fields are mandatory (see lib/formconfig); a field that depends on
- * another answer (ambulance code only when leaving by ambulance) is only checked when it applies.
+ * What a finished report must contain, as a list so the screen can show every gap at once.
+ * stage 'submit': items the patrol director made "required to submit"; stage 'approve': those plus "required to approve"
+ * (judged against the rules the report was submitted under, so later changes never move the goalposts). Items approved
+ * with an exception count as given. The safety rules below are checked whatever the settings.
+ * Each problem is { message, level, ...where }; where = { scope, section, field, patient_id } for a form field, or
+ * { area, patient_id? } for the summary, patients, responders, signatures or narrative. level 'approve' marks an item the
+ * Patrol Director may approve with an exception.
  */
-async function reportProblems(conn, tenantId, inc) {
-  // Each problem is { message, ...where }: the screen turns it into a link that opens and highlights the field.
-  //   where = { scope: 'case' | 'patient', section, field, patient_id } for a form field, or { area } for the summary, patients, responders or signatures.
+async function reportProblems(conn, tenantId, inc, { stage = 'submit', rules = null } = {}) {
   const problems = [];
-  const problem = (message, where = {}) => problems.push({ message, ...where });
+  const problem = (message, where = {}, level = 'submit') => problems.push({ message, level, ...where });
   if (!inc.summary || !inc.summary.trim()) problem('Add a one-line summary', { area: 'summary' });
-  if (!CLINICAL_CATEGORIES.includes(inc.category)) return problems;
-  const required = await requiredFields(conn, tenantId);
   const c = await loadCase(conn, tenantId, inc.id);
+  const set = rules || (stage === 'approve' ? await RQ.version(conn, tenantId, inc.rules_version_id) : await RQ.current(conn, tenantId));
+  const blocking = stage === 'approve' ? ['submit', 'approve'] : ['submit'];
+  for (const i of RQ.evaluate(set.rules, c, { exceptions: c.exceptions || [] })) {
+    if (i.met || i.exception || !blocking.includes(i.level)) continue;
+    problem(RQ.message(i), RQ.where(i), i.level);
+  }
+  // Before the patient left: each item done, or skipped with a reason (patient care cases, when the director asks for it).
+  if (RQ.optionsOf(set.rules).leave) for (const x of LEAVE.problems(c)) problems.push(x);
+  if (!CLINICAL_CATEGORIES.includes(inc.category)) return problems;
   const patients = c.patients.filter((p) => !p.voided_at); // a patient entered in error is not part of the report
   if (!patients.length) problem('Add at least one patient', { area: 'patients' });
   const { signatures } = c;
-  const title = new Map(SECTIONS.map((x) => [x.id, x.title]));
 
-  // Case-level fields (location, conditions, witnesses, sign-off)
-  const caseForm = parseForm(inc.form);
-  const caseVals = Object.fromEntries(FIELDS.filter((f) => f.scope === 'case').map((f) => [f.key, fieldValue(f, inc, caseForm)]));
-  for (const f of FIELDS.filter((x) => x.scope === 'case' && required.case.has(x.key))) {
-    if (!applies(f, caseVals)) continue;
-    let missing;
-    if (f.type === 'witnesses') missing = !c.witnesses.length && !caseForm.witnesses_none;
-    else if (f.type === 'signature') missing = !signatures.some((s) => s.kind === f.kind);
-    else missing = isEmpty(caseVals[f.key]);
-    if (missing) problem(`${title.get(f.section)}: ${f.label}`, { scope: 'case', section: f.section, field: f.key });
-  }
-
-  // Patient-level fields. An answer worked out from the bedside entries counts as given.
+  // Safety rules for each patient.
   for (const p of patients) {
     const who = `${p.first_name} ${p.last_name}`.trim();
-    const form = { ...p.derived, ...p.form };
-    const vals = Object.fromEntries(FIELDS.filter((f) => f.scope === 'patient').map((f) => [f.key, fieldValue(f, p, form)]));
-    for (const f of FIELDS.filter((x) => x.scope === 'patient' && required.patient.has(x.key))) {
-      if (!applies(f, vals)) continue;
-      let missing;
-      if (f.type === 'signature') missing = !signatures.some((s) => s.kind === f.kind && (s.patient_id === p.id || s.patient_id === null));
-      else missing = isEmpty(vals[f.key]);
-      if (missing) problem(`${who}: ${f.label}`, { scope: 'patient', patient_id: p.id, section: f.section, field: f.key });
-    }
-    // Safety rules that no setting can switch off.
+    // These are checked whatever the settings say.
     const pf0 = p.form || {};
     const liveVitals = (p.vitals || []).filter((v) => !v.voided_at);
     const lastGcs = [...liveVitals].reverse().find((v) => v.gcs !== null && v.gcs !== undefined);
@@ -563,26 +601,47 @@ async function keepVersion(conn, req, incidentId, kind) {
   return n;
 }
 
-async function setState(req, res, { from, to, check, extra, version }) {
+/**
+ * Moves a report between states. check 'submit' or 'approve' runs reportProblems at that stage first; a report that
+ * still has gaps is refused with the list. allowExceptions(conn, inc, problems) may accept some gaps (the Patrol
+ * Director approving with an exception) and returns the problems that are left.
+ */
+async function setState(req, res, { from, to, check, extra, version, allowExceptions }) {
   const id = paramId(req);
   let out = { ok: true };
   await tx(async (conn) => {
     const inc = await one(conn, 'SELECT * FROM incidents WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id]);
     if (!inc) throw notFound('Incident');
     if (!from.includes(inc.report_state)) throw conflict(`This report is ${inc.report_state}`);
+    let rules = null;
     if (check) {
-      const problems = await reportProblems(conn, req.auth.tenantId, inc);
-      if (problems.length) throw conflict('The report is not complete yet', problems);
+      // A report is checked, and later approved, against the rules in force when it is submitted.
+      if (check === 'submit') { rules = await RQ.ensure(conn, req.auth.tenantId); await conn.query('UPDATE incidents SET rules_version_id = ? WHERE tenant_id = ? AND id = ?', [rules.id, inc.tenant_id, inc.id]); }
+      let problems = await reportProblems(conn, req.auth.tenantId, inc, { stage: check, rules });
+      if (problems.length && allowExceptions) problems = await allowExceptions(conn, inc, problems);
+      if (problems.length) {
+        const err = conflict('The report is not complete yet', problems);
+        // only "required to approve" gaps left: say whether this reviewer could approve with an exception
+        if (check === 'approve' && problems.every((x) => x.level === 'approve')) err.extra = { exceptions_possible: await mayExcept(req) };
+        throw err;
+      }
     }
     const filled = check ? await fillFromBedside(conn, req, inc) : [];
     const tenant = await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId]);
     const result = await extra(conn, inc, nowIn(tenant.timezone));
     const vk = typeof version === 'function' ? version(result) : version;
     const v = vk ? await keepVersion(conn, req, id, vk) : null;
-    await audit(conn, req, to, 'incidents', id, { ...(v ? { version: v } : {}), ...(filled.length ? { filled_from_bedside: filled } : {}), ...(result && result.audit ? result.audit : {}) });
+    await audit(conn, req, to, 'incidents', id, { ...(v ? { version: v } : {}), ...(rules ? { rules_version: rules.id } : {}), ...(filled.length ? { filled_from_bedside: filled } : {}), ...(result && result.audit ? result.audit : {}) });
     out = { ok: true, ...(result && result.reply ? result.reply : {}) };
   });
   res.json(out);
+}
+
+/** May this login approve a report with an exception? The Patrol Director: the review group's lead, or the patrol admin level. */
+async function mayExcept(req) {
+  if ((await PA.levelOf(pool, req)) === 'admin') return true;
+  const s = await R.settingsOf(pool, req.auth.tenantId);
+  return s.reviewers.some((r) => r.user_id === req.auth.userId && r.active && r.lead);
 }
 
 /** Review rights: a member of the review group; with no group, the approve_case access level. */
@@ -595,21 +654,40 @@ const reviewer = async (req, _res, next) => {
 
 router.post('/incidents/:id/submit', patrol, needs('submit_case'), (req, res) => setState(req, res, {
   // a kind of case the review group does not review is signed off and approved at once: keep the approved copy
-  from: ['draft'], to: 'submit', check: true, version: (r) => (r && r.reply && r.reply.review === 'not_required' ? 'approved' : 'submitted'),
+  from: ['draft'], to: 'submit', check: 'submit', version: (r) => (r && r.reply && r.reply.review === 'not_required' ? 'approved' : 'submitted'),
   extra: async (conn, inc, now) => {
     await conn.query("UPDATE incidents SET report_state = 'submitted', submitted_by = ?, submitted_at = ? WHERE tenant_id = ? AND id = ?", [req.auth.userId, now, inc.tenant_id, inc.id]);
     const routed = await R.afterSubmit(conn, req, { ...inc, submitted_by: req.auth.userId }, now);
-    return { reply: { review: routed }, audit: { review: routed } };
+    // What the reviewer will still need: "required to approve" items not answered yet. Submitting is not held up by them.
+    const later = routed === 'not_required' ? [] : (await reportProblems(conn, req.auth.tenantId, inc, { stage: 'approve' })).filter((x) => x.level === 'approve');
+    return { reply: { review: routed, for_approval: later }, audit: { review: routed, for_approval: later.length } };
   },
 }));
 
 const checklist = z.record(z.enum(R.CHECK_KEYS), z.boolean());
-router.post('/incidents/:id/approve', patrol, reviewer, validate(z.object({ checklist: checklist.optional(), note: z.string().trim().max(1000).optional() }).default({})), async (req, res, next) => {
+const exceptionItem = z.object({ scope: z.enum(['case', 'patient']), field: z.string().max(40), patient_id: z.number().int().positive().nullable().optional(), reason: z.string().trim().min(5).max(500) });
+router.post('/incidents/:id/approve', patrol, reviewer, validate(z.object({ checklist: checklist.optional(), note: z.string().trim().max(1000).optional(), exceptions: z.array(exceptionItem).max(60).optional() }).default({})), async (req, res, next) => {
   const s = await R.settingsOf(pool, req.auth.tenantId);
   if (s.enabled && R.CHECK_KEYS.some((k) => !(req.body.checklist || {})[k])) return next(bad('Tick every review check before approving. If a check does not apply, it is fine: tick it.'));
+  const wanted = req.body.exceptions || [];
+  if (wanted.length && !(await mayExcept(req))) return next(forbidden('Only the Patrol Director can approve a report with an exception. Send it back with comments instead.'));
   return setState(req, res, {
     // With a review group, only a signed-off report can be approved, and never by the person who signed it off.
-    from: s.enabled ? ['submitted'] : ['draft', 'submitted'], to: 'approve', check: true, version: 'approved',
+    from: s.enabled ? ['submitted'] : ['draft', 'submitted'], to: 'approve', check: 'approve', version: 'approved',
+    // The Patrol Director may accept a missing "required to approve" item with a reason. Each one is kept with the
+    // report and shows on every copy, including copies released outside. Nothing else can be excepted.
+    allowExceptions: wanted.length ? async (conn, inc, problems) => {
+      const now = nowIn((await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [inc.tenant_id])).timezone);
+      const left = [];
+      for (const p of problems) {
+        const match = p.level === 'approve' && p.field && wanted.find((w) => w.scope === p.scope && w.field === p.field && (w.patient_id || null) === (p.patient_id || null));
+        if (!match) { left.push(p); continue; }
+        await conn.query('INSERT INTO incident_exceptions (tenant_id, incident_id, patient_id, scope, item_key, label, reason, approved_by, approved_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [inc.tenant_id, inc.id, p.patient_id || null, p.scope, p.field, p.message.slice(0, 255), match.reason, req.auth.userId, now]);
+      }
+      if (left.length) throw conflict(left.some((x) => x.level !== 'approve') ? 'Some gaps cannot be approved with an exception. Send the report back with comments.' : 'Give a reason for every missing item, or send the report back with comments.', left);
+      return left;
+    } : null,
     extra: async (conn, inc, now) => {
       // With a review group, never your own report. (Without one, a small patrol may have a single approver; turning the
       // group off to get round this takes a patrol admin.)
@@ -946,9 +1024,9 @@ const sub = {
       relation: z.enum(['witnessed_by', 'accompanied_by', 'collided_with', 'other']).optional(),
       name: z.string().min(1).max(150), phone: z.string().max(40).optional(), email: z.string().email().max(255).optional(),
       address: z.string().max(255).optional(), city: z.string().max(100).optional(), region: z.string().max(60).optional(), postal: z.string().max(20).optional(),
-      statement: z.string().max(10000).optional(),
+      statement: z.string().max(10000).optional(), client_ref: clientRef,
     }),
-    cols: ['relation', 'name', 'phone', 'email', 'address', 'city', 'region', 'postal', 'statement'],
+    cols: ['relation', 'name', 'phone', 'email', 'address', 'city', 'region', 'postal', 'statement', 'client_ref'],
   },
 };
 
@@ -1091,6 +1169,36 @@ router.delete('/incidents/:id/responders/:rowId', patrol, needs('create_case'), 
   res.status(204).end();
 });
 
+// ---------------------------------------------------------------- before the patient leaves
+/**
+ * A checklist item skipped before the patient left (contact details, a guardian for a minor, the refusal signature,
+ * witnesses, rental gear), with the reason. Never blocks the outcome or care; the reviewer sees every skip, and an item
+ * neither done nor skipped holds up the submit. Works from the outbox: client_ref stops a second copy.
+ */
+router.post('/incidents/:id/skips', patrol, needs('create_case'), validate(z.object({
+  patient_id: z.number().int().positive().nullable().optional(), item: z.enum(LEAVE.ITEM_KEYS), reason: z.enum(RQ.NA_KEYS), note: z.string().trim().max(300).nullable().optional(),
+  at: dateTimeStr.transform(normDateTime).optional(), client_ref: clientRef,
+})), async (req, res) => {
+  const id = paramId(req);
+  const b = req.body;
+  if (b.reason === 'other' && !b.note) throw bad('Say why, when the reason is Other');
+  const newId = await tx(async (conn) => {
+    await editableCase(conn, req, id);
+    if (b.client_ref) {
+      const seen = await one(conn, 'SELECT id FROM incident_skips WHERE tenant_id = ? AND client_ref = ?', [req.auth.tenantId, b.client_ref]);
+      if (seen) return seen.id;
+    }
+    if (b.patient_id && !(await one(conn, 'SELECT id FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ? AND voided_at IS NULL', [req.auth.tenantId, id, b.patient_id]))) throw notFound('Patient');
+    const now = nowIn((await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone);
+    const at = b.at && b.at <= plusMin(now, 5) && b.at >= plusMin(now, -72 * 60) ? b.at : now;
+    const [r] = await conn.query('INSERT INTO incident_skips (tenant_id, incident_id, patient_id, gate, item_key, reason, note, skipped_by, skipped_at, client_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [req.auth.tenantId, id, b.patient_id || null, 'leave', b.item, b.reason, b.note || null, req.auth.userId, at, b.client_ref || null]);
+    await audit(conn, req, 'skip_leave_item', 'incidents', id, { item: b.item, patient_id: b.patient_id || null, reason: b.reason });
+    return r.insertId;
+  });
+  res.status(201).json({ id: newId });
+});
+
 // ---------------------------------------------------------------- signatures (add only, and allowed while a report is open)
 const MAX_SIGNATURE_CHARS = 90_000; // a drawn signature is a few KB; this also keeps requests under the 100 KB body limit
 router.post(
@@ -1102,10 +1210,16 @@ router.post(
     signer_role: z.string().max(150).optional(),
     patient_id: z.number().int().positive().optional(),
     image: z.string().max(MAX_SIGNATURE_CHARS).regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/, 'The signature must be a PNG image'),
+    // A phone with no signal keeps the signature and sends it later: client_ref stops a second copy, signed_at keeps the real time.
+    client_ref: clientRef, signed_at: dateTimeStr.transform(normDateTime).optional(),
   })),
   async (req, res) => {
     const id = paramId(req);
     const b = req.body;
+    if (b.client_ref) {
+      const seen = await one(pool, 'SELECT id FROM incident_signatures WHERE tenant_id = ? AND client_ref = ?', [req.auth.tenantId, b.client_ref]);
+      if (seen) return res.status(201).json({ id: seen.id });
+    }
     const newId = await tx(async (conn) => {
       await editableCase(conn, req, id);
       const p = b.patient_id ? await one(conn, 'SELECT id, form, voided_at FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ?', [req.auth.tenantId, id, b.patient_id]) : null;
@@ -1115,9 +1229,12 @@ router.post(
       // A patient who cannot make the decision cannot refuse: care continues under implied consent.
       if (b.kind === 'refusal_of_care' && parseForm(p.form).refusal_capacity === 'no') throw conflict('This patient is recorded as not able to decide, so they cannot refuse care. Treat under implied consent and escalate to the lead or EMS.');
       const tz = (await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone;
-      // signed_at is kept on the mountain clock, like every other time on the report.
-      const [r] = await conn.query('INSERT INTO incident_signatures (tenant_id, incident_id, patient_id, kind, signer_name, signer_role, image, recorded_by, signed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [req.auth.tenantId, id, b.patient_id ?? null, b.kind, b.signer_name, b.signer_role ?? null, b.image, req.auth.userId, nowIn(tz)]);
-      await audit(conn, req, 'add_signature', 'incidents', id, { kind: b.kind, row: r.insertId });
+      // signed_at is kept on the mountain clock, like every other time on the report. A signature sent late by a phone that
+      // had no signal keeps the time it was signed (never in the future, never more than three days back).
+      const now = nowIn(tz);
+      const late = b.signed_at && b.signed_at <= plusMin(now, 5) && b.signed_at >= plusMin(now, -72 * 60) ? b.signed_at : null;
+      const [r] = await conn.query('INSERT INTO incident_signatures (tenant_id, incident_id, patient_id, kind, signer_name, signer_role, image, recorded_by, signed_at, client_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [req.auth.tenantId, id, b.patient_id ?? null, b.kind, b.signer_name, b.signer_role ?? null, b.image, req.auth.userId, late || now, b.client_ref || null]);
+      await audit(conn, req, 'add_signature', 'incidents', id, { kind: b.kind, row: r.insertId, ...(late ? { sent_late: true } : {}) });
       return r.insertId;
     });
     res.status(201).json({ id: newId });

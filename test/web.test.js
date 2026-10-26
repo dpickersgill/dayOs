@@ -594,7 +594,7 @@ test('patrol: a case opens, shows the whole report, and the sign-off buttons wor
   assert.ok(buttons(pat, 'Add note').length === 1);
 });
 
-test('patrol: the incident form follows the NSAAR sections, saves a section, and the administrator sets mandatory fields', skip(), async () => {
+test('patrol: the incident form follows the NSAAR sections, saves a section, and the patrol director sets what is required', skip(), async () => {
   const o = T.owner;
   const c = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${today}T15:05`, location: 'Mid Ridge', category: 'injury', severity: 'minor', summary: 'Wrist' } }));
   const base = `/patrol/incidents/${c.id}`;
@@ -605,10 +605,10 @@ test('patrol: the incident form follows the NSAAR sections, saves a section, and
     if (t === 'Attending ambulance number') { assert.equal([...root.querySelectorAll('label, .field')].some((e) => e.textContent.includes(t) && !e.hidden && !e.closest('[hidden]')), false, 'a conditional field stays hidden until it applies'); continue; }
     assert.ok(root.textContent.includes(t), `the form is missing "${t}"`);
   }
-  assert.ok(root.querySelector('.req'), 'default mandatory fields are starred');
+  assert.ok(root.querySelector('.req-tag[data-level="submit"]'), 'required fields are marked Required');
 
   // save one section from the screen
-  const conditions = [...root.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent === 'Conditions');
+  const conditions = [...root.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent.startsWith('Conditions'));
   const weather = [...conditions.querySelectorAll('select')][0];
   weather.value = 'clear'; weather.dispatchEvent(new window.Event('change', { bubbles: true }));
   [...conditions.querySelectorAll('button')].find((b) => b.textContent.startsWith('Save')).click();
@@ -616,7 +616,7 @@ test('patrol: the incident form follows the NSAAR sections, saves a section, and
   assert.equal(ok(await api('GET', base, { token: o })).form.weather, 'clear');
 
   root = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id)]);
-  const complaint = [...root.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent === 'Complaint and treatment protocol');
+  const complaint = [...root.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent.startsWith('Complaint and treatment protocol'));
   const wrist = [...complaint.querySelectorAll('select')].find((e) => e.getAttribute('aria-label') === 'Wrist: left, right or both');
   wrist.value = 'R';
   [...complaint.querySelectorAll('input[type=checkbox]')].find((i) => i.value === 'fracture').checked = true;
@@ -628,34 +628,45 @@ test('patrol: the incident form follows the NSAAR sections, saves a section, and
 
   // showing "ambulance" reveals the ambulance code
   root = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id)]);
-  const transport = [...root.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent === 'Transport');
+  const transport = [...root.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent.startsWith('Transport'));
   const from = [...transport.querySelectorAll('select')].find((e) => [...e.options].some((x) => x.value === 'ambulance'));
   const codeField = [...transport.querySelectorAll('.field')].find((e) => e.textContent.includes('Attending ambulance number'));
   assert.equal(codeField.hidden, true);
   from.value = 'ambulance'; from.dispatchEvent(new window.Event('change', { bubbles: true }));
   assert.equal(codeField.hidden, false);
 
-  // the administrator opens the settings and makes date of birth mandatory
+  // the patrol director opens Report requirements and makes date of birth required to submit
+  const req = await renderView('patrol', 'owner', T.owner);
+  (await patTab(req, 'Report requirements')).click();
+  await settle();
+  assert.match(req.textContent, /Start from a setup/);
+  assert.match(req.textContent, /Always checked, whatever is set here/);
+  clean(req, 'report requirements');
+  const row = req.querySelector('[data-item="patient.date_of_birth"]');
+  const level = row.querySelector('select');
+  level.value = 'submit'; level.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await settle();
+  const bar = req.querySelector('.req-savebar');
+  assert.equal(bar.hidden, false, 'unsaved changes show the save bar');
+  [...bar.querySelectorAll('button')].find((b) => b.textContent === 'Save').click();
+  await settle();
+  assert.equal(ok(await api('GET', '/patrol/requirements', { token: o })).rules.injury['patient.date_of_birth'].level, 'submit');
+  // the legal name keeps its own small dialog, from the cases Options
   const cases = await renderView('patrol', 'owner', T.owner);
   (await patTab(cases, 'All cases')).click();
   await settle();
-  [...cases.querySelectorAll('button')].find((b) => b.textContent === 'Form settings').click();
+  [...cases.querySelectorAll('button')].find((b) => b.textContent === 'Legal name on reports').click();
   await settle();
   const dlg = document.querySelector('.overlay');
-  assert.match(dlg.textContent, /Incident form: mandatory fields/);
   assert.match(dlg.textContent, /Full legal name of the resort/);
-  clean(dlg, 'form settings');
-  const dob = [...dlg.querySelectorAll('label.setting')].find((l) => l.textContent.includes('Date of birth')).querySelector('input');
-  dob.checked = true;
-  [...dlg.querySelectorAll('button')].find((b) => b.textContent === 'Save settings').click();
-  await settle();
-  assert.ok(ok(await api('GET', '/patrol/form', { token: o })).required.patient.includes('date_of_birth'));
-  // a patroller who is not an administrator does not see the settings button
+  clean(dlg, 'legal name');
+  dlg.querySelector('button').click();
+  // a patroller who is not the director can read the requirements but not change them, and has no settings in Options
   const pat = await renderView('patrol', 'patrol', T.patrol);
   (await patTab(pat, 'All cases')).click();
   await settle();
-  assert.equal([...pat.querySelectorAll('button')].some((b) => b.textContent === 'Form settings'), false);
-  ok(await api('PUT', '/patrol/form-config', { token: o, body: { required: { case: [], patient: ['chief_complaint', 'disposition'] } } }));
+  assert.equal([...pat.querySelectorAll('button')].some((b) => b.textContent === 'Report requirements' || b.textContent === 'Legal name on reports'), false);
+  ok(await api('PUT', '/patrol/requirements', { token: o, body: { rules: { injury: { 'patient.chief_complaint': { level: 'submit' }, 'patient.disposition': { level: 'submit' } }, medical: { 'patient.chief_complaint': { level: 'submit' }, 'patient.disposition': { level: 'submit' } } } } }));
 });
 
 test('patrol: the Cases search narrows by state chip, shows removable filters, and clears', skip(), async () => {

@@ -3,8 +3,9 @@
 // Every answer starts blank, so nothing is recorded that was not asked. A patient who is not able to decide cannot refuse:
 // care continues under implied consent. A parent or guardian signs for anyone under 18. A witness can sign too.
 
-import { get, post, patch } from '../api.js';
-import { h, clear, button, toast, formDialog, field, input, select, val, fmtDateTime, label, errorBox, state } from '../ui.js';
+import { get } from '../api.js';
+import { send, keptCase } from '../outbox.js';
+import { h, clear, button, toast, formDialog, field, input, select, val, fmtDateTime, label, errorBox, state, nowStamp } from '../ui.js';
 import { has } from './patrol-feat.js';
 import { signaturePad } from '../sigpad.js';
 
@@ -17,13 +18,18 @@ export async function renderRefusal(root, id, pid) {
   root.append(page);
   async function load() {
     let c;
-    try { c = await get(`/patrol/incidents/${id}`); } catch (err) { clear(page).append(h('p', null, h('a', { href: `#/patrol/case/${id}` }, 'Back to the case')), errorBox(err)); return; }
+    try { c = await get(`/patrol/incidents/${id}`); } catch (err) {
+      // No signal: the copy of the case kept on this phone, so the refusal can still be read out and signed.
+      const kept = keptCase(id);
+      if (kept && kept.data && kept.data.c && (!(err && err.status) || (globalThis.navigator && globalThis.navigator.onLine === false))) c = kept.data.c;
+      else { clear(page).append(h('p', null, h('a', { href: `#/patrol/case/${id}` }, 'Back to the case')), errorBox(err)); return; }
+    }
     const p = c.patients.find((x) => x.id === Number(pid));
     if (!p) { clear(page).append(h('p', null, h('a', { href: `#/patrol/case/${id}` }, 'Back to the case')), errorBox(new Error('Patient not found on this case'))); return; }
     if (p.voided_at) { clear(page).append(h('p', null, h('a', { href: `#/patrol/case/${id}` }, 'Back to the case')), h('p', { class: 'refusal-block' }, `This patient was marked entered in error: ${p.void_reason}.`)); return; }
     const sig = [...c.signatures].reverse().find((s) => s.kind === 'refusal_of_care' && s.patient_id === p.id);
     const wsig = [...c.signatures].reverse().find((s) => s.kind === 'witness' && s.patient_id === p.id);
-    const image = async (s) => { if (!s) return null; try { return (await get(`/patrol/incidents/${id}/signatures/${s.id}`)).image; } catch (_) { return null; } };
+    const image = async (s) => { if (!s || !s.id || id < 0) return null; try { return (await get(`/patrol/incidents/${id}/signatures/${s.id}`)).image; } catch (_) { return null; } };
     const [img, wimg] = await Promise.all([image(sig), image(wsig)]);
     clear(page).append(sheet(c, p, sig, img, wsig, wimg));
   }
@@ -109,15 +115,19 @@ export async function renderRefusal(root, id, pid) {
       if (g && (!val(fd, 'refusal_guardian_name') || !val(fd, 'refusal_guardian_relation'))) throw new Error('Give the parent or guardian\'s name and relationship');
       const needSig = !already || !pad.isEmpty();
       if (needSig && pad.isEmpty()) throw new Error('The signature area is empty');
-      await patch(`/patrol/incidents/${id}/patients/${p.id}`, { disposition: 'refused_care', form: {
+      // Through the outbox: with no signal the refusal and its signatures wait on this phone, in order, with the time signed.
+      const q = (method, path, body, text) => send(method, path, body, { caseId: id, label: text });
+      const r1 = await q('PATCH', `/patrol/incidents/${id}/patients/${p.id}`, { disposition: 'refused_care', form: {
         refusal_scope: val(fd, 'refusal_scope'), refusal_capacity: val(fd, 'refusal_capacity'), refusal_risks_explained: val(fd, 'refusal_risks_explained'),
         refusal_witness: val(fd, 'refusal_witness'), refusal_reason: val(fd, 'refusal_reason'), refusal_advice: val(fd, 'refusal_advice'), refusal_care_offered: val(fd, 'refusal_care_offered'),
         refusal_signer: g ? 'guardian' : 'patient', refusal_guardian_name: g ? val(fd, 'refusal_guardian_name') : null, refusal_guardian_relation: g ? val(fd, 'refusal_guardian_relation') : null,
-      } });
-      if (needSig) await post(`/patrol/incidents/${id}/signatures`, { kind: 'refusal_of_care', signer_name: val(fd, 'signer_name') || (g ? val(fd, 'refusal_guardian_name') : patientName) || 'Patient', signer_role: g ? val(fd, 'refusal_guardian_relation') : 'Patient', patient_id: p.id, image: pad.toDataUrl() });
-      if (!wpad.isEmpty()) await post(`/patrol/incidents/${id}/signatures`, { kind: 'witness', signer_name: val(fd, 'refusal_witness') || 'Witness', signer_role: 'Witness to the refusal', patient_id: p.id, image: wpad.toDataUrl() });
-      toast('Refusal recorded');
-      await load();
+      } }, 'Refusal of care');
+      const at = nowStamp();
+      const r2 = needSig ? await q('POST', `/patrol/incidents/${id}/signatures`, { kind: 'refusal_of_care', signer_name: val(fd, 'signer_name') || (g ? val(fd, 'refusal_guardian_name') : patientName) || 'Patient', signer_role: g ? val(fd, 'refusal_guardian_relation') : 'Patient', patient_id: p.id, image: pad.toDataUrl(), signed_at: at }, 'Refusal signature') : null;
+      const r3 = !wpad.isEmpty() ? await q('POST', `/patrol/incidents/${id}/signatures`, { kind: 'witness', signer_name: val(fd, 'refusal_witness') || 'Witness', signer_role: 'Witness to the refusal', patient_id: p.id, image: wpad.toDataUrl(), signed_at: at }, 'Witness signature') : null;
+      const queued = [r1, r2, r3].some((r) => r && r.queued);
+      toast(queued ? 'Refusal kept on this phone. It is sent when there is signal.' : 'Refusal recorded', queued ? 'warn' : 'ok');
+      if (!queued) await load();
     }, { submitText: 'Save refusal', wide: true });
     reflect();
     return form;

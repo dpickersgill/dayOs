@@ -29,6 +29,7 @@ import { drawLog } from './patrol-log.js';
 import { drawAvy } from './patrol-avy.js';
 import { drawRecords, renderRelease } from './patrol-records.js';
 import { drawOpsSettings } from './patrol-settings.js';
+import { drawRequirements } from './patrol-requirements.js';
 import { send as queue, keepCase, latestKept } from '../outbox.js';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -36,7 +37,7 @@ const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
 /** A banner that appears when the phone loses its connection, so nobody keeps typing into a page that is not saving. */
 function connectionBanner() {
   const el = h('div', { class: 'offline-banner', role: 'status', 'aria-live': 'polite', hidden: navigator.onLine !== false },
-    h('b', null, 'No connection. '), 'Vitals, treatments, time stamps and assessment answers are kept on this phone and sent when the signal returns. Other changes wait until then.');
+    h('b', null, 'No connection. '), 'Vitals, treatments, time stamps, assessment answers, signatures and the before-the-patient-leaves checklist are kept on this phone and sent when the signal returns. Other changes wait until then.');
   const sync = () => { if (!el.isConnected) { window.removeEventListener('online', sync); window.removeEventListener('offline', sync); return; } el.hidden = navigator.onLine !== false; };
   window.addEventListener('online', sync); window.addEventListener('offline', sync);
   return el;
@@ -68,7 +69,8 @@ export async function render(root, params = []) {
   if (params[0] === 'room') { await renderRoom(root); return; } // the patrol-room sign-in screen
   if (params[0] === 'release' && ONE.test(params[1] || '')) { await renderRelease(root, Number(params[1])); return; }
   const printPages = { handoff: renderHandoff, refusal: renderRefusal, takehome: renderTakehome };
-  if (printPages[params[0]] && ONE.test(params[1] || '') && ONE.test(params[2] || '')) {
+  // the refusal can be signed on a case started with no signal (temporary negative ids, kept on the phone)
+  if (printPages[params[0]] && (params[0] === 'refusal' ? CASE_ID : ONE).test(params[1] || '') && (params[0] === 'refusal' ? CASE_ID : ONE).test(params[2] || '')) {
     await printPages[params[0]](root, Number(params[1]), Number(params[2]), params[3]);
     return;
   }
@@ -100,6 +102,7 @@ export async function render(root, params = []) {
     ['passport', 'Skills', (b) => drawPassport(b, opts)],
     ...only('records', ['records', 'Records requests', drawRecords]),
     ...(['manage_settings', 'manage_schedule', 'manage_meds', 'run_sweep', 'avalanche'].some(has) ? [['settings', 'Patrol settings', drawOpsSettings]] : []),
+    ...(['manage_settings', 'approve_case', 'submit_case'].some(has) ? [['requirements', 'Report requirements', drawRequirements]] : []),
     ...only('reports', ['stats', 'Statistics', drawStats]),
     ...only('reports', ['network', 'Injury network', drawNetwork]),
     ...(me.is_reviewer || me.can_manage_review ? [['review', me.review_group ? 'Review' : 'Review group', (b) => drawReview(b, me)]] : []),
@@ -113,7 +116,7 @@ export async function render(root, params = []) {
     ['cases', 'Cases', ['cases', 'review', 'followup', 'records', 'stats', 'network']],
     ['people', 'People', ['schedule', 'cover', 'posts', 'team', 'training', 'passport']],
     ['gear', 'Gear', ['equipment', 'meds', 'lifts']],
-    ['admin', 'Admin', ['settings', 'access', 'levels']],
+    ['admin', 'Admin', ['settings', 'requirements', 'access', 'levels']],
   ].map(([id, text, keys]) => ({ id, text, items: keys.map((k) => items.find((i) => i[0] === k)).filter(Boolean) })).filter((s) => s.items.length);
   const wanted = SECTIONS.find((s) => s.items.some((i) => i[0] === params[0])) || SECTIONS[0];
   const body = h('div', { class: 'pbody' });
@@ -218,7 +221,8 @@ async function drawCases(box, { canAdmin } = {}) {
     h('div', { class: 'menu-items stack' },
       mgr ? button('Cases CSV (uses the filters)', () => download(`/patrol/incidents.csv${query() ? `?${query()}` : ''}`, 'cases.csv'), { small: true }) : null,
       mgr ? button('Patient statistics CSV', () => download('/patrol/patients.csv', 'patients.csv'), { small: true }) : null,
-      canAdmin ? button('Form settings', () => formSettingsDialog(), { small: true }) : null)) : null;
+      canAdmin ? button('Report requirements', () => { location.hash = '#/patrol/requirements'; }, { small: true }) : null,
+      canAdmin ? button('Legal name on reports', () => formSettingsDialog(), { small: true }) : null)) : null;
   clear(box).append(h('div', { class: 'stack cases' },
     h('div', { class: 'cases-bar' }, h('div', { class: 'grow search' }, q), exports),
     h('div', { class: 'cases-filters' }, stateBar, rangeBar, dates, h('div', { class: 'row' }, category, severity)),

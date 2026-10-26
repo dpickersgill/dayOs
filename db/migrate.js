@@ -736,6 +736,59 @@ const fieldKitSteps = [
 
 // Staff injuries, first step: when the owner and GM were told a patient is staff, and told again when they went to hospital.
 // Demos built on a real mountain: what OpenStreetMap says about a ski area, kept a week so a visitor's choice is quick.
+const reportRuleSteps = [
+  // Report requirements: each change to a mountain's rules is a version; a report keeps the version it was submitted under.
+  ['patrol_rule_versions', (c) => tableExists(c, 'patrol_rule_versions'), `CREATE TABLE patrol_rule_versions (
+    id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id  BIGINT UNSIGNED NOT NULL,
+    rules      MEDIUMTEXT NOT NULL,
+    preset     VARCHAR(20) NULL,
+    note       VARCHAR(255) NULL,
+    created_by BIGINT UNSIGNED NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY ix_prv_tenant (tenant_id, id),
+    CONSTRAINT fk_prv_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  ) ENGINE=InnoDB`],
+  // N/A with a reason, per field: { field_key: { reason, note, by, at } } on the case and on each patient.
+  ['incidents.rules_version_id', (c) => columnExists(c, 'incidents', 'rules_version_id'), 'ALTER TABLE incidents ADD COLUMN rules_version_id BIGINT UNSIGNED NULL, ADD COLUMN na TEXT NULL'],
+  // A checklist item skipped before the patient left (with the reason), and an item approved with an exception.
+  ['incident_skips', (c) => tableExists(c, 'incident_skips'), `CREATE TABLE incident_skips (
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id   BIGINT UNSIGNED NOT NULL,
+    incident_id BIGINT UNSIGNED NOT NULL,
+    patient_id  BIGINT UNSIGNED NULL,
+    gate        VARCHAR(20) NOT NULL DEFAULT 'leave',
+    item_key    VARCHAR(40) NOT NULL,
+    reason      VARCHAR(20) NOT NULL,
+    note        VARCHAR(300) NULL,
+    skipped_by  BIGINT UNSIGNED NULL,
+    skipped_at  DATETIME NOT NULL,
+    KEY ix_skips_case (tenant_id, incident_id),
+    CONSTRAINT fk_skips_incident FOREIGN KEY (tenant_id, incident_id) REFERENCES incidents(tenant_id, id)
+  ) ENGINE=InnoDB`],
+  ['incident_exceptions', (c) => tableExists(c, 'incident_exceptions'), `CREATE TABLE incident_exceptions (
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id   BIGINT UNSIGNED NOT NULL,
+    incident_id BIGINT UNSIGNED NOT NULL,
+    patient_id  BIGINT UNSIGNED NULL,
+    scope       VARCHAR(10) NOT NULL,
+    item_key    VARCHAR(40) NOT NULL,
+    label       VARCHAR(255) NOT NULL,
+    reason      VARCHAR(500) NOT NULL,
+    approved_by BIGINT UNSIGNED NOT NULL,
+    approved_at DATETIME NOT NULL,
+    KEY ix_exc_case (tenant_id, incident_id),
+    CONSTRAINT fk_exc_incident FOREIGN KEY (tenant_id, incident_id) REFERENCES incidents(tenant_id, id)
+  ) ENGINE=InnoDB`],
+  // Signatures, witnesses and skips can wait on a phone with no signal: client_ref stops a second copy when it is sent again.
+  ['offline signatures and witnesses', (c) => columnExists(c, 'incident_signatures', 'client_ref'), [
+    'ALTER TABLE incident_signatures ADD COLUMN client_ref VARCHAR(40) NULL, ADD UNIQUE KEY uq_isig_ref (tenant_id, client_ref)',
+    'ALTER TABLE incident_witnesses ADD COLUMN client_ref VARCHAR(40) NULL, ADD UNIQUE KEY uq_iwit_ref (tenant_id, client_ref)',
+    'ALTER TABLE incident_skips ADD COLUMN client_ref VARCHAR(40) NULL, ADD UNIQUE KEY uq_iskip_ref (tenant_id, client_ref)',
+  ]],
+  ['incident_patients.na', (c) => columnExists(c, 'incident_patients', 'na'), 'ALTER TABLE incident_patients ADD COLUMN na TEXT NULL'],
+];
+
 const skiAreaSteps = [
   ['ski_area_cache', (c) => tableExists(c, 'ski_area_cache'), `CREATE TABLE ski_area_cache (
     ref        VARCHAR(40) NOT NULL PRIMARY KEY,
@@ -993,7 +1046,7 @@ async function main() {
   await seedPatrolPlan(conn);
   await seedAssistantAddon(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

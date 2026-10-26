@@ -17,7 +17,8 @@ const conflict = (msg, details) => new AppError(409, msg, details);
 /** Express error middleware. Never leaks SQL or stack traces to clients. */
 function errorHandler(err, req, res, _next) {
   if (err instanceof AppError) {
-    return res.status(err.status).json({ error: err.message, details: err.details });
+    // extra: a few plain flags the screen can act on (for example whether an exception is possible); never data from the request
+    return res.status(err.status).json({ error: err.message, details: err.details, ...(err.extra && typeof err.extra === 'object' ? err.extra : {}) });
   }
   if (err && err.type === 'entity.parse.failed') {
     return res.status(400).json({ error: 'Invalid JSON body' });

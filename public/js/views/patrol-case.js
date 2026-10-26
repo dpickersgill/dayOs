@@ -10,7 +10,7 @@ import { has } from './patrol-feat.js';
 import { shareButton } from '../share.js';
 import { signaturePad } from '../sigpad.js';
 import { personPicker } from '../widgets.js';
-import { loadForm, keptForm, sectionPanel, sectionVisible } from './nsaar-form.js';
+import { loadForm, keptForm, sectionPanel, sectionVisible, naWords } from './nsaar-form.js';
 import { bedsideCard, voidedNote } from './patrol-bedside.js';
 import { collisionPanel } from './patrol-collision.js';
 import { checklistPanel, loadChecklists } from './patrol-checklists.js';
@@ -21,6 +21,7 @@ import { live, lateNote, treatmentName, atTime } from '../care-text.js';
 import { searchPanel, recordsPanel } from './patrol-search.js';
 import { legalHoldControl } from './patrol-records.js';
 import { photosPanel } from './patrol-photos.js';
+import { leaveDialog, leavePanel, skipLabel } from '../leavecheck.js';
 
 export const CATEGORIES = ['injury', 'collision', 'lost_person', 'equipment', 'medical', 'conduct', 'other'];
 export const SEVERITY = ['minor', 'moderate', 'serious', 'critical'];
@@ -155,8 +156,9 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
     return h('div', { class: 'stack case', 'data-mode': mode },
       wristband(c),
       version ? versionBanner() : null,
-      c.offline ? h('div', { class: 'warn-note', role: 'status' }, h('b', null, 'Started with no signal. '), 'Time stamps and bedside entries (vitals, injuries, treatments, assessments) are kept on this phone and sent with the case when the signal returns. The rest of the report waits until then.') : null,
+      c.offline ? h('div', { class: 'warn-note', role: 'status' }, h('b', null, 'Started with no signal. '), 'Time stamps, bedside entries (vitals, injuries, treatments, assessments), signatures and the before-the-patient-leaves checklist are kept on this phone and sent with the case when the signal returns. The rest of the report waits until then.') : null,
       outboxStrip(c),
+      editable || c.report_state !== 'draft' ? leavePanel({ ...c, waiting: pending(id) }, leaveCtx(editable), leaveOn()) : null,
       progressPanel(c, editable),
       panes.care, panes.report, panes.record);
   }
@@ -230,9 +232,44 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
     signed: (f) => c.signatures.some((x) => x.kind === f.kind && (!patient || x.patient_id === patient.id || x.patient_id === null)),
   });
 
+  /** Ask "before the patient leaves" (the patrol director turns it on under Report requirements). */
+  const leaveOn = () => Boolean(def && def.rules && def.rules.options && def.rules.options.leave);
+  const leaveCtx = (editable) => ({ id, editable, reload: load, redraw, refusalHref: (pid) => `#/patrol/refusal/${id}/${pid}` });
+  /** After an outcome or a hand-off: the checklist for whoever is leaving, once the page shows the new state. */
+  const askBeforeLeaving = (patientId, stamp = null) => {
+    if (!leaveOn() || !current) return;
+    // a stamp still waiting on the phone counts too, so the checklist opens with no signal
+    const base = { ...current, waiting: pending(id) };
+    const c = stamp ? { ...base, leave: null, events: [...(current.events || []), { kind: stamp, at: nowStamp(), patient_id: null }] } : base;
+    leaveDialog(c, leaveCtx(true), { patientId });
+  };
+
+  /**
+   * The report requirements for one row (the case, or one patient) as field key -> item. Online, the server worked them out;
+   * a case started with no signal marks fields from the rules the phone keeps (without counting what is left).
+   */
+  function reqMap(c, scope, pid) {
+    if (c.requirements) return new Map(c.requirements.items.filter((i) => i.scope === scope && (scope === 'case' ? !i.patient_id : i.patient_id === pid)).map((i) => [i.key, i]));
+    // a frozen copy, or a case only on this phone: the levels from the rules, and the N/A answers the row holds
+    const set = (def.rules || {})[c.category] || {};
+    const row = scope === 'case' ? c : live(c.patients).find((p) => p.id === pid) || {};
+    const na = row.na && typeof row.na === 'object' ? row.na : {};
+    const out = new Map(Object.entries(set).filter(([k, r]) => k.startsWith(`${scope}.`) && !(r.when || []).length).map(([k, r]) => [k.slice(scope.length + 1), { level: r.level, met: true, na: na[k.slice(scope.length + 1)] || null }]));
+    for (const [k, v] of Object.entries(na)) if (!out.has(k)) out.set(k, { level: 'submit', met: true, na: v });
+    return out;
+  }
+  /** N/A with a reason (or taking it away). Waits on the phone with no signal, like a vital sign. */
+  const setNa = (scope, pid) => async (key, reason, note) => {
+    try {
+      const r = await send('PUT', `/patrol/incidents/${id}/na`, { scope, field: key, patient_id: pid || null, reason, note: note || null }, { caseId: id, label: reason ? 'N/A answer' : 'N/A taken away' });
+      sentToast(r, reason ? 'Saved as N/A' : 'N/A taken away');
+      if (r && r.queued) redraw(); else await load();
+    } catch (err) { fail(err); }
+  };
+
   function caseSection(c, editable, sectionId, extra, suggest) {
     const section = def.sections.find((x) => x.id === sectionId);
-    return sectionPanel({ def, section, scope: 'case', row: c, editable, required: def.required, ctx: sigCtx(c), trails, extra, suggest,
+    return sectionPanel({ def, section, scope: 'case', row: c, editable, required: def.required, reqs: reqMap(c, 'case', null), onNa: c.requirements ? setNa('case', null) : null, ctx: sigCtx(c), trails, extra, suggest,
       onSave: async (body, o) => { await patch(`/patrol/incidents/${id}`, body); if (o && o.next) goNext = `case:${sectionId}`; await load(); } });
   }
 
@@ -267,6 +304,28 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
     setTimeout(() => el.classList.remove('flash'), 2500);
   }
 
+  /** Required items not answered yet: "required to submit" first, then "for approval", each in the order of the report. */
+  function missingItems(c) {
+    if (!c.requirements) return [];
+    const order = new Map(def.sections.map((x, i) => [x.id, i]));
+    const pidOrder = new Map(live(c.patients).map((p, i) => [p.id, i]));
+    return c.requirements.items.filter((i) => !i.met && !i.exception && ['submit', 'approve'].includes(i.level))
+      .sort((a, b) => (a.level === b.level ? 0 : a.level === 'submit' ? -1 : 1) || (pidOrder.get(a.patient_id) ?? -1) - (pidOrder.get(b.patient_id) ?? -1) || (order.get(a.section) ?? 99) - (order.get(b.section) ?? 99));
+  }
+  /** "3 required, 1 for approval" and a button to the next one. */
+  function requiredLine(c) {
+    const gaps = missingItems(c);
+    if (!c.requirements || !c.requirements.items.some((i) => ['submit', 'approve'].includes(i.level))) return null;
+    const sub = gaps.filter((i) => i.level === 'submit').length; const app = gaps.length - sub;
+    if (!gaps.length) return h('p', { class: 'req-line done', 'data-area': 'required' }, 'Everything your patrol director requires is in.');
+    const words = [sub ? `${sub} required before you submit` : null, app ? `${app} your reviewer will need` : null].filter(Boolean).join(', ');
+    const next = gaps[0];
+    return h('div', { class: 'req-line', 'data-area': 'required' },
+      h('span', null, h('b', null, `${gaps.length} left: `), words),
+      button('Next missing item', () => jumpTo(next.where), { small: true }),
+      h('span', { class: 'muted small' }, `Next: ${next.who ? `${next.who}, ` : ''}${next.label}`));
+  }
+
   // ------------------------------------------------------------ progress: what is done, and the one next thing to do
   function progressPanel(c, editable) {
     if (c.report_state !== 'draft' || !editable) return null;
@@ -285,6 +344,10 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
     if (refused) steps.push({ key: 'refusal', text: 'Get the refusal signed', done: c.signatures.some((x) => x.kind === 'refusal_of_care' && x.patient_id === refused.id), go: () => { location.hash = `#/patrol/refusal/${id}/${refused.id}`; } });
     steps.push({ key: 'lead', text: 'Name the lead responder', done: c.responders.some((r) => r.role === 'lead'), go: () => { setMode('report'); responderDialog(); } });
     steps.push({ key: 'story', text: 'Say what happened', done: Boolean(c.narrative && c.narrative.trim()), go: () => jumpTo({ area: 'narrative' }) });
+    const gaps = missingItems(c);
+    if (c.requirements && c.requirements.items.some((i) => i.level === 'submit')) {
+      steps.push({ key: 'required', text: 'Fill in what is required', done: !gaps.some((i) => i.level === 'submit'), go: () => { const n = gaps[0]; if (n) jumpTo(n.where); } });
+    }
     const done = steps.filter((x) => x.done).length;
     const next = steps.find((x) => !x.done && !x.skip);
     const ready = !next;
@@ -295,6 +358,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
         h('div', { class: 'progress-words' }, h('h2', null, ready ? 'Ready to submit' : 'Next step'), h('p', { class: 'muted' }, ready ? 'Everything the report needs is in. Check it over, then submit it for approval.' : `${done} of ${steps.length} steps done. ${next.text} is next.`)),
         ready ? button('Submit report', () => { const b = page.querySelector('[data-act=submit]'); if (b) b.click(); }, { kind: 'primary' }) : button(next.text, () => next.go(), { kind: 'primary' })),
       h('div', { class: 'pbar', role: 'img', 'aria-label': `${done} of ${steps.length} steps done` }, fill),
+      requiredLine(c),
       h('ol', { class: 'psteps' }, steps.map((st) => {
         const b = h('button', { type: 'button', class: `pstep${st.done ? ' done' : ''}${st === next ? ' next' : ''}`, 'data-step': st.key }, st.text);
         b.addEventListener('click', () => st.go());
@@ -340,7 +404,12 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       const b = h('button', { type: 'button', class: 'stage todo', 'data-stage': k }, h('span', { class: 'sname' }, label(k)), h('span', null, 'Tap to stamp'));
       b.addEventListener('click', async () => {
         b.disabled = true;
-        try { const r = await send('POST', `/patrol/incidents/${id}/events`, { kind: k, at: nowStamp() }, { caseId: id, label: label(k) }); sentToast(r, `${label(k)} stamped`); if (r && r.queued) redraw(); else await load(); } catch (err) { fail(err); b.disabled = false; }
+        try {
+          const r = await send('POST', `/patrol/incidents/${id}/events`, { kind: k, at: nowStamp() }, { caseId: id, label: label(k) });
+          sentToast(r, `${label(k)} stamped`);
+          if (r && r.queued) redraw(); else await load();
+          if (['handoff', 'transport_started'].includes(k)) askBeforeLeaving(null, r && r.queued ? k : null);
+        } catch (err) { fail(err); b.disabled = false; }
       });
       return b;
     };
@@ -389,8 +458,14 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
     const actions = [];
     if (!version && c.report_state === 'draft') {
       const send_ = async () => {
-        try { await post(`/patrol/incidents/${id}/submit`, {}); } catch (err) { showProblems(err, 'Not ready to submit', editable); return; }
-        toast('Report submitted'); await load();
+        let r;
+        try { r = await post(`/patrol/incidents/${id}/submit`, {}); } catch (err) { showProblems(err, 'Not ready to submit', editable); return; }
+        await load();
+        // Submitting is not held up by what only the reviewer needs, but the patroller hears about it now, while it can still be found.
+        if (r && r.for_approval && r.for_approval.length) {
+          dialog('Submitted', [h('p', null, 'Your report is with the review group. Your reviewer will also need these, so they may send it back for them:'),
+            h('ul', { class: 'problems' }, r.for_approval.map((x) => h('li', null, x.message)))]);
+        } else toast('Report submitted');
       };
       const submit = button('Submit report', async () => {
         // The report check is advice: if it cannot be fetched, the submit goes ahead and the required-field check still runs.
@@ -410,7 +485,10 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
     } else if (!version) {
       if (has('approve_case') && c.report_state !== 'approved') actions.push(button('Approve and lock', () => confirmDialog('Approve this report?', 'Approved reports are locked. Corrections afterwards go in as notes, or you can reopen the report.', 'Approve', async () => {
         try { await post(`/patrol/incidents/${id}/approve`, {}); } catch (err) {
-          if (err.status === 409 && Array.isArray(err.details) && err.details.length) { showProblems(err, 'Not ready to approve', editable); return; }
+          if (err.status === 409 && Array.isArray(err.details) && err.details.length) {
+            if (canExcept(c, err.details)) { exceptionDialog(c, err.details, {}); return; }
+            showProblems(err, 'Not ready to approve', editable); return;
+          }
           throw err;
         }
         toast('Report approved');
@@ -433,6 +511,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       !version && rv.changes_requested ? changesBox(rv.changes_requested) : null,
       !version && rv.escalated && c.report_state === 'submitted' ? h('p', { class: 'review-flag', role: 'status' }, h('strong', null, 'Escalated'), ` by ${rv.escalated.by || 'a reviewer'}: ${rv.escalated.note}`) : null,
       reviewPanel,
+      gapsOnRecord(c),
       !version && c.report_state !== 'approved' ? checkList(c.check, c.report_state === 'draft' ? editable : true) : null,
       actions.length ? h('div', { class: 'row actions' }, actions) : null,
       !version && rv.history && rv.history.length ? reviewHistory(rv.history) : null);
@@ -460,7 +539,10 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       const checklist = Object.fromEntries(boxes.map(([k, cb]) => [k, cb.checked]));
       if (Object.values(checklist).some((v) => !v)) { err.append(h('p', { class: 'error-box', role: 'alert' }, 'Tick every review check first. If one does not apply to this case, tick it.')); return; }
       try { await post(`/patrol/incidents/${id}/approve`, { checklist, note: note.value.trim() || undefined }); } catch (ex) {
-        if (ex.status === 409 && Array.isArray(ex.details) && ex.details.length) { showProblems(ex, 'Not ready to approve', false); return; }
+        if (ex.status === 409 && Array.isArray(ex.details) && ex.details.length) {
+          if (canExcept(c, ex.details)) { exceptionDialog(c, ex.details, { checklist, note: note.value.trim() || undefined }); return; }
+          showProblems(ex, ex.details.every((d) => d.level === 'approve') ? 'Not ready to approve: send it back, or ask the Patrol Director' : 'Not ready to approve', false); return;
+        }
         err.append(errorBox(ex)); return;
       }
       toast('Approved. The patroller has been told.');
@@ -469,9 +551,69 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
     return h('section', { class: 'review-box stack' },
       h('h2', null, 'Review'),
       h('p', { class: 'muted small' }, `Signed off by the patroller${c.review.signed_again ? ' again, after changes' : ''}. Read the report, then tick each check.`),
+      reviewGaps(c),
       h('div', { class: 'stack tight' }, boxes.map((b) => b[2])),
       note, err,
       h('div', { class: 'row' }, approve, button('Send back with comments', () => sendBackDialog(c)), button('Escalate', () => escalateDialog(c), { small: true })));
+  }
+
+  /** For the reviewer: what is still missing for approval, and what the patroller answered N/A or skipped, and why. */
+  function reviewGaps(c) {
+    const reqs = c.requirements ? c.requirements.items : [];
+    const missing = reqs.filter((i) => !i.met && !i.exception && ['submit', 'approve'].includes(i.level));
+    const nas = reqs.filter((i) => i.na);
+    const skips = c.skips || [];
+    if (!missing.length && !nas.length && !skips.length) return null;
+    const who = (i) => (i.who ? `${i.who}: ` : '');
+    return h('div', { class: 'review-gaps stack tight', 'data-area': 'review-gaps' },
+      missing.length ? h('div', null, h('h3', null, `Missing for approval (${missing.length})`),
+        h('ul', null, missing.map((i) => h('li', null, `${who(i)}${i.label}`))),
+        h('p', { class: 'muted small' }, c.requirements.can_except ? 'Send it back for these, or approve with an exception and say why for each.' : 'Send it back for these. Only the Patrol Director can approve with an exception.')) : null,
+      nas.length ? h('div', null, h('h3', null, `Answered N/A (${nas.length})`), h('ul', null, nas.map((i) => h('li', null, `${who(i)}${i.label}: `, h('i', null, naWords(def, i.na)))))) : null,
+      skips.length ? h('div', null, h('h3', null, `Skipped before the patient left (${skips.length})`), h('ul', null, skips.map((x) => h('li', null, `${skipLabel(x.item_key)}: `, h('i', null, naWords(def, { reason: x.reason, note: x.note })), x.skipped_by ? h('span', { class: 'muted' }, ` (${x.skipped_by})`) : null)))) : null);
+  }
+
+  /**
+   * What the report says about its own gaps, on every copy (printed, frozen and released): items approved with an
+   * exception and why, items answered N/A and why, and checklist items skipped before the patient left.
+   */
+  function gapsOnRecord(c) {
+    const exc = c.exceptions || [];
+    const skips = c.skips || [];
+    const nas = [];
+    const naRows = [['', c.na], ...live(c.patients).map((p) => [`${p.first_name || ''} ${p.last_name || ''}`.trim(), p.na])];
+    const labelOf = (key) => (def.fields.find((f) => f.key === key) || { label: key === 'narrative' ? 'Narrative' : key === 'photos' ? 'Photos' : key }).label;
+    for (const [who, na] of naRows) for (const [k, v] of Object.entries(na && typeof na === 'object' ? na : {})) nas.push({ who, label: labelOf(k), na: v });
+    if ((c.report_state !== 'approved' && !version) || (!exc.length && !skips.length && !nas.length)) return null;
+    return h('section', { class: 'record-gaps stack tight', 'data-area': 'record-gaps' },
+      exc.length ? h('div', null, h('h3', null, 'Approved with exceptions'),
+        h('ul', null, exc.map((e) => h('li', null, h('b', null, e.label), `: ${e.reason}`, h('span', { class: 'muted' }, ` (${e.approved_by || 'Patrol Director'}, ${fmtDateTime(e.approved_at)})`))))) : null,
+      nas.length ? h('div', null, h('h3', null, 'Answered N/A'), h('ul', null, nas.map((x) => h('li', null, `${x.who ? `${x.who}: ` : ''}${x.label}: `, h('i', null, naWords(def, x.na)))))) : null,
+      skips.length ? h('div', null, h('h3', null, 'Skipped before the patient left'), h('ul', null, skips.map((x) => {
+        const p = live(c.patients).find((q) => q.id === x.patient_id);
+        return h('li', null, `${p ? `${p.first_name} ${p.last_name}: ` : ''}${skipLabel(x.item_key)}: `, h('i', null, naWords(def, { reason: x.reason, note: x.note })), x.skipped_by ? h('span', { class: 'muted' }, ` (${x.skipped_by})`) : null);
+      }))) : null);
+  }
+
+  /** Only "required to approve" gaps are left and this reviewer is the Patrol Director. */
+  const canExcept = (c, details) => Boolean(c.requirements && c.requirements.can_except) && details.every((d) => d.level === 'approve' && d.field);
+
+  /**
+   * Approve with an exception: the Patrol Director gives a reason for each missing item. Each one is kept with the report
+   * and shows on every copy, including copies released to an insurer, a lawyer or the patient.
+   */
+  function exceptionDialog(c, details, body) {
+    const rows = details.map((d, i) => ({ d, box: h('textarea', { name: `r${i}`, rows: 2, maxlength: 500, required: true, minlength: 5, placeholder: 'Why the report can be approved without it' }) }));
+    formDialog('Approve with an exception', h('div', { class: 'stack' },
+      h('p', null, 'These are still missing. Give a reason for each. The reasons are kept with the report and show on every copy, including copies released outside.'),
+      ...rows.map(({ d, box }) => field(d.message, box))),
+    async () => {
+      const exceptions = rows.map(({ d, box }) => ({ scope: d.scope, field: d.field, patient_id: d.patient_id || null, reason: box.value.trim() }));
+      if (exceptions.some((x) => x.reason.length < 5)) throw new Error('Give a reason for each item (a few words at least)');
+      await post(`/patrol/incidents/${id}/approve`, { ...body, exceptions });
+      toast('Approved with exceptions. The patroller has been told.');
+      await load();
+    }, { submitText: 'Approve with exceptions', wide: true });
   }
 
   function sendBackDialog(c) {
@@ -668,8 +810,14 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
     const base = `/patrol/incidents/${id}/patients/${p.id}`;
     const suggest = Object.fromEntries(Object.entries(p.derived || {}).map(([k, v]) => [k, { value: v, from: 'the bedside card' }]));
     const sections = def.sections.filter((x) => x.scope === 'patient' && sectionShows(x, c, p)).map((section) => sectionPanel({
-      def, section, scope: 'patient', row: p, editable, required: def.required, ctx: sigCtx(c, p), trails, suggest, open: section.id === 'patient' && live(c.patients).length === 1 && editable && !p.chief_complaint,
-      onSave: async (body, o) => { await patch(base, body); if (o && o.next) goNext = `${p.id}:${section.id}`; await load(); },
+      def, section, scope: 'patient', row: p, editable, required: def.required, reqs: reqMap(c, 'patient', p.id), onNa: c.requirements ? setNa('patient', p.id) : null, ctx: sigCtx(c, p), trails, suggest, open: section.id === 'patient' && live(c.patients).length === 1 && editable && !p.chief_complaint,
+      onSave: async (body, o) => {
+        await patch(base, body);
+        if (o && o.next) goNext = `${p.id}:${section.id}`;
+        await load();
+        // An outcome just recorded: the patient is leaving, so ask for what can only be collected now.
+        if (body.disposition && body.disposition !== p.disposition) askBeforeLeaving(p.id);
+      },
     }));
     return h('article', { class: 'stack patient', 'data-patient': p.id }, h('h3', null, `Patient form: ${p.first_name} ${p.last_name}`), whoRow(p, editable), ...sections);
   }

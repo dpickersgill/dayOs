@@ -92,14 +92,20 @@ function suggestText(f, v) {
  * starts with the suggestion and says where it came from; a field that already holds something different shows what the
  * bedside entries say, so the patroller can decide which is right.
  */
-export function sectionPanel({ def, section, scope, row, editable, required, ctx, trails, onSave, extra, open = false, suggest = {} }) {
+/**
+ * reqs: Map of field key -> { level, met, na, na_allowed } from the case's report requirements, for this row (the case, or
+ * one patient). onNa(key, reason, note): answer a required field N/A with a reason (reason null takes it away).
+ */
+export function sectionPanel({ def, section, scope, row, editable, required, reqs = null, onNa = null, ctx, trails, onSave, extra, open = false, suggest = {} }) {
   const fields = def.fields.filter((f) => f.section === section.id && f.scope === scope);
-  const mandatory = new Set(required[scope]);
+  const mandatory = reqs ? new Set([...reqs].filter(([, r]) => r.level === 'submit').map(([k]) => k)) : new Set(required[scope]);
+  const left = reqs ? fields.filter((f) => { const r = reqs.get(f.key); return r && !r.met && ['submit', 'approve'].includes(r.level); }).length : 0;
   const base = valuesOf(def.fields.filter((f) => f.scope === scope), row);
-  const head = [h('summary', null, section.title), section.note ? h('p', { class: 'muted small nsaar-note' }, section.note) : null];
+  const head = [h('summary', null, section.title, left && editable ? h('span', { class: 'req-left', 'data-left': left }, ` ${left} required left`) : null), section.note ? h('p', { class: 'muted small nsaar-note' }, section.note) : null];
 
   if (!editable) {
-    const lines = fields.map((f) => [f.label, display(f, row, ctx)]).filter(([, v]) => v);
+    const naText = (f) => { const r = reqs && reqs.get(f.key); return r && r.na ? `N/A: ${naWords(def, r.na)}` : ''; };
+    const lines = fields.map((f) => [f.label, display(f, row, ctx) || naText(f)]).filter(([, v]) => v);
     const viewPin = fields.some((f) => f.type === 'gps') && row.gps_lat !== null && row.gps_lat !== undefined && row.gps_lng !== null && row.gps_lng !== undefined
       ? button('View the pin on the map', () => pinDialog({ at: { lat: Number(row.gps_lat), lng: Number(row.gps_lng) }, editable: false, title: 'Incident location' }), { small: true }) : null;
     return h('details', { class: 'panel nsaar-sec', open, 'data-section': section.id }, ...head, extra || null, viewPin, lines.length ? h('dl', { class: 'kv' }, lines.map(([k, v]) => [h('dt', null, k), h('dd', null, v)])) : h('p', { class: 'muted' }, 'Nothing recorded.'));
@@ -111,7 +117,24 @@ export function sectionPanel({ def, section, scope, row, editable, required, ctx
     for (const c of controls) if (c.get) vals[c.f.key] = c.get();
     for (const c of controls) c.wrap.hidden = !holds(c.f, vals);
   };
-  const mark = (f) => (mandatory.has(f.key) ? h('span', { class: 'req', title: 'Mandatory before the report can be submitted' }, ' *') : null);
+  const TAG = { submit: ['Required', 'Needed before the report can be submitted'], approve: ['For approval', 'Needed before the report is approved. You can submit without it; the reviewer will ask.'], recommended: ['Recommended', 'Your patrol director recommends this. It never stops anything.'] };
+  const mark = (f) => {
+    if (!reqs) return mandatory.has(f.key) ? h('span', { class: 'req', title: 'Mandatory before the report can be submitted' }, ' *') : null;
+    const r = reqs.get(f.key);
+    if (!r || !TAG[r.level]) return null;
+    return h('span', { class: 'req-tag', 'data-level': r.level, 'data-met': String(Boolean(r.met)), title: TAG[r.level][1] }, TAG[r.level][0]);
+  };
+  // N/A with a reason, for a required field that cannot be answered: shown in the report instead of a blank.
+  const naLine = (f) => {
+    const r = reqs && reqs.get(f.key);
+    if (!r || !onNa || !r.na_allowed || !['submit', 'approve'].includes(r.level)) return null;
+    if (r.na) {
+      return h('span', { class: 'na-line', 'data-na': f.key }, h('b', null, 'N/A: '), naWords(def, r.na), ' ',
+        h('button', { type: 'button', class: 'linkish', onclick: () => onNa(f.key, null) }, 'Answer it instead'));
+    }
+    if (r.met) return null;
+    return h('button', { type: 'button', class: 'linkish na-ask', 'data-na-ask': f.key, onclick: () => naDialog(def, f, (reason, note) => onNa(f.key, reason, note)) }, 'Cannot answer? N/A with a reason');
+  };
   const naButton = (f, el) => button(f.none ? 'None' : 'N/A', () => { el.value = f.none ? 'None' : 'N/A'; reflect(); }, { small: true });
 
   function build(f) {
@@ -252,6 +275,8 @@ export function sectionPanel({ def, section, scope, row, editable, required, ctx
     }
     wrap.dataset.field = f.key;
     if (sgNote) { wrap.append(sgNote); if (useSg) wrap.classList.add('prefilled'); }
+    const na = naLine(f);
+    if (na) wrap.append(na);
     controls.push({ f, wrap, get });
     return wrap;
   }
@@ -282,32 +307,45 @@ export function sectionPanel({ def, section, scope, row, editable, required, ctx
   }
 }
 
+// ---------------------------------------------------------------- N/A with a reason
+const NA_FALLBACK = [['declined', 'Patient declined to answer'], ['unable', 'Patient could not answer'], ['left', 'Patient left before it was asked'], ['not_applicable', 'Does not apply'], ['other', 'Other']];
+const naReasons = (def) => (def && def.na_reasons ? def.na_reasons.map((r) => [r.value, r.label]) : NA_FALLBACK);
+/** "Patient declined to answer", or the note for Other. */
+export function naWords(def, na) {
+  if (!na) return '';
+  const label = (naReasons(def).find(([v]) => v === na.reason) || [null, na.reason])[1];
+  return na.reason === 'other' && na.note ? na.note : `${label}${na.note ? ` (${na.note})` : ''}`;
+}
+/** Asks why a required field cannot be answered. Works with no signal: the answer waits on the phone like a vital sign. */
+export function naDialog(def, f, done) {
+  const choices = naReasons(def);
+  const radios = choices.map(([v, t], i) => h('label', { class: 'check' }, h('input', { type: 'radio', name: 'na_reason', value: v, required: true, checked: i === 0 }), ` ${t}`));
+  const note = h('input', { name: 'na_note', maxlength: 300, placeholder: 'Say why (needed for Other)' });
+  formDialog(`${f.label}: N/A`, h('div', { class: 'stack' },
+    h('p', { class: 'muted small' }, 'The report shows the reason instead of a blank, and your reviewer sees it.'),
+    h('fieldset', { class: 'stack tight' }, h('legend', null, 'Why can it not be answered?'), ...radios),
+    field('Note', note)),
+  async (fd) => {
+    const reason = String(fd.get('na_reason') || '');
+    const text = String(fd.get('na_note') || '').trim();
+    if (reason === 'other' && !text) throw new Error('Say why, when the reason is Other');
+    await done(reason, text || null);
+  }, { submitText: 'Save N/A' });
+}
+
 // ---------------------------------------------------------------- administrator settings
+/** The resort's full legal name, printed on every copy of the report. What a report must hold is under Admin, Report requirements. */
 export async function formSettingsDialog(onDone) {
   const def = await loadForm(true);
-  const mandatory = { case: new Set(def.required.case), patient: new Set(def.required.patient) };
   const legal = h('input', { name: 'legal_name', value: def.resort.legal_name || '', maxlength: 255, placeholder: def.resort.name });
-  const boxes = [];
-  const sections = def.sections.map((s) => {
-    const fields = def.fields.filter((f) => f.section === s.id && f.scope === s.scope && f.locked !== 'never');
-    const items = fields.map((f) => {
-      const box = h('input', { type: 'checkbox', checked: f.locked === 'always' || mandatory[f.scope].has(f.key), disabled: f.locked === 'always' });
-      if (!f.locked) boxes.push([f, box]);
-      return h('label', { class: 'check setting' }, box, ` ${f.label}`, f.locked === 'always' ? h('span', { class: 'muted' }, ' (always required)') : null, f.when ? h('span', { class: 'muted' }, ' (only when it applies)') : null);
-    });
-    return h('fieldset', { class: 'stack tight' }, h('legend', null, `${s.title}`, h('span', { class: 'muted small' }, s.scope === 'patient' ? ' , asked for each patient' : ' , asked once per incident')), h('div', { class: 'settings-list' }, items));
-  });
-  formDialog('Incident form: mandatory fields', h('div', { class: 'stack' },
-    h('p', { class: 'muted' }, 'Tick the fields that must be filled in before a report can be submitted. Drafts can always be saved with gaps. N/A, Unknown and None count as an answer, as the form guide asks. Fields that depend on another answer are only checked when they apply.'),
+  formDialog('Legal name on reports', h('div', { class: 'stack' },
     field('Full legal name of the resort', legal, 'Printed on every copy of the report. Leave blank to use the mountain name.'),
-    ...sections),
+    h('p', { class: 'muted small' }, 'Which fields a report must hold is set under Admin, Report requirements.')),
   async () => {
-    const required = { case: [], patient: [] };
-    for (const [f, box] of boxes) if (box.checked) required[f.scope].push(f.key);
-    await put('/patrol/form-config', { required, legal_name: legal.value.trim() || null });
+    await put('/patrol/form-config', { legal_name: legal.value.trim() || null });
     forgetForm();
-    toast('Form settings saved');
+    toast('Saved');
     if (onDone) await onDone();
-  }, { wide: true, submitText: 'Save settings' });
+  }, { submitText: 'Save' });
 }
 export { errorBox, clear, patch };
