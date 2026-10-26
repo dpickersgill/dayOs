@@ -151,6 +151,18 @@ Five wrong passwords or codes lock that login for 15 minutes; sign-in is also li
 Sessions last 2 hours. **Address allowlist (optional):** `PLATFORM_ALLOW_IPS` = comma-separated addresses allowed to use the console.
 `PLATFORM_TOTP_SECRET` (an authenticator code for the platform key itself) still works if you keep key sign-in on.
 
+## Prospect outreach (platform console, Prospects, Outreach)
+
+Outreach emails go from your own Google Workspace mailbox, never through Postmark (Postmark carries the mountains' email and does not allow cold outreach). Use a separate domain for it, so runmyresort.com's reputation is never at risk.
+
+1. **Workspace**: buy a second domain (for example verdynt-mail.com), set up Google Workspace on it with one mailbox, and turn on SPF, DKIM and DMARC in Workspace (Admin, Apps, Gmail, Authenticate email). Send normal mail from it for a week or two before outreach starts.
+2. **Connect it**: in Cloud Shell, from the unzipped folder: `bash scripts/outreach-setup.sh you@your-outreach-domain.com`. It makes the service account and key, connects the live service (staging never sends outreach) and adds the `summitops-outreach` Cloud Scheduler job (every 30 minutes, weekdays 8 to 5 Eastern).
+3. **Authorize it** in Google Workspace Admin: Security, Access and data control, API controls, Manage domain-wide delegation, Add new, with the client ID the script prints and the scopes `https://www.googleapis.com/auth/gmail.send,https://www.googleapis.com/auth/gmail.readonly`.
+4. **In the console**: Prospects, Outreach, Settings. Your name, company line and a postal address (required in every commercial email), the sending hours and the daily cap. Then Send a test to me.
+5. **APP_URL** must be set on the live service: the "not interested" link in every email points at it (`/o/...`).
+
+Day to day: on a prospect, People, Start outreach drafts the first email (by the assistant when it is on). Approve it under Outreach. Follow-ups go on days 7, 16, 30 and 45 as replies in the same thread, then an update every 90 days. A reply, a bounce, "not interested" or moving the prospect to In conversation or later stops it. Not interested and bounced addresses are never emailed again.
+
 ## Two-step sign-in recovery
 - A user who lost their phone: use a recovery code, or an owner/manager clicks **Reset two-step** in Settings > Users.
 - If the only owner is locked out, reset in SQL (Cloud Shell, with DB env vars):

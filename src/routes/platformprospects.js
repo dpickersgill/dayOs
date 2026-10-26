@@ -129,6 +129,9 @@ module.exports = function prospectsRouter(log) {
     const notes = await rows(pool, 'SELECT * FROM prospect_notes WHERE prospect_id = ? ORDER BY id DESC LIMIT 200', [p.id]);
     // A website lead from the same mountain, so a walkthrough request is not missed.
     const leads = await rows(pool, 'SELECT id, created_at, kind, name, email, status FROM site_leads WHERE mountain LIKE ? ORDER BY id DESC LIMIT 5', [`%${p.name.replace(/\(.*$/, '').trim().split(/\s+/).slice(0, 2).join(' ')}%`]).catch(() => []);
+    // Each person's outreach, if any (the latest sequence for their address).
+    const outreach = await rows(pool, 'SELECT id, contact_id, status, step, next_at, stop_reason FROM outreach_sequences WHERE prospect_id = ? ORDER BY id', [p.id]).catch(() => []);
+    for (const c of contacts) c.outreach = outreach.filter((o) => o.contact_id === c.id).pop() || null;
     res.json({ ...P.shape(p), contacts, notes, leads });
   });
 
@@ -140,6 +143,7 @@ module.exports = function prospectsRouter(log) {
     if (!before) throw notFound('Prospect');
     await pool.query(`UPDATE prospects SET ${set.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, [...set.map((k) => (k === 'indy_pass' && b[k] !== null ? (b[k] ? 1 : 0) : b[k])), before.id]);
     // A stage change goes on the timeline by itself, so the history reads without anyone writing it up.
+    if (b.stage && b.stage !== before.stage) await require('../lib/outreach').stopForProspect(pool, before.id, b.stage); // talking or done: outreach stops
     if (b.stage && b.stage !== before.stage) {
       const name = Object.fromEntries(P.STAGES);
       await pool.query('INSERT INTO prospect_notes (prospect_id, kind, body, actor) VALUES (?, ?, ?, ?)', [before.id, 'stage', `${name[before.stage] || before.stage} → ${name[b.stage]}`, req.operator || null]);

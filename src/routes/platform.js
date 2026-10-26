@@ -406,6 +406,7 @@ router.post('/billing/plans/:id/sync', async (req, res) => {
 
 // ---------------------------------------------------------------- prospects: the ski areas we are selling to
 router.use('/prospects', require('./platformprospects')(log));
+router.use('/outreach', require('./platformoutreach')(log));
 
 // ---------------------------------------------------------------- website leads (Contact page)
 router.get('/leads', async (req, res) => {

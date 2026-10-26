@@ -135,6 +135,15 @@ function createApp() {
   app.get('/help/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'help.html')));
   app.get('/lost/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'lost.html')));
   app.get('/reserve/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'reserve.html')));
+  // An outreach email's "not interested" link: the page, and a mail app's one-click unsubscribe (a POST to the same address).
+  app.get('/o/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'outreach-stop.html')));
+  app.post('/o/:token', rateLimit({ windowMs: 60_000, max: 30 }), async (req, res, next) => {
+    try {
+      if (!/^[a-f0-9]{32}$/.test(req.params.token)) return res.status(404).send('Not found');
+      const seq = await require('./lib/outreach').notInterested(require('./db').pool, req.params.token);
+      return seq ? res.status(200).send('Unsubscribed') : res.status(404).send('Not found');
+    } catch (err) { return next(err); }
+  });
 
   // The public lesson booking page, one per mountain, read from the URL like the help page.
   app.get('/book/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'book.html')));

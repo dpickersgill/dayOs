@@ -1210,6 +1210,77 @@ const partnerSteps = [
   ) ENGINE=InnoDB`],
 ];
 
+// Prospect outreach: emails from the operator's own mailbox on a cadence, until a reply, a bounce or "not interested"
+// (src/lib/outreach.js). The suppression list is permanent.
+const outreachSteps = [
+  ['outreach_settings', (c) => tableExists(c, 'outreach_settings'), `CREATE TABLE outreach_settings (
+    id            TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+    sender_name   VARCHAR(100) NULL,
+    company_line  VARCHAR(150) NULL,
+    postal_address VARCHAR(300) NULL,
+    daily_cap     INT UNSIGNED NOT NULL DEFAULT 25,
+    send_from_hour TINYINT UNSIGNED NOT NULL DEFAULT 9,
+    send_to_hour  TINYINT UNSIGNED NOT NULL DEFAULT 16,
+    timezone      VARCHAR(40) NOT NULL DEFAULT 'America/New_York',
+    offsets       VARCHAR(100) NOT NULL DEFAULT '[0,7,16,30,45]',
+    nurture_days  INT UNSIGNED NOT NULL DEFAULT 90,
+    use_ai        TINYINT(1) NOT NULL DEFAULT 1,
+    paused        TINYINT(1) NOT NULL DEFAULT 0,
+    updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB`],
+  ['outreach_templates', (c) => tableExists(c, 'outreach_templates'), `CREATE TABLE outreach_templates (
+    step       TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+    subject    VARCHAR(200) NOT NULL,
+    body       TEXT NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB`],
+  ['outreach_suppress', (c) => tableExists(c, 'outreach_suppress'), `CREATE TABLE outreach_suppress (
+    email      VARCHAR(200) NOT NULL PRIMARY KEY,
+    reason     VARCHAR(30) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB`],
+  ['outreach_sequences', (c) => tableExists(c, 'outreach_sequences'), `CREATE TABLE outreach_sequences (
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    prospect_id BIGINT UNSIGNED NOT NULL,
+    contact_id  BIGINT UNSIGNED NOT NULL,
+    email       VARCHAR(200) NOT NULL,
+    token       CHAR(32) NOT NULL,
+    status      ENUM('pending','active','nurture','replied','bounced','stopped','not_interested') NOT NULL DEFAULT 'pending',
+    step        TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    next_at     DATETIME NULL,
+    thread_id   VARCHAR(40) NULL,
+    first_message_id VARCHAR(300) NULL,
+    first_subject VARCHAR(200) NULL,
+    started_at  DATETIME NULL,
+    stopped_at  DATETIME NULL,
+    stop_reason VARCHAR(200) NULL,
+    created_by  VARCHAR(120) NULL,
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_os_token (token),
+    KEY ix_os_due (status, next_at),
+    KEY ix_os_prospect (prospect_id),
+    CONSTRAINT fk_os_prospect FOREIGN KEY (prospect_id) REFERENCES prospects(id) ON DELETE CASCADE,
+    CONSTRAINT fk_os_contact FOREIGN KEY (contact_id) REFERENCES prospect_contacts(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`],
+  ['outreach_messages', (c) => tableExists(c, 'outreach_messages'), `CREATE TABLE outreach_messages (
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    sequence_id BIGINT UNSIGNED NOT NULL,
+    step        TINYINT UNSIGNED NOT NULL,
+    subject     VARCHAR(200) NOT NULL,
+    body        TEXT NOT NULL,
+    status      ENUM('draft','approved','sent','failed','skipped') NOT NULL DEFAULT 'draft',
+    drafted_by  VARCHAR(20) NOT NULL DEFAULT 'template',
+    gmail_id    VARCHAR(40) NULL,
+    approved_by VARCHAR(120) NULL,
+    sent_at     DATETIME NULL,
+    error       VARCHAR(300) NULL,
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY ix_om_seq (sequence_id, step),
+    KEY ix_om_sent (status, sent_at),
+    CONSTRAINT fk_om_seq FOREIGN KEY (sequence_id) REFERENCES outreach_sequences(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`],
+];
+
 // Research batches shipped in db/data are loaded once each (by batch name), so deleting a prospect never brings it back.
 async function loadProspectBatches(conn) {
   const dir = path.join(__dirname, 'data');
@@ -1495,7 +1566,7 @@ async function main() {
   await seedPatrolPlan(conn);
   await seedAssistantAddon(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps, ...crewSteps, ...caseLinkSteps, ...injuryRegisterSteps, ...lostFoundSteps, ...kitSteps, ...teamSteps, ...prospectSteps, ...partnerSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps, ...crewSteps, ...caseLinkSteps, ...injuryRegisterSteps, ...lostFoundSteps, ...kitSteps, ...teamSteps, ...prospectSteps, ...partnerSteps, ...outreachSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

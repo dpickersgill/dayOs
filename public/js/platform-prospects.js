@@ -2,6 +2,7 @@
 // pipeline and what happens next. Opened from the Mountains page; uses the console's own session (passed in).
 
 import { h, clear, button, field, input, select, table, dialog, formDialog, confirmDialog, toast, fail, empty, errorBox } from './ui.js';
+import { openOutreach, OUTREACH_STATUS } from './platform-outreach.js';
 
 let ctx = null; // { app, call, session(), back(), signIn() }
 let meta = { stages: [], roles: [], note_kinds: [], patrol_kinds: [], regions: [], states: [] };
@@ -35,7 +36,7 @@ async function draw() {
   app.append(h('main', { class: 'platform-box wider stack' },
     h('header', { class: 'row between' },
       h('div', { class: 'stack tight' }, h('h1', null, 'Prospects'), h('p', { class: 'muted' }, 'Ski areas to sell to, who runs them, and what happens next. Only operators see this.')),
-      h('div', { class: 'row' }, button('Back to mountains', () => ctx.back(), { small: true }), button('Add a ski area', () => editProspect(null), { kind: 'primary' }), button('Import research', () => importDialog(), { small: true }), button('Download spreadsheet', () => download().catch(fail), { small: true }))),
+      h('div', { class: 'row' }, button('Back to mountains', () => ctx.back(), { small: true }), button('Add a ski area', () => editProspect(null), { kind: 'primary' }), button('Outreach', () => openOutreach({ ...ctx, backToProspects: () => openProspects(ctx) }), { small: true }), button('Import research', () => importDialog(), { small: true }), button('Download spreadsheet', () => download().catch(fail), { small: true }))),
     chips,
     h('div', { class: 'row wrap prospect-filters' }, search, stageSel, regionSel, stateSel, prioSel),
     body));
@@ -203,6 +204,8 @@ async function openProspect(id) {
     { head: 'Name', cell: (c) => h('div', null, c.name || h('span', { class: 'muted' }, 'No name'), c.title ? h('div', { class: 'small muted' }, c.title) : null, c.note ? h('div', { class: 'small' }, c.note) : null) },
     { head: 'Reach them', cell: (c) => h('div', null, c.email ? h('div', null, h('a', { href: `mailto:${c.email}` }, c.email)) : null, c.phone ? h('div', null, c.phone) : null) },
     { head: 'Source', cell: (c) => (c.source_url ? link(c.source_url, 'Source') : '') },
+    { head: 'Outreach', cell: (c) => (c.outreach ? h('div', null, OUTREACH_STATUS[c.outreach.status] || c.outreach.status, c.outreach.step ? h('div', { class: 'small muted' }, `${c.outreach.step} of 5 sent`) : null)
+      : c.email ? button('Start outreach', async () => { try { const r = await call('POST', '/outreach/enroll', { contact_ids: [c.id] }); const x = r.data[0]; toast(x.id ? 'First email drafted. Approve it under Outreach.' : `Not started: ${x.skipped}.`, x.id ? 'ok' : 'error'); refresh(); } catch (ex) { fail(ex); } }, { small: true }) : h('span', { class: 'muted small' }, 'No email')) },
     { actions: true, cell: (c) => h('div', { class: 'row' }, button('Edit', () => editContact(p, c, refresh), { small: true }), button('Remove', () => confirmDialog('Remove this person?', `${c.name || roleName(c.role)} comes off ${p.name}.`, 'Remove', async () => { await call('DELETE', `/prospects/${p.id}/contacts/${c.id}`); toast('Removed.'); refresh(); }, { danger: true }), { small: true })) },
   ], p.contacts) : empty('No people yet.');
 

@@ -117,6 +117,7 @@ jobs.post('/daily', async (req, res) => {
     out.program_reminders = await stage('program_reminders', () => require('../lib/programplus').remindAll());
     out.retention = await stage('retention', () => require('../lib/retention').runAll());
     out.demo_emails = await stage('demo_emails', () => require('../lib/demomail').runAll(base));
+    out.outreach = await stage('outreach', () => require('../lib/outreach').runDue());
     // One line per finished run: an alert on "no such line for 26 hours" tells you the job stopped.
     console.log(JSON.stringify({ severity: 'INFO', job: 'daily', message: 'daily job finished', seconds: Math.round((Date.now() - started) / 1000) }));
     res.json(out);
@@ -124,6 +125,39 @@ jobs.post('/daily', async (req, res) => {
     await conn.query("SELECT RELEASE_LOCK('summitops_daily_job')").catch(() => {});
     conn.release();
   }
+});
+
+// ---------------------------------------------------------------- prospect outreach (Cloud Scheduler, every 30 minutes on weekdays)
+// Sends what is due inside the sending hours and checks threads for replies and bounces (lib/outreach.js).
+jobs.post('/outreach', async (req, res) => {
+  const key = process.env.JOBS_KEY || '';
+  const given = String(req.get('x-jobs-key') || '');
+  const a = Buffer.from(given); const b = Buffer.from(key);
+  if (!key || a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new AppError(401, 'Not allowed');
+  const conn = await pool.getConnection();
+  try {
+    const [[got]] = await conn.query("SELECT GET_LOCK('summitops_outreach_job', 5) AS ok");
+    if (!Number(got.ok)) throw new AppError(409, 'The outreach job is already running');
+    res.json(await stage('outreach', () => require('../lib/outreach').runDue()));
+  } finally {
+    await conn.query("SELECT RELEASE_LOCK('summitops_outreach_job')").catch(() => {});
+    conn.release();
+  }
+});
+
+// ---------------------------------------------------------------- "not interested" from an outreach email (/o/<token>)
+publicRouter.get('/outreach-stop/:token', async (req, res) => {
+  if (!tokenOk(req.params.token)) throw notFound('Link');
+  const seq = await one(pool, 'SELECT status FROM outreach_sequences WHERE token = ?', [req.params.token]);
+  if (!seq) throw notFound('Link');
+  res.json({ stopped: seq.status === 'not_interested' });
+});
+// The page's button, and a mail app's one-click unsubscribe (RFC 8058) both land here.
+publicRouter.post('/outreach-stop/:token', async (req, res) => {
+  if (!tokenOk(req.params.token)) throw notFound('Link');
+  const seq = await require('../lib/outreach').notInterested(pool, req.params.token);
+  if (!seq) throw notFound('Link');
+  res.json({ ok: true });
 });
 
 module.exports = { publicRouter, jobs };

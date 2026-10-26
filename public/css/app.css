@@ -308,6 +308,7 @@ tr.attention td { background: var(--hold-tint); }
 .kv dt { color: var(--quiet); }
 .kv dd { margin: 0; overflow-wrap: anywhere; }
 .prospect-log li { display: block; }
+.error-text { color: var(--closed); }
 .prospect-filters > * { width: auto; flex: 1 1 170px; }
 .prospect-filters > input[type=search] { flex-basis: 260px; }
 .patient > h3 { font-size: 1.125rem; padding: var(--sp-2) 0 0; }

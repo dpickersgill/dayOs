@@ -145,6 +145,12 @@
           "app": null,
           "text": "Prospects in the platform console: the ski areas we sell to, who runs them, the sales pipeline with next steps and follow-ups due, a timeline of calls and emails, research imports and a spreadsheet download. Starts with 72 researched independent ski areas; Indy Pass resorts are left out.",
           "who": "platform"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "text": "Outreach in the platform console: start outreach to a person at a prospect, approve the first email (drafted for them), and five emails over 45 days then a quarterly update go from your own mailbox until they reply, bounce or choose not interested.",
+          "who": "platform"
         }
       ]
     },
