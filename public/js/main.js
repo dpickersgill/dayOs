@@ -31,6 +31,7 @@ const VIEWS = [
   ['people', 'Customers', () => can('counter', 'instructor'), () => import('./views/people.js')],
   ['waivers', 'Waivers', () => can('counter', 'instructor'), () => import('./views/waivers.js')],
   ['lostfound', 'Lost and found', () => can('counter', 'staff'), () => import('./views/lostfound.js')],
+  ['partners', 'Partner passes', () => can('counter'), () => import('./views/partners.js')],
   ['shop', 'Online shop', () => can('counter'), () => import('./views/shop.js')],
   ['catalog', 'Products and prices', () => isManager(), () => import('./views/catalog.js')],
   ['messages', 'Messages', () => isManager(), () => import('./views/messages.js')],
@@ -326,7 +327,8 @@ const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
 
 // An app the platform has turned off for this mountain is hidden for everyone, including the owner.
 const ALWAYS = ['dashboard', 'inbox', 'people', 'waivers', 'lostfound', 'myshifts', 'settings', 'billing', 'help', 'area'];
-const appOn = (key) => ALWAYS.includes(key) || !ctx.me.modules || ctx.me.modules.includes(key);
+const PART_OF = { partners: 'sell' }; // a page that belongs to another app
+const appOn = (key) => ALWAYS.includes(key) || !ctx.me.modules || ctx.me.modules.includes(PART_OF[key] || key);
 function visibleViews() {
   // The ski area's read-only login sees the patrol summary and its own account, nothing else.
   if (ctx.me.role === 'area') return VIEWS.filter((v) => ['area', 'settings', 'help'].includes(v[0]));

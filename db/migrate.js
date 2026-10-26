@@ -1152,6 +1152,64 @@ const prospectSteps = [
   ) ENGINE=InnoDB`],
 ];
 
+// Partner passes (Indy Pass, a neighbor's reciprocal pass): the program's rules, its blackout dates, and every day a
+// pass holder skied here (src/lib/partnerpasses.js).
+const partnerSteps = [
+  ['partner_programs', (c) => tableExists(c, 'partner_programs'), `CREATE TABLE partner_programs (
+    id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id        BIGINT UNSIGNED NOT NULL,
+    name             VARCHAR(80) NOT NULL,
+    product_id       BIGINT UNSIGNED NOT NULL,
+    levels           TEXT NULL,
+    number_label     VARCHAR(60) NOT NULL DEFAULT 'Pass number',
+    free_days        TINYINT UNSIGNED NOT NULL DEFAULT 2,
+    discount_days    TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    discount_percent TINYINT UNSIGNED NOT NULL DEFAULT 25,
+    daily_limit      INT UNSIGNED NULL,
+    id_check         TINYINT(1) NOT NULL DEFAULT 1,
+    online           TINYINT(1) NOT NULL DEFAULT 0,
+    reservation_required TINYINT(1) NOT NULL DEFAULT 0,
+    staff_note       VARCHAR(500) NULL,
+    active           TINYINT(1) NOT NULL DEFAULT 1,
+    created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_partner_name (tenant_id, name),
+    CONSTRAINT fk_partner_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  ) ENGINE=InnoDB`],
+  ['partner_blackouts', (c) => tableExists(c, 'partner_blackouts'), `CREATE TABLE partner_blackouts (
+    tenant_id  BIGINT UNSIGNED NOT NULL,
+    program_id BIGINT UNSIGNED NOT NULL,
+    on_date    DATE NOT NULL,
+    PRIMARY KEY (tenant_id, program_id, on_date),
+    CONSTRAINT fk_pblack_program FOREIGN KEY (program_id) REFERENCES partner_programs(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`],
+  ['partner_redemptions', (c) => tableExists(c, 'partner_redemptions'), `CREATE TABLE partner_redemptions (
+    id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id     BIGINT UNSIGNED NOT NULL,
+    program_id    BIGINT UNSIGNED NOT NULL,
+    number        VARCHAR(40) NOT NULL,
+    level         VARCHAR(30) NULL,
+    season        VARCHAR(9) NOT NULL,
+    on_date       DATE NOT NULL,
+    kind          ENUM('free','discount') NOT NULL,
+    percent_off   TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    window_cents  INT UNSIGNED NOT NULL DEFAULT 0,
+    charged_cents INT UNSIGNED NOT NULL DEFAULT 0,
+    person_id     BIGINT UNSIGNED NULL,
+    order_id      BIGINT UNSIGNED NULL,
+    order_item_id BIGINT UNSIGNED NULL,
+    ticket_id     BIGINT UNSIGNED NULL,
+    channel       VARCHAR(10) NOT NULL DEFAULT 'window',
+    id_checked    TINYINT(1) NOT NULL DEFAULT 0,
+    status        ENUM('active','void') NOT NULL DEFAULT 'active',
+    void_reason   VARCHAR(200) NULL,
+    created_by    BIGINT UNSIGNED NULL,
+    created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY ix_pred_number (tenant_id, program_id, number, season),
+    KEY ix_pred_day (tenant_id, program_id, on_date),
+    CONSTRAINT fk_pred_program FOREIGN KEY (program_id) REFERENCES partner_programs(id)
+  ) ENGINE=InnoDB`],
+];
+
 // Research batches shipped in db/data are loaded once each (by batch name), so deleting a prospect never brings it back.
 async function loadProspectBatches(conn) {
   const dir = path.join(__dirname, 'data');
@@ -1437,7 +1495,7 @@ async function main() {
   await seedPatrolPlan(conn);
   await seedAssistantAddon(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps, ...crewSteps, ...caseLinkSteps, ...injuryRegisterSteps, ...lostFoundSteps, ...kitSteps, ...teamSteps, ...prospectSteps]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps, ...crewSteps, ...caseLinkSteps, ...injuryRegisterSteps, ...lostFoundSteps, ...kitSteps, ...teamSteps, ...prospectSteps, ...partnerSteps]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

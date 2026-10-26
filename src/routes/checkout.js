@@ -23,6 +23,7 @@ const { loadRules, applyTax, split } = require('../lib/tax');
 const { addLink, isMinor } = require('../lib/family');
 const R = require('../lib/rentals');
 const terminal = require('./terminal');
+const PPS = require('../lib/partnerpasses');
 
 const checkout = express.Router();
 const giftCards = express.Router();
@@ -42,7 +43,9 @@ const personSpec = z.object({ person_id: z.number().int().positive().optional(),
 const who = z.string().min(1).max(20).optional(); // key into `participants`; blank means the customer
 
 const lineSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('ticket'), product_id: z.number().int().positive(), tier: tierEnum.default('adult'), quantity: z.number().int().min(1).max(200).default(1), valid_on: dateStr.optional(), holders: z.array(z.string().min(1).max(20)).max(200).optional() }),
+  z.object({ type: z.literal('ticket'), product_id: z.number().int().positive(), tier: tierEnum.default('adult'), quantity: z.number().int().min(1).max(200).default(1), valid_on: dateStr.optional(), holders: z.array(z.string().min(1).max(20)).max(200).optional(),
+    // A partner pass day (Indy Pass and the like): free or discounted by the program's rules (lib/partnerpasses.js).
+    partner: z.object({ program_id: z.number().int().positive(), number: z.string().trim().min(1).max(60), level: z.string().max(30).optional(), id_checked: z.boolean().optional() }).optional() }),
   z.object({ type: z.literal('lesson_package'), product_id: z.number().int().positive(), tier: tierEnum.default('adult'), participant: who }),
   z.object({ type: z.literal('lesson'), session_id: z.number().int().positive(), tier: tierEnum.default('adult'), participant: who }),
   z.object({
@@ -118,12 +121,25 @@ async function spotsLeft(conn, tenantId, sessionId, capacity) {
  */
 async function priceLines(conn, tenantId, lines, today) {
   const out = [];
+  const partnerSeen = new Set();
   for (const [i, ln] of lines.entries()) {
     if (ln.type === 'ticket') {
       const validOn = ln.valid_on || today;
       if (validOn < today) throw bad('Tickets cannot be sold for a past date');
       const { product, cents } = await unitPrice(conn, tenantId, ln.product_id, ln.tier, validOn);
       if (!TICKET_KINDS.includes(product.kind)) throw bad(`${product.name} is a ${product.kind} product and cannot be sold as a ticket`);
+      if (ln.partner) {
+        // One pass, one day, one person; the program's rules decide free or discounted (locked while selling).
+        if (ln.quantity !== 1) throw bad('A partner pass day is one ticket for one person');
+        const key = PPS.cleanNumber(ln.partner.number);
+        if (partnerSeen.has(key)) throw bad('One partner pass day per pass in a basket');
+        partnerSeen.add(key);
+        const c = await PPS.check(conn, tenantId, ln.partner.program_id, { number: ln.partner.number, level: ln.partner.level, date: validOn, lock: conn !== pool });
+        if (c.program.product_id !== product.id) throw bad(`${c.program.name} days are sold as ${(await one(conn, 'SELECT name FROM products WHERE tenant_id = ? AND id = ?', [tenantId, c.program.product_id]) || {}).name || 'their own ticket'}`);
+        const unit = PPS.chargeFor(cents, c);
+        out.push({ i, line: ln, type: 'ticket', name: `${product.name} (${c.program.name}${c.kind === 'free' ? ', free day' : `, ${c.percent}% off`})`, detail: `${ln.tier}, ${validOn}`, quantity: 1, unit, product, validOn, partner: c, windowCents: cents });
+        continue;
+      }
       out.push({ i, line: ln, type: 'ticket', name: product.name, detail: `${ln.tier}, ${validOn}`, quantity: ln.quantity, unit: cents, product, validOn });
     } else if (ln.type === 'lesson') {
       const session = await one(conn, 'SELECT * FROM lesson_sessions WHERE tenant_id = ? AND id = ?', [tenantId, ln.session_id]);
@@ -196,7 +212,8 @@ async function totals(conn, tenantId, priced, promoCode, today, lock) {
   return { subtotal, discount, tax, taxes, total: subtotal - discount + tax, giftCents, promo };
 }
 
-const describe = (p) => ({ index: p.i, type: p.type, name: p.name, detail: p.detail, quantity: p.quantity, unit_price_cents: p.unit, line_cents: p.cents, discount_cents: p.discount || 0, tax_cents: p.tax || 0 });
+const describe = (p) => ({ index: p.i, type: p.type, name: p.name, detail: p.detail, quantity: p.quantity, unit_price_cents: p.unit, line_cents: p.cents, discount_cents: p.discount || 0, tax_cents: p.tax || 0,
+  ...(p.partner ? { partner: { program: p.partner.program.name, kind: p.partner.kind, percent: p.partner.percent, window_cents: p.windowCents, used: p.partner.used, free_days: p.partner.program.free_days, discount_days: p.partner.program.discount_days, history: p.partner.history.map((h) => String(h.on_date).slice(0, 10)) } } : {}) });
 
 // ---------------------------------------------------------------- menu
 checkout.get('/menu', requireRole(...sellers), async (req, res) => {
@@ -233,6 +250,7 @@ checkout.get('/menu', requireRole(...sellers), async (req, res) => {
     quick_sale: { allowed: Boolean(tenant.quick_sale), kinds: QUICK_KINDS },
     tax_rules: await rows(pool, 'SELECT name, applies_to, rate_bps FROM tax_rules WHERE tenant_id = ? AND active = 1 ORDER BY id', [tenantId]),
     comp: { reasons: COMP_REASONS, counter_limit_cents: tenant.comp_counter_limit_cents, can_comp: ['owner', 'manager'].includes(req.auth.role) || tenant.comp_counter_limit_cents > 0 },
+    partner_programs: (await rows(pool, 'SELECT id, name, product_id, levels, number_label, id_check, staff_note FROM partner_programs WHERE tenant_id = ? AND active = 1 ORDER BY name', [tenantId])).map((x) => ({ ...x, levels: PPS.levelsOf(x), id_check: Boolean(x.id_check) })),
   });
 });
 
@@ -273,6 +291,13 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
     if (giftPaid + compPaid > t.total - t.giftCents) throw bad('A gift card or a comp cannot be used to buy a gift card');
     // Free of charge: managers always; counter staff only up to the limit the manager has set (default none).
     if (compPaid && !['owner', 'manager'].includes(req.auth.role) && compPaid > tenant.comp_counter_limit_cents) throw forbidden(compPaid && tenant.comp_counter_limit_cents ? `Counter staff can comp up to ${money(tenant.comp_counter_limit_cents)}. Ask a manager.` : 'Only a manager can give things away free of charge');
+
+    // ---- a partner pass day: the photo ID was checked, when the program asks for it, and never on a quick sale
+    for (const p of priced) {
+      if (!p.partner) continue;
+      if (body.quick) throw bad(`A ${p.partner.program.name} day needs the guest's name. Use the full checkout.`);
+      if (p.partner.program.id_check && !p.line.partner.id_checked) throw bad(`Check the guest's photo ID against their ${p.partner.program.name} account first`);
+    }
 
     // ---- quick sale: tickets only, nobody named, nothing saved about the guest
     if (body.quick) {
@@ -403,8 +428,12 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
           const holder = people.get(key);
           const itemId = await item({ product_id: p.product.id, person_id: holder, valid_on: p.validOn, quantity: 1 });
           const code = newCode();
-          await conn.query('INSERT INTO tickets (tenant_id, order_item_id, person_id, product_id, code, valid_from, valid_to, uses_remaining) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [tenantId, itemId, holder, p.product.id, code, p.validOn, validTo, p.product.uses ?? null]);
+          const [tk] = await conn.query('INSERT INTO tickets (tenant_id, order_item_id, person_id, product_id, code, valid_from, valid_to, uses_remaining) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [tenantId, itemId, holder, p.product.id, code, p.validOn, validTo, p.product.uses ?? null]);
           done.tickets.push({ code, product: p.product.name, tier: ln.tier, valid_from: p.validOn, valid_to: validTo, person_id: holder, holder: names.get(holder) });
+          if (p.partner) {
+            const rid = await PPS.record(conn, tenantId, p.partner, { date: p.validOn, windowCents: p.windowCents, chargedCents: p.unit, personId: holder, orderId, itemId, ticketId: tk.insertId, channel: body.channel, idChecked: Boolean(ln.partner.id_checked), userId: req.auth.userId });
+            done.partner = (done.partner || []).concat({ id: rid, program: p.partner.program.name, kind: p.partner.kind, percent: p.partner.percent, number: p.partner.number, used: { free: p.partner.used.free + (p.partner.kind === 'free' ? 1 : 0), discount: p.partner.used.discount + (p.partner.kind === 'discount' ? 1 : 0) } });
+          }
           // A season pass for a child already in a program with a lift ticket part: refund or credit it, per the mountain.
           if (p.product.kind === 'season_pass') done.program_adjustments.push(...await PP.passBought(conn, tenantId, holder, { passFrom: p.validOn, passTo: validTo, userId: req.auth.userId }));
         }

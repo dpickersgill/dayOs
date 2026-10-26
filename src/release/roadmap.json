@@ -57,11 +57,6 @@
           "app": "dashboard",
           "title": "This season against last",
           "text": "Visits, sales, lessons and incidents side by side with the same day last season."
-        },
-        {
-          "app": "sell",
-          "title": "Partner passes",
-          "text": "Record Indy Pass and reciprocal pass visits at the window and see them in your reports."
         }
       ]
     },

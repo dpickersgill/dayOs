@@ -7,7 +7,7 @@ const { AppError } = require('./errors');
 
 // paths are matched against the API path after /api/v1 (for example /rentals/items).
 const MODULES = [
-  { key: 'sell', label: 'Sell', blurb: 'Point of sale: tickets, passes, orders, gift cards and refunds.', needs: ['catalog'], paths: ['/checkout', '/gift-cards', '/orders', '/passes', '/terminal'] },
+  { key: 'sell', label: 'Sell', blurb: 'Point of sale: tickets, passes, orders, gift cards and refunds.', needs: ['catalog'], paths: ['/checkout', '/gift-cards', '/orders', '/passes', '/terminal', '/partner-passes'] },
   { key: 'catalog', label: 'Products and prices', blurb: 'The product list, promo codes and price rules.', paths: ['/products', '/pricing', '/guest-types'] },
   { key: 'gate', label: 'Gate', blurb: 'Scanning lift tickets and passes at the gate: barcodes, RFID cards and gate hardware.', paths: ['/tickets', '/access'] },
   { key: 'conditions', label: 'Lifts and trails', blurb: 'Lift and trail status, grooming, snow and weather, maintenance and daily reports.', paths: ['/schedule', '/ops'] },
@@ -40,7 +40,7 @@ const SHARED_READS = [
 ];
 
 // Public pages, by the word after the mountain's web name.
-const PUBLIC = { conditions: 'conditions', booking: 'school', quote: 'school', requests: 'school', 'instructor-availability': 'availability', help: 'patrol', give: 'patrol', shop: 'shop', programs: 'programs', family: 'programs', assistant: 'assistant_plus' };
+const PUBLIC = { conditions: 'conditions', booking: 'school', quote: 'school', requests: 'school', 'instructor-availability': 'availability', help: 'patrol', give: 'patrol', shop: 'shop', partner: 'shop', programs: 'programs', family: 'programs', assistant: 'assistant_plus' };
 
 /** Turning one app on turns on what it needs; turning one off turns off what needs it. */
 function settle(want) {

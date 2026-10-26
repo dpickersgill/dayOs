@@ -134,6 +134,14 @@
         },
         {
           "kind": "new",
+          "app": "sell",
+          "text": "Partner passes: redeem Indy Pass days at the window by the Indy rules (two free days, then one at 25% off), with blackout dates for Indy Base, a daily limit, a photo ID check, online reservations for free days, and a visits report to check Indy's statement.",
+          "who": [
+            "counter"
+          ]
+        },
+        {
+          "kind": "new",
           "app": null,
           "text": "Prospects in the platform console: the ski areas we sell to, who runs them, the sales pipeline with next steps and follow-ups due, a timeline of calls and emails, research imports and a spreadsheet download. Starts with 72 researched independent ski areas; Indy Pass resorts are left out.",
           "who": "platform"

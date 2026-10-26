@@ -134,6 +134,7 @@ function createApp() {
   app.get('/locate/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'locate.html')));
   app.get('/help/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'help.html')));
   app.get('/lost/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'lost.html')));
+  app.get('/reserve/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'reserve.html')));
 
   // The public lesson booking page, one per mountain, read from the URL like the help page.
   app.get('/book/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'book.html')));
@@ -200,6 +201,7 @@ function createApp() {
   api.use('/users', rateLimit({ windowMs: 60_000, max: 60 }));
   // The guest help form is open to anyone with the link, so it gets its own tight limit: 5 requests per 10 minutes per address.
   api.post('/public/locate/:token', rateLimit({ windowMs: 600_000, max: 30, message: 'Too many tries. Please call patrol.' }));
+  api.post('/public/:slug/partner/:id/reserve', rateLimit({ windowMs: 600_000, max: Number(process.env.HELP_RATE_LIMIT) || 10, message: 'Too many reservations from here. Please call the mountain.' }));
   api.post('/public/:slug/lost', rateLimit({ windowMs: 600_000, max: Number(process.env.HELP_RATE_LIMIT) || 5, message: 'Too many reports from here. Please call the mountain.' }));
   api.post('/public/:slug/help', rateLimit({ windowMs: 600_000, max: Number(process.env.HELP_RATE_LIMIT) || 5, message: 'Too many requests. Please call patrol or flag down a patroller.' }));
   // Online lesson requests take a name and contact details from anyone, so they get a tight limit too: 8 a hour per address.
@@ -227,7 +229,7 @@ function createApp() {
   api.post(['/platform/login', '/platform/login/setup', '/platform/login/passkey', '/platform/login/passkey/options'], rateLimit({ windowMs: 15 * 60_000, max: Number(process.env.PLATFORM_LOGIN_RATE_LIMIT) || 20, message: 'Too many sign-in attempts from this address. Try again in 15 minutes.' }));
   api.use('/platform', rateLimit({ windowMs: 60_000, max: Number(process.env.PLATFORM_RATE_LIMIT) || 60, message: 'Too many attempts' }), platform);
   api.use(site.api); // the website's plans and contact form (no sign-in)
-  api.use('/public', rateLimit({ windowMs: 60_000, max: 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/lostfound').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter);
+  api.use('/public', rateLimit({ windowMs: 60_000, max: 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/lostfound').publicRouter, require('./routes/partnerpasses').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter);
   api.use(authRoutes); // login, tenants, users, me (each route applies authenticate itself where needed)
   api.use(require('./routes/security')); // passkeys, the second check, sessions, devices, PINs, terminals (each route authenticates)
 
@@ -262,6 +264,7 @@ function createApp() {
   api.use('/workforce', workforce);
   api.use('/staff-injuries', require('./routes/staffinjuries'));
   api.use('/lost-found', require('./routes/lostfound').router);
+  api.use('/partner-passes', require('./routes/partnerpasses').router);
   api.use('/workforce', require('./routes/workforcetime'));
   api.use('/kiosk-admin', kiosk.adminRouter);
   api.use('/skischool', skischool);
