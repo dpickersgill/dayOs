@@ -24,6 +24,8 @@ import { photosPanel } from './patrol-photos.js';
 import { leaveDialog, leavePanel, skipLabel } from '../leavecheck.js';
 import { conditionsBox, contactsPanel, liftBox, rentalsPanel } from './patrol-conditions.js';
 import { kitUsePanel } from './patrol-kits.js';
+import { claimPanel } from './patrol-claim.js';
+import { scenePanel, witnessLinkButton } from './patrol-scene.js';
 
 export const CATEGORIES = ['injury', 'collision', 'lost_person', 'equipment', 'medical', 'conduct', 'other'];
 export const SEVERITY = ['minor', 'moderate', 'serious', 'critical'];
@@ -437,6 +439,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       ['details', 'Incident and narrative', detailsPanel(c, editable)],
       ...pts.map((p) => [`patient-${p.id}`, `Patient form: ${p.first_name} ${p.last_name}`.trim(), patientCard(c, p, editable)]),
       ['witness', 'Witnesses', caseSection(c, editable, 'witness', witnessList(c, editable))],
+      ['scene', 'Scene diagram', scenePanel({ c, editable, id, onDone: load, version }) || h('div', { hidden: true })],
       ['location', 'Location', caseSection(c, editable, 'location', liftBox({ c, editable, lifts, id, onDone: load }))],
       ['conditions', 'Conditions', caseSection(c, editable, 'conditions', conditionsBox({ c, editable, id, onDone: load }), editable ? c.conditions_suggest || {} : {})],
       ['contacts', 'Who was told', contactsPanel({ c, editable, id, onDone: load, redraw })],
@@ -995,7 +998,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
 
   // ---- witnesses
   function witnessList(c, editable) {
-    return h('div', { class: 'stack' }, h('div', { class: 'spread' }, h('h4', null, 'Witnesses on file'), editable ? button('Add witness', () => witnessDialog(), { small: true }) : null),
+    return h('div', { class: 'stack' }, h('div', { class: 'spread' }, h('h4', null, 'Witnesses on file'), h('div', { class: 'row' }, editable ? witnessLinkButton({ c, editable, id, onDone: load }) : null, editable ? button('Add witness', () => witnessDialog(), { small: true }) : null)),
       c.witnesses.length ? h('ul', { class: 'plain' }, c.witnesses.map((w) => h('li', { class: 'stack tight' }, h('div', { class: 'spread' }, h('span', null, w.relation ? `${label(w.relation)}: ` : '', h('b', null, w.name), h('span', { class: 'muted' }, ` ${[w.phone, w.email, [w.address, w.city, w.region, w.postal].filter(Boolean).join(' ')].filter(Boolean).join(', ')}`)), editable ? button('Remove', change(() => del(`/patrol/incidents/${id}/witnesses/${w.id}`)), { small: true }) : null), w.statement ? h('p', { class: 'prewrap' }, w.statement) : null))) : h('p', { class: 'muted' }, 'No witnesses recorded.'));
   }
   function witnessDialog() {
@@ -1011,6 +1014,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
   function recordPane(c) {
     return h('section', { class: 'pane stack', 'data-pane': 'record', role: 'tabpanel', 'aria-labelledby': 'tab-record' },
       c.protocol_stamp ? h('p', { class: 'muted small' }, c.protocol_stamp) : null,
+      claimPanel({ c, id, version, load }),
       notesPanel(c), versionsPanel(c),
       !version && has('records') ? legalHoldControl({ ...c, legal_hold: Boolean(Number(c.legal_hold)) }, load) : (Number(c.legal_hold) ? h('p', { class: 'warn-note' }, `On legal hold: ${c.legal_hold_note || ''}`) : null),
       !version && has('view_cases') ? recordsPanel(c, { canManage: has('records') }) : null,
