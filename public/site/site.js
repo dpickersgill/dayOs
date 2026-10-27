@@ -105,7 +105,7 @@
     const d = await loadPlans(); if (!d || !d.plans.length) return;
     box.style.setProperty('--n', String(Math.min(d.plans.length, 4)));
     box.replaceChildren(...d.plans.map((p, i) => el('div', { class: `plan${i === 1 ? ' feat' : ''}` },
-      el('div', { class: 'sym' }, sym(i, p.code), el('h3', null, p.name)), el('p', { class: 'who' }, p.blurb || ''),
+      el('div', { class: 'sym' }, sym(i, p.code), el('h3', null, p.name)),
       el('div', { class: 'price' }, el('b', null, dollars(p.monthly_cents)), el('span', null, 'per month')))));
     const adds = $('#homeaddons');
     if (adds && d.addons.length) adds.replaceChildren(el('b', null, 'Add when you want them:'), ...d.addons.map((a) => el('span', null, a.name)), el('a', { href: `${siteBase()}/pricing#addons` }, 'See add-on prices'));

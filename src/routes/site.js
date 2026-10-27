@@ -172,7 +172,8 @@ const SYMS = ['<circle cx="17" cy="17" r="15" fill="#2C7A57"/>', '<rect x="2" y=
 const PATROL_SYM = '<path d="M12 2h10v10h10v10H22v10H12V22H2V12h10Z" fill="#D63A2F"/>';
 const sym = (i, code) => `<svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">${/patrol/.test(code || '') ? PATROL_SYM : SYMS[Math.min(i, 2)]}</svg>`;
 function homePlansHtml(d) {
-  return d.plans.map((p, i) => `<div class="plan${i === 1 ? ' feat' : ''}"><div class="sym">${sym(i, p.code)}<h3>${escHtml(p.name)}</h3></div><p class="who">${escHtml(p.blurb)}</p><div class="price"><b>${dollars(p.monthly_cents)}</b><span>per month</span></div></div>`).join('\n        ');
+  // Home shows each plan's name and price only: what each holds is on Pricing.
+  return d.plans.map((p, i) => `<div class="plan${i === 1 ? ' feat' : ''}"><div class="sym">${sym(i, p.code)}<h3>${escHtml(p.name)}</h3></div><div class="price"><b>${dollars(p.monthly_cents)}</b><span>per month</span></div></div>`).join('\n        ');
 }
 function homeAddonsHtml(d) {
   return `<b>Add when you want them:</b>${d.addons.map((a) => `<span>${escHtml(a.name)}</span>`).join('')}<a href="{{SITE}}/pricing#addons">See add-on prices</a>`;

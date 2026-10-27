@@ -310,7 +310,7 @@ body{margin:0;background:var(--snow)}
 .plan li.plus:before{display:none}
 .plan .go{margin-top:22px}
 /* Cards side by side share their rows, so prices, lists and buttons line up however long a plan's blurb is */
-.plans.home{--rows:3}#plans{--rows:6}
+.plans.home{--rows:2}#plans{--rows:6}
 @supports (grid-template-rows:subgrid){
   .plans>.plan{display:grid;grid-template-rows:subgrid;grid-row:span var(--rows,3);row-gap:0;align-content:start}
   .plans>.plan>.go{align-self:end}
@@ -752,6 +752,39 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 .cutrows .ours b{color:var(--spruce)}
 @media (max-width:1000px){.setups{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:640px){.cutrows>div{font-size:16px}.cutrows b{font-size:28px}.season-note{padding:18px}.bill button{font-size:15px}}
+
+/* Home: the day as six tiles, trust in three, plans as a compact row */
+.daygrid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 40px;border-top:2px solid var(--ink)}
+.daygrid li{display:flex;flex-direction:column;gap:8px;padding:26px 0 28px;border-bottom:1px solid var(--line)}
+.sx .daygrid .dt{font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:32px;line-height:1;color:var(--ink)}
+.daygrid .dt span{display:block;margin-top:6px;font-size:17px;font-weight:500;color:var(--muted)}
+.daygrid h3{font-size:28px;line-height:1.05;margin-top:6px}
+.daygrid li>p:not(.dt){color:var(--ink2);font-size:16.5px;line-height:1.5}
+.daygrid li>a,.daygrid .dlinks{margin-top:auto;padding-top:4px;font-weight:700;font-size:16px}
+.sx .daymore{margin-top:26px;font-size:17px;color:var(--ink2);max-width:52em}
+.daymore a{font-weight:700;white-space:nowrap}
+.trust3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 40px;border-top:2px solid var(--ink)}
+.trust3>div{padding:22px 0 4px}
+.trust3 h3{font-size:27px;line-height:1.05}
+.sx .trust3 p{margin-top:8px;color:var(--ink2);font-size:16.5px;line-height:1.5}
+.plans.home .plan{padding:20px 22px}
+.plans.home .price{margin-top:10px}
+.plans.home .price b{font-size:48px}
+@media (max-width:1000px){.daygrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:0 28px}.trust3{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:640px){
+  .daygrid{grid-template-columns:minmax(0,1fr)}
+  .daygrid li{padding:20px 0 22px}
+  .sx .daygrid .dt{font-size:28px}
+  .daygrid .dt span{display:inline;margin:0 0 0 8px;font-size:16px}
+  .daygrid h3{font-size:25px}
+  .plans.home{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .plans.home .plan{padding:16px 14px}
+  .plans.home .plan h3{font-size:24px}
+  .plans.home .sym{gap:8px}.plans.home .sym svg{width:22px;height:22px}
+  .plans.home .price{flex-direction:column;gap:2px}
+  .plans.home .price b{font-size:36px}
+  .plans.home .price span{font-size:14px}
+}
 
 /* One gap between a section's heading and what follows it, at every size */
 .sh+*,.gh+*{margin-top:var(--stack)}

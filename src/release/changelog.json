@@ -178,6 +178,12 @@
         {
           "kind": "improved",
           "app": null,
+          "text": "The website's home page is about half as long: the claim story comes straight after the headline, the day is six short tiles linking to each solution page, the roles and trust sections are folded in, prices are one row with a link to Pricing, five questions instead of eleven, and Book a walkthrough is the main button.",
+          "who": "platform"
+        },
+        {
+          "kind": "improved",
+          "app": null,
           "text": "Pricing on the website: a season billing choice, guided setup packages (with a Guided setup request kind in Leads), a comparison showing Verdynt/OS takes no cut of online sales, and the Pricing questions updated for the new Resort and Patrol prices.",
           "who": "platform"
         },
