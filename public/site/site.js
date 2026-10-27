@@ -14,11 +14,14 @@
   };
   const dollars = (cents) => '$' + Math.round(cents / 100).toLocaleString('en-US');
   const SVGNS = 'http://www.w3.org/2000/svg';
-  function sym(i) {
+  // kept the same as PATROL_ONLY in src/routes/site.js
+  const PATROL_ONLY = ['Patient care reports and the report check', 'Requirements your patrol director sets', 'Dispatch and phone alerts', 'Duty, the patrol schedule and shift cover', 'Opening checks and the closing sweep', 'Medications, oxygen and AEDs', 'Records requests and legal hold', 'Documents', 'A free read-only login for the ski area'];
+  function sym(i, code) {
     const s = document.createElementNS(SVGNS, 'svg');
     s.setAttribute('width', '34'); s.setAttribute('height', '34'); s.setAttribute('viewBox', '0 0 34 34'); s.setAttribute('aria-hidden', 'true');
     const shapes = [['circle', { cx: 17, cy: 17, r: 15, fill: '#2C7A57' }], ['rect', { x: 2, y: 2, width: 30, height: 30, rx: 2, fill: '#1B5FC1' }], ['path', { d: 'M17 1 L33 17 L17 33 L1 17 Z', fill: '#12303A' }]];
-    const [tag, a] = shapes[Math.min(i, 2)];
+    // the patrol plan carries the patrol cross rather than a third trail sign
+    const [tag, a] = /patrol/.test(code || '') ? ['path', { d: 'M12 2h10v10h10v10H22v10H12V22H2V12h10Z', fill: '#D63A2F' }] : shapes[Math.min(i, 2)];
     const p = document.createElementNS(SVGNS, tag);
     for (const [k, v] of Object.entries(a)) p.setAttribute(k, v);
     s.append(p);
@@ -101,7 +104,7 @@
     const d = await loadPlans(); if (!d || !d.plans.length) return;
     box.style.setProperty('--n', String(Math.min(d.plans.length, 4)));
     box.replaceChildren(...d.plans.map((p, i) => el('div', { class: `plan${i === 1 ? ' feat' : ''}` },
-      el('div', { class: 'sym' }, sym(i), el('h3', null, p.name)), el('p', { class: 'who' }, p.blurb || ''),
+      el('div', { class: 'sym' }, sym(i, p.code), el('h3', null, p.name)), el('p', { class: 'who' }, p.blurb || ''),
       el('div', { class: 'price' }, el('b', null, dollars(p.monthly_cents)), el('span', null, 'per month')))));
     const adds = $('#homeaddons');
     if (adds && d.addons.length) adds.replaceChildren(el('b', null, 'Add when you want them:'), ...d.addons.map((a) => el('span', null, a.name)), el('a', { href: `${siteBase()}/pricing#addons` }, 'See add-on prices'));
@@ -135,11 +138,12 @@
         const added = prev ? p.apps.filter((a) => !prev.apps.some((x) => x.key === a.key)) : p.apps;
         const offered = interval === 'year' ? p.yearly_cents : p.monthly_cents;
         return el('div', { class: `plan${i === 1 ? ' feat' : ''}` },
-          el('div', { class: 'sym' }, sym(i), el('h2', null, p.name)),
+          el('div', { class: 'sym' }, sym(i, p.code), el('h2', null, p.name)),
           el('p', { class: 'who' }, p.blurb || ''),
           el('div', { class: 'price' }, el('b', null, offered ? dollars(perMonth(p, interval)) : 'Ask us'), el('span', null, offered ? 'per month' : '')),
           el('p', { class: 'setup' }, interval === 'year' ? (p.yearly_cents ? `${dollars(p.yearly_cents)} billed once a year` : 'Not offered yearly') : 'Billed monthly'),
-          el('ul', null, prev ? el('li', { class: 'plus' }, `Everything in ${prev.name}, plus:`) : null, ...added.map((a) => el('li', null, a.label))),
+          // Patrol only is one app, so its card says what that app holds for a patrol (as the page's own HTML does)
+          el('ul', null, prev ? el('li', { class: 'plus' }, `Everything in ${prev.name}, plus:`) : null, ...(p.code === 'patrol-only' ? PATROL_ONLY : added.map((a) => a.label)).map((t) => el('li', null, t))),
           el('a', { class: `btn go${i === 1 ? '' : ' ghost'}`, href: `${base}/contact?kind=trial&plan=${encodeURIComponent(p.name)}` }, `Start a ${p.name} trial`));
       }));
       $('#planfine').textContent = `Prices are in US dollars, before any sales tax. ${interval === 'year' ? 'Yearly prices are shown per month and charged once a year.' : 'Every plan starts with a ' + (d.trial_days || 14) + '-day free trial.'}`;
@@ -237,7 +241,17 @@
       menu.addEventListener('toggle', () => { document.documentElement.style.overflow = menu.open ? 'hidden' : ''; if (head) head.classList.toggle('open', menu.open); if (bar) bar.hidden = menu.open; });
       menu.addEventListener('click', (e) => { if (e.target.closest('a')) menu.open = false; });
       document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && menu.open) { menu.open = false; menu.querySelector('summary').focus(); } });
-      window.matchMedia('(min-width: 961px)').addEventListener('change', (m) => { if (m.matches) menu.open = false; });
+      window.matchMedia('(min-width: 1080px)').addEventListener('change', (m) => { if (m.matches) menu.open = false; });
+    }
+    // The Product menu opens on hover and keyboard focus (CSS). Escape shuts it until the pointer or focus leaves.
+    const dd = $('.sn-dd');
+    if (dd) {
+      const reopen = () => dd.classList.remove('shut');
+      dd.addEventListener('keydown', (e) => { if (e.key === 'Escape') { dd.classList.add('shut'); dd.querySelector('.sn-a').focus(); } });
+      dd.addEventListener('mouseleave', reopen);
+      dd.addEventListener('focusout', (e) => { if (!dd.contains(e.relatedTarget)) reopen(); });
+      // a click on a solution closes it at once, so the next page doesn't open with the menu still showing
+      dd.addEventListener('click', (e) => { if (e.target.closest('.sn-panel a')) dd.classList.add('shut'); });
     }
     // Long lists of what an app does fold away on phones, behind "What it does". Open everywhere else.
     const phone = window.matchMedia('(max-width: 640px)');

@@ -44,34 +44,77 @@ function template(name) {
 
 // The Verdynt/OS wordmark (public/brand): the light version on snow, the dark one on navy.
 const WORDMARK = (theme, h) => `<img class="wordmark" src="/brand/verdynt-lockup-${theme}.png" alt="Verdynt/OS" width="${Math.round(h * 6.06)}" height="${h}">`;
-const NAV = [['product', 'Product'], ['ski-patrol', 'Ski patrol'], ['ski-area-risk-management', 'For owners'], ['pricing', 'Pricing'], ['resources', 'Resources']];
+const NAV = [['ski-patrol', 'Ski patrol'], ['ski-area-risk-management', 'For owners'], ['pricing', 'Pricing'], ['resources', 'Resources']];
+// One line under each solution in the Product menu, from that page's own headline.
+const SOLUTION_LINES = {
+  'lift-ticket-software': 'Day tickets, season passes and the gate', 'ski-school-software': 'Lessons that fill without the phone tag',
+  'ski-rental-software': 'Every item out, and every item back', 'ski-waiver-software': 'Signed before they drive up',
+  'lift-maintenance-software': 'Inspections, work orders and service plans', 'ski-area-pos': 'A fast ticket window on a busy Saturday',
+  'online-lift-ticket-sales': 'Your own page, selling while you sleep', 'terrain-park-software': 'Every feature, and whether it passed',
+  'ski-area-staff-scheduling': 'Every shift covered before the first chair',
+};
+const CHEVRON = '<svg class="chev" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-/** The top of every page: logo, Product, Pricing, Security, Try the demo, Sign in, Request a walkthrough; on phones a
- * full-screen menu with every solution page, and a bar at the bottom with the two things people came to do. */
+/** The top of every page. Wide screens: the logo, Product (a menu of every solution page on hover or keyboard focus,
+ * and a plain link to the Product page on a tap), four more links, then Sign in and Book a walkthrough. Try the demo sits
+ * in the Product menu, the phone menu, the phone bar and each page's own buttons.
+ * Narrower screens: a Menu button opening a full-screen menu, its two buttons kept at the bottom; on phones a bar at the
+ * bottom of the page holds the two things people came to do. */
 function header(current) {
-  const links = NAV.map(([s, t]) => `<a href="{{SITE}}/${s}"${s === current ? ' aria-current="page"' : ''}>${t}</a>`).join('\n      ');
-  const extra = '<a class="sn-try" href="{{TRY}}">Try the demo</a>\n      <a href="{{APP}}">Sign in</a>';
-  const solutions = SOLUTIONS.filter(([s]) => s !== 'ski-patrol').map(([s, t]) => `<a href="{{SITE}}/${s}"${s === current ? ' aria-current="page"' : ''}>${t}</a>`).join('');
+  const cur = (s) => (s === current ? ' aria-current="page"' : '');
+  const sols = SOLUTIONS.filter(([s]) => s !== 'ski-patrol');
+  const links = NAV.map(([s, t]) => `<li><a class="sn-a" href="{{SITE}}/${s}"${cur(s)}>${t}</a></li>`).join('\n        ');
+  const productOn = current === 'product' || sols.some(([s]) => s === current);
+  const panel = sols.map(([s, t]) => `<li><a href="{{SITE}}/${s}"${cur(s)}><b>${t}</b><span>${SOLUTION_LINES[s]}</span></a></li>`).join('\n              ');
+  const phoneLinks = [['', 'Home', '{{HOME}}'], ['product', 'Product'], ...NAV].map(([s, t, href]) => `<li><a href="${href || `{{SITE}}/${s}`}"${cur(s)}>${t}</a></li>`).join('\n          ');
+  const phoneSols = sols.map(([s, t]) => `<li><a href="{{SITE}}/${s}"${cur(s)}>${t}</a></li>`).join('\n          ');
   const bar = current === 'contact' ? '' : `
 <div class="mcta"><a class="btn ghost" href="{{TRY}}">Try the demo</a><a class="btn" href="{{SITE}}/contact">Book a walkthrough</a></div>`;
   return `<a class="skip" href="#main">Skip to the content</a>
 <header class="sn">
   <div class="wrap sn-in">
-    <a class="sn-brand" href="{{HOME}}" aria-label="Verdynt/OS, home">${WORDMARK('light', 42)}</a>
-    <nav class="sn-links" aria-label="Main">
-      ${links}
-      ${extra}
-      <a class="btn" href="{{SITE}}/contact">Request a walkthrough</a>
-    </nav>
-    <details class="sn-m">
-      <summary><i aria-hidden="true"></i>Menu</summary>
-      <nav class="sn-menu" aria-label="Main">
-        <a href="{{HOME}}"${current === '' ? ' aria-current="page"' : ''}>Home</a>
+    <a class="sn-brand" href="{{HOME}}" aria-label="Verdynt/OS, home">${WORDMARK('light', 36)}</a>
+    <nav class="sn-nav" aria-label="Main">
+      <ul class="sn-links">
+        <li class="sn-dd">
+          <a class="sn-a" href="{{SITE}}/product"${productOn ? ` aria-current="${current === 'product' ? 'page' : 'true'}"` : ''}>Product${CHEVRON}</a>
+          <div class="sn-panel">
+            <div class="sn-ov">
+              <b>Every part of the mountain</b>
+              <span>Each part is its own app. Turn on the ones you run; your crew sees only those.</span>
+              <a class="sn-ov-all" href="{{SITE}}/product">See the whole product</a>
+              <a class="btn onink sm" href="{{TRY}}">Try the demo</a>
+            </div>
+            <ul class="sn-sols" aria-label="Solutions">
+              ${panel}
+            </ul>
+          </div>
+        </li>
         ${links}
-        <div class="sub">${solutions}</div>
-        ${extra}
-        <a class="btn" href="{{SITE}}/contact">Request a walkthrough</a>
-      </nav>
+      </ul>
+    </nav>
+    <div class="sn-act">
+      <a class="sn-sign" href="{{APP}}">Sign in</a>
+      <a class="btn sm" href="{{SITE}}/contact">Book a walkthrough</a>
+    </div>
+    <details class="sn-m">
+      <summary><i aria-hidden="true"></i><span>Menu</span></summary>
+      <div class="sn-menu">
+        <nav class="sn-mnav" aria-label="Main">
+          <ul class="sn-mp">
+          ${phoneLinks}
+          </ul>
+          <h2 class="sn-mh">Solutions</h2>
+          <ul class="sn-ms">
+          ${phoneSols}
+          </ul>
+        </nav>
+        <div class="sn-mact">
+          <a class="btn ghost" href="{{TRY}}">Try the demo</a>
+          <a class="btn" href="{{SITE}}/contact">Book a walkthrough</a>
+          <a class="sn-sign" href="{{APP}}">Sign in</a>
+        </div>
+      </div>
     </details>
   </div>
 </header>${bar}`;
@@ -125,9 +168,11 @@ const FOOTER = `<footer class="sf">
 const escHtml = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const dollars = (cents) => `$${Math.round(cents / 100).toLocaleString('en-US')}`;
 const SYMS = ['<circle cx="17" cy="17" r="15" fill="#2C7A57"/>', '<rect x="2" y="2" width="30" height="30" rx="2" fill="#1B5FC1"/>', '<path d="M17 1 L33 17 L17 33 L1 17 Z" fill="#12303A"/>'];
-const sym = (i) => `<svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">${SYMS[Math.min(i, 2)]}</svg>`;
+// The patrol plan carries the patrol cross rather than a third trail sign.
+const PATROL_SYM = '<path d="M12 2h10v10h10v10H22v10H12V22H2V12h10Z" fill="#D63A2F"/>';
+const sym = (i, code) => `<svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">${/patrol/.test(code || '') ? PATROL_SYM : SYMS[Math.min(i, 2)]}</svg>`;
 function homePlansHtml(d) {
-  return d.plans.map((p, i) => `<div class="plan${i === 1 ? ' feat' : ''}"><div class="sym">${sym(i)}<h3>${escHtml(p.name)}</h3></div><p class="who">${escHtml(p.blurb)}</p><div class="price"><b>${dollars(p.monthly_cents)}</b><span>per month</span></div></div>`).join('\n        ');
+  return d.plans.map((p, i) => `<div class="plan${i === 1 ? ' feat' : ''}"><div class="sym">${sym(i, p.code)}<h3>${escHtml(p.name)}</h3></div><p class="who">${escHtml(p.blurb)}</p><div class="price"><b>${dollars(p.monthly_cents)}</b><span>per month</span></div></div>`).join('\n        ');
 }
 function homeAddonsHtml(d) {
   return `<b>Add when you want them:</b>${d.addons.map((a) => `<span>${escHtml(a.name)}</span>`).join('')}<a href="{{SITE}}/pricing#addons">See add-on prices</a>`;
@@ -142,7 +187,7 @@ function pricingPlansHtml(d) {
     // Patrol only is one app, so its card says what that app holds for a patrol, not just "Patrol".
     const list = p.code === 'patrol-only' ? PATROL_ONLY.map((t) => `<li>${t}</li>`) : added.map((a) => `<li>${escHtml(a.label)}</li>`);
     const items = [prev ? `<li class="plus">Everything in ${escHtml(prev.name)}, plus:</li>` : '', ...list].join('');
-    return `<div class="plan${i === 1 ? ' feat' : ''}"><div class="sym">${sym(i)}<h2>${escHtml(p.name)}</h2></div><p class="who">${escHtml(p.blurb)}</p>`
+    return `<div class="plan${i === 1 ? ' feat' : ''}"><div class="sym">${sym(i, p.code)}<h2>${escHtml(p.name)}</h2></div><p class="who">${escHtml(p.blurb)}</p>`
       + `<div class="price"><b>${p.monthly_cents ? dollars(p.monthly_cents) : 'Ask us'}</b><span>${p.monthly_cents ? 'per month' : ''}</span></div><p class="setup">Billed monthly</p>`
       + `<ul>${items}</ul><a class="btn go${i === 1 ? '' : ' ghost'}" href="{{SITE}}/contact?kind=trial&amp;plan=${encodeURIComponent(p.name)}">Start a ${escHtml(p.name)} trial</a></div>`;
   }).join('\n        ');

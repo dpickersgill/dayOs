@@ -185,7 +185,9 @@ test('the live plans are in the page itself, for search engines and people witho
   if (own) {
     const card = pricing.text.slice(pricing.text.indexOf(`<h2>${own.name}</h2>`)).split('</ul>')[0];
     assert.ok(!card.includes('Everything in'), `${own.name} stands on its own`);
-    for (const a of own.apps) assert.ok(card.includes(`<li>${a.label}</li>`), a.label);
+    // Patrol only is one app, so its card spells out what that app holds for a patrol instead of the app's name
+    const expect = own.code === 'patrol-only' ? ['Patient care reports and the report check', 'A free read-only login for the ski area'] : own.apps.map((a) => a.label);
+    for (const t of expect) assert.ok(card.includes(`<li>${t}</li>`), t);
   }
 });
 
