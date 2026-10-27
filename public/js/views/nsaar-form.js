@@ -116,12 +116,15 @@ export function sectionPanel({ def, section, scope, row, editable, required, req
     const vals = { ...base };
     for (const c of controls) if (c.get) vals[c.f.key] = c.get();
     for (const c of controls) c.wrap.hidden = !holds(c.f, vals);
+    // A required tag shows only while the field still needs an answer: once it is filled in (or N/A), it goes.
+    for (const c of controls) if (c.tag && c.touched && c.get) c.tag.dataset.met = String(!blank(c.get()) || Boolean(c.r && c.r.na));
   };
   const TAG = { submit: ['Required', 'Needed before the report can be submitted'], approve: ['For approval', 'Needed before the report is approved. You can submit without it; the reviewer will ask.'], recommended: ['Recommended', 'Your patrol director recommends this. It never stops anything.'] };
   const mark = (f) => {
     if (!reqs) return mandatory.has(f.key) ? h('span', { class: 'req', title: 'Mandatory before the report can be submitted' }, ' *') : null;
     const r = reqs.get(f.key);
-    if (!r || !TAG[r.level]) return null;
+    // Only what is needed gets a tag (Required, For approval); Recommended items carry none.
+    if (!r || !TAG[r.level] || r.level === 'recommended') return null;
     return h('span', { class: 'req-tag', 'data-level': r.level, 'data-met': String(Boolean(r.met)), title: TAG[r.level][1] }, TAG[r.level][0]);
   };
   // N/A with a reason, for a required field that cannot be answered: shown in the report instead of a blank.
@@ -146,7 +149,8 @@ export function sectionPanel({ def, section, scope, row, editable, required, req
     const sgNote = !sg || blank(sg.value) ? null
       : useSg ? h('span', { class: 'from-note' }, `Filled in from ${sg.from}. Change it if it is not right.`)
         : JSON.stringify(sg.value) !== JSON.stringify(stored) ? h('span', { class: 'from-note differs' }, `${sg.from[0].toUpperCase()}${sg.from.slice(1)} says: ${suggestText(f, sg.value)}`) : null;
-    const label_ = h('span', null, f.label, mark(f));
+    const tag = mark(f);
+    const label_ = h('span', null, f.label, tag);
     const hint = f.hint ? h('span', { class: 'hint' }, f.hint) : null;
     const wrapField = (el, extraEls = []) => h('label', { class: 'field' }, label_, el, ...extraEls, hint);
     let wrap; let get;
@@ -277,7 +281,9 @@ export function sectionPanel({ def, section, scope, row, editable, required, req
     if (sgNote) { wrap.append(sgNote); if (useSg) wrap.classList.add('prefilled'); }
     const na = naLine(f);
     if (na) wrap.append(na);
-    controls.push({ f, wrap, get });
+    const c = { f, wrap, get, tag: tag && tag.classList.contains('req-tag') ? tag : null, r: reqs && reqs.get(f.key), touched: false };
+    if (c.tag) { const touch = () => { c.touched = true; reflect(); }; wrap.addEventListener('input', touch); wrap.addEventListener('change', touch); wrap.addEventListener('click', (e) => { if (e.target.closest('button')) setTimeout(touch); }); }
+    controls.push(c);
     return wrap;
   }
 

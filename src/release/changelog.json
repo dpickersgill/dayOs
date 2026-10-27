@@ -170,6 +170,12 @@
         },
         {
           "kind": "improved",
+          "text": "On the patrol report, the Required and For approval tags now show only on fields that still need an answer, and they are smaller. A tag goes the moment the field is filled in or marked N/A, and comes back if it is cleared. Recommended fields no longer carry a tag.",
+          "app": "patrol",
+          "who": ["patrol"]
+        },
+        {
+          "kind": "improved",
           "app": null,
           "text": "The product website now leads with the patient care record that holds up later: a new page for owners and insurers, a free incident report review, and shorter feature lists.",
           "who": "platform"

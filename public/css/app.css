@@ -2543,10 +2543,11 @@ button.pdate { cursor: pointer; min-height: 36px; min-width: 56px; }
   .req-types button { border-right: none; border-bottom: 1px solid var(--line-strong); text-align: left; }
 }
 /* report requirements on the case: the level of each field, what is left, N/A with a reason */
-.req-tag { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; font-size: .75rem; font-weight: 700; vertical-align: 2px; border: 1px solid var(--line-strong); color: var(--quiet); }
+.req-tag { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: .6875rem; line-height: 1.5; font-weight: 700; vertical-align: 1px; border: 1px solid var(--line-strong); color: var(--quiet); white-space: nowrap; }
 .req-tag[data-level='submit'] { border-color: #c2410c; color: #c2410c; }
 .req-tag[data-level='approve'] { border-color: #a16207; color: #a16207; }
-.req-tag[data-met='true'] { border-color: var(--line-strong); color: var(--quiet); }
+/* answered: the tag goes away, and comes back if the answer is cleared */
+.req-tag[data-met='true'] { display: none; }
 .req-left { font-size: .8125rem; font-weight: 700; color: #c2410c; margin-left: 8px; }
 .req-line { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 8px 0 0; }
 .req-line.done { color: var(--quiet); }

@@ -606,6 +606,17 @@ test('patrol: the incident form follows the NSAAR sections, saves a section, and
     assert.ok(root.textContent.includes(t), `the form is missing "${t}"`);
   }
   assert.ok(root.querySelector('.req-tag[data-level="submit"]'), 'required fields are marked Required');
+  assert.equal(root.querySelector('.req-tag[data-level="recommended"]'), null, 'Recommended items carry no tag');
+  // the tag goes as soon as the field is answered, and comes back if it is cleared
+  const tagged = [...root.querySelectorAll('[data-field]')].find((f) => f.querySelector('.req-tag[data-met="false"]') && f.querySelector('input:not([type=checkbox]):not([type=radio]):not([type=date]):not([type=time]):not([type=number]), textarea'));
+  assert.ok(tagged, 'a required text field waits for an answer');
+  {
+    const inp = tagged.querySelector('input:not([type=checkbox]):not([type=radio]), textarea'); const tag = tagged.querySelector('.req-tag');
+    inp.value = 'Somewhere'; inp.dispatchEvent(new window.Event('input', { bubbles: true }));
+    assert.equal(tag.dataset.met, 'true', 'an answered field drops its tag');
+    inp.value = ''; inp.dispatchEvent(new window.Event('input', { bubbles: true }));
+    assert.equal(tag.dataset.met, 'false', 'a cleared field shows it again');
+  }
 
   // save one section from the screen
   const conditions = [...root.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent.startsWith('Conditions'));
