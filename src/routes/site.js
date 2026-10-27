@@ -197,10 +197,20 @@ function patrolFrom(d) {
   const p = d && (d.plans.find((x) => x.code === 'patrol-only') || d.addons.find((x) => x.code === 'patrol'));
   return p && p.monthly_cents ? dollars(p.monthly_cents) : '$149';
 }
-/** "$179": the Patrol add-on's monthly price (on a plan), or the Patrol only price when there is no add-on. */
+/** The Patrol add-on's monthly price (on a plan), or the Patrol only price when there is no add-on. */
 function patrolAddon(d) {
   const a = d && d.addons.find((x) => x.code === 'patrol');
   return a && a.monthly_cents ? dollars(a.monthly_cents) : patrolFrom(d);
+}
+/**
+ * The no-cut example on Pricing: what Lodge with the Online shop costs for a year, paid yearly, against booking fees on a
+ * season's online sales. Worked out from the live prices; the launch prices when the plans cannot be read.
+ */
+function noCut(d) {
+  const find = (code) => d && [...d.plans, ...d.addons].find((x) => x.code === code);
+  const lodge = find('lodge'); const shop = find('shop');
+  const year = (lodge && lodge.yearly_cents ? lodge.yearly_cents : 203000) + (shop && shop.yearly_cents ? shop.yearly_cents : 80600);
+  return { '{{NOCUT_YEAR}}': dollars(year), '{{NOCUT_FOUR}}': '$12,000', '{{NOCUT_ONEHALF}}': '$5,088' };
 }
 function fillPlans(html, d) {
   if (!d || !d.plans.length) return html;
@@ -228,7 +238,8 @@ async function render(req, name, slug) {
   let html = template(name);
   const plans = await loadPlans().catch(() => null);
   // Prices in the page's words (FAQ answers included), so the structured data says the same as the page.
-  const prices = (s) => s.replaceAll('{{PATROL_FROM}}', patrolFrom(plans)).replaceAll('{{PATROL_ADDON}}', patrolAddon(plans));
+  const cut = noCut(plans);
+  const prices = (s) => Object.entries(cut).reduce((t, [k, v]) => t.replaceAll(k, v), s.replaceAll('{{PATROL_FROM}}', patrolFrom(plans)).replaceAll('{{PATROL_ADDON}}', patrolAddon(plans)));
   html = prices(html);
   const head = SEO.head({ slug: name === 'notfound' ? 'notfound' : slug, origin: canonicalOrigin(req), html, plans, verify: config.site.verify, sameAs: config.site.sameAs, noindex: isCopy(req), modified: modified(name), asset: ASSET_V });
   html = fillPlans(html, plans).replace(/<!--\/?(PLANS|ADDONS)(:[a-z]+)?-->/g, '');
@@ -405,13 +416,13 @@ api.get('/site/plans', async (_req, res) => res.set('Cache-Control', 'public, ma
 const forgetPlans = () => { planCache = { at: 0, body: null }; };
 
 const contactBody = z.object({
-  kind: z.enum(['walkthrough', 'trial', 'founding', 'question', 'patrol', 'review']).default('walkthrough'),
+  kind: z.enum(['walkthrough', 'trial', 'founding', 'question', 'patrol', 'review', 'setup']).default('walkthrough'),
   name: z.string().trim().min(1).max(150), mountain: z.string().trim().min(1).max(150), role: z.string().trim().max(100).optional().default(''),
   email: z.string().trim().email().max(255), phone: z.string().trim().max(40).optional().default(''), lifts: z.string().trim().max(20).optional().default(''),
   plan_interest: z.string().trim().max(60).optional().default(''), message: z.string().trim().max(2000).optional().default(''),
   founding: z.boolean().optional().default(false), website: z.string().max(200).optional().default(''), // a field people never see: bots fill it
 });
-const KINDS = { walkthrough: 'Walkthrough request', trial: '14-day trial request', founding: 'Founding group request', question: 'Question', patrol: 'Patrol only sign-up', review: 'Incident report review request' };
+const KINDS = { walkthrough: 'Walkthrough request', trial: '14-day trial request', founding: 'Founding group request', question: 'Question', patrol: 'Patrol only sign-up', review: 'Incident report review request', setup: 'Guided setup request' };
 
 api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SITE_CONTACT_LIMIT) || 8, message: 'Too many messages from this address. Try again later, or email us.' }), validate(contactBody), async (req, res) => {
   const b = req.body;

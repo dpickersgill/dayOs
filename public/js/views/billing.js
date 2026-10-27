@@ -50,6 +50,7 @@ export async function render(root) {
     const lines = [];
     if (s.kind === 'trial') lines.push(`Everything is on during the trial. It ends ${dateText(s.until)} (${s.days_left === 0 ? 'today' : s.days_left === 1 ? 'tomorrow' : `in ${s.days_left} days`}). Choose a plan and a way to pay before then; paying early does not shorten the trial.`);
     if (s.kind === 'subscribed' && s.until) lines.push(`Renews ${dateText(s.until)}${b.pay_method ? `, paid by ${{ card: 'card', bank: 'bank account', invoice: 'invoice' }[b.pay_method]}` : ''}.`);
+    if (b.interval === 'season') lines.push(b.season_paused_until ? `Paid over the season: nothing to pay until ${dateText(b.season_paused_until)}, and everything keeps working meanwhile.` : 'Paid over the season: six monthly payments, November to April.');
     if (s.kind === 'cancelling' && s.until) lines.push(`Ends ${dateText(s.until)}. Use Manage payment to keep it going.`);
     if (s.kind === 'paid_manually' && s.until) lines.push(`Paid through ${dateText(s.until)}.`);
     if (s.state === 'grace') lines.push(`Everything keeps working until ${dateText(s.until)} (${s.days_left} day${s.days_left === 1 ? '' : 's'}). After that the mountain becomes read only: people can sign in, see and export everything, but nothing new is sold, booked or added. Patrol, the time clock and the Inbox keep working.`);
@@ -62,8 +63,9 @@ export async function render(root) {
 
   function planPanel(choice, { owner, live, b }) {
     const sec = h('section', { class: 'panel stack' });
-    const priceOf = (p) => (choice.interval === 'year' ? p.yearly_cents : p.monthly_cents);
-    const per = () => (choice.interval === 'year' ? 'year' : 'month');
+    // Season: the yearly price in six payments, November to April.
+    const priceOf = (p) => (choice.interval === 'year' ? p.yearly_cents : choice.interval === 'season' ? (p.yearly_cents ? Math.round(p.yearly_cents / 6) : 0) : p.monthly_cents);
+    const per = () => (choice.interval === 'year' ? 'year' : choice.interval === 'season' ? 'month, November to April' : 'month');
     function paint() {
       const plan = d.plans.find((p) => p.id === choice.plan_id);
       const addons = d.addons.filter((a) => choice.addons.has(a.id));
@@ -73,7 +75,8 @@ export async function render(root) {
       const intervalBtn = (v, text) => h('button', { type: 'button', 'data-tone': 'good', 'aria-pressed': String(choice.interval === v), disabled: !owner, onclick: () => { choice.interval = v; paint(); } }, text);
       clear(sec).append(...[
         h('div', { class: 'spread' }, h('h2', null, live ? 'Your plan' : 'Choose a plan'),
-          h('div', { class: 'seg', role: 'group', 'aria-label': 'Billing period' }, intervalBtn('month', 'Monthly'), intervalBtn('year', yearlySaves ? 'Yearly (save)' : 'Yearly'))),
+          h('div', { class: 'seg', role: 'group', 'aria-label': 'Billing period' }, intervalBtn('month', 'Monthly'), intervalBtn('year', yearlySaves ? 'Yearly (save)' : 'Yearly'), intervalBtn('season', 'Over the season'))),
+        choice.interval === 'season' ? h('p', { class: 'muted small' }, 'The yearly price in six monthly payments, November to April, with nothing to pay May to October. Everything keeps working all year. Starting between May and October, the first payment is on November 1.') : null,
         h('div', { class: 'plan-grid', role: 'radiogroup', 'aria-label': 'Plan' }, d.plans.map((p) => {
           const cents = priceOf(p); const on = p.id === choice.plan_id;
           return h('button', { type: 'button', role: 'radio', 'aria-checked': String(on), class: `plan-card${on ? ' on' : ''}`, disabled: !owner || !cents,

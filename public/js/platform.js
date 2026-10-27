@@ -294,7 +294,7 @@ function leadsButton() {
   call('GET', '/leads?status=new').then((r) => { if (r.new_count) b.append(' ', badge(String(r.new_count), 'warn')); }).catch(() => {});
   return b;
 }
-const LEAD_KIND = { walkthrough: 'Walkthrough', trial: 'Trial', founding: 'Founding group', question: 'Question', patrol: 'Patrol only', review: 'Report review' };
+const LEAD_KIND = { walkthrough: 'Walkthrough', trial: 'Trial', founding: 'Founding group', question: 'Question', patrol: 'Patrol only', review: 'Report review', setup: 'Guided setup' };
 const LEAD_STATUS = [['new', 'New'], ['contacted', 'Contacted'], ['trial', 'On a trial'], ['won', 'Paying'], ['lost', 'Not now']];
 async function leads() {
   let r;
@@ -319,7 +319,7 @@ const BILL_WORDS = { comped: 'Free', subscribed: 'Paying', cancelling: 'Cancelin
 function billBadge(b) {
   if (!b) return '';
   const text = `${BILL_WORDS[b.kind] || b.kind}${b.kind === 'trial' && b.days_left != null ? `, ${b.days_left} days left` : ''}${b.read_only ? ', read only' : b.state === 'grace' ? `, grace to ${b.until}` : ''}`;
-  return h('span', null, badge(text, b.read_only ? 'bad' : b.state === 'grace' ? 'warn' : b.kind === 'comped' ? '' : 'ok'), b.plan ? h('span', { class: 'muted small' }, ` ${b.plan}${b.interval === 'year' ? ', yearly' : ''}`) : null);
+  return h('span', null, badge(text, b.read_only ? 'bad' : b.state === 'grace' ? 'warn' : b.kind === 'comped' ? '' : 'ok'), b.plan ? h('span', { class: 'muted small' }, ` ${b.plan}${b.interval === 'year' ? ', yearly' : b.interval === 'season' ? ', season' : ''}`) : null);
 }
 
 async function billingPlans() {
@@ -330,7 +330,7 @@ async function billingPlans() {
   const reload = async () => { dlg.close(); await billingPlans(); };
   const appName = (k) => (r.modules.find((m) => m.key === k) || { label: k }).label;
   const rowsOf = (kind) => r.data.filter((p) => p.kind === kind);
-  const synced = (p) => (p.stripe_product && (!p.monthly_cents || (p.stripe_month && Number(p.stripe_month_cents) === p.monthly_cents)) && (!p.yearly_cents || (p.stripe_year && Number(p.stripe_year_cents) === p.yearly_cents)));
+  const synced = (p) => (p.stripe_product && (!p.monthly_cents || (p.stripe_month && Number(p.stripe_month_cents) === p.monthly_cents)) && (!p.yearly_cents || (p.stripe_year && Number(p.stripe_year_cents) === p.yearly_cents && p.stripe_season && Number(p.stripe_season_cents) === Math.round(p.yearly_cents / 6))));
   const list = (kind) => (rowsOf(kind).length ? table([
     { head: 'Name', cell: (p) => h('span', null, h('b', null, p.name), h('span', { class: 'muted' }, ` ${p.code}`), p.active ? null : h('span', null, ' ', badge('Hidden', 'warn'))) },
     { head: 'Monthly', num: true, cell: (p) => (p.monthly_cents ? dollars(p.monthly_cents) : '') },
@@ -417,7 +417,7 @@ async function billingForm(t, done) {
   const b = t.billing || {};
   const opt = (v, text, on) => { const o = h('option', { value: String(v) }, text); o.selected = Boolean(on); return o; };
   const plan = h('select', { name: 'plan' }, opt('', 'None chosen', !b.plan_id), ...r.data.filter((p) => p.kind === 'plan' && (p.active || Number(b.plan_id) === p.id)).map((p) => opt(p.id, `${p.name} (${dollars(p.monthly_cents)}/mo, ${dollars(p.yearly_cents)}/yr)`, Number(b.plan_id) === p.id)));
-  const interval = h('select', { name: 'interval' }, opt('month', 'Monthly', b.billing_interval !== 'year'), opt('year', 'Yearly', b.billing_interval === 'year'));
+  const interval = h('select', { name: 'interval' }, opt('month', 'Monthly', !['year', 'season'].includes(b.billing_interval)), opt('year', 'Yearly', b.billing_interval === 'year'), opt('season', 'Over the season (Nov to Apr)', b.billing_interval === 'season'));
   const addonBoxes = r.data.filter((p) => p.kind === 'addon' && (p.active || (b.addons || []).includes(p.id))).map((p) => { const cb = h('input', { type: 'checkbox', value: String(p.id) }); cb.checked = (b.addons || []).includes(p.id); return h('label', { class: 'check' }, cb, p.name); });
   const comped = h('input', { type: 'checkbox' }); comped.checked = t.billing ? Boolean(b.comped) : true;
   const trial = input({ name: 'trial', type: 'date', value: b.trial_ends_on || '' });

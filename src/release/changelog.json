@@ -170,6 +170,19 @@
         },
         {
           "kind": "new",
+          "text": "Pay over the season: on Billing, choose to pay the yearly price in six monthly payments, November to April, with nothing to pay May to October. Everything keeps working all year, and starting in the summer, the first payment is November 1. Resort now includes Assets and fleet and Messages, and Patrol costs the same as an add-on as on its own.",
+          "app": null,
+          "help": "billing",
+          "who": []
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "text": "Pricing on the website: a season billing choice, guided setup packages (with a Guided setup request kind in Leads), a comparison showing Verdynt/OS takes no cut of online sales, and the Pricing questions updated for the new Resort and Patrol prices.",
+          "who": "platform"
+        },
+        {
+          "kind": "new",
           "text": "Head strike or possible head injury: a one-tap Yes, No or Not sure on the Care tab and the Report for injury and collision cases, required before submitting. It shows Yes already when a head injury is recorded on the Care tab. The Head injury questions on the Report open, and the Head check is marked due, only for Yes or Not sure; a neck injury now counts under Spine rather than Head.",
           "app": "patrol",
           "help": "patrol-bedside",

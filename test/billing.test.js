@@ -137,6 +137,8 @@ test('paying by bank keeps the trial days and opens Stripe Checkout for a subscr
   assert.equal(co.status, 200, co.text);
   assert.ok(co.body.url.startsWith('https://checkout.stripe.test/'));
   assert.equal(calls.filter((c) => c.path === '/v1/products').length, 2, 'the plan and add-on are made in Stripe on first use');
+  const season = calls.filter((c) => c.path === '/v1/prices' && c.params['metadata[period]'] === 'season');
+  assert.ok(season.some((c) => c.params.unit_amount === String(Math.round(499000 / 6)) && c.params['recurring[interval]'] === 'month'), 'a season price (a sixth of yearly, monthly) is made with the others');
   const s = calls.find((c) => c.path === '/v1/checkout/sessions').params;
   assert.equal(s.mode, 'subscription');
   assert.equal(s['payment_method_types[0]'], 'us_bank_account');
@@ -179,6 +181,53 @@ test('changing plans updates the Stripe subscription; the portal opens; failures
   assert.equal(me.body.billing.kind, 'subscribed');
   const hist = (await api('GET', '/billing', { token: owner })).body.events.map((e) => e.kind);
   assert.ok(hist.includes('payment_failed') && hist.includes('paid'));
+});
+
+test('season billing: the yearly price in six payments, November to April, with the summer paused', async () => {
+  // the rules on their own
+  assert.equal(B.seasonCents({ yearly_cents: 199000 }), 33167, 'a sixth of the yearly price');
+  assert.equal(B.seasonCents({ yearly_cents: 0 }), 0);
+  for (const [d, summer] of [['2026-04-30', false], ['2026-05-01', true], ['2026-10-31', true], ['2026-11-01', false], ['2027-02-10', false]]) assert.equal(B.inSummer(d), summer, d);
+  assert.equal(B.nextNovember('2026-06-10'), '2026-11-01');
+  assert.equal(B.nextNovember('2026-12-10'), '2027-11-01');
+  const nov1 = Math.floor(Date.parse('2026-11-01T12:00:00Z') / 1000);
+  assert.equal(B.trialEnd({ billing_interval: 'season' }, '2026-07-01'), nov1, 'starting in the summer, the first payment is November 1');
+  assert.equal(B.trialEnd({ billing_interval: 'season', trial_ends_on: '2026-11-10' }, '2026-10-30') > nov1, true, 'trial days left still count');
+  assert.equal(B.trialEnd({ billing_interval: 'season' }, '2027-01-15'), undefined, 'in the winter it starts now');
+  assert.equal(B.trialEnd({ billing_interval: 'month' }, '2026-07-01'), undefined, 'monthly is not paused');
+
+  // choosing it on a live subscription: a season price in Stripe, and a summer pause when it is summer
+  const today = new Date().toISOString().slice(0, 10);
+  calls.length = 0;
+  const c = await api('PUT', '/billing/choice', { token: owner, body: { plan_id: base1, addons: [], interval: 'season' } });
+  assert.equal(c.status, 200, c.text);
+  // Stripe already holds the season price: syncing a plan makes its monthly, yearly and season prices together
+  const plan = (await plat('GET', '/billing/plans')).body.data.find((p) => p.id === base1);
+  assert.equal(plan.stripe_season_cents, 33167, 'a sixth of the yearly price');
+  const upd = calls.find((x) => x.method === 'POST' && x.path === `/v1/subscriptions/sub_${suffix}`).params;
+  assert.equal(upd['items[2][price]'], plan.stripe_season, 'the subscription moves to the season price');
+  if (B.inSummer(today)) assert.equal(upd['pause_collection[behavior]'], 'void', 'nothing more is collected until November');
+  else assert.equal(upd['pause_collection[behavior]'], undefined);
+  let page = (await api('GET', '/billing', { token: owner })).body;
+  assert.equal(page.billing.interval, 'season');
+  assert.equal(page.billing.season_paused_until, B.inSummer(today) ? B.nextNovember(today) : null);
+  // a plan with no yearly price cannot be paid over the season
+  const monthlyOnly = (await plat('POST', '/billing/plans', { code: `mo-${suffix}`, name: 'Monthly only', kind: 'plan', modules: ['sell'], monthly_cents: 5000, yearly_cents: 0 })).body.id;
+  assert.equal((await api('PUT', '/billing/choice', { token: owner, body: { plan_id: monthlyOnly, interval: 'season' } })).status, 400);
+  await plat('PATCH', `/billing/plans/${monthlyOnly}`, { active: false });
+
+  // the daily job pauses a season subscription in the summer, and back on monthly the pause comes off
+  await q('UPDATE tenant_billing SET season_paused_until = NULL WHERE tenant_id = ?', [tenantId]);
+  calls.length = 0;
+  const n2 = await B.seasonAll();
+  const ours = calls.find((x) => x.path === `/v1/subscriptions/sub_${suffix}`);
+  if (B.inSummer(today)) { assert.ok(n2 >= 1); assert.equal(ours.params['pause_collection[behavior]'], 'void'); } else assert.equal(ours, undefined);
+  calls.length = 0;
+  assert.equal((await api('PUT', '/billing/choice', { token: owner, body: { plan_id: base1, addons: [], interval: 'month' } })).status, 200);
+  const back = calls.find((x) => x.method === 'POST' && x.path === `/v1/subscriptions/sub_${suffix}`).params;
+  if (B.inSummer(today)) assert.equal(back.pause_collection, '', 'the summer pause is taken off');
+  page = (await api('GET', '/billing', { token: owner })).body;
+  assert.equal(page.billing.season_paused_until, null);
 });
 
 test('read only: sales and new records stop, patrol and billing keep working, the shop stops taking orders', async () => {

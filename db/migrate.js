@@ -1487,8 +1487,10 @@ async function seedPlans(conn) {
   const rows = [
     ['lodge', 'Lodge', 'Small hills and community areas that need to sell, scan and keep the lifts honest.', 'plan', base, 199, 1],
     ['mountain', 'Mountain', 'The typical independent mountain, with a ski school, a rental shop and a crew to schedule.', 'plan', mid, 449, 2],
-    ['resort', 'Resort', 'Larger operations with a patrol department, a terrain park and many hands.', 'plan', [...mid, 'patrol', 'park', 'shop'], 799, 3],
-    ['patrol', 'Patrol', 'Patient care reports, dispatch, duty, the closing sweep, medications and records, for any plan.', 'addon', ['patrol'], 179, 1],
+    // Resort holds everything Mountain does plus five apps, for less than adding them one by one.
+    ['resort', 'Resort', 'Larger operations with a patrol department, a terrain park and many hands.', 'plan', [...mid, 'patrol', 'park', 'shop', 'assets', 'messages'], 799, 3],
+    // Patrol is the same price on its own or with a plan (see seedPatrolPlan).
+    ['patrol', 'Patrol', 'Patient care reports, dispatch, duty, the closing sweep, medications and records, for any plan.', 'addon', ['patrol'], 149, 1],
     ['shop', 'Online shop', 'Guests buy lift tickets, passes and gift cards online, picking the day first.', 'addon', ['shop'], 79, 2],
     ['assets', 'Assets and fleet', 'Every machine and building system on one register, serviced on time and costed.', 'addon', ['assets'], 89, 3],
     ['messages', 'Messages', 'Email and texts to the guests who agreed to hear from you.', 'addon', ['messages'], 39, 4],
@@ -1496,7 +1498,7 @@ async function seedPlans(conn) {
     ['park', 'Terrain park', 'Features, daily inspections and the park map.', 'addon', ['park'], 49, 6],
   ];
   for (const [code, name, blurb, kind, modules, monthly, sort] of rows) {
-    await conn.query('INSERT IGNORE INTO billing_plans (code, name, blurb, kind, modules, monthly_cents, yearly_cents, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [code, name, blurb, kind, modules.join(','), monthly * 100, yearly(monthly), sort]);
+    await conn.query('INSERT IGNORE INTO billing_plans (code, name, blurb, kind, modules, monthly_cents, yearly_cents, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [code, name, blurb, kind, modules.join(','), monthly * 100, code === 'patrol' ? 150000 : yearly(monthly), sort]);
   }
   console.log('Added the launch plans and add-ons (change them in the console, Plans and prices)');
 }
@@ -1566,7 +1568,7 @@ async function main() {
   await seedPatrolPlan(conn);
   await seedAssistantAddon(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps, ...crewSteps, ...caseLinkSteps, ...injuryRegisterSteps, ...lostFoundSteps, ...kitSteps, ...teamSteps, ...prospectSteps, ...partnerSteps, ...outreachSteps, ...require('./steps/claims')({ tableExists, columnExists }), ...require('./steps/scene')({ tableExists, columnExists }), ...require('./steps/site')({ tableExists, columnExists })]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps, ...crewSteps, ...caseLinkSteps, ...injuryRegisterSteps, ...lostFoundSteps, ...kitSteps, ...teamSteps, ...prospectSteps, ...partnerSteps, ...outreachSteps, ...require('./steps/claims')({ tableExists, columnExists }), ...require('./steps/scene')({ tableExists, columnExists }), ...require('./steps/site')({ tableExists, columnExists }), ...require('./steps/pricing')({ tableExists, columnExists })]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

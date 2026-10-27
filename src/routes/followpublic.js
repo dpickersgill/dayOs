@@ -110,6 +110,7 @@ jobs.post('/daily', async (req, res) => {
     out.card_refunds = await stage('card_refunds', () => cardrefund.retryAll());
     out.review_nudges = await stage('review_nudges', () => require('../lib/review').nudgeAll());
     out.billing_reminders = await stage('billing_reminders', () => require('../lib/billing').remindAll(base));
+    out.season_billing = await stage('season_billing', () => require('../lib/billing').seasonAll());
     out.patrol_day_reminders = await stage('patrol_day_reminders', () => require('./patrolduty').remindAll());
     out.patrol_short_weekend = await stage('patrol_short_weekend', () => require('./patrolcrews').shortAlertAll());
     out.patrol_stock_flags = await stage('patrol_stock_flags', () => require('./patrolmeds').flagAll());

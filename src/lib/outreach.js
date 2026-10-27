@@ -46,7 +46,7 @@ Happy to show you in 20 minutes whenever suits.
 {sender_first}` },
   3: { subject: 'Re: {first_subject}', body: `Hi {first_name},
 
-One more thought for {mountain}. Getting started takes about a day: we load your products and prices, bring in your roster and pass holders, and train your team on site. Plans start at {price_from} a month, and patrol on its own is {patrol_price} a month.
+One more thought for {mountain}. Getting started takes about a day: you can set it up yourselves for free, or we load your products and prices, bring in your roster and pass holders, and train your team for one price agreed up front. Plans start at {price_from} a month, can be paid over the season from November to April, and patrol on its own is {patrol_price} a month.
 
 If it would help, I can set up a demo mountain with {mountain}'s name on it so your team can try it.
 

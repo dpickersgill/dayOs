@@ -97,7 +97,8 @@
     } catch (_) { plansData = null; }
     return plansData;
   }
-  const perMonth = (p, interval) => (interval === 'year' && p.yearly_cents ? p.yearly_cents / 12 : p.monthly_cents);
+  // Yearly is shown per month (a twelfth); over the season is the yearly price in six payments, November to April.
+  const perMonth = (p, interval) => (interval === 'year' && p.yearly_cents ? p.yearly_cents / 12 : interval === 'season' && p.yearly_cents ? p.yearly_cents / 6 : p.monthly_cents);
 
   async function homePlans() {
     const box = $('#homeplans'); if (!box) return;
@@ -114,15 +115,16 @@
     if (!document.querySelector('[data-page="pricing"]')) return;
     const d = await loadPlans();
     let interval = 'month';
-    try { if (localStorage.getItem('so.site.interval') === 'year') interval = 'year'; } catch (_) { /* private mode */ }
+    try { const kept = localStorage.getItem('so.site.interval'); if (kept === 'year' || kept === 'season') interval = kept; } catch (_) { /* private mode */ }
     const base = siteBase();
     const buttons = [...document.querySelectorAll('.bill button')];
     // How much yearly saves, from the real prices
     if (d && d.plans.length) {
       const saves = d.plans.filter((p) => p.yearly_cents && p.monthly_cents).map((p) => 1 - p.yearly_cents / (p.monthly_cents * 12));
-      const best = saves.length ? Math.round(Math.max(...saves) * 100) : 0;
-      const tag = $('#yearsave'); if (tag) tag.textContent = best > 0 ? `save ${best}%` : '';
-      if (!d.plans.some((p) => p.yearly_cents)) { buttons[1].hidden = true; interval = 'month'; }
+      // the smallest saving across the plans, so the label never promises more than every plan gives
+      const least = saves.length ? Math.round(Math.min(...saves) * 100) : 0;
+      const tag = $('#yearsave'); if (tag) tag.textContent = least > 0 ? `save ${least}%` : '';
+      if (!d.plans.some((p) => p.yearly_cents)) { buttons.filter((b) => b.dataset.interval !== 'month').forEach((b) => { b.hidden = true; }); interval = 'month'; }
     }
     function draw() {
       buttons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.interval === interval)));
@@ -136,17 +138,20 @@
         const before = d.plans[i - 1];
         const prev = before && before.apps.every((a) => p.apps.some((x) => x.key === a.key)) ? before : null;
         const added = prev ? p.apps.filter((a) => !prev.apps.some((x) => x.key === a.key)) : p.apps;
-        const offered = interval === 'year' ? p.yearly_cents : p.monthly_cents;
+        const offered = interval === 'month' ? p.monthly_cents : p.yearly_cents;
         return el('div', { class: `plan${i === 1 ? ' feat' : ''}` },
           el('div', { class: 'sym' }, sym(i, p.code), el('h2', null, p.name)),
           el('p', { class: 'who' }, p.blurb || ''),
           el('div', { class: 'price' }, el('b', null, offered ? dollars(perMonth(p, interval)) : 'Ask us'), el('span', null, offered ? 'per month' : '')),
-          el('p', { class: 'setup' }, interval === 'year' ? (p.yearly_cents ? `${dollars(p.yearly_cents)} billed once a year` : 'Not offered yearly') : 'Billed monthly'),
+          el('p', { class: 'setup' }, interval === 'year' ? (p.yearly_cents ? `${dollars(p.yearly_cents)} billed once a year` : 'Not offered yearly')
+            : interval === 'season' ? (p.yearly_cents ? `November to April only: ${dollars(p.yearly_cents)} a year` : 'Not offered over the season') : 'Billed monthly'),
           // Patrol only is one app, so its card says what that app holds for a patrol (as the page's own HTML does)
           el('ul', null, prev ? el('li', { class: 'plus' }, `Everything in ${prev.name}, plus:`) : null, ...(p.code === 'patrol-only' ? PATROL_ONLY : added.map((a) => a.label)).map((t) => el('li', null, t))),
           el('a', { class: `btn go${i === 1 ? '' : ' ghost'}`, href: `${base}/contact?kind=trial&plan=${encodeURIComponent(p.name)}` }, `Start a ${p.name} trial`));
       }));
-      $('#planfine').textContent = `Prices are in US dollars, before any sales tax. ${interval === 'year' ? 'Yearly prices are shown per month and charged once a year.' : 'Every plan starts with a ' + (d.trial_days || 14) + '-day free trial.'}`;
+      $('#planfine').textContent = `Prices are in US dollars, before any sales tax. ${interval === 'year' ? 'Yearly prices are shown per month and charged once a year.'
+        : interval === 'season' ? 'Over the season, the yearly price is paid in six monthly payments, November to April, with nothing to pay May to October. Everything keeps working all year. Starting between May and October, the first payment is November 1.'
+          : 'Every plan starts with a ' + (d.trial_days || 14) + '-day free trial.'}`;
       // Comparison table: plans across, apps down, add-ons after
       const yes = () => el('span', { class: 'y', html: '<svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M3 9.5 L7.5 14 L15 4.5" fill="none" stroke="#2C7A57" stroke-width="2.6"/></svg><span class="vh">Included</span>' });
       const no = () => el('span', { class: 'n', html: '<span aria-hidden="true">&ndash;</span><span class="vh">Not included</span>' });
@@ -163,9 +168,9 @@
       // Add-on cards
       $('#addonlist').replaceChildren(...d.addons.map((a) => {
         const inPlans = d.plans.filter((p) => a.apps.length && a.apps.every((x) => p.apps.some((y) => y.key === x.key))).map((p) => p.name);
-        const offered = interval === 'year' ? a.yearly_cents : a.monthly_cents;
+        const offered = interval === 'month' ? a.monthly_cents : a.yearly_cents;
         return el('div', { class: 'addon' },
-          el('div', { class: 'tops' }, el('h3', null, a.name), el('div', { class: 'ap' }, el('b', null, offered ? dollars(perMonth(a, interval)) : (a.monthly_cents ? dollars(a.monthly_cents) : 'Ask us')), el('span', null, offered ? 'per month' : (a.monthly_cents ? 'per month, monthly only' : '')))),
+          el('div', { class: 'tops' }, el('h3', null, a.name), el('div', { class: 'ap' }, el('b', null, offered ? dollars(perMonth(a, interval)) : (a.monthly_cents ? dollars(a.monthly_cents) : 'Ask us')), el('span', null, offered ? (interval === 'season' ? 'per month, Nov to Apr' : 'per month') : (a.monthly_cents ? 'per month, monthly only' : '')))),
           el('p', null, a.blurb || ''),
           el('p', { class: 'fit' }, a.apps.length ? `Turns on ${a.apps.map((x) => x.label).join(', ')}. ` : '', inPlans.length ? el('b', null, `Included in ${inPlans.join(' and ')}.`) : 'Works with any plan.'));
       }));
@@ -181,6 +186,7 @@
     founding: 'Tell us about your mountain and what you would want from Verdynt/OS', question: 'Your question',
     patrol: 'About your patrol: how many patrollers, volunteer or paid, and who at the ski area should get the read-only login',
     review: 'About your reports: how many incidents a season, paper or software, and who reviews them today. Please don\'t paste patient details here',
+    setup: 'What you run today (ticketing, rentals, school, patrol), roughly how many customers and staff, and when you would like to go live',
   };
   function contact() {
     const form = $('#leadform'); if (!form) return;
@@ -193,7 +199,7 @@
       msgLabel.firstChild.textContent = `${LABELS[k]} `;
       msgLabel.querySelector('.opt').hidden = k === 'question';
       if (k === 'founding') $('#f-found').checked = true;
-      $('#f-send').textContent = { walkthrough: 'Request a walkthrough', trial: 'Ask for my trial', founding: 'Apply for the founding group', question: 'Send my question', patrol: 'Set up our patrol', review: 'Ask for a report review' }[k];
+      $('#f-send').textContent = { walkthrough: 'Request a walkthrough', trial: 'Ask for my trial', founding: 'Apply for the founding group', question: 'Send my question', patrol: 'Set up our patrol', review: 'Ask for a report review', setup: 'Ask for guided setup' }[k];
     };
     form.addEventListener('change', (e) => { if (e.target.name === 'kind') syncKind(); });
     syncKind();

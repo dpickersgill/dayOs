@@ -15,6 +15,7 @@
       <div class="bill" role="group" aria-label="Billing period">
         <button type="button" aria-pressed="true" data-interval="month">Pay monthly</button>
         <button type="button" aria-pressed="false" data-interval="year">Pay yearly<small id="yearsave">save 15%</small></button>
+        <button type="button" aria-pressed="false" data-interval="season">Pay over the season<small>Nov to Apr</small></button>
       </div>
     </div>
   </section>
@@ -25,7 +26,7 @@
       <div class="plans swipe" id="plans"><!--PLANS:pricing-->
         <div class="plan"><div class="sym"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="15" fill="#2C7A57"/></svg><h2>Lodge</h2></div><p class="who">Small hills and community areas that need to sell, scan and keep the lifts honest.</p><div class="price"><b>$199</b><span>per month</span></div><p class="setup">Billed monthly</p><ul><li>Sell, with Products and prices</li><li>Gate scanning</li><li>Lifts and trails</li><li>Documents</li></ul><a class="btn ghost go" href="{{SITE}}/contact?kind=trial&amp;plan=Lodge">Start a Lodge trial</a></div>
         <div class="plan feat"><div class="sym"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect x="2" y="2" width="30" height="30" rx="2" fill="#1B5FC1"/></svg><h2>Mountain</h2></div><p class="who">The typical independent mountain, with a ski school, a rental shop and a crew to schedule.</p><div class="price"><b>$449</b><span>per month</span></div><p class="setup">Billed monthly</p><ul><li class="plus">Everything in Lodge, plus:</li><li>Rentals</li><li>Ski school and instructor availability</li><li>Clubs and programs</li><li>Staff and schedule</li><li>Money</li></ul><a class="btn go" href="{{SITE}}/contact?kind=trial&amp;plan=Mountain">Start a Mountain trial</a></div>
-        <div class="plan"><div class="sym"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><path d="M17 1 L33 17 L17 33 L1 17 Z" fill="#12303A"/></svg><h2>Resort</h2></div><p class="who">Larger operations with a patrol department, a terrain park and many hands.</p><div class="price"><b>$799</b><span>per month</span></div><p class="setup">Billed monthly</p><ul><li class="plus">Everything in Mountain, plus:</li><li>Patrol</li><li>Terrain park</li><li>Online shop</li></ul><a class="btn ghost go" href="{{SITE}}/contact?kind=trial&amp;plan=Resort">Start a Resort trial</a></div><!--/PLANS-->
+        <div class="plan"><div class="sym"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><path d="M17 1 L33 17 L17 33 L1 17 Z" fill="#12303A"/></svg><h2>Resort</h2></div><p class="who">Larger operations with a patrol department, a terrain park and many hands.</p><div class="price"><b>$799</b><span>per month</span></div><p class="setup">Billed monthly</p><ul><li class="plus">Everything in Mountain, plus:</li><li>Patrol</li><li>Terrain park</li><li>Online shop</li><li>Assets and fleet</li><li>Messages</li></ul><a class="btn ghost go" href="{{SITE}}/contact?kind=trial&amp;plan=Resort">Start a Resort trial</a></div><!--/PLANS-->
       </div>
       <p class="fine" id="planfine">Prices are in US dollars, before any sales tax. Yearly billing is charged once a year.</p>
     </div>
@@ -55,14 +56,17 @@
       <div class="sh"><h2 id="h-how">How paying works.</h2><p>No contract to sign. The owner runs it all from the Billing page inside Verdynt/OS.</p></div>
       <div class="steps-line">
         <div><b>14 days free</b><span>Ask for a trial and we set up your mountain with everything on. No card needed to start.</span></div>
-        <div><b>Pick a plan</b><span>Choose a plan, any add-ons, and monthly or yearly, before the trial ends. Paying early does not shorten the trial.</span></div>
+        <div><b>Pick a plan</b><span>Choose a plan, any add-ons, and monthly, yearly or over the season, before the trial ends. Paying early does not shorten the trial.</span></div>
         <div><b>Pay your way</b><span>Card, US bank account or invoice. Receipts and invoices are on the Billing page.</span></div>
         <div><b>Change any time</b><span>Move up or down a plan, or add and remove add-ons. Stripe charges or credits the difference.</span></div>
       </div>
       <div class="paygrid">
-        <div class="payway"><h3>Card</h3><p>Credit or debit card, renewing automatically each month or year. Change the card whenever you like.</p></div>
+        <div class="payway"><h3>Card</h3><p>Credit or debit card, renewing automatically. Change the card whenever you like.</p></div>
         <div class="payway"><h3>Bank account (ACH)</h3><p>Link a US bank account once and it renews automatically. The first payment takes a few business days to clear.</p></div>
         <div class="payway"><h3>Invoice</h3><p>We email an invoice each period, due in 30 days. Pay by card, bank transfer or check. Good for boards and town-run areas.</p></div>
+      </div>
+      <div class="season-note">
+        <div><b>Pay when the lifts are turning.</b><span>Over the season, you pay the yearly price in six monthly payments, November to April, and nothing May to October. Everything keeps working all summer. Sign up in the summer and the first payment is November 1.</span></div>
       </div>
     </div>
   </section>
@@ -83,10 +87,33 @@
     <div class="wrap">
       <div class="sh"><h2 id="h-ex">What costs extra, and what doesn't.</h2></div>
       <div class="extras">
-        <div><h3>Moving in</h3><p>We import your customers and products, set up your staff and roles, and train your crew. Tell us what you have and we will quote it in writing before you sign up.</p></div>
+        <div><h3>Setting up</h3><p>Set up on your own for free, or have us do it with guided setup, priced below. Either way you start with the 14 days free.</p></div>
         <div><h3>Card processing</h3><p>The online shop, lesson payments and patrol giving are paid straight into your own Stripe account, and Stripe pays them out to your bank. Stripe charges its card fees to your account, and Verdynt/OS adds nothing on top. Text messages are charged at the text provider's cost.</p></div>
         <div><h3>Logins and storage</h3><p>Every plan has as many staff logins as you need. Each mountain starts with 500 MB for documents and their versions; ask us if you need more.</p></div>
       </div>
+    </div>
+  </section>
+
+  <section class="sec alt" aria-labelledby="h-setup" id="setup">
+    <div class="wrap">
+      <div class="sh"><h2 id="h-setup">Getting set up.</h2><p>One price, agreed before you start. Paid once, when you choose a plan.</p></div>
+      <div class="setups">
+        <div class="setup-card"><h3>On your own</h3><p class="setup-price"><b>Free</b></p><p>The trial mountain comes with everything on, Help in the app walks through each part, and a person answers email within one business day.</p></div>
+        <div class="setup-card feat"><h3>Guided setup</h3><ul class="setup-tiers"><li><b>$750</b> Lodge</li><li><b>$1,500</b> Mountain</li><li><b>$3,000</b> Resort</li><li><b>$500</b> Patrol only</li></ul><p>We bring in your customers, pass holders, products and staff from your current system or spreadsheets, set up roles and permissions, and run two training calls with your crew.</p><a class="btn go" href="{{SITE}}/contact?kind=setup">Ask for guided setup</a></div>
+        <div class="setup-card"><h3>A day on site</h3><p class="setup-price"><b>$1,200</b> a day, plus travel</p><p>One of us at your mountain to train the crew in person and stand beside them on opening day.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="h-cut">
+    <div class="wrap">
+      <div class="sh"><h2 id="h-cut">We don't take a cut of your sales.</h2><p>Many ticketing systems charge a fee on every online booking. Verdynt/OS is a flat price, however much you sell. Here is a season with $300,000 of online lift ticket and pass sales:</p></div>
+      <div class="cutrows" role="table" aria-label="What a season of online sales costs in fees">
+        <div role="row"><span role="cell">A 4% booking fee</span><b role="cell">{{NOCUT_FOUR}}</b></div>
+        <div role="row"><span role="cell">A 1.5% booking fee and $49 a month</span><b role="cell">{{NOCUT_ONEHALF}}</b></div>
+        <div role="row" class="ours"><span role="cell">Verdynt/OS Lodge with the Online shop, paid yearly</span><b role="cell">{{NOCUT_YEAR}}</b></div>
+      </div>
+      <p class="fine">Card processing fees are charged by the card processor in every case, and are not included above. The online shop is paid into your own Stripe account.</p>
     </div>
   </section>
 
@@ -103,13 +130,15 @@
     <div class="wrap">
       <div class="sh"><h2 id="h-pf">Pricing questions.</h2></div>
       <div class="faq">
-        <details><summary>Is there a contract?</summary><p>No. Monthly billing is month to month, and yearly billing is paid once a year. Cancel from the Billing page and you keep everything until the end of the period you paid for.</p></details>
+        <details><summary>Is there a contract?</summary><p>No. Monthly billing is month to month, yearly billing is paid once a year, and season billing is six payments from November to April. Cancel from the Billing page and you keep everything until the end of the period you paid for.</p></details>
+        <details><summary>What is paying over the season?</summary><p>The yearly price, split into six monthly payments from November to April, so you pay while the lifts are turning and nothing in the summer. It costs the same over the year as paying yearly, and everything keeps working all year. Sign up between May and October and the first payment is November 1.</p></details>
         <details><summary>What happens when the trial ends?</summary><p>If you have chosen a plan and a way to pay, nothing changes. If not, everything keeps working for 14 more days with a note at the top of every page, then Verdynt/OS becomes read only until you pay.</p></details>
         <details><summary>What does read only mean?</summary><p>Everyone can still sign in, see and export everything. Nothing new is sold, booked or added, and the online shop stops taking orders. Patrol, the time clock and the team Inbox keep working, because care records and hours should never wait on a bill. Paying turns everything back on straight away.</p></details>
         <details><summary>Can we buy just a few apps?</summary><p>Start with the plan nearest to what you run and add what you need. If none fits, tell us what you run and we will price it with you.</p></details>
         <details><summary>What does Assistant Plus add?</summary><p>Every plan includes Ask, which answers how-to questions from Help and your setup. Assistant Plus adds questions about your own day (scans, sales, lessons, program days, who is working), limited to what each person's role can already see, and a Questions button for guests on the online pages you choose. A monthly allowance is built in, so the bill never surprises you. The assistant never sees patient care records.</p></details>
-        <details><summary>We need Patrol but not the bigger plan.</summary><p>Take Patrol only, at {{PATROL_FROM}} a month, and the ski area gets a free read-only login. Patrol is also an add-on for Lodge and Mountain, and included in Resort.</p></details>
-        <details><summary>Why is Patrol {{PATROL_ADDON}} as an add-on and {{PATROL_FROM}} on its own?</summary><p>Because the add-on does more. Patrol only is everything patrol needs: patient care reports, dispatch, duty, the closing sweep, medications and the claim file. As an add-on, Patrol is connected to the rest of the mountain's records, so a case picks up the rental binding setting and the technician who set it, the morning's grooming, the lift's status, the trail's opening check and who was on the time clock, without anyone typing it in. That is the record an insurer asks for.</p></details>
+        <details><summary>We need Patrol but not the bigger plan.</summary><p>Take Patrol only, at {{PATROL_FROM}} a month, and the ski area gets a free read-only login. Patrol is the same {{PATROL_ADDON}} a month as an add-on for Lodge and Mountain, where a case also picks up the rental binding setting, the morning's grooming, the lift's status and who was on the time clock by itself. It is included in Resort.</p></details>
+        <details><summary>Do you take a cut of ticket sales?</summary><p>No. The price is the same however much you sell online. Guests pay into your own Stripe account, and the only fees on a sale are the card processor's.</p></details>
+        <details><summary>Why is Resort a better deal than adding apps to Mountain?</summary><p>Resort includes Patrol, the Online shop, Terrain park, Assets and fleet, and Messages. Added to Mountain one by one, those cost more each month than Resort does.</p></details>
         <details><summary>Can we change plans or switch apps on and off?</summary><p>Yes. The owner changes the plan and add-ons on the Billing page, and the apps change to match. Turning an app off hides it from your crew without deleting anything.</p></details>
         <details><summary>What happens to our data if we leave?</summary><p>It is yours. Customers, sales, payments, refunds and incident reports download as spreadsheets whenever you want them.</p></details>
       </div>

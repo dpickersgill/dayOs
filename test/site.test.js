@@ -191,6 +191,20 @@ test('the live plans are in the page itself, for search engines and people witho
   }
 });
 
+test('Pricing: pay monthly, yearly or over the season; setup packages; and the no-cut comparison from the live prices', async () => {
+  const page = (await onHost('/pricing')).text;
+  assert.ok(page.includes('data-interval="season"'), 'a season choice beside monthly and yearly');
+  assert.ok(page.includes('id="setup"') && page.includes('kind=setup'), 'setup packages, with a way to ask for one');
+  assert.ok(!/\{\{[A-Z_]+\}\}/.test(page), 'every token is filled in');
+  const d = (await api('GET', '/site/plans')).body;
+  const lodge = d.plans.find((x) => x.code === 'lodge'); const shop = d.addons.find((x) => x.code === 'shop');
+  if (lodge && shop) assert.ok(page.includes(`$${Math.round((lodge.yearly_cents + shop.yearly_cents) / 100).toLocaleString('en-US')}`), 'the Lodge and Online shop year, from the live prices');
+  assert.ok(!page.includes('Why is Patrol'), 'no question about Patrol costing more as an add-on');
+  // the request kind for guided setup goes to Leads
+  const r = await api('POST', '/site/contact', { kind: 'setup', name: 'Sam Setup', mountain: 'Setup Hill', email: `setup-${suffix}@example.test` });
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+});
+
 test('the Contact form keeps the request for Leads and emails it, and bots and bad input are turned away', async () => {
   assert.equal((await api('POST', '/site/contact', { name: 'A', mountain: 'B', email: 'not-an-email' })).status, 400);
   mails.length = 0;

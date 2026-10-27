@@ -2,7 +2,9 @@
 
 // What a mountain pays Verdynt/OS, and what happens when it does not.
 //
-// Each mountain is on a plan (a set of apps) with any add-ons, monthly or yearly. New mountains start with a 14-day
+// Each mountain is on a plan (a set of apps) with any add-ons, paid monthly, yearly, or over the season: the yearly price
+// in six monthly payments, November to April, with nothing to pay May to October (Stripe's collection is paused for the
+// summer by the daily job, and a mountain that starts in the summer pays nothing until November). New mountains start with a 14-day
 // trial. They pay through Stripe: card or US bank account (Stripe Checkout), or an emailed invoice due in 30 days.
 // Stripe's customer portal handles changing the card, seeing invoices and canceling.
 //
@@ -121,7 +123,22 @@ async function startTrial(conn, tenantId, { planId = null, email = null } = {}) 
 }
 
 // ---------------------------------------------------------------- Stripe
-const priceKey = (b) => (b.billing_interval === 'year' ? ['stripe_year', 'stripe_year_cents', 'yearly_cents', 'year'] : ['stripe_month', 'stripe_month_cents', 'monthly_cents', 'month']);
+// ---- season billing: November to April
+const SEASON_MONTHS = 6;
+/** A sixth of the yearly price: what a season payment is, in cents (none when the plan has no yearly price). */
+const seasonCents = (p) => (p && p.yearly_cents ? Math.round(Number(p.yearly_cents) / SEASON_MONTHS) : 0);
+/** May to October: nothing is collected from a season-billed mountain. today is YYYY-MM-DD. */
+const inSummer = (today) => { const m = Number(String(today).slice(5, 7)); return m >= 5 && m <= 10; };
+/** The next November 1 on or after today, as YYYY-MM-DD. */
+const nextNovember = (today) => { const y = Number(String(today).slice(0, 4)); const m = Number(String(today).slice(5, 7)); return `${m >= 11 ? y + 1 : y}-11-01`; };
+const unix = (day) => Math.floor(Date.parse(`${day}T12:00:00Z`) / 1000);
+
+/** [price id column, its amount column, the amount for this period, Stripe's interval] for the mountain's billing period. */
+const priceKey = (b) => (b.billing_interval === 'year' ? ['stripe_year', 'stripe_year_cents', 'yearly_cents', 'year']
+  : b.billing_interval === 'season' ? ['stripe_season', 'stripe_season_cents', 'season_cents', 'month']
+    : ['stripe_month', 'stripe_month_cents', 'monthly_cents', 'month']);
+/** A plan with its season amount worked out, so all three periods read the same way. */
+const withSeason = (p) => (p ? { ...p, season_cents: seasonCents(p) } : p);
 
 /** Make (or refresh) the Stripe product and prices for a plan. Prices cannot change in Stripe, so a new amount makes a new price. */
 async function syncPlan(p) {
@@ -131,9 +148,11 @@ async function syncPlan(p) {
     product = (await stripe.call('/v1/products', { name: `Verdynt/OS ${p.name}`, metadata: { kind: 'billing_plan', plan_id: String(p.id), code: p.code } }, { idempotencyKey: `plan-product-${p.id}` })).id;
     await pool.query('UPDATE billing_plans SET stripe_product = ? WHERE id = ?', [product, p.id]);
   }
-  for (const [col, centsCol, amountCol, interval] of [['stripe_month', 'stripe_month_cents', 'monthly_cents', 'month'], ['stripe_year', 'stripe_year_cents', 'yearly_cents', 'year']]) {
+  p = withSeason(p);
+  for (const [col, centsCol, amountCol, interval] of [['stripe_month', 'stripe_month_cents', 'monthly_cents', 'month'], ['stripe_year', 'stripe_year_cents', 'yearly_cents', 'year'], ['stripe_season', 'stripe_season_cents', 'season_cents', 'month']]) {
     if (!p[amountCol] || (p[col] && Number(p[centsCol]) === Number(p[amountCol]))) continue;
-    const price = await stripe.call('/v1/prices', { product, currency: 'usd', unit_amount: p[amountCol], recurring: { interval }, metadata: { plan_id: String(p.id) } }, { idempotencyKey: `plan-price-${p.id}-${interval}-${p[amountCol]}` });
+    const season = col === 'stripe_season';
+    const price = await stripe.call('/v1/prices', { product, currency: 'usd', unit_amount: p[amountCol], recurring: { interval }, nickname: season ? 'Season (Nov to Apr)' : undefined, metadata: { plan_id: String(p.id), ...(season ? { period: 'season' } : {}) } }, { idempotencyKey: `plan-price-${p.id}-${season ? 'season' : interval}-${p[amountCol]}` });
     await pool.query(`UPDATE billing_plans SET ${col} = ?, ${centsCol} = ? WHERE id = ?`, [price.id, p[amountCol], p.id]);
   }
   return parsePlan(await one(pool, 'SELECT * FROM billing_plans WHERE id = ?', [p.id]));
@@ -142,13 +161,13 @@ async function syncPlan(p) {
 /** The Stripe prices for a mountain's plan, add-ons and interval, synced first if needed. */
 async function lineItems(b) {
   const all = await plans();
-  const chosen = [all.find((p) => p.id === Number(b.plan_id)), ...all.filter((p) => ids(b.addons).includes(p.id))].filter(Boolean);
+  const chosen = [all.find((p) => p.id === Number(b.plan_id)), ...all.filter((p) => ids(b.addons).includes(p.id))].filter(Boolean).map(withSeason);
   if (!chosen.length || !chosen[0] || chosen[0].kind !== 'plan') throw new AppError(400, 'Choose a plan first');
   const [col, centsCol, amountCol] = priceKey(b);
   const out = [];
   for (let p of chosen) {
     if (!p[amountCol]) continue; // a free add-on has no line
-    if (!p[col] || Number(p[centsCol]) !== Number(p[amountCol])) p = await syncPlan(p);
+    if (!p[col] || Number(p[centsCol]) !== Number(p[amountCol])) p = withSeason(await syncPlan(p));
     out.push({ price: p[col], quantity: 1 });
   }
   if (!out.length) throw new AppError(400, 'This plan has no price for that billing period');
@@ -163,11 +182,43 @@ async function customerFor(conn, tenantId, b) {
   return c.id;
 }
 
-/** The trial's last day as a Stripe trial end, when there are trial days left (so paying early does not cut the trial). */
+/**
+ * When Stripe should first charge, as a Stripe trial end: the trial's last day when there are trial days left (so paying
+ * early does not cut the trial), and for season billing started between May and October, November 1.
+ */
 function trialEnd(b, today) {
   const d = dateOf(b.trial_ends_on);
-  if (!d || d <= today || b.stripe_subscription_id) return undefined;
-  return Math.floor(Date.parse(`${d}T23:59:00Z`) / 1000);
+  const trial = d && d > today && !b.stripe_subscription_id ? Math.floor(Date.parse(`${d}T23:59:00Z`) / 1000) : undefined;
+  if (b.billing_interval === 'season' && inSummer(today)) return Math.max(trial || 0, unix(nextNovember(today)));
+  return trial;
+}
+
+/** Stripe's summer pause for a season-billed subscription: collection stops until November 1 (Stripe resumes it itself). */
+const pauseUntilNovember = (today) => ({ pause_collection: { behavior: 'void', resumes_at: unix(nextNovember(today)) } });
+
+/**
+ * The daily job: pause season-billed subscriptions for the summer (May to October), and take the pause off any that
+ * moved to monthly or yearly. Returns how many changed. Stripe resumes a paused one on November 1 by itself.
+ */
+async function seasonAll() {
+  if (!stripe.enabled()) return 0;
+  const list = await rows(pool, "SELECT b.*, t.timezone FROM tenant_billing b JOIN tenants t ON t.id = b.tenant_id WHERE b.stripe_subscription_id IS NOT NULL AND b.sub_status IN ('active','trialing','past_due') AND (b.billing_interval = 'season' OR b.season_paused_until IS NOT NULL)");
+  let changed = 0;
+  for (const b of list) {
+    const today = todayIn(b.timezone);
+    const paused = dateOf(b.season_paused_until);
+    if (b.billing_interval === 'season' && inSummer(today) && (!paused || paused <= today)) {
+      await stripe.call(`/v1/subscriptions/${encodeURIComponent(b.stripe_subscription_id)}`, pauseUntilNovember(today));
+      await pool.query('UPDATE tenant_billing SET season_paused_until = ? WHERE tenant_id = ?', [nextNovember(today), b.tenant_id]);
+      await event(pool, b.tenant_id, 'season_paused', `Nothing to pay until ${nextNovember(today)}`);
+      changed += 1;
+    } else if (paused && (b.billing_interval !== 'season' || paused <= today)) {
+      if (b.billing_interval !== 'season') await stripe.call(`/v1/subscriptions/${encodeURIComponent(b.stripe_subscription_id)}`, { pause_collection: '' });
+      await pool.query('UPDATE tenant_billing SET season_paused_until = NULL WHERE tenant_id = ?', [b.tenant_id]);
+      changed += 1;
+    }
+  }
+  return changed;
 }
 
 /**
@@ -201,4 +252,5 @@ async function remindAll(base = '') {
 module.exports = { remindAll,
   TRIAL_DAYS, GRACE_DAYS, standing, standingOf, invalidate, gate, publicBlocked, plans, parsePlan, ids, modulesFor, applyModules, event,
   startTrial, syncPlan, lineItems, customerFor, trialEnd, dateOf,
+  SEASON_MONTHS, seasonCents, inSummer, nextNovember, pauseUntilNovember, seasonAll,
 };

@@ -731,6 +731,28 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 .offer b{display:block;font-family:'Barlow Condensed',sans-serif;font-size:32px;line-height:1.05;color:var(--white)}
 .offer p{color:var(--onink3)!important;margin-top:8px!important;font-size:17.5px}
 @media (max-width:760px){.offer{grid-template-columns:minmax(0,1fr)}}
+/* Pricing: season billing, setup packages, and the no-cut comparison */
+.season-note{margin-top:18px;padding:22px 24px;background:var(--white);border:1px solid var(--line2);border-left:5px solid var(--spruce);border-radius:0 var(--r) var(--r) 0}
+.season-note b{display:block;font-family:'Barlow Condensed',sans-serif;font-size:26px;line-height:1.1}
+.season-note span{display:block;margin-top:6px;color:var(--ink2);font-size:17px;max-width:46em}
+.setups{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;align-items:stretch}
+.setup-card{display:flex;flex-direction:column;gap:10px;padding:24px;background:var(--white);border:1px solid var(--line);border-radius:var(--r)}
+.setup-card.feat{border:2px solid var(--trail);box-shadow:0 0 0 4px var(--trailWash)}
+.setup-card h3{font-size:30px;line-height:1}
+.setup-card p{color:var(--ink2);font-size:16.5px}
+.sx .setup-price{color:var(--ink);font-size:16px;line-height:1.5}
+.setup-price b{font-family:'Barlow Condensed',sans-serif;font-size:30px;font-weight:700;line-height:1}
+.setup-card .btn{margin-top:auto;align-self:flex-start}
+.setup-tiers{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 16px;font-size:15.5px;color:var(--ink2)}
+.setup-tiers b{font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:700;line-height:1;color:var(--ink);margin-right:4px}
+.cutrows{max-width:760px;border-top:2px solid var(--ink)}
+.cutrows>div{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:16px 0;border-bottom:1px solid var(--line2);font-size:18px}
+.cutrows b{font-family:'Barlow Condensed',sans-serif;font-size:34px;line-height:1;white-space:nowrap}
+.cutrows .ours span{font-weight:700}
+.cutrows .ours b{color:var(--spruce)}
+@media (max-width:1000px){.setups{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:640px){.cutrows>div{font-size:16px}.cutrows b{font-size:28px}.season-note{padding:18px}.bill button{font-size:15px}}
+
 /* One gap between a section's heading and what follows it, at every size */
 .sh+*,.gh+*{margin-top:var(--stack)}
 .story>.sh+*{margin-top:0}

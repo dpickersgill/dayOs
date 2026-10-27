@@ -45,22 +45,23 @@ router.get('/billing', managers, async (req, res) => {
     billing: b ? {
       plan_id: b.plan_id ? Number(b.plan_id) : null, addons: B.ids(b.addons), interval: b.billing_interval, comped: Boolean(Number(b.comped)), trial_ends_on: B.dateOf(b.trial_ends_on),
       paid_until: B.dateOf(b.paid_until), billing_email: b.billing_email, pay_method: b.pay_method, subscribed: Boolean(b.stripe_subscription_id), sub_status: b.sub_status,
-      period_end: b.period_end, cancel_at_period_end: Boolean(Number(b.cancel_at_period_end)), has_customer: Boolean(b.stripe_customer_id),
+      period_end: b.period_end, cancel_at_period_end: Boolean(Number(b.cancel_at_period_end)), has_customer: Boolean(b.stripe_customer_id), season_paused_until: B.dateOf(b.season_paused_until),
     } : null,
     plans: all.filter((p) => p.active && p.kind === 'plan'), addons: all.filter((p) => p.active && p.kind === 'addon'),
     invoices, events, can_pay: req.auth.role === 'owner', stripe: stripe.enabled(), grace_days: B.GRACE_DAYS,
   });
 });
 
-const choiceBody = z.object({ plan_id: z.number().int().positive(), addons: z.array(z.number().int().positive()).max(20).default([]), interval: z.enum(['month', 'year']).default('month'), billing_email: z.string().trim().email().max(255).nullable().optional() });
+const choiceBody = z.object({ plan_id: z.number().int().positive(), addons: z.array(z.number().int().positive()).max(20).default([]), interval: z.enum(['month', 'year', 'season']).default('month'), billing_email: z.string().trim().email().max(255).nullable().optional() });
 
 async function checkChoice(db, b) {
   const all = await B.plans(db);
   const plan = all.find((p) => p.id === b.plan_id && p.kind === 'plan' && p.active);
   if (!plan) throw bad('Choose one of the plans');
   for (const a of b.addons) if (!all.some((p) => p.id === a && p.kind === 'addon' && p.active)) throw bad('Unknown add-on');
-  const cents = b.interval === 'year' ? 'yearly_cents' : 'monthly_cents';
-  if (!plan[cents]) throw bad(`${plan.name} is not offered ${b.interval === 'year' ? 'yearly' : 'monthly'}`);
+  // Season billing is the yearly price in six payments, so it needs a yearly price.
+  const cents = b.interval === 'month' ? 'monthly_cents' : 'yearly_cents';
+  if (!plan[cents]) throw bad(`${plan.name} is not offered ${b.interval === 'month' ? 'monthly' : b.interval === 'year' ? 'yearly' : 'over the season'}`);
   return plan;
 }
 
@@ -77,16 +78,22 @@ router.put('/billing/choice', managers, ownerOnly, validate(choiceBody), async (
     const items = await B.lineItems({ ...b, plan_id: c.plan_id, addons: c.addons.join(','), billing_interval: c.interval });
     const sub = await stripe.get(`/v1/subscriptions/${encodeURIComponent(b.stripe_subscription_id)}`);
     const old = (sub.items && sub.items.data) || [];
+    // Season billing in the summer: nothing more is collected until November. Leaving it takes any summer pause off.
+    const tz = (await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [t])).timezone;
+    const today = require('../lib/util').todayIn(tz);
+    const summer = c.interval === 'season' && B.inSummer(today);
     await stripe.call(`/v1/subscriptions/${encodeURIComponent(b.stripe_subscription_id)}`, {
       items: [...old.map((i) => ({ id: i.id, deleted: true })), ...items], proration_behavior: 'create_prorations',
+      ...(summer ? B.pauseUntilNovember(today) : B.dateOf(b.season_paused_until) ? { pause_collection: '' } : {}),
     });
+    await pool.query('UPDATE tenant_billing SET season_paused_until = ? WHERE tenant_id = ?', [summer ? B.nextNovember(today) : null, t]);
   }
   await tx(async (conn) => {
     await conn.query('UPDATE tenant_billing SET plan_id = ?, addons = ?, billing_interval = ?, billing_email = COALESCE(?, billing_email) WHERE tenant_id = ?', [c.plan_id, c.addons.join(','), c.interval, c.billing_email || null, t]);
     const now = await one(conn, 'SELECT * FROM tenant_billing WHERE tenant_id = ?', [t]);
     // The apps follow the plan once it is paid for; during the trial everything stays on.
     if (now.stripe_subscription_id || B.dateOf(now.paid_until)) await B.applyModules(conn, t, now);
-    await B.event(conn, t, 'plan_chosen', `Plan ${c.plan_id}, add-ons ${c.addons.join(',') || 'none'}, ${c.interval}ly`, { userId: req.auth.userId });
+    await B.event(conn, t, 'plan_chosen', `Plan ${c.plan_id}, add-ons ${c.addons.join(',') || 'none'}, ${{ month: 'monthly', year: 'yearly', season: 'over the season (November to April)' }[c.interval]}`, { userId: req.auth.userId });
   });
   await audit(pool, req, 'billing_choice', 'tenant_billing', t, c);
   B.invalidate(t);

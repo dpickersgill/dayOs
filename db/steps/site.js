@@ -12,4 +12,7 @@ module.exports = () => [
   // "Score ten of our reports, free": a request from the incident report guide, kept in the console's Leads.
   ['site_leads review kind', (c) => typeHas(c, 'site_leads', 'kind', "'review'"),
     "ALTER TABLE site_leads MODIFY kind ENUM('walkthrough','trial','founding','question','patrol','review') NOT NULL DEFAULT 'walkthrough'"],
+  // Guided setup (Pricing, Getting set up): a request for the paid setup package.
+  ['site_leads setup kind', (c) => typeHas(c, 'site_leads', 'kind', "'setup'"),
+    "ALTER TABLE site_leads MODIFY kind ENUM('walkthrough','trial','founding','question','patrol','review','setup') NOT NULL DEFAULT 'walkthrough'"],
 ];

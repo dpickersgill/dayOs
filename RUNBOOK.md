@@ -151,6 +151,20 @@ Five wrong passwords or codes lock that login for 15 minutes; sign-in is also li
 Sessions last 2 hours. **Address allowlist (optional):** `PLATFORM_ALLOW_IPS` = comma-separated addresses allowed to use the console.
 `PLATFORM_TOTP_SECRET` (an authenticator code for the platform key itself) still works if you keep key sign-in on.
 
+## Plans, prices and season billing
+
+Plans and add-ons are set in the console under **Plans and prices**; the website and the Billing page follow straight away.
+After changing a price, press **Sync to Stripe** on that row: it makes the monthly, yearly and season prices in Stripe.
+
+- **Season billing** is the yearly price in six monthly payments, November to April. The daily job pauses Stripe's
+  collection on those subscriptions from May to October (Stripe resumes it on November 1 by itself), and a mountain that
+  signs up in the summer pays nothing until November 1. Nothing to set up: it runs with the daily job.
+- **Guided setup** is priced on the website (Pricing, Getting set up): $750 Lodge, $1,500 Mountain, $3,000 Resort,
+  $500 Patrol only, and $1,200 a day on site plus travel. Requests arrive in Leads as "Guided setup". Bill it as a one-off
+  Stripe invoice to the mountain's customer once they choose a plan.
+- The October 2026 review moved Resort to include Assets and fleet and Messages, and the Patrol add-on to $149 a month
+  ($1,500 a year), the same as Patrol only. The migration changed them only where they were still the launch values.
+
 ## Prospect outreach (platform console, Prospects, Outreach)
 
 Outreach emails go from your own Google Workspace mailbox, never through Postmark (Postmark carries the mountains' email and does not allow cold outreach). Use a separate domain for it, so runmyresort.com's reputation is never at risk.

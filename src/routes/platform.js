@@ -401,7 +401,7 @@ router.post('/billing/plans/:id/sync', async (req, res) => {
   if (!p) throw notFound('Plan');
   const out = await BL.syncPlan(BL.parsePlan(p));
   await log(pool, req, null, 'billing_plan_sync', { id: p.id });
-  res.json({ stripe_product: out.stripe_product, stripe_month: out.stripe_month, stripe_year: out.stripe_year });
+  res.json({ stripe_product: out.stripe_product, stripe_month: out.stripe_month, stripe_year: out.stripe_year, stripe_season: out.stripe_season });
 });
 
 // ---------------------------------------------------------------- prospects: the ski areas we are selling to
@@ -427,7 +427,7 @@ router.patch('/leads/:id', validate(z.object({ status: z.enum(['new', 'contacted
 
 /** One mountain's billing, as the operator sets it: plan, trial end, free (comped), paid outside Stripe until a date. */
 router.put('/tenants/:id/billing', needsAccess, validate(z.object({
-  plan_id: z.number().int().positive().nullable().optional(), addons: z.array(z.number().int().positive()).max(20).optional(), interval: z.enum(['month', 'year']).optional(),
+  plan_id: z.number().int().positive().nullable().optional(), addons: z.array(z.number().int().positive()).max(20).optional(), interval: z.enum(['month', 'year', 'season']).optional(),
   comped: z.boolean().optional(), trial_ends_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), paid_until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   billing_email: z.string().trim().email().max(255).nullable().optional(), notes: z.string().max(500).nullable().optional(), apply_apps: z.boolean().default(false),
 })), async (req, res) => {
