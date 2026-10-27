@@ -6,7 +6,7 @@
 2. **Change the owner password** in the app (Settings > Change password) and turn on two-step sign-in for every owner and manager.
 3. **Verify backups**: Cloud SQL, Backups shows a daily backup and point-in-time recovery on. Restore one into a throwaway instance once and check the data.
 4. **Legal**: have a lawyer review the waiver text and privacy terms. Sign a BAA with Google Cloud before storing patrol patient/health data (see HIPAA.md).
-5. **Card payments**: pick a processor (Square or Stripe) before taking live cards through a terminal. Until then card sales are recorded manually.
+5. **Card payments**: the owner connects the mountain's own Stripe account under Billing, and a manager pairs a Stripe smart reader for each counter (see "Online card payment (Stripe)" below).
 
 ## Setting up a patrol on its own (Patrol only)
 

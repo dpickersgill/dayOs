@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-26",
+  "updated": "2026-10-27",
   "stages": [
     {
       "key": "now",
@@ -7,24 +7,29 @@
       "when": null,
       "items": [
         {
-          "app": "patrol",
-          "title": "Aid room supplies and patroller readiness",
-          "text": "Each aid room and top shack keeps its own supply levels, with reorder points, and one morning board adds patrollers whose certifications are due, next to the kits that are not ready."
+          "app": null,
+          "title": "Ready for your busiest morning",
+          "text": "More room on a holiday Saturday and a powder-day rush on the online shop, the first sale of the day as quick as the rest, and a status page that shows how Verdynt/OS is running."
         },
         {
           "app": "sell",
           "title": "Keep selling when the internet drops",
-          "text": "The ticket window keeps selling cash and card-reader sales if the lodge loses its connection, and catches everything up as soon as it is back."
+          "text": "The ticket window, rental counter and ski school desk keep selling cash and card-reader sales if the lodge loses its connection, print receipts, and catch everything up in order as soon as it is back."
         },
         {
           "app": null,
-          "title": "Bring your data with you",
-          "text": "Upload what your old system or spreadsheets export, such as customers, pass holders, products, staff and the rental fleet. Verdynt/OS matches the columns, flags duplicates and problems, and shows you a preview before anything is saved."
+          "title": "Bring your data with you, and take it with you",
+          "text": "Upload what your old system or spreadsheets export, such as customers, pass holders, products, staff and the rental fleet. Verdynt/OS matches the columns, flags duplicates and problems, and shows a preview before anything is saved. Download everything your mountain holds in one file whenever you want."
+        },
+        {
+          "app": "money",
+          "title": "Sales tax the way your area charges it",
+          "text": "More than one tax on a sale, such as state, county and local rates, different rates for lodging or rentals, and tax-exempt sales to schools and government groups."
         },
         {
           "app": "money",
           "title": "Sales into QuickBooks Online",
-          "text": "Each day's sales, refunds and payments go to QuickBooks Online instead of being typed in."
+          "text": "Each day's sales, refunds, payments and tax go to QuickBooks Online, mapped to your own accounts, instead of being typed in."
         }
       ]
     },
@@ -35,18 +40,28 @@
       "items": [
         {
           "app": "shop",
-          "title": "Reload a card online, straight to the lift",
-          "text": "Guests with a lift card buy their day online and go straight to the lift, without stopping at the window."
+          "title": "Season pass payment plans and renewals",
+          "text": "Sell a pass with a deposit and monthly payments taken automatically, a renewal price for last season's pass holders, and family pricing for passes bought together."
+        },
+        {
+          "app": "money",
+          "title": "Pass revenue over the season",
+          "text": "A schedule that spreads season pass sales across the days of the season, for your accountant and your books."
+        },
+        {
+          "app": null,
+          "title": "Sign in with your company login",
+          "text": "Staff sign in with your Microsoft or Google work account, and owners build their own access levels for every app, the way the patrol director already can in Patrol."
         },
         {
           "app": "shop",
-          "title": "Season pass payment plans",
-          "text": "Sell a pass with a deposit and monthly payments, taken automatically."
+          "title": "Guest pages anyone can use",
+          "text": "The online shop, waivers, program registration and lesson booking work with a keyboard and a screen reader, with an accessibility statement you can share."
         },
         {
-          "app": "shop",
-          "title": "Tickets in Apple and Google Wallet",
-          "text": "Guests add their ticket or pass to their phone's wallet and scan it at the lift."
+          "app": "dashboard",
+          "title": "This season against last",
+          "text": "Visits, sales, lessons and incidents side by side with the same day last season, with revenue per visit and labor cost against sales."
         },
         {
           "app": "money",
@@ -54,9 +69,24 @@
           "text": "Food, drink and shop sales from Square or Toast appear in Money next to tickets and lessons, so the day adds up in one place."
         },
         {
-          "app": "dashboard",
-          "title": "This season against last",
-          "text": "Visits, sales, lessons and incidents side by side with the same day last season."
+          "app": "workforce",
+          "title": "Pay rates and hours into your payroll",
+          "text": "Pay rates for each job, labor cost as the day goes, daily overtime where your state requires it, and approved hours sent to your payroll service instead of a spreadsheet."
+        },
+        {
+          "app": "shop",
+          "title": "Reload a card online, straight to the lift",
+          "text": "Guests with a lift card buy their day online and go straight to the lift, without stopping at the window."
+        },
+        {
+          "app": "shop",
+          "title": "Tickets in Apple and Google Wallet",
+          "text": "Guests add their ticket or pass to their phone's wallet and scan it at the lift."
+        },
+        {
+          "app": "gate",
+          "title": "Work with your lift gates",
+          "text": "Tickets and passes sold in Verdynt/OS open the turnstiles many mountains already have, starting with one of the major gate makers."
         }
       ]
     },
@@ -66,24 +96,29 @@
       "when": null,
       "items": [
         {
-          "app": "conditions",
-          "title": "Snowmaking log",
-          "text": "Which guns ran on which trails, for how long, with the water used and the conditions, so you can see what each foot of snow cost."
-        },
-        {
-          "app": "workforce",
-          "title": "Hiring seasonal staff",
-          "text": "An application form, then the paperwork and checklist for each new hire, before their first shift."
+          "app": null,
+          "title": "One company, several mountains",
+          "text": "One login across your mountains, products and pass holders shared between them, a pass that works at sister mountains, and reports across all of them."
         },
         {
           "app": null,
-          "title": "Season-end survey help",
-          "text": "The visits, lifts and injury figures the industry's end-of-season survey asks for, gathered for you."
+          "title": "Connect your other systems",
+          "text": "An API, event notifications and a data feed for the reporting tools you already use."
         },
         {
           "app": "conditions",
-          "title": "Lift inspection reports for your state",
-          "text": "Your lift checks printed in the layout your state's lift inspectors ask for."
+          "title": "Lift inspections by lift type",
+          "text": "Daily, weekly and annual checks that match each lift, from a detachable chair to a surface lift, with operator training, evacuation drills and your state inspector's records in one place."
+        },
+        {
+          "app": "conditions",
+          "title": "Rides and downtime by lift",
+          "text": "Rides, uphill capacity used and wait times from gate scans, and every stop with its reason for the season report."
+        },
+        {
+          "app": "conditions",
+          "title": "Snowmaking and grooming",
+          "text": "Which guns ran on which trails, the water and power used and what each foot of snow cost, plus the night's grooming plan and machine hours."
         },
         {
           "app": "dashboard",
@@ -91,39 +126,64 @@
           "text": "How busy the next 10 days will be, as a range, from the day of the week, holidays and school breaks, new snow, the weather forecast and the tickets already sold."
         },
         {
-          "app": "conditions",
-          "title": "Snow report that writes itself",
-          "text": "Each morning, the day's conditions update for your website, email and social media, written from lifts, trails, grooming and new snow."
-        },
-        {
           "app": "dashboard",
-          "title": "Morning brief for managers",
-          "text": "One short read each morning: yesterday against last year, today's forecast and staffing gaps, lifts on hold, open work orders and open incidents."
-        },
-        {
-          "app": "patrol",
-          "title": "Patrol on the map",
-          "text": "See where patrollers are on the map during a call, and group them into crews for race days and events."
-        },
-        {
-          "app": "workforce",
-          "title": "Hours into your payroll",
-          "text": "Approved hours sent straight to your payroll service instead of a spreadsheet."
-        },
-        {
-          "app": null,
-          "title": "One login for groups of mountains",
-          "text": "Move between mountains you work at without signing in again."
-        },
-        {
-          "app": null,
-          "title": "Connect your other systems",
-          "text": "An API and event notifications for the tools you already use."
+          "title": "Morning brief and snow report",
+          "text": "One short read for managers each morning, and the day's conditions update written for your website, email and social media from lifts, trails, grooming and new snow."
         },
         {
           "app": "catalog",
           "title": "Suggested prices",
-          "text": "Price ideas for busy and quiet days, based on how fast tickets are selling."
+          "text": "Price ideas for busy and quiet days, and better prices for guests who buy ahead, based on how fast tickets are selling."
+        },
+        {
+          "app": "workforce",
+          "title": "Hiring seasonal staff",
+          "text": "An application form, the paperwork checklist, visa sponsorship dates, housing assignments and a rehire list, so each new hire is ready before their first shift."
+        },
+        {
+          "app": "workforce",
+          "title": "Training records for every team",
+          "text": "Required training and certifications for lift operators, groomers, instructors and every other team, checked when shifts are scheduled."
+        },
+        {
+          "app": null,
+          "title": "Safety program",
+          "text": "Near misses, safety meetings and job hazard reviews for every department, next to the staff injury register."
+        },
+        {
+          "app": "shop",
+          "title": "Guest accounts and alerts",
+          "text": "Guests keep their family, passes and a saved card in one account, and get a text when a lift is on hold or a lesson moves for weather."
+        },
+        {
+          "app": "money",
+          "title": "Group sales and charge accounts",
+          "text": "Invoices and accounts for school groups, ski clubs and company days, paid later."
+        },
+        {
+          "app": "catalog",
+          "title": "Summer operations",
+          "text": "Bike park, scenic rides and other summer activities sold by time slot with a limit, the right waiver for each activity, and bike rentals."
+        },
+        {
+          "app": null,
+          "title": "Canada",
+          "text": "Canadian dollars and taxes, French, and metric units."
+        },
+        {
+          "app": "workforce",
+          "title": "Staff screens in Spanish",
+          "text": "The time clock, schedules and staff pages in Spanish for the staff who read it first."
+        },
+        {
+          "app": "patrol",
+          "title": "Patrol on the map",
+          "text": "See where patrollers are on the map during a call."
+        },
+        {
+          "app": null,
+          "title": "Season-end survey help",
+          "text": "The visits, lifts and injury figures the industry's end-of-season survey asks for, gathered for you."
         }
       ]
     }

@@ -211,6 +211,12 @@
           "app": null,
           "text": "The product website's header, menus and spacing are rebuilt: the header lines up with the page, Product opens a menu of every solution page, phones get a full-screen menu with the solutions grouped and the buttons kept at the bottom, tablets a menu that slides in from the right, and plan cards on Pricing line up.",
           "who": "platform"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": [],
+          "text": "The roadmap under Help, Coming to Verdynt/OS, is rebuilt from a full review of the app: first a busy Saturday that never waits (more room at peak, selling with no internet, sales tax by area, QuickBooks Online), then season pass payment plans and pass revenue over the season, signing in with your company login, guest pages anyone can use, labor cost and payroll, and your lift gates; later, groups of mountains, lift inspections by lift type, hiring, summer operations and Canada."
         }
       ]
     },
