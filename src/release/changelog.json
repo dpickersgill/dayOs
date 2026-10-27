@@ -173,6 +173,12 @@
           "app": null,
           "text": "The product website now leads with the patient care record that holds up later: a new page for owners and insurers, a free incident report review, and shorter feature lists.",
           "who": "platform"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "text": "The product website's header, menus and spacing are rebuilt: the header lines up with the page, Product opens a menu of every solution page, phones get a full-screen menu with the solutions grouped and the buttons kept at the bottom, tablets a menu that slides in from the right, and plan cards on Pricing line up.",
+          "who": "platform"
         }
       ]
     },
