@@ -245,6 +245,7 @@ export function sectionPanel({ def, section, scope, row, editable, required, req
         const el = h('select', null, h('option', { value: '' }, 'Not on a trail'));
         for (const t of trails) el.append(h('option', { value: t.id, selected: t.id === row.trail_id }, t.name));
         wrap = wrapField(el);
+        get = () => el.value || null;
         wrap.collect = (out) => { out.cols.trail_id = el.value ? Number(el.value) : null; };
         break;
       }
