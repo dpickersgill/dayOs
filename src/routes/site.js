@@ -268,9 +268,16 @@ async function send(req, res, name, slug, status = 200) {
   res.send(body);
 }
 
-// The website's stylesheet and script are fetched as /site/site.css?v=<version>, so browsers can keep them for a year
+// The website's stylesheet and script are fetched as /site/site.css?v=<version>-<build>, so browsers can keep them for a year
 // and still get the new ones the moment a release changes the address.
-const ASSET_V = require('../../package.json').version;
+// The build is part of the address too: several builds can share a version while it is on staging, and a browser that
+// kept an earlier build's script for a year would otherwise go on running it (old prices, old buttons).
+const ASSET_V = (() => {
+  const { version } = require('../../package.json');
+  let build = '';
+  try { build = String(require('../release/build.json').build || '').replace(/[^0-9a-z]/gi, ''); } catch (_) { /* a copy without a stamped build */ }
+  return build && build !== 'dev' ? `${version}-${build}` : version;
+})();
 
 /** When each page last changed, for the sitemap. */
 const modified = (name) => { try { return fs.statSync(path.join(DIR, `${name}.html`)).mtime.toISOString().slice(0, 10); } catch (_) { return null; } };

@@ -165,6 +165,9 @@ test('pages written for each search are linked from every page, in the sitemap, 
   // The stylesheet is fetched by version, so browsers keep it for a year and still see a new release at once
   const css = home.text.match(/href="(\/site\/site\.css\?v=[^"]+)"/);
   assert.ok(css, 'versioned stylesheet');
+  // and by build, so a new build under the same version is fetched fresh, not kept from an earlier build
+  let build = ''; try { build = String(require('../src/release/build.json').build || '').replace(/[^0-9a-z]/gi, ''); } catch (_) { /* not stamped */ }
+  if (build && build !== 'dev') assert.ok(css[1].endsWith(`-${build}`), `the address carries the build: ${css[1]}`);
   const cssRes = await fetch(`${base}${css[1]}`);
   assert.match(cssRes.headers.get('cache-control'), /max-age=31536000/);
   assert.match((await fetch(`${base}/site/site.css`)).headers.get('cache-control'), /no-cache/);
