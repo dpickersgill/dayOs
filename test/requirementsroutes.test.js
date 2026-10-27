@@ -53,7 +53,7 @@ async function newCase(token, { category = 'injury', complaint = 'Left knee pain
   const c = ok(await api('POST', '/patrol/incidents', { token, body: { occurred_at: `${today}T10:15`, location: 'Ridge Run', category, severity: 'moderate', summary: 'Knee injury' } }));
   let p = null;
   if (['injury', 'medical'].includes(category)) {
-    p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token, body: { first_name: 'Sam', last_name: 'Skier' } })).id;
+    p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token, body: { form: { head_strike: 'no' }, first_name: 'Sam', last_name: 'Skier' } })).id;
     ok(await api('PATCH', `/patrol/incidents/${c.id}/patients/${p}`, { token, body: { chief_complaint: complaint, disposition: outcome } }));
   }
   ok(await api('POST', `/patrol/incidents/${c.id}/responders`, { token, body: { staff_id: S.pat, role: 'lead' } }));

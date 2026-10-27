@@ -121,7 +121,24 @@ export function bedsideCard(p, c, opts) {
     b.addEventListener('click', () => (which === 'arrest' ? arrestSheet({ def, patient: p, base, caseId: id, onClose: () => opts.reload() }) : assessSheet({ def, which, patient: p, base, caseId: id, onSaved: after })));
     return b;
   };
-  const headish = live(p.injuries).some((i) => ['head', 'face', 'neck'].includes(i.body_region) || i.injury_type === 'concussion');
+  // Head strike: asked on injury and collision cases, one tap. Yes or Not sure makes the Head check due and opens the head
+  // questions on the Report. Shown as Yes, from the injuries, when a head injury is already recorded.
+  const hsTyped = (p.form || {}).head_strike || null;
+  const hsNow = hsTyped || (p.derived || {}).head_strike || null;
+  const headQ = editable && ['injury', 'collision'].includes(c.category) ? h('div', { class: 'head-q', 'data-area': 'head-strike' },
+    h('span', { class: 'head-q-label', id: `hq-${p.id}` }, 'Head strike or possible head injury?'),
+    h('div', { class: 'seg', role: 'group', 'aria-labelledby': `hq-${p.id}` }, [['yes', 'Yes', 'warn'], ['no', 'No', 'good'], ['unsure', 'Not sure', 'warn']].map(([v, t, tone]) => {
+      const b = h('button', { type: 'button', 'aria-pressed': String(hsNow === v), 'data-tone': tone, 'data-head': v }, t);
+      b.addEventListener('click', async () => {
+        if (hsTyped === v) return;
+        const r = await send('PATCH', base, { form: { head_strike: v } }, { caseId: id, label: 'Head strike' });
+        sentToast(r, 'Head strike saved');
+        await after(r);
+      });
+      return b;
+    })),
+    !hsTyped && hsNow ? h('span', { class: 'muted small' }, 'Yes, from the injuries recorded. Tap to confirm or change it.') : null) : null;
+  const headish = ['yes', 'unsure'].includes(hsNow) || live(p.injuries).some((i) => ['head', 'face'].includes(i.body_region) || i.injury_type === 'concussion');
   const medical = c.category === 'medical' || live(p.injuries).some((i) => ['illness', 'cardiac'].includes(i.injury_type));
   const tools = editable ? h('div', { class: 'tools', role: 'group', 'aria-label': 'Assessment' },
     tool('survey', 'Primary survey'), tool('head', headish ? 'Head check (due)' : 'Head check'), tool('spine', 'Spine'), tool('medical', medical ? 'Medical (OPQRST)' : 'Medical'), tool('arrest', 'Cardiac arrest')) : null;
@@ -189,7 +206,7 @@ export function bedsideCard(p, c, opts) {
         h('div', { class: 'vhead spread' }, h('h4', null, cur ? `Vitals at ${fmtTime(cur.taken_at)} (${agoText(minutesSince(String(cur.taken_at)))})` : 'Vitals'), due),
         cur ? strip : h('p', { class: 'muted' }, queuedVitals.length ? 'Vitals are waiting to send.' : 'No vitals recorded yet.'),
         extras ? h('p', { class: 'small muted' }, extras) : null,
-        actions, tools, allVitals),
+        actions, headQ, tools, allVitals),
       h('div', { class: 'bed-logs stack' }, injuries, treatments)),
     h('div', { class: 'bed-more stack tight' }, h('h4', null, 'Forms for this patient'), more),
     foot);

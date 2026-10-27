@@ -90,7 +90,7 @@ test('the form works out what it can: age, run classification, summary and colli
   const c = ok(await newCase(T.pat, { summary: 'Injury at Upper Ridge' }), 201);
   const d = ok(await api('GET', `/patrol/incidents/${c.id}`, { token: T.pat }));
   assert.equal(d.form.run_classification, 'more_difficult', 'a blue trail is "more difficult"');
-  const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: T.pat, body: { first_name: 'Ana', last_name: 'Lee', date_of_birth: '2000-01-01', chief_complaint: 'Pain in right ankle' } }), 201);
+  const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: T.pat, body: { form: { head_strike: 'no' }, first_name: 'Ana', last_name: 'Lee', date_of_birth: '2000-01-01', chief_complaint: 'Pain in right ankle' } }), 201);
   let got = ok(await api('GET', `/patrol/incidents/${c.id}`, { token: T.pat }));
   assert.ok(got.patients[0].age_years >= 20, 'age comes from the date of birth');
   assert.equal(got.summary, 'Pain in right ankle', 'the chief complaint replaces the automatic summary');
@@ -99,18 +99,18 @@ test('the form works out what it can: age, run classification, summary and colli
   assert.equal(got.summary, 'Right ankle sprain', 'a summary copied from the complaint follows it');
   // a summary someone typed is never replaced
   const typed = ok(await newCase(T.pat, { summary: 'Skier down near the lift' }), 201);
-  ok(await api('POST', `/patrol/incidents/${typed.id}/patients`, { token: T.pat, body: { first_name: 'Bo', last_name: 'Ng', chief_complaint: 'Knee pain' } }), 201);
+  ok(await api('POST', `/patrol/incidents/${typed.id}/patients`, { token: T.pat, body: { form: { head_strike: 'no' }, first_name: 'Bo', last_name: 'Ng', chief_complaint: 'Knee pain' } }), 201);
   assert.equal(ok(await api('GET', `/patrol/incidents/${typed.id}`, { token: T.pat })).summary, 'Skier down near the lift');
   // a collision case starts its patients with the collision question answered
   const col = ok(await newCase(T.pat, { category: 'collision' }), 201);
-  ok(await api('POST', `/patrol/incidents/${col.id}/patients`, { token: T.pat, body: { first_name: 'Cy', last_name: 'Ox' } }), 201);
+  ok(await api('POST', `/patrol/incidents/${col.id}/patients`, { token: T.pat, body: { form: { head_strike: 'no' }, first_name: 'Cy', last_name: 'Ox' } }), 201);
   assert.equal(ok(await api('GET', `/patrol/incidents/${col.id}`, { token: T.pat })).patients[0].form.collided, 'yes');
 });
 
 test('full report: patient, vitals, injuries, treatments, timeline, responders', async () => {
   const c = ok(await newCase(T.pat, { summary: 'Skier down on Ridge Run' }), 201);
   const id = c.id;
-  const p = ok(await api('POST', `/patrol/incidents/${id}/patients`, { token: T.pat, body: { person_id: D.ann, activity: 'ski', ability: 'intermediate', helmet: 'yes', age_years: 35 } }), 201);
+  const p = ok(await api('POST', `/patrol/incidents/${id}/patients`, { token: T.pat, body: { form: { head_strike: 'no' }, person_id: D.ann, activity: 'ski', ability: 'intermediate', helmet: 'yes', age_years: 35 } }), 201);
   const detail = async () => ok(await api('GET', `/patrol/incidents/${id}`, { token: T.pat }));
   let d = await detail();
   assert.equal(d.patients[0].first_name, 'Ann', 'name filled from the person record');
@@ -166,7 +166,7 @@ test('sign-off: submit lists what is missing, managers approve, approved reports
   assert.equal(none.status, 409);
   assert.ok(none.body.details.some((x) => /at least one patient/i.test(x.message)));
 
-  const p = ok(await api('POST', `/patrol/incidents/${id}/patients`, { token: T.pat, body: { first_name: 'Sam', last_name: 'Skier' } }), 201);
+  const p = ok(await api('POST', `/patrol/incidents/${id}/patients`, { token: T.pat, body: { form: { head_strike: 'no' }, first_name: 'Sam', last_name: 'Skier' } }), 201);
   const gaps = await api('POST', `/patrol/incidents/${id}/submit`, { token: T.pat });
   assert.ok(gaps.body.details.some((x) => /chief complaint/i.test(x.message)));
   assert.ok(gaps.body.details.some((x) => /outcome/i.test(x.message)));
@@ -220,7 +220,7 @@ test('sign-off: submit lists what is missing, managers approve, approved reports
 test('refusal of care needs a signature, and signatures cannot be removed', async () => {
   const c = ok(await newCase(T.pat, { summary: 'Refused transport' }), 201);
   const id = c.id;
-  const p = ok(await api('POST', `/patrol/incidents/${id}/patients`, { token: T.pat, body: { first_name: 'Rae', last_name: 'Refuser', chief_complaint: 'Head bump', disposition: 'refused_care' } }), 201);
+  const p = ok(await api('POST', `/patrol/incidents/${id}/patients`, { token: T.pat, body: { form: { head_strike: 'yes' }, first_name: 'Rae', last_name: 'Refuser', chief_complaint: 'Head bump', disposition: 'refused_care' } }), 201);
   const gaps = await api('POST', `/patrol/incidents/${id}/submit`, { token: T.pat });
   assert.ok(gaps.body.details.some((x) => /refusal signature/i.test(x.message)), JSON.stringify(gaps.body));
 
@@ -248,7 +248,7 @@ test('refusal of care needs a signature, and signatures cannot be removed', asyn
 test('other mountains and other roles cannot reach a case', async () => {
   const id = D.fullCase;
   assert.equal((await api('GET', `/patrol/incidents/${id}`, { token: T.otherPat })).status, 404);
-  assert.equal((await api('POST', `/patrol/incidents/${id}/patients`, { token: T.otherPat, body: { first_name: 'A', last_name: 'B' } })).status, 404);
+  assert.equal((await api('POST', `/patrol/incidents/${id}/patients`, { token: T.otherPat, body: { form: { head_strike: 'no' }, first_name: 'A', last_name: 'B' } })).status, 404);
   assert.equal((await api('POST', `/patrol/incidents/${id}/events`, { token: T.otherPat, body: { kind: 'cleared' } })).status, 404);
   assert.equal((await api('POST', `/patrol/incidents/${id}/submit`, { token: T.otherPat })).status, 404);
   for (const [m, p] of [['GET', '/patrol/incidents'], ['GET', '/patrol/analytics'], ['GET', '/patrol/team'], ['GET', '/patrol/equipment'], ['GET', '/patrol/deployments'], ['GET', '/patrol/training']]) {
@@ -516,7 +516,7 @@ test('NSAAR form: every field is described, stored, validated and can be made ma
   const got = ok(await api('GET', `/patrol/incidents/${c.id}`, { token: T.pat }));
   assert.deepEqual(got.form, { weather: 'snowing', light: 'flat', temperature: 'minus10_to_0', surface: 'groomed', snow: '0_to_5', run_classification: 'more_difficult' }, 'merged, null removes a field, and the run class comes from the trail');
 
-  const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: T.pat, body: { first_name: 'Dana', last_name: 'Rider', chief_complaint: 'Wrist pain', disposition: 'transported_ambulance', form: { activity: 'snowboard', body_parts: { wrist: 'L', head: 'X' }, treatment_protocol: ['fracture'], from_base: 'ambulance', helmet: 'owned' } } }), 201);
+  const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: T.pat, body: { first_name: 'Dana', last_name: 'Rider', chief_complaint: 'Wrist pain', disposition: 'transported_ambulance', form: { head_strike: 'yes', activity: 'snowboard', body_parts: { wrist: 'L', head: 'X' }, treatment_protocol: ['fracture'], from_base: 'ambulance', helmet: 'owned' } } }), 201);
   ok(await api('POST', `/patrol/incidents/${c.id}/patients/${p.id}/vitals`, { token: T.pat, body: { pulse: 88, bp_sys: 124, bp_dia: 80 } }), 201); // sent to higher care: vitals are needed
   assert.equal((await api('PATCH', `/patrol/incidents/${c.id}/patients/${p.id}`, { token: T.pat, body: { form: { body_parts: { elbow: 'Q' } } } })).status, 400);
   assert.equal((await api('PATCH', `/patrol/incidents/${c.id}/patients/${p.id}`, { token: T.pat, body: { form: { scene_on: '25:99' } } })).status, 400, '24 hour time');
@@ -581,7 +581,7 @@ test('the patrol director can administer the form, and switching a field back of
 test('hand-off: fields are saved with the patient, printing is logged, and other mountains cannot touch it', async () => {
   const o = A.owner;
   const c = ok(await newCase(o, { summary: 'Hand-off test' }), 201);
-  const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: o, body: { first_name: 'Hal', last_name: 'Handoff' } }), 201);
+  const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: o, body: { form: { head_strike: 'no' }, first_name: 'Hal', last_name: 'Handoff' } }), 201);
   ok(await api('PATCH', `/patrol/incidents/${c.id}/patients/${p.id}`, { token: o, body: { form: { handoff_to: 'Medic 9', handoff_time: '12:30' } } }));
   const got = ok(await api('GET', `/patrol/incidents/${c.id}`, { token: o })).patients[0];
   assert.equal(got.form.handoff_to, 'Medic 9');

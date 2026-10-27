@@ -169,6 +169,13 @@
           "who": "platform"
         },
         {
+          "kind": "new",
+          "text": "Head strike or possible head injury: a one-tap Yes, No or Not sure on the Care tab and the Report for injury and collision cases, required before submitting. It shows Yes already when a head injury is recorded on the Care tab. The Head injury questions on the Report open, and the Head check is marked due, only for Yes or Not sure; a neck injury now counts under Spine rather than Head.",
+          "app": "patrol",
+          "help": "patrol-bedside",
+          "who": ["patrol"]
+        },
+        {
           "kind": "improved",
           "text": "On the patrol report, the Required and For approval tags now show only on fields that still need an answer, and they are smaller. A tag goes the moment the field is filled in or marked N/A, and comes back if it is cleared. Recommended fields no longer carry a tag.",
           "app": "patrol",

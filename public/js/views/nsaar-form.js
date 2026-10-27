@@ -96,8 +96,8 @@ function suggestText(f, v) {
  * reqs: Map of field key -> { level, met, na, na_allowed } from the case's report requirements, for this row (the case, or
  * one patient). onNa(key, reason, note): answer a required field N/A with a reason (reason null takes it away).
  */
-export function sectionPanel({ def, section, scope, row, editable, required, reqs = null, onNa = null, ctx, trails, onSave, extra, open = false, suggest = {} }) {
-  const fields = def.fields.filter((f) => f.section === section.id && f.scope === scope);
+export function sectionPanel({ def, section, scope, row, editable, required, reqs = null, onNa = null, ctx, trails, onSave, extra, open = false, suggest = {}, skip = [] }) {
+  const fields = def.fields.filter((f) => f.section === section.id && f.scope === scope && !skip.includes(f.key));
   const mandatory = reqs ? new Set([...reqs].filter(([, r]) => r.level === 'submit').map(([k]) => k)) : new Set(required[scope]);
   const left = reqs ? fields.filter((f) => { const r = reqs.get(f.key); return r && !r.met && ['submit', 'approve'].includes(r.level); }).length : 0;
   const base = valuesOf(def.fields.filter((f) => f.scope === scope), row);

@@ -48,7 +48,7 @@ test.before(async () => {
   // A serious lift case with a 12-year-old, management told, one photo, approved.
   const c = ok(await api('POST', '/patrol/incidents', { token: M.patT, body: { occurred_at: ago(180), location: 'Summit chair unload', category: 'injury', severity: 'serious', lift_id: M.lift, summary: 'Fell at the unload ramp' } }));
   M.case = Number(c.id);
-  const p = ok(await api('POST', `/patrol/incidents/${M.case}/patients`, { token: M.patT, body: { first_name: 'Riley', last_name: 'Zebulon', date_of_birth: `${Number(today.slice(0, 4)) - 12}-01-15` } }));
+  const p = ok(await api('POST', `/patrol/incidents/${M.case}/patients`, { token: M.patT, body: { form: { head_strike: 'no' }, first_name: 'Riley', last_name: 'Zebulon', date_of_birth: `${Number(today.slice(0, 4)) - 12}-01-15` } }));
   ok(await api('PATCH', `/patrol/incidents/${M.case}/patients/${p.id}`, { token: M.patT, body: { chief_complaint: 'Right wrist pain', disposition: 'transported_private' } }));
   ok(await api('POST', `/patrol/incidents/${M.case}/patients/${p.id}/vitals`, { token: M.patT, body: { taken_at: ago(170), pulse: 104, resp: 20, bp_sys: 118, bp_dia: 74, spo2: 98, gcs: 15, pain: 7, avpu: 'alert' } }));
   ok(await api('POST', `/patrol/incidents/${M.case}/responders`, { token: M.patT, body: { staff_id: M.pat, role: 'lead' } }));

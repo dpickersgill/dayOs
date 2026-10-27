@@ -66,7 +66,7 @@ test.after(async () => {
 const newCase = async (over = {}) => is(await api('POST', '/patrol/incidents', { token: T.pat, body: { occurred_at: `${today}T10:15`, location: 'Upper Ridge', category: 'injury', severity: 'moderate', summary: 'Wrist injury, Ann Guest', trail_id: D.trail, ...over } }), 201).id;
 
 async function signOff(id, { approve = false } = {}) {
-  const p = is(await api('POST', `/patrol/incidents/${id}/patients`, { token: T.pat, body: { first_name: 'Ann', last_name: 'Guest', chief_complaint: 'Wrist pain', disposition: 'treated_released' } }), 201);
+  const p = is(await api('POST', `/patrol/incidents/${id}/patients`, { token: T.pat, body: { form: { head_strike: 'no' }, first_name: 'Ann', last_name: 'Guest', chief_complaint: 'Wrist pain', disposition: 'treated_released' } }), 201);
   is(await api('POST', `/patrol/incidents/${id}/submit`, { token: T.pat }), 200);
   if (approve) is(await api('POST', `/patrol/incidents/${id}/approve`, { token: A.owner }), 200);
   return p;

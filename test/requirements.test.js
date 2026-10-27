@@ -9,6 +9,8 @@ const RQ = require('../src/lib/requirements');
 const patient = (over = {}) => ({ id: 11, first_name: 'Ana', last_name: 'Ruiz', age_years: 34, disposition: null, form: {}, derived: {}, ...over });
 const caseOf = (over = {}) => ({ id: 1, category: 'injury', severity: 'minor', occurred_at: '2026-01-10 10:00:00', form: {}, narrative: '', patients: [patient()], witnesses: [], signatures: [], photos: [], ...over });
 const rules = (type, items) => ({ ...RQ.emptyRules(), [type]: items });
+// The head strike question is always asked on injury and collision cases (tested on its own below); left out of the rest.
+const ev = (...a) => RQ.evaluate(...a).filter((i) => i.key !== 'head_strike');
 
 test('every starting setup is valid for every kind of case', () => {
   for (const p of RQ.PRESETS) {
@@ -33,21 +35,21 @@ test('clean refuses unknown items, levels and conditions, and drops off and lock
 
 test('a required field shows as met once answered, or once answered N/A with a reason', () => {
   const r = rules('injury', { 'patient.phone': { level: 'submit' }, 'case.narrative': { level: 'approve' } });
-  let items = RQ.evaluate(r, caseOf());
+  let items = ev(r, caseOf());
   assert.deepEqual(items.map((i) => [i.id, i.met, i.level]), [['patient.phone', false, 'submit'], ['case.narrative', false, 'approve']]);
   assert.equal(RQ.summary(items).submit_left, 1);
   assert.equal(RQ.summary(items).approve_left, 1);
-  items = RQ.evaluate(r, caseOf({ narrative: 'Fell on the lower bowl', patients: [patient({ phone: '555-0100' })] }));
+  items = ev(r, caseOf({ narrative: 'Fell on the lower bowl', patients: [patient({ phone: '555-0100' })] }));
   assert.ok(items.every((i) => i.met));
-  items = RQ.evaluate(r, caseOf({ patients: [patient({ na: JSON.stringify({ phone: { reason: 'declined' } }) })] }));
+  items = ev(r, caseOf({ patients: [patient({ na: JSON.stringify({ phone: { reason: 'declined' } }) })] }));
   assert.equal(items[0].met, true);
   assert.equal(items[0].na.reason, 'declined');
 });
 
 test('only when: the rule applies only to cases or patients that match', () => {
   const r = rules('injury', { 'patient.handoff_to': { level: 'submit', when: ['transported'] }, 'case.photos': { level: 'submit', when: ['serious'] } });
-  assert.equal(RQ.evaluate(r, caseOf()).length, 0);
-  const items = RQ.evaluate(r, caseOf({ severity: 'serious', patients: [patient({ disposition: 'transported_ambulance' }), patient({ id: 12, first_name: 'Ben' })] }));
+  assert.equal(ev(r, caseOf()).length, 0);
+  const items = ev(r, caseOf({ severity: 'serious', patients: [patient({ disposition: 'transported_ambulance' }), patient({ id: 12, first_name: 'Ben' })] }));
   assert.deepEqual(items.map((i) => [i.id, i.patient_id]), [['patient.handoff_to', 11], ['case.photos', null]]);
 });
 
@@ -64,31 +66,44 @@ test('conditions are worked out from answers already on the report', () => {
 
 test('a field that depends on another answer is only checked when it applies', () => {
   const r = rules('injury', { 'patient.ambulance_code': { level: 'submit' } });
-  assert.equal(RQ.evaluate(r, caseOf()).length, 0);
-  assert.equal(RQ.evaluate(r, caseOf({ patients: [patient({ form: { from_base: 'ambulance' } })] })).length, 1);
+  assert.equal(ev(r, caseOf()).length, 0);
+  assert.equal(ev(r, caseOf({ patients: [patient({ form: { from_base: 'ambulance' } })] })).length, 1);
 });
 
 test('witnesses, signatures and the extras count the right things', () => {
   const r = rules('collision', { 'case.witnesses': { level: 'submit' }, 'case.patroller_signature': { level: 'submit' }, 'case.collision_report': { level: 'submit' }, 'case.photos': { level: 'approve' } });
-  let items = RQ.evaluate(r, caseOf({ category: 'collision' }));
+  let items = ev(r, caseOf({ category: 'collision' }));
   assert.equal(items.filter((i) => !i.met).length, 4);
-  items = RQ.evaluate(r, caseOf({ category: 'collision', form: { witnesses_none: true }, signatures: [{ kind: 'patroller', patient_id: null }], collision: { id: 1 }, photos: [{ id: 1, voided_at: null }] }));
+  items = ev(r, caseOf({ category: 'collision', form: { witnesses_none: true }, signatures: [{ kind: 'patroller', patient_id: null }], collision: { id: 1 }, photos: [{ id: 1, voided_at: null }] }));
   assert.ok(items.every((i) => i.met));
   // a photo entered in error does not count
-  items = RQ.evaluate(r, caseOf({ category: 'collision', photos: [{ id: 1, voided_at: '2026-01-10 11:00:00' }] }));
+  items = ev(r, caseOf({ category: 'collision', photos: [{ id: 1, voided_at: '2026-01-10 11:00:00' }] }));
   assert.equal(items.find((i) => i.key === 'photos').met, false);
+});
+
+test('injury and collision cases always ask the head strike question, whatever the settings', () => {
+  const none = RQ.emptyRules();
+  const hs = (c) => RQ.evaluate(none, c).filter((i) => i.key === 'head_strike');
+  assert.deepEqual(hs(caseOf()).map((i) => [i.level, i.met]), [['submit', false]], 'an injury case asks it, even with no rules set');
+  assert.equal(hs(caseOf({ category: 'collision' })).length, 1);
+  assert.equal(hs(caseOf({ category: 'medical' })).length, 0, 'a medical call does not');
+  assert.equal(hs(caseOf({ patients: [patient({ form: { head_strike: 'no' } })] }))[0].met, true, 'No is an answer');
+  assert.equal(hs(caseOf({ patients: [patient({ derived: { head_strike: 'yes' } })] }))[0].met, true, 'Yes from the Care tab counts');
+  assert.ok(!RQ.itemsFor('medical').some((i) => i.key === 'head_strike'), 'not listed for medical cases');
+  assert.equal(RQ.naAllowed('injury', 'patient.head_strike'), false, 'Not sure is the answer, not N/A');
+  assert.deepEqual(RQ.clean({ injury: { 'patient.head_strike': { level: 'off' } } }).injury, {}, 'the setting cannot turn it off');
 });
 
 test('an approved exception no longer counts against approval', () => {
   const r = rules('injury', { 'patient.phone': { level: 'approve' } });
-  const items = RQ.evaluate(r, caseOf(), { exceptions: [{ scope: 'patient', key: 'phone', patient_id: 11 }] });
+  const items = ev(r, caseOf(), { exceptions: [{ scope: 'patient', key: 'phone', patient_id: 11 }] });
   assert.equal(items[0].exception, true);
   assert.equal(RQ.summary(items).approve_left, 0);
 });
 
 test('other kinds of case use their own list', () => {
   const r = { ...RQ.emptyRules(), injury: { 'case.narrative': { level: 'submit' } }, lost_person: { 'case.witnesses': { level: 'submit' } } };
-  assert.deepEqual(RQ.evaluate(r, caseOf({ category: 'lost_person', patients: [] })).map((i) => i.id), ['case.witnesses']);
+  assert.deepEqual(ev(r, caseOf({ category: 'lost_person', patients: [] })).map((i) => i.id), ['case.witnesses']);
   assert.ok(RQ.itemsFor('lost_person').every((i) => i.scope === 'case'));
   assert.ok(!RQ.itemsFor('injury').some((i) => i.key === 'collision_report'));
 });

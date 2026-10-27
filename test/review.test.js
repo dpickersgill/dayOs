@@ -52,7 +52,7 @@ test.after(async () => { await new Promise((r) => server.close(r)); await pool.e
 /** A report ready to sign off: one patient with a chief complaint and an outcome. */
 async function readyCase(token, category = 'injury', summary = 'Knee injury') {
   const c = ok(await api('POST', '/patrol/incidents', { token, body: { occurred_at: `${today}T10:15`, location: 'Ridge Run', category, severity: 'moderate', summary } }));
-  const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token, body: { first_name: 'Sam', last_name: 'Skier' } }));
+  const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token, body: { form: { head_strike: 'no' }, first_name: 'Sam', last_name: 'Skier' } }));
   ok(await api('PATCH', `/patrol/incidents/${c.id}/patients/${p.id}`, { token, body: { chief_complaint: 'Left knee pain', disposition: 'treated_released' } }));
   const lead = Object.keys(T).find((k) => T[k] === token);
   ok(await api('POST', `/patrol/incidents/${c.id}/responders`, { token, body: { staff_id: S[lead] || S.pat, role: 'lead' } }));

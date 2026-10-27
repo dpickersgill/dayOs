@@ -51,6 +51,14 @@ function treatmentText(t) {
   return `${hhmm(t.performed_at)} ${name}${bits.length ? ` (${bits.join('; ')})` : ''}`;
 }
 
+/** What on the Care tab shows a head injury: a head or face injury, concussion, lost consciousness, memory loss, GCS under 15. */
+function headSigns(p) {
+  const f = p.form || {};
+  return live(p.injuries).some((i) => ['head', 'face'].includes(i.body_region) || i.injury_type === 'concussion')
+    || f.head_loc === 'yes' || f.head_amnesia_before === 'yes' || f.head_amnesia_after === 'yes'
+    || live(p.vitals).some((v) => v.gcs !== null && v.gcs !== undefined && Number(v.gcs) < 15);
+}
+
 /**
  * Derived NSAAR patient answers. `c` is the case as the API returns it (events, responders), `p` one patient with
  * injuries, treatments and vitals. Only answers that can be worked out are returned.
@@ -92,7 +100,8 @@ function derive(c, p) {
   }
   const map = bodyMap(p.injuries);
   if (Object.keys(map).length) out.body_parts = map;
+  if (headSigns(p)) out.head_strike = 'yes';
   return out;
 }
 
-module.exports = { derive, treatmentText, bodyMap, parseDetail, cmsText };
+module.exports = { derive, headSigns, treatmentText, bodyMap, parseDetail, cmsText };

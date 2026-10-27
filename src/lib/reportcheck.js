@@ -87,8 +87,12 @@ function patientChecks(c, p, add) {
   const leaving = ['transported_ambulance', 'transported_private'].includes(p.disposition) || ['hospital', 'clinic', 'doctor'].includes(f.destination_type);
 
   // ---- head injury
-  const headInjury = injuries.some((i) => HEAD_REGIONS.has(i.body_region) || i.injury_type === 'concussion')
+  const signs = injuries.some((i) => HEAD_REGIONS.has(i.body_region) || i.injury_type === 'concussion')
     || f.head_loc === 'yes' || f.head_amnesia_before === 'yes' || f.head_amnesia_after === 'yes';
+  const headInjury = signs || ['yes', 'unsure'].includes(f.head_strike);
+  if ((p.form || {}).head_strike === 'no' && (signs || vitals.some((v) => v.gcs != null && Number(v.gcs) < 15))) {
+    add(`${who}: head strike answered No, but a head injury is recorded`, 'Check the answer against the injuries, the head questions and the GCS.', field('complaint', 'head_strike'));
+  }
   if (headInjury) {
     if (!vitals.some((v) => v.avpu || v.gcs != null)) add(`${who}: head injury with no AVPU or GCS recorded`, 'Level of consciousness is the baseline the next provider compares against.', at({ area: 'vitals' }));
     const unanswered = HEAD_QUESTIONS.filter(([k]) => blank(f[k]));

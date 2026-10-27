@@ -54,7 +54,7 @@ const newCase = (token, over = {}) => api('POST', '/patrol/incidents', { token, 
 /** A collision case that is approved and old enough for the follow-up, with one patient. */
 async function approvedCase(token, { severity = 'minor', patient = {}, days = 6 } = {}) {
   const c = ok(await newCase(token, { severity, occurred_at: `${addDays(today, -days)}T10:15` }), 201);
-  const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token, body: { first_name: 'Kay', last_name: 'Patient', chief_complaint: 'Sore wrist from the fall', ...patient } }), 201);
+  const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token, body: { form: { head_strike: 'no' }, first_name: 'Kay', last_name: 'Patient', chief_complaint: 'Sore wrist from the fall', ...patient } }), 201);
   ok(await api('POST', `/patrol/incidents/${c.id}/submit`, { token }));
   ok(await api('POST', `/patrol/incidents/${c.id}/approve`, { token: A.owner }));
   return { id: c.id, pid: p.id };
@@ -91,7 +91,7 @@ test.after(async () => { await new Promise((r) => server.close(r)); await new Pr
 test('collision report: parties, scene, right of way, and who can see or change it', async () => {
   const c = ok(await newCase(pat), 201);
   const base_ = `/patrol/incidents/${c.id}`;
-  const hurt = ok(await api('POST', `${base_}/patients`, { token: pat, body: { first_name: 'Hal', last_name: 'Hurt', age_years: 30 } }), 201).id;
+  const hurt = ok(await api('POST', `${base_}/patients`, { token: pat, body: { form: { head_strike: 'no' }, first_name: 'Hal', last_name: 'Hurt', age_years: 30 } }), 201).id;
   ok(await api('PUT', `${base_}/collision`, { token: pat, body: { collision_type: 'skier_skier', right_of_way: 'Uphill skier was behind and should have yielded', factors: ['speed', 'blind_roll'], police_notified: true, police_agency: 'Township PD', police_report_no: 'TP-1', equipment_held: 'Cracked helmet', legal_hold: true } }));
   const p1 = ok(await api('POST', `${base_}/parties`, { token: pat, body: { role: 'skier', first_name: 'Una', last_name: 'Uphill', phone: '555-0101', position: 'uphill', speed: 'fast', statement: 'I did not see them', patient_id: hurt } }), 201).id;
   const p2 = ok(await api('POST', `${base_}/parties`, { token: pat, body: { role: 'unknown', left_scene: true, refused_contact_info: true, direction: 'Skied off toward the lift' } }), 201).id;
@@ -129,7 +129,7 @@ test('checklists: known items only, stamped with who and when, and they can be u
   assert.ok(defs.find((d) => d.id === 'head_spine').items.length >= 6);
   assert.ok(defs.find((d) => d.id === 'collision' && d.scope === 'case'));
   const c = ok(await newCase(pat), 201);
-  const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: pat, body: { first_name: 'Ivy', last_name: 'Icepack' } }), 201).id;
+  const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: pat, body: { form: { head_strike: 'no' }, first_name: 'Ivy', last_name: 'Icepack' } }), 201).id;
   const b = `/patrol/incidents/${c.id}/checklist`;
   ok(await api('POST', b, { token: pat, body: { key: 'neuro_checked', patient_id: p, done: true } }));
   ok(await api('POST', b, { token: pat, body: { key: 'neuro_checked', patient_id: p, done: true } })); // twice is harmless
@@ -149,7 +149,7 @@ test('checklists: known items only, stamped with who and when, and they can be u
 
 test('home screen: my open cases for everyone, the approval queue for directors only, and search by patient name', async () => {
   const c = ok(await newCase(pat, { summary: 'Home screen case' }), 201); // the filer becomes lead responder
-  ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: pat, body: { first_name: 'Zelda', last_name: 'Zzyzx' } }), 201);
+  ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: pat, body: { form: { head_strike: 'no' }, first_name: 'Zelda', last_name: 'Zzyzx' } }), 201);
   const home = ok(await api('GET', '/patrol/home', { token: pat }));
   assert.ok(home.mine.some((x) => x.id === c.id), 'the filer sees it under My open cases');
   assert.equal(home.can_approve, false);

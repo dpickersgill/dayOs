@@ -100,7 +100,7 @@ test('a Host cannot reach cases, patients, guests or dispatch, but can use the m
 test('Patrol writes and submits cases; Approver approves; Manager does not approve by default', async () => {
   const c = ok(await newCase(T.patrol), 201);
   const id = c.id;
-  ok(await api('POST', `/patrol/incidents/${id}/patients`, { token: T.patrol, body: { first_name: 'Gus', last_name: 'Guest', chief_complaint: 'Wrist', disposition: 'treated_released' } }), 201);
+  ok(await api('POST', `/patrol/incidents/${id}/patients`, { token: T.patrol, body: { form: { head_strike: 'no' }, first_name: 'Gus', last_name: 'Guest', chief_complaint: 'Wrist', disposition: 'treated_released' } }), 201);
   ok(await api('PATCH', `/patrol/incidents/${id}`, { token: T.patrol, body: { narrative: 'Fell on the flats. Splinted and released.' } }));
   const sub = await api('POST', `/patrol/incidents/${id}/submit`, { token: T.patrol });
   assert.ok([200, 400].includes(sub.status), JSON.stringify(sub.body)); // 400 only when a mandatory field is missing; the guard is what matters here

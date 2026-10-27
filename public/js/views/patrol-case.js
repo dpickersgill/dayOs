@@ -805,12 +805,16 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
     return h('section', { class: 'panel stack' }, h('h2', null, 'Incident'), form);
   }
 
+  // The head strike question is asked on injury and collision cases; a medical call or a lost person skips it.
+  const HEAD_ASKED = ['injury', 'collision'];
   /** Sections that only matter for some patients are shown when they apply, or once anything is in them. */
   function sectionShows(section, c, p) {
     const f = p.form || {};
     const any = () => def.fields.some((x) => x.scope === 'patient' && x.section === section.id && f[x.key] !== undefined && f[x.key] !== null && f[x.key] !== '');
     const inj = live(p.injuries);
-    if (section.show === 'head') return any() || inj.some((i) => ['head', 'face', 'neck'].includes(i.body_region) || i.injury_type === 'concussion') || Boolean(f.body_parts && (f.body_parts.head || f.body_parts.face));
+    // Head injury: when the head strike answer is Yes or Not sure (typed, or worked out from the Care tab), when a head or
+    // face injury or concussion is recorded, or once a head question has an answer. A neck injury belongs under Spine.
+    if (section.show === 'head') return any() || ['yes', 'unsure'].includes(f.head_strike || (p.derived || {}).head_strike) || inj.some((i) => ['head', 'face'].includes(i.body_region) || i.injury_type === 'concussion') || Boolean(f.body_parts && (f.body_parts.head || f.body_parts.face));
     if (section.show === 'spine') return any() || inj.some((i) => ['neck', 'back'].includes(i.body_region) || i.injury_type === 'spinal') || live(p.treatments).some((t) => t.kind === 'spinal_motion_restriction');
     if (section.show === 'arrest') return any() || live(p.treatments).some((t) => ['cpr', 'aed', 'rosc'].includes(t.kind));
     return sectionVisible(def, section, 'patient', p);
@@ -820,7 +824,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
     const base = `/patrol/incidents/${id}/patients/${p.id}`;
     const suggest = Object.fromEntries(Object.entries(p.derived || {}).map(([k, v]) => [k, { value: v, from: 'the bedside card' }]));
     const sections = def.sections.filter((x) => x.scope === 'patient' && sectionShows(x, c, p)).map((section) => sectionPanel({
-      def, section, scope: 'patient', row: p, editable, required: def.required, reqs: reqMap(c, 'patient', p.id), onNa: c.requirements ? setNa('patient', p.id) : null, ctx: sigCtx(c, p), trails, suggest, open: section.id === 'patient' && live(c.patients).length === 1 && editable && !p.chief_complaint,
+      def, section, scope: 'patient', row: p, editable, required: def.required, reqs: reqMap(c, 'patient', p.id), skip: HEAD_ASKED.includes(c.category) ? [] : ['head_strike'], onNa: c.requirements ? setNa('patient', p.id) : null, ctx: sigCtx(c, p), trails, suggest, open: section.id === 'patient' && live(c.patients).length === 1 && editable && !p.chief_complaint,
       onSave: async (body, o) => {
         await patch(base, body);
         if (o && o.next) goNext = `${p.id}:${section.id}`;

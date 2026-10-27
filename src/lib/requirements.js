@@ -94,6 +94,7 @@ function itemsFor(type) {
   for (const f of FIELDS) {
     if (f.locked === 'never') continue;
     if (!isCare(type) && f.scope === 'patient') continue;
+    if (f.cases && !f.cases.includes(type)) continue;
     out.push({ id: `${f.scope}.${f.key}`, scope: f.scope, key: f.key, section: f.section, label: f.label, type: f.type, locked: f.locked || null, field: f });
   }
   for (const x of EXTRA) {
@@ -286,6 +287,7 @@ const ALWAYS = [
   'A patient name, the exact location and a one-line summary',
   'The patroller who led the response',
   'At least one patient on an injury or medical case',
+  'Injury and collision cases: the head strike question answered (Yes, No or Not sure)',
   'Lost consciousness, amnesia or a GCS under 15: not back to skiing unless cleared by a named person or care was refused in writing',
   'Serious, critical or transported: a set of vitals, and two when on scene more than 15 minutes',
   'Refused care: a signed refusal, a note on capacity when anything clouds it, and a parent or guardian for anyone under 18',
@@ -316,7 +318,8 @@ function evaluate(rules, c, { exceptions = [] } = {}) {
   const signed = (kind, pid) => (c.signatures || []).some((s) => s.kind === kind && (pid === undefined || s.patient_id === pid || s.patient_id === null));
   const excepted = (scope, key, pid) => exceptions.some((e) => e.scope === scope && e.key === key && (e.patient_id || null) === (pid || null));
   for (const item of itemsFor(type)) {
-    const r = set[item.id];
+    // A field the form always asks on some kinds of case (the head strike question) is required to submit whatever the settings.
+    const r = item.locked === 'always' && item.field && item.field.cases ? { level: 'submit' } : set[item.id];
     if (!r || r.level === 'off') continue;
     const push = (patient, met, na) => out.push({
       id: item.id, scope: item.scope, key: item.key, section: item.section, section_title: titleOf.get(item.section) || item.section, label: item.label,

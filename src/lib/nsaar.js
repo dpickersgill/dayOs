@@ -46,6 +46,7 @@ const BODY_PLAIN = [['upper_back', 'Upper back'], ['lower_back', 'Lower back'], 
 
 // type: text | longtext | date | time | number | tel | email | select | multi | check | yesno | measure | bodymap | trail | gps | signature | witnesses
 // locked 'always' = the report cannot exist without it; locked 'never' = a helper tick box that cannot be made mandatory.
+// cases: the kinds of case the field is asked on (all patient care cases when left out).
 const F = [];
 const add = (scope, section, key, label, type, more = {}) => F.push({ key, scope, section, label, type, ...more });
 const YN = [['yes', 'Yes'], ['no', 'No']];
@@ -82,6 +83,9 @@ add('patient', 'patient', 'drugs_alcohol', 'Drugs or alcohol', 'text', { hint: '
 
 // ---- complaint
 add('patient', 'complaint', 'chief_complaint', 'Chief complaint', 'text', { col: 'chief_complaint', defaultRequired: true, hint: 'The main problem, in the patient\'s words. If there is more than one injury, put the main one first. It also becomes the case summary.' });
+// Asked on every injury and collision case (required to submit, whatever the settings): Yes or Not sure opens the head
+// injury questions. Filled in as Yes from the Care tab when a head injury shows there (see carederive.js).
+add('patient', 'complaint', 'head_strike', 'Head strike or possible head injury', 'select', { locked: 'always', cases: ['injury', 'collision'], options: opts(['yes', 'Yes'], ['no', 'No'], ['unsure', 'Not sure']), hint: 'Did they hit their head, or might they have? Yes or Not sure opens the head injury questions.' });
 add('patient', 'complaint', 'body_parts', 'Body parts injured', 'bodymap');
 add('patient', 'complaint', 'treatment_protocol', 'Treatment protocol', 'multi', { options: opts('fracture', 'sprain', 'strain', 'bruise', 'laceration', 'dislocation', 'cardiac', 'stroke', 'concussion', 'hypothermia', 'frostbite', 'internal', 'illness', 'deceased', 'unknown', ['na', 'N/A']) });
 add('patient', 'complaint', 'other_treatment', 'Other treatment', 'text');
@@ -283,7 +287,7 @@ function applies(f, values) {
 function describe() {
   return {
     sections: SECTIONS,
-    fields: FIELDS.map(({ key, scope, section, label, type, options, groups, hint, when, col, locked, none, min, max, kind, defaultRequired, units }) => ({ key, scope, section, label, type, options, groups, hint, when, units, locked: locked || null, none: Boolean(none), min, max, kind, col: col || null, stored: col ? 'column' : 'form', defaultRequired: Boolean(defaultRequired) })),
+    fields: FIELDS.map(({ key, scope, section, label, type, options, groups, hint, when, col, locked, cases, none, min, max, kind, defaultRequired, units }) => ({ key, scope, section, label, type, options, groups, hint, when, units, locked: locked || null, cases: cases || null, none: Boolean(none), min, max, kind, col: col || null, stored: col ? 'column' : 'form', defaultRequired: Boolean(defaultRequired) })),
     body: { sided: BODY_SIDED.map(([value, label]) => ({ value, label })), plain: BODY_PLAIN.map(([value, label]) => ({ value, label })) },
   };
 }

@@ -536,7 +536,7 @@ test('patrol: a case opens, shows the whole report, and the sign-off buttons wor
   const o = T.owner;
   const c = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${today}T13:05`, location: 'Upper Ridge', category: 'injury', severity: 'moderate', summary: 'Skier down at the top of Ridge Run' } }));
   const base = `/patrol/incidents/${c.id}`;
-  const p = ok(await api('POST', `${base}/patients`, { token: o, body: { first_name: 'Cam', last_name: 'Carver', age_years: 34, activity: 'ski', helmet: 'yes' } }));
+  const p = ok(await api('POST', `${base}/patients`, { token: o, body: { form: { head_strike: 'no' }, first_name: 'Cam', last_name: 'Carver', age_years: 34, activity: 'ski', helmet: 'yes' } }));
   ok(await api('POST', `${base}/patients/${p.id}/vitals`, { token: o, body: { pulse: 92, spo2: 97, pain: 5 } }));
   ok(await api('POST', `${base}/patients/${p.id}/injuries`, { token: o, body: { body_region: 'knee', side: 'left', injury_type: 'sprain_strain' } }));
   await api('POST', '/patrol/meds/formulary', { token: o, body: { name: 'Ibuprofen', authority: 'standing_order', routes: ['oral'], max_dose: 800, dose_unit: 'mg', min_cert: 'none' } }); // this patrol's medical director allows it
@@ -598,7 +598,7 @@ test('patrol: the incident form follows the NSAAR sections, saves a section, and
   const o = T.owner;
   const c = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${today}T15:05`, location: 'Mid Ridge', category: 'injury', severity: 'minor', summary: 'Wrist' } }));
   const base = `/patrol/incidents/${c.id}`;
-  ok(await api('POST', `${base}/patients`, { token: o, body: { first_name: 'Nia', last_name: 'Nordic' } }));
+  ok(await api('POST', `${base}/patients`, { token: o, body: { form: { head_strike: 'no' }, first_name: 'Nia', last_name: 'Nordic' } }));
   let root = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id)]);
   clean(root, 'case form');
   for (const t of ['National Ski Area Accident Report', 'Patient', 'Complaint and treatment protocol', 'First aid', 'Witnesses', 'Location of accident', 'Conditions', 'Collision or cause', 'Transport', 'Sign off', 'Treatment protocol', 'Attending ambulance number', 'Form completed by (print)']) {
@@ -710,7 +710,7 @@ test('patrol: a signature drawn on the pad is saved, and cannot be removed after
   const o = T.owner;
   const c = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${today}T14:05`, location: 'Base lodge', category: 'injury', severity: 'minor', summary: 'Declined transport' } }));
   const base = `/patrol/incidents/${c.id}`;
-  ok(await api('POST', `${base}/patients`, { token: o, body: { first_name: 'Rae', last_name: 'Refuser', chief_complaint: 'Head bump', disposition: 'refused_care' } }));
+  ok(await api('POST', `${base}/patients`, { token: o, body: { form: { head_strike: 'yes' }, first_name: 'Rae', last_name: 'Refuser', chief_complaint: 'Head bump', disposition: 'refused_care' } }));
 
   // jsdom has no canvas, so give the pad something to draw on and a small PNG to export
   const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
@@ -1035,7 +1035,7 @@ test('patrol: items in the "not ready" list link to the missing field, for both 
   const o = T.owner;
   await closeOverlays();
   const c = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${today}T16:05`, location: 'Lower Ridge', category: 'injury', severity: 'minor', summary: 'Knee' } }));
-  const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: o, body: { first_name: 'Lin', last_name: 'Link' } }));
+  const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: o, body: { form: { head_strike: 'no' }, first_name: 'Lin', last_name: 'Link' } }));
   const gaps = await api('POST', `/patrol/incidents/${c.id}/submit`, { token: o, body: {} });
   assert.equal(gaps.status, 409);
   const where = gaps.body.details.find((x) => /chief complaint/i.test(x.message));
@@ -1316,7 +1316,7 @@ test('patrol: a patient entered by hand can be linked to a guest later, filling 
   const o = T.owner;
   await closeOverlays();
   const c = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${today}T14:00`, location: 'Park', category: 'injury', severity: 'minor', summary: 'Wrist' } }));
-  const pt = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: o, body: { first_name: 'Anne', last_name: 'Guest', helmet: 'no' } }));
+  const pt = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: o, body: { form: { head_strike: 'no' }, first_name: 'Anne', last_name: 'Guest', helmet: 'no' } }));
   const root = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id)]);
   [...root.querySelectorAll('button')].find((b) => b.textContent === 'Pull from customer record').click();
   await settle();
@@ -1967,7 +1967,7 @@ test('patrol: the bedside card shows allergies, latest vitals with flags, and th
   const o = T.owner;
   const c = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${today}T11:05`, location: 'Summit Chair line', category: 'injury', severity: 'moderate', summary: 'Rider down, shoulder pain' } }));
   const base = `/patrol/incidents/${c.id}`;
-  const p = ok(await api('POST', `${base}/patients`, { token: o, body: { first_name: 'Dana', last_name: 'Drift', age_years: 41, sex: 'female', allergies: 'Penicillin', medications: 'None', chief_complaint: 'Right shoulder pain', activity: 'snowboard', helmet: 'yes' } }));
+  const p = ok(await api('POST', `${base}/patients`, { token: o, body: { form: { head_strike: 'no' }, first_name: 'Dana', last_name: 'Drift', age_years: 41, sex: 'female', allergies: 'Penicillin', medications: 'None', chief_complaint: 'Right shoulder pain', activity: 'snowboard', helmet: 'yes' } }));
   ok(await api('POST', `${base}/patients/${p.id}/vitals`, { token: o, body: { pulse: 104, bp_sys: 132, bp_dia: 84, spo2: 97, pain: 8, avpu: 'alert' } }));
 
   const root = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id)]);
@@ -2079,7 +2079,7 @@ test('patrol: the hand-off sheet gathers the injuries, treatment and vitals, rec
 test('patrol home: my open cases, a search by patient name, the New case button on every screen, and the offline banner', skip(), async () => {
   const o = T.owner;
   const c = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${today}T12:05`, location: 'Lodge deck', category: 'injury', severity: 'minor', summary: 'Home screen case' } }));
-  ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: o, body: { first_name: 'Quincy', last_name: 'Quixote' } }));
+  ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: o, body: { form: { head_strike: 'no' }, first_name: 'Quincy', last_name: 'Quixote' } }));
   const root = await renderView('patrol', 'owner', T.owner);
   clean(root, 'patrol home');
   assert.equal(root.querySelector('[role=tab][aria-selected=true]').textContent, 'Home', 'Home is the first tab');
@@ -2136,7 +2136,7 @@ test('patrol: a collision is recorded by person and by scene, ticked off with a 
   const o = T.owner;
   const c = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${today}T13:10`, location: 'Cascade merge', category: 'collision', severity: 'moderate', summary: 'Two riders collided at the merge' } }));
   const base_ = `/patrol/incidents/${c.id}`;
-  const hurt = ok(await api('POST', `${base_}/patients`, { token: o, body: { first_name: 'Cora', last_name: 'Collide', age_years: 15, allergies: 'Penicillin', chief_complaint: 'Shoulder pain' } })).id;
+  const hurt = ok(await api('POST', `${base_}/patients`, { token: o, body: { form: { head_strike: 'no' }, first_name: 'Cora', last_name: 'Collide', age_years: 15, allergies: 'Penicillin', chief_complaint: 'Shoulder pain' } })).id;
   ok(await api('POST', `${base_}/patients/${hurt}/injuries`, { token: o, body: { body_region: 'head', side: 'midline', injury_type: 'concussion' } }));
   ok(await api('POST', `${base_}/witnesses`, { token: o, body: { name: 'Wes Watcher', relation: 'witnessed_by', statement: 'The rider in blue came across the trail' } }));
   let root = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id)]);
@@ -2248,7 +2248,7 @@ test('patrol: the follow-up desk lists who is emailed, and a director can approv
   const o = T.owner;
   const mk = async (summary) => {
     const c = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${today}T09:00`, location: 'Summit', category: 'collision', severity: 'serious', summary } }));
-    const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: o, body: { first_name: 'Hana', last_name: 'Held' } }));
+    const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: o, body: { form: { head_strike: 'no' }, first_name: 'Hana', last_name: 'Held' } }));
     const tok = require('crypto').randomBytes(16).toString('hex');
     const [r] = await pool.query("INSERT INTO followups (tenant_id, incident_id, patient_id, to_email, due_on, status, hold_reason, token) VALUES ((SELECT tenant_id FROM incidents WHERE id = ?), ?, ?, 'hana.held@example.test', ?, 'held', 'Transported or serious: a director decides', ?)", [c.id, c.id, p.id, today, tok]);
     return r.insertId;
@@ -2355,7 +2355,7 @@ test('patrol: the case page guides the next step, and keeps the reader\'s place 
   assert.ok(root.querySelector('.back a'), 'the way back is above the header, not buried in it');
 
   // a patient and vitals move the guide on
-  const p = ok(await api('POST', `${base}/patients`, { token: o, body: { first_name: 'Gus', last_name: 'Guide' } }));
+  const p = ok(await api('POST', `${base}/patients`, { token: o, body: { form: { head_strike: 'no' }, first_name: 'Gus', last_name: 'Guide' } }));
   ok(await api('POST', `${base}/patients/${p.id}/vitals`, { token: o, body: { pulse: 80, avpu: 'alert' } }));
   root = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id)]);
   const done = [...root.querySelectorAll('.pstep.done')].map((x) => x.dataset.step);
@@ -2387,7 +2387,7 @@ test('patrol care: the wristband and three views, assessment tools, CMS, entered
   const caseDay = new Date(Date.parse(`${today}T12:00:00Z`) - 86400000).toISOString().slice(0, 10);
   const c = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${caseDay}T10:05`, location: 'Lower Cascade', category: 'injury', severity: 'moderate', summary: 'Skier down, leg pain' } }));
   const base = `/patrol/incidents/${c.id}`;
-  const p = ok(await api('POST', `${base}/patients`, { token: o, body: { first_name: 'Cara', last_name: 'Care', age_years: 3, allergies: 'None', chief_complaint: 'Left leg pain' } }));
+  const p = ok(await api('POST', `${base}/patients`, { token: o, body: { form: { head_strike: 'no' }, first_name: 'Cara', last_name: 'Care', age_years: 3, allergies: 'None', chief_complaint: 'Left leg pain' } }));
   const pb = `${base}/patients/${p.id}`;
   ok(await api('POST', `${base}/events`, { token: o, body: { kind: 'on_scene', at: `${caseDay}T10:12` } }));
   const vit = ok(await api('POST', `${pb}/vitals`, { token: o, body: { pulse: 300, taken_at: `${caseDay}T10:15` } }));
@@ -2520,7 +2520,7 @@ test('patrol care: the refusal form asks every question, stops a refusal without
   const o = T.owner;
   await closeOverlays();
   const c = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${today}T11:05`, location: 'Bunny hill', category: 'injury', severity: 'minor', summary: 'Child fall' } }));
-  const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: o, body: { first_name: 'Kip', last_name: 'Kid', age_years: 9, chief_complaint: 'Sore wrist' } }));
+  const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: o, body: { form: { head_strike: 'no' }, first_name: 'Kip', last_name: 'Kid', age_years: 9, chief_complaint: 'Sore wrist' } }));
   const root = await renderView('patrol', 'owner', T.owner, {}, ['refusal', String(c.id), String(p.id)]);
   [...root.querySelectorAll('button')].find((b) => b.textContent === 'Record the refusal').click(); await settle();
   const dlg = document.querySelector('.overlay');
