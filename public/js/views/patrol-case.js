@@ -439,7 +439,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       ['details', 'Incident and narrative', detailsPanel(c, editable)],
       ...pts.map((p) => [`patient-${p.id}`, `Patient form: ${p.first_name} ${p.last_name}`.trim(), patientCard(c, p, editable)]),
       ['witness', 'Witnesses', caseSection(c, editable, 'witness', witnessList(c, editable))],
-      ['scene', 'Scene diagram', scenePanel({ c, editable, id, onDone: load, version }) || h('div', { hidden: true })],
+      version ? null : ['scene', 'Scene diagram', scenePanel({ c, editable, id, onDone: load, version }) || h('div', { hidden: true })],
       ['location', 'Location', caseSection(c, editable, 'location', liftBox({ c, editable, lifts, id, onDone: load }))],
       ['conditions', 'Conditions', caseSection(c, editable, 'conditions', conditionsBox({ c, editable, id, onDone: load }), editable ? c.conditions_suggest || {} : {})],
       ['contacts', 'Who was told', contactsPanel({ c, editable, id, onDone: load, redraw })],
@@ -999,7 +999,23 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
   // ---- witnesses
   function witnessList(c, editable) {
     return h('div', { class: 'stack' }, h('div', { class: 'spread' }, h('h4', null, 'Witnesses on file'), h('div', { class: 'row' }, editable ? witnessLinkButton({ c, editable, id, onDone: load }) : null, editable ? button('Add witness', () => witnessDialog(), { small: true }) : null)),
-      c.witnesses.length ? h('ul', { class: 'plain' }, c.witnesses.map((w) => h('li', { class: 'stack tight' }, h('div', { class: 'spread' }, h('span', null, w.relation ? `${label(w.relation)}: ` : '', h('b', null, w.name), h('span', { class: 'muted' }, ` ${[w.phone, w.email, [w.address, w.city, w.region, w.postal].filter(Boolean).join(' ')].filter(Boolean).join(', ')}`)), editable ? button('Remove', change(() => del(`/patrol/incidents/${id}/witnesses/${w.id}`)), { small: true }) : null), w.statement ? h('p', { class: 'prewrap' }, w.statement) : null))) : h('p', { class: 'muted' }, 'No witnesses recorded.'));
+      c.witnesses.length ? h('ul', { class: 'plain' }, c.witnesses.map((w) => {
+        // A statement the witness wrote by link is theirs: it is never edited or removed, only marked entered in error.
+        const own = w.source === 'link';
+        const action = !editable || w.voided_at ? null
+          : own ? button('Entered in error', () => voidOwnStatement(w), { small: true })
+            : button('Remove', change(() => del(`/patrol/incidents/${id}/witnesses/${w.id}`)), { small: true });
+        return h('li', { class: w.voided_at ? 'stack tight voided' : 'stack tight' },
+          h('div', { class: 'spread' }, h('span', null, w.relation ? `${label(w.relation)}: ` : '', h('b', null, w.name), h('span', { class: 'muted' }, ` ${[w.phone, w.email, [w.address, w.city, w.region, w.postal].filter(Boolean).join(' ')].filter(Boolean).join(', ')}`)), action),
+          own ? h('p', { class: 'small' }, state(`In their own words, received ${fmtDateTime(w.received_at)}`, 'good')) : null,
+          w.statement ? h('p', { class: 'prewrap' }, w.statement) : null,
+          w.voided_at ? h('p', { class: 'small muted' }, `Entered in error: ${w.void_reason || ''}`) : null);
+      })) : h('p', { class: 'muted' }, 'No witnesses recorded.'));
+  }
+  function voidOwnStatement(w) {
+    const why = input({ name: 'reason', maxlength: 255, required: true, placeholder: 'For example: sent to the wrong person' });
+    formDialog('Mark this statement entered in error?', h('div', { class: 'form' }, h('p', null, `${w.name}'s own words stay on the record, struck through, with your reason.`), field('Why', why)),
+      async () => { await post(`/patrol/incidents/${id}/witness-statements/${w.id}/void`, { reason: why.value.trim() }); await load(); }, { submitText: 'Mark entered in error' });
   }
   function witnessDialog() {
     formDialog('Add a witness', h('div', { class: 'form' },

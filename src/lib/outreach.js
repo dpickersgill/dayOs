@@ -25,13 +25,13 @@ const STOP_STAGES = ['talking', 'demo', 'trial', 'won', 'lost', 'not_fit'];
 const OPEN = ['pending', 'active', 'nurture'];
 
 const DEFAULT_TEMPLATES = {
-  1: { subject: '{mountain} and one system for the whole mountain', body: `Hi {first_name},
+  1: { subject: 'If a guest from last February sued tomorrow', body: `Hi {first_name},
 
-{opening}
+If a guest from last February sued {mountain} tomorrow, how long would it take to pull together everything about that day?
 
-I'm {sender_first}, and I build Verdynt/OS, software made for smaller ski areas. It runs tickets and passes, rentals, ski school, staff scheduling and a full ski patrol module in one place: patient care reports that work with no signal, dispatch, crews and kits. It is priced to fit a smaller mountain.
+I'm {sender_first}, and I build Verdynt/OS for independent ski areas. Patrol writes the report at the bedside, time-stamped and never deleted, and the case picks up the rental binding record, the morning's grooming and the lift's status by itself. The claim file is one click.
 
-Would a 20-minute look be useful, for this season or next? If patrol is the bigger need, it is also sold on its own.
+Would a 20-minute look be useful? If patrol is the bigger need, it is also sold on its own, from {patrol_price} a month.
 
 Thanks,
 {sender_first}` },
@@ -148,7 +148,7 @@ async function draftFirst(db, seq, s) {
   try {
     const out = await require('./assistant').callModel({
       model: config.assistant.model,
-      system: `You write the first cold email from ${ctx.sender_name}, who builds Verdynt/OS: operations software for independent ski areas (tickets and passes, rentals, ski school, staff scheduling, and a deep ski patrol module: patient care reports that work offline, dispatch, crews, kits; patrol is also sold alone). Write in plain US English, warm and direct, like one person writing to another. Under 130 words. One specific, true observation about this mountain from the facts, then what Verdynt/OS could do for them, then one easy ask (a 20-minute look). No flattery, no hype words, no em dashes, no links, no sign-off beyond "${ctx.sender_first}". Never mention that you researched them or quote the private notes. Never invent facts. Reply with JSON only: {"subject": "...", "body": "..."} where body starts with "Hi ${ctx.first_name},".`,
+      system: `You write the first cold email from ${ctx.sender_name}, who builds Verdynt/OS: operations software for independent ski areas (tickets and passes, rentals, ski school, staff scheduling, and a deep ski patrol module: patient care reports that work offline, dispatch, crews, kits; patrol is also sold alone). Write in plain US English, warm and direct, like one person writing to another. Under 130 words. Open with the question this pitch is built on, adapted to them: if a guest from last season sued tomorrow, how long would it take to pull together everything about that day? Then, using one specific, true detail about this mountain from the facts where it fits, say what Verdynt/OS keeps: the report written at the bedside, time-stamped and never deleted, the rental binding record, the morning's grooming and the lift's status attached to the case by themselves, and a one-click claim file. End with one easy ask (a 20-minute look). Never claim it wins lawsuits or lowers insurance premiums. No flattery, no hype words, no em dashes, no links, no sign-off beyond "${ctx.sender_first}". Never mention that you researched them or quote the private notes. Never invent facts. Reply with JSON only: {"subject": "...", "body": "..."} where body starts with "Hi ${ctx.first_name},".`,
       messages: [{ role: 'user', content: facts }],
     });
     const text = ((out.content || []).find((b) => b.type === 'text') || {}).text || '';

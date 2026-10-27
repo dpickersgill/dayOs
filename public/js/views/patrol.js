@@ -30,6 +30,8 @@ import { drawLifts } from './patrol-lifts.js';
 import { drawLog } from './patrol-log.js';
 import { drawAvy } from './patrol-avy.js';
 import { drawRecords, renderRelease } from './patrol-records.js';
+import { renderClaimFile } from './patrol-claimfile.js';
+import { drawRisk, renderRiskReport } from './patrol-risk.js';
 import { drawOpsSettings } from './patrol-settings.js';
 import { drawRequirements } from './patrol-requirements.js';
 import { send as queue, keepCase, latestKept } from '../outbox.js';
@@ -70,6 +72,8 @@ export async function render(root, params = []) {
   }
   if (params[0] === 'room') { await renderRoom(root); return; } // the patrol-room sign-in screen
   if (params[0] === 'release' && ONE.test(params[1] || '')) { await renderRelease(root, Number(params[1])); return; }
+  if (params[0] === 'claim' && ONE.test(params[1] || '')) { await renderClaimFile(root, Number(params[1])); return; } // the claim file of one case
+  if (params[0] === 'risk-report' && (!params[1] || /^\d{4}-\d{2}$/.test(params[1]))) { await renderRiskReport(root, params[1] || ''); return; } // the season risk report, printable
   if (params[0] === 'kit' && ONE.test(params[1] || '')) { await renderKitPage(root, Number(params[1])); return; }
   if (params[0] === 'kit-labels') { await renderKitLabels(root); return; }
   const printPages = { handoff: renderHandoff, refusal: renderRefusal, takehome: renderTakehome };
@@ -111,6 +115,7 @@ export async function render(root, params = []) {
     ...(['manage_settings', 'approve_case', 'submit_case'].some(has) ? [['requirements', 'Report requirements', drawRequirements]] : []),
     ...only('reports', ['stats', 'Statistics', drawStats]),
     ...only('reports', ['network', 'Injury network', drawNetwork]),
+    ...only('reports', ['risk', 'Risk report', drawRisk]),
     ...(me.is_reviewer || me.can_manage_review ? [['review', me.review_group ? 'Review' : 'Review group', (b) => drawReview(b, me)]] : []),
     ...only('view_access_log', ['access', 'Access log', drawAccessLog]),
     ...(me.access_level === 'admin' ? [['levels', 'Access levels', drawLevels]] : []),
@@ -119,7 +124,7 @@ export async function render(root, params = []) {
   // pages show as large buttons that wrap, so none hides off the edge of the screen.
   const SECTIONS = [
     ['now', 'Now', ['home', 'duty', 'dispatch', 'map', 'opening', 'sweep', 'avalanche', 'log']],
-    ['cases', 'Cases', ['cases', 'review', 'followup', 'records', 'stats', 'network']],
+    ['cases', 'Cases', ['cases', 'review', 'followup', 'records', 'stats', 'network', 'risk']],
     ['people', 'People', ['schedule', 'crews', 'cover', 'posts', 'team', 'training', 'passport']],
     ['gear', 'Gear', ['kits', 'equipment', 'meds', 'lifts']],
     ['admin', 'Admin', ['settings', 'requirements', 'access', 'levels']],

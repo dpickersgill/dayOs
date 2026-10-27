@@ -1,5 +1,5 @@
 import { get, put, post, patch, del } from '../api.js';
-import { h, clear, money, state, input, field, select, button, todayStr, fmtDate, fmtDateLong, fmtTime, fmtDateTime, label, empty, errorBox, loading, toast, fail, isManager, confirmDialog } from '../ui.js';
+import { ctx, h, clear, money, state, input, field, select, button, todayStr, fmtDate, fmtDateLong, fmtTime, fmtDateTime, label, empty, errorBox, loading, toast, fail, isManager, confirmDialog } from '../ui.js';
 
 const ROLES = [['counter', 'Counter'], ['instructor', 'Instructors'], ['patrol', 'Patrol'], ['staff', 'Staff'], ['manager', 'Managers and owners']];
 
@@ -10,9 +10,11 @@ export async function render(root) {
   const bar = h('div', { class: 'actions' });
   const editBar = h('div', { class: 'board-edit', hidden: true });
   const wallHost = h('div', { class: 'board-host' }, alertsBox, grid);
+  const scoreHost = h('div', { class: 'docscore-host', hidden: true });
   root.append(
     h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Today'), h('p', { class: 'muted', id: 'dash-sub' })), bar),
-    editBar, wallHost);
+    editBar, scoreHost, wallHost);
+  docScoreCard(scoreHost);
 
   let board = null; // last answer from /board
   let editing = null; // working list of tile keys while customizing
@@ -84,6 +86,24 @@ export async function render(root) {
 
   date.addEventListener('change', () => date.value && load());
   await load();
+}
+
+// ------------------------------------------------------------------ patrol documentation score (owners, managers, patrol admins)
+// Hidden for anyone the server says no to, and when Patrol is off.
+async function docScoreCard(host) {
+  if (!(isManager() || (ctx.me && (ctx.me.role === 'patrol' || ctx.me.on_patrol)))) return;
+  let s;
+  try { s = await get('/patrol/doc-score?brief=1'); } catch (_) { return; }
+  const tone = (n) => (n === null || n === undefined ? 'neutral' : n >= 90 ? 'good' : n >= 70 ? 'warn' : 'bad');
+  const cell = (big, small, href, kind) => h('a', { class: `ds-cell${kind ? ` is-${kind}` : ''}`, href }, h('b', null, big), h('span', null, small));
+  clear(host).append(h('section', { class: 'docscore-card', 'aria-label': 'Patrol documentation' },
+    h('div', { class: 'ds-head' }, h('b', null, 'Patrol documentation'), h('span', { class: 'muted' }, `Season ${s.season} · ${s.reports} ${s.reports === 1 ? 'report' : 'reports'} signed off`), h('a', { href: '#/patrol/risk', class: 'ds-more' }, 'Risk report')),
+    h('div', { class: 'ds-row' },
+      cell(s.score === null ? '–' : `${s.score}%`, 'Documentation score', '#/patrol/risk', tone(s.score)),
+      cell(s.on_time_pct === null ? '–' : `${s.on_time_pct}%`, 'Signed off within 24 hours', '#/patrol/risk', s.on_time_pct === null ? null : s.on_time_pct >= 90 ? 'good' : 'warn'),
+      cell(String(s.reviews_overdue), 'Reviews overdue', '#/patrol/review', s.reviews_overdue ? 'warn' : 'good'),
+      cell(s.red_flags ? `${s.red_flags_management}/${s.red_flags}` : '0', 'Red-flag cases with management told', '#/patrol/risk', s.red_flags && s.red_flags_management < s.red_flags ? 'bad' : null))));
+  host.hidden = false;
 }
 
 // ------------------------------------------------------------------ the band at the top

@@ -20,9 +20,15 @@ const META = {
   },
   'ski-patrol': {
     title: 'Ski Patrol Software: Incident Reports, Dispatch | Verdynt/OS',
-    description: 'Patient care reports written at the bedside, dispatch with phone alerts, opening checks, the closing sweep and volunteer days, for paid and volunteer patrols.',
-    og: 'Ski patrol software, from the first call to the closing sweep',
+    description: 'Ski patrol incident reports written at the bedside, time-stamped and never deleted, with a one-click claim file. Dispatch, sweep and volunteers too.',
+    og: 'When the claim comes, the record is already written',
     crumb: 'Ski patrol',
+  },
+  'ski-area-risk-management': {
+    title: 'Ski Area Risk Management and Incident Records | Verdynt/OS',
+    description: 'For ski area owners, GMs and insurers: a documentation score, a one-click claim file, a season risk report for renewal and secure insurer access.',
+    og: 'Know the record is complete before anyone asks',
+    crumb: 'For owners and insurers',
   },
   'lift-ticket-software': {
     title: 'Lift Ticket and Season Pass Software | Verdynt/OS',
@@ -159,7 +165,7 @@ const dollars = (cents) => `$${Math.round(cents / 100).toLocaleString('en-US')}`
  * ctx: { slug, origin (the canonical origin, no trailing slash), base (link prefix), html (the page body), plans, verify }
  */
 // Pages that describe the software itself carry its structured data (name, category, prices).
-const SOFTWARE_PAGES = ['', 'pricing', 'product', 'ski-patrol', 'lift-ticket-software', 'ski-school-software', 'ski-rental-software', 'ski-waiver-software', 'lift-maintenance-software', 'ski-area-pos', 'online-lift-ticket-sales', 'terrain-park-software', 'ski-area-staff-scheduling'];
+const SOFTWARE_PAGES = ['', 'pricing', 'product', 'ski-patrol', 'ski-area-risk-management', 'lift-ticket-software', 'ski-school-software', 'ski-rental-software', 'ski-waiver-software', 'lift-maintenance-software', 'ski-area-pos', 'online-lift-ticket-sales', 'terrain-park-software', 'ski-area-staff-scheduling'];
 const FEATURES = ['Lift and trail status and inspections', 'Grooming and snowmaking logs', 'Ticket and season pass sales', 'RFID gate scanning', 'Online ticket shop',
   'Online waivers', 'Ski and snowboard rentals', 'Ski school and lesson booking', 'Ski patrol patient care reports and dispatch', 'Staff scheduling and time clock', 'Fleet and equipment maintenance'];
 

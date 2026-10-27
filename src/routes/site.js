@@ -24,6 +24,8 @@ const PAGES = {
   resources: 'resources', 'chairlift-inspection-checklist': 'guide-chairlift', 'terrain-park-inspection-checklist': 'guide-terrainpark',
   'ski-area-incident-report-guide': 'guide-incident', 'how-to-choose-ski-area-software': 'guide-choosing', about: 'about',
   pricing: 'pricing', security: 'security', contact: 'contact', privacy: 'privacy', terms: 'terms',
+  // For owners, GMs and insurers: the record, the claim file, the documentation score and the season risk report.
+  'ski-area-risk-management': 'risk',
 };
 // The pages written for one search each ("ski school software"), linked from the menu and the footer.
 const SOLUTIONS = [['ski-patrol', 'Ski patrol'], ['lift-ticket-software', 'Lift tickets and passes'], ['ski-school-software', 'Ski school'],
@@ -42,13 +44,13 @@ function template(name) {
 
 // The Verdynt/OS wordmark (public/brand): the light version on snow, the dark one on navy.
 const WORDMARK = (theme, h) => `<img class="wordmark" src="/brand/verdynt-lockup-${theme}.png" alt="Verdynt/OS" width="${Math.round(h * 6.06)}" height="${h}">`;
-const NAV = [['product', 'Product'], ['ski-patrol', 'Ski patrol'], ['pricing', 'Pricing'], ['resources', 'Resources']];
+const NAV = [['product', 'Product'], ['ski-patrol', 'Ski patrol'], ['ski-area-risk-management', 'For owners'], ['pricing', 'Pricing'], ['resources', 'Resources']];
 
 /** The top of every page: logo, Product, Pricing, Security, Try the demo, Sign in, Request a walkthrough; on phones a
  * full-screen menu with every solution page, and a bar at the bottom with the two things people came to do. */
 function header(current) {
   const links = NAV.map(([s, t]) => `<a href="{{SITE}}/${s}"${s === current ? ' aria-current="page"' : ''}>${t}</a>`).join('\n      ');
-  const extra = '<a href="{{TRY}}">Try the demo</a>\n      <a href="{{APP}}">Sign in</a>';
+  const extra = '<a class="sn-try" href="{{TRY}}">Try the demo</a>\n      <a href="{{APP}}">Sign in</a>';
   const solutions = SOLUTIONS.filter(([s]) => s !== 'ski-patrol').map(([s, t]) => `<a href="{{SITE}}/${s}"${s === current ? ' aria-current="page"' : ''}>${t}</a>`).join('');
   const bar = current === 'contact' ? '' : `
 <div class="mcta"><a class="btn ghost" href="{{TRY}}">Try the demo</a><a class="btn" href="{{SITE}}/contact">Book a walkthrough</a></div>`;
@@ -87,6 +89,7 @@ const FOOTER = `<footer class="sf">
         <ul>
           <li><a href="{{HOME}}">Home</a></li>
           <li><a href="{{SITE}}/product">Product</a></li>
+          <li><a href="{{SITE}}/ski-area-risk-management">For owners and insurers</a></li>
           <li><a href="{{SITE}}/pricing">Pricing</a></li>
           <li><a href="{{SITE}}/security">Security</a></li>
           <li><a href="{{SITE}}/resources">Guides and checklists</a></li>
@@ -106,6 +109,7 @@ const FOOTER = `<footer class="sf">
           <li><a href="{{SITE}}/contact">Request a walkthrough</a></li>
           <li><a href="{{SITE}}/contact?kind=trial">Start a 14-day trial</a></li>
           <li><a href="{{SITE}}/contact?kind=founding">Become a founding mountain</a></li>
+          <li><a href="{{SITE}}/contact?kind=review">Free incident report review</a></li>
           <li><a href="{{APP}}">Sign in</a></li>
         </ul>
         <p class="sf-mail">Sales and questions: <a href="mailto:{{HELLO}}">{{HELLO}}</a><br>Customer support: <a href="mailto:{{SUPPORT}}">{{SUPPORT}}</a></p>
@@ -148,6 +152,11 @@ function patrolFrom(d) {
   const p = d && (d.plans.find((x) => x.code === 'patrol-only') || d.addons.find((x) => x.code === 'patrol'));
   return p && p.monthly_cents ? dollars(p.monthly_cents) : '$149';
 }
+/** "$179": the Patrol add-on's monthly price (on a plan), or the Patrol only price when there is no add-on. */
+function patrolAddon(d) {
+  const a = d && d.addons.find((x) => x.code === 'patrol');
+  return a && a.monthly_cents ? dollars(a.monthly_cents) : patrolFrom(d);
+}
 function fillPlans(html, d) {
   if (!d || !d.plans.length) return html;
   const cols = ` style="--n:${Math.min(d.plans.length, 4)}"`;
@@ -173,6 +182,9 @@ async function render(req, name, slug) {
   const app = config.site.appUrl || (site ? '/app' : '');
   let html = template(name);
   const plans = await loadPlans().catch(() => null);
+  // Prices in the page's words (FAQ answers included), so the structured data says the same as the page.
+  const prices = (s) => s.replaceAll('{{PATROL_FROM}}', patrolFrom(plans)).replaceAll('{{PATROL_ADDON}}', patrolAddon(plans));
+  html = prices(html);
   const head = SEO.head({ slug: name === 'notfound' ? 'notfound' : slug, origin: canonicalOrigin(req), html, plans, verify: config.site.verify, sameAs: config.site.sameAs, noindex: isCopy(req), modified: modified(name), asset: ASSET_V });
   html = fillPlans(html, plans).replace(/<!--\/?(PLANS|ADDONS)(:[a-z]+)?-->/g, '');
   html = html.replace('<!--HEAD-->', head)
@@ -206,7 +218,7 @@ const ASSET_V = require('../../package.json').version;
 
 /** When each page last changed, for the sitemap. */
 const modified = (name) => { try { return fs.statSync(path.join(DIR, `${name}.html`)).mtime.toISOString().slice(0, 10); } catch (_) { return null; } };
-const PRIORITY = { '': '1.0', product: '0.9', 'ski-patrol': '0.9', pricing: '0.9', resources: '0.7', about: '0.6', contact: '0.7', security: '0.6', privacy: '0.2', terms: '0.2' };
+const PRIORITY = { '': '1.0', product: '0.9', 'ski-patrol': '0.9', 'ski-area-risk-management': '0.9', pricing: '0.9', resources: '0.7', about: '0.6', contact: '0.7', security: '0.6', privacy: '0.2', terms: '0.2' };
 for (const [s] of SOLUTIONS) if (!PRIORITY[s]) PRIORITY[s] = '0.8';
 for (const s of ['chairlift-inspection-checklist', 'terrain-park-inspection-checklist', 'ski-area-incident-report-guide', 'how-to-choose-ski-area-software']) PRIORITY[s] = '0.7';
 
@@ -263,6 +275,7 @@ Verdynt/OS runs in a web browser on counter computers, phones and tablets, with 
 - [Home](${page('')}): what Verdynt/OS does, one day at a ski area from first chair to closing
 - [Product](${page('product')}): every app and the pages guests use
 - [Ski patrol software](${page('ski-patrol')}): patient care reports, dispatch, opening checks, the closing sweep, volunteers
+- [For owners and insurers](${page('ski-area-risk-management')}): the claim file, the documentation score, the season risk report and insurer access
 - [Lift ticket and season pass software](${page('lift-ticket-software')}): the counter, the gate, RFID cards and the online shop
 - [Ski school software](${page('ski-school-software')}): lessons, online booking and instructors
 - [Ski rental software](${page('ski-rental-software')}): rental contracts, sizing, binding records and barcoded gear
@@ -282,7 +295,7 @@ Verdynt/OS runs in a web browser on counter computers, phones and tablets, with 
 - [Resources](${page('resources')}): free guides and printable checklists for ski areas
 - [Chairlift daily inspection checklist](${page('chairlift-inspection-checklist')}): the pre-opening lift check and the daily record
 - [Terrain park daily inspection checklist](${page('terrain-park-inspection-checklist')}): features, landings, signs and the daily park record
-- [How to write a ski area incident report](${page('ski-area-incident-report-guide')}): what to record, what to leave out, and a review checklist
+- [How to write a ski area incident report](${page('ski-area-incident-report-guide')}): what to record, what to leave out, and a review checklist (and a free review of ten of your own reports)
 - [How to choose ski area management software](${page('how-to-choose-ski-area-software')}): when to switch, what to compare, questions for vendors
 
 ## Plans (US dollars, before sales tax)
@@ -347,13 +360,13 @@ api.get('/site/plans', async (_req, res) => res.set('Cache-Control', 'public, ma
 const forgetPlans = () => { planCache = { at: 0, body: null }; };
 
 const contactBody = z.object({
-  kind: z.enum(['walkthrough', 'trial', 'founding', 'question', 'patrol']).default('walkthrough'),
+  kind: z.enum(['walkthrough', 'trial', 'founding', 'question', 'patrol', 'review']).default('walkthrough'),
   name: z.string().trim().min(1).max(150), mountain: z.string().trim().min(1).max(150), role: z.string().trim().max(100).optional().default(''),
   email: z.string().trim().email().max(255), phone: z.string().trim().max(40).optional().default(''), lifts: z.string().trim().max(20).optional().default(''),
   plan_interest: z.string().trim().max(60).optional().default(''), message: z.string().trim().max(2000).optional().default(''),
   founding: z.boolean().optional().default(false), website: z.string().max(200).optional().default(''), // a field people never see: bots fill it
 });
-const KINDS = { walkthrough: 'Walkthrough request', trial: '14-day trial request', founding: 'Founding group request', question: 'Question', patrol: 'Patrol only sign-up' };
+const KINDS = { walkthrough: 'Walkthrough request', trial: '14-day trial request', founding: 'Founding group request', question: 'Question', patrol: 'Patrol only sign-up', review: 'Incident report review request' };
 
 api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SITE_CONTACT_LIMIT) || 8, message: 'Too many messages from this address. Try again later, or email us.' }), validate(contactBody), async (req, res) => {
   const b = req.body;
@@ -373,7 +386,7 @@ api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.e
     if (sent.ok) {
       await pool.query('UPDATE site_leads SET emailed = 1 WHERE id = ?', [r.insertId]);
       copy = (await mailer.sendPlatform({ to: b.email, replyTo: config.site.contactEmail, subject: 'We have your Verdynt/OS request', tag: 'site-lead-thanks',
-        text: `Hello ${b.name},\n\nThank you for writing about ${b.mountain}. A person will reply within one business day${b.kind === 'trial' ? ' to set up your trial' : b.kind === 'patrol' ? ' to set up your patrol, with a 14-day trial' : ' to set a time'}.\n\nTo look around in the meantime, start a demo mountain: ${config.site.appUrl || `${req.protocol}://${req.get('host')}`}/try\n\nVerdynt/OS` })).ok;
+        text: `Hello ${b.name},\n\nThank you for writing about ${b.mountain}. A person will reply within one business day${b.kind === 'trial' ? ' to set up your trial' : b.kind === 'patrol' ? ' to set up your patrol, with a 14-day trial' : b.kind === 'review' ? ' with a safe way to send your ten reports (please do not email patient records)' : ' to set a time'}.\n\nTo look around in the meantime, start a demo mountain: ${config.site.appUrl || `${req.protocol}://${req.get('host')}`}/try\n\nVerdynt/OS` })).ok;
     }
   }
   res.status(201).json({ ok: true, copy });

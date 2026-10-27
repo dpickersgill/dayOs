@@ -294,7 +294,7 @@ function leadsButton() {
   call('GET', '/leads?status=new').then((r) => { if (r.new_count) b.append(' ', badge(String(r.new_count), 'warn')); }).catch(() => {});
   return b;
 }
-const LEAD_KIND = { walkthrough: 'Walkthrough', trial: 'Trial', founding: 'Founding group', question: 'Question' };
+const LEAD_KIND = { walkthrough: 'Walkthrough', trial: 'Trial', founding: 'Founding group', question: 'Question', patrol: 'Patrol only', review: 'Report review' };
 const LEAD_STATUS = [['new', 'New'], ['contacted', 'Contacted'], ['trial', 'On a trial'], ['won', 'Paying'], ['lost', 'Not now']];
 async function leads() {
   let r;

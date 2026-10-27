@@ -176,6 +176,7 @@
     walkthrough: 'Which part of the day is hardest right now?', trial: 'Anything we should set up for your trial? (lifts, apps you want first)',
     founding: 'Tell us about your mountain and what you would want from Verdynt/OS', question: 'Your question',
     patrol: 'About your patrol: how many patrollers, volunteer or paid, and who at the ski area should get the read-only login',
+    review: 'About your reports: how many incidents a season, paper or software, and who reviews them today. Please don\'t paste patient details here',
   };
   function contact() {
     const form = $('#leadform'); if (!form) return;
@@ -188,7 +189,7 @@
       msgLabel.firstChild.textContent = `${LABELS[k]} `;
       msgLabel.querySelector('.opt').hidden = k === 'question';
       if (k === 'founding') $('#f-found').checked = true;
-      $('#f-send').textContent = { walkthrough: 'Request a walkthrough', trial: 'Ask for my trial', founding: 'Apply for the founding group', question: 'Send my question' }[k];
+      $('#f-send').textContent = { walkthrough: 'Request a walkthrough', trial: 'Ask for my trial', founding: 'Apply for the founding group', question: 'Send my question', patrol: 'Set up our patrol', review: 'Ask for a report review' }[k];
     };
     form.addEventListener('change', (e) => { if (e.target.name === 'kind') syncKind(); });
     syncKind();
@@ -211,7 +212,7 @@
         const out = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(out.error || 'Something went wrong');
         form.querySelectorAll('input:not([type=radio]):not([type=checkbox]), textarea').forEach((i) => { i.value = ''; });
-        show(`Sent. ${k === 'trial' ? 'We will reply within one business day to set up your trial mountain.' : 'A person will reply within one business day.'}${out.copy ? ' A copy is on its way to your email.' : ''}`, 'ok');
+        show(`Sent. ${k === 'trial' ? 'We will reply within one business day to set up your trial mountain.' : k === 'review' ? 'A person will reply within one business day with a safe way to send your reports. Please don\'t email them.' : 'A person will reply within one business day.'}${out.copy ? ' A copy is on its way to your email.' : ''}`, 'ok');
       } catch (err) {
         show(`${err.message}. Try again in a moment.`, 'bad');
       } finally { btn.disabled = false; }
@@ -240,7 +241,7 @@
     }
     // Long lists of what an app does fold away on phones, behind "What it does". Open everywhere else.
     const phone = window.matchMedia('(max-width: 640px)');
-    const fold = () => document.querySelectorAll('details.more').forEach((d) => { d.open = !phone.matches; });
+    const fold = () => document.querySelectorAll('details.more:not(.all)').forEach((d) => { d.open = !phone.matches; });
     phone.addEventListener('change', fold);
     fold();
     // Guides: a Print button prints the checklist (the page hides its menus and links when printed).

@@ -8,22 +8,83 @@
 <!--HEADER:ski-patrol-->
 
 <main id="main">
-  <section class="pagehead" aria-labelledby="h-sp">
-    <div class="wrap">
-      <h1 id="h-sp">Ski patrol software, from the first call to the closing sweep.</h1>
-      <p>Patient care reports written at the bedside, dispatch that buzzes every phone on duty, opening checks, the closing sweep and the daily log, for paid and volunteer patrols at independent ski areas.</p>
-      <div class="ctas"><a class="btn" href="{{SITE}}/contact?kind=trial&amp;plan=Patrol%20only">Start a 14-day patrol trial</a><a class="btn ghost" href="{{TRY}}">Try the demo</a></div>
-      <p class="heronote">Patrol on its own is {{PATROL_FROM}} a month, and the ski area gets a free read-only login. The demo opens on your own mountain's lifts and trails. No card, no contract, and your data exports any time.</p>
+  <section class="hero" aria-labelledby="h-sp">
+    <div class="wrap herogrid">
+      <div>
+        <h1 id="h-sp"><span class="kicker">Ski patrol software</span> When the claim comes, the record is already written.</h1>
+        <p class="lede">Verdynt/OS is ski patrol software that records care at the bedside as it happens. Every entry is time-stamped, nothing is ever deleted, and the report is frozen when it is approved. Two seasons later, when a lawyer or an insurer asks, the whole claim file is one click.</p>
+        <div class="ctas"><a class="btn" href="{{SITE}}/contact?kind=trial&amp;plan=Patrol%20only">Start a 14-day patrol trial</a><a class="btn ghost" href="{{TRY}}">Try the demo</a></div>
+        <p class="heronote">Patrol on its own is {{PATROL_FROM}} a month, and the ski area gets a free read-only login. For paid and volunteer patrols. No card, no contract, and your data exports any time.</p>
+        <!-- QUOTE: a patrol director's quote from a founding mountain goes here, under the buttons, once one is given. Keep it to two sentences with their name, role and mountain. -->
+      </div>
+      <figure class="claimviz" aria-label="Sample case on a phone, and the claim file it becomes">
+        <div class="phone" aria-hidden="true">
+          <div class="scr">
+            <div class="ph-top"><b>Case 2026-27-0142</b><span>Upper Ridge, below tower 7</span></div>
+            <div class="ph-pt"><span>Guest, 34</span><em>Allergy: penicillin</em></div>
+            <ol>
+              <li><time>1:16 PM</time><span>Call received, Upper Ridge</span></li>
+              <li><time>1:21 PM</time><span>On scene, Patroller 12</span></li>
+              <li><time>1:24 PM</time><span>Vitals, GCS 15</span></li>
+              <li><time>1:31 PM</time><span>Splint, circulation checked before and after</span></li>
+              <li><time>1:38 PM</time><span>Toboggan to the patrol room</span></li>
+            </ol>
+            <div class="ph-v"><div><b>128/82</b><span>BP</span></div><div><b>96</b><span>Pulse</span></div><div><b>98%</b><span>SpO2</span></div></div>
+          </div>
+        </div>
+        <div class="cfile">
+          <h3>Claim file</h3>
+          <p class="cf-sub">Case 2026-27-0142. Approved Feb 14, 2027, frozen as version 3.</p>
+          <ul>
+            <li><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M3 9.5 L7.5 14 L15 4.5" fill="none" stroke="#2C7A57" stroke-width="2.6"/></svg><div><b>The approved report</b><span>Frozen, with who approved it and when</span></div></li>
+            <li><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M3 9.5 L7.5 14 L15 4.5" fill="none" stroke="#2C7A57" stroke-width="2.6"/></svg><div><b>6 photos, fingerprinted</b><span>Time and place read from each photo</span></div></li>
+            <li><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M3 9.5 L7.5 14 L15 4.5" fill="none" stroke="#2C7A57" stroke-width="2.6"/></svg><div><b>Conditions at 1:16 PM</b><span>Groomed 4:10 AM, packed powder, 18°F</span></div></li>
+            <li><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M3 9.5 L7.5 14 L15 4.5" fill="none" stroke="#2C7A57" stroke-width="2.6"/></svg><div><b>Rental binding: 6.5</b><span>Set by the rental tech, serviced Jan 30</span></div></li>
+            <li><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M3 9.5 L7.5 14 L15 4.5" fill="none" stroke="#2C7A57" stroke-width="2.6"/></svg><div><b>Who was told, and when</b><span>Management 1:52 PM, insurer 2:05 PM</span></div></li>
+            <li><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M3 9.5 L7.5 14 L15 4.5" fill="none" stroke="#2C7A57" stroke-width="2.6"/></svg><div><b>The audit trail</b><span>41 entries, nothing deleted</span></div></li>
+          </ul>
+          <div class="score"><span>Documentation score</span><b>96%</b></div>
+        </div>
+        <figcaption class="vizcap">Sample data for illustration. The case is written on the phone at the bedside; the claim file is built from it.</figcaption>
+      </figure>
     </div>
   </section>
 
-  <figure class="vista"><img src="/site/img/patrol.svg" width="400" height="300" alt="Illustration of a ski patroller beside a rescue toboggan"></figure>
+  <section class="sec alt" aria-labelledby="h-sp-story">
+    <div class="wrap story">
+      <div class="sh">
+        <h2 id="h-sp-story">A guest's lawyer writes in March 2028. Here's what you send.</h2>
+        <p>The letter is about a knee injury on Upper Ridge in February 2027. It says the trail was icy and the rental binding was set wrong. Nobody on patrol remembers the day. They don't have to.</p>
+      </div>
+      <div>
+        <ol>
+          <li><b>Open the case.</b><p>The approved report is exactly as it was approved, frozen, with who wrote it, who reviewed it and when. Every earlier version is kept beside it.</p></li>
+          <li><b>The conditions at that minute.</b><p>When the case was opened, Verdynt/OS saved what the mountain's own records said: the trail's status, when it was groomed, the snow and the weather. Nobody had to remember to write it down.</p></li>
+          <li><b>The binding, the technician and the last service.</b><p>The rental gear was added to the case from the contract: the binding setting, skier type and boot sole length, who set it, when it was last serviced, and the inspection after.</p></li>
+          <li><b>The photos and the witnesses.</b><p>Photos were fingerprinted the moment they were added, with time and place read from the photo itself, and none can be deleted. Witnesses wrote their statements in their own words, and the scene is drawn on a diagram.</p></li>
+          <li><b>Who was told, and when.</b><p>Management, the insurer and a parent when a minor is hurt, each with the time and how. Your patrol director decides which are required before a report can be approved.</p></li>
+          <li><b>One click: the claim file.</b><p>Everything above in one file, released only from the approved report with a release number, and shared with the insurer by a secure link that expires. Every view is logged.</p></li>
+        </ol>
+        <p class="last">Before the letter ever came, the GM had seen the season's documentation score: how complete every report was, and how fast it was written. The record says what happened, and nobody can say it was changed later. <a href="{{SITE}}/ski-area-risk-management">What owners and insurers see</a>.</p>
+        <details class="more all"><summary>Everything that keeps a record standing</summary><ul class="top3">
+          <li>Every submit and approval keeps a frozen copy of the whole report</li>
+          <li>A review group signs off reports; nobody reviews their own; only the patrol director approves with an exception, and says why</li>
+          <li>Mistakes are marked entered in error and stay on the record, struck through</li>
+          <li>Staff and volunteers hurt on duty: the owner and GM are told at once, with OSHA's deadlines when it is serious</li>
+          <li>Records requests logged and released only from the approved report, with a release number</li>
+          <li>A legal hold that stops any change to the case</li>
+          <li>Incident reports export as a spreadsheet</li>
+          <li>Opt in to compare injury rates with other mountains, by counts only</li>
+        </ul></details>
+      </div>
+    </div>
+  </section>
 
   <section class="band" aria-labelledby="h-sp-why">
     <div class="wrap two">
       <div>
         <h2 id="h-sp-why">The report shouldn't start after the hill closes.</h2>
-        <p>When care is written on a glove, then a clipboard, then a Word form at 9 pm, details get lost and reports go missing when a lawyer asks two seasons later. Verdynt/OS records it once, at the bedside, and builds the report from that.</p>
+        <p>When care is written on a glove, then a clipboard, then a Word form at 9 PM, details get lost and reports go missing when a lawyer asks two seasons later. Verdynt/OS records it once, at the bedside, and builds the report from that.</p>
       </div>
       <ul aria-label="What it replaces">
         <li><s>Incident reports in a binder</s></li>
@@ -42,27 +103,28 @@
       <div class="applist">
         <article class="app-r">
           <div><h3>Patient care reports</h3><p class="one">Enter it once at the bedside; the report writes itself.</p><div class="note">Nothing is deleted. A mistake is marked entered in error and stays on the record, struck through.</div></div>
-          <details class="more" open><summary>What it does</summary><ul><li>Vitals with age-based flags, trends and a "check again" timer</li><li>GCS, primary survey, head, spine and stroke checks</li><li>Splints with circulation checks before and after, tourniquet and pelvic binder times, oxygen and a cardiac arrest log</li><li>A full incident report form, with what is required set by your patrol director, by kind of case and only when it applies (transports, minors, collisions, rental gear)</li><li>Next missing item, and N/A with a reason when something cannot be answered</li><li>A second look before submitting: gaps a reviewer would notice, linked to the field</li><li>Before the patient leaves: contact details, a parent or guardian, the signed refusal, the rental number and witnesses, each done or skipped with a reason</li><li>Photos kept as evidence: fingerprinted when added, time and place from the photo, never deleted</li><li>A CHART or SOAP narrative drafted from the bedside entries, for the patroller to correct</li><li>Refusal of care and the hand-off to EMS signed on the phone, and a one-page hand-off sheet that prints</li><li>Collision reports, witness statements and take-home sheets</li></ul></details>
+          <div><ul class="top3"><li>Vitals, assessments, splints, oxygen and a cardiac arrest log, each time-stamped as it happens</li><li>The incident report fills in from the bedside, with what is required set by your patrol director</li><li>Refusal of care and the hand-off to EMS signed on the phone, with a one-page hand-off sheet</li></ul>
+          <details class="more all"><summary>Everything it does</summary><ul><li>Vitals with age-based flags, trends and a "check again" timer</li><li>GCS, primary survey, head, spine and stroke checks</li><li>Splints with circulation checks before and after, tourniquet and pelvic binder times, oxygen and a cardiac arrest log</li><li>A full incident report form, with what is required set by your patrol director, by kind of case and only when it applies (transports, minors, collisions, rental gear)</li><li>Next missing item, and N/A with a reason when something cannot be answered</li><li>A second look before submitting: gaps a reviewer would notice, linked to the field</li><li>Before the patient leaves: contact details, a parent or guardian, the signed refusal, the rental number and witnesses, each done or skipped with a reason</li><li>Photos kept as evidence: fingerprinted when added, time and place from the photo, never deleted</li><li>Witness statements written by the witness on their own phone, from a link</li><li>A scene diagram: direction of travel, where people were, signs and ropes</li><li>A CHART or SOAP narrative drafted from the bedside entries, for the patroller to correct</li><li>Collision reports and take-home sheets</li></ul></details></div>
         </article>
         <article class="app-r">
           <div><h3>Dispatch and phone alerts</h3><p class="one">Send the call, and the right phones know where to go.</p></div>
-          <details class="more" open><summary>What it does</summary><ul><li>Calls with location, responders and a timeline</li><li>Phone alerts to responders, with "On my way" to answer</li><li>Critical calls alert everyone on duty, and can text them too</li><li>Lost-person searches with areas assigned and alerted</li><li>Locate caller: text a link, and the guest's phone sends back where they are</li><li>A guest help page from a QR code on a trail sign, which always says to call 911 in an emergency</li></ul></details>
+          <div><ul class="top3"><li>Calls with location, responders and a timeline</li><li>Phone alerts to responders, with "On my way" to answer</li><li>Locate caller: text a link, and the guest's phone sends back where they are</li></ul>
+          <details class="more all"><summary>Everything it does</summary><ul><li>Critical calls alert everyone on duty, and can text them too</li><li>Lost-person searches with areas assigned and alerted</li><li>A guest help page from a QR code on a trail sign, which always says to call 911 in an emergency</li></ul></details></div>
         </article>
         <article class="app-r">
           <div><h3>Opening checks and the closing sweep</h3><p class="one">Every run checked in the morning, every route swept at night.</p><div class="note">The mountain can't be called clear while a route is open or someone found has no call.</div></div>
-          <details class="more" open><summary>What it does</summary><ul><li>Opening checks: hazards marked, ropes and signs, padding; open, hold or close with a reason</li><li>Mountain status changes as patrol goes</li><li>Sweep routes assigned to whoever is on duty, stop by stop</li><li>An alert when a route runs late, and the time the mountain was called clear</li><li>A daily log built from the day, with addenda that never overwrite it</li></ul></details>
+          <div><ul class="top3"><li>Opening checks: hazards marked, ropes and signs, padding; open, hold or close with a reason</li><li>Sweep routes assigned to whoever is on duty, stop by stop</li><li>A daily log built from the day, with addenda that never overwrite it</li></ul>
+          <details class="more all"><summary>Everything it does</summary><ul><li>Mountain status changes as patrol goes</li><li>An alert when a route runs late, and the time the mountain was called clear</li></ul></details></div>
         </article>
         <article class="app-r">
-          <div><h3>Duty, roster and volunteers</h3><p class="one">Know who's on the hill, and who's kept current.</p></div>
-          <details class="more" open><summary>What it does</summary><ul><li>Sign in on duty with station and radio, on a phone or by tapping your name on the patrol-room tablet</li><li>Paid patrollers can clock in for pay at the same time</li><li>A patrol schedule published to each patroller, and shift cover requests someone free can take</li><li>Volunteer days counted against your season minimum, with reminders</li><li>Access levels your director sets: who opens, approves and releases cases</li><li>Lift evacuation plans and drills, and who on duty is ready for each lift</li></ul></details>
+          <div><h3>Duty, crews and volunteers</h3><p class="one">Know who's on the hill, and who's kept current.</p></div>
+          <div><ul class="top3"><li>Sign in on duty with station and radio, on a phone or the patrol-room tablet</li><li>Crews and rotating teams, with sign-up for open spots and shift cover</li><li>Volunteer days counted against your season minimum, with reminders</li></ul>
+          <details class="more all"><summary>Everything it does</summary><ul><li>Paid patrollers can clock in for pay at the same time</li><li>A patrol schedule published to each patroller, and shift cover requests someone free can take</li><li>Access levels your director sets: who opens, approves and releases cases</li><li>Lift evacuation plans and drills, and who on duty is ready for each lift</li></ul></details></div>
         </article>
         <article class="app-r">
-          <div><h3>Medications, oxygen and AEDs</h3><p class="one">Only what your medical director allows.</p></div>
-          <details class="more" open><summary>What it does</summary><ul><li>A formulary per mountain: each drug's authority, routes, largest dose and who may give it</li><li>Stock received by lot and expiry, and taken from stock when given</li><li>Oxygen cylinder pressure and AED pad and battery checks, with low cylinders flagged</li></ul></details>
-        </article>
-        <article class="app-r">
-          <div><h3>Records that hold up</h3><p class="one">When a lawyer, insurer or state asks, the answer is one click away.</p></div>
-          <details class="more" open><summary>What it does</summary><ul><li>Every submit and approval keeps a frozen copy of the whole report</li><li>A review group signs off reports; nobody reviews their own; only the patrol director approves with an exception, and says why</li><li>Staff and volunteers hurt on duty: the owner and GM are told at once, with OSHA's deadlines when it is serious</li><li>Records requests logged and released only from the approved report, with a release number</li><li>A legal hold that stops any change to the case</li><li>Incident reports export as a spreadsheet</li><li>Opt in to compare injury rates with other mountains, by counts only</li></ul></details>
+          <div><h3>Kits, medications, oxygen and AEDs</h3><p class="one">Only what your medical director allows, and every bag ready.</p></div>
+          <div><ul class="top3"><li>A formulary per mountain: each drug's authority, routes, largest dose and who may give it</li><li>Trauma bags, packed toboggans and lift evacuation kits checked by QR code</li><li>Oxygen cylinder pressure and AED pad and battery checks, with low cylinders flagged</li></ul>
+          <details class="more all"><summary>Everything it does</summary><ul><li>Stock received by lot and expiry, and taken from stock when given</li><li>Supplies used on a case mark the kit for restock</li></ul></details></div>
         </article>
       </div>
     </div>
@@ -80,11 +142,12 @@
     </div>
   </section>
 
-  <section class="sec" aria-labelledby="h-sp-price">
+  <section class="sec" aria-labelledby="h-sp-found">
     <div class="wrap">
+      <div class="gh"><h2 id="h-sp-found">The founding group.</h2><p>We are opening Verdynt/OS to a small, named group of independent mountains and their patrols first. Founding mountains pay half in their first season and get a say in what we build next. In return, we ask for honest feedback, the kind that says what doesn't work.</p></div>
       <div class="found">
-        <div><b id="h-sp-price">Patrol on its own: {{PATROL_FROM}} a month.</b><span>The Patrol only plan is everything patrol needs, and the ski area gets a free read-only login. Running more of the mountain? Add Patrol to the Lodge or Mountain plan, where it shares the mountain's guests, runs and staff, or take Resort, where it is included. 14 days free, no card, no contract. See <a href="{{SITE}}/pricing" style="color:#fff">pricing</a>.</span></div>
-        <a class="btn onink" href="{{SITE}}/contact?kind=trial&amp;plan=Patrol%20only">Start a patrol trial</a>
+        <div><b id="h-sp-price">Patrol on its own: {{PATROL_FROM}} a month.</b><span>Half that in a founding mountain's first season. The Patrol only plan is everything patrol needs, and the ski area gets a free read-only login. Running more of the mountain? Add Patrol to the Lodge or Mountain plan, where it connects to rentals, lifts and staff, or take Resort, where it is included. See <a href="{{SITE}}/pricing">pricing</a>.</span></div>
+        <a class="btn onink" href="{{SITE}}/contact?kind=founding&amp;plan=Patrol%20only">Apply for the founding group</a>
       </div>
     </div>
   </section>
@@ -93,12 +156,13 @@
     <div class="wrap">
       <div class="sh"><h2 id="h-sp-faq">Questions patrol directors ask.</h2></div>
       <div class="faq">
+        <details><summary>Will this win a lawsuit for us?</summary><p>No software can promise that, and we don't. What Verdynt/OS gives you is a complete record, written at the time, that can't be changed afterward without it showing: frozen versions, time stamps, fingerprinted photos and an audit trail. What happens next is for your insurer and your lawyer.</p></details>
         <details><summary>Does it work for a volunteer patrol?</summary><p>Yes. Volunteers sign in on duty without a time clock, their days count toward your season minimum, and they can ask for cover when they can't make a shift. Paid patrollers can clock in for pay when they sign in.</p></details>
         <details><summary>What if there's no cell signal where we treat patients?</summary><p>A case can be started with no signal, and entries are kept on the phone and sent in order when the signal returns, so nothing typed at the bedside is lost. Photos taken with the phone camera can be added later and keep their own time and place.</p></details>
         <details><summary>Can a report be changed after it's submitted?</summary><p>Every submit and approval keeps a frozen copy. Corrections are marked entered in error, never deleted, and a legal hold stops any change to the case.</p></details>
+        <details><summary>What goes in the claim file?</summary><p>The approved report, every photo with its fingerprint, the conditions at the time, rental gear and its binding record, the lift's status, witness statements, the scene diagram, who was told and when, and the audit trail. It is released only from the approved report, with a release number.</p></details>
         <details><summary>Who can see patient details?</summary><p>Only the patrol access levels your director allows. Counter, instructor and other staff logins never see patrol cases.</p></details>
         <details><summary>Does it replace our radios or 911?</summary><p>No. Verdynt/OS records and coordinates the call; radios and 911 stay your lifeline. Phone alerts depend on phones and networks.</p></details>
-        <details><summary>Do we have to use the rest of Verdynt/OS?</summary><p>No. The Patrol only plan is everything patrol needs and nothing else, so you can start with patrol alone, which touches no guest, and add lift checks or the front desk later on the same account.</p></details>
         <details><summary>Can our patrol sign up on its own, without the ski area?</summary><p>Yes. Many patrols have their own budget, so the patrol can be the customer, on a monthly or yearly price. The ski area gets a free read-only login that shows the day's patrol in numbers and every approved report, never a case in progress. See the Patrol only plan on <a href="{{SITE}}/pricing">Pricing</a>.</p></details>
         <details><summary>Can we try it before committing?</summary><p>Yes. Start a demo on your own mountain: type its name and it opens on your own lifts and trails. Or ask for a 14-day trial with no card.</p></details>
       </div>
@@ -107,9 +171,9 @@
 
   <section class="band" aria-labelledby="h-sp-cta">
     <div class="wrap">
-      <h2 id="h-sp-cta">See a case go from call to hand-off.</h2>
-      <p>In 20 minutes we'll show a call, the bedside, the report and the sweep, on a phone, with your patrol director in the room.</p>
-      <div class="ctas"><a class="btn onink" href="{{SITE}}/contact?kind=walkthrough&amp;plan=Patrol%20only">Request a walkthrough</a><a class="btn line" href="{{TRY}}">Try the demo</a></div>
+      <h2 id="h-sp-cta">See a case become a claim file.</h2>
+      <p>In 20 minutes we'll show a call, the bedside, the report and the one-click claim file, on a phone, with your patrol director in the room. Or send us ten of last season's reports and we'll score them against our review checklist, free.</p>
+      <div class="ctas"><a class="btn onink" href="{{SITE}}/contact?kind=walkthrough&amp;plan=Patrol%20only">Request a walkthrough</a><a class="btn line" href="{{SITE}}/contact?kind=review">Get a free report review</a></div>
     </div>
   </section>
 </main>

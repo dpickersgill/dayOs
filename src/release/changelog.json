@@ -142,6 +142,22 @@
         },
         {
           "kind": "new",
+          "app": "patrol",
+          "text": "Claim files, a documentation score and a season risk report: one printable claim file from any case (the approved report, care, photos with fingerprints, conditions, rental gear, who was told, witnesses, the scene diagram and the audit trail), report completeness and timeliness on Today, and a counts-only season report for your broker. Insurers get a secure link with a passcode after a records release; it expires, can be stopped, and every opening is logged.",
+          "who": [
+            "patrol"
+          ]
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "text": "Witnesses can write their statement in their own words on their own phone from a link sent by text or email, or a QR code, and sign it; it arrives on the case untouched. The Report also has a scene diagram for the direction of travel, the point of impact and what was around.",
+          "who": [
+            "patrol"
+          ]
+        },
+        {
+          "kind": "new",
           "app": null,
           "text": "Prospects in the platform console: the ski areas we sell to, who runs them, the sales pipeline with next steps and follow-ups due, a timeline of calls and emails, research imports and a spreadsheet download. Starts with 72 researched independent ski areas; Indy Pass resorts are left out.",
           "who": "platform"
@@ -150,6 +166,12 @@
           "kind": "new",
           "app": null,
           "text": "Outreach in the platform console: start outreach to a person at a prospect, approve the first email (drafted for them), and five emails over 45 days then a quarterly update go from your own mailbox until they reply, bounce or choose not interested.",
+          "who": "platform"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "text": "The product website now leads with the patient care record that holds up later: a new page for owners and insurers, a free incident report review, and shorter feature lists.",
           "who": "platform"
         }
       ]

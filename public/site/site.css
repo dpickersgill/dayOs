@@ -71,7 +71,8 @@ body{margin:0;background:var(--snow)}
 .sn-in{display:flex;align-items:center;justify-content:space-between;gap:24px;min-height:var(--head)}
 .sn-brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink)!important}
 .sn-brand .wordmark{display:block;height:42px;width:auto}
-.sn-links{display:flex;gap:26px;align-items:center}
+.sn-links{display:flex;gap:22px;align-items:center;white-space:nowrap}
+@media (max-width:1240px){.sn-links{gap:18px}.sn-links .sn-try{display:none}}
 .sn-links a:not(.btn){color:var(--ink);text-decoration:none;font-weight:700;font-size:16px;padding:8px 0;border-bottom:3px solid transparent}
 .sn-links a:not(.btn):hover{border-bottom-color:var(--line)}
 .sn-links a[aria-current]{border-bottom-color:var(--trail)}
@@ -91,7 +92,7 @@ body{margin:0;background:var(--snow)}
 .sn-menu .sub{display:flex;flex-wrap:wrap;gap:6px 18px;padding:16px 0 4px}
 .sn-menu .sub a:not(.btn){font-family:'Atkinson Hyperlegible',sans-serif;font-size:17px;border:0;padding:6px 0;color:var(--ink2)}
 .sn-menu .btn{margin-top:14px;width:100%}
-@media (max-width:960px){.sn-links{display:none}.sn-m{display:block}}
+@media (max-width:1080px){.sn-links{display:none}.sn-m{display:block}}
 
 /* phone action bar: the two things a visitor came to do, always a thumb away */
 .mcta{display:none}
@@ -585,6 +586,80 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 .guides span{color:var(--ink2);font-size:17px}
 .guides em{font-style:normal;font-size:14px;font-weight:700;color:var(--trailDark)}
 @media (max-width:760px){.guides{grid-template-columns:1fr}.sign{grid-template-columns:1fr}}
+
+/* ================================================================ the record: patrol page and For owners
+   The hero's picture: the bedside on a phone, and the claim file it becomes. Sample data, labeled. */
+.claimviz{position:relative;margin:0;min-height:680px}
+.phone{position:relative;z-index:1;width:246px;border-radius:40px;background:#0B1C23;padding:11px;box-shadow:0 30px 60px -28px rgba(18,48,58,.65)}
+.phone .scr{background:var(--white);border-radius:30px;overflow:hidden;color:var(--ink);font-size:13.5px;line-height:1.35}
+.phone .ph-top{background:var(--ink);color:var(--onink);padding:16px 16px 12px}
+.phone .ph-top b{display:block;font-family:'Barlow Condensed',sans-serif;font-size:21px;font-weight:600;line-height:1.1}
+.phone .ph-top span{font-size:12.5px;color:var(--onink2)}
+.phone .ph-pt{display:flex;justify-content:space-between;gap:8px;padding:10px 16px;background:#FFF4F2;border-bottom:1px solid #F3D3CF;font-weight:700;font-size:13px}
+.phone .ph-pt em{font-style:normal;color:#8A1F17}
+.phone ol{list-style:none;margin:0;padding:4px 16px 10px}
+.phone li{display:grid;grid-template-columns:58px minmax(0,1fr);gap:8px;padding:8px 0;border-top:1px solid var(--line)}
+.phone li:first-child{border-top:0}
+.phone li time{white-space:nowrap;font-size:13px;font-weight:700;color:var(--trailDark);font-variant-numeric:tabular-nums}
+.phone .ph-v{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:0 16px 14px}
+.phone .ph-v div{background:var(--frost);border-radius:10px;padding:7px 8px;text-align:center}
+.phone .ph-v b{display:block;font-family:'Barlow Condensed',sans-serif;font-size:20px;line-height:1}
+.phone .ph-v span{font-size:11px;color:var(--muted)}
+.cfile{position:absolute;z-index:2;right:-14px;top:150px;width:312px;background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:20px 20px 18px;box-shadow:9px 9px 0 -1px var(--white),9px 9px 0 0 var(--line),18px 18px 0 -1px var(--frost),18px 18px 0 0 var(--line),0 34px 60px -30px rgba(18,48,58,.55)}
+.cfile h3{font-size:28px;line-height:1}
+.cfile .cf-sub{font-size:13.5px;color:var(--muted);margin-top:4px}
+.cfile ul{list-style:none;margin:14px 0 0;padding:0}
+.cfile li{display:grid;grid-template-columns:20px minmax(0,1fr);gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:14.5px;line-height:1.35}
+.cfile li svg{margin-top:2px}
+.cfile li b{display:block}
+.cfile li span{color:var(--muted);font-size:13px}
+.cfile .score{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;padding:10px 12px;border-radius:10px;background:#DDF1E6;color:#17543A;font-weight:700;font-size:14.5px}
+.cfile .score b{font-family:'Barlow Condensed',sans-serif;font-size:28px;line-height:1}
+.vizcap{font-size:14px;color:var(--muted);margin-top:14px;max-width:210px}
+@media (max-width:1180px) and (min-width:1001px){.phone{width:230px}.cfile{width:288px;right:-10px}}
+@media (max-width:1000px){.claimviz{min-height:0;display:flex;flex-direction:column;align-items:flex-start}.cfile{position:relative;top:auto;right:auto;margin:-170px 0 20px auto;width:min(330px,86%)}.vizcap{max-width:34em;order:3}}
+@media (max-width:640px){.phone{width:236px}.cfile{margin-top:-150px;margin-right:18px}}
+
+/* The story of a claim, told in the order it happens */
+.story{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:56px;align-items:start}
+.story .sh{position:sticky;top:calc(var(--head) + 24px)}
+.story ol{list-style:none;margin:0;padding:0;counter-reset:st;border-top:2px solid var(--ink)}
+.story li{counter-increment:st;position:relative;padding:22px 0 22px 64px;border-bottom:1px solid var(--line2)}
+.story li:before{content:counter(st);position:absolute;left:0;top:22px;width:42px;height:42px;border-radius:50%;background:var(--ink);color:var(--white);font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:22px;display:flex;align-items:center;justify-content:center}
+.story li b{display:block;font-family:'Barlow Condensed',sans-serif;font-size:26px;line-height:1.1}
+.story li p{margin-top:6px;color:var(--ink2);font-size:17.5px}
+.story .last{margin-top:26px;font-size:18px;font-weight:700;max-width:34em}
+@media (max-width:1000px){.story{grid-template-columns:minmax(0,1fr);gap:32px}.story .sh{position:static}}
+
+/* What the GM sees: four figures with what they mean */
+.gmsees{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px;margin-top:40px}
+.gmsees div{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:22px}
+.gmsees b{display:block;font-family:'Barlow Condensed',sans-serif;font-size:48px;line-height:1;font-weight:700}
+.gmsees h3{font-size:24px;line-height:1.1;margin-top:10px!important}
+.gmsees p{margin-top:8px!important;font-size:16px;color:var(--ink2);line-height:1.5}
+.gmsees .s{font-size:13px;color:var(--muted);margin-top:10px!important}
+@media (max-width:1000px){.gmsees{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:640px){.gmsees{grid-template-columns:minmax(0,1fr)}}
+
+/* What attaches to the case by itself, from the rest of the mountain */
+.moat{margin-top:36px;border-top:2px solid rgba(255,255,255,.4)}
+.moat div{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.6fr);gap:12px 32px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,.18)}
+.moat b{font-size:18px;color:var(--white)}
+.moat span{color:var(--onink3);font-size:17px}
+@media (max-width:640px){.moat div{grid-template-columns:minmax(0,1fr);gap:4px}}
+
+/* Three outcomes in view, the full list folded below ("Everything it does") */
+.top3{list-style:none;margin:0;padding:0}
+.top3 li{padding:7px 0 7px 22px;position:relative;font-size:17.5px}
+.top3 li:before{content:'';position:absolute;left:0;top:calc(.8em - 1px);width:9px;height:9px;background:var(--trail);border-radius:50%}
+.more.all{margin-top:6px}
+.more.all>summary{display:list-item;cursor:pointer;font-weight:700;font-size:16px;color:var(--trailDark);padding:6px 0;list-style-position:inside}
+.more.all>ul{margin-top:6px}
+.more.all>summary:hover{color:var(--ink)}
+.offer{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px 28px;align-items:center;margin-top:28px;padding:26px 28px;background:var(--ink);color:var(--onink);border-radius:var(--r-lg)}
+.offer b{display:block;font-family:'Barlow Condensed',sans-serif;font-size:32px;line-height:1.05;color:var(--white)}
+.offer p{color:var(--onink3)!important;margin-top:8px!important;font-size:17.5px}
+@media (max-width:760px){.offer{grid-template-columns:minmax(0,1fr)}}
 @media print{
   .sn,.mcta,.sf,.contact,.guide-actions,.related,.crumbs,.no-print{display:none!important}
   .sx{background:#fff}

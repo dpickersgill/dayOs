@@ -3,6 +3,7 @@
 // hold are listed too. The release pack prints as a cover sheet plus the report.
 import { get, post, put, patch } from '../api.js';
 import { h, clear, select, input, field, button, toast, formDialog, table, empty, errorBox, state, fmtDate, fmtDateTime, label, todayStr } from '../ui.js';
+import { sharesList, showNewLink } from './patrol-claim.js';
 
 const KINDS = [['patient', 'The patient'], ['guardian', 'Parent or guardian'], ['insurer', 'Insurer'], ['attorney', 'Attorney'], ['police', 'Police'], ['court', 'Court'], ['other', 'Other']];
 const AUTHS = [['none', 'Nothing yet'], ['signed_release', 'Signed release from the patient'], ['patient_self', 'The patient asking for their own'], ['subpoena', 'Subpoena'], ['court_order', 'Court order'], ['police_request', 'Police request']];
@@ -12,9 +13,12 @@ export async function drawRecords(box) {
   const body = h('div', { class: 'stack' });
   clear(box).append(body);
   async function load() {
-    try { draw(await get('/patrol/records')); } catch (err) { clear(body).append(errorBox(err)); }
+    try {
+      const [d, links] = await Promise.all([get('/patrol/records'), get('/patrol/shares').catch(() => ({ data: [] }))]);
+      draw(d, links.data.filter((x) => x.kind === 'claim'));
+    } catch (err) { clear(body).append(errorBox(err)); }
   }
-  function draw(d) {
+  function draw(d, links = []) {
     clear(body).append(
       h('div', { class: 'spread' }, h('div', null, h('h2', null, 'Records requests'), h('p', { class: 'muted' }, 'Release only with an authorization on file. Only the approved report is released, frozen, with a release number.')),
         button('Log a request', () => requestDialog(load), { kind: 'primary' })),
@@ -28,8 +32,12 @@ export async function drawRecords(box) {
           r.status === 'open' ? button('Release', () => releaseDialog(r, load), { small: true, kind: 'primary' }) : null,
           r.status === 'open' ? button('Authority', () => authDialog(r, load), { small: true }) : null,
           r.status === 'open' ? button('Deny or withdraw', () => decideDialog(r, load), { small: true, kind: 'ghost' }) : null,
-          r.status === 'released' ? h('a', { class: 'btn small', href: `#/patrol/release/${r.id}` }, 'Release pack') : null) },
+          r.status === 'released' ? h('a', { class: 'btn small', href: `#/patrol/release/${r.id}` }, 'Release pack') : null,
+          r.status === 'released' ? button('Secure link', () => shareDialog(r, load), { small: true }) : null) },
       ], d.data) : empty('No requests yet.'),
+      h('section', { class: 'panel stack' }, h('h3', null, 'Secure links to claim files'),
+        h('p', { class: 'muted small' }, 'A link opens only the approved report a release sent, until it expires or you stop it. Every opening is logged with the time and address.'),
+        sharesList(links, load)),
       h('section', { class: 'panel' }, h('h3', null, `Cases on legal hold (${d.holds.length})`), d.holds.length ? h('ul', { class: 'duty-list' }, d.holds.map((c) => h('li', null, h('a', { href: `#/patrol/case/${c.id}` }, c.case_number), ` ${label(c.category)}, ${fmtDate(String(c.occurred_at).slice(0, 10))}: ${c.legal_hold_note || ''}`)))
         : h('p', { class: 'muted small' }, 'None. Put a case on hold from its Record view when a claim or request arrives.')));
   }
@@ -68,6 +76,19 @@ function releaseDialog(r, again) {
     location.hash = `#/patrol/release/${r.id}`;
     await again();
   }, { submitText: 'Release' });
+}
+
+/** After a release: a link the insurer opens instead of an emailed file. 14 days, revocable, with a passcode. */
+function shareDialog(r, again) {
+  formDialog(`Secure link for ${r.case_number}`, h('div', { class: 'form' },
+    h('div', { class: 'wide' }, h('p', null, `Release ${r.release_no}: only the approved report it released. Every opening is logged on the case.`)),
+    h('div', { class: 'wide' }, field('Who it is for', input({ name: 'shared_with', required: true, maxlength: 150, value: r.requester_name }))),
+    field('Open for', select([['14', '14 days'], ['7', '7 days'], ['30', '30 days']], '14', { name: 'days' })),
+    field('Passcode', select([['yes', '6-digit passcode (recommended)'], ['no', 'No passcode']], 'yes', { name: 'passcode' }), 'Send the passcode a different way from the link.')), async (fd) => {
+    const who = String(fd.get('shared_with')).trim();
+    const out = await post(`/patrol/records/${r.id}/share`, { shared_with: who, days: Number(fd.get('days')), passcode: fd.get('passcode') === 'yes' });
+    showNewLink(out, who); await again();
+  }, { submitText: 'Make link', wide: true });
 }
 
 function decideDialog(r, again) {

@@ -318,7 +318,7 @@ async function loadCase(conn, tenantId, id) {
     rows(conn, `SELECT p.*, COALESCE(vu.email, vu.username) AS voided_by_email FROM incident_patients p ${VOIDED_BY('p')} WHERE p.tenant_id = ? AND p.incident_id = ? ORDER BY p.id`, [tenantId, id]),
     rows(conn, `SELECT e.id, e.kind, e.at, e.note, e.patient_id, e.entered_at, e.voided_at, e.void_reason, COALESCE(vu.email, vu.username) AS voided_by_email FROM incident_events e ${VOIDED_BY('e')} WHERE e.tenant_id = ? AND e.incident_id = ? ORDER BY e.at, e.id`, [tenantId, id]),
     rows(conn, `SELECT r.id, r.staff_id, r.role, p.first_name, p.last_name, m.patrol_number, m.callsign FROM incident_responders r JOIN staff s ON s.id = r.staff_id AND s.tenant_id = r.tenant_id JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id LEFT JOIN patrol_members m ON m.staff_id = r.staff_id AND m.tenant_id = r.tenant_id WHERE r.tenant_id = ? AND r.incident_id = ? ORDER BY FIELD(r.role, 'lead', 'assist', 'transport', 'dispatch'), r.id`, [tenantId, id]),
-    rows(conn, 'SELECT id, relation, name, phone, email, address, city, region, postal, statement FROM incident_witnesses WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]),
+    rows(conn, 'SELECT id, relation, name, phone, email, address, city, region, postal, statement, source, received_at, voided_at, void_reason FROM incident_witnesses WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]), // source link: written by the witness (routes/patrolscene.js)
     rows(conn, 'SELECT id, patient_id, kind, signer_name, signer_role, signed_at FROM incident_signatures WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]),
     one(conn, 'SELECT * FROM incident_collisions WHERE tenant_id = ? AND incident_id = ?', [tenantId, id]),
     rows(conn, 'SELECT * FROM incident_parties WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]),
@@ -1235,6 +1235,8 @@ for (const [name, def] of Object.entries(sub)) {
       await tx(async (conn) => {
         await editableCase(conn, req, id);
         const parent = await parentId(conn, req, id);
+        // A statement the witness wrote on their own phone is theirs: it is marked entered in error, never removed.
+        if (name === 'witnesses' && await one(conn, "SELECT id FROM incident_witnesses WHERE tenant_id = ? AND incident_id = ? AND id = ? AND source = 'link'", [req.auth.tenantId, parent, paramId(req, 'rowId')])) throw conflict('The witness wrote this statement themselves, so it cannot be removed. Mark it entered in error with a reason.');
         const [r] = await conn.query(`DELETE FROM \`${def.table}\` WHERE tenant_id = ? AND ${parentCol} = ? AND id = ?`, [req.auth.tenantId, parent, paramId(req, 'rowId')]);
         if (!r.affectedRows) throw notFound('Record');
         await audit(conn, req, `remove_${name}`, 'incidents', id, { row: paramId(req, 'rowId') });
@@ -1391,4 +1393,5 @@ router.get('/trail-checks', patrol, needs('trail_checks'), async (req, res) => {
 
 router.createCase = createCase;
 router.editableCase = editableCase;
+router.loadCase = loadCase; // the claim file assembles the same case (routes/patrolclaims.js)
 module.exports = router;
