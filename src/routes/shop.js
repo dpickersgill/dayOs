@@ -15,6 +15,8 @@ const connect = require('../lib/connect');
 const sandbox = require('../lib/sandbox');
 const shop = require('../lib/shopsale');
 const after = require('../lib/shopafter');
+const ACT = require('../lib/activities');
+const { nowIn } = require('../lib/util');
 
 const router = express.Router();
 const publicRouter = express.Router();
@@ -118,14 +120,17 @@ const holderSchema = z.object({
 });
 const itemSchema = z.object({ product_id: z.number().int().positive(), valid_on: dateStr.optional(), holder: holderSchema });
 const addonSchema = z.object({ product_id: z.number().int().positive(), quantity: z.number().int().min(1).max(10).default(1) });
+// An activity: one guest's place on an attraction on a day, in a time slot (none for a day pass).
+const activitySchema = z.object({ product_id: z.number().int().positive(), valid_on: dateStr, start_time: z.string().trim().max(8).optional(), holder: holderSchema });
 const giftSchema = z.object({ amount_cents: z.number().int().min(500).max(100000), recipient_name: z.string().trim().max(150).optional(), message: z.string().trim().max(300).optional() });
 const basketShape = {
   items: z.array(itemSchema).max(shop.MAX_ITEMS).default([]),
   addons: z.array(addonSchema).max(10).default([]),
   gifts: z.array(giftSchema).max(5).default([]),
+  activities: z.array(activitySchema).max(shop.MAX_ITEMS).default([]),
   promo_code: z.string().trim().max(40).optional(),
 };
-const nonEmpty = (b) => b.items.length + b.addons.length + b.gifts.length > 0;
+const nonEmpty = (b) => b.items.length + b.addons.length + b.gifts.length + b.activities.length > 0;
 
 publicRouter.get('/:slug/shop', async (req, res) => {
   const t = await tenantFor(req.params.slug);
@@ -151,7 +156,12 @@ publicRouter.get('/:slug/shop', async (req, res) => {
   ]);
   const conditions = (cal || snow || Number(lifts.total)) ? { status: cal ? cal.status : null, open_time: cal ? cal.open_time : null, close_time: cal ? cal.close_time : null, base_in: snow ? snow.base_in : null, new_snow_in: snow ? snow.new_snow_in : null, lifts_open: Number(lifts.total) ? Number(lifts.open || 0) : null, lifts_total: Number(lifts.total), trails_open: Number(trails.total) ? Number(trails.open || 0) : null, trails_total: Number(trails.total) } : null;
   const addons = await rows(pool, `SELECT id, kind, name, valid_days, base_price_cents FROM products WHERE tenant_id = ? AND active = 1 AND online = 1 AND kind IN ('lesson','rental','voucher') ORDER BY FIELD(kind, 'lesson','rental','voucher'), name`, [t.id]);
-  res.json({ addons: addons.map((a) => ({ id: a.id, kind: a.kind, name: a.name, valid_days: a.valid_days, price_cents: a.base_price_cents })), gift: { min_cents: 500, max_cents: 100000 }, mountain: t.name, brand: brand ? { ...brand, opening_day: brand.opening_day ? String(brand.opening_day).slice(0, 10) : null } : null, conditions, phone: t.phone, message: t.shop_message, open: t.open, today, waiver_text: t.waiver_text || null, products: out, guest_types: guestTypes });
+  // Activities by attraction, with each attraction's limits in words (shown before paying).
+  const acts = await rows(pool, "SELECT id, name, attraction_id, timed, base_price_cents FROM products WHERE tenant_id = ? AND active = 1 AND online = 1 AND kind = 'activity' AND attraction_id IS NOT NULL ORDER BY name", [t.id]);
+  const atts = acts.length ? (await ACT.activeAttractions(pool, t.id)).filter((a) => acts.some((p) => p.attraction_id === a.id)) : [];
+  const actTiers = acts.length ? await rows(pool, 'SELECT product_id, tier, price_cents FROM price_tiers WHERE tenant_id = ? AND product_id IN (?) ORDER BY price_cents', [t.id, acts.map((p) => p.id)]) : [];
+  const activities = atts.map((a) => ({ attraction: { ...ACT.attractionOut(a), status_note: undefined }, products: acts.filter((p) => p.attraction_id === a.id).map((p) => ({ id: p.id, name: p.name, timed: Boolean(p.timed), base_price_cents: p.base_price_cents, prices: actTiers.filter((x) => x.product_id === p.id).map((x) => ({ tier: x.tier, price_cents: x.price_cents })) })) }));
+  res.json({ activities, addons: addons.map((a) => ({ id: a.id, kind: a.kind, name: a.name, valid_days: a.valid_days, price_cents: a.base_price_cents })), gift: { min_cents: 500, max_cents: 100000 }, mountain: t.name, brand: brand ? { ...brand, opening_day: brand.opening_day ? String(brand.opening_day).slice(0, 10) : null } : null, conditions, phone: t.phone, message: t.shop_message, open: t.open, today, waiver_text: t.waiver_text || null, products: out, guest_types: guestTypes });
 });
 
 publicRouter.get('/:slug/shop/month', async (req, res) => {
@@ -170,11 +180,41 @@ publicRouter.get('/:slug/shop/day', async (req, res) => {
   res.json({ date: day, products: await shop.dayMenu(pool, t, day) });
 });
 
+/** One day of one attraction's activities: each time slot with places left and the price by age group. */
+publicRouter.get('/:slug/shop/activities', async (req, res) => {
+  const t = await tenantFor(req.params.slug);
+  res.set('Cache-Control', 'no-store');
+  const day = String(req.query.date || '');
+  if (!dateStr.safeParse(day).success) throw bad('date must be YYYY-MM-DD');
+  const today = todayIn(t.timezone);
+  if (day < today) throw bad('Pick today or a later day');
+  if (day > addDays(today, 365)) throw bad('That day is too far ahead to buy online');
+  const aid = Number(req.query.attraction_id) || 0;
+  const prods = await rows(pool, "SELECT id, kind, name, attraction_id, timed, day_capacity, sale_days, active FROM products WHERE tenant_id = ? AND active = 1 AND online = 1 AND kind = 'activity' AND attraction_id = ? ORDER BY name", [t.id, aid]);
+  const used = await ACT.taken(pool, t.id, prods.map((p) => p.id), day);
+  const now = day === today ? nowIn(t.timezone).slice(11, 16) : null;
+  const types = (await require('../lib/guesttypes').list(pool, t.id, { visibleOnly: true })).filter((g) => g.online).map((g) => g.code);
+  const out = [];
+  for (const p of prods) {
+    const d = await ACT.dayOf(pool, t.id, p, day, { now, used });
+    const prices = [];
+    let reason = null;
+    for (const tier of types) {
+      try { prices.push({ tier, price_cents: (await require('../lib/pricing').unitPrice(pool, t.id, p.id, tier, day)).cents }); } catch (err) { if (err.status === 409) { reason = 'Not sold on this day.'; break; } throw err; }
+    }
+    const slots = d.slots.filter((x) => !x.past).map((x) => ({ start: x.start, end: x.end, label: x.label, left: x.left }));
+    if (!reason && d.timed && !slots.length) reason = 'No times on this day.';
+    out.push({ id: p.id, name: p.name, timed: d.timed, available: !reason, reason, prices: reason ? [] : prices, slots: reason ? [] : slots });
+  }
+  res.json({ date: day, products: out });
+});
+
 publicRouter.post('/:slug/shop/quote', validate(z.object(basketShape).refine(nonEmpty, 'Add something to your order')), async (req, res) => {
   const t = await tenantFor(req.params.slug);
   res.set('Cache-Control', 'no-store');
   const q = await shop.quote(pool, t, req.body.items, req.body);
-  res.json({ lines: q.lines.map((l) => ({ name: l.name, valid_on: l.valid_on, tier: l.tier, unit_cents: l.unit, saved_cents: l.saved || 0, tax_cents: l.tax })), addons: q.addons.map((a) => ({ product_id: a.product_id, name: a.name, quantity: a.quantity, unit_cents: a.unit })), gifts: q.gifts, promo: q.promo, discount_cents: q.discount, subtotal_cents: q.subtotal, tax_cents: q.tax, total_cents: q.total });
+  res.json({ lines: q.lines.map((l) => ({ name: l.name, valid_on: l.valid_on, tier: l.tier, unit_cents: l.unit, saved_cents: l.saved || 0, tax_cents: l.tax })),
+    activities: q.activities.map((a) => ({ name: a.name, attraction: a.attraction, valid_on: a.valid_on, start_time: a.start_time, tier: a.tier, unit_cents: a.unit, tax_cents: a.tax, limits_text: a.limits_text })), addons: q.addons.map((a) => ({ product_id: a.product_id, name: a.name, quantity: a.quantity, unit_cents: a.unit })), gifts: q.gifts, promo: q.promo, discount_cents: q.discount, subtotal_cents: q.subtotal, tax_cents: q.tax, total_cents: q.total });
 });
 
 publicRouter.post('/:slug/shop/orders', validate(z.object({
@@ -185,6 +225,7 @@ publicRouter.post('/:slug/shop/orders', validate(z.object({
   ...basketShape,
   waiver_accepted: z.boolean().optional(),
   terms_accepted: z.boolean().optional(),
+  limits_accepted: z.boolean().optional(), // every rider meets the attraction's height, weight and age limits
   news_opt_in: z.boolean().optional(),
   website: z.string().max(200).optional(), // a hidden field people never fill; a robot does
 }).refine(nonEmpty, 'Add something to your order')), async (req, res) => {
@@ -195,6 +236,10 @@ publicRouter.post('/:slug/shop/orders', validate(z.object({
   if (!t.open) throw conflict(`Online sales are not open right now.${t.phone ? ` Please call ${t.phone}.` : ''}`);
   if (!b.terms_accepted) throw bad('Please confirm you understand tickets are not refundable online');
   if (t.waiver_text && !b.waiver_accepted) throw bad('Please read and accept the waiver');
+  if (b.activities.length && !b.limits_accepted && (await rows(pool, `SELECT a.id FROM products p JOIN attractions a ON a.tenant_id = p.tenant_id AND a.id = p.attraction_id
+      WHERE p.tenant_id = ? AND p.id IN (?) AND (a.min_height_in IS NOT NULL OR a.min_weight_lb IS NOT NULL OR a.max_weight_lb IS NOT NULL OR a.min_age IS NOT NULL)`, [t.id, b.activities.map((a) => a.product_id)])).length) {
+    throw bad('Please confirm every rider meets the height, weight and age limits');
+  }
   const sha = t.waiver_text ? crypto.createHash('sha256').update(t.waiver_text).digest('hex') : null;
   const made = await tx(async (conn) => {
     await conn.query('SELECT id FROM tenants WHERE id = ? FOR UPDATE', [t.id]); // one basket at a time per mountain, so two guests cannot both take the last ticket
@@ -215,9 +260,9 @@ publicRouter.post('/:slug/shop/orders', validate(z.object({
   let co;
   try {
     const pay = connect.checkoutFor(await connect.payeeOrThrow(t.id), made.quote.total, { tenant_id: String(t.id), request_id: String(made.id), shop_order_id: String(made.id), kind: 'shop', reference: made.ref });
-    const n = made.quote.lines.length + made.quote.addons.reduce((x, a) => x + a.quantity, 0) + made.quote.gifts.length;
+    const n = made.quote.lines.length + made.quote.activities.length + made.quote.addons.reduce((x, a) => x + a.quantity, 0) + made.quote.gifts.length;
     co = await stripe.createCheckout({
-      amountCents: made.quote.total, name: `${t.name}: ${n} item${n > 1 ? 's' : ''}`, description: [...made.quote.lines.map((l) => `${l.name} ${l.valid_on}`), ...made.quote.addons.map((a) => `${a.quantity} x ${a.name}`), ...made.quote.gifts.map(() => 'Gift card')].join(', ').slice(0, 480),
+      amountCents: made.quote.total, name: `${t.name}: ${n} item${n > 1 ? 's' : ''}`, description: [...made.quote.lines.map((l) => `${l.name} ${l.valid_on}`), ...made.quote.activities.map((a) => `${a.name} ${a.valid_on}${a.start_time ? ` ${ACT.clock(a.start_time)}` : ''}`), ...made.quote.addons.map((a) => `${a.quantity} x ${a.name}`), ...made.quote.gifts.map(() => 'Gift card')].join(', ').slice(0, 480),
       email: b.contact_email, reference: made.ref, ...pay, idempotencyKey: `shop-${made.id}`,
       successUrl: `${baseUrl(req)}/shop/${req.params.slug}?order=${made.token}`, cancelUrl: `${baseUrl(req)}/shop/${req.params.slug}?cancelled=${made.token}`,
     });
@@ -280,7 +325,7 @@ publicRouter.get('/:slug/shop/orders/:token', async (req, res) => {
   const v = await shop.viewOf(t.id, req.params.token);
   if (!v) throw notFound('Order');
   const br = await one(pool, 'SELECT color, logo, hero FROM shop_brand WHERE tenant_id = ?', [t.id]);
-  res.json({ ...v, mountain: t.name, phone: t.phone, brand: br || null, changes: t.shop_change_hours === null ? null : { hours: t.shop_change_hours, fee_cents: t.shop_change_fee_cents } });
+  res.json({ ...v, waiver_link: v.waiver_needed.length ? `${baseUrl(req)}/waiver/${t.slug}` : null, mountain: t.name, phone: t.phone, brand: br || null, changes: t.shop_change_hours === null ? null : { hours: t.shop_change_hours, fee_cents: t.shop_change_fee_cents } });
 });
 
 module.exports = { router, publicRouter };

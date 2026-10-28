@@ -1,6 +1,6 @@
 'use strict';
 
-// One basket for everything the mountain sells: tickets, lessons, rentals, program places and gift cards.
+// One basket for everything the mountain sells: tickets, lessons, rentals, program places, activities and gift cards.
 // The counter builds the basket first and adds the customer's details at the end, then pays.
 //   GET  /checkout/menu    what can be sold today (with spots left and stock)
 //   POST /checkout/quote   prices a basket and checks it can be sold, without selling it
@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
-const { z, dateStr, dateTimeStr, tierEnum, validate, newCode, addDays, todayIn, seasonFor, normDateTime } = require('../lib/util');
+const { z, dateStr, dateTimeStr, tierEnum, validate, newCode, addDays, todayIn, nowIn, seasonFor, normDateTime } = require('../lib/util');
 const { unitPrice, applyPromo } = require('../lib/pricing');
 const { notFound, conflict, bad, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
@@ -24,6 +24,7 @@ const { addLink, isMinor } = require('../lib/family');
 const R = require('../lib/rentals');
 const terminal = require('./terminal');
 const PPS = require('../lib/partnerpasses');
+const ACT = require('../lib/activities');
 
 const checkout = express.Router();
 const giftCards = express.Router();
@@ -60,6 +61,9 @@ const lineSchema = z.discriminatedUnion('type', [
     // The child's answers: ski or snowboard, a season pass (no lift ticket part; checked when the sale is made), rental, helmet.
     discipline: z.enum(['ski', 'snowboard']).optional(), has_pass: z.boolean().optional(), needs_rental: z.boolean().optional(), needs_helmet: z.boolean().optional(),
   }),
+  // A place on an attraction for one guest: the day, the time slot (none for a day pass), and the clerk's word that this
+  // rider meets the attraction's height, weight and age limits (needed when the attraction has limits).
+  z.object({ type: z.literal('activity'), product_id: z.number().int().positive(), tier: tierEnum.default('adult'), valid_on: dateStr.optional(), start_time: z.string().trim().max(8).optional(), participant: who, limits_ok: z.boolean().optional() }),
   z.object({ type: z.literal('gift_card'), amount_cents: z.number().int().min(GIFT_MIN).max(GIFT_MAX), recipient_name: z.string().max(150).optional(), message: z.string().max(300).optional() }),
 ]);
 
@@ -122,6 +126,7 @@ async function spotsLeft(conn, tenantId, sessionId, capacity) {
 async function priceLines(conn, tenantId, lines, today) {
   const out = [];
   const partnerSeen = new Set();
+  const activityCount = new Map(); const clockOf = {};
   for (const [i, ln] of lines.entries()) {
     if (ln.type === 'ticket') {
       const validOn = ln.valid_on || today;
@@ -162,6 +167,18 @@ async function priceLines(conn, tenantId, lines, today) {
       const { product, cents } = await unitPrice(conn, tenantId, ln.product_id, ln.tier, validOn);
       if (product.kind !== 'rental') throw bad(`${product.name} is not a rental package`);
       out.push({ i, line: ln, type: 'rental', name: product.name, detail: `${ln.tier}, ${validOn}${product.valid_days > 1 ? ` for ${product.valid_days} days` : ''}`, quantity: 1, unit: cents, product, validOn });
+    } else if (ln.type === 'activity') {
+      const day = ln.valid_on || today;
+      if (day < today) throw bad('Activities cannot be sold for a past date');
+      const { product, cents } = await unitPrice(conn, tenantId, ln.product_id, ln.tier, day);
+      const tz = clockOf.tz || (clockOf.tz = (await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone);
+      const { attraction, slot } = await ACT.slotFor(conn, tenantId, product, day, ln.start_time, { today, now: nowIn(tz).slice(11, 16) });
+      // Places are checked here for the quote (this basket's own earlier lines count too); the sale checks again under a lock.
+      const key = `${product.id}|${day}|${slot.start || ''}`;
+      const mine = (activityCount.get(key) || 0);
+      if (conn === pool) await ACT.ensurePlaces(conn, tenantId, product, day, slot, 1, { lock: false, extra: mine });
+      activityCount.set(key, mine + 1);
+      out.push({ i, line: ln, type: 'activity', name: product.name, detail: `${ln.tier}, ${day}${slot.start ? `, ${ACT.clock(slot.start)}` : ', all day'}`, quantity: 1, unit: cents, product, attraction, slot, day });
     } else if (ln.type === 'program' && (ln.term_id || ln.bundle_id)) {
       const reg = await PS.priceRegistration(conn, tenantId, ln, today, { pass: async () => (ln.has_pass ? 'claimed' : 'none') });
       out.push({ i, line: ln, type: 'program', name: reg.name, detail: reg.detail, quantity: 1, unit: reg.list_cents, program: reg.program, reg: { ...reg, child: ln.participant || 'customer' } });
@@ -222,7 +239,7 @@ checkout.get('/menu', requireRole(...sellers), async (req, res) => {
   const today = todayIn(tenant.timezone);
   const [products, tiers, sessions, programs, stock] = await Promise.all([
     // Best sellers of the last 30 days first, so the busiest tiles sit where the cashier's hand already is.
-    rows(pool, `SELECT p.id, p.kind, p.name, p.base_price_cents, p.valid_days, p.uses,
+    rows(pool, `SELECT p.id, p.kind, p.name, p.base_price_cents, p.valid_days, p.uses, p.attraction_id, p.timed, p.day_capacity,
                   (SELECT COALESCE(SUM(i.quantity), 0) FROM order_items i WHERE i.tenant_id = p.tenant_id AND i.product_id = p.id AND i.order_id IN
                     (SELECT o.id FROM orders o WHERE o.tenant_id = p.tenant_id AND o.created_at > DATE_SUB(NOW(), INTERVAL 30 DAY))) AS sold
                 FROM products p WHERE p.tenant_id = ? AND p.active = 1 ORDER BY sold DESC, p.name`, [tenantId]),
@@ -237,7 +254,11 @@ checkout.get('/menu', requireRole(...sellers), async (req, res) => {
     rows(pool, "SELECT category, COUNT(*) AS available FROM rental_items WHERE tenant_id = ? AND status = 'available' GROUP BY category", [tenantId]),
   ]);
   const withTiers = (p) => ({ ...p, tiers: Object.fromEntries(tiers.filter((t) => t.product_id === p.id).map((t) => [t.tier, t.price_cents])) });
+  // Activities by attraction: only active activity products of active attractions (Sell shows the tab only when there are some).
+  const acts = products.filter((p) => p.kind === 'activity' && p.attraction_id);
+  const attractions = acts.length ? (await ACT.activeAttractions(pool, tenantId)).filter((a) => acts.some((p) => p.attraction_id === a.id)) : [];
   res.json({
+    activities: attractions.map((a) => ({ attraction: ACT.attractionOut(a), products: acts.filter((p) => p.attraction_id === a.id).map((p) => ({ ...withTiers(p), timed: Boolean(p.timed) })) })),
     today,
     tickets: products.filter((p) => TICKET_KINDS.includes(p.kind) && p.kind !== 'voucher').map(withTiers),
     rentals: products.filter((p) => p.kind === 'rental').map(withTiers),
@@ -252,6 +273,27 @@ checkout.get('/menu', requireRole(...sellers), async (req, res) => {
     comp: { reasons: COMP_REASONS, counter_limit_cents: tenant.comp_counter_limit_cents, can_comp: ['owner', 'manager'].includes(req.auth.role) || tenant.comp_counter_limit_cents > 0 },
     partner_programs: (await rows(pool, 'SELECT id, name, product_id, levels, number_label, id_check, staff_note FROM partner_programs WHERE tenant_id = ? AND active = 1 ORDER BY name', [tenantId])).map((x) => ({ ...x, levels: PPS.levelsOf(x), id_check: Boolean(x.id_check) })),
   });
+});
+
+/** One day of activities at the counter: each product's time slots (or the whole day) with places left, refreshed as it sells. */
+checkout.get('/activity-day', requireRole(...sellers), async (req, res) => {
+  const { tenantId } = req.auth;
+  const tz = (await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone;
+  const today = todayIn(tz);
+  const day = String(req.query.date || today);
+  if (!dateStr.safeParse(day).success) throw bad('date must be YYYY-MM-DD');
+  if (day < today) throw bad('Pick today or a later day');
+  const aid = Number(req.query.attraction_id) || null;
+  const prods = await rows(pool, `SELECT id, kind, name, attraction_id, timed, day_capacity, sale_days FROM products WHERE tenant_id = ? AND active = 1 AND kind = 'activity'${aid ? ' AND attraction_id = ?' : ''} ORDER BY name`, aid ? [tenantId, aid] : [tenantId]);
+  const used = await ACT.taken(pool, tenantId, prods.map((p) => p.id), day);
+  const now = day === today ? nowIn(tz).slice(11, 16) : null;
+  const out = [];
+  for (const p of prods) {
+    const d = await ACT.dayOf(pool, tenantId, p, day, { now, used });
+    const blackout = await one(pool, 'SELECT 1 AS x FROM price_calendar WHERE tenant_id = ? AND product_id = ? AND on_date = ? AND blackout = 1 AND tier IS NULL', [tenantId, p.id, day]);
+    out.push({ id: p.id, name: p.name, attraction_id: p.attraction_id, timed: d.timed, slots: d.slots, closed: Boolean(blackout) || !require('../lib/saledays').allowedOn(p.sale_days, day) });
+  }
+  res.json({ date: day, today, products: out });
 });
 
 // ---------------------------------------------------------------- quote
@@ -270,6 +312,9 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
   const body = req.body;
 
   const result = await tx(async (conn) => {
+    // Activity places are claimed under their products' row locks, taken first (before anything is read), so a sale that
+    // finished while this one waited is counted.
+    await ACT.lockProducts(conn, tenantId, body.lines.filter((l) => l.type === 'activity').map((l) => l.product_id));
     const tenant = await one(conn, 'SELECT timezone, comp_counter_limit_cents, waiver_text, quick_sale FROM tenants WHERE id = ?', [tenantId]);
     const today = todayIn(tenant.timezone);
     const lines = body.lines;
@@ -329,7 +374,7 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
       else if (l.type !== 'gift_card') use(keyOf(l), l.type);
     }
     const isLesson = (types) => types.has('lesson') || types.has('lesson_package');
-    const scopeFor = (types) => (isLesson(types) ? 'lesson' : types.has('ticket') || types.has('buyer') ? 'ticket' : 'none');
+    const scopeFor = (types) => (isLesson(types) ? 'lesson' : types.has('ticket') || types.has('activity') || types.has('buyer') ? 'ticket' : 'none');
     const resolve = async (key, spec) => {
       const types = usedBy.get(key);
       const r = await resolvePerson(conn, tenantId, { personId: spec.person_id, details: spec.details, scope: scopeFor(types), source: body.channel, sale });
@@ -409,7 +454,7 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
     );
     const orderId = o.insertId;
     for (const tx_ of t.taxes) await conn.query('INSERT INTO order_taxes (tenant_id, order_id, name, rate_bps, amount_cents) VALUES (?, ?, ?, ?, ?)', [tenantId, orderId, tx_.name, tx_.rate_bps, tx_.amount_cents]);
-    const done = { tickets: [], lessons: [], packages: [], rentals: [], programs: [], gift_cards: [], program_adjustments: [] };
+    const done = { tickets: [], lessons: [], packages: [], rentals: [], programs: [], activities: [], gift_cards: [], program_adjustments: [] };
 
     for (const p of priced) {
       const ln = p.line;
@@ -473,6 +518,25 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
         await item({ product_id: p.product.id, person_id: renter, contract_id: c.insertId, valid_on: p.validOn });
         await audit(conn, req, 'checkout', 'rental_contracts', c.insertId, { items: ids, order_id: orderId });
         done.rentals.push({ contract_id: c.insertId, person_id: renter, due_at: dueAt, items: locked.map((l) => l.sku) });
+      } else if (p.type === 'activity') {
+        // One guest, one place, one ticket good once at this attraction in this slot.
+        const key = ln.participant || 'customer';
+        const rider = personOf(ln);
+        const me = personRows.get(rider);
+        const a = p.attraction;
+        const who = `${me.first_name} ${me.last_name}`;
+        if (ACT.hasLimits(a) && !ln.limits_ok) throw bad(`Confirm that ${who} meets the limits for ${a.name}. ${ACT.limitsText(a)}`, { person_id: rider, attraction_id: a.id });
+        const age = a.min_age ? ACT.ageOn(me.date_of_birth, p.day) : null;
+        if (age !== null && age < a.min_age) throw conflict(`${who} is ${age}. ${a.name} riders must be ${a.min_age} or older.`);
+        if (a.waiver_required) await ensureWaiver(key, rider, seasonFor(p.day), 'The rider');
+        await ACT.ensurePlaces(conn, tenantId, p.product, p.day, p.slot, 1);
+        const itemId = await item({ product_id: p.product.id, person_id: rider, valid_on: p.day });
+        const code = newCode();
+        const [tk] = await conn.query('INSERT INTO tickets (tenant_id, order_item_id, person_id, product_id, code, valid_from, valid_to, uses_remaining) VALUES (?, ?, ?, ?, ?, ?, ?, 1)', [tenantId, itemId, rider, p.product.id, code, p.day, p.day]);
+        await ACT.book(conn, tenantId, { product: p.product, attractionId: a.id, day: p.day, slot: p.slot, personId: rider, orderItemId: itemId, ticketId: tk.insertId, channel: body.channel, limitsBy: ACT.hasLimits(a) ? req.auth.userId : null });
+        const when = p.slot.start ? `${ACT.clock(p.slot.start)} to ${ACT.clock(p.slot.end)}` : 'All day';
+        done.tickets.push({ code, product: `${p.product.name}, ${when}`, tier: ln.tier, valid_from: p.day, valid_to: p.day, person_id: rider, holder: names.get(rider) });
+        done.activities.push({ code, attraction: a.name, product: p.product.name, date: p.day, start_time: p.slot.start, end_time: p.slot.end, person_id: rider, holder: names.get(rider) });
       } else if (p.type === 'program' && p.reg) {
         const participant = personOf(ln);
         const guardian = buyer.id && buyer.id !== participant ? buyer.id : null;
@@ -545,7 +609,7 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
         [tenantId, orderId, p.tender, p.amount_cents, p.tendered_cents ?? null, p.reference ?? null, cardId, p.card_brand ?? null, p.card_last4 ?? null, p.auth_code ?? null, p.processor ?? null, p.comp_reason ?? null]);
     }
 
-    await audit(conn, req, 'create', 'orders', orderId, { total_cents: t.total, tickets: done.tickets.length, lessons: done.lessons.length, rentals: done.rentals.length, programs: done.programs.length, gift_cards: done.gift_cards.length, tenders: body.payments.map((p) => p.tender), tax_cents: t.tax });
+    await audit(conn, req, 'create', 'orders', orderId, { total_cents: t.total, tickets: done.tickets.length, lessons: done.lessons.length, rentals: done.rentals.length, programs: done.programs.length, activities: done.activities.length, gift_cards: done.gift_cards.length, tenders: body.payments.map((p) => p.tender), tax_cents: t.tax });
     return {
       id: orderId, person_id: buyer.id, customer: buyer.id ? { id: buyer.id, created: buyer.created, matched: buyer.matched } : null,
       subtotal_cents: t.subtotal, discount_cents: t.discount, tax_cents: t.tax, taxes: t.taxes, total_cents: t.total, change_due_cents: change,

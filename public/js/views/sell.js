@@ -1,10 +1,11 @@
-// Sell: one menu for everything the mountain sells (tickets, lessons, rentals, program places, gift cards), one basket,
+// Sell: one menu for everything the mountain sells (tickets, lessons, rentals, program places, activities, gift cards), one basket,
 // and the customer's details added at the end. The gate scanner is its own page (gate.js).
 import { loadTypes, saleOptions, typeName } from '../guesttypes.js';
 import { get, post } from '../api.js';
 import { h, clear, ctx, isManager, money, toCents, table, state, input, select, field, button, toast, dialog, formDialog, todayStr, fmtDate, fmtDateTime, label, empty, errorBox, tabs, fail, fmtTime, addDays } from '../ui.js';
 import { loadCustomerForm } from './customer-form.js';
 import { checkoutDialog, lineApi } from './sell-checkout.js';
+import { drawActivities } from './sell-activities.js';
 import { drawerDialog } from './till.js';
 import { printButtons } from '../print.js';
 import { shareButton } from '../share.js';
@@ -40,7 +41,7 @@ export async function showPartnerTab() {
 const queryTab = () => { try { return new URLSearchParams(location.hash.split('?')[1] || '').get('tab'); } catch (_) { return null; } };
 
 // ---------------------------------------------------------------- selling
-const ICON = { ticket: 'Ticket', lesson: 'Lesson', lesson_package: 'Lesson package', rental: 'Rental', program: 'Program', gift_card: 'Gift card' };
+const ICON = { ticket: 'Ticket', lesson: 'Lesson', lesson_package: 'Lesson package', rental: 'Rental', program: 'Program', activity: 'Activity', gift_card: 'Gift card' };
 
 async function sellPanel(root) {
   const [menu, def, types, partnerTab] = await Promise.all([get('/checkout/menu'), loadCustomerForm(true), loadTypes(), showPartnerTab()]);
@@ -146,6 +147,8 @@ async function sellPanel(root) {
         { head: '', actions: true, cell: (p) => (p.spots_left === 0 ? null : button('Add', () => add({ type: 'program', program_id: p.id, name: p.name, quantity: 1, detail: p.season }), { small: true })) },
       ], simple));
     }],
+    // Activities (zipline, coaster, skating...): only when the mountain has activity products on sale.
+    ...((menu.activities || []).length ? [['activities', 'Activities', (b) => drawActivities(b, { menu, tiers: TIERS, first: FIRST, add: (line) => { basket.push(line); } , done: () => refresh() })]] : []),
     ['gift', 'Gift cards', (b) => {
       const amt = input({ name: 'gift-amount', inputmode: 'decimal', placeholder: '0.00', 'aria-label': 'Gift card amount' });
       const to = input({ name: 'gift-to', maxlength: 150, 'aria-label': 'Gift card for' });

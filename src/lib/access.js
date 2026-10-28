@@ -7,8 +7,9 @@
 const crypto = require('crypto');
 const config = require('../config');
 const { one, rows } = require('../db');
-const { todayIn, seasonFor } = require('./util');
+const { todayIn, nowIn, seasonFor } = require('./util');
 const { ON_FILE } = require('./waivers');
+const ACT = require('./activities');
 
 /**
  * The ways one chip serial can arrive. Readers differ: phones give "04:A2:3B:..", desk readers type hex or a decimal
@@ -50,8 +51,10 @@ const looksLikeTicketCode = (s) => /^[0-9A-F]{20}$/.test(s);
 
 /**
  * Decide and log one scan, inside the caller's transaction.
- * input: { code?, uid?, location?, override?, deviceId?, clientRef?, via }
+ * input: { code?, uid?, location?, override?, deviceId?, clientRef?, via, attractionId? }
  * A code that is not a ticket is tried as a card serial, so a desk RFID reader that types into the scan box just works.
+ * attractionId: the attraction this gate stands at (null for a lift gate). An activity ticket is good only at its own
+ * attraction in its slot; another ticket only at an attraction its product includes (lib/activities.js gateRule).
  */
 async function decide(conn, tenantId, input) {
   // The ticket (or card) is locked before anything else is read. InnoDB takes a transaction's snapshot at its first
@@ -78,12 +81,14 @@ async function decide(conn, tenantId, input) {
 
   let result = 'ok';
   let previous = null;
+  let rule = null;
   if (card && (card.status === 'lost' || card.status === 'retired')) result = 'card_blocked';
   else if (!t) result = 'unknown';
   else if (t.status === 'void') result = 'void';
   else if (t.status === 'used_up' || (t.uses_remaining !== null && t.uses_remaining < 1)) result = 'no_uses';
   else if (today < t.valid_from) result = 'not_yet_valid';
   else if (today > t.valid_to) result = 'expired';
+  else if ((rule = await ACT.gateRule(conn, tenantId, t, input.attractionId || null, nowIn(tenant.timezone)))) result = rule.result;
   else if (tenant.scan_passback_seconds > 0 && !input.override) {
     previous = await one(conn, "SELECT scanned_at, location FROM scans WHERE tenant_id = ? AND ticket_id = ? AND result = 'ok' AND scanned_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? SECOND) ORDER BY id DESC LIMIT 1", [tenantId, t.id, tenant.scan_passback_seconds]);
     if (previous) result = 'duplicate';
@@ -105,10 +110,13 @@ async function decide(conn, tenantId, input) {
     holder = { name: p && p.first_name ? `${p.first_name} ${p.last_name}` : null, first_name: p ? p.first_name || null : null, photo: p ? p.photo || null : null, product: p ? p.product : null, kind: p ? p.kind : null };
     // Only when the mountain uses waivers and the ticket has a named holder: true or false, otherwise null (nothing to show).
     holder.waiver = tenant.waiver_text && p && p.id ? Boolean(await one(conn, ON_FILE, [tenantId, p.id, seasonFor(today)])) : null;
+    if (!rule && p && p.kind === 'activity' && result === 'no_uses') rule = { reason: 'Already used. An activity ticket lets one guest in once.' };
+    if (!rule && p && p.kind === 'activity' && (result === 'not_yet_valid' || result === 'expired')) rule = { reason: `This ticket is for ${String(t.valid_from).slice(0, 10)} only.` };
   }
   return {
     result,
     valid: result === 'ok',
+    reason: rule ? rule.reason : null, // why it was refused, in words, when the plain result needs explaining
     holder,
     scanned_before: previous ? { at: previous.scanned_at, location: previous.location } : null,
     ticket: t ? { code: t.code, valid_from: t.valid_from, valid_to: t.valid_to, uses_remaining: t.uses_remaining } : null,
@@ -127,15 +135,21 @@ async function decide(conn, tenantId, input) {
 const LIST_HASH_CHARS = 32;
 const listKey = (tenantId, day) => crypto.createHmac('sha256', `${config.kioskSecret}:gate-list`).update(`${tenantId}.${day}`).digest('hex');
 const codeHash = (key, code) => crypto.createHmac('sha256', key).update(String(code).toUpperCase()).digest('hex').slice(0, LIST_HASH_CHARS);
-async function allowlist(conn, tenantId) {
+async function allowlist(conn, tenantId, { attractionId = null } = {}) {
   const tenant = await one(conn, 'SELECT timezone, scan_passback_seconds FROM tenants WHERE id = ?', [tenantId]);
   const today = todayIn(tenant.timezone);
   const key = listKey(tenantId, today);
+  // A lift gate gets no activity tickets. A gate at an attraction gets that attraction's activity tickets and the lift
+  // tickets that include it. (Offline, a gate cannot check the time slot: that is checked when it is online.)
+  const where = attractionId
+    ? "AND ((p.kind = 'activity' AND p.attraction_id = ?) OR (p.kind <> 'activity' AND EXISTS (SELECT 1 FROM product_attractions pa WHERE pa.tenant_id = t.tenant_id AND pa.product_id = t.product_id AND pa.attraction_id = ?)))"
+    : "AND p.kind <> 'activity'";
   const items = await rows(conn,
     `SELECT t.code, t.uses_remaining, c.uid
-       FROM tickets t LEFT JOIN rfid_cards c ON c.tenant_id = t.tenant_id AND c.ticket_id = t.id AND c.status = 'assigned'
-      WHERE t.tenant_id = ? AND t.status = 'active' AND t.valid_from <= ? AND t.valid_to >= ? AND (t.uses_remaining IS NULL OR t.uses_remaining > 0)
-      ORDER BY t.id`, [tenantId, today, today]);
+       FROM tickets t JOIN products p ON p.tenant_id = t.tenant_id AND p.id = t.product_id
+       LEFT JOIN rfid_cards c ON c.tenant_id = t.tenant_id AND c.ticket_id = t.id AND c.status = 'assigned'
+      WHERE t.tenant_id = ? AND t.status = 'active' AND t.valid_from <= ? AND t.valid_to >= ? AND (t.uses_remaining IS NULL OR t.uses_remaining > 0) ${where}
+      ORDER BY t.id`, [tenantId, today, today, ...(attractionId ? [attractionId, attractionId] : [])]);
   const blocked = await rows(conn, "SELECT uid FROM rfid_cards WHERE tenant_id = ? AND status IN ('lost','retired') ORDER BY uid", [tenantId]);
   return {
     date: today,

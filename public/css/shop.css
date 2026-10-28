@@ -95,3 +95,19 @@
 #shop .layout { max-width: 1180px; }
 @media (min-width: 960px) { #shop .layout { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 999px) { .shop-aside { display: contents; } }
+
+/* ---- Activities ---- */
+.act-card { padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r-sm); background: #fff; }
+.act-card h3 { margin: 0; }
+.act-limits { margin: 0; padding: 8px 12px; border-left: 4px solid #8a5300; background: #fbefd6; color: #6b4300; border-radius: var(--r-sm); }
+.act-prod { display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.act-prod h4 { margin: 0; }
+.act-prod.off { color: var(--muted, #52656d); }
+.slot-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
+#shop .btn.slot { display: grid; gap: 2px; justify-items: start; align-content: center; min-height: 56px; padding: 8px 12px; text-align: left; white-space: nowrap; border-radius: var(--r-sm); }
+#shop .btn.slot small { font-weight: 400; }
+#shop .btn.slot.full, #shop .btn.slot:disabled { opacity: 0.6; cursor: not-allowed; border-style: dashed; }
+.act-row .act-limits { font-size: 0.875rem; }
+.act-when { font-weight: 700; }
+.act-waiver { border: 2px solid #8a5300; }
+@media (max-width: 520px) { .slot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

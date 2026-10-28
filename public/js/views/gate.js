@@ -18,7 +18,14 @@ const SCAN_TEXT = {
   unknown: ['Not recognized', 'bad'],
   duplicate: ['Scanned a moment ago', 'warn'],
   card_blocked: ['Card blocked', 'bad'],
+  wrong_place: ['Wrong attraction', 'bad'],
+  too_early: ['Too early for this time', 'warn'],
+  too_late: ['This time has ended', 'bad'],
+  not_included: ['Not included', 'bad'],
 };
+// Where this screen scans (kept on this device): the lifts, or one attraction, where activity tickets are checked.
+const PLACE_KEY = 'verdynt.gate.place';
+const placeOf = () => { try { return Number(localStorage.getItem(PLACE_KEY)) || null; } catch (_) { return null; } };
 const CARD_STATUS = { assigned: ['Has a ticket', 'good'], free: ['Empty', 'neutral'], lost: ['Lost, blocked', 'bad'], retired: ['Retired', 'neutral'] };
 
 export async function render(root, params = []) {
@@ -35,12 +42,17 @@ export const settingsPages = {
 };
 
 // ---------------------------------------------------------------- scan
-function drawScan(box) {
-  const g = gate();
+async function drawScan(box) {
+  let places = [];
+  try { places = (await get('/tickets/scan-places')).attractions || []; } catch (_) { places = []; }
+  const g = gate(places);
   box.append(g.el, passLookup(g.scan));
 }
 
-function gate() {
+function gate(places = []) {
+  let place = places.some((a) => a.id === placeOf()) ? placeOf() : null;
+  const placeSel = places.length ? select([['', 'Lifts'], ...places.map((a) => [String(a.id), a.name])], place ? String(place) : '', { name: 'scan-place', 'aria-label': 'Scanning at' }) : null;
+  if (placeSel) placeSel.addEventListener('change', () => { place = Number(placeSel.value) || null; try { if (place) localStorage.setItem(PLACE_KEY, String(place)); else localStorage.removeItem(PLACE_KEY); } catch (_) { /* kept for this visit only */ } code.focus(); });
   const code = input({ class: 'scan-input', name: 'code', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', placeholder: 'Scan, tap or type', 'aria-label': 'Ticket code or card' });
   const panel = h('div', { class: 'gate', role: 'status', 'aria-live': 'assertive' }, h('strong', null, 'Ready'), h('span', null, 'Scan a ticket or tap a card to check it.'));
   const recent = h('div', { class: 'stack' });
@@ -51,7 +63,8 @@ function gate() {
   async function scan(value, { override = false, card = false } = {}) {
     code.disabled = true;
     try {
-      const out = await post('/tickets/scan', { ...(card ? { uid: value } : { code: value }), location: 'Gate', ...(override ? { override: true } : {}) });
+      const at = place ? places.find((a) => a.id === place) : null;
+      const out = await post('/tickets/scan', { ...(card ? { uid: value } : { code: value }), location: at ? at.name : 'Gate', ...(at ? { attraction_id: at.id } : {}), ...(override ? { override: true } : {}) });
       showResult(out, value, card);
     } catch (err) {
       clear(panel).append(h('strong', null, 'Could not check'), h('span', null, err.message || 'Try again'));
@@ -76,6 +89,7 @@ function gate() {
     const t = out.ticket;
     if (out.result === 'duplicate' && out.scanned_before) panel.append(h('span', null, `This ticket went through at ${fmtDateTime(out.scanned_before.at)}${out.scanned_before.location ? ` (${out.scanned_before.location})` : ''}. Check who is holding it.`));
     else if (out.result === 'card_blocked') panel.append(h('span', null, 'This card was reported lost. Keep it and send the guest to the window.'));
+    else if (out.reason) panel.append(h('span', { 'data-reason': '' }, out.reason));
     else if (t) {
       if (out.result === 'not_yet_valid') panel.append(h('span', null, `Valid from ${fmtDate(t.valid_from)}`));
       else if (out.result === 'expired') panel.append(h('span', null, `Expired ${fmtDate(t.valid_to)}`));
@@ -118,7 +132,7 @@ function gate() {
     helpers.append(nfcBtn);
   }
   if (cameraSupported()) helpers.append(button('Scan with the camera', async () => { const v = await scanWithCamera(); if (v) scan(v); }));
-  const wrap = h('section', { class: 'gate-page stack' }, form, helpers.childNodes.length ? helpers : null, panel, recent);
+  const wrap = h('section', { class: 'gate-page stack' }, placeSel ? h('div', { class: 'inline-form gate-place' }, field('Scanning at', placeSel, 'Activity tickets are checked for this attraction and their time.')) : null, form, helpers.childNodes.length ? helpers : null, panel, recent);
   // Leaving the Scan tab or the page stops the phone reading cards, so a tap meant for something else never scans here.
   const Observer = globalThis.MutationObserver;
   if (Observer) {
@@ -245,15 +259,26 @@ function pairDialog(d) {
 }
 
 async function drawDevices(box) {
-  const [{ data }, settings] = await Promise.all([get('/access/devices'), get('/access/settings')]);
+  const [{ data, attractions = [] }, settings] = await Promise.all([get('/access/devices'), get('/access/settings')]);
   const again = async () => drawDevices(clear(box));
+  // A device can stand at one attraction: it then takes that attraction's activity tickets (in their time) and lift
+  // tickets that include it, and refuses the rest.
+  const atField = (d) => (attractions.length ? field('Stands at', select([['', 'A lift (lift tickets and passes)'], ...attractions.map((a) => [String(a.id), a.name])], d && d.attraction_id ? String(d.attraction_id) : '', { name: 'attraction_id' }), 'At an attraction it lets in that attraction\'s activity tickets, in their time, and lift tickets that include it.') : null);
+  const atVal = (fd) => (attractions.length ? { attraction_id: Number(val(fd, 'attraction_id')) || null } : {});
   const add = () => formDialog('Add a device', h('div', { class: 'form' },
     field('Name', input({ name: 'name', required: true, maxlength: 100, placeholder: 'Summit Quad gate 1' })),
     field('Where (shown on each scan)', input({ name: 'location', maxlength: 100, placeholder: 'Summit Quad' })),
-    field('Kind', select(KINDS, 'gate', { name: 'kind' }))), async (fd) => {
-    const r = await post('/access/devices', { name: val(fd, 'name'), location: val(fd, 'location'), kind: val(fd, 'kind') });
+    field('Kind', select(KINDS, 'gate', { name: 'kind' })), atField(null)), async (fd) => {
+    const r = await post('/access/devices', { name: val(fd, 'name'), location: val(fd, 'location'), kind: val(fd, 'kind'), ...atVal(fd) });
     await again(); pairDialog(r);
   }, { submitText: 'Add and get a code' });
+  const edit = (d) => formDialog(`Change ${d.name}`, h('div', { class: 'form' },
+    field('Name', input({ name: 'name', required: true, maxlength: 100, value: d.name })),
+    field('Where (shown on each scan)', input({ name: 'location', maxlength: 100, value: d.location || '' })),
+    field('Kind', select(KINDS, d.kind, { name: 'kind' })), atField(d)), async (fd) => {
+    await patch(`/access/devices/${d.id}`, { name: val(fd, 'name'), location: val(fd, 'location'), kind: val(fd, 'kind'), ...atVal(fd) });
+    toast('Saved'); await again();
+  });
   const setForm = () => formDialog('Gate settings', h('div', { class: 'form' },
     field('Gate stays open (seconds)', input({ name: 'open', type: 'number', min: 0.5, max: 15, step: 0.5, value: settings.gate_open_ms / 1000 })),
     field('Same ticket again is held for (seconds)', input({ name: 'passback', type: 'number', min: 0, max: 3600, step: 1, value: settings.scan_passback_seconds }), 'Catches a ticket handed back over the fence. 0 turns it off.')), async (fd) => {
@@ -267,12 +292,13 @@ async function drawDevices(box) {
     h('div', { class: 'spread' }, h('p', { class: 'muted' }, `Gates, turnstiles and handheld scanners that check tickets and cards on their own. A gate opens for ${settings.gate_open_ms / 1000} s; the same ticket is held for ${settings.scan_passback_seconds} s.`),
       h('span', { class: 'row tight' }, button('Settings', setForm, { small: true }), button('Add a device', add, { kind: 'primary' }))),
     data.length ? table([
-      { head: 'Device', cell: (d) => h('span', { class: 'stack tight' }, h('strong', null, d.name), h('span', { class: 'muted small' }, [label(d.kind), d.location].filter(Boolean).join(', '))) },
+      { head: 'Device', cell: (d) => h('span', { class: 'stack tight' }, h('strong', null, d.name), h('span', { class: 'muted small' }, [label(d.kind), d.location, d.attraction ? `at ${d.attraction}` : null].filter(Boolean).join(', '))) },
       { head: 'Status', cell: status },
       { head: 'Last seen', cell: (d) => (d.last_seen_at ? fmtDateTime(d.last_seen_at) : 'Never') },
       { head: 'Offline list', cell: (d) => (d.last_list_at ? fmtDateTime(d.last_list_at) : 'Never') },
       { head: 'Scans, 24 h', num: true, cell: (d) => String(d.scans_24h) },
       { head: '', actions: true, cell: (d) => h('span', { class: 'row tight' },
+        button('Change', () => edit(d), { small: true, label: `Change ${d.name}` }),
         button(d.paired ? 'New code' : 'Pair', async () => pairDialog({ ...d, ...(await post(`/access/devices/${d.id}/pair-code`, {})) }), { small: true, label: `Get a pairing code for ${d.name}` }),
         button(d.active ? 'Switch off' : 'Switch on', async () => { await patch(`/access/devices/${d.id}`, { active: !d.active }); await again(); }, { small: true, label: `${d.active ? 'Switch off' : 'Switch on'} ${d.name}` }),
         button('Remove', () => confirmDialog(`Remove ${d.name}?`, 'It stops working at once. Its scans stay in the records.', 'Remove', async () => { await del(`/access/devices/${d.id}`); await again(); }, { danger: true }), { small: true, kind: 'quiet', label: `Remove ${d.name}` })) },

@@ -46,13 +46,16 @@ export function receiptSheet(data) {
     m.footer ? h('footer', { class: 'rc-foot' }, m.footer) : null);
 }
 
+/** '14:00' -> '2:00 PM' (an activity's time slot). */
+const clock12 = (t) => { const [hh, mm] = String(t || '').split(':').map(Number); return Number.isFinite(hh) ? `${hh % 12 || 12}:${String(mm || 0).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}` : ''; };
 /** One slip per ticket: who, what, when, and the code as a barcode and a QR code. */
 export function ticketSlips(data, { wristband = false } = {}) {
   const m = data.mountain;
   return data.tickets.filter((t) => t.status !== 'void').map((t) => h('article', { class: wristband ? 'sheet slip wristband' : 'sheet slip', 'data-sheet': 'ticket', 'data-code': t.code },
     h('header', null, h('strong', null, m.name), h('span', null, t.product)),
     h('div', { class: 'slip-who' }, nameOf(t) || 'Guest', h('small', null, [typeName(t.tier), t.kind === 'season_pass' ? 'Season pass' : null].filter(Boolean).join(', '))),
-    h('div', { class: 'slip-when' }, range(t.valid_from, t.valid_to), t.uses_remaining !== null && t.uses_remaining !== undefined ? ` · ${t.uses_remaining} ride${t.uses_remaining === 1 ? '' : 's'}` : ''),
+    t.kind === 'activity' ? h('div', { class: 'slip-when' }, range(t.valid_from, t.valid_to), t.start_time ? ` · ${clock12(t.start_time)} to ${clock12(t.end_time)}` : ' · All day', t.attraction ? ` · ${t.attraction}` : '')
+      : h('div', { class: 'slip-when' }, range(t.valid_from, t.valid_to), t.uses_remaining !== null && t.uses_remaining !== undefined ? ` · ${t.uses_remaining} ride${t.uses_remaining === 1 ? '' : 's'}` : ''),
     h('div', { class: 'slip-codes' }, code128(t.code, { height: wristband ? 36 : 54, module: wristband ? 1 : 2 }), wristband ? null : qr(t.code, { size: 96 })),
     h('div', { class: 'slip-code' }, t.code)));
 }
@@ -68,7 +71,7 @@ export function receiptText(data) {
   for (const p of data.payments) out.push(`Paid by ${label(p.tender)}${cardText(p) ? ` (${cardText(p)})` : ''}: ${money(p.amount_cents)}`);
   if (data.tickets.length) {
     out.push('', 'Your tickets:');
-    for (const t of data.tickets) out.push(`${t.product} for ${nameOf(t) || 'guest'}, ${range(t.valid_from, t.valid_to)}: ${t.code}`);
+    for (const t of data.tickets) out.push(`${t.product} for ${nameOf(t) || 'guest'}, ${range(t.valid_from, t.valid_to)}${t.start_time ? `, ${clock12(t.start_time)}` : ''}: ${t.code}`);
   }
   if (data.lines.some((l) => l.line_kind === 'rental')) out.push('', `Rental pickup code: ORD-${o.id}`);
   for (const g of data.gift_cards) out.push('', `Gift card ${g.code} (${money(g.initial_cents)})`);

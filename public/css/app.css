@@ -2998,4 +2998,36 @@ tr.attr-blocked td { background: var(--closed-tint); }
   .cl-row-actions { width: 100%; justify-content: flex-end; }
   .cl-edit-item { flex-wrap: wrap; }
   .cl-edit-item input { flex-basis: 100%; }
+/* ---- Activities ---- */
+/* Sell, Activities tab: an attraction's times as big buttons with places left, and guests by type. */
+.act-about p { margin: 4px 0; }
+.act-limits { padding: 8px 12px; border-left: 4px solid var(--hold); background: var(--hold-tint); color: var(--hold-ink); border-radius: var(--radius); }
+.act-product { display: grid; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.act-product h3 { margin: 0; font-size: 1rem; }
+.slot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: 8px; }
+.slot-btn { display: grid; gap: 2px; justify-items: start; min-height: 56px; padding: 8px 12px; font: inherit; text-align: left; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius); cursor: pointer; }
+.slot-btn small { color: var(--quiet); }
+.slot-btn:hover:not(:disabled), .slot-btn:focus-visible { border-color: var(--trail-blue); }
+.slot-btn:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.slot-btn.on { background: var(--sel-bg); color: var(--sel-ink); border-color: var(--sel-bg); }
+.slot-btn.on small { color: var(--sel-ink); }
+.slot-btn.full, .slot-btn:disabled { cursor: not-allowed; color: var(--quiet); background: var(--snowpack); border-style: dashed; }
+.act-guests { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.act-guest { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 48px; padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.act-guest .qty .btn { min-width: 44px; min-height: 44px; }
+.act-add { align-items: center; }
+/* Checkout: the rider's limits box beside "who is it for". */
+.who-limits .limits-ok { display: flex; gap: 8px; align-items: flex-start; min-height: 44px; padding: 6px 8px; border: 1px solid var(--hold); border-radius: var(--radius); background: var(--hold-tint); color: var(--hold-ink); }
+.who-limits .limits-ok input { width: 22px; height: 22px; flex: none; accent-color: var(--trail-blue); }
+.who-limits .limits-ok small { display: block; color: var(--hold-ink); }
+/* Products and prices, and Settings: the activity setup and the time-slot generator. */
+.act-setup, .act-includes { display: grid; gap: 8px; }
+.act-for { font-weight: 600; }
+.slot-fill { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.slot-fill input { width: auto; max-width: 8rem; }
+.gate-place { margin-bottom: 4px; }
+@media (max-width: 720px) {
+  .slot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .slot-btn { min-height: 60px; }
+  .act-add .btn { width: 100%; min-height: 48px; }
 }

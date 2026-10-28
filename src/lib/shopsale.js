@@ -18,6 +18,8 @@ const { audit } = require('./audit');
 const mailer = require('./mailer');
 const cardrefund = require('./cardrefund');
 const { logFailure } = require('./jobs');
+const ACT = require('./activities');
+const { nowIn } = require('./util');
 
 const KINDS = ['day_ticket', 'multi_day', 'season_pass'];
 const MAX_ITEMS = 20;
@@ -91,9 +93,9 @@ async function limited(conn, tenant, products, from) {
 
 /** Price one basket. items: [{ product_id, valid_on, holder: { first_name, last_name, date_of_birth } }]. Prices always come from here. */
 async function quote(conn, tenant, items, extras = {}) {
-  const addonsIn = extras.addons || []; const giftsIn = extras.gifts || [];
-  if (items.length > MAX_ITEMS) throw bad(`A basket holds up to ${MAX_ITEMS} tickets`);
-  if (!items.length && !addonsIn.length && !giftsIn.length) throw bad('Add something to your order');
+  const addonsIn = extras.addons || []; const giftsIn = extras.gifts || []; const actsIn = extras.activities || [];
+  if (items.length + actsIn.length > MAX_ITEMS) throw bad(`A basket holds up to ${MAX_ITEMS} tickets`);
+  if (!items.length && !addonsIn.length && !giftsIn.length && !actsIn.length) throw bad('Add something to your order');
   const today = todayIn(tenant.timezone);
   const last = addDays(today, MAX_DAYS_AHEAD);
   const priced = []; const detail = [];
@@ -148,6 +150,36 @@ async function quote(conn, tenant, items, extras = {}) {
     priced.push({ type: 'gift_card', unit: g.amount_cents, cents: g.amount_cents });
     gifts.push({ amount_cents: g.amount_cents, recipient_name: g.recipient_name || null, message: g.message || null });
   }
+  // Activities: a place in a time slot (or for the whole day) for each guest. Places are counted the same way as the
+  // day limits above (sold plus baskets on the card page); placing the order counts them again under the products' locks.
+  const activities = [];
+  if (actsIn.length) {
+    const lock = conn !== pool;
+    if (lock) await ACT.lockProducts(conn, tenant.id, actsIn.map((a) => a.product_id));
+    const nowHm = nowIn(tenant.timezone).slice(11, 16);
+    const counted = new Map();
+    for (const a of actsIn) {
+      const product = await one(conn, 'SELECT id, kind, name, active, online, sale_days, attraction_id, timed, day_capacity FROM products WHERE tenant_id = ? AND id = ?', [tenant.id, a.product_id]);
+      if (!product || !product.active || !product.online || product.kind !== 'activity') throw conflict('One of those activities is not sold online');
+      const day = a.valid_on;
+      if (!day || day < today) throw bad('Pick today or a later day for each activity');
+      if (day > last) throw bad('That day is too far ahead to buy online');
+      const h = a.holder;
+      if (h.date_of_birth && h.date_of_birth > today) throw bad('Date of birth cannot be in the future');
+      if (!h.date_of_birth && !(await onlineTypes(conn, tenant.id)).includes(h.age_group)) throw bad('Pick an age group for each guest');
+      delete h.photo;
+      const tier = h.date_of_birth ? await tierFor(conn, tenant.id, h.date_of_birth, day) : h.age_group;
+      const base = await unitPrice(conn, tenant.id, product.id, tier, day);
+      const { attraction, slot } = await ACT.slotFor(conn, tenant.id, product, day, a.start_time, { today, now: nowHm });
+      if (attraction.min_age && h.date_of_birth && ACT.ageOn(h.date_of_birth, day) < attraction.min_age) throw conflict(`${h.first_name} is under ${attraction.min_age}. ${ACT.limitsText(attraction)}`);
+      const key = `${product.id}|${day}|${slot.start || ''}`; const mine = counted.get(key) || 0;
+      await ACT.ensurePlaces(conn, tenant.id, product, day, slot, 1, { lock, extra: mine });
+      counted.set(key, mine + 1);
+      priced.push({ type: 'activity', unit: base.cents, cents: base.cents });
+      activities.push({ product_id: product.id, name: product.name, attraction_id: attraction.id, attraction: attraction.name, valid_on: day, start_time: slot.start, end_time: slot.end, tier, holder: h,
+        waiver_required: Boolean(attraction.waiver_required), limits_text: ACT.limitsText(attraction) });
+    }
+  }
   const subtotal = priced.reduce((n, p) => n + p.cents, 0);
   if (subtotal <= 0) throw bad('Those tickets have no price set. Please call the mountain.');
   // A promo code takes money off everything except gift cards.
@@ -164,7 +196,9 @@ async function quote(conn, tenant, items, extras = {}) {
   const nT = detail.length;
   addons.forEach((a, i) => { a.tax = priced[nT + i].tax; a.discount = priced[nT + i].discount; });
   gifts.forEach((g, i) => { g.tax = 0; g.discount = 0; });
-  return { lines, addons, gifts, promo, discount, subtotal, tax, taxes, total: subtotal - discount + tax };
+  const nA = nT + addons.length + gifts.length;
+  activities.forEach((a, i) => { a.unit = priced[nA + i].unit; a.tax = priced[nA + i].tax; a.discount = priced[nA + i].discount; });
+  return { lines, addons, gifts, activities, promo, discount, subtotal, tax, taxes, total: subtotal - discount + tax };
 }
 
 /** What can be bought on one day: price per age group, tickets left, and why something is not available. */
@@ -249,10 +283,10 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
   if (q.promo) await conn.query('UPDATE promo_codes SET used_count = used_count + 1 WHERE tenant_id = ? AND code = ?', [tenantId, q.promo]);
   for (const t of q.taxes) await conn.query('INSERT INTO order_taxes (tenant_id, order_id, name, rate_bps, amount_cents) VALUES (?, ?, ?, ?, ?)', [tenantId, orderId, t.name, t.rate_bps, t.amount_cents]);
   const waiverNeeded = []; const tickets = []; const programAdjustments = [];
-  for (const ln of q.lines) {
-    const st = ln.holder;
+  /** A ticket holder or rider on file, with the waiver the buyer could sign for them. Returns { who, waiver }. */
+  const holderOnFile = async (st, day, tier, seasonOf) => {
     const sameAsContact = st.first_name.toLowerCase() === String(c.first_name).toLowerCase() && st.last_name.toLowerCase() === String(c.last_name).toLowerCase();
-    const minor = st.date_of_birth ? isMinor(st.date_of_birth, ln.valid_on) : (ln.tier === 'child' || ln.tier === 'youth');
+    const minor = st.date_of_birth ? isMinor(st.date_of_birth, day) : (tier === 'child' || tier === 'youth');
     const details = { first_name: st.first_name, last_name: st.last_name };
     if (st.date_of_birth) details.date_of_birth = st.date_of_birth;
     if (st.photo) details.photo = st.photo;
@@ -262,11 +296,16 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
     if (!who.id) throw bad(`Could not save ${st.first_name} ${st.last_name}`);
     const guardianOk = minor && await mayActAsGuardian(conn, tenantId, contact.id, who.id, who.created);
     if (guardianOk) await addLink(conn, tenantId, contact.id, who.id, 'guardian');
-    let waiver = await one(conn, ON_FILE, [tenantId, who.id, season]);
+    let waiver = await one(conn, ON_FILE, [tenantId, who.id, seasonOf]);
     if (!waiver && acceptedOk && (guardianOk || (sameAsContact && !minor)) && contact.id) {
-      await conn.query("INSERT INTO waivers (tenant_id, person_id, season, kind, signed_by_person_id, signed_by_name, signer_relation, text_sha, method) VALUES (?, ?, ?, 'general', ?, ?, ?, ?, 'accepted_online')", [tenantId, who.id, season, contact.id, row.contact_name, minor ? 'guardian' : 'self', row.waiver_text_sha]);
+      await conn.query("INSERT INTO waivers (tenant_id, person_id, season, kind, signed_by_person_id, signed_by_name, signer_relation, text_sha, method) VALUES (?, ?, ?, 'general', ?, ?, ?, ?, 'accepted_online')", [tenantId, who.id, seasonOf, contact.id, row.contact_name, minor ? 'guardian' : 'self', row.waiver_text_sha]);
       waiver = { id: 1 };
     }
+    return { who, waiver };
+  };
+  for (const ln of q.lines) {
+    const st = ln.holder;
+    const { who, waiver } = await holderOnFile(st, ln.valid_on, ln.tier, season);
     if (!waiver && tenant.waiver_text) waiverNeeded.push(`${st.first_name} ${st.last_name}`);
     const [it] = await conn.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents) VALUES (?, ?, ?, 'ticket', ?, ?, 1, ?, ?, ?, ?)", [tenantId, orderId, ln.product_id, who.id, ln.tier, ln.unit, ln.valid_on, ln.discount || 0, ln.tax || 0]);
     const code = newCode();
@@ -276,6 +315,26 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
     // A season pass for a child already in a program that charged a lift ticket part: refund or credit it, per the mountain.
     const kind = await one(conn, 'SELECT kind FROM products WHERE tenant_id = ? AND id = ?', [tenantId, ln.product_id]);
     if (kind && kind.kind === 'season_pass') programAdjustments.push(...await require('./programplus').passBought(conn, tenantId, who.id, { passFrom: ln.valid_on, passTo: validTo }));
+  }
+  // Activities: one ticket per guest, good once at the attraction in the slot, and the place written down. A payment that
+  // lands after the hold is still honored (the guest paid); staff are told when it took a slot over its places.
+  const overSlots = [];
+  for (const a of q.activities || []) {
+    const st = a.holder;
+    const { who, waiver } = await holderOnFile(st, a.valid_on, a.tier, seasonFor(a.valid_on));
+    if (!waiver && (a.waiver_required || tenant.waiver_text) && !waiverNeeded.includes(`${st.first_name} ${st.last_name}`)) waiverNeeded.push(`${st.first_name} ${st.last_name}`);
+    const product = await one(conn, 'SELECT id, name, timed, day_capacity FROM products WHERE tenant_id = ? AND id = ?', [tenantId, a.product_id]);
+    const slot = { start: a.start_time || null, end: a.end_time || null };
+    if (late && Number(late.late)) {
+      const cap = a.start_time ? ((await ACT.slotsOn(conn, tenantId, a.product_id, a.valid_on)).find((x) => x.start === a.start_time) || {}).capacity : product.day_capacity;
+      const used = (await ACT.taken(conn, tenantId, [a.product_id], a.valid_on)).get(`${a.product_id}|${a.start_time || ''}`) || 0;
+      if (cap !== null && cap !== undefined && used >= cap) overSlots.push(`${a.name} ${a.valid_on}${a.start_time ? ` ${ACT.clock(a.start_time)}` : ''}`);
+    }
+    const [it] = await conn.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents) VALUES (?, ?, ?, 'activity', ?, ?, 1, ?, ?, ?, ?)", [tenantId, orderId, a.product_id, who.id, a.tier, a.unit, a.valid_on, a.discount || 0, a.tax || 0]);
+    const code = newCode();
+    const [tk] = await conn.query('INSERT INTO tickets (tenant_id, order_item_id, person_id, product_id, code, valid_from, valid_to, uses_remaining) VALUES (?, ?, ?, ?, ?, ?, ?, 1)', [tenantId, it.insertId, who.id, a.product_id, code, a.valid_on, a.valid_on]);
+    await ACT.book(conn, tenantId, { product, attractionId: a.attraction_id, day: a.valid_on, slot, personId: who.id, orderItemId: it.insertId, ticketId: tk.insertId, channel: 'online' });
+    tickets.push(code);
   }
   // Add-ons become a voucher the guest uses at the mountain; each unit has its own code and barcode.
   for (const a of q.addons || []) {
@@ -298,7 +357,7 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
   await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, processor, processor_account, platform_fee_cents) VALUES (?, ?, 'card', ?, ?, 'stripe', ?, ?)",
     [tenantId, orderId, q.total, paymentIntent, payee.account || null, payee.feeCents || 0]);
   await conn.query("UPDATE shop_orders SET status = 'paid', paid_at = NOW(), order_id = ?, payment_intent = COALESCE(?, payment_intent), note = ? WHERE tenant_id = ? AND id = ?",
-    [orderId, paymentIntent, [waiverNeeded.length ? `Waiver still to sign at the gate: ${waiverNeeded.join(', ')}.` : '', overLimit.length ? `Payment arrived late: ${overLimit.join(', ')} went over the daily limit.` : ''].filter(Boolean).join(' ').slice(0, 300) || null, tenantId, row.id]);
+    [orderId, paymentIntent, [waiverNeeded.length ? `Waiver still to sign at the gate: ${waiverNeeded.join(', ')}.` : '', overLimit.length ? `Payment arrived late: ${overLimit.join(', ')} went over the daily limit.` : '', overSlots.length ? `Payment arrived late: ${overSlots.join(', ')} went over its places.` : ''].filter(Boolean).join(' ').slice(0, 300) || null, tenantId, row.id]);
   await audit(conn, { auth: { tenantId, userId: null } }, 'shop_paid', 'shop_orders', row.id, { tickets: tickets.length, order_id: orderId });
   return { orderId, tickets, waiverNeeded, giftCodes, programAdjustments };
 }
@@ -307,17 +366,25 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
 async function viewOf(tenantId, token) {
   const row = await one(pool, 'SELECT id, reference, status, contact_name, amount_cents, order_id, note FROM shop_orders WHERE tenant_id = ? AND view_token = ?', [tenantId, String(token || '')]);
   if (!row) return null;
-  let tickets = [];
+  let tickets = []; let raw = []; const waiverNeeded = [];
   if (row.order_id) {
-    tickets = await rows(pool,
-      `SELECT t.code, t.valid_from, t.valid_to, t.status, t.uses_remaining, p.name AS product, p.kind, p.valid_days, pe.first_name, pe.last_name
+    tickets = raw = await rows(pool,
+      `SELECT t.code, t.valid_from, t.valid_to, t.status, t.uses_remaining, p.name AS product, p.kind, p.valid_days, pe.first_name, pe.last_name, t.person_id,
+              b.start_time, b.end_time, a.name AS attraction, a.waiver_required
        FROM tickets t JOIN order_items i ON i.id = t.order_item_id AND i.tenant_id = t.tenant_id JOIN products p ON p.id = t.product_id AND p.tenant_id = t.tenant_id
        LEFT JOIN people pe ON pe.id = t.person_id AND pe.tenant_id = t.tenant_id
+       LEFT JOIN activity_bookings b ON b.tenant_id = t.tenant_id AND b.ticket_id = t.id
+       LEFT JOIN attractions a ON a.tenant_id = b.tenant_id AND a.id = b.attraction_id
        WHERE t.tenant_id = ? AND i.order_id = ? ORDER BY t.id`, [tenantId, row.order_id]);
-    tickets = tickets.map((t) => ({ ...t, movable: t.status === 'active' && t.kind === 'day_ticket' && Number(t.valid_days) === 1 }));
+    tickets = tickets.map((t) => ({ ...t, movable: t.status === 'active' && t.kind === 'day_ticket' && Number(t.valid_days) === 1, start_time: t.start_time ? ACT.hhmm(t.start_time) : null, end_time: t.end_time ? ACT.hhmm(t.end_time) : null, waiver_required: undefined, person_id: undefined }));
+    // Riders on an attraction that needs a waiver, with none on file for that season yet: the page links to the signing page.
+    for (const t of raw.filter((x) => x.kind === 'activity' && x.waiver_required && x.status === 'active' && x.person_id)) {
+      const name = `${t.first_name} ${t.last_name}`;
+      if (!waiverNeeded.includes(name) && !(await one(pool, ON_FILE, [tenantId, t.person_id, seasonFor(String(t.valid_from).slice(0, 10))]))) waiverNeeded.push(name);
+    }
   }
   const gift_cards = row.order_id ? await rows(pool, 'SELECT code, initial_cents AS amount_cents, recipient_name, message FROM gift_cards WHERE tenant_id = ? AND order_id = ? ORDER BY id', [tenantId, row.order_id]) : [];
-  return { reference: row.reference, status: row.status, name: row.contact_name, amount_cents: row.amount_cents, tickets, gift_cards };
+  return { reference: row.reference, status: row.status, name: row.contact_name, amount_cents: row.amount_cents, tickets, gift_cards, waiver_needed: waiverNeeded };
 }
 
 /** Email the tickets once. Failure to send never undoes the sale: the page with the tickets is always there. */
@@ -327,10 +394,12 @@ async function emailTickets(tenantId, rowId, baseUrl) {
   const t = await one(pool, 'SELECT name, slug, phone FROM tenants WHERE id = ?', [tenantId]);
   const link = `${baseUrl}/shop/${t.slug}?order=${row.view_token}`;
   const v = await viewOf(tenantId, row.view_token);
-  const lines = v.tickets.map((k) => `- ${k.product}${k.first_name ? `, ${k.first_name} ${k.last_name}` : ''}: ${k.valid_from === k.valid_to ? k.valid_from : `${k.valid_from} to ${k.valid_to}`}`);
+  const lines = v.tickets.map((k) => `- ${k.product}${k.first_name ? `, ${k.first_name} ${k.last_name}` : ''}: ${k.valid_from === k.valid_to ? k.valid_from : `${k.valid_from} to ${k.valid_to}`}${k.start_time ? `, ${ACT.clock(k.start_time)} to ${ACT.clock(k.end_time)}` : ''}`);
   const gifts = v.gift_cards.map((g) => `- Gift card ${g.code}, ${money(g.amount_cents)}${g.recipient_name ? ` for ${g.recipient_name}` : ''}`);
   const text = [`Hi ${row.contact_name.split(' ')[0]},`, '', `Thank you for your order at ${t.name} (reference ${row.reference}, ${money(row.amount_cents)}).`, '', ...lines, ...gifts, '',
-    'Show the barcode on your phone at the gate. Your tickets are here:', link, '', ...(row.note ? [row.note, ''] : []), t.phone ? `Questions? Call ${t.phone}.` : ''].join('\n');
+    'Show the barcode on your phone at the gate. Your tickets are here:', link, '',
+    ...(v.waiver_needed.length ? [`Still to sign a waiver before riding: ${v.waiver_needed.join(', ')}. Sign here: ${baseUrl}/waiver/${t.slug}`, ''] : []),
+    ...(row.note ? [row.note, ''] : []), t.phone ? `Questions? Call ${t.phone}.` : ''].join('\n');
   const r = await mailer.send({ tenantId, to: row.contact_email, fromName: t.name, subject: `Your tickets for ${t.name}`, text, tag: 'shop-tickets' });
   if (r.ok) await pool.query('UPDATE shop_orders SET emailed_at = NOW() WHERE tenant_id = ? AND id = ? AND emailed_at IS NULL', [tenantId, rowId]);
   return r.ok;
