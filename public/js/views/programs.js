@@ -670,7 +670,7 @@ async function todayView(root) {
 
 // ================================================================ a program without sessions: one roster, as before
 function legacyDetail(p) {
-  dialog(p.name, tabs([['roster', 'Roster', (b) => roster(p, b)], ['sessions', 'Dates', (b) => sessions(p, b)]]), { wide: true });
+  dialog(p.name, tabs([['roster', 'Roster', (b) => roster(p, b)], ['sessions', 'Dates', (b) => sessions(p, b)]], undefined, { address: false }), { wide: true });
 }
 
 async function roster(p, box) {

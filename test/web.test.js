@@ -73,6 +73,9 @@ async function loadModules() {
 const me = (role, extra = {}) => ({ id: 1, email: `${role}@x.test`, role, tenant: slug, tenant_name: 'Web Test Mountain', timezone: 'America/New_York', staff_id: null, ...extra });
 
 const VIEW_AS = new WeakMap(); // root -> who drew it, so a helper can draw another part as the same person
+// The next renderView opens at this address (a screen that reads its tab or section from the address).
+let nextAddress = null;
+const atAddress = (hash) => { nextAddress = hash; };
 async function renderView(name, role, token, extra, params) {
   mods.ui.ctx.me = me(role, extra);
   mods.ui.ctx.tz = 'America/New_York';
@@ -81,6 +84,7 @@ async function renderView(name, role, token, extra, params) {
   // A fresh page: no tab left in the address by the last screen (tabs keep the open tab in the address), and the
   // tabs of the last page let go of it.
   window.history.replaceState(null, '', window.location.pathname);
+  if (nextAddress) { window.history.replaceState(null, '', nextAddress); nextAddress = null; } // atAddress(): open this screen at an address
   mods.ui.newPage();
   const root = document.body.firstChild;
   VIEW_AS.set(root, [role, token, extra]);
@@ -2292,9 +2296,10 @@ test('settings: who sees which pages', skip(), async () => {
   assert.deepEqual(pagesOf(counter), ['profile']);
   assert.equal(counter.querySelector('h1').textContent, 'Your profile and sign-in');
   clean(counter, 'counter settings');
-  // patrol, not an admin: only their own page
+  // patrol, not an admin: their own page, and Patrol for the cards their permissions allow (a patroller who files
+  // reports reads Report requirements, as they could inside Patrol before setup moved to Settings)
   const patrol = await renderView('settings', 'patrol', T.patrol);
-  assert.deepEqual(pagesOf(patrol), ['profile']);
+  assert.deepEqual(pagesOf(patrol), ['profile', 'patrol']);
   // Back to the app goes to the screen the person's menu opens on
   const withMenu = await renderView('settings', 'counter', T.counter, { menu: { apps: ['sell', 'inbox', 'myshifts'], start: 'sell' } });
   assert.equal(withMenu.querySelector('.set-backapp').getAttribute('href'), '#/sell');
@@ -3157,11 +3162,13 @@ test('setup tabs are gone from their apps and each draws on its own in Settings'
   clean(pp, 'partner pass rules');
   assert.ok(pp.querySelector('[data-setting=partner_tab]'), 'the Show the Partner passes tab in Sell switch');
   assert.match(pp.textContent, /Show the Partner passes tab in Sell/);
-  // Patrol: its three admin pages, marked for patrol admins
+  // Patrol: its three setup pages, each for the same people who saw that tab inside Patrol before
   const patrolPages = (await mods.view('patrol')).settingsPages;
   assert.deepEqual(Object.keys(patrolPages), ['settings', 'requirements', 'access']);
+  assert.deepEqual(patrolPages.settings.who, { patrol: ['manage_settings', 'manage_schedule', 'manage_meds', 'run_sweep', 'avalanche'] });
+  assert.deepEqual(patrolPages.requirements.who, { patrol: ['manage_settings', 'approve_case', 'submit_case'] });
+  assert.deepEqual(patrolPages.access.who, { patrolLevel: 'admin' });
   for (const k of Object.keys(patrolPages)) {
-    assert.equal(patrolPages[k].who, 'patrol-admin');
     clean(await renderSetup('patrol', k, 'owner', T.owner), `patrol ${k} in Settings`);
   }
   const names = await patNames(await renderView('patrol', 'owner', T.owner));
@@ -3192,7 +3199,7 @@ test('sell: Partner passes is the last tab unless the mountain turns it off', sk
   mods.ui.ctx.me = me('counter');
   assert.equal(await sellMod.showPartnerTab(), true);
   // #/sell?tab=partners (where #/partners now goes) opens it
-  history.replaceState(null, '', '#/sell?tab=partners');
+  atAddress('#/sell?tab=partners');
   try {
     root = await renderView('sell', 'counter', T.counter);
     assert.equal(root.querySelector('[role=tab][aria-selected=true]').textContent, 'Partner passes');
@@ -3221,7 +3228,7 @@ test('patrol: sections come from the address, old addresses still land, and only
     assert.equal(root.querySelector('[role=tab][aria-selected=true]').textContent, tab, `#/patrol/${old}`);
   }
   // ?tab= picks the tab within a section
-  history.replaceState(null, '', '#/patrol/gear?tab=meds');
+  atAddress('#/patrol/gear?tab=meds');
   try { assert.equal((await renderView('patrol', 'owner', T.owner, {}, ['gear'])).querySelector('[role=tab][aria-selected=true]').textContent, 'Medications'); } finally { history.replaceState(null, '', '#/'); }
   // where every old address goes now
   const { legacyRoute, SECTION_OF } = await mods.view('patrol');

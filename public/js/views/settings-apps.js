@@ -30,7 +30,18 @@ export function sectionsOf(file) {
   if (!loaded.has(file)) loaded.set(file, import(`./${file}.js`).then((m) => (m && m.settingsPages && typeof m.settingsPages === 'object' ? m.settingsPages : {})).catch(() => ({})));
   return loaded.get(file);
 }
-const allowed = (sec, who) => (sec.who === 'patrol-admin' ? who.manager || who.patrolAdmin : sec.who === 'manager' ? who.manager : true);
+// sec.who: none (anyone who can open the page), 'manager', 'patrol-admin', { patrolLevel: 'admin' } or
+// { patrol: [features] } (any one of those Patrol permissions). Owners and managers see every section.
+const allowed = (sec, who) => {
+  const w = sec.who;
+  if (!w || who.manager) return true;
+  if (w === 'manager') return false;
+  if (w === 'patrol-admin') return Boolean(who.patrolAdmin);
+  const p = who.patrol;
+  if (!p || typeof w !== 'object') return false;
+  if (w.patrolLevel) return p.level === w.patrolLevel;
+  return Array.isArray(w.patrol) && w.patrol.some((f) => (p.features || []).includes(f));
+};
 
 /** The sections a page shows this person: [[file, key, section]]. */
 async function sectionsFor(page, who) {

@@ -53,7 +53,7 @@ async function visiblePages(who) {
     if (ctx.me.role === 'area') continue;
     if (group === 'mountain') { if (who.manager) out.push(p); continue; }
     if (!moduleOn(APP_OF[key][2])) continue;
-    if (key === 'patrol' ? !(who.manager || who.patrolAdmin) : !who.manager) continue;
+    if (key === 'patrol' ? !(who.manager || who.patrol) : !who.manager) continue; // patrol: the cards decide, by permission
     if (await apps.pageHasSetup(key, who)) out.push(p);
   }
   return out;

@@ -187,14 +187,16 @@ const sectionsFor = (items) => SECTION_LIST.map(([id, text, note, keys]) => ({ i
 // Each draws on a fresh panel: it asks the server who this person is in Patrol first, so it does not need this page.
 const withAccess = (draw) => async (panel) => { setAccess(await get('/patrol/me')); return draw(panel); };
 export const settingsPages = {
-  settings: { title: 'Patrol settings', who: 'patrol-admin', render: withAccess((panel) => drawOpsSettings(panel)) },
-  requirements: { title: 'Report requirements', who: 'patrol-admin', render: withAccess(async (panel) => {
+  // Who sees each card: the same people who saw these tabs inside Patrol before they moved to Settings.
+  settings: { title: 'Patrol settings', who: { patrol: ['manage_settings', 'manage_schedule', 'manage_meds', 'run_sweep', 'avalanche'] }, render: withAccess((panel) => drawOpsSettings(panel)) },
+  requirements: { title: 'Report requirements', who: { patrol: ['manage_settings', 'approve_case', 'submit_case'] }, render: withAccess(async (panel) => {
+    const me = await get('/patrol/me');
     const legal = h('div', { class: 'row' }, button('Legal name on reports', () => formSettingsDialog(), { small: true }), h('span', { class: 'muted small' }, 'Printed on every copy of the report.'));
     const box = h('div');
-    panel.append(legal, box);
+    panel.append(...(me.can_admin_form ? [legal] : []), box);
     await drawRequirements(box);
   }) },
-  access: { title: 'Access levels', who: 'patrol-admin', render: withAccess((panel) => drawLevels(panel)) },
+  access: { title: 'Access levels', who: { patrolLevel: 'admin' }, render: withAccess((panel) => drawLevels(panel)) },
 };
 
 // ---------------------------------------------------------------- cases
