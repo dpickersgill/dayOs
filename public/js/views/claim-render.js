@@ -181,6 +181,8 @@ export function claimDoc(f, { photoSrc = null, extra = [], header = null } = {})
         h('code', { class: 'cf-sha', title: 'SHA-256 fingerprint of the original file' }, `SHA-256 ${p.sha256}`)));
     })), h('p', { class: 'muted small' }, 'Each fingerprint identifies the original file exactly: any copy with the same fingerprint is the same photo, unaltered.')) : null,
     (c.signatures || []).length ? sec('Signatures', tbl(['Signed', 'Kind', 'Name', 'Role'], c.signatures.map((s) => [when(s.signed_at), label(s.kind), t(s.signer_name), s.signer_role ? label(s.signer_role) : '']))) : null,
+    (c.checklist || []).length ? sec('Checklists', tbl(['List', 'Item', 'For', 'Ticked'], checklistRows(c)),
+      h('p', { class: 'muted small' }, 'Each item in the words it was ticked under, with who ticked it and when.')) : null,
     ((c.exceptions || []).length || (c.skips || []).length) ? sec('Approved with exceptions, and skipped items',
       tbl(['Item', 'Reason', 'Approved by'], (c.exceptions || []).map((e) => [t(e.label), t(e.reason), `${t(e.approved_by)} ${when(e.approved_at)}`])),
       tbl(['Skipped', 'Reason', 'By'], (c.skips || []).map((s) => [label(s.item_key), `${label(s.reason || '')}${s.note ? `: ${s.note}` : ''}`, `${t(s.skipped_by)} ${when(s.skipped_at)}`]))) : null,
@@ -188,6 +190,13 @@ export function claimDoc(f, { photoSrc = null, extra = [], header = null } = {})
     (c.versions || []).length ? sec('Versions', tbl(['Version', 'Kind', 'Made', 'By'], c.versions.map((v) => [String(v.version_no), label(v.kind), when(v.created_at), t(v.created_by)]))) : null,
     extra,
     h('footer', { class: 'cf-foot' }, 'Confidential patient information. Share only as the authority on file allows.'));
+}
+
+/** Checklist ticks as they were ticked: the list title and item words kept with each tick. */
+function checklistRows(c) {
+  const who = (pid) => { const p = Number(pid) ? (c.patients || []).find((x) => x.id === Number(pid)) : null; return p ? name(p) : 'The case'; };
+  return [...c.checklist].sort((a, b) => String(a.list_title || '').localeCompare(String(b.list_title || '')) || Number(a.patient_id) - Number(b.patient_id))
+    .map((r) => [t(r.list_title || 'Checklist'), t(r.item_label || label(r.item_key)), who(r.patient_id), `${t(r.done_by)} ${when(r.done_local || r.done_at)}`.trim()]);
 }
 
 /** A scene diagram drawn as SVG, shown as an image so nothing in it can run. */

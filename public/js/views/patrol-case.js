@@ -87,7 +87,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       }
       if (!trails) trails = (await get('/schedule/trails?limit=500')).data;
       if (!lifts) lifts = (await get('/schedule/lifts?limit=200').catch(() => ({ data: [] }))).data;
-      if (!checklists.length) checklists = await loadChecklists();
+      if (!checklists.length) checklists = await loadChecklists(id);
     } catch (err) {
       // No signal: keep what is on screen. Bedside entries are kept on the phone meanwhile.
       const offline = (globalThis.navigator && globalThis.navigator.onLine === false) || !(err && err.status);
@@ -389,7 +389,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       pts.length ? pts.map((p) => { const card = bedsideCard(p, c, { ...callbacks, base: `/patrol/incidents/${id}/patients/${p.id}` }); card.hidden = p.id !== activePid; return card; })
         : h('div', { class: 'empty stack' }, h('p', null, c.category === 'injury' || c.category === 'medical' ? 'Add the patient to start the care record.' : 'No patients on this report.'), addBtn),
       c.category === 'lost_person' && !version ? searchPanel(c, { editable, roster, trails: trails || [] }) : null,
-      checklistPanel(c, { id, editable, reload: load, defs: checklists }),
+      checklistPanel(c, { id, editable, reload: load, defs: checklists, frozen: Boolean(version) }),
       id > 0 ? photosPanel(c, { id, editable, reload: load, readOnly: Boolean(version) }) : null,
       voided.length ? h('section', { class: 'panel stack voided-patients' }, h('h3', null, 'Entered in error'), h('ul', { class: 'plain' }, voided.map((p) => h('li', { class: 'voided' }, h('span', { class: 'what' }, `${p.first_name} ${p.last_name}`), voidedNote(p))))) : null);
   }
