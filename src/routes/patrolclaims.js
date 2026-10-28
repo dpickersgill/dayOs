@@ -63,6 +63,7 @@ const plusDays = (now, days) => `${addDays(now.slice(0, 10), days)} ${now.slice(
 async function reportOf(db, t, id, live) {
   const v = await one(db, "SELECT id, version_no, kind, snapshot, created_at FROM incident_versions WHERE tenant_id = ? AND incident_id = ? AND kind = 'approved' ORDER BY version_no DESC LIMIT 1", [t, id]);
   const snap = v && parseJSON(v.snapshot);
+  if (snap && Array.isArray(snap.checklist)) snap.checklist = require('../lib/checklists').labelTicks(snap.checklist); // frozen before ticks kept their words
   if (snap && snap.id) return { report: snap, basis: 'approved', version: { id: Number(v.id), version_no: v.version_no, created_at: v.created_at } };
   return { report: live, basis: live.report_state === 'submitted' ? 'submitted' : live.report_state === 'approved' ? 'approved_live' : 'draft', version: null };
 }
@@ -113,6 +114,8 @@ async function claimFile(db, req, id) {
   ]);
   const showTrail = canRecords || canAudit;
   const { tz } = await OPS.clock(db, t);
+  // checklist ticks are stamped in UTC; the document reads the mountain's clock like every other time on it
+  if (Array.isArray(report.checklist)) report.checklist = report.checklist.map((r) => ({ ...r, done_local: r.done_at ? localOf(r.done_at, tz) : null }));
   return {
     id, case_number: live.case_number || caseNo(live), basis, version,
     report_state: live.report_state, legal_hold: Boolean(Number(live.legal_hold)), legal_hold_note: live.legal_hold_note || null,

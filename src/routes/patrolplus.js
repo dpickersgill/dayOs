@@ -4,10 +4,11 @@
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
-const { z, validate, paramId, partialOf, setClause, todayIn, addDays } = require('../lib/util');
+const { z, validate, paramId, partialOf, setClause, todayIn, addDays, dateTimeStr, normDateTime } = require('../lib/util');
 const { notFound, bad, forbidden, conflict } = require('../lib/errors');
 const { audit } = require('../lib/audit');
-const { LISTS, valid } = require('../lib/checklists');
+const CL = require('../lib/checklists');
+const { TYPE_KEYS: ATTRACTION_TYPES, TYPES: ATTRACTION_TYPE_LIST } = require('../lib/attractions');
 const followups = require('../lib/followups');
 const mailer = require('../lib/mailer');
 const patrolRouter = require('./patrol');
@@ -113,22 +114,200 @@ router.post('/incidents/:id/collision-printed', patrol, needs('create_case'), as
 });
 
 // ---------------------------------------------------------------- checklists
-router.get('/checklists', patrol, needs('view_cases'), (_req, res) => res.json({ data: LISTS.map((l) => ({ id: l.id, scope: l.scope, title: l.title, when: l.when, items: l.items.map(([key, label]) => ({ key, label })) })) }));
+// The built-in library (src/lib/checklists.js) a patrol admin switches on or off, plus the mountain's own lists. Every
+// tick keeps the list's title and the item's words as they were, so a past case reads the same after a list changes.
 
-router.post('/incidents/:id/checklist', patrol, needs('create_case'), validate(z.object({ key: z.string().max(60), patient_id: z.number().int().positive().optional(), done: z.boolean() })), async (req, res) => {
+/** The lists patrollers can use. With ?case=<id>, lists already ticked on that case come too, even if switched off. */
+router.get('/checklists', patrol, needs('view_cases'), async (req, res) => {
+  const caseId = /^\d{1,15}$/.test(String(req.query.case || '')) ? Number(req.query.case) : null;
+  res.json({ data: await CL.listsFor(pool, req.auth.tenantId, { incidentId: caseId }) });
+});
+
+/** A tick's list and words: built-in, or one of the mountain's own (tenant-scoped). Null when there is no such item. */
+async function checklistItem(conn, tenantId, key) {
+  const b = CL.BY_KEY.get(key);
+  if (b) return { listId: b.list.id, title: b.list.title, label: b.label, scope: b.list.scope, on: CL.builtinOn(b.list, await CL.contextOf(conn, tenantId)), removed: false };
+  const c = CL.parseCustomKey(key);
+  if (!c) return null;
+  const r = await one(conn, `SELECT l.id, l.title, l.scope, l.enabled, l.archived_at, i.label, i.removed_at FROM patrol_checklist_items i
+    JOIN patrol_checklists l ON l.tenant_id = i.tenant_id AND l.id = i.checklist_id WHERE i.tenant_id = ? AND i.id = ? AND i.checklist_id = ?`, [tenantId, c.itemId, c.listId]);
+  if (!r) return null;
+  return { listId: CL.customId(r.id), title: r.title, label: r.label, scope: r.scope, on: Boolean(Number(r.enabled)) && !r.archived_at, removed: Boolean(r.removed_at) };
+}
+
+/** A mountain wall-clock time ('YYYY-MM-DD HH:MM:SS') as UTC, the way done_at is kept. */
+function utcOf(local, timeZone) {
+  const offset = (ms) => {
+    const f = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+    const p = Object.fromEntries(f.formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+    return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - ms;
+  };
+  const g = Date.parse(`${local.replace(' ', 'T')}Z`);
+  let t = g - offset(g); t = g - offset(t);
+  return t;
+}
+
+// A tick sent from the phone's outbox carries the time it was taken (`at`, the mountain's clock) and its own id.
+router.post('/incidents/:id/checklist', patrol, needs('create_case'), validate(z.object({
+  key: z.string().max(60), patient_id: z.number().int().positive().optional(), done: z.boolean(),
+  at: dateTimeStr.transform(normDateTime).optional(), client_ref: z.string().regex(/^[a-z0-9]{6,40}$/).optional(),
+})), async (req, res) => {
   const id = paramId(req);
   const { key, done } = req.body;
-  if (!valid(key)) throw bad('Unknown checklist item');
+  const t = req.auth.tenantId;
   await tx(async (conn) => {
     await editable(conn, req, id);
     await checkPatient(conn, req, id, req.body.patient_id);
+    const item = await checklistItem(conn, t, key);
+    if (!item) throw bad('Unknown checklist item');
     const pid = req.body.patient_id || 0;
-    if (done) await conn.query('INSERT IGNORE INTO incident_checklist (tenant_id, incident_id, patient_id, item_key, done_by) VALUES (?, ?, ?, ?, ?)', [req.auth.tenantId, id, pid, key, req.auth.userId]);
-    else await conn.query('DELETE FROM incident_checklist WHERE tenant_id = ? AND incident_id = ? AND patient_id = ? AND item_key = ?', [req.auth.tenantId, id, pid, key]);
-    await audit(conn, req, done ? 'check' : 'uncheck', 'incidents', id, { key, patient_id: pid || null });
+    if (item.scope === 'patient' && !pid) throw bad('This checklist is for one patient: say which');
+    if (item.scope === 'case' && pid) throw bad('This checklist is for the whole case, not one patient');
+    // A list switched off (or archived) takes ticks only on a case where it was already in use.
+    if (!item.on && !(await CL.tickedLists(conn, t, id)).has(item.listId)) throw conflict('This checklist is switched off for your patrol. A patrol admin can switch it on in Settings, Patrol, Checklists.');
+    if (done) {
+      if (item.removed) throw conflict('This item was taken off its checklist');
+      const tz = (await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [t])).timezone;
+      const at = req.body.at ? utcOf(req.body.at, tz) : null;
+      const ok = at !== null && Number.isFinite(at) && at <= Date.now() + 5 * 60000 && at >= Date.now() - 72 * 3600000;
+      const doneAt = new Date(ok ? at : Date.now()).toISOString().slice(0, 19).replace('T', ' ');
+      await conn.query(`INSERT IGNORE INTO incident_checklist (tenant_id, incident_id, patient_id, item_key, done_by, done_at, entered_at, list_id, list_title, item_label)
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)`, [t, id, pid, key, req.auth.userId, doneAt, item.listId, item.title, item.label]);
+    } else {
+      await conn.query('DELETE FROM incident_checklist WHERE tenant_id = ? AND incident_id = ? AND patient_id = ? AND item_key = ?', [t, id, pid, key]);
+    }
+    await audit(conn, req, done ? 'check' : 'uncheck', 'incidents', id, { key, patient_id: pid || null, list: item.listId, list_title: item.title, item: item.label });
   });
   res.json({ ok: true });
 });
+
+// ---- setup: Settings, Patrol, Checklists (the patrol admin)
+const checklistAdmin = needs('manage_settings', 'Only a patrol admin can change the checklists');
+
+/** How many cases each list has been ticked on: Map listId -> count. */
+async function checklistUse(db, tenantId) {
+  const [r] = await db.query('SELECT DISTINCT incident_id, list_id, item_key FROM incident_checklist WHERE tenant_id = ?', [tenantId]);
+  const seen = new Map();
+  for (const x of r) {
+    const lid = x.list_id || (CL.BY_KEY.get(x.item_key) ? CL.BY_KEY.get(x.item_key).list.id : (CL.parseCustomKey(x.item_key) ? CL.customId(CL.parseCustomKey(x.item_key).listId) : null));
+    if (!lid) continue;
+    if (!seen.has(lid)) seen.set(lid, new Set());
+    seen.get(lid).add(Number(x.incident_id));
+  }
+  return new Map([...seen].map(([k, v]) => [k, v.size]));
+}
+
+router.get('/checklists/setup', patrol, checklistAdmin, async (req, res) => {
+  const t = req.auth.tenantId;
+  const [ctx, used, own] = await Promise.all([CL.contextOf(pool, t), checklistUse(pool, t), CL.customLists(pool, t, { withArchived: true })]);
+  res.json({
+    groups: CL.GROUPS.map(([key, label]) => ({ key, label })),
+    attraction_types: ATTRACTION_TYPE_LIST.map((x) => ({ key: x.key, label: x.label })),
+    builtin: CL.LISTS.map((l) => {
+      const start = CL.startsOn(l, ctx);
+      return { ...CL.shape(l), enabled: CL.builtinOn(l, ctx), chosen: ctx.switches.has(l.id), starts_on: start.on, start_note: start.why, original: CL.ORIGINAL.includes(l.id), cases: used.get(l.id) || 0 };
+    }),
+    custom: own.map((l) => ({ ...l, cases: used.get(l.id) || 0 })),
+  });
+});
+
+router.put('/checklists/builtin/:listId', patrol, checklistAdmin, validate(z.object({ enabled: z.boolean() })), async (req, res) => {
+  const l = CL.BY_ID.get(String(req.params.listId));
+  if (!l) throw notFound('Checklist');
+  await tx(async (conn) => {
+    await conn.query('INSERT INTO patrol_checklist_switches (tenant_id, list_id, enabled, updated_by) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), updated_by = VALUES(updated_by)',
+      [req.auth.tenantId, l.id, req.body.enabled ? 1 : 0, req.auth.userId]);
+    await audit(conn, req, req.body.enabled ? 'checklist_on' : 'checklist_off', 'patrol_checklists', null, { list: l.id, title: l.title });
+  });
+  res.json({ ok: true });
+});
+
+const customItems = z.array(z.object({ id: z.number().int().positive().optional(), label: z.string().trim().min(1, 'Every item needs words').max(255) })).min(1, 'Add at least one item').max(40);
+const customFields = {
+  title: z.string().trim().min(1, 'Give the list a title').max(150),
+  when: z.string().trim().max(300).nullable().optional(),
+  scope: z.enum(['patient', 'case']),
+  attraction_type: z.enum(ATTRACTION_TYPES).nullable().optional(),
+  enabled: z.boolean().optional(),
+  items: customItems,
+};
+
+async function titleFree(conn, tenantId, title, exceptId = 0) {
+  if (await one(conn, 'SELECT id FROM patrol_checklists WHERE tenant_id = ? AND archived_at IS NULL AND title = ? AND id <> ?', [tenantId, title, exceptId])) throw conflict('Your patrol already has a checklist with that title');
+}
+
+router.post('/checklists/custom', patrol, checklistAdmin, validate(z.object(customFields).refine((b) => !b.items.some((i) => i.id), { message: 'A new list has new items only' })), async (req, res) => {
+  const b = req.body; const t = req.auth.tenantId;
+  const out = await tx(async (conn) => {
+    await titleFree(conn, t, b.title);
+    const [r] = await conn.query('INSERT INTO patrol_checklists (tenant_id, title, when_text, scope, attraction_type, enabled, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [t, b.title, b.when || null, b.scope, b.attraction_type || null, b.enabled === false ? 0 : 1, req.auth.userId, req.auth.userId]);
+    const lid = r.insertId;
+    let sort = 0;
+    for (const it of b.items) await conn.query('INSERT INTO patrol_checklist_items (tenant_id, checklist_id, label, sort) VALUES (?, ?, ?, ?)', [t, lid, it.label, (sort += 1)]);
+    await audit(conn, req, 'checklist_create', 'patrol_checklists', lid, { title: b.title, scope: b.scope, attraction_type: b.attraction_type || null, items: b.items.length });
+    return lid;
+  });
+  res.status(201).json({ id: CL.customId(out), db_id: out });
+});
+
+router.patch('/checklists/custom/:id', patrol, checklistAdmin, validate(partialOf(customFields)), async (req, res) => {
+  const id = paramId(req); const t = req.auth.tenantId; const b = req.body;
+  await tx(async (conn) => {
+    const l = await one(conn, 'SELECT * FROM patrol_checklists WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, id]);
+    if (!l) throw notFound('Checklist');
+    if (l.archived_at) throw conflict('This checklist is archived. Bring it back before changing it.');
+    const changed = [];
+    if (b.title !== undefined && b.title !== l.title) { await titleFree(conn, t, b.title, id); changed.push('title'); }
+    if (b.scope !== undefined && b.scope !== l.scope) {
+      // Ticks already recorded belong to one patient or to the whole case; that cannot change under them.
+      if (await one(conn, 'SELECT id FROM incident_checklist WHERE tenant_id = ? AND list_id = ? LIMIT 1', [t, CL.customId(id)])) throw conflict('This checklist is already in use on cases, so it cannot switch between one patient and the whole case. Archive it and write a new one.');
+      changed.push('scope');
+    }
+    const cols = { title: b.title, when_text: b.when === undefined ? undefined : (b.when || null), scope: b.scope, attraction_type: b.attraction_type === undefined ? undefined : (b.attraction_type || null), enabled: b.enabled === undefined ? undefined : (b.enabled ? 1 : 0) };
+    const set = Object.entries(cols).filter(([, v]) => v !== undefined);
+    if (set.length) await conn.query(`UPDATE patrol_checklists SET ${set.map(([k]) => `\`${k}\` = ?`).join(', ')}, updated_by = ? WHERE tenant_id = ? AND id = ?`, [...set.map(([, v]) => v), req.auth.userId, t, id]);
+    let items = null;
+    if (b.items) {
+      const current = await rows(conn, 'SELECT id, label FROM patrol_checklist_items WHERE tenant_id = ? AND checklist_id = ? AND removed_at IS NULL', [t, id]);
+      const known = new Map(current.map((x) => [Number(x.id), x]));
+      if (b.items.some((i) => i.id && !known.has(i.id))) throw bad('An item is not on this checklist');
+      const kept = new Set(b.items.filter((i) => i.id).map((i) => i.id));
+      if (kept.size !== b.items.filter((i) => i.id).length) throw bad('An item is listed twice');
+      items = { added: 0, reworded: 0, removed: 0 };
+      let sort = 0;
+      for (const it of b.items) {
+        sort += 1;
+        if (it.id) {
+          if (known.get(it.id).label !== it.label) items.reworded += 1;
+          await conn.query('UPDATE patrol_checklist_items SET label = ?, sort = ? WHERE tenant_id = ? AND id = ?', [it.label, sort, t, it.id]);
+        } else {
+          await conn.query('INSERT INTO patrol_checklist_items (tenant_id, checklist_id, label, sort) VALUES (?, ?, ?, ?)', [t, id, it.label, sort]);
+          items.added += 1;
+        }
+      }
+      // An item taken off keeps its row, so its key is never given to anything else; ticks keep their own words.
+      for (const x of current) if (!kept.has(Number(x.id))) { await conn.query('UPDATE patrol_checklist_items SET removed_at = UTC_TIMESTAMP() WHERE tenant_id = ? AND id = ?', [t, x.id]); items.removed += 1; }
+    }
+    await audit(conn, req, 'checklist_update', 'patrol_checklists', id, { fields: Object.keys(b).filter((k) => k !== 'items'), changed, items });
+  });
+  res.json({ ok: true });
+});
+
+/** Archive: off for good, kept for the cases that used it. Bring back undoes it. Never deleted. */
+async function archiveList(req, res, archive) {
+  const id = paramId(req); const t = req.auth.tenantId;
+  await tx(async (conn) => {
+    const l = await one(conn, 'SELECT id, title, archived_at FROM patrol_checklists WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, id]);
+    if (!l) throw notFound('Checklist');
+    if (!archive) await titleFree(conn, t, l.title, id);
+    await conn.query(`UPDATE patrol_checklists SET archived_at = ${archive ? 'UTC_TIMESTAMP()' : 'NULL'}, archived_by = ?, updated_by = ? WHERE tenant_id = ? AND id = ?`, [archive ? req.auth.userId : null, req.auth.userId, t, id]);
+    await audit(conn, req, archive ? 'checklist_archive' : 'checklist_restore', 'patrol_checklists', id, { title: l.title });
+  });
+  res.json({ ok: true });
+}
+router.post('/checklists/custom/:id/archive', patrol, checklistAdmin, (req, res) => archiveList(req, res, true));
+router.post('/checklists/custom/:id/restore', patrol, checklistAdmin, (req, res) => archiveList(req, res, false));
 
 // ---------------------------------------------------------------- the patrol home screen
 router.get('/home', patrol, async (req, res) => {
