@@ -55,7 +55,7 @@ const counterBody = signBody.extend({
 
 // ---------------------------------------------------------------- public: the signing page
 async function publicTenant(slug) {
-  const t = await one(pool, 'SELECT id, slug, name, phone, timezone, status, waiver_text FROM tenants WHERE slug = ?', [slug]);
+  const t = await one(pool, 'SELECT id, slug, name, phone, timezone, status, waiver_text, season_ends_on FROM tenants WHERE slug = ?', [slug]);
   if (!t || t.status !== 'active') throw new AppError(404, 'Page not found');
   return t;
 }
@@ -76,9 +76,11 @@ publicRouter.post('/:slug/waiver/sign', validate(signBody), async (req, res) => 
 publicRouter.get('/:slug/waiver/copy/:token', async (req, res) => {
   const t = await publicTenant(req.params.slug);
   if (!/^[a-f0-9]{32}$/.test(req.params.token)) throw notFound('Signed waiver');
-  const d = await W.signingDetail(pool, t.id, 'token = ?', [req.params.token]);
+  const d = await W.signingDetail(pool, t.id, ...W.byToken(req.params.token));
   if (!d) throw notFound('Signed waiver');
   const s = d.signing;
+  // The link stops working once the season it was signed for is over. Staff still see the copy from Waivers in the app.
+  if (todayIn(t.timezone) > W.copyLinkEnds(t, s)) throw new AppError(410, 'This link has expired. The season it was signed for has ended; ask the mountain for a copy.');
   // Names as the signer typed them (never what is on file for those records), in the order they were signed for.
   let typed = []; try { typed = JSON.parse(s.covered_names || '[]'); } catch (_) { typed = []; }
   res.json({

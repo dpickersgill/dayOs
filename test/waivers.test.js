@@ -208,3 +208,37 @@ test('the counter signs for next season, and nothing further ahead', async () =>
   const r = ok(await api('POST', '/waivers/sign', { token: T.counter, body: body(sum.next_season) }), 201);
   assert.equal(r.season, sum.next_season);
 });
+
+test('the copy link is kept only as a hash, works through the season, and is refused once it has ended', async () => {
+  const crypto = require('crypto');
+  const [[row]] = await pool.query('SELECT token, token_sha FROM waiver_signings WHERE token_sha = ?', [crypto.createHash('sha256').update(copyToken).digest('hex')]);
+  assert.ok(row, 'the signing is found by the hash of its token');
+  assert.equal(row.token, null, 'the plain token is not stored');
+  assert.match(row.token_sha, /^[a-f0-9]{64}$/);
+  // A row from before hashing still opens with its plain token.
+  const [[t]] = await pool.query('SELECT id FROM tenants WHERE slug = ?', [A.slug]);
+  const old = crypto.randomBytes(16).toString('hex');
+  await pool.query('UPDATE waiver_signings SET token = ?, token_sha = NULL WHERE tenant_id = ? AND token_sha = ?', [old, t.id, row.token_sha]);
+  ok(await api('GET', `/public/${A.slug}/waiver/copy/${old}`));
+  is(await api('GET', `/public/${A.slug}/waiver/copy/${copyToken}`), 404, 'the old hash no longer matches anything');
+  await pool.query('UPDATE waiver_signings SET token = NULL, token_sha = ? WHERE tenant_id = ? AND token = ?', [row.token_sha, t.id, old]);
+  // Within the season: the link works. A season end in the past for the signing's season: refused. Staff still see it in the app.
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const season = ok(await api('GET', `/public/${A.slug}/waiver/copy/${copyToken}`)).season;
+  const inSeason = (d) => require('../src/lib/util').seasonFor(d) === season;
+  await pool.query('UPDATE tenants SET season_ends_on = ? WHERE id = ?', [tomorrow, t.id]);
+  ok(await api('GET', `/public/${A.slug}/waiver/copy/${copyToken}`));
+  if (inSeason(yesterday)) {
+    await pool.query('UPDATE tenants SET season_ends_on = ? WHERE id = ?', [yesterday, t.id]);
+    is(await api('GET', `/public/${A.slug}/waiver/copy/${copyToken}`), 410, 'the season has ended');
+  }
+  // With no season end, the link lasts twelve months after signing.
+  await pool.query('UPDATE tenants SET season_ends_on = NULL WHERE id = ?', [t.id]);
+  ok(await api('GET', `/public/${A.slug}/waiver/copy/${copyToken}`));
+  await pool.query('UPDATE waiver_signings SET created_at = DATE_SUB(NOW(), INTERVAL 13 MONTH) WHERE tenant_id = ? AND token_sha = ?', [t.id, row.token_sha]);
+  is(await api('GET', `/public/${A.slug}/waiver/copy/${copyToken}`), 410, 'twelve months have passed');
+  const d = ok(await api('GET', `/waivers/${kitWaiver.id}`, { token: T.counter }));
+  assert.equal(d.signing.signature, SIG, 'staff still open the signed copy from Waivers');
+  await pool.query('UPDATE waiver_signings SET created_at = NOW() WHERE tenant_id = ? AND token_sha = ?', [t.id, row.token_sha]);
+});

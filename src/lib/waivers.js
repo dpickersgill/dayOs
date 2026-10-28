@@ -153,11 +153,12 @@ async function sign(conn, tenant, input, ctx) {
     if (!covered.some((x) => x.id === childId)) covered.push({ id: childId, name: k.name, relation: 'guardian' });
   }
 
+  // Only a hash of the link's token is kept, so a copy of the database cannot open anyone's signed copy.
   const token = crypto.randomBytes(16).toString('hex');
   const [ins] = await conn.query(
-    `INSERT INTO waiver_signings (tenant_id, token, season, source, signer_person_id, signer_name, signer_email, signer_phone, signer_dob, covered_names, typed_name, signature, text_sha, ip, user_agent, recorded_by)
+    `INSERT INTO waiver_signings (tenant_id, token_sha, season, source, signer_person_id, signer_name, signer_email, signer_phone, signer_dob, covered_names, typed_name, signature, text_sha, ip, user_agent, recorded_by)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [tenant.id, token, season, source, signer.id, fullName, email, phone, signerDob, JSON.stringify(covered.map((c) => ({ name: c.name, relation: c.relation }))), clean(input.typed_name), sig, input.sha,
+    [tenant.id, tokenSha(token), season, source, signer.id, fullName, email, phone, signerDob, JSON.stringify(covered.map((c) => ({ name: c.name, relation: c.relation }))), clean(input.typed_name), sig, input.sha,
       String(ctx.ip || '').slice(0, 45) || null, String(ctx.userAgent || '').slice(0, 300) || null, ctx.userId || null],
   );
   for (const c of covered) {
@@ -188,6 +189,24 @@ async function emailCopy(conn, tenant, signing, base) {
   return r;
 }
 
+/** What is kept of a copy link's token. */
+const tokenSha = (token) => crypto.createHash('sha256').update(token).digest('hex');
+
+/** The WHERE clause and parameters that find a signing by its copy link: the hash, or the plain token of a row from before hashing. */
+const byToken = (token) => ['(token_sha = ? OR token = ?)', [tokenSha(token), token]];
+
+/**
+ * The last day (YYYY-MM-DD) a guest's copy link works: the mountain's season end when it falls in the signing's season,
+ * otherwise twelve months after signing. The mountain's own staff can still open the copy from Waivers after that.
+ */
+function copyLinkEnds(tenant, signing) {
+  const end = tenant.season_ends_on ? String(tenant.season_ends_on).slice(0, 10) : null;
+  if (end && seasonFor(end) === signing.season) return end;
+  const signed = new Date(signing.created_at);
+  signed.setUTCFullYear(signed.getUTCFullYear() + 1);
+  return signed.toISOString().slice(0, 10);
+}
+
 /** Everything needed to show one signing exactly as it was signed. */
 async function signingDetail(conn, tenantId, where, params) {
   const s = await one(conn, `SELECT * FROM waiver_signings WHERE tenant_id = ? AND ${where}`, [tenantId, ...params]);
@@ -198,4 +217,4 @@ async function signingDetail(conn, tenantId, where, params) {
   return { signing: s, text: text ? text.body : null, covered };
 }
 
-module.exports = { VALID, ON_FILE, MAX_SIGNATURE_CHARS, nextSeason, shaOf, archive, sign, emailCopy, signingDetail };
+module.exports = { VALID, ON_FILE, MAX_SIGNATURE_CHARS, nextSeason, shaOf, archive, sign, emailCopy, signingDetail, tokenSha, byToken, copyLinkEnds };
