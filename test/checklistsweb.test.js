@@ -123,7 +123,7 @@ test('settings: the Checklists card switches lists, previews them, and writes, e
   assert.match(row('head_spine').textContent, /8 items/);
   for (const g of ['care', 'people', 'scene', 'lifts', 'attractions', 'own']) assert.ok(card.querySelector(`[data-group="${g}"]`), `group ${g}`);
   assert.equal(row('zipline_rescue').querySelector('input[role=switch]').checked, false, 'no zipline yet: the zipline list starts off');
-  assert.match(row('zipline_rescue').textContent, /Starts off/);
+  assert.match(row('zipline_rescue').textContent, /Off until the mountain adds this kind of attraction/);
   for (const b of card.querySelectorAll('button, input[role=switch]')) assert.ok(b.getAttribute('aria-label') || b.textContent.trim(), 'every control is named');
 
   // preview

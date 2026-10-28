@@ -476,10 +476,13 @@ function shape(l) {
  * Whether a built-in list is on before the patrol admin chooses: { on, why }. ctx: { avalanche, attractionTypes: Set }.
  */
 function startsOn(l, ctx = {}) {
-  if (l.start === 'avalanche') return { on: Boolean(ctx.avalanche), why: 'On when the mountain does avalanche work (Patrol settings).' };
+  if (l.start === 'avalanche') {
+    const on = Boolean(ctx.avalanche);
+    return { on, why: on ? 'On because Patrol settings says the mountain does avalanche work.' : 'Off until Patrol settings says the mountain does avalanche work.' };
+  }
   if (l.start === 'attraction') {
-    const have = (l.attraction || []).some((t) => ctx.attractionTypes && ctx.attractionTypes.has(t));
-    return { on: have, why: 'On when the mountain has this kind of attraction.' };
+    const on = (l.attraction || []).some((t) => ctx.attractionTypes && ctx.attractionTypes.has(t));
+    return { on, why: on ? 'On because the mountain has this kind of attraction.' : 'Off until the mountain adds this kind of attraction.' };
   }
   return { on: true, why: null };
 }

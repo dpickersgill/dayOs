@@ -44,7 +44,7 @@ export async function drawChecklistSetup(panel) {
     ].filter(Boolean).join(' · ');
     return h('li', { class: 'cl-row', 'data-list': l.id },
       h('div', { class: 'cl-row-text' }, h('b', { class: 'cl-row-title' }, l.title), l.when ? h('span', { class: 'cl-row-when' }, l.when) : null,
-        h('span', { class: 'muted small' }, notes), l.start_note && !l.chosen ? h('span', { class: 'muted small' }, `Starts ${l.starts_on ? 'on' : 'off'}: ${l.start_note}`) : null),
+        h('span', { class: 'muted small' }, notes), l.start_note && !l.chosen ? h('span', { class: 'muted small cl-start' }, l.start_note) : null),
       h('div', { class: 'cl-row-actions' }, button('Preview', () => preview(l), { small: true, label: `Preview ${l.title}` }), ...extra, sw));
   }
 
@@ -100,10 +100,10 @@ export async function drawChecklistSetup(panel) {
     for (const it of (l ? l.items : [{}, {}, {}])) items.append(itemRow(it));
     const more = button('Add an item', () => { const r = itemRow(); items.append(r); r.querySelector('input').focus(); }, { small: true });
     const fields = h('div', { class: 'form' },
-      field('Title', title), field('When to use it', when),
+      field('Title', title), h('div', { class: 'wide' }, field('When to use it', when)),
       field('Ticked for', scope, l && l.cases ? 'In use on cases, so this stays as it is.' : 'A patient list is ticked once for each patient.'),
       field('Suggest it for cases at', attraction, 'It suggests itself when the case happened at this kind of attraction.'),
-      h('div', { class: 'field' }, h('span', null, 'Items, in order'), items, more,
+      h('div', { class: 'field wide cl-edit-field' }, h('span', null, 'Items, in order'), items, more,
         h('span', { class: 'hint' }, l ? 'Rewording or taking an item off never changes a case already ticked: each tick keeps the words it was ticked under.' : 'Write each as a short action someone can tick, like "Time of the fall recorded".')));
     formDialog(l ? `Edit ${l.title}` : 'Write a checklist', fields, async () => {
       const list = [...items.querySelectorAll('input[name=item]')].map((x) => ({ ...(x.dataset.id ? { id: Number(x.dataset.id) } : {}), label: x.value.trim() })).filter((x) => x.label);
