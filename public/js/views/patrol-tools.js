@@ -52,7 +52,11 @@ export function whenPicker(id = 'when') {
 }
 
 const savedWord = (r) => (r && r.queued ? 'Kept on this phone. It will send when the signal returns.' : null);
-export function sentToast(r, text) { toast(savedWord(r) || text, r && r.queued ? 'warn' : 'ok'); }
+export function sentToast(r, text) {
+  // With no signal, the case's one signal strip counts what is waiting, so an entry kept on the phone needs no toast too.
+  if (r && r.queued && typeof document !== 'undefined' && document.querySelector('[data-area=outbox]')) return;
+  toast(savedWord(r) || text, r && r.queued ? 'warn' : 'ok');
+}
 
 // ---------------------------------------------------------------- assessment sheets, drawn from the form registry
 const SHEETS = {

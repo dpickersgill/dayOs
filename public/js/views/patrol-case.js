@@ -15,7 +15,7 @@ import { bedsideCard, voidedNote } from './patrol-bedside.js';
 import { collisionPanel } from './patrol-collision.js';
 import { checklistPanel, loadChecklists } from './patrol-checklists.js';
 import { voidDialog, sentToast } from './patrol-tools.js';
-import { send, pending, onChange as onOutbox, flush, retry, discard, waitingCounts, keepCase, keptCase, realCaseId } from '../outbox.js';
+import { send, pending, onChange as onOutbox, flush, retry, discard, waitingCounts, keepCase, keptCase, realCaseId, cachedList } from '../outbox.js';
 import { draftNarrative } from '../narrative.js';
 import { live, lateNote, treatmentName, atTime } from '../care-text.js';
 import { searchPanel, recordsPanel } from './patrol-search.js';
@@ -86,9 +86,10 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       } else {
         [c, def] = await Promise.all([get(`/patrol/incidents/${id}`), loadForm()]);
       }
-      if (!trails) trails = (await get('/schedule/trails?limit=500')).data;
-      if (!lifts) lifts = (await get('/schedule/lifts?limit=200').catch(() => ({ data: [] }))).data;
-      if (!attractions) attractions = (await get('/attractions').catch(() => ({ data: [] }))).data;
+      // the lists the location picker offers are kept on the phone for a dead spot (outbox.js)
+      if (!trails) trails = await cachedList('trails', async () => (await get('/schedule/trails?limit=500')).data);
+      if (!lifts) lifts = await cachedList('lifts', async () => (await get('/schedule/lifts?limit=200')).data).catch(() => []);
+      if (!attractions) attractions = await cachedList('attractions', async () => (await get('/attractions')).data).catch(() => []);
       if (!checklists.length) checklists = await loadChecklists(id);
     } catch (err) {
       // No signal: keep what is on screen. Bedside entries are kept on the phone meanwhile.
@@ -118,6 +119,9 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
     restoreSections(open);
   }
 
+  // The signal strip follows the connection: redraw (what is on screen) when it drops or returns.
+  const onSignal = () => { if (!page.isConnected) { window.removeEventListener('online', onSignal); window.removeEventListener('offline', onSignal); return; } if (current) redraw(); };
+  window.addEventListener('online', onSignal); window.addEventListener('offline', onSignal);
   // Redraw when entries kept on the phone go out (or come back refused).
   let outboxTimer = null;
   const stopOutbox = onOutbox(() => {
@@ -164,7 +168,6 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
     return h('div', { class: 'stack case', 'data-mode': mode },
       wristband(c),
       version ? versionBanner() : null,
-      c.offline ? h('div', { class: 'warn-note', role: 'status' }, h('b', null, 'Started with no signal. '), 'Time stamps, bedside entries (vitals, injuries, treatments, assessments), signatures and the before-the-patient-leaves checklist are kept on this phone and sent with the case when the signal returns. The rest of the report waits until then.') : null,
       outboxStrip(c),
       editable || c.report_state !== 'draft' ? leavePanel({ ...c, waiting: pending(id) }, leaveCtx(editable), leaveOn()) : null,
       progressPanel(c, editable),
@@ -218,18 +221,25 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       h('a', { href: `#/patrol/case/${id}/record` }, 'Open the live report'));
   }
 
-  /** Entries kept on this phone because there was no signal, and any the server refused. */
-  function outboxStrip() {
+  /**
+   * The one signal strip on a case: no signal, a case started with none, what is kept on this phone waiting to send,
+   * and any entry the server refused. It redraws as the signal and the outbox change.
+   */
+  function outboxStrip(c) {
     if (version) return null;
+    const offline = globalThis.navigator && globalThis.navigator.onLine === false;
     const list = pending(id);
     const others = waitingCounts(id).others;
-    if (!list.length && !others) return null;
+    if (!offline && !c.offline && !list.length && !others) return null;
     const waiting = list.filter((x) => !x.error);
     const refused = list.filter((x) => x.error);
-    return h('section', { class: 'outbox-strip', role: 'status', 'data-area': 'outbox' },
+    const count = `${waiting.length} entr${waiting.length === 1 ? 'y' : 'ies'}`;
+    const head = c.offline ? 'Started with no signal. ' : offline ? 'No signal. ' : '';
+    const words = waiting.length ? `${count} waiting to send.` : offline ? 'Bedside entries, time stamps and signatures are kept on this phone and sent when the signal returns.' : c.offline ? 'Sending the case now.' : '';
+    return h('section', { class: `outbox-strip${offline ? ' no-signal' : ''}`, role: 'status', 'data-area': 'outbox', 'data-offline': offline ? 'true' : 'false' },
+      head || words ? h('div', { class: 'spread' }, h('span', null, h('b', null, head), words),
+        waiting.length && !offline ? button('Send now', async () => { const n = await flush(); toast(n ? `Sent ${n}` : 'Still no connection', n ? 'ok' : 'warn'); }, { small: true }) : null) : null, // Send now once there is a signal to send with
       others ? h('p', null, h('b', null, `${others} entr${others === 1 ? 'y' : 'ies'} for this case from another patroller ${others === 1 ? 'is' : 'are'} waiting on this phone. `), 'They send when that patroller signs in here with a signal.') : null,
-      waiting.length ? h('div', { class: 'spread' }, h('span', null, h('b', null, `${waiting.length} entr${waiting.length === 1 ? 'y' : 'ies'} waiting to send. `), 'Kept on this phone with the time each was taken. They send by themselves when the signal returns.'),
-        button('Send now', async () => { const n = await flush(); toast(n ? `Sent ${n}` : 'Still no connection', n ? 'ok' : 'warn'); }, { small: true })) : null,
       refused.map((x) => h('div', { class: 'spread refused' }, h('span', null, h('b', null, `Not saved: ${x.label}. `), x.error),
         h('span', { class: 'row tight' }, button('Try again', () => retry(x.id), { small: true }), button('Discard', () => confirmDialog('Discard this entry?', `${x.label}, taken ${fmtDateTime(x.at)}. It was never saved to the report.`, 'Discard', () => discard(x.id), { danger: true }), { small: true, kind: 'quiet-danger' })))));
   }
@@ -480,9 +490,12 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
         } else toast('Report submitted');
       };
       const submit = button('Submit report', async () => {
-        // The report check is advice: if it cannot be fetched, the submit goes ahead and the required-field check still runs.
-        let items = [];
-        try { items = (await get(`/patrol/incidents/${id}/check`)).data || []; } catch (_) { items = []; }
+        // One pass: what the patrol director requires comes first, with no way past it; the suggestions, with Submit
+        // anyway, are offered only once everything required is in. If the check cannot be fetched, the submit goes
+        // ahead and the server's own required-field check still runs.
+        let items = []; let required = [];
+        try { const r = await get(`/patrol/incidents/${id}/check`); items = r.data || []; required = r.required || []; } catch (_) { items = []; required = []; }
+        if (required.length) { showProblems({ message: 'The report is not complete yet', details: required }, 'Not ready to submit', editable); return; }
         if (items.length) checkDialog(items, send_); else await send_();
       });
       submit.dataset.act = 'submit';
@@ -872,9 +885,20 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
   }
   function responderDialog() {
     const members = roster.filter((m) => m.staff_status === 'active');
-    if (!members.length) { toast('Add patrollers to the Roster first', 'error'); return; }
-    formDialog('Add a responder', h('div', { class: 'form' }, field('Patroller', select(members.map((m) => [m.staff_id, `${m.first_name} ${m.last_name}`]), '', { name: 'staff_id' })), field('Role', select([['assist', 'Assist'], ['lead', 'Lead (replaces the current lead)'], ['transport', 'Transport'], ['dispatch', 'Dispatch']], 'assist', { name: 'role' }))),
-      async (fd) => { await post(`/patrol/incidents/${id}/responders`, { staff_id: num(fd, 'staff_id'), role: val(fd, 'role') }); await load(); });
+    // "Me" comes first: the signed-in patroller, whether or not their login is linked to a staff record yet. The server
+    // makes (or links) their own staff record on the roster when it is not, so the lead can always be named.
+    const myName = me.name || (ctx.me && (ctx.me.login_name || ctx.me.username || ctx.me.email)) || '';
+    const choices = [['me', `Me${myName ? ` (${myName})` : ''}`], ...members.filter((m) => !me.staff_id || m.staff_id !== me.staff_id).map((m) => [m.staff_id, `${m.first_name} ${m.last_name}`])];
+    const hint = members.length ? null : 'Nobody is on the Roster yet. You can still name yourself.';
+    const noLead = !(current && current.responders || []).some((r) => r.role === 'lead' && !r.voided_at); // the first responder named is the lead
+    formDialog('Add a responder', h('div', { class: 'form' }, field('Patroller', select(choices, 'me', { name: 'staff_id' }), hint), field('Role', select([['assist', 'Assist'], ['lead', 'Lead (replaces the current lead)'], ['transport', 'Transport'], ['dispatch', 'Dispatch']], noLead ? 'lead' : 'assist', { name: 'role' }))),
+      async (fd) => {
+        if (val(fd, 'staff_id') === 'me') {
+          const r = await post(`/patrol/incidents/${id}/responders/me`, { role: val(fd, 'role') });
+          if (r && r.linked) { me.staff_id = r.staff_id; toast('Your login is now linked to your own staff record on the patrol roster'); }
+        } else await post(`/patrol/incidents/${id}/responders`, { staff_id: num(fd, 'staff_id'), role: val(fd, 'role') });
+        await load();
+      });
   }
 
   /** Marks the case as a collision, so the collision section appears. */
