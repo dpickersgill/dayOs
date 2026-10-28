@@ -121,6 +121,13 @@ function editProduct(p, done, atts = []) {
     if (incBox) incBox.hidden = !TICKET_KINDS.includes(k);
   };
   for (const el of [kindSel, timedSlots, timedDay]) el.addEventListener('change', showKind);
+  // A new activity starts as the attraction usually sells: skating, the bike park and disc golf by the day, rides by time slot.
+  attSel.addEventListener('change', () => {
+    const a = atts.find((x) => String(x.id) === attSel.value);
+    if (p || !a) return;
+    const day = ['ice_rink', 'bike_park', 'disc_golf'].includes(a.type);
+    timedDay.checked = day; timedSlots.checked = !day; showKind();
+  });
   const dayBoxes = DOW.map((d, i) => h('label', { class: 'check' }, h('input', { type: 'checkbox', name: `dow${i}`, checked: Boolean(mask & (1 << i)) }), d));
   const f = h('div', { class: 'form' },
     field('Name', input({ name: 'name', required: true, maxlength: 255, value: p ? p.name : '' })),
