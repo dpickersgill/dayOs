@@ -18,6 +18,7 @@ const { isSandbox } = require('../lib/sandbox');
 const shopsale = require('../lib/shopsale');
 const shopafter = require('../lib/shopafter');
 const cardrefund = require('../lib/cardrefund');
+const { logFailure } = require('../lib/jobs');
 
 const router = express.Router();
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I
@@ -154,7 +155,7 @@ router.post('/:slug/requests', validate(requestSchema), async (req, res) => {
       const pay = connect.checkoutFor(await connect.payeeOrThrow(t.id), out.quote.total, { tenant_id: String(t.id), request_id: String(out.id), reference: out.ref });
       co = await stripe.createCheckout({
         amountCents: out.quote.total, name: `${out.quote.name} (${b.students.length} student${b.students.length > 1 ? 's' : ''})`,
-        description: `${t.name}: ${out.session.starts_at.slice(0, 16).replace('T', ' ')}`, email: b.contact_email, reference: out.ref, ...pay,
+        description: `${t.name}: ${out.session.starts_at.slice(0, 16).replace('T', ' ')}`, email: b.contact_email, reference: out.ref, ...pay, idempotencyKey: `lesson-${out.id}`,
         successUrl: `${baseUrl(req)}/book/${req.params.slug}?paid=${out.ref}`, cancelUrl: `${baseUrl(req)}/book/${req.params.slug}?cancelled=${out.ref}`,
       });
     } catch (err) {
@@ -189,11 +190,12 @@ router.post('/:slug/requests/:ref/cancel', validate(z.object({ email: z.string()
   const t = await tenantFor(req.params.slug);
   res.set('Cache-Control', 'no-store');
   const r = await findRequest(t, req.params.ref, req.body.email);
-  let refundInfo = null;
+  let refundInfo = null; let openPage = null;
   await tx(async (conn) => {
-    const cur = await one(conn, 'SELECT status FROM lesson_requests WHERE tenant_id = ? AND id = ? FOR UPDATE', [t.id, r.id]);
+    const cur = await one(conn, 'SELECT status, stripe_session_id FROM lesson_requests WHERE tenant_id = ? AND id = ? FOR UPDATE', [t.id, r.id]);
     if (cur.status === 'awaiting_payment') {
       await conn.query("UPDATE lesson_requests SET status = 'cancelled', decided_at = NOW() WHERE tenant_id = ? AND id = ?", [t.id, r.id]);
+      openPage = cur.stripe_session_id;
     } else if (cur.status === 'confirmed' && r.order_id) {
       refundInfo = await cancelPaid(conn, t, r);
     } else if (cur.status === 'pending') {
@@ -212,8 +214,49 @@ router.post('/:slug/requests/:ref/cancel', validate(z.object({ email: z.string()
   // The refund is already written down as owed; if Stripe cannot be reached now it is retried, so the guest is not left
   // with an error after their lesson was canceled.
   if (refundInfo && refundInfo.refundId) await cardrefund.send(t.id, refundInfo.refundId);
-  res.json({ ok: true, refund_cents: refundInfo ? refundInfo.cents : 0, refund_percent: refundInfo ? refundInfo.percent : 0 });
+  // Still on Stripe's page (another tab, or the two happened together): close the page so it cannot take the money now.
+  // If the payment got there first, it is given back in full here, or by the webhook when it arrives, whichever is first.
+  const late = openPage ? await closePage(t.id, r.id, openPage) : null;
+  res.json({ ok: true, refund_cents: late ? late.cents : refundInfo ? refundInfo.cents : 0, refund_percent: late ? 100 : refundInfo ? refundInfo.percent : 0,
+    ...(late ? { message: 'Your payment went through just as you canceled, so all of it is going back to your card.' } : {}) });
 });
+
+/**
+ * Expires the Stripe page of a request the guest just canceled. When Stripe says the page was already paid, the payment is
+ * refunded in full now. Returns { cents } when it was, else null.
+ */
+async function closePage(tenantId, requestId, sessionId) {
+  const acct = (await one(pool, 'SELECT stripe_account FROM tenants WHERE id = ?', [tenantId])).stripe_account || null;
+  const how = await stripe.expireCheckout(sessionId, { account: acct });
+  if (how !== 'closed') return null;
+  let s = null;
+  try { s = await stripe.get(`/v1/checkout/sessions/${encodeURIComponent(sessionId)}`, { account: acct }); } catch (_) { return null; } // the webhook still refunds it
+  if (!s || s.status !== 'complete' || s.payment_status !== 'paid' || !s.payment_intent) return null;
+  const out = await giveBack(tenantId, requestId, { ...s, id: sessionId }, acct, 'the request was canceled before the payment arrived');
+  return out.refunded ? { cents: Number(s.amount_total) } : null;
+}
+
+/**
+ * A paid page for a request we cannot book (canceled or expired while the guest was paying, or already paid another way):
+ * the whole payment is written down as owed back, then sent to Stripe. A request with no payment of its own is noted
+ * (Refunded automatically) in the same step. A repeat changes nothing.
+ */
+async function giveBack(tenantId, requestId, obj, account, why) {
+  const owed = await tx(async (conn) => {
+    const raw = await one(conn, 'SELECT id, status, payment_intent FROM lesson_requests WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, requestId]);
+    if (!raw || raw.status === 'awaiting_payment' || raw.payment_intent === String(obj.payment_intent)) return null;
+    const id = await cardrefund.oweReturn(conn, { tenantId, kind: 'lesson', rowId: requestId, session: obj.id, paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), account, reason: why });
+    if (!id) return null;
+    if (!raw.payment_intent) {
+      await conn.query('UPDATE lesson_requests SET payment_intent = ?, refund_cents = ?, staff_note = ? WHERE tenant_id = ? AND id = ?',
+        [String(obj.payment_intent), Number(obj.amount_total), `Refunded automatically: ${why}`.slice(0, 300), tenantId, requestId]);
+    }
+    return id;
+  });
+  if (!owed) return { duplicate: true };
+  await cardrefund.sendReturn(owed);
+  return { refunded: true };
+}
 
 /** Cancels a paid online request under the mountain's tiers and records the refund in the books. The Stripe refund is sent after the commit. */
 async function cancelPaid(conn, t, r) {
@@ -251,14 +294,16 @@ async function recordDonation(event, obj) {
   const m = obj.metadata;
   const details = obj.customer_details || {};
   const [r] = await pool.query(
-    'INSERT IGNORE INTO donations (tenant_id, amount_cents, monthly, email, name, followup_id, stripe_session_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [Number(m.tenant_id), Number(obj.amount_total), obj.mode === 'subscription' ? 1 : 0, (details.email || obj.customer_email || '').slice(0, 255) || null, (details.name || '').slice(0, 150) || null, m.followup_id ? Number(m.followup_id) : null, obj.id],
+    'INSERT IGNORE INTO donations (tenant_id, amount_cents, monthly, email, name, followup_id, stripe_session_id, stripe_account) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [Number(m.tenant_id), Number(obj.amount_total), obj.mode === 'subscription' ? 1 : 0, (details.email || obj.customer_email || '').slice(0, 255) || null, (details.name || '').slice(0, 150) || null, m.followup_id ? Number(m.followup_id) : null, obj.id, event.account || null],
   );
   return { donation: r.affectedRows === 1 };
 }
 
 async function handleWebhook(event, base) {
   const obj = event && event.data && event.data.object;
+  // A card reader payment at the counter (routes/terminal.js).
+  if (obj && obj.metadata && obj.metadata.kind === 'counter' && String(event.type || '').startsWith('payment_intent.')) return require('./terminal').handleWebhook(event, obj);
   if (obj && obj.metadata && obj.metadata.kind === 'shop_change') return shopafter.handleChangeWebhook(event, obj);
   if (obj && obj.metadata && obj.metadata.kind === 'shop') return shopsale.handleWebhook(event, obj, base || config.stripe.publicUrl || '');
   if (obj && obj.metadata && obj.metadata.kind === 'program') return require('./programreg').handleWebhook(event, obj, base || config.stripe.publicUrl || '');
@@ -267,23 +312,35 @@ async function handleWebhook(event, base) {
   const tenantId = Number(obj.metadata.tenant_id);
   const requestId = Number(obj.metadata.request_id);
   if (event.type === 'checkout.session.expired') {
-    await pool.query("UPDATE lesson_requests SET status = 'expired' WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment' AND stripe_session_id = ?", [tenantId, requestId, obj.id]);
+    // (A request whose page was never saved, because that save failed, is matched too.)
+    await pool.query("UPDATE lesson_requests SET status = 'expired' WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment' AND (stripe_session_id = ? OR stripe_session_id IS NULL)", [tenantId, requestId, obj.id]);
     return { expired: true };
   }
   if (event.type !== 'checkout.session.completed' || obj.payment_status !== 'paid') return { ignored: true };
-  let failed = null;
+  let failed = null; let gone = null; let stray = null;
   let result;
   try {
     result = await tx(async (conn) => {
+      failed = null; gone = null; stray = null;
       const raw = await one(conn, 'SELECT * FROM lesson_requests WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, requestId]);
-      if (!raw || raw.stripe_session_id !== obj.id) return { ignored: true };
-      // Only a request still waiting for this payment is acted on. A repeat of an event we already handled, including one we
-      // refunded, changes nothing.
-      if (raw.status !== 'awaiting_payment') return { duplicate: true };
+      if (!raw) { logFailure({ job: 'stripe_webhook', tenant: tenantId, message: `a paid card page names lesson request ${requestId}, which is not on file` }); return { ignored: true }; }
+      // A repeat of an event we already handled, booked or refunded, changes nothing.
+      if (raw.payment_intent === String(obj.payment_intent) || await cardrefund.returned(conn, tenantId, obj.payment_intent)) return { duplicate: true };
+      // Only a request still waiting for this payment is booked. One canceled, expired or paid another way while the guest
+      // was still paying is refunded in full.
+      if (raw.status !== 'awaiting_payment') {
+        gone = ['cancelled', 'expired', 'declined'].includes(raw.status) ? `the request was ${raw.status === 'cancelled' ? 'canceled' : raw.status} before the payment arrived` : 'the request was already paid';
+        return { problem: true };
+      }
+      // Waiting on another card page: this one is not what it is waiting for, so it goes back. With no page saved (that
+      // save failed after Stripe made the page), the payment is accepted when the amount is right.
+      const lost = !raw.stripe_session_id;
+      if (!lost && raw.stripe_session_id !== obj.id) { stray = 'it was not the card page saved for this request'; return { problem: true }; }
       const q = parseRequest(raw).quote;
       if (!q || Number(obj.amount_total) !== raw.amount_cents) { failed = 'amount'; return { problem: true }; }
+      if (lost) await conn.query('UPDATE lesson_requests SET stripe_session_id = ? WHERE tenant_id = ? AND id = ?', [obj.id, tenantId, raw.id]);
       try {
-        return await confirmRequest(conn, tenantId, raw, { paid: true, paymentIntent: obj.payment_intent });
+        return await confirmRequest(conn, tenantId, raw, { paid: true, paymentIntent: obj.payment_intent, payee: connect.paidTo(event) });
       } catch (err) {
         if (err.status && err.status < 500) throw new Unhonourable(err.message);
         throw err;
@@ -293,11 +350,18 @@ async function handleWebhook(event, base) {
     if (!(err instanceof Unhonourable)) throw err;
     failed = err.message; result = { problem: true }; // rolled back: nothing half-made is kept
   }
+  if (gone) return giveBack(tenantId, requestId, obj, event.account || null, gone);
+  if (stray) return cardrefund.returnStray({ tenantId, kind: 'lesson', rowId: requestId, obj, account: event.account || null, why: stray });
   if (failed) {
-    // We could not honor it (lesson full or canceled, or the amount was wrong): give the money back in full. The refund
-    // goes first; if Stripe cannot be reached this throws, Stripe sends the event again, and we try again.
-    if (obj.payment_intent && stripe.enabled()) await stripe.refund({ paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), key: `autorefund-${tenantId}-${requestId}`, account: event.account || null });
-    await pool.query("UPDATE lesson_requests SET status = 'expired', payment_intent = ?, refund_cents = amount_cents, staff_note = ? WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment'", [obj.payment_intent, `Refunded automatically: ${failed}`.slice(0, 300), tenantId, requestId]);
+    // We could not honor it (lesson full or canceled, or the amount was wrong): give the money back in full. It is written
+    // down as owed with the request's new state in one step, then sent; the daily job retries it if Stripe is slow.
+    const owed = await tx(async (conn) => {
+      const [u] = await conn.query("UPDATE lesson_requests SET status = 'expired', payment_intent = ?, refund_cents = ?, staff_note = ? WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment'",
+        [obj.payment_intent || null, Number(obj.amount_total) || 0, `Refunded automatically: ${failed}`.slice(0, 300), tenantId, requestId]);
+      if (u.affectedRows !== 1) return null;
+      return cardrefund.oweReturn(conn, { tenantId, kind: 'lesson', rowId: requestId, session: obj.id, paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), account: event.account || null, reason: failed });
+    });
+    if (owed) await cardrefund.sendReturn(owed);
   }
   return result;
 }

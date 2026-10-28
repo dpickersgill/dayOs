@@ -17,6 +17,7 @@ const { createApp } = require('../src/app');
 const { pool } = require('../src/db');
 
 let server; let base; let mock; const calls = []; let n = 0;
+const pages = new Map(); const stripeSays = { refuseRefunds: false }; // the mock's checkout pages, and a switch for a refund Stripe refuses
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const PW = 'correct-horse-battery';
 const q = async (sql, params) => (await pool.query(sql, params))[0];
@@ -70,10 +71,17 @@ test.before(async () => {
     req.on('data', (c) => { data += c; });
     req.on('end', () => {
       const params = Object.fromEntries(new URLSearchParams(data));
-      calls.push({ path: req.url, params, auth: req.headers.authorization, key: req.headers['idempotency-key'] });
+      calls.push({ path: req.url, method: req.method, params, auth: req.headers.authorization, key: req.headers['idempotency-key'], account: req.headers['stripe-account'] || null });
       res.setHeader('content-type', 'application/json');
-      if (req.url === '/v1/checkout/sessions') res.end(JSON.stringify({ id: `cs_test_${++n}`, url: `https://checkout.stripe.test/c/${n}` }));
+      let m;
+      if (req.url === '/v1/checkout/sessions') { const id = `cs_test_${++n}`; pages.set(id, { id, status: 'open' }); res.end(JSON.stringify({ id, url: `https://checkout.stripe.test/c/${n}` })); }
+      else if ((m = req.url.match(/^\/v1\/checkout\/sessions\/(cs_test_\d+)\/expire$/))) {
+        const pg = pages.get(m[1]);
+        if (!pg || pg.status !== 'open') { res.statusCode = 400; res.end(JSON.stringify({ error: { message: 'Only Checkout Sessions with a status in ["open"] can be expired.' } })); } else { pg.status = 'expired'; res.end(JSON.stringify(pg)); }
+      } else if ((m = req.url.match(/^\/v1\/checkout\/sessions\/(cs_test_\d+)$/))) res.end(JSON.stringify(pages.get(m[1]) || {}));
+      else if (req.url === '/v1/refunds' && stripeSays.refuseRefunds) { res.statusCode = 500; res.end(JSON.stringify({ error: { message: 'Stripe is having a bad day' } })); }
       else if (req.url === '/v1/refunds') res.end(JSON.stringify({ id: `re_${++n}` }));
+      else if (req.url.startsWith('/v1/refunds?')) res.end(JSON.stringify({ data: [] }));
       else { res.statusCode = 404; res.end('{}'); }
     });
   });
@@ -117,6 +125,21 @@ test('a reservation must accept the policy, then goes to Stripe for the tax-incl
   // the spot is held while the guest pays
   const held = (await pub('GET', '/booking')).body.lessons.find((l) => l.id === sessionId);
   assert.equal(held.spots_left, 3);
+});
+
+test('every card page has its own Stripe key: the table, the row and the amount, never shared by two guests', async () => {
+  const page = (key, amountCents = 25000) => stripe.createCheckout({ amountCents, name: 'Program', email: 'p@x.test', reference: 'R1', metadata: { tenant_id: String(tenantId), registration_id: '1', kind: 'program' },
+    successUrl: 'https://x.test/s', cancelUrl: 'https://x.test/c', ...(key ? { idempotencyKey: key } : {}) });
+  const before = calls.length;
+  await page('program-101'); await page('program-102'); await page('lesson-101'); await page('program-101', 26000);
+  assert.deepEqual(calls.slice(before).filter((x) => x.path === '/v1/checkout/sessions').map((x) => x.key),
+    ['checkout-program-101-25000', 'checkout-program-102-25000', 'checkout-lesson-101-25000', 'checkout-program-101-26000']);
+  await assert.rejects(page(null), /idempotencyKey/, 'a card page without its own key is never sent');
+  sessionId = await newLesson(100);
+  const r = await pub('POST', '/requests', { body: reqBody() });
+  assert.equal(r.status, 201, r.text);
+  const row = (await q('SELECT id, amount_cents FROM lesson_requests WHERE reference = ?', [r.body.reference]))[0];
+  assert.equal(calls.filter((x) => x.path === '/v1/checkout/sessions').at(-1).key, `checkout-lesson-${row.id}-${row.amount_cents}`);
 });
 
 test('webhooks need a valid, fresh signature, and a paid webhook books the lesson and records the sale once', async () => {
@@ -170,7 +193,7 @@ test('if the lesson filled up while the guest was paying, they are refunded in f
   assert.equal(after.refund_cents, 8480);
   assert.match(after.staff_note, /Refunded automatically/);
   assert.equal(calls.slice(before).find((x) => x.path === '/v1/refunds').params.amount, '8480');
-  assert.equal((await q('SELECT COUNT(*) AS n FROM orders WHERE payment_ref = ?', [`pi_${row.stripe_session_id}`]))[0].n, 0);
+  assert.equal((await q('SELECT COUNT(*) AS n FROM orders WHERE tenant_id = ? AND payment_ref = ?', [tenantId, `pi_${row.stripe_session_id}`]))[0].n, 0);
 });
 
 test('an abandoned checkout expires and frees the spot', async () => {
@@ -184,6 +207,133 @@ test('an abandoned checkout expires and frees the spot', async () => {
   assert.equal((await pub('POST', '/requests', { body: reqBody() })).status, 201, 'the spot is free again');
 });
 
+test('a guest who cancels while still on Stripe\'s page: the page is closed, and a payment that lands anyway is refunded in full', async () => {
+  sessionId = await newLesson(100);
+  const r = await pub('POST', '/requests', { body: reqBody() });
+  const row = (await q('SELECT * FROM lesson_requests WHERE reference = ?', [r.body.reference]))[0];
+  const c = await pub('POST', `/requests/${r.body.reference}/cancel`, { body: { email: 'pam@x.test' } });
+  assert.equal(c.status, 200, c.text);
+  assert.equal(c.body.refund_cents, 0, 'nothing was paid yet');
+  assert.ok(calls.some((x) => x.path === `/v1/checkout/sessions/${row.stripe_session_id}/expire`), 'the Stripe page is closed');
+  assert.equal(pages.get(row.stripe_session_id).status, 'expired');
+  // The other tab paid a moment before the page closed: the money goes back, nothing is booked.
+  const before = calls.length;
+  const w = await webhook(completed({ session_id: row.stripe_session_id, amount_cents: row.amount_cents }, row.id, tenantId));
+  assert.equal(w.status, 200); assert.equal(w.body.refunded, true);
+  const sent = calls.slice(before).filter((x) => x.path === '/v1/refunds');
+  assert.equal(sent.length, 1); assert.equal(sent[0].params.amount, String(row.amount_cents)); assert.equal(sent[0].params.payment_intent, `pi_${row.stripe_session_id}`);
+  const after = (await q('SELECT status, refund_cents, staff_note, payment_intent, order_id FROM lesson_requests WHERE id = ?', [row.id]))[0];
+  assert.equal(after.status, 'cancelled'); assert.equal(after.refund_cents, row.amount_cents); assert.equal(after.order_id, null);
+  assert.match(after.staff_note, /Refunded automatically: the request was canceled/);
+  const owed = (await q('SELECT kind, row_id, amount_cents, card_status FROM card_returns WHERE tenant_id = ? AND payment_intent = ?', [tenantId, `pi_${row.stripe_session_id}`]))[0];
+  assert.deepEqual({ ...owed }, { kind: 'lesson', row_id: row.id, amount_cents: row.amount_cents, card_status: 'sent' }, 'written down as owed, then sent');
+  assert.equal((await q('SELECT COUNT(*) AS n FROM lesson_bookings WHERE session_id = ?', [sessionId]))[0].n, 0);
+  const again = await webhook(completed({ session_id: row.stripe_session_id, amount_cents: row.amount_cents }, row.id, tenantId));
+  assert.equal(again.body.duplicate, true, 'a repeat refunds nothing more');
+  assert.equal(calls.slice(before).filter((x) => x.path === '/v1/refunds').length, 1);
+  // A request that expired is the same: it cannot be booked, so its payment goes back.
+  const r2 = await pub('POST', '/requests', { body: reqBody() });
+  const row2 = (await q('SELECT * FROM lesson_requests WHERE reference = ?', [r2.body.reference]))[0];
+  await q("UPDATE lesson_requests SET status = 'expired' WHERE id = ?", [row2.id]);
+  assert.equal((await webhook(completed({ session_id: row2.stripe_session_id, amount_cents: row2.amount_cents }, row2.id, tenantId))).body.refunded, true);
+  assert.equal((await q('SELECT refund_cents FROM lesson_requests WHERE id = ?', [row2.id]))[0].refund_cents, row2.amount_cents);
+});
+
+test('paid just before the cancel: the cancel gives it all back at once, and the webhook that follows changes nothing', async () => {
+  sessionId = await newLesson(100);
+  const r = await pub('POST', '/requests', { body: reqBody() });
+  const row = (await q('SELECT * FROM lesson_requests WHERE reference = ?', [r.body.reference]))[0];
+  Object.assign(pages.get(row.stripe_session_id), { status: 'complete', payment_status: 'paid', payment_intent: `pi_${row.stripe_session_id}`, amount_total: row.amount_cents });
+  const before = calls.length;
+  const c = await pub('POST', `/requests/${r.body.reference}/cancel`, { body: { email: 'pam@x.test' } });
+  assert.equal(c.status, 200, c.text);
+  assert.equal(c.body.refund_cents, row.amount_cents); assert.equal(c.body.refund_percent, 100); assert.match(c.body.message, /going back to your card/);
+  assert.equal(calls.slice(before).filter((x) => x.path === '/v1/refunds').length, 1);
+  const w = await webhook(completed({ session_id: row.stripe_session_id, amount_cents: row.amount_cents }, row.id, tenantId));
+  assert.equal(w.body.duplicate, true);
+  assert.equal(calls.slice(before).filter((x) => x.path === '/v1/refunds').length, 1, 'refunded once');
+});
+
+test('a refund Stripe cannot take now is kept as owed and sent by the daily job', async () => {
+  sessionId = await newLesson(100);
+  const r = await pub('POST', '/requests', { body: reqBody() });
+  const row = (await q('SELECT * FROM lesson_requests WHERE reference = ?', [r.body.reference]))[0];
+  assert.equal((await pub('POST', `/requests/${r.body.reference}/cancel`, { body: { email: 'pam@x.test' } })).status, 200);
+  stripeSays.refuseRefunds = true;
+  try {
+    const w = await webhook(completed({ session_id: row.stripe_session_id, amount_cents: row.amount_cents }, row.id, tenantId));
+    assert.equal(w.status, 200, 'the event is taken: the money is written down as owed');
+  } finally { stripeSays.refuseRefunds = false; }
+  const pi = `pi_${row.stripe_session_id}`;
+  assert.equal((await q('SELECT card_status FROM card_returns WHERE tenant_id = ? AND payment_intent = ?', [tenantId, pi]))[0].card_status, 'failed');
+  assert.match((await q('SELECT staff_note FROM lesson_requests WHERE id = ?', [row.id]))[0].staff_note, /Refunded automatically/);
+  await require('../src/lib/cardrefund').retryAll();
+  assert.equal((await q('SELECT card_status FROM card_returns WHERE tenant_id = ? AND payment_intent = ?', [tenantId, pi]))[0].card_status, 'sent');
+});
+
+test('a paid card page that cannot be matched is refunded; one whose saved page was lost is accepted when the amount is right', async () => {
+  // The save of the page went missing (Stripe made it, our database never kept it): the right amount books the lesson.
+  sessionId = await newLesson(100);
+  const r = await pub('POST', '/requests', { body: reqBody() });
+  const row = (await q('SELECT * FROM lesson_requests WHERE reference = ?', [r.body.reference]))[0];
+  await q('UPDATE lesson_requests SET stripe_session_id = NULL WHERE id = ?', [row.id]);
+  const w = await webhook(completed({ session_id: row.stripe_session_id, amount_cents: row.amount_cents }, row.id, tenantId));
+  assert.equal(w.status, 200);
+  const booked = (await q('SELECT status, order_id, stripe_session_id FROM lesson_requests WHERE id = ?', [row.id]))[0];
+  assert.equal(booked.status, 'confirmed'); assert.ok(booked.order_id); assert.equal(booked.stripe_session_id, row.stripe_session_id, 'the page is saved now');
+  // Waiting on its own page, but a different paid page names it: that money goes back, the request keeps waiting.
+  sessionId = await newLesson(100);
+  const r2 = await pub('POST', '/requests', { body: reqBody() });
+  const row2 = (await q('SELECT * FROM lesson_requests WHERE reference = ?', [r2.body.reference]))[0];
+  const before = calls.length;
+  const stray = await webhook(completed({ session_id: 'cs_test_elsewhere', amount_cents: row2.amount_cents }, row2.id, tenantId, { payment_intent: `pi_stray_${suffix}` }));
+  assert.equal(stray.status, 200); assert.equal(stray.body.refunded, true);
+  assert.equal(calls.slice(before).find((x) => x.path === '/v1/refunds').params.payment_intent, `pi_stray_${suffix}`);
+  assert.equal((await q('SELECT status FROM lesson_requests WHERE id = ?', [row2.id]))[0].status, 'awaiting_payment');
+  assert.match((await q('SELECT reason FROM card_returns WHERE tenant_id = ? AND payment_intent = ?', [tenantId, `pi_stray_${suffix}`]))[0].reason, /not the card page saved/);
+  assert.equal((await webhook(completed({ session_id: row2.stripe_session_id, amount_cents: row2.amount_cents }, row2.id, tenantId))).status, 200);
+  assert.equal((await q('SELECT status FROM lesson_requests WHERE id = ?', [row2.id]))[0].status, 'confirmed', 'its own page still books it');
+  // Already paid, and a second payment arrives: it goes back, and the booking is left as it was.
+  const third = await webhook(completed({ session_id: 'cs_test_again', amount_cents: row2.amount_cents }, row2.id, tenantId, { payment_intent: `pi_twice_${suffix}` }));
+  assert.equal(third.body.refunded, true);
+  const kept = (await q('SELECT status, payment_intent, staff_note FROM lesson_requests WHERE id = ?', [row2.id]))[0];
+  assert.equal(kept.status, 'confirmed'); assert.equal(kept.payment_intent, `pi_${row2.stripe_session_id}`); assert.equal(kept.staff_note, null);
+});
+
+test('an order paid with two cards refunds each card what it paid, oldest first; a card from a separate machine is left for the desk', async () => {
+  const order = async (lines, pays) => {
+    const total = lines.reduce((x, c) => x + c, 0);
+    const [o] = await pool.query("INSERT INTO orders (tenant_id, user_id, status, subtotal_cents, total_cents, channel) VALUES (?, NULL, 'paid', ?, ?, 'window')", [tenantId, total, total]);
+    for (const c of lines) await pool.query("INSERT INTO order_items (tenant_id, order_id, line_kind, quantity, unit_price_cents) VALUES (?, ?, 'ticket', 1, ?)", [tenantId, o.insertId, c]);
+    for (const p of pays) await pool.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, processor) VALUES (?, ?, 'card', ?, ?, ?)", [tenantId, o.insertId, p.cents, p.ref || null, p.ref ? 'stripe' : null]);
+    return { id: o.insertId, items: (await q('SELECT id FROM order_items WHERE order_id = ? ORDER BY id', [o.insertId])).map((x) => x.id) };
+  };
+  const sentSince = (mark) => calls.slice(mark).filter((x) => x.path === '/v1/refunds').map((x) => [x.params.payment_intent, Number(x.params.amount)]);
+  const cardRows = async (id) => (await q("SELECT card_ref, amount_cents, card_status FROM order_refunds WHERE order_id = ? AND method = 'card' ORDER BY id", [id])).map((r) => [r.card_ref, r.amount_cents, r.card_status]);
+  // Two reader payments, $60 and $40: the whole refund is split $60 and $40, one refund row each.
+  const A2 = `pi_cardA_${suffix}`; const B2 = `pi_cardB_${suffix}`;
+  const two = await order([10000], [{ cents: 6000, ref: A2 }, { cents: 4000, ref: B2 }]);
+  let mark = calls.length;
+  const r = await api('POST', `/orders/${two.id}/refund`, { token: A.owner, body: { reason: 'customer_request' } });
+  assert.equal(r.status, 200, r.text); assert.equal(r.body.card_refunded, true); assert.equal(r.body.card_refund_failed, undefined);
+  assert.deepEqual(sentSince(mark), [[A2, 6000], [B2, 4000]]);
+  assert.deepEqual(await cardRows(two.id), [[A2, 6000, 'sent'], [B2, 4000, 'sent']]);
+  // Part refunds, one at a time: $50 on Stripe, $30 on a separate card machine, $20 on Stripe.
+  const P = `pi_cardP_${suffix}`; const Q = `pi_cardQ_${suffix}`;
+  const three = await order([2500, 2500, 2500, 2500], [{ cents: 5000, ref: P }, { cents: 3000 }, { cents: 2000, ref: Q }]);
+  const part = async (i) => { const x = await api('POST', `/orders/${three.id}/refund`, { token: A.owner, body: { reason: 'customer_request', item_ids: [three.items[i]] } }); assert.equal(x.status, 200, x.text); return x; };
+  mark = calls.length;
+  await part(0); await part(1);
+  assert.deepEqual(sentSince(mark), [[P, 2500], [P, 2500]], 'the first card, until it has nothing left');
+  mark = calls.length;
+  await part(2);
+  assert.deepEqual(sentSince(mark), [], 'the separate machine\'s card is not sent to Stripe');
+  await part(3);
+  assert.deepEqual(sentSince(mark), [[Q, 2000]]);
+  assert.deepEqual(await cardRows(three.id), [[P, 2500, 'sent'], [P, 2500, 'sent'], [null, 2500, null], [null, 500, null], [Q, 2000, 'sent']]);
+  assert.equal((await q('SELECT status, refunded_cents FROM orders WHERE id = ?', [three.id]))[0].refunded_cents, 10000);
+});
+
 test('canceling a paid lesson refunds 100% well ahead, 50% in the middle window and nothing at the last minute', async () => {
   const cancel = (info, email = 'pam@x.test') => pub('POST', `/requests/${info.reference}/cancel`, { body: { email } });
   // 100 hours ahead: full refund
@@ -195,7 +345,7 @@ test('canceling a paid lesson refunds 100% well ahead, 50% in the middle window 
   assert.equal(c.body.refund_percent, 100);
   assert.equal(c.body.refund_cents, 8480);
   assert.equal(calls.slice(before).find((x) => x.path === '/v1/refunds').params.amount, '8480');
-  assert.equal((await q('SELECT status, refunded_cents FROM orders WHERE payment_ref = ?', [`pi_${info.session_id}`]))[0].status, 'refunded');
+  assert.equal((await q('SELECT status, refunded_cents FROM orders WHERE tenant_id = ? AND payment_ref = ?', [tenantId, `pi_${info.session_id}`]))[0].status, 'refunded');
   assert.equal((await q('SELECT COUNT(*) AS n FROM lesson_bookings WHERE session_id = (SELECT session_id FROM lesson_requests WHERE reference = ?) AND status = \'booked\'', [info.reference]))[0].n, 0);
   assert.equal((await q('SELECT COUNT(*) AS n FROM order_refunds WHERE tenant_id = ? AND method = \'card\'', [tenantId]))[0].n >= 1, true);
   assert.equal((await cancel(info)).status, 409, 'cannot cancel twice');
@@ -206,7 +356,7 @@ test('canceling a paid lesson refunds 100% well ahead, 50% in the middle window 
   assert.equal(c.body.refund_percent, 50);
   assert.equal(c.body.refund_cents, 4240);
   assert.equal(calls.slice(before).find((x) => x.path === '/v1/refunds').params.amount, '4240');
-  const o = (await q('SELECT status, refunded_cents FROM orders WHERE payment_ref = ?', [`pi_${info.session_id}`]))[0];
+  const o = (await q('SELECT status, refunded_cents FROM orders WHERE tenant_id = ? AND payment_ref = ?', [tenantId, `pi_${info.session_id}`]))[0];
   assert.deepEqual({ ...o }, { status: 'paid', refunded_cents: 4240 });
   // 10 hours ahead: none
   info = await reserveAndPay(10);

@@ -3,7 +3,9 @@
 // Card readers at the counter (Stripe Terminal, server-driven). A Stripe smart reader (S700/S710, WisePOS E, T600) sits
 // on the counter on the mountain's Wi-Fi; nothing is installed on the counter computer. A manager pairs it under Billing
 // with the code the reader shows. At checkout, Card on reader sends the amount to the reader through Stripe's API, the
-// guest taps, inserts or swipes, and the counter screen asks this server how it went every second or two.
+// guest taps, inserts or swipes, and the counter screen asks this server how it went every second or two. Stripe's
+// payment_intent webhooks and the daily job check too, so a payment the screen stopped watching (a refresh, a dropped
+// connection) is still recorded, and shows under Billing to finish or refund.
 //
 // The money is a direct charge on the mountain's own Stripe account, like the online shop (lib/connect.js), with the
 // platform's fee when the console sets one. A payment that succeeded is attached to the sale it paid for when the sale
@@ -13,6 +15,7 @@
 const crypto = require('crypto');
 const express = require('express');
 const { pool, one, rows } = require('../db');
+const { logFailure } = require('../lib/jobs');
 const { z, validate } = require('../lib/util');
 const { requireRole } = require('../middleware/auth');
 const { AppError, bad, notFound, conflict } = require('../lib/errors');
@@ -88,7 +91,12 @@ router.delete('/readers/:id', requireRole('manager'), async (req, res) => {
 
 // ---------------------------------------------------------------- charging
 const payShape = (p) => ({ id: Number(p.id), status: p.status, amount_cents: Number(p.amount_cents), failure: p.failure || null,
-  card_brand: p.card_brand || null, card_last4: p.card_last4 || null, attached: Boolean(p.order_id), reader_id: Number(p.reader_id) });
+  card_brand: p.card_brand || null, card_last4: p.card_last4 || null, attached: Boolean(p.order_id), reader_id: Number(p.reader_id), created_at: p.created_at });
+/** The brand and last 4 of the card on a payment (with its latest charge expanded), when Stripe says. */
+function cardOf(intent) {
+  const card = intent && intent.latest_charge && intent.latest_charge.payment_method_details && (intent.latest_charge.payment_method_details.card_present || intent.latest_charge.payment_method_details.interac_present);
+  return { brand: card ? brandOf(card.brand) : null, last4: card && /^\d{4}$/.test(String(card.last4 || '')) ? card.last4 : null };
+}
 
 /** Sends an amount to a reader. The counter screen then asks GET /terminal/payments/:id until it settles. */
 router.post('/charges', requireRole(...sellers), validate(z.object({ reader_id: z.number().int().positive(), amount_cents: z.number().int().min(50).max(10_000_000) })), async (req, res) => {
@@ -126,8 +134,7 @@ async function settle(row) {
   let next = null; let failure = null; let brand = null; let last4 = null;
   if (intent.status === 'succeeded') {
     next = 'succeeded';
-    const card = intent.latest_charge && intent.latest_charge.payment_method_details && (intent.latest_charge.payment_method_details.card_present || intent.latest_charge.payment_method_details.interac_present);
-    brand = card ? brandOf(card.brand) : null; last4 = card && /^\d{4}$/.test(String(card.last4 || '')) ? card.last4 : null;
+    ({ brand, last4 } = cardOf(intent));
   } else if (intent.status === 'canceled') {
     next = 'canceled';
   } else {
@@ -166,7 +173,7 @@ router.post('/payments/:id/simulate', requireRole(...sellers), validate(z.object
  * Stops a payment. Still waiting: the reader stops asking for a card. Already paid but not part of a completed sale
  * (the sale failed, or the line was removed): the guest's money goes back to their card.
  */
-router.post('/payments/:id/cancel', requireRole(...sellers), async (req, res) => {
+router.post('/payments/:id/cancel', requireRole(...sellers), validate(z.object({ keep_if_paid: z.boolean().optional() })), async (req, res) => {
   let row = await payRow(req.auth.tenantId, Number(req.params.id));
   if (!row) throw notFound('Payment');
   row = await settle(row);
@@ -179,6 +186,8 @@ router.post('/payments/:id/cancel', requireRole(...sellers), async (req, res) =>
     else await pool.query("UPDATE terminal_payments SET status = 'canceled' WHERE id = ? AND status = 'waiting'", [row.id]);
   }
   row = await payRow(req.auth.tenantId, row.id);
+  // The counter giving up on a reader that went quiet: a payment that went through after all is kept for the sale.
+  if (row.status === 'succeeded' && req.body.keep_if_paid) return res.json(payShape(row));
   if (row.status === 'succeeded') {
     if (row.order_id) throw conflict('That payment is part of a completed sale. Refund it from the order instead.');
     await stripe.refund({ paymentIntent: row.intent, amountCents: Number(row.amount_cents), key: `terminal-cancel-${row.id}`, metadata: { tenant_id: String(req.auth.tenantId), kind: 'counter_cancel' }, account: row.account || null });
@@ -188,11 +197,52 @@ router.post('/payments/:id/cancel', requireRole(...sellers), async (req, res) =>
   res.json(payShape(await payRow(req.auth.tenantId, row.id)));
 });
 
-/** Card payments taken on a reader today that never became part of a sale: to finish or refund them. */
+/**
+ * Card payments taken on a reader in the last two days that never became part of a sale, to finish or refund them, and
+ * payments still waiting on the reader a few minutes on (the counter screen stopped watching): those are asked about
+ * again first, and any still waiting are listed so a manager can check the reader and cancel them.
+ */
 router.get('/unattached', requireRole(...sellers), async (req, res) => {
-  const list = await rows(pool, "SELECT * FROM terminal_payments WHERE tenant_id = ? AND status = 'succeeded' AND order_id IS NULL AND created_at > NOW() - INTERVAL 2 DAY ORDER BY id DESC", [req.auth.tenantId]);
-  res.json({ payments: list.map(payShape) });
+  const STUCK = "status = 'waiting' AND created_at < NOW() - INTERVAL 3 MINUTE AND created_at > NOW() - INTERVAL 2 DAY";
+  for (const r of await rows(pool, `SELECT * FROM terminal_payments WHERE tenant_id = ? AND ${STUCK} ORDER BY id DESC LIMIT 10`, [req.auth.tenantId])) await settle(r);
+  const list = await rows(pool, `SELECT * FROM terminal_payments WHERE tenant_id = ? AND order_id IS NULL AND ((status = 'succeeded' AND created_at > NOW() - INTERVAL 2 DAY) OR (${STUCK})) ORDER BY id DESC`, [req.auth.tenantId]);
+  res.json({ payments: list.map((p) => ({ ...payShape(p), ...(p.status === 'waiting' ? { note: 'Still waiting for the card on the reader. Check the reader; if the guest did not pay, cancel it.' } : {}) })) });
 });
+
+const EVENTS = { 'payment_intent.succeeded': 'succeeded', 'payment_intent.payment_failed': 'failed', 'payment_intent.canceled': 'canceled' };
+/**
+ * Stripe says a counter payment succeeded, failed or was canceled (metadata.kind 'counter'). The payment is matched by its
+ * PaymentIntent and the Stripe account it was taken on, checked with Stripe (for the card's brand and last 4) and kept.
+ * If Stripe cannot be asked, the event's own word is kept. A payment already finished is left alone, except a success,
+ * which always counts: the money was taken.
+ */
+async function handleWebhook(event, obj) {
+  const next = EVENTS[event.type];
+  if (!next || !obj || !obj.id) return { ignored: true };
+  const row = await one(pool, 'SELECT * FROM terminal_payments WHERE tenant_id = ? AND intent = ? AND account <=> ?', [Number(obj.metadata && obj.metadata.tenant_id), String(obj.id), event.account || null]);
+  if (!row) return { ignored: true };
+  let now = await settle(row);
+  if (now.status === 'waiting' || (next === 'succeeded' && now.status === 'failed')) {
+    let card = { brand: null, last4: null };
+    if (next === 'succeeded') { try { card = cardOf(await stripe.get(`/v1/payment_intents/${encodeURIComponent(row.intent)}?expand[]=latest_charge`, { account: row.account || null })); } catch (_) { /* recorded without the card */ } }
+    const failure = next === 'failed' ? String((obj.last_payment_error && obj.last_payment_error.message) || 'The card was not accepted.').slice(0, 255) : null;
+    await pool.query(`UPDATE terminal_payments SET status = ?, failure = ?, card_brand = COALESCE(?, card_brand), card_last4 = COALESCE(?, card_last4) WHERE id = ? AND status IN (${next === 'succeeded' ? "'waiting','failed'" : "'waiting'"})`,
+      [next, failure, card.brand, card.last4, row.id]);
+    now = await one(pool, 'SELECT * FROM terminal_payments WHERE id = ?', [row.id]);
+  }
+  return { terminal: now.status };
+}
+
+/** Daily: asks Stripe about every counter payment still waiting after 10 minutes, and keeps the answer. */
+async function sweep() {
+  if (!stripe.enabled()) return { checked: 0, settled: 0 };
+  const due = await rows(pool, "SELECT * FROM terminal_payments WHERE status = 'waiting' AND created_at < NOW() - INTERVAL 10 MINUTE ORDER BY id LIMIT 500");
+  const out = { checked: due.length, settled: 0 };
+  for (const r of due) {
+    try { if ((await settle(r)).status !== 'waiting') out.settled += 1; } catch (err) { logFailure({ job: 'terminal_sweep', tenant: r.tenant_id, payment: r.id, message: err.message }); }
+  }
+  return out;
+}
 
 /**
  * For checkout: the reader payment a sale says it was paid by, locked, checked (this mountain, succeeded, the same
@@ -208,4 +258,4 @@ async function attach(conn, tenantId, id, amountCents, orderId) {
   return { intent: row.intent, account: row.account || null, fee: Number(row.fee_cents) || 0, brand: row.card_brand || null, last4: row.card_last4 || null };
 }
 
-module.exports = { router, attach };
+module.exports = { router, attach, handleWebhook, sweep };

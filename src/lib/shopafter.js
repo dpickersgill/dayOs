@@ -11,8 +11,9 @@ const { allowedOn, dayName, daysText } = require('./saledays');
 const shopsale = require('./shopsale');
 const mailer = require('./mailer');
 const stripe = require('./stripe');
+const cardrefund = require('./cardrefund');
 const { audit } = require('./audit');
-const { eachTenant } = require('./jobs');
+const { eachTenant, logFailure } = require('./jobs');
 const { isSandbox } = require('./sandbox');
 
 const day10 = (d) => String(d).slice(0, 10);
@@ -85,7 +86,7 @@ async function requestChange({ tenant, shopRow, code, newDate, successUrl, cance
       amountCents: c.due, name: `${tenant.name}: change of day`, description: `${c.product.name}: ${day10(c.ticket.valid_from)} to ${newDate}`,
       email: shopRow.contact_email, reference: shopRow.reference,
       ...require('./connect').checkoutFor(payTo, c.due, { tenant_id: String(tenant.id), request_id: `chg${r.insertId}`, change_id: String(r.insertId), kind: 'shop_change', reference: shopRow.reference }),
-      successUrl, cancelUrl,
+      successUrl, cancelUrl, idempotencyKey: `shopchange-${r.insertId}`,
     });
     await conn.query('UPDATE shop_changes SET stripe_session_id = ? WHERE tenant_id = ? AND id = ?', [co.id, tenant.id, r.insertId]);
     return { done: false, due_cents: c.due, checkout_url: co.url };
@@ -96,17 +97,27 @@ async function requestChange({ tenant, shopRow, code, newDate, successUrl, cance
 async function handleChangeWebhook(event, obj) {
   const tenantId = Number(obj.metadata.tenant_id); const id = Number(obj.metadata.change_id);
   if (event.type === 'checkout.session.expired') {
-    await pool.query("UPDATE shop_changes SET status = 'expired' WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment' AND stripe_session_id = ?", [tenantId, id, obj.id]);
+    await pool.query("UPDATE shop_changes SET status = 'expired' WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment' AND (stripe_session_id = ? OR stripe_session_id IS NULL)", [tenantId, id, obj.id]);
     return { expired: true };
   }
   if (event.type !== 'checkout.session.completed' || obj.payment_status !== 'paid') return { ignored: true };
-  let failed = null;
+  let failed = null; let stray = null;
   let out;
   try {
     out = await tx(async (conn) => {
+      failed = null; stray = null;
       const ch = await one(conn, 'SELECT * FROM shop_changes WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, id]);
-      if (!ch || ch.stripe_session_id !== obj.id) return { ignored: true };
-      if (ch.status !== 'awaiting_payment') return { duplicate: true }; // a repeat, including one we refunded
+      if (!ch) { logFailure({ job: 'stripe_webhook', tenant: tenantId, message: `a paid card page names date change ${id}, which is not on file` }); return { ignored: true }; }
+      // A repeat, including one we refunded, changes nothing (a change refunded before refunds were written down has no
+      // payment of its own on file, so its status says it).
+      if (ch.status === 'refunded' || await cardrefund.returned(conn, tenantId, obj.payment_intent)) return { duplicate: true };
+      if (ch.status === 'done') {
+        const paidBy = ch.order_id ? await one(conn, 'SELECT payment_ref FROM orders WHERE tenant_id = ? AND id = ?', [tenantId, ch.order_id]) : null;
+        if (paidBy && paidBy.payment_ref === String(obj.payment_intent)) return { duplicate: true };
+      }
+      // Only a change still waiting for this card page is made; anything else is a payment we cannot honor.
+      if (ch.status !== 'awaiting_payment') { stray = `the date change was already ${ch.status}`; return { problem: true }; }
+      if (ch.stripe_session_id !== obj.id) { stray = 'it was not the card page saved for this date change'; return { problem: true }; }
       if (Number(obj.amount_total) !== ch.due_cents) { failed = 'the amount did not match'; return { problem: true }; }
       const tenant = await one(conn, 'SELECT id, name, timezone, shop_change_hours, shop_change_fee_cents FROM tenants WHERE id = ?', [tenantId]);
       const shopRow = await one(conn, 'SELECT * FROM shop_orders WHERE tenant_id = ? AND id = ?', [tenantId, ch.shop_order_id]);
@@ -122,7 +133,9 @@ async function handleChangeWebhook(event, obj) {
         const [o] = await conn.query("INSERT INTO orders (tenant_id, person_id, user_id, status, subtotal_cents, discount_cents, tax_cents, total_cents, channel, payment_ref) VALUES (?, ?, NULL, 'paid', ?, 0, ?, ?, 'online', ?)", [tenantId, orig ? orig.person_id : null, subtotal, c.tax, c.due, obj.payment_intent]);
         for (const l of c.lines) await conn.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, label, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents) VALUES (?, ?, NULL, 'fee', ?, ?, 'adult', 1, ?, ?, 0, ?)", [tenantId, o.insertId, l.label, orig ? orig.person_id : null, l.cents, to, l.tax || 0]);
         for (const x of c.taxes) await conn.query('INSERT INTO order_taxes (tenant_id, order_id, name, rate_bps, amount_cents) VALUES (?, ?, ?, ?, ?)', [tenantId, o.insertId, x.name, x.rate_bps, x.amount_cents]);
-        await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, processor) VALUES (?, ?, 'card', ?, ?, 'stripe')", [tenantId, o.insertId, ch.due_cents, obj.payment_intent]);
+        const payee = require('./connect').paidTo(event);
+        await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, processor, processor_account, platform_fee_cents) VALUES (?, ?, 'card', ?, ?, 'stripe', ?, ?)",
+          [tenantId, o.insertId, ch.due_cents, obj.payment_intent, payee.account, payee.feeCents]);
         await conn.query("UPDATE shop_changes SET status = 'done', order_id = ? WHERE tenant_id = ? AND id = ?", [o.insertId, tenantId, id]);
         await audit(conn, { auth: { tenantId, userId: null } }, 'shop_change', 'tickets', ch.ticket_id, { from: day10(ch.from_date), to, due_cents: ch.due_cents });
         return { ok: true };
@@ -132,9 +145,15 @@ async function handleChangeWebhook(event, obj) {
     if (!(err instanceof Unhonourable)) throw err;
     failed = err.message; out = { problem: true }; // rolled back: nothing half-made is kept
   }
+  if (stray) return cardrefund.returnStray({ tenantId, kind: 'shop_change', rowId: id, obj, account: event.account || null, why: stray });
   if (failed) {
-    if (obj.payment_intent && stripe.enabled()) await stripe.refund({ paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), key: `shop-change-refund-${tenantId}-${id}`, account: event.account || null });
-    await pool.query("UPDATE shop_changes SET status = 'refunded' WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment'", [tenantId, id]);
+    // Written down as owed with the change's new state in one step, then sent; retried daily if Stripe is slow.
+    const owed = await tx(async (conn) => {
+      const [u] = await conn.query("UPDATE shop_changes SET status = 'refunded' WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment'", [tenantId, id]);
+      if (u.affectedRows !== 1) return null;
+      return cardrefund.oweReturn(conn, { tenantId, kind: 'shop_change', rowId: id, session: obj.id, paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), account: event.account || null, reason: failed });
+    });
+    if (owed) await cardrefund.sendReturn(owed);
     return { refunded: true };
   }
   return { ok: Boolean(out.ok), duplicate: out.duplicate, ignored: out.ignored };

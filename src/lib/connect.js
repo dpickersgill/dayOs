@@ -121,19 +121,15 @@ async function screen(event) {
   return { pass: true, tenantId };
 }
 
-/** After a paid checkout on a connected account: note on the payment which account holds it (for refunds) and the fee kept. */
-async function stamp(event) {
+/**
+ * Who holds a paid checkout: the connected account it was paid on (null for the platform's own) and the platform fee
+ * Stripe kept. The sale records both on its payment in the same transaction that records the sale, so a later refund
+ * always goes back through the right account.
+ */
+function paidTo(event) {
   const obj = event && event.data && event.data.object;
-  if (!event || !event.account || event.type !== 'checkout.session.completed' || !obj || !obj.metadata) return;
-  const tenantId = Number(obj.metadata.tenant_id);
-  const fee = Number(obj.metadata.platform_fee_cents) || 0;
-  try {
-    if (obj.payment_intent) {
-      await pool.query("UPDATE order_payments SET processor_account = ?, platform_fee_cents = ? WHERE tenant_id = ? AND reference = ? AND processor = 'stripe' AND processor_account IS NULL",
-        [event.account, fee, tenantId, String(obj.payment_intent)]);
-    }
-    if (obj.metadata.kind === 'donation') await pool.query('UPDATE donations SET stripe_account = ? WHERE tenant_id = ? AND stripe_session_id = ?', [event.account, tenantId, obj.id]);
-  } catch (err) { logFailure({ job: 'stripe_webhook', event: event.type, message: `could not note the account: ${err.message}` }); }
+  const account = (event && event.account) || null;
+  return { account, feeCents: account && obj && obj.metadata ? Number(obj.metadata.platform_fee_cents) || 0 : 0 };
 }
 
 /** The account a card payment was taken on (for its refund): the one noted on the payment, else the platform's (null). */
@@ -142,4 +138,4 @@ async function accountOfPayment(conn, tenantId, paymentIntent) {
   return p ? p.processor_account : null;
 }
 
-module.exports = { NOT_READY, readyRow, payee, payeeOrThrow, feeFor, checkoutFor, refresh, state, tenantForAccount, screen, stamp, accountOfPayment };
+module.exports = { NOT_READY, readyRow, payee, payeeOrThrow, feeFor, checkoutFor, refresh, state, tenantForAccount, screen, paidTo, accountOfPayment };

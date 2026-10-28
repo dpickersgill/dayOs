@@ -212,3 +212,67 @@ test('on a connected Stripe account, readers and charges belong to that account,
   is(await api('DELETE', `/terminal/readers/${r.body.id}`, { token: A.owner }), 200);
   assert.ok(!(await api('GET', '/terminal/readers', { token: A.counter })).body.readers.some((x) => x.id === r.body.id));
 });
+
+// The counter screen stopped watching (a refresh, a dropped connection) while the guest tapped: Stripe's webhook, the
+// daily job and the manager's list still find the payment, and giving up at the counter never loses a card that went through.
+const stripeLib = require('../src/lib/stripe');
+const piEvent = (type, intent, tenantId, extra = {}) => ({ id: `evt_${++n}`, type, data: { object: { id: intent, object: 'payment_intent', metadata: { tenant_id: String(tenantId), kind: 'counter' }, ...extra } } });
+async function webhook(event) {
+  const raw = JSON.stringify(event);
+  const res = await fetch(`${base}/api/v1/stripe/webhook`, { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': stripeLib.signWebhook(raw, 'whsec_platform') }, body: raw });
+  return { status: res.status, body: await res.json().catch(() => ({})) };
+}
+const tapped = (intent) => Object.assign(intents.get(intent), { status: 'succeeded', latest_charge: { id: `ch_${++n}`, payment_method_details: { type: 'card_present', card_present: { brand: 'mastercard', last4: '5454' } } } });
+async function charge(m) {
+  await q('UPDATE tenants SET stripe_account = NULL, stripe_charges_enabled = 0 WHERE id = ?', [m.id]);
+  const c = await api('POST', '/terminal/charges', { token: m.counter, body: { reader_id: m.reader, amount_cents: 6000 } });
+  is(c, 201);
+  return { id: c.body.id, intent: (await q('SELECT intent FROM terminal_payments WHERE id = ?', [c.body.id]))[0].intent };
+}
+const statusOf = async (id) => (await q('SELECT status, card_last4, failure FROM terminal_payments WHERE id = ?', [id]))[0];
+
+test('Stripe\'s webhook records a reader payment the counter stopped watching: succeeded, declined or canceled', async () => {
+  const a = await charge(A);
+  tapped(a.intent);
+  const w = await webhook(piEvent('payment_intent.succeeded', a.intent, A.id));
+  is(w, 200); assert.equal(w.body.terminal, 'succeeded');
+  assert.deepEqual({ ...(await statusOf(a.id)) }, { status: 'succeeded', card_last4: '5454', failure: null });
+  assert.ok((await api('GET', '/terminal/unattached', { token: A.counter })).body.payments.some((p) => p.id === a.id && p.status === 'succeeded'), 'listed to finish or refund');
+  const b = await charge(A);
+  const d = await webhook(piEvent('payment_intent.payment_failed', b.intent, A.id, { last_payment_error: { message: 'Your card was declined.' } }));
+  assert.equal(d.body.terminal, 'failed'); assert.match((await statusOf(b.id)).failure, /declined/);
+  const c = await charge(A);
+  intents.get(c.intent).status = 'canceled';
+  assert.equal((await webhook(piEvent('payment_intent.canceled', c.intent, A.id))).body.terminal, 'canceled');
+  // Another mountain's name on the event matches nothing.
+  const e = await charge(A);
+  assert.equal((await webhook(piEvent('payment_intent.canceled', e.intent, B.id))).body.ignored, true);
+  assert.equal((await statusOf(e.id)).status, 'waiting');
+  await api('POST', `/terminal/payments/${e.id}/cancel`, { token: A.counter });
+});
+
+test('the daily job asks Stripe about reader payments still waiting after 10 minutes, and the list shows the ones still waiting', async () => {
+  const a = await charge(A); const b = await charge(A);
+  tapped(a.intent);
+  await q('UPDATE terminal_payments SET created_at = DATE_SUB(NOW(), INTERVAL 11 MINUTE) WHERE id IN (?)', [[a.id, b.id]]);
+  const out = await require('../src/routes/terminal').sweep();
+  assert.ok(out.checked >= 2);
+  assert.equal((await statusOf(a.id)).status, 'succeeded', 'the tap the screen missed is recorded');
+  assert.equal((await statusOf(b.id)).status, 'waiting', 'nobody tapped: still waiting');
+  const list = (await api('GET', '/terminal/unattached', { token: A.counter })).body.payments;
+  const stuck = list.find((p) => p.id === b.id);
+  assert.ok(stuck, 'a payment still waiting is listed for a manager'); assert.equal(stuck.status, 'waiting'); assert.match(stuck.note, /Still waiting for the card/);
+  const fresh = await charge(A);
+  assert.ok(!(await api('GET', '/terminal/unattached', { token: A.counter })).body.payments.some((p) => p.id === fresh.id), 'not one the counter is still watching');
+  for (const id of [b.id, fresh.id]) assert.equal((await api('POST', `/terminal/payments/${id}/cancel`, { token: A.counter })).body.status, 'canceled');
+});
+
+test('giving up on a quiet reader keeps a card that went through after all, instead of refunding or losing it', async () => {
+  const a = await charge(A);
+  tapped(a.intent); // the guest tapped as the counter gave up
+  const before = refunds.length;
+  const gaveUp = await api('POST', `/terminal/payments/${a.id}/cancel`, { token: A.counter, body: { keep_if_paid: true } });
+  is(gaveUp, 200); assert.equal(gaveUp.body.status, 'succeeded'); assert.equal(gaveUp.body.card_last4, '5454');
+  assert.equal(refunds.length, before, 'nothing refunded: it pays for the sale');
+  is(await sale(A, a.id), 201);
+});

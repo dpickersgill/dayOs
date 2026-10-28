@@ -136,7 +136,9 @@ router.post('/billing/invoice', managers, ownerOnly, validate(z.object({ billing
   if (b.stripe_customer_id) await stripe.call(`/v1/customers/${encodeURIComponent(customer)}`, { email: req.body.billing_email });
   const tz = (await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [t])).timezone;
   const meta = { kind: 'billing', tenant_id: String(t) };
-  const sub = await stripe.call('/v1/subscriptions', { customer, items, collection_method: 'send_invoice', days_until_due: 30, metadata: meta, trial_end: B.trialEnd(b, require('../lib/util').todayIn(tz)) }, { idempotencyKey: `billing-invoice-sub-${t}-${b.plan_id}-${b.addons}-${b.billing_interval}` });
+  // The last subscription is in the key, so a mountain that cancels and signs up again the same day gets a new
+  // subscription rather than Stripe's saved answer for the old, canceled one.
+  const sub = await stripe.call('/v1/subscriptions', { customer, items, collection_method: 'send_invoice', days_until_due: 30, metadata: meta, trial_end: B.trialEnd(b, require('../lib/util').todayIn(tz)) }, { idempotencyKey: `billing-invoice-sub-${t}-${b.plan_id}-${b.addons}-${b.billing_interval}-after-${b.stripe_subscription_id || 'none'}` });
   await tx(async (conn) => {
     await conn.query('UPDATE tenant_billing SET comped = 0, stripe_subscription_id = ?, sub_status = ?, pay_method = ?, period_end = ? WHERE tenant_id = ?', [sub.id, sub.status, 'invoice', periodEnd(sub), t]);
     await B.applyModules(conn, t, await one(conn, 'SELECT * FROM tenant_billing WHERE tenant_id = ?', [t]));

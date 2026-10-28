@@ -23,7 +23,7 @@ const { pool } = require('../src/db');
 const modules = require('../src/lib/modules');
 const PS = require('../src/lib/programsessions');
 
-let server; let base; let stripeMock; let pmMock; const mails = []; const refunds = []; let n = 0;
+let server; let base; let stripeMock; let pmMock; const mails = []; const refunds = []; const sessions = []; let n = 0;
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const PW = 'correct-horse-battery';
 const q = async (sql, params) => (await pool.query(sql, params))[0];
@@ -57,7 +57,7 @@ test.before(async () => {
     let data = ''; req.on('data', (c) => { data += c; });
     req.on('end', () => {
       res.setHeader('content-type', 'application/json');
-      if (req.url === '/v1/checkout/sessions') res.end(JSON.stringify({ id: `cs_prog_${++n}`, url: `https://checkout.stripe.test/c/${n}` }));
+      if (req.url === '/v1/checkout/sessions') { sessions.push({ key: req.headers['idempotency-key'], amount: Object.fromEntries(new URLSearchParams(data))['line_items[0][price_data][unit_amount]'] }); res.end(JSON.stringify({ id: `cs_prog_${++n}`, url: `https://checkout.stripe.test/c/${n}` })); }
       else if (req.url === '/v1/refunds') { const p = Object.fromEntries(new URLSearchParams(data)); refunds.push(p); res.end(JSON.stringify({ id: `re_${++n}`, payment_intent: p.payment_intent, status: 'succeeded' })); }
       else { res.statusCode = 404; res.end('{}'); }
     });
@@ -254,6 +254,8 @@ test('online: parents see what is open, prices with the early bird and sibling d
   const r = ok(await pub('POST', '/programs/register', { body: { ...contact, registrations: regs, waiver_accepted: true } }), 201);
   assert.match(r.checkout_url, /checkout\.stripe\.test/);
   const row = (await q('SELECT * FROM program_registrations WHERE tenant_id = ? AND reference = ?', [M.id, r.reference]))[0];
+  // Each registration has its own Stripe key (two families paying the same amount must never share one).
+  assert.equal(sessions.at(-1).key, `checkout-program-${row.id}-${row.amount_cents}`);
   assert.equal((await q('SELECT COUNT(*) AS n FROM program_enrollments e JOIN people p ON p.id = e.person_id WHERE e.tenant_id = ? AND p.last_name = ?', [M.id, 'Ford']))[0].n, 0, 'nothing held before paying');
   const before = mails.length;
   ok(await webhook(paid(row, M.id)));
@@ -293,6 +295,19 @@ test('online: a day that filled while the parent paid is refunded in full; a ful
   const out = ok(await api('POST', `/programs/${M.program}/enrollments/${ava}/withdraw`, { token: M.owner }));
   const hal = (await q("SELECT id FROM people WHERE tenant_id = ? AND first_name = 'Hal'", [M.id]))[0].id;
   assert.equal(out.promoted_person_id, hal);
+});
+
+test('online: a registration whose saved card page was lost is still made when the payment lands with the right amount', async () => {
+  const contact = { contact_first_name: 'Lou', contact_last_name: 'Lane', contact_email: `lou.${suffix}@x.test`, contact_phone: '215-555-0103' };
+  const r = ok(await pub('POST', '/programs/register', { body: { ...contact, waiver_accepted: true, registrations: [{ program_id: M.program, term_id: M.s1, group_id: M.tue.id, child: { first_name: 'Max', last_name: 'Lane', date_of_birth: `${year - 9}-01-01` } }] } }), 201);
+  const row = (await q('SELECT * FROM program_registrations WHERE tenant_id = ? AND reference = ?', [M.id, r.reference]))[0];
+  await q('UPDATE program_registrations SET stripe_session_id = NULL WHERE id = ?', [row.id]);
+  assert.equal(ok(await webhook(paid(row, M.id))).ok, true);
+  assert.equal((await q('SELECT status FROM program_registrations WHERE id = ?', [row.id]))[0].status, 'paid');
+  const n0 = refunds.length;
+  const again = ok(await webhook(paid({ ...row, stripe_session_id: `cs_prog_other_${suffix}` }, M.id)));
+  assert.equal(again.refunded, true, 'a second page for a registration already paid goes back');
+  assert.equal(refunds.length, n0 + 1);
 });
 
 test('dates cannot be rebuilt once children are enrolled; the old program without sessions still works', async () => {

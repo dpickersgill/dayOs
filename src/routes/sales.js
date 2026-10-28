@@ -299,19 +299,22 @@ router.post('/orders/:id/refund', requireRole('manager'), validate(refundBody), 
       if (body.till_id && !till) throw bad('That cash drawer is not open');
       tillId = till ? till.id : null;
     }
-    const stripePay = await one(conn, "SELECT reference FROM order_payments WHERE tenant_id = ? AND order_id = ? AND processor = 'stripe' AND tender = 'card' AND reference IS NOT NULL ORDER BY id LIMIT 1", [tenantId, orderId]);
-    // Record it: one row per way the money went back, the tax split in proportion.
+    // Card money goes back to each card it came from (an order paid with two cards refunds to both), oldest first.
+    const parts = [];
+    for (const x of plan) parts.push(...(x.method === 'card' ? await cardrefund.splitCard(conn, tenantId, orderId, pays, x.cents) : [x]));
+    // Record it: one row per way the money went back (one per card), the tax split in proportion.
     const refundIds = [];
     const cardRows = [];
-    const plans = plan.length ? plan : [{ method: 'other', cents: 0 }]; // a comp-only order has no money to return
+    const plans = parts.length ? parts : [{ method: 'other', cents: 0 }]; // a comp-only order has no money to return
     let taxLeft = taxPart;
     for (const [i, x] of plans.entries()) {
       const t = i === plans.length - 1 ? taxLeft : (amount ? Math.round((taxPart * x.cents) / amount) : 0);
       taxLeft -= t;
       const [r] = await conn.query('INSERT INTO order_refunds (tenant_id, order_id, user_id, reason, note, amount_cents, tax_cents, method, till_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [tenantId, orderId, req.auth.userId, body.reason, body.note ?? null, x.cents, t, x.method, x.method === 'cash' ? tillId : null]);
       refundIds.push(r.insertId);
-      // Online card sales go back through Stripe: written down as owed now, sent after this commits, retried if Stripe fails.
-      if (x.method === 'card' && x.cents > 0 && stripePay) { await cardrefund.markPending(conn, tenantId, r.insertId, stripePay.reference); cardRows.push(r.insertId); }
+      // Card payments taken through Stripe go back through Stripe: written down as owed now, sent after this commits,
+      // retried if Stripe fails. A card taken on a separate machine is refunded on that machine by the desk.
+      if (x.method === 'card' && x.cents > 0 && x.ref) { await cardrefund.markPending(conn, tenantId, r.insertId, x.ref); cardRows.push(r.insertId); }
     }
     await conn.query('UPDATE order_items SET refunded_at = NOW(), refund_id = ? WHERE tenant_id = ? AND id IN (?)', [refundIds[0], tenantId, ids]);
     const stillOpen = open.length - lines.length;

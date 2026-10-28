@@ -102,7 +102,6 @@ function createApp() {
         if (billed) return res.json({ received: true, ...billed });
       }
       const out = await lessonbook.handleWebhook(event, config.stripe.publicUrl || `${req.protocol}://${req.get('host')}`);
-      await connect.stamp(event);
       res.json({ received: true, ...out }); } catch (err) {
       logFailure({ job: 'stripe_webhook', event: event && event.type, message: err.message });
       res.status(500).json({ error: 'Try again' });

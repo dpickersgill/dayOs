@@ -174,7 +174,7 @@ Guests' card payments go straight into each mountain's own Stripe account (a Sta
 Set up once, in the Stripe dashboard of the Verdynt/OS account:
 
 1. **Turn on Connect.** Connect, Get started: choose to build a platform where your users (the mountains) take payments, and fill in the platform profile. The mountains use Standard accounts, which they run themselves in their own Stripe dashboard.
-2. **The Connect webhook.** Developers, Webhooks (or Workbench, Event destinations), Add a destination: choose **Connected accounts** (events on your users' accounts), the address `https://app.runmyresort.com/api/v1/stripe/webhook`, and the events `checkout.session.completed`, `checkout.session.expired`, `account.updated` and `account.application.deauthorized`. Copy its signing secret (`whsec_...`).
+2. **The Connect webhook.** Developers, Webhooks (or Workbench, Event destinations), Add a destination: choose **Connected accounts** (events on your users' accounts), the address `https://app.runmyresort.com/api/v1/stripe/webhook`, and the events `checkout.session.completed`, `checkout.session.expired`, `payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled` (card reader payments at the counter), `account.updated` and `account.application.deauthorized`. Copy its signing secret (`whsec_...`).
 3. **Give the secret to the service**, from the unzipped folder in Cloud Shell:
    ```
    bash scripts/stripe-connect.sh whsec_...
