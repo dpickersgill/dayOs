@@ -12,7 +12,7 @@
     <div class="wrap">
       <h1 id="h-pv">Privacy policy.</h1>
       <p>What we collect, why, who sees it, and what you can ask us to do with it. Written to be read.</p>
-      <p class="updated" style="font-size:16px;color:var(--muted)">Last updated October 16, 2026.</p>
+      <p class="updated" style="font-size:16px;color:var(--muted)">Last updated October 28, 2026.</p>
     </div>
   </section>
 
@@ -52,9 +52,25 @@
       <ul>
         <li>Google Cloud, which hosts Verdynt/OS and its database in the United States.</li>
         <li>Stripe, which takes guests' card payments into each mountain's own Stripe account, and the mountains' subscription payments to Verdynt/OS.</li>
-        <li>Postmark, which delivers email, and a text message provider when a mountain sends texts.</li>
+        <li>Postmark, which delivers email, and Twilio when a mountain sends texts.</li>
       </ul>
       <p>We share information when the law requires it, and tell the mountain first when the law allows. We do not sell personal information.</p>
+      <h3>Every outside service, and what it receives</h3>
+      <p>This is the complete list of services Verdynt/OS sends information to. We update it when it changes, and tell mountains before we add one.</p>
+      <table class="sub">
+        <thead><tr><th>Service</th><th>What it receives</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>Google Cloud</td><td>Everything Verdynt/OS stores: the database, uploaded files, backups and server logs. Kept in the United States.</td><td>Hosting.</td></tr>
+          <tr><td>Stripe</td><td>Card details typed by guests (on Stripe's own pages; they never reach us) and the amount, the guest's name and email for their receipt. For the mountain's subscription, its billing email and plan.</td><td>Guest card payments into the mountain's own Stripe account, and subscriptions.</td></tr>
+          <tr><td>Postmark</td><td>The address and content of each email Verdynt/OS sends: sign-in and billing notices, receipts, signed waiver copies, and the messages a mountain sends its customers.</td><td>Email delivery.</td></tr>
+          <tr><td>Twilio</td><td>The phone number and content of each text message. Only when a mountain turns text messages on.</td><td>Text messages.</td></tr>
+          <tr><td>Anthropic</td><td>For the in-app assistant: the question typed by a staff member or guest, the Help text it answers from, the mountain's setup (hours, products, prices, programs, policies), and, with Assistant Plus, the rosters, schedules or records the asking person's role may already see on screen. Never patient care records or patrol reports. Sent only when the mountain has the assistant on. Separately, a mountain may ask us to turn on Fill in from the story for its patrol, which sends a patroller's own account of an incident with no names, dates of birth or contact details; it is off unless we have agreed it with the mountain under a business associate agreement.</td><td>Answering questions in the app.</td></tr>
+          <tr><td>Cloudflare</td><td>On this website only: the page viewed, browser type and country, with no cookies. Nothing from the app, the console or a mountain's own pages.</td><td>Counting website visits (Web Analytics).</td></tr>
+          <tr><td>Open-Meteo</td><td>The map point of the mountain, to fetch its weather. No personal information.</td><td>Weather on the day record.</td></tr>
+          <tr><td>OpenStreetMap, OpenTopoMap and the USGS National Map</td><td>Map tiles: your browser requests the images for the area on screen directly from these services, so they see your address and the area viewed. OpenStreetMap's Overpass servers also receive the name and state a visitor types to find their mountain for a demo.</td><td>The patrol map and the demo's mountain lookup.</td></tr>
+          <tr><td>Have I Been Pwned</td><td>The first five characters of a hash of a new password, never the password itself, when someone sets one.</td><td>Refusing passwords found in known breaches.</td></tr>
+        </tbody>
+      </table>
 
       <h2>How long we keep it</h2>
       <p>A mountain's records are kept while it uses Verdynt/OS, and the mountain can export them at any time. When a mountain leaves, we delete its records after it has had the chance to export them, except where the law requires us to keep something. Contact requests are kept while we are talking with you and for up to two years after.</p>

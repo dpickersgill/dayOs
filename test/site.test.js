@@ -286,3 +286,14 @@ test('the sales and support addresses are on every page, the Contact page, in th
   const v = await (await fetch(`${base}/version`)).json();
   assert.equal(v.support_email, 'support@runmyresort.com', 'the app’s Help reads the support address from here');
 });
+
+test('the privacy page names every outside service, and Security says what the assistant sees', async () => {
+  const pv = await get('/site/privacy');
+  assert.match(pv.text, /<table class="sub">/, 'the service table is there');
+  for (const name of ['Google Cloud', 'Stripe', 'Postmark', 'Twilio', 'Anthropic', 'Cloudflare', 'Open-Meteo', 'OpenStreetMap', 'USGS National Map', 'Have I Been Pwned']) assert.ok(pv.text.includes(`<td>${name}`) || pv.text.includes(`${name}</td>`) || pv.text.includes(name), `${name} is named`);
+  assert.ok(pv.text.includes('<td>Anthropic</td>') && pv.text.includes('<td>Twilio</td>'), 'Anthropic and Twilio have rows of their own');
+  assert.match(pv.text, /tell mountains before we add one/);
+  assert.match(pv.text, /Never patient care records/);
+  const sec = await get('/site/security');
+  assert.match(sec.text, /It never sees patient care records or patrol reports/);
+});
