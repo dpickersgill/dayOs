@@ -114,7 +114,7 @@ router.post('/billing/checkout', managers, ownerOnly, stepUp('change how Verdynt
   const s = await stripe.call('/v1/checkout/sessions', {
     mode: 'subscription', customer, line_items: items,
     payment_method_types: req.body.method === 'bank' ? ['us_bank_account'] : ['card'],
-    success_url: `${baseUrl(req)}/#/billing?paid=1`, cancel_url: `${baseUrl(req)}/#/billing`,
+    success_url: `${baseUrl(req)}/#/settings/billing?paid=1`, cancel_url: `${baseUrl(req)}/#/settings/billing`,
     metadata: meta, subscription_data: { metadata: meta, trial_end: B.trialEnd(b, require('../lib/util').todayIn(tz)) },
   });
   await pool.query('UPDATE tenant_billing SET pay_method = ? WHERE tenant_id = ?', [req.body.method, t]);
@@ -154,7 +154,7 @@ router.post('/billing/portal', managers, ownerOnly, stepUp('change how Verdynt/O
   if (!stripe.enabled()) throw conflict('Payments are not set up yet. Contact Verdynt/OS.');
   const b = await one(pool, 'SELECT stripe_customer_id FROM tenant_billing WHERE tenant_id = ?', [req.auth.tenantId]);
   if (!b || !b.stripe_customer_id) throw bad('There is nothing to manage yet: choose a plan and pay first');
-  const s = await stripe.call('/v1/billing_portal/sessions', { customer: b.stripe_customer_id, return_url: `${baseUrl(req)}/#/billing` });
+  const s = await stripe.call('/v1/billing_portal/sessions', { customer: b.stripe_customer_id, return_url: `${baseUrl(req)}/#/settings/billing` });
   res.json({ url: s.url });
 });
 
@@ -245,7 +245,7 @@ router.post('/payments/stripe/link', managers, ownerOnly, stepUp('connect where 
     if (!u.affectedRows) account = (await one(pool, 'SELECT stripe_account FROM tenants WHERE id = ?', [t])).stripe_account;
     await audit(pool, req, 'stripe_connect_start', 'tenants', t, { account });
   }
-  const back = `${appUrl(req)}/#/billing?stripe=`;
+  const back = `${appUrl(req)}/#/settings/payments?stripe=`;
   const url = await stripe.accountLink({ account, refreshUrl: `${back}again`, returnUrl: `${back}return` });
   res.json({ url });
 });

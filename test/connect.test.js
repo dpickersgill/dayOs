@@ -131,7 +131,7 @@ test('only the owner connects, after confirming it is them; Stripe\'s pages fini
   const made = calls.find((c) => c.path === '/v1/accounts' && c.method === 'POST');
   assert.equal(made.params.type, 'standard'); assert.equal(made.params.email, `owner@${A.slug}.test`); assert.equal(made.account, null, 'made by the platform');
   const linkCall = calls.filter((c) => c.path === '/v1/account_links').pop();
-  assert.match(linkCall.params.return_url, /#\/billing\?stripe=return$/);
+  assert.match(linkCall.params.return_url, /#\/settings\/payments\?stripe=return$/);
   // A second press reuses the same account
   is(await api('POST', '/payments/stripe/link', { token: A.owner, body: {} }), 200);
   assert.equal(calls.filter((c) => c.path === '/v1/accounts' && c.method === 'POST').length, 1);
