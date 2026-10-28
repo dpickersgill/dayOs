@@ -266,6 +266,12 @@ test('paying by invoice starts a subscription that Stripe emails; a free mountai
   assert.equal(calls.find((c) => c.path === '/v1/customers').params.email, 'ap@invoice.test');
   const b = (await q('SELECT * FROM tenant_billing WHERE tenant_id = ?', [t2]))[0];
   assert.equal(b.pay_method, 'invoice'); assert.ok(b.stripe_subscription_id);
+  // Canceled, then invoiced again the same day: a new subscription, not Stripe's saved answer for the old one.
+  const firstKey = calls.find((c) => c.path === '/v1/subscriptions').key;
+  await q("UPDATE tenant_billing SET sub_status = 'canceled' WHERE tenant_id = ?", [t2]);
+  calls.length = 0;
+  assert.equal((await api('POST', '/billing/invoice', { token: o2, body: { billing_email: 'ap@invoice.test' } })).status, 200);
+  assert.notEqual(calls.find((c) => c.path === '/v1/subscriptions').key, firstKey);
   // free
   const s3 = `bf-${suffix}`;
   const m3 = await plat('POST', '/tenants', { slug: s3, name: 'Free Test', billing: 'comped', owner: { email: `o@${s3}.test`, password: PW, first_name: 'Fay', last_name: 'Owner' } });

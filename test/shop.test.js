@@ -144,6 +144,7 @@ test('placing a basket needs the terms and waiver, goes to Stripe for the total,
   const c = calls.slice(before).find((x) => x.path === '/v1/checkout/sessions');
   assert.equal(c.params['line_items[0][price_data][unit_amount]'], '6600');
   assert.equal(c.params['metadata[kind]'], 'shop');
+  assert.equal(c.key, `checkout-shop-${row.id}-6600`, 'the basket has its own Stripe key');
   assert.equal(row.status, 'awaiting_payment');
   assert.equal((await q('SELECT COUNT(*) AS n FROM orders WHERE tenant_id = ?', [A.id]))[0].n, orders, 'no sale until paid');
   assert.equal((await q('SELECT COUNT(*) AS n FROM tickets WHERE tenant_id = ?', [A.id]))[0].n, 0);
@@ -198,7 +199,7 @@ test('a payment that does not match the basket is refunded in full and sells not
   const w = await webhook(paidEvent(row, A.id, { amount_total: row.amount_cents - 100 }));
   assert.equal(w.body.refunded, true);
   assert.equal((await q('SELECT status FROM shop_orders WHERE id = ?', [row.id]))[0].status, 'refunded');
-  assert.equal((await q('SELECT COUNT(*) AS n FROM orders WHERE payment_ref = ?', [`pi_${row.stripe_session_id}`]))[0].n, 0);
+  assert.equal((await q('SELECT COUNT(*) AS n FROM orders WHERE tenant_id = ? AND payment_ref = ?', [A.id, `pi_${row.stripe_session_id}`]))[0].n, 0);
   assert.ok(calls.slice(before).some((c) => c.path === '/v1/refunds'));
 });
 
@@ -399,6 +400,7 @@ test('a guest can move a ticket to another day: free when the price is the same,
   assert.equal(paid.status, 200, paid.text); assert.equal(paid.body.due_cents, 550, 'the $5 fee plus 10% tax'); assert.match(paid.body.checkout_url, /^https:\/\/checkout\.stripe\.test\//);
   assert.equal(String((await q('SELECT valid_from FROM tickets WHERE code = ?', [code]))[0].valid_from).slice(0, 10), plus(today, 6), 'not moved yet');
   const ch = (await q('SELECT * FROM shop_changes WHERE tenant_id = ? AND status = ? ORDER BY id DESC LIMIT 1', [A.id, 'awaiting_payment']))[0];
+  assert.equal(calls.filter((x) => x.path === '/v1/checkout/sessions').at(-1).key, `checkout-shopchange-${ch.id}-550`);
   const ev = { id: `evt_${++n}`, type: 'checkout.session.completed', data: { object: { id: ch.stripe_session_id, payment_status: 'paid', amount_total: 550, payment_intent: `pi_chg_${n}`, metadata: { tenant_id: String(A.id), change_id: String(ch.id), kind: 'shop_change', request_id: `chg${ch.id}` } } } };
   assert.equal((await webhook(ev)).status, 200);
   assert.equal(String((await q('SELECT valid_from FROM tickets WHERE code = ?', [code]))[0].valid_from).slice(0, 10), plus(today, 7));

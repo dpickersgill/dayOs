@@ -85,7 +85,7 @@ async function requestChange({ tenant, shopRow, code, newDate, successUrl, cance
       amountCents: c.due, name: `${tenant.name}: change of day`, description: `${c.product.name}: ${day10(c.ticket.valid_from)} to ${newDate}`,
       email: shopRow.contact_email, reference: shopRow.reference,
       ...require('./connect').checkoutFor(payTo, c.due, { tenant_id: String(tenant.id), request_id: `chg${r.insertId}`, change_id: String(r.insertId), kind: 'shop_change', reference: shopRow.reference }),
-      successUrl, cancelUrl,
+      successUrl, cancelUrl, idempotencyKey: `shopchange-${r.insertId}`,
     });
     await conn.query('UPDATE shop_changes SET stripe_session_id = ? WHERE tenant_id = ? AND id = ?', [co.id, tenant.id, r.insertId]);
     return { done: false, due_cents: c.due, checkout_url: co.url };

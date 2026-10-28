@@ -154,7 +154,7 @@ router.post('/:slug/requests', validate(requestSchema), async (req, res) => {
       const pay = connect.checkoutFor(await connect.payeeOrThrow(t.id), out.quote.total, { tenant_id: String(t.id), request_id: String(out.id), reference: out.ref });
       co = await stripe.createCheckout({
         amountCents: out.quote.total, name: `${out.quote.name} (${b.students.length} student${b.students.length > 1 ? 's' : ''})`,
-        description: `${t.name}: ${out.session.starts_at.slice(0, 16).replace('T', ' ')}`, email: b.contact_email, reference: out.ref, ...pay,
+        description: `${t.name}: ${out.session.starts_at.slice(0, 16).replace('T', ' ')}`, email: b.contact_email, reference: out.ref, ...pay, idempotencyKey: `lesson-${out.id}`,
         successUrl: `${baseUrl(req)}/book/${req.params.slug}?paid=${out.ref}`, cancelUrl: `${baseUrl(req)}/book/${req.params.slug}?cancelled=${out.ref}`,
       });
     } catch (err) {

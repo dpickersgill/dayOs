@@ -119,6 +119,21 @@ test('a reservation must accept the policy, then goes to Stripe for the tax-incl
   assert.equal(held.spots_left, 3);
 });
 
+test('every card page has its own Stripe key: the table, the row and the amount, never shared by two guests', async () => {
+  const page = (key, amountCents = 25000) => stripe.createCheckout({ amountCents, name: 'Program', email: 'p@x.test', reference: 'R1', metadata: { tenant_id: String(tenantId), registration_id: '1', kind: 'program' },
+    successUrl: 'https://x.test/s', cancelUrl: 'https://x.test/c', ...(key ? { idempotencyKey: key } : {}) });
+  const before = calls.length;
+  await page('program-101'); await page('program-102'); await page('lesson-101'); await page('program-101', 26000);
+  assert.deepEqual(calls.slice(before).filter((x) => x.path === '/v1/checkout/sessions').map((x) => x.key),
+    ['checkout-program-101-25000', 'checkout-program-102-25000', 'checkout-lesson-101-25000', 'checkout-program-101-26000']);
+  await assert.rejects(page(null), /idempotencyKey/, 'a card page without its own key is never sent');
+  sessionId = await newLesson(100);
+  const r = await pub('POST', '/requests', { body: reqBody() });
+  assert.equal(r.status, 201, r.text);
+  const row = (await q('SELECT id, amount_cents FROM lesson_requests WHERE reference = ?', [r.body.reference]))[0];
+  assert.equal(calls.filter((x) => x.path === '/v1/checkout/sessions').at(-1).key, `checkout-lesson-${row.id}-${row.amount_cents}`);
+});
+
 test('webhooks need a valid, fresh signature, and a paid webhook books the lesson and records the sale once', async () => {
   sessionId = await newLesson(100);
   const r = await pub('POST', '/requests', { body: reqBody() });
@@ -170,7 +185,7 @@ test('if the lesson filled up while the guest was paying, they are refunded in f
   assert.equal(after.refund_cents, 8480);
   assert.match(after.staff_note, /Refunded automatically/);
   assert.equal(calls.slice(before).find((x) => x.path === '/v1/refunds').params.amount, '8480');
-  assert.equal((await q('SELECT COUNT(*) AS n FROM orders WHERE payment_ref = ?', [`pi_${row.stripe_session_id}`]))[0].n, 0);
+  assert.equal((await q('SELECT COUNT(*) AS n FROM orders WHERE tenant_id = ? AND payment_ref = ?', [tenantId, `pi_${row.stripe_session_id}`]))[0].n, 0);
 });
 
 test('an abandoned checkout expires and frees the spot', async () => {
@@ -195,7 +210,7 @@ test('canceling a paid lesson refunds 100% well ahead, 50% in the middle window 
   assert.equal(c.body.refund_percent, 100);
   assert.equal(c.body.refund_cents, 8480);
   assert.equal(calls.slice(before).find((x) => x.path === '/v1/refunds').params.amount, '8480');
-  assert.equal((await q('SELECT status, refunded_cents FROM orders WHERE payment_ref = ?', [`pi_${info.session_id}`]))[0].status, 'refunded');
+  assert.equal((await q('SELECT status, refunded_cents FROM orders WHERE tenant_id = ? AND payment_ref = ?', [tenantId, `pi_${info.session_id}`]))[0].status, 'refunded');
   assert.equal((await q('SELECT COUNT(*) AS n FROM lesson_bookings WHERE session_id = (SELECT session_id FROM lesson_requests WHERE reference = ?) AND status = \'booked\'', [info.reference]))[0].n, 0);
   assert.equal((await q('SELECT COUNT(*) AS n FROM order_refunds WHERE tenant_id = ? AND method = \'card\'', [tenantId]))[0].n >= 1, true);
   assert.equal((await cancel(info)).status, 409, 'cannot cancel twice');
@@ -206,7 +221,7 @@ test('canceling a paid lesson refunds 100% well ahead, 50% in the middle window 
   assert.equal(c.body.refund_percent, 50);
   assert.equal(c.body.refund_cents, 4240);
   assert.equal(calls.slice(before).find((x) => x.path === '/v1/refunds').params.amount, '4240');
-  const o = (await q('SELECT status, refunded_cents FROM orders WHERE payment_ref = ?', [`pi_${info.session_id}`]))[0];
+  const o = (await q('SELECT status, refunded_cents FROM orders WHERE tenant_id = ? AND payment_ref = ?', [tenantId, `pi_${info.session_id}`]))[0];
   assert.deepEqual({ ...o }, { status: 'paid', refunded_cents: 4240 });
   // 10 hours ahead: none
   info = await reserveAndPay(10);
