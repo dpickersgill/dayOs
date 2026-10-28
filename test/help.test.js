@@ -34,6 +34,8 @@ test('every article is complete and belongs to a section', () => {
 test('every section is a real screen (or the getting-started section) and has articles', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'main.js'), 'utf8');
   const screens = new Set([...src.matchAll(/^\s*\['([a-z]+)', '/gm)].map((m) => m[1]));
+  // An old address that now opens a tab or a Settings page (Partner passes, Billing) keeps its Help section.
+  for (const m of src.matchAll(/^\s*([a-z]+): \([a-z]*\) => [`']#\//gm)) screens.add(m[1]);
   for (const s of mod.SECTIONS) {
     if (s.key !== 'start') assert.ok(screens.has(s.key), `section ${s.key} has no screen`);
     assert.ok(mod.ARTICLES.some((a) => a.app === s.key), `section ${s.key} is empty`);
@@ -50,5 +52,5 @@ test('the help text is plain: no long dashes and no placeholders left in', () =>
 
 test('the app mounts the Help screen and a link to it on every page', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'main.js'), 'utf8');
-  assert.ok(/\['help', 'Help'/.test(main) && main.includes('addHelpLink(holder, key)'));
+  assert.ok(/\['help', 'Help'/.test(main) && main.includes('decorateHead(holder, key, params, mod)') && main.includes("href: `#/help/for-${key}`"));
 });
