@@ -6,12 +6,15 @@
 #
 # What staging gets, and what keeps it apart from the live site:
 #   - its own Cloud Run service (summitops-staging): one server at most, and none when nobody is using it
+#   - its own service account (summitops-staging): it can reach the database server and write logs, and read the
+#     summitops-staging-* secrets and nothing else, so code on staging can never read a live key
 #   - its own database (summitops_staging) on the same database server, with a login that can reach nothing else
-#   - its own keys (sign-in, bootstrap) and a shared password in front of the whole site
+#   - its own keys (sign-in, bootstrap, its own copy of the email key) and a shared password in front of the whole site
 #   - Stripe in test mode only (live keys are refused), with its own test webhooks
 #   - every email goes to your inbox instead of to the person it names; no text messages are sent
 #   - hidden from search engines
-# Safe to run again: it keeps what already exists and fills in anything missing.
+# Safe to run again: it keeps what already exists, fills in anything missing and says what it changed. Running it again
+# also moves a staging made before it had its own account off the live account (summitops-run).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/cloud-common.sh
@@ -40,10 +43,8 @@ LIVE_DB="$(envval DB_NAME)"
 if [ "$LIVE_DB" = "$STG_DB" ]; then echo "The live database is already called $STG_DB. Stopping."; exit 1; fi
 MAIL_FROM_V="$(envval MAIL_FROM)"
 PM_SECRET="$(secretof POSTMARK_SERVER_TOKEN)"; PM_PLAIN="$(envval POSTMARK_SERVER_TOKEN)"
-SA="$RUN_SA"
-if ! gcloud iam service-accounts describe "$SA" >/dev/null 2>&1; then
-  SA="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')-compute@developer.gserviceaccount.com"
-fi
+SA="$STAGING_SA"
+COMPUTE_SA="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')-compute@developer.gserviceaccount.com"
 echo "Database server $INSTANCE; the live database is $LIVE_DB; staging runs as $SA."
 
 step "A few choices"
@@ -83,21 +84,59 @@ export DB_USER="$STG_USER" DB_PASSWORD="$STG_PW" DB_NAME="$STG_DB"
 export JWT_SECRET="$(secret_read summitops-staging-jwt)"
 npm run migrate
 
-step "3. Letting staging read its keys"
-ALL=("${SECRETS[@]}"); secret_exists summitops-staging-stripe-key && ALL+=(summitops-staging-stripe-key)
-[ -n "$PM_SECRET" ] && ALL+=("$PM_SECRET")
-for s in "${ALL[@]}"; do
-  gcloud secrets add-iam-policy-binding "$s" --member="serviceAccount:$SA" --role=roles/secretmanager.secretAccessor --quiet >/dev/null
+step "3. Staging's own service account, which can read staging's keys and none of the live site's"
+if gcloud iam service-accounts describe "$SA" >/dev/null 2>&1; then echo "$SA is already there."
+else
+  gcloud iam service-accounts create summitops-staging --display-name "Verdynt/OS staging (Cloud Run)" --quiet
+  echo "Made $SA."
+  sleep 5
+fi
+# Reach the database server (the staging login can only open the staging database) and write logs and metrics. Nothing else.
+POLICY="$(gcloud projects get-iam-policy "$PROJECT" --format=json)"
+has_role() { echo "$POLICY" | jq -e --arg r "$1" --arg m "serviceAccount:$SA" '[.bindings[]? | select(.role == $r and .condition == null) | .members[]?] | any(. == $m)' >/dev/null; }
+for role in roles/cloudsql.client roles/logging.logWriter roles/monitoring.metricWriter; do
+  if ! has_role "$role"; then
+    gcloud projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role "$role" --condition=None --quiet >/dev/null
+    echo "  $SA now has $role"
+  fi
 done
-echo "Done."
+if has_role roles/secretmanager.secretAccessor; then
+  gcloud projects remove-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role roles/secretmanager.secretAccessor --condition=None --quiet >/dev/null
+  echo "  $SA may no longer read every secret in the project"
+fi
+# Email: staging gets its own copy of the Postmark key, so it never needs to read the live secret.
+PM_VALUE="$PM_PLAIN"; [ -n "$PM_SECRET" ] && PM_VALUE="$(secret_read "$PM_SECRET")"
+if [ -n "$PM_VALUE" ] && ! secret_exists summitops-staging-postmark; then
+  put_secret summitops-staging-postmark "$PM_VALUE"; echo "  Copied the email (Postmark) key to summitops-staging-postmark"
+fi
+if secret_exists summitops-assistant-api-key && ! secret_exists summitops-staging-assistant-api-key; then
+  put_secret summitops-staging-assistant-api-key "$(secret_read summitops-assistant-api-key)"; echo "  Copied the assistant key to summitops-staging-assistant-api-key"
+fi
+STG_SECRETS=("${SECRETS[@]}")
+for s in summitops-staging-stripe-key summitops-staging-postmark summitops-staging-stripe-webhook summitops-staging-stripe-connect-webhook summitops-staging-assistant-api-key; do
+  secret_exists "$s" && STG_SECRETS+=("$s")
+done
+for s in "${STG_SECRETS[@]}"; do
+  let_read "$s" "$SA"
+  # A staging made before it had its own account ran as the live account (or the default one); they lose staging's keys.
+  stop_read "$s" "$RUN_SA"; stop_read "$s" "$COMPUTE_SA"
+done
+echo "Checking staging cannot read any live secret"
+for s in $(gcloud secrets list --format='value(name.basename())'); do
+  case "$s" in summitops-staging-*) continue ;; esac
+  stop_read "$s" "$SA"
+done
+echo "Done. Staging can read only: ${STG_SECRETS[*]}"
 
 step "4. Deploying staging (this takes a few minutes)"
 ENVS="NODE_ENV=production|STAGE=staging|STAGING_INBOX=$INBOX|DB_SOCKET=$SOCKET|DB_USER=$STG_USER|DB_NAME=$STG_DB|DB_POOL=4|STRIPE_GUEST_FALLBACK=on"
 [ -n "$MAIL_FROM_V" ] && ENVS="$ENVS|MAIL_FROM=$MAIL_FROM_V"
-[ -z "$PM_SECRET" ] && [ -n "$PM_PLAIN" ] && ENVS="$ENVS|POSTMARK_SERVER_TOKEN=$PM_PLAIN"
 SECS="DB_PASSWORD=summitops-staging-db-password:latest,JWT_SECRET=summitops-staging-jwt:latest,BOOTSTRAP_KEY=summitops-staging-bootstrap:latest,STAGING_GATE=summitops-staging-gate:latest"
-[ -n "$PM_SECRET" ] && SECS="$SECS,POSTMARK_SERVER_TOKEN=$PM_SECRET:latest"
+secret_exists summitops-staging-postmark && SECS="$SECS,POSTMARK_SERVER_TOKEN=summitops-staging-postmark:latest"
 secret_exists summitops-staging-stripe-key && SECS="$SECS,STRIPE_SECRET_KEY=summitops-staging-stripe-key:latest"
+secret_exists summitops-staging-stripe-webhook && SECS="$SECS,STRIPE_WEBHOOK_SECRET=summitops-staging-stripe-webhook:latest"
+secret_exists summitops-staging-stripe-connect-webhook && SECS="$SECS,STRIPE_CONNECT_WEBHOOK_SECRET=summitops-staging-stripe-connect-webhook:latest"
+secret_exists summitops-staging-assistant-api-key && SECS="$SECS,ASSISTANT_API_KEY=summitops-staging-assistant-api-key:latest"
 gcloud run deploy "$STAGING_SERVICE" --source . --region "$REGION" --quiet --service-account "$SA" \
   --add-cloudsql-instances "$SQL_CONN" --allow-unauthenticated \
   --min-instances=0 --max-instances=1 --concurrency=40 --memory=1Gi --cpu-boost --timeout=900 \
@@ -117,9 +156,7 @@ if [ -n "$STRIPE_KEY" ] && ! secret_exists summitops-staging-stripe-webhook; the
     -d 'enabled_events[]=account.updated' -d 'enabled_events[]=account.application.deauthorized')"
   if [ -n "$W1" ] && [ -n "$W2" ]; then
     put_secret summitops-staging-stripe-webhook "$W1"; put_secret summitops-staging-stripe-connect-webhook "$W2"
-    for s in summitops-staging-stripe-webhook summitops-staging-stripe-connect-webhook; do
-      gcloud secrets add-iam-policy-binding "$s" --member="serviceAccount:$SA" --role=roles/secretmanager.secretAccessor --quiet >/dev/null
-    done
+    for s in summitops-staging-stripe-webhook summitops-staging-stripe-connect-webhook; do let_read "$s" "$SA"; done
     gcloud run services update "$STAGING_SERVICE" --region "$REGION" --quiet \
       --update-secrets "STRIPE_WEBHOOK_SECRET=summitops-staging-stripe-webhook:latest,STRIPE_CONNECT_WEBHOOK_SECRET=summitops-staging-stripe-connect-webhook:latest"
     echo "Stripe will send test-mode payment events to staging."
@@ -138,5 +175,6 @@ echo "  Bootstrap key (to create a mountain, or the first console sign-in at $UR
 echo "                      gcloud secrets versions access latest --secret=summitops-staging-bootstrap"
 echo "  A full demo mountain to test with: $URL/try"
 echo "  Email from staging goes to $INBOX. No text messages are sent."
+echo "  Staging runs as $SA, which can read only the summitops-staging-* secrets."
 echo ""
 echo "From now on, each release:   bash deploy.sh   (staging), check it, then   bash promote.sh   (live)."

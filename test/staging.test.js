@@ -119,3 +119,33 @@ test('deploy.sh only ever targets staging; promote.sh puts staging\'s exact imag
   const common = fs.readFileSync(path.join(root, 'scripts/cloud-common.sh'), 'utf8');
   assert.match(common, /\[ "\$SERVICE" = "\$PROD_SERVICE" \] && secret_exists summitops-db-migrator/, 'staging never gets the live migration login');
 });
+
+test('staging runs as its own service account, which is given staging secrets only and is taken off any live one', () => {
+  const root = path.join(__dirname, '..');
+  for (const f of ['scripts/harden.sh', 'scripts/assistant-key.sh']) execFileSync('bash', ['-n', path.join(root, f)]);
+  const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
+  const deploy = read('deploy.sh'); const setup = read('scripts/staging-setup.sh');
+  assert.match(deploy, /--service-account "\$STAGING_SA"/, 'every release deploys staging as the staging account');
+  assert.ok(!deploy.includes('RUN_SA'), 'deploy.sh never uses the live account');
+  assert.match(setup, /^SA="\$STAGING_SA"$/m);
+  assert.match(setup, /--service-account "\$SA"/);
+  assert.ok(!/RUN_SA"; then|SA="\$RUN_SA"|compute@developer/.test(setup.replace(/COMPUTE_SA="[^\n]*\n/, '')), 'no fallback to the live or default account');
+  // Every secret staging-setup.sh names is a staging one, except the two it copies from (read by the person running it).
+  const named = new Set(setup.match(/summitops-[a-z0-9-]+/g).filter((n) => !n.startsWith('summitops-staging')));
+  assert.ok([...named].every((n) => ['summitops-assistant-api-key', 'summitops-run'].includes(n)), [...named].join(', '));
+  assert.match(setup, /put_secret summitops-staging-assistant-api-key "\$\(secret_read summitops-assistant-api-key\)"/);
+  assert.match(setup, /case "\$s" in summitops-staging-\*\) continue ;; esac\n\s*stop_read "\$s" "\$SA"/, 'checks every live secret and takes staging off it');
+  assert.ok(!/add-iam-policy-binding "\$s"|secretAccessor --quiet >\/dev\/null\n\s*done/.test(setup), 'secrets are only granted through let_read');
+  assert.match(read('scripts/harden.sh'), /stop_read "\$s" "\$STAGING_SA"/);
+  // The permission helpers change only what is wrong, and say what they changed.
+  const policy = '{"bindings":[{"role":"roles/secretmanager.secretAccessor","members":["serviceAccount:summitops-staging@summitops-510715.iam.gserviceaccount.com"]}]}';
+  const out = execFileSync('bash', ['-c', `set -euo pipefail; exec 2>&1; source scripts/cloud-common.sh
+    gcloud() { if [ "$2" = get-iam-policy ]; then if [ "$3" = summitops-stripe-secret-key ]; then echo '${policy}'; else echo '{}'; fi; else echo "gcloud $*" >&2; fi; }
+    stop_read summitops-stripe-secret-key "$STAGING_SA"; stop_read summitops-jwt "$STAGING_SA"
+    let_read summitops-staging-jwt "$STAGING_SA"; let_read summitops-stripe-secret-key "$STAGING_SA"`], { cwd: root, encoding: 'utf8' });
+  const lines = out.trim().split('\n');
+  assert.equal(lines.filter((l) => l.startsWith('gcloud secrets remove-iam-policy-binding summitops-stripe-secret-key')).length, 1);
+  assert.equal(lines.filter((l) => l.startsWith('gcloud secrets add-iam-policy-binding summitops-staging-jwt')).length, 1);
+  assert.equal(lines.filter((l) => l.startsWith('gcloud')).length, 2, 'nothing changed where nothing was wrong');
+  assert.match(out, /may no longer read summitops-stripe-secret-key/); assert.match(out, /may now read summitops-staging-jwt/);
+});

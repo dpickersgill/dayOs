@@ -49,7 +49,9 @@ From the unzipped folder in Cloud Shell, after `bash promote.sh`:
    database login for the app (`summitops_app`) that can change rows but not tables, keeps the current login for
    migrations only (secret `summitops-db-migrator`, which the app cannot read), makes Cloud SQL refuse unencrypted
    connections and protects it from deletion, sends audit events to a log bucket kept 400 days, and redeploys.
-   It is safe to run again. From then on `deploy.sh` migrates with the migration login and deploys as `summitops-run`.
+   It is safe to run again. From then on `promote.sh` migrates with the migration login and deploys live as
+   `summitops-run`. Staging never runs as `summitops-run`: `deploy.sh` deploys it as `summitops-staging`, which
+   `scripts/staging-setup.sh` makes and which can read only the `summitops-staging-*` secrets (see DEPLOY.md, Staging).
 2. `bash scripts/harden.sh --lock-audit` locks that log bucket so nobody can shorten or delete it. Cannot be undone.
 3. `bash scripts/harden.sh --remove-editor` takes Editor away from the default compute account (builds keep working:
    it gets the build roles first). If a deploy then fails at the build step, the script prints the command to undo it.

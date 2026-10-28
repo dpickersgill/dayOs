@@ -8,6 +8,8 @@ SERVICE="${DAYOS_TARGET:-$PROD_SERVICE}"
 REGION=us-east1
 PROJECT=summitops-510715
 RUN_SA="summitops-run@${PROJECT}.iam.gserviceaccount.com"
+# Staging runs as its own account, which may read the summitops-staging-* secrets and no live one (staging-setup.sh).
+STAGING_SA="summitops-staging@${PROJECT}.iam.gserviceaccount.com"
 
 step() { printf '\n== %s\n' "$1"; }
 
@@ -28,6 +30,21 @@ envval() { echo "$SVC_JSON" | jq -r --arg k "$1" '.spec.template.spec.containers
 secretof() { echo "$SVC_JSON" | jq -r --arg k "$1" '.spec.template.spec.containers[0].env[]? | select(.name==$k) | .valueFrom.secretKeyRef.name // empty'; }
 secret_exists() { gcloud secrets describe "$1" >/dev/null 2>&1; }
 secret_read() { gcloud secrets versions access latest --secret="$1"; }
+# Who may read a secret. Each prints only when it changes something, so a second run shows it had nothing to do.
+can_read() { # secret account
+  gcloud secrets get-iam-policy "$1" --format=json | jq -e --arg m "serviceAccount:$2" \
+    '[.bindings[]? | select(.role == "roles/secretmanager.secretAccessor") | .members[]?] | any(. == $m)' >/dev/null
+}
+let_read() { # secret account
+  if can_read "$1" "$2"; then return 0; fi
+  gcloud secrets add-iam-policy-binding "$1" --member "serviceAccount:$2" --role roles/secretmanager.secretAccessor --quiet >/dev/null
+  echo "  $2 may now read $1"
+}
+stop_read() { # secret account
+  if ! can_read "$1" "$2"; then return 0; fi
+  gcloud secrets remove-iam-policy-binding "$1" --member "serviceAccount:$2" --role roles/secretmanager.secretAccessor --quiet >/dev/null
+  echo "  $2 may no longer read $1"
+}
 # Where to check the live service: its run.app address, or PUBLIC_URL once ingress only allows the load balancer.
 check_url() {
   local ingress; ingress="$(echo "$SVC_JSON" | jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"')"
