@@ -38,6 +38,7 @@ export async function renderRefusal(root, id, pid) {
     const editable = c.report_state === 'draft' || (c.report_state === 'submitted' && has('approve_case'));
     const f = p.form || {};
     const name = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Name not known';
+    const lead = c.responders.find((r) => r.role === 'lead' && !r.voided_at);
     const row = (k, v) => h('p', null, h('b', null, `${k}: `), v || h('span', { class: 'muted' }, 'Not recorded'));
     const tools = h('div', { class: 'handoff-tools row' }, h('a', { class: 'btn', href: `#/patrol/case/${id}` }, 'Back to the case'), button('Print', () => window.print(), { kind: 'primary' }), editable ? button(sig ? 'Update the answers' : 'Record the refusal', () => dialog(c, p, Boolean(sig)), { kind: sig ? undefined : 'primary' }) : null);
     return h('article', { class: 'handoff', 'data-refusal': p.id },
@@ -55,7 +56,7 @@ export async function renderRefusal(root, id, pid) {
       h('div', { class: 'hs-sign' },
         h('div', null, h('span', { class: 'k' }, f.refusal_signer === 'guardian' ? 'Parent or guardian signature' : 'Patient signature'), h('div', { class: 'line sigbox' }, img ? h('img', { class: 'sig-img', src: img, alt: `Signature of ${sig.signer_name}` }) : null), sig ? h('span', { class: 'muted small' }, `${sig.signer_name}${sig.signer_role ? ` (${sig.signer_role})` : ''}, ${fmtDateTime(sig.signed_at)}`) : null),
         h('div', null, h('span', { class: 'k' }, 'Witness'), h('div', { class: 'line sigbox' }, wimg ? h('img', { class: 'sig-img', src: wimg, alt: `Signature of ${wsig.signer_name}` }) : (f.refusal_witness || '')), wsig ? h('span', { class: 'muted small' }, `${wsig.signer_name}, ${fmtDateTime(wsig.signed_at)}`) : null),
-        h('div', null, h('span', { class: 'k' }, 'Patroller'), h('div', { class: 'line' }, (c.responders.find((r) => r.role === 'lead') ? `${c.responders.find((r) => r.role === 'lead').first_name} ${c.responders.find((r) => r.role === 'lead').last_name}` : ''))),
+        h('div', null, h('span', { class: 'k' }, 'Patroller'), h('div', { class: 'line' }, (lead ? `${lead.first_name} ${lead.last_name}` : ''))),
         h('div', null, h('span', { class: 'k' }, 'Date and time'), h('div', { class: 'line' }, sig ? fmtDateTime(sig.signed_at) : ''))),
       !sig ? h('p', null, state('Not signed yet', 'warn')) : null,
       h('p', { class: 'hs-foot muted small' }, 'Confidential patient information. A patient who refuses care needs this signed before the report can be submitted.'));

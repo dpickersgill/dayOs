@@ -66,7 +66,7 @@ const CONDITIONS = [
   ['collision', 'A collision', (p) => formOf(p).collided === 'yes', (c) => c.category === 'collision'],
   ['refused', 'Care refused', (p) => p.disposition === 'refused_care', null],
   ['staff', 'Staff or volunteer on duty', (p) => ['staff_work', 'volunteer_work'].includes(formOf(p).patient_type) || p.activity === 'staff', null],
-  ['rental', 'Rental or demo gear', (p) => RENTAL.includes(formOf(p).equipment) || p.rental_equipment === 'yes', (c) => (c.rentals || []).length > 0],
+  ['rental', 'Rental or demo gear', (p) => RENTAL.includes(formOf(p).equipment) || p.rental_equipment === 'yes', (c) => (c.rentals || []).some((r) => !r.voided_at)],
   ['lift', 'A lift involved', (p) => String(formOf(p).cause || '').startsWith('lift_'), (c) => parseForm(c.form).incident_location === 'lift_incident' || Boolean(c.lift_id)],
 ];
 const CONDITION_KEYS = CONDITIONS.map((x) => x[0]);
@@ -332,7 +332,7 @@ function evaluate(rules, c, { exceptions = [] } = {}) {
       const f = item.field;
       if (!applies(f, caseVals)) continue;
       let met;
-      if (f.type === 'witnesses') met = (c.witnesses || []).length > 0 || Boolean(caseForm.witnesses_none);
+      if (f.type === 'witnesses') met = (c.witnesses || []).some((w) => !w.voided_at) || Boolean(caseForm.witnesses_none);
       else if (f.type === 'signature') met = signed(f.kind);
       else met = !isEmpty(caseVals[f.key]);
       push(null, met, caseNa[item.key]);

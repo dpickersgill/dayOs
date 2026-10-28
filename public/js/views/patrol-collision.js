@@ -1,8 +1,10 @@
 // The collision report. On the case page it is a panel for recording who was involved and what happened at the scene; the
 // printable report (#/patrol/collision/:id) is for an insurer or the risk manager and carries no medical details.
 
-import { get, post, put, patch, del } from '../api.js';
-import { h, state, input, select, field, button, toast, formDialog, confirmDialog, val, num, fmtDateTime, label, errorBox } from '../ui.js';
+import { get, post, put, patch } from '../api.js';
+import { h, state, input, select, field, button, toast, formDialog, val, num, fmtDateTime, label, errorBox } from '../ui.js';
+import { voidDialog } from './patrol-tools.js';
+import { voidedNote } from './patrol-bedside.js';
 
 const TYPES = [['skier_skier', 'Skier or rider with another skier or rider'], ['skier_object', 'Skier or rider with an object (tree, fence, sign)'], ['skier_lift_structure', 'With a lift tower or structure'], ['skier_vehicle', 'With a vehicle (groomer, snowmobile)'], ['skier_animal', 'With an animal'], ['other', 'Other']];
 const ROLES = [['skier', 'Skier'], ['snowboarder', 'Snowboarder'], ['other_snow', 'Other snow sport'], ['pedestrian', 'Pedestrian'], ['employee', 'Employee'], ['vehicle', 'Vehicle driver'], ['unknown', 'Unknown']];
@@ -13,6 +15,7 @@ const factorList = (s) => String(s || '').split(',').filter(Boolean);
 const factorText = (s) => factorList(s).map((k) => (FACTORS.find((f) => f[0] === k) || [k, label(k)])[1]);
 const yn = (v) => (v ? 'Yes' : 'No');
 const typeText = (t) => (TYPES.find((x) => x[0] === t) || [0, label(t)])[1];
+const live = (list) => (list || []).filter((x) => !x.voided_at); // entered in error: on the case page, not on the printed report
 const partyName = (p) => [p.first_name, p.last_name].filter(Boolean).join(' ') || (p.role === 'unknown' ? 'Unidentified person' : label(p.role));
 
 /** The panel on the case page. opts: { id, editable, reload } */
@@ -24,10 +27,10 @@ export function collisionPanel(c, { id, editable, reload }) {
     factorList(col.factors).length ? h('p', null, h('b', null, 'Factors: '), factorText(col.factors).join(', ')) : null,
     col.hit_and_run && col.unknown_party_description ? h('p', null, h('b', null, 'Description of the other party: '), col.unknown_party_description) : null)
     : h('p', { class: 'muted' }, 'Nothing recorded yet. Add each person involved, then the details of the scene.');
-  const people = c.parties.length ? h('ul', { class: 'plain parties' }, c.parties.map((p) => h('li', { class: 'spread', 'data-party': p.id },
-    h('span', null, h('b', null, partyName(p)), ` ${label(p.role)}`, p.position && p.position !== 'unknown' ? `, ${label(p.position)}` : '', p.speed && p.speed !== 'unknown' ? `, ${p.speed} speed` : '', p.left_scene ? ' ' : '', p.left_scene ? state('Left the scene', 'bad') : null,
-      p.patient_id ? ' ' : '', p.patient_id ? state('Patient on this report', 'neutral') : null, h('span', { class: 'muted' }, ` ${[p.phone, p.email].filter(Boolean).join(', ')}`)),
-    editable ? h('span', { class: 'row' }, button('Edit', () => partyDialog(c, p, { id, reload }), { small: true }), button('Remove', () => confirmDialog('Remove this person?', partyName(p), 'Remove', async () => { await del(`/patrol/incidents/${id}/parties/${p.id}`); await reload(); }, { danger: true }), { small: true })) : null))) : null;
+  const people = c.parties.length ? h('ul', { class: 'plain parties' }, c.parties.map((p) => h('li', { class: p.voided_at ? 'spread voided' : 'spread', 'data-party': p.id },
+    h('span', null, h('b', { class: 'what' }, partyName(p)), ` ${label(p.role)}`, p.position && p.position !== 'unknown' ? `, ${label(p.position)}` : '', p.speed && p.speed !== 'unknown' ? `, ${p.speed} speed` : '', p.left_scene ? ' ' : '', p.left_scene ? state('Left the scene', 'bad') : null,
+      p.patient_id ? ' ' : '', p.patient_id ? state('Patient on this report', 'neutral') : null, h('span', { class: 'muted' }, ` ${[p.phone, p.email].filter(Boolean).join(', ')}`), voidedNote(p)),
+    editable && !p.voided_at ? h('span', { class: 'row' }, button('Edit', () => partyDialog(c, p, { id, reload }), { small: true }), button('Entered in error', () => voidDialog({ what: partyName(p), path: `/patrol/incidents/${id}/parties/${p.id}`, onDone: reload }), { small: true, kind: 'quiet' })) : null))) : null;
   return h('section', { class: 'panel stack', 'data-area': 'collision', 'data-collision': '' },
     h('div', { class: 'spread' }, h('h2', null, 'Collision report'),
       h('div', { class: 'row' }, editable ? button('Add person involved', () => partyDialog(c, null, { id, reload }), { small: true, kind: 'primary' }) : null, editable ? button(col ? 'Edit scene details' : 'Add scene details', () => sceneDialog(c, { id, reload }), { small: true }) : null,
@@ -116,7 +119,7 @@ export async function renderCollisionReport(root, id) {
       h('div', null, h('p', { class: 'eyebrow' }, 'Collision report'), h('h1', null, c.case_number || `Case ${id}`), h('p', null, typeText(col.collision_type || 'skier_skier'))),
       h('div', { class: 'hs-meta' }, h('b', null, c.resort.legal_name || c.resort.name), h('span', null, fmtDateTime(c.occurred_at)), h('span', null, where))),
     col.hit_and_run ? h('div', { class: 'hs-alert' }, h('div', null, h('span', { class: 'k' }, 'Other party left the scene'), h('b', null, col.unknown_party_description || 'No description recorded'))) : null,
-    section('People involved', c.parties.length ? h('div', { class: 'parties-grid' }, c.parties.map(partyBlock)) : h('p', { class: 'muted' }, 'No one recorded.')),
+    section('People involved', live(c.parties).length ? h('div', { class: 'parties-grid' }, live(c.parties).map(partyBlock)) : h('p', { class: 'muted' }, 'No one recorded.')),
     h('div', { class: 'hs-grid' },
       h('div', { class: 'stack' },
         section('What happened', h('p', { class: 'prewrap' }, c.narrative || c.summary), kvp('Right of way', col.right_of_way), factorList(col.factors).length ? kvp('Contributing factors', factorText(col.factors).join(', ')) : null),
@@ -124,10 +127,10 @@ export async function renderCollisionReport(root, id) {
       h('div', { class: 'stack' },
         section('Notifications and holds', kvp('Police', col.police_notified ? [col.police_agency || 'Notified', col.police_report_no && `report ${col.police_report_no}`].filter(Boolean).join(', ') : 'Not notified'), kvp('Risk manager or supervisor', yn(col.risk_notified)),
           kvp('Equipment held', col.equipment_held || 'None'), kvp('Property damage', col.property_damage || 'None reported'), col.legal_hold ? h('p', null, h('b', null, 'Legal hold: keep everything about this case')) : null))),
-    section('Witnesses', c.witnesses.length ? h('ul', { class: 'plain' }, c.witnesses.map((w) => h('li', { class: 'stack tight' }, h('span', null, h('b', null, w.name), ` ${[w.relation && label(w.relation), w.phone, w.email].filter(Boolean).join(', ')}`), w.statement ? h('span', { class: 'prewrap' }, w.statement) : null))) : h('p', { class: 'muted' }, 'No witnesses recorded.')),
+    section('Witnesses', live(c.witnesses).length ? h('ul', { class: 'plain' }, live(c.witnesses).map((w) => h('li', { class: 'stack tight' }, h('span', null, h('b', null, w.name), ` ${[w.relation && label(w.relation), w.phone, w.email].filter(Boolean).join(', ')}`), w.statement ? h('span', { class: 'prewrap' }, w.statement) : null))) : h('p', { class: 'muted' }, 'No witnesses recorded.')),
     col.findings ? section('Findings and notes', h('p', { class: 'prewrap' }, col.findings)) : null,
     h('div', { class: 'hs-sign' },
-      h('div', null, h('span', { class: 'k' }, 'Prepared by (patrol)'), h('div', { class: 'line' }, (c.responders.find((r) => r.role === 'lead') || {}).first_name ? `${c.responders.find((r) => r.role === 'lead').first_name} ${c.responders.find((r) => r.role === 'lead').last_name}` : '')),
+      h('div', null, h('span', { class: 'k' }, 'Prepared by (patrol)'), h('div', { class: 'line' }, (live(c.responders).find((r) => r.role === 'lead') || {}).first_name ? `${live(c.responders).find((r) => r.role === 'lead').first_name} ${live(c.responders).find((r) => r.role === 'lead').last_name}` : '')),
       h('div', null, h('span', { class: 'k' }, 'Signature'), h('div', { class: 'line' })), h('div', null, h('span', { class: 'k' }, 'Reviewed by (risk manager)'), h('div', { class: 'line' })), h('div', null, h('span', { class: 'k' }, 'Date'), h('div', { class: 'line' }))),
     h('p', { class: 'hs-foot muted small' }, 'Confidential. This report has no medical information. Printing it is logged. Share it only with the people involved, the insurer and authorities.')));
 }

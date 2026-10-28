@@ -182,7 +182,7 @@ test('witness link: the witness writes, signs and sends their own statement once
   assert.equal(list.statements.length, 1);
 
   // staff never edit or remove it; they mark it entered in error with a reason
-  is(await api('DELETE', `/patrol/incidents/${id}/witnesses/${w.id}`, { token: T.pat }), 409);
+  is(await api('DELETE', `/patrol/incidents/${id}/witnesses/${w.id}`, { token: T.pat }), 400, 'removing asks for a reason and only marks it entered in error');
   is(await api('POST', `/patrol/incidents/${id}/witness-statements/${w.id}/void`, { token: T.pat, body: { reason: '' } }), 400);
   is(await api('POST', `/patrol/incidents/${id}/witness-statements/${w.id}/void`, { token: T.pat, body: { reason: 'Sent for the wrong accident' } }), 200);
   is(await api('POST', `/patrol/incidents/${id}/witness-statements/${w.id}/void`, { token: T.pat, body: { reason: 'Again please' } }), 409);

@@ -156,12 +156,15 @@ test('rental gear on a case: found three ways, held until the shop inspects it',
   assert.equal(await status(ski), 'available');
   const after = ok(await api('GET', `/patrol/incidents/${M.case}`, { token: M.patT })).rentals[0];
   assert.ok(after.released_at); assert.match(after.inspection_note, /retested/);
-  is(await api('DELETE', `/patrol/incidents/${M.case}/rentals/${after.id}`, { token: M.patT }), 409, 'inspected gear stays on the report');
+  is(await api('DELETE', `/patrol/incidents/${M.case}/rentals/${after.id}`, { token: M.patT, body: { reason: 'Wrong gear' } }), 409, 'inspected gear stays on the report');
   // added by mistake, then removed: back on the rack; with the shop's hold turned off, nothing is held
   const r2 = ok(await api('POST', `/patrol/incidents/${M.case}/rentals`, { token: M.patT, body: { rental_item_id: boot } }));
   assert.equal(await status(boot), 'maintenance');
-  ok(await api('DELETE', `/patrol/incidents/${M.case}/rentals/${r2.id}`, { token: M.patT }));
+  is(await api('DELETE', `/patrol/incidents/${M.case}/rentals/${r2.id}`, { token: M.patT }), 400, 'a reason is needed');
+  ok(await api('POST', `/patrol/incidents/${M.case}/rentals/${r2.id}/void`, { token: M.patT, body: { reason: 'Added by mistake' } }));
   assert.equal(await status(boot), 'available');
+  const marked = ok(await api('GET', `/patrol/incidents/${M.case}`, { token: M.patT })).rentals.find((x) => x.id === r2.id);
+  assert.ok(marked.voided_at, 'marked entered in error, still on the record'); assert.equal(marked.void_reason, 'Added by mistake');
   ok(await api('PUT', '/rentals/settings', { token: M.owner, body: { hold_after_incident: false } }));
   assert.equal(ok(await api('POST', `/patrol/incidents/${M.case}/rentals`, { token: M.patT, body: { rental_item_id: boot } })).held, false);
   assert.equal(await status(boot), 'available');

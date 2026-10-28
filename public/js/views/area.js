@@ -73,6 +73,6 @@ async function openReport(id) {
     kv([['When', fmtDateTime(c.occurred_at)], ['Where', c.location], ['Run', c.trail], ['Kind', CAT[c.category] || c.category], ['Severity', SEV[c.severity] || c.severity], ['Summary', c.summary]]),
     c.narrative ? h('div', null, h('b', null, 'What happened'), h('p', null, c.narrative)) : '',
     ...(c.patients || []).filter(live).map(patient),
-    (c.responders || []).length ? h('p', null, h('b', null, 'Responders: '), c.responders.map((x) => `${x.first_name} ${x.last_name} (${label(x.role)})`).join(', ')) : '',
+    (c.responders || []).filter(live).length ? h('p', null, h('b', null, 'Responders: '), c.responders.filter(live).map((x) => `${x.first_name} ${x.last_name} (${label(x.role)})`).join(', ')) : '',
     h('div', { class: 'row no-print' }, button('Print or save as PDF', () => window.print(), { small: true }))), { wide: true });
 }

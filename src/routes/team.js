@@ -42,7 +42,7 @@ router.get('/team', patrol, async (req, res) => {
                 WHERE sc.tenant_id = ? AND sc.staff_id IN (SELECT staff_id FROM patrol_members WHERE tenant_id = ?) ORDER BY c.name`, [tenantId, tenantId]),
     rows(pool, 'SELECT staff_id, SUM(hours) AS hours FROM training_records WHERE tenant_id = ? AND completed_on >= ? GROUP BY staff_id', [tenantId, seasonStart]),
     rows(pool, `SELECT r.staff_id, COUNT(*) AS n FROM incident_responders r JOIN incidents i ON i.id = r.incident_id AND i.tenant_id = r.tenant_id
-                WHERE r.tenant_id = ? AND r.role = 'lead' AND DATE(i.occurred_at) >= ? GROUP BY r.staff_id`, [tenantId, seasonStart]),
+                WHERE r.tenant_id = ? AND r.role = 'lead' AND r.voided_at IS NULL AND DATE(i.occurred_at) >= ? GROUP BY r.staff_id`, [tenantId, seasonStart]),
   ]);
   const soon = addDays(today, 30);
   const data = members.map((m) => ({

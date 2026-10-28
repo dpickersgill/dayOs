@@ -17,7 +17,7 @@ const FROM_BASE = { private_car_taxi: 'Private car or taxi', company: 'Company v
 /** Everything the sheet shows, gathered once so the page and the plain-text copy always say the same thing. */
 export function buildHandoff(c, p, nowText = '') {
   const f = p.form || {};
-  const lead = c.responders.find((r) => r.role === 'lead');
+  const lead = c.responders.find((r) => r.role === 'lead' && !r.voided_at);
   const firstEvent = (k) => live(c.events).find((e) => e.kind === k);
   const treatments = live(p.treatments);
   const meds = treatments.filter((t) => t.kind === 'medication');
