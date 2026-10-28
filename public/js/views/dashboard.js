@@ -1,4 +1,4 @@
-import { get, put, post, patch, del } from '../api.js';
+import { get, poll, put, post, patch, del } from '../api.js';
 import { ctx, h, clear, money, state, input, field, select, button, todayStr, fmtDate, fmtDateLong, fmtTime, fmtDateTime, label, empty, errorBox, loading, toast, fail, isManager, confirmDialog } from '../ui.js';
 
 const ROLES = [['counter', 'Counter'], ['instructor', 'Instructors'], ['patrol', 'Patrol'], ['staff', 'Staff'], ['manager', 'Managers and owners']];
@@ -25,10 +25,10 @@ export async function render(root) {
   const wallBtn = button('Wall screen', () => toggleWall(true), { small: true });
   bar.append(...[dayField, customize, wallBtn].filter(Boolean));
 
-  async function load(quiet) {
+  async function load(quiet, timed) { // timed: the wall screen's own refresh, which is not someone using the app
     if (!quiet) clear(grid).append(loading());
     try {
-      board = await get(`/board${isManager() && date.value && date.value !== todayStr() ? `?date=${date.value}` : ''}`);
+      board = await (timed ? poll : get)(`/board${isManager() && date.value && date.value !== todayStr() ? `?date=${date.value}` : ''}`);
       root.querySelector('#dash-sub').textContent = fmtDateLong(board.date);
       draw();
     } catch (err) { clear(grid).append(errorBox(err)); }
@@ -77,7 +77,7 @@ export async function render(root) {
     wall = on; root.classList.toggle('wall', on);
     clearInterval(timer);
     if (on) {
-      timer = setInterval(() => { if (!root.isConnected) { clearInterval(timer); return; } load(true); }, 60000);
+      timer = setInterval(() => { if (!root.isConnected) { clearInterval(timer); return; } load(true, true); }, 60000);
       if (wallHost.requestFullscreen) wallHost.requestFullscreen().catch(() => {});
       wallHost.prepend(h('button', { type: 'button', class: 'btn small wall-exit', onclick: () => { if (document.fullscreenElement) document.exitFullscreen(); toggleWall(false); } }, 'Close wall screen'));
     } else wallHost.querySelectorAll('.wall-exit').forEach((b) => b.remove());

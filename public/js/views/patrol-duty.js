@@ -1,8 +1,8 @@
 // Patrol > Now > On duty: sign in when you reach the patrol room and out when you leave. Dispatch, the sweep, Today's
 // posts and days patrolled all use this list. A shared tablet in the patrol room can run the big-button screen, where
 // anyone taps their name. Also here: my phone alerts, and my days this season against the patrol's minimum.
-import { get, post, patch } from '../api.js';
-import { h, clear, select, input, field, button, toast, formDialog, empty, errorBox, state, fmtTime, label, act } from '../ui.js';
+import { get, poll, post, patch, hooks } from '../api.js';
+import { h, clear, select, input, field, button, toast, formDialog, confirmDialog, empty, errorBox, state, fmtTime, label, act } from '../ui.js';
 import { hrs } from './workforce-common.js';
 import * as alerts from '../alerts.js';
 
@@ -53,7 +53,7 @@ export async function drawDuty(box) {
     parts.push(await alertsPanel());
     // ---- who is on
     parts.push(h('section', { class: 'panel stack' },
-      h('div', { class: 'spread' }, h('h2', null, `On duty now (${d.on_duty.length})`), d.can_sign_others ? button('Patrol-room screen', () => { location.hash = '#/patrol/room'; }, { small: true }) : null),
+      h('div', { class: 'spread' }, h('h2', null, `On duty now (${d.on_duty.length})`), d.can_sign_others ? button('Patrol-room screen', () => roomDialog(), { small: true }) : null),
       d.on_duty.length ? h('ul', { class: 'duty-list' }, d.on_duty.map((e) => h('li', null,
         h('b', null, e.name), e.callsign ? h('span', { class: 'muted' }, ` ${e.callsign}`) : null,
         h('span', { class: 'muted' }, ` since ${since(e.signed_in_at)}${e.station ? `, ${e.station}` : ''}${e.radio ? `, radio ${e.radio}` : ''}`),
@@ -93,15 +93,35 @@ async function alertsPanel() {
   return box;
 }
 
-/** The patrol-room screen: big name buttons, tap to sign in or out. Runs on a shared tablet signed in by a leader. */
+/** Before a leader turns this device into the patrol-room screen: what it does, and how to leave it. */
+export function roomDialog() {
+  return confirmDialog('Patrol-room screen', 'This device becomes the patrol-room screen: everyone taps their name to sign in or out, and nothing else opens on it. To use it for anything else, press Leave this screen and confirm it is you, or sign out.', 'Start the screen', () => startRoom());
+}
+/** The server locks this session to the room screen, then the page starts over as that screen. */
+export async function startRoom() {
+  await post('/patrol/room');
+  history.replaceState(null, '', `${location.pathname}#/patrol/room`);
+  location.reload();
+}
+
+/**
+ * The patrol-room screen: big name buttons, tap to sign in or out. Runs all day on a shared tablet, on a leader's session
+ * the server keeps to this screen alone (main.js shows it without the menu). Leaving it needs the leader again.
+ */
 export async function renderRoom(root) {
   const body = h('div', { class: 'room' });
-  clear(root).append(h('div', { class: 'room-head' }, h('h1', null, 'Patrol room'), h('p', null, 'Tap your name to sign in or out.'), h('a', { class: 'btn small', href: '#/patrol/duty' }, 'Done')), body);
+  const leave = button('Leave this screen', async () => {
+    await post('/patrol/room/end'); // asks for the leader's passkey, code or password first
+    history.replaceState(null, '', `${location.pathname}#/patrol/duty`);
+    location.reload();
+  }, { small: true });
+  clear(root).append(h('div', { class: 'room-head' }, h('h1', null, 'Patrol room'), h('p', null, 'Tap your name to sign in or out.'),
+    h('div', { class: 'row' }, leave, button('Sign out', () => hooks.signOut && hooks.signOut(), { small: true, kind: 'ghost' }))), body);
   let timer = null;
-  const tick = () => { if (!body.isConnected) { clearInterval(timer); return; } load(); };
-  async function load() {
+  const tick = () => { if (!body.isConnected) { clearInterval(timer); return; } load(true); };
+  async function load(timed) {
     try {
-      const d = await get('/patrol/duty');
+      const d = await (timed ? poll : get)('/patrol/duty');
       clear(body).append(h('div', { class: 'room-grid' }, d.roster.map((r) => h('button', {
         type: 'button', class: `room-tile${r.on_duty ? ' is-on' : ''}`, 'aria-pressed': String(r.on_duty),
         onclick: () => (r.on_duty ? signOut(r) : signIn(r, d.stations)),

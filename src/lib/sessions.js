@@ -48,7 +48,7 @@ const STATE_SQL = `(s.id_hash IS NOT NULL AND s.ended_at IS NULL AND s.expires_a
     AND s.last_seen > DATE_SUB(UTC_TIMESTAMP(), INTERVAL IF(s.terminal_id IS NULL, ?, ?) MINUTE)
     AND (s.terminal_id IS NULL OR EXISTS (SELECT 1 FROM terminals x WHERE x.id = s.terminal_id AND x.tenant_id = s.tenant_id AND x.revoked_at IS NULL))) AS session_open,
   (s.stepped_up_at IS NOT NULL AND s.stepped_up_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? MINUTE)) AS stepped_up,
-  s.method AS session_method, s.terminal_id AS session_terminal, s.device_hash AS session_device`;
+  s.method AS session_method, s.terminal_id AS session_terminal, s.device_hash AS session_device, s.display AS session_display`;
 const stateParams = () => [IDLE_MIN(), TERMINAL_IDLE_MIN(), STEP_UP_MIN()];
 const JOIN_SQL = 'LEFT JOIN user_sessions s ON s.id_hash = ? AND s.user_id = u.id';
 
@@ -57,9 +57,21 @@ async function steppedUp(sid) {
   await pool.query('UPDATE user_sessions SET stepped_up_at = UTC_TIMESTAMP() WHERE id_hash = ? AND ended_at IS NULL', [hash(sid)]);
 }
 
-/** Marks the session used (at most once a minute, so busy pages do not write on every request). */
+/**
+ * Marks the session used (at most once a minute, so busy pages do not write on every request). The middleware skips it for
+ * background polls (x-poll: 1), so a tab nobody touches still ends after SESSION_IDLE_MINUTES.
+ */
 function touch(sid) {
   pool.query('UPDATE user_sessions SET last_seen = UTC_TIMESTAMP() WHERE id_hash = ? AND last_seen < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 MINUTE)', [hash(sid)]).catch(() => {});
+}
+
+/**
+ * The patrol-room screen: this session becomes the room's display (display = 'patrol_room'). It can then only show who is
+ * on duty and sign people in and out (ROOM_PATHS in middleware/auth.js), and the last second check is cleared, so leaving
+ * the screen needs the leader's passkey, code or password again.
+ */
+async function setDisplay(sid, display) {
+  await pool.query(`UPDATE user_sessions SET display = ?${display ? ', stepped_up_at = NULL' : ''} WHERE id_hash = ? AND ended_at IS NULL`, [display, hash(sid)]);
 }
 
 async function end(sid, why = 'signed_out') {
@@ -75,4 +87,4 @@ async function prune() {
   return r.affectedRows;
 }
 
-module.exports = { open, STATE_SQL, stateParams, JOIN_SQL, steppedUp, STEP_UP_MIN, TERMINAL_IDLE_MIN, touch, end, endAll, prune, hash };
+module.exports = { open, STATE_SQL, stateParams, JOIN_SQL, steppedUp, STEP_UP_MIN, TERMINAL_IDLE_MIN, touch, setDisplay, end, endAll, prune, hash };

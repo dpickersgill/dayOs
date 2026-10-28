@@ -437,7 +437,7 @@ router.get('/auth/me', authenticate, async (req, res) => {
     mfa_required_by_mountain: Boolean(Number(user.require_mfa)), mfa_required: Boolean(rule), mfa_rule: rule, mfa_enrollment_required: Boolean(rule && !strong), mfa_starts_on: soon,
     access_ends_on: user.access_ends_on ? String(user.access_ends_on).slice(0, 10) : null,
     staff_injuries: await require('../lib/injuryregister').canSee(pool, req.auth.tenantId, { id: req.auth.userId, role: user.role }),
-    signed_in_with: req.auth.method, terminal, stepped_up: req.auth.steppedUp, device_key: deviceKey,
+    signed_in_with: req.auth.method, terminal, stepped_up: req.auth.steppedUp, device_key: deviceKey, display: req.auth.display || null,
   });
 });
 

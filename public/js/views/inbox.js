@@ -2,7 +2,7 @@
 // on a phone), read and reply on the right. Links to records (from a Share button, or pasted from the address bar)
 // show as cards that open the record. New messages arrive by checking every few seconds while the page is open.
 
-import { get, post, patch, del } from '../api.js';
+import { get, poll, post, patch, del } from '../api.js';
 import { h, clear, button, formDialog, confirmDialog, toast, empty, errorBox, input, field, fmtDate, fmtTime } from '../ui.js';
 import { linkCard, linksIn, LINK_TYPES } from '../share.js';
 
@@ -25,8 +25,8 @@ export async function render(root, params = []) {
   root.append(h('div', { class: 'page-head inbox-head' }, h('div', null, h('h1', null, 'Inbox'), h('p', { class: 'muted' }, 'Messages with your team. Use Share on a case, customer, order, asset, work order, waiver or document to send a link to it.'))), layout);
 
   let threads = [];
-  async function loadList() {
-    try { threads = (await get('/inbox/threads')).data; } catch (err) { clear(listBox).append(errorBox(err)); return; }
+  async function loadList(timed) { // timed: the list's own refresh, which is not someone using the app
+    try { threads = (await (timed === true ? poll : get)('/inbox/threads')).data; } catch (err) { clear(listBox).append(errorBox(err)); return; }
     clear(listBox);
     if (!threads.length) { listBox.append(empty('No conversations yet.', button('Start one', () => newConversation(), { small: true }))); return; }
     listBox.append(h('ul', { class: 'thread-list' }, threads.map((t) => h('li', null, h('a', { href: `#/inbox/${t.id}`, class: 'thread-row', 'aria-current': t.id === openId ? 'page' : null },
@@ -35,7 +35,7 @@ export async function render(root, params = []) {
       t.unread ? h('span', { class: 'unread-dot', 'aria-label': `${t.unread} unread` }, String(t.unread)) : null)))));
   }
   await loadList();
-  const listTimer = setInterval(() => { if (!root.isConnected) { clearInterval(listTimer); return; } if (!document.hidden) loadList(); }, LIST_MS);
+  const listTimer = setInterval(() => { if (!root.isConnected) { clearInterval(listTimer); return; } if (!document.hidden) loadList(true); }, LIST_MS);
   listTimer.unref?.(); // (test runners only: a pending timer must not keep the process alive)
 
   if (openId) await openThread(threadBox, openId, loadList);
@@ -137,8 +137,8 @@ async function openThread(box, id, onChange) {
     moreBefore = out.more_before; olderBtn.hidden = !moreBefore;
     scroller.scrollTop = scroller.scrollHeight - before;
   }
-  async function loadNew() {
-    const out = await get(`/inbox/threads/${id}/messages?after=${lastId}&limit=100`);
+  async function loadNew(timed) {
+    const out = await (timed === true ? poll : get)(`/inbox/threads/${id}/messages?after=${lastId}&limit=100`);
     if (!out.data.length) return;
     const stick = nearBottom();
     const placeholder = list.querySelector('.msg.system:not([data-id])');
@@ -175,7 +175,7 @@ async function openThread(box, id, onChange) {
 
   await reloadAll();
   text.focus({ preventScroll: true });
-  const timer = setInterval(() => { if (!box.isConnected || !box.contains(form)) { clearInterval(timer); return; } if (!document.hidden) loadNew().catch(() => {}); }, POLL_MS);
+  const timer = setInterval(() => { if (!box.isConnected || !box.contains(form)) { clearInterval(timer); return; } if (!document.hidden) loadNew(true).catch(() => {}); }, POLL_MS);
   timer.unref?.();
 }
 

@@ -2,12 +2,13 @@
 
 import './stage.js'; // the staging band (shows only on staging)
 import { openTourPicker, resumeTour, welcomeOnce, endTour } from './tour.js';
-import { get, post, session, hooks, ApiError } from './api.js';
+import { get, poll, post, session, hooks, noteActivity, ApiError } from './api.js';
 import { mfaPanel } from './views/mfa.js';
 import * as passkey from './passkey.js';
 import { confirmItsYou } from './stepup.js';
 import { readTerminal, saveTerminal } from './terminal.js';
 import { passkeysPanel } from './views/security.js';
+import * as alerts from './alerts.js';
 import { flush as flushOutbox, waitingCounts, forgetCases, setDeviceKey, dropDeviceKey } from './outbox.js';
 import { buildFrame, GROUP_OF } from './nav.js';
 import { icon } from './icons.js';
@@ -371,7 +372,7 @@ async function refreshUnread() {
   clearTimeout(unreadTimer);
   if (!ctx.me || !frame || ctx.me.role === 'area') return; // the ski area's read-only login has no Inbox
   unreadBusy = true;
-  try { const { unread } = await get('/inbox/unread'); if (frame.setBadge) frame.setBadge('inbox', unread); } catch (_) { /* try again on the next tick */ }
+  try { const { unread } = await poll('/inbox/unread'); if (frame.setBadge) frame.setBadge('inbox', unread); } catch (_) { /* try again on the next tick */ }
   unreadBusy = false;
   clearTimeout(unreadTimer);
   if (ctx.me) { unreadTimer = setTimeout(refreshUnread, document.hidden ? 120_000 : 30_000); unreadTimer.unref?.(); } // (unref: test runners only)
@@ -395,6 +396,7 @@ function currentPath() {
 
 async function route() {
   if (!ctx.me) return;
+  if (ctx.me.display === 'patrol_room') { if (location.hash !== '#/patrol/room') history.replaceState(null, '', `${location.pathname}#/patrol/room`); return; } // the room screen goes nowhere else
   const { key, params } = currentPath();
   if (!key) { location.replace(`#/${defaultView()}`); return; }
   const my = ++navToken;
@@ -442,7 +444,19 @@ function addHelpLink(holder, key) {
   (lead && lead.tagName === 'DIV' ? lead : head).append(h('a', { class: 'help-link', href: `#/help/for-${key}` }, 'Help with this page'));
 }
 
+// Why the last session ended, carried across the reload to the sign-in screen (this tab only).
+const SAID_KEY = 'so.signedout';
+function takeSaid() { try { const m = sessionStorage.getItem(SAID_KEY); sessionStorage.removeItem(SAID_KEY); return m || undefined; } catch (_) { return undefined; } }
+const within = (p, ms) => Promise.race([p, new Promise((r) => { const t = setTimeout(r, ms); if (t && t.unref) t.unref(); })]); // (unref: test runners only)
+
+let signingOut = false;
+/**
+ * Every way out (Sign out, 15 minutes without activity, a session the server ended, a PIN switch on a shared terminal)
+ * ends with a fresh page. Dialogs, the Ask panel, timers and what each screen kept all live in the page, so starting it
+ * again is the only sure way none of it reaches the next person. message: why it happened (none when on purpose).
+ */
 async function signOut(message) {
+  if (signingOut) return;
   endTour();
   // Patrol entries kept on this phone while there was no signal go with the person who typed them. Try to send them first;
   // if they still cannot go, say so before signing out (they stay on this phone for up to three days, for this person).
@@ -451,21 +465,44 @@ async function signOut(message) {
     const left = waitingCounts().mine;
     if (left && !window.confirm(`${left} patient care entr${left === 1 ? 'y has' : 'ies have'} not been sent yet (no signal). They stay on this phone and send when you sign in again with a signal. Sign out anyway?`)) return;
   }
+  signingOut = true;
+  // Each open dialog's own clean-up runs while this session can still act: a camera or NFC reader is let go, and a card
+  // already charged on the reader goes back to the guest. (After a session the server ended, that refund cannot go from here.)
+  await within(closeAllDialogs(), 8000);
+  await within(import('./assistant.js').then((m) => m.resetAssistant()).catch(() => {}), 2000);
+  // Signing out on purpose on a shared phone or tablet: this person's phone alerts stop coming to it. An automatic
+  // sign-out leaves them on, so a patroller's own phone still gets dispatch calls after it locks itself.
+  if (!message && ctx.me && (ctx.me.role === 'patrol' || ctx.me.on_patrol) && alerts.supported()) await within(alerts.turnOff().catch(() => {}), 3000);
   if (!message) forgetCases(); // signing out on purpose clears the cases kept for a dead spot
-  dropDeviceKey(); // what stays on the phone is sealed, and the key goes with the session
+  dropDeviceKey(); // what stays on the phone is sealed, and the key goes with the session (the sealed entries stay)
   // End the session on the server too (also after an idle sign-out). Sent with the token directly, so a session the server
-  // already ended cannot bounce back into another sign-out.
+  // already ended cannot bounce back into another sign-out; keepalive lets it finish while the page reloads.
   const ending = session.token;
   session.clear();
   if (ending) fetch('/api/v1/auth/logout', { method: 'POST', headers: { authorization: `Bearer ${ending}` }, keepalive: true }).catch(() => { /* offline: it expires on its own */ });
   ctx.me = null;
   navToken += 1;
+  try { if (message) sessionStorage.setItem(SAID_KEY, message); } catch (_) { /* the sign-in screen shows no reason */ }
+  // The sign-in screen at once, then the fresh page. What it needs is kept: the mountain name and a shared terminal's
+  // enrollment (both in this browser's storage), and why the session ended.
   history.replaceState(null, '', location.pathname);
   if (readTerminal()) showPinSignIn(message); else showSignIn(message);
+  signingOut = false;
+  freshPage();
+}
+
+/** Loads the page again as soon as the server answers. With no signal the sign-in screen stays until it does. */
+async function freshPage() {
+  for (;;) {
+    if (session.token) return; // signed in again on this screen meanwhile: nothing to start over
+    try { const r = await within(fetch('/version', { cache: 'no-store' }), 4000); if (r && r.ok) { location.replace(location.pathname); return; } } catch (_) { /* no signal yet */ }
+    await new Promise((r) => { const t = setTimeout(r, 15000); if (t && t.unref) t.unref(); });
+  }
 }
 
 hooks.onSignedOut = () => { if (ctx.me) signOut('Your session ended. Sign in again.'); };
 hooks.stepUp = (details) => confirmItsYou(details);
+hooks.signOut = () => signOut();
 
 // Automatic sign-out: a phone or screen left open should not leave guest and patient details on display.
 const IDLE_MINUTES = 15;
@@ -473,17 +510,20 @@ let idleTimer = null;
 function resetIdle() {
   clearTimeout(idleTimer);
   if (!ctx.me) return;
-  // The patrol-room sign-in screen stays up all day on a shared tablet; it shows names only, never patient details.
-  idleTimer = setTimeout(() => { if (location.hash.startsWith('#/patrol/room')) { resetIdle(); return; } if (ctx.me) signOut(`Signed out after ${IDLE_MINUTES} minutes without activity.`); }, IDLE_MINUTES * 60_000);
+  // The patrol-room screen stays up all day on a shared tablet. The server holds its session to that screen (names, signing in
+  // and out, never patient details), and leaving it needs the leader's password, passkey or code.
+  idleTimer = setTimeout(() => { if (ctx.me && ctx.me.display === 'patrol_room') { resetIdle(); return; } if (ctx.me) signOut(`Signed out after ${IDLE_MINUTES} minutes without activity.`); }, IDLE_MINUTES * 60_000);
   if (idleTimer && idleTimer.unref) idleTimer.unref(); // (test runners only: a pending timer must not keep the process alive)
 }
-for (const ev of ['pointerdown', 'keydown', 'scroll', 'touchstart']) document.addEventListener(ev, resetIdle, { passive: true, capture: true });
+const touchedPage = () => { noteActivity(); resetIdle(); };
+for (const ev of ['pointerdown', 'keydown', 'scroll', 'touchstart']) document.addEventListener(ev, touchedPage, { passive: true, capture: true });
 // Arm the timer shortly after sign-in, and again whenever it has been cleared by a sign-out and back in.
 setInterval(() => { if (ctx.me && !idleTimer) resetIdle(); if (!ctx.me) { clearTimeout(idleTimer); idleTimer = null; } }, 5_000).unref?.();
 
 async function start() {
   if (/^#(email|reset)-link=/.test(location.hash) && await fromEmailLink()) return;
-  if (!session.token) { if (readTerminal()) showPinSignIn(); else showSignIn(); return; }
+  const said = takeSaid();
+  if (!session.token) { if (readTerminal()) showPinSignIn(said); else showSignIn(said); return; }
   try {
     ctx.me = await get('/auth/me');
   } catch (_) {
@@ -492,6 +532,7 @@ async function start() {
     return;
   }
   ctx.tz = ctx.me.timezone || ctx.tz;
+  if (ctx.me.display === 'patrol_room') { await showRoom(); return; }
   // Opens (and sends) any patrol entries this person left waiting on this phone; they are sealed with this key.
   try { if (await setDeviceKey(ctx.me.device_key) && waitingCounts().mine) flushOutbox(); } catch (_) { /* nothing waiting */ }
   if (ctx.me.must_change_password) { showPasswordChange(); return; }
@@ -503,6 +544,17 @@ async function start() {
   }
   await route();
   if (ctx.me.sandbox) { resumeTour(); welcomeOnce(); }
+}
+
+/** The patrol-room screen on its own, without the menu: this session can do nothing else (the server holds it to that). */
+async function showRoom() {
+  clear(app);
+  frame = null;
+  if (location.hash !== '#/patrol/room') history.replaceState(null, '', `${location.pathname}#/patrol/room`);
+  document.title = `Patrol room · ${ctx.me.tenant_name}`;
+  const holder = h('main', { class: 'main room-screen', id: 'main' });
+  app.append(holder);
+  try { await (await import('./views/patrol-duty.js')).renderRoom(holder); } catch (err) { holder.append(errorBox(err)); }
 }
 
 // Moving to another page closes any dialog left open on the last one (for example a customer opened from an Inbox link).

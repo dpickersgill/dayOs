@@ -20,7 +20,7 @@ const STARTERS = {
 const PLUS = { dashboard: ['How many scans so far today?', 'Who is working today?'], sell: ['What did we sell yesterday?'], school: ['What lessons are on tomorrow?'], programs: ['How full is each program day?'] };
 
 let panel = null; let state = null;
-const chat = []; // this visit's questions and answers, sent back so follow-ups make sense
+const chat = []; // this visit's questions and answers; their ids go back so follow-ups make sense
 
 /** Text with simple paragraphs, numbered steps and bullets, built as elements (never as HTML). */
 function prose(text) {
@@ -108,7 +108,7 @@ export async function openAssistant({ page, views = ctx.views || [], question } 
     const wait = h('div', { class: 'ask-a' }, h('p', { class: 'ask-q' }, q), h('p', { class: 'loading', role: 'status' }, 'Thinking…'));
     log.append(wait); wait.scrollIntoView({ block: 'end' });
     try {
-      const r = await post('/assistant/ask', { question: q, page: current.page || undefined, views: current.views, history: chat.slice(-3).map((c) => ({ q: c.q, a: c.r.answer })) });
+      const r = await post('/assistant/ask', { question: q, page: current.page || undefined, views: current.views, history_ids: chat.slice(-3).map((c) => c.r.id) }); // the server reads them back from its own log
       chat.push({ q, r });
       wait.replaceWith(answerEl(q, r));
     } catch (err) { wait.replaceWith(h('div', { class: 'ask-a' }, h('p', { class: 'ask-q' }, q), h('p', { class: 'error-box', role: 'alert' }, describeError(err)))); }
@@ -134,3 +134,10 @@ export async function assistantOn() {
   try { state = await get('/assistant'); return Boolean(state.on); } catch (_) { return false; }
 }
 export const resetChat = () => { chat.length = 0; };
+/** On sign-out: the panel, this visit's conversation and what was looked up go, so none of it reaches the next person. */
+export function resetAssistant() {
+  resetChat();
+  if (panel) panel.remove();
+  panel = null; state = null; send = () => {}; current = { page: null, views: [] };
+  document.body.classList.remove('asking');
+}

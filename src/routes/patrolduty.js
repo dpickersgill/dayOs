@@ -16,6 +16,8 @@ const OPS = require('../lib/patrolops');
 const CREWS = require('../lib/patrolcrews');
 const SH = require('../lib/shifts');
 const PUSH = require('../lib/push');
+const sessions = require('../lib/sessions');
+const { stepUp } = require('../lib/stepup');
 const crypto = require('crypto');
 
 const router = express.Router();
@@ -167,6 +169,24 @@ router.patch('/duty/:staffId', patrol, validate(z.object({ station_id: z.number(
   if (!sets.length) throw bad('Nothing to change');
   await pool.query(`UPDATE patrol_duty SET ${sets.map((k) => `${k} = ?`).join(', ')} WHERE tenant_id = ? AND id = ?`, [...sets.map((k) => req.body[k]), t, d.id]);
   res.json({ ok: true });
+});
+
+// ---------------------------------------------------------------- the patrol-room screen
+// A leader turns this tablet's session into the room's display: big name buttons that anyone taps. From then on it can only
+// show who is on duty and sign people in and out (middleware/auth.js, ROOM_PATHS), so a patient or visitor passing through
+// cannot open the leader's app. It stays signed in all day (the room screen's own requests keep it open, up to the 8-hour
+// sign-in limit). Leaving it needs the leader's passkey, code or password again; or anyone can sign it out.
+router.post('/room', patrol, async (req, res) => {
+  if (!(await PA.can(pool, req, 'assign_posts'))) throw forbidden('Only those who post the day\'s team can run the patrol-room screen');
+  await sessions.setDisplay(req.auth.sid, 'patrol_room');
+  await audit(pool, req, 'room_screen_on', 'patrol_duty', null);
+  res.json({ ok: true, display: 'patrol_room' });
+});
+
+router.post('/room/end', patrol, stepUp('leave the patrol-room screen'), async (req, res) => {
+  await sessions.setDisplay(req.auth.sid, null);
+  await audit(pool, req, 'room_screen_off', 'patrol_duty', null);
+  res.json({ ok: true, display: null });
 });
 
 // ---------------------------------------------------------------- commitment

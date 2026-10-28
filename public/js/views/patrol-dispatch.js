@@ -1,6 +1,6 @@
 // Patrol dispatch board (calls, timeline, responders, guest help requests) and the training passport.
 
-import { get, post, put, patch, del } from '../api.js';
+import { get, poll, post, put, patch, del } from '../api.js';
 import { h, clear, state, input, select, field, button, toast, formDialog, dialog, table, val, num, fmtTime, fmtDateTime, fmtDate, label, empty, errorBox, appendAll } from '../ui.js';
 import { has } from './patrol-feat.js';
 import { compact } from './patrol-case.js';
@@ -31,10 +31,11 @@ export async function drawDispatch(box, { canLead }) {
   const mgr = has('manage_settings');
 
   const mine = h('div');
-  async function load() {
+  async function load(timed) { // timed: the board's own refresh, which is not someone using the app
     if (!box.isConnected && timer) { clearInterval(timer); timer = null; return; }
+    const read = timed === true ? poll : get;
     try {
-      const [{ data }, a, m] = await Promise.all([get('/patrol/dispatch'), get('/patrol/dispatch/available'), get('/patrol/dispatch-mine')]);
+      const [{ data }, a, m] = await Promise.all([read('/patrol/dispatch'), read('/patrol/dispatch/available'), read('/patrol/dispatch-mine')]);
       // The calls I am sent to, with "On my way" so dispatch knows the alert was seen.
       clear(mine).append(...m.data.map((c) => h('div', { class: `my-call${c.acked_at ? '' : ' is-new'}`, role: c.acked_at ? null : 'alert' },
         h('b', null, `You are sent to call ${c.call_no}: `), c.location, c.description ? ` (${c.description})` : '',
@@ -51,7 +52,7 @@ export async function drawDispatch(box, { canLead }) {
       h('div', { class: 'row' }, mgr ? button('Guest help page', () => guestHelpDialog(), {}) : null, button('History', () => historyDialog(), {}), button('New call', () => newCallDialog(load), { kind: 'primary' }))),
     mine, avail, board));
   await load();
-  timer = setInterval(load, 15000);
+  timer = setInterval(() => load(true), 15000);
   if (timer && timer.unref) timer.unref(); // Node (tests) only; browsers return a number
 }
 
