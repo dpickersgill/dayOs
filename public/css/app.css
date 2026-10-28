@@ -956,7 +956,7 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
 .who-text span { font-size: .75rem; color: var(--side-muted); }
 .who-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .who-actions:empty { display: none; }
-.who-switch { flex: 1 1 auto; min-height: 44px; }
+.rail .who-actions .who-switch { flex: 1 1 auto; min-height: 44px; font-size: .9375rem; }
 .rail-out { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--side-ink); font: inherit; font-size: .875rem; cursor: pointer; }
 .rail-out:hover { background: var(--side-hover); color: var(--ink); }
 .who-version { display: block; margin-left: auto; padding: 0 6px; font-size: .75rem; color: var(--side-muted); text-decoration: none; }
@@ -1513,7 +1513,7 @@ input[type='search'][aria-label='Search documents'] { min-width: min(20rem, 100%
 .sell-menu .tabs button[aria-selected='true'] { border-color: var(--ink); }
 @media (max-width: 640px) {
   .page-head h1 { font-size: 1.75rem; }
-  .head-tools { order: 0; }
+  .head-tools .btn { min-height: 44px; }
   .tabs { gap: 18px; }
 }
 
