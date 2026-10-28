@@ -10,9 +10,9 @@ import { readTerminal, saveTerminal } from './terminal.js';
 import { passkeysPanel } from './views/security.js';
 import * as alerts from './alerts.js';
 import { flush as flushOutbox, waitingCounts, forgetCases, setDeviceKey, dropDeviceKey } from './outbox.js';
-import { buildFrame, GROUP_OF } from './nav.js';
+import { buildFrame, GROUP_OF, PATROL_SECTIONS, patrolSection } from './nav.js';
 import { icon } from './icons.js';
-import { h, svg, clear, ctx, can, isManager, toast, loading, errorBox, button, field, input, closeAllDialogs } from './ui.js';
+import { h, svg, clear, ctx, can, isManager, toast, loading, errorBox, button, field, input, closeAllDialogs, newPage, hashPath, todayStr } from './ui.js';
 
 const VIEWS = [
   // [hash, label, who may open it, loader]
@@ -32,18 +32,22 @@ const VIEWS = [
   ['people', 'Customers', () => can('counter', 'instructor'), () => import('./views/people.js')],
   ['waivers', 'Waivers', () => can('counter', 'instructor'), () => import('./views/waivers.js')],
   ['lostfound', 'Lost and found', () => can('counter', 'staff'), () => import('./views/lostfound.js')],
-  ['partners', 'Partner passes', () => can('counter'), () => import('./views/partners.js')],
   ['shop', 'Online shop', () => can('counter'), () => import('./views/shop.js')],
   ['catalog', 'Products and prices', () => isManager(), () => import('./views/catalog.js')],
   ['messages', 'Messages', () => isManager(), () => import('./views/messages.js')],
   ['money', 'Money', () => isManager(), () => import('./views/money.js')],
   ['workforce', 'Staff and schedule', () => isManager(), () => import('./views/workforce.js')],
   ['myshifts', 'My shifts', () => true, () => import('./views/myshifts.js')],
-  ['settings', 'Account', () => true, () => import('./views/settings.js')],
-  ['billing', 'Billing', () => isManager(), () => import('./views/billing.js')],
+  ['settings', 'Settings', () => true, () => import('./views/settings.js')],
   ['help', 'Help', () => true, () => import('./views/help.js')],
   ['area', 'Patrol summary', () => ctx.me.role === 'area', () => import('./views/area.js')],
 ];
+
+// Old addresses that still work: Partner passes is the last tab of Sell, Billing is a page of Settings.
+const REDIRECTS = {
+  partners: () => '#/sell?tab=partners',
+  billing: (query) => `#/settings/billing${query ? `?${query}` : ''}`,
+};
 
 const app = document.getElementById('app');
 const SLUG_KEY = 'so.mountain';
@@ -53,9 +57,17 @@ const patrolOnly = () => Boolean(ctx.me.modules) && ctx.me.modules.includes('pat
 
 function defaultView() {
   const role = ctx.me.role;
+  const open = (k) => visibleViews().some((v) => v[0] === k);
   if (role === 'area') return 'area';
-  if (patrolOnly()) return visibleViews().some((v) => v[0] === 'patrol') ? 'patrol' : 'settings';
+  if (patrolOnly()) return open('patrol') ? 'patrol' : 'settings';
   if (isManager()) return 'dashboard';
+  // A role menu starts on its start app, or on the first app in it this person can open.
+  const menu = ctx.me.menu;
+  if (menu && Array.isArray(menu.apps)) {
+    if (menu.start && open(menu.start)) return menu.start;
+    const first = menu.apps.find(open);
+    if (first) return first;
+  }
   const home = { counter: 'sell', instructor: 'school', patrol: 'patrol' }[role] || 'conditions';
   return visibleViews().some((v) => v[0] === home) ? home : (visibleViews()[0] || ['settings'])[0];
 }
@@ -75,7 +87,7 @@ function saveSlug(v) { try { localStorage.setItem(SLUG_KEY, v); } catch (_) { /*
 /** Signed in: keep the token and open the app. */
 async function signedIn(out) {
   session.token = out.token;
-  if (out.recovery_codes_left !== undefined && out.recovery_codes_left < 3) toast(`Recovery code used. ${out.recovery_codes_left} left: make new ones in Account.`);
+  if (out.recovery_codes_left !== undefined && out.recovery_codes_left < 3) toast(`Recovery code used. ${out.recovery_codes_left} left: make new ones in Settings.`);
   await start();
 }
 
@@ -271,7 +283,7 @@ async function showPinSignIn(message) {
   const who = input({ name: 'login', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', required: true });
   const pin = input({ name: 'pin', type: 'password', inputmode: 'numeric', autocomplete: 'off', pattern: '[0-9]*', maxlength: 8, required: true });
   const go = h('button', { type: 'submit', class: 'btn primary' }, 'Start');
-  const form = h('form', { novalidate: true, 'data-step': 'pin' }, field('Username', who), field('PIN', pin, 'Your 6 to 8 digit PIN. Set it in Account after signing in with your password.'), err, go);
+  const form = h('form', { novalidate: true, 'data-step': 'pin' }, field('Username', who), field('PIN', pin, 'Your 6 to 8 digit PIN. Set it in Settings after signing in with your password.'), err, go);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     clear(err);
@@ -327,9 +339,8 @@ let navToken = 0;
 const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
 
 // An app the platform has turned off for this mountain is hidden for everyone, including the owner.
-const ALWAYS = ['dashboard', 'inbox', 'people', 'waivers', 'lostfound', 'myshifts', 'settings', 'billing', 'help', 'area'];
-const PART_OF = { partners: 'sell' }; // a page that belongs to another app
-const appOn = (key) => ALWAYS.includes(key) || !ctx.me.modules || ctx.me.modules.includes(PART_OF[key] || key);
+const ALWAYS = ['dashboard', 'inbox', 'people', 'waivers', 'lostfound', 'myshifts', 'settings', 'help', 'area'];
+const appOn = (key) => ALWAYS.includes(key) || !ctx.me.modules || ctx.me.modules.includes(key);
 function visibleViews() {
   // The ski area's read-only login sees the patrol summary and its own account, nothing else.
   if (ctx.me.role === 'area') return VIEWS.filter((v) => ['area', 'settings', 'help'].includes(v[0]));
@@ -341,7 +352,7 @@ function visibleViews() {
 let frame = null;
 function buildShell() {
   clear(app);
-  frame = buildFrame({ views: visibleViews().map(([key, text]) => [key, text]), main, signOut: () => signOut() });
+  frame = buildFrame({ views: visibleViews().map(([key, text]) => [key, text]), main, signOut: () => signOut(), menu: ctx.me.menu || null });
   app.append(frame.shell);
   if (ctx.me.sandbox) app.append(demoPill(ctx.me.sandbox));
   showBillingBanner();
@@ -390,28 +401,34 @@ function demoPill(sb) {
 
 /** '#/patrol/case/12?x=1' -> { key: 'patrol', params: ['case', '12'] } */
 function currentPath() {
-  const [key, ...params] = location.hash.replace(/^#\//, '').split('?')[0].split('/').filter((x, i) => i === 0 || x !== '');
-  return { key: visibleViews().some((v) => v[0] === key) ? key : null, params };
+  const [key, ...params] = hashPath().split('/').filter((x, i) => i === 0 || x !== '');
+  return { key: visibleViews().some((v) => v[0] === key) ? key : null, params, raw: key };
 }
+
+// The path of the page on screen. A change to the query alone (a tab: #/rentals?tab=service) does not draw the page again.
+let drawnPath = null;
 
 async function route() {
   if (!ctx.me) return;
   if (ctx.me.display === 'patrol_room') { if (location.hash !== '#/patrol/room') history.replaceState(null, '', `${location.pathname}#/patrol/room`); return; } // the room screen goes nowhere else
-  const { key, params } = currentPath();
+  const { key, params, raw } = currentPath();
+  if (REDIRECTS[raw]) { location.replace(REDIRECTS[raw](location.hash.split('?')[1] || '')); return; }
   if (!key) { location.replace(`#/${defaultView()}`); return; }
   const my = ++navToken;
-  if (frame) frame.setCurrent(key);
+  drawnPath = hashPath();
+  newPage();
+  if (frame) frame.setCurrent(key, params);
   clear(main).append(loading());
-  document.title = `${visibleViews().find((v) => v[0] === key)[1]} · ${ctx.me.tenant_name}`;
   const view = visibleViews().find((v) => v[0] === key);
+  document.title = `${view[1]} · ${ctx.me.tenant_name}`;
   try {
     const mod = await view[3]();
     const holder = h('div');
     await mod.render(holder, params);
     if (my !== navToken) return;
     clear(main).append(holder);
-    addHelpLink(holder, key);
-    markArea(holder, key);
+    decorateHead(holder, key, params, mod);
+    movedNote(holder, key);
     main.focus({ preventScroll: true });
   } catch (err) {
     if (my !== navToken) return;
@@ -419,29 +436,90 @@ async function route() {
   }
 }
 
-/** Color, icon and area name on the page title, so every page says which part of the app it belongs to. */
-function markArea(holder, key) {
-  const area = key === 'dashboard' ? { id: 'home', name: 'Today' } : GROUP_OF[key];
-  if (!area) return;
-  holder.dataset.group = area.id;
+// Apps with a page in Settings, and which page: "<App> settings" in the page header links there (managers and owners).
+// Patrol has its own Patrol settings button, shown to patrol admins too.
+const SETTINGS_PAGE = { sell: 'sell', gate: 'sell', shop: 'shop', school: 'school', availability: 'school', rentals: 'rentals', waivers: 'waivers', workforce: 'workforce' };
+const MAYBE_SETTINGS = { programs: 'programs', messages: 'messages' }; // only when the app has setup to show there
+export function settingsPageFor(key, mod) {
+  if (SETTINGS_PAGE[key]) return SETTINGS_PAGE[key];
+  if (MAYBE_SETTINGS[key] && mod && mod.settingsPages && Object.keys(mod.settingsPages).length) return MAYBE_SETTINGS[key];
+  return null;
+}
+const appName = (key) => (VIEWS.find((v) => v[0] === key) || [key, key])[1];
+
+/**
+ * The page header, the same on every page: a breadcrumb (App / Tab) where the page has tabs (Patrol / Section on
+ * Patrol), the title, the page's one-line summary, a Help button, and "<App> settings" for managers. Done here, so
+ * each screen only says its title and summary.
+ */
+function decorateHead(holder, key, params, mod) {
+  const area = key === 'dashboard' ? { id: 'home' } : GROUP_OF[key];
+  if (area) holder.dataset.group = area.id;
+  holder.dataset.app = key;
   const head = holder.querySelector('.page-head');
-  if (!head) return;
-  const lead = head.firstElementChild && head.firstElementChild.tagName === 'DIV' ? head.firstElementChild : null;
+  if (!head || head.dataset.decorated) return;
+  head.dataset.decorated = '1';
   const h1 = head.querySelector('h1');
-  if (h1 && !h1.querySelector('.ico')) h1.prepend(icon(key, 26));
-  if (area.id === 'home') return;
-  const name = h('p', { class: 'area-name' }, area.name);
-  if (lead) lead.prepend(name);
-  else if (h1 && h1.parentElement === head) { const wrap = h('div'); h1.replaceWith(wrap); wrap.append(name, h1); }
+  if (!h1) return;
+  // The title and its summary sit together on the left.
+  let lead = h1.parentElement === head ? null : h1.parentElement;
+  if (!lead || lead.parentElement !== head) {
+    lead = h('div', { class: 'head-lead' });
+    h1.replaceWith(lead);
+    lead.append(h1);
+    const next = lead.nextElementSibling;
+    if (next && next.tagName === 'P') lead.append(next);
+  } else lead.classList.add('head-lead');
+  const crumbs = breadcrumb(holder, key, params);
+  if (crumbs) lead.prepend(crumbs);
+  // Help and the app's settings: next to the title, before the page's own buttons.
+  const tools = h('div', { class: 'head-tools' });
+  const page = isManager() ? settingsPageFor(key, mod) : null;
+  if (page) tools.append(h('a', { class: 'btn small head-settings', href: `#/settings/${page}` }, icon('settings', 16), h('span', null, `${appName(key)} settings`)));
+  if (key !== 'help') tools.append(h('a', { class: 'btn small help-btn', href: `#/help/for-${key}`, 'aria-label': `Help with ${appName(key)}` }, icon('help', 16), h('span', null, 'Help')));
+  if (tools.firstChild) lead.after(tools);
 }
 
-/** A small link under each page title that opens the help for that page. */
-function addHelpLink(holder, key) {
-  if (key === 'help') return;
+/** "Rentals / Service": the app, then the open tab (or Patrol's section). Kept up to date as tabs change. */
+function breadcrumb(holder, key, params) {
+  const name = appName(key);
+  const bar = holder.querySelector('.tabs[data-address]');
+  if (key !== 'patrol' && !bar) return null;
+  const here = h('span', { 'aria-current': 'page' });
+  const nav = h('nav', { class: 'crumbs', 'aria-label': 'Breadcrumb' }, h('a', { href: `#/${key}` }, name), h('span', { 'aria-hidden': 'true' }, '/'), here);
+  const paint = () => {
+    if (key === 'patrol') { here.textContent = (PATROL_SECTIONS.find(([id]) => id === patrolSection(params)) || PATROL_SECTIONS[0])[1]; return; }
+    const on = bar.querySelector('[aria-selected=true]');
+    here.textContent = on ? on.textContent : '';
+  };
+  paint();
+  holder.addEventListener('tabs:change', (e) => { if (bar && e.target.contains(bar)) paint(); });
+  return nav;
+}
+
+// For two weeks after the menus changed, apps whose setup moved into Settings say so (managers only, until dismissed).
+export const MOVED_FROM = '2026-11-08';
+export const MOVED_DAYS = 14;
+const MOVED_PAGE = { sell: 'sell', gate: 'sell', shop: 'shop', school: 'school', availability: 'school', rentals: 'rentals', waivers: 'waivers', workforce: 'workforce', patrol: 'patrol' };
+export function movedNoteDue(key, today) {
+  if (!MOVED_PAGE[key]) return false;
+  const start = Date.parse(`${MOVED_FROM}T00:00:00Z`);
+  const day = Date.parse(`${today}T00:00:00Z`);
+  return day >= start && day < start + MOVED_DAYS * 86400000;
+}
+const movedKey = () => `so.moved.${ctx.me.tenant || ''}.${ctx.me.id || ctx.me.email || ''}`;
+function movedDismissed() { try { return JSON.parse(localStorage.getItem(movedKey()) || '[]'); } catch (_) { return []; } }
+function movedNote(holder, key) {
+  if (!isManager() || !movedNoteDue(key, todayStr()) || movedDismissed().includes(key)) return;
   const head = holder.querySelector('.page-head');
   if (!head) return;
-  const lead = head.firstElementChild;
-  (lead && lead.tagName === 'DIV' ? lead : head).append(h('a', { class: 'help-link', href: `#/help/for-${key}` }, 'Help with this page'));
+  const close = h('button', { type: 'button', class: 'moved-close', 'aria-label': 'Dismiss this note' }, icon('close', 16));
+  const note = h('div', { class: 'moved-note', role: 'note' }, h('span', null, 'Setup for this app moved to Settings. '), h('a', { href: `#/settings/${MOVED_PAGE[key]}` }, `Open ${appName(key)} settings`), close);
+  close.addEventListener('click', () => {
+    try { localStorage.setItem(movedKey(), JSON.stringify([...new Set([...movedDismissed(), key])])); } catch (_) { /* shows again next time */ }
+    note.remove();
+  });
+  head.after(note);
 }
 
 // Why the last session ended, carried across the reload to the sign-in screen (this tab only).
@@ -540,7 +618,7 @@ async function start() {
   buildShell();
   if (ctx.me.mfa_starts_on && !ctx.me.mfa_enabled) {
     main.before(h('div', { class: 'banner warn', role: 'status', 'data-banner': 'mfa-soon' }, `From ${new Date(`${ctx.me.mfa_starts_on}T12:00:00`).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}, patrollers need two-step sign-in, because Patrol holds patient details. `,
-      h('a', { href: '#/settings' }, 'Set it up now in Account'), ' (a passkey takes a minute).'));
+      h('a', { href: '#/settings' }, 'Set it up now in Settings'), ' (a passkey takes a minute).'));
   }
   await route();
   if (ctx.me.sandbox) { resumeTour(); welcomeOnce(); }
@@ -558,11 +636,13 @@ async function showRoom() {
 }
 
 // Moving to another page closes any dialog left open on the last one (for example a customer opened from an Inbox link).
-let lastPath = location.hash.split('?')[0];
+// A change to the query alone (Back to the last tab) stays on the page: the tabs follow the address themselves.
+let lastPath = hashPath();
 window.addEventListener('hashchange', () => {
-  const now = location.hash.split('?')[0];
+  const now = hashPath();
   if (now !== lastPath) closeAllDialogs();
   lastPath = now;
+  if (ctx.me && frame && drawnPath !== null && now === drawnPath && currentPath().key) return;
   route();
 });
 start();

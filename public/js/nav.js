@@ -1,24 +1,41 @@
-// The menu: a grouped icon rail on wide screens, a bottom bar with a "More" sheet on phones,
-// and a jump-to palette (Ctrl+K, Cmd+K or "/") that opens any page by typing a few letters.
+// The menu. On a computer the side menu is always in view: managers and owners see every app in five groups, always
+// open; everyone else sees the short menu for their role (ctx.me.menu) with the rest under All apps. On a phone a
+// labeled bottom bar holds the person's first four items and Menu, which opens a sheet of everything. Jump to
+// (Ctrl+K, Cmd+K or "/") opens any page the person may use by typing a few letters.
 import { h, clear, ctx, label, isManager } from './ui.js';
 import { icon } from './icons.js';
+import { readTerminal } from './terminal.js';
 
-// Menu groups: label, color key, pages. Today stands alone at the top. Each group has its own accent, used on the menu, the page title and the tabs.
-const GROUPS = [
-  ['Front desk', 'front', ['sell', 'gate', 'partners', 'shop', 'rentals', 'people', 'waivers', 'lostfound']],
+// Menu groups: label, color key, apps. Today, Inbox and My shifts stand alone at the top. Each group has its own accent dot.
+export const GROUPS = [
+  ['Front desk', 'front', ['sell', 'gate', 'shop', 'rentals', 'people', 'waivers', 'lostfound']],
   ['Mountain', 'mountain', ['conditions', 'park', 'assets']],
   ['Safety', 'safety', ['patrol', 'area']],
   ['Programs', 'programs', ['school', 'programs', 'availability']],
   ['Office', 'office', ['catalog', 'money', 'workforce', 'messages', 'documents']],
 ];
 export const GROUP_OF = Object.fromEntries(GROUPS.flatMap(([name, id, keys]) => keys.map((k) => [k, { id, name }])));
-const PERSONAL = ['myshifts', 'settings', 'billing', 'help'];
+const START = ['dashboard', 'inbox', 'myshifts'];
+const MINE = ['inbox', 'myshifts']; // always in a role menu, after the role's own apps
+const BOTTOM = ['settings', 'help'];
 const PHONE_FIRST = ['dashboard', 'sell', 'gate', 'patrol', 'area', 'school', 'conditions', 'myshifts'];
-// Words people might type that are not in the page's name.
+
+// Patrol is the one app with sections between the app and its tabs.
+export const PATROL_SECTIONS = [['now', 'Now'], ['cases', 'Cases'], ['people', 'People'], ['gear', 'Gear']];
+const SECTION_OF = {
+  now: 'now', home: 'now', board: 'now', duty: 'now', dispatch: 'now', map: 'now', opening: 'now', sweep: 'now', avalanche: 'now', log: 'now', room: 'now',
+  cases: 'cases', case: 'cases', review: 'cases', followup: 'cases', records: 'cases', release: 'cases', stats: 'cases', network: 'cases', risk: 'cases', 'risk-report': 'cases', claim: 'cases', version: 'cases', collision: 'cases', access: 'cases', refusal: 'cases', handoff: 'cases',
+  people: 'people', schedule: 'people', crews: 'people', cover: 'people', posts: 'people', team: 'people', training: 'people', passport: 'people',
+  gear: 'gear', kit: 'gear', kits: 'gear', 'kit-labels': 'gear', equipment: 'gear', meds: 'gear', lifts: 'gear',
+};
+/** Which Patrol section a Patrol address belongs to: ['case', '12'] -> 'cases'. */
+export const patrolSection = (params = []) => SECTION_OF[params[0]] || 'now';
+
+// Words people might type that are not in the page's name (old names included, so habits still work).
 const ALSO = {
-  dashboard: 'home overview numbers today', sell: 'ticket pos register checkout basket', gate: 'scan lift ticket scanner check in',
+  dashboard: 'home overview numbers today', sell: 'ticket pos register checkout basket partner passes indy pass reciprocal redeem', gate: 'scan lift ticket scanner check in',
   conditions: 'lifts trails snow open closed status grooming groomer snowmaking weather maintenance work orders inspection fleet downtime handoff report', park: 'terrain park rails jumps boxes features freestyle halfpipe jib map', rentals: 'equipment skis boards boots rent', school: 'lessons instructors ski school',
-  programs: 'clubs camps leagues teams', patrol: 'incident case injury first aid dispatch', people: 'customers guests search members',
+  programs: 'clubs camps leagues teams', patrol: 'incident case injury first aid dispatch admin', people: 'customers guests search members',
   catalog: 'products prices passes items', money: 'sales refunds reports till drawer payments', workforce: 'staff schedule shifts hours kiosk time clock pin badge',
   availability: 'instructor calendar open dates times schedule days off private lessons',
   shop: 'online will-call willcall pickup web orders groups waitlist reprint tickets prices calendar pace report',
@@ -28,89 +45,153 @@ const ALSO = {
   assets: 'fleet vehicles trucks groomers equipment maintenance parts inventory stock purchase orders vendors fuel inspection qr tag registration insurance warranty depreciation',
   waivers: 'waiver release liability sign signature signed guardian minor consent form',
   lostfound: 'lost found missing handed in phone wallet keys gloves goggles claim return guest services',
-  partners: 'indy pass partner reciprocal free day redeem blackout reservation',
-  myshifts: 'my schedule clock in out', settings: 'account password security two-step sign out',
-  billing: 'subscription plan pay payment invoice card bank ach trial renew upgrade receipt summitops',
+  myshifts: 'my schedule clock in out', settings: 'account setup password security two-step passkey profile mountain team logins billing subscription plan invoice menus',
   help: 'how to guide instructions support questions articles',
 };
-const RAIL_KEY = 'so.rail';
 const RECENT_KEY = 'so.recent';
-const FOLD_KEY = 'so.folded';
 
 const read = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch (_) { return d; } };
 const write = (k, v) => { try { localStorage.setItem(k, v); } catch (_) { /* private mode */ } };
-const initials = (email) => String(email || '?').split('@')[0].split(/[._-]/).map((s) => s[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || '?';
+const initials = (name) => String(name || '?').split('@')[0].split(/[\s._-]+/).map((s) => s[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || '?';
+const isMac = () => /Mac|iPhone|iPad/.test((typeof navigator !== 'undefined' && navigator.platform) || '');
 
-/**
- * Builds the page frame. views: [[key, label]] already filtered for this person.
- * Returns { shell, main, setCurrent(key), openPalette() }.
- */
-/** The version under Sign out in the account menu: "Verdynt/OS 2026.10.4", linking to What's new. */
+// ---------------------------------------------------------------- theme
+// Light, Dark, or the same as this device (the default). theme.js applies it before the page paints; this keeps it in step.
+export const THEME_KEY = 'verdynt.theme';
+const THEMES = [['light', 'Light', 'sun'], ['dark', 'Dark', 'moon'], ['device', 'Same as this device', 'device']];
+export function themePick() { const v = read(THEME_KEY, null); return v === 'light' || v === 'dark' ? v : 'device'; }
+const deviceDark = () => { try { return Boolean(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches); } catch (_) { return false; } };
+export function applyTheme(pick = themePick()) {
+  const dark = pick === 'dark' || (pick === 'device' && deviceDark());
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+}
+export function setTheme(pick) {
+  if (pick === 'device') { try { localStorage.removeItem(THEME_KEY); } catch (_) { /* this device only, best effort */ } } else write(THEME_KEY, pick);
+  applyTheme(pick);
+  window.dispatchEvent(new Event('theme:change'));
+}
+
+/** Three labeled choices. kind 'menu': a small button beside the person's name that opens them; 'seg': a row of three. */
+function themeControl(kind) {
+  const choices = THEMES.map(([id, text, ico]) => {
+    const b = h('button', { type: 'button', role: kind === 'menu' ? 'menuitemradio' : 'radio', dataset: { theme: id }, class: 'theme-choice' }, icon(ico, 16), h('span', null, text));
+    b.addEventListener('click', () => { setTheme(id); if (kind === 'menu') setOpen(false, true); });
+    return b;
+  });
+  const mark = () => { const now = themePick(); for (const b of choices) b.setAttribute('aria-checked', String(b.dataset.theme === now)); if (btn) { const t = THEMES.find((x) => x[0] === now); clear(btn).append(icon(t[2], 17)); btn.setAttribute('aria-label', `Theme: ${t[1]}`); btn.title = `Theme: ${t[1]}`; } };
+  let btn = null; let pop = null;
+  function setOpen(open, focusBack) { pop.hidden = !open; btn.setAttribute('aria-expanded', String(open)); if (open) (choices.find((b) => b.getAttribute('aria-checked') === 'true') || choices[0]).focus(); else if (focusBack) btn.focus(); }
+  let root = null;
+  const onChange = () => { if (root && !root.isConnected) { window.removeEventListener('theme:change', onChange); return; } mark(); };
+  window.addEventListener('theme:change', onChange);
+  if (kind !== 'menu') { root = h('div', { class: 'theme-seg', role: 'radiogroup', 'aria-label': 'Theme' }, choices); mark(); return root; }
+  btn = h('button', { type: 'button', class: 'theme-btn', 'aria-haspopup': 'menu', 'aria-expanded': 'false' });
+  pop = h('div', { class: 'theme-pop', role: 'menu', 'aria-label': 'Theme', hidden: true }, choices);
+  btn.addEventListener('click', (e) => { e.stopPropagation(); setOpen(pop.hidden); });
+  pop.addEventListener('keydown', (e) => {
+    const at = choices.indexOf(document.activeElement);
+    if (e.key === 'Escape') { e.preventDefault(); setOpen(false, true); } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); choices[(at + (e.key === 'ArrowDown' ? 1 : -1) + choices.length) % choices.length].focus(); }
+  });
+  document.addEventListener('click', (e) => { if (!pop.hidden && !pop.contains(e.target)) setOpen(false); });
+  mark();
+  root = h('div', { class: 'theme-wrap' }, btn, pop);
+  return root;
+}
+
+/** The version under the person's name: "Verdynt/OS 2026.10.4", linking to What's new. */
 function whoVersion() {
   const a = h('a', { class: 'who-version', href: '#/help/whats-new' });
   fetch('/version').then((r) => r.json()).then((v) => { if (v && v.version) a.textContent = `Verdynt/OS ${v.version}`; }).catch(() => {});
   return a;
 }
 
-/** Dark (the Verdynt/OS look) or Light, chosen per device in the account menu. theme.js applies it before the page paints. */
-function themeToggle(cls) {
-  const now = () => document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
-  const text = () => (now() === 'dark' ? 'Light mode' : 'Dark mode');
-  const btn = h('button', { type: 'button', class: cls }, cls === 'rail-out' ? [icon('settings', 18), h('span', { class: 'nav-label' }, text())] : text());
-  btn.addEventListener('click', () => {
-    const next = now() === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', next);
-    try { localStorage.setItem('verdynt.theme', next); } catch (_) { /* this device only, best effort */ }
-    const label = btn.querySelector('.nav-label') || btn; label.textContent = text();
-  });
-  return btn;
+/**
+ * What the menu shows for this person. views: [[key, label]] already filtered for them; menu: ctx.me.menu.
+ * A role menu ({ apps, start }) lists its apps in its order, then Inbox and My shifts; everything else they may open is
+ * under All apps. No menu (owners and managers): every app in the five groups.
+ */
+export function menuPlan(views, menu) {
+  const keys = views.map(([k]) => k);
+  const has = (k) => keys.includes(k);
+  const bottom = BOTTOM.filter(has);
+  if (menu && Array.isArray(menu.apps)) {
+    const apps = [...new Set(menu.apps)].filter((k) => has(k) && !MINE.includes(k) && !BOTTOM.includes(k));
+    const mine = MINE.filter(has);
+    const listed = new Set([...apps, ...mine, ...bottom]);
+    return { role: true, apps, mine, bottom, more: keys.filter((k) => !listed.has(k)), first: [...apps, ...mine].slice(0, 4) };
+  }
+  const start = START.filter(has);
+  const groups = GROUPS.map(([name, id, ks]) => ({ name, id, keys: ks.filter(has) })).filter((g) => g.keys.length);
+  const inGroups = new Set([...start, ...groups.flatMap((g) => g.keys), ...bottom]);
+  const extra = keys.filter((k) => !inGroups.has(k)); // nothing today; a new app shows somewhere rather than nowhere
+  if (extra.length) groups.push({ name: 'More', id: 'office', keys: extra });
+  return { role: false, start, groups, bottom, more: [], first: PHONE_FIRST.filter(has).slice(0, 4) };
 }
 
-export function buildFrame({ views, main, signOut }) {
+/** Apps grouped the way the menu groups them: [[heading, id, keys]], for All apps and the phone sheet. */
+function grouped(keys) {
+  const out = [];
+  const start = START.filter((k) => keys.includes(k));
+  if (start.length) out.push(['Start', 'home', start]);
+  for (const [name, id, ks] of GROUPS) { const in_ = ks.filter((k) => keys.includes(k)); if (in_.length) out.push([name, id, in_]); }
+  const rest = keys.filter((k) => !out.some(([, , ks]) => ks.includes(k)) && !BOTTOM.includes(k));
+  if (rest.length) out.push(['More', 'office', rest]);
+  return out;
+}
+
+/**
+ * Builds the page frame. views: [[key, label]] already filtered for this person; menu: ctx.me.menu.
+ * Returns { shell, setCurrent(key, params), openPalette(), openAllApps(), setBadge() }.
+ */
+export function buildFrame({ views, main, signOut, menu = null }) {
   const byKey = new Map(views);
   const have = (k) => byKey.has(k);
-  const shell = h('div', { class: 'shell' });
-  if (read(RAIL_KEY, 'open') === 'closed') shell.classList.add('collapsed');
-  const links = new Map(); // key -> every <a> for that page (rail and phone sheet)
+  const plan = menuPlan(views, menu);
+  const shell = h('div', { class: `shell${plan.role ? ' role-menu' : ''}` });
+  const links = new Map(); // key -> every <a> for that page (side menu, phone bar, sheet)
+  const dots = new Set();
+  let currentKey = null;
+  let currentSection = null;
+  const keep = (key, a) => { if (!links.has(key)) links.set(key, []); links.get(key).push(a); return a; };
 
-  const link = (key, extra = {}) => {
-    const a = h('a', { href: `#/${key}`, dataset: { key }, title: byKey.get(key), ...extra }, icon(key), h('span', { class: 'nav-label' }, byKey.get(key)));
-    if (!links.has(key)) links.set(key, []);
-    links.get(key).push(a);
-    return a;
+  const link = (key, cls = 'nav-row') => keep(key, h('a', { href: `#/${key}`, class: cls, dataset: { key } }, icon(key, 18), h('span', { class: 'nav-label' }, byKey.get(key))));
+
+  // Patrol's sections, under Patrol while it is open (and as chips in the phone sheet).
+  const sectionLinks = [];
+  const sectionsBox = () => {
+    const box = h('div', { class: 'nav-sections', hidden: currentKey !== 'patrol', 'aria-label': 'Patrol sections', role: 'group' },
+      PATROL_SECTIONS.map(([id, text]) => { const a = h('a', { href: `#/patrol/${id}`, class: 'nav-sec', dataset: { section: id } }, text); sectionLinks.push(a); return a; }));
+    return box;
+  };
+  const sectionBoxes = [];
+  const appLink = (key) => {
+    const a = link(key);
+    if (key !== 'patrol') return a;
+    const box = sectionsBox();
+    sectionBoxes.push(box);
+    return [a, box];
   };
 
-  // ---- rail
-  const sections = GROUPS.map(([name, id, keys]) => ({ name, id, keys: keys.filter(have) })).filter((g) => g.keys.length);
-  let folded = [];
-  // First visit: every group starts folded so all five headings fit on a small screen; the page you open unfolds its own group.
-  try { const saved = read(FOLD_KEY, null); folded = saved === null ? sections.map((g) => g.id) : JSON.parse(saved); } catch (_) { folded = []; }
-  const groupEls = new Map();
-  const nav = h('nav', { class: 'nav', 'aria-label': 'Main' },
-    have('dashboard') || have('inbox') ? h('div', { class: 'nav-group nav-home' }, have('dashboard') ? link('dashboard') : null, have('inbox') ? link('inbox') : null) : null,
-    sections.map((g) => {
-      const items = h('div', { class: 'nav-items', id: `nav-${g.id}` }, g.keys.map((k) => link(k)));
-      const title = h('button', { type: 'button', class: 'nav-title', 'aria-expanded': String(!folded.includes(g.id)), 'aria-controls': `nav-${g.id}` }, h('span', null, g.name), icon('chevron', 14));
-      const el = h('div', { class: `nav-group${folded.includes(g.id) ? ' folded' : ''}`, dataset: { group: g.id } }, title, items);
-      title.addEventListener('click', () => {
-        const nowFolded = !el.classList.contains('folded');
-        el.classList.toggle('folded', nowFolded);
-        title.setAttribute('aria-expanded', String(!nowFolded));
-        folded = nowFolded ? [...new Set([...folded, g.id])] : folded.filter((x) => x !== g.id);
-        write(FOLD_KEY, JSON.stringify(folded));
-      });
-      groupEls.set(g.id, el);
-      return el;
-    }));
-  const personal = PERSONAL.filter(have);
-  const toggle = h('button', { type: 'button', class: 'rail-toggle', 'aria-label': 'Collapse menu', 'aria-pressed': String(shell.classList.contains('collapsed')) }, icon('collapse', 18));
-  toggle.addEventListener('click', () => {
-    const closed = shell.classList.toggle('collapsed');
-    write(RAIL_KEY, closed ? 'closed' : 'open');
-    toggle.setAttribute('aria-pressed', String(closed));
-    toggle.setAttribute('aria-label', closed ? 'Expand menu' : 'Collapse menu');
-  });
-  const search = h('button', { type: 'button', class: 'rail-search', 'aria-label': 'Jump to a page' }, icon('search', 18), h('span', { class: 'nav-label' }, 'Jump to'), h('kbd', null, /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘K' : 'Ctrl K'));
+  // ---- side menu
+  let nav;
+  if (plan.role) {
+    nav = h('nav', { class: 'nav nav-role', 'aria-label': 'Main' },
+      h('div', { class: 'nav-group nav-mine' }, plan.apps.map(appLink)),
+      plan.mine.length ? h('div', { class: 'nav-group nav-mine nav-personal-apps' }, plan.mine.map((k) => link(k))) : null);
+  } else {
+    nav = h('nav', { class: 'nav', 'aria-label': 'Main' },
+      plan.start.length ? h('div', { class: 'nav-group nav-home' }, plan.start.map((k) => link(k))) : null,
+      plan.groups.map((g) => h('div', { class: 'nav-group', dataset: { group: g.id } },
+        h('p', { class: 'nav-title', id: `nav-${g.id}` }, h('span', null, g.name)),
+        h('div', { class: 'nav-items', role: 'group', 'aria-labelledby': `nav-${g.id}` }, g.keys.map(appLink)))));
+  }
+  const allBtn = () => {
+    const b = h('button', { type: 'button', class: 'nav-row nav-all', 'aria-haspopup': 'dialog' }, icon('apps', 18), h('span', { class: 'nav-label' }, 'All apps'), h('span', { class: 'nav-more' }, `${plan.more.length} more`));
+    b.addEventListener('click', () => openAllApps());
+    return b;
+  };
+
+  const search = h('button', { type: 'button', class: 'rail-search', 'aria-label': 'Jump to a page' }, icon('search', 18), h('span', { class: 'nav-label' }, 'Jump to'), h('kbd', null, isMac() ? '⌘K' : 'Ctrl K'));
   // Ask: the assistant's side panel, loaded the first time it is opened. Hidden until the server says it is on.
   const viewKeys = views.map(([k]) => k);
   ctx.views = viewKeys;
@@ -119,71 +200,111 @@ export function buildFrame({ views, main, signOut }) {
   const topAsk = h('button', { type: 'button', class: 'top-inbox top-ask', 'aria-label': 'Ask the assistant', hidden: true }, icon('ask', 22));
   ask.addEventListener('click', openAsk); topAsk.addEventListener('click', openAsk);
   if (ctx.me.role !== 'area') import('./assistant.js').then((m) => m.assistantOn()).then((yes) => { ask.hidden = !yes; topAsk.hidden = !yes; }).catch(() => {});
-  const out = h('button', { type: 'button', class: 'rail-out', title: 'Sign out' }, icon('signout', 18), h('span', { class: 'nav-label' }, 'Sign out'));
-  out.addEventListener('click', () => signOut());
-  const themeBtn = themeToggle('rail-out');
-  // One account button replaces four stacked rows: it opens My shifts, Account, Help and Sign out.
-  const whoMenu = h('div', { class: 'who-menu', id: 'who-menu', hidden: true }, h('nav', { class: 'nav nav-personal', 'aria-label': 'Your pages' }, h('div', { class: 'nav-group' }, personal.map((k) => link(k)))), themeBtn, out, whoVersion());
-  const whoBtn = h('button', { type: 'button', class: 'who', 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-controls': 'who-menu', title: ctx.me.login_name || ctx.me.email },
-    h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(ctx.me.username || ctx.me.email)), h('span', { class: 'who-text' }, h('b', null, ctx.me.login_name || ctx.me.email), h('span', null, ctx.me.role === 'area' ? 'Ski area (read-only)' : label(ctx.me.role))), icon('chevron', 14));
-  const setWho = (open) => { whoMenu.hidden = !open; whoBtn.setAttribute('aria-expanded', String(open)); };
-  whoBtn.addEventListener('click', (e) => { e.stopPropagation(); setWho(whoMenu.hidden); });
-  document.addEventListener('click', (e) => { if (!whoMenu.hidden && !whoMenu.contains(e.target)) setWho(false); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !whoMenu.hidden) { setWho(false); whoBtn.focus(); } });
-  whoMenu.addEventListener('click', (e) => { if (e.target.closest('a')) setWho(false); });
-  const rail = h('aside', { class: 'rail' },
-    h('div', { class: 'brand' }, h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: '', width: '64', height: '36' }), h('div', { class: 'brand-text' }, h('img', { class: 'brand-word', src: '/brand/verdynt-word-dark.png', alt: 'Verdynt/OS', width: '126', height: '23' }), h('span', null, ctx.me.tenant_name)), toggle),
-    search, ask, nav,
-    h('div', { class: 'rail-foot' }, whoMenu, whoBtn));
 
-  // ---- phone: slim top bar, bottom tabs, and a sheet with everything
-  const first = PHONE_FIRST.filter(have).slice(0, 4);
+  const name = ctx.me.login_name || ctx.me.username || ctx.me.email;
+  const roleText = ctx.me.role === 'area' ? 'Ski area (read-only)' : label(ctx.me.role);
+  const terminal = Boolean(ctx.me.terminal) || Boolean(readTerminal());
+  const outBtn = (cls) => { const b = h('button', { type: 'button', class: cls }, icon('signout', 17), h('span', null, 'Sign out')); b.addEventListener('click', () => signOut()); return b; };
+  // A shared counter computer: the next person switches in with their PIN (signing out shows the PIN screen there).
+  const switchBtn = (cls) => { if (!terminal) return null; const b = h('button', { type: 'button', class: cls }, icon('swap', 17), h('span', null, 'Switch person')); b.addEventListener('click', () => signOut()); return b; };
+  const who = h('div', { class: 'who' },
+    h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(name)),
+    h('span', { class: 'who-text' }, h('b', { title: ctx.me.email || name }, name), h('span', null, roleText)),
+    themeControl('menu'));
+  const rail = h('aside', { class: 'rail' },
+    h('div', { class: 'brand' }, h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: '', width: '48', height: '27' }),
+      h('div', { class: 'brand-text' }, h('strong', null, 'Verdynt/OS'), h('span', null, ctx.me.tenant_name))),
+    search, ask, nav,
+    h('div', { class: 'rail-foot' },
+      h('nav', { class: 'nav nav-bottom', 'aria-label': 'Settings and help' },
+        plan.role && plan.more.length ? allBtn() : null,
+        plan.bottom.map((k) => link(k))),
+      who,
+      h('div', { class: 'who-actions' }, switchBtn('btn small who-switch'), outBtn('rail-out'), whoVersion())));
+
+  // ---- phone: slim top bar, a labeled bottom bar, and a sheet with everything
   const tabLinks = new Map();
-  const tab = (key) => { const a = h('a', { href: `#/${key}`, dataset: { key }, class: 'tab' }, icon(key, 22), h('span', null, byKey.get(key))); tabLinks.set(key, a); return a; };
-  const more = h('button', { type: 'button', class: 'tab', 'aria-haspopup': 'dialog' }, icon('menu', 22), h('span', null, 'More'));
-  const tabbar = h('nav', { class: 'tabbar', 'aria-label': 'Quick links' }, first.map(tab), more);
-  const topSearch = h('button', { type: 'button', class: 'top-search', 'aria-label': 'Jump to a page' }, icon('search', 18), h('span', null, 'Jump to a page'), h('kbd', null, /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘K' : 'Ctrl K'));
-  const topInbox = have('inbox') ? h('a', { href: '#/inbox', class: 'top-inbox', dataset: { key: 'inbox' }, 'aria-label': 'Inbox' }, icon('inbox', 22)) : null;
-  if (topInbox) { if (!links.has('inbox')) links.set('inbox', []); links.get('inbox').push(topInbox); }
+  const tab = (key) => { const a = keep(key, h('a', { href: `#/${key}`, dataset: { key }, class: 'tab' }, icon(key, 22), h('span', null, byKey.get(key)))); tabLinks.set(key, a); return a; };
+  const more = h('button', { type: 'button', class: 'tab tab-menu', 'aria-haspopup': 'dialog' }, icon('menu', 22), h('span', null, 'Menu'));
+  const tabbar = h('nav', { class: 'tabbar', 'aria-label': 'Quick links' }, plan.first.map(tab), more);
+  const topSearch = h('button', { type: 'button', class: 'top-search', 'aria-label': 'Jump to a page' }, icon('search', 18), h('span', null, 'Jump to a page'), h('kbd', null, isMac() ? '⌘K' : 'Ctrl K'));
+  const topInbox = have('inbox') ? keep('inbox', h('a', { href: '#/inbox', class: 'top-inbox', dataset: { key: 'inbox' }, 'aria-label': 'Inbox' }, icon('inbox', 22))) : null;
   const topbar = h('header', { class: 'topbar' }, h('div', { class: 'top-brand' }, h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: 'Verdynt/OS', width: '53', height: '30' }), h('strong', null, ctx.me.tenant_name)), topSearch, topAsk, topInbox);
 
-  function openSheet() {
-    const items = [['Home', ['dashboard', 'inbox'].filter(have)], ...sections.map((g) => [g.name, g.keys]), ['You', personal]].filter(([, k]) => k.length);
-    const closeBtn = h('button', { type: 'button', class: 'btn small' }, 'Close');
-    const signOutBtn = h('button', { type: 'button', class: 'btn' }, 'Sign out');
-    const sheet = h('div', { class: 'dialog sheet menu-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'All pages' },
-      h('header', null, h('h2', null, 'Go to'), closeBtn),
-      items.map(([name, keys]) => h('div', { class: 'sheet-group' }, h('p', { class: 'nav-title' }, name),
-        h('div', { class: 'sheet-grid' }, keys.map((k) => { const a = h('a', { href: `#/${k}`, class: 'sheet-item', 'data-current': String(currentKey === k) }, icon(k, 22), h('span', null, byKey.get(k)), dots.has(k) ? h('span', { class: 'nav-badge dot', 'aria-label': 'new' }) : null); a.addEventListener('click', close); return a; })))),
-      h('div', { class: 'row' }, themeToggle('btn'), signOutBtn));
-    const overlay = h('div', { class: 'overlay' }, sheet);
-    function close() { overlay.remove(); document.removeEventListener('keydown', onKey); }
+  /** A sheet over the page (the phone menu and All apps). build(close) returns its content. */
+  function sheet(title, cls, build) {
+    const previous = document.activeElement;
+    const closeBtn = h('button', { type: 'button', class: 'sheet-close', 'aria-label': `Close ${title.toLowerCase()}` }, icon('close', 20));
+    const titleId = `sheet-${Math.random().toString(36).slice(2, 7)}`;
+    const box = h('div', { class: `dialog menu-sheet ${cls}`, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId });
+    const overlay = h('div', { class: 'overlay menu-overlay' }, box);
+    function close() { overlay.remove(); document.removeEventListener('keydown', onKey); if (previous && previous.isConnected && previous.focus) previous.focus(); }
     const onKey = (e) => { if (e.key === 'Escape') close(); };
+    box.append(h('header', null, h('h2', { id: titleId }, title), closeBtn), build(close));
+    box.addEventListener('click', (e) => { if (e.target.closest('a[href]')) close(); });
     closeBtn.addEventListener('click', close);
-    signOutBtn.addEventListener('click', () => { close(); signOut(); });
     overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
     document.addEventListener('keydown', onKey);
     document.body.append(overlay);
     closeBtn.focus();
+    return { close, box };
+  }
+  const tile = (k) => h('a', { href: `#/${k}`, class: 'sheet-item', dataset: { key: k }, 'aria-current': currentKey === k ? 'page' : null }, icon(k, 20), h('span', null, byKey.get(k)), dots.has(k) ? h('span', { class: 'nav-badge dot', 'aria-label': 'new' }) : null);
+  const chips = () => h('div', { class: 'sheet-chips', role: 'group', 'aria-label': 'Patrol sections' },
+    PATROL_SECTIONS.map(([id, text]) => h('a', { href: `#/patrol/${id}`, class: 'sheet-chip', 'aria-current': currentKey === 'patrol' && currentSection === id ? 'true' : null }, text)));
+  const groupBlock = ([heading, id, keys], withHeading = true) => h('div', { class: 'sheet-group', dataset: { group: id } },
+    withHeading ? h('p', { class: 'nav-title' }, h('span', null, heading)) : null,
+    h('div', { class: 'sheet-grid' }, keys.map(tile)),
+    keys.includes('patrol') && currentKey === 'patrol' ? chips() : null);
+
+  /** Every other app this person may open (role menus): grouped, one tap away. */
+  function openAllApps() {
+    return sheet('All apps', 'all-apps', () => h('div', { class: 'stack' },
+      h('p', { class: 'muted small' }, 'Apps you can use that are not in your menu.'),
+      grouped(plan.more).map((g) => groupBlock(g))));
+  }
+
+  function openSheet() {
+    const searchBox = h('input', { type: 'search', class: 'sheet-search', placeholder: 'Jump to an app or page', 'aria-label': 'Jump to an app or page', autocomplete: 'off' });
+    const s = sheet('Menu', 'phone-menu', (close) => {
+      searchBox.addEventListener('input', () => { const q = searchBox.value; close(); openPalette(q); });
+      const blocks = plan.role
+        ? [groupBlock(['Your apps', 'home', [...plan.apps, ...plan.mine]], false)]
+        : [...(plan.start.length ? [groupBlock(['Start', 'home', plan.start])] : []), ...plan.groups.map((g) => groupBlock([g.name, g.id, g.keys]))];
+      const all = plan.role && plan.more.length ? h('button', { type: 'button', class: 'sheet-row nav-all' }, icon('apps', 20), h('span', null, 'All apps'), h('span', { class: 'nav-more' }, `${plan.more.length} more`)) : null;
+      if (all) all.addEventListener('click', () => { close(); openAllApps(); });
+      const signOutBtn = outBtn('btn small');
+      signOutBtn.addEventListener('click', close, { capture: true });
+      const sw = switchBtn('btn small');
+      if (sw) sw.addEventListener('click', close, { capture: true });
+      return h('div', { class: 'sheet-body' }, searchBox, h('div', { class: 'sheet-groups' }, blocks, all),
+        h('div', { class: 'sheet-foot' },
+          plan.bottom.map((k) => h('a', { href: `#/${k}`, class: 'sheet-row', 'aria-current': currentKey === k ? 'page' : null }, icon(k, 20), h('span', null, byKey.get(k)), dots.has(k) ? h('span', { class: 'nav-badge dot', 'aria-label': 'new' }) : null)),
+          h('div', { class: 'sheet-theme' }, h('span', { class: 'small muted' }, 'Theme'), themeControl('seg')),
+          h('div', { class: 'who sheet-who' }, h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(name)), h('span', { class: 'who-text' }, h('b', null, name), h('span', null, roleText)), sw, signOutBtn)));
+    });
+    return s;
   }
   more.addEventListener('click', openSheet);
 
   // ---- palette
-  let currentKey = null;
   function actions() {
     const list = [];
     if (isManager()) list.push({ id: 'kiosk', title: 'Open the time clock kiosk page', hint: 'New tab', icon: 'clock', words: 'kiosk tablet punch', run: () => window.open('/kiosk', '_blank', 'noopener') });
-    list.push({ id: 'rail', title: shell.classList.contains('collapsed') ? 'Expand the menu' : 'Collapse the menu', hint: '', icon: 'collapse', words: 'sidebar rail', run: () => toggle.click() });
+    if (plan.role && plan.more.length) list.push({ id: 'all', title: 'All apps', hint: `${plan.more.length} more`, icon: 'apps', words: 'apps more everything', run: () => openAllApps() });
+    for (const [id, text, ico] of THEMES) list.push({ id: `theme-${id}`, title: id === 'device' ? 'Theme: same as this device' : `Theme: ${text.toLowerCase()}`, hint: themePick() === id ? 'On now' : '', icon: ico, words: 'theme dark light mode night day colors', run: () => setTheme(id) });
     if (!ask.hidden) list.push({ id: 'ask', title: 'Ask the assistant', hint: '', icon: 'ask', words: 'assistant question how do i ai chat', run: () => openAsk() });
+    if (terminal) list.push({ id: 'switch', title: 'Switch person', hint: '', icon: 'swap', words: 'pin shared terminal change user', run: () => signOut() });
     list.push({ id: 'out', title: 'Sign out', hint: '', icon: 'signout', words: 'log out leave', run: () => signOut() });
     return list;
   }
   function recent() { try { return JSON.parse(read(RECENT_KEY, '[]')).filter(have); } catch (_) { return []; } }
 
-  function openPalette() {
+  function openPalette(start = '') {
     if (document.querySelector('.palette-overlay')) return;
     const previous = document.activeElement;
-    const box = h('input', { class: 'palette-input', type: 'text', role: 'combobox', 'aria-expanded': 'true', 'aria-controls': 'palette-list', 'aria-autocomplete': 'list', placeholder: 'Go to a page or run a command', autocomplete: 'off', spellcheck: 'false' });
+    const box = h('input', { class: 'palette-input', type: 'text', role: 'combobox', 'aria-expanded': 'true', 'aria-controls': 'palette-list', 'aria-autocomplete': 'list', 'aria-label': 'Go to a page or run a command', placeholder: 'Go to a page or run a command', autocomplete: 'off', spellcheck: 'false' });
+    box.value = typeof start === 'string' ? start : '';
     const list = h('ul', { class: 'palette-list', id: 'palette-list', role: 'listbox' });
     const foot = h('div', { class: 'palette-foot' }, h('span', null, h('kbd', null, '↑'), h('kbd', null, '↓'), ' to move'), h('span', null, h('kbd', null, 'Enter'), ' to open'), h('span', null, h('kbd', null, 'Esc'), ' to close'));
     const panel = h('div', { class: 'palette', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Jump to a page' }, h('div', { class: 'palette-top' }, icon('search', 18), box), list, foot);
@@ -192,6 +313,7 @@ export function buildFrame({ views, main, signOut }) {
 
     const everything = () => [
       ...views.map(([key, text]) => ({ id: `page-${key}`, title: text, hint: key === currentKey ? 'You are here' : '', icon: key, words: `${text} ${ALSO[key] || ''}`, run: () => { location.hash = `#/${key}`; } })),
+      ...(have('patrol') ? PATROL_SECTIONS.map(([id, text]) => ({ id: `patrol-${id}`, title: `Patrol: ${text}`, hint: currentKey === 'patrol' && currentSection === id ? 'You are here' : '', icon: 'patrol', words: `patrol ${text}`, run: () => { location.hash = `#/patrol/${id}`; } })) : []),
       ...actions(),
     ];
     function score(item, q) {
@@ -248,8 +370,8 @@ export function buildFrame({ views, main, signOut }) {
     paint();
     box.focus();
   }
-  search.addEventListener('click', openPalette);
-  topSearch.addEventListener('click', openPalette);
+  search.addEventListener('click', () => openPalette());
+  topSearch.addEventListener('click', () => openPalette());
   const onGlobalKey = (e) => {
     if (!shell.isConnected) { document.removeEventListener('keydown', onGlobalKey); return; }
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || '') || (e.target && e.target.isContentEditable);
@@ -259,22 +381,25 @@ export function buildFrame({ views, main, signOut }) {
 
   shell.append(rail, h('div', { class: 'frame' }, topbar, main), tabbar);
 
-  function setCurrent(key) {
+  /** Marks where the person is: the app in the menus, and Patrol's section while Patrol is open. */
+  function setCurrent(key, params = []) {
     currentKey = key;
-    const g = GROUP_OF[key];
-    if (g && groupEls.get(g.id) && groupEls.get(g.id).classList.contains('folded')) groupEls.get(g.id).querySelector('.nav-title').click();
+    currentSection = key === 'patrol' ? patrolSection(params) : null;
     for (const [k, anchors] of links) for (const a of anchors) { if (k === key) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); }
-    for (const [k, a] of tabLinks) { if (k === key) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); }
-    more.classList.toggle('on', !first.includes(key));
+    for (const box of sectionBoxes) box.hidden = key !== 'patrol';
+    for (const a of sectionLinks) { if (a.dataset.section === currentSection) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current'); }
+    // Keep the open app in view when the side menu is taller than the screen.
+    const here = (key === 'patrol' && sectionBoxes[0]) || nav.querySelector(`[data-key="${key}"]`);
+    if (here && here.scrollIntoView && shell.isConnected) { try { here.scrollIntoView({ block: 'nearest' }); } catch (_) { /* old browsers */ } }
+    more.classList.toggle('on', !tabLinks.has(key));
     const rec = [key, ...recent().filter((k) => k !== key)].slice(0, 5);
     write(RECENT_KEY, JSON.stringify(rec));
   }
   /**
    * A count on a page's menu links (unread messages on Inbox). 0 removes it. With { dot: true } it is a small dot
-   * instead of a number (Help, when What's new has something): quiet, and repeated on the account button and the
-   * phone's More tab, since Help sits inside those.
+   * instead of a number (Help, when What's new has something): quiet, and repeated on the phone's Menu button when
+   * the page sits inside the menu sheet there.
    */
-  const dots = new Set();
   function setBadge(key, n, { dot = false, says = 'unread' } = {}) {
     for (const a of links.get(key) || []) {
       let b = a.querySelector('.nav-badge');
@@ -284,13 +409,11 @@ export function buildFrame({ views, main, signOut }) {
       b.textContent = dot ? '' : n > 99 ? '99+' : String(n);
       a.setAttribute('aria-description', dot ? says : `${n} ${says}`);
     }
-    if (personal.includes(key)) {
+    if (dot) {
       if (n) dots.add(key); else dots.delete(key);
-      for (const el of [whoBtn, more]) {
-        el.classList.toggle('has-new', dots.size > 0);
-        if (dots.size) el.setAttribute('aria-description', 'Something new in Help'); else el.removeAttribute('aria-description');
-      }
+      more.classList.toggle('has-new', [...dots].some((k) => !tabLinks.has(k)));
+      if (more.classList.contains('has-new')) more.setAttribute('aria-description', 'Something new in Help'); else more.removeAttribute('aria-description');
     }
   }
-  return { shell, setCurrent, openPalette, setBadge };
+  return { shell, setCurrent, openPalette, openAllApps, openSheet, setBadge, plan };
 }
