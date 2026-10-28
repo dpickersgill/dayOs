@@ -1,4 +1,4 @@
-// Patrol > Admin > Patrol settings: the medical director and protocol version (stamped on each report at sign-off),
+// Settings > Patrol > Patrol settings: the medical director and protocol version (stamped on each report at sign-off),
 // volunteer days, self sign-up for open shifts, the sweep's late alert, oxygen refill level, controlled counts,
 // avalanche work and text messages on critical calls. Each part is changed by whoever runs that part of patrol.
 import { get, put, post, patch, del } from '../api.js';

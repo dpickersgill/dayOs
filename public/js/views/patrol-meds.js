@@ -16,7 +16,7 @@ export async function drawMeds(box) {
     const certName = Object.fromEntries(d.certs);
     clear(body).append(...[
       h('div', null, h('h2', null, 'Medications and oxygen'),
-        h('p', { class: 'muted' }, [d.medical_director ? `Medical director: ${d.medical_director}.` : 'No medical director recorded (Admin, Patrol settings).', d.protocol_version ? ` Protocols: ${d.protocol_version}.` : ''].join(''))),
+        h('p', { class: 'muted' }, [d.medical_director ? `Medical director: ${d.medical_director}.` : 'No medical director recorded (Settings, Patrol, Patrol settings).', d.protocol_version ? ` Protocols: ${d.protocol_version}.` : ''].join(''))),
       d.flags.length ? h('ul', { class: 'flag-list', role: 'status' }, d.flags.map((f) => h('li', null, state(f.level === 'bad' ? 'Now' : 'Soon', f.level), ` ${f.text}`))) : h('p', { class: 'muted' }, 'Nothing expired, low or owed.'),
 
       h('section', { class: 'panel stack' },

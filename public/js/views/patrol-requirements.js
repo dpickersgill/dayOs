@@ -1,4 +1,4 @@
-// Patrol > Admin > Report requirements: what each kind of report must hold, set by the patrol director.
+// Settings > Patrol > Report requirements: what each kind of report must hold, set by the patrol director.
 //
 // Every item has a level (off, recommended, required to approve, required to submit) and can be limited to some cases
 // ("only when": serious, transported, under 18, a collision, refused care, staff on duty, rental gear, a lift). A starting
@@ -39,7 +39,6 @@ export async function drawRequirements(box) {
     const presetName = (key) => (d.presets.find((p) => p.key === key) || {}).label;
     clear(page).append(
       h('header', { class: 'stack tight' },
-        h('h2', null, 'Report requirements'),
         h('p', { class: 'page-note' }, 'What each kind of report must hold before it is submitted or approved. Patrollers see what is required as they write, and a phone with no signal knows the rules too. A report is always checked against the rules in force when it was submitted.'),
         h('p', { class: 'muted small', 'data-status': '' }, d.version.id
           ? `${d.version.preset ? `Started from ${presetName(d.version.preset)}. ` : ''}Last changed ${fmtDateTime(d.version.changed_at)}${d.version.changed_by ? ` by ${d.version.changed_by}` : ''}.`

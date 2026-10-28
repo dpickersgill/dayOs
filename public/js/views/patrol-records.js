@@ -103,7 +103,7 @@ export async function renderRelease(root, id) {
   const p = await get(`/patrol/records/${id}/pack`);
   const r = p.request;
   root.append(h('div', { class: 'print-page release-pack' },
-    h('div', { class: 'no-print row' }, h('a', { class: 'btn', href: '#/patrol/records' }, 'Back'), button('Print or save as PDF', () => window.print(), { kind: 'primary' })),
+    h('div', { class: 'no-print row' }, h('a', { class: 'btn', href: '#/patrol/cases?tab=records' }, 'Back'), button('Print or save as PDF', () => window.print(), { kind: 'primary' })),
     h('h1', null, `Release ${r.release_no}`),
     h('p', null, h('b', null, p.resort.legal_name || p.resort.name)),
     h('table', { class: 'kv' }, h('tbody', null,

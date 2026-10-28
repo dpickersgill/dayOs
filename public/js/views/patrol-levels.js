@@ -57,6 +57,6 @@ export async function drawLevels(box) {
     h('details', { class: 'lv-legend' }, h('summary', null, 'What each level is for'), h('ul', null, data.levels.map((l) => h('li', null, h('b', null, l.label), ` ${l.about}`)))),
     h('div', { class: 'table-wrap' }, h('table', { class: 'matrix' }, h('thead', null, head), h('tbody', null, body))),
     h('h2', null, 'People'),
-    h('p', { class: 'muted small' }, 'Rank on the Team tab is for training and seniority. The access level here decides what a person can open and do.'),
+    h('p', { class: 'muted small' }, 'Rank on the roster (Patrol, People, Roster) is for training and seniority. The access level here decides what a person can open and do.'),
     people.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'matrix people' }, h('thead', null, h('tr', null, h('th', null, 'Name'), h('th', null, 'Rank'), h('th', null, 'Access level'))), h('tbody', null, people))) : empty('No one is on the patrol roster yet.')));
 }

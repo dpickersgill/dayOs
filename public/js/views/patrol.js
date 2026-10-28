@@ -3,7 +3,7 @@
 import { get, download } from '../api.js';
 import { setAccess, has } from './patrol-feat.js';
 import { drawLevels } from './patrol-levels.js';
-import { h, clear, input, select, field, button, toast, formDialog, tabs, val, num, nowInput, todayStr, addDays, label, errorBox, ctx } from '../ui.js';
+import { h, clear, input, select, field, button, toast, formDialog, tabs, val, num, nowInput, todayStr, addDays, label, errorBox, empty, ctx, isManager } from '../ui.js';
 import { renderCase, CATEGORIES, SEVERITY, compact, flow } from './patrol-case.js';
 import { renderHandoff } from './patrol-handoff.js';
 import { renderCollisionReport } from './patrol-collision.js';
@@ -73,7 +73,7 @@ export async function render(root, params = []) {
   if (params[0] === 'room') { // the patrol-room screen runs on its own (main.js); this starts it on this device
     root.append(h('section', { class: 'panel stack' }, h('h1', null, 'Patrol-room screen'),
       h('p', null, 'This device becomes the patrol-room screen: everyone taps their name to sign in or out, and nothing else opens on it. To use it for anything else, press Leave this screen and confirm it is you, or sign out.'),
-      h('div', { class: 'row' }, button('Start the screen', () => startRoom(), { kind: 'primary' }), h('a', { class: 'btn', href: '#/patrol/duty' }, 'Back to On duty'))));
+      h('div', { class: 'row' }, button('Start the screen', () => startRoom(), { kind: 'primary' }), h('a', { class: 'btn', href: '#/patrol/now?tab=duty' }, 'Back to On duty'))));
     return;
   }
   if (params[0] === 'release' && ONE.test(params[1] || '')) { await renderRelease(root, Number(params[1])); return; }
@@ -92,9 +92,67 @@ export async function render(root, params = []) {
     return;
   }
   const opts = { canLead: me.can_lead, canAdmin: me.can_admin_form, staffId: me.staff_id, newCase };
+  // Old addresses (#/patrol/duty, #/patrol/kits, #/patrol/settings and so on) still work: a tab moves to its section's
+  // address, and the setup pages to Settings.
+  const want = params[0] || 'now';
+  if (!SECTION_IDS.includes(want) && want !== 'new') {
+    const to = legacyRoute(want);
+    if (to && isAt(params)) { location.replace(to); return; }
+  }
+  const items = pageItems(me, opts);
+  const SECTIONS = sectionsFor(items);
+  const section = SECTIONS.find((s) => s.id === want) || SECTIONS.find((s) => s.items.some((i) => i[0] === (want === 'home' ? 'board' : want))) || SECTIONS[0];
+  if (!section) { root.append(h('div', { class: 'page-head' }, h('h1', null, 'Patrol')), empty('Your patrol access level does not open any page here. Ask a patrol Admin.')); return; }
+  const fromLegacy = section.id !== want && want !== 'new' ? (want === 'home' ? 'board' : want) : null;
+  const tabKey = [queryTab(), fromLegacy].find((k) => k && section.items.some((i) => i[0] === k)) || section.items[0][0];
+  // The page title is the section; Patrol settings is a button for those who set patrol up (patrol Admins and managers).
+  const settingsBtn = me.access_level === 'admin' || isManager() ? h('a', { class: 'btn', href: '#/settings/patrol', 'data-act': 'patrol-settings' }, 'Patrol settings') : null;
+  // New case is the one thing a patroller must always find: in the header on every screen size, and floating on a phone.
+  const headNew = has('create_case') ? h('button', { type: 'button', class: 'btn primary patrol-new', 'data-act': 'new-case-head', onclick: () => newCase() }, h('span', { 'aria-hidden': 'true' }, '+'), ' New case') : null;
+  const note = h('p', { class: 'page-note', 'data-section-note': section.id }, section.note);
+  root.append(h('div', { class: 'page-head patrol-head', 'data-section': section.id },
+    h('div', null, h('h1', null, section.text), note), h('div', { class: 'row patrol-actions' }, settingsBtn, headNew)),
+  h('div', { class: 'pbody' }, h('div', { class: section.items.length === 1 ? 'solo' : null }, tabs(section.items, tabKey))), newCaseButton());
+  // On Cases, say when reports are waiting for this person to approve.
+  if (section.id === 'cases' && has('approve_case')) {
+    get('/patrol/home').then((home) => {
+      const n = home.can_approve ? home.waiting.length : 0;
+      if (n && note.isConnected) note.append(' ', h('b', { class: 'psec-waiting' }, `${n} waiting for your approval.`));
+    }).catch(() => {});
+  }
+  if (want === 'new') { // Today's New case button: the Now page with the New case form open
+    if (isAt(params)) history.replaceState(null, '', '#/patrol/now');
+    if (has('create_case')) newCase();
+  }
+}
+
+// ---------------------------------------------------------------- sections and tabs
+// Four sections, each a page with its own tabs (#/patrol/now?tab=duty). Setup is in Settings, Patrol.
+const SECTION_LIST = [
+  ['now', 'Now', 'Who is on, the calls, the map and today\'s checks.', ['board', 'duty', 'dispatch', 'map', 'opening', 'sweep', 'avalanche', 'log']],
+  ['cases', 'Cases', 'Every patrol report, newest first, and what follows from them.', ['cases', 'review', 'followup', 'records', 'stats', 'network', 'risk', 'access']],
+  ['people', 'People', 'The schedule, crews, posts, roster and training.', ['schedule', 'crews', 'cover', 'posts', 'team', 'training', 'passport']],
+  ['gear', 'Gear', 'Kits, equipment, medications and lift evacuation.', ['kits', 'equipment', 'meds', 'lifts']],
+];
+export const SECTION_IDS = SECTION_LIST.map((s) => s[0]);
+/** Which section holds a tab, by its key (the same whatever the person may open). */
+export const SECTION_OF = Object.fromEntries(SECTION_LIST.flatMap(([id, , , keys]) => keys.map((k) => [k, id])));
+const SETUP_KEYS = ['settings', 'requirements', 'levels', 'admin'];
+
+/** Where an old Patrol address goes now, or null when it is not one. */
+export function legacyRoute(key) {
+  if (key === 'home') return '#/patrol/now?tab=board';
+  if (SETUP_KEYS.includes(key)) return '#/settings/patrol';
+  return SECTION_OF[key] ? `#/patrol/${SECTION_OF[key]}?tab=${key}` : null;
+}
+// Only move the address when this page is the one in the address bar (not when drawn somewhere else, as in a test).
+const isAt = (params) => location.hash.split('?')[0].replace(/\/+$/, '') === `#/patrol/${params.join('/')}`.replace(/\/+$/, '');
+const queryTab = () => { try { return new URLSearchParams(location.hash.split('?')[1] || '').get('tab'); } catch (_) { return null; } };
+
+function pageItems(me, opts) {
   const only = (feature, item) => (has(feature) ? [item] : []);
-  const items = [
-    ['home', 'Home', (b) => drawHome(b, opts)],
+  return [
+    ['board', 'Board', (b) => drawHome(b, opts)],
     ['duty', 'On duty', drawDuty],
     ['sweep', 'Closing sweep', drawSweep],
     ['opening', 'Opening checks', drawOpening],
@@ -116,51 +174,28 @@ export async function render(root, params = []) {
     ['training', 'Training', (b) => drawTraining(b, opts)],
     ['passport', 'Skills', (b) => drawPassport(b, opts)],
     ...only('records', ['records', 'Records requests', drawRecords]),
-    ...(['manage_settings', 'manage_schedule', 'manage_meds', 'run_sweep', 'avalanche'].some(has) ? [['settings', 'Patrol settings', drawOpsSettings]] : []),
-    ...(['manage_settings', 'approve_case', 'submit_case'].some(has) ? [['requirements', 'Report requirements', drawRequirements]] : []),
     ...only('reports', ['stats', 'Statistics', drawStats]),
     ...only('reports', ['network', 'Injury network', drawNetwork]),
     ...only('reports', ['risk', 'Risk report', drawRisk]),
     ...(me.is_reviewer || me.can_manage_review ? [['review', me.review_group ? 'Review' : 'Review group', (b) => drawReview(b, me)]] : []),
     ...only('view_access_log', ['access', 'Access log', drawAccessLog]),
-    ...(me.access_level === 'admin' ? [['levels', 'Access levels', drawLevels]] : []),
   ];
-  // Two levels: a few sections for what the person is doing, then the pages inside the chosen section. On a phone the
-  // pages show as large buttons that wrap, so none hides off the edge of the screen.
-  const SECTIONS = [
-    ['now', 'Now', ['home', 'duty', 'dispatch', 'map', 'opening', 'sweep', 'avalanche', 'log']],
-    ['cases', 'Cases', ['cases', 'review', 'followup', 'records', 'stats', 'network', 'risk']],
-    ['people', 'People', ['schedule', 'crews', 'cover', 'posts', 'team', 'training', 'passport']],
-    ['gear', 'Gear', ['kits', 'equipment', 'meds', 'lifts']],
-    ['admin', 'Admin', ['settings', 'requirements', 'access', 'levels']],
-  ].map(([id, text, keys]) => ({ id, text, items: keys.map((k) => items.find((i) => i[0] === k)).filter(Boolean) })).filter((s) => s.items.length);
-  const wanted = SECTIONS.find((s) => s.items.some((i) => i[0] === params[0])) || SECTIONS[0];
-  const body = h('div', { class: 'pbody' });
-  const buttons = new Map();
-  let badge = null;
-  const nav = h('nav', { class: 'psections', 'aria-label': 'Patrol sections' }, ...SECTIONS.map((s) => {
-    const b = h('button', { type: 'button', 'data-section': s.id, onclick: () => open(s) }, s.text);
-    buttons.set(s.id, b);
-    return b;
-  }));
-  function open(section, key) {
-    for (const [id, b] of buttons) { if (id === section.id) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
-    clear(body).append(h('div', { class: section.items.length === 1 ? 'solo' : null }, tabs(section.items, key && section.items.some((i) => i[0] === key) ? key : section.items[0][0])));
-  }
-  // New case is the one thing a patroller must always find: in the header on every screen size, and floating on a phone.
-  const headNew = has('create_case') ? h('button', { type: 'button', class: 'btn primary patrol-new', 'data-act': 'new-case-head', onclick: () => newCase() }, h('span', { 'aria-hidden': 'true' }, '+'), ' New case') : null;
-  root.append(h('div', { class: 'page-head patrol-head' }, h('h1', null, 'Patrol'), nav, headNew), body, newCaseButton());
-  open(wanted, params[0]);
-  // A small count on Cases when reports are waiting for this person to approve.
-  if (has('approve_case') && buttons.has('cases')) {
-    get('/patrol/home').then((home) => {
-      const n = home.can_approve ? home.waiting.length : 0;
-      if (!n || !nav.isConnected) return;
-      badge = h('span', { class: 'psec-badge', 'aria-label': `${n} waiting for approval` }, String(n));
-      buttons.get('cases').append(badge);
-    }).catch(() => {});
-  }
 }
+const sectionsFor = (items) => SECTION_LIST.map(([id, text, note, keys]) => ({ id, text, note, items: keys.map((k) => items.find((i) => i[0] === k)).filter(Boolean) })).filter((s) => s.items.length);
+
+// ---------------------------------------------------------------- setup, shown in Settings, Patrol
+// Each draws on a fresh panel: it asks the server who this person is in Patrol first, so it does not need this page.
+const withAccess = (draw) => async (panel) => { setAccess(await get('/patrol/me')); return draw(panel); };
+export const settingsPages = {
+  settings: { title: 'Patrol settings', who: 'patrol-admin', render: withAccess((panel) => drawOpsSettings(panel)) },
+  requirements: { title: 'Report requirements', who: 'patrol-admin', render: withAccess(async (panel) => {
+    const legal = h('div', { class: 'row' }, button('Legal name on reports', () => formSettingsDialog(), { small: true }), h('span', { class: 'muted small' }, 'Printed on every copy of the report.'));
+    const box = h('div');
+    panel.append(legal, box);
+    await drawRequirements(box);
+  }) },
+  access: { title: 'Access levels', who: 'patrol-admin', render: withAccess((panel) => drawLevels(panel)) },
+};
 
 // ---------------------------------------------------------------- cases
 const REMEMBER = { report_state: '', category: '', severity: '', range: '', from: '', to: '', q: '' };
@@ -237,8 +272,7 @@ async function drawCases(box, { canAdmin } = {}) {
     h('div', { class: 'menu-items stack' },
       mgr ? button('Cases CSV (uses the filters)', () => download(`/patrol/incidents.csv${query() ? `?${query()}` : ''}`, 'cases.csv'), { small: true }) : null,
       mgr ? button('Patient statistics CSV', () => download('/patrol/patients.csv', 'patients.csv'), { small: true }) : null,
-      canAdmin ? button('Report requirements', () => { location.hash = '#/patrol/requirements'; }, { small: true }) : null,
-      canAdmin ? button('Legal name on reports', () => formSettingsDialog(), { small: true }) : null)) : null;
+      canAdmin ? h('a', { class: 'btn small', href: '#/settings/patrol' }, 'Report requirements and legal name') : null)) : null;
   clear(box).append(h('div', { class: 'stack cases' },
     h('div', { class: 'cases-bar' }, h('div', { class: 'grow search' }, q), exports),
     h('div', { class: 'cases-filters' }, stateBar, rangeBar, dates, h('div', { class: 'row' }, category, severity)),

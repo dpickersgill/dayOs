@@ -85,7 +85,7 @@ function shareDialog(season, again) {
 export async function renderRiskReport(root, season) {
   const r = await get(`/patrol/risk-report${season ? `?season=${encodeURIComponent(season)}` : ''}`);
   root.append(h('div', { class: 'print-page claim-file' },
-    h('div', { class: 'no-print row wrap cf-bar' }, h('a', { class: 'btn', href: '#/patrol/risk' }, 'Back'), button('Print or save as PDF', () => window.print(), { kind: 'primary' }),
+    h('div', { class: 'no-print row wrap cf-bar' }, h('a', { class: 'btn', href: '#/patrol/cases?tab=risk' }, 'Back'), button('Print or save as PDF', () => window.print(), { kind: 'primary' }),
       button('Share with your broker', () => shareDialog(r.season, async () => {}))),
     riskDoc(r),
     r.shares && r.shares.length ? h('div', { class: 'no-print cf-sec' }, h('h2', null, 'Shared with brokers'), sharesList(r.shares.filter((s) => s.season === r.season), () => location.reload())) : null));

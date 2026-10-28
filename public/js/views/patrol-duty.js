@@ -112,7 +112,7 @@ export async function renderRoom(root) {
   const body = h('div', { class: 'room' });
   const leave = button('Leave this screen', async () => {
     await post('/patrol/room/end'); // asks for the leader's passkey, code or password first
-    history.replaceState(null, '', `${location.pathname}#/patrol/duty`);
+    history.replaceState(null, '', `${location.pathname}#/patrol/now?tab=duty`);
     location.reload();
   }, { small: true });
   clear(root).append(h('div', { class: 'room-head' }, h('h1', null, 'Patrol room'), h('p', null, 'Tap your name to sign in or out.'),

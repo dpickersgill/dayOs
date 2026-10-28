@@ -20,7 +20,7 @@ export async function drawLog(box) {
     q.addEventListener('keydown', async (e) => {
       if (e.key !== 'Enter' || q.value.trim().length < 2) return;
       const r = await get(`/patrol/daily-log/search?q=${encodeURIComponent(q.value.trim())}`);
-      const dlg = dialog(`"${q.value.trim()}" in the log`, r.data.length ? h('ul', { class: 'duty-list' }, r.data.map((x) => h('li', null, h('a', { href: '#/patrol/log', onclick: (ev) => { ev.preventDefault(); date = x.date; dlg.close(); load(); } }, dayLong(x.date)), ` ${x.kind === 'addendum' ? '(addendum) ' : ''}${x.snippet}`))) : empty('Nothing found.'));
+      const dlg = dialog(`"${q.value.trim()}" in the log`, r.data.length ? h('ul', { class: 'duty-list' }, r.data.map((x) => h('li', null, h('a', { href: '#/patrol/now?tab=log', onclick: (ev) => { ev.preventDefault(); date = x.date; dlg.close(); load(); } }, dayLong(x.date)), ` ${x.kind === 'addendum' ? '(addendum) ' : ''}${x.snippet}`))) : empty('Nothing found.'));
     });
     clear(head).append(h('div', { class: 'week-nav' },
       h('button', { type: 'button', class: 'btn small icon-btn', 'aria-label': 'Day before', onclick: () => { date = addDays(date, -1); load(); } }, '‹'),

@@ -31,9 +31,9 @@ export async function drawHome(box) {
   q.addEventListener('search', search);
 
   const nudges = [];
-  if (home.can_approve && home.waiting.length) nudges.push(h('a', { class: 'nudge warn', href: '#/patrol/home', 'data-nudge': 'waiting' }, `${home.waiting.length} report${home.waiting.length === 1 ? ' is' : 's are'} waiting for your approval`));
+  if (home.can_approve && home.waiting.length) nudges.push(h('a', { class: 'nudge warn', href: '#/patrol/now?tab=board', 'data-nudge': 'waiting' }, `${home.waiting.length} report${home.waiting.length === 1 ? ' is' : 's are'} waiting for your approval`));
   if (home.stale_drafts) nudges.push(h('span', { class: 'nudge warn', 'data-nudge': 'stale' }, `${home.stale_drafts} case${home.stale_drafts === 1 ? ' is' : 's are'} still in draft from before today. Finish and submit ${home.stale_drafts === 1 ? 'it' : 'them'}.`));
-  if (has('followups') && home.followups_held) nudges.push(h('a', { class: 'nudge', href: '#/patrol/followup', 'data-nudge': 'followups' }, `${home.followups_held} follow-up email${home.followups_held === 1 ? '' : 's'} need${home.followups_held === 1 ? 's' : ''} a director's decision`));
+  if (has('followups') && home.followups_held) nudges.push(h('a', { class: 'nudge', href: '#/patrol/cases?tab=followup', 'data-nudge': 'followups' }, `${home.followups_held} follow-up email${home.followups_held === 1 ? '' : 's'} need${home.followups_held === 1 ? 's' : ''} a director's decision`));
 
   const mineIds = new Set(home.mine.map((x) => x.id));
   const others = home.recent.filter((x) => !mineIds.has(x.id));
