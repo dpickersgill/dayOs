@@ -474,6 +474,10 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 .legal ul{margin:12px 0 0;padding-left:22px}
 .legal li{margin:6px 0}
 .legal .updated{color:var(--muted);font-size:16px;margin-top:10px}
+.legal table.sub{max-width:none;width:100%;border-collapse:collapse;margin-top:16px;font-size:16px;color:var(--ink2)}
+.legal table.sub th,.legal table.sub td{text-align:left;vertical-align:top;padding:10px 12px 10px 0;border-bottom:1px solid var(--line)}
+.legal table.sub th{color:var(--ink);font-weight:600}
+.legal table.sub td:first-child{font-weight:600;color:var(--ink)}
 .lost{padding:60px 0 120px}
 .lost h1{font-size:clamp(48px,7vw,96px);line-height:.92}
 .lost p{font-size:20px;margin-top:20px;color:var(--ink2);max-width:34em}
@@ -566,7 +570,16 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
   .guest{margin-top:28px}
   .swipehint{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:15px;color:var(--muted)}
   .plans{grid-template-columns:minmax(0,1fr)}
+  /* a swiped card is a column again: the shared subgrid rows above would put the price on top of the blurb */
+  .plans.swipe>.plan{display:flex;flex-direction:column}
+  .plans.swipe>.plan>.go{margin-top:auto}
   .plan{padding:24px 20px}
+  /* the privacy page's service table reads as stacked cards */
+  .legal table.sub,.legal table.sub thead,.legal table.sub tbody,.legal table.sub tr,.legal table.sub td{display:block}
+  .legal table.sub thead{position:absolute;left:-9999px}
+  .legal table.sub tr{padding:12px 0;border-bottom:1px solid var(--line)}
+  .legal table.sub td{padding:2px 0;border:0}
+  .legal table.sub td:last-child{color:var(--muted)}
   .plan h2,.plan h3{font-size:34px}
   .plan .who{min-height:0}
   .price b{font-size:52px}
