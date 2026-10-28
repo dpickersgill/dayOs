@@ -239,7 +239,7 @@ function zoneWarning(x) {
 }
 
 router.get('/tenants', async (_req, res) => {
-  const t = await rows(pool, `SELECT t.id, t.slug, t.name, t.status, t.timezone, t.map_lat, t.map_lng, t.created_at, t.storage_cap_mb, t.platform_notes, t.delete_after,
+  const t = await rows(pool, `SELECT t.id, t.slug, t.name, t.status, t.timezone, t.map_lat, t.map_lng, t.created_at, t.storage_cap_mb, t.platform_notes, t.delete_after, t.delete_due_at, t.data_deleted_at,
       (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id AND u.active = 1) AS users FROM tenants t WHERE t.sandbox_expires_at IS NULL ORDER BY t.name`);
   for (const x of t) { x.zone_warning = zoneWarning(x); delete x.map_lat; delete x.map_lng; }
   const used = await usage(t.map((x) => x.id));
@@ -347,8 +347,9 @@ router.post('/tenants/:id/access/close', async (req, res) => {
 
 router.get('/tenants/:id', async (req, res) => {
   const id = paramId(req);
-  const t = await one(pool, 'SELECT id, slug, name, status, timezone, created_at, storage_cap_mb, platform_notes, closed_at, delete_after FROM tenants WHERE id = ?', [id]);
+  const t = await one(pool, 'SELECT id, slug, name, status, timezone, created_at, storage_cap_mb, platform_notes, closed_at, delete_after, delete_due_at, data_deleted_at FROM tenants WHERE id = ?', [id]);
   if (!t) throw notFound('Mountain');
+  t.legal_holds = Number((await one(pool, 'SELECT COUNT(*) AS n FROM incidents WHERE tenant_id = ? AND legal_hold = 1', [id])).n);
   M.invalidate(id);
   const used = await usage([id]);
   const users = await rows(pool, "SELECT id, email, username, role, active, totp_enabled FROM users WHERE tenant_id = ? AND role IN ('owner','manager') ORDER BY role, email", [id]);
@@ -506,7 +507,9 @@ router.patch('/tenants/:id', needsAccess, validate(partialOf({
   const id = paramId(req);
   const keys = Object.keys(req.body);
   if (!keys.length) throw bad('Nothing to change');
-  const extra = req.body.status === 'active' ? ', closed_at = NULL, delete_after = NULL' : ''; // resuming cancels a pending deletion
+  // Resuming cancels a pending deletion. A mountain whose data was deleted cannot be resumed: only its kept records are left.
+  if (req.body.status === 'active' && (await one(pool, 'SELECT id FROM tenants WHERE id = ? AND data_deleted_at IS NOT NULL', [id]))) throw bad('This mountain\'s data was deleted. It cannot be resumed.');
+  const extra = req.body.status === 'active' ? ', closed_at = NULL, delete_after = NULL, delete_due_at = NULL' : '';
   const [r] = await pool.query(`UPDATE tenants SET ${keys.map((k) => `${k} = ?`).join(', ')}${extra} WHERE id = ?`, [...keys.map((k) => req.body[k]), id]);
   if (!r.affectedRows) throw notFound('Mountain');
   await log(pool, req, id, keys.includes('status') ? req.body.status === 'suspended' ? 'pause' : 'resume' : keys.some((k) => k.startsWith('platform_fee')) ? 'platform_fee' : 'edit', req.body);
@@ -515,8 +518,9 @@ router.patch('/tenants/:id', needsAccess, validate(partialOf({
 });
 
 /**
- * Close a mountain that has left: it is paused straight away, its people can no longer sign in, and everything in it is
- * deleted by the daily job once the export window (days, 60 by default) has passed. Reopening before then cancels it.
+ * Close a mountain that has left: it is paused straight away and its people can no longer sign in. Once the export window
+ * (days, 60 by default) has passed, the daily job marks it due for deletion; an operator then deletes it (below).
+ * Reopening before then cancels it.
  */
 router.post('/tenants/:id/close', needsAccess, validate(z.object({ days: z.number().int().min(7).max(365).default(60), confirm_slug: z.string() })), async (req, res) => {
   const id = paramId(req);
@@ -534,11 +538,36 @@ router.post('/tenants/:id/close', needsAccess, validate(z.object({ days: z.numbe
 });
 router.post('/tenants/:id/reopen', needsAccess, async (req, res) => {
   const id = paramId(req);
-  const [r] = await pool.query("UPDATE tenants SET status = 'active', closed_at = NULL, delete_after = NULL WHERE id = ? AND closed_at IS NOT NULL", [id]);
+  const [r] = await pool.query("UPDATE tenants SET status = 'active', closed_at = NULL, delete_after = NULL, delete_due_at = NULL WHERE id = ? AND closed_at IS NOT NULL AND data_deleted_at IS NULL", [id]);
   if (!r.affectedRows) throw notFound('Closed mountain');
   await log(pool, req, id, 'reopen', {});
   M.invalidate(id);
   res.json({ ok: true });
+});
+
+/**
+ * Delete a closed mountain's data, deliberately, once its export window has passed. The operator types the mountain's
+ * address and writes down how and when the owner got their export (kept in the console's history). Refused while any
+ * patrol case is on legal hold. Patrol reports, signed waivers, the audit trail and (for five years after their year)
+ * the OSHA injury log are kept, with the logins, staff and guests they name; everything else goes, in one transaction.
+ * Running it again later removes OSHA entries whose five years have passed.
+ */
+router.post('/tenants/:id/delete', needsAccess, validate(z.object({ confirm_slug: z.string(), export_note: z.string().trim().min(10, 'Write down how and when the owner got their export').max(500) })), async (req, res) => {
+  const id = paramId(req);
+  const t = await one(pool, 'SELECT id, slug, sandbox_expires_at FROM tenants WHERE id = ?', [id]);
+  if (!t) throw notFound('Mountain');
+  if (t.sandbox_expires_at) throw bad('Demo mountains are removed on their own');
+  if (req.body.confirm_slug !== t.slug) throw bad('Type the mountain\'s address to confirm');
+  const R = require('../lib/retention');
+  let out;
+  try {
+    out = await R.deleteClosed(id, async (conn, done) => {
+      await log(conn, req, id, 'export_recorded', { note: req.body.export_note });
+      await log(conn, req, id, 'deleted_after_close', { slug: t.slug, rows_deleted: done.deleted, kept: done.kept });
+    });
+  } catch (e) { if (e instanceof R.Refused) throw new AppError(409, e.message); throw e; }
+  M.invalidate(id);
+  res.json({ ok: true, ...out });
 });
 
 /** Choose which apps a mountain has. Send { modules: { rentals: false, patrol: true } }; anything left out keeps its setting. */

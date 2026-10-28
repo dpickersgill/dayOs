@@ -373,6 +373,8 @@ const assetSteps = [
 const securitySteps = [
   ['users.login_failures', (c) => columnExists(c, 'users', 'login_failures'), 'ALTER TABLE users ADD COLUMN login_failures SMALLINT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN login_locked_until DATETIME NULL'],
   ['tenants.delete_after', (c) => columnExists(c, 'tenants', 'delete_after'), 'ALTER TABLE tenants ADD COLUMN closed_at DATETIME NULL, ADD COLUMN delete_after DATE NULL'],
+  // A closed mountain is never deleted by the daily job: it is marked due, and an operator deletes it (keeping its records).
+  ['tenants.delete_due_at', (c) => columnExists(c, 'tenants', 'delete_due_at'), 'ALTER TABLE tenants ADD COLUMN delete_due_at DATETIME NULL, ADD COLUMN data_deleted_at DATETIME NULL'],
   // 2026.10.17: how each session was opened (password, two-step, passkey, emailed code or PIN), on which device or
   // terminal, and when the person last proved it was them for a sensitive action.
   ['user_sessions.method', (c) => columnExists(c, 'user_sessions', 'method'), "ALTER TABLE user_sessions ADD COLUMN method VARCHAR(12) NOT NULL DEFAULT 'password', ADD COLUMN device_hash CHAR(64) NULL, ADD COLUMN terminal_id BIGINT UNSIGNED NULL, ADD COLUMN stepped_up_at DATETIME NULL"],

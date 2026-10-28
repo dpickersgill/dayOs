@@ -190,7 +190,7 @@ test('alerts are only sent to the known push services', () => {
   for (const bad of ['http://fcm.googleapis.com/x', 'https://169.254.169.254/computeMetadata', 'https://localhost/x', 'https://fcm.googleapis.com.evil.test/x', 'https://evil.test/notify.windows.com', 'not a url']) assert.equal(pushHostOk(bad), false, bad);
 });
 
-test('closing a mountain signs everyone out now and the daily job deletes it after the window', async () => {
+test('closing a mountain signs everyone out now; the daily job only marks it due, and the operator deletes it keeping its records', async () => {
   const D = await mountain(`sec-d-${suffix}`);
   const plat = (method, path, body) => api(method, `/platform${path}`, { headers: { 'x-platform-key': KEY }, body });
   assert.equal((await plat('POST', `/tenants/${D.id}/close`, { days: 30, confirm_slug: 'wrong' })).status, 400, 'the address must be typed');
@@ -202,23 +202,62 @@ test('closing a mountain signs everyone out now and the daily job deletes it aft
   const listed = (await plat('GET', '/tenants')).body.data.find((t) => t.id === D.id);
   assert.ok(listed.delete_after && listed.status === 'suspended');
 
-  // Reopening cancels it; closing again and letting the window pass deletes everything but the console's history.
+  // Reopening cancels it.
   assert.equal((await plat('POST', `/tenants/${D.id}/reopen`)).status, 200);
   assert.equal((await pool.query('SELECT delete_after FROM tenants WHERE id = ?', [D.id]))[0][0].delete_after, null);
   assert.equal((await plat('POST', `/tenants/${D.id}/close`, { days: 7, confirm_slug: D.slug })).status, 200);
-  const R = require('../src/lib/retention');
-  await R.runAll();
-  assert.equal((await pool.query('SELECT COUNT(*) AS n FROM tenants WHERE id = ?', [D.id]))[0][0].n, 1, 'not before the window ends');
+  assert.equal((await plat('POST', `/tenants/${D.id}/delete`, { confirm_slug: D.slug, export_note: 'Owner downloaded everything on 10/1' })).status, 409, 'not before the export window ends');
+
+  // Its records: a patrol case on legal hold, its audit trail, a signed waiver, and two years of the OSHA log.
+  const [inc] = await pool.query("INSERT INTO incidents (tenant_id, occurred_at, location, category, summary, legal_hold, legal_hold_note) VALUES (?, '2026-02-01 10:00', 'Ridge', 'injury', 'Knee', 1, 'Attorney letter')", [D.id]);
+  await pool.query("INSERT INTO audit_log (tenant_id, action, entity, entity_id) VALUES (?, 'view', 'incidents', ?)", [D.id, inc.insertId]);
+  const [per] = await pool.query("INSERT INTO people (tenant_id, first_name, last_name) VALUES (?, 'Wanda', 'Waiver'), (?, 'Gus', 'Guest')", [D.id, D.id]);
+  await pool.query("INSERT INTO waivers (tenant_id, person_id, season) VALUES (?, ?, '2025-26')", [D.id, per.insertId]);
+  const year = new Date().getFullYear();
+  await pool.query("INSERT INTO staff_injuries (tenant_id, year, seq, employee_name, occurred_at) VALUES (?, ?, 1, 'Old Case', ?), (?, ?, 1, 'Recent Case', ?)", [D.id, year - 6, `${year - 6}-01-10`, D.id, year - 5, `${year - 5}-01-10`]);
+
+  // The window passes: the daily job marks it due and tells the operator, but deletes nothing.
   await pool.query('UPDATE tenants SET delete_after = DATE_SUB(CURDATE(), INTERVAL 1 DAY) WHERE id = ?', [D.id]);
+  const R = require('../src/lib/retention');
   const out = await R.runAll();
-  assert.ok(out.mountains >= 1);
-  assert.equal((await pool.query('SELECT COUNT(*) AS n FROM tenants WHERE id = ?', [D.id]))[0][0].n, 0);
-  assert.equal((await pool.query('SELECT COUNT(*) AS n FROM users WHERE tenant_id = ?', [D.id]))[0][0].n, 0);
-  assert.equal((await pool.query('SELECT COUNT(*) AS n FROM user_sessions WHERE tenant_id = ?', [D.id]))[0][0].n, 0);
-  assert.ok((await pool.query("SELECT COUNT(*) AS n FROM platform_audit WHERE tenant_id = ? AND action IN ('close', 'deleted_after_close')", [D.id]))[0][0].n >= 2);
+  assert.ok(out.due_for_deletion >= 1);
+  assert.equal((await R.runAll()).due_for_deletion, 0, 'marked once');
+  assert.equal((await pool.query('SELECT COUNT(*) AS n FROM users WHERE tenant_id = ?', [D.id]))[0][0].n, 1, 'nothing deleted by the job');
+  assert.ok((await pool.query('SELECT delete_due_at FROM tenants WHERE id = ?', [D.id]))[0][0].delete_due_at);
+  assert.equal((await pool.query("SELECT COUNT(*) AS n FROM platform_audit WHERE tenant_id = ? AND action = 'due_for_deletion'", [D.id]))[0][0].n, 1);
+  assert.equal((await plat('GET', '/tenants')).body.data.find((t) => t.id === D.id).delete_due_at !== null, true, 'the console lists it as due');
+
+  // The operator's delete: refused on legal hold, needs the address and a note of the export.
+  const held = await plat('POST', `/tenants/${D.id}/delete`, { confirm_slug: D.slug, export_note: 'Owner downloaded everything on 10/1' });
+  assert.equal(held.status, 409);
+  assert.match(held.body.error, /legal hold/);
+  assert.equal((await pool.query('SELECT COUNT(*) AS n FROM users WHERE tenant_id = ?', [D.id]))[0][0].n, 1, 'and nothing went');
+  await pool.query('UPDATE incidents SET legal_hold = 0 WHERE id = ?', [inc.insertId]);
+  assert.equal((await plat('POST', `/tenants/${D.id}/delete`, { confirm_slug: 'wrong', export_note: 'Owner downloaded everything on 10/1' })).status, 400);
+  assert.equal((await plat('POST', `/tenants/${D.id}/delete`, { confirm_slug: D.slug })).status, 400, 'the export must be recorded');
+  const del = await plat('POST', `/tenants/${D.id}/delete`, { confirm_slug: D.slug, export_note: 'Owner downloaded everything on 10/1' });
+  assert.equal(del.status, 200, JSON.stringify(del.body));
+  const n = async (sql) => Number((await pool.query(sql, [D.id]))[0][0].n);
+  assert.equal(await n('SELECT COUNT(*) AS n FROM tenants WHERE id = ?'), 1, 'the mountain row stays, holding its records');
+  assert.equal(await n('SELECT COUNT(*) AS n FROM incidents WHERE tenant_id = ?'), 1, 'patrol reports kept');
+  assert.equal(await n('SELECT COUNT(*) AS n FROM audit_log WHERE tenant_id = ?') >= 1, true, 'audit trail kept');
+  assert.equal(await n('SELECT COUNT(*) AS n FROM waivers WHERE tenant_id = ?'), 1, 'signed waivers kept');
+  assert.equal(await n("SELECT COUNT(*) AS n FROM people WHERE tenant_id = ? AND first_name = 'Wanda'"), 1, 'with the person who signed');
+  assert.equal(await n("SELECT COUNT(*) AS n FROM people WHERE tenant_id = ? AND first_name = 'Gus'"), 0, 'other guests go');
+  assert.equal(await n("SELECT COUNT(*) AS n FROM staff_injuries WHERE tenant_id = ? AND employee_name = 'Recent Case'"), 1, 'OSHA log kept five years after its year');
+  assert.equal(await n("SELECT COUNT(*) AS n FROM staff_injuries WHERE tenant_id = ? AND employee_name = 'Old Case'"), 0, 'and deleted after that');
+  assert.equal(await n('SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND active = 1'), 0, 'logins kept for the names on the records, switched off');
+  assert.equal(await n('SELECT COUNT(*) AS n FROM user_sessions WHERE tenant_id = ?'), 0);
+  assert.equal(await n('SELECT COUNT(*) AS n FROM tenant_modules WHERE tenant_id = ?'), 0, 'everything else goes');
+  assert.ok(await n("SELECT COUNT(*) AS n FROM platform_audit WHERE tenant_id = ? AND action IN ('close', 'due_for_deletion', 'export_recorded', 'deleted_after_close')") >= 4);
+  assert.equal((await plat('POST', `/tenants/${D.id}/reopen`)).status, 404, 'a deleted mountain cannot be reopened');
+  assert.equal((await plat('PATCH', `/tenants/${D.id}`, { status: 'active' })).status, 400, 'or resumed');
+
   // An active mountain is never touched, even with a date set by mistake.
   await pool.query('UPDATE tenants SET delete_after = DATE_SUB(CURDATE(), INTERVAL 1 DAY) WHERE id = ?', [A.id]);
   await R.runAll();
+  assert.equal((await pool.query('SELECT delete_due_at FROM tenants WHERE id = ?', [A.id]))[0][0].delete_due_at, null);
+  assert.equal((await plat('POST', `/tenants/${A.id}/delete`, { confirm_slug: A.slug, export_note: 'Owner downloaded everything on 10/1' })).status, 409);
   assert.equal((await pool.query('SELECT COUNT(*) AS n FROM tenants WHERE id = ?', [A.id]))[0][0].n, 1);
   await pool.query('UPDATE tenants SET delete_after = NULL WHERE id = ?', [A.id]);
 });

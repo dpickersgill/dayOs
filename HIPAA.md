@@ -38,6 +38,18 @@ checks the rows are identical before and after). Pulling is logged.
 5. **Breach plan.** Know who you tell, and how fast, if patient information is exposed.
 6. **Retention.** HIPAA documentation (including the audit log) is generally kept six years; medical-record retention is set by
    your state. The app never deletes either on its own. Decide your schedule.
+
+   **When a mountain leaves.** Closing a mountain pauses it and signs everyone out. After its export window (60 days unless
+   set otherwise) the daily job only marks it due for deletion and notes that in the operator console; it never deletes a
+   real mountain. An operator then deletes it by hand, typing the mountain's address and writing down how and when the owner
+   got their export (kept in the console's history). The delete is refused while any patrol case is on legal hold, and it runs
+   in one transaction, so it either finishes or changes nothing. It keeps: every patrol report and everything filed with it
+   (patients, care, statements, photos, signatures, frozen versions, records requests and claim links), signed waivers and the
+   wording signed, the audit log, and the OSHA injury log until five years after the end of its year (a later run removes
+   entries past that). The logins, staff and guests those records name are kept too; the logins are switched off and their
+   passwords, two-step and passkeys removed. Everything else is deleted. Patrol reports, waivers and the audit log are never
+   deleted by the app; removing them later is a decision for the mountain and its lawyer. Demo mountains hold only made-up
+   data and are removed whole when they end.
 7. **Backups and recovery.** Cloud SQL backups are on; test a restore. Keep backups under the same BAA.
 8. **Devices.** Phones and Chromebooks that open patient reports need screen locks and, ideally, device management.
 9. **People.** Remove a patroller's login the day they leave. Give the owner and manager logins only to people who need them.

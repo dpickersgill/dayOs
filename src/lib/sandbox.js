@@ -20,11 +20,11 @@ async function activeCount() {
 }
 
 /**
- * Removes one mountain and everything in it. Only a demo, or (closed: true) a real mountain the operator closed whose
- * export window has passed (tenants.delete_after, status paused). Refuses anything else.
+ * Removes one demo mountain and everything in it (its data is made up). Refuses anything else: a real mountain that has
+ * closed is never removed this way, only by an operator through retention.deleteClosed, which keeps its records.
  */
-async function purgeTenant(id, { closed = false } = {}) {
-  const which = closed ? "status = 'suspended' AND delete_after IS NOT NULL AND delete_after <= CURDATE() AND sandbox_expires_at IS NULL" : 'sandbox_expires_at IS NOT NULL';
+async function purgeTenant(id) {
+  const which = 'sandbox_expires_at IS NOT NULL';
   // Write down the last of the demo's usage before its data goes; the Demos dashboard keeps showing it.
   await require('./demousage').flush();
   await pool.query(`UPDATE sandbox_signups s SET ended_at = UTC_TIMESTAMP()
@@ -41,7 +41,7 @@ async function purgeTenant(id, { closed = false } = {}) {
     try {
       await conn.query('DELETE FROM user_recovery_codes WHERE user_id IN (SELECT id FROM users WHERE tenant_id = ?)', [id]);
       for (const { t: name } of tables) await conn.query('DELETE FROM `' + String(name).replace(/`/g, '') + '` WHERE tenant_id = ?', [id]);
-      if (!closed) await conn.query('DELETE FROM platform_audit WHERE tenant_id = ?', [id]); // a real mountain's console history is kept
+      await conn.query('DELETE FROM platform_audit WHERE tenant_id = ?', [id]);
       await conn.query(`DELETE FROM tenants WHERE id = ? AND ${which}`, [id]);
     } finally {
       await conn.query('SET FOREIGN_KEY_CHECKS = 1');

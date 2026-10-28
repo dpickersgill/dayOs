@@ -152,7 +152,7 @@ async function home() {
       if (!data.length) { body.append(empty('No mountain matches that.')); return; }
       body.append(table([
       { head: 'Mountain', cell: (t) => h('span', null, h('b', null, t.name), h('span', { class: 'muted' }, ` ${t.slug}`)) },
-      { head: 'Status', cell: (t) => t.status === 'active' ? badge('Active', 'ok') : t.delete_after ? badge(`Closed, deleted ${String(t.delete_after).slice(0, 10)}`, 'bad') : badge('Paused', 'warn') },
+      { head: 'Status', cell: (t) => t.status === 'active' ? badge('Active', 'ok') : t.data_deleted_at ? badge('Deleted, records kept', 'bad') : t.delete_due_at ? badge('Closed, due for deletion', 'bad') : t.delete_after ? badge(`Closed, export until ${String(t.delete_after).slice(0, 10)}`, 'bad') : badge('Paused', 'warn') },
       { head: 'Billing', cell: (t) => billBadge(t.billing) },
       { head: 'Apps', cell: (t) => `${t.modules.length} of ${apps.length} on` },
       { head: 'Logins', num: true, cell: (t) => String(t.users) },
@@ -213,11 +213,12 @@ async function manage(id) {
   };
   drawAccess();
   const dlg = dialog(t.name, h('div', { class: 'stack' }, access,
-    h('p', { class: 'muted' }, `${t.slug}. Added ${String(t.created_at).slice(0, 10)}. ${t.delete_after ? `Closed: everything in it is deleted on ${String(t.delete_after).slice(0, 10)}. Resume it before then to keep it.` : paused ? 'Paused: nobody can sign in and public pages are off.' : 'Active.'}`),
+    h('p', { class: 'muted' }, `${t.slug}. Added ${String(t.created_at).slice(0, 10)}. ${closedText(t, paused)}`),
     h('div', { class: 'row' },
-      button(paused ? 'Resume mountain' : 'Pause mountain', () => confirmDialog(paused ? 'Resume this mountain?' : 'Pause this mountain?', paused ? 'People can sign in again.' : 'Everyone is signed out and its public pages stop working. Nothing is deleted.', paused ? 'Resume' : 'Pause', async () => { await call('PATCH', `/tenants/${id}`, { status: paused ? 'active' : 'suspended' }); dlg.close(); home(); manage(id); }, { danger: !paused })),
+      t.data_deleted_at ? null : button(paused ? 'Resume mountain' : 'Pause mountain', () => confirmDialog(paused ? 'Resume this mountain?' : 'Pause this mountain?', paused ? 'People can sign in again.' : 'Everyone is signed out and its public pages stop working. Nothing is deleted.', paused ? 'Resume' : 'Pause', async () => { await call('PATCH', `/tenants/${id}`, { status: paused ? 'active' : 'suspended' }); dlg.close(); home(); manage(id); }, { danger: !paused })),
       button('Rename or set storage', () => editBasics(t, () => { dlg.close(); home(); manage(id); }), { small: true }),
-      t.delete_after ? null : button('Close mountain', () => closeMountain(t, () => { dlg.close(); home(); manage(id); }), { small: true })),
+      t.delete_after ? null : button('Close mountain', () => closeMountain(t, () => { dlg.close(); home(); manage(id); }), { small: true }),
+      t.delete_due_at || t.data_deleted_at ? button(t.data_deleted_at ? 'Run deletion again' : 'Delete its data', () => deleteMountain(t, () => { dlg.close(); home(); manage(id); }), { small: true }) : null),
     h('h3', null, 'Billing'), billingPanel(t, () => { dlg.close(); home(); manage(id); }),
     h('h3', null, 'Guest card payments'), cardPanel(t, () => { dlg.close(); home(); manage(id); }),
     h('h3', null, 'Apps'), h('p', { class: 'hint' }, 'Changes apply within a few seconds. Turning an app off hides it and refuses its requests; its data is kept.'), list,
@@ -227,15 +228,36 @@ async function manage(id) {
     t.history.length ? h('div', { class: 'stack tight' }, h('h3', null, 'Recent changes'), ...t.history.slice(0, 8).map((x) => h('p', { class: 'small muted' }, `${String(x.at).replace('T', ' ').slice(0, 16)}  ${x.action}  ${x.detail || ''}`))) : null), { wide: true });
 }
 
-// A mountain that has left: paused now, deleted for good once its export window passes.
+const KEPT = 'Patrol reports, signed waivers, the audit trail and the OSHA injury log (five years after its year) are kept, with the logins, staff and guests they name.';
+function closedText(t, paused) {
+  const day = (d) => String(d).slice(0, 10);
+  if (t.data_deleted_at) return `Its data was deleted on ${day(t.data_deleted_at)}. ${KEPT}`;
+  if (t.delete_due_at) return `Closed, and due for deletion since ${day(t.delete_due_at)}. Nothing is deleted until you delete it here.${t.legal_holds ? ` ${t.legal_holds} patrol case${t.legal_holds === 1 ? ' is' : 's are'} on legal hold, so it cannot be deleted yet.` : ''}`;
+  if (t.delete_after) return `Closed: the owner has until ${day(t.delete_after)} to export. Then it is due for deletion, and you delete it here. Resume it before then to keep it.`;
+  return paused ? 'Paused: nobody can sign in and public pages are off.' : 'Active.';
+}
+
+// A mountain that has left: paused now, due for deletion once its export window passes.
 function closeMountain(t, done) {
   const days = input({ name: 'days', type: 'number', min: 7, max: 365, value: 60 });
   const slug = input({ name: 'slug', required: true, autocomplete: 'off' });
   formDialog(`Close ${t.name}`, h('div', { class: 'stack' },
-    h('p', null, 'Everyone is signed out and the mountain is paused now. After the number of days below, everything in it is deleted for good: people, sales, patrol records and files. Give the owner time to export first.'),
-    field('Delete after (days)', days), field(`Type ${t.slug} to confirm`, slug)), async () => {
+    h('p', null, `Everyone is signed out and the mountain is paused now. After the number of days below it is due for deletion, and you delete it from here once the owner has their export. ${KEPT}`),
+    field('Export window (days)', days), field(`Type ${t.slug} to confirm`, slug)), async () => {
     const out = await call('POST', `/tenants/${t.id}/close`, { days: Number(days.value), confirm_slug: slug.value.trim() });
-    toast(`Closed. Deleted on ${String(out.delete_after).slice(0, 10)} unless resumed.`); done();
+    toast(`Closed. Due for deletion on ${String(out.delete_after).slice(0, 10)} unless resumed.`); done();
+  });
+}
+
+// Deleting a closed mountain's data: deliberate, after the export, refused while a case is on legal hold.
+function deleteMountain(t, done) {
+  const note = input({ name: 'export_note', required: true, maxlength: 500, autocomplete: 'off' });
+  const slug = input({ name: 'slug', required: true, autocomplete: 'off' });
+  formDialog(`Delete ${t.name}'s data`, h('div', { class: 'stack' },
+    h('p', null, `Everything else in it is deleted for good: people, sales, schedules and files. ${KEPT} This cannot be undone.`),
+    field('How and when the owner got their export', note, 'Kept in this mountain\'s history.'), field(`Type ${t.slug} to confirm`, slug)), async () => {
+    const out = await call('POST', `/tenants/${t.id}/delete`, { confirm_slug: slug.value.trim(), export_note: note.value.trim() });
+    toast(`Deleted ${out.deleted} rows. Records kept.`); done();
   });
 }
 
