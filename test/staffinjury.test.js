@@ -32,8 +32,9 @@ const owner = `owner@${slug}.test`;
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
 const T = {};
 
+const DEVICE = 'test-device-0123456789abcdef'; // the app always says which device signs in; leaving it out asks for an emailed code
 async function api(method, path, { token, body } = {}) {
-  const res = await fetch(`${base}/api/v1${path}`, { method, headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const res = await fetch(`${base}/api/v1${path}`, { method, headers: { 'x-device': DEVICE,  ...(token ? { authorization: `Bearer ${token}` } : {}), ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
   const text = await res.text();
   let json; try { json = JSON.parse(text); } catch (_) { json = text; }
   return { status: res.status, body: json };

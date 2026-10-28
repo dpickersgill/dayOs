@@ -92,6 +92,7 @@ async function refuseWeakFor(u, pw) {
 // they are. A passkey or two-step sign-in, or a password from someone with neither, counts as the second check for
 // sensitive actions for the next few minutes, so nobody is asked twice straight after signing in.
 async function finishSignIn(user, req, res, { method, extra = {} }) {
+  if (user.codes_blocked_at) await cleared(user.id); // a full sign-in turns signing in with an emailed code back on (see claimCode)
   const deviceHash = devices.hashOf(req);
   await devices.remember(user, req, deviceHash, { method });
   const strong = Number(user.totp_enabled) || (await passkeys.count('user', user.id)) > 0;
@@ -121,30 +122,30 @@ router.post(
     const who = String(req.body.login || req.body.email).trim();
     const byEmail = who.includes('@');
     const user = await one(pool, `${USER_SQL} WHERE t.slug = ? AND ${byEmail ? 'u.email' : 'u.username'} = ? AND u.active = 1`, [tenant, byEmail ? who : UN.normalize(who)]);
+    if (!user) { await bcrypt.compare(pw, DUMMY_HASH); throw unauthorized('Invalid credentials'); }
     // A login is locked for 15 minutes after 10 wrong passwords in a row, whatever address they come from (so guessing
-    // from many machines is slowed too). The answer stays "Invalid credentials", so it does not reveal which logins exist.
-    if (user && user.login_locked_until && new Date(`${String(user.login_locked_until).replace(' ', 'T')}Z`) > new Date()) {
+    // from many machines is slowed too). Each try is counted before the password is checked (see claimTry), so guesses
+    // sent all at once still get only 10 checks. A wrong password answers "Invalid credentials", like an unknown login.
+    const tries = await claimTry('login', user.id);
+    if (!tries) {
       await bcrypt.compare(pw, DUMMY_HASH);
       throw new AppError(429, 'Too many wrong passwords for this login. Wait 15 minutes, or ask your manager to reset it.');
     }
-    const valid = await bcrypt.compare(pw, user ? user.password_hash : DUMMY_HASH);
-    if (user && !valid) {
-      // MySQL applies SET left to right, so login_failures below is already the new count.
-      await pool.query(`UPDATE users SET login_failures = login_failures + 1,
-        login_locked_until = IF(login_failures >= ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 15 MINUTE), login_locked_until) WHERE id = ?`, [LOGIN_LOCK_AFTER, user.id]);
-      if (Number(user.login_failures) + 1 >= LOGIN_LOCK_AFTER) {
+    if (!(await bcrypt.compare(pw, user.password_hash))) {
+      if (tries === LOGIN_LOCK_AFTER) {
         await pool.query("INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id, detail) VALUES (?, NULL, 'login_locked', 'users', ?, ?)", [user.tenant_id, user.id, JSON.stringify({ after: LOGIN_LOCK_AFTER })]).catch(() => {});
       }
+      throw unauthorized('Invalid credentials');
     }
-    if (!user || !valid) throw unauthorized('Invalid credentials');
-    if (Number(user.login_failures) || user.login_locked_until) await pool.query('UPDATE users SET login_failures = 0, login_locked_until = NULL WHERE id = ?', [user.id]);
+    await pool.query('UPDATE users SET login_failures = 0, login_locked_until = NULL WHERE id = ?', [user.id]);
     refuseClosed(user);
     const keys = await passkeys.count('user', user.id);
     if (user.totp_enabled || keys) {
       // Password right; the second step is still to do. This token cannot be used for anything else.
       return res.json({ mfa_required: true, mfa_token: halfToken(user), methods: { app: Boolean(user.totp_enabled), passkey: keys > 0 } });
     }
-    // No second step of their own: on a device they have not used before, a code goes to their email first.
+    // No second step of their own: on a device they have not used before, a code goes to their email first. A sign-in that
+    // does not say which device it is (no x-device header; the app always sends one) counts as a new device.
     const deviceHash = devices.hashOf(req);
     if (user.email && !Number(user.sandbox) && mailer.enabled() && await devices.isNew(user, deviceHash)) {
       const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
@@ -158,15 +159,57 @@ router.post(
   },
 );
 
-// Wrong second-step codes are counted per login in the database, so guessing a six-digit code is not practical even from
-// many addresses or across several servers: 5 wrong codes lock that login's second step for 5 minutes.
-const LOCK_AFTER = 5;
-const LOGIN_LOCK_AFTER = Number(process.env.LOGIN_LOCK_AFTER || 10);
-const lockedOut = (u) => u.mfa_failures >= LOCK_AFTER && u.mfa_locked_until && new Date(`${String(u.mfa_locked_until).replace(' ', 'T')}Z`) > new Date();
-const failed = (id) => pool.query(
-  `UPDATE users SET mfa_failures = IF(mfa_locked_until IS NOT NULL AND mfa_locked_until < UTC_TIMESTAMP(), 1, mfa_failures + 1),
-     mfa_locked_until = DATE_ADD(UTC_TIMESTAMP(), INTERVAL 5 MINUTE) WHERE id = ?`, [id]);
-const cleared = (id) => pool.query('UPDATE users SET mfa_failures = 0, mfa_locked_until = NULL WHERE id = ?', [id]);
+// Wrong passwords, PINs and codes are counted per login in the database, so guessing is slow even from many addresses or
+// across several servers. Each try is counted BEFORE it is checked, by one UPDATE that only succeeds while the login is
+// not locked: reading the count, checking, then adding one let a burst of guesses sent at the same moment all read "not
+// locked" (61 guesses got 61 checks against a limit of 10). The try that reaches the limit sets the lock; a right answer
+// clears the count. Returns the try's number, or 0 when the login is locked (the caller answers 429).
+// The per-address limits in app.js are per server; these per-login counts are what holds across servers.
+const LOCK_AFTER = 5; // wrong codes in a row, then 5 minutes
+const LOGIN_LOCK_AFTER = Number(process.env.LOGIN_LOCK_AFTER || 10); // wrong passwords in a row, then 15 minutes
+const PIN_LOCK_AFTER = 5; // wrong PINs in a row, then 15 minutes
+const CODE_DAY_CAP = 50; // wrong codes in a day, then signing in with an emailed code stops for that login (see claimCode)
+const COUNTERS = {
+  login: ['login_failures', 'login_locked_until', () => LOGIN_LOCK_AFTER, 15],
+  pin: ['pin_failures', 'pin_locked_until', () => PIN_LOCK_AFTER, 15],
+};
+async function claimTry(kind, id) {
+  const [count, until, limit, minutes] = COUNTERS[kind];
+  // A lock that has run out starts the count again at 1. MySQL applies SET left to right, so the second line sees the new count.
+  const [r] = await pool.query(`UPDATE users SET ${count} = LAST_INSERT_ID(IF(${until} IS NOT NULL, 1, ${count} + 1)),
+      ${until} = IF(${count} >= ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? MINUTE), NULL)
+    WHERE id = ? AND (${until} IS NULL OR ${until} < UTC_TIMESTAMP())`, [limit(), minutes, id]);
+  return r.affectedRows === 1 ? Number(r.insertId) : 0;
+}
+// Codes (app codes, recovery codes and emailed codes) the same way: 5 wrong in a row lock them for 5 minutes. They also
+// count toward a day's total. Signing in with an emailed code needs only the mountain and a username, so at 5 tries every
+// few minutes a six-digit code could be worn down all day (about 1,440 tries a day). The 50th wrong code within 24 hours
+// therefore stops signing in (or resetting the password) with an emailed code for that login, until a full sign-in by
+// another way: the password and its second step (app code, or the code emailed for a new device), a passkey, or a
+// password alone on a device used before; or until a manager (or the operator, for an owner) sets a new password or
+// resets two-step. Second-step codes are not stopped, so someone who guesses at the emailed code cannot lock a person
+// out; they already need the right password, and keep the 5-in-a-row lock. signIn: this code stands in for the password.
+// Returns the day's count for this try.
+const CODES_STOPPED = 'Too many wrong codes for this login today, so signing in with an emailed code is stopped. Sign in with your password or a passkey, or ask your manager to set a new password for you.';
+async function claimCode(id, wait, { signIn = false } = {}) {
+  const [r] = await pool.query(`UPDATE users SET mfa_failures = IF(mfa_locked_until IS NOT NULL, 1, mfa_failures + 1),
+      mfa_locked_until = IF(mfa_failures >= ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 5 MINUTE), NULL),
+      code_day_failures = LAST_INSERT_ID(IF(code_day_from IS NULL OR code_day_from < UTC_TIMESTAMP() - INTERVAL 1 DAY, 1, code_day_failures + 1)),
+      code_day_from = IF(code_day_from IS NULL OR code_day_from < UTC_TIMESTAMP() - INTERVAL 1 DAY, UTC_TIMESTAMP(), code_day_from),
+      codes_blocked_at = IF(code_day_failures >= ?, COALESCE(codes_blocked_at, UTC_TIMESTAMP()), codes_blocked_at)
+    WHERE id = ? ${signIn ? 'AND codes_blocked_at IS NULL' : ''} AND (mfa_locked_until IS NULL OR mfa_locked_until < UTC_TIMESTAMP())`, [LOCK_AFTER, CODE_DAY_CAP, id]);
+  if (r.affectedRows === 1) return Number(r.insertId);
+  const u = await one(pool, 'SELECT codes_blocked_at FROM users WHERE id = ?', [id]);
+  throw new AppError(429, signIn && u && u.codes_blocked_at ? CODES_STOPPED : `Too many wrong codes. ${wait}`);
+}
+/** After a wrong code: the one that stopped codes for the day is written to the audit log. */
+async function wrongCode(user, dayCount) {
+  if (dayCount !== CODE_DAY_CAP) return;
+  await pool.query("INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id, detail) VALUES (?, NULL, 'codes_stopped', 'users', ?, ?)", [user.tenant_id, user.id, JSON.stringify({ after: CODE_DAY_CAP })]).catch(() => {});
+}
+// A right code, a passkey or a reset clears every code count and turns emailed-code sign-in back on.
+const CLEAR_CODES = 'mfa_failures = 0, mfa_locked_until = NULL, code_day_failures = 0, code_day_from = NULL, codes_blocked_at = NULL';
+const cleared = (id) => pool.query(`UPDATE users SET ${CLEAR_CODES} WHERE id = ?`, [id]);
 
 /** Checks a six-digit app code or a recovery code for this user. Returns true when accepted (and marks it used). */
 async function checkSecondStep(conn, user, code) {
@@ -195,7 +238,7 @@ async function halfSignedIn(token) {
 // The second step: a code from the app (or a recovery code), a passkey, or the code emailed for a new device.
 router.post('/auth/mfa', validate(z.object({ mfa_token: z.string().min(10).max(2000), code: z.string().min(6).max(20).optional(), handle: z.string().max(100).optional(), response: z.any().optional() })), async (req, res) => {
   const { user, payload } = await halfSignedIn(req.body.mfa_token);
-  if (lockedOut(user)) throw new AppError(429, 'Too many wrong codes. Wait a few minutes and sign in again.');
+  // A passkey cannot be guessed, so it works even while codes are locked (and turns them back on).
   if (req.body.response) {
     await passkeys.authenticate(req, { kind: 'user', purpose: 'second', handle: req.body.handle, response: req.body.response, ownerId: user.id });
     await cleared(user.id);
@@ -205,14 +248,17 @@ router.post('/auth/mfa', validate(z.object({ mfa_token: z.string().min(10).max(2
   if (payload.via === 'email') {
     const ch = await challenges.peek('email_code', payload.h);
     if (!ch || Number(ch.user_id) !== user.id) throw unauthorized('That code has run out. Sign in again for a new one.');
-    if (ch.challenge !== challenges.hash(`${user.id}:${String(req.body.code).trim()}`)) { await challenges.wrongTry(payload.h); await failed(user.id); throw unauthorized('That code is not right'); }
+    const day = await claimCode(user.id, 'Wait a few minutes and sign in again.');
+    if (!(await challenges.claimTry(payload.h))) throw unauthorized('That code has run out. Sign in again for a new one.');
+    if (ch.challenge !== challenges.hash(`${user.id}:${String(req.body.code).trim()}`)) { await wrongCode(user, day); throw unauthorized('That code is not right'); }
     await challenges.spend(payload.h);
     await cleared(user.id);
     return finishSignIn(user, req, res, { method: 'email' });
   }
   if (!user.totp_enabled) throw unauthorized('Use your passkey to finish signing in');
+  const day = await claimCode(user.id, 'Wait a few minutes and sign in again.');
   const how = await checkSecondStep(pool, user, req.body.code);
-  if (!how) { await failed(user.id); throw unauthorized('That code is not right'); }
+  if (!how) { await wrongCode(user, day); throw unauthorized('That code is not right'); }
   await cleared(user.id);
   let left;
   if (how === 'recovery') {
@@ -289,12 +335,15 @@ async function emailCodeUser(purpose, { request, code, link }, beforeSpend) {
   if (!ch) throw unauthorized(RUN_OUT);
   const user = await one(pool, `${USER_SQL} WHERE u.id = ? AND u.tenant_id = ? AND u.active = 1`, [ch.user_id, ch.tenant_id]);
   if (!user) throw unauthorized(RUN_OUT);
-  if (lockedOut(user)) throw new AppError(429, 'Too many wrong codes. Wait a few minutes and ask for a new one.');
-  if (ch.challenge !== challenges.hash(`${user.id}:${given}`)) { await challenges.wrongTry(handle); await failed(user.id); throw unauthorized(RUN_OUT); }
+  const day = await claimCode(user.id, 'Wait a few minutes and ask for a new one.', { signIn: true });
+  if (!(await challenges.claimTry(handle))) throw unauthorized(RUN_OUT); // 5 tries per code, counted before checking too
+  if (ch.challenge !== challenges.hash(`${user.id}:${given}`)) { await wrongCode(user, day); throw unauthorized(RUN_OUT); }
   refuseClosed(user);
-  if (beforeSpend) await beforeSpend(user); // a new password that is refused leaves the code usable
-  await challenges.spend(handle);
   await cleared(user.id);
+  if (beforeSpend) { // a new password that is refused leaves the code usable, with its try given back
+    try { await beforeSpend(user); } catch (e) { await challenges.giveBackTry(handle); throw e; }
+  }
+  await challenges.spend(handle);
   return user;
 }
 
@@ -327,10 +376,8 @@ router.post('/auth/password-reset', validate(z.object({ request: z.string().max(
 
 // ---------------------------------------------------------------- shared terminals: switching in with a PIN
 // A computer a manager enrolled (ticket window, rental counter) holds a terminal key. Counter, instructor and lift staff
-// switch in there with their username and a personal PIN. Five wrong PINs lock that person's PIN for 15 minutes.
-// Anyone who must use two-step sign-in (managers, patrol) signs in properly instead.
-const PIN_LOCK_AFTER = 5;
-const pinLocked = (u) => u.pin_locked_until && new Date(`${String(u.pin_locked_until).replace(' ', 'T')}Z`) > new Date();
+// switch in there with their username and a personal PIN. Five wrong PINs lock that person's PIN for 15 minutes (each
+// try counted before it is checked; see claimTry). Anyone who must use two-step sign-in (managers, patrol) signs in properly instead.
 async function terminalOf(tenantId, secret) {
   if (!secret || String(secret).length < 20) return null;
   return one(pool, 'SELECT id, name FROM terminals WHERE tenant_id = ? AND secret_hash = ? AND revoked_at IS NULL', [tenantId, challenges.hash(`terminal:${secret}`)]);
@@ -355,13 +402,9 @@ router.post('/auth/pin-login', validate(z.object({ tenant: slug, terminal: z.str
     FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE u.tenant_id = ? AND ${byEmail ? 'u.email' : 'u.username'} = ? AND u.active = 1`, [t.id, byEmail ? who : UN.normalize(who)]);
   const NO = 'That username and PIN do not match';
   if (!user || !user.pin_hash) { await bcrypt.compare(req.body.pin, DUMMY_HASH); throw unauthorized(user ? 'Set a PIN first: sign in with your password, then open Account.' : NO); }
-  if (pinLocked(user)) throw new AppError(429, 'Too many wrong PINs. Wait 15 minutes or sign in with your password.');
   if (!CREW_ROLES.includes(user.role) || mfaRequired(user)) throw forbidden('PINs are for counter, lift and instructor staff. Sign in with your password instead.');
-  if (!(await bcrypt.compare(req.body.pin, user.pin_hash))) {
-    await pool.query(`UPDATE users SET pin_failures = pin_failures + 1,
-      pin_locked_until = IF(pin_failures >= ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 15 MINUTE), pin_locked_until) WHERE id = ?`, [PIN_LOCK_AFTER, user.id]);
-    throw unauthorized(NO);
-  }
+  if (!(await claimTry('pin', user.id))) { await bcrypt.compare(req.body.pin, DUMMY_HASH); throw new AppError(429, 'Too many wrong PINs. Wait 15 minutes or sign in with your password.'); }
+  if (!(await bcrypt.compare(req.body.pin, user.pin_hash))) throw unauthorized(NO);
   await pool.query('UPDATE users SET pin_failures = 0, pin_locked_until = NULL WHERE id = ?', [user.id]);
   refuseClosed(user);
   await pool.query('UPDATE terminals SET last_seen = UTC_TIMESTAMP() WHERE id = ?', [term.id]);
@@ -627,7 +670,7 @@ router.post('/users/:id/reset-password', authenticate, adminOnly, stepUp('set a 
   const target = await loadTarget(req);
   await refuseWeakFor(await one(pool, 'SELECT tenant_id, username, email FROM users WHERE id = ?', [target.id]), req.body.new_password);
   const now = Math.floor(Date.now() / 1000);
-  await pool.query('UPDATE users SET password_hash = ?, password_changed_at = FROM_UNIXTIME(?), must_change_password = ?, login_failures = 0, login_locked_until = NULL WHERE tenant_id = ? AND id = ?', [
+  await pool.query(`UPDATE users SET password_hash = ?, password_changed_at = FROM_UNIXTIME(?), must_change_password = ?, login_failures = 0, login_locked_until = NULL, ${CLEAR_CODES} WHERE tenant_id = ? AND id = ?`, [
     await bcrypt.hash(req.body.new_password, 12), now, req.body.temporary ? 1 : 0, req.auth.tenantId, target.id,
   ]);
   await sessions.endAll(pool, target.id, 'password_reset');
@@ -639,7 +682,7 @@ router.post('/users/:id/reset-password', authenticate, adminOnly, stepUp('set a 
 router.post('/users/:id/reset-mfa', authenticate, adminOnly, stepUp('reset someone\'s two-step sign-in'), async (req, res) => {
   const target = await loadTarget(req);
   await tx(async (conn) => {
-    await conn.query('UPDATE users SET totp_enabled = 0, totp_secret = NULL, totp_last_step = NULL WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, target.id]);
+    await conn.query(`UPDATE users SET totp_enabled = 0, totp_secret = NULL, totp_last_step = NULL, ${CLEAR_CODES} WHERE tenant_id = ? AND id = ?`, [req.auth.tenantId, target.id]);
     await conn.query('DELETE FROM user_recovery_codes WHERE user_id = ?', [target.id]);
   });
   await pool.query('DELETE FROM user_passkeys WHERE tenant_id = ? AND user_id = ?', [req.auth.tenantId, target.id]); // their lost phone's passkeys too

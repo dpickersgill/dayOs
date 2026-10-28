@@ -24,14 +24,18 @@ async function take(purpose, handle) {
   return row || null;
 }
 
-/** For emailed codes: look without claiming, counting a wrong try (5 wrong and it is spent). */
+/** For emailed codes: look without claiming. Each try at the code is counted first with claimTry (5 tries per code). */
 async function peek(purpose, handle) {
   const [[row]] = await pool.query('SELECT challenge, tenant_id, user_id, tries FROM auth_challenges WHERE id_hash = ? AND purpose = ? AND used_at IS NULL AND expires_at > UTC_TIMESTAMP()', [hash(handle || ''), purpose]);
   return row || null;
 }
-async function wrongTry(handle) {
-  await pool.query('UPDATE auth_challenges SET tries = tries + 1, used_at = IF(tries >= 5, UTC_TIMESTAMP(), used_at) WHERE id_hash = ?', [hash(handle)]);
+/** Takes one of an emailed code's 5 tries before the code is checked, in one statement, so tries sent at once cannot all get in. False when none are left. */
+async function claimTry(handle) {
+  const [r] = await pool.query('UPDATE auth_challenges SET tries = tries + 1 WHERE id_hash = ? AND used_at IS NULL AND expires_at > UTC_TIMESTAMP() AND tries < 5', [hash(handle || '')]);
+  return r.affectedRows === 1;
 }
+/** Gives a try back (the code was right but the step after it was refused, such as a new password that is too weak). */
+async function giveBackTry(handle) { await pool.query('UPDATE auth_challenges SET tries = GREATEST(tries, 1) - 1 WHERE id_hash = ?', [hash(handle)]); }
 async function spend(handle) { await pool.query('UPDATE auth_challenges SET used_at = UTC_TIMESTAMP() WHERE id_hash = ?', [hash(handle)]); }
 
 async function prune() {
@@ -39,4 +43,4 @@ async function prune() {
   return r.affectedRows;
 }
 
-module.exports = { put, take, peek, wrongTry, spend, prune, hash };
+module.exports = { put, take, peek, claimTry, giveBackTry, spend, prune, hash };

@@ -156,9 +156,12 @@ test('a lock that has run out starts counting again, so five more wrong tries lo
   for (let i = 0; i < 5; i += 1) await api('POST', '/login', { body: { email: bo, password: 'wrong-password-here' } });
   const [[o]] = await pool.query('SELECT failures, locked_until > UTC_TIMESTAMP() AS locked FROM platform_operators WHERE id = ?', [boId]);
   assert.equal(Number(o.locked), 1, `locked again (failures ${o.failures})`);
-  const r = await api('POST', '/login', { body: { email: bo, password: PW } });
+  is(await api('POST', '/login', { body: { email: bo, password: PW } }), 403);
+  // With a code (the form sends one once it asks for it), a locked login and an unknown email get the same answer.
+  // (Without one, an unknown email is asked for a code like any operator with the app set up, so that step reveals nothing.)
+  const r = await api('POST', '/login', { body: { email: bo, password: PW, code: '123456' } });
   is(r, 403);
-  const unknown = await api('POST', '/login', { body: { email: `nobody-${suffix}@example.test`, password: PW } });
+  const unknown = await api('POST', '/login', { body: { email: `nobody-${suffix}@example.test`, password: PW, code: '123456' } });
   assert.equal(unknown.body.error, r.body.error, 'a locked login and an unknown email get the same answer');
   await pool.query('UPDATE platform_operators SET locked_until = NULL, failures = 0 WHERE id = ?', [boId]);
 });

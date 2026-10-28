@@ -28,8 +28,9 @@ const PW = 'correct-horse-battery';
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
 const q = async (sql, params) => (await pool.query(sql, params))[0];
 
+const DEVICE = 'test-device-0123456789abcdef'; // the app always says which device signs in; leaving it out asks for an emailed code
 async function call(prefix, method, path, { token, body, headers } = {}) {
-  const res = await fetch(`${base}${prefix}${path}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...(headers || {}) }, body: body ? JSON.stringify(body) : undefined });
+  const res = await fetch(`${base}${prefix}${path}`, { method, headers: { 'x-device': DEVICE,  'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...(headers || {}) }, body: body ? JSON.stringify(body) : undefined });
   const text = await res.text();
   let json; try { json = JSON.parse(text); } catch (_) { json = text; }
   return { status: res.status, body: json, text };
