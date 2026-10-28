@@ -2,8 +2,9 @@
 
 // Lockouts hold when guesses are sent all at once: every try at a password, PIN or code is counted before it is checked,
 // so a burst of parallel guesses gets no more checks than one guess after another would. Also: a sign-in that leaves out
-// the device id is treated as a new device, a day of wrong codes stops codes for that login, and the operator console never
-// confirms a password before its code. (Built from the security review's race proofs.)
+// the device id is treated as a new device, a day of wrong codes stops codes for that login, the operator console never
+// confirms a password before its code, and an unknown login takes as long to refuse as a wrong password.
+// (Built from the security review's race and timing proofs.)
 process.env.BOOTSTRAP_KEY = 'test-bootstrap-key';
 process.env.LOGIN_RATE_LIMIT = '100000'; // stands in for many source addresses, or many servers
 process.env.PLATFORM_LOGIN_RATE_LIMIT = '100000';
@@ -221,4 +222,13 @@ test('operator sign-in: parallel codes get 5 checks, and the password is never c
   assert.equal(Number(o.failures), 5); assert.equal(Number(o.locked), 1);
   const late = await plat('/login', { email, password: opPw, code: totp.hotp(secret, step + 2) });
   assert.equal(late.status, 403, 'the right code is refused while locked');
+});
+
+test('an unknown login takes about as long to refuse as a wrong password', async () => {
+  const time = async (email) => { const t = process.hrtime.bigint(); await api('POST', '/auth/login', { body: { tenant: slug, email, password: 'wrong-password-xyz' } }); return Number(process.hrtime.bigint() - t) / 1e6; };
+  const fay = await addUser('fay');
+  const known = []; const unknown = [];
+  for (let i = 0; i < 6; i += 1) { known.push(await time(fay)); unknown.push(await time(`nobody${i}@${slug}.test`)); }
+  const med = (x) => x.sort((p, q) => p - q)[Math.floor(x.length / 2)];
+  assert.ok(med(unknown) > med(known) * 0.6, `unknown ${med(unknown).toFixed(0)} ms, known ${med(known).toFixed(0)} ms`);
 });

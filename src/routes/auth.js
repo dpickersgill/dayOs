@@ -33,8 +33,8 @@ const MANAGERS = ['owner', 'manager'];
 const NEEDS_EMAIL = [...MANAGERS, 'area']; // security notices and getting back in
 
 // A real bcrypt hash of a throwaway string, compared against when the user is unknown so that
-// response time does not reveal whether a username or email exists.
-const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(8).toString('hex'), 10);
+// response time does not reveal whether a username or email exists. Same cost (12) as real password hashes.
+const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(8).toString('hex'), 12);
 
 /** Token issued at an explicit second, so it is never older than the password change that created it. */
 function tokenIssuedAt(user, iat, req) {
