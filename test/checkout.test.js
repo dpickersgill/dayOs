@@ -180,6 +180,34 @@ test('a basket that cannot be completed saves nothing, not even the new customer
   D.unaOrder = ok.body.id;
 });
 
+test('a lesson for a student with no waiver is refused before any payment or order is written, and /checkout/check says so first', async () => {
+  const before = { orders: await count('orders', A.slug), payments: await count('order_payments', A.slug), people: await count('people', A.slug), bookings: await count('lesson_bookings', A.slug), waivers: await count('waivers', A.slug) };
+  const customer = { details: { first_name: 'Nola', last_name: 'Nowaiver', email: 'nola@x.test' } };
+  const lines = [{ type: 'lesson', session_id: D.lesson }];
+  // Checked before the cashier takes anything: the same refusal, and nothing kept, not even the new customer.
+  const chk = await api('POST', '/checkout/check', { token: T.counter, body: fill({ customer, lines }) });
+  assert.equal(chk.status, 409, chk.text);
+  assert.match(chk.body.error, /needs a signed waiver/);
+  assert.equal(await count('people', A.slug), before.people, 'a check keeps nothing');
+  // The sale itself, with the cash already counted: refused with no payment row and no order.
+  const res = await sell(T.counter, { customer, lines, payments: [{ tender: 'cash', amount_cents: 5000, tendered_cents: 5000 }] });
+  assert.equal(res.status, 409, res.text);
+  assert.match(res.body.error, /needs a signed waiver/);
+  assert.equal(await count('order_payments', A.slug), before.payments, 'no payment row was written');
+  assert.equal(await count('orders', A.slug), before.orders, 'no order was created');
+  assert.equal(await count('lesson_bookings', A.slug), before.bookings, 'no booking was made');
+  assert.equal(await count('people', A.slug), before.people);
+  // With the waiver signed at the counter the check passes with the quote, still keeping nothing, and the sale goes through.
+  const good = await api('POST', '/checkout/check', { token: T.counter, body: fill({ customer: { ...customer, sign_waiver: true }, lines }) });
+  assert.equal(good.status, 200, good.text);
+  assert.equal(good.body.total_cents, 5000);
+  assert.equal(await count('people', A.slug), before.people, 'the check does not save the customer');
+  assert.equal(await count('waivers', A.slug), before.waivers, 'nor the waiver');
+  const sold = await sell(T.counter, { customer: { ...customer, sign_waiver: true }, lines, payments: [{ tender: 'cash', amount_cents: 5000 }] });
+  assert.equal(sold.status, 201, sold.text);
+  assert.equal(await count('orders', A.slug), before.orders + 1);
+});
+
 test('capacity, duplicates and gear already out are refused', async () => {
   const one = (extra = {}) => sell(T.counter, { customer: { details: { first_name: 'Cap', last_name: 'Test', email: `cap${Math.random()}@x.test`, ...extra }, sign_waiver: true }, lines: [{ type: 'lesson', session_id: D.tiny }], payments: [{ tender: 'cash', amount_cents: 5000 }] });
   const first = await one();
