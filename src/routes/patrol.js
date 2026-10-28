@@ -397,12 +397,18 @@ router.get('/incidents/:id', patrol, needs('view_cases'), async (req, res) => {
   res.json(c);
 });
 
-/** The report check: gaps worth a second look before submitting. Never blocks; reportProblems decides what is required. */
+/**
+ * The report check: gaps worth a second look before submitting. Never blocks; reportProblems decides what is required,
+ * and a draft's required gaps come back too (`required`), so the screen asks for them first and offers the suggestions,
+ * with Submit anyway, only once everything required is in.
+ */
 router.get('/incidents/:id/check', patrol, needs('view_cases'), async (req, res) => {
   const c = await loadCase(pool, req.auth.tenantId, paramId(req));
   if (!c) throw notFound('Incident');
   const reqs = await requirementsOf(pool, req, c);
-  res.json({ data: [...checkCase(c), ...recommendedChecks(reqs.items)] });
+  const inc = c.report_state === 'draft' ? await one(pool, 'SELECT * FROM incidents WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, c.id]) : null;
+  const required = inc ? await reportProblems(pool, req.auth.tenantId, inc, { stage: 'submit' }) : [];
+  res.json({ data: [...checkCase(c), ...recommendedChecks(reqs.items)], required });
 });
 
 /**
@@ -1330,23 +1336,77 @@ router.post('/incidents/:id/patients/:pid/handoff-printed', patrol, needs('view_
 });
 
 // ---------------------------------------------------------------- responders
-router.post('/incidents/:id/responders', patrol, needs('create_case'), validate(z.object({ staff_id: z.number().int().positive(), role: z.enum(['lead', 'assist', 'transport', 'dispatch']).default('assist') })), async (req, res) => {
+const RESPONDER_ROLE = z.enum(['lead', 'assist', 'transport', 'dispatch']).default('assist');
+/** Names a responder on a draft case. There is exactly one lead: naming a new lead moves the old one to assist. */
+async function addResponder(conn, req, id, staffId, role) {
+  await editableCase(conn, req, id);
+  if (!(await one(conn, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, staffId]))) throw notFound('Staff member');
+  if (role === 'lead') await conn.query("UPDATE incident_responders SET role = 'assist' WHERE tenant_id = ? AND incident_id = ? AND role = 'lead' AND voided_at IS NULL", [req.auth.tenantId, id]);
+  // Someone marked entered in error and then added again comes back on the same row (one per person per case); the
+  // earlier marking stays in the audit trail.
+  const [r] = await conn.query(
+    'INSERT INTO incident_responders (tenant_id, incident_id, staff_id, role) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE role = VALUES(role), voided_at = NULL, void_reason = NULL, voided_by = NULL, id = LAST_INSERT_ID(id)',
+    [req.auth.tenantId, id, staffId, role],
+  );
+  await audit(conn, req, 'add_responders', 'incidents', id, { staff_id: staffId, role });
+  return r.insertId;
+}
+router.post('/incidents/:id/responders', patrol, needs('create_case'), validate(z.object({ staff_id: z.number().int().positive(), role: RESPONDER_ROLE })), async (req, res) => {
   const id = paramId(req);
-  const newId = await tx(async (conn) => {
-    await editableCase(conn, req, id);
-    if (!(await one(conn, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, req.body.staff_id]))) throw notFound('Staff member');
-    // There is exactly one lead. Naming a new lead moves the old one to assist.
-    if (req.body.role === 'lead') await conn.query("UPDATE incident_responders SET role = 'assist' WHERE tenant_id = ? AND incident_id = ? AND role = 'lead' AND voided_at IS NULL", [req.auth.tenantId, id]);
-    // Someone marked entered in error and then added again comes back on the same row (one per person per case); the
-    // earlier marking stays in the audit trail.
-    const [r] = await conn.query(
-      'INSERT INTO incident_responders (tenant_id, incident_id, staff_id, role) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE role = VALUES(role), voided_at = NULL, void_reason = NULL, voided_by = NULL, id = LAST_INSERT_ID(id)',
-      [req.auth.tenantId, id, req.body.staff_id, req.body.role],
-    );
-    await audit(conn, req, 'add_responders', 'incidents', id, req.body);
-    return r.insertId;
-  });
+  const newId = await tx((conn) => addResponder(conn, req, id, req.body.staff_id, req.body.role));
   res.status(201).json({ id: newId });
+});
+
+/** A name from a login that has none on file: "mia.ellis@..." or "mellis" becomes Mia Ellis or Mellis. */
+function nameFromLogin(user) {
+  const cap = (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+  const local = String(user.username || user.email || 'Patroller').split('@')[0].replace(/[0-9]+$/, '');
+  const parts = local.split(/[._-]+/).filter(Boolean).map(cap);
+  if (!parts.length) return { first_name: 'Patroller', last_name: String(user.id) };
+  return { first_name: parts[0], last_name: parts.slice(1).join(' ') || '' };
+}
+
+/**
+ * "Me" as a responder: the signed-in patroller names themselves, whether or not their login is linked to a staff
+ * record yet. A login with no staff record gets one (its person's name, or a name from the login) on the patrol roster,
+ * linked to the login and written to the audit log; a staff record not yet on the roster joins it. Then they are added
+ * to the case like any responder.
+ */
+router.post('/incidents/:id/responders/me', patrol, needs('create_case'), validate(z.object({ role: RESPONDER_ROLE })), async (req, res) => {
+  const id = paramId(req); const t = req.auth.tenantId;
+  const out = await tx(async (conn) => {
+    const user = await one(conn, 'SELECT id, email, username, person_id, staff_id FROM users WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, req.auth.userId]);
+    if (!user) throw notFound('Login');
+    let staffId = user.staff_id;
+    let created = false; let linked = false;
+    if (!staffId) {
+      let personId = user.person_id;
+      if (personId && !(await one(conn, 'SELECT id FROM people WHERE tenant_id = ? AND id = ?', [t, personId]))) personId = null;
+      if (!personId) {
+        const name = nameFromLogin(user);
+        const [p] = await conn.query('INSERT INTO people (tenant_id, first_name, last_name, email) VALUES (?, ?, ?, ?)', [t, name.first_name, name.last_name, user.email || null]);
+        personId = p.insertId;
+        await conn.query('UPDATE users SET person_id = ? WHERE tenant_id = ? AND id = ?', [personId, t, user.id]);
+      }
+      const existing = await one(conn, 'SELECT id FROM staff WHERE tenant_id = ? AND person_id = ?', [t, personId]);
+      if (existing) staffId = existing.id;
+      else {
+        const [s] = await conn.query("INSERT INTO staff (tenant_id, person_id, status, in_workforce) VALUES (?, ?, 'active', 0)", [t, personId]);
+        staffId = s.insertId; created = true;
+      }
+      await conn.query('UPDATE users SET staff_id = ? WHERE tenant_id = ? AND id = ?', [staffId, t, user.id]);
+      linked = true;
+      await audit(conn, req, 'link_staff', 'users', user.id, { staff_id: staffId, created_staff: created, person_id: personId, from: 'responder_me' });
+    }
+    // on the patrol roster (department patrol), so the name shows as a patroller from now on
+    if (!(await one(conn, 'SELECT id FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [t, staffId]))) {
+      await conn.query("INSERT INTO patrol_members (tenant_id, staff_id, level, access_level) VALUES (?, ?, 'patroller', 'patrol')", [t, staffId]);
+      await audit(conn, req, 'add_member', 'patrol_members', staffId, { level: 'patroller', access_level: 'patrol', self: true, from: 'responder_me' });
+    }
+    const rowId = await addResponder(conn, req, id, staffId, req.body.role);
+    return { id: rowId, staff_id: staffId, created, linked };
+  });
+  res.status(201).json(out);
 });
 
 /** A responder named by mistake is marked entered in error with a reason, never removed. DELETE does the same. */
