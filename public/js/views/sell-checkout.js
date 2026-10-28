@@ -80,8 +80,9 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   // An activity rider: the clerk ticks that they meet the attraction's height, weight and age limits. Kept per slot.
   const limitsOk = new Map();
   const needsLimits = (s) => s.line.type === 'activity' && Boolean(s.line.attraction && s.line.attraction.has_limits);
-  // Quick sale: a basket of only day tickets, multi-day tickets, punch cards or vouchers can be sold with no name.
-  const quickOk = Boolean(quickSale && quickSale.allowed && basket.length && basket.every((l) => l.type === 'ticket' && quickSale.kinds.includes(l.kind)));
+  // Quick sale: a basket of only day tickets, multi-day tickets, punch cards or vouchers (and gift cards) can be sold
+  // with no name, and that is the first choice for it; the guest's details are a tap away.
+  const quickOk = Boolean(quickSale && quickSale.allowed && basket.length && basket.every((l) => (l.type === 'ticket' && quickSale.kinds.includes(l.kind)) || l.type === 'gift_card'));
   let quick = false;
 
   // ---- step 1: customer and participants
@@ -99,6 +100,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   const guardianPick = new Map(); // person key -> the key of their parent or guardian ('' = already on file)
   const whoBox = h('div', { class: 'stack' });
   const step1Error = h('div');
+  const step0Error = h('div');
 
   const nameOf = (p) => {
     const d = p.capture.payload('details');
@@ -255,6 +257,8 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
     if (!cents || cents < 50) throw new Error('Enter the amount to take (at least $0.50)');
     if (cents > remaining()) throw new Error(`That is more than the ${money(remaining())} still to pay`);
     const reader = readers.find((x) => String(x.id) === readerPick.value) || readers[0];
+    // The sale can still go through? Nothing goes to the reader otherwise: a refusal shows here, with no card charged.
+    try { await check(); } catch (err) { clear(readerBox).append(errorBox(err)); return; }
     const pay = await post('/terminal/charges', { reader_id: reader.id, amount_cents: cents });
     charging = pay.id;
     const line = h('p', { role: 'status' }, h('strong', null, `Waiting for the card on ${reader.label}.`), ` Ask the guest to tap, insert or swipe for ${money(cents)}.`);
@@ -457,6 +461,12 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
     return body;
   }
 
+  /**
+   * The sale as it stands, checked by the server before any money is taken: who it is for, guardians, waivers, a
+   * rider's limits and age, places left and gear. A refusal shows here, not after the guest has paid.
+   */
+  async function check() { return post('/checkout/check', build()); }
+
   async function finish() {
     clear(step2Error);
     complete.disabled = true;
@@ -471,21 +481,37 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
     }
   }
 
+  // ---- step 0, a basket that needs no name: quick sale first, the guest's details a tap away
+  const quickText = basket.some((l) => l.type === 'gift_card') && basket.every((l) => l.type === 'gift_card') ? 'Gift cards need no name: the code is the card.' : 'Day tickets need no name. Nothing is saved about the guest.';
+  const step0 = h('div', { class: 'stack', 'data-quick': '' },
+    h('h3', null, 'Quick sale'),
+    h('p', { class: 'muted' }, `${quickText} Add guest details to put the sale on a customer record instead.`),
+    h('ul', { class: 'plain quick-lines' }, basket.map((l) => h('li', null, h('strong', null, l.quantity > 1 ? `${l.quantity} x ${l.name}` : l.name), h('small', { class: 'muted' }, ` ${l.detail || ''}`)))),
+    step0Error);
+  const toPayment = async (asQuick) => {
+    const errs = asQuick ? step0Error : step1Error;
+    clear(errs);
+    quick = asQuick;
+    if (!asQuick) { const p = problems(); if (p) { errs.append(errorBox(new Error(p))); return; } }
+    try { await check(); } catch (err) { errs.append(errorBox(err)); return; }
+    show(2); drawPayments();
+  };
+
   function show(n) {
-    clear(dlgBody).append(n === 1 ? step1 : step2);
+    clear(dlgBody).append(n === 0 ? step0 : n === 1 ? step1 : step2);
     clear(nav);
-    if (n === 1) {
+    if (n === 0) {
+      quick = true;
+      appendAll(nav, button('Cancel', () => dlg.close()),
+        button('Add guest details', () => show(1)),
+        button(total ? 'Next: payment' : 'Next', () => toPayment(true), { kind: 'primary' }));
+    } else if (n === 1) {
       quick = false;
       appendAll(nav, button('Cancel', () => dlg.close()),
-        quickOk ? button('Quick sale: no name', () => { quick = true; show(2); drawPayments(); }, { kind: null }) : null,
-        button(total ? 'Next: payment' : 'Next', () => {
-        clear(step1Error);
-        const p = problems();
-        if (p) { step1Error.append(errorBox(new Error(p))); return; }
-        show(2); drawPayments();
-      }, { kind: 'primary' }));
+        quickOk ? button('Quick sale: no name', () => show(0), { kind: null }) : null,
+        button(total ? 'Next: payment' : 'Next', () => toPayment(false), { kind: 'primary' }));
     } else {
-      nav.append(button('Back', () => show(1)), complete);
+      nav.append(button('Back', () => show(quick ? 0 : 1)), complete);
       if (quick) dlgBody.prepend(h('p', { class: 'muted small' }, 'Quick sale: nothing is saved about the guest. Use Back to add their details instead.'));
     }
   }
@@ -498,7 +524,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       h('div', { class: 'row print-actions' }, printButtons(out.id, { hasTickets: out.tickets.length > 0 })),
       out.change_due_cents ? h('div', { class: 'change-due', role: 'status' }, `Change due ${money(out.change_due_cents)}`) : null,
       out.customer ? h('p', { class: 'muted' }, out.customer.created ? 'New customer saved.' : 'Customer record updated.') : null,
-      codes(out.tickets.map((t) => h('div', { class: 'code' }, t.code, h('small', null, [t.holder, t.product, typeName(t.tier), t.valid_from === t.valid_to ? t.valid_from : `${t.valid_from} to ${t.valid_to}`].join(', ')))), `${out.tickets.length} ticket${out.tickets.length === 1 ? '' : 's'}`),
+      codes(out.tickets.map((t) => h('div', { class: 'code' }, t.code, h('small', null, [t.holder, t.product, typeName(t.tier), t.valid_from === t.valid_to ? t.valid_from : `${t.valid_from} to ${t.valid_to}`].filter(Boolean).join(', ')))), `${out.tickets.length} ticket${out.tickets.length === 1 ? '' : 's'}`),
       codes(out.gift_cards.map((g) => h('div', { class: 'code' }, g.code, h('small', null, `${money(g.amount_cents)}${g.recipient_name ? ` for ${g.recipient_name}` : ''}`))), 'Gift cards (give the guest the code)'),
       out.lessons.length ? h('section', { class: 'stack' }, h('h3', null, 'Lessons booked'), h('ul', { class: 'plain' }, out.lessons.map((l) => h('li', null, `${l.name}, ${fmtDateTime(l.starts_at)}`)))) : null,
       out.rentals.length ? h('section', { class: 'stack' }, h('h3', null, 'Gear out'), h('ul', { class: 'plain' }, out.rentals.map((r) => h('li', null, `${r.items.join(', ')}, due back ${fmtDateTime(r.due_at)}`)))) : null,
@@ -515,7 +541,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
     return Promise.all(payments.filter((x) => x.on_reader).map((p) => giveBack(p).catch(() => toast('A card reader payment could not be refunded. A manager can refund it under Billing, Card readers.', 'error'))));
   };
   dlg = dialog('Checkout', h('div', { class: 'stack' }, dlgBody, nav), { wide: true, onClose });
-  show(1);
+  show(quickOk ? 0 : 1);
   return dlg;
 }
 

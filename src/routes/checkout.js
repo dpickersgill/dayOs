@@ -307,11 +307,18 @@ checkout.post('/quote', requireRole(...sellers), validate(quoteSchema), async (r
 });
 
 // ---------------------------------------------------------------- checkout
-checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req, res) => {
-  const { tenantId } = req.auth;
-  const body = req.body;
+/** A sale checked but not made: thrown inside the transaction so everything it wrote (a new customer) is rolled back. */
+class Checked extends Error { constructor(result) { super('checked'); this.result = result; } }
 
-  const result = await tx(async (conn) => {
+/**
+ * The sale, inside one transaction. Everything that can refuse it (prices, who it is for, guardians, waivers, a rider's
+ * limits and age, places left, gear) is checked first; only then are the order, its bookings and its payments written.
+ * With `check` set, it stops after those checks and throws Checked with the quote, so the counter can be sure the sale
+ * will go through before any money is taken, on the reader or from the till.
+ */
+async function runSale(conn, req, body, { check = false } = {}) {
+  const { tenantId } = req.auth;
+  {
     // Activity places are claimed under their products' row locks, taken first (before anything is read), so a sale that
     // finished while this one waited is counted.
     await ACT.lockProducts(conn, tenantId, body.lines.filter((l) => l.type === 'activity').map((l) => l.product_id));
@@ -321,11 +328,12 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
 
     // ---- price first, so a bad line or a wrong payment fails before anything is saved
     const priced = await priceLines(conn, tenantId, lines, today);
-    const t = await totals(conn, tenantId, priced, body.promo_code, today, true);
+    const t = await totals(conn, tenantId, priced, body.promo_code, today, !check);
+    if (check) body = { ...body, payments: [] }; // not paid yet: the payment is checked when the sale is made
     const paySum = body.payments.reduce((n, p) => n + p.amount_cents, 0);
     if (t.total === 0 && body.payments.length) throw bad('Nothing is due on this basket, so no payment should be recorded');
-    if (t.total > 0 && !body.payments.length) throw bad('Record how it was paid');
-    if (paySum !== t.total) throw bad(`Payments add up to ${money(paySum)} but the basket is ${money(t.total)}`);
+    if (t.total > 0 && !body.payments.length && !check) throw bad('Record how it was paid');
+    if (!check && paySum !== t.total) throw bad(`Payments add up to ${money(paySum)} but the basket is ${money(t.total)}`);
     for (const p of body.payments) {
       if (p.tender === 'cash' && p.tendered_cents !== undefined && p.tendered_cents < p.amount_cents) throw bad('The cash handed over is less than the amount paid in cash');
       if (p.tender === 'gift_card' && !cleanCode(p.code)) throw bad('Enter the gift card code');
@@ -349,6 +357,7 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
       if (!tenant.quick_sale) throw bad('Quick sale is switched off for this mountain: add the customer\'s details');
       if (body.participants && Object.keys(body.participants).length) throw bad('A quick sale has no named guests');
       for (const p of priced) {
+        if (p.type === 'gift_card') continue; // a gift card names nobody: the code is the card
         if (p.type !== 'ticket' || !QUICK_KINDS.includes(p.product.kind)) throw bad(`${p.product ? p.product.name : 'That item'} needs the guest's details. Use the full checkout.`);
         if ((p.line.holders || []).some((x) => x !== 'customer')) throw bad('A quick sale has no named guests');
       }
@@ -434,10 +443,17 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
       }
     }
 
-    const ensureWaiver = async (key, personId, season, label) => {
+    // A waiver on file for the season, or one being signed at the counter now: checked before anything is written,
+    // then recorded when the booking is made.
+    const waiverOk = async (key, personId, season, label) => {
       if (await one(conn, ON_FILE, [tenantId, personId, season])) return;
       const g = guardianOf.get(key);
       if (!waiverFor.get(key)) throw conflict(g ? `${label} is under 18: their guardian must sign the waiver for the ${season} season` : `${label} needs a signed waiver for the ${season} season`, { person_id: personId });
+    };
+    const ensureWaiver = async (key, personId, season, label) => {
+      await waiverOk(key, personId, season, label);
+      if (await one(conn, ON_FILE, [tenantId, personId, season])) return;
+      const g = guardianOf.get(key);
       const me = personRows.get(personId);
       const signer = g || me;
       const sha = tenant.waiver_text ? crypto.createHash('sha256').update(tenant.waiver_text).digest('hex') : null;
@@ -445,6 +461,80 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
         [tenantId, personId, season, signer.id, `${signer.first_name} ${signer.last_name}`, g ? 'guardian' : 'self', sha, req.auth.userId]);
       await audit(conn, req, 'sign_waiver', 'waivers', w.insertId, { person_id: personId, season, signed_by: signer.id });
     };
+    // A lesson's session, locked, with the student's place: refused when it is not running, full, or already theirs.
+    const lessonCheck = async (p, student) => {
+      const s = await one(conn, 'SELECT * FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, p.session.id]);
+      if (s.status !== 'scheduled') throw conflict(`That lesson is ${s.status}`);
+      const existing = await one(conn, 'SELECT id, status, unpaid FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND person_id = ?', [tenantId, s.id, student]);
+      const adopting = Boolean(existing && existing.status === 'booked' && existing.unpaid); // their spot is already held
+      if (!adopting && existing && ['booked', 'attended'].includes(existing.status)) throw conflict('That student is already booked into this lesson');
+      if (!adopting && (await spotsLeft(conn, tenantId, s.id, s.capacity)) < 1) throw conflict(`${p.name} on ${p.day} is full`);
+      return { s, existing, adopting };
+    };
+    // An activity rider: the clerk's word on the limits, old enough, and (when the attraction asks) a waiver.
+    const riderCheck = async (p) => {
+      const key = p.line.participant || 'customer';
+      const rider = personOf(p.line);
+      const me = personRows.get(rider);
+      const a = p.attraction;
+      const who = `${me.first_name} ${me.last_name}`;
+      if (ACT.hasLimits(a) && !p.line.limits_ok) throw bad(`Confirm that ${who} meets the limits for ${a.name}. ${ACT.limitsText(a)}`, { person_id: rider, attraction_id: a.id });
+      const age = a.min_age ? ACT.ageOn(me.date_of_birth, p.day) : null;
+      if (age !== null && age < a.min_age) throw conflict(`${who} is ${age}. ${a.name} riders must be ${a.min_age} or older.`);
+      if (a.waiver_required) await waiverOk(key, rider, seasonFor(p.day), 'The rider');
+    };
+    // A program with no sessions: a place left, and not already in it.
+    const programCheck = async (p, participant) => {
+      const pg = await one(conn, 'SELECT * FROM programs WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, p.program.id]);
+      if (pg.capacity !== null) {
+        const { n } = await one(conn, "SELECT COUNT(*) AS n FROM program_enrollments WHERE tenant_id = ? AND program_id = ? AND status = 'enrolled'", [tenantId, pg.id]);
+        if (n >= pg.capacity) throw conflict(`${pg.name} is full. Use the Programs screen to add them to the waitlist.`);
+      }
+      const existing = await one(conn, 'SELECT id, status FROM program_enrollments WHERE tenant_id = ? AND program_id = ? AND person_id = ?', [tenantId, pg.id, participant]);
+      if (existing && existing.status !== 'withdrawn') throw conflict(`Already ${existing.status} in ${pg.name}`);
+      return { pg, existing };
+    };
+
+    // ---- everything that can still refuse the sale, before the order, its bookings or any payment is written. The
+    // cashier sees a refusal before money changes hands, not after. The booking step checks again under its locks.
+    const placesWanted = new Map(); // activity product|day|slot -> places this basket takes
+    for (const p of priced) {
+      const ln = p.line;
+      if (p.type === 'lesson' && !p.pkg) {
+        const student = personOf(ln);
+        await waiverOk(ln.participant || 'customer', student, seasonFor(p.day), 'The student');
+        await lessonCheck(p, student);
+      } else if (p.type === 'rental') {
+        const gear = ln.items || [];
+        if (!gear.length) throw bad(`Choose the gear for the ${p.name} rental`);
+        await waiverOk(ln.participant || 'customer', personOf(ln), seasonFor(today), 'The renter');
+        const ids = gear.map((g) => g.rental_item_id);
+        if (new Set(ids).size !== ids.length) throw bad('The same rental item was chosen twice');
+        const items = await rows(conn, 'SELECT id, sku, status FROM rental_items WHERE tenant_id = ? AND id IN (?)', [tenantId, ids]);
+        if (items.length !== ids.length) throw notFound('One or more rental items');
+        const out = items.filter((r) => r.status !== 'available');
+        if (out.length) throw conflict('Some gear is not available', out.map((u) => ({ sku: u.sku, status: u.status })));
+      } else if (p.type === 'activity') {
+        await riderCheck(p);
+        const key = `${p.product.id}|${p.day}|${p.slot.start || ''}`;
+        const mine = placesWanted.get(key) || 0;
+        await ACT.ensurePlaces(conn, tenantId, p.product, p.day, p.slot, 1, { extra: mine });
+        placesWanted.set(key, mine + 1);
+      } else if (p.type === 'program' && p.reg) {
+        const participant = personOf(ln);
+        for (const x of p.reg.parts) {
+          const existing = await one(conn, 'SELECT id, status FROM program_enrollments WHERE tenant_id = ? AND program_id = ? AND term_key = ? AND person_id = ?', [tenantId, p.program.id, x.term.id, participant]);
+          if (existing && existing.status !== 'withdrawn') throw conflict(`Already ${existing.status === 'waitlist' ? 'on the waitlist' : 'enrolled'} in ${x.term.name}`);
+          const { n } = await one(conn, "SELECT COUNT(*) AS n FROM program_enrollments WHERE tenant_id = ? AND group_id = ? AND status = 'enrolled'", [tenantId, x.group.id]);
+          if (x.group.capacity != null && Number(n) >= x.group.capacity) throw conflict(`${PS.WEEKDAYS[x.group.weekday]}s in ${x.term.name} are full`);
+        }
+      } else if (p.type === 'program') {
+        await programCheck(p, personOf(ln));
+      }
+    }
+    if (check) {
+      throw new Checked({ ok: true, lines: priced.map(describe), subtotal_cents: t.subtotal, discount_cents: t.discount, tax_cents: t.tax, taxes: t.taxes, total_cents: t.total, gift_card_cents: t.giftCents });
+    }
 
     // ---- the order
     const firstRef = body.payments.find((p) => p.reference);
@@ -491,15 +581,10 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
         done.packages.push({ credit_id: cr.insertId, person_id: owner, name: p.name, lessons: p.product.uses, expires_on: expires });
       } else if (p.type === 'lesson') {
         const student = personOf(ln);
-        const s = await one(conn, 'SELECT * FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, p.session.id]);
-        if (s.status !== 'scheduled') throw conflict(`That lesson is ${s.status}`);
         await ensureWaiver(ln.participant || 'customer', student, seasonFor(p.day), 'The student');
-        const existing = await one(conn, 'SELECT id, status, unpaid FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND person_id = ?', [tenantId, s.id, student]);
-        const adopting = existing && existing.status === 'booked' && existing.unpaid; // their spot is already held
-        if (!adopting && (await spotsLeft(conn, tenantId, s.id, s.capacity)) < 1) throw conflict(`${p.name} on ${p.day} is full`);
+        const { s, existing, adopting } = await lessonCheck(p, student);
         let bookingId;
-        if (existing && existing.status === 'booked' && existing.unpaid) { await conn.query('UPDATE lesson_bookings SET unpaid = 0 WHERE id = ? AND tenant_id = ?', [existing.id, tenantId]); bookingId = existing.id; } // an online request they are now paying for
-        else if (existing && ['booked', 'attended'].includes(existing.status)) throw conflict('That student is already booked into this lesson');
+        if (adopting) { await conn.query('UPDATE lesson_bookings SET unpaid = 0 WHERE id = ? AND tenant_id = ?', [existing.id, tenantId]); bookingId = existing.id; } // an online request they are now paying for
         else if (existing) { await conn.query("UPDATE lesson_bookings SET status = 'booked' WHERE id = ? AND tenant_id = ?", [existing.id, tenantId]); bookingId = existing.id; } else {
           bookingId = (await conn.query('INSERT INTO lesson_bookings (tenant_id, session_id, person_id) VALUES (?, ?, ?)', [tenantId, s.id, student]))[0].insertId;
         }
@@ -522,12 +607,8 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
         // One guest, one place, one ticket good once at this attraction in this slot.
         const key = ln.participant || 'customer';
         const rider = personOf(ln);
-        const me = personRows.get(rider);
         const a = p.attraction;
-        const who = `${me.first_name} ${me.last_name}`;
-        if (ACT.hasLimits(a) && !ln.limits_ok) throw bad(`Confirm that ${who} meets the limits for ${a.name}. ${ACT.limitsText(a)}`, { person_id: rider, attraction_id: a.id });
-        const age = a.min_age ? ACT.ageOn(me.date_of_birth, p.day) : null;
-        if (age !== null && age < a.min_age) throw conflict(`${who} is ${age}. ${a.name} riders must be ${a.min_age} or older.`);
+        await riderCheck(p);
         if (a.waiver_required) await ensureWaiver(key, rider, seasonFor(p.day), 'The rider');
         await ACT.ensurePlaces(conn, tenantId, p.product, p.day, p.slot, 1);
         const itemId = await item({ product_id: p.product.id, person_id: rider, valid_on: p.day });
@@ -553,13 +634,7 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
         }
       } else if (p.type === 'program') {
         const participant = personOf(ln);
-        const pg = await one(conn, 'SELECT * FROM programs WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, p.program.id]);
-        if (pg.capacity !== null) {
-          const { n } = await one(conn, "SELECT COUNT(*) AS n FROM program_enrollments WHERE tenant_id = ? AND program_id = ? AND status = 'enrolled'", [tenantId, pg.id]);
-          if (n >= pg.capacity) throw conflict(`${pg.name} is full. Use the Programs screen to add them to the waitlist.`);
-        }
-        const existing = await one(conn, 'SELECT id, status FROM program_enrollments WHERE tenant_id = ? AND program_id = ? AND person_id = ?', [tenantId, pg.id, participant]);
-        if (existing && existing.status !== 'withdrawn') throw conflict(`Already ${existing.status} in ${pg.name}`);
+        const { pg, existing } = await programCheck(p, participant);
         const guardian = buyer.id && buyer.id !== participant ? buyer.id : null;
         let enrollmentId;
         if (existing) {
@@ -616,10 +691,30 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
       lines: priced.map(describe), payments: body.payments.map((p) => ({ tender: p.tender, amount_cents: p.amount_cents })),
       ...done,
     };
-  });
+  }
+}
 
-  if (result.program_adjustments && result.program_adjustments.length) await PP.afterPassBought(tenantId, result.program_adjustments).catch(() => {});
+checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req, res) => {
+  const result = await tx((conn) => runSale(conn, req, req.body));
+  if (result.program_adjustments && result.program_adjustments.length) await PP.afterPassBought(req.auth.tenantId, result.program_adjustments).catch(() => {});
   res.status(201).json(result);
+});
+
+/**
+ * The same sale, checked but not made: the customer and participants, guardians, waivers, limits, ages, places and gear
+ * are all held to the rules of a real sale, and the answer is the quote, or the refusal the sale would get. The counter
+ * asks this before taking any money (cash, or a card on the reader), so a guest is never paid up and then turned away.
+ * Nothing is kept: not even a new customer's details, which are saved when the sale is made.
+ */
+checkout.post('/check', requireRole(...sellers), validate(checkoutSchema), async (req, res) => {
+  let out;
+  try {
+    await tx((conn) => runSale(conn, req, req.body, { check: true }));
+  } catch (err) {
+    if (!(err instanceof Checked)) throw err;
+    out = err.result;
+  }
+  res.json(out);
 });
 
 // ---------------------------------------------------------------- gift cards

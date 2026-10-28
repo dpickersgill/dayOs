@@ -998,6 +998,8 @@ test('patrol: a signature drawn on the pad is saved, and cannot be removed after
 const typeInto = (root, name, value) => { const el = root.querySelector(`[name=${name}]`); assert.ok(el, `no field named ${name}`); el.value = value; };
 const submitForm = async (el) => { el.form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await settle(); };
 
+// A basket that needs no name opens on the quick sale; this steps into the guest's details.
+const details = async (dlg) => { const b = [...dlg.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Add guest details'); if (b) { b.click(); await settle(); } };
 const clickBtn = (scope, text) => { const b = [...scope.querySelectorAll('button')].find((x) => x.textContent.trim() === text); assert.ok(b, `no "${text}" button`); b.click(); return b; };
 const tileFor = (root, text) => { const t = [...root.querySelectorAll('.tile')].find((x) => x.textContent.includes(text)); assert.ok(t, `no tile "${text}"`); return t; };
 
@@ -1058,6 +1060,7 @@ test('sell: a ticket goes in the basket from the menu, the customer is added at 
   clickBtn(root, 'Checkout'); await settle();
   let dlg = topDialog();
   clean(dlg, 'checkout dialog');
+  await details(dlg);
   for (const [k, v] of Object.entries({ first_name: 'Wendy', last_name: 'Window', email: 'wendy@window.test', phone: '610-555-0123', address_line1: '5 Base Lodge Rd', city: 'Stowe', region: 'VT', postal_code: '05672', country: 'USA', date_of_birth: '1984-05-06', sex: 'female' })) typeInto(dlg, k, v);
   dlg.querySelector('[name=marketing_opt_in]').checked = true;
   clickBtn(dlg, 'Next: payment'); await settle();
@@ -1088,6 +1091,7 @@ test('sell: a ticket goes in the basket from the menu, the customer is added at 
   tileFor(root, 'Adult Day').click(); await settle();
   clickBtn(root, 'Checkout'); await settle();
   dlg = topDialog();
+  await details(dlg);
   typeInto(dlg, 'first_name', 'Wendy'); typeInto(dlg, 'last_name', 'Window'); typeInto(dlg, 'email', 'wendy@window.test'); typeInto(dlg, 'date_of_birth', '1984-05-06'); typeInto(dlg, 'sex', 'female');
   clickBtn(dlg, 'Next: payment'); await settle();
   clickBtn(dlg, 'Card'); await settle();
@@ -1095,6 +1099,74 @@ test('sell: a ticket goes in the basket from the menu, the customer is added at 
   clickBtn(dlg, 'Complete sale'); await settle();
   assert.ok(dlg.querySelectorAll('.code').length >= 1);
   assert.equal(ok(await api('GET', '/people?q=Wendy', { token: T.owner })).data.length, 1);
+  await closeOverlays();
+});
+
+test('sell: a day ticket opens on the quick sale, with guest details a tap away, and the receipt line has no stray comma', skip(), async () => {
+  await closeOverlays();
+  const root = await renderView('sell', 'counter', T.counter);
+  tileFor(root, 'Adult Day').click(); await settle();
+  await openTab(root, 'Gift cards');
+  tileFor(root, '$25.00').click(); await settle();
+  clickBtn(root, 'Checkout'); await settle();
+  const dlg = topDialog();
+  clean(dlg, 'quick checkout');
+  assert.ok(dlg.querySelector('[data-quick]'), 'a basket of day tickets and gift cards opens on the quick sale');
+  assert.equal(dlg.querySelector('[name=first_name]'), null, 'no name, date of birth or sex is asked for');
+  const next = [...dlg.querySelectorAll('button')].find((b) => b.textContent === 'Next: payment');
+  assert.ok(next.classList.contains('primary'), 'the quick sale is the primary action');
+  const add = [...dlg.querySelectorAll('button')].find((b) => b.textContent === 'Add guest details');
+  assert.ok(add && !add.classList.contains('primary'), 'guest details are the secondary choice');
+  // the details are one tap away, and Quick sale: no name brings the quick sale back
+  add.click(); await settle();
+  assert.ok(dlg.querySelector('[name=first_name]'), 'the customer form');
+  clickBtn(dlg, 'Quick sale: no name'); await settle();
+  assert.ok(dlg.querySelector('[data-quick]'));
+  clickBtn(dlg, 'Next: payment'); await settle();
+  assert.match(dlg.textContent, /Still to pay \$90\.00/);
+  clickBtn(dlg, 'Cash'); await settle();
+  clickBtn(dlg, 'Exact $90.00'); await settle();
+  clickBtn(dlg, 'Complete sale'); await settle();
+  assert.match(dlg.textContent, /Sold \$90\.00/);
+  const code = dlg.querySelector('.code small');
+  assert.match(code.textContent, /^Adult Day, Adult, /, 'the ticket line starts with the product, not a comma');
+  assert.ok(!dlg.textContent.includes(', Adult Day'), 'no leading comma where the guest name would be');
+  assert.equal(dlg.querySelectorAll('.code').length, 2, 'the ticket and the gift card');
+  await closeOverlays();
+
+  // anything that needs a person keeps the form first
+  await openTab(root, 'Tickets');
+  tileFor(root, 'Adult Day').click(); await settle();
+  await openTab(root, 'Lessons');
+  const row = [...root.querySelectorAll('tr')].find((r) => r.textContent.includes('Group Lesson'));
+  [...row.querySelectorAll('button')].find((b) => b.textContent === 'Add').click(); await settle();
+  clickBtn(root, 'Checkout'); await settle();
+  const full = topDialog();
+  assert.equal(full.querySelector('[data-quick]'), null, 'a lesson needs a name');
+  assert.ok(full.querySelector('[name=first_name]'));
+  assert.equal([...full.querySelectorAll('button')].find((b) => b.textContent === 'Quick sale: no name'), undefined, 'no quick sale for a lesson');
+  await closeOverlays();
+});
+
+test('sell: a student with no waiver is refused before payment is taken, not after', skip(), async () => {
+  await closeOverlays();
+  const root = await renderView('sell', 'counter', T.counter);
+  await openTab(root, 'Lessons');
+  const row = [...root.querySelectorAll('tr')].find((r) => r.textContent.includes('Group Lesson'));
+  [...row.querySelectorAll('button')].find((b) => b.textContent === 'Add').click(); await settle();
+  clickBtn(root, 'Checkout'); await settle();
+  const dlg = topDialog();
+  typeInto(dlg, 'first_name', 'Wade'); typeInto(dlg, 'last_name', 'Waiverless'); typeInto(dlg, 'email', 'wade@waiver.test'); typeInto(dlg, 'date_of_birth', '1990-05-06'); typeInto(dlg, 'sex', 'male');
+  const before = ok(await api('GET', '/people?q=Waiverless', { token: T.owner })).data.length;
+  clickBtn(dlg, 'Next: payment'); await settle();
+  assert.match(dlg.textContent, /needs a signed waiver/, 'the refusal shows on the details step');
+  assert.ok(!/Still to pay/.test(dlg.textContent), 'the payment step is never reached');
+  assert.equal(ok(await api('GET', '/people?q=Waiverless', { token: T.owner })).data.length, before, 'the check saved nothing');
+  // signed at the counter: on to payment
+  const waiver = [...dlg.querySelectorAll('label.check')].find((l) => l.textContent.includes('Waiver signed at the counter'));
+  waiver.querySelector('input').checked = true;
+  clickBtn(dlg, 'Next: payment'); await settle();
+  assert.match(dlg.textContent, /Still to pay/);
   await closeOverlays();
 });
 
@@ -1191,6 +1263,7 @@ test('sell: a mandatory detail is starred at checkout and a sale cannot go on wi
     tileFor(root, 'Adult Day').click(); await settle();
     clickBtn(root, 'Checkout'); await settle();
     const dlg = topDialog();
+    await details(dlg);
     const phone = [...dlg.querySelectorAll('label.field')].find((l) => l.textContent.startsWith('Phone'));
     assert.ok(phone.querySelector('.req'), 'Phone is starred');
     typeInto(dlg, 'first_name', 'Nophone'); typeInto(dlg, 'last_name', 'Guest'); typeInto(dlg, 'date_of_birth', '1980-02-02'); typeInto(dlg, 'sex', 'male');
@@ -1212,6 +1285,7 @@ test('sell: every ticket is named, and an under-18 needs a date of birth and sex
   clickBtn(root, '+'); await settle();
   clickBtn(root, 'Checkout'); await settle();
   const dlg = topDialog();
+  await details(dlg);
   const sels = [...dlg.querySelectorAll('select')].filter((x) => /^Who is Adult Day/.test(x.getAttribute('aria-label') || ''));
   assert.equal(sels.length, 2, 'one "who is it for" choice per ticket');
   const starred = (scope, text) => { const l = [...scope.querySelectorAll('label.field')].find((x) => x.querySelector('span') && x.querySelector('span').textContent.startsWith(text)); return l && l.querySelector('.req') && !l.querySelector('.req').hidden; };
@@ -1702,6 +1776,7 @@ test('sell: the basket shows tax, a manager can give it free of charge with a re
   assert.match(root.querySelector('.basket-summary').textContent, /Total\s*\$68\.90/);
   clickBtn(root, 'Checkout'); await settle();
   const dlg = topDialog();
+  await details(dlg);
   typeInto(dlg, 'first_name', 'Fran'); typeInto(dlg, 'last_name', 'Free'); typeInto(dlg, 'email', 'fran@free.test'); typeInto(dlg, 'date_of_birth', '1980-05-06'); typeInto(dlg, 'sex', 'female');
   clickBtn(dlg, 'Next: payment'); await settle();
   assert.match(dlg.textContent, /Tax \$3\.90/);
@@ -1788,6 +1863,7 @@ test('sell: a child needs a guardian who signs, and family on file is added in o
   tileFor(root, 'Adult Day').click(); await settle();
   clickBtn(root, 'Checkout'); await settle();
   const dlg = topDialog();
+  await details(dlg);
   // find the mother by name
   const search = dlg.querySelector('input[type=search]');
   search.value = 'Mia Mom'; search.dispatchEvent(new window.Event('input', { bubbles: true }));
@@ -2307,6 +2383,38 @@ test('settings: who sees which pages', skip(), async () => {
   const withMenu = await renderView('settings', 'counter', T.counter, { menu: { apps: ['sell', 'inbox', 'myshifts'], start: 'sell' } });
   assert.equal(withMenu.querySelector('.set-backapp').getAttribute('href'), '#/sell');
   assert.ok(document.documentElement.classList.contains('in-settings'), 'the app menu steps aside while in Settings');
+});
+
+test('settings: Add login suggests a username only while the field is untouched, and the Logins table stays inside its card', skip(), async () => {
+  await closeOverlays();
+  const root = await renderView('settings', 'owner', T.owner, {}, ['team']);
+  clickBtn(root, 'Add login'); await settle();
+  const dlg = topDialog();
+  const uname = dlg.querySelector('[name=username]');
+  const email = dlg.querySelector('[name=email]');
+  const setEmail = async (v) => { email.value = v; email.dispatchEvent(new window.Event('change', { bubbles: true })); await settle(); };
+  // untouched: the username follows the email
+  await setEmail('pat.tester@demo.test');
+  assert.equal(uname.value, 'pat.tester', 'derived from the email while untouched');
+  // typed: what the manager typed stays, whatever the email becomes
+  uname.value = 'ptester'; uname.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await setEmail('someone.else@demo.test');
+  assert.equal(uname.value, 'ptester', 'a typed username is never overwritten');
+  await closeOverlays();
+  // a value put in the field some other way (pasted, autofilled) counts as touched too
+  clickBtn(root, 'Add login'); await settle();
+  const dlg2 = topDialog();
+  const u2 = dlg2.querySelector('[name=username]'); const e2 = dlg2.querySelector('[name=email]');
+  u2.value = 'pasted.name';
+  e2.value = 'auto@demo.test'; e2.dispatchEvent(new window.Event('change', { bubbles: true })); await settle();
+  assert.equal(u2.value, 'pasted.name');
+  await closeOverlays();
+  // the wide Logins table scrolls inside its card instead of pushing the page sideways
+  const wrap = root.querySelector('[data-card=logins] .table-wrap');
+  assert.ok(wrap, 'the table has a scrolling wrapper');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'app.css'), 'utf8');
+  assert.match(css, /\.set-card\s*>\s*\.table-wrap\s*\{[^}]*overflow-x:\s*auto/, 'the card lets its table scroll sideways');
+  assert.match(css, /\.set-card\s*\{[^}]*min-width:\s*0/, 'the card itself never grows past the page');
 });
 
 test('settings: menus for each role, changed by the owner and read only for managers', skip(), async () => {
