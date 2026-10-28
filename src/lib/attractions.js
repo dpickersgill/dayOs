@@ -31,6 +31,8 @@ const ACTIVITIES = [
 ];
 /** The Activity value for an attraction type ('other' for one the list has no word for). */
 const activityFor = (type) => (byKey[type] ? byKey[type].activity : 'other');
+/** The words the report's Activity list uses for that value. */
+const activityLabel = (value) => (ACTIVITIES.find((a) => a[0] === value) || [value, 'Other'])[1];
 
 /**
  * Default daily opening checks, per type: short items in the spirit of the manufacturer's daily inspection and ASTM
@@ -212,4 +214,4 @@ function staffFor(type) {
   return { positions, certifications: [...new Set(positions.flatMap((p) => p.requires))] };
 }
 
-module.exports = { TYPES, TYPE_KEYS, typeLabel, ACTIVITIES, activityFor, TEMPLATES, templateFor, parseChecklist, checklistOf, normalizeChecklist, DOWNTIME_REASONS, DOWNTIME_KEYS, staffFor };
+module.exports = { TYPES, TYPE_KEYS, typeLabel, ACTIVITIES, activityFor, activityLabel, TEMPLATES, templateFor, parseChecklist, checklistOf, normalizeChecklist, DOWNTIME_REASONS, DOWNTIME_KEYS, staffFor };

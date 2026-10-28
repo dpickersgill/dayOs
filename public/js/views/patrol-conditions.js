@@ -123,8 +123,8 @@ export function attractionBox({ c, editable, attractions, id, onDone }) {
     try { await patch(`/patrol/incidents/${id}`, body); toast('Attraction saved'); await onDone(); } catch (err) { fail(err); }
   }, { small: true });
   const sel = (attractions || []).find((a) => a.id === c.attraction_id);
-  return h('div', { class: 'lift-box attraction-box', 'data-area': 'attraction' }, h('h3', null, 'Attraction'), h('div', { class: 'row tight' }, pick, save), nameLine,
-    h('p', { class: 'muted small' }, sel ? `For each patient hurt on it, choose "${sel.type_label}" or the closest Activity on the patient form.` : 'Zipline, mountain coaster, tubing, the rink and the other things to do, as set up in Settings, Attractions.'));
+  return h('div', { class: 'lift-box attraction-box', 'data-area': 'attraction' }, h('h3', null, 'Attraction'), pick, nameLine, h('div', { class: 'row tight' }, save),
+    h('p', { class: 'muted small' }, sel ? `For each patient hurt on it, choose "${sel.activity_label || sel.type_label}" as the Activity on the patient form.` : 'Zipline, mountain coaster, tubing, the rink and the other things to do, as set up in Settings, Attractions.'));
 }
 
 const gearName = (it) => `${label(it.category)} ${[it.brand, it.model, it.size].filter(Boolean).join(' ')}`.trim();

@@ -32,7 +32,7 @@ export function limitsText(a) {
 
 // ================================================================ Settings, Attractions
 export const settingsPages = {
-  attractions: { title: 'Attractions', who: 'manager', render: (panel) => drawSetup(panel) },
+  attractions: { title: 'Your attractions', who: 'manager', render: (panel) => drawSetup(panel) },
 };
 
 async function drawSetup(panel) {

@@ -32,7 +32,7 @@ const num = (v) => (v === null || v === undefined ? null : Number(v));
 /** An attraction as the screens read it. `full` adds its opening checks (for the people who edit or run them). */
 function shape(a, { full = false } = {}) {
   const out = {
-    id: Number(a.id), name: a.name, type: a.type, type_label: A.typeLabel(a.type), activity: A.activityFor(a.type),
+    id: Number(a.id), name: a.name, type: a.type, type_label: A.typeLabel(a.type), activity: A.activityFor(a.type), activity_label: A.activityLabel(A.activityFor(a.type)),
     status: a.status, status_note: a.status_note || null,
     min_height_in: num(a.min_height_in), min_weight_lb: num(a.min_weight_lb), max_weight_lb: num(a.max_weight_lb), min_age: num(a.min_age),
     waiver_required: Boolean(Number(a.waiver_required)), sort: Number(a.sort), active: Boolean(Number(a.active)),

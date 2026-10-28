@@ -2932,6 +2932,7 @@ input.switch:disabled { opacity: .5; cursor: not-allowed; }
 .attr-name { display: flex; flex-direction: column; }
 .attr-note { display: block; max-width: 28ch; }
 tr.attr-blocked td { background: var(--closed-tint); }
+.attr-section .seg { width: fit-content; max-width: 100%; }
 .attr-section .seg button { min-height: 44px; }
 .attr-section .seg button:disabled[data-tone='good'] { text-decoration: line-through; }
 .attr-downtime { margin-top: 16px; }
