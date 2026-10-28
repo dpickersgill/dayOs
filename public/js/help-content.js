@@ -235,7 +235,7 @@ export const ARTICLES = [
   { id: 'school-online', app: 'school', title: 'Online lesson booking', keywords: 'public page book request stripe card cancellation',
     intro: 'Guests can book or request lessons on a public page for your mountain.',
     steps: ['A manager switches on online booking in Settings. The page is at /book/ and your mountain name.', 'Guests pick a day and a lesson type. A day with nothing scheduled says so.', 'With card payment on, guests pay on Stripe and the lesson is booked. With it off, guests send a request and you answer it from Online requests.'],
-    tips: ['Canceling refunds by your tiers. The default is full at least 48 hours before, half at least 24 hours before, then none.'] },
+    tips: ['Canceling refunds by your tiers. The default is full at least 48 hours before, half at least 24 hours before, then none.', 'A guest who cancels while still on Stripe\u2019s payment page is never charged for nothing: the payment page is closed, and a payment that gets through anyway is refunded in full. The request shows Refunded automatically.'] },
   { id: 'school-card', app: 'school', title: 'Report cards and levels', keywords: 'skills progress ladder notes print',
     intro: 'Instructors tick skills off and move a student up a level on the report card.',
     steps: ['Open the student report card from the Roster.', 'Tick the skills reached and move the level up when ready.', 'Write a note for the lesson. Print the card for the family.'],

@@ -38,12 +38,61 @@ async function send(tenantId, refundId) {
   }
 }
 
-/** Daily: retries every card refund still owed (failed, or pending for more than 10 minutes). */
+// ---------------------------------------------------------------- paid card pages we cannot honor
+// A guest paid on Stripe's page for something we cannot give them: the lesson request was canceled while they were still
+// paying, the lesson filled, the amount does not match, or the payment cannot be matched to what it was for. The whole
+// payment goes back. Like a refund above it is written down first (card_returns, one row per payment, so a repeated
+// Stripe event never owes it twice), then sent after the commit, and retried by the daily job until Stripe has it.
+
+/**
+ * Writes a full refund of one paid card page as owed, inside the caller's transaction, with an audit entry. Returns its
+ * id, or null when this payment is already owed back (a repeated event).
+ */
+async function oweReturn(conn, { tenantId, kind, rowId = null, session = null, paymentIntent, amountCents, account = null, reason }) {
+  if (!paymentIntent || !(Number(amountCents) > 0)) return null;
+  const [r] = await conn.query('INSERT IGNORE INTO card_returns (tenant_id, kind, row_id, checkout_session, payment_intent, account, amount_cents, reason, card_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [tenantId, kind, rowId, session, String(paymentIntent), account || null, Number(amountCents), String(reason || 'could not be honored').slice(0, 300), `card-return-${paymentIntent}`.slice(0, 100)]);
+  if (r.affectedRows !== 1) return null;
+  await require('./audit').audit(conn, { auth: { tenantId, userId: null } }, 'card_return', 'card_returns', r.insertId, { kind, row_id: rowId, amount_cents: Number(amountCents), reason });
+  return r.insertId;
+}
+
+/** True when this payment is already owed back (or was given back) in full. */
+async function returned(conn, tenantId, paymentIntent) {
+  return Boolean(paymentIntent && await one(conn, 'SELECT id FROM card_returns WHERE tenant_id = ? AND payment_intent = ?', [tenantId, String(paymentIntent)]));
+}
+
+/** Sends one owed card return to Stripe. Returns 'sent', 'failed' or 'skipped'. Never throws. */
+async function sendReturn(id) {
+  const r = await one(pool, 'SELECT * FROM card_returns WHERE id = ?', [id]);
+  if (!r || !['pending', 'failed'].includes(r.card_status)) return 'skipped';
+  if (!stripe.enabled()) { await pool.query("UPDATE card_returns SET card_status = 'failed', card_error = ? WHERE id = ?", ['Card payment is not set up', r.id]); return 'failed'; }
+  try {
+    let done = null;
+    if (r.card_status === 'failed') {
+      // A retry looks first, as above: ours by its metadata, or refunds already covering the whole payment.
+      const live = (await stripe.listRefunds(r.payment_intent, { account: r.account || null })).filter((x) => x.status !== 'failed' && x.status !== 'canceled');
+      done = live.find((x) => x.metadata && x.metadata.summitops_return === String(r.id))
+        || (live.length && live.reduce((n, x) => n + Number(x.amount || 0), 0) >= r.amount_cents ? live[0] : null);
+    }
+    const out = done ? { id: done.id } : await stripe.refund({ paymentIntent: r.payment_intent, amountCents: r.amount_cents, key: r.card_key, metadata: { summitops_return: String(r.id), tenant: String(r.tenant_id) }, account: r.account || null });
+    await pool.query("UPDATE card_returns SET card_status = 'sent', card_error = NULL, card_refund_id = ? WHERE id = ?", [out.id || null, r.id]);
+    return 'sent';
+  } catch (err) {
+    await pool.query("UPDATE card_returns SET card_status = 'failed', card_error = ? WHERE id = ?", [String(err.message || 'Stripe refused the refund').slice(0, 250), r.id]);
+    logFailure({ job: 'card_return', tenant: r.tenant_id, card_return: r.id, message: err.message });
+    return 'failed';
+  }
+}
+
+/** Daily: retries every card refund and card return still owed (failed, or pending for more than 10 minutes). */
 async function retryAll() {
   const due = await rows(pool, "SELECT tenant_id, id FROM order_refunds WHERE card_status = 'failed' OR (card_status = 'pending' AND created_at < DATE_SUB(NOW(), INTERVAL 10 MINUTE)) ORDER BY id LIMIT 200");
   const out = { sent: 0, failed: 0 };
   for (const d of due) { const s = await send(d.tenant_id, d.id); if (s === 'sent') out.sent += 1; else if (s === 'failed') out.failed += 1; }
+  const back = await rows(pool, "SELECT id FROM card_returns WHERE card_status = 'failed' OR (card_status = 'pending' AND created_at < DATE_SUB(NOW(), INTERVAL 10 MINUTE)) ORDER BY id LIMIT 200");
+  for (const d of back) { const s = await sendReturn(d.id); if (s === 'sent') out.sent += 1; else if (s === 'failed') out.failed += 1; }
   return out;
 }
 
-module.exports = { markPending, send, retryAll };
+module.exports = { markPending, send, retryAll, oweReturn, returned, sendReturn };

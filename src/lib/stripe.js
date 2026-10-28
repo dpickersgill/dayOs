@@ -106,6 +106,19 @@ async function createCheckout({ amountCents, name, description, email, reference
   return { id: s.id, url: s.url };
 }
 
+/**
+ * Closes a hosted payment page that is still open, so a guest who canceled can no longer pay on it. Returns 'expired';
+ * 'closed' when Stripe says it is not open any more (already paid, or already expired); or 'unknown' when Stripe could
+ * not be asked. Never throws: a payment that did land is refunded when its webhook arrives.
+ */
+async function expireCheckout(sessionId, { account = null } = {}) {
+  if (!sessionId) return 'closed';
+  let r;
+  try { r = await tryCall(`/v1/checkout/sessions/${encodeURIComponent(sessionId)}/expire`, {}, { account }); } catch (_) { return 'unknown'; }
+  if (r.ok) return 'expired';
+  return r.status >= 400 && r.status < 500 ? 'closed' : 'unknown';
+}
+
 /** A hosted page for a gift: one time, or every month. Returns { id, url }. */
 async function createDonationCheckout({ amountCents, monthly, name, email, metadata, successUrl, cancelUrl, nonce, account = null }) {
   const s = await call('/v1/checkout/sessions', {
@@ -175,4 +188,4 @@ function signWebhook(rawBody, secret, t = Math.floor(Date.now() / 1000)) {
   return `t=${t},v1=${crypto.createHmac('sha256', secret).update(`${t}.${rawBody}`).digest('hex')}`;
 }
 
-module.exports = { call, get, del, tryCall, enabled, createCheckout, createDonationCheckout, refund, listRefunds, createAccount, accountLink, getAccount, verifyWebhook, signWebhook, ACCOUNT };
+module.exports = { call, get, del, tryCall, enabled, createCheckout, expireCheckout, createDonationCheckout, refund, listRefunds, createAccount, accountLink, getAccount, verifyWebhook, signWebhook, ACCOUNT };

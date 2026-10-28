@@ -189,11 +189,12 @@ router.post('/:slug/requests/:ref/cancel', validate(z.object({ email: z.string()
   const t = await tenantFor(req.params.slug);
   res.set('Cache-Control', 'no-store');
   const r = await findRequest(t, req.params.ref, req.body.email);
-  let refundInfo = null;
+  let refundInfo = null; let openPage = null;
   await tx(async (conn) => {
-    const cur = await one(conn, 'SELECT status FROM lesson_requests WHERE tenant_id = ? AND id = ? FOR UPDATE', [t.id, r.id]);
+    const cur = await one(conn, 'SELECT status, stripe_session_id FROM lesson_requests WHERE tenant_id = ? AND id = ? FOR UPDATE', [t.id, r.id]);
     if (cur.status === 'awaiting_payment') {
       await conn.query("UPDATE lesson_requests SET status = 'cancelled', decided_at = NOW() WHERE tenant_id = ? AND id = ?", [t.id, r.id]);
+      openPage = cur.stripe_session_id;
     } else if (cur.status === 'confirmed' && r.order_id) {
       refundInfo = await cancelPaid(conn, t, r);
     } else if (cur.status === 'pending') {
@@ -212,8 +213,46 @@ router.post('/:slug/requests/:ref/cancel', validate(z.object({ email: z.string()
   // The refund is already written down as owed; if Stripe cannot be reached now it is retried, so the guest is not left
   // with an error after their lesson was canceled.
   if (refundInfo && refundInfo.refundId) await cardrefund.send(t.id, refundInfo.refundId);
-  res.json({ ok: true, refund_cents: refundInfo ? refundInfo.cents : 0, refund_percent: refundInfo ? refundInfo.percent : 0 });
+  // Still on Stripe's page (another tab, or the two happened together): close the page so it cannot take the money now.
+  // If the payment got there first, it is given back in full here, or by the webhook when it arrives, whichever is first.
+  const late = openPage ? await closePage(t.id, r.id, openPage) : null;
+  res.json({ ok: true, refund_cents: late ? late.cents : refundInfo ? refundInfo.cents : 0, refund_percent: late ? 100 : refundInfo ? refundInfo.percent : 0,
+    ...(late ? { message: 'Your payment went through just as you canceled, so all of it is going back to your card.' } : {}) });
 });
+
+/**
+ * Expires the Stripe page of a request the guest just canceled. When Stripe says the page was already paid, the payment is
+ * refunded in full now. Returns { cents } when it was, else null.
+ */
+async function closePage(tenantId, requestId, sessionId) {
+  const acct = (await one(pool, 'SELECT stripe_account FROM tenants WHERE id = ?', [tenantId])).stripe_account || null;
+  const how = await stripe.expireCheckout(sessionId, { account: acct });
+  if (how !== 'closed') return null;
+  let s = null;
+  try { s = await stripe.get(`/v1/checkout/sessions/${encodeURIComponent(sessionId)}`, { account: acct }); } catch (_) { return null; } // the webhook still refunds it
+  if (!s || s.status !== 'complete' || s.payment_status !== 'paid' || !s.payment_intent) return null;
+  const out = await giveBack(tenantId, requestId, { ...s, id: sessionId }, acct, 'the request was canceled before the payment arrived');
+  return out.refunded ? { cents: Number(s.amount_total) } : null;
+}
+
+/**
+ * A paid page for a request we cannot book (canceled or expired while the guest was paying): the whole payment is written
+ * down as owed back and noted on the request in one step, then sent to Stripe. A repeat changes nothing.
+ */
+async function giveBack(tenantId, requestId, obj, account, why) {
+  const owed = await tx(async (conn) => {
+    const raw = await one(conn, 'SELECT id, status, payment_intent FROM lesson_requests WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, requestId]);
+    if (!raw || raw.status === 'awaiting_payment' || raw.payment_intent === String(obj.payment_intent)) return null;
+    const id = await cardrefund.oweReturn(conn, { tenantId, kind: 'lesson', rowId: requestId, session: obj.id, paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), account, reason: why });
+    if (!id) return null;
+    await conn.query('UPDATE lesson_requests SET payment_intent = ?, refund_cents = ?, staff_note = ? WHERE tenant_id = ? AND id = ?',
+      [String(obj.payment_intent), Number(obj.amount_total), `Refunded automatically: ${why}`.slice(0, 300), tenantId, requestId]);
+    return id;
+  });
+  if (!owed) return { duplicate: true };
+  await cardrefund.sendReturn(owed);
+  return { refunded: true };
+}
 
 /** Cancels a paid online request under the mountain's tiers and records the refund in the books. The Stripe refund is sent after the commit. */
 async function cancelPaid(conn, t, r) {
@@ -271,15 +310,19 @@ async function handleWebhook(event, base) {
     return { expired: true };
   }
   if (event.type !== 'checkout.session.completed' || obj.payment_status !== 'paid') return { ignored: true };
-  let failed = null;
+  let failed = null; let gone = null;
   let result;
   try {
     result = await tx(async (conn) => {
       const raw = await one(conn, 'SELECT * FROM lesson_requests WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, requestId]);
       if (!raw || raw.stripe_session_id !== obj.id) return { ignored: true };
-      // Only a request still waiting for this payment is acted on. A repeat of an event we already handled, including one we
-      // refunded, changes nothing.
-      if (raw.status !== 'awaiting_payment') return { duplicate: true };
+      // Only a request still waiting for this payment is booked. A repeat of an event we already handled, including one we
+      // refunded, changes nothing. A request canceled or expired while the guest was still paying is refunded in full.
+      if (raw.status !== 'awaiting_payment') {
+        if (raw.payment_intent === String(obj.payment_intent) || await cardrefund.returned(conn, tenantId, obj.payment_intent)) return { duplicate: true };
+        if (['cancelled', 'expired', 'declined'].includes(raw.status)) { gone = `the request was ${raw.status === 'cancelled' ? 'canceled' : raw.status} before the payment arrived`; return { problem: true }; }
+        return { duplicate: true };
+      }
       const q = parseRequest(raw).quote;
       if (!q || Number(obj.amount_total) !== raw.amount_cents) { failed = 'amount'; return { problem: true }; }
       try {
@@ -293,11 +336,17 @@ async function handleWebhook(event, base) {
     if (!(err instanceof Unhonourable)) throw err;
     failed = err.message; result = { problem: true }; // rolled back: nothing half-made is kept
   }
+  if (gone) return giveBack(tenantId, requestId, obj, event.account || null, gone);
   if (failed) {
-    // We could not honor it (lesson full or canceled, or the amount was wrong): give the money back in full. The refund
-    // goes first; if Stripe cannot be reached this throws, Stripe sends the event again, and we try again.
-    if (obj.payment_intent && stripe.enabled()) await stripe.refund({ paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), key: `autorefund-${tenantId}-${requestId}`, account: event.account || null });
-    await pool.query("UPDATE lesson_requests SET status = 'expired', payment_intent = ?, refund_cents = amount_cents, staff_note = ? WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment'", [obj.payment_intent, `Refunded automatically: ${failed}`.slice(0, 300), tenantId, requestId]);
+    // We could not honor it (lesson full or canceled, or the amount was wrong): give the money back in full. It is written
+    // down as owed with the request's new state in one step, then sent; the daily job retries it if Stripe is slow.
+    const owed = await tx(async (conn) => {
+      const [u] = await conn.query("UPDATE lesson_requests SET status = 'expired', payment_intent = ?, refund_cents = ?, staff_note = ? WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment'",
+        [obj.payment_intent || null, Number(obj.amount_total) || 0, `Refunded automatically: ${failed}`.slice(0, 300), tenantId, requestId]);
+      if (u.affectedRows !== 1) return null;
+      return cardrefund.oweReturn(conn, { tenantId, kind: 'lesson', rowId: requestId, session: obj.id, paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), account: event.account || null, reason: failed });
+    });
+    if (owed) await cardrefund.sendReturn(owed);
   }
   return result;
 }

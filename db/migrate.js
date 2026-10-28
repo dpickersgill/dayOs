@@ -452,6 +452,34 @@ const terminalSteps = [
   ) ENGINE=InnoDB`],
 ];
 
+// Paid card pages we cannot honor: a lesson request canceled while the guest was still on Stripe's page, a lesson that
+// filled, an amount that does not match, or a payment that cannot be matched to what it was for. The whole payment goes
+// back, written down here as owed before it is sent (one row per payment, so a repeated Stripe event never owes it
+// twice), and retried by the daily job until Stripe has it.
+const cardReturnSteps = [
+  ['card_returns', (c) => tableExists(c, 'card_returns'), `CREATE TABLE card_returns (
+    id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id        BIGINT UNSIGNED NOT NULL,
+    kind             VARCHAR(20) NOT NULL,
+    row_id           BIGINT UNSIGNED NULL,
+    checkout_session VARCHAR(255) NULL,
+    payment_intent   VARCHAR(255) NOT NULL,
+    account          VARCHAR(64) NULL,
+    amount_cents     INT UNSIGNED NOT NULL,
+    reason           VARCHAR(300) NOT NULL,
+    card_status      ENUM('pending','sent','failed') NOT NULL DEFAULT 'pending',
+    card_key         VARCHAR(100) NOT NULL,
+    card_error       VARCHAR(255) NULL,
+    card_refund_id   VARCHAR(255) NULL,
+    created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_card_returns_intent (tenant_id, payment_intent),
+    KEY ix_card_returns_status (card_status, created_at),
+    KEY ix_card_returns_row (tenant_id, kind, row_id),
+    CONSTRAINT fk_card_returns_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  ) ENGINE=InnoDB`],
+];
+
 // Canceling lessons (2026.10.29): a canceled lesson keeps who canceled it, when and why.
 // Better pin dropping (2026.10.29): how a pin was put down (GPS, a tap on the map, a drag) and how close the GPS was.
 const pinSteps = [
@@ -1568,7 +1596,7 @@ async function main() {
   await seedPatrolPlan(conn);
   await seedAssistantAddon(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps, ...crewSteps, ...caseLinkSteps, ...injuryRegisterSteps, ...lostFoundSteps, ...kitSteps, ...teamSteps, ...prospectSteps, ...partnerSteps, ...outreachSteps, ...require('./steps/claims')({ tableExists, columnExists }), ...require('./steps/scene')({ tableExists, columnExists }), ...require('./steps/site')({ tableExists, columnExists }), ...require('./steps/pricing')({ tableExists, columnExists })]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...cardReturnSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps, ...crewSteps, ...caseLinkSteps, ...injuryRegisterSteps, ...lostFoundSteps, ...kitSteps, ...teamSteps, ...prospectSteps, ...partnerSteps, ...outreachSteps, ...require('./steps/claims')({ tableExists, columnExists }), ...require('./steps/scene')({ tableExists, columnExists }), ...require('./steps/site')({ tableExists, columnExists }), ...require('./steps/pricing')({ tableExists, columnExists })]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;

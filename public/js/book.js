@@ -292,7 +292,8 @@ async function main() {
           try {
             const c = await call('POST', `/requests/${encodeURIComponent(ref.value.trim())}/cancel`, { email: email.value.trim() });
             await check();
-            if (c.refund_percent !== undefined && r.amount_cents) put(out, h('p', { role: 'status' }, c.refund_cents ? `Canceled. ${c.refund_percent}% refunded: ${money(c.refund_cents)}.` : T('Canceled. This was inside the no-refund window, so nothing is refunded.')));
+            if (c.message) put(out, h('p', { role: 'status' }, c.message));
+            else if (c.refund_percent !== undefined && r.amount_cents && (r.status === 'confirmed' || c.refund_cents)) put(out, h('p', { role: 'status' }, c.refund_cents ? `Canceled. ${c.refund_percent}% refunded: ${money(c.refund_cents)}.` : T('Canceled. This was inside the no-refund window, so nothing is refunded.')));
           } catch (err) { clear(out).append(h('p', { class: 'error-box', role: 'alert' }, err.message)); }
         } }, r.amount_cents && r.status === 'confirmed' ? T('Cancel and refund under the policy') : T('Cancel this request'))) : null));
     } catch (_) { out.append(h('p', { class: 'error-box', role: 'alert' }, T('We could not find a booking with that reference and email.'))); }
