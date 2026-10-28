@@ -32,7 +32,7 @@ export async function render(root, params = []) {
   ];
   const want = items.some((i) => i[0] === params[0]) ? params[0] : 'overview';
   root.append(h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Assets and fleet'), h('p', { class: 'page-note' }, 'Every machine, lift part and building system: what it is, where it is, what it needs and what it costs.'))),
-    tabs(items.map(([k, t, fn]) => [k, t, (box) => { try { history.replaceState(null, '', `#/assets/${k}`); } catch (_) { /* tab still opens */ } return fn(box); }]), want));
+    tabs(items, want)); // the open tab is kept in the address (?tab=); #/assets/<tab> still opens that tab
 }
 
 const assetLink = (id, text) => h('a', { href: `#/assets/a/${id}` }, text);

@@ -12,9 +12,14 @@ const gearName = (i) => [i.brand, i.model, i.size].filter(Boolean).join(' ');
 export async function render(root) {
   const items = [['counter', 'Counter', drawCounter], ['out', 'Out now', drawOut], ['reservations', 'Reservations', more.drawReservations]];
   if (can('counter')) items.push(['inventory', 'Inventory', drawInventory], ['service', 'Service', more.drawService]);
-  if (isManager()) items.push(['reports', 'Reports', more.drawReports], ['settings', 'Settings', more.drawSettings]);
+  if (isManager()) items.push(['reports', 'Reports', more.drawReports]);
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Rentals')), tabs(items));
 }
+
+/** Setup shown in Settings, Rentals (managers): late fees, deposits, service, the binding rules and the binding chart. */
+export const settingsPages = {
+  settings: { title: 'Fees, service and the binding chart', render: (panel) => more.drawSettings(panel) },
+};
 
 // ---------------------------------------------------------------- out now
 async function drawOut(box) {

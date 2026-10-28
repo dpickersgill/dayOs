@@ -1,9 +1,10 @@
-// Gate: check a ticket and get one clear answer. Three tabs.
+// Gate: check a ticket and get one clear answer. Two tabs, and the devices set up in Settings.
 // - Scan: a barcode scanner or desk RFID reader types into the box; a phone can also tap cards (NFC) or read a barcode
 //   with its camera. The answer shows the holder's name and photo, warns when the same ticket comes straight back,
 //   and lets staff find a season pass holder who left their card at home.
 // - Cards: put a ticket or pass on an RFID card, look a card up, block a lost one.
-// - Devices (managers): pair gates, turnstiles and handheld readers, and set how long a gate stays open.
+// - Devices (managers, shown in Settings, Sell and gate): pair gates, turnstiles and handheld readers, and set how long a
+//   gate stays open.
 import { get, post, put, patch, del } from '../api.js';
 import { h, clear, input, state, table, field, button, fmtDate, fmtDateTime, label, empty, errorBox, tabs, formDialog, confirmDialog, dialog, select, toast, val, isManager } from '../ui.js';
 import { nfcSupported, cameraSupported, listenNfc, readOneCard, scanWithCamera } from '../readers.js';
@@ -21,11 +22,17 @@ const SCAN_TEXT = {
 const CARD_STATUS = { assigned: ['Has a ticket', 'good'], free: ['Empty', 'neutral'], lost: ['Lost, blocked', 'bad'], retired: ['Retired', 'neutral'] };
 
 export async function render(root, params = []) {
-  const items = [['scan', 'Scan', drawScan], ['cards', 'Cards', drawCards], ...(isManager() ? [['devices', 'Devices', drawDevices]] : [])];
+  // Gate devices are set up in Settings, Sell and gate; the old address goes there.
+  if (params[0] === 'devices' && isManager() && location.hash.startsWith('#/gate/devices')) { location.replace('#/settings/sell'); return; }
+  const items = [['scan', 'Scan', drawScan], ['cards', 'Cards', drawCards]];
   const want = items.some((i) => i[0] === params[0]) ? params[0] : 'scan';
-  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Gate'), h('p', { class: 'muted' }, 'Scan a ticket, tap a card, or type a code.')),
-    tabs(items.map(([k, t, fn]) => [k, t, (box) => { try { if (location.hash.startsWith('#/gate')) history.replaceState(null, '', `#/gate${k === 'scan' ? '' : `/${k}`}`); } catch (_) { /* tab still opens */ } return fn(box); }]), want));
+  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Gate'), h('p', { class: 'muted' }, 'Scan a ticket, tap a card, or type a code.')), tabs(items, want));
 }
+
+/** Setup shown in Settings, Sell and gate (managers): gates, turnstiles and handheld readers, and how long a gate stays open. */
+export const settingsPages = {
+  devices: { title: 'Gate devices', render: (panel) => drawDevices(panel) },
+};
 
 // ---------------------------------------------------------------- scan
 function drawScan(box) {

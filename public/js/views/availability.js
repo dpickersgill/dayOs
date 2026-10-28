@@ -17,10 +17,14 @@ export async function render(root) {
   const items = [];
   if (linked || isManager()) items.push(['mine', isManager() && !linked ? 'Set availability' : 'My availability', (box) => drawMine(box, settings)]);
   items.push(['all', 'Everyone', drawAll]);
-  if (isManager()) items.push(['public', 'Public page', (box) => drawPublic(box, settings)]);
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Instructor availability'),
     h('p', { class: 'page-note' }, 'Mark the dates and times you are open. Change them whenever plans change.')), tabs(items, items[0][0]));
 }
+
+/** Setup shown in Settings, Ski school (managers): the public availability page. */
+export const settingsPages = {
+  public: { title: 'Public availability page', render: async (panel) => drawPublic(panel, await get('/availability/settings'), { heading: false }) },
+};
 
 // ---------------------------------------------------------------- the calendar an instructor edits
 async function drawMine(box, settings) {
@@ -141,7 +145,7 @@ async function drawAll(box) {
 }
 
 // ---------------------------------------------------------------- the public page switch (managers)
-async function drawPublic(box, settings) {
+async function drawPublic(box, settings, { heading = true } = {}) {
   const link = `${location.origin}/availability/${settings.slug}`;
   const on = h('input', { type: 'checkbox', checked: settings.public, id: 'pub-on' });
   on.addEventListener('change', async () => {
@@ -153,7 +157,7 @@ async function drawPublic(box, settings) {
     if (settings.public) slot.append(h('p', null, 'Share this link on your website or social media:'), h('p', null, h('a', { href: link, target: '_blank', rel: 'noopener' }, link)),
       button('Copy link', async () => { try { await navigator.clipboard.writeText(link); toast('Link copied'); } catch (_) { toast('Select the link and copy it'); } }, { small: true }));
   }
-  clear(box).append(h('section', { class: 'section stack' }, h('h2', null, 'Public availability page'),
+  clear(box).append(h('section', { class: 'section stack' }, heading ? h('h2', null, 'Public availability page') : null,
     h('p', { class: 'muted' }, 'Guests can see which instructors are open and when. They cannot book or send a request from it. Only instructors who choose to be listed appear, and they control their own bio and times.'),
     h('label', { class: 'check', for: 'pub-on' }, on, 'Show the public availability page'), slot));
   draw();

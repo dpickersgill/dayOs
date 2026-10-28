@@ -1,5 +1,5 @@
 // Waivers: who has signed this season (search, see exactly what was signed, print it, void a mistake), signing a guest at the
-// counter, the counter tablet link, and (managers) the wording, with every earlier version kept.
+// counter and the counter tablet link. The wording (managers, every earlier version kept) is in Settings, Waivers.
 import { get, post, put, download } from '../api.js';
 import { h, clear, input, state, table, field, button, fmtDateTime, empty, errorBox, tabs, toast, fail, isManager, can, confirmDialog, formDialog, val, appendAll } from '../ui.js';
 import { personPicker, waiverPanel } from '../widgets.js';
@@ -9,11 +9,15 @@ import { shareButton } from '../share.js';
 export async function render(root, params = []) {
   const items = [['signed', 'Signed', signed]];
   if (can('counter', 'instructor')) items.push(['sign', 'Sign a guest', signGuest]);
-  if (isManager()) items.push(['wording', 'Wording', wording]);
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Waivers'), h('p', { class: 'muted' }, 'Everyone who has signed this season, and how they signed.')), tabs(items, 'signed'));
   // #/waivers/w/12 (a shared link): open that signed waiver
   if (params[0] === 'w' && /^\d+$/.test(params[1] || '')) detail(Number(params[1])).catch(() => {});
 }
+
+/** Setup shown in Settings, Waivers (managers): the wording guests sign, with every earlier version kept. */
+export const settingsPages = {
+  wording: { title: 'Waiver wording', render: (panel) => wording(panel) },
+};
 
 const methodTone = (r) => (r.has_signature ? 'good' : 'neutral');
 
@@ -87,7 +91,7 @@ async function signGuest(box) {
   const picker = personPicker({ label: 'Guest', required: true, onPick: (p) => { clear(slot); if (p) slot.append(waiverPanel(p.id)); } });
   const tablet = `${sum.link}?counter=1`;
   appendAll(box, 
-    sum.text ? null : h('div', { class: 'error-box' }, 'There is no waiver wording yet. A manager adds it under Wording.'),
+    sum.text ? null : h('div', { class: 'error-box' }, 'There is no waiver wording yet. A manager adds it in Settings, Waivers.'),
     h('section', { class: 'panel stack' }, h('h2', null, 'A guest who is here now'),
       h('p', { class: 'muted' }, 'Find them, then turn the screen round so they can sign, or email them a link.'), picker.el, slot),
     h('section', { class: 'panel stack' }, h('h2', null, 'Guests who are not in the system yet'),

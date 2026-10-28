@@ -21,10 +21,14 @@ export async function render(root) {
   // Today first: on the day, the board of who teaches what is what the desk needs.
   const items = [['today', 'Today', (b) => boardTab(b, { staff })], ['lessons', 'Lessons', (b) => lessonsTab(b, { staff, certs, names })]];
   if (can('counter')) items.push(['requests', pending ? `Online requests (${pending})` : 'Online requests', (b) => requestsTab(b)]);
-  if (can('instructor')) items.push(['levels', 'Levels and skills', (b) => levelsTab(b)]);
   if (isManager()) items.push(['hours', 'Instructor hours', (b) => hoursTab(b)]);
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Ski school')), tabs(items, 'today'));
 }
+
+/** Setup shown in Settings, Ski school (managers): the level ladder and the skills for each level. */
+export const settingsPages = {
+  levels: { title: 'Levels and skills', render: (panel) => levelsTab(panel) },
+};
 
 // ---------------------------------------------------------------- lessons
 async function lessonsTab(root, { staff, certs, names }) {

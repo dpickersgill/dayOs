@@ -6,7 +6,7 @@
 // A program can run in sessions (Session 1, Session 2), each meeting weekly on the days the mountain picks, with makeup
 // weeks held in reserve for weather. An older program without sessions keeps its single roster.
 import { get, post, put, patch, del } from '../api.js';
-import { h, clear, can, isManager, money, toCents, centsToInput, table, state, input, select, field, button, toast, formDialog, confirmDialog, dialog, tabs, val, num, todayStr, fmtDate, fmtRange, label, empty, errorBox } from '../ui.js';
+import { h, clear, can, isManager, money, toCents, centsToInput, table, state, input, select, field, button, toast, formDialog, confirmDialog, dialog, tabs, val, num, todayStr, fmtDate, fmtRange, label, empty, errorBox, fail } from '../ui.js';
 import { personPicker } from '../widgets.js';
 import { cardDialog } from './school-card.js';
 
@@ -40,8 +40,6 @@ async function listView(root) {
   const typeIn = select([['', 'All types'], ...all.filter((x) => !x.hidden).map((x) => [x.id, x.name])], '', { 'aria-label': 'Type' });
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Programs'),
     h('div', { class: 'row' }, can('instructor') ? h('a', { class: 'btn', href: '#/programs/today' }, "Today's lessons") : null,
-      isManager() ? button('Program types', () => typesDialog(load)) : null,
-      isManager() ? button('Program settings', () => settingsDialog()) : null,
       isManager() ? button('Add program', () => editProgram(null, (id) => { location.hash = `#/programs/${id}`; }), { kind: 'primary' }) : null)),
   h('div', { class: 'inline-form' }, field('Type', typeIn), field('Season', seasonIn, 'Such as 2026-27'), button('Filter', () => load())), body);
 
@@ -66,12 +64,17 @@ async function listView(root) {
   await load();
 }
 
+/** Setup shown in Settings, Programs (managers): registration and reminders, and the program types. */
+export const settingsPages = {
+  registration: { title: 'Registration and reminders', render: (panel) => drawProgramSettings(panel) },
+  types: { title: 'Program types', render: (panel) => drawTypes(panel) },
+};
+
 /** The mountain's own list of program types: add, rename, hide, put in order. */
-async function typesDialog(reload) {
+async function drawTypes(panel) {
   const list = h('ol', { class: 'plain ptypes' });
-  const dlg = dialog('Program types', [h('p', { class: 'muted' }, 'The headings programs are grouped under, here and on the registration page. Hide a type you no longer use; its programs keep it.'), list,
-    h('div', { class: 'row' }, button('Add a type', () => formDialog('Add a type', field('Name', input({ name: 'name', required: true, maxlength: 60, placeholder: 'Homeschool, Scouts, Women\'s clinic' })), async (fd) => { await post('/programs/types', { name: val(fd, 'name') }); await draw(); }), { kind: 'primary' }))],
-  { onClose: () => reload() });
+  panel.append(h('div', { class: 'stack' }, h('p', { class: 'muted' }, 'The headings programs are grouped under, here and on the registration page. Hide a type you no longer use; its programs keep it.'), list,
+    h('div', { class: 'row' }, button('Add a type', () => formDialog('Add a type', field('Name', input({ name: 'name', required: true, maxlength: 60, placeholder: 'Homeschool, Scouts, Women\'s clinic' })), async (fd) => { await post('/programs/types', { name: val(fd, 'name') }); await draw(); }), { kind: 'primary' }))));
   async function draw() {
     const ts = await types(true);
     clear(list).append(...ts.map((x, i) => h('li', { class: `spread ptype${x.hidden ? ' is-hidden' : ''}` }, h('span', null, h('b', null, x.name), x.hidden ? h('span', { class: 'muted small' }, ' hidden') : null),
@@ -80,26 +83,32 @@ async function typesDialog(reload) {
         button('Rename', () => formDialog(`Rename ${x.name}`, field('Name', input({ name: 'name', required: true, maxlength: 60, value: x.name })), async (fd) => { await patch(`/programs/types/${x.id}`, { name: val(fd, 'name') }); await draw(); }), { small: true }),
         button(x.hidden ? 'Show' : 'Hide', async () => { await patch(`/programs/types/${x.id}`, { hidden: !x.hidden }); await draw(); }, { small: true, kind: 'quiet' })))));
     const firstUp = list.querySelector('li button'); if (firstUp) firstUp.disabled = true;
+    if (!ts.length) list.append(h('li', { class: 'muted' }, 'No types yet.'));
   }
   await draw();
-  return dlg;
 }
 
 /** The mountain's program settings: a pass bought after registering, reminders, weather texts. */
-async function settingsDialog() {
+async function drawProgramSettings(panel) {
   const s = await get('/programs/settings');
-  formDialog('Program settings', h('div', { class: 'stack' },
+  const form = h('form', { class: 'stack', novalidate: true },
     h('fieldset', { class: 'plain-set' }, h('legend', null, 'A season pass bought after registering'),
       h('p', { class: 'muted small' }, 'When a child in a program that charged a lift ticket part gets a season pass, at the window or online:'),
       field('Then', select([['none', 'Nothing changes'], ['refund', 'Refund the lift ticket part (to the card it was paid with)'], ['credit', 'Give the family a credit (as a gift card)']], s.pass_later, { name: 'pass_later' })),
       field('How much', select([['unused', 'The share for lessons still to come'], ['full', 'The whole lift ticket part']], s.pass_later_share, { name: 'pass_later_share' }))),
     h('fieldset', { class: 'plain-set' }, h('legend', null, 'Telling families'),
       field('Reminder the day before', select([['first', 'Before the first lesson (and any makeup)'], ['every', 'Before every lesson'], ['off', 'Off']], s.reminders, { name: 'reminders' }), 'By email, with the time, the meeting place and what to bring'),
-      h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'text_cancellations', checked: s.text_cancellations }), ' Text families when a lesson is canceled for weather (needs text messages set up)'))),
-  async (fd) => {
-    await put('/programs/settings', { pass_later: val(fd, 'pass_later'), pass_later_share: val(fd, 'pass_later_share'), reminders: val(fd, 'reminders'), text_cancellations: Boolean(fd.get('text_cancellations')) });
-    toast('Program settings saved');
-  }, { wide: true });
+      h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'text_cancellations', checked: s.text_cancellations }), ' Text families when a lesson is canceled for weather (needs text messages set up)')),
+    h('div', { class: 'row' }, h('button', { type: 'submit', class: 'btn primary' }, 'Save')));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    try {
+      await put('/programs/settings', { pass_later: val(fd, 'pass_later'), pass_later_share: val(fd, 'pass_later_share'), reminders: val(fd, 'reminders'), text_cancellations: Boolean(fd.get('text_cancellations')) });
+      toast('Program settings saved');
+    } catch (err) { fail(err); }
+  });
+  panel.append(form);
 }
 
 /** A program's own settings: type, who it is for, what the price is made of, discounts, classes and its rules. */
@@ -113,7 +122,7 @@ async function editProgram(p, done) {
   const f = h('div', { class: 'stack' },
     h('div', { class: 'form' },
       field('Name', input({ name: 'name', required: true, maxlength: 255, value: p ? p.name : '', placeholder: 'After-School Ski & Ride' })),
-      field('Type', select([['', 'Choose a type'], ...ts.map((x) => [x.id, x.name])], p ? p.type_id || '' : '', { name: 'type_id' }), 'Manage the list in Program types'),
+      field('Type', select([['', 'Choose a type'], ...ts.map((x) => [x.id, x.name])], p ? p.type_id || '' : '', { name: 'type_id' }), 'Manage the list in Settings, Programs'),
       field('Season', input({ name: 'season', required: true, value: p ? p.season : '', placeholder: '2026-27' })),
       field('Youngest age', input({ name: 'age_min', type: 'number', min: 0, max: 99, value: p && p.age_min != null ? p.age_min : '' })),
       field('Oldest age', input({ name: 'age_max', type: 'number', min: 0, max: 99, value: p && p.age_max != null ? p.age_max : '' })),

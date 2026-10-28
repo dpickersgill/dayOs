@@ -1,13 +1,19 @@
 // Online shop desk: find a guest's order at the window (will-call), follow up group inquiries, see who is waiting for a
-// sold-out day, and (managers) edit prices and limits for many days at once and watch ticket sales pace.
+// sold-out day, and (managers) watch ticket sales pace. Prices and limits for many days at once are set in Settings,
+// Online shop (settingsPages below).
 import { get, post, patch } from '../api.js';
 import { h, clear, fail, money, toCents, table, state, input, select, field, button, toast, tabs, fmtDate, fmtDateTime, todayStr, addDays, empty, errorBox, isManager } from '../ui.js';
 
 export async function render(root) {
   const items = [['willcall', 'Will-call', willcall], ['groups', 'Group inquiries', groups], ['waitlist', 'Waitlist', waitlist]];
-  if (isManager()) items.push(['calendar', 'Prices and limits', calendar], ['pace', 'Sales pace', pace]);
+  if (isManager()) items.push(['pace', 'Sales pace', pace]);
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Online shop')), tabs(items, 'willcall'));
 }
+
+/** Setup shown in Settings, Online shop (managers): prices and limits for many days at once. */
+export const settingsPages = {
+  limits: { title: 'Prices and limits', render: (panel) => calendar(panel) },
+};
 
 // ---------------------------------------------------------------- will-call
 async function willcall(box) {
@@ -63,7 +69,7 @@ async function groups(box) {
 // ---------------------------------------------------------------- waitlist
 async function waitlist(box) {
   const r = await get('/online-shop/waitlist');
-  box.append(h('p', { class: 'muted' }, 'Guests who asked to be emailed if a sold-out day opens up. They are told once, automatically, the next time the daily job runs after tickets are available. Raising a day\'s limit is the quickest way to serve them.'),
+  box.append(h('p', { class: 'muted' }, 'Guests who asked to be emailed if a sold-out day opens up. They are told once, automatically, the next time the daily job runs after tickets are available. Raising a day\'s limit is the quickest way to serve them.', isManager() ? [' ', h('a', { href: '#/settings/shop' }, 'Prices and limits are in Settings, Online shop.')] : null),
     r.data.length ? table([
       { head: 'Day', cell: (d) => fmtDate(d.on_date) },
       { head: 'People waiting', num: true, cell: (d) => String(d.people) },
