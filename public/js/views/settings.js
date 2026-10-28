@@ -1,336 +1,131 @@
-import { get, post, put, patch, del, session } from '../api.js';
-import { mfaPanel } from './mfa.js';
-import { signInSection } from './security.js';
-import { brandPanel } from './shopbrand.js';
-import { h, clear, ctx, isManager, table, state, input, select, field, button, toast, formDialog, confirmDialog, val, num, label, empty, errorBox, toCents, centsToInput, money, fmtDateTime, dialog } from '../ui.js';
+// Settings: everything that is set up once rather than used every day, in one place. Its own list on the left (in
+// place of the app menu) in three groups: You (everyone), The mountain and Apps (owners and managers; Apps only for apps
+// that are on). A patrol Admin who is not a manager sees the Patrol page as well as their own. On a phone the list is a
+// page of its own: pick one, and each page has a link back to the list.
+//
+// Pages: #/settings/<page>. #/settings on its own opens Your profile and sign-in on a computer, and the list on a phone.
+import { get } from '../api.js';
+import { h, clear, ctx, isManager, errorBox, loading, confirmDialog } from '../ui.js';
+import { hasUnsaved } from './settings-kit.js';
 
-const ROLES = ['manager', 'staff', 'counter', 'instructor', 'patrol', 'area'];
-// The ski area's free read-only login: the patrol summary and approved reports only.
-const roleName = (r) => (r === 'area' ? 'Ski area (read-only)' : label(r));
+const GROUPS = { you: 'You', mountain: 'The mountain', apps: 'Apps' };
 
-export async function render(root) {
-  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Account')));
-  root.append(passwordForm(), await signInSection(() => mfaPanel()));
-  if (isManager()) {
-    root.append(await mountainForm());
-    root.append(await brandPanel());
-    root.append(await assistantPanel());
-    const box = h('section', { class: 'section' });
-    root.append(box);
-    await drawLogins(box);
+// [key, group, name in the list and title, one line under the title, loader of the page's own module]
+const PAGES = [
+  ['profile', 'you', 'Your profile and sign-in', 'Your password, passkeys and two-step sign-in, where you are signed in, and light or dark.', () => import('./settings-you.js')],
+  ['mountain', 'mountain', 'Mountain details', 'The name, phone and address on receipts, the mountain’s time zone, and the weekly report.', () => import('./settings-mountain.js')],
+  ['team', 'mountain', 'Team and logins', 'Who can sign in, who must use two-step sign-in, and the menu each role sees.', () => import('./settings-team.js')],
+  ['shared', 'mountain', 'Shared computers', 'Computers several people use, like the ticket window. Staff switch in with their username and PIN.', () => import('./settings-mountain.js')],
+  ['billing', 'mountain', 'Billing and plan', 'Your Verdynt/OS plan, how you pay for it, invoices and history.', () => import('./billing.js')],
+  ['payments', 'mountain', 'Payments and card readers', 'The Stripe account guests’ card payments go into, and the card readers at the counter.', () => import('./billing.js')],
+  ['assistant', 'mountain', 'Assistant', 'Who can ask the assistant, which guest pages show it, and this month’s use.', () => import('./settings-mountain.js')],
+  ['sell', 'apps', 'Sell and gate', 'The ticket window’s limits, quick sale, partner passes, and the gate. Only owners and managers see this page.', () => import('./settings-apps.js')],
+  ['shop', 'apps', 'Online shop', 'Whether guests can buy online, date changes, limits and prices by day, and how the shop page looks.', () => import('./settings-apps.js')],
+  ['school', 'apps', 'Ski school', 'Online lesson booking, cancellations and refunds, and the levels you teach. Only owners and managers see this page.', () => import('./settings-apps.js')],
+  ['programs', 'apps', 'Programs', 'How families register for programs.', () => import('./settings-apps.js')],
+  ['rentals', 'apps', 'Rentals', 'How the rental counter works: fees, deposits and the binding chart.', () => import('./settings-apps.js')],
+  ['waivers', 'apps', 'Waivers', 'The waiver wording guests sign, with every earlier version kept.', () => import('./settings-apps.js')],
+  ['patrol', 'apps', 'Patrol', 'Patrol settings, what a report must hold, and who can do what.', () => import('./settings-apps.js')],
+  ['workforce', 'apps', 'Staff and schedule', 'Positions, certifications and the time clock.', () => import('./settings-apps.js')],
+  ['messages', 'apps', 'Messages', 'How email and text messages are sent.', () => import('./settings-apps.js')],
+];
+export const PAGE_KEYS = PAGES.map((p) => p[0]);
+
+// The app each Apps page opens, and the module that must be on for the page to show.
+export const APP_OF = { sell: ['sell', 'Sell', ['sell', 'gate']], shop: ['shop', 'Online shop', ['shop']], school: ['school', 'Ski school', ['school']], programs: ['programs', 'Programs', ['programs']],
+  rentals: ['rentals', 'Rentals', ['rentals']], waivers: ['waivers', 'Waivers', null], patrol: ['patrol', 'Patrol', ['patrol']], workforce: ['workforce', 'Staff and schedule', ['workforce']], messages: ['messages', 'Messages', ['messages']] };
+
+const moduleOn = (keys) => !keys || !ctx.me.modules || keys.some((k) => ctx.me.modules.includes(k));
+
+/** The person's patrol access level (admin, manager, ...), or null when they are not on the patrol. */
+async function patrolLevel() {
+  if (!moduleOn(['patrol']) || !(ctx.me.role === 'patrol' || ctx.me.on_patrol)) return null;
+  try { const m = await get('/patrol/me'); return { level: m.access_level, features: m.features || [] }; } catch (_) { return null; }
+}
+
+/** Which pages this person sees, in list order. who: { manager, patrolAdmin }. */
+async function visiblePages(who) {
+  const apps = await import('./settings-apps.js');
+  const out = [];
+  for (const p of PAGES) {
+    const [key, group] = p;
+    if (group === 'you') { out.push(p); continue; }
+    if (ctx.me.role === 'area') continue;
+    if (group === 'mountain') { if (who.manager) out.push(p); continue; }
+    if (!moduleOn(APP_OF[key][2])) continue;
+    if (key === 'patrol' ? !(who.manager || who.patrolAdmin) : !who.manager) continue;
+    if (await apps.pageHasSetup(key, who)) out.push(p);
   }
+  return out;
 }
 
-function passwordForm() {
-  const cur = input({ type: 'password', name: 'current', autocomplete: 'current-password', required: true });
-  const next = input({ type: 'password', name: 'next', autocomplete: 'new-password', required: true, minlength: 12 });
-  const again = input({ type: 'password', name: 'again', autocomplete: 'new-password', required: true });
-  const slot = h('div');
-  const go = h('button', { type: 'submit', class: 'btn primary' }, 'Change password');
-  const form = h('form', { class: 'stack', novalidate: true }, h('div', { class: 'form' }, field('Current password', cur), field('New password', next, 'At least 12 characters. A short phrase of a few words is easiest to remember. Not your name or the mountain\'s.'), field('Repeat new password', again)), slot, h('div', { class: 'row' }, go));
-  form.addEventListener('submit', async (e) => {
+// Leaving Settings gives the app its menu back.
+let watching = false;
+function enterArea() {
+  document.documentElement.classList.add('in-settings');
+  if (watching) return;
+  watching = true;
+  window.addEventListener('hashchange', () => { if (!/^#\/settings(\/|\?|$)/.test(location.hash)) document.documentElement.classList.remove('in-settings'); });
+}
+
+/** A link inside Settings that asks first when the page has changes not saved yet. */
+function guarded(a) {
+  a.addEventListener('click', (e) => {
+    if (!hasUnsaved() || e.ctrlKey || e.metaKey) return;
     e.preventDefault();
-    clear(slot);
-    if (next.value !== again.value) { slot.append(errorBox(new Error('The new passwords do not match'))); return; }
-    go.disabled = true;
-    try {
-      const out = await post('/auth/change-password', { current_password: cur.value, new_password: next.value });
-      session.token = out.token; // this device stays signed in; every other session ends
-      cur.value = next.value = again.value = '';
-      toast('Password changed. Other devices were signed out');
-    } catch (err) {
-      slot.append(errorBox(err));
-    } finally {
-      go.disabled = false;
-    }
+    confirmDialog('Leave without saving?', 'This page has changes that are not saved yet. Leave and lose them, or stay and press Save changes.', 'Leave without saving', async () => { location.hash = a.getAttribute('href'); });
   });
-  const myName = h('div', { class: 'row' }, h('span', null, 'Username: ', h('b', null, ctx.me.username || '')), ctx.me.username ? button('Change', () => formDialog('Change your username', h('div', { class: 'form' },
-    field('Username', input({ name: 'username', value: ctx.me.username, required: true, maxlength: 40, autocapitalize: 'none', spellcheck: 'false' }), 'What you type to sign in. Letters, numbers, dots and dashes.')), async (fd) => {
-    const r = await post('/auth/username', { username: String(fd.get('username') || '') });
-    ctx.me.username = r.username;
-    toast(`You now sign in as ${r.username}`);
-  }), { small: true }) : null);
-  return h('section', { class: 'panel stack' }, h('h2', null, 'Change your password'), myName, h('p', { class: 'muted' }, `Signed in as ${ctx.me.username || ctx.me.email}${ctx.me.username && ctx.me.email ? ` (${ctx.me.email}). You can sign in with either.` : '.'}`), form);
+  return a;
 }
 
-// ---------------------------------------------------------------- manage logins
-async function drawLogins(box) {
-  const [{ data: users }, { data: staff }] = await Promise.all([get('/users'), get('/workforce/staff')]);
-  const staffName = new Map(staff.map((s) => [s.id, `${s.first_name} ${s.last_name}`]));
-  const reload = async () => { const n = h('div'); await drawLogins(n); clear(box).append(...n.childNodes); };
-  const isOwner = ctx.me.role === 'owner';
-  const canManage = (u) => u.role !== 'owner' && (isOwner || u.role !== 'manager');
+export async function render(root, params = []) {
+  enterArea();
+  const asked = params[0] || null;
+  const manager = isManager();
+  const pl = manager ? null : await patrolLevel();
+  const who = { manager, patrolAdmin: Boolean(pl && (pl.level === 'admin' || pl.features.includes('manage_settings'))), patrol: pl };
+  const pages = await visiblePages(who);
+  const page = pages.find((p) => p[0] === asked) || pages[0];
+  const home = !asked || !pages.some((p) => p[0] === asked);
+  if (asked && home) history.replaceState(history.state, '', '#/settings'); // a page this person cannot use: the list instead
 
-  clear(box).append(
-    h('header', null, h('div', null, h('h2', null, 'Logins'), h('p', null, 'Who can sign in to this mountain. Everyone signs in with their username, or their email if they have one; only managers must have an email. Link a login to a staff member so they can see their shifts and clock in.')),
-      h('div', { class: 'row' }, button('Season end', () => seasonEnd(reload), { small: true }), button('Add login', () => addLogin(staff, isOwner, reload), { kind: 'primary', small: true }))),
-    users.length ? table([
-      { head: 'Username', cell: (u) => [h('strong', null, u.username || ''), u.must_change_password ? h('small', { class: 'muted' }, ' (temporary password)') : null] },
-      { head: 'Email', cell: (u) => u.email || h('span', { class: 'muted' }, 'None') },
-      { head: 'Role', cell: (u) => roleName(u.role) },
-      { head: 'Staff record', cell: (u) => (u.staff_id ? staffName.get(u.staff_id) || `#${u.staff_id}` : h('span', { class: 'muted' }, 'Not linked')) },
-      { head: 'Status', cell: (u) => state(u.active ? 'Active' : 'Deactivated', u.active ? 'good' : 'neutral') },
-      { head: 'Two-step', cell: (u) => (u.mfa_enabled ? state(Number(u.passkeys) ? (u.app_enabled ? 'Passkey and app' : 'Passkey') : 'App', 'good') : h('span', { class: 'muted' }, 'Off')) },
-      { head: 'Access ends', cell: (u) => (u.access_ends_on ? (String(u.access_ends_on).slice(0, 10) < today() ? state(`Ended ${String(u.access_ends_on).slice(0, 10)}`, 'neutral') : String(u.access_ends_on).slice(0, 10)) : h('span', { class: 'muted' }, '-')) },
-      { head: '', actions: true, cell: (u) => (canManage(u) ? [
-        button('Edit', () => editLogin(u, reload), { small: true, label: `Edit ${u.username}` }),
-        button('Link staff', () => linkStaff(u, staff, reload), { small: true }),
-        button('Role', () => changeRole(u, isOwner, reload), { small: true }),
-        button('New password', () => resetPassword(u), { small: true }),
-        u.mfa_enabled ? button('Reset two-step', () => resetMfa(u, reload), { small: true }) : null,
-        u.pin_set ? button('Clear PIN', () => confirmDialog(`Clear ${who(u)}'s PIN?`, 'They are switched out of any shared terminal now and set a new PIN in Account.', 'Clear PIN', async () => { await del(`/users/${u.id}/pin`); toast('PIN cleared'); await reload(); }), { small: true }) : null,
-        u.id === ctx.me.id ? null : button(u.active ? 'Deactivate' : 'Reactivate', () => toggleActive(u, reload), { small: true, kind: u.active ? 'danger' : undefined }),
-      ] : null) },
-    ], users) : empty('No logins.'));
+  const phone = Boolean(window.matchMedia && window.matchMedia('(max-width: 860px)').matches);
+  // ---- the list
+  const back = guarded(h('a', { class: 'set-backapp', href: ctx.me.menu && ctx.me.menu.start ? `#/${ctx.me.menu.start}` : '#/' }, h('span', { 'aria-hidden': 'true' }, '‹'), 'Back to the app'));
+  const nav = h('nav', { class: 'set-nav', 'aria-label': 'Settings' }, back, h('p', { class: 'set-nav-title', role: 'heading', 'aria-level': '2' }, 'Settings'),
+    Object.entries(GROUPS).map(([g, name]) => {
+      const mine = pages.filter((p) => p[1] === g);
+      if (!mine.length) return null;
+      return h('div', { class: 'set-group' }, h('p', { class: 'set-group-name' }, name),
+        h('ul', null, mine.map(([key, , text]) => h('li', null, guarded(h('a', { href: `#/settings/${key}`, class: 'set-link', dataset: { page: key }, 'aria-current': key === page[0] && !(home && phone) ? 'page' : null }, text))))));
+    }));
+
+  // ---- the page
+  const content = h('div', { class: 'set-main' });
+  const area = h('div', { class: `set-area${home ? ' is-home' : ''}` }, nav, content);
+  root.append(area);
+  if (home && phone) { document.title = `Settings · ${ctx.me.tenant_name}`; return; } // the list is the page
+  await renderPage(content, page, who);
 }
 
-function roleOptions(isOwner) { return (isOwner ? ROLES : ROLES.filter((r) => r !== 'manager')); }
-
-const who = (u) => u.username || u.email;
-const needsEmail = (role) => ['owner', 'manager', 'area'].includes(role);
-
-/** A new login: a username (filled in from the staff member's name), an email if they have one (managers must). */
-function addLogin(staff, isOwner, done) {
-  const uname = input({ name: 'username', required: true, autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', maxlength: 40 });
-  const email = input({ name: 'email', type: 'email', autocomplete: 'off' });
-  const role = select(roleOptions(isOwner).map((r) => [r, roleName(r)]), 'staff', { name: 'role' });
-  const staffSel = select([['', 'Not linked'], ...staff.map((s) => [s.id, `${s.first_name} ${s.last_name}`])], '', { name: 'staff_id' });
-  const emailHint = h('span', { class: 'hint' });
-  let typed = false;
-  uname.addEventListener('input', () => { typed = true; });
-  const suggest = async () => {
-    if (typed) return;
-    try { uname.value = (await get(`/users/suggest-username?staff_id=${staffSel.value || ''}&email=${encodeURIComponent(email.value.trim())}`)).username; } catch (_) { /* leave it */ }
-  };
-  const syncHint = () => { emailHint.textContent = role.value === 'area' ? 'Required. A ski area login sees the patrol summary and approved reports only, uses two-step sign-in, and is free.' : needsEmail(role.value) ? 'Required for managers.' : 'Optional. They can sign in with either.'; };
-  staffSel.addEventListener('change', suggest); email.addEventListener('change', suggest); role.addEventListener('change', syncHint);
-  syncHint();
-  const f = h('div', { class: 'form' },
-    field('Staff record', staffSel, 'Linking lets them see their shifts and clock in'),
-    field('Username', uname, 'What they type to sign in. Letters, numbers, dots and dashes.'),
-    h('label', { class: 'field' }, 'Email', email, emailHint),
-    field('Role', role),
-    field('Temporary password', input({ name: 'password', type: 'text', required: true, minlength: 12, autocomplete: 'off' }), 'At least 12 characters. Tell them in person or by phone.'),
-    h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name: 'temporary', checked: true }), ' They choose their own password when they first sign in'));
-  formDialog('Add a login', f, async (fd) => {
-    if (needsEmail(val(fd, 'role')) && !val(fd, 'email')) throw new Error(val(fd, 'role') === 'area' ? 'A ski area login needs an email' : 'Managers need an email');
-    const r = await post('/users', { username: val(fd, 'username') || undefined, email: val(fd, 'email') || undefined, password: fd.get('password'), role: val(fd, 'role'), staff_id: num(fd, 'staff_id') || undefined, temporary: Boolean(fd.get('temporary')) });
-    toast(`Login created. They sign in as ${r.username}`);
-    await done();
-  }, { submitText: 'Create login' });
-  suggest();
-}
-
-const today = () => new Date().toISOString().slice(0, 10);
-
-function editLogin(u, done) {
-  formDialog(`Edit ${who(u)}`, h('div', { class: 'form' },
-    field('Username', input({ name: 'username', value: u.username || '', required: true, maxlength: 40, autocapitalize: 'none', spellcheck: 'false' }), 'Letters, numbers, dots and dashes'),
-    field('Email', input({ name: 'email', type: 'email', value: u.email || '' }), needsEmail(u.role) ? 'Required for managers.' : 'Optional. Leave blank if they have none.'),
-    needsEmail(u.role) ? null : field('Access ends after', input({ name: 'access_ends_on', type: 'date', value: u.access_ends_on ? String(u.access_ends_on).slice(0, 10) : '' }), 'They cannot sign in after this day. Leave blank for no end. Clear it to bring someone back.')), async (fd) => {
-    await patch(`/users/${u.id}`, { username: val(fd, 'username'), email: val(fd, 'email'), ...(needsEmail(u.role) ? {} : { access_ends_on: val(fd, 'access_ends_on') }) });
-    toast('Saved');
-    await done();
-  });
-}
-
-/** The last day of the season: seasonal logins stop working after it, and new ones get it too. */
-async function seasonEnd(done) {
-  const r = await get('/tenant/sign-in-rules');
-  const date = input({ name: 'date', type: 'date', value: r.season_ends_on || '', min: today() });
-  const now = h('input', { type: 'checkbox', name: 'now', checked: true });
-  formDialog('Season end', h('div', { class: 'stack' },
-    h('p', null, 'Seasonal staff stop being able to sign in after this day, so logins do not linger over the summer. Owners and managers are never affected. To bring someone back, edit their login and clear or move the date.'),
-    h('div', { class: 'form' }, field('Last day of the season', date, 'Leave blank to have no season end for new logins')),
-    h('label', { class: 'check' }, now, ' Also set it on every current counter, instructor, staff and patrol login')), async () => {
-    const out = await post('/users/season-end', { date: date.value || null, apply_to_current: now.checked });
-    toast(out.season_ends_on ? `Season ends ${out.season_ends_on}. ${out.changed} login${out.changed === 1 ? '' : 's'} updated` : 'No season end for new logins');
-    await done();
-  }, { submitText: 'Save' });
-}
-
-function linkStaff(u, staff, done) {
-  formDialog(`Staff record for ${who(u)}`, h('div', { class: 'form' },
-    field('Staff member', select([['', 'Not linked'], ...staff.map((s) => [s.id, `${s.first_name} ${s.last_name}`])], u.staff_id || '', { name: 'staff_id' }), 'Each staff member can have one login')), async (fd) => {
-    await patch(`/users/${u.id}`, { staff_id: num(fd, 'staff_id') || null });
-    toast('Saved');
-    await done();
-  });
-}
-
-function changeRole(u, isOwner, done) {
-  formDialog(`Role for ${who(u)}`, h('div', { class: 'form' }, field('Role', select(roleOptions(isOwner).map((r) => [r, roleName(r)]), u.role, { name: 'role' }))), async (fd) => {
-    await patch(`/users/${u.id}`, { role: val(fd, 'role') });
-    toast('Role changed. It applies right away');
-    await done();
-  });
-}
-
-function resetPassword(u) {
-  formDialog(`New password for ${who(u)}`, h('div', { class: 'form' },
-    field('New password', input({ name: 'password', type: 'text', required: true, minlength: 12, autocomplete: 'off' }), 'At least 12 characters. They are signed out everywhere until they use it. Tell them in person or by phone.'),
-    h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name: 'temporary', checked: true }), ' Temporary: they choose their own password when they next sign in')), async (fd) => {
-    await post(`/users/${u.id}/reset-password`, { new_password: fd.get('password'), temporary: Boolean(fd.get('temporary')) });
-    toast(`Password reset. They sign in as ${who(u)}`);
-  }, { submitText: 'Reset password' });
-}
-
-function toggleActive(u, done) {
-  const off = u.active;
-  confirmDialog(off ? 'Deactivate this login?' : 'Reactivate this login?', off ? `${who(u)} is signed out immediately and cannot sign in.` : `${who(u)} can sign in again.`, off ? 'Deactivate' : 'Reactivate', async () => {
-    await patch(`/users/${u.id}`, { active: !off });
-    toast(off ? 'Login deactivated' : 'Login reactivated');
-    await done();
-  }, { danger: off });
-}
-
-function resetMfa(u, done) {
-  confirmDialog('Reset two-step sign-in?', `${who(u)} will sign in with just their password until they set two-step up again. Do this when they have lost their phone and their recovery codes.`, 'Reset two-step', async () => {
-    await post(`/users/${u.id}/reset-mfa`);
-    toast('Two-step sign-in reset');
-    await done();
-  }, { danger: true });
-}
-
-// ---------------------------------------------------------------- the mountain's own details
-/** Name, address and phone for receipts, the waiver wording, comp and gate settings, and the two-step rule. */
-async function mountainForm() {
-  const t = await get('/tenant/profile');
-  const isOwner = ctx.me.role === 'owner';
-  const name = input({ name: 'name', value: t.name || '', maxlength: 255, required: true });
-  // The mountain's clock: every time on its records is shown on it. The common North American zones first.
-  const ZONES = [['America/New_York', 'Eastern'], ['America/Detroit', 'Eastern (Michigan)'], ['America/Chicago', 'Central'], ['America/Denver', 'Mountain'], ['America/Boise', 'Mountain (Idaho)'], ['America/Phoenix', 'Arizona (no daylight saving)'],
-    ['America/Los_Angeles', 'Pacific'], ['America/Anchorage', 'Alaska'], ['Pacific/Honolulu', 'Hawaii'], ['America/Halifax', 'Atlantic'], ['America/Toronto', 'Eastern (Canada)'], ['America/Winnipeg', 'Central (Canada)'], ['America/Edmonton', 'Mountain (Canada)'], ['America/Vancouver', 'Pacific (Canada)']];
-  const zoneSel = select([...(ZONES.some((z) => z[0] === t.timezone) ? [] : [[t.timezone, t.timezone]]), ...ZONES.map(([z, l]) => [z, `${l} (${z})`])], t.timezone, { name: 'timezone', disabled: !isOwner });
-  const clockNow = h('span', { class: 'muted small' });
-  const showClock = () => { try { clockNow.textContent = `It is ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: zoneSel.value, timeZoneName: 'short' })} there now.`; } catch (_) { clockNow.textContent = ''; } };
-  zoneSel.addEventListener('change', showClock); showClock();
-  const address = input({ name: 'address', value: t.address || '', maxlength: 255, placeholder: 'Street, town, state' });
-  const phone = input({ name: 'phone', value: t.phone || '', maxlength: 40 });
-  const footer = h('textarea', { name: 'receipt_footer', rows: 2, maxlength: 500 }, t.receipt_footer || '');
-  const waiver = h('textarea', { name: 'waiver_text', rows: 8, maxlength: 20000, 'aria-label': 'Waiver wording' }, t.waiver_text || '');
-  const comp = input({ name: 'comp', inputmode: 'decimal', value: centsToInput(t.comp_counter_limit_cents), 'aria-label': 'Counter free-of-charge limit' });
-  const passback = input({ name: 'passback', type: 'number', min: 0, max: 3600, value: t.scan_passback_seconds, 'aria-label': 'Pass-back seconds' });
-  const booking = h('input', { type: 'checkbox', name: 'online_booking', checked: Boolean(t.online_booking) });
-  const notice = input({ name: 'booking_notice_hours', type: 'number', min: 0, max: 240, value: t.booking_notice_hours ?? 12, 'aria-label': 'Booking notice hours' });
-  const cancelHrs = input({ name: 'cancel_hours', type: 'number', min: 0, max: 240, value: t.cancel_hours ?? 24, 'aria-label': 'Cancel hours' });
-  const bookMsg = input({ name: 'booking_message', maxlength: 500, value: t.booking_message || '', placeholder: 'For example: Lessons are at the Ski School desk in the base lodge.' });
-  const payOn = h('input', { type: 'checkbox', name: 'online_payment', checked: Boolean(t.online_payment), disabled: !t.stripe_ready });
-  const fullHrs = input({ name: 'refund_full_hours', type: 'number', min: 0, max: 720, value: t.refund_full_hours ?? 48, 'aria-label': 'Full refund hours' });
-  const halfHrs = input({ name: 'refund_half_hours', type: 'number', min: 0, max: 720, value: t.refund_half_hours ?? 24, 'aria-label': 'Partial refund hours' });
-  const halfPct = input({ name: 'refund_half_percent', type: 'number', min: 0, max: 100, value: t.refund_half_percent ?? 50, 'aria-label': 'Partial refund percent' });
-  const cancelNote = input({ name: 'cancel_note', maxlength: 500, value: t.cancel_note || '', placeholder: 'Optional extra line, for example: Groups of 6 or more, call us to change.' });
-  const bookUrl = `${location.origin}/book/${t.slug}`;
-  const weeklyOn = h('input', { type: 'checkbox', name: 'weekly_report', checked: t.weekly_report !== false });
-  const quickOn = h('input', { type: 'checkbox', name: 'quick_sale', checked: t.quick_sale !== false });
-  const shopOn = h('input', { type: 'checkbox', name: 'online_shop', checked: Boolean(t.online_shop) });
-  const shopMsg = input({ name: 'shop_message', maxlength: 500, value: t.shop_message || '', placeholder: 'For example: Show the barcode on your phone at the gate. No printing needed.' });
-  const recov = h('input', { type: 'checkbox', checked: Boolean(t.shop_recovery) });
-  const chgOn = h('input', { type: 'checkbox', checked: t.shop_change_hours !== null && t.shop_change_hours !== undefined });
-  const chgHours = input({ name: 'shop_change_hours', type: 'number', min: 0, max: 720, value: t.shop_change_hours ?? 24 });
-  const chgFee = input({ name: 'shop_change_fee', inputmode: 'decimal', value: centsToInput(t.shop_change_fee_cents || 0) });
-  const shopLimit = input({ name: 'online_daily_limit', type: 'number', min: 1, max: 1000000, value: t.online_daily_limit || '', placeholder: 'No limit' });
-  const shopUrl = `${location.origin}/shop/${t.slug}`;
-  const mfa = h('input', { type: 'checkbox', name: 'require_mfa', checked: Boolean(t.require_mfa), disabled: !isOwner });
-  const slot = h('div');
-  const go = h('button', { type: 'submit', class: 'btn primary' }, 'Save');
-  const form = h('form', { class: 'stack', novalidate: true, 'data-form': 'mountain' },
-    h('div', { class: 'form' }, field('Mountain name', name), field('Phone', phone), field('Address', address, 'Printed at the top of receipts and ticket slips')),
-    h('div', { class: 'stack tight', 'data-section': 'timezone' }, field('Time zone', zoneSel, isOwner ? 'Every time on your records is on the mountain\u2019s clock. Check it shows the right local time.' : 'Only the owner can change this.'), clockNow),
-    field('Receipt footer', footer, 'For example: opening hours, a thank-you, or the refund policy'),
-    field('Waiver wording', waiver, 'Shown to guests before they sign. Have a lawyer review it before you rely on it. Every version is kept word for word. To ask everyone to sign a new version again, change it on the Waivers page instead.'),
-    h('div', { class: 'form' },
-      field('Counter staff may give away up to', comp, 'In dollars per sale. 0 means only managers can sell free of charge.'),
-      field('Gate: warn if a ticket is scanned again within (seconds)', passback, '0 turns the warning off. Catches a ticket passed back across the fence.')),
-    h('div', { class: 'stack', 'data-section': 'online-booking' },
-      h('h3', null, 'Online lesson booking'),
-      h('label', { class: 'check' }, booking, ' Guests can ask for a lesson on the public booking page'),
-      h('p', { class: 'muted small' }, 'Without card payment, requests hold a place and staff confirm each one (Ski school > Online requests); the guest pays at the desk. With card payment, guests pay when they reserve and the lesson is booked automatically. Share this link: ', h('code', null, bookUrl)),
-      h('label', { class: 'check' }, payOn, ' Guests pay by card when they reserve'),
-      t.stripe_ready ? null : h('p', { class: 'muted small' }, 'Card payment is not connected yet. Add your Stripe keys first (see RUNBOOK.md, "Online card payment").'),
-      h('h4', null, 'Cancellation and refunds (card payments)'),
-      h('div', { class: 'form' },
-        field('Full refund if canceled at least this many hours before', fullHrs),
-        field('Partial refund if canceled at least this many hours before', halfHrs, 'Must be fewer hours than the full refund. Later than this: no refund.'),
-        field('Partial refund percent', halfPct), field('Extra line for the policy', cancelNote)),
-      h('div', { class: 'form' },
-        field('Requests close this many hours before a lesson', notice),
-        field('Guests can cancel online up to this many hours before', cancelHrs),
-        field('Message shown at the top of the page', bookMsg))),
-    h('label', { class: 'check' }, quickOn, ' Quick sale at the ticket window: day tickets, punch cards and vouchers can be sold without a name (season passes, lessons and rentals always need one)'),
-    h('label', { class: 'check' }, weeklyOn, ' Email the weekly report to owners and managers every Monday (also in Money > Weekly report)'),
-    h('div', { class: 'stack', 'data-section': 'online-shop' },
-      h('h3', null, 'Online shop (tickets and passes)'),
-      h('label', { class: 'check' }, shopOn, ' Guests can buy tickets and passes by card on the public shop page'),
-      h('p', { class: 'muted small' }, 'Choose which products are sold online by ticking "Sell on the online shop" on each product (Products and prices). Guests pay on Stripe, then get their tickets by email and on a page with a barcode the gate can scan. Share this link: ', h('code', null, shopUrl)),
-      t.stripe_ready ? null : h('p', { class: 'muted small' }, 'Card payment is not connected yet, so the page will show "not open". Add your Stripe keys first (see RUNBOOK.md, "Online card payment").'),
-      field('Message shown at the top of the page', shopMsg),
-      h('label', { class: 'check' }, recov, ' Send one reminder email to guests who started an order but did not pay'),
-      h('label', { class: 'check' }, chgOn, ' Guests can move a single-day ticket to another day from their ticket page'),
-      h('div', { class: 'form' }, field('Up to this many hours before the day', chgHours), field('Fee for a change ($, 0 for free)', chgFee, 'The guest also pays any rise in the ticket price. A lower price is not refunded.')),
-      field('Most tickets for one day, all products together (blank = no limit)', shopLimit, 'Counts every day ticket and multi-day ticket valid that day, window sales too. A day that reaches it shows Sold out online. You can also set a limit on each product.')),
-    h('label', { class: 'check' }, mfa, isOwner ? ' Everyone must use two-step sign-in (each person, including you, is asked to set it up on their next screen)' : ' Everyone must use two-step sign-in (only the owner can change this)'),
-    slot, h('div', { class: 'row' }, go));
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    clear(slot);
-    go.disabled = true;
-    try {
-      const limit = toCents(comp.value);
-      if (limit === null) throw new Error('Enter the limit in dollars, for example 0 or 50.00');
-      const body = { name: name.value.trim(), address: address.value.trim() || null, phone: phone.value.trim() || null, receipt_footer: footer.value.trim() || null,
-        waiver_text: waiver.value.trim() || null, comp_counter_limit_cents: limit, scan_passback_seconds: Number(passback.value || 0),
-        online_booking: booking.checked, booking_notice_hours: Number(notice.value || 0), cancel_hours: Number(cancelHrs.value || 0), booking_message: bookMsg.value.trim() || null,
-        online_payment: payOn.checked, online_shop: shopOn.checked, online_daily_limit: shopLimit.value ? Number(shopLimit.value) : null, shop_recovery: recov.checked, shop_change_hours: chgOn.checked ? Number(chgHours.value || 0) : null, shop_change_fee_cents: Math.max(0, toCents(chgFee.value) || 0), weekly_report: weeklyOn.checked, quick_sale: quickOn.checked, shop_message: shopMsg.value.trim() || null, refund_full_hours: Number(fullHrs.value || 0), refund_half_hours: Number(halfHrs.value || 0), refund_half_percent: Number(halfPct.value || 0), cancel_note: cancelNote.value.trim() || null };
-      if (isOwner) { body.require_mfa = mfa.checked; body.timezone = zoneSel.value; }
-      await put('/tenant/profile', body);
-      if (body.timezone) { ctx.tz = body.timezone; ctx.me.timezone = body.timezone; }
-      toast('Saved');
-    } catch (err) { slot.append(errorBox(err)); } finally { go.disabled = false; }
-  });
-  return h('section', { class: 'panel stack' }, h('h2', null, 'Mountain details and rules'), form);
-}
-
-// ---- the assistant: on for staff, which guest pages show it (Assistant Plus), where guest questions go, this month's use
-const PAGE_NAMES = { shop: 'Online ticket shop', programs: 'Program registration', booking: 'Lesson booking', family: 'Family page' };
-async function assistantPanel() {
-  let a;
-  try { a = await get('/assistant/settings'); } catch (err) { return h('section', { class: 'panel stack' }, h('h2', null, 'Assistant'), errorBox(err)); }
-  const staffOn = h('input', { type: 'checkbox', checked: a.staff_on });
-  const pages = a.pages.map((p) => [p, h('input', { type: 'checkbox', checked: a.guest_pages.includes(p), disabled: !a.plus })]);
-  const contact = input({ type: 'email', value: a.contact_email || '', placeholder: a.owner_email || 'you@yourmountain.com', disabled: !a.plus });
-  const slot = h('div');
-  const go = h('button', { type: 'submit', class: 'btn primary' }, 'Save');
-  const used = h('p', { class: 'muted small' }, `This month: ${a.month.questions} question${a.month.questions === 1 ? '' : 's'}, ${money(a.month.spent_cents)} of the ${money(a.month.cap_cents)} included. At the limit it rests until the 1st; Help keeps working.`);
-  const form = h('form', { class: 'stack' },
-    a.available ? null : h('p', { class: 'muted' }, 'The assistant is not switched on for Verdynt/OS yet.'),
-    h('label', { class: 'check' }, staffOn, ' Staff can ask the assistant how to do things (the Ask button in the menu)'),
-    h('p', { class: 'muted small' }, a.plus
-      ? 'Assistant Plus is on: staff can also ask about today\'s numbers, lessons, programs and who is working. It only looks up what that person could already see, and never sees patient care records.'
-      : 'Assistant Plus (add-on, under Billing) adds questions about today\'s numbers, lessons, programs and who is working, and the assistant for guests.'),
-    h('fieldset', { class: 'stack', disabled: !a.plus }, h('legend', null, 'Guests can ask on these pages'),
-      pages.map(([p, box]) => h('label', { class: 'check' }, box, ` ${PAGE_NAMES[p]}`)),
-      field('Guest questions it cannot answer go to', contact, 'Guests give their email, and your reply goes straight to them. Blank: the owner\'s email.')),
-    used, slot, h('div', { class: 'row' }, go, h('a', { href: '#/settings', class: 'btn', id: 'ask-questions' }, 'See questions asked')));
-  form.querySelector('#ask-questions').addEventListener('click', (e) => { e.preventDefault(); questionsDialog(); });
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault(); clear(slot); go.disabled = true;
-    try {
-      await put('/assistant/settings', { staff_on: staffOn.checked, guest_pages: pages.filter(([, b]) => b.checked).map(([p]) => p), contact_email: contact.value.trim() || null });
-      toast('Saved');
-    } catch (err) { slot.append(errorBox(err)); } finally { go.disabled = false; }
-  });
-  return h('section', { class: 'panel stack' }, h('h2', null, 'Assistant'), form);
-}
-async function questionsDialog() {
-  const body = h('div', { class: 'stack' }, h('p', { class: 'loading' }, 'Loading…'));
-  dialog('Questions asked in the last month', body, { wide: true });
+async function renderPage(content, [key, group, title, line, load], who) {
+  const app = APP_OF[key];
+  const head = h('header', { class: 'page-head set-head' },
+    h('div', { class: 'set-head-text' },
+      h('a', { class: 'set-back', href: '#/settings' }, h('span', { 'aria-hidden': 'true' }, '‹ '), 'Settings'),
+      h('nav', { class: 'set-crumbs', 'aria-label': 'Breadcrumb' }, h('ol', null, h('li', null, h('a', { href: '#/settings' }, 'Settings')), h('li', null, GROUPS[group]))),
+      h('h1', null, title),
+      h('p', { class: 'set-line' }, line)),
+    app ? h('a', { class: 'set-open', href: `#/${app[0]}` }, `Open ${app[1]}`) : null);
+  const body = h('div', { class: 'set-body' }, loading());
+  clear(content).append(head, body);
+  document.title = `${title} · Settings · ${ctx.me.tenant_name}`;
   try {
-    const { data } = await get('/assistant/questions');
-    clear(body);
-    if (!data.length) { body.append(empty('Nobody has asked anything yet.')); return; }
-    body.append(h('p', { class: 'muted small' }, 'What staff and guests wanted to know. Ones it could not answer are worth a line in your own notes, or a word to support.'),
-      table([{ head: 'When', cell: (r) => fmtDateTime(r.created_at) }, { head: 'Who', cell: (r) => (r.audience === 'guest' ? `Guest, ${PAGE_NAMES[r.page] || r.page}` : r.username || 'Staff') }, { head: 'Question', cell: (r) => r.question },
-        { head: 'How it went', cell: (r) => [r.unanswered ? state('Not answered', 'hold') : null, r.rating === -1 ? state('Did not help', 'closed') : r.rating === 1 ? state('Helped', 'open') : null, r.escalated_at ? state('Passed on', 'neutral') : null] }], data));
-  } catch (err) { clear(body); body.append(errorBox(err)); }
+    const mod = await load();
+    const holder = h('div', { class: 'set-body' });
+    await mod.renderSettingsPage(holder, key, who);
+    body.replaceWith(holder);
+  } catch (err) {
+    clear(body).append(errorBox(err));
+  }
 }
