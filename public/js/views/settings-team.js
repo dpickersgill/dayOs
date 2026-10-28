@@ -66,11 +66,18 @@ function addLogin(staff, isOwner, done) {
   const role = select(roleOptions(isOwner).map((r) => [r, roleName(r)]), 'staff', { name: 'role' });
   const staffSel = select([['', 'Not linked'], ...staff.map((s) => [s.id, `${s.first_name} ${s.last_name}`])], '', { name: 'staff_id' });
   const emailHint = h('span', { class: 'hint' });
-  let typed = false;
+  // The username is suggested (from the staff member's name, or the email) only while the manager has not touched it:
+  // once they type in it, or it no longer holds what was suggested, it is theirs, and a suggestion that arrives later
+  // (the lookup takes a moment) is dropped.
+  let typed = false; let suggested = '';
   uname.addEventListener('input', () => { typed = true; });
+  const untouched = () => !typed && uname.value === suggested;
   const suggest = async () => {
-    if (typed) return;
-    try { uname.value = (await get(`/users/suggest-username?staff_id=${staffSel.value || ''}&email=${encodeURIComponent(email.value.trim())}`)).username; } catch (_) { /* leave it */ }
+    if (!untouched()) return;
+    let name;
+    try { ({ username: name } = await get(`/users/suggest-username?staff_id=${staffSel.value || ''}&email=${encodeURIComponent(email.value.trim())}`)); } catch (_) { return; /* leave it */ }
+    if (!untouched()) return;
+    uname.value = suggested = name || '';
   };
   const syncHint = () => { emailHint.textContent = role.value === 'area' ? 'Required. A ski area login sees the patrol summary and approved reports only, uses two-step sign-in, and is free.' : needsEmail(role.value) ? 'Required for managers.' : 'Optional. They can sign in with either.'; };
   staffSel.addEventListener('change', suggest); email.addEventListener('change', suggest); role.addEventListener('change', syncHint);

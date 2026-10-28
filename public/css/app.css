@@ -2804,6 +2804,12 @@ li.voided > .prewrap { text-decoration: line-through; color: var(--quiet); }
 .set-card-intro { padding: 14px 20px 0; color: var(--quiet); }
 .set-rows > .set-card-intro:last-child { padding-bottom: 16px; }
 .set-rows > .table-wrap { border: 0; border-radius: 0 0 14px 14px; margin: 0; }
+/* A table in a settings card (Logins) stays inside the card: its action buttons wrap onto a second line rather than
+   pushing the row past the edge, and anything still wider scrolls inside the card, never the page. */
+.set-card > .table-wrap { overflow-x: auto; max-width: 100%; border: 0; border-top: 1px solid var(--line); border-radius: 0 0 14px 14px; margin: 0; }
+.set-card > .table-wrap td.actions { white-space: normal; }
+.set-card > .table-wrap td.actions .btn { white-space: nowrap; margin: 2px 0 2px 6px; }
+.set-card > .table-wrap td.actions .btn + .btn { margin-left: 6px; }
 .set-rows > .callout { margin: 14px 20px 0; }
 .set-row { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; align-items: center; padding: 16px 20px; border-top: 1px solid var(--line); }
 .set-rows > .set-row:first-child, .set-rows > .set-card-intro + .set-row { border-top: 0; }
