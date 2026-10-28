@@ -104,14 +104,14 @@ function editProduct(p, done, atts = []) {
   const timedDay = h('input', { type: 'radio', name: 'timed', value: '0', checked: Boolean(p && p.kind === 'activity' && !p.timed) });
   const dayCap = input({ name: 'day_capacity', type: 'number', min: 1, max: 100000, value: p && p.day_capacity ? p.day_capacity : '' });
   const capField = field('Places a day (blank = no limit)', dayCap, 'For a day pass, such as skating all day.');
-  const actBox = h('fieldset', { class: 'field act-setup' }, h('legend', null, 'Activity'),
+  const actBox = h('fieldset', { class: 'field act-setup wide' }, h('legend', null, 'Activity'),
     atts.length ? field('Attraction', attSel, 'Its height, weight and age limits and its waiver come from the attraction (Settings, Attractions).') : h('p', { class: 'muted small' }, 'Add the attraction first, in Settings, Attractions.'),
     h('div', { class: 'row', role: 'radiogroup', 'aria-label': 'How it is sold' }, h('label', { class: 'check' }, timedSlots, ' Time slots'), h('label', { class: 'check' }, timedDay, ' All day (a day pass)')),
     capField, h('p', { class: 'muted small' }, 'Time slots are set after saving, with the Time slots button. Each guest gets a ticket good once, at this attraction only.'));
   // A lift ticket or pass can include attractions: its holder is let in at those attractions' gates too.
   const inc = new Set();
   const incBoxes = atts.map((a) => { const cb = h('input', { type: 'checkbox', value: String(a.id) }); cb.addEventListener('change', () => { if (cb.checked) inc.add(a.id); else inc.delete(a.id); }); return [a, cb]; });
-  const incBox = atts.length ? h('fieldset', { class: 'field act-includes' }, h('legend', null, 'Also lets the holder in at'), h('div', { class: 'row' }, incBoxes.map(([a, cb]) => h('label', { class: 'check' }, cb, ` ${a.name}`))),
+  const incBox = atts.length ? h('fieldset', { class: 'field act-includes wide' }, h('legend', null, 'Also lets the holder in at'), h('div', { class: 'row' }, incBoxes.map(([a, cb]) => h('label', { class: 'check' }, cb, ` ${a.name}`))),
     h('p', { class: 'muted small' }, 'Leave all unticked for a lift ticket that is not good at any attraction. A gate set to an attraction refuses other tickets.')) : null;
   if (p && incBox) get(`/products/${p.id}/activity`).then((r) => { for (const [a, cb] of incBoxes) if (r.includes.includes(a.id)) { cb.checked = true; inc.add(a.id); } }).catch(() => {});
   const showKind = () => {
