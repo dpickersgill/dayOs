@@ -280,7 +280,7 @@ router.get('/analytics', patrol, needs('reports'), async (req, res) => {
     group(`SELECT CONCAT(pe.first_name, ' ', pe.last_name) AS label, COUNT(*) AS n
            FROM incident_responders r JOIN incidents i ON i.id = r.incident_id AND i.tenant_id = r.tenant_id
            JOIN staff s ON s.id = r.staff_id AND s.tenant_id = r.tenant_id JOIN people pe ON pe.id = s.person_id AND pe.tenant_id = s.tenant_id
-           WHERE ${inRange} AND r.role = 'lead' GROUP BY r.staff_id, pe.first_name, pe.last_name ORDER BY n DESC LIMIT 10`),
+           WHERE ${inRange} AND r.role = 'lead' AND r.voided_at IS NULL GROUP BY r.staff_id, pe.first_name, pe.last_name ORDER BY n DESC LIMIT 10`),
     group(`SELECT report_state AS label, COUNT(*) AS n FROM incidents i WHERE ${inRange} GROUP BY report_state`),
   ]);
   const round = (v) => (v === null || v === undefined ? null : Math.round(Number(v) * 10) / 10);
@@ -317,11 +317,11 @@ async function loadCase(conn, tenantId, id) {
     rows(conn, 'SELECT n.id, n.author_user, COALESCE(u.email, u.username) AS author, n.body, n.created_at FROM incident_notes n LEFT JOIN users u ON u.id = n.author_user AND u.tenant_id = n.tenant_id WHERE n.tenant_id = ? AND n.incident_id = ? ORDER BY n.id', [tenantId, id]),
     rows(conn, `SELECT p.*, COALESCE(vu.email, vu.username) AS voided_by_email FROM incident_patients p ${VOIDED_BY('p')} WHERE p.tenant_id = ? AND p.incident_id = ? ORDER BY p.id`, [tenantId, id]),
     rows(conn, `SELECT e.id, e.kind, e.at, e.note, e.patient_id, e.entered_at, e.voided_at, e.void_reason, COALESCE(vu.email, vu.username) AS voided_by_email FROM incident_events e ${VOIDED_BY('e')} WHERE e.tenant_id = ? AND e.incident_id = ? ORDER BY e.at, e.id`, [tenantId, id]),
-    rows(conn, `SELECT r.id, r.staff_id, r.role, p.first_name, p.last_name, m.patrol_number, m.callsign FROM incident_responders r JOIN staff s ON s.id = r.staff_id AND s.tenant_id = r.tenant_id JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id LEFT JOIN patrol_members m ON m.staff_id = r.staff_id AND m.tenant_id = r.tenant_id WHERE r.tenant_id = ? AND r.incident_id = ? ORDER BY FIELD(r.role, 'lead', 'assist', 'transport', 'dispatch'), r.id`, [tenantId, id]),
-    rows(conn, 'SELECT id, relation, name, phone, email, address, city, region, postal, statement, source, received_at, voided_at, void_reason FROM incident_witnesses WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]), // source link: written by the witness (routes/patrolscene.js)
+    rows(conn, `SELECT r.id, r.staff_id, r.role, p.first_name, p.last_name, m.patrol_number, m.callsign, r.voided_at, r.void_reason, COALESCE(vu.email, vu.username) AS voided_by_email FROM incident_responders r JOIN staff s ON s.id = r.staff_id AND s.tenant_id = r.tenant_id JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id LEFT JOIN patrol_members m ON m.staff_id = r.staff_id AND m.tenant_id = r.tenant_id ${VOIDED_BY('r')} WHERE r.tenant_id = ? AND r.incident_id = ? ORDER BY r.voided_at IS NOT NULL, FIELD(r.role, 'lead', 'assist', 'transport', 'dispatch'), r.id`, [tenantId, id]),
+    rows(conn, `SELECT w.id, w.relation, w.name, w.phone, w.email, w.address, w.city, w.region, w.postal, w.statement, w.source, w.received_at, w.voided_at, w.void_reason, COALESCE(vu.email, vu.username) AS voided_by_email FROM incident_witnesses w ${VOIDED_BY('w')} WHERE w.tenant_id = ? AND w.incident_id = ? ORDER BY w.id`, [tenantId, id]), // source link: written by the witness (routes/patrolscene.js)
     rows(conn, 'SELECT id, patient_id, kind, signer_name, signer_role, signed_at FROM incident_signatures WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]),
     one(conn, 'SELECT * FROM incident_collisions WHERE tenant_id = ? AND incident_id = ?', [tenantId, id]),
-    rows(conn, 'SELECT * FROM incident_parties WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]),
+    rows(conn, `SELECT x.*, COALESCE(vu.email, vu.username) AS voided_by_email FROM incident_parties x ${VOIDED_BY('x')} WHERE x.tenant_id = ? AND x.incident_id = ? ORDER BY x.id`, [tenantId, id]),
     rows(conn, 'SELECT c.patient_id, c.item_key, c.done_at, COALESCE(u.email, u.username) AS done_by FROM incident_checklist c LEFT JOIN users u ON u.id = c.done_by AND u.tenant_id = c.tenant_id WHERE c.tenant_id = ? AND c.incident_id = ? ORDER BY c.id', [tenantId, id]),
     rows(conn, 'SELECT v.id, v.version_no, v.kind, v.created_at, COALESCE(u.email, u.username) AS created_by FROM incident_versions v LEFT JOIN users u ON u.id = v.created_by AND u.tenant_id = v.tenant_id WHERE v.tenant_id = ? AND v.incident_id = ? ORDER BY v.version_no', [tenantId, id]),
   ]);
@@ -338,7 +338,7 @@ async function loadCase(conn, tenantId, id) {
   const mine = (list, pid) => list.filter((x) => x.patient_id === pid);
   const tenant = await one(conn, 'SELECT name, legal_name FROM tenants WHERE id = ?', [tenantId]);
   // Photos without their bytes: a frozen version records each one's fingerprint, so the approved report names the exact files.
-  const photos = (await rows(conn, `SELECT m.id, m.patient_id, m.mime, m.bytes, m.sha256, m.caption, m.taken_at, m.taken_lat, m.taken_lng, m.uploaded_at, (m.preview IS NOT NULL) AS has_preview,
+  const photos = (await rows(conn, `SELECT m.id, m.patient_id, m.mime, m.bytes, m.sha256, m.caption, m.taken_at, m.taken_lat, m.taken_lng, m.uploaded_at, (m.preview IS NOT NULL) AS has_preview, m.preview_sha256,
       m.voided_at, m.void_reason, COALESCE(u.email, u.username) AS uploaded_by_name, COALESCE(vu.email, vu.username) AS voided_by_email
     FROM incident_media m LEFT JOIN users u ON u.id = m.uploaded_by AND u.tenant_id = m.tenant_id ${VOIDED_BY('m')} WHERE m.tenant_id = ? AND m.incident_id = ? ORDER BY m.id`, [tenantId, id]))
     .map((m) => ({ ...m, has_preview: Boolean(m.has_preview), taken_lat: m.taken_lat === null ? null : Number(m.taken_lat), taken_lng: m.taken_lng === null ? null : Number(m.taken_lng) }));
@@ -349,8 +349,9 @@ async function loadCase(conn, tenantId, id) {
     rows(conn, `SELECT e.id, e.patient_id, e.scope, e.item_key AS \`key\`, e.label, e.reason, e.approved_at, ${PERSON_NAME('e.approved_by')} AS approved_by FROM incident_exceptions e WHERE e.tenant_id = ? AND e.incident_id = ? ORDER BY e.id`, [tenantId, id]),
     rows(conn, `SELECT x.id, x.patient_id, x.who, x.who_name, x.method, x.at, x.note, x.entered_at, x.voided_at, x.void_reason, ${PERSON_NAME('x.recorded_by')} AS recorded_by, COALESCE(vu.email, vu.username) AS voided_by_email
       FROM incident_contacts x ${VOIDED_BY('x')} WHERE x.tenant_id = ? AND x.incident_id = ? ORDER BY x.at, x.id`, [tenantId, id]),
-    rows(conn, `SELECT r.id, r.patient_id, r.contract_id, r.rental_item_id, r.detail, r.held, r.released_at, r.inspection_note, r.added_at, ${PERSON_NAME('r.released_by')} AS released_by
-      FROM incident_rentals r WHERE r.tenant_id = ? AND r.incident_id = ? ORDER BY r.id`, [tenantId, id]),
+    rows(conn, `SELECT r.id, r.patient_id, r.contract_id, r.rental_item_id, r.detail, r.held, r.released_at, r.inspection_note, r.added_at, ${PERSON_NAME('r.released_by')} AS released_by,
+        r.voided_at, r.void_reason, COALESCE(vu.email, vu.username) AS voided_by_email
+      FROM incident_rentals r ${VOIDED_BY('r')} WHERE r.tenant_id = ? AND r.incident_id = ? ORDER BY r.id`, [tenantId, id]),
   ]);
   const c = {
     ...withNumber(incident), form: parseForm(incident.form), na: RQ.naOf(incident), resort: { name: tenant.name, legal_name: tenant.legal_name }, notes, events, responders, witnesses, signatures,
@@ -459,9 +460,17 @@ router.get('/incidents/:id/versions/:vid', patrol, needs('view_cases'), async (r
  * Loads a case for editing. Approved reports are locked. A submitted report is waiting for a manager, so only
  * managers change it until it is sent back. Row-locks the case so two phones cannot interleave a state change.
  */
+// A wrong entry is marked entered in error, with a reason, and stays on the record (voidCaseRow below).
+const voidSchema = z.object({ reason: z.string().trim().min(3, 'Say why, in a few words').max(255) });
+
+/**
+ * The case, locked for a change, if it may be changed: not on legal hold (only notes are added then), not approved, and
+ * not waiting for review. Every write to a case goes through this, except notes.
+ */
 async function editableCase(conn, req, id) {
   const inc = await one(conn, 'SELECT * FROM incidents WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id]);
   if (!inc) throw notFound('Incident');
+  if (Number(inc.legal_hold)) throw conflict('This case is on legal hold: nothing on it can change. Add a note instead.');
   if (inc.report_state === 'approved') throw conflict('This report is approved and locked. Add a note, or ask a manager to reopen it.');
   if (inc.report_state === 'submitted') {
     // With a review group, nobody edits a signed-off report: the reviewer sends it back with comments, so the
@@ -471,6 +480,20 @@ async function editableCase(conn, req, id) {
     if (!(await PA.can(pool, req, 'approve_case'))) throw conflict('This report is waiting for an approver. Ask them to send it back if it needs changes.');
   }
   return inc;
+}
+
+/**
+ * Marks one row on a case (a witness, responder, collision party or rental gear) entered in error, with the reason, who
+ * and when. Like clinical entries, these are never deleted: the row stays on the record, struck through. Call after
+ * editableCase, inside the same transaction. Returns the row as it was.
+ */
+async function voidCaseRow(conn, req, id, table, rowId, what) {
+  const row = await one(conn, `SELECT * FROM \`${table}\` WHERE tenant_id = ? AND incident_id = ? AND id = ? FOR UPDATE`, [req.auth.tenantId, id, rowId]);
+  if (!row) throw notFound(what);
+  if (row.voided_at) throw conflict('Already marked entered in error');
+  const tz = (await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone;
+  await conn.query(`UPDATE \`${table}\` SET voided_at = ?, void_reason = ?, voided_by = ? WHERE tenant_id = ? AND id = ?`, [nowIn(tz), req.body.reason, req.auth.userId, req.auth.tenantId, rowId]);
+  return row;
 }
 
 /** After a change that could make a staff patient's case serious, tells the owner and GM if they have not been told. */
@@ -564,38 +587,47 @@ router.post('/incidents/:id/rentals', patrol, needs('create_case'), validate(z.o
     if (b.patient_id && !(await one(conn, 'SELECT id FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ? AND voided_at IS NULL', [t, id, b.patient_id]))) throw notFound('Patient');
     const it = await one(conn, 'SELECT id, sku, status FROM rental_items WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, b.rental_item_id]);
     if (!it) throw notFound('Rental item');
-    if (await one(conn, 'SELECT id FROM incident_rentals WHERE tenant_id = ? AND incident_id = ? AND rental_item_id = ?', [t, id, it.id])) throw conflict(`${it.sku} is already on this case`);
+    const before = await one(conn, 'SELECT id, voided_at FROM incident_rentals WHERE tenant_id = ? AND incident_id = ? AND rental_item_id = ?', [t, id, it.id]);
+    if (before && !before.voided_at) throw conflict(`${it.sku} is already on this case`);
     const detail = await rentalDetail(conn, t, it.id, b.contract_id || null);
     const settings = await RENTALS.getSettings(conn, t);
     const hold = settings.hold_after_incident;
     const now = nowIn((await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [t])).timezone);
-    const [r] = await conn.query('INSERT INTO incident_rentals (tenant_id, incident_id, patient_id, contract_id, rental_item_id, detail, held, status_before, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [t, id, b.patient_id || null, (detail.contract && detail.contract.id) || b.contract_id || null, it.id, JSON.stringify(detail), hold ? 1 : 0, it.status, req.auth.userId, now]);
+    const vals = [b.patient_id || null, (detail.contract && detail.contract.id) || b.contract_id || null, JSON.stringify(detail), hold ? 1 : 0, it.status, req.auth.userId, now];
+    // Gear marked entered in error and then added again: the same row comes back (one row per item per case); the
+    // earlier marking stays in the audit trail.
+    const [r] = before
+      ? await conn.query('UPDATE incident_rentals SET patient_id = ?, contract_id = ?, detail = ?, held = ?, status_before = ?, added_by = ?, added_at = ?, released_at = NULL, released_by = NULL, inspection_note = NULL, voided_at = NULL, void_reason = NULL, voided_by = NULL WHERE tenant_id = ? AND id = ?', [...vals, t, before.id])
+      : await conn.query('INSERT INTO incident_rentals (tenant_id, incident_id, rental_item_id, patient_id, contract_id, detail, held, status_before, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [t, id, it.id, ...vals]);
     // Back on the rack only after the shop inspects it. Gear still out on the contract goes to the shop when it is returned.
     if (hold && it.status === 'available') await conn.query("UPDATE rental_items SET status = 'maintenance' WHERE tenant_id = ? AND id = ?", [t, it.id]);
     await audit(conn, req, 'add_rental', 'incidents', id, { rental_item_id: it.id, held: hold });
-    return { id: r.insertId, held: hold };
+    return { id: before ? Number(before.id) : r.insertId, held: hold };
   });
   res.status(201).json(out);
 });
 
-/** Take gear off the case (added by mistake), while the report is open and before the shop has inspected it. */
-router.delete('/incidents/:id/rentals/:rowId', patrol, needs('create_case'), async (req, res) => {
+/**
+ * Gear put on the case by mistake is marked entered in error with a reason (it stays on the record, struck through),
+ * while the report is open and before the shop has inspected it. Its hold for inspection ends. DELETE does the same.
+ */
+async function voidRental(req, res) {
   const t = req.auth.tenantId;
   const id = paramId(req);
   await tx(async (conn) => {
     await editableCase(conn, req, id);
-    const r = await one(conn, 'SELECT * FROM incident_rentals WHERE tenant_id = ? AND incident_id = ? AND id = ? FOR UPDATE', [t, id, paramId(req, 'rowId')]);
-    if (!r) throw notFound('Rental gear on this case');
-    if (r.released_at) throw conflict('The rental shop has already inspected this gear, so it stays on the report');
-    await conn.query('DELETE FROM incident_rentals WHERE tenant_id = ? AND id = ?', [t, r.id]);
+    const cur = await one(conn, 'SELECT released_at FROM incident_rentals WHERE tenant_id = ? AND incident_id = ? AND id = ?', [t, id, paramId(req, 'rowId')]);
+    if (cur && cur.released_at) throw conflict('The rental shop has already inspected this gear, so it stays on the report');
+    const r = await voidCaseRow(conn, req, id, 'incident_rentals', paramId(req, 'rowId'), 'Rental gear on this case');
     if (Number(r.held) && r.status_before === 'available' && !(await RENTALS.patrolHold(conn, t, r.rental_item_id))) {
       await conn.query("UPDATE rental_items SET status = 'available' WHERE tenant_id = ? AND id = ? AND status = 'maintenance'", [t, r.rental_item_id]);
     }
-    await audit(conn, req, 'remove_rental', 'incidents', id, { rental_item_id: Number(r.rental_item_id) });
+    await audit(conn, req, 'void_rental', 'incidents', id, { row: Number(r.id), rental_item_id: Number(r.rental_item_id), reason: req.body.reason });
   });
-  res.status(204).end();
-});
+  res.json({ ok: true });
+}
+router.post('/incidents/:id/rentals/:rowId/void', patrol, needs('create_case'), validate(voidSchema), voidRental);
+router.delete('/incidents/:id/rentals/:rowId', patrol, needs('create_case'), validate(voidSchema), voidRental);
 
 router.post('/incidents/:id/notes', patrol, needs('create_case'), validate(z.object({ body: z.string().min(1).max(5000) })), async (req, res) => {
   const id = paramId(req);
@@ -674,7 +706,7 @@ async function reportProblems(conn, tenantId, inc, { stage = 'submit', rules = n
       }
     }
   }
-  if (!c.responders.some((r) => r.role === 'lead')) problem('Add the patroller who led the response', { area: 'responders' });
+  if (!c.responders.some((r) => r.role === 'lead' && !r.voided_at)) problem('Add the patroller who led the response', { area: 'responders' });
   return problems;
 }
 
@@ -1018,7 +1050,6 @@ router.patch('/incidents/:id/patients/:pid', patrol, needs('create_case'), valid
 
 // Nothing clinical is deleted. A patient added by mistake is marked "entered in error" with a reason, and stays on the
 // record struck through; their vitals, injuries and treatments go with them. Follow-up emails that have not gone are dropped.
-const voidSchema = z.object({ reason: z.string().trim().min(3, 'Say why, in a few words').max(255) });
 router.post('/incidents/:id/patients/:pid/void', patrol, needs('create_case'), validate(voidSchema), async (req, res) => {
   const id = paramId(req);
   const pid = paramId(req, 'pid');
@@ -1155,7 +1186,7 @@ const sub = {
       address: z.string().max(255).optional(), city: z.string().max(100).optional(), region: z.string().max(60).optional(), postal: z.string().max(20).optional(),
       statement: z.string().max(10000).optional(), client_ref: clientRef,
     }),
-    cols: ['relation', 'name', 'phone', 'email', 'address', 'city', 'region', 'postal', 'statement', 'client_ref'],
+    cols: ['relation', 'name', 'phone', 'email', 'address', 'city', 'region', 'postal', 'statement', 'client_ref'], voidable: true, deleteVoids: true,
   },
 };
 
@@ -1211,8 +1242,9 @@ for (const [name, def] of Object.entries(sub)) {
   });
 
   if (def.voidable) {
-    // Clinical rows are never deleted: a wrong entry is marked "entered in error" with a reason and stays on the record, struck through.
-    router.post(`${base}/:rowId/void`, patrol, needs('create_case'), validate(voidSchema), async (req, res) => {
+    // Clinical rows (and witnesses) are never deleted: a wrong entry is marked "entered in error" with a reason and stays
+    // on the record, struck through. For witnesses, the older DELETE does the same and needs a reason too.
+    const voidRoute = async (req, res) => {
       const id = paramId(req);
       await tx(async (conn) => {
         const held = await editableCase(conn, req, id);
@@ -1228,7 +1260,9 @@ for (const [name, def] of Object.entries(sub)) {
         await audit(conn, req, `void_${name}`, 'incidents', id, { row: rowId, reason: req.body.reason });
       });
       res.json({ ok: true });
-    });
+    };
+    router.post(`${base}/:rowId/void`, patrol, needs('create_case'), validate(voidSchema), voidRoute);
+    if (def.deleteVoids) router.delete(`${base}/:rowId`, patrol, needs('create_case'), validate(voidSchema), voidRoute);
   } else {
     router.delete(`${base}/:rowId`, patrol, needs('create_case'), async (req, res) => {
       const id = paramId(req);
@@ -1278,9 +1312,11 @@ router.post('/incidents/:id/responders', patrol, needs('create_case'), validate(
     await editableCase(conn, req, id);
     if (!(await one(conn, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, req.body.staff_id]))) throw notFound('Staff member');
     // There is exactly one lead. Naming a new lead moves the old one to assist.
-    if (req.body.role === 'lead') await conn.query("UPDATE incident_responders SET role = 'assist' WHERE tenant_id = ? AND incident_id = ? AND role = 'lead'", [req.auth.tenantId, id]);
+    if (req.body.role === 'lead') await conn.query("UPDATE incident_responders SET role = 'assist' WHERE tenant_id = ? AND incident_id = ? AND role = 'lead' AND voided_at IS NULL", [req.auth.tenantId, id]);
+    // Someone marked entered in error and then added again comes back on the same row (one per person per case); the
+    // earlier marking stays in the audit trail.
     const [r] = await conn.query(
-      'INSERT INTO incident_responders (tenant_id, incident_id, staff_id, role) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE role = VALUES(role), id = LAST_INSERT_ID(id)',
+      'INSERT INTO incident_responders (tenant_id, incident_id, staff_id, role) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE role = VALUES(role), voided_at = NULL, void_reason = NULL, voided_by = NULL, id = LAST_INSERT_ID(id)',
       [req.auth.tenantId, id, req.body.staff_id, req.body.role],
     );
     await audit(conn, req, 'add_responders', 'incidents', id, req.body);
@@ -1289,16 +1325,18 @@ router.post('/incidents/:id/responders', patrol, needs('create_case'), validate(
   res.status(201).json({ id: newId });
 });
 
-router.delete('/incidents/:id/responders/:rowId', patrol, needs('create_case'), async (req, res) => {
+/** A responder named by mistake is marked entered in error with a reason, never removed. DELETE does the same. */
+async function voidResponder(req, res) {
   const id = paramId(req);
   await tx(async (conn) => {
     await editableCase(conn, req, id);
-    const [r] = await conn.query('DELETE FROM incident_responders WHERE tenant_id = ? AND incident_id = ? AND id = ?', [req.auth.tenantId, id, paramId(req, 'rowId')]);
-    if (!r.affectedRows) throw notFound('Responder');
-    await audit(conn, req, 'remove_responders', 'incidents', id, { row: paramId(req, 'rowId') });
+    const r = await voidCaseRow(conn, req, id, 'incident_responders', paramId(req, 'rowId'), 'Responder');
+    await audit(conn, req, 'void_responders', 'incidents', id, { row: Number(r.id), staff_id: Number(r.staff_id), reason: req.body.reason });
   });
-  res.status(204).end();
-});
+  res.json({ ok: true });
+}
+router.post('/incidents/:id/responders/:rowId/void', patrol, needs('create_case'), validate(voidSchema), voidResponder);
+router.delete('/incidents/:id/responders/:rowId', patrol, needs('create_case'), validate(voidSchema), voidResponder);
 
 // ---------------------------------------------------------------- before the patient leaves
 /**
@@ -1393,5 +1431,7 @@ router.get('/trail-checks', patrol, needs('trail_checks'), async (req, res) => {
 
 router.createCase = createCase;
 router.editableCase = editableCase;
+router.voidCaseRow = voidCaseRow;
+router.voidSchema = voidSchema;
 router.loadCase = loadCase; // the claim file assembles the same case (routes/patrolclaims.js)
 module.exports = router;

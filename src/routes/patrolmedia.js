@@ -3,7 +3,9 @@
 // Photos on a patrol case, kept so they stand up as evidence. Each file is stored exactly as uploaded, with its SHA-256
 // recorded at upload; Verify recomputes it from the stored bytes, and the original downloads with its fingerprint in the
 // file's headers. When and where the photo was taken come from the photo itself (EXIF), else from the phone at upload.
-// The case page shows a small preview first (made on the phone), so a case with many photos opens fast.
+// The case page shows a small preview first (made on the phone), so a case with many photos opens fast. A preview can
+// only be added while the case can be changed, is fingerprinted too, and every read of one is logged; anyone outside the
+// mountain (a claim link) gets the fingerprinted original, never a preview.
 //
 // Like every care record, a photo is never deleted: a wrong one is marked entered in error, with who and why, and stays
 // in the record struck through. Adding photos follows the report's rules (not once approved; a manager reopens it).
@@ -27,7 +29,7 @@ const raw = (limit) => express.raw({ type: () => true, limit });
 const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 
 const META = `m.id, m.incident_id, m.patient_id, m.mime, m.file_name, m.bytes, m.sha256, m.caption, m.taken_at, m.taken_lat, m.taken_lng, m.uploaded_at,
-  (m.preview IS NOT NULL) AS has_preview, m.voided_at, m.void_reason, COALESCE(u.email, u.username) AS uploaded_by_name, COALESCE(vu.email, vu.username) AS voided_by_email`;
+  (m.preview IS NOT NULL) AS has_preview, m.preview_sha256, m.voided_at, m.void_reason, COALESCE(u.email, u.username) AS uploaded_by_name, COALESCE(vu.email, vu.username) AS voided_by_email`;
 const JOINS = 'LEFT JOIN users u ON u.id = m.uploaded_by AND u.tenant_id = m.tenant_id LEFT JOIN users vu ON vu.id = m.voided_by AND vu.tenant_id = m.tenant_id';
 const shape = (r) => ({ ...r, has_preview: Boolean(r.has_preview), taken_lat: r.taken_lat === null ? null : Number(r.taken_lat), taken_lng: r.taken_lng === null ? null : Number(r.taken_lng) });
 
@@ -94,20 +96,31 @@ router.post('/incidents/:id/photos', patrol, needs('create_case'), raw(MAX_BYTES
   res.status(out.repeat ? 200 : 201).json(out);
 });
 
-/** The small preview the phone made, shown on the case page before anyone opens the original. Set once. */
+/**
+ * The small preview the phone made, shown on the case page before anyone opens the original. Set once, and only while
+ * the case can be changed (not once signed off, approved or on legal hold), like every other write to the record.
+ */
 router.put('/incidents/:id/photos/:mid/preview', patrol, needs('create_case'), raw(MAX_PREVIEW), async (req, res) => {
   const id = paramId(req); const mid = paramId(req, 'mid');
-  await mediaOf(req.auth.tenantId, id, mid);
   if (!Buffer.isBuffer(req.body) || sniff(req.body) !== 'image/jpeg') throw bad('The preview must be a JPEG');
-  await pool.query('UPDATE incident_media SET preview = ? WHERE tenant_id = ? AND incident_id = ? AND id = ? AND preview IS NULL', [req.body, req.auth.tenantId, id, mid]);
-  res.json({ ok: true });
+  const hash = sha(req.body);
+  const set = await tx(async (conn) => {
+    await cases.editableCase(conn, req, id);
+    await mediaOf(req.auth.tenantId, id, mid);
+    const [r] = await conn.query('UPDATE incident_media SET preview = ?, preview_sha256 = ? WHERE tenant_id = ? AND incident_id = ? AND id = ? AND preview IS NULL', [req.body, hash, req.auth.tenantId, id, mid]);
+    if (r.affectedRows) await audit(conn, req, 'add_photo_preview', 'incidents', id, { photo_id: mid, sha256: hash, bytes: req.body.length });
+    return r.affectedRows > 0;
+  });
+  res.json({ ok: true, set });
 });
 
 router.get('/incidents/:id/photos/:mid/preview', patrol, needs('view_cases'), async (req, res) => {
-  const r = await one(pool, 'SELECT preview, mime FROM incident_media WHERE tenant_id = ? AND incident_id = ? AND id = ?', [req.auth.tenantId, paramId(req), paramId(req, 'mid')]);
+  const id = paramId(req); const mid = paramId(req, 'mid');
+  const r = await one(pool, 'SELECT preview, preview_sha256 FROM incident_media WHERE tenant_id = ? AND incident_id = ? AND id = ?', [req.auth.tenantId, id, mid]);
   if (!r) throw notFound('Photo');
   if (!r.preview) throw new AppError(404, 'No preview yet');
-  res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=3600' }).send(r.preview);
+  await audit(pool, req, 'view_photo_preview', 'incidents', id, { photo_id: mid });
+  res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, no-store', ...(r.preview_sha256 ? { 'X-Content-SHA256': r.preview_sha256 } : {}) }).send(r.preview);
 });
 
 /** The original, byte for byte, with its recorded fingerprint. Every opening is logged, like reading the case. */

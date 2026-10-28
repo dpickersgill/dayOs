@@ -15,9 +15,9 @@ way. Ask your lawyer. Verdynt/OS is built to the stricter standard regardless.
 | --- | --- |
 | Access control, minimum necessary | Patient care reports are readable only by patrol, managers and the owner. Patrol searches the customer list one guest at a time (name, phone or email, at least two characters); there is no browsable customer list for patrol. Patrol searching the list never sees address, emergency contact, marketing consent, notes, or what a guest paid. When a guest is pulled into a patient record, the address, height and weight the incident form asks for are copied in (and the pull is logged); the emergency contact, email, marketing consent, notes and payments still never reach patrol. |
 | Unique user identification | Every login is one person; there is no shared account. Deactivating a login or changing a role or password takes effect on the next request. |
-| Audit controls | Opening a case, changing it, adding or removing a patient, signatures, exports, map views, guest searches, and pulls from customer records are all written to the audit log with the user and time. The log records that a search happened, never what was typed. Patrol administrators read it under Patrol, **Access log**; reading the log is itself logged. The app has no way to edit or delete log rows. |
+| Audit controls | Opening a case, changing it, adding or removing a patient, signatures, opening a photo or its preview, exports, map views, guest searches, and pulls from customer records are all written to the audit log with the user and time. The log records that a search happened, never what was typed. Patrol administrators read it under Patrol, **Access log**; reading the log is itself logged. The app has no way to edit or delete log rows. |
 | Automatic logoff | The screen signs out after 15 minutes without activity, and the sign-in itself lasts 8 hours (`JWT_TTL` to change). The sign-in token lives in the browser tab only, so closing the tab ends it. Signing out reloads the app, so nothing left open (a dialog, the assistant) reaches the next person. A screen's own refreshes are marked as polls and do not count as use, so the server's one-hour idle limit ends a tab nobody touches. The patrol-room screen is the one display that stays signed in all day: the server holds its session to who is on duty and signing people in and out, and leaving it needs the leader's second check. |
-| Integrity | Clinical entries are never deleted: a wrong one is marked entered in error with a reason, by a named user, and stays on the record. Each submitted and approved report is kept as a frozen version, and opening a version is logged. Approved reports are locked. Reopening needs a manager and is logged. |
+| Integrity | Clinical entries are never deleted: a wrong one is marked entered in error with a reason, by a named user, and stays on the record. The same goes for witnesses, responders, people in a collision, rental gear and photos on a case. A case on legal hold cannot change at all, except by adding notes. Each submitted and approved report is kept as a frozen version, and opening a version is logged. Approved reports are locked. Reopening needs a manager and is logged. |
 | Transmission security | Cloud Run serves HTTPS only; the app sends HSTS and a strict content policy. The database connection uses TLS (`DB_CA`). |
 | No copies left behind | Every API response is sent `Cache-Control: no-store`. Server error logs record where something failed, never the request or the SQL (which could carry patient details). |
 | Limited exports | Only managers can export. The case export carries no names and no free text. |
@@ -38,6 +38,18 @@ checks the rows are identical before and after). Pulling is logged.
 5. **Breach plan.** Know who you tell, and how fast, if patient information is exposed.
 6. **Retention.** HIPAA documentation (including the audit log) is generally kept six years; medical-record retention is set by
    your state. The app never deletes either on its own. Decide your schedule.
+
+   **When a mountain leaves.** Closing a mountain pauses it and signs everyone out. After its export window (60 days unless
+   set otherwise) the daily job only marks it due for deletion and notes that in the operator console; it never deletes a
+   real mountain. An operator then deletes it by hand, typing the mountain's address and writing down how and when the owner
+   got their export (kept in the console's history). The delete is refused while any patrol case is on legal hold, and it runs
+   in one transaction, so it either finishes or changes nothing. It keeps: every patrol report and everything filed with it
+   (patients, care, statements, photos, signatures, frozen versions, records requests and claim links), signed waivers and the
+   wording signed, the audit log, and the OSHA injury log until five years after the end of its year (a later run removes
+   entries past that). The logins, staff and guests those records name are kept too; the logins are switched off and their
+   passwords, two-step and passkeys removed. Everything else is deleted. Patrol reports, waivers and the audit log are never
+   deleted by the app; removing them later is a decision for the mountain and its lawyer. Demo mountains hold only made-up
+   data and are removed whole when they end.
 7. **Backups and recovery.** Cloud SQL backups are on; test a restore. Keep backups under the same BAA.
 8. **Devices.** Phones and Chromebooks that open patient reports need screen locks and, ideally, device management.
 9. **People.** Remove a patroller's login the day they leave. Give the owner and manager logins only to people who need them.

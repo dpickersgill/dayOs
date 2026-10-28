@@ -75,8 +75,10 @@ test('setting up the review group: who may, and its own Inbox conversation', asy
   const s = ok(await api('PUT', '/patrol/review/settings', { token: T.owner, body }));
   assert.equal(s.enabled, true); assert.deepEqual(s.categories, ['injury', 'collision', 'medical']);
   assert.equal(s.reviewers.find((r) => r.lead).name, 'Dana Ridge');
-  // the group (not only admins) chooses which kinds of case it reviews
-  ok(await api('PUT', '/patrol/review/settings', { token: T.backup, body: { ...body, categories: ['injury', 'collision', 'medical', 'lost_person'] } }));
+  // only a patrol admin chooses which kinds of case are reviewed; a member may change the reminder time
+  is(await api('PUT', '/patrol/review/settings', { token: T.backup, body: { ...body, categories: ['injury', 'collision', 'medical', 'lost_person'] } }), 403);
+  ok(await api('PUT', '/patrol/review/settings', { token: T.backup, body: { ...body, nudge_hours: 72 } }));
+  ok(await api('PUT', '/patrol/review/settings', { token: T.owner, body: { ...body, categories: ['injury', 'collision', 'medical', 'lost_person'] } }));
   const director = ok(await api('GET', '/inbox/threads', { token: T.director })).data.find((t) => t.title === R.THREAD_NAME);
   assert.ok(director, 'the group has its own conversation');
   assert.ok(!ok(await api('GET', '/inbox/threads', { token: T.pat })).data.some((t) => t.title === R.THREAD_NAME), 'patrollers are not in it');
@@ -182,7 +184,7 @@ test('fixes from the review: nothing gets stuck, nothing gets around the group',
   const c = await readyCase(T.pat, 'medical', 'Dizzy at the summit');
   ok(await api('POST', `/patrol/incidents/${c.id}/submit`, { token: T.pat }));
   const body = { reviewers: [{ user_id: U.director, lead: true }, { user_id: U.backup }], categories: ['injury', 'collision'], nudge_hours: 72 };
-  ok(await api('PUT', '/patrol/review/settings', { token: T.backup, body }));
+  ok(await api('PUT', '/patrol/review/settings', { token: T.owner, body }));
   assert.ok(ok(await api('GET', '/patrol/review/queue', { token: T.director })).data.some((q) => q.id === c.id), 'still in the queue');
   await pool.query('UPDATE incidents SET submitted_at = DATE_SUB(submitted_at, INTERVAL 80 HOUR) WHERE id = ?', [c.id]);
   assert.ok(await R.nudgeTenant(tenantId) >= 1);
@@ -213,6 +215,41 @@ test('fixes from the review: nothing gets stuck, nothing gets around the group',
   ok(await api('POST', `/patrol/incidents/${g.id}/submit`, { token: T.pat }));
   const [[v]] = await pool.query("SELECT GROUP_CONCAT(kind) AS kinds FROM incident_versions WHERE incident_id = ?", [g.id]);
   assert.equal(v.kinds, 'approved');
+});
+
+test('a member of the group cannot rewrite it, and whoever changed it has their own reports reviewed for 30 days', async () => {
+  const body = { reviewers: [{ user_id: U.director, lead: true }, { user_id: U.backup }], categories: ['injury', 'collision', 'medical'], nudge_hours: 72 };
+  ok(await api('PUT', '/patrol/review/settings', { token: T.owner, body }));
+  // the backup (a patrol login, only in the group) tries to drop injuries from review and make themselves the director
+  const c = await readyCase(T.backup, 'injury', 'Own knee report');
+  is(await api('PUT', '/patrol/review/settings', { token: T.backup, body: { reviewers: [{ user_id: U.director }, { user_id: U.backup, lead: true }], categories: ['other'], nudge_hours: 72 } }), 403);
+  is(await api('PUT', '/patrol/review/settings', { token: T.backup, body: { ...body, categories: ['other'] } }), 403, 'the kinds');
+  is(await api('PUT', '/patrol/review/settings', { token: T.backup, body: { ...body, reviewers: [{ user_id: U.director }, { user_id: U.backup, lead: true }] } }), 403, 'the director');
+  is(await api('PUT', '/patrol/review/settings', { token: T.backup, body: { ...body, reviewers: [{ user_id: U.director, lead: true }, { user_id: U.backup }, { user_id: U.pat }] } }), 403, 'who reviews');
+  const s = ok(await api('GET', '/patrol/review/settings', { token: T.backup }));
+  assert.equal(s.can_edit, true); assert.equal(s.can_edit_group, false);
+  assert.equal(ok(await api('POST', `/patrol/incidents/${c.id}/submit`, { token: T.backup })).review, 'review');
+  const [[row]] = await pool.query('SELECT report_state, approved_by FROM incidents WHERE id = ?', [c.id]);
+  assert.equal(row.report_state, 'submitted');
+  // a member changing the reminder time is recorded with what it was before and after
+  ok(await api('PUT', '/patrol/review/settings', { token: T.backup, body: { ...body, nudge_hours: 48 } }));
+  const [[a]] = await pool.query("SELECT detail FROM audit_log WHERE tenant_id = ? AND action = 'review_group' AND user_id = ? ORDER BY id DESC LIMIT 1", [tenantId, U.backup]);
+  const d = typeof a.detail === 'string' ? JSON.parse(a.detail) : a.detail;
+  assert.equal(d.before.nudge_hours, 72); assert.equal(d.after.nudge_hours, 48);
+  assert.deepEqual(d.before.categories, ['injury', 'collision', 'medical']);
+  assert.ok(d.before.reviewers.some((r) => r.user_id === U.director && r.lead));
+  // an admin who changed the group: their own report of a kind not reviewed still goes for review (for 30 days)
+  ok(await api('PUT', '/patrol/review/settings', { token: T.owner, body: { ...body, nudge_hours: 72 } }));
+  const own = await readyCase(T.owner, 'equipment', 'Owner bent pole');
+  assert.equal(ok(await api('POST', `/patrol/incidents/${own.id}/submit`, { token: T.owner })).review, 'review');
+  // the patroller, who changed nothing, is signed off without review for a kind not reviewed
+  const p = await readyCase(T.pat, 'equipment', 'Bent pole again');
+  assert.equal(ok(await api('POST', `/patrol/incidents/${p.id}/submit`, { token: T.pat })).review, 'not_required');
+  // older than 30 days, the change no longer counts
+  await pool.query("UPDATE audit_log SET at = DATE_SUB(at, INTERVAL 31 DAY) WHERE tenant_id = ? AND action = 'review_group' AND user_id = ?", [tenantId, U.owner]);
+  const later = await readyCase(T.owner, 'equipment', 'Owner bent pole later');
+  assert.equal(ok(await api('POST', `/patrol/incidents/${later.id}/submit`, { token: T.owner })).review, 'not_required');
+  for (const id of [c.id, own.id]) ok(await api('POST', `/patrol/incidents/${id}/approve`, { token: T.director, body: { checklist: ALL } }));
 });
 
 test('removing everyone turns the group off and the older approval rule applies again', async () => {

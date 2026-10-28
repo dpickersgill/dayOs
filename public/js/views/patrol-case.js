@@ -4,7 +4,7 @@
 //   Record  the history: notes and addenda, frozen versions, and everything marked entered in error
 // A wristband bar at the top always says whose record this is and what might hurt them, and switches between the views.
 
-import { get, post, patch, del } from '../api.js';
+import { get, post, patch } from '../api.js';
 import { h, clear, state, input, select, field, button, toast, formDialog, dialog, confirmDialog, val, num, nowInput, nowStamp, fmtDateTime, fmtTime, fmtDate, fmtTimeZoned, label, empty, errorBox, fail, ctx } from '../ui.js';
 import { has } from './patrol-feat.js';
 import { shareButton } from '../share.js';
@@ -234,7 +234,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
 
   /** What the form needs to know about the rest of the report: who has signed and how many witnesses are on file. */
   const sigCtx = (c, patient) => ({
-    witnessCount: c.witnesses.length,
+    witnessCount: c.witnesses.filter((w) => !w.voided_at).length,
     signed: (f) => c.signatures.some((x) => x.kind === f.kind && (!patient || x.patient_id === patient.id || x.patient_id === null)),
   });
 
@@ -348,7 +348,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       steps.push({ key: 'outcome', text: 'Record the outcome', done: pts.length > 0 && pts.every((p) => p.disposition), skip: !first, go: () => { const p = pts.find((x) => !x.disposition) || first; jumpTo({ patient_id: p.id, section: 'transport', field: 'disposition' }); } });
     }
     if (refused) steps.push({ key: 'refusal', text: 'Get the refusal signed', done: c.signatures.some((x) => x.kind === 'refusal_of_care' && x.patient_id === refused.id), go: () => { location.hash = `#/patrol/refusal/${id}/${refused.id}`; } });
-    steps.push({ key: 'lead', text: 'Name the lead responder', done: c.responders.some((r) => r.role === 'lead'), go: () => { setMode('report'); responderDialog(); } });
+    steps.push({ key: 'lead', text: 'Name the lead responder', done: c.responders.some((r) => r.role === 'lead' && !r.voided_at), go: () => { setMode('report'); responderDialog(); } });
     steps.push({ key: 'story', text: 'Say what happened', done: Boolean(c.narrative && c.narrative.trim()), go: () => jumpTo({ area: 'narrative' }) });
     const gaps = missingItems(c);
     if (c.requirements && c.requirements.items.some((i) => i.level === 'submit')) {
@@ -865,8 +865,8 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
   // ---- responders
   function respondersPanel(c, editable) {
     return h('section', { class: 'panel stack' }, h('div', { class: 'spread' }, h('h2', null, 'Responders'), editable ? anchor(button('Add responder', () => responderDialog(), { small: true }), 'responders') : null),
-      c.responders.length ? h('ul', { class: 'plain' }, c.responders.map((r) => h('li', { class: 'spread' }, h('span', null, `${r.first_name} ${r.last_name} `, state(label(r.role), r.role === 'lead' ? 'good' : 'neutral'), r.patrol_number ? h('span', { class: 'muted small' }, ` No. ${r.patrol_number}`) : null),
-        editable ? button('Remove', change(() => del(`/patrol/incidents/${id}/responders/${r.id}`)), { small: true }) : null))) : h('p', { class: 'muted' }, 'No responders named yet.'));
+      c.responders.length ? h('ul', { class: 'plain' }, c.responders.map((r) => h('li', { class: r.voided_at ? 'spread voided' : 'spread' }, h('span', null, h('span', { class: 'what' }, `${r.first_name} ${r.last_name} `), state(label(r.role), r.role === 'lead' && !r.voided_at ? 'good' : 'neutral'), r.patrol_number ? h('span', { class: 'muted small' }, ` No. ${r.patrol_number}`) : null, voidedNote(r)),
+        editable && !r.voided_at ? button('Entered in error', () => voidDialog({ what: `${r.first_name} ${r.last_name}, ${label(r.role)}`, path: `/patrol/incidents/${id}/responders/${r.id}`, onDone: load }), { small: true, kind: 'quiet' }) : null))) : h('p', { class: 'muted' }, 'No responders named yet.'));
   }
   function responderDialog() {
     const members = roster.filter((m) => m.staff_status === 'active');
@@ -1008,12 +1008,12 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
         const own = w.source === 'link';
         const action = !editable || w.voided_at ? null
           : own ? button('Entered in error', () => voidOwnStatement(w), { small: true })
-            : button('Remove', change(() => del(`/patrol/incidents/${id}/witnesses/${w.id}`)), { small: true });
+            : button('Entered in error', () => voidDialog({ what: `Witness: ${w.name}`, path: `/patrol/incidents/${id}/witnesses/${w.id}`, onDone: load }), { small: true, kind: 'quiet' });
         return h('li', { class: w.voided_at ? 'stack tight voided' : 'stack tight' },
           h('div', { class: 'spread' }, h('span', null, w.relation ? `${label(w.relation)}: ` : '', h('b', null, w.name), h('span', { class: 'muted' }, ` ${[w.phone, w.email, [w.address, w.city, w.region, w.postal].filter(Boolean).join(' ')].filter(Boolean).join(', ')}`)), action),
           own ? h('p', { class: 'small' }, state(`In their own words, received ${fmtDateTime(w.received_at)}`, 'good')) : null,
           w.statement ? h('p', { class: 'prewrap' }, w.statement) : null,
-          w.voided_at ? h('p', { class: 'small muted' }, `Entered in error: ${w.void_reason || ''}`) : null);
+          w.voided_at ? h('p', { class: 'small muted' }, voidedNote(w)) : null);
       })) : h('p', { class: 'muted' }, 'No witnesses recorded.'));
   }
   function voidOwnStatement(w) {
@@ -1073,6 +1073,10 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       for (const i of p.injuries.filter((x) => x.voided_at)) rows.push([i.voided_at, `${who}: ${label(i.injury_type)}, ${label(i.body_region)}`, i]);
       for (const t of p.treatments.filter((x) => x.voided_at)) rows.push([t.voided_at, `${who}: ${treatmentName(t)} at ${fmtTime(t.performed_at)}`, t]);
     }
+    for (const r of c.responders.filter((x) => x.voided_at)) rows.push([r.voided_at, `Responder: ${r.first_name} ${r.last_name}`, r]);
+    for (const w of c.witnesses.filter((x) => x.voided_at)) rows.push([w.voided_at, `Witness: ${w.name}`, w]);
+    for (const p of (c.parties || []).filter((x) => x.voided_at)) rows.push([p.voided_at, `Person involved: ${[p.first_name, p.last_name].filter(Boolean).join(' ') || label(p.role)}`, p]);
+    for (const r of (c.rentals || []).filter((x) => x.voided_at)) rows.push([r.voided_at, `Rental gear: ${(r.detail && r.detail.item && r.detail.item.sku) || 'item'}`, r]);
     rows.sort((a, b) => (String(a[0]) < String(b[0]) ? -1 : 1));
     return h('section', { class: 'panel stack', 'data-area': 'corrections' }, h('h2', null, 'Entered in error'),
       rows.length ? h('ul', { class: 'plain log' }, rows.map(([, what, row]) => h('li', { class: 'voided' }, h('span', null, h('span', { class: 'what' }, what), voidedNote(row))))) : h('p', { class: 'muted' }, 'Nothing has been marked entered in error.'),

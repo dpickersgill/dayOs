@@ -1,7 +1,7 @@
 // Patrol case > Report: the conditions at the time (what the mountain's own records said: the trail and its grooming,
 // snow, weather and the lift), who was told about the incident and when, the lift involved, and rental gear involved. The calls log works with
 // no signal: each entry waits on the phone with the time it was made and is sent when the signal returns.
-import { get, post, patch, del } from '../api.js';
+import { get, post, patch } from '../api.js';
 import { h, clear, input, select, field, button, toast, formDialog, dialog, val, nowInput, fmtTime, fmtDateTime, label, fail } from '../ui.js';
 import { send, pending } from '../outbox.js';
 import { voidDialog, sentToast } from './patrol-tools.js';
@@ -114,11 +114,11 @@ export function rentalsPanel({ c, editable, id, onDone }) {
     h('div', { class: 'spread' }, h('h2', null, 'Rental gear'), editable ? button('Find rental gear', () => rentalDialog({ id, pts, onDone }), { small: true }) : null),
     list.length ? h('ul', { class: 'plain gear-list' }, list.map((r) => {
       const d = r.detail || {};
-      return h('li', { class: 'stack tight' },
-        h('div', { class: 'spread' }, h('span', null, h('b', null, d.item ? `${d.item.sku}, ${gearName(d.item)}` : 'Rental item'), r.patient_id && pts.length > 1 ? h('span', { class: 'muted' }, ` (${(pts.find((p) => p.id === r.patient_id) || {}).first_name || 'patient'})`) : null),
-          editable && !r.released_at ? button('Remove', async () => { try { await del(`/patrol/incidents/${id}/rentals/${r.id}`); toast('Removed'); await onDone(); } catch (err) { fail(err); } }, { small: true, kind: 'quiet' }) : null),
+      return h('li', { class: r.voided_at ? 'stack tight voided' : 'stack tight' },
+        h('div', { class: 'spread' }, h('span', null, h('b', { class: 'what' }, d.item ? `${d.item.sku}, ${gearName(d.item)}` : 'Rental item'), r.patient_id && pts.length > 1 ? h('span', { class: 'muted' }, ` (${(pts.find((p) => p.id === r.patient_id) || {}).first_name || 'patient'})`) : null),
+          editable && !r.released_at && !r.voided_at ? button('Entered in error', () => voidDialog({ what: d.item ? `${d.item.sku}, ${gearName(d.item)}` : 'Rental item', path: `/patrol/incidents/${id}/rentals/${r.id}`, onDone }), { small: true, kind: 'quiet' }) : null),
         h('ul', { class: 'gear-facts' }, gearLines(d).map((x) => h('li', null, x))),
-        h('p', { class: r.held && !r.released_at ? 'cover-why' : 'muted small' }, holdText(r)));
+        r.voided_at ? h('p', { class: 'small muted' }, voidedNote(r)) : h('p', { class: r.held && !r.released_at ? 'cover-why' : 'muted small' }, holdText(r)));
     })) : h('p', { class: 'muted' }, 'No rental gear on this case.'));
 }
 

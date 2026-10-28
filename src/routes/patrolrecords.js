@@ -104,7 +104,7 @@ router.get('/records/:id/pack', patrol, needs('records'), async (req, res) => {
   res.json({ request: shape(r), version: { id: Number(v.id), version_no: v.version_no, created_at: v.created_at, report: JSON.parse(v.snapshot) }, resort: tenant });
 });
 
-/** Legal hold: nothing on the case can be marked entered in error, no patient removed, and it is never purged. */
+/** Legal hold: nothing on the case changes but notes (nothing added, edited or marked entered in error), and it is never purged. */
 router.put('/incidents/:id/legal-hold', patrol, needs('records'), validate(z.object({ hold: z.boolean(), note: z.string().trim().max(255).nullable().optional() })), async (req, res) => {
   const t = req.auth.tenantId; const id = paramId(req);
   if (req.body.hold && !req.body.note) throw bad('Say why the case is on hold (the claim or request)');

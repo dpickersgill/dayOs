@@ -125,6 +125,9 @@ function enteredInError(c) {
   for (const x of c.contacts || []) add('Who was told', x, `${label(x.who)} ${when(x.at)}`);
   for (const x of c.photos || []) add('Photo', x, x.caption || `Photo ${x.id}`);
   for (const x of c.witnesses || []) add('Witness', x, x.name || 'Witness');
+  for (const x of c.responders || []) add('Responder', x, `${[x.first_name, x.last_name].filter(Boolean).join(' ')} (${label(x.role)})`);
+  for (const x of c.parties || []) add('Person involved', x, [x.first_name, x.last_name].filter(Boolean).join(' ') || label(x.role || ''));
+  for (const x of c.rentals || []) add('Rental gear', x, ((x.detail || {}).item || {}).sku || 'Rental item');
   return tbl(['What', 'Item', 'Marked', 'Why', 'By'], out);
 }
 
@@ -150,14 +153,14 @@ export function claimDoc(f, { photoSrc = null, extra = [], header = null } = {})
       ['GPS', nn(c.gps_lat) ? `${Number(c.gps_lat).toFixed(5)}, ${Number(c.gps_lng).toFixed(5)}` : null],
       ['Kind', c.category ? label(c.category) : null], ['Severity', c.severity ? label(c.severity) : null], ['Report', c.report_state ? label(c.report_state) : null],
       ['Signed off', c.submitted_at ? when(c.submitted_at) : null], ['Approved', c.approved_at ? when(c.approved_at) : null],
-      ['Responders', (c.responders || []).map((r) => `${[r.first_name, r.last_name].filter(Boolean).join(' ')}${r.patrol_number ? ` #${r.patrol_number}` : ''} (${label(r.role)})`).join('; ')],
+      ['Responders', live(c.responders).map((r) => `${[r.first_name, r.last_name].filter(Boolean).join(' ')}${r.patrol_number ? ` #${r.patrol_number}` : ''} (${label(r.role)})`).join('; ')],
       ['Protocols', c.protocol_stamp],
     ]), c.summary ? h('p', null, h('b', null, 'Summary. '), c.summary) : null, c.narrative ? h('div', { class: 'cf-narrative' }, h('h3', null, 'Narrative'), h('p', null, c.narrative)) : null),
     sec(`Patients (${live(c.patients).length})`, live(c.patients).map((p) => patientBlock(p, c))),
     sec('Care timeline', careTimeline(c)),
     sec('Who was told', tbl(['When', 'Who', 'How', 'Note', 'Recorded by'], live(c.contacts).map((x) => [when(x.at), `${label(x.who)}${x.who_name ? `: ${x.who_name}` : ''}`, label(x.method), t(x.note), t(x.recorded_by)])) || h('p', { class: 'muted' }, 'Nobody recorded as told.')),
     sec('Conditions at the time', conditionsBlock(c.conditions) || h('p', { class: 'muted' }, 'No conditions snapshot on this case.')),
-    (c.rentals || []).length ? sec('Rental gear', rentalsBlock(c.rentals)) : null,
+    live(c.rentals).length ? sec('Rental gear', rentalsBlock(live(c.rentals))) : null,
     live(c.witnesses).length ? sec(`Witnesses (${live(c.witnesses).length})`, live(c.witnesses).map((w) => h('article', { class: 'cf-witness' },
       h('h3', null, w.name || 'Witness', w.relation ? h('span', { class: 'muted' }, ` · ${label(w.relation)}`) : null),
       kv([['Phone', w.phone], ['Email', w.email], ['Address', [w.address, w.city, w.region, w.postal].filter(Boolean).join(', ')], ['Received', w.received_at ? `${when(w.received_at)}${w.source === 'link' ? ', written by the witness' : ''}` : null]]),
@@ -167,7 +170,7 @@ export function claimDoc(f, { photoSrc = null, extra = [], header = null } = {})
       ['Type', c.collision.collision_type ? label(c.collision.collision_type) : null], ['Hit and run', Number(c.collision.hit_and_run) ? 'Yes' : null], ['Other party', c.collision.unknown_party_description],
       ['Right of way', c.collision.right_of_way ? label(c.collision.right_of_way) : null], ['Police', Number(c.collision.police_notified) ? `${c.collision.police_agency || 'Notified'}${c.collision.police_report_no ? `, report ${c.collision.police_report_no}` : ''}` : null],
       ['Equipment held', Number(c.collision.equipment_held) ? 'Yes' : null], ['Damage', c.collision.property_damage], ['Findings', c.collision.findings],
-    ]), tbl(['Party', 'Name', 'Age', 'Helmet', 'Statement'], (c.parties || []).map((p) => [label(p.role), [p.first_name, p.last_name].filter(Boolean).join(' '), t(p.age_years), p.helmet ? label(p.helmet) : '', t(p.statement)]))) : null,
+    ]), tbl(['Party', 'Name', 'Age', 'Helmet', 'Statement'], live(c.parties).map((p) => [label(p.role), [p.first_name, p.last_name].filter(Boolean).join(' '), t(p.age_years), p.helmet ? label(p.helmet) : '', t(p.statement)]))) : null,
     photos.length ? sec(`Photos (${photos.length})`, h('div', { class: 'cf-photos' }, photos.map((p) => {
       const img = h('img', { alt: p.caption || `Photo ${p.id}`, loading: 'lazy' });
       if (photoSrc && p.has_preview !== false) photoSrc(p, img);

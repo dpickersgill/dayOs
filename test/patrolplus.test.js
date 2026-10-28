@@ -112,8 +112,12 @@ test('collision report: parties, scene, right of way, and who can see or change 
   // marking the patient entered in error keeps the party, unlinked
   ok(await api('POST', `${base_}/patients/${hurt}/void`, { token: pat, body: { reason: 'Added to the wrong case' } }));
   assert.equal(ok(await api('GET', base_, { token: pat })).parties[0].patient_id, null);
-  ok(await api('DELETE', `${base_}/parties/${p1}`, { token: pat }));
-  assert.equal(ok(await api('GET', base_, { token: pat })).parties.length, 1);
+  // a person recorded by mistake is marked entered in error with a reason, never removed
+  assert.equal((await api('DELETE', `${base_}/parties/${p1}`, { token: pat })).status, 400, 'a reason is needed');
+  ok(await api('DELETE', `${base_}/parties/${p1}`, { token: pat, body: { reason: 'Wrong person' } }));
+  const parties = ok(await api('GET', base_, { token: pat })).parties;
+  assert.equal(parties.length, 2);
+  assert.equal(parties.filter((x) => !x.voided_at).length, 1);
   // printing is logged
   assert.equal((await api('POST', `${base_}/collision-printed`, { token: pat })).status, 204);
   assert.equal((await api('POST', `${base_}/collision-printed`, { token: B.pat })).status, 404);
@@ -123,6 +127,56 @@ test('collision report: parties, scene, right of way, and who can see or change 
   ok(await api('POST', `${base_}/approve`, { token: A.owner }));
   assert.equal((await api('PUT', `${base_}/collision`, { token: pat, body: { collision_type: 'other' } })).status, 409);
   assert.equal((await api('POST', `${base_}/parties`, { token: pat, body: { role: 'skier' } })).status, 409);
+});
+
+test('witnesses, responders and collision parties are marked entered in error, never deleted; legal hold stops every change but notes', async () => {
+  const c = ok(await newCase(pat, { category: 'injury' }), 201);
+  const b = `/patrol/incidents/${c.id}`;
+  ok(await api('POST', `${b}/patients`, { token: pat, body: { form: { head_strike: 'no' }, first_name: 'Sam', last_name: 'Struck', chief_complaint: 'Sore back', disposition: 'treated_released' } }), 201);
+  const w = ok(await api('POST', `${b}/witnesses`, { token: pat, body: { name: 'Will Witness', statement: 'Saw the snowboarder hit him from behind' } }), 201).id;
+  const w2 = ok(await api('POST', `${b}/witnesses`, { token: pat, body: { name: 'Wes Second', statement: 'Heard the crash' } }), 201).id;
+  const pty = ok(await api('POST', `${b}/parties`, { token: pat, body: { role: 'snowboarder', first_name: 'Other', last_name: 'Party', statement: 'I was not going fast' } }), 201).id;
+  const r = ok(await api('POST', `${b}/responders`, { token: pat, body: { staff_id: patStaff, role: 'lead' } }), 201).id;
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0]), Buffer.from('SCENE'), Buffer.from([0xff, 0xd9])]);
+  const photo = await (await fetch(`${base}/api/v1${b}/photos`, { method: 'POST', headers: { authorization: `Bearer ${pat}`, 'content-type': 'image/jpeg' }, body: jpeg })).json();
+
+  // marked entered in error with a reason: the rows stay, with who, when and why
+  assert.equal((await api('DELETE', `${b}/witnesses/${w}`, { token: pat })).status, 400, 'a reason is needed');
+  ok(await api('DELETE', `${b}/witnesses/${w}`, { token: pat, body: { reason: 'Wrote down the wrong name' } }));
+  ok(await api('POST', `${b}/responders/${r}/void`, { token: pat, body: { reason: 'Was not on this call' } }));
+  assert.equal((await api('POST', `${b}/responders/${r}/void`, { token: pat, body: { reason: 'Again' } })).status, 409, 'once');
+  const [[wr]] = await pool.query('SELECT voided_at, void_reason, voided_by, statement FROM incident_witnesses WHERE id = ?', [w]);
+  assert.ok(wr.voided_at && wr.voided_by); assert.equal(wr.void_reason, 'Wrote down the wrong name'); assert.match(wr.statement, /from behind/);
+  const got = ok(await api('GET', b, { token: pat }));
+  assert.ok(got.witnesses.find((x) => x.id === w).voided_at, 'shown on the record as entered in error');
+  assert.match(got.witnesses.find((x) => x.id === w).voided_by_email, /pat@/);
+  const resp = got.responders.find((x) => x.id === r);
+  assert.ok(resp.voided_at); assert.equal(resp.void_reason, 'Was not on this call');
+  // a voided lead does not count as the lead
+  const sub = await api('POST', `${b}/submit`, { token: pat });
+  assert.equal(sub.status, 409); assert.match(sub.text, /led the response/);
+  // named again: back on the record
+  ok(await api('POST', `${b}/responders`, { token: pat, body: { staff_id: patStaff, role: 'lead' } }), 201);
+  assert.equal(ok(await api('GET', b, { token: pat })).responders.find((x) => x.id === r).voided_at, null);
+  const cf = ok(await api('GET', `${b}/claim-file`, { token: A.owner }));
+  assert.ok(cf.report.witnesses.find((x) => x.id === w).voided_at, 'and in the claim file');
+
+  // On legal hold, nothing changes but notes: no voids, no new entries, no edits, no ticks, no photo voids.
+  ok(await api('PUT', `${b}/legal-hold`, { token: A.owner, body: { hold: true, note: 'Attorney letter' } }));
+  for (const [m, path, body] of [
+    ['DELETE', `${b}/witnesses/${w2}`, { reason: 'Gone' }], ['POST', `${b}/witnesses/${w2}/void`, { reason: 'Gone' }],
+    ['DELETE', `${b}/parties/${pty}`, { reason: 'Gone' }], ['POST', `${b}/parties`, { role: 'skier' }], ['PATCH', `${b}/parties/${pty}`, { statement: 'Changed' }],
+    ['DELETE', `${b}/responders/${r}`, { reason: 'Gone' }], ['PATCH', b, { summary: 'Rewritten' }],
+    ['POST', `${b}/checklist`, { key: 'witnesses_taken', done: true }], ['POST', `${b}/photos/${photo.id}/void`, { reason: 'Wrong photo' }],
+  ]) {
+    const res = await api(m, path, { token: pat, body });
+    assert.equal(res.status, 409, `${m} ${path} on legal hold: ${res.text}`);
+    assert.match(res.text, /legal hold/);
+  }
+  ok(await api('POST', `${b}/notes`, { token: pat, body: { body: 'Letter received from the other party\'s attorney' } }), 201);
+  const [[left]] = await pool.query('SELECT (SELECT COUNT(*) FROM incident_witnesses WHERE incident_id = ? AND voided_at IS NULL) AS w, (SELECT COUNT(*) FROM incident_parties WHERE incident_id = ? AND voided_at IS NULL) AS p, (SELECT statement FROM incident_parties WHERE id = ?) AS st', [c.id, c.id, pty]);
+  assert.equal(Number(left.w), 1); assert.equal(Number(left.p), 1); assert.equal(left.st, 'I was not going fast');
+  ok(await api('PUT', `${b}/legal-hold`, { token: A.owner, body: { hold: false } }));
 });
 
 test('checklists: known items only, stamped with who and when, and they can be unticked', async () => {

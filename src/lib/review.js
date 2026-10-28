@@ -25,6 +25,7 @@ const CHECKS = [
 const CHECK_KEYS = CHECKS.map((c) => c[0]);
 const SECTIONS = ['Patient', 'Complaint and treatment', 'Assessment', 'First aid', 'Location', 'Conditions', 'Activity and equipment', 'Cause', 'Transport', 'Narrative', 'Witnesses', 'Signatures', 'Timeline', 'Other'];
 const THREAD_NAME = 'Patrol case review';
+const CHANGED_DAYS = 30;
 
 const caseNo = (i) => (i.seq ? `${i.season}-${String(i.seq).padStart(4, '0')}` : String(i.id));
 const NAME = "COALESCE(NULLIF(TRIM(CONCAT(COALESCE(p.first_name, sp.first_name, ''), ' ', COALESCE(p.last_name, sp.last_name, ''))), ''), u.email, u.username)";
@@ -59,7 +60,11 @@ async function canReview(db, req, settings) {
   return PA.can(pool, req, 'approve_case');
 }
 
-/** May this login change the review group? Patrol admins (owners, managers, patrol admin level) and its members. */
+/**
+ * May this login change the review group's settings? Patrol admins (owners, managers, patrol admin level) and its members.
+ * Members may only change the reminder time: who reviews, the director and the kinds reviewed are for patrol admins
+ * (routes/patrolreview.js checks that).
+ */
 async function canManage(db, req, settings) {
   if ((await PA.levelOf(pool, req)) === 'admin') return true;
   const s = settings || await settingsOf(db, req.auth.tenantId);
@@ -118,7 +123,11 @@ async function afterSubmit(conn, req, inc, now) {
   const s = await settingsOf(conn, req.auth.tenantId);
   if (!s.enabled) return 'review';
   const link = [{ type: 'patrol_case', id: inc.id }];
-  if (!needsReview(s, inc.category)) {
+  // Someone who changed the review group in the last 30 days never has their own report signed off without review, so
+  // dropping a kind of case from review cannot be used to skip review of one's own report.
+  const changedGroup = await one(conn, `SELECT 1 AS y FROM audit_log WHERE tenant_id = ? AND action = 'review_group' AND user_id = ?
+    AND at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY) LIMIT 1`, [inc.tenant_id, req.auth.userId, CHANGED_DAYS]);
+  if (!needsReview(s, inc.category) && !changedGroup) {
     await conn.query("UPDATE incidents SET report_state = 'approved', status = 'closed', approved_by = NULL, approved_at = ?, review_round = review_round + 1, returned_at = NULL, returned_by = NULL, escalated_at = NULL, escalated_by = NULL, escalation_note = NULL WHERE tenant_id = ? AND id = ?", [now, inc.tenant_id, inc.id]);
     await conn.query("INSERT INTO incident_reviews (tenant_id, incident_id, round, outcome, note) VALUES (?, ?, ?, 'not_required', ?)", [inc.tenant_id, inc.id, (inc.review_round || 0) + 1, `The review group does not review ${inc.category.replace('_', ' ')} cases`]);
     return 'not_required';

@@ -81,6 +81,7 @@ router.patch('/incidents/:id/parties/:rowId', patrol, needs('create_case'), vali
   await tx(async (conn) => {
     await editable(conn, req, id);
     await checkPatient(conn, req, id, req.body.patient_id);
+    if (await one(conn, 'SELECT id FROM incident_parties WHERE tenant_id = ? AND incident_id = ? AND id = ? AND voided_at IS NOT NULL', [req.auth.tenantId, id, paramId(req, 'rowId')])) throw conflict('This person was marked entered in error');
     const set = setClause(req.body, partyCols);
     if (!set) throw bad('No updatable fields supplied');
     const [r] = await conn.query(`UPDATE incident_parties SET ${set.sql} WHERE tenant_id = ? AND incident_id = ? AND id = ?`, [...set.values, req.auth.tenantId, id, paramId(req, 'rowId')]);
@@ -90,16 +91,18 @@ router.patch('/incidents/:id/parties/:rowId', patrol, needs('create_case'), vali
   res.json({ ok: true });
 });
 
-router.delete('/incidents/:id/parties/:rowId', patrol, needs('create_case'), async (req, res) => {
+/** A person recorded by mistake is marked entered in error with a reason; they and their statement stay on the record. DELETE does the same. */
+async function voidParty(req, res) {
   const id = paramId(req);
   await tx(async (conn) => {
     await editable(conn, req, id);
-    const [r] = await conn.query('DELETE FROM incident_parties WHERE tenant_id = ? AND incident_id = ? AND id = ?', [req.auth.tenantId, id, paramId(req, 'rowId')]);
-    if (!r.affectedRows) throw notFound('Party');
-    await audit(conn, req, 'remove_party', 'incidents', id, { row: paramId(req, 'rowId') });
+    const r = await patrolRouter.voidCaseRow(conn, req, id, 'incident_parties', paramId(req, 'rowId'), 'Party');
+    await audit(conn, req, 'void_party', 'incidents', id, { row: Number(r.id), reason: req.body.reason });
   });
-  res.status(204).end();
-});
+  res.json({ ok: true });
+}
+router.post('/incidents/:id/parties/:rowId/void', patrol, needs('create_case'), validate(patrolRouter.voidSchema), voidParty);
+router.delete('/incidents/:id/parties/:rowId', patrol, needs('create_case'), validate(patrolRouter.voidSchema), voidParty);
 
 /** The printed collision report goes to insurers and other parties, so printing it is logged. */
 router.post('/incidents/:id/collision-printed', patrol, needs('create_case'), async (req, res) => {
@@ -138,7 +141,7 @@ router.get('/home', patrol, async (req, res) => {
   const cols = `i.id, i.season, i.seq, i.occurred_at, i.location, i.category, i.severity, i.summary, i.report_state, (SELECT COUNT(*) FROM incident_patients p WHERE p.tenant_id = i.tenant_id AND p.incident_id = i.id AND p.voided_at IS NULL) AS patient_count`;
   const num = (r) => ({ ...r, case_number: r.seq ? `${r.season}-${String(r.seq).padStart(4, '0')}` : null });
   const mine = staffId && canView
-    ? await rows(pool, `SELECT ${cols} FROM incidents i WHERE i.tenant_id = ? AND i.report_state = 'draft' AND EXISTS (SELECT 1 FROM incident_responders r WHERE r.tenant_id = i.tenant_id AND r.incident_id = i.id AND r.staff_id = ?) ORDER BY i.occurred_at DESC LIMIT 20`, [tenantId, staffId])
+    ? await rows(pool, `SELECT ${cols} FROM incidents i WHERE i.tenant_id = ? AND i.report_state = 'draft' AND EXISTS (SELECT 1 FROM incident_responders r WHERE r.tenant_id = i.tenant_id AND r.incident_id = i.id AND r.staff_id = ? AND r.voided_at IS NULL) ORDER BY i.occurred_at DESC LIMIT 20`, [tenantId, staffId])
     : [];
   const recent = canView ? await rows(pool, `SELECT ${cols} FROM incidents i WHERE i.tenant_id = ? AND i.report_state = 'draft' ORDER BY i.occurred_at DESC LIMIT 10`, [tenantId]) : [];
   // a reviewer's own reports are reviewed by someone else, so they are not in their own queue

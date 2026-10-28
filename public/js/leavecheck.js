@@ -50,7 +50,7 @@ export function leaveItems(c, { on = true, only = null } = {}) {
     if (p.disposition === 'refused_care') add('refusal_signature', (c.signatures || []).some((s) => s.kind === 'refusal_of_care' && s.patient_id === p.id));
     if (RENTAL.includes(f.equipment) || p.rental_equipment === 'yes') add('rental', !blank(f.rental_boot) || !blank(f.rental_ski));
   }
-  if (pts.length) out.push({ item: 'witnesses', label: LABEL.witnesses, patient_id: null, who: null, met: (c.witnesses || []).length > 0 || Boolean(formOf(c.form).witnesses_none), skip: skipFor('witnesses', null) });
+  if (pts.length) out.push({ item: 'witnesses', label: LABEL.witnesses, patient_id: null, who: null, met: (c.witnesses || []).some((w) => !w.voided_at) || Boolean(formOf(c.form).witnesses_none), skip: skipFor('witnesses', null) });
   return withWaiting(c, out);
 }
 

@@ -74,7 +74,7 @@ function lateFee(dueAt, settings, timeZone) {
  */
 async function patrolHold(conn, tenantId, itemId) {
   const [[r]] = await conn.query(`SELECT r.id, r.incident_id, CONCAT(i.season, '-', LPAD(i.seq, 4, '0')) AS case_number FROM incident_rentals r JOIN incidents i ON i.tenant_id = r.tenant_id AND i.id = r.incident_id
-    WHERE r.tenant_id = ? AND r.rental_item_id = ? AND r.held = 1 AND r.released_at IS NULL ORDER BY r.id DESC LIMIT 1`, [tenantId, itemId]);
+    WHERE r.tenant_id = ? AND r.rental_item_id = ? AND r.held = 1 AND r.released_at IS NULL AND r.voided_at IS NULL ORDER BY r.id DESC LIMIT 1`, [tenantId, itemId]);
   return r || null;
 }
 /** The status gear goes to when it comes back: a patrol hold sends it to the shop instead of the rack. */

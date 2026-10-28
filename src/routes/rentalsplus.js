@@ -332,7 +332,7 @@ router.get('/service', requireRole(...counter), async (req, res) => {
   const settings = await R.getSettings(pool, tenantId);
   // Gear held after a patrol case shows with the case, and is released by logging an inspection.
   const inShop = await rows(pool, `SELECT ri.*, h.incident_id AS patrol_incident_id, CONCAT(i.season, '-', LPAD(i.seq, 4, '0')) AS patrol_case FROM rental_items ri
-    LEFT JOIN incident_rentals h ON h.tenant_id = ri.tenant_id AND h.rental_item_id = ri.id AND h.held = 1 AND h.released_at IS NULL
+    LEFT JOIN incident_rentals h ON h.tenant_id = ri.tenant_id AND h.rental_item_id = ri.id AND h.held = 1 AND h.released_at IS NULL AND h.voided_at IS NULL
     LEFT JOIN incidents i ON i.tenant_id = h.tenant_id AND i.id = h.incident_id
     WHERE ri.tenant_id = ? AND (ri.status = 'maintenance' OR h.id IS NOT NULL) ORDER BY (h.id IS NULL), ri.category, ri.sku`, [tenantId]);
   const due = settings.service_every_uses
@@ -358,7 +358,7 @@ router.post(
       await conn.query('INSERT INTO rental_service_log (tenant_id, rental_item_id, kind, notes, cost_cents, done_by) VALUES (?, ?, ?, ?, ?, ?)', [tenantId, id, req.body.kind, hold && req.body.kind === 'inspection' ? `After patrol case ${hold.case_number}: ${req.body.notes}`.slice(0, 500) : req.body.notes ?? null, req.body.cost_cents ?? 0, req.body.done_by ?? null]);
       await conn.query('UPDATE rental_items SET uses_at_service = uses_count, last_service_at = NOW() WHERE tenant_id = ? AND id = ?', [tenantId, id]);
       if (hold && req.body.kind === 'inspection') {
-        await conn.query('UPDATE incident_rentals SET released_at = NOW(), released_by = ?, inspection_note = ? WHERE tenant_id = ? AND rental_item_id = ? AND held = 1 AND released_at IS NULL', [req.auth.userId, req.body.notes, tenantId, id]);
+        await conn.query('UPDATE incident_rentals SET released_at = NOW(), released_by = ?, inspection_note = ? WHERE tenant_id = ? AND rental_item_id = ? AND held = 1 AND released_at IS NULL AND voided_at IS NULL', [req.auth.userId, req.body.notes, tenantId, id]);
       }
       const onContract = await one(conn, 'SELECT id FROM rental_contract_items WHERE tenant_id = ? AND rental_item_id = ? AND returned_at IS NULL LIMIT 1', [tenantId, id]);
       if (req.body.return_to_rack && it.status === 'maintenance' && !onContract) await conn.query("UPDATE rental_items SET status = 'available' WHERE tenant_id = ? AND id = ?", [tenantId, id]);
