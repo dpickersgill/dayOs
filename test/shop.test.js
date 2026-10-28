@@ -593,6 +593,24 @@ test('a repeated Stripe event after an automatic refund changes nothing', async 
   assert.equal((await q('SELECT COUNT(*) AS n FROM orders WHERE tenant_id = ? AND payment_ref = ?', [A.id, right.data.object.payment_intent]))[0].n, 0, 'nothing sold');
 });
 
+test('a paid card page that cannot be matched to its basket is refunded; one whose saved page was lost is accepted', async () => {
+  const lost = await buy({ contact_email: 'lost@x.test', items: [{ product_id: adultP, valid_on: plus(today, 35), holder: adult }] });
+  await q('UPDATE shop_orders SET stripe_session_id = NULL WHERE id = ?', [lost.row.id]);
+  const ok = await webhook(paidEvent(lost.row, A.id));
+  assert.equal(ok.body.ok, true, JSON.stringify(ok.body));
+  assert.equal((await q('SELECT status, stripe_session_id FROM shop_orders WHERE id = ?', [lost.row.id]))[0].status, 'paid');
+  const other = await buy({ contact_email: 'other@x.test', items: [{ product_id: adultP, valid_on: plus(today, 35), holder: adult }] });
+  const before = calls.length;
+  const stray = await webhook(paidEvent({ ...other.row, stripe_session_id: 'cs_shop_elsewhere' }, A.id, { payment_intent: `pi_shopstray_${n}` }));
+  assert.equal(stray.body.refunded, true);
+  assert.equal(calls.slice(before).filter((x) => x.path === '/v1/refunds').length, 1);
+  assert.equal((await q('SELECT status FROM shop_orders WHERE id = ?', [other.row.id]))[0].status, 'awaiting_payment', 'the basket still waits for its own page');
+  // A basket already paid: a second payment for it goes back too.
+  const twice = await webhook(paidEvent({ ...lost.row, stripe_session_id: 'cs_shop_twice' }, A.id, { payment_intent: `pi_shoptwice_${n}` }));
+  assert.equal(twice.body.refunded, true);
+  assert.equal((await q('SELECT COUNT(*) AS n FROM orders WHERE tenant_id = ? AND payment_ref LIKE ?', [A.id, 'pi_shop%']))[0].n, 0, 'nothing sold for either');
+});
+
 test('a payment that lands after its hold ran out is honored, and staff are told it went over the limit', async () => {
   const d = plus(today, 34);
   await q('UPDATE tenants SET online_daily_limit = 1 WHERE id = ?', [A.id]);

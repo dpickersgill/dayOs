@@ -296,6 +296,19 @@ test('online: a day that filled while the parent paid is refunded in full; a ful
   assert.equal(out.promoted_person_id, hal);
 });
 
+test('online: a registration whose saved card page was lost is still made when the payment lands with the right amount', async () => {
+  const contact = { contact_first_name: 'Lou', contact_last_name: 'Lane', contact_email: `lou.${suffix}@x.test`, contact_phone: '215-555-0103' };
+  const r = ok(await pub('POST', '/programs/register', { body: { ...contact, waiver_accepted: true, registrations: [{ program_id: M.program, term_id: M.s1, group_id: M.tue.id, child: { first_name: 'Max', last_name: 'Lane', date_of_birth: `${year - 9}-01-01` } }] } }), 201);
+  const row = (await q('SELECT * FROM program_registrations WHERE tenant_id = ? AND reference = ?', [M.id, r.reference]))[0];
+  await q('UPDATE program_registrations SET stripe_session_id = NULL WHERE id = ?', [row.id]);
+  assert.equal(ok(await webhook(paid(row, M.id))).ok, true);
+  assert.equal((await q('SELECT status FROM program_registrations WHERE id = ?', [row.id]))[0].status, 'paid');
+  const n0 = refunds.length;
+  const again = ok(await webhook(paid({ ...row, stripe_session_id: `cs_prog_other_${suffix}` }, M.id)));
+  assert.equal(again.refunded, true, 'a second page for a registration already paid goes back');
+  assert.equal(refunds.length, n0 + 1);
+});
+
 test('dates cannot be rebuilt once children are enrolled; the old program without sessions still works', async () => {
   is(await api('PATCH', `/programs/terms/${M.s1}`, { token: M.owner, body: { weeks: 6 } }), 409);
   ok(await api('PATCH', `/programs/terms/${M.s1}`, { token: M.owner, body: { price_cents: 21000 } }));

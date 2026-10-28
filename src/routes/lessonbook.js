@@ -18,6 +18,7 @@ const { isSandbox } = require('../lib/sandbox');
 const shopsale = require('../lib/shopsale');
 const shopafter = require('../lib/shopafter');
 const cardrefund = require('../lib/cardrefund');
+const { logFailure } = require('../lib/jobs');
 
 const router = express.Router();
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I
@@ -236,8 +237,9 @@ async function closePage(tenantId, requestId, sessionId) {
 }
 
 /**
- * A paid page for a request we cannot book (canceled or expired while the guest was paying): the whole payment is written
- * down as owed back and noted on the request in one step, then sent to Stripe. A repeat changes nothing.
+ * A paid page for a request we cannot book (canceled or expired while the guest was paying, or already paid another way):
+ * the whole payment is written down as owed back, then sent to Stripe. A request with no payment of its own is noted
+ * (Refunded automatically) in the same step. A repeat changes nothing.
  */
 async function giveBack(tenantId, requestId, obj, account, why) {
   const owed = await tx(async (conn) => {
@@ -245,8 +247,10 @@ async function giveBack(tenantId, requestId, obj, account, why) {
     if (!raw || raw.status === 'awaiting_payment' || raw.payment_intent === String(obj.payment_intent)) return null;
     const id = await cardrefund.oweReturn(conn, { tenantId, kind: 'lesson', rowId: requestId, session: obj.id, paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), account, reason: why });
     if (!id) return null;
-    await conn.query('UPDATE lesson_requests SET payment_intent = ?, refund_cents = ?, staff_note = ? WHERE tenant_id = ? AND id = ?',
-      [String(obj.payment_intent), Number(obj.amount_total), `Refunded automatically: ${why}`.slice(0, 300), tenantId, requestId]);
+    if (!raw.payment_intent) {
+      await conn.query('UPDATE lesson_requests SET payment_intent = ?, refund_cents = ?, staff_note = ? WHERE tenant_id = ? AND id = ?',
+        [String(obj.payment_intent), Number(obj.amount_total), `Refunded automatically: ${why}`.slice(0, 300), tenantId, requestId]);
+    }
     return id;
   });
   if (!owed) return { duplicate: true };
@@ -290,8 +294,8 @@ async function recordDonation(event, obj) {
   const m = obj.metadata;
   const details = obj.customer_details || {};
   const [r] = await pool.query(
-    'INSERT IGNORE INTO donations (tenant_id, amount_cents, monthly, email, name, followup_id, stripe_session_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [Number(m.tenant_id), Number(obj.amount_total), obj.mode === 'subscription' ? 1 : 0, (details.email || obj.customer_email || '').slice(0, 255) || null, (details.name || '').slice(0, 150) || null, m.followup_id ? Number(m.followup_id) : null, obj.id],
+    'INSERT IGNORE INTO donations (tenant_id, amount_cents, monthly, email, name, followup_id, stripe_session_id, stripe_account) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [Number(m.tenant_id), Number(obj.amount_total), obj.mode === 'subscription' ? 1 : 0, (details.email || obj.customer_email || '').slice(0, 255) || null, (details.name || '').slice(0, 150) || null, m.followup_id ? Number(m.followup_id) : null, obj.id, event.account || null],
   );
   return { donation: r.affectedRows === 1 };
 }
@@ -306,27 +310,35 @@ async function handleWebhook(event, base) {
   const tenantId = Number(obj.metadata.tenant_id);
   const requestId = Number(obj.metadata.request_id);
   if (event.type === 'checkout.session.expired') {
-    await pool.query("UPDATE lesson_requests SET status = 'expired' WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment' AND stripe_session_id = ?", [tenantId, requestId, obj.id]);
+    // (A request whose page was never saved, because that save failed, is matched too.)
+    await pool.query("UPDATE lesson_requests SET status = 'expired' WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment' AND (stripe_session_id = ? OR stripe_session_id IS NULL)", [tenantId, requestId, obj.id]);
     return { expired: true };
   }
   if (event.type !== 'checkout.session.completed' || obj.payment_status !== 'paid') return { ignored: true };
-  let failed = null; let gone = null;
+  let failed = null; let gone = null; let stray = null;
   let result;
   try {
     result = await tx(async (conn) => {
+      failed = null; gone = null; stray = null;
       const raw = await one(conn, 'SELECT * FROM lesson_requests WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, requestId]);
-      if (!raw || raw.stripe_session_id !== obj.id) return { ignored: true };
-      // Only a request still waiting for this payment is booked. A repeat of an event we already handled, including one we
-      // refunded, changes nothing. A request canceled or expired while the guest was still paying is refunded in full.
+      if (!raw) { logFailure({ job: 'stripe_webhook', tenant: tenantId, message: `a paid card page names lesson request ${requestId}, which is not on file` }); return { ignored: true }; }
+      // A repeat of an event we already handled, booked or refunded, changes nothing.
+      if (raw.payment_intent === String(obj.payment_intent) || await cardrefund.returned(conn, tenantId, obj.payment_intent)) return { duplicate: true };
+      // Only a request still waiting for this payment is booked. One canceled, expired or paid another way while the guest
+      // was still paying is refunded in full.
       if (raw.status !== 'awaiting_payment') {
-        if (raw.payment_intent === String(obj.payment_intent) || await cardrefund.returned(conn, tenantId, obj.payment_intent)) return { duplicate: true };
-        if (['cancelled', 'expired', 'declined'].includes(raw.status)) { gone = `the request was ${raw.status === 'cancelled' ? 'canceled' : raw.status} before the payment arrived`; return { problem: true }; }
-        return { duplicate: true };
+        gone = ['cancelled', 'expired', 'declined'].includes(raw.status) ? `the request was ${raw.status === 'cancelled' ? 'canceled' : raw.status} before the payment arrived` : 'the request was already paid';
+        return { problem: true };
       }
+      // Waiting on another card page: this one is not what it is waiting for, so it goes back. With no page saved (that
+      // save failed after Stripe made the page), the payment is accepted when the amount is right.
+      const lost = !raw.stripe_session_id;
+      if (!lost && raw.stripe_session_id !== obj.id) { stray = 'it was not the card page saved for this request'; return { problem: true }; }
       const q = parseRequest(raw).quote;
       if (!q || Number(obj.amount_total) !== raw.amount_cents) { failed = 'amount'; return { problem: true }; }
+      if (lost) await conn.query('UPDATE lesson_requests SET stripe_session_id = ? WHERE tenant_id = ? AND id = ?', [obj.id, tenantId, raw.id]);
       try {
-        return await confirmRequest(conn, tenantId, raw, { paid: true, paymentIntent: obj.payment_intent });
+        return await confirmRequest(conn, tenantId, raw, { paid: true, paymentIntent: obj.payment_intent, payee: connect.paidTo(event) });
       } catch (err) {
         if (err.status && err.status < 500) throw new Unhonourable(err.message);
         throw err;
@@ -337,6 +349,7 @@ async function handleWebhook(event, base) {
     failed = err.message; result = { problem: true }; // rolled back: nothing half-made is kept
   }
   if (gone) return giveBack(tenantId, requestId, obj, event.account || null, gone);
+  if (stray) return cardrefund.returnStray({ tenantId, kind: 'lesson', rowId: requestId, obj, account: event.account || null, why: stray });
   if (failed) {
     // We could not honor it (lesson full or canceled, or the amount was wrong): give the money back in full. It is written
     // down as owed with the request's new state in one step, then sent; the daily job retries it if Stripe is slow.

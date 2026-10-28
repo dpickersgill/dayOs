@@ -66,7 +66,7 @@ const parse = (r) => { let j = {}; try { j = JSON.parse(r.students); } catch (_)
  * and a booking per student. `paid` true means card payment was taken: the booking is not marked unpaid and a sale is
  * recorded. Throws a 409 if the lesson has no room.
  */
-async function confirmRequest(conn, tenantId, raw, { paid = false, auditReq, paymentIntent = null } = {}) {
+async function confirmRequest(conn, tenantId, raw, { paid = false, auditReq, paymentIntent = null, payee = { account: null, feeCents: 0 } } = {}) {
   const r = parse(raw);
   const s = await one(conn, 'SELECT * FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, raw.session_id]);
   if (s.status !== 'scheduled') throw conflict(`That lesson is ${s.status}`);
@@ -120,7 +120,8 @@ async function confirmRequest(conn, tenantId, raw, { paid = false, auditReq, pay
       await conn.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, session_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents) VALUES (?, ?, ?, 'lesson', ?, ?, ?, 1, ?, ?, 0, ?)",
         [tenantId, orderId, s.product_id, b.person_id, s.id, q.lines[i].tier, q.lines[i].unit, day, q.lines[i].tax || 0]);
     }
-    await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, processor) VALUES (?, ?, 'card', ?, ?, 'stripe')", [tenantId, orderId, q.total, paymentIntent]);
+    await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, processor, processor_account, platform_fee_cents) VALUES (?, ?, 'card', ?, ?, 'stripe', ?, ?)",
+      [tenantId, orderId, q.total, paymentIntent, payee.account || null, payee.feeCents || 0]);
   }
   await conn.query("UPDATE lesson_requests SET status = 'confirmed', decided_at = NOW(), order_id = ?, payment_intent = COALESCE(?, payment_intent) WHERE tenant_id = ? AND id = ?", [orderId, paymentIntent, tenantId, raw.id]);
   await audit(conn, auditReq || { auth: { tenantId, userId: null } }, paid ? 'confirm_paid' : 'confirm', 'lesson_requests', raw.id, { students: booked.length, order_id: orderId });

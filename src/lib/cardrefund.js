@@ -3,7 +3,7 @@
 // Card refunds through Stripe. The refund is written to the books first (order_refunds, card_status 'pending'), then sent
 // to Stripe. If Stripe cannot be reached the row is marked 'failed' and is retried by the daily job or by a manager, always
 // with the same idempotency key, so the guest can never be refunded twice and a refund can never be silently lost.
-const { pool, rows, one } = require('../db');
+const { pool, tx, rows, one } = require('../db');
 const stripe = require('./stripe');
 const { logFailure } = require('./jobs');
 
@@ -85,6 +85,20 @@ async function sendReturn(id) {
   }
 }
 
+/**
+ * A paid card page that names one of our rows but cannot be matched to it (the row is waiting on a different page, or was
+ * settled another way): the whole payment is owed back and sent, the row itself is left alone, and the operator is
+ * alerted, because it means a card page was lost track of. Returns { refunded: true }, or { duplicate: true } when this
+ * payment was already owed back.
+ */
+async function returnStray({ tenantId, kind, rowId, obj, account = null, why }) {
+  const id = await tx((conn) => oweReturn(conn, { tenantId, kind, rowId, session: obj.id, paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), account, reason: why }));
+  if (!id) return { duplicate: true };
+  logFailure({ job: 'stripe_webhook', tenant: tenantId, kind, row: rowId, message: `a paid card page could not be matched and is refunded: ${why}` });
+  await sendReturn(id);
+  return { refunded: true };
+}
+
 /** Daily: retries every card refund and card return still owed (failed, or pending for more than 10 minutes). */
 async function retryAll() {
   const due = await rows(pool, "SELECT tenant_id, id FROM order_refunds WHERE card_status = 'failed' OR (card_status = 'pending' AND created_at < DATE_SUB(NOW(), INTERVAL 10 MINUTE)) ORDER BY id LIMIT 200");
@@ -95,4 +109,4 @@ async function retryAll() {
   return out;
 }
 
-module.exports = { markPending, send, retryAll, oweReturn, returned, sendReturn };
+module.exports = { markPending, send, retryAll, oweReturn, returned, sendReturn, returnStray };

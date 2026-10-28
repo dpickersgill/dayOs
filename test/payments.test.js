@@ -271,6 +271,35 @@ test('a refund Stripe cannot take now is kept as owed and sent by the daily job'
   assert.equal((await q('SELECT card_status FROM card_returns WHERE tenant_id = ? AND payment_intent = ?', [tenantId, pi]))[0].card_status, 'sent');
 });
 
+test('a paid card page that cannot be matched is refunded; one whose saved page was lost is accepted when the amount is right', async () => {
+  // The save of the page went missing (Stripe made it, our database never kept it): the right amount books the lesson.
+  sessionId = await newLesson(100);
+  const r = await pub('POST', '/requests', { body: reqBody() });
+  const row = (await q('SELECT * FROM lesson_requests WHERE reference = ?', [r.body.reference]))[0];
+  await q('UPDATE lesson_requests SET stripe_session_id = NULL WHERE id = ?', [row.id]);
+  const w = await webhook(completed({ session_id: row.stripe_session_id, amount_cents: row.amount_cents }, row.id, tenantId));
+  assert.equal(w.status, 200);
+  const booked = (await q('SELECT status, order_id, stripe_session_id FROM lesson_requests WHERE id = ?', [row.id]))[0];
+  assert.equal(booked.status, 'confirmed'); assert.ok(booked.order_id); assert.equal(booked.stripe_session_id, row.stripe_session_id, 'the page is saved now');
+  // Waiting on its own page, but a different paid page names it: that money goes back, the request keeps waiting.
+  sessionId = await newLesson(100);
+  const r2 = await pub('POST', '/requests', { body: reqBody() });
+  const row2 = (await q('SELECT * FROM lesson_requests WHERE reference = ?', [r2.body.reference]))[0];
+  const before = calls.length;
+  const stray = await webhook(completed({ session_id: 'cs_test_elsewhere', amount_cents: row2.amount_cents }, row2.id, tenantId, { payment_intent: `pi_stray_${suffix}` }));
+  assert.equal(stray.status, 200); assert.equal(stray.body.refunded, true);
+  assert.equal(calls.slice(before).find((x) => x.path === '/v1/refunds').params.payment_intent, `pi_stray_${suffix}`);
+  assert.equal((await q('SELECT status FROM lesson_requests WHERE id = ?', [row2.id]))[0].status, 'awaiting_payment');
+  assert.match((await q('SELECT reason FROM card_returns WHERE tenant_id = ? AND payment_intent = ?', [tenantId, `pi_stray_${suffix}`]))[0].reason, /not the card page saved/);
+  assert.equal((await webhook(completed({ session_id: row2.stripe_session_id, amount_cents: row2.amount_cents }, row2.id, tenantId))).status, 200);
+  assert.equal((await q('SELECT status FROM lesson_requests WHERE id = ?', [row2.id]))[0].status, 'confirmed', 'its own page still books it');
+  // Already paid, and a second payment arrives: it goes back, and the booking is left as it was.
+  const third = await webhook(completed({ session_id: 'cs_test_again', amount_cents: row2.amount_cents }, row2.id, tenantId, { payment_intent: `pi_twice_${suffix}` }));
+  assert.equal(third.body.refunded, true);
+  const kept = (await q('SELECT status, payment_intent, staff_note FROM lesson_requests WHERE id = ?', [row2.id]))[0];
+  assert.equal(kept.status, 'confirmed'); assert.equal(kept.payment_intent, `pi_${row2.stripe_session_id}`); assert.equal(kept.staff_note, null);
+});
+
 test('canceling a paid lesson refunds 100% well ahead, 50% in the middle window and nothing at the last minute', async () => {
   const cancel = (info, email = 'pam@x.test') => pub('POST', `/requests/${info.reference}/cancel`, { body: { email } });
   // 100 hours ahead: full refund

@@ -13,6 +13,8 @@ const { notFound, conflict, bad, Unhonourable } = require('../lib/errors');
 const { baseUrl } = require('../lib/baseurl');
 const stripe = require('../lib/stripe');
 const connect = require('../lib/connect');
+const cardrefund = require('../lib/cardrefund');
+const { logFailure } = require('../lib/jobs');
 const sandbox = require('../lib/sandbox');
 const mailer = require('../lib/mailer');
 const { audit } = require('../lib/audit');
@@ -227,7 +229,7 @@ publicRouter.get('/:slug/programs/registrations/:token', async (req, res) => {
 });
 
 /** Makes the places once the card payment lands. Throws an Unhonourable error when a day filled up meanwhile. */
-async function fulfil(conn, tenantId, row, { paymentIntent }) {
+async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: null, feeCents: 0 } }) {
   let basket; try { basket = JSON.parse(row.basket); } catch (_) { throw bad('The saved registration is unreadable'); }
   const t = await one(conn, 'SELECT id, timezone, waiver_text, waiver_resign_id, phone FROM tenants WHERE id = ?', [tenantId]);
   const today = todayIn(t.timezone);
@@ -265,7 +267,8 @@ async function fulfil(conn, tenantId, row, { paymentIntent }) {
     }
     await audit(conn, { auth: { tenantId, userId: null } }, 'register_online', 'programs', p.program.id, { order_id: orderId, order_item: it.insertId });
   }
-  await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, processor) VALUES (?, ?, 'card', ?, ?, 'stripe')", [tenantId, orderId, row.amount_cents, paymentIntent]);
+  await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, processor, processor_account, platform_fee_cents) VALUES (?, ?, 'card', ?, ?, 'stripe', ?, ?)",
+    [tenantId, orderId, row.amount_cents, paymentIntent, payee.account || null, payee.feeCents || 0]);
   await conn.query("UPDATE program_registrations SET status = 'paid', paid_at = NOW(), order_id = ?, payment_intent = COALESCE(?, payment_intent), note = ? WHERE tenant_id = ? AND id = ?",
     [orderId, paymentIntent, waiverNeeded.length ? `Waiver still to sign: ${waiverNeeded.join(', ')}.` : null, tenantId, row.id]);
   return { orderId };
@@ -290,18 +293,24 @@ async function emailConfirmation(tenantId, id, base) {
 async function handleWebhook(event, obj, base) {
   const tenantId = Number(obj.metadata.tenant_id); const id = Number(obj.metadata.registration_id);
   if (event.type === 'checkout.session.expired') {
-    await pool.query("UPDATE program_registrations SET status = 'expired' WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment' AND stripe_session_id = ?", [tenantId, id, obj.id]);
+    await pool.query("UPDATE program_registrations SET status = 'expired' WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment' AND (stripe_session_id = ? OR stripe_session_id IS NULL)", [tenantId, id, obj.id]);
     return { expired: true };
   }
   if (event.type !== 'checkout.session.completed' || obj.payment_status !== 'paid') return { ignored: true };
-  let failed = null; let out;
+  let failed = null; let stray = null; let out;
   try {
     out = await tx(async (conn) => {
+      failed = null; stray = null;
       const row = await one(conn, 'SELECT * FROM program_registrations WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, id]);
-      if (!row || row.stripe_session_id !== obj.id) return { ignored: true };
-      if (!['awaiting_payment', 'expired'].includes(row.status)) return { duplicate: true };
+      if (!row) { logFailure({ job: 'stripe_webhook', tenant: tenantId, message: `a paid card page names program registration ${id}, which is not on file` }); return { ignored: true }; }
+      if (row.payment_intent === String(obj.payment_intent) || await cardrefund.returned(conn, tenantId, obj.payment_intent)) return { duplicate: true }; // a repeat
+      // Only a registration still waiting (or let go while the parent paid), for its own card page; with no page saved
+      // (that save failed), the payment is accepted when the amount is right. Anything else goes back in full.
+      if (!['awaiting_payment', 'expired'].includes(row.status)) { stray = 'the registration was already settled'; return { problem: true }; }
+      if (row.stripe_session_id && row.stripe_session_id !== obj.id) { stray = 'it was not the card page saved for this registration'; return { problem: true }; }
       if (Number(obj.amount_total) !== row.amount_cents) { failed = 'the amount did not match'; return { problem: true }; }
-      try { return { ...(await fulfil(conn, tenantId, row, { paymentIntent: obj.payment_intent })), ok: true }; } catch (err) {
+      if (!row.stripe_session_id) await conn.query('UPDATE program_registrations SET stripe_session_id = ? WHERE tenant_id = ? AND id = ?', [obj.id, tenantId, row.id]);
+      try { return { ...(await fulfil(conn, tenantId, row, { paymentIntent: obj.payment_intent, payee: connect.paidTo(event) })), ok: true }; } catch (err) {
         if (err.status && err.status < 500) throw new Unhonourable(err.message);
         throw err;
       }
@@ -310,9 +319,15 @@ async function handleWebhook(event, obj, base) {
     if (!(err instanceof Unhonourable)) throw err;
     failed = err.message; out = { problem: true };
   }
+  if (stray) return cardrefund.returnStray({ tenantId, kind: 'program', rowId: id, obj, account: event.account || null, why: stray });
   if (failed) {
-    if (obj.payment_intent && stripe.enabled()) await stripe.refund({ paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), key: `program-autorefund-${tenantId}-${id}`, account: event.account || null });
-    await pool.query("UPDATE program_registrations SET status = 'refunded', payment_intent = ?, note = ? WHERE tenant_id = ? AND id = ? AND status IN ('awaiting_payment','expired')", [obj.payment_intent, `Refunded automatically: ${failed}`.slice(0, 300), tenantId, id]);
+    // Written down as owed with the registration's new state in one step, then sent; retried daily if Stripe is slow.
+    const owed = await tx(async (conn) => {
+      const [u] = await conn.query("UPDATE program_registrations SET status = 'refunded', payment_intent = ?, note = ? WHERE tenant_id = ? AND id = ? AND status IN ('awaiting_payment','expired')", [obj.payment_intent || null, `Refunded automatically: ${failed}`.slice(0, 300), tenantId, id]);
+      if (u.affectedRows !== 1) return null;
+      return cardrefund.oweReturn(conn, { tenantId, kind: 'program', rowId: id, session: obj.id, paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), account: event.account || null, reason: failed });
+    });
+    if (owed) await cardrefund.sendReturn(owed);
     return { refunded: true };
   }
   if (out.ok) await emailConfirmation(tenantId, id, base).catch(() => {});

@@ -16,7 +16,8 @@ const { conflict, bad, Unhonourable } = require('./errors');
 const { allowedOn, dayName, daysText } = require('./saledays');
 const { audit } = require('./audit');
 const mailer = require('./mailer');
-const stripe = require('./stripe');
+const cardrefund = require('./cardrefund');
+const { logFailure } = require('./jobs');
 
 const KINDS = ['day_ticket', 'multi_day', 'season_pass'];
 const MAX_ITEMS = 20;
@@ -226,7 +227,7 @@ async function overDays(conn, tenant, lines) {
  * A paid basket becomes people on file, waivers where the buyer can legitimately sign, one order and one ticket per holder.
  * Runs inside the caller's transaction on a locked shop_orders row.
  */
-async function fulfil(conn, tenantId, row, { paymentIntent }) {
+async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: null, feeCents: 0 } }) {
   let basket; try { basket = JSON.parse(row.basket); } catch (_) { throw bad('The saved basket is unreadable'); }
   const q = basket.quote; const c = basket.contact;
   const tenant = await one(conn, 'SELECT id, timezone, waiver_text, waiver_resign_id, online_daily_limit FROM tenants WHERE id = ?', [tenantId]);
@@ -294,7 +295,8 @@ async function fulfil(conn, tenantId, row, { paymentIntent }) {
     await conn.query("INSERT INTO order_items (tenant_id, order_id, line_kind, person_id, gift_card_id, tier, quantity, unit_price_cents, discount_cents, tax_cents) VALUES (?, ?, 'gift_card', ?, ?, 'adult', 1, ?, 0, 0)", [tenantId, orderId, contact.id, gc.insertId, g.amount_cents]);
     giftCodes.push(code);
   }
-  await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, processor) VALUES (?, ?, 'card', ?, ?, 'stripe')", [tenantId, orderId, q.total, paymentIntent]);
+  await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, processor, processor_account, platform_fee_cents) VALUES (?, ?, 'card', ?, ?, 'stripe', ?, ?)",
+    [tenantId, orderId, q.total, paymentIntent, payee.account || null, payee.feeCents || 0]);
   await conn.query("UPDATE shop_orders SET status = 'paid', paid_at = NOW(), order_id = ?, payment_intent = COALESCE(?, payment_intent), note = ? WHERE tenant_id = ? AND id = ?",
     [orderId, paymentIntent, [waiverNeeded.length ? `Waiver still to sign at the gate: ${waiverNeeded.join(', ')}.` : '', overLimit.length ? `Payment arrived late: ${overLimit.join(', ')} went over the daily limit.` : ''].filter(Boolean).join(' ').slice(0, 300) || null, tenantId, row.id]);
   await audit(conn, { auth: { tenantId, userId: null } }, 'shop_paid', 'shop_orders', row.id, { tickets: tickets.length, order_id: orderId });
@@ -338,21 +340,28 @@ async function emailTickets(tenantId, rowId, baseUrl) {
 async function handleWebhook(event, obj, baseUrl) {
   const tenantId = Number(obj.metadata.tenant_id); const id = Number(obj.metadata.shop_order_id);
   if (event.type === 'checkout.session.expired') {
-    await pool.query("UPDATE shop_orders SET status = 'expired' WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment' AND stripe_session_id = ?", [tenantId, id, obj.id]);
+    await pool.query("UPDATE shop_orders SET status = 'expired' WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment' AND (stripe_session_id = ? OR stripe_session_id IS NULL)", [tenantId, id, obj.id]);
     return { expired: true };
   }
   if (event.type !== 'checkout.session.completed' || obj.payment_status !== 'paid') return { ignored: true };
-  let failed = null;
+  let failed = null; let stray = null;
   let out;
   try {
     out = await tx(async (conn) => {
+      failed = null; stray = null;
       const row = await one(conn, 'SELECT * FROM shop_orders WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, id]);
-      if (!row || row.stripe_session_id !== obj.id) return { ignored: true };
-      // Act only on a basket still waiting (or let go when the guest pressed back: their payment can still land). A repeat,
-      // including one we refunded, changes nothing.
-      if (!['awaiting_payment', 'expired'].includes(row.status)) return { duplicate: true };
+      if (!row) { logFailure({ job: 'stripe_webhook', tenant: tenantId, message: `a paid card page names shop order ${id}, which is not on file` }); return { ignored: true }; }
+      // A repeat, including one we refunded, changes nothing.
+      if (row.payment_intent === String(obj.payment_intent) || await cardrefund.returned(conn, tenantId, obj.payment_intent)) return { duplicate: true };
+      // Act only on a basket still waiting (or let go when the guest pressed back: their payment can still land), and only
+      // for its own card page. With no page saved (that save failed after Stripe made it), the payment is accepted when the
+      // amount is right. Anything else is a payment we cannot honor, and goes back in full.
+      const open = ['awaiting_payment', 'expired'].includes(row.status);
+      if (!open) { stray = 'the order was already settled'; return { problem: true }; }
+      if (row.stripe_session_id && row.stripe_session_id !== obj.id) { stray = 'it was not the card page saved for this order'; return { problem: true }; }
       if (Number(obj.amount_total) !== row.amount_cents) { failed = 'the amount did not match'; return { problem: true }; }
-      try { return { ...(await fulfil(conn, tenantId, row, { paymentIntent: obj.payment_intent })), ok: true }; } catch (err) {
+      if (!row.stripe_session_id) await conn.query('UPDATE shop_orders SET stripe_session_id = ? WHERE tenant_id = ? AND id = ?', [obj.id, tenantId, row.id]);
+      try { return { ...(await fulfil(conn, tenantId, row, { paymentIntent: obj.payment_intent, payee: require('./connect').paidTo(event) })), ok: true }; } catch (err) {
         if (err.status && err.status < 500) throw new Unhonourable(err.message);
         throw err;
       }
@@ -361,10 +370,15 @@ async function handleWebhook(event, obj, baseUrl) {
     if (!(err instanceof Unhonourable)) throw err;
     failed = err.message; out = { problem: true }; // rolled back: nothing half-made is kept
   }
+  if (stray) return cardrefund.returnStray({ tenantId, kind: 'shop', rowId: id, obj, account: event.account || null, why: stray });
   if (failed) {
-    // Refund first: if Stripe cannot be reached this throws, Stripe sends the event again, and we try again.
-    if (obj.payment_intent && stripe.enabled()) await stripe.refund({ paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), key: `shop-autorefund-${tenantId}-${id}`, account: event.account || null });
-    await pool.query("UPDATE shop_orders SET status = 'refunded', payment_intent = ?, note = ? WHERE tenant_id = ? AND id = ? AND status IN ('awaiting_payment','expired')", [obj.payment_intent, `Refunded automatically: ${failed}`.slice(0, 300), tenantId, id]);
+    // Written down as owed with the basket's new state in one step, then sent; the daily job retries it if Stripe is slow.
+    const owed = await tx(async (conn) => {
+      const [u] = await conn.query("UPDATE shop_orders SET status = 'refunded', payment_intent = ?, note = ? WHERE tenant_id = ? AND id = ? AND status IN ('awaiting_payment','expired')", [obj.payment_intent || null, `Refunded automatically: ${failed}`.slice(0, 300), tenantId, id]);
+      if (u.affectedRows !== 1) return null;
+      return cardrefund.oweReturn(conn, { tenantId, kind: 'shop', rowId: id, session: obj.id, paymentIntent: obj.payment_intent, amountCents: Number(obj.amount_total), account: event.account || null, reason: failed });
+    });
+    if (owed) await cardrefund.sendReturn(owed);
     return { refunded: true };
   }
   if (out.ok) await emailTickets(tenantId, id, baseUrl).catch(() => {});

@@ -192,6 +192,22 @@ test('a fee set in the console is kept by Stripe from each payment, and given ba
   is(await api('PATCH', `/platform/tenants/${A.id}`, { headers: { 'x-platform-key': KEY }, body: { platform_fee_bps: 0, platform_fee_cents: 0 } }), 200);
 });
 
+test('the account a payment was taken on is recorded with the sale itself, so nothing after the sale can lose it', async () => {
+  const { row } = await buy(A, productA);
+  // Anything written after the sale's own transaction fails (a dropped connection, say).
+  const real = pool.query;
+  pool.query = function (sql, ...rest) { return /UPDATE order_payments SET processor_account/.test(String(sql)) ? Promise.reject(new Error('connection lost')) : real.call(this, sql, ...rest); };
+  try { is(await webhook(paid(row, A.id, acctA, { platform_fee_cents: '45' })), 200); } finally { pool.query = real; }
+  const pay = (await q('SELECT processor_account, platform_fee_cents FROM order_payments WHERE tenant_id = ? AND reference = ?', [A.id, `pi_${row.stripe_session_id}`]))[0];
+  assert.equal(pay.processor_account, acctA); assert.equal(pay.platform_fee_cents, 45);
+  // A paid page we cannot match is refunded on that same account.
+  const mark = calls.length;
+  const other = await buy(A, productA);
+  const w = await webhook(paid({ ...other.row, stripe_session_id: `cs_lost_${suffix}` }, A.id, acctA));
+  assert.equal(w.body.refunded, true);
+  assert.equal(calls.slice(mark).filter((c) => c.path === '/v1/refunds').pop().account, acctA);
+});
+
 test('a payment we cannot honor is refunded on the account it was paid on', async () => {
   const { row } = await buy(A, productA);
   const mark = calls.length;

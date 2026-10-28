@@ -474,7 +474,7 @@ export const ARTICLES = [
   { id: 'shop-orders', app: 'money', title: 'Online orders, resending tickets and refunds', keywords: 'online orders resend tickets refund email guest lost',
     intro: 'Money > Online orders lists everything guests bought online, newest first.',
     steps: ['Open Money, then Online orders.', 'A guest who lost their email: choose Send tickets next to their order.', 'To refund, open the order in Sell > Orders and choose Refund. Unused tickets are canceled and the money goes back to the guest\u2019s card.'],
-    tips: ['If a payment could not be turned into tickets, it is refunded in full automatically and the order shows Refunded.', 'Tickets used at the gate cannot be refunded here; sort those out by hand.'], related: ['shop-setup'] },
+    tips: ['If a payment could not be turned into tickets, it is refunded in full automatically and the order shows Refunded. A payment that cannot be matched to an order at all (a second payment for an order already paid, say) is refunded in full too.', 'Tickets used at the gate cannot be refunded here; sort those out by hand.'], related: ['shop-setup'] },
 
   // ------------------------------------------------------------ Weekly report
   { id: 'money-weekly', app: 'money', title: 'The weekly report', keywords: 'weekly report owner monday email sales guests week compare last week',
