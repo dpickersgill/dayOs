@@ -9,6 +9,7 @@
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
+const CL = require('../lib/checklists');
 const { partialOf, z, dateStr, dateTimeStr, validate, paramId, normDateTime, setClause, seasonFor, todayIn, nowIn } = require('../lib/util');
 const { notFound, bad, conflict, forbidden } = require('../lib/errors');
 const R = require('../lib/review');
@@ -337,7 +338,8 @@ async function loadCase(conn, tenantId, id) {
     rows(conn, 'SELECT id, patient_id, kind, signer_name, signer_role, signed_at FROM incident_signatures WHERE tenant_id = ? AND incident_id = ? ORDER BY id', [tenantId, id]),
     one(conn, 'SELECT * FROM incident_collisions WHERE tenant_id = ? AND incident_id = ?', [tenantId, id]),
     rows(conn, `SELECT x.*, COALESCE(vu.email, vu.username) AS voided_by_email FROM incident_parties x ${VOIDED_BY('x')} WHERE x.tenant_id = ? AND x.incident_id = ? ORDER BY x.id`, [tenantId, id]),
-    rows(conn, 'SELECT c.patient_id, c.item_key, c.done_at, COALESCE(u.email, u.username) AS done_by FROM incident_checklist c LEFT JOIN users u ON u.id = c.done_by AND u.tenant_id = c.tenant_id WHERE c.tenant_id = ? AND c.incident_id = ? ORDER BY c.id', [tenantId, id]),
+    // each tick with the list title and item words it was ticked under (older ticks: the built-in words, below)
+    rows(conn, 'SELECT c.patient_id, c.item_key, c.list_id, c.list_title, c.item_label, c.done_at, c.entered_at, COALESCE(u.email, u.username) AS done_by FROM incident_checklist c LEFT JOIN users u ON u.id = c.done_by AND u.tenant_id = c.tenant_id WHERE c.tenant_id = ? AND c.incident_id = ? ORDER BY c.id', [tenantId, id]),
     rows(conn, 'SELECT v.id, v.version_no, v.kind, v.created_at, COALESCE(u.email, u.username) AS created_by FROM incident_versions v LEFT JOIN users u ON u.id = v.created_by AND u.tenant_id = v.tenant_id WHERE v.tenant_id = ? AND v.incident_id = ? ORDER BY v.version_no', [tenantId, id]),
   ]);
   const ids = patients.map((p) => p.id);
@@ -372,10 +374,12 @@ async function loadCase(conn, tenantId, id) {
     ...withNumber(incident), form: parseForm(incident.form), na: RQ.naOf(incident), resort: { name: tenant.name, legal_name: tenant.legal_name }, notes, events, responders, witnesses, signatures,
     conditions: COND.parse(incident.conditions), contacts: contacts.map((x) => ({ ...x, patient_id: x.patient_id === null ? null : Number(x.patient_id) })),
     rentals: rentals.map((r) => ({ ...r, detail: COND.parse(r.detail) || {}, held: Boolean(Number(r.held)), patient_id: r.patient_id === null ? null : Number(r.patient_id) })),
-    collision: collisionRow || null, parties, checklist, versions, photos, skips, exceptions: exceptions.map((e) => ({ ...e, patient_id: e.patient_id === null ? null : Number(e.patient_id) })),
+    collision: collisionRow || null, parties, checklist: CL.labelTicks(checklist), versions, photos, skips, exceptions: exceptions.map((e) => ({ ...e, patient_id: e.patient_id === null ? null : Number(e.patient_id) })),
     patients: patients.map((p) => ({ ...p, form: parseForm(p.form), na: RQ.naOf(p), vitals: mine(vitals, p.id), injuries: mine(injuries, p.id), treatments: mine(treatments, p.id) })),
   };
   for (const p of c.patients) p.derived = derive(c, p);
+  // The kind of attraction the case happened at, so attraction checklists suggest themselves (kept in frozen copies too).
+  c.attraction_type = incident.attraction_type || null;
   return c;
 }
 
@@ -468,7 +472,9 @@ router.get('/incidents/:id/versions/:vid', patrol, needs('view_cases'), async (r
   const v = await one(pool, 'SELECT v.id, v.version_no, v.kind, v.snapshot, v.created_at, COALESCE(u.email, u.username) AS created_by FROM incident_versions v LEFT JOIN users u ON u.id = v.created_by AND u.tenant_id = v.tenant_id WHERE v.tenant_id = ? AND v.incident_id = ? AND v.id = ?', [req.auth.tenantId, id, paramId(req, 'vid')]);
   if (!v) throw notFound('Version');
   await audit(pool, req, 'view_version', 'incidents', id, { version: v.version_no });
-  res.json({ id: v.id, version_no: v.version_no, kind: v.kind, created_at: v.created_at, created_by: v.created_by, case: JSON.parse(v.snapshot) });
+  const snap = JSON.parse(v.snapshot);
+  if (snap && Array.isArray(snap.checklist)) snap.checklist = CL.labelTicks(snap.checklist); // a copy frozen before ticks kept their words
+  res.json({ id: v.id, version_no: v.version_no, kind: v.kind, created_at: v.created_at, created_by: v.created_by, case: snap });
 });
 
 /**

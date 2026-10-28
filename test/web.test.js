@@ -3164,7 +3164,8 @@ test('setup tabs are gone from their apps and each draws on its own in Settings'
   assert.match(pp.textContent, /Show the Partner passes tab in Sell/);
   // Patrol: its three setup pages, each for the same people who saw that tab inside Patrol before
   const patrolPages = (await mods.view('patrol')).settingsPages;
-  assert.deepEqual(Object.keys(patrolPages), ['settings', 'requirements', 'access']);
+  assert.deepEqual(Object.keys(patrolPages), ['settings', 'requirements', 'checklists', 'access']);
+  assert.deepEqual(patrolPages.checklists.who, { patrol: ['manage_settings'] }); // the patrol admin chooses the checklists
   assert.deepEqual(patrolPages.settings.who, { patrol: ['manage_settings', 'manage_schedule', 'manage_meds', 'run_sweep', 'avalanche'] });
   assert.deepEqual(patrolPages.requirements.who, { patrol: ['manage_settings', 'approve_case', 'submit_case'] });
   assert.deepEqual(patrolPages.access.who, { patrolLevel: 'admin' });

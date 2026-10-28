@@ -34,6 +34,7 @@ import { renderClaimFile } from './patrol-claimfile.js';
 import { drawRisk, renderRiskReport } from './patrol-risk.js';
 import { drawOpsSettings } from './patrol-settings.js';
 import { drawRequirements } from './patrol-requirements.js';
+import { drawChecklistSetup } from './patrol-checklist-setup.js';
 import { send as queue, keepCase, latestKept } from '../outbox.js';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -196,6 +197,8 @@ export const settingsPages = {
     panel.append(...(me.can_admin_form ? [legal] : []), box);
     await drawRequirements(box);
   }) },
+  // Which built-in checklists patrollers see on a case, and the patrol's own lists (the patrol admin).
+  checklists: { title: 'Checklists', who: { patrol: ['manage_settings'] }, render: withAccess((panel) => drawChecklistSetup(panel)) },
   access: { title: 'Access levels', who: { patrolLevel: 'admin' }, render: withAccess((panel) => drawLevels(panel)) },
 };
 
