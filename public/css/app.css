@@ -2318,10 +2318,10 @@ body:has(.tour-card) .demo-pill { display: none; }
   --on-accent: #14212a;
   --sel-bg: #d8b672;
   --sel-ink: #14212a;
-  --open: #4cc38a;
-  --open-tint: rgba(76, 195, 138, 0.15);
+  --open: #6fd9a0; /* 7.7:1 on --surface, 5.5:1 on its own tint; the filled uses below take dark text */
+  --open-tint: rgba(111, 217, 160, 0.15);
   --open-ink: #9be3bd;
-  --ok-tint: rgba(76, 195, 138, 0.15);
+  --ok-tint: rgba(111, 217, 160, 0.15);
   --hold: #e9b04b;
   --hold-tint: rgba(233, 176, 75, 0.15);
   --hold-ink: #f3d08c;
@@ -2340,6 +2340,11 @@ body:has(.tour-card) .demo-pill { display: none; }
   --radius: 8px;
   --lift: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.28);
 }
+/* White on the green or red fill is about 2:1 in the dark theme; the fills take the same dark ink as the gold accent (over 5.8:1). */
+:root[data-theme='dark'] .seg button[aria-pressed='true'][data-tone='good'], :root[data-theme='dark'] .seg button[aria-pressed='true'][data-tone='bad'],
+:root[data-theme='dark'] .gate[data-result='ok'], :root[data-theme='dark'] .gate[data-result='good'], :root[data-theme='dark'] .gate[data-result='bad'],
+:root[data-theme='dark'] .arrest-btn.good, :root[data-theme='dark'] .arrest-btn.danger, :root[data-theme='dark'] .tq-banner,
+:root[data-theme='dark'] .chip.result-pass[aria-pressed='true'], :root[data-theme='dark'] .chip.result-fail[aria-pressed='true'], :root[data-theme='dark'] .chip.result-na[aria-pressed='true'] { color: var(--on-accent); }
 :root[data-theme='dark'] input, :root[data-theme='dark'] select, :root[data-theme='dark'] textarea { background-color: var(--field); }
 :root[data-theme='dark'] .btn:disabled, :root[data-theme='dark'] .btn.primary:disabled, :root[data-theme='dark'] .btn.danger:disabled { background: #26353f; border-color: #3a4c57; color: #7f949e; }
 :root[data-theme='dark'] .panel, :root[data-theme='dark'] .table-wrap, :root[data-theme='dark'] .card, :root[data-theme='dark'] .dialog { box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset; }
