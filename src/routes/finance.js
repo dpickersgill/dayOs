@@ -18,7 +18,7 @@ const tz = async (tenantId) => (await one(pool, 'SELECT timezone FROM tenants WH
 // ---------------------------------------------------------------- tax rules
 const taxBody = z.object({
   name: z.string().trim().min(1).max(80),
-  applies_to: z.enum(['all', 'ticket', 'lesson', 'rental', 'program', 'gift_card']).default('all'),
+  applies_to: z.enum(['all', 'ticket', 'lesson', 'rental', 'program', 'gift_card', 'activity']).default('all'),
   rate_percent: z.number().min(0).max(30),
   active: z.boolean().optional(),
 });

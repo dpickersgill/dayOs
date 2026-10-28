@@ -35,7 +35,7 @@ async function drawers(box) {
 }
 
 // ---------------------------------------------------------------- weekly report
-const TYPE = { ticket: 'Tickets and passes', lesson: 'Lessons', rental: 'Rentals', program: 'Programs', gift_card: 'Gift cards sold', fee: 'Fees' };
+const TYPE = { ticket: 'Tickets and passes', lesson: 'Lessons', rental: 'Rentals', program: 'Programs', activity: 'Activities', gift_card: 'Gift cards sold', fee: 'Fees' };
 const CHAN = { window: 'Ticket window', online: 'Online', phone: 'Phone', group: 'Groups' };
 async function weekly(box) {
   let start = null; // null: last week
@@ -59,7 +59,8 @@ async function weekly(box) {
       h('div', { class: 'form' },
         h('div', null, h('h3', null, 'Sales by type'), w.types.length ? table([{ head: 'Type', cell: (x) => TYPE[x.kind] || label(x.kind) }, { head: 'Sales', num: true, cell: (x) => money(x.cents) }], w.types) : empty('No sales this week.'), h('p', { class: 'muted small' }, 'Before tax and refunds.')),
         h('div', null, h('h3', null, 'Where it was sold'), w.channels.length ? table([{ head: 'Where', cell: (x) => CHAN[x.channel] || label(x.channel) }, { head: 'Orders', num: true, cell: (x) => String(x.orders) }, { head: 'Total', num: true, cell: (x) => money(x.cents) }], w.channels) : empty('No sales this week.'), h('p', { class: 'muted small' }, `Online is ${w.online_share_pct}% of sales.`)),
-        h('div', null, h('h3', null, 'Top sellers'), w.top_products.length ? table([{ head: 'Product', cell: (x) => x.name }, { head: 'Sold', num: true, cell: (x) => String(x.units) }], w.top_products) : empty('Nothing sold.'))),
+        h('div', null, h('h3', null, 'Top sellers'), w.top_products.length ? table([{ head: 'Product', cell: (x) => x.name }, { head: 'Sold', num: true, cell: (x) => String(x.units) }], w.top_products) : empty('Nothing sold.')),
+        (w.attractions || []).length ? h('div', { 'data-attractions': '' }, h('h3', null, 'Activities by attraction'), table([{ head: 'Attraction', cell: (x) => x.name }, { head: 'Sold', num: true, cell: (x) => String(x.units) }, { head: 'Sales', num: true, cell: (x) => money(x.cents) }], w.attractions), h('p', { class: 'muted small' }, 'Before tax and refunds.')) : null),
       h('h3', null, 'Also this week'),
       h('ul', { class: 'bd-list' }, h('li', null, `New customers: ${w.new_customers} (${w.new_email_opt_ins} agreed to email)`), h('li', null, `Ski school: ${w.ski_school.sessions} lessons, ${w.ski_school.students} students`), h('li', null, `Patrol cases: ${w.patrol.incidents}`)),
       h('h3', null, 'Needs attention'),
@@ -163,7 +164,7 @@ function exports(box) {
 }
 
 // ---------------------------------------------------------------- sales tax
-const APPLIES = [['all', 'Everything'], ['ticket', 'Tickets and passes'], ['lesson', 'Lessons'], ['rental', 'Rentals'], ['program', 'Programs'], ['gift_card', 'Gift cards']];
+const APPLIES = [['all', 'Everything'], ['ticket', 'Tickets and passes'], ['lesson', 'Lessons'], ['rental', 'Rentals'], ['program', 'Programs'], ['activity', 'Activities'], ['gift_card', 'Gift cards']];
 async function tax(box) {
   async function load() {
     const { data } = await get('/tax-rules');

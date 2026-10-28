@@ -14,7 +14,7 @@ const { money, esc } = require('./format');
 const dollars = (c) => /* whole dollars, for headline numbers */ `${c < 0 ? '-' : ''}$${(Math.abs(c) / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 const weekStartOf = (date) => addDays(date, -((weekdayOf(date) + 6) % 7)); // the Monday on or before
 const pct = (now, before) => (before > 0 ? Math.round(((now - before) / before) * 100) : null);
-const LABEL = { ticket: 'Tickets and passes', lesson: 'Lessons', rental: 'Rentals', program: 'Programs', gift_card: 'Gift cards sold', fee: 'Fees' };
+const LABEL = { ticket: 'Tickets and passes', lesson: 'Lessons', rental: 'Rentals', program: 'Programs', activity: 'Activities', gift_card: 'Gift cards sold', fee: 'Fees' };
 const CHANNEL = { window: 'Ticket window', online: 'Online', phone: 'Phone', group: 'Groups' };
 const dayName = (d) => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(`${d}T12:00:00Z`));
 
@@ -47,6 +47,11 @@ async function buildWeek(tenantId, weekStart) {
   for (const d of days) for (const p of d.top) top.set(p.name, (top.get(p.name) || 0) + Number(p.units));
   const channels = await rows(pool, "SELECT channel, COUNT(*) AS orders, COALESCE(SUM(total_cents), 0) AS cents FROM orders WHERE tenant_id = ? AND status = 'paid' AND created_at >= ? AND created_at < ? GROUP BY channel ORDER BY cents DESC", [tenantId, from, to]);
   const types = await rows(pool, "SELECT i.line_kind AS kind, COALESCE(SUM(i.unit_price_cents * i.quantity - i.discount_cents), 0) AS cents FROM order_items i JOIN orders o ON o.id = i.order_id AND o.tenant_id = i.tenant_id WHERE i.tenant_id = ? AND o.status = 'paid' AND o.created_at >= ? AND o.created_at < ? GROUP BY i.line_kind ORDER BY cents DESC", [tenantId, from, to]);
+  // Activities by attraction (zipline, coaster, skating...): places sold and sales, counted like Sales by type.
+  const attractions = await rows(pool, `SELECT a.name, COUNT(*) AS units, COALESCE(SUM(i.unit_price_cents * i.quantity - i.discount_cents), 0) AS cents
+    FROM order_items i JOIN orders o ON o.id = i.order_id AND o.tenant_id = i.tenant_id JOIN products p ON p.id = i.product_id AND p.tenant_id = i.tenant_id
+    JOIN attractions a ON a.id = p.attraction_id AND a.tenant_id = p.tenant_id
+    WHERE i.tenant_id = ? AND i.line_kind = 'activity' AND o.status = 'paid' AND o.created_at >= ? AND o.created_at < ? GROUP BY a.id, a.name ORDER BY cents DESC`, [tenantId, from, to]);
   const people = await one(pool, 'SELECT COUNT(*) AS n FROM people WHERE tenant_id = ? AND anonymised_at IS NULL AND created_at >= ? AND created_at < ?', [tenantId, from, to]);
   const optIns = await one(pool, "SELECT COUNT(*) AS n FROM consent_events WHERE tenant_id = ? AND channel = 'email' AND status = 'opted_in' AND created_at >= ? AND created_at < ?", [tenantId, from, to]);
   const lessons = await one(pool, "SELECT COUNT(*) AS sessions, COALESCE(SUM((SELECT COUNT(*) FROM lesson_bookings b WHERE b.tenant_id = s.tenant_id AND b.session_id = s.id AND b.status IN ('booked','attended'))), 0) AS students FROM lesson_sessions s WHERE s.tenant_id = ? AND s.status <> 'cancelled' AND DATE(s.starts_at) >= ? AND DATE(s.starts_at) <= ?", [tenantId, weekStart, end]);
@@ -67,6 +72,7 @@ async function buildWeek(tenantId, weekStart) {
     channels: channels.map((c) => ({ channel: c.channel, orders: Number(c.orders), cents: Number(c.cents) })),
     online_share_pct: online && tot.gross_cents > 0 ? Math.round((Number(online.cents) / tot.gross_cents) * 100) : 0,
     types: types.map((t) => ({ kind: t.kind, cents: Number(t.cents) })),
+    attractions: attractions.map((a) => ({ name: a.name, units: Number(a.units), cents: Number(a.cents) })),
     tenders, top_products: [...top.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, units]) => ({ name, units })),
     new_customers: Number(people.n), new_email_opt_ins: Number(optIns.n),
     ski_school: { sessions: Number(lessons.sessions), students: Number(lessons.students) },
@@ -94,6 +100,7 @@ function renderEmail(s, tenant) {
     ...(s.best_day ? [`Best day: ${dayName(s.best_day.date)}, ${dollars(s.best_day.revenue_cents)}`] : []),
     '', 'Day by day:', ...s.days.map((d) => `  ${dayName(d.date)}: ${dollars(d.revenue_cents)}, ${d.orders} orders, ${d.guests} guests`),
     ...(s.types.length ? ['', 'Sales by type (before tax and refunds):', ...s.types.map((x) => `  ${LABEL[x.kind] || x.kind}: ${dollars(x.cents)}`)] : []),
+    ...((s.attractions || []).length ? ['', 'Activities by attraction:', ...s.attractions.map((x) => `  ${x.name}: ${x.units} sold, ${dollars(x.cents)}`)] : []),
     ...(s.channels.length ? ['', 'Where it was sold:', ...s.channels.map((x) => `  ${CHANNEL[x.channel] || x.channel}: ${x.orders} orders, ${money(x.cents)}`), `  Online share of sales: ${s.online_share_pct}%`] : []),
     ...(s.top_products.length ? ['', 'Top sellers:', ...s.top_products.map((p) => `  ${p.name}: ${p.units}`)] : []),
     '', `New customers: ${s.new_customers} (${s.new_email_opt_ins} agreed to email)`, `Ski school: ${s.ski_school.sessions} lessons, ${s.ski_school.students} students`, `Patrol cases: ${s.patrol.incidents}`,
@@ -108,6 +115,7 @@ function renderEmail(s, tenant) {
       .map(([a, b, c]) => `<td style="padding:10px;vertical-align:top;width:33%"><div style="color:#4f636d;font-size:13px">${a}</div><div style="font-size:26px;font-weight:bold">${esc(b)}</div><div style="color:#4f636d;font-size:12px">${esc(c)}</div></td>`).join('')}</tr></table>
     ${table('Day by day', s.days.map((d) => row(dayName(d.date), `${dollars(d.revenue_cents)}  ·  ${d.guests} guests`)))}
     ${table('Sales by type (before tax and refunds)', s.types.map((x) => row(LABEL[x.kind] || x.kind, dollars(x.cents))))}
+    ${table('Activities by attraction', (s.attractions || []).map((x) => row(x.name, `${x.units} sold  ·  ${dollars(x.cents)}`)))}
     ${table('Where it was sold', s.channels.map((x) => row(CHANNEL[x.channel] || x.channel, `${x.orders} orders  ·  ${money(x.cents)}`)))}
     ${table('Top sellers', s.top_products.map((p) => row(p.name, String(p.units))))}
     ${table('Also this week', [row('New customers', `${s.new_customers} (${s.new_email_opt_ins} agreed to email)`), row('Ski school', `${s.ski_school.sessions} lessons, ${s.ski_school.students} students`), row('Patrol cases', String(s.patrol.incidents))])}

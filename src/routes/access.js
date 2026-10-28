@@ -151,15 +151,23 @@ async function issuePairCode(req, id) {
 adminRouter.get('/devices', manager, async (req, res) => {
   const t = req.auth.tenantId; const tz = await tzOf(pool, t);
   const data = await rows(pool,
-    `SELECT d.id, d.name, d.location, d.kind, d.active, d.token_hash IS NOT NULL AS paired, (d.pair_hash IS NOT NULL AND d.pair_expires_at > NOW()) AS waiting, d.last_seen_at, d.last_list_at,
+    `SELECT d.id, d.name, d.location, d.kind, d.active, d.attraction_id, (SELECT a.name FROM attractions a WHERE a.tenant_id = d.tenant_id AND a.id = d.attraction_id) AS attraction, d.token_hash IS NOT NULL AS paired, (d.pair_hash IS NOT NULL AND d.pair_expires_at > NOW()) AS waiting, d.last_seen_at, d.last_list_at,
        (SELECT COUNT(*) FROM scans s WHERE s.tenant_id = d.tenant_id AND s.device_id = d.id AND s.scanned_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY)) AS scans_24h
      FROM access_devices d WHERE d.tenant_id = ? ORDER BY d.name`, [t]);
-  res.json({ data: data.map((d) => ({ ...d, active: Boolean(d.active), paired: Boolean(d.paired), waiting: Boolean(d.waiting), scans_24h: Number(d.scans_24h), last_seen_at: d.last_seen_at ? localTime(d.last_seen_at, tz) : null, last_list_at: d.last_list_at ? localTime(d.last_list_at, tz) : null })) });
+  // The attractions a device can stand at (read from the table: the gate's own list).
+  const attractions = await rows(pool, 'SELECT id, name, type FROM attractions WHERE tenant_id = ? AND active = 1 ORDER BY sort, name', [t]);
+  res.json({ attractions, data: data.map((d) => ({ ...d, active: Boolean(d.active), paired: Boolean(d.paired), waiting: Boolean(d.waiting), scans_24h: Number(d.scans_24h), last_seen_at: d.last_seen_at ? localTime(d.last_seen_at, tz) : null, last_list_at: d.last_list_at ? localTime(d.last_list_at, tz) : null })) });
 });
-const deviceFields = { name: z.string().trim().min(1).max(100), location: z.string().trim().max(100).nullable().optional(), kind: z.enum(DEVICE_KINDS).optional() };
+// attraction_id: the attraction the device stands at (activity tickets for it, and lift tickets that include it), or null for a lift gate.
+const deviceFields = { name: z.string().trim().min(1).max(100), location: z.string().trim().max(100).nullable().optional(), kind: z.enum(DEVICE_KINDS).optional(), attraction_id: z.number().int().positive().nullable().optional() };
+async function checkAttraction(tenantId, id) {
+  if (!id) return;
+  if (!(await one(pool, 'SELECT id FROM attractions WHERE tenant_id = ? AND id = ? AND active = 1', [tenantId, id]))) throw bad('That attraction is not on file');
+}
 adminRouter.post('/devices', manager, validate(z.object(deviceFields)), async (req, res) => {
   const b = req.body;
-  const [r] = await pool.query('INSERT INTO access_devices (tenant_id, name, location, kind) VALUES (?, ?, ?, ?)', [req.auth.tenantId, b.name, b.location || null, b.kind || 'gate']);
+  await checkAttraction(req.auth.tenantId, b.attraction_id);
+  const [r] = await pool.query('INSERT INTO access_devices (tenant_id, name, location, kind, attraction_id) VALUES (?, ?, ?, ?, ?)', [req.auth.tenantId, b.name, b.location || null, b.kind || 'gate', b.attraction_id || null]);
   await audit(pool, req, 'device_added', 'access_devices', r.insertId, { name: b.name });
   res.status(201).json({ name: b.name, ...(await issuePairCode(req, r.insertId)) });
 });
@@ -171,8 +179,9 @@ adminRouter.post('/devices/:id/pair-code', manager, async (req, res) => {
 });
 adminRouter.patch('/devices/:id', manager, validate(z.object({ ...deviceFields, name: deviceFields.name.optional(), active: z.boolean().optional() })), async (req, res) => {
   const id = paramId(req); const b = req.body;
+  await checkAttraction(req.auth.tenantId, b.attraction_id);
   const sets = []; const vals = [];
-  for (const k of ['name', 'location', 'kind']) if (b[k] !== undefined) { sets.push(`${k} = ?`); vals.push(b[k] || null); }
+  for (const k of ['name', 'location', 'kind', 'attraction_id']) if (b[k] !== undefined) { sets.push(`${k} = ?`); vals.push(b[k] || null); }
   if (b.active !== undefined) { sets.push('active = ?'); vals.push(b.active ? 1 : 0); }
   if (!sets.length) throw bad('Nothing to change');
   const [r] = await pool.query(`UPDATE access_devices SET ${sets.join(', ')} WHERE tenant_id = ? AND id = ?`, [...vals, req.auth.tenantId, id]);
@@ -193,6 +202,7 @@ const deviceRouter = express.Router();
 const MESSAGES = {
   ok: 'Welcome', expired: 'Ticket expired', not_yet_valid: 'Not valid yet', void: 'Ticket voided', no_uses: 'No rides left',
   unknown: 'Not recognized', duplicate: 'Already used, see staff', card_blocked: 'Card blocked, see staff',
+  wrong_place: 'Wrong attraction', too_early: 'Too early for this slot', too_late: 'This slot has ended', not_included: 'Not included, see staff',
 };
 
 /** A device trades a manager's one-time code for its own long-lived key. The code works once and expires. */
@@ -210,10 +220,10 @@ deviceRouter.post('/pair', validate(z.object({ code: z.string().min(4).max(20) }
 async function deviceAuth(req, _res, next) {
   const header = String(req.get('authorization') || '');
   const token = header.startsWith('Device ') ? header.slice(7).trim() : String(req.get('x-device-token') || '');
-  const d = token ? await one(pool, 'SELECT id, tenant_id, name, location FROM access_devices WHERE token_hash = ? AND active = 1', [K.tokenHash(token)]) : null;
+  const d = token ? await one(pool, 'SELECT id, tenant_id, name, location, attraction_id FROM access_devices WHERE token_hash = ? AND active = 1', [K.tokenHash(token)]) : null;
   if (!d) { const e = unauthorized('This device is not paired. Ask a manager for a pairing code.'); e.details = { code: 'device_unpaired' }; throw e; }
   await requireModule(d.tenant_id, 'gate');
-  req.device = { tenantId: d.tenant_id, id: d.id, location: d.location || d.name };
+  req.device = { tenantId: d.tenant_id, id: d.id, location: d.location || d.name, attractionId: d.attraction_id || null };
   await pool.query('UPDATE access_devices SET last_seen_at = NOW() WHERE id = ? AND (last_seen_at IS NULL OR last_seen_at < DATE_SUB(NOW(), INTERVAL 30 SECOND))', [d.id]);
   return next();
 }
@@ -243,14 +253,14 @@ const seenScan = (tenantId, deviceId, ref) => one(pool, 'SELECT result, ticket_i
  */
 deviceRouter.post('/check', validate(z.object({ uid: uidField.optional(), code: z.string().trim().min(4).max(64).optional(), client_ref: z.string().trim().min(1).max(64).optional() })
   .refine((b) => b.uid || b.code, 'Send uid or code')), async (req, res) => {
-  const { tenantId, id, location } = req.device; const b = req.body;
+  const { tenantId, id, location, attractionId } = req.device; const b = req.body;
   if (b.client_ref) {
     const seen = await seenScan(tenantId, id, b.client_ref);
     if (seen) return res.json({ ...(await replyFor(tenantId, seen)), repeat: true });
   }
   let out;
   try {
-    out = await tx((conn) => A.decide(conn, tenantId, { code: b.code, uid: b.uid, location, deviceId: id, clientRef: b.client_ref || null, via: 'device' }));
+    out = await tx((conn) => A.decide(conn, tenantId, { code: b.code, uid: b.uid, location, deviceId: id, clientRef: b.client_ref || null, via: 'device', attractionId }));
   } catch (err) {
     if (err.code !== 'ER_DUP_ENTRY' || !b.client_ref) throw err;
     return res.json({ ...(await replyFor(tenantId, await seenScan(tenantId, id, b.client_ref))), repeat: true });
@@ -258,13 +268,14 @@ deviceRouter.post('/check', validate(z.object({ uid: uidField.optional(), code: 
   res.json({
     allow: out.valid, result: out.result, message: out.valid && out.holder && out.holder.first_name ? `Welcome, ${out.holder.first_name}` : MESSAGES[out.result],
     open_ms: out.valid ? out.open_ms : 0, uses_remaining: out.ticket ? out.ticket.uses_remaining : null, valid_to: out.ticket ? out.ticket.valid_to : null,
+    reason: out.reason || null, // for a screen on the device: why it was refused, in a sentence
   });
 });
 
 /** Today's list for deciding offline: good chips and codes, blocked chips. No names leave the server. */
 deviceRouter.get('/list', async (req, res) => {
-  const { tenantId, id } = req.device;
-  const list = await A.allowlist(pool, tenantId);
+  const { tenantId, id, attractionId } = req.device;
+  const list = await A.allowlist(pool, tenantId, { attractionId });
   await pool.query('UPDATE access_devices SET last_list_at = NOW() WHERE id = ?', [id]);
   // The same body while nothing changes, so a device that sends If-None-Match gets 304 and no body. Done here by hand:
   // the API marks every answer no-store, which turns off Express's own check.

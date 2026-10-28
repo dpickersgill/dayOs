@@ -12,6 +12,7 @@ const { personFields, resolvePerson, requiredFor, PURCHASER_KEY } = require('../
 const { money } = require('../lib/format');
 
 const cardrefund = require('../lib/cardrefund');
+const ACT = require('../lib/activities');
 const { loadRules, applyTax } = require('../lib/tax');
 const router = express.Router();
 const sellers = ['counter', 'manager'];
@@ -191,7 +192,7 @@ router.post('/orders/:id/refund', requireRole('manager'), validate(refundBody), 
     }
     // Check everything first so a refused refund changes nothing.
     for (const l of lines) {
-      if (l.line_kind === 'ticket') {
+      if (l.line_kind === 'ticket' || l.line_kind === 'activity') {
         const scanned = await one(conn, `SELECT s.id FROM scans s JOIN tickets t ON t.id = s.ticket_id AND t.tenant_id = s.tenant_id WHERE s.tenant_id = ? AND t.order_item_id = ? AND s.result = 'ok' LIMIT 1`, [tenantId, l.id]);
         if (scanned) throw conflict('A ticket on this order was already used; refund it manually');
       }
@@ -250,6 +251,8 @@ router.post('/orders/:id/refund', requireRole('manager'), validate(refundBody), 
     // Undo what was sold.
     const ids = lines.map((l) => l.id);
     if (ids.length) await conn.query("UPDATE tickets SET status = 'void' WHERE tenant_id = ? AND order_item_id IN (?)", [tenantId, ids]);
+    // An activity's place goes back on sale.
+    await ACT.release(conn, tenantId, lines.filter((l) => l.line_kind === 'activity').map((l) => l.id));
     for (const l of lines) {
       if (l.line_kind === 'lesson' && !l.session_id) {
         await conn.query("UPDATE lesson_credits SET status = 'void' WHERE tenant_id = ? AND order_item_id = ?", [tenantId, l.id]);
@@ -353,14 +356,22 @@ router.post('/orders/:id/refunds/:rid/retry', requireRole('manager'), async (req
 router.post(
   '/tickets/scan',
   requireRole('counter', 'staff', 'manager'),
-  validate(z.object({ code: z.string().trim().min(4).max(64).optional(), uid: z.string().trim().min(4).max(64).optional(), location: z.string().max(100).optional(), override: z.boolean().optional() })
+  validate(z.object({ code: z.string().trim().min(4).max(64).optional(), uid: z.string().trim().min(4).max(64).optional(), location: z.string().max(100).optional(), override: z.boolean().optional(),
+    attraction_id: z.number().int().positive().nullable().optional() }) // scanning at an attraction (activity tickets), not at a lift
     .refine((b) => b.code || b.uid, 'Give the ticket code or the card')),
   async (req, res) => {
-    const out = await tx((conn) => access.decide(conn, req.auth.tenantId, { code: req.body.code, uid: req.body.uid, location: req.body.location, override: req.body.override, via: req.body.uid ? 'rfid' : 'code' }));
+    const aid = req.body.attraction_id || null;
+    if (aid && !(await one(pool, 'SELECT id FROM attractions WHERE tenant_id = ? AND id = ? AND active = 1', [req.auth.tenantId, aid]))) throw bad('That attraction is not on file');
+    const out = await tx((conn) => access.decide(conn, req.auth.tenantId, { code: req.body.code, uid: req.body.uid, location: req.body.location, override: req.body.override, via: req.body.uid ? 'rfid' : 'code', attractionId: aid }));
     delete out.open_ms;
     res.json(out);
   },
 );
+
+/** Where the Gate screen can scan: the lifts, or one of the mountain's attractions (for activity tickets). */
+router.get('/tickets/scan-places', requireRole('counter', 'staff', 'manager'), async (req, res) => {
+  res.json({ attractions: await rows(pool, 'SELECT id, name, type FROM attractions WHERE tenant_id = ? AND active = 1 ORDER BY sort, name', [req.auth.tenantId]) });
+});
 
 // ---------------------------------------------------------------- season passes
 /** Find a pass by holder name, phone or ticket code: for the gate when a card is left at home. */
