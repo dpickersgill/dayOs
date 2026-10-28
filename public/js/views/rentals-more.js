@@ -1,5 +1,5 @@
 import { get, post, patch, put } from '../api.js';
-import { h, clear, table, state, input, select, field, button, toast, formDialog, val, todayStr, fmtDate, fmtDateTime, label, empty, money, toCents, centsToInput, addDays } from '../ui.js';
+import { h, clear, table, state, input, select, field, button, toast, formDialog, val, todayStr, fmtDate, fmtDateTime, label, empty, money, toCents, centsToInput, addDays, isManager } from '../ui.js';
 import { personPicker } from '../widgets.js';
 
 const CATEGORIES = ['ski', 'snowboard', 'boot', 'helmet', 'pole', 'other'];
@@ -66,7 +66,7 @@ export async function drawService(box) {
   ];
   clear(box).append(h('div', { class: 'stack' },
     h('h3', null, 'In the shop'), r.in_shop.length ? table(cols(true), r.in_shop) : empty('Nothing is waiting for service.'),
-    r.service_every_uses ? h('div', null, h('h3', null, `Due for service (every ${r.service_every_uses} rentals)`), r.due.length ? table(cols(false), r.due) : empty('Nothing is due.')) : h('p', { class: 'muted' }, 'Set "Service every" in Settings to see gear due for a tune.')));
+    r.service_every_uses ? h('div', null, h('h3', null, `Due for service (every ${r.service_every_uses} rentals)`), r.due.length ? table(cols(false), r.due) : empty('Nothing is due.')) : h('p', { class: 'muted' }, 'Set "Service every" in Settings, Rentals to see gear due for a tune.', isManager() ? [' ', h('a', { href: '#/settings/rentals' }, 'Open Settings, Rentals')] : null)));
 }
 
 function logWork(i, done) {

@@ -59,7 +59,7 @@ function runCard(d, s, r, again) {
         h('span', { class: 'stop-name' }, h('b', null, x.name), h('small', null, ` ${label(x.kind)}`)),
         m ? h('span', { class: 'stop-mark' }, `${t(m.swept_at)}${m.flag !== 'none' ? `: ${label(m.flag)}${m.note ? `, ${m.note}` : ''}` : ''}`,
           m.flag === 'person' && !m.call_id ? button('Call it in', async () => { const c = await post(`/patrol/sweep/marks/${m.id}/call`); toast(`Call ${c.call_no} on the dispatch board`); await again(); }, { small: true, kind: 'danger' }) : null,
-          m.call_id ? h('a', { class: 'small', href: '#/patrol/dispatch' }, ' Dispatch call') : null,
+          m.call_id ? h('a', { class: 'small', href: '#/patrol/now?tab=dispatch' }, ' Dispatch call') : null,
           can && !m.call_id ? button('Undo', async () => { await del(`/patrol/sweep/runs/${r.id}/marks/${x.id}`); await again(); }, { small: true, kind: 'ghost', label: `Undo ${x.name}` }) : null)
           : can ? h('span', { class: 'row tight' },
             button('Swept', (e) => act(e.currentTarget, async () => { await post(`/patrol/sweep/runs/${r.id}/marks`, { item_id: x.id }); await again(); })(e), { small: true, kind: 'primary', label: `${x.name} swept` }),

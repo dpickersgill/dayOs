@@ -341,13 +341,13 @@ export function naDialog(def, f, done) {
 }
 
 // ---------------------------------------------------------------- administrator settings
-/** The resort's full legal name, printed on every copy of the report. What a report must hold is under Admin, Report requirements. */
+/** The resort's full legal name, printed on every copy of the report. What a report must hold is under Settings, Patrol, Report requirements. */
 export async function formSettingsDialog(onDone) {
   const def = await loadForm(true);
   const legal = h('input', { name: 'legal_name', value: def.resort.legal_name || '', maxlength: 255, placeholder: def.resort.name });
   formDialog('Legal name on reports', h('div', { class: 'stack' },
     field('Full legal name of the resort', legal, 'Printed on every copy of the report. Leave blank to use the mountain name.'),
-    h('p', { class: 'muted small' }, 'Which fields a report must hold is set under Admin, Report requirements.')),
+    h('p', { class: 'muted small' }, 'Which fields a report must hold is set under Report requirements, in Settings, Patrol.')),
   async () => {
     await put('/patrol/form-config', { legal_name: legal.value.trim() || null });
     forgetForm();

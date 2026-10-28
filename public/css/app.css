@@ -2889,3 +2889,39 @@ input.switch:disabled { opacity: .5; cursor: not-allowed; }
 }
 .set-menus { gap: 18px; }
 .set-body [role='tabpanel'] > div { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+
+/* ---- App screens (menus redesign) ---- */
+/* Patrol: the section is the page title; Patrol settings and New case sit at the right of the header. */
+.page-head.patrol-head { justify-content: space-between; align-items: flex-end; }
+.patrol-head .page-note { margin: 2px 0 0; color: var(--quiet); }
+.patrol-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.patrol-actions .btn { min-height: 40px; }
+.psec-waiting { color: var(--hold-ink); }
+@media (max-width: 720px) {
+  .patrol-actions { width: 100%; }
+  .patrol-actions .btn { min-height: 44px; flex: 1 1 auto; justify-content: center; }
+}
+
+/* Today: big job buttons for staff, instructors, the counter and patrol (LiftPhone design). */
+.jobs-host:empty { display: none; }
+.today-jobs { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin: 0 0 var(--sp-5, 24px); }
+.job-btn { display: flex; flex-direction: column; justify-content: space-between; gap: 10px; min-height: 124px; padding: 16px; border-radius: 16px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink); text-decoration: none; box-shadow: var(--shadow-sm, none); }
+.job-btn:hover { border-color: var(--trail-blue); color: var(--ink); }
+.job-btn:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.job-btn .ico { color: var(--trail-blue); }
+.job-btn .job-text { display: flex; flex-direction: column; gap: 2px; }
+.job-btn strong { font-size: 1.0625rem; }
+.job-btn .job-text span { font-size: 0.8125rem; color: var(--quiet); }
+.job-btn.is-first { background: var(--trail-blue); border-color: var(--trail-blue); color: var(--on-accent); }
+.job-btn.is-first .ico, .job-btn.is-first .job-text span { color: var(--on-accent); }
+.job-btn.is-first .job-text span { opacity: 0.88; }
+.job-btn.is-first:hover { background: var(--trail-blue-dark); color: var(--on-accent); }
+@media (max-width: 720px) { .today-jobs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Settings cards drawn by the apps: a label on the left, its switch on the right. */
+.app-setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.app-setting-row label { display: flex; flex-direction: column; gap: 2px; cursor: pointer; }
+.app-setting-row input[type='checkbox'] { width: 22px; height: 22px; flex: none; accent-color: var(--trail-blue); }
+.partner-rule { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.partner-rule p { margin: 2px 0 0; }

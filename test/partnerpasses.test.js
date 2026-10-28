@@ -154,3 +154,16 @@ test('guests reserve a free day online when the mountain allows it', async () =>
   const [[bot]] = await pool.query('SELECT COUNT(*) AS n FROM partner_redemptions WHERE number = ?', [`BOT${suffix}`.toUpperCase()]);
   assert.equal(Number(bot.n), 0);
 });
+
+test('Sell shows the Partner passes tab unless a manager turns it off, and the change is audited', async () => {
+  assert.deepEqual(ok(await api('GET', '/partner-passes/tab', { token: M.desk })), { show: true }, 'on unless turned off');
+  assert.equal(ok(await api('GET', '/partner-passes', { token: M.desk })).show_tab, true);
+  is(await api('PUT', '/partner-passes/tab', { token: M.desk, body: { show: false } }), 403, 'the desk cannot change it');
+  is(await api('PUT', '/partner-passes/tab', { token: M.owner, body: { show: 'no' } }), 400, 'a yes or no only');
+  assert.deepEqual(ok(await api('PUT', '/partner-passes/tab', { token: M.owner, body: { show: false } })), { show: false });
+  assert.deepEqual(ok(await api('GET', '/partner-passes/tab', { token: M.desk })), { show: false });
+  const [[row]] = await pool.query("SELECT a.action, a.entity, a.detail FROM audit_log a JOIN tenants t ON t.id = a.tenant_id WHERE t.slug = ? AND a.entity = 'tenants' AND a.detail LIKE '%partner_tab%' ORDER BY a.id DESC LIMIT 1", [slug]);
+  assert.deepEqual(typeof row.detail === 'string' ? JSON.parse(row.detail) : row.detail, { partner_tab: { before: true, after: false } });
+  ok(await api('PUT', '/partner-passes/tab', { token: M.owner, body: { show: true } }));
+  assert.equal(ok(await api('GET', '/partner-passes/tab', { token: M.desk })).show, true);
+});

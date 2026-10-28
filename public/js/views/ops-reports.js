@@ -6,7 +6,7 @@ export async function drawReports(root) {
     ['report', 'Daily report', drawDaily],
     ['downtime', 'Lift downtime', drawDowntime],
     ['handoff', 'Handoff notes', drawHandoffs],
-  ], 'report'));
+  ], 'report', { param: 'sub' })); // inside Mountain status's Reports tab
 }
 
 // ---------------------------------------------------------------- daily report

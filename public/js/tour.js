@@ -48,8 +48,7 @@ export const TOURS = [
       { at: '.scan-input', title: 'A lost card', body: 'Card 04C0FFEE123456 was reported lost. Type it in: it is refused, even though its ticket is still good.', fill: { at: '.scan-input', value: '04C0FFEE123456' }, until: () => document.querySelector('.gate[data-result="bad"]') },
       { at: 'button', text: 'Cards', click: true, title: 'Every card', body: 'Click Cards to see every card and what it carries.' },
       { at: 'button.btn', text: 'Load a card', title: 'Load a card', body: 'Tap a card, scan the ticket, done. A lost card is blocked in one click, and its ticket moves to a new card.' },
-      { at: 'button', text: 'Devices', click: true, title: 'Gates and turnstiles', body: 'Click Devices. Turnstiles, gates and handhelds from any maker connect here.' },
-      { at: 'button.btn', text: 'Add a device', title: 'Pair a gate', body: 'Each device pairs with a one-time code. It checks tickets online, and keeps a list for when the network drops, then sends its scans when it is back.' },
+      { route: '#/settings/sell', at: 'button.btn', text: 'Add a device', title: 'Gates and turnstiles', body: 'Turnstiles, gates and handhelds from any maker are set up in Settings, Sell and gate. Each pairs with a one-time code, checks tickets online, keeps a list for when the network drops, and sends its scans when it is back.' },
     ],
   },
   {
@@ -63,8 +62,8 @@ export const TOURS = [
       { at: 'button.pstep', title: 'What to do next', body: 'The next steps guide the patroller: add the patient, take vitals, log injuries and treatment, record the outcome.' },
       { at: 'button.btn', text: 'Add vitals', title: 'Vitals and care', body: 'Vitals, injuries and treatments are logged with times, and they keep working without a signal. They are sent when it comes back.' },
       { at: 'button', text: 'Report', click: true, title: 'The report', body: 'Click Report. The full incident report, laid out like the NSAA form, filled from what was logged during care.' },
-      { route: '#/patrol/stats', at: '.figures', title: 'Statistics', body: 'Cases by type, place, hour, activity and injury, and response times, for any dates.' },
-      { route: '#/patrol/network', at: '.panel h2', title: 'The injury network', body: 'Mountains can share anonymous injury counts with the National Ski Patrol and NSAA, and see how their season compares. Demo mountains cannot join, but you can read how it works here.' },
+      { route: '#/patrol/cases?tab=stats', at: '.figures', title: 'Statistics', body: 'Cases by type, place, hour, activity and injury, and response times, for any dates.' },
+      { route: '#/patrol/cases?tab=network', at: '.panel h2', title: 'The injury network', body: 'Mountains can share anonymous injury counts with the National Ski Patrol and NSAA, and see how their season compares. Demo mountains cannot join, but you can read how it works here.' },
     ],
   },
   {
@@ -95,7 +94,7 @@ export const TOURS = [
     steps: [
       { route: '#/waivers', at: '.page-head h1', title: 'Signed waivers', body: 'Every waiver, signed online before the visit or at the counter, kept word for word as it was signed.' },
       { at: 'button', text: 'Sign a guest', click: true, title: 'Sign at the counter', body: 'Click Sign a guest. The guest signs on the screen; a parent signs for a child.' },
-      { at: 'button', text: 'Wording', click: true, title: 'Your wording', body: 'Click Wording. Change the text, and choose whether everyone has to sign again. The gate shows whether a pass holder has signed this season.' },
+      { route: '#/settings/waivers', at: 'textarea', title: 'Your wording', body: 'The wording is in Settings, Waivers. Change the text, and choose whether everyone has to sign again. The gate shows whether a pass holder has signed this season.' },
     ],
   },
 ];

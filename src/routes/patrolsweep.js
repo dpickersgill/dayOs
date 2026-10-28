@@ -425,7 +425,7 @@ router.post('/lift-evac/:liftId/evacs', patrol, validate(z.object({
 
 // ================================================================ avalanche
 async function avyOn(req) {
-  if (!(await OPS.settingsOf(pool, req.auth.tenantId)).avalanche) throw forbidden('Avalanche work is off for this mountain (Patrol, Admin, Patrol settings)');
+  if (!(await OPS.settingsOf(pool, req.auth.tenantId)).avalanche) throw forbidden('Avalanche work is off for this mountain (Settings, Patrol, Patrol settings)');
 }
 
 router.get('/avy', patrol, async (req, res) => {

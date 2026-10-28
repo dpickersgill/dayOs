@@ -1245,6 +1245,8 @@ const partnerSteps = [
     KEY ix_pred_day (tenant_id, program_id, on_date),
     CONSTRAINT fk_pred_program FOREIGN KEY (program_id) REFERENCES partner_programs(id)
   ) ENGINE=InnoDB`],
+  // Whether Sell shows its Partner passes tab (on unless the mountain turns it off in Settings, Sell and gate).
+  ['tenants.partner_tab', (c) => columnExists(c, 'tenants', 'partner_tab'), 'ALTER TABLE tenants ADD COLUMN partner_tab TINYINT(1) NOT NULL DEFAULT 1'],
 ];
 
 // Prospect outreach: emails from the operator's own mailbox on a cadence, until a reply, a bounce or "not interested"

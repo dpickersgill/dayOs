@@ -227,7 +227,7 @@ router.post('/threads/:id/leave', async (req, res) => {
     const th = await memberOf(conn, req, paramId(req), { lock: true });
     if (th.kind !== 'group') throw forbidden('A one-to-one conversation cannot be left');
     const rs = await review.settingsOf(conn, req.auth.tenantId);
-    if (rs.thread_id && Number(rs.thread_id) === Number(th.id)) throw forbidden('This is the patrol review group\'s conversation. To leave it, leave the review group in Patrol, Admin, Review group.');
+    if (rs.thread_id && Number(rs.thread_id) === Number(th.id)) throw forbidden('This is the patrol review group\'s conversation. To leave it, leave the review group in Patrol, Cases, Review.');
     await conn.query('UPDATE chat_members SET left_at = UTC_TIMESTAMP() WHERE tenant_id = ? AND thread_id = ? AND user_id = ?', [req.auth.tenantId, th.id, req.auth.userId]);
     const me = (await namesOf(conn, req.auth.tenantId, [req.auth.userId])).get(req.auth.userId);
     await addMessage(conn, req, th.id, `${me ? me.name : 'Someone'} left the conversation`, [], { system: true });

@@ -122,7 +122,7 @@ function typesDialog(types, onDone) {
 // ---------------------------------------------------------------- one kit (opened from its QR label)
 export async function renderKitPage(root, id) {
   const body = h('div', { class: 'stack' });
-  root.append(h('div', { class: 'page-head' }, h('a', { href: '#/patrol/kits', class: 'back' }, '‹ Kits'), h('h1', null, 'Kit')), body);
+  root.append(h('div', { class: 'page-head' }, h('a', { href: '#/patrol/gear?tab=kits', class: 'back' }, '‹ Kits'), h('h1', null, 'Kit')), body);
   async function load() {
     clear(body).append(h('p', { class: 'loading' }, 'Loading the kit…'));
     let r;
@@ -192,7 +192,7 @@ function sealDialog(k, onDone) {
 export async function renderKitLabels(root) {
   const r = await get('/patrol/kits');
   root.append(h('div', { class: 'labels-page stack' },
-    h('div', { class: 'row labels-tools' }, h('a', { class: 'btn', href: '#/patrol/kits' }, '‹ Kits'), button('Print', () => window.print(), { kind: 'primary' }),
+    h('div', { class: 'row labels-tools' }, h('a', { class: 'btn', href: '#/patrol/gear?tab=kits' }, '‹ Kits'), button('Print', () => window.print(), { kind: 'primary' }),
       h('span', { class: 'muted small' }, `${r.kits.length} label${r.kits.length === 1 ? '' : 's'}. Use weatherproof labels outdoors.`)),
     h('div', { class: 'labels' }, r.kits.map((k) => h('div', { class: 'label-card' }, qr(kitUrl(k.id), { size: 96 }),
       h('div', { class: 'label-text' }, h('b', null, k.label), h('span', null, k.type), h('span', { class: 'muted' }, (ctx.me && ctx.me.tenant_name) || ''), h('span', { class: 'small muted' }, 'Scan to check this kit')))))));

@@ -114,7 +114,7 @@ export async function personPage(root, id) {
         card('Sign-in', p.login ? null : h('div', { class: 'row' }, button('Create login', () => createLogin(p, draw), { small: true, kind: 'primary' }), button('Link existing', () => linkLogin(p, draw), { small: true })),
           p.login ? h('p', null, h('b', null, p.login.username || p.login.email), ` (${label(p.login.role)}${p.login.email && p.login.username ? `, ${p.login.email}` : ''}). They see their shifts in My shifts, clock in, and get schedule messages in their Inbox.`)
             : h('p', { class: 'muted' }, p.employee ? 'No login. Without one they use the time clock kiosk and do not get schedule messages.' : 'No login. A volunteer patroller needs one to write cases and see the patrol schedule.')),
-        card('Ski patrol', p.patrol ? h('div', { class: 'row' }, h('a', { class: 'btn small', href: '#/patrol/team' }, 'Open in Patrol'), button('Take off patrol', () => offPatrol(p, draw), { small: true, kind: 'danger' })) : button('Put on ski patrol', () => onPatrol(p, draw), { small: true }),
+        card('Ski patrol', p.patrol ? h('div', { class: 'row' }, h('a', { class: 'btn small', href: '#/patrol/people?tab=team' }, 'Open in Patrol'), button('Take off patrol', () => offPatrol(p, draw), { small: true, kind: 'danger' })) : button('Put on ski patrol', () => onPatrol(p, draw), { small: true }),
           p.patrol ? [h('p', null, h('b', null, label(p.patrol.level)), p.patrol.callsign ? `, call sign ${p.patrol.callsign}` : '', p.patrol.patrol_number ? `, patrol number ${p.patrol.patrol_number}` : '', '.'),
             h('p', { class: 'muted small' }, `Patrol access: ${label(p.patrol.access_level || 'patrol')}${Number(p.patrol.exceptions) ? `, with ${p.patrol.exceptions} exception${Number(p.patrol.exceptions) === 1 ? '' : 's'}` : ''}. ${isManager() ? 'Change it with Edit details, or single permissions in Patrol, People, Roster.' : 'A patrol Admin sets access and permissions in Patrol, People, Roster.'}`),
             p.login ? null : h('p', { class: 'muted small' }, 'They need a login to open Patrol. Create one under Sign-in.')]
@@ -162,7 +162,7 @@ function editPositions(p, positions, done) {
   const boxes = positions.map((x) => ({ x, cb: h('input', { type: 'checkbox', checked: have.has(Number(x.id)) }) }));
   formDialog(`What ${p.first_name} works as`, h('div', { class: 'stack' },
     h('p', { class: 'muted' }, 'People trained for a position are offered first when filling its shifts. This does not stop anyone else being chosen.'),
-    positions.length ? h('div', { class: 'checks' }, boxes.map((b) => h('label', { class: 'check' }, b.cb, ` ${b.x.name}`))) : empty('No positions yet. Add them on the Setup tab.')), async () => {
+    positions.length ? h('div', { class: 'checks' }, boxes.map((b) => h('label', { class: 'check' }, b.cb, ` ${b.x.name}`))) : empty('No positions yet. A manager adds them in Settings, Staff and schedule.')), async () => {
     await put(`/workforce/staff/${p.id}/positions`, { position_ids: boxes.filter((b) => b.cb.checked).map((b) => Number(b.x.id)) });
     toast('Saved');
     await done();
@@ -170,7 +170,7 @@ function editPositions(p, positions, done) {
 }
 
 function certDialog(p, certTypes, current, done) {
-  if (!certTypes.length) { toast('Add certification types on the Setup tab first', 'error'); return; }
+  if (!certTypes.length) { toast('Add certification types first, in Settings, Staff and schedule', 'error'); return; }
   formDialog(current ? `Renew ${current.name}` : `Add a certification for ${p.first_name}`, h('div', { class: 'form' },
     field('Certification', select(certTypes.map((c) => [c.id, c.name]), current ? current.id : certTypes[0].id, { name: 'cert', disabled: Boolean(current) })),
     field('Issued', input({ type: 'date', name: 'issued', value: current && current.issued_on ? String(current.issued_on).slice(0, 10) : '' })),

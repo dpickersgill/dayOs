@@ -124,7 +124,7 @@ async function permissionsDialog(m, again) {
     rows.push(h('div', { class: 'perm-row' }, h('div', null, h('b', null, f.label), h('small', { class: 'muted' }, ` ${f.about}`)), sel));
   }
   formDialog(`Permissions for ${p.name}`, h('div', { class: 'stack' },
-    h('p', { class: 'muted' }, `${p.name} is ${p.level_label}. Leave a permission as their level has it, or change it for ${m.first_name} alone. To change what every ${p.level_label} can do, use Access levels.`),
+    h('p', { class: 'muted' }, `${p.name} is ${p.level_label}. Leave a permission as their level has it, or change it for ${m.first_name} alone. To change what every ${p.level_label} can do, use Settings, Patrol, Access levels.`),
     h('div', { class: 'perm-list' }, rows)), async () => {
     await put(`/patrol/team/${m.staff_id}/permissions`, { exceptions: [...choice.entries()].map(([feature, allowed]) => ({ feature, allowed })) });
     toast('Permissions saved');

@@ -10,7 +10,7 @@ let lastPosition = null;
  * available, trained for the position), says why anyone else cannot, and shows each person's hours that week.
  */
 export function shiftDialog({ shift, date, staffId, positions, onDone }) {
-  if (!positions.length) { toast('Add a position first, on the Setup tab', 'error'); return; }
+  if (!positions.length) { toast('Add a position first, in Settings, Staff and schedule', 'error'); return; }
   const editing = Boolean(shift);
   const day = input({ type: 'date', name: 'day', required: true, value: editing ? shift.starts_at.slice(0, 10) : date });
   const from = input({ type: 'time', name: 'from', required: true, value: editing ? shift.starts_at.slice(11, 16) : '08:00' });
@@ -194,7 +194,7 @@ export function staffingNeeds(start, today) {
         { head: 'On a shift', num: true, cell: (p) => String(p.scheduled) },
         { head: 'Unfilled shifts', num: true, cell: (p) => (p.unfilled ? String(p.unfilled) : '') },
         { head: '', cell: (p) => (!p.suggested ? '' : p.gap > 0 ? state(`${p.gap} short`, 'warn') : state('Covered', 'good')) },
-      ], r.data) : empty('No position has "guests per staff member" set yet. Set it on the Setup tab.'));
+      ], r.data) : empty('No position has "guests per staff member" set yet. Set it in Settings, Staff and schedule, on each position.'));
     } catch (err) { clear(out).append(errorBox(err)); }
   }
   forecast.addEventListener('change', run);

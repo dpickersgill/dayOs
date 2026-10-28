@@ -72,7 +72,7 @@ export function recordsPanel(c, { canManage }) {
     clear(box).append(...[h('h2', null, 'Requests for this report'),
       r.data.length ? h('ul', { class: 'duty-list' }, r.data.map((x) => h('li', null, state(label(x.status), x.status === 'released' ? 'good' : x.status === 'open' ? 'warn' : 'neutral'), ` ${x.requester_name} (${label(x.requester_kind)}), received ${String(x.received_on).slice(0, 10)}${x.release_no ? `, ${x.release_no}` : ''}`)))
         : h('p', { class: 'muted small' }, 'No requests for this report.'),
-      canManage ? h('a', { class: 'btn small', href: '#/patrol/records' }, 'Records requests') : null].filter(Boolean));
+      canManage ? h('a', { class: 'btn small', href: '#/patrol/cases?tab=records' }, 'Records requests') : null].filter(Boolean));
   }).catch(() => box.remove());
   return box;
 }
