@@ -78,7 +78,7 @@ async function drawPartnerSetup(panel) {
     }
     list.append(h('div', { class: 'row' },
       r.data.some((p) => p.name === 'Indy Pass') ? null : button('Set up the Indy Pass', () => indySetup(r, load), { kind: r.data.length ? null : 'primary', small: Boolean(r.data.length) }),
-      button('Add another partner pass', () => setup(null, r, load), { small: true })));
+      button('Add another partner pass', () => setup(null, r, load), { small: Boolean(r.data.length) })));
   }
   await load();
 }
