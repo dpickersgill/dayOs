@@ -7,7 +7,10 @@ const DIFFICULTY = [['green', 'Easy'], ['blue', 'Intermediate'], ['black', 'Adva
 
 export async function render(root, params = []) {
   const canSet = can('patrol', 'staff');
-  const openOrder = params[0] === 'wo' && /^\d+$/.test(params[1] || '') ? Number(params[1]) : null;
+  // #/conditions/wo/12 opens that work order; #/conditions/wo/new opens the form for a new one (Today's Report a problem).
+  const openOrder = params[0] === 'wo' && /^\d+$/.test(params[1] || '') ? Number(params[1]) : params[0] === 'wo' && params[1] === 'new' ? 'new' : null;
+  const asked = new URLSearchParams(location.hash.split('?')[1] || '').get('tab');
+  if (openOrder === 'new' && location.hash.startsWith('#/conditions/wo/new')) history.replaceState(null, '', '#/conditions?tab=maint'); // a refresh does not open the form again
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Mountain status'),
     h('p', { class: 'page-note' }, canSet ? 'Status, grooming, snow, maintenance and the daily report. Status changes show on your public conditions feed within a minute.' : 'You can see status here. Patrol and managers change it.')));
   if (!canSet) { await drawStatus(root, false); return; }
@@ -17,7 +20,7 @@ export async function render(root, params = []) {
     ['snow', 'Snow and weather', async (box) => (await import('./ops-weather.js')).drawSnowWeather(box)],
     ['maint', 'Maintenance', async (box) => (await import('./ops-maint.js')).drawMaintenance(box, { openOrder })],
     ['reports', 'Reports', async (box) => (await import('./ops-reports.js')).drawReports(box)],
-  ], openOrder ? 'maint' : 'status'));
+  ], openOrder ? 'maint' : ['grooming', 'snow', 'maint', 'reports'].includes(asked) ? asked : 'status'));
 }
 
 async function drawStatus(root, canSet) {

@@ -7,12 +7,14 @@ const PM_TONE = { overdue: 'bad', soon: 'warn', ok: 'good', never: 'neutral' };
 const PM_TEXT = { overdue: 'Overdue', soon: 'Due soon', ok: 'On track', never: 'Never done' };
 
 export async function drawMaintenance(root, { openOrder = null } = {}) {
+  // These tabs sit inside Mountain status's Maintenance tab, so they keep their place in the address as ?sub=.
+  const asked = openOrder ? null : new URLSearchParams(location.hash.split('?')[1] || '').get('sub');
   root.append(tabs([
     ['orders', 'Work orders', (box) => drawOrders(box, openOrder)],
     ['checks', 'Lift inspections', drawChecks],
     ['pm', 'Recurring jobs', drawPm],
     ['fleet', 'Fleet', drawFleet],
-  ], 'orders'));
+  ], ['checks', 'pm', 'fleet'].includes(asked) ? asked : 'orders', { param: 'sub' }));
 }
 
 // ---------------------------------------------------------------- work orders
@@ -83,7 +85,8 @@ async function drawOrders(box, openId = null) {
   }
   await load();
   // #/conditions/wo/12 (a shared link): open that work order
-  if (openId) detail(openId).catch((err) => toast(err.message || 'Could not open that work order', 'error'));
+  if (openId === 'new') add();
+  else if (openId) detail(openId).catch((err) => toast(err.message || 'Could not open that work order', 'error'));
 }
 
 // ---------------------------------------------------------------- lift inspections

@@ -1,5 +1,6 @@
 import { get, poll, put, post, patch, del } from '../api.js';
-import { ctx, h, clear, money, state, input, field, select, button, todayStr, fmtDate, fmtDateLong, fmtTime, fmtDateTime, label, empty, errorBox, loading, toast, fail, isManager, confirmDialog } from '../ui.js';
+import { icon } from '../icons.js';
+import { ctx, h, svg, can, clear, money, state, input, field, select, button, todayStr, fmtDate, fmtDateLong, fmtTime, fmtDateTime, label, empty, errorBox, loading, toast, fail, isManager, confirmDialog } from '../ui.js';
 
 const ROLES = [['counter', 'Counter'], ['instructor', 'Instructors'], ['patrol', 'Patrol'], ['staff', 'Staff'], ['manager', 'Managers and owners']];
 
@@ -11,9 +12,11 @@ export async function render(root) {
   const editBar = h('div', { class: 'board-edit', hidden: true });
   const wallHost = h('div', { class: 'board-host' }, alertsBox, grid);
   const scoreHost = h('div', { class: 'docscore-host', hidden: true });
+  const jobsHost = h('div', { class: 'jobs-host' });
   root.append(
     h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Today'), h('p', { class: 'muted', id: 'dash-sub' })), bar),
-    editBar, scoreHost, wallHost);
+    jobsHost, editBar, scoreHost, wallHost);
+  if (!isManager()) jobButtons(jobsHost);
   docScoreCard(scoreHost);
 
   let board = null; // last answer from /board
@@ -88,6 +91,55 @@ export async function render(root) {
   await load();
 }
 
+// ------------------------------------------------------------------ job buttons (everyone but managers)
+// Big, labeled buttons for the work of the day, straight to the screen that does it. Only apps this person may open.
+const ALWAYS_ON = ['dashboard', 'inbox', 'people', 'waivers', 'lostfound', 'myshifts'];
+const appOn = (key) => ALWAYS_ON.includes(key) || !ctx.me || !ctx.me.modules || ctx.me.modules.includes(key);
+const MAY = { sell: () => can('counter'), shop: () => can('counter'), gate: () => can('counter', 'staff'), conditions: () => can('patrol', 'staff'), lostfound: () => can('counter', 'staff'),
+  school: () => can('instructor', 'counter'), availability: () => can('instructor', 'counter'), patrol: () => can('patrol') };
+export const mayOpen = (key) => appOn(key) && Boolean(MAY[key] && MAY[key]());
+const JOB_ICON = { check: 'M9 11l3 3 8-8M20 12v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h10', alert: 'M12 9v4M12 17h.01M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z' };
+const jobIcon = (name) => (JOB_ICON[name] ? svg('svg', { class: 'ico', width: 28, height: 28, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.75, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' }, svg('path', { d: JOB_ICON[name] })) : icon(name, 28));
+const JOBS = {
+  staff: [
+    { app: 'conditions', act: 'opening-check', label: 'Opening check', note: 'Lift inspections before opening', href: '#/conditions?tab=maint&sub=checks', icon: 'check' },
+    { app: 'gate', act: 'scan', label: 'Scan tickets', note: 'Check tickets and cards', href: '#/gate', icon: 'gate' },
+    { app: 'conditions', act: 'work-order', label: 'Report a problem', note: 'A work order for maintenance', href: '#/conditions/wo/new', icon: 'alert' },
+    { app: 'lostfound', act: 'lost-found', label: 'Lost and found', note: 'Log something handed in', href: '#/lostfound', icon: 'lostfound' },
+  ],
+  instructor: [
+    { app: 'school', act: 'lessons', label: 'Today\'s lessons', note: 'Who you teach, and where to meet', href: '#/school?tab=today', icon: 'school' },
+    { app: 'availability', act: 'availability', label: 'My availability', note: 'Mark the days you can teach', href: '#/availability', icon: 'availability' },
+  ],
+  counter: [
+    { app: 'sell', act: 'sell', label: 'Sell', note: 'Tickets, lessons, rentals and gift cards', href: '#/sell', icon: 'sell' },
+    { app: 'shop', act: 'will-call', label: 'Will-call pickups', note: 'Hand over online orders', href: '#/shop?tab=willcall', icon: 'shop' },
+  ],
+  patrol: [
+    { app: 'patrol', act: 'on-duty', label: 'On duty', note: 'Sign in for your shift and see who is on', href: '#/patrol/now?tab=duty', icon: 'patrol' },
+    { app: 'patrol', act: 'new-case', label: 'New case', note: 'Start a patient report', href: '#/patrol/new', icon: 'plus', needs: 'create_case' },
+  ],
+};
+/** The job buttons for this person: their role's, plus patrol's for a staff member who is also on patrol. */
+export function jobsFor(me) {
+  if (!me || ['owner', 'manager', 'area'].includes(me.role)) return [];
+  const list = [...(JOBS[me.role] || []), ...(me.role !== 'patrol' && me.on_patrol ? JOBS.patrol : [])];
+  return list.filter((j) => mayOpen(j.app));
+}
+async function jobButtons(host) {
+  let jobs = jobsFor(ctx.me);
+  if (!jobs.length) return;
+  // New case only for patrollers whose access level can start one (a Host cannot).
+  if (jobs.some((j) => j.needs)) {
+    let features = [];
+    try { features = (await get('/patrol/me')).features || []; } catch (_) { /* no patrol access: no New case */ }
+    jobs = jobs.filter((j) => !j.needs || features.includes(j.needs));
+  }
+  clear(host).append(h('nav', { class: 'today-jobs', 'aria-label': 'Your work today' },
+    ...jobs.map((j, i) => h('a', { class: `job-btn${i === 0 ? ' is-first' : ''}`, href: j.href, 'data-job': j.act },
+      jobIcon(j.icon), h('span', { class: 'job-text' }, h('strong', null, j.label), h('span', null, j.note))))));
+}
+
 // ------------------------------------------------------------------ patrol documentation score (owners, managers, patrol admins)
 // Hidden for anyone the server says no to, and when Patrol is off.
 async function docScoreCard(host) {
@@ -97,12 +149,12 @@ async function docScoreCard(host) {
   const tone = (n) => (n === null || n === undefined ? 'neutral' : n >= 90 ? 'good' : n >= 70 ? 'warn' : 'bad');
   const cell = (big, small, href, kind) => h('a', { class: `ds-cell${kind ? ` is-${kind}` : ''}`, href }, h('b', null, big), h('span', null, small));
   clear(host).append(h('section', { class: 'docscore-card', 'aria-label': 'Patrol documentation' },
-    h('div', { class: 'ds-head' }, h('b', null, 'Patrol documentation'), h('span', { class: 'muted' }, `Season ${s.season} · ${s.reports} ${s.reports === 1 ? 'report' : 'reports'} signed off`), h('a', { href: '#/patrol/risk', class: 'ds-more' }, 'Risk report')),
+    h('div', { class: 'ds-head' }, h('b', null, 'Patrol documentation'), h('span', { class: 'muted' }, `Season ${s.season} · ${s.reports} ${s.reports === 1 ? 'report' : 'reports'} signed off`), h('a', { href: '#/patrol/cases?tab=risk', class: 'ds-more' }, 'Risk report')),
     h('div', { class: 'ds-row' },
-      cell(s.score === null ? '–' : `${s.score}%`, 'Documentation score', '#/patrol/risk', tone(s.score)),
-      cell(s.on_time_pct === null ? '–' : `${s.on_time_pct}%`, 'Signed off within 24 hours', '#/patrol/risk', s.on_time_pct === null ? null : s.on_time_pct >= 90 ? 'good' : 'warn'),
-      cell(String(s.reviews_overdue), 'Reviews overdue', '#/patrol/review', s.reviews_overdue ? 'warn' : 'good'),
-      cell(s.red_flags ? `${s.red_flags_management}/${s.red_flags}` : '0', 'Red-flag cases with management told', '#/patrol/risk', s.red_flags && s.red_flags_management < s.red_flags ? 'bad' : null))));
+      cell(s.score === null ? '–' : `${s.score}%`, 'Documentation score', '#/patrol/cases?tab=risk', tone(s.score)),
+      cell(s.on_time_pct === null ? '–' : `${s.on_time_pct}%`, 'Signed off within 24 hours', '#/patrol/cases?tab=risk', s.on_time_pct === null ? null : s.on_time_pct >= 90 ? 'good' : 'warn'),
+      cell(String(s.reviews_overdue), 'Reviews overdue', '#/patrol/cases?tab=review', s.reviews_overdue ? 'warn' : 'good'),
+      cell(s.red_flags ? `${s.red_flags_management}/${s.red_flags}` : '0', 'Red-flag cases with management told', '#/patrol/cases?tab=risk', s.red_flags && s.red_flags_management < s.red_flags ? 'bad' : null))));
   host.hidden = false;
 }
 
