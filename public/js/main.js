@@ -2,7 +2,7 @@
 
 import './stage.js'; // the staging band (shows only on staging)
 import { openTourPicker, resumeTour, welcomeOnce, endTour } from './tour.js';
-import { get, post, session, hooks, ApiError } from './api.js';
+import { get, poll, post, session, hooks, noteActivity, ApiError } from './api.js';
 import { mfaPanel } from './views/mfa.js';
 import * as passkey from './passkey.js';
 import { confirmItsYou } from './stepup.js';
@@ -372,7 +372,7 @@ async function refreshUnread() {
   clearTimeout(unreadTimer);
   if (!ctx.me || !frame || ctx.me.role === 'area') return; // the ski area's read-only login has no Inbox
   unreadBusy = true;
-  try { const { unread } = await get('/inbox/unread'); if (frame.setBadge) frame.setBadge('inbox', unread); } catch (_) { /* try again on the next tick */ }
+  try { const { unread } = await poll('/inbox/unread'); if (frame.setBadge) frame.setBadge('inbox', unread); } catch (_) { /* try again on the next tick */ }
   unreadBusy = false;
   clearTimeout(unreadTimer);
   if (ctx.me) { unreadTimer = setTimeout(refreshUnread, document.hidden ? 120_000 : 30_000); unreadTimer.unref?.(); } // (unref: test runners only)
@@ -396,6 +396,7 @@ function currentPath() {
 
 async function route() {
   if (!ctx.me) return;
+  if (ctx.me.display === 'patrol_room') { if (location.hash !== '#/patrol/room') history.replaceState(null, '', `${location.pathname}#/patrol/room`); return; } // the room screen goes nowhere else
   const { key, params } = currentPath();
   if (!key) { location.replace(`#/${defaultView()}`); return; }
   const my = ++navToken;
@@ -501,6 +502,7 @@ async function freshPage() {
 
 hooks.onSignedOut = () => { if (ctx.me) signOut('Your session ended. Sign in again.'); };
 hooks.stepUp = (details) => confirmItsYou(details);
+hooks.signOut = () => signOut();
 
 // Automatic sign-out: a phone or screen left open should not leave guest and patient details on display.
 const IDLE_MINUTES = 15;
@@ -508,11 +510,13 @@ let idleTimer = null;
 function resetIdle() {
   clearTimeout(idleTimer);
   if (!ctx.me) return;
-  // The patrol-room sign-in screen stays up all day on a shared tablet; it shows names only, never patient details.
-  idleTimer = setTimeout(() => { if (location.hash.startsWith('#/patrol/room')) { resetIdle(); return; } if (ctx.me) signOut(`Signed out after ${IDLE_MINUTES} minutes without activity.`); }, IDLE_MINUTES * 60_000);
+  // The patrol-room screen stays up all day on a shared tablet. The server holds its session to that screen (names, signing in
+  // and out, never patient details), and leaving it needs the leader's password, passkey or code.
+  idleTimer = setTimeout(() => { if (ctx.me && ctx.me.display === 'patrol_room') { resetIdle(); return; } if (ctx.me) signOut(`Signed out after ${IDLE_MINUTES} minutes without activity.`); }, IDLE_MINUTES * 60_000);
   if (idleTimer && idleTimer.unref) idleTimer.unref(); // (test runners only: a pending timer must not keep the process alive)
 }
-for (const ev of ['pointerdown', 'keydown', 'scroll', 'touchstart']) document.addEventListener(ev, resetIdle, { passive: true, capture: true });
+const touchedPage = () => { noteActivity(); resetIdle(); };
+for (const ev of ['pointerdown', 'keydown', 'scroll', 'touchstart']) document.addEventListener(ev, touchedPage, { passive: true, capture: true });
 // Arm the timer shortly after sign-in, and again whenever it has been cleared by a sign-out and back in.
 setInterval(() => { if (ctx.me && !idleTimer) resetIdle(); if (!ctx.me) { clearTimeout(idleTimer); idleTimer = null; } }, 5_000).unref?.();
 
@@ -528,6 +532,7 @@ async function start() {
     return;
   }
   ctx.tz = ctx.me.timezone || ctx.tz;
+  if (ctx.me.display === 'patrol_room') { await showRoom(); return; }
   // Opens (and sends) any patrol entries this person left waiting on this phone; they are sealed with this key.
   try { if (await setDeviceKey(ctx.me.device_key) && waitingCounts().mine) flushOutbox(); } catch (_) { /* nothing waiting */ }
   if (ctx.me.must_change_password) { showPasswordChange(); return; }
@@ -539,6 +544,17 @@ async function start() {
   }
   await route();
   if (ctx.me.sandbox) { resumeTour(); welcomeOnce(); }
+}
+
+/** The patrol-room screen on its own, without the menu: this session can do nothing else (the server holds it to that). */
+async function showRoom() {
+  clear(app);
+  frame = null;
+  if (location.hash !== '#/patrol/room') history.replaceState(null, '', `${location.pathname}#/patrol/room`);
+  document.title = `Patrol room · ${ctx.me.tenant_name}`;
+  const holder = h('main', { class: 'main room-screen', id: 'main' });
+  app.append(holder);
+  try { await (await import('./views/patrol-duty.js')).renderRoom(holder); } catch (err) { holder.append(errorBox(err)); }
 }
 
 // Moving to another page closes any dialog left open on the last one (for example a customer opened from an Inbox link).

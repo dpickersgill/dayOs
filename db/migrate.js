@@ -376,6 +376,8 @@ const securitySteps = [
   // 2026.10.17: how each session was opened (password, two-step, passkey, emailed code or PIN), on which device or
   // terminal, and when the person last proved it was them for a sensitive action.
   ['user_sessions.method', (c) => columnExists(c, 'user_sessions', 'method'), "ALTER TABLE user_sessions ADD COLUMN method VARCHAR(12) NOT NULL DEFAULT 'password', ADD COLUMN device_hash CHAR(64) NULL, ADD COLUMN terminal_id BIGINT UNSIGNED NULL, ADD COLUMN stepped_up_at DATETIME NULL"],
+  // 2026.10.28: a session turned into a display screen (the patrol-room screen) is locked to what that screen shows.
+  ['user_sessions.display', (c) => columnExists(c, 'user_sessions', 'display'), 'ALTER TABLE user_sessions ADD COLUMN display VARCHAR(20) NULL'],
   ['users.pin_hash', (c) => columnExists(c, 'users', 'pin_hash'), 'ALTER TABLE users ADD COLUMN pin_hash VARCHAR(100) NULL, ADD COLUMN pin_failures SMALLINT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN pin_locked_until DATETIME NULL'],
   ['users.access_ends_on', (c) => columnExists(c, 'users', 'access_ends_on'), 'ALTER TABLE users ADD COLUMN access_ends_on DATE NULL'],
   // 2026.10.18: the ski area's free read-only login for a patrol on Verdynt/OS Patrol.

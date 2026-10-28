@@ -41,13 +41,18 @@ const TIER_SQL = `(u.totp_enabled = 1 OR EXISTS (SELECT 1 FROM user_passkeys k W
 // The ski area's read-only login reaches its own sign-in settings and the patrol summary, and nothing else.
 const AREA_PATHS = /^\/api\/v1\/(auth\/|area(\/|$)|whats-new)/;
 
+// The patrol-room screen (a leader's session turned into the room's display) reaches only these: who is on duty, signing
+// people in and out, and leaving the screen with a second check or signing out (which turns this device's alerts off).
+// Never a patient record.
+const ROOM_PATHS = /^\/api\/v1\/(patrol\/(duty|duty\/sign-in|duty\/sign-out|room|room\/end|alerts\/unsubscribe)|auth\/(me|logout|step-up|step-up\/options))$/;
+
 // While two-step is still to be set up, or a temporary password replaced, only these are open.
 const SETUP_PATHS = /\/auth\/(me|logout|change-password|mfa\/(setup|enable|status)|passkeys(\/options)?)$/;
 
 /**
  * Verifies the bearer token, then re-checks the user in the database on every request, so that
  * deactivating a login, changing a role, or changing a password takes effect immediately instead of
- * after the token expires. Sets req.auth = { tenantId, userId, role, staffId, onPatrol, sid, method, terminalId, steppedUp, strong }.
+ * after the token expires. Sets req.auth = { tenantId, userId, role, staffId, onPatrol, sid, method, terminalId, steppedUp, strong, display }.
  *
  * tenantId comes ONLY from the signed token, never from the request body, query or URL,
  * so one mountain can never read or write another mountain's rows.
@@ -85,10 +90,18 @@ async function authenticate(req, _res, next) {
   // The server's own record of the session: signed out, idle too long, or ended from elsewhere.
   if (!payload.sid || !Number(row.session_open)) return next(unauthorized('Session ended. Sign in again.'));
   if (Number(row.access_over)) return next(unauthorized('Your access has ended for the season. Ask a manager if you are coming back.'));
-  sessions.touch(payload.sid);
+  const display = row.session_display || null;
+  // A background poll (x-poll: 1) is not someone using the app, so it does not keep the session open. The patrol-room
+  // screen is the exception: it stays up all day, and can do nothing but the room's own work (below).
+  if (req.headers['x-poll'] !== '1' || display) sessions.touch(payload.sid);
   if (row.status !== 'active') return next(forbidden('This mountain is paused. Contact Verdynt/OS.'));
   if (row.sandbox_over) return next(forbidden('This demo has ended. Start a new one, or ask Verdynt/OS for a walkthrough.'));
   const path = req.originalUrl.split('?')[0];
+  if (display === 'patrol_room' && !ROOM_PATHS.test(path)) {
+    const err = forbidden('This is the patrol-room screen. Leave it with your password, passkey or code first.');
+    err.details = { code: 'room_screen' };
+    return next(err);
+  }
   // Two-step sign-in, tier by tier (mfaRule): someone who must have it and has not set it up can only reach the setup screens.
   if (mfaRequired(row) && !Number(row.strong) && !SETUP_PATHS.test(path)) {
     const err = forbidden('Set up two-step sign-in to continue');
@@ -109,7 +122,7 @@ async function authenticate(req, _res, next) {
   req.auth = {
     tenantId: payload.tid, userId, role: row.role, staffId: row.staff_id, onPatrol: Boolean(Number(row.on_patrol)), sid: payload.sid,
     method: row.session_method, terminalId: row.session_terminal ? Number(row.session_terminal) : null, deviceHash: row.session_device || null,
-    steppedUp: Boolean(Number(row.stepped_up)), strong: Boolean(Number(row.strong)), mfaRule: mfaRule(row),
+    steppedUp: Boolean(Number(row.stepped_up)), strong: Boolean(Number(row.strong)), mfaRule: mfaRule(row), display,
   };
   if (Number(row.sandbox)) demoUsage.touch(payload.tid, req.originalUrl, req.method); // for the platform's Demos dashboard
   return next();

@@ -2,8 +2,14 @@
 
 export const config = { base: '' };
 // stepUp(details): asks the person to confirm it is them (passkey, app code or password) and resolves when they have,
-// or rejects if they cancel. Set by main.js.
-export const hooks = { onSignedOut() {}, stepUp: null };
+// or rejects if they cancel. signOut(): signs out on purpose. Set by main.js.
+export const hooks = { onSignedOut() {}, stepUp: null, signOut: null };
+
+// Whether the person has touched the page since the last request went out. A background poll is marked x-poll: 1 when
+// they have not, so the server does not count it as use and an unattended tab still ends after an hour; when they have
+// (typing a long note, say), the poll carries that to the server instead.
+let touched = false;
+export function noteActivity() { touched = true; }
 
 // A random id this browser keeps, so the server can tell a sign-in from a new device (it stores only a keyed hash).
 const DEVICE_KEY = 'so.device';
@@ -37,8 +43,9 @@ export class ApiError extends Error {
   }
 }
 
-export async function api(method, path, body, retried = false) {
+export async function api(method, path, body, retried = false, { poll = false } = {}) {
   const headers = {};
+  if (poll && !touched) headers['x-poll'] = '1'; else touched = false;
   if (body !== undefined) headers['content-type'] = 'application/json';
   if (session.token) headers.authorization = `Bearer ${session.token}`;
   const dev = deviceId();
@@ -56,7 +63,7 @@ export async function api(method, path, body, retried = false) {
     // A sensitive action: confirm it is you, then the same request goes again.
     if (!retried && hooks.stepUp && isJson && isStepUp(res.status, data)) {
       await hooks.stepUp(data.details);
-      return api(method, path, body, true);
+      return api(method, path, body, true, { poll });
     }
     throw new ApiError(res.status, (isJson && data.error) || 'Request failed', isJson ? data.details : undefined);
   }
@@ -64,6 +71,8 @@ export async function api(method, path, body, retried = false) {
 }
 
 export const get = (p) => api('GET', p);
+/** A GET made by a timer, not by the person (an unread count, a board that refreshes itself). */
+export const poll = (p) => api('GET', p, undefined, false, { poll: true });
 export const post = (p, b = {}) => api('POST', p, b);
 export const patch = (p, b) => api('PATCH', p, b);
 export const put = (p, b) => api('PUT', p, b);

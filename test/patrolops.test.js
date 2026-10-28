@@ -18,8 +18,8 @@ const PUSH = require('../src/lib/push');
 let server; let base;
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const PW = 'correct-horse-battery';
-async function api(method, p, { token, body } = {}) {
-  const res = await fetch(`${base}/api/v1${p}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined });
+async function api(method, p, { token, body, headers } = {}) {
+  const res = await fetch(`${base}/api/v1${p}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });
   const text = await res.text();
   let json; try { json = JSON.parse(text); } catch (_) { json = text; }
   return { status: res.status, body: json };
@@ -34,6 +34,7 @@ test.before(async () => {
   await new Promise((r) => { server = createApp().listen(0, r); });
   base = `http://127.0.0.1:${server.address().port}`;
   const slug = `po-${suffix}`;
+  M.slug = slug;
   const res = await fetch(`${base}/api/v1/tenants`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-bootstrap-key': 'test-bootstrap-key' }, body: JSON.stringify({ slug, name: 'Ops Peak', owner: { email: `owner@${slug}.test`, password: PW, first_name: 'Olive', last_name: 'Owner' } }) });
   assert.equal(res.status, 201);
   const login = async (email) => (await api('POST', '/auth/login', { body: { tenant: slug, email, password: PW } })).body.token;
@@ -77,6 +78,39 @@ test('volunteers sign in on duty, and dispatch can send them', async () => {
   const c = ok(await api('GET', `/patrol/dispatch/${call.id}`, { token: M.leeT }));
   assert.ok(c.responders[0].acked_at);
   ok(await api('POST', `/patrol/dispatch/${call.id}/events`, { token: M.leeT, body: { kind: 'closed' } }));
+});
+
+test('the patrol-room screen is locked to duty sign-in, stays open on its own polls, and leaving needs the leader again', async () => {
+  const lee = ok(await api('POST', '/auth/login', { body: { tenant: M.slug, email: `lee@${M.slug}.test`, password: PW } })).token;
+  is(await api('POST', '/patrol/room', { token: M.valT }), 403, 'only those who post the team run the room screen');
+  ok(await api('POST', '/patrol/room', { token: lee }));
+  assert.equal(ok(await api('GET', '/auth/me', { token: lee })).display, 'patrol_room');
+  // The room's own work goes on: who is on duty, tap a name to sign in or out.
+  const d = ok(await api('GET', '/patrol/duty', { token: lee, headers: { 'x-poll': '1' } }));
+  assert.ok(d.roster.length >= 3);
+  is(await api('POST', '/patrol/duty/sign-in', { token: lee, body: { staff_id: M.pia, source: 'room' } }), 409, 'reaches sign-in (Pia is already on)');
+  is(await api('POST', '/patrol/duty/sign-out', { token: lee, body: {} }), 409, 'reaches sign-out (Lee is not on)');
+  // Nothing else opens from the room screen, patient records least of all.
+  for (const p of ['/patrol/incidents', '/patrol/me', '/patrol/dispatch', '/people', '/inbox/unread']) {
+    const r = await api('GET', p, { token: lee });
+    is(r, 403, p);
+    assert.equal(r.body.details.code, 'room_screen');
+  }
+  // Its polls keep the display signed in all day (other screens' polls do not count; see security.test.js).
+  const sid = require('../src/lib/sessions').hash(JSON.parse(Buffer.from(lee.split('.')[1], 'base64url')).sid);
+  await pool.query('UPDATE user_sessions SET last_seen = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 59 MINUTE) WHERE id_hash = ?', [sid]);
+  ok(await api('GET', '/patrol/duty', { token: lee, headers: { 'x-poll': '1' } }));
+  await new Promise((r) => setTimeout(r, 150));
+  assert.ok(Number((await pool.query('SELECT TIMESTAMPDIFF(MINUTE, last_seen, UTC_TIMESTAMP()) AS m FROM user_sessions WHERE id_hash = ?', [sid]))[0][0].m) <= 1);
+  // Leaving needs a fresh second check, even minutes after a password sign-in.
+  const leave = await api('POST', '/patrol/room/end', { token: lee });
+  is(leave, 403, 'leaving asks who it is');
+  assert.equal(leave.body.details.code, 'step_up_required');
+  is(await api('POST', '/auth/step-up', { token: lee, body: { password: 'not-the-password-1' } }), 403);
+  ok(await api('POST', '/auth/step-up', { token: lee, body: { password: PW } }));
+  ok(await api('POST', '/patrol/room/end', { token: lee }));
+  assert.equal(ok(await api('GET', '/auth/me', { token: lee })).display, null);
+  ok(await api('GET', '/patrol/incidents', { token: lee }));
 });
 
 test('opening checks set runs open, on hold or closed; opening without a check needs a lead and a reason', async () => {

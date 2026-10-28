@@ -23,7 +23,7 @@ import { drawSchedule } from './patrol-schedule.js';
 import { drawCover } from './patrol-cover.js';
 import { drawCrews } from './patrol-crews.js';
 import { drawKits, renderKitPage, renderKitLabels } from './patrol-kits.js';
-import { drawDuty, renderRoom } from './patrol-duty.js';
+import { drawDuty, startRoom } from './patrol-duty.js';
 import { drawSweep, drawOpening } from './patrol-sweep.js';
 import { drawMeds } from './patrol-meds.js';
 import { drawLifts } from './patrol-lifts.js';
@@ -70,7 +70,12 @@ export async function render(root, params = []) {
     await renderCase(root, Number(params[1]), { me, version: Number(params[2]) }); // a frozen copy, read only
     return;
   }
-  if (params[0] === 'room') { await renderRoom(root); return; } // the patrol-room sign-in screen
+  if (params[0] === 'room') { // the patrol-room screen runs on its own (main.js); this starts it on this device
+    root.append(h('section', { class: 'panel stack' }, h('h1', null, 'Patrol-room screen'),
+      h('p', null, 'This device becomes the patrol-room screen: everyone taps their name to sign in or out, and nothing else opens on it. To use it for anything else, press Leave this screen and confirm it is you, or sign out.'),
+      h('div', { class: 'row' }, button('Start the screen', () => startRoom(), { kind: 'primary' }), h('a', { class: 'btn', href: '#/patrol/duty' }, 'Back to On duty'))));
+    return;
+  }
   if (params[0] === 'release' && ONE.test(params[1] || '')) { await renderRelease(root, Number(params[1])); return; }
   if (params[0] === 'claim' && ONE.test(params[1] || '')) { await renderClaimFile(root, Number(params[1])); return; } // the claim file of one case
   if (params[0] === 'risk-report' && (!params[1] || /^\d{4}-\d{2}$/.test(params[1]))) { await renderRiskReport(root, params[1] || ''); return; } // the season risk report, printable

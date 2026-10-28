@@ -395,6 +395,21 @@ test('changing a password from Account keeps this device signed in', skip(), asy
   assert.equal((await api('GET', '/auth/me', { token: T.pw })).status, 401);
 });
 
+test('a screen\'s own refresh is marked as a poll, unless the person touched the page since the last request', skip(), async () => {
+  mods.api.session.token = T.owner;
+  const marks = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (u, opts = {}) => { marks.push((opts.headers || {})['x-poll'] || ''); return realFetch(u, opts); };
+  try {
+    await mods.api.get('/inbox/unread'); // the person did something: counts as use
+    await mods.api.poll('/inbox/unread'); // nobody touched the page since: marked
+    mods.api.noteActivity(); // a key press while a long note is typed
+    await mods.api.poll('/inbox/unread'); // carries that activity to the server
+    await mods.api.poll('/inbox/unread');
+  } finally { globalThis.fetch = realFetch; }
+  assert.deepEqual(marks, ['', '1', '', '1']);
+});
+
 test('sign in through the real form, move around, and sign out', skip(), async () => {
   mods.api.session.clear();
   document.body.replaceChildren(Object.assign(document.createElement('div'), { id: 'app' }));
