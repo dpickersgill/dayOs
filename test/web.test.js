@@ -72,12 +72,14 @@ async function loadModules() {
 
 const me = (role, extra = {}) => ({ id: 1, email: `${role}@x.test`, role, tenant: slug, tenant_name: 'Web Test Mountain', timezone: 'America/New_York', staff_id: null, ...extra });
 
+const VIEW_AS = new WeakMap(); // root -> who drew it, so a helper can draw another part as the same person
 async function renderView(name, role, token, extra, params) {
   mods.ui.ctx.me = me(role, extra);
   mods.ui.ctx.tz = 'America/New_York';
   mods.api.session.token = token;
   document.body.replaceChildren(document.createElement('div'));
   const root = document.body.firstChild;
+  VIEW_AS.set(root, [role, token, extra]);
   const mod = await mods.view(name);
   const holder = document.createElement('div');
   await mod.render(holder, params);
@@ -509,10 +511,8 @@ test('patrol: the Access levels tab edits the matrix, and a Host sees only the t
   T.host = ok(await api('POST', '/auth/login', { body: { tenant: slug, email: `host@${slug}.test`, password: PW } })).token;
 
   const tabNames = patNames;
-  const adm = await renderView('patrol', 'owner', T.owner);
-  assert.ok((await tabNames(adm)).includes('Access levels'), 'an Admin sees the Access levels tab');
-  (await patTab(adm, 'Access levels')).click();
-  await settle();
+  assert.equal((await tabNames(await renderView('patrol', 'owner', T.owner))).includes('Access levels'), false, 'Access levels is no longer a Patrol tab');
+  const adm = await renderSetup('patrol', 'access', 'owner', T.owner);
   const cb = adm.querySelector('input[data-level=patrol][data-key=approve_case]');
   assert.ok(cb && !cb.checked, 'Patrol cannot approve by default');
   assert.equal(adm.querySelector('input[data-level=admin][data-key=approve_case]').disabled, true, 'the Admin column is locked');
@@ -676,9 +676,7 @@ test('patrol: the incident form follows the NSAAR sections, saves a section, and
   assert.equal(codeField.hidden, false);
 
   // the patrol director opens Report requirements and makes date of birth required to submit
-  const req = await renderView('patrol', 'owner', T.owner);
-  (await patTab(req, 'Report requirements')).click();
-  await settle();
+  const req = await renderSetup('patrol', 'requirements', 'owner', T.owner);
   assert.match(req.textContent, /Start from a setup/);
   assert.match(req.textContent, /Always checked, whatever is set here/);
   clean(req, 'report requirements');
@@ -691,11 +689,8 @@ test('patrol: the incident form follows the NSAAR sections, saves a section, and
   [...bar.querySelectorAll('button')].find((b) => b.textContent === 'Save').click();
   await settle();
   assert.equal(ok(await api('GET', '/patrol/requirements', { token: o })).rules.injury['patient.date_of_birth'].level, 'submit');
-  // the legal name keeps its own small dialog, from the cases Options
-  const cases = await renderView('patrol', 'owner', T.owner);
-  (await patTab(cases, 'All cases')).click();
-  await settle();
-  [...cases.querySelectorAll('button')].find((b) => b.textContent === 'Legal name on reports').click();
+  // the legal name keeps its own small dialog, next to the requirements in Settings, Patrol
+  [...req.querySelectorAll('button')].find((b) => b.textContent === 'Legal name on reports').click();
   await settle();
   const dlg = document.querySelector('.overlay');
   assert.match(dlg.textContent, /Full legal name of the resort/);
@@ -712,8 +707,8 @@ test('patrol: the incident form follows the NSAAR sections, saves a section, and
 test('patrol: the Cases search narrows by state chip, shows removable filters, and clears', skip(), async () => {
   const o = T.owner;
   const a = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${today}T09:10`, location: 'Zebra chute', category: 'injury', severity: 'minor', summary: 'Zebra search case' } }));
-  const root = await renderView('patrol', 'owner', T.owner);
-  assert.ok(root.querySelectorAll('.psections button').length >= 3, 'the menu has a few sections, not a long row of tabs');
+  const root = await renderView('patrol', 'owner', T.owner, {}, ['cases']);
+  assert.equal(root.querySelector('.psections'), null, 'no section buttons on the page: the sections are in the menu');
   (await patTab(root, 'All cases')).click();
   await settle();
   const rows = () => root.querySelectorAll('a.case-row').length;
@@ -776,17 +771,44 @@ const submitForm = async (el) => { el.form.dispatchEvent(new window.Event('submi
 const clickBtn = (scope, text) => { const b = [...scope.querySelectorAll('button')].find((x) => x.textContent.trim() === text); assert.ok(b, `no "${text}" button`); b.click(); return b; };
 const tileFor = (root, text) => { const t = [...root.querySelectorAll('.tile')].find((x) => x.textContent.includes(text)); assert.ok(t, `no tile "${text}"`); return t; };
 
-/** Finds a Patrol page tab by name, switching to the section that holds it. */
+/** Draws one Patrol section (#/patrol/<section>) into root, as whoever was signed in last. */
+const PAT_SECTIONS = ['now', 'cases', 'people', 'gear'];
+async function patSection(root, section) {
+  const as = VIEW_AS.get(root);
+  if (as) { mods.ui.ctx.me = me(as[0], as[2]); mods.api.session.token = as[1]; }
+  const mod = await mods.view('patrol');
+  const holder = document.createElement('div');
+  await mod.render(holder, [section]);
+  root.replaceChildren(holder);
+  await settle();
+  return root;
+}
+/** Finds a Patrol page tab by name, opening the section that holds it. */
 async function patTab(root, name) {
   const find = () => [...root.querySelectorAll('[role=tab]')].find((b) => b.textContent === name);
   let t = find();
-  for (const sec of root.querySelectorAll('.psections button')) {
+  for (const sec of PAT_SECTIONS) {
     if (t) break;
-    sec.click(); t = find();
+    await patSection(root, sec); t = find();
   }
   return t;
 }
-const patNames = async (root) => { const out = new Set(); for (const sec of root.querySelectorAll('.psections button')) { sec.click(); for (const t of root.querySelectorAll('[role=tab]')) out.add(t.textContent); } return [...out]; };
+const patNames = async (root) => { const out = new Set(); for (const sec of PAT_SECTIONS) { await patSection(root, sec); for (const t of root.querySelectorAll('[role=tab]')) out.add(t.textContent); } return [...out]; };
+/** Draws an app's setup section the way Settings does: on a fresh panel, as this role. */
+async function renderSetup(view, key, role, token, extra) {
+  mods.ui.ctx.me = me(role, extra);
+  mods.api.session.token = token;
+  document.body.replaceChildren(document.createElement('div'));
+  const root = document.body.firstChild;
+  const page = (await mods.view(view)).settingsPages;
+  assert.ok(page && page[key], `${view}.js exports settingsPages.${key}`);
+  assert.ok(typeof page[key].title === 'string' && page[key].title.length > 3, `${view} ${key}: a plain title`);
+  const panel = document.createElement('section');
+  root.append(panel);
+  await page[key].render(panel);
+  await settle();
+  return panel;
+}
 const openTab = async (root, text) => { [...root.querySelectorAll('[role=tab]')].find((t) => t.textContent === text).click(); await settle(); };
 const topDialog = () => [...document.querySelectorAll('.overlay')].at(-1);
 
@@ -1643,7 +1665,9 @@ test('gate cards and devices: load a card, tap it at the gate, block it; a manag
   // devices: managers only
   root = await renderView('gate', 'counter', T.counter);
   assert.ok(![...root.querySelectorAll('[role=tab]')].some((b) => b.textContent === 'Devices'), 'counter sees no Devices tab');
-  root = await renderView('gate', 'owner', o, {}, ['devices']);
+  root = await renderView('gate', 'owner', o);
+  assert.ok(![...root.querySelectorAll('[role=tab]')].some((b) => b.textContent === 'Devices'), 'devices are set up in Settings, not on the Gate');
+  root = await renderSetup('gate', 'devices', 'owner', o);
   clean(root, 'devices tab, empty');
   clickBtn(root, 'Add a device'); await settle();
   const add = document.querySelector('.overlay');
@@ -1787,12 +1811,12 @@ const addD = (d, n) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.ge
 test('school: every tab renders for managers, counter staff and instructors, and the dialogs open', skip(), async () => {
   await closeOverlays();
   const owner = await renderView('school', 'owner', T.owner);
-  assert.deepEqual([...owner.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests', 'Levels and skills', 'Instructor hours']);
+  assert.deepEqual([...owner.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests', 'Instructor hours']);
   await exercise(owner, 'school (owner)');
   const counter = await renderView('school', 'counter', T.counter);
   assert.deepEqual([...counter.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests']);
   const ins = await renderView('school', 'instructor', T.instructor, { staff_id: D.s2 });
-  assert.deepEqual([...ins.querySelectorAll('[role=tab]')].map((t) => t.textContent), ['Today', 'Lessons', 'Levels and skills']);
+  assert.deepEqual([...ins.querySelectorAll('[role=tab]')].map((t) => t.textContent), ['Today', 'Lessons']);
   await exercise(ins, 'school (instructor)');
   await closeOverlays();
 });
@@ -2111,7 +2135,7 @@ test('patrol home: my open cases, a search by patient name, the New case button 
   ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: o, body: { form: { head_strike: 'no' }, first_name: 'Quincy', last_name: 'Quixote' } }));
   const root = await renderView('patrol', 'owner', T.owner);
   clean(root, 'patrol home');
-  assert.equal(root.querySelector('[role=tab][aria-selected=true]').textContent, 'Home', 'Home is the first tab');
+  assert.equal(root.querySelector('[role=tab][aria-selected=true]').textContent, 'Board', 'Board is the first tab');
   assert.ok(root.querySelector('[data-group="Waiting for review"]'), 'directors see the approval queue');
   assert.ok(root.querySelector('button.fab[data-act=new-case]'), 'a New case button stays in reach');
   const q = root.querySelector('input[type=search]');
@@ -2659,8 +2683,7 @@ test('assets and fleet: every tab draws, an asset is added, inspected (a failure
 
 test('kiosk admin: add a tablet, set a PIN, print a badge, snapshots and fixing a punch', skip(), async () => {
   const o = T.owner;
-  const root = await renderView('workforce', 'owner', o, {});
-  await openTab(root, 'Setup');
+  const root = await renderSetup('workforce', 'setup', 'owner', o);
   clean(root, 'kiosk tab');
   assert.ok(root.querySelector('[data-kiosk=tablets]') && root.querySelector('[data-kiosk=people]') && root.querySelector('[data-kiosk=settings]'));
 
@@ -2742,4 +2765,157 @@ test('programs: a session shows a card per weekday with its dates; the day page 
   dlg.querySelector('form').dispatchEvent(new window.Event('submit', { cancelable: true })); await settle(); await settle();
   assert.ok(root.querySelector('.pdate.is-off'), 'the date is struck through');
   assert.equal(root.querySelectorAll('.pdate.is-reserve').length, 0, 'the makeup date is now a lesson');
+});
+
+// ---------------------------------------------------------------- menus redesign: setup moved to Settings, Patrol sections, Today's job buttons
+const tabTexts = (root) => [...root.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)$/, ''));
+
+test('setup tabs are gone from their apps and each draws on its own in Settings', skip(), async () => {
+  await closeOverlays();
+  // [app, tab that moved, export key, what the setup panel shows]
+  const moved = [
+    ['gate', 'Devices', 'devices', /Add a device/],
+    ['shop', 'Prices and limits', 'limits', /Apply to these days|Change many days at once/],
+    ['school', 'Levels and skills', 'levels', /The ladder students move up/],
+    ['availability', 'Public page', 'public', /Show the public availability page/],
+    ['rentals', 'Settings', 'settings', /Binding chart/],
+    ['waivers', 'Wording', 'wording', /Waiver wording|Earlier versions/],
+    ['workforce', 'Setup', 'setup', /Positions/],
+  ];
+  for (const [app, tab, key, shows] of moved) {
+    const page = await renderView(app, 'owner', T.owner);
+    assert.equal(tabTexts(page).includes(tab), false, `${app}: the ${tab} tab is gone`);
+    const panel = await renderSetup(app, key, 'owner', T.owner);
+    clean(panel, `${app} ${key} in Settings`);
+    assert.match(panel.textContent, shows, `${app} ${key} draws in a fresh panel`);
+  }
+  // Programs: the two setup buttons left the list page for Settings, Programs
+  const progs = await renderView('programs', 'owner', T.owner);
+  assert.equal([...progs.querySelectorAll('button')].some((b) => /^Program (types|settings)$/.test(b.textContent)), false);
+  const reg = await renderSetup('programs', 'registration', 'owner', T.owner);
+  clean(reg, 'program registration');
+  reg.querySelector('[name=reminders]').value = 'every';
+  reg.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await settle();
+  assert.equal(ok(await api('GET', '/programs/settings', { token: T.owner })).reminders, 'every', 'saving works as the dialog did');
+  ok(await api('PUT', '/programs/settings', { token: T.owner, body: { reminders: 'first' } }));
+  clean(await renderSetup('programs', 'types', 'owner', T.owner), 'program types');
+  // Partner passes: the rules and the Sell tab switch
+  const pp = await renderSetup('partners', 'partners', 'owner', T.owner);
+  clean(pp, 'partner pass rules');
+  assert.ok(pp.querySelector('[data-setting=partner_tab]'), 'the Show the Partner passes tab in Sell switch');
+  assert.match(pp.textContent, /Show the Partner passes tab in Sell/);
+  // Patrol: its three admin pages, marked for patrol admins
+  const patrolPages = (await mods.view('patrol')).settingsPages;
+  assert.deepEqual(Object.keys(patrolPages), ['settings', 'requirements', 'access']);
+  for (const k of Object.keys(patrolPages)) {
+    assert.equal(patrolPages[k].who, 'patrol-admin');
+    clean(await renderSetup('patrol', k, 'owner', T.owner), `patrol ${k} in Settings`);
+  }
+  const names = await patNames(await renderView('patrol', 'owner', T.owner));
+  for (const gone of ['Patrol settings', 'Report requirements', 'Access levels', 'Home']) assert.equal(names.includes(gone), false, `Patrol has no ${gone} tab`);
+  assert.ok(names.includes('Board') && names.includes('Access log'));
+});
+
+test('sell: Partner passes is the last tab unless the mountain turns it off', skip(), async () => {
+  await closeOverlays();
+  let root = await renderView('sell', 'counter', T.counter);
+  assert.equal(tabTexts(root).at(-1), 'Partner passes', 'the last tab');
+  await openTab(root, 'Partner passes');
+  clean(root, 'partner passes in Sell');
+  assert.match(root.textContent, /No partner passes yet/);
+  assert.equal([...root.querySelectorAll('button')].some((b) => /Set up the Indy Pass|Rules/.test(b.textContent)), false, 'no setup at the window');
+  // switched off from Settings, Sell and gate
+  const panel = await renderSetup('partners', 'partners', 'owner', T.owner);
+  const sw = panel.querySelector('[data-setting=partner_tab]');
+  sw.checked = false; sw.dispatchEvent(new window.Event('change', { bubbles: true })); await settle();
+  assert.equal(ok(await api('GET', '/partner-passes/tab', { token: T.counter })).show, false);
+  root = await renderView('sell', 'counter', T.counter);
+  assert.equal(tabTexts(root).includes('Partner passes'), false, 'turned off: no tab');
+  ok(await api('PUT', '/partner-passes/tab', { token: T.owner, body: { show: true } }));
+  // with Sell off for the mountain there is no tab to show
+  mods.ui.ctx.me = me('counter', { modules: ['gate'] });
+  const sellMod = await mods.view('sell');
+  assert.equal(await sellMod.showPartnerTab(), false);
+  mods.ui.ctx.me = me('counter');
+  assert.equal(await sellMod.showPartnerTab(), true);
+  // #/sell?tab=partners (where #/partners now goes) opens it
+  history.replaceState(null, '', '#/sell?tab=partners');
+  try {
+    root = await renderView('sell', 'counter', T.counter);
+    assert.equal(root.querySelector('[role=tab][aria-selected=true]').textContent, 'Partner passes');
+  } finally { history.replaceState(null, '', '#/'); }
+});
+
+test('patrol: sections come from the address, old addresses still land, and only admins get Patrol settings', skip(), async () => {
+  await closeOverlays();
+  const want = { now: ['Board', 'On duty', 'Dispatch', 'Map', 'Opening checks', 'Closing sweep', 'Daily log'], cases: ['All cases', 'Follow-up', 'Records requests', 'Statistics', 'Injury network', 'Risk report', 'Access log'],
+    people: ['Schedule', 'Crews', 'Shift cover', 'Today\'s posts', 'Roster', 'Training', 'Skills'], gear: ['Kits', 'Equipment', 'Medications', 'Lift evacuation'] };
+  const titles = { now: 'Now', cases: 'Cases', people: 'People', gear: 'Gear' };
+  for (const [section, tabsWanted] of Object.entries(want)) {
+    const root = await renderView('patrol', 'owner', T.owner, {}, [section]);
+    clean(root, `patrol ${section}`);
+    assert.equal(root.querySelector('.page-head h1').textContent, titles[section]);
+    for (const t of tabsWanted) assert.ok(tabTexts(root).includes(t), `${section} has ${t}`);
+    assert.equal(root.querySelector('[role=tab][aria-selected=true]').textContent, tabsWanted[0]);
+    assert.equal(root.querySelector('.psections'), null, 'no pill buttons');
+  }
+  // the default is Now
+  assert.equal((await renderView('patrol', 'owner', T.owner)).querySelector('.page-head h1').textContent, 'Now');
+  // old tab addresses open their tab in the right section
+  for (const [old, section, tab] of [['kits', 'Gear', 'Kits'], ['duty', 'Now', 'On duty'], ['home', 'Now', 'Board'], ['team', 'People', 'Roster'], ['access', 'Cases', 'Access log'], ['stats', 'Cases', 'Statistics']]) {
+    const root = await renderView('patrol', 'owner', T.owner, {}, [old]);
+    assert.equal(root.querySelector('.page-head h1').textContent, section, `#/patrol/${old}`);
+    assert.equal(root.querySelector('[role=tab][aria-selected=true]').textContent, tab, `#/patrol/${old}`);
+  }
+  // ?tab= picks the tab within a section
+  history.replaceState(null, '', '#/patrol/gear?tab=meds');
+  try { assert.equal((await renderView('patrol', 'owner', T.owner, {}, ['gear'])).querySelector('[role=tab][aria-selected=true]').textContent, 'Medications'); } finally { history.replaceState(null, '', '#/'); }
+  // where every old address goes now
+  const { legacyRoute, SECTION_OF } = await mods.view('patrol');
+  assert.equal(legacyRoute('kits'), '#/patrol/gear?tab=kits');
+  assert.equal(legacyRoute('home'), '#/patrol/now?tab=board');
+  assert.equal(legacyRoute('access'), '#/patrol/cases?tab=access');
+  for (const k of ['settings', 'requirements', 'levels', 'admin']) assert.equal(legacyRoute(k), '#/settings/patrol');
+  assert.equal(legacyRoute('case'), null, 'pages of their own are not tabs');
+  // every #/patrol/<word> link in the app and in Help goes to a section, a tab, Settings or a page of its own
+  const own = ['case', 'version', 'room', 'release', 'claim', 'risk-report', 'kit', 'kit-labels', 'handoff', 'refusal', 'takehome', 'collision', 'new'];
+  const files = [];
+  const walk = (d) => { for (const f of fs.readdirSync(d, { withFileTypes: true })) { if (f.isDirectory()) walk(path.join(d, f.name)); else if (f.name.endsWith('.js')) files.push(path.join(d, f.name)); } };
+  walk(path.join(__dirname, '..', 'public', 'js')); walk(path.join(__dirname, '..', 'src'));
+  for (const f of files) {
+    for (const m of fs.readFileSync(f, 'utf8').matchAll(/#\/patrol\/([a-z-]+)/g)) {
+      const w = m[1];
+      assert.ok(PAT_SECTIONS.includes(w) || SECTION_OF[w] || own.includes(w) || legacyRoute(w), `${path.basename(f)}: #/patrol/${w} lands nowhere`);
+    }
+  }
+  // #/patrol/new (Today's New case button) opens the form on Now
+  await renderView('patrol', 'owner', T.owner, {}, ['new']);
+  assert.match(topDialog().textContent, /New case/);
+  await closeOverlays();
+  // Patrol settings: owners and patrol Admins, not a plain patroller
+  const owner = await renderView('patrol', 'owner', T.owner);
+  assert.equal(owner.querySelector('a[data-act=patrol-settings]').getAttribute('href'), '#/settings/patrol');
+  assert.equal(owner.querySelector('a[data-act=patrol-settings]').textContent, 'Patrol settings');
+  const plain = await renderView('patrol', 'patrol', T.patrol);
+  assert.equal(plain.querySelector('a[data-act=patrol-settings]'), null);
+});
+
+test('Today: big job buttons for each role, only for apps the person may open', skip(), async () => {
+  await closeOverlays();
+  const jobs = async (role, extra = {}) => { const r = await renderView('dashboard', role, T[role], extra); clean(r, `${role} today`); return [...r.querySelectorAll('.today-jobs a')].map((a) => [a.dataset.job, a.getAttribute('href'), a.querySelector('strong').textContent]); };
+  assert.deepEqual((await jobs('staff', { staff_id: D.s1 })).map((j) => j[2]), ['Opening check', 'Scan tickets', 'Report a problem', 'Lost and found']);
+  assert.deepEqual((await jobs('instructor', { staff_id: D.s2 })).map((j) => j[2]), ['Today\'s lessons', 'My availability']);
+  assert.deepEqual((await jobs('counter')).map((j) => j[0]), ['sell', 'will-call']);
+  const pat = await jobs('patrol');
+  assert.deepEqual(pat.map((j) => j[2]), ['On duty', 'New case']);
+  assert.deepEqual(pat.map((j) => j[1]), ['#/patrol/now?tab=duty', '#/patrol/new']);
+  assert.deepEqual(await jobs('owner'), [], 'managers and owners get the full board, no job buttons');
+  // an app the mountain does not have is left out
+  assert.deepEqual((await jobs('counter', { modules: ['sell', 'gate'] })).map((j) => j[0]), ['sell']);
+  assert.deepEqual((await jobs('staff', { staff_id: D.s1, modules: ['gate'] })).map((j) => j[0]), ['scan', 'lost-found']);
+  // Report a problem opens the work order form straight away
+  const st = await renderView('conditions', 'staff', T.staff, { staff_id: D.s1 }, ['wo', 'new']);
+  assert.equal(st.querySelector('[role=tab][aria-selected=true]').textContent, 'Maintenance');
+  assert.match(topDialog().textContent, /New work order/);
+  await closeOverlays();
 });
