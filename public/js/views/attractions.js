@@ -47,7 +47,7 @@ async function drawSetup(panel) {
     listBox));
 
   async function load() {
-    const { data } = await get(`/attractions${showArchived ? '?all=1' : ''}`);
+    const { data } = await get('/attractions?all=1'); // with each one's opening checks, for Edit
     const list = data.filter((a) => (showArchived ? true : a.active));
     clear(listBox);
     if (!list.length) { listBox.append(empty('No attractions yet. Add your zipline, coaster, tubing hill or rink.')); return; }

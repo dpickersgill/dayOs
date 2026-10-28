@@ -3279,3 +3279,183 @@ test('Today: big job buttons for each role, only for apps the person may open', 
   assert.match(topDialog().textContent, /New work order/);
   await closeOverlays();
 });
+
+// ---------------------------------------------------------------- Attractions
+const submitTop = async () => { topDialog().querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await settle(); };
+const pick = (el, value) => { el.value = String(value); el.dispatchEvent(new window.Event('change', { bubbles: true })); };
+const btn = (root, text) => [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === text);
+
+test('attractions: Settings adds one with limits and its own opening checks, edits, archives and restores it', skip(), async () => {
+  await closeOverlays();
+  const pagesOf = (root) => [...root.querySelectorAll('.set-link')].map((a) => a.dataset.page);
+  assert.ok(pagesOf(await renderView('settings', 'owner', T.owner)).includes('attractions'), 'an Apps page when Lifts and trails is on');
+  assert.ok(!pagesOf(await renderView('settings', 'owner', T.owner, { modules: ['sell', 'catalog', 'patrol'] })).includes('attractions'), 'not without Lifts and trails');
+  const page = await renderView('settings', 'owner', T.owner, {}, ['attractions']);
+  assert.equal(page.querySelector('h1').textContent, 'Attractions');
+  assert.equal(page.querySelector('.set-open').getAttribute('href'), '#/conditions');
+  clean(page, 'settings attractions');
+
+  let panel = await renderSetup('attractions', 'attractions', 'owner', T.owner);
+  assert.match(panel.textContent, /No attractions yet/);
+  btn(panel, 'Add attraction').click(); await settle();
+  let dlg = topDialog();
+  clean(dlg, 'add attraction');
+  const items = () => [...topDialog().querySelectorAll('.attr-checks-edit li input')].map((i) => i.value);
+  assert.equal(items()[0], 'Weather, wind and lightning within the operating limits', 'zipline defaults first');
+  pick(dlg.querySelector('[name=type]'), 'coaster');
+  assert.ok(items().includes('Track, rails and supports walked or visually checked'), 'the checks follow the type');
+  dlg.querySelector('[name=name]').value = 'Alpine Coaster';
+  dlg.querySelector('[name=min_height_in]').value = '38';
+  dlg.querySelector('[name=max_weight_lb]').value = '300';
+  dlg.querySelector('[name=min_age]').value = '3';
+  // Reword the first check, remove the second, add one of our own.
+  const first = dlg.querySelector('.attr-checks-edit li input');
+  first.value = 'Track walked from top to bottom'; first.dispatchEvent(new window.Event('input', { bubbles: true }));
+  dlg.querySelectorAll('.attr-checks-edit li')[1].querySelector('button[aria-label^="Remove"]').click();
+  btn(dlg, 'Add a check').click();
+  const last = [...dlg.querySelectorAll('.attr-checks-edit li input')].at(-1);
+  last.value = 'Sled count matches the log'; last.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await submitTop();
+  assert.equal(document.querySelector('.overlay'), null, 'saved');
+  const made = ok(await api('GET', '/attractions?all=1', { token: T.owner })).data.find((a) => a.name === 'Alpine Coaster');
+  assert.deepEqual([made.type, made.min_height_in, made.max_weight_lb, made.min_age, made.waiver_required], ['coaster', 38, 300, 3, true]);
+  assert.equal(made.checklist_custom, true);
+  assert.equal(made.checklist[0].label, 'Track walked from top to bottom');
+  assert.equal(made.checklist.at(-1).label, 'Sled count matches the log');
+  assert.equal(made.checklist.length, A_COASTER_CHECKS - 1 + 1);
+  D.coaster = made.id;
+  assert.match(panel.textContent, /Alpine Coaster.*Mountain coaster.*38 in and taller, up to 300 lb, 3 and older, waiver/);
+
+  // Edit: limits change; the checks go back to the defaults.
+  btn(panel, 'Edit').click(); await settle();
+  dlg = topDialog();
+  dlg.querySelector('[name=min_age]').value = '5';
+  btn(dlg, 'Use the defaults for this type').click();
+  await submitTop();
+  const edited = ok(await api('GET', `/attractions/${D.coaster}`, { token: T.owner }));
+  assert.equal(edited.min_age, 5); assert.equal(edited.checklist_custom, false);
+
+  // A second one, then archive and restore it.
+  ok(await api('POST', '/attractions', { token: T.owner, body: { name: 'Village Rink', type: 'ice_rink', waiver_required: false } }));
+  panel = await renderSetup('attractions', 'attractions', 'owner', T.owner);
+  [...panel.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === 'Archive Village Rink').click(); await settle();
+  btn(topDialog(), 'Archive').click(); await settle();
+  assert.ok(!panel.textContent.includes('Village Rink'), 'archived ones leave the list');
+  const show = panel.querySelector('.attr-setup input[type=checkbox]');
+  show.checked = true; show.dispatchEvent(new window.Event('change', { bubbles: true })); await settle();
+  assert.match(panel.textContent, /Village Rink \(archived\)/);
+  [...panel.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === 'Restore Village Rink').click(); await settle();
+  assert.ok(ok(await api('GET', '/attractions', { token: T.counter })).data.some((a) => a.name === 'Village Rink'));
+  clean(panel, 'attractions after restore');
+});
+const A_COASTER_CHECKS = 12;
+
+test('attractions: Mountain status opens, holds and inspects them; a failed inspection blocks Open; a counter only looks', skip(), async () => {
+  await closeOverlays();
+  const row = (root, name) => [...root.querySelectorAll('.attr-section tr')].find((r) => r.textContent.includes(name));
+  let root = await renderView('conditions', 'staff', T.staff, { staff_id: D.s1 });
+  clean(root, 'status with attractions');
+  assert.match(root.querySelector('.attr-section h2').textContent, /Attractions \(0 of 2 open\)/);
+  // Hold asks why.
+  btn(row(root, 'Village Rink'), 'On hold').click(); await settle();
+  await submitTop();
+  assert.match(topDialog().textContent, /Say why it is on hold/, 'a hold needs a note');
+  topDialog().querySelector('[name=note]').value = 'Resurfacing late';
+  pick(topDialog().querySelector('[name=reason]'), 'mechanical');
+  await submitTop();
+  let rink = ok(await api('GET', '/attractions/today', { token: T.staff })).data.find((a) => a.name === 'Village Rink');
+  assert.deepEqual([rink.status, rink.status_note], ['hold', 'Resurfacing late']);
+  root = await renderView('conditions', 'staff', T.staff, { staff_id: D.s1 });
+  assert.match(row(root, 'Village Rink').textContent, /Resurfacing late/);
+
+  // The opening inspection: pass all but one, fail that one with a note, finish.
+  btn(row(root, 'Alpine Coaster'), 'Start check').click(); await settle();
+  let dlg = topDialog();
+  assert.match(dlg.textContent, /Opening inspection: Alpine Coaster/);
+  const itemsEls = () => [...topDialog().querySelectorAll('.attr-item')];
+  assert.equal(itemsEls().length, A_COASTER_CHECKS);
+  assert.ok(btn(dlg, 'Finish: passed').disabled, 'cannot pass before every item is checked');
+  for (const li of itemsEls().slice(1)) { btn(li, 'Pass').click(); await settle(); }
+  btn(itemsEls()[0], 'Fail').click(); await settle();
+  const note = itemsEls()[0].querySelector('input');
+  note.value = 'Wind gusts over the manufacturer limit'; note.dispatchEvent(new window.Event('change', { bubbles: true })); await settle();
+  assert.match(topDialog().textContent, new RegExp(`${A_COASTER_CHECKS} of ${A_COASTER_CHECKS} checked, 1 failed`));
+  btn(topDialog(), 'Finish: failed').click(); await settle();
+  assert.equal(document.querySelector('.overlay'), null);
+  const coaster = ok(await api('GET', '/attractions/today', { token: T.staff })).data.find((a) => a.name === 'Alpine Coaster');
+  assert.equal(coaster.check.status, 'fail'); assert.equal(coaster.blocked, true);
+  assert.equal(coaster.check.items[0].note, 'Wind gusts over the manufacturer limit');
+  root = await renderView('conditions', 'staff', T.staff, { staff_id: D.s1 });
+  const r = row(root, 'Alpine Coaster');
+  assert.match(r.textContent, /Failed: cannot open/);
+  assert.ok(btn(r, 'Open').disabled, 'Open is off after a failed inspection');
+  assert.ok(btn(r, 'Check again'), 'a new inspection can start after the fix');
+  // Downtime today is listed, and a stop can be logged by hand.
+  assert.match(root.querySelector('.attr-downtime').textContent, /Downtime today/);
+  btn(root.querySelector('.attr-downtime'), 'Log downtime').click(); await settle();
+  clean(topDialog(), 'log downtime');
+  await closeOverlays();
+
+  // A counter sees the section but cannot change anything.
+  const ro = await renderView('conditions', 'counter', T.counter);
+  clean(ro, 'counter status');
+  assert.ok([...ro.querySelectorAll('.attr-section .seg button')].every((b) => b.disabled));
+  assert.equal(btn(ro.querySelector('.attr-section'), 'Start check'), undefined);
+  assert.equal(ro.querySelector('.attr-downtime'), null);
+
+  // Today's morning board names them, and the failed inspection is at the top.
+  const board = await renderView('dashboard', 'owner', T.owner);
+  const mb = board.querySelector('.mboard');
+  assert.match(mb.textContent, /Attractions/); assert.match(mb.textContent, /Alpine Coaster.*Inspection failed.*Cannot open/);
+  assert.match(board.textContent, /Alpine Coaster failed its opening inspection and cannot open/);
+});
+
+test('attractions: a patrol case picks its attraction, statistics count it, and staff suggestions are added in one step', skip(), async () => {
+  await closeOverlays();
+  const o = T.owner;
+  const c = ok(await api('POST', '/patrol/incidents', { token: o, body: { occurred_at: `${today}T14:10`, location: 'Base area', category: 'injury', severity: 'minor', summary: 'Hand bruise' } }));
+  ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: o, body: { form: { head_strike: 'no' }, first_name: 'Cora', last_name: 'Coaster' } }));
+  let root = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id), 'report']);
+  const box = root.querySelector('[data-area=attraction]');
+  assert.ok(box, 'the location section has an attraction picker');
+  const sel = box.querySelector('select');
+  pick(sel, D.coaster);
+  assert.match(box.textContent, /Write "Alpine Coaster" as the exact location/);
+  assert.ok(box.querySelector('input[type=checkbox]').checked);
+  btn(box, 'Save attraction').click(); await settle();
+  const saved = ok(await api('GET', `/patrol/incidents/${c.id}`, { token: o }));
+  assert.deepEqual([saved.attraction_id, saved.attraction, saved.location, saved.form.incident_location], [D.coaster, 'Alpine Coaster', 'Alpine Coaster', 'attraction']);
+  root = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id), 'report']);
+  assert.equal(root.querySelector('[data-area=attraction] select').value, String(D.coaster));
+  // The activity list has the attraction activities.
+  const opts = [...root.querySelectorAll('select')].flatMap((s) => [...s.options].map((x) => x.textContent));
+  assert.ok(opts.includes('Mountain coaster') && opts.includes('Ice skating'), 'the Activity choices');
+
+  // New case: an Attraction field; its name is the place when nothing else is typed.
+  await renderView('patrol', 'owner', T.owner, {}, ['new']);
+  const nc = topDialog();
+  pick(nc.querySelector('[name=attraction_id]'), D.coaster);
+  await submitTop();
+  const list = ok(await api('GET', '/patrol/incidents', { token: o })).data;
+  assert.ok(list.some((x) => x.location === 'Alpine Coaster' && x.id !== c.id), 'started at the coaster');
+
+  // Statistics: Cases at attractions.
+  const stats = await renderView('patrol', 'owner', T.owner, {}, ['cases']);
+  await openTab(stats, 'Statistics');
+  assert.match(stats.textContent, /Cases at attractions/);
+  assert.match(stats.textContent, /Alpine Coaster/);
+
+  // Staff and schedule: suggestions for the types in use, added in one step; the Attractions department is offered.
+  const panel = await renderSetup('workforce', 'attractions', 'owner', T.owner);
+  clean(panel, 'attraction staff');
+  assert.match(panel.textContent, /Mountain coaster: Alpine Coaster/);
+  assert.match(panel.textContent, /Coaster operator requires Mountain coaster operator/);
+  [...panel.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === 'Add suggested positions for Mountain coaster').click(); await settle();
+  const ov = ok(await api('GET', '/workforce/positions-overview', { token: o })).data;
+  assert.equal(ov.find((p) => p.name === 'Coaster operator').department, 'attractions');
+  assert.match(panel.textContent, /All added/);
+  const setup = await renderSetup('workforce', 'setup', 'owner', T.owner);
+  btn(setup, 'Add position').click(); await settle();
+  assert.ok([...topDialog().querySelectorAll('[name=department] option')].some((x) => x.value === 'attractions' && x.textContent === 'Attractions'));
+  await closeOverlays();
+});
