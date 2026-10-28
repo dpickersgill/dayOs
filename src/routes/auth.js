@@ -21,6 +21,7 @@ const { AppError, unauthorized, forbidden, notFound, bad, conflict } = require('
 const { audit } = require('../lib/audit');
 const totp = require('../lib/totp');
 const moduleGate = require('../lib/modules');
+const menus = require('../lib/menus');
 
 const router = express.Router();
 
@@ -415,7 +416,7 @@ router.get('/auth/me', authenticate, async (req, res) => {
   const user = await one(
     pool,
     `SELECT u.id, u.email, u.username, u.must_change_password, u.role, u.staff_id, u.totp_enabled, u.access_ends_on, (u.pin_hash IS NOT NULL) AS pin_set,
-       t.slug AS tenant, t.name AS tenant_name, t.timezone, t.sandbox_expires_at, ${TIER_SQL}
+       t.slug AS tenant, t.name AS tenant_name, t.timezone, t.sandbox_expires_at, t.role_menus, ${TIER_SQL}
      FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE u.id = ? AND u.tenant_id = ?`,
     [req.auth.userId, req.auth.tenantId],
   );
@@ -438,7 +439,47 @@ router.get('/auth/me', authenticate, async (req, res) => {
     access_ends_on: user.access_ends_on ? String(user.access_ends_on).slice(0, 10) : null,
     staff_injuries: await require('../lib/injuryregister').canSee(pool, req.auth.tenantId, { id: req.auth.userId, role: user.role }),
     signed_in_with: req.auth.method, terminal, stepped_up: req.auth.steppedUp, device_key: deviceKey, display: req.auth.display || null,
+    // This role's own menu (its apps in order, and the screen it opens on); null for owners and managers, who see everything.
+    menu: menus.menuFor(user.role, user.role_menus),
   });
+});
+
+// ---------------------------------------------------------------- menus for each role (Settings, Team and logins)
+/** Each role's menu now, the standard one, and what each role could have. Managers may look; only the owner changes. */
+async function menusState(tenantId, role) {
+  const t = await one(pool, 'SELECT role_menus FROM tenants WHERE id = ?', [tenantId]);
+  const changed = menus.parse(t && t.role_menus);
+  return {
+    can_change: role === 'owner',
+    always: menus.ALWAYS,
+    apps: menus.APPS,
+    roles: Object.fromEntries(menus.ROLES.map((r) => [r, { ...(changed[r] || menus.standardFor(r)), standard: !changed[r], can_open: menus.ROLE_APPS[r] }])),
+    standard: Object.fromEntries(menus.ROLES.map((r) => [r, menus.standardFor(r)])),
+  };
+}
+router.get('/settings/menus', authenticate, requireRole(...MANAGERS), async (req, res) => {
+  res.json(await menusState(req.auth.tenantId, req.auth.role));
+});
+router.put('/settings/menus', authenticate, requireRole('owner'), validate(z.object({
+  role: z.enum(menus.ROLES),
+  // null puts back the standard menu for that role
+  menu: z.object({ apps: z.array(z.string().max(30)).min(1).max(menus.KEYS.length), start: z.string().max(30) }).nullable(),
+})), async (req, res) => {
+  const { role, menu } = req.body;
+  const out = await tx(async (conn) => {
+    const [[t]] = await conn.query('SELECT role_menus FROM tenants WHERE id = ? FOR UPDATE', [req.auth.tenantId]);
+    const all = menus.parse(t && t.role_menus);
+    const before = all[role] || null;
+    if (menu) {
+      const r = menus.check(role, menu);
+      if (r.problem) throw bad(r.problem);
+      all[role] = r.menu;
+    } else delete all[role];
+    await conn.query('UPDATE tenants SET role_menus = ? WHERE id = ?', [Object.keys(all).length ? JSON.stringify(all) : null, req.auth.tenantId]);
+    await audit(conn, req, 'update_role_menu', 'tenants', req.auth.tenantId, { role, before, after: all[role] || null });
+    return all[role] || null;
+  });
+  res.json({ role, menu: out || menus.standardFor(role), standard: !out });
 });
 
 /** Change your own password. Signs out every other session and returns a fresh token for this one. */

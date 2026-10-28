@@ -46,7 +46,7 @@ export function passkeysPanel(onChange) {
 }
 
 /** Your PIN for shared terminals (counter, instructor and lift staff only). */
-function pinPanel(sec) {
+export function pinPanel(sec) {
   const box = h('section', { class: 'panel stack', 'data-panel': 'pin' });
   const set = () => {
     const pw = input({ name: 'password', type: 'password', autocomplete: 'current-password', required: true });
@@ -70,7 +70,7 @@ function pinPanel(sec) {
 }
 
 /** Where you are signed in now, and the devices you have used. */
-function sessionsPanel(sec, redraw) {
+export function sessionsPanel(sec, redraw) {
   return h('section', { class: 'panel stack', 'data-panel': 'sessions' },
     h('h2', null, 'Where you are signed in'),
     h('p', null, 'Each sign-in ends after an hour unused, or 8 hours at most. If you see one that is not you, sign it out and change your password.'),
@@ -93,7 +93,7 @@ function sessionsPanel(sec, redraw) {
 }
 
 /** This mountain's shared terminals (managers): enroll this computer, see the others, remove one. */
-function terminalsPanel() {
+export function terminalsPanel() {
   const box = h('section', { class: 'panel stack', 'data-panel': 'terminals' });
   async function draw() {
     let data;

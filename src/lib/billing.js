@@ -242,7 +242,7 @@ async function remindAll(base = '') {
     const owners = (await rows(pool, "SELECT email FROM users WHERE tenant_id = ? AND role = 'owner' AND active = 1 AND email IS NOT NULL", [b.tenant_id])).map((u) => u.email);
     const to = [...new Set([...owners, b.billing_email].filter(Boolean))];
     if (!to.length) continue;
-    for (const addr of to) await mailer.send({ tenantId: b.tenant_id, to: addr, fromName: 'Verdynt/OS', subject, text: `${text}\n\n${base ? `${base}/#/billing` : ''}`, tag: 'billing' });
+    for (const addr of to) await mailer.send({ tenantId: b.tenant_id, to: addr, fromName: 'Verdynt/OS', subject, text: `${text}\n\n${base ? `${base}/#/settings/billing` : ''}`, tag: 'billing' });
     await pool.query('UPDATE tenant_billing SET reminded = ? WHERE tenant_id = ?', [step, b.tenant_id]);
     sent += 1;
   }

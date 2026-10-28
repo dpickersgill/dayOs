@@ -1,6 +1,8 @@
-// Billing: the mountain's Verdynt/OS subscription, and where guests' card payments go (the mountain's own Stripe account). Where it stands (trial, paid, grace, read only), the plan and add-ons
-// with monthly or yearly prices, paying by card, US bank account or invoice, Stripe's portal for the card and
-// canceling, past invoices and the history. Owners change and pay; managers can look.
+// Settings, Billing and plan: the mountain's Verdynt/OS subscription. Where it stands (trial, paid, grace, read only),
+// the plan and add-ons with monthly or yearly prices, paying by card, US bank account or invoice, Stripe's portal for the
+// card and canceling, past invoices and the history. Owners change and pay; managers can look.
+// Settings, Payments and card readers: where guests' card payments go (the mountain's own Stripe account), and the card
+// readers at the counter. #/billing sends people to Settings.
 import { get, post, put, del } from '../api.js';
 import { h, clear, ctx, money, state, button, table, toast, formDialog, field, input, errorBox, loading, label, fmtDate, fmtDateTime, confirmDialog } from '../ui.js';
 
@@ -11,9 +13,20 @@ const STATUS_WORDS = {
 };
 const dateText = (d) => (d ? fmtDate(`${String(d).slice(0, 10)}T12:00:00`) : '');
 
-export async function render(root) {
+/** #/billing now lives in Settings: send the person there, keeping what Stripe added to the address. */
+export async function render() {
+  const q = location.hash.split('?')[1];
+  location.replace(`#/settings/billing${q ? `?${q}` : ''}`);
+}
+
+/** Settings, Billing and plan (the Verdynt/OS subscription), and Payments and card readers (guests' card payments). */
+export async function renderSettingsPage(root, key) {
   const query = new URLSearchParams(location.hash.split('?')[1] || '');
-  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Billing')));
+  if (key === 'payments') { root.append(cardPaymentsPanel(query), readersPanel()); return; }
+  await renderBilling(root, query);
+}
+
+async function renderBilling(root, query) {
   const box = h('div', { class: 'stack billing' }, loading('Loading billing'));
   root.append(box);
   if (query.get('paid') === '1') toast('Thanks. Stripe is confirming the payment; this page updates in a moment');
@@ -39,8 +52,7 @@ export async function render(root) {
       standingPanel(s, b, word, kind),
       b.comped && !live ? h('section', { class: 'panel' }, h('p', null, 'This mountain is on Verdynt/OS at no charge. There is nothing to pay.'), d.plans.length && owner ? h('p', { class: 'muted small' }, 'You can still choose a plan below if you would like to start paying.') : null) : null,
       d.plans.length ? planPanel(choice, { owner, live, b }) : h('section', { class: 'panel' }, h('p', { class: 'muted' }, 'Plans have not been set up yet. Contact Verdynt/OS.')),
-      cardPaymentsPanel(query),
-      readersPanel(),
+      h('p', { class: 'set-note' }, 'Guests\u2019 card payments go into your own Stripe account, set up under ', h('a', { href: '#/settings/payments' }, 'Payments and card readers'), '.'),
       invoicesPanel(),
       historyPanel(),
     ].filter(Boolean));
@@ -226,7 +238,7 @@ function readersPanel() {
     clear(sec).append(...[
       h('h2', null, 'Card readers'),
       h('p', null, 'A Stripe card reader on the counter takes tap, chip and swipe for sales at the ticket window, paid straight into your own Stripe account. Order one from your Stripe dashboard (Terminal, Shop); the Stripe Reader S700 is a good choice.'),
-      !r.enabled ? h('p', { class: 'muted small' }, 'Connect Stripe above first.') : null,
+      !r.enabled ? h('p', { class: 'muted small' }, 'Connect your Stripe account above first.') : null,
       r.readers.length ? table(['Reader', 'Type', ''], r.readers.map((x) => [h('span', null, x.label, x.simulated ? h('small', { class: 'muted' }, ' (test)') : null), x.device_type ? label(x.device_type.replace(/_/g, ' ')) : '',
         manager ? button('Remove', () => confirmDialog(`Remove ${x.label}?`, 'It stops taking payments here. You can pair it again later with a new code.', 'Remove', async () => { await del(`/terminal/readers/${x.id}`); toast('Removed'); draw(); }, { danger: true }), { small: true }) : ''])) : r.enabled ? h('p', { class: 'muted' }, 'No card readers paired yet.') : null,
       manager && r.enabled ? h('div', { class: 'row' }, button('Pair a card reader', () => pair(false), { kind: 'primary' }), r.test_mode ? button('Add a test reader', () => pair(true)) : null) : null,
@@ -255,5 +267,5 @@ export function billingBanner(s, { canFix }) {
     : s.state === 'grace' ? `${s.kind === 'payment_failed' ? 'The last Verdynt/OS payment did not go through.' : 'The Verdynt/OS trial or paid time has ended.'} Everything keeps working until ${dateText(s.until)}.`
       : `The Verdynt/OS trial ends ${s.days_left === 0 ? 'today' : s.days_left === 1 ? 'tomorrow' : `in ${s.days_left} days`}.`;
   return h('div', { class: `billing-banner is-${s.read_only ? 'read_only' : s.state === 'grace' ? 'grace' : 'trial'}`, role: s.read_only ? 'alert' : 'status' },
-    h('span', null, text), canFix ? h('a', { href: '#/billing' }, s.read_only || s.state === 'grace' ? 'Pay now' : 'Choose a plan') : h('span', { class: 'small' }, ' Ask the owner to renew.'));
+    h('span', null, text), canFix ? h('a', { href: '#/settings/billing' }, s.read_only || s.state === 'grace' ? 'Pay now' : 'Choose a plan') : h('span', { class: 'small' }, ' Ask the owner to renew.'));
 }

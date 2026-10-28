@@ -445,7 +445,9 @@ test('sign in through the real form, move around, and sign out', skip(), async (
     await settle();
     await sleep(60);
     await settle();
-    assert.equal(document.querySelector('.nav a[aria-current=page]').textContent, a.textContent);
+    // #/billing now opens Settings, Billing and plan
+    const settingsLink = document.querySelector('.nav a[href="#/settings"]');
+    assert.equal(document.querySelector('.nav a[aria-current=page]').textContent, a.getAttribute('href') === '#/billing' ? settingsLink.textContent : a.textContent);
     clean(document.querySelector('main'), `nav ${a.textContent}`);
   }
 
@@ -2174,18 +2176,148 @@ test('public booking page: lists open lessons, takes a request, and lets the gue
   }
 });
 
-test('settings: the mountain form carries the online booking switch and its link', skip(), async () => {
-  const root = await renderView('settings', 'owner', T.owner);
-  const section = root.querySelector('[data-section=online-booking]');
+const saveBar = (root) => root.querySelector('.set-savebar');
+const change = (el, v) => { if (el.type === 'checkbox') el.checked = v; else el.value = v; el.dispatchEvent(new window.Event(el.type === 'checkbox' ? 'change' : 'input', { bubbles: true })); };
+
+test('settings: Ski school carries the online booking switch, its link, and saves from the save bar', skip(), async () => {
+  const root = await renderView('settings', 'owner', T.owner, {}, ['school']);
+  clean(root, 'settings / school');
+  assert.equal(root.querySelector('h1').textContent, 'Ski school');
+  assert.equal(root.querySelector('.set-link[aria-current=page]').textContent, 'Ski school');
+  const section = root.querySelector('[data-card=online-booking]');
   assert.ok(section);
   assert.match(section.textContent, new RegExp(`/book/${slug}`));
-  section.querySelector('[name=online_booking]').checked = true;
-  section.querySelector('[name=booking_message]').value = 'Lessons at the base lodge';
-  await submitForm(root.querySelector('form[data-form=mountain] [name=name]'));
+  assert.ok(!/RUNBOOK/.test(root.textContent), 'no talk of Stripe keys and the runbook');
+  assert.ok([...section.querySelectorAll('a')].some((a) => a.getAttribute('href') === '#/settings/payments'), 'points to Payments and card readers');
+  assert.equal(saveBar(root).hidden, true, 'no bar until something changes');
+  change(section.querySelector('[name=online_booking]'), true);
+  change(section.querySelector('[name=booking_message]'), 'Lessons at the base lodge');
+  assert.equal(saveBar(root).hidden, false);
+  assert.match(saveBar(root).textContent, /You changed 2 settings on this page/);
+  clickBtn(saveBar(root), 'Save changes'); await settle();
+  assert.equal(saveBar(root).hidden, true);
   const p = ok(await api('GET', '/tenant/profile', { token: T.owner }));
   assert.equal(p.online_booking, true);
   assert.equal(p.booking_message, 'Lessons at the base lodge');
-  ok(await api('PUT', '/tenant/profile', { token: T.owner, body: { online_booking: false } }));
+  // undo puts the page back without saving
+  change(section.querySelector('[name=booking_message]'), 'Something else');
+  clickBtn(saveBar(root), 'Undo changes'); await settle();
+  assert.equal(section.querySelector('[name=booking_message]').value, 'Lessons at the base lodge');
+  assert.equal(saveBar(root).hidden, true);
+  ok(await api('PUT', '/tenant/profile', { token: T.owner, body: { online_booking: false, booking_message: null } }));
+});
+
+test('settings: every Account field has a page, and each page saves only its own fields', skip(), async () => {
+  const where = {
+    mountain: ['name', 'phone', 'address', 'receipt_footer', 'timezone', 'weekly_report'],
+    sell: ['quick_sale', 'comp', 'passback'],
+    shop: ['online_shop', 'shop_message', 'shop_recovery', 'shop_change', 'shop_change_hours', 'shop_change_fee', 'online_daily_limit'],
+    school: ['online_booking', 'online_payment', 'booking_notice_hours', 'booking_message', 'refund_full_hours', 'refund_half_hours', 'refund_half_percent', 'cancel_hours', 'cancel_note'],
+    assistant: ['staff_on', 'contact_email'],
+  };
+  for (const [page, names] of Object.entries(where)) {
+    const root = await renderView('settings', 'owner', T.owner, {}, [page]);
+    clean(root, `settings / ${page}`);
+    for (const n of names) assert.ok(root.querySelector(`[name=${n}]`), `${page} has ${n}`);
+  }
+  const shop = await renderView('settings', 'owner', T.owner, {}, ['shop']);
+  assert.ok(shop.querySelector('[data-section=shop-look]'), 'the look of the shop page is on Online shop');
+  const team = await renderView('settings', 'owner', T.owner, {}, ['team']);
+  assert.ok(team.querySelector('[data-card=logins]'), 'Logins is the first tab');
+  assert.match(team.textContent, /Add login/);
+  const shared = await renderView('settings', 'owner', T.owner, {}, ['shared']);
+  assert.ok(shared.querySelector('[data-panel=terminals]'));
+  const pay = await renderView('settings', 'owner', T.owner, {}, ['payments']);
+  assert.match(pay.textContent, /Guest card payments/);
+  assert.match(pay.textContent, /Card readers/);
+  const bill = await renderView('settings', 'owner', T.owner, {}, ['billing']);
+  assert.match(bill.textContent, /Subscription/);
+  assert.ok(!/Card readers/.test(bill.textContent), 'card readers live on Payments and card readers only');
+
+  // Sell and gate sends only what changed
+  const sell = await renderView('settings', 'owner', T.owner, {}, ['sell']);
+  const before = ok(await api('GET', '/tenant/profile', { token: T.owner }));
+  change(sell.querySelector('[name=comp]'), '12.50');
+  clickBtn(saveBar(sell), 'Save changes'); await settle();
+  const after = ok(await api('GET', '/tenant/profile', { token: T.owner }));
+  assert.equal(after.comp_counter_limit_cents, 1250);
+  assert.equal(after.scan_passback_seconds, before.scan_passback_seconds);
+  assert.equal(after.name, before.name);
+  ok(await api('PUT', '/tenant/profile', { token: T.owner, body: { comp_counter_limit_cents: before.comp_counter_limit_cents } }));
+});
+
+test('settings: who sees which pages', skip(), async () => {
+  const pagesOf = (root) => [...root.querySelectorAll('.set-link')].map((a) => a.dataset.page);
+  const owner = await renderView('settings', 'owner', T.owner);
+  const all = pagesOf(owner);
+  for (const k of ['profile', 'mountain', 'team', 'shared', 'billing', 'payments', 'assistant', 'sell', 'shop', 'school']) assert.ok(all.includes(k), `owner sees ${k}`);
+  assert.deepEqual([...owner.querySelectorAll('.set-group-name')].map((x) => x.textContent), ['You', 'The mountain', 'Apps']);
+  assert.equal(owner.querySelector('h1').textContent, 'Your profile and sign-in', '#/settings opens your own page on a computer');
+  // an Apps page shows only when it holds something: Account's own settings, or the app's settingsPages
+  for (const k of all.filter((x) => ['programs', 'rentals', 'waivers', 'patrol', 'workforce', 'messages'].includes(x))) {
+    const file = { workforce: 'workforce' }[k] || k;
+    const mod = await mods.view(file);
+    assert.ok(mod.settingsPages && Object.keys(mod.settingsPages).length, `${k} is listed only when ${file}.js exports settingsPages`);
+  }
+  // an app the mountain has turned off has no page
+  const off = await renderView('settings', 'owner', T.owner, { modules: ['sell', 'catalog', 'gate'] });
+  assert.ok(pagesOf(off).includes('sell'));
+  assert.ok(!pagesOf(off).includes('school') && !pagesOf(off).includes('shop'), 'Ski school and Online shop are off');
+  // counter: only their own page, and a page they cannot use opens the list instead
+  const counter = await renderView('settings', 'counter', T.counter, {}, ['mountain']);
+  assert.deepEqual(pagesOf(counter), ['profile']);
+  assert.equal(counter.querySelector('h1').textContent, 'Your profile and sign-in');
+  clean(counter, 'counter settings');
+  // patrol, not an admin: only their own page
+  const patrol = await renderView('settings', 'patrol', T.patrol);
+  assert.deepEqual(pagesOf(patrol), ['profile']);
+  // Back to the app goes to the screen the person's menu opens on
+  const withMenu = await renderView('settings', 'counter', T.counter, { menu: { apps: ['sell', 'inbox', 'myshifts'], start: 'sell' } });
+  assert.equal(withMenu.querySelector('.set-backapp').getAttribute('href'), '#/sell');
+  assert.ok(document.documentElement.classList.contains('in-settings'), 'the app menu steps aside while in Settings');
+});
+
+test('settings: menus for each role, changed by the owner and read only for managers', skip(), async () => {
+  const owner = await renderView('settings', 'owner', T.owner, {}, ['team']);
+  [...owner.querySelectorAll('[role=tab]')].find((t) => t.textContent === 'Menus for each role').click(); await settle();
+  clean(owner, 'menus');
+  const inList = () => [...owner.querySelectorAll('[data-list=in] li')].map((li) => li.dataset.app);
+  assert.deepEqual(inList(), ['sell', 'gate', 'rentals', 'people', 'waivers', 'shop', 'inbox', 'myshifts']);
+  assert.equal(owner.querySelector('[data-app=inbox] [data-act=out]'), null, 'Inbox is always in');
+  owner.querySelector('[data-app=gate] [data-act=out]').click(); await settle();
+  owner.querySelector('[data-app=rentals] [data-act=up]').click(); await settle();
+  owner.querySelector('[data-list=out] [data-app=lostfound] [data-act=in]').click(); await settle();
+  assert.deepEqual(inList(), ['rentals', 'sell', 'people', 'waivers', 'shop', 'lostfound', 'inbox', 'myshifts']);
+  const start = owner.querySelector('select[name=start]');
+  start.value = 'rentals'; start.dispatchEvent(new window.Event('change', { bubbles: true }));
+  assert.match(saveBar(owner).textContent, /You changed the ticket window menu/);
+  clickBtn(saveBar(owner), 'Save changes'); await settle();
+  assert.deepEqual(ok(await api('GET', '/auth/me', { token: T.counter })).menu, { apps: ['rentals', 'sell', 'people', 'waivers', 'shop', 'lostfound', 'inbox', 'myshifts'], start: 'rentals' });
+  clickBtn(owner, 'Put back the standard menu'); await settle();
+  clickBtn(saveBar(owner), 'Save changes'); await settle();
+  assert.equal(ok(await api('GET', '/auth/me', { token: T.counter })).menu.start, 'sell');
+  // the other roles
+  owner.querySelector('[data-role=patrol]').click(); await settle();
+  assert.deepEqual(inList(), ['patrol', 'conditions', 'inbox', 'myshifts']);
+  owner.querySelector('[data-role=manager]').click(); await settle();
+  assert.match(owner.textContent, /see everything/);
+
+  ok(await api('POST', '/users', { token: T.owner, body: { email: `mgr-menus@${slug}.test`, password: PW, role: 'manager' } }));
+  const mtoken = ok(await api('POST', '/auth/login', { body: { tenant: slug, email: `mgr-menus@${slug}.test`, password: PW } })).token;
+  const mgr = await renderView('settings', 'manager', mtoken, {}, ['team']);
+  [...mgr.querySelectorAll('[role=tab]')].find((t) => t.textContent === 'Menus for each role').click(); await settle();
+  assert.match(mgr.textContent, /Only the owner can change the menus/);
+  assert.ok([...mgr.querySelectorAll('[data-list] button')].every((b) => b.disabled), 'nothing to press');
+});
+
+test('settings: Billing is a page in Settings, and #/billing goes there', skip(), async () => {
+  dom.reconfigure({ url: `${base}/#/billing?paid=1` });
+  const b = await mods.view('billing');
+  await b.render(document.createElement('div'));
+  assert.equal(location.hash, '#/settings/billing?paid=1');
+  dom.reconfigure({ url: `${base}/` });
+  const banner = b.billingBanner({ state: 'grace', kind: 'payment_failed', until: '2026-12-01', days_left: 3 }, { canFix: true });
+  assert.equal(banner.querySelector('a').getAttribute('href'), '#/settings/billing');
 });
 
 // ---------------------------------------------------------------- patrol: bedside card, quick vitals, hand-off sheet
