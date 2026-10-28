@@ -1,6 +1,137 @@
 {
   "releases": [
     {
+      "version": "2026.11.1",
+      "date": "2026-11-15",
+      "title": "Patrol checklists you choose, and attractions: ziplines, coasters, ice skating, tubing and more",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-checklists",
+          "text": "Patrol has 22 new checklists: cardiac arrest, chest pain, breathing trouble or allergic reaction, seizure, diabetic emergency, cold injury, fracture or dislocation, tree well, avalanche, lost person, terrain park, uphill traffic, an intoxicated guest, a death on the mountain, lift evacuation, and lists for ziplines, coasters, ice skating, tubing, scenic rides, the bike park, aerial parks and climbing walls."
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-checklist-setup",
+          "text": "Patrol admins choose which checklists their patrol sees, and write their own, under Settings, Patrol, Checklists. Preview any list before switching it on. A list of your own can suggest itself for cases at a kind of attraction."
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-checklists",
+          "text": "Lists that fit a case show up by themselves, including the right list when the case happened at an attraction. Add a checklist offers every other list with one tap, and each row is a large target that works with gloves on."
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-checklists",
+          "text": "A checklist tick always reads the way it was ticked, even if the list is renamed or switched off later. Ticks show in frozen copies and the claim file. With no signal, a tick waits on the phone and is sent with the time it was ticked."
+        },
+        {
+          "kind": "new",
+          "app": "conditions",
+          "who": null,
+          "help": "attr-setup",
+          "text": "Attractions: add your zipline, mountain coaster, tubing hill, ice rink, scenic ride, bike park, disc golf, aerial park, climbing wall or anything else under Settings, Attractions, with height, weight and age limits and whether a waiver is needed."
+        },
+        {
+          "kind": "new",
+          "app": "conditions",
+          "who": [
+            "staff",
+            "patrol"
+          ],
+          "help": "attr-status",
+          "text": "Each attraction has Open, On hold and Closed on Mountain status, like a lift. On hold asks why, and downtime is logged with a reason."
+        },
+        {
+          "kind": "new",
+          "app": "conditions",
+          "who": [
+            "staff",
+            "patrol"
+          ],
+          "help": "attr-inspect",
+          "text": "Daily opening inspections for attractions, ticked on a phone. A failed inspection closes the attraction and keeps it from opening until a new one passes. The checks start from defaults for each type; change them to match your manufacturer's manual and your state inspector."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "help": "attr-status",
+          "text": "Today's morning board and the wall screen show your attractions, and a failed inspection shows at the top."
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "attr-patrol",
+          "text": "A patrol case can name the attraction it happened at. The Activity list now includes zipline, mountain coaster, ice skating, scenic lift ride, mountain biking, disc golf, aerial park and climbing. Statistics and the season risk report count cases at each attraction."
+        },
+        {
+          "kind": "new",
+          "app": "workforce",
+          "who": null,
+          "help": "attr-staff",
+          "text": "Staff and schedule has an Attractions department, with suggested positions and certifications for each attraction, such as zip guide and coaster operator, that you add in one step."
+        },
+        {
+          "kind": "new",
+          "app": "catalog",
+          "who": null,
+          "help": "catalog-activities",
+          "text": "Sell activities such as zipline tours, coaster rides, tubing sessions and skating, by time slot with places per slot or as a day pass. Set them up in Products and prices."
+        },
+        {
+          "kind": "new",
+          "app": "sell",
+          "who": [
+            "counter"
+          ],
+          "help": "sell-activities",
+          "text": "Sell has an Activities tab. Pick the attraction, day and time to see places left, then add guests. At checkout, tick that each rider meets the height, weight and age limits, and sign the waiver at the counter when the attraction needs one."
+        },
+        {
+          "kind": "new",
+          "app": "catalog",
+          "who": null,
+          "help": "shop-activities",
+          "text": "Guests can buy activities online: they pick a day, then a time, see the limits before paying, and get a link to sign the waiver afterward. Two people can never buy the last place at once, and a refund frees the place."
+        },
+        {
+          "kind": "new",
+          "app": "gate",
+          "who": [
+            "staff"
+          ],
+          "help": "gate-activities",
+          "text": "A gate can stand at an attraction. Activity tickets are let in only there, on their day, from 15 minutes before their time, and once, and the screen says why a ticket is refused. A lift ticket or pass can include an attraction."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "The weekly report and Money show activity sales by attraction, and a sales tax can apply to activities only."
+        }
+      ]
+    },
+    {
       "version": "2026.10.49",
       "date": "2026-11-08",
       "title": "New menus and Settings, patrol crews and kits, conditions on every report, staff injuries, lost and found",

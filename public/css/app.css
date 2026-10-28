@@ -2959,6 +2959,8 @@ tr.attr-blocked td { background: var(--closed-tint); }
   .attr-item-act .btn { flex: 1 1 0; }
   .attr-checks-edit li { flex-wrap: wrap; }
   .attr-checks-edit li input { flex-basis: 100%; }
+}
+
 /* ---- Checklists ---- */
 /* The case panel: each item is one full-width tap target (bedside, gloves, a phone in the cold). */
 .checklist .cl-items { margin: 4px 0 0; }
@@ -2998,6 +3000,8 @@ tr.attr-blocked td { background: var(--closed-tint); }
   .cl-row-actions { width: 100%; justify-content: flex-end; }
   .cl-edit-item { flex-wrap: wrap; }
   .cl-edit-item input { flex-basis: 100%; }
+}
+
 /* ---- Activities ---- */
 /* Sell, Activities tab: an attraction's times as big buttons with places left, and guests by type. */
 .act-about p { margin: 4px 0; }

@@ -37,7 +37,7 @@ export async function drawRequirements(box) {
 
   function draw() {
     const presetName = (key) => (d.presets.find((p) => p.key === key) || {}).label;
-    clear(page).append(
+    clear(page).append(...[
       h('header', { class: 'stack tight' },
         h('p', { class: 'page-note' }, 'What each kind of report must hold before it is submitted or approved. Patrollers see what is required as they write, and a phone with no signal knows the rules too. A report is always checked against the rules in force when it was submitted.'),
         h('p', { class: 'muted small', 'data-status': '' }, d.version.id
@@ -51,7 +51,7 @@ export async function drawRequirements(box) {
       alwaysPanel(),
       historyPanel(),
       can ? saveBar() : null,
-    );
+    ].filter(Boolean)); // append() writes a null as the word "null"
   }
 
   function presetsPanel() {
