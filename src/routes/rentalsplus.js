@@ -6,7 +6,7 @@ const { ON_FILE } = require('../lib/waivers');
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
-const { z, validate, paramId, dateStr, dateTimeStr, normDateTime, todayIn, addDays, seasonFor, nowIn } = require('../lib/util');
+const { z, validate, paramId, dateStr, dateTimeStr, normDateTime, todayIn, addDays, seasonFor, nowIn, dayRange } = require('../lib/util');
 const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const R = require('../lib/rentals');
@@ -488,28 +488,30 @@ router.patch(
 // ---- Reports ----------------------------------------------------------------------------------
 router.get('/reports', requireRole(...manager), async (req, res) => {
   const { tenantId } = req.auth;
-  const today = todayIn(await tzOf(tenantId));
+  const tz = await tzOf(tenantId);
+  const today = todayIn(tz);
   const ok = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s));
   const from = ok(req.query.from) ? String(req.query.from) : addDays(today, -29);
   const to = ok(req.query.to) ? String(req.query.to) : today;
-  const range = [tenantId, from, `${to} 23:59:59`];
+  // The days are the mountain's; checked_out_at and created_at are stamped in UTC, so an evening's rentals belong to that day.
+  const range = [tenantId, dayRange(tz, from)[0], dayRange(tz, to)[1]];
   const fleet = await rows(pool, "SELECT category, tier, status, COUNT(*) AS n FROM rental_items WHERE tenant_id = ? GROUP BY category, tier, status ORDER BY category, tier", [tenantId]);
-  const contracts = await one(pool, 'SELECT COUNT(*) AS n FROM rental_contracts WHERE tenant_id = ? AND checked_out_at BETWEEN ? AND ?', range);
+  const contracts = await one(pool, 'SELECT COUNT(*) AS n FROM rental_contracts WHERE tenant_id = ? AND checked_out_at >= ? AND checked_out_at < ?', range);
   const pieces = await rows(
     pool,
     `SELECT i.category, COUNT(*) AS n FROM rental_contract_items li JOIN rental_contracts c ON c.id = li.contract_id AND c.tenant_id = li.tenant_id
-     JOIN rental_items i ON i.id = li.rental_item_id AND i.tenant_id = li.tenant_id WHERE li.tenant_id = ? AND c.checked_out_at BETWEEN ? AND ? GROUP BY i.category ORDER BY n DESC`,
+     JOIN rental_items i ON i.id = li.rental_item_id AND i.tenant_id = li.tenant_id WHERE li.tenant_id = ? AND c.checked_out_at >= ? AND c.checked_out_at < ? GROUP BY i.category ORDER BY n DESC`,
     range,
   );
-  const fees = await rows(pool, "SELECT kind, status, COUNT(*) AS n, COALESCE(SUM(cents), 0) AS cents FROM rental_charges WHERE tenant_id = ? AND created_at BETWEEN ? AND ? GROUP BY kind, status", range);
+  const fees = await rows(pool, "SELECT kind, status, COUNT(*) AS n, COALESCE(SUM(cents), 0) AS cents FROM rental_charges WHERE tenant_id = ? AND created_at >= ? AND created_at < ? GROUP BY kind, status", range);
   const reservations = await rows(pool, 'SELECT status, COUNT(*) AS n FROM rental_reservations WHERE tenant_id = ? AND pickup_on BETWEEN ? AND ? GROUP BY status', [tenantId, from, to]);
   const topItems = await rows(
     pool,
     `SELECT i.id, i.sku, i.category, i.brand, i.model, COUNT(*) AS n FROM rental_contract_items li JOIN rental_contracts c ON c.id = li.contract_id AND c.tenant_id = li.tenant_id
-     JOIN rental_items i ON i.id = li.rental_item_id AND i.tenant_id = li.tenant_id WHERE li.tenant_id = ? AND c.checked_out_at BETWEEN ? AND ? GROUP BY i.id ORDER BY n DESC LIMIT 10`,
+     JOIN rental_items i ON i.id = li.rental_item_id AND i.tenant_id = li.tenant_id WHERE li.tenant_id = ? AND c.checked_out_at >= ? AND c.checked_out_at < ? GROUP BY i.id ORDER BY n DESC LIMIT 10`,
     range,
   );
-  const damaged = await one(pool, 'SELECT COUNT(*) AS n FROM rental_contract_items WHERE tenant_id = ? AND damage_notes IS NOT NULL AND returned_at BETWEEN ? AND ?', range);
+  const damaged = await one(pool, 'SELECT COUNT(*) AS n FROM rental_contract_items WHERE tenant_id = ? AND damage_notes IS NOT NULL AND returned_at >= ? AND returned_at < ?', range);
   const overdue = await rows(
     pool,
     `SELECT c.id, c.due_at, p.first_name, p.last_name FROM rental_contracts c JOIN people p ON p.id = c.person_id AND p.tenant_id = c.tenant_id

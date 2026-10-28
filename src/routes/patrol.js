@@ -560,7 +560,7 @@ async function rentalDetail(db, t, itemId, contractId) {
 router.get('/rental-lookup', patrol, needs('create_case'), async (req, res) => {
   const t = req.auth.tenantId;
   const q = String(req.query.q || '').trim();
-  if (q.length < 2) throw bad('Type a contract number, an item number, or the renter\'s name');
+  if (q.length < 2 && !/^\d+$/.test(q)) throw bad('Type a contract number, an item number, or the renter\'s name'); // contract 7 is one digit
   const ids = new Set();
   if (/^\d+$/.test(q)) for (const r of await rows(pool, 'SELECT id FROM rental_contracts WHERE tenant_id = ? AND id = ?', [t, Number(q)])) ids.add(Number(r.id));
   for (const r of await rows(pool, 'SELECT ci.contract_id FROM rental_contract_items ci JOIN rental_items ri ON ri.tenant_id = ci.tenant_id AND ri.id = ci.rental_item_id WHERE ci.tenant_id = ? AND ri.sku = ? ORDER BY ci.id DESC LIMIT 3', [t, q])) ids.add(Number(r.contract_id));
