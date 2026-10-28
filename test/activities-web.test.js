@@ -188,14 +188,14 @@ test('sell: the Activities tab sits before Gift cards, shows times with places l
   // the zipline needs a waiver: the counter's own waiver box shows for the rider
   const waiver = [...dlg.querySelectorAll('label.check')].find((l) => /Waiver signed at the counter/.test(l.textContent));
   assert.ok(waiver && !waiver.parentNode.hidden, 'the waiver is asked for');
+  // refused before any money is taken: the payment step is not reached without the waiver
+  clickBtn(dlg, 'Next: payment'); await settle();
+  assert.match(dlg.textContent, /needs a signed waiver/, 'refused without the waiver');
+  assert.ok(!/Still to pay/.test(dlg.textContent), 'no payment is asked for yet');
+  waiver.querySelector('input').checked = true;
   clickBtn(dlg, 'Next: payment'); await settle();
   clickBtn(dlg, 'Cash'); await settle();
   clickBtn(dlg, 'Take cash'); await settle();
-  clickBtn(dlg, 'Complete sale'); await settle();
-  assert.match(dlg.textContent, /409|needs a signed waiver/, 'refused without the waiver');
-  clickBtn(dlg, 'Back'); await settle();
-  waiver.querySelector('input').checked = true;
-  clickBtn(dlg, 'Next: payment'); await settle();
   clickBtn(dlg, 'Complete sale'); await settle();
   assert.match(dlg.textContent, /Sold \$89\.00/);
   assert.match(dlg.textContent, /Activities booked/);
