@@ -240,8 +240,9 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
     charging = pay.id;
     const line = h('p', { role: 'status' }, h('strong', null, `Waiting for the card on ${reader.label}.`), ` Ask the guest to tap, insert or swipe for ${money(cents)}.`);
     const stop = button('Cancel', async () => {
-      try { await post(`/terminal/payments/${pay.id}/cancel`, {}); } catch (err) { readerBox.append(errorBox(err)); return; }
-      charging = null; clear(readerBox).append(h('p', { class: 'muted' }, 'Stopped. Nothing was charged.'));
+      let st;
+      try { st = await post(`/terminal/payments/${pay.id}/cancel`, {}); } catch (err) { readerBox.append(errorBox(err)); return; }
+      charging = null; clear(readerBox).append(h('p', { class: 'muted' }, st && st.status === 'refunded' ? `The card had already gone through, so ${money(st.amount_cents)} was refunded to it.` : 'Stopped. Nothing was charged.'));
     }, { small: true });
     const sim = reader.simulated && readerTest ? [
       button('Simulate a tap', () => post(`/terminal/payments/${pay.id}/simulate`, { outcome: 'approve' }).catch((err) => readerBox.append(errorBox(err))), { small: true }),
@@ -256,11 +257,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       if (st.status === 'waiting') continue;
       charging = null;
       if (st.status === 'succeeded') {
-        const p = { tender: 'card', amount_cents: st.amount_cents, terminal_payment_id: st.id, on_reader: true };
-        if (st.card_last4) p.card_last4 = st.card_last4;
-        if (st.card_brand && BRAND_OK.includes(st.card_brand)) p.card_brand = st.card_brand;
-        payments.push(p); clear(readerBox); drawPayments();
-        toast(`Card approved: ${money(st.amount_cents)}`);
+        took(st);
       } else if (st.status === 'failed') {
         clear(readerBox).append(errorBox(new Error(`${st.failure || 'The card was not accepted.'} Try again, or take another payment.`)));
       } else {
@@ -268,7 +265,25 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       }
       return;
     }
-    if (charging === pay.id) { charging = null; clear(readerBox).append(errorBox(new Error('The reader did not answer in 3 minutes. Check it is on and online, then try again.'))); post(`/terminal/payments/${pay.id}/cancel`, {}).catch(() => {}); }
+    if (charging === pay.id) {
+      // Giving up: stop the payment, but a card that went through after all is kept for this sale, never lost or refunded.
+      charging = null;
+      let st;
+      try { st = await post(`/terminal/payments/${pay.id}/cancel`, { keep_if_paid: true }); } catch (err) {
+        clear(readerBox).append(errorBox(new Error(`The reader did not answer in 3 minutes, and the payment could not be stopped (${err.message}). Do not charge again until you have checked the reader. It also shows under Billing, Card readers.`)));
+        return;
+      }
+      if (st.status === 'succeeded') { took(st); return; }
+      clear(readerBox).append(errorBox(new Error('The reader did not answer in 3 minutes, so the payment was stopped and nothing was charged. Check it is on and online, then try again.')));
+    }
+  }
+  /** A reader payment that went through: added to the sale's payments. */
+  function took(st) {
+    const p = { tender: 'card', amount_cents: st.amount_cents, terminal_payment_id: st.id, on_reader: true };
+    if (st.card_last4) p.card_last4 = st.card_last4;
+    if (st.card_brand && BRAND_OK.includes(st.card_brand)) p.card_brand = st.card_brand;
+    payments.push(p); clear(readerBox); drawPayments();
+    toast(`Card approved: ${money(st.amount_cents)}`);
   }
   /** A reader payment taken off the sale, or a sale given up: the card is refunded, never left charged. */
   async function giveBack(p) {

@@ -302,6 +302,8 @@ async function recordDonation(event, obj) {
 
 async function handleWebhook(event, base) {
   const obj = event && event.data && event.data.object;
+  // A card reader payment at the counter (routes/terminal.js).
+  if (obj && obj.metadata && obj.metadata.kind === 'counter' && String(event.type || '').startsWith('payment_intent.')) return require('./terminal').handleWebhook(event, obj);
   if (obj && obj.metadata && obj.metadata.kind === 'shop_change') return shopafter.handleChangeWebhook(event, obj);
   if (obj && obj.metadata && obj.metadata.kind === 'shop') return shopsale.handleWebhook(event, obj, base || config.stripe.publicUrl || '');
   if (obj && obj.metadata && obj.metadata.kind === 'program') return require('./programreg').handleWebhook(event, obj, base || config.stripe.publicUrl || '');

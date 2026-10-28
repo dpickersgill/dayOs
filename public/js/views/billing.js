@@ -231,9 +231,13 @@ function readersPanel() {
         manager ? button('Remove', () => confirmDialog(`Remove ${x.label}?`, 'It stops taking payments here. You can pair it again later with a new code.', 'Remove', async () => { await del(`/terminal/readers/${x.id}`); toast('Removed'); draw(); }, { danger: true }), { small: true }) : ''])) : r.enabled ? h('p', { class: 'muted' }, 'No card readers paired yet.') : null,
       manager && r.enabled ? h('div', { class: 'row' }, button('Pair a card reader', () => pair(false), { kind: 'primary' }), r.test_mode ? button('Add a test reader', () => pair(true)) : null) : null,
       stray.payments.length ? h('div', { class: 'notice warn stack' }, h('b', null, 'Card payments not part of a sale'),
-        h('p', { class: 'small' }, 'These were charged on a reader but the sale was never completed. Refund them so the guest is not charged.'),
-        ...stray.payments.map((p) => h('div', { class: 'spread' }, h('span', null, `${money(p.amount_cents)}${p.card_last4 ? `, card ending ${p.card_last4}` : ''}`),
-          button('Refund', async () => { await post(`/terminal/payments/${p.id}/cancel`, {}); toast('Refunded'); draw(); }, { small: true })))) : null,
+        h('p', { class: 'small' }, 'These were charged on a reader but the sale was never completed. Refund them so the guest is not charged. A payment still waiting for the card is one the counter stopped watching: check the reader, then cancel it if the guest did not pay.'),
+        ...stray.payments.map((p) => h('div', { class: 'spread' }, h('span', null, `${money(p.amount_cents)}${p.card_last4 ? `, card ending ${p.card_last4}` : ''}`,
+          p.status === 'waiting' ? h('small', { class: 'muted' }, `  Still waiting for the card on the reader${p.created_at ? ` since ${fmtDateTime(p.created_at)}` : ''}`) : null),
+          p.status === 'waiting'
+            ? h('span', { class: 'row' }, button('Check again', async () => { await get(`/terminal/payments/${p.id}`); draw(); }, { small: true }),
+              button('Cancel it', async () => { const st = await post(`/terminal/payments/${p.id}/cancel`, {}); toast(st.status === 'refunded' ? 'It had gone through, so it was refunded' : 'Canceled. Nothing was charged.'); draw(); }, { small: true }))
+            : button('Refund', async () => { await post(`/terminal/payments/${p.id}/cancel`, {}); toast('Refunded'); draw(); }, { small: true })))) : null,
     ].filter(Boolean));
   };
   draw();
