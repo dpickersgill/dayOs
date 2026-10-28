@@ -209,8 +209,11 @@ export function button(text, onClick, { kind, small, type = 'button', label } = 
 /** Opens a dialog. Returns { close, body }. */
 // Every open dialog, so a move to another page can close them (a link opened from a message, then Back).
 const openDialogs = new Set();
-/** Close every open dialog, running each one's own clean-up (a camera or NFC reader is let go). */
-export function closeAllDialogs() { for (const close of [...openDialogs]) close(); }
+/**
+ * Close every open dialog, running each one's own clean-up (a camera or NFC reader is let go, a card already charged on
+ * the reader goes back to the guest). Resolves when that clean-up has finished, so sign-out can wait for it.
+ */
+export function closeAllDialogs() { return Promise.allSettled([...openDialogs].map((close) => close())); }
 
 export function dialog(title, content, { wide = false, footer, onClose } = {}) {
   const previous = document.activeElement;
@@ -235,7 +238,7 @@ export function dialog(title, content, { wide = false, footer, onClose } = {}) {
     document.removeEventListener('keydown', onKey);
     overlay.remove();
     if (previous && previous.isConnected) previous.focus();
-    if (onClose) onClose(); // lets a dialog that holds the camera or NFC let go of it however it was closed
+    return onClose ? onClose() : undefined; // lets a dialog that holds the camera or NFC let go of it however it was closed
   }
   closeBtn.addEventListener('click', close);
   // A tap outside closes the dialog only while nothing has been typed in it, so a stray tap never throws work away.

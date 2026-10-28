@@ -427,10 +427,24 @@ test('sign in through the real form, move around, and sign out', skip(), async (
     clean(document.querySelector('main'), `nav ${a.textContent}`);
   }
 
-  [...document.querySelectorAll('button')].find((b) => b.textContent === 'Sign out').click();
-  await settle();
+  // A dialog left open (dialogs live outside the page): its clean-up must run while the session still works, as checkout's
+  // does to give a card reader payment back, and then the page starts over.
+  let cleanedWith = 'never';
+  mods.ui.dialog('Checkout', document.createTextNode('Card charged on the reader'), { onClose: async () => { await sleep(30); cleanedWith = mods.api.session.token ? 'token' : 'none'; } });
+  const asked = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (u, ...rest) => { asked.push(String(u)); return realFetch(u, ...rest); };
+  try {
+    [...document.querySelectorAll('button')].find((b) => b.textContent === 'Sign out').click();
+    await settle();
+    await sleep(100);
+  } finally { globalThis.fetch = realFetch; }
   assert.ok(document.querySelector('.signin form'));
   assert.equal(mods.api.session.token, null);
+  assert.equal(cleanedWith, 'token', 'the dialog\'s clean-up ran before the session ended');
+  assert.equal(document.querySelector('.overlay'), null, 'no dialog left on the sign-in screen');
+  assert.ok(asked.some((u) => u.endsWith('/auth/logout')), 'the server session is ended');
+  assert.ok(asked.includes('/version'), 'then the page is loaded again (once the server answers)');
 });
 
 // ---------------------------------------------------------------- patrol cases and team

@@ -8,6 +8,7 @@ import * as passkey from './passkey.js';
 import { confirmItsYou } from './stepup.js';
 import { readTerminal, saveTerminal } from './terminal.js';
 import { passkeysPanel } from './views/security.js';
+import * as alerts from './alerts.js';
 import { flush as flushOutbox, waitingCounts, forgetCases, setDeviceKey, dropDeviceKey } from './outbox.js';
 import { buildFrame, GROUP_OF } from './nav.js';
 import { icon } from './icons.js';
@@ -442,7 +443,19 @@ function addHelpLink(holder, key) {
   (lead && lead.tagName === 'DIV' ? lead : head).append(h('a', { class: 'help-link', href: `#/help/for-${key}` }, 'Help with this page'));
 }
 
+// Why the last session ended, carried across the reload to the sign-in screen (this tab only).
+const SAID_KEY = 'so.signedout';
+function takeSaid() { try { const m = sessionStorage.getItem(SAID_KEY); sessionStorage.removeItem(SAID_KEY); return m || undefined; } catch (_) { return undefined; } }
+const within = (p, ms) => Promise.race([p, new Promise((r) => { const t = setTimeout(r, ms); if (t && t.unref) t.unref(); })]); // (unref: test runners only)
+
+let signingOut = false;
+/**
+ * Every way out (Sign out, 15 minutes without activity, a session the server ended, a PIN switch on a shared terminal)
+ * ends with a fresh page. Dialogs, the Ask panel, timers and what each screen kept all live in the page, so starting it
+ * again is the only sure way none of it reaches the next person. message: why it happened (none when on purpose).
+ */
 async function signOut(message) {
+  if (signingOut) return;
   endTour();
   // Patrol entries kept on this phone while there was no signal go with the person who typed them. Try to send them first;
   // if they still cannot go, say so before signing out (they stay on this phone for up to three days, for this person).
@@ -451,17 +464,39 @@ async function signOut(message) {
     const left = waitingCounts().mine;
     if (left && !window.confirm(`${left} patient care entr${left === 1 ? 'y has' : 'ies have'} not been sent yet (no signal). They stay on this phone and send when you sign in again with a signal. Sign out anyway?`)) return;
   }
+  signingOut = true;
+  // Each open dialog's own clean-up runs while this session can still act: a camera or NFC reader is let go, and a card
+  // already charged on the reader goes back to the guest. (After a session the server ended, that refund cannot go from here.)
+  await within(closeAllDialogs(), 8000);
+  await within(import('./assistant.js').then((m) => m.resetAssistant()).catch(() => {}), 2000);
+  // Signing out on purpose on a shared phone or tablet: this person's phone alerts stop coming to it. An automatic
+  // sign-out leaves them on, so a patroller's own phone still gets dispatch calls after it locks itself.
+  if (!message && ctx.me && (ctx.me.role === 'patrol' || ctx.me.on_patrol) && alerts.supported()) await within(alerts.turnOff().catch(() => {}), 3000);
   if (!message) forgetCases(); // signing out on purpose clears the cases kept for a dead spot
-  dropDeviceKey(); // what stays on the phone is sealed, and the key goes with the session
+  dropDeviceKey(); // what stays on the phone is sealed, and the key goes with the session (the sealed entries stay)
   // End the session on the server too (also after an idle sign-out). Sent with the token directly, so a session the server
-  // already ended cannot bounce back into another sign-out.
+  // already ended cannot bounce back into another sign-out; keepalive lets it finish while the page reloads.
   const ending = session.token;
   session.clear();
   if (ending) fetch('/api/v1/auth/logout', { method: 'POST', headers: { authorization: `Bearer ${ending}` }, keepalive: true }).catch(() => { /* offline: it expires on its own */ });
   ctx.me = null;
   navToken += 1;
+  try { if (message) sessionStorage.setItem(SAID_KEY, message); } catch (_) { /* the sign-in screen shows no reason */ }
+  // The sign-in screen at once, then the fresh page. What it needs is kept: the mountain name and a shared terminal's
+  // enrollment (both in this browser's storage), and why the session ended.
   history.replaceState(null, '', location.pathname);
   if (readTerminal()) showPinSignIn(message); else showSignIn(message);
+  signingOut = false;
+  freshPage();
+}
+
+/** Loads the page again as soon as the server answers. With no signal the sign-in screen stays until it does. */
+async function freshPage() {
+  for (;;) {
+    if (session.token) return; // signed in again on this screen meanwhile: nothing to start over
+    try { const r = await within(fetch('/version', { cache: 'no-store' }), 4000); if (r && r.ok) { location.replace(location.pathname); return; } } catch (_) { /* no signal yet */ }
+    await new Promise((r) => { const t = setTimeout(r, 15000); if (t && t.unref) t.unref(); });
+  }
 }
 
 hooks.onSignedOut = () => { if (ctx.me) signOut('Your session ended. Sign in again.'); };
@@ -483,7 +518,8 @@ setInterval(() => { if (ctx.me && !idleTimer) resetIdle(); if (!ctx.me) { clearT
 
 async function start() {
   if (/^#(email|reset)-link=/.test(location.hash) && await fromEmailLink()) return;
-  if (!session.token) { if (readTerminal()) showPinSignIn(); else showSignIn(); return; }
+  const said = takeSaid();
+  if (!session.token) { if (readTerminal()) showPinSignIn(said); else showSignIn(said); return; }
   try {
     ctx.me = await get('/auth/me');
   } catch (_) {

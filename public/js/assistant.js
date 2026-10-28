@@ -134,3 +134,10 @@ export async function assistantOn() {
   try { state = await get('/assistant'); return Boolean(state.on); } catch (_) { return false; }
 }
 export const resetChat = () => { chat.length = 0; };
+/** On sign-out: the panel, this visit's conversation and what was looked up go, so none of it reaches the next person. */
+export function resetAssistant() {
+  resetChat();
+  if (panel) panel.remove();
+  panel = null; state = null; send = () => {}; current = { page: null, views: [] };
+  document.body.classList.remove('asking');
+}

@@ -471,7 +471,8 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   const onClose = () => {
     charging = null;
     if (sold) return;
-    for (const p of payments.filter((x) => x.on_reader)) giveBack(p).catch(() => toast('A card reader payment could not be refunded. A manager can refund it under Billing, Card readers.', 'error'));
+    // Returned so sign-out can wait for the refund before the page starts again.
+    return Promise.all(payments.filter((x) => x.on_reader).map((p) => giveBack(p).catch(() => toast('A card reader payment could not be refunded. A manager can refund it under Billing, Card readers.', 'error'))));
   };
   dlg = dialog('Checkout', h('div', { class: 'stack' }, dlgBody, nav), { wide: true, onClose });
   show(1);
