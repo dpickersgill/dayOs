@@ -39,7 +39,12 @@ async function load(code) {
   const header = h('div', { class: 'cs-banner no-print' },
     h('span', null, `Shared with ${body.shared_with}. Open until ${when(body.expires_at)}. Every opening is logged by the mountain.`),
     h('button', { type: 'button', class: 'btn small', onclick: () => window.print() }, 'Print or save as PDF'));
-  const photoSrc = (p, img) => { img.src = `${api}/photos/${p.id}?k=${encodeURIComponent(body.view_key)}`; img.addEventListener('error', () => img.replaceWith(h('div', { class: 'cf-nophoto' }, 'No preview')), { once: true }); };
+  // The original photo, the file whose fingerprint the report lists. One the browser cannot show (a HEIC from an iPhone) can be downloaded.
+  const photoSrc = (p, img) => {
+    const url = `${api}/photos/${p.id}?k=${encodeURIComponent(body.view_key)}`;
+    img.src = url;
+    img.addEventListener('error', () => img.replaceWith(h('div', { class: 'cf-nophoto' }, h('a', { href: `${url}&download=1` }, 'Download the original photo'))), { once: true });
+  };
   clear(root).append(body.kind === 'risk' ? riskDoc(body, { header }) : claimDoc(body, { photoSrc, header }));
 }
 

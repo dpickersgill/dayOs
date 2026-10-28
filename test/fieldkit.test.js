@@ -123,7 +123,14 @@ test('a case photo is kept byte for byte with its fingerprint, verified, preview
   is(await api('PUT', `/patrol/incidents/${c.id}/photos/${up.body.id}/preview`, { token: T.pat, raw: PNG }), 400);
   const small = jpegWithExif({ when: '2026:01:01 00:00:00' });
   ok(await api('PUT', `/patrol/incidents/${c.id}/photos/${up.body.id}/preview`, { token: T.pat, raw: small }));
-  assert.ok((await api('GET', `/patrol/incidents/${c.id}/photos/${up.body.id}/preview`, { token: T.pat })).bytes.equals(small));
+  const auditCount = async (action) => Number((await pool.query('SELECT COUNT(*) AS n FROM audit_log WHERE entity = \'incidents\' AND entity_id = ? AND action = ?', [c.id, action]))[0][0].n);
+  assert.equal(await auditCount('add_photo_preview'), 1, 'adding a preview is logged');
+  const pv = await api('GET', `/patrol/incidents/${c.id}/photos/${up.body.id}/preview`, { token: T.pat });
+  assert.ok(pv.bytes.equals(small));
+  assert.match(pv.headers.get('cache-control'), /no-store/, 'a preview is not cached');
+  assert.equal(pv.headers.get('x-content-sha256'), crypto.createHash('sha256').update(small).digest('hex'));
+  assert.equal(await auditCount('view_photo_preview'), 1, 'and so is reading one');
+  assert.equal(ok(await api('GET', `/patrol/incidents/${c.id}/photos`, { token: T.pat })).data.find((x) => x.id === up.body.id).preview_sha256, crypto.createHash('sha256').update(small).digest('hex'));
   // Tampering in the database shows up.
   await pool.query('UPDATE incident_media SET original = ? WHERE id = ?', [Buffer.concat([jpg, Buffer.from([0])]), up.body.id]);
   assert.equal(ok(await api('GET', `/patrol/incidents/${c.id}/photos/${up.body.id}/verify`, { token: T.pat })).unchanged, false);

@@ -19,8 +19,8 @@ const PW = 'correct-horse-battery';
 async function api(method, p, { token, body, headers = {}, raw = false } = {}) {
   const res = await fetch(`${base}${raw ? '' : '/api/v1'}${p}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });
   const type = res.headers.get('content-type') || '';
-  if (!type.includes('json')) return { status: res.status, body: Buffer.from(await res.arrayBuffer()), type };
-  return { status: res.status, body: await res.json(), type };
+  if (!type.includes('json')) return { status: res.status, body: Buffer.from(await res.arrayBuffer()), type, headers: res.headers };
+  return { status: res.status, body: await res.json(), type, headers: res.headers };
 }
 const ok = (r) => { assert.ok(r.status < 300, `${r.status} ${JSON.stringify(r.body)}`); return r.body; };
 const is = (r, status, why) => assert.equal(r.status, status, `${why || ''} ${JSON.stringify(r.body)}`);
@@ -144,6 +144,39 @@ test('an insurer link: only after a release with authority, passcode, every view
   ok(await api('POST', `/patrol/shares/${sh.id}/revoke`, { token: M.owner }));
   is(await api('GET', `/public/claim-share/${token}`, { headers: { 'x-share-code': sh.passcode } }), 410);
   is(await api('GET', '/public/claim-share/not-a-real-token-at-all-xx'), 404);
+});
+
+test('the insurer sees the fingerprinted original, never a preview added after approval', async () => {
+  // A second photo with no preview yet (a HEIC, or a desktop upload), on the approved case.
+  const real = Buffer.concat([JPEG, Buffer.from('REAL-INJURY-PHOTO')]);
+  const hash = crypto.createHash('sha256').update(real).digest('hex');
+  ok(await api('POST', `/patrol/incidents/${M.case}/reopen`, { token: M.owner, body: { reason: 'Add the second photo' } }));
+  const [ins] = await pool.query('INSERT INTO incident_media (tenant_id, incident_id, mime, bytes, sha256, original, caption, uploaded_by, uploaded_at) VALUES (?, ?, \'image/jpeg\', ?, ?, ?, \'Ramp edge\', NULL, ?)', [M.id, M.case, real.length, hash, real, now]);
+  ok(await api('POST', `/patrol/incidents/${M.case}/submit`, { token: M.owner }));
+  const st = ok(await api('GET', `/patrol/incidents/${M.case}`, { token: M.owner }));
+  if (st.report_state !== 'approved') ok(await api('POST', `/patrol/incidents/${M.case}/approve`, { token: M.owner, body: {} }));
+  const req = Number(ok(await api('POST', '/patrol/records', { token: M.owner, body: { incident_id: M.case, requester_kind: 'insurer', requester_name: 'Beta Mutual', received_on: today, authorization: 'signed_release' } })).id);
+  ok(await api('POST', `/patrol/records/${req}/release`, { token: M.owner, body: {} }));
+  const sh = ok(await api('POST', `/patrol/records/${req}/share`, { token: M.owner, body: { passcode: false } }));
+  const token = sh.url.split('/c/')[1];
+  // After approval and release, nobody can add a preview, through the app or otherwise.
+  const substitute = Buffer.concat([JPEG, Buffer.from('NOT-THE-INJURY')]);
+  const put = await fetch(`${base}/api/v1/patrol/incidents/${M.case}/photos/${ins.insertId}/preview`, { method: 'PUT', headers: { 'content-type': 'image/jpeg', authorization: `Bearer ${M.patT}` }, body: substitute });
+  assert.equal(put.status, 409, 'a preview cannot be added to an approved report');
+  // Even a preview put in the database directly is never what the insurer sees.
+  await pool.query('UPDATE incident_media SET preview = ? WHERE id = ?', [substitute, ins.insertId]);
+  const view = ok(await api('GET', `/public/claim-share/${token}`));
+  const listed = view.report.photos.find((p) => p.id === ins.insertId);
+  assert.equal(listed.sha256, hash);
+  const ph = await api('GET', `/public/claim-share/${token}/photos/${ins.insertId}?k=${encodeURIComponent(view.view_key)}`);
+  is(ph, 200);
+  assert.ok(ph.body.equals(real), 'the original, byte for byte');
+  assert.equal(ph.headers.get('x-content-sha256'), hash);
+  assert.match(ph.headers.get('cache-control'), /no-store/);
+  // A changed original no longer matches the released fingerprint, so it is not served.
+  await pool.query('UPDATE incident_media SET original = ? WHERE id = ?', [substitute, ins.insertId]);
+  is(await api('GET', `/public/claim-share/${token}/photos/${ins.insertId}?k=${encodeURIComponent(view.view_key)}`), 404);
+  await pool.query('UPDATE incident_media SET original = ? WHERE id = ?', [real, ins.insertId]);
 });
 
 test('too many wrong passcodes locks the link', async () => {

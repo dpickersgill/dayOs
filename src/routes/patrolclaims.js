@@ -370,7 +370,10 @@ publicRouter.get('/claim-share/:token', async (req, res) => {
   res.set('Cache-Control', 'no-store').json({ ...data, shared_with: s.shared_with, expires_at: s.expires_at, view_key: s.kind === 'claim' ? viewKey(s.id) : null });
 });
 
-/** A photo's preview, for a claim link: only the photos in the released version. */
+/**
+ * A photo, for a claim link: only the photos in the released version, and always the original file whose fingerprint
+ * the released report lists (checked again here), never a preview, which is a separate file anyone could have made.
+ */
 publicRouter.get('/claim-share/:token/photos/:mid', async (req, res) => {
   const { s } = await openShare(String(req.params.token));
   if (s.kind !== 'claim' || !viewKeyOk(s.id, req.query.k)) throw notFound('Photo');
@@ -378,10 +381,13 @@ publicRouter.get('/claim-share/:token/photos/:mid', async (req, res) => {
   const v = r && await one(pool, 'SELECT snapshot FROM incident_versions WHERE tenant_id = ? AND id = ?', [s.tenant_id, r.version_id]);
   const report = v && parseJSON(v.snapshot);
   const mid = paramId(req, 'mid');
-  if (!report || !(report.photos || []).some((p) => Number(p.id) === mid && !p.voided_at)) throw notFound('Photo');
-  const m = await one(pool, 'SELECT preview FROM incident_media WHERE tenant_id = ? AND incident_id = ? AND id = ?', [s.tenant_id, s.incident_id, mid]);
-  if (!m || !m.preview) throw notFound('Photo');
-  res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=600' }).send(m.preview);
+  const listed = report && (report.photos || []).find((p) => Number(p.id) === mid && !p.voided_at);
+  if (!listed) throw notFound('Photo');
+  const m = await one(pool, 'SELECT original, mime, sha256 FROM incident_media WHERE tenant_id = ? AND incident_id = ? AND id = ?', [s.tenant_id, s.incident_id, mid]);
+  if (!m || m.sha256 !== listed.sha256 || crypto.createHash('sha256').update(m.original).digest('hex') !== listed.sha256) throw notFound('Photo');
+  const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic' }[m.mime] || 'bin';
+  res.set({ 'Content-Type': m.mime, 'X-Content-SHA256': m.sha256, 'Cache-Control': 'private, no-store',
+    'Content-Disposition': `${req.query.download ? 'attachment' : 'inline'}; filename="case-${report.case_number || s.incident_id}-photo-${mid}.${ext}"` }).send(m.original);
 });
 
 module.exports = { router, publicRouter, claimFile, riskReport };

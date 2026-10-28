@@ -721,6 +721,8 @@ const fieldKitSteps = [
     KEY ix_media_incident (tenant_id, incident_id, id),
     CONSTRAINT fk_media_incident FOREIGN KEY (tenant_id, incident_id) REFERENCES incidents(tenant_id, id)
   ) ENGINE=InnoDB`],
+  // The preview's own fingerprint, so a frozen version names the exact preview too (set once, while the case is editable).
+  ['incident_media.preview_sha256', (c) => columnExists(c, 'incident_media', 'preview_sha256'), 'ALTER TABLE incident_media ADD COLUMN preview_sha256 CHAR(64) NULL AFTER preview'],
   // Check steps for each kind of patrol gear (readings with ranges, dates with expiry rules), and the answers on a check.
   ['patrol_gear_checklists', (c) => tableExists(c, 'patrol_gear_checklists'), `CREATE TABLE patrol_gear_checklists (
     tenant_id   BIGINT UNSIGNED NOT NULL,

@@ -338,7 +338,7 @@ async function loadCase(conn, tenantId, id) {
   const mine = (list, pid) => list.filter((x) => x.patient_id === pid);
   const tenant = await one(conn, 'SELECT name, legal_name FROM tenants WHERE id = ?', [tenantId]);
   // Photos without their bytes: a frozen version records each one's fingerprint, so the approved report names the exact files.
-  const photos = (await rows(conn, `SELECT m.id, m.patient_id, m.mime, m.bytes, m.sha256, m.caption, m.taken_at, m.taken_lat, m.taken_lng, m.uploaded_at, (m.preview IS NOT NULL) AS has_preview,
+  const photos = (await rows(conn, `SELECT m.id, m.patient_id, m.mime, m.bytes, m.sha256, m.caption, m.taken_at, m.taken_lat, m.taken_lng, m.uploaded_at, (m.preview IS NOT NULL) AS has_preview, m.preview_sha256,
       m.voided_at, m.void_reason, COALESCE(u.email, u.username) AS uploaded_by_name, COALESCE(vu.email, vu.username) AS voided_by_email
     FROM incident_media m LEFT JOIN users u ON u.id = m.uploaded_by AND u.tenant_id = m.tenant_id ${VOIDED_BY('m')} WHERE m.tenant_id = ? AND m.incident_id = ? ORDER BY m.id`, [tenantId, id]))
     .map((m) => ({ ...m, has_preview: Boolean(m.has_preview), taken_lat: m.taken_lat === null ? null : Number(m.taken_lat), taken_lng: m.taken_lng === null ? null : Number(m.taken_lng) }));
