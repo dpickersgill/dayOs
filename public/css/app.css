@@ -1621,6 +1621,7 @@ main:focus, main:focus-visible, #main:focus, [tabindex='-1']:focus:not(input):no
 .version-banner { background: var(--hold-tint); border: 1.5px solid #e0b560; color: var(--hold-ink); border-radius: 12px; padding: 12px 16px; }
 .outbox-strip { display: grid; gap: 8px; background: var(--hold-tint); border: 1.5px solid #e0b560; border-radius: 12px; padding: 12px 16px; }
 .outbox-strip .refused { color: var(--alert); }
+.outbox-strip.no-signal { border-color: var(--alert); } /* one strip says it all: no signal, and what waits on this phone */
 .outbox-refused { background: var(--alert-tint); color: var(--alert); border-radius: 10px; padding: 10px 12px; }
 
 /* progress becomes a slim guide that sits between the wristband and the view */

@@ -35,7 +35,7 @@ import { drawRisk, renderRiskReport } from './patrol-risk.js';
 import { drawOpsSettings } from './patrol-settings.js';
 import { drawRequirements } from './patrol-requirements.js';
 import { drawChecklistSetup } from './patrol-checklist-setup.js';
-import { send as queue, keepCase, latestKept } from '../outbox.js';
+import { send as queue, keepCase, latestKept, cachedList, keptList } from '../outbox.js';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -58,9 +58,11 @@ export async function render(root, params = []) {
   let me;
   try { me = await get('/patrol/me'); lastMe = me; } catch (err) { if (!lastMe || (err && err.status && err.status < 500)) throw err; me = lastMe; }
   setAccess(me);
-  // Keep the report form's layout on this phone while there is a signal, so a case can be started where there is none.
-  if (has('create_case')) loadForm().catch(() => {});
-  root.append(connectionBanner());
+  // Keep the report form's layout, the trails and the attractions on this phone while there is a signal, so a case can
+  // be started, and name its trail, where there is none.
+  if (has('create_case')) { loadForm().catch(() => {}); keepLists(); }
+  // A case carries its own signal strip (one line: no signal, and what is waiting to send), so the banner stays off it.
+  if (!(params[0] === 'case' && CASE_ID.test(params[1] || ''))) root.append(connectionBanner());
   if (params[0] === 'case' && CASE_ID.test(params[1] || '')) {
     let roster = lastRoster;
     try { roster = (await get('/patrol/team')).data; lastRoster = roster; } catch (_) { /* no signal: the roster last seen */ }
@@ -288,8 +290,16 @@ async function drawCases(box, { canAdmin } = {}) {
 }
 
 const PATIENT_TYPES = ['injury', 'collision', 'medical'];
-let lastTrails = [];
-let lastAttractions = [];
+/** The trails, lifts and attractions, fetched with a signal and kept on the phone (outbox.js) for a dead spot. */
+const TRAILS = () => cachedList('trails', async () => (await get('/schedule/trails?limit=500')).data);
+const LIFTS = () => cachedList('lifts', async () => (await get('/schedule/lifts?limit=200')).data);
+const ATTRACTIONS = () => cachedList('attractions', async () => (await get('/attractions')).data);
+let listsKept = false;
+function keepLists() {
+  if (listsKept) return;
+  listsKept = true;
+  for (const fetchList of [TRAILS, LIFTS, ATTRACTIONS]) fetchList().catch(() => {}); // no signal, or a list this login cannot see
+}
 /**
  * A case started with no signal, as the case page needs it, kept (sealed) on this phone under its temporary id. The
  * report form, trails and checklists come from the last case opened here, so the bedside card works the same.
@@ -305,12 +315,13 @@ function startOffline(tmp, body, trailName) {
     patients: p ? [{ id: tmp - 1, incident_id: tmp, first_name: p.first_name || 'Unknown', last_name: p.last_name || 'Patient', age_years: p.age_years ?? null, chief_complaint: p.chief_complaint || null,
       sex: 'unknown', allergies: null, form: {}, vitals: [], injuries: [], treatments: [], derived: {} }] : [],
   };
-  keepCase(tmp, { c, def: (prev && prev.def) || keptForm(), trails: prev ? prev.trails : lastTrails, checklists: prev ? prev.checklists : [] });
+  keepCase(tmp, { c, def: (prev && prev.def) || keptForm(), trails: keptList('trails') || (prev ? prev.trails : []), lifts: keptList('lifts') || (prev ? prev.lifts : []), attractions: keptList('attractions') || (prev ? prev.attractions : []), checklists: prev ? prev.checklists : [] });
 }
 
 async function newCase() {
-  let trails = lastTrails;
-  try { trails = (await get('/schedule/trails?limit=500')).data; lastTrails = trails; } catch (_) { /* no signal: the trails last seen */ }
+  // With no signal, the lists last kept on this phone (see outbox.js) are offered, so the case can still name its trail.
+  let trails = [];
+  try { trails = await TRAILS(); } catch (_) { /* no signal and nothing kept yet */ }
   // Built for gloves and cold hands: big buttons for type and severity, trail first, and the spot only when it adds something.
   const segmented = (name, options, value, ariaLabel) => {
     const hidden = h('input', { type: 'hidden', name, value });
@@ -319,8 +330,8 @@ async function newCase() {
     }, dataset: { value: o } }, label(o)));
     return h('div', { class: 'choice-grid', role: 'group', 'aria-label': ariaLabel }, btns, hidden);
   };
-  let attractions = lastAttractions;
-  try { attractions = (await get('/attractions')).data; lastAttractions = attractions; } catch (_) { /* no signal, or none */ }
+  let attractions = [];
+  try { attractions = await ATTRACTIONS(); } catch (_) { /* no signal and nothing kept yet, or none */ }
   const trail = select([['', 'Not on a trail'], ...trails.map((t) => [t.id, t.name])], '', { name: 'trail_id' });
   const attraction = attractions.length ? select([['', 'Not at an attraction'], ...attractions.map((a) => [a.id, a.name])], '', { name: 'attraction_id' }) : null;
   const where = input({ name: 'location', maxlength: 255, placeholder: 'For example "Top of Lower Ridge, skier\'s left"' });
@@ -351,9 +362,8 @@ async function newCase() {
     // Offline, a patient record is made with the case (a placeholder name if none was given) so vitals can go on it at once.
     const offlineBody = PATIENT_TYPES.includes(cat) && !body.patient ? { ...body, patient: { first_name: 'Unknown', last_name: 'Patient' } } : body;
     const c = await queue('POST', '/patrol/incidents', body, { caseId: tmp, label: `New case at ${spot}`, offlineBody, temp: { caseId: tmp, patientId: offlineBody.patient ? tmp - 1 : null } });
-    if (c.queued) {
+    if (c.queued) { // the case page's signal strip says it is kept on this phone and sent when the signal returns
       startOffline(tmp, offlineBody, trailName);
-      toast('No signal: the case is started on this phone. Keep working; it is sent with everything you add when the signal returns.', 'warn');
       location.hash = `#/patrol/case/${tmp}/care`;
       return;
     }

@@ -272,3 +272,32 @@ export function forgetCases() {
   const st = store(); const me = who();
   try { if (st) { st.removeItem(CASES_LEGACY); if (me) st.removeItem(CASES_BOX(me)); } } catch (_) { /* nothing kept */ }
 }
+
+// ---------------------------------------------------------------- lists kept for a dead spot
+// The trails, lifts and attractions (what New case and the location picker offer) are kept on the phone, in the clear,
+// whenever they are fetched with a signal: they hold no patient details. With no signal, the copy last kept is offered,
+// so a case started in a dead spot can still name its trail or attraction.
+const LIST_KEY = (name) => { const t = who(); return `so.patrol.list.${t ? t.split('.')[0] : ''}.${name}`; };
+const lists = {};
+/** Fetches a list with `load()`; keeps the answer on the phone, and falls back to the copy kept when there is no signal. */
+export async function cachedList(name, load) {
+  try {
+    const data = await load();
+    if (Array.isArray(data)) keepList(name, data);
+    return data;
+  } catch (err) {
+    const kept = keptList(name);
+    if (kept) return kept;
+    throw err;
+  }
+}
+export function keepList(name, data) {
+  lists[name] = data;
+  const st = store();
+  try { if (st) st.setItem(LIST_KEY(name), JSON.stringify(data)); } catch (_) { /* private mode or full: kept in memory */ }
+}
+/** The list last fetched on this phone, or null if it never was. */
+export function keptList(name) {
+  if (lists[name]) return lists[name];
+  try { const s = store() && store().getItem(LIST_KEY(name)); return s ? JSON.parse(s) : null; } catch (_) { return null; }
+}

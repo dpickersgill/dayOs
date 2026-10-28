@@ -807,20 +807,17 @@ test('patrol: a case opens, shows the whole report, and the sign-off buttons wor
   for (const text of [c.case_number, 'Cam Carver', 'Medication: Ibuprofen 400 mg oral', 'Wendy Witness', 'Sprain strain, Knee', 'Draft']) assert.ok(root.textContent.includes(text), `case page is missing "${text}"`);
   await exercise(root, 'case page');
 
-  // submitting first shows the report check (suggestions only); "Submit anyway" goes on, and an incomplete report lists what is missing
-  const pastCheck = async () => {
-    const anyway = [...document.querySelectorAll('.overlay button')].find((b) => b.textContent.trim() === 'Submit anyway');
-    if (anyway) { anyway.click(); await settle(); }
-  };
+  // submitting an incomplete report is one pass: what is required is listed first, with no "Submit anyway" past it
+  const overlayButtons = () => [...document.querySelectorAll('.overlay button')].map((b) => b.textContent.trim());
   buttons(root, 'Submit report')[0].click();
   await settle();
-  assert.match(document.querySelector('.overlay').textContent, /to check/, 'the report check comes first');
-  assert.ok([...document.querySelectorAll('.overlay button')].some((b) => b.textContent.trim() === 'Fix first'));
-  await pastCheck();
   const dlg = document.querySelector('.overlay');
   assert.ok(dlg, 'a dialog explains why it cannot be submitted');
+  assert.match(dlg.textContent, /Not ready to submit/, 'required items come first');
+  assert.doesNotMatch(dlg.textContent, /suggestions, not requirements/, 'the suggestions are not mixed in with what is required');
   assert.match(dlg.textContent, /chief complaint/i);
   assert.match(dlg.textContent, /outcome/i);
+  assert.ok(!overlayButtons().includes('Submit anyway') && !overlayButtons().includes('Fix first'), 'nothing offers a way past what is required');
   await closeOverlays();
   assert.equal(ok(await api('GET', base, { token: o })).report_state, 'draft');
 
@@ -829,7 +826,13 @@ test('patrol: a case opens, shows the whole report, and the sign-off buttons wor
   root = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id)]);
   buttons(root, 'Submit report')[0].click();
   await settle();
-  await pastCheck();
+  // everything required is in: now, and only now, the suggestions are offered with "Submit anyway" and "Fix first"
+  const anyway = [...document.querySelectorAll('.overlay button')].find((b) => b.textContent.trim() === 'Submit anyway');
+  if (anyway) {
+    assert.match(document.querySelector('.overlay').textContent, /to check/);
+    assert.ok(overlayButtons().includes('Fix first'));
+    anyway.click(); await settle();
+  }
   assert.equal(ok(await api('GET', base, { token: o })).report_state, 'submitted');
   assert.equal(document.querySelector('.overlay'), null, 'no dialog when the submit succeeds');
   assert.match(root.textContent, /Waiting for review/);
@@ -1322,11 +1325,11 @@ test('patrol: items in the "not ready" list link to the missing field, for both 
   const root = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id)]);
   const btn = (t) => [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === t);
   const links = () => [...document.querySelectorAll('.overlay button.problem-link')];
-  // The report check comes first and only suggests: "Submit anyway" goes on to the required-field check.
+  // With required items missing, the required-field check comes first and alone: no "Submit anyway" past it.
   const submitPast = async () => {
     btn('Submit report').click(); await settle();
     const anyway = [...document.querySelectorAll('.overlay button')].find((b) => b.textContent.trim() === 'Submit anyway');
-    if (anyway) { assert.match(document.querySelector('.overlay').textContent, /to check/); anyway.click(); await settle(); }
+    assert.equal(anyway, undefined, 'the suggestions dialog waits until everything required is in');
   };
 
   // Submit: choose "Chief complaint" and land in it
@@ -2541,6 +2544,70 @@ test('a case started with no signal opens even when no case was opened since the
   const page = await renderView('patrol', 'patrol', T.patrol, {}, ['case', String(tmp)]);
   assert.doesNotMatch(page.textContent, /reading 'fields'|Cannot read/);
   assert.match(page.textContent, /Started with no signal/);
+});
+
+test('with no signal, New case offers the trails and attractions kept on the phone, and the case page shows one signal strip', skip(), async () => {
+  const online = (v) => { for (const nav of [window.navigator, globalThis.navigator]) Object.defineProperty(nav, 'onLine', { value: v, configurable: true }); };
+  // Opening Patrol with a signal keeps the trail and attraction lists on the phone...
+  await renderView('patrol', 'patrol', T.patrol);
+  await new Promise((r) => setTimeout(r, 300)); await settle();
+  const ob = await mods.imp('outbox.js');
+  assert.ok((ob.keptList('trails') || []).some((t) => t.name === 'Ridge Run'), 'the trails are kept on the phone');
+  // ...so with every fetch failing, the New case dialog still offers them.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  online(false);
+  try {
+    const root = await renderView('patrol', 'patrol', T.patrol);
+    root.querySelector('button.fab[data-act=new-case]').click();
+    await sleep(100);
+    const trail = document.querySelector('.overlay select[name=trail_id]');
+    assert.ok(trail, 'the trail picker is in the dialog');
+    assert.ok([...trail.options].some((o) => o.textContent === 'Ridge Run'), 'the cached trails are offered offline');
+    await closeOverlays();
+  } finally { globalThis.fetch = realFetch; online(true); }
+
+  // One strip on a case with no signal: the red banner, the yellow note and the toast are not stacked above it.
+  const tmp = -(Date.now() % 1e9);
+  ob.keepCase(tmp, { c: { id: tmp, offline: true, status: 'open', report_state: 'draft', occurred_at: `${today} 10:42:00`, location: 'Ridge Run', category: 'injury', severity: 'moderate', summary: 'Skier down', resort: { name: 'X', legal_name: null }, form: {}, notes: [], events: [], responders: [], witnesses: [], signatures: [], collision: null, parties: [], checklist: [], versions: [], photos: [], review: null, check: [], patients: [] }, def: null, trails: [], checklists: [] });
+  online(false);
+  try {
+    const page = await renderView('patrol', 'patrol', T.patrol, {}, ['case', String(tmp)]);
+    assert.equal(page.querySelector('.offline-banner'), null, 'no separate connection banner over a case');
+    assert.equal(page.querySelector('.warn-note'), null, 'no separate started-with-no-signal note');
+    const strips = page.querySelectorAll('[role=status]');
+    assert.equal(strips.length, 1, `one status strip, not ${strips.length}`);
+    const strip = page.querySelector('[data-area=outbox]');
+    assert.match(strip.textContent, /^Started with no signal\. /, 'the strip leads with the signal');
+    assert.equal(strip.dataset.offline, 'true');
+    // it updates as the signal returns
+    online(true); window.dispatchEvent(new window.Event('online')); await sleep(50);
+    assert.equal(page.querySelector('[data-area=outbox]').dataset.offline, 'false', 'the strip follows the connection');
+  } finally { online(true); }
+});
+
+test('"Me" tops the responder picker, and links an unlinked patroller to their own staff record', skip(), async () => {
+  const o = T.owner;
+  const mine = await (async () => { ok(await api('POST', '/users', { token: o, body: { email: `solo.patroller@${slug}.test`, password: PW, role: 'patrol' } })); return ok(await api('POST', '/auth/login', { body: { tenant: slug, email: `solo.patroller@${slug}.test`, password: PW } })).token; })();
+  const c = ok(await api('POST', '/patrol/incidents', { token: mine, body: { occurred_at: `${today}T11:05`, location: 'Ridge Run', category: 'injury', severity: 'minor', summary: 'Solo case' } }));
+  assert.equal(ok(await api('GET', `/patrol/incidents/${c.id}`, { token: mine })).responders.length, 0, 'an unlinked filer is not the lead yet');
+  const root = await renderView('patrol', 'patrol', mine, {}, ['case', String(c.id), 'report']);
+  const step = root.querySelector('[data-step=lead]');
+  assert.ok(step && !step.classList.contains('done'), 'the lead is still to be named');
+  step.click(); await settle();
+  const pick = document.querySelector('.overlay select[name=staff_id]');
+  assert.ok(pick, 'the responder dialog opens even though this login is not on the roster');
+  assert.equal(pick.options[0].value, 'me', 'Me comes first');
+  assert.match(pick.options[0].textContent, /^Me/);
+  assert.equal(document.querySelector('.overlay select[name=role]').value, 'lead', 'the first responder is the lead');
+  document.querySelector('.overlay form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  const got = ok(await api('GET', `/patrol/incidents/${c.id}`, { token: mine }));
+  const lead = got.responders.find((r) => r.role === 'lead' && !r.voided_at);
+  assert.ok(lead, 'they are now the lead');
+  assert.equal(`${lead.first_name} ${lead.last_name}`, 'Solo Patroller', 'named from the login');
+  assert.equal(ok(await api('GET', '/patrol/me', { token: mine })).staff_id, lead.staff_id, 'the login is linked from now on');
+  assert.ok(root.querySelector('[data-step=lead]').classList.contains('done'), 'the step is done');
 });
 
 test('patrol: a collision is recorded by person and by scene, ticked off with a checklist, and printed without medical details', skip(), async () => {

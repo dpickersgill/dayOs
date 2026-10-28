@@ -594,3 +594,51 @@ test('hand-off: fields are saved with the patient, printing is logged, and other
   assert.equal((await api('POST', `/patrol/incidents/${c.id}/patients/${p.id}/handoff-printed`, { token: T.otherPat })).status, 404);
   assert.equal((await api('POST', `/patrol/incidents/${c.id}/patients/999999/handoff-printed`, { token: o })).status, 404);
 });
+
+test('"Me" as a responder: an unlinked login gets its own staff record on the roster, audited, and is named on the case', async () => {
+  const o = A.owner;
+  // a patroller whose login was never linked to a staff record
+  const meLogin = await addUser(A, `rowan.reyes@${A.slug}.test`, 'patrol');
+  const c = ok(await newCase(meLogin, { summary: 'Named myself' }), 201);
+  const before = ok(await api('GET', `/patrol/incidents/${c.id}`, { token: meLogin }));
+  assert.equal(before.responders.length, 0, 'an unlinked filer cannot be the lead by default');
+
+  const r = ok(await api('POST', `/patrol/incidents/${c.id}/responders/me`, { token: meLogin, body: { role: 'lead' } }), 201);
+  assert.ok(r.staff_id > 0 && r.linked === true && r.created === true, JSON.stringify(r));
+  const after = ok(await api('GET', `/patrol/incidents/${c.id}`, { token: meLogin }));
+  const lead = after.responders.find((x) => x.role === 'lead' && !x.voided_at);
+  assert.ok(lead, 'they are the lead');
+  assert.equal(lead.staff_id, r.staff_id);
+  assert.equal(`${lead.first_name} ${lead.last_name}`, 'Rowan Reyes', 'the name comes from the login');
+  // the login is linked from now on, and the new patroller is on the roster
+  assert.equal(ok(await api('GET', '/patrol/me', { token: meLogin })).staff_id, r.staff_id);
+  assert.equal(ok(await api('GET', '/auth/me', { token: meLogin })).staff_id, r.staff_id);
+  assert.ok(ok(await api('GET', '/patrol/team', { token: o })).data.some((m) => m.staff_id === r.staff_id && m.first_name === 'Rowan'), 'on the patrol roster');
+  const [log] = await pool.query("SELECT action, entity, detail FROM audit_log WHERE entity = 'users' AND action = 'link_staff' ORDER BY id DESC LIMIT 1");
+  assert.equal(log.length, 1, 'the link is audited');
+  assert.equal(Number(log[0].detail.staff_id), r.staff_id);
+  assert.equal(log[0].detail.created_staff, true);
+
+  // the second time, nothing is made: the same record is used, and the role can change
+  const again = ok(await api('POST', `/patrol/incidents/${c.id}/responders/me`, { token: meLogin, body: { role: 'assist' } }), 201);
+  assert.deepEqual([again.staff_id, again.linked, again.created], [r.staff_id, false, false]);
+  const [staffRows] = await pool.query('SELECT COUNT(*) AS n FROM staff s JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id WHERE p.email = ?', [`rowan.reyes@${A.slug}.test`]);
+  assert.equal(Number(staffRows[0].n), 1);
+  assert.equal(ok(await api('GET', `/patrol/incidents/${c.id}`, { token: meLogin })).responders.filter((x) => !x.voided_at).length, 1);
+
+  // a linked login names itself without making anything
+  const c2 = ok(await newCase(T.quinn, { summary: 'Quinn leads' }), 201);
+  const q = ok(await api('POST', `/patrol/incidents/${c2.id}/responders/me`, { token: T.quinn, body: { role: 'lead' } }), 201);
+  assert.deepEqual([q.staff_id, q.linked, q.created], [D.s2, false, false]);
+});
+
+test('the report check says what is required before it suggests anything', async () => {
+  const c = ok(await newCase(T.pat, { summary: 'Check order' }), 201);
+  let check = ok(await api('GET', `/patrol/incidents/${c.id}/check`, { token: T.pat }));
+  assert.ok(Array.isArray(check.required) && check.required.some((x) => /at least one patient/i.test(x.message)), 'a draft lists its required gaps');
+  const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: T.pat, body: { form: { head_strike: 'no' }, first_name: 'Rae', last_name: 'Ready', chief_complaint: 'Wrist pain', disposition: 'treated_released' } }), 201);
+  ok(await api('POST', `/patrol/incidents/${c.id}/patients/${p.id}/vitals`, { token: T.pat, body: { pulse: 80 } }), 201);
+  check = ok(await api('GET', `/patrol/incidents/${c.id}/check`, { token: T.pat }));
+  assert.deepEqual(check.required, [], 'nothing required is missing');
+  assert.ok(Array.isArray(check.data), 'the suggestions still come');
+});
