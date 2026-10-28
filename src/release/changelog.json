@@ -1,6 +1,92 @@
 {
   "releases": [
     {
+      "version": "2026.11.2",
+      "date": "2026-10-29",
+      "title": "Demo-readiness fixes: the sale is checked before payment, quick sale by default, patrol with no signal, the privacy list",
+      "notes": [
+        {
+          "kind": "fixed",
+          "app": "sell",
+          "who": [
+            "counter"
+          ],
+          "help": "sell-pay",
+          "text": "A sale is checked before any money is taken. A missing waiver, a rider under the age limit, a lesson that has filled up or gear that is out is refused on the details step, never after the guest has paid or the card reader has charged their card."
+        },
+        {
+          "kind": "improved",
+          "app": "sell",
+          "who": [
+            "counter"
+          ],
+          "help": "sell-quick",
+          "text": "A basket of day tickets, punch cards, vouchers or gift cards opens on the quick sale. Press Next: payment to sell with no name, or Add guest details to put the sale on a customer record. A quick-sale receipt line no longer starts with a stray comma."
+        },
+        {
+          "kind": "fixed",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-offline",
+          "text": "A case started with no signal can name its trail, lift or attraction: the lists are kept on the phone while there is a signal."
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-case",
+          "text": "Submit report is one check. Anything required is listed first, and the suggestions with Submit anyway appear only once everything required is in."
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-case",
+          "text": "Me is the first choice when naming a responder. A patroller whose login has no staff record gets one on the patrol roster, linked to the login and written to the audit log."
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "help": "patrol-offline",
+          "text": "With no signal, a case shows one strip, saying there is no signal and how many entries are waiting to send, in place of the banner, the note and the pop-up messages."
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": null,
+          "text": "Settings, Team and logins: a username you type in Add login is kept. The suggestion from the email only fills the box while it is untouched. The Logins table stays inside its card on a wide screen."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "The privacy policy lists every outside service Verdynt/OS sends information to, what each one receives and why, and promises to tell mountains before adding one. The Security page and the assistant's Help say what the assistant can and cannot see."
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": null,
+          "help": "waiver-sign",
+          "text": "A guest's link to their signed waiver copy stops working when the season it was signed for ends, or twelve months after signing when no season end is set. Staff still open every signed copy from Waivers. The link's code is no longer kept in plain form in the database."
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": null,
+          "text": "Dark theme: the Open and Closed buttons, gate results and other green and red fills read clearly, and the pricing page on a phone no longer draws the price over the plan description."
+        }
+      ]
+    },
+    {
       "version": "2026.11.1",
       "date": "2026-11-15",
       "title": "Patrol checklists you choose, and attractions: ziplines, coasters, ice skating, tubing and more",
