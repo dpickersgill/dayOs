@@ -2,7 +2,7 @@
 // and the customer's details added at the end. The gate scanner is its own page (gate.js).
 import { loadTypes, saleOptions, typeName } from '../guesttypes.js';
 import { get, post } from '../api.js';
-import { h, clear, isManager, money, toCents, table, state, input, select, field, button, toast, dialog, formDialog, todayStr, fmtDate, fmtDateTime, label, empty, errorBox, tabs, fail, fmtTime, addDays } from '../ui.js';
+import { h, clear, ctx, isManager, money, toCents, table, state, input, select, field, button, toast, dialog, formDialog, todayStr, fmtDate, fmtDateTime, label, empty, errorBox, tabs, fail, fmtTime, addDays } from '../ui.js';
 import { loadCustomerForm } from './customer-form.js';
 import { checkoutDialog, lineApi } from './sell-checkout.js';
 import { drawerDialog } from './till.js';
@@ -32,11 +32,18 @@ export async function render(root, params = []) {
   if (params[0] === 'order' && /^\d+$/.test(params[1] || '')) showOrder(Number(params[1])).catch((err) => toast(err.message || 'Could not open that order', 'error'));
 }
 
+/** Whether Sell shows the Partner passes tab: the app is on and the mountain has not turned the tab off. */
+export async function showPartnerTab() {
+  if (ctx.me && ctx.me.modules && !ctx.me.modules.includes('sell')) return false;
+  try { return (await get('/partner-passes/tab')).show; } catch (_) { return false; }
+}
+const queryTab = () => { try { return new URLSearchParams(location.hash.split('?')[1] || '').get('tab'); } catch (_) { return null; } };
+
 // ---------------------------------------------------------------- selling
 const ICON = { ticket: 'Ticket', lesson: 'Lesson', lesson_package: 'Lesson package', rental: 'Rental', program: 'Program', gift_card: 'Gift card' };
 
 async function sellPanel(root) {
-  const [menu, def, types] = await Promise.all([get('/checkout/menu'), loadCustomerForm(true), loadTypes()]);
+  const [menu, def, types, partnerTab] = await Promise.all([get('/checkout/menu'), loadCustomerForm(true), loadTypes(), showPartnerTab()]);
   const { options: TIERS, first: FIRST } = saleOptions(types);
   const basket = [];
   const promoIn = input({ name: 'promo', autocapitalize: 'characters', placeholder: 'Promo code', 'aria-label': 'Promo code' });
@@ -155,7 +162,10 @@ async function sellPanel(root) {
         h('div', { class: 'row' }, addOther));
     }],
   ];
-  const menuBox = h('section', { class: 'card sell-menu' }, tabs(items, 'tickets'));
+  // Partner passes is the last tab, unless the mountain turned it off (Settings, Sell and gate).
+  if (partnerTab) items.push(['partners', 'Partner passes', async (b) => (await import('./partners.js')).drawPartners(b)]);
+  const asked = queryTab();
+  const menuBox = h('section', { class: 'card sell-menu' }, tabs(items, items.some((i) => i[0] === asked) ? asked : 'tickets'));
 
   // ---- the basket
   async function refresh() {

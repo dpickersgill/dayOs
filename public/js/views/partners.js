@@ -1,6 +1,6 @@
-// Front desk > Partner passes: the Indy Pass and other partner passes the mountain honors. The window redeems a day
-// (free, or at the program's discount once the free days are used), the visits list adds them up for checking the
-// partner's statement, and a manager sets the rules, blackout dates and online reservations.
+// Sell > Partner passes: the Indy Pass and other partner passes the mountain honors. The window redeems a day (free, or
+// at the program's discount once the free days are used), the visits list adds them up for checking the partner's
+// statement. A manager sets the rules, blackout dates and online reservations in Settings, Sell and gate.
 import { get, post, patch, put, download } from '../api.js';
 import { h, clear, input, select, field, button, toast, formDialog, dialog, confirmDialog, empty, errorBox, state, fmtDate, money, todayStr, isManager, fail } from '../ui.js';
 
@@ -15,31 +15,70 @@ const rulesText = (p) => [
 export async function render(root) {
   const body = h('div', { class: 'stack' });
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Partner passes')), body);
+  await drawPartners(body);
+}
+
+/** The window's view, also the last tab in Sell: redeem a day and see the visits. The rules are set in Settings. */
+export async function drawPartners(body) {
   async function load() {
     clear(body).append(h('p', { class: 'loading' }, 'Loading partner passes…'));
     let r;
     try { r = await get('/partner-passes'); } catch (err) { clear(body).append(errorBox(err)); return; }
     clear(body);
-    if (!r.data.length) {
-      body.append(empty('No partner passes yet. Set up the Indy Pass, or another pass whose holders ski here, and the window can record their days.',
-        isManager() ? h('div', { class: 'row' }, button('Set up the Indy Pass', () => indySetup(r, load), { kind: 'primary' }), button('Add another partner pass', () => setup(null, r, load))) : null));
+    const live = r.data.filter((p) => p.active);
+    if (!live.length) {
+      body.append(empty(r.data.length ? 'No partner pass is switched on.' : 'No partner passes yet. Once a manager sets up the Indy Pass, or another pass whose holders ski here, the window records their days here.',
+        isManager() ? h('a', { class: 'btn primary', href: '#/settings/sell' }, 'Set up partner passes in Settings') : null));
       return;
     }
-    for (const p of r.data) {
-      body.append(h('section', { class: 'panel stack' },
+    for (const p of live) {
+      body.append(h('section', { class: 'panel stack partner-desk', 'data-partner': p.id },
         h('div', { class: 'row between' },
-          h('div', null, h('h2', null, p.name, p.active ? null : [' ', state('Off', 'neutral')]), h('p', { class: 'muted small' }, rulesText(p))),
-          h('div', { class: 'row' },
-            p.active ? button('Redeem a day', () => redeem(p, r, load), { kind: 'primary' }) : null,
-            button('Visits', () => visits(p)),
-            isManager() ? button('Rules', () => setup(p, r, load), { small: true }) : null,
-            isManager() && p.levels.some((l) => l.blackouts) ? button('Blackout dates', () => blackouts(p, r, load), { small: true }) : null)),
+          h('div', null, h('h2', null, p.name), h('p', { class: 'muted small' }, rulesText(p))),
+          h('div', { class: 'row' }, button('Redeem a day', () => redeem(p, r, load), { kind: 'primary' }), button('Visits', () => visits(p)))),
         h('p', null, `${p.today_count} visit${p.today_count === 1 ? '' : 's'} today.`, p.today_unchecked ? [' ', state(`${p.today_unchecked} reserved online, ID not checked yet`, 'warn')] : null),
         p.online ? h('p', { class: 'small' }, 'Guests reserve free days online at ', h('a', { href: r.reserve_path, target: '_blank', rel: 'noopener' }, `${location.origin}${r.reserve_path}`), '. Put the link on your website.') : null,
         p.staff_note ? h('p', { class: 'muted small' }, p.staff_note) : null));
     }
-    if (isManager() && !r.data.some((p) => p.name === 'Indy Pass')) body.append(h('div', { class: 'row' }, button('Set up the Indy Pass', () => indySetup(r, load), { small: true }), button('Add another partner pass', () => setup(null, r, load), { small: true })));
-    else if (isManager()) body.append(h('div', { class: 'row' }, button('Add another partner pass', () => setup(null, r, load), { small: true })));
+    if (isManager()) body.append(h('p', { class: 'muted small' }, 'Rules, blackout dates and new partner passes are in ', h('a', { href: '#/settings/sell' }, 'Settings, Sell and gate'), '.'));
+  }
+  await load();
+}
+
+/** Setup shown in Settings, Sell and gate (managers): each pass's rules and blackout dates, and whether Sell shows the tab. */
+export const settingsPages = {
+  partners: { title: 'Partner passes', render: (panel) => drawPartnerSetup(panel) },
+};
+
+async function drawPartnerSetup(panel) {
+  const tab = await get('/partner-passes/tab');
+  const sw = h('input', { type: 'checkbox', checked: tab.show, id: 'partner-tab-on', 'data-setting': 'partner_tab' });
+  sw.addEventListener('change', async () => {
+    sw.disabled = true;
+    try { const out = await put('/partner-passes/tab', { show: sw.checked }); sw.checked = out.show; toast(out.show ? 'Sell shows the Partner passes tab' : 'Sell no longer shows the Partner passes tab'); } catch (err) { sw.checked = !sw.checked; fail(err); }
+    sw.disabled = false;
+  });
+  const list = h('div', { class: 'stack' });
+  panel.append(h('div', { class: 'stack' },
+    h('div', { class: 'app-setting-row' }, h('label', { for: 'partner-tab-on' }, h('b', null, 'Show the Partner passes tab in Sell'), h('span', { class: 'muted small' }, 'For mountains that honor the Indy Pass or another partner pass. Turn it off if you take none.')), sw),
+    list));
+  async function load() {
+    clear(list).append(h('p', { class: 'loading' }, 'Loading partner passes…'));
+    let r;
+    try { r = await get('/partner-passes'); } catch (err) { clear(list).append(errorBox(err)); return; }
+    clear(list);
+    if (!r.data.length) list.append(h('p', { class: 'muted' }, 'No partner passes yet. Set up the Indy Pass, or another pass whose holders ski here, and the window can record their days.'));
+    for (const p of r.data) {
+      list.append(h('div', { class: 'row between partner-rule', 'data-partner': p.id },
+        h('div', null, h('b', null, p.name), p.active ? null : [' ', state('Off', 'neutral')], h('p', { class: 'muted small' }, rulesText(p) || 'No limits.')),
+        h('div', { class: 'row' },
+          button('Rules', () => setup(p, r, load), { small: true, label: `${p.name} rules` }),
+          button('Visits', () => visits(p), { small: true, label: `${p.name} visits` }),
+          p.levels.some((l) => l.blackouts) ? button('Blackout dates', () => blackouts(p, r, load), { small: true, label: `${p.name} blackout dates` }) : null)));
+    }
+    list.append(h('div', { class: 'row' },
+      r.data.some((p) => p.name === 'Indy Pass') ? null : button('Set up the Indy Pass', () => indySetup(r, load), { kind: r.data.length ? null : 'primary', small: Boolean(r.data.length) }),
+      button('Add another partner pass', () => setup(null, r, load), { small: true })));
   }
   await load();
 }

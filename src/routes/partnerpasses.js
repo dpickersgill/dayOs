@@ -2,6 +2,7 @@
 
 // Front desk > Partner passes (/partner-passes, part of Sell): the Indy Pass and other partner passes a mountain honors.
 //   GET  /                         the programs, with today's visits
+//   GET  /tab , PUT /tab           whether Sell shows its Partner passes tab (the mountain can turn it off; a manager)
 //   POST /indy                     set up the Indy Pass from its usual rules (a manager)
 //   POST / , PATCH /:id            a program's rules (a manager)
 //   PUT  /:id/blackouts            its blackout dates
@@ -71,14 +72,28 @@ router.get('/', desk, async (req, res) => {
   const counts = await rows(pool, `SELECT r.program_id, COUNT(*) AS n, SUM(r.channel = 'online' AND r.id_checked = 0) AS unchecked FROM partner_redemptions r WHERE r.tenant_id = ? AND r.on_date = ? AND ${P.COUNTS} GROUP BY r.program_id`, [tenantId, today]);
   const blackouts = await rows(pool, 'SELECT program_id, on_date FROM partner_blackouts WHERE tenant_id = ? AND on_date >= ? ORDER BY on_date', [tenantId, addDays(today, -1)]);
   const products = await rows(pool, "SELECT id, name FROM products WHERE tenant_id = ? AND kind = 'day_ticket' AND active = 1 ORDER BY name", [tenantId]);
-  const slug = (await one(pool, 'SELECT slug FROM tenants WHERE id = ?', [tenantId])).slug;
+  const { slug, partner_tab: tab } = await one(pool, 'SELECT slug, partner_tab FROM tenants WHERE id = ?', [tenantId]);
   res.json({
-    today, products, reserve_path: `/reserve/${slug}`,
+    today, products, reserve_path: `/reserve/${slug}`, show_tab: Boolean(Number(tab)),
     data: programs.map((p) => {
       const c = counts.find((x) => x.program_id === p.id);
       return { ...P.shape(p), today_count: c ? Number(c.n) : 0, today_unchecked: c ? Number(c.unchecked || 0) : 0, blackouts: blackouts.filter((b) => b.program_id === p.id).map((b) => day(b.on_date)) };
     }),
   });
+});
+
+// Sell shows a Partner passes tab unless the mountain turns it off (Settings, Sell and gate).
+router.get('/tab', desk, async (req, res) => {
+  const t = await one(pool, 'SELECT partner_tab FROM tenants WHERE id = ?', [req.auth.tenantId]);
+  res.json({ show: Boolean(t && Number(t.partner_tab)) });
+});
+
+router.put('/tab', boss, validate(z.object({ show: z.boolean() })), async (req, res) => {
+  const { tenantId } = req.auth;
+  const before = Boolean(Number((await one(pool, 'SELECT partner_tab FROM tenants WHERE id = ?', [tenantId])).partner_tab));
+  await pool.query('UPDATE tenants SET partner_tab = ? WHERE id = ?', [req.body.show ? 1 : 0, tenantId]);
+  await audit(pool, req, 'update', 'tenants', tenantId, { partner_tab: { before, after: req.body.show } });
+  res.json({ show: req.body.show });
 });
 
 router.post('/indy', boss, validate(z.object({ product_id: z.number().int().positive() })), async (req, res) => {
