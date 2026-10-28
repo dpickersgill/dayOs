@@ -231,9 +231,13 @@ router.get('/orders/:id/receipt', sellers, async (req, res) => {
     LEFT JOIN people p ON p.id = i.person_id AND p.tenant_id = i.tenant_id WHERE i.tenant_id = ? AND i.order_id = ? ORDER BY i.id`, [tenantId, order.id]);
   const payments = await rows(pool, 'SELECT tender, amount_cents, tendered_cents, card_brand, card_last4, comp_reason FROM order_payments WHERE tenant_id = ? AND order_id = ? ORDER BY id', [tenantId, order.id]);
   const taxes = await rows(pool, 'SELECT name, rate_bps, amount_cents FROM order_taxes WHERE tenant_id = ? AND order_id = ? ORDER BY id', [tenantId, order.id]);
-  const tickets = await rows(pool, `SELECT tk.code, tk.valid_from, tk.valid_to, tk.uses_remaining, tk.status, pr.name AS product, pr.kind, p.first_name, p.last_name, i.tier
+  // An activity ticket also carries its attraction and time slot (lib/activities.js), printed on its slip.
+  const tickets = await rows(pool, `SELECT tk.code, tk.valid_from, tk.valid_to, tk.uses_remaining, tk.status, pr.name AS product, pr.kind, p.first_name, p.last_name, i.tier,
+      LEFT(ab.start_time, 5) AS start_time, LEFT(ab.end_time, 5) AS end_time, att.name AS attraction
     FROM tickets tk JOIN order_items i ON i.id = tk.order_item_id AND i.tenant_id = tk.tenant_id JOIN products pr ON pr.id = tk.product_id AND pr.tenant_id = tk.tenant_id
-    LEFT JOIN people p ON p.id = tk.person_id AND p.tenant_id = tk.tenant_id WHERE tk.tenant_id = ? AND i.order_id = ? ORDER BY tk.id`, [tenantId, order.id]);
+    LEFT JOIN people p ON p.id = tk.person_id AND p.tenant_id = tk.tenant_id
+    LEFT JOIN activity_bookings ab ON ab.tenant_id = tk.tenant_id AND ab.ticket_id = tk.id LEFT JOIN attractions att ON att.tenant_id = ab.tenant_id AND att.id = ab.attraction_id
+    WHERE tk.tenant_id = ? AND i.order_id = ? ORDER BY tk.id`, [tenantId, order.id]);
   const giftCards = await rows(pool, 'SELECT code, initial_cents, recipient_name FROM gift_cards WHERE tenant_id = ? AND order_id = ?', [tenantId, order.id]);
   const buyer = order.person_id ? await one(pool, 'SELECT first_name, last_name, email FROM people WHERE tenant_id = ? AND id = ?', [tenantId, order.person_id]) : null;
   const cashier = order.user_id ? await one(pool, 'SELECT COALESCE(email, username) AS email FROM users WHERE tenant_id = ? AND id = ?', [tenantId, order.user_id]) : null;

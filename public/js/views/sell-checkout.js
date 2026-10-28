@@ -1,5 +1,5 @@
 // Checkout for the basket. Two steps in one dialog: who the sale is for (the customer, and each person a lesson,
-// rental or program place is for), then how it is paid. The counter builds the basket first; this is where the
+// rental, program place or activity is for, with each rider's limits confirmed), then how it is paid. The counter builds the basket first; this is where the
 // customer's details are added. The receipt at the end shows ticket and gift card codes, change due and bookings.
 
 import { typeName } from '../guesttypes.js';
@@ -8,9 +8,11 @@ import { h, clear, money, toCents, centsToInput, state, input, select, field, bu
 import { customerCapture } from './customer-form.js';
 import { printButtons } from '../print.js';
 
-const WHO_TYPES = ['lesson', 'lesson_package', 'rental', 'program'];
-export const lineApi = (l, who, holders) => {
+const clock12 = (t) => { const [hh, mm] = String(t || '').split(':').map(Number); return `${hh % 12 || 12}:${String(mm || 0).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`; };
+const WHO_TYPES = ['lesson', 'lesson_package', 'rental', 'program', 'activity'];
+export const lineApi = (l, who, holders, limitsOk) => {
   const { type } = l;
+  if (type === 'activity') return { type, product_id: l.product_id, tier: l.tier, valid_on: l.valid_on, ...(l.start_time ? { start_time: l.start_time } : {}), ...(who ? { participant: who } : {}), ...(limitsOk ? { limits_ok: true } : {}) };
   if (type === 'ticket') return { type, product_id: l.product_id, tier: l.tier, quantity: l.quantity, valid_on: l.valid_on, ...(holders ? { holders } : {}) };
   if (type === 'lesson') return { type, session_id: l.session_id, tier: l.tier, ...(who ? { participant: who } : {}) };
   if (type === 'lesson_package') return { type, product_id: l.product_id, tier: l.tier, ...(who ? { participant: who } : {}) };
@@ -63,7 +65,7 @@ export async function gearDialog(line, onDone, profile = null) {
  * onSold(order) runs after a successful sale.
  */
 export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null, waiverText = null, quickSale = null, drawerOpen = () => true, onOpenDrawer = null }) {
-  const hasTickets = basket.some((l) => l.type === 'ticket');
+  const hasTickets = basket.some((l) => l.type === 'ticket' || l.type === 'activity'); // an activity asks for the same details as a ticket
   const hasLesson = basket.some((l) => l.type === 'lesson' || l.type === 'lesson_package');
   const hasRental = basket.some((l) => l.type === 'rental');
   const total = quote.total_cents;
@@ -74,7 +76,10 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       for (let n = 0; n < l.quantity; n++) slots.push({ line: l, text: l.quantity > 1 ? `${l.name} ${n + 1} of ${l.quantity}` : l.name, aria: l.quantity > 1 ? `${l.name} ${n + 1}` : l.name });
     } else if (WHO_TYPES.includes(l.type)) slots.push({ line: l, text: l.name, aria: l.name });
   }
-  const slotNeedsWaiver = (s) => s.line.type === 'lesson' || s.line.type === 'rental';
+  const slotNeedsWaiver = (s) => s.line.type === 'lesson' || s.line.type === 'rental' || (s.line.type === 'activity' && Boolean(s.line.attraction && s.line.attraction.waiver_required));
+  // An activity rider: the clerk ticks that they meet the attraction's height, weight and age limits. Kept per slot.
+  const limitsOk = new Map();
+  const needsLimits = (s) => s.line.type === 'activity' && Boolean(s.line.attraction && s.line.attraction.has_limits);
   // Quick sale: a basket of only day tickets, multi-day tickets, punch cards or vouchers can be sold with no name.
   const quickOk = Boolean(quickSale && quickSale.allowed && basket.length && basket.every((l) => l.type === 'ticket' && quickSale.kinds.includes(l.kind)));
   let quick = false;
@@ -112,6 +117,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
 
   function refreshWho() {
     clear(whoBox);
+    riderEls.clear();
     refreshGuardians();
     refreshWaivers();
     for (const e of everyone()) e.cap.photoNeeded(usedBy(e.id).some((s) => s.line.kind === 'season_pass'));
@@ -122,9 +128,22 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       const sel = select([['customer', `Same as ${custName()}`], ...people.map((p) => [p.id, nameOf(p)])], assign.get(s), { 'aria-label': `Who is ${s.aria} for` });
       sel.addEventListener('change', () => { assign.set(s, sel.value); refreshWho(); });
       const extra = l.type === 'rental' ? [button(l.items && l.items.length ? `Gear: ${l.items.length} chosen` : 'Choose gear', () => openGear(s), { small: true })] : [];
-      whoBox.append(h('div', { class: 'who-row' }, h('div', null, h('strong', null, s.text), h('small', { class: 'muted' }, ` ${l.detail || ''}`)), sel, ...extra));
+      if (needsLimits(s)) {
+        const cb = h('input', { type: 'checkbox', checked: Boolean(limitsOk.get(s)), 'data-limits': '' });
+        cb.addEventListener('change', () => { limitsOk.set(s, cb.checked); });
+        const who = h('span', { class: 'rider-name' });
+        riderEls.set(s, who);
+        extra.push(h('label', { class: 'check limits-ok' }, cb, h('span', null, ' ', who, ' meets the limits', h('small', { class: 'muted' }, ` ${l.attraction.limits_text}`))));
+      }
+      whoBox.append(h('div', { class: `who-row${needsLimits(s) ? ' who-limits' : ''}` }, h('div', null, h('strong', null, s.text), h('small', { class: 'muted' }, ` ${l.detail || ''}`)), sel, ...extra));
     }
     whoBox.append(button('Someone else is taking part', () => addPerson(), { small: true }));
+    renameRiders();
+  }
+  /** The rider's name beside each limits box, kept up to date as names are typed. */
+  const riderEls = new Map();
+  function renameRiders() {
+    for (const [s, el] of riderEls) { el.textContent = (everyone().find((e) => e.id === assign.get(s)) || {}).name || 'The rider'; }
   }
   /** Sizing on file (typed above, or kept from last time) and the last DIN used, then the gear chooser. */
   async function openGear(s) {
@@ -194,7 +213,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       } }, `Add ${k.first_name}${k.age !== null && k.age !== undefined ? ` (${k.age})` : ''}`))));
     } catch (_) { /* family is a convenience; the sale does not depend on it */ }
   }
-  customer.el.addEventListener('input', () => { for (const o of whoBox.querySelectorAll('option[value=customer]')) o.textContent = `Same as ${custName()}`; refreshGuardians(); refreshWaivers(); });
+  customer.el.addEventListener('input', () => { for (const o of whoBox.querySelectorAll('option[value=customer]')) o.textContent = `Same as ${custName()}`; refreshGuardians(); refreshWaivers(); renameRiders(); });
 
   const step1 = h('div', { class: 'stack' },
     h('h3', null, 'Customer'),
@@ -409,6 +428,11 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       if (e.cap.isMinor() && guardianFor(e.id) === '' && !(e.cap.person() && e.cap.person().id)) return `${e.name} is under 18: choose a parent or guardian (18 or over) who is signing for them.`;
     }
     for (const s of slots) if (s.line.type === 'rental' && !(s.line.items && s.line.items.length)) return `Choose the gear for ${s.line.name}.`;
+    for (const s of slots) {
+      if (!needsLimits(s) || limitsOk.get(s)) continue;
+      const who = (everyone().find((e) => e.id === assign.get(s)) || {}).name || 'each rider';
+      return `Confirm that ${who} meets the limits for ${s.line.attraction.name}. ${s.line.attraction.limits_text}`;
+    }
     return null;
   }
 
@@ -428,7 +452,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       const mine = slots.filter((s) => s.line === l);
       if (l.type === 'ticket') return lineApi(l, null, mine.map((s) => assign.get(s)));
       const who = mine.length ? assign.get(mine[0]) : null;
-      return lineApi(l, who && who !== 'customer' ? who : null);
+      return lineApi(l, who && who !== 'customer' ? who : null, null, mine.length ? limitsOk.get(mine[0]) : false);
     });
     return body;
   }
@@ -478,7 +502,8 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       codes(out.gift_cards.map((g) => h('div', { class: 'code' }, g.code, h('small', null, `${money(g.amount_cents)}${g.recipient_name ? ` for ${g.recipient_name}` : ''}`))), 'Gift cards (give the guest the code)'),
       out.lessons.length ? h('section', { class: 'stack' }, h('h3', null, 'Lessons booked'), h('ul', { class: 'plain' }, out.lessons.map((l) => h('li', null, `${l.name}, ${fmtDateTime(l.starts_at)}`)))) : null,
       out.rentals.length ? h('section', { class: 'stack' }, h('h3', null, 'Gear out'), h('ul', { class: 'plain' }, out.rentals.map((r) => h('li', null, `${r.items.join(', ')}, due back ${fmtDateTime(r.due_at)}`)))) : null,
-      out.programs.length ? h('section', { class: 'stack' }, h('h3', null, 'Program places'), h('ul', { class: 'plain' }, out.programs.map((p) => h('li', null, p.name)))) : null);
+      out.programs.length ? h('section', { class: 'stack' }, h('h3', null, 'Program places'), h('ul', { class: 'plain' }, out.programs.map((p) => h('li', null, p.name)))) : null,
+      out.activities && out.activities.length ? h('section', { class: 'stack' }, h('h3', null, 'Activities booked'), h('ul', { class: 'plain' }, out.activities.map((a) => h('li', null, `${a.holder}: ${a.product} at ${a.attraction}, ${a.date}${a.start_time ? `, ${clock12(a.start_time)} to ${clock12(a.end_time)}` : ', all day'}`))), h('p', { class: 'muted small' }, 'Each ticket lets one guest in once, at that attraction, from 15 minutes before the time.')) : null);
     nav.append(button('New sale', () => dlg.close(), { kind: 'primary' }));
   }
 

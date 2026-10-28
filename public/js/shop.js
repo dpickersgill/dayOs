@@ -37,6 +37,8 @@ function langToggle() {
 }
 
 
+// '14:00' -> '2:00 PM' (an activity's time slot)
+const clock = (t) => { const [hh, mm] = String(t || '').split(':').map(Number); return `${hh % 12 || 12}:${String(mm || 0).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`; };
 const fmtDay = (s) => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric' }).format(dateOf(s));
 function brandIt(page) {
   const b = page.brand;
@@ -100,9 +102,13 @@ async function showOrder(token) {
         paid ? h('div', { class: 'pass-grid' }, v.tickets.map((t) => h('article', { class: 'pass-card' },
           h('span', { class: 'who' }, `${t.first_name || ''} ${t.last_name || ''}`.trim() || 'Ticket'), h('span', null, t.product),
           h('span', { class: 'muted' }, t.valid_from === t.valid_to ? dayLong(t.valid_from) : `${dayLong(t.valid_from)} to ${dayLong(t.valid_to)}`),
+          t.kind === 'activity' ? h('span', { class: 'act-when' }, `${t.attraction ? `${t.attraction}, ` : ''}${t.start_time ? `${clock(t.start_time)} to ${clock(t.end_time)}. Arrive up to 15 minutes before.` : 'Any time that day.'} Good once.`) : null,
           t.status === 'void' ? h('span', { class: 'void' }, 'Canceled and refunded') : [code128(t.code, { height: 64, module: 2 }), qr(t.code, { size: 120 })],
           h('span', { class: 'code' }, t.code),
           t.movable && v.changes ? changeBox(t, v.changes, token) : null))) : null,
+        paid && v.waiver_link ? h('section', { class: 'card stack act-waiver', role: 'note' }, h('h2', null, 'One more step: the waiver'),
+          h('p', null, `Before riding, ${v.waiver_needed.join(', ')} ${v.waiver_needed.length === 1 ? 'needs' : 'need'} a signed waiver. A parent or guardian signs for anyone under 18.`),
+          h('a', { class: 'btn primary', href: v.waiver_link }, 'Sign the waiver now')) : null,
         paid && v.gift_cards && v.gift_cards.length ? h('div', { class: 'pass-grid' }, v.gift_cards.map((g) => h('article', { class: 'pass-card' }, h('span', { class: 'who' }, `Gift card ${money(g.amount_cents)}`), g.recipient_name ? h('span', null, `For ${g.recipient_name}`) : null, g.message ? h('span', { class: 'muted' }, g.message) : null, code128(g.code, { height: 64, module: 2 }), h('span', { class: 'code' }, g.code)))) : null));
     return v;
   };
@@ -216,6 +222,7 @@ async function showShop() {
 
   async function pickDay(d) {
     picked = d; drawCal();
+    for (const follow of dayFollowers) follow(d); // activity days the guest has not set follow the calendar
     const ph = document.getElementById('pick-hint'); if (ph) ph.hidden = true;
     svcHead.textContent = `2. Choose services for ${dayLong(d)}`;
     clear(svcEl).append(h('p', { class: 'muted', role: 'status' }, T('Loading prices…')));
@@ -238,6 +245,81 @@ async function showShop() {
       clear(svcEl).append(cards.length ? h('div', { class: 'prod-grid' }, cards) : h('p', { class: 'muted' }, T('Nothing is on sale online for this day.')), ...(soldOut ? [waitlistBox(d)] : []));
     } catch (e) { clear(svcEl).append(h('div', { role: 'alert', class: 'error-box' }, e.message)); }
   }
+
+  // ---- activities: by attraction, the day first, then a time with places left; one row per guest below
+  const acts = []; // { id, act, product, attraction, date, start, end, f, l, age, priceEl, badEl, el }
+  const dayFollowers = new Set();
+  const redraws = new Map(); // attraction id -> redraw its times (after a guest is added or removed)
+  const priceText = (p) => {
+    if (!p.prices.length) return null;
+    const same = p.prices.every((x) => x.price_cents === p.prices[0].price_cents);
+    return h('ul', { class: 'agelist' }, same ? h('li', null, h('span', null, T('Everyone')), h('b', null, money(p.prices[0].price_cents))) : p.prices.map((x) => h('li', null, h('span', null, AGE[x.tier]), h('b', null, money(x.price_cents)))));
+  };
+  function attractionCard(g) {
+    const a = g.attraction;
+    const id = `ad-${a.id}`;
+    const date = h('input', { type: 'date', id, min: today, max: lastDay, value: picked || today });
+    let touched = false;
+    const list = h('div', { class: 'stack', 'aria-live': 'polite' });
+    let last = null;
+    const load = async () => {
+      clear(list).append(h('p', { class: 'muted', role: 'status' }, T('Loading prices…')));
+      try {
+        const want = date.value;
+        const out = await call('GET', `/activities?attraction_id=${a.id}&date=${encodeURIComponent(want)}`);
+        if (want !== date.value) return;
+        last = out; drawTimes();
+      } catch (e) { clear(list).append(h('div', { role: 'alert', class: 'error-box' }, e.message)); }
+    };
+    const drawTimes = () => {
+      if (!last) return;
+      clear(list);
+      for (const p of last.products) {
+        if (!p.available) { list.append(h('div', { class: 'act-prod off' }, h('h4', null, p.name), h('span', { class: 'bad' }, p.reason || 'Not sold on this day.'))); continue; }
+        const btns = p.slots.map((sl) => {
+          const mine = acts.filter((r) => r.product.id === p.id && r.date === last.date && (r.start || null) === (sl.start || null)).length;
+          const left = sl.left === null ? null : sl.left - mine;
+          const full = left !== null && left < 1;
+          const when = sl.start ? clock(sl.start) : 'All day';
+          return h('button', { type: 'button', class: `btn slot${full ? ' full' : ''}`, disabled: full, 'aria-label': `${p.name}, ${dayLong(last.date)}, ${sl.start ? `${clock(sl.start)} to ${clock(sl.end)}` : 'all day'}, ${left === null ? 'places open' : full ? 'full' : `${left} left`}. Add a guest.`,
+            onclick: () => addAct(g, p, last.date, sl) }, h('strong', null, when), h('small', null, left === null ? 'Open' : full ? 'Full' : `${left} left`));
+        });
+        list.append(h('div', { class: 'act-prod' }, h('h4', null, p.name), priceText(p), btns.length ? h('div', { class: 'slot-grid' }, btns) : h('p', { class: 'muted' }, 'No times left on this day.')));
+      }
+      if (!last.products.length) list.append(h('p', { class: 'muted' }, T('Nothing is on sale online for this day.')));
+    };
+    redraws.set(a.id, drawTimes);
+    date.addEventListener('change', () => { touched = true; load(); });
+    dayFollowers.add((d) => { if (!touched && date.value !== d) { date.value = d; load(); } });
+    load();
+    return h('article', { class: 'act-card stack', dataset: { attraction: String(a.id) } }, h('h3', null, a.name),
+      a.limits_text ? h('p', { class: 'act-limits' }, h('strong', null, a.limits_text)) : null,
+      a.waiver_required ? h('p', { class: 'muted small' }, 'Every rider needs a signed waiver. You can sign it online right after paying.') : null,
+      lab(id, '1. Day', date), h('p', { class: 'muted small' }, '2. Pick a time to add a guest. Tap again for each guest.'), list);
+  }
+  function addAct(g, p, date, sl) {
+    const id = ++uid;
+    const f = h('input', { id: `f${id}`, autocomplete: 'off', maxlength: 60, required: true });
+    const l = h('input', { id: `l${id}`, autocomplete: 'off', maxlength: 60, required: true });
+    const age = h('select', { id: `a${id}`, required: true }, h('option', { value: '' }, T('Choose…')), ONLINE_TYPES.map((k) => h('option', { value: k }, AGE[k])));
+    const priceEl = h('span', { class: 'line-price' });
+    const badEl = h('span', { class: 'bad', role: 'alert' });
+    const row = { id, act: true, product: p, attraction: g.attraction, date, start: sl.start || null, end: sl.end || null, f, l, age, priceEl, badEl };
+    const when = sl.start ? `${clock(sl.start)} to ${clock(sl.end)}` : 'all day';
+    row.el = h('div', { class: 'ticket-row act-row' },
+      h('div', { class: 'row-head' }, h('div', null, h('h3', null, p.name), h('span', { class: 'muted' }, `${g.attraction.name}, ${dayLong(date)}, ${when}`)),
+        h('span', null, priceEl, ' ', h('button', { class: 'btn link', type: 'button', onclick: () => { acts.splice(acts.indexOf(row), 1); row.el.remove(); (redraws.get(g.attraction.id) || (() => {}))(); sync(); } }, T('Remove')))),
+      h('div', { class: 'cols' }, lab(`f${id}`, T('First name of the person using it'), f), lab(`l${id}`, T('Last name'), l), lab(`a${id}`, T('Age group'), age, T('Sets the price'))),
+      g.attraction.limits_text ? h('p', { class: 'small act-limits' }, g.attraction.limits_text) : null, badEl);
+    for (const el of [f, l, age]) el.addEventListener('input', sync);
+    acts.push(row); rowsEl.append(row.el); (redraws.get(g.attraction.id) || (() => {}))(); sync();
+    f.focus();
+  }
+  const actsEl = (page.activities || []).length ? h('section', { class: 'card stack act-shop' }, h('h2', null, 'Activities'),
+    h('p', { class: 'muted' }, 'Pick a day, then a time. Each guest gets their own ticket, good once at that attraction.'),
+    page.activities.map((g) => attractionCard(g))) : null;
+  const limitsCb = h('input', { type: 'checkbox', id: 'c-limits' });
+  const limitsRow = h('label', { class: 'check-row', for: 'c-limits', hidden: true }, limitsCb, h('span', null, 'Every rider in this order meets the height, weight and age limits shown for their activity.'));
 
   // Guests from earlier visits, kept on this device only.
   const GKEY = `shop-guests-${location.pathname}`;
@@ -331,19 +413,21 @@ async function showShop() {
     } }, T('Add gift card'))), giftList);
   const promoEl = h('div', { class: 'stack' }, lab('promo', T('Promo code'), promo));
   const addonsOf = () => [...qtys].filter(([, n]) => n > 0).map(([product_id, quantity]) => ({ product_id, quantity }));
-  const anything = () => basket.length > 0 || addonsOf().length > 0 || gifts.length > 0;
+  const anything = () => basket.length > 0 || acts.length > 0 || addonsOf().length > 0 || gifts.length > 0;
 
   function sync() {
     clearTimeout(timer); showErr('');
     pay.disabled = true;
-    hint.hidden = basket.length > 0;
+    hint.hidden = basket.length > 0 || acts.length > 0;
+    limitsRow.hidden = !acts.some((r) => r.attraction.limits_text);
     if (!anything()) { clear(totalEl); pay.textContent = T('Add a ticket to start'); return; }
     pay.textContent = T('Fill in every ticket to pay');
     showEstimate();
     timer = setTimeout(quote, 350);
   }
   const itemsOf = (withPhoto = false) => basket.map((r) => ({ product_id: r.product.id, valid_on: r.date, holder: { first_name: r.f.value.trim(), last_name: r.l.value.trim(), ...(r.pass ? { date_of_birth: r.dob.value, ...(withPhoto ? { photo: r.shot.data } : {}) } : { age_group: r.age.value }) } }));
-  const basketOf = (withPhoto = false) => ({ items: itemsOf(withPhoto), addons: addonsOf(), gifts, ...(promo.value.trim() ? { promo_code: promo.value.trim() } : {}) });
+  const activitiesOf = () => acts.map((r) => ({ product_id: r.product.id, valid_on: r.date, ...(r.start ? { start_time: r.start } : {}), holder: { first_name: r.f.value.trim(), last_name: r.l.value.trim(), age_group: r.age.value } }));
+  const basketOf = (withPhoto = false) => ({ items: itemsOf(withPhoto), addons: addonsOf(), gifts, activities: activitiesOf(), ...(promo.value.trim() ? { promo_code: promo.value.trim() } : {}) });
   // A running estimate from the listed prices, shown straight away; the exact total (tax, discounts) follows once every
   // ticket is filled in.
   function showEstimate() {
@@ -354,20 +438,21 @@ async function showShop() {
       if (hit) return hit.price_cents;
       return prices.length ? Math.min(...prices.map((x) => x.price_cents)) : 0;
     };
-    const tickets = basket.reduce((n, r) => n + priceOf(r), 0);
+    const tickets = [...basket, ...acts].reduce((n, r) => n + priceOf(r), 0);
     const extras = [...qtys].reduce((n, [id, q]) => n + q * ((page.addons || []).find((a) => a.id === id) || { price_cents: 0 }).price_cents, 0) + gifts.reduce((n, g) => n + g.amount_cents, 0);
-    const count = basket.length + [...qtys.values()].reduce((n, q) => n + q, 0) + gifts.length;
+    const count = basket.length + acts.length + [...qtys.values()].reduce((n, q) => n + q, 0) + gifts.length;
     clear(totalEl).append(h('span', { class: 'muted' }, `${count} ${count === 1 ? T('item') : T('items')}`), h('span', { class: 'grand' }, `${T('About')} ${money(tickets + extras)}`), h('span', { class: 'muted small' }, T('The exact total, with tax, shows when every ticket is filled in.')));
   }
   async function quote() {
-    for (const r of basket) { r.badEl.textContent = ''; r.priceEl.textContent = ''; }
-    if (!basket.every(ready)) { showEstimate(); return; }
+    for (const r of [...basket, ...acts]) { r.badEl.textContent = ''; r.priceEl.textContent = ''; }
+    if (!basket.every(ready) || !acts.every(ready)) { showEstimate(); return; }
     const mine = ++seq;
     try {
       const q = await call('POST', '/quote', basketOf());
       if (mine !== seq) return;
       last = q;
       q.lines.forEach((ln, i) => { basket[i].priceEl.textContent = `${TIER[ln.tier] || ''} ${money(ln.unit_cents)}`; });
+      (q.activities || []).forEach((ln, i) => { if (acts[i]) acts[i].priceEl.textContent = `${TIER[ln.tier] || ''} ${money(ln.unit_cents)}`; });
       const saved = q.lines.reduce((n, l) => n + (l.saved_cents || 0), 0);
       appendAll(clear(totalEl), ...[saved ? h('span', { class: 'save-note' }, `You save ${money(saved)} by buying online`) : null, h('span', { class: 'muted' }, `Subtotal ${money(q.subtotal_cents)}`),
         q.discount_cents ? h('span', { class: 'save-note' }, `${q.promo}: -${money(q.discount_cents)}`) : null,
@@ -390,11 +475,13 @@ async function showShop() {
   const form = h('form', { class: 'shop-grid', novalidate: true }, h('div', { class: 'stack shop-main' },
     h('section', { class: 'card stack' }, h('h2', null, T('1. Pick a day')), calEl),
     h('section', { class: 'card stack' }, svcHead, h('p', { id: 'pick-hint', class: 'muted' }, T('Pick a day above to see what is on sale and the price for each age.')), svcEl),
+    actsEl,
     h('section', { class: 'card stack' }, h('h2', null, T('3. Who is each ticket for?')), rowsEl, hint),
     addonsEl,
     h('section', { class: 'card stack' }, h('h2', null, T('4. Your details')),
       h('div', { class: 'ticket-row' }, h('div', { class: 'cols' }, lab('c-first', T('First name'), bf), lab('c-last', T('Last name'), bl), lab('c-email', T('Email (we send the tickets here)'), be), lab('c-phone', T('Mobile phone'), bp))),
       page.waiver_text ? [h('h3', null, T('Waiver')), h('div', { class: 'waiver-box', tabindex: '0' }, page.waiver_text), h('label', { class: 'check-row', for: 'c-waiver' }, waiver, h('span', null, T('I have read the waiver. I accept it for myself and for any child under 18 in this order. Other adults in the order will sign at the mountain.')))] : null,
+      limitsRow,
       h('label', { class: 'check-row', for: 'c-terms' }, terms, h('span', null, T('I understand tickets bought online are not refundable. If the mountain closes, I can call for help.'))),
       h('label', { class: 'check-row', for: 'c-news' }, news, h('span', null, `Email me news from ${page.mountain} (optional)`)),
       h('div', { class: 'hp' }, h('label', null, T('Leave this empty'), hp))),
@@ -404,14 +491,15 @@ async function showShop() {
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault(); showErr('');
-    if (!anything() || !basket.every(ready)) return showErr(T('Fill in the name and age group for every ticket.'));
+    if (!anything() || !basket.every(ready) || !acts.every(ready)) return showErr(T('Fill in the name and age group for every ticket.'));
+    if (!limitsRow.hidden && !limitsCb.checked) return showErr('Please confirm every rider meets the limits for their activity.');
     if (![bf, bl, be, bp].every((x) => x.value.trim())) return showErr(T('Fill in your name, email and phone.'));
     if (page.waiver_text && !waiver.checked) return showErr(T('Please read and accept the waiver.'));
     if (!terms.checked) return showErr(T('Please confirm you understand tickets are not refundable online.'));
     pay.disabled = true; pay.textContent = T('Taking you to the card page…');
     try {
       saveGuests();
-      const out = await call('POST', '/orders', { contact_first_name: bf.value.trim(), contact_last_name: bl.value.trim(), contact_email: be.value.trim(), contact_phone: bp.value.trim(), ...basketOf(true), waiver_accepted: waiver.checked, terms_accepted: terms.checked, news_opt_in: news.checked, website: hp.value });
+      const out = await call('POST', '/orders', { contact_first_name: bf.value.trim(), contact_last_name: bl.value.trim(), contact_email: be.value.trim(), contact_phone: bp.value.trim(), ...basketOf(true), waiver_accepted: waiver.checked, terms_accepted: terms.checked, limits_accepted: !limitsRow.hidden && limitsCb.checked, news_opt_in: news.checked, website: hp.value });
       if (out.checkout_url) location.href = out.checkout_url; else showErr(T('Something went wrong. Please try again.'));
     } catch (ex) { showErr(ex.message); pay.disabled = false; pay.textContent = last ? `${LANG === 'es' ? 'Pagar' : 'Pay'} ${money(last.total_cents)}` : 'Pay'; }
   });
