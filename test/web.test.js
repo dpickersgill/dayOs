@@ -661,7 +661,7 @@ test('role menus: a patroller starts on Patrol; the phone Menu shows Patrol sect
     assert.equal(window.location.hash, '#/patrol');
     assert.deepEqual([...document.querySelectorAll('.rail nav[aria-label=Main] .nav-row')].map((a) => a.dataset.key), ['patrol', 'conditions', 'inbox', 'myshifts']);
     assert.equal(document.querySelector('.rail .nav-sections').hidden, false, 'Patrol sections in the side menu');
-    assert.deepEqual([...document.querySelectorAll('.tabbar .tab')].map((t) => t.textContent), ['Patrol', 'Mountain status', 'Inbox', 'My shifts', 'Menu']);
+    assert.deepEqual([...document.querySelectorAll('.tabbar .tab')].map((t) => t.textContent), ['Patrol', 'Mountain', 'Inbox', 'My shifts', 'Menu']);
     await go('#/patrol/cases');
     document.querySelector('.tabbar .tab-menu').click();
     const sheet = document.querySelector('.menu-sheet.phone-menu');

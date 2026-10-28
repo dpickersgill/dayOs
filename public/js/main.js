@@ -470,7 +470,7 @@ function decorateHead(holder, key, params, mod) {
     const next = lead.nextElementSibling;
     if (next && next.tagName === 'P') lead.append(next);
   } else lead.classList.add('head-lead');
-  const crumbs = breadcrumb(holder, key, params);
+  const crumbs = key === 'settings' ? null : breadcrumb(holder, key, params); // Settings draws its own
   if (crumbs) lead.prepend(crumbs);
   // Help and the app's settings: next to the title, before the page's own buttons.
   const tools = h('div', { class: 'head-tools' });

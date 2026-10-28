@@ -3,7 +3,7 @@
     {
       "version": "2026.10.49",
       "date": "2026-11-08",
-      "title": "Patrol crews and kits, conditions on every report, staff injuries, lost and found",
+      "title": "New menus and Settings, patrol crews and kits, conditions on every report, staff injuries, lost and found",
       "notes": [
         {
           "kind": "new",
@@ -379,6 +379,93 @@
           "app": null,
           "who": null,
           "text": "Signing in from a browser that cannot remember your device now asks for an emailed code, the same as any new device."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "New menus. On a computer the menu is always open. Owners and managers see every app in five groups; everyone else sees a short menu for their job, such as Sell, Gate, Rentals, Customers, Waivers and Online shop at the ticket window. Every other app you may use is under All apps at the bottom, and Jump to still finds anything.",
+          "help": "getting-around"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Each tab has its own address, so Back returns to the tab you were on, and refreshing or sharing a link opens the same tab. The top of every page shows where you are, such as Rentals / Service, with a Help button beside the title.",
+          "help": "getting-around"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Account is now Settings, with its own list: your sign-in; the mountain's details, logins, shared computers, billing, card payments and the assistant; and a page for each app's setup. Change what you need, then press Save changes in the bar at the bottom.",
+          "help": "what-moved"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Setup moved out of the apps and into Settings: gate devices, partner pass rules, online shop prices and limits, ski school levels and online booking, the public availability page, rental settings, waiver wording, staff setup, program settings and patrol setup. Managers get a settings button beside each app's title, such as Rentals settings, and for two weeks a short note shows where it went.",
+          "help": "what-moved"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Owners can choose the menu each role sees under Settings, Team and logins, Menus for each role: which apps, their order, and the screen it opens on. Inbox and My shifts are always in."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "On a phone, the bottom bar shows your first four apps and Menu, which opens everything as large tiles."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Screens follow your phone or computer's light or dark setting. Pick Light or Dark beside your name to change it on that device.",
+          "help": "theme"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "On a shared counter computer, Switch person at the bottom of the menu brings up the PIN screen for the next person."
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Patrol has four sections in the menu while it is open: Now, Cases, People and Gear, each with its own tabs. Home is now called Board, and the Access log is a tab under Cases. Old Patrol links still open the right page."
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Patrol settings, Report requirements and Access levels are under Settings, Patrol, opened from the Patrol settings button at the top of Patrol. Each shows to the same people as before."
+        },
+        {
+          "kind": "improved",
+          "app": "sell",
+          "who": null,
+          "text": "Partner passes is now the last tab of Sell. A mountain that takes no partner pass, such as Indy Pass, can hide it under Settings, Sell and gate."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Today shows large job buttons for lift and mountain staff, instructors, the ticket window and patrol, such as Opening check, Report a problem, Today's lessons, Will-call pickups and New case. Report a problem opens a new work order straight away."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Card payments and card readers have their own page in Settings, Payments and card readers, and the online shop and lesson booking pages link straight to it when card payments are not set up yet."
         }
       ]
     },
