@@ -1441,6 +1441,8 @@ const gateSteps = [
   ['scans.media_uid', (c) => columnExists(c, 'scans', 'media_uid'), 'ALTER TABLE scans ADD COLUMN media_uid VARCHAR(32) NULL, ADD COLUMN device_id BIGINT UNSIGNED NULL, ADD COLUMN client_ref VARCHAR(64) NULL, ADD COLUMN via ENUM(\'code\',\'rfid\',\'device\',\'offline\') NULL'],
   ['scans card_blocked result', (c) => columnTypeHas(c, 'scans', 'result', 'card_blocked'), "ALTER TABLE scans MODIFY result ENUM('ok','expired','not_yet_valid','void','no_uses','unknown','duplicate','card_blocked') NOT NULL"],
   ['tenants.gate_open_ms', (c) => columnExists(c, 'tenants', 'gate_open_ms'), 'ALTER TABLE tenants ADD COLUMN gate_open_ms SMALLINT UNSIGNED NOT NULL DEFAULT 3000'],
+  // An owner's changes to the menu each role sees (src/lib/menus.js); NULL means every role has the standard menu.
+  ['tenants.role_menus', (c) => columnExists(c, 'tenants', 'role_menus'), 'ALTER TABLE tenants ADD COLUMN role_menus JSON NULL'],
   ['scans by device ref', (c) => indexExists(c, 'scans', 'uq_scans_device_ref'), 'ALTER TABLE scans ADD UNIQUE KEY uq_scans_device_ref (tenant_id, device_id, client_ref)'],
   ['incidents review columns', (c) => columnExists(c, 'incidents', 'review_round'), 'ALTER TABLE incidents ADD COLUMN review_round SMALLINT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN returned_at DATETIME NULL, ADD COLUMN returned_by BIGINT UNSIGNED NULL, ADD COLUMN escalated_at DATETIME NULL, ADD COLUMN escalated_by BIGINT UNSIGNED NULL, ADD COLUMN escalation_note VARCHAR(1000) NULL, ADD COLUMN last_nudge_at DATETIME NULL'],
   ['incidents waiting for review', (c) => indexExists(c, 'incidents', 'ix_incidents_review'), 'ALTER TABLE incidents ADD KEY ix_incidents_review (tenant_id, report_state, submitted_at)'],
