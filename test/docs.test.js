@@ -171,6 +171,18 @@ test('documents can be found by the words inside them, in text, Word and PDF-fre
   assert.ok(st.counts.indexed >= 2);
 });
 
+test('a small Word file that would unzip to 300 MB is kept, marked as not readable, and the server carries on', async () => {
+  const { zipSync, strToU8 } = require('fflate');
+  const bomb = Buffer.from(zipSync({ '[Content_Types].xml': strToU8('<x/>'), 'word/document.xml': [new Uint8Array(300 * 1048576).fill(0x20), { level: 9 }] }));
+  const id = ok(await api('POST', '/documents/documents', { token: T.patrol, body: { category_id: D.cat, title: 'Huge inside' } }), 201).id;
+  const before = process.memoryUsage().rss;
+  assert.equal(ok(await upload(T.patrol, id, 'huge.docx', bomb), 201).text_status, 'failed');
+  assert.ok(process.memoryUsage().rss - before < 100 * 1048576, 'the file was never unzipped in full');
+  const back = await api('GET', `/documents/documents/${id}/file`, { token: T.patrol });
+  assert.equal(back.status, 200, 'the upload itself is kept and can be downloaded');
+  ok(await api('DELETE', `/documents/documents/${id}`, { token: T.patrol }));
+});
+
 test('text recognition is an add-on: off until the operator turns it on for the mountain', async () => {
   const png = fs.readFileSync(nodePath.join(__dirname, 'fixtures', 'scan.png'));
   const [[t]] = await pool.query('SELECT id FROM tenants WHERE slug = ?', [A.slug]);

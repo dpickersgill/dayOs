@@ -22,24 +22,27 @@ function label(agent) {
   return `${browser} on ${os}`;
 }
 
-/** Has this person used this device before? A person with no devices on record yet is not "new" (their first sign-in after this release). */
+/**
+ * Has this person used this device before? A sign-in that does not say which device it is (no x-device header, or one
+ * that is not a device id; the app always sends one) is treated as a new device, so leaving the header out cannot skip
+ * the emailed code or the alert. A person with no devices on record yet is not "new" (their first sign-in after this release).
+ */
 async function isNew(user, deviceHash) {
-  if (!deviceHash) return false;
+  if (!deviceHash) return true;
   const [[r]] = await pool.query('SELECT COUNT(*) AS n, SUM(device_hash = ?) AS mine FROM user_devices WHERE user_id = ?', [deviceHash, user.id]);
   return Number(r.n) > 0 && !Number(r.mine);
 }
 
-/** Notes the device; on a device not seen before, writes the audit log and emails the person. Never throws. */
+/** Notes the device; on a device not seen before (or one that did not say which it is), writes the audit log and emails the person. Never throws. */
 async function remember(user, req, deviceHash, { method } = {}) {
-  if (!deviceHash) return;
   try {
     const fresh = await isNew(user, deviceHash);
     const agent = String(req.get('user-agent') || '');
-    await pool.query(`INSERT INTO user_devices (tenant_id, user_id, device_hash, label, first_seen, last_seen) VALUES (?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+    if (deviceHash) await pool.query(`INSERT INTO user_devices (tenant_id, user_id, device_hash, label, first_seen, last_seen) VALUES (?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
       ON DUPLICATE KEY UPDATE last_seen = UTC_TIMESTAMP(), label = VALUES(label)`, [user.tenant_id, user.id, deviceHash, label(agent)]);
     if (!fresh) return;
     await pool.query("INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id, detail) VALUES (?, ?, 'new_device', 'users', ?, ?)",
-      [user.tenant_id, user.id, user.id, JSON.stringify({ device: label(agent), method: method || null })]).catch(() => {});
+      [user.tenant_id, user.id, user.id, JSON.stringify({ device: label(agent), method: method || null, ...(deviceHash ? {} : { no_device_id: true }) })]).catch(() => {});
     if (!user.email) return;
     const t = await one(pool, 'SELECT name FROM tenants WHERE id = ?', [user.tenant_id]);
     const when = new Date().toUTCString().replace(' GMT', ' UTC');

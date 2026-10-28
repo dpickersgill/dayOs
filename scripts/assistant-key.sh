@@ -5,23 +5,26 @@
 #   bash scripts/assistant-key.sh sk-ant-...
 #
 # Use a key from a plain Anthropic organization, not the patrol BAA one: the assistant never sees patient care records.
-# The key goes into Secret Manager (one secret, read by both services' own account). Safe to run again with a new key.
+# The key goes into Secret Manager, once for live and once for staging (staging's account may read only staging's
+# secrets). Safe to run again with a new key.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/cloud-common.sh
 KEY="${1:-}"
 [[ "$KEY" =~ ^sk-ant-[A-Za-z0-9_-]{20,}$ ]] || { echo "Give the API key from the Anthropic Console, for example: bash scripts/assistant-key.sh sk-ant-api03-..."; exit 1; }
 signed_in
-NAME=summitops-assistant-api-key
 step "Into Secret Manager"
-if secret_exists "$NAME"; then printf '%s' "$KEY" | gcloud secrets versions add "$NAME" --data-file=- >/dev/null
-else printf '%s' "$KEY" | gcloud secrets create "$NAME" --replication-policy=automatic --data-file=- >/dev/null; fi
+for NAME in summitops-assistant-api-key summitops-staging-assistant-api-key; do
+  if secret_exists "$NAME"; then printf '%s' "$KEY" | gcloud secrets versions add "$NAME" --data-file=- >/dev/null
+  else printf '%s' "$KEY" | gcloud secrets create "$NAME" --replication-policy=automatic --data-file=- >/dev/null; fi
+done
 for S in "$PROD_SERVICE" "$STAGING_SERVICE"; do
   SERVICE="$S"
+  NAME=summitops-assistant-api-key; [ "$S" = "$STAGING_SERVICE" ] && NAME=summitops-staging-assistant-api-key
   if ! gcloud run services describe "$SERVICE" --region "$REGION" --format='value(metadata.name)' >/dev/null 2>&1; then echo "No $SERVICE service yet: skipped."; continue; fi
   load_service
   SA="$(echo "$SVC_JSON" | jq -r '.spec.template.spec.serviceAccountName // empty')"
-  [ -n "$SA" ] && gcloud secrets add-iam-policy-binding "$NAME" --member "serviceAccount:$SA" --role roles/secretmanager.secretAccessor --quiet >/dev/null
+  [ -n "$SA" ] && let_read "$NAME" "$SA"
   step "On $SERVICE"
   gcloud run services update "$SERVICE" --region "$REGION" --update-secrets "ASSISTANT_API_KEY=$NAME:latest" --quiet
 done

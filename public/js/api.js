@@ -6,17 +6,23 @@ export const config = { base: '' };
 export const hooks = { onSignedOut() {}, stepUp: null };
 
 // A random id this browser keeps, so the server can tell a sign-in from a new device (it stores only a keyed hash).
+// It is always sent: the server treats a sign-in with no id as a new device. When the browser will not store it (some
+// private windows), this page keeps one for as long as it is open, and each sign-in there counts as a new device.
 const DEVICE_KEY = 'so.device';
+let pageDevice = '';
+const newDeviceId = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 export function deviceId() {
   try {
     let id = localStorage.getItem(DEVICE_KEY);
     if (!id || !/^[A-Za-z0-9_-]{20,64}$/.test(id)) {
-      const b = crypto.getRandomValues(new Uint8Array(24));
-      id = btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      id = newDeviceId();
       localStorage.setItem(DEVICE_KEY, id);
     }
     return id;
-  } catch (_) { return ''; }
+  } catch (_) {
+    if (!pageDevice) pageDevice = newDeviceId();
+    return pageDevice;
+  }
 }
 const isStepUp = (status, data) => status === 403 && data && data.details && data.details.code === 'step_up_required';
 

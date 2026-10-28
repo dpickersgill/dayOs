@@ -118,21 +118,26 @@ router.post('/session', validate(z.object({ key: z.string().min(1).max(500), nam
 
 // ---------------------------------------------------------------- operators: their own sign-in
 // Email and password, then always a code from an authenticator app. The first time, the app is set up as part of signing
-// in. Five wrong passwords or codes lock that operator for 15 minutes; a code works once.
+// in. Five wrong passwords or codes lock that operator for 15 minutes; a code works once. Each try is counted before it is
+// checked (opClaim), so tries sent all at once cannot all get in before the lock. Once the app is set up, the password and
+// code are checked together and a wrong one of either gets the same answer, so the password alone is never confirmed.
 const LOCK_AFTER = 5;
 const LOCK_MINUTES = 15;
 const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(8).toString('hex'), 12);
 const opLocked = (op) => op.locked_until && new Date(`${String(op.locked_until).replace(' ', 'T')}Z`) > new Date();
-// MySQL applies SET clauses left to right, so locked_until below already sees the new failures count. A lock that has run
-// out starts the count again at 1 and is cleared, so the next five wrong tries lock it again.
-const opFailed = (id) => pool.query(`UPDATE platform_operators SET failures = IF(locked_until IS NOT NULL AND locked_until < UTC_TIMESTAMP(), 1, failures + 1),
-  locked_until = IF(failures >= ?, UTC_TIMESTAMP() + INTERVAL ? MINUTE, IF(locked_until < UTC_TIMESTAMP(), NULL, locked_until)) WHERE id = ?`, [LOCK_AFTER, LOCK_MINUTES, id]);
+// Counts a try, only while the operator is not locked; false when locked. MySQL applies SET clauses left to right, so
+// locked_until below already sees the new count: the fifth try sets the lock. A lock that has run out starts the count
+// again at 1. A successful sign-in sets the count back to 0 (opSignedIn).
+const opClaim = async (id) => (await pool.query(`UPDATE platform_operators SET failures = IF(locked_until IS NOT NULL, 1, failures + 1),
+  locked_until = IF(failures >= ?, UTC_TIMESTAMP() + INTERVAL ? MINUTE, NULL) WHERE id = ? AND (locked_until IS NULL OR locked_until < UTC_TIMESTAMP())`, [LOCK_AFTER, LOCK_MINUTES, id]))[0].affectedRows === 1;
 const NO_MATCH = 'That email and password do not match, or this login is locked for a few minutes after too many wrong tries.';
+const NO_MATCH_CODE = 'That email, password or code is not right, or this login is locked for a few minutes after too many wrong tries.';
 const printOf = (secret) => crypto.createHash('sha256').update(`totp:${secret}`).digest('hex').slice(0, 16);
 async function opSignedIn(op, step) {
-  // One statement claims the code: a second request with the same code (or one racing it), or a login locked meanwhile, changes nothing.
+  // One statement claims the code: a second request with the same code (or one racing it) changes nothing. (The try was
+  // already counted before checking, so the try that set the lock may still succeed here and clears it.)
   const [r] = await pool.query(`UPDATE platform_operators SET failures = 0, locked_until = NULL, totp_last_step = ?, last_login_at = UTC_TIMESTAMP()
-    WHERE id = ? AND active = 1 AND session_epoch = ? AND (totp_last_step IS NULL OR totp_last_step < ?) AND (locked_until IS NULL OR locked_until < UTC_TIMESTAMP())`, [step, op.id, op.session_epoch, step]);
+    WHERE id = ? AND active = 1 AND session_epoch = ? AND (totp_last_step IS NULL OR totp_last_step < ?)`, [step, op.id, op.session_epoch, step]);
   if (r.affectedRows !== 1) throw forbidden('That code was just used. Wait for the next one in your app.');
   await pool.query('INSERT INTO platform_audit (tenant_id, action, actor, detail) VALUES (NULL, ?, ?, ?)', ['sign_in', op.name, JSON.stringify({ operator: op.email })]);
   require('../lib/audit').trail({ console: true, action: 'sign_in', actor: op.name });
@@ -141,21 +146,26 @@ async function opSignedIn(op, step) {
 
 router.post('/login', validate(z.object({ email: z.string().trim().toLowerCase().max(255), password: z.string().max(200), code: z.string().max(10).optional() })), async (req, res) => {
   const op = await one(pool, 'SELECT * FROM platform_operators WHERE email = ? AND active = 1', [req.body.email]);
+  // With the app set up (or an unknown email), the code is asked for before anything is checked, so this answer says
+  // nothing about the password (or whether the email is an operator's). Nothing is counted: nothing was checked.
+  if (!req.body.code && (!op || op.totp_enabled)) { await bcrypt.compare(req.body.password, DUMMY_HASH); return res.json({ code_required: true }); }
+  const NO = req.body.code ? NO_MATCH_CODE : NO_MATCH; // once a code is sent, every failure gets the same answer
+  if (op && !(await opClaim(op.id))) { await bcrypt.compare(req.body.password, DUMMY_HASH); throw forbidden(NO); } // locked: the same answer as a wrong try
   const okPw = await bcrypt.compare(req.body.password, op ? op.password_hash : DUMMY_HASH);
-  if (op && opLocked(op)) throw forbidden(NO_MATCH); // the same answer as a wrong password, so it does not show which emails exist
-  if (!op || !okPw) { if (op) await opFailed(op.id); throw forbidden(NO_MATCH); }
-  // An operator with a passkey signs in with it only: a password and code can be phished, a passkey cannot.
-  if (await passkeys.count('operator', op.id)) throw forbidden('Sign in with your passkey (the "Sign in with a passkey" button).');
+  if (!op || !okPw) throw forbidden(NO);
   if (!op.totp_enabled) {
+    // An operator with a passkey signs in with it only: a password and code can be phished, a passkey cannot.
+    if (await passkeys.count('operator', op.id)) throw forbidden('Sign in with your passkey (the "Sign in with a passkey" button).');
     // First sign-in (or after a reset): set up the authenticator app before anything else. The ticket is tied to this secret
     // and to the operator's current session epoch, so a newer sign-in, a password reset or switching them off voids it.
+    // Before the app is set up the password is all there is, so a right one clears the count, as it does for staff.
     const secret = totp.newSecret();
-    await pool.query('UPDATE platform_operators SET totp_secret = ?, totp_last_step = NULL WHERE id = ?', [totp.seal(secret), op.id]);
+    await pool.query('UPDATE platform_operators SET totp_secret = ?, totp_last_step = NULL, failures = 0, locked_until = NULL WHERE id = ?', [totp.seal(secret), op.id]);
     return res.json({ setup_required: true, setup_token: makeSession(op.name, op.id, { typ: 'setup', minutes: 10, epoch: Number(op.session_epoch), secretPrint: printOf(secret) }), secret, otpauth_uri: totp.otpauthUri(secret, op.email, 'Verdynt/OS platform') });
   }
-  if (!req.body.code) return res.json({ code_required: true });
   const step = totp.verify(totp.open(op.totp_secret), req.body.code);
-  if (step === null || (op.totp_last_step !== null && step <= Number(op.totp_last_step))) { await opFailed(op.id); throw forbidden('That code is not right. Use the newest one in your app.'); }
+  if (step === null || (op.totp_last_step !== null && step <= Number(op.totp_last_step))) throw forbidden(NO_MATCH_CODE);
+  if (await passkeys.count('operator', op.id)) throw forbidden('Sign in with your passkey (the "Sign in with a passkey" button).');
   res.json(await opSignedIn(op, step));
 });
 
@@ -164,9 +174,9 @@ router.post('/login/setup', validate(z.object({ setup_token: z.string().max(1000
   if (!t || t.typ !== 'setup' || !t.o) throw forbidden('That took too long. Sign in again.');
   const op = await one(pool, 'SELECT * FROM platform_operators WHERE id = ? AND active = 1', [t.o]);
   if (!op || op.totp_enabled || !op.totp_secret || Number(op.session_epoch) !== Number(t.e) || printOf(totp.open(op.totp_secret)) !== t.h) throw forbidden('Sign in again');
-  if (opLocked(op)) throw forbidden(`Too many wrong tries. Wait ${LOCK_MINUTES} minutes.`);
+  if (!(await opClaim(op.id))) throw forbidden(`Too many wrong tries. Wait ${LOCK_MINUTES} minutes.`);
   const step = totp.verify(totp.open(op.totp_secret), req.body.code);
-  if (step === null) { await opFailed(op.id); throw bad('That code is not right. Check the app and type the newest code.'); }
+  if (step === null) throw bad('That code is not right. Check the app and type the newest code.');
   const [on] = await pool.query('UPDATE platform_operators SET totp_enabled = 1 WHERE id = ? AND totp_enabled = 0 AND session_epoch = ?', [op.id, op.session_epoch]);
   forgetKeyGate(); // the first operator with two-step turns the platform key off
   if (on.affectedRows !== 1) throw forbidden('Sign in again');
@@ -569,7 +579,9 @@ router.post('/tenants/:id/reset-password', needsAccess, validate(z.object({ user
   await PWR.refuseWeak(req.body.password, { username: u.username, email: u.email, tenantSlug: u.slug, tenantName: u.name });
   const hash = await bcrypt.hash(req.body.password, 12);
   await tx(async (conn) => {
-    await conn.query('UPDATE users SET password_hash = ?, password_changed_at = NOW(), must_change_password = ?, login_failures = 0, login_locked_until = NULL WHERE id = ? AND tenant_id = ?', [hash, req.body.temporary ? 1 : 0, u.id, id]);
+    // A reset also turns codes back on if too many wrong ones stopped them (routes/auth.js, claimCode).
+    await conn.query(`UPDATE users SET password_hash = ?, password_changed_at = NOW(), must_change_password = ?, login_failures = 0, login_locked_until = NULL,
+      mfa_failures = 0, mfa_locked_until = NULL, code_day_failures = 0, code_day_from = NULL, codes_blocked_at = NULL WHERE id = ? AND tenant_id = ?`, [hash, req.body.temporary ? 1 : 0, u.id, id]);
     await require('../lib/sessions').endAll(conn, u.id, 'console_reset');
     if (req.body.clear_two_step) {
       await conn.query('UPDATE users SET totp_enabled = 0, totp_secret = NULL, totp_last_step = NULL WHERE id = ? AND tenant_id = ?', [u.id, id]);

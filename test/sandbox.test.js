@@ -230,11 +230,14 @@ test('a finished demo stops working, then is removed with everything in it', asy
   const gone = await api('POST', '/platform/sandboxes/purge', { key: KEY });
   assert.equal(gone.status, 200); assert.ok(gone.body.removed >= 1);
   assert.equal(await tenantId(one.body.tenant), undefined);
-  // not one row is left behind, in any table that carries a mountain id
+  // not one row is left behind, in any table that carries a mountain id, but the audit trail: the app's database login
+  // may only read and add audit rows, so the demo's stay
   const [tables] = await pool.query("SELECT table_name AS t FROM information_schema.columns WHERE table_schema = DATABASE() AND column_name = 'tenant_id'");
   const left = [];
+  const [[kept]] = await pool.query('SELECT COUNT(*) AS n FROM audit_log WHERE tenant_id = ?', [id]);
+  assert.ok(Number(kept.n) > 0, 'the demo\'s audit trail is kept');
   for (const { t } of tables) {
-    if (t === 'sandbox_signups') continue;
+    if (['sandbox_signups', 'audit_log', 'platform_audit'].includes(t)) continue;
     const [[c]] = await pool.query('SELECT COUNT(*) AS n FROM `' + t + '` WHERE tenant_id = ?', [id]);
     if (Number(c.n)) left.push(`${t}: ${c.n}`);
   }

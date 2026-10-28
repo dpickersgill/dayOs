@@ -33,8 +33,9 @@ const dow = (d) => new Date(`${d}T12:00:00Z`).getUTCDay();
 let monday = plus(today, 14); while (dow(monday) !== 1) monday = plus(monday, 1);
 const year = Number(today.slice(0, 4));
 
+const DEVICE = 'test-device-0123456789abcdef'; // the app always says which device signs in; leaving it out asks for an emailed code
 async function call(prefix, method, path, { token, body } = {}) {
-  const res = await fetch(`${base}${prefix}${path}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const res = await fetch(`${base}${prefix}${path}`, { method, headers: { 'x-device': DEVICE,  'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined });
   const text = await res.text();
   let json; try { json = JSON.parse(text); } catch (_) { json = text; }
   return { status: res.status, body: json, text };

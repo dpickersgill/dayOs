@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # One-time security setup for Google Cloud, run from the unzipped folder in Cloud Shell:   bash scripts/harden.sh
 # Safe to run again: each step checks what is already in place. What it does (security review findings in brackets):
-#   1. A service account just for the app, with only the roles it needs, instead of the default one with Editor [H2]
+#   1. A service account just for the live app, with only the roles it needs, instead of the default one with Editor [H2]
+#      (staging runs as its own account, summitops-staging, made by staging-setup.sh; it is never given a live secret)
 #   2. Every key the app holds (Stripe, Postmark, the job key, the phone-alert keys) moved into Secret Manager [M6]
-#   3. A database login for the app that can change rows but not tables or the audit trail; the current login is
+#   3. A database login for the app that can change rows but not tables, and can only add to the audit trail; the current login is
 #      kept for migrations only [M4, M5]
 #   4. The database refuses unencrypted connections and cannot be deleted by accident [L4]
 #   5. A copy of every audit event kept for 400 days in its own log bucket, outside the database [M5]
@@ -103,6 +104,10 @@ for s in $NEEDED; do
 done
 if [ -n "$OLD_DB_SECRET" ]; then
   gcloud secrets remove-iam-policy-binding "$OLD_DB_SECRET" --member "serviceAccount:$RUN_SA" --role roles/secretmanager.secretAccessor --quiet >/dev/null 2>&1 || true
+fi
+# Staging's account never reads a live secret.
+if gcloud iam service-accounts describe "$STAGING_SA" >/dev/null 2>&1; then
+  for s in $NEEDED summitops-db-migrator; do secret_exists "$s" && stop_read "$s" "$STAGING_SA"; done
 fi
 
 step "4. Database connections"

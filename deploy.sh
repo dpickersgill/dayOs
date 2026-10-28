@@ -19,6 +19,12 @@ if ! gcloud run services describe "$SERVICE" --region "$REGION" >/dev/null 2>&1;
   echo "There is no staging yet. Run this once first:   bash scripts/staging-setup.sh"
   exit 1
 fi
+# Staging runs builds nobody has checked yet, so it never runs as the live account, which can read the live keys.
+if ! gcloud iam service-accounts describe "$STAGING_SA" >/dev/null 2>&1; then
+  echo "Staging needs its own service account now, so it can never read the live site's keys. Run this once, then deploy again:"
+  echo "  bash scripts/staging-setup.sh"
+  exit 1
+fi
 
 step "Checking the version"
 NEW_VERSION="$(node -p "require('./package.json').version")"
@@ -41,9 +47,7 @@ npm run migrate
 
 step "Deploying to staging (this takes a few minutes)"
 # One server is plenty for checking a release, and it shuts down when nobody is using it, so staging costs almost nothing.
-SA_FLAG=()
-if gcloud iam service-accounts describe "$RUN_SA" >/dev/null 2>&1; then SA_FLAG=(--service-account "$RUN_SA"); fi
-gcloud run deploy "$SERVICE" --source . --region "$REGION" --quiet "${SA_FLAG[@]}" \
+gcloud run deploy "$SERVICE" --source . --region "$REGION" --quiet --service-account "$STAGING_SA" \
   --min-instances=0 --max-instances=1 --concurrency=40 --memory=1Gi --cpu-boost --timeout=900 \
   --update-env-vars "DB_POOL=4,DEPLOYED_BY=$(gcloud config get-value account 2>/dev/null || echo unknown)"
 

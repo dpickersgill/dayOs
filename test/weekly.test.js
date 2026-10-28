@@ -24,8 +24,9 @@ let A; let B; let T = {};
 const thisMon = weekly.weekStartOf(todayIn('America/New_York'));
 const lastMon = addDays(thisMon, -7); const prevMon = addDays(thisMon, -14);
 
+const DEVICE = 'test-device-0123456789abcdef'; // the app always says which device signs in; leaving it out asks for an emailed code
 async function call(method, path, { token, body } = {}) {
-  const res = await fetch(`${base}/api/v1${path}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const res = await fetch(`${base}/api/v1${path}`, { method, headers: { 'x-device': DEVICE,  'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined });
   const text = await res.text(); let json; try { json = JSON.parse(text); } catch (_) { json = text; }
   return { status: res.status, body: json, text };
 }

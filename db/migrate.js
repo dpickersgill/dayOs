@@ -386,6 +386,9 @@ const securitySteps = [
     'ALTER TABLE tenants ADD COLUMN mfa_for_patrol TINYINT(1) NOT NULL DEFAULT 1, ADD COLUMN patrol_mfa_from DATE NULL, ADD COLUMN season_ends_on DATE NULL',
     'UPDATE tenants SET patrol_mfa_from = DATE_ADD(CURDATE(), INTERVAL 14 DAY)',
   ]],
+  // Wrong codes per login per day: after 50 in a day, signing in with an emailed code stops for that login until a full
+  // sign-in another way (password and its second step, or a passkey) or a manager or operator reset.
+  ['users.codes_blocked_at', (c) => columnExists(c, 'users', 'codes_blocked_at'), 'ALTER TABLE users ADD COLUMN code_day_failures SMALLINT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN code_day_from DATETIME NULL, ADD COLUMN codes_blocked_at DATETIME NULL'],
 ];
 // 2026.10.22: Stripe Connect. Each mountain's guest card payments go to its own Stripe account (a Standard account it
 // controls), with an optional platform fee per mountain, 0 unless the console sets one.

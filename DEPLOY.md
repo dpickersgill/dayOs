@@ -93,8 +93,9 @@ the exact command for the revision it replaced.
 | | Live | Staging |
 |---|---|---|
 | Cloud Run service | `summitops-api` | `summitops-staging` (one server at most, none when idle) |
+| Service account | `summitops-run` (reads the live secrets) | `summitops-staging`: reaches the database server and writes logs; reads only the `summitops-staging-*` secrets, never a live one |
 | Database | the live one | `summitops_staging` on the same server, with a login (`summitops_stg`) that can reach nothing else |
-| Keys | live secrets | `summitops-staging-*` secrets: sign-in key, bootstrap key, database password, staging password |
+| Keys | live secrets | `summitops-staging-*` secrets: sign-in key, bootstrap key, database password, staging password, and staging's own copies of the email (Postmark) and assistant keys |
 | Stripe | live keys | test keys only (a live key stops staging from starting), with its own test-mode webhooks |
 | Email and texts | to guests and staff | every email to `STAGING_INBOX`, with who it was for in the subject; no texts unless `STAGING_SMS_TO` is set |
 | Visitors | everyone | a shared password (`STAGING_GATE`) first; hidden from search engines; a yellow band on every page |
@@ -102,7 +103,22 @@ the exact command for the revision it replaced.
 Staging starts empty. Use its `/try` page for a full demo mountain, or its bootstrap key to create a mountain or sign
 in to its console the first time. Read the staging password or the bootstrap key with
 `gcloud secrets versions access latest --secret=summitops-staging-gate` (or `summitops-staging-bootstrap`). The script
-is safe to run again: it keeps what exists and fills in anything missing (for example Stripe, if it was skipped).
+is safe to run again: it keeps what exists, fills in anything missing (for example Stripe, if it was skipped) and prints
+each permission it changes.
+
+Staging shares the live database server (Cloud SQL instance), in a database of its own that the staging login cannot
+leave. Its service account can connect to that server but holds no live database password, so it can only sign in as
+the staging login. A separate server or project would separate them further.
+Staging's email key starts as a copy of the live Postmark key (so a leak from staging could send mail as you). For full
+separation, make a second Postmark server for staging and store its token with
+`printf '%s' <token> | gcloud secrets versions add summitops-staging-postmark --data-file=-`.
+
+**A staging set up before staging had its own account runs as the live account** (`summitops-run`), which can read every live key.
+`deploy.sh` now stops until it is moved. Run `bash scripts/staging-setup.sh` once from the release folder staging runs:
+it makes `summitops-staging`, gives it staging's keys, takes them away from `summitops-run`, checks it can read no live
+secret, and redeploys staging as it. To switch only the account of the running staging service, after that script has
+made the account and its permissions:
+`gcloud run services update summitops-staging --region us-east1 --service-account summitops-staging@summitops-510715.iam.gserviceaccount.com`
 
 ## Optional settings (Cloud Run environment)
 
