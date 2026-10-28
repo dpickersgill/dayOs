@@ -302,31 +302,100 @@ export function confirmDialog(title, message, confirmText, onConfirm, { danger =
 export const val = (fd, name) => { const v = String(fd.get(name) ?? '').trim(); return v === '' ? null : v; };
 export const num = (fd, name) => { const v = val(fd, name); return v === null ? null : Number(v); };
 
-/** Tabs: tabs = [[key, label, render(panel)]]. */
-export function tabs(items, initial) {
+// ---------------------------------------------------------------- tabs, kept in the address
+// The open tab lives in the page's address (#/rentals?tab=service), so Back, Forward, refresh and a shared link all land
+// on the same tab. A click changes only the query with history.pushState: the page is not drawn again, only the panel.
+// One set of tabs per page owns the address; tabs drawn inside another tab's panel stay local unless given their own
+// opts.param. main.js calls newPage() before drawing each page.
+const addressed = new Set(); // live tab sets bound to the address: { param, path, sync, wrap }
+let pageGen = 0;
+let nesting = 0; // > 0 while a tab panel of this page is being drawn
+/** The hash without its query: '#/patrol/cases?tab=review' -> 'patrol/cases'. */
+export const hashPath = (hash = location.hash) => String(hash || '').replace(/^#\/?/, '').split('?')[0];
+/** One value from the hash query, or null. */
+export function hashParam(name, hash = location.hash) {
+  const q = String(hash || '').split('?')[1];
+  return q ? new URLSearchParams(q).get(name) : null;
+}
+/** The hash with one query value set (or removed when value is null), the rest of the query kept. */
+export function withHashParam(name, value, hash = location.hash) {
+  const [path, q] = String(hash || '#/').split('?');
+  const p = new URLSearchParams(q || '');
+  if (value === null || value === undefined) p.delete(name); else p.set(name, value);
+  const s = p.toString();
+  return `${path || '#/'}${s ? `?${s}` : ''}`;
+}
+/** Called by the router before drawing a page: tab sets of the last page let go of the address. */
+export function newPage() {
+  pageGen += 1;
+  nesting = 0;
+  for (const t of addressed) if (!t.wrap.isConnected) addressed.delete(t);
+}
+function syncTabsFromAddress() {
+  for (const t of [...addressed]) {
+    if (!t.wrap.isConnected && t.gen !== pageGen) { addressed.delete(t); continue; }
+    t.sync();
+  }
+}
+if (typeof window !== 'undefined' && window.addEventListener) {
+  window.addEventListener('popstate', syncTabsFromAddress);
+  window.addEventListener('hashchange', syncTabsFromAddress);
+}
+
+/**
+ * Tabs: tabs = [[key, label, render(panel)]]. initial: the tab to open when the address names none.
+ * opts.param: the query name that keeps the open tab (default 'tab'); opts.address: false keeps the tabs local.
+ */
+export function tabs(items, initial, opts = {}) {
+  const param = opts.param || 'tab';
   const bar = h('div', { class: 'tabs', role: 'tablist' });
   const panel = h('div', { role: 'tabpanel' });
+  const wrap = h('div', null, bar, panel);
   const buttons = new Map();
   const uid = Math.random().toString(36).slice(2, 7);
+  const keys = items.map((i) => i[0]);
+  const fallback = keys.includes(initial) ? initial : keys[0];
+  const taken = [...addressed].some((t) => t.param === param && t.wrap.isConnected);
+  const bound = opts.address !== false && (Boolean(opts.param) || nesting === 0) && !taken;
   let token = 0;
+  let current = null;
   async function show(key) {
     const my = ++token;
+    current = key;
     for (const [k, b] of buttons) { b.setAttribute('aria-selected', String(k === key)); b.tabIndex = k === key ? 0 : -1; }
     panel.setAttribute('aria-labelledby', `tab-${uid}-${key}`);
     clear(panel).append(loading());
+    try { wrap.dispatchEvent(new Event('tabs:change', { bubbles: true })); } catch (_) { /* the breadcrumb catches up on the next page */ }
     const item = items.find((i) => i[0] === key);
     const out = h('div');
+    const gen = pageGen;
+    nesting += 1;
     try {
       await item[2](out);
     } catch (err) {
       clear(out).append(errorBox(err));
+    } finally {
+      if (gen === pageGen && nesting > 0) nesting -= 1;
     }
     if (my === token) clear(panel).append(out);
   }
-  const keys = items.map((i) => i[0]);
+  const fromAddress = () => { const k = hashParam(param); return keys.includes(k) ? k : null; };
+  // A click adds a history entry (so Back returns to the last tab); moving along with the arrow keys replaces it.
+  function choose(key, { replace = false } = {}) {
+    if (bound && key !== current) {
+      try { history[replace ? 'replaceState' : 'pushState'](null, '', withHashParam(param, key)); } catch (_) { /* the tab still opens */ }
+      binding.path = hashPath();
+    }
+    show(key);
+  }
+  const binding = { param, path: hashPath(), gen: pageGen, wrap, sync: () => {
+    if (hashPath() !== binding.path) return; // another page: the router draws it
+    const k = fromAddress() || fallback;
+    if (k !== current) show(k);
+  } };
   for (const [key, text] of items) {
-    const b = h('button', { type: 'button', role: 'tab', id: `tab-${uid}-${key}`, 'aria-selected': 'false', 'aria-controls': `panel-${uid}`, tabIndex: -1 }, text);
-    b.addEventListener('click', () => show(key));
+    const b = h('button', { type: 'button', role: 'tab', id: `tab-${uid}-${key}`, 'aria-selected': 'false', 'aria-controls': `panel-${uid}`, tabIndex: -1, dataset: { key } }, text);
+    b.addEventListener('click', () => choose(key));
     // Arrow keys move between tabs, Home and End jump to the first and last (the roving tab stop pattern).
     b.addEventListener('keydown', (e) => {
       const at = keys.indexOf(key);
@@ -334,12 +403,13 @@ export function tabs(items, initial) {
       if (!to) return;
       e.preventDefault();
       buttons.get(to).focus();
-      show(to);
+      choose(to, { replace: true });
     });
     buttons.set(key, b);
     bar.append(b);
   }
   panel.id = `panel-${uid}`;
-  show(initial || items[0][0]);
-  return h('div', null, bar, panel);
+  if (bound) { bar.dataset.address = param; addressed.add(binding); }
+  show((bound && fromAddress()) || fallback);
+  return wrap;
 }
