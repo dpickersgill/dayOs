@@ -34,7 +34,7 @@ function actingStaffId(req, requested) {
 // ---------------------------------------------------------------- positions & certifications
 const positionFields = {
   name: z.string().min(1).max(100),
-  department: z.enum(['lifts', 'rentals', 'ski_school', 'patrol', 'food', 'guest_services', 'grooming', 'maintenance', 'admin']),
+  department: z.enum(['lifts', 'rentals', 'ski_school', 'patrol', 'food', 'guest_services', 'grooming', 'maintenance', 'admin', 'attractions']),
   visits_per_staff: z.number().int().min(1).nullable().optional(),
 };
 router.use('/positions', crud({ table: 'positions', entity: 'Position', createSchema: z.object(positionFields), updateSchema: partialOf(positionFields), columns: ['name', 'department', 'visits_per_staff'], filters: ['department'], orderBy: 'department, name', readRoles: ['staff', 'counter', 'instructor', 'patrol'], writeRoles: mgr }));

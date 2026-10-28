@@ -23,6 +23,7 @@ const DS = require('../lib/docscore');
 const S = require('../lib/safety');
 const K = require('../lib/patrolkits');
 const config = require('../config');
+const { typeLabel } = require('../lib/attractions');
 
 const router = express.Router();
 const publicRouter = express.Router();
@@ -198,7 +199,7 @@ async function riskReport(db, t, season, { now, today }) {
   const inSeason = today >= period.from && today <= period.to;
   const md = today.slice(5, 10) === '02-29' ? '02-28' : today.slice(5, 10);
   const lastToDate = inSeason ? { ...lastFull, to: `${Number(today.slice(0, 4)) - 1}-${md}` } : null;
-  const [mine, prevFull, prevToDate, docs, prevDocs, staff, tenant, comp] = await Promise.all([
+  const [mine, prevFull, prevToDate, docs, prevDocs, staff, tenant, comp, atAttractions] = await Promise.all([
     S.benchmark(db, t, { period: inSeason ? { ...period, to: today } : period }),
     S.benchmark(db, t, { period: lastFull }),
     lastToDate ? S.benchmark(db, t, { period: lastToDate }) : null,
@@ -207,6 +208,10 @@ async function riskReport(db, t, season, { now, today }) {
     rows(db, `SELECT outcome, COUNT(*) AS n FROM staff_injuries WHERE tenant_id = ? AND occurred_at >= ? AND occurred_at < ? GROUP BY outcome`, [t, `${period.from} 00:00:00`, `${addDays(period.to, 1)} 00:00:00`]).catch(() => []),
     one(db, 'SELECT name, legal_name FROM tenants WHERE id = ?', [t]),
     compliance(db, t, today),
+    // Cases at each attraction this season (counts only).
+    rows(db, `SELECT a.name, a.type, COUNT(*) AS cases, COALESCE(SUM((SELECT COUNT(*) FROM incident_patients p WHERE p.tenant_id = i.tenant_id AND p.incident_id = i.id AND p.voided_at IS NULL)), 0) AS patients
+      FROM incidents i JOIN attractions a ON a.tenant_id = i.tenant_id AND a.id = i.attraction_id WHERE i.tenant_id = ? AND i.occurred_at >= ? AND i.occurred_at < ? GROUP BY a.id, a.name, a.type ORDER BY cases DESC, a.name`,
+    [t, `${period.from} 00:00:00`, `${addDays(inSeason ? today : period.to, 1)} 00:00:00`]).catch(() => []),
   ]);
   const staffOf = (k) => staff.filter((r) => (k ? r.outcome === k : true)).reduce((n, r) => n + Number(r.n), 0);
   const network = mine.sharing.share && mine.peers && !mine.peers.too_few_mountains && mine.peers.per_1000 !== undefined
@@ -223,6 +228,7 @@ async function riskReport(db, t, season, { now, today }) {
     red_flags: { cases: docs.red_flags, management_told: docs.red_flags_management, insurer_told: docs.red_flags_insurer, by_kind: Object.entries(DS.FLAG_LABEL).map(([key, label]) => ({ key, label, n: docs.cases.filter((c) => c.red_flags.some((f) => f.key === key)).length })).filter((x) => x.n) },
     staff_injuries: { total: staffOf(), recordable: staff.filter((r) => r.outcome && r.outcome !== 'not_recordable').reduce((n, r) => n + Number(r.n), 0), days_away: staffOf('days_away'), restricted: staffOf('restricted') },
     compliance: comp,
+    attractions: atAttractions.map((a) => ({ name: a.name, type_label: typeLabel(a.type), cases: Number(a.cases), patients: Number(a.patients) })),
   };
 }
 

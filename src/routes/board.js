@@ -12,6 +12,7 @@ const modules = require('../lib/modules');
 const { dailyReport } = require('../lib/daily');
 const patrolaccess = require('../lib/patrolaccess');
 const { pmStatus } = require('../lib/ops');
+const { typeLabel } = require('../lib/attractions');
 
 const router = express.Router();
 const ROLES = ['owner', 'manager', 'staff', 'patrol', 'instructor', 'counter'];
@@ -111,7 +112,7 @@ const TILE_DATA = {
       else detail = 'Not inspected yet today';
       return { name: l.name, status: l.status, check: l.check, detail };
     });
-    const out = { lifts: liftRows, grooming: { plan: trails.plan, groomed: trails.groomed, total: trails.total, open: trails.open } };
+    const out = { lifts: liftRows, attractions: (await get('attractions')).list, grooming: { plan: trails.plan, groomed: trails.groomed, total: trails.total, open: trails.open } };
     if (on.has('patrol')) {
       const [duty, checked, holds] = await Promise.all([
         one(pool, 'SELECT COUNT(*) AS n FROM patrol_duty WHERE tenant_id = ? AND on_date = ? AND signed_out_at IS NULL', [c.tenantId, c.today]),
@@ -145,6 +146,30 @@ const TILE_DATA = {
     const checks = await rows(pool, 'SELECT lift_id, result FROM lift_checks WHERE tenant_id = ? AND check_date = ? ORDER BY checked_at, id', [c.tenantId, c.today]);
     const latest = new Map(checks.map((k) => [Number(k.lift_id), k.result]));
     return { lifts: lifts.map((l) => ({ id: Number(l.id), name: l.name, status: l.status, check: latest.get(Number(l.id)) || null })) };
+  },
+  /** Active attractions with why each is or isn't open (not a tile of its own: the morning board and the alerts use it). */
+  async attractions(c) {
+    const [list, checks, downs] = await Promise.all([
+      rows(pool, 'SELECT id, name, type, status, status_note FROM attractions WHERE tenant_id = ? AND active = 1 ORDER BY sort, name', [c.tenantId]),
+      rows(pool, 'SELECT attraction_id, status, finished_at, started_at FROM attraction_checks WHERE tenant_id = ? AND check_date = ? ORDER BY attempt', [c.tenantId, c.today]),
+      rows(pool, 'SELECT attraction_id, started_at, reason, note FROM attraction_downtime WHERE tenant_id = ? AND ended_at IS NULL ORDER BY started_at', [c.tenantId]),
+    ]);
+    return {
+      list: list.map((a) => {
+        const mine = checks.filter((k) => Number(k.attraction_id) === Number(a.id));
+        const done = [...mine].reverse().find((k) => k.status !== 'in_progress');
+        const going = mine.length && mine[mine.length - 1].status === 'in_progress';
+        const d = downs.find((x) => Number(x.attraction_id) === Number(a.id));
+        const check = done && done.status === 'fail' ? 'fail' : done ? 'pass' : null;
+        let detail;
+        if (check === 'fail') detail = going ? 'Inspection failed, a new one is under way' : 'Inspection failed';
+        else if (a.status !== 'open' && a.status_note) detail = a.status_note;
+        else if (d && a.status !== 'open') detail = `Stopped since ${String(d.started_at).slice(11, 16)}${d.note ? `: ${d.note}` : ''}`;
+        else if (check === 'pass') detail = `Passed inspection at ${String(done.finished_at).slice(11, 16)}`;
+        else detail = going ? 'Inspection under way' : 'Not inspected yet today';
+        return { name: a.name, type: a.type, type_label: typeLabel(a.type), status: a.status, check, detail };
+      }),
+    };
   },
   async trails(c) {
     const t = await one(pool, 'SELECT COUNT(*) AS total, COALESCE(SUM(status = \'open\'), 0) AS open, COALESCE(SUM(groomed), 0) AS groomed FROM trails WHERE tenant_id = ?', [c.tenantId]);
@@ -219,6 +244,11 @@ async function alertsFor(c, has, get) {
     for (const l of (await get('lifts')).lifts) {
       if (l.check === 'fail') out.push({ level: 'stop', text: `${l.name} failed its inspection and cannot open`, link: 'conditions' });
       else if (l.status === 'wind_hold') out.push({ level: 'warn', text: `${l.name} is on a wind hold`, link: 'conditions' });
+    }
+  }
+  if (has('lifts') || has('morning')) {
+    for (const a of (await get('attractions')).list) {
+      if (a.check === 'fail') out.push({ level: 'stop', text: `${a.name} failed its opening inspection and cannot open`, link: 'conditions' });
     }
   }
   if (has('maintenance')) {

@@ -13,7 +13,7 @@ import { h, clear, button, field, input, dialog, formDialog, confirmDialog, toas
 import { qr } from '../barcode.js';
 import { sceneSvg, KINDS, KIND, W, H, MAX_ITEMS } from '../scene-draw.js';
 
-const placeOf = (c) => [c.trail, c.lift].filter(Boolean).join(', ') || c.location || '';
+const placeOf = (c) => [c.trail, c.lift, c.attraction].filter(Boolean).join(', ') || c.location || '';
 const whenOf = (c) => (c.occurred_at ? new Date(`${String(c.occurred_at).replace(' ', 'T')}Z`).toLocaleString('en-US', { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
 const svgImage = (svg, alt) => h('img', { class: 'scene-img', alt, src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` });
 const offline = (err) => err instanceof TypeError || /fetch|network/i.test(String(err && err.message));

@@ -25,6 +25,7 @@ const SF = require('../lib/storyfill');
 const staffInjury = require('../lib/staffinjury');
 const COND = require('../lib/caseconditions');
 const { baseUrl } = require('../lib/baseurl');
+const { typeLabel } = require('../lib/attractions');
 
 const router = express.Router();
 // Incident records can contain injury details about guests, so access is limited to patrol and managers.
@@ -55,6 +56,7 @@ const incidentFields = {
   trail_id: z.number().int().positive().nullable().optional(),
   lift_id: z.number().int().positive().nullable().optional(),
   lift_chair: z.string().trim().max(12).nullable().optional(),
+  attraction_id: z.number().int().positive().nullable().optional(), // at an attraction (zipline, coaster, rink): routes/attractions.js
   form: formSchema('case').optional(),
 };
 
@@ -98,6 +100,11 @@ async function summaryFromComplaint(conn, tenantId, inc, complaint, previous) {
   await conn.query('UPDATE incidents SET summary = ? WHERE tenant_id = ? AND id = ?', [text.slice(0, 500), tenantId, inc.id]);
 }
 
+/** A case's attraction must be one of this mountain's (an archived one stays allowed: the report keeps naming it). */
+async function mustBeAttraction(conn, tenantId, id) {
+  if (!(await one(conn, 'SELECT id FROM attractions WHERE tenant_id = ? AND id = ?', [tenantId, id]))) throw notFound('Attraction');
+}
+
 /** Case numbers run per season (2026-27-0001). The unique key settles races; a collision just retries. */
 async function createCase(req, body) {
   for (let attempt = 0; ; attempt++) {
@@ -113,9 +120,11 @@ async function createCase(req, body) {
             return { id: seen.id, case_number: `${seen.season}-${String(seen.seq).padStart(4, '0')}`, status: 'open', report_state: 'draft', repeat: true, patient_id: first ? first.id : null };
           }
         }
+        if (rest.attraction_id) await mustBeAttraction(conn, req.auth.tenantId, rest.attraction_id);
         const data = { ...rest, season, seq: n };
         const cls = body.trail_id && !(body.form && body.form.run_classification) ? await runClassFor(conn, req.auth.tenantId, body.trail_id) : null;
         if (cls) data.form = { ...(data.form || {}), run_classification: cls };
+        if (rest.attraction_id && !(data.form && data.form.incident_location)) data.form = { ...(data.form || {}), incident_location: 'attraction' };
         if ('form' in data) data.form = mergeForm(null, data.form);
         const keys = Object.keys(data);
         const [r] = await conn.query(
@@ -253,7 +262,7 @@ router.get('/analytics', patrol, needs('reports'), async (req, res) => {
 
   // Skier visits = accepted gate scans in the same dates (a rough denominator: one guest can scan more than once).
   const visits = Number((await one(pool, "SELECT COUNT(*) AS n FROM scans WHERE tenant_id = ? AND result = 'ok' AND DATE(scanned_at) BETWEEN ? AND ?", range)).n);
-  const [totals, byCategory, bySeverity, byHour, byWeekday, places, disposition, activity, ability, helmet, region, injuryType, response, byLead, states] = await Promise.all([
+  const [totals, byCategory, bySeverity, byHour, byWeekday, places, disposition, activity, ability, helmet, region, injuryType, response, byLead, states, byAttraction] = await Promise.all([
     one(pool, `SELECT COUNT(*) AS cases, (SELECT COUNT(*) FROM incident_patients p JOIN incidents x ON x.id = p.incident_id AND x.tenant_id = p.tenant_id WHERE x.tenant_id = ? AND DATE(x.occurred_at) BETWEEN ? AND ? AND p.voided_at IS NULL) AS patients,
       (SELECT COUNT(*) FROM incident_patients p JOIN incidents x ON x.id = p.incident_id AND x.tenant_id = p.tenant_id WHERE x.tenant_id = ? AND DATE(x.occurred_at) BETWEEN ? AND ? AND p.voided_at IS NULL AND NOT ${staffInjury.GUEST_SQL}) AS staff_patients FROM incidents i WHERE ${inRange}`, [...range, ...range, ...range]),
     group(`SELECT category AS label, COUNT(*) AS n FROM incidents i WHERE ${inRange} GROUP BY category ORDER BY n DESC`),
@@ -282,6 +291,9 @@ router.get('/analytics', patrol, needs('reports'), async (req, res) => {
            JOIN staff s ON s.id = r.staff_id AND s.tenant_id = r.tenant_id JOIN people pe ON pe.id = s.person_id AND pe.tenant_id = s.tenant_id
            WHERE ${inRange} AND r.role = 'lead' AND r.voided_at IS NULL GROUP BY r.staff_id, pe.first_name, pe.last_name ORDER BY n DESC LIMIT 10`),
     group(`SELECT report_state AS label, COUNT(*) AS n FROM incidents i WHERE ${inRange} GROUP BY report_state`),
+    // Cases at each attraction (zipline, coaster, rink), with their patients, for the attraction's own safety record.
+    group(`SELECT a.name AS label, a.type, COUNT(*) AS n, COALESCE(SUM((SELECT COUNT(*) FROM incident_patients p WHERE p.tenant_id = i.tenant_id AND p.incident_id = i.id AND p.voided_at IS NULL)), 0) AS patients
+      FROM incidents i JOIN attractions a ON a.id = i.attraction_id AND a.tenant_id = i.tenant_id WHERE ${inRange} GROUP BY a.id, a.name, a.type ORDER BY n DESC, a.name`),
   ]);
   const round = (v) => (v === null || v === undefined ? null : Math.round(Number(v) * 10) / 10);
   res.json({
@@ -296,6 +308,7 @@ router.get('/analytics', patrol, needs('reports'), async (req, res) => {
     injuries_by_region: region, injuries_by_type: injuryType,
     response_times: { call_to_scene_min: round(response.call_to_scene_min), scene_to_aid_room_min: round(response.scene_to_aid_room_min), timed_cases: Number(response.timed_cases || 0) },
     cases_by_lead: byLead, report_states: states,
+    cases_by_attraction: byAttraction.map((x) => ({ label: x.label, type: x.type, type_label: typeLabel(x.type), n: Number(x.n), patients: Number(x.patients) })),
   });
 });
 
@@ -311,8 +324,10 @@ const VOIDED_BY = (t) => `LEFT JOIN users vu ON vu.id = ${t}.voided_by AND vu.te
  * answers that can be worked out from the bedside entries.
  */
 async function loadCase(conn, tenantId, id) {
-  const incident = await one(conn, 'SELECT i.*, t.name AS trail, l.name AS lift FROM incidents i LEFT JOIN trails t ON t.id = i.trail_id AND t.tenant_id = i.tenant_id LEFT JOIN lifts l ON l.id = i.lift_id AND l.tenant_id = i.tenant_id WHERE i.tenant_id = ? AND i.id = ?', [tenantId, id]);
+  const incident = await one(conn, `SELECT i.*, t.name AS trail, l.name AS lift, a.name AS attraction, a.type AS attraction_type FROM incidents i LEFT JOIN trails t ON t.id = i.trail_id AND t.tenant_id = i.tenant_id LEFT JOIN lifts l ON l.id = i.lift_id AND l.tenant_id = i.tenant_id
+    LEFT JOIN attractions a ON a.id = i.attraction_id AND a.tenant_id = i.tenant_id WHERE i.tenant_id = ? AND i.id = ?`, [tenantId, id]);
   if (!incident) return null;
+  if (incident.attraction_type) incident.attraction_type_label = typeLabel(incident.attraction_type);
   const [notes, patients, events, responders, witnesses, signatures, collisionRow, parties, checklist, versions] = await Promise.all([
     rows(conn, 'SELECT n.id, n.author_user, COALESCE(u.email, u.username) AS author, n.body, n.created_at FROM incident_notes n LEFT JOIN users u ON u.id = n.author_user AND u.tenant_id = n.tenant_id WHERE n.tenant_id = ? AND n.incident_id = ? ORDER BY n.id', [tenantId, id]),
     rows(conn, `SELECT p.*, COALESCE(vu.email, vu.username) AS voided_by_email FROM incident_patients p ${VOIDED_BY('p')} WHERE p.tenant_id = ? AND p.incident_id = ? ORDER BY p.id`, [tenantId, id]),
@@ -513,10 +528,13 @@ router.patch('/incidents/:id', patrol, needs('create_case'), validate(partialOf(
       const cls = await runClassFor(conn, req.auth.tenantId, body.trail_id);
       if (cls) body.form = { ...(body.form || {}), run_classification: cls };
     }
+    // At an attraction: the NSAAR incident location says so, unless someone already answered it.
+    if (body.attraction_id && !(body.form && body.form.incident_location) && !parseForm(inc.form).incident_location) body.form = { ...(body.form || {}), incident_location: 'attraction' };
     if (body.form) body.form = mergeForm(inc.form, body.form);
     const set = setClause(body, [...Object.keys(incidentFields), 'status']);
     if (!set) throw bad('No updatable fields supplied');
     if (body.lift_id && !(await one(conn, 'SELECT id FROM lifts WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, body.lift_id]))) throw notFound('Lift');
+    if (body.attraction_id) await mustBeAttraction(conn, req.auth.tenantId, body.attraction_id);
     await conn.query(`UPDATE incidents SET ${set.sql} WHERE tenant_id = ? AND id = ?`, [...set.values, req.auth.tenantId, id]);
     // A new time, trail or lift: the conditions are taken again for it while the report is still being written.
     if (['occurred_at', 'trail_id', 'lift_id'].some((k) => k in body && String(body[k] ?? '') !== String(inc[k] ?? '')) && inc.report_state === 'draft') await takeConditions(conn, req.auth.tenantId, id);

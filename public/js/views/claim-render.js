@@ -150,6 +150,7 @@ export function claimDoc(f, { photoSrc = null, extra = [], header = null } = {})
       (f.legal_hold || c.legal_hold) ? h('p', { class: 'cf-hold' }, h('b', null, 'Legal hold. '), f.legal_hold_note || c.legal_hold_note || '') : null),
     sec('The incident', kv([
       ['When', when(c.occurred_at)], ['Where', c.location], ['Trail', c.trail], ['Lift', c.lift ? `${c.lift}${c.lift_chair ? `, chair ${c.lift_chair}` : ''}` : null],
+      ['Attraction', c.attraction ? `${c.attraction}${c.attraction_type_label ? ` (${c.attraction_type_label})` : ''}` : null],
       ['GPS', nn(c.gps_lat) ? `${Number(c.gps_lat).toFixed(5)}, ${Number(c.gps_lng).toFixed(5)}` : null],
       ['Kind', c.category ? label(c.category) : null], ['Severity', c.severity ? label(c.severity) : null], ['Report', c.report_state ? label(c.report_state) : null],
       ['Signed off', c.submitted_at ? when(c.submitted_at) : null], ['Approved', c.approved_at ? when(c.approved_at) : null],
@@ -249,6 +250,8 @@ export function riskDoc(r, { header = null } = {}) {
         co.kits && co.kits.total ? tile(`${co.kits.ready} of ${co.kits.total}`, 'First-aid kits ready', [co.kits.check_due ? `${co.kits.check_due} check due` : null, co.kits.expired ? `${co.kits.expired} with expired items` : null].filter(Boolean).join(', ') || null) : null,
         co.aeds && co.aeds.total ? tile(`${co.aeds.ready} of ${co.aeds.total}`, 'AEDs ready', co.aeds.pads_or_battery_expired ? `${co.aeds.pads_or_battery_expired} with expired pads or battery` : null) : null,
         co.equipment && co.equipment.total ? tile(`${co.equipment.in_service} of ${co.equipment.total}`, 'Rescue equipment in service', co.equipment.attention ? `${co.equipment.attention} need attention` : null) : null)) : null,
+    r.attractions && r.attractions.length ? sec('Cases at attractions',
+      tbl(['Attraction', 'Cases', 'Patients'], r.attractions.map((a) => [`${a.name} (${a.type_label})`, String(a.cases), String(a.patients)]))) : null,
     inj.breakdowns && Object.keys(inj.breakdowns).length ? sec('Patients by', h('div', { class: 'cf-breakdowns' }, Object.values(inj.breakdowns).filter((b) => b.cells.length).map((b) => h('div', null, h('h3', null, b.title), tbl(['', 'Patients', 'Share'], b.cells.map((c) => [c.label, String(c.n), c.pct === null || c.pct === undefined ? '' : `${Math.round(c.pct)}%`])))))) : null,
     h('footer', { class: 'cf-foot' }, h('b', null, 'Not legal advice. '), 'Prepared from the mountain\'s own patrol records for its insurance broker and underwriters. Figures are counts and rates only; no patient is named. Ask the mountain about anything here.'));
 }

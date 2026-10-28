@@ -10,7 +10,7 @@ const MODULES = [
   { key: 'sell', label: 'Sell', blurb: 'Point of sale: tickets, passes, orders, gift cards and refunds.', needs: ['catalog'], paths: ['/checkout', '/gift-cards', '/orders', '/passes', '/terminal', '/partner-passes'] },
   { key: 'catalog', label: 'Products and prices', blurb: 'The product list, promo codes and price rules.', paths: ['/products', '/pricing', '/guest-types'] },
   { key: 'gate', label: 'Gate', blurb: 'Scanning lift tickets and passes at the gate: barcodes, RFID cards and gate hardware.', paths: ['/tickets', '/access'] },
-  { key: 'conditions', label: 'Lifts and trails', blurb: 'Lift and trail status, grooming, snow and weather, maintenance and daily reports.', paths: ['/schedule', '/ops'] },
+  { key: 'conditions', label: 'Lifts and trails', blurb: 'Lift and trail status, grooming, snow and weather, maintenance and daily reports.', paths: ['/schedule', '/ops', '/attractions'] },
   { key: 'assets', label: 'Assets and fleet (add-on)', blurb: 'The asset register for the fleet, lifts, snowmaking and buildings: meters, fuel, inspections, parts and stock, purchase orders, costs and QR tags. Off until the operator turns it on for a mountain.', addon: true, needs: ['conditions'], paths: ['/assets'] },
   { key: 'park', label: 'Terrain park', blurb: 'Park features, areas and the park map.', paths: ['/park'] },
   { key: 'rentals', label: 'Rentals', blurb: 'Rental equipment and contracts.', paths: ['/rentals'] },
@@ -37,6 +37,8 @@ const SHARED_WRITES = [{ re: /^\/schedule\/(lifts|trails)(\/|$)/, any: ['patrol'
 const SHARED_READS = [
   { re: /^\/schedule\/(lifts|trails|days|events)(\/|$)/, any: ['conditions', 'patrol', 'park', 'gate'] },
   { re: /^\/(products|pricing)(\/|$)/, any: ['catalog', 'sell', 'rentals', 'school', 'programs'] },
+  // The attractions themselves (not their inspections): Patrol picks one as a case's place, Sell and the shop sell them.
+  { re: /^\/attractions(\/(meta|\d+))?\/?$/, any: ['conditions', 'patrol', 'sell', 'shop', 'gate', 'catalog', 'workforce'] },
 ];
 
 // Public pages, by the word after the mountain's web name.

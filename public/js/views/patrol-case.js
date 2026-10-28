@@ -22,7 +22,7 @@ import { searchPanel, recordsPanel } from './patrol-search.js';
 import { legalHoldControl } from './patrol-records.js';
 import { photosPanel } from './patrol-photos.js';
 import { leaveDialog, leavePanel, skipLabel } from '../leavecheck.js';
-import { conditionsBox, contactsPanel, liftBox, rentalsPanel } from './patrol-conditions.js';
+import { conditionsBox, contactsPanel, liftBox, attractionBox, rentalsPanel } from './patrol-conditions.js';
 import { kitUsePanel } from './patrol-kits.js';
 import { claimPanel } from './patrol-claim.js';
 import { scenePanel, witnessLinkButton } from './patrol-scene.js';
@@ -56,6 +56,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
   let def = null;
   let trails = null;
   let lifts = null;
+  let attractions = null;
   let checklists = [];
   let current = null;
   let frozen = null;
@@ -71,7 +72,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       if (real) { location.replace(`#/patrol/case/${real}/${mode || 'care'}`); return; }
       const kept = keptCase(id);
       if (!kept) { clear(page).append(backLink(), errorBox(new Error('This case is not on this phone. If it was sent already, open it from the case list.'))); return; }
-      ({ c, def, trails, checklists } = kept.data); lifts = kept.data.lifts || [];
+      ({ c, def, trails, checklists } = kept.data); lifts = kept.data.lifts || []; attractions = kept.data.attractions || [];
       def = def || keptForm();
       if (!def) { clear(page).append(backLink(), errorBox(new Error('This phone has not loaded the report form yet. The case is kept here: open it again once there is a signal.'))); return; }
       current = c; mode = 'care';
@@ -87,6 +88,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       }
       if (!trails) trails = (await get('/schedule/trails?limit=500')).data;
       if (!lifts) lifts = (await get('/schedule/lifts?limit=200').catch(() => ({ data: [] }))).data;
+      if (!attractions) attractions = (await get('/attractions').catch(() => ({ data: [] }))).data;
       if (!checklists.length) checklists = await loadChecklists();
     } catch (err) {
       // No signal: keep what is on screen. Bedside entries are kept on the phone meanwhile.
@@ -95,14 +97,14 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       // Opened in a dead spot: the copy kept on this phone the last time it was opened (up to 12 hours).
       const kept = offline && !version ? keptCase(id) : null;
       if (kept) {
-        ({ c, def, trails, checklists } = kept.data); lifts = kept.data.lifts || [];
+        ({ c, def, trails, checklists } = kept.data); lifts = kept.data.lifts || []; attractions = kept.data.attractions || [];
         current = c; if (!mode) mode = 'care';
         toast(`No connection. Showing the copy on this phone from ${new Date(kept.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}; new entries are sent when the signal returns.`, 'warn');
         redraw(); return;
       }
       clear(page).append(backLink(), errorBox(err)); return;
     }
-    if (!version) keepCase(id, { c, def, trails, checklists, lifts });
+    if (!version) keepCase(id, { c, def, trails, checklists, lifts, attractions });
     current = c;
     if (!mode) mode = c.report_state === 'draft' && !version ? 'care' : 'report';
     redraw();
@@ -440,7 +442,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       ...pts.map((p) => [`patient-${p.id}`, `Patient form: ${p.first_name} ${p.last_name}`.trim(), patientCard(c, p, editable)]),
       ['witness', 'Witnesses', caseSection(c, editable, 'witness', witnessList(c, editable))],
       version ? null : ['scene', 'Scene diagram', scenePanel({ c, editable, id, onDone: load, version }) || h('div', { hidden: true })],
-      ['location', 'Location', caseSection(c, editable, 'location', liftBox({ c, editable, lifts, id, onDone: load }))],
+      ['location', 'Location', caseSection(c, editable, 'location', [liftBox({ c, editable, lifts, id, onDone: load }), attractionBox({ c, editable, attractions, id, onDone: load })])],
       ['conditions', 'Conditions', caseSection(c, editable, 'conditions', conditionsBox({ c, editable, id, onDone: load }), editable ? c.conditions_suggest || {} : {})],
       ['contacts', 'Who was told', contactsPanel({ c, editable, id, onDone: load, redraw })],
       ['rentals', 'Rental gear', rentalsPanel({ c, editable, id, onDone: load })],

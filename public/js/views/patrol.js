@@ -286,6 +286,7 @@ async function drawCases(box, { canAdmin } = {}) {
 
 const PATIENT_TYPES = ['injury', 'collision', 'medical'];
 let lastTrails = [];
+let lastAttractions = [];
 /**
  * A case started with no signal, as the case page needs it, kept (sealed) on this phone under its temporary id. The
  * report form, trails and checklists come from the last case opened here, so the bedside card works the same.
@@ -315,13 +316,16 @@ async function newCase() {
     }, dataset: { value: o } }, label(o)));
     return h('div', { class: 'choice-grid', role: 'group', 'aria-label': ariaLabel }, btns, hidden);
   };
+  let attractions = lastAttractions;
+  try { attractions = (await get('/attractions')).data; lastAttractions = attractions; } catch (_) { /* no signal, or none */ }
   const trail = select([['', 'Not on a trail'], ...trails.map((t) => [t.id, t.name])], '', { name: 'trail_id' });
+  const attraction = attractions.length ? select([['', 'Not at an attraction'], ...attractions.map((a) => [a.id, a.name])], '', { name: 'attraction_id' }) : null;
   const where = input({ name: 'location', maxlength: 255, placeholder: 'For example "Top of Lower Ridge, skier\'s left"' });
   const summary = input({ name: 'summary', maxlength: 500, placeholder: 'Filled in for you if you leave it blank' });
   formDialog('New case', h('div', { class: 'stack' },
     h('div', { class: 'field' }, h('span', null, 'Type'), segmented('category', CATEGORIES, 'injury', 'Type')),
     h('div', { class: 'field' }, h('span', null, 'Severity'), segmented('severity', SEVERITY, 'minor', 'Severity')),
-    h('div', { class: 'form' }, field('Trail', trail), field('Where exactly (optional when a trail is picked)', where)),
+    h('div', { class: 'form' }, field('Trail', trail), attraction ? field('Attraction', attraction) : null, field(attraction ? 'Where exactly (optional when a trail or attraction is picked)' : 'Where exactly (optional when a trail is picked)', where)),
     h('details', null, h('summary', null, 'Patient (optional, add more on the case)'), h('div', { class: 'form' },
       field('First name', input({ name: 'p_first', maxlength: 100 })), field('Last name', input({ name: 'p_last', maxlength: 100 })),
       field('Age', input({ name: 'p_age', type: 'number', min: 0, max: 120, inputmode: 'numeric' })), field('Chief complaint', input({ name: 'p_complaint', maxlength: 255 })))),
@@ -330,11 +334,12 @@ async function newCase() {
       h('div', { class: 'wide' }, field('One-line summary', summary, 'Optional. If you leave it, the first patient\'s chief complaint becomes the summary.'))))),
   async (fd) => {
     const trailName = trail.value ? trail.options[trail.selectedIndex].textContent : '';
-    const spot = val(fd, 'location') || trailName;
-    if (!spot) throw new Error('Pick the trail or say where it is');
+    const attractionName = attraction && attraction.value ? attraction.options[attraction.selectedIndex].textContent : '';
+    const spot = val(fd, 'location') || attractionName || trailName;
+    if (!spot) throw new Error(attraction ? 'Pick the trail or attraction, or say where it is' : 'Pick the trail or say where it is');
     const cat = val(fd, 'category');
     const patient = compact({ first_name: val(fd, 'p_first'), last_name: val(fd, 'p_last'), age_years: num(fd, 'p_age') ?? undefined, chief_complaint: val(fd, 'p_complaint') });
-    const body = compact({ occurred_at: val(fd, 'occurred_at'), location: spot, trail_id: val(fd, 'trail_id') ? Number(val(fd, 'trail_id')) : null, category: cat, severity: val(fd, 'severity'),
+    const body = compact({ occurred_at: val(fd, 'occurred_at'), location: spot, trail_id: val(fd, 'trail_id') ? Number(val(fd, 'trail_id')) : null, attraction_id: val(fd, 'attraction_id') ? Number(val(fd, 'attraction_id')) : null, category: cat, severity: val(fd, 'severity'),
       summary: val(fd, 'summary') || patient.chief_complaint || `${label(cat)} at ${spot}`, patient: Object.keys(patient).length ? patient : undefined });
     // No signal: the case is started on this phone with a temporary id and opens straight away, so time stamps and
     // bedside entries can be added at once. Everything waits, in order, and is sent when the signal returns; the case
@@ -380,7 +385,8 @@ async function drawStats(box) {
           bars('Hour of day', a.by_hour.map((x) => ({ label: `${x.label}:00`, n: x.n }))), bars('Patient outcomes', a.patients_by_disposition.map(lab)),
           bars('Activity', a.patients_by_activity.map(lab)), bars('Ability level', a.patients_by_ability.map(lab)),
           bars('Injuries by body part', a.injuries_by_region.map(lab)), bars('Injuries by type', a.injuries_by_type.map(lab)),
-          bars('Cases led by', a.cases_by_lead), bars('Report status', a.report_states.map(lab))),
+          bars('Cases led by', a.cases_by_lead), bars('Report status', a.report_states.map(lab)),
+          (a.cases_by_attraction || []).length ? bars('Cases at attractions', a.cases_by_attraction.map((x) => ({ label: `${x.label} (${x.patients} ${x.patients === 1 ? 'patient' : 'patients'})`, n: x.n }))) : null),
         h('p', { class: 'muted small' }, `Showing ${a.from} to ${a.to}. Response times use cases that have both times stamped on the timeline (${a.response_times.timed_cases}).`));
     } catch (err) { clear(out).append(errorBox(err)); }
   }

@@ -24,7 +24,7 @@ export const dayLong = (d) => fmt(d, { weekday: 'long', month: 'long', day: 'num
 export const weekLabel = (start) => `${monthDay(start)} to ${monthDay(addDays(start, 6))}`;
 export const weekDays = (start) => Array.from({ length: 7 }, (_, i) => addDays(start, i));
 
-export const DEPARTMENTS = ['lifts', 'rentals', 'ski_school', 'patrol', 'food', 'guest_services', 'grooming', 'maintenance', 'admin'];
+export const DEPARTMENTS = ['lifts', 'rentals', 'ski_school', 'patrol', 'food', 'guest_services', 'grooming', 'maintenance', 'admin', 'attractions'];
 export const STAFF_STATUS = ['active', 'onboarding', 'applicant', 'inactive'];
 export const STATUS_TONE = { active: 'good', onboarding: 'neutral', applicant: 'neutral', inactive: 'warn' };
 export const fullName = (s) => `${s.first_name} ${s.last_name}`;

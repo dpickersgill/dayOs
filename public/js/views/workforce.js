@@ -26,6 +26,8 @@ export async function render(root, params = []) {
 /** Setup shown in Settings, Staff and schedule (managers): positions, certifications, templates and the time clock. */
 export const settingsPages = {
   setup: { title: 'Positions, certifications and the time clock', render: (panel) => drawSetup(panel) },
+  // Suggested positions and certifications for the mountain's attractions (zip guide, coaster operator), added in one step.
+  attractions: { title: 'Staff for attractions', render: async (panel) => (await import('./attractions.js')).drawStaffSuggestions(panel) },
 };
 
 // ---------------------------------------------------------------- the week

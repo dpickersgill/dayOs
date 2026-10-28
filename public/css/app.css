@@ -2925,3 +2925,37 @@ input.switch:disabled { opacity: .5; cursor: not-allowed; }
 .app-setting-row input[type='checkbox'] { width: 22px; height: 22px; flex: none; accent-color: var(--trail-blue); }
 .partner-rule { padding: 8px 0; border-bottom: 1px solid var(--line); }
 .partner-rule p { margin: 2px 0 0; }
+
+/* ---- Attractions ---- */
+[data-dept='attractions'] { --dept: #8a4b0f; }
+:root[data-theme='dark'] [data-dept='attractions'] { --dept: #e0a35c; }
+.attr-name { display: flex; flex-direction: column; }
+.attr-note { display: block; max-width: 28ch; }
+tr.attr-blocked td { background: var(--closed-tint); }
+.attr-section .seg button { min-height: 44px; }
+.attr-section .seg button:disabled[data-tone='good'] { text-decoration: line-through; }
+.attr-downtime { margin-top: 16px; }
+.attr-check-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.attr-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.attr-item.is-pass { border-color: var(--open); background: var(--open-tint); }
+.attr-item.is-fail { border-color: var(--closed); background: var(--closed-tint); }
+.attr-item > input, .attr-item > .attr-note-slot, .attr-item > small { grid-column: 1 / -1; }
+.attr-item-label { font-weight: 700; color: var(--ink); }
+.attr-item-act { display: flex; gap: 6px; }
+.attr-item-act .btn { min-height: 44px; min-width: 72px; }
+.attr-item-act .btn[aria-pressed='true'][data-tone='good'] { background: var(--open); border-color: var(--open); color: var(--surface); }
+.attr-item-act .btn[aria-pressed='true'][data-tone='bad'] { background: var(--closed); border-color: var(--closed); color: var(--surface); }
+.attr-checks-field { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin: 0; }
+.attr-checks-field legend { font-weight: 700; padding: 0 4px; }
+.attr-checks-edit { margin: 0; padding-left: 1.5em; display: grid; gap: 6px; }
+.attr-checks-edit li { display: flex; gap: 6px; align-items: center; }
+.attr-checks-edit li input { flex: 1 1 auto; min-width: 0; min-height: 44px; }
+.attr-staff { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.attr-staff:last-child { border-bottom: none; }
+.attraction-box { margin-top: 12px; }
+@media (max-width: 640px) {
+  .attr-item { grid-template-columns: minmax(0, 1fr); }
+  .attr-item-act .btn { flex: 1 1 0; }
+  .attr-checks-edit li { flex-wrap: wrap; }
+  .attr-checks-edit li input { flex-basis: 100%; }
+}

@@ -8,6 +8,7 @@ const { partialOf, z, dateStr, dateTimeStr, timeStr, validate, normDateTime, add
 const { notFound, conflict } = require('../lib/errors');
 const ops = require('../lib/ops');
 const { audit } = require('../lib/audit');
+const { typeLabel } = require('../lib/attractions');
 
 const schedule = express.Router();
 const publicRouter = express.Router();
@@ -86,11 +87,13 @@ publicRouter.get('/:slug/conditions', async (req, res) => {
   const tenant = await one(pool, 'SELECT id, name, timezone FROM tenants WHERE slug = ?', [req.params.slug]);
   if (!tenant) throw notFound('Mountain');
   const today = todayIn(tenant.timezone);
-  const [day, lifts, trails, events] = await Promise.all([
+  const [day, lifts, trails, events, attractions] = await Promise.all([
     one(pool, 'SELECT status, open_time, close_time, notes FROM calendar_days WHERE tenant_id = ? AND on_date = ?', [tenant.id, today]),
     rows(pool, 'SELECT name, status, updated_at FROM lifts WHERE tenant_id = ? ORDER BY name', [tenant.id]),
     rows(pool, 'SELECT name, difficulty, status, groomed FROM trails WHERE tenant_id = ? ORDER BY name', [tenant.id]),
     rows(pool, 'SELECT title, starts_at, ends_at FROM events WHERE tenant_id = ? AND starts_at >= ? AND starts_at < ? ORDER BY starts_at LIMIT 10', [tenant.id, today, addDays(today, 8)]),
+    // Attractions show by name, type and status only: the note on a hold is for staff.
+    rows(pool, 'SELECT name, type, status FROM attractions WHERE tenant_id = ? AND active = 1 ORDER BY sort, name', [tenant.id]),
   ]);
   res.set('Cache-Control', 'public, max-age=60');
   res.json({
@@ -102,6 +105,8 @@ publicRouter.get('/:slug/conditions', async (req, res) => {
     trails_open: trails.filter((t) => t.status === 'open').length,
     trails,
     upcoming_events: events,
+    attractions_open: attractions.filter((a) => a.status === 'open').length,
+    attractions: attractions.map((a) => ({ name: a.name, type: a.type, type_label: typeLabel(a.type), status: a.status })),
   });
 });
 

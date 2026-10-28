@@ -37,14 +37,16 @@ const REGION_KEYS = REGIONS.map((r) => r[0]);
 // ---------------------------------------------------------------- categories
 // Each dimension: its title, its categories in display order, and how a patient is placed in one.
 const NR = 'not_recorded';
+// The attraction activities on the report (zipline, mountain coaster, ice skating and the rest; tubing has its own).
+const ATTRACTION_ACTIVITY = new Set(require('./attractions').ACTIVITIES.map((a) => a[0]).filter((v) => v !== 'tubing'));
 const D = {
-  activity: { title: 'Activity', cats: [['ski', 'Skiing'], ['snowboard', 'Snowboarding'], ['nordic_touring', 'Nordic or touring'], ['tubing', 'Tubing'], ['other_snow', 'Other snow sport'], ['non_skiing', 'Not on snow equipment'], ['other', 'Other'], [NR, 'Not recorded']] },
+  activity: { title: 'Activity', cats: [['ski', 'Skiing'], ['snowboard', 'Snowboarding'], ['nordic_touring', 'Nordic or touring'], ['tubing', 'Tubing'], ['other_snow', 'Other snow sport'], ['attraction', 'Other attractions (zipline, coaster, rink, bike park and others)'], ['non_skiing', 'Not on snow equipment'], ['other', 'Other'], [NR, 'Not recorded']] },
   ability: { title: 'Ability', cats: [['beginner', 'Beginner or novice'], ['intermediate', 'Intermediate'], ['advanced', 'Advanced'], ['expert', 'Expert'], [NR, 'Not recorded']] },
   age: { title: 'Age', cats: [['0_12', '12 and under'], ['13_17', '13 to 17'], ['18_24', '18 to 24'], ['25_34', '25 to 34'], ['35_44', '35 to 44'], ['45_54', '45 to 54'], ['55_64', '55 to 64'], ['65_up', '65 and over'], [NR, 'Not recorded']] },
   sex: { title: 'Sex', cats: [['female', 'Female'], ['male', 'Male'], ['other', 'Other'], [NR, 'Not recorded']] },
   helmet: { title: 'Helmet (on snow)', cats: [['yes', 'Wearing a helmet'], ['no', 'No helmet'], [NR, 'Not recorded']] },
   cause: { title: 'Cause', cats: [['fall', 'Fall'], ['collision', 'Collision with a person or object'], ['near_collision', 'Avoiding a collision'], ['struck', 'Struck by equipment'], ['equipment', 'Equipment or binding failure'], ['lift_loading', 'Lift: loading'], ['lift_unloading', 'Lift: unloading'], ['lift_other', 'Lift: other'], ['off_trail', 'Went off the trail'], ['non_skiing', 'Slip or other, not skiing'], [NR, 'Not recorded']] },
-  location: { title: 'Where', cats: [['marked_run', 'Marked run'], ['terrain_park', 'Terrain park or pipe'], ['off_trail', 'Off trail, in bounds'], ['closed_oob', 'Closed or out of bounds'], ['lift', 'Lift'], ['premises', 'Buildings, decks and parking'], [NR, 'Not recorded']] },
+  location: { title: 'Where', cats: [['marked_run', 'Marked run'], ['terrain_park', 'Terrain park or pipe'], ['off_trail', 'Off trail, in bounds'], ['closed_oob', 'Closed or out of bounds'], ['lift', 'Lift'], ['attraction', 'Attraction'], ['premises', 'Buildings, decks and parking'], [NR, 'Not recorded']] },
   run: { title: 'Run rating', cats: [['easiest', 'Easiest'], ['more_difficult', 'More difficult'], ['most_difficult', 'Most difficult'], ['extreme', 'Extreme'], [NR, 'Not recorded or not a run']] },
   surface: { title: 'Snow surface', cats: [['groomed', 'Groomed'], ['moguls', 'Moguls'], ['powder', 'Powder'], ['variable', 'Variable'], ['granular', 'Granular'], ['hard', 'Hard'], [NR, 'Not recorded']] },
   light: { title: 'Light', cats: [['sharp', 'Sharp'], ['flat', 'Flat'], ['whiteout', 'Whiteout'], ['lights', 'Night lights'], ['dark', 'Dark'], [NR, 'Not recorded']] },
@@ -68,7 +70,7 @@ const parse = (v) => { if (!v) return {}; if (typeof v === 'object') return v; t
 const pick = (form, key, col) => { const v = form[key]; return v === undefined || v === null || v === '' ? (col ?? null) : v; };
 
 function activityOf(v) {
-  return { alpine: 'ski', ski: 'ski', telemark: 'ski', snowboard: 'snowboard', nordic: 'nordic_touring', touring: 'nordic_touring', tubing: 'tubing', other_snow: 'other_snow', non_skiing: 'non_skiing', pedestrian: 'non_skiing', other: 'other' }[v] || NR;
+  return { alpine: 'ski', ski: 'ski', telemark: 'ski', snowboard: 'snowboard', nordic: 'nordic_touring', touring: 'nordic_touring', tubing: 'tubing', other_snow: 'other_snow', non_skiing: 'non_skiing', pedestrian: 'non_skiing', other: 'other' }[v] || (ATTRACTION_ACTIVITY.has(v) ? 'attraction' : NR);
 }
 const abilityOf = (v) => ({ beginner: 'beginner', novice: 'beginner', intermediate: 'intermediate', advanced: 'advanced', expert: 'expert' }[v] || NR);
 const helmetOf = (v) => ({ owned: 'yes', rental: 'yes', yes: 'yes', none: 'no', no: 'no' }[v] || NR);
@@ -95,7 +97,7 @@ function causeOf(collided, cause) {
   return NR;
 }
 function locationOf(where, involvement) {
-  const m = { marked_run: 'marked_run', freestyle_terrain: 'terrain_park', terrain_rail_park: 'terrain_park', half_pipe: 'terrain_park', competition_terrain: 'terrain_park', off_trail: 'off_trail', out_of_bounds: 'closed_oob', closed_inbounds: 'closed_oob', lift_incident: 'lift', premises: 'premises' }[where];
+  const m = { marked_run: 'marked_run', freestyle_terrain: 'terrain_park', terrain_rail_park: 'terrain_park', half_pipe: 'terrain_park', competition_terrain: 'terrain_park', off_trail: 'off_trail', out_of_bounds: 'closed_oob', closed_inbounds: 'closed_oob', lift_incident: 'lift', attraction: 'attraction', premises: 'premises' }[where];
   if (m) return m;
   return involvement === 'terrain_park_feature' ? 'terrain_park' : NR;
 }

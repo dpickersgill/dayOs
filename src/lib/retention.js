@@ -29,6 +29,7 @@ const NAMED = {
   staff: [['incident_responders', 'staff_id'], ['staff_injuries', 'staff_id'], ['users', 'staff_id']],
   trails: [['incidents', 'trail_id']],
   lifts: [['incidents', 'lift_id']],
+  attractions: [['incidents', 'attraction_id']],
 };
 // Logins are kept (switched off) because the records name who wrote, signed and approved them; what lets anyone sign in goes.
 

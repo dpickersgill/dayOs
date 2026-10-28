@@ -15,6 +15,7 @@ const SOURCES = {
   school: [['school', 'school'], ['availability', 'availability']],
   programs: [['programs', 'programs']],
   rentals: [['rentals', 'rentals']],
+  attractions: [['attractions', 'conditions']],
   waivers: [['waivers', null]],
   patrol: [['patrol', 'patrol']],
   workforce: [['workforce', 'workforce']],

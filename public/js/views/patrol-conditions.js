@@ -95,6 +95,38 @@ export function liftBox({ c, editable, lifts, id, onDone }) {
     h('p', { class: 'muted small' }, 'The lift’s status and any stop at the time are kept with the conditions.'));
 }
 
+/**
+ * The attraction the case happened at (zipline, mountain coaster, rink and the rest), from Settings, Attractions. Picking
+ * one can also write its name as the exact location; the report's incident location becomes Attraction if not answered.
+ */
+export function attractionBox({ c, editable, attractions, id, onDone }) {
+  const named = c.attraction ? `${c.attraction}${c.attraction_type_label ? ` (${c.attraction_type_label})` : ''}` : 'Attraction';
+  if (!editable) return c.attraction_id ? h('p', { 'data-area': 'attraction' }, h('b', null, 'Attraction: '), named) : null;
+  const list = [...(attractions || [])];
+  if (c.attraction_id && !list.some((a) => a.id === c.attraction_id)) list.push({ id: c.attraction_id, name: c.attraction || 'Attraction (archived)', type_label: c.attraction_type_label || '' });
+  if (!list.length) return null;
+  const pick = select([['', 'Not at an attraction'], ...list.map((a) => [a.id, `${a.name}${a.type_label ? ` (${a.type_label})` : ''}`])], c.attraction_id || '', { 'aria-label': 'Attraction' });
+  const useName = h('input', { type: 'checkbox' });
+  const nameLine = h('label', { class: 'check' }, useName, h('span', { class: 'use-name' }));
+  const sync = () => {
+    const a = list.find((x) => String(x.id) === pick.value);
+    nameLine.hidden = !a;
+    if (!a) return;
+    nameLine.querySelector('.use-name').textContent = ` Write "${a.name}" as the exact location`;
+    useName.checked = !String(c.location || '').toLowerCase().includes(a.name.toLowerCase());
+  };
+  pick.addEventListener('change', sync); sync();
+  const save = button('Save attraction', async () => {
+    const a = list.find((x) => String(x.id) === pick.value);
+    const body = { attraction_id: a ? a.id : null };
+    if (a && useName.checked) body.location = a.name;
+    try { await patch(`/patrol/incidents/${id}`, body); toast('Attraction saved'); await onDone(); } catch (err) { fail(err); }
+  }, { small: true });
+  const sel = (attractions || []).find((a) => a.id === c.attraction_id);
+  return h('div', { class: 'lift-box attraction-box', 'data-area': 'attraction' }, h('h3', null, 'Attraction'), h('div', { class: 'row tight' }, pick, save), nameLine,
+    h('p', { class: 'muted small' }, sel ? `For each patient hurt on it, choose "${sel.type_label}" or the closest Activity on the patient form.` : 'Zipline, mountain coaster, tubing, the rink and the other things to do, as set up in Settings, Attractions.'));
+}
+
 const gearName = (it) => `${label(it.category)} ${[it.brand, it.model, it.size].filter(Boolean).join(' ')}`.trim();
 function gearLines(d) {
   const b = d.binding || {};

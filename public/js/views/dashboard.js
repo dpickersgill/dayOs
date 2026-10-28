@@ -196,6 +196,14 @@ const TILES = {
       const [t, k] = l.check === 'fail' ? ['Cannot open', 'bad'] : LIFTCHIP[l.status] || [label(l.status), 'neutral'];
       liftCol.push(mbRow(l.name, l.detail, chip(t, k)));
     }
+    if (d.attractions && d.attractions.length) {
+      const ACHIP = { open: ['Open', 'good'], hold: ['On hold', 'warn'], closed: ['Closed', 'neutral'] };
+      liftCol.push(mbHead('Attractions', 'conditions'));
+      for (const a of d.attractions) {
+        const [t, k] = a.check === 'fail' ? ['Cannot open', 'bad'] : ACHIP[a.status] || [label(a.status), 'neutral'];
+        liftCol.push(mbRow(a.name, a.detail, chip(t, k)));
+      }
+    }
     const parts = [];
     if (d.patrol) {
       const p = d.patrol; const done = p.trails && p.checked >= p.trails;

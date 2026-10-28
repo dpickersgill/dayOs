@@ -24,6 +24,7 @@ const PAGES = [
   ['school', 'apps', 'Ski school', 'Online lesson booking, cancellations and refunds, and the levels you teach. Only owners and managers see this page.', () => import('./settings-apps.js')],
   ['programs', 'apps', 'Programs', 'How families register for programs.', () => import('./settings-apps.js')],
   ['rentals', 'apps', 'Rentals', 'How the rental counter works: fees, deposits and the binding chart.', () => import('./settings-apps.js')],
+  ['attractions', 'apps', 'Attractions', 'Ziplines, a coaster, tubing, the rink and more: limits, waivers and each one’s daily opening checks.', () => import('./settings-apps.js')],
   ['waivers', 'apps', 'Waivers', 'The waiver wording guests sign, with every earlier version kept.', () => import('./settings-apps.js')],
   ['patrol', 'apps', 'Patrol', 'Patrol settings, what a report must hold, and who can do what.', () => import('./settings-apps.js')],
   ['workforce', 'apps', 'Staff and schedule', 'Positions, certifications and the time clock.', () => import('./settings-apps.js')],
@@ -33,7 +34,7 @@ export const PAGE_KEYS = PAGES.map((p) => p[0]);
 
 // The app each Apps page opens, and the module that must be on for the page to show.
 export const APP_OF = { sell: ['sell', 'Sell', ['sell', 'gate']], shop: ['shop', 'Online shop', ['shop']], school: ['school', 'Ski school', ['school']], programs: ['programs', 'Programs', ['programs']],
-  rentals: ['rentals', 'Rentals', ['rentals']], waivers: ['waivers', 'Waivers', null], patrol: ['patrol', 'Patrol', ['patrol']], workforce: ['workforce', 'Staff and schedule', ['workforce']], messages: ['messages', 'Messages', ['messages']] };
+  rentals: ['rentals', 'Rentals', ['rentals']], attractions: ['conditions', 'Mountain status', ['conditions']], waivers: ['waivers', 'Waivers', null], patrol: ['patrol', 'Patrol', ['patrol']], workforce: ['workforce', 'Staff and schedule', ['workforce']], messages: ['messages', 'Messages', ['messages']] };
 
 const moduleOn = (keys) => !keys || !ctx.me.modules || keys.some((k) => ctx.me.modules.includes(k));
 

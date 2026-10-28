@@ -11,6 +11,7 @@
 // col             = the field already has its own database column (older reports keep working);
 //                   every other field is stored in the case's or patient's `form` JSON.
 const { z } = require('zod');
+const ATTRACTION_ACTIVITIES = require('./attractions').ACTIVITIES;
 
 const opts = (...pairs) => pairs.map((p) => (Array.isArray(p) ? { value: p[0], label: p[1] } : { value: p, label: p.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()) }));
 const UNK = [['unknown', 'Unknown'], ['na', 'N/A']];
@@ -159,12 +160,13 @@ add('case', 'location', 'trail_id', 'Run', 'trail', { col: 'trail_id' });
 add('case', 'location', 'map_grid', 'Map or grid coordinates', 'text');
 add('case', 'location', 'gps', 'GPS', 'gps', { col: 'gps_lat', hint: 'Complete this if the patroller has a GPS' });
 add('case', 'location', 'location', 'Exact location', 'text', { col: 'location', locked: 'always' });
-add('case', 'location', 'incident_location', 'Incident location', 'select', { options: opts(['marked_run', 'Marked run (run is posted)'], ['freestyle_terrain', 'Freestyle terrain (posted as freestyle)'], ['terrain_rail_park', 'Terrain or rail park'], ['competition_terrain', 'Competition terrain (active competition)'], ['half_pipe', 'Half pipe'], ['out_of_bounds', 'Out of bounds'], ['closed_inbounds', 'Closed inbounds'], ['off_trail', 'Off trail (inside the boundary)'], ['lift_incident', 'Lift incident'], ['premises', 'Premises (indoors, deck, walkway, parking lot)'], 'unknown', ['na', 'N/A']) });
+add('case', 'location', 'incident_location', 'Incident location', 'select', { options: opts(['marked_run', 'Marked run (run is posted)'], ['freestyle_terrain', 'Freestyle terrain (posted as freestyle)'], ['terrain_rail_park', 'Terrain or rail park'], ['competition_terrain', 'Competition terrain (active competition)'], ['half_pipe', 'Half pipe'], ['out_of_bounds', 'Out of bounds'], ['closed_inbounds', 'Closed inbounds'], ['off_trail', 'Off trail (inside the boundary)'], ['lift_incident', 'Lift incident'], ['attraction', 'Attraction (zipline, coaster, tubing, rink and others)'], ['premises', 'Premises (indoors, deck, walkway, parking lot)'], 'unknown', ['na', 'N/A']) });
 add('case', 'location', 'park_feature', 'Park feature name, number and size', 'text', { when: { field: 'incident_location', in: ['freestyle_terrain', 'terrain_rail_park', 'half_pipe'] }, hint: 'Ask the terrain park supervisor. Do not guess.' });
 add('case', 'location', 'run_classification', 'Run classification', 'select', { options: opts(['easiest', 'Easiest (green circle)'], ['more_difficult', 'More difficult (blue square)'], ['most_difficult', 'Most difficult (black diamond)'], ['extreme', 'Extreme (double black diamond)'], ['na', 'N/A']) });
 
 // ---- activity (patient)
-add('patient', 'activity', 'activity', 'Activity', 'select', { options: opts('alpine', 'snowboard', 'telemark', 'nordic', 'touring', 'tubing', ['non_skiing', 'Non-skiing'], 'other') });
+// The attraction activities come from lib/attractions.js (tubing was here first and keeps its value and place).
+add('patient', 'activity', 'activity', 'Activity', 'select', { options: opts('alpine', 'snowboard', 'telemark', 'nordic', 'touring', ...ATTRACTION_ACTIVITIES, ['non_skiing', 'Non-skiing'], 'other') });
 add('patient', 'activity', 'activity_other', 'Other activity', 'text', { when: { field: 'activity', equals: 'other' } });
 add('patient', 'activity', 'involvement', 'Involvement', 'select', { options: opts(['rec_ski_ride', 'Recreation skiing or riding'], ['rec_jumping', 'Recreation jumping'], 'competition', 'training', ['in_lesson', 'In lesson (circle SB or ski)'], ['tube_slide', 'Tube slide'], ['terrain_park_feature', 'Terrain park feature'], 'unknown', 'other') });
 add('patient', 'activity', 'involvement_other', 'Other involvement', 'text', { when: { field: 'involvement', equals: 'other' } });

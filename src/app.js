@@ -271,11 +271,13 @@ function createApp() {
   api.use(sales); // /orders, /tickets/scan
   api.use('/rentals', rentals);
   api.use('/schedule', schedule);
+  api.use('/attractions', require('./routes/attractions').router);
   api.use('/workforce', workforce);
   api.use('/staff-injuries', require('./routes/staffinjuries'));
   api.use('/lost-found', require('./routes/lostfound').router);
   api.use('/partner-passes', require('./routes/partnerpasses').router);
   api.use('/workforce', require('./routes/workforcetime'));
+  api.use('/workforce', require('./routes/attractions').workforceRouter); // suggested staff for attractions
   api.use('/kiosk-admin', kiosk.adminRouter);
   api.use('/skischool', skischool);
   api.use('/skischool', schoolplus);

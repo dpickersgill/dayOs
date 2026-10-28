@@ -27,8 +27,10 @@ async function drawStatus(root, canSet) {
   const day = h('section', { class: 'section' });
   const lifts = h('section', { class: 'section' });
   const trails = h('section', { class: 'section' });
-  root.append(day, lifts, trails);
-  await Promise.all([drawDay(day), drawLifts(lifts, canSet), drawTrails(trails, canSet)]);
+  const attractions = h('section', { class: 'section attr-section', hidden: true });
+  root.append(day, lifts, trails, attractions);
+  const drawAttr = async () => { try { await (await import('./attractions.js')).drawAttractions(attractions, canSet); } catch (err) { attractions.hidden = false; clear(attractions).append(errorBox(err)); } };
+  await Promise.all([drawDay(day), drawLifts(lifts, canSet), drawTrails(trails, canSet), drawAttr()]);
   if (isManager()) {
     root.append(h('p', { class: 'muted small' }, `Public feed for your website: /api/v1/public/${ctx.me.tenant}/conditions`));
   }
