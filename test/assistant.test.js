@@ -126,6 +126,24 @@ test('an instructor is not given manager-only Help, and cannot see managers\' mo
   assert.match(lastSystem(), /\[money-export\]/);
 });
 
+test('a follow-up carries only the asker\'s own earlier answers, read back from the log, never text the screen sends', async () => {
+  replies = [text('Yesterday you sold $4,210 across 63 orders.')];
+  const owners = ok(await api('POST', '/assistant/ask', { token: T.owner, body: { question: 'What did we sell yesterday?' } }));
+  // A counter clerk signs in on the same screen; an old screen sends the owner's answer as text, a new one sends its id.
+  replies = [text('Press Refund on the order.')];
+  ok(await api('POST', '/assistant/ask', { token: T.counter, body: { question: 'How do I refund part of an order?', history_ids: [owners.id], history: [{ q: 'What did we sell yesterday?', a: 'Yesterday you sold $4,210 across 63 orders.' }] } }));
+  const sent = JSON.stringify(calls.at(-1).body.messages);
+  assert.doesNotMatch(sent, /4,210|sell yesterday/, 'nothing of the owner\'s conversation reaches the clerk\'s question');
+  // The clerk's own earlier answer is used for their follow-up.
+  const mine = ok(await api('POST', '/assistant/ask', { token: T.counter, body: { question: 'And a whole order?', history_ids: [owners.id] } }));
+  replies = [text('Same screen.')];
+  ok(await api('POST', '/assistant/ask', { token: T.counter, body: { question: 'Where is that screen?', history_ids: [owners.id, mine.id] } }));
+  const follow = calls.at(-1).body.messages;
+  assert.equal(follow.length, 3, 'one earlier question and answer, then the new question');
+  assert.equal(follow[0].content, 'And a whole order?');
+  assert.doesNotMatch(JSON.stringify(follow), /4,210/);
+});
+
 test('Ask support sends the question, the answer and a drafted reply to support@, once', async () => {
   replies = [text('[[unsure]] Not sure.'), text('Hi! You can do that under Settings.')];
   const r = ok(await api('POST', '/assistant/ask', { token: T.counter, body: { question: 'Can I print a ticket twice?', page: 'sell' } }));

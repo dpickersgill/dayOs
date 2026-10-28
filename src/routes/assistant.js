@@ -29,10 +29,23 @@ router.get('/', async (req, res) => {
   res.json({ on: config.assistant.on && s.staff_on, plus: mods.includes('assistant_plus'), support_email: config.site.supportEmail });
 });
 
-router.post('/ask', perPerson, validate(z.object({ question: z.string().trim().min(2).max(1000), page: z.string().trim().max(40).optional(), views: z.array(z.string().max(40)).max(80).optional(), history })), async (req, res) => {
+/**
+ * The earlier questions a follow-up builds on: this person's own answers from the last few hours, read back from the
+ * log by id. Text a screen sends is never used for this: on a shared device it could be the last person's answers (an
+ * owner's sales figures carried into a clerk's question), or it could be made up.
+ */
+async function ownHistory(req, ids) {
+  if (!ids || !ids.length) return [];
+  const list = await rows(pool, `SELECT question, answer FROM assistant_log WHERE tenant_id = ? AND user_id = ? AND audience = 'staff' AND id IN (?)
+    AND created_at >= DATE_SUB(NOW(), INTERVAL 8 HOUR) ORDER BY id DESC LIMIT 3`, [req.auth.tenantId, req.auth.userId, ids]);
+  return list.reverse().map((r) => ({ q: r.question, a: r.answer }));
+}
+
+// history (the questions and answers as text) is still accepted from screens opened before this change, and ignored.
+router.post('/ask', perPerson, validate(z.object({ question: z.string().trim().min(2).max(1000), page: z.string().trim().max(40).optional(), views: z.array(z.string().max(40)).max(80).optional(), history_ids: z.array(z.number().int().positive()).max(6).optional(), history })), async (req, res) => {
   const s = await A.settingsOf(pool, req.auth.tenantId);
   if (!s.staff_on) throw new AppError(403, 'The assistant is turned off for your mountain');
-  const out = await A.ask({ tenantId: req.auth.tenantId, audience: 'staff', userId: req.auth.userId, role: req.auth.role, page: req.body.page, views: req.body.views || [] }, req.body.question, { history: req.body.history || [] });
+  const out = await A.ask({ tenantId: req.auth.tenantId, audience: 'staff', userId: req.auth.userId, role: req.auth.role, page: req.body.page, views: req.body.views || [] }, req.body.question, { history: await ownHistory(req, req.body.history_ids) });
   res.json(out);
 });
 
