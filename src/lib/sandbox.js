@@ -20,8 +20,10 @@ async function activeCount() {
 }
 
 /**
- * Removes one mountain and everything in it. Only a demo, or (closed: true) a real mountain the operator closed whose
- * export window has passed (tenants.delete_after, status paused). Refuses anything else.
+ * Removes one mountain and everything in it but its audit trail. Only a demo, or (closed: true) a real mountain the
+ * operator closed whose export window has passed (tenants.delete_after, status paused). Refuses anything else.
+ * The audit trail (audit_log, platform_audit) is kept, for a demo too: the app's database login may only read and add
+ * audit rows (scripts/db-runtime-user.js), so nothing running in the app can erase who did what.
  */
 async function purgeTenant(id, { closed = false } = {}) {
   const which = closed ? "status = 'suspended' AND delete_after IS NOT NULL AND delete_after <= CURDATE() AND sandbox_expires_at IS NULL" : 'sandbox_expires_at IS NOT NULL';
@@ -35,13 +37,12 @@ async function purgeTenant(id, { closed = false } = {}) {
     if (!t) return false;
     const [tables] = await conn.query(
       `SELECT c.table_name AS t FROM information_schema.columns c JOIN information_schema.tables x ON x.table_schema = c.table_schema AND x.table_name = c.table_name
-       WHERE c.table_schema = DATABASE() AND c.column_name = 'tenant_id' AND x.table_type = 'BASE TABLE' AND c.table_name NOT IN ('tenants', 'sandbox_signups', 'platform_audit')`,
+       WHERE c.table_schema = DATABASE() AND c.column_name = 'tenant_id' AND x.table_type = 'BASE TABLE' AND c.table_name NOT IN ('tenants', 'sandbox_signups', 'audit_log', 'platform_audit')`,
     );
     await conn.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
       await conn.query('DELETE FROM user_recovery_codes WHERE user_id IN (SELECT id FROM users WHERE tenant_id = ?)', [id]);
       for (const { t: name } of tables) await conn.query('DELETE FROM `' + String(name).replace(/`/g, '') + '` WHERE tenant_id = ?', [id]);
-      if (!closed) await conn.query('DELETE FROM platform_audit WHERE tenant_id = ?', [id]); // a real mountain's console history is kept
       await conn.query(`DELETE FROM tenants WHERE id = ? AND ${which}`, [id]);
     } finally {
       await conn.query('SET FOREIGN_KEY_CHECKS = 1');

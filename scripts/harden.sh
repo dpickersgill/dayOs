@@ -4,7 +4,7 @@
 #   1. A service account just for the live app, with only the roles it needs, instead of the default one with Editor [H2]
 #      (staging runs as its own account, summitops-staging, made by staging-setup.sh; it is never given a live secret)
 #   2. Every key the app holds (Stripe, Postmark, the job key, the phone-alert keys) moved into Secret Manager [M6]
-#   3. A database login for the app that can change rows but not tables or the audit trail; the current login is
+#   3. A database login for the app that can change rows but not tables, and can only add to the audit trail; the current login is
 #      kept for migrations only [M4, M5]
 #   4. The database refuses unencrypted connections and cannot be deleted by accident [L4]
 #   5. A copy of every audit event kept for 400 days in its own log bucket, outside the database [M5]
