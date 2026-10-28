@@ -15,6 +15,37 @@ async function markPending(conn, tenantId, refundId, paymentIntent) {
     [paymentIntent, `card-refund-${tenantId}-${refundId}`, account, tenantId, refundId]);
 }
 
+/**
+ * Splits the card part of a refund across the order's card payments (pays: its order_payments rows), oldest first, each
+ * capped at what it has left after earlier card refunds. Each Stripe payment (online, or on a counter reader) gets its own
+ * part, refunded back through Stripe to that card; cards taken on a separate machine share one part that the desk refunds
+ * on that machine. Returns [{ method: 'card', cents, ref }], ref being the Stripe payment, or null for the desk.
+ */
+async function splitCard(conn, tenantId, orderId, pays, cents) {
+  const cards = pays.filter((p) => p.tender === 'card');
+  const viaStripe = (p) => p.processor === 'stripe' && p.reference;
+  const before = await rows(conn, "SELECT card_ref, SUM(amount_cents) AS cents FROM order_refunds WHERE tenant_id = ? AND order_id = ? AND method = 'card' GROUP BY card_ref", [tenantId, orderId]);
+  const back = new Map(before.map((b) => [b.card_ref || '', Number(b.cents)]));
+  const left = new Map(); // what each Stripe payment, and the desk's cards together (''), still have to give back
+  for (const p of cards) { const k = viaStripe(p) ? String(p.reference) : ''; left.set(k, (left.get(k) || 0) + Number(p.amount_cents)); }
+  for (const [k, v] of left) left.set(k, v - (back.get(k) || 0));
+  // Desk refunds beyond the desk's own cards (written before refunds were split by card) came off the Stripe payments.
+  let over = Math.max(-(left.get('') || 0), 0);
+  for (const p of cards.filter(viaStripe)) { const k = String(p.reference); const take = Math.min(over, Math.max(left.get(k), 0)); left.set(k, left.get(k) - take); over -= take; }
+  const out = []; let todo = cents;
+  for (const p of cards) {
+    if (todo <= 0) break;
+    const k = viaStripe(p) ? String(p.reference) : '';
+    const give = Math.min(todo, Math.max(left.get(k) || 0, 0));
+    if (give <= 0) continue;
+    left.set(k, left.get(k) - give); todo -= give;
+    const same = out.find((x) => x.ref === (k || null));
+    if (same) same.cents += give; else out.push({ method: 'card', cents: give, ref: k || null });
+  }
+  if (todo > 0) out.push({ method: 'card', cents: todo, ref: null }); // what the records cannot place goes to the desk
+  return out;
+}
+
 /** Sends one pending or failed card refund to Stripe. Returns 'sent', 'failed' or 'skipped'. Never throws. */
 async function send(tenantId, refundId) {
   const r = await one(pool, "SELECT id, amount_cents, card_status, card_ref, card_key, card_account FROM order_refunds WHERE tenant_id = ? AND id = ?", [tenantId, refundId]);
@@ -109,4 +140,4 @@ async function retryAll() {
   return out;
 }
 
-module.exports = { markPending, send, retryAll, oweReturn, returned, sendReturn, returnStray };
+module.exports = { markPending, splitCard, send, retryAll, oweReturn, returned, sendReturn, returnStray };

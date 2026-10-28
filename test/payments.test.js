@@ -300,6 +300,40 @@ test('a paid card page that cannot be matched is refunded; one whose saved page 
   assert.equal(kept.status, 'confirmed'); assert.equal(kept.payment_intent, `pi_${row2.stripe_session_id}`); assert.equal(kept.staff_note, null);
 });
 
+test('an order paid with two cards refunds each card what it paid, oldest first; a card from a separate machine is left for the desk', async () => {
+  const order = async (lines, pays) => {
+    const total = lines.reduce((x, c) => x + c, 0);
+    const [o] = await pool.query("INSERT INTO orders (tenant_id, user_id, status, subtotal_cents, total_cents, channel) VALUES (?, NULL, 'paid', ?, ?, 'window')", [tenantId, total, total]);
+    for (const c of lines) await pool.query("INSERT INTO order_items (tenant_id, order_id, line_kind, quantity, unit_price_cents) VALUES (?, ?, 'ticket', 1, ?)", [tenantId, o.insertId, c]);
+    for (const p of pays) await pool.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, processor) VALUES (?, ?, 'card', ?, ?, ?)", [tenantId, o.insertId, p.cents, p.ref || null, p.ref ? 'stripe' : null]);
+    return { id: o.insertId, items: (await q('SELECT id FROM order_items WHERE order_id = ? ORDER BY id', [o.insertId])).map((x) => x.id) };
+  };
+  const sentSince = (mark) => calls.slice(mark).filter((x) => x.path === '/v1/refunds').map((x) => [x.params.payment_intent, Number(x.params.amount)]);
+  const cardRows = async (id) => (await q("SELECT card_ref, amount_cents, card_status FROM order_refunds WHERE order_id = ? AND method = 'card' ORDER BY id", [id])).map((r) => [r.card_ref, r.amount_cents, r.card_status]);
+  // Two reader payments, $60 and $40: the whole refund is split $60 and $40, one refund row each.
+  const A2 = `pi_cardA_${suffix}`; const B2 = `pi_cardB_${suffix}`;
+  const two = await order([10000], [{ cents: 6000, ref: A2 }, { cents: 4000, ref: B2 }]);
+  let mark = calls.length;
+  const r = await api('POST', `/orders/${two.id}/refund`, { token: A.owner, body: { reason: 'customer_request' } });
+  assert.equal(r.status, 200, r.text); assert.equal(r.body.card_refunded, true); assert.equal(r.body.card_refund_failed, undefined);
+  assert.deepEqual(sentSince(mark), [[A2, 6000], [B2, 4000]]);
+  assert.deepEqual(await cardRows(two.id), [[A2, 6000, 'sent'], [B2, 4000, 'sent']]);
+  // Part refunds, one at a time: $50 on Stripe, $30 on a separate card machine, $20 on Stripe.
+  const P = `pi_cardP_${suffix}`; const Q = `pi_cardQ_${suffix}`;
+  const three = await order([2500, 2500, 2500, 2500], [{ cents: 5000, ref: P }, { cents: 3000 }, { cents: 2000, ref: Q }]);
+  const part = async (i) => { const x = await api('POST', `/orders/${three.id}/refund`, { token: A.owner, body: { reason: 'customer_request', item_ids: [three.items[i]] } }); assert.equal(x.status, 200, x.text); return x; };
+  mark = calls.length;
+  await part(0); await part(1);
+  assert.deepEqual(sentSince(mark), [[P, 2500], [P, 2500]], 'the first card, until it has nothing left');
+  mark = calls.length;
+  await part(2);
+  assert.deepEqual(sentSince(mark), [], 'the separate machine\'s card is not sent to Stripe');
+  await part(3);
+  assert.deepEqual(sentSince(mark), [[Q, 2000]]);
+  assert.deepEqual(await cardRows(three.id), [[P, 2500, 'sent'], [P, 2500, 'sent'], [null, 2500, null], [null, 500, null], [Q, 2000, 'sent']]);
+  assert.equal((await q('SELECT status, refunded_cents FROM orders WHERE id = ?', [three.id]))[0].refunded_cents, 10000);
+});
+
 test('canceling a paid lesson refunds 100% well ahead, 50% in the middle window and nothing at the last minute', async () => {
   const cancel = (info, email = 'pam@x.test') => pub('POST', `/requests/${info.reference}/cancel`, { body: { email } });
   // 100 hours ahead: full refund
