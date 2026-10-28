@@ -217,6 +217,168 @@
           "app": null,
           "who": [],
           "text": "The roadmap under Help, Coming to Verdynt/OS, is rebuilt from a full review of the app: first a busy Saturday that never waits (more room at peak, selling with no internet, sales tax by area, QuickBooks Online), then season pass payment plans and pass revenue over the season, signing in with your company login, guest pages anyone can use, labor cost and payroll, and your lift gates; later, groups of mountains, lift inspections by lift type, hiring, summer operations and Canada."
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": null,
+          "text": "Signing out, by you or after 15 minutes, now starts the app over. A checkout, a customer, the Ask panel or anything else left open is closed, so the next person on a shared computer or tablet never sees it. A card already charged on the reader in an unfinished checkout goes back to the guest.",
+          "help": "idle"
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": null,
+          "text": "The Ask assistant forgets your conversation when you sign out, and a follow-up question only uses your own earlier questions."
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": null,
+          "text": "A page that only refreshes itself, like a board or the Inbox count, no longer keeps you signed in. After an hour with nobody using it, the sign-in ends.",
+          "help": "idle"
+        },
+        {
+          "kind": "fixed",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "The patrol-room screen now shows only who is on duty. Nothing else opens on that tablet until the leader presses Leave this screen and confirms it is them, or presses Sign out. It stays signed in all day.",
+          "help": "patrol-duty"
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Pressing Sign out on a phone or tablet turns phone alerts off on it, so on a shared device the next person is never alerted for you. Turn them on again after you sign in.",
+          "help": "patrol-duty"
+        },
+        {
+          "kind": "fixed",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Witnesses, responders, people in a collision and rental gear added to a case by mistake are now marked entered in error with a reason. They stay on the report, struck through, instead of being removed.",
+          "help": "patrol-case"
+        },
+        {
+          "kind": "fixed",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "While a case is on legal hold, nothing on it can change except adding notes."
+        },
+        {
+          "kind": "fixed",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Only a patrol admin can change who reviews reports, the Patrol Director, and which kinds of case are reviewed. Group members can still change the reminder time. Every change is recorded with what it was before and after.",
+          "help": "patrol-review"
+        },
+        {
+          "kind": "fixed",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "If you changed the review group in the last 30 days, your own reports go for review, whatever the kind of case.",
+          "help": "patrol-review"
+        },
+        {
+          "kind": "fixed",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Photo previews can only be added while a report can still be changed, and opening a preview is now recorded in the access log, like opening the original.",
+          "help": "patrol-photos"
+        },
+        {
+          "kind": "fixed",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Insurer and broker links now show the original photo, the file whose fingerprint the report lists.",
+          "help": "patrol-claim-file"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "When a mountain leaves Verdynt/OS, nothing is deleted on its own. After the export window it is marked due for deletion, and deleting it is a deliberate step that is refused while any patrol case is on legal hold. Patrol reports, signed waivers, the audit trail and the OSHA injury log are always kept."
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": null,
+          "text": "Program registrations, lesson payments and shop orders no longer turn away a guest who pays the same amount as someone else that day."
+        },
+        {
+          "kind": "fixed",
+          "app": "school",
+          "who": null,
+          "text": "A guest who cancels a lesson request while still on the card payment page is never charged for nothing. The payment page closes, and any payment that gets through anyway is refunded in full and marked Refunded automatically.",
+          "help": "school-online"
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": null,
+          "text": "A card payment online that cannot be matched to its order, request or registration is now refunded in full automatically instead of being kept. Every card payment also remembers which Stripe account it went to, so refunds always go back through the right account."
+        },
+        {
+          "kind": "fixed",
+          "app": "sell",
+          "who": null,
+          "text": "Refunding an order paid with more than one card now refunds each card, oldest first, never more than that card paid. A card taken on a separate card machine is left for the desk to refund on that machine.",
+          "help": "sell-refund"
+        },
+        {
+          "kind": "fixed",
+          "app": "sell",
+          "who": null,
+          "text": "Card reader payments are recorded even if the checkout screen is refreshed or loses its connection while the guest taps. Payments still waiting on the reader show under Billing, Card readers, with Check again and Cancel it.",
+          "help": "sell-pay"
+        },
+        {
+          "kind": "fixed",
+          "app": "sell",
+          "who": null,
+          "text": "If the reader does not answer in 3 minutes, a card that went through after all is added to the sale instead of being lost.",
+          "help": "sell-pay"
+        },
+        {
+          "kind": "fixed",
+          "app": "documents",
+          "who": null,
+          "text": "A Word, Excel or PowerPoint file too big to read safely is still saved and opens as normal. It shows Could not read the file and is found by its title. The same goes for photos or scanned pages over 40 megapixels and PDFs over 1,000 pages.",
+          "help": "docs-search"
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": null,
+          "text": "Sign-in lockouts now hold even when many guesses arrive at once: 10 wrong passwords, 5 wrong PINs or 5 wrong codes in a row lock that login for a while."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "After 50 wrong codes in one day, signing in with an emailed code stops for that login. Sign in with your password and two-step, or a passkey, to turn it back on, or ask a manager to set a new password."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Signing in from a browser that cannot remember your device now asks for an emailed code, the same as any new device."
         }
       ]
     },
