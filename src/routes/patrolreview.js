@@ -1,8 +1,9 @@
 'use strict';
 
 // Patrol case review, the group's side (mounted under /patrol): who is in the review group, which kinds of case it
-// reviews, how long before a nudge, and the queue of reports waiting. Patrol admins (owner, managers, patrol admin
-// level) and the group's own members can change the group. Review decisions themselves are in routes/patrol.js.
+// reviews, how long before a nudge, and the queue of reports waiting. Only patrol admins (owner, managers, patrol admin
+// level) choose who reviews, the Patrol Director and which kinds of case are reviewed; the group's members may change
+// the reminder time. Review decisions themselves are in routes/patrol.js.
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
@@ -18,12 +19,13 @@ router.get('/review/settings', patrol, async (req, res) => {
   const t = req.auth.tenantId;
   const s = await R.settingsOf(pool, t);
   const canEdit = await R.canManage(pool, req, s);
+  const canEditGroup = (await require('../lib/patrolaccess').levelOf(pool, req)) === 'admin';
   // Who could be in the group: anyone who can open Patrol (patrol logins, owners and managers).
   const candidates = canEdit ? await rows(pool, `SELECT u.id, COALESCE(NULLIF(TRIM(CONCAT(COALESCE(p.first_name, sp.first_name, ''), ' ', COALESCE(p.last_name, sp.last_name, ''))), ''), u.email, u.username) AS name, u.role
       FROM users u LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id LEFT JOIN staff st ON st.tenant_id = u.tenant_id AND st.id = u.staff_id LEFT JOIN people sp ON sp.tenant_id = st.tenant_id AND sp.id = st.person_id
       WHERE u.tenant_id = ? AND u.active = 1 AND u.role IN ('owner','manager','patrol') ORDER BY name`, [t]) : [];
   res.json({
-    ...s, can_edit: canEdit, me_in_group: s.reviewers.some((r) => r.user_id === req.auth.userId && r.active),
+    ...s, can_edit: canEdit, can_edit_group: canEditGroup, me_in_group: s.reviewers.some((r) => r.user_id === req.auth.userId && r.active),
     all_categories: R.CATEGORIES.map(([value, label]) => ({ value, label })),
     // current members who can no longer open Patrol are listed too, so they can be taken off
     candidates: [...candidates.map((c) => ({ id: Number(c.id), name: c.name, role: c.role })), ...s.reviewers.filter((r) => !candidates.some((c) => Number(c.id) === r.user_id)).map((r) => ({ id: r.user_id, name: r.name, role: r.active ? r.role : 'no longer signs in', stale: true }))],
@@ -37,22 +39,34 @@ router.put('/review/settings', patrol, validate(z.object({
 })), async (req, res) => {
   const t = req.auth.tenantId;
   const b = req.body;
-  if (!(await R.canManage(pool, req))) throw forbidden('Only a patrol admin or a member of the review group can change it');
+  const before = await R.settingsOf(pool, t);
+  if (!(await R.canManage(pool, req, before))) throw forbidden('Only a patrol admin or a member of the review group can change it');
   const ids = [...new Set(b.reviewers.map((r) => r.user_id))];
+  // Who reviews, the director and the kinds reviewed decide whether a report is checked at all, so a member of the group
+  // (who may be about to submit a report) cannot change them: only a patrol admin can.
+  const shape = (reviewers, categories) => JSON.stringify({ r: reviewers.map((r) => `${r.user_id}${r.lead ? '*' : ''}`).sort(), c: [...categories].sort() });
+  const groupChanged = shape(before.reviewers.filter((r) => r.active), before.categories) !== shape(ids.map((id) => ({ user_id: id, lead: b.reviewers.some((r) => r.user_id === id && r.lead) })), b.categories);
+  const admin = (await require('../lib/patrolaccess').levelOf(pool, req)) === 'admin';
+  if (groupChanged && !admin) throw forbidden('Only a patrol admin can change who reviews, the Patrol Director or which kinds of case are reviewed');
   if (b.reviewers.filter((r) => r.lead).length > 1) throw bad('Choose one Patrol Director');
   if (ids.length) {
     const ok = await rows(pool, "SELECT id FROM users WHERE tenant_id = ? AND active = 1 AND role IN ('owner','manager','patrol') AND id IN (?)", [t, ids]);
     if (ok.length !== ids.length) throw bad('Everyone in the review group needs an active login that can open Patrol');
   }
   if (ids.length && !b.categories.length) throw bad('Choose at least one kind of case to review, or remove everyone to turn review off');
-  if (!ids.length && (await R.settingsOf(pool, t)).enabled && (await require('../lib/patrolaccess').levelOf(pool, req)) !== 'admin') throw forbidden('Only a patrol admin can turn review off');
+  if (!ids.length && before.enabled && !admin) throw forbidden('Only a patrol admin can turn review off');
   await tx(async (conn) => {
     await conn.query('INSERT INTO patrol_review_settings (tenant_id, categories, nudge_hours, updated_by) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE categories = VALUES(categories), nudge_hours = VALUES(nudge_hours), updated_by = VALUES(updated_by)',
       [t, b.categories.join(','), b.nudge_hours, req.auth.userId]);
     await conn.query('DELETE FROM patrol_reviewers WHERE tenant_id = ?', [t]);
     for (const r of b.reviewers) await conn.query('INSERT IGNORE INTO patrol_reviewers (tenant_id, user_id, is_lead) VALUES (?, ?, ?)', [t, r.user_id, r.lead ? 1 : 0]);
     await R.syncThread(conn, t, req.auth.userId);
-    await audit(conn, req, 'review_group', 'patrol_review_settings', t, { reviewers: ids, categories: b.categories, nudge_hours: b.nudge_hours });
+    const view = (x) => ({ reviewers: x.reviewers.filter((r) => r.active !== false).map((r) => ({ user_id: r.user_id, lead: Boolean(r.lead) })), categories: x.categories, nudge_hours: x.nudge_hours });
+    await audit(conn, req, 'review_group', 'patrol_review_settings', t, {
+      before: view(before),
+      after: view({ reviewers: ids.map((id) => ({ user_id: id, lead: b.reviewers.some((r) => r.user_id === id && r.lead) })), categories: b.categories, nudge_hours: b.nudge_hours }),
+      group_changed: groupChanged,
+    });
   });
   res.json(await R.settingsOf(pool, t));
 });

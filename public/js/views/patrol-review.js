@@ -1,6 +1,6 @@
 // Patrol > Cases > Review: the reports waiting for the review group, oldest first, and the group itself: the Patrol
-// Director and backups, which kinds of case they review, and how long before a reminder. Patrol admins and the
-// group's members can change the group.
+// Director and backups, which kinds of case they review, and how long before a reminder. Only patrol admins choose who
+// reviews and which kinds; the group's members can change the reminder time.
 
 import { get, put } from '../api.js';
 import { h, clear, button, input, field, toast, errorBox, empty, table, state, label } from '../ui.js';
@@ -34,13 +34,14 @@ function groupPanel(s, redraw) {
     h('p', { class: 'muted small' }, 'Every report of the kinds below goes to the group when the patroller signs it off. The group gets a message in its Inbox conversation, and a reviewer approves it, sends it back with comments or escalates it. Nobody reviews a report they signed off. Other kinds of case are signed off without review.'));
   if (!s.can_edit) return panel;
 
+  const locked = !s.can_edit_group; // a member, not a patrol admin: the reminder time only
   const picked = new Map(s.reviewers.filter((r) => r.active).map((r) => [r.user_id, r.lead]));
   let leadId = lead ? lead.user_id : null;
   const people = h('div', { class: 'pick-list review-people' });
   const drawPeople = () => {
     clear(people).append(...s.candidates.map((c) => {
-      const cb = h('input', { type: 'checkbox', checked: picked.has(c.id), 'aria-label': `${c.name} is in the review group` });
-      const radio = h('input', { type: 'radio', name: 'lead', checked: leadId === c.id, disabled: !picked.has(c.id), 'aria-label': `${c.name} is the Patrol Director` });
+      const cb = h('input', { type: 'checkbox', checked: picked.has(c.id), disabled: locked, 'aria-label': `${c.name} is in the review group` });
+      const radio = h('input', { type: 'radio', name: 'lead', checked: leadId === c.id, disabled: locked || !picked.has(c.id), 'aria-label': `${c.name} is the Patrol Director` });
       cb.addEventListener('change', () => { if (cb.checked) picked.set(c.id, false); else { picked.delete(c.id); if (leadId === c.id) leadId = null; } drawPeople(); });
       radio.addEventListener('change', () => { leadId = c.id; });
       return h('div', { class: 'review-person' }, h('label', { class: 'check' }, cb, h('span', null, h('b', null, c.name), h('small', null, ` ${label(c.role)}${c.stale ? ' (cannot open Patrol: take them off)' : ''}`))),
@@ -50,7 +51,7 @@ function groupPanel(s, redraw) {
   drawPeople();
   const cats = new Set(s.categories);
   const catBox = h('div', { class: 'row wrap' }, s.all_categories.map((c) => {
-    const cb = h('input', { type: 'checkbox', checked: cats.has(c.value) });
+    const cb = h('input', { type: 'checkbox', checked: cats.has(c.value), disabled: locked });
     cb.addEventListener('change', () => (cb.checked ? cats.add(c.value) : cats.delete(c.value)));
     return h('label', { class: 'check' }, cb, ` ${c.label}`);
   }));
@@ -65,7 +66,7 @@ function groupPanel(s, redraw) {
     } catch (ex) { err.append(errorBox(ex)); }
   }, { kind: 'primary' });
   panel.append(
-    h('h3', null, 'Who reviews'), h('p', { class: 'muted small' }, 'Tick the Patrol Director and the backups, and mark who is the director.'), people,
+    h('h3', null, 'Who reviews'), h('p', { class: 'muted small' }, locked ? 'Only a patrol admin can change who reviews, the director and which kinds of case are reviewed. You can change the reminder time.' : 'Tick the Patrol Director and the backups, and mark who is the director.'), people,
     h('h3', null, 'Which kinds of case go for review'), catBox,
     field('Reminder to the group after (hours)', hours, 'There is no deadline. Reports waiting this long are listed in a reminder in the group\'s Inbox conversation, and again each time this much more time passes.'),
     err, h('div', { class: 'row' }, save));
