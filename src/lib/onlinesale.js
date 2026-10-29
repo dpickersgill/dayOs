@@ -114,6 +114,8 @@ async function confirmRequest(conn, tenantId, raw, { paid = false, auditReq, pay
     booked.push({ booking_id: b.insertId, person_id: who.id, name: `${st.first_name} ${st.last_name}`, tier: await tierFor(conn, tenantId, st.date_of_birth, day) });
   }
 
+  // Safety details, consents and the level from the family's booking go on each new booking (Track PARENTS).
+  await require('./lessonfamily').afterConfirm(conn, tenantId, r.students, s, booked, { name: raw.contact_name, email: raw.contact_email, phone: raw.contact_phone });
   let orderId = null;
   if (paid) {
     const q = r.quote;

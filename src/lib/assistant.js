@@ -269,4 +269,4 @@ async function draftReply(row, mountain) {
   } catch (_) { return null; }
 }
 
-module.exports = { lastFailure, ask, findArticles, facts, settingsOf, spentThisMonth, costMicros, shape, GUEST_PAGES, help, draftReply, SETTING_DEFAULTS };
+module.exports = { lastFailure, ask, findArticles, facts, settingsOf, spentThisMonth, costMicros, shape, GUEST_PAGES, help, draftReply, SETTING_DEFAULTS, callModel }; // callModel: also the lesson recap writer (lib/lessonrecap.js)

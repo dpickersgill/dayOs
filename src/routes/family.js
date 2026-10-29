@@ -126,6 +126,20 @@ publicRouter.get('/:slug/family', async (req, res) => {
       people.push(p);
     }
   }
+  // Single lessons (2026.11.5): each person's upcoming lessons and the progress card, across lessons, programs and seasons.
+  if (fam.ids.length) {
+    const L = require('../lib/levels'); const LF = require('../lib/lessonfamily');
+    const lessons = await rows(pool, `SELECT b.person_id, b.status, s.starts_at, s.ends_at, s.meeting_place, s.level_min, s.level_max, s.status AS session_status, s.delay_minutes, pr.name AS product, p.first_name, p.last_name
+      FROM lesson_bookings b JOIN lesson_sessions s ON s.tenant_id = b.tenant_id AND s.id = b.session_id JOIN products pr ON pr.tenant_id = s.tenant_id AND pr.id = s.product_id
+      JOIN people p ON p.tenant_id = b.tenant_id AND p.id = b.person_id
+      WHERE b.tenant_id = ? AND b.person_id IN (?) AND b.status IN ('booked','attended') AND DATE(s.starts_at) >= ? ORDER BY s.starts_at LIMIT 60`, [t.id, fam.ids, today]);
+    const withHistory = await rows(pool, "SELECT DISTINCT b.person_id, p.first_name, p.last_name FROM lesson_bookings b JOIN people p ON p.tenant_id = b.tenant_id AND p.id = b.person_id WHERE b.tenant_id = ? AND b.person_id IN (?) AND b.status IN ('booked','attended')", [t.id, fam.ids]);
+    for (const w of withHistory) if (!people.some((x) => x.id === w.person_id)) people.push({ id: w.person_id, first_name: w.first_name, last_name: w.last_name, places: [], report_card: [] });
+    for (const p of people) {
+      p.lessons = lessons.filter((l) => l.person_id === p.id).map((l) => ({ product: l.product, starts_at: l.starts_at, ends_at: l.ends_at, meeting_place: l.meeting_place, level_words: L.range(l.level_min, l.level_max), canceled: l.session_status === 'cancelled', delay_minutes: Number(l.delay_minutes || 0) }));
+      p.progress = await LF.progressCard(pool, t.id, p.id, { recapBodies: true });
+    }
+  }
   await audit(pool, system(t.id), 'family_view', 'people', null, { email });
   res.json({ mountain: t.name, phone: t.phone, email, today, people });
 });
