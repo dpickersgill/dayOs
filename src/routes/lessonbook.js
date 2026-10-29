@@ -19,6 +19,11 @@ const shopsale = require('../lib/shopsale');
 const shopafter = require('../lib/shopafter');
 const cardrefund = require('../lib/cardrefund');
 const { logFailure } = require('../lib/jobs');
+const L = require('../lib/levels');
+const F = require('../lib/lessonfamily');
+const B = require('../lib/lessonbasket');
+const S = require('../lib/schoolsettings');
+const { textsOn } = require('../lib/familynotify');
 
 const router = express.Router();
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I
@@ -49,25 +54,78 @@ router.get('/:slug/booking', async (req, res) => {
   const today = todayIn(t.timezone);
   const earliest = inHours(t.timezone, t.booking_notice_hours);
   const sessions = await rows(pool,
-    `SELECT s.id, s.starts_at, s.ends_at, s.discipline, s.ability_level, s.format, s.age_group, s.meeting_place, s.capacity, pr.id AS product_id, pr.name AS product, pr.base_price_cents,
+    `SELECT s.id, s.starts_at, s.ends_at, s.discipline, s.ability_level, s.format, s.age_group, s.meeting_place, s.capacity, s.level_min, s.level_max, s.age_min, s.age_max, pr.id AS product_id, pr.name AS product, pr.base_price_cents,
        (SELECT COUNT(*) FROM lesson_bookings b WHERE b.tenant_id = s.tenant_id AND b.session_id = s.id AND b.status IN ('booked','attended')) AS booked
      FROM lesson_sessions s JOIN products pr ON pr.id = s.product_id AND pr.tenant_id = s.tenant_id
      WHERE s.tenant_id = ? AND s.status = 'scheduled' AND pr.active = 1 AND s.starts_at >= ? AND DATE(s.starts_at) <= ? ORDER BY s.starts_at LIMIT 300`,
     [t.id, earliest, addDays(today, 45)]);
-  const pend = await rows(pool, `SELECT session_id, students FROM lesson_requests WHERE tenant_id = ? AND status IN ${HOLD}`, [t.id]);
-  const held = new Map();
-  for (const r of pend) { let n = 1; try { n = JSON.parse(r.students).students.length; } catch (_) { /* count one */ } held.set(r.session_id, (held.get(r.session_id) || 0) + n); }
+  // Spots held: requests waiting to be confirmed or paid, and waitlist offers not yet claimed.
+  const held = await F.heldSpots(pool, t.id);
   const tiers = await rows(pool, 'SELECT product_id, tier, price_cents FROM price_tiers WHERE tenant_id = ?', [t.id]);
+  const extras = await F.productExtras(pool, t.id);
+  const set = await S.get(pool, t.id);
+  const shape = (s) => ({
+    id: s.id, starts_at: s.starts_at, ends_at: s.ends_at, product: s.product, discipline: s.discipline, ability_level: s.ability_level, format: s.format, age_group: s.age_group, meeting_place: s.meeting_place,
+    level_min: s.level_min, level_max: s.level_max, level_words: L.range(s.level_min, s.level_max), age_min: s.age_min, age_max: s.age_max, ages: F.agesWords(s.age_min, s.age_max),
+    offers_ticket: Boolean((extras.get(Number(s.product_id)) || {}).ticket_product_id), offers_rental: Boolean((extras.get(Number(s.product_id)) || {}).rental_product_id),
+    price_cents: s.base_price_cents, prices: tiers.filter((x) => x.product_id === s.product_id).map((x) => ({ tier: x.tier, price_cents: x.price_cents })),
+    spots_left: Math.max(s.capacity - Number(s.booked) - (held.get(Number(s.id)) || 0), 0),
+  });
+  const all = sessions.map(shape);
   res.set('Cache-Control', 'no-store');
   res.json({
+    // Family booking (2026.11.5): the waitlist for full lessons, the consents asked, the guest assistant only when it is on.
+    full: all.filter((s) => s.spots_left <= 0 && s.format === 'group').map((s) => ({ ...s, waitlist: true })),
+    texts_available: await textsOn(t.id), photos_asked: Boolean(set.recap_photos), assistant: await assistantOn(t.id),
     guest_types: (await require('../lib/guesttypes').list(pool, t.id, { visibleOnly: true })).map((g) => ({ code: g.code, name: g.name })),
     mountain: t.name, phone: t.phone, message: t.booking_message, notice_hours: t.booking_notice_hours, cancel_hours: t.cancel_hours, waiver_text: t.waiver_text, pay_online: t.pay_online, policy: policyText(t), policy_tiers: policyTiers(t), policy_notes: policyNotes(t),
-    lessons: sessions.map((s) => ({
-      id: s.id, starts_at: s.starts_at, ends_at: s.ends_at, product: s.product, discipline: s.discipline, ability_level: s.ability_level, format: s.format, age_group: s.age_group, meeting_place: s.meeting_place,
-      price_cents: s.base_price_cents, prices: tiers.filter((x) => x.product_id === s.product_id).map((x) => ({ tier: x.tier, price_cents: x.price_cents })),
-      spots_left: Math.max(s.capacity - Number(s.booked) - (held.get(s.id) || 0), 0),
-    })).filter((s) => s.spots_left > 0),
+    lessons: all.filter((s) => s.spots_left > 0),
   });
+});
+
+/** Is the guest assistant on for the booking page? (Assistant Plus and the page chosen.) The page only loads it then. */
+async function assistantOn(tenantId) {
+  try {
+    if (!config.assistant.on || !(await require('../lib/modules').enabledKeys(tenantId)).includes('assistant_plus')) return false;
+    return (await require('../lib/assistant').settingsOf(pool, tenantId)).guest_pages.includes('booking');
+  } catch (_) { return false; }
+}
+
+// ---------------------------------------------------------------- the family basket (2026.11.5)
+/** Prices a family basket without saving it: each lesson by the student's age, and the tickets and rentals asked for. */
+router.post('/:slug/lesson-basket/quote', validate(z.object({ items: z.array(z.object({ session_id: z.number().int().positive(), student: z.object({ date_of_birth: dateStr }), ticket: z.boolean().optional(), rental: z.boolean().optional() })).min(1).max(B.MAX_ITEMS) })), async (req, res) => {
+  const t = await tenantFor(req.params.slug);
+  const extrasOf = await F.productExtras(pool, t.id);
+  const lines = []; let lessons = 0; let tax = 0; const extraLines = [];
+  for (const it of req.body.items) {
+    const s = await one(pool, "SELECT id, starts_at, product_id FROM lesson_sessions WHERE tenant_id = ? AND id = ? AND status = 'scheduled'", [t.id, it.session_id]);
+    if (!s) throw notFound('Lesson');
+    const q = await quoteFor(pool, t.id, s, [it.student]);
+    lessons += q.subtotal; tax += q.tax;
+    lines.push({ kind: 'lesson', session_id: s.id, price_cents: q.subtotal });
+    const x = extrasOf.get(Number(s.product_id)) || {}; const day = String(s.starts_at).slice(0, 10);
+    if (it.ticket && x.ticket_product_id) extraLines.push(await F.extraLine(pool, t.id, 'ticket', x.ticket_product_id, it.student, day, String(s.id)));
+    if (it.rental && x.rental_product_id) extraLines.push(await F.extraLine(pool, t.id, 'rental', x.rental_product_id, it.student, day, String(s.id)));
+  }
+  const ex = await F.priceExtras(pool, t.id, extraLines);
+  for (const l of ex.lines) lines.push({ kind: l.kind, session_id: Number(l.key), name: l.name, price_cents: l.unit });
+  res.set('Cache-Control', 'no-store');
+  const subtotal = lessons + ex.subtotal; const allTax = tax + ex.tax;
+  res.json({ subtotal_cents: subtotal, tax_cents: allTax, total_cents: subtotal + allTax, lines, extras_paid_at_desk: !t.pay_online });
+});
+
+router.post('/:slug/lesson-basket', validate(B.basketSchema), async (req, res) => {
+  const t = await tenantFor(req.params.slug);
+  res.set('Cache-Control', 'no-store');
+  if (req.body.website) return res.status(202).json({ ok: true });
+  const out = await B.create(t, req.body, { base: baseUrl(req), slug: req.params.slug });
+  res.status(201).json({ ok: true, ...out });
+});
+
+router.post('/:slug/lesson-basket/:ref/status', validate(z.object({ email: z.string().max(255) })), async (req, res) => {
+  const t = await tenantFor(req.params.slug);
+  res.set('Cache-Control', 'no-store');
+  res.json(await B.status(pool, t.id, req.params.ref, req.body.email));
 });
 
 /** The exact price for these students, tax included, so the guest sees the total before they pay. */
@@ -120,6 +178,7 @@ router.post('/:slug/requests', validate(requestSchema), async (req, res) => {
     const pend = await rows(conn, `SELECT students FROM lesson_requests WHERE tenant_id = ? AND session_id = ? AND status IN ${HOLD}`, [t.id, s.id]);
     let held = 0;
     for (const r of pend) { try { held += JSON.parse(r.students).students.length; } catch (_) { held += 1; } }
+    held += Number((await one(conn, "SELECT COUNT(*) AS n FROM lesson_waitlist WHERE tenant_id = ? AND session_id = ? AND status = 'offered' AND offer_expires_at > UTC_TIMESTAMP()", [t.id, s.id])).n); // a waitlist offer holds its spot
     if (pend.length >= MAX_PENDING_PER_LESSON) throw conflict('This lesson has a lot of requests waiting. Please call the ski school.');
     if (s.capacity - Number(n) - held < b.students.length) throw conflict(`Only ${Math.max(s.capacity - Number(n) - held, 0)} spot(s) are left in that lesson`);
     const { total } = await one(conn, `SELECT COUNT(*) AS total FROM lesson_requests WHERE tenant_id = ? AND status IN ${HOLD}`, [t.id]);
@@ -308,6 +367,7 @@ async function handleWebhook(event, base) {
   if (obj && obj.metadata && obj.metadata.kind === 'shop') return shopsale.handleWebhook(event, obj, base || config.stripe.publicUrl || '');
   if (obj && obj.metadata && obj.metadata.kind === 'program') return require('./programreg').handleWebhook(event, obj, base || config.stripe.publicUrl || '');
   if (obj && obj.metadata && obj.metadata.kind === 'donation') return recordDonation(event, obj);
+  if (obj && obj.metadata && ['lesson_basket', 'lesson_tip'].includes(obj.metadata.kind)) return F.handleWebhook(event, obj); // a family basket or a tip
   if (!obj || !obj.metadata || !obj.metadata.request_id) return { ignored: true };
   const tenantId = Number(obj.metadata.tenant_id);
   const requestId = Number(obj.metadata.request_id);
@@ -363,6 +423,8 @@ async function handleWebhook(event, base) {
     });
     if (owed) await cardrefund.sendReturn(owed);
   }
+  // The family's confirmation for each booking, after the commit (lessonconfirm, Track CORE).
+  if (result && result.booked) for (const bk of result.booked) await require('../lib/lessonconfirm').sendConfirmation(pool, tenantId, bk.booking_id, base || config.stripe.publicUrl || '').catch(() => {});
   return result;
 }
 
