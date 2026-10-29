@@ -223,8 +223,12 @@ test('the copy link is kept only as a hash, works through the season, and is ref
   is(await api('GET', `/public/${A.slug}/waiver/copy/${copyToken}`), 404, 'the old hash no longer matches anything');
   await pool.query('UPDATE waiver_signings SET token = NULL, token_sha = ? WHERE tenant_id = ? AND token = ?', [row.token_sha, t.id, old]);
   // Within the season: the link works. A season end in the past for the signing's season: refused. Staff still see it in the app.
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  // Days on the mountain's own clock, as the server counts them (a UTC date can be a day ahead near midnight).
+  const U = require('../src/lib/util');
+  const [[tz]] = await pool.query('SELECT timezone FROM tenants WHERE id = ?', [t.id]);
+  const todayLocal = U.todayIn(tz.timezone);
+  const tomorrow = U.addDays(todayLocal, 1);
+  const yesterday = U.addDays(todayLocal, -1);
   const season = ok(await api('GET', `/public/${A.slug}/waiver/copy/${copyToken}`)).season;
   const inSeason = (d) => require('../src/lib/util').seasonFor(d) === season;
   await pool.query('UPDATE tenants SET season_ends_on = ? WHERE id = ?', [tomorrow, t.id]);

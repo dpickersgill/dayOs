@@ -1,6 +1,49 @@
 {
   "releases": [
     {
+      "version": "2026.11.3",
+      "date": "2026-10-29",
+      "title": "Website: attractions and summer, who each plan is for, and the reason to switch said plainly",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Website: a new page for attractions and activities (ziplines, mountain coasters, tubing, skating) at /attraction-ticketing-software, in the Product menu, the sitemap and llms.txt."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Website home: the headline now reads Run the whole mountain from one screen, the morning board shows attractions, the day has an 11:00 AM attractions card, each plan says who it is for, and the patrol director's way in is a visible line under the buttons."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Website pricing: paying over the season is described as the yearly price in six payments, with nothing in the months between, and a new question answers which plan runs a summer operation."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Product page: Attractions, Activities by time slot, Patrol checklists you choose and Menus by role lead New this season, and an Attractions and activities block joins Operations. The Ski patrol page describes the checklists your patrol chooses."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Help, Coming to Verdynt/OS: summer operations now lists only what is left (a waiver per product, bike rentals, group and event bookings)."
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": "platform",
+          "text": "The Resort plan's line now reads Larger operations with a patrol, a terrain park and attractions to run, where it still had the launch wording."
+        }
+      ]
+    },
+    {
       "version": "2026.11.2",
       "date": "2026-10-29",
       "title": "Demo-readiness fixes: the sale is checked before payment, quick sale by default, patrol with no signal, the privacy list",
