@@ -98,6 +98,24 @@ router.post('/checkin/scan', requireRole(...desk), validate(z.object({ code: z.s
   res.json({ data: out });
 });
 
+// ---------------------------------------------------------------- the window: a student's level and last safety details
+/**
+ * For Sell: the student's level per discipline and age (to show the lessons that fit), and their safety details from
+ * their last lesson booking (or their emergency contact on file), to prefill a lesson line. Desk and managers only.
+ */
+router.get('/lesson-safety/:id', requireRole(...desk), async (req, res) => {
+  const { tenantId } = req.auth;
+  const p = await one(pool, 'SELECT id, first_name, last_name, date_of_birth, ski_level, snowboard_level, emergency_name, emergency_phone, email, phone FROM people WHERE tenant_id = ? AND id = ?', [tenantId, paramId(req)]);
+  if (!p) throw notFound('Person');
+  const last = await one(pool, `SELECT allergies, medical, pickup, contact_name, contact_phone, contact_email, text_ok, photo_ok FROM lesson_bookings
+    WHERE tenant_id = ? AND person_id = ? ORDER BY id DESC LIMIT 1`, [tenantId, p.id]);
+  const today = todayIn(await LL.tzOf(pool, tenantId));
+  res.json({
+    person_id: p.id, first_name: p.first_name, age: LL.ageOn(p.date_of_birth, today), ski_level: p.ski_level, snowboard_level: p.snowboard_level,
+    safety: last ? { ...last, text_ok: Boolean(last.text_ok), photo_ok: Boolean(last.photo_ok) } : { contact_name: p.emergency_name || null, contact_phone: p.emergency_phone || null },
+  });
+});
+
 // ---------------------------------------------------------------- the lineup board
 router.get('/lineups', requireRole(...desk), async (req, res) => {
   const date = await dayOf(req);
@@ -142,6 +160,23 @@ router.post('/lineups/:id/apply', requireRole('manager'), validate(z.object({ cl
   const told = [];
   for (const m of moves) told.push(await LL.tellMoved(pool, tenantId, m));
   res.json({ moved: moves.length, board: await LL.board(pool, tenantId, paramId(req)), told: told.length });
+});
+
+/** The instructors for a lineup's time, each with why they cannot take a class at its highest level (null when they can). */
+router.get('/lineup-teachers', requireRole(...desk), async (req, res) => {
+  const { tenantId } = req.auth;
+  const b = await LL.board(pool, tenantId, Number(req.query.lineup_id) || 0);
+  const first = b.classes[0];
+  if (!first) return res.json({ data: [] });
+  const top = Math.max(...b.classes.map((c) => Number(c.level_max) || 0), 0) || null;
+  const mine = new Set(b.classes.map((c) => c.instructor_id).filter(Boolean));
+  const out = [];
+  for (const t of await LL.teachers(pool, tenantId)) {
+    const problem = mine.has(t.id) ? null : await LL.teacherProblem(pool, tenantId, t, { discipline: b.lineup.discipline, levelMax: null, kids: b.lineup.kids, startsAt: first.starts_at, endsAt: first.ends_at });
+    const max = Number(b.lineup.discipline === 'snowboard' ? t.snowboard_level_max : t.ski_level_max) || null;
+    out.push({ id: t.id, name: `${t.first_name} ${t.last_name}`, max, problem, covers_top: !top || !max || max >= top });
+  }
+  res.json({ data: out });
 });
 
 // ---------------------------------------------------------------- moving one student

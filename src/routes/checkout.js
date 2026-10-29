@@ -273,7 +273,7 @@ checkout.get('/menu', requireRole(...sellers), async (req, res) => {
     rentals: products.filter((p) => p.kind === 'rental').map(withTiers),
     packages: products.filter((p) => p.kind === 'lesson' && p.uses > 1).map(withTiers),
     // the window's day strip (Sell, Lessons): level range and ages in words, and whether the lesson has started
-    lessons: LS.menuLessons(sessions, nowIn(tenant.timezone)),
+    lessons: LS.menuLessons(sessions.map((x) => ({ ...x, tiers: Object.fromEntries(tiers.filter((t) => t.product_id === x.product_id).map((t) => [t.tier, t.price_cents])) })), nowIn(tenant.timezone)),
     programs: await withSessions(tenantId, programs.map((p) => ({ ...p, spots_left: p.capacity === null ? null : Math.max(p.capacity - Number(p.enrolled), 0) })), today),
     stock: Object.fromEntries(stock.map((s) => [s.category, Number(s.available)])),
     gift_card: { min_cents: GIFT_MIN, max_cents: GIFT_MAX },
