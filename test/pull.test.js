@@ -55,6 +55,8 @@ test.before(async () => {
   const pass = (await api('POST', '/products', { token: A.owner, body: { kind: 'season_pass', name: 'Season Pass', base_price_cents: 40000, valid_days: 200 } })).body.id;
   assert.equal((await api('POST', '/orders', { token: A.owner, body: { person_id: ctx.sam, items: [{ product_id: pass }] } })).status, 201);
   assert.equal((await api('POST', `/people/${ctx.sam}/waivers`, { token: A.owner, body: {} })).status, 201);
+  // The renter's signed confirmation before skis go out is covered in rentalfit.test.js; this setup is about patrol pulls.
+  assert.equal((await api('PUT', '/rentals/fit/settings', { token: A.owner, body: { require_signoff: false } })).status, 200);
   const mk = async (sku, category, extra = {}) => (await api('POST', '/rentals/items', { token: A.owner, body: { sku, category, size: '160', ...extra } })).body.id;
   const items = [await mk('SB-77', 'snowboard', { brand: 'Burton' }), await mk('BT-12', 'boot'), await mk('HL-5', 'helmet')];
   const out = await api('POST', '/rentals/contracts', { token: A.owner, body: { unpaid_reason: 'Test hand-out', person_id: ctx.sam, due_at: `${today}T16:30`, items: items.map((rental_item_id) => ({ rental_item_id })) } });
