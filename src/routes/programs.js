@@ -10,14 +10,17 @@ const { audit } = require('../lib/audit');
 const PS = require('../lib/programsessions');
 const { instructorBusy } = require('../lib/workforce');
 
-/** Does this staff member coach this program meeting (named on it, on its day, or on a level class of its day)? */
+/**
+ * May this staff member take attendance for this program meeting? Yes when they coach it (named on the meeting, on its
+ * day, or on a level class of that day), or when nobody coaches it at all (a small hill that does not name coaches).
+ */
 async function coachesMeeting(conn, tenantId, staffId, m) {
+  const g = m.group_id ? await one(conn, 'SELECT coach_staff_id FROM program_groups WHERE tenant_id = ? AND id = ?', [tenantId, m.group_id]) : null;
+  const levelCoaches = m.group_id ? (await rows(conn, 'SELECT coach_staff_id FROM program_levels WHERE tenant_id = ? AND group_id = ? AND coach_staff_id IS NOT NULL', [tenantId, m.group_id])).map((r) => r.coach_staff_id) : [];
+  const dayCoach = m.coach_staff_id || (g && g.coach_staff_id) || null;
+  if (!dayCoach && !levelCoaches.length) return true;
   if (!staffId) return false;
-  if (m.coach_staff_id === staffId) return true;
-  if (!m.group_id) return false;
-  const g = await one(conn, 'SELECT coach_staff_id FROM program_groups WHERE tenant_id = ? AND id = ?', [tenantId, m.group_id]);
-  if (!m.coach_staff_id && g && g.coach_staff_id === staffId) return true;
-  return Boolean(await one(conn, 'SELECT id FROM program_levels WHERE tenant_id = ? AND group_id = ? AND coach_staff_id = ? LIMIT 1', [tenantId, m.group_id, staffId]));
+  return dayCoach === staffId || levelCoaches.includes(staffId);
 }
 
 const router = express.Router();

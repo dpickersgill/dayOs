@@ -1,4 +1,5 @@
 import { get, post, put, del } from '../api.js';
+import { availabilityDialog } from './myshifts.js';
 import { h, clear, ctx, isManager, tabs, table, state, input, select, field, button, toast, formDialog, val, todayStr, addDays, fmtDate, empty, fail } from '../ui.js';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -59,7 +60,9 @@ async function drawMine(box, settings) {
     body.append(h('div', { class: 'row' },
       h('div', { class: 'stack tight' }, h('strong', null, data.staff.name),
         p.is_public && settings.public ? state(`Listed on the public page as ${p.shown_as}`, 'good') : p.is_public ? state('Opted in, but the public page is off', 'warn') : state('Not listed publicly', 'neutral')),
-      h('span', { class: 'row grow-end' }, button('Public profile', () => editProfile(), { small: true }))));
+      h('span', { class: 'row grow-end' }, button('Weekly pattern', () => availabilityDialog(data.staff.id, data.staff.name, load), { small: true }), button('Public profile', () => editProfile(), { small: true }))));
+    // One place for an instructor's availability (Track CORE): the dates marked here, or the weekly pattern, and nothing outside them.
+    body.append(h('p', { class: 'muted small' }, 'Lessons and shifts are given only inside the dates you mark here or your weekly pattern. If you set neither, you can be scheduled any time.'));
     body.append(calendar(), picker2());
   }
 

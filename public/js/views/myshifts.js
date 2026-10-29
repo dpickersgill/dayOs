@@ -1,5 +1,5 @@
 import { get, post, put } from '../api.js';
-import { h, clear, table, state, input, select, field, button, toast, dialog, fmtRange, fmtDateTime, empty } from '../ui.js';
+import { h, clear, ctx, table, state, input, select, field, button, toast, dialog, fmtRange, fmtDateTime, empty, errorBox } from '../ui.js';
 
 export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -34,7 +34,7 @@ export async function availabilityDialog(staffId, name, onSaved) {
     if (onSaved) await onSaved();
   }, { kind: 'primary' });
   const dlg = dialog(`Weekly availability${name ? ` for ${name}` : ''}`, [
-    h('p', { class: 'muted' }, 'The times in each week this person can work. Shifts outside them are flagged when scheduling (a manager can still choose them). Dates marked open on Instructor availability count too.'),
+    h('p', { class: 'muted' }, 'The times in each week this person can work. Shifts and lessons outside them are flagged when scheduling (a manager can still choose them). Dates marked open on Availability count too.'),
     none, rows, h('div', { class: 'row' }, button('Add a window', () => addRow(), { small: true })), h('div', { class: 'footer row' }, save)], { wide: true });
 }
 
@@ -45,9 +45,16 @@ export async function render(root) {
     root.append(empty('Your login is not linked to a staff record, so there are no shifts to show. Ask a manager to link it in Account.'));
     return;
   }
+  const instructor = ctx.me && ctx.me.role === 'instructor';
   const clock = h('section', { class: 'panel stack' });
+  const day = h('section', { class: 'section' });
   const shifts = h('section', { class: 'section' });
-  root.append(clock, shifts);
+  root.append(clock, day, shifts);
+  // Instructors: today's lessons and program groups first, the same My day as in Ski school.
+  if (instructor) {
+    day.append(h('header', null, h('h2', null, 'My day')));
+    try { const myDay = await import('./school-myday.js'); await myDay.render(day, { compact: true }); } catch (err) { day.append(errorBox(err)); }
+  }
 
   async function draw() {
     const m = await get('/workforce/me');
@@ -59,12 +66,18 @@ export async function render(root) {
       clock.append(h('div', { class: 'spread' }, state('Not clocked in', 'neutral'),
         button('Clock in', async () => { await post('/workforce/time/clock-in', {}); toast('Clocked in'); await draw(); }, { kind: 'primary' })));
     }
-    clock.append(h('div', { class: 'row' }, button('Set my weekly availability', () => availabilityDialog(m.staff_id, ''), { small: true })));
-    clear(shifts).append(h('header', null, h('h2', null, 'Upcoming')),
-      m.shifts.length ? table([
-        { head: 'When', cell: (s) => fmtRange(s.starts_at, s.ends_at) },
-        { head: 'Position', cell: (s) => s.position },
-      ], m.shifts) : empty('No published shifts yet. Your manager publishes the schedule when it is ready.'));
+    // One place for availability: instructors use the Availability page (dates and their weekly pattern); others the weekly pattern here.
+    clock.append(h('div', { class: 'row' }, instructor ? h('a', { class: 'btn small', href: '#/availability' }, 'My availability') : button('Set my weekly availability', () => availabilityDialog(m.staff_id, ''), { small: true })));
+    // Lessons and program groups count as work too: an instructor with lessons never sees "No published shifts".
+    let lessons = [];
+    if (ctx.me && ['instructor', 'manager', 'owner'].includes(ctx.me.role)) { try { lessons = (await get('/skischool/my-schedule')).data; } catch (_) { lessons = []; } }
+    const all = [...m.shifts.map((x) => ({ ...x, what: x.position })), ...lessons.map((x) => ({ starts_at: x.starts_at, ends_at: x.ends_at, what: `${x.kind === 'program' ? 'Program: ' : 'Lesson: '}${x.title}${x.level_words && x.level_words !== 'All levels' ? `, ${x.level_words}` : ''}` }))]
+      .sort((a, b) => String(a.starts_at).localeCompare(String(b.starts_at)));
+    clear(shifts).append(h('header', null, h('h2', null, 'Coming up')),
+      all.length ? table([
+        { head: 'When', cell: (x) => fmtRange(x.starts_at, x.ends_at) },
+        { head: 'What', cell: (x) => x.what },
+      ], all) : empty('Nothing scheduled yet. Your manager publishes the schedule when it is ready.'));
   }
   await draw();
 }

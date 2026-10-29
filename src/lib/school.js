@@ -161,7 +161,7 @@ async function instructorFit(db, tenantId, s, { ignoreLessonId = null, onlyStaff
   const out = [];
   for (const m of staff) {
     const problems = await staffProblems(db, tenantId, { staffId: m.id, certificationIds: s.required_certification_id ? [s.required_certification_id] : [], startsAt: s.starts_at, endsAt: s.ends_at, ignoreLessonId: ignoreLessonId || s.id || null });
-    if (m.not_instructor) problems.push('Not set up as an instructor');
+    // Someone with no instructor login or profile is not listed in the picker, but older screens and imports may still assign them.
     problems.push(...clearanceGaps(m, s));
     const listed = csvOf(m.disciplines);
     out.push({ id: m.id, name: `${m.first_name} ${m.last_name}`, first_name: m.first_name, problems, ok: problems.length === 0, requested_by: Number((asked.find((a) => a.id === m.id) || {}).n || 0),

@@ -3169,3 +3169,39 @@ tr.attr-blocked td { background: var(--closed-tint); }
   .slot-btn { min-height: 60px; }
   .act-add .btn { width: 100%; min-height: 48px; }
 }
+
+/* ---- Ski school: My day, safety flags and the safety fields (round 2, Track CORE) ---- */
+.myday-bar { align-items: center; flex-wrap: wrap; gap: 8px; }
+.myday-bar input[type=date] { width: auto; min-height: 44px; }
+.myday-day { margin: 4px 0 0; }
+.myday-card { border-left: 4px solid var(--trail-blue); }
+.myday-card.program { border-left-color: var(--open); }
+.myday-head { display: grid; gap: 2px; }
+.myday-time { font-size: 1.15rem; }
+.myday-title { font-weight: 600; }
+.myday-roster { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.myday-student { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.myday-face { width: 48px; height: 48px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--quiet); overflow: hidden; }
+.myday-face img { width: 100%; height: 100%; object-fit: cover; }
+.myday-who { display: grid; gap: 2px; min-width: 0; }
+.myday-who a { overflow-wrap: anywhere; }
+.myday-actions { display: grid; gap: 6px; justify-items: end; }
+.myday-marks { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.myday-marks .btn, .myday-actions .btn { min-height: 44px; }
+.myday-pay { font-weight: 600; color: var(--ink-2); }
+.myday-flags { gap: 6px; flex-wrap: wrap; margin: 2px 0; }
+.flag { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 2px 10px; border-radius: 999px; font-weight: 700; font-size: .9rem; cursor: pointer; border: 1.5px solid; }
+.flag span { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; font-size: .8rem; color: var(--on-accent); }
+.flag.allergy { background: var(--closed-tint); color: var(--closed-ink); border-color: var(--closed); }
+.flag.allergy span { background: var(--closed); }
+.flag.medical { background: var(--hold-tint); color: var(--hold-ink); border-color: var(--hold); }
+.flag.medical span { background: var(--hold); }
+fieldset.safety { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; }
+fieldset.safety legend { font-weight: 700; padding: 0 4px; }
+@media (max-width: 720px) {
+  .myday-student { grid-template-columns: 40px minmax(0, 1fr); }
+  .myday-face { width: 40px; height: 40px; }
+  .myday-actions { grid-column: 1 / -1; justify-items: stretch; }
+  .myday-marks { justify-content: stretch; }
+  .myday-marks .btn { flex: 1 1 0; }
+}
