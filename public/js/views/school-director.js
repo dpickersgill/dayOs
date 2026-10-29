@@ -299,18 +299,17 @@ async function weatherSettings(panel) {
   const s = await get('/skischool/director/settings');
   const { data } = await get('/products?kind=lesson&active=1&limit=500');
   const singles = data.filter((p) => !(p.uses > 1));
-  const prod = select([['', 'The cheapest group lesson'], ...singles.map((p) => [String(p.id), p.name])], s.weather_credit_product_id ? String(s.weather_credit_product_id) : '', { name: 'product' });
-  const days = input({ type: 'number', name: 'days', min: 1, max: 30, value: s.choice_days });
-  const form = h('form', { class: 'stack' },
+  const prod = select([['', 'The cheapest group lesson'], ...singles.map((p) => [String(p.id), p.name])], s.weather_credit_product_id ? String(s.weather_credit_product_id) : '');
+  const days = input({ type: 'number', min: 1, max: 30, value: s.choice_days });
+  // Saved with its own button (not the page's save bar), like the other Ski school parts.
+  const save = button('Save weather settings', async () => {
+    try { await put('/skischool/director/settings', { weather_credit_product_id: prod.value ? Number(prod.value) : null, choice_days: Number(days.value) || 7 }); toast('Saved'); } catch (err) { fail(err); }
+  }, { kind: 'primary' });
+  panel.append(h('div', { class: 'stack' },
     h('p', { class: 'muted' }, 'When lessons or program meetings are canceled for weather, each family gets a link to choose a makeup, a lesson credit or a refund.'),
     h('div', { class: 'form' }, field('Days families have to choose', days, 'After that, an open choice becomes a lesson credit'),
       field('Lesson credit for program families', prod, 'A program family who takes a credit gets one of these lessons')),
-    h('div', { class: 'row' }, button('Save', null, { kind: 'primary', type: 'submit' })));
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    try { await put('/skischool/director/settings', { weather_credit_product_id: prod.value ? Number(prod.value) : null, choice_days: Number(days.value) || 7 }); toast('Saved'); } catch (err) { fail(err); }
-  });
-  panel.append(form);
+    h('div', { class: 'row' }, save)));
 }
 
 // ---------------------------------------------------------------- staffing
