@@ -9,7 +9,7 @@ import { h, clear, can, isManager, state, input, select, field, button, toast, d
 import { code128 } from '../barcode.js';
 import { printDialog } from '../print.js';
 import { levelOptions } from '../levels.js';
-import { card, row, toggle, amount } from './settings-kit.js';
+import { row, toggle, amount } from './settings-kit.js';
 
 const desk = () => can('counter');
 const store = {
@@ -358,10 +358,11 @@ export const settingsPages = {
       await patch('/skischool/settings', { ratio_kids: k, ratio_adults: a, checkin_link: link.checked });
       toast('Saved');
     }, { kind: 'primary' });
-    panel.append(card('Check-in and lineup', [
+    // the settings page draws the card and its title; these are its rows
+    panel.append(h('p', { class: 'set-card-intro' }, 'How the 9:45 lineup splits groups, and how families check in.'),
       row('Kids per instructor', amount(kids, 'students'), 'Class size when the lineup splits a kids lesson (ages 12 and under).'),
       row('Adults and teens per instructor', amount(adults, 'students'), 'Class size for every other group lesson.'),
       row('"We\'re here" link', link, 'Families can check in from their lesson link, from 90 minutes before the lesson.'),
-    ], { intro: 'How the 9:45 lineup splits groups, and how families check in.', actions: save }));
+      h('div', { class: 'row' }, save));
   } },
 };
