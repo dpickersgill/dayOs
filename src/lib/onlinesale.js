@@ -12,6 +12,7 @@ const { addLink, isMinor, mayActAsGuardian } = require('./family');
 const { seasonFor, todayIn } = require('./util');
 const { conflict, bad } = require('./errors');
 const { audit } = require('./audit');
+const { studentClash, clashWords } = require('./lessonrules');
 
 /** Which guest type a student is priced as, by age on the day of the lesson (the mountain's own types and ages). */
 const tierFor = (db, tenantId, dob, day) => require('./guesttypes').forBirthday(db, tenantId, dob, day);
@@ -104,6 +105,9 @@ async function confirmRequest(conn, tenantId, raw, { paid = false, auditReq, pay
       waiver = { id: 1 };
     }
     if (!waiver) waiverNeeded.push(`${st.first_name} ${st.last_name}`);
+    // Not in another lesson or a program meeting at the same time (Track CORE: lib/lessonrules, one rule for every way of booking).
+    const clash = await studentClash(conn, tenantId, who.id, s.starts_at, s.ends_at, { ignoreSessionId: s.id });
+    if (clash) throw conflict(`${st.first_name} ${st.last_name}: ${clashWords(clash)}`);
     const [b] = await conn.query(
       `INSERT INTO lesson_bookings (tenant_id, session_id, person_id, status, unpaid, request_id) VALUES (?, ?, ?, 'booked', ?, ?)
        ON DUPLICATE KEY UPDATE status = IF(status = 'cancelled', 'booked', status), unpaid = IF(status = 'cancelled', VALUES(unpaid), unpaid), request_id = VALUES(request_id), id = LAST_INSERT_ID(id)`, [tenantId, s.id, who.id, paid ? 0 : 1, raw.id]);

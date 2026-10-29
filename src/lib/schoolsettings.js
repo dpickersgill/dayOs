@@ -20,6 +20,7 @@ const DEFAULTS = {
   request_bonus_cents: 0, // added when a guest asked for the instructor by name
   private_accept_minutes: 120, // how long an instructor has to accept a private asked for by name
   private_decline: 'offer_other', // offer_other or refund, when the instructor declines or does not answer
+  what_to_bring: null, // Track CORE (db/steps/lessons2-core.js): in the confirmation; blank uses the lesson product's description
 };
 
 const bool = z.union([z.boolean(), z.literal(0), z.literal(1)]).transform((v) => (v ? 1 : 0));
@@ -32,6 +33,7 @@ const schema = z.object({
   pay_mode: z.enum(['per_lesson', 'hourly', 'both']), lineup_paid: bool, lineup_minutes: z.number().int().min(0).max(120),
   request_bonus_cents: z.number().int().min(0).max(100000),
   private_accept_minutes: z.number().int().min(15).max(2880), private_decline: z.enum(['offer_other', 'refund']),
+  what_to_bring: z.string().trim().max(500).nullable(), // Track CORE
 }).partial();
 
 async function get(db, tenantId) {

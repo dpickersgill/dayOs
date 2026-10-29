@@ -12,6 +12,7 @@ const { audit } = require('../lib/audit');
 const { todayIn, addDays } = require('../lib/util');
 const PS = require('../lib/programsessions');
 const PP = require('../lib/programplus');
+const { coachBusy, instructorBusy } = require('../lib/workforce');
 
 const manager = requireRole('manager');
 const coord = requireRole('manager', 'instructor');
@@ -174,6 +175,7 @@ module.exports = function mount(router) {
       const g = await groupOf(conn, t, paramId(req, 'gid'));
       const keys = Object.keys(b);
       if (!keys.length) throw bad('Nothing to change');
+      if (b.coach_staff_id) { const busy = await coachBusy(conn, t, b.coach_staff_id, g.id); if (busy) throw conflict(`That coach is busy: ${busy}`); } // one rule with lessons (lib/workforce)
       await conn.query(`UPDATE program_groups SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE tenant_id = ? AND id = ?`, [...keys.map((k) => b[k]), t, g.id]);
       if (b.coach_staff_id !== undefined) await conn.query("UPDATE program_sessions SET coach_staff_id = ? WHERE tenant_id = ? AND group_id = ? AND status <> 'cancelled' AND starts_at >= NOW()", [b.coach_staff_id, t, g.id]);
       const fresh = await groupOf(conn, t, g.id);
@@ -258,6 +260,7 @@ module.exports = function mount(router) {
       name = name || (g.discipline === 'any' ? `${sl.discipline === 'ski' ? 'Ski' : 'Snowboard'}: ${sl.name}` : sl.name);
     }
     if (!name) throw bad('Name the class, or choose a school level');
+    if (req.body.coach_staff_id) { const busy = await coachBusy(pool, t, req.body.coach_staff_id, g.id); if (busy) throw conflict(`That coach is busy: ${busy}`); }
     const { n } = await one(pool, 'SELECT COUNT(*) AS n FROM program_levels WHERE tenant_id = ? AND group_id = ?', [t, g.id]);
     const [r] = await pool.query('INSERT INTO program_levels (tenant_id, group_id, name, coach_staff_id, sort, school_level_id) VALUES (?, ?, ?, ?, ?, ?)', [t, g.id, name.slice(0, 60), req.body.coach_staff_id ?? null, Number(n), req.body.school_level_id ?? null]);
     res.status(201).json({ id: r.insertId });
@@ -265,6 +268,11 @@ module.exports = function mount(router) {
   router.patch('/levels/:lid', coord, validate(z.object({ name: z.string().trim().min(1).max(60).optional(), coach_staff_id: z.number().int().positive().nullable().optional() })), async (req, res) => {
     const keys = Object.keys(req.body);
     if (!keys.length) throw bad('Nothing to change');
+    if (req.body.coach_staff_id) {
+      const lvl = await one(pool, 'SELECT group_id FROM program_levels WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, paramId(req, 'lid')]);
+      const busy = lvl && await coachBusy(pool, req.auth.tenantId, req.body.coach_staff_id, lvl.group_id);
+      if (busy) throw conflict(`That coach is busy: ${busy}`);
+    }
     const [r] = await pool.query(`UPDATE program_levels SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE tenant_id = ? AND id = ?`, [...keys.map((k) => req.body[k]), req.auth.tenantId, paramId(req, 'lid')]);
     if (!r.affectedRows) throw notFound('Class');
     res.json({ ok: true });
@@ -393,6 +401,8 @@ module.exports = function mount(router) {
       const term = await termOf(conn, t, g.term_id);
       if (await one(conn, "SELECT id FROM program_sessions WHERE tenant_id = ? AND group_id = ? AND DATE(starts_at) = ? AND status <> 'cancelled'", [t, g.id, req.body.date])) throw conflict('This day already has a lesson on that date');
       const start = PS.tstr(g.start_time || term.start_time); const end = PS.tstr(g.end_time || term.end_time);
+      const busy = g.coach_staff_id && await instructorBusy(conn, t, g.coach_staff_id, `${req.body.date} ${start}:00`, `${req.body.date} ${end}:00`, { ignoreGroupId: g.id });
+      if (busy) throw conflict(`The coach for this day is busy then: ${busy}. Change the coach or that lesson first.`);
       const [r] = await conn.query("INSERT INTO program_sessions (tenant_id, program_id, term_id, group_id, starts_at, ends_at, kind, status, coach_staff_id) VALUES (?, ?, ?, ?, ?, ?, 'extra', 'scheduled', ?)",
         [t, term.program_id, term.id, g.id, `${req.body.date} ${start}:00`, `${req.body.date} ${end}:00`, g.coach_staff_id]);
       await PS.stretchTickets(conn, t, g.id);

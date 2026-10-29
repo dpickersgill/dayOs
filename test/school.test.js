@@ -55,6 +55,7 @@ test.before(async () => {
   T.instructor = await addUser(A, `ivy@${A.slug}.test`, 'instructor', { staff_id: D.ivy });
   const st2 = await api('POST', '/workforce/staff', { token: A.owner, body: { person: { first_name: 'Max', last_name: 'Other' }, status: 'active' } });
   D.max = st2.body.id;
+  await addUser(A, `max@${A.slug}.test`, 'instructor', { staff_id: D.max }); // round 2: only staff who teach can be given a lesson
   const prod = async (body) => (await api('POST', '/products', { token: A.owner, body })).body.id;
   D.group = await prod({ kind: 'lesson', name: 'Group Lesson', base_price_cents: 8000 });
   D.private = await prod({ kind: 'lesson', name: 'Private Lesson', base_price_cents: 20000 });
@@ -91,7 +92,7 @@ test('the level ladder starts with sensible defaults, is editable, and keeps ski
   const lv = await api('GET', '/skischool/levels', { token: T.counter });
   assert.equal(lv.status, 200);
   const ski = lv.body.data.filter((l) => l.discipline === 'ski');
-  assert.equal(ski.length, 6);
+  assert.equal(ski.length, 9, 'the nine levels (round 2)');
   assert.ok(ski[0].skills.length >= 3);
   assert.ok(lv.body.data.some((l) => l.discipline === 'snowboard'));
   assert.equal((await api('POST', '/skischool/levels', { token: T.counter, body: { discipline: 'ski', name: 'x' } })).status, 403);
@@ -159,7 +160,7 @@ test('the instructors day board, who could teach, hours and tips', async () => {
   assert.equal(board.instructors[0].lessons, 1);
   assert.equal(board.instructors[0].minutes, 120);
   const el = (await api('GET', `/skischool/sessions/${D.priv}/eligible-instructors`, { token: T.manager })).body.data;
-  assert.deepEqual(el.map((x) => x.name), ['Max Other'], 'Ivy teaches the group lesson at the same time');
+  assert.deepEqual(el.filter((x) => x.ok).map((x) => x.name), ['Max Other'], 'Ivy teaches the group lesson at the same time');
   assert.equal((await api('GET', `/skischool/sessions/${D.priv}/eligible-instructors`, { token: T.counter })).status, 403);
   assert.equal((await api('PATCH', `/skischool/sessions/${D.g}/details`, { token: T.instructor, body: { tip_cents: 2500, notes: 'Meet at the flag' } })).status, 200);
   assert.equal((await api('PATCH', `/skischool/sessions/${D.priv}/details`, { token: T.instructor, body: { tip_cents: 100 } })).status, 400, 'not their lesson');

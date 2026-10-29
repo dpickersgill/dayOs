@@ -7,14 +7,16 @@ const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
 const { z, validate, paramId, dateStr, todayIn } = require('../lib/util');
 const { notFound, conflict, bad } = require('../lib/errors');
-const { staffProblems } = require('../lib/workforce');
 const { audit } = require('../lib/audit');
-const { ensureLadder, ladder, studentCard, DISCIPLINES } = require('../lib/school');
+const { ensureLadder, ladder, studentCard, instructorFit, DISCIPLINES } = require('../lib/school');
+const LV = require('../lib/levels');
+const { sendConfirmation } = require('../lib/lessonconfirm');
+const { baseUrl } = require('../lib/baseurl');
 const { confirmRequest, parse: parseRequest } = require('../lib/onlinesale');
 
 const router = express.Router();
 const school = ['instructor', 'manager', 'counter'];
-const MAX_LEVELS = 12;
+const MAX_LEVELS = 9; // the nine levels (lib/levels.js)
 
 // ---------------------------------------------------------------- levels and skills
 router.get('/levels', requireRole(...school), async (req, res) => {
@@ -68,7 +70,7 @@ router.delete('/skills/:id', requireRole('manager'), async (req, res) => {
 
 // ---------------------------------------------------------------- report card
 router.get('/students/:id/card', requireRole(...school), async (req, res) => {
-  const card = await tx((conn) => studentCard(conn, req.auth.tenantId, paramId(req)));
+  const card = await tx((conn) => studentCard(conn, req.auth.tenantId, paramId(req), { discipline: DISCIPLINES.includes(req.query.discipline) ? req.query.discipline : null }));
   if (!card) throw notFound('Student');
   res.json(card);
 });
@@ -123,18 +125,26 @@ router.get('/board', requireRole(...school), async (req, res) => {
   const date = req.query.date ? String(req.query.date) : todayIn(tz);
   if (!dateStr.safeParse(date).success) throw bad('date must be YYYY-MM-DD');
   const sessions = await rows(pool,
-    `SELECT s.id, s.starts_at, s.ends_at, s.discipline, s.ability_level, s.format, s.age_group, s.meeting_place, s.notes, s.capacity, s.status, s.instructor_id, s.tip_cents, pr.name AS product,
+    `SELECT s.id, s.starts_at, s.ends_at, s.discipline, s.ability_level, s.level_min, s.level_max, s.age_min, s.age_max, s.delay_minutes, s.format, s.age_group, s.meeting_place, s.notes, s.capacity, s.status, s.instructor_id, s.tip_cents, pr.name AS product,
             pe.first_name AS instructor_first, pe.last_name AS instructor_last
      FROM lesson_sessions s JOIN products pr ON pr.id = s.product_id AND pr.tenant_id = s.tenant_id
      LEFT JOIN staff st ON st.id = s.instructor_id AND st.tenant_id = s.tenant_id LEFT JOIN people pe ON pe.id = st.person_id AND pe.tenant_id = st.tenant_id
      WHERE s.tenant_id = ? AND DATE(s.starts_at) = ? AND s.status <> 'cancelled' ORDER BY s.starts_at, s.id`, [tenantId, date]);
   const ids = sessions.map((s) => s.id);
   const students = ids.length ? await rows(pool,
-    `SELECT b.id AS booking_id, b.session_id, b.status, b.unpaid, b.instructor_notes, b.requested_instructor_id, p.id AS person_id, p.first_name, p.last_name, p.date_of_birth,
-       (SELECT level FROM student_progress sp WHERE sp.tenant_id = p.tenant_id AND sp.person_id = p.id AND sp.discipline = s.discipline ORDER BY sp.recorded_at DESC, sp.id DESC LIMIT 1) AS level
+    `SELECT b.id AS booking_id, b.session_id, b.status, b.unpaid, b.instructor_notes, b.requested_instructor_id, b.allergies, b.medical, b.checked_in_at, p.id AS person_id, p.first_name, p.last_name, p.date_of_birth,
+       COALESCE(IF(s.discipline = 'snowboard', p.snowboard_level, p.ski_level), b.level,
+         (SELECT level FROM student_progress sp WHERE sp.tenant_id = p.tenant_id AND sp.person_id = p.id AND sp.discipline = s.discipline ORDER BY sp.recorded_at DESC, sp.id DESC LIMIT 1)) AS level
      FROM lesson_bookings b JOIN lesson_sessions s ON s.id = b.session_id AND s.tenant_id = b.tenant_id JOIN people p ON p.id = b.person_id AND p.tenant_id = b.tenant_id
      WHERE b.tenant_id = ? AND b.session_id IN (?) AND b.status <> 'cancelled' ORDER BY p.last_name, p.first_name`, [tenantId, ids]) : [];
-  const out = sessions.map((s) => ({ ...s, instructor: s.instructor_id ? `${s.instructor_first} ${s.instructor_last}` : null, students: students.filter((x) => x.session_id === s.id) }));
+  // Allergies and medical notes: the flag for everyone in the school, the words only for the desk, managers and the lesson's instructor.
+  const sees = (s) => req.auth.role !== 'instructor' || s.instructor_id === req.auth.staffId;
+  const out = sessions.map((s) => ({ ...s, level_words: LV.range(s.level_min, s.level_max), instructor: s.instructor_id ? `${s.instructor_first} ${s.instructor_last}` : null,
+    students: students.filter((x) => x.session_id === s.id).map((x) => {
+      const o = { ...x, has_allergies: Boolean(x.allergies), has_medical: Boolean(x.medical) };
+      if (!sees(s)) { delete o.allergies; delete o.medical; delete o.instructor_notes; }
+      return o;
+    }) }));
   // Instructors who have lessons today, and their hours.
   const byInstr = new Map();
   for (const s of out) {
@@ -147,21 +157,55 @@ router.get('/board', requireRole(...school), async (req, res) => {
   res.json({ date, sessions: out, instructors: [...byInstr.values()], unassigned: out.filter((s) => s.status === 'scheduled' && !s.instructor_id).length });
 });
 
-/** Staff who could teach a session: certified, available, and not already teaching. Those a guest asked for come first. */
+/**
+ * Who could teach a lesson, best fit first: every active staff member who teaches, with the problems that stop them
+ * (a clash with a lesson, program meeting or shift, a missing certification, not cleared for the level, kids or
+ * adaptive, outside their availability). ok: true means they can be assigned; a manager can still assign anyone else
+ * with a reason (PATCH /sessions/:id/instructor, override_reason).
+ */
 router.get('/sessions/:id/eligible-instructors', requireRole('manager'), async (req, res) => {
   const { tenantId } = req.auth;
   const s = await one(pool, 'SELECT * FROM lesson_sessions WHERE tenant_id = ? AND id = ?', [tenantId, paramId(req)]);
   if (!s) throw notFound('Lesson session');
-  const staff = await rows(pool, "SELECT st.id, p.first_name, p.last_name FROM staff st JOIN people p ON p.id = st.person_id AND p.tenant_id = st.tenant_id WHERE st.tenant_id = ? AND st.status = 'active' ORDER BY p.last_name, p.first_name LIMIT 200", [tenantId]);
-  const asked = await rows(pool, "SELECT requested_instructor_id AS id, COUNT(*) AS n FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND status <> 'cancelled' AND requested_instructor_id IS NOT NULL GROUP BY requested_instructor_id", [tenantId, s.id]);
-  const out = [];
-  for (const m of staff) {
-    const problems = await staffProblems(pool, tenantId, { staffId: m.id, certificationIds: s.required_certification_id ? [s.required_certification_id] : [], startsAt: s.starts_at, endsAt: s.ends_at, ignoreLessonId: s.id });
-    if (problems.length) continue;
-    out.push({ id: m.id, name: `${m.first_name} ${m.last_name}`, requested_by: Number((asked.find((a) => a.id === m.id) || {}).n || 0) });
-  }
-  out.sort((a, b) => b.requested_by - a.requested_by || a.name.localeCompare(b.name));
-  res.json({ data: out });
+  res.json({ data: await instructorFit(pool, tenantId, s) });
+});
+
+/** The same picker for a lesson not saved yet (the Add a lesson form). */
+router.post('/instructor-fit', requireRole('manager'), validate(z.object({
+  starts_at: z.string().min(16).max(19), ends_at: z.string().min(16).max(19), discipline: z.enum(DISCIPLINES).default('ski'),
+  level_max: z.number().int().min(1).max(9).nullable().optional(), age_max: z.number().int().min(0).max(99).nullable().optional(), required_certification_id: z.number().int().positive().nullable().optional(),
+})), async (req, res) => {
+  const b = req.body;
+  const norm = (v) => `${v.replace('T', ' ').slice(0, 16)}:00`;
+  res.json({ data: await instructorFit(pool, req.auth.tenantId, { ...b, starts_at: norm(b.starts_at), ends_at: norm(b.ends_at) }) });
+});
+
+// ---------------------------------------------------------------- instructor profiles: what each instructor is cleared to teach
+const csvList = (v) => (v ? String(v).split(',').filter(Boolean) : []);
+router.get('/instructors', requireRole('manager'), async (req, res) => {
+  const { tenantId } = req.auth;
+  const data = await rows(pool, `SELECT st.id, p.first_name, p.last_name, ip.disciplines, ip.ski_level_max, ip.snowboard_level_max, ip.teaches_kids, ip.teaches_adaptive, ip.psia_level, ip.staff_id IS NOT NULL AS has_profile,
+      EXISTS (SELECT 1 FROM users u WHERE u.tenant_id = st.tenant_id AND u.staff_id = st.id AND u.role = 'instructor' AND u.active = 1) AS has_login
+    FROM staff st JOIN people p ON p.id = st.person_id AND p.tenant_id = st.tenant_id LEFT JOIN instructor_profiles ip ON ip.tenant_id = st.tenant_id AND ip.staff_id = st.id
+    WHERE st.tenant_id = ? AND st.status = 'active' ORDER BY p.first_name, p.last_name LIMIT 300`, [tenantId]);
+  const certs = await rows(pool, 'SELECT sc.staff_id, c.id, c.name, sc.expires_on FROM staff_certifications sc JOIN certifications c ON c.tenant_id = sc.tenant_id AND c.id = sc.certification_id WHERE sc.tenant_id = ? ORDER BY c.name', [tenantId]);
+  res.json({ data: data.map((r) => ({ ...r, name: `${r.first_name} ${r.last_name}`, teaches: Boolean(r.has_profile || r.has_login), disciplines: csvList(r.disciplines), teaches_kids: r.teaches_kids == null ? true : Boolean(r.teaches_kids), teaches_adaptive: Boolean(r.teaches_adaptive),
+    psia_level: r.psia_level || 'none', certifications: certs.filter((c) => c.staff_id === r.id).map((c) => ({ id: c.id, name: c.name, expires_on: c.expires_on })) })) });
+});
+
+router.put('/instructors/:id/profile', requireRole('manager'), validate(z.object({
+  disciplines: z.array(z.enum(DISCIPLINES)).max(4),
+  ski_level_max: z.number().int().min(1).max(9).nullable(), snowboard_level_max: z.number().int().min(1).max(9).nullable(),
+  teaches_kids: z.boolean(), teaches_adaptive: z.boolean(), psia_level: z.enum(['none', 'level1', 'level2', 'level3']),
+})), async (req, res) => {
+  const { tenantId } = req.auth; const b = req.body;
+  const st = await one(pool, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ?', [tenantId, paramId(req)]);
+  if (!st) throw notFound('Instructor');
+  await pool.query(`INSERT INTO instructor_profiles (tenant_id, staff_id, is_public, disciplines, ski_level_max, snowboard_level_max, teaches_kids, teaches_adaptive, psia_level) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE disciplines = VALUES(disciplines), ski_level_max = VALUES(ski_level_max), snowboard_level_max = VALUES(snowboard_level_max), teaches_kids = VALUES(teaches_kids), teaches_adaptive = VALUES(teaches_adaptive), psia_level = VALUES(psia_level)`,
+  [tenantId, st.id, [...new Set(b.disciplines)].join(','), b.ski_level_max, b.snowboard_level_max, b.teaches_kids ? 1 : 0, b.teaches_adaptive ? 1 : 0, b.psia_level]);
+  await audit(pool, req, 'teaching_profile', 'instructor_profiles', st.id, b);
+  res.json({ ok: true });
 });
 
 /** Hours and lessons taught per instructor over a date range, for payroll and tips. */
@@ -219,6 +263,7 @@ router.post('/requests/:id/confirm', requireRole('manager', 'counter'), async (r
     if (raw.status !== 'pending') throw conflict(`That request is already ${raw.status}`);
     return confirmRequest(conn, tenantId, raw, { paid: false, auditReq: req });
   });
+  for (const b of out.booked || []) b.confirmation = (await sendConfirmation(pool, tenantId, b.booking_id, baseUrl(req))).ok;
   res.json(out);
 });
 

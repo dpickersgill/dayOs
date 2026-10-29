@@ -5,9 +5,20 @@ const { pool, tx, rows, one } = require('../db');
 const { crud } = require('../lib/crud');
 const { requireRole } = require('../middleware/auth');
 const { partialOf, z, dateStr, dateTimeStr, validate, paramId, normDateTime } = require('../lib/util');
-const { notFound, conflict, bad } = require('../lib/errors');
+const { notFound, conflict, bad, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const PS = require('../lib/programsessions');
+const { instructorBusy } = require('../lib/workforce');
+
+/** Does this staff member coach this program meeting (named on it, on its day, or on a level class of its day)? */
+async function coachesMeeting(conn, tenantId, staffId, m) {
+  if (!staffId) return false;
+  if (m.coach_staff_id === staffId) return true;
+  if (!m.group_id) return false;
+  const g = await one(conn, 'SELECT coach_staff_id FROM program_groups WHERE tenant_id = ? AND id = ?', [tenantId, m.group_id]);
+  if (!m.coach_staff_id && g && g.coach_staff_id === staffId) return true;
+  return Boolean(await one(conn, 'SELECT id FROM program_levels WHERE tenant_id = ? AND group_id = ? AND coach_staff_id = ? LIMIT 1', [tenantId, m.group_id, staffId]));
+}
 
 const router = express.Router();
 const coord = ['manager', 'instructor'];
@@ -126,6 +137,9 @@ router.post('/:id/sessions', requireRole('manager'), validate(z.object({ starts_
   const b = req.body;
   if (b.ends_at <= b.starts_at) throw bad('ends_at must be after starts_at');
   if (!(await one(pool, 'SELECT id FROM programs WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, paramId(req)]))) throw notFound('Program');
+  // One rule with lessons (lib/workforce): a coach cannot be teaching a lesson or coaching another meeting then.
+  const busy = b.coach_staff_id && await instructorBusy(pool, req.auth.tenantId, b.coach_staff_id, b.starts_at, b.ends_at);
+  if (busy) throw conflict(`That coach is busy: ${busy}`);
   const [r] = await pool.query('INSERT INTO program_sessions (tenant_id, program_id, starts_at, ends_at, coach_staff_id) VALUES (?, ?, ?, ?, ?)', [req.auth.tenantId, paramId(req), b.starts_at, b.ends_at, b.coach_staff_id ?? null]);
   res.status(201).json({ id: r.insertId });
 });
@@ -138,7 +152,10 @@ router.put('/sessions/:sessionId/attendance', requireRole(...coord), validate(z.
   const { tenantId } = req.auth;
   const sid = paramId(req, 'sessionId');
   await tx(async (conn) => {
-    if (!(await one(conn, 'SELECT id FROM program_sessions WHERE tenant_id = ? AND id = ?', [tenantId, sid]))) throw notFound('Session');
+    const meeting = await one(conn, 'SELECT id, group_id, coach_staff_id FROM program_sessions WHERE tenant_id = ? AND id = ?', [tenantId, sid]);
+    if (!meeting) throw notFound('Session');
+    // An instructor marks attendance only on the meetings they coach (the meeting, its day, or a level class of it).
+    if (req.auth.role === 'instructor' && !(await coachesMeeting(conn, tenantId, req.auth.staffId, meeting))) throw forbidden('You can only take attendance for the groups you coach');
     for (const m of req.body.marks) {
       await conn.query('INSERT INTO attendance (tenant_id, session_id, person_id, present) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE present = VALUES(present)', [tenantId, sid, m.person_id, m.present ? 1 : 0]);
     }

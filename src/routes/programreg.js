@@ -138,7 +138,8 @@ publicRouter.post('/:slug/programs/register', validate(z.object({ ...contactShap
   const b = req.body;
   res.set('Cache-Control', 'no-store');
   if (b.website) return res.status(202).json({ ok: true });
-  if (!t.open) throw conflict(`Online registration is not open right now.${t.phone ? ` Please call ${t.phone}.` : ''}`);
+  // Card payments must be set up before anyone fills in the form (the page checks `open` first and says so too).
+  if (!t.open) throw conflict(`${t.name} cannot take card payments online yet, so you cannot sign up here.${t.phone ? ` Please call ${t.phone} to sign up.` : ' Please sign up at the ski school desk.'}`);
   if (t.waiver_text && !b.waiver_accepted) throw bad('Please read and accept the waiver');
   const today = todayIn(t.timezone);
   const made = await tx(async (conn) => {

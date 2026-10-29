@@ -363,6 +363,7 @@ async function handleWebhook(event, base) {
     });
     if (owed) await cardrefund.sendReturn(owed);
   }
+  for (const b of (result && result.booked) || []) await require('../lib/lessonconfirm').sendConfirmation(pool, tenantId, b.booking_id, base); // Track CORE: the confirmation, after commit
   return result;
 }
 

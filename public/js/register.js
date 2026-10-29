@@ -33,6 +33,13 @@ async function main() {
     clear(root).append(shell(h('section', { class: 'card stack' }, h('h1', null, 'Registration is not available'), h('p', { class: 'muted' }, 'Please call the mountain.')))); return;
   }
   document.title = `${page.mountain}: register for a program`;
+  // No card payments set up yet: say so plainly before any form (Track CORE).
+  if (!page.open && page.programs.length) {
+    clear(root).append(hero(page, 'Register for lessons and programs'), shell(h('section', { class: 'card stack', 'data-closed': 'cards' }, h('h2', null, 'Online sign-up is not open yet'),
+      h('p', null, `${page.mountain} cannot take card payments online yet, so you cannot sign up here today.`),
+      h('p', null, page.phone ? h('a', { class: 'call', href: `tel:${page.phone.replace(/[^\d+]/g, '')}` }, `Call ${page.phone} to sign up`) : 'Please sign up at the ski school desk.'))));
+    return;
+  }
   if (!page.programs.length) {
     clear(root).append(hero(page, 'Register for lessons and programs'), shell(h('section', { class: 'card stack' }, h('h2', null, 'Nothing is open for registration right now'), h('p', { class: 'muted' }, 'Check back soon, or call us.'))));
     return;
