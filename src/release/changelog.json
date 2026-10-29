@@ -1,6 +1,138 @@
 {
   "releases": [
     {
+      "version": "2026.11.5",
+      "date": "2026-10-29",
+      "title": "The ski school, rebuilt for all four seats: safe booking rules, My day, the lineup board, family booking and recaps, instructor pay and privates, and the director's weather and staffing tools",
+      "notes": [
+        {
+          "kind": "fixed",
+          "app": "school",
+          "who": ["counter", "instructor"],
+          "text": "A student can no longer be booked into two lessons, or a lesson and a program group, at the same time, at the desk, at the window, online, from a waitlist or when moved.",
+          "help": "school-instructors"
+        },
+        {
+          "kind": "improved",
+          "app": "school",
+          "who": null,
+          "text": "The instructor picker lists only people who teach, best fit first, and says why someone does not fit: busy, coaching a program group, outside their availability, missing a certification, or not cleared for the level, kids or adaptive. A manager can still assign anyway with a reason. Set what each instructor teaches on the new Instructors tab.",
+          "help": "school-instructors"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": ["counter", "instructor"],
+          "text": "Safety details on every lesson booking: allergies, medical notes, who may pick up, who to call, and whether photos and texts are OK. They fill in from the last booking and only the lesson's instructor, the desk and managers can read them.",
+          "help": "school-safety"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": ["counter"],
+          "text": "Families get a confirmation email for every lesson booked, with the time, meeting place, what to bring, a check-in code and their own lesson page. Resend it from the roster.",
+          "help": "school-confirm"
+        },
+        {
+          "kind": "improved",
+          "app": "school",
+          "who": null,
+          "text": "One level scale for the whole school: the nine PSIA-AASI levels in plain words, on lessons, report cards, programs, instructors and each guest. A guest's level follows them to the next lesson and season.",
+          "help": "school-levels"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": ["instructor"],
+          "text": "My day for instructors: your lessons and program groups in time order, with each student's level, allergy and medical flags, pickup and a tap-to-call parent, All present in one tap, the report card, moving a student to another group, and your pay for each lesson. It still opens with no signal.",
+          "help": "school-myday"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": ["counter"],
+          "text": "Check-in and labels: families tap We're here on their lesson page, or the desk scans their code. Print a jacket or bib label for each student.",
+          "help": "lesson-checkin"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": ["counter"],
+          "text": "The lineup board: each class at a lesson time as a column, a suggested split by level, age and your class size onto instructors who are free and cleared, and drag or tap to move a student. The family and the new instructor are told.",
+          "help": "lesson-lineup"
+        },
+        {
+          "kind": "improved",
+          "app": "school",
+          "who": ["counter"],
+          "text": "Sell shows lessons one day at a time with levels, ages, instructor and spots left, lessons that fit the student first. A child's type follows them to the ticket and rental, the basket warns when a lesson and a ticket are on different days, and the receipt names each student and where to meet.",
+          "help": "sell-lessons"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "Families book online by person: a five-question Find my level, lessons that fit each child first, siblings in different lessons with a lift ticket and rental in one payment, and a waitlist that offers an open spot to the next family for 15 minutes.",
+          "help": "school-family-booking"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "Each booking has a family lesson page: the details, check-in, changing the date, the safety details, and after the lesson the recap, a tip for the instructor, the next lesson and the progress card.",
+          "help": "school-family-page"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": ["instructor"],
+          "text": "Recaps: after each lesson, tick the skills, set the level, add a note and up to two photos (only with the family's yes), and approve before it is sent. With Assistant Plus, or the AI lesson recaps add-on, the writer drafts it for you.",
+          "help": "school-recaps"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "Instructor pay your way: per lesson, hourly or both, lineup time paid or not, private and request rates, each instructor's own rates, a pay line on every lesson, My pay, and payroll you approve and export, with tips paid in full to the instructor.",
+          "help": "payroll"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": ["instructor"],
+          "text": "Privates asked for by name: families pick an instructor and a time on the private lesson page and pay; the instructor accepts within the time you set, or the family is offered another instructor or refunded. Instructors can offer their past private guests a new time.",
+          "help": "private-requests"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "Copy a day or a weekend of lessons, with or without instructors, or save it as a template: a 12-lesson Saturday in five taps.",
+          "help": "school-copy-day"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "The weather playbook: delay, cancel or move a day for lessons and program groups together, in one go. Each family chooses a makeup, a credit or a refund on their phone; no answer in 7 days becomes a credit.",
+          "help": "school-weather"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "Staffing for the next 14 days, from bookings, past walk-ups, school holidays and snow, with shift offers to free, cleared instructors (first to say yes gets it), and ski school reports: seat fill, revenue per instructor, first lesson to return, no-shows and privates.",
+          "help": "school-staffing"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": "platform",
+          "text": "Two new add-ons for a mountain: Texts to families (lesson confirmations, recaps, waitlist offers and weather changes by text as well as email) and AI lesson recaps (included with Assistant Plus, or turned on at no cost)."
+        }
+      ]
+    },
+    {
       "version": "2026.11.4",
       "date": "2026-10-29",
       "title": "The rental shop, rebuilt around a busy Saturday: paid and ready to fit, signed fitting cards, guest forms, groups, scan-to-return, season rentals and card deposits",
