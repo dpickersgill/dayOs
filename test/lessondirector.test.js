@@ -272,6 +272,15 @@ test('move a day to a makeup day: lessons are copied with free instructors, fami
   const ch = (await q('SELECT choice, chosen_via FROM weather_choices WHERE tenant_id = ? AND booking_id = ?', [M.id, eve.id]))[0];
   assert.deepEqual([ch.choice, ch.chosen_via], ['makeup', 'move']);
   assert.equal((await call('POST', '/skischool/director/weather', { token: M.owner, body: { action: 'move', date: day, makeup_date: day, reason: 'x y z' } })).status, 400);
+  // An unpaid booking on a canceled lesson gets a new day, never a free credit.
+  const day3 = addDays(today, 12);
+  const s3 = ok(await lesson(M, day3, '10:00')).id;
+  ok(await call('POST', `/skischool/sessions/${s3}/bookings`, { token: M.counter, body: { person_id: eve.person_id, sign_waiver: true } }), 201);
+  ok(await call('POST', '/skischool/director/weather', { token: M.owner, body: { action: 'cancel', date: day3, reason: 'Wind' } }), 201);
+  const un = (await q('SELECT id FROM weather_choices WHERE tenant_id = ? AND session_id = ?', [M.id, s3]))[0];
+  const deskView = ok(await call('GET', `/skischool/director/weather/choices/${un.id}`, { token: M.counter }));
+  assert.equal(deskView.credit_ok, false); assert.equal(deskView.refund_ok, false);
+  assert.equal((await call('POST', `/skischool/director/weather/choices/${un.id}/choose`, { token: M.counter, body: { choice: 'credit' } })).status, 409);
 });
 
 test('staffing: booked plus expected walk-ups against instructors gives the gap; first instructor to accept a shift offer gets it', async () => {

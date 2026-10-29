@@ -414,7 +414,7 @@ async function offersTab(root) {
     clear(body).append(loading());
     try {
       const { data } = await get('/skischool/offers/mine');
-      clear(body).append(data.length ? h('ul', { class: 'plain stack' }, data.map((o) => h('li', { class: 'panel stack' },
+      clear(body).append(data.length ? h('div', { class: 'stack' }, data.map((o) => h('article', { class: 'panel stack' },
         h('div', { class: 'spread' }, h('strong', null, o.words), o.answer === 'yes' ? state('Yours', 'good') : o.status !== 'open' ? state('Filled', 'neutral') : o.answer === 'no' ? state('You said no', 'neutral') : null),
         h('div', { class: 'muted small' }, fmtRange(o.starts_at, o.ends_at)), o.note ? h('p', { class: 'small' }, o.note) : null,
         o.status === 'open' && o.answer === 'none' ? h('div', { class: 'row' },
