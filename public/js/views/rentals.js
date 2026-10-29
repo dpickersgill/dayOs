@@ -10,7 +10,7 @@ const ITEM_STATUS = ['available', 'rented', 'maintenance', 'lost', 'retired'];
 const gearName = (i) => [i.brand, i.model, i.size].filter(Boolean).join(' ');
 
 export async function render(root) {
-  const items = [['counter', 'Counter', drawCounter], ['out', 'Out now', drawOut], ['reservations', 'Reservations', more.drawReservations]];
+  const items = [['counter', 'Counter', drawCounter], ['forms', 'Forms', async (b) => (await import('./rentals-forms.js')).drawForms(b)], ['out', 'Out now', drawOut], ['groups', 'Groups', async (b) => (await import('./rentals-groups.js')).drawGroups(b)], ['reservations', 'Reservations', more.drawReservations]];
   if (can('counter')) items.push(['inventory', 'Inventory', drawInventory], ['service', 'Service', more.drawService]);
   if (isManager()) items.push(['reports', 'Reports', more.drawReports]);
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Rentals')), tabs(items));

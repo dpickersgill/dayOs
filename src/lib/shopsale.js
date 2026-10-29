@@ -394,11 +394,14 @@ async function emailTickets(tenantId, rowId, baseUrl) {
   const t = await one(pool, 'SELECT name, slug, phone FROM tenants WHERE id = ?', [tenantId]);
   const link = `${baseUrl}/shop/${t.slug}?order=${row.view_token}`;
   const v = await viewOf(tenantId, row.view_token);
+  const RF = require('./rentalforms');
+  const rentalForm = row.order_id && (await RF.rentalLines(pool, tenantId, row.order_id)).count ? await RF.orderFormLink(pool, tenantId, row.order_id, baseUrl, t.slug) : null;
   const lines = v.tickets.map((k) => `- ${k.product}${k.first_name ? `, ${k.first_name} ${k.last_name}` : ''}: ${k.valid_from === k.valid_to ? k.valid_from : `${k.valid_from} to ${k.valid_to}`}${k.start_time ? `, ${ACT.clock(k.start_time)} to ${ACT.clock(k.end_time)}` : ''}`);
   const gifts = v.gift_cards.map((g) => `- Gift card ${g.code}, ${money(g.amount_cents)}${g.recipient_name ? ` for ${g.recipient_name}` : ''}`);
   const text = [`Hi ${row.contact_name.split(' ')[0]},`, '', `Thank you for your order at ${t.name} (reference ${row.reference}, ${money(row.amount_cents)}).`, '', ...lines, ...gifts, '',
     'Show the barcode on your phone at the gate. Your tickets are here:', link, '',
     ...(v.waiver_needed.length ? [`Still to sign a waiver before riding: ${v.waiver_needed.join(', ')}. Sign here: ${baseUrl}/waiver/${t.slug}`, ''] : []),
+    ...(rentalForm ? ['Renting gear? Fill in your rental form before you come: each renter\'s height, weight, boot size and ability, signed. The shop fits you faster.', rentalForm, ''] : []),
     ...(row.note ? [row.note, ''] : []), t.phone ? `Questions? Call ${t.phone}.` : ''].join('\n');
   const r = await mailer.send({ tenantId, to: row.contact_email, fromName: t.name, subject: `Your tickets for ${t.name}`, text, tag: 'shop-tickets' });
   if (r.ok) await pool.query('UPDATE shop_orders SET emailed_at = NOW() WHERE tenant_id = ? AND id = ? AND emailed_at IS NULL', [tenantId, rowId]);
