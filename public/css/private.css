@@ -1,0 +1,21 @@
+/* The private lesson page (/private/<mountain>). It sits on the booking page's stylesheet (book.css) and adds the
+   instructor cards and the grid of start times. */
+
+/* ---- one column */
+.layout.one { max-width: 760px; grid-template-columns: minmax(0, 1fr); }
+
+/* ---- instructor cards */
+.inst-cards { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.inst-card { display: grid; gap: 4px; align-content: start; text-align: left; min-height: 64px; padding: 12px 14px; border-radius: var(--r-sm); border: 1.5px solid var(--line-strong); background: #fff; color: var(--ink); font: inherit; cursor: pointer; }
+.inst-card:hover { border-color: var(--blue); }
+.inst-card[aria-pressed='true'] { border-color: var(--ink); background: var(--ink); color: #fff; }
+.inst-card[aria-pressed='true'] .muted { color: #cfe0e7; }
+.inst-card:disabled { opacity: 0.6; cursor: wait; }
+
+/* ---- start times */
+.time-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+.time-grid .pill { min-height: 48px; padding: 0 8px; white-space: nowrap; }
+.time-grid .empty-day { grid-column: 1 / -1; }
+.legend { display: block; }
+.done .inst-cards { width: 100%; }
+.done .btn { justify-self: center; }

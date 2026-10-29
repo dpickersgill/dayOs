@@ -2122,9 +2122,11 @@ test('school: every tab renders for managers, counter staff and instructors, and
   await closeOverlays();
   const owner = await renderView('school', 'owner', T.owner);
   assert.deepEqual([...owner.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests', 'Instructors', 'Instructor hours', 'Check-in', 'Lineup', 'Recaps', 'Waitlist']);
+  assert.ok(['Privates', 'Instructor pay', 'Payroll'].every((k) => [...owner.querySelectorAll('[role=tab]')].some((t) => t.textContent === k)), 'the pay tabs');
   await exercise(owner, 'school (owner)');
   const counter = await renderView('school', 'counter', T.counter);
   assert.deepEqual([...counter.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests', 'Check-in', 'Lineup', 'Waitlist']);
+  assert.ok(![...counter.querySelectorAll('[role=tab]')].some((t) => t.textContent === 'Payroll'), 'no payroll for the desk');
   const ins = await renderView('school', 'instructor', T.instructor, { staff_id: D.s2 });
   assert.deepEqual([...ins.querySelectorAll('[role=tab]')].map((t) => t.textContent), ['My day', 'Today', 'Lessons', 'Recaps'], 'an instructor opens on My day');
   await exercise(ins, 'school (instructor)');

@@ -368,6 +368,8 @@ async function handleWebhook(event, base) {
   if (obj && obj.metadata && obj.metadata.kind === 'program') return require('./programreg').handleWebhook(event, obj, base || config.stripe.publicUrl || '');
   if (obj && obj.metadata && obj.metadata.kind === 'donation') return recordDonation(event, obj);
   if (obj && obj.metadata && ['lesson_basket', 'lesson_tip'].includes(obj.metadata.kind)) return F.handleWebhook(event, obj); // a family basket or a tip
+
+  if (obj && obj.metadata && obj.metadata.kind === 'private') return require('./schoolpay').handleWebhook(event, obj); // Track PAY: privates asked for by name
   if (!obj || !obj.metadata || !obj.metadata.request_id) return { ignored: true };
   const tenantId = Number(obj.metadata.tenant_id);
   const requestId = Number(obj.metadata.request_id);
