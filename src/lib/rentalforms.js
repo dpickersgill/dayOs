@@ -208,7 +208,9 @@ async function useForm(conn, tenantId, form, choices, { orderId, userId, setting
     for (const p of out.filter((x) => x.contract_id)) {
       const c = open.find((x) => x.id === p.contract_id);
       // the form is in, so in a shop with stations the renter moves on to boots
-      await conn.query("UPDATE rental_contracts SET person_id = ?, stage = IF(stage = 'form', 'boots', stage) WHERE tenant_id = ? AND id = ?", [p.person_id, tenantId, c.id]);
+      // (Track FIT reads a NULL stage as 'form' in a shop with stations; a counter shop keeps no stage.)
+      const stations = settings && settings.layout === 'stations';
+      await conn.query("UPDATE rental_contracts SET person_id = ?, stage = IF(? AND (stage IS NULL OR stage = 'form'), 'boots', IF(stage = 'form', 'boots', stage)) WHERE tenant_id = ? AND id = ?", [p.person_id, stations ? 1 : 0, tenantId, c.id]);
       attached.push({ contract_id: c.id, person_id: p.person_id });
     }
   }
