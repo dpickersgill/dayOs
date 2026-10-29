@@ -3169,3 +3169,18 @@ tr.attr-blocked td { background: var(--closed-tint); }
   .slot-btn { min-height: 60px; }
   .act-add .btn { width: 100%; min-height: 48px; }
 }
+
+/* ---- Ski school pay: the pay line on My day, private requests, My pay and payroll (school-pay.js) ---- */
+.pay-line { margin: 4px 0 0; }
+.pay-line .pay-label { font-weight: 600; color: var(--ink); }
+.pay-line .pay-note { display: block; }
+.pay-top { margin-bottom: 16px; }
+.pay-top-head { font-size: 1.125rem; margin: 0; }
+.req-card { border-left: 4px solid var(--hold, #d98a00); }
+.req-card .req-when { font-size: 1.0625rem; }
+.req-card .req-students { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.req-card .row .btn { min-height: 44px; min-width: 96px; }
+.pay-week { flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+.pay-tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.pay-tile { display: grid; gap: 2px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.pay-tile strong { font-size: 1.375rem; line-height: 1.2; }
