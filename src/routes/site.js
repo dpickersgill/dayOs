@@ -21,7 +21,7 @@ const PAGES = {
   '': 'index', product: 'product', 'ski-patrol': 'skipatrol', 'lift-ticket-software': 'lifttickets', 'ski-school-software': 'skischool',
   'ski-rental-software': 'skirental', 'ski-waiver-software': 'skiwaivers', 'lift-maintenance-software': 'liftmaintenance',
   'ski-area-pos': 'skiareapos', 'online-lift-ticket-sales': 'onlinetickets', 'terrain-park-software': 'terrainpark', 'ski-area-staff-scheduling': 'staffscheduling',
-  resources: 'resources', 'chairlift-inspection-checklist': 'guide-chairlift', 'terrain-park-inspection-checklist': 'guide-terrainpark',
+  'attraction-ticketing-software': 'attractions', resources: 'resources', 'chairlift-inspection-checklist': 'guide-chairlift', 'terrain-park-inspection-checklist': 'guide-terrainpark',
   'ski-area-incident-report-guide': 'guide-incident', 'how-to-choose-ski-area-software': 'guide-choosing', about: 'about',
   pricing: 'pricing', security: 'security', contact: 'contact', privacy: 'privacy', terms: 'terms',
   // For owners, GMs and insurers: the record, the claim file, the documentation score and the season risk report.
@@ -30,7 +30,7 @@ const PAGES = {
 // The pages written for one search each ("ski school software"), linked from the menu and the footer.
 const SOLUTIONS = [['ski-patrol', 'Ski patrol'], ['lift-ticket-software', 'Lift tickets and passes'], ['ski-school-software', 'Ski school'],
   ['ski-rental-software', 'Ski rentals'], ['ski-waiver-software', 'Online waivers'], ['lift-maintenance-software', 'Lift and fleet maintenance'],
-  ['ski-area-pos', 'Ski area POS'], ['online-lift-ticket-sales', 'Online ticket sales'], ['terrain-park-software', 'Terrain park'], ['ski-area-staff-scheduling', 'Staff scheduling']];
+  ['ski-area-pos', 'Ski area POS'], ['online-lift-ticket-sales', 'Online ticket sales'], ['terrain-park-software', 'Terrain park'], ['attraction-ticketing-software', 'Attractions and activities'], ['ski-area-staff-scheduling', 'Staff scheduling']];
 const SEO = require('../lib/seo');
 const cache = new Map();
 
@@ -51,7 +51,7 @@ const SOLUTION_LINES = {
   'ski-rental-software': 'Every item out, and every item back', 'ski-waiver-software': 'Signed before they drive up',
   'lift-maintenance-software': 'Inspections, work orders and service plans', 'ski-area-pos': 'A fast ticket window on a busy Saturday',
   'online-lift-ticket-sales': 'Your own page, selling while you sleep', 'terrain-park-software': 'Every feature, and whether it passed',
-  'ski-area-staff-scheduling': 'Every shift covered before the first chair',
+  'attraction-ticketing-software': 'Ziplines, coasters and tubing, open on their check', 'ski-area-staff-scheduling': 'Every shift covered before the first chair',
 };
 const CHEVRON = '<svg class="chev" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
@@ -172,11 +172,13 @@ const SYMS = ['<circle cx="17" cy="17" r="15" fill="#2C7A57"/>', '<rect x="2" y=
 const PATROL_SYM = '<path d="M12 2h10v10h10v10H22v10H12V22H2V12h10Z" fill="#D63A2F"/>';
 const sym = (i, code) => `<svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">${/patrol/.test(code || '') ? PATROL_SYM : SYMS[Math.min(i, 2)]}</svg>`;
 function homePlansHtml(d) {
-  // Home shows each plan's name and price only: what each holds is on Pricing.
-  return d.plans.map((p, i) => `<div class="plan${i === 1 ? ' feat' : ''}"><div class="sym">${sym(i, p.code)}<h3>${escHtml(p.name)}</h3></div><div class="price"><b>${dollars(p.monthly_cents)}</b><span>per month</span></div></div>`).join('\n        ');
+  // Home shows each plan's name, who it is for (the blurb set in the console) and its price: what each holds is on Pricing.
+  return d.plans.map((p, i) => `<div class="plan${i === 1 ? ' feat' : ''}"><div class="sym">${sym(i, p.code)}<h3>${escHtml(p.name)}</h3></div>${p.blurb ? `<p class="who">${escHtml(p.blurb)}</p>` : ''}<div class="price"><b>${dollars(p.monthly_cents)}</b><span>per month</span></div></div>`).join('\n        ');
 }
+// A few words after the two add-on names that do not explain themselves. Kept the same as ADDON_HINTS in public/site/site.js.
+const ADDON_HINTS = { 'doc-ocr': 'scans become searchable', 'assistant-plus': 'live answers from your data' };
 function homeAddonsHtml(d) {
-  return `<b>Add when you want them:</b>${d.addons.map((a) => `<span>${escHtml(a.name)}</span>`).join('')}<a href="{{SITE}}/pricing#addons">See add-on prices</a>`;
+  return `<b>Add when you want them:</b>${d.addons.map((a) => `<span>${escHtml(a.name)}${ADDON_HINTS[a.code] ? ` <i>(${ADDON_HINTS[a.code]})</i>` : ''}</span>`).join('')}<a href="{{SITE}}/pricing#addons">See add-on prices</a>`;
 }
 const PATROL_ONLY = ['Patient care reports and the report check', 'Requirements your patrol director sets', 'Dispatch and phone alerts', 'Duty, the patrol schedule and shift cover', 'Opening checks and the closing sweep', 'Medications, oxygen and AEDs', 'Records requests and legal hold', 'Documents', 'A free read-only login for the ski area'];
 function pricingPlansHtml(d) {
@@ -330,7 +332,7 @@ pages.get('/llms.txt', async (req, res, next) => {
   const page = (slug) => `${origin}/${slug}`;
   const text = `# Verdynt/OS
 
-> Verdynt/OS is web-based operations software for independent ski areas in the United States: lift and trail status and inspections, grooming, fleet maintenance, ticket and season pass sales with RFID gate scanning, an online ticket shop, waivers, ski and snowboard rentals, ski school and lesson booking, ski patrol (patient care reports, dispatch, the closing sweep) and staff scheduling. Each mountain turns on only the apps it runs. Every plan starts with a 14-day free trial, with no contract.
+> Verdynt/OS is web-based operations software for independent ski areas in the United States: lift and trail status and inspections, grooming, fleet maintenance, ticket and season pass sales with RFID gate scanning, an online ticket shop, waivers, ski and snowboard rentals, ski school and lesson booking, ski patrol (patient care reports, dispatch, the closing sweep), staff scheduling, and attractions and activities (ziplines, mountain coasters, tubing, ice skating, scenic rides and bike parks, with a daily opening check and time slots sold at the counter and online). Each mountain turns on only the apps it runs. Every plan starts with a 14-day free trial, with no contract.
 
 Verdynt/OS runs in a web browser on counter computers, phones and tablets, with nothing to install. Guest card payments go straight into each mountain's own Stripe account; Verdynt/OS never holds the money. Each mountain's data is kept separate, patient records are never deleted (mistakes are marked entered in error), and every mountain can export its data as spreadsheets at any time. Every plan includes Ask, an in-app assistant that answers staff how-to questions from Help; the Assistant Plus add-on adds questions about the mountain's own day and a Questions button for guests. The assistant never sees patient care records.
 
@@ -348,6 +350,7 @@ Verdynt/OS runs in a web browser on counter computers, phones and tablets, with 
 - [Ski area POS](${page('ski-area-pos')}): the ticket window, card payments on a Stripe smart reader, gift cards and the till
 - [Online lift ticket sales](${page('online-lift-ticket-sales')}): the online shop, day-first pricing, daily limits and the waitlist
 - [Terrain park software](${page('terrain-park-software')}): park features, the daily map with GPS pins, and inspections
+- [Attraction and activity software](${page('attraction-ticketing-software')}): ziplines, coasters, tubing and skating with a daily opening check, time slots with rider limits sold at the counter and online, and tickets scanned at the attraction
 - [Ski area staff scheduling](${page('ski-area-staff-scheduling')}): shifts, the time clock and certifications
 - [About](${page('about')}): who Verdynt/OS is for and how it works with ski areas
 - [Pricing](${page('pricing')}): plans, add-ons and how paying works

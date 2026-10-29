@@ -9,8 +9,8 @@
 const META = {
   '': {
     title: 'Ski Area and Ski Resort Management Software | Verdynt/OS',
-    description: 'Run lifts, ski patrol, tickets, waivers, rentals, lessons and staff from one screen. Built for independent ski areas. Plans from {{FROM}}/month, 14 days free.',
-    og: 'Open the mountain from one screen',
+    description: 'Run lifts, ski patrol, tickets, rentals, lessons, staff and your zipline, coaster or tubing hill from one screen. Built for independent ski areas. Plans from {{FROM}}/month, 14 days free.',
+    og: 'Run the whole mountain from one screen',
   },
   product: {
     title: 'Ski Resort Software: POS, Lifts, Patrol, Rentals | Verdynt/OS',
@@ -77,6 +77,12 @@ const META = {
     description: 'A catalog of rails, boxes and jumps, a daily park map with GPS pins dropped from a phone, and inspections that close a feature everywhere when it fails.',
     og: 'Terrain park software: every feature, where it is, and whether it passed',
     crumb: 'Terrain park',
+  },
+  'attraction-ticketing-software': {
+    title: 'Zipline, Mountain Coaster and Tubing Software for Ski Areas | Verdynt/OS',
+    description: 'Run and sell your zipline, coaster, tubing hill or skating rink: a daily opening check, time slots with height, weight and age limits, sold at the counter and online.',
+    og: 'Attractions and activities: open on the check, sold by the time slot',
+    crumb: 'Attractions and activities',
   },
   'ski-area-staff-scheduling': {
     title: 'Ski Area Staff Scheduling and Time Clock | Verdynt/OS',
@@ -165,9 +171,10 @@ const dollars = (cents) => `$${Math.round(cents / 100).toLocaleString('en-US')}`
  * ctx: { slug, origin (the canonical origin, no trailing slash), base (link prefix), html (the page body), plans, verify }
  */
 // Pages that describe the software itself carry its structured data (name, category, prices).
-const SOFTWARE_PAGES = ['', 'pricing', 'product', 'ski-patrol', 'ski-area-risk-management', 'lift-ticket-software', 'ski-school-software', 'ski-rental-software', 'ski-waiver-software', 'lift-maintenance-software', 'ski-area-pos', 'online-lift-ticket-sales', 'terrain-park-software', 'ski-area-staff-scheduling'];
+const SOFTWARE_PAGES = ['', 'pricing', 'product', 'ski-patrol', 'ski-area-risk-management', 'lift-ticket-software', 'ski-school-software', 'ski-rental-software', 'ski-waiver-software', 'lift-maintenance-software', 'ski-area-pos', 'online-lift-ticket-sales', 'terrain-park-software', 'attraction-ticketing-software', 'ski-area-staff-scheduling'];
 const FEATURES = ['Lift and trail status and inspections', 'Grooming and snowmaking logs', 'Ticket and season pass sales', 'RFID gate scanning', 'Online ticket shop',
-  'Online waivers', 'Ski and snowboard rentals', 'Ski school and lesson booking', 'Ski patrol patient care reports and dispatch', 'Staff scheduling and time clock', 'Fleet and equipment maintenance'];
+  'Online waivers', 'Ski and snowboard rentals', 'Ski school and lesson booking', 'Ski patrol patient care reports and dispatch', 'Staff scheduling and time clock', 'Fleet and equipment maintenance',
+  'Attractions with daily opening checks', 'Activity time slots with rider limits sold at the counter and online'];
 
 function head({ slug, origin, html, plans, verify = {}, sameAs = [], noindex = false, modified = null, asset = '' }) {
   const key = slug in META ? slug : 'notfound';
@@ -193,7 +200,7 @@ function head({ slug, origin, html, plans, verify = {}, sameAs = [], noindex = f
     graph.push({
       '@type': 'SoftwareApplication', '@id': `${origin}/#software`, name: 'Verdynt/OS', applicationCategory: 'BusinessApplication', applicationSubCategory: 'Ski area management software',
       operatingSystem: 'Web browser; iOS; Android', url: `${origin}/`, image, publisher: { '@id': `${origin}/#org` },
-      description: 'Operations software for independent ski areas: lift inspections, ski patrol, ticket sales, waivers, rentals, ski school and staff scheduling.',
+      description: 'Operations software for independent ski areas: lift inspections, ski patrol, ticket sales, waivers, rentals, ski school, staff scheduling, and attractions and activities such as ziplines, coasters and tubing.',
       featureList: FEATURES.join(', '), isAccessibleForFree: false, inLanguage: 'en-US',
       offers: { '@type': 'AggregateOffer', priceCurrency: 'USD', lowPrice: (Math.min(...plans.plans.map((p) => p.monthly_cents)) / 100).toFixed(2), highPrice: (Math.max(...plans.plans.map((p) => p.monthly_cents)) / 100).toFixed(2), offerCount: plans.plans.length,
         offers: plans.plans.map((p) => ({ '@type': 'Offer', name: p.name, price: (p.monthly_cents / 100).toFixed(2), priceCurrency: 'USD', description: p.blurb || undefined, url: `${origin}/pricing`,

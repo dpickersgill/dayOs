@@ -57,7 +57,7 @@ test.after(async () => { await new Promise((r) => server.close(r)); await new Pr
 
 test('every page is at /site, with its links kept under /site', async () => {
   assert.equal((await get('/site')).status, 301);
-  for (const p of ['/site/', '/site/product', '/site/ski-patrol', '/site/lift-ticket-software', '/site/ski-school-software', '/site/ski-rental-software', '/site/ski-waiver-software', '/site/lift-maintenance-software', '/site/ski-area-pos', '/site/online-lift-ticket-sales', '/site/terrain-park-software', '/site/ski-area-staff-scheduling', '/site/pricing', '/site/security', '/site/contact', '/site/privacy', '/site/terms']) {
+  for (const p of ['/site/', '/site/product', '/site/ski-patrol', '/site/lift-ticket-software', '/site/ski-school-software', '/site/ski-rental-software', '/site/ski-waiver-software', '/site/lift-maintenance-software', '/site/ski-area-pos', '/site/online-lift-ticket-sales', '/site/terrain-park-software', '/site/attraction-ticketing-software', '/site/ski-area-staff-scheduling', '/site/pricing', '/site/security', '/site/contact', '/site/privacy', '/site/terms']) {
     const r = await get(p);
     assert.equal(r.status, 200, p);
     assert.match(r.type, /text\/html/);
@@ -73,7 +73,8 @@ test('every page is at /site, with its links kept under /site', async () => {
 test('on the website address, the pages are at the top, with robots, a sitemap and a not-found page', async () => {
   const home = await onHost('/');
   assert.equal(home.status, 200);
-  assert.ok(home.text.includes('Open the mountain from one screen.'));
+  assert.ok(home.text.includes('Run the whole mountain from one screen.'));
+  assert.match(home.text, /<meta name="description" content="Run lifts, ski patrol, tickets, rentals, lessons, staff and your zipline, coaster or tubing hill from one screen\./);
   assert.match(home.text, /<h1[^>]*><span class="kicker">Ski area management software<\/span>/, 'the head search term is in the main heading');
   assert.ok(home.text.includes('href="/pricing"') && home.text.includes('href="/app"') && home.text.includes('href="/try"'));
   assert.ok(home.text.includes('rel="canonical" href="https://www.site.test/"'));
@@ -140,7 +141,7 @@ test('the Pricing page reads the active plans and add-ons set in the console', a
 });
 
 test('pages written for each search are linked from every page, in the sitemap, and described for AI assistants', async () => {
-  const slugs = ['ski-patrol', 'lift-ticket-software', 'ski-school-software', 'ski-rental-software', 'ski-waiver-software', 'lift-maintenance-software', 'ski-area-pos', 'online-lift-ticket-sales', 'terrain-park-software', 'ski-area-staff-scheduling'];
+  const slugs = ['ski-patrol', 'lift-ticket-software', 'ski-school-software', 'ski-rental-software', 'ski-waiver-software', 'lift-maintenance-software', 'ski-area-pos', 'online-lift-ticket-sales', 'terrain-park-software', 'attraction-ticketing-software', 'ski-area-staff-scheduling'];
   const home = await onHost('/');
   const map = await onHost('/sitemap.xml');
   for (const s of slugs) {
@@ -182,7 +183,11 @@ test('the live plans are in the page itself, for search engines and people witho
     assert.ok(home.text.includes(`<h3>${p.name}</h3>`) && home.text.includes(price), `${p.name} on Home`);
     assert.ok(pricing.text.includes(`<h2>${p.name}</h2>`) && pricing.text.includes(price), `${p.name} on Pricing`);
   }
-  for (const a of d.addons) assert.ok(home.text.includes(`<span>${a.name}</span>`), a.name);
+  for (const a of d.addons) assert.ok(home.text.includes(`<span>${a.name}`), a.name);
+  // who each plan is for, from the console's own line, so Home and Pricing say the same
+  for (const p of d.plans) if (p.blurb) assert.ok(home.text.includes(`<p class="who">${p.blurb}</p>`), `${p.name}: who it is for, on Home`);
+  // a few words after the two add-on names that do not explain themselves
+  if (d.addons.some((a) => a.code === 'doc-ocr')) assert.match(home.text, /Document text recognition <i>\(scans become searchable\)<\/i>/);
   // A plan that is not a step up from the one before lists its own apps, not "Everything in Resort, plus" and nothing
   const own = d.plans.find((p, i) => i > 0 && !d.plans[i - 1].apps.every((a) => p.apps.some((x) => x.key === a.key)));
   if (own) {
@@ -203,9 +208,36 @@ test('Pricing: pay monthly, yearly or over the season; setup packages; and the n
   const lodge = d.plans.find((x) => x.code === 'lodge'); const shop = d.addons.find((x) => x.code === 'shop');
   if (lodge && shop) assert.ok(page.includes(`$${Math.round((lodge.yearly_cents + shop.yearly_cents) / 100).toLocaleString('en-US')}`), 'the Lodge and Online shop year, from the live prices');
   assert.ok(!page.includes('Why is Patrol'), 'no question about Patrol costing more as an add-on');
+  // a mountain open in summer reads which plan runs its attractions, and never that it pays "nothing May to October"
+  assert.ok(page.includes("We're open in summer too. Which plan?") && page.includes('Attractions are part of Lifts and trails'), 'the summer question');
+  assert.ok(!page.includes('May to October') && page.includes('nothing in the months between'), 'season billing is not described as winter only');
   // the request kind for guided setup goes to Leads
   const r = await api('POST', '/site/contact', { kind: 'setup', name: 'Sam Setup', mountain: 'Setup Hill', email: `setup-${suffix}@example.test` });
   assert.equal(r.status, 201, JSON.stringify(r.body));
+});
+
+test('the attractions page: its own search title, questions in the structured data, in the Product menu, llms.txt and the home page', async () => {
+  const page = await onHost('/attraction-ticketing-software');
+  assert.equal(page.status, 200);
+  assert.ok(page.text.includes('<title>Zipline, Mountain Coaster and Tubing Software for Ski Areas | Verdynt/OS</title>'));
+  const graph = JSON.parse(page.text.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1])['@graph'];
+  const faq = graph.find((g) => g['@type'] === 'FAQPage');
+  for (const q of ['Can guests book a time slot online?', 'How does the daily inspection work?', 'Does it work in summer?']) assert.ok(faq.mainEntity.some((x) => x.name === q), q);
+  const crumbs = graph.find((g) => g['@type'] === 'BreadcrumbList').itemListElement.map((i) => i.name);
+  assert.deepEqual(crumbs, ['Home', 'Attractions and activities']);
+  const soft = graph.find((g) => g['@type'] === 'SoftwareApplication');
+  assert.match(soft.featureList, /Attractions with daily opening checks/);
+  // the Product menu on every page, the home page's day and its questions, and llms.txt
+  const home = await onHost('/');
+  assert.ok(home.text.includes('<b>Attractions and activities</b>'), 'in the Product menu');
+  assert.ok(home.text.includes('The zipline opens on its check.') && home.text.includes('We run a zipline and a tubing hill too. Does it handle those?'));
+  assert.ok(home.text.includes('<div class="bt">Attractions</div>') && home.text.includes('Alpine Coaster'), 'on the morning board');
+  assert.ok(home.text.indexOf('id="day"') < home.text.indexOf('id="risk"'), 'the day comes before the claims section');
+  assert.ok(home.text.includes('Built in Pennsylvania, and support is answered by the people who build it.'));
+  assert.ok(!/[\u2014]/.test(home.text + page.text), 'no em dashes');
+  const llms = (await onHost('/llms.txt')).text;
+  assert.match(llms, /attractions and activities/);
+  assert.ok(llms.includes('https://www.site.test/attraction-ticketing-software'));
 });
 
 test('the Contact form keeps the request for Leads and emails it, and bots and bad input are turned away', async () => {
