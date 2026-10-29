@@ -203,7 +203,7 @@ async function programView(root, id) {
         h('div', { class: 'row' },
           isManager() ? button('New session', () => termDialog(p, null, load), { kind: 'primary' }) : null,
           isManager() ? button('Settings', () => editProgram(p, load)) : null,
-          isManager() && o.terms.length ? button('Cancel a day', () => stormDialog(load)) : null)),
+          isManager() && o.terms.length ? button('Weather: delay or cancel a day', () => { location.hash = '#/school?tab=weather'; }) : null)), // Track DIRECTOR: the weather playbook in Ski school covers programs too (stormDialog is no longer reached)
       h('div', { class: 'chip-row' }, chips),
       p.online ? h('p', { class: 'muted small' }, 'Parents register at ', h('a', { href: link, target: '_blank', rel: 'noopener' }, link), '. Only sessions set to Open, inside their registration dates, show there.') : null,
       ...(o.terms.length ? o.terms.map((t) => termPanel(p, t, o.today, load)) : [noTerms(p, load)]),
@@ -650,7 +650,7 @@ async function todayView(root) {
   const date = input({ type: 'date', value: todayStr(), 'aria-label': 'Date' });
   const body = h('div', { class: 'stack' });
   root.append(back('#/programs', 'All programs'), h('div', { class: 'page-head' }, h('h1', null, 'Program lessons'),
-    h('div', { class: 'row' }, date, isManager() ? button('Cancel this day', () => stormDialog(load)) : null)), body);
+    h('div', { class: 'row' }, date, isManager() ? button('Weather: delay or cancel this day', () => { location.hash = `#/school?tab=weather&day=${date.value}`; }) : null)), body); // Track DIRECTOR: the weather playbook
   async function load() {
     clear(body).append(h('p', { class: 'loading' }, 'Loading…'));
     try {

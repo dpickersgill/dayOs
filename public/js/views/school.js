@@ -54,7 +54,7 @@ async function lessonsTab(root, { staff, certs, names }) {
   const to = input({ type: 'date', value: addDays(todayStr(), 14) });
   const body = h('div');
   root.append(h('div', { class: 'row' }, isManager() ? button('Add lesson session', () => addSession(staff, certs, load), { kind: 'primary' }) : null, isManager() ? button('Add a series of days', () => addSeries(staff, certs, load)) : null,
-    isManager() ? button('Cancel a day', () => cancelDays(load)) : null),
+    isManager() ? button('Weather: delay or cancel a day', () => { location.hash = '#/school?tab=weather'; }) : null), // Track DIRECTOR: one weather playbook for lessons and programs (cancelDays below is no longer reached)
     h('div', { class: 'inline-form' }, field('From', from), field('To', to), button('Show', () => load(), { kind: 'primary' })), body);
 
   async function load() {

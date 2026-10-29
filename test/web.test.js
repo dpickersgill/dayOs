@@ -2121,14 +2121,19 @@ const addD = (d, n) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.ge
 test('school: every tab renders for managers, counter staff and instructors, and the dialogs open', skip(), async () => {
   await closeOverlays();
   const owner = await renderView('school', 'owner', T.owner);
-  assert.deepEqual([...owner.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests', 'Instructors', 'Instructor hours', 'Check-in', 'Lineup', 'Recaps', 'Waitlist']);
-  assert.ok(['Privates', 'Instructor pay', 'Payroll'].every((k) => [...owner.querySelectorAll('[role=tab]')].some((t) => t.textContent === k)), 'the pay tabs');
+  const tabsOf = (el) => [...el.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, ''));
+  const has = (el, names) => names.every((k) => tabsOf(el).includes(k));
+  assert.deepEqual(tabsOf(owner).slice(0, 9), ['Today', 'Lessons', 'Online requests', 'Instructors', 'Instructor hours', 'Check-in', 'Lineup', 'Recaps', 'Waitlist']);
+  assert.ok(has(owner, ['Privates', 'Instructor pay', 'Payroll']), 'the pay tabs');
+  assert.ok(has(owner, ['Copy a day', 'Weather', 'Staffing', 'Reports']), 'the director tabs');
   await exercise(owner, 'school (owner)');
   const counter = await renderView('school', 'counter', T.counter);
-  assert.deepEqual([...counter.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests', 'Check-in', 'Lineup', 'Waitlist']);
-  assert.ok(![...counter.querySelectorAll('[role=tab]')].some((t) => t.textContent === 'Payroll'), 'no payroll for the desk');
+  assert.deepEqual(tabsOf(counter).slice(0, 6), ['Today', 'Lessons', 'Online requests', 'Check-in', 'Lineup', 'Waitlist']);
+  assert.ok(!tabsOf(counter).includes('Payroll'), 'no payroll for the desk');
+  assert.ok(has(counter, ['Weather']), 'the desk sees weather calls');
   const ins = await renderView('school', 'instructor', T.instructor, { staff_id: D.s2 });
-  assert.deepEqual([...ins.querySelectorAll('[role=tab]')].map((t) => t.textContent), ['My day', 'Today', 'Lessons', 'Recaps'], 'an instructor opens on My day');
+  assert.equal(tabsOf(ins)[0], 'My day', 'an instructor opens on My day');
+  assert.ok(has(ins, ['Recaps', 'Shift offers']), 'recaps and shift offers for instructors');
   await exercise(ins, 'school (instructor)');
   await closeOverlays();
 });

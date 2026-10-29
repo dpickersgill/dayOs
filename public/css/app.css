@@ -3322,3 +3322,28 @@ fieldset.safety legend { font-weight: 700; padding: 0 4px; }
 .pay-tile { display: grid; gap: 2px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .pay-tile strong { font-size: 1.375rem; line-height: 1.2; }
 .pay-filter select { max-width: 16rem; }
+
+/* ---- Ski school, the director (round 2): weather call choices, seat fill bars, the copy result ---- */
+.wx-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; border: 0; padding: 0; margin: 0; }
+.wx-choices legend { font-weight: 700; margin-bottom: 6px; padding: 0; }
+.wx-choice { display: flex; gap: 10px; align-items: flex-start; min-height: 56px; padding: 10px 12px; border: 1.5px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); cursor: pointer; }
+.wx-choice input { width: 22px; height: 22px; flex: none; margin-top: 2px; accent-color: var(--trail-blue); }
+.wx-choice span { display: grid; gap: 2px; }
+.wx-choice small { color: var(--quiet); }
+.wx-choice:has(input:checked) { border-color: var(--trail-blue); box-shadow: inset 0 0 0 1px var(--trail-blue); }
+.wx-choice:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
+.notice.good { background: var(--open-tint, #e6f4ea); border-color: var(--open); }
+@media (min-width: 721px) {
+  .staffing-day table { table-layout: fixed; width: 100%; }
+  .staffing-day th:nth-child(1) { width: 6.5rem; }
+  .staffing-day th:nth-child(2) { width: auto; }
+  .staffing-day th:nth-child(n+3):nth-child(-n+6) { width: 5.5rem; }
+  .staffing-day th:nth-child(7) { width: 8rem; }
+  .staffing-day th:nth-child(8) { width: 8rem; }
+}
+.copy-days { display: flex; flex-wrap: wrap; gap: 8px; }
+.copy-day { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 6px 4px 14px; border: 1px solid var(--line-strong); border-radius: 22px; background: var(--surface); font-weight: 700; }
+.fillbar { display: inline-block; min-width: 4.5rem; padding: 2px 6px; border-radius: 4px; font-variant-numeric: tabular-nums; background: linear-gradient(90deg, var(--open-tint, #d8eedf) var(--fill, 0%), transparent var(--fill, 0%)); }
+@media (max-width: 720px) {
+  .wx-choices { grid-template-columns: 1fr; }
+}
