@@ -66,6 +66,8 @@ test.before(async () => {
   D.prog = (await api('POST', '/programs', { token: o, body: { name: 'Junior Race Team', kind: 'race_team', season: '2026-27', capacity: 2, price_cents: 45000 } })).body.id;
   const gear = async (sku, category) => (await api('POST', '/rentals/items', { token: o, body: { sku, category, size: '150' } })).body.id;
   D.ski = await gear('CK-SKI', 'ski'); D.boot = await gear('CK-BOOT', 'boot'); D.ski2 = await gear('CK-SKI2', 'ski'); D.boot2 = await gear('CK-BOOT2', 'boot');
+  // The renter's signed confirmation before skis go out is covered in rentalfit.test.js; these baskets are about the sale.
+  assert.equal((await api('PUT', '/rentals/fit/settings', { token: o, body: { require_signoff: false } })).status, 200);
   await api('POST', '/pricing/promos', { token: o, body: { code: 'TEN', percent_off: 10 } });
 });
 test.after(async () => { await new Promise((r) => server.close(r)); await pool.end(); });
@@ -225,7 +227,8 @@ test('every item sold needs a named person: the customer is always required, and
   assert.equal((await sellRaw(T.counter, { lines: [{ type: 'ticket', product_id: D.day }], payments: cash(6000) })).status, 400, 'a ticket with no customer');
   assert.equal((await sellRaw(T.counter, { lines: [{ type: 'lesson', session_id: D.lesson }], payments: cash(5000) })).status, 400, 'a lesson with no customer');
   assert.equal((await sellRaw(T.counter, { lines: [{ type: 'gift_card', amount_cents: 2500 }], payments: cash(2500) })).status, 400, 'a gift card needs its buyer');
-  assert.equal((await sell(T.counter, { lines: [{ type: 'rental', product_id: D.rentalProd }], customer: { details: { first_name: 'No', last_name: 'Gear', email: 'ng@x.test' }, sign_waiver: true }, payments: cash(4500) })).status, 400, 'a rental needs its gear chosen');
+  // a rental with no gear is paid now and fitted later at the rental shop (Ready to fit)
+  assert.equal((await api('POST', '/checkout/check', { token: T.counter, body: fill({ channel: 'window', lines: [{ type: 'rental', product_id: D.rentalProd }], customer: { details: { first_name: 'No', last_name: 'Gear', email: 'ng@x.test' }, sign_waiver: true }, payments: cash(4500) }) })).status, 200, 'a rental can be sold before the gear is chosen');
 
   // two tickets, two people: each ticket carries the holder's name and gets its own line
   const parent = { first_name: 'Hal', last_name: 'Holder', email: 'hal@holder.test', date_of_birth: '1980-01-01', sex: 'male' };

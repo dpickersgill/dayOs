@@ -57,7 +57,7 @@ test.before(async () => {
   assert.equal((await api('POST', `/people/${ctx.sam}/waivers`, { token: A.owner, body: {} })).status, 201);
   const mk = async (sku, category, extra = {}) => (await api('POST', '/rentals/items', { token: A.owner, body: { sku, category, size: '160', ...extra } })).body.id;
   const items = [await mk('SB-77', 'snowboard', { brand: 'Burton' }), await mk('BT-12', 'boot'), await mk('HL-5', 'helmet')];
-  const out = await api('POST', '/rentals/contracts', { token: A.owner, body: { person_id: ctx.sam, due_at: `${today}T16:30`, items: items.map((rental_item_id) => ({ rental_item_id })) } });
+  const out = await api('POST', '/rentals/contracts', { token: A.owner, body: { unpaid_reason: 'Test hand-out', person_id: ctx.sam, due_at: `${today}T16:30`, items: items.map((rental_item_id) => ({ rental_item_id })) } });
   assert.equal(out.status, 201, JSON.stringify(out.body));
 
   const lee = await api('POST', '/people', { token: A.owner, body: { first_name: 'Lee', last_name: 'Park', phone: '610.555.0111' } });
@@ -66,7 +66,7 @@ test.before(async () => {
   await api('POST', '/orders', { token: A.owner, body: { person_id: ctx.lee, items: [{ product_id: day, valid_on: addDays(today, -3) }] } });
   assert.equal((await api('POST', `/people/${ctx.lee}/waivers`, { token: A.owner, body: {} })).status, 201);
   const old = await mk('SK-OLD', 'ski');
-  const c = await api('POST', '/rentals/contracts', { token: A.owner, body: { person_id: ctx.lee, due_at: `${today}T16:30`, items: [{ rental_item_id: old }] } });
+  const c = await api('POST', '/rentals/contracts', { token: A.owner, body: { unpaid_reason: 'Test hand-out', person_id: ctx.lee, due_at: `${today}T16:30`, items: [{ rental_item_id: old }] } });
   await api('POST', `/rentals/contracts/${c.body.id}/checkin`, { token: A.owner, body: { items: [{ rental_item_id: old }] } });
   await pool.query("UPDATE rental_contracts SET checked_out_at = ?, checked_in_at = ? WHERE id = ?", [`${addDays(today, -2)} 09:00:00`, `${addDays(today, -2)} 15:00:00`, c.body.id]);
 });

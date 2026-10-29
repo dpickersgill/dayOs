@@ -198,7 +198,8 @@ router.post('/orders/:id/refund', requireRole('manager'), validate(refundBody), 
       }
       if (l.line_kind === 'rental' && l.contract_id) {
         const c = await one(conn, 'SELECT status FROM rental_contracts WHERE tenant_id = ? AND id = ?', [tenantId, l.contract_id]);
-        if (c && c.status !== 'returned') throw conflict('The rental gear from this order is not back yet. Check it in first, then refund.');
+        // A paid rental not fitted yet (no gear out) can be refunded; it leaves the Ready to fit list below.
+        if (c && !['returned', 'to_fit', 'cancelled'].includes(c.status)) throw conflict('The rental gear from this order is not back yet. Check it in first, then refund.');
       }
       if (l.line_kind === 'lesson' && !l.session_id) {
         const c = await one(conn, 'SELECT used FROM lesson_credits WHERE tenant_id = ? AND order_item_id = ?', [tenantId, l.id]);
@@ -212,6 +213,9 @@ router.post('/orders/:id/refund', requireRole('manager'), validate(refundBody), 
         const g = await one(conn, 'SELECT initial_cents, balance_cents FROM gift_cards WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, l.gift_card_id]);
         if (g && g.balance_cents < g.initial_cents) throw conflict('A gift card sold on this order has already been spent, so it cannot be refunded');
       }
+    }
+    for (const l of lines) {
+      if (l.line_kind === 'rental' && l.contract_id) await conn.query("UPDATE rental_contracts SET status = 'cancelled', stage = NULL WHERE tenant_id = ? AND id = ? AND status = 'to_fit'", [tenantId, l.contract_id]);
     }
 
     // What the refund is worth: each line's price less its share of any discount, plus its tax. Free-of-charge (comp)

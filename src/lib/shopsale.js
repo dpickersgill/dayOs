@@ -342,6 +342,9 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
     for (let k = 0; k < a.quantity; k++) {
       const [it] = await conn.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents) VALUES (?, ?, ?, ?, ?, 'adult', 1, ?, ?, ?, ?)",
         [tenantId, orderId, a.product_id, a.kind === 'voucher' ? 'ticket' : a.kind, contact.id, a.unit, today, discEach[k], taxEach[k]]);
+      // A prepaid rental also waits in the rental shop's Ready to fit list, for the buyer (or the named renter), on the
+      // day of the first ticket in the basket (or today when there is none).
+      if (a.kind === 'rental') await rentalToFit(conn, tenantId, { personId: a.person_id || contact.id, orderId, orderItemId: it.insertId, productId: a.product_id, validOn: (q.lines || []).map((l) => l.valid_on).filter(Boolean).sort()[0] || today });
       await conn.query('INSERT INTO tickets (tenant_id, order_item_id, person_id, product_id, code, valid_from, valid_to, uses_remaining) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         [tenantId, it.insertId, contact.id, a.product_id, newCode(), today, addDays(today, a.valid_days - 1), a.uses ?? null]);
     }
@@ -360,6 +363,14 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
     [orderId, paymentIntent, [waiverNeeded.length ? `Waiver still to sign at the gate: ${waiverNeeded.join(', ')}.` : '', overLimit.length ? `Payment arrived late: ${overLimit.join(', ')} went over the daily limit.` : '', overSlots.length ? `Payment arrived late: ${overSlots.join(', ')} went over its places.` : ''].filter(Boolean).join(' ').slice(0, 300) || null, tenantId, row.id]);
   await audit(conn, { auth: { tenantId, userId: null } }, 'shop_paid', 'shop_orders', row.id, { tickets: tickets.length, order_id: orderId });
   return { orderId, tickets, waiverNeeded, giftCodes, programAdjustments };
+}
+
+/** A paid online rental as a contract waiting to be fitted (lib/rentalfit.js). */
+async function rentalToFit(conn, tenantId, { personId, orderId, orderItemId, productId, validOn }) {
+  const F = require('./rentalfit');
+  const product = await one(conn, 'SELECT id, valid_days, rental_kind FROM products WHERE tenant_id = ? AND id = ?', [tenantId, productId]);
+  const c = await F.createToFit(conn, tenantId, { personId, orderId, orderItemId, validOn, product });
+  await conn.query('UPDATE order_items SET contract_id = ? WHERE tenant_id = ? AND id = ?', [c.id, tenantId, orderItemId]);
 }
 
 /** What the guest sees for their order: only reachable with the secret link token. */
