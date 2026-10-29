@@ -120,3 +120,24 @@ export function releaseDeposit(contractId, after, { stillOut = false } = {}) {
     if (after) await after();
   });
 }
+
+/**
+ * A rental extended past the end of its card hold: let the hold go and save the card on the reader instead (the guest
+ * taps again; nothing is charged). contract: { id, deposit_cents?, first_name?, last_name? }.
+ */
+export async function switchDeposit(contract, after) {
+  const ready = await get('/rentals/deposits/ready');
+  if (!ready.ready) { toast(`The card cannot be saved now: ${ready.why}`, 'error'); return; }
+  const body = h('div', { class: 'stack deposit-step' });
+  const reader = select(ready.readers.map((r) => [String(r.id), r.label]), String(ready.readers[0].id), { 'aria-label': 'Card reader' });
+  const dlg = dialog('Switch to a saved card', body, { onClose: () => { if (after) after(); } });
+  const done = (r) => { if (r && r.status === 'saved') toast('Card saved. Now extend the rental.'); dlg.close(); };
+  clear(body).append(
+    h('p', null, 'A card hold only lasts about 2 days, so a longer rental saves the card instead. The hold is let go now, and the guest taps their card again to save it. Nothing is charged.'),
+    ready.readers.length > 1 ? h('div', { class: 'form' }, field('Card reader', reader)) : null,
+    h('div', { class: 'footer row' }, button('Not now', () => dlg.close()), button('Let go of the hold and save the card', async () => {
+      const d = await post(`/rentals/contracts/${contract.id}/deposit/switch`, { reader_id: Number(reader.value) });
+      waitForCard(body, contract, { default_deposit_cents: d.amount_cents }, ready, d, done);
+    }, { kind: 'primary' })));
+}
+

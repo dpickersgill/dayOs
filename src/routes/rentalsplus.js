@@ -10,6 +10,7 @@ const { z, validate, paramId, dateStr, dateTimeStr, normDateTime, todayIn, addDa
 const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const R = require('../lib/rentals');
+const F = require('../lib/rentalfit');
 
 const router = express.Router();
 const counter = ['counter', 'manager'];
@@ -240,6 +241,11 @@ router.post('/contracts/:id/extend', requireRole(...counter), validate(z.object(
     if (!c) throw notFound('Contract');
     if (c.status === 'returned') throw conflict('That contract is already returned');
     if (dueAt <= String(c.due_at)) throw bad('The new return time must be later than the current one');
+    // A card hold only lasts a few days. Gear due back after the hold ends would have no deposit behind it.
+    const holdEnds = await require('../lib/rentaldeposit').holdEndsLocal(conn, tenantId, id, await tzOf(tenantId));
+    if (holdEnds && dueAt > holdEnds) {
+      throw conflict(`The card hold for the deposit ends ${holdEnds.slice(0, 16)}, before the new return time. Switch the deposit to a saved card first (Switch to a saved card, then the guest taps again), then extend.`, { deposit: 'switch', hold_ends: holdEnds });
+    }
     await conn.query('UPDATE rental_contracts SET due_at = ? WHERE tenant_id = ? AND id = ?', [dueAt, tenantId, id]);
     await audit(conn, req, 'extend', 'rental_contracts', id, { from: c.due_at, to: dueAt });
   });
@@ -256,9 +262,12 @@ router.post(
     await tx(async (conn) => {
       const c = await one(conn, 'SELECT * FROM rental_contracts WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, id]);
       if (!c) throw notFound('Contract');
-      if (c.status === 'returned') throw conflict('That contract is already returned');
+      if (!['out', 'overdue'].includes(c.status)) throw conflict(c.status === 'returned' ? 'That contract is already returned' : 'Only gear that is out can be swapped. Hand the gear out first.');
       const line = await one(conn, 'SELECT * FROM rental_contract_items WHERE tenant_id = ? AND contract_id = ? AND rental_item_id = ? AND returned_at IS NULL', [tenantId, id, req.body.out_item_id]);
       if (!line) throw bad('That item is not outstanding on this contract');
+      // skis or a snowboard going out: the person who wears them has signed that their details are true
+      const wearer = req.body.replacement.person_id || line.person_id || c.person_id;
+      await F.requireSignoffs(conn, tenantId, [{ ...req.body.replacement, person_id: wearer }], c.person_id, await F.fitSettings(conn, tenantId));
       const incoming = await R.insertGear(conn, tenantId, id, [{ person_id: line.person_id ?? undefined, ...req.body.replacement }], await R.getSettings(conn, tenantId));
       await conn.query('UPDATE rental_contract_items SET returned_at = NOW(), swap_reason = ? WHERE id = ? AND tenant_id = ?', [req.body.reason ?? 'Swapped', line.id, tenantId]);
       await conn.query('UPDATE rental_items SET status = ? WHERE tenant_id = ? AND id = ?', [await R.returnStatus(conn, tenantId, req.body.out_item_id, req.body.damaged ? 'maintenance' : 'available'), tenantId, req.body.out_item_id]);

@@ -203,7 +203,11 @@ test('groups: members from a list and a parent form, gear set aside, bag labels 
   // the shop's Out now never shows set-aside bags
   assert.ok(!(await api('GET', '/rentals/contracts?status=out', { token: A.token })).body.data.some((c) => c.group_id === gid));
 
-  // the morning: no waiver yet, so the bag stays
+  // the morning: nobody has recorded how the group pays, so no bag goes out; a manager records it
+  const unpaid = await api('POST', '/rentals/groups/scan', { token: A.token, body: { code: F.contractCode(sam.contract_id) } });
+  assert.equal(unpaid.body.skipped, 'A manager must record how this group pays');
+  assert.equal((await api('PUT', `/rentals/groups/${gid}/billing`, { token: A.token, body: { note: 'Invoice to Pine School' } })).status, 200);
+  // no waiver yet, so the bag stays
   const noWaiver = await api('POST', '/rentals/groups/scan', { token: A.token, body: { code: F.contractCode(sam.contract_id) } });
   assert.equal(noWaiver.status, 200); assert.match(noWaiver.body.skipped, /waiver/);
   for (const m of [sam, tia]) assert.equal((await api('POST', `/people/${m.person_id}/waivers`, { token: A.token, body: {} })).status < 300, true);

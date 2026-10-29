@@ -222,19 +222,6 @@ async function useForm(conn, tenantId, form, choices, { orderId, userId, setting
   return { people: out, attached };
 }
 
-/**
- * A signed confirmation that counts for handing out gear on a contract: one signed at the counter for this contract,
- * a guest form for the rental day, or any signoff for the person within the shop's signoff_valid_days.
- * Track FIT's src/lib/rentalfit.js validSignoff is the shared check; this one also knows a form is filled ahead of the day.
- */
-async function signoffFor(conn, tenantId, contract, settings) {
-  const day = String(contract.valid_on instanceof Date ? contract.valid_on.toISOString() : contract.valid_on || '').slice(0, 10);
-  const days = Math.max(Number(settings.signoff_valid_days) || 1, 1);
-  return one(conn, `SELECT s.id FROM rental_signoffs s LEFT JOIN rental_forms f ON f.tenant_id = s.tenant_id AND f.id = s.form_id
-    WHERE s.tenant_id = ? AND s.person_id = ? AND (s.contract_id = ? OR (f.id IS NOT NULL AND f.rental_on = ?) OR s.signed_at >= NOW() - INTERVAL ? DAY)
-    ORDER BY s.id DESC LIMIT 1`, [tenantId, contract.person_id, contract.id, day || null, days]);
-}
-
 /** Lets go of gear set aside on a contract: the lines go, and the gear goes back on the rack. */
 async function releaseSetAside(conn, tenantId, contractId) {
   const lines = await rows(conn, 'SELECT rental_item_id FROM rental_contract_items WHERE tenant_id = ? AND contract_id = ? AND returned_at IS NULL', [tenantId, contractId]);
@@ -274,6 +261,6 @@ const parseContractCode = (code) => { const m = /^RC-?(\d{1,12})$/i.exec(String(
 
 module.exports = {
   MAX_PEOPLE, MAX_SIGNATURE_CHARS, ABILITY, ABILITY_OF_TYPE, ADULT_AGE, sha, tokenOk, orderFormLink, groupLink, walkInLink, rentalLines, ageOn, cleanPerson,
-  withoutSignatures, parsePeople, snapshot, saveDetails, personFor, candidates, closingOn, addMember, useForm, signoffFor, releaseSetAside, setAside,
+  withoutSignatures, parsePeople, snapshot, saveDetails, personFor, candidates, closingOn, addMember, useForm, releaseSetAside, setAside,
   contractCode, parseContractCode,
 };

@@ -39,6 +39,11 @@ router.post('/contracts/:id/deposit/note', requireRole(...counter), validate(z.o
 /** Takes the fees owed from the card deposit (staff confirm first; loss fees and gear still out need a manager). */
 router.post('/contracts/:id/deposit/take', requireRole(...counter), async (req, res) => res.json(await D.take(req, paramId(req))));
 
+/** A rental extended past the end of its card hold: let the hold go and save the card on the reader instead. */
+router.post('/contracts/:id/deposit/switch', requireRole(...counter), validate(z.object({ reader_id: z.number().int().positive() })), async (req, res) => {
+  res.status(201).json(await D.switchToSaved(req, paramId(req), req.body));
+});
+
 router.post('/contracts/:id/deposit/release', requireRole(...counter), async (req, res) => res.json(await D.release(req, paramId(req))));
 
 module.exports = router;

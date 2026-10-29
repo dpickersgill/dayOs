@@ -213,7 +213,9 @@ test('a form filled in the night before counts on the rental day; set-aside grou
   assert.ok(v && !v.mismatch.length, 'a form for today counts though it was signed days ago');
   // a group contract with gear set aside the night before
   const gski = await item(A, `GS-${suffix}`, 'ski', { size: '110' });
-  const [gc] = await pool.query("INSERT INTO rental_contracts (tenant_id, person_id, status, stage, valid_on, due_at, group_id) VALUES (?, ?, 'to_fit', 'set', ?, ?, 7)", [A.tid, kid, today, `${today} 16:00:00`]);
+  // the group's billing is recorded (a manager's note), so its gear can go out
+  const [grp] = await pool.query("INSERT INTO rental_groups (tenant_id, name, rental_on, billing_note, billing_at) VALUES (?, 'Gus club', ?, 'Invoice to the club', NOW())", [A.tid, today]);
+  const [gc] = await pool.query("INSERT INTO rental_contracts (tenant_id, person_id, status, stage, valid_on, due_at, group_id) VALUES (?, ?, 'to_fit', 'set', ?, ?, ?)", [A.tid, kid, today, `${today} 16:00:00`, grp.insertId]);
   await q('INSERT INTO rental_contract_items (tenant_id, contract_id, rental_item_id, person_id, din_setting, tech_name, test_result) VALUES (?, ?, ?, ?, 3, \'Tess\', \'pass\')', [A.tid, gc.insertId, gski, kid]);
   await q("UPDATE rental_items SET status = 'set_aside' WHERE id = ?", [gski]);
   assert.ok((await api('GET', '/rentals/fit/ready?q=Gus', { token: counterTok })).body.data.some((x) => x.id === gc.insertId));

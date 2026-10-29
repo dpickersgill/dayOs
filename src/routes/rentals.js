@@ -54,9 +54,10 @@ router.post(
     const { tenantId } = req.auth;
     const { person_id, order_id, items } = req.body;
     const dueAt = normDateTime(req.body.due_at);
-    const unpaid = F.unpaidCheck(req, req.body);
 
     const created = await tx(async (conn) => {
+      // a sale named here must be real, at this mountain, paid, with a rental on it; with no sale, managers only
+      const unpaid = await F.unpaidCheck(conn, req, req.body);
       if (!(await one(conn, 'SELECT id FROM people WHERE tenant_id = ? AND id = ?', [tenantId, person_id]))) throw notFound('Person');
       const tenant = await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId]);
       const season = seasonFor(todayIn(tenant.timezone));
@@ -69,6 +70,8 @@ router.post(
         }
       }
       const settings = await R.getSettings(conn, tenantId);
+      // skis or a snowboard: each person wearing them has signed that their details are true
+      await F.requireSignoffs(conn, tenantId, items, person_id, await F.fitSettings(conn, tenantId));
       const deposit = req.body.deposit_cents ?? settings.default_deposit_cents;
       let reservation = null;
       if (req.body.reservation_id) {

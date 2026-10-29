@@ -47,8 +47,11 @@ async function person(m, first, last, extra = {}) {
   const r = await api('POST', '/people', { token: m.owner, body: { first_name: first, last_name: last, ...extra } });
   is(r, 201);
   is(await api('POST', `/people/${r.body.id}/waivers`, { token: m.owner, body: {} }), 201);
+  // signed that their details are true, so skis can go out (a date of birth first: nobody signs for themselves without one)
+  is(await api('POST', '/rentals/fit/signoffs', { token: m.owner, body: { person_id: r.body.id, signer_name: `${first} ${last}`, signer_relation: 'self', signature: SIG, details: { date_of_birth: extra.date_of_birth || '1985-01-01' } } }), 201);
   return r.body.id;
 }
+const SIG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 /** Gear out the old way (a manager, with a reason, for tests: Track FIT gates the direct hand-out). */
 async function rent(m, personId, itemIds, due, extra = {}) {
   const r = await api('POST', '/rentals/contracts', { token: m.owner, body: { person_id: personId, due_at: due, deposit_cents: 0, unpaid_reason: 'test', items: itemIds.map((id) => ({ rental_item_id: id })), ...extra } });

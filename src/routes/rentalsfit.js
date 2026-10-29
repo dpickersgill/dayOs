@@ -172,8 +172,8 @@ router.post('/contracts/:id/handout', requireRole(...counter), validate(F.handou
   const { tenantId } = req.auth;
   const id = paramId(req);
   const out = await tx(async (conn) => {
-    const r = await F.handout(conn, tenantId, id, req.body);
-    await audit(conn, req, 'handout', 'rental_contracts', id, { items: req.body.items.map((i) => i.rental_item_id) });
+    const r = await F.handout(conn, tenantId, id, req.body, req);
+    await audit(conn, req, 'handout', 'rental_contracts', id, { items: req.body.items.map((i) => i.rental_item_id), ...(r.unpaid_reason ? { unpaid_reason: r.unpaid_reason } : {}) });
     return r;
   });
   res.json(out);

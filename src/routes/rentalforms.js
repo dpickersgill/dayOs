@@ -5,7 +5,7 @@
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
-const { z, validate, paramId, dateStr, todayIn, addDays, seasonFor } = require('../lib/util');
+const { z, validate, paramId, dateStr, todayIn, addDays, seasonFor, localTime } = require('../lib/util');
 const { notFound, conflict, bad, AppError } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { baseUrl } = require('../lib/baseurl');
@@ -14,10 +14,12 @@ const { esc } = require('../lib/format');
 const mailer = require('../lib/mailer');
 const R = require('../lib/rentals');
 const F = require('../lib/rentalforms');
+const FIT = require('../lib/rentalfit');
 
 const router = express.Router();
 const publicRouter = express.Router();
 const counter = requireRole('counter', 'manager');
+const managerOnly = requireRole('manager');
 const AHEAD_DAYS = 60; // how far ahead a walk-in form can be for
 const dayOf = (v) => (v ? String(v instanceof Date ? v.toISOString() : v).slice(0, 10) : null);
 
@@ -225,7 +227,8 @@ router.get('/groups/:id', counter, async (req, res) => {
   const g = await loadGroup(pool, tenantId, paramId(req));
   const day = dayOf(g.rental_on);
   const season = seasonFor(day);
-  const settings = await R.getSettings(pool, tenantId);
+  const settings = await FIT.fitSettings(pool, tenantId);
+  const tz = await tzOf(tenantId);
   const members = await rows(pool, `SELECT c.id AS contract_id, c.status, c.stage, c.due_at, c.valid_on, c.person_id, p.first_name, p.last_name, p.date_of_birth, p.email, p.phone, p.height_in, p.weight_lb, p.boot_size, p.stance, p.skier_type, p.discipline,
       rp.boot_sole_mm, rp.shoe_size, rp.skier_type AS profile_skier_type
     FROM rental_contracts c JOIN people p ON p.tenant_id = c.tenant_id AND p.id = c.person_id LEFT JOIN rental_profiles rp ON rp.tenant_id = c.tenant_id AND rp.person_id = c.person_id
@@ -235,7 +238,10 @@ router.get('/groups/:id', counter, async (req, res) => {
     m.age = F.ageOn(m.date_of_birth, day);
     m.skier_type = m.profile_skier_type || m.skier_type; delete m.profile_skier_type;
     m.details_in = Boolean(m.height_in && m.weight_lb && (m.boot_size || m.shoe_size) && m.skier_type && m.date_of_birth);
-    m.signed = Boolean(await F.signoffFor(pool, tenantId, { id: m.contract_id, person_id: m.person_id, valid_on: day }, settings));
+    // the same check the hand-out makes (details unchanged since signing), for the group's day
+    const v = await FIT.validSignoff(pool, tenantId, m.person_id, (await FIT.detailsOf(pool, tenantId, m.person_id)).details, { settings, timeZone: tz, forDay: day });
+    m.signed = Boolean(v && !v.mismatch.length);
+    m.signed_changed = Boolean(v && v.mismatch.length);
     m.waiver_signed = Boolean(await one(pool, ON_FILE, [tenantId, m.person_id, season]));
     m.gear = await rows(pool, `SELECT li.rental_item_id, li.din_setting, li.tech_name, li.test_result, li.returned_at, r.sku, r.category, r.brand, r.model, r.size, r.status AS item_status
       FROM rental_contract_items li JOIN rental_items r ON r.tenant_id = li.tenant_id AND r.id = li.rental_item_id WHERE li.tenant_id = ? AND li.contract_id = ? ORDER BY li.id`, [tenantId, m.contract_id]);
@@ -245,8 +251,11 @@ router.get('/groups/:id', counter, async (req, res) => {
   const t = await one(pool, 'SELECT slug, waiver_text FROM tenants WHERE id = ?', [tenantId]);
   const link = await F.groupLink(pool, tenantId, g.id, baseUrl(req), t.slug);
   await audit(pool, req, 'view', 'rental_groups', g.id, null);
+  const billedBy = g.billing_by ? await one(pool, 'SELECT email FROM users WHERE tenant_id = ? AND id = ?', [tenantId, g.billing_by]) : null;
+  const billing = { order_id: g.billing_order_id ? Number(g.billing_order_id) : null, note: g.billing_note || null, by: billedBy ? billedBy.email : null, at: g.billing_at ? localTime(g.billing_at, tz) : null,
+    settled: await FIT.groupBillingOk(pool, tenantId, g.id) };
   res.json({
-    group: { ...g, rental_on: day, link_token_sha: undefined }, link, waiver_link: t.waiver_text ? `${baseUrl(req)}/waiver/${t.slug}` : null, season,
+    group: { ...g, rental_on: day, link_token_sha: undefined }, link, billing, waiver_link: t.waiver_text ? `${baseUrl(req)}/waiver/${t.slug}` : null, season,
     require_signoff: settings.require_signoff === undefined ? true : Boolean(Number(settings.require_signoff)), require_binding_record: settings.require_binding_record,
     members, forms: forms.map(formRow), email_ready: mailer.enabled(),
   });
@@ -274,6 +283,34 @@ router.patch('/groups/:id', counter, validate(z.object({ ...Object.fromEntries(O
       await conn.query("UPDATE rental_contracts SET valid_on = ?, due_at = ?, group_name = ? WHERE tenant_id = ? AND group_id = ? AND status = 'to_fit'", [day, F.closingOn(addDays(day, fresh.days - 1), settings), fresh.name, tenantId, g.id]);
     }
     await audit(conn, req, 'update', 'rental_groups', g.id, b);
+  });
+  res.json({ ok: true });
+});
+
+/**
+ * How the group pays, recorded by a manager: a paid sale in Sell for the group (order_id), or a note such as "invoice
+ * to the school" with the reason. Until one is recorded, the group's gear cannot go out. Both empty clears it.
+ */
+router.put('/groups/:id/billing', managerOnly, validate(z.object({
+  order_id: z.number().int().positive().nullable().optional(),
+  note: z.string().trim().max(200).nullable().optional(),
+})), async (req, res) => {
+  const { tenantId } = req.auth;
+  const b = req.body;
+  if (b.order_id && b.note) throw bad('Record either the sale or a note, not both');
+  if (b.note !== undefined && b.note !== null && b.note !== '' && b.note.length < 3) throw bad('Say how the group pays, for example: Invoice to the school, PO 1234');
+  await tx(async (conn) => {
+    const g = await loadGroup(conn, tenantId, paramId(req), true);
+    if (b.order_id) {
+      const o = await one(conn, 'SELECT id, status FROM orders WHERE tenant_id = ? AND id = ?', [tenantId, b.order_id]);
+      if (!o) throw notFound('Sale');
+      if (o.status !== 'paid') throw conflict(`That sale is ${o.status}. Record a paid sale.`);
+    }
+    const note = b.order_id ? null : (b.note || null);
+    const cleared = !b.order_id && !note;
+    await conn.query('UPDATE rental_groups SET billing_order_id = ?, billing_note = ?, billing_by = ?, billing_at = IF(?, NULL, NOW()) WHERE tenant_id = ? AND id = ?',
+      [b.order_id || null, note, cleared ? null : req.auth.userId ?? null, cleared ? 1 : 0, tenantId, g.id]);
+    await audit(conn, req, 'billing', 'rental_groups', g.id, { order_id: b.order_id || null, note });
   });
   res.json({ ok: true });
 });
@@ -348,9 +385,13 @@ async function handOut(conn, req, c, settings, season) {
   if (c.status !== 'to_fit') return { name, skipped: c.status === 'out' ? 'Already handed out' : `Contract is ${c.status}` };
   const lines = await rows(conn, 'SELECT li.*, r.sku, r.category, r.status AS item_status FROM rental_contract_items li JOIN rental_items r ON r.tenant_id = li.tenant_id AND r.id = li.rental_item_id WHERE li.tenant_id = ? AND li.contract_id = ? AND li.returned_at IS NULL FOR UPDATE', [tenantId, c.id]);
   if (!lines.length) return { name, skipped: 'No gear set aside yet' };
+  // paid first: the group's billing (or the member's own paid sale)
+  const unpaid = await FIT.paymentProblem(conn, tenantId, c);
+  if (unpaid) return { name, skipped: unpaid };
   if (!(await one(conn, ON_FILE, [tenantId, c.person_id, season]))) return { name, skipped: 'No signed waiver for the season' };
-  const needSignoff = settings.require_signoff === undefined ? true : Boolean(Number(settings.require_signoff));
-  if (needSignoff && lines.some((l) => ['ski', 'snowboard'].includes(l.category)) && !(await F.signoffFor(conn, tenantId, c, settings))) return { name, skipped: 'Details not signed yet' };
+  // the same signoff rule as every hand-out: signed in the window (a form counts for its rental day) and unchanged since
+  const problem = await FIT.signoffProblem(conn, tenantId, lines.map((l) => ({ rental_item_id: l.rental_item_id, person_id: l.person_id || c.person_id })), c.person_id, settings);
+  if (problem) return { name, skipped: problem.signoff === 'changed' ? 'Details changed since they signed. Have them sign again.' : 'Details not signed yet' };
   for (const l of lines) {
     if (l.test_result === 'fail') return { name, skipped: `${l.sku} failed its binding test` };
     if (settings.require_binding_record && l.category === 'ski' && (l.din_setting == null || !l.tech_name)) return { name, skipped: `Record the binding setting and who set it for ${l.sku}` };
@@ -375,7 +416,7 @@ router.post('/groups/scan', counter, validate(z.object({ code: z.string().trim()
   const out = await tx(async (conn) => {
     const c = await one(conn, 'SELECT * FROM rental_contracts WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, id]);
     if (!c || !c.group_id) throw notFound('Group bag');
-    const settings = await R.getSettings(conn, tenantId);
+    const settings = await FIT.fitSettings(conn, tenantId);
     const r = await handOut(conn, req, c, settings, seasonFor(todayIn(await tzOf(tenantId))));
     if (r.out) await groupAfterHandout(conn, tenantId, c.group_id);
     return { ...r, group_id: c.group_id };
@@ -388,7 +429,7 @@ router.post('/groups/:id/handout', counter, validate(z.object({ contract_ids: z.
   const { tenantId } = req.auth;
   const out = await tx(async (conn) => {
     const g = await loadGroup(conn, tenantId, paramId(req), true);
-    const settings = await R.getSettings(conn, tenantId);
+    const settings = await FIT.fitSettings(conn, tenantId);
     const season = seasonFor(todayIn(await tzOf(tenantId)));
     const list = await rows(conn, "SELECT * FROM rental_contracts WHERE tenant_id = ? AND group_id = ? AND status = 'to_fit' ORDER BY id FOR UPDATE", [tenantId, g.id]);
     const want = req.body.contract_ids ? list.filter((c) => req.body.contract_ids.includes(c.id)) : list;

@@ -184,6 +184,7 @@ test.before(async (t) => {
   // rentals, lessons, program, incident
   D.items = [];
   for (const [sku, category, size] of [['SK-001', 'ski', '150'], ['SK-002', 'ski', '160'], ['BT-001', 'boot', '27']]) D.items.push(ok(await api('POST', '/rentals/items', { token: o, body: { sku, category, brand: 'Atomic', size } })).id);
+  ok(await api('POST', '/rentals/fit/signoffs', { token: o, body: { person_id: D.ann, signer_name: 'Ann Guest', signer_relation: 'guardian', signature: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', details: {} } }));
   ok(await api('POST', '/rentals/contracts', { token: o, body: { unpaid_reason: 'Test hand-out', person_id: D.ann, due_at: `${today}T16:30`, items: [{ rental_item_id: D.items[0] }] } }));
   D.session = ok(await api('POST', '/skischool/sessions', { token: o, body: { product_id: D.lesson, starts_at: `${today}T10:00`, ends_at: `${today}T12:00`, capacity: 4, instructor_id: D.s2 } })).id;
   ok(await api('POST', `/skischool/sessions/${D.session}/bookings`, { token: o, body: { person_id: D.ann } }));

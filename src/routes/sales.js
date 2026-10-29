@@ -191,13 +191,16 @@ router.post('/orders/:id/refund', requireRole('manager'), validate(refundBody), 
       if (lines.length !== new Set(body.item_ids).size) throw bad('Some of those lines are not on this order or are already refunded');
     }
     // Check everything first so a refused refund changes nothing.
+    // Lock this order's rentals first, so a hand-out at the counter cannot slip in between this check and the refund.
+    await rows(conn, 'SELECT id FROM rental_contracts WHERE tenant_id = ? AND order_id = ? FOR UPDATE', [tenantId, orderId]);
     for (const l of lines) {
       if (l.line_kind === 'ticket' || l.line_kind === 'activity') {
         const scanned = await one(conn, `SELECT s.id FROM scans s JOIN tickets t ON t.id = s.ticket_id AND t.tenant_id = s.tenant_id WHERE s.tenant_id = ? AND t.order_item_id = ? AND s.result = 'ok' LIMIT 1`, [tenantId, l.id]);
         if (scanned) throw conflict('A ticket on this order was already used; refund it manually');
       }
       if (l.line_kind === 'rental' && l.contract_id) {
-        const c = await one(conn, 'SELECT status FROM rental_contracts WHERE tenant_id = ? AND id = ?', [tenantId, l.contract_id]);
+        // locked, so a hand-out at the counter waits for this refund (or this refund sees the gear went out)
+        const c = await one(conn, 'SELECT status FROM rental_contracts WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, l.contract_id]);
         // A paid rental not fitted yet (no gear out) can be refunded; it leaves the Ready to fit list below.
         if (c && !['returned', 'to_fit', 'cancelled'].includes(c.status)) throw conflict('The rental gear from this order is not back yet. Check it in first, then refund.');
       }

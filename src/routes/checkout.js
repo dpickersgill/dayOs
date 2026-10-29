@@ -512,13 +512,19 @@ async function runSale(conn, req, body, { check = false } = {}) {
         const gear = ln.items || [];
         if (!gear.length) continue;
         await waiverOk(ln.participant || 'customer', personOf(ln), seasonFor(today), 'The renter');
-        if (!ln.signoff) {
-          const renter = personOf(ln);
-          const onFile = renter ? await F.detailsOf(conn, tenantId, renter) : { details: {} };
-          await F.requireSignoffs(conn, tenantId, gear, renter, await F.fitSettings(conn, tenantId)).catch(async (err) => {
+        // Every person wearing skis or a snowboard needs their own signoff. The one signed on this card is the renter's
+        // only, and it counts once it is written (checked again below after it is); it never covers anyone else.
+        const renter = personOf(ln);
+        const fs = await F.fitSettings(conn, tenantId);
+        const others = gear.filter((g) => g.person_id && g.person_id !== renter);
+        const mine = gear.filter((g) => !g.person_id || g.person_id === renter);
+        await F.requireSignoffs(conn, tenantId, others, renter, fs);
+        if (!ln.signoff && renter) {
+          const onFile = await F.detailsOf(conn, tenantId, renter);
+          await F.requireSignoffs(conn, tenantId, mine, renter, fs).catch(async (err) => {
             // a signoff in the window whose details match what was typed on the card now still counts
             if (!ln.fit) throw err;
-            const v = await F.validSignoff(conn, tenantId, renter, { ...onFile.details, ...ln.fit });
+            const v = await F.validSignoff(conn, tenantId, renter, { ...onFile.details, ...ln.fit }, { settings: fs });
             if (!v || v.mismatch.length) throw err;
           });
         }
@@ -627,6 +633,8 @@ async function runSale(conn, req, body, { check = false } = {}) {
         const [c] = await conn.query('INSERT INTO rental_contracts (tenant_id, person_id, order_id, due_at, kind, valid_on) VALUES (?, ?, ?, ?, ?, ?)', [tenantId, renter, orderId, dueAt, kind, p.validOn]);
         if (ln.signoff) await F.saveDetails(conn, tenantId, renter, ln.signoff.details);
         if (ln.signoff) await F.writeSignoff(conn, tenantId, renter, ln.signoff, { contractId: c.insertId, ip: req.ip || null, today });
+        // the details and the signoff are written now: check every wearer for real before the gear goes out
+        await F.requireSignoffs(conn, tenantId, gear, renter, fs);
         const locked = await R.insertGear(conn, tenantId, c.insertId, gear, fs);
         const ids = gear.map((g) => g.rental_item_id);
         const itemId = await item({ product_id: p.product.id, person_id: renter, contract_id: c.insertId, valid_on: p.validOn });

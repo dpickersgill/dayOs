@@ -88,6 +88,8 @@ function signDialog(name, minor, values) {
       h('div', { class: 'form' }, field('Name of the person signing', who), field('They are', rel)),
       h('div', { class: 'stack tight' }, h('span', null, 'Sign here'), pad.el, h('div', { class: 'row' }, button('Clear', () => pad.clear(), { small: true })))), async () => {
       if (who.value.trim().length < 2) throw new Error('Type the name of the person signing');
+      // with no date of birth we cannot tell a child from an adult, so nobody signs for themselves without one
+      if (rel.value === 'self' && !values.date_of_birth) throw new Error(`Add ${name}'s date of birth on the card first. A renter under 18 needs a parent or guardian to sign.`);
       const sig = pad.toDataUrl();
       if (!sig) throw new Error('Sign in the box');
       done = true;
@@ -156,7 +158,10 @@ function fittingCard({ mode, data, settings, line = null, onDone = () => {} }) {
           const got = await signDialog(name, minor(), v);
           if (!got) return;
           if (mode === 'live') {
-            await post('/rentals/fit/signoffs', { person_id: p.id, ...(c ? { contract_id: c.id } : {}), ...got, details: v });
+            clear(errEl);
+            try {
+              await post('/rentals/fit/signoffs', { person_id: p.id, ...(c ? { contract_id: c.id } : {}), ...got, details: v });
+            } catch (err) { errEl.append(errorBox(err)); return; }
             signed = { ...got, details: v, signed_at: null, via: 'counter' };
             fresh = null;
             toast('Signed');

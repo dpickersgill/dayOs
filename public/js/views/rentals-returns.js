@@ -2,8 +2,8 @@
 // Out now (search and filters), with check in, extend, swap, fees and the card deposit. Built for the 3:30 to 4:30
 // rush with a USB scanner: the scan box keeps the focus, every scan is handled in order, and one tap marks damage.
 import { get, post } from '../api.js';
-import { h, clear, isManager, table, state, input, select, field, button, toast, formDialog, dialog, val, num, fmtDateTime, label, empty, money, toCents, centsToInput } from '../ui.js';
-import { depositBadge, confirmTake, releaseDeposit, depositStep } from './rentals-deposit.js';
+import { h, clear, isManager, table, state, input, select, field, button, toast, formDialog, confirmDialog, dialog, val, num, fmtDateTime, label, empty, money, toCents, centsToInput } from '../ui.js';
+import { depositBadge, confirmTake, releaseDeposit, depositStep, switchDeposit } from './rentals-deposit.js';
 import { buyoutDialog } from './rentals-season.js';
 
 const gearName = (i) => [i.brand, i.model, i.size].filter(Boolean).join(' ');
@@ -246,7 +246,16 @@ export function collect(charge, done) {
 
 export function extend(c, done) {
   formDialog(`Extend ${who(c)}`, h('div', { class: 'form' }, field('New return time', input({ type: 'datetime-local', name: 'due', required: true, value: String(c.due_at).replace(' ', 'T').slice(0, 16) }))), async (fd) => {
-    await post(`/rentals/contracts/${c.id}/extend`, { due_at: val(fd, 'due') });
+    try {
+      await post(`/rentals/contracts/${c.id}/extend`, { due_at: val(fd, 'due') });
+    } catch (err) {
+      // the card hold ends before the new time: offer to switch the deposit to a saved card first
+      if (err.details && err.details.deposit === 'switch') {
+        confirmDialog('The card hold ends too soon', err.message, 'Switch to a saved card', () => switchDeposit(c, done));
+        return;
+      }
+      throw err;
+    }
     toast('Return time updated');
     await done();
   });

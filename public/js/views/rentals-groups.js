@@ -3,7 +3,7 @@
 // a bag label for each member. In the morning, scan a bag label to hand that bag out, or hand out the whole group at once.
 
 import { get, post, patch, put, del } from '../api.js';
-import { h, clear, state, input, select, field, button, toast, dialog, formDialog, confirmDialog, empty, table, fmtDate, label, val, todayStr } from '../ui.js';
+import { h, clear, state, input, select, field, button, toast, dialog, formDialog, confirmDialog, empty, table, fmtDate, fmtDateTime, label, val, todayStr, isManager } from '../ui.js';
 import { printDialog } from '../print.js';
 import { code128 } from '../barcode.js';
 import { sizesText, useForm } from './rentals-forms.js';
@@ -76,7 +76,7 @@ async function drawGroup(box, id) {
   const members = d.members.length ? table([
     { head: 'Member', cell: (m) => h('span', null, h('strong', null, nameOf(m)), m.age != null ? h('span', { class: 'muted' }, `, ${m.age}`) : null) },
     { head: 'Sizes', cell: (m) => h('span', { class: 'small' }, sizesText(m) || 'None yet') },
-    { head: 'Checks', cell: (m) => h('span', { class: 'row' }, yesNo(m.details_in, 'Details in', 'Details missing', 'warn'), yesNo(m.signed, 'Signed', 'Not signed', d.require_signoff ? 'bad' : 'neutral'), yesNo(m.waiver_signed, 'Waiver', 'No waiver')) },
+    { head: 'Checks', cell: (m) => h('span', { class: 'row' }, yesNo(m.details_in, 'Details in', 'Details missing', 'warn'), m.signed_changed ? state('Details changed: sign again', 'warn') : yesNo(m.signed, 'Signed', 'Not signed', d.require_signoff ? 'bad' : 'neutral'), yesNo(m.waiver_signed, 'Waiver', 'No waiver')) },
     { head: 'Gear', cell: (m) => (m.gear.length ? h('span', { class: 'small' }, m.gear.map((x) => `${x.sku} ${label(x.category)}${x.size ? ` ${x.size}` : ''}${x.din_setting != null ? ` (setting ${Number(x.din_setting)})` : ''}`).join(', ')) : h('span', { class: 'muted small' }, 'Not set aside')) },
     { head: '', actions: true, cell: (m) => (m.status === 'to_fit' ? h('span', { class: 'row' },
       button(m.gear.length ? 'Change gear' : 'Set aside gear', () => gearDialog(d, m, reload), { small: true, kind: m.gear.length ? undefined : 'primary' }),
@@ -93,7 +93,7 @@ async function drawGroup(box, id) {
       h('div', { class: 'spread' }, h('h2', null, g.name), state(...(STATUS[g.status] || [label(g.status), 'neutral']))),
       h('p', null, `${dayText(g)}${g.leader_name ? ` · Leader: ${g.leader_name}` : ''}${g.leader_phone ? ` · ${g.leader_phone}` : ''}${g.leader_email ? ` · ${g.leader_email}` : ''}`),
       g.notes ? h('p', { class: 'muted' }, g.notes) : null,
-      h('p', { class: 'small muted' }, 'Billing: take payment for the group as one sale in Sell, and note the order number here with Edit.')),
+      billingBlock(d, reload)),
     h('div', { class: 'panel stack' }, h('h3', null, 'Link for parents'),
       h('p', { class: 'small muted' }, 'Parents open it on a phone and fill in the rental form for each child: sizes, ability and a signature. Their forms show below to add to the group.'),
       h('p', { class: 'rform-url' }, d.link),
@@ -109,6 +109,43 @@ async function drawGroup(box, id) {
       ready.length ? button('Print bag labels', () => printLabels(d, ready), { small: true }) : null,
       ready.length ? button('Hand out all', () => handOutAll(d, ready, reload), { small: true, kind: 'primary' }) : null)),
     members));
+}
+
+// ---------------------------------------------------------------- billing
+/** How the group pays: a paid sale in Sell, or a manager's note (an invoice). The gear cannot go out until one is in. */
+function billingBlock(d, reload) {
+  const b = d.billing || {};
+  const by = b.by ? ` Recorded by ${b.by}${b.at ? `, ${fmtDateTime(b.at)}` : ''}.` : '';
+  const what = b.order_id ? `Paid in Sell, order #${b.order_id}.` : b.note ? `${b.note}.` : '';
+  return h('div', { class: 'group-billing stack tight' },
+    h('div', { class: 'row' }, h('strong', null, 'Billing'), b.settled ? state(b.order_id ? 'Paid' : 'Billed', 'good') : state('Not recorded', 'warn')),
+    b.settled ? h('p', { class: 'small' }, `${what}${by}`)
+      : h('p', { class: 'small', role: 'note' }, b.order_id ? `Order #${b.order_id} is no longer paid. A manager must record how this group pays.` : 'A manager must record how this group pays. Until then the gear cannot go out.'),
+    isManager() ? h('div', { class: 'row' }, button(b.settled ? 'Change billing' : 'Record billing', () => billingDialog(d, reload), { small: true, kind: b.settled ? undefined : 'primary' })) : null);
+}
+
+function billingDialog(d, done) {
+  const b = d.billing || {};
+  const how = select([['sale', 'Paid as one sale in Sell'], ['note', 'Billed another way (an invoice, a PO)']], b.note ? 'note' : 'sale', { name: 'how', 'aria-label': 'How the group pays' });
+  const order = input({ name: 'order', type: 'number', min: '1', inputmode: 'numeric', value: b.order_id || '', placeholder: 'Order number' });
+  const note = input({ name: 'note', maxlength: 200, value: b.note || '', placeholder: 'Invoice to the school, PO 1234' });
+  const orderField = field('Order number', order, 'The sale for the group, from Sales');
+  const noteField = field('How they pay', note, 'Kept on the group with your name');
+  const show = () => { orderField.hidden = how.value !== 'sale'; noteField.hidden = how.value !== 'note'; };
+  how.addEventListener('change', show);
+  show();
+  formDialog(`Billing for ${d.group.name}`, h('div', { class: 'form' }, field('How the group pays', how), orderField, noteField), async () => {
+    if (how.value === 'sale') {
+      const id = Number(order.value);
+      if (!(id > 0)) throw new Error('Enter the order number of the sale');
+      await put(`/rentals/groups/${d.group.id}/billing`, { order_id: id });
+    } else {
+      if (note.value.trim().length < 3) throw new Error('Say how the group pays, for example: Invoice to the school');
+      await put(`/rentals/groups/${d.group.id}/billing`, { note: note.value.trim() });
+    }
+    toast('Billing recorded');
+    await done();
+  }, { submitText: 'Save' });
 }
 
 // ---------------------------------------------------------------- adding members from a list

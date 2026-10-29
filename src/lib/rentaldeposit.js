@@ -27,7 +27,7 @@ const { pool, tx, rows, one } = require('../db');
 const { logFailure } = require('./jobs');
 const { AppError, bad, notFound, conflict, forbidden } = require('./errors');
 const { audit } = require('./audit');
-const { nowIn } = require('./util');
+const { nowIn, localTime } = require('./util');
 const config = require('../config');
 const stripe = require('./stripe');
 const connect = require('./connect');
@@ -91,7 +91,7 @@ async function mirror(conn, d) {
  * counter then asks GET /rentals/deposits/:id until the guest has tapped. A reader that cannot be reached is reported
  * with fallback 'note', so the counter can take a note deposit instead.
  */
-async function start(req, contractId, { reader_id: readerId, amount_cents: amount }) {
+async function start(req, contractId, { reader_id: readerId, amount_cents: amount, kind: forced = null }) {
   const { tenantId } = req.auth;
   needStripe();
   const c = await one(pool, `SELECT c.*, p.first_name, p.last_name, p.email, p.phone FROM rental_contracts c JOIN people p ON p.id = c.person_id AND p.tenant_id = c.tenant_id WHERE c.tenant_id = ? AND c.id = ?`, [tenantId, contractId]);
@@ -104,7 +104,7 @@ async function start(req, contractId, { reader_id: readerId, amount_cents: amoun
   if (!p.ok) throw new AppError(503, 'Card deposits are not set up yet. Connect Stripe under Billing first, or take a note deposit.', { fallback: 'note' });
   if ((p.account || null) !== (reader.account || null)) throw conflict('This reader belongs to a Stripe account that is no longer connected. Remove it and pair it again.');
   const tz = (await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone;
-  const kind = planFor(c, tz);
+  const kind = forced === 'saved' ? 'saved' : planFor(c, tz); // a switch from a hold always saves the card
   const acct = { account: reader.account || null };
   const key = crypto.randomUUID();
   const metadata = { tenant_id: String(tenantId), kind: 'rental_deposit', contract_id: String(contractId) };
@@ -216,7 +216,7 @@ async function letGo(d) {
   } else if (d.payment_method) {
     await stripe.tryCall(`/v1/payment_methods/${encodeURIComponent(d.payment_method)}/detach`, {}, acct); // already gone is fine
   }
-  await pool.query("UPDATE rental_deposits SET status = 'released' WHERE id = ? AND status IN ('held','saved')", [d.id]);
+  await pool.query("UPDATE rental_deposits SET status = 'released', detached_at = IF(kind = 'saved', NOW(), detached_at) WHERE id = ? AND status IN ('held','saved')", [d.id]);
   const now = await one(pool, 'SELECT * FROM rental_deposits WHERE id = ?', [d.id]);
   await mirror(pool, now);
   return now;
@@ -266,37 +266,50 @@ async function take(req, contractId) {
   const manager = ['owner', 'manager'].includes(req.auth.role);
   if (fees.some((f) => f.kind === 'loss') && !manager) throw forbidden('Charging for lost gear needs a manager');
   if (['out', 'overdue'].includes(contract.status) && !manager) throw forbidden('Gear is still out. A manager decides when to charge the card before it is back.');
+  // A saved card can be charged any amount with nobody there to tap, so a manager decides every such charge. Counter
+  // staff can only capture from a hold, and never more than is owed or than the hold.
+  if (d.kind === 'saved' && !manager) throw forbidden('Charging a saved card needs a manager. Ask a manager to confirm the fees and charge it.');
   const owed = fees.reduce((a, f) => a + Number(f.cents), 0);
   const acct = { account: d.account || null };
   const p = await connect.payee(tenantId);
+  // Claim the deposit first, so a second press of Take (or a second screen) stops here instead of taking it again.
+  const was = d.status;
+  const [claim] = await pool.query("UPDATE rental_deposits SET status = 'taking' WHERE id = ? AND status IN ('held','saved')", [d.id]);
+  if (!claim.affectedRows) throw conflict('Someone is already taking this deposit. Refresh to see the result.');
+  const restore = () => pool.query("UPDATE rental_deposits SET status = ? WHERE id = ? AND status = 'taking'", [was, d.id]);
   let amount; let ref = d.intent;
-  if (d.kind === 'hold') {
-    amount = Math.min(owed, Number(d.amount_cents));
-    const fee = p.ok && (p.account || null) === (d.account || null) ? connect.feeFor(p, amount) : 0;
-    const r = await stripe.tryCall(`/v1/payment_intents/${encodeURIComponent(d.intent)}/capture`, { amount_to_capture: amount, ...(fee ? { application_fee_amount: fee } : {}) }, { ...acct, idempotencyKey: `dep-capture-${d.id}` });
-    if (!r.ok) {
-      if (/expired|canceled|cancelled/i.test(r.error)) {
-        await pool.query("UPDATE rental_deposits SET status = 'expired', failure = ? WHERE id = ?", ['The hold ended before it was used', d.id]);
-        await mirror(pool, await rowOf(tenantId, d.id));
-        throw conflict('The card hold has ended, so nothing can be taken from it. Collect the fees another way.');
+  try {
+    if (d.kind === 'hold') {
+      amount = Math.min(owed, Number(d.amount_cents));
+      const fee = p.ok && (p.account || null) === (d.account || null) ? connect.feeFor(p, amount) : 0;
+      const r = await stripe.tryCall(`/v1/payment_intents/${encodeURIComponent(d.intent)}/capture`, { amount_to_capture: amount, ...(fee ? { application_fee_amount: fee } : {}) }, { ...acct, idempotencyKey: `dep-capture-${d.id}` });
+      if (!r.ok) {
+        if (/expired|canceled|cancelled/i.test(r.error)) {
+          await pool.query("UPDATE rental_deposits SET status = 'expired', failure = ? WHERE id = ? AND status = 'taking'", ['The hold ended before it was used', d.id]);
+          await mirror(pool, await rowOf(tenantId, d.id));
+          throw conflict('The card hold has ended, so nothing can be taken from it. Collect the fees another way.');
+        }
+        throw new AppError(502, `The card service said: ${r.error}`);
       }
-      throw new AppError(502, `The card service said: ${r.error}`);
+      d.fee = fee;
+    } else {
+      amount = owed;
+      const fee = p.ok && (p.account || null) === (d.account || null) ? connect.feeFor(p, amount) : 0;
+      const r = await stripe.tryCall('/v1/payment_intents', {
+        amount, currency: 'usd', customer: d.customer, payment_method: d.payment_method, payment_method_types: ['card'], off_session: true, confirm: true,
+        description: `Rental fees, contract ${contractId}`, metadata: { tenant_id: String(tenantId), kind: 'rental_fees', contract_id: String(contractId) }, ...(fee ? { application_fee_amount: fee } : {}),
+      }, { ...acct, idempotencyKey: `dep-charge-${d.id}-${amount}` });
+      if (!r.ok || r.json.status !== 'succeeded') {
+        const why = r.ok ? 'The bank wants the guest to confirm this charge. Ask them to pay at the counter.' : r.error;
+        await audit(pool, req, 'deposit_charge_failed', 'rental_contracts', contractId, { amount_cents: amount, why: String(why).slice(0, 200) });
+        throw new AppError(409, `The saved card was not charged: ${why}`);
+      }
+      ref = r.json.id;
+      d.fee = fee;
     }
-    d.fee = fee;
-  } else {
-    amount = owed;
-    const fee = p.ok && (p.account || null) === (d.account || null) ? connect.feeFor(p, amount) : 0;
-    const r = await stripe.tryCall('/v1/payment_intents', {
-      amount, currency: 'usd', customer: d.customer, payment_method: d.payment_method, payment_method_types: ['card'], off_session: true, confirm: true,
-      description: `Rental fees, contract ${contractId}`, metadata: { tenant_id: String(tenantId), kind: 'rental_fees', contract_id: String(contractId) }, ...(fee ? { application_fee_amount: fee } : {}),
-    }, { ...acct, idempotencyKey: `dep-charge-${d.id}-${amount}` });
-    if (!r.ok || r.json.status !== 'succeeded') {
-      const why = r.ok ? 'The bank wants the guest to confirm this charge. Ask them to pay at the counter.' : r.error;
-      await audit(pool, req, 'deposit_charge_failed', 'rental_contracts', contractId, { amount_cents: amount, why: String(why).slice(0, 200) });
-      throw new AppError(409, `The saved card was not charged: ${why}`);
-    }
-    ref = r.json.id;
-    d.fee = fee;
+  } catch (err) {
+    await restore(); // nothing was taken: the deposit is as it was (a hold that ended is already recorded as ended)
+    throw err;
   }
   const orderId = await tx(async (conn) => {
     const [o] = await conn.query("INSERT INTO orders (tenant_id, person_id, status, subtotal_cents, total_cents, user_id, channel, payment_ref) VALUES (?, ?, 'paid', ?, ?, ?, 'window', 'card')", [tenantId, contract.person_id, amount, amount, req.auth.userId ?? null]);
@@ -304,7 +317,9 @@ async function take(req, contractId) {
     await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, card_brand, card_last4, processor, processor_account, platform_fee_cents) VALUES (?, ?, 'card', ?, ?, ?, ?, 'stripe', ?, ?)",
       [tenantId, o.insertId, amount, ref, d.card_brand, d.card_last4, d.account || null, d.fee || 0]);
     let left = amount;
-    for (const f of fees) {
+    // the fees as they are now, locked: one paid another way meanwhile is not paid twice
+    const nowDue = await rows(conn, "SELECT * FROM rental_charges WHERE tenant_id = ? AND contract_id = ? AND status = 'due' AND kind <> 'deposit' ORDER BY id FOR UPDATE", [tenantId, contractId]);
+    for (const f of nowDue) {
       if (left <= 0) break;
       const cents = Number(f.cents);
       if (cents <= left) {
@@ -312,7 +327,7 @@ async function take(req, contractId) {
         left -= cents;
       } else {
         // only part of this fee is covered: the covered part is paid, the rest stays due
-        await conn.query('UPDATE rental_charges SET cents = ? WHERE tenant_id = ? AND id = ?', [cents - left, tenantId, f.id]);
+        await conn.query("UPDATE rental_charges SET cents = ? WHERE tenant_id = ? AND id = ? AND status = 'due'", [cents - left, tenantId, f.id]);
         await conn.query("INSERT INTO rental_charges (tenant_id, contract_id, kind, cents, note, status, order_id, resolved_at) VALUES (?, ?, ?, ?, ?, 'paid', ?, NOW())", [tenantId, contractId, f.kind, left, `${f.note ? `${f.note}, ` : ''}part from deposit`.slice(0, 200), o.insertId]);
         left = 0;
       }
@@ -324,7 +339,10 @@ async function take(req, contractId) {
   const now = await rowOf(tenantId, d.id);
   await mirror(pool, now);
   // a saved card is not kept once the rental is settled
-  if (d.kind === 'saved' && d.payment_method && !['out', 'overdue'].includes(contract.status)) await stripe.tryCall(`/v1/payment_methods/${encodeURIComponent(d.payment_method)}/detach`, {}, acct);
+  if (d.kind === 'saved' && d.payment_method && !['out', 'overdue'].includes(contract.status)) {
+    const det = await stripe.tryCall(`/v1/payment_methods/${encodeURIComponent(d.payment_method)}/detach`, {}, acct);
+    if (det.ok) await pool.query('UPDATE rental_deposits SET detached_at = NOW() WHERE id = ?', [d.id]);
+  }
   return { ...shape(now), order_id: orderId, owed_cents: owed, still_due_cents: owed - amount };
 }
 
@@ -336,10 +354,48 @@ async function release(req, contractId) {
   d = await settle(d);
   if (d.status === 'waiting') throw conflict('The reader is still waiting for the card. Cancel it there instead.');
   const contract = await one(pool, 'SELECT status FROM rental_contracts WHERE tenant_id = ? AND id = ?', [tenantId, contractId]);
-  if (['out', 'overdue'].includes(contract.status) && !['owner', 'manager'].includes(req.auth.role)) throw forbidden('Gear is still out. Only a manager can release the deposit now.');
+  const manager = ['owner', 'manager'].includes(req.auth.role);
+  if (['out', 'overdue'].includes(contract.status) && !manager) throw forbidden('Gear is still out. Only a manager can release the deposit now.');
+  const owed = (await dueFees(pool, tenantId, contractId)).reduce((a, f) => a + Number(f.cents), 0);
+  if (owed && !manager) throw forbidden('Fees are still owed on this rental. Take them from the deposit, or ask a manager to release it.');
   const now = await letGo(d);
-  await audit(pool, req, 'deposit_release', 'rental_contracts', contractId, { deposit: d.id, kind: d.kind, by_hand: true });
+  await audit(pool, req, 'deposit_release', 'rental_contracts', contractId, { deposit: d.id, kind: d.kind, by_hand: true, ...(owed ? { owed_cents: owed } : {}) });
   return shape(now);
+}
+
+/**
+ * When a card hold on this contract ends, as the mountain's local time ('YYYY-MM-DD HH:MM:SS'), or null with no hold.
+ * A hold still waiting for the tap is planned for the shortest window (2 days from now).
+ */
+async function holdEndsLocal(conn, tenantId, contractId, timeZone) {
+  const d = await one(conn, "SELECT status, expires_at FROM rental_deposits WHERE tenant_id = ? AND contract_id = ? AND kind = 'hold' AND status IN ('waiting','held','taking') ORDER BY id DESC LIMIT 1", [tenantId, contractId]);
+  if (!d) return null;
+  const end = d.status !== 'waiting' && d.expires_at ? String(d.expires_at) : utc(new Date(Date.now() + HOLD_HOURS.other * 3600000));
+  return localTime(end, timeZone);
+}
+
+/**
+ * Switches a card hold to a saved card, for a rental extended past the end of its hold: the reader is checked, the
+ * hold is let go, and the guest taps again to save the card (same amount noted). Nothing owed is allowed.
+ */
+async function switchToSaved(req, contractId, { reader_id: readerId }) {
+  const { tenantId } = req.auth;
+  needStripe();
+  let d = await activeFor(pool, tenantId, contractId);
+  if (!d || d.kind !== 'hold') throw conflict('This rental has no card hold to switch');
+  d = await settle(d);
+  if (d.status === 'waiting') throw conflict('The reader is still waiting for the card. Cancel it there first.');
+  if (d.status !== 'held') throw conflict('The card hold is not active, so there is nothing to switch. Start a new deposit.');
+  const c = await one(pool, 'SELECT status FROM rental_contracts WHERE tenant_id = ? AND id = ?', [tenantId, contractId]);
+  if (!['out', 'overdue'].includes(c.status)) throw conflict('Switch the deposit while the gear is out');
+  if ((await dueFees(pool, tenantId, contractId)).length) throw conflict('Fees are owed on this rental. Settle them before you switch the deposit.');
+  const reader = await one(pool, 'SELECT * FROM terminal_readers WHERE tenant_id = ? AND id = ? AND active = 1', [tenantId, readerId]);
+  if (!reader) throw new AppError(404, 'That card reader is not paired with this mountain');
+  const p = await connect.payee(tenantId);
+  if (!p.ok || (p.account || null) !== (reader.account || null)) throw conflict('This reader cannot take a card for this mountain now. Check the card reader under Billing.');
+  await letGo(d);
+  await audit(pool, req, 'deposit_release', 'rental_contracts', contractId, { deposit: d.id, kind: d.kind, switch_to: 'saved' });
+  return start(req, contractId, { reader_id: readerId, amount_cents: Number(d.amount_cents), kind: 'saved' });
 }
 
 /** When the card cannot be used: the deposit is noted on the contract, as before (the shop holds cash, an ID, a note). */
@@ -361,10 +417,13 @@ async function noteDeposit(req, contractId, amount, note) {
 /**
  * Daily: deposits still waiting on a reader after 10 minutes are asked about again; holds within a day of their end
  * while gear is still out are flagged for Out now; holds past their end are checked with Stripe and recorded as ended.
+ * Then what was left behind is cleaned up: a hold on a rental that is back with nothing owed is let go (one tapped
+ * after the return, or one nobody released), and a saved card on a rental back for 7 days with nothing owed is
+ * detached (one charged while the gear was out, or with fees paid another way). Each is audited.
  */
 async function sweep() {
   if (!stripe.enabled()) return { checked: 0 };
-  const out = { checked: 0, warned: 0, expired: 0 };
+  const out = { checked: 0, warned: 0, expired: 0, released: 0, detached: 0 };
   for (const r of await rows(pool, "SELECT * FROM rental_deposits WHERE status = 'waiting' AND created_at < NOW() - INTERVAL 10 MINUTE ORDER BY id LIMIT 500")) {
     out.checked += 1;
     try { await settle(r); } catch (err) { logFailure({ job: 'rental_deposits', tenant: r.tenant_id, deposit: r.id, message: err.message }); }
@@ -383,7 +442,30 @@ async function sweep() {
       }
     } catch (err) { logFailure({ job: 'rental_deposits', tenant: d.tenant_id, deposit: d.id, message: err.message }); }
   }
+  const nothingOwed = `c.status = 'returned' AND NOT EXISTS (SELECT 1 FROM rental_charges f WHERE f.tenant_id = d.tenant_id AND f.contract_id = d.contract_id AND f.status = 'due' AND f.kind <> 'deposit')`;
+  for (const d of await rows(pool, `SELECT d.* FROM rental_deposits d JOIN rental_contracts c ON c.id = d.contract_id AND c.tenant_id = d.tenant_id
+    WHERE d.kind = 'hold' AND d.status = 'held' AND ${nothingOwed} ORDER BY d.id LIMIT 500`)) {
+    try {
+      await letGo(d);
+      await audit(pool, robot(d.tenant_id), 'deposit_release', 'rental_contracts', d.contract_id, { deposit: d.id, kind: d.kind, by: 'daily job', why: 'gear back, nothing owed' });
+      out.released += 1;
+    } catch (err) { logFailure({ job: 'rental_deposits', tenant: d.tenant_id, deposit: d.id, message: err.message }); }
+  }
+  for (const d of await rows(pool, `SELECT d.* FROM rental_deposits d JOIN rental_contracts c ON c.id = d.contract_id AND c.tenant_id = d.tenant_id
+    WHERE d.kind = 'saved' AND d.status IN ('saved','charged') AND d.payment_method IS NOT NULL AND d.detached_at IS NULL
+      AND c.checked_in_at < NOW() - INTERVAL 7 DAY AND ${nothingOwed} ORDER BY d.id LIMIT 500`)) {
+    try {
+      if (d.status === 'saved') await letGo(d);
+      else {
+        const r = await stripe.tryCall(`/v1/payment_methods/${encodeURIComponent(d.payment_method)}/detach`, {}, { account: d.account || null });
+        if (!r.ok && !/no such|not attached|detached/i.test(r.error)) throw new Error(r.error);
+        await pool.query('UPDATE rental_deposits SET detached_at = NOW() WHERE id = ?', [d.id]);
+      }
+      await audit(pool, robot(d.tenant_id), 'deposit_card_detached', 'rental_contracts', d.contract_id, { deposit: d.id, by: 'daily job', why: 'back 7 days, nothing owed' });
+      out.detached += 1;
+    } catch (err) { logFailure({ job: 'rental_deposits', tenant: d.tenant_id, deposit: d.id, message: err.message }); }
+  }
   return out;
 }
 
-module.exports = { HOLD_SAFE_HOURS, HOLD_HOURS, planFor, readiness, start, settle, simulate, cancel, afterReturn, take, release, noteDeposit, sweep, shape, rowOf, testMode };
+module.exports = { HOLD_SAFE_HOURS, HOLD_HOURS, planFor, readiness, start, settle, simulate, cancel, afterReturn, take, release, noteDeposit, sweep, shape, rowOf, testMode, holdEndsLocal, switchToSaved };

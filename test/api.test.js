@@ -168,6 +168,11 @@ test('rentals: waiver required, no double checkout, damage goes to maintenance',
 
   assert.equal((await api('POST', `/people/${ctx.ada}/waivers`, { token: A.token, body: {} })).status, 201);
 
+  // skis also need Ada's signed confirmation of her details
+  const unsigned = await api('POST', '/rentals/contracts', { token: A.token, body: { unpaid_reason: 'Test hand-out', person_id: ctx.ada, due_at: due, items: [{ rental_item_id: skiId, din_setting: 6.5 }] } });
+  assert.equal(unsigned.status, 409);
+  assert.equal((await api('POST', '/rentals/fit/signoffs', { token: A.token, body: { person_id: ctx.ada, signer_name: 'Ada Skier', signer_relation: 'self', signature: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', details: { date_of_birth: '1980-01-01' } } })).status, 201);
+
   const out = await api('POST', '/rentals/contracts', { token: A.token, body: { unpaid_reason: 'Test hand-out', person_id: ctx.ada, due_at: due, items: [{ rental_item_id: skiId, din_setting: 6.5 }, { rental_item_id: bootId }] } });
   assert.equal(out.status, 201, JSON.stringify(out.body));
   const twice = await api('POST', '/rentals/contracts', { token: A.token, body: { unpaid_reason: 'Test hand-out', person_id: ctx.ada, due_at: due, items: [{ rental_item_id: skiId }] } });

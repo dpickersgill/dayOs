@@ -37,6 +37,12 @@ test.before(async () => {
   B = await mountain(`rent-b-${suffix}`);
   mum = (await api('POST', '/people', { token: A.token, body: { first_name: 'Mia', last_name: 'Renter' } })).body.id;
   kid = (await api('POST', '/people', { token: A.token, body: { first_name: 'Kit', last_name: 'Renter' } })).body.id;
+  // both have signed that their details are true, so skis can go out (Mia for herself, a parent for Kit)
+  const SIG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+  for (const [pid, rel, details] of [[mum, 'self', { date_of_birth: '1984-02-02' }], [kid, 'parent', {}]]) {
+    const r = await api('POST', '/rentals/fit/signoffs', { token: A.token, body: { person_id: pid, signer_name: 'Mia Renter', signer_relation: rel, signature: SIG, details } });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+  }
 });
 test.after(async () => { await new Promise((r) => server.close(r)); await pool.end(); });
 

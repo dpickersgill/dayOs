@@ -111,12 +111,14 @@ function mismatch(signed, now) {
 /**
  * The renter's signed confirmation that still counts: signed within the shop's signoff_valid_days (on the mountain's
  * clock), at the counter or on the guest rental form, with details that match the card now. Returns
- * { signoff, mismatch: [] } for the newest one in the window, or null when none was signed in the window.
+ * { signoff, mismatch: [] } for the newest one in the window, or null when none was signed in the window. A signoff at
+ * the counter counts from the day it was signed; a form signoff counts for the rental day on its form.
  */
-async function validSignoff(conn, tenantId, personId, details = null, { settings = null, timeZone = null } = {}) {
+async function validSignoff(conn, tenantId, personId, details = null, { settings = null, timeZone = null, forDay = null } = {}) {
   const s = settings || await fitSettings(conn, tenantId);
   const tz = timeZone || (await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone;
-  const today = todayIn(tz);
+  // forDay: the rental day being checked (a group page the night before looks at the group's day). Default today.
+  const today = forDay && forDay > todayIn(tz) ? forDay : todayIn(tz);
   const fromDay = addDays(today, -(Math.max(s.signoff_valid_days, 1) - 1));
   const from = dayRange(tz, fromDay)[0];
   // A guest rental form is often filled in the night before: it counts for the day it was filled in for.
@@ -141,7 +143,10 @@ async function writeSignoff(conn, tenantId, personId, s, { contractId = null, ip
   const p = await one(conn, 'SELECT date_of_birth FROM people WHERE tenant_id = ? AND id = ?', [tenantId, personId]);
   if (!p) throw notFound('Person');
   const dob = s.details.date_of_birth || p.date_of_birth;
-  const age = today ? ageOn(dob, today) : null;
+  // With no date of birth anywhere we cannot tell a child from an adult, so nobody signs for themselves without one.
+  if (s.signer_relation === 'self' && !dob) throw bad('Add the date of birth first. A renter under 18 needs a parent or guardian to sign.', { field: 'date_of_birth' });
+  const day = today || todayIn((await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone);
+  const age = ageOn(dob, day);
   if (age !== null && age < 18 && s.signer_relation === 'self') throw bad('This renter is under 18. A parent or guardian signs for them.');
   const [r] = await conn.query("INSERT INTO rental_signoffs (tenant_id, person_id, contract_id, signer_name, signer_relation, details, signature, via, ip) VALUES (?, ?, ?, ?, ?, ?, ?, 'counter', ?)",
     [tenantId, personId, contractId, s.signer_name, s.signer_relation, JSON.stringify(s.details), s.signature, ip]);
@@ -199,24 +204,33 @@ async function createToFit(conn, tenantId, { personId, orderId = null, orderItem
  * wearing them needs a signoff in the window whose details match what is on file now. Throws a conflict naming who.
  */
 async function requireSignoffs(conn, tenantId, gear, defaultPersonId, settings) {
-  if (!settings.require_signoff) return;
+  const p = await signoffProblem(conn, tenantId, gear, defaultPersonId, settings);
+  if (p) throw conflict(p.message, { person_id: p.person_id, signoff: p.signoff });
+}
+
+/** The same check, returning the first problem ({ message, person_id, signoff }) instead of throwing, or null. */
+async function signoffProblem(conn, tenantId, gear, defaultPersonId, settings, { forDay = null } = {}) {
+  if (!settings.require_signoff) return null;
   const ids = gear.map((g) => g.rental_item_id);
-  if (!ids.length) return;
+  if (!ids.length) return null;
   const cats = new Map((await rows(conn, 'SELECT id, category FROM rental_items WHERE tenant_id = ? AND id IN (?)', [tenantId, ids])).map((r) => [r.id, r.category]));
   const who = [...new Set(gear.filter((g) => NEEDS_SIGNOFF.includes(cats.get(g.rental_item_id))).map((g) => g.person_id || defaultPersonId))];
   for (const pid of who) {
     const { person, details } = await detailsOf(conn, tenantId, pid);
-    const v = await validSignoff(conn, tenantId, pid, details, { settings });
+    const v = await validSignoff(conn, tenantId, pid, details, { settings, forDay });
     const name = `${person.first_name} ${person.last_name}`;
-    if (!v) throw conflict(`${name} has not signed that their details are true. Have them sign on the fitting card first.`, { person_id: pid, signoff: 'missing' });
-    if (v.mismatch.length) throw conflict(`${name}'s details changed since they signed (${v.mismatch.map((k) => k.replace(/_/g, ' ')).join(', ')}). Have them sign again.`, { person_id: pid, signoff: 'changed' });
+    if (!v) return { message: `${name} has not signed that their details are true. Have them sign on the fitting card first.`, person_id: pid, signoff: 'missing' };
+    if (v.mismatch.length) return { message: `${name}'s details changed since they signed (${v.mismatch.map((k) => k.replace(/_/g, ' ')).join(', ')}). Have them sign again.`, person_id: pid, signoff: 'changed' };
   }
+  return null;
 }
 
 const handoutSchema = z.object({
   items: z.array(R.gearLine).max(60), // empty is fine when gear was set aside on the contract (a group, the night before)
   due_at: z.string().regex(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/).optional(),
   deposit_cents: z.number().int().min(0).max(1_000_000).optional(),
+  // a rental with no paid sale behind it: managers only, and they say why
+  unpaid_reason: z.string().max(200).optional(),
 });
 
 /**
@@ -224,10 +238,14 @@ const handoutSchema = z.object({
  * gear goes rented and the contract goes out. A note deposit (the shop's default, or what staff typed) is recorded as a
  * deposit charge, as before. Call inside a transaction. Returns the contract's new state.
  */
-async function handout(conn, tenantId, contractId, body) {
+async function handout(conn, tenantId, contractId, body, req = null) {
   const c = await one(conn, 'SELECT * FROM rental_contracts WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, contractId]);
   if (!c) throw notFound('Contract');
   if (c.status !== 'to_fit') throw conflict(c.status === 'out' ? 'That gear is already out' : `That rental is ${c.status.replace('_', ' ')}`);
+  // Paid first: the sale behind this rental (still paid, its rental line not refunded), or for a group the group's
+  // billing a manager recorded. With neither, counter staff are refused and a manager says why.
+  const unpaid = await paymentProblem(conn, tenantId, c) ? await unpaidCheck(conn, req, { unpaid_reason: body.unpaid_reason }, { group: Boolean(c.group_id) }) : null;
+  if (unpaid) await conn.query('UPDATE rental_contracts SET unpaid_reason = ?, unpaid_by = ? WHERE tenant_id = ? AND id = ?', [unpaid, (req && req.auth.userId) ?? null, tenantId, contractId]);
   const tenant = await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId]);
   const season = seasonFor(todayIn(tenant.timezone));
   const everyone = [...new Set([c.person_id, ...body.items.map((i) => i.person_id).filter(Boolean), ...(await rows(conn, 'SELECT person_id FROM rental_contract_items WHERE tenant_id = ? AND contract_id = ? AND returned_at IS NULL AND person_id IS NOT NULL', [tenantId, contractId])).map((r) => r.person_id)])];
@@ -267,14 +285,55 @@ async function handout(conn, tenantId, contractId, body) {
   if (deposit > 0) await conn.query("INSERT INTO rental_charges (tenant_id, contract_id, kind, cents, note) VALUES (?, ?, 'deposit', ?, 'Deposit held')", [tenantId, contractId, deposit]);
   // Signoffs made at the counter before the gear went out now point at this contract.
   await conn.query('UPDATE rental_signoffs SET contract_id = ? WHERE tenant_id = ? AND person_id IN (?) AND contract_id IS NULL AND via = \'counter\' AND signed_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)', [contractId, tenantId, everyone]);
-  return { id: contractId, status: 'out', due_at: dueAt, deposit_cents: deposit };
+  return { id: contractId, status: 'out', due_at: dueAt, deposit_cents: deposit, ...(unpaid ? { unpaid_reason: unpaid } : {}) };
 }
 
-/** Handing out gear with nothing paid: counter staff are sent to Sell; a manager can do it with a reason, kept on the contract. */
-function unpaidCheck(req, body) {
-  if (body.order_id) return null;
-  const managerish = ['owner', 'manager'].includes(req.auth.role);
-  if (!managerish) throw forbidden('Sell the rental first. A manager can hand out gear without a sale.');
+/**
+ * Why a sale does not pay for a rental, or null when it does: it must be at this mountain, still paid, and have a
+ * rental line that is not refunded (the contract's own line when it has one).
+ */
+async function orderProblem(conn, tenantId, orderId, orderItemId = null) {
+  const o = await one(conn, 'SELECT id, status FROM orders WHERE tenant_id = ? AND id = ?', [tenantId, orderId]);
+  if (!o) return 'That sale was not found at this mountain. Check the order number.';
+  if (o.status !== 'paid') return `That sale is ${o.status}, so it does not pay for a rental.`;
+  const line = await one(conn, `SELECT id FROM order_items WHERE tenant_id = ? AND order_id = ? AND line_kind = 'rental' AND refunded_at IS NULL${orderItemId ? ' AND id = ?' : ''} LIMIT 1`,
+    orderItemId ? [tenantId, orderId, orderItemId] : [tenantId, orderId]);
+  if (!line) return orderItemId ? 'The rental on that sale was refunded.' : 'That sale has no rental on it that is still paid.';
+  return null;
+}
+
+/** Whether a group's billing is settled: a paid sale recorded for the group, or a manager's note (an invoice). */
+async function groupBillingOk(conn, tenantId, groupId) {
+  const g = await one(conn, 'SELECT billing_order_id, billing_note FROM rental_groups WHERE tenant_id = ? AND id = ?', [tenantId, groupId]);
+  if (!g) return false;
+  if (g.billing_note) return true;
+  if (g.billing_order_id) return Boolean(await one(conn, "SELECT id FROM orders WHERE tenant_id = ? AND id = ? AND status = 'paid'", [tenantId, g.billing_order_id]));
+  return false;
+}
+
+const GROUP_BILLING = 'A manager must record how this group pays';
+
+/** Why a contract's gear is not paid for (a message), or null when it is: its own paid sale, or its group's billing. */
+async function paymentProblem(conn, tenantId, c) {
+  if (c.order_id && !(await orderProblem(conn, tenantId, c.order_id, c.order_item_id || null))) return null;
+  if (c.group_id && await groupBillingOk(conn, tenantId, c.group_id)) return null;
+  if (c.group_id) return GROUP_BILLING;
+  return c.order_id ? await orderProblem(conn, tenantId, c.order_id, c.order_item_id || null) : 'Nothing has been paid for this rental.';
+}
+
+/**
+ * Handing out gear: with an order_id the sale must be real and paid (orderProblem), for every caller. With nothing paid,
+ * counter staff are sent to Sell; a manager can do it with a reason, kept on the contract (unpaid_reason, unpaid_by).
+ * Returns the reason to keep, or null when the sale pays for it. Call inside the transaction.
+ */
+async function unpaidCheck(conn, req, body, { group = false } = {}) {
+  if (body.order_id) {
+    const why = await orderProblem(conn, req.auth.tenantId, body.order_id);
+    if (why) throw conflict(why);
+    return null;
+  }
+  const managerish = req && ['owner', 'manager'].includes(req.auth.role);
+  if (!managerish) throw forbidden(group ? `${GROUP_BILLING}. Counter staff cannot hand out this gear until then.` : 'Sell the rental first. A manager can hand out gear without a sale.');
   const reason = String(body.unpaid_reason || '').trim();
   if (reason.length < 3) throw bad('Say why this gear goes out without a sale');
   return reason.slice(0, 200);
@@ -282,5 +341,6 @@ function unpaidCheck(req, body) {
 
 module.exports = {
   ABILITY, ABILITY_HELP, STAGES, NEEDS_SIGNOFF, nextStage, typeOf, ageOn, fitSettings, dueFor, detailsSchema, detailsOf, saveDetails,
-  mismatch, validSignoff, signoffSchema, writeSignoff, suggestBinding, createToFit, requireSignoffs, handoutSchema, handout, unpaidCheck, nowIn,
+  mismatch, validSignoff, signoffSchema, writeSignoff, suggestBinding, createToFit, requireSignoffs, signoffProblem, handoutSchema, handout, unpaidCheck, nowIn,
+  orderProblem, groupBillingOk, paymentProblem, GROUP_BILLING,
 };
