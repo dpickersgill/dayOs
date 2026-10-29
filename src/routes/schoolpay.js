@@ -200,13 +200,14 @@ router.get('/pay/mine', school, async (req, res) => {
   const [g] = P.byInstructor(lines);
   // The season so far: from the start of the season (August 1, as seasonFor counts it) to today.
   const season = seasonFor(today); const seasonStart = `${String(season).slice(0, 4)}-08-01`;
-  const all = await P.lines(pool, t, { from: seasonStart < today ? seasonStart : today, to: today, staffId });
+  const seasonEnd = to > today ? to : today; // the season to the end of the week shown, so booked lessons ahead count too
+  const all = await P.lines(pool, t, { from: seasonStart, to: seasonEnd, staffId });
   const [sg] = P.byInstructor(all.lines);
   const exported = new Set((await rows(pool, 'SELECT line_key FROM payroll_items WHERE tenant_id = ? AND staff_id = ?', [t, staffId])).map((x) => x.line_key));
   res.json({ from, to, pay_mode: settings.pay_mode, lineup_paid: Boolean(settings.lineup_paid),
     lines: lines.map((l) => ({ ...l, paid: exported.has(l.key) })),
     total_cents: g ? g.pay_cents : 0, tips_cents: g ? g.tips_cents : 0, minutes: g ? g.minutes : 0,
-    season: { from: seasonStart, total_cents: sg ? sg.pay_cents : 0, tips_cents: sg ? sg.tips_cents : 0, minutes: sg ? sg.minutes : 0 } });
+    season: { from: seasonStart, to: seasonEnd, total_cents: sg ? sg.pay_cents : 0, tips_cents: sg ? sg.tips_cents : 0, minutes: sg ? sg.minutes : 0 } });
 });
 
 // "Ask a question" about a pay line: an email to the school's managers with the line in it.
@@ -649,7 +650,7 @@ async function familyView(t, r) {
   const st = PR.parseStudents(r);
   const ins = r.staff_id ? await PR.publicInstructor(pool, t.id, r.staff_id) || await one(pool, 'SELECT p.first_name, p.last_name, NULL AS display_name FROM staff s JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE s.tenant_id = ? AND s.id = ?', [t.id, r.staff_id]) : null;
   const others = r.status === 'offered' ? await PR.freeInstructors(pool, t.id, { discipline: r.discipline, levelMax: Math.max(...st.map((x) => Number(x.level) || 1)), startsAt: r.starts_at, minutes: r.minutes, exclude: PR.ids(r.declined_ids) }) : [];
-  return { mountain: t.name, phone: t.phone, reference: r.reference, status: r.status, starts_at: r.starts_at, minutes: r.minutes, discipline: r.discipline,
+  return { mountain: t.name, phone: t.phone, timezone: t.timezone, reference: r.reference, status: r.status, starts_at: r.starts_at, minutes: r.minutes, discipline: r.discipline,
     instructor: ins ? PR.shortName(ins) : null, any_instructor: !r.staff_id, students: st.map((s) => ({ first_name: s.first_name, level: s.level })),
     amount_cents: r.amount_cents, refund_cents: r.refund_cents, pay_at_desk: Boolean(r.pay_at_desk), deadline_at: r.deadline_at ? `${String(r.deadline_at).replace(' ', 'T')}Z` : null,
     choices: others.map(publicIns), booked_reference: r.status === 'accepted' ? r.reference : null };

@@ -17,7 +17,7 @@ const ES = { 'Private lessons': 'Clases privadas', 'Book a private lesson': 'Res
   'First name': 'Nombre', 'Last name': 'Apellido', 'Date of birth': 'Fecha de nacimiento', 'Level': 'Nivel', 'Allergies (optional)': 'Alergias (opcional)', 'Medical notes (optional)': 'Notas médicas (opcional)',
   'Who is booking?': '¿Quién reserva?', 'Email': 'Correo', 'Phone': 'Teléfono', 'Continue to payment': 'Continuar al pago', 'Send request': 'Enviar solicitud', 'Add another student': 'Agregar otro alumno',
   'Something went wrong. Please try again or call the ski school.': 'Algo salió mal. Inténtalo de nuevo o llama a la escuela de esquí.', 'Not sure of the level?': '¿No sabes el nivel?', 'Find my level': 'Encontrar mi nivel',
-  'Sex': 'Sexo', 'Female': 'Femenino', 'Male': 'Masculino', 'Other': 'Otro', 'Remove': 'Quitar', 'Anything the instructor should know? (optional)': '¿Algo que el instructor deba saber? (opcional)', 'Total': 'Total' };
+  'Sex': 'Sexo', 'Female': 'Femenino', 'Male': 'Masculino', 'Other': 'Otro', 'Remove': 'Quitar', 'Anything the instructor should know? (optional)': '¿Algo que el instructor deba saber? (opcional)', 'Total': 'Total', 'Your details': 'Tus datos' };
 let LANG = (navigator.language || '').toLowerCase().startsWith('es') ? 'es' : 'en';
 try { const saved = localStorage.getItem('shop-lang'); if (saved === 'en' || saved === 'es') LANG = saved; } catch (_) { /* private mode */ }
 const T = (en) => (LANG === 'es' && ES[en]) || en;
@@ -55,7 +55,7 @@ async function main() {
   const hero = h('header', { class: 'hero' }, h('div', { class: 'hero-in' },
     h('span', { class: 'eyebrow' }, T('Private lessons')),
     h('h1', null, page.mountain),
-    h('p', { class: 'sub' }, `Pick your instructor and a time. ${page.pay_online ? 'You pay now, and' : 'You pay at the desk, and'} the instructor has ${page.accept_minutes >= 120 ? `${Math.round(page.accept_minutes / 60)} hours` : `${page.accept_minutes} minutes`} to say yes. If they cannot, ${page.decline === 'refund' ? 'you get your money back in full.' : 'you can pick another instructor or get your money back in full.'}`),
+    h('p', { class: 'sub' }, `Pick your instructor and a time. ${page.pay_online ? 'You pay now, and' : 'You pay at the desk, and'} the instructor has ${page.accept_minutes >= 120 ? `${Math.round(page.accept_minutes / 60)} hours` : `${page.accept_minutes} minutes`} to say yes. If they cannot, ${page.decline === 'refund' && page.pay_online ? 'you get your money back in full.' : page.pay_online ? 'you can pick another instructor or get your money back in full.' : 'you can pick another instructor.'}`),
     h('div', { class: 'chips-row' },
       h('button', { type: 'button', class: 'btn link lang', lang: LANG === 'es' ? 'en' : 'es', onclick: () => { try { localStorage.setItem('shop-lang', LANG === 'es' ? 'en' : 'es'); } catch (_) { /* ignore */ } location.reload(); } }, LANG === 'es' ? 'English' : 'Español'),
       h('span', { class: 'trust' }, page.pay_online ? 'Secure card payment' : 'Pay at the ski school desk'),
@@ -175,7 +175,7 @@ async function main() {
     const send = h('button', { type: 'submit', class: 'btn primary big' }, page.pay_online ? T('Continue to payment') : T('Send request'));
     totalEl = h('div', { class: 'total' });
     const form = h('form', { class: 'stack', novalidate: true },
-      h('div', { class: 'card summary' }, h('strong', null, `${dayLong(st.day)}, ${clock(st.time)}`), h('span', null, `${lengthWords(st.offer.minutes)} ${DISC[st.discipline]} private with ${ins}`), st.offer.meeting_place ? h('span', { class: 'small' }, `Meet at ${st.offer.meeting_place}`) : null),
+      h('div', { class: 'card summary' }, h('strong', null, `${dayLong(st.day)}, ${clock(st.time)}`), h('span', null, `${lengthWords(st.offer.minutes)} ${DISC[st.discipline].toLowerCase()} private with ${ins}`), st.offer.meeting_place ? h('span', { class: 'small' }, `Meet at ${st.offer.meeting_place}`) : null),
       ...students.map((_, i) => studentBlock(i)),
       students.length < st.offer.max_students ? h('button', { type: 'button', class: 'btn', onclick: () => { students.push({}); drawWho(); } }, `${T('Add another student')} (+${money(st.offer.extra_student_cents)})`) : null,
       h('fieldset', { class: 'student' }, h('legend', null, T('Who is booking?')),
@@ -211,7 +211,7 @@ async function main() {
         clear(root); statusPage(r.token);
       } catch (ex) { say(ex.message); send.disabled = false; }
     });
-    clear(who).append(h('h2', { id: 'p-who' }, T('Who is taking the lesson?')), form);
+    clear(who).append(h('h2', { id: 'p-who' }, T('Your details')), form);
     drawTotal();
   }
 
@@ -235,9 +235,9 @@ async function statusPage(token) {
   const kids = r.students.map((s) => s.first_name).join(' and ');
   const head = { awaiting_payment: params.get('cancelled') ? 'Payment canceled. Nothing was booked.' : 'Waiting for your payment', waiting: r.instructor ? `Waiting for ${r.instructor} to say yes` : 'Waiting for an instructor to say yes',
     offered: 'Please pick another instructor', accepted: 'Your private lesson is booked', refunded: 'Refunded', declined: 'No instructor was free', cancelled: 'Canceled', expired: 'Not booked' }[r.status] || r.status;
-  put(box, h('span', { class: `status ${r.status === 'accepted' ? 'ok' : ['refunded', 'declined', 'cancelled', 'expired'].includes(r.status) ? 'bad' : ''}` }, head),
+  put(box, h('p', { class: 'eyebrow muted' }, r.mountain), h('span', { class: `status ${r.status === 'accepted' ? 'ok' : ['refunded', 'declined', 'cancelled', 'expired'].includes(r.status) ? 'bad' : ''}` }, head),
     h('h1', null, kids), h('p', null, when), h('p', { class: 'reference' }, r.reference),
-    r.status === 'waiting' && r.deadline_at ? h('p', { class: 'muted' }, `You will hear back by ${new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(r.deadline_at))}, by email${r.pay_at_desk ? '' : '. If they cannot, your money comes back in full'}.`) : null,
+    r.status === 'waiting' && r.deadline_at ? h('p', { class: 'muted' }, `You will hear back by ${new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZone: r.timezone || undefined }).format(new Date(r.deadline_at))}, by email${r.pay_at_desk ? '' : '. If they cannot, your money comes back in full'}.`) : null,
     r.status === 'accepted' ? h('p', null, `${r.instructor} will teach ${kids}. ${r.pay_at_desk ? 'Please pay at the ski school desk before the lesson.' : 'You are all paid.'} To cancel, use the booking page with your reference and email.`) : null,
     r.status === 'refunded' ? h('p', null, `${money(r.refund_cents || r.amount_cents)} is going back to your card. It can take 5 to 10 days to show.`) : null);
   const list = h('div', { class: 'inst-cards' });

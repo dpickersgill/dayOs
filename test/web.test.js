@@ -2112,12 +2112,14 @@ const addD = (d, n) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.ge
 test('school: every tab renders for managers, counter staff and instructors, and the dialogs open', skip(), async () => {
   await closeOverlays();
   const owner = await renderView('school', 'owner', T.owner);
-  assert.deepEqual([...owner.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests', 'Instructor hours']);
+  assert.deepEqual([...owner.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')).slice(0, 4), ['Today', 'Lessons', 'Online requests', 'Instructor hours']); // round 2 tracks add theirs after
+  assert.ok(['Privates', 'Instructor pay', 'Payroll'].every((k) => [...owner.querySelectorAll('[role=tab]')].some((t) => t.textContent === k)), 'the pay tabs');
   await exercise(owner, 'school (owner)');
   const counter = await renderView('school', 'counter', T.counter);
-  assert.deepEqual([...counter.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests']);
+  assert.deepEqual([...counter.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')).slice(0, 3), ['Today', 'Lessons', 'Online requests']);
+  assert.ok(![...counter.querySelectorAll('[role=tab]')].some((t) => t.textContent === 'Payroll'), 'no payroll for the desk');
   const ins = await renderView('school', 'instructor', T.instructor, { staff_id: D.s2 });
-  assert.deepEqual([...ins.querySelectorAll('[role=tab]')].map((t) => t.textContent), ['Today', 'Lessons']);
+  assert.deepEqual([...ins.querySelectorAll('[role=tab]')].map((t) => t.textContent).slice(0, 2), ['Today', 'Lessons']);
   await exercise(ins, 'school (instructor)');
   await closeOverlays();
 });

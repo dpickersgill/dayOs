@@ -14,7 +14,7 @@
 
 /* ---- start times */
 .time-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
-.time-grid .pill { min-height: 48px; }
+.time-grid .pill { min-height: 48px; padding: 0 8px; white-space: nowrap; }
 .time-grid .empty-day { grid-column: 1 / -1; }
 .legend { display: block; }
 .done .inst-cards { width: 100%; }

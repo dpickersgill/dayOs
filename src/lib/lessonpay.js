@@ -149,9 +149,12 @@ async function lines(db, tenantId, { from, to, staffId = null, tipsMode = 'lesso
     out.push({ key: `program:${m.id}`, staff_id: m.staff_id, kind: 'program', day, starts_at: m.starts_at, ends_at: m.ends_at, title: m.program, program_session_id: m.id, minutes, cents, parts, words: wordsOf(parts), note: notes.join(' ') || null });
   }
 
-  // ---- clocked time, one line per day
+  // ---- clocked time, one line per day, for the instructors who teach in this range (the time clock is shared with
+  // every other department, whose hours are paid elsewhere)
+  const teachers = new Set([...lessons.map((l) => l.instructor_id), ...meetings.map((m) => m.staff_id)]);
   for (const [k, minutes] of clocked) {
     const [sid, day] = k.split('|'); const staff = Number(sid);
+    if (!teachers.has(staff) || minutes < 1) continue;
     const hr = rateFrom(rates, staff, 'hourly', day);
     const cents = hr === null ? 0 : prorate(hr, minutes);
     out.push({ key: `clock:${day}`, staff_id: staff, kind: 'clock', day, starts_at: `${day} 00:00:00`, ends_at: `${day} 00:00:00`, title: `Time card, ${hoursText(minutes)}`, minutes, cents,

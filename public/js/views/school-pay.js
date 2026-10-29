@@ -81,7 +81,7 @@ function requestCard(r, done) {
     h('div', { class: 'row between' },
       h('strong', { class: 'req-when' }, `${fmtDate(r.starts_at)}, ${fmtTime(r.starts_at)}`),
       r.deadline_at ? state(`Answer by ${atClock(r.deadline_at)} (${leftWords(r.deadline_at)})`, minutesLeft(r.deadline_at) < 30 ? 'bad' : 'warn') : null),
-    h('div', null, `${lengthWords(r.minutes)} ${label(r.discipline)} private, ${r.any_instructor ? 'any instructor' : 'asked for you by name'}`),
+    h('div', null, `${lengthWords(r.minutes)} ${label(r.discipline).toLowerCase()} private, ${r.any_instructor ? 'any instructor' : 'asked for you by name'}`),
     h('ul', { class: 'plain req-students' }, r.students.map((s) => h('li', null, h('strong', null, s.first_name), ` ${s.last_name ? `${s.last_name[0]}.` : ''}  `, h('span', { class: 'muted' }, s.level_words || 'Level not given')))),
     r.note ? h('p', { class: 'small' }, h('span', { class: 'muted' }, 'Family note: '), r.note) : null,
     r.pay ? h('p', { class: 'pay-line' }, h('span', { class: 'pay-label' }, 'Your pay: '), r.pay.cents ? payWords(r.pay) : 'No private rate is set yet') : null,
@@ -137,7 +137,7 @@ async function allRequests(root) {
   try { slug = (await get('/skischool/pay/private-offers')).slug; } catch (_) { /* the link is optional */ }
   root.append(h('div', { class: 'row between' }, h('p', { class: 'muted' }, 'Private lessons asked for online. Instructors accept them on My day; you can give one to an instructor by hand.'),
     slug ? h('a', { class: 'btn small', href: `/private/${encodeURIComponent(slug)}`, target: '_blank', rel: 'noopener' }, 'Open the private lesson page') : null),
-  h('div', { class: 'inline-form' }, field('Show', which)), body);
+  h('div', { class: 'inline-form pay-filter' }, field('Show', which)), body);
   which.addEventListener('change', () => load());
   let staff = null;
   async function load() {
@@ -145,7 +145,7 @@ async function allRequests(root) {
     try {
       const { requests } = await get(`/skischool/pay/requests?scope=all&status=${which.value}`);
       clear(body).append(requests.length ? table([
-        { head: 'When', cell: (r) => h('span', null, fmtRange(r.starts_at, r.ends_at), h('div', { class: 'muted small' }, `${lengthWords(r.minutes)} ${label(r.discipline)}, ${r.level_words}`)) },
+        { head: 'When', cell: (r) => h('span', null, fmtRange(r.starts_at, r.ends_at), h('div', { class: 'muted small' }, `${lengthWords(r.minutes)} ${label(r.discipline).toLowerCase()}, ${r.level_words}`)) },
         { head: 'Students', cell: (r) => h('span', null, r.students.map((s) => s.first_name).join(', '), h('div', { class: 'muted small' }, `${r.contact_name}, ${r.contact_phone}`)) },
         { head: 'Asked for', cell: (r) => r.staff_name || (r.any_instructor ? 'Any instructor' : '') },
         { head: 'Status', cell: (r) => h('span', null, statusPill(r), r.status === 'waiting' && r.deadline_at ? h('div', { class: 'muted small' }, `Answer by ${atClock(r.deadline_at)}`) : null,
@@ -159,7 +159,7 @@ async function allRequests(root) {
     } catch (err) { clear(body).append(errorBox(err)); }
   }
   async function assignDialog(r) {
-    if (!staff) staff = (await get('/skischool/pay/rates').catch(() => null))?.instructors || (await get('/availability/instructors')).data;
+    if (!staff) staff = isManager() ? (await get('/skischool/pay/rates')).instructors : (await get('/availability/instructors')).data;
     const pick = select([['', 'Choose an instructor'], ...staff.map((s) => [s.id, s.name])], '', { name: 'staff_id', required: true });
     formDialog('Give this private to an instructor', h('div', { class: 'stack' },
       h('p', null, `${fmtRange(r.starts_at, r.ends_at)}, ${r.students.map((s) => s.first_name).join(' and ')}, ${r.level_words}.`),
@@ -190,20 +190,20 @@ async function myPayTab(root) {
   root.append(head, body);
   async function load() {
     clear(head).append(
-      button('Previous week', () => { week = addDays(week, -7); load(); }, { small: true, label: 'Previous week' }),
-      h('strong', null, `${fmtDate(week)} to ${fmtDate(addDays(week, 6))}`),
-      button('Next week', () => { week = addDays(week, 7); load(); }, { small: true, label: 'Next week' }));
+      h('strong', { class: 'pay-week-name' }, `${fmtDate(week)} to ${fmtDate(addDays(week, 6))}`),
+      h('span', { class: 'row' }, button('Previous', () => { week = addDays(week, -7); load(); }, { small: true, label: 'Previous week' }),
+        button('Next', () => { week = addDays(week, 7); load(); }, { small: true, label: 'Next week' })));
     if (!staffId) { clear(body).append(empty(isManager() ? 'Choose an instructor to see their pay.' : 'Your login is not linked to a staff record yet. Ask a manager to link it.')); return; }
     clear(body).append(loading());
     try {
       const d = await get(`/skischool/pay/mine?from=${week}&to=${addDays(week, 6)}${isManager() ? `&staff_id=${staffId}` : ''}`);
       const pay = d.lines.filter((l) => !l.tip);
       const tips = d.lines.filter((l) => l.tip);
-      clear(body).append(
+      appendAll(clear(body),
         h('div', { class: 'pay-tiles' },
           tile('This week', money(d.total_cents), hours(d.minutes)),
           tile('Tips this week', money(d.tips_cents), 'Paid to you in full'),
-          tile('Season so far', money(d.season.total_cents), `${hours(d.season.minutes)}, tips ${money(d.season.tips_cents)}`)),
+          tile('Season to date', money(d.season.total_cents), `${hours(d.season.minutes)}, tips ${money(d.season.tips_cents)}`)),
         h('p', { class: 'muted small' }, howPaid(d)),
         pay.length ? table([
           { head: 'Day', cell: (l) => (l.kind === 'clock' ? fmtDate(l.day) : `${fmtDate(l.starts_at)}, ${fmtTime(l.starts_at)}`) },
@@ -298,7 +298,7 @@ async function payrollTab(root) {
       const approved = all.filter((g) => g.approved && !g.changed);
       const total = all.reduce((n, g) => n + g.pay_cents, 0);
       const tipsTotal = all.reduce((n, g) => n + g.tips_cents, 0);
-      clear(body).append(
+      appendAll(clear(body),
         h('div', { class: 'pay-tiles' }, tile('Pay', money(total), plural(all.length, 'instructor')), tile('Tips to pass through', money(tipsTotal), 'Not part of pay'), tile('Approved', `${approved.length} of ${all.length}`, d.run && d.run.exported_at ? `Exported ${fmtDate(d.run.exported_at)}` : 'Not exported yet')),
         d.earlier ? h('p', { class: 'muted small' }, `${plural(d.earlier, 'line')} in this period were paid in an earlier export and are left out.`) : null,
         all.length ? table([
