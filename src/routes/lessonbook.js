@@ -308,6 +308,7 @@ async function handleWebhook(event, base) {
   if (obj && obj.metadata && obj.metadata.kind === 'shop') return shopsale.handleWebhook(event, obj, base || config.stripe.publicUrl || '');
   if (obj && obj.metadata && obj.metadata.kind === 'program') return require('./programreg').handleWebhook(event, obj, base || config.stripe.publicUrl || '');
   if (obj && obj.metadata && obj.metadata.kind === 'donation') return recordDonation(event, obj);
+  if (obj && obj.metadata && obj.metadata.kind === 'private') return require('./schoolpay').handleWebhook(event, obj); // Track PAY: privates asked for by name
   if (!obj || !obj.metadata || !obj.metadata.request_id) return { ignored: true };
   const tenantId = Number(obj.metadata.tenant_id);
   const requestId = Number(obj.metadata.request_id);
