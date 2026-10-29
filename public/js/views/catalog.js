@@ -70,7 +70,7 @@ async function drawProducts(box) {
   async function rebuild() { const n = h('div'); await drawProducts(n); return [...n.childNodes]; }
   wrap.append(data.length ? table([
     { head: 'Product', cell: (p) => h('strong', null, p.name) },
-    { head: 'Kind', cell: (p) => label(p.kind) },
+    { head: 'Kind', cell: (p) => (p.kind === 'rental' && p.rental_kind === 'season' ? 'Season rental' : label(p.kind)) },
     { head: 'Base price', num: true, cell: (p) => money(p.base_price_cents) },
     { head: 'Days', num: true, cell: (p) => String(p.valid_days) },
     { head: 'Rides', num: true, cell: (p) => (p.uses === null ? 'Unlimited' : String(p.uses)) },
@@ -104,6 +104,9 @@ function editProduct(p, done, atts = []) {
   const timedDay = h('input', { type: 'radio', name: 'timed', value: '0', checked: Boolean(p && p.kind === 'activity' && !p.timed) });
   const dayCap = input({ name: 'day_capacity', type: 'number', min: 1, max: 100000, value: p && p.day_capacity ? p.day_capacity : '' });
   const capField = field('Places a day (blank = no limit)', dayCap, 'For a day pass, such as skating all day.');
+  // A rental: a day rental, or a season rental (due back on the shop's season return date, set in Settings, Rentals).
+  const rentalKind = select([['day', 'Day rental'], ['season', 'Season rental']], p && p.rental_kind === 'season' ? 'season' : 'day', { name: 'rental_kind' });
+  const rentalBox = field('Rental type', rentalKind, 'A season rental is due back on the season return date in Settings, Rentals. Renters get a reminder in March.');
   const actBox = h('fieldset', { class: 'field act-setup wide' }, h('legend', null, 'Activity'),
     atts.length ? field('Attraction', attSel, 'Its height, weight and age limits and its waiver come from the attraction (Settings, Attractions).') : h('p', { class: 'muted small' }, 'Add the attraction first, in Settings, Attractions.'),
     h('div', { class: 'row', role: 'radiogroup', 'aria-label': 'How it is sold' }, h('label', { class: 'check' }, timedSlots, ' Time slots'), h('label', { class: 'check' }, timedDay, ' All day (a day pass)')),
@@ -119,6 +122,7 @@ function editProduct(p, done, atts = []) {
     actBox.hidden = k !== 'activity';
     capField.hidden = !timedDay.checked;
     if (incBox) incBox.hidden = !TICKET_KINDS.includes(k);
+    rentalBox.hidden = k !== 'rental';
   };
   for (const el of [kindSel, timedSlots, timedDay]) el.addEventListener('change', showKind);
   // A new activity starts as the attraction usually sells: skating, the bike park and disc golf by the day, rides by time slot.
@@ -132,7 +136,7 @@ function editProduct(p, done, atts = []) {
   const f = h('div', { class: 'form' },
     field('Name', input({ name: 'name', required: true, maxlength: 255, value: p ? p.name : '' })),
     field('Kind', kindSel),
-    actBox, incBox,
+    actBox, incBox, rentalBox,
     field('Base price ($)', input({ name: 'price', inputmode: 'decimal', required: true, value: p ? centsToInput(p.base_price_cents) : '' })),
     field('Valid for (days)', input({ name: 'valid_days', type: 'number', min: 1, max: 400, value: p ? p.valid_days : 1 })),
     field('Rides (blank = unlimited)', input({ name: 'uses', type: 'number', min: 1, value: p && p.uses !== null ? p.uses : '' }), 'For punch cards. For a lesson product, 2 or more makes it a lesson package: that many lessons, valid for the number of days above (1 means no expiry).'),
@@ -153,6 +157,7 @@ function editProduct(p, done, atts = []) {
       sale_days: sold, online_daily_limit: num(fd, 'online_daily_limit'),
       advance_percent: num(fd, 'advance_percent'), advance_days: num(fd, 'advance_days'),
     };
+    if (body.kind === 'rental') body.rental_kind = rentalKind.value;
     if (!!body.advance_percent !== !!body.advance_days) throw new Error('Fill in both the discount and the number of days ahead, or leave both blank');
     if (body.kind === 'activity') {
       if (!attSel.value) throw new Error('Choose the attraction this activity is for');

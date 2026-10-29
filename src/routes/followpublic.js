@@ -109,6 +109,8 @@ jobs.post('/daily', async (req, res) => {
     out.shop_emails = await stage('shop_emails', () => shopafter.runAll(base));
     out.card_refunds = await stage('card_refunds', () => cardrefund.retryAll());
     out.reader_payments = await stage('reader_payments', () => require('./terminal').sweep());
+    out.rental_deposits = await stage('rental_deposits', () => require('../lib/rentaldeposit').sweep());
+    out.rental_season_reminders = await stage('rental_season_reminders', () => require('../lib/rentalseason').remindAll());
     out.review_nudges = await stage('review_nudges', () => require('../lib/review').nudgeAll());
     out.billing_reminders = await stage('billing_reminders', () => require('../lib/billing').remindAll(base));
     out.season_billing = await stage('season_billing', () => require('../lib/billing').seasonAll());

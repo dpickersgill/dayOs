@@ -31,6 +31,8 @@ const productFields = {
   attraction_id: z.coerce.number().int().positive().nullable().optional(),
   timed: z.coerce.number().int().min(0).max(1).optional(),
   day_capacity: z.coerce.number().int().min(1).max(100000).nullable().optional(),
+  // A rental (kind 'rental'): a day rental, or a season rental (due back on the shop's season return date)
+  rental_kind: z.enum(['day', 'season']).optional(),
 };
 
 // ---- activities: the attraction a product is for, its time slots, and the attractions a lift ticket includes
@@ -194,7 +196,7 @@ products.use(
     entity: 'Product',
     createSchema: z.object(productFields),
     updateSchema: partialOf(productFields),
-    columns: ['kind', 'name', 'base_price_cents', 'valid_days', 'uses', 'active', 'online', 'sale_days', 'online_daily_limit', 'advance_days', 'advance_percent', 'attraction_id', 'timed', 'day_capacity'],
+    columns: ['kind', 'name', 'base_price_cents', 'valid_days', 'uses', 'active', 'online', 'sale_days', 'online_daily_limit', 'advance_days', 'advance_percent', 'attraction_id', 'timed', 'day_capacity', 'rental_kind'],
     filters: ['kind', 'active'],
     orderBy: 'kind, name',
     readRoles: ['counter', 'instructor'],

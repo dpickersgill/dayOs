@@ -153,4 +153,6 @@ export async function drawSettings(box) {
       }, { kind: 'primary' }))));
   // Fitting and hand-out (layout, closing time, the renter's signed confirmation): its own block, saved on its own.
   const fitBox = h('div'); box.append(fitBox); await (await import('./rentals-fit.js')).drawFitSettings(fitBox);
+  // deposits and season rentals (the return side): their own block, saved on its own
+  await (await import('./rentals-season.js')).drawReturnSettings(box);
 }
