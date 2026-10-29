@@ -288,6 +288,28 @@ test('changing the date keeps the same booking row and refuses a clash', async (
   assert.match(dd.why, /48 hours/);
 });
 
+test('changing the date never moves to a day that costs more than what was paid', async () => {
+  const from = await lesson(100, { level_min: 1, level_max: 3 });
+  const st = await personAndBooking(from, 'Pia');
+  const [o] = await pool.query("INSERT INTO orders (tenant_id, status, subtotal_cents, total_cents, channel) VALUES (?, 'paid', 8000, 8000, 'window')", [A.id]);
+  await pool.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, session_id, tier, quantity, unit_price_cents, discount_cents, tax_cents) VALUES (?, ?, ?, 'lesson', ?, ?, 'child', 1, 8000, 0, 0)", [A.id, o.insertId, D.group, st.person, from]);
+  const cheap = await lesson(120, { level_min: 1, level_max: 3 });
+  const dear = await lesson(200, { level_min: 1, level_max: 3 }); // a holiday: the same lesson costs more that day
+  const [[d]] = await pool.query('SELECT DATE(starts_at) AS day, DATE(starts_at) = (SELECT DATE(starts_at) FROM lesson_sessions WHERE id = ?) AS same FROM lesson_sessions WHERE id = ?', [cheap, dear]);
+  assert.equal(Number(d.same), 0, 'the two lessons are on different days');
+  await pool.query('INSERT INTO price_calendar (tenant_id, product_id, on_date, tier, price_cents) VALUES (?, ?, ?, NULL, 12000)', [A.id, D.group, d.day]);
+  const dates = await pub('GET', `/lesson/${st.token}/dates`);
+  assert.equal(dates.status, 200, dates.text);
+  assert.ok(dates.body.lessons.some((l) => l.id === cheap), 'the same price is offered');
+  assert.ok(!dates.body.lessons.some((l) => l.id === dear), 'a dearer day is not offered');
+  const r = await pub('POST', `/lesson/${st.token}/move`, { body: { session_id: dear } });
+  assert.equal(r.status, 409);
+  assert.match(r.body.error, /costs more/);
+  const m = await pub('POST', `/lesson/${st.token}/move`, { body: { session_id: cheap } });
+  assert.equal(m.status, 200, m.text);
+  assert.equal((await q("SELECT session_id FROM order_items WHERE tenant_id = ? AND order_id = ?", [A.id, o.insertId]))[0].session_id, cheap, 'the sale line follows the lesson');
+});
+
 test('recaps: only the lesson\'s instructor writes one, nothing goes out until approved, photos only with a yes', async () => {
   const done = await lesson(-1.5, { instructor: D.ivy, hours: 1, level_min: 1, level_max: 3 });
   const yes = await personAndBooking(done, 'Ruby', { photo_ok: true, allergies: 'Peanuts' });

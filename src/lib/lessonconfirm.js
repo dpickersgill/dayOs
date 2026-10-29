@@ -37,7 +37,7 @@ async function recipient(db, tenantId, b) {
 }
 
 /** The email and text for one booking (exported for tests and the screens' preview). */
-function compose({ tenant, b, settings, url }) {
+function compose({ tenant, b, settings, url, keepLink = false }) {
   const lesson = `${b.product}${b.format === 'private' ? ' (private)' : ''}`;
   const lvl = b.level_min || b.level_max ? levels.range(b.level_min, b.level_max) : null;
   const bring = settings.what_to_bring || DEFAULT_BRING;
@@ -56,8 +56,8 @@ function compose({ tenant, b, settings, url }) {
     '',
     `Check-in code at the desk: L${b.id}`,
     '',
-    url ? `Your lesson page (check in when you arrive, see the details, change the date): ${url}` : null,
-    url ? '' : null,
+    url ? `Your lesson page (check in when you arrive, see the details, change the date): ${url}` : keepLink ? 'Your lesson page is the same link as before.' : null,
+    url || keepLink ? '' : null,
     'Canceling:',
     ...policy.map((p) => `- ${p}`),
     '',
@@ -97,9 +97,12 @@ async function sendConfirmation(db, tenantId, bookingId, base, opts = {}) {
     const tenant = await one(db, 'SELECT id, slug, name, phone, reply_to, refund_full_hours, refund_half_hours, refund_half_percent, cancel_note FROM tenants WHERE id = ?', [tenantId]);
     const to = await recipient(db, tenantId, b);
     if (!to.email && !(to.phone && b.text_ok)) return { ok: false, error: 'No email address for this booking' };
-    const token = await links.issue(db, tenantId, b.id);
-    const url = base ? links.url(base, tenant.slug, token) : null;
-    const msg = compose({ tenant, b: { ...b, to_name: to.name }, settings, url });
+    // A family that changed the date from their lesson page keeps that same link (a new one would break the page they are
+    // on), so the note about the move says to use it instead of carrying a new link.
+    const keepLink = Boolean(opts.moved && b.token_sha);
+    const token = keepLink ? null : await links.issue(db, tenantId, b.id);
+    const url = base && token ? links.url(base, tenant.slug, token) : null;
+    const msg = compose({ tenant, b: { ...b, to_name: to.name }, settings, url, keepLink });
     const out = await notify({ tenant, to: { email: to.email, phone: to.phone, textOk: Boolean(b.text_ok) }, ...msg, tag: 'lesson-confirmation' });
     const ok = Boolean((out.email && out.email.ok) || (out.text && out.text.ok));
     if (ok) await db.query('UPDATE lesson_bookings SET confirmed_at = UTC_TIMESTAMP() WHERE tenant_id = ? AND id = ?', [tenantId, b.id]);

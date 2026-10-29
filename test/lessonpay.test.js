@@ -98,7 +98,8 @@ test.after(async () => { await new Promise((r) => server.close(r)); await new Pr
 const settings = async (body) => ok(await api('PATCH', '/skischool/settings', { token: T.owner, body }));
 const rate = (staff_id, kind, cents, effective_from) => api('POST', '/skischool/pay/rates', { token: T.owner, body: { staff_id, kind, cents, effective_from: effective_from || plus(today, -30) } });
 async function lesson(day, from, to, extra = {}) {
-  return ok(await api('POST', '/skischool/sessions', { token: T.owner, body: { product_id: D.group, starts_at: `${day}T${from}`, ends_at: `${day}T${to}`, instructor_id: D.ivy, ...extra } }), 201).id;
+  // Ivy keeps open dates for privates (D1 to D3), so a lesson on another day is assigned anyway, with the reason.
+  return ok(await api('POST', '/skischool/sessions', { token: T.owner, body: { product_id: D.group, starts_at: `${day}T${from}`, ends_at: `${day}T${to}`, instructor_id: D.ivy, override_reason: 'Pay test lesson', ...extra } }), 201).id;
 }
 let kid = 0;
 async function book(sessionId, extra = {}) {
@@ -341,6 +342,29 @@ test('with card payment off, the request goes straight to the instructor and the
   ok(await api('PUT', '/tenant/profile', { token: T.owner, body: { online_payment: true } }));
 });
 
+test('a private with a child goes only to instructors who teach kids; with no teaching profile, nobody is cleared', async () => {
+  ok(await api('PUT', '/tenant/profile', { token: T.owner, body: { online_payment: false } }));
+  await q('UPDATE instructor_profiles SET teaches_kids = 0 WHERE tenant_id = ? AND staff_id = ?', [M.id, D.max]);
+  const r = ok(await ask({ instructor: 'any', date: D3, time: '15:00', ...contact('k'), students: [student('Kit')] }), 201); // Kit is 10
+  const row = (await q('SELECT * FROM private_requests WHERE tenant_id = ? AND reference = ?', [M.id, r.reference]))[0];
+  assert.equal((await myDay(T.max, D3)).requests.filter((x) => x.id === row.id).length, 0, 'not listed for an instructor who does not teach kids');
+  is(await api('POST', `/skischool/pay/requests/${row.id}/accept`, { token: T.max }), 409, 'and cannot be accepted by one');
+  // an adult private is fine for Max
+  const adult = ok(await ask({ instructor: 'any', date: D3, time: '15:00', ...contact('ad'), students: [student('Abe', { date_of_birth: '1980-03-03' })] }), 201);
+  const arow = (await q('SELECT id FROM private_requests WHERE tenant_id = ? AND reference = ?', [M.id, adult.reference]))[0];
+  assert.equal((await myDay(T.max, D3)).requests.filter((x) => x.id === arow.id).length, 1);
+  // no teaching profile on file: not cleared for anything (never "cleared for everything")
+  const [prof] = await q('SELECT * FROM instructor_profiles WHERE tenant_id = ? AND staff_id = ?', [M.id, D.max]);
+  await q('DELETE FROM instructor_profiles WHERE tenant_id = ? AND staff_id = ?', [M.id, D.max]);
+  assert.equal((await myDay(T.max, D3)).requests.filter((x) => x.id === arow.id).length, 0);
+  const no = await api('POST', `/skischool/pay/requests/${arow.id}/accept`, { token: T.max });
+  assert.equal(no.status, 409); assert.match(no.body.error, /not set up/);
+  await q('INSERT INTO instructor_profiles SET ?', [prof]);
+  await q('UPDATE instructor_profiles SET teaches_kids = 1 WHERE tenant_id = ? AND staff_id = ?', [M.id, D.max]);
+  await q("UPDATE private_requests SET status = 'declined' WHERE id IN (?)", [[row.id, arow.id]]);
+  ok(await api('PUT', '/tenant/profile', { token: T.owner, body: { online_payment: true } }));
+});
+
 test('tips show in My pay by lesson; an instructor sees only their own pay', async () => {
   const leoBooking = (await q('SELECT id FROM lesson_bookings WHERE session_id = ? LIMIT 1', [D.leoSession]))[0].id;
   await q("INSERT INTO lesson_tips (tenant_id, booking_id, session_id, staff_id, amount_cents, status, paid_at) VALUES (?, ?, ?, ?, 1500, 'paid', UTC_TIMESTAMP()), (?, ?, ?, ?, 900, 'pending', NULL)",
@@ -362,7 +386,13 @@ test('tips show in My pay by lesson; an instructor sees only their own pay', asy
 });
 
 test('payroll: approve, export CSV with tips listed apart, mark tips paid out, never pay a line twice', async () => {
-  const from = today; const to = D4;
+  // Only lessons that have ended are paid: Ivy's lessons on D4 are still ahead, so the period lists them as later.
+  const ahead = ok(await api('GET', `/skischool/pay/payroll?from=${today}&to=${D4}`, { token: T.mgr }));
+  assert.ok(ahead.later > 0, 'lessons not over yet are counted apart');
+  assert.ok(!ahead.instructors.some((g) => g.lines.some((l) => l.kind === 'lesson' || l.kind === 'lineup')), 'and are not in the export');
+  // Those lessons are taught: they move to yesterday.
+  await q('UPDATE lesson_sessions SET starts_at = starts_at - INTERVAL 7 DAY, ends_at = ends_at - INTERVAL 7 DAY WHERE tenant_id = ? AND DATE(starts_at) = ?', [M.id, D4]);
+  const from = plus(today, -1); const to = D4;
   const p = ok(await api('GET', `/skischool/pay/payroll?from=${from}&to=${to}`, { token: T.mgr }));
   const ivy = p.instructors.find((g) => g.staff_id === D.ivy);
   assert.ok(ivy && ivy.pay_cents > 0 && ivy.tips_cents === 1500);
@@ -379,15 +409,38 @@ test('payroll: approve, export CSV with tips listed apart, mark tips paid out, n
   assert.match(sum[1], /"Ivy Instructor".*"15.00"$/);
   assert.ok((await q("SELECT paid_out_at FROM lesson_tips WHERE tenant_id = ? AND status = 'paid'", [M.id]))[0].paid_out_at, 'tip marked paid out');
   // A longer period that overlaps does not pay Ivy's exported lines again.
-  const later = ok(await api('GET', `/skischool/pay/payroll?from=${plus(today, -1)}&to=${D4}`, { token: T.mgr }));
+  const later = ok(await api('GET', `/skischool/pay/payroll?from=${plus(today, -2)}&to=${D4}`, { token: T.mgr }));
   assert.ok(!later.instructors.some((g) => g.staff_id === D.ivy && g.lines.some((l) => l.kind === 'lesson')), 'already paid');
   assert.ok(later.earlier > 0);
   const runs = ok(await api('GET', '/skischool/pay/payroll/runs', { token: T.mgr }));
   assert.ok(runs.runs.some((r) => r.id === ex.run_id));
   const csv = await fetch(`${base}/api/v1/skischool/pay/payroll/runs/${ex.run_id}/summary.csv`, { headers: { authorization: `Bearer ${T.mgr}`, 'x-device': DEVICE } });
   assert.equal(csv.status, 200); assert.match(await csv.text(), /Ivy Instructor/);
-  const mine = ok(await api('GET', `/skischool/pay/mine?from=${today}&to=${D4}`, { token: T.ivy }));
+  const mine = ok(await api('GET', `/skischool/pay/mine?from=${from}&to=${today}`, { token: T.ivy }));
   assert.ok(mine.lines.filter((l) => !l.tip && l.cents > 0).every((l) => l.paid), 'My pay shows them as paid');
+});
+
+test('a weather delay never makes a second lineup line, and a canceled lesson is never paid', async () => {
+  await settings({ pay_mode: 'both', lineup_paid: true, lineup_minutes: 15 });
+  const day = plus(today, 9);
+  const a = await lesson(day, '09:00', '11:00');
+  await book(a);
+  const before = (await P.lines(pool, M.id, { from: day, to: day, staffId: D.ivy })).lines.filter((l) => l.kind === 'lineup');
+  assert.equal(before.length, 1);
+  // A 30 minute weather delay moves the lesson and notes the delay; the lineup keeps its key (its first start time).
+  await q('UPDATE lesson_sessions SET starts_at = starts_at + INTERVAL 30 MINUTE, ends_at = ends_at + INTERVAL 30 MINUTE, delay_minutes = 30 WHERE id = ?', [a]);
+  const after = (await P.lines(pool, M.id, { from: day, to: day, staffId: D.ivy })).lines.filter((l) => l.kind === 'lineup');
+  assert.equal(after.length, 1);
+  assert.equal(after[0].key, before[0].key, 'same lineup, same line, so an export after the delay cannot pay it twice');
+  // canceled: no line at all
+  await q("UPDATE lesson_sessions SET status = 'cancelled' WHERE id = ?", [a]);
+  assert.equal((await P.lines(pool, M.id, { from: day, to: day, staffId: D.ivy })).lines.filter((l) => l.session_id === a).length, 0);
+  // lineDone: a lesson is paid only once it has ended, a time card once its day is over
+  assert.equal(P.lineDone({ kind: 'lesson', ends_at: `${day} 11:00:00` }, `${day} 10:59:00`), false);
+  assert.equal(P.lineDone({ kind: 'lesson', ends_at: `${day} 11:00:00` }, `${day} 11:00:00`), true);
+  assert.equal(P.lineDone({ kind: 'lineup', ends_at: `${day} 09:00:00`, done_at: `${day} 11:00:00` }, `${day} 10:00:00`), false, 'a lineup waits for its lesson to end');
+  assert.equal(P.lineDone({ kind: 'clock', day }, `${day} 23:00:00`), false);
+  assert.equal(P.lineDone({ kind: 'clock', day }, `${plus(day, 1)} 00:01:00`), true);
 });
 
 test('rebook my guests: past private guests, an offer email with the prefilled link, a manager books one directly', async () => {
