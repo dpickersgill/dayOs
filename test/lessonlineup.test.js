@@ -280,7 +280,7 @@ test('labels carry first name, last initial, level, color, an allergy mark, the 
 test('a guest type follows the person: a child on the lesson is a child on the rental and the ticket', async () => {
   const lesson = await session({ starts_at: `${day2}T13:00`, ends_at: `${day2}T15:00` });
   const body = (lines, extra = {}) => ({
-    channel: 'window',
+    channel: 'window', follow_types: true,
     customer: { details: { first_name: 'Pat', last_name: `Parent${suffix}`, ...ADULT, email: `pat${suffix}@example.com` }, sign_waiver: true },
     participants: { p1: { details: { first_name: 'Kit', last_name: `Parent${suffix}`, date_of_birth: '2017-02-02', sex: 'male' }, sign_waiver: true, guardian: 'customer' } },
     lines, payments: [], ...extra,

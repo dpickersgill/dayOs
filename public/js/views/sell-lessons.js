@@ -24,7 +24,7 @@ export function drawLessons(b, { menu, tiers, first, add, price }) {
   const age = input({ type: 'number', min: 2, max: 99, inputmode: 'numeric', placeholder: 'Any', 'aria-label': 'Student age', class: 'sl-age' });
   const level = select([['', 'Any level'], ...levelOptions('ski')], '', { 'aria-label': 'Student level' });
   const started = h('input', { type: 'checkbox' });
-  const strip = h('div', { class: 'seg sl-days', role: 'group', 'aria-label': 'Day' });
+  const strip = h('div', { class: 'sl-days', role: 'group', 'aria-label': 'Day' });
   const list = h('div', { class: 'sl-list', 'aria-live': 'polite' });
   const who = h('div', { class: 'sl-who' });
 
@@ -101,7 +101,7 @@ export function drawLessons(b, { menu, tiers, first, add, price }) {
   tier.addEventListener('change', draw);
   b.append(
     h('div', { class: 'sl-find' }, find, results), who,
-    h('div', { class: 'menu-tools sl-tools' }, field('Discipline', disc), field('Age', age), field('Level', level), field('Student type', tier),
+    h('div', { class: 'sl-tools' }, field('Discipline', disc), field('Age', age), field('Level', level), field('Student type', tier),
       isManager() ? h('label', { class: 'check' }, started, ' Show lessons that started') : null),
     strip, list);
   draw();

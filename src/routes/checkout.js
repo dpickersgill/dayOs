@@ -100,6 +100,9 @@ const checkoutSchema = z.object({
   // Quick sale: day tickets, multi-day tickets, punch cards and vouchers only, with no customer record (a mountain can
   // switch this off in Account to require a name on every sale).
   quick: z.boolean().optional(),
+  // Sell sends this: each guest's type follows them across their lines (lib/guesttypes.js followPerson). The check before
+  // payment returns the new total, so the counter always takes the right amount.
+  follow_types: z.boolean().optional(),
 });
 const QUICK_KINDS = ['day_ticket', 'multi_day', 'punch_card', 'voucher'];
 
@@ -336,7 +339,7 @@ async function runSale(conn, req, body, { check = false } = {}) {
     const today = todayIn(tenant.timezone);
     // a guest's type follows them: a child on the lesson is a child on the rental and the ticket too (lib/guesttypes.js)
     body = { ...body, lines: body.lines.map((l) => ({ ...l, ...(l.holders ? { holders: [...l.holders] } : {}) })) };
-    const typeChanges = await GT.followPerson(conn, tenantId, body, today);
+    const typeChanges = body.follow_types ? await GT.followPerson(conn, tenantId, body, today) : [];
     const lines = body.lines;
 
     // ---- price first, so a bad line or a wrong payment fails before anything is saved

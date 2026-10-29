@@ -92,7 +92,26 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   const usedBy = (id) => slots.filter((s) => assign.get(s) === id);
   const guardianFor = (id) => (guardianPick.has(id) ? guardianPick.get(id) : (id !== 'customer' && !customer.isMinor() ? 'customer' : ''));
 
+  // Who each item is for, filled in as people are added (Track LINEUP): a child's ticket, lesson and rental go to a
+  // child, the adults' to the adults, one of each kind per person. A choice the cashier makes by hand is never changed.
+  const touched = new Set();
+  function autoAssign() {
+    if (people.length === 0) return;
+    const used = new Map();
+    const take = (k, id) => { if (!used.has(k)) used.set(k, new Set()); used.get(k).add(id); };
+    const kindOf = (s) => (s.line.type === 'ticket' ? `ticket:${s.line.product_id}` : s.line.type);
+    for (const s of slots) if (touched.has(s) || (s.line.items && s.line.items.length)) take(kindOf(s), assign.get(s));
+    for (const s of slots) {
+      if (touched.has(s) || (s.line.items && s.line.items.length)) continue;
+      const minorLine = ['child', 'youth'].includes(s.line.tier) || Boolean(s.line.student);
+      const k = kindOf(s);
+      const free = everyone().filter((e) => !(used.get(k) || new Set()).has(e.id) && (e.id === 'customer' || usedBy(e.id).length || true));
+      const cand = free.find((e) => e.cap.isMinor() === minorLine && (e.id === 'customer' || e.cap.payload('details').details || e.cap.person()));
+      if (cand) { assign.set(s, cand.id); take(k, cand.id); }
+    }
+  }
   function refreshWho() {
+    autoAssign();
     clear(whoBox);
     riderEls.clear();
     refreshGuardians();
@@ -104,7 +123,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       const l = s.line;
       const sel = select([['customer', `Same as ${custName()}`], ...people.map((p) => [p.id, nameOf(p)])], assign.get(s), { 'aria-label': `Who is ${s.aria} for` });
       // a fitting belongs to one person: choosing someone else for the rental starts it again
-      sel.addEventListener('change', () => { assign.set(s, sel.value); if (l.type === 'rental') { l.items = []; delete l.fit; delete l.signoff; } refreshWho(); });
+      sel.addEventListener('change', () => { touched.add(s); assign.set(s, sel.value); if (l.type === 'rental') { l.items = []; delete l.fit; delete l.signoff; } refreshWho(); });
       if (l.type === 'lesson') safetyFor(s, sel.value);
       const extra = l.type === 'rental' ? [button(l.items && l.items.length ? `Gear: ${l.items.length} chosen` : 'Fit now (optional)', () => openGear(s), { small: true }), l.items && l.items.length ? null : h('small', { class: 'muted' }, ' or fit at the rental shop')] : [];
       if (needsLimits(s)) {
@@ -446,7 +465,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   }
 
   function build() {
-    const body = { channel: 'window', promo_code: promo || undefined, lines: [], payments: payments.map((p) => ({ ...p })) };
+    const body = { channel: 'window', follow_types: true, promo_code: promo || undefined, lines: [], payments: payments.map((p) => ({ ...p })) };
     if (quick) return { ...body, quick: true, lines: basket.map((l) => lineApi(l, null, null)) };
     const c = customer.payload('details');
     const gOf = (id, cap) => { const g = guardianFor(id); return cap.isMinor() && g ? { guardian: g } : {}; };

@@ -293,8 +293,9 @@ async function lineupTab(root) {
       formDialog(`Move ${s.first_name} to`, h('div', { class: 'form' }, field('Class', sel)), async () => { moveIn(s.booking_id, all[Number(sel.value)]); });
     };
     const cols = all.map((c, i) => {
-      const lvMin = select([['', 'Lowest'], ...levelOptions(b.lineup.discipline)], c.level_min ? String(c.level_min) : '', { 'aria-label': `Lowest level, class ${i + 1}` });
-      const lvMax = select([['', 'Highest'], ...levelOptions(b.lineup.discipline)], c.level_max ? String(c.level_max) : '', { 'aria-label': `Highest level, class ${i + 1}` });
+      const short = levelOptions(b.lineup.discipline).map(([v]) => [v, v]);
+      const lvMin = select([['', 'Any'], ...short], c.level_min ? String(c.level_min) : '', { 'aria-label': `Lowest level, class ${i + 1}` });
+      const lvMax = select([['', 'Any'], ...short], c.level_max ? String(c.level_max) : '', { 'aria-label': `Highest level, class ${i + 1}` });
       lvMin.addEventListener('change', () => { c.level_min = Number(lvMin.value) || null; });
       lvMax.addEventListener('change', () => { c.level_max = Number(lvMax.value) || null; });
       const teach = select([['', c.needs_instructor ? 'Nobody free and cleared' : 'No instructor'], ...(c.instructor_id ? [[String(c.instructor_id), c.instructor]] : [])], c.instructor_id ? String(c.instructor_id) : '', { 'aria-label': `Instructor, class ${i + 1}`, class: 'lu-teach' });
@@ -304,7 +305,7 @@ async function lineupTab(root) {
         h('header', { class: 'stack tight' }, h('div', { class: 'row between' }, h('strong', null, swatch(c.color === 'New' ? null : c.color), ` ${c.session_id ? `${c.color} class` : `New class ${i + 1}`}`), h('span', { class: 'muted small' }, `${c.students.length} of ${sg.ratio}`)),
           c.students.length > sg.ratio ? state('Over the class size', 'warn') : null,
           c.instructor_problem ? h('div', { class: 'small' }, state(`${c.was_instructor}: ${c.instructor_problem}`, 'warn')) : null,
-          teach, h('div', { class: 'row tight' }, lvMin, lvMax)),
+          teach, h('div', { class: 'lu-levels' }, h('span', { class: 'small' }, 'Levels'), lvMin, h('span', { class: 'small' }, 'to'), lvMax)),
         c.students.length ? h('ul', { class: 'plain lu-chips' }, c.students.map((s) => studentChip(s, { onPick: pickFor }))) : h('p', { class: 'muted small lu-empty' }, 'Empty. Drop students here.'));
       dropZone(col, (id) => moveIn(id, c));
       return col;
