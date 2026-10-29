@@ -39,13 +39,13 @@ export const settingsPages = {
 function lastSaturday() { let d = todayStr(); while (weekday(d) !== 6) d = addDays(d, -1); return d; }
 
 async function copyTab(root, { names }) {
-  const kind = select([['day', 'One day'], ['weekend', 'A weekend (2 days)'], ['template', 'A saved template']], 'day', { name: 'copy-kind', 'aria-label': 'What to copy' });
-  const from = input({ type: 'date', value: lastSaturday(), 'aria-label': 'Day to copy' });
-  const tplSel = select([['', 'No templates yet']], '', { 'aria-label': 'Template' });
+  const kind = select([['day', 'One day'], ['weekend', 'A weekend (2 days)'], ['template', 'A saved template']], 'day', { name: 'copy-kind' });
+  const from = input({ type: 'date', value: lastSaturday() });
+  const tplSel = select([['', 'No templates yet']], '');
   const keep = h('input', { type: 'checkbox', checked: true });
   const targets = new Set([addDays(from.value, 7)]);
-  const pick = input({ type: 'date', value: addDays(from.value, 14), 'aria-label': 'Another day to copy to' });
-  const chips = h('div', { class: 'chip-row', 'aria-live': 'polite' });
+  const pick = input({ type: 'date', value: addDays(from.value, 14) });
+  const chips = h('div', { class: 'copy-days', 'aria-live': 'polite' });
   const result = h('div', { class: 'stack', 'aria-live': 'polite' });
   const recent = h('div');
   const tplBox = h('div');
@@ -56,7 +56,7 @@ async function copyTab(root, { names }) {
   let seen = null;
 
   const drawChips = () => {
-    clear(chips).append(...[...targets].sort().map((d) => h('span', { class: 'chip' }, `${dayWords(d)}${kind.value === 'weekend' ? ` and ${fmtDate(`${addDays(d, 1)} 12:00:00`)}` : ''}`,
+    clear(chips).append(...[...targets].sort().map((d) => h('span', { class: 'copy-day' }, `${dayWords(d)}${kind.value === 'weekend' ? ` and ${fmtDate(`${addDays(d, 1)} 12:00:00`)}` : ''}`,
       button('Remove', () => { targets.delete(d); drawChips(); seen = null; clear(result); }, { small: true, kind: 'quiet', label: `Remove ${dayWords(d)}` }))));
     if (!targets.size) chips.append(h('p', { class: 'muted small' }, 'Add at least one day to copy to.'));
   };
@@ -65,7 +65,7 @@ async function copyTab(root, { names }) {
     targets: [...targets].sort(), with_instructors: keep.checked,
   });
   kind.addEventListener('change', () => { tplField.hidden = kind.value !== 'template'; fromField.hidden = kind.value === 'template'; drawChips(); seen = null; clear(result); });
-  from.addEventListener('change', () => { if (targets.size <= 1) { targets.clear(); targets.add(addDays(from.value, 7)); drawChips(); } seen = null; clear(result); });
+  from.addEventListener('change', () => { if (targets.size <= 1) { targets.clear(); targets.add(addDays(from.value, 7)); pick.value = addDays(from.value, 14); drawChips(); } seen = null; clear(result); });
 
   async function preview() {
     if (!targets.size) { toast('Add a day to copy to', 'error'); return; }
@@ -188,14 +188,14 @@ async function weatherTab(root) {
 
 function callForm(done) {
   const asked = hashParam('day');
-  const date = input({ type: 'date', value: /^\d{4}-\d{2}-\d{2}$/.test(asked || '') ? asked : todayStr(), 'aria-label': 'Day' });
+  const date = input({ type: 'date', value: /^\d{4}-\d{2}-\d{2}$/.test(asked || '') ? asked : todayStr() });
   const some = h('input', { type: 'checkbox' });
-  const fromT = input({ type: 'time', value: '09:00', 'aria-label': 'From' });
-  const toT = input({ type: 'time', value: '12:00', 'aria-label': 'Until' });
+  const fromT = input({ type: 'time', value: '09:00' });
+  const toT = input({ type: 'time', value: '12:00' });
   const times = h('div', { class: 'inline-form', hidden: true }, field('From', fromT), field('Until', toT));
-  const minutes = select([['15', '15 minutes'], ['30', '30 minutes'], ['45', '45 minutes'], ['60', '1 hour'], ['90', '1 hour 30 minutes'], ['120', '2 hours']], '30', { 'aria-label': 'How long' });
-  const makeup = input({ type: 'date', value: addDays(todayStr(), 1), 'aria-label': 'Makeup day' });
-  const reason = input({ maxlength: 300, placeholder: 'For example: wind hold on the main lift', 'aria-label': 'Why' });
+  const minutes = select([['15', '15 minutes'], ['30', '30 minutes'], ['45', '45 minutes'], ['60', '1 hour'], ['90', '1 hour 30 minutes'], ['120', '2 hours']], '30');
+  const makeup = input({ type: 'date', value: addDays(todayStr(), 1) });
+  const reason = input({ maxlength: 300, placeholder: 'For example: wind hold on the main lift' });
   const minutesF = field('How long', minutes); const makeupF = field('Makeup day', makeup, 'Lessons keep their times');
   const what = h('div', { class: 'stack', 'aria-live': 'polite' });
   let action = 'delay';
@@ -268,7 +268,7 @@ async function familiesDialog(call, reload) {
         table([
           { head: 'Student', cell: (c) => h('span', null, h('strong', null, `${c.first_name} ${c.last_name}`), h('div', { class: 'muted small' }, `${c.what || ''} ${c.starts_at ? fmtTime(c.starts_at) : ''}`)) },
           { head: 'Choice', cell: (c) => h('span', null, state(c.choice === 'open' ? 'Still to choose' : label(c.choice), c.choice === 'open' ? 'warn' : 'good'),
-            h('div', { class: 'muted small' }, c.choice === 'open' ? `Becomes a credit ${fmtDate(c.expires_at)}` : c.choice === 'makeup' && (c.makeup_at || c.makeup_meeting_at) ? fmtDate(c.makeup_at || c.makeup_meeting_at) : c.choice === 'refund' ? `${money(c.refund_cents)}${c.refund_how === 'card' ? ' to the card' : c.refund_how === 'desk' ? ' at the desk' : ''}` : c.chosen_via === 'auto' ? 'No answer, so a credit' : '')) },
+            h('div', { class: 'muted small' }, c.choice === 'open' ? (c.on_package || c.value_cents || c.kind === 'program' ? `Becomes a credit ${fmtDate(c.expires_at)}` : `Not paid: stays canceled after ${fmtDate(c.expires_at)}`) : c.choice === 'makeup' && (c.makeup_at || c.makeup_meeting_at) ? fmtDate(c.makeup_at || c.makeup_meeting_at) : c.choice === 'refund' ? `${money(c.refund_cents)}${c.refund_how === 'card' ? ' to the card' : c.refund_how === 'desk' ? ' at the desk' : ''}` : c.chosen_via === 'auto' ? 'No answer, so a credit' : '')) },
           { head: 'Paid', cell: (c) => (c.on_package ? 'Package' : c.value_cents ? money(c.value_cents) : 'Not paid') },
           { head: '', actions: true, cell: (c) => (['open', 'makeup'].includes(c.choice) ? button('Choose for them', () => chooseFor(c, async () => { await load(); await reload(); }), { small: true, label: `Choose for ${c.first_name}` }) : null) },
         ], data));
@@ -315,7 +315,7 @@ async function weatherSettings(panel) {
 
 // ---------------------------------------------------------------- staffing
 async function staffingTab(root) {
-  const from = input({ type: 'date', value: todayStr(), 'aria-label': 'From' });
+  const from = input({ type: 'date', value: todayStr() });
   const onlyGaps = h('input', { type: 'checkbox' });
   const body = h('div', { class: 'stack' });
   const offers = h('div'); const holidays = h('div'); const certs = h('div');
@@ -338,15 +338,15 @@ async function staffingTab(root) {
       appendAll(clear(body),
         h('div', { class: 'stats' }, stat(v.slots.reduce((n, s) => n + s.booked, 0), 'students booked'), stat(v.slots.reduce((n, s) => n + s.walkups, 0), 'walk-ups expected'), stat(gaps.length, gaps.length === 1 ? 'time short of instructors' : 'times short of instructors'), stat(`${v.ratio_kids} / ${v.ratio_adults}`, 'students per instructor, kids / adults')),
         gaps.length ? h('div', { class: 'notice warn' }, h('ul', { class: 'plain' }, gaps.slice(0, 6).map((g) => h('li', null, g.words, g.available ? ` (${g.available} free to ask)` : ' (nobody free to ask)')))) : null,
-        days.length ? days.map((d) => h('section', { class: 'stack' }, h('h3', null, dayWords(d), v.holidays.includes(d) ? h('span', null, ' ', state('Holiday', 'neutral')) : null),
+        days.length ? days.map((d) => h('section', { class: 'stack staffing-day' }, h('h3', null, dayWords(d), v.holidays.includes(d) ? h('span', null, ' ', state('Holiday', 'neutral')) : null),
           table([
             { head: 'Time', cell: (s) => h('strong', null, clock(s.time)) },
-            { head: 'Lessons', cell: (s) => h('span', null, `${s.band === 'kids' ? 'Kids' : 'Adults and teens'} ${s.discipline === 'ski' ? 'ski' : label(s.discipline).toLowerCase()}`, h('div', { class: 'muted small' }, `${s.level_words}, ${plural(s.lessons, 'lesson')}${s.unassigned ? `, ${s.unassigned} without an instructor` : ''}`)) },
+            { head: 'Lessons', cell: (s) => h('span', null, `${s.band === 'kids' ? 'Kids' : s.band === 'adults' ? 'Teens and adults' : 'All ages'} ${s.discipline === 'ski' ? 'ski' : label(s.discipline).toLowerCase()}`, h('div', { class: 'muted small' }, `${s.level_words}, ${plural(s.lessons, 'lesson')}${s.unassigned ? `, ${s.unassigned} without an instructor` : ''}`)) },
             { head: 'Booked', num: true, cell: (s) => String(s.booked) },
             { head: 'Walk-ups', num: true, cell: (s) => (s.snow_in !== null && s.snow_in >= 6 ? h('span', { title: `${s.snow_in} in of snow forecast` }, `${s.walkups} (snow)`) : String(s.walkups)) },
             { head: 'Need', num: true, cell: (s) => String(s.need) },
             { head: 'Have', num: true, cell: (s) => String(s.scheduled) },
-            { head: 'Gap', cell: (s) => (s.gap ? state(`${s.gap} more`, 'warn') : state('Covered', 'good')) },
+            { head: 'Gap', cell: (s) => (s.gap ? state(`${s.gap} more`, 'warn') : !s.need ? state('Nobody yet', 'neutral') : state('Covered', 'good')) },
             { head: '', actions: true, cell: (s) => (s.gap ? button('Offer shift', () => offerDialog(s, async () => { await load(); await loadOffers(); }), { small: true, label: `Offer a shift ${dayWords(s.date)} ${clock(s.time)}` }) : null) },
           ], slots.filter((s) => s.date === d), { rowClass: (s) => (s.gap ? 'attention' : null) }))) : empty(onlyGaps.checked ? 'Every lesson time is covered.' : 'No lessons in the next 14 days.'));
     } catch (err) { clear(body).append(errorBox(err)); }
@@ -395,7 +395,7 @@ async function offerDialog(s, done) {
   if (!free.length) { dialog('Nobody to ask', h('p', null, 'No instructor is free, available and cleared for that time. Check Staff and schedule, or ask someone to mark the day open.')); return; }
   const boxes = free.map((i) => h('label', { class: 'check' }, h('input', { type: 'checkbox', name: `s${i.id}`, checked: true }), ` ${i.name}`, h('span', { class: 'muted small' }, i.has_phone ? '  text' : i.has_email ? '  email' : '  in the app only')));
   formDialog(`Offer ${dayWords(s.date)} ${clock(s.time)}`, h('div', { class: 'stack' },
-    h('p', null, `${s.band === 'kids' ? 'Kids' : 'Adults'} ${s.discipline}, ${s.level_words}. The first to say yes gets it; the others are told it is filled.`),
+    h('p', null, `${s.band === 'kids' ? 'Kids' : s.band === 'adults' ? 'Teens and adults' : 'All ages'} ${s.discipline}, ${s.level_words}. The first to say yes gets it; the others are told it is filled.`),
     h('fieldset', { class: 'stack' }, h('legend', null, 'Ask'), ...boxes),
     h('div', { class: 'form' }, field('Spots', input({ type: 'number', name: 'spots', min: 1, max: 20, value: s.gap })), field('Note (optional)', input({ name: 'note', maxlength: 200, placeholder: 'Meet at the kids center at 9:30' })))), async (fd) => {
     const ids = free.filter((i) => fd.get(`s${i.id}`)).map((i) => i.id);
@@ -427,8 +427,8 @@ async function offersTab(root) {
 
 // ---------------------------------------------------------------- reports
 async function reportsTab(root) {
-  const from = input({ type: 'date', value: addDays(todayStr(), -30), 'aria-label': 'From' });
-  const to = input({ type: 'date', value: todayStr(), 'aria-label': 'To' });
+  const from = input({ type: 'date', value: addDays(todayStr(), -30) });
+  const to = input({ type: 'date', value: todayStr() });
   const by = select([['by_day', 'By day'], ['by_time', 'By time'], ['by_product', 'By lesson'], ['by_level', 'By level']], 'by_day', { 'aria-label': 'Seat fill grouped' });
   const body = h('div', { class: 'stack' });
   let data = null;

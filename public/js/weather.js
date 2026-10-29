@@ -69,6 +69,7 @@ function render(v) {
   if (v.choice === 'makeup' && v.current) status.append(`${who} is booked on ${dayLong(v.current.starts_at)} at ${time(v.current.starts_at)}${v.current.name ? `, ${v.current.name}` : ''}.`);
   else if (v.choice === 'credit') status.append(`${who} has a lesson credit. ${v.credit_words || ''}`);
   else if (v.choice === 'refund') status.append(v.refund.refund_how === 'card' ? `Refund of ${money(v.refund.amount_cents)} on its way to your card. It usually shows within 5 to 10 days.` : v.refund.refund_how === 'desk' ? `Refund of ${money(v.refund.amount_cents)}: please see the ski school desk, or call us.` : 'Canceled. There was nothing to refund.');
+  else if (v.unpaid && v.kind === 'lesson') { status.classList.add('open'); status.append(`Please pick another day below by ${stamp(v.expires_at)}. You had not paid yet, so there is nothing to refund.`); }
   else { status.classList.add('open'); status.append(`Please choose below by ${stamp(v.expires_at)}. If we don't hear from you, we'll keep it as a lesson credit.`); }
 
   const what = h('section', { class: 'card wx-what', 'aria-labelledby': 'wx-was' },
@@ -82,17 +83,24 @@ function render(v) {
     const opts = [];
     if (v.makeups.length) {
       opts.push(h('h3', null, v.kind === 'program' ? 'Come on the makeup date' : 'Take the lesson another day'));
-      for (const m of v.makeups) {
+      const SHOW = 6;
+      v.makeups.forEach((m, i) => {
         const current = v.choice === 'makeup' && v.current && v.current.starts_at === m.starts_at;
         opts.push(h('button', { type: 'button', class: `wx-opt${current ? ' current' : ''}`, 'aria-pressed': String(Boolean(current)), onclick: () => (current ? null : act(v.kind === 'program' ? { choice: 'makeup', meeting_id: m.id } : { choice: 'makeup', session_id: m.id }, '/choose', `Booked: ${dayLong(m.starts_at)} at ${time(m.starts_at)}.`)) },
           h('strong', null, `${dayLong(m.starts_at)}, ${time(m.starts_at)}`),
           h('span', null, [m.product, m.level_words, m.meeting_place ? `meet at ${m.meeting_place}` : null, m.spots_left ? `${m.spots_left} spot${m.spots_left === 1 ? '' : 's'} left` : null, current ? 'your choice' : null].filter(Boolean).join(', '))));
+        if (i >= SHOW && !current) opts[opts.length - 1].hidden = true;
+      });
+      if (v.makeups.length > SHOW) {
+        const more = h('button', { type: 'button', class: 'btn link' }, `Show ${v.makeups.length - SHOW} more days`);
+        more.addEventListener('click', () => { root.querySelectorAll('.wx-opt[hidden]').forEach((b) => { b.hidden = false; }); more.remove(); });
+        opts.push(more);
       }
     } else if (v.kind === 'lesson' && v.choice !== 'makeup') opts.push(h('p', { class: 'muted' }, 'No other lesson that fits has a spot right now. Take a credit and book when it suits you, or call us.'));
     const final = (text, sub, body, done) => {
       const yes = h('button', { type: 'button', class: 'btn primary', onclick: () => act(body, '/choose', done) }, 'Yes, that is what I want');
       const no = h('button', { type: 'button', class: 'btn link' }, 'Back');
-      const confirm = h('div', { class: 'stack', hidden: true }, h('p', null, 'This cannot be changed afterwards.'), h('div', { class: 'chips-row' }, yes, no));
+      const confirm = h('div', { class: 'stack', hidden: true }, h('p', null, h('strong', null, `${text}: ${sub}`), ' This cannot be changed afterwards.'), h('div', { class: 'chips-row' }, yes, no));
       const btn = h('button', { type: 'button', class: 'wx-opt', onclick: () => { confirm.hidden = false; btn.hidden = true; yes.focus(); } }, h('strong', null, text), h('span', null, sub));
       no.addEventListener('click', () => { confirm.hidden = true; btn.hidden = false; btn.focus(); });
       return [btn, confirm];

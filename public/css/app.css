@@ -3180,6 +3180,16 @@ tr.attr-blocked td { background: var(--closed-tint); }
 .wx-choice:has(input:checked) { border-color: var(--trail-blue); box-shadow: inset 0 0 0 1px var(--trail-blue); }
 .wx-choice:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
 .notice.good { background: var(--open-tint, #e6f4ea); border-color: var(--open); }
+@media (min-width: 721px) {
+  .staffing-day table { table-layout: fixed; width: 100%; }
+  .staffing-day th:nth-child(1) { width: 6.5rem; }
+  .staffing-day th:nth-child(2) { width: auto; }
+  .staffing-day th:nth-child(n+3):nth-child(-n+6) { width: 5.5rem; }
+  .staffing-day th:nth-child(7) { width: 8rem; }
+  .staffing-day th:nth-child(8) { width: 8rem; }
+}
+.copy-days { display: flex; flex-wrap: wrap; gap: 8px; }
+.copy-day { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 6px 4px 14px; border: 1px solid var(--line-strong); border-radius: 22px; background: var(--surface); font-weight: 700; }
 .fillbar { display: inline-block; min-width: 4.5rem; padding: 2px 6px; border-radius: 4px; font-variant-numeric: tabular-nums; background: linear-gradient(90deg, var(--open-tint, #d8eedf) var(--fill, 0%), transparent var(--fill, 0%)); }
 @media (max-width: 720px) {
   .wx-choices { grid-template-columns: 1fr; }
