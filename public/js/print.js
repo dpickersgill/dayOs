@@ -43,6 +43,7 @@ export function receiptSheet(data) {
     data.gift_cards.length ? h('div', { class: 'rc-sub' }, data.gift_cards.map((g) => h('div', null, `Gift card ${g.code}: ${money(g.initial_cents)}`))) : null,
     data.tickets.length ? h('div', { class: 'rc-sub' }, `${data.tickets.length} ticket${data.tickets.length === 1 ? '' : 's'} printed separately.`) : null,
     data.lines.some((l) => l.line_kind === 'rental') ? h('div', { class: 'rc-code' }, h('div', { class: 'rc-sub' }, 'Show this at the rental counter'), code128(`ORD-${o.id}`, { height: 44, module: 1.6 }), h('div', null, `ORD-${o.id}`)) : null,
+    data.rental_form_url ? h('div', { class: 'rc-code' }, h('div', { class: 'rc-sub' }, 'Fill in your rental form: scan this with your phone camera'), qr(data.rental_form_url, { size: 96 })) : null,
     m.footer ? h('footer', { class: 'rc-foot' }, m.footer) : null);
 }
 
@@ -74,6 +75,7 @@ export function receiptText(data) {
     for (const t of data.tickets) out.push(`${t.product} for ${nameOf(t) || 'guest'}, ${range(t.valid_from, t.valid_to)}${t.start_time ? `, ${clock12(t.start_time)}` : ''}: ${t.code}`);
   }
   if (data.lines.some((l) => l.line_kind === 'rental')) out.push('', `Rental pickup code: ORD-${o.id}`);
+  if (data.rental_form_url) out.push('', 'Fill in your rental form (sizes and signature for each renter):', data.rental_form_url);
   for (const g of data.gift_cards) out.push('', `Gift card ${g.code} (${money(g.initial_cents)})`);
   if (m.footer) out.push('', m.footer);
   return out.join('\n');

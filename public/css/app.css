@@ -1475,6 +1475,29 @@ input[type='search'][aria-label='Search documents'] { min-width: min(20rem, 100%
 .deposit-wait { font-size: 1.15rem; font-weight: 700; margin: 8px 0; }
 .report-range { align-items: end; flex-wrap: wrap; }
 @media (max-width: 600px) { .return-scan { font-size: 1.15rem; } .return-piece .row { flex-wrap: wrap; } }
+/* ---- rentals: guest rental forms, the QR poster, groups and bag labels */
+.rform-bar { flex-wrap: wrap; align-items: center; }
+.rform-bar input[type='search'] { flex: 1 1 240px; max-width: 420px; }
+.rform-card { display: grid; gap: 10px; border-left: 6px solid var(--trail-blue); }
+.rform-people { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.rform-person { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }
+.rform-person h3 { margin: 0; }
+.rform-person fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.rform-person legend { font-weight: 700; padding: 0; margin-bottom: 4px; }
+.rform-sig { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.rform-sig img { width: 180px; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.rform-url { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.875rem; overflow-wrap: anywhere; margin: 0; }
+.rform-poster { text-align: center; display: grid; gap: 14px; justify-items: center; padding: 24px; background: #fff; color: #000; }
+.rform-poster h2 { font-size: 2rem; margin: 0; }
+.rform-poster-mtn { font-size: 1.125rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.rform-poster-sub { font-size: 1.125rem; margin: 0; }
+.rform-poster-qr svg { width: 320px; max-width: 80vw; height: auto; }
+.rform-poster ol { text-align: left; font-size: 1.125rem; max-width: 34rem; display: grid; gap: 6px; }
+.rform-poster-url { font-size: 0.875rem; overflow-wrap: anywhere; margin: 0; }
+.bag-label { border: 1px dashed #000; padding: 10px; background: #fff; color: #000; break-inside: avoid; display: grid; gap: 4px; text-align: left; }
+.bag-label svg { max-width: 100%; height: auto; }
+.bag-name { font-size: 1.25rem; font-weight: 700; }
+.bag-gear { margin: 0; padding-left: 18px; font-size: 0.875rem; }
 
 /* ---------- day board ---------- */
 .board-alerts { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }

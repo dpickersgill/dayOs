@@ -242,7 +242,11 @@ router.get('/orders/:id/receipt', sellers, async (req, res) => {
   const buyer = order.person_id ? await one(pool, 'SELECT first_name, last_name, email FROM people WHERE tenant_id = ? AND id = ?', [tenantId, order.person_id]) : null;
   const cashier = order.user_id ? await one(pool, 'SELECT COALESCE(email, username) AS email FROM users WHERE tenant_id = ? AND id = ?', [tenantId, order.user_id]) : null;
   const change = payments.filter((p) => p.tender === 'cash' && p.tendered_cents > p.amount_cents).reduce((n, p) => n + p.tendered_cents - p.amount_cents, 0);
+  // Rentals on the order: the guest's rental form link (each renter's sizes and signature), printed with a QR code.
+  const rentalForm = lines.some((l) => l.line_kind === 'rental' && !l.refunded_at)
+    ? await require('../lib/rentalforms').orderFormLink(pool, tenantId, order.id, require('../lib/baseurl').baseUrl(req), (await one(pool, 'SELECT slug FROM tenants WHERE id = ?', [tenantId])).slug) : null;
   res.json({
+    rental_form_url: rentalForm,
     mountain: { name: t.name, address: t.address, phone: t.phone, footer: t.receipt_footer },
     order: { id: order.id, status: order.status, at: localTime(order.created_at, t.timezone), channel: order.channel, cashier: cashier ? cashier.email.split('@')[0] : null,
       subtotal_cents: order.subtotal_cents, discount_cents: order.discount_cents, tax_cents: order.tax_cents, total_cents: order.total_cents, refunded_cents: order.refunded_cents, promo_code: order.promo_code, change_due_cents: change },

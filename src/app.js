@@ -108,6 +108,7 @@ function createApp() {
     }
   });
   app.use(/^\/api\/v1\/public\/[^/]+\/shop\/orders$/, express.json({ limit: '2mb' })); // season pass photos ride along with the basket
+  app.use(/^\/api\/v1\/public\/[^/]+\/rental-form$/, express.json({ limit: '1200kb' })); // a signature for each renter on the guest rental form
   app.use('/api/v1/online-shop/brand', express.json({ limit: '1200kb' })); // logo and hero photo together
   app.use('/api/v1/platform/prospects/import', express.json({ limit: '2mb' })); // a research batch of ski areas
   app.use(express.json({ limit: '400kb' })); // a customer photo is about 40 KB; a card statement a few hundred rows
@@ -154,6 +155,8 @@ function createApp() {
   app.get('/try', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'try.html')));
   app.get('/platform', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'platform.html')));
   // The public waiver signing page: /waiver/<mountain>, and a signed copy at /waiver/<mountain>?copy=<token>.
+  // The guest rental form: /rental-form/<mountain>, with ?t= for an order or ?g= for a group.
+  app.get('/rental-form/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'rental-form.html')));
   app.get('/waiver/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'waiver.html')));
   app.get('/availability/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'availability.html')));
 
@@ -224,6 +227,8 @@ function createApp() {
   api.post(['/public/:slug/shop/waitlist', '/public/:slug/shop/group', '/public/:slug/shop/orders/:token/change'], rateLimit({ windowMs: 3_600_000, max: Number(process.env.SHOP_RATE_LIMIT) || 12, message: 'Too many requests from this address. Please call the mountain.' }));
   // Anyone can sign a waiver, so signing has its own limit: a family signing at the counter tablet stays well inside it.
   api.post('/public/:slug/waiver/sign', rateLimit({ windowMs: 3_600_000, max: Number(process.env.WAIVER_RATE_LIMIT) || 40, message: 'Too many waivers from this address. Please ask at the ticket window.' }));
+  // The rental form takes names and signatures from anyone: a family fits well inside it, a bot does not.
+  api.post('/public/:slug/rental-form', rateLimit({ windowMs: 3_600_000, max: Number(process.env.RENTAL_FORM_RATE_LIMIT) || 20, message: 'Too many forms from this address. Please fill it in at the rental shop.' }));
   api.post(['/public/followup/:token/give', '/public/:slug/give'], rateLimit({ windowMs: 600_000, max: Number(process.env.GIVE_RATE_LIMIT) || 20, message: 'Too many attempts. Please try again later.' }));
   // The kiosk has no login, so its doors are rate limited: pairing is tight, and each PIN is also locked per person after five misses.
   api.post('/kiosk/pair', rateLimit({ windowMs: 600_000, max: Number(process.env.KIOSK_PAIR_LIMIT) || 10, message: 'Too many tries. Ask a manager for a new code.' }));
@@ -239,7 +244,7 @@ function createApp() {
   api.post(['/platform/login', '/platform/login/setup', '/platform/login/passkey', '/platform/login/passkey/options'], rateLimit({ windowMs: 15 * 60_000, max: Number(process.env.PLATFORM_LOGIN_RATE_LIMIT) || 20, message: 'Too many sign-in attempts from this address. Try again in 15 minutes.' }));
   api.use('/platform', rateLimit({ windowMs: 60_000, max: Number(process.env.PLATFORM_RATE_LIMIT) || 60, message: 'Too many attempts' }), platform);
   api.use(site.api); // the website's plans and contact form (no sign-in)
-  api.use('/public', rateLimit({ windowMs: 60_000, max: 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/lostfound').publicRouter, require('./routes/partnerpasses').publicRouter, require('./routes/patrolclaims').publicRouter, require('./routes/patrolscene').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter);
+  api.use('/public', rateLimit({ windowMs: 60_000, max: 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/lostfound').publicRouter, require('./routes/partnerpasses').publicRouter, require('./routes/patrolclaims').publicRouter, require('./routes/patrolscene').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter, require('./routes/rentalforms').publicRouter);
   api.use(authRoutes); // login, tenants, users, me (each route applies authenticate itself where needed)
   api.use(require('./routes/security')); // passkeys, the second check, sessions, devices, PINs, terminals (each route authenticates)
 
@@ -270,6 +275,7 @@ function createApp() {
   api.use('/pricing', pricing);
   api.use(sales); // /orders, /tickets/scan
   api.use('/rentals', rentals);
+  api.use('/rentals', require('./routes/rentalforms').router); // the guest rental form at the counter, and groups
   api.use('/schedule', schedule);
   api.use('/attractions', require('./routes/attractions').router);
   api.use('/workforce', workforce);

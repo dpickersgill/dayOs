@@ -1,0 +1,22 @@
+/* The guest rental form. Builds on book.css and waiver.css (the signature box); only the renter cards are new. */
+.hero .logo { max-height: 56px; max-width: 200px; object-fit: contain; }
+.person { border-left: 4px solid var(--blue); }
+.row3 { display: grid; gap: 14px; }
+.pair { display: flex; align-items: center; gap: 6px; }
+.field input, .field select { min-height: 48px; font: inherit; font-size: 1rem; padding: 8px 12px; border: 1.5px solid var(--line-strong); border-radius: var(--r-sm); background: #fff; color: var(--ink); width: 100%; }
+.pair input.short { width: 5rem !important; flex: none; }
+.pair { flex-wrap: wrap; }
+.choices { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; min-width: 0; }
+.choices legend { font-weight: 700; font-size: 0.9375rem; padding: 0; margin-bottom: 6px; }
+.choice-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.choice-col { display: grid; gap: 8px; }
+.choice { display: flex; gap: 10px; align-items: flex-start; border: 1.5px solid var(--line-strong); border-radius: var(--r-sm); padding: 10px 14px; min-height: 48px; cursor: pointer; background: #fff; }
+.choice input { width: 22px !important; height: 22px !important; min-height: 0 !important; padding: 0 !important; margin: 1px 0 0; flex: none; accent-color: var(--blue); }
+.choice span { display: grid; gap: 2px; }
+.choice small { color: var(--muted); font-size: 0.875rem; }
+.choice:has(input:checked) { border-color: var(--blue); background: var(--blue-tint); }
+.choice:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
+.sign-box { border-top: 1.5px solid var(--line); padding-top: 14px; }
+.sign-for { font-weight: 700; }
+.note-box { background: var(--amber-tint); color: var(--amber); font-weight: 700; }
+@media (min-width: 640px) { .waiver-layout .row2 { grid-template-columns: 1fr 1fr; } .row3 { grid-template-columns: 1.2fr 1fr 1fr; } }
