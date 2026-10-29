@@ -2112,12 +2112,12 @@ const addD = (d, n) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.ge
 test('school: every tab renders for managers, counter staff and instructors, and the dialogs open', skip(), async () => {
   await closeOverlays();
   const owner = await renderView('school', 'owner', T.owner);
-  assert.deepEqual([...owner.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests', 'Instructor hours']);
+  assert.deepEqual([...owner.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests', 'Instructors', 'Instructor hours']);
   await exercise(owner, 'school (owner)');
   const counter = await renderView('school', 'counter', T.counter);
   assert.deepEqual([...counter.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests']);
   const ins = await renderView('school', 'instructor', T.instructor, { staff_id: D.s2 });
-  assert.deepEqual([...ins.querySelectorAll('[role=tab]')].map((t) => t.textContent), ['Today', 'Lessons']);
+  assert.deepEqual([...ins.querySelectorAll('[role=tab]')].map((t) => t.textContent), ['My day', 'Today', 'Lessons'], 'an instructor opens on My day');
   await exercise(ins, 'school (instructor)');
   await closeOverlays();
 });
@@ -2145,11 +2145,14 @@ test('school: the day board lists lessons with students, and a student opens a r
     d.dispatchEvent(new window.Event('change', { bubbles: true }));
     await settle();
   }
-  const after = topDialog();
-  assert.ok([...after.querySelectorAll('button')].some((b) => /^Move up to level 2$/.test(b.textContent.trim())), 'a finished level offers a move up');
-  clickBtn(after, 'Move up to level 2');
+  // round 2: the card shows the student's level and the next; with no level yet, start at level 1, then pass it
+  clickBtn(topDialog(), 'Start at level 1');
   await settle();
-  assert.match(topDialog().textContent, /Working at level 2/);
+  const after = topDialog();
+  assert.ok([...after.querySelectorAll('button')].some((b) => /^Passed: move up to level 2$/.test(b.textContent.trim())), 'a level offers a move up');
+  clickBtn(after, 'Passed: move up to level 2');
+  await settle();
+  assert.match(topDialog().textContent, /Level 2: Stopping/);
   const card2 = ok(await api('GET', `/skischool/students/${D.ann}/card`, { token: o }));
   assert.equal(card2.disciplines.find((d) => d.discipline === 'ski').current_level, 2);
   clickBtn(topDialog(), 'Print report card');
@@ -3304,7 +3307,7 @@ test('setup tabs are gone from their apps and each draws on its own in Settings'
   const moved = [
     ['gate', 'Devices', 'devices', /Add a device/],
     ['shop', 'Prices and limits', 'limits', /Apply to these days|Change many days at once/],
-    ['school', 'Levels and skills', 'levels', /The ladder students move up/],
+    ['school', 'Levels and skills', 'levels', /the same nine levels/],
     ['availability', 'Public page', 'public', /Show the public availability page/],
     ['rentals', 'Settings', 'settings', /Binding chart/],
     ['waivers', 'Wording', 'wording', /Waiver wording|Earlier versions/],

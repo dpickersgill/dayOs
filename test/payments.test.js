@@ -50,6 +50,9 @@ let A; let tenantId; let sessionId; let pub;
 const kid = { first_name: 'Kit', last_name: 'Kid', date_of_birth: `${new Date().getFullYear() - 9}-02-01`, sex: 'male', discipline: 'ski' };
 const reqBody = (extra = {}) => ({ session_id: sessionId, contact_first_name: 'Pam', contact_last_name: 'Parent', contact_email: 'pam@x.test', contact_phone: '215-555-0100', students: [kid], waiver_accepted: true, policy_accepted: true, ...extra });
 const newLesson = async (hoursAhead, capacity = 4) => {
+  // Each test books the same children at about the same time; a student cannot be in two lessons at once (round 2), so the
+  // lessons of earlier tests are moved a week back first.
+  await pool.query('UPDATE lesson_sessions SET starts_at = starts_at - INTERVAL 7 DAY, ends_at = ends_at - INTERVAL 7 DAY WHERE tenant_id = ? AND starts_at > NOW() - INTERVAL 1 DAY', [tenantId]);
   const [r] = await pool.query("INSERT INTO lesson_sessions (tenant_id, product_id, starts_at, ends_at, capacity, status) VALUES (?, ?, ?, ?, ?, 'scheduled')", [tenantId, A.product, mountainWall(hoursAhead), mountainWall(hoursAhead + 2), capacity]);
   return r.insertId;
 };
