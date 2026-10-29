@@ -6,6 +6,7 @@ import { h, clear, ctx, isManager, money, toCents, table, state, input, select, 
 import { loadCustomerForm } from './customer-form.js';
 import { checkoutDialog, lineApi } from './sell-checkout.js';
 import { drawActivities } from './sell-activities.js';
+import { drawLessons } from './sell-lessons.js';
 import { drawerDialog } from './till.js';
 import { printButtons } from '../print.js';
 import { shareButton } from '../share.js';
@@ -85,15 +86,11 @@ async function sellPanel(root) {
     }],
     ['lessons', 'Lessons', (b) => {
       if (!menu.lessons.length && !(menu.packages || []).length) { b.append(empty('No lessons are scheduled in the next two weeks.', isManager() ? h('a', { class: 'btn primary', href: '#/school' }, 'Schedule a lesson') : null)); return; }
-      const t = select(TIERS, FIRST, { name: 'lesson-tier', 'aria-label': 'Student type' });
-      b.append(h('div', { class: 'menu-tools' }, field('Student type', t)), table([
-        { head: 'When', cell: (s) => fmtDateTime(s.starts_at) },
-        { head: 'Lesson', cell: (s) => h('span', null, `${s.name}, ${label(s.discipline)}, ${label(s.ability_level)}`, s.format && s.format !== 'group' ? h('span', { class: 'muted' }, `  ${label(s.format)}`) : null, s.meeting_place ? h('div', { class: 'muted small' }, `Meet: ${s.meeting_place}`) : null) },
-        { head: 'Spots', num: true, cell: (s) => (s.spots_left ? String(s.spots_left) : state('Full', 'bad')) },
-        { head: 'Price', num: true, cell: (s) => money(s.base_price_cents) },
-        { head: '', actions: true, cell: (s) => { const btn = button('Add', () => add({ type: 'lesson', session_id: s.id, name: s.name, tier: t.value, quantity: 1, detail: fmtDateTime(s.starts_at) }), { small: true }); btn.disabled = !s.spots_left; return btn; } },
-      ], menu.lessons));
+      // the lessons for one day at a time, by age and level (sell-lessons.js)
+      drawLessons(b, { menu, tiers: TIERS, first: FIRST, add, price });
+      const t = select(TIERS, FIRST, { name: 'package-tier', 'aria-label': 'Package guest type' });
       if ((menu.packages || []).length) {
+        b.append(h('div', { class: 'menu-tools' }, field('Package guest type', t)));
         b.append(h('h3', null, 'Lesson packages'), h('p', { class: 'muted small' }, 'Sold once, then spent one lesson at a time when the student is booked in (Ski school > Roster).'),
           h('div', { class: 'tiles' }, menu.packages.map((p) => h('button', { type: 'button', class: 'tile', 'data-package': p.id, onclick: () => add({ type: 'lesson_package', product_id: p.id, name: p.name, tier: t.value, quantity: 1, detail: `${p.uses} lessons` }) },
             h('strong', null, p.name), h('small', { class: 'muted' }, `${p.uses} lessons${p.valid_days > 1 ? `, valid ${p.valid_days} days` : ''}`), h('span', { class: 'tile-price' }, money(price(p, t.value)))))));
@@ -204,6 +201,8 @@ async function sellPanel(root) {
           button('+', () => { l.quantity = Math.min(l.quantity + 1, 200); return refresh(); }, { small: true })) : h('span'),
         button('Remove', () => { basket.splice(i, 1); return refresh(); }, { small: true, kind: 'link' }));
     })));
+    // a lesson and a lift ticket for different days: a warning, never a refusal
+    if (quote && (quote.warnings || []).length) basketBox.append(h('div', { class: 'notice warn', role: 'status', 'data-day-warning': '' }, quote.warnings.map((w) => h('div', null, w))));
     if (quote) {
       clear(summary);
       if (quote.discount_cents) {

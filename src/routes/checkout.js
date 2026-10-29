@@ -26,6 +26,9 @@ const F = require('../lib/rentalfit');
 const terminal = require('./terminal');
 const PPS = require('../lib/partnerpasses');
 const ACT = require('../lib/activities');
+const GT = require('../lib/guesttypes');
+const LS = require('../lib/lessonsale');
+const { studentClash, clashWords } = require('../lib/lessonrules');
 
 const checkout = express.Router();
 const giftCards = express.Router();
@@ -49,7 +52,8 @@ const lineSchema = z.discriminatedUnion('type', [
     // A partner pass day (Indy Pass and the like): free or discounted by the program's rules (lib/partnerpasses.js).
     partner: z.object({ program_id: z.number().int().positive(), number: z.string().trim().min(1).max(60), level: z.string().max(30).optional(), id_checked: z.boolean().optional() }).optional() }),
   z.object({ type: z.literal('lesson_package'), product_id: z.number().int().positive(), tier: tierEnum.default('adult'), participant: who }),
-  z.object({ type: z.literal('lesson'), session_id: z.number().int().positive(), tier: tierEnum.default('adult'), participant: who }),
+  // safety: the student's allergies, medical notes, pickup and contact, and the family's text and photo answers (lib/lessonsale.js)
+  z.object({ type: z.literal('lesson'), session_id: z.number().int().positive(), tier: tierEnum.default('adult'), participant: who, safety: LS.safetySchema.optional() }),
   z.object({
     type: z.literal('rental'), product_id: z.number().int().positive(), tier: tierEnum.default('adult'), valid_on: dateStr.optional(), due_at: dateTimeStr.optional(), participant: who,
     items: z.array(R.gearLine).max(60).optional(),
@@ -96,6 +100,9 @@ const checkoutSchema = z.object({
   // Quick sale: day tickets, multi-day tickets, punch cards and vouchers only, with no customer record (a mountain can
   // switch this off in Account to require a name on every sale).
   quick: z.boolean().optional(),
+  // Sell sends this: each guest's type follows them across their lines (lib/guesttypes.js followPerson). The check before
+  // payment returns the new total, so the counter always takes the right amount.
+  follow_types: z.boolean().optional(),
 });
 const QUICK_KINDS = ['day_ticket', 'multi_day', 'punch_card', 'voucher'];
 
@@ -248,9 +255,11 @@ checkout.get('/menu', requireRole(...sellers), async (req, res) => {
                 FROM products p WHERE p.tenant_id = ? AND p.active = 1 ORDER BY sold DESC, p.name`, [tenantId]),
     rows(pool, 'SELECT product_id, tier, price_cents FROM price_tiers WHERE tenant_id = ?', [tenantId]),
     rows(pool, `SELECT s.id, s.product_id, pr.name, pr.base_price_cents, s.discipline, s.ability_level, s.format, s.age_group, s.meeting_place, s.starts_at, s.ends_at, s.capacity,
+                  s.level_min, s.level_max, s.age_min, s.age_max, ip.first_name AS instructor_first,
                   (SELECT COUNT(*) FROM lesson_bookings b WHERE b.tenant_id = s.tenant_id AND b.session_id = s.id AND b.status IN ('booked','attended')) AS booked
                 FROM lesson_sessions s JOIN products pr ON pr.id = s.product_id AND pr.tenant_id = s.tenant_id
-                WHERE s.tenant_id = ? AND s.status = 'scheduled' AND DATE(s.starts_at) BETWEEN ? AND ? ORDER BY s.starts_at LIMIT 200`, [tenantId, today, addDays(today, 14)]),
+                LEFT JOIN staff st ON st.tenant_id = s.tenant_id AND st.id = s.instructor_id LEFT JOIN people ip ON ip.tenant_id = st.tenant_id AND ip.id = st.person_id
+                WHERE s.tenant_id = ? AND s.status = 'scheduled' AND DATE(s.starts_at) BETWEEN ? AND ? ORDER BY s.starts_at LIMIT 400`, [tenantId, today, addDays(today, 14)]),
     rows(pool, `SELECT p.id, p.name, p.kind, p.season, p.capacity, p.price_cents, p.starts_on, p.ends_on, p.includes_ticket, p.includes_rental, p.offers_helmet, p.disciplines,
                   (SELECT COUNT(*) FROM program_enrollments e WHERE e.tenant_id = p.tenant_id AND e.program_id = p.id AND e.status = 'enrolled') AS enrolled
                 FROM programs p WHERE p.tenant_id = ? AND (p.ends_on IS NULL OR p.ends_on >= ?) ORDER BY p.name`, [tenantId, today]),
@@ -266,7 +275,8 @@ checkout.get('/menu', requireRole(...sellers), async (req, res) => {
     tickets: products.filter((p) => TICKET_KINDS.includes(p.kind) && p.kind !== 'voucher').map(withTiers),
     rentals: products.filter((p) => p.kind === 'rental').map(withTiers),
     packages: products.filter((p) => p.kind === 'lesson' && p.uses > 1).map(withTiers),
-    lessons: sessions.map((s) => ({ ...s, spots_left: Math.max(s.capacity - Number(s.booked), 0) })),
+    // the window's day strip (Sell, Lessons): level range and ages in words, and whether the lesson has started
+    lessons: LS.menuLessons(sessions.map((x) => ({ ...x, tiers: Object.fromEntries(tiers.filter((t) => t.product_id === x.product_id).map((t) => [t.tier, t.price_cents])) })), nowIn(tenant.timezone)),
     programs: await withSessions(tenantId, programs.map((p) => ({ ...p, spots_left: p.capacity === null ? null : Math.max(p.capacity - Number(p.enrolled), 0) })), today),
     stock: Object.fromEntries(stock.map((s) => [s.category, Number(s.available)])),
     gift_card: { min_cents: GIFT_MIN, max_cents: GIFT_MAX },
@@ -306,7 +316,7 @@ checkout.post('/quote', requireRole(...sellers), validate(quoteSchema), async (r
   const today = todayIn(tenant.timezone);
   const priced = await priceLines(pool, tenantId, req.body.lines, today);
   const t = await totals(pool, tenantId, priced, req.body.promo_code, today, false);
-  res.json({ lines: priced.map(describe), subtotal_cents: t.subtotal, discount_cents: t.discount, tax_cents: t.tax, taxes: t.taxes, total_cents: t.total, gift_card_cents: t.giftCents });
+  res.json({ lines: priced.map(describe), subtotal_cents: t.subtotal, discount_cents: t.discount, tax_cents: t.tax, taxes: t.taxes, total_cents: t.total, gift_card_cents: t.giftCents, warnings: LS.dayWarnings(priced) });
 });
 
 // ---------------------------------------------------------------- checkout
@@ -327,6 +337,9 @@ async function runSale(conn, req, body, { check = false } = {}) {
     await ACT.lockProducts(conn, tenantId, body.lines.filter((l) => l.type === 'activity').map((l) => l.product_id));
     const tenant = await one(conn, 'SELECT timezone, comp_counter_limit_cents, waiver_text, quick_sale FROM tenants WHERE id = ?', [tenantId]);
     const today = todayIn(tenant.timezone);
+    // a guest's type follows them: a child on the lesson is a child on the rental and the ticket too (lib/guesttypes.js)
+    body = { ...body, lines: body.lines.map((l) => ({ ...l, ...(l.holders ? { holders: [...l.holders] } : {}) })) };
+    const typeChanges = body.follow_types ? await GT.followPerson(conn, tenantId, body, today) : [];
     const lines = body.lines;
 
     // ---- price first, so a bad line or a wrong payment fails before anything is saved
@@ -472,6 +485,9 @@ async function runSale(conn, req, body, { check = false } = {}) {
       const adopting = Boolean(existing && existing.status === 'booked' && existing.unpaid); // their spot is already held
       if (!adopting && existing && ['booked', 'attended'].includes(existing.status)) throw conflict('That student is already booked into this lesson');
       if (!adopting && (await spotsLeft(conn, tenantId, s.id, s.capacity)) < 1) throw conflict(`${p.name} on ${p.day} is full`);
+      // not already in another lesson or a program meeting at that time (lib/lessonrules.js)
+      const clash = await studentClash(conn, tenantId, student, s.starts_at, s.ends_at, { ignoreSessionId: s.id });
+      if (clash) throw conflict(`${(personRows.get(student) || {}).first_name || 'The student'}: ${clashWords(clash)}`);
       return { s, existing, adopting };
     };
     // An activity rider: the clerk's word on the limits, old enough, and (when the attraction asks) a waiver.
@@ -553,7 +569,7 @@ async function runSale(conn, req, body, { check = false } = {}) {
       }
     }
     if (check) {
-      throw new Checked({ ok: true, lines: priced.map(describe), subtotal_cents: t.subtotal, discount_cents: t.discount, tax_cents: t.tax, taxes: t.taxes, total_cents: t.total, gift_card_cents: t.giftCents });
+      throw new Checked({ ok: true, lines: priced.map(describe), subtotal_cents: t.subtotal, discount_cents: t.discount, tax_cents: t.tax, taxes: t.taxes, total_cents: t.total, gift_card_cents: t.giftCents, type_changes: typeChanges, warnings: LS.dayWarnings(priced) });
     }
 
     // ---- the order
@@ -609,8 +625,9 @@ async function runSale(conn, req, body, { check = false } = {}) {
           bookingId = (await conn.query('INSERT INTO lesson_bookings (tenant_id, session_id, person_id) VALUES (?, ?, ?)', [tenantId, s.id, student]))[0].insertId;
         }
         await item({ product_id: s.product_id, person_id: student, session_id: s.id });
+        await LS.saveSafety(conn, req, tenantId, bookingId, student, s, ln.safety);
         await audit(conn, req, 'book', 'lesson_sessions', s.id, { person_id: student, order_id: orderId });
-        done.lessons.push({ booking_id: bookingId, session_id: s.id, person_id: student, name: p.name, starts_at: s.starts_at });
+        done.lessons.push({ booking_id: bookingId, session_id: s.id, person_id: student, name: p.name, starts_at: s.starts_at, ...(await LS.receiptBits(conn, tenantId, s, student)) });
       } else if (p.type === 'rental') {
         const renter = personOf(ln);
         const gear = ln.items || [];
@@ -727,6 +744,7 @@ async function runSale(conn, req, body, { check = false } = {}) {
       id: orderId, person_id: buyer.id, customer: buyer.id ? { id: buyer.id, created: buyer.created, matched: buyer.matched } : null,
       subtotal_cents: t.subtotal, discount_cents: t.discount, tax_cents: t.tax, taxes: t.taxes, total_cents: t.total, change_due_cents: change,
       lines: priced.map(describe), payments: body.payments.map((p) => ({ tender: p.tender, amount_cents: p.amount_cents })),
+      type_changes: typeChanges, warnings: LS.dayWarnings(priced),
       ...done,
     };
   }
@@ -735,6 +753,8 @@ async function runSale(conn, req, body, { check = false } = {}) {
 checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req, res) => {
   const result = await tx((conn) => runSale(conn, req, req.body));
   if (result.program_adjustments && result.program_adjustments.length) await PP.afterPassBought(req.auth.tenantId, result.program_adjustments).catch(() => {});
+  // each lesson booked gets its confirmation (lib/lessonconfirm.js), after the sale has committed
+  await LS.confirmAll(req, result.lessons);
   res.status(201).json(result);
 });
 

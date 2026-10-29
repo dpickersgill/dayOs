@@ -3205,3 +3205,87 @@ fieldset.safety legend { font-weight: 700; padding: 0 4px; }
   .myday-marks { justify-content: stretch; }
   .myday-marks .btn { flex: 1 1 0; }
 }
+
+/* ---- ski school: check-in, the lineup board and lesson labels (round 2, Track LINEUP) */
+.lu-scan-row { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }
+.lu-scan-row .lu-scan { flex: 1 1 260px; min-height: 52px; font-size: 1.25rem; }
+.lu-list { display: grid; gap: 6px; margin: 0; padding: 0; }
+.lu-row { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.lu-row.in { border-left: 5px solid var(--open); }
+.lu-who { display: grid; gap: 2px; min-width: 0; flex: 1 1 220px; }
+.lu-act { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.lu-tools { flex-wrap: wrap; align-items: end; }
+.lu-head h2 { margin: 0; }
+.lu-board { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); align-items: start; }
+.lu-col { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 10px; display: grid; gap: 8px; min-height: 140px; align-content: start; }
+.lu-col.attention { border-left: 4px solid var(--hold); }
+.lu-col.over { outline: 3px dashed var(--trail-blue); outline-offset: -3px; }
+.lu-col header { display: grid; gap: 4px; }
+.lu-col select { width: 100%; }
+.lu-col .lu-levels { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 6px; align-items: center; }
+.lu-col .lu-levels select { min-width: 0; }
+.lu-waiting { background: var(--surface-2); border-style: dashed; }
+.lu-chips { display: grid; gap: 6px; margin: 0; padding: 0; }
+.lu-chips > li.lu-chip { display: flex; gap: 8px; align-items: center; min-height: 44px; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 22px; background: var(--surface); cursor: grab; }
+.lu-chips > li.lu-chip.in { border: 1px solid var(--open); border-left-width: 4px; }
+.lu-list > li.lu-row { padding: 10px 12px; border: 1px solid var(--line); }
+.lu-list > li.lu-row.in { border-left: 5px solid var(--open); }
+.lu-chip.dragging { opacity: 0.5; }
+.lu-chip:focus-visible { outline: 3px solid var(--focus); }
+.lu-chip-name { font-weight: 700; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lu-chip-meta { font-size: 0.8125rem; color: var(--muted); }
+.lu-chip-flag { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--closed); color: #fff; font-weight: 700; font-size: 0.8125rem; }
+.lu-empty { margin: 0; }
+.lu-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(0, 0, 0, 0.35); vertical-align: middle; }
+.lu-host:fullscreen { background: var(--snowpack); padding: 24px; overflow: auto; }
+.lu-host:fullscreen .lu-chip { font-size: 1.125rem; }
+.c-red { background: #d64545; } .c-blue { background: #2f6fd0; } .c-green { background: #2e8b57; } .c-orange { background: #e8892b; } .c-purple { background: #7e57c2; }
+.c-yellow { background: #f2c94c; } .c-pink { background: #e86fa6; } .c-teal { background: #1f9e9e; } .c-brown { background: #8d6e63; } .c-gray { background: #8a959b; }
+.label-roll { display: grid; gap: 10px; justify-items: center; }
+.label-sheet { display: grid; grid-template-columns: repeat(3, 2.4in); gap: 0.1in; justify-content: center; }
+.lesson-label { width: 2.25in; height: 1.25in; padding: 0.06in 0.08in; box-sizing: border-box; display: grid; grid-template-rows: auto auto auto 1fr; gap: 1px; overflow: hidden; font-family: Arial, Helvetica, sans-serif; border: 1px dashed #000; border-radius: 0; }
+.lesson-label .ll-top { display: flex; justify-content: space-between; align-items: center; gap: 4px; }
+.lesson-label .ll-name { font-size: 15pt; line-height: 1.05; }
+.lesson-label .ll-allergy { font-size: 7pt; font-weight: 700; border: 1.5px solid #000; padding: 0 3px; }
+.lesson-label .ll-mid { display: flex; gap: 6px; align-items: center; font-size: 8pt; font-weight: 700; }
+.lesson-label .ll-color { color: #000; padding: 0 4px; border: 1px solid #000; }
+.lesson-label .ll-small { font-size: 7pt; line-height: 1.1; }
+.lesson-label .ll-code { display: flex; align-items: end; gap: 4px; font-size: 6pt; }
+.lesson-label .ll-code svg { height: 0.28in; width: auto; max-width: 1.6in; }
+@page lesson-roll { size: 2.25in 1.25in; margin: 0; }
+@media print {
+  .lesson-label.roll { page: lesson-roll; border: 0; margin: 0; break-after: page; }
+  .label-sheet .lesson-label { margin: 0; break-inside: avoid; }
+}
+
+/* ---- Sell, Lessons: one day at a time, by age and level (round 2, Track LINEUP) */
+.sl-find { display: grid; gap: 6px; margin-bottom: 8px; }
+.sl-find input { width: 100%; }
+.sl-results { gap: 4px; }
+.sl-results > li { border: 0; padding: 0; }
+.sl-tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 130px), 1fr)); gap: 8px 12px; align-items: end; }
+.sl-tools .check { grid-column: 1 / -1; }
+.sl-tools .field { min-width: 0; margin: 0; }
+.sl-days { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.sl-days .btn { display: inline-flex; gap: 4px; align-items: baseline; min-height: 44px; }
+.sl-days .btn[aria-pressed='true'] { background: var(--sel-bg); color: var(--sel-ink); border-color: var(--sel-bg); }
+.sl-days .btn[aria-pressed='true'] small { color: inherit; }
+.sl-list { display: grid; gap: 8px; }
+.sl-card { display: grid; grid-template-columns: 100px 1fr auto; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.sl-card.unfit { opacity: 0.75; border-style: dashed; }
+.sl-time { display: grid; }
+.sl-time strong { font-size: 1.0625rem; }
+.sl-what { display: grid; gap: 2px; min-width: 0; }
+.sl-side { display: grid; gap: 4px; justify-items: end; text-align: right; }
+.sl-side .btn { min-width: 72px; }
+.sl-other summary { cursor: pointer; padding: 6px 0; }
+.sl-other { display: grid; gap: 8px; }
+.sl-student { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.who-safety { border-left: 3px solid var(--line-strong); padding-left: 10px; margin: 0 0 8px; }
+.who-safety summary { cursor: pointer; font-weight: 700; padding: 4px 0; }
+@media (max-width: 560px) {
+  .sl-card { grid-template-columns: 1fr auto; }
+  .sl-time { grid-column: 1 / -1; display: flex; gap: 8px; align-items: baseline; }
+}
+@media print { .lesson-label .ll-color, .lesson-label .ll-allergy { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+.sl-tools input, .sl-tools select { width: 100%; min-width: 0; box-sizing: border-box; }

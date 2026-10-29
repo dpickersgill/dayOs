@@ -4,7 +4,7 @@
 
 import { typeName } from './guesttypes.js';
 import { get } from './api.js';
-import { h, clear, money, label, fmtDate, fmtDateTime, button, dialog, toast, loading, errorBox } from './ui.js';
+import { h, clear, money, label, fmtDate, fmtDateTime, fmtTime, button, dialog, toast, loading, errorBox } from './ui.js';
 import { code128, qr } from './barcode.js';
 
 const range = (a, b) => (a === b ? fmtDate(a) : `${fmtDate(a)} to ${fmtDate(b)}`);
@@ -17,6 +17,10 @@ function lineText(l) {
   if (l.line_kind === 'ticket' || l.line_kind === 'rental') bits.push(typeName(l.tier));
   return bits.join(', ');
 }
+
+/** A lesson on the receipt: who, which lesson, when, and where to meet (with the instructor's first name when known). */
+const lessonWords = (l) => [`${nameOf(l) || 'Student'}: ${l.product}`, `${fmtDate(l.starts_at)}, ${fmtTime(l.starts_at)} to ${fmtTime(l.ends_at)}`,
+  l.meeting_place ? `Meet at ${l.meeting_place}` : null, l.instructor_first ? `Instructor ${l.instructor_first}` : null].filter(Boolean).join('. ');
 
 /** The receipt as a sheet. data is GET /orders/:id/receipt. */
 export function receiptSheet(data) {
@@ -40,6 +44,8 @@ export function receiptSheet(data) {
       ...data.payments.map((p) => row(`${label(p.tender)}${cardText(p) ? ` ${cardText(p)}` : ''}${p.comp_reason ? ` (${label(p.comp_reason)})` : ''}`, money(p.amount_cents))),
       o.change_due_cents ? row('Change', money(o.change_due_cents)) : null,
       o.refunded_cents ? row('Refunded', `-${money(o.refunded_cents)}`) : null),
+    (data.lessons || []).length ? h('div', { class: 'rc-lessons', 'data-receipt-lessons': '' }, h('strong', null, 'Lessons'), data.lessons.map((l) => h('div', { class: 'rc-sub' }, lessonWords(l))),
+      h('div', { class: 'rc-sub' }, 'Please be at the meeting place 15 minutes early.')) : null,
     data.gift_cards.length ? h('div', { class: 'rc-sub' }, data.gift_cards.map((g) => h('div', null, `Gift card ${g.code}: ${money(g.initial_cents)}`))) : null,
     data.tickets.length ? h('div', { class: 'rc-sub' }, `${data.tickets.length} ticket${data.tickets.length === 1 ? '' : 's'} printed separately.`) : null,
     data.lines.some((l) => l.line_kind === 'rental') ? h('div', { class: 'rc-code' }, h('div', { class: 'rc-sub' }, 'Show this at the rental counter'), code128(`ORD-${o.id}`, { height: 44, module: 1.6 }), h('div', null, `ORD-${o.id}`)) : null,
@@ -74,6 +80,7 @@ export function receiptText(data) {
     out.push('', 'Your tickets:');
     for (const t of data.tickets) out.push(`${t.product} for ${nameOf(t) || 'guest'}, ${range(t.valid_from, t.valid_to)}${t.start_time ? `, ${clock12(t.start_time)}` : ''}: ${t.code}`);
   }
+  if ((data.lessons || []).length) { out.push('', 'Lessons:'); for (const l of data.lessons) out.push(lessonWords(l)); }
   if (data.lines.some((l) => l.line_kind === 'rental')) out.push('', `Rental pickup code: ORD-${o.id}`);
   if (data.rental_form_url) out.push('', 'Fill in your rental form (sizes and signature for each renter):', data.rental_form_url);
   for (const g of data.gift_cards) out.push('', `Gift card ${g.code} (${money(g.initial_cents)})`);

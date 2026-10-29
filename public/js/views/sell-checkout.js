@@ -4,7 +4,8 @@
 
 import { typeName } from '../guesttypes.js';
 import { get, post } from '../api.js';
-import { h, clear, money, toCents, centsToInput, state, input, select, field, button, toast, dialog, label, errorBox, fmtDateTime, appendAll } from '../ui.js';
+import { h, clear, ctx, money, toCents, centsToInput, state, input, select, field, button, toast, dialog, label, errorBox, fmtDateTime, fmtTime, appendAll } from '../ui.js';
+import { safetyFields } from './lesson-safety.js';
 import { customerCapture } from './customer-form.js';
 import { printButtons } from '../print.js';
 
@@ -14,7 +15,7 @@ export const lineApi = (l, who, holders, limitsOk) => {
   const { type } = l;
   if (type === 'activity') return { type, product_id: l.product_id, tier: l.tier, valid_on: l.valid_on, ...(l.start_time ? { start_time: l.start_time } : {}), ...(who ? { participant: who } : {}), ...(limitsOk ? { limits_ok: true } : {}) };
   if (type === 'ticket') return { type, product_id: l.product_id, tier: l.tier, quantity: l.quantity, valid_on: l.valid_on, ...(holders ? { holders } : {}) };
-  if (type === 'lesson') return { type, session_id: l.session_id, tier: l.tier, ...(who ? { participant: who } : {}) };
+  if (type === 'lesson') return { type, session_id: l.session_id, tier: l.tier, ...(who ? { participant: who } : {}), ...(l.safety ? { safety: l.safety } : {}) };
   if (type === 'lesson_package') return { type, product_id: l.product_id, tier: l.tier, ...(who ? { participant: who } : {}) };
   // eslint-disable-next-line no-unused-vars
   if (type === 'rental') return { type, product_id: l.product_id, tier: l.tier, items: (l.items || []).map(({ _item, _category, ...g }) => g), ...(l.fit ? { fit: l.fit } : {}), ...(l.signoff ? { signoff: l.signoff } : {}), ...(who ? { participant: who } : {}) };
@@ -42,7 +43,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   const hasTickets = basket.some((l) => l.type === 'ticket' || l.type === 'activity'); // an activity asks for the same details as a ticket
   const hasLesson = basket.some((l) => l.type === 'lesson' || l.type === 'lesson_package');
   const hasRental = basket.some((l) => l.type === 'rental');
-  const total = quote.total_cents;
+  let total = quote.total_cents; // the check before payment can change it: a guest type that follows the person
   // Everything sold is for a named person: one slot per ticket, and one per lesson, rental and program place.
   const slots = [];
   for (const l of basket) {
@@ -91,7 +92,26 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   const usedBy = (id) => slots.filter((s) => assign.get(s) === id);
   const guardianFor = (id) => (guardianPick.has(id) ? guardianPick.get(id) : (id !== 'customer' && !customer.isMinor() ? 'customer' : ''));
 
+  // Who each item is for, filled in as people are added (Track LINEUP): a child's ticket, lesson and rental go to a
+  // child, the adults' to the adults, one of each kind per person. A choice the cashier makes by hand is never changed.
+  const touched = new Set();
+  function autoAssign() {
+    if (people.length === 0) return;
+    const used = new Map();
+    const take = (k, id) => { if (!used.has(k)) used.set(k, new Set()); used.get(k).add(id); };
+    const kindOf = (s) => (s.line.type === 'ticket' ? `ticket:${s.line.product_id}` : s.line.type);
+    for (const s of slots) if (touched.has(s) || (s.line.items && s.line.items.length)) take(kindOf(s), assign.get(s));
+    for (const s of slots) {
+      if (touched.has(s) || (s.line.items && s.line.items.length)) continue;
+      const minorLine = ['child', 'youth'].includes(s.line.tier) || Boolean(s.line.student);
+      const k = kindOf(s);
+      const free = everyone().filter((e) => !(used.get(k) || new Set()).has(e.id) && (e.id === 'customer' || usedBy(e.id).length || true));
+      const cand = free.find((e) => e.cap.isMinor() === minorLine && (e.id === 'customer' || e.cap.payload('details').details || e.cap.person()));
+      if (cand) { assign.set(s, cand.id); take(k, cand.id); }
+    }
+  }
   function refreshWho() {
+    autoAssign();
     clear(whoBox);
     riderEls.clear();
     refreshGuardians();
@@ -103,7 +123,8 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       const l = s.line;
       const sel = select([['customer', `Same as ${custName()}`], ...people.map((p) => [p.id, nameOf(p)])], assign.get(s), { 'aria-label': `Who is ${s.aria} for` });
       // a fitting belongs to one person: choosing someone else for the rental starts it again
-      sel.addEventListener('change', () => { assign.set(s, sel.value); if (l.type === 'rental') { l.items = []; delete l.fit; delete l.signoff; } refreshWho(); });
+      sel.addEventListener('change', () => { touched.add(s); assign.set(s, sel.value); if (l.type === 'rental') { l.items = []; delete l.fit; delete l.signoff; } refreshWho(); });
+      if (l.type === 'lesson') safetyFor(s, sel.value);
       const extra = l.type === 'rental' ? [button(l.items && l.items.length ? `Gear: ${l.items.length} chosen` : 'Fit now (optional)', () => openGear(s), { small: true }), l.items && l.items.length ? null : h('small', { class: 'muted' }, ' or fit at the rental shop')] : [];
       if (needsLimits(s)) {
         const cb = h('input', { type: 'checkbox', checked: Boolean(limitsOk.get(s)), 'data-limits': '' });
@@ -113,9 +134,30 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
         extra.push(h('label', { class: 'check limits-ok' }, cb, h('span', null, ' ', who, ' meets the limits', h('small', { class: 'muted' }, ` ${l.attraction.limits_text}`))));
       }
       whoBox.append(h('div', { class: `who-row${needsLimits(s) ? ' who-limits' : ''}` }, h('div', null, h('strong', null, s.text), h('small', { class: 'muted' }, ` ${l.detail || ''}`)), sel, ...extra));
+      if (l.type === 'lesson') whoBox.append(safety.get(s).box);
     }
     whoBox.append(button('Someone else is taking part', () => addPerson(), { small: true }));
     renameRiders();
+  }
+  // ---- each lesson's safety details and the family's answers on texts and photos (lesson-safety.js). The same fields
+  // are kept while people are added or changed; they are filled from the student's last lesson when they are on file.
+  const safety = new Map(); // slot -> { f, box, filledFor }
+  const textsOn = Boolean(ctx.me && ctx.me.modules && ctx.me.modules.includes('lesson_texts'));
+  function safetyFor(s, whoKey) {
+    if (!safety.has(s)) {
+      const f = safetyFields({ name: s.text, texts: textsOn, photos: true });
+      if (s.line.safety_prefill) f.fill(s.line.safety_prefill);
+      const sum = h('summary', null, 'Allergies, pickup and who to call');
+      safety.set(s, { f, sum, box: h('details', { class: 'who-safety', open: true }, sum, f.el), filledFor: null });
+    }
+    const x = safety.get(s);
+    const e = everyone().find((p) => p.id === whoKey);
+    const person = e && e.cap.person();
+    x.sum.textContent = `Allergies, pickup and who to call${e ? ` for ${e.name}` : ''}`;
+    if (person && person.id && x.filledFor !== person.id) {
+      x.filledFor = person.id;
+      get(`/skischool/lesson-safety/${person.id}`).then((r) => x.f.fill(r.safety || {})).catch(() => {});
+    }
   }
   /** The rider's name beside each limits box, kept up to date as names are typed. */
   const riderEls = new Map();
@@ -190,6 +232,13 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   }
   customer.el.addEventListener('input', () => { for (const o of whoBox.querySelectorAll('option[value=customer]')) o.textContent = `Same as ${custName()}`; refreshGuardians(); refreshWaivers(); renameRiders(); });
 
+  // a student picked in Sell's lesson list is added as the person taking that lesson
+  for (const s of slots) {
+    const st = s.line.type === 'lesson' && s.line.student;
+    if (!st) continue;
+    const already = people.find((p) => p.capture.person() && p.capture.person().id === st.id);
+    assign.set(s, already ? already.id : addPerson(st));
+  }
   const step1 = h('div', { class: 'stack' },
     h('h3', null, 'Customer'),
     h('p', { class: 'muted small' }, 'Every item sold needs a name. Find the customer by name, phone or email, or type their details. Everyone needs a date of birth and sex; under 18s do not need a phone or email, but do need a parent or guardian.'),
@@ -212,6 +261,8 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   const due = h('div', { class: 'basket-total', role: 'status' });
   const changeBig = h('div', { class: 'change-due', role: 'status', hidden: true });
   const step2Error = h('div');
+  const totalEl = h('div', { class: 'basket-total' }, `Total ${money(total)}`);
+  const typeNote = h('div');
   const complete = button('Complete sale', () => finish(), { kind: 'primary' });
 
   // ---- card readers at the counter (routes/terminal.js): the amount goes to the reader, the guest taps, inserts or swipes.
@@ -379,7 +430,8 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   const wayRow = h('div', { class: 'seg tender-row', role: 'group', 'aria-label': 'How are they paying' }, ways.map(([k, t]) => { const b = h('button', { type: 'button', class: 'btn', 'aria-pressed': 'false', onclick: () => choose(k) }, t); wayBtns.set(k, b); return b; }));
   const step2 = h('div', { class: 'stack' },
     h('h3', null, 'Payment'),
-    h('div', { class: 'spread' }, h('div', { class: 'muted' }, [quote.discount_cents ? `Discount ${money(quote.discount_cents)}` : '', quote.tax_cents ? `${quote.discount_cents ? ' · ' : ''}Tax ${money(quote.tax_cents)}` : ''].join('')), h('div', { class: 'basket-total' }, `Total ${money(total)}`)),
+    h('div', { class: 'spread' }, h('div', { class: 'muted' }, [quote.discount_cents ? `Discount ${money(quote.discount_cents)}` : '', quote.tax_cents ? `${quote.discount_cents ? ' · ' : ''}Tax ${money(quote.tax_cents)}` : ''].join('')), totalEl),
+    typeNote,
     total ? h('div', { class: 'stack' }, wayRow, panel) : h('p', { class: 'muted' }, 'Nothing is due, so no payment is needed.'),
     payList, due, changeBig, step2Error);
   if (total) choose('cash');
@@ -413,7 +465,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   }
 
   function build() {
-    const body = { channel: 'window', promo_code: promo || undefined, lines: [], payments: payments.map((p) => ({ ...p })) };
+    const body = { channel: 'window', follow_types: true, promo_code: promo || undefined, lines: [], payments: payments.map((p) => ({ ...p })) };
     if (quick) return { ...body, quick: true, lines: basket.map((l) => lineApi(l, null, null)) };
     const c = customer.payload('details');
     const gOf = (id, cap) => { const g = guardianFor(id); return cap.isMinor() && g ? { guardian: g } : {}; };
@@ -426,6 +478,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
     }
     body.lines = basket.map((l) => {
       const mine = slots.filter((s) => s.line === l);
+      if (l.type === 'lesson' && mine.length && safety.has(mine[0])) { const v = safety.get(mine[0]).f.value(); l.safety = Object.keys(v).length ? v : undefined; }
       if (l.type === 'ticket') return lineApi(l, null, mine.map((s) => assign.get(s)));
       const who = mine.length ? assign.get(mine[0]) : null;
       return lineApi(l, who && who !== 'customer' ? who : null, null, mine.length ? limitsOk.get(mine[0]) : false);
@@ -471,7 +524,13 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
     clear(errs);
     quick = asQuick;
     if (!asQuick) { const p = problems(); if (p) { errs.append(errorBox(new Error(p))); return; } }
-    try { await check(); } catch (err) { errs.append(errorBox(err)); return; }
+    let r;
+    try { r = await check(); } catch (err) { errs.append(errorBox(err)); return; }
+    // a guest's type follows them (a child on the lesson is a child on the rental): the total may have changed
+    if (r && typeof r.total_cents === 'number' && r.total_cents !== total) total = r.total_cents;
+    clear(totalEl).append(`Total ${money(total)}`);
+    clear(typeNote);
+    if (r && (r.type_changes || []).length) typeNote.append(h('div', { class: 'notice', role: 'status' }, r.type_changes.map((c) => h('div', null, `${c.name}: the ${label(c.line)} is priced as ${typeName(c.to)}, the same as their other items.`))));
     show(2); drawPayments();
   };
 
@@ -504,7 +563,8 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       out.customer ? h('p', { class: 'muted' }, out.customer.created ? 'New customer saved.' : 'Customer record updated.') : null,
       codes(out.tickets.map((t) => h('div', { class: 'code' }, t.code, h('small', null, [t.holder, t.product, typeName(t.tier), t.valid_from === t.valid_to ? t.valid_from : `${t.valid_from} to ${t.valid_to}`].filter(Boolean).join(', ')))), `${out.tickets.length} ticket${out.tickets.length === 1 ? '' : 's'}`),
       codes(out.gift_cards.map((g) => h('div', { class: 'code' }, g.code, h('small', null, `${money(g.amount_cents)}${g.recipient_name ? ` for ${g.recipient_name}` : ''}`))), 'Gift cards (give the guest the code)'),
-      out.lessons.length ? h('section', { class: 'stack' }, h('h3', null, 'Lessons booked'), h('ul', { class: 'plain' }, out.lessons.map((l) => h('li', null, `${l.name}, ${fmtDateTime(l.starts_at)}`)))) : null,
+      out.lessons.length ? h('section', { class: 'stack', 'data-lessons-booked': '' }, h('h3', null, 'Lessons booked'), h('ul', { class: 'plain' }, out.lessons.map((l) => h('li', null,
+        h('strong', null, l.student || 'Student'), `: ${l.name}, ${fmtDateTime(l.starts_at)}${l.ends_at ? ` to ${fmtTime(l.ends_at)}` : ''}`, l.meeting_place ? `. Meet at ${l.meeting_place}` : '', l.instructor_first ? ` with ${l.instructor_first}` : '', '.')))) : null,
       out.rentals.some((r) => r.status !== 'to_fit') ? h('section', { class: 'stack' }, h('h3', null, 'Gear out'), h('ul', { class: 'plain' }, out.rentals.filter((r) => r.status !== 'to_fit').map((r) => h('li', null, `${r.items.join(', ')}, due back ${fmtDateTime(r.due_at)}`)))) : null,
       out.rentals.some((r) => r.status === 'to_fit') ? h('section', { class: 'stack' }, h('h3', null, 'Ready to fit'), h('p', null, `${out.rentals.filter((r) => r.status === 'to_fit').length} rental${out.rentals.filter((r) => r.status === 'to_fit').length === 1 ? '' : 's'} paid. Send the guest to the rental shop with the receipt.`)) : null,
       out.programs.length ? h('section', { class: 'stack' }, h('h3', null, 'Program places'), h('ul', { class: 'plain' }, out.programs.map((p) => h('li', null, p.name)))) : null,

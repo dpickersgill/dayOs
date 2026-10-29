@@ -188,6 +188,8 @@ test.before(async (t) => {
   ok(await api('POST', '/rentals/contracts', { token: o, body: { unpaid_reason: 'Test hand-out', person_id: D.ann, due_at: `${today}T16:30`, items: [{ rental_item_id: D.items[0] }] } }));
   D.session = ok(await api('POST', '/skischool/sessions', { token: o, body: { product_id: D.lesson, starts_at: `${today}T10:00`, ends_at: `${today}T12:00`, capacity: 4, instructor_id: D.s2 } })).id;
   ok(await api('POST', `/skischool/sessions/${D.session}/bookings`, { token: o, body: { person_id: D.ann } }));
+  // Sell lists lessons that have not started (sell-lessons.js): one tomorrow, so the counter tests do not depend on the clock
+  D.sellSession = ok(await api('POST', '/skischool/sessions', { token: o, body: { product_id: D.lesson, starts_at: `${addD(today, 1)}T10:00`, ends_at: `${addD(today, 1)}T12:00`, capacity: 4 } })).id;
   D.program = ok(await api('POST', '/programs', { token: o, body: { name: 'Junior Race Team', kind: 'race_team', season: '2026-27', capacity: 1, price_cents: 45000 } })).id;
   ok(await api('POST', `/programs/${D.program}/enrollments`, { token: o, body: { person_id: D.ann } }));
   ok(await api('POST', `/programs/${D.program}/enrollments`, { token: o, body: { person_id: D.bob } }));
@@ -1043,6 +1045,13 @@ async function renderSetup(view, key, role, token, extra) {
   return panel;
 }
 const openTab = async (root, text) => { [...root.querySelectorAll('[role=tab]')].find((t) => t.textContent === text).click(); await settle(); };
+// Sell, Lessons shows one day at a time (sell-lessons.js): find the lesson's card, trying each day in the strip.
+async function lessonCard(root, name) {
+  const find = () => [...root.querySelectorAll('.sl-card')].find((r) => r.textContent.includes(name));
+  if (find()) return find();
+  for (const b of [...root.querySelectorAll('.sl-days button')]) { b.click(); await settle(); if (find()) return find(); }
+  return undefined;
+}
 const topDialog = () => [...document.querySelectorAll('.overlay')].at(-1);
 
 test('sell: a ticket goes in the basket from the menu, the customer is added at checkout, and it is paid in cash', skip(), async () => {
@@ -1139,7 +1148,7 @@ test('sell: a day ticket opens on the quick sale, with guest details a tap away,
   await openTab(root, 'Tickets');
   tileFor(root, 'Adult Day').click(); await settle();
   await openTab(root, 'Lessons');
-  const row = [...root.querySelectorAll('tr')].find((r) => r.textContent.includes('Group Lesson'));
+  const row = await lessonCard(root, 'Group Lesson');
   [...row.querySelectorAll('button')].find((b) => b.textContent === 'Add').click(); await settle();
   clickBtn(root, 'Checkout'); await settle();
   const full = topDialog();
@@ -1153,7 +1162,7 @@ test('sell: a student with no waiver is refused before payment is taken, not aft
   await closeOverlays();
   const root = await renderView('sell', 'counter', T.counter);
   await openTab(root, 'Lessons');
-  const row = [...root.querySelectorAll('tr')].find((r) => r.textContent.includes('Group Lesson'));
+  const row = await lessonCard(root, 'Group Lesson');
   [...row.querySelectorAll('button')].find((b) => b.textContent === 'Add').click(); await settle();
   clickBtn(root, 'Checkout'); await settle();
   const dlg = topDialog();
@@ -1179,7 +1188,7 @@ test('sell: lessons, a rental, a program place and a gift card in one basket, fo
   const root = await renderView('sell', 'counter', T.counter);
 
   await openTab(root, 'Lessons');
-  const row = [...root.querySelectorAll('tr')].find((r) => r.textContent.includes('Group Lesson'));
+  const row = await lessonCard(root, 'Group Lesson');
   assert.ok(row, 'the lesson is on the menu');
   [...row.querySelectorAll('button')].find((b) => b.textContent === 'Add').click(); await settle();
   await openTab(root, 'Rentals');
@@ -2112,10 +2121,10 @@ const addD = (d, n) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.ge
 test('school: every tab renders for managers, counter staff and instructors, and the dialogs open', skip(), async () => {
   await closeOverlays();
   const owner = await renderView('school', 'owner', T.owner);
-  assert.deepEqual([...owner.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests', 'Instructors', 'Instructor hours']);
+  assert.deepEqual([...owner.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests', 'Instructors', 'Instructor hours', 'Check-in', 'Lineup']);
   await exercise(owner, 'school (owner)');
   const counter = await renderView('school', 'counter', T.counter);
-  assert.deepEqual([...counter.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests']);
+  assert.deepEqual([...counter.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests', 'Check-in', 'Lineup']);
   const ins = await renderView('school', 'instructor', T.instructor, { staff_id: D.s2 });
   assert.deepEqual([...ins.querySelectorAll('[role=tab]')].map((t) => t.textContent), ['My day', 'Today', 'Lessons'], 'an instructor opens on My day');
   await exercise(ins, 'school (instructor)');

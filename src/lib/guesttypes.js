@@ -75,4 +75,63 @@ async function used(db, tenantId, code) {
   return Boolean(c);
 }
 
-module.exports = { DEFAULTS, CODE, codeFor, list, forAge, forBirthday, ageOn, assertKnown, used };
+/**
+ * A guest's type follows them through the basket (the counter's Sell). Once a person is a Child on one line (picked, or
+ * from their date of birth), their other lines at the usual type (Adult) are priced as a Child too: a child's rental
+ * never goes at the adult price because the cashier picked "Child" only on the lesson. A type picked on purpose (other
+ * than the usual one) is kept. A ticket line held by people of different types is split into one line per type.
+ * body: the checkout body ({ customer, participants, lines }); changed in place. Returns what changed, for the screen:
+ * [{ key, name, line, from, to }].
+ */
+async function followPerson(db, tenantId, body, today) {
+  if (!body || body.quick || !Array.isArray(body.lines)) return [];
+  const types = await list(db, tenantId);
+  const usual = (types.find((t) => t.code === 'adult' && !t.hidden) || types.find((t) => !t.hidden) || { code: 'adult' }).code;
+  const specs = { customer: body.customer || {}, ...(body.participants || {}) };
+  const who = new Map(); // key -> { dob, name }
+  for (const [key, spec] of Object.entries(specs)) {
+    const d = (spec && spec.details) || {};
+    let dob = d.date_of_birth || null;
+    let name = [d.first_name, d.last_name].filter(Boolean).join(' ');
+    if (spec && spec.person_id && (!dob || !name)) {
+      const p = await one(db, 'SELECT first_name, last_name, date_of_birth FROM people WHERE tenant_id = ? AND id = ?', [tenantId, spec.person_id]);
+      if (p) { dob = dob || (p.date_of_birth ? String(p.date_of_birth).slice(0, 10) : null); name = name || `${p.first_name} ${p.last_name}`; }
+    }
+    who.set(key, { dob, name: name || (key === 'customer' ? 'The customer' : 'A guest') });
+  }
+  const TIERED = ['ticket', 'lesson', 'lesson_package', 'rental', 'activity'];
+  // a ticket line for several people: one line per holder first, so each can follow its holder (merged again below)
+  const lines = [];
+  for (const l of body.lines) {
+    if (l.type === 'ticket' && Array.isArray(l.holders) && l.holders.length > 1 && new Set(l.holders).size > 1) {
+      for (const k of l.holders) lines.push({ ...l, quantity: 1, holders: [k], _from: l });
+    } else lines.push(l);
+  }
+  const keyOf = (l) => (l.type === 'ticket' ? ((l.holders && l.holders[0]) || 'customer') : (l.participant || 'customer'));
+  const changes = [];
+  for (const [key, w] of who) {
+    const mine = lines.filter((l) => TIERED.includes(l.type) && keyOf(l) === key && !(l.type === 'ticket' && l.quantity > 1 && !(l.holders && l.holders.length)));
+    if (!mine.length) continue;
+    const picked = mine.map((l) => l.tier).filter((t) => t && t !== usual);
+    const byAge = w.dob && /^\d{4}-\d{2}-\d{2}/.test(w.dob) ? forAge(types, ageOn(w.dob, today)) : null;
+    const target = picked[0] || byAge;
+    if (!target || target === usual) continue;
+    for (const l of mine) {
+      if ((l.tier || usual) !== usual) continue;
+      changes.push({ key, name: w.name, line: l.type, from: usual, to: target });
+      l.tier = target;
+    }
+  }
+  // put split ticket lines back together where their holders ended up the same type
+  const out = [];
+  for (const l of lines) {
+    if (!l._from) { out.push(l); continue; }
+    const same = out.find((x) => x._from === l._from && x.tier === l.tier);
+    if (same) { same.quantity += 1; same.holders.push(l.holders[0]); } else out.push({ ...l, holders: [...l.holders] });
+  }
+  for (const l of out) delete l._from;
+  body.lines = out;
+  return changes;
+}
+
+module.exports = { DEFAULTS, CODE, codeFor, list, forAge, forBirthday, ageOn, assertKnown, used, followPerson };

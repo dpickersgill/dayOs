@@ -245,7 +245,14 @@ router.get('/orders/:id/receipt', sellers, async (req, res) => {
   // Rentals on the order: the guest's rental form link (each renter's sizes and signature), printed with a QR code.
   const rentalForm = lines.some((l) => l.line_kind === 'rental' && !l.refunded_at)
     ? await require('../lib/rentalforms').orderFormLink(pool, tenantId, order.id, require('../lib/baseurl').baseUrl(req), (await one(pool, 'SELECT slug FROM tenants WHERE id = ?', [tenantId])).slug) : null;
+  // Lessons on the order: who, which lesson, when and where to meet (Track LINEUP)
+  const lessons = await rows(pool, `SELECT i.id AS item_id, p.first_name, p.last_name, pr.name AS product, s.starts_at, s.ends_at, s.meeting_place, s.level_min, s.level_max, ip.first_name AS instructor_first
+    FROM order_items i JOIN lesson_sessions s ON s.tenant_id = i.tenant_id AND s.id = i.session_id JOIN products pr ON pr.tenant_id = s.tenant_id AND pr.id = s.product_id
+    LEFT JOIN people p ON p.tenant_id = i.tenant_id AND p.id = i.person_id
+    LEFT JOIN staff st ON st.tenant_id = s.tenant_id AND st.id = s.instructor_id LEFT JOIN people ip ON ip.tenant_id = st.tenant_id AND ip.id = st.person_id
+    WHERE i.tenant_id = ? AND i.order_id = ? AND i.line_kind = 'lesson' AND i.refunded_at IS NULL ORDER BY s.starts_at, i.id`, [tenantId, order.id]);
   res.json({
+    lessons,
     rental_form_url: rentalForm,
     mountain: { name: t.name, address: t.address, phone: t.phone, footer: t.receipt_footer },
     order: { id: order.id, status: order.status, at: localTime(order.created_at, t.timezone), channel: order.channel, cashier: cashier ? cashier.email.split('@')[0] : null,
