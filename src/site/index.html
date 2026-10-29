@@ -11,18 +11,18 @@
   <section class="hero" aria-labelledby="h-hero">
     <div class="wrap herogrid">
       <div>
-        <h1 id="h-hero"><span class="kicker">Ski area management software</span> Open the mountain from one screen.</h1>
-        <p class="lede">Verdynt/OS runs lifts, grooming, the fleet, tickets, waivers, rentals, lessons, patrol and staff for independent ski areas. Turn on the parts you run, and leave the rest off.</p>
+        <h1 id="h-hero"><span class="kicker">Ski area management software</span> Run the whole mountain from one screen.</h1>
+        <p class="lede">Verdynt/OS runs lifts, patrol, tickets, waivers, rentals, lessons and staff for independent ski areas, and your zipline, coaster and tubing hill too. One system instead of five that don't talk to each other. Turn on the parts you run, and leave the rest off.</p>
         <div class="ctas">
           <a class="btn" href="{{SITE}}/contact">Book a walkthrough</a>
           <a class="btn ghost" href="{{TRY}}">Try the demo</a>
         </div>
+        <p class="heroline"><b>Patrol director?</b> <a href="{{SITE}}/ski-patrol">See ski patrol software, on its own from {{PATROL_FROM}} a month.</a></p>
         <ul class="proofline" aria-label="Good to know">
           <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8.5 L6.5 12.5 L13.5 3.5" fill="none" stroke="#2C7A57" stroke-width="2.6"/></svg>14 days free, no card</li>
           <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8.5 L6.5 12.5 L13.5 3.5" fill="none" stroke="#2C7A57" stroke-width="2.6"/></svg>Nothing to install</li>
           <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8.5 L6.5 12.5 L13.5 3.5" fill="none" stroke="#2C7A57" stroke-width="2.6"/></svg>No contract</li>
         </ul>
-        <p class="heronote"><a href="{{SITE}}/ski-patrol">Running a patrol? Patrol on its own is {{PATROL_FROM}} a month.</a></p>
       </div>
       <figure style="margin:0">
         <div class="board" role="group" aria-label="Sample morning board">
@@ -38,18 +38,42 @@
             <div class="bt">Patrol</div>
             <div class="brow" style="--i:4"><div><div class="n">7 on duty, 12 of 14 runs checked</div><div class="d">Upper Ridge on hold: rope line down at the cat track</div></div>
               <span class="chip hold"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" fill="#6B4200"/></svg>Opening</span></div>
+            <div class="bt">Attractions</div>
+            <div class="brow" style="--i:5"><div><div class="n">Alpine Coaster</div><div class="d">Opening check passed at 8:40</div></div>
+              <span class="chip ok"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="#17543A"/></svg>Open</span></div>
+            <div class="brow" style="--i:6"><div><div class="n">Tube Park</div><div class="d">Lanes icy after the freeze, regrooming</div></div>
+              <span class="chip hold"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" fill="#6B4200"/></svg>On hold</span></div>
             <div class="bt">Fleet</div>
-            <div class="brow" style="--i:5"><div><div class="n">Groomer 2, A-0006</div><div class="d">250-hour service due in 12 hours</div></div>
+            <div class="brow" style="--i:7"><div><div class="n">Groomer 2: service due in 12 hours</div></div>
               <span class="chip hold"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" fill="#6B4200"/></svg>Service soon</span></div>
           </div>
           <div class="bfoot">
-            <div style="--i:6"><b>2</b><span>shifts still unfilled today</span></div>
-            <div style="--i:7"><b>3</b><span>open work orders</span></div>
-            <div style="--i:8"><b>0</b><span>incidents open</span></div>
+            <div style="--i:8"><b>2</b><span>shifts still unfilled today</span></div>
+            <div style="--i:9"><b>3</b><span>open work orders</span></div>
+            <div style="--i:10"><b>0</b><span>incidents open</span></div>
           </div>
         </div>
         <figcaption class="boardcap">Sample data for illustration. Your board shows your lifts, your trails and your crew.</figcaption>
       </figure>
+    </div>
+  </section>
+
+  <section class="sec" id="day" aria-labelledby="h-day">
+    <div class="wrap">
+      <div class="sh">
+        <h2 id="h-day">One day, start to finish.</h2>
+        <p>Most ski areas run the day on a ticketing system, a waiver site, paper patrol reports and a few spreadsheets. Here is the same day on one system. Everything below is in Verdynt/OS today.</p>
+      </div>
+      <ol class="daygrid">
+        <li><p class="dt">5:30 AM <span>Before the first chair</span></p><h3>Know what's safe to open.</h3><p>Grooming plans, snow and weather, and lift inspections on a phone. A lift that fails its check can't be set to open.</p><a href="{{SITE}}/lift-maintenance-software">Lift inspections and maintenance</a></li>
+        <li><p class="dt">7:30 AM <span>Patrol opens the hill</span></p><h3>Every run checked before it opens.</h3><p>Patrollers sign in on duty and check each run, and the mountain's status changes as they go.</p><a href="{{SITE}}/ski-patrol">Ski patrol software</a></li>
+        <li><p class="dt">8:00 AM <span>At the gate</span></p><h3>Sell it, scan it, move on.</h3><p>Tickets, passes and gift cards at the counter and online. The gate scans a code or taps an RFID card.</p><a href="{{SITE}}/lift-ticket-software">Lift tickets and passes</a></li>
+        <li><p class="dt">9:30 AM <span>Lodge and learning area</span></p><h3>Gear out, lessons running.</h3><p>Waivers signed at home, every rental item out and back, and lessons booked without the phone tag.</p><span class="dlinks"><a href="{{SITE}}/ski-rental-software">Rentals</a>, <a href="{{SITE}}/ski-waiver-software">waivers</a> and <a href="{{SITE}}/ski-school-software">ski school</a></span></li>
+        <li><p class="dt">11:00 AM <span>Beyond the slopes</span></p><h3>The zipline opens on its check.</h3><p>Each attraction gets a daily opening check, a failed check keeps it closed, and its time slots sell at the counter and online with height, weight and age limits.</p><a href="{{SITE}}/attraction-ticketing-software">Attractions and activities</a></li>
+        <li><p class="dt">1:15 PM <span>When someone gets hurt</span></p><h3>One record from the first call.</h3><p>Dispatch buzzes the right phones, and the care report is written at the bedside, even with no signal.</p><a href="{{SITE}}/ski-patrol">Patient care reports and dispatch</a></li>
+        <li><p class="dt">4:45 PM <span>Closing</span></p><h3>Sweep it, count it, go home.</h3><p>Routes swept and called clear with the time, drawers counted, and the next shift reads what this one wrote.</p><span class="dlinks"><a href="{{SITE}}/ski-area-pos">Ski area POS</a> and <a href="{{SITE}}/ski-area-staff-scheduling">staff scheduling</a></span></li>
+      </ol>
+      <p class="daymore">Guests get their own pages too: the online shop, lesson booking, waivers and program registration, with your logo. <a href="{{SITE}}/product#guest">See the guest pages</a></p>
     </div>
   </section>
 
@@ -58,34 +82,17 @@
       <div>
         <h2 id="h-risk">When the claim comes, the record is already written.</h2>
         <p>Patrol writes care at the bedside, time-stamped and never deleted. Because Verdynt/OS also runs rentals, grooming, lifts and the time clock, the case picks up the binding setting, the morning's grooming and the lift's status by itself. Two seasons later, the claim file is one click.</p>
-        <div class="ctas"><a class="btn onink" href="{{SITE}}/ski-area-risk-management">For owners and insurers</a><a class="btn line" href="{{SITE}}/contact?kind=review">Get a free report review</a></div>
+        <div class="ctas"><a class="btn onink" href="{{SITE}}/ski-area-risk-management">For owners and insurers</a><a class="btn line" href="{{SITE}}/contact?kind=review">Send us 10 reports for a free review</a></div>
       </div>
       <ul aria-label="What a claim file holds">
         <li>The approved report, frozen</li>
-        <li>Photos, fingerprinted</li>
+        <li>Photos, proven unchanged</li>
         <li>Conditions at that minute</li>
         <li>Rental binding record</li>
+        <li>Every checklist tick, as it was ticked</li>
         <li>Who was told, and when</li>
         <li>The full audit trail</li>
       </ul>
-    </div>
-  </section>
-
-  <section class="sec" id="day" aria-labelledby="h-day">
-    <div class="wrap">
-      <div class="sh">
-        <h2 id="h-day">One day, start to finish.</h2>
-        <p>What a day looks like when the tools agree with each other. Everything here is in Verdynt/OS today.</p>
-      </div>
-      <ol class="daygrid">
-        <li><p class="dt">5:30 AM <span>Before the first chair</span></p><h3>Know what's safe to open.</h3><p>Grooming plans, snow and weather, and lift inspections on a phone. A lift that fails its check can't be set to open.</p><a href="{{SITE}}/lift-maintenance-software">Lift inspections and maintenance</a></li>
-        <li><p class="dt">7:30 AM <span>Patrol opens the hill</span></p><h3>Every run checked before it opens.</h3><p>Patrollers sign in on duty and check each run, and the mountain's status changes as they go.</p><a href="{{SITE}}/ski-patrol">Ski patrol software</a></li>
-        <li><p class="dt">8:00 AM <span>At the gate</span></p><h3>Sell it, scan it, move on.</h3><p>Tickets, passes and gift cards at the counter and online. The gate scans a code or taps an RFID card.</p><a href="{{SITE}}/lift-ticket-software">Lift tickets and passes</a></li>
-        <li><p class="dt">9:30 AM <span>Lodge and learning area</span></p><h3>Gear out, lessons running.</h3><p>Waivers signed at home, every rental item out and back, and lessons booked without the phone tag.</p><span class="dlinks"><a href="{{SITE}}/ski-rental-software">Rentals</a>, <a href="{{SITE}}/ski-waiver-software">waivers</a> and <a href="{{SITE}}/ski-school-software">ski school</a></span></li>
-        <li><p class="dt">1:15 PM <span>When someone gets hurt</span></p><h3>One record from the first call.</h3><p>Dispatch buzzes the right phones, and the care report is written at the bedside, even with no signal.</p><a href="{{SITE}}/ski-patrol">Patient care reports and dispatch</a></li>
-        <li><p class="dt">4:45 PM <span>Closing</span></p><h3>Sweep it, count it, go home.</h3><p>Routes swept and called clear with the time, drawers counted, and the next shift reads what this one wrote.</p><span class="dlinks"><a href="{{SITE}}/ski-area-pos">Ski area POS</a> and <a href="{{SITE}}/ski-area-staff-scheduling">staff scheduling</a></span></li>
-      </ol>
-      <p class="daymore">Guests get their own pages too: the online shop, lesson booking, waivers and program registration, with your logo. <a href="{{SITE}}/product#guest">See the guest pages</a></p>
     </div>
   </section>
 
@@ -123,14 +130,14 @@
     <div class="wrap">
       <div class="sh">
         <h2 id="h-price">Priced by what you run.</h2>
-        <p>Plans named for the trail signs, because they get steeper, and add-ons when you want them. Pay monthly, yearly, or over the season, November to April. No cut of your sales, and every plan starts with 14 days free.</p>
+        <p>Plans named for the trail signs, because they get steeper, and add-ons when you want them. Pay monthly, yearly, or over your season in six payments. No cut of your sales, and every plan starts with 14 days free.</p>
       </div>
       <div class="plans home" id="homeplans"><!--PLANS:home-->
-        <div class="plan"><div class="sym"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="15" fill="#2C7A57"/></svg><h3>Lodge</h3></div><div class="price"><b>$199</b><span>per month</span></div></div>
-        <div class="plan feat"><div class="sym"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect x="2" y="2" width="30" height="30" rx="2" fill="#1B5FC1"/></svg><h3>Mountain</h3></div><div class="price"><b>$449</b><span>per month</span></div></div>
-        <div class="plan"><div class="sym"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><path d="M17 1 L33 17 L17 33 L1 17 Z" fill="#12303A"/></svg><h3>Resort</h3></div><div class="price"><b>$799</b><span>per month</span></div></div><!--/PLANS-->
+        <div class="plan"><div class="sym"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="15" fill="#2C7A57"/></svg><h3>Lodge</h3></div><p class="who">Small hills and community areas that sell, scan and keep the lifts honest.</p><div class="price"><b>$199</b><span>per month</span></div></div>
+        <div class="plan feat"><div class="sym"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect x="2" y="2" width="30" height="30" rx="2" fill="#1B5FC1"/></svg><h3>Mountain</h3></div><p class="who">The typical independent mountain, with a ski school, rental shop and crew to schedule.</p><div class="price"><b>$449</b><span>per month</span></div></div>
+        <div class="plan"><div class="sym"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><path d="M17 1 L33 17 L17 33 L1 17 Z" fill="#12303A"/></svg><h3>Resort</h3></div><p class="who">Larger operations with a patrol, a terrain park and attractions to run.</p><div class="price"><b>$799</b><span>per month</span></div></div><!--/PLANS-->
       </div>
-      <div class="addline" id="homeaddons"><!--ADDONS:home--><b>Add when you want them:</b><span>Patrol</span><span>Online shop</span><span>Assets and fleet</span><span>Messages</span><span>Document text recognition</span><span>Assistant Plus</span><a href="{{SITE}}/pricing#addons">See add-on prices</a><!--/ADDONS--></div>
+      <div class="addline" id="homeaddons"><!--ADDONS:home--><b>Add when you want them:</b><span>Patrol</span><span>Online shop</span><span>Assets and fleet</span><span>Messages</span><span>Document text recognition <i>(scans become searchable)</i></span><span>Assistant Plus <i>(live answers from your data)</i></span><a href="{{SITE}}/pricing#addons">See add-on prices</a><!--/ADDONS--></div>
       <div class="found">
         <div><b>Founding mountains pay half in their first season.</b><span>In return for honest feedback and a say in what we build next.</span></div>
         <a class="btn onink" href="{{SITE}}/pricing">See pricing</a>
@@ -143,6 +150,7 @@
       <div class="sh"><h2 id="h-faq">Questions mountain managers ask.</h2></div>
       <div class="faq">
         <details><summary>Do we have to replace everything on day one?</summary><p>No. Start with the apps that hurt most, such as the lift checks or the ski school, and add others as you're ready. Each mountain chooses its own set, and an app you don't use stays out of the menu.</p></details>
+        <details><summary>We run a zipline and a tubing hill too. Does it handle those?</summary><p>Yes. Add each attraction with its height, weight and age limits and whether it needs a waiver. Staff run a daily opening check from a phone, and a failed check keeps it closed. Sell time slots at the counter and online, with places left shown and limits confirmed for every rider, and scan tickets at the attraction's own gate. Patrol reports can name the attraction, and statistics count cases there.</p></details>
         <details><summary>Can you bring over our customers and products?</summary><p>Yes. Set it up yourselves for free, or choose guided setup: we bring in your customers, pass holders, products and staff, set up roles, and train your crew, for one price agreed before you start. Either way your data is yours, and it exports as spreadsheets whenever you want it.</p></details>
         <details><summary>How does the free trial work?</summary><p>Ask for a trial and we set up your mountain, usually within a business day. Everything is on for 14 days, with no card needed. Choose a plan and a way to pay any time before the trial ends; paying early does not shorten it.</p></details>
         <details><summary>What do we need to run it?</summary><p>A web browser and an internet connection. Counter computers, phones and tablets all work, and there's nothing to install. If a patrol phone loses signal on the hill, bedside entries are kept on the phone and sent when the signal returns.</p></details>
@@ -152,10 +160,14 @@
     </div>
   </section>
 
+  <section class="builtby" aria-label="Who builds it">
+    <div class="wrap"><p>Built in Pennsylvania, and support is answered by the people who build it. <a href="{{SITE}}/about">About Verdynt/OS</a></p></div>
+  </section>
+
   <section class="contact" id="contact" aria-labelledby="h-contact">
     <div class="wrap">
       <h2 id="h-contact">See your mountain on the board.</h2>
-      <p>Book a 20-minute walkthrough. Tell us how many lifts you run and which part of the day is hardest, and we'll show you that part first.</p>
+      <p>Book a 20-minute walkthrough. Tell us how many lifts and attractions you run and which part of the day is hardest, and we'll show you that part first.</p>
       <div class="ctas" style="margin-top:30px"><a class="btn onink" href="{{SITE}}/contact">Book a walkthrough</a><a class="btn line" href="{{TRY}}">Try the demo</a></div>
     </div>
   </section>

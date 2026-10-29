@@ -173,7 +173,8 @@ body{margin:0;background:var(--snow)}
 .band h2{font-size:clamp(36px,5.4vw,72px);line-height:.95;max-width:13em}
 .band p{max-width:36em;font-size:20px;color:var(--onink3);margin-top:22px}
 .band a:not(.btn){color:var(--white)}
-.band .two{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:clamp(32px,5vw,72px);align-items:center}
+.band .two,.sec .two{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:clamp(32px,5vw,72px);align-items:center}
+.sec .two .board{max-width:560px;justify-self:end;width:100%}
 .band ul{list-style:none;margin:0;padding:0;font-size:19px}
 .band li{padding:12px 0;border-top:1px solid rgba(255,255,255,.18)}
 .band li:last-child{border-bottom:1px solid rgba(255,255,255,.18)}
@@ -187,22 +188,26 @@ body{margin:0;background:var(--snow)}
 .hero .lede{font-size:21px;line-height:1.55;max-width:34em;margin-top:26px;color:var(--ink2)}
 .heronote{margin-top:16px;font-size:15px;line-height:1.5;color:var(--muted);max-width:32em}
 .heronote+.heronote{margin-top:6px}
+/* the patrol director's way in: a third line under the buttons, as visible as the proof line */
+.sx .heroline{margin-top:18px;font-size:17px;line-height:1.5;color:var(--ink2);max-width:34em}
+.heroline b{font-weight:800;color:var(--ink)}
+.heroline a{font-weight:700}
 .proofline{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:24px;padding:0;list-style:none;font-size:15.5px;font-weight:700;color:var(--ink2)}
 .proofline li{display:flex;align-items:center;gap:8px}
 .proofline svg{flex:none}
 
 /* morning board */
 .board{background:var(--ink);color:var(--onink);border-radius:var(--r-lg);overflow:hidden;box-shadow:0 1px 0 rgba(18,48,58,.25),0 30px 60px -30px rgba(18,48,58,.6)}
-.board .bh{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:16px 22px;border-bottom:1px solid rgba(255,255,255,.14)}
+.board .bh{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:13px 22px;border-bottom:1px solid rgba(255,255,255,.14)}
 .board .bh b{font-family:'Barlow Condensed',sans-serif;font-size:24px;font-weight:600}
 .board .bh span{font-size:14px;color:var(--onink2)}
-.board .bs{padding:6px 22px 4px}
-.board .bt{font-size:14px;color:var(--onink2);padding:14px 0 6px}
-.brow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px 0;border-top:1px solid rgba(255,255,255,.1)}
+.board .bs{padding:2px 22px 2px}
+.board .bt{font-size:13px;color:var(--onink2);padding:10px 0 3px}
+.brow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:7px 0;border-top:1px solid rgba(255,255,255,.1)}
 .bt+.brow{border-top:0}
-.brow .n{font-weight:700;font-size:17px;line-height:1.35}
-.brow .d{font-size:14px;color:var(--onink2);line-height:1.4}
-.bfoot{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid rgba(255,255,255,.14);margin-top:8px}
+.brow .n{font-weight:700;font-size:17px;line-height:1.3}
+.brow .d{font-size:14px;color:var(--onink2);line-height:1.35}
+.bfoot{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid rgba(255,255,255,.14);margin-top:6px}
 .bfoot div{padding:14px 22px;border-left:1px solid rgba(255,255,255,.14)}
 .bfoot div:first-child{border-left:0}
 .bfoot b{display:block;font-family:'Barlow Condensed',sans-serif;font-size:34px;line-height:1;font-weight:600}
@@ -310,7 +315,7 @@ body{margin:0;background:var(--snow)}
 .plan li.plus:before{display:none}
 .plan .go{margin-top:22px}
 /* Cards side by side share their rows, so prices, lists and buttons line up however long a plan's blurb is */
-.plans.home{--rows:2}#plans{--rows:6}
+.plans.home{--rows:3}#plans{--rows:6}
 @supports (grid-template-rows:subgrid){
   .plans>.plan{display:grid;grid-template-rows:subgrid;grid-row:span var(--rows,3);row-gap:0;align-content:start}
   .plans>.plan>.go{align-self:end}
@@ -502,7 +507,8 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 
 /* ================================================================ tablet */
 @media (max-width:1000px){
-  .herogrid,.band .two,.sw,.cgrid{grid-template-columns:minmax(0,1fr)}
+  .herogrid,.band .two,.sec .two,.sw,.cgrid{grid-template-columns:minmax(0,1fr)}
+  .sec .two .board{justify-self:stretch;max-width:none}
   .herogrid{gap:44px}.cgrid{gap:40px}
   .stop{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px 32px}
   .stop .tm{grid-column:1 / -1;display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 16px}
@@ -781,8 +787,15 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 .trust3 h3{font-size:27px;line-height:1.05}
 .sx .trust3 p{margin-top:8px;color:var(--ink2);font-size:16.5px;line-height:1.5}
 .plans.home .plan{padding:20px 22px}
+.plans.home .who{min-height:0;font-size:15.5px;margin-top:8px}
 .plans.home .price{margin-top:10px}
 .plans.home .price b{font-size:48px}
+.addline span i{font-style:normal;font-weight:500;color:var(--muted)}
+/* who builds it: one line above the closing section */
+.builtby{padding:0 0 40px}
+.sx .builtby p{font-size:17px;color:var(--ink2);text-align:center;max-width:40em;margin:0 auto}
+.builtby a{font-weight:700;white-space:nowrap}
+@media (min-width:1180px){.daygrid{grid-template-columns:repeat(4,minmax(0,1fr));gap:0 32px}.daygrid h3{font-size:26px}}
 @media (max-width:1000px){.daygrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:0 28px}.trust3{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:640px){
   .daygrid{grid-template-columns:minmax(0,1fr)}
@@ -797,6 +810,9 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
   .plans.home .price{flex-direction:column;gap:2px}
   .plans.home .price b{font-size:36px}
   .plans.home .price span{font-size:14px}
+  .plans.home .who{font-size:14px;line-height:1.4}
+  .heroline{font-size:16px}
+  .builtby{padding-bottom:28px}
 }
 
 /* One gap between a section's heading and what follows it, at every size */

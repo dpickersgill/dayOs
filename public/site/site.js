@@ -30,15 +30,17 @@
   const siteBase = () => { const a = $('.sn-brand'); const href = a ? a.getAttribute('href') : '/'; return href.replace(/\/$/, ''); };
 
   // ---------------------------------------------------------------- Home: turn apps on and off
+  // Grouped the way the app's own menu groups them (public/js/nav.js GROUPS): Customers, Waivers and Lost and found sit
+  // under Front desk with every mountain, so they are listed there in the preview rather than switched.
   const APPS = [
-    ['sell', 'Sell', 'Tickets, passes, gift cards, refunds', 'Front desk'],
+    ['sell', 'Sell', 'Tickets, passes, activities, gift cards', 'Front desk'],
     ['gate', 'Gate', 'Scan tickets, passes and RFID cards', 'Front desk'],
-    ['rentals', 'Rentals', 'Gear and rental contracts', 'Front desk'],
     ['shop', 'Online shop', 'Add-on: guests buy online', 'Front desk'],
-    ['conditions', 'Lifts and trails', 'Status, grooming, weather, maintenance', 'Mountain'],
+    ['rentals', 'Rentals', 'Gear and rental contracts', 'Front desk'],
+    ['conditions', 'Lifts and trails', 'Lifts, trails, attractions, grooming, weather', 'Mountain'],
     ['park', 'Terrain park', 'Features and the park map', 'Mountain'],
     ['assets', 'Assets and fleet', 'Add-on: fleet, lifts, snowmaking, buildings', 'Mountain'],
-    ['patrol', 'Patrol', 'Care, dispatch, duty, sweep, records', 'Safety'],
+    ['patrol', 'Patrol', 'Care, dispatch, checklists, sweep, records', 'Safety'],
     ['school', 'Ski school', 'Lessons, instructors, packages', 'Programs'],
     ['programs', 'Clubs and programs', 'Camps, leagues and sessions', 'Programs'],
     ['availability', 'Instructor availability', 'Open dates and a public page', 'Programs'],
@@ -48,10 +50,12 @@
     ['messages', 'Messages', 'Add-on: email and texts to guests', 'Office'],
     ['documents', 'Documents', 'Manuals and forms, searchable', 'Office'],
   ];
+  // What every mountain has, in the group the app's menu shows it in; nothing to switch.
+  const ALWAYS = { 'Front desk': ['Customers', 'Waivers', 'Lost and found'] };
   function switchboard() {
     const grid = $('#appgrid'); if (!grid) return;
-    const off = { rentals: true, park: true, patrol: true, messages: true, assets: true, shop: true };
-    let note = 'Rentals, Terrain park, Patrol, the Online shop, Assets and fleet and Messages are off, as a small hill might choose.';
+    const off = { rentals: true, park: true, messages: true, assets: true, shop: true };
+    let note = 'Rentals, Terrain park, the Online shop, Assets and fleet and Messages are off, as a small hill might choose.';
     function flip(key) {
       note = '';
       if (off[key]) {
@@ -71,14 +75,16 @@
         return el('button', { type: 'button', class: on ? 'app on' : 'app', 'aria-pressed': String(on), onclick: () => flip(key) },
           el('span', { class: 'sw-t', 'aria-hidden': 'true' }), el('span', null, el('b', null, label), el('span', { class: 'bl' }, blurb)));
       }));
-      const rows = [el('div', { class: 'prow h' }, 'Always on')];
-      for (const l of ['Today', 'Inbox', 'Customers', 'Waivers', 'My shifts', 'Help']) rows.push(el('div', { class: 'prow m' }, el('i', { 'aria-hidden': 'true' }), l));
+      const rows = [];
+      for (const l of ['Today', 'Inbox', 'My shifts']) rows.push(el('div', { class: 'prow m' }, el('i', { 'aria-hidden': 'true' }), l));
       for (const g of ['Front desk', 'Mountain', 'Safety', 'Programs', 'Office']) {
-        const items = APPS.filter((a) => a[3] === g && !off[a[0]]);
-        if (!items.length) continue;
+        const items = APPS.filter((a) => a[3] === g && !off[a[0]]).map((a) => a[1]);
+        const all = [...items, ...(ALWAYS[g] || [])];
+        if (!all.length) continue;
         rows.push(el('div', { class: 'prow h' }, g));
-        for (const a of items) rows.push(el('div', { class: 'prow' }, el('i', { 'aria-hidden': 'true' }), a[1]));
+        for (const l of all) rows.push(el('div', { class: items.includes(l) ? 'prow' : 'prow m' }, el('i', { 'aria-hidden': 'true' }), l));
       }
+      for (const l of ['Settings', 'Help']) rows.push(el('div', { class: 'prow m' }, el('i', { 'aria-hidden': 'true' }), l));
       $('#approws').replaceChildren(...rows);
       const n = APPS.filter((a) => !off[a[0]]).length;
       $('#appnote').textContent = `${n} of ${APPS.length} apps on. ${note}`;
@@ -88,6 +94,8 @@
 
   // ---------------------------------------------------------------- plans and prices, live from the console
   let plansData = null;
+  // kept the same as ADDON_HINTS in src/routes/site.js
+  const ADDON_HINTS = { 'doc-ocr': 'scans become searchable', 'assistant-plus': 'live answers from your data' };
   async function loadPlans() {
     if (plansData) return plansData;
     try {
@@ -106,9 +114,10 @@
     box.style.setProperty('--n', String(Math.min(d.plans.length, 4)));
     box.replaceChildren(...d.plans.map((p, i) => el('div', { class: `plan${i === 1 ? ' feat' : ''}` },
       el('div', { class: 'sym' }, sym(i, p.code), el('h3', null, p.name)),
+      p.blurb ? el('p', { class: 'who' }, p.blurb) : null,
       el('div', { class: 'price' }, el('b', null, dollars(p.monthly_cents)), el('span', null, 'per month')))));
     const adds = $('#homeaddons');
-    if (adds && d.addons.length) adds.replaceChildren(el('b', null, 'Add when you want them:'), ...d.addons.map((a) => el('span', null, a.name)), el('a', { href: `${siteBase()}/pricing#addons` }, 'See add-on prices'));
+    if (adds && d.addons.length) adds.replaceChildren(el('b', null, 'Add when you want them:'), ...d.addons.map((a) => el('span', null, a.name, ADDON_HINTS[a.code] ? [' ', el('i', null, `(${ADDON_HINTS[a.code]})`)] : null)), el('a', { href: `${siteBase()}/pricing#addons` }, 'See add-on prices'));
   }
 
   async function pricing() {
@@ -150,7 +159,7 @@
           el('a', { class: `btn go${i === 1 ? '' : ' ghost'}`, href: `${base}/contact?kind=trial&plan=${encodeURIComponent(p.name)}` }, `Start a ${p.name} trial`));
       }));
       $('#planfine').textContent = `Prices are in US dollars, before any sales tax. ${interval === 'year' ? 'Yearly prices are shown per month and charged once a year.'
-        : interval === 'season' ? 'Over the season, the yearly price is paid in six monthly payments, November to April, with nothing to pay May to October. Everything keeps working all year. Starting between May and October, the first payment is November 1.'
+        : interval === 'season' ? 'Over the season, the yearly price is paid in six monthly payments, November to April, and nothing in the months between. Everything keeps working all year. Starting between May and October, the first payment is November 1.'
           : 'Every plan starts with a ' + (d.trial_days || 14) + '-day free trial.'}`;
       // Comparison table: plans across, apps down, add-ons after
       const yes = () => el('span', { class: 'y', html: '<svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M3 9.5 L7.5 14 L15 4.5" fill="none" stroke="#2C7A57" stroke-width="2.6"/></svg><span class="vh">Included</span>' });
