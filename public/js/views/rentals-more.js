@@ -131,7 +131,7 @@ export async function drawSettings(box) {
     rows.forEach((r, n) => {
       const cell = (k, w = '5rem', step = '1') => { const e = input({ type: 'number', min: '0', step, value: r[k] ?? '', style: `width:${w}`, 'aria-label': k.replace(/_/g, ' ') }); e.addEventListener('input', () => { r[k] = e.value === '' ? null : Number(e.value); }); return e; };
       const type = input({ value: r.skier_type || '', maxlength: 4, style: 'width:4rem', 'aria-label': 'ability type' }); type.addEventListener('input', () => { r.skier_type = type.value; });
-      rowsEl.append(h('div', { class: 'row' }, type, cell('weight_lb_min'), cell('weight_lb_max'), cell('sole_mm_min'), cell('sole_mm_max'), cell('din', '5rem', '0.25'), button('Remove', () => { rows.splice(n, 1); drawRows(); }, { small: true })));
+      rowsEl.append(h('div', { class: 'row' }, type, cell('weight_lb_min'), cell('weight_lb_max'), cell('height_in_min'), cell('height_in_max'), cell('sole_mm_min'), cell('sole_mm_max'), cell('age_min', '4rem'), cell('age_max', '4rem'), cell('din', '5rem', '0.25'), button('Remove', () => { rows.splice(n, 1); drawRows(); }, { small: true })));
     });
   }
   drawRows();
@@ -143,12 +143,14 @@ export async function drawSettings(box) {
       h('label', { class: 'check' }, f.hold, 'Hold gear involved in a patrol case until the shop inspects it')), h('div', { class: 'row' }, save),
     h('h3', null, 'Binding chart'),
     h('p', { class: 'muted' }, 'Enter the release settings your shop uses, from your binding manufacturer and the standard you follow. Verdynt/OS does not supply values. The Chart button at the counter only looks up what you enter here, and the technician still records what they set.'),
-    h('div', { class: 'row muted small' }, 'Type · Weight min · max (lb) · Sole min · max (mm) · Setting'),
+    h('div', { class: 'row muted small' }, 'Type (1, 2, 3) · Weight min · max (lb) · Height min · max (in) · Sole min · max (mm) · Age min · max (blank for any age) · Setting'),
     rowsEl,
     h('div', { class: 'row' }, button('Add row', () => { rows.push({ skier_type: '', din: '' }); drawRows(); }, { small: true }),
       button('Save chart', async () => {
-        const clean = rows.filter((r) => r.skier_type && r.din !== '' && r.din != null).map((r) => ({ skier_type: r.skier_type, weight_lb_min: r.weight_lb_min ?? null, weight_lb_max: r.weight_lb_max ?? null, height_in_min: r.height_in_min ?? null, height_in_max: r.height_in_max ?? null, sole_mm_min: r.sole_mm_min ?? null, sole_mm_max: r.sole_mm_max ?? null, din: Number(r.din) }));
+        const clean = rows.filter((r) => r.skier_type && r.din !== '' && r.din != null).map((r) => ({ skier_type: r.skier_type, weight_lb_min: r.weight_lb_min ?? null, weight_lb_max: r.weight_lb_max ?? null, height_in_min: r.height_in_min ?? null, height_in_max: r.height_in_max ?? null, sole_mm_min: r.sole_mm_min ?? null, sole_mm_max: r.sole_mm_max ?? null, age_min: r.age_min ?? null, age_max: r.age_max ?? null, din: Number(r.din) }));
         await put('/rentals/chart', { rows: clean });
         toast(`${clean.length} chart row${clean.length === 1 ? '' : 's'} saved`);
       }, { kind: 'primary' }))));
+  // Fitting and hand-out (layout, closing time, the renter's signed confirmation): its own block, saved on its own.
+  const fitBox = h('div'); box.append(fitBox); await (await import('./rentals-fit.js')).drawFitSettings(fitBox);
 }

@@ -6,7 +6,7 @@
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
-const { z, validate, paramId, todayIn, addDays, seasonFor } = require('../lib/util');
+const { z, validate, paramId, todayIn, addDays, seasonFor, localTime } = require('../lib/util');
 const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { ON_FILE } = require('../lib/waivers');
@@ -53,9 +53,11 @@ const READY_FROM = `FROM rental_contracts c JOIN people p ON p.id = c.person_id 
 router.get('/fit/ready', requireRole(...counter), async (req, res) => {
   const { tenantId } = req.auth;
   const today = todayIn(await tzOf(tenantId));
-  const where = ["c.tenant_id = ? AND c.status = 'to_fit' AND (c.stage IS NULL OR c.stage <> 'set')", 'c.valid_on BETWEEN ? AND ?'];
+  // group rentals with gear set aside (stage 'set') are listed too, so a member who walks up alone is found
+  const where = ["c.tenant_id = ? AND c.status = 'to_fit'", 'c.valid_on BETWEEN ? AND ?'];
   const params = [tenantId, addDays(today, -14), today];
-  if (req.query.stage && F.STAGES.includes(String(req.query.stage))) { where.push('c.stage = ?'); params.push(String(req.query.stage)); }
+  // a rental paid before the shop switched to stations has no station yet: it waits at the first one
+  if (req.query.stage && F.STAGES.includes(String(req.query.stage))) { where.push(req.query.stage === 'form' ? "(c.stage = 'form' OR c.stage IS NULL)" : 'c.stage = ?'); if (req.query.stage !== 'form') params.push(String(req.query.stage)); }
   const q = String(req.query.q || '').trim();
   if (q) {
     const m = /^(?:ORD-?)?(\d{1,12})$/i.exec(q);
@@ -115,7 +117,7 @@ async function personCard(tenantId, personId, today, settings, tz) {
   return {
     person: { ...person, age: F.ageOn(details.date_of_birth, today), waiver_signed: Boolean(waiver) },
     details, profile,
-    signoff: signoff ? { id: signoff.signoff.id, signed_at: signoff.signoff.signed_at, signer_name: signoff.signoff.signer_name, signer_relation: signoff.signoff.signer_relation, via: signoff.signoff.via, mismatch: signoff.mismatch } : null,
+    signoff: signoff ? { id: signoff.signoff.id, signed_at: localTime(signoff.signoff.signed_at, tz), signer_name: signoff.signoff.signer_name, signer_relation: signoff.signoff.signer_relation, via: signoff.signoff.via, mismatch: signoff.mismatch } : null,
   };
 }
 
@@ -278,11 +280,13 @@ router.get('/fit/contracts/:id/agreement', requireRole(...counter), async (req, 
     let s = await one(pool, 'SELECT signer_name, signer_relation, details, signature, via, signed_at FROM rental_signoffs WHERE tenant_id = ? AND person_id = ? AND contract_id = ? ORDER BY id DESC LIMIT 1', [tenantId, pid, c.id]);
     if (!s) { const v = await F.validSignoff(pool, tenantId, pid, null, { timeZone: t.timezone }); if (v) s = await one(pool, 'SELECT signer_name, signer_relation, details, signature, via, signed_at FROM rental_signoffs WHERE tenant_id = ? AND id = ?', [tenantId, v.signoff.id]); }
     if (s && typeof s.details === 'string') { try { s.details = JSON.parse(s.details); } catch (_) { s.details = {}; } }
+    if (s) s.signed_at = localTime(s.signed_at, t.timezone); // stamped in UTC, shown on the mountain's clock
     const waiver = await one(pool, ON_FILE, [tenantId, pid, seasonFor(today)]);
     people.push({ id: p.id, first_name: p.first_name, last_name: p.last_name, age: F.ageOn(p.date_of_birth, today), is_renter: pid === c.person_id, waiver_signed: Boolean(waiver), signoff: s || null, items: items.filter((i) => (i.person_id || c.person_id) === pid) });
   }
   const settings = await F.fitSettings(pool, tenantId);
   await audit(pool, req, 'print', 'rental_contracts', c.id, { what: 'agreement' });
+  if (c.checked_out_at) c.checked_out_at = localTime(c.checked_out_at, t.timezone);
   res.json({ mountain: { name: t.name, address: t.address, phone: t.phone }, contract: c, people, fees: { late_fee_cents_per_day: settings.late_fee_cents_per_day, late_grace_minutes: settings.late_grace_minutes }, season: seasonFor(today) });
 });
 

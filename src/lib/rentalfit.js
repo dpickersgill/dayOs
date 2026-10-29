@@ -116,8 +116,13 @@ function mismatch(signed, now) {
 async function validSignoff(conn, tenantId, personId, details = null, { settings = null, timeZone = null } = {}) {
   const s = settings || await fitSettings(conn, tenantId);
   const tz = timeZone || (await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone;
-  const from = dayRange(tz, addDays(todayIn(tz), -(Math.max(s.signoff_valid_days, 1) - 1)))[0];
-  const list = await rows(conn, 'SELECT id, person_id, contract_id, form_id, signer_name, signer_relation, details, via, signed_at FROM rental_signoffs WHERE tenant_id = ? AND person_id = ? AND signed_at >= ? ORDER BY signed_at DESC, id DESC LIMIT 5', [tenantId, personId, from]);
+  const today = todayIn(tz);
+  const fromDay = addDays(today, -(Math.max(s.signoff_valid_days, 1) - 1));
+  const from = dayRange(tz, fromDay)[0];
+  // A guest rental form is often filled in the night before: it counts for the day it was filled in for.
+  const list = await rows(conn, `SELECT s.id, s.person_id, s.contract_id, s.form_id, s.signer_name, s.signer_relation, s.details, s.via, s.signed_at FROM rental_signoffs s
+    LEFT JOIN rental_forms f ON f.tenant_id = s.tenant_id AND f.id = s.form_id
+    WHERE s.tenant_id = ? AND s.person_id = ? AND (s.signed_at >= ? OR (s.via = 'form' AND f.rental_on BETWEEN ? AND ?)) ORDER BY s.signed_at DESC, s.id DESC LIMIT 5`, [tenantId, personId, from, fromDay, today]);
   if (!list.length) return null;
   for (const r of list) { if (typeof r.details === 'string') { try { r.details = JSON.parse(r.details); } catch (_) { r.details = {}; } } }
   const ok = list.find((r) => !mismatch(r.details, details).length);
@@ -209,7 +214,7 @@ async function requireSignoffs(conn, tenantId, gear, defaultPersonId, settings) 
 }
 
 const handoutSchema = z.object({
-  items: z.array(R.gearLine).min(1).max(60),
+  items: z.array(R.gearLine).max(60), // empty is fine when gear was set aside on the contract (a group, the night before)
   due_at: z.string().regex(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/).optional(),
   deposit_cents: z.number().int().min(0).max(1_000_000).optional(),
 });
@@ -225,7 +230,7 @@ async function handout(conn, tenantId, contractId, body) {
   if (c.status !== 'to_fit') throw conflict(c.status === 'out' ? 'That gear is already out' : `That rental is ${c.status.replace('_', ' ')}`);
   const tenant = await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId]);
   const season = seasonFor(todayIn(tenant.timezone));
-  const everyone = [...new Set([c.person_id, ...body.items.map((i) => i.person_id).filter(Boolean)])];
+  const everyone = [...new Set([c.person_id, ...body.items.map((i) => i.person_id).filter(Boolean), ...(await rows(conn, 'SELECT person_id FROM rental_contract_items WHERE tenant_id = ? AND contract_id = ? AND returned_at IS NULL AND person_id IS NOT NULL', [tenantId, contractId])).map((r) => r.person_id)])];
   for (const pid of everyone) {
     if (!(await one(conn, ON_FILE, [tenantId, pid, season]))) {
       const p = await one(conn, 'SELECT first_name, last_name FROM people WHERE tenant_id = ? AND id = ?', [tenantId, pid]);
@@ -233,11 +238,28 @@ async function handout(conn, tenantId, contractId, body) {
     }
   }
   const settings = await fitSettings(conn, tenantId);
-  await requireSignoffs(conn, tenantId, body.items, c.person_id, settings);
-  // Gear set aside for this contract (a group the night before) is freed first, so insertGear can take it.
-  const ids = body.items.map((i) => i.rental_item_id);
-  await conn.query("UPDATE rental_items SET status = 'available' WHERE tenant_id = ? AND id IN (?) AND status = 'set_aside'", [tenantId, ids]);
-  await R.insertGear(conn, tenantId, contractId, body.items, settings);
+  // Gear already on the contract (set aside for a group the night before) stays: its lines are updated with anything
+  // recorded now, and only new gear is added.
+  const onIt = await rows(conn, 'SELECT id, rental_item_id, person_id FROM rental_contract_items WHERE tenant_id = ? AND contract_id = ? AND returned_at IS NULL', [tenantId, contractId]);
+  const existing = new Map(onIt.map((l) => [l.rental_item_id, l]));
+  const fresh = body.items.filter((i) => !existing.has(i.rental_item_id));
+  if (!fresh.length && !onIt.length) throw bad('Choose the gear first');
+  await requireSignoffs(conn, tenantId, [...onIt.map((l) => ({ rental_item_id: l.rental_item_id, person_id: l.person_id || undefined })), ...fresh], c.person_id, settings);
+  for (const i of body.items.filter((x) => existing.has(x.rental_item_id))) {
+    if (i.test_result === 'fail') throw bad('A binding that failed its test cannot go out');
+    await conn.query(`UPDATE rental_contract_items SET din_setting = COALESCE(?, din_setting), tech_name = COALESCE(?, tech_name), test_result = COALESCE(?, test_result),
+      boot_sole_mm = COALESCE(?, boot_sole_mm), skier_type = COALESCE(?, skier_type), set_at = IF(? IS NULL, set_at, NOW()) WHERE tenant_id = ? AND id = ?`,
+    [i.din_setting ?? null, i.tech_name ?? null, i.test_result ?? null, i.boot_sole_mm ?? null, i.skier_type ?? null, i.din_setting ?? null, tenantId, existing.get(i.rental_item_id).id]);
+  }
+  if (onIt.length) {
+    const lines = await rows(conn, 'SELECT l.din_setting, l.tech_name, l.test_result, r.sku, r.category FROM rental_contract_items l JOIN rental_items r ON r.id = l.rental_item_id AND r.tenant_id = l.tenant_id WHERE l.tenant_id = ? AND l.contract_id = ? AND l.returned_at IS NULL', [tenantId, contractId]);
+    for (const l of lines) {
+      if (l.test_result === 'fail') throw bad(`${l.sku} failed its binding test, so it cannot go out`);
+      if (settings.require_binding_record && l.category === 'ski' && (l.din_setting == null || !l.tech_name)) throw bad(`Record the binding setting and who set it for ${l.sku}`);
+    }
+    await conn.query("UPDATE rental_items SET status = 'rented', uses_count = uses_count + 1 WHERE tenant_id = ? AND id IN (?) AND status IN ('set_aside','available')", [tenantId, onIt.map((l) => l.rental_item_id)]);
+  }
+  if (fresh.length) await R.insertGear(conn, tenantId, contractId, fresh, settings);
   const dueAt = body.due_at ? `${body.due_at.replace('T', ' ').slice(0, 16)}:00` : String(c.due_at);
   const deposit = settings.deposit_mode === 'note' ? (body.deposit_cents ?? settings.default_deposit_cents ?? 0) : 0;
   await conn.query("UPDATE rental_contracts SET status = 'out', stage = NULL, stage_at = NULL, checked_out_at = NOW(), due_at = ?, deposit_cents = ?, deposit_mode = ? WHERE tenant_id = ? AND id = ?",

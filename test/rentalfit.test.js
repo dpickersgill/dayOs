@@ -203,6 +203,26 @@ test('a signoff from the guest rental form (no contract) counts the same', async
   assert.ok(v && v.mismatch.length === 0 && v.signoff.via === 'form');
 });
 
+test('a form filled in the night before counts on the rental day; set-aside group gear goes out with the contract', async () => {
+  const kid = (await api('POST', '/people', { token: A.token, body: { first_name: 'Gus', last_name: 'Group', date_of_birth: '2015-01-01' } })).body.id;
+  await q("INSERT INTO waivers (tenant_id, person_id, season, kind, signed_by_name, method) VALUES (?, ?, ?, 'general', 'Pat Group', 'recorded_by_staff')", [A.tid, kid, require('../src/lib/util').seasonFor(today)]);
+  const [f] = await pool.query("INSERT INTO rental_forms (tenant_id, contact_name, rental_on, people, status) VALUES (?, 'Pat Group', ?, '[]', 'used')", [A.tid, today]);
+  await q("INSERT INTO rental_signoffs (tenant_id, person_id, form_id, signer_name, signer_relation, details, signature, via, signed_at) VALUES (?, ?, ?, 'Pat Group', 'parent', ?, ?, 'form', DATE_SUB(NOW(), INTERVAL 3 DAY))", [A.tid, kid, f.insertId, JSON.stringify({ weight_lb: 80, skier_type: '1' }), SIG]);
+  await api('PUT', `/rentals/fit/people/${kid}`, { token: counterTok, body: { weight_lb: 80, skier_type: '1' } });
+  const v = await F.validSignoff(pool, A.tid, kid, { weight_lb: 80, skier_type: '1' });
+  assert.ok(v && !v.mismatch.length, 'a form for today counts though it was signed days ago');
+  // a group contract with gear set aside the night before
+  const gski = await item(A, `GS-${suffix}`, 'ski', { size: '110' });
+  const [gc] = await pool.query("INSERT INTO rental_contracts (tenant_id, person_id, status, stage, valid_on, due_at, group_id) VALUES (?, ?, 'to_fit', 'set', ?, ?, 7)", [A.tid, kid, today, `${today} 16:00:00`]);
+  await q('INSERT INTO rental_contract_items (tenant_id, contract_id, rental_item_id, person_id, din_setting, tech_name, test_result) VALUES (?, ?, ?, ?, 3, \'Tess\', \'pass\')', [A.tid, gc.insertId, gski, kid]);
+  await q("UPDATE rental_items SET status = 'set_aside' WHERE id = ?", [gski]);
+  assert.ok((await api('GET', '/rentals/fit/ready?q=Gus', { token: counterTok })).body.data.some((x) => x.id === gc.insertId));
+  const out = await api('POST', `/rentals/contracts/${gc.insertId}/handout`, { token: counterTok, body: { items: [] } });
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  assert.equal((await q('SELECT status FROM rental_items WHERE id = ?', [gski]))[0].status, 'rented');
+  assert.equal((await q('SELECT COUNT(*) AS n FROM rental_contract_items WHERE contract_id = ?', [gc.insertId]))[0].n, 1, 'no second line for the same ski');
+});
+
 test('handing out with nothing paid: counter is sent to Sell, a manager gives a reason', async () => {
   const p = (await api('POST', '/people', { token: A.token, body: { first_name: 'Una', last_name: 'Paid' } })).body.id;
   await q("INSERT INTO waivers (tenant_id, person_id, season, kind, signed_by_name, method) VALUES (?, ?, ?, 'general', 'Una Paid', 'recorded_by_staff')", [A.tid, p, require('../src/lib/util').seasonFor(today)]);
