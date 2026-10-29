@@ -5,6 +5,7 @@
 import './stage.js';
 import { h, clear } from './ui.js';
 import { levelList } from './levels.js';
+import { code128 } from './barcode.js';
 
 const parts = location.pathname.split('/').filter(Boolean);
 const slug = decodeURIComponent(parts[1] || '');
@@ -77,6 +78,14 @@ function draw(v) {
       try { await call('POST', '/here'); draw(await call('GET', '')); } catch (err) { msg.append(errorBox(err.message)); btn.disabled = false; }
     } }, 'We\'re here');
     lessonCard.append(h('p', { class: 'muted small' }, `At the mountain? Tap so ${L.instructor || 'the ski school'} knows ${who} is here.`), btn, msg);
+  }
+  if (!B.checked_in_at && v.checkin_code && B.status === 'booked' && L.status !== 'cancelled' && !L.ended) {
+    lessonCard.append(h('div', { class: 'checkin-code' }, h('p', { class: 'muted small' }, 'Or show this code at the ski school desk:'), code128(v.checkin_code, { height: 48, module: 2 }), h('p', { class: 'small' }, v.checkin_code)));
+  }
+  if (v.credits && v.credits.length) {
+    main.append(h('section', { class: 'card stack', 'aria-labelledby': 'cr-h' }, h('h2', { id: 'cr-h' }, 'Weather credits'),
+      h('ul', null, ...v.credits.map((c) => h('li', null, `${c.left} ${c.left === 1 ? 'lesson' : 'lessons'}: ${c.product}${c.expires_on ? `, use by ${dayLong(String(c.expires_on).slice(0, 10))}` : ''}`))),
+      h('p', { class: 'muted small' }, 'Show this page at the ski school desk to use a credit.')));
   }
 
   // ---- after the lesson: the recap, a tip, what is next

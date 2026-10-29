@@ -194,14 +194,14 @@ async function familiesSettings(panel) {
     waitlist_claim_minutes: input({ type: 'number', min: 5, max: 240, value: s.waitlist_claim_minutes }),
     next_lesson_on: toggle({ checked: Boolean(f.next_lesson_on) }), pack_on: toggle({ checked: Boolean(f.pack_on) }), pack_credit: toggle({ checked: Boolean(f.pack_credit) }),
     pass_on: toggle({ checked: Boolean(f.pass_on) }), pass_words: input({ value: f.pass_words || '', maxlength: 300, placeholder: 'You have had three lessons with us. Put what you spent toward a season pass: ask at the ski school desk.' }),
-    followup_on: toggle({ checked: Boolean(f.followup_on) }), what_to_bring: input({ value: f.what_to_bring || '', maxlength: 500, placeholder: 'Helmet, goggles, waterproof mittens, a snack' }),
+    followup_on: toggle({ checked: Boolean(f.followup_on) }),
   };
   const msg = h('div', { role: 'status', 'aria-live': 'polite' });
   const save = button('Save', async () => {
     clear(msg);
     try {
       await patch('/skischool/settings', { recap_on: t.recap_on.checked, recap_photos: t.recap_photos.checked, tips_on: t.tips_on.checked, tip_policy: t.tip_policy.value.trim() || null, waitlist_claim_minutes: Number(t.waitlist_claim_minutes.value) || 15 });
-      await patch('/skischool/families/settings', { next_lesson_on: t.next_lesson_on.checked, pack_on: t.pack_on.checked, pack_credit: t.pack_credit.checked, pass_on: t.pass_on.checked, pass_words: t.pass_words.value.trim() || null, followup_on: t.followup_on.checked, what_to_bring: t.what_to_bring.value.trim() || null });
+      await patch('/skischool/families/settings', { next_lesson_on: t.next_lesson_on.checked, pack_on: t.pack_on.checked, pack_credit: t.pack_credit.checked, pass_on: t.pass_on.checked, pass_words: t.pass_words.value.trim() || null, followup_on: t.followup_on.checked});
       toast('Saved');
     } catch (err) { msg.append(errorBox(err)); }
   }, { kind: 'primary' });
@@ -224,7 +224,6 @@ async function familiesSettings(panel) {
     row('Season pass message after three lessons', t.pass_on, f.sells_passes ? 'With a link to your passes in the online shop.' : 'You do not sell passes online yet.'),
     row('Season pass words', t.pass_words, null, { wide: true }),
     row('Follow-up after a first lesson', t.followup_on, 'One email three days later when nothing else is booked.'),
-    row('What to bring', t.what_to_bring, 'On the family\'s lesson page and the confirmation.', { wide: true }),
     h('div', { class: 'set-row' }, msg, save),
     f.lesson_products.length ? h('h3', { class: 'set-subhead' }, 'Lift ticket and rental with a lesson') : null, ...extras);
 }

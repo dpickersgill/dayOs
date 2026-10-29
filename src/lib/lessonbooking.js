@@ -59,6 +59,9 @@ async function bookStudent(conn, req, { sessionId, personId, details = {}, signW
     if (clash) throw conflict(clashWords(clash), { person_id: personId, clash });
     const { n } = await one(conn, "SELECT COUNT(*) AS n FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND status IN ('booked','attended')", [tenantId, s.id]);
     if (Number(n) >= s.capacity) throw conflict('Session is full', { person_id: personId });
+    // a spot offered to the next family on the waitlist is theirs until the offer runs out (lib/lessonwaitlist.js)
+    const { w } = await one(conn, "SELECT COUNT(*) AS w FROM lesson_waitlist WHERE tenant_id = ? AND session_id = ? AND status = 'offered' AND offer_expires_at > UTC_TIMESTAMP()", [tenantId, s.id]);
+    if (Number(n) + Number(w) >= s.capacity) throw conflict(`The last ${Number(w) === 1 ? 'spot is' : `${w} spots are`} held for a family on the waitlist until their offer runs out`, { person_id: personId });
   }
   let creditId = null;
   if (useCreditId) {

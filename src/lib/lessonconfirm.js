@@ -54,6 +54,8 @@ function compose({ tenant, b, settings, url }) {
     '',
     `What to bring: ${bring}`,
     '',
+    `Check-in code at the desk: L${b.id}`,
+    '',
     url ? `Your lesson page (check in when you arrive, see the details, change the date): ${url}` : null,
     url ? '' : null,
     'Canceling:',
@@ -69,6 +71,7 @@ function compose({ tenant, b, settings, url }) {
 <table role="presentation" cellpadding="4"><tr><td><strong>When</strong></td><td>${esc(when(b.starts_at))} to ${esc(clock(b.ends_at))}</td></tr>
 <tr><td><strong>Meet at</strong></td><td>${esc(b.meeting_place || 'the ski school desk')}</td></tr>${lvl ? `<tr><td><strong>Level</strong></td><td>${esc(lvl)}</td></tr>` : ''}</table>
 <p><strong>What to bring:</strong> ${esc(bring)}</p>
+<p><strong>Check-in code at the desk:</strong> L${esc(String(b.id))}</p>
 ${url ? `<p><a href="${esc(url)}">Open your lesson page</a> to check in when you arrive, see the details or change the date.</p>` : ''}
 <p><strong>Canceling</strong></p><ul>${policy.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>
 ${contact ? `<p>Questions? ${esc(contact[0].toUpperCase() + contact.slice(1))}.</p>` : ''}<p>See you on the snow!<br>${esc(tenant.name)}</p>`;

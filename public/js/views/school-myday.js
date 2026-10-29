@@ -8,6 +8,7 @@ import { send, keepCase, keptCase, onChange, pending, flush } from '../outbox.js
 import { cardDialog } from './school-card.js';
 import * as payPart from './school-pay.js';
 import * as parentsPart from './school-parents.js';
+import { moveDialog } from './school-lineup.js';
 
 const OUTBOX = 0; // attendance taps queue under this "case" in the phone's outbox
 const keepId = (date, staffId) => -Number(`${String(staffId || 0).slice(-4)}${date.replace(/-/g, '')}`); // a negative id: never a patrol case
@@ -124,7 +125,8 @@ export async function render(root, opts = {}) {
         x.pickup ? h('div', { class: 'small' }, `Pickup: ${x.pickup}`) : null,
         x.phone ? h('div', { class: 'small' }, h('a', { href: `tel:${String(x.phone).replace(/[^\d+]/g, '')}` }, `Call ${x.contact_name ? `${x.contact_name} ` : ''}${x.phone}`)) : null,
         checkin(x)),
-      h('div', { class: 'myday-actions' }, toggles, button('Report card', () => cardDialog(x.person_id, { discipline: s.discipline }), { small: true, label: `Report card for ${x.first_name}` })));
+      h('div', { class: 'myday-actions' }, toggles, button('Report card', () => cardDialog(x.person_id, { discipline: s.discipline }), { small: true, label: `Report card for ${x.first_name}` }),
+        x.status !== 'no_show' ? button('Move group', () => moveDialog(x, () => load()), { small: true, label: `Move ${x.first_name} to another group` }) : null));
   }
 
   // ---- one program meeting

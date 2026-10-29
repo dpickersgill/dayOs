@@ -249,3 +249,7 @@ details.more .row3 { display: grid; gap: 12px; margin-top: 8px; }
 .choices { display: grid; gap: 8px; }
 .choice { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: var(--r-sm); background: #fff; }
 .countdown { font-size: 1.125rem; font-weight: 700; }
+
+/* ---- the family lesson page: the desk check-in code */
+.checkin-code { display: grid; justify-items: start; gap: 4px; margin-top: 8px; }
+.checkin-code svg { max-width: 100%; height: auto; background: #fff; }

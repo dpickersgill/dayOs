@@ -40,6 +40,9 @@ async function familySettings(db, tenantId) {
   const row = await one(db, 'SELECT * FROM school_family_settings WHERE tenant_id = ?', [tenantId]);
   const out = { ...FAMILY_DEFAULTS };
   if (row) for (const k of Object.keys(FAMILY_DEFAULTS)) if (row[k] !== undefined) out[k] = row[k];
+  // One "What to bring" for the school: Settings, Ski school, Confirmations (school_settings), used by the confirmation too.
+  const shared = (await one(db, 'SELECT what_to_bring FROM school_settings WHERE tenant_id = ?', [tenantId]) || {}).what_to_bring;
+  if (shared) out.what_to_bring = shared;
   return out;
 }
 async function saveFamilySettings(conn, tenantId, fields) {
@@ -461,6 +464,8 @@ async function familyView(t, b, { slug }) {
       allergies: b.allergies, medical: b.medical, pickup: b.pickup, contact_name: b.contact_name, contact_phone: b.contact_phone, moved_at: b.moved_at,
     },
     checkin_open: checkinOpen(b, nowLocal) && Boolean(set.checkin_link),
+    checkin_code: `L${b.id}`, // the desk scans it (lessonlineup.bookingCode)
+    credits: await require('./lessonweather').creditsFor(pool, t.id, b.person_id), // weather credits (Track DIRECTOR)
     texts_available: await textsOn(t.id), photos_asked: Boolean(set.recap_photos),
     policy, recap: recapOut, tips,
     next: ended ? await nextSteps(pool, t, b, { slug }) : null,
