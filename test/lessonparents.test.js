@@ -442,6 +442,32 @@ test('waitlist: a full lesson takes names, a cancellation offers the spot, a cla
   modules.invalidate(A.id);
 });
 
+test('a waitlist offer holds its spot at Sell too, and one offer makes one booking request even when claimed three times at once', async () => {
+  const full = await lesson(170, { capacity: 1 });
+  const first = await personAndBooking(full, 'Una');
+  const j = await pub('POST', '/waitlist', { body: { session_id: full, contact_name: 'Vic Parent', contact_email: 'vic@x.test', contact_phone: '215-555-0112', student: { first_name: 'Vic', last_name: 'Wait', date_of_birth: `${year - 7}-01-01` } } });
+  assert.equal(j.status, 201, j.text);
+  await pool.query("UPDATE lesson_bookings SET status = 'cancelled' WHERE id = ?", [first.booking]);
+  const before = mails.length;
+  assert.equal(await require('../src/lib/lessonwaitlist').offerNext(A.id, full, base), 1);
+  const token = mails.slice(before).find((m) => m.To === 'vic@x.test').TextBody.match(/\/waitlist\/[^/]+\/([A-Za-z0-9_-]{32,64})/)[1];
+  // Sell at the window cannot take the held spot (the counter's booking screen already could not)
+  const sale = await api('POST', '/checkout', { token: T.desk, body: { channel: 'window', customer: { details: { first_name: 'Walt', last_name: 'Walkup', date_of_birth: '1985-03-02', sex: 'male', email: 'walt@x.test' }, sign_waiver: true }, lines: [{ type: 'lesson', session_id: full }], payments: [{ tender: 'cash', amount_cents: 8000 }] } });
+  assert.equal(sale.status, 409, sale.text);
+  assert.match(sale.body.error, /waitlist/);
+  // a double tap and a second tab: one request for the one spot
+  const body = { contact_first_name: 'Vic', contact_last_name: 'Parent', contact_email: 'vic@x.test', contact_phone: '215-555-0112', student: kid('Vic', 7), waiver_accepted: true, policy_accepted: true };
+  const rs = await Promise.all([1, 2, 3].map(() => pub('POST', `/waitlist/${token}/claim`, { body })));
+  assert.deepEqual(rs.map((r) => r.status).sort(), [201, 409, 409], rs.map((r) => r.text).join(' | '));
+  const open = await q("SELECT id FROM lesson_requests WHERE tenant_id = ? AND session_id = ? AND status IN ('pending','awaiting_payment')", [A.id, full]);
+  assert.equal(open.length, 1);
+  assert.equal((await q('SELECT status FROM lesson_waitlist WHERE tenant_id = ? AND session_id = ?', [A.id, full]))[0].status, 'claimed');
+  // the request waiting for its payment holds the spot at Sell as well
+  const sale2 = await api('POST', '/checkout', { token: T.desk, body: { channel: 'window', customer: { details: { first_name: 'Walt', last_name: 'Walkup', date_of_birth: '1985-03-02', sex: 'male', email: 'walt@x.test' }, sign_waiver: true }, lines: [{ type: 'lesson', session_id: full }], payments: [{ tender: 'cash', amount_cents: 8000 }] } });
+  assert.equal(sale2.status, 409, sale2.text);
+  await pool.query("UPDATE lesson_requests SET status = 'expired' WHERE tenant_id = ? AND session_id = ?", [A.id, full]);
+});
+
 test('canceling a paid online lesson refunds this child\'s part under the policy, and the progress card and settings work', async () => {
   const c = await pub('GET', `/lesson/${await links.issue(pool, A.id, D.mia.id)}`);
   assert.equal(c.status, 200);

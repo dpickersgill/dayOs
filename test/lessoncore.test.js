@@ -111,6 +111,28 @@ test('double-booking is refused, for another lesson and for a program meeting', 
   assert.match(r.text, /Already in Sunday Club at 2:00 PM/);
 });
 
+test('two sales of one student at the same moment never double-book them: the counter and Sell both wait for the student', async () => {
+  const at = (d, h) => api('POST', '/skischool/sessions', { token: A.owner, body: { product_id: D.group, starts_at: `${d}T${h}`, ends_at: `${d}T${String(Number(h.slice(0, 2)) + 2).padStart(2, '0')}:${h.slice(3)}` } });
+  const home = ok(await at(addDays(day, 2), '07:00'), 201).id;
+  // one plain sale first (it also sets up the mountain's guest types, which the first sale of a mountain does)
+  const rae = ok(await api('POST', '/checkout', { token: T.counter, body: { channel: 'window', customer: { details: { first_name: 'Rae', last_name: 'Race', date_of_birth: '1985-03-02', sex: 'female', email: 'rae.race@x.test' }, sign_waiver: true }, lines: [{ type: 'lesson', session_id: home }], payments: [{ tender: 'cash', amount_cents: 8000 }] } }), 201).person_id;
+  const count = async (a, b) => Number((await q("SELECT COUNT(*) AS n FROM lesson_bookings WHERE tenant_id = (SELECT id FROM tenants WHERE slug = ?) AND person_id = ? AND session_id IN (?, ?) AND status = 'booked'", [A.slug, rae, a, b]))[0].n);
+  for (let i = 0; i < 3; i += 1) {
+    const d = addDays(day, 3 + i);
+    const a = ok(await at(d, '10:00'), 201).id; const b = ok(await at(d, '10:30'), 201).id;
+    // the counter, twice at once
+    const desk = await Promise.all([a, b].map((sid) => api('POST', `/skischool/sessions/${sid}/bookings`, { token: T.counter, body: { person_id: rae } })));
+    assert.deepEqual(desk.map((r) => r.status).sort(), [201, 409], desk.map((r) => r.text).join(' | '));
+    assert.equal(await count(a, b), 1, `round ${i}: the counter booked one of the two`);
+    // Sell, twice at once, into two more overlapping lessons
+    const c = ok(await at(d, '13:00'), 201).id; const e = ok(await at(d, '13:30'), 201).id;
+    const sale = (sid) => api('POST', '/checkout', { token: T.counter, body: { channel: 'window', customer: { person_id: rae, sign_waiver: true }, lines: [{ type: 'lesson', session_id: sid }], payments: [{ tender: 'cash', amount_cents: 8000 }] } });
+    const sold = await Promise.all([sale(c), sale(e)]);
+    assert.deepEqual(sold.map((r) => r.status).sort(), [201, 409], sold.map((r) => r.text).join(' | '));
+    assert.equal(await count(c, e), 1, `round ${i}: Sell booked one of the two`);
+  }
+});
+
 test('availability: someone who marked open dates only is available only on those dates', async () => {
   const d2 = addDays(day, 1);
   ok(await api('PUT', `/skischool/instructors/${D.kim.id}/profile`, { token: T.manager, body: { disciplines: ['ski', 'snowboard'], ski_level_max: 9, snowboard_level_max: 9, teaches_kids: true, teaches_adaptive: false, psia_level: 'none' } }), 200);

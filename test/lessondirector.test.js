@@ -285,6 +285,94 @@ test('move a day to a makeup day: lessons are copied with free instructors, fami
   assert.equal((await call('POST', `/skischool/director/weather/choices/${un.id}/choose`, { token: M.counter, body: { choice: 'credit' } })).status, 409);
 });
 
+test('a weather makeup canceled for a refund is closed: no credit or refund on top, and a refund never exceeds the child\'s own line', async () => {
+  const M = await mountain('w');
+  const crypto = require('crypto');
+  const day = addDays(today, 2); const later = addDays(today, 3);
+  const s1 = ok(await lesson(M, day, '10:00', { instructor_id: M.ivyId })).id;
+  const other = ok(await lesson(M, later, '10:00')).id;
+  const ana = await sellLesson(M, s1, 'Ana', 'Online');
+  // An online card booking, as onlinesale.confirmRequest leaves it: a confirmed request with its order.
+  await q("UPDATE order_payments SET processor = 'stripe', reference = 'pi_ana_1', tender = 'card' WHERE tenant_id = ? AND order_id = ?", [M.id, ana.order_id]);
+  const [lr] = await pool.query("INSERT INTO lesson_requests (tenant_id, session_id, reference, contact_name, contact_email, contact_phone, students, waiver_accepted, status, amount_cents, payment_intent, order_id, policy_accepted) VALUES (?, ?, 'ANAREF01', 'Ana Online', 'ana.online@x.test', '215-555-0101', '{\"students\":[{}]}', 1, 'confirmed', 8000, 'pi_ana_1', ?, 1)", [M.id, s1, ana.order_id]);
+  await q('UPDATE lesson_bookings SET request_id = ? WHERE id = ?', [lr.insertId, ana.id]);
+  const before = mails.length;
+  ok(await call('POST', '/skischool/director/weather', { token: M.owner, body: { action: 'cancel', date: day, reason: 'Ice storm, lifts closed' } }));
+  const wtok = linkFrom(mails.slice(before).find((m) => m.To === 'ana.online@x.test'));
+  ok(await call('POST', `/public/${M.slug}/weather/${wtok}/choose`, { body: { choice: 'makeup', session_id: other } }));
+  const [line] = await q("SELECT session_id FROM order_items WHERE tenant_id = ? AND order_id = ? AND line_kind = 'lesson'", [M.id, ana.order_id]);
+  assert.equal(line.session_id, other, 'the sale line moved with the makeup');
+  // The family cancels the makeup from their lesson page: a full refund to the card.
+  const ltok = crypto.randomBytes(24).toString('base64url');
+  await q('UPDATE lesson_bookings SET token_sha = ? WHERE id = ?', [crypto.createHash('sha256').update(ltok).digest('hex'), ana.id]);
+  const c = ok(await call('POST', `/public/${M.slug}/lesson/${ltok}/cancel`));
+  assert.equal(c.refund_cents, 8000);
+  // The weather link is now closed: no credit, no refund, no new makeup.
+  const view = ok(await call('GET', `/public/${M.slug}/weather/${wtok}`));
+  assert.ok(view.closed, JSON.stringify(view)); assert.equal(view.credit_ok, false); assert.equal(view.refund_ok, false); assert.deepEqual(view.makeups, []);
+  for (const body of [{ choice: 'credit' }, { choice: 'refund' }, { choice: 'makeup', session_id: other }]) assert.equal((await call('POST', `/public/${M.slug}/weather/${wtok}/choose`, { body })).status, 409, JSON.stringify(body));
+  assert.equal((await q("SELECT COUNT(*) AS n FROM lesson_credits WHERE tenant_id = ? AND person_id = ? AND source = 'weather'", [M.id, ana.person_id]))[0].n, 0);
+  assert.equal((await q('SELECT refunded_cents FROM orders WHERE id = ?', [ana.order_id]))[0].refunded_cents, 8000, 'refunded once');
+
+  // Two children on one card order at different prices: the weather refund of the cheaper one is her own line only.
+  const s3 = ok(await lesson(M, addDays(today, 4), '10:00')).id;
+  const sale = ok(await call('POST', '/checkout', { token: M.counter, body: { channel: 'window', customer: { details: { first_name: 'Pam', last_name: 'Parent', date_of_birth: '1980-01-01', sex: 'female', email: 'pam.parent@x.test' }, sign_waiver: true },
+    participants: { a: { details: { first_name: 'Bo', last_name: 'Parent', date_of_birth: '2016-01-01', sex: 'male' }, sign_waiver: true }, b: { details: { first_name: 'Cy', last_name: 'Parent', date_of_birth: '2015-01-01', sex: 'male' }, sign_waiver: true } },
+    lines: [{ type: 'lesson', session_id: s3, participant: 'a' }, { type: 'lesson', session_id: s3, participant: 'b' }], payments: [{ tender: 'cash', amount_cents: 16000 }] } }));
+  const orderId = sale.order_id || sale.id;
+  const kids = await q("SELECT b.id, b.person_id, p.first_name FROM lesson_bookings b JOIN people p ON p.id = b.person_id WHERE b.tenant_id = ? AND b.session_id = ? ORDER BY p.first_name", [M.id, s3]);
+  await q("UPDATE order_items SET unit_price_cents = 5000 WHERE tenant_id = ? AND order_id = ? AND person_id = ?", [M.id, orderId, kids[0].person_id]);
+  await q("UPDATE order_items SET unit_price_cents = 11000 WHERE tenant_id = ? AND order_id = ? AND person_id = ?", [M.id, orderId, kids[1].person_id]);
+  await q("UPDATE order_payments SET processor = 'stripe', reference = 'pi_two_kids', tender = 'card' WHERE tenant_id = ? AND order_id = ?", [M.id, orderId]);
+  const [lr2] = await pool.query("INSERT INTO lesson_requests (tenant_id, session_id, reference, contact_name, contact_email, contact_phone, students, waiver_accepted, status, amount_cents, payment_intent, order_id, policy_accepted) VALUES (?, ?, 'TWOKIDS1', 'Pam Parent', 'pam.parent@x.test', '215-555-0102', '{\"students\":[{},{}]}', 1, 'confirmed', 16000, 'pi_two_kids', ?, 1)", [M.id, s3, orderId]);
+  await q('UPDATE lesson_bookings SET request_id = ?, contact_email = ? WHERE tenant_id = ? AND session_id = ?', [lr2.insertId, 'pam.parent@x.test', M.id, s3]);
+  const b2 = mails.length;
+  ok(await call('POST', '/skischool/director/weather', { token: M.owner, body: { action: 'cancel', date: addDays(today, 4), reason: 'Wind' } }));
+  const links = mails.slice(b2).filter((m) => m.To === 'pam.parent@x.test').map(linkFrom);
+  const views = await Promise.all(links.map(async (t) => ({ t, v: ok(await call('GET', `/public/${M.slug}/weather/${t}`)) })));
+  const bo = views.find((x) => x.v.student === 'Bo');
+  assert.equal(bo.v.refund.cents, 5000, 'Bo\'s own line, not an even share of the order');
+  const r = ok(await call('POST', `/public/${M.slug}/weather/${bo.t}/choose`, { body: { choice: 'refund' } }));
+  assert.equal(r.refund_cents, 5000);
+  assert.ok((await q('SELECT refunded_at FROM order_items WHERE tenant_id = ? AND order_id = ? AND person_id = ?', [M.id, orderId, kids[0].person_id]))[0].refunded_at, 'Bo\'s line is marked refunded');
+  assert.equal((await q('SELECT refunded_at FROM order_items WHERE tenant_id = ? AND order_id = ? AND person_id = ?', [M.id, orderId, kids[1].person_id]))[0].refunded_at, null, 'Cy\'s line is untouched');
+});
+
+test('a weather makeup canceled by weather again keeps what was paid: the second link offers the credit or refund, the first is closed', async () => {
+  const M = await mountain('w');
+  const d1 = addDays(today, 12); const d2 = addDays(today, 13);
+  const s1 = ok(await lesson(M, d1, '10:00')).id;
+  const s2 = ok(await lesson(M, d2, '10:00')).id;
+  await sellLesson(M, s1, 'Cal', 'Cash');
+  let before = mails.length;
+  ok(await call('POST', '/skischool/director/weather', { token: M.owner, body: { action: 'cancel', date: d1, reason: 'Ice storm' } }));
+  const t1 = linkFrom(mails.slice(before).find((m) => m.To === 'cal.cash@x.test'));
+  ok(await call('POST', `/public/${M.slug}/weather/${t1}/choose`, { body: { choice: 'makeup', session_id: s2 } }));
+  before = mails.length;
+  ok(await call('POST', '/skischool/director/weather', { token: M.owner, body: { action: 'cancel', date: d2, reason: 'Wind' } }));
+  const t2 = linkFrom(mails.slice(before).find((m) => m.To === 'cal.cash@x.test'));
+  const second = ok(await call('GET', `/public/${M.slug}/weather/${t2}`));
+  assert.equal(second.refund.cents, 8000); assert.equal(second.credit_ok, true); assert.equal(second.refund_ok, true);
+  assert.equal((await call('POST', `/public/${M.slug}/weather/${t1}/choose`, { body: { choice: 'credit' } })).status, 409, 'the first link is closed');
+  ok(await call('POST', `/public/${M.slug}/weather/${t2}/choose`, { body: { choice: 'credit' } }));
+  assert.equal((await q("SELECT COUNT(*) AS n FROM lesson_credits c JOIN people p ON p.id = c.person_id WHERE c.tenant_id = ? AND p.first_name = 'Cal' AND p.last_name = 'Cash' AND c.source = 'weather'", [M.id]))[0].n, 1, 'one credit for one paid lesson');
+});
+
+test('a weather delay shows the moved start on the family page once', async () => {
+  const M = await mountain('w');
+  const crypto = require('crypto');
+  const day = addDays(today, 5);
+  const s = ok(await lesson(M, day, '10:00', { instructor_id: M.ivyId })).id;
+  const b = await sellLesson(M, s, 'Dee', 'Delay');
+  ok(await call('POST', '/skischool/director/weather', { token: M.owner, body: { action: 'delay', date: day, delay_minutes: 45, reason: 'Wind hold on the main lift' } }));
+  const tok = crypto.randomBytes(24).toString('base64url');
+  await q('UPDATE lesson_bookings SET token_sha = ? WHERE id = ?', [crypto.createHash('sha256').update(tok).digest('hex'), b.id]);
+  const page = ok(await call('GET', `/public/${M.slug}/lesson/${tok}`));
+  assert.equal(page.lesson.starts_at, `${day} 10:45:00`);
+  assert.equal(page.lesson.new_start, `${day} 10:45:00`, 'not 11:30');
+  assert.equal(page.lesson.was_start, `${day} 10:00:00`);
+});
+
 test('staffing: booked plus expected walk-ups against instructors gives the gap; first instructor to accept a shift offer gets it', async () => {
   const M = await mountain('s');
   const day = addDays(today, 6);

@@ -66,7 +66,8 @@ function render(v) {
   flash = null;
 
   // Where things stand now.
-  if (v.choice === 'makeup' && v.current) status.append(`${who} is booked on ${dayLong(v.current.starts_at)} at ${time(v.current.starts_at)}${v.current.name ? `, ${v.current.name}` : ''}.`);
+  if (v.closed) status.append(v.closed); // canceled or refunded another way since: nothing more to choose here
+  else if (v.choice === 'makeup' && v.current) status.append(`${who} is booked on ${dayLong(v.current.starts_at)} at ${time(v.current.starts_at)}${v.current.name ? `, ${v.current.name}` : ''}.`);
   else if (v.choice === 'credit') status.append(`${who} has a lesson credit. ${v.credit_words || ''}`);
   else if (v.choice === 'refund') status.append(v.refund.refund_how === 'card' ? `Refund of ${money(v.refund.amount_cents)} on its way to your card. It usually shows within 5 to 10 days.` : v.refund.refund_how === 'desk' ? `Refund of ${money(v.refund.amount_cents)}: please see the ski school desk, or call us.` : 'Canceled. There was nothing to refund.');
   else if (v.unpaid && v.kind === 'lesson') { status.classList.add('open'); status.append(`Please pick another day below by ${stamp(v.expires_at)}. You had not paid yet, so there is nothing to refund.`); }
