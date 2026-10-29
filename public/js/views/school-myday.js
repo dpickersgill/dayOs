@@ -81,13 +81,16 @@ export async function render(root, opts = {}) {
   // ---- one lesson
   function lessonCard(s) {
     const list = h('ul', { class: 'myday-roster' });
-    const present = s.students.filter((x) => x.status === 'attended').length;
     const head = h('header', { class: 'myday-head' },
       h('div', null, h('strong', { class: 'myday-time' }, `${fmtTime(s.starts_at)} to ${fmtTime(s.ends_at)}`), s.delay_minutes ? h('span', null, ' ', state(`Delayed ${s.delay_minutes} min`, 'warn')) : null),
       h('div', { class: 'myday-title' }, s.product, s.format && s.format !== 'group' ? h('span', { class: 'muted' }, ` ${label(s.format)}`) : null),
       h('div', { class: 'muted small' }, [s.level_words, label(s.discipline), s.meeting_place ? `Meet: ${s.meeting_place}` : null].filter(Boolean).join('  ·  ')));
-    const count = h('p', { class: 'muted small' }, `${s.students.length} student${s.students.length === 1 ? '' : 's'}${present ? `, ${present} here` : ''}`);
-    const drawRoster = () => { clear(list); for (const x of s.students) list.append(studentRow(s, x, () => drawRoster())); };
+    const count = h('p', { class: 'muted small' });
+    const drawRoster = () => {
+      const present = s.students.filter((x) => x.status === 'attended').length;
+      count.textContent = `${s.students.length} student${s.students.length === 1 ? '' : 's'}${present ? `, ${present} here` : ''}`;
+      clear(list); for (const x of s.students) list.append(studentRow(s, x, () => drawRoster()));
+    };
     drawRoster();
     const allBtn = s.students.some((x) => x.status === 'booked') ? button('All present', async () => {
       const out = await send('POST', `/skischool/sessions/${s.id}/all-present`, {}, { caseId: OUTBOX, label: `All present, ${s.product}` });

@@ -232,7 +232,9 @@ async function load(o) {
     const d = addDays(today, i);
     for (const [hh, prodKey, cap] of [[10, 'lesson', 6], [13, 'lesson', 6], [11, 'private', 1]]) {
       const inst = by('inst')[(i + hh) % Math.max(by('inst').length, 1)];
-      const r = await soft('lesson session', () => C('POST', '/skischool/sessions', { product_id: prod[prodKey], starts_at: `${d}T${hhmm(hh)}`, ends_at: `${d}T${hhmm(hh + (prodKey === 'private' ? 1 : 2))}`, capacity: cap, instructor_id: inst ? inst.id : undefined }));
+      // the nine levels and ages (ski school round 2); a private is a private
+      const fit = prodKey === 'private' ? { format: 'private' } : hh === 10 ? { level_min: 1, level_max: 3, age_min: 5, age_max: 12, meeting_place: 'Magic carpet' } : { level_min: 4, level_max: 6, meeting_place: 'Ski school flag' };
+      const r = await soft('lesson session', () => C('POST', '/skischool/sessions', { product_id: prod[prodKey], starts_at: `${d}T${hhmm(hh)}`, ends_at: `${d}T${hhmm(hh + (prodKey === 'private' ? 1 : 2))}`, capacity: cap, instructor_id: inst ? inst.id : undefined, ...fit }));
       if (r) sessions.push({ id: r.id, cap, day: i });
     }
   }
