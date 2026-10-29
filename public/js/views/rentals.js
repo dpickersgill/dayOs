@@ -13,7 +13,9 @@ const ITEM_STATUS = ['available', 'rented', 'maintenance', 'lost', 'retired'];
 const gearName = (i) => [i.brand, i.model, i.size].filter(Boolean).join(' ');
 
 export async function render(root) {
-  const items = [['counter', 'Counter', fit.drawCounter], ['forms', 'Forms', async (b) => (await import('./rentals-forms.js')).drawForms(b)], ['returns', 'Returns', ret.drawReturns], ['out', 'Out now', ret.drawOut], ['groups', 'Groups', async (b) => (await import('./rentals-groups.js')).drawGroups(b)], ['reservations', 'Reservations', more.drawReservations], ['board', 'Queue board', fit.drawBoard]];
+  const items = [['counter', 'Counter', fit.drawCounter], ['forms', 'Forms', async (b) => (await import('./rentals-forms.js')).drawForms(b)], ['returns', 'Returns', ret.drawReturns], ['out', 'Out now', ret.drawOut], ['groups', 'Groups', async (b) => (await import('./rentals-groups.js')).drawGroups(b)], ['reservations', 'Reservations', more.drawReservations]];
+  // The queue board is for shops with stations (boots, ski tech, door); a one-counter shop does not need it.
+  try { if ((await get('/rentals/fit/settings')).layout === 'stations') items.push(['board', 'Queue board', fit.drawBoard]); } catch (_) { /* settings unreadable: leave the board out */ }
   if (can('counter')) items.push(['inventory', 'Inventory', drawInventory], ['service', 'Service', more.drawService]);
   if (isManager()) items.push(['reports', 'Reports', shopReports]);
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Rentals')), tabs(items));
@@ -28,7 +30,7 @@ export const settingsPages = {
 
 // ---------------------------------------------------------------- inventory
 async function drawInventory(box) {
-  const { data } = await get('/rentals/items?limit=500');
+  const { data } = await (await import('./rentals-picker.js')).allGear();
   const reload = async () => { const n = h('div'); await drawInventory(n); clear(box).append(...n.childNodes); };
   const counts = ITEM_STATUS.map((s) => `${data.filter((i) => i.status === s).length} ${label(s).toLowerCase()}`).join(', ');
   const needle = input({ type: 'search', placeholder: 'Search SKU, brand, model or serial', 'aria-label': 'Search inventory' });

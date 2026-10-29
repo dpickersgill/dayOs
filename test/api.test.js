@@ -174,9 +174,9 @@ test('rentals: waiver required, no double checkout, damage goes to maintenance',
   assert.equal(twice.status, 409);
 
   const partial = await api('POST', `/rentals/contracts/${out.body.id}/checkin`, { token: A.token, body: { items: [{ rental_item_id: skiId, damage_notes: 'Edge damage' }] } });
-  assert.deepEqual(partial.body, { status: 'out', outstanding: 1, fees: [] });
+  assert.deepEqual(partial.body, { status: 'out', outstanding: 1, fees: [], deposit: null });
   const full = await api('POST', `/rentals/contracts/${out.body.id}/checkin`, { token: A.token, body: {} });
-  assert.deepEqual(full.body, { status: 'returned', outstanding: 0, fees: [] });
+  assert.deepEqual(full.body, { status: 'returned', outstanding: 0, fees: [], deposit: null });
 
   const items = (await api('GET', '/rentals/items', { token: A.token })).body.data;
   assert.equal(items.find((i) => i.sku === 'SKI-1').status, 'maintenance');

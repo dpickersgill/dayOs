@@ -29,14 +29,14 @@ async function drawShop(box) {
       const needle = pieceFilter.value.trim().toLowerCase();
       const shown = r.pieces.filter((p) => !needle || [p.sku, p.category, p.size, p.brand, p.model].filter(Boolean).join(' ').toLowerCase().includes(needle)).sort((a, b) => b.use_pct - a.use_pct || b.revenue_cents - a.revenue_cents);
       const first = shown.slice(0, 50);
-      clear(piecesBox).append(shown.length ? table([
+      clear(piecesBox).append(...[shown.length ? table([
         { head: 'Tag', cell: (p) => h('strong', null, p.sku) },
         { head: 'Gear', cell: (p) => `${gear(p)}${p.tier === 'performance' ? ' (performance)' : ''}` },
         { head: 'Times out', num: true, cell: (p) => String(p.times) },
         { head: 'Days out', num: true, cell: (p) => String(p.days_out) },
         { head: 'Use', num: true, cell: (p) => pct(p.use_pct) },
         { head: 'Rental money', num: true, cell: (p) => money(p.revenue_cents) },
-      ], first) : empty('No gear matches.'), shown.length > first.length ? h('p', { class: 'muted small' }, `Showing the 50 used most of ${shown.length}. Search to find others.`) : null);
+      ], first) : empty('No gear matches.'), shown.length > first.length ? h('p', { class: 'muted small' }, `Showing the 50 used most of ${shown.length}. Search to find others.`) : null].filter(Boolean));
     };
     pieceFilter.addEventListener('input', drawPieces);
     drawPieces();

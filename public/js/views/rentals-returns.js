@@ -253,7 +253,7 @@ export function extend(c, done) {
 }
 
 export async function swap(contract, done) {
-  const [c, avail] = await Promise.all([get(`/rentals/contracts/${contract.id}`), get('/rentals/items?status=available&limit=500')]);
+  const [c, avail] = await Promise.all([get(`/rentals/contracts/${contract.id}`), (await import('./rentals-picker.js')).allGear('status=available')]);
   const open = c.items.filter((i) => !i.returned_at);
   const outSel = select(open.map((i) => [String(i.rental_item_id), `${i.sku} ${gearName(i)}`]), '', { name: 'out' });
   const inSel = select(avail.data.map((i) => [String(i.id), `${i.sku} ${label(i.category)} ${gearName(i)}`]), '', { name: 'in' });

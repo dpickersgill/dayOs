@@ -164,7 +164,7 @@ function addMembers(id, done) {
 // ---------------------------------------------------------------- setting gear aside
 async function gearDialog(d, m, done) {
   const kinds = m.discipline === 'snowboard' ? ['snowboard', 'boot', 'helmet'] : ['ski', 'boot', 'pole', 'helmet'];
-  const lists = await Promise.all(kinds.map((k) => get(`/rentals/items?category=${k}&status=available&limit=500`)));
+  const lists = await Promise.all(kinds.map((k) => import('./rentals-picker.js').then((m) => m.allGear(`category=${k}&status=available`))));
   const mine = new Map(m.gear.map((x) => [x.category, x]));
   const wantSize = { boot: m.boot_size || '' };
   const sizeNum = (s) => parseFloat(s);

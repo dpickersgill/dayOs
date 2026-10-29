@@ -218,7 +218,8 @@ const mergeBody = z.object({ into_id: z.coerce.number().int().positive() });
 const ONCE = [['lesson_bookings', 'person_id'], ['program_enrollments', 'person_id'], ['attendance', 'person_id']];
 const MOVE = [['waivers', 'person_id'], ['waivers', 'signed_by_person_id'], ['waiver_signings', 'signer_person_id'], ['orders', 'person_id'], ['order_items', 'person_id'], ['tickets', 'person_id'], ['gift_cards', 'purchaser_id'],
   ['rental_contracts', 'person_id'], ['student_progress', 'person_id'], ['incidents', 'person_id'], ['incident_patients', 'person_id'], ['program_enrollments', 'guardian_id'],
-  ['consent_events', 'person_id'], ['person_notes', 'person_id'], ['person_flags', 'person_id']];
+  ['consent_events', 'person_id'], ['person_notes', 'person_id'], ['person_flags', 'person_id'],
+  ['rental_signoffs', 'person_id'], ['rental_contract_items', 'person_id'], ['rental_reservations', 'person_id'], ['rental_reservation_lines', 'for_person_id']];
 
 /** Folds one customer record into another: everything they bought, signed or booked moves over, then the extra record is removed. */
 router.post('/:id/merge', requireRole('manager'), validate(mergeBody), async (req, res) => {
@@ -245,6 +246,9 @@ router.post('/:id/merge', requireRole('manager'), validate(mergeBody), async (re
     await conn.query('UPDATE IGNORE person_links SET adult_id = ? WHERE tenant_id = ? AND adult_id = ?', [toId, tenantId, fromId]);
     await conn.query('UPDATE IGNORE person_links SET member_id = ? WHERE tenant_id = ? AND member_id = ?', [toId, tenantId, fromId]);
     await conn.query('DELETE FROM person_links WHERE tenant_id = ? AND (adult_id = ? OR member_id = ? OR adult_id = member_id)', [tenantId, fromId, fromId]);
+    // Rental sizing: the kept record's profile wins; the merged-away one moves over only when there is none.
+    await conn.query('UPDATE IGNORE rental_profiles SET person_id = ? WHERE tenant_id = ? AND person_id = ?', [toId, tenantId, fromId]);
+    await conn.query('DELETE FROM rental_profiles WHERE tenant_id = ? AND person_id = ?', [tenantId, fromId]);
     // Remove the extra record first (frees its email), then fill the gaps in the kept record from it.
     await conn.query('DELETE FROM people WHERE tenant_id = ? AND id = ?', [tenantId, fromId]);
     const fill = [];

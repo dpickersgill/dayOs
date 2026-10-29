@@ -119,3 +119,15 @@ export async function leftPanel(box) {
     h('summary', null, h('strong', null, label(t.category)), h('span', { class: 'muted small' }, ` ${t.free} free · ${t.out_now} out · ${t.service} in service`)),
     h('div', { class: 'fit-left-sizes' }, t.sizes.map((s) => h('span', { class: `fit-size${s.free ? '' : ' none'}`, title: `${s.out_now} out, ${s.service} in service` }, h('strong', null, s.size || 'No size'), ` ${s.free}`))))));
 }
+
+/** Every rental item matching a query, page by page (the item list returns at most 500 at a time), for lists that
+ * need the whole fleet: inventory, swaps, setting gear aside. */
+export async function allGear(query = '') {
+  const out = [];
+  for (let offset = 0; offset < 20000; offset += 500) {
+    const { data } = await get(`/rentals/items?${query}${query ? '&' : ''}limit=500&offset=${offset}`);
+    out.push(...data);
+    if (data.length < 500) break;
+  }
+  return { data: out };
+}

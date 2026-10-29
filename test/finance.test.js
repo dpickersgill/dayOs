@@ -56,6 +56,8 @@ test.before(async () => {
   D.rental = await prod({ kind: 'rental', name: 'Ski Package', base_price_cents: 4000 });
   D.pass = await prod({ kind: 'season_pass', name: 'Season Pass', base_price_cents: 50000 });
   D.ski = (await api('POST', '/rentals/items', { token: A.owner, body: { sku: 'F-SKI', category: 'ski', size: '150' } })).body.id;
+  // The renter's signed confirmation before skis go out is covered in rentalfit.test.js; these sales are about the money.
+  assert.equal((await api('PUT', '/rentals/fit/settings', { token: A.owner, body: { require_signoff: false } })).status, 200);
 });
 test.after(async () => { await new Promise((r) => server.close(r)); await pool.end(); });
 

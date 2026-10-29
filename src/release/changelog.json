@@ -1,6 +1,89 @@
 {
   "releases": [
     {
+      "version": "2026.11.4",
+      "date": "2026-10-29",
+      "title": "The rental shop, rebuilt around a busy Saturday: paid and ready to fit, signed fitting cards, guest forms, groups, scan-to-return, season rentals and card deposits",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "rentals",
+          "who": ["counter"],
+          "text": "Paid and ready to fit: a rental sold in Sell or online no longer needs gear chosen at payment. Each renter waits in Ready to fit on the Counter tab, found by name, phone, order number or a scanned receipt, and gear goes out from there. Handing out gear with nothing paid needs a manager and a reason.",
+          "help": "rent-counter"
+        },
+        {
+          "kind": "new",
+          "app": "rentals",
+          "who": ["counter"],
+          "text": "A fitting card for each person: height, weight, date of birth, boot size, sole length, stance and how they ski (cautious, moderate or aggressive), saved to the customer, with the binding setting suggested from your chart using that person's details only. Settings are never copied from a past rental.",
+          "help": "rent-fit"
+        },
+        {
+          "kind": "new",
+          "app": "rentals",
+          "who": ["counter"],
+          "text": "The renter signs on screen that their details are true before skis or a snowboard go out; a parent or guardian signs for anyone under 18. The signature, the details and the gear print on a rental agreement.",
+          "help": "rent-signoff"
+        },
+        {
+          "kind": "new",
+          "app": "rentals",
+          "who": ["counter"],
+          "text": "Shops with stations: each paid rental moves through Form, Boots, Ski tech and Door, each station sees its own queue with wait times, and a queue board shows the line on a wall screen.",
+          "help": "rent-stations"
+        },
+        {
+          "kind": "new",
+          "app": "rentals",
+          "who": ["counter"],
+          "text": "The guest rental form: guests fill in each renter's sizes and ability on their phone and sign, from a link in their order email, a QR code on the receipt, or a QR poster in line. The Forms tab picks it up at the counter.",
+          "help": "rent-form"
+        },
+        {
+          "kind": "new",
+          "app": "rentals",
+          "who": ["counter"],
+          "text": "Groups: schools and clubs add members by list or a parents' link, gear is set aside the night before with bag labels, and the morning hand-out is one scan per bag.",
+          "help": "rent-groups"
+        },
+        {
+          "kind": "new",
+          "app": "rentals",
+          "who": ["counter"],
+          "text": "Returns tab: scan each gear tag and it is checked in at once, with Damaged and Lost one tap away. Out now searches by name, phone, tag or contract and filters overdue, due today, groups and season rentals.",
+          "help": "rent-return"
+        },
+        {
+          "kind": "new",
+          "app": "rentals",
+          "who": ["counter"],
+          "text": "Card deposits: the deposit is held on the guest's card on the counter's card reader and let go when the gear comes back; fees can be taken from it once staff confirm. Longer and season rentals keep the card on file instead.",
+          "help": "rent-deposit"
+        },
+        {
+          "kind": "new",
+          "app": "rentals",
+          "who": null,
+          "text": "Season rentals: a rental product can be a season rental, due back on the shop's season return date, with reminder emails in March and when overdue, and a buy-out that sells the gear to the family.",
+          "help": "rent-season"
+        },
+        {
+          "kind": "improved",
+          "app": "rentals",
+          "who": null,
+          "text": "Rental reports: use by piece, type and size, gear that rarely goes out, repair spend, fees charged, collected and waived, rental money per piece, and late returns.",
+          "help": "rent-reports"
+        },
+        {
+          "kind": "improved",
+          "app": "rentals",
+          "who": ["counter"],
+          "text": "One gear picker everywhere (Sell, the fitting card, groups), with counts by size and What's left; it loads the whole fleet, where lists used to stop at 500 pieces. Due back now defaults to the shop's closing time."
+        }
+      ]
+    },
+    {
       "version": "2026.11.3",
       "date": "2026-10-29",
       "title": "Website: attractions and summer, who each plan is for, and the reason to switch said plainly",
