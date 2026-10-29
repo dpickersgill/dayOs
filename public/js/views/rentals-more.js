@@ -151,4 +151,6 @@ export async function drawSettings(box) {
         await put('/rentals/chart', { rows: clean });
         toast(`${clean.length} chart row${clean.length === 1 ? '' : 's'} saved`);
       }, { kind: 'primary' }))));
+  // deposits and season rentals (the return side): their own block, saved on its own
+  await (await import('./rentals-season.js')).drawReturnSettings(box);
 }

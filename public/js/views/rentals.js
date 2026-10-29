@@ -4,15 +4,17 @@ import { personPicker, waiverPanel } from '../widgets.js';
 import { code128 } from '../barcode.js';
 import { printDialog } from '../print.js';
 import * as more from './rentals-more.js';
+import * as ret from './rentals-returns.js';
+import { drawReports as shopReports } from './rentals-reports.js';
 
 export const CATEGORIES = ['ski', 'snowboard', 'boot', 'helmet', 'pole', 'other'];
 const ITEM_STATUS = ['available', 'rented', 'maintenance', 'lost', 'retired'];
 const gearName = (i) => [i.brand, i.model, i.size].filter(Boolean).join(' ');
 
 export async function render(root) {
-  const items = [['counter', 'Counter', drawCounter], ['out', 'Out now', drawOut], ['reservations', 'Reservations', more.drawReservations]];
+  const items = [['counter', 'Counter', drawCounter], ['returns', 'Returns', ret.drawReturns], ['out', 'Out now', ret.drawOut], ['reservations', 'Reservations', more.drawReservations]];
   if (can('counter')) items.push(['inventory', 'Inventory', drawInventory], ['service', 'Service', more.drawService]);
-  if (isManager()) items.push(['reports', 'Reports', more.drawReports]);
+  if (isManager()) items.push(['reports', 'Reports', shopReports]);
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Rentals')), tabs(items));
 }
 
@@ -21,100 +23,7 @@ export const settingsPages = {
   settings: { title: 'Fees, service and the binding chart', render: (panel) => more.drawSettings(panel) },
 };
 
-// ---------------------------------------------------------------- out now
-async function drawOut(box) {
-  const [{ data }, fees] = await Promise.all([get('/rentals/contracts?status=out'), get('/rentals/charges?status=due')]);
-  const now = nowInput().replace('T', ' ');
-  const due = fees.data;
-  clear(box).append(h('div', { class: 'stack' },
-    due.length ? h('div', { class: 'callout' }, h('strong', null, `${due.length} unpaid fee${due.length === 1 ? '' : 's'}`),
-      table([
-        { head: 'Renter', cell: (c) => `${c.first_name} ${c.last_name}` },
-        { head: 'Fee', cell: (c) => `${label(c.kind)}${c.note ? `: ${c.note}` : ''}` },
-        { head: 'Amount', cell: (c) => money(c.cents) },
-        { head: '', actions: true, cell: (c) => h('span', { class: 'row' }, c.kind === 'deposit' ? null : button('Collect', () => collect(c, () => drawOut(box)), { small: true, kind: 'primary' }), isManager() ? button(c.kind === 'deposit' ? 'Mark returned' : 'Waive', async () => { await post(`/rentals/charges/${c.id}/waive`, {}); toast('Done'); await drawOut(box); }, { small: true }) : null) },
-      ], due.filter((c) => c.kind !== 'deposit' || true))) : null,
-    data.length ? table([
-      { head: 'Renter', cell: (c) => h('span', null, h('strong', null, `${c.first_name} ${c.last_name}`), c.group_name ? ` (${c.group_name})` : '') },
-      { head: 'Due back', cell: (c) => fmtDateTime(c.due_at) },
-      { head: 'Status', cell: (c) => (String(c.due_at) < now ? state('Overdue', 'bad') : state('Out', 'neutral')) },
-      { head: '', actions: true, cell: (c) => h('span', { class: 'row' },
-        button('Check in', () => checkIn(c, () => drawOut(box)), { small: true, kind: 'primary' }),
-        button('Extend', () => extend(c, () => drawOut(box)), { small: true }),
-        button('Swap', () => swap(c, () => drawOut(box)), { small: true })) },
-    ], data, { rowClass: (c) => (String(c.due_at) < now ? 'attention' : null) }) : empty('No gear is out right now.')));
-}
-
-function collect(charge, done) {
-  const method = select([['cash', 'Cash'], ['card', 'Card'], ['other', 'Other']], 'cash', { name: 'method' });
-  formDialog(`Collect ${money(charge.cents)}`, h('div', { class: 'form' }, field('Paid by', method)), async (fd) => {
-    await post(`/rentals/charges/${charge.id}/collect`, { method: val(fd, 'method') });
-    toast('Payment recorded');
-    await done();
-  }, { submitText: 'Record payment' });
-}
-
-function extend(c, done) {
-  formDialog(`Extend ${c.first_name} ${c.last_name}`, h('div', { class: 'form' }, field('New return time', input({ type: 'datetime-local', name: 'due', required: true, value: String(c.due_at).replace(' ', 'T').slice(0, 16) }))), async (fd) => {
-    await post(`/rentals/contracts/${c.id}/extend`, { due_at: val(fd, 'due') });
-    toast('Return time updated');
-    await done();
-  });
-}
-
-async function swap(contract, done) {
-  const [c, avail] = await Promise.all([get(`/rentals/contracts/${contract.id}`), get('/rentals/items?status=available&limit=500')]);
-  const open = c.items.filter((i) => !i.returned_at);
-  const outSel = select(open.map((i) => [String(i.rental_item_id), `${i.sku} ${gearName(i)}`]), '', { name: 'out' });
-  const inSel = select(avail.data.map((i) => [String(i.id), `${i.sku} ${label(i.category)} ${gearName(i)}`]), '', { name: 'in' });
-  const reason = input({ name: 'reason', maxlength: 200, placeholder: 'Too big, bad fit, broken…' });
-  const damaged = h('input', { type: 'checkbox', name: 'damaged' });
-  const din = input({ name: 'din', type: 'number', step: '0.25', min: '0.5', max: '20' });
-  const tech = input({ name: 'tech', maxlength: 100 });
-  formDialog('Swap gear', h('div', { class: 'form' }, field('Bring back', outSel), field('Give instead', inSel), field('Why', reason), h('label', { class: 'check' }, damaged, 'Returned item is damaged (send to service)'),
-    field('Binding setting (skis)', din), field('Set by', tech)), async (fd) => {
-    const rep = { rental_item_id: Number(val(fd, 'in')) };
-    if (num(fd, 'din')) { rep.din_setting = num(fd, 'din'); rep.tech_name = val(fd, 'tech') || undefined; }
-    await post(`/rentals/contracts/${contract.id}/swap`, { out_item_id: Number(val(fd, 'out')), reason: val(fd, 'reason') || undefined, damaged: damaged.checked, replacement: rep });
-    toast('Gear swapped');
-    await done();
-  }, { submitText: 'Swap' });
-}
-
-async function checkIn(contract, done) {
-  const c = await get(`/rentals/contracts/${contract.id}`);
-  const open = c.items.filter((i) => !i.returned_at);
-  const rows = open.map((i) => ({
-    i,
-    back: h('input', { type: 'checkbox', checked: true, 'aria-label': `${i.sku} returned` }),
-    note: input({ placeholder: 'Damage, if any', maxlength: 500, 'aria-label': `${i.sku} damage notes` }),
-    fee: input({ type: 'number', min: '0', step: '0.01', placeholder: 'Fee', 'aria-label': `${i.sku} damage or loss fee`, style: 'width:6rem' }),
-    lost: h('input', { type: 'checkbox', 'aria-label': `${i.sku} lost` }),
-  }));
-  const tbl = table([
-    { head: 'Back', cell: (r) => r.back },
-    { head: 'Item', cell: (r) => h('span', null, h('strong', null, r.i.sku), ` ${gearName(r.i)}`) },
-    { head: 'Damage', cell: (r) => r.note },
-    { head: 'Fee', cell: (r) => r.fee },
-    { head: 'Lost', cell: (r) => r.lost },
-  ], rows);
-  const go = button('Check in selected', async () => {
-    const items = rows.filter((r) => r.back.checked || r.lost.checked).map((r) => ({
-      rental_item_id: r.i.rental_item_id,
-      ...(r.lost.checked ? { lost: true } : {}),
-      ...(r.note.value.trim() ? { damage_notes: r.note.value.trim() } : {}),
-      ...(toCents(r.fee.value) ? { fee_cents: toCents(r.fee.value) } : {}),
-    }));
-    if (!items.length) throw new Error('Select at least one item');
-    const out = await post(`/rentals/contracts/${contract.id}/checkin`, { items });
-    const owed = out.fees.reduce((a, f) => a + f.cents, 0);
-    toast(owed ? `Returned. ${money(owed)} in fees to collect` : out.outstanding ? `${out.outstanding} item${out.outstanding === 1 ? '' : 's'} still out` : 'All gear returned');
-    dlg.close();
-    await done();
-  }, { kind: 'primary' });
-  const dlg = dialog(`Check in for ${contract.first_name} ${contract.last_name}`, [
-    h('p', { class: 'muted' }, 'Gear with damage notes goes to service. A late fee is added automatically if the shop charges one.'), tbl, h('div', { class: 'footer row' }, go)], { wide: true });
-}
+// Out now, the Returns tab, check in, extend, swap and fees live in rentals-returns.js; the shop manager's reports in rentals-reports.js.
 
 // ---------------------------------------------------------------- counter (check out)
 async function drawCounter(box) {
