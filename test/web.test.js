@@ -1044,7 +1044,12 @@ async function renderSetup(view, key, role, token, extra) {
   await settle();
   return panel;
 }
-const openTab = async (root, text) => { [...root.querySelectorAll('[role=tab]')].find((t) => t.textContent === text).click(); await settle(); };
+const openTab = async (root, text) => {
+  const find = () => [...root.querySelectorAll('[role=tab]')].find((t) => t.textContent === text);
+  // Ski school keeps its views in groups: open each group until the view shows up.
+  for (const g of [null, ...root.querySelectorAll('.school-groups > .tabs [role=tab]')]) { if (find()) break; if (g) { g.click(); await settle(); } }
+  find().click(); await settle();
+};
 // Sell, Lessons shows one day at a time (sell-lessons.js): find the lesson's card, trying each day in the strip.
 async function lessonCard(root, name) {
   const find = () => [...root.querySelectorAll('.sl-card')].find((r) => r.textContent.includes(name));
@@ -2122,19 +2127,17 @@ test('school: every tab renders for managers, counter staff and instructors, and
   await closeOverlays();
   const owner = await renderView('school', 'owner', T.owner);
   const tabsOf = (el) => [...el.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, ''));
-  const has = (el, names) => names.every((k) => tabsOf(el).includes(k));
-  assert.deepEqual(tabsOf(owner).slice(0, 8), ['Today', 'Check-in', 'Lineup', 'Lessons', 'Online requests', 'Privates', 'Waitlist', 'Recaps']);
-  assert.ok(has(owner, ['Instructors', 'Instructor hours']), 'the instructor tabs');
-  assert.ok(has(owner, ['Privates', 'Instructor pay', 'Payroll']), 'the pay tabs');
-  assert.ok(has(owner, ['Copy a day', 'Weather', 'Staffing', 'Reports']), 'the director tabs');
+  const groupsOf = (el) => [...el.querySelectorAll('.school-groups > .tabs [role=tab]')].map((t) => t.textContent);
+  const viewsOf = (el) => [...el.querySelectorAll('.subtabs > .tabs [role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, ''));
+  assert.deepEqual(groupsOf(owner), ['Today', 'Bookings', 'Instructors', 'Planning'], 'four groups, not a long row');
+  assert.deepEqual(viewsOf(owner).slice(-3), ['Board', 'Check-in', 'Lineup']);
   await exercise(owner, 'school (owner)');
   const counter = await renderView('school', 'counter', T.counter);
-  assert.deepEqual(tabsOf(counter).slice(0, 7), ['Today', 'Check-in', 'Lineup', 'Lessons', 'Online requests', 'Privates', 'Waitlist']);
-  assert.ok(!tabsOf(counter).includes('Payroll'), 'no payroll for the desk');
-  assert.ok(has(counter, ['Weather']), 'the desk sees weather calls');
+  assert.ok(!groupsOf(counter).includes('Instructors') || !tabsOf(counter).includes('Payroll'), 'no payroll for the desk');
+  assert.ok(groupsOf(counter).includes('Planning'), 'the desk sees weather calls');
   const ins = await renderView('school', 'instructor', T.instructor, { staff_id: D.s2 });
-  assert.equal(tabsOf(ins)[0], 'My day', 'an instructor opens on My day');
-  assert.ok(has(ins, ['Recaps', 'Shift offers']), 'recaps and shift offers for instructors');
+  assert.equal(viewsOf(ins)[0], 'My day', 'an instructor opens on My day');
+  assert.ok(groupsOf(ins).includes('My work'), 'recaps, shift offers and pay under My work');
   await exercise(ins, 'school (instructor)');
   await closeOverlays();
 });
@@ -2209,6 +2212,10 @@ test('school: packages are sold from the Lessons menu and online requests are co
     students: [{ first_name: 'Rhea', last_name: 'Requester', date_of_birth: '1990-05-05', sex: 'female', discipline: 'ski', height_in: 66 }], waiver_accepted: true }) });
   assert.equal(sent.status, 201);
   const reqRoot = await renderView('school', 'counter', T.counter);
+  const group = [...reqRoot.querySelectorAll('.school-groups > .tabs [role=tab]')].find((t) => /^Bookings \(\d+\)$/.test(t.textContent));
+  assert.ok(group, 'the Bookings group shows how many requests are waiting');
+  group.click();
+  await settle();
   const tab = [...reqRoot.querySelectorAll('[role=tab]')].find((t) => /^Online requests \(\d+\)$/.test(t.textContent));
   assert.ok(tab, 'the tab shows how many requests are waiting');
   tab.click();

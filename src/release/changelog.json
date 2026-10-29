@@ -1,6 +1,26 @@
 {
   "releases": [
     {
+      "version": "2026.11.6",
+      "date": "2026-10-29",
+      "title": "Ski school in four groups instead of one long row of tabs",
+      "notes": [
+        {
+          "kind": "improved",
+          "app": "school",
+          "who": ["counter", "instructor"],
+          "text": "Ski school now has four groups at the top: Today (Board, Check-in, Lineup, and My day for instructors), Bookings (Lessons, Online requests, Privates, Waitlist), Instructors (My work for instructors: Recaps, pay, guests, shift offers) and Planning (Weather, Copy a day, Staffing, Reports). Each group shows its own short row of views. Bookings shows how many online requests are waiting.",
+          "help": "school-myday"
+        },
+        {
+          "kind": "fixed",
+          "app": "school",
+          "who": ["instructor"],
+          "text": "The recap form is readable in the dark theme."
+        }
+      ]
+    },
+    {
       "version": "2026.11.5",
       "date": "2026-10-29",
       "title": "The ski school, rebuilt for all four seats: safe booking rules, My day, the lineup board, family booking and recaps, instructor pay and privates, and the director's weather and staffing tools",

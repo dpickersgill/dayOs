@@ -1,5 +1,5 @@
 import { get, post, patch, put, del } from '../api.js';
-import { h, clear, ctx, can, isManager, table, state, input, select, field, button, toast, formDialog, dialog, val, num, todayStr, addDays, fmtDateTime, fmtDate, fmtTime, fmtRange, label, empty, errorBox, tabs, money, confirmDialog, fail, appendAll } from '../ui.js';
+import { h, clear, ctx, can, isManager, table, state, input, select, field, button, toast, formDialog, dialog, val, num, todayStr, addDays, fmtDateTime, fmtDate, fmtTime, fmtRange, label, empty, errorBox, tabs, money, confirmDialog, fail, appendAll, hashParam, withHashParam } from '../ui.js';
 import { levelOptions, levelName, levelList } from '../levels.js';
 import * as myDay from './school-myday.js';
 import { flags } from './school-myday.js';
@@ -34,15 +34,36 @@ export async function render(root) {
   const instructor = ctx.me && ctx.me.role === 'instructor';
   const items = [];
   if (instructor || (isManager() && ctx.me.staff_id)) items.push(['myday', 'My day', (b) => myDay.render(b)]);
-  items.push(['today', 'Today', (b) => boardTab(b, { staff })], ['lessons', 'Lessons', (b) => lessonsTab(b, { staff, certs, names })]);
+  items.push(['today', 'Board', (b) => boardTab(b, { staff })], ['lessons', 'Lessons', (b) => lessonsTab(b, { staff, certs, names })]);
   if (can('counter')) items.push(['requests', pending ? `Online requests (${pending})` : 'Online requests', (b) => requestsTab(b)]);
-  if (isManager()) items.push(['instructors', 'Instructors', (b) => instructorsTab(b, { certs })], ['hours', 'Instructor hours', (b) => hoursTab(b)]);
+  if (isManager()) items.push(['instructors', 'Who teaches what', (b) => instructorsTab(b, { certs })], ['hours', 'Instructor hours', (b) => hoursTab(b)]);
   for (const part of PARTS) items.push(...part.tabs({ staff, certs, names }));
-  // The morning first (the day, check-in, the lineup), then bookings, then the instructor's own, then planning and pay.
-  const ORDER = ['myday', 'today', 'checkin', 'lineup', 'lessons', 'requests', 'privates', 'waitlist', 'recaps', 'offers', 'mypay', 'guests', 'weather', 'copy', 'staffing', 'instructors', 'payroll', 'hours', 'reports'];
-  const rank = (k) => { const i = ORDER.indexOf(k); return i < 0 ? ORDER.length : i; };
-  items.sort((a, b) => rank(a[0]) - rank(b[0]));
-  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Ski school')), tabs(items, instructor ? 'myday' : 'today'));
+  // Four groups instead of a long row: the day, bookings, instructors, planning. Each group shows its own small row of
+  // views; a group with one view shows none. The group is ?tab= in the address, the view ?view=.
+  const GROUPS = [
+    ['day', 'Today', ['myday', 'today', 'checkin', 'lineup']],
+    ['bookings', pending ? `Bookings (${pending})` : 'Bookings', ['lessons', 'requests', 'privates', 'waitlist']],
+    ['team', instructor ? 'My work' : 'Instructors', ['recaps', 'offers', 'mypay', 'guests', 'instructors', 'payroll', 'hours']],
+    ['plan', 'Planning', ['weather', 'copy', 'staffing', 'reports']],
+  ];
+  const byKey = new Map(items.map((i) => [i[0], i]));
+  const placed = new Set(GROUPS.flatMap((g) => g[2]));
+  const extra = items.filter((i) => !placed.has(i[0])).map((i) => i[0]);
+  if (extra.length) GROUPS[GROUPS.length - 1][2].push(...extra); // a new tab from a part lands in Planning until it has a home
+  const groupOf = (k) => (GROUPS.find((g) => g[2].includes(k)) || [])[0];
+  // An old link (#/school?tab=recaps) still opens the right view.
+  const asked = hashParam('tab');
+  if (asked && byKey.has(asked)) { try { history.replaceState(null, '', withHashParam('view', asked, withHashParam('tab', groupOf(asked)))); } catch (_) { /* opens the group */ } }
+  const groups = GROUPS.map(([key, text, keys]) => [key, text, keys.filter((k) => byKey.has(k)).map((k) => byKey.get(k))]).filter((g) => g[2].length);
+  const top = groups.map(([key, text, list]) => [key, text, (panel) => {
+    if (list.length === 1) return list[0][2](panel);
+    const inner = tabs(list, list[0][0], { param: 'view' });
+    inner.classList.add('subtabs');
+    panel.append(inner);
+  }]);
+  const page = tabs(top, 'day');
+  page.classList.add('school-groups');
+  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Ski school')), page);
 }
 
 /** Setup shown in Settings, Ski school (managers): the level ladder and the skills for each level. */
@@ -58,7 +79,7 @@ async function lessonsTab(root, { staff, certs, names }) {
   const to = input({ type: 'date', value: addDays(todayStr(), 14) });
   const body = h('div');
   root.append(h('div', { class: 'row' }, isManager() ? button('Add lesson session', () => addSession(staff, certs, load), { kind: 'primary' }) : null, isManager() ? button('Add a series of days', () => addSeries(staff, certs, load)) : null,
-    isManager() ? button('Weather: delay or cancel a day', () => { location.hash = '#/school?tab=weather'; }) : null), // Track DIRECTOR: one weather playbook for lessons and programs (cancelDays below is no longer reached)
+    isManager() ? button('Weather: delay or cancel a day', () => { location.hash = '#/school?tab=plan&view=weather'; }) : null), // Track DIRECTOR: one weather playbook for lessons and programs (cancelDays below is no longer reached)
     h('div', { class: 'inline-form' }, field('From', from), field('To', to), button('Show', () => load(), { kind: 'primary' })), body);
 
   async function load() {

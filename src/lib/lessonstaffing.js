@@ -161,7 +161,7 @@ async function createOffer(tenantId, b, req, base) {
     return r.insertId;
   });
   const o = await one(pool, 'SELECT * FROM shift_offers WHERE tenant_id = ? AND id = ?', [tenantId, id]);
-  const link = `${base}/#/school?tab=offers`;
+  const link = `${base}/#/school?tab=team&view=offers`;
   const ask = `Can you teach ${offerWords(o)}${o.spots > 1 ? ` (${o.spots} spots)` : ''}? First to say yes gets it. Open the app to say yes: ${link}`;
   let sent = 0;
   for (const i of to) {

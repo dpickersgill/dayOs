@@ -3295,7 +3295,7 @@ fieldset.safety legend { font-weight: 700; padding: 0 4px; }
 
 /* ---- ski school families (2026.11.5, Track PARENTS): recaps to send, the waitlist, the families settings */
 .recap-lesson { gap: 16px; }
-.recap-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--card, #fff); }
+.recap-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--surface); }
 .recap-card textarea { width: 100%; }
 .recap-skills { border: 0; margin: 0; padding: 0; display: grid; gap: 4px; }
 .recap-skills legend { font-weight: 700; margin-bottom: 4px; }
@@ -3349,4 +3349,13 @@ fieldset.safety legend { font-weight: 700; padding: 0 4px; }
 .fillbar { display: inline-block; min-width: 4.5rem; padding: 2px 6px; border-radius: 4px; font-variant-numeric: tabular-nums; background: linear-gradient(90deg, var(--open-tint, #d8eedf) var(--fill, 0%), transparent var(--fill, 0%)); }
 @media (max-width: 720px) {
   .wx-choices { grid-template-columns: 1fr; }
+}
+
+/* ---- Ski school: four groups, each with a small row of views (2026.11.5) */
+.subtabs > .tabs { gap: 6px; border-bottom: 0; margin: -6px 0 18px; flex-wrap: wrap; overflow: visible; mask-image: none; -webkit-mask-image: none; }
+.subtabs > .tabs button { min-height: 36px; padding: 0 14px; border: 1px solid var(--line); border-radius: 999px; margin: 0; color: var(--ink-2); font-weight: 600; font-size: .95rem; }
+.subtabs > .tabs button:hover { color: var(--ink); border-color: var(--line-strong); }
+.subtabs > .tabs button[aria-selected='true'] { background: var(--sel-bg); border-color: var(--sel-bg); color: var(--sel-ink); font-weight: 700; }
+@media (max-width: 640px) {
+  .subtabs > .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
 }

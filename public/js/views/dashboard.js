@@ -108,7 +108,7 @@ const JOBS = {
     { app: 'lostfound', act: 'lost-found', label: 'Lost and found', note: 'Log something handed in', href: '#/lostfound', icon: 'lostfound' },
   ],
   instructor: [
-    { app: 'school', act: 'lessons', label: 'Today\'s lessons', note: 'Who you teach, and where to meet', href: '#/school?tab=today', icon: 'school' },
+    { app: 'school', act: 'lessons', label: 'Today\'s lessons', note: 'Who you teach, and where to meet', href: '#/school?tab=day&view=today', icon: 'school' },
     { app: 'availability', act: 'availability', label: 'My availability', note: 'Mark the days you can teach', href: '#/availability', icon: 'availability' },
   ],
   counter: [
