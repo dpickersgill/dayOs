@@ -3169,3 +3169,19 @@ tr.attr-blocked td { background: var(--closed-tint); }
   .slot-btn { min-height: 60px; }
   .act-add .btn { width: 100%; min-height: 48px; }
 }
+
+/* ---- ski school families (2026.11.5, Track PARENTS): recaps to send, the waitlist, the families settings */
+.recap-lesson { gap: 16px; }
+.recap-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--card, #fff); }
+.recap-card textarea { width: 100%; }
+.recap-skills { border: 0; margin: 0; padding: 0; display: grid; gap: 4px; }
+.recap-skills legend { font-weight: 700; margin-bottom: 4px; }
+.check-row { display: flex; gap: 10px; align-items: flex-start; min-height: 44px; padding: 6px 0; cursor: pointer; }
+.check-row input { width: 22px; height: 22px; flex: none; margin-top: 2px; }
+.recap-photos { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.recap-photo { margin: 0; display: grid; gap: 4px; justify-items: start; }
+.recap-photo img { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; background: var(--line); }
+.waitlist { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.waitlist li { padding: 6px 0; border-top: 1px solid var(--line); }
+.waitlist li:first-child { border-top: 0; }
+.set-subhead { font-size: 1rem; margin: 16px 20px 4px; }

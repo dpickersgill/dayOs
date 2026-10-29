@@ -182,3 +182,70 @@ details.more .row3 { display: grid; gap: 12px; margin-top: 8px; }
 .stack.tight { gap: 6px; }
 @media (max-width: 560px) { .slots li { grid-template-columns: 1fr; } .slots .badges { grid-column: 1; } }
 .lang { margin-left: auto; }
+
+/* ---- families, round 2 (Track PARENTS): find my level, picking a lesson per person, the waitlist, the family lesson page */
+.quiz { display: grid; gap: 12px; }
+.quiz-card { background: #fbfcfd; box-shadow: none; }
+.quiz-step { font-size: 0.8125rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.quiz-q { font-size: 1.25rem; line-height: 1.3; }
+.quiz-q:focus { outline: none; }
+.quiz-options { display: grid; gap: 10px; }
+@media (min-width: 560px) { .quiz-options { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); } }
+.quiz-opt { min-height: 60px; padding: 10px 16px; border-radius: var(--r); border: 2px solid var(--line-strong); background: #fff; color: var(--ink); font: inherit; font-size: 1.0625rem; font-weight: 700; cursor: pointer; text-align: left; }
+.quiz-opt:hover { border-color: var(--blue); background: var(--blue-tint); }
+.quiz-result { display: grid; gap: 8px; justify-items: start; }
+.quiz-level { font-size: 1.5rem; font-weight: 700; line-height: 1.2; }
+.quiz-can { font-size: 1.0625rem; color: var(--ink-soft); }
+.quiz-actions { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.quiz-live { position: absolute; left: -9999px; }
+.quiz-open { align-self: end; }
+.quiz-open .btn { width: 100%; }
+.student legend { display: flex; gap: 8px; align-items: center; }
+.lesson.picked { border-color: var(--green); box-shadow: 0 0 0 2px var(--green-tint), var(--lift); }
+.lesson.nofit { background: #fafbfc; }
+.lesson.nofit .when, .lesson.nofit .what { color: var(--ink-soft); }
+.extras { display: grid; gap: 2px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.wl { margin-top: 12px; box-shadow: none; background: #fbfcfd; }
+.booked-list { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.picker [role='tablist'] { margin-bottom: 4px; }
+
+/* the family lesson page (/lesson/<mountain>/<token>), the waitlist claim and find my level */
+.fam { max-width: 720px; margin: 0 auto; padding: 20px 16px 48px; display: grid; gap: 16px; }
+.fam-head { display: grid; gap: 4px; }
+.fam-when { font-size: 1.375rem; font-weight: 700; line-height: 1.2; }
+.facts { display: grid; gap: 10px; margin: 0; }
+.facts div { display: grid; grid-template-columns: 8.5rem 1fr; gap: 8px; }
+.facts dt { color: var(--muted); font-weight: 700; font-size: 0.9375rem; }
+.facts dd { margin: 0; }
+@media (max-width: 420px) { .facts div { grid-template-columns: 1fr; gap: 0; } }
+.notice { border-radius: var(--r); padding: 14px 16px; font-weight: 700; display: grid; gap: 4px; }
+.notice.warn { background: var(--amber-tint); color: var(--amber); border: 1px solid #f0d49a; }
+.notice.bad { background: var(--red-tint); color: var(--red); border: 1px solid #e8aaa3; }
+.notice.ok { background: var(--green-tint); color: var(--green); border: 1px solid #a9d8bd; }
+.notice span { font-weight: 400; color: var(--ink); }
+.here { width: 100%; min-height: 64px; font-size: 1.25rem; }
+.switch-row { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); }
+.switch-row:first-of-type { border-top: 0; }
+.switch-row .check { padding: 0; min-height: 0; }
+.recap-body { font-size: 1.0625rem; white-space: pre-wrap; }
+.skills { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.skills li { display: flex; gap: 8px; align-items: flex-start; }
+.skills li::before { content: '✓'; color: var(--green); font-weight: 700; }
+.photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.photos img { width: 100%; height: auto; border-radius: var(--r-sm); display: block; background: var(--snow); }
+.tips-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.tips-row .pill { min-width: 72px; }
+.other-tip { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+.other-tip .field { max-width: 160px; }
+.ladder { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ladder li { display: grid; grid-template-columns: 2.25rem 1fr; gap: 10px; align-items: center; padding: 6px 8px; border-radius: var(--r-sm); }
+.ladder li .n { display: inline-grid; place-items: center; width: 2rem; height: 2rem; border-radius: 50%; background: var(--snow); font-weight: 700; color: var(--muted); }
+.ladder li.now { background: var(--blue-tint); }
+.ladder li.now .n { background: var(--blue); color: #fff; }
+.ladder li.past .n { background: var(--green-tint); color: var(--green); }
+.next-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.next-list a { display: flex; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: var(--r-sm); text-decoration: none; color: var(--ink); background: #fff; }
+.next-list a:hover { border-color: var(--blue); }
+.choices { display: grid; gap: 8px; }
+.choice { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: var(--r-sm); background: #fff; }
+.countdown { font-size: 1.125rem; font-weight: 700; }

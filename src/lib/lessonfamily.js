@@ -279,6 +279,13 @@ function plusMinutes(s, mins) {
   return d.toISOString().slice(0, 19).replace('T', ' ');
 }
 
+/** A UTC stamp from the database as the mountain's wall-clock time ('YYYY-MM-DD HH:MM:SS'). */
+function localOf(utc, tz) {
+  const d = new Date(`${String(utc).slice(0, 19).replace(' ', 'T')}Z`);
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(d).map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
+}
+
 /** Is "We're here" open: the lesson day, from 90 minutes before the start until the end, lesson and booking not canceled. */
 function checkinOpen(b, nowLocal) {
   if (b.session_status === 'cancelled' || b.status !== 'booked') return false;
@@ -450,7 +457,7 @@ async function familyView(t, b, { slug }) {
       delay_minutes: Number(b.delay_minutes || 0), new_start: Number(b.delay_minutes || 0) > 0 ? plusMinutes(b.starts_at, b.delay_minutes) : null, ended,
     },
     booking: {
-      status: b.status, checked_in_at: b.checked_in_at, checked_in_via: b.checked_in_via, text_ok: Boolean(b.text_ok), photo_ok: Boolean(b.photo_ok),
+      status: b.status, checked_in_at: b.checked_in_at, checked_in_local: b.checked_in_at ? localOf(b.checked_in_at, t.timezone) : null, checked_in_via: b.checked_in_via, text_ok: Boolean(b.text_ok), photo_ok: Boolean(b.photo_ok),
       allergies: b.allergies, medical: b.medical, pickup: b.pickup, contact_name: b.contact_name, contact_phone: b.contact_phone, moved_at: b.moved_at,
     },
     checkin_open: checkinOpen(b, nowLocal) && Boolean(set.checkin_link),

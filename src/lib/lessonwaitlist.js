@@ -128,8 +128,8 @@ function claimView(w) {
 
 /** Staff: who is waiting for a lesson, in order. */
 async function forSession(db, tenantId, sessionId) {
-  return (await rows(db, "SELECT id, contact_name, contact_email, contact_phone, student, status, offered_at, offer_expires_at, created_at FROM lesson_waitlist WHERE tenant_id = ? AND session_id = ? AND status IN ('waiting','offered') ORDER BY id", [tenantId, sessionId]))
-    .map((w) => { let st = {}; try { st = JSON.parse(w.student); } catch (_) { /* none */ } return { id: w.id, contact_name: w.contact_name, contact_email: w.contact_email, contact_phone: w.contact_phone, student: `${st.first_name || ''} ${st.last_name || ''}`.trim(), level: st.level || null, status: w.status, offer_expires_at: w.offer_expires_at, created_at: w.created_at }; });
+  return (await rows(db, "SELECT id, contact_name, contact_email, contact_phone, student, status, offered_at, offer_expires_at, GREATEST(TIMESTAMPDIFF(MINUTE, UTC_TIMESTAMP(), offer_expires_at), 0) AS minutes_left, created_at FROM lesson_waitlist WHERE tenant_id = ? AND session_id = ? AND status IN ('waiting','offered') ORDER BY id", [tenantId, sessionId]))
+    .map((w) => { let st = {}; try { st = JSON.parse(w.student); } catch (_) { /* none */ } return { id: w.id, contact_name: w.contact_name, contact_email: w.contact_email, contact_phone: w.contact_phone, student: `${st.first_name || ''} ${st.last_name || ''}`.trim(), level: st.level || null, status: w.status, offer_expires_at: w.offer_expires_at, minutes_left: w.status === 'offered' ? Number(w.minutes_left) : null, created_at: w.created_at }; });
 }
 
 function clock(s) { const hh = Number(String(s).slice(11, 13)); return `${hh % 12 || 12}:${String(s).slice(14, 16)} ${hh < 12 ? 'AM' : 'PM'}`; }

@@ -67,15 +67,38 @@ async function show() {
   out.addEventListener('click', async () => { await call('POST', '/signout').catch(() => {}); session = null; store.set(null); signIn(); });
   const tel = d.phone ? h('a', { class: 'call', href: `tel:${d.phone.replace(/[^\d+]/g, '')}` }, `Call ${d.phone}`) : null;
   clear(root).append(hero(d.mountain, `Signed in as ${d.email}`, h('div', { class: 'chips-row' }, tel, out)),
-    shell(d.people.length ? d.people.map((p) => childCard(p, d)) : h('section', { class: 'card' }, h('h2', null, 'Nothing here yet'), h('p', null, 'No program places are on this email. If you registered with another email, sign in with that one.'), h('a', { class: 'btn', href: `/programs/${encodeURIComponent(slug)}` }, 'Register for a program'))));
+    shell(d.people.length ? d.people.map((p) => childCard(p, d)) : h('section', { class: 'card' }, h('h2', null, 'Nothing here yet'), h('p', null, 'No program places or lessons are on this email. If you booked with another email, sign in with that one.'), h('a', { class: 'btn', href: `/programs/${encodeURIComponent(slug)}` }, 'Register for a program'))));
 }
 
 function childCard(p, d) {
   return h('section', { class: 'card stack fam-child' }, h('h2', null, `${p.first_name} ${p.last_name}`),
     ...p.places.map((pl) => placeBlock(p, pl, d)),
+    lessonsBlock(p), progressBlock(p),
     p.report_card.length ? h('div', { class: 'fam-card' }, h('h3', null, 'Report card'), ...p.report_card.map((rc) => h('div', { class: 'stack tight' },
       h('p', null, h('b', null, rc.discipline === 'ski' ? 'Skiing' : rc.discipline === 'snowboard' ? 'Snowboarding' : rc.discipline), rc.level ? `: ${rc.level}` : ': just starting'),
       rc.next ? h('div', null, h('p', { class: 'small muted' }, `Working toward ${rc.next.name}:`), h('ul', { class: 'fam-skills' }, rc.next.skills.map((s) => h('li', { class: s.passed ? 'done' : '' }, h('span', { 'aria-hidden': 'true' }, s.passed ? '✓ ' : '○ '), s.name, h('span', { class: 'visually-hidden' }, s.passed ? ' (passed)' : ' (not yet)'))))) : null))) : null);
+}
+
+/** Single lessons coming up (2026.11.5): each has its own private link in the confirmation email. */
+function lessonsBlock(p) {
+  if (!p.lessons || !p.lessons.length) return null;
+  const clock = (s) => t12(String(s).slice(11, 16));
+  return h('div', { class: 'fam-card' }, h('h3', null, 'Lessons coming up'), h('ul', { class: 'fam-lessons' }, p.lessons.map((l) => h('li', null,
+    h('b', null, `${long(String(l.starts_at).slice(0, 10))}, ${clock(l.starts_at)}`), ` ${l.product}`, h('span', { class: 'small muted' }, ` · ${l.level_words}${l.meeting_place ? ` · meet at ${l.meeting_place}` : ''}`),
+    l.canceled ? h('span', { class: 'small' }, ' · canceled by the mountain') : l.delay_minutes ? h('span', { class: 'small' }, ` · delayed ${l.delay_minutes} minutes`) : null))),
+  h('p', { class: 'small muted' }, 'To check in, change the date or cancel, use the link in that lesson\'s confirmation email.'));
+}
+
+/** The progress card: level per sport, levels passed with dates, skills, recaps, across lessons, programs and seasons. */
+function progressBlock(p) {
+  const g = p.progress;
+  if (!g || (!g.levels.length && !g.passed.length && !g.recaps.length)) return null;
+  return h('div', { class: 'fam-card' }, h('h3', null, 'Progress'),
+    ...g.levels.map((lv) => h('p', null, h('b', null, lv.discipline === 'snowboard' ? 'Snowboard' : 'Ski'), `: ${lv.words}. `, h('span', { class: 'small muted' }, `“${lv.can}”`))),
+    g.passed.length ? h('p', { class: 'small' }, `Levels passed: ${g.passed.map((x) => `${x.words} (${short(x.on)})`).join(', ')}`) : null,
+    g.skills.length ? h('p', { class: 'small' }, `Skills ticked: ${g.skills.length}`) : null,
+    g.recaps.length ? h('details', null, h('summary', null, `Lesson recaps (${g.recaps.length})`), ...g.recaps.map((r) => h('div', { class: 'stack tight' }, h('b', null, `${short(r.date)}, ${r.product}`), r.body ? h('p', { class: 'small' }, r.body) : null))) : null,
+    h('p', { class: 'small muted' }, `${g.lessons} lesson${g.lessons === 1 ? '' : 's'} so far${g.programs.length ? `; programs: ${g.programs.map((x) => x.name).join(', ')}` : ''}.`));
 }
 
 function placeBlock(p, pl, d) {

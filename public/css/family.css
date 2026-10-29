@@ -21,3 +21,4 @@
 .btn.onink { background: transparent; color: #fff; border-color: rgba(255, 255, 255, 0.5); min-height: 40px; }
 .btn.small { min-height: 40px; padding: 0 14px; font-size: 0.9375rem; }
 .visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.fam-lessons { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
