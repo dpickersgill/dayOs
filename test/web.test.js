@@ -184,7 +184,7 @@ test.before(async (t) => {
   // rentals, lessons, program, incident
   D.items = [];
   for (const [sku, category, size] of [['SK-001', 'ski', '150'], ['SK-002', 'ski', '160'], ['BT-001', 'boot', '27']]) D.items.push(ok(await api('POST', '/rentals/items', { token: o, body: { sku, category, brand: 'Atomic', size } })).id);
-  ok(await api('POST', '/rentals/contracts', { token: o, body: { person_id: D.ann, due_at: `${today}T16:30`, items: [{ rental_item_id: D.items[0] }] } }));
+  ok(await api('POST', '/rentals/contracts', { token: o, body: { unpaid_reason: 'Test hand-out', person_id: D.ann, due_at: `${today}T16:30`, items: [{ rental_item_id: D.items[0] }] } }));
   D.session = ok(await api('POST', '/skischool/sessions', { token: o, body: { product_id: D.lesson, starts_at: `${today}T10:00`, ends_at: `${today}T12:00`, capacity: 4, instructor_id: D.s2 } })).id;
   ok(await api('POST', `/skischool/sessions/${D.session}/bookings`, { token: o, body: { person_id: D.ann } }));
   D.program = ok(await api('POST', '/programs', { token: o, body: { name: 'Junior Race Team', kind: 'race_team', season: '2026-27', capacity: 1, price_cents: 45000 } })).id;
@@ -1211,14 +1211,8 @@ test('sell: lessons, a rental, a program place and a gift card in one basket, fo
     sel.value = 'p1'; sel.dispatchEvent(new window.Event('change', { bubbles: true }));
   }
   await settle();
-  // the rental needs gear
-  clickBtn(dlg, 'Next: payment'); await settle();
-  assert.match(dlg.textContent, /Choose the gear for Ski Package/);
-  clickBtn(dlg, 'Choose gear'); await settle();
-  const gear = topDialog();
-  for (const sku of ['SK-002', 'BT-001']) { const box = gear.querySelector(`input[aria-label="${sku}"]`); assert.ok(box, `${sku} can be chosen`); box.checked = true; box.dispatchEvent(new window.Event('change', { bubbles: true })); }
-  clickBtn(gear, 'Use this gear'); await settle();
-  assert.match(dlg.textContent, /Gear: 2 chosen/);
+  // the rental can be fitted now, or later at the rental shop: this one is fitted later (Ready to fit)
+  assert.match(dlg.textContent, /Fit now \(optional\)/);
   // the child has no waiver yet: it is signed at the counter
   const waiver = [...kid.querySelectorAll('label.check')].find((l) => l.textContent.includes('guardian signed the waiver for Kit Parent'));
   assert.ok(waiver, 'a child\'s waiver is signed by the parent or guardian');
@@ -1233,7 +1227,7 @@ test('sell: lessons, a rental, a program place and a gift card in one basket, fo
   clickBtn(dlg, 'Complete sale'); await settle();
   const text = dlg.textContent;
   assert.match(text, /Sold \$150\.00/);
-  assert.match(text, /Lessons booked/); assert.match(text, /Gear out/); assert.match(text, /Program places/); assert.match(text, /Gift cards/);
+  assert.match(text, /Lessons booked/); assert.match(text, /Ready to fit/); assert.match(text, /Program places/); assert.match(text, /Gift cards/);
 
   const kitRows = ok(await api('GET', '/people?q=Kit', { token: o })).data;
   assert.equal(kitRows.length, 1);

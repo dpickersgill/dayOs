@@ -105,7 +105,7 @@ async function sellPanel(root) {
       const stock = Object.entries(menu.stock).map(([k, n]) => `${label(k)} ${n}`).join(', ');
       b.append(h('div', { class: 'menu-tools' }, field('Renter type', t)), h('p', { class: 'muted small' }, stock ? `Available now: ${stock}.` : 'No gear is available right now.'),
         h('div', { class: 'tiles' }, menu.rentals.map((p) => h('button', { type: 'button', class: 'tile', 'data-product': p.id, onclick: () => add({ type: 'rental', product_id: p.id, name: p.name, tier: t.value, quantity: 1, items: [], detail: `${t.value}, ${menu.today}${p.valid_days > 1 ? `, ${p.valid_days} days` : ''}` }) },
-          h('strong', null, p.name), h('small', { class: 'muted' }, 'Gear is chosen at checkout'), h('span', { class: 'tile-price' }, money(price(p, t.value)))))));
+          h('strong', null, p.name), h('small', { class: 'muted' }, 'Fit now, or later at the rental shop'), h('span', { class: 'tile-price' }, money(price(p, t.value)))))));
     }],
     ['programs', 'Programs', (b) => {
       if (!menu.programs.length) { b.append(empty('No programs are open.', isManager() ? h('a', { class: 'btn primary', href: '#/programs' }, 'Add a program') : null)); return; }

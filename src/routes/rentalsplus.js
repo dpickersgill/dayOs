@@ -83,6 +83,9 @@ const chartRow = z.object({
   sole_mm_min: z.number().int().min(0).max(400).nullable().optional(),
   sole_mm_max: z.number().int().min(0).max(400).nullable().optional(),
   din: z.number().min(0.5).max(20),
+  // a row for an age range (children, older skiers); blank means any age
+  age_min: z.number().int().min(0).max(120).nullable().optional(),
+  age_max: z.number().int().min(0).max(120).nullable().optional(),
 });
 
 router.get('/chart', requireRole(...counter), async (req, res) => {
@@ -95,8 +98,8 @@ router.put('/chart', requireRole(...manager), validate(z.object({ rows: z.array(
     await conn.query('DELETE FROM binding_chart WHERE tenant_id = ?', [tenantId]);
     for (const r of req.body.rows) {
       await conn.query(
-        'INSERT INTO binding_chart (tenant_id, skier_type, weight_lb_min, weight_lb_max, height_in_min, height_in_max, sole_mm_min, sole_mm_max, din) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [tenantId, r.skier_type, r.weight_lb_min ?? null, r.weight_lb_max ?? null, r.height_in_min ?? null, r.height_in_max ?? null, r.sole_mm_min ?? null, r.sole_mm_max ?? null, r.din],
+        'INSERT INTO binding_chart (tenant_id, skier_type, weight_lb_min, weight_lb_max, height_in_min, height_in_max, sole_mm_min, sole_mm_max, din, age_min, age_max) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [tenantId, r.skier_type, r.weight_lb_min ?? null, r.weight_lb_max ?? null, r.height_in_min ?? null, r.height_in_max ?? null, r.sole_mm_min ?? null, r.sole_mm_max ?? null, r.din, r.age_min ?? null, r.age_max ?? null],
       );
     }
     await audit(conn, req, 'update', 'binding_chart', tenantId, { rows: req.body.rows.length });
@@ -496,7 +499,7 @@ router.get('/reports', requireRole(...manager), async (req, res) => {
   // The days are the mountain's; checked_out_at and created_at are stamped in UTC, so an evening's rentals belong to that day.
   const range = [tenantId, dayRange(tz, from)[0], dayRange(tz, to)[1]];
   const fleet = await rows(pool, "SELECT category, tier, status, COUNT(*) AS n FROM rental_items WHERE tenant_id = ? GROUP BY category, tier, status ORDER BY category, tier", [tenantId]);
-  const contracts = await one(pool, 'SELECT COUNT(*) AS n FROM rental_contracts WHERE tenant_id = ? AND checked_out_at >= ? AND checked_out_at < ?', range);
+  const contracts = await one(pool, "SELECT COUNT(*) AS n FROM rental_contracts WHERE tenant_id = ? AND checked_out_at >= ? AND checked_out_at < ? AND status NOT IN ('to_fit','cancelled')", range); // paid but not fitted yet is not a rental out
   const pieces = await rows(
     pool,
     `SELECT i.category, COUNT(*) AS n FROM rental_contract_items li JOIN rental_contracts c ON c.id = li.contract_id AND c.tenant_id = li.tenant_id

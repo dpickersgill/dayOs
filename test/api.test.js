@@ -163,14 +163,14 @@ test('rentals: waiver required, no double checkout, damage goes to maintenance',
   const bootId = await mk('BOOT-1', 'boot');
   const due = `${today}T16:30`;
 
-  const noWaiver = await api('POST', '/rentals/contracts', { token: A.token, body: { person_id: ctx.ada, due_at: due, items: [{ rental_item_id: skiId }] } });
+  const noWaiver = await api('POST', '/rentals/contracts', { token: A.token, body: { unpaid_reason: 'Test hand-out', person_id: ctx.ada, due_at: due, items: [{ rental_item_id: skiId }] } });
   assert.equal(noWaiver.status, 409);
 
   assert.equal((await api('POST', `/people/${ctx.ada}/waivers`, { token: A.token, body: {} })).status, 201);
 
-  const out = await api('POST', '/rentals/contracts', { token: A.token, body: { person_id: ctx.ada, due_at: due, items: [{ rental_item_id: skiId, din_setting: 6.5 }, { rental_item_id: bootId }] } });
+  const out = await api('POST', '/rentals/contracts', { token: A.token, body: { unpaid_reason: 'Test hand-out', person_id: ctx.ada, due_at: due, items: [{ rental_item_id: skiId, din_setting: 6.5 }, { rental_item_id: bootId }] } });
   assert.equal(out.status, 201, JSON.stringify(out.body));
-  const twice = await api('POST', '/rentals/contracts', { token: A.token, body: { person_id: ctx.ada, due_at: due, items: [{ rental_item_id: skiId }] } });
+  const twice = await api('POST', '/rentals/contracts', { token: A.token, body: { unpaid_reason: 'Test hand-out', person_id: ctx.ada, due_at: due, items: [{ rental_item_id: skiId }] } });
   assert.equal(twice.status, 409);
 
   const partial = await api('POST', `/rentals/contracts/${out.body.id}/checkin`, { token: A.token, body: { items: [{ rental_item_id: skiId, damage_notes: 'Edge damage' }] } });

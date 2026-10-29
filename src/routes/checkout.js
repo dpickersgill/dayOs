@@ -22,6 +22,7 @@ const { personFields, resolvePerson, ensureRequired } = require('../lib/customer
 const { loadRules, applyTax, split } = require('../lib/tax');
 const { addLink, isMinor } = require('../lib/family');
 const R = require('../lib/rentals');
+const F = require('../lib/rentalfit');
 const terminal = require('./terminal');
 const PPS = require('../lib/partnerpasses');
 const ACT = require('../lib/activities');
@@ -52,6 +53,8 @@ const lineSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('rental'), product_id: z.number().int().positive(), tier: tierEnum.default('adult'), valid_on: dateStr.optional(), due_at: dateTimeStr.optional(), participant: who,
     items: z.array(R.gearLine).max(60).optional(),
+    // The fitting card in Sell: the renter's details, and their signed confirmation of them (needed for skis or a board).
+    fit: F.detailsSchema.optional(), signoff: F.signoffSchema.optional(),
   }),
   z.object({
     type: z.literal('program'), program_id: z.number().int().positive(), participant: who,
@@ -505,9 +508,20 @@ async function runSale(conn, req, body, { check = false } = {}) {
         await waiverOk(ln.participant || 'customer', student, seasonFor(p.day), 'The student');
         await lessonCheck(p, student);
       } else if (p.type === 'rental') {
+        // No gear: the rental is paid now and fitted at the rental shop (Ready to fit), where the waiver is checked.
         const gear = ln.items || [];
-        if (!gear.length) throw bad(`Choose the gear for the ${p.name} rental`);
+        if (!gear.length) continue;
         await waiverOk(ln.participant || 'customer', personOf(ln), seasonFor(today), 'The renter');
+        if (!ln.signoff) {
+          const renter = personOf(ln);
+          const onFile = renter ? await F.detailsOf(conn, tenantId, renter) : { details: {} };
+          await F.requireSignoffs(conn, tenantId, gear, renter, await F.fitSettings(conn, tenantId)).catch(async (err) => {
+            // a signoff in the window whose details match what was typed on the card now still counts
+            if (!ln.fit) throw err;
+            const v = await F.validSignoff(conn, tenantId, renter, { ...onFile.details, ...ln.fit });
+            if (!v || v.mismatch.length) throw err;
+          });
+        }
         const ids = gear.map((g) => g.rental_item_id);
         if (new Set(ids).size !== ids.length) throw bad('The same rental item was chosen twice');
         const items = await rows(conn, 'SELECT id, sku, status FROM rental_items WHERE tenant_id = ? AND id IN (?)', [tenantId, ids]);
@@ -594,15 +608,31 @@ async function runSale(conn, req, body, { check = false } = {}) {
       } else if (p.type === 'rental') {
         const renter = personOf(ln);
         const gear = ln.items || [];
-        if (!gear.length) throw bad(`Choose the gear for the ${p.name} rental`);
-        await ensureWaiver(ln.participant || 'customer', renter, seasonFor(today), 'The renter');
-        const dueAt = ln.due_at ? normDateTime(ln.due_at) : `${addDays(p.validOn, Math.max(p.product.valid_days, 1) - 1)} 17:00:00`;
-        const [c] = await conn.query('INSERT INTO rental_contracts (tenant_id, person_id, order_id, due_at) VALUES (?, ?, ?, ?)', [tenantId, renter, orderId, dueAt]);
-        const locked = await R.insertGear(conn, tenantId, c.insertId, gear, await R.getSettings(conn, tenantId));
+        const key = ln.participant || 'customer';
+        const fs = await F.fitSettings(conn, tenantId);
+        if (ln.fit) await F.saveDetails(conn, tenantId, renter, ln.fit);
+        if (!gear.length) {
+          // Paid and ready to fit: one contract for the renter, no gear yet. A waiver ticked at the window is still recorded.
+          if (waiverFor.get(key)) await ensureWaiver(key, renter, seasonFor(today), 'The renter');
+          const tf = await F.createToFit(conn, tenantId, { personId: renter, orderId, validOn: p.validOn, product: p.product, settings: fs });
+          const itemId = await item({ product_id: p.product.id, person_id: renter, contract_id: tf.id, valid_on: p.validOn });
+          await conn.query('UPDATE rental_contracts SET order_item_id = ? WHERE tenant_id = ? AND id = ?', [itemId, tenantId, tf.id]);
+          await audit(conn, req, 'sell_to_fit', 'rental_contracts', tf.id, { order_id: orderId, kind: tf.kind });
+          done.rentals.push({ contract_id: tf.id, person_id: renter, status: 'to_fit', kind: tf.kind, due_at: tf.due_at, items: [] });
+          continue;
+        }
+        await ensureWaiver(key, renter, seasonFor(today), 'The renter');
+        const kind = p.product.rental_kind === 'season' ? 'season' : 'day';
+        const dueAt = ln.due_at ? normDateTime(ln.due_at) : F.dueFor(fs, kind, p.validOn, p.product.valid_days);
+        const [c] = await conn.query('INSERT INTO rental_contracts (tenant_id, person_id, order_id, due_at, kind, valid_on) VALUES (?, ?, ?, ?, ?, ?)', [tenantId, renter, orderId, dueAt, kind, p.validOn]);
+        if (ln.signoff) await F.saveDetails(conn, tenantId, renter, ln.signoff.details);
+        if (ln.signoff) await F.writeSignoff(conn, tenantId, renter, ln.signoff, { contractId: c.insertId, ip: req.ip || null, today });
+        const locked = await R.insertGear(conn, tenantId, c.insertId, gear, fs);
         const ids = gear.map((g) => g.rental_item_id);
-        await item({ product_id: p.product.id, person_id: renter, contract_id: c.insertId, valid_on: p.validOn });
+        const itemId = await item({ product_id: p.product.id, person_id: renter, contract_id: c.insertId, valid_on: p.validOn });
+        await conn.query('UPDATE rental_contracts SET order_item_id = ? WHERE tenant_id = ? AND id = ?', [itemId, tenantId, c.insertId]);
         await audit(conn, req, 'checkout', 'rental_contracts', c.insertId, { items: ids, order_id: orderId });
-        done.rentals.push({ contract_id: c.insertId, person_id: renter, due_at: dueAt, items: locked.map((l) => l.sku) });
+        done.rentals.push({ contract_id: c.insertId, person_id: renter, status: 'out', kind, due_at: dueAt, items: locked.map((l) => l.sku) });
       } else if (p.type === 'activity') {
         // One guest, one place, one ticket good once at this attraction in this slot.
         const key = ln.participant || 'customer';

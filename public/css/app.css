@@ -1377,6 +1377,73 @@ input[type='search'][aria-label='Search documents'] { min-width: min(20rem, 100%
 .pickup-person { display: grid; grid-template-columns: 72px 1fr; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); }
 .pickup-photo { width: 72px; height: 72px; border-radius: 8px; object-fit: cover; background: var(--snowpack); display: grid; place-items: center; font-weight: 700; color: var(--quiet); }
 
+/* Rentals, fitting: Ready to fit, the fitting card, the queue board and the rental agreement */
+.fit-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); gap: 16px; align-items: start; }
+.fit-layout h2 { margin: 0; font-size: 1.15rem; }
+.fit-side { display: grid; gap: 10px; position: sticky; top: 12px; }
+.fit-find { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+.fit-queue { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.fit-row { width: 100%; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) auto; grid-template-areas: 'who what wait' 'meta meta wait'; gap: 2px 12px; align-items: center; text-align: left; min-height: 56px; padding: 10px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; }
+.fit-row:hover { border-color: var(--trail-blue); }
+.fit-row:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.fit-who { grid-area: who; font-size: 1.05rem; }
+.fit-what { grid-area: what; }
+.fit-what .tag { background: var(--hold-tint); color: var(--hold); border-radius: 4px; padding: 0 5px; font-weight: 700; font-size: .8rem; }
+.fit-meta { grid-area: meta; }
+.fit-wait { grid-area: wait; font-weight: 700; white-space: nowrap; }
+.fit-card { display: grid; gap: 10px; border-left: 6px solid var(--trail-blue); }
+.fit-card h4 { margin: 6px 0 0; font-size: .95rem; text-transform: uppercase; letter-spacing: .04em; color: var(--quiet); }
+.fit-head { display: grid; grid-template-columns: 72px 1fr; gap: 12px; align-items: center; }
+.fit-head h3 { margin: 0; }
+.fit-details { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 12px; }
+.fit-height { flex-wrap: nowrap; gap: 4px; }
+.fit-height input { width: 3.6rem; min-width: 0; }
+.fit-num { width: 6.5rem; }
+.fit-tech { width: 8rem; }
+.fit-ability { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.fit-ability button { display: grid; gap: 2px; text-align: left; min-height: 56px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; }
+.fit-ability button small { color: var(--quiet); }
+.fit-ability button.on { background: var(--sel-bg); border-color: var(--sel-bg); color: var(--sel-ink); }
+.fit-ability button.on small { color: inherit; }
+.fit-ability button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.fit-suggest { display: grid; gap: 4px; }
+.fit-din { font-size: 1.5rem; }
+.fit-caution { color: var(--hold-ink, var(--hold)); }
+.fit-sign { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fit-binding { flex-wrap: wrap; }
+.fit-binding select { width: auto; min-width: 8rem; }
+.fit-actions { flex-wrap: wrap; justify-content: flex-end; }
+.fit-pick > summary { cursor: pointer; font-weight: 700; min-height: 40px; display: flex; align-items: center; }
+.fit-confirm { font-size: 1.05rem; }
+.fit-left > summary { cursor: pointer; padding: 6px 0; }
+.fit-left-sizes { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 8px; }
+.fit-none { grid-column: 1 / -1; }
+.fit-size { border: 1px solid var(--line-strong); border-radius: 6px; padding: 2px 8px; font-size: .9rem; }
+.fit-size.none { color: var(--quiet); border-style: dashed; }
+.fit-left-mini .table-wrap { max-width: 420px; }
+.fit-board { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.fit-board-wrap:fullscreen { background: var(--surface); padding: 24px; overflow: auto; }
+.fit-board-col { background: var(--surface); border: 2px solid var(--line-strong); border-radius: var(--radius-lg); padding: 16px; }
+.fit-board-col h2 { margin: 0 0 6px; font-size: 1.6rem; }
+.fit-board-count { font-size: 3.5rem; font-weight: 700; line-height: 1; }
+.fit-board-count span { font-size: 1.2rem; font-weight: 400; }
+.fit-board-wait { font-size: 1.1rem; margin-top: 4px; }
+.fit-board ol { margin: 12px 0 0; padding-left: 1.4em; font-size: 1.4rem; display: grid; gap: 4px; }
+.fit-board li { display: flex; justify-content: space-between; gap: 8px; }
+.fit-board-min { color: var(--quiet); font-size: 1.1rem; }
+.agreement-sheet { display: grid; gap: 10px; color: #000; background: #fff; padding: 12px; }
+.agreement-sheet .ag-head { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
+.agreement-sheet .ag-code { text-align: center; }
+.agreement-sheet .ag-code svg { max-width: 100%; height: auto; }
+.agreement-sheet .ag-person { border-top: 1px solid #000; padding-top: 6px; break-inside: avoid; }
+.agreement-sheet .ag-person h3 { margin: 0 0 4px; }
+.agreement-sheet .ag-gear { width: 100%; border-collapse: collapse; }
+.agreement-sheet .ag-gear th, .agreement-sheet .ag-gear td { border-bottom: 1px solid #999; padding: 3px 4px; text-align: left; font-size: .9rem; }
+.agreement-sheet .sig-img { max-width: 260px; max-height: 90px; border: 1px solid #999; }
+.agreement-sheet .ag-terms { border-top: 1px solid #000; padding-top: 6px; }
+@media (max-width: 1100px) { .fit-layout { grid-template-columns: 1fr; } .fit-side { position: static; } }
+@media (max-width: 520px) { .fit-row { grid-template-columns: 1fr auto; grid-template-areas: 'who wait' 'what what' 'meta meta'; } .fit-ability { grid-template-columns: 1fr; } .fit-details { grid-template-columns: 1fr 1fr; } }
+
 /* ---------- day board ---------- */
 .board-alerts { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
 .board-clear { margin: 0; }

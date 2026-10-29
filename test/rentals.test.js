@@ -60,9 +60,9 @@ test('binding record is required for skis and a failed test blocks checkout', as
   const ski = await item(A, `SK-${suffix}`, 'ski', { tier: 'standard' });
   for (const p of [mum, kid]) await api('POST', `/people/${p}/waivers`, { token: A.token, body: {} });
   const due = `${today}T23:59`;
-  const no = await api('POST', '/rentals/contracts', { token: A.token, body: { person_id: mum, due_at: due, items: [{ rental_item_id: ski }] } });
+  const no = await api('POST', '/rentals/contracts', { token: A.token, body: { unpaid_reason: 'Test hand-out', person_id: mum, due_at: due, items: [{ rental_item_id: ski }] } });
   assert.equal(no.status, 400);
-  const fail = await api('POST', '/rentals/contracts', { token: A.token, body: { person_id: mum, due_at: due, items: [{ rental_item_id: ski, din_setting: 5, tech_name: 'Tess', test_result: 'fail' }] } });
+  const fail = await api('POST', '/rentals/contracts', { token: A.token, body: { unpaid_reason: 'Test hand-out', person_id: mum, due_at: due, items: [{ rental_item_id: ski, din_setting: 5, tech_name: 'Tess', test_result: 'fail' }] } });
   assert.equal(fail.status, 400);
   assert.equal((await api('GET', '/rentals/items', { token: A.token })).body.data.find((i) => i.id === ski).status, 'available');
 });
@@ -72,9 +72,9 @@ test('group contract needs a waiver for everyone wearing gear; deposit, late fee
   const boot = await item(A, `BG-${suffix}`, 'boot');
   const stranger = (await api('POST', '/people', { token: A.token, body: { first_name: 'No', last_name: 'Waiver' } })).body.id;
   const due = `${addDays(today, -3)}T10:00`;
-  const blocked = await api('POST', '/rentals/contracts', { token: A.token, body: { person_id: mum, due_at: due, items: [{ rental_item_id: boot, person_id: stranger }] } });
+  const blocked = await api('POST', '/rentals/contracts', { token: A.token, body: { unpaid_reason: 'Test hand-out', person_id: mum, due_at: due, items: [{ rental_item_id: boot, person_id: stranger }] } });
   assert.equal(blocked.status, 409);
-  const ok = await api('POST', '/rentals/contracts', { token: A.token, body: { person_id: mum, group_name: 'Renter family', due_at: due, items: [{ rental_item_id: ski, person_id: kid, din_setting: 4.5, tech_name: 'Tess', test_result: 'pass', boot_sole_mm: 290, skier_type: 'I' }, { rental_item_id: boot, person_id: kid }] } });
+  const ok = await api('POST', '/rentals/contracts', { token: A.token, body: { unpaid_reason: 'Test hand-out', person_id: mum, group_name: 'Renter family', due_at: due, items: [{ rental_item_id: ski, person_id: kid, din_setting: 4.5, tech_name: 'Tess', test_result: 'pass', boot_sole_mm: 290, skier_type: 'I' }, { rental_item_id: boot, person_id: kid }] } });
   assert.equal(ok.status, 201, JSON.stringify(ok.body));
   const id = ok.body.id;
   const detail = (await api('GET', `/rentals/contracts/${id}`, { token: A.token })).body;
@@ -117,16 +117,16 @@ test('reservations check capacity, convert at pickup and cannot be reused', asyn
   const r3 = await api('POST', '/rentals/reservations', { token: A.token, body: { person_id: kid, ...day, lines: [{ category: 'helmet', quantity: 1 }] } });
   assert.equal(r3.status, 201);
   const helmets = (await api('GET', '/rentals/items?category=helmet', { token: A.token })).body.data;
-  const out = await api('POST', '/rentals/contracts', { token: A.token, body: { person_id: kid, reservation_id: r3.body.id, due_at: `${when}T17:00`, items: [{ rental_item_id: helmets[0].id }] } });
+  const out = await api('POST', '/rentals/contracts', { token: A.token, body: { unpaid_reason: 'Test hand-out', person_id: kid, reservation_id: r3.body.id, due_at: `${when}T17:00`, items: [{ rental_item_id: helmets[0].id }] } });
   assert.equal(out.status, 201, JSON.stringify(out.body));
-  const again = await api('POST', '/rentals/contracts', { token: A.token, body: { person_id: kid, reservation_id: r3.body.id, due_at: `${when}T17:00`, items: [{ rental_item_id: helmets[1].id }] } });
+  const again = await api('POST', '/rentals/contracts', { token: A.token, body: { unpaid_reason: 'Test hand-out', person_id: kid, reservation_id: r3.body.id, due_at: `${when}T17:00`, items: [{ rental_item_id: helmets[1].id }] } });
   assert.equal(again.status, 409);
   assert.equal((await api('GET', `/rentals/reservations/${r3.body.id}`, { token: A.token })).body.status, 'picked_up');
 });
 
 test('extend and swap', async () => {
   const p1 = await item(A, `PO1-${suffix}`, 'pole'); const p2 = await item(A, `PO2-${suffix}`, 'pole');
-  const c = await api('POST', '/rentals/contracts', { token: A.token, body: { person_id: mum, deposit_cents: 0, due_at: `${addDays(today, 1)}T10:00`, items: [{ rental_item_id: p1 }] } });
+  const c = await api('POST', '/rentals/contracts', { token: A.token, body: { unpaid_reason: 'Test hand-out', person_id: mum, deposit_cents: 0, due_at: `${addDays(today, 1)}T10:00`, items: [{ rental_item_id: p1 }] } });
   assert.equal(c.status, 201, JSON.stringify(c.body));
   assert.equal((await api('POST', `/rentals/contracts/${c.body.id}/extend`, { token: A.token, body: { due_at: `${today}T08:00` } })).status, 400);
   assert.equal((await api('POST', `/rentals/contracts/${c.body.id}/extend`, { token: A.token, body: { due_at: `${addDays(today, 2)}T10:00` } })).status, 200);

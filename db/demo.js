@@ -267,8 +267,13 @@ async function load(o) {
   for (const g of adults.slice(8, 11)) { await soft('photo', () => C('PUT', `/people/${g.id}/photo`, { photo: AVATAR })); await sale(g, [{ type: 'ticket', product_id: prod.season, tier: g.age >= 62 ? 'senior' : 'adult' }], 'card'); }
   for (const g of adults.slice(0, 2)) await sale(g, [{ type: 'ticket', product_id: prod.punch }], 'card');
   for (let i = 0; i < 3; i++) await sale(adults[i + 4], [{ type: 'gift_card', amount_cents: [5000, 7500, 10000][i], recipient_name: 'Alex', message: 'Happy holidays' }], 'card');
-  const rentalSale = await sale(adults[5], [{ type: 'rental', product_id: prod.boardrental, items: free('snowboard').slice(0, 1).map((x) => ({ rental_item_id: x.id })) }, { type: 'rental', product_id: prod.helmet, items: free('helmet').slice(0, 1).map((x) => ({ rental_item_id: x.id })) }], 'card');
+  // A board fitted at the window: the renter signs that their details are true before it goes out (a demo signature).
+  const SIGN = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+  const fit5 = { weight_lb: 165, height_in: 69, stance: 'regular', skier_type: '2' };
+  const rentalSale = await sale(adults[5], [{ type: 'rental', product_id: prod.boardrental, items: free('snowboard').slice(0, 1).map((x) => ({ rental_item_id: x.id })), fit: fit5, signoff: { signer_name: adults[5].name, signer_relation: 'self', signature: SIGN, details: fit5 } }, { type: 'rental', product_id: prod.helmet, items: free('helmet').slice(0, 1).map((x) => ({ rental_item_id: x.id })) }], 'card');
   if (!rentalSale) failures.push('rental sale did not complete');
+  // Paid rentals waiting to be fitted: sold at the window with no gear chosen, they show in Rentals, Counter.
+  for (const g of adults.slice(11, 15)) await sale(g, [{ type: 'ticket', product_id: prod.day }, { type: 'rental', product_id: prod.rental }], 'card');
 
   // rental shop settings, sizing profile, reservations and a service entry (the binding chart is left empty on purpose: a shop enters its own)
   await soft('rental settings', () => C('PUT', '/rentals/settings', { late_fee_cents_per_day: 1500, late_grace_minutes: 60, default_deposit_cents: 0, service_every_uses: 20 }));

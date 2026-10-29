@@ -9,6 +9,7 @@ const { partialOf, z, dateTimeStr, validate, paramId, normDateTime, seasonFor, t
 const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const R = require('../lib/rentals');
+const F = require('../lib/rentalfit');
 
 const router = express.Router();
 const counter = ['counter', 'manager'];
@@ -42,6 +43,8 @@ router.post(
       group_name: z.string().max(120).optional(),
       deposit_cents: z.number().int().min(0).max(1_000_000).optional(),
       notes: z.string().max(500).optional(),
+      // gear out with nothing paid: managers only, and they say why
+      unpaid_reason: z.string().max(200).optional(),
       due_at: dateTimeStr,
       items: z.array(R.gearLine).min(1).max(60),
     }),
@@ -50,6 +53,7 @@ router.post(
     const { tenantId } = req.auth;
     const { person_id, order_id, items } = req.body;
     const dueAt = normDateTime(req.body.due_at);
+    const unpaid = F.unpaidCheck(req, req.body);
 
     const created = await tx(async (conn) => {
       if (!(await one(conn, 'SELECT id FROM people WHERE tenant_id = ? AND id = ?', [tenantId, person_id]))) throw notFound('Person');
@@ -72,15 +76,15 @@ router.post(
         if (reservation.status !== 'held') throw conflict(`That reservation is already ${reservation.status.replace('_', ' ')}`);
       }
       const [c] = await conn.query(
-        'INSERT INTO rental_contracts (tenant_id, person_id, order_id, due_at, group_name, deposit_cents, reservation_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [tenantId, person_id, order_id ?? null, dueAt, req.body.group_name ?? null, deposit, reservation ? reservation.id : null, req.body.notes ?? null],
+        'INSERT INTO rental_contracts (tenant_id, person_id, order_id, due_at, group_name, deposit_cents, reservation_id, notes, unpaid_reason, unpaid_by, deposit_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [tenantId, person_id, order_id ?? null, dueAt, req.body.group_name ?? null, deposit, reservation ? reservation.id : null, req.body.notes ?? null, unpaid, unpaid ? req.auth.userId ?? null : null, deposit > 0 ? 'note' : 'none'],
       );
       await R.insertGear(conn, tenantId, c.insertId, items, settings);
       if (reservation) await conn.query("UPDATE rental_reservations SET status = 'picked_up', contract_id = ? WHERE tenant_id = ? AND id = ?", [c.insertId, tenantId, reservation.id]);
       if (deposit > 0) {
         await conn.query("INSERT INTO rental_charges (tenant_id, contract_id, kind, cents, note) VALUES (?, ?, 'deposit', ?, 'Deposit held')", [tenantId, c.insertId, deposit]);
       }
-      await audit(conn, req, 'checkout', 'rental_contracts', c.insertId, { items: items.map((i) => i.rental_item_id) });
+      await audit(conn, req, 'checkout', 'rental_contracts', c.insertId, { items: items.map((i) => i.rental_item_id), ...(unpaid ? { unpaid_reason: unpaid } : {}) });
       return c.insertId;
     });
     res.status(201).json({ id: created, status: 'out' });
@@ -172,6 +176,7 @@ router.get('/contracts/:id', requireRole(...counter), async (req, res) => {
 });
 
 router.use(require('./rentalsplus'));
+router.use(require('./rentalsfit'));
 
 router.use(
   '/items',

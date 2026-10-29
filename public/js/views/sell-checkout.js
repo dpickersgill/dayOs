@@ -16,47 +16,21 @@ export const lineApi = (l, who, holders, limitsOk) => {
   if (type === 'ticket') return { type, product_id: l.product_id, tier: l.tier, quantity: l.quantity, valid_on: l.valid_on, ...(holders ? { holders } : {}) };
   if (type === 'lesson') return { type, session_id: l.session_id, tier: l.tier, ...(who ? { participant: who } : {}) };
   if (type === 'lesson_package') return { type, product_id: l.product_id, tier: l.tier, ...(who ? { participant: who } : {}) };
-  if (type === 'rental') return { type, product_id: l.product_id, tier: l.tier, items: l.items || [], ...(who ? { participant: who } : {}) };
+  // eslint-disable-next-line no-unused-vars
+  if (type === 'rental') return { type, product_id: l.product_id, tier: l.tier, items: (l.items || []).map(({ _item, _category, ...g }) => g), ...(l.fit ? { fit: l.fit } : {}), ...(l.signoff ? { signoff: l.signoff } : {}), ...(who ? { participant: who } : {}) };
   if (type === 'program') return { type, program_id: l.program_id, ...(l.term_id ? { term_id: l.term_id, group_id: l.group_id } : {}), ...(l.bundle_id ? { bundle_id: l.bundle_id, groups: l.groups } : {}), ...['discipline', 'has_pass', 'needs_rental', 'needs_helmet'].reduce((o, k) => (l[k] !== undefined ? { ...o, [k]: l[k] } : o), {}), ...(who ? { participant: who } : {}) };
   return { type, amount_cents: l.amount_cents, recipient_name: l.recipient_name, message: l.message };
 };
 
-// ---------------------------------------------------------------- choosing gear for a rental line
-export async function gearDialog(line, onDone, profile = null) {
-  const { data } = await get('/rentals/items?status=available&limit=500');
-  const sized = profile ? [profile.height_in && `${profile.height_in} in`, profile.weight_lb && `${profile.weight_lb} lb`, profile.boot_size && `boot ${profile.boot_size}`, profile.stance && label(profile.stance), profile.skier_type && `type ${profile.skier_type}`, profile.last_din && `last DIN ${profile.last_din}`].filter(Boolean) : [];
-  const chosen = new Map((line.items || []).map((i) => [i.rental_item_id, i]));
-  const filter = input({ type: 'search', placeholder: 'Filter by size, brand or tag number', 'aria-label': 'Filter gear' });
-  const list = h('div', { class: 'stack' });
-  const dinInputs = new Map();
-  function draw() {
-    clear(list);
-    const q = filter.value.trim().toLowerCase();
-    const items = data.filter((i) => !q || [i.sku, i.brand, i.model, i.size, i.category].join(' ').toLowerCase().includes(q));
-    if (!items.length) { list.append(h('p', { class: 'muted' }, data.length ? 'Nothing matches.' : 'No gear is available right now.')); return; }
-    for (const cat of [...new Set(items.map((i) => i.category))]) {
-      list.append(h('h4', null, label(cat)), h('div', { class: 'gear-grid' }, items.filter((i) => i.category === cat).map((i) => {
-        const bootMatch = profile && profile.boot_size && i.category === 'boot' && String(i.size || '').trim() === String(profile.boot_size).trim();
-        const box = h('input', { type: 'checkbox', checked: chosen.has(i.id), 'aria-label': `${i.sku}` });
-        const din = ['ski', 'snowboard'].includes(i.category) ? h('input', { type: 'number', step: '0.5', min: '0.5', max: '20', placeholder: 'DIN', class: 'din', 'aria-label': `DIN for ${i.sku}`, value: chosen.has(i.id) && chosen.get(i.id).din_setting ? chosen.get(i.id).din_setting : (profile && profile.last_din ? profile.last_din : '') }) : null;
-        if (din) dinInputs.set(i.id, din);
-        box.addEventListener('change', () => { if (box.checked) chosen.set(i.id, { rental_item_id: i.id }); else chosen.delete(i.id); });
-        return h('label', { class: bootMatch ? 'gear match' : 'gear', title: bootMatch ? 'Matches the boot size on file' : null }, box, h('span', null, `${i.brand || ''} ${i.model || ''}`.trim() || label(i.category), h('small', { class: 'muted' }, ` ${[i.size && `size ${i.size}`, `tag ${i.sku}`, bootMatch ? 'matches boot size' : null].filter(Boolean).join(', ')}`)), din);
-      })));
-    }
-  }
-  filter.addEventListener('input', draw);
-  const done = button('Use this gear', () => {
-    line.items = [...chosen.values()].map((i) => {
-      const d = dinInputs.get(i.rental_item_id);
-      const n = d && d.value ? Number(d.value) : null;
-      return { rental_item_id: i.rental_item_id, ...(n ? { din_setting: n } : {}) };
-    });
-    dlg.close();
-    onDone();
-  }, { kind: 'primary' });
-  const dlg = dialog(`Choose the gear: ${line.name}`, h('div', { class: 'stack' }, sized.length ? h('p', { class: 'sizing-note', 'data-sizing': '' }, `Sizing on file: ${sized.join(', ')}.`) : h('p', { class: 'muted small' }, 'No sizing on file for this renter. Add height, weight and boot size on their customer details to get a match next time.'), filter, list, h('div', { class: 'footer row' }, done)), { wide: true });
-  draw();
+// ---------------------------------------------------------------- fitting a rental line now (optional)
+/**
+ * The rental shop's fitting card for a rental line: today's details, the binding suggestion, the gear and the renter's
+ * signed confirmation. Optional: a rental with no gear is paid now and fitted at the rental shop. No setting is ever
+ * filled in from a past rental.
+ */
+export async function gearDialog(line, onDone, who = {}) {
+  const { sellFitDialog } = await import('./rentals-fit.js');
+  await sellFitDialog(line, who, onDone);
 }
 
 // ---------------------------------------------------------------- the checkout dialog
@@ -128,8 +102,9 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
     for (const s of slots) {
       const l = s.line;
       const sel = select([['customer', `Same as ${custName()}`], ...people.map((p) => [p.id, nameOf(p)])], assign.get(s), { 'aria-label': `Who is ${s.aria} for` });
-      sel.addEventListener('change', () => { assign.set(s, sel.value); refreshWho(); });
-      const extra = l.type === 'rental' ? [button(l.items && l.items.length ? `Gear: ${l.items.length} chosen` : 'Choose gear', () => openGear(s), { small: true })] : [];
+      // a fitting belongs to one person: choosing someone else for the rental starts it again
+      sel.addEventListener('change', () => { assign.set(s, sel.value); if (l.type === 'rental') { l.items = []; delete l.fit; delete l.signoff; } refreshWho(); });
+      const extra = l.type === 'rental' ? [button(l.items && l.items.length ? `Gear: ${l.items.length} chosen` : 'Fit now (optional)', () => openGear(s), { small: true }), l.items && l.items.length ? null : h('small', { class: 'muted' }, ' or fit at the rental shop')] : [];
       if (needsLimits(s)) {
         const cb = h('input', { type: 'checkbox', checked: Boolean(limitsOk.get(s)), 'data-limits': '' });
         cb.addEventListener('change', () => { limitsOk.set(s, cb.checked); });
@@ -147,14 +122,12 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   function renameRiders() {
     for (const [s, el] of riderEls) { el.textContent = (everyone().find((e) => e.id === assign.get(s)) || {}).name || 'The rider'; }
   }
-  /** Sizing on file (typed above, or kept from last time) and the last DIN used, then the gear chooser. */
+  /** The fitting card for this rental: today's details (typed above, or on file), never a setting from a past rental. */
   async function openGear(s) {
     const who = everyone().find((e) => e.id === assign.get(s));
-    const typed = who ? who.cap.sizing() : {};
-    let last = null;
-    const person = who && who.cap.person();
-    if (person) { try { last = (await get(`/people/${person.id}/rental-profile`)).last_din; } catch (_) { /* no history */ } }
-    await gearDialog(s.line, refreshWho, { ...typed, last_din: last });
+    const d = who ? (who.cap.payload('details').details || {}) : {};
+    const [first, ...rest] = String(who ? who.name : '').split(' ');
+    await gearDialog(s.line, refreshWho, { person: who && who.cap.person(), first_name: d.first_name || first, last_name: d.last_name || rest.join(' '), minor: Boolean(who && who.cap.isMinor()), sizing: { ...(who ? who.cap.sizing() : {}), ...(d.date_of_birth ? { date_of_birth: d.date_of_birth } : {}) } });
   }
   function refreshGuardians() {
     for (const e of everyone()) {
@@ -431,7 +404,6 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       if (e.id !== 'customer' && !usedBy(e.id).length) continue;
       if (e.cap.isMinor() && guardianFor(e.id) === '' && !(e.cap.person() && e.cap.person().id)) return `${e.name} is under 18: choose a parent or guardian (18 or over) who is signing for them.`;
     }
-    for (const s of slots) if (s.line.type === 'rental' && !(s.line.items && s.line.items.length)) return `Choose the gear for ${s.line.name}.`;
     for (const s of slots) {
       if (!needsLimits(s) || limitsOk.get(s)) continue;
       const who = (everyone().find((e) => e.id === assign.get(s)) || {}).name || 'each rider';
@@ -475,6 +447,12 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       sold = true;
       receipt(out);
       onSold(out);
+      // gear fitted here went straight out: the shop's deposit step runs for each contract
+      const outNow = (out.rentals || []).filter((r) => r.status === 'out');
+      if (outNow.length) {
+        const [{ depositStep }, settings] = await Promise.all([import('./rentals-deposit.js'), get('/rentals/fit/settings')]);
+        for (const r of outNow) await depositStep({ id: r.contract_id, ...r }, settings);
+      }
     } catch (err) {
       step2Error.append(errorBox(err));
       complete.disabled = remaining() !== 0;
@@ -527,7 +505,8 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       codes(out.tickets.map((t) => h('div', { class: 'code' }, t.code, h('small', null, [t.holder, t.product, typeName(t.tier), t.valid_from === t.valid_to ? t.valid_from : `${t.valid_from} to ${t.valid_to}`].filter(Boolean).join(', ')))), `${out.tickets.length} ticket${out.tickets.length === 1 ? '' : 's'}`),
       codes(out.gift_cards.map((g) => h('div', { class: 'code' }, g.code, h('small', null, `${money(g.amount_cents)}${g.recipient_name ? ` for ${g.recipient_name}` : ''}`))), 'Gift cards (give the guest the code)'),
       out.lessons.length ? h('section', { class: 'stack' }, h('h3', null, 'Lessons booked'), h('ul', { class: 'plain' }, out.lessons.map((l) => h('li', null, `${l.name}, ${fmtDateTime(l.starts_at)}`)))) : null,
-      out.rentals.length ? h('section', { class: 'stack' }, h('h3', null, 'Gear out'), h('ul', { class: 'plain' }, out.rentals.map((r) => h('li', null, `${r.items.join(', ')}, due back ${fmtDateTime(r.due_at)}`)))) : null,
+      out.rentals.some((r) => r.status !== 'to_fit') ? h('section', { class: 'stack' }, h('h3', null, 'Gear out'), h('ul', { class: 'plain' }, out.rentals.filter((r) => r.status !== 'to_fit').map((r) => h('li', null, `${r.items.join(', ')}, due back ${fmtDateTime(r.due_at)}`)))) : null,
+      out.rentals.some((r) => r.status === 'to_fit') ? h('section', { class: 'stack' }, h('h3', null, 'Ready to fit'), h('p', null, `${out.rentals.filter((r) => r.status === 'to_fit').length} rental${out.rentals.filter((r) => r.status === 'to_fit').length === 1 ? '' : 's'} paid. Send the guest to the rental shop with the receipt.`)) : null,
       out.programs.length ? h('section', { class: 'stack' }, h('h3', null, 'Program places'), h('ul', { class: 'plain' }, out.programs.map((p) => h('li', null, p.name)))) : null,
       out.activities && out.activities.length ? h('section', { class: 'stack' }, h('h3', null, 'Activities booked'), h('ul', { class: 'plain' }, out.activities.map((a) => h('li', null, `${a.holder}: ${a.product} at ${a.attraction}, ${a.date}${a.start_time ? `, ${clock12(a.start_time)} to ${clock12(a.end_time)}` : ', all day'}`))), h('p', { class: 'muted small' }, 'Each ticket lets one guest in once, at that attraction, from 15 minutes before the time.')) : null);
     nav.append(button('New sale', () => dlg.close(), { kind: 'primary' }));
