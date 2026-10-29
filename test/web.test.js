@@ -2112,12 +2112,12 @@ const addD = (d, n) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.ge
 test('school: every tab renders for managers, counter staff and instructors, and the dialogs open', skip(), async () => {
   await closeOverlays();
   const owner = await renderView('school', 'owner', T.owner);
-  assert.deepEqual([...owner.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests', 'Instructor hours']);
+  assert.deepEqual([...owner.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests', 'Instructor hours', 'Recaps', 'Waitlist']); // Recaps and Waitlist: school-parents.js
   await exercise(owner, 'school (owner)');
   const counter = await renderView('school', 'counter', T.counter);
-  assert.deepEqual([...counter.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests']);
+  assert.deepEqual([...counter.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, '')), ['Today', 'Lessons', 'Online requests', 'Waitlist']);
   const ins = await renderView('school', 'instructor', T.instructor, { staff_id: D.s2 });
-  assert.deepEqual([...ins.querySelectorAll('[role=tab]')].map((t) => t.textContent), ['Today', 'Lessons']);
+  assert.deepEqual([...ins.querySelectorAll('[role=tab]')].map((t) => t.textContent), ['Today', 'Lessons', 'Recaps']);
   await exercise(ins, 'school (instructor)');
   await closeOverlays();
 });
@@ -2222,35 +2222,41 @@ test('public booking page: lists open lessons, takes a request, and lets the gue
     const page = document.getElementById('book');
     clean(page, 'booking page');
     assert.match(page.textContent, /Web Test Mountain/); assert.match(page.textContent, /Ski and snowboard lessons/i);
-    const pickDay = page.querySelector('#pick-day'); const pickType = page.querySelector('#pick-type');
-    assert.ok(pickDay && pickType, 'the day and lesson type pickers are there');
-    assert.ok(page.querySelectorAll('#book-picker .day').length >= 7, 'a row of days to tap');
-    const change = (el, v) => { el.value = v; el.dispatchEvent(new window.Event('change', { bubbles: true })); };
+    // Step 1: who is coming (2026.11.5: the family booking page)
+    const change = (el, v) => { el.value = v; el.dispatchEvent(new window.Event('change', { bubbles: true })); el.dispatchEvent(new window.Event('input', { bubbles: true })); };
+    page.querySelector('#to-lessons').click();
+    await settle();
+    assert.match(page.textContent, /Please add the name and date of birth/);
+    change(page.querySelector('#p1-first'), 'Gus'); change(page.querySelector('#p1-last'), 'Guardian'); change(page.querySelector('#p1-dob'), `${Number(today.slice(0, 4)) - 8}-03-03`);
+    page.querySelector('#to-lessons').click();
+    await settle();
+    // Step 2: a lesson for Gus
+    const pickDay = page.querySelector('#pick-day');
+    assert.ok(pickDay, 'a date picker');
+    assert.ok(page.querySelectorAll('.days .day').length >= 7, 'a row of days to tap');
     change(pickDay, addD(today, 20));
-    assert.match(page.querySelector('#no-lessons').textContent, /No lessons are scheduled for .*call the mountain/, 'an empty day says to call');
-    change(pickDay, day);
-    const chips = [...pickType.querySelectorAll('button[data-type]')];
-    assert.ok(chips.length >= 2 && chips[0].getAttribute('aria-pressed') === 'true', 'lesson types are chips, "All lessons" first');
-    chips.find((c) => c.dataset.type).click();
-    assert.equal(page.querySelector('#no-lessons') === null || page.querySelector(`[data-lesson="${sid}"]`) !== null, true);
-    pickType.querySelector('button[data-type=""]').click();
-    assert.equal(page.querySelector('#no-lessons'), null);
-    page.querySelector(`#book-picker .day[data-day="${day}"]`)?.click();
+    await settle();
+    assert.match(page.querySelector('#no-lessons').textContent, /No lessons that fit Gus/, 'an empty day says so');
+    change(page.querySelector('#pick-day'), day);
+    await settle();
     const card = page.querySelector(`[data-lesson="${sid}"]`);
     assert.ok(card, 'the lesson is listed');
     assert.match(card.textContent, /Base lodge/);
     assert.match(card.textContent, /Only 2 left/);
     assert.equal(/@/.test(page.textContent), false, 'no personal details are shown');
-    card.querySelector('button').click();
-    const form = page.querySelector('#book-form form');
+    [...card.querySelectorAll('button')].find((x) => /Pick this lesson/.test(x.textContent)).click();
+    await settle();
+    page.querySelector('#to-details').click();
+    await settle();
+    const form = page.querySelector('#book-stage form');
     assert.ok(form);
     const set = (id, v) => { const el = form.querySelector(`#${id}`); assert.ok(el, id); el.value = v; };
-    // a missing waiver tick is explained, nothing is sent
+    // a missing detail is explained, nothing is sent
     form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
     await settle();
     assert.match(page.textContent, /Please fill in your name/);
     set('c-first_name', 'Gail'); set('c-last_name', 'Guardian'); set('c-email', 'gail@w.test'); set('c-phone', '610-555-0166');
-    set('s1-first', 'Gus'); set('s1-last', 'Guardian'); set('s1-dob', `${Number(today.slice(0, 4)) - 8}-03-03`); set('s1-sex', 'male');
+    form.querySelector('select[id$="-sex"]').value = 'male';
     form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
     await settle();
     assert.match(page.textContent, /accept the waiver/);
