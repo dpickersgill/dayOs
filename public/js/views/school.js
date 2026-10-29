@@ -3,6 +3,12 @@ import { h, clear, can, isManager, table, state, input, select, field, button, t
 import { waiverPanel } from '../widgets.js';
 import { loadCustomerForm, customerCapture } from './customer-form.js';
 import { cardDialog } from './school-card.js';
+import * as lineupPart from './school-lineup.js';
+import * as parentsPart from './school-parents.js';
+import * as payPart from './school-pay.js';
+import * as directorPart from './school-director.js';
+
+const PARTS = [lineupPart, parentsPart, payPart, directorPart];
 
 const DISCIPLINES = ['ski', 'snowboard', 'telemark', 'adaptive'];
 const LEVELS = ['first_timer', 'beginner', 'intermediate', 'advanced'];
@@ -22,12 +28,14 @@ export async function render(root) {
   const items = [['today', 'Today', (b) => boardTab(b, { staff })], ['lessons', 'Lessons', (b) => lessonsTab(b, { staff, certs, names })]];
   if (can('counter')) items.push(['requests', pending ? `Online requests (${pending})` : 'Online requests', (b) => requestsTab(b)]);
   if (isManager()) items.push(['hours', 'Instructor hours', (b) => hoursTab(b)]);
+  for (const part of PARTS) items.push(...part.tabs({ staff, certs, names }));
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Ski school')), tabs(items, 'today'));
 }
 
 /** Setup shown in Settings, Ski school (managers): the level ladder and the skills for each level. */
 export const settingsPages = {
   levels: { title: 'Levels and skills', render: (panel) => levelsTab(panel) },
+  ...lineupPart.settingsPages, ...parentsPart.settingsPages, ...payPart.settingsPages, ...directorPart.settingsPages,
 };
 
 // ---------------------------------------------------------------- lessons

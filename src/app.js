@@ -149,6 +149,13 @@ function createApp() {
 
   // The public lesson booking page, one per mountain, read from the URL like the help page.
   app.get('/book/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'book.html')));
+  // The ski school's family pages (2026.11.5): one lesson booking (check in, details, change the date, the recap and a tip),
+  // find my level, claiming a waitlist spot, asking for a private by name, and a weather change to choose from.
+  app.get('/lesson/:slug/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'lesson.html')));
+  app.get('/level/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'level.html')));
+  app.get('/waitlist/:slug/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'waitlist.html')));
+  app.get('/private/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'private.html')));
+  app.get('/weather/:slug/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'weather.html')));
   app.get('/shop/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'shop.html')));
   app.get('/programs/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'register.html')));
   app.get('/family/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'family.html')));
@@ -244,7 +251,7 @@ function createApp() {
   api.post(['/platform/login', '/platform/login/setup', '/platform/login/passkey', '/platform/login/passkey/options'], rateLimit({ windowMs: 15 * 60_000, max: Number(process.env.PLATFORM_LOGIN_RATE_LIMIT) || 20, message: 'Too many sign-in attempts from this address. Try again in 15 minutes.' }));
   api.use('/platform', rateLimit({ windowMs: 60_000, max: Number(process.env.PLATFORM_RATE_LIMIT) || 60, message: 'Too many attempts' }), platform);
   api.use(site.api); // the website's plans and contact form (no sign-in)
-  api.use('/public', rateLimit({ windowMs: 60_000, max: 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/lostfound').publicRouter, require('./routes/partnerpasses').publicRouter, require('./routes/patrolclaims').publicRouter, require('./routes/patrolscene').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter, require('./routes/rentalforms').publicRouter);
+  api.use('/public', rateLimit({ windowMs: 60_000, max: 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/lostfound').publicRouter, require('./routes/partnerpasses').publicRouter, require('./routes/patrolclaims').publicRouter, require('./routes/patrolscene').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter, require('./routes/rentalforms').publicRouter, require('./routes/schoollineup').publicRouter, require('./routes/schoolparents').publicRouter, require('./routes/schoolpay').publicRouter, require('./routes/schooldirector').publicRouter);
   api.use(authRoutes); // login, tenants, users, me (each route applies authenticate itself where needed)
   api.use(require('./routes/security')); // passkeys, the second check, sessions, devices, PINs, terminals (each route authenticates)
 
@@ -287,6 +294,11 @@ function createApp() {
   api.use('/kiosk-admin', kiosk.adminRouter);
   api.use('/skischool', skischool);
   api.use('/skischool', schoolplus);
+  api.use('/skischool', require('./routes/schoolsettings'));
+  api.use('/skischool', require('./routes/schoollineup').router); // the lineup, check-in, the counter
+  api.use('/skischool', require('./routes/schoolparents').router); // recaps, waitlists, levels
+  api.use('/skischool', require('./routes/schoolpay').router); // instructor pay, privates by name
+  api.use('/skischool', require('./routes/schooldirector').router); // copy a day, weather, staffing, reports
   api.use('/patrol', patrol);
   api.use('/patrol', require('./routes/patrolmedia')); // photos on a case
   api.use('/patrol', patrolPlus);
