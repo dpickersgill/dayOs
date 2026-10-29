@@ -19,7 +19,7 @@ const sms = require('./sms');
 const WEEKDAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const hhmm = (dt) => String(dt).slice(11, 16);
 const clock = (t) => { const [hh, mm] = t.split(':').map(Number); return `${((hh + 11) % 12) + 1}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`; };
-const bandOf = (s) => (s.age_max && Number(s.age_max) <= 12 ? 'kids' : 'adults');
+const bandOf = (s) => (s.age_max && Number(s.age_max) <= 12 ? 'kids' : s.age_min && Number(s.age_min) >= 13 ? 'adults' : 'all');
 const slotKey = (time, discipline, band) => `${time}|${discipline}|${band}`;
 const POWDER_IN = 6;
 
@@ -127,7 +127,7 @@ async function view(tenantId, { from, days = 14 } = {}) {
       date: x.date, time: x.time, starts_at: x.starts_at, ends_at: x.ends_at, discipline: x.discipline, band: x.band, lessons: x.lessons, unassigned: x.unassigned,
       booked: x.booked, walkups, need, scheduled, gap, level_min: x.level_min, level_max: x.level_max, level_words: levels.range(x.level_min, x.level_max),
       holiday: hist.holidays.has(x.date), snow_in: sn, available: null,
-      words: gap ? `${WEEKDAY[weekdayOf(x.date)]} ${clock(x.time)}: need ${gap} more ${x.band === 'kids' ? 'kids ' : ''}${x.discipline === 'ski' ? '' : `${x.discipline} `}instructor${gap === 1 ? '' : 's'}` : null,
+      words: gap ? `${WEEKDAY[weekdayOf(x.date)]} ${clock(x.time)}: need ${gap} more ${x.band === 'kids' ? 'kids ' : x.band === 'adults' ? 'adult ' : ''}${x.discipline === 'ski' ? '' : `${x.discipline} `}instructor${gap === 1 ? '' : 's'}` : null,
     };
     if (gap) row.available = (await freeFor(pool, tenantId, { discipline: x.discipline, level_max: x.level_max, kids: x.band === 'kids', starts_at: x.starts_at, ends_at: x.ends_at }, x.staff)).length;
     out.push(row);

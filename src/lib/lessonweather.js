@@ -450,8 +450,10 @@ async function viewOf(tenantId, c) {
     current: ctx.current && ctx.current.status !== 'cancelled' && c.choice === 'makeup' ? { starts_at: ctx.current.starts_at, ends_at: ctx.current.ends_at, name: ctx.current.product || ctx.meeting?.program, meeting_place: ctx.current.meeting_place || ctx.meeting?.meeting_place || null } : null,
     expires_at: c.expires_at,
     refund: { cents: c.on_package ? 0 : Number(c.value_cents), how: refundHow, amount_cents: c.refund_cents ? Number(c.refund_cents) : null, refund_how: c.refund_how },
-    credit_ok: c.kind === 'lesson' ? true : Boolean(credit),
-    credit_words: c.on_package ? 'The lesson goes back on your lesson package.' : c.kind === 'lesson' ? `A credit for one ${ctx.lesson.product} lesson, to use any day this season, at the ski school desk or online.` : credit ? `A credit for one ${credit.name}, to use any day this season, at the ski school desk or online.` : null,
+    // An unpaid lesson (to pay at the desk) gets a makeup, not a free credit.
+    credit_ok: c.kind === 'lesson' ? Boolean(c.on_package || Number(c.value_cents) > 0) : Boolean(credit),
+    unpaid: !c.on_package && !Number(c.value_cents),
+    credit_words: c.on_package ? 'The lesson goes back on your lesson package.' : c.kind === 'lesson' ? `A lesson credit (${ctx.lesson.product}) to use any day this season, at the ski school desk or online.` : credit ? `A lesson credit (${credit.name}) to use any day this season, at the ski school desk or online.` : null,
     refund_ok: !c.on_package && Number(c.value_cents) > 0,
     makeups: final ? [] : c.kind === 'lesson' ? await makeupLessons(pool, tenantId, c, ctx, t.timezone) : await makeupMeetings(pool, tenantId, ctx, t.timezone),
     credits: await creditsFor(pool, tenantId, c.person_id),
@@ -532,6 +534,7 @@ async function choose(conn, tenantId, c, what, via, userId = null) {
         creditId = b.credit_id;
       }
     } else {
+      if (c.kind === 'lesson' && !Number(c.value_cents)) throw conflict('This lesson was not paid for yet, so there is no credit. Pick another day instead.');
       const product = c.kind === 'lesson' ? { id: ctx.lesson.product_id } : await creditProduct(conn, tenantId);
       if (!product) throw conflict('A lesson credit is not available here. Please choose another option.');
       const note = `Weather: ${c.kind === 'lesson' ? ctx.lesson.product : ctx.meeting.program} on ${String(ctx.call.on_date).slice(0, 10)}`;
