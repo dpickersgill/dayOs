@@ -100,8 +100,8 @@ export async function render(root, opts = {}) {
       toast(out && out.queued ? 'Saved on this phone. It is sent when the signal is back.' : 'Everyone marked present');
     }, { kind: 'primary' }) : null;
     const pay = safePayLine(s);
-    return h('article', { class: 'panel stack myday-card', 'data-lesson': s.id }, head, s.notes ? h('p', { class: 'small' }, s.notes) : null, count, list,
-      h('div', { class: 'row' }, allBtn), pay);
+    return h('article', { class: 'panel stack myday-card', 'data-lesson': s.id }, head, s.notes ? h('p', { class: 'small' }, s.notes) : null, pay,
+      h('div', { class: 'row myday-count' }, count, allBtn), list);
   }
 
   function studentRow(s, x, redraw) {

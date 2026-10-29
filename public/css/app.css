@@ -3189,6 +3189,8 @@ tr.attr-blocked td { background: var(--closed-tint); }
 .myday-marks { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .myday-marks .btn, .myday-actions .btn { min-height: 44px; }
 .myday-pay { font-weight: 600; color: var(--ink-2); }
+.myday-count { align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.myday-count p { margin: 0; }
 .myday-flags { gap: 6px; flex-wrap: wrap; margin: 2px 0; }
 .flag { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 2px 10px; border-radius: 999px; font-weight: 700; font-size: .9rem; cursor: pointer; border: 1.5px solid; }
 .flag span { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; font-size: .8rem; color: var(--on-accent); }
@@ -3201,7 +3203,8 @@ fieldset.safety legend { font-weight: 700; padding: 0 4px; }
 @media (max-width: 720px) {
   .myday-student { grid-template-columns: 40px minmax(0, 1fr); }
   .myday-face { width: 40px; height: 40px; }
-  .myday-actions { grid-column: 1 / -1; justify-items: stretch; }
+  .myday-actions { grid-column: 1 / -1; justify-items: stretch; grid-template-columns: 1fr 1fr; }
+  .myday-actions > .myday-marks { grid-column: 1 / -1; }
   .myday-marks { justify-content: stretch; }
   .myday-marks .btn { flex: 1 1 0; }
 }

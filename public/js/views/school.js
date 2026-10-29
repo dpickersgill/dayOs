@@ -38,6 +38,10 @@ export async function render(root) {
   if (can('counter')) items.push(['requests', pending ? `Online requests (${pending})` : 'Online requests', (b) => requestsTab(b)]);
   if (isManager()) items.push(['instructors', 'Instructors', (b) => instructorsTab(b, { certs })], ['hours', 'Instructor hours', (b) => hoursTab(b)]);
   for (const part of PARTS) items.push(...part.tabs({ staff, certs, names }));
+  // The morning first (the day, check-in, the lineup), then bookings, then the instructor's own, then planning and pay.
+  const ORDER = ['myday', 'today', 'checkin', 'lineup', 'lessons', 'requests', 'privates', 'waitlist', 'recaps', 'offers', 'mypay', 'guests', 'weather', 'copy', 'staffing', 'instructors', 'payroll', 'hours', 'reports'];
+  const rank = (k) => { const i = ORDER.indexOf(k); return i < 0 ? ORDER.length : i; };
+  items.sort((a, b) => rank(a[0]) - rank(b[0]));
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Ski school')), tabs(items, instructor ? 'myday' : 'today'));
 }
 

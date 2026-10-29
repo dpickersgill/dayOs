@@ -539,7 +539,7 @@ const publicIns = (i) => ({ id: i.id, name: PR.shortName(i), bio: i.bio || null,
 publicRouter.get('/:slug/private', lookLimit, async (req, res) => {
   const t = await tenantFor(req.params.slug);
   const offers = await offersOf(t);
-  if (!offers.length) throw notFound('Private lessons are not offered online here');
+  if (!offers.length) throw new AppError(404, 'Private lessons are not offered online here. Please call the ski school.');
   const s = await S.get(pool, t.id);
   const today = todayIn(t.timezone);
   res.set('Cache-Control', 'no-store');

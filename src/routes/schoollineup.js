@@ -22,7 +22,7 @@ const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
 const { z, validate, paramId, dateStr, todayIn, nowIn } = require('../lib/util');
-const { notFound, conflict, bad, forbidden } = require('../lib/errors');
+const { notFound, conflict, bad, forbidden, AppError } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const LL = require('../lib/lessonlineup');
 const links = require('../lib/lessonlinks');
@@ -86,7 +86,7 @@ router.post('/checkin/scan', requireRole(...desk), validate(z.object({ code: z.s
     ids = (await rows(pool, `SELECT DISTINCT b.id FROM order_items i JOIN lesson_bookings b ON b.tenant_id = i.tenant_id AND b.session_id = i.session_id AND b.person_id = i.person_id
       JOIN lesson_sessions s ON s.tenant_id = b.tenant_id AND s.id = b.session_id
       WHERE i.tenant_id = ? AND i.order_id = ? AND i.refunded_at IS NULL AND DATE(s.starts_at) = ? AND b.status IN ('booked','attended')`, [tenantId, code.order_id, today])).map((r) => r.id);
-    if (!ids.length) throw notFound('A lesson today on that receipt');
+    if (!ids.length) throw new AppError(404, 'No lesson today on that receipt');
   }
   const out = [];
   for (const id of ids) {

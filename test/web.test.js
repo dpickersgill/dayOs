@@ -2123,12 +2123,13 @@ test('school: every tab renders for managers, counter staff and instructors, and
   const owner = await renderView('school', 'owner', T.owner);
   const tabsOf = (el) => [...el.querySelectorAll('[role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, ''));
   const has = (el, names) => names.every((k) => tabsOf(el).includes(k));
-  assert.deepEqual(tabsOf(owner).slice(0, 9), ['Today', 'Lessons', 'Online requests', 'Instructors', 'Instructor hours', 'Check-in', 'Lineup', 'Recaps', 'Waitlist']);
+  assert.deepEqual(tabsOf(owner).slice(0, 8), ['Today', 'Check-in', 'Lineup', 'Lessons', 'Online requests', 'Privates', 'Waitlist', 'Recaps']);
+  assert.ok(has(owner, ['Instructors', 'Instructor hours']), 'the instructor tabs');
   assert.ok(has(owner, ['Privates', 'Instructor pay', 'Payroll']), 'the pay tabs');
   assert.ok(has(owner, ['Copy a day', 'Weather', 'Staffing', 'Reports']), 'the director tabs');
   await exercise(owner, 'school (owner)');
   const counter = await renderView('school', 'counter', T.counter);
-  assert.deepEqual(tabsOf(counter).slice(0, 6), ['Today', 'Lessons', 'Online requests', 'Check-in', 'Lineup', 'Waitlist']);
+  assert.deepEqual(tabsOf(counter).slice(0, 7), ['Today', 'Check-in', 'Lineup', 'Lessons', 'Online requests', 'Privates', 'Waitlist']);
   assert.ok(!tabsOf(counter).includes('Payroll'), 'no payroll for the desk');
   assert.ok(has(counter, ['Weather']), 'the desk sees weather calls');
   const ins = await renderView('school', 'instructor', T.instructor, { staff_id: D.s2 });
