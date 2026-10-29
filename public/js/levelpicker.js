@@ -36,7 +36,7 @@ export function quizPanel({ discipline = 'ski', who = '', lang = 'en', onDone, o
     if (res && res.level) {
       const can = levelList(discipline)[res.level - 1].can;
       box.append(h('div', { class: 'quiz-result' },
-        h('p', { class: 'eyebrow' }, who ? `${who}: ${T('Your level').toLowerCase()}` : T('Your level')),
+        h('p', { class: 'quiz-step' }, who ? `${who}'s level` : T('Your level')),
         h('p', { class: 'quiz-level' }, levelName(res.level, discipline)),
         h('p', { class: 'quiz-can' }, `“${can}”`),
         h('div', { class: 'quiz-actions' },

@@ -107,7 +107,7 @@ async function main() {
       page.pay_online ? h('span', { class: 'trust' }, T('Secure card payment')) : h('span', { class: 'trust' }, T('Pay at the ski school desk')),
       page.pay_online && tiers.length ? h('span', { class: 'trust' }, `Full refund up to ${hoursText(tiers[0].from_hours)} before`) : null,
       tel ? h('a', { class: 'call', href: tel }, `Call ${page.phone}`) : null)));
-  const stepNames = [T('Who is coming?'), T('Choose a lesson'), page.pay_online ? 'Pay' : 'Send'];
+  const stepNames = [LANG === 'es' ? 'Quién' : 'Who', LANG === 'es' ? 'Clases' : 'Lessons', page.pay_online ? (LANG === 'es' ? 'Pagar' : 'Pay') : (LANG === 'es' ? 'Enviar' : 'Send')];
   const stepsEl = h('nav', { class: 'steps', 'aria-label': 'Progress' }, h('ol', null, stepNames.map((n, i) => h('li', { 'data-step': i + 1 }, `${i + 1}. ${n}`))));
   const setStep = (n) => stepsEl.querySelectorAll('li').forEach((li, i) => { li.className = i + 1 < n ? 'done' : ''; if (i + 1 === n) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current'); });
 
@@ -152,7 +152,8 @@ async function main() {
         const quizBtn = h('button', { type: 'button', class: 'btn', 'aria-expanded': 'false', onclick: () => {
           if (quizSlot.firstChild) { clear(quizSlot); quizBtn.setAttribute('aria-expanded', 'false'); return; }
           quizBtn.setAttribute('aria-expanded', 'true');
-          quizSlot.append(h('div', { class: 'card quiz-card' }, quizPanel({ discipline: p.discipline, who: p.first_name.trim(), lang: LANG, onDone: (lv) => { p.level = String(lv); rememberLevel(slug, p.discipline, lv); draw(); document.getElementById(`p${n}-level`)?.focus(); } })));
+          requestAnimationFrame(() => quizSlot.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }));
+          quizSlot.append(h('div', { class: 'card quiz-card' }, quizPanel({ discipline: p.discipline, who: p.first_name.trim(), lang: LANG, onResult: (lv) => { p.level = String(lv); const sel = document.getElementById(`p${n}-level`); if (sel) sel.value = String(lv); }, onDone: (lv) => { p.level = String(lv); rememberLevel(slug, p.discipline, lv); draw(); document.getElementById(`p${n}-level`)?.focus(); } })));
         } }, T('Not sure? Find the level'));
         list.append(h('fieldset', { class: 'student', 'data-person': n },
           h('legend', null, `${T('Student')} ${i + 1}`, people.length > 1 ? h('button', { type: 'button', class: 'btn link', 'aria-label': `${T('Remove')} ${T('Student').toLowerCase()} ${i + 1}`, onclick: () => { people.splice(people.indexOf(p), 1); draw(); } }, T('Remove')) : null),

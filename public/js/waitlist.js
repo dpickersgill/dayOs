@@ -66,7 +66,7 @@ async function main() {
       v.waiver_text ? h('details', { class: 'waiver-read' }, h('summary', null, 'Read the waiver'), h('div', { class: 'waiver-text' }, v.waiver_text)) : null,
       h('label', { class: 'check' }, accept, h('span', null, 'I have read and accept the waiver, for myself and for the student named above if under 18.')),
       v.pay_online ? h('div', { class: 'stack' }, h('ul', { class: 'tiers' }, tiers.map((t, i) => h('li', { class: `tier ${t.percent === 100 ? 'full' : t.percent === 0 ? 'none' : 'part'}` }, h('span', { class: 'pct' }, t.percent === 0 ? 'None' : `${t.percent}%`),
-        h('span', { class: 'when' }, i === 0 ? `Cancel ${hoursText(t.from_hours)} or more before` : `Cancel less than ${hoursText(tiers[i - 1].from_hours)} before`)))), h('label', { class: 'check' }, policy, h('span', null, 'I have read and accept the cancellation policy.'))) : null),
+        h('span', { class: 'when' }, i === 0 ? `Cancel ${hoursText(t.from_hours)} or more before` : t.percent === 0 ? `Cancel less than ${hoursText(tiers[i - 1].from_hours)} before, or do not show up` : `Cancel ${hoursText(t.from_hours)} to ${hoursText(tiers[i - 1].from_hours)} before`)))), h('label', { class: 'check' }, policy, h('span', null, 'I have read and accept the cancellation policy.'))) : null),
     msg, h('div', { class: 'actionbar' }, h('span', { class: 'muted small' }, `${v.student.first_name}, ${L.product}`), send));
   form.addEventListener('submit', async (e) => {
     e.preventDefault(); clear(msg);

@@ -152,7 +152,7 @@ async function waitlistTab(root) {
     clear(body).append(h('p', { class: 'loading' }, 'Loading…'));
     try {
       const { data } = await get('/skischool/waitlists');
-      clear(body).append(data.length ? data.map((s) => waitlistBlockFor(s, load)) : empty('Nobody is waiting.'));
+      clear(body).append(...(data.length ? data.map((s) => waitlistBlockFor(s, load)) : [empty('Nobody is waiting.')]));
     } catch (err) { clear(body).append(errorBox(err)); }
   }
   await load();

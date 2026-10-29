@@ -85,7 +85,7 @@ function draw(v) {
   if (v.next && (v.next.lessons.length || v.next.pack || v.next.pass)) main.append(nextCard(v));
 
   // ---- the progress card
-  if (v.progress) main.append(progressCard(v));
+  if (v.progress && (v.progress.levels.length || v.progress.lessons || v.progress.recaps.length)) main.append(progressCard(v));
 
   // ---- change or cancel
   if (B.status === 'booked' && L.status === 'scheduled' && !L.ended) main.append(changeCard(v));
