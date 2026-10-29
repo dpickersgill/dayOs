@@ -12,7 +12,7 @@ const { addLink, isMinor, mayActAsGuardian } = require('./family');
 const { seasonFor, todayIn } = require('./util');
 const { conflict, bad } = require('./errors');
 const { audit } = require('./audit');
-const { studentClash, clashWords } = require('./lessonrules');
+const { studentClash, clashWords, lockStudents, spotsLeft } = require('./lessonrules');
 
 /** Which guest type a student is priced as, by age on the day of the lesson (the mountain's own types and ages). */
 const tierFor = (db, tenantId, dob, day) => require('./guesttypes').forBirthday(db, tenantId, dob, day);
@@ -69,13 +69,13 @@ const parse = (r) => { let j = {}; try { j = JSON.parse(r.students); } catch (_)
  */
 async function confirmRequest(conn, tenantId, raw, { paid = false, auditReq, paymentIntent = null, payee = { account: null, feeCents: 0 } } = {}) {
   const r = parse(raw);
-  const s = await one(conn, 'SELECT * FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, raw.session_id]);
-  if (s.status !== 'scheduled') throw conflict(`That lesson is ${s.status}`);
+  // The students are found (or added) first and locked, then the lesson row (lib/lessonrules.js: the lock order every
+  // booking path keeps). The places are counted under the lesson lock, after the students are known.
+  const s0 = await one(conn, 'SELECT * FROM lesson_sessions WHERE tenant_id = ? AND id = ?', [tenantId, raw.session_id]);
+  if (!s0 || s0.status !== 'scheduled') throw conflict(`That lesson is ${s0 ? s0.status : 'gone'}`);
   const tenant = await one(conn, 'SELECT timezone, waiver_text, waiver_resign_id FROM tenants WHERE id = ?', [tenantId]);
-  const day = s.starts_at.slice(0, 10);
+  const day = s0.starts_at.slice(0, 10);
   if (day < todayIn(tenant.timezone)) throw conflict('That lesson date has passed');
-  const { n } = await one(conn, "SELECT COUNT(*) AS n FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND status IN ('booked','attended')", [tenantId, s.id]);
-  if (s.capacity - Number(n) < r.students.length) throw conflict(`Only ${Math.max(s.capacity - Number(n), 0)} spot(s) left in that lesson`);
   const season = seasonFor(day);
   const sha = tenant.waiver_text ? crypto.createHash('sha256').update(tenant.waiver_text).digest('hex') : null;
 
@@ -85,6 +85,7 @@ async function confirmRequest(conn, tenantId, raw, { paid = false, auditReq, pay
   const contact = await contactPerson(conn, tenantId, { first_name: c.first_name, last_name: c.last_name, email: raw.contact_email, phone: raw.contact_phone });
   const waiverNeeded = [];
   const booked = [];
+  const found = [];
   for (const st of r.students) {
     const sameAsContact = st.first_name.toLowerCase() === String(c.first_name).toLowerCase() && st.last_name.toLowerCase() === String(c.last_name).toLowerCase();
     const minor = isMinor(st.date_of_birth, day);
@@ -105,8 +106,17 @@ async function confirmRequest(conn, tenantId, raw, { paid = false, auditReq, pay
       waiver = { id: 1 };
     }
     if (!waiver) waiverNeeded.push(`${st.first_name} ${st.last_name}`);
+    found.push({ st, who });
+  }
+  await lockStudents(conn, tenantId, found.map((f) => f.who.id));
+  const s = await one(conn, 'SELECT * FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, raw.session_id]);
+  if (s.status !== 'scheduled') throw conflict(`That lesson is ${s.status}`);
+  // This request's own students do not hold against it; other requests waiting and waitlist offers do.
+  const sp = await spotsLeft(conn, tenantId, s, { exceptRequestId: raw.id });
+  if (sp.left < r.students.length) throw conflict(`Only ${sp.left} spot(s) left in that lesson`);
+  for (const { st, who } of found) {
     // Not in another lesson or a program meeting at the same time (Track CORE: lib/lessonrules, one rule for every way of booking).
-    const clash = await studentClash(conn, tenantId, who.id, s.starts_at, s.ends_at, { ignoreSessionId: s.id });
+    const clash = await studentClash(conn, tenantId, who.id, s.starts_at, s.ends_at, { ignoreSessionId: s.id, lock: true });
     if (clash) throw conflict(`${st.first_name} ${st.last_name}: ${clashWords(clash)}`);
     const [b] = await conn.query(
       `INSERT INTO lesson_bookings (tenant_id, session_id, person_id, status, unpaid, request_id) VALUES (?, ?, ?, 'booked', ?, ?)

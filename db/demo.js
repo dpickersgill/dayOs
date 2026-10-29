@@ -180,6 +180,10 @@ async function load(o) {
   await hire('groom', 'grooming', ['Snowmaker']);
   await hire('food', 'food', ['Food handler']);
   const by = (k) => people.filter((p) => p.pos === k);
+  // What each instructor teaches (ski school round 2: an instructor with no teaching profile shows "Not set up" in the picker).
+  for (const [i, x] of by('inst').entries()) {
+    await soft(`teaching profile ${x.name}`, () => C('PUT', `/skischool/instructors/${x.id}/profile`, { disciplines: i === 2 ? ['ski', 'snowboard'] : ['ski'], ski_level_max: i === 0 ? 9 : 6, snowboard_level_max: i === 2 ? 6 : null, teaches_kids: true, teaches_adaptive: i === 0, psia_level: i === 0 ? 'level2' : 'level1' }));
+  }
 
   // shifts for the next 7 days, then publish
   for (let i = 0; i < 7; i++) {

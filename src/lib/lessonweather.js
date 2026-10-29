@@ -14,7 +14,7 @@ const { bad, conflict, notFound } = require('./errors');
 const { audit } = require('./audit');
 const { addDays, todayIn, nowIn, seasonFor } = require('./util');
 const { staffProblems } = require('./workforce');
-const { studentClash, clashWords } = require('./lessonrules');
+const { studentClash, clashWords, lockStudents, spotsLeft, moveBookingRow } = require('./lessonrules');
 const { ON_FILE } = require('./waivers');
 const levels = require('./levels');
 const PS = require('./programsessions');
@@ -80,6 +80,20 @@ async function meetingsIn(db, tenantId, b, lock = false) {
     WHERE s.tenant_id = ? AND s.status = 'scheduled' AND ${w.join(' AND ')} ORDER BY s.starts_at, s.id${lock ? ' FOR UPDATE' : ''}`, [tenantId, ...p]);
 }
 
+/** What a lesson line was sold for, before tax. */
+const lineValue = (l) => Math.max(0, Number(l.unit_price_cents) * Number(l.quantity) - Number(l.discount_cents));
+
+/**
+ * A student's lesson line on an order: the one for this lesson (a sale line moves with its booking), else the only
+ * lesson line for that student on the order. Null when there is none, or more than one and none for this lesson.
+ */
+async function lessonLine(db, tenantId, orderId, personId, sessionId, { lock = false } = {}) {
+  if (!orderId) return null;
+  const list = await rows(db, `SELECT id, session_id, unit_price_cents, quantity, discount_cents, tax_cents, refunded_at FROM order_items
+    WHERE tenant_id = ? AND order_id = ? AND person_id = ? AND line_kind = 'lesson' ORDER BY id${lock ? ' FOR UPDATE' : ''}`, [tenantId, orderId, personId]);
+  return list.find((l) => Number(l.session_id) === Number(sessionId)) || (list.length === 1 ? list[0] : null);
+}
+
 /** Who is on a lesson, with what they paid and how (for the refund and the words in the preview). */
 async function lessonFamilies(db, tenantId, sessionId) {
   const list = await rows(db, `SELECT b.id, b.person_id, b.credit_id, b.request_id, b.unpaid, b.text_ok, b.contact_email, b.contact_phone, b.level,
@@ -97,7 +111,11 @@ async function lessonFamilies(db, tenantId, sessionId) {
         b.contact_email = b.contact_email || r.contact_email; b.contact_phone = b.contact_phone || r.contact_phone;
         if (r.order_id && r.status === 'confirmed') {
           b.order_id = r.order_id; b.paid = 'online';
-          b.value_cents = Math.max(0, Math.round((Number(r.total_cents) - Number(r.tax_cents)) / Math.max(1, Number(r.n))));
+          // This student's own lesson line on the order (children on one order can pay different prices); a line already
+          // refunded is worth nothing. An old order with no line per student falls back to an even share.
+          const line = await lessonLine(db, tenantId, r.order_id, b.person_id, sessionId);
+          if (line) b.value_cents = line.refunded_at ? 0 : lineValue(line);
+          else b.value_cents = Math.max(0, Math.round((Number(r.total_cents) - Number(r.tax_cents)) / Math.max(1, Number(r.n))));
         }
       }
       continue;
@@ -250,10 +268,12 @@ async function apply(conn, tenantId, b, req) {
       for (const f of fam) {
         let movedTo = null;
         if (copyId) {
-          const clash = await studentClash(conn, tenantId, f.person_id, `${b.makeup_date} ${String(s.starts_at).slice(11, 19)}`, `${b.makeup_date} ${String(s.ends_at).slice(11, 19)}`, { ignoreSessionId: s.id });
+          // The day's lessons are locked first here (a call covers the whole day), then each student (lib/lessonrules.js).
+          const clash = await studentClash(conn, tenantId, f.person_id, `${b.makeup_date} ${String(s.starts_at).slice(11, 19)}`, `${b.makeup_date} ${String(s.ends_at).slice(11, 19)}`, { ignoreSessionId: s.id, lock: true });
           if (clash) out.not_moved.push({ name: `${f.first_name} ${f.last_name}`, why: clashWords(clash) });
           else {
-            await conn.query("UPDATE lesson_bookings SET session_id = ?, moved_from_session_id = ?, moved_at = NOW(), checked_in_at = NULL, checked_in_by = NULL, checked_in_via = NULL WHERE tenant_id = ? AND id = ?", [copyId, s.id, tenantId, f.id]);
+            // The same booking row moves to the copy, and its sale line with it (so a later call still finds what was paid).
+            await moveBookingRow(conn, tenantId, f, s.id, { id: copyId, starts_at: `${b.makeup_date} ${String(s.starts_at).slice(11, 19)}` });
             movedTo = copyId; out.moved += 1;
           }
         }
@@ -440,22 +460,24 @@ async function viewOf(tenantId, c) {
   const makeupStarted = ctx.current && String(ctx.current.starts_at) <= nowIn(t.timezone);
   const brand = await one(pool, 'SELECT color, logo FROM shop_brand WHERE tenant_id = ?', [tenantId]).catch(() => null);
   const refundHow = c.on_package ? 'package' : !c.value_cents ? 'none' : c.refund_order_id && await one(pool, "SELECT id FROM order_payments WHERE tenant_id = ? AND order_id = ? AND processor = 'stripe' AND reference LIKE 'pi\\_%' LIMIT 1", [tenantId, c.refund_order_id]) ? 'card' : 'desk';
+  const bk = c.kind === 'lesson' && c.booking_id ? await one(pool, 'SELECT * FROM lesson_bookings WHERE tenant_id = ? AND id = ?', [tenantId, c.booking_id]) : null;
+  const closed = final ? null : await settledWhy(pool, tenantId, c, bk);
   const out = {
-    mountain: t.name, phone: t.phone, brand: brand || null,
+    mountain: t.name, phone: t.phone, brand: brand || null, closed,
     student: ctx.person ? ctx.person.first_name : '',
     kind: c.kind, action: ctx.call.action, reason: ctx.call.reason, date: ctx.call.on_date,
     what: c.kind === 'lesson' ? { name: ctx.lesson.product, starts_at: ctx.lesson.starts_at, ends_at: ctx.lesson.ends_at, meeting_place: ctx.lesson.meeting_place, level_words: levels.range(ctx.lesson.level_min, ctx.lesson.level_max) }
       : { name: ctx.meeting.program, starts_at: ctx.meeting.starts_at, ends_at: ctx.meeting.ends_at, meeting_place: ctx.meeting.meeting_place },
-    choice: c.choice, chosen_via: c.chosen_via, chosen_at: c.chosen_at, final: final || Boolean(makeupStarted),
+    choice: c.choice, chosen_via: c.chosen_via, chosen_at: c.chosen_at, final: final || Boolean(makeupStarted) || Boolean(closed),
     current: ctx.current && ctx.current.status !== 'cancelled' && c.choice === 'makeup' ? { starts_at: ctx.current.starts_at, ends_at: ctx.current.ends_at, name: ctx.current.product || ctx.meeting?.program, meeting_place: ctx.current.meeting_place || ctx.meeting?.meeting_place || null } : null,
     expires_at: c.expires_at,
     refund: { cents: c.on_package ? 0 : Number(c.value_cents), how: refundHow, amount_cents: c.refund_cents ? Number(c.refund_cents) : null, refund_how: c.refund_how },
     // An unpaid lesson (to pay at the desk) gets a makeup, not a free credit.
-    credit_ok: c.kind === 'lesson' ? Boolean(c.on_package || Number(c.value_cents) > 0) : Boolean(credit),
+    credit_ok: closed ? false : c.kind === 'lesson' ? Boolean(c.on_package || Number(c.value_cents) > 0) : Boolean(credit),
     unpaid: !c.on_package && !Number(c.value_cents),
     credit_words: c.on_package ? 'The lesson goes back on your lesson package.' : c.kind === 'lesson' ? `A lesson credit (${ctx.lesson.product}) to use any day this season, at the ski school desk or online.` : credit ? `A lesson credit (${credit.name}) to use any day this season, at the ski school desk or online.` : null,
-    refund_ok: !c.on_package && Number(c.value_cents) > 0,
-    makeups: final ? [] : c.kind === 'lesson' ? await makeupLessons(pool, tenantId, c, ctx, t.timezone) : await makeupMeetings(pool, tenantId, ctx, t.timezone),
+    refund_ok: !closed && !c.on_package && Number(c.value_cents) > 0,
+    makeups: final || closed ? [] : c.kind === 'lesson' ? await makeupLessons(pool, tenantId, c, ctx, t.timezone) : await makeupMeetings(pool, tenantId, ctx, t.timezone),
     credits: await creditsFor(pool, tenantId, c.person_id),
   };
   if (c.choice === 'credit') out.credit_lessons = await creditLessons(pool, tenantId, c, ctx, t.timezone);
@@ -478,14 +500,57 @@ async function creditsFor(db, tenantId, personId) {
 
 /** Puts a student into a lesson: the shared booking checks (status, capacity under the row lock, waiver, clash). */
 async function checkSeat(conn, tenantId, sessionId, personId, ignoreSessionId) {
+  await lockStudents(conn, tenantId, [personId]); // the student first, then the lesson (lib/lessonrules.js)
   const s = await one(conn, 'SELECT * FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, sessionId]);
   if (!s || s.status !== 'scheduled') throw conflict('That lesson is not open any more. Pick another.');
-  const { n } = await one(conn, "SELECT COUNT(*) AS n FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND status IN ('booked','attended')", [tenantId, s.id]);
-  if (Number(n) >= Number(s.capacity)) throw conflict('That lesson just filled up. Pick another.');
-  const clash = await studentClash(conn, tenantId, personId, s.starts_at, s.ends_at, { ignoreSessionId });
+  if ((await spotsLeft(conn, tenantId, s)).left < 1) throw conflict('That lesson just filled up. Pick another.');
+  const clash = await studentClash(conn, tenantId, personId, s.starts_at, s.ends_at, { ignoreSessionId, lock: true });
   if (clash) throw conflict(clashWords(clash));
   if (!(await one(conn, ON_FILE, [tenantId, personId, seasonFor(String(s.starts_at).slice(0, 10))]))) throw conflict('That lesson is in a season with no waiver on file yet. Please call us to book it.');
   return s;
+}
+
+/**
+ * Why a lesson choice can no longer give anything, or null. A makeup booking canceled since it was booked (the family
+ * canceled it from the lesson page, the desk canceled it, or a later weather call canceled that day and sent a new
+ * link), or a lesson line already refunded, closes the choice: it never gives a credit or a refund on top.
+ */
+async function settledWhy(db, tenantId, c, bk) {
+  if (c.kind !== 'lesson') return null;
+  if (!bk) return 'This booking is no longer on file. Please call the ski school.';
+  if (c.choice === 'makeup' && c.makeup_session_id && !['booked', 'attended'].includes(bk.status)) {
+    return 'The makeup lesson was canceled after it was booked, so this choice is closed. If a later message from us has a new link, use that one. Questions? Please call the ski school.';
+  }
+  if (!c.on_package && Number(c.value_cents) > 0 && c.refund_order_id) {
+    const line = await lessonLine(db, tenantId, c.refund_order_id, c.person_id, bk.session_id);
+    if (line && line.refunded_at) return 'This lesson was already refunded, so this choice is closed. Questions? Please call the ski school.';
+  }
+  return null;
+}
+
+/**
+ * The weather refund of one student's lesson: what was paid for THAT student's lesson line (with its tax), never more,
+ * and never from other children's lines on the same order. A card payment goes back to the card and the line is marked
+ * refunded; a desk sale is refunded at the desk.
+ */
+async function refundLesson(conn, tenantId, c, bk, { note, userId }) {
+  const line = await lessonLine(conn, tenantId, c.refund_order_id, c.person_id, bk.session_id, { lock: true });
+  if (!line) return PP.refundPart(conn, tenantId, { orderId: c.refund_order_id, cents: Number(c.value_cents), reason: 'weather', note, userId });
+  if (line.refunded_at) return { how: 'none', cents: 0 };
+  const order = await one(conn, 'SELECT id, total_cents, refunded_cents FROM orders WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, c.refund_order_id]);
+  if (!order) return { how: 'none', cents: 0 };
+  const pre = Math.min(lineValue(line), Number(c.value_cents));
+  const tax = lineValue(line) > 0 ? Math.round((Number(line.tax_cents) * pre) / lineValue(line)) : 0;
+  const amount = Math.min(pre + tax, Number(order.total_cents) - Number(order.refunded_cents));
+  if (amount <= 0) return { how: 'none', cents: 0 };
+  const card = await one(conn, "SELECT reference FROM order_payments WHERE tenant_id = ? AND order_id = ? AND processor = 'stripe' AND reference LIKE 'pi\\_%' ORDER BY id LIMIT 1", [tenantId, order.id]);
+  if (!card) return { how: 'desk', cents: amount, order_id: order.id };
+  const [rf] = await conn.query("INSERT INTO order_refunds (tenant_id, order_id, user_id, reason, note, amount_cents, tax_cents, method) VALUES (?, ?, ?, 'weather', ?, ?, ?, 'card')",
+    [tenantId, order.id, userId, String(note || '').slice(0, 300) || null, amount, Math.min(tax, amount)]);
+  await cardrefund.markPending(conn, tenantId, rf.insertId, card.reference);
+  await conn.query("UPDATE orders SET refunded_cents = refunded_cents + ?, status = IF(refunded_cents >= total_cents, 'refunded', status) WHERE tenant_id = ? AND id = ?", [amount, tenantId, order.id]);
+  await conn.query('UPDATE order_items SET refunded_at = NOW(), refund_id = ? WHERE tenant_id = ? AND id = ?', [rf.insertId, tenantId, line.id]);
+  return { how: 'card', cents: amount, refund_id: rf.insertId, order_id: order.id };
 }
 
 /**
@@ -499,6 +564,15 @@ async function choose(conn, tenantId, c, what, via, userId = null) {
   if (ctx.current && c.choice === 'makeup' && String(ctx.current.starts_at) <= nowIn(t.timezone)) throw conflict('The makeup has already started, so this can no longer change.');
   const req = { auth: { tenantId, userId }, ip: null };
   const out = {};
+  // A lesson choice: the student, then the booking, are locked (lib/lessonrules.js), and nothing is given for a booking
+  // that was canceled or refunded some other way since (the family page, the desk, a later weather call).
+  let bk = null;
+  if (c.kind === 'lesson') {
+    await lockStudents(conn, tenantId, [c.person_id]);
+    bk = c.booking_id ? await one(conn, 'SELECT * FROM lesson_bookings WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, c.booking_id]) : null;
+    const why = await settledWhy(conn, tenantId, c, bk);
+    if (why) throw conflict(why);
+  }
   // Leaving a makeup lesson: the booking row comes back out of it (a program makeup needs nothing undone).
   const leaveMakeup = async () => {
     if (c.kind === 'lesson' && c.makeup_session_id) await conn.query("UPDATE lesson_bookings SET status = 'cancelled' WHERE tenant_id = ? AND id = ?", [tenantId, c.booking_id]);
@@ -508,12 +582,14 @@ async function choose(conn, tenantId, c, what, via, userId = null) {
       if (!what.session_id) throw bad('Pick a lesson');
       const ok = (await makeupLessons(conn, tenantId, c, ctx, t.timezone)).some((x) => x.id === what.session_id);
       if (!ok) throw conflict('That lesson is not one of the choices any more. Pick another.');
-      await checkSeat(conn, tenantId, what.session_id, c.person_id, c.makeup_session_id || 0);
+      // A makeup the family already holds is the lesson being left, so it does not clash with the new one.
+      const leaving = bk && ['booked', 'attended'].includes(bk.status) ? bk.session_id : 0;
+      const to = await checkSeat(conn, tenantId, what.session_id, c.person_id, leaving || c.makeup_session_id || 0);
       const dupe = await one(conn, 'SELECT id FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND person_id = ? AND id <> ?', [tenantId, what.session_id, c.person_id, c.booking_id]);
       if (dupe) throw conflict('This student already has a place in that lesson.');
-      // Same booking row: the safety details, the family link and the consents stay with it; a package lesson moves with it.
-      await conn.query("UPDATE lesson_bookings SET session_id = ?, status = 'booked', moved_from_session_id = ?, moved_at = NOW(), checked_in_at = NULL, checked_in_by = NULL, checked_in_via = NULL WHERE tenant_id = ? AND id = ?",
-        [what.session_id, c.session_id, tenantId, c.booking_id]);
+      // Same booking row: the safety details, the family link and the consents stay with it; a package lesson moves with
+      // it, and so does its sale line (so a later cancel or weather call finds what was paid on the new lesson).
+      await moveBookingRow(conn, tenantId, bk, bk.session_id, to, { status: 'booked' });
       await conn.query("UPDATE weather_choices SET choice = 'makeup', makeup_session_id = ?, chosen_at = NOW(), chosen_via = ? WHERE tenant_id = ? AND id = ?", [what.session_id, via, tenantId, c.id]);
       out.booking_id = c.booking_id;
     } else {
@@ -548,7 +624,9 @@ async function choose(conn, tenantId, c, what, via, userId = null) {
     await leaveMakeup();
     let r = { how: 'none', cents: 0 };
     if (Number(c.value_cents) > 0) {
-      if (c.refund_order_id) r = await PP.refundPart(conn, tenantId, { orderId: c.refund_order_id, cents: Number(c.value_cents), reason: 'weather', note: `Weather refund, ${String(ctx.call.on_date).slice(0, 10)}`, userId });
+      const note = `Weather refund, ${String(ctx.call.on_date).slice(0, 10)}`;
+      if (c.kind === 'lesson' && c.refund_order_id) r = await refundLesson(conn, tenantId, c, bk, { note, userId });
+      else if (c.refund_order_id) r = await PP.refundPart(conn, tenantId, { orderId: c.refund_order_id, cents: Number(c.value_cents), reason: 'weather', note, userId });
       else r = { how: 'desk', cents: Number(c.value_cents) };
     }
     if (c.kind === 'program' && r.cents) await conn.query('UPDATE program_enrollments SET refund_cents = refund_cents + ? WHERE tenant_id = ? AND id = ?', [r.cents, tenantId, c.enrollment_id]);
@@ -588,7 +666,9 @@ async function expireOpen() {
       await tx(async (conn) => {
         const c = await one(conn, "SELECT * FROM weather_choices WHERE tenant_id = ? AND id = ? AND choice = 'open' FOR UPDATE", [d.tenant_id, d.id]);
         if (!c) return;
-        if (!c.on_package && !Number(c.value_cents) && c.kind === 'lesson') {
+        const bk = c.kind === 'lesson' && c.booking_id ? await one(conn, 'SELECT * FROM lesson_bookings WHERE tenant_id = ? AND id = ?', [d.tenant_id, c.booking_id]) : null;
+        // Nothing to give (not paid, or refunded some other way since): the choice simply closes.
+        if (c.kind === 'lesson' && ((!c.on_package && !Number(c.value_cents)) || await settledWhy(conn, d.tenant_id, c, bk))) {
           await conn.query("UPDATE weather_choices SET choice = 'refund', refund_how = 'none', chosen_at = NOW(), chosen_via = 'auto' WHERE tenant_id = ? AND id = ?", [d.tenant_id, c.id]);
           closed += 1; return;
         }

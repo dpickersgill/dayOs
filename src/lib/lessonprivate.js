@@ -56,13 +56,23 @@ async function publicInstructors(db, tenantId) {
     WHERE ip.tenant_id = ? AND ip.is_public = 1 ORDER BY COALESCE(ip.display_name, p.first_name)`, [tenantId]);
 }
 
-/** Does this instructor teach this discipline, level and these students? (An empty disciplines list means any.) */
+/**
+ * Does this instructor teach this discipline, level and these students? (An empty disciplines list means any.) No
+ * teaching profile on file means nobody has said what they teach yet: not cleared.
+ */
 function teaches(ins, discipline, levelMax, { kids = false } = {}) {
+  if (!ins) return false;
   const list = String(ins.disciplines || '').split(',').filter(Boolean);
   if (list.length && !list.includes(discipline)) return false;
   if (discipline === 'adaptive' && ins.teaches_adaptive === 0) return false;
   if (kids && ins.teaches_kids === 0) return false;
   return levels.instructorCovers(ins, discipline, levelMax);
+}
+
+/** Does a private request have a child (12 or under on the day) among its students? The same rule the booking page uses. */
+function kidsIn(r) {
+  const day = String(r.starts_at || r.date || '').slice(0, 10);
+  return parseStudents(r).some((s) => s.date_of_birth && require('./family').isMinor(s.date_of_birth, day) && Number(day.slice(0, 4)) - Number(String(s.date_of_birth).slice(0, 4)) <= 12);
 }
 
 /** The times the instructor is busy on a day: lessons, shifts, patrol shifts and program meetings they coach. */
@@ -147,7 +157,7 @@ async function tellInstructors(tenantId, r) {
     const t = await tenantRow(pool, tenantId);
     const st = parseStudents(r);
     const levelMax = Math.max(...st.map((s) => Number(s.level) || 1));
-    const who = r.staff_id ? [{ id: r.staff_id }] : await freeInstructors(pool, tenantId, { discipline: r.discipline, levelMax, startsAt: r.starts_at, minutes: r.minutes, exclude: ids(r.declined_ids) });
+    const who = r.staff_id ? [{ id: r.staff_id }] : await freeInstructors(pool, tenantId, { discipline: r.discipline, levelMax, kids: kidsIn(r), startsAt: r.starts_at, minutes: r.minutes, exclude: ids(r.declined_ids) });
     const deadline = r.deadline_at ? ` Please answer within ${(await S.get(pool, tenantId)).private_accept_minutes} minutes.` : '';
     for (const w of who) {
       const c = await staffContact(pool, tenantId, w.id);
@@ -252,7 +262,7 @@ async function accept(req, requestId, staffId, { byHand = false } = {}) {
     const res = await confirmRequest(conn, tenantId, raw, { paid: !r.pay_at_desk, auditReq: req, paymentIntent: r.payment_intent, payee: { account: r.payee_account, feeCents: r.fee_cents } });
     const bookingIds = [];
     for (const [i, b] of res.booked.entries()) {
-      const c = await studentClash(conn, tenantId, b.person_id, r.starts_at, endsAt, { ignoreSessionId: sessionId });
+      const c = await studentClash(conn, tenantId, b.person_id, r.starts_at, endsAt, { ignoreSessionId: sessionId, lock: true });
       if (c) throw conflict(`${b.name}: ${clashWords(c)}`);
       const s = st[i] || {};
       await conn.query(`UPDATE lesson_bookings SET requested_instructor_id = ?, allergies = ?, medical = ?, contact_name = ?, contact_phone = ?, contact_email = ?, text_ok = ?, photo_ok = ?, level = ?
@@ -312,7 +322,7 @@ async function decline(tenantId, requestId, { staffId = null, why, auditReq = nu
     const tz = (await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone;
     const future = r.starts_at > nowIn(tz);
     const others = s.private_decline === 'offer_other' && future
-      ? await freeInstructors(conn, tenantId, { discipline: r.discipline, levelMax: Math.max(...st.map((x) => Number(x.level) || 1)), startsAt: r.starts_at, minutes: r.minutes, exclude: declined }) : [];
+      ? await freeInstructors(conn, tenantId, { discipline: r.discipline, levelMax: Math.max(...st.map((x) => Number(x.level) || 1)), kids: kidsIn(r), startsAt: r.starts_at, minutes: r.minutes, exclude: declined }) : [];
     if (others.length) {
       await conn.query("UPDATE private_requests SET status = 'offered', staff_id = NULL, declined_ids = ?, deadline_at = NULL, staff_note = ? WHERE tenant_id = ? AND id = ?", [declined.join(','), String(why || '').slice(0, 300) || null, tenantId, r.id]);
       outcome = 'offered';
@@ -350,7 +360,7 @@ async function pick(tenantId, requestId, staffId) {
     const r = await one(conn, 'SELECT * FROM private_requests WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, requestId]);
     if (!r || r.status !== 'offered') throw conflict('This request is not waiting for a choice');
     const st = parseStudents(r);
-    const free = await freeInstructors(conn, tenantId, { discipline: r.discipline, levelMax: Math.max(...st.map((x) => Number(x.level) || 1)), startsAt: r.starts_at, minutes: r.minutes, exclude: ids(r.declined_ids) });
+    const free = await freeInstructors(conn, tenantId, { discipline: r.discipline, levelMax: Math.max(...st.map((x) => Number(x.level) || 1)), kids: kidsIn(r), startsAt: r.starts_at, minutes: r.minutes, exclude: ids(r.declined_ids) });
     if (!free.some((f) => f.id === staffId)) throw conflict('That instructor is no longer free then. Please pick another.');
     const s = await S.get(conn, tenantId);
     await conn.query("UPDATE private_requests SET status = 'waiting', staff_id = ?, any_instructor = 0, deadline_at = ? WHERE tenant_id = ? AND id = ?", [staffId, utcIn(s.private_accept_minutes), tenantId, r.id]);
@@ -397,6 +407,6 @@ async function tick() {
   return { expired, lapsed, unpaid_closed: x.affectedRows };
 }
 
-module.exports = { sha, newToken, looksRight, reference, plusMinutes, clock, dayWords, lengthWords, ids, parseStudents, shortName, utcIn,
+module.exports = { kidsIn, sha, newToken, looksRight, reference, plusMinutes, clock, dayWords, lengthWords, ids, parseStudents, shortName, utcIn,
   publicInstructor, publicInstructors, teaches, freeTimes, freeInstructors, quote, byToken, familyLink, staffContact, tellFamily,
   markPaid, afterWaiting, accept, decline, pick, refundByFamily, tick, OPEN };

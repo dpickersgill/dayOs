@@ -54,6 +54,8 @@ async function newMountain(tag) {
     M[`${k}Id`] = st.id;
     ok(await call('POST', '/users', { token: M.owner, body: { email: `${k}@${slug}.test`, password: PW, role: 'instructor', staff_id: st.id } }));
     M[k] = await login(`${k}@${slug}.test`);
+    // what they teach (an instructor with no teaching profile is not cleared for anything yet)
+    ok(await call('PUT', `/skischool/instructors/${st.id}/profile`, { token: M.owner, body: { disciplines: ['ski', 'snowboard'], ski_level_max: 9, snowboard_level_max: 9, teaches_kids: true, teaches_adaptive: false, psia_level: 'level1' } }));
   }
   M.group = ok(await call('POST', '/products', { token: M.owner, body: { kind: 'lesson', name: 'Group Lesson', base_price_cents: 8000 } })).id;
   return M;
@@ -315,6 +317,10 @@ test('staffing: booked plus expected walk-ups against instructors gives the gap;
   const st = ok(await call('POST', '/workforce/staff', { token: M.owner, body: { person: { first_name: 'Zoe', last_name: 'Teach', email: `zoe@${M.slug}.test` }, status: 'active' } }));
   ok(await call('POST', '/users', { token: M.owner, body: { email: `zoe@${M.slug}.test`, password: PW, role: 'instructor', staff_id: st.id } }));
   const zoe = (await call('POST', '/auth/login', { body: { tenant: M.slug, email: `zoe@${M.slug}.test`, password: PW } })).body.token;
+  // An instructor with no teaching profile yet is not offered a shift: nobody has said what they teach.
+  const notSetUp = ok(await call('GET', `/skischool/director/staffing?from=${today}`, { token: M.owner })).slots.find((x) => x.date === day && x.time === '10:00');
+  assert.equal(notSetUp.available, 1, 'Zoe is not set up yet, so only Max counts as free');
+  ok(await call('PUT', `/skischool/instructors/${st.id}/profile`, { token: M.owner, body: { disciplines: ['ski'], ski_level_max: 4, snowboard_level_max: null, teaches_kids: true, teaches_adaptive: false, psia_level: 'level1' } }));
   assert.equal((await call('POST', '/skischool/director/offers', { token: M.ivy, body: { starts_at: `${day}T10:00`, ends_at: `${day}T12:00` } })).status, 403);
   const before = mails.length;
   const off = ok(await call('POST', '/skischool/director/offers', { token: M.owner, body: { starts_at: `${day}T10:00`, ends_at: `${day}T12:00`, discipline: 'ski', level_max: 2, kids: true, session_id: b } }), 201);

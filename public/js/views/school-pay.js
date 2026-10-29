@@ -301,6 +301,7 @@ async function payrollTab(root) {
       appendAll(clear(body),
         h('div', { class: 'pay-tiles' }, tile('Pay', money(total), plural(all.length, 'instructor')), tile('Tips to pass through', money(tipsTotal), 'Not part of pay'), tile('Approved', `${approved.length} of ${all.length}`, d.run && d.run.exported_at ? `Exported ${fmtDate(d.run.exported_at)}` : 'Not exported yet')),
         d.earlier ? h('p', { class: 'muted small' }, `${plural(d.earlier, 'line')} in this period were paid in an earlier export and are left out.`) : null,
+        d.later ? h('p', { class: 'muted small' }, `${plural(d.later, 'line')} in this period are for lessons not over yet. Export again after they end.`) : null,
         all.length ? table([
           { head: 'Instructor', cell: (g) => h('strong', null, g.name) },
           { head: 'Hours', num: true, cell: (g) => hours(g.minutes) },

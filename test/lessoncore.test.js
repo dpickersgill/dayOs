@@ -113,12 +113,22 @@ test('double-booking is refused, for another lesson and for a program meeting', 
 
 test('availability: someone who marked open dates only is available only on those dates', async () => {
   const d2 = addDays(day, 1);
+  ok(await api('PUT', `/skischool/instructors/${D.kim.id}/profile`, { token: T.manager, body: { disciplines: ['ski', 'snowboard'], ski_level_max: 9, snowboard_level_max: 9, teaches_kids: true, teaches_adaptive: false, psia_level: 'none' } }), 200);
   ok(await api('POST', '/availability/windows', { token: D.kim.token, body: { dates: [d2], start_time: '09:00', end_time: '16:00' } }), 201);
   const s = ok(await lesson({}, '09:00', '10:00'), 201).id; // on `day`, not a date Kim marked
   const fit = ok(await api('GET', `/skischool/sessions/${s}/eligible-instructors`, { token: T.manager })).data;
   const kim = fit.find((x) => x.id === D.kim.id);
   assert.ok(kim.problems.includes('Outside their availability'), JSON.stringify(kim));
-  assert.equal(fit.find((x) => x.id === D.max.id).ok, true, 'Max said nothing, so he can work any time');
+  // No teaching profile yet: not cleared for everything, a soft "Not set up" a manager can assign anyway.
+  const bare = fit.find((x) => x.id === D.max.id);
+  assert.deepEqual(bare.problems, ['Not set up: set what they teach'], JSON.stringify(bare));
+  assert.equal(bare.ok, false); assert.equal(bare.not_set_up, true);
+  const anyway = ok(await api('PATCH', `/skischool/sessions/${s}/instructor`, { token: T.manager, body: { instructor_id: D.max.id } }));
+  assert.ok(anyway, 'a manager can still assign someone not set up');
+  ok(await api('PATCH', `/skischool/sessions/${s}/instructor`, { token: T.manager, body: { instructor_id: null } }));
+  ok(await api('PUT', `/skischool/instructors/${D.max.id}/profile`, { token: T.manager, body: { disciplines: ['ski', 'snowboard'], ski_level_max: 9, snowboard_level_max: 9, teaches_kids: true, teaches_adaptive: false, psia_level: 'none' } }), 200);
+  const fit2 = ok(await api('GET', `/skischool/sessions/${s}/eligible-instructors`, { token: T.manager })).data;
+  assert.equal(fit2.find((x) => x.id === D.max.id).ok, true, 'Max said nothing about dates, so he can work any time');
   const onDate = ok(await api('POST', '/skischool/sessions', { token: A.owner, body: { product_id: D.group, starts_at: `${d2}T09:00`, ends_at: `${d2}T10:00` } }), 201).id;
   assert.equal(ok(await api('GET', `/skischool/sessions/${onDate}/eligible-instructors`, { token: T.manager })).data.find((x) => x.id === D.kim.id).ok, true);
 });

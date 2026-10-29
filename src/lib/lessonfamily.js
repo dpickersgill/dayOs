@@ -14,7 +14,7 @@ const { audit } = require('./audit');
 const L = require('./levels');
 const S = require('./schoolsettings');
 const links = require('./lessonlinks');
-const { studentClash, clashWords } = require('./lessonrules');
+const { studentClash, clashWords, lockStudents, spotsLeft, moveBookingRow } = require('./lessonrules');
 const { notify, textsOn } = require('./familynotify');
 const { unitPrice } = require('./pricing');
 const { loadRules, applyTax } = require('./tax');
@@ -153,7 +153,7 @@ async function fulfilBasket(event, obj) {
         const s = await one(conn, 'SELECT id, starts_at, ends_at FROM lesson_sessions WHERE tenant_id = ? AND id = ?', [tenantId, r.session_id]);
         let students = []; try { students = JSON.parse(r.students).students || []; } catch (_) { /* none */ }
         for (const [i, bk] of out.booked.entries()) {
-          const c = await studentClash(conn, tenantId, bk.person_id, s.starts_at, s.ends_at, { ignoreSessionId: s.id });
+          const c = await studentClash(conn, tenantId, bk.person_id, s.starts_at, s.ends_at, { ignoreSessionId: s.id, lock: true });
           if (c) throw new Unhonourable(`${bk.name}: ${clashWords(c)}`);
           if (students[i] && students[i].key) people.set(students[i].key, bk.person_id);
         }
@@ -289,10 +289,14 @@ function localOf(utc, tz) {
   return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
 }
 
-/** Is "We're here" open: the lesson day, from 90 minutes before the start until the end, lesson and booking not canceled. */
+/**
+ * Is "We're here" open: the lesson day, from 90 minutes before the start until the end, lesson and booking not canceled.
+ * A weather delay has already moved starts_at and ends_at (lib/lessonweather.js); delay_minutes only notes by how much,
+ * so it is never added again here or anywhere else.
+ */
 function checkinOpen(b, nowLocal) {
   if (b.session_status === 'cancelled' || b.status !== 'booked') return false;
-  const start = plusMinutes(b.starts_at, b.delay_minutes); const end = plusMinutes(b.ends_at, b.delay_minutes);
+  const start = String(b.starts_at); const end = String(b.ends_at);
   if (nowLocal.slice(0, 10) !== String(b.starts_at).slice(0, 10)) return false;
   return nowLocal >= plusMinutes(start, -90) && nowLocal <= end;
 }
@@ -309,6 +313,19 @@ async function paidUnit(db, tenantId, b) {
   }
   const it = await one(db, "SELECT unit_price_cents FROM order_items WHERE tenant_id = ? AND session_id = ? AND person_id = ? AND line_kind = 'lesson' ORDER BY id DESC LIMIT 1", [tenantId, b.session_id, b.person_id]);
   return it ? Number(it.unit_price_cents) : null;
+}
+
+/**
+ * Can this booking move to lesson s without paying more? The price on the new day (the product's price that day, with
+ * any date or holiday pricing, lib/pricing.js) must not be more than what was paid. Another product must cost the same.
+ * A booking with nothing paid on file (a package lesson, or pay at the desk) can only move within its own product.
+ */
+async function samePrice(db, t, b, s, { tier, unit }) {
+  let price = null;
+  try { price = (await unitPrice(db, t.id, s.product_id, tier, String(s.starts_at).slice(0, 10))).cents; } catch (_) { return false; }
+  if (unit === null) return Number(s.product_id) === Number(b.product_id);
+  if (Number(s.product_id) !== Number(b.product_id)) return price === unit;
+  return price <= unit;
 }
 
 /** Lessons this booking can move to: same discipline, fits the student, spots left, same price, in the next 45 days. */
@@ -330,10 +347,7 @@ async function moveChoices(db, t, b) {
     if (s.capacity - Number(s.booked) - (held.get(Number(s.id)) || 0) <= 0) continue;
     const age = person && person.date_of_birth ? ageOn(person.date_of_birth, String(s.starts_at).slice(0, 10)) : null;
     if (!fits(s, { age, level })) continue;
-    let price = null;
-    try { price = (await unitPrice(db, t.id, s.product_id, tier, String(s.starts_at).slice(0, 10))).cents; } catch (_) { continue; }
-    if (s.product_id !== b.product_id && unit !== null && price !== unit) continue;
-    if (unit === null && s.product_id !== b.product_id) continue;
+    if (!(await samePrice(db, t, b, s, { tier, unit }))) continue;
     out.push({ id: s.id, starts_at: s.starts_at, ends_at: s.ends_at, product: s.product, level_words: L.range(s.level_min, s.level_max), meeting_place: s.meeting_place });
     if (out.length >= 40) break;
   }
@@ -436,7 +450,7 @@ async function familyView(t, b, { slug }) {
   const nowLocal = nowIn(t.timezone);
   const ins = b.instructor_id ? await one(pool, 'SELECT p.first_name FROM staff st JOIN people p ON p.tenant_id = st.tenant_id AND p.id = st.person_id WHERE st.tenant_id = ? AND st.id = ?', [t.id, b.instructor_id]) : null;
   const sess = await one(pool, 'SELECT cancel_reason FROM lesson_sessions WHERE tenant_id = ? AND id = ?', [t.id, b.session_id]);
-  const ended = String(plusMinutes(b.ends_at, b.delay_minutes)) <= nowLocal;
+  const ended = String(b.ends_at) <= nowLocal; // a weather delay already moved ends_at
   const recap = await one(pool, "SELECT id, body, skills, level, sent_at FROM lesson_recaps WHERE tenant_id = ? AND booking_id = ? AND status = 'sent'", [t.id, b.id]);
   let recapOut = null;
   if (recap) {
@@ -457,7 +471,9 @@ async function familyView(t, b, { slug }) {
       product: b.product, starts_at: b.starts_at, ends_at: b.ends_at, discipline: b.discipline, level_words: L.range(b.level_min, b.level_max), format: b.format,
       meeting_place: b.meeting_place, instructor: ins ? ins.first_name : null, what_to_bring: fs.what_to_bring || null,
       status: b.session_status, cancel_reason: b.session_status === 'cancelled' ? (sess && sess.cancel_reason) || null : null,
-      delay_minutes: Number(b.delay_minutes || 0), new_start: Number(b.delay_minutes || 0) > 0 ? plusMinutes(b.starts_at, b.delay_minutes) : null, ended,
+      // starts_at is already the new start after a weather delay; was_start is the time first booked.
+      delay_minutes: Number(b.delay_minutes || 0), new_start: Number(b.delay_minutes || 0) > 0 ? b.starts_at : null,
+      was_start: Number(b.delay_minutes || 0) > 0 ? plusMinutes(b.starts_at, -Number(b.delay_minutes)) : null, ended,
     },
     booking: {
       status: b.status, checked_in_at: b.checked_in_at, checked_in_local: b.checked_in_at ? localOf(b.checked_in_at, t.timezone) : null, checked_in_via: b.checked_in_via, text_ok: Boolean(b.text_ok), photo_ok: Boolean(b.photo_ok),
@@ -495,24 +511,34 @@ async function updateDetails(t, b, fields) {
  */
 async function moveBooking(t, b, toSessionId) {
   const choices = await moveChoices(pool, t, b);
-  if (!choices.some((c) => Number(c.id) === Number(toSessionId))) throw conflict('That lesson cannot be chosen. Pick another, or call the ski school.');
+  if (!choices.some((c) => Number(c.id) === Number(toSessionId))) {
+    const target = await one(pool, "SELECT id, product_id, starts_at FROM lesson_sessions WHERE tenant_id = ? AND id = ? AND status = 'scheduled'", [t.id, toSessionId]);
+    if (target) {
+      const person = await one(pool, 'SELECT date_of_birth FROM people WHERE tenant_id = ? AND id = ?', [t.id, b.person_id]);
+      const tier = person && person.date_of_birth ? await tierFor(pool, t.id, person.date_of_birth, String(b.starts_at).slice(0, 10)) : 'adult';
+      if (!(await samePrice(pool, t, b, target, { tier, unit: await paidUnit(pool, t.id, b) }))) throw conflict('That day costs more than what was paid. Please call the ski school to change to it.');
+    }
+    throw conflict('That lesson cannot be chosen. Pick another, or call the ski school.');
+  }
   return tx(async (conn) => {
+    // The student first, then the booking and the lessons (lib/lessonrules.js: the lock order every booking path keeps).
+    await lockStudents(conn, t.id, [b.person_id]);
     const cur = await one(conn, 'SELECT * FROM lesson_bookings WHERE tenant_id = ? AND id = ? FOR UPDATE', [t.id, b.id]);
     if (!cur || cur.status !== 'booked') throw conflict('This booking cannot be changed now');
-    const [from, to] = await Promise.all([b.session_id, toSessionId].map((id) => one(conn, 'SELECT * FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [t.id, id])));
+    const ids = [Number(cur.session_id), Number(toSessionId)];
+    const got = new Map();
+    for (const id of [...ids].sort((x, y) => x - y)) got.set(id, await one(conn, 'SELECT * FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [t.id, id]));
+    const from = got.get(ids[0]); const to = got.get(ids[1]);
     const pol = await policyNow(conn, t, { ...b, status: cur.status });
     if (!pol.can_change) throw conflict(pol.why || 'This booking cannot be changed now');
     if (!to || to.status !== 'scheduled') throw conflict('That lesson is no longer open');
-    const { n } = await one(conn, "SELECT COUNT(*) AS n FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND status IN ('booked','attended')", [t.id, to.id]);
-    const held = (await heldSpots(conn, t.id)).get(Number(to.id)) || 0;
-    if (to.capacity - Number(n) - held <= 0) throw conflict('That lesson just filled up. Pick another.');
-    const clash = await studentClash(conn, t.id, cur.person_id, to.starts_at, to.ends_at, { ignoreSessionId: from.id });
+    if ((await spotsLeft(conn, t.id, to)).left < 1) throw conflict('That lesson just filled up. Pick another.');
+    const clash = await studentClash(conn, t.id, cur.person_id, to.starts_at, to.ends_at, { ignoreSessionId: from.id, lock: true });
     if (clash) throw conflict(clashWords(clash));
     const old = await one(conn, 'SELECT id, status FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND person_id = ?', [t.id, to.id, cur.person_id]);
     if (old) throw conflict('This student was booked in that lesson before. Please call the ski school to change it.');
-    await conn.query('UPDATE lesson_bookings SET session_id = ?, moved_from_session_id = ?, moved_at = NOW(), checked_in_at = NULL, checked_in_by = NULL, checked_in_via = NULL WHERE tenant_id = ? AND id = ?', [to.id, from.id, t.id, cur.id]);
-    // The sale follows the lesson, so receipts and reports name the new date.
-    await conn.query("UPDATE order_items SET session_id = ?, valid_on = ? WHERE tenant_id = ? AND session_id = ? AND person_id = ? AND line_kind = 'lesson' AND refunded_at IS NULL", [to.id, String(to.starts_at).slice(0, 10), t.id, from.id, cur.person_id]);
+    // The same booking row moves, and the sale follows the lesson, so receipts and reports name the new date.
+    await moveBookingRow(conn, t.id, cur, from.id, to);
     if (cur.request_id) await conn.query('UPDATE lesson_requests SET session_id = ? WHERE tenant_id = ? AND id = ? AND NOT EXISTS (SELECT 1 FROM (SELECT id FROM lesson_bookings WHERE tenant_id = ? AND request_id = ? AND session_id = ? AND id <> ? AND status IN (\'booked\',\'attended\')) x)',
       [to.id, t.id, cur.request_id, t.id, cur.request_id, from.id, cur.id]);
     await audit(conn, system(t.id), 'family_move_lesson', 'lesson_bookings', cur.id, { from: from.id, to: to.id });
@@ -531,7 +557,9 @@ async function cancelBooking(t, b) {
     const r = cur.request_id ? await one(conn, 'SELECT * FROM lesson_requests WHERE tenant_id = ? AND id = ? FOR UPDATE', [t.id, cur.request_id]) : null;
     if (r && r.order_id) {
       const order = await one(conn, 'SELECT id, total_cents, tax_cents, refunded_cents FROM orders WHERE tenant_id = ? AND id = ? FOR UPDATE', [t.id, r.order_id]);
-      const line = await one(conn, "SELECT id, unit_price_cents, quantity, discount_cents, tax_cents FROM order_items WHERE tenant_id = ? AND order_id = ? AND person_id = ? AND line_kind = 'lesson' AND refunded_at IS NULL ORDER BY id LIMIT 1", [t.id, order.id, cur.person_id]);
+      // This student's own lesson line (this lesson's line first, when the order has more than one): the refund is a share
+      // of what was paid for it, never of other children's lines on the same order.
+      const line = await one(conn, "SELECT id, unit_price_cents, quantity, discount_cents, tax_cents FROM order_items WHERE tenant_id = ? AND order_id = ? AND person_id = ? AND line_kind = 'lesson' AND refunded_at IS NULL ORDER BY (session_id = ?) DESC, id LIMIT 1", [t.id, order.id, cur.person_id, cur.session_id]);
       const lineTotal = line ? Number(line.unit_price_cents) * Number(line.quantity) - Number(line.discount_cents) + Number(line.tax_cents) : 0;
       const cents = Math.min(Math.floor((lineTotal * pol.refund_percent) / 100), Number(order.total_cents) - Number(order.refunded_cents));
       if (cents > 0) {

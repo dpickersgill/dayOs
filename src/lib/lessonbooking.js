@@ -13,7 +13,7 @@ const { one } = require('../db');
 const { z, seasonFor } = require('./util');
 const { conflict, notFound } = require('./errors');
 const { audit } = require('./audit');
-const { studentClash, clashWords } = require('./lessonrules');
+const { studentClash, clashWords, lockStudents, spotsLeft } = require('./lessonrules');
 const { recordConsent } = require('./consent');
 const levels = require('./levels');
 
@@ -35,12 +35,20 @@ const safetyShape = {
   level: z.number().int().min(1).max(9).nullable().optional(),
 };
 
+/** Why the last places cannot be sold: who holds them. */
+function heldWords(sp) {
+  if (sp.offers) return `The last ${sp.offers === 1 ? 'spot is' : `${sp.offers} spots are`} held for a family on the waitlist until their offer runs out`;
+  return `The last ${sp.requests === 1 ? 'spot is' : 'spots are'} held for a family booking online. Confirm or decline their request first.`;
+}
+
 /**
  * Books a student. opts: { sessionId, personId, details: { ...safetyShape }, signWaiver, useCreditId, requestedInstructorId }.
  * Returns { bookingId, session }. Throws 409 with words a person can act on.
  */
 async function bookStudent(conn, req, { sessionId, personId, details = {}, signWaiver = false, useCreditId = null, requestedInstructorId = null }) {
   const tenantId = req.auth.tenantId;
+  // The student first, then the lesson (lib/lessonrules.js: the lock order every booking path keeps).
+  await lockStudents(conn, tenantId, [personId]);
   const s = await one(conn, 'SELECT * FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, sessionId]);
   if (!s) throw notFound('Lesson session');
   if (s.status !== 'scheduled') throw conflict(`Session is ${s.status}`, { person_id: personId });
@@ -55,13 +63,13 @@ async function bookStudent(conn, req, { sessionId, personId, details = {}, signW
   const prior = await one(conn, 'SELECT id, status FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND person_id = ?', [tenantId, s.id, personId]);
   const already = prior && ['booked', 'attended'].includes(prior.status);
   if (!already) {
-    const clash = await studentClash(conn, tenantId, personId, s.starts_at, s.ends_at, { ignoreSessionId: s.id });
+    const clash = await studentClash(conn, tenantId, personId, s.starts_at, s.ends_at, { ignoreSessionId: s.id, lock: true });
     if (clash) throw conflict(clashWords(clash), { person_id: personId, clash });
-    const { n } = await one(conn, "SELECT COUNT(*) AS n FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND status IN ('booked','attended')", [tenantId, s.id]);
-    if (Number(n) >= s.capacity) throw conflict('Session is full', { person_id: personId });
-    // a spot offered to the next family on the waitlist is theirs until the offer runs out (lib/lessonwaitlist.js)
-    const { w } = await one(conn, "SELECT COUNT(*) AS w FROM lesson_waitlist WHERE tenant_id = ? AND session_id = ? AND status = 'offered' AND offer_expires_at > UTC_TIMESTAMP()", [tenantId, s.id]);
-    if (Number(n) + Number(w) >= s.capacity) throw conflict(`The last ${Number(w) === 1 ? 'spot is' : `${w} spots are`} held for a family on the waitlist until their offer runs out`, { person_id: personId });
+    const sp = await spotsLeft(conn, tenantId, s);
+    if (sp.booked >= s.capacity) throw conflict('Session is full', { person_id: personId });
+    // a spot offered to the next family on the waitlist is theirs until the offer runs out (lib/lessonwaitlist.js), and a
+    // family booking online that is waiting to be confirmed or paid holds its spots too
+    if (sp.left < 1) throw conflict(heldWords(sp), { person_id: personId });
   }
   let creditId = null;
   if (useCreditId) {
@@ -130,4 +138,4 @@ async function lastDetails(db, tenantId, personId) {
   };
 }
 
-module.exports = { bookStudent, saveDetails, lastDetails, guardianOf, safetyShape, SAFETY, TEXT_WORDS, PHOTO_WORDS };
+module.exports = { heldWords, bookStudent, saveDetails, lastDetails, guardianOf, safetyShape, SAFETY, TEXT_WORDS, PHOTO_WORDS };

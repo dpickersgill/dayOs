@@ -127,10 +127,14 @@ async function teachingStaff(db, tenantId) {
     ORDER BY p.first_name, p.last_name LIMIT 300`, [tenantId]);
 }
 
+/** The gap for an instructor with no teaching profile: not cleared for everything, but a manager may assign anyway. */
+const NOT_SET_UP = 'Not set up: set what they teach';
+
 /** Is this instructor cleared for this lesson? Words for each gap: level, kids, adaptive, the discipline. */
 function clearanceGaps(profile, s) {
   const gaps = [];
-  if (!profile || !profile.has_profile) return gaps; // no profile: no limits on file
+  // No profile on file means nobody has said what they teach yet: never "cleared for everything".
+  if (!profile || !profile.has_profile) return [NOT_SET_UP];
   const disc = s.discipline || 'ski';
   const listed = csvOf(profile.disciplines);
   if (listed.length && !listed.includes(disc)) gaps.push(`Does not teach ${disc}`);
@@ -164,7 +168,7 @@ async function instructorFit(db, tenantId, s, { ignoreLessonId = null, onlyStaff
     // Someone with no instructor login or profile is not listed in the picker, but older screens and imports may still assign them.
     problems.push(...clearanceGaps(m, s));
     const listed = csvOf(m.disciplines);
-    out.push({ id: m.id, name: `${m.first_name} ${m.last_name}`, first_name: m.first_name, problems, ok: problems.length === 0, requested_by: Number((asked.find((a) => a.id === m.id) || {}).n || 0),
+    out.push({ id: m.id, name: `${m.first_name} ${m.last_name}`, first_name: m.first_name, problems, ok: problems.length === 0, not_set_up: problems.includes(NOT_SET_UP), requested_by: Number((asked.find((a) => a.id === m.id) || {}).n || 0),
       teaches: listed.includes(s.discipline || 'ski'), psia_level: m.psia_level || 'none' });
   }
   out.sort((a, b) => Number(b.ok) - Number(a.ok) || b.requested_by - a.requested_by || Number(b.teaches) - Number(a.teaches) || a.problems.length - b.problems.length || a.name.localeCompare(b.name));
@@ -173,4 +177,5 @@ async function instructorFit(db, tenantId, s, { ignoreLessonId = null, onlyStaff
 
 module.exports.teachingStaff = teachingStaff;
 module.exports.clearanceGaps = clearanceGaps;
+module.exports.NOT_SET_UP = NOT_SET_UP;
 module.exports.instructorFit = instructorFit;

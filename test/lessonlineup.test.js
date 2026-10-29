@@ -244,8 +244,10 @@ test('moving a student keeps the booking row, refuses a clash and a full class, 
   // a clash: the student is in another lesson that overlaps the target class
   const clashLesson = await session({ product_id: D.group, starts_at: `${day2}T11:00`, ends_at: `${day2}T13:00`, discipline: 'snowboard' });
   const k = low.students[1];
+  // (booking it through the counter is refused now: it overlaps the class the student is in, so it is put on file directly)
   const r = await api('POST', `/skischool/sessions/${clashLesson}/bookings`, { token: T.counter, body: { person_id: k.person_id } });
-  assert.equal(r.status, 201, r.text);
+  assert.equal(r.status, 409, 'the counter refuses a booking that overlaps the class the student is in');
+  await q("INSERT INTO lesson_bookings (tenant_id, session_id, person_id, status) VALUES (?, ?, ?, 'booked')", [tidA, clashLesson, k.person_id]);
   const clash = await api('POST', `/skischool/bookings/${k.booking_id}/move`, { token: T.manager, body: { session_id: high.id, reason: 'testing a clash' } });
   assert.equal(clash.status, 409);
   assert.match(clash.body.error || clash.text, /Already booked in Kids Group/);

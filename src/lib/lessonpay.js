@@ -56,7 +56,7 @@ async function lines(db, tenantId, { from, to, staffId = null, tipsMode = 'lesso
   const who = staffId ? ' AND s.instructor_id = ?' : ' AND s.instructor_id IS NOT NULL';
   const args = staffId ? [tenantId, from, to, staffId] : [tenantId, from, to];
 
-  const lessons = await rows(db, `SELECT s.id, s.instructor_id, s.starts_at, s.ends_at, s.format, s.discipline, s.status, pr.name AS product,
+  const lessons = await rows(db, `SELECT s.id, s.instructor_id, s.starts_at, s.ends_at, s.format, s.discipline, s.status, s.delay_minutes, pr.name AS product,
       (SELECT COUNT(*) FROM lesson_bookings b WHERE b.tenant_id = s.tenant_id AND b.session_id = s.id AND b.status <> 'cancelled') AS students,
       (SELECT COUNT(*) FROM lesson_bookings b WHERE b.tenant_id = s.tenant_id AND b.session_id = s.id AND b.status <> 'cancelled' AND b.requested_instructor_id = s.instructor_id) AS requested
     FROM lesson_sessions s JOIN products pr ON pr.tenant_id = s.tenant_id AND pr.id = s.product_id
@@ -120,14 +120,17 @@ async function lines(db, tenantId, { from, to, staffId = null, tipsMode = 'lesso
     const seen = new Set();
     for (const l of lessons) {
       if (l.format !== 'group' || !Number(l.students)) continue;
-      const k = `${l.instructor_id}|${l.starts_at}`;
+      // Keyed by the lineup's first start time: a weather delay moves starts_at (and notes delay_minutes), and must not
+      // make a second lineup line for the same lineup, in this export or a later one.
+      const first = minusMinutes(l.starts_at, Number(l.delay_minutes || 0));
+      const k = `${l.instructor_id}|${first}`;
       if (seen.has(k)) continue;
       seen.add(k);
       const day = l.starts_at.slice(0, 10);
       if (hourlyOn && isClocked(l.instructor_id, day)) continue; // the time card already has it
       const hr = rateFrom(rates, l.instructor_id, 'hourly', day);
       const cents = hr === null ? 0 : prorate(hr, settings.lineup_minutes);
-      out.push({ key: `lineup:${l.starts_at.replace(' ', 'T').slice(0, 16)}`, staff_id: l.instructor_id, kind: 'lineup', day, starts_at: l.starts_at, ends_at: l.starts_at, title: `Lineup, ${settings.lineup_minutes} minutes`, session_id: l.id, minutes: settings.lineup_minutes, cents,
+      out.push({ key: `lineup:${first.replace(' ', 'T').slice(0, 16)}`, staff_id: l.instructor_id, kind: 'lineup', day, starts_at: l.starts_at, ends_at: l.starts_at, done_at: l.ends_at, title: `Lineup, ${settings.lineup_minutes} minutes`, session_id: l.id, minutes: settings.lineup_minutes, cents,
         parts: cents ? [{ label: 'lineup', cents }] : [], words: cents ? `lineup ${amount(cents)}` : '', note: hr === null ? 'No hourly rate is set, so lineup time pays nothing.' : null });
     }
   }
@@ -177,6 +180,23 @@ async function lines(db, tenantId, { from, to, staffId = null, tipsMode = 'lesso
   return { settings, lines: out };
 }
 
+/** 'YYYY-MM-DD HH:MM:SS' minus minutes, as wall-clock arithmetic. */
+function minusMinutes(dt, minutes) {
+  const d = new Date(`${String(dt).replace(' ', 'T').slice(0, 19)}Z`);
+  d.setUTCMinutes(d.getUTCMinutes() - minutes);
+  return d.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+/**
+ * Has the work on this line happened, so it can be paid? A lesson, lineup or program meeting once its lesson has ended
+ * (mountain time); a time card once its day is over; a tip once it is paid (tips come only after a lesson).
+ */
+function lineDone(l, nowLocal) {
+  if (l.tip) return true;
+  if (l.kind === 'clock') return l.day < String(nowLocal).slice(0, 10);
+  return String(l.done_at || l.ends_at) <= String(nowLocal);
+}
+
 /** Lines grouped by instructor with totals: pay (not tips) and tips. */
 function byInstructor(list) {
   const map = new Map();
@@ -212,4 +232,4 @@ function forMyDay(list) {
   return out;
 }
 
-module.exports = { KINDS, KIND_WORDS, lines, byInstructor, forMyDay, rateFrom, wordsOf, amount };
+module.exports = { KINDS, KIND_WORDS, lines, byInstructor, forMyDay, rateFrom, wordsOf, amount, lineDone, minusMinutes };

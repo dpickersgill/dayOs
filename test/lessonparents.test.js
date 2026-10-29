@@ -243,11 +243,19 @@ test('the family lesson page works only with its link, and shows safety details 
   const soon = await lesson(1, {});
   const s2 = await personAndBooking(soon, 'Ola');
   assert.equal((await pub('GET', `/lesson/${s2.token}`)).body.checkin_open, true);
-  // a delay shows the new start
-  await pool.query('UPDATE lesson_sessions SET delay_minutes = 30 WHERE id = ?', [soon]);
+  const F = require('../src/lib/lessonfamily');
+  // a delay shows the new start: a weather delay moves starts_at and ends_at and notes delay_minutes, and the page never
+  // adds the delay a second time (the start, the check-in window and "ended" all use the moved times)
+  const [[before]] = await pool.query('SELECT starts_at, ends_at FROM lesson_sessions WHERE id = ?', [soon]);
+  await pool.query('UPDATE lesson_sessions SET starts_at = DATE_ADD(starts_at, INTERVAL 30 MINUTE), ends_at = DATE_ADD(ends_at, INTERVAL 30 MINUTE), delay_minutes = 30 WHERE id = ?', [soon]);
+  const [[after]] = await pool.query('SELECT starts_at, ends_at FROM lesson_sessions WHERE id = ?', [soon]);
   const d = (await pub('GET', `/lesson/${s2.token}`)).body;
   assert.equal(d.lesson.delay_minutes, 30);
-  assert.ok(d.lesson.new_start > d.lesson.starts_at);
+  assert.equal(d.lesson.starts_at, after.starts_at);
+  assert.equal(d.lesson.new_start, after.starts_at, 'the new start is the moved start, not 30 more minutes');
+  assert.equal(d.lesson.was_start, before.starts_at);
+  assert.equal(F.checkinOpen({ ...d.lesson, status: 'booked', session_status: 'scheduled', starts_at: after.starts_at, ends_at: after.ends_at, delay_minutes: 30 }, F.plusMinutes(after.ends_at, 10)), false, 'check-in closes at the moved end, not 30 minutes after it');
+  assert.equal(F.checkinOpen({ status: 'booked', session_status: 'scheduled', starts_at: after.starts_at, ends_at: after.ends_at, delay_minutes: 30 }, F.plusMinutes(after.ends_at, -10)), true);
 });
 
 test('changing the date keeps the same booking row and refuses a clash', async () => {

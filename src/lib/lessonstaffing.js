@@ -25,7 +25,7 @@ const POWDER_IN = 6;
 
 /** Active staff who teach: an instructor profile, or a sign-in with the instructor role. */
 async function instructors(db, tenantId) {
-  return rows(db, `SELECT s.id, p.first_name, p.last_name, p.phone, p.email, ip.disciplines, ip.ski_level_max, ip.snowboard_level_max, ip.teaches_kids, ip.teaches_adaptive
+  return rows(db, `SELECT s.id, p.first_name, p.last_name, p.phone, p.email, ip.disciplines, ip.ski_level_max, ip.snowboard_level_max, ip.teaches_kids, ip.teaches_adaptive, (ip.staff_id IS NOT NULL) AS has_profile
     FROM staff s JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id
     LEFT JOIN instructor_profiles ip ON ip.tenant_id = s.tenant_id AND ip.staff_id = s.id
     WHERE s.tenant_id = ? AND s.status = 'active' AND (ip.staff_id IS NOT NULL OR EXISTS (SELECT 1 FROM users u WHERE u.tenant_id = s.tenant_id AND u.staff_id = s.id AND u.role = 'instructor'))
@@ -34,6 +34,7 @@ async function instructors(db, tenantId) {
 
 /** Can this instructor take this kind of lesson (discipline, level, kids)? Their calendar is checked separately. */
 function suits(i, { discipline, level_max: levelMax, kids }) {
+  if (i.has_profile !== undefined && !Number(i.has_profile)) return false; // no teaching profile yet: not cleared for anything
   const taught = String(i.disciplines || '').split(',').map((x) => x.trim()).filter(Boolean);
   if (taught.length && !taught.includes(discipline)) return false;
   if (discipline === 'adaptive' && i.teaches_adaptive === 0) return false;

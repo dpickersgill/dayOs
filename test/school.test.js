@@ -56,6 +56,8 @@ test.before(async () => {
   const st2 = await api('POST', '/workforce/staff', { token: A.owner, body: { person: { first_name: 'Max', last_name: 'Other' }, status: 'active' } });
   D.max = st2.body.id;
   await addUser(A, `max@${A.slug}.test`, 'instructor', { staff_id: D.max }); // round 2: the picker lists only staff who teach
+  // what each teaches (with no teaching profile, the picker says "Not set up" instead of clearing them for everything)
+  for (const id of [D.ivy, D.max]) assert.equal((await api('PUT', `/skischool/instructors/${id}/profile`, { token: A.owner, body: { disciplines: ['ski', 'snowboard'], ski_level_max: 9, snowboard_level_max: 9, teaches_kids: true, teaches_adaptive: false, psia_level: 'level1' } })).status, 200);
   const prod = async (body) => (await api('POST', '/products', { token: A.owner, body })).body.id;
   D.group = await prod({ kind: 'lesson', name: 'Group Lesson', base_price_cents: 8000 });
   D.private = await prod({ kind: 'lesson', name: 'Private Lesson', base_price_cents: 20000 });

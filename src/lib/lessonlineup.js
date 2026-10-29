@@ -9,7 +9,7 @@ const { ON_FILE } = require('./waivers');
 const { staffProblems } = require('./workforce');
 const L = require('./levels');
 const S = require('./schoolsettings');
-const { studentClash, clashWords } = require('./lessonrules');
+const { studentClash, clashWords, lockStudents, spotsLeft, moveBookingRow } = require('./lessonrules');
 const familynotify = require('./familynotify');
 const mailer = require('./mailer');
 const { audit } = require('./audit');
@@ -189,6 +189,7 @@ async function teachers(db, tenantId) {
 
 /** Why a teacher cannot take this class, in plain words, or null. Uses CORE's rules: staffProblems and the level clearance. */
 async function teacherProblem(db, tenantId, t, { discipline, levelMax, kids, startsAt, endsAt, ignoreLessonId = null, certIds = [] }) {
+  if (!Number(t.has_profile)) return 'Not set up: set what they teach'; // no teaching profile: never cleared for everything
   if (!L.instructorCovers(t, discipline, levelMax)) return `Not cleared to teach Level ${levelMax}`;
   if (kids && !Number(t.teaches_kids)) return 'Does not teach kids';
   if (discipline === 'adaptive' && !Number(t.teaches_adaptive)) return 'Does not teach adaptive';
@@ -284,6 +285,9 @@ async function instructorFirst(db, tenantId, staffId) {
  */
 async function moveBooking(conn, req, bookingId, toSessionId, { reason = null, isManager = false, quiet = false, skipCapacity = false } = {}) {
   const { tenantId } = req.auth;
+  // The student first, then the booking and the lesson (lib/lessonrules.js: the lock order every booking path keeps).
+  const who = await one(conn, 'SELECT person_id FROM lesson_bookings WHERE tenant_id = ? AND id = ?', [tenantId, bookingId]);
+  if (who) await lockStudents(conn, tenantId, [who.person_id]);
   const b = await one(conn, 'SELECT * FROM lesson_bookings WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, bookingId]);
   if (!b) throw notFound('Booking');
   if (!['booked', 'attended'].includes(b.status)) throw conflict('Only a student who is booked can be moved');
@@ -293,9 +297,10 @@ async function moveBooking(conn, req, bookingId, toSessionId, { reason = null, i
   if (!to) throw notFound('Lesson');
   if (to.status !== 'scheduled') throw conflict(`That class is ${to.status === 'cancelled' ? 'canceled' : to.status}`);
   if (String(to.starts_at).slice(0, 10) !== String(from.starts_at).slice(0, 10)) throw bad('Move a student to a class on the same day. To change the day, use the family page or cancel and book again.');
-  const clash = await studentClash(conn, tenantId, b.person_id, to.starts_at, to.ends_at, { ignoreSessionId: from.id });
+  const clash = await studentClash(conn, tenantId, b.person_id, to.starts_at, to.ends_at, { ignoreSessionId: from.id, lock: true });
   if (clash) throw conflict(clashWords(clash));
-  const { n } = await one(conn, "SELECT COUNT(*) AS n FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND status IN ('booked','attended')", [tenantId, to.id]);
+  // On the day, at the lineup: only the students in the class count (lib/lessonrules.spotsLeft, under the lesson lock).
+  const { booked: n } = await spotsLeft(conn, tenantId, to, { holds: false });
   let over = false;
   if (!skipCapacity && Number(n) >= to.capacity) {
     if (!isManager) throw conflict('That class is full. A manager can add one more with a reason.', { full: true });
@@ -308,8 +313,8 @@ async function moveBooking(conn, req, bookingId, toSessionId, { reason = null, i
   const old = await one(conn, 'SELECT id, status FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND person_id = ?', [tenantId, to.id, b.person_id]);
   if (old && ['booked', 'attended'].includes(old.status)) throw conflict('That student is already in that class');
   if (old) await conn.query('DELETE FROM lesson_bookings WHERE tenant_id = ? AND id = ?', [tenantId, old.id]);
-  await conn.query('UPDATE lesson_bookings SET session_id = ?, moved_from_session_id = ?, moved_at = UTC_TIMESTAMP() WHERE tenant_id = ? AND id = ?', [to.id, from.id, tenantId, b.id]);
-  await conn.query('UPDATE order_items SET session_id = ? WHERE tenant_id = ? AND session_id = ? AND person_id = ? AND refunded_at IS NULL', [to.id, tenantId, from.id, b.person_id]);
+  // The same booking row moves and its sale line follows (a check-in at the lineup stays: same day, same student).
+  await moveBookingRow(conn, tenantId, b, from.id, to, { utc: true, resetCheckin: false });
   await audit(conn, req, 'move_student', 'lesson_bookings', b.id, { from_session_id: from.id, to_session_id: to.id, ...(over ? { over_by_one: true, reason } : {}) });
   return { booking: b, from, to, over, quiet };
 }

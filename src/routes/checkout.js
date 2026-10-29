@@ -28,7 +28,8 @@ const PPS = require('../lib/partnerpasses');
 const ACT = require('../lib/activities');
 const GT = require('../lib/guesttypes');
 const LS = require('../lib/lessonsale');
-const { studentClash, clashWords } = require('../lib/lessonrules');
+const { studentClash, clashWords, spotsLeft } = require('../lib/lessonrules');
+const { heldWords } = require('../lib/lessonbooking');
 
 const checkout = express.Router();
 const giftCards = express.Router();
@@ -124,10 +125,8 @@ async function withSessions(tenantId, programs, today) {
 }
 
 // ---------------------------------------------------------------- pricing and availability
-async function spotsLeft(conn, tenantId, sessionId, capacity) {
-  const { n } = await one(conn, "SELECT COUNT(*) AS n FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND status IN ('booked','attended')", [tenantId, sessionId]);
-  return Math.max(capacity - n, 0);
-}
+// Places left in a lesson: lib/lessonrules.spotsLeft (bookings, waitlist offers still standing and online requests
+// still waiting all count), the same count every way of booking uses.
 
 /**
  * Prices every line from the catalog and checks it can be sold. Returns one entry per line:
@@ -165,7 +164,8 @@ async function priceLines(conn, tenantId, lines, today) {
       const { product, cents } = await unitPrice(conn, tenantId, session.product_id, ln.tier, day);
       // Spots held for an online request (unpaid) count as open here: the student paying for one takes it over. The exact check happens when booking.
       const held = await one(conn, "SELECT COUNT(*) AS n FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND status = 'booked' AND unpaid = 1", [tenantId, session.id]);
-      if ((await spotsLeft(conn, tenantId, session.id, session.capacity)) + Number(held.n) < 1) throw conflict(`${product.name} on ${day} is full`);
+      const sp = await spotsLeft(conn, tenantId, session);
+      if (sp.left + Number(held.n) < 1) throw conflict(sp.booked < session.capacity ? `${product.name} on ${day}: ${heldWords(sp)}` : `${product.name} on ${day} is full`);
       out.push({ i, line: ln, type: 'lesson', name: product.name, detail: `${session.starts_at.slice(0, 16).replace('T', ' ')}, ${session.discipline}`, quantity: 1, unit: cents, product, session, day });
     } else if (ln.type === 'lesson_package') {
       const { product, cents } = await unitPrice(conn, tenantId, ln.product_id, ln.tier, today);
@@ -484,9 +484,13 @@ async function runSale(conn, req, body, { check = false } = {}) {
       const existing = await one(conn, 'SELECT id, status, unpaid FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND person_id = ?', [tenantId, s.id, student]);
       const adopting = Boolean(existing && existing.status === 'booked' && existing.unpaid); // their spot is already held
       if (!adopting && existing && ['booked', 'attended'].includes(existing.status)) throw conflict('That student is already booked into this lesson');
-      if (!adopting && (await spotsLeft(conn, tenantId, s.id, s.capacity)) < 1) throw conflict(`${p.name} on ${p.day} is full`);
-      // not already in another lesson or a program meeting at that time (lib/lessonrules.js)
-      const clash = await studentClash(conn, tenantId, student, s.starts_at, s.ends_at, { ignoreSessionId: s.id });
+      if (!adopting) {
+        const sp = await spotsLeft(conn, tenantId, s);
+        if (sp.left < 1) throw conflict(sp.booked < s.capacity ? `${p.name} on ${p.day}: ${heldWords(sp)}` : `${p.name} on ${p.day} is full`);
+      }
+      // not already in another lesson or a program meeting at that time (lib/lessonrules.js; the student's people row
+      // was locked when the sale found them, before the lesson row, and lock: true reads the latest bookings)
+      const clash = await studentClash(conn, tenantId, student, s.starts_at, s.ends_at, { ignoreSessionId: s.id, lock: true });
       if (clash) throw conflict(`${(personRows.get(student) || {}).first_name || 'The student'}: ${clashWords(clash)}`);
       return { s, existing, adopting };
     };

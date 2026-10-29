@@ -10,7 +10,7 @@ const { personFields, resolvePerson } = require('../lib/customers');
 const LV = require('../lib/levels');
 const { bookStudent, saveDetails, lastDetails, safetyShape } = require('../lib/lessonbooking');
 const { sendConfirmation } = require('../lib/lessonconfirm');
-const { instructorFit } = require('../lib/school');
+const { instructorFit, NOT_SET_UP } = require('../lib/school');
 const { baseUrl } = require('../lib/baseurl');
 
 const router = express.Router();
@@ -93,8 +93,11 @@ async function lessonProduct(conn, tenantId, productId) {
 async function checkInstructor(conn, req, s, staffId, overrideReason) {
   const [fit] = await instructorFit(conn, req.auth.tenantId, s, { onlyStaffId: staffId, ignoreLessonId: s.id || null });
   if (!fit) throw notFound('Instructor');
-  if (fit.problems.length && !overrideReason) throw conflict(`Cannot assign ${fit.name} on ${String(s.starts_at).slice(0, 10)}`, fit.problems);
-  if (fit.problems.length) await audit(conn, req, 'assign_anyway', 'lesson_sessions', s.id || null, { staff_id: staffId, problems: fit.problems, reason: overrideReason });
+  // "Not set up" (no teaching profile yet) is a soft problem: the picker shows it and asks for Assign anyway, and a
+  // manager assigning without a reason is still recorded as assigning anyway. Every other problem needs the reason.
+  const hard = fit.problems.filter((p) => p !== NOT_SET_UP);
+  if (hard.length && !overrideReason) throw conflict(`Cannot assign ${fit.name} on ${String(s.starts_at).slice(0, 10)}`, fit.problems);
+  if (fit.problems.length) await audit(conn, req, 'assign_anyway', 'lesson_sessions', s.id || null, { staff_id: staffId, problems: fit.problems, reason: overrideReason || 'No teaching profile yet' });
   return fit;
 }
 

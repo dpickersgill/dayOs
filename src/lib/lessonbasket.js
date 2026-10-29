@@ -12,6 +12,7 @@ const { quoteFor } = require('./onlinesale');
 const { ageOn } = require('./guesttypes');
 const L = require('./levels');
 const F = require('./lessonfamily');
+const { spotsLeft } = require('./lessonrules');
 const stripe = require('./stripe');
 const connect = require('./connect');
 
@@ -66,10 +67,13 @@ async function create(t, b, { base, slug, waitlistId = null } = {}) {
       if (s.starts_at < earliest) throw conflict(`Online booking closes ${t.booking_notice_hours} hours before the lesson. Please call the ski school.`);
       sessions.set(id, s);
     }
-    const held = await F.heldSpots(conn, t.id);
+    // A waitlist claim: the offer is locked and must still be open; it is marked claimed in this same transaction, so a
+    // second tap (or a second tab) finds it claimed. Only then does its held spot count for this family.
     if (waitlistId) {
-      const w = await one(conn, 'SELECT session_id FROM lesson_waitlist WHERE tenant_id = ? AND id = ?', [t.id, waitlistId]);
-      if (w) held.set(Number(w.session_id), Math.max((held.get(Number(w.session_id)) || 0) - 1, 0));
+      const w = await one(conn, 'SELECT id, session_id, status, (offer_expires_at > UTC_TIMESTAMP()) AS live FROM lesson_waitlist WHERE tenant_id = ? AND id = ? FOR UPDATE', [t.id, waitlistId]);
+      if (!w || w.status !== 'offered' || !Number(w.live)) throw conflict(w && w.status === 'claimed' ? 'This spot is already claimed.' : 'This offer has run out. The spot went to the next family on the waitlist.');
+      if (!sessions.has(Number(w.session_id)) || b.items.some((it) => Number(it.session_id) !== Number(w.session_id))) throw conflict('This offer is for one lesson only.');
+      await conn.query("UPDATE lesson_waitlist SET status = 'claimed' WHERE tenant_id = ? AND id = ?", [t.id, waitlistId]);
     }
     const { total } = await one(conn, "SELECT COUNT(*) AS total FROM lesson_requests WHERE tenant_id = ? AND status IN ('pending','awaiting_payment')", [t.id]);
     if (Number(total) >= MAX_PENDING_TOTAL) throw conflict('The ski school has a lot of bookings waiting right now. Please call to book.');
@@ -90,8 +94,7 @@ async function create(t, b, { base, slug, waitlistId = null } = {}) {
     }
     for (const [id, n] of want) {
       const s = sessions.get(id);
-      const { booked } = await one(conn, "SELECT COUNT(*) AS booked FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND status IN ('booked','attended')", [t.id, id]);
-      const left = s.capacity - Number(booked) - (held.get(Number(id)) || 0);
+      const { left } = await spotsLeft(conn, t.id, s, { exceptWaitlistId: waitlistId || 0 });
       if (left < n) throw conflict(left > 0 ? `Only ${left} spot${left === 1 ? '' : 's'} left in the ${String(s.starts_at).slice(11, 16)} lesson` : 'That lesson just filled up. You can join its waitlist.');
     }
     // An adult books for anyone under 18.

@@ -155,7 +155,9 @@ async function requestsFor(db, tenantId, staffId) {
   const out = [];
   for (const r of list) {
     const st = PR.parseStudents(r);
-    if (!r.staff_id && (PR.ids(r.declined_ids).includes(staffId) || (prof && !PR.teaches(prof, r.discipline, Math.max(...st.map((s) => Number(s.level) || 1)))))) continue;
+    // A request open to any instructor shows only to those cleared for it: the discipline, the level, and children when
+    // there are any (an instructor with no teaching profile is not cleared yet).
+    if (!r.staff_id && (PR.ids(r.declined_ids).includes(staffId) || !PR.teaches(prof, r.discipline, Math.max(...st.map((s) => Number(s.level) || 1)), { kids: PR.kidsIn(r) }))) continue;
     out.push({ ...shapeRequest(r), pay: await requestPay(db, tenantId, staffId, r, settings) });
   }
   return out;
@@ -246,11 +248,12 @@ router.get('/pay/requests', school, async (req, res) => {
 
 router.post('/pay/requests/:id/accept', requireRole('instructor', 'manager'), async (req, res) => {
   if (!req.auth.staffId) throw bad('Your login is not linked to a staff record yet. Ask a manager to link it.');
-  const r = await one(pool, 'SELECT id, staff_id, any_instructor, discipline, students, declined_ids FROM private_requests WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, paramId(req)]);
+  const r = await one(pool, 'SELECT id, staff_id, any_instructor, discipline, starts_at, students, declined_ids FROM private_requests WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, paramId(req)]);
   if (!r) throw notFound('Private request');
   if (!r.staff_id) {
     const prof = await one(pool, 'SELECT disciplines, ski_level_max, snowboard_level_max, teaches_kids, teaches_adaptive FROM instructor_profiles WHERE tenant_id = ? AND staff_id = ?', [req.auth.tenantId, req.auth.staffId]);
-    if (prof && !PR.teaches(prof, r.discipline, Math.max(...PR.parseStudents(r).map((s) => Number(s.level) || 1)))) throw conflict('You are not cleared for this lesson. Ask the ski school director.');
+    if (!prof) throw conflict('Your teaching profile is not set up yet. Ask the ski school director to set what you teach.');
+    if (!PR.teaches(prof, r.discipline, Math.max(...PR.parseStudents(r).map((s) => Number(s.level) || 1)), { kids: PR.kidsIn(r) })) throw conflict('You are not cleared for this lesson. Ask the ski school director.');
   }
   res.json(await PR.accept(req, r.id, req.auth.staffId));
 });
@@ -320,7 +323,8 @@ router.post('/pay/guests/:id/book', manager, validate(z.object({ staff_id: z.num
   const t = req.auth.tenantId; const personId = paramId(req); const b = req.body;
   const startsAt = `${b.starts_at.slice(0, 10)} ${b.starts_at.slice(11, 16)}:00`;
   const out = await tx(async (conn) => {
-    const person = await one(conn, 'SELECT id, first_name, ski_level, snowboard_level FROM people WHERE tenant_id = ? AND id = ?', [t, personId]);
+    // The student's row is locked first (lib/lessonrules.js), so two bookings of one guest wait for each other.
+    const person = await one(conn, 'SELECT id, first_name, ski_level, snowboard_level FROM people WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, personId]);
     if (!person) throw notFound('Guest');
     const offer = await one(conn, 'SELECT * FROM private_offers WHERE tenant_id = ? AND id = ?', [t, b.offer_id]);
     if (!offer) throw notFound('Private lesson length');
@@ -331,7 +335,7 @@ router.post('/pay/guests/:id/book', manager, validate(z.object({ staff_id: z.num
     const endsAt = PR.plusMinutes(startsAt, offer.minutes);
     const problems = await staffProblems(conn, t, { staffId: b.staff_id, startsAt, endsAt });
     if (problems.length) throw conflict('That instructor cannot take this lesson', problems);
-    const c = await studentClash(conn, t, personId, startsAt, endsAt);
+    const c = await studentClash(conn, t, personId, startsAt, endsAt, { lock: true });
     if (c) throw conflict(`${person.first_name}: ${clashWords(c)}`);
     const season = seasonFor(startsAt.slice(0, 10));
     let waiver = await one(conn, ON_FILE, [t, personId, season]);
@@ -371,7 +375,12 @@ function period(req, src) {
 
 /** Every instructor's lines for the period, with what is approved and what an earlier export already paid. */
 async function payroll(db, t, from, to) {
-  const { lines, settings } = await P.lines(db, t, { from, to, tipsMode: 'unpaid' });
+  const { lines: all, settings } = await P.lines(db, t, { from, to, tipsMode: 'unpaid' });
+  // Only work that has happened is paid: a lesson that has not ended yet (or a time card for today) waits for a later
+  // export of this period. Canceled lessons have no line.
+  const nowLocal = nowIn((await one(db, 'SELECT timezone FROM tenants WHERE id = ?', [t])).timezone);
+  const lines = all.filter((l) => P.lineDone(l, nowLocal));
+  const later = all.length - lines.length;
   const run = await runFor(db, t, from, to);
   const exported = await rows(db, 'SELECT staff_id, line_key, run_id FROM payroll_items WHERE tenant_id = ?', [t]);
   const done = new Map(exported.map((e) => [`${e.staff_id}|${e.line_key}`, e.run_id]));
@@ -386,7 +395,7 @@ async function payroll(db, t, from, to) {
     const a = approvals.find((x) => x.staff_id === g.staff_id);
     return { ...g, name: names.get(g.staff_id) || `Staff ${g.staff_id}`, approved: Boolean(a), approved_cents: a ? a.cents : null, changed: Boolean(a && a.cents !== g.pay_cents + g.tips_cents) };
   }).sort((a, b) => a.name.localeCompare(b.name));
-  return { from, to, pay_mode: settings.pay_mode, run: run ? { id: run.id, status: run.status, exported_at: run.exported_at } : null, instructors: people, earlier: already.length };
+  return { from, to, pay_mode: settings.pay_mode, run: run ? { id: run.id, status: run.status, exported_at: run.exported_at } : null, instructors: people, earlier: already.length, later };
 }
 
 router.get('/pay/payroll', manager, async (req, res) => {
@@ -471,7 +480,8 @@ router.post('/pay/payroll/export', manager, validate(z.object({ from: dateStr, t
       }
     }
     if (tips.length) await conn.query("UPDATE lesson_tips SET paid_out_at = UTC_TIMESTAMP() WHERE tenant_id = ? AND id IN (?) AND status = 'paid' AND paid_out_at IS NULL", [t, tips]);
-    const all = now.instructors.every((g) => ok.has(g.staff_id));
+    // The period closes only when everyone is approved and no lesson in it is still to come.
+    const all = now.instructors.every((g) => ok.has(g.staff_id)) && !now.later;
     await conn.query(`UPDATE payroll_runs SET exported_by = ?, exported_at = UTC_TIMESTAMP()${all ? ", status = 'exported'" : ''} WHERE tenant_id = ? AND id = ?`, [req.auth.userId, t, run.id]);
     await audit(conn, req, 'payroll_export', 'payroll_runs', run.id, { lines: n, tips: tips.length, instructors: ok.size });
     return { run_id: run.id, lines: n, tips: tips.length };
@@ -649,7 +659,7 @@ publicRouter.post('/:slug/private', publicLimit, validate(requestSchema), async 
 async function familyView(t, r) {
   const st = PR.parseStudents(r);
   const ins = r.staff_id ? await PR.publicInstructor(pool, t.id, r.staff_id) || await one(pool, 'SELECT p.first_name, p.last_name, NULL AS display_name FROM staff s JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE s.tenant_id = ? AND s.id = ?', [t.id, r.staff_id]) : null;
-  const others = r.status === 'offered' ? await PR.freeInstructors(pool, t.id, { discipline: r.discipline, levelMax: Math.max(...st.map((x) => Number(x.level) || 1)), startsAt: r.starts_at, minutes: r.minutes, exclude: PR.ids(r.declined_ids) }) : [];
+  const others = r.status === 'offered' ? await PR.freeInstructors(pool, t.id, { discipline: r.discipline, levelMax: Math.max(...st.map((x) => Number(x.level) || 1)), kids: PR.kidsIn(r), startsAt: r.starts_at, minutes: r.minutes, exclude: PR.ids(r.declined_ids) }) : [];
   return { mountain: t.name, phone: t.phone, timezone: t.timezone, reference: r.reference, status: r.status, starts_at: r.starts_at, minutes: r.minutes, discipline: r.discipline,
     instructor: ins ? PR.shortName(ins) : null, any_instructor: !r.staff_id, students: st.map((s) => ({ first_name: s.first_name, level: s.level })),
     amount_cents: r.amount_cents, refund_cents: r.refund_cents, pay_at_desk: Boolean(r.pay_at_desk), deadline_at: r.deadline_at ? `${String(r.deadline_at).replace(' ', 'T')}Z` : null,
