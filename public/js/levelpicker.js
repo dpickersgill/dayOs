@@ -52,7 +52,7 @@ export function quizPanel({ discipline = 'ski', who = '', lang = 'en', onDone, o
     box.append(h('p', { class: 'quiz-step' }, `${T('Question')} ${i + 1} ${T('of')} ${qs.length}`),
       h('h3', { class: 'quiz-q', id: `quiz-q-${i}`, tabindex: '-1' }, who ? title : T(q.q)), h('p', { class: 'muted small' }, T(q.help)),
       h('div', { class: 'quiz-options', role: 'group', 'aria-labelledby': `quiz-q-${i}` }, q.options.map((o, k) => h('button', { type: 'button', class: 'quiz-opt', onclick: () => { answers.push(k); draw(); } }, T(o.a)))),
-      i > 0 ? h('button', { type: 'button', class: 'btn link', onclick: () => { answers.pop(); draw(); } }, `← ${T('Back')}`) : null, live);
+      i > 0 ? h('button', { type: 'button', class: 'btn link', onclick: () => { answers.pop(); draw(); } }, `← ${T('Back')}`) : '', live); // box.append (the DOM's) would print a null
     live.textContent = '';
     if (answers.length) box.querySelector('.quiz-q').focus?.({ preventScroll: true });
   }
