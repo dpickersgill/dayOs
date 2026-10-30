@@ -97,7 +97,9 @@ publicRouter.get('/:slug/account', async (req, res) => {
   }
   const last = await lastOrder(t.id, email, hh);
   await audit(pool, system(t.id), 'account_view', 'people', null, { email });
-  res.json({ mountain: t.name, phone: t.phone, email, today, members, tickets, rewards, receipts, recaps, renew, rebuy: last ? { people: last.people.map((p) => p.first_name), products: [...new Set(last.lines.map((l) => l.name))] } : null,
+  const meRow = hh.primary ? await one(pool, 'SELECT first_name, last_name, phone FROM people WHERE tenant_id = ? AND id = ?', [t.id, hh.primary]) : null;
+  const day = await rows(pool, "SELECT id, name, base_price_cents FROM products WHERE tenant_id = ? AND active = 1 AND online = 1 AND kind = 'rental' ORDER BY id LIMIT 1", [t.id]);
+  res.json({ mountain: t.name, phone: t.phone, email, today, me: meRow, rental_offered: day.length > 0, lessons_link: `/book/${t.slug}`, members, tickets, rewards, receipts, recaps, renew, rebuy: last ? { people: last.people.map((p) => p.first_name), products: [...new Set(last.lines.map((l) => l.name))] } : null,
     autorenew: Boolean(settings.autorenew_on), shop: Boolean(t.online_shop), waiver_link: t.waiver_text ? `/waiver/${t.slug}` : null });
 });
 

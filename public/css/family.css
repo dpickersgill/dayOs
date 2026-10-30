@@ -22,3 +22,40 @@
 .btn.small { min-height: 40px; padding: 0 14px; font-size: 0.9375rem; }
 .visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .fam-lessons { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
+
+/* ---- The household account (Guests round 2, Track ACCOUNT): buy for a day, passes and tickets, rewards, the family. */
+.hh-section { margin: 8px 0 0; }
+.hh-buy h3 { margin: 4px 0 0; font-size: 1rem; }
+.hh-days { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.hh-days input[type='date'] { width: auto !important; min-height: 44px; }
+#fam .chip, dialog .chip { font: inherit; min-height: 44px; padding: 4px 16px; border: 1.5px solid var(--line-strong); border-radius: 999px; background: #fff; color: var(--ink); cursor: pointer; }
+#fam .chip.small { min-height: 36px; padding: 2px 12px; font-size: 0.9375rem; }
+#fam .chip.on { background: var(--blue); color: #fff; border-color: var(--blue); }
+#fam .chip:disabled { opacity: 0.45; cursor: default; }
+.hh-who { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.hh-person { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px; border: 1.5px solid var(--line); border-radius: var(--r-sm); }
+.hh-person.on { border-color: var(--blue); background: var(--blue-tint); }
+.hh-name { flex: 1 1 140px; display: flex; align-items: center; gap: 10px; min-height: 48px; font: inherit; font-weight: 700; font-size: 1.0625rem; text-align: left; background: transparent; border: 0; color: var(--ink); cursor: pointer; padding: 0 6px; }
+.hh-tick { width: 26px; height: 26px; border-radius: 6px; border: 2px solid var(--line-strong); display: inline-grid; place-items: center; background: #fff; color: var(--blue); font-weight: 700; }
+.hh-person.on .hh-tick { border-color: var(--blue); }
+.hh-total { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; justify-content: space-between; padding: 10px 12px; background: var(--snow); border-radius: var(--r-sm); }
+.hh-total b { font-size: 1.25rem; }
+#fam .check-row { display: flex; gap: 10px; align-items: flex-start; }
+#fam .check-row input { margin-top: 3px; width: 22px; height: 22px; min-height: 0; flex: none; accent-color: var(--blue); }
+#fam .pass-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+#fam .pass-card { display: grid; gap: 6px; justify-items: center; text-align: center; padding: 16px; border: 2px solid var(--ink); border-radius: var(--r); background: #fff; }
+#fam .pass-card .who { font-weight: 700; font-size: 1.125rem; }
+#fam .pass-card .code { font-family: ui-monospace, monospace; letter-spacing: 0.08em; }
+#fam .pass-card svg.barcode { max-width: 100%; height: auto; }
+.pass-photo { width: 96px; height: 120px; object-fit: cover; border-radius: var(--r-sm); border: 1.5px solid var(--line); }
+.hh-reward { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 4px; justify-items: start; }
+.hh-reward:first-of-type { border-top: 0; padding-top: 0; }
+.hh-members, .hh-receipts { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.hh-member { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; border-top: 1px solid var(--line); padding-top: 10px; }
+.hh-member:first-child { border-top: 0; padding-top: 0; }
+.hh-member b { margin-right: 8px; }
+.hh-member p { margin: 4px 0 0; }
+.fam-chip.ok { background: #e3f3ea; color: #17543a; }
+.hh-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+dialog .hh-grid select { width: 100%; font: inherit; min-height: 48px; }
+dialog { max-width: min(640px, calc(100vw - 32px)); }
