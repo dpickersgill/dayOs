@@ -251,7 +251,7 @@ async function subscribe({ email, name, role, source, ip, origin }) {
     } else if (s.status === 'confirmed') {
       return null; // already on the list: nothing to do, and nothing to say
     } else {
-      if (s.recent) return null; // a link went a few minutes ago: no second email, so the form cannot be used to flood an inbox
+      if (s.recent && s.status === 'pending') return null; // a link went a few minutes ago: no second email, so the form cannot be used to flood an inbox
       // pending again, or back after unsubscribing: the new consent replaces the old, and a new link goes
       await conn.query(`UPDATE goodday_subscribers SET status = 'pending', name = COALESCE(?, name), role = IF(? IS NULL, role, ?), source = ?, consent_at = UTC_TIMESTAMP(), consent_wording = ?, consent_ip = ?,
         confirm_sent_at = UTC_TIMESTAMP(), unsubscribed_at = NULL, unsubscribe_how = NULL WHERE id = ?`, [name || null, role || null, role || null, source || null, wording, ip || null, s.id]);

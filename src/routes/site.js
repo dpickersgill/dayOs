@@ -294,7 +294,7 @@ async function render(req, name, slug, words = null) {
 async function send(req, res, name, slug, status = 200, words = null) {
   const body = await render(req, name, slug, words);
   res.status(status).set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=300' });
-  if (isCopy(req) || name === 'notfound') res.set('X-Robots-Tag', 'noindex, follow');
+  if ((isCopy(req) || name === 'notfound') && !res.get('X-Robots-Tag')) res.set('X-Robots-Tag', 'noindex, follow');
   res.send(body);
 }
 
