@@ -415,7 +415,9 @@ router.post('/tickets/:code/change-day', requireRole(...sellers), validate(chang
       if (!b.over_limit_reason) throw conflict(`${words} Only a manager can sell over the limit, and says why.`, { over_limit: over });
       if (!isMgr(req)) throw forbidden(`${words} Only a manager can sell over the limit. Ask a manager.`);
     }
-    const old = t.unit_price_cents - t.discount_cents; // what was paid for it, before tax
+    // what has been paid for it so far, before tax: the sale, or the day it was last moved to at the window
+    const prior = await one(conn, 'SELECT new_cents FROM window_changes WHERE tenant_id = ? AND ticket_id = ? ORDER BY id DESC LIMIT 1', [tenantId, t.id]);
+    const old = prior ? Number(prior.new_cents) : t.unit_price_cents - t.discount_cents;
     const diff = cents - old;
     const { tax } = applyTax([{ type: 'ticket', cents: Math.abs(diff) }], 0, await loadRules(conn, tenantId));
     const owed = diff > 0 ? diff + tax : 0;

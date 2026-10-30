@@ -2,7 +2,7 @@
 // How often a guest comes: the days they skied (a good gate scan on their ticket or pass), had a lesson or rented, by
 // season. Shared by the welcome-back card, loyalty and birthdays (who is a past guest), recaps and the reports.
 const { one, rows } = require('../db');
-const { seasonFor } = require('./util');
+const { seasonFor, dayRange, localDay } = require('./util');
 
 /** Season label for a day, the way the rest of the app writes it: '2026-27'. */
 const seasonOf = (day) => seasonFor(day);
@@ -17,15 +17,21 @@ function seasonRange(label) {
  * attended or booked, a rental handed out. Scans are stored in UTC; tz is the mountain's time zone.
  */
 async function daysHere(db, tenantId, personId, from, to, tz = 'America/New_York') {
-  const r = await rows(db, `SELECT d FROM (
-      SELECT DATE(CONVERT_TZ(s.scanned_at, '+00:00', ?)) AS d FROM scans s JOIN tickets t ON t.tenant_id = s.tenant_id AND t.id = s.ticket_id
-        WHERE s.tenant_id = ? AND t.person_id = ? AND s.result = 'ok'
-      UNION SELECT DATE(ls.starts_at) FROM lesson_bookings b JOIN lesson_sessions ls ON ls.tenant_id = b.tenant_id AND ls.id = b.session_id
+  // Scans are turned into the mountain's days here, not with CONVERT_TZ: a database without time zone tables (Cloud SQL,
+  // the test database) returns NULL for a named zone. One row per hour scanned keeps it small. (Track WINDOW fix.)
+  const [fromUtc] = dayRange(tz, from);
+  const [, toUtc] = dayRange(tz, to);
+  const hours = await rows(db, `SELECT DISTINCT DATE_FORMAT(s.scanned_at, '%Y-%m-%d %H:00:00') AS h FROM scans s JOIN tickets t ON t.tenant_id = s.tenant_id AND t.id = s.ticket_id
+    WHERE s.tenant_id = ? AND t.person_id = ? AND s.result = 'ok' AND s.scanned_at >= ? AND s.scanned_at < ?`, [tenantId, personId, fromUtc, toUtc]);
+  const other = await rows(db, `SELECT d FROM (
+      SELECT DATE(ls.starts_at) AS d FROM lesson_bookings b JOIN lesson_sessions ls ON ls.tenant_id = b.tenant_id AND ls.id = b.session_id
         WHERE b.tenant_id = ? AND b.person_id = ? AND b.status = 'attended'
       UNION SELECT DATE(rc.checked_out_at) FROM rental_contracts rc
         WHERE rc.tenant_id = ? AND rc.person_id = ? AND rc.status IN ('out','returned','overdue')
-    ) x WHERE d BETWEEN ? AND ? ORDER BY d DESC`, [tz, tenantId, personId, tenantId, personId, tenantId, personId, from, to]);
-  return r.map((x) => (x.d instanceof Date ? x.d.toISOString().slice(0, 10) : String(x.d).slice(0, 10)));
+    ) x WHERE d BETWEEN ? AND ?`, [tenantId, personId, tenantId, personId, from, to]);
+  const days = new Set(other.map((x) => (x.d instanceof Date ? x.d.toISOString().slice(0, 10) : String(x.d).slice(0, 10))));
+  for (const x of hours) days.add(localDay(x.h, tz));
+  return [...days].filter((d) => d >= from && d <= to).sort().reverse();
 }
 
 /** { this_season, last_season, total, first_day, last_day } for a person, with seasons by the given day. */

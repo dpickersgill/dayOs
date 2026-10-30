@@ -122,10 +122,10 @@ function birthdayThisWeek(dob, day) {
  * date of birth only. The license number and address are never returned or kept. Scanners send the line breaks as
  * newlines, carriage returns, record separators or (from the scan box) a "|". Returns null when it is not a license.
  */
-const AAMVA_IDS = ['DAA', 'DAB', 'DAC', 'DAD', 'DAE', 'DAF', 'DAG', 'DAH', 'DAI', 'DAJ', 'DAK', 'DAL', 'DAM', 'DAN', 'DAO', 'DAP', 'DAQ', 'DAR', 'DAS', 'DAT', 'DAU', 'DAV', 'DAW', 'DAX', 'DAY', 'DAZ',
-  'DBA', 'DBB', 'DBC', 'DBD', 'DBE', 'DBF', 'DBG', 'DBH', 'DBI', 'DBJ', 'DBK', 'DBL', 'DBM', 'DBN', 'DBO', 'DBP', 'DBQ', 'DBR', 'DBS',
-  'DCA', 'DCB', 'DCD', 'DCE', 'DCF', 'DCG', 'DCH', 'DCI', 'DCJ', 'DCK', 'DCL', 'DCM', 'DCN', 'DCO', 'DCP', 'DCQ', 'DCR', 'DCS', 'DCT', 'DCU',
-  'DDA', 'DDB', 'DDC', 'DDD', 'DDE', 'DDF', 'DDG', 'DDH', 'DDI', 'DDJ', 'DDK', 'DDL'];
+// The element IDs a license carries (AAMVA DL/ID card design standard), used to split the text when the scanner lost
+// the line breaks. Rare IDs that look like parts of names (DAN, DAL, DAM...) are left out on purpose.
+const AAMVA_IDS = ['DAA', 'DAB', 'DAC', 'DAD', 'DAG', 'DAH', 'DAI', 'DAJ', 'DAK', 'DAQ', 'DAU', 'DAW', 'DAY', 'DAZ', 'DBA', 'DBB', 'DBC', 'DBD',
+  'DCA', 'DCB', 'DCD', 'DCE', 'DCF', 'DCG', 'DCK', 'DCL', 'DCS', 'DCT', 'DCU', 'DDA', 'DDB', 'DDC', 'DDD', 'DDE', 'DDF', 'DDG', 'DDH', 'DDI', 'DDJ', 'DDK', 'DDL'];
 function parseLicense(raw) {
   const s = String(raw || '');
   if (!/ANSI ?\d{6}|AAMVA/i.test(s) && !(/DBB\d{8}/.test(s) && /DC[ST]|DAC|DAA/.test(s))) return null;
