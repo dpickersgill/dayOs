@@ -1,6 +1,108 @@
 {
   "releases": [
     {
+      "version": "2026.11.9",
+      "date": "2026-10-30",
+      "title": "Lesson planning: plan the season in minutes, spots that follow your staff, and a ski school director login",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "Season plan (Ski school, Planning): set up the season's lessons in one place. Day types (Weekday, Weekend, Holiday, Holiday week, Closed, or your own), which day type each weekday uses, periods such as Christmas week, and single-day changes. See the month as a calendar, check what will change, then publish.",
+          "help": "school-season-plan"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "Publishing is safe to repeat: a change to the plan adds new lessons and updates unbooked ones, and never changes a lesson that has bookings, requests or a waitlist. Undo the last publish while nothing in it is booked. Save the plan as a pattern for next season.",
+          "help": "school-season-publish"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "Pool lessons, the way most ski schools sell groups: guests book a time (9:30 kids ski, 80 spots) and the lineup splits them into classes by level. Set classes with fixed levels are still there for clinics, adaptive lessons and camps.",
+          "help": "guest-pools"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "Spots that follow your staff: a pool's open spots are the instructors free and cleared for that time times your class ratio, up to the number you set. When an instructor marks a day off, spots shrink; when one picks up a shift, spots open. Before anyone enters availability, the number you set is sold.",
+          "help": "school-spots-staff"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "Fill and staff: one calendar shows each day's students booked, spots open, instructors needed and instructors free, with a red, amber or green mark. Tap a day to see each lesson time and why it has the spots it has.",
+          "help": "school-fill"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "Fill the gap: when a time is short of instructors, one tap asks every free, cleared instructor to take it. The first to say yes is scheduled and the spots stay open.",
+          "help": "school-fill-gap"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "Demand: see which lesson times fill up, how far ahead, and how many families waited or found them full, with suggestions such as adding a 10:00 kids pool on Saturdays. Suggestions only; nothing is added for you.",
+          "help": "school-demand"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": [
+            "instructor"
+          ],
+          "text": "My day shows the days that need more instructors (\"Saturday, Jan 9 needs 4 more people, kids ski, 9:30 AM\"), with I can work to add yourself.",
+          "help": "school-needs"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "Level questions: when families book online, three plain yes or no questions per student place them on the nine levels. The lineup starts from those answers. You can change the wording in Settings, Ski school. Sell's lesson checkout can ask them too.",
+          "help": "guest-placement"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "Private lesson hours: set the hours, lengths and how many privates can run at once for each day type. Families only see times an instructor can really teach. You can also confirm privates automatically when a cleared instructor is free.",
+          "help": "guest-private-hours"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "When a lesson is full, the booking page and Sell show the next times with room, plus the waitlist.",
+          "help": "guest-pools"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": [
+            "instructor"
+          ],
+          "text": "Ski school access levels: an owner or manager can make an instructor a Supervisor (runs the day: lineup, check-in, rosters, assigning instructors, bookings, weather calls) or a Director (runs the school: the season plan, lessons, instructors, pay approval, school settings, lesson prices, selling lessons and refunds up to the counter limit). Neither can see Money, billing or other teams.",
+          "help": "school-access-levels"
+        },
+        {
+          "kind": "improved",
+          "app": "school",
+          "who": null,
+          "text": "Directors need two-step sign-in, cannot set their own pay rate or approve their own pay, and refund private requests only within the counter refund limit.",
+          "help": "school-director-role"
+        }
+      ]
+    },
+    {
       "version": "2026.11.8",
       "date": "2026-10-30",
       "title": "Guests remembered: the welcome back, the household account, birthday gifts and recaps, a faster window, and fair pricing promises",
