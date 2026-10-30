@@ -1,6 +1,111 @@
 {
   "releases": [
     {
+      "version": "2026.11.8",
+      "date": "2026-10-30",
+      "title": "Guests remembered: the welcome back, the household account, birthday gifts and recaps, a faster window, and fair pricing promises",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "sell",
+          "who": ["counter", "staff"],
+          "text": "The welcome back: when you find a guest in Sell, open a customer or scan a ticket at the gate, a card shows their visits this season, last visit, pass, birthday this week, the family's recent lessons and levels, usual rental sizes, rewards they hold, and one line to greet them with. Never allergy or medical notes.",
+          "help": "welcome-back"
+        },
+        {
+          "kind": "new",
+          "app": "sell",
+          "who": ["counter"],
+          "text": "Scan to find: one box in Sell takes a name, phone or email, or a scanned receipt, confirmation, ticket, pass, lesson code, card, reward code or driver's license (only the name and date of birth are used; nothing from the license is kept).",
+          "help": "scan-to-find"
+        },
+        {
+          "kind": "improved",
+          "app": "sell",
+          "who": ["counter"],
+          "text": "A day ticket needs only a name: no date of birth or sex. What was not asked shows as a note, never a block. Type a quantity on any line.",
+          "help": "sell-people"
+        },
+        {
+          "kind": "new",
+          "app": "sell",
+          "who": ["counter"],
+          "text": "Group sales: a group price per product from a number of people, one payer, and a roster pasted or loaded from a spreadsheet.",
+          "help": "group-sales"
+        },
+        {
+          "kind": "new",
+          "app": "sell",
+          "who": ["counter"],
+          "text": "Counter staff can refund up to a limit the manager sets. Change day at the window keeps the ticket code and charges or refunds the difference, with an email to the guest.",
+          "help": "change-day"
+        },
+        {
+          "kind": "new",
+          "app": "sell",
+          "who": ["counter"],
+          "text": "Line mode: a one-screen sale on a phone for the parking lot or the rental line, with big ticket buttons, the card reader or cash, an emailed or texted receipt, and loading a card.",
+          "help": "line-mode"
+        },
+        {
+          "kind": "new",
+          "app": "shop",
+          "who": null,
+          "text": "The household account: guests sign in with an emailed link and see everyone's passes and tickets with barcodes, rewards, receipts and the saved family (birthdays, sizes, levels, pass photos, waivers). Buy for a day with everyone prefilled, Same as last time in one tap, renew a pass with the photo on file, and renew automatically.",
+          "help": "household-account"
+        },
+        {
+          "kind": "new",
+          "app": "shop",
+          "who": null,
+          "text": "A designed confirmation email with the barcode, where to park and where to go first, today's conditions and first-day steps for first-timers, and a short message the morning of the visit.",
+          "help": "confirmation"
+        },
+        {
+          "kind": "new",
+          "app": "shop",
+          "who": null,
+          "text": "Reload a lift card online and go straight to the lift. Gift experiences with a reveal page, delivered on the day you choose, and a gift card balance page.",
+          "help": "gift-experiences"
+        },
+        {
+          "kind": "new",
+          "app": "sell",
+          "who": null,
+          "text": "Birthday gifts: past guests and pass holders get a gift a week before their birthday (or at opening for birthdays outside the season) and pick a free ticket, a percent off or a credit, whichever the mountain offers. On by default; each mountain can turn it off.",
+          "help": "birthday-gifts"
+        },
+        {
+          "kind": "new",
+          "app": "sell",
+          "who": null,
+          "text": "Thank-you recaps for every guest: an evening email after a day on the hill (first chair, laps, lifts) and a season recap page at the end of the season. A text too only for guests who said yes to texts.",
+          "help": "day-recap"
+        },
+        {
+          "kind": "new",
+          "app": "sell",
+          "who": null,
+          "text": "Loyalty rules the mountain can turn on: every Nth paid day free, milestones (10th, 25th, 50th, 100th day), the first-timer ladder and a top loyalists list with a thank you.",
+          "help": "loyalty-rules"
+        },
+        {
+          "kind": "new",
+          "app": "sell",
+          "who": null,
+          "text": "Fair by design, each off until the mountain turns it on with a badge in the shop: a price calendar showing when a day's price rises next, a walk-up cap, a price-drop promise with automatic refunds, closure credits, a conditions guarantee the guest claims from their phone, and payment plans and automatic renewal for passes with a waitlist.",
+          "help": "price-promise"
+        },
+        {
+          "kind": "new",
+          "app": "sell",
+          "who": null,
+          "text": "Fair scan review: unusual scans are flagged for a manager; nothing is blocked automatically, and a blocked guest gets the reason and a page to reply.",
+          "help": "fraud-review"
+        }
+      ]
+    },
+    {
       "version": "2026.11.7",
       "date": "2026-10-30",
       "title": "Selling fixes: season passes online, add-ons for the right person and day, day limits at the window, holiday prices by guest type, and a blind till count",
