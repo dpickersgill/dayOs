@@ -184,7 +184,7 @@ async function quote(conn, tenant, items, extras = {}) {
   for (const g of giftsIn) {
     if (g.amount_cents < GIFT_MIN || g.amount_cents > GIFT_MAX) throw bad(`A gift card is ${money(GIFT_MIN)} to ${money(GIFT_MAX)}`);
     priced.push({ type: 'gift_card', unit: g.amount_cents, cents: g.amount_cents });
-    gifts.push({ amount_cents: g.amount_cents, recipient_name: g.recipient_name || null, message: g.message || null });
+    gifts.push({ amount_cents: g.amount_cents, recipient_name: g.recipient_name || null, message: g.message || null, ...(g.experience ? { experience: g.experience } : {}) });
   }
   // Activities: a place in a time slot (or for the whole day) for each guest. Places are counted the same way as the
   // day limits above (sold plus baskets on the card page); placing the order counts them again under the products' locks.
@@ -218,6 +218,11 @@ async function quote(conn, tenant, items, extras = {}) {
   }
   const subtotal = priced.reduce((n, p) => n + p.cents, 0);
   if (subtotal <= 0) throw bad('Those tickets have no price set. Please call the mountain.');
+  // A reward the household holds (a birthday gift, a loyalty day, a credit): it takes its value off one ticket (a free
+  // ticket or a percent) or off the order (a credit, never off a gift card). Checked again, under a row lock, when the
+  // payment lands (fulfil). Only a signed-in household can use one, and only its own (extras.household).
+  let reward = null; const rewardShare = priced.map(() => 0);
+  if (extras.reward) reward = await rewardFor(conn, tenant, extras, detail, priced, rewardShare, today);
   // A promo code takes money off everything except gift cards.
   let discount = 0; let promo = null;
   if (extras.promo_code) {
@@ -228,13 +233,56 @@ async function quote(conn, tenant, items, extras = {}) {
     promo = code;
   }
   const { tax, taxes } = applyTax(priced, discount, await loadRules(conn, tenant.id));
+  priced.forEach((p, i) => { p.discount += rewardShare[i]; });
+  const rewardCents = rewardShare.reduce((n, c) => n + c, 0);
   const lines = detail.map((d, i) => ({ ...d, unit: priced[i].unit, tax: priced[i].tax, discount: priced[i].discount }));
   const nT = detail.length;
   addons.forEach((a, i) => { a.tax = priced[nT + i].tax; a.discount = priced[nT + i].discount; });
   gifts.forEach((g, i) => { g.tax = 0; g.discount = 0; });
   const nA = nT + addons.length + gifts.length;
   activities.forEach((a, i) => { a.unit = priced[nA + i].unit; a.tax = priced[nA + i].tax; a.discount = priced[nA + i].discount; });
-  return { lines, addons, gifts, activities, promo, discount, subtotal, tax, taxes, total: subtotal - discount + tax };
+  // "Pay in N" (lib/paymentplans.js, Track FAIR): only when the guest asked for it and the mountain's plans allow this basket.
+  let plan = null;
+  if (extras.plan) {
+    const pq = await require('./paymentplans').quote(conn, tenant.id, { lines: detail, addons, total: subtotal - rewardCents - discount + tax });
+    if (!pq || !pq.available) throw conflict('Paying in parts is not offered for this order');
+    plan = pq;
+  }
+  return { plan, lines, addons, gifts, activities, promo, discount, subtotal, tax, taxes, reward: reward ? { ...reward, cents: rewardCents } : null, reward_cents: rewardCents,
+    total: subtotal - rewardCents - discount + tax, household: extras.household ? extras.household.ids : null, reload: extras.reload || null };
+}
+
+/**
+ * Applies a household reward to a priced basket (quote). extras.reward: { id, choice, for_item }. Writes each priced
+ * line's share into rewardShare and lowers priced[i].cents by it (tax and promo then work on what is left).
+ */
+async function rewardFor(conn, tenant, extras, detail, priced, rewardShare, today) {
+  const R = require('./rewards');
+  const hh = extras.household;
+  if (!hh || !hh.ids.length) throw bad('Sign in to use a reward');
+  const r = await one(conn, 'SELECT * FROM guest_rewards WHERE tenant_id = ? AND id = ?', [tenant.id, Number(extras.reward.id)]);
+  if (!r || !hh.ids.includes(Number(r.person_id))) throw bad('That reward is not on your account');
+  if (r.status !== 'offered') throw conflict('That reward has already been used');
+  const rw = R.shape(r); const choice = extras.reward.choice;
+  if (!rw.options[choice]) throw bad('Pick one of the reward\'s choices');
+  const d10 = (x) => String(x instanceof Date ? x.toISOString() : x).slice(0, 10);
+  const inRange = (day) => day >= d10(r.valid_from) && day <= d10(r.valid_to);
+  let day = today;
+  if (choice === 'credit') {
+    if (!inRange(today)) throw conflict(`That reward is good from ${dayText(d10(r.valid_from))} to ${dayText(d10(r.valid_to))}`);
+    let left = R.valueOf(rw, 'credit', { orderCents: priced.reduce((n, p) => n + (p.type === 'gift_card' ? 0 : p.cents), 0) });
+    priced.forEach((p, i) => { if (p.type === 'gift_card' || left <= 0) return; const c = Math.min(left, p.cents); rewardShare[i] = c; p.cents -= c; left -= c; });
+  } else {
+    const i = Number(extras.reward.for_item);
+    const ln = detail[i];
+    if (!Number.isInteger(i) || !ln) throw bad('Pick which ticket the reward is for');
+    day = ln.valid_on;
+    if (!inRange(day)) throw conflict(`That reward is good from ${dayText(d10(r.valid_from))} to ${dayText(d10(r.valid_to))}`);
+    const value = Math.min(priced[i].cents, R.valueOf(rw, choice, { line: { product_id: ln.product_id, unit_cents: priced[i].cents } }));
+    if (value <= 0) throw conflict(`That reward does not cover ${ln.name}`);
+    rewardShare[i] = value; priced[i].cents -= value;
+  }
+  return { id: Number(r.id), choice, for_item: choice === 'credit' ? null : Number(extras.reward.for_item), day, words: R.words(rw) };
 }
 
 /** What can be bought on one day: price per age group, tickets left, and why something is not available. */
@@ -364,7 +412,7 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
     await conn.query('UPDATE people SET marketing_opt_in = 1 WHERE tenant_id = ? AND id = ?', [tenantId, contact.id]);
     await recordConsent(conn, tenantId, contact.id, 'email', 'opted_in', 'online', null);
   }
-  const [o] = await conn.query("INSERT INTO orders (tenant_id, person_id, user_id, status, promo_code, subtotal_cents, discount_cents, tax_cents, total_cents, channel, payment_ref) VALUES (?, ?, NULL, 'paid', ?, ?, ?, ?, ?, 'online', ?)", [tenantId, contact.id, q.promo || null, q.subtotal, q.discount || 0, q.tax, q.total, paymentIntent]);
+  const [o] = await conn.query("INSERT INTO orders (tenant_id, person_id, user_id, status, promo_code, subtotal_cents, discount_cents, tax_cents, total_cents, channel, payment_ref) VALUES (?, ?, NULL, 'paid', ?, ?, ?, ?, ?, 'online', ?)", [tenantId, contact.id, q.promo || null, q.subtotal, (q.discount || 0) + (q.reward_cents || 0), q.tax, q.total, paymentIntent]);
   const orderId = o.insertId;
   if (q.promo) await conn.query('UPDATE promo_codes SET used_count = used_count + 1 WHERE tenant_id = ? AND code = ?', [tenantId, q.promo]);
   for (const t of q.taxes) await conn.query('INSERT INTO order_taxes (tenant_id, order_id, name, rate_bps, amount_cents) VALUES (?, ?, ?, ?, ?)', [tenantId, orderId, t.name, t.rate_bps, t.amount_cents]);
@@ -380,7 +428,8 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
     if (sameAsContact && !minor) { details.email = row.contact_email; details.phone = row.contact_phone; }
     // A child (or anyone) already linked to the buyer with the same name is the same person, so a family buying again does
     // not get a second record. A date of birth, when both have one, must match too.
-    let personId = sameAsContact && !minor ? contact.id : undefined;
+    // A person picked from the signed-in household (checked when the basket was placed) is that person, no matching by name.
+    let personId = st.person_id && (q.household || []).includes(Number(st.person_id)) ? Number(st.person_id) : sameAsContact && !minor ? contact.id : undefined;
     if (!personId && contact.id && !sameAsContact) {
       const kin = await rows(conn, `SELECT p.id, p.date_of_birth FROM person_links l JOIN people p ON p.tenant_id = l.tenant_id AND p.id = l.member_id
         WHERE l.tenant_id = ? AND l.adult_id = ? AND l.relation = 'guardian' AND p.first_name = ? AND p.last_name = ? AND p.anonymised_at IS NULL ORDER BY p.id`, [tenantId, contact.id, st.first_name, st.last_name]);
@@ -399,15 +448,18 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
     return { who, waiver };
   };
   const holderIds = []; // the person on each ticket line, for the add-ons that go with a ticket
+  const lineItemIds = []; const ticketIds = []; // per ticket line, for a reward and a reloaded card
   for (const ln of q.lines) {
     const st = ln.holder;
     const { who, waiver } = await holderOnFile(st, ln.valid_on, ln.tier, season);
     holderIds.push(who.id);
     if (!waiver && tenant.waiver_text) waiverNeeded.push(`${st.first_name} ${st.last_name}`);
     const [it] = await conn.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents) VALUES (?, ?, ?, 'ticket', ?, ?, 1, ?, ?, ?, ?)", [tenantId, orderId, ln.product_id, who.id, ln.tier, ln.unit, ln.valid_on, ln.discount || 0, ln.tax || 0]);
+    lineItemIds.push(it.insertId);
     const code = newCode();
     const validTo = addDays(ln.valid_on, Math.max(ln.valid_days, 1) - 1);
-    await conn.query('INSERT INTO tickets (tenant_id, order_item_id, person_id, product_id, code, valid_from, valid_to, uses_remaining) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [tenantId, it.insertId, who.id, ln.product_id, code, ln.valid_on, validTo, ln.uses ?? null]);
+    const [tk] = await conn.query('INSERT INTO tickets (tenant_id, order_item_id, person_id, product_id, code, valid_from, valid_to, uses_remaining) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [tenantId, it.insertId, who.id, ln.product_id, code, ln.valid_on, validTo, ln.uses ?? null]);
+    ticketIds.push(tk.insertId);
     tickets.push(code);
     // A season pass for a child already in a program that charged a lift ticket part: refund or credit it, per the mountain.
     const kind = await one(conn, 'SELECT kind FROM products WHERE tenant_id = ? AND id = ?', [tenantId, ln.product_id]);
@@ -458,13 +510,53 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
     await conn.query("INSERT INTO gift_card_txns (tenant_id, gift_card_id, order_id, kind, delta_cents, balance_after_cents) VALUES (?, ?, ?, 'issue', ?, ?)", [tenantId, gc.insertId, orderId, g.amount_cents, g.amount_cents]);
     await conn.query("INSERT INTO order_items (tenant_id, order_id, line_kind, person_id, gift_card_id, tier, quantity, unit_price_cents, discount_cents, tax_cents) VALUES (?, ?, 'gift_card', ?, ?, 'adult', 1, ?, 0, 0)", [tenantId, orderId, contact.id, gc.insertId, g.amount_cents]);
     giftCodes.push(code);
+    // A gift experience ("First day on snow"): delivered to the person receiving it on its date by the guests job.
+    if (g.experience) await require('../routes/guestsaccount').attachExperience(conn, tenantId, { giftCardId: gc.insertId, orderId, gift: g.experience });
   }
+  // A reward used online: redeemed here, in the order's transaction under a row lock, so two orders cannot both use it
+  // (the second payment is refunded in full). The line it paid for carries reward_id; a refund puts it back (rewards.release).
+  if (q.reward) {
+    await require('./rewards').redeem(conn, tenantId, q.reward.id, { choice: q.reward.choice, day: q.reward.day, orderId, personIds: q.household || [] });
+    const itemId = q.reward.for_item !== null && q.reward.for_item !== undefined ? lineItemIds[q.reward.for_item] : lineItemIds[0];
+    if (itemId) await conn.query('UPDATE order_items SET reward_id = ? WHERE tenant_id = ? AND id = ?', [q.reward.id, tenantId, itemId]);
+  }
+  // A card reloaded online: the new day goes onto the card, so the guest goes straight to the lift.
+  if (q.reload && q.reload.card_id && ticketIds[0]) await reloadCard(conn, tenantId, q.reload.card_id, ticketIds[0]);
+  const paidNow = q.plan ? Number(row.amount_cents) : q.total; // a payment plan: the first payment now, the rest on schedule
   await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, processor, processor_account, platform_fee_cents) VALUES (?, ?, 'card', ?, ?, 'stripe', ?, ?)",
-    [tenantId, orderId, q.total, paymentIntent, payee.account || null, payee.feeCents || 0]);
+    [tenantId, orderId, paidNow, paymentIntent, payee.account || null, payee.feeCents || 0]);
+  if (q.plan) await require('./paymentplans').start(conn, tenantId, { id: orderId, shop_order_id: row.id, total_cents: q.total, paid_cents: paidNow, payment_intent: paymentIntent, person_id: contact.id }, { plan: q.plan });
   await conn.query("UPDATE shop_orders SET status = 'paid', paid_at = NOW(), order_id = ?, payment_intent = COALESCE(?, payment_intent), note = ? WHERE tenant_id = ? AND id = ?",
     [orderId, paymentIntent, [waiverNeeded.length ? `Waiver still to sign at the gate: ${waiverNeeded.join(', ')}.` : '', overLimit.length ? `Payment arrived late: ${overLimit.map(dayText).join(', ')} went over the daily limit.` : '', overSlots.length ? `Payment arrived late: ${overSlots.join(', ')} went over its places.` : ''].filter(Boolean).join(' ').slice(0, 300) || null, tenantId, row.id]);
   await audit(conn, { auth: { tenantId, userId: null } }, 'shop_paid', 'shop_orders', row.id, { tickets: tickets.length, order_id: orderId });
   return { orderId, tickets, waiverNeeded, giftCodes, programAdjustments };
+}
+
+/**
+ * A card from the back of an RFID card, ready for a new day online? It must be registered, not lost, and not holding a
+ * pass or a ticket for today or later (so nobody can push a stranger's pass off their card). Returns the card row.
+ */
+async function reloadable(conn, tenantId, number, today, lock = false) {
+  const A = require('./access');
+  const raw = String(number || '').trim().toUpperCase().replace(/[\s-]/g, '');
+  if (raw.length < 4 || raw.length > 32) return null;
+  const cands = [...new Set([raw, ...A.uidCandidates(raw)])];
+  const card = await one(conn, `SELECT * FROM rfid_cards WHERE tenant_id = ? AND (UPPER(REPLACE(REPLACE(label, ' ', ''), '-', '')) = ? OR uid IN (?)) ORDER BY id LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [tenantId, raw, cands]);
+  if (!card || !['free', 'assigned'].includes(card.status)) return null;
+  if (card.ticket_id) {
+    const held = await one(conn, 'SELECT t.status, t.valid_to, p.kind FROM tickets t JOIN products p ON p.tenant_id = t.tenant_id AND p.id = t.product_id WHERE t.tenant_id = ? AND t.id = ?', [tenantId, card.ticket_id]);
+    if (held && held.status === 'active' && (held.kind === 'season_pass' || dstr(held.valid_to) >= today)) return { ...card, busy: true };
+  }
+  return card;
+}
+async function reloadCard(conn, tenantId, cardId, ticketId) {
+  const tenant = await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId]);
+  const card = await one(conn, 'SELECT * FROM rfid_cards WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, cardId]);
+  const ok = card && await reloadable(conn, tenantId, card.label || card.uid, todayIn(tenant.timezone));
+  if (!ok || ok.busy) { await audit(conn, { auth: { tenantId, userId: null } }, 'card_reload_skipped', 'rfid_cards', cardId, { ticket_id: ticketId }); return false; }
+  await conn.query("UPDATE rfid_cards SET ticket_id = ?, status = 'assigned', assigned_at = UTC_TIMESTAMP() WHERE tenant_id = ? AND id = ?", [ticketId, tenantId, cardId]);
+  await audit(conn, { auth: { tenantId, userId: null } }, 'card_reload', 'rfid_cards', cardId, { ticket_id: ticketId, online: true });
+  return true;
 }
 
 /** A paid online rental as a contract waiting to be fitted (lib/rentalfit.js). */
@@ -505,18 +597,19 @@ async function emailTickets(tenantId, rowId, baseUrl) {
   const row = await one(pool, 'SELECT * FROM shop_orders WHERE tenant_id = ? AND id = ?', [tenantId, rowId]);
   if (!row || row.status !== 'paid' || row.emailed_at || !mailer.enabled()) return false;
   const t = await one(pool, 'SELECT name, slug, phone FROM tenants WHERE id = ?', [tenantId]);
-  const link = `${baseUrl}/shop/${t.slug}?order=${row.view_token}`;
   const v = await viewOf(tenantId, row.view_token);
   const RF = require('./rentalforms');
   const rentalForm = row.order_id && (await RF.rentalLines(pool, tenantId, row.order_id)).count ? await RF.orderFormLink(pool, tenantId, row.order_id, baseUrl, t.slug) : null;
-  const lines = v.tickets.map((k) => `- ${k.product}${k.first_name ? `, ${k.first_name} ${k.last_name}` : ''}: ${dayRangeText(k.valid_from, k.valid_to)}${k.start_time ? `, ${ACT.clock(k.start_time)} to ${ACT.clock(k.end_time)}` : ''}`);
-  const gifts = v.gift_cards.map((g) => `- Gift card ${g.code}, ${money(g.amount_cents)}${g.recipient_name ? ` for ${g.recipient_name}` : ''}`);
-  const text = [`Hi ${row.contact_name.split(' ')[0]},`, '', `Thank you for your order at ${t.name} (reference ${row.reference}, ${money(row.amount_cents)}).`, '', ...lines, ...gifts, '',
-    'Show the barcode on your phone at the gate. Your tickets are here:', link, '',
-    ...(v.waiver_needed.length ? [`Still to sign a waiver before riding: ${v.waiver_needed.join(', ')}. Sign here: ${baseUrl}/waiver/${t.slug}`, ''] : []),
-    ...(rentalForm ? ['Renting gear? Fill in your rental form before you come: each renter\'s height, weight, boot size and ability, signed. The shop fits you faster.', rentalForm, ''] : []),
-    ...(row.note ? [row.note, ''] : []), t.phone ? `Questions? Call ${t.phone}.` : ''].join('\n');
-  const r = await mailer.send({ tenantId, to: row.contact_email, fromName: t.name, subject: `Your tickets for ${t.name}`, text, tag: 'shop-tickets' });
+  // The designed confirmation (lib/salemail.js), with what only an online order adds: the waiver still to sign, the rental form, a staff note.
+  const c = await require('./salemail').confirmation(tenantId, { shopOrderId: rowId }, baseUrl);
+  if (!c) return false;
+  const { esc } = require('./format');
+  const more = [...(v.waiver_needed.length ? [[`Still to sign a waiver before riding: ${v.waiver_needed.join(', ')}.`, `${baseUrl}/waiver/${t.slug}`, 'Sign the waiver']] : []),
+    ...(rentalForm ? [['Renting gear? Fill in your rental form before you come: each renter\'s height, weight, boot size and ability, signed. The shop fits you faster.', rentalForm, 'Fill in the rental form']] : []),
+    ...(row.note ? [[row.note, null, null]] : [])];
+  const text = more.length ? `${c.text}\n\n${more.map(([w, l]) => (l ? `${w}\n${l}` : w)).join('\n\n')}` : c.text;
+  const html = more.length ? c.html.replace('<!-- wallet:', `${more.map(([w, l, label]) => `<tr><td style="padding:0 24px"><p style="margin:0 0 12px;font:15px/1.5 Arial,Helvetica,sans-serif;color:#12303a;background:#fff6dd;padding:12px;border-radius:6px">${esc(w)}${l ? ` <a href="${esc(l)}" style="color:#1a5fb4">${esc(label)}</a>` : ''}</p></td></tr>`).join('')}<!-- wallet:`) : c.html;
+  const r = await mailer.send({ tenantId, to: row.contact_email, fromName: t.name, subject: c.subject, text, html, tag: 'shop-tickets' });
   if (r.ok) await pool.query('UPDATE shop_orders SET emailed_at = NOW() WHERE tenant_id = ? AND id = ? AND emailed_at IS NULL', [tenantId, rowId]);
   return r.ok;
 }
@@ -611,14 +704,14 @@ async function monthView(conn, tenant, ym) {
       const cents = advance(p, today, d, price.cents).cents;
       // The calendar shows the cheapest one-day ticket when there is one, else the cheapest ticket of any length.
       const rank = [p.kind === 'day_ticket' && Number(p.valid_days) === 1 ? 0 : 1, cents];
-      if (!best || rank[0] < best.rank[0] || (rank[0] === best.rank[0] && rank[1] < best.rank[1])) best = { rank, cents, left: l };
+      if (!best || rank[0] < best.rank[0] || (rank[0] === best.rank[0] && rank[1] < best.rank[1])) best = { rank, cents, left: l, product_id: p.id };
     }
     if (!best) { out[d] = { state: soldOut ? 'sold_out' : 'closed' }; continue; }
-    out[d] = { state: best.left !== Infinity && best.left <= FEW ? 'few' : 'open', from_cents: best.cents, left: best.left === Infinity ? null : best.left };
+    out[d] = { state: best.left !== Infinity && best.left <= FEW ? 'few' : 'open', from_cents: best.cents, left: best.left === Infinity ? null : best.left, product_id: best.product_id };
   }
   monthCache.set(key, { at: Date.now(), out });
   if (monthCache.size > 500) monthCache.clear();
   return out;
 }
 
-module.exports = { overLimits, leftOn: left, monthView, advance, KINDS, dayMenu, closedDates, usage, quote, fulfil, viewOf, emailTickets, handleWebhook, reference, MAX_ITEMS };
+module.exports = { reloadable, reloadCard, overLimits, leftOn: left, monthView, advance, KINDS, dayMenu, closedDates, usage, quote, fulfil, viewOf, emailTickets, handleWebhook, reference, MAX_ITEMS };

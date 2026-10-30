@@ -5,6 +5,7 @@
 import './stage.js';
 import { mountGuestAssistant } from './guest-assistant.js';
 import { h, clear, appendAll } from './ui.js';
+import { householdSections } from './household.js';
 
 const slug = decodeURIComponent(location.pathname.split('/').filter(Boolean)[1] || '');
 const root = document.getElementById('fam');
@@ -27,7 +28,7 @@ const long = (s) => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday:
 const t12 = (t) => { const [hh, mm] = String(t).split(':').map(Number); return `${((hh + 11) % 12) + 1}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'am' : 'pm'}`; };
 const shell = (...kids) => h('div', { class: 'layout' }, h('main', { class: 'main stack', id: 'fam-main' }, ...kids));
 const lab = (id, text, el, hint) => h('div', { class: 'field' }, h('label', { for: id }, text), el, hint ? h('span', { class: 'hint' }, hint) : null);
-const hero = (name, sub, extra) => h('header', { class: 'hero' }, h('div', { class: 'hero-in' }, h('span', { class: 'eyebrow' }, 'Your family'), h('h1', null, name || 'Programs and lessons'), h('p', { class: 'sub' }, sub), extra || null));
+const hero = (name, sub, extra) => h('header', { class: 'hero' }, h('div', { class: 'hero-in' }, h('span', { class: 'eyebrow' }, 'Your account'), h('h1', null, name || 'Tickets, passes and lessons'), h('p', { class: 'sub' }, sub), extra || null));
 
 async function start() {
   const t = new URLSearchParams(location.search).get('t');
@@ -45,7 +46,7 @@ function signIn(problem) {
   const hp = h('input', { name: 'website', tabindex: '-1', autocomplete: 'off', class: 'reg-hp', 'aria-hidden': 'true' });
   const msg = h('p', { role: 'status' }, problem ? h('span', { class: 'error-box' }, problem) : null);
   const go = h('button', { type: 'submit', class: 'btn primary big' }, 'Email me a sign-in link');
-  const form = h('form', { class: 'card stack', novalidate: true }, h('h2', null, 'Sign in'), h('p', null, 'Use the email you registered with. We will send a link that signs you in on this phone or computer. No password needed.'),
+  const form = h('form', { class: 'card stack', novalidate: true }, h('h2', null, 'Sign in'), h('p', null, 'Use the email you bought or registered with. We will send a link that signs you in on this phone or computer. No password needed.'),
     lab('em', 'Email', email), hp, msg, go);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -53,10 +54,10 @@ function signIn(problem) {
     go.disabled = true;
     try {
       await call('POST', '/link', { email: email.value.trim(), website: hp.value || undefined });
-      clear(form).append(h('h2', null, 'Check your email'), h('p', null, `If ${email.value.trim()} is on a registration with us, a sign-in link is on its way. It works once, for 30 minutes.`));
+      clear(form).append(h('h2', null, 'Check your email'), h('p', null, `If ${email.value.trim()} is on an order or a registration with us, a sign-in link is on its way. It works once, for 30 minutes.`));
     } catch (ex) { clear(msg).append(h('span', { class: 'error-box' }, ex.message)); go.disabled = false; }
   });
-  clear(root).append(hero(null, 'Every lesson date, weather changes, classes and report cards for your children.'), shell(form));
+  clear(root).append(hero(null, 'Your passes and tickets, your family\'s sizes and levels, rewards, and every lesson date in one place.'), shell(form));
 }
 
 async function show() {
@@ -66,8 +67,22 @@ async function show() {
   const out = h('button', { type: 'button', class: 'btn small onink' }, 'Sign out');
   out.addEventListener('click', async () => { await call('POST', '/signout').catch(() => {}); session = null; store.set(null); signIn(); });
   const tel = d.phone ? h('a', { class: 'call', href: `tel:${d.phone.replace(/[^\d+]/g, '')}` }, `Call ${d.phone}`) : null;
+  // The household account (Guests round 2): buy for a day, passes and tickets, rewards, the saved family, renewals, receipts.
+  const account = h('div', { class: 'stack', id: 'hh-account' }, h('p', { class: 'muted', role: 'status' }, 'Loading your account…'));
+  const lessonAfter = (() => { try { const l = sessionStorage.getItem(`hh-lesson-${slug}`); sessionStorage.removeItem(`hh-lesson-${slug}`); return l; } catch (_) { return null; } })();
   clear(root).append(hero(d.mountain, `Signed in as ${d.email}`, h('div', { class: 'chips-row' }, tel, out)),
-    shell(d.people.length ? d.people.map((p) => childCard(p, d)) : h('section', { class: 'card' }, h('h2', null, 'Nothing here yet'), h('p', null, 'No program places or lessons are on this email. If you booked with another email, sign in with that one.'), h('a', { class: 'btn', href: `/programs/${encodeURIComponent(slug)}` }, 'Register for a program'))));
+    shell(lessonAfter ? h('section', { class: 'card stack' }, h('h2', null, 'Next: book the lesson'), h('a', { class: 'btn primary', href: lessonAfter }, 'Book the lesson')) : null,
+      account, d.people.length ? h('h2', { class: 'hh-section' }, 'Programs and lessons') : null, ...d.people.map((p) => childCard(p, d)),
+      d.people.length ? null : h('p', { class: 'small muted' }, h('a', { href: `/programs/${encodeURIComponent(slug)}` }, 'Register for a program'), ' or ', h('a', { href: `/book/${encodeURIComponent(slug)}` }, 'book a lesson'), '.')));
+  householdSections(account, { acall, slug, onChange: show });
+}
+/** The account and shop calls (/public/<slug>/...), with the same session. */
+async function acall(method, path, body) {
+  const res = await fetch(`/api/v1/public/${encodeURIComponent(slug)}${path}`, { method, headers: { 'content-type': 'application/json', ...(session ? { 'x-family-session': session } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { session = null; store.set(null); }
+  if (!res.ok) { const e = new Error(data.error || 'Something went wrong. Please try again or call the mountain.'); e.status = res.status; throw e; }
+  return data;
 }
 
 function childCard(p, d) {

@@ -1,0 +1,26 @@
+/* A gift experience reveal (/gift/<mountain>/<link>) and the gift card balance page (/gift-balance/<mountain>). */
+.gift-wrap { min-height: 100vh; display: grid; place-items: start center; padding: 32px 16px; background: linear-gradient(180deg, #12303a 0, #12303a 220px, var(--snow, #f3f6f7) 220px); }
+.gift-card { width: 100%; max-width: 560px; background: #fff; border-radius: 16px; padding: 28px 22px; box-shadow: 0 10px 30px rgba(10, 20, 35, 0.18); display: grid; gap: 16px; text-align: center; }
+.gift-h1 { margin: 0; font-size: 1.6rem; color: var(--ink, #12303a); }
+.gift-card .field { text-align: left; }
+.gift-card input { width: 100%; font: inherit; min-height: 48px; padding: 10px 12px; border: 1.5px solid var(--line-strong, #9aa9b0); border-radius: 8px; }
+.gift-cols { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.gift-eyebrow { margin: 0; text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.8125rem; color: var(--muted, #5b6b73); }
+.gift-inside h2 { margin: 0; font-size: 2rem; color: var(--ink, #12303a); }
+.gift-inside { display: grid; gap: 14px; }
+.gift-from { margin: 0; font-weight: 600; }
+.gift-msg { margin: 0; padding: 12px 16px; background: var(--snow, #f3f6f7); border-radius: 10px; font-style: italic; }
+.gift-what { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.gift-what li { padding: 6px 14px; border-radius: 999px; background: #e3f3ea; color: #17543a; font-weight: 700; }
+.gift-code-label { margin: 0; color: var(--muted, #5b6b73); }
+.gift-code { margin: 0; font: 700 1.75rem/1.2 ui-monospace, monospace; letter-spacing: 0.12em; }
+.gift-balance b { font-size: 1.5rem; }
+.gift-box { position: relative; width: 180px; height: 170px; margin: 8px auto; border: 0; background: transparent; cursor: pointer; }
+.gift-base { position: absolute; left: 20px; right: 20px; bottom: 26px; height: 92px; background: #1a5fb4; border-radius: 8px; }
+.gift-base::after, .gift-lid::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 18px; margin-left: -9px; background: #f2b631; }
+.gift-lid { position: absolute; left: 10px; right: 10px; top: 32px; height: 30px; background: #164f97; border-radius: 6px; transition: transform 0.6s ease, opacity 0.6s ease; }
+.gift-tap { position: absolute; left: 0; right: 0; bottom: 0; font-weight: 700; color: var(--ink, #12303a); }
+.gift-box:hover .gift-lid, .gift-box:focus-visible .gift-lid { transform: translateY(-6px) rotate(-4deg); }
+.gift-box.open .gift-lid { transform: translateY(-80px) rotate(-25deg); opacity: 0; }
+.gift-box:focus-visible { outline: 3px solid var(--focus, #f2b631); outline-offset: 4px; border-radius: 12px; }
+@media (prefers-reduced-motion: reduce) { .gift-lid { transition: none; } }
