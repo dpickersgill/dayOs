@@ -27,7 +27,7 @@ function dayChoices(today) {
 export async function householdSections(into, { acall, slug, onChange }) {
   let d;
   try { d = await acall('GET', '/account'); } catch (e) { into.append(h('p', { class: 'error-box' }, e.message)); return; }
-  const kids = [buyCard(d, acall, slug), ticketsCard(d), rewardsCard(d, slug), renewCard(d, acall, slug), familyCard(d, acall, onChange), receiptsCard(d)].filter(Boolean);
+  const kids = [buyCard(d, acall, slug), ticketsCard(d), rewardsCard(d, slug), renewCard(d, acall, slug), d.autorenew ? autoRenewCard(acall) : null, familyCard(d, acall, onChange), receiptsCard(d)].filter(Boolean);
   clear(into).append(...kids);
 }
 
@@ -138,7 +138,7 @@ function renewCard(d, acall, slug) {
         r.has_photo ? h('p', { class: 'small' }, 'Is this photo still a good likeness? Then you do not need a new one.') : h('p', { class: 'small' }, 'No photo on file. Buy the pass in the shop with a new photo.'),
         h('div', { class: 'row' }, yes, h('a', { class: 'btn', href: `/shop/${encodeURIComponent(slug)}` }, 'Use a new photo')), msg, box);
     }),
-    d.autorenew ? h('p', { class: 'small muted' }, 'Want it to renew by itself next year? Turn on "Renew automatically" on the pass once you have it.') : null);
+    null);
 }
 
 // ---------------------------------------------------------------- the saved family
@@ -210,4 +210,32 @@ function receiptsCard(d) {
   if (!d.receipts.length) return null;
   return h('section', { class: 'card stack', 'aria-labelledby': 'hh-rc-h' }, h('h2', { id: 'hh-rc-h' }, 'Receipts'),
     h('ul', { class: 'hh-receipts' }, d.receipts.map((r) => h('li', null, h('a', { href: r.link }, `Order ${r.reference}`), h('span', { class: 'muted small' }, ` ${r.paid_on ? fmtDay(r.paid_on) : ''}, ${money(r.amount_cents)}`)))));
+}
+
+// ---------------------------------------------------------------- renew automatically (lib/autorenew.js, Track FAIR)
+function autoRenewCard(acall) {
+  const box = h('section', { class: 'card stack', 'aria-labelledby': 'hh-ar-h', hidden: true });
+  const money = (c) => (Number(c) / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+  const draw = async () => {
+    let r;
+    try { r = await acall('GET', '/autorenew'); } catch (_) { return; }
+    if (!r || !r.available || !r.people || !r.people.length) { box.hidden = true; return; }
+    box.hidden = false;
+    box.replaceChildren(h('h2', { id: 'hh-ar-h' }, 'Renew automatically'),
+      h('p', { class: 'small muted' }, `Keep your season pass for next season at the best price, with no rush${r.renews_on ? ` (renewals run ${fmtDay(r.renews_on)})` : ''}. You get a reminder a week before, and you can turn it off any time before then.`),
+      ...r.people.map((x) => {
+        const msg = h('p', { class: 'small', role: 'status', 'aria-live': 'polite' });
+        const sw = h('input', { type: 'checkbox', checked: x.on, id: `ar-${x.person_id}` });
+        sw.addEventListener('change', async () => {
+          sw.disabled = true; msg.textContent = '';
+          try { await acall('POST', '/autorenew', { person_id: x.person_id, on: sw.checked }); msg.textContent = sw.checked ? 'Turned on. We will email you before it renews.' : 'Turned off.'; } catch (err) { sw.checked = !sw.checked; msg.textContent = err.message; }
+          sw.disabled = false;
+        });
+        return h('div', { class: 'hh-renew' },
+          h('label', { for: `ar-${x.person_id}`, class: 'row' }, sw, h('span', null, h('b', null, `${x.name}: ${x.pass}`), x.price_cents !== null ? ` renews at ${money(x.price_cents)}` : '', x.card ? ` on the ${x.card.brand || 'card'} ending ${x.card.last4}` : '')),
+          x.on && !x.card ? h('p', { class: 'small muted' }, 'We will email you a link to add the card it renews on.') : null, msg);
+      }));
+  };
+  draw();
+  return box;
 }

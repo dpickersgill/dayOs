@@ -59,7 +59,7 @@ function valueOf(reward, choice, { line = null, orderCents = 0 } = {}) {
   const o = shape(reward).options[choice];
   if (!o) return 0;
   if (choice === 'free_ticket') return line && (!o.product_id || Number(o.product_id) === Number(line.product_id)) ? Number(line.unit_cents) : 0;
-  if (choice === 'percent') return line ? Math.round(Number(line.unit_cents) * Math.min(100, Number(o.percent)) / 100) : 0;
+  if (choice === 'percent') return line && (!o.product_id || Number(o.product_id) === Number(line.product_id)) ? Math.round(Number(line.unit_cents) * Math.min(100, Number(o.percent)) / 100) : 0; // a percent offer may name one product (a season pass offer)
   return Math.min(Number(o.cents), Math.max(0, Number(orderCents)));
 }
 

@@ -523,6 +523,15 @@ router.post('/orders/:id/send-receipt', requireRole(...sellers), validate(z.obje
   }
   if (!req.body.email) throw bad('Enter the email address');
   if (!mailer.enabled()) throw conflict('Email is not set up for this mountain.');
+  // The designed confirmation (Track ACCOUNT's salemail.confirmation) when the order's guest has this email on file.
+  try {
+    const SM = require('../lib/salemail');
+    const c = await SM.confirmation(tenantId, { orderId: o.id }, require('../lib/baseurl').baseUrl(req));
+    if (c && c.to && c.to.email && c.to.email.toLowerCase() === req.body.email.toLowerCase()) {
+      const r0 = await mailer.send({ tenantId, to: c.to.email, fromName: t.name, subject: c.subject, text: c.text, html: c.html, tag: 'window-receipt' });
+      if (r0.ok) { await audit(pool, req, 'send_receipt', 'orders', o.id, { by: 'email', designed: true }); return res.json({ ok: true, by: 'email' }); }
+    }
+  } catch (_) { /* the plain receipt below still goes */ }
   const text = [`Thanks for coming to ${t.name}!`, '', `Order ${o.id}: ${money(o.total_cents)}`, '', ...(lines.length ? ['Your tickets (show the code at the gate):', ...lines, ''] : []), t.phone ? `Questions? Call ${t.phone}.` : ''].join('\n');
   const r = await mailer.send({ tenantId, to: req.body.email, fromName: t.name, subject: `Your receipt from ${t.name}`, text, tag: 'window-receipt' });
   if (!r.ok) throw conflict('The email could not be sent.');

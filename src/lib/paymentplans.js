@@ -49,7 +49,7 @@ async function planProducts(db, tenantId, ids) {
 async function quote(db, tenantId, basket) {
   const s = await G.get(db, tenantId);
   if (!Number(s.plans_on)) return { available: false };
-  const total = Number(basket && basket.total_cents);
+  const total = Number(basket && (basket.total_cents !== undefined ? basket.total_cents : basket.total)); // the shop sends total
   const count = Number(s.plans_count) || 3;
   if (!(total >= count * 100)) return { available: false };
   const ids = [...new Set(((basket && basket.lines) || []).map((l) => Number(l.product_id)).filter(Boolean))];

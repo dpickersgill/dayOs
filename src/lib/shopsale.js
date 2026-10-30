@@ -113,6 +113,11 @@ async function quote(conn, tenant, items, extras = {}) {
     // A season pass carries the holder's photo, which the gate shows next to the name. The price check runs without it
     // (the photo is only sent with the order); placing the order needs it.
     if (product.kind === 'season_pass' && extras.needPhoto && !h.photo) throw bad(`${h.first_name} ${h.last_name} needs a photo for the season pass`);
+    // A capped pass (Track FAIR's pass caps and waitlist): none left means the waitlist, unless this guest holds an offer.
+    if (product.kind === 'season_pass') {
+      const places = await require('./autorenew').passPlaces(conn, tenant.id, product.id, { email: extras.email || extras.contact_email || null }).catch(() => null);
+      if (places && places.left !== Infinity && places.left <= 0) throw conflict(`${product.name} is sold out for now. Join the waitlist and we will email you when a place opens.`);
+    }
     const tier = h.date_of_birth ? await tierFor(conn, tenant.id, h.date_of_birth, day) : h.age_group;
     const base = await unitPrice(conn, tenant.id, product.id, tier, day);
     const adv = advance(product, today, day, base.cents);
@@ -525,7 +530,7 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
   const paidNow = q.plan ? Number(row.amount_cents) : q.total; // a payment plan: the first payment now, the rest on schedule
   await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, processor, processor_account, platform_fee_cents) VALUES (?, ?, 'card', ?, ?, 'stripe', ?, ?)",
     [tenantId, orderId, paidNow, paymentIntent, payee.account || null, payee.feeCents || 0]);
-  if (q.plan) await require('./paymentplans').start(conn, tenantId, { id: orderId, shop_order_id: row.id, total_cents: q.total, paid_cents: paidNow, payment_intent: paymentIntent, person_id: contact.id }, { plan: q.plan });
+  if (q.plan) await require('./paymentplans').start(conn, tenantId, { id: orderId, shop_order_id: row.id, total_cents: q.total, paid_cents: paidNow, payment_intent: paymentIntent, person_id: contact.id, email: contact.email || null, name: [contact.first_name, contact.last_name].filter(Boolean).join(' ') || null, account: payee.account || null }, { plan: q.plan, count: q.plan && q.plan.count });
   await conn.query("UPDATE shop_orders SET status = 'paid', paid_at = NOW(), order_id = ?, payment_intent = COALESCE(?, payment_intent), note = ? WHERE tenant_id = ? AND id = ?",
     [orderId, paymentIntent, [waiverNeeded.length ? `Waiver still to sign at the gate: ${waiverNeeded.join(', ')}.` : '', overLimit.length ? `Payment arrived late: ${overLimit.map(dayText).join(', ')} went over the daily limit.` : '', overSlots.length ? `Payment arrived late: ${overSlots.join(', ')} went over its places.` : ''].filter(Boolean).join(' ').slice(0, 300) || null, tenantId, row.id]);
   await audit(conn, { auth: { tenantId, userId: null } }, 'shop_paid', 'shop_orders', row.id, { tickets: tickets.length, order_id: orderId });
@@ -542,7 +547,7 @@ async function reloadable(conn, tenantId, number, today, lock = false) {
   if (raw.length < 4 || raw.length > 32) return null;
   const cands = [...new Set([raw, ...A.uidCandidates(raw)])];
   const card = await one(conn, `SELECT * FROM rfid_cards WHERE tenant_id = ? AND (UPPER(REPLACE(REPLACE(label, ' ', ''), '-', '')) = ? OR uid IN (?)) ORDER BY id LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [tenantId, raw, cands]);
-  if (!card || !['free', 'assigned'].includes(card.status)) return null;
+  if (!card || !['free', 'assigned'].includes(card.status)) { await require('./fairprice').noteFailedReload(conn, tenantId, { uid: raw, why: card ? 'card not usable' : 'no such card' }).catch(() => {}); return null; } // many failures in a day go to the scan review
   if (card.ticket_id) {
     const held = await one(conn, 'SELECT t.status, t.valid_to, p.kind FROM tickets t JOIN products p ON p.tenant_id = t.tenant_id AND p.id = t.product_id WHERE t.tenant_id = ? AND t.id = ?', [tenantId, card.ticket_id]);
     if (held && held.status === 'active' && (held.kind === 'season_pass' || dstr(held.valid_to) >= today)) return { ...card, busy: true };
