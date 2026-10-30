@@ -49,6 +49,14 @@ async function findCard(conn, tenantId, raw, { lock = false } = {}) {
 
 const looksLikeTicketCode = (s) => /^[0-9A-F]{20}$/.test(s);
 
+/** A compact welcome for the gate: { visit, first_visit, birthday } (birthday: 'today', a weekday, or null). Nothing private. */
+async function gateWelcome(conn, tenantId, personId, today, tz) {
+  const v = await require('./guestvisits').summary(conn, tenantId, personId, today, tz);
+  const p = await one(conn, 'SELECT date_of_birth FROM people WHERE tenant_id = ? AND id = ?', [tenantId, personId]);
+  const b = require('./windowsale').birthdayThisWeek(p && p.date_of_birth, today);
+  return { visit: Math.max(v.this_season, 1), first_visit: v.total <= 1, birthday: b ? b.weekday : null };
+}
+
 /**
  * Decide and log one scan, inside the caller's transaction.
  * input: { code?, uid?, location?, override?, deviceId?, clientRef?, via, attractionId? }
@@ -114,6 +122,8 @@ async function decide(conn, tenantId, input) {
       guest_type: p && p.tier ? p.tier : null, guest_type_name: p && p.tier ? (p.tier_name || p.tier.charAt(0).toUpperCase() + p.tier.slice(1)) : null };
     // Only when the mountain uses waivers and the ticket has a named holder: true or false, otherwise null (nothing to show).
     holder.waiver = tenant.waiver_text && p && p.id ? Boolean(await one(conn, ON_FILE, [tenantId, p.id, seasonFor(today)])) : null;
+    // The welcome back at the gate (Track WINDOW, display only): the visit number this season and a birthday this week.
+    holder.welcome = p && p.id && result === 'ok' ? await gateWelcome(conn, tenantId, p.id, today, tenant.timezone).catch(() => null) : null;
     if (!rule && p && p.kind === 'activity' && result === 'no_uses') rule = { reason: 'Already used. An activity ticket lets one guest in once.' };
     if (!rule && p && p.kind === 'activity' && (result === 'not_yet_valid' || result === 'expired')) rule = { reason: `This ticket is for ${String(t.valid_from).slice(0, 10)} only.` };
   }

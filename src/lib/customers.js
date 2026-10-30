@@ -104,14 +104,17 @@ function missingFields(person, required, sale) {
   const minor = Boolean(sale && sale.today) && ageOn(person.date_of_birth, sale.today) !== null && ageOn(person.date_of_birth, sale.today) < 18;
   const out = [];
   const want = new Set(required);
-  if (sale) { want.add('first_name'); want.add('last_name'); want.add('date_of_birth'); want.add('sex'); }
+  if (sale) { want.add('first_name'); want.add('last_name'); if (!sale.light) { want.add('date_of_birth'); want.add('sex'); } }
+  // sale.light (Track WINDOW, 2026.11.8): a day ticket needs only a name, no date of birth or sex; sale.noContact: a
+  // guest on someone else's sale (the buyer is the contact) needs no phone or email either.
+  if (sale && sale.noContact) { want.delete('phone'); want.delete('email'); }
   for (const key of want) {
     if (key === PURCHASER_KEY) continue;
     if (minor && (key === 'phone' || key === 'email')) continue;
     const f = BY_KEY.get(key);
     if (f && isBlank(person[key])) out.push(f.label);
   }
-  if (sale && !minor && isBlank(person.phone) && isBlank(person.email) && !want.has('phone') && !want.has('email')) out.push('Phone or email');
+  if (sale && !minor && !sale.noContact && isBlank(person.phone) && isBlank(person.email) && !want.has('phone') && !want.has('email')) out.push('Phone or email');
   return out;
 }
 

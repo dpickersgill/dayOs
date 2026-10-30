@@ -31,6 +31,7 @@ const LS = require('../lib/lessonsale');
 const { studentClash, clashWords, spotsLeft } = require('../lib/lessonrules');
 const { heldWords } = require('../lib/lessonbooking');
 const SH = require('../lib/shopsale');
+const WIN = require('../lib/windowsale');
 
 const checkout = express.Router();
 const giftCards = express.Router();
@@ -91,7 +92,11 @@ const paymentSchema = z.object({
   terminal_payment_id: z.number().int().positive().optional(), // a card taken on the counter's card reader (routes/terminal.js)
 });
 
-const quoteSchema = z.object({ date: dateStr.optional(), promo_code: z.string().max(40).optional(), lines: z.array(lineSchema).min(1).max(50) });
+// A reward the guest holds (lib/rewards.js), used at the window: by id (the welcome-back card) or by its code, with the
+// choice the guest made, on one line of the basket (its index; the first line it fits when left out).
+const rewardUse = z.object({ reward_id: z.number().int().positive().optional(), code: z.string().trim().max(20).optional(), choice: z.enum(['free_ticket', 'percent', 'credit']), line: z.number().int().min(0).max(49).optional() })
+  .refine((r) => r.reward_id || r.code, 'Give the reward or its code');
+const quoteSchema = z.object({ date: dateStr.optional(), promo_code: z.string().max(40).optional(), lines: z.array(lineSchema).min(1).max(50), rewards: z.array(rewardUse).max(5).optional() });
 const checkoutSchema = z.object({
   channel: z.enum(['window', 'online', 'phone', 'group']).default('window'),
   customer: personSpec.optional(),
@@ -107,6 +112,7 @@ const checkoutSchema = z.object({
   follow_types: z.boolean().optional(),
   // A day at its ticket limit (online and window sales together): a manager can still sell, and says why.
   over_limit_reason: z.string().trim().max(300).optional(),
+  rewards: z.array(rewardUse).max(5).optional(),
 });
 const QUICK_KINDS = ['day_ticket', 'multi_day', 'punch_card', 'voucher'];
 
@@ -209,6 +215,8 @@ async function priceLines(conn, tenantId, lines, today) {
       out.push({ i, line: ln, type: 'gift_card', name: 'Gift card', detail: ln.recipient_name ? `for ${ln.recipient_name}` : '', quantity: 1, unit: ln.amount_cents });
     }
   }
+  // Group prices (Track WINDOW): a product's price per person from N people on the same day, when it is lower.
+  await WIN.applyGroupPrices(conn, tenantId, out);
   // Sibling discounts on programs run in sessions: the second and later child in the same program pay less.
   const regs = out.filter((p) => p.reg).map((p) => p.reg);
   if (regs.length) {
@@ -233,7 +241,7 @@ async function totals(conn, tenantId, priced, promoCode, today, lock) {
   let subtotal = 0;
   let promoEligible = 0; // gift cards are not discounted
   for (const p of priced) {
-    p.cents = p.unit * p.quantity;
+    p.cents = p.unit * p.quantity - (p.unitOff || []).reduce((n, c) => n + c, 0); // a reward used on this line (lib/windowsale.js)
     subtotal += p.cents;
     if (p.type !== 'gift_card') promoEligible += p.cents;
   }
@@ -251,6 +259,7 @@ async function totals(conn, tenantId, priced, promoCode, today, lock) {
 }
 
 const describe = (p) => ({ index: p.i, type: p.type, name: p.name, detail: p.detail, quantity: p.quantity, unit_price_cents: p.unit, line_cents: p.cents, discount_cents: p.discount || 0, tax_cents: p.tax || 0,
+  ...(p.group ? { group: p.group } : {}), ...(p.rewardsUsed ? { reward_cents: (p.unitOff || []).reduce((n, c) => n + c, 0), rewards: p.rewardsUsed } : {}),
   ...(p.partner ? { partner: { program: p.partner.program.name, kind: p.partner.kind, percent: p.partner.percent, window_cents: p.windowCents, used: p.partner.used, free_days: p.partner.program.free_days, discount_days: p.partner.program.discount_days, history: p.partner.history.map((h) => String(h.on_date).slice(0, 10)) } } : {}) });
 
 // ---------------------------------------------------------------- menu
@@ -295,6 +304,8 @@ checkout.get('/menu', requireRole(...sellers), async (req, res) => {
     quick_sale: { allowed: Boolean(tenant.quick_sale), kinds: QUICK_KINDS },
     tax_rules: await rows(pool, 'SELECT name, applies_to, rate_bps FROM tax_rules WHERE tenant_id = ? AND active = 1 ORDER BY id', [tenantId]),
     comp: { reasons: COMP_REASONS, counter_limit_cents: tenant.comp_counter_limit_cents, can_comp: ['owner', 'manager'].includes(req.auth.role) || tenant.comp_counter_limit_cents > 0 },
+    // refunds at the counter (Track WINDOW): managers always; counter staff up to this much per order (0: never)
+    refund: { counter_limit_cents: (await require('../lib/guestsettings').get(pool, tenantId)).counter_refund_limit_cents, can_refund: ['owner', 'manager'].includes(req.auth.role) || (await require('../lib/guestsettings').get(pool, tenantId)).counter_refund_limit_cents > 0 },
     partner_programs: (await rows(pool, 'SELECT id, name, product_id, levels, number_label, id_check, staff_note FROM partner_programs WHERE tenant_id = ? AND active = 1 ORDER BY name', [tenantId])).map((x) => ({ ...x, levels: PPS.levelsOf(x), id_check: Boolean(x.id_check) })),
   });
 });
@@ -326,8 +337,9 @@ checkout.post('/quote', requireRole(...sellers), validate(quoteSchema), async (r
   const tenant = await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId]);
   const today = todayIn(tenant.timezone);
   const priced = await priceLines(pool, tenantId, req.body.lines, today);
+  const used = await WIN.applyRewards(pool, tenantId, priced, req.body.rewards, today, { lock: false });
   const t = await totals(pool, tenantId, priced, req.body.promo_code, today, false);
-  res.json({ lines: priced.map(describe), subtotal_cents: t.subtotal, discount_cents: t.discount, tax_cents: t.tax, taxes: t.taxes, total_cents: t.total, gift_card_cents: t.giftCents, warnings: LS.dayWarnings(priced), over_limit: await overLimits(pool, tenantId, priced) });
+  res.json({ rewards: used, lines: priced.map(describe), subtotal_cents: t.subtotal, discount_cents: t.discount, tax_cents: t.tax, taxes: t.taxes, total_cents: t.total, gift_card_cents: t.giftCents, warnings: LS.dayWarnings(priced), over_limit: await overLimits(pool, tenantId, priced) });
 });
 
 // ---------------------------------------------------------------- checkout
@@ -355,6 +367,8 @@ async function runSale(conn, req, body, { check = false } = {}) {
 
     // ---- price first, so a bad line or a wrong payment fails before anything is saved
     const priced = await priceLines(conn, tenantId, lines, today);
+    // ---- rewards the guest is using (Track WINDOW): locked now, so two sales cannot both use one; marked used below
+    const rewardsUsed = await WIN.applyRewards(conn, tenantId, priced, body.rewards, today, { lock: !check });
     // ---- a day at its ticket limit: the same lock the online shop takes, so the window and the shop count one at a time.
     // The cashier sees the limit; only a manager goes over it, with a reason, and that is audited below.
     if (!check && priced.some((p) => p.type === 'ticket')) await conn.query('SELECT id FROM tenants WHERE id = ? FOR UPDATE', [tenantId]);
@@ -420,9 +434,20 @@ async function runSale(conn, req, body, { check = false } = {}) {
     }
     const isLesson = (types) => types.has('lesson') || types.has('lesson_package');
     const scopeFor = (types) => (isLesson(types) ? 'lesson' : types.has('ticket') || types.has('activity') || types.has('buyer') ? 'ticket' : 'none');
+    // A day ticket needs only a name (Track WINDOW): no date of birth or sex unless something else this person gets needs
+    // them (a season pass, a lesson, a rental, a program place, an activity). What is missing is shown, never blocking.
+    const fullFor = new Set();
+    for (const p of priced) {
+      if (p.type === 'gift_card') continue;
+      if (p.type === 'ticket') { if (p.product.kind === 'season_pass') for (const k of holdersOf(p.line)) fullFor.add(k); continue; }
+      fullFor.add(keyOf(p.line));
+    }
+    const softMissing = [];
     const resolve = async (key, spec) => {
       const types = usedBy.get(key);
-      const r = await resolvePerson(conn, tenantId, { personId: spec.person_id, details: spec.details, scope: scopeFor(types), source: body.channel, sale });
+      const light = !fullFor.has(key);
+      const r = await resolvePerson(conn, tenantId, { personId: spec.person_id, details: spec.details, scope: scopeFor(types), source: body.channel, sale: light ? { today, light: true, noContact: key !== 'customer' } : sale });
+      if (light && r.person) { const gap = WIN.softGaps(r.person); if (gap.length) softMissing.push({ key, person_id: r.id, name: `${r.person.first_name} ${r.person.last_name}`, missing: gap }); }
       if (r.notFound) throw notFound('Person');
       if (isLesson(types) && types.has('ticket')) await ensureRequired(conn, tenantId, r.person, 'ticket', sale);
       return r;
@@ -593,7 +618,7 @@ async function runSale(conn, req, body, { check = false } = {}) {
       }
     }
     if (check) {
-      throw new Checked({ ok: true, lines: priced.map(describe), subtotal_cents: t.subtotal, discount_cents: t.discount, tax_cents: t.tax, taxes: t.taxes, total_cents: t.total, gift_card_cents: t.giftCents, type_changes: typeChanges, warnings: LS.dayWarnings(priced), over_limit: over });
+      throw new Checked({ ok: true, missing: softMissing, rewards: rewardsUsed, lines: priced.map(describe), subtotal_cents: t.subtotal, discount_cents: t.discount, tax_cents: t.tax, taxes: t.taxes, total_cents: t.total, gift_card_cents: t.giftCents, type_changes: typeChanges, warnings: LS.dayWarnings(priced), over_limit: over });
     }
 
     // ---- the order
@@ -606,17 +631,27 @@ async function runSale(conn, req, body, { check = false } = {}) {
     const orderId = o.insertId;
     for (const tx_ of t.taxes) await conn.query('INSERT INTO order_taxes (tenant_id, order_id, name, rate_bps, amount_cents) VALUES (?, ?, ?, ?, ?)', [tenantId, orderId, tx_.name, tx_.rate_bps, tx_.amount_cents]);
     const done = { tickets: [], lessons: [], packages: [], rentals: [], programs: [], activities: [], gift_cards: [], program_adjustments: [] };
+    // the rewards used: marked used on this order (row locked above), and audited
+    for (const r of rewardsUsed) {
+      await require('../lib/rewards').redeem(conn, tenantId, r.id, { choice: r.choice, day: today, orderId, userId: req.auth.userId });
+      await audit(conn, req, 'redeem', 'guest_rewards', r.id, { order_id: orderId, choice: r.choice, value_cents: r.value_cents });
+    }
 
     for (const p of priced) {
       const ln = p.line;
       const unitsOf = p.type === 'ticket' ? p.quantity : 1; // a ticket line becomes one item per person
       let unitNo = 0;
-      const item = async (extra) => (await conn.query(
-        `INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, session_id, program_id, contract_id, gift_card_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [tenantId, orderId, extra.product_id ?? null, p.type, extra.person_id ?? null, extra.session_id ?? null, extra.program_id ?? null, extra.contract_id ?? null, extra.gift_card_id ?? null, ln.tier || 'adult', extra.quantity ?? p.quantity, p.unit,
-          extra.valid_on ?? null, split(p.discount, unitsOf)[Math.min(unitNo, unitsOf - 1)], split(p.tax, unitsOf)[Math.min(unitNo++, unitsOf - 1)]],
-      ))[0].insertId;
+      const item = async (extra) => {
+        const k = Math.min(unitNo++, unitsOf - 1);
+        const off = (p.unitOff || [])[k] || 0; // a reward used on this unit lowers what it cost (lib/windowsale.js)
+        const qty = extra.quantity ?? p.quantity;
+        return (await conn.query(
+          `INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, session_id, program_id, contract_id, gift_card_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents, reward_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [tenantId, orderId, extra.product_id ?? null, p.type, extra.person_id ?? null, extra.session_id ?? null, extra.program_id ?? null, extra.contract_id ?? null, extra.gift_card_id ?? null, ln.tier || 'adult', qty,
+            qty === 1 ? p.unit - off : p.unit, extra.valid_on ?? null, split(p.discount, unitsOf)[k], split(p.tax, unitsOf)[k], (p.unitReward || [])[k] || null],
+        ))[0].insertId;
+      };
 
       if (p.type === 'ticket') {
         const validTo = addDays(p.validOn, Math.max(p.product.valid_days, 1) - 1);
@@ -769,7 +804,7 @@ async function runSale(conn, req, body, { check = false } = {}) {
       id: orderId, person_id: buyer.id, customer: buyer.id ? { id: buyer.id, created: buyer.created, matched: buyer.matched } : null,
       subtotal_cents: t.subtotal, discount_cents: t.discount, tax_cents: t.tax, taxes: t.taxes, total_cents: t.total, change_due_cents: change,
       lines: priced.map(describe), payments: body.payments.map((p) => ({ tender: p.tender, amount_cents: p.amount_cents })),
-      type_changes: typeChanges, warnings: LS.dayWarnings(priced), over_limit: over,
+      type_changes: typeChanges, warnings: LS.dayWarnings(priced), over_limit: over, missing: softMissing, rewards: rewardsUsed,
       ...done,
     };
   }

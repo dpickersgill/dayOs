@@ -156,6 +156,8 @@ router.get('/lookup', requireRole(...readers), patrolLookup, async (req, res) =>
     const wv = new Set(waivers.map((w) => w.person_id));
     const rt = new Set(rentals.map((r) => r.person_id));
     out = out.map((p) => ({ ...p, flags: flags.filter((f) => f.person_id === p.id).map((f) => ({ kind: f.kind, message: f.message })), summary: { waiver_this_season: wv.has(p.id), tickets_today: tickets.filter((t) => t.person_id === p.id).map((t) => t.name), rental_out: rt.has(p.id) } }));
+    // Two people with the same name: what tells them apart (age, a parent or guardian, the last visit). Track WINDOW.
+    out = await require('./guestswindow').tellApart(pool, tenantId, out, today, tenant.timezone);
   }
   out = out.map(({ exact, ...p }) => p);
   if (req.auth.role === 'patrol') await audit(pool, req, 'lookup', 'people', null, { by: kind, results: out.length });

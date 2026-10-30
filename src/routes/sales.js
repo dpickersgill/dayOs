@@ -174,7 +174,9 @@ const refundBody = z.object({
  * a ticket already scanned or a lesson already attended stops the refund, so staff sort that out first. The money goes back the
  * way it came (cash, card, gift card); gift card money is put back on the card, the rest happens at the till or processor.
  */
-router.post('/orders/:id/refund', requireRole('manager'), validate(refundBody), async (req, res) => {
+// Counter staff may refund up to the mountain's counter refund limit per order (guest_settings, Track WINDOW); above it,
+// or when the limit is 0, a manager.
+router.post('/orders/:id/refund', requireRole('counter', 'manager'), validate(refundBody), async (req, res) => {
   const orderId = paramId(req);
   const { tenantId } = req.auth;
   const body = req.body;
@@ -238,6 +240,7 @@ router.post('/orders/:id/refund', requireRole('manager'), validate(refundBody), 
       amount = Math.max(realPaid - Number(back.cents), 0);
       taxPart = Math.max(Math.round(order.tax_cents * ratio) - Number(back.tax), 0);
     }
+    await require('./guestswindow').refundAllowed(conn, req, orderId, amount);
     // A large refund needs the second check (STEP_UP_REFUND_CENTS, $200 by default).
     const big = Number(process.env.STEP_UP_REFUND_CENTS || 20000);
     if (amount > big) require('../lib/stepup').require(req, `refund more than $${(big / 100).toFixed(0)}`);
@@ -327,6 +330,11 @@ router.post('/orders/:id/refund', requireRole('manager'), validate(refundBody), 
       if (x.method === 'card' && x.cents > 0 && x.ref) { await cardrefund.markPending(conn, tenantId, r.insertId, x.ref); cardRows.push(r.insertId); }
     }
     await conn.query('UPDATE order_items SET refunded_at = NOW(), refund_id = ? WHERE tenant_id = ? AND id IN (?)', [refundIds[0], tenantId, ids]);
+    // A reward used on a refunded line is the guest's again (lib/rewards.js release; the whole order, or just those lines).
+    const rewardIds = [...new Set(lines.map((l) => l.reward_id).filter(Boolean))];
+    if (lines.length === open.length) await require('../lib/rewards').release(conn, tenantId, orderId);
+    else if (rewardIds.length) await conn.query("UPDATE guest_rewards SET status = 'offered', chosen = NULL, order_id = NULL, redeemed_at = NULL, redeemed_by = NULL WHERE tenant_id = ? AND order_id = ? AND id IN (?) AND status = 'redeemed'", [tenantId, orderId, rewardIds]);
+    if (rewardIds.length) await audit(conn, req, 'release', 'guest_rewards', null, { order_id: orderId, reward_ids: rewardIds });
     const stillOpen = open.length - lines.length;
     await conn.query('UPDATE orders SET refunded_cents = refunded_cents + ?, status = ? WHERE tenant_id = ? AND id = ?', [amount, stillOpen ? 'paid' : 'refunded', tenantId, orderId]);
     await audit(conn, req, 'refund', 'orders', orderId, { amount_cents: amount, reason: body.reason, lines: ids.length, whole: !stillOpen });
