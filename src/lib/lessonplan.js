@@ -362,6 +362,14 @@ async function preview(db, tenantId, plan, { lock = false } = {}) {
     update.push({ id: e.id, date: w.date, product: w.product, before: e, row: w.row, differs: words(diff.filter((f) => f !== 'plan_slot')) });
   }
   const remove = existing.filter((e) => !taken.has(e.id) && String(e.starts_at) > now).map((e) => ({ id: e.id, date: String(e.starts_at).slice(0, 10), start: String(e.starts_at).slice(11, 16), product_id: e.product_id, booked: Number(e.booked), asked: Number(e.asked), waiting: Number(e.waiting), in_use: inUse(e), refs: Number(e.refs), before: e }));
+  // Lessons made by hand (or by another plan) at the same time with the same product: the plan's lesson is made too.
+  if (create.length) {
+    const others = await rows(db, "SELECT DATE_FORMAT(starts_at, '%Y-%m-%d %H:%i') AS at, product_id FROM lesson_sessions WHERE tenant_id = ? AND status <> 'cancelled' AND (plan_id IS NULL OR plan_id <> ?) AND starts_at >= ? AND starts_at < ?",
+      [tenantId, plan.id, `${from} 00:00:00`, `${addDays(planTo, 1)} 00:00:00`]);
+    const seen = new Set(others.map((o) => `${o.at}|${o.product_id}`));
+    const twice = create.filter((w) => seen.has(`${w.date} ${w.slot.start}|${w.row.product_id}`));
+    if (twice.length) warn('overlap', `${twice.length === 1 ? 'One new lesson starts' : `${twice.length} new lessons start`} at the same time as a lesson of the same product already on the schedule (${daysWords(twice.map((w) => w.date))}). Both will be on sale; cancel the old one in Lessons if the plan replaces it.`, { dates: [...new Set(twice.map((w) => w.date))] });
+  }
   if (assignLater.length) warn('instructor', `${assignLater.length === 1 ? 'One lesson is' : `${assignLater.length} lessons are`} made with "Assign later" because the named instructor cannot teach it that day. See the list below.`);
 
   const privateDays = days.filter((d) => d.private || d.closed).map((d) => ({ date: d.date, closed: d.closed, private: d.private }));

@@ -3447,3 +3447,55 @@ fieldset.safety legend { font-weight: 700; padding: 0 4px; }
 .fair-who img { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; flex: none; }
 .fair-pass { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 6px; display: grid; gap: 4px; }
 .fair-pass:first-of-type { border-top: 0; margin-top: 0; padding-top: 0; }
+
+/* ---- Ski school, the season plan (2026.11.9, Track PLAN: school-plan.js): day types, the month calendar, check and publish */
+.plan-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.plan-editor .plan-head-card h2 { margin: 0; }
+.plan-parts > .tabs { flex-wrap: wrap; }
+.plan-type { border-left: 6px solid var(--type, var(--line-strong)); }
+.plan-type h3 { display: flex; align-items: center; gap: 8px; margin: 0; }
+.plan-swatch { display: inline-block; width: 14px; height: 14px; border-radius: 3px; background: var(--type, var(--line-strong)); flex: none; }
+.plan-kinds { grid-template-columns: 1fr 1fr; }
+.plan-lengths { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 4px 12px; border: 0; padding: 0; margin: 0; }
+.plan-lengths legend { font-weight: 700; margin-bottom: 6px; padding: 0; }
+.plan-weekdays { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.plan-cal-head h3 { margin: 0; text-align: center; flex: 1; }
+.plan-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.plan-key { display: inline-flex; align-items: center; gap: 6px; font-size: .9rem; }
+.plan-month { display: grid; gap: 4px; }
+.plan-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.plan-head > div { font-weight: 700; font-size: .85rem; color: var(--quiet); text-align: center; padding: 4px 0; }
+.plan-cell { min-height: 112px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); position: relative; display: flex; flex-direction: column; overflow: hidden; }
+.plan-cell.plan-out { background: transparent; border-color: transparent; }
+.plan-cell.plan-none { background: var(--surface-2); }
+.plan-cell.plan-today { outline: 2px solid var(--trail-blue); outline-offset: -2px; }
+.plan-num { position: absolute; top: 4px; right: 6px; font-weight: 700; font-size: .85rem; color: var(--quiet); pointer-events: none; }
+.plan-dayname { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.plan-daybtn { flex: 1; display: flex; flex-direction: column; align-items: stretch; gap: 2px; width: 100%; padding: 6px 6px 6px 10px; border: 0; border-left: 5px solid var(--type, var(--line-strong)); background: color-mix(in srgb, var(--type, transparent) 9%, transparent); color: var(--ink); text-align: left; font: inherit; font-size: .8rem; cursor: pointer; }
+.plan-daybtn:hover { background: color-mix(in srgb, var(--type, transparent) 18%, transparent); }
+.plan-daybtn:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
+.plan-daybtn.plan-closed { background: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--type, #888) 14%, transparent) 6px 8px); }
+.plan-type-name { font-weight: 700; padding-right: 20px; }
+.plan-holiday { color: var(--closed-ink); font-weight: 600; }
+.plan-lines { display: grid; gap: 1px; color: var(--ink-2); }
+.plan-lines > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plan-count { display: none; color: var(--ink-2); }
+.plan-booked { margin-top: auto; font-weight: 600; color: var(--open-ink); }
+.plan-summary .plan-big { font-size: 1.25rem; font-weight: 700; margin: 0; }
+.plan-patterns { margin-top: 24px; }
+@media (max-width: 720px) {
+  .plan-pair, .plan-kinds { grid-template-columns: 1fr; }
+  /* On a phone the month reads as a list of days, a week at a time. */
+  .plan-head { display: none; }
+  .plan-week { grid-template-columns: 1fr; gap: 4px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  .plan-cell { min-height: 0; }
+  .plan-cell.plan-out { display: none; }
+  .plan-cell.plan-none { display: none; }
+  .plan-week-empty { display: none; }
+  .plan-num { display: none; }
+  .plan-dayname { position: static; width: auto; height: auto; clip: auto; padding: 6px 10px 0; font-weight: 700; font-size: .9rem; }
+  .plan-daybtn { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-height: 44px; font-size: .9rem; }
+  .plan-lines { display: none; }
+  .plan-count { display: inline; }
+  .plan-booked { margin-top: 0; }
+}
