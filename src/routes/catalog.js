@@ -4,6 +4,16 @@ const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { crud } = require('../lib/crud');
 const { requireRole } = require('../middleware/auth');
+const SA = require('../lib/schoolaccess');
+
+// A ski school director (2026.11.9) changes lesson products and their prices only: a new product must be a lesson, and
+// a product changed must be one already (and stay one).
+const lessonOnly = SA.directorFor([], async (req) => {
+  if (req.body && req.body.kind !== undefined && req.body.kind !== 'lesson') return false;
+  if (!req.params.id) return req.method === 'POST' && req.body && req.body.kind === 'lesson';
+  const p = await one(pool, 'SELECT kind FROM products WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, Number(req.params.id) || 0]);
+  return Boolean(p) && p.kind === 'lesson';
+}, 'A ski school director can change lesson products only');
 const { partialOf, z, dateStr, tierEnum, validate, paramId } = require('../lib/util');
 const GT = require('../lib/guesttypes');
 const { unitPrice, applyPromo } = require('../lib/pricing');
@@ -133,7 +143,7 @@ products.delete('/:id/schedules/:sid', requireRole('manager'), async (req, res) 
 });
 
 // ---- tiers and calendar are nested under a product ----
-products.get('/:id/pricing', requireRole('manager', 'counter'), async (req, res) => {
+products.get('/:id/pricing', SA.directorFor(['counter'], async () => true), async (req, res) => {
   const pid = paramId(req);
   const [tiers, calendar] = await Promise.all([
     rows(pool, 'SELECT tier, price_cents FROM price_tiers WHERE tenant_id = ? AND product_id = ? ORDER BY tier', [req.auth.tenantId, pid]),
@@ -144,7 +154,7 @@ products.get('/:id/pricing', requireRole('manager', 'counter'), async (req, res)
 
 products.put(
   '/:id/tiers',
-  requireRole('manager'),
+  lessonOnly,
   validate(z.object({ tiers: z.array(z.object({ tier: tierEnum, price_cents: z.number().int().min(0) })).max(40) })),
   async (req, res) => {
     const pid = paramId(req);
@@ -164,7 +174,7 @@ products.put(
 /** Set or replace date-specific prices or blackouts. tier omitted = applies to all tiers. */
 products.put(
   '/:id/calendar',
-  requireRole('manager'),
+  lessonOnly,
   validate(
     z.object({
       entries: z
@@ -201,6 +211,7 @@ products.use(
     orderBy: 'kind, name',
     readRoles: ['counter', 'instructor'],
     writeRoles: ['manager'],
+    writeGuard: lessonOnly,
     allowDelete: false,
   }),
 );

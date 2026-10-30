@@ -29,8 +29,9 @@ const router = express.Router();
 const publicRouter = express.Router();
 const jobBase = () => config.stripe.publicUrl || config.site.appUrl || '';
 const teach = requireRole('instructor', 'manager');
-const desk = requireRole('manager', 'counter');
-const managers = requireRole('manager');
+const SA = require('../lib/schoolaccess'); // 2026.11.9: the school director and supervisor
+const desk = SA.school('supervisor', 'counter');
+const managers = SA.school('director');
 
 // ---------------------------------------------------------------- staff: recaps
 router.get('/recaps', teach, async (req, res) => res.json(await R.listFor(req)));

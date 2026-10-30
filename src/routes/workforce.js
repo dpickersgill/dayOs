@@ -15,6 +15,9 @@ const SH = require('../lib/shifts');
 const router = express.Router();
 const mgr = ['manager'];
 const selfRoles = ['staff', 'counter', 'instructor', 'patrol'];
+// 2026.11.9: a ski school director sets certifications on instructors' teaching profiles (someone who teaches), nobody else's.
+const teacherCerts = require('../lib/schoolaccess').directorFor(mgr, async (req) => Boolean(await one(pool, `SELECT st.id FROM staff st WHERE st.tenant_id = ? AND st.id = ?
+  AND (EXISTS (SELECT 1 FROM instructor_profiles ip WHERE ip.tenant_id = st.tenant_id AND ip.staff_id = st.id) OR EXISTS (SELECT 1 FROM users u WHERE u.tenant_id = st.tenant_id AND u.staff_id = st.id AND u.role = 'instructor'))`, [req.auth.tenantId, Number(req.params.id) || 0])), 'A ski school director can change certifications for instructors only');
 
 /**
  * Staff may only act on their own staff record. Managers pass any id (or fall back to their own).
@@ -219,7 +222,7 @@ router.patch(
   },
 );
 
-router.put('/staff/:id/certifications', requireRole(...mgr), validate(z.object({ certification_id: z.number().int().positive(), issued_on: dateStr.optional(), expires_on: dateStr.nullable().optional() })), async (req, res) => {
+router.put('/staff/:id/certifications', teacherCerts, validate(z.object({ certification_id: z.number().int().positive(), issued_on: dateStr.optional(), expires_on: dateStr.nullable().optional() })), async (req, res) => {
   const b = req.body;
   await pool.query(
     `INSERT INTO staff_certifications (tenant_id, staff_id, certification_id, issued_on, expires_on) VALUES (?, ?, ?, ?, ?)
@@ -230,7 +233,7 @@ router.put('/staff/:id/certifications', requireRole(...mgr), validate(z.object({
   res.json({ ok: true });
 });
 
-router.delete('/staff/:id/certifications/:cid', requireRole(...mgr), async (req, res) => {
+router.delete('/staff/:id/certifications/:cid', teacherCerts, async (req, res) => {
   const [r] = await pool.query('DELETE FROM staff_certifications WHERE tenant_id = ? AND staff_id = ? AND certification_id = ?', [req.auth.tenantId, paramId(req), paramId(req, 'cid')]);
   if (!r.affectedRows) throw notFound('Certification');
   await audit(pool, req, 'remove_certification', 'staff', paramId(req), { certification_id: paramId(req, 'cid') });

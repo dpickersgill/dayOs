@@ -12,10 +12,10 @@ const { audit } = require('./audit');
  *   GET /, GET /:id, POST /, PATCH /:id, DELETE /:id
  * Every statement carries tenant_id taken from the verified token.
  */
-function crud({ table, entity, createSchema, updateSchema, columns, filters = [], orderBy = 'id', readRoles = [], writeRoles = ['manager'], allowDelete = true, search }) {
+function crud({ table, entity, createSchema, updateSchema, columns, filters = [], orderBy = 'id', readRoles = [], writeRoles = ['manager'], writeGuard: guard = null, allowDelete = true, search }) {
   const router = express.Router();
   const readGuard = readRoles === 'any' ? (_q, _s, n) => n() : requireRole(...readRoles, ...writeRoles);
-  const writeGuard = requireRole(...writeRoles);
+  const writeGuard = guard || requireRole(...writeRoles); // guard: a route's own write check (Products: the school director, lessons only)
 
   router.get('/', readGuard, async (req, res) => {
     const where = ['tenant_id = ?'];
