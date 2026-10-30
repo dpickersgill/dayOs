@@ -116,7 +116,7 @@ async function main() {
     let res;
     try { res = await call('GET', `/private/times?date=${st.day}&offer_id=${st.offer.id}&instructor=${st.instructor}&discipline=${st.discipline}&level=${st.level}`); } catch (err) { slots.append(h('p', { class: 'error-box', role: 'alert' }, err.message)); return; }
     openDays = new Set(res.open_days || []);
-    if (!openDays.has(st.day) && openDays.size && !res.times.length) {
+    if (!openDays.has(st.day) && openDays.size && !res.times.length && !res.note) {
       const next = [...openDays].sort().find((d) => d >= first);
       if (next && next !== st.day) { st.day = next; return drawWhen(); }
     }

@@ -3465,3 +3465,4 @@ fieldset.safety legend { font-weight: 700; padding: 0 4px; }
 .sell-placement .sp-q { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
 .sell-placement .sp-q > span { flex: 1 1 220px; }
 .sl-next { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.gs-intro { margin: 0 0 12px; }

@@ -187,7 +187,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
         if (typeof a !== 'boolean' || (a ? qs[i].yes : qs[i].no)) break;
       }
       const lv = placedLevel(qs, answers);
-      box.append(h('div', { class: 'row', role: 'status' }, lv ? state(levelName(lv, disc), 'ok') : null, button(lv ? 'Clear' : 'Skip', () => { placement.delete(s); draw(); }, { small: true, kind: 'link' })));
+      box.append(h('div', { class: 'row', role: 'status' }, lv ? state(levelName(lv, disc), 'good') : null, button(lv ? 'Clear' : 'Skip', () => { placement.delete(s); draw(); }, { small: true, kind: 'link' })));
     };
     draw();
     return box;

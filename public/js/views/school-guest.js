@@ -49,7 +49,7 @@ const DISC = [['ski', 'Ski'], ['snowboard', 'Snowboard']];
 async function placementPage(panel) {
   let data = await get('/skischool/placement');
   const body = h('div', { class: 'stack' });
-  panel.append(h('p', { class: 'muted' }, 'Guests answer three yes or no questions for each student when they book, unless they pick a level. Each answer leads to the next question or to a level. The lineup uses that level to place a student who has none yet. Telemark and adaptive students are placed by the instructor.'), body);
+  panel.append(h('p', { class: 'muted gs-intro' }, 'Guests answer three yes or no questions for each student when they book, unless they pick a level. Each answer leads to the next question or to a level. The lineup uses that level to place a student who has none yet. Telemark and adaptive students are placed by the instructor.'), body);
 
   function draw() {
     clear(body);
