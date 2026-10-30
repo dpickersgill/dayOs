@@ -1,7 +1,7 @@
 'use strict';
 // The ski school's frequent job (POST /jobs/lessons, every 5 minutes) and its part of the daily job. Each part of the
 // school does its own work in tick() and daily(); one failing does not stop the others.
-const PARTS = ['lineup', 'parents', 'pay', 'director'];
+const PARTS = ['lineup', 'parents', 'pay', 'director', 'plan', 'staff'];
 
 async function run(kind) {
   const out = {};

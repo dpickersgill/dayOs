@@ -304,6 +304,8 @@ function createApp() {
   api.use('/skischool', require('./routes/schoolparents').router); // recaps, waitlists, levels
   api.use('/skischool', require('./routes/schoolpay').router); // instructor pay, privates by name
   api.use('/skischool', require('./routes/schooldirector').router); // copy a day, weather, staffing, reports
+  api.use('/skischool', require('./routes/schoolplan').router); // 2026.11.9: the season plan, private hours, placement
+  api.use('/skischool', require('./routes/schoolstaff').router); // 2026.11.9: spots that follow staff, the fill view, demand
   api.use('/guests', require('./routes/guests').router); // guest settings (round 2)
   api.use('/guests', require('./routes/guestswindow').router); // the welcome-back card, the window
   api.use('/guests', require('./routes/guestsaccount').router); // household accounts, confirmations

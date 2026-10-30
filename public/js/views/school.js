@@ -10,8 +10,10 @@ import * as lineupPart from './school-lineup.js';
 import * as parentsPart from './school-parents.js';
 import * as payPart from './school-pay.js';
 import * as directorPart from './school-director.js';
+import * as planPart from './school-plan.js';
+import * as staffPart from './school-staff.js';
 
-const PARTS = [lineupPart, parentsPart, payPart, directorPart];
+const PARTS = [lineupPart, parentsPart, payPart, directorPart, planPart, staffPart];
 
 const DISCIPLINES = ['ski', 'snowboard', 'telemark', 'adaptive'];
 const PSIA = [['none', 'None yet'], ['level1', 'PSIA-AASI Level 1'], ['level2', 'PSIA-AASI Level 2'], ['level3', 'PSIA-AASI Level 3']];
@@ -44,7 +46,7 @@ export async function render(root) {
     ['day', 'Today', ['myday', 'today', 'checkin', 'lineup']],
     ['bookings', pending ? `Bookings (${pending})` : 'Bookings', ['lessons', 'requests', 'privates', 'waitlist']],
     ['team', instructor ? 'My work' : 'Instructors', ['recaps', 'offers', 'mypay', 'guests', 'instructors', 'payroll', 'hours']],
-    ['plan', 'Planning', ['weather', 'copy', 'staffing', 'reports']],
+    ['plan', 'Planning', ['season', 'fill', 'weather', 'copy', 'staffing', 'reports']],
   ];
   const byKey = new Map(items.map((i) => [i[0], i]));
   const placed = new Set(GROUPS.flatMap((g) => g[2]));

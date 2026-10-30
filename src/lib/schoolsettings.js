@@ -21,6 +21,9 @@ const DEFAULTS = {
   private_accept_minutes: 120, // how long an instructor has to accept a private asked for by name
   private_decline: 'offer_other', // offer_other or refund, when the instructor declines or does not answer
   what_to_bring: null, // Track CORE (db/steps/lessons2-core.js): in the confirmation; blank uses the lesson product's description
+  private_confirm: 'accept', // 2026.11.9: accept (the instructor says yes, as before) or auto (confirmed when a cleared instructor is free)
+  placement_questions: null, // 2026.11.9: JSON of the director's own placement questions; null uses the built-in ones (lib/placement.js)
+  pool_spots_mode: 'staff', // 2026.11.9: new pool slots follow staff (staff) or keep the number typed (fixed)
 };
 
 const bool = z.union([z.boolean(), z.literal(0), z.literal(1)]).transform((v) => (v ? 1 : 0));
@@ -34,6 +37,7 @@ const schema = z.object({
   request_bonus_cents: z.number().int().min(0).max(100000),
   private_accept_minutes: z.number().int().min(15).max(2880), private_decline: z.enum(['offer_other', 'refund']),
   what_to_bring: z.string().trim().max(500).nullable(), // Track CORE
+  private_confirm: z.enum(['accept', 'auto']), pool_spots_mode: z.enum(['staff', 'fixed']), // 2026.11.9
 }).partial();
 
 async function get(db, tenantId) {
