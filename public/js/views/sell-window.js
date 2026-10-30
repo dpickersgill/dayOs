@@ -30,7 +30,8 @@ export function findBox({ onPerson, onLicense = null, onOrder = null, onReward =
     const mine = ++seq;
     if (q.length < 2) { clear(out); return; }
     let r;
-    try { r = await get(`/guests/find?q=${encodeURIComponent(q)}`); } catch (err) { if (mine === seq) clear(out).append(errorBox(err)); return; }
+    // a POST, so a scanned license never sits in a URL or a request log
+    try { r = await post('/guests/find', { q }); } catch (err) { if (mine === seq) clear(out).append(errorBox(err)); return; }
     if (mine !== seq) return;
     clear(out);
     const pick = (p) => { clear(out); box.value = ''; onPerson(p); };

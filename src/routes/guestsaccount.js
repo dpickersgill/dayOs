@@ -10,8 +10,8 @@ const crypto = require('crypto');
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
-const { z, dateStr, validate, todayIn, addDays, nowIn, seasonFor } = require('../lib/util');
-const { notFound, conflict, bad, unauthorized } = require('../lib/errors');
+const { z, dateStr, validate, todayIn, addDays, nowIn, seasonFor, dayRange } = require('../lib/util');
+const { notFound, conflict, bad, unauthorized, forbidden } = require('../lib/errors');
 const { baseUrl } = require('../lib/baseurl');
 const { audit } = require('../lib/audit');
 const { money, dayText, esc } = require('../lib/format');
@@ -359,10 +359,18 @@ router.patch('/account-settings', requireRole('manager'), validate(arrival.schem
   res.json(await arrival.get(pool, req.auth.tenantId));
 });
 /** The window sells a gift experience as a gift card: this adds the theme and delivery to a gift card just sold. */
+// A gift experience sends the card's code to the email given, so counter staff may add one only to a gift card they just
+// sold: on an order they rang up today, nothing spent. Any other card needs a manager.
 router.post('/gift-experiences', requireRole('manager', 'counter'), validate(giftSchema.extend({ gift_card_id: z.number().int().positive() })), async (req, res) => {
   const id = await tx(async (conn) => {
-    const c = await one(conn, 'SELECT id, order_id FROM gift_cards WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, req.body.gift_card_id]);
+    const c = await one(conn, 'SELECT id, order_id, initial_cents, balance_cents, status FROM gift_cards WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, req.body.gift_card_id]);
     if (!c) throw notFound('Gift card');
+    if (!['owner', 'manager'].includes(req.auth.role)) {
+      const t = await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId]);
+      const [from, to] = dayRange(t.timezone, todayIn(t.timezone));
+      const o = c.order_id ? await one(conn, "SELECT id FROM orders WHERE tenant_id = ? AND id = ? AND user_id = ? AND status = 'paid' AND created_at >= ? AND created_at < ?", [req.auth.tenantId, c.order_id, req.auth.userId, from, to]) : null;
+      if (!o || c.status !== 'active' || Number(c.balance_cents) !== Number(c.initial_cents)) throw forbidden('Counter staff can add a gift experience only to a gift card they sold today. Ask a manager.');
+    }
     if (await one(conn, 'SELECT id FROM gift_experiences WHERE tenant_id = ? AND gift_card_id = ?', [req.auth.tenantId, c.id])) throw conflict('That gift card already has a gift experience');
     const gid = await attachExperience(conn, req.auth.tenantId, { giftCardId: c.id, orderId: c.order_id, gift: req.body });
     await audit(conn, req, 'create', 'gift_experiences', gid, { gift_card_id: c.id });

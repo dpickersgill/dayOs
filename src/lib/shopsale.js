@@ -240,12 +240,13 @@ async function quote(conn, tenant, items, extras = {}) {
   const { tax, taxes } = applyTax(priced, discount, await loadRules(conn, tenant.id));
   priced.forEach((p, i) => { p.discount += rewardShare[i]; });
   const rewardCents = rewardShare.reduce((n, c) => n + c, 0);
-  const lines = detail.map((d, i) => ({ ...d, unit: priced[i].unit, tax: priced[i].tax, discount: priced[i].discount }));
+  // reward_cents: each line's part of a reward (also inside discount), kept on the order line (lib/linevalue.js)
+  const lines = detail.map((d, i) => ({ ...d, unit: priced[i].unit, tax: priced[i].tax, discount: priced[i].discount, reward_cents: rewardShare[i] }));
   const nT = detail.length;
-  addons.forEach((a, i) => { a.tax = priced[nT + i].tax; a.discount = priced[nT + i].discount; });
+  addons.forEach((a, i) => { a.tax = priced[nT + i].tax; a.discount = priced[nT + i].discount; a.reward_cents = rewardShare[nT + i]; });
   gifts.forEach((g, i) => { g.tax = 0; g.discount = 0; });
   const nA = nT + addons.length + gifts.length;
-  activities.forEach((a, i) => { a.unit = priced[nA + i].unit; a.tax = priced[nA + i].tax; a.discount = priced[nA + i].discount; });
+  activities.forEach((a, i) => { a.unit = priced[nA + i].unit; a.tax = priced[nA + i].tax; a.discount = priced[nA + i].discount; a.reward_cents = rewardShare[nA + i]; });
   // "Pay in N" (lib/paymentplans.js, Track FAIR): only when the guest asked for it and the mountain's plans allow this basket.
   let plan = null;
   if (extras.plan) {
@@ -459,7 +460,9 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
     const { who, waiver } = await holderOnFile(st, ln.valid_on, ln.tier, season);
     holderIds.push(who.id);
     if (!waiver && tenant.waiver_text) waiverNeeded.push(`${st.first_name} ${st.last_name}`);
-    const [it] = await conn.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents) VALUES (?, ?, ?, 'ticket', ?, ?, 1, ?, ?, ?, ?)", [tenantId, orderId, ln.product_id, who.id, ln.tier, ln.unit, ln.valid_on, ln.discount || 0, ln.tax || 0]);
+    const rc = Number(ln.reward_cents) || 0; // the part of a reward on this line: it carries the reward (a credit can cover several)
+    const [it] = await conn.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents, list_cents, reward_cents, reward_id) VALUES (?, ?, ?, 'ticket', ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)",
+      [tenantId, orderId, ln.product_id, who.id, ln.tier, ln.unit, ln.valid_on, ln.discount || 0, ln.tax || 0, ln.unit, rc, rc && q.reward ? q.reward.id : null]);
     lineItemIds.push(it.insertId);
     const code = newCode();
     const validTo = addDays(ln.valid_on, Math.max(ln.valid_days, 1) - 1);
@@ -484,7 +487,9 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
       const used = (await ACT.taken(conn, tenantId, [a.product_id], a.valid_on)).get(`${a.product_id}|${a.start_time || ''}`) || 0;
       if (cap !== null && cap !== undefined && used >= cap) overSlots.push(`${a.name} ${dayText(a.valid_on)}${a.start_time ? ` ${ACT.clock(a.start_time)}` : ''}`);
     }
-    const [it] = await conn.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents) VALUES (?, ?, ?, 'activity', ?, ?, 1, ?, ?, ?, ?)", [tenantId, orderId, a.product_id, who.id, a.tier, a.unit, a.valid_on, a.discount || 0, a.tax || 0]);
+    const arc = Number(a.reward_cents) || 0;
+    const [it] = await conn.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents, list_cents, reward_cents, reward_id) VALUES (?, ?, ?, 'activity', ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)",
+      [tenantId, orderId, a.product_id, who.id, a.tier, a.unit, a.valid_on, a.discount || 0, a.tax || 0, a.unit, arc, arc && q.reward ? q.reward.id : null]);
     const code = newCode();
     const [tk] = await conn.query('INSERT INTO tickets (tenant_id, order_item_id, person_id, product_id, code, valid_from, valid_to, uses_remaining) VALUES (?, ?, ?, ?, ?, ?, ?, 1)', [tenantId, it.insertId, who.id, a.product_id, code, a.valid_on, a.valid_on]);
     await ACT.book(conn, tenantId, { product, attractionId: a.attraction_id, day: a.valid_on, slot, personId: who.id, orderItemId: it.insertId, ticketId: tk.insertId, channel: 'online' });
@@ -494,14 +499,15 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
   // package is for its person, from the visit day (a voucher is the buyer's, from today).
   for (const a of q.addons || []) {
     const discEach = split(a.discount || 0, a.quantity); const taxEach = split(a.tax || 0, a.quantity); // shared evenly, so refunding one unit returns its share
+    const rewEach = split(Number(a.reward_cents) || 0, a.quantity);
     let personId = contact.id;
     if (a.for_item !== undefined && a.for_item !== null && holderIds[a.for_item]) personId = holderIds[a.for_item];
     else if (a.holder && a.valid_on) personId = (await holderOnFile(a.holder, a.valid_on, a.tier, seasonFor(a.valid_on))).who.id;
     // A basket saved before add-ons named their person and day: the first ticket day, as it was then.
     const day = a.kind === 'voucher' ? today : (a.valid_on || (q.lines || []).map((l) => l.valid_on).filter(Boolean).sort()[0] || today);
     for (let k = 0; k < a.quantity; k++) {
-      const [it] = await conn.query('INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)',
-        [tenantId, orderId, a.product_id, a.kind === 'voucher' ? 'ticket' : a.kind, personId, a.tier || 'adult', a.unit, day, discEach[k], taxEach[k]]);
+      const [it] = await conn.query('INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents, list_cents, reward_cents, reward_id) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)',
+        [tenantId, orderId, a.product_id, a.kind === 'voucher' ? 'ticket' : a.kind, personId, a.tier || 'adult', a.unit, day, discEach[k], taxEach[k], a.unit, rewEach[k], rewEach[k] && q.reward ? q.reward.id : null]);
       // A prepaid rental also waits in the rental shop's Ready to fit list, for the renter, on the visit day.
       if (a.kind === 'rental') await rentalToFit(conn, tenantId, { personId, orderId, orderItemId: it.insertId, productId: a.product_id, validOn: day });
       await conn.query('INSERT INTO tickets (tenant_id, order_item_id, person_id, product_id, code, valid_from, valid_to, uses_remaining) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -522,8 +528,11 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
   // (the second payment is refunded in full). The line it paid for carries reward_id; a refund puts it back (rewards.release).
   if (q.reward) {
     await require('./rewards').redeem(conn, tenantId, q.reward.id, { choice: q.reward.choice, day: q.reward.day, orderId, personIds: q.household || [] });
-    const itemId = q.reward.for_item !== null && q.reward.for_item !== undefined ? lineItemIds[q.reward.for_item] : lineItemIds[0];
-    if (itemId) await conn.query('UPDATE order_items SET reward_id = ? WHERE tenant_id = ? AND id = ?', [q.reward.id, tenantId, itemId]);
+    // Lines priced before reward_cents was kept (a basket saved earlier): the line it paid for, or the first.
+    if (!(await one(conn, 'SELECT id FROM order_items WHERE tenant_id = ? AND order_id = ? AND reward_id = ? LIMIT 1', [tenantId, orderId, q.reward.id]))) {
+      const itemId = q.reward.for_item !== null && q.reward.for_item !== undefined ? lineItemIds[q.reward.for_item] : lineItemIds[0];
+      if (itemId) await conn.query('UPDATE order_items SET reward_id = ? WHERE tenant_id = ? AND id = ?', [q.reward.id, tenantId, itemId]);
+    }
   }
   // A card reloaded online: the new day goes onto the card, so the guest goes straight to the lift.
   if (q.reload && q.reload.card_id && ticketIds[0]) await reloadCard(conn, tenantId, q.reload.card_id, ticketIds[0]);

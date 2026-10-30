@@ -111,6 +111,12 @@ async function chargeOne(chargeId, { base = null, notify = true } = {}) {
     if (!ch) return { result: 'skipped' };
     const plan = await one(conn, 'SELECT * FROM payment_plans WHERE id = ? FOR UPDATE', [ch.plan_id]);
     if (!['active', 'late', 'suspended'].includes(plan.status)) return { result: 'skipped' };
+    // Never charge for an order that was refunded (or whose every line was): stop the plan instead.
+    const order = await one(conn, "SELECT o.status, (SELECT COUNT(*) FROM order_items i WHERE i.tenant_id = o.tenant_id AND i.order_id = o.id AND i.refunded_at IS NULL) AS open FROM orders o WHERE o.tenant_id = ? AND o.id = ?", [plan.tenant_id, plan.order_id]);
+    if (!order || order.status !== 'paid' || !Number(order.open)) {
+      await stopForRefund(conn, plan.tenant_id, plan.order_id);
+      return { result: 'skipped' };
+    }
     let card = await one(conn, 'SELECT * FROM fair_cards WHERE id = ?', [plan.card_id]);
     let error = null; let ref = null; let fee = 0;
     try {
@@ -209,18 +215,21 @@ async function chargeNow(req, id) {
   await audit(pool, req, 'plan_charge_now', 'payment_plans', p.id, {});
   return { result: await chargeOne(c.id) };
 }
-/** Manager: the rest was paid another way (cash at the window, say), or forgiven. The pass works again. */
+/** Manager: the rest was paid another way (cash at the window, say), or forgiven. The pass works again (a canceled plan too). */
 async function settle(req, id, note) {
   await tx(async (conn) => {
     const p = await one(conn, 'SELECT * FROM payment_plans WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id]);
     if (!p) throw notFound('Payment plan');
-    if (['paid', 'settled', 'canceled'].includes(p.status)) throw conflict(`This plan is already ${p.status}`);
-    const [r] = await conn.query("UPDATE payment_plan_charges SET status = 'settled' WHERE plan_id = ? AND status IN ('due','failed')", [id]);
+    if (['paid', 'settled'].includes(p.status)) throw conflict(`This plan is already ${p.status}`);
+    const [r] = await conn.query("UPDATE payment_plan_charges SET status = 'settled' WHERE plan_id = ? AND status IN ('due','failed','canceled')", [id]);
     await conn.query("UPDATE payment_plans SET status = 'settled', note = ? WHERE id = ?", [note || null, id]);
     await audit(conn, req, 'plan_settled', 'payment_plans', id, { installments: r.affectedRows, note: note || null });
   });
 }
-/** Manager: stop charging. Nothing more is taken; the pass is held at the gate until a manager settles or refunds it. */
+/**
+ * Manager: stop charging. Nothing more is taken; the pass is held at the gate (fairprice.holdFor and the offline list in
+ * lib/access.js) until a manager settles the plan or refunds the order.
+ */
 async function cancel(req, id, note) {
   await tx(async (conn) => {
     const p = await one(conn, 'SELECT * FROM payment_plans WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id]);
@@ -230,6 +239,39 @@ async function cancel(req, id, note) {
     await conn.query("UPDATE payment_plans SET status = 'canceled', note = ? WHERE id = ?", [note || null, id]);
     await audit(conn, req, 'plan_canceled', 'payment_plans', id, { installments: r.affectedRows, note: note || null });
   });
+}
+
+// ---------------------------------------------------------------- refunds
+/** The whole order was refunded: nothing more is charged. Inside the refund's transaction. */
+async function stopForRefund(conn, tenantId, orderId, req = null) {
+  const p = await one(conn, "SELECT * FROM payment_plans WHERE tenant_id = ? AND order_id = ? AND status IN ('active','late','suspended') FOR UPDATE", [tenantId, orderId]);
+  if (!p) return null;
+  const [r] = await conn.query("UPDATE payment_plan_charges SET status = 'canceled', next_try_on = NULL WHERE plan_id = ? AND status IN ('due','failed')", [p.id]);
+  await conn.query("UPDATE payment_plans SET status = 'canceled', note = ? WHERE id = ?", ['Order refunded', p.id]);
+  await audit(conn, req || F.system(tenantId), 'plan_canceled', 'payment_plans', p.id, { installments: r.affectedRows, reason: 'order_refunded' });
+  return p.id;
+}
+/**
+ * Part of the order was refunded. The refund gave back only what was paid toward those lines (sales.js uses the share
+ * paid so far); the part of them not paid yet (unpaidCents) comes off the installments still to come, the last ones
+ * first, so the guest never keeps paying for a refunded pass. Inside the refund's transaction.
+ */
+async function lowerForRefund(conn, tenantId, orderId, unpaidCents, req = null) {
+  const p = await one(conn, "SELECT * FROM payment_plans WHERE tenant_id = ? AND order_id = ? AND status IN ('active','late','suspended') FOR UPDATE", [tenantId, orderId]);
+  if (!p || !(unpaidCents > 0)) return null;
+  const left = await rows(conn, "SELECT id, cents FROM payment_plan_charges WHERE plan_id = ? AND status IN ('due','failed') ORDER BY n DESC FOR UPDATE", [p.id]);
+  let todo = unpaidCents; let cut = 0;
+  for (const c of left) {
+    if (todo <= 0) break;
+    const take = Math.min(todo, Number(c.cents));
+    if (take === Number(c.cents)) await conn.query("UPDATE payment_plan_charges SET status = 'canceled', next_try_on = NULL WHERE id = ?", [c.id]);
+    else await conn.query('UPDATE payment_plan_charges SET cents = cents - ? WHERE id = ?', [take, c.id]);
+    todo -= take; cut += take;
+  }
+  const still = await one(conn, "SELECT COUNT(*) AS n FROM payment_plan_charges WHERE plan_id = ? AND status IN ('due','failed')", [p.id]);
+  await conn.query('UPDATE payment_plans SET total_cents = GREATEST(total_cents - ?, 0), status = ? WHERE id = ?', [cut, Number(still.n) ? p.status : 'paid', p.id]);
+  await audit(conn, req || F.system(tenantId), 'plan_lowered', 'payment_plans', p.id, { cents: cut, reason: 'part_refund' });
+  return cut;
 }
 
 // ---------------------------------------------------------------- the guest's card page (/plan/<slug>/<token>)
@@ -285,4 +327,4 @@ async function planCardDone(l, sessionId) {
   return guestView(pool, l);
 }
 
-module.exports = { PROVIDERS, quote, start, checkoutExtra, schedule, addMonths, split, chargeOne, chargeDue, list, get, chargeNow, settle, cancel, guestView, cardSession, cardDone, planCardDone };
+module.exports = { PROVIDERS, quote, start, checkoutExtra, schedule, addMonths, split, chargeOne, chargeDue, list, get, chargeNow, settle, cancel, stopForRefund, lowerForRefund, guestView, cardSession, cardDone, planCardDone };

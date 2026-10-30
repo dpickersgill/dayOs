@@ -165,7 +165,7 @@ async function allowlist(conn, tenantId, { attractionId = null } = {}) {
        LEFT JOIN rfid_cards c ON c.tenant_id = t.tenant_id AND c.ticket_id = t.id AND c.status = 'assigned'
       WHERE t.tenant_id = ? AND t.status = 'active' AND t.valid_from <= ? AND t.valid_to >= ? AND (t.uses_remaining IS NULL OR t.uses_remaining > 0) ${where}
         AND NOT EXISTS (SELECT 1 FROM fair_blocks b WHERE b.tenant_id = t.tenant_id AND b.ticket_id = t.id AND b.status = 'active')
-        AND NOT EXISTS (SELECT 1 FROM payment_plans pp JOIN order_items oi ON oi.tenant_id = pp.tenant_id AND oi.order_id = pp.order_id WHERE pp.tenant_id = t.tenant_id AND oi.id = t.order_item_id AND pp.status = 'suspended')
+        AND NOT EXISTS (SELECT 1 FROM payment_plans pp JOIN order_items oi ON oi.tenant_id = pp.tenant_id AND oi.order_id = pp.order_id WHERE pp.tenant_id = t.tenant_id AND oi.id = t.order_item_id AND pp.status IN ('suspended','canceled'))
       ORDER BY t.id`, [tenantId, today, today, ...(attractionId ? [attractionId, attractionId] : [])]);
   const blocked = await rows(conn, "SELECT uid FROM rfid_cards WHERE tenant_id = ? AND status IN ('lost','retired') ORDER BY uid", [tenantId]);
   return {

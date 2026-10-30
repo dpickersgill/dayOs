@@ -7,7 +7,7 @@
 const crypto = require('crypto');
 const { z } = require('zod');
 const { pool, tx, rows, one } = require('../db');
-const { todayIn, nowIn, addDays, weekdayOf, seasonFor, dayRange, localTime } = require('./util');
+const { todayIn, nowIn, addDays, weekdayOf, seasonFor, dayRange, localTime, localDay } = require('./util');
 const { dayText, esc, money } = require('./format');
 const { audit } = require('./audit');
 const G = require('./guestsettings');
@@ -643,13 +643,27 @@ async function badgesFor(db, tenantId, personId, day) {
 async function topLoyalists(db, tenantId, label, limit, tz) {
   const [from, to] = V.seasonRange(label);
   const [utcFrom] = dayRange(tz, from); const [, utcTo] = dayRange(tz, to);
-  return (await rows(db, `SELECT p.id, p.first_name, p.last_name, p.email IS NOT NULL AND p.email <> '' AS has_email, COUNT(DISTINCT DATE(COALESCE(CONVERT_TZ(s.scanned_at, '+00:00', ?), s.scanned_at))) AS days,
-      (SELECT r.id FROM guest_rewards r WHERE r.tenant_id = p.tenant_id AND r.person_id = p.id AND r.source_key = ? LIMIT 1) AS thanked
+  // Scans become the mountain's days in JS, the way lib/guestvisits.js does it: CONVERT_TZ is NULL on a database without
+  // time zone tables (Cloud SQL), and the UTC date would count one evening on the mountain as two days.
+  const hours = await rows(db, `SELECT DISTINCT t.person_id, DATE_FORMAT(s.scanned_at, '%Y-%m-%d %H:00:00') AS h
     FROM scans s JOIN tickets t ON t.tenant_id = s.tenant_id AND t.id = s.ticket_id JOIN people p ON p.tenant_id = t.tenant_id AND p.id = t.person_id
     WHERE s.tenant_id = ? AND s.result = 'ok' AND s.scanned_at >= ? AND s.scanned_at < ? AND p.anonymised_at IS NULL
-      AND NOT EXISTS (SELECT 1 FROM staff st WHERE st.tenant_id = p.tenant_id AND st.person_id = p.id AND st.status = 'active')
-    GROUP BY p.id ORDER BY days DESC, p.last_name, p.first_name LIMIT ?`, [tz, `top:${label}`, tenantId, utcFrom, utcTo, Math.min(1000, Number(limit) || 20)]))
-    .map((r) => ({ id: r.id, name: `${r.first_name} ${r.last_name}`.trim(), days: Number(r.days), has_email: Boolean(Number(r.has_email)), thanked: Boolean(r.thanked) }));
+      AND NOT EXISTS (SELECT 1 FROM staff st WHERE st.tenant_id = p.tenant_id AND st.person_id = p.id AND st.status = 'active')`, [tenantId, utcFrom, utcTo]);
+  const days = new Map();
+  for (const x of hours) {
+    const d = localDay(x.h, tz);
+    if (d < from || d > to) continue;
+    if (!days.has(x.person_id)) days.set(x.person_id, new Set());
+    days.get(x.person_id).add(d);
+  }
+  if (!days.size) return [];
+  const people = await rows(db, `SELECT p.id, p.first_name, p.last_name, p.email IS NOT NULL AND p.email <> '' AS has_email,
+      (SELECT r.id FROM guest_rewards r WHERE r.tenant_id = p.tenant_id AND r.person_id = p.id AND r.source_key = ? LIMIT 1) AS thanked
+    FROM people p WHERE p.tenant_id = ? AND p.id IN (?)`, [`top:${label}`, tenantId, [...days.keys()]]);
+  return people.map((r) => ({ id: r.id, name: `${r.first_name} ${r.last_name}`.trim(), last: r.last_name || '', first: r.first_name || '', days: days.get(r.id).size, has_email: Boolean(Number(r.has_email)), thanked: Boolean(r.thanked) }))
+    .sort((a, b) => b.days - a.days || a.last.localeCompare(b.last) || a.first.localeCompare(b.first))
+    .slice(0, Math.min(1000, Number(limit) || 20))
+    .map(({ last, first, ...r }) => r);
 }
 
 /** Rewards issued and used by kind, recaps sent (and viewed: the link was opened), for a season. */

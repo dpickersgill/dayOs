@@ -85,6 +85,41 @@ async function release(conn, tenantId, orderId) {
   await conn.query("UPDATE guest_rewards SET status = 'offered', chosen = NULL, order_id = NULL, redeemed_at = NULL, redeemed_by = NULL WHERE tenant_id = ? AND order_id = ? AND status = 'redeemed'", [tenantId, orderId]);
 }
 
+/**
+ * Gives rewards back after a refund of some lines of an order (itemIds, already marked refunded). A reward is put back
+ * whole once every line it paid for is refunded. While some of its lines stand (a credit spread over two tickets, one
+ * refunded), it stays used, and the refunded lines' part (order_items.reward_cents) comes back as a new credit, good
+ * until the old one ran out (at least 30 days): the guest gets back exactly what the refund took, never more.
+ * whole: the whole order is refunded (a reward on no line, from before lines carried it, is put back whole then).
+ * Returns { released: [ids], reissued: [{ from, id, cents }] }.
+ */
+async function giveBack(conn, tenantId, orderId, itemIds, { whole = false } = {}) {
+  const out = { released: [], reissued: [] };
+  const ids = [].concat(itemIds).map(Number);
+  const used = await rows(conn, "SELECT * FROM guest_rewards WHERE tenant_id = ? AND order_id = ? AND status = 'redeemed' FOR UPDATE", [tenantId, orderId]);
+  const t = used.length ? await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId]) : null;
+  const today = t ? new Intl.DateTimeFormat('en-CA', { timeZone: t.timezone || 'America/New_York' }).format(new Date()) : null;
+  const d10 = (x) => String(x instanceof Date ? x.toISOString() : x).slice(0, 10);
+  for (const r of used) {
+    const lines = await rows(conn, 'SELECT id, refunded_at, reward_cents FROM order_items WHERE tenant_id = ? AND order_id = ? AND reward_id = ?', [tenantId, orderId, r.id]);
+    const before = await one(conn, 'SELECT id FROM guest_rewards WHERE tenant_id = ? AND person_id = ? AND source_key LIKE ? LIMIT 1', [tenantId, r.person_id, `reissue:${r.id}:%`]);
+    const now = lines.filter((l) => ids.includes(Number(l.id)));
+    if (!lines.length ? whole && !before : now.length && lines.every((l) => l.refunded_at) && !before) {
+      await conn.query("UPDATE guest_rewards SET status = 'offered', chosen = NULL, order_id = NULL, redeemed_at = NULL, redeemed_by = NULL WHERE tenant_id = ? AND id = ? AND status = 'redeemed'", [tenantId, r.id]);
+      out.released.push(r.id);
+      continue;
+    }
+    const cents = now.reduce((n, l) => n + Number(l.reward_cents || 0), 0);
+    if (!now.length || cents <= 0) continue;
+    const plus30 = new Date(`${today}T12:00:00Z`); plus30.setUTCDate(plus30.getUTCDate() + 30);
+    const until = d10(r.valid_to) > plus30.toISOString().slice(0, 10) ? d10(r.valid_to) : plus30.toISOString().slice(0, 10);
+    const fresh = await issue(conn, tenantId, { personId: r.person_id, kind: r.kind, reason: `Given back from ${r.code} after a refund`, options: { credit: { cents } },
+      validFrom: today, validTo: until, sourceKey: `reissue:${r.id}:${Math.min(...now.map((l) => Number(l.id)))}` });
+    out.reissued.push({ from: r.id, id: fresh.id, cents });
+  }
+  return out;
+}
+
 /** Plain words for a reward's choices: "a free All-day ticket, 50% off, or a 25.00 credit". */
 function words(reward, productNames = {}) {
   const o = shape(reward).options;
@@ -95,4 +130,4 @@ function words(reward, productNames = {}) {
   return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} or ${parts[parts.length - 1]}` : parts[0] || '';
 }
 
-module.exports = { CHOICES, issue, usable, byCode, valueOf, redeem, release, words, shape, newCode };
+module.exports = { CHOICES, issue, usable, byCode, valueOf, redeem, release, giveBack, words, shape, newCode };

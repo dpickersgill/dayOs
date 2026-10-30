@@ -3417,6 +3417,7 @@ fieldset.safety legend { font-weight: 700; padding: 0 4px; }
 @media (max-width: 480px) {
   .line-tiles { grid-template-columns: 1fr 1fr; }
   .guest-reward .btn { margin-left: auto; }
+}
 
 /* ---- Guest rewards and recaps settings (guests round 2, Track LOYALTY: guest-rewards.js) */
 .set-section-body.gr-body { padding: 0; }

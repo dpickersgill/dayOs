@@ -345,3 +345,14 @@ test('settings, report and top loyalists: managers only, plain numbers', async (
   assert.equal(th2.body.thanked, 0, 'once a season');
   assert.equal((await api('POST', '/guests/loyalty/top/thanks', { token: counter, body: { person_ids: [1] } })).status, 403);
 });
+
+// ---------------------------------------------------------------- guests round 2 fixes
+test('fix: top loyalists count mountain days, not UTC days, without time zone tables', async () => {
+  const Y = require('../src/lib/loyalty');
+  const id = await person('Tess', { last: `Late${suffix}` });
+  const t = await ticket(id, { from: '2030-12-01', to: '2031-04-01' });
+  await scan(t, '2031-01-10 15:00'); await scan(t, '2031-01-10 20:30'); // 20:30 New York is the next day in UTC
+  await scan(t, '2031-01-11 09:00');
+  const me = (await Y.topLoyalists(pool, A.id, '2030-31', 1000, 'America/New_York')).find((x) => x.id === id);
+  assert.equal(me.days, 2);
+});

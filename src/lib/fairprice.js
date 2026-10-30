@@ -16,6 +16,7 @@ const { addDays, todayIn, seasonFor, dayRange, localTime } = require('./util');
 const utc = (s) => (s ? new Date(`${String(s).replace(' ', 'T').slice(0, 19)}Z`) : null);
 const { conflict, notFound, bad } = require('./errors');
 const { seasonRange } = require('./guestvisits');
+const LV = require('./linevalue');
 
 const TICKET_KINDS = ['day_ticket', 'multi_day'];
 const dstr = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d || '').slice(0, 10));
@@ -198,7 +199,7 @@ async function guaranteeView(db, l) {
   else if (k.status === 'void') { state = 'closed'; why = 'This ticket was refunded.'; }
   else if (!at) { state = 'waiting'; why = `The guarantee starts when you scan in at the first lift. Then you have ${hours} hours.`; }
   else if (Date.now() > until.getTime()) { state = 'closed'; why = `The guarantee was good for ${hours} hours after your first lift.`; }
-  const cents = Number(k.unit_price_cents);
+  const cents = await LV.netPaidForTicket(db, tenantId, k.id); // what the guest paid for it, after discounts and refunds
   return { mountain: l.mountain, phone: l.phone, ticket: { product: k.product, day: dstr(k.valid_from), first_name: k.first_name || null }, hours, state, why,
     first_scan_at: at ? at.toISOString() : null, until: until ? until.toISOString() : null, credit_cents: cents, has_holder: Boolean(k.person_id),
     reward: claimed ? { code: claimed.code, cents: (rewards.shape(claimed).options.credit || {}).cents, valid_to: dstr(claimed.valid_to) } : null };
@@ -263,14 +264,19 @@ async function priceDrops(tenantId) {
     const day = dstr(c.valid_from);
     let now;
     try { now = advance(c, today, day, (await unitPrice(pool, tenantId, c.id, c.tier, day)).cents).cents; } catch (_) { continue; }
-    const before = await one(pool, 'SELECT MIN(to_cents) AS low FROM fair_price_drops WHERE tenant_id = ? AND ticket_id = ?', [tenantId, c.ticket_id]);
-    const paid = before && before.low !== null ? Math.min(Number(before.low), Number(c.unit_price_cents)) : Number(c.unit_price_cents);
-    if (now >= paid) continue;
+    // what the guest still pays for this ticket: after its discount or reward, a change of day and earlier drops
+    if (now >= await LV.netPaidForTicket(pool, tenantId, c.ticket_id)) continue;
     const out = await tx(async (conn) => {
-      const order = await one(conn, 'SELECT id, total_cents, refunded_cents FROM orders WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, c.order_id]);
+      const order = await one(conn, 'SELECT id, status, total_cents, refunded_cents FROM orders WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, c.order_id]);
+      // checked again under the locks: a refund or a change of day may have landed since the list was read
+      const line = await one(conn, 'SELECT i.refunded_at, k.status FROM order_items i JOIN tickets k ON k.tenant_id = i.tenant_id AND k.order_item_id = i.id WHERE i.tenant_id = ? AND i.id = ? AND k.id = ? FOR UPDATE', [tenantId, c.item_id, c.ticket_id]);
+      if (!line || line.refunded_at || line.status !== 'active' || order.status !== 'paid') return null;
+      const v = await LV.ticketValue(conn, tenantId, c.ticket_id);
+      const paid = v.net;
+      if (now >= paid) return null;
       const diff = paid - now;
       const perUnitTax = Number(c.quantity) > 0 ? Number(c.tax_cents) / Number(c.quantity) : 0;
-      const tax = Number(c.unit_price_cents) > 0 ? Math.round(perUnitTax * diff / Number(c.unit_price_cents)) : 0;
+      const tax = v.paid > 0 ? Math.round(perUnitTax * diff / v.paid) : 0;
       const amount = Math.min(diff + tax, Number(order.total_cents) - Number(order.refunded_cents));
       if (amount <= 0) return null;
       const [d] = await conn.query('INSERT IGNORE INTO fair_price_drops (tenant_id, ticket_id, order_id, from_cents, to_cents, refund_cents) VALUES (?, ?, ?, ?, ?, ?)', [tenantId, c.ticket_id, c.order_id, paid, now, amount]);
@@ -313,12 +319,13 @@ async function closurePreview(db, tenantId, day, { closedFrom = null } = {}) {
     LEFT JOIN people hp ON hp.tenant_id = k.tenant_id AND hp.id = k.person_id LEFT JOIN people bp ON bp.tenant_id = o.tenant_id AND bp.id = o.person_id
     WHERE k.tenant_id = ? AND p.kind = 'day_ticket' AND k.status <> 'void' AND k.valid_from <= ? AND k.valid_to >= ? AND i.refunded_at IS NULL ORDER BY k.id`, [from, to, tenantId, day, day]);
   const items = []; let skipped = 0;
+  const values = await LV.forTickets(db, tenantId, list.map((k) => k.id));
   for (const k of list) {
     const scan = k.first_scan ? localTime(k.first_scan, t.timezone).slice(11, 19) : null;
     if (scan && (!closedFrom || scan >= closedFrom)) continue; // skied before the closure, or skied at all on a full closure
     const personId = k.person_id || k.buyer_id;
     if (!personId) { skipped += 1; continue; }
-    const cents = Math.round(Number(k.unit_price_cents));
+    const cents = values.has(k.id) ? values.get(k.id).net : 0; // what the guest paid for it (lib/linevalue.js)
     if (!cents) continue;
     items.push({ ticket_id: k.id, person_id: personId, name: k.first_name ? `${k.first_name} ${k.last_name}` : 'Guest', product: k.product, cents, why: scan ? `Scanned at ${scan.slice(0, 5)}, before the closure` : 'Did not scan' });
   }
@@ -482,9 +489,11 @@ async function holdFor(conn, tenantId, ticket) {
   if (!ticket) return null;
   const b = await one(conn, "SELECT reason FROM fair_blocks WHERE tenant_id = ? AND ticket_id = ? AND status = 'active' LIMIT 1", [tenantId, ticket.id]);
   if (b) return { result: 'blocked', reason: 'A manager put this pass on hold. Send the guest to the ticket window. The guest has an email with the reason.' };
-  const p = await one(conn, `SELECT pp.id FROM payment_plans pp JOIN order_items i ON i.tenant_id = pp.tenant_id AND i.order_id = pp.order_id
-    WHERE pp.tenant_id = ? AND i.id = ? AND pp.status = 'suspended' LIMIT 1`, [tenantId, ticket.order_item_id]);
-  if (p) return { result: 'plan_unpaid', reason: 'A payment on this pass is overdue. Send the guest to the ticket window to pay or update their card.' };
+  // A plan whose payments failed (suspended), or one a manager stopped with money still owed (canceled), holds the pass
+  // until a manager settles it (paid another way, or forgiven) or refunds it (which voids the pass).
+  const p = await one(conn, `SELECT pp.id, pp.status FROM payment_plans pp JOIN order_items i ON i.tenant_id = pp.tenant_id AND i.order_id = pp.order_id
+    WHERE pp.tenant_id = ? AND i.id = ? AND pp.status IN ('suspended','canceled') LIMIT 1`, [tenantId, ticket.order_item_id]);
+  if (p) return { result: 'plan_unpaid', reason: p.status === 'canceled' ? 'The payment plan for this pass was stopped with money still owed. Send the guest to the ticket window.' : 'A payment on this pass is overdue. Send the guest to the ticket window to pay or update their card.' };
   return null;
 }
 

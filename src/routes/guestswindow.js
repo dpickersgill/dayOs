@@ -4,7 +4,7 @@
 //   GET    /guests/people/:id/welcome?day=     the welcome-back card (visits, pass, birthday, family, rewards, badges, a line)
 //   GET    /guests/people/:id/history          the whole family's history for the customer record
 //   POST   /guests/people/:id/goodwill         a manager gives a goodwill credit (a reward, kind goodwill)
-//   GET    /guests/find?q=                     scan to find: an order, ticket, lesson, card, reward, license or a name
+//   POST   /guests/find { q }                  scan to find: an order, ticket, lesson, card, reward, license or a name
 //   GET    /guests/group-prices                each product's group price; PUT and DELETE /guests/group-prices/:productId (managers)
 //   POST   /guests/roster                      a pasted roster or CSV (names, ages) read into people with a guest type
 //   POST   /guests/tickets/:code/change-day    move a dated ticket to another day at the window (check: true to price it)
@@ -28,6 +28,7 @@ const { unitPrice } = require('../lib/pricing');
 const { loadRules, applyTax } = require('../lib/tax');
 const SH = require('../lib/shopsale');
 const cardrefund = require('../lib/cardrefund');
+const LV = require('../lib/linevalue');
 const mailer = require('../lib/mailer');
 
 const router = express.Router();
@@ -243,9 +244,11 @@ async function tellApart(db, tenantId, list, day, tz) {
 
 const peopleBy = async (ids, tenantId) => (ids.length ? rows(pool, `SELECT ${COLS} FROM people WHERE tenant_id = ? AND id IN (?) AND anonymised_at IS NULL ORDER BY last_name, first_name LIMIT 20`, [tenantId, [...new Set(ids)]]) : []);
 
-router.get('/find', requireRole(...sellers), async (req, res) => {
+// A POST, so a scanned driver's license (name, address, date of birth, license number) travels in the body: a query
+// string lands in the load balancer's request logs and the browser's history. The scan itself is never logged or kept.
+router.post('/find', requireRole(...sellers), validate(z.object({ q: z.string().max(3000) })), async (req, res) => {
   const { tenantId } = req.auth;
-  const q = String(Array.isArray(req.query.q) ? req.query.q[0] : req.query.q || '').slice(0, 3000);
+  const q = req.body.q;
   const tz = await tzOf(pool, tenantId);
   const day = todayIn(tz);
   const c = WIN.classify(q);
@@ -419,14 +422,17 @@ router.post('/tickets/:code/change-day', requireRole(...sellers), validate(chang
       if (!b.over_limit_reason) throw conflict(`${words} Only a manager can sell over the limit, and says why.`, { over_limit: over });
       if (!isMgr(req)) throw forbidden(`${words} Only a manager can sell over the limit. Ask a manager.`);
     }
-    // what has been paid for it so far, before tax: the sale, or the day it was last moved to at the window
-    const prior = await one(conn, 'SELECT new_cents FROM window_changes WHERE tenant_id = ? AND ticket_id = ? ORDER BY id DESC LIMIT 1', [tenantId, t.id]);
-    const old = prior ? Number(prior.new_cents) : t.unit_price_cents - t.discount_cents;
-    const diff = cents - old;
+    // What is still paid for it, before tax (lib/linevalue.js: the sale less its discount or reward, less any change-day
+    // or price-drop refund, plus any extra a change charged), against what the new day costs less the same discount: a
+    // free reward ticket moves free to a day at the same price, and nothing already given back is given again.
+    const v = await LV.ticketValue(conn, tenantId, t.id);
+    const old = v.net;
+    const target = Math.max(cents - v.discount, 0);
+    const diff = target - old;
     const { tax } = applyTax([{ type: 'ticket', cents: Math.abs(diff) }], 0, await loadRules(conn, tenantId));
     const owed = diff > 0 ? diff + tax : 0;
     const back = diff < 0 ? Math.abs(diff) + tax : 0;
-    const quote = { ticket: { code: t.code, product: t.name, from, to: b.date }, old_cents: old, new_cents: cents, diff_cents: diff, tax_cents: diff ? tax : 0, owed_cents: owed, back_cents: back, over_limit: over };
+    const quote = { ticket: { code: t.code, product: t.name, from, to: b.date }, old_cents: old, new_cents: target, day_cents: cents, diff_cents: diff, tax_cents: diff ? tax : 0, owed_cents: owed, back_cents: back, over_limit: over };
     if (b.check) return { ...quote, check: true };
     if (back) await refundAllowed(conn, req, t.order_id, back);
     if (owed && !b.payment) throw bad(`The new day costs ${money(owed)} more. Take the payment first.`);
@@ -468,7 +474,7 @@ router.post('/tickets/:code/change-day', requireRole(...sellers), validate(chang
       quote.back_method = method;
     }
     const [w] = await conn.query('INSERT INTO window_changes (tenant_id, ticket_id, order_id, from_date, to_date, old_cents, new_cents, diff_cents, paid_order_id, refund_id, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [tenantId, t.id, t.order_id, from, b.date, old, cents, diff, paidOrder, refundId, req.auth.userId]);
+      [tenantId, t.id, t.order_id, from, b.date, old, target, diff, paidOrder, refundId, req.auth.userId]);
     await audit(conn, req, 'change_day', 'tickets', t.id, { from, to: b.date, diff_cents: diff, owed_cents: owed, back_cents: back, paid_order_id: paidOrder, refund_id: refundId, ...(over.length ? { over_limit_reason: b.over_limit_reason } : {}) });
     return { ...quote, done: true, change_id: w.insertId, paid_order_id: paidOrder, order_id: t.order_id, ticket_id: t.id };
   });

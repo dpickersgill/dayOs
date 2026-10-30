@@ -327,8 +327,9 @@ test('a gift experience: priced on the server, delivered on its date, revealed b
 
 test('the shop calendar carries each day\'s next price rise and the fair badges (Track FAIR fills them)', async () => {
   const fair = require('../src/lib/fairprice');
-  const was = { nextRise: fair.nextRise, badges: fair.badges };
-  fair.nextRise = async (_db, _t, _p, d) => ({ on: plus(d, -1), cents: 500 });
+  const was = { calendarRises: fair.calendarRises, badges: fair.badges };
+  // FAIR's calendarRises adds next_rise only for early-buy products; the shop's side is that it carries what FAIR returns
+  fair.calendarRises = async (_db, _t, days) => { for (const [d, v] of Object.entries(days)) if (v && v.state === 'open') v.next_rise = { on: plus(d, -1), cents: 500 }; return days; };
   fair.badges = async () => [{ key: 'price_promise', text: 'Price promise' }];
   try {
     const ym = plus(today, 40).slice(0, 7);
@@ -338,4 +339,22 @@ test('the shop calendar carries each day\'s next price rise and the fair badges 
     assert.deepEqual(m.badges, [{ key: 'price_promise', text: 'Price promise' }]);
     assert.equal((await pub('GET', '/shop')).body.badges[0].text, 'Price promise');
   } finally { Object.assign(fair, was); }
+});
+
+// ---------------------------------------------------------------- guests round 2 fixes
+test('fix: counter staff add a gift experience only to a gift card they sold today; a manager to any', async () => {
+  const email = `counter-gx-${Date.now()}@${A.slug}.test`;
+  assert.equal((await api('POST', '/users', { token: A.owner, body: { email, password: PW, role: 'counter' } })).status, 201);
+  const counter = (await api('POST', '/auth/login', { body: { tenant: A.slug, email, password: PW } })).body.token;
+  const cid = (await q('SELECT id FROM users WHERE tenant_id = ? AND email = ?', [A.id, email]))[0].id;
+  const card = async (userId) => {
+    const [o] = await pool.query("INSERT INTO orders (tenant_id, user_id, status, subtotal_cents, tax_cents, total_cents, channel) VALUES (?, ?, 'paid', 5000, 0, 5000, 'window')", [A.id, userId]);
+    const [g] = await pool.query('INSERT INTO gift_cards (tenant_id, code, initial_cents, balance_cents, order_id) VALUES (?, ?, 5000, 5000, ?)', [A.id, `GX${Date.now()}${Math.floor(Math.random() * 1e4)}`.slice(0, 20), o.insertId]);
+    return g.insertId;
+  };
+  const gift = (id) => ({ gift_card_id: id, theme: 'A day on the mountain', amount_cents: 5000, from_name: 'Sam', recipient_name: 'Lee Park', recipient_email: 'lee@park.test', deliver_on: plus(today, 1) });
+  const someoneElses = await card(null);
+  assert.equal((await api('POST', '/guests/gift-experiences', { token: counter, body: gift(someoneElses) })).status, 403, 'not their sale: a manager');
+  assert.equal((await api('POST', '/guests/gift-experiences', { token: counter, body: gift(await card(cid)) })).status, 201, 'a card they just sold');
+  assert.equal((await api('POST', '/guests/gift-experiences', { token: A.owner, body: gift(someoneElses) })).status, 201, 'a manager may');
 });

@@ -224,22 +224,42 @@ router.post('/orders/:id/refund', requireRole('counter', 'manager'), validate(re
       if (l.line_kind === 'rental' && l.contract_id) await conn.query("UPDATE rental_contracts SET status = 'cancelled', stage = NULL WHERE tenant_id = ? AND id = ? AND status = 'to_fit'", [tenantId, l.contract_id]);
     }
 
-    // What the refund is worth: each line's price less its share of any discount, plus its tax. Free-of-charge (comp)
-    // payments are not money to give back, so only the part actually paid is refunded.
+    // A closure or conditions credit given for a ticket on these lines: not used yet, it is canceled with the refund; used
+    // already, the guest keeps what it bought and its value comes off this refund (never both the money and the credit).
+    const lineTickets = await rows(conn, 'SELECT id, order_item_id FROM tickets WHERE tenant_id = ? AND order_item_id IN (?)', [tenantId, lines.map((l) => l.id)]);
+    const credits = lineTickets.length ? await rows(conn, 'SELECT * FROM guest_rewards WHERE tenant_id = ? AND source_key IN (?) FOR UPDATE', [tenantId, lineTickets.flatMap((k) => [`closure:${k.id}`, `conditions:${k.id}`])]) : [];
+    const usedCredit = new Map(); // order_items.id => cents of a used closure or conditions credit
+    for (const c of credits) {
+      if (c.status !== 'redeemed') continue;
+      const k = lineTickets.find((x) => c.source_key.endsWith(`:${x.id}`));
+      const cents = Number(c.credit_cents) || Number(((require('../lib/rewards').shape(c).options || {}).credit || {}).cents) || 0;
+      usedCredit.set(k.order_item_id, (usedCredit.get(k.order_item_id) || 0) + cents);
+    }
+
+    // What the refund is worth: what each line still holds (its price less its discount, less what already went back on
+    // its tickets for a change of day or a price drop: lib/linevalue.js), less a credit used for it, plus its tax share.
+    // Free-of-charge (comp) payments are not money to give back, so only the part actually paid is refunded.
     const pays = await rows(conn, 'SELECT * FROM order_payments WHERE tenant_id = ? AND order_id = ? ORDER BY id', [tenantId, orderId]);
     const real = pays.filter((p) => p.tender !== 'comp');
     const realPaid = real.reduce((n, p) => n + p.amount_cents, 0);
-    const lineValue = (l) => l.unit_price_cents * l.quantity - l.discount_cents + l.tax_cents;
-    const worth = lines.reduce((n, l) => n + lineValue(l), 0);
-    const worthTax = lines.reduce((n, l) => n + l.tax_cents, 0);
+    const LV = require('../lib/linevalue');
+    let worth = 0; let worthTax = 0; let creditOff = 0;
+    for (const l of lines) {
+      const gross = Math.max(l.unit_price_cents * l.quantity - l.discount_cents, 0);
+      const used = usedCredit.get(l.id) || 0;
+      const kept = await LV.lineKept(conn, tenantId, l);
+      const pre = Math.max(kept - used, 0);
+      const tax = gross > 0 ? Math.round(l.tax_cents * pre / gross) : 0;
+      worth += pre + tax; worthTax += tax; creditOff += Math.min(used, kept);
+    }
     const ratio = order.total_cents ? realPaid / order.total_cents : 0;
     let amount = Math.round(worth * ratio);
     let taxPart = Math.round(worthTax * ratio);
     if (lines.length === open.length) {
       // The last of the order: return exactly what is left, so rounding on earlier part refunds can never block it.
       const back = await one(conn, 'SELECT COALESCE(SUM(amount_cents), 0) AS cents, COALESCE(SUM(tax_cents), 0) AS tax FROM order_refunds WHERE tenant_id = ? AND order_id = ?', [tenantId, orderId]);
-      amount = Math.max(realPaid - Number(back.cents), 0);
-      taxPart = Math.max(Math.round(order.tax_cents * ratio) - Number(back.tax), 0);
+      amount = Math.max(realPaid - Number(back.cents) - Math.round(creditOff * ratio), 0);
+      taxPart = Math.min(Math.max(Math.round(order.tax_cents * ratio) - Number(back.tax), 0), amount);
     }
     await require('./guestswindow').refundAllowed(conn, req, orderId, amount);
     // A large refund needs the second check (STEP_UP_REFUND_CENTS, $200 by default).
@@ -331,12 +351,22 @@ router.post('/orders/:id/refund', requireRole('counter', 'manager'), validate(re
       if (x.method === 'card' && x.cents > 0 && x.ref) { await cardrefund.markPending(conn, tenantId, r.insertId, x.ref); cardRows.push(r.insertId); }
     }
     await conn.query('UPDATE order_items SET refunded_at = NOW(), refund_id = ? WHERE tenant_id = ? AND id IN (?)', [refundIds[0], tenantId, ids]);
-    // A reward used on a refunded line is the guest's again (lib/rewards.js release; the whole order, or just those lines).
-    const rewardIds = [...new Set(lines.map((l) => l.reward_id).filter(Boolean))];
-    if (lines.length === open.length) await require('../lib/rewards').release(conn, tenantId, orderId);
-    else if (rewardIds.length) await conn.query("UPDATE guest_rewards SET status = 'offered', chosen = NULL, order_id = NULL, redeemed_at = NULL, redeemed_by = NULL WHERE tenant_id = ? AND order_id = ? AND id IN (?) AND status = 'redeemed'", [tenantId, orderId, rewardIds]);
-    if (rewardIds.length) await audit(conn, req, 'release', 'guest_rewards', null, { order_id: orderId, reward_ids: rewardIds });
+    // A reward used on a refunded line goes back to the guest: whole when every line it paid for is refunded, else just
+    // the refunded lines' part as a new credit (lib/rewards.js giveBack).
+    const given = await require('../lib/rewards').giveBack(conn, tenantId, orderId, ids, { whole: lines.length === open.length });
+    if (given.released.length || given.reissued.length) await audit(conn, req, 'release', 'guest_rewards', null, { order_id: orderId, released: given.released, reissued: given.reissued });
+    // The closure and conditions credits for these tickets that were not used are canceled (see above).
+    const voidIds = credits.filter((c) => c.status === 'offered').map((c) => c.id);
+    if (voidIds.length) {
+      await conn.query("UPDATE guest_rewards SET status = 'void' WHERE tenant_id = ? AND id IN (?) AND status = 'offered'", [tenantId, voidIds]);
+      await audit(conn, req, 'void', 'guest_rewards', null, { order_id: orderId, reward_ids: voidIds, reason: 'ticket_refunded' });
+    }
+    if (creditOff) await audit(conn, req, 'refund_less_credit', 'orders', orderId, { credit_cents: creditOff });
     const stillOpen = open.length - lines.length;
+    // A payment plan: a whole refund stops its charges; a part refund takes the unpaid part of those lines off what is to come.
+    const PPL = require('../lib/paymentplans');
+    if (!stillOpen) await PPL.stopForRefund(conn, tenantId, orderId, req);
+    else await PPL.lowerForRefund(conn, tenantId, orderId, Math.max(worth - amount, 0), req);
     await conn.query('UPDATE orders SET refunded_cents = refunded_cents + ?, status = ? WHERE tenant_id = ? AND id = ?', [amount, stillOpen ? 'paid' : 'refunded', tenantId, orderId]);
     await audit(conn, req, 'refund', 'orders', orderId, { amount_cents: amount, reason: body.reason, lines: ids.length, whole: !stillOpen });
     return { amount_cents: amount, returns: plan.map((x) => ({ method: x.method, amount_cents: x.cents })), whole_order: !stillOpen, refund_ids: refundIds, card_rows: cardRows, item_ids: ids };

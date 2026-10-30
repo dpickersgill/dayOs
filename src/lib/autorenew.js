@@ -27,14 +27,21 @@ async function lastPass(db, tenantId, personId, today) {
     JOIN order_items i ON i.tenant_id = k.tenant_id AND i.id = k.order_item_id
     WHERE k.tenant_id = ? AND k.person_id = ? AND p.kind = 'season_pass' AND k.status <> 'void' AND k.valid_to >= ? ORDER BY k.valid_from DESC LIMIT 1`, [tenantId, personId, addDays(today, -400)]);
 }
-/** The guaranteed price for a renewal (before tax): { cents, last_cents, now_cents, rule }. */
+/**
+ * The guaranteed price for a renewal (before tax): { cents, last_cents, now_cents, rule, tier }. The guest type is the
+ * holder's on the renewal day (a child who turned 18 renews as an adult); last season's price only counts when it was
+ * for the same guest type, and it is the price before any reward or promo (list_cents), so a free pass never renews free.
+ */
 async function renewPrice(db, tenantId, r, day) {
   const f = await F.settings(db, tenantId);
-  const from = r.from_ticket_id ? await one(db, 'SELECT i.unit_price_cents, i.tier FROM tickets k JOIN order_items i ON i.tenant_id = k.tenant_id AND i.id = k.order_item_id WHERE k.tenant_id = ? AND k.id = ?', [tenantId, r.from_ticket_id]) : null;
-  const tier = (from && from.tier) || 'adult';
+  const from = r.from_ticket_id ? await one(db, 'SELECT k.person_id, i.unit_price_cents, i.list_cents, i.tier FROM tickets k JOIN order_items i ON i.tenant_id = k.tenant_id AND i.id = k.order_item_id WHERE k.tenant_id = ? AND k.id = ?', [tenantId, r.from_ticket_id]) : null;
+  const personId = r.person_id || (from && from.person_id);
+  const who = personId ? await one(db, 'SELECT date_of_birth FROM people WHERE tenant_id = ? AND id = ?', [tenantId, personId]) : null;
+  const dob = who && who.date_of_birth ? (who.date_of_birth instanceof Date ? who.date_of_birth.toISOString() : String(who.date_of_birth)).slice(0, 10) : null;
+  const tier = dob ? await require('./guesttypes').forBirthday(db, tenantId, dob, day) : ((from && from.tier) || 'adult');
   let now = null;
   try { now = (await require('./pricing').unitPrice(db, tenantId, r.product_id, tier, day)).cents; } catch (_) { now = null; }
-  const last = from ? Number(from.unit_price_cents) : null;
+  const last = from && from.tier === tier ? Number(from.list_cents ?? from.unit_price_cents) : null;
   const cents = f.renew_rule === 'current' || last === null ? now : now === null ? last : Math.min(last, now);
   return { cents, last_cents: last, now_cents: now, rule: f.renew_rule, tier };
 }
@@ -53,7 +60,7 @@ async function household(db, tenantId, personIds) {
     const r = await one(db, 'SELECT * FROM fair_renewals WHERE tenant_id = ? AND person_id = ? AND product_id = ?', [tenantId, id, pass.product_id]);
     const person = await one(db, 'SELECT first_name, last_name FROM people WHERE tenant_id = ? AND id = ?', [tenantId, id]);
     const card = r && r.card_id ? await one(db, 'SELECT brand, last4, payment_method FROM fair_cards WHERE id = ?', [r.card_id]) : null;
-    const price = f.renew_on ? await renewPrice(db, tenantId, { product_id: pass.product_id, from_ticket_id: pass.id }, startOf(s, f)) : null;
+    const price = f.renew_on ? await renewPrice(db, tenantId, { person_id: id, product_id: pass.product_id, from_ticket_id: pass.id }, startOf(s, f)) : null;
     out.push({ person_id: id, name: `${person.first_name} ${person.last_name}`, product_id: pass.product_id, pass: pass.name, valid_to: dstr(pass.valid_to), on: Boolean(r && r.status === 'on'),
       renews_on: f.renew_on, price_cents: price ? price.cents : null, card: card && card.payment_method ? { brand: card.brand, last4: card.last4 } : null, renewed_for: r ? r.renewed_for : null });
   }
@@ -106,9 +113,27 @@ async function renewCardDone(l, sessionId) {
   return renewView(pool, l);
 }
 
-/** Charges one renewal and makes the new pass. Returns 'renewed', 'failed' or 'skipped'. */
+/**
+ * Charges one renewal and makes the new pass. Returns 'renewed', 'failed' or 'skipped'. Two runs at once (two job
+ * workers) cannot both renew: each first claims the renewal row under a lock (renewing_for = the season); the second
+ * sees the claim and skips. The Stripe charge has a fixed idempotency key per renewal and season, so a retry never
+ * charges twice, and the pass is made in a transaction that locks the row again and checks renewed_for first.
+ */
 async function renewOne(tenantId, r, s, f, season, base) {
   const day = startOf(s, f);
+  const claimed = await tx(async (conn) => {
+    const row = await one(conn, 'SELECT * FROM fair_renewals WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, r.id]);
+    if (!row || row.status !== 'on' || row.renewed_for === season) return false;
+    if (row.renewing_for === season && row.renewing_at && Date.now() - new Date(`${String(row.renewing_at instanceof Date ? row.renewing_at.toISOString() : row.renewing_at).replace(' ', 'T').slice(0, 19)}Z`).getTime() < 15 * 60 * 1000) return false;
+    await conn.query('UPDATE fair_renewals SET renewing_for = ?, renewing_at = UTC_TIMESTAMP() WHERE id = ?', [season, r.id]);
+    return true;
+  });
+  if (!claimed) return 'skipped';
+  try { return await renewClaimed(tenantId, r, s, f, season, base, day); } finally {
+    await pool.query('UPDATE fair_renewals SET renewing_for = NULL, renewing_at = NULL WHERE id = ?', [r.id]).catch(() => {});
+  }
+}
+async function renewClaimed(tenantId, r, s, f, season, base, day) {
   const price = await renewPrice(pool, tenantId, r, day);
   if (price.cents === null) return 'skipped';
   const has = await one(pool, `SELECT k.id FROM tickets k WHERE k.tenant_id = ? AND k.person_id = ? AND k.product_id = ? AND k.status <> 'void' AND k.valid_from >= ? LIMIT 1`, [tenantId, r.person_id, r.product_id, day]);
@@ -147,17 +172,22 @@ async function renewOne(tenantId, r, s, f, season, base) {
   const prod = await one(pool, 'SELECT * FROM products WHERE tenant_id = ? AND id = ?', [tenantId, r.product_id]);
   const code = newCode();
   const validTo = addDays(day, Math.max(Number(prod.valid_days), 1) - 1);
-  await tx(async (conn) => {
+  const made = await tx(async (conn) => {
+    const row = await one(conn, 'SELECT renewed_for FROM fair_renewals WHERE id = ? FOR UPDATE', [r.id]);
+    if (row && row.renewed_for === season) return false; // made already (the same charge, idempotent at Stripe)
+    if (await one(conn, 'SELECT id FROM order_payments WHERE tenant_id = ? AND reference = ? LIMIT 1', [tenantId, ref])) return false;
     const [o] = await conn.query("INSERT INTO orders (tenant_id, person_id, status, subtotal_cents, tax_cents, total_cents, channel, payment_ref) VALUES (?, ?, 'paid', ?, ?, ?, 'online', ?)", [tenantId, r.person_id, price.cents, tax, total, ref]);
     for (const x of taxes) await conn.query('INSERT INTO order_taxes (tenant_id, order_id, name, rate_bps, amount_cents) VALUES (?, ?, ?, ?, ?)', [tenantId, o.insertId, x.name, x.rate_bps, x.amount_cents]);
-    const [i] = await conn.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, tax_cents, label) VALUES (?, ?, ?, 'ticket', ?, ?, 1, ?, ?, ?, 'Renewed automatically')",
-      [tenantId, o.insertId, r.product_id, r.person_id, price.tier, price.cents, day, tax]);
+    const [i] = await conn.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, tax_cents, label, list_cents) VALUES (?, ?, ?, 'ticket', ?, ?, 1, ?, ?, ?, 'Renewed automatically', ?)",
+      [tenantId, o.insertId, r.product_id, r.person_id, price.tier, price.cents, day, tax, price.cents]);
     await conn.query('INSERT INTO tickets (tenant_id, order_item_id, person_id, product_id, code, valid_from, valid_to, uses_remaining) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [tenantId, i.insertId, r.person_id, r.product_id, code, day, validTo, prod.uses ?? null]);
     await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, card_brand, card_last4, processor, processor_account, platform_fee_cents) VALUES (?, ?, 'card', ?, ?, ?, ?, 'stripe', ?, ?)",
       [tenantId, o.insertId, total, ref, card.brand || null, card.last4 || null, card.account || null, fee]);
     await conn.query('UPDATE fair_renewals SET renewed_for = ?, new_order_id = ?, last_error = NULL WHERE id = ?', [season, o.insertId, r.id]);
     await audit(conn, F.system(tenantId), 'autorenew_charged', 'orders', o.insertId, { renewal_id: r.id, cents: total, price_cents: price.cents, last_cents: price.last_cents, now_cents: price.now_cents });
+    return true;
   });
+  if (!made) return 'skipped';
   if (email) await F.mail(tenantId, email, `Your ${prod.name} is renewed at ${t.name}`, [`Hi ${who ? who.first_name : 'there'},`, '', `Your ${prod.name} for ${season} is renewed. We charged ${money(total)} to your card${card.last4 ? ` ending ${card.last4}` : ''}.`,
     price.last_cents !== null && price.now_cents !== null && price.cents < price.now_cents ? `That is last season's price, ${money(price.now_cents - price.cents)} less than this season's.` : '', '', `Your pass: ${code}`, `Good from ${dayText(day)} to ${dayText(validTo)}.`], 'autorenew-done').catch(() => {});
   return 'renewed';

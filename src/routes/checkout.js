@@ -646,10 +646,11 @@ async function runSale(conn, req, body, { check = false } = {}) {
         const off = (p.unitOff || [])[k] || 0; // a reward used on this unit lowers what it cost (lib/windowsale.js)
         const qty = extra.quantity ?? p.quantity;
         return (await conn.query(
-          `INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, session_id, program_id, contract_id, gift_card_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents, reward_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, session_id, program_id, contract_id, gift_card_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents, reward_id, list_cents, reward_cents)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [tenantId, orderId, extra.product_id ?? null, p.type, extra.person_id ?? null, extra.session_id ?? null, extra.program_id ?? null, extra.contract_id ?? null, extra.gift_card_id ?? null, ln.tier || 'adult', qty,
-            qty === 1 ? p.unit - off : p.unit, extra.valid_on ?? null, split(p.discount, unitsOf)[k], split(p.tax, unitsOf)[k], (p.unitReward || [])[k] || null],
+            qty === 1 ? p.unit - off : p.unit, extra.valid_on ?? null, split(p.discount, unitsOf)[k], split(p.tax, unitsOf)[k], (p.unitReward || [])[k] || null,
+            p.unit, qty === 1 ? off : 0], // list_cents and reward_cents (db/steps/guests-fix.js, lib/linevalue.js)
         ))[0].insertId;
       };
 

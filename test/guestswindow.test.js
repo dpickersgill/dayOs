@@ -120,7 +120,7 @@ test('scan to find: an order, a ticket, a lesson, a card, a reward, a driver\'s 
   const sam = await person({ first_name: 'Sam', last_name: `Find${suffix}`, email: `sam${suffix}@x.test` });
   const sale = await api('POST', '/checkout', { token: counter, body: { channel: 'window', customer: { person_id: sam.id }, lines: [ticketLine()], payments: [{ tender: 'cash', amount_cents: 8000 }] } });
   assert.equal(sale.status, 201, sale.text);
-  const find = async (code) => { const r = await api('GET', `/guests/find?q=${encodeURIComponent(code)}`, { token: counter }); assert.equal(r.status, 200, r.text); return r; };
+  const find = async (code) => { const r = await api('POST', '/guests/find', { token: counter, body: { q: code } }); assert.equal(r.status, 200, r.text); return r; };
   let r = await find(`ORD-${sale.body.id}`);
   assert.equal(r.body.kind, 'order'); assert.equal(r.body.order_id, sale.body.id); assert.equal(r.body.people[0].id, sam.id);
   r = await find(sale.body.tickets[0].code);
@@ -292,4 +292,58 @@ test('a reward is used once (two sales at once: one wins), comes off the right l
   assert.equal(two.status, 201, two.text); assert.equal(two.body.total_cents, 6000);
   const its = await q('SELECT unit_price_cents, reward_id FROM order_items WHERE tenant_id = ? AND order_id = ? ORDER BY id', [A.id, two.body.id]);
   assert.deepEqual(its.map((x) => x.unit_price_cents), [0, 6000]); assert.ok(its.every((x) => x.reward_id === cr.body.id));
+});
+
+// ---------------------------------------------------------------- guests round 2 fixes (one value for what a ticket is paid)
+test('fix: a line refund after a change of day never gives back more than the ticket cost', async () => {
+  const g = await person({ first_name: 'Rae', last_name: `Refund${suffix}`, email: `rae${suffix}@x.test` });
+  const d1 = plus(today, 12); const cheap = plus(today, 13);
+  await pool.query('INSERT INTO price_calendar (tenant_id, product_id, on_date, tier, price_cents, blackout) VALUES (?, ?, ?, NULL, 5000, 0)', [A.id, dayP, cheap]);
+  const sale = await api('POST', '/checkout', { token: manager, body: { channel: 'window', customer: { person_id: g.id }, lines: [ticketLine({ valid_on: d1, quantity: 2, holders: ['customer', 'customer'] })], payments: [{ tender: 'cash', amount_cents: 16000 }] } });
+  assert.equal(sale.status, 201, sale.text);
+  const mv = await api('POST', `/guests/tickets/${sale.body.tickets[0].code}/change-day`, { token: manager, body: { date: cheap } });
+  assert.equal(mv.status, 200, mv.text); assert.equal(mv.body.back_cents, 3000);
+  const its = await q('SELECT i.id FROM order_items i JOIN tickets k ON k.order_item_id = i.id WHERE k.tenant_id = ? AND k.code = ?', [A.id, sale.body.tickets[0].code]);
+  const ref = await api('POST', `/orders/${sale.body.id}/refund`, { token: manager, body: { reason: 'customer_request', item_ids: [its[0].id] } });
+  assert.equal(ref.status, 200, ref.text); assert.equal(ref.body.amount_cents, 5000, '80.00 paid, 30.00 back already: 50.00 left');
+  assert.equal((await q('SELECT refunded_cents FROM orders WHERE id = ?', [sale.body.id]))[0].refunded_cents, 8000);
+});
+
+test('fix: a free reward ticket moves to a day at the same price for free', async () => {
+  const g = await person({ first_name: 'Bea', last_name: `Free${suffix}`, email: `bea${suffix}@x.test` });
+  const gw = await api('POST', `/guests/people/${g.id}/goodwill`, { token: manager, body: { reason: 'Birthday', free_ticket_product_id: dayP } });
+  const sale = await api('POST', '/checkout', { token: counter, body: { channel: 'window', customer: { person_id: g.id }, lines: [ticketLine({ valid_on: plus(today, 2) })], rewards: [{ reward_id: gw.body.id, choice: 'free_ticket' }], payments: [] } });
+  assert.equal(sale.status, 201, sale.text);
+  const it = (await q('SELECT list_cents, reward_cents, unit_price_cents FROM order_items WHERE order_id = ?', [sale.body.id]))[0];
+  assert.deepEqual([it.list_cents, it.reward_cents, it.unit_price_cents], [8000, 8000, 0]);
+  const r = await api('POST', `/guests/tickets/${sale.body.tickets[0].code}/change-day`, { token: counter, body: { date: plus(today, 3), check: true } });
+  assert.equal(r.status, 200, r.text); assert.equal(r.body.owed_cents, 0); assert.equal(r.body.back_cents, 0);
+});
+
+test('fix: a credit spread over two tickets: refunding one gives back only its part, as a new credit', async () => {
+  const g = await person({ first_name: 'Kit', last_name: `Credit${suffix}`, email: `kit${suffix}@x.test` });
+  const cr = await api('POST', `/guests/people/${g.id}/goodwill`, { token: manager, body: { reason: 'Lift stop', credit_cents: 10000 } });
+  const sale = await api('POST', '/checkout', { token: counter, body: { channel: 'window', customer: { person_id: g.id }, lines: [ticketLine({ quantity: 2, holders: ['customer', 'customer'] })], rewards: [{ reward_id: cr.body.id, choice: 'credit' }], payments: [{ tender: 'cash', amount_cents: 6000 }] } });
+  assert.equal(sale.status, 201, sale.text);
+  const its = await q('SELECT id, reward_cents FROM order_items WHERE order_id = ? ORDER BY id', [sale.body.id]);
+  assert.deepEqual(its.map((x) => x.reward_cents), [8000, 2000]);
+  let ref = await api('POST', `/orders/${sale.body.id}/refund`, { token: manager, body: { reason: 'customer_request', item_ids: [its[0].id] } });
+  assert.equal(ref.status, 200, ref.text); assert.equal(ref.body.amount_cents, 0);
+  assert.equal((await q('SELECT status FROM guest_rewards WHERE id = ?', [cr.body.id]))[0].status, 'redeemed', 'the other ticket still uses it');
+  const fresh = await q("SELECT credit_cents, options, status FROM guest_rewards WHERE tenant_id = ? AND source_key LIKE ?", [A.id, `reissue:${cr.body.id}:%`]);
+  assert.equal(fresh.length, 1); assert.equal(RW_cents(fresh[0]), 8000); assert.equal(fresh[0].status, 'offered');
+  // the rest: the second ticket's part comes back too, never the whole credit again
+  ref = await api('POST', `/orders/${sale.body.id}/refund`, { token: manager, body: { reason: 'customer_request' } });
+  assert.equal(ref.status, 200, ref.text);
+  assert.equal((await q('SELECT status FROM guest_rewards WHERE id = ?', [cr.body.id]))[0].status, 'redeemed');
+  const all = await q("SELECT options FROM guest_rewards WHERE tenant_id = ? AND source_key LIKE ?", [A.id, `reissue:${cr.body.id}:%`]);
+  assert.equal(all.reduce((s, r) => s + RW_cents(r), 0), 10000);
+});
+function RW_cents(r) { const o = typeof r.options === 'string' ? JSON.parse(r.options) : r.options; return o.credit.cents; }
+
+test('fix: scan to find takes the scan in a POST body, never the URL', async () => {
+  assert.equal((await api('GET', '/guests/find?q=Rivera', { token: counter })).status, 404);
+  const lic = '@\n\x1e\rANSI 636000090002DL00410278ZV03190008DLDAQT64235789\nDCSSAMPLE\nDACMICHAEL\nDBB06061986\n';
+  const r = await api('POST', '/guests/find', { token: counter, body: { q: lic } });
+  assert.equal(r.status, 200, r.text);
 });

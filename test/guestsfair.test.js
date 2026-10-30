@@ -411,3 +411,125 @@ test('a guest page is served for each private link, and an unknown token is a pl
   assert.equal((await api('GET', `/public/${A.slug}/plan/abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG`)).status, 404);
   assert.equal((await api('GET', `/public/${A.slug}/renew/short`)).status, 404);
 });
+
+// ---------------------------------------------------------------- guests round 2 fixes (one value for what a ticket is paid)
+test('fix: price drops, closure and conditions credits use what was paid after discounts and earlier refunds', async () => {
+  const LV = require('../src/lib/linevalue');
+  ok(await settings({ price_promise_on: true, closure_credit_on: true }));
+  const sat = plus(today, 40);
+  const free = await sold({ product: dayP, from: sat });
+  await q('UPDATE order_items SET discount_cents = 6000 WHERE id = ?', [free.itemId]); // a reward took the whole price
+  const half = await sold({ product: dayP, from: sat });
+  await q('UPDATE order_items SET discount_cents = 3000 WHERE id = ?', [half.itemId]); // a promo took half
+  assert.equal(await LV.netPaidForTicket(pool, A.id, free.ticketId), 0);
+  assert.equal(await LV.netPaidForTicket(pool, A.id, half.ticketId), 3000);
+  await q('INSERT INTO price_calendar (tenant_id, product_id, on_date, tier, price_cents) VALUES (?, ?, ?, NULL, 5000)', [A.id, dayP, sat]);
+  await F.priceDrops(A.id);
+  assert.equal((await q('SELECT COUNT(*) AS n FROM fair_price_drops WHERE ticket_id IN (?)', [[free.ticketId, half.ticketId]]))[0].n, 0, 'nothing back: they paid less than the new price');
+  // a drop, then a change of day: the change gives back only what is left over the new day
+  const full = await sold({ product: dayP, from: sat });
+  await F.priceDrops(A.id);
+  assert.equal((await q('SELECT refund_cents FROM fair_price_drops WHERE ticket_id = ?', [full.ticketId]))[0].refund_cents, 1000);
+  const tue = plus(today, 41);
+  await q('INSERT INTO price_calendar (tenant_id, product_id, on_date, tier, price_cents) VALUES (?, ?, ?, NULL, 4000)', [A.id, dayP, tue]);
+  const ch = ok(await api('POST', `/guests/tickets/${full.code}/change-day`, { token: A.owner, body: { date: tue } }));
+  assert.equal(ch.back_cents, 1000, '60.00 paid, 10.00 back for the drop, now a 40.00 day: 10.00 more');
+  await F.priceDrops(A.id);
+  assert.equal(Number((await q('SELECT refunded_cents FROM orders WHERE id = ?', [full.orderId]))[0].refunded_cents), 2000);
+  // closure credit for a ticket bought at half price is the half
+  const t2 = await sold({ product: dayP, from: today });
+  await q('UPDATE order_items SET discount_cents = 2500 WHERE id = ?', [t2.itemId]);
+  const pre = ok(await api('POST', '/guests/fair/closures/preview', { token: A.owner, body: { day: today } }));
+  assert.equal(pre.items.find((i) => i.ticket_id === t2.ticketId).cents, 3500);
+  await q('UPDATE order_items SET refunded_at = NOW() WHERE id = ?', [t2.itemId]); // keep later closure tests clean
+  ok(await settings({ price_promise_on: false, closure_credit_on: false }));
+});
+
+test('fix: the price-drop job checks the refund again under the lock', async () => {
+  ok(await settings({ price_promise_on: true }));
+  const day = plus(today, 45);
+  const s = await sold({ product: dayP, from: day });
+  await q('INSERT INTO price_calendar (tenant_id, product_id, on_date, tier, price_cents) VALUES (?, ?, ?, NULL, 5000)', [A.id, dayP, day]);
+  // a refund lands between the job's list and its transaction: the list is read, then the line is refunded
+  const LV = require('../src/lib/linevalue');
+  const was = LV.netPaidForTicket;
+  LV.netPaidForTicket = async (...a) => { const v = await was(...a); if (a[2] === s.ticketId) await q('UPDATE order_items SET refunded_at = NOW() WHERE id = ?', [s.itemId]); return v; };
+  try { await F.priceDrops(A.id); } finally { LV.netPaidForTicket = was; }
+  assert.equal((await q('SELECT COUNT(*) AS n FROM fair_price_drops WHERE ticket_id = ?', [s.ticketId]))[0].n, 0);
+  ok(await settings({ price_promise_on: false }));
+});
+
+test('fix: a refund cancels an unused closure credit, and a used one comes off the refund', async () => {
+  ok(await settings({ closure_credit_on: true }));
+  const yesterday = plus(today, -1);
+  const a = await sold({ product: dayP, from: yesterday });
+  const b = await sold({ product: dayP, from: yesterday });
+  ok(await api('POST', '/guests/fair/closures', { token: A.owner, body: { day: yesterday, reason: 'wind' } }), 201);
+  const ref = ok(await api('POST', `/orders/${a.orderId}/refund`, { token: A.owner, body: { reason: 'weather' } }));
+  assert.equal(ref.amount_cents, 6000);
+  assert.equal((await q('SELECT status FROM guest_rewards WHERE tenant_id = ? AND source_key = ?', [A.id, `closure:${a.ticketId}`]))[0].status, 'void');
+  // b used its credit already: the refund is the price less the credit (here nothing)
+  await q("UPDATE guest_rewards SET status = 'redeemed', chosen = 'credit', credit_cents = 6000 WHERE tenant_id = ? AND source_key = ?", [A.id, `closure:${b.ticketId}`]);
+  const ref2 = ok(await api('POST', `/orders/${b.orderId}/refund`, { token: A.owner, body: { reason: 'weather' } }));
+  assert.equal(ref2.amount_cents, 0, 'the guest kept the credit, so no money too');
+  ok(await settings({ closure_credit_on: false }));
+});
+
+test('fix: a refund stops a payment plan, a part refund lowers it, and a canceled plan holds the pass until settled', async () => {
+  const mk = async () => {
+    const s = await sold({ product: passP, cents: 15000 });
+    await q('UPDATE orders SET total_cents = 45000, subtotal_cents = 45000 WHERE id = ?', [s.orderId]);
+    const id = await tx((c) => PP.start(c, A.id, { id: s.orderId, total_cents: 45000, payment_intent: s.pi, person_id: s.personId, email: s.email }, { count: 3 }));
+    return { ...s, planId: id };
+  };
+  // whole refund
+  const a = await mk();
+  ok(await api('POST', `/orders/${a.orderId}/refund`, { token: A.owner, body: { reason: 'customer_request' } }));
+  assert.equal((await q('SELECT status FROM payment_plans WHERE id = ?', [a.planId]))[0].status, 'canceled');
+  assert.deepEqual((await q('SELECT status FROM payment_plan_charges WHERE plan_id = ? ORDER BY n', [a.planId])).map((c) => c.status), ['paid', 'canceled', 'canceled']);
+  // even if a plan were left on, the charge job never charges a refunded order
+  await q("UPDATE payment_plans SET status = 'active' WHERE id = ?", [a.planId]);
+  await q("UPDATE payment_plan_charges SET status = 'due', due_on = ? WHERE plan_id = ? AND n = 2", [today, a.planId]);
+  const before = calls.filter((c) => c.path === '/v1/payment_intents' && c.method === 'POST').length;
+  await PP.chargeDue(null);
+  assert.equal(calls.filter((c) => c.path === '/v1/payment_intents' && c.method === 'POST').length, before);
+  assert.equal((await q('SELECT status FROM payment_plans WHERE id = ?', [a.planId]))[0].status, 'canceled');
+  // part refund: a pass and a day ticket on one plan; refunding the pass takes its unpaid part off what is to come
+  const b = await mk();
+  const [i2] = await pool.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, tax_cents) VALUES (?, ?, ?, 'ticket', ?, 'adult', 1, 30000, ?, 0)", [A.id, b.orderId, dayP, b.personId, today]);
+  await q('UPDATE order_items SET unit_price_cents = 15000 WHERE id = ?', [b.itemId]);
+  void i2;
+  const r = ok(await api('POST', `/orders/${b.orderId}/refund`, { token: A.owner, body: { reason: 'customer_request', item_ids: [b.itemId] } }));
+  assert.equal(r.amount_cents, 5000, 'a third of the pass was paid, so a third goes back');
+  const left = await q("SELECT cents, status FROM payment_plan_charges WHERE plan_id = ? AND n > 1 ORDER BY n", [b.planId]);
+  assert.equal(left.filter((c) => c.status === 'due').reduce((x, c) => x + Number(c.cents), 0), 20000, '30000 was to come; the pass\'s unpaid 10000 is gone');
+  // a canceled plan holds the pass at the gate (and off the offline list) until a manager settles it
+  const c = await mk();
+  ok(await api('POST', `/guests/fair/plans/${c.planId}/cancel`, { token: A.owner, body: { note: 'stop' } }));
+  assert.equal(ok(await scan(c.code)).result, 'plan_unpaid');
+  ok(await api('POST', `/guests/fair/plans/${c.planId}/settle`, { token: A.owner, body: { note: 'paid cash' } }));
+  assert.equal(ok(await scan(c.code)).result, 'ok');
+});
+
+test('fix: auto-renew prices by the holder\'s guest type on the renewal day, and two runs make one pass', async () => {
+  ok(await settings({ autorenew_on: true }));
+  const renewOn = plus(today, 3);
+  ok(await api('PATCH', '/guests/fair/settings', { token: A.owner, body: { renew_on: renewOn, renew_rule: 'lower' } }));
+  await q("INSERT INTO price_tiers (tenant_id, product_id, tier, price_cents) VALUES (?, ?, 'child', 20000) ON DUPLICATE KEY UPDATE price_cents = 20000", [A.id, passP]);
+  // born 12 years and 362 days before today: a child when the pass was bought, 13 (youth) on the renewal day
+  const dob = `${Number(today.slice(0, 4)) - 13}${plus(today, 2).slice(4)}`;
+  const kid = await sold({ product: passP, cents: 20000, tier: 'child', from: plus(today, -200), to: plus(today, 100) });
+  await q('UPDATE people SET date_of_birth = ? WHERE id = ?', [dob, kid.personId]);
+  const p = await AR.renewPrice(pool, A.id, { person_id: kid.personId, product_id: passP, from_ticket_id: kid.ticketId }, renewOn);
+  assert.equal(p.tier, 'youth'); assert.equal(p.cents, 45000, 'the youth price, not last season\'s child price'); assert.equal(p.last_cents, null);
+  // the race: two runs at once charge once and make one pass
+  ok(await api('POST', '/guests/fair/renewals', { token: A.owner, body: { person_id: kid.personId, on: true } }));
+  const [c] = await pool.query("INSERT INTO fair_cards (tenant_id, person_id, provider, customer, payment_method) VALUES (?, ?, 'stripe', 'cus_mock', 'pm_mock')", [A.id, kid.personId]);
+  await q('UPDATE fair_renewals SET card_id = ? WHERE tenant_id = ? AND person_id = ?', [c.insertId, A.id, kid.personId]);
+  ok(await api('PATCH', '/guests/fair/settings', { token: A.owner, body: { renew_on: today } }));
+  await q('UPDATE fair_renewals SET status = \'off\' WHERE tenant_id = ? AND person_id <> ?', [A.id, kid.personId]);
+  const [x, y] = await Promise.all([AR.daily(A.id, base), AR.daily(A.id, base)]);
+  assert.equal(x.renewed + y.renewed, 1);
+  assert.equal((await q("SELECT COUNT(*) AS n FROM tickets WHERE tenant_id = ? AND person_id = ? AND product_id = ? AND valid_from >= ?", [A.id, kid.personId, passP, today]))[0].n, 1);
+  ok(await settings({ autorenew_on: false }));
+});
