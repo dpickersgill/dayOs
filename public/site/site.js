@@ -259,15 +259,14 @@
       window.matchMedia('(min-width: 1080px)').addEventListener('change', (m) => { if (m.matches) menu.open = false; });
     }
     // The Product menu opens on hover and keyboard focus (CSS). Escape shuts it until the pointer or focus leaves.
-    const dd = $('.sn-dd');
-    if (dd) {
+    document.querySelectorAll('.sn-dd').forEach((dd) => {
       const reopen = () => dd.classList.remove('shut');
       dd.addEventListener('keydown', (e) => { if (e.key === 'Escape') { dd.classList.add('shut'); dd.querySelector('.sn-a').focus(); } });
       dd.addEventListener('mouseleave', reopen);
       dd.addEventListener('focusout', (e) => { if (!dd.contains(e.relatedTarget)) reopen(); });
       // a click on a solution closes it at once, so the next page doesn't open with the menu still showing
       dd.addEventListener('click', (e) => { if (e.target.closest('.sn-panel a')) dd.classList.add('shut'); });
-    }
+    });
     // Long lists of what an app does fold away on phones, behind "What it does". Open everywhere else.
     const phone = window.matchMedia('(max-width: 640px)');
     const fold = () => document.querySelectorAll('details.more:not(.all)').forEach((d) => { d.open = !phone.matches; });
@@ -277,7 +276,40 @@
     document.querySelectorAll('[data-print]').forEach((b) => b.addEventListener('click', () => window.print()));
   }
 
+  // ---------------------------------------------------------------- The Good Day: every sign-up form (card and footer)
+  // The form also works without this script (a plain post, then the "Check your email" page). With it, the answer shows
+  // in place. The answer is the same whether or not the address is already subscribed.
+  function goodDay() {
+    document.querySelectorAll('form[data-gd]').forEach((form) => {
+      const email = form.elements.email;
+      const status = form.querySelector('.gd-status');
+      const btn = form.querySelector('button[type=submit]');
+      const show = (text, kind) => { status.textContent = text; status.className = `gd-status ${kind}`; };
+      email.addEventListener('input', () => { if (email.getAttribute('aria-invalid') === 'true' && email.validity.valid) { email.setAttribute('aria-invalid', 'false'); show('', ''); } });
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const v = (n) => (form.elements[n] ? String(form.elements[n].value || '').trim() : '');
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v('email'))) {
+          email.setAttribute('aria-invalid', 'true'); show('Enter an email address like you@yourmountain.com.', 'bad'); email.focus(); return;
+        }
+        email.setAttribute('aria-invalid', 'false');
+        btn.disabled = true; btn.textContent = 'Sending...';
+        try {
+          const res = await fetch('/api/v1/site/good-day/subscribe', { method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ email: v('email'), name: v('name'), role: v('role'), source: v('source'), website: v('website') }) });
+          const out = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(out.error || 'That did not go through');
+          form.classList.add('done');
+          show(`Almost done. ${out.message || 'Check your inbox for a link to confirm.'}`, 'ok');
+          status.focus();
+        } catch (err) {
+          show(`${err.message}. Try again in a moment.`, 'bad');
+        } finally { btn.disabled = false; btn.textContent = 'Subscribe'; }
+      });
+    });
+  }
+
   // The script is deferred, so the page is already parsed: fold the lists now, before the first paint where possible.
   chrome();
-  document.addEventListener('DOMContentLoaded', () => { switchboard(); homePlans(); pricing(); contact(); });
+  document.addEventListener('DOMContentLoaded', () => { switchboard(); homePlans(); pricing(); contact(); goodDay(); });
 }());

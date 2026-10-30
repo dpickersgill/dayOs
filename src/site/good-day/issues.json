@@ -1,0 +1,19 @@
+{
+  "_how": "One line per issue, newest last. A new issue is one file (src/site/good-day/issue-N.html) and one line here. moment is one of Plan, Arrive, Learn, Ride, Get help, Come back. lines are the three short lines in the email that sends it.",
+  "next": { "moment": "Learn", "question": "Is my kid in good hands?" },
+  "issues": [
+    {
+      "n": 1,
+      "date": "2026-10-30",
+      "moment": "Plan",
+      "question": "Can I trust what I'm about to buy?",
+      "title": "A ticket shop that starts with the date",
+      "teaser": "Five steps that let a guest see what is on offer, and what is sold out, before they pay. Plus one number to track and a two-minute test for your busiest days.",
+      "lines": [
+        "Five steps to a ticket shop a guest can trust, starting with the date.",
+        "One number to watch: questions asked before buying, as a share of orders.",
+        "A two-minute test for your three busiest days."
+      ]
+    }
+  ]
+}

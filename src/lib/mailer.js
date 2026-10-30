@@ -60,10 +60,13 @@ async function post({ to: named, fromName, fromAddress, replyTo, subject: asked,
   }
 }
 
-/** Mail from Verdynt/OS itself, not from a mountain (the website's contact form, operator notices). */
-async function sendPlatform({ to, replyTo, subject, text, tag, fromName, fromAddress }) {
+/**
+ * Mail from Verdynt/OS itself, not from a mountain (the website's contact form, operator notices, The Good Day).
+ * html, headers (List-Unsubscribe) and stream ('broadcast' for the newsletter) are optional.
+ */
+async function sendPlatform({ to, replyTo, subject, text, html, headers, stream, tag, fromName, fromAddress }) {
   if (!enabled()) return { ok: false, error: 'Email is not set up' };
-  const r = await post({ to, fromName: fromName || 'Verdynt/OS', fromAddress, replyTo: replyTo || require('../config').site.helloEmail, subject, text, tag });
+  const r = await post({ to, fromName: fromName || 'Verdynt/OS', fromAddress, replyTo: replyTo || require('../config').site.helloEmail, subject, text, html, headers, stream, tag });
   if (!r.ok) logFailure({ job: 'email', tag, message: r.error });
   return r;
 }
