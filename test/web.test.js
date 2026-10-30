@@ -1847,7 +1847,9 @@ test('sell: the cash drawer opens with a float, takes a payout, and a difference
   typeInto(f, 'amount', '5.00'); typeInto(f, 'reason', 'Buy tape');
   clickBtn(f, 'Save'); await settle();
   dlg = [...document.querySelectorAll('.overlay')].find((o) => o.textContent.includes('Cash drawer'));
-  assert.match(dlg.textContent, /\$163\.90/, '100 + 68.90 - 5.00 should be in the drawer');
+  // 2026.11.7: a cashier counts blind, so what should be there (100 + 68.90 - 5.00) shows only after the count
+  assert.match(dlg.textContent, /Shown after you count/);
+  assert.doesNotMatch(dlg.textContent, /\$163\.90/, 'the expected amount is hidden before the count');
   clickBtn(dlg, 'Count and close'); await settle();
   f = topDialog();
   typeInto(f, 'counted', '160.00');
