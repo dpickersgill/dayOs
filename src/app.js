@@ -156,6 +156,8 @@ function createApp() {
   app.get('/waitlist/:slug/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'waitlist.html')));
   app.get('/private/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'private.html')));
   app.get('/weather/:slug/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'weather.html')));
+  // Fair by design (guests round 2, FAIR): the conditions guarantee, a pass on hold, a payment plan's card, a renewal, a waitlist offer.
+  app.get(['/guarantee/:slug/:token', '/blocked/:slug/:token', '/plan/:slug/:token', '/renew/:slug/:token', '/pass-offer/:slug/:token'], (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'fair.html')));
   app.get('/shop/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'shop.html')));
   app.get('/programs/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'register.html')));
   app.get('/family/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'family.html')));

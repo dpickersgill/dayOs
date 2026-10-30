@@ -11,8 +11,10 @@ const { allowedOn, dayName, daysText } = require('./saledays');
  *   3. price_tiers row for the tier
  *   4. products.base_price_cents
  * A blackout row for that date (tier-specific or all tiers) blocks the sale.
+ * opts.at 'window': the ticket window's price, after the walk-up cap (lib/fairprice.js, a mountain setting, off by
+ * default). Then `walkup` says what the cap did: { from_cents, online_cents, cap_cents } when it lowered the price.
  */
-async function unitPrice(db, tenantId, productId, tier, date) {
+async function unitPrice(db, tenantId, productId, tier, date, { at = null } = {}) {
   await require('./guesttypes').assertKnown(db, tenantId, [tier], { forSale: true });
   const product = await one(db, 'SELECT * FROM products WHERE tenant_id = ? AND id = ?', [tenantId, productId]);
   if (!product) throw notFound('Product');
@@ -27,7 +29,11 @@ async function unitPrice(db, tenantId, productId, tier, date) {
   const t = await one(db, 'SELECT price_cents FROM price_tiers WHERE tenant_id = ? AND product_id = ? AND tier = ?', [tenantId, productId, tier]);
   const out = priceFrom(product, cal, t ? t.price_cents : null, tier);
   if (out.blackout) throw conflict(`${product.name} is blacked out on ${date}`);
-  return { product, cents: out.cents, source: out.source };
+  if (at === 'window') {
+    const w = await require('./fairprice').walkup(db, tenantId, { product, windowCents: out.cents });
+    if (w.capped) return { product, cents: w.cents, source: 'walkup_cap', walkup: { from_cents: out.cents, online_cents: w.online_cents, cap_cents: w.cap_cents } };
+  }
+  return { product, cents: out.cents, source: out.source, walkup: null };
 }
 
 /**

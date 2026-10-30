@@ -89,6 +89,7 @@ async function decide(conn, tenantId, input) {
   else if (today < t.valid_from) result = 'not_yet_valid';
   else if (today > t.valid_to) result = 'expired';
   else if ((rule = await ACT.gateRule(conn, tenantId, t, input.attractionId || null, nowIn(tenant.timezone)))) result = rule.result;
+  else if ((rule = await require('./fairprice').holdFor(conn, tenantId, t))) result = rule.result; // FAIR: a blocked pass, a plan left unpaid
   else if (tenant.scan_passback_seconds > 0 && !input.override) {
     previous = await one(conn, "SELECT scanned_at, location FROM scans WHERE tenant_id = ? AND ticket_id = ? AND result = 'ok' AND scanned_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? SECOND) ORDER BY id DESC LIMIT 1", [tenantId, t.id, tenant.scan_passback_seconds]);
     if (previous) result = 'duplicate';
@@ -153,6 +154,8 @@ async function allowlist(conn, tenantId, { attractionId = null } = {}) {
        FROM tickets t JOIN products p ON p.tenant_id = t.tenant_id AND p.id = t.product_id
        LEFT JOIN rfid_cards c ON c.tenant_id = t.tenant_id AND c.ticket_id = t.id AND c.status = 'assigned'
       WHERE t.tenant_id = ? AND t.status = 'active' AND t.valid_from <= ? AND t.valid_to >= ? AND (t.uses_remaining IS NULL OR t.uses_remaining > 0) ${where}
+        AND NOT EXISTS (SELECT 1 FROM fair_blocks b WHERE b.tenant_id = t.tenant_id AND b.ticket_id = t.id AND b.status = 'active')
+        AND NOT EXISTS (SELECT 1 FROM payment_plans pp JOIN order_items oi ON oi.tenant_id = pp.tenant_id AND oi.order_id = pp.order_id WHERE pp.tenant_id = t.tenant_id AND oi.id = t.order_item_id AND pp.status = 'suspended')
       ORDER BY t.id`, [tenantId, today, today, ...(attractionId ? [attractionId, attractionId] : [])]);
   const blocked = await rows(conn, "SELECT uid FROM rfid_cards WHERE tenant_id = ? AND status IN ('lost','retired') ORDER BY uid", [tenantId]);
   return {
