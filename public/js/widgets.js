@@ -38,7 +38,8 @@ export function personPicker({ label = 'Guest', required = false, onPick } = {})
       if (!data.length) results.append(h('p', { class: 'muted small picker-empty' }, 'No one found. Check the spelling, or add them on the Customers screen first.'));
       for (const p of data) {
         const sm = p.summary;
-        const known = [p.phone, p.email].filter(Boolean).join('  ·  ');
+        // what tells two people with the same name apart: age, a parent or guardian, the last visit (Track WINDOW)
+        const known = [p.age !== null && p.age !== undefined ? `age ${p.age}` : null, p.guardian ? `child of ${p.guardian}` : null, p.last_visit ? `last here ${fmtDate(p.last_visit)}` : null, p.phone, p.email].filter(Boolean).join('  ·  ');
         const b = h('button', { type: 'button', class: 'picker-hit' },
           h('span', { class: 'picker-name' }, `${p.first_name} ${p.last_name}`, p.date_of_birth ? h('span', { class: 'muted' }, `  born ${p.date_of_birth}`) : null),
           known ? h('span', { class: 'muted small picker-line' }, known) : null,

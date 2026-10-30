@@ -31,11 +31,12 @@ function control(f, value) {
  * The fields for one customer, grouped. scope ('ticket' | 'lesson' | null) decides which are mandatory.
  * Returns { el, values(), set(person), missing(), isEmpty() }.
  */
-export function customerFields({ def, scope = null, person = null, groups = null, sale = false, sizing = false, photo = false }) {
+export function customerFields({ def, scope = null, person = null, groups = null, sale = false, sizing = false, photo = false, light = false, noContact = false }) {
   const required = new Set(scope ? def.required[scope] : []);
   // In a sale everyone needs a name, date of birth and sex. Adults also need a phone or an email; under 18s need neither.
-  const SALE_ALWAYS = ['date_of_birth', 'sex'];
-  const isReq = (f) => f.fixed === 'required' || required.has(f.key) || (sale && SALE_ALWAYS.includes(f.key));
+  // light (a day ticket, Track WINDOW): a name only, no date of birth or sex. noContact: a guest on someone else's sale.
+  const SALE_ALWAYS = light ? [] : ['date_of_birth', 'sex'];
+  const isReq = (f) => f.fixed === 'required' || (required.has(f.key) && !(noContact && (f.key === 'phone' || f.key === 'email'))) || (sale && SALE_ALWAYS.includes(f.key));
   const inputs = new Map();
   const stars = new Map();
   const ruleNote = sale ? h('p', { class: 'muted small', 'data-note': 'sale-rule' }) : null;
@@ -52,7 +53,8 @@ export function customerFields({ def, scope = null, person = null, groups = null
     if (!sale) return;
     const minor = isMinor();
     for (const [key, st] of stars) st.hidden = minor && (key === 'phone' || key === 'email');
-    ruleNote.textContent = minor ? 'Under 18: name, date of birth and sex are all we need.' : 'Name, date of birth and sex are required. Adults also need a phone number or an email.';
+    ruleNote.textContent = light ? (noContact ? 'A day ticket needs only a name.' : 'A day ticket needs only a name, and a phone number or an email for the buyer.')
+      : minor ? 'Under 18: name, date of birth and sex are all we need.' : 'Name, date of birth and sex are required. Adults also need a phone number or an email.';
   };
   const wrap = h('div', { class: 'stack' });
   const more = h('div', { class: 'stack' });
@@ -116,7 +118,7 @@ export function customerFields({ def, scope = null, person = null, groups = null
       const v = api.values();
       const minor = sale && isMinor();
       const out = def.fields.filter((f) => inputs.has(f.key) && isReq(f) && v[f.key] === null && !(minor && (f.key === 'phone' || f.key === 'email'))).map((f) => f.label);
-      if (sale && !minor && inputs.has('phone') && inputs.has('email') && v.phone === null && v.email === null && !out.includes('Phone') && !out.includes('Email')) out.push('Phone or email');
+      if (sale && !minor && !noContact && inputs.has('phone') && inputs.has('email') && v.phone === null && v.email === null && !out.includes('Phone') && !out.includes('Email')) out.push('Phone or email');
       return out;
     },
   };
@@ -132,10 +134,10 @@ export function customerFields({ def, scope = null, person = null, groups = null
  * Customer capture for a sale or booking: find someone already on file (their details fill the form so the clerk
  * can confirm or correct them) or type a new customer. payload() gives what the API wants.
  */
-export function customerCapture({ def, scope, who = 'Purchaser', optionalAll = false, onPick = null, sale = false, sizing = false }) {
+export function customerCapture({ def, scope, who = 'Purchaser', optionalAll = false, onPick = null, sale = false, sizing = false, light = false, noContact = false }) {
   let chosen = null;
   let photoNeeded = false;
-  const fields = customerFields({ def, scope, sale, sizing, photo: sale ? 'hidden' : false });
+  const fields = customerFields({ def, scope, sale, sizing, photo: sale ? 'hidden' : false, light, noContact });
   const picker = personPicker({ label: `Find an existing ${who.toLowerCase()}`, required: false, onPick: (p) => {
     chosen = p;
     if (p) fields.set(p); else fields.set(null);
@@ -155,6 +157,8 @@ export function customerCapture({ def, scope, who = 'Purchaser', optionalAll = f
     sizing() { const v = fields.values(); return { height_in: v.height_in, weight_lb: v.weight_lb, boot_size: v.boot_size, stance: v.stance, skier_type: v.skier_type }; },
     firstName: () => (fields.values().first_name || ''),
     usePerson(p) { chosen = p; picker.set(p); fields.set(p); if (onPick) onPick(p); },
+    /** Fills the form for someone not on file yet (a driver's license read, a roster line). */
+    fill(d) { chosen = null; picker.set(null); fields.set(d); if (onPick) onPick(null); },
     /** Throws a readable error when something mandatory is missing. */
     check() {
       if (!chosen && fields.isEmpty()) {

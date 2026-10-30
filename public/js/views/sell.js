@@ -10,6 +10,8 @@ import { drawLessons } from './sell-lessons.js';
 import { drawerDialog } from './till.js';
 import { printButtons } from '../print.js';
 import { shareButton } from '../share.js';
+import { welcomeCard, pickChoice } from './guest-card.js';
+import { findBox, groupDialog, changeDayDialog, lineMode } from './sell-window.js';
 
 
 // Whether this cashier has a drawer open, shown in the page header, so cash is always taken into a drawer that gets counted.
@@ -24,8 +26,12 @@ async function loadDrawer() {
 }
 
 export async function render(root, params = []) {
-  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Sell'), h('div', { class: 'row' }, drawerBadge, button('Cash drawer', () => drawerDialog(loadDrawer), { small: true }), h('a', { class: 'btn', href: '#/gate' }, 'Open the gate'))));
+  // Line mode (Track WINDOW): one phone screen for line-busting, today's tickets as big buttons. The full Sell stays.
+  const lineOn = queryMode() === 'line';
+  root.append(h('div', { class: 'page-head' }, h('h1', null, lineOn ? 'Sell: Line' : 'Sell'), h('div', { class: 'row' }, drawerBadge, button('Cash drawer', () => drawerDialog(loadDrawer), { small: true }),
+    h('a', { class: 'btn', href: lineOn ? '#/sell' : '#/sell?mode=line', 'data-line-toggle': '', 'aria-pressed': String(lineOn) }, lineOn ? 'Full Sell' : 'Line mode'), h('a', { class: 'btn', href: '#/gate' }, 'Open the gate'))));
   await loadDrawer();
+  if (lineOn) { await lineMode(root, { drawerOpen: () => drawer.open, onOpenDrawer: (after) => drawerDialog(async () => { await loadDrawer(); after(); }) }); return; }
   const left = h('div', { class: 'stack sell-main' });
   const right = h('div', { class: 'stack sell-side' });
   root.append(h('div', { class: 'sell-grid' }, left, right));
@@ -40,6 +46,7 @@ export async function showPartnerTab() {
   try { return (await get('/partner-passes/tab')).show; } catch (_) { return false; }
 }
 const queryTab = () => { try { return new URLSearchParams(location.hash.split('?')[1] || '').get('tab'); } catch (_) { return null; } };
+const queryMode = () => { try { return new URLSearchParams(location.hash.split('?')[1] || '').get('mode'); } catch (_) { return null; } };
 
 // ---------------------------------------------------------------- selling
 const ICON = { ticket: 'Ticket', lesson: 'Lesson', lesson_package: 'Lesson package', rental: 'Rental', program: 'Program', activity: 'Activity', gift_card: 'Gift card' };
@@ -48,6 +55,9 @@ async function sellPanel(root) {
   const [menu, def, types, partnerTab] = await Promise.all([get('/checkout/menu'), loadCustomerForm(true), loadTypes(), showPartnerTab()]);
   const { options: TIERS, first: FIRST } = saleOptions(types);
   const basket = [];
+  // The guest at the window (found by the search box, a scan or a license) and the rewards they are using (Track WINDOW)
+  let guest = null;
+  const rewardsUsed = []; // [{ reward_id, choice, words }]
   const promoIn = input({ name: 'promo', autocapitalize: 'characters', placeholder: 'Promo code', 'aria-label': 'Promo code' });
   const basketBox = h('div', { class: 'stack', 'aria-live': 'polite' });
   const summary = h('div', { class: 'basket-summary', 'aria-live': 'polite' });
@@ -59,7 +69,7 @@ async function sellPanel(root) {
   const tier = select(TIERS, FIRST, { name: 'tier', 'aria-label': 'Guest type' });
   const date = input({ type: 'date', value: menu.today, min: menu.today, name: 'date', 'aria-label': 'Valid on' });
 
-  const same = (a, b) => a.type === b.type && (a.type === 'ticket' ? a.product_id === b.product_id && a.tier === b.tier && a.valid_on === b.valid_on : false);
+  const same = (a, b) => a.type === b.type && !a.roster && !b.roster && (a.type === 'ticket' ? a.product_id === b.product_id && a.tier === b.tier && a.valid_on === b.valid_on : false);
   const add = (line) => {
     const existing = basket.find((b) => same(b, line));
     if (existing) existing.quantity += line.quantity || 1; else basket.push(line);
@@ -84,7 +94,8 @@ async function sellPanel(root) {
       };
       tier.addEventListener('change', draw);
       draw();
-      b.append(h('div', { class: 'menu-tools' }, field('Valid on', date), field('Guest type', tier)), grid);
+      b.append(h('div', { class: 'menu-tools' }, field('Valid on', date), field('Guest type', tier)), grid,
+        h('div', { class: 'row' }, button('Group sale', () => groupDialog({ menu, tiers: TIERS, first: FIRST, day: date.value, add: (line) => add(line) }), { small: true, label: 'Group sale: typed numbers, a group price and a roster' })));
     }],
     ['lessons', 'Lessons', (b) => {
       if (!menu.lessons.length && !(menu.packages || []).length) { b.append(empty('No lessons are scheduled in the next two weeks.', isManager() ? h('a', { class: 'btn primary', href: '#/school' }, 'Schedule a lesson') : null)); return; }
@@ -175,10 +186,28 @@ async function sellPanel(root) {
     quote = null;
     if (basket.length) {
       try {
-        quote = await post('/checkout/quote', { promo_code: promoIn.value.trim() || undefined, lines: basket.map((l) => lineApi(l)) });
-      } catch (err) { quoteMsg.append(errorBox(err)); }
+        quote = await post('/checkout/quote', { promo_code: promoIn.value.trim() || undefined, lines: basket.map((l) => lineApi(l)), ...(rewardsUsed.length ? { rewards: rewardsUsed.map((r) => ({ reward_id: r.reward_id, choice: r.choice })) } : {}) });
+      } catch (err) {
+        // a reward that does not fit the basket is taken off, and the basket priced again without it
+        if (rewardsUsed.length && /reward|basket can take|ticket that is not/i.test(err.message || '')) { rewardsUsed.pop(); toast(err.message, 'error'); return refresh(); }
+        quoteMsg.append(errorBox(err));
+      }
     }
     drawBasket();
+  }
+  // Typed quantities (Track WINDOW): type 24 instead of tapping plus 23 times. Enter or leaving the box applies it.
+  function qtyInput(l, i) {
+    const el = h('input', { type: 'number', class: 'qty-input', min: 0, max: 200, inputmode: 'numeric', value: String(l.quantity), 'aria-label': `How many ${l.name}` });
+    const apply = () => {
+      const v = Math.floor(Number(el.value));
+      if (!Number.isFinite(v) || v === l.quantity) { el.value = String(l.quantity); return; }
+      if (v < 1) basket.splice(i, 1); else l.quantity = Math.min(v, 200);
+      if (l.roster && l.roster.length > l.quantity) toast(`The roster has ${l.roster.length} names: the first ${l.quantity} get tickets`, 'error');
+      refresh();
+    };
+    el.addEventListener('change', apply);
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); apply(); } });
+    return el;
   }
   function drawBasket() {
     clear(basketBox);
@@ -198,10 +227,16 @@ async function sellPanel(root) {
         h('div', { class: 'basket-what' }, h('strong', null, l.name), h('div', { class: 'muted small' }, `${ICON[l.type]}${l.detail ? `, ${l.detail}` : ''}`)),
         h('span', { class: 'line-price' }, q ? money(q.line_cents) : ''),
         l.type === 'ticket' ? h('div', { class: 'qty' },
-          button('−', () => { l.quantity -= 1; if (l.quantity < 1) basket.splice(i, 1); return refresh(); }, { small: true }),
-          h('span', { 'aria-label': 'Quantity' }, String(l.quantity)),
-          button('+', () => { l.quantity = Math.min(l.quantity + 1, 200); return refresh(); }, { small: true })) : h('span'),
+          button('−', () => { l.quantity -= 1; if (l.quantity < 1) basket.splice(i, 1); return refresh(); }, { small: true, label: `One fewer ${l.name}` }),
+          qtyInput(l, i),
+          button('+', () => { l.quantity = Math.min(l.quantity + 1, 200); return refresh(); }, { small: true, label: `One more ${l.name}` })) : h('span'),
         button('Remove', () => { basket.splice(i, 1); return refresh(); }, { small: true, kind: 'link' }));
+    })));
+    // rewards the guest is using: what each one takes off (from the quote), and a way to take it off again
+    if (rewardsUsed.length) basketBox.append(h('ul', { class: 'basket reward-lines', 'data-rewards': '' }, rewardsUsed.map((r, k) => {
+      const qr = quote && (quote.rewards || [])[k];
+      return h('li', { class: 'basket-line reward-line' }, h('div', { class: 'basket-what' }, h('strong', null, 'Reward'), h('div', { class: 'muted small' }, r.words)),
+        h('span', { class: 'line-price' }, qr ? `−${money(qr.value_cents)}` : ''), h('span'), button('Remove', () => { rewardsUsed.splice(k, 1); return refresh(); }, { small: true, kind: 'link', label: 'Remove the reward' }));
     })));
     // a lesson and a lift ticket for different days: a warning, never a refusal
     if (quote && (quote.warnings || []).length) basketBox.append(h('div', { class: 'notice warn', role: 'status', 'data-day-warning': '' }, quote.warnings.map((w) => h('div', null, w))));
@@ -227,8 +262,9 @@ async function sellPanel(root) {
     if (!quote) throw new Error('Fix the problem shown in the basket first');
     if ((quote.over_limit || []).length && !isManager()) throw new Error('This day is at its limit. Only a manager can sell over it.');
     if ((quote.over_limit || []).length && !overReason.value.trim()) { overReason.focus(); throw new Error('Say why you are selling over the limit'); }
-    checkoutDialog({ basket, quote, def, promo: promoIn.value.trim(), overLimitReason: () => overReason.value.trim() || undefined, comp: menu.comp, waiverText: menu.waiver_text, quickSale: menu.quick_sale, drawerOpen: () => drawer.open, onOpenDrawer: (after) => drawerDialog(async () => { await loadDrawer(); after(); }), onSold: async () => {
-      basket.length = 0; promoIn.value = ''; overReason.value = ''; quote = null;
+    checkoutDialog({ basket, quote, def, promo: promoIn.value.trim(), overLimitReason: () => overReason.value.trim() || undefined, comp: menu.comp, waiverText: menu.waiver_text, quickSale: menu.quick_sale, drawerOpen: () => drawer.open, onOpenDrawer: (after) => drawerDialog(async () => { await loadDrawer(); after(); }),
+      guest, rewards: rewardsUsed, onSold: async () => {
+      basket.length = 0; promoIn.value = ''; overReason.value = ''; quote = null; rewardsUsed.length = 0; setGuest(null);
       drawBasket();
       try { Object.assign(menu, await get('/checkout/menu')); } catch (_) { /* the menu refreshes on the next visit */ }
       loadOrders();
@@ -236,8 +272,29 @@ async function sellPanel(root) {
   }, { kind: 'primary big' });
 
   const mobileBar = h('div', { class: 'mobile-basket-bar', hidden: true, role: 'region', 'aria-label': 'Basket' });
-  root.append(menuBox, mobileBar);
+  // ---- the guest at the window (Track WINDOW): one box finds anyone by name, phone, email or a scan; the welcome-back
+  // card shows who they are, and their rewards can be used on this sale
+  const guestBox = h('section', { class: 'card guest-panel', hidden: true, 'aria-label': 'Guest' });
+  function setGuest(g) {
+    guest = g;
+    clear(guestBox);
+    guestBox.hidden = !g;
+    if (!g) return;
+    const name = g.person ? `${g.person.first_name} ${g.person.last_name}` : `${g.details.first_name} ${g.details.last_name}`;
+    guestBox.append(h('header', { class: 'card-head' }, h('h2', null, 'Guest'), button('Clear', () => { rewardsUsed.length = 0; setGuest(null); refresh(); }, { small: true, kind: 'link', label: `Clear ${name}` })));
+    if (g.person) guestBox.append(welcomeCard(g.person.id, { onUse: (r, choice) => useReward(r, choice) }));
+    else guestBox.append(h('p', null, h('strong', null, name), g.details.date_of_birth ? h('span', { class: 'muted' }, ` born ${fmtDate(g.details.date_of_birth)}`) : null, h('br'), h('span', { class: 'muted small' }, 'Not on file yet. They are saved when the sale is made.')));
+  }
+  function useReward(r, choice) {
+    if (rewardsUsed.some((x) => x.reward_id === r.id)) { toast('That reward is already on this sale'); return; }
+    rewardsUsed.push({ reward_id: r.id, choice, words: `${r.words || ''}${r.person ? ` (${r.person})` : ''}`.trim() || choice });
+    if (!basket.length) toast('Reward added. Now add what it is for.');
+    return refresh();
+  }
+  const finder = findBox({ onPerson: (p) => setGuest({ person: p }), onLicense: (d) => setGuest({ details: d }), onOrder: (id) => showOrder(id, menu), onReward: async (r) => { const c = await pickChoice(r); if (c) await useReward(r, c); } });
+  root.append(finder, menuBox, mobileBar);
   const applyPromo = button('Apply', () => refresh(), { small: true });
+  const basketPanel0 = guestBox;
   const basketPanel = h('section', { class: 'card basket-panel' }, h('header', { class: 'basket-head' }, h('h2', null, 'Basket'), countBadge), basketBox, quoteMsg, summary,
     h('label', { class: 'promo-row' }, h('span', { class: 'small muted' }, 'Promo code'), h('span', { class: 'promo-input' }, promoIn, applyPromo)), checkoutBtn);
   drawBasket();
@@ -254,15 +311,19 @@ async function sellPanel(root) {
           h('span', { class: 'muted' }, fmtTime(o.created_at)),
           state(label(o.status), o.status === 'paid' ? 'good' : 'neutral'),
           h('strong', { class: 'order-total' }, money(o.total_cents)),
-          h('span', { class: 'order-actions' }, button('Details', () => showOrder(o.id), { small: true }),
-            o.status === 'paid' && isManager() ? button('Refund', () => refund(o, loadOrders), { small: true, kind: 'danger' }) : null)))) : empty('Nothing sold yet today.'));
+          h('span', { class: 'order-actions' }, button('Details', () => showOrder(o.id, menu), { small: true }),
+            o.status === 'paid' && canRefund(menu) ? button('Refund', () => refund(o, loadOrders, menu), { small: true, kind: 'danger' }) : null)))) : empty('Nothing sold yet today.'));
     } catch (err) { clear(orders).append(errorBox(err)); }
   }
   await loadOrders();
-  return basketPanel;
+  return h('div', { class: 'stack' }, basketPanel0, basketPanel);
 }
 
-async function showOrder(id) {
+/** Managers always; counter staff when the mountain set a counter refund limit (Settings, Sell and gate). */
+const canRefund = (menu) => isManager() || Boolean(menu && menu.refund && menu.refund.can_refund);
+
+async function showOrder(id, menu = null) {
+  if (!menu) { try { menu = await get('/checkout/menu'); } catch (_) { menu = null; } }
   const o = await get(`/orders/${id}`);
   const box = h('div', { class: 'stack' });
   box.append(table([
@@ -279,14 +340,18 @@ async function showOrder(id) {
     { head: 'Amount', num: true, cell: (r) => money(r.amount_cents) }], o.refunds)));
   box.append(h('div', { class: 'row' }, printButtons(id, { hasTickets: o.tickets.some((t) => t.status !== 'void') }), shareButton('order', id)));
   if (o.tickets.length) showTickets(box, { tickets: o.tickets.map((t) => ({ code: t.code, product: 'Ticket', valid_from: t.valid_from, valid_to: t.valid_to, status: t.status })) }, true);
+  // change day at the window (Track WINDOW): a dated ticket moves to another day, the same code
+  const movable = o.tickets.filter((t) => t.status === 'active' && String(t.valid_to).slice(0, 10) >= todayStr());
+  if (movable.length) box.append(h('div', { class: 'row change-day-row' }, movable.map((t) => button(`Change day: ${t.code.slice(-6)}`, () => changeDayDialog(t, () => { dlg.close(); showOrder(id, menu); }), { small: true, label: `Change the day of ticket ${t.code}` }))));
   if (o.gift_cards.length) box.append(h('section', { class: 'section' }, h('header', null, h('h2', null, 'Gift cards')), h('div', { class: 'codes' }, o.gift_cards.map((g) => h('div', { class: 'code' }, g.code, h('small', null, `${money(g.initial_cents)}${g.recipient_name ? ` for ${g.recipient_name}` : ''}${g.status === 'void' ? ', canceled' : ''}`))))));
-  if (o.status === 'paid' && isManager()) box.append(h('div', { class: 'row' }, button('Refund…', () => refund(o, null), { small: true, kind: 'danger' })));
-  dialog(`Order #${id}`, box, { wide: true });
+  if (o.status === 'paid' && canRefund(menu)) box.append(h('div', { class: 'row' }, button('Refund…', () => refund(o, null, menu), { small: true, kind: 'danger' })));
+  const dlg = dialog(`Order #${id}`, box, { wide: true });
 }
 
 const REFUND_REASONS = ['customer_request', 'weather', 'injury', 'wrong_item', 'duplicate', 'staff_error', 'other'];
-/** Refund all or part of an order. A reason is always recorded. Managers only. */
-async function refund(o, done) {
+/** Refund all or part of an order. A reason is always recorded. Managers, and counter staff up to the mountain's limit. */
+async function refund(o, done, menu = null) {
+  const limit = menu && menu.refund ? menu.refund.counter_limit_cents : 0;
   const full = await get(`/orders/${o.id}`);
   const open = full.lines.filter((l) => !l.refunded_at);
   const boxes = new Map(open.map((l) => [l.id, h('input', { type: 'checkbox', checked: true, 'aria-label': `Refund ${l.name}` })]));
@@ -304,6 +369,7 @@ async function refund(o, done) {
   redraw();
   const f = h('div', { class: 'stack' },
     h('p', null, `Order #${o.id}, ${money(full.total_cents)}. Choose what is being refunded. Tickets are voided, lesson and program places released and unspent gift cards canceled. Gear that is still out must be checked in first. The money goes back the way it was paid.`),
+    !isManager() && limit ? h('p', { class: 'notice', role: 'note' }, `You can refund up to ${money(limit)} on an order. Above that, ask a manager.`) : null,
     h('div', { class: 'stack tight' }, open.map((l) => h('label', { class: 'check' }, boxes.get(l.id), ` ${l.name}${[l.first_name, l.last_name].filter(Boolean).length ? ` (${[l.first_name, l.last_name].filter(Boolean).join(' ')})` : ''}, ${money(l.unit_price_cents * l.quantity - (l.discount_cents || 0) + (l.tax_cents || 0))}`))),
     h('div', { class: 'form' }, field('Why', reason), field('Note (needed for "Other")', note), paidCash && drawers.length ? field('Cash comes out of', drawer) : null), worth);
   formDialog(`Refund order #${o.id}`, f, async () => {

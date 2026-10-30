@@ -39,7 +39,7 @@ export async function gearDialog(line, onDone, who = {}) {
  * basket: [{ type, name, ... }] built by the Sell screen. quote: the server's quote for it (totals).
  * onSold(order) runs after a successful sale.
  */
-export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null, waiverText = null, quickSale = null, drawerOpen = () => true, onOpenDrawer = null, overLimitReason = () => undefined }) {
+export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null, waiverText = null, quickSale = null, drawerOpen = () => true, onOpenDrawer = null, overLimitReason = () => undefined, guest = null, rewards = [], receiptBy = false, startPay = null }) {
   const hasTickets = basket.some((l) => l.type === 'ticket' || l.type === 'activity'); // an activity asks for the same details as a ticket
   const hasLesson = basket.some((l) => l.type === 'lesson' || l.type === 'lesson_package');
   const hasRental = basket.some((l) => l.type === 'rental');
@@ -47,6 +47,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   // Everything sold is for a named person: one slot per ticket, and one per lesson, rental and program place.
   const slots = [];
   for (const l of basket) {
+    if (l.roster && l.roster.length) continue; // a group's roster names its own tickets (Track WINDOW)
     if (l.type === 'ticket') {
       for (let n = 0; n < l.quantity; n++) slots.push({ line: l, text: l.quantity > 1 ? `${l.name} ${n + 1} of ${l.quantity}` : l.name, aria: l.quantity > 1 ? `${l.name} ${n + 1}` : l.name });
     } else if (WHO_TYPES.includes(l.type)) slots.push({ line: l, text: l.name, aria: l.name });
@@ -59,10 +60,12 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   // with no name, and that is the first choice for it; the guest's details are a tap away.
   const quickOk = Boolean(quickSale && quickSale.allowed && basket.length && basket.every((l) => (l.type === 'ticket' && quickSale.kinds.includes(l.kind)) || l.type === 'gift_card'));
   let quick = false;
+  // A day ticket needs only a name (Track WINDOW): no date of birth or sex when the basket is day tickets and gift cards.
+  const light = basket.every((l) => (l.type === 'ticket' && l.kind !== 'season_pass') || l.type === 'gift_card');
 
   // ---- step 1: customer and participants
   const waiverBox = () => (waiverText ? h('details', { class: 'waiver-read' }, h('summary', null, 'Read the waiver'), h('div', { class: 'waiver-text' }, waiverText)) : null);
-  const customer = customerCapture({ def, scope: hasTickets ? 'ticket' : (hasLesson ? 'lesson' : null), who: 'Customer', sale: true, sizing: hasRental, onPick: (p) => { refreshWho(); loadFamily(p); } });
+  const customer = customerCapture({ def, scope: hasTickets ? 'ticket' : (hasLesson ? 'lesson' : null), who: 'Customer', sale: true, sizing: hasRental, light, onPick: (p) => { refreshWho(); loadFamily(p); } });
   const custWaiver = h('input', { type: 'checkbox', name: 'cust_waiver' });
   const custWaiverText = h('span');
   const custWaiverRow = h('div', { class: 'stack tight' }, h('label', { class: 'check' }, custWaiver, custWaiverText), waiverBox());
@@ -197,7 +200,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   }
   function addPerson(prefill) {
     const id = `p${people.length + 1}`;
-    const capture = customerCapture({ def, scope: hasLesson ? 'lesson' : (hasTickets ? 'ticket' : null), who: 'Participant', sale: true, sizing: hasRental, onPick: () => refreshWho() });
+    const capture = customerCapture({ def, scope: hasLesson ? 'lesson' : (hasTickets ? 'ticket' : null), who: 'Participant', sale: true, sizing: hasRental, light, noContact: light, onPick: () => refreshWho() });
     const waiver = h('input', { type: 'checkbox' });
     const waiverText_ = h('span');
     const waiverRow = h('div', { class: 'stack tight' }, h('label', { class: 'check' }, waiver, waiverText_), waiverBox());
@@ -241,9 +244,14 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   }
   const step1 = h('div', { class: 'stack' },
     h('h3', null, 'Customer'),
-    h('p', { class: 'muted small' }, 'Every item sold needs a name. Find the customer by name, phone or email, or type their details. Everyone needs a date of birth and sex; under 18s do not need a phone or email, but do need a parent or guardian.'),
+    h('p', { class: 'muted small' }, light ? 'Every ticket needs a name. Find the customer by name, phone or email, or type their details. A day ticket needs no date of birth or sex. The buyer needs a phone or an email.'
+      : 'Every item sold needs a name. Find the customer by name, phone or email, or type their details. Everyone needs a date of birth and sex; under 18s do not need a phone or email, but do need a parent or guardian.'),
+    basket.some((l) => l.roster && l.roster.length) ? h('p', { class: 'notice', role: 'status' }, `The group's ${basket.reduce((n, l) => n + ((l.roster && l.roster.length) || 0), 0)} names from the roster are on their tickets. Add the person paying here.`) : null,
     customer.el, famBox, custGuardianRow, custWaiverRow, whoBox, peopleBox, step1Error);
   refreshWho();
+  // someone already found in Sell (the search box, a scan, the welcome-back card) or read from a license
+  if (guest && guest.person) customer.usePerson(guest.person);
+  else if (guest && guest.details) customer.fill(guest.details);
 
   // ---- step 2: payment. Choose how they pay first; only that way's fields show.
   const payments = [];
@@ -465,7 +473,8 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   }
 
   function build() {
-    const body = { channel: 'window', follow_types: true, promo_code: promo || undefined, over_limit_reason: overLimitReason(), lines: [], payments: payments.map((p) => ({ ...p })) };
+    const body = { channel: basket.some((l) => l.roster && l.roster.length) ? 'group' : 'window', follow_types: true, promo_code: promo || undefined, over_limit_reason: overLimitReason(), lines: [], payments: payments.map((p) => ({ ...p })),
+      ...(rewards.length ? { rewards: rewards.map((r) => ({ reward_id: r.reward_id, choice: r.choice })) } : {}) };
     if (quick) return { ...body, quick: true, lines: basket.map((l) => lineApi(l, null, null)) };
     const c = customer.payload('details');
     const gOf = (id, cap) => { const g = guardianFor(id); return cap.isMinor() && g ? { guardian: g } : {}; };
@@ -476,7 +485,18 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       body.participants = body.participants || {};
       body.participants[p.id] = { ...p.capture.payload('details'), ...(p.waiver.checked && !p.waiverRow.hidden ? { sign_waiver: true } : {}), ...gOf(p.id, p.capture) };
     }
-    body.lines = basket.map((l) => {
+    body.lines = basket.map((l, li) => {
+      if (l.roster && l.roster.length) {
+        // each name on the roster is a guest with a ticket; any tickets beyond the roster go to the person paying
+        const keys = l.roster.slice(0, l.quantity).map((r, k) => {
+          const key = `r${li}_${k}`;
+          body.participants = body.participants || {};
+          body.participants[key] = { details: { first_name: r.first_name, last_name: r.last_name } };
+          return key;
+        });
+        while (keys.length < l.quantity) keys.push('customer');
+        return lineApi(l, null, keys);
+      }
       const mine = slots.filter((s) => s.line === l);
       if (l.type === 'lesson' && mine.length && safety.has(mine[0])) { const v = safety.get(mine[0]).f.value(); l.safety = Object.keys(v).length ? v : undefined; }
       if (l.type === 'ticket') return lineApi(l, null, mine.map((s) => assign.get(s)));
@@ -530,6 +550,9 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
     if (r && typeof r.total_cents === 'number' && r.total_cents !== total) total = r.total_cents;
     clear(totalEl).append(`Total ${money(total)}`);
     clear(typeNote);
+    // what a day ticket did not ask for: shown, never blocking (Track WINDOW)
+    if (r && (r.missing || []).length) typeNote.append(h('div', { class: 'notice soft-missing', role: 'status', 'data-soft-missing': '' }, h('strong', null, 'Not asked today: '), r.missing.map((m) => `${m.name} (${m.missing.join(' and ').toLowerCase()})`).join(', '), '. Ask next time they buy a lesson or a pass.'));
+    if (r && (r.rewards || []).length) typeNote.append(h('div', { class: 'notice', role: 'status' }, r.rewards.map((x) => h('div', null, `Reward used: ${money(x.value_cents)} off.`))));
     if (r && (r.type_changes || []).length) typeNote.append(h('div', { class: 'notice', role: 'status' }, r.type_changes.map((c) => h('div', null, `${c.name}: the ${label(c.line)} is priced as ${typeName(c.to)}, the same as their other items.`))));
     show(2); drawPayments();
   };
@@ -569,8 +592,10 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       out.rentals.some((r) => r.status === 'to_fit') ? h('section', { class: 'stack' }, h('h3', null, 'Ready to fit'), h('p', null, `${out.rentals.filter((r) => r.status === 'to_fit').length} rental${out.rentals.filter((r) => r.status === 'to_fit').length === 1 ? '' : 's'} paid. Send the guest to the rental shop with the receipt.`)) : null,
       out.programs.length ? h('section', { class: 'stack' }, h('h3', null, 'Program places'), h('ul', { class: 'plain' }, out.programs.map((p) => h('li', null, p.name)))) : null,
       out.activities && out.activities.length ? h('section', { class: 'stack' }, h('h3', null, 'Activities booked'), h('ul', { class: 'plain' }, out.activities.map((a) => h('li', null, `${a.holder}: ${a.product} at ${a.attraction}, ${a.date}${a.start_time ? `, ${clock12(a.start_time)} to ${clock12(a.end_time)}` : ', all day'}`))), h('p', { class: 'muted small' }, 'Each ticket lets one guest in once, at that attraction, from 15 minutes before the time.')) : null);
+    if (receiptBy || out.customer) dlgBody.append(receiptSender(out, customerEmail()));
     nav.append(button('New sale', () => dlg.close(), { kind: 'primary' }));
   }
+  function customerEmail() { const d = customer.payload('details').details; return (d && d.email) || (customer.person() && customer.person().email) || ''; }
 
   // Closed without completing the sale: a card already charged on the reader goes back to the guest.
   const onClose = () => {
@@ -580,8 +605,24 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
     return Promise.all(payments.filter((x) => x.on_reader).map((p) => giveBack(p).catch(() => toast('A card reader payment could not be refunded. A manager can refund it under Billing, Card readers.', 'error'))));
   };
   dlg = dialog('Checkout', h('div', { class: 'stack' }, dlgBody, nav), { wide: true, onClose });
-  show(quickOk ? 0 : 1);
+  show(quickOk && !guest ? 0 : 1);
+  // Line mode: a quick sale goes straight to payment, with the way to pay already chosen (Track WINDOW)
+  if (startPay && quickOk && !guest) toPayment(true).then(() => { if (total) choose(startPay); });
   return dlg;
+}
+
+/** Send the receipt with the ticket codes by email (or by text, only when the guest said yes to texts). Track WINDOW. */
+export function receiptSender(out, email = '') {
+  const to = input({ type: 'email', name: 'receipt_email', value: email, autocomplete: 'off', placeholder: 'guest@example.com', 'aria-label': 'Email the receipt to' });
+  const msg = h('span', { class: 'muted small', role: 'status' });
+  const send = async (by) => {
+    msg.textContent = '';
+    if (by === 'email' && !to.value.trim()) { to.focus(); throw new Error('Enter the email address'); }
+    await post(`/guests/orders/${out.id}/send-receipt`, by === 'email' ? { by, email: to.value.trim() } : { by });
+    msg.textContent = by === 'email' ? `Receipt sent to ${to.value.trim()}.` : 'Receipt sent by text.';
+  };
+  return h('section', { class: 'stack tight receipt-send', 'data-receipt-send': '' }, h('h3', null, 'Receipt'),
+    h('div', { class: 'row' }, to, button('Email it', () => send('email'), { small: true }), out.customer ? button('Text it', () => send('text'), { small: true }) : null), msg);
 }
 
 export { state };

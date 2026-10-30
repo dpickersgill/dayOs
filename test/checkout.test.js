@@ -245,7 +245,7 @@ test('every item sold needs a named person: the customer is always required, and
   assert.equal((await sellRaw(T.counter, { customer: { details: parent }, lines: [{ type: 'ticket', product_id: D.day, holders: ['nobody'] }], payments: cash(6000) })).status, 400, 'an unknown person key');
 });
 
-test('name, date of birth and sex for everyone; adults also a phone or email; under 18s need neither', async () => {
+test('a day ticket needs a name only (2026.11.8: no date of birth or sex, shown as missing); adults buying also a phone or email', async () => {
   const cash = [{ tender: 'cash', amount_cents: 12000 }];
   const lines = [{ type: 'ticket', product_id: D.day, quantity: 2, holders: ['customer', 'k'] }];
   const adult = { first_name: 'Ada', last_name: 'Adult', email: 'ada@a.test', date_of_birth: '1982-04-04', sex: 'female' };
@@ -254,12 +254,11 @@ test('name, date of birth and sex for everyone; adults also a phone or email; un
   const kid = { first_name: 'Kai', last_name: 'Adult', date_of_birth: minorDob, sex: 'male' };
   const missing = async (res) => { assert.equal(res.status, 400); return res.body.error; };
 
-  assert.match(await missing(await go({ ...adult, sex: undefined }, kid)), /Sex/);
-  assert.match(await missing(await go({ ...adult, date_of_birth: undefined }, kid)), /Date of birth/);
+  // Track WINDOW (2026.11.8): a day ticket asks for no date of birth or sex; what is missing comes back as a soft flag
+  const light = await go({ ...adult, first_name: 'Ada0', email: 'ada0@a.test', sex: undefined, date_of_birth: undefined }, { ...kid, first_name: 'Kai0', sex: undefined, date_of_birth: undefined });
+  assert.equal(light.status, 201, light.text);
+  assert.deepEqual(light.body.missing.map((m) => m.missing.join(', ')), ['Date of birth, Sex', 'Date of birth, Sex']);
   assert.match(await missing(await go({ ...adult, email: undefined }, kid)), /Phone or email/);
-  assert.match(await missing(await go(adult, { ...kid, sex: undefined })), /Sex/);
-  assert.match(await missing(await go(adult, { ...kid, date_of_birth: undefined })), /Date of birth/);
-  assert.match(await missing(await go(adult, { ...kid, date_of_birth: undefined, email: 'kai@a.test' })), /Date of birth/);
   assert.equal((await go({ ...adult, email: undefined, phone: '610-555-0111' }, kid)).status, 201, 'a phone number alone is enough for an adult');
   const ok1 = await go({ ...adult, first_name: 'Ada2' }, kid);
   assert.equal(ok1.status, 201, JSON.stringify(ok1.body));

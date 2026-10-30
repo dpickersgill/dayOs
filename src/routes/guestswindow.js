@@ -380,8 +380,10 @@ const changeBody = z.object({
 });
 /** The counter's refund limit: what has gone back on this order already plus this, against the mountain's limit. */
 async function refundAllowed(conn, req, orderId, cents) {
-  if (isMgr(req) || cents <= 0) return;
+  if (isMgr(req)) return;
   const s = await GS.get(conn, req.auth.tenantId);
+  if (!s.counter_refund_limit_cents) throw forbidden('Only a manager can give money back. Ask a manager.');
+  if (cents <= 0) return;
   const before = await one(conn, 'SELECT COALESCE(SUM(amount_cents), 0) AS c FROM order_refunds WHERE tenant_id = ? AND order_id = ?', [req.auth.tenantId, orderId]);
   if (!s.counter_refund_limit_cents) throw forbidden('Only a manager can give money back. Ask a manager.');
   if (Number(before.c) + cents > s.counter_refund_limit_cents) throw forbidden(`Counter staff can give back up to ${money(s.counter_refund_limit_cents)} on an order. Ask a manager.`);
@@ -491,6 +493,40 @@ async function changeEmail(tenantId, c) {
   const r = await mailer.send({ tenantId, to: to.email, fromName: t.name, subject: `Your ticket is now for ${dayText(c.ticket.to)}`, text, tag: 'window-change' });
   return r.ok;
 }
+
+// ---------------------------------------------------------------- the receipt from Line mode
+/**
+ * Sends the receipt with the ticket codes: by email to the address given, or by text to the guest on the order, only
+ * when texts are set up and that guest has said yes to texts (the consent ledger). Never a text without consent.
+ * ACCOUNT's designed confirmation (lib/salemail.js) can replace the email body when it lands.
+ */
+router.post('/orders/:id/send-receipt', requireRole(...sellers), validate(z.object({ email: z.string().trim().email().max(255).optional(), by: z.enum(['email', 'text']).default('email') })), async (req, res) => {
+  const { tenantId } = req.auth;
+  const o = await one(pool, 'SELECT id, person_id, total_cents FROM orders WHERE tenant_id = ? AND id = ?', [tenantId, paramId(req)]);
+  if (!o) throw notFound('Order');
+  const t = await one(pool, 'SELECT name, phone FROM tenants WHERE id = ?', [tenantId]);
+  const tickets = await rows(pool, `SELECT tk.code, tk.valid_from, pr.name, p.first_name FROM tickets tk JOIN order_items i ON i.tenant_id = tk.tenant_id AND i.id = tk.order_item_id
+    JOIN products pr ON pr.tenant_id = tk.tenant_id AND pr.id = tk.product_id LEFT JOIN people p ON p.tenant_id = tk.tenant_id AND p.id = tk.person_id
+    WHERE tk.tenant_id = ? AND i.order_id = ? AND tk.status <> 'void' ORDER BY tk.id`, [tenantId, o.id]);
+  const lines = tickets.map((k) => `- ${k.name}${k.first_name ? ` for ${k.first_name}` : ''}, ${dayText(d10(k.valid_from))}: ${k.code}`);
+  if (req.body.by === 'text') {
+    const sms = require('../lib/sms');
+    if (!sms.enabled()) throw conflict('Text messages are not set up for this mountain. Send the receipt by email.');
+    const p = o.person_id ? await one(pool, 'SELECT phone FROM people WHERE tenant_id = ? AND id = ?', [tenantId, o.person_id]) : null;
+    const c = o.person_id ? await require('../lib/consent').currentConsent(pool, tenantId, o.person_id) : null;
+    if (!p || !p.phone || !c || !c.sms || c.sms.status !== 'opted_in') throw conflict('This guest has not said yes to texts. Send the receipt by email.');
+    const r = await sms.send({ tenantId, to: sms.e164(p.phone) || p.phone, body: `${t.name}: thanks! Order ${o.id}, ${money(o.total_cents)}.${tickets.length ? ` Tickets: ${tickets.map((k) => k.code).join(', ')}` : ''}` });
+    if (!r.ok) throw conflict('The text could not be sent. Try email.');
+    return res.json({ ok: true, by: 'text' });
+  }
+  if (!req.body.email) throw bad('Enter the email address');
+  if (!mailer.enabled()) throw conflict('Email is not set up for this mountain.');
+  const text = [`Thanks for coming to ${t.name}!`, '', `Order ${o.id}: ${money(o.total_cents)}`, '', ...(lines.length ? ['Your tickets (show the code at the gate):', ...lines, ''] : []), t.phone ? `Questions? Call ${t.phone}.` : ''].join('\n');
+  const r = await mailer.send({ tenantId, to: req.body.email, fromName: t.name, subject: `Your receipt from ${t.name}`, text, tag: 'window-receipt' });
+  if (!r.ok) throw conflict('The email could not be sent.');
+  await audit(pool, req, 'send_receipt', 'orders', o.id, { by: 'email' });
+  res.json({ ok: true, by: 'email' });
+});
 
 async function tick() { return {}; }
 async function daily() { return {}; }

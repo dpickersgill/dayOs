@@ -3377,3 +3377,44 @@ fieldset.safety legend { font-weight: 700; padding: 0 4px; }
 .over-limit .field { margin-top: 8px; }
 .gate-type { display: inline-block; margin-top: 6px; padding: 4px 16px; border-radius: 10px; background: #fff; color: #10202f; font-size: 2.25rem; font-weight: 800; letter-spacing: .04em; }
 .gate-type.flag { background: #ffd23f; }
+
+/* ---- Guests round 2, Track WINDOW: the welcome back, scan to find, typed quantities, rewards in the basket, Line mode */
+.guest-card { border: 1px solid var(--line); border-left: 4px solid var(--trail-blue); border-radius: var(--radius); background: var(--surface-2); padding: 10px 12px; margin: 4px 0 8px; }
+.guest-card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.guest-say { margin: 6px 0; font-size: 1.05rem; font-weight: 600; color: var(--ink); }
+.guest-facts { margin: 0; padding-left: 18px; }
+.guest-facts li { margin: 2px 0; }
+.guest-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--info-tint); color: var(--ink-2); font-size: .85rem; font-weight: 600; }
+.guest-rewards { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
+.guest-reward { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }
+.gate-welcome { margin-top: 8px; font-size: 1.25rem; font-weight: 700; }
+.find-box { display: grid; gap: 8px; }
+.find-box .find-label { font-weight: 700; }
+.find-input { width: 100%; min-height: 48px; font-size: 1.1rem; }
+.find-results:empty { display: none; }
+.find-results { display: grid; gap: 6px; }
+.find-title { margin: 0; }
+.find-people .picker-hit { width: 100%; text-align: left; }
+.qty .qty-input, .qty-input { width: 4.5em; min-height: 40px; text-align: center; font-size: 1.05rem; }
+.reward-line .line-price { color: var(--open-ink); font-weight: 700; }
+.soft-missing { background: var(--hold-tint); color: var(--hold-ink); }
+.change-day-row { flex-wrap: wrap; }
+.receipt-send .row { flex-wrap: wrap; }
+.receipt-send input[type='email'] { flex: 1 1 220px; min-width: 0; }
+.line-mode { max-width: 640px; margin: 0 auto; }
+.line-tiers { display: flex; flex-wrap: wrap; gap: 6px; }
+.line-tiers .btn { min-height: 48px; flex: 1 1 auto; }
+.line-tiers .btn[aria-pressed='true'] { background: var(--sel-bg); color: var(--sel-ink); border-color: var(--sel-bg); }
+.line-qty-row { align-items: center; gap: 8px; }
+.line-qty-row .btn { min-width: 48px; min-height: 48px; font-size: 1.3rem; }
+.line-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.line-tile { display: grid; gap: 6px; min-height: 96px; padding: 14px; border: 2px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--ink); font-size: 1.1rem; text-align: left; cursor: pointer; }
+.line-tile[aria-pressed='true'] { border-color: var(--trail-blue); background: var(--info-tint); }
+.line-tile:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.line-pay-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.line-pay-buttons .btn { min-height: 64px; font-size: 1.15rem; }
+.line-pay-buttons .btn:last-child { grid-column: 1 / -1; min-height: 48px; }
+@media (max-width: 480px) {
+  .line-tiles { grid-template-columns: 1fr 1fr; }
+  .guest-reward .btn { margin-left: auto; }
+}

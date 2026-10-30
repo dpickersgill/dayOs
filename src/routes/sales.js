@@ -184,6 +184,7 @@ router.post('/orders/:id/refund', requireRole('counter', 'manager'), validate(re
   const result = await tx(async (conn) => {
     const order = await one(conn, 'SELECT * FROM orders WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, orderId]);
     if (!order) throw notFound('Order');
+    await require('./guestswindow').refundAllowed(conn, req, orderId, 0); // counter staff with no refund limit: a manager, first
     if (order.status !== 'paid') throw conflict(`Order is ${order.status}`);
     const open = await rows(conn, 'SELECT * FROM order_items WHERE tenant_id = ? AND order_id = ? AND refunded_at IS NULL ORDER BY id', [tenantId, orderId]);
     if (!open.length) throw conflict('Everything on this order has been refunded');

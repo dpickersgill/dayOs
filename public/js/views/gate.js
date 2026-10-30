@@ -8,6 +8,7 @@
 import { get, post, put, patch, del } from '../api.js';
 import { h, clear, input, state, table, field, button, fmtDate, fmtDateTime, label, empty, errorBox, tabs, formDialog, confirmDialog, dialog, select, toast, val, isManager } from '../ui.js';
 import { nfcSupported, cameraSupported, listenNfc, readOneCard, scanWithCamera } from '../readers.js';
+import { gateLine } from './guest-card.js';
 
 const SCAN_TEXT = {
   ok: ['Let them ride', 'good'],
@@ -107,7 +108,8 @@ function gate(places = []) {
         h('div', null, h('div', { class: 'gate-name' }, who.name || 'Guest'),
           who.guest_type_name ? h('div', { class: `gate-type${adultType ? '' : ' flag'}`, 'data-guest-type': who.guest_type, 'aria-label': `Guest type: ${who.guest_type_name}` }, who.guest_type_name.toUpperCase()) : null,
           h('div', null, [who.product, who.kind === 'season_pass' && !who.photo ? 'No photo on file' : null].filter(Boolean).join(' · ')),
-          who.waiver === false ? h('div', { class: 'gate-waiver' }, state('No waiver on file', 'warn'), ' Send them to the window to sign.') : null)));
+          who.waiver === false ? h('div', { class: 'gate-waiver' }, state('No waiver on file', 'warn'), ' Send them to the window to sign.') : null,
+          gateLine(who.welcome))));
     }
     if (out.result === 'duplicate') panel.append(button('Let them through anyway', () => scan(value, { override: true, card }), { kind: 'primary' }));
     const shown = out.ticket ? out.ticket.code : value.toUpperCase();

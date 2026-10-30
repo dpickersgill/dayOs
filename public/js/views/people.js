@@ -6,6 +6,7 @@ import { shareButton } from '../share.js';
 import { loadCustomerForm, customerFields, customerSettingsDialog } from './customer-form.js';
 import { photoSection, familySection, duplicatesDialog, renewalsDialog, mergeDialog } from './people-extra.js';
 import { alertsBanner, consentSection, notesSection, dataActions, qualityStrip, FLAG_LABELS } from './customer-care.js';
+import { welcomeCard, familyHistory } from './guest-card.js';
 
 export async function render(root, params = []) {
   const q = input({ type: 'search', placeholder: 'Name, email or phone', 'aria-label': 'Search customers' });
@@ -71,6 +72,8 @@ async function detail(p, done) {
     h('div', { class: 'row end' }, shareButton('customer', fresh.id)),
     fresh.anonymised_at ? h('p', { class: 'muted' }, 'This customer has been anonymised. Their history stays for the mountain\u2019s records.') : null,
     alertsBanner(fresh),
+    // the welcome back (Track WINDOW): visits, pass, birthday, the family's lessons and sizes, rewards held
+    !fresh.anonymised_at && can('counter', 'instructor', 'staff') ? welcomeCard(fresh.id) : null,
     h('dl', { class: 'cust-lines' },
       ...line('Email', fresh.email), ...line('Phone', fresh.phone), ...line('Born', fresh.date_of_birth ? fmtDate(fresh.date_of_birth) : ''),
       ...line('Address', address), ...line('Emergency contact', [fresh.emergency_name, fresh.emergency_phone].filter(Boolean).join(', ')),
@@ -83,6 +86,8 @@ async function detail(p, done) {
   const hist = h('div', { class: 'stack' });
   parts.push(h('h3', null, 'History'), hist);
   loadHistory(hist, fresh);
+  // the whole family's history, visits and rewards, and a manager's goodwill credit (Track WINDOW)
+  if (can('counter', 'instructor') && !fresh.anonymised_at) parts.push(h('h3', null, 'Family history'), familyHistory(fresh));
   if (can('instructor')) {
     const box = h('div');
     parts.push(h('h3', null, 'Lesson progress'), box);
