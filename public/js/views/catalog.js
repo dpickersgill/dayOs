@@ -6,9 +6,10 @@ const KINDS = ['day_ticket', 'multi_day', 'season_pass', 'punch_card', 'lesson',
 const TICKET_KINDS = ['day_ticket', 'multi_day', 'season_pass', 'punch_card', 'voucher'];
 
 export async function render(root) {
-  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Products and prices')),
+  if (schoolDirectorOnly()) root.append(h('p', { class: 'muted' }, 'Lesson products and their prices. Other products belong to a manager.'));
+  root.prepend(h('div', { class: 'page-head' }, h('h1', null, 'Products and prices')));
+  root.append(
     // A ski school director (2026.11.9) sees and changes lesson products and their prices only.
-    schoolDirectorOnly() ? h('p', { class: 'muted' }, 'Lesson products and their prices. Other products belong to a manager.') : null,
     tabs([['products', 'Products', drawProducts], ...(schoolDirectorOnly() ? [] : [['types', 'Guest types', drawTypes], ['promos', 'Promo codes', drawPromos]])]));
 }
 

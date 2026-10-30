@@ -137,9 +137,9 @@ function schoolAccessLine(id) {
   const box = h('div', { class: 'school-access', 'data-school-access': '' });
   get(`/skischool/access/${id}`).then((a) => {
     const only = a.login_role && a.login_role !== 'instructor';
-    box.append(h('p', null, h('b', null, 'Ski school access: '), label(a.level), '. ', h('span', { class: 'muted small' }, SCHOOL_ACCESS[a.level])),
+    box.append(...[h('p', null, h('b', null, 'Ski school access: '), label(a.level), '. ', h('span', { class: 'muted small' }, SCHOOL_ACCESS[a.level])),
       only ? h('p', { class: 'muted small' }, `Their login is ${label(a.login_role)}, so this level does not change what they can do.`) : null,
-      a.level === 'director' && !a.two_step ? h('p', { class: 'small', role: 'note' }, state('Two-step sign-in not set up', 'warn'), ' They are asked to set it up the next time they open the app.') : null);
+      a.level === 'director' && !a.two_step ? h('p', { class: 'small', role: 'note' }, state('Two-step sign-in not set up', 'warn'), ' They are asked to set it up the next time they open the app.') : null].filter(Boolean));
   }).catch(() => { /* not an owner or manager: nothing to show */ });
   return box;
 }

@@ -31,7 +31,7 @@ export async function render(root, params = []) {
   root.append(h('div', { class: 'page-head' }, h('h1', null, lineOn ? 'Sell: Line' : 'Sell'), h('div', { class: 'row' }, drawerBadge, button('Cash drawer', () => drawerDialog(loadDrawer), { small: true }),
     // the address changes (so a phone can keep #/sell?mode=line as a bookmark) and the page draws again in the other mode
     h('a', { class: 'btn', href: lineOn ? '#/sell' : '#/sell?mode=line', 'data-line-toggle': '', 'aria-pressed': String(lineOn), onclick: (e) => { e.preventDefault(); location.hash = lineOn ? '#/sell' : '#/sell?mode=line'; clear(root); render(root, params); } }, lineOn ? 'Full Sell' : 'Line mode'), h('a', { class: 'btn', href: '#/gate' }, 'Open the gate'))));
-  if (schoolDirectorOnly()) root.querySelectorAll('[data-line-toggle], a[href="#/gate"]').forEach((a) => a.remove());
+  if (schoolDirectorOnly()) [...root.querySelectorAll('[data-line-toggle], a[href="#/gate"], .drawer-badge, button')].filter((x) => x.tagName !== 'BUTTON' || x.textContent === 'Cash drawer').forEach((a) => a.remove()); // a ski school director: lessons only, no drawer
   await loadDrawer();
   if (lineOn) { await lineMode(root, { drawerOpen: () => drawer.open, onOpenDrawer: (after) => drawerDialog(async () => { await loadDrawer(); after(); }) }); return; }
   const left = h('div', { class: 'stack sell-main' });
