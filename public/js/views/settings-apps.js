@@ -10,7 +10,7 @@ import { card, row, toggle, amount, linkRow, formTracker, nothingHere } from './
 
 // The app views whose setup shows on each page, and the module that must be on for each.
 const SOURCES = {
-  sell: [['gate', 'gate'], ['partners', 'sell']],
+  sell: [['gate', 'gate'], ['partners', 'sell'], ['guest-rewards', 'sell'], ['guest-fair', 'sell']],
   shop: [['shop', 'shop']],
   school: [['school', 'school'], ['availability', 'availability']],
   programs: [['programs', 'programs']],

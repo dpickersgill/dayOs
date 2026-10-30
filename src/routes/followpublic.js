@@ -120,6 +120,7 @@ jobs.post('/daily', async (req, res) => {
     out.day_records = await stage('day_records', () => require('../lib/dayrecord').runAll());
     out.program_reminders = await stage('program_reminders', () => require('../lib/programplus').remindAll());
     out.lessons = await stage('lessons_daily', () => require('../lib/schooltick').daily());
+    out.guests = await stage('guests_daily', () => require('../lib/guesttick').daily());
     out.retention = await stage('retention', () => require('../lib/retention').runAll());
     out.demo_emails = await stage('demo_emails', () => require('../lib/demomail').runAll(base));
     out.outreach = await stage('outreach', () => require('../lib/outreach').runDue());
@@ -128,6 +129,24 @@ jobs.post('/daily', async (req, res) => {
     res.json(out);
   } finally {
     await conn.query("SELECT RELEASE_LOCK('summitops_daily_job')").catch(() => {});
+    conn.release();
+  }
+});
+
+// ---------------------------------------------------------------- guests (Cloud Scheduler, every 5 minutes)
+// Birthday gifts due, evening recaps, price promises, payment plan charges, waitlist and renewal offers.
+jobs.post('/guests', async (req, res) => {
+  const key = process.env.JOBS_KEY || '';
+  const given = String(req.get('x-jobs-key') || '');
+  const a = Buffer.from(given); const b = Buffer.from(key);
+  if (!key || a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new AppError(401, 'Not allowed');
+  const conn = await pool.getConnection();
+  try {
+    const [[got]] = await conn.query("SELECT GET_LOCK('summitops_guests_job', 5) AS ok");
+    if (!Number(got.ok)) throw new AppError(409, 'The guests job is already running');
+    res.json(await require('../lib/guesttick').tick());
+  } finally {
+    await conn.query("SELECT RELEASE_LOCK('summitops_guests_job')").catch(() => {});
     conn.release();
   }
 });
