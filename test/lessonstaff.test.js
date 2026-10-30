@@ -275,3 +275,33 @@ test('the lessons job recounts, records when a lesson fills and opens again, and
   // Nothing was added by itself.
   assert.equal((await q("SELECT COUNT(*) AS n FROM lesson_sessions WHERE tenant_id = ? AND TIME(starts_at) = '10:00:00' AND DAYOFWEEK(starts_at) = 7", [M.id]))[0].n, 0);
 });
+
+// Review fix (2026.11.9): a private request waiting for a named instructor holds their time; accepting a private recounts.
+test('a private request waiting for a named instructor holds their time; declining frees it; accepting a private recounts', async () => {
+  const PR = require('../src/lib/lessonprivate');
+  const M = await mountain('held');
+  const d = addDays(today, 9);
+  for (const who of ['ivy', 'max']) ok(await openOn(M, who, [d]), 201);
+  ok(await openOn(M, 'zoe', [addDays(d, 3)]), 201);
+  const little = await lesson(M, d, '10:00', kids, { pool: 30 });
+  await LS.sync(pool, M.id, { dates: [d] });
+  assert.equal(await cap(little), 10, 'Ivy and Max');
+  const priv = ok(await call('POST', '/products', { token: M.owner, body: { kind: 'lesson', name: 'Private Lesson', base_price_cents: 14000 } })).id;
+  const offer = ok(await call('POST', '/skischool/pay/private-offers', { token: M.owner, body: { product_id: priv, minutes: 60, max_students: 2 } }), 201).id;
+  const ask = async (ref, staffId) => (await pool.query(`INSERT INTO private_requests (tenant_id, reference, token_sha, status, source, staff_id, any_instructor, offer_id, product_id, discipline, starts_at, minutes, students, contact_name, contact_email, contact_phone, waiver_accepted, amount_cents, pay_at_desk, deadline_at)
+    VALUES (?, ?, ?, 'waiting', 'public', ?, ?, ?, ?, 'ski', ?, 60, ?, 'Pat Parent', ?, '215-555-0101', 1, 14000, 1, UTC_TIMESTAMP() + INTERVAL 1 HOUR)`,
+  [M.id, PR.reference(), PR.sha(`${ref}-${suffix}`), staffId, staffId ? 0 : 1, offer, priv, `${d} 10:30:00`, JSON.stringify({ contact: { first_name: 'Pat', last_name: 'Parent' }, students: [{ first_name: 'Kim', last_name: `Held${suffix}`, date_of_birth: '1990-01-01', sex: 'female', level: 3 }] }), `pat.${ref}.${suffix}@x.test`]))[0].insertId;
+  // Asked for Ivy by name: her time is held while she decides.
+  const a = await ask('heldivy', M.ivyId);
+  await PR.afterWaiting(M.id, a);
+  assert.equal(await cap(little), 5, 'only Max counts while Ivy is held');
+  // She declines: the time is free again.
+  ok(await call('POST', `/skischool/pay/requests/${a}/decline`, { token: M.ivy, body: { reason: 'Racing' } }));
+  assert.equal(await cap(little), 10);
+  // "Any instructor": nobody is held until Max accepts; accepting recounts at once.
+  const b = await ask('heldany', null);
+  await PR.afterWaiting(M.id, b);
+  assert.equal(await cap(little), 10);
+  ok(await call('POST', `/skischool/pay/requests/${b}/accept`, { token: M.max }));
+  assert.equal(await cap(little), 5, 'Max now teaches the private');
+});

@@ -302,9 +302,11 @@ test('decline with "offer another instructor": the family picks one, the clock r
   assert.ok(tick.expired >= 1);
   const after = (await q('SELECT status, refund_cents FROM private_requests WHERE id = ?', [row.id]))[0];
   assert.equal(after.status, 'refunded'); assert.equal(after.refund_cents, 14000);
-  assert.equal(refunds.length, before + 1, 'sent to Stripe');
-  assert.equal(refunds[refunds.length - 1].payment_intent, row.payment_intent);
-  assert.equal(Number(refunds[refunds.length - 1].amount), 14000);
+  // The tick runs for every mountain in the database: on a shared test database it can also expire a paid request left
+  // waiting by an earlier run (its deadline long past), so count only the refunds for this request.
+  const mine = refunds.slice(before).filter((x) => x.payment_intent === row.payment_intent);
+  assert.equal(mine.length, 1, 'sent to Stripe once');
+  assert.equal(Number(mine[0].amount), 14000);
 });
 
 test('decline with "refund": the family is refunded straight away; the family can also cancel while it waits', async () => {

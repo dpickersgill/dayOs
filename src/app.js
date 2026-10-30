@@ -230,6 +230,8 @@ function createApp() {
   api.post('/public/:slug/lost', rateLimit({ windowMs: 600_000, max: Number(process.env.HELP_RATE_LIMIT) || 5, message: 'Too many reports from here. Please call the mountain.' }));
   api.post('/public/:slug/help', rateLimit({ windowMs: 600_000, max: Number(process.env.HELP_RATE_LIMIT) || 5, message: 'Too many requests. Please call patrol or flag down a patroller.' }));
   // Online lesson requests take a name and contact details from anyone, so they get a tight limit too: 8 a hour per address.
+  // "Next times with room" for a full lesson: a guest looks a few times; a script inflating sold-out demand does not get far.
+  api.get('/public/:slug/booking/next/:id', rateLimit({ windowMs: 600_000, max: Number(process.env.NEXT_TIMES_RATE_LIMIT) || 30, message: 'Too many looks from this address. Please try again in a few minutes.' }));
   api.post('/public/:slug/requests', rateLimit({ windowMs: 3_600_000, max: Number(process.env.BOOKING_RATE_LIMIT) || 8, message: 'Too many requests from this address. Please call the ski school.' }));
   api.post('/public/:slug/shop/orders', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SHOP_RATE_LIMIT) || 12, message: 'Too many orders from this address. Please call the mountain.' }));
   api.post(['/public/:slug/programs/register', '/public/:slug/programs/waitlist', '/public/:slug/family/link', '/public/:slug/family/session'], rateLimit({ windowMs: 3_600_000, max: Number(process.env.SHOP_RATE_LIMIT) || 12, message: 'Too many registrations from this address. Please call the mountain.' }));

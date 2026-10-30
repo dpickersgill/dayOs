@@ -11,9 +11,9 @@
 // How instructors are counted for one day (plan()):
 //   - Who teaches: lessonstaffing.instructors (a teaching profile or an instructor sign-in, active).
 //   - Cleared for a lesson: lessonstaffing.suits (discipline, level, kids, adaptive) and any certification the lesson needs.
-//   - Free: not teaching another lesson, on a work shift, on patrol or coaching a program meeting at that time (the same
-//     clashes as workforce.staffProblems), and available (workforce.isAvailable: their weekly pattern or a date marked
-//     open; someone who has said neither can work any time). Saying yes to a shift offer for that time counts as available.
+//   - Free: not teaching another lesson, held by a private request waiting for them by name, on a work shift, on patrol
+//     or coaching a program meeting at that time (the same clashes as workforce.staffProblems), and available
+//     (workforce.isAvailable: their weekly pattern or a date marked open; someone who has said neither can work any time). Saying yes to a shift offer for that time counts as available.
 //   - Shared: an instructor counts once across lessons that overlap. A lesson keeps its assigned instructor. Lessons
 //     already sold without an instructor (set classes and privates with bookings) take theirs first, then lessons that
 //     follow staff, most constrained first: adaptive, then kids, then the narrowest level range (lessons alike take one
@@ -75,6 +75,8 @@ async function load(db, tenantId, dates) {
   const addBusy = (staffId, s, e, lesson = 0) => { if (!staffId) return; const k = Number(staffId); if (!busy.has(k)) busy.set(k, []); busy.get(k).push({ s: String(s), e: String(e), lesson: Number(lesson) }); };
   for (const r of await rows(db, "SELECT id, instructor_id, starts_at, ends_at FROM lesson_sessions WHERE tenant_id = ? AND instructor_id IS NOT NULL AND status <> 'cancelled' AND starts_at < ? AND ends_at > ?", [tenantId, to, from])) addBusy(r.instructor_id, r.starts_at, r.ends_at, r.id);
   for (const r of await rows(db, "SELECT staff_id, starts_at, ends_at FROM shifts WHERE tenant_id = ? AND staff_id IS NOT NULL AND status <> 'cancelled' AND starts_at < ? AND ends_at > ?", [tenantId, to, from])) addBusy(r.staff_id, r.starts_at, r.ends_at);
+  // A private request waiting for a named instructor (paid or being paid) holds their time, as lessonprivate.busy() does.
+  for (const r of await rows(db, "SELECT staff_id, starts_at, DATE_ADD(starts_at, INTERVAL minutes MINUTE) AS ends_at FROM private_requests WHERE tenant_id = ? AND staff_id IS NOT NULL AND status IN ('awaiting_payment','waiting') AND starts_at < ? AND DATE_ADD(starts_at, INTERVAL minutes MINUTE) > ?", [tenantId, to, from])) addBusy(r.staff_id, r.starts_at, r.ends_at);
   for (const r of await rows(db, "SELECT staff_id, starts_at, ends_at FROM patrol_shifts WHERE tenant_id = ? AND staff_id IS NOT NULL AND status <> 'cancelled' AND starts_at < ? AND ends_at > ?", [tenantId, to, from])) addBusy(r.staff_id, r.starts_at, r.ends_at);
   const levelCoaches = new Map();
   for (const r of await rows(db, 'SELECT group_id, coach_staff_id FROM program_levels WHERE tenant_id = ? AND coach_staff_id IS NOT NULL', [tenantId])) {

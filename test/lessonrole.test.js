@@ -268,3 +268,38 @@ test('a director must use two-step sign-in; a supervisor need not', async () => 
   }
   ok(await call('GET', '/skischool/sessions', { token: M.dana }));
 });
+
+// Review fix (2026.11.9): separation of duties for a Director's own pay, and the counter refund limit on private refunds.
+test('a director never sets or approves their own pay; refunds of a private request keep to the counter limit', async () => {
+  const day = addDays(today, 7);
+  ok(await call('POST', '/skischool/pay/rates', { token: M.dana, body: { staff_id: M.ivyId, kind: 'group', cents: 2500 } }), 201);
+  assert.match(no(await call('POST', '/skischool/pay/rates', { token: M.dana, body: { staff_id: M.danaId, kind: 'group', cents: 9900 } }), 'her own rate').error, /your own pay rate/);
+  // A school-wide default she has no rate of her own for is her pay too.
+  no(await call('POST', '/skischool/pay/rates', { token: M.dana, body: { staff_id: null, kind: 'hourly', cents: 9900 } }), 'the default that pays her');
+  const mine = ok(await call('POST', '/skischool/pay/rates', { token: M.manager, body: { staff_id: M.danaId, kind: 'hourly', cents: 3000 } }), 201).id;
+  ok(await call('POST', '/skischool/pay/rates', { token: M.dana, body: { staff_id: null, kind: 'hourly', cents: 2800 } }), 201);
+  no(await call('DELETE', `/skischool/pay/rates/${mine}`, { token: M.dana }), 'deleting her own rate');
+  // Payroll: she approves Ivy, never herself; a manager approves her.
+  const period = { from: addDays(today, -6), to: today };
+  no(await call('POST', '/skischool/pay/payroll/approve', { token: M.dana, body: { ...period, staff_ids: [M.ivyId, M.danaId], approved: true } }), 'approving her own pay');
+  no(await call('POST', '/skischool/pay/payroll/approve', { token: M.dana, body: { ...period, staff_ids: [M.danaId], approved: false } }), 'taking back her own approval');
+  ok(await call('POST', '/skischool/pay/payroll/approve', { token: M.dana, body: { ...period, staff_ids: [M.ivyId], approved: true } }));
+  ok(await call('POST', '/skischool/pay/payroll/approve', { token: M.manager, body: { ...period, staff_ids: [M.danaId], approved: true } }));
+
+  // Private requests: a paid one over the limit is refused; with no limit set, only a manager gives money back.
+  const PR = require('../src/lib/lessonprivate');
+  const priv = ok(await call('POST', '/products', { token: M.owner, body: { kind: 'lesson', name: 'Private Lesson', base_price_cents: 14000 } })).id;
+  const offer = ok(await call('POST', '/skischool/pay/private-offers', { token: M.owner, body: { product_id: priv, minutes: 60, max_students: 1 } }), 201).id;
+  const ask = async (desk) => (await pool.query(`INSERT INTO private_requests (tenant_id, reference, token_sha, status, source, staff_id, any_instructor, offer_id, product_id, discipline, starts_at, minutes, students, contact_name, contact_email, contact_phone, waiver_accepted, amount_cents, pay_at_desk, payment_intent)
+    VALUES (?, ?, ?, 'waiting', 'public', NULL, 1, ?, ?, 'ski', ?, 60, ?, 'Pat Parent', ?, '215-555-0101', 1, 14000, ?, ?)`,
+  [M.id, PR.reference(), PR.sha(`role-${desk}-${suffix}`), offer, priv, `${day} 10:00:00`, JSON.stringify({ contact: { first_name: 'Pat', last_name: 'Parent' }, students: [{ first_name: 'Kim', last_name: `Role${suffix}`, date_of_birth: '1990-01-01', sex: 'female', level: 3 }] }), `pat.role${desk}.${suffix}@x.test`, desk ? 1 : 0, desk ? null : `pi_role_${suffix}`]))[0].insertId;
+  const paid = await ask(0); const atDesk = await ask(1);
+  await q('UPDATE guest_settings SET counter_refund_limit_cents = 0 WHERE tenant_id = ?', [M.id]);
+  assert.match(no(await call('POST', `/skischool/pay/requests/${atDesk}/refund`, { token: M.dana }), 'no limit set').error, /Only a manager/);
+  await q('UPDATE guest_settings SET counter_refund_limit_cents = 10000 WHERE tenant_id = ?', [M.id]);
+  assert.match(no(await call('POST', `/skischool/pay/requests/${paid}/refund`, { token: M.dana }), 'over the limit').error, /up to/);
+  assert.equal((await q('SELECT status FROM private_requests WHERE id = ?', [paid]))[0].status, 'waiting', 'nothing changed');
+  ok(await call('POST', `/skischool/pay/requests/${atDesk}/refund`, { token: M.dana }));
+  assert.equal((await q('SELECT status FROM private_requests WHERE id = ?', [atDesk]))[0].status, 'cancelled');
+  await q("UPDATE private_requests SET status = 'cancelled' WHERE id = ?", [paid]); // never left for a later refund job
+});

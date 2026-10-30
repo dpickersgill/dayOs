@@ -283,6 +283,8 @@ async function afterWaiting(tenantId, requestId) {
     const done = await autoConfirm(tenantId, r);
     if (done) return { auto: true, staff_id: done.staff_id };
   }
+  // A request waiting for a named instructor holds their time (lessonspots counts it), so spots that follow staff move.
+  if (r && r.staff_id) await require('./lessonspots').after(tenantId, { dates: [String(r.starts_at).slice(0, 10)] });
   await tellInstructors(tenantId, r);
   const who = r.staff_id ? (await staffContact(pool, tenantId, r.staff_id)).first_name : 'our instructors';
   const mins = (await S.get(pool, tenantId)).private_accept_minutes;
@@ -342,6 +344,10 @@ async function accept(req, requestId, staffId, { byHand = false } = {}) {
     if (!byHand && r.status !== 'waiting') throw conflict('This request is waiting for the family to choose another instructor');
     if (!byHand && r.staff_id && r.staff_id !== staffId) throw conflict('This request was sent to another instructor');
     if (!byHand && ids(r.declined_ids).includes(staffId)) throw conflict('You already declined this request');
+    // One instructor at a time: lock their staff row before any plain read (the first plain read fixes the snapshot), so
+    // two requests confirmed at once (two card payments, or "confirm automatically") cannot both find them free. The
+    // second waits here, then its free check sees the lesson the first one made.
+    await conn.query('SELECT id FROM staff WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, staffId]);
     const offer = await one(conn, 'SELECT * FROM private_offers WHERE tenant_id = ? AND id = ?', [tenantId, r.offer_id]);
     const st = parseStudents(r);
     const lv = st.map((s) => Number(s.level) || 1);
@@ -384,6 +390,8 @@ async function accept(req, requestId, staffId, { byHand = false } = {}) {
     await audit(conn, req, byHand ? 'private_assign' : 'private_accept', 'private_requests', r.id, { staff_id: staffId, session_id: sessionId });
     return { session_id: sessionId, booking_ids: bookingIds, r };
   });
+  // The instructor is now taken at that time: spots that follow staff that day are counted again.
+  await require('./lessonspots').after(tenantId, { dates: [String(done.r.starts_at).slice(0, 10)] }, req.auth && req.auth.userId ? req : null);
   // The confirmation (CORE's lessonconfirm) goes to the family for each booking. Until it is built, a short note says yes.
   const base = req.get ? require('./baseurl').baseUrl(req) : (config.stripe.publicUrl || '');
   let confirmed = false;
@@ -443,6 +451,8 @@ async function decline(tenantId, requestId, { staffId = null, why, auditReq = nu
     return r;
   });
   if (returnId) await cardrefund.sendReturn(returnId);
+  // The named instructor's time is free again: spots that follow staff that day are counted again.
+  if (r0.staff_id) await require('./lessonspots').after(tenantId, { dates: [String(r0.starts_at).slice(0, 10)] });
   if (outcome === 'passed') return { outcome };
   const t = await tenantRow(pool, tenantId);
   const who = r0.staff_id ? (await staffContact(pool, tenantId, r0.staff_id)).first_name : 'No instructor';
@@ -477,12 +487,16 @@ async function pick(tenantId, requestId, staffId) {
   await afterWaiting(tenantId, requestId);
 }
 
-/** The family asks for their money back before anyone accepted (waiting or offered). */
-async function refundByFamily(tenantId, requestId) {
+/**
+ * The family asks for their money back before anyone accepted (waiting or offered). Staff use it too; opts.allow(conn, r)
+ * runs under the request's lock first and throws to refuse (a Director's refund limit, routes/schoolpay.js).
+ */
+async function refundByFamily(tenantId, requestId, { allow = null } = {}) {
   let returnId = null; let r0;
   await tx(async (conn) => {
     const r = await one(conn, 'SELECT * FROM private_requests WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, requestId]);
     if (!r || !OPEN.includes(r.status)) throw conflict(r && r.status === 'accepted' ? 'This lesson is already booked. Cancel it from the booking page under the cancellation policy.' : 'This request is already closed');
+    if (allow) await allow(conn, r);
     returnId = await oweRefund(conn, tenantId, r, 'the family canceled before an instructor accepted');
     await conn.query("UPDATE private_requests SET status = ?, decided_at = UTC_TIMESTAMP() WHERE tenant_id = ? AND id = ?", [r.pay_at_desk ? 'cancelled' : 'refunded', tenantId, r.id]);
     await audit(conn, { auth: { tenantId, userId: null } }, 'private_family_cancel', 'private_requests', r.id, {});

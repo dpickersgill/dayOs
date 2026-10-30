@@ -17,10 +17,21 @@ const daysBetween = (a, b) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.pa
 const bandWords = (band) => (band === 'kids' ? 'kids ' : band === 'adults' ? 'adult ' : '');
 const discWords = (d) => (d === 'ski' ? 'ski' : d);
 
-/** A guest looked for this lesson and found it full. Safe to call from anywhere; never throws. */
-async function noteFull(db, tenantId, sessionId) {
+const MAX_SEARCHES = 200; // per lesson: plenty to show demand, and a ceiling on what one lesson can write
+
+/**
+ * A guest looked for this lesson and found it full. visitor: something that tells visitors apart (the booking page passes
+ * the address); it is stored only as a hash with the day, so one visitor counts once per lesson per day. Safe to call from
+ * anywhere; never throws. Returns true when a search was noted.
+ */
+async function noteFull(db, tenantId, sessionId, { visitor = null } = {}) {
   try {
-    await (db || pool).query('INSERT INTO lesson_full_searches (tenant_id, session_id) VALUES (?, ?)', [tenantId, sessionId]);
+    const d = db || pool;
+    const sha = visitor ? require('crypto').createHash('sha256').update(`${tenantId}|${visitor}|${new Date().toISOString().slice(0, 10)}`).digest('hex') : null;
+    if (sha && await one(d, 'SELECT id FROM lesson_full_searches WHERE tenant_id = ? AND session_id = ? AND visitor_sha = ? LIMIT 1', [tenantId, sessionId, sha])) return false;
+    const n = await one(d, 'SELECT COUNT(*) AS n FROM lesson_full_searches WHERE tenant_id = ? AND session_id = ?', [tenantId, sessionId]);
+    if (Number(n.n) >= MAX_SEARCHES) return false;
+    await d.query('INSERT INTO lesson_full_searches (tenant_id, session_id, visitor_sha) VALUES (?, ?, ?)', [tenantId, sessionId, sha]);
     return true;
   } catch (err) {
     console.error(JSON.stringify({ severity: 'WARNING', part: 'lessondemand', message: err.message }));

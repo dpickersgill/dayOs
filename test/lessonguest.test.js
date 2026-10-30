@@ -273,3 +273,43 @@ test('confirm automatically never books an instructor who is not free: the reque
   await q("UPDATE instructor_profiles SET disciplines = 'ski,snowboard' WHERE tenant_id = ? AND staff_id = ?", [M.id, D.ivy]);
   ok(await api('PATCH', '/skischool/settings', { token: T.owner, body: { private_confirm: 'accept' } }));
 });
+
+// ---------------------------------------------------------------- review fixes (2026.11.9)
+test('confirm automatically books one instructor once when two requests for the same time are confirmed together', async () => {
+  ok(await api('PATCH', '/skischool/settings', { token: T.owner, body: { private_confirm: 'auto' } }));
+  const PR = require('../src/lib/lessonprivate');
+  // Two families paid for "any instructor" at the same time for a level 8 skier: only Ivy is cleared (Max teaches up to 6).
+  // Three rounds, as the race is about timing.
+  for (const time of ['11:00', '12:00', '13:00']) {
+    const at = `${D2} ${time}:00`;
+    const ids = [];
+    for (const k of [1, 2]) {
+      const [ins] = await pool.query(`INSERT INTO private_requests (tenant_id, reference, token_sha, status, source, staff_id, any_instructor, offer_id, product_id, discipline, starts_at, minutes, students, contact_name, contact_email, contact_phone, waiver_accepted, amount_cents, pay_at_desk)
+        VALUES (?, ?, ?, 'waiting', 'public', NULL, 1, ?, ?, 'ski', ?, 60, ?, 'Pat Parent', ?, '215-555-0101', 1, 14000, 1)`,
+      [M.id, PR.reference(), PR.sha(`race-${time}-${k}-${suffix}`), D.offer60, D.private, at, JSON.stringify({ contact: { first_name: 'Pat', last_name: `Race${k}` }, students: [{ first_name: `Rae${k}`, last_name: `Race${suffix}`, date_of_birth: `${year - 30}-01-01`, sex: 'female', level: 8 }] }), `pat.race${k}.${suffix}@x.test`]);
+      ids.push(ins.insertId);
+    }
+    const out = await Promise.all(ids.map((id) => PR.afterWaiting(M.id, id)));
+    assert.deepEqual(out.map((o) => o.auto).sort(), [false, true], `${time}: one booked, the other waits for an instructor`);
+    const n = (await q("SELECT COUNT(*) AS n FROM lesson_sessions WHERE tenant_id = ? AND instructor_id = ? AND format = 'private' AND status <> 'cancelled' AND starts_at = ?", [M.id, D.ivy, at]))[0].n;
+    assert.equal(Number(n), 1, `Ivy holds one private at ${time}`);
+    assert.deepEqual((await q('SELECT status FROM private_requests WHERE id IN (?)', [ids])).map((r) => r.status).sort(), ['accepted', 'waiting']);
+  }
+  ok(await api('PATCH', '/skischool/settings', { token: T.owner, body: { private_confirm: 'accept' } }));
+});
+
+test('next times: only a lesson guests can book here; a full one is noted once per visitor per day; its own rate limit', async () => {
+  const far = await lesson(D.kids, plus(today, 50), '09:30', '11:30', { pool: true, age_min: 7, age_max: 12, capacity: 8 });
+  is(await pub('GET', `/booking/next/${far}`), 404, 'not on the booking page, so not "full"');
+  const noted = async (id) => Number((await q('SELECT COUNT(*) AS n FROM lesson_full_searches WHERE tenant_id = ? AND session_id = ?', [M.id, id]))[0].n);
+  assert.equal(await noted(far), 0);
+  const full = await lesson(D.kids, D4, '09:30', '11:30', { pool: true, age_min: 7, age_max: 12, capacity: 1 });
+  await book(full);
+  for (let i = 0; i < 3; i += 1) assert.equal(ok(await pub('GET', `/booking/next/${full}`)).full, true);
+  assert.equal(await noted(full), 1, 'one visitor, one search');
+  const shas = await q('SELECT visitor_sha FROM lesson_full_searches WHERE tenant_id = ? AND session_id = ?', [M.id, full]);
+  assert.match(shas[0].visitor_sha, /^[0-9a-f]{64}$/, 'a hash, never the address');
+  let status = 200; let tries = 0;
+  while (status !== 429 && tries < 40) { status = (await pub('GET', `/booking/next/${full}`)).status; tries += 1; }
+  assert.equal(status, 429, 'a script soon hits the limit');
+});

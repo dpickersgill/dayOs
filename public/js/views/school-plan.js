@@ -218,7 +218,7 @@ function typeCard(t, i, ctx, draw) {
   return h('section', { class: 'card stack plan-type', style: `--type:${t.color}`, 'aria-label': t.name },
     h('div', { class: 'row between' },
       h('h3', null, h('span', { class: 'plan-swatch', 'aria-hidden': 'true' }), t.name, t.closed && t.name.toLowerCase() !== 'closed' ? h('span', { class: 'muted small' }, ' (closed)') : null),
-      h('span', { class: 'muted small' }, used ? `Used on ${plural(used, 'weekday')}` : 'Not a weekday default')),
+      h('span', { class: 'muted small' }, [used ? `Used on ${plural(used, 'weekday')}` : 'Not a weekday default', holidayTypeOf(doc) === t.key ? 'school holidays' : null].filter(Boolean).join(', '))),
     slotsTable,
     privateLine ? h('p', { class: 'small' }, privateLine) : null,
     h('div', { class: 'row wrap' },
@@ -237,18 +237,25 @@ function editType(t, ctx, draw) {
   const colors = ctx.opts.colors.map((c) => [c, COLOR_NAMES[c] || c]);
   const used = new Set(ctx.plan.doc.day_types.map((x) => x.color));
   const closed = h('input', { type: 'checkbox', name: 'closed', checked: Boolean(t && t.closed) });
+  const holiday = h('input', { type: 'checkbox', name: 'is_holiday', checked: Boolean(t && holidayTypeOf(ctx.plan.doc) === t.key) });
   formDialog(t ? `Rename ${t.name}` : 'Add a day type', [
     field('Name', input({ name: 'name', required: true, maxlength: 40, value: t ? t.name : '', placeholder: 'For example: Spring weekend' })),
     field('Color on the calendar', select(colors, t ? t.color : (ctx.opts.colors.find((c) => !used.has(c)) || ctx.opts.colors[0]), { name: 'color' })),
     h('label', { class: 'check' }, closed, ' Closed: no lessons and no private lessons on these days'),
+    h('label', { class: 'check' }, holiday, ' Use on school holidays (only one day type can be)'),
   ], async (fd) => {
     const d = copyOf(ctx.plan.doc);
     const name = val(fd, 'name') || '';
+    let k = t ? t.key : null;
+    const was = holidayTypeOf(d);
     if (t) { const x = d.day_types.find((y) => y.key === t.key); x.name = name; x.color = val(fd, 'color'); x.closed = closed.checked; if (x.closed) { x.slots = []; x.private = null; } } else {
-      let k = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 16) || 'type';
+      k = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 16) || 'type';
       while (d.day_types.some((y) => y.key === k)) k = `${k.slice(0, 14)}${Math.floor(Math.random() * 90 + 10)}`;
       d.day_types.push({ key: k, name, color: val(fd, 'color'), closed: closed.checked, slots: [], private: null });
     }
+    // One day type at most is used on school holidays; ticking it here moves the mark from any other day type.
+    const use = holiday.checked ? k : (was === k ? null : was);
+    for (const y of d.day_types) y.is_holiday = y.key === use;
     await ctx.save(d, 'Day type saved');
     draw();
   });
@@ -364,7 +371,7 @@ function weekdaysPart(root, ctx) {
     appendAll(clear(root),
       h('section', { class: 'card stack' }, h('h3', null, 'Each weekday'), h('p', { class: 'muted' }, 'The day type a day gets unless a period, a school holiday or a single-day change says otherwise.'), h('div', { class: 'plan-weekdays' }, ...sels)),
       h('section', { class: 'card stack' }, h('h3', null, 'Periods'),
-        h('p', { class: 'muted' }, 'A period uses one day type every day, such as Holiday week from Dec 26 to Jan 1. School holidays (set in Staffing) use the Holiday day type.'),
+        h('p', { class: 'muted' }, 'A period uses one day type every day, such as Holiday week from Dec 26 to Jan 1. School holidays (set in Staffing) use the day type marked for school holidays (Rename a day type to change which one).'),
         doc.periods.length ? table([
           { head: 'Name', cell: (p) => p.name || h('span', { class: 'muted' }, 'No name') },
           { head: 'Dates', cell: (p) => (p.from === p.to ? day(p.from) : `${day(p.from)} to ${day(p.to)}`) },
@@ -472,13 +479,20 @@ async function dayDialog(d, ctx, reload) {
   } catch (err) { clear(booked).append(errorBox(err)); }
 }
 
+/** The day type school holidays use (mirrors lessonplan.holidayType): the one marked, or for older plans the one keyed holiday. */
+function holidayTypeOf(doc) {
+  const t = doc.day_types.find((x) => x.is_holiday) || (doc.day_types.some((x) => x.is_holiday === false) ? null : doc.day_types.find((x) => x.key === 'holiday'));
+  return t ? t.key : null;
+}
+
 /** The day type a day gets from the plan (the server's expand() decides; this mirrors it for the day dialog). */
 function typeFor(doc, date, holiday) {
   const x = doc.exceptions.find((e) => e.date === date);
   if (x && x.day_type) return x.day_type;
   const p = [...doc.periods].reverse().find((q) => q.from <= date && q.to >= date);
   if (p) return p.day_type;
-  if (holiday && doc.day_types.some((t) => t.key === 'holiday')) return 'holiday';
+  const ht = holidayTypeOf(doc);
+  if (holiday && ht) return ht;
   return doc.weekdays[weekdayOf(date)];
 }
 

@@ -96,8 +96,10 @@ router.get('/:slug/booking', async (req, res) => {
 
 /**
  * A full lesson the guest wanted (2026.11.9, Track GUEST): the next times with room for the same lesson product and age
- * band, the same day first and then the next 7 days, and whether the full one has a waitlist. Each look at a full lesson is
- * noted for the director's demand view (lib/lessondemand.js, Track STAFF).
+ * band, the same day first and then the next 7 days, and whether the full one has a waitlist. A lesson guests cannot book
+ * here (not on the booking page: inside the notice hours, too far ahead, not on sale) is 404, never "full". A look at a
+ * full lesson is noted for the director's demand view (lib/lessondemand.js) once per visitor per lesson per day.
+ * Rate limited on its own in app.js.
  */
 router.get('/:slug/booking/next/:id', async (req, res) => {
   const t = await tenantFor(req.params.slug);
@@ -108,8 +110,9 @@ router.get('/:slug/booking/next/:id', async (req, res) => {
   const day = String(s.starts_at).slice(0, 10);
   const list = await guestLessons(t, ' AND s.product_id = ? AND s.age_min <=> ? AND s.age_max <=> ? AND DATE(s.starts_at) BETWEEN ? AND ?', [s.product_id, s.age_min, s.age_max, day, addDays(day, 7)]);
   const me = list.find((x) => x.id === id);
-  const full = me ? me.spots_left <= 0 : true;
-  if (full) await noteFull(t.id, id);
+  if (!me) throw notFound('Lesson');
+  const full = me.spots_left <= 0;
+  if (full) await noteFull(t.id, id, req.ip);
   const next = list.filter((x) => x.id !== id && x.spots_left > 0)
     .sort((a, b) => (String(a.starts_at).slice(0, 10) === day ? 0 : 1) - (String(b.starts_at).slice(0, 10) === day ? 0 : 1) || String(a.starts_at).localeCompare(String(b.starts_at)))
     .slice(0, 6);
@@ -117,11 +120,11 @@ router.get('/:slug/booking/next/:id', async (req, res) => {
   res.json({ session_id: id, full, waitlist: full && s.format === 'group', next });
 });
 
-/** Tells the demand view a guest found this lesson full. Track STAFF provides lessondemand.noteFull; until then nothing. Never throws. */
-async function noteFull(tenantId, sessionId) {
+/** Tells the demand view a guest found this lesson full (once per visitor per lesson per day). Never throws. */
+async function noteFull(tenantId, sessionId, visitor) {
   try {
     const D = require('../lib/lessondemand');
-    if (D && typeof D.noteFull === 'function') await D.noteFull(pool, tenantId, sessionId);
+    if (D && typeof D.noteFull === 'function') await D.noteFull(pool, tenantId, sessionId, { visitor: visitor || 'unknown' });
   } catch (_) { /* the demand note is a nice-to-have; the guest still sees the next times */ }
 }
 
