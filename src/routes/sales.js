@@ -330,7 +330,7 @@ router.post('/orders/:id/refund', requireRole('manager'), validate(refundBody), 
     const stillOpen = open.length - lines.length;
     await conn.query('UPDATE orders SET refunded_cents = refunded_cents + ?, status = ? WHERE tenant_id = ? AND id = ?', [amount, stillOpen ? 'paid' : 'refunded', tenantId, orderId]);
     await audit(conn, req, 'refund', 'orders', orderId, { amount_cents: amount, reason: body.reason, lines: ids.length, whole: !stillOpen });
-    return { amount_cents: amount, returns: plan.map((x) => ({ method: x.method, amount_cents: x.cents })), whole_order: !stillOpen, refund_ids: refundIds, card_rows: cardRows };
+    return { amount_cents: amount, returns: plan.map((x) => ({ method: x.method, amount_cents: x.cents })), whole_order: !stillOpen, refund_ids: refundIds, card_rows: cardRows, item_ids: ids };
   });
   // Online card sales: the money goes back to the guest's card through Stripe. A failure is kept as owed and retried.
   for (const id of result.card_rows) {
@@ -338,6 +338,9 @@ router.post('/orders/:id/refund', requireRole('manager'), validate(refundBody), 
     if (s === 'sent') result.card_refunded = true; else if (s === 'failed') result.card_refund_failed = true;
   }
   delete result.card_rows;
+  // The guest hears about it: what was refunded, the amount, and where the money goes (lib/salemail.js).
+  result.emailed = await require('../lib/salemail').refundEmail(tenantId, orderId, result, require('../lib/baseurl').baseUrl(req)).catch(() => false);
+  delete result.item_ids;
   res.json({ ok: true, ...result });
 });
 

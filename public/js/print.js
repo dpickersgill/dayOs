@@ -4,10 +4,10 @@
 
 import { typeName } from './guesttypes.js';
 import { get } from './api.js';
-import { h, clear, money, label, fmtDate, fmtDateTime, fmtTime, button, dialog, toast, loading, errorBox } from './ui.js';
+import { h, clear, money, label, fmtDay, fmtTime, button, dialog, toast, loading, errorBox } from './ui.js';
 import { code128, qr } from './barcode.js';
 
-const range = (a, b) => (a === b ? fmtDate(a) : `${fmtDate(a)} to ${fmtDate(b)}`);
+const range = (a, b) => (a === b ? fmtDay(a) : `${fmtDay(a)} to ${fmtDay(b)}`); // with the year: a receipt is kept
 const nameOf = (p) => [p.first_name, p.last_name].filter(Boolean).join(' ');
 const cardText = (p) => (p.card_last4 ? `${p.card_brand ? `${label(p.card_brand)} ` : 'Card '}ending ${p.card_last4}` : '');
 
@@ -19,7 +19,7 @@ function lineText(l) {
 }
 
 /** A lesson on the receipt: who, which lesson, when, and where to meet (with the instructor's first name when known). */
-const lessonWords = (l) => [`${nameOf(l) || 'Student'}: ${l.product}`, `${fmtDate(l.starts_at)}, ${fmtTime(l.starts_at)} to ${fmtTime(l.ends_at)}`,
+const lessonWords = (l) => [`${nameOf(l) || 'Student'}: ${l.product}`, `${fmtDay(l.starts_at)}, ${fmtTime(l.starts_at)} to ${fmtTime(l.ends_at)}`,
   l.meeting_place ? `Meet at ${l.meeting_place}` : null, l.instructor_first ? `Instructor ${l.instructor_first}` : null].filter(Boolean).join('. ');
 
 /** The receipt as a sheet. data is GET /orders/:id/receipt. */
@@ -33,7 +33,7 @@ export function receiptSheet(data) {
     l.refunded_at ? h('div', { class: 'rc-sub' }, 'Refunded') : null));
   return h('article', { class: 'sheet receipt-sheet', 'data-sheet': 'receipt' },
     h('header', { class: 'rc-head' }, h('strong', null, m.name), m.address ? h('div', null, m.address) : null, m.phone ? h('div', null, m.phone) : null),
-    h('div', { class: 'rc-meta' }, `Order #${o.id}`, h('br'), o.at ? fmtDateTime(o.at) : '', o.cashier ? ` · ${o.cashier}` : ''),
+    h('div', { class: 'rc-meta' }, `Order #${o.id}`, h('br'), o.at ? `${fmtDay(o.at)}, ${fmtTime(o.at)}` : '', o.cashier ? ` · ${o.cashier}` : ''),
     data.customer ? h('div', { class: 'rc-meta' }, nameOf(data.customer)) : null,
     h('div', { class: 'rc-lines' }, lines),
     h('div', { class: 'rc-totals' },
@@ -70,7 +70,7 @@ export function ticketSlips(data, { wristband = false } = {}) {
 /** The receipt as plain text, for an email: the codes are in it so the guest can show them on a phone. */
 export function receiptText(data) {
   const { mountain: m, order: o } = data;
-  const out = [m.name, m.address, m.phone, '', `Order #${o.id}${o.at ? `  ${fmtDateTime(o.at)}` : ''}`, ''].filter((x) => x !== null && x !== undefined);
+  const out = [m.name, m.address, m.phone, '', `Order #${o.id}${o.at ? `  ${fmtDay(o.at)}, ${fmtTime(o.at)}` : ''}`, ''].filter((x) => x !== null && x !== undefined);
   for (const l of data.lines) out.push(`${l.quantity > 1 ? `${l.quantity} x ` : ''}${lineText(l)}${nameOf(l) ? ` (for ${nameOf(l)})` : ''}  ${money(l.unit_price_cents * l.quantity - (l.discount_cents || 0))}`);
   out.push('');
   for (const t of data.taxes) out.push(`${t.name}: ${money(t.amount_cents)}`);

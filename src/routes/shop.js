@@ -329,7 +329,9 @@ publicRouter.post('/:slug/shop/orders/:token/change', validate(z.object({ ticket
   if (!t.open) throw conflict('Online sales are not open right now. Please call.');
   const root = `${baseUrl(req)}/shop/${req.params.slug}?order=${req.params.token}`;
   const out = await after.requestChange({ tenant: t, shopRow: row, code: req.body.ticket_code, newDate: req.body.date, successUrl: `${root}&changed=1`, cancelUrl: root });
-  res.json(out);
+  // A free change is done now: the guest gets an email with the old and new day (a paid one is emailed when the payment lands).
+  if (out.done) await require('../lib/salemail').changeEmail(t.id, { shopOrderId: row.id, ticketId: out.ticket_id, from: out.from, to: out.to, paidCents: 0 }, baseUrl(req)).catch(() => false);
+  res.json({ done: out.done, due_cents: out.due_cents, checkout_url: out.checkout_url });
 });
 
 publicRouter.get('/:slug/shop/orders/:token', async (req, res) => {

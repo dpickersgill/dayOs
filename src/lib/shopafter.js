@@ -15,6 +15,7 @@ const cardrefund = require('./cardrefund');
 const { audit } = require('./audit');
 const { eachTenant, logFailure } = require('./jobs');
 const { isSandbox } = require('./sandbox');
+const { dayText } = require('./format');
 
 const day10 = (d) => String(d).slice(0, 10);
 
@@ -47,7 +48,7 @@ async function changeCheck(conn, tenant, shopRow, code, newDate) {
   const product = await one(conn, 'SELECT id, kind, name, valid_days, sale_days, online_daily_limit, advance_days, advance_percent FROM products WHERE tenant_id = ? AND id = ?', [tenant.id, t.product_id]);
   if (!allowedOn(product.sale_days, newDate)) throw conflict(`${product.name} is not sold on ${dayName(newDate)}s (${daysText(product.sale_days)})`);
   const use = await shopsale.usage(conn, tenant.id, newDate, newDate);
-  if (shopsale.leftOn(use, tenant, product, newDate) < 1) throw conflict(`${product.name} is sold out for ${newDate}`);
+  if (shopsale.leftOn(use, tenant, product, newDate) < 1) throw conflict(`${product.name} is sold out for ${dayText(newDate)}`);
   const base = await unitPrice(conn, tenant.id, product.id, t.tier, newDate); // a blackout day throws a 409 here
   const newPrice = shopsale.advance(product, today, newDate, base.cents).cents;
   // What the guest has paid for this ticket so far: the original price, raised by any earlier paid change.
@@ -77,13 +78,13 @@ async function requestChange({ tenant, shopRow, code, newDate, successUrl, cance
       await applyChange(conn, tenant.id, c.ticket, newDate);
       await conn.query("INSERT INTO shop_changes (tenant_id, shop_order_id, ticket_id, from_date, to_date, due_cents, basis_cents, status) VALUES (?, ?, ?, ?, ?, 0, ?, 'done')", [tenant.id, shopRow.id, c.ticket.id, day10(c.ticket.valid_from), newDate, c.basis]);
       await audit(conn, { auth: { tenantId: tenant.id, userId: null } }, 'shop_change', 'tickets', c.ticket.id, { from: day10(c.ticket.valid_from), to: newDate, due_cents: 0 });
-      return { done: true, due_cents: 0 };
+      return { done: true, due_cents: 0, ticket_id: c.ticket.id, from: day10(c.ticket.valid_from), to: newDate };
     }
     const payTo = await require('./connect').payee(tenant.id, conn);
     if (!payTo.ok) throw conflict('Card payment is not available right now. Please call.');
     const [r] = await conn.query("INSERT INTO shop_changes (tenant_id, shop_order_id, ticket_id, from_date, to_date, due_cents, basis_cents) VALUES (?, ?, ?, ?, ?, ?, ?)", [tenant.id, shopRow.id, c.ticket.id, day10(c.ticket.valid_from), newDate, c.due, c.basis]);
     const co = await stripe.createCheckout({
-      amountCents: c.due, name: `${tenant.name}: change of day`, description: `${c.product.name}: ${day10(c.ticket.valid_from)} to ${newDate}`,
+      amountCents: c.due, name: `${tenant.name}: change of day`, description: `${c.product.name}: ${dayText(day10(c.ticket.valid_from))} to ${dayText(newDate)}`,
       email: shopRow.contact_email, reference: shopRow.reference,
       ...require('./connect').checkoutFor(payTo, c.due, { tenant_id: String(tenant.id), request_id: `chg${r.insertId}`, change_id: String(r.insertId), kind: 'shop_change', reference: shopRow.reference }),
       successUrl, cancelUrl, idempotencyKey: `shopchange-${r.insertId}`,
@@ -94,7 +95,7 @@ async function requestChange({ tenant, shopRow, code, newDate, successUrl, cance
 }
 
 /** Stripe webhook for a paid change (metadata.kind === 'shop_change'). Anything we cannot honor is refunded in full. */
-async function handleChangeWebhook(event, obj) {
+async function handleChangeWebhook(event, obj, base = '') {
   const tenantId = Number(obj.metadata.tenant_id); const id = Number(obj.metadata.change_id);
   if (event.type === 'checkout.session.expired') {
     await pool.query("UPDATE shop_changes SET status = 'expired' WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment' AND (stripe_session_id = ? OR stripe_session_id IS NULL)", [tenantId, id, obj.id]);
@@ -138,7 +139,7 @@ async function handleChangeWebhook(event, obj) {
           [tenantId, o.insertId, ch.due_cents, obj.payment_intent, payee.account, payee.feeCents]);
         await conn.query("UPDATE shop_changes SET status = 'done', order_id = ? WHERE tenant_id = ? AND id = ?", [o.insertId, tenantId, id]);
         await audit(conn, { auth: { tenantId, userId: null } }, 'shop_change', 'tickets', ch.ticket_id, { from: day10(ch.from_date), to, due_cents: ch.due_cents });
-        return { ok: true };
+        return { ok: true, mail: { shopOrderId: ch.shop_order_id, ticketId: ch.ticket_id, from: day10(ch.from_date), to, paidCents: ch.due_cents } };
       } catch (err) { if (err.status && err.status < 500) throw new Unhonourable(err.message); throw err; }
     });
   } catch (err) {
@@ -156,6 +157,7 @@ async function handleChangeWebhook(event, obj) {
     if (owed) await cardrefund.sendReturn(owed);
     return { refunded: true };
   }
+  if (out.ok && out.mail) await require('./salemail').changeEmail(tenantId, out.mail, base).catch(() => false);
   return { ok: Boolean(out.ok), duplicate: out.duplicate, ignored: out.ignored };
 }
 
@@ -242,8 +244,8 @@ async function runWaitlist(tenant, base) {
     const open = menus.get(d);
     if (!open.some((m) => m.left === null || m.left >= w.party_size)) continue;
     if (!(await claim('shop_waitlist', 'notified_at', tenant.id, w.id))) continue;
-    const text = [`Hi ${first(w.name)},`, '', `Good news: tickets for ${d} are on sale again at ${tenant.name}. They can go quickly.`, '', link(base, tenant.slug), ''].join('\n');
-    if (await mail(tenant, w.email, `Tickets are back for ${d}`, text, 'shop-waitlist')) sent += 1; else await release('shop_waitlist', 'notified_at', tenant.id, w.id);
+    const text = [`Hi ${first(w.name)},`, '', `Good news: tickets for ${dayText(d)} are on sale again at ${tenant.name}. They can go quickly.`, '', link(base, tenant.slug), ''].join('\n');
+    if (await mail(tenant, w.email, `Tickets are back for ${dayText(d)}`, text, 'shop-waitlist')) sent += 1; else await release('shop_waitlist', 'notified_at', tenant.id, w.id);
   }
   return sent;
 }

@@ -2,7 +2,8 @@
 // sold-out day, and (managers) watch ticket sales pace. Prices and limits for many days at once are set in Settings,
 // Online shop (settingsPages below).
 import { get, post, patch } from '../api.js';
-import { h, clear, fail, money, toCents, table, state, input, select, field, button, toast, tabs, fmtDate, fmtDateTime, todayStr, addDays, empty, errorBox, isManager } from '../ui.js';
+import { loadTypes, saleOptions } from '../guesttypes.js';
+import { fmtDay, h, clear, fail, money, toCents, table, state, input, select, field, button, toast, tabs, fmtDate, fmtDateTime, todayStr, addDays, empty, errorBox, isManager } from '../ui.js';
 
 export async function render(root) {
   const items = [['willcall', 'Will-call', willcall], ['groups', 'Group inquiries', groups], ['waitlist', 'Waitlist', waitlist]];
@@ -33,7 +34,7 @@ async function willcall(box) {
     h('p', { class: 'muted small' }, [o.contact_email, o.contact_phone].filter(Boolean).join(' · ')),
     table([
       { head: 'Ticket', cell: (t) => [h('strong', null, t.product), h('div', { class: 'muted small' }, `${t.first_name || ''} ${t.last_name || ''}`.trim())] },
-      { head: 'Valid', cell: (t) => (t.valid_from === t.valid_to ? fmtDate(t.valid_from) : `${fmtDate(t.valid_from)} to ${fmtDate(t.valid_to)}`) },
+      { head: 'Valid', cell: (t) => (t.valid_from === t.valid_to ? fmtDay(t.valid_from) : `${fmtDay(t.valid_from)} to ${fmtDay(t.valid_to)}`) },
       { head: 'Code', cell: (t) => h('code', null, t.code) },
       { head: 'Status', cell: (t) => (t.status === 'void' ? state('Canceled', 'bad') : t.scans ? state(`Used ${t.scans}x`, 'warn') : state('Not used', 'good')) },
     ], o.tickets),
@@ -86,11 +87,23 @@ async function calendar(box) {
   const days = DOW.map((d, i) => h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: true, dataset: { dow: String(i) } }), d));
   const who = select([], '', { 'aria-label': 'Product' });
   const act = h('select', { 'aria-label': 'What to do' }, [['price', 'Set the price'], ['close', 'Close for sale'], ['open', 'Reopen a closed day'], ['limit', 'Set a limit for these days'], ['clear_limit', 'Remove the limit for these days'], ['clear', 'Back to normal prices']].map(([k, v]) => h('option', { value: k }, v)));
-  const amount = input({ inputmode: 'decimal', placeholder: 'Dollars', 'aria-label': 'Price in dollars' });
+  // A price is set for each guest type, or changed by a percent or an amount from each type's own price, so a holiday
+  // price never makes a child pay the adult price.
+  const how = select([['each', 'A price for each guest type'], ['percent', 'Change every price by a percent'], ['amount', 'Change every price by an amount']], 'each', { 'aria-label': 'How to set the price' });
+  const { options: typeOpts } = saleOptions(await loadTypes().catch(() => []));
+  const perType = new Map(typeOpts.map(([code, name]) => [code, input({ inputmode: 'decimal', placeholder: 'Leave as is', 'aria-label': `${name} price in dollars`, name: `price-${code}` })]));
+  const typeBox = h('div', { class: 'inline-form price-types' }, typeOpts.map(([code, name]) => field(`${name} (dollars)`, perType.get(code))));
+  const pct = input({ type: 'number', min: -90, max: 500, step: 'any', placeholder: '20 or -10', 'aria-label': 'Percent change' });
+  const amount = input({ inputmode: 'decimal', placeholder: '10.00 or -5.00', 'aria-label': 'Change in dollars' });
   const lim = input({ type: 'number', min: 0, placeholder: 'Tickets', 'aria-label': 'Most tickets' });
   const view = h('div'); const msg = h('div', { role: 'status' });
   let products = [];
-  const sync = () => { amount.parentElement.hidden = act.value !== 'price'; lim.parentElement.hidden = act.value !== 'limit'; };
+  const sync = () => {
+    const price = act.value === 'price';
+    how.parentElement.hidden = !price; typeBox.hidden = !price || how.value !== 'each';
+    pct.parentElement.hidden = !price || how.value !== 'percent'; amount.parentElement.hidden = !price || how.value !== 'amount';
+    lim.parentElement.hidden = act.value !== 'limit';
+  };
   async function load() {
     clear(view).append(h('p', { class: 'loading', role: 'status' }, 'Loading…'));
     try {
@@ -108,17 +121,32 @@ async function calendar(box) {
     clear(msg);
     const body = { from: first.value, to: last.value, action: act.value, weekdays: days.map((l) => l.firstChild).filter((c) => c.checked).map((c) => Number(c.dataset.dow)) };
     if (who.value) body.product_id = Number(who.value);
-    if (act.value === 'price') { const c = toCents(amount.value); if (!c) { msg.append(errorBox('Enter the price in dollars, for example 89.00')); return; } body.price_cents = c; }
+    if (act.value === 'price' && how.value === 'each') {
+      const prices = [];
+      for (const [code, el] of perType) {
+        if (!el.value.trim()) continue;
+        const c = toCents(el.value); if (!c) { msg.append(errorBox('Enter each price in dollars, for example 89.00')); return; }
+        prices.push({ tier: code, price_cents: c });
+      }
+      if (!prices.length) { msg.append(errorBox('Enter a price for at least one guest type')); return; }
+      body.prices = prices;
+    }
+    if (act.value === 'price' && how.value === 'percent') { const n = Number(pct.value); if (!pct.value.trim() || !Number.isFinite(n) || !n) { msg.append(errorBox('Enter the percent, for example 20 for 20% more or -10 for 10% less')); return; } body.change = { percent: n }; }
+    if (act.value === 'price' && how.value === 'amount') {
+      const neg = amount.value.trim().startsWith('-'); const c = toCents(amount.value.trim().replace(/^[-+]/, ''));
+      if (!c) { msg.append(errorBox('Enter the change in dollars, for example 10.00 or -5.00')); return; }
+      body.change = { amount_cents: neg ? -c : c };
+    }
     if (act.value === 'limit') { if (lim.value === '') { msg.append(errorBox('Enter the most tickets for these days')); return; } body.limit = Number(lim.value); }
     try { const r = await post('/online-shop/calendar', body); toast(`Changed ${r.days} day${r.days === 1 ? '' : 's'}`); await load(); } catch (e) { msg.append(errorBox(e)); }
   }, { kind: 'primary' });
   const form = h('div', { class: 'stack' },
     h('div', { class: 'inline-form' }, field('First day', first), field('Last day', last), button('Show', load)),
     h('div', { class: 'row', role: 'group', 'aria-label': 'Weekdays' }, days),
-    h('div', { class: 'inline-form' }, field('Product', who), field('Do this', act), field('Price ($)', amount), field('Most tickets', lim)),
+    h('div', { class: 'inline-form' }, field('Product', who), field('Do this', act), field('Price', how), field('Percent', pct), field('Change (dollars)', amount), field('Most tickets', lim)), typeBox,
     msg, h('div', { class: 'row' }, apply));
-  act.addEventListener('change', sync);
-  box.append(h('p', { class: 'muted' }, 'Change many days at once, for example Saturdays in February, or a holiday week. Prices apply to every age group. A limit set here for a day replaces the usual limit for that day only. Window sales count toward it, but only the online shop is stopped.'), form, view);
+  act.addEventListener('change', sync); how.addEventListener('change', sync);
+  box.append(h('p', { class: 'muted' }, 'Change many days at once, for example Saturdays in February, or a holiday week. Set a price for each guest type, or change every type\u2019s own price by a percent or an amount: a child\u2019s price stays a child\u2019s price. A limit set here for a day replaces the usual limit for that day only. Window sales count toward it. When a day reaches it, the shop shows it sold out, and the window needs a manager and a reason to sell more.'), form, view);
   sync(); await load();
 }
 

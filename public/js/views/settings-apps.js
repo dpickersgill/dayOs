@@ -133,6 +133,8 @@ async function shopCards(root, t) {
   root.append(
     card('Selling online', [
       stripeNote(t, 'the shop page shows "not open"'),
+      // A waiver is only recorded online against wording the guest read. With none written, nobody is asked.
+      t.waiver_text ? null : h('div', { class: 'notice warn', role: 'status', 'data-no-waiver': '' }, 'Guests are not asked to accept a waiver online, because you have no waiver wording yet. If your tickets need a waiver, add it in ', h('a', { href: '#/settings/waivers' }, 'Settings, Waivers'), '. Until then, guests sign at the mountain.'),
       row('Guests can buy tickets and passes online', shopOn, ['Guests pay by card, then get their tickets by email and on a page with a barcode the gate can scan. Choose what is sold online with "Sell on the online shop" on each product in ', h('a', { href: '#/catalog' }, 'Products and prices'), '.']),
       row('Message at the top of the shop page', msg, null, { wide: true }),
       linkRow('Your shop page', `${location.origin}/shop/${t.slug}`),
@@ -144,7 +146,7 @@ async function shopCards(root, t) {
       row('Fee for a change', amount(chgFee, 'dollars'), '0 for free. The guest also pays any rise in the ticket price; a lower price is not refunded.'),
     ], { id: 'date-changes' }),
     card('Tickets for one day', [
-      row('Most tickets for one day, all products together', amount(limit, 'tickets'), 'Counts every day ticket and multi-day ticket valid that day, window sales too. A day that reaches it shows Sold out online. Blank for no limit. You can also set a limit on each product.'),
+      row('Most tickets for one day, all products together', amount(limit, 'tickets'), 'Counts every day ticket and multi-day ticket valid that day, window sales too. A day that reaches it shows Sold out online, and the window needs a manager and a reason to sell more. Blank for no limit. You can also set a limit on each product.'),
     ], { id: 'daily-limit' }),
     f.bar);
   try {

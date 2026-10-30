@@ -51,6 +51,10 @@ const applySchema = z.object({
   action: z.enum(['price', 'close', 'open', 'clear', 'limit', 'clear_limit']),
   price_cents: z.number().int().min(1).max(10000000).optional(),
   tier: z.string().trim().toLowerCase().regex(/^[a-z0-9_]{1,30}$/).nullable().optional(), // a guest type code (lib/guesttypes.js)
+  // A price for each guest type, or one change (a percent or an amount, up or down) applied to each type's own price.
+  prices: z.array(z.object({ tier: z.string().trim().toLowerCase().regex(/^[a-z0-9_]{1,30}$/), price_cents: z.number().int().min(1).max(10000000) })).min(1).max(30).optional(),
+  change: z.object({ percent: z.number().min(-90).max(500).optional(), amount_cents: z.number().int().min(-10000000).max(10000000).optional() })
+    .refine((c) => (c.percent !== undefined) !== (c.amount_cents !== undefined), 'Give a percent or an amount, not both').optional(),
   limit: z.number().int().min(0).max(1000000).optional(),
 });
 router.post('/calendar', requireRole('manager'), validate(applySchema), async (req, res) => {
@@ -59,11 +63,33 @@ router.post('/calendar', requireRole('manager'), validate(applySchema), async (r
   const days = span(b.from, b.to).filter((d) => !b.weekdays || !b.weekdays.length || b.weekdays.includes(weekdayOf(d)));
   if (!days.length) throw bad('No days match those weekdays');
   if (span(b.from, b.to).length > MAX_SPAN) throw bad(`Pick up to ${MAX_SPAN} days at a time`);
-  if (b.action === 'price' && !b.price_cents) throw bad('Enter the price');
+  if (b.action === 'price' && !b.price_cents && !b.prices && !b.change) throw bad('Enter the price');
+  if (b.prices) await require('../lib/guesttypes').assertKnown(pool, tenantId, b.prices.map((x) => x.tier));
+  if (b.tier) await require('../lib/guesttypes').assertKnown(pool, tenantId, [b.tier]);
   if (b.action === 'limit' && b.limit === undefined) throw bad('Enter the limit');
   const all = await rows(pool, TICKET_SQL, [tenantId]);
   let targets = all;
   if (b.product_id) { targets = all.filter((p) => p.id === b.product_id); if (!targets.length) throw bad('That product is not sold online'); }
+  // Each product's own prices: its base price and a price for each guest type that has one. A bulk change never flattens
+  // them: one price with no guest type is refused when a product has different prices by type.
+  const own = new Map();
+  for (const p of targets) {
+    const base = (await one(pool, 'SELECT base_price_cents FROM products WHERE tenant_id = ? AND id = ?', [tenantId, p.id])).base_price_cents;
+    own.set(p.id, { base, tiers: await rows(pool, 'SELECT tier, price_cents FROM price_tiers WHERE tenant_id = ? AND product_id = ?', [tenantId, p.id]) });
+  }
+  if (b.action === 'price' && b.price_cents && !b.tier && !b.prices && !b.change) {
+    const mixed = targets.find((p) => own.get(p.id).tiers.some((t) => t.price_cents !== own.get(p.id).base));
+    if (mixed) throw bad(`${mixed.name} has its own price for each guest type. Set a price for each type, or change every price by a percent or an amount.`);
+  }
+  const changed = (cents) => {
+    const c = b.change.percent !== undefined ? Math.round(cents * (100 + b.change.percent) / 100) : cents + b.change.amount_cents;
+    if (c < 1) throw bad('That change takes a price to zero or below');
+    return c;
+  };
+  const setPrice = async (conn, pid, d, tier, cents) => {
+    await conn.query('DELETE FROM price_calendar WHERE tenant_id = ? AND product_id = ? AND on_date = ? AND (tier <=> ?)', [tenantId, pid, d, tier]);
+    await conn.query('INSERT INTO price_calendar (tenant_id, product_id, on_date, tier, price_cents, blackout) VALUES (?, ?, ?, ?, ?, 0)', [tenantId, pid, d, tier, cents]);
+  };
   await tx(async (conn) => {
     for (const d of days) {
       if (b.action === 'limit' || b.action === 'clear_limit') {
@@ -73,9 +99,15 @@ router.post('/calendar', requireRole('manager'), validate(applySchema), async (r
         continue;
       }
       for (const p of targets) {
-        if (b.action === 'price') {
-          await conn.query('DELETE FROM price_calendar WHERE tenant_id = ? AND product_id = ? AND on_date = ? AND (tier <=> ?)', [tenantId, p.id, d, b.tier ?? null]);
-          await conn.query('INSERT INTO price_calendar (tenant_id, product_id, on_date, tier, price_cents, blackout) VALUES (?, ?, ?, ?, ?, 0)', [tenantId, p.id, d, b.tier ?? null, b.price_cents]);
+        if (b.action === 'price' && b.prices) {
+          for (const x of b.prices) await setPrice(conn, p.id, d, x.tier, x.price_cents);
+        } else if (b.action === 'price' && b.change) {
+          // the base price (for types with no price of their own), then each type's own price, each changed the same way
+          const o = own.get(p.id);
+          await setPrice(conn, p.id, d, null, changed(o.base));
+          for (const t of o.tiers) await setPrice(conn, p.id, d, t.tier, changed(t.price_cents));
+        } else if (b.action === 'price') {
+          await setPrice(conn, p.id, d, b.tier ?? null, b.price_cents);
         } else if (b.action === 'close') {
           await conn.query('DELETE FROM price_calendar WHERE tenant_id = ? AND product_id = ? AND on_date = ? AND tier IS NULL', [tenantId, p.id, d]);
           await conn.query('INSERT INTO price_calendar (tenant_id, product_id, on_date, tier, price_cents, blackout) VALUES (?, ?, ?, NULL, NULL, 1)', [tenantId, p.id, d]);
@@ -86,7 +118,7 @@ router.post('/calendar', requireRole('manager'), validate(applySchema), async (r
         }
       }
     }
-    await audit(conn, req, 'shop_calendar', 'products', b.product_id || 0, { action: b.action, from: b.from, to: b.to, days: days.length, price_cents: b.price_cents, limit: b.limit });
+    await audit(conn, req, 'shop_calendar', 'products', b.product_id || 0, { action: b.action, from: b.from, to: b.to, days: days.length, price_cents: b.price_cents, tier: b.tier, prices: b.prices, change: b.change, limit: b.limit });
   });
   res.json({ ok: true, days: days.length });
 });

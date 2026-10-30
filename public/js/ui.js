@@ -64,6 +64,8 @@ function asUtc(s) {
   return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0)));
 }
 export const fmtDate = (s) => { const d = asUtc(s); return d ? parts(d, { weekday: 'short', month: 'short', day: 'numeric' }) : ''; };
+/** A day with its year, the way receipts, order pages and emails show it: "Sat, Oct 31, 2026". */
+export const fmtDay = (s) => { const d = asUtc(s); return d ? parts(d, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : ''; };
 export const fmtDateLong = (s) => { const d = asUtc(s); return d ? parts(d, { weekday: 'long', month: 'long', day: 'numeric' }) : ''; };
 // ---- the mountain's time zone on screen
 // Times are the mountain's clock. When this device is on a different clock (an owner traveling, a reviewer in another
