@@ -3377,3 +3377,23 @@ fieldset.safety legend { font-weight: 700; padding: 0 4px; }
 .over-limit .field { margin-top: 8px; }
 .gate-type { display: inline-block; margin-top: 6px; padding: 4px 16px; border-radius: 10px; background: #fff; color: #10202f; font-size: 2.25rem; font-weight: 800; letter-spacing: .04em; }
 .gate-type.flag { background: #ffd23f; }
+
+/* ---- Guest rewards and recaps settings (guests round 2, Track LOYALTY: guest-rewards.js) */
+.set-section-body.gr-body { padding: 0; }
+.gr-body > .set-row:first-of-type { border-top: 0; }
+.gr-intro { margin: 0; padding: 16px 20px 4px; color: var(--muted); }
+.gr-sub { margin: 0; padding: 16px 20px 4px; font-size: 1rem; border-top: 1px solid var(--line); }
+.gr-body > .notice { margin: 8px 20px; }
+.gr-pair { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.gr-pair select { min-width: 200px; }
+.gr-cost { margin: 0; padding: 12px 20px; border-top: 1px solid var(--line); }
+.gr-pad { padding: 4px 20px; margin: 0; }
+.gr-body > .table-wrap { margin: 4px 20px 8px; }
+.gr-save { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--line); }
+.gr-save-note { color: var(--muted); font-weight: 700; }
+@media (max-width: 720px) {
+  .gr-intro, .gr-sub, .gr-cost, .gr-pad, .gr-save { padding-left: 16px; padding-right: 16px; }
+  .gr-body > .table-wrap, .gr-body > .notice { margin-left: 16px; margin-right: 16px; }
+  .gr-pair select { min-width: 0; max-width: 100%; }
+  .gr-save .btn { flex: 1 1 auto; }
+}
