@@ -111,3 +111,9 @@
 .act-when { font-weight: 700; }
 .act-waiver { border: 2px solid #8a5300; }
 @media (max-width: 520px) { .slot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---------------------------------------------------------------- 2026.11.7: pass photo and add-ons on a ticket */
+.pass-photo-field .photo-input { min-height: 44px; }
+.pass-photo { width: 96px; height: 120px; object-fit: cover; border-radius: var(--r-sm); border: 1.5px solid var(--line); }
+.row-extras { display: grid; gap: 6px; }
+.lesson-link .btn { justify-self: start; }

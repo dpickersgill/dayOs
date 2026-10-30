@@ -69,7 +69,7 @@ export async function duplicatesDialog(done) {
     clear(body);
     let out;
     try { out = await get('/people/duplicates'); } catch (err) { body.append(errorBox(err)); return; }
-    if (!out.data.length) { body.append(empty('No duplicates found. Customers with the same name and date of birth, or the same name and phone number, would be listed here.')); return; }
+    if (!out.data.length) { body.append(empty('No duplicates found. Customers with the same name and date of birth, the same name and phone number, or the same name and the same parent or guardian would be listed here.')); return; }
     body.append(h('p', { class: 'muted' }, 'Merging moves everything one record bought, signed and booked onto the other, fills any blanks, and removes the extra record. It cannot be undone.'));
     for (const group of out.data) {
       body.append(h('section', { class: 'panel stack', 'data-dup-group': '' }, table([
@@ -91,6 +91,29 @@ export async function duplicatesDialog(done) {
     return null;
   }
   await draw();
+  return dlg;
+}
+
+/**
+ * Merge from the customer's own record (managers): pick the other record that is the same person, then choose which one
+ * to keep. Everything the other one bought, signed and booked moves over, and it is removed.
+ */
+export function mergeDialog(person, done) {
+  let other = null;
+  const msg = h('div');
+  const choice = h('div', { class: 'stack', 'aria-live': 'polite' });
+  const pick = personPicker({ label: 'The other record for this person', required: true, onPick: (p) => { other = p && p.id !== person.id ? p : null; draw(); } });
+  const dlg = dialog(`Merge ${fullName(person)} with another record`, h('div', { class: 'stack' },
+    h('p', { class: 'muted' }, 'Use this when one person has two records, for example a child added again with each online order. It cannot be undone.'), pick.el, choice, msg));
+  const run = (from, into) => confirmDialog('Merge these two customers?', `${fullName(from)} (#${from.id}) will be merged into ${fullName(into)} (#${into.id}) and removed. Everything they bought, signed and booked moves to ${fullName(into)}.`, 'Merge', async () => {
+    try { await post(`/people/${from.id}/merge`, { into_id: into.id }); toast('Merged'); dlg.close(); if (done) await done(into); } catch (err) { clear(msg).append(errorBox(err)); }
+  });
+  function draw() {
+    clear(choice);
+    if (!other) return;
+    choice.append(h('p', null, `Which record do you keep? The other is merged into it.`),
+      h('div', { class: 'row' }, button(`Keep this one (#${person.id})`, () => run(other, person), { kind: 'primary' }), button(`Keep ${fullName(other)} (#${other.id})`, () => run(person, other))));
+  }
   return dlg;
 }
 

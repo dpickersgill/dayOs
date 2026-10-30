@@ -5,10 +5,17 @@ import { get, post } from '../api.js';
 import { h, clear, money, toCents, centsToInput, input, field, button, toast, dialog, formDialog, fmtDateTime, label, state, errorBox } from '../ui.js';
 import { printDialog } from '../print.js';
 
-const grid = (t) => h('div', { class: 'drawer-grid' },
-  [['Opening float', t.opening_float_cents], ['Cash sales', t.cash_sales_cents], ['Cash refunds', -t.cash_refunds_cents], ['Paid in', t.paid_in_cents], ['Paid out', -t.payouts_cents], ['Dropped to safe', -t.drops_cents]]
-    .map(([k, v]) => h('div', null, h('small', null, k), h('strong', null, money(v)))),
-  h('div', { class: 'expected' }, h('small', null, 'Should be in the drawer'), h('strong', null, money(t.expected_cents))));
+// A cashier counts blind: what should be in the drawer (and the cash sales that add up to it) shows only after they type
+// their count. Managers see it all, here and in Money.
+const grid = (t) => (t.blind
+  ? h('div', { class: 'drawer-grid' },
+    [['Opening float', t.opening_float_cents], ['Paid in', t.paid_in_cents], ['Paid out', -t.payouts_cents], ['Dropped to safe', -t.drops_cents]]
+      .map(([k, v]) => h('div', null, h('small', null, k), h('strong', null, money(v)))),
+    h('div', { class: 'expected', 'data-blind': '' }, h('small', null, 'Should be in the drawer'), h('span', null, 'Shown after you count')))
+  : h('div', { class: 'drawer-grid' },
+    [['Opening float', t.opening_float_cents], ['Cash sales', t.cash_sales_cents], ['Cash refunds', -t.cash_refunds_cents], ['Paid in', t.paid_in_cents], ['Paid out', -t.payouts_cents], ['Dropped to safe', -t.drops_cents]]
+      .map(([k, v]) => h('div', null, h('small', null, k), h('strong', null, money(v)))),
+    h('div', { class: 'expected' }, h('small', null, 'Should be in the drawer'), h('strong', null, money(t.expected_cents)))));
 
 /** The end-of-shift sheet (a "Z report"): takings by tender, and the cash count against what was expected. */
 export function closeSheet(t, who) {
@@ -75,7 +82,7 @@ function closeIt(till, done) {
   const counted = input({ name: 'counted', inputmode: 'decimal', required: true, 'aria-label': 'Cash counted' });
   const notes = h('textarea', { name: 'notes', rows: 2, maxlength: 500, 'aria-label': 'Note about any difference' });
   formDialog('Count and close the drawer', h('div', { class: 'stack' },
-    h('p', null, 'Count all the cash in the drawer and type the total. The system compares it with what should be there.'),
+    h('p', null, 'Count all the cash in the drawer and type the total. Then you see how it compares with what should be there. If it does not match, add a note saying why and close.'),
     h('div', { class: 'form' }, field('Cash counted', counted), field('Note (needed if it does not match)', notes))),
   async () => {
     const cents = toCents(counted.value);

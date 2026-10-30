@@ -95,6 +95,7 @@ async function main() {
   const tiers = page.policy_tiers || [];
   const params = new URLSearchParams(location.search);
   const wantLesson = Number(params.get('lesson')) || null;
+  const wantDay = /^\d{4}-\d{2}-\d{2}$/.test(params.get('date') || '') ? params.get('date') : null; // from the ticket shop: the day picked there
   const all = [...page.lessons, ...(page.full || [])];
 
   // ---- header and progress
@@ -192,7 +193,7 @@ async function main() {
     const goodFor = (l) => fitsPerson(l, p).ok;
     if (!view.day) {
       const want = wantLesson ? lessonOf(wantLesson) : null;
-      view.day = want ? want.starts_at.slice(0, 10) : ([...new Set(all.filter(goodFor).map((l) => l.starts_at.slice(0, 10)))].sort().find((d) => d >= today) || today);
+      view.day = want ? want.starts_at.slice(0, 10) : wantDay && wantDay >= today ? wantDay : ([...new Set(all.filter(goodFor).map((l) => l.starts_at.slice(0, 10)))].sort().find((d) => d >= today) || today);
     }
     const tabsRow = people.length > 1 ? h('div', { class: 'types', role: 'tablist', 'aria-label': 'Students' }, people.map((q, i) => h('button', { type: 'button', class: 'pill', role: 'tab', 'aria-selected': String(i === idx), 'aria-pressed': String(i === idx), onclick: () => drawLessons(i) },
       `${q.first_name || `${T('Student')} ${i + 1}`}${q.lessonId ? ' ✓' : ''}`))) : null;

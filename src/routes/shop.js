@@ -17,6 +17,7 @@ const shop = require('../lib/shopsale');
 const after = require('../lib/shopafter');
 const ACT = require('../lib/activities');
 const { nowIn } = require('../lib/util');
+const { dayText } = require('../lib/format');
 
 const router = express.Router();
 const publicRouter = express.Router();
@@ -119,7 +120,10 @@ const holderSchema = z.object({
   photo: z.string().max(120000).regex(/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/, 'The photo must be a JPEG').optional(), // season pass holders only
 });
 const itemSchema = z.object({ product_id: z.number().int().positive(), valid_on: dateStr.optional(), holder: holderSchema });
-const addonSchema = z.object({ product_id: z.number().int().positive(), quantity: z.number().int().min(1).max(10).default(1) });
+// A rental or a lesson package goes with one person: the holder of ticket number for_item in this basket, or a person
+// named here with the day (a guest who has a pass and only wants gear). A voucher is for the buyer.
+const addonSchema = z.object({ product_id: z.number().int().positive(), quantity: z.number().int().min(1).max(10).default(1), for_item: z.number().int().min(0).max(shop.MAX_ITEMS - 1).optional(),
+  holder: holderSchema.omit({ photo: true }).optional(), valid_on: dateStr.optional() });
 // An activity: one guest's place on an attraction on a day, in a time slot (none for a day pass).
 const activitySchema = z.object({ product_id: z.number().int().positive(), valid_on: dateStr, start_time: z.string().trim().max(8).optional(), holder: holderSchema });
 const giftSchema = z.object({ amount_cents: z.number().int().min(500).max(100000), recipient_name: z.string().trim().max(150).optional(), message: z.string().trim().max(300).optional() });
@@ -138,9 +142,11 @@ publicRouter.get('/:slug/shop', async (req, res) => {
   const today = todayIn(t.timezone);
   pool.query('INSERT INTO shop_visits (tenant_id, day, visits) VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE visits = visits + 1', [t.id, today]).catch(() => {}); // for the funnel; never blocks the page
   const prods = await rows(pool, `SELECT id, kind, name, base_price_cents, valid_days, uses, sale_days, online_daily_limit FROM products WHERE tenant_id = ? AND active = 1 AND online = 1 AND kind IN ('day_ticket','multi_day','season_pass') ORDER BY FIELD(kind, 'day_ticket','multi_day','season_pass'), name`, [t.id]);
+  // Only the guest types sold online have their prices shown (Military, say, is sold at the window with an ID check).
+  const onlineCodes = new Set((await require('../lib/guesttypes').list(pool, t.id, { visibleOnly: true })).filter((g) => g.online).map((g) => g.code));
   const out = [];
   for (const p of prods) {
-    const tiers = await rows(pool, 'SELECT tier, price_cents FROM price_tiers WHERE tenant_id = ? AND product_id = ? ORDER BY price_cents', [t.id, p.id]);
+    const tiers = (await rows(pool, 'SELECT tier, price_cents FROM price_tiers WHERE tenant_id = ? AND product_id = ? ORDER BY price_cents', [t.id, p.id])).filter((x) => onlineCodes.has(x.tier));
     const blackouts = await rows(pool, 'SELECT on_date FROM price_calendar WHERE tenant_id = ? AND product_id = ? AND blackout = 1 AND tier IS NULL AND on_date >= ? AND on_date <= ?', [t.id, p.id, today, addDays(today, 365)]);
     out.push({ id: p.id, kind: p.kind, name: p.name, valid_days: p.valid_days, uses: p.uses, base_price_cents: p.base_price_cents, sale_days: p.sale_days, online_daily_limit: p.online_daily_limit, kind_limited: false, prices: tiers, blackout_dates: blackouts.map((b) => String(b.on_date).slice(0, 10)) });
   }
@@ -155,13 +161,19 @@ publicRouter.get('/:slug/shop', async (req, res) => {
     one(pool, "SELECT COUNT(*) AS total, SUM(status = 'open') AS open FROM trails WHERE tenant_id = ?", [t.id]),
   ]);
   const conditions = (cal || snow || Number(lifts.total)) ? { status: cal ? cal.status : null, open_time: cal ? cal.open_time : null, close_time: cal ? cal.close_time : null, base_in: snow ? snow.base_in : null, new_snow_in: snow ? snow.new_snow_in : null, lifts_open: Number(lifts.total) ? Number(lifts.open || 0) : null, lifts_total: Number(lifts.total), trails_open: Number(trails.total) ? Number(trails.open || 0) : null, trails_total: Number(trails.total) } : null;
-  const addons = await rows(pool, `SELECT id, kind, name, valid_days, base_price_cents FROM products WHERE tenant_id = ? AND active = 1 AND online = 1 AND kind IN ('lesson','rental','voucher') ORDER BY FIELD(kind, 'lesson','rental','voucher'), name`, [t.id]);
+  // Add-ons: rentals and lesson packages go with a person; vouchers are the buyer's. A single lesson is booked on the
+  // lesson page (a time that fits the person), so the shop links there instead of selling a lesson voucher.
+  const addons = await rows(pool, `SELECT id, kind, name, valid_days, uses, base_price_cents FROM products WHERE tenant_id = ? AND active = 1 AND online = 1 AND (kind IN ('rental','voucher') OR (kind = 'lesson' AND uses > 1)) ORDER BY FIELD(kind, 'rental','lesson','voucher'), name`, [t.id]);
+  const addonTiers = addons.length ? await rows(pool, 'SELECT product_id, tier, price_cents FROM price_tiers WHERE tenant_id = ? AND product_id IN (?)', [t.id, addons.map((a) => a.id)]) : [];
+  const booking = await one(pool, "SELECT online_booking, (SELECT COUNT(*) FROM products p WHERE p.tenant_id = t.id AND p.active = 1 AND p.kind = 'lesson') AS lessons FROM tenants t WHERE t.id = ?", [t.id]);
   // Activities by attraction, with each attraction's limits in words (shown before paying).
   const acts = await rows(pool, "SELECT id, name, attraction_id, timed, base_price_cents FROM products WHERE tenant_id = ? AND active = 1 AND online = 1 AND kind = 'activity' AND attraction_id IS NOT NULL ORDER BY name", [t.id]);
   const atts = acts.length ? (await ACT.activeAttractions(pool, t.id)).filter((a) => acts.some((p) => p.attraction_id === a.id)) : [];
   const actTiers = acts.length ? await rows(pool, 'SELECT product_id, tier, price_cents FROM price_tiers WHERE tenant_id = ? AND product_id IN (?) ORDER BY price_cents', [t.id, acts.map((p) => p.id)]) : [];
   const activities = atts.map((a) => ({ attraction: { ...ACT.attractionOut(a), status_note: undefined }, products: acts.filter((p) => p.attraction_id === a.id).map((p) => ({ id: p.id, name: p.name, timed: Boolean(p.timed), base_price_cents: p.base_price_cents, prices: actTiers.filter((x) => x.product_id === p.id).map((x) => ({ tier: x.tier, price_cents: x.price_cents })) })) }));
-  res.json({ activities, addons: addons.map((a) => ({ id: a.id, kind: a.kind, name: a.name, valid_days: a.valid_days, price_cents: a.base_price_cents })), gift: { min_cents: 500, max_cents: 100000 }, mountain: t.name, brand: brand ? { ...brand, opening_day: brand.opening_day ? String(brand.opening_day).slice(0, 10) : null } : null, conditions, phone: t.phone, message: t.shop_message, open: t.open, today, waiver_text: t.waiver_text || null, products: out, guest_types: guestTypes });
+  res.json({ activities, addons: addons.map((a) => ({ id: a.id, kind: a.kind, name: a.name, valid_days: a.valid_days, uses: a.uses, price_cents: a.base_price_cents, per_person: a.kind !== 'voucher',
+    prices: addonTiers.filter((x) => x.product_id === a.id && onlineCodes.has(x.tier)).map((x) => ({ tier: x.tier, price_cents: x.price_cents })) })),
+    lesson_booking: Boolean(booking && booking.online_booking && Number(booking.lessons)) ? { link: `/book/${encodeURIComponent(t.slug)}` } : null, gift: { min_cents: 500, max_cents: 100000 }, mountain: t.name, brand: brand ? { ...brand, opening_day: brand.opening_day ? String(brand.opening_day).slice(0, 10) : null } : null, conditions, phone: t.phone, message: t.shop_message, open: t.open, today, waiver_text: t.waiver_text || null, products: out, guest_types: guestTypes });
 });
 
 publicRouter.get('/:slug/shop/month', async (req, res) => {
@@ -214,7 +226,7 @@ publicRouter.post('/:slug/shop/quote', validate(z.object(basketShape).refine(non
   res.set('Cache-Control', 'no-store');
   const q = await shop.quote(pool, t, req.body.items, req.body);
   res.json({ lines: q.lines.map((l) => ({ name: l.name, valid_on: l.valid_on, tier: l.tier, unit_cents: l.unit, saved_cents: l.saved || 0, tax_cents: l.tax })),
-    activities: q.activities.map((a) => ({ name: a.name, attraction: a.attraction, valid_on: a.valid_on, start_time: a.start_time, tier: a.tier, unit_cents: a.unit, tax_cents: a.tax, limits_text: a.limits_text })), addons: q.addons.map((a) => ({ product_id: a.product_id, name: a.name, quantity: a.quantity, unit_cents: a.unit })), gifts: q.gifts, promo: q.promo, discount_cents: q.discount, subtotal_cents: q.subtotal, tax_cents: q.tax, total_cents: q.total });
+    activities: q.activities.map((a) => ({ name: a.name, attraction: a.attraction, valid_on: a.valid_on, start_time: a.start_time, tier: a.tier, unit_cents: a.unit, tax_cents: a.tax, limits_text: a.limits_text })), addons: q.addons.map((a) => ({ product_id: a.product_id, name: a.name, kind: a.kind, quantity: a.quantity, unit_cents: a.unit, tier: a.tier, valid_on: a.valid_on, for_item: a.for_item, for_name: a.holder ? `${a.holder.first_name} ${a.holder.last_name}` : null })), gifts: q.gifts, promo: q.promo, discount_cents: q.discount, subtotal_cents: q.subtotal, tax_cents: q.tax, total_cents: q.total });
 });
 
 publicRouter.post('/:slug/shop/orders', validate(z.object({
@@ -241,18 +253,19 @@ publicRouter.post('/:slug/shop/orders', validate(z.object({
     throw bad('Please confirm every rider meets the height, weight and age limits');
   }
   const sha = t.waiver_text ? crypto.createHash('sha256').update(t.waiver_text).digest('hex') : null;
+  const accepted = Boolean(b.waiver_accepted && t.waiver_text); // with no waiver wording there is nothing to accept
   const made = await tx(async (conn) => {
     await conn.query('SELECT id FROM tenants WHERE id = ? FOR UPDATE', [t.id]); // one basket at a time per mountain, so two guests cannot both take the last ticket
     const { n } = await one(conn, "SELECT COUNT(*) AS n FROM shop_orders WHERE tenant_id = ? AND status = 'awaiting_payment' AND created_at > DATE_SUB(NOW(), INTERVAL 40 MINUTE)", [t.id]);
     if (Number(n) >= MAX_OPEN_BASKETS) throw conflict('A lot of people are buying right now. Please try again in a few minutes.');
-    const quote = await shop.quote(conn, t, b.items, b);
+    const quote = await shop.quote(conn, t, b.items, { ...b, needPhoto: true });
     const basket = JSON.stringify({ contact: { first_name: b.contact_first_name, last_name: b.contact_last_name }, quote });
     for (let attempt = 0; ; attempt++) {
       const ref = shop.reference(); const token = crypto.randomBytes(16).toString('hex');
       try {
         const [r] = await conn.query(
           'INSERT INTO shop_orders (tenant_id, reference, view_token, contact_name, contact_email, contact_phone, basket, waiver_accepted, waiver_text_sha, news_opt_in, amount_cents, promo_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [t.id, ref, token, `${b.contact_first_name} ${b.contact_last_name}`, b.contact_email, b.contact_phone, basket, b.waiver_accepted ? 1 : 0, sha, b.news_opt_in ? 1 : 0, quote.total, quote.promo || null]);
+          [t.id, ref, token, `${b.contact_first_name} ${b.contact_last_name}`, b.contact_email, b.contact_phone, basket, accepted ? 1 : 0, accepted ? sha : null, b.news_opt_in ? 1 : 0, quote.total, quote.promo || null]);
         return { id: r.insertId, ref, token, quote };
       } catch (err) { if (err.code === 'ER_DUP_ENTRY' && attempt < 4) continue; throw err; }
     }
@@ -262,7 +275,7 @@ publicRouter.post('/:slug/shop/orders', validate(z.object({
     const pay = connect.checkoutFor(await connect.payeeOrThrow(t.id), made.quote.total, { tenant_id: String(t.id), request_id: String(made.id), shop_order_id: String(made.id), kind: 'shop', reference: made.ref });
     const n = made.quote.lines.length + made.quote.activities.length + made.quote.addons.reduce((x, a) => x + a.quantity, 0) + made.quote.gifts.length;
     co = await stripe.createCheckout({
-      amountCents: made.quote.total, name: `${t.name}: ${n} item${n > 1 ? 's' : ''}`, description: [...made.quote.lines.map((l) => `${l.name} ${l.valid_on}`), ...made.quote.activities.map((a) => `${a.name} ${a.valid_on}${a.start_time ? ` ${ACT.clock(a.start_time)}` : ''}`), ...made.quote.addons.map((a) => `${a.quantity} x ${a.name}`), ...made.quote.gifts.map(() => 'Gift card')].join(', ').slice(0, 480),
+      amountCents: made.quote.total, name: `${t.name}: ${n} item${n > 1 ? 's' : ''}`, description: [...made.quote.lines.map((l) => `${l.name} ${dayText(l.valid_on)}`), ...made.quote.activities.map((a) => `${a.name} ${dayText(a.valid_on)}${a.start_time ? ` ${ACT.clock(a.start_time)}` : ''}`), ...made.quote.addons.map((a) => `${a.quantity} x ${a.name}`), ...made.quote.gifts.map(() => 'Gift card')].join(', ').slice(0, 480),
       email: b.contact_email, reference: made.ref, ...pay, idempotencyKey: `shop-${made.id}`,
       successUrl: `${baseUrl(req)}/shop/${req.params.slug}?order=${made.token}`, cancelUrl: `${baseUrl(req)}/shop/${req.params.slug}?cancelled=${made.token}`,
     });

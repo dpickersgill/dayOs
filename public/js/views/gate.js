@@ -99,10 +99,14 @@ function gate(places = []) {
     else if (out.card && out.card.status === 'free') panel.append(h('span', null, 'This card is empty. Load a ticket on the Cards tab.'));
     else panel.append(h('span', null, 'No ticket has this code.'));
     const who = out.holder;
-    if (who && (who.name || who.photo)) {
+    if (who && (who.name || who.photo || who.guest_type)) {
+      // The guest type big (CHILD, SENIOR), next to the photo when there is one: an adult on a child's ticket is caught here.
+      const adultType = who.guest_type === 'adult';
       panel.append(h('div', { class: 'gate-person', 'data-holder': '' },
         who.photo ? h('img', { src: who.photo, alt: `Photo of ${who.name || 'the holder'}` }) : null,
-        h('div', null, h('div', { class: 'gate-name' }, who.name || 'Guest'), h('div', null, [who.product, who.kind === 'season_pass' && !who.photo ? 'No photo on file' : null].filter(Boolean).join(' · ')),
+        h('div', null, h('div', { class: 'gate-name' }, who.name || 'Guest'),
+          who.guest_type_name ? h('div', { class: `gate-type${adultType ? '' : ' flag'}`, 'data-guest-type': who.guest_type, 'aria-label': `Guest type: ${who.guest_type_name}` }, who.guest_type_name.toUpperCase()) : null,
+          h('div', null, [who.product, who.kind === 'season_pass' && !who.photo ? 'No photo on file' : null].filter(Boolean).join(' · ')),
           who.waiver === false ? h('div', { class: 'gate-waiver' }, state('No waiver on file', 'warn'), ' Send them to the window to sign.') : null)));
     }
     if (out.result === 'duplicate') panel.append(button('Let them through anyway', () => scan(value, { override: true, card }), { kind: 'primary' }));

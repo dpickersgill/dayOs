@@ -3359,3 +3359,21 @@ fieldset.safety legend { font-weight: 700; padding: 0 4px; }
 @media (max-width: 640px) {
   .subtabs > .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
 }
+
+/* ---------------------------------------------------------------- 2026.11.7: Sell on a phone, the day limit, the gate's guest type */
+/* On a phone the basket comes straight after the menu (before Sold today), and the Checkout bar sits above the bottom navigation. */
+@media (max-width: 900px) {
+  .sell-grid { display: flex; flex-direction: column; gap: 16px; }
+  .sell-grid > .sell-main { display: contents; }
+  .sell-grid .sell-menu { order: 1; }
+  .sell-grid > .sell-side { order: 2; }
+  .sell-grid .sell-orders { order: 3; }
+  .sell-grid .mobile-basket-bar { order: 4; }
+  .sell-grid .basket-panel { position: static; }
+}
+@media (max-width: 860px) {
+  .mobile-basket-bar:not([hidden]) { bottom: calc(68px + env(safe-area-inset-bottom, 0px)); padding-bottom: 10px; }
+}
+.over-limit .field { margin-top: 8px; }
+.gate-type { display: inline-block; margin-top: 6px; padding: 4px 16px; border-radius: 10px; background: #fff; color: #10202f; font-size: 2.25rem; font-weight: 800; letter-spacing: .04em; }
+.gate-type.flag { background: #ffd23f; }

@@ -132,11 +132,17 @@ async function tillSummary(conn, till) {
     expected_cents: expected, counted_cents: till.counted_cents, variance_cents: till.variance_cents, notes: till.notes,
   };
 }
+/**
+ * A blind count: the cashier does not see what should be in the drawer (nor the cash figures that add up to it) until
+ * they have counted it. Managers see everything, here and in Money.
+ */
+const forCashier = (req, sum) => (['owner', 'manager'].includes(req.auth.role) ? sum
+  : { ...sum, blind: true, expected_cents: null, cash_sales_cents: null, cash_refunds_cents: null, tenders: { ...sum.tenders, cash: null } });
 const myTill = (conn, req) => one(conn, "SELECT * FROM till_sessions WHERE tenant_id = ? AND opened_by = ? AND status = 'open' ORDER BY id DESC LIMIT 1", [req.auth.tenantId, req.auth.userId]);
 
 router.get('/till/current', sellers, async (req, res) => {
   const till = await myTill(pool, req);
-  res.json({ till: till ? await tillSummary(pool, till) : null });
+  res.json({ till: till ? forCashier(req, await tillSummary(pool, till)) : null });
 });
 router.post('/till/open', sellers, validate(z.object({ opening_float_cents: z.number().int().min(0).max(10_000_000).default(0) })), async (req, res) => {
   const id = await tx(async (conn) => {
@@ -161,7 +167,7 @@ router.post('/till/moves', sellers, validate(z.object({ kind: z.enum(['paid_in',
     await audit(conn, req, req.body.kind, 'till_sessions', t.id, { amount_cents: req.body.amount_cents });
     return t;
   });
-  res.status(201).json({ till: await tillSummary(pool, till) });
+  res.status(201).json({ till: forCashier(req, await tillSummary(pool, till)) });
 });
 router.post('/till/close', sellers, validate(z.object({ counted_cents: z.number().int().min(0).max(100_000_000), notes: z.string().trim().max(500).optional() })), async (req, res) => {
   const out = await tx(async (conn) => {
@@ -171,6 +177,8 @@ router.post('/till/close', sellers, validate(z.object({ counted_cents: z.number(
     const closing = { ...till, closed_at: now };
     const sum = await tillSummary(conn, closing);
     const variance = req.body.counted_cents - sum.expected_cents;
+    // The count is kept in the audit log even when it does not close the drawer, so a recount is visible to managers.
+    if (variance !== 0 && !req.body.notes) await audit(pool, req, 'count', 'till_sessions', till.id, { counted_cents: req.body.counted_cents, variance_cents: variance });
     if (variance !== 0 && !req.body.notes) throw bad(`The drawer is ${variance > 0 ? 'over' : 'short'} by $${(Math.abs(variance) / 100).toFixed(2)}. Add a note saying why, then close.`);
     await conn.query("UPDATE till_sessions SET status = 'closed', closed_at = ?, counted_cents = ?, expected_cents = ?, variance_cents = ?, notes = ? WHERE id = ? AND tenant_id = ?", [now, req.body.counted_cents, sum.expected_cents, variance, req.body.notes ?? null, till.id, req.auth.tenantId]);
     await audit(conn, req, 'close', 'till_sessions', till.id, { counted_cents: req.body.counted_cents, expected_cents: sum.expected_cents, variance_cents: variance });

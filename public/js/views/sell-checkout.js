@@ -39,7 +39,7 @@ export async function gearDialog(line, onDone, who = {}) {
  * basket: [{ type, name, ... }] built by the Sell screen. quote: the server's quote for it (totals).
  * onSold(order) runs after a successful sale.
  */
-export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null, waiverText = null, quickSale = null, drawerOpen = () => true, onOpenDrawer = null }) {
+export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null, waiverText = null, quickSale = null, drawerOpen = () => true, onOpenDrawer = null, overLimitReason = () => undefined }) {
   const hasTickets = basket.some((l) => l.type === 'ticket' || l.type === 'activity'); // an activity asks for the same details as a ticket
   const hasLesson = basket.some((l) => l.type === 'lesson' || l.type === 'lesson_package');
   const hasRental = basket.some((l) => l.type === 'rental');
@@ -465,7 +465,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   }
 
   function build() {
-    const body = { channel: 'window', follow_types: true, promo_code: promo || undefined, lines: [], payments: payments.map((p) => ({ ...p })) };
+    const body = { channel: 'window', follow_types: true, promo_code: promo || undefined, over_limit_reason: overLimitReason(), lines: [], payments: payments.map((p) => ({ ...p })) };
     if (quick) return { ...body, quick: true, lines: basket.map((l) => lineApi(l, null, null)) };
     const c = customer.payload('details');
     const gOf = (id, cap) => { const g = guardianFor(id); return cap.isMinor() && g ? { guardian: g } : {}; };

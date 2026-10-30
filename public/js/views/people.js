@@ -4,7 +4,7 @@ import { h, clear, can, isManager, money, table, state, input, field, button, to
 import { waiverPanel } from '../widgets.js';
 import { shareButton } from '../share.js';
 import { loadCustomerForm, customerFields, customerSettingsDialog } from './customer-form.js';
-import { photoSection, familySection, duplicatesDialog, renewalsDialog } from './people-extra.js';
+import { photoSection, familySection, duplicatesDialog, renewalsDialog, mergeDialog } from './people-extra.js';
 import { alertsBanner, consentSection, notesSection, dataActions, qualityStrip, FLAG_LABELS } from './customer-care.js';
 
 export async function render(root, params = []) {
@@ -94,7 +94,8 @@ async function detail(p, done) {
   let shown;
   const act = dataActions(fresh, async () => { if (shown) shown.close(); await done(); });
   if (act) parts.push(h('h3', null, 'Their data'), act);
-  if (can('counter', 'instructor') && !fresh.anonymised_at) parts.push(h('div', { class: 'row' }, button('Edit details', () => edit(fresh, done))));
+  if (can('counter', 'instructor') && !fresh.anonymised_at) parts.push(h('div', { class: 'row' }, button('Edit details', () => edit(fresh, done)),
+    isManager() ? button('Merge with another record', () => mergeDialog(fresh, async (kept) => { if (shown) shown.close(); await done(); if (kept) detail(kept, done); })) : null));
   shown = dialog(`${fresh.first_name} ${fresh.last_name}`, parts, { wide: true });
 }
 
@@ -105,7 +106,7 @@ async function loadHistory(box, person) {
     const none = !a.orders.length && !a.lessons.length && !a.rentals.length && !a.programs.length;
     clear(box);
     if (none) { box.append(h('p', { class: 'muted' }, 'Nothing bought or booked yet.')); return; }
-    box.append(h('p', null, `${a.totals.orders} paid order${a.totals.orders === 1 ? '' : 's'}, ${money(a.totals.spend_cents)} spent, ${a.totals.days_skied} day${a.totals.days_skied === 1 ? '' : 's'} scanned at the gate.`));
+    box.append(h('p', null, `${a.totals.orders} paid order${a.totals.orders === 1 ? '' : 's'}, ${money(a.totals.spend_cents)} spent after refunds, ${a.totals.days_skied} day${a.totals.days_skied === 1 ? '' : 's'} scanned at the gate.`));
     if (a.tickets.length) box.append(h('h4', null, 'Tickets'), table([
       { head: 'Ticket', cell: (t) => t.product }, { head: 'Valid', cell: (t) => (t.valid_from === t.valid_to ? fmtDate(t.valid_from) : `${fmtDate(t.valid_from)} to ${fmtDate(t.valid_to)}`) },
       { head: 'Status', cell: (t) => state(label(t.status), t.status === 'active' ? 'good' : 'neutral') }, { head: 'Code', cell: (t) => t.code }], a.tickets));

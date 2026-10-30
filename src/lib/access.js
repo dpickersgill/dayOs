@@ -106,8 +106,12 @@ async function decide(conn, tenantId, input) {
 
   let holder = null;
   if (t) {
-    const p = await one(conn, 'SELECT p.id, p.first_name, p.last_name, p.photo, pr.name AS product, pr.kind FROM tickets k JOIN products pr ON pr.id = k.product_id AND pr.tenant_id = k.tenant_id LEFT JOIN people p ON p.id = k.person_id AND p.tenant_id = k.tenant_id WHERE k.tenant_id = ? AND k.id = ?', [tenantId, t.id]);
-    holder = { name: p && p.first_name ? `${p.first_name} ${p.last_name}` : null, first_name: p ? p.first_name || null : null, photo: p ? p.photo || null : null, product: p ? p.product : null, kind: p ? p.kind : null };
+    const p = await one(conn, `SELECT p.id, p.first_name, p.last_name, p.photo, pr.name AS product, pr.kind, i.tier, gt.name AS tier_name FROM tickets k JOIN products pr ON pr.id = k.product_id AND pr.tenant_id = k.tenant_id
+      LEFT JOIN people p ON p.id = k.person_id AND p.tenant_id = k.tenant_id LEFT JOIN order_items i ON i.id = k.order_item_id AND i.tenant_id = k.tenant_id
+      LEFT JOIN guest_types gt ON gt.tenant_id = i.tenant_id AND gt.code = i.tier WHERE k.tenant_id = ? AND k.id = ?`, [tenantId, t.id]);
+    holder = { name: p && p.first_name ? `${p.first_name} ${p.last_name}` : null, first_name: p ? p.first_name || null : null, photo: p ? p.photo || null : null, product: p ? p.product : null, kind: p ? p.kind : null,
+      // the guest type the ticket was sold as, shown big at the gate so an adult on a child's ticket is caught
+      guest_type: p && p.tier ? p.tier : null, guest_type_name: p && p.tier ? (p.tier_name || p.tier.charAt(0).toUpperCase() + p.tier.slice(1)) : null };
     // Only when the mountain uses waivers and the ticket has a named holder: true or false, otherwise null (nothing to show).
     holder.waiver = tenant.waiver_text && p && p.id ? Boolean(await one(conn, ON_FILE, [tenantId, p.id, seasonFor(today)])) : null;
     if (!rule && p && p.kind === 'activity' && result === 'no_uses') rule = { reason: 'Already used. An activity ticket lets one guest in once.' };

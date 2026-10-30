@@ -99,7 +99,8 @@ router.get('/:id/activity', requireRole(...front), async (req, res) => {
     rows(pool, `SELECT e.status, p.name, p.season FROM program_enrollments e JOIN programs p ON p.id = e.program_id AND p.tenant_id = e.tenant_id
                 WHERE e.tenant_id = ? AND e.person_id = ? ORDER BY e.id DESC LIMIT 25`, [tenantId, id]),
     rows(pool, `SELECT w.season, w.kind, w.signed_at, w.voided_at, w.void_reason, (${VALID('w')}) AS counts FROM waivers w WHERE w.tenant_id = ? AND w.person_id = ? ORDER BY w.signed_at DESC LIMIT 10`, [tenantId, id]),
-    one(pool, "SELECT COUNT(*) AS orders, COALESCE(SUM(total_cents), 0) AS spend_cents FROM orders WHERE tenant_id = ? AND person_id = ? AND status = 'paid'", [tenantId, id]),
+    // What they spent, net of refunds: a fully refunded order counts nothing, a part refund takes off what went back.
+    one(pool, "SELECT SUM(status = 'paid') AS orders, COALESCE(SUM(total_cents - refunded_cents), 0) AS spend_cents FROM orders WHERE tenant_id = ? AND person_id = ? AND status IN ('paid','refunded')", [tenantId, id]),
     one(pool, `SELECT COUNT(DISTINCT DATE(s.scanned_at)) AS days FROM scans s JOIN tickets t ON t.id = s.ticket_id AND t.tenant_id = s.tenant_id
                WHERE s.tenant_id = ? AND t.person_id = ? AND s.result = 'ok'`, [tenantId, id]),
   ]);
@@ -189,17 +190,26 @@ router.get('/', requireRole(...readers), patrolLookup, async (req, res) => {
 });
 
 // ---------------------------------------------------------------- duplicates and merge (managers)
-/** Groups of customers that look like the same person: same name and birth date, or same name and phone. */
+/**
+ * Groups of customers that look like the same person: same name and birth date, same name and phone, or same name with
+ * the same parent or guardian (a child bought for twice online with no birth date). Two people with one name and two
+ * different birth dates are not put together.
+ */
 router.get('/duplicates', requireRole('manager'), async (req, res) => {
   const { tenantId } = req.auth;
   const keyed = await rows(pool, `SELECT ${COLS} FROM people WHERE tenant_id = ? ORDER BY id`, [tenantId]);
+  const guardians = await rows(pool, "SELECT adult_id, member_id FROM person_links WHERE tenant_id = ? AND relation = 'guardian'", [tenantId]);
+  const byMember = new Map();
+  for (const g of guardians) { if (!byMember.has(g.member_id)) byMember.set(g.member_id, []); byMember.get(g.member_id).push(g.adult_id); }
   const groups = new Map();
   const add = (k, p) => { if (!groups.has(k)) groups.set(k, []); const g = groups.get(k); if (!g.some((x) => x.id === p.id)) g.push(p); };
   for (const p of keyed) {
     const name = `${p.first_name} ${p.last_name}`.trim().toLowerCase();
     if (p.date_of_birth) add(`dob|${name}|${p.date_of_birth}`, p);
     if (p.phone_key) add(`ph|${name}|${p.phone_key}`, p);
+    for (const adult of byMember.get(p.id) || []) add(`g|${name}|${adult}`, p);
   }
+  for (const [k, g] of groups) if (k.startsWith('g|') && new Set(g.map((p) => p.date_of_birth).filter(Boolean)).size > 1) groups.delete(k);
   // Merge groups that share a person so one customer is not listed twice.
   const seen = new Set();
   const out = [];

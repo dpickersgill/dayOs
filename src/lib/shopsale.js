@@ -27,7 +27,7 @@ const MAX_DAYS_AHEAD = 365;
 
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const reference = () => Array.from(crypto.randomBytes(8), (b) => ALPHABET[b % ALPHABET.length]).join('');
-const { money } = require('./format');
+const { money, dayText, daysText: dayRangeText } = require('./format');
 
 
 const ADDON_KINDS = ['lesson', 'rental', 'voucher'];
@@ -110,6 +110,9 @@ async function quote(conn, tenant, items, extras = {}) {
     if (product.kind === 'season_pass' && !h.date_of_birth) throw bad('A season pass needs the holder\'s date of birth');
     if (!h.date_of_birth && !(await onlineTypes(conn, tenant.id)).includes(h.age_group)) throw bad('Pick an age group for each ticket');
     if (h.photo && product.kind !== 'season_pass') delete h.photo;
+    // A season pass carries the holder's photo, which the gate shows next to the name. The price check runs without it
+    // (the photo is only sent with the order); placing the order needs it.
+    if (product.kind === 'season_pass' && extras.needPhoto && !h.photo) throw bad(`${h.first_name} ${h.last_name} needs a photo for the season pass`);
     const tier = h.date_of_birth ? await tierFor(conn, tenant.id, h.date_of_birth, day) : h.age_group;
     const base = await unitPrice(conn, tenant.id, product.id, tier, day);
     const adv = advance(product, today, day, base.cents);
@@ -123,26 +126,59 @@ async function quote(conn, tenant, items, extras = {}) {
     const from = ticketLines.reduce((m, d) => (d.valid_on < m ? d.valid_on : m), ticketLines[0].valid_on);
     const to = ticketLines.reduce((m, d) => { const e = addDays(d.valid_on, Math.max(d.valid_days, 1) - 1); return e > m ? e : m; }, ticketLines[0].valid_on);
     const use = await usage(conn, tenant.id, from, to);
+    const before = await usage(conn, tenant.id, from, to); // as it was before this basket, for the words
+    const asked = new Map();
+    for (const d of ticketLines) for (let day = d.valid_on; day <= addDays(d.valid_on, Math.max(d.valid_days, 1) - 1); day = addDays(day, 1)) asked.set(`${d.product_id}|${day}`, (asked.get(`${d.product_id}|${day}`) || 0) + 1);
     for (const d of ticketLines) {
       const prod = { id: d.product_id, kind: d.kind, online_daily_limit: d.limit };
       for (let day = d.valid_on; day <= addDays(d.valid_on, Math.max(d.valid_days, 1) - 1); day = addDays(day, 1)) {
         const l = left(use, tenant, prod, day);
-        if (l < 1) throw conflict(`${d.name} is sold out for ${day}`);
+        if (l < 1) {
+          // Fewer left than asked for is not "sold out": say how many there are.
+          const was = left(before, tenant, prod, day);
+          const want = asked.get(`${d.product_id}|${day}`) || 1;
+          throw conflict(was < 1 ? `${d.name} is sold out for ${dayText(day)}` : `Only ${was} left for ${d.name} on ${dayText(day)}. You asked for ${want}.`, { left: was, date: day, product_id: d.product_id });
+        }
         const u = use.get(day) || { all: 0, by: new Map() }; u.all += 1; u.by.set(d.product_id, (u.by.get(d.product_id) || 0) + 1); use.set(day, u);
       }
     }
   }
-  // Add-ons: lessons, prepaid rentals and vouchers sold as ordinary products. They come as a voucher the guest uses at the mountain.
-  const addons = [];
+  // Add-ons: prepaid rentals, lesson packages and vouchers. A rental or a lesson package is for one named person on one
+  // day: the holder of a ticket in this basket (for_item), or a person named with the add-on. It is priced at that person's
+  // guest type on that day. A voucher is for the buyer, from today. A single lesson is not an add-on: it is booked on the
+  // lesson page, where the ski school's rules pick a lesson time that fits the person and has room.
+  const addons = []; const perPerson = new Set();
   for (const a of addonsIn) {
     const product = await one(conn, 'SELECT id, kind, name, valid_days, uses, active, online FROM products WHERE tenant_id = ? AND id = ?', [tenant.id, a.product_id]);
     if (!product || !product.active || !product.online || !ADDON_KINDS.includes(product.kind)) throw conflict('One of those add-ons is not sold online');
-    const qty = Math.min(Math.max(Number(a.quantity) || 1, 1), MAX_ADDON_QTY);
-    const base = await unitPrice(conn, tenant.id, product.id, 'adult', today);
+    if (product.kind === 'lesson' && !(Number(product.uses) > 1)) throw conflict(`${product.name} is booked on the lesson page, where you pick a lesson time that fits each person.`);
+    let tier = 'adult'; let day = today; let holder = null; let forItem = null;
+    if (product.kind !== 'voucher') {
+      if (a.for_item !== undefined && a.for_item !== null) {
+        const line = detail[a.for_item];
+        if (!line) throw bad(`Pick whose ticket ${product.name} goes with`);
+        forItem = a.for_item; tier = line.tier; day = line.valid_on;
+        holder = { first_name: line.holder.first_name, last_name: line.holder.last_name, ...(line.holder.date_of_birth ? { date_of_birth: line.holder.date_of_birth } : {}) };
+      } else if (a.holder && a.valid_on) {
+        const h = a.holder; day = a.valid_on;
+        if (day < today) throw bad(`Pick today or a later day for ${product.name}`);
+        if (day > last) throw bad('That day is too far ahead to buy online');
+        if (h.date_of_birth && h.date_of_birth > today) throw bad('Date of birth cannot be in the future');
+        if (!h.date_of_birth && !(await onlineTypes(conn, tenant.id)).includes(h.age_group)) throw bad(`Pick an age group for ${product.name}`);
+        tier = h.date_of_birth ? await tierFor(conn, tenant.id, h.date_of_birth, day) : h.age_group;
+        holder = { first_name: h.first_name, last_name: h.last_name, ...(h.date_of_birth ? { date_of_birth: h.date_of_birth } : {}) };
+      } else throw bad(`Say who ${product.name} is for and on which day`);
+      if (Number(a.quantity || 1) > 1) throw bad(`${product.name} is one per person. Add it for each person.`);
+      const key = `${product.id}|${holder.first_name.toLowerCase()}|${holder.last_name.toLowerCase()}|${day}`;
+      if (perPerson.has(key)) throw bad(`${holder.first_name} already has ${product.name} on ${dayText(day)}`);
+      perPerson.add(key);
+    }
+    const qty = product.kind === 'voucher' ? Math.min(Math.max(Number(a.quantity) || 1, 1), MAX_ADDON_QTY) : 1;
+    const base = await unitPrice(conn, tenant.id, product.id, tier, day);
     if (base.cents <= 0) throw bad(`${product.name} has no price set`);
     const type = product.kind === 'voucher' ? 'ticket' : product.kind;
     priced.push({ type, unit: base.cents, cents: base.cents * qty });
-    addons.push({ product_id: product.id, name: product.name, kind: product.kind, quantity: qty, unit: base.cents, valid_days: Math.max(product.valid_days, 1), uses: product.uses });
+    addons.push({ product_id: product.id, name: product.name, kind: product.kind, quantity: qty, unit: base.cents, valid_days: Math.max(product.valid_days, 1), uses: product.uses, tier, valid_on: day, for_item: forItem, holder });
   }
   const gifts = [];
   for (const g of giftsIn) {
@@ -257,6 +293,55 @@ async function overDays(conn, tenant, lines) {
   return [...out];
 }
 
+/** The limit that binds first on a day for a product: { limit, sold, mountain } or null when no limit applies. */
+function binding(use, tenant, product, day) {
+  const u = use.get(day) || { all: 0, by: new Map() };
+  const over = use.over || new Map();
+  const pLimit = over.has(`${day}|${product.id}`) ? over.get(`${day}|${product.id}`) : product.online_daily_limit;
+  const tLimit = over.has(`${day}|0`) ? over.get(`${day}|0`) : tenant.online_daily_limit;
+  const opts = [];
+  if (pLimit !== null && pLimit !== undefined) opts.push({ limit: Number(pLimit), sold: u.by.get(product.id) || 0, mountain: false });
+  if (tLimit !== null && tLimit !== undefined) opts.push({ limit: Number(tLimit), sold: u.all, mountain: true });
+  opts.sort((a, b) => (a.limit - a.sold) - (b.limit - b.sold));
+  return opts[0] || null;
+}
+const weekdayText = (d) => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long', month: 'short', day: 'numeric' }).format(new Date(`${d}T12:00:00Z`));
+
+/**
+ * For the ticket window: the days a sale would take over a day limit (the same limits the online shop keeps, which count
+ * every channel). lines: [{ product: { id, kind, name, online_daily_limit, valid_days }, valid_on, quantity }].
+ * Returns [{ date, product_id, limit, sold, wanted, words }], empty when the sale fits.
+ */
+async function overLimits(conn, tenant, lines) {
+  const lim = lines.filter((l) => LIMITED_KINDS.includes(l.product.kind));
+  if (!lim.length) return [];
+  const from = lim.reduce((m, l) => (l.valid_on < m ? l.valid_on : m), lim[0].valid_on);
+  const to = lim.reduce((m, l) => { const e = addDays(l.valid_on, Math.max(Number(l.product.valid_days) || 1, 1) - 1); return e > m ? e : m; }, lim[0].valid_on);
+  if (!(await limited(conn, tenant, lim.map((l) => l.product), from))) return [];
+  const use = await usage(conn, tenant.id, from, to);
+  const before = await usage(conn, tenant.id, from, to);
+  const out = new Map();
+  for (const l of lim) {
+    const n = Math.max(Number(l.quantity) || 1, 1);
+    for (let d = l.valid_on; d <= addDays(l.valid_on, Math.max(Number(l.product.valid_days) || 1, 1) - 1); d = addDays(d, 1)) {
+      const have = left(use, tenant, l.product, d);
+      if (have < n) {
+        const b = binding(before, tenant, l.product, d);
+        const key = `${d}|${b && !b.mountain ? l.product.id : 0}`;
+        const prev = out.get(key);
+        const wanted = (prev ? prev.wanted : 0) + n;
+        const what = b && !b.mountain ? `${l.product.name} on ${weekdayText(d)}` : weekdayText(d);
+        const words = b.sold >= b.limit
+          ? `${what} is at its limit: ${b.sold} of ${b.limit} sold online and at the window.`
+          : `${what} has ${b.limit - b.sold} left under its limit (${b.sold} of ${b.limit} sold online and at the window). This sale has ${wanted}.`;
+        out.set(key, { date: d, product_id: b && !b.mountain ? l.product.id : null, limit: b.limit, sold: b.sold, wanted, words });
+      }
+      const u = use.get(d) || { all: 0, by: new Map() }; u.all += n; u.by.set(l.product.id, (u.by.get(l.product.id) || 0) + n); use.set(d, u);
+    }
+  }
+  return [...out.values()];
+}
+
 /**
  * A paid basket becomes people on file, waivers where the buyer can legitimately sign, one order and one ticket per holder.
  * Runs inside the caller's transaction on a locked shop_orders row.
@@ -266,7 +351,8 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
   const q = basket.quote; const c = basket.contact;
   const tenant = await one(conn, 'SELECT id, timezone, waiver_text, waiver_resign_id, online_daily_limit FROM tenants WHERE id = ?', [tenantId]);
   // After "ask everyone to sign again", a box ticked against the old wording no longer counts as a waiver.
-  const acceptedOk = row.waiver_accepted && !(tenant.waiver_resign_id && row.waiver_text_sha !== (tenant.waiver_text ? shaOf(tenant.waiver_text) : null));
+  // A box ticked when the mountain has no waiver wording is not a waiver: there is nothing it agreed to.
+  const acceptedOk = row.waiver_accepted && tenant.waiver_text && row.waiver_text_sha && !(tenant.waiver_resign_id && row.waiver_text_sha !== (tenant.waiver_text ? shaOf(tenant.waiver_text) : null));
   // A payment that lands after the 40-minute hold is still honoured (the guest paid), but staff are told if it took the
   // day over its limit.
   const late = await one(conn, 'SELECT created_at < DATE_SUB(NOW(), INTERVAL 40 MINUTE) AS late FROM shop_orders WHERE tenant_id = ? AND id = ?', [tenantId, row.id]);
@@ -292,7 +378,16 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
     if (st.photo) details.photo = st.photo;
     // The buyer's email and phone belong to the buyer, so only the buyer's own record gets them.
     if (sameAsContact && !minor) { details.email = row.contact_email; details.phone = row.contact_phone; }
-    const who = await resolvePerson(conn, tenantId, { personId: sameAsContact && !minor ? contact.id : undefined, details, scope: 'none', source: 'online', fillOnly: true });
+    // A child (or anyone) already linked to the buyer with the same name is the same person, so a family buying again does
+    // not get a second record. A date of birth, when both have one, must match too.
+    let personId = sameAsContact && !minor ? contact.id : undefined;
+    if (!personId && contact.id && !sameAsContact) {
+      const kin = await rows(conn, `SELECT p.id, p.date_of_birth FROM person_links l JOIN people p ON p.tenant_id = l.tenant_id AND p.id = l.member_id
+        WHERE l.tenant_id = ? AND l.adult_id = ? AND l.relation = 'guardian' AND p.first_name = ? AND p.last_name = ? AND p.anonymised_at IS NULL ORDER BY p.id`, [tenantId, contact.id, st.first_name, st.last_name]);
+      const hit = kin.find((k) => !st.date_of_birth || !k.date_of_birth || dstr(k.date_of_birth) === st.date_of_birth);
+      if (hit) personId = hit.id;
+    }
+    const who = await resolvePerson(conn, tenantId, { personId, details, scope: 'none', source: 'online', fillOnly: true });
     if (!who.id) throw bad(`Could not save ${st.first_name} ${st.last_name}`);
     const guardianOk = minor && await mayActAsGuardian(conn, tenantId, contact.id, who.id, who.created);
     if (guardianOk) await addLink(conn, tenantId, contact.id, who.id, 'guardian');
@@ -303,9 +398,11 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
     }
     return { who, waiver };
   };
+  const holderIds = []; // the person on each ticket line, for the add-ons that go with a ticket
   for (const ln of q.lines) {
     const st = ln.holder;
     const { who, waiver } = await holderOnFile(st, ln.valid_on, ln.tier, season);
+    holderIds.push(who.id);
     if (!waiver && tenant.waiver_text) waiverNeeded.push(`${st.first_name} ${st.last_name}`);
     const [it] = await conn.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents) VALUES (?, ?, ?, 'ticket', ?, ?, 1, ?, ?, ?, ?)", [tenantId, orderId, ln.product_id, who.id, ln.tier, ln.unit, ln.valid_on, ln.discount || 0, ln.tax || 0]);
     const code = newCode();
@@ -328,7 +425,7 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
     if (late && Number(late.late)) {
       const cap = a.start_time ? ((await ACT.slotsOn(conn, tenantId, a.product_id, a.valid_on)).find((x) => x.start === a.start_time) || {}).capacity : product.day_capacity;
       const used = (await ACT.taken(conn, tenantId, [a.product_id], a.valid_on)).get(`${a.product_id}|${a.start_time || ''}`) || 0;
-      if (cap !== null && cap !== undefined && used >= cap) overSlots.push(`${a.name} ${a.valid_on}${a.start_time ? ` ${ACT.clock(a.start_time)}` : ''}`);
+      if (cap !== null && cap !== undefined && used >= cap) overSlots.push(`${a.name} ${dayText(a.valid_on)}${a.start_time ? ` ${ACT.clock(a.start_time)}` : ''}`);
     }
     const [it] = await conn.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents) VALUES (?, ?, ?, 'activity', ?, ?, 1, ?, ?, ?, ?)", [tenantId, orderId, a.product_id, who.id, a.tier, a.unit, a.valid_on, a.discount || 0, a.tax || 0]);
     const code = newCode();
@@ -336,17 +433,22 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
     await ACT.book(conn, tenantId, { product, attractionId: a.attraction_id, day: a.valid_on, slot, personId: who.id, orderItemId: it.insertId, ticketId: tk.insertId, channel: 'online' });
     tickets.push(code);
   }
-  // Add-ons become a voucher the guest uses at the mountain; each unit has its own code and barcode.
+  // Add-ons become a voucher the guest uses at the mountain; each unit has its own code and barcode. A rental or a lesson
+  // package is for its person, from the visit day (a voucher is the buyer's, from today).
   for (const a of q.addons || []) {
     const discEach = split(a.discount || 0, a.quantity); const taxEach = split(a.tax || 0, a.quantity); // shared evenly, so refunding one unit returns its share
+    let personId = contact.id;
+    if (a.for_item !== undefined && a.for_item !== null && holderIds[a.for_item]) personId = holderIds[a.for_item];
+    else if (a.holder && a.valid_on) personId = (await holderOnFile(a.holder, a.valid_on, a.tier, seasonFor(a.valid_on))).who.id;
+    // A basket saved before add-ons named their person and day: the first ticket day, as it was then.
+    const day = a.kind === 'voucher' ? today : (a.valid_on || (q.lines || []).map((l) => l.valid_on).filter(Boolean).sort()[0] || today);
     for (let k = 0; k < a.quantity; k++) {
-      const [it] = await conn.query("INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents) VALUES (?, ?, ?, ?, ?, 'adult', 1, ?, ?, ?, ?)",
-        [tenantId, orderId, a.product_id, a.kind === 'voucher' ? 'ticket' : a.kind, contact.id, a.unit, today, discEach[k], taxEach[k]]);
-      // A prepaid rental also waits in the rental shop's Ready to fit list, for the buyer (or the named renter), on the
-      // day of the first ticket in the basket (or today when there is none).
-      if (a.kind === 'rental') await rentalToFit(conn, tenantId, { personId: a.person_id || contact.id, orderId, orderItemId: it.insertId, productId: a.product_id, validOn: (q.lines || []).map((l) => l.valid_on).filter(Boolean).sort()[0] || today });
+      const [it] = await conn.query('INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)',
+        [tenantId, orderId, a.product_id, a.kind === 'voucher' ? 'ticket' : a.kind, personId, a.tier || 'adult', a.unit, day, discEach[k], taxEach[k]]);
+      // A prepaid rental also waits in the rental shop's Ready to fit list, for the renter, on the visit day.
+      if (a.kind === 'rental') await rentalToFit(conn, tenantId, { personId, orderId, orderItemId: it.insertId, productId: a.product_id, validOn: day });
       await conn.query('INSERT INTO tickets (tenant_id, order_item_id, person_id, product_id, code, valid_from, valid_to, uses_remaining) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [tenantId, it.insertId, contact.id, a.product_id, newCode(), today, addDays(today, a.valid_days - 1), a.uses ?? null]);
+        [tenantId, it.insertId, personId, a.product_id, newCode(), day, addDays(day, a.valid_days - 1), a.uses ?? null]);
     }
   }
   const giftCodes = [];
@@ -360,7 +462,7 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
   await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, processor, processor_account, platform_fee_cents) VALUES (?, ?, 'card', ?, ?, 'stripe', ?, ?)",
     [tenantId, orderId, q.total, paymentIntent, payee.account || null, payee.feeCents || 0]);
   await conn.query("UPDATE shop_orders SET status = 'paid', paid_at = NOW(), order_id = ?, payment_intent = COALESCE(?, payment_intent), note = ? WHERE tenant_id = ? AND id = ?",
-    [orderId, paymentIntent, [waiverNeeded.length ? `Waiver still to sign at the gate: ${waiverNeeded.join(', ')}.` : '', overLimit.length ? `Payment arrived late: ${overLimit.join(', ')} went over the daily limit.` : '', overSlots.length ? `Payment arrived late: ${overSlots.join(', ')} went over its places.` : ''].filter(Boolean).join(' ').slice(0, 300) || null, tenantId, row.id]);
+    [orderId, paymentIntent, [waiverNeeded.length ? `Waiver still to sign at the gate: ${waiverNeeded.join(', ')}.` : '', overLimit.length ? `Payment arrived late: ${overLimit.map(dayText).join(', ')} went over the daily limit.` : '', overSlots.length ? `Payment arrived late: ${overSlots.join(', ')} went over its places.` : ''].filter(Boolean).join(' ').slice(0, 300) || null, tenantId, row.id]);
   await audit(conn, { auth: { tenantId, userId: null } }, 'shop_paid', 'shop_orders', row.id, { tickets: tickets.length, order_id: orderId });
   return { orderId, tickets, waiverNeeded, giftCodes, programAdjustments };
 }
@@ -407,7 +509,7 @@ async function emailTickets(tenantId, rowId, baseUrl) {
   const v = await viewOf(tenantId, row.view_token);
   const RF = require('./rentalforms');
   const rentalForm = row.order_id && (await RF.rentalLines(pool, tenantId, row.order_id)).count ? await RF.orderFormLink(pool, tenantId, row.order_id, baseUrl, t.slug) : null;
-  const lines = v.tickets.map((k) => `- ${k.product}${k.first_name ? `, ${k.first_name} ${k.last_name}` : ''}: ${k.valid_from === k.valid_to ? k.valid_from : `${k.valid_from} to ${k.valid_to}`}${k.start_time ? `, ${ACT.clock(k.start_time)} to ${ACT.clock(k.end_time)}` : ''}`);
+  const lines = v.tickets.map((k) => `- ${k.product}${k.first_name ? `, ${k.first_name} ${k.last_name}` : ''}: ${dayRangeText(k.valid_from, k.valid_to)}${k.start_time ? `, ${ACT.clock(k.start_time)} to ${ACT.clock(k.end_time)}` : ''}`);
   const gifts = v.gift_cards.map((g) => `- Gift card ${g.code}, ${money(g.amount_cents)}${g.recipient_name ? ` for ${g.recipient_name}` : ''}`);
   const text = [`Hi ${row.contact_name.split(' ')[0]},`, '', `Thank you for your order at ${t.name} (reference ${row.reference}, ${money(row.amount_cents)}).`, '', ...lines, ...gifts, '',
     'Show the barcode on your phone at the gate. Your tickets are here:', link, '',
@@ -519,4 +621,4 @@ async function monthView(conn, tenant, ym) {
   return out;
 }
 
-module.exports = { leftOn: left, monthView, advance, KINDS, dayMenu, closedDates, usage, quote, fulfil, viewOf, emailTickets, handleWebhook, reference, MAX_ITEMS };
+module.exports = { overLimits, leftOn: left, monthView, advance, KINDS, dayMenu, closedDates, usage, quote, fulfil, viewOf, emailTickets, handleWebhook, reference, MAX_ITEMS };

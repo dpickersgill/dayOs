@@ -27,7 +27,7 @@ export async function render(root, params = []) {
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Sell'), h('div', { class: 'row' }, drawerBadge, button('Cash drawer', () => drawerDialog(loadDrawer), { small: true }), h('a', { class: 'btn', href: '#/gate' }, 'Open the gate'))));
   await loadDrawer();
   const left = h('div', { class: 'stack sell-main' });
-  const right = h('div', { class: 'stack' });
+  const right = h('div', { class: 'stack sell-side' });
   root.append(h('div', { class: 'sell-grid' }, left, right));
   right.append(await sellPanel(left));
   // #/sell/order/12 (a shared link): open that order
@@ -54,6 +54,8 @@ async function sellPanel(root) {
   const countBadge = h('span', { class: 'count', hidden: true });
   const quoteMsg = h('div');
   let quote = null;
+  // A day at its ticket limit: a manager's reason to sell over it (kept while the basket is open).
+  const overReason = input({ name: 'over_limit_reason', maxlength: 300, 'aria-label': 'Why sell over the limit', placeholder: 'For example: school group booked by phone' });
   const tier = select(TIERS, FIRST, { name: 'tier', 'aria-label': 'Guest type' });
   const date = input({ type: 'date', value: menu.today, min: menu.today, name: 'date', 'aria-label': 'Valid on' });
 
@@ -75,7 +77,7 @@ async function sellPanel(root) {
       const draw = () => {
         clear(grid);
         for (const p of menu.tickets) {
-          const tile = h('button', { type: 'button', class: 'tile', 'data-product': p.id, onclick: () => { flash(tile); return add({ type: 'ticket', product_id: p.id, kind: p.kind, name: p.name, tier: tier.value, quantity: 1, valid_on: date.value, detail: `${tier.value}, ${date.value}` }); } },
+          const tile = h('button', { type: 'button', class: 'tile', 'data-product': p.id, onclick: () => { flash(tile); return add({ type: 'ticket', product_id: p.id, kind: p.kind, name: p.name, tier: tier.value, quantity: 1, valid_on: date.value, detail: `${typeName(tier.value)}, ${fmtDate(date.value)}` }); } },
             h('strong', null, p.name), h('small', { class: 'muted' }, p.uses ? `${p.uses} rides` : p.kind === 'season_pass' ? `Valid to ${fmtDate(addDays(date.value || menu.today, Math.max(p.valid_days, 1) - 1))}` : p.valid_days > 1 ? `${p.valid_days} days` : 'One day'), h('span', { class: 'tile-price' }, money(price(p, tier.value))));
           grid.append(tile);
         }
@@ -203,6 +205,11 @@ async function sellPanel(root) {
     })));
     // a lesson and a lift ticket for different days: a warning, never a refusal
     if (quote && (quote.warnings || []).length) basketBox.append(h('div', { class: 'notice warn', role: 'status', 'data-day-warning': '' }, quote.warnings.map((w) => h('div', null, w))));
+    // a day at its ticket limit (online and window together): the cashier is told; only a manager sells over it, with a reason
+    if (quote && (quote.over_limit || []).length) {
+      basketBox.append(h('div', { class: 'notice warn over-limit', role: 'alert', 'data-over-limit': '' }, quote.over_limit.map((o) => h('div', null, h('strong', null, o.words))),
+        isManager() ? field('Reason to sell over the limit (saved in the audit log)', overReason) : h('div', null, 'Only a manager can sell over the limit. Ask a manager to make this sale, or pick another day.')));
+    }
     if (quote) {
       clear(summary);
       if (quote.discount_cents) {
@@ -218,8 +225,10 @@ async function sellPanel(root) {
   const checkoutBtn = button('Checkout', () => {
     if (!basket.length) throw new Error('Add something to the basket first');
     if (!quote) throw new Error('Fix the problem shown in the basket first');
-    checkoutDialog({ basket, quote, def, promo: promoIn.value.trim(), comp: menu.comp, waiverText: menu.waiver_text, quickSale: menu.quick_sale, drawerOpen: () => drawer.open, onOpenDrawer: (after) => drawerDialog(async () => { await loadDrawer(); after(); }), onSold: async () => {
-      basket.length = 0; promoIn.value = ''; quote = null;
+    if ((quote.over_limit || []).length && !isManager()) throw new Error('This day is at its limit. Only a manager can sell over it.');
+    if ((quote.over_limit || []).length && !overReason.value.trim()) { overReason.focus(); throw new Error('Say why you are selling over the limit'); }
+    checkoutDialog({ basket, quote, def, promo: promoIn.value.trim(), overLimitReason: () => overReason.value.trim() || undefined, comp: menu.comp, waiverText: menu.waiver_text, quickSale: menu.quick_sale, drawerOpen: () => drawer.open, onOpenDrawer: (after) => drawerDialog(async () => { await loadDrawer(); after(); }), onSold: async () => {
+      basket.length = 0; promoIn.value = ''; overReason.value = ''; quote = null;
       drawBasket();
       try { Object.assign(menu, await get('/checkout/menu')); } catch (_) { /* the menu refreshes on the next visit */ }
       loadOrders();
@@ -232,7 +241,7 @@ async function sellPanel(root) {
   const basketPanel = h('section', { class: 'card basket-panel' }, h('header', { class: 'basket-head' }, h('h2', null, 'Basket'), countBadge), basketBox, quoteMsg, summary,
     h('label', { class: 'promo-row' }, h('span', { class: 'small muted' }, 'Promo code'), h('span', { class: 'promo-input' }, promoIn, applyPromo)), checkoutBtn);
   drawBasket();
-  const orders = h('section', { class: 'card' });
+  const orders = h('section', { class: 'card sell-orders' });
   root.append(orders);
 
   // ---- today's orders

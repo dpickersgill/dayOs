@@ -30,6 +30,7 @@ const GT = require('../lib/guesttypes');
 const LS = require('../lib/lessonsale');
 const { studentClash, clashWords, spotsLeft } = require('../lib/lessonrules');
 const { heldWords } = require('../lib/lessonbooking');
+const SH = require('../lib/shopsale');
 
 const checkout = express.Router();
 const giftCards = express.Router();
@@ -104,6 +105,8 @@ const checkoutSchema = z.object({
   // Sell sends this: each guest's type follows them across their lines (lib/guesttypes.js followPerson). The check before
   // payment returns the new total, so the counter always takes the right amount.
   follow_types: z.boolean().optional(),
+  // A day at its ticket limit (online and window sales together): a manager can still sell, and says why.
+  over_limit_reason: z.string().trim().max(300).optional(),
 });
 const QUICK_KINDS = ['day_ticket', 'multi_day', 'punch_card', 'voucher'];
 
@@ -218,6 +221,14 @@ async function priceLines(conn, tenantId, lines, today) {
   return out;
 }
 
+/** Days this basket would take over a day's ticket limit (lib/shopsale.js overLimits): the window sees it, a manager decides. */
+async function overLimits(conn, tenantId, priced) {
+  const lines = priced.filter((p) => p.type === 'ticket' && p.product).map((p) => ({ product: p.product, valid_on: p.validOn, quantity: p.quantity }));
+  if (!lines.length) return [];
+  const tenant = await one(conn, 'SELECT id, online_daily_limit FROM tenants WHERE id = ?', [tenantId]);
+  return SH.overLimits(conn, tenant, lines);
+}
+
 async function totals(conn, tenantId, priced, promoCode, today, lock) {
   let subtotal = 0;
   let promoEligible = 0; // gift cards are not discounted
@@ -316,7 +327,7 @@ checkout.post('/quote', requireRole(...sellers), validate(quoteSchema), async (r
   const today = todayIn(tenant.timezone);
   const priced = await priceLines(pool, tenantId, req.body.lines, today);
   const t = await totals(pool, tenantId, priced, req.body.promo_code, today, false);
-  res.json({ lines: priced.map(describe), subtotal_cents: t.subtotal, discount_cents: t.discount, tax_cents: t.tax, taxes: t.taxes, total_cents: t.total, gift_card_cents: t.giftCents, warnings: LS.dayWarnings(priced) });
+  res.json({ lines: priced.map(describe), subtotal_cents: t.subtotal, discount_cents: t.discount, tax_cents: t.tax, taxes: t.taxes, total_cents: t.total, gift_card_cents: t.giftCents, warnings: LS.dayWarnings(priced), over_limit: await overLimits(pool, tenantId, priced) });
 });
 
 // ---------------------------------------------------------------- checkout
@@ -344,6 +355,15 @@ async function runSale(conn, req, body, { check = false } = {}) {
 
     // ---- price first, so a bad line or a wrong payment fails before anything is saved
     const priced = await priceLines(conn, tenantId, lines, today);
+    // ---- a day at its ticket limit: the same lock the online shop takes, so the window and the shop count one at a time.
+    // The cashier sees the limit; only a manager goes over it, with a reason, and that is audited below.
+    if (!check && priced.some((p) => p.type === 'ticket')) await conn.query('SELECT id FROM tenants WHERE id = ? FOR UPDATE', [tenantId]);
+    const over = await overLimits(conn, tenantId, priced);
+    if (over.length) {
+      const words = over.map((o) => o.words).join(' ');
+      if (!body.over_limit_reason) throw conflict(`${words} Only a manager can sell over the limit, and says why.`, { over_limit: over });
+      if (!['owner', 'manager'].includes(req.auth.role)) throw forbidden(`${words} Only a manager can sell over the limit. Ask a manager to make this sale.`);
+    }
     const t = await totals(conn, tenantId, priced, body.promo_code, today, !check);
     if (check) body = { ...body, payments: [] }; // not paid yet: the payment is checked when the sale is made
     const paySum = body.payments.reduce((n, p) => n + p.amount_cents, 0);
@@ -573,7 +593,7 @@ async function runSale(conn, req, body, { check = false } = {}) {
       }
     }
     if (check) {
-      throw new Checked({ ok: true, lines: priced.map(describe), subtotal_cents: t.subtotal, discount_cents: t.discount, tax_cents: t.tax, taxes: t.taxes, total_cents: t.total, gift_card_cents: t.giftCents, type_changes: typeChanges, warnings: LS.dayWarnings(priced) });
+      throw new Checked({ ok: true, lines: priced.map(describe), subtotal_cents: t.subtotal, discount_cents: t.discount, tax_cents: t.tax, taxes: t.taxes, total_cents: t.total, gift_card_cents: t.giftCents, type_changes: typeChanges, warnings: LS.dayWarnings(priced), over_limit: over });
     }
 
     // ---- the order
@@ -582,6 +602,7 @@ async function runSale(conn, req, body, { check = false } = {}) {
       `INSERT INTO orders (tenant_id, person_id, user_id, status, promo_code, subtotal_cents, discount_cents, tax_cents, total_cents, channel, payment_ref) VALUES (?, ?, ?, 'paid', ?, ?, ?, ?, ?, ?, ?)`,
       [tenantId, buyer.id, req.auth.userId, t.promo, t.subtotal, t.discount, t.tax, t.total, body.channel, firstRef ? firstRef.reference : null],
     );
+    if (over.length) await audit(conn, req, 'sell_over_limit', 'orders', o.insertId, { reason: body.over_limit_reason, days: over.map((x) => ({ date: x.date, product_id: x.product_id, limit: x.limit, sold: x.sold, wanted: x.wanted })) });
     const orderId = o.insertId;
     for (const tx_ of t.taxes) await conn.query('INSERT INTO order_taxes (tenant_id, order_id, name, rate_bps, amount_cents) VALUES (?, ?, ?, ?, ?)', [tenantId, orderId, tx_.name, tx_.rate_bps, tx_.amount_cents]);
     const done = { tickets: [], lessons: [], packages: [], rentals: [], programs: [], activities: [], gift_cards: [], program_adjustments: [] };
@@ -748,7 +769,7 @@ async function runSale(conn, req, body, { check = false } = {}) {
       id: orderId, person_id: buyer.id, customer: buyer.id ? { id: buyer.id, created: buyer.created, matched: buyer.matched } : null,
       subtotal_cents: t.subtotal, discount_cents: t.discount, tax_cents: t.tax, taxes: t.taxes, total_cents: t.total, change_due_cents: change,
       lines: priced.map(describe), payments: body.payments.map((p) => ({ tender: p.tender, amount_cents: p.amount_cents })),
-      type_changes: typeChanges, warnings: LS.dayWarnings(priced),
+      type_changes: typeChanges, warnings: LS.dayWarnings(priced), over_limit: over,
       ...done,
     };
   }
