@@ -1,0 +1,20 @@
+/* A guest's day or season recap (/season/<mountain>/<token>) and its share page. Uses book.css for the base. */
+
+/* ---- the page */
+.rc { max-width: 760px; margin: -28px auto 0; padding: 0 16px 48px; display: grid; gap: 16px; position: relative; z-index: 2; }
+.rc-person { display: grid; gap: 14px; }
+.rc-person h2 { font-size: 1.375rem; }
+.rc-big { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.rc-big li { background: var(--snow); border-radius: var(--r-sm); padding: 14px; display: grid; gap: 2px; }
+.rc-big .n { font-size: 2rem; font-weight: 700; line-height: 1.1; color: var(--ink); }
+.rc-big .w { color: var(--muted); font-size: 0.9375rem; }
+.rc-facts { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.rc-facts li { padding-left: 22px; position: relative; }
+.rc-facts li::before { content: ''; position: absolute; left: 4px; top: 0.6em; width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+.rc-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.rc-msg { padding: 12px 14px; border-radius: var(--r-sm); background: var(--green-tint); color: var(--green); font-weight: 700; }
+.rc-err { padding: 12px 14px; border-radius: var(--r-sm); background: var(--red-tint); color: var(--red); }
+.rc-share-url { word-break: break-all; font-size: 0.9375rem; color: var(--muted); }
+.rc-foot { color: var(--muted); font-size: 0.9375rem; display: grid; gap: 8px; }
+@media (max-width: 480px) { .rc-actions .btn { width: 100%; } .rc-big { grid-template-columns: 1fr 1fr; } }
+

@@ -18,7 +18,7 @@ function seasonRange(label) {
  */
 async function daysHere(db, tenantId, personId, from, to, tz = 'America/New_York') {
   const r = await rows(db, `SELECT d FROM (
-      SELECT DATE(CONVERT_TZ(s.scanned_at, '+00:00', ?)) AS d FROM scans s JOIN tickets t ON t.tenant_id = s.tenant_id AND t.id = s.ticket_id
+      SELECT DATE(COALESCE(CONVERT_TZ(s.scanned_at, '+00:00', ?), s.scanned_at)) AS d FROM scans s JOIN tickets t ON t.tenant_id = s.tenant_id AND t.id = s.ticket_id
         WHERE s.tenant_id = ? AND t.person_id = ? AND s.result = 'ok'
       UNION SELECT DATE(ls.starts_at) FROM lesson_bookings b JOIN lesson_sessions ls ON ls.tenant_id = b.tenant_id AND ls.id = b.session_id
         WHERE b.tenant_id = ? AND b.person_id = ? AND b.status = 'attended'

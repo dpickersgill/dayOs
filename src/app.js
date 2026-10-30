@@ -156,6 +156,7 @@ function createApp() {
   app.get('/waitlist/:slug/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'waitlist.html')));
   app.get('/private/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'private.html')));
   app.get('/weather/:slug/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'weather.html')));
+  app.get(['/season/:slug/:token', '/season/:slug/share/:token'], (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'season.html'))); // a guest's day or season recap (guests round 2)
   app.get('/shop/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'shop.html')));
   app.get('/programs/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'register.html')));
   app.get('/family/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'family.html')));
