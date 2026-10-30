@@ -3498,6 +3498,7 @@ fieldset.safety legend { font-weight: 700; padding: 0 4px; }
   .plan-lines { display: none; }
   .plan-count { display: inline; }
   .plan-booked { margin-top: 0; }
+}
 
 /* ---- Ski school, Fill and staff (2026.11.9, Track STAFF: school-staff.js): the month, a day's lesson times, the My day card */
 .fill-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
