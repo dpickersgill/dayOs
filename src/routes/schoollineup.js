@@ -21,6 +21,7 @@
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
+const SA = require('../lib/schoolaccess'); // 2026.11.9: the school director and supervisor
 const { z, validate, paramId, dateStr, todayIn, nowIn } = require('../lib/util');
 const { notFound, conflict, bad, forbidden, AppError } = require('../lib/errors');
 const { audit } = require('../lib/audit');
@@ -32,7 +33,7 @@ const S = require('../lib/schoolsettings');
 const router = express.Router();
 const publicRouter = express.Router();
 const desk = ['manager', 'counter'];
-const isManager = (req) => ['owner', 'manager'].includes(req.auth.role);
+const isManager = (req) => SA.atLeast(req, 'supervisor'); // owners, managers and school supervisors and directors
 const dayOf = async (req) => {
   const d = String(req.query.date || '');
   if (d && !dateStr.safeParse(d).success) throw bad('date must be YYYY-MM-DD');
@@ -40,7 +41,7 @@ const dayOf = async (req) => {
 };
 
 // ---------------------------------------------------------------- check-in
-router.get('/checkin', requireRole(...desk), async (req, res) => {
+router.get('/checkin', SA.school('supervisor', ...desk), async (req, res) => {
   const date = await dayOf(req);
   res.json({ date, data: await LL.checkinList(pool, req.auth.tenantId, { date, q: String(req.query.q || '').slice(0, 60) }) });
 });
@@ -61,10 +62,10 @@ async function deskCheckIn(req, bookingId) {
   return { ...row, already: !done };
 }
 
-router.post('/bookings/:id/checkin', requireRole(...desk), async (req, res) => {
+router.post('/bookings/:id/checkin', SA.school('supervisor', ...desk), async (req, res) => {
   res.json(await deskCheckIn(req, paramId(req)));
 });
-router.delete('/bookings/:id/checkin', requireRole(...desk), async (req, res) => {
+router.delete('/bookings/:id/checkin', SA.school('supervisor', ...desk), async (req, res) => {
   const { tenantId } = req.auth;
   await tx(async (conn) => {
     const b = await one(conn, 'SELECT id FROM lesson_bookings WHERE tenant_id = ? AND id = ?', [tenantId, paramId(req)]);
@@ -75,7 +76,7 @@ router.delete('/bookings/:id/checkin', requireRole(...desk), async (req, res) =>
   res.json({ ok: true });
 });
 
-router.post('/checkin/scan', requireRole(...desk), validate(z.object({ code: z.string().trim().min(1).max(40) })), async (req, res) => {
+router.post('/checkin/scan', SA.school('supervisor', ...desk), validate(z.object({ code: z.string().trim().min(1).max(40) })), async (req, res) => {
   const { tenantId } = req.auth;
   const code = LL.readCode(req.body.code);
   if (!code) throw bad('That code is not a lesson or a receipt. Search by name instead.');
@@ -103,7 +104,7 @@ router.post('/checkin/scan', requireRole(...desk), validate(z.object({ code: z.s
  * For Sell: the student's level per discipline and age (to show the lessons that fit), and their safety details from
  * their last lesson booking (or their emergency contact on file), to prefill a lesson line. Desk and managers only.
  */
-router.get('/lesson-safety/:id', requireRole(...desk), async (req, res) => {
+router.get('/lesson-safety/:id', SA.school('supervisor', ...desk), async (req, res) => {
   const { tenantId } = req.auth;
   const p = await one(pool, 'SELECT id, first_name, last_name, date_of_birth, ski_level, snowboard_level, emergency_name, emergency_phone, email, phone FROM people WHERE tenant_id = ? AND id = ?', [tenantId, paramId(req)]);
   if (!p) throw notFound('Person');
@@ -117,7 +118,7 @@ router.get('/lesson-safety/:id', requireRole(...desk), async (req, res) => {
 });
 
 // ---------------------------------------------------------------- the lineup board
-router.get('/lineups', requireRole(...desk), async (req, res) => {
+router.get('/lineups', SA.school('supervisor', ...desk), async (req, res) => {
   const date = await dayOf(req);
   const list = await tx((conn) => LL.ensureLineups(conn, req.auth.tenantId, date));
   const now = nowIn(await LL.tzOf(pool, req.auth.tenantId));
@@ -126,11 +127,11 @@ router.get('/lineups', requireRole(...desk), async (req, res) => {
   res.json({ date, now, next_id: next ? next.id : null, data: list });
 });
 
-router.get('/lineups/:id', requireRole(...desk), async (req, res) => {
+router.get('/lineups/:id', SA.school('supervisor', ...desk), async (req, res) => {
   res.json(await LL.board(pool, req.auth.tenantId, paramId(req)));
 });
 
-router.patch('/lineups/:id', requireRole('manager'), validate(z.object({ ratio: z.number().int().min(1).max(20).nullable() })), async (req, res) => {
+router.patch('/lineups/:id', SA.school('supervisor'), validate(z.object({ ratio: z.number().int().min(1).max(20).nullable() })), async (req, res) => {
   const { tenantId } = req.auth;
   await tx(async (conn) => {
     const [r] = await conn.query('UPDATE lesson_lineups SET ratio = ? WHERE tenant_id = ? AND id = ?', [req.body.ratio, tenantId, paramId(req)]);
@@ -140,7 +141,7 @@ router.patch('/lineups/:id', requireRole('manager'), validate(z.object({ ratio: 
   res.json(await LL.board(pool, tenantId, paramId(req)));
 });
 
-router.post('/lineups/:id/suggest', requireRole(...desk), validate(z.object({ from: z.enum(['checked_in', 'booked']).default('checked_in') })), async (req, res) => {
+router.post('/lineups/:id/suggest', SA.school('supervisor', ...desk), validate(z.object({ from: z.enum(['checked_in', 'booked']).default('checked_in') })), async (req, res) => {
   res.json(await LL.suggestSplit(pool, req.auth.tenantId, paramId(req), { from: req.body.from }));
 });
 
@@ -152,7 +153,7 @@ const classSchema = z.object({
   level_max: z.number().int().min(1).max(9).nullable().optional(),
   meeting_place: z.string().trim().max(120).optional(),
 });
-router.post('/lineups/:id/apply', requireRole('manager'), validate(z.object({ classes: z.array(classSchema).min(1).max(30) })), async (req, res) => {
+router.post('/lineups/:id/apply', SA.school('supervisor'), validate(z.object({ classes: z.array(classSchema).min(1).max(30) })), async (req, res) => {
   const { tenantId } = req.auth;
   const classes = req.body.classes.filter((c) => c.session_id || c.booking_ids.length);
   for (const c of classes) if (c.level_min && c.level_max && c.level_min > c.level_max) throw bad('A class has its lowest level above its highest');
@@ -163,7 +164,7 @@ router.post('/lineups/:id/apply', requireRole('manager'), validate(z.object({ cl
 });
 
 /** The instructors for a lineup's time, each with why they cannot take a class at its highest level (null when they can). */
-router.get('/lineup-teachers', requireRole(...desk), async (req, res) => {
+router.get('/lineup-teachers', SA.school('supervisor', ...desk), async (req, res) => {
   const { tenantId } = req.auth;
   const b = await LL.board(pool, tenantId, Number(req.query.lineup_id) || 0);
   const first = b.classes[0];
@@ -185,7 +186,7 @@ async function mayMove(req, bookingId) {
   const b = await one(pool, `SELECT b.id, b.session_id, s.instructor_id, s.starts_at, s.ends_at, s.discipline, s.product_id FROM lesson_bookings b
     JOIN lesson_sessions s ON s.tenant_id = b.tenant_id AND s.id = b.session_id WHERE b.tenant_id = ? AND b.id = ?`, [req.auth.tenantId, bookingId]);
   if (!b) throw notFound('Booking');
-  if (req.auth.role === 'instructor' && (!req.auth.staffId || Number(b.instructor_id) !== Number(req.auth.staffId))) throw forbidden('You can move students only from your own lesson');
+  if (SA.ownOnly(req) && (!req.auth.staffId || Number(b.instructor_id) !== Number(req.auth.staffId))) throw forbidden('You can move students only from your own lesson');
   return b;
 }
 
@@ -221,7 +222,7 @@ router.get('/labels', requireRole('instructor', ...desk), async (req, res) => {
   const bookingIds = ids(req.query.booking_ids);
   if (!sessionIds.length && !bookingIds.length) throw bad('Choose a lesson, a lineup or students');
   // an instructor prints only their own lessons' labels
-  if (req.auth.role === 'instructor') {
+  if (SA.ownOnly(req)) {
     const own = await rows(pool, `SELECT DISTINCT s.id FROM lesson_sessions s ${bookingIds.length ? 'JOIN lesson_bookings b ON b.tenant_id = s.tenant_id AND b.session_id = s.id AND b.id IN (?)' : ''}
       WHERE s.tenant_id = ? ${sessionIds.length ? 'AND s.id IN (?)' : ''} AND (s.instructor_id IS NULL OR s.instructor_id <> ?)`,
     [...(bookingIds.length ? [bookingIds] : []), tenantId, ...(sessionIds.length ? [sessionIds] : []), req.auth.staffId || 0]);

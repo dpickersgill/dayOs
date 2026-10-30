@@ -6,7 +6,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { pool, tx, rows, one } = require('../db');
-const { requireRole, isManager } = require('../middleware/auth');
+const { requireRole } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/rateLimit');
 const { z, dateStr, validate, paramId, todayIn, nowIn, addDays, seasonFor } = require('../lib/util');
 const { notFound, conflict, bad, forbidden, AppError } = require('../lib/errors');
@@ -30,8 +30,9 @@ const { policyText, policyTiers } = require('../lib/onlinesale');
 
 const router = express.Router();
 const publicRouter = express.Router();
-const manager = requireRole('manager');
-const desk = requireRole('manager', 'counter');
+const SA = require('../lib/schoolaccess'); // 2026.11.9: the school director and supervisor
+const manager = SA.school('director');
+const desk = SA.school('supervisor', 'counter');
 const school = requireRole('instructor', 'manager', 'counter');
 const NAME = "TRIM(CONCAT(p.first_name, ' ', p.last_name))";
 const DISCIPLINES = ['ski', 'snowboard', 'telemark', 'adaptive'];
@@ -42,8 +43,8 @@ const dateQ = (v, dflt) => { const s = v === undefined ? dflt : String(first(v))
 /** Whose pay or requests: your own; a manager may name an instructor with staff_id. */
 function whoseStaff(req, asked) {
   const wanted = asked ? Number(first(asked)) : req.auth.staffId;
-  if (!wanted) throw bad(isManager(req) ? 'Choose an instructor' : 'Your login is not linked to a staff record yet. Ask a manager to link it.');
-  if (wanted !== req.auth.staffId && !isManager(req)) throw forbidden('You can only see your own pay');
+  if (!wanted) throw bad(SA.atLeast(req, 'director') ? 'Choose an instructor' : 'Your login is not linked to a staff record yet. Ask a manager to link it.');
+  if (wanted !== req.auth.staffId && !SA.atLeast(req, 'director')) throw forbidden('You can only see your own pay');
   return wanted;
 }
 
@@ -232,7 +233,7 @@ router.post('/pay/question', school, validate(z.object({ line: z.string().trim()
 // ================================================================ private requests (staff)
 router.get('/pay/requests', school, async (req, res) => {
   const t = req.auth.tenantId;
-  const all = req.query.scope === 'all' && (isManager(req) || req.auth.role === 'counter');
+  const all = req.query.scope === 'all' && (SA.atLeast(req, 'supervisor') || req.auth.role === 'counter');
   if (!all) {
     const staffId = whoseStaff(req, req.query.staff_id);
     const waiting = await requestsFor(pool, t, staffId);

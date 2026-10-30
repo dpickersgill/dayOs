@@ -5,6 +5,7 @@
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
+const SA = require('../lib/schoolaccess'); // 2026.11.9: the school director and supervisor
 const { z, validate, paramId, dateStr, todayIn } = require('../lib/util');
 const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
@@ -25,7 +26,7 @@ router.get('/levels', requireRole(...school), async (req, res) => {
   res.json({ data: await ladder(pool, tenantId) });
 });
 
-router.post('/levels', requireRole('manager'), validate(z.object({ discipline: z.enum(DISCIPLINES), name: z.string().trim().min(1).max(80), description: z.string().trim().max(300).optional() })), async (req, res) => {
+router.post('/levels', SA.school('director'), validate(z.object({ discipline: z.enum(DISCIPLINES), name: z.string().trim().min(1).max(80), description: z.string().trim().max(300).optional() })), async (req, res) => {
   const { tenantId } = req.auth;
   const b = req.body;
   const { n } = await one(pool, 'SELECT COALESCE(MAX(rank_no), 0) AS n FROM school_levels WHERE tenant_id = ? AND discipline = ?', [tenantId, b.discipline]);
@@ -34,7 +35,7 @@ router.post('/levels', requireRole('manager'), validate(z.object({ discipline: z
   res.status(201).json({ id: r.insertId, rank_no: n + 1 });
 });
 
-router.patch('/levels/:id', requireRole('manager'), validate(z.object({ name: z.string().trim().min(1).max(80).optional(), description: z.string().trim().max(300).nullable().optional() })), async (req, res) => {
+router.patch('/levels/:id', SA.school('director'), validate(z.object({ name: z.string().trim().min(1).max(80).optional(), description: z.string().trim().max(300).nullable().optional() })), async (req, res) => {
   const set = []; const vals = [];
   for (const k of ['name', 'description']) if (req.body[k] !== undefined) { set.push(`${k} = ?`); vals.push(req.body[k] || null); }
   if (!set.length) throw bad('Nothing to change');
@@ -43,7 +44,7 @@ router.patch('/levels/:id', requireRole('manager'), validate(z.object({ name: z.
   res.json({ ok: true });
 });
 
-router.post('/levels/:id/skills', requireRole('manager'), validate(z.object({ name: z.string().trim().min(1).max(160) })), async (req, res) => {
+router.post('/levels/:id/skills', SA.school('director'), validate(z.object({ name: z.string().trim().min(1).max(160) })), async (req, res) => {
   const { tenantId } = req.auth;
   const level = await one(pool, 'SELECT id FROM school_levels WHERE tenant_id = ? AND id = ?', [tenantId, paramId(req)]);
   if (!level) throw notFound('Level');
@@ -52,13 +53,13 @@ router.post('/levels/:id/skills', requireRole('manager'), validate(z.object({ na
   res.status(201).json({ id: r.insertId });
 });
 
-router.patch('/skills/:id', requireRole('manager'), validate(z.object({ name: z.string().trim().min(1).max(160) })), async (req, res) => {
+router.patch('/skills/:id', SA.school('director'), validate(z.object({ name: z.string().trim().min(1).max(160) })), async (req, res) => {
   const [r] = await pool.query('UPDATE school_skills SET name = ? WHERE tenant_id = ? AND id = ?', [req.body.name, req.auth.tenantId, paramId(req)]);
   if (!r.affectedRows) throw notFound('Skill');
   res.json({ ok: true });
 });
 
-router.delete('/skills/:id', requireRole('manager'), async (req, res) => {
+router.delete('/skills/:id', SA.school('director'), async (req, res) => {
   const { tenantId } = req.auth;
   const id = paramId(req);
   const used = await one(pool, 'SELECT COUNT(*) AS n FROM student_skills WHERE tenant_id = ? AND skill_id = ?', [tenantId, id]);
@@ -99,7 +100,7 @@ router.patch('/sessions/:id/details', requireRole('instructor', 'manager'), vali
   const { tenantId, role, staffId } = req.auth;
   const s = await one(pool, 'SELECT id, instructor_id FROM lesson_sessions WHERE tenant_id = ? AND id = ?', [tenantId, paramId(req)]);
   if (!s) throw notFound('Lesson session');
-  if (role === 'instructor' && s.instructor_id !== staffId) throw bad('Instructors can only change their own lessons');
+  if (role === 'instructor' && SA.ownOnly(req) && s.instructor_id !== staffId) throw bad('Instructors can only change their own lessons');
   const set = []; const vals = [];
   for (const k of ['notes', 'meeting_place']) if (req.body[k] !== undefined) { set.push(`${k} = ?`); vals.push(req.body[k] || null); }
   if (req.body.tip_cents !== undefined) { set.push('tip_cents = ?'); vals.push(req.body.tip_cents); }
@@ -112,7 +113,7 @@ router.patch('/bookings/:id/notes', requireRole('instructor', 'manager'), valida
   const { tenantId, role, staffId } = req.auth;
   const b = await one(pool, 'SELECT b.id, s.instructor_id FROM lesson_bookings b JOIN lesson_sessions s ON s.id = b.session_id AND s.tenant_id = b.tenant_id WHERE b.tenant_id = ? AND b.id = ?', [tenantId, paramId(req)]);
   if (!b) throw notFound('Booking');
-  if (role === 'instructor' && b.instructor_id !== staffId) throw bad('Instructors can only write notes on their own lessons');
+  if (role === 'instructor' && SA.ownOnly(req) && b.instructor_id !== staffId) throw bad('Instructors can only write notes on their own lessons');
   await pool.query('UPDATE lesson_bookings SET instructor_notes = ? WHERE tenant_id = ? AND id = ?', [req.body.instructor_notes || null, tenantId, b.id]);
   res.json({ ok: true });
 });
@@ -138,7 +139,7 @@ router.get('/board', requireRole(...school), async (req, res) => {
      FROM lesson_bookings b JOIN lesson_sessions s ON s.id = b.session_id AND s.tenant_id = b.tenant_id JOIN people p ON p.id = b.person_id AND p.tenant_id = b.tenant_id
      WHERE b.tenant_id = ? AND b.session_id IN (?) AND b.status <> 'cancelled' ORDER BY p.last_name, p.first_name`, [tenantId, ids]) : [];
   // Allergies and medical notes: the flag for everyone in the school, the words only for the desk, managers and the lesson's instructor.
-  const sees = (s) => req.auth.role !== 'instructor' || s.instructor_id === req.auth.staffId;
+  const sees = (s) => !SA.ownOnly(req) || s.instructor_id === req.auth.staffId;
   const out = sessions.map((s) => ({ ...s, level_words: LV.range(s.level_min, s.level_max), instructor: s.instructor_id ? `${s.instructor_first} ${s.instructor_last}` : null,
     students: students.filter((x) => x.session_id === s.id).map((x) => {
       const o = { ...x, has_allergies: Boolean(x.allergies), has_medical: Boolean(x.medical) };
@@ -163,7 +164,7 @@ router.get('/board', requireRole(...school), async (req, res) => {
  * adaptive, outside their availability). ok: true means they can be assigned; a manager can still assign anyone else
  * with a reason (PATCH /sessions/:id/instructor, override_reason).
  */
-router.get('/sessions/:id/eligible-instructors', requireRole('manager'), async (req, res) => {
+router.get('/sessions/:id/eligible-instructors', SA.school('supervisor'), async (req, res) => {
   const { tenantId } = req.auth;
   const s = await one(pool, 'SELECT * FROM lesson_sessions WHERE tenant_id = ? AND id = ?', [tenantId, paramId(req)]);
   if (!s) throw notFound('Lesson session');
@@ -171,7 +172,7 @@ router.get('/sessions/:id/eligible-instructors', requireRole('manager'), async (
 });
 
 /** The same picker for a lesson not saved yet (the Add a lesson form). */
-router.post('/instructor-fit', requireRole('manager'), validate(z.object({
+router.post('/instructor-fit', SA.school('supervisor'), validate(z.object({
   starts_at: z.string().min(16).max(19), ends_at: z.string().min(16).max(19), discipline: z.enum(DISCIPLINES).default('ski'),
   level_max: z.number().int().min(1).max(9).nullable().optional(), age_max: z.number().int().min(0).max(99).nullable().optional(), required_certification_id: z.number().int().positive().nullable().optional(),
 })), async (req, res) => {
@@ -182,7 +183,7 @@ router.post('/instructor-fit', requireRole('manager'), validate(z.object({
 
 // ---------------------------------------------------------------- instructor profiles: what each instructor is cleared to teach
 const csvList = (v) => (v ? String(v).split(',').filter(Boolean) : []);
-router.get('/instructors', requireRole('manager'), async (req, res) => {
+router.get('/instructors', SA.school('supervisor'), async (req, res) => {
   const { tenantId } = req.auth;
   const data = await rows(pool, `SELECT st.id, p.first_name, p.last_name, ip.disciplines, ip.ski_level_max, ip.snowboard_level_max, ip.teaches_kids, ip.teaches_adaptive, ip.psia_level, ip.staff_id IS NOT NULL AS has_profile,
       EXISTS (SELECT 1 FROM users u WHERE u.tenant_id = st.tenant_id AND u.staff_id = st.id AND u.role = 'instructor' AND u.active = 1) AS has_login
@@ -193,7 +194,7 @@ router.get('/instructors', requireRole('manager'), async (req, res) => {
     psia_level: r.psia_level || 'none', certifications: certs.filter((c) => c.staff_id === r.id).map((c) => ({ id: c.id, name: c.name, expires_on: c.expires_on })) })) });
 });
 
-router.put('/instructors/:id/profile', requireRole('manager'), validate(z.object({
+router.put('/instructors/:id/profile', SA.school('director'), validate(z.object({
   disciplines: z.array(z.enum(DISCIPLINES)).max(4),
   ski_level_max: z.number().int().min(1).max(9).nullable(), snowboard_level_max: z.number().int().min(1).max(9).nullable(),
   teaches_kids: z.boolean(), teaches_adaptive: z.boolean(), psia_level: z.enum(['none', 'level1', 'level2', 'level3']),
@@ -209,7 +210,7 @@ router.put('/instructors/:id/profile', requireRole('manager'), validate(z.object
 });
 
 /** Hours and lessons taught per instructor over a date range, for payroll and tips. */
-router.get('/hours', requireRole('manager'), async (req, res) => {
+router.get('/hours', SA.school('director'), async (req, res) => {
   const { tenantId } = req.auth;
   const from = String(req.query.from || ''); const to = String(req.query.to || '');
   if (!dateStr.safeParse(from).success || !dateStr.safeParse(to).success) throw bad('from and to must be YYYY-MM-DD');
@@ -232,7 +233,7 @@ router.get('/credits', requireRole(...school), async (req, res) => {
 
 // ---------------------------------------------------------------- requests from the public booking page
 
-router.get('/requests', requireRole('manager', 'counter'), async (req, res) => {
+router.get('/requests', SA.school('supervisor', 'counter'), async (req, res) => {
   const status = ['pending', 'confirmed', 'declined', 'cancelled', 'awaiting_payment', 'expired'].includes(req.query.status) ? req.query.status : 'pending';
   const data = await rows(pool,
     `SELECT r.*, s.starts_at, s.ends_at, s.discipline, s.format, pr.name AS product
@@ -242,7 +243,7 @@ router.get('/requests', requireRole('manager', 'counter'), async (req, res) => {
   res.json({ data: data.map(parseRequest), pending: Number(n) });
 });
 
-router.post('/requests/:id/decline', requireRole('manager', 'counter'), validate(z.object({ staff_note: z.string().trim().max(300).optional() })), async (req, res) => {
+router.post('/requests/:id/decline', SA.school('supervisor', 'counter'), validate(z.object({ staff_note: z.string().trim().max(300).optional() })), async (req, res) => {
   const [r] = await pool.query("UPDATE lesson_requests SET status = 'declined', staff_note = ?, decided_at = NOW() WHERE tenant_id = ? AND id = ? AND status = 'pending'", [req.body.staff_note ?? null, req.auth.tenantId, paramId(req)]);
   if (!r.affectedRows) throw conflict('That request is not waiting for an answer');
   await audit(pool, req, 'decline', 'lesson_requests', paramId(req));
@@ -254,7 +255,7 @@ router.post('/requests/:id/decline', requireRole('manager', 'counter'), validate
  * recorded where the contact can legitimately sign it, and each student is booked and marked "unpaid" until they pay at the
  * desk (the checkout picks up the unpaid booking instead of booking twice).
  */
-router.post('/requests/:id/confirm', requireRole('manager', 'counter'), async (req, res) => {
+router.post('/requests/:id/confirm', SA.school('supervisor', 'counter'), async (req, res) => {
   const { tenantId } = req.auth;
   const id = paramId(req);
   const out = await tx(async (conn) => {

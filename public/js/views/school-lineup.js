@@ -5,13 +5,13 @@
 // or a receipt's 'ORD-' + order number). The lineup board: one column per class of a lineup, the students checked in,
 // "Not checked in", the suggested split and moving a student (drag, or tap and "Move to"). Labels for each student.
 import { get, post, patch, del } from '../api.js';
-import { h, clear, can, isManager, state, input, select, field, button, toast, dialog, formDialog, todayStr, addDays, fmtTime, fmtDate, empty, errorBox, fail, appendAll, val } from '../ui.js';
+import { h, clear, can, schoolCan, state, input, select, field, button, toast, dialog, formDialog, todayStr, addDays, fmtTime, fmtDate, empty, errorBox, fail, appendAll, val } from '../ui.js';
 import { code128 } from '../barcode.js';
 import { printDialog } from '../print.js';
 import { levelOptions } from '../levels.js';
 import { row, toggle, amount } from './settings-kit.js';
 
-const desk = () => can('counter');
+const desk = () => can('counter') || schoolCan('supervisor');
 const store = {
   get: (k, d) => { try { const v = localStorage.getItem(`lineup.${k}`); return v === null ? d : v; } catch (_) { return d; } },
   set: (k, v) => { try { localStorage.setItem(`lineup.${k}`, v); } catch (_) { /* a private window: not remembered */ } },
@@ -126,7 +126,7 @@ export async function moveDialog(student, done) {
   const pick = select(opts.map((s) => [s.id, `${s.instructor_first ? `${s.instructor_first}'s group` : 'No instructor yet'}, ${s.level_words}${s.meeting_place ? `, ${s.meeting_place}` : ''} (${s.spots_left ? `${s.spots_left} spot${s.spots_left === 1 ? '' : 's'} left` : 'full'})`]), opts[0].id, { name: 'session_id' });
   const reason = input({ name: 'reason', maxlength: 300, placeholder: 'Only when the class is full' });
   const reasonRow = field('Reason to go over by one (managers)', reason);
-  const sync = () => { const s = opts.find((x) => String(x.id) === pick.value); reasonRow.hidden = !(s && !s.spots_left && isManager()); };
+  const sync = () => { const s = opts.find((x) => String(x.id) === pick.value); reasonRow.hidden = !(s && !s.spots_left && schoolCan('supervisor')); };
   pick.addEventListener('change', sync); sync();
   formDialog(`Move ${student.first_name}`, h('div', { class: 'form' }, field('Move to', pick, 'The family and the new instructor are told.'), reasonRow), async (fd) => {
     const body = { session_id: Number(pick.value) };
@@ -143,7 +143,7 @@ async function moveTo(student, sessionId, done) {
     await post(`/skischool/bookings/${student.booking_id}/move`, { session_id: sessionId });
     toast(`${student.first_name} moved`);
   } catch (err) {
-    if (err.details && err.details.needs_reason && isManager()) {
+    if (err.details && err.details.needs_reason && schoolCan('supervisor')) {
       formDialog('That class is full', h('div', { class: 'form' }, h('p', { class: 'wide' }, `Add ${student.first_name} as one over the class size?`), field('Reason', input({ name: 'reason', required: true, minlength: 3, maxlength: 300 }))), async (fd) => {
         await post(`/skischool/bookings/${student.booking_id}/move`, { session_id: sessionId, reason: val(fd, 'reason') });
         toast(`${student.first_name} moved`);
@@ -230,7 +230,7 @@ async function lineupTab(root) {
         h('div', { class: 'row' },
           !L.locked ? button('Suggest a split', () => suggest(), { kind: 'primary' }) : null,
           button('Print labels', () => printLabels(`lineup_id=${L.id}`, 'Labels for this lineup')),
-          isManager() ? button('Class size', () => ratioDialog(), { small: true }) : null)));
+          schoolCan('supervisor') ? button('Class size', () => ratioDialog(), { small: true }) : null)));
     const cols = b.classes.map((c) => {
       const list = h('ul', { class: 'plain lu-chips' }, c.students.filter((s) => s.checked_in).map((s) => studentChip(s, { onPick: studentMenu, color: c.color })));
       const col = h('section', { class: `lu-col${c.instructor_id ? '' : ' attention'}`, 'data-session': c.id, 'aria-label': `${c.color} class` },
@@ -274,7 +274,7 @@ async function lineupTab(root) {
         h('p', { class: 'small' }, `${all.reduce((n, c) => n + c.students.length, 0)} students in ${all.length} class${all.length === 1 ? '' : 'es'} of up to ${sg.ratio}, grouped by level then age. Move students between classes (drag, or tap a name), pick instructors, then press Use this split. Families whose child changes class are told.`),
         sg.left_out.length ? h('p', { class: 'small' }, `${sg.left_out.length} not checked in yet and left out: ${sg.left_out.map((s) => s.first_name).join(', ')}.`) : null,
         h('div', { class: 'row' }, h('label', null, 'Split ', fromPick),
-          isManager() ? button('Use this split', () => useSplit(), { kind: 'primary' }) : h('span', { class: 'muted small' }, 'A manager presses Use this split.'),
+          schoolCan('supervisor') ? button('Use this split', () => useSplit(), { kind: 'primary' }) : h('span', { class: 'muted small' }, 'A supervisor or manager presses Use this split.'),
           button('Add a class', () => { all.push({ session_id: null, color: 'New', level_min: null, level_max: null, students: [], instructor_id: null, instructor: null }); drawSuggestion(); }),
           button('Cancel', () => { suggestion = null; draw(); }))));
     const relevel = (c) => { const lv = c.students.map((s) => s.level).filter(Boolean); if (lv.length) { c.level_min = Math.min(...lv); c.level_max = Math.max(...lv); } };

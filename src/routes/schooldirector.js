@@ -21,8 +21,9 @@ const cardrefund = require('../lib/cardrefund');
 
 const router = express.Router();
 const publicRouter = express.Router();
-const manager = requireRole('manager');
-const desk = requireRole('manager', 'counter');
+const SA = require('../lib/schoolaccess'); // 2026.11.9: the school director and supervisor
+const manager = SA.school('director');
+const desk = SA.school('supervisor', 'counter');
 const DISCIPLINES = ['ski', 'snowboard', 'telemark', 'adaptive'];
 const hhmm = z.string().regex(/^\d{2}:\d{2}$/, 'Use HH:MM');
 const dt = z.string().regex(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/).transform((s) => { const t = s.replace('T', ' '); return t.length === 16 ? `${t}:00` : t; });
@@ -61,12 +62,12 @@ const checkScope = (b) => {
   if (b.action === 'delay' && !b.delay_minutes) throw bad('Say how many minutes to delay');
   if (b.action === 'move' && !b.makeup_date) throw bad('Pick the makeup day');
 };
-router.post('/director/weather/preview', manager, validate(z.object(weatherScope)), async (req, res) => {
+router.post('/director/weather/preview', SA.school('supervisor'), validate(z.object(weatherScope)), async (req, res) => {
   checkScope(req.body);
   const p = await W.preview(req.auth.tenantId, req.body);
   res.json({ ...p, words: W.words(req.body.action, p, req.body) });
 });
-router.post('/director/weather', manager, validate(z.object({ ...weatherScope, reason: z.string().trim().min(3, 'Say why, in a few words').max(300) })), async (req, res) => {
+router.post('/director/weather', SA.school('supervisor'), validate(z.object({ ...weatherScope, reason: z.string().trim().min(3, 'Say why, in a few words').max(300) })), async (req, res) => {
   checkScope(req.body);
   res.status(201).json(await W.run(req.auth.tenantId, req.body, req, baseUrl(req)));
 });

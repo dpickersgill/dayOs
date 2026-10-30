@@ -5,7 +5,7 @@
 //
 // Pages: #/settings/<page>. #/settings on its own opens Your profile and sign-in on a computer, and the list on a phone.
 import { get } from '../api.js';
-import { h, clear, ctx, isManager, errorBox, loading, confirmDialog } from '../ui.js';
+import { h, clear, ctx, isManager, schoolCan, errorBox, loading, confirmDialog } from '../ui.js';
 import { hasUnsaved } from './settings-kit.js';
 
 const GROUPS = { you: 'You', mountain: 'The mountain', apps: 'Apps' };
@@ -21,7 +21,7 @@ const PAGES = [
   ['assistant', 'mountain', 'Assistant', 'Who can ask the assistant, which guest pages show it, and this month’s use.', () => import('./settings-mountain.js')],
   ['sell', 'apps', 'Sell and gate', 'The ticket window’s limits, quick sale, partner passes, and the gate. Only owners and managers see this page.', () => import('./settings-apps.js')],
   ['shop', 'apps', 'Online shop', 'Whether guests can buy online, date changes, limits and prices by day, and how the shop page looks.', () => import('./settings-apps.js')],
-  ['school', 'apps', 'Ski school', 'Online lesson booking, cancellations and refunds, and the levels you teach. Only owners and managers see this page.', () => import('./settings-apps.js')],
+  ['school', 'apps', 'Ski school', 'Online lesson booking, cancellations and refunds, and the levels you teach. Only owners, managers and the ski school Director see this page.', () => import('./settings-apps.js')],
   ['programs', 'apps', 'Programs', 'How families register for programs.', () => import('./settings-apps.js')],
   ['rentals', 'apps', 'Rentals', 'How the rental counter works: fees, deposits and the binding chart.', () => import('./settings-apps.js')],
   ['attractions', 'apps', 'Attractions', 'Ziplines, a coaster, tubing, the rink and more: limits, waivers and each one’s daily opening checks.', () => import('./settings-apps.js')],
@@ -54,7 +54,7 @@ async function visiblePages(who) {
     if (ctx.me.role === 'area') continue;
     if (group === 'mountain') { if (who.manager) out.push(p); continue; }
     if (!moduleOn(APP_OF[key][2])) continue;
-    if (key === 'patrol' ? !(who.manager || who.patrol) : !who.manager) continue; // patrol: the cards decide, by permission
+    if (key === 'patrol' ? !(who.manager || who.patrol) : key === 'school' ? !(who.manager || who.schoolDirector) : !who.manager) continue; // school: a ski school director too (2026.11.9) // patrol: the cards decide, by permission
     if (await apps.pageHasSetup(key, who)) out.push(p);
   }
   return out;
@@ -84,7 +84,7 @@ export async function render(root, params = []) {
   const asked = params[0] || null;
   const manager = isManager();
   const pl = manager ? null : await patrolLevel();
-  const who = { manager, patrolAdmin: Boolean(pl && (pl.level === 'admin' || pl.features.includes('manage_settings'))), patrol: pl };
+  const who = { manager, schoolDirector: !manager && schoolCan('director'), patrolAdmin: Boolean(pl && (pl.level === 'admin' || pl.features.includes('manage_settings'))), patrol: pl };
   const pages = await visiblePages(who);
   const page = pages.find((p) => p[0] === asked) || pages[0];
   const home = !asked || !pages.some((p) => p[0] === asked);

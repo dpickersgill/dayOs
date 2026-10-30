@@ -16,6 +16,7 @@ const CREW_ROLES = ['counter', 'instructor', 'staff'];
  *   manager      owners and managers (REQUIRE_ADMIN_MFA, on in production)
  *   patrol_lead  patrol Admins and Managers (they run the team and its records)
  *   patrol       patrollers, who see patient details (unless the owner turned it off, and after a two-week start)
+ *   school_director  an instructor login set to Director in Ski school (it sells, refunds and approves pay)
  * Counter, instructor and lift staff are not forced: they use a password, or a PIN on an enrolled terminal.
  * Demo mountains are exempt from the tiers. row: the sign-in check's columns.
  */
@@ -25,6 +26,7 @@ function mfaRule(row) {
   if (MANAGER_ROLES.includes(row.role)) return 'manager';
   if (row.role === 'area') return 'area'; // reads approved patient reports
   if (Number(row.patrol_lead)) return 'patrol_lead';
+  if (row.role === 'instructor' && row.school_access === 'director') return 'school_director';
   if ((row.role === 'patrol' || Number(row.on_patrol)) && !Number(row.patrol_host) && Number(row.mfa_for_patrol ?? 1) && Number(row.patrol_mfa_due ?? 1)) return 'patrol';
   return null;
 }
@@ -35,6 +37,7 @@ const TIER_SQL = `(u.totp_enabled = 1 OR EXISTS (SELECT 1 FROM user_passkeys k W
   (u.staff_id IS NOT NULL AND EXISTS (SELECT 1 FROM patrol_members m JOIN staff s2 ON s2.tenant_id = m.tenant_id AND s2.id = m.staff_id AND s2.status = 'active' WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id)) AS on_patrol,
   (u.staff_id IS NOT NULL AND EXISTS (SELECT 1 FROM patrol_members m WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id AND m.access_level IN ('admin','manager'))) AS patrol_lead,
   (u.staff_id IS NOT NULL AND EXISTS (SELECT 1 FROM patrol_members m WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id AND m.access_level = 'host')) AS patrol_host,
+  (SELECT ip.school_access FROM instructor_profiles ip JOIN staff s3 ON s3.tenant_id = ip.tenant_id AND s3.id = ip.staff_id AND s3.status = 'active' WHERE ip.tenant_id = u.tenant_id AND ip.staff_id = u.staff_id) AS school_access,
   t.require_mfa, t.mfa_for_patrol, (t.patrol_mfa_from IS NULL OR t.patrol_mfa_from <= CURDATE()) AS patrol_mfa_due, t.patrol_mfa_from,
   (t.sandbox_expires_at IS NOT NULL) AS sandbox`;
 
@@ -52,7 +55,7 @@ const SETUP_PATHS = /\/auth\/(me|logout|change-password|mfa\/(setup|enable|statu
 /**
  * Verifies the bearer token, then re-checks the user in the database on every request, so that
  * deactivating a login, changing a role, or changing a password takes effect immediately instead of
- * after the token expires. Sets req.auth = { tenantId, userId, role, staffId, onPatrol, sid, method, terminalId, steppedUp, strong, display }.
+ * after the token expires. Sets req.auth = { tenantId, userId, role, staffId, onPatrol, sid, method, terminalId, steppedUp, strong, display, schoolLevel }.
  *
  * tenantId comes ONLY from the signed token, never from the request body, query or URL,
  * so one mountain can never read or write another mountain's rows.
@@ -123,6 +126,7 @@ async function authenticate(req, _res, next) {
     tenantId: payload.tid, userId, role: row.role, staffId: row.staff_id, onPatrol: Boolean(Number(row.on_patrol)), sid: payload.sid,
     method: row.session_method, terminalId: row.session_terminal ? Number(row.session_terminal) : null, deviceHash: row.session_device || null,
     steppedUp: Boolean(Number(row.stepped_up)), strong: Boolean(Number(row.strong)), mfaRule: mfaRule(row), display,
+    schoolLevel: row.role === 'instructor' ? (row.school_access || 'instructor') : null, // lib/schoolaccess.js
   };
   if (Number(row.sandbox)) demoUsage.touch(payload.tid, req.originalUrl, req.method); // for the platform's Demos dashboard
   return next();

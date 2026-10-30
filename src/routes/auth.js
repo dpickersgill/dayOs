@@ -440,7 +440,9 @@ router.get('/auth/me', authenticate, async (req, res) => {
     staff_injuries: await require('../lib/injuryregister').canSee(pool, req.auth.tenantId, { id: req.auth.userId, role: user.role }),
     signed_in_with: req.auth.method, terminal, stepped_up: req.auth.steppedUp, device_key: deviceKey, display: req.auth.display || null,
     // This role's own menu (its apps in order, and the screen it opens on); null for owners and managers, who see everything.
-    menu: menus.menuFor(user.role, user.role_menus),
+    menu: menus.menuFor(user.role, user.role_menus, user.school_access),
+    // The ski school access level (lib/schoolaccess.js): director for owners and managers, the teaching profile's for an instructor.
+    school_access: ['owner', 'manager'].includes(user.role) ? 'director' : user.role === 'instructor' ? (user.school_access || 'instructor') : null,
   });
 });
 

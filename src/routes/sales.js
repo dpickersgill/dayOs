@@ -16,6 +16,12 @@ const ACT = require('../lib/activities');
 const { loadRules, applyTax } = require('../lib/tax');
 const router = express.Router();
 const sellers = ['counter', 'manager'];
+// A ski school director (2026.11.9) sees and refunds lesson-only orders (every line a lesson or lesson package), up to the
+// counter refund limit like counter staff.
+const SA = require('../lib/schoolaccess');
+const LESSON_ONLY_SQL = "NOT EXISTS (SELECT 1 FROM order_items x WHERE x.tenant_id = o.tenant_id AND x.order_id = o.id AND x.line_kind <> 'lesson')";
+const lessonOrder = SA.directorFor(sellers, async (req) => Boolean(await one(pool, `SELECT o.id FROM orders o WHERE o.tenant_id = ? AND o.id = ? AND ${LESSON_ONLY_SQL}`, [req.auth.tenantId, Number(req.params.id) || 0])),
+  'A ski school director can see and refund lesson orders only');
 
 // The purchaser's details (name, address, phone, ...). Same fields as the customer record; names are required once any detail is sent.
 const purchaserSchema = z.object({ ...personFields, first_name: personFields.first_name.optional(), last_name: personFields.last_name.optional() });
@@ -115,8 +121,9 @@ router.post('/orders', requireRole(...sellers), validate(orderSchema), async (re
   res.status(201).json(result);
 });
 
-router.get('/orders', requireRole(...sellers), async (req, res) => {
+router.get('/orders', SA.directorFor(sellers, async () => true), async (req, res) => {
   const where = ['o.tenant_id = ?'];
+  if (SA.isSchoolDirector(req)) where.push(LESSON_ONLY_SQL);
   const params = [req.auth.tenantId];
   if (req.query.date) {
     const tz = (await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone;
@@ -132,7 +139,7 @@ router.get('/orders', requireRole(...sellers), async (req, res) => {
   res.json({ data });
 });
 
-router.get('/orders/:id', requireRole(...sellers), async (req, res) => {
+router.get('/orders/:id', lessonOrder, async (req, res) => {
   const order = await one(pool, 'SELECT * FROM orders WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, paramId(req)]);
   if (!order) throw notFound('Order');
   const items = await rows(pool, 'SELECT * FROM order_items WHERE tenant_id = ? AND order_id = ?', [req.auth.tenantId, order.id]);
@@ -176,7 +183,7 @@ const refundBody = z.object({
  */
 // Counter staff may refund up to the mountain's counter refund limit per order (guest_settings, Track WINDOW); above it,
 // or when the limit is 0, a manager.
-router.post('/orders/:id/refund', requireRole('counter', 'manager'), validate(refundBody), async (req, res) => {
+router.post('/orders/:id/refund', lessonOrder, validate(refundBody), async (req, res) => {
   const orderId = paramId(req);
   const { tenantId } = req.auth;
   const body = req.body;

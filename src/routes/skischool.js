@@ -3,6 +3,7 @@
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
+const SA = require('../lib/schoolaccess'); // 2026.11.9: the school director and supervisor
 const { z, dateStr, dateTimeStr, validate, paramId, normDateTime, todayIn, addDays } = require('../lib/util');
 const { notFound, conflict, bad, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
@@ -114,7 +115,7 @@ async function insertSession(conn, req, b, startsAt, endsAt, product) {
   return r.insertId;
 }
 
-router.post('/sessions', requireRole('manager'), validate(sessionSchema), async (req, res) => {
+router.post('/sessions', SA.school('director'), validate(sessionSchema), async (req, res) => {
   const b = req.body;
   const id = await tx(async (conn) => {
     const product = await lessonProduct(conn, req.auth.tenantId, b.product_id);
@@ -123,7 +124,7 @@ router.post('/sessions', requireRole('manager'), validate(sessionSchema), async 
   res.status(201).json({ id });
 });
 
-router.post('/sessions/series', requireRole('manager'), validate(seriesSchema), async (req, res) => {
+router.post('/sessions/series', SA.school('director'), validate(seriesSchema), async (req, res) => {
   const b = req.body;
   const dates = [...new Set(b.dates)].sort();
   const ids = await tx(async (conn) => {
@@ -135,7 +136,7 @@ router.post('/sessions/series', requireRole('manager'), validate(seriesSchema), 
   res.status(201).json({ ids, count: ids.length });
 });
 
-router.patch('/sessions/:id/instructor', requireRole('manager'), validate(z.object({ instructor_id: z.number().int().positive().nullable(), override_reason: z.string().trim().min(3).max(300).optional() })), async (req, res) => {
+router.patch('/sessions/:id/instructor', SA.school('supervisor'), validate(z.object({ instructor_id: z.number().int().positive().nullable(), override_reason: z.string().trim().min(3).max(300).optional() })), async (req, res) => {
   const { tenantId } = req.auth;
   const sid = paramId(req);
   await tx(async (conn) => {
@@ -149,7 +150,7 @@ router.patch('/sessions/:id/instructor', requireRole('manager'), validate(z.obje
 });
 
 /** Edit a lesson: levels, ages, meeting place, spots, type. Times and the product stay (cancel and add a new one instead). */
-router.patch('/sessions/:id', requireRole('manager'), validate(z.object({
+router.patch('/sessions/:id', SA.school('director'), validate(z.object({
   level_min: level.nullable().optional(), level_max: level.nullable().optional(), age_min: age.nullable().optional(), age_max: age.nullable().optional(),
   meeting_place: z.string().trim().max(120).nullable().optional(), capacity: z.number().int().min(1).max(60).optional(), format: z.enum(formats).optional(),
 })), async (req, res) => {
@@ -221,7 +222,7 @@ router.post(
 );
 
 /** The details to fill the counter's booking form with: the student's last booking, else their emergency contact. */
-router.get('/students/:id/safety', requireRole('manager', 'counter'), async (req, res) => {
+router.get('/students/:id/safety', SA.school('supervisor', 'counter'), async (req, res) => {
   const d = await lastDetails(pool, req.auth.tenantId, paramId(req));
   if (!d) throw notFound('Student');
   res.json(d);
@@ -233,7 +234,7 @@ router.patch('/bookings/:id/safety', requireRole(...school), validate(z.object(s
   await tx(async (conn) => {
     const b = await one(conn, 'SELECT b.id, b.person_id, s.instructor_id FROM lesson_bookings b JOIN lesson_sessions s ON s.tenant_id = b.tenant_id AND s.id = b.session_id WHERE b.tenant_id = ? AND b.id = ? FOR UPDATE', [tenantId, paramId(req)]);
     if (!b) throw notFound('Booking');
-    if (req.auth.role === 'instructor' && b.instructor_id !== req.auth.staffId) throw forbidden('Instructors can only change their own lessons');
+    if (SA.ownOnly(req) && b.instructor_id !== req.auth.staffId) throw forbidden('Instructors can only change their own lessons');
     await saveDetails(conn, req, b.id, b.person_id, req.body);
     await audit(conn, req, 'safety_details', 'lesson_bookings', b.id, { fields: Object.keys(req.body) }); // the fields changed, never the details
   });
@@ -241,7 +242,7 @@ router.patch('/bookings/:id/safety', requireRole(...school), validate(z.object(s
 });
 
 /** Send the confirmation again (the family lost it, or the email was wrong). Sends even when automatic emails are off. */
-router.post('/bookings/:id/confirmation', requireRole('manager', 'counter'), async (req, res) => {
+router.post('/bookings/:id/confirmation', SA.school('supervisor', 'counter'), async (req, res) => {
   const b = await one(pool, 'SELECT id FROM lesson_bookings WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, paramId(req)]);
   if (!b) throw notFound('Booking');
   const out = await sendConfirmation(pool, req.auth.tenantId, b.id, baseUrl(req), { force: true });
@@ -255,21 +256,21 @@ const LC = require('../lib/lessoncancel');
 const reasonSchema = z.object({ reason: z.string().trim().min(3, 'Say why the lesson is canceled').max(300) });
 
 /** What canceling one lesson would do: bookings, package lessons and online payments on it. */
-router.get('/sessions/:id/cancel-preview', requireRole('manager'), async (req, res) => {
+router.get('/sessions/:id/cancel-preview', SA.school('director'), async (req, res) => {
   const [s] = await LC.preview(req.auth.tenantId, 's.id = ?', [paramId(req)]);
   if (!s) throw notFound('Lesson');
   res.json(s);
 });
-router.post('/sessions/:id/cancel', requireRole('manager'), validate(reasonSchema), async (req, res) => {
+router.post('/sessions/:id/cancel', SA.school('director'), validate(reasonSchema), async (req, res) => {
   res.json(await LC.cancelSession(req.auth.tenantId, paramId(req), req.body.reason, req));
 });
-router.delete('/sessions/:id', requireRole('manager'), async (req, res) => {
+router.delete('/sessions/:id', SA.school('director'), async (req, res) => {
   await LC.deleteSession(req.auth.tenantId, paramId(req), req);
   res.json({ ok: true });
 });
 
 /** A storm day: every lesson from one date to another. preview: true lists them; otherwise each is canceled in turn. */
-router.post('/sessions/cancel-days', requireRole('manager'), validate(reasonSchema.extend({
+router.post('/sessions/cancel-days', SA.school('director'), validate(reasonSchema.extend({
   from: dateStr, to: dateStr, preview: z.boolean().optional(),
 })), async (req, res) => {
   const { from, to } = req.body;
@@ -288,7 +289,7 @@ router.patch('/bookings/:id', requireRole(...school), validate(z.object({ status
     const b = await one(conn, 'SELECT b.id, b.status, b.credit_id, b.session_id, s.instructor_id FROM lesson_bookings b JOIN lesson_sessions s ON s.tenant_id = b.tenant_id AND s.id = b.session_id WHERE b.tenant_id = ? AND b.id = ? FOR UPDATE', [tenantId, paramId(req)]);
     if (!b) throw notFound('Booking');
     // An instructor marks attendance only on their own lessons (the desk and managers on any), and cannot cancel a booking.
-    if (req.auth.role === 'instructor' && (b.instructor_id !== req.auth.staffId || req.body.status === 'cancelled')) throw forbidden('Instructors can only mark attendance on their own lessons');
+    if (SA.ownOnly(req) && (b.instructor_id !== req.auth.staffId || req.body.status === 'cancelled')) throw forbidden('Instructors can only mark attendance on their own lessons');
     // Bringing a canceled booking back takes a seat again: lock the lesson and check it still has one.
     if (b.status === 'cancelled' && req.body.status !== 'cancelled') {
       const s = await one(conn, 'SELECT capacity, status FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, b.session_id]);
@@ -313,7 +314,7 @@ router.post('/sessions/:id/all-present', requireRole(...school), async (req, res
   const n = await tx(async (conn) => {
     const s = await one(conn, 'SELECT id, instructor_id FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, paramId(req)]);
     if (!s) throw notFound('Lesson session');
-    if (req.auth.role === 'instructor' && s.instructor_id !== req.auth.staffId) throw forbidden('Instructors can only mark attendance on their own lessons');
+    if (SA.ownOnly(req) && s.instructor_id !== req.auth.staffId) throw forbidden('Instructors can only mark attendance on their own lessons');
     const [r] = await conn.query("UPDATE lesson_bookings SET status = 'attended' WHERE tenant_id = ? AND session_id = ? AND status = 'booked'", [tenantId, s.id]);
     await audit(conn, req, 'all_present', 'lesson_sessions', s.id, { marked: r.affectedRows });
     return r.affectedRows;
@@ -322,7 +323,7 @@ router.post('/sessions/:id/all-present', requireRole(...school), async (req, res
 });
 
 /** Can this signed-in person see the children's details on this lesson? The desk, managers, and its own instructor. */
-const seesDetails = (req, s) => req.auth.role !== 'instructor' || (s && s.instructor_id === req.auth.staffId);
+const seesDetails = (req, s) => !SA.ownOnly(req) || (s && s.instructor_id === req.auth.staffId);
 const DETAIL_KEYS = ['allergies', 'medical', 'pickup', 'contact_name', 'contact_phone', 'contact_email'];
 
 router.get('/sessions/:id/roster', requireRole(...school), async (req, res) => {
@@ -442,7 +443,7 @@ async function myItems(tenantId, staffId, from, to, withRoster) {
 /** Whose day: your own, or (managers) the instructor named by staff_id. */
 function whose(req) {
   const asked = Number(req.query.staff_id) || null;
-  if (asked && asked !== req.auth.staffId && req.auth.role === 'instructor') throw forbidden('You can only see your own day');
+  if (asked && asked !== req.auth.staffId && SA.ownOnly(req)) throw forbidden('You can only see your own day');
   const id = asked || req.auth.staffId;
   if (!id) throw bad('Your login is not linked to a staff record yet. Ask a manager to link it in Account.');
   return id;

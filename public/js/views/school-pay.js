@@ -7,7 +7,7 @@
 // Settings, Ski school: Pay (how the school pays), Pay rates, Privates online (the lengths sold on /private/<mountain>).
 // payLine(lesson) and myDayTop(panel) are used by the instructor's My day (school-myday.js).
 import { get, post, patch, del, download } from '../api.js';
-import { h, clear, ctx, can, isManager, table, state, input, select, field, button, toast, formDialog, dialog, val, money, toCents, centsToInput,
+import { h, clear, ctx, can, schoolCan, table, state, input, select, field, button, toast, formDialog, dialog, val, money, toCents, centsToInput,
   todayStr, addDays, weekStart, fmtDate, fmtTime, fmtRange, label, empty, errorBox, loading, confirmDialog, fail, appendAll } from '../ui.js';
 
 const KINDS = [['group', 'Group lesson'], ['semi_private', 'Semi-private'], ['private', 'Private'], ['hourly', 'Hourly'], ['program', 'Program meeting']];
@@ -27,9 +27,9 @@ export const payWords = (p) => (p.parts && p.parts.length > 1 ? `${money(p.cents
 export function tabs(_ctx) {
   const out = [];
   if (can('instructor', 'counter')) out.push(['privates', 'Privates', (panel) => privatesTab(panel)]);
-  if (can('instructor')) out.push(['mypay', isManager() ? 'Instructor pay' : 'My pay', (panel) => myPayTab(panel)]);
-  if (can('instructor')) out.push(['guests', isManager() ? 'Rebook guests' : 'My guests', (panel) => guestsTab(panel)]);
-  if (isManager()) out.push(['payroll', 'Payroll', (panel) => payrollTab(panel)]);
+  if (can('instructor')) out.push(['mypay', schoolCan('director') ? 'Instructor pay' : 'My pay', (panel) => myPayTab(panel)]);
+  if (can('instructor')) out.push(['guests', schoolCan('director') ? 'Rebook guests' : 'My guests', (panel) => guestsTab(panel)]);
+  if (schoolCan('director')) out.push(['payroll', 'Payroll', (panel) => payrollTab(panel)]);
   return out;
 }
 
@@ -153,13 +153,13 @@ async function allRequests(root) {
           r.staff_note ? h('div', { class: 'muted small' }, r.staff_note) : null) },
         { head: '', actions: true, cell: (r) => (['waiting', 'offered'].includes(r.status) ? [
           button('Assign', () => assignDialog(r), { small: true, label: `Assign the private for ${r.students[0].first_name}` }),
-          isManager() ? button('Refund', () => confirmDialog('Cancel and refund this request?', `${r.contact_name} gets ${r.pay_at_desk ? 'an email that it is canceled' : `${money(r.amount_cents)} back in full`}.`, 'Cancel and refund', async () => { await post(`/skischool/pay/requests/${r.id}/refund`, {}); toast('Canceled'); await load(); }, { danger: true }), { small: true }) : null,
+          schoolCan('director') ? button('Refund', () => confirmDialog('Cancel and refund this request?', `${r.contact_name} gets ${r.pay_at_desk ? 'an email that it is canceled' : `${money(r.amount_cents)} back in full`}.`, 'Cancel and refund', async () => { await post(`/skischool/pay/requests/${r.id}/refund`, {}); toast('Canceled'); await load(); }, { danger: true }), { small: true }) : null,
         ] : null) },
       ], requests, { rowClass: (r) => (r.status === 'waiting' && r.deadline_at && minutesLeft(r.deadline_at) < 30 ? 'attention' : null) }) : empty(which.value === 'open' ? 'No private requests are waiting.' : 'No private requests yet.'));
     } catch (err) { clear(body).append(errorBox(err)); }
   }
   async function assignDialog(r) {
-    if (!staff) staff = isManager() ? (await get('/skischool/pay/rates')).instructors : (await get('/availability/instructors')).data;
+    if (!staff) staff = schoolCan('director') ? (await get('/skischool/pay/rates')).instructors : (await get('/availability/instructors')).data;
     const pick = select([['', 'Choose an instructor'], ...staff.map((s) => [s.id, s.name])], '', { name: 'staff_id', required: true });
     formDialog('Give this private to an instructor', h('div', { class: 'stack' },
       h('p', null, `${fmtRange(r.starts_at, r.ends_at)}, ${r.students.map((s) => s.first_name).join(' and ')}, ${r.level_words}.`),
@@ -174,7 +174,7 @@ async function allRequests(root) {
 
 // ================================================================ My pay
 async function pickInstructor(root, onPick) {
-  if (!isManager()) return myStaff();
+  if (!schoolCan('director')) return myStaff();
   const { instructors } = await get('/skischool/pay/rates');
   const sel = select([['', 'Choose an instructor'], ...instructors.map((s) => [s.id, s.name])], myStaff() || '', { 'aria-label': 'Instructor' });
   sel.addEventListener('change', () => onPick(sel.value ? Number(sel.value) : null));
@@ -193,10 +193,10 @@ async function myPayTab(root) {
       h('strong', { class: 'pay-week-name' }, `${fmtDate(week)} to ${fmtDate(addDays(week, 6))}`),
       h('span', { class: 'row' }, button('Previous', () => { week = addDays(week, -7); load(); }, { small: true, label: 'Previous week' }),
         button('Next', () => { week = addDays(week, 7); load(); }, { small: true, label: 'Next week' })));
-    if (!staffId) { clear(body).append(empty(isManager() ? 'Choose an instructor to see their pay.' : 'Your login is not linked to a staff record yet. Ask a manager to link it.')); return; }
+    if (!staffId) { clear(body).append(empty(schoolCan('director') ? 'Choose an instructor to see their pay.' : 'Your login is not linked to a staff record yet. Ask a manager to link it.')); return; }
     clear(body).append(loading());
     try {
-      const d = await get(`/skischool/pay/mine?from=${week}&to=${addDays(week, 6)}${isManager() ? `&staff_id=${staffId}` : ''}`);
+      const d = await get(`/skischool/pay/mine?from=${week}&to=${addDays(week, 6)}${schoolCan('director') ? `&staff_id=${staffId}` : ''}`);
       const pay = d.lines.filter((l) => !l.tip);
       const tips = d.lines.filter((l) => l.tip);
       appendAll(clear(body),
@@ -243,17 +243,17 @@ async function guestsTab(root) {
   root.append(h('p', { class: 'muted' }, 'Families you taught a private for, or who asked for you. Offer them another time: they get an email (and a text if they said yes) with a link to book you.'), body);
   let offers = null;
   async function load() {
-    if (!staffId) { clear(body).append(empty(isManager() ? 'Choose an instructor.' : 'Your login is not linked to a staff record yet. Ask a manager to link it.')); return; }
+    if (!staffId) { clear(body).append(empty(schoolCan('director') ? 'Choose an instructor.' : 'Your login is not linked to a staff record yet. Ask a manager to link it.')); return; }
     clear(body).append(loading());
     try {
-      const { guests } = await get(`/skischool/pay/guests${isManager() ? `?staff_id=${staffId}` : ''}`);
+      const { guests } = await get(`/skischool/pay/guests${schoolCan('director') ? `?staff_id=${staffId}` : ''}`);
       clear(body).append(guests.length ? table([
         { head: 'Guest', cell: (g) => h('span', null, h('strong', null, `${g.first_name} ${g.last_name}`), g.level_words ? h('div', { class: 'muted small' }, g.level_words) : null) },
         { head: 'Last lesson', cell: (g) => h('span', null, fmtDate(g.last_at), h('div', { class: 'muted small' }, plural(Number(g.lessons), 'lesson'))) },
         { head: 'Next', cell: (g) => (g.next_at ? state(`Booked ${fmtDate(g.next_at)}`, 'good') : h('span', { class: 'muted' }, 'Nothing booked')) },
         { head: '', actions: true, cell: (g) => [
           g.reachable ? button('Offer a time', () => offerDialog(g), { small: true, label: `Offer ${g.first_name} another lesson` }) : h('span', { class: 'muted small' }, 'No email on file'),
-          isManager() ? button('Book', () => bookDialog(g), { small: true, label: `Book ${g.first_name} a private` }) : null,
+          schoolCan('director') ? button('Book', () => bookDialog(g), { small: true, label: `Book ${g.first_name} a private` }) : null,
         ] },
       ], guests) : empty('No private guests yet. They show here after their lesson.'));
     } catch (err) { clear(body).append(errorBox(err)); }
@@ -261,7 +261,7 @@ async function guestsTab(root) {
   function offerDialog(g) {
     const msg = h('textarea', { name: 'message', rows: 3, maxlength: 500, placeholder: `For example: ${g.first_name} was linking turns by the end. Let us try the blue runs next.` });
     formDialog(`Offer ${g.first_name} another lesson`, h('div', { class: 'stack' }, field('A note from you (optional)', msg, 'Your open dates are on the link. Keep them up to date in Availability.')), async (fd) => {
-      await post(`/skischool/pay/guests/${g.person_id}/offer`, { message: val(fd, 'message') || undefined, ...(isManager() ? { staff_id: staffId } : {}) });
+      await post(`/skischool/pay/guests/${g.person_id}/offer`, { message: val(fd, 'message') || undefined, ...(schoolCan('director') ? { staff_id: staffId } : {}) });
       toast('Sent');
     }, { submitText: 'Send' });
   }

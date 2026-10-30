@@ -6,7 +6,7 @@
 // instructor taps Approve and send. Waitlist: the families waiting for full lessons, for the desk. Families settings:
 // recaps, photos, tips, the waitlist hold, next-step offers, and the lift ticket and rental each lesson offers online.
 import { get, post, put, patch, del, config, session } from '../api.js';
-import { h, clear, ctx, can, isManager, button, toast, fail, errorBox, empty, fmtDate, fmtTime, fmtDateTime, select, input, field, confirmDialog, state } from '../ui.js';
+import { h, clear, ctx, can, isManager, schoolCan, button, toast, fail, errorBox, empty, fmtDate, fmtTime, fmtDateTime, select, input, field, confirmDialog, state } from '../ui.js';
 import { levelOptions, levelName } from '../levels.js';
 import { card, row, toggle, amount } from './settings-kit.js';
 
@@ -15,7 +15,7 @@ const teaches = () => isManager() || (ctx.me && ctx.me.role === 'instructor');
 export function tabs(_ctx) {
   const out = [];
   if (teaches()) out.push(['recaps', 'Recaps', (panel) => recapsTab(panel)]);
-  if (can('counter')) out.push(['waitlist', 'Waitlist', (panel) => waitlistTab(panel)]);
+  if ((can('counter') || schoolCan('supervisor'))) out.push(['waitlist', 'Waitlist', (panel) => waitlistTab(panel)]);
   return out;
 }
 
@@ -167,13 +167,13 @@ function waitingList(sessionId, list, reload) {
     h('span', null, h('strong', null, w.student), w.level ? h('span', { class: 'muted small' }, ` · Level ${w.level}`) : null, h('br'),
       h('span', { class: 'small' }, `${w.contact_name} · `, h('a', { href: `mailto:${w.contact_email}` }, w.contact_email), w.contact_phone ? ` · ${w.contact_phone}` : '')),
     h('span', { class: 'row' }, w.status === 'offered' ? state(`Offered, ${w.minutes_left} min left`, 'warn') : state('Waiting', 'neutral'),
-      can('counter') ? button('Remove', () => confirmDialog('Take them off the waitlist?', `${w.student} (${w.contact_name})`, 'Remove', async () => { await del(`/skischool/waitlist/${w.id}`); await reload(); }), { small: true }) : null))));
+      (can('counter') || schoolCan('supervisor')) ? button('Remove', () => confirmDialog('Take them off the waitlist?', `${w.student} (${w.contact_name})`, 'Remove', async () => { await del(`/skischool/waitlist/${w.id}`); await reload(); }), { small: true }) : null))));
 }
 
 /** The waitlist for one lesson, for a roster (CORE's lesson dialog can show it): an element, empty when nobody waits. */
 export async function waitlistBlock(sessionId) {
   const box = h('div', { class: 'stack waitlist-block' });
-  if (!can('counter')) return box;
+  if (!(can('counter') || schoolCan('supervisor'))) return box;
   const load = async () => {
     try {
       const { data } = await get(`/skischool/sessions/${sessionId}/waitlist`);

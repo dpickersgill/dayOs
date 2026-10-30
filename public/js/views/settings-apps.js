@@ -49,6 +49,7 @@ async function sectionsFor(page, who) {
   const out = [];
   for (const [file, mod] of SOURCES[page] || []) {
     if (!moduleOn(mod)) continue;
+    if (who.schoolDirector && !who.manager && file !== 'school') continue; // a ski school director: the school's own sections (2026.11.9)
     const secs = await sectionsOf(file);
     for (const [key, sec] of Object.entries(secs)) if (sec && typeof sec.render === 'function' && allowed(sec, who)) out.push([file, key, sec]);
   }
@@ -65,7 +66,7 @@ export async function renderSettingsPage(root, page, who) {
   const t = OWN.includes(page) && who.manager ? await get('/tenant/profile') : null;
   if (page === 'sell') sellCards(root, t);
   if (page === 'shop') await shopCards(root, t);
-  if (page === 'school') schoolCards(root, t);
+  if (page === 'school' && t) schoolCards(root, t); // t: owners and managers (a ski school director sees the school's own sections only)
   const secs = await sectionsFor(page, who);
   const ownBar = root.querySelector('.set-savebar');
   for (const [file, key, sec] of secs) {

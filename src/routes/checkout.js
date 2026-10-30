@@ -36,6 +36,21 @@ const WIN = require('../lib/windowsale');
 const checkout = express.Router();
 const giftCards = express.Router();
 const sellers = ['counter', 'manager'];
+// A ski school director (2026.11.9, lib/schoolaccess.js) sells lessons, lesson packages and gift cards at the window, and
+// nothing else: their Sell menu holds only those, and a sale or quote with anything else is refused.
+const SA = require('../lib/schoolaccess');
+const LESSON_LINES = ['lesson', 'lesson_package', 'gift_card'];
+const lessonSale = SA.directorFor(sellers, async (req) => {
+  const lines = req.body && Array.isArray(req.body.lines) ? req.body.lines : [];
+  return Boolean(lines.length) && !req.body.quick && lines.every((l) => l && LESSON_LINES.includes(l.type));
+}, 'A ski school director can sell lessons, lesson packages and gift cards only');
+const lessonMenu = [SA.directorFor(sellers, async () => true), (req, res, next) => {
+  if (SA.isSchoolDirector(req)) {
+    const send = res.json.bind(res);
+    res.json = (b) => send({ ...b, activities: [], tickets: [], rentals: [], programs: [], partner_programs: [], quick_sale: { ...b.quick_sale, allowed: false }, lessons_only: true });
+  }
+  next();
+}];
 
 const TICKET_KINDS = ['day_ticket', 'multi_day', 'season_pass', 'punch_card', 'voucher'];
 const GIFT_MIN = 500; // $5.00
@@ -263,7 +278,7 @@ const describe = (p) => ({ index: p.i, type: p.type, name: p.name, detail: p.det
   ...(p.partner ? { partner: { program: p.partner.program.name, kind: p.partner.kind, percent: p.partner.percent, window_cents: p.windowCents, used: p.partner.used, free_days: p.partner.program.free_days, discount_days: p.partner.program.discount_days, history: p.partner.history.map((h) => String(h.on_date).slice(0, 10)) } } : {}) });
 
 // ---------------------------------------------------------------- menu
-checkout.get('/menu', requireRole(...sellers), async (req, res) => {
+checkout.get('/menu', ...lessonMenu, async (req, res) => {
   const { tenantId } = req.auth;
   const tenant = await one(pool, 'SELECT timezone, comp_counter_limit_cents, waiver_text, quick_sale FROM tenants WHERE id = ?', [tenantId]);
   const today = todayIn(tenant.timezone);
@@ -332,7 +347,7 @@ checkout.get('/activity-day', requireRole(...sellers), async (req, res) => {
 });
 
 // ---------------------------------------------------------------- quote
-checkout.post('/quote', requireRole(...sellers), validate(quoteSchema), async (req, res) => {
+checkout.post('/quote', lessonSale, validate(quoteSchema), async (req, res) => {
   const { tenantId } = req.auth;
   const tenant = await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId]);
   const today = todayIn(tenant.timezone);
@@ -811,7 +826,7 @@ async function runSale(conn, req, body, { check = false } = {}) {
   }
 }
 
-checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req, res) => {
+checkout.post('/', lessonSale, validate(checkoutSchema), async (req, res) => {
   const result = await tx((conn) => runSale(conn, req, req.body));
   if (result.program_adjustments && result.program_adjustments.length) await PP.afterPassBought(req.auth.tenantId, result.program_adjustments).catch(() => {});
   // each lesson booked gets its confirmation (lib/lessonconfirm.js), after the sale has committed
@@ -825,7 +840,7 @@ checkout.post('/', requireRole(...sellers), validate(checkoutSchema), async (req
  * asks this before taking any money (cash, or a card on the reader), so a guest is never paid up and then turned away.
  * Nothing is kept: not even a new customer's details, which are saved when the sale is made.
  */
-checkout.post('/check', requireRole(...sellers), validate(checkoutSchema), async (req, res) => {
+checkout.post('/check', lessonSale, validate(checkoutSchema), async (req, res) => {
   let out;
   try {
     await tx((conn) => runSale(conn, req, req.body, { check: true }));
@@ -844,7 +859,7 @@ giftCards.get('/', requireRole('manager'), async (req, res) => {
   res.json({ data: data.map(publicCard) });
 });
 
-giftCards.get('/:code', requireRole(...sellers), async (req, res) => {
+giftCards.get('/:code', SA.directorFor(sellers, async () => true), async (req, res) => {
   const card = await one(pool, 'SELECT * FROM gift_cards WHERE tenant_id = ? AND code = ?', [req.auth.tenantId, cleanCode(req.params.code)]);
   if (!card) throw notFound('Gift card');
   res.json(publicCard(card));

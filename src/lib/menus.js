@@ -73,10 +73,20 @@ function parse(raw) {
   return out;
 }
 
-/** The menu for someone with this role: null for owners, managers and anyone else who sees everything. */
-function menuFor(role, raw) {
+/**
+ * The menu for someone with this role: null for owners, managers and anyone else who sees everything. schoolAccess: an
+ * instructor login's ski school level (lib/schoolaccess.js); a Director also gets Sell (lessons only) and Products and
+ * prices (lesson products only) right after Ski school.
+ */
+function menuFor(role, raw, schoolAccess = null) {
   if (!ROLE_APPS[role]) return null;
-  return parse(raw)[role] || standardFor(role);
+  const menu = parse(raw)[role] || standardFor(role);
+  if (role === 'instructor' && schoolAccess === 'director') {
+    const extra = ['sell', 'catalog'].filter((k) => !menu.apps.includes(k));
+    const at = menu.apps.includes('school') ? menu.apps.indexOf('school') + 1 : 0;
+    menu.apps.splice(at, 0, ...extra);
+  }
+  return menu;
 }
 
 module.exports = { APPS, KEYS, ALWAYS, ROLE_APPS, ROLES, STANDARD, standardFor, withAlways, check, parse, menuFor };
