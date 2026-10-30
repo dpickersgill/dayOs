@@ -94,6 +94,8 @@ async function afterConfirm(conn, tenantId, students, session, booked, contact) 
       await conn.query(`UPDATE people SET ${col} = ?, level_source = 'quiz', level_set_at = NOW() WHERE tenant_id = ? AND id = ? AND (${col} IS NULL OR level_source IS NULL OR level_source IN ('quiz','import'))`, [level, tenantId, b.person_id]);
     }
     if (st.text_ok) await require('./consent').recordConsent(conn, tenantId, b.person_id, 'sms', 'opted_in', 'online', null).catch(() => {});
+    // 2026.11.9 (Track GUEST): the level the placement questions point to, for the lineup when the student has no level yet.
+    if (L.valid(Number(st.placement_level))) await conn.query('UPDATE lesson_bookings SET placement_level = ?, placement_answers = ? WHERE tenant_id = ? AND id = ?', [Number(st.placement_level), String(st.placement_answers || '').slice(0, 400) || null, tenantId, b.booking_id]);
   }
 }
 

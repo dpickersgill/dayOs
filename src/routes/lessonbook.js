@@ -23,6 +23,7 @@ const L = require('../lib/levels');
 const F = require('../lib/lessonfamily');
 const B = require('../lib/lessonbasket');
 const S = require('../lib/schoolsettings');
+const P = require('../lib/placement');
 const { textsOn } = require('../lib/familynotify');
 
 const router = express.Router();
@@ -49,29 +50,38 @@ function inHours(tz, hours) {
   return d.toISOString().slice(0, 19).replace('T', ' ');
 }
 
-router.get('/:slug/booking', async (req, res) => {
-  const t = await tenantFor(req.params.slug);
+/**
+ * The open lessons for the booking page, shaped for guests (no private data): each with its spots left after bookings,
+ * requests waiting and waitlist offers. A pool (kind 'pool') is a time guests book; the lineup splits it into classes by
+ * level, so it fits every level unless the plan set a range. extraWhere and params narrow the list.
+ */
+async function guestLessons(t, extraWhere = '', params = []) {
   const today = todayIn(t.timezone);
   const earliest = inHours(t.timezone, t.booking_notice_hours);
   const sessions = await rows(pool,
-    `SELECT s.id, s.starts_at, s.ends_at, s.discipline, s.ability_level, s.format, s.age_group, s.meeting_place, s.capacity, s.level_min, s.level_max, s.age_min, s.age_max, pr.id AS product_id, pr.name AS product, pr.base_price_cents,
+    `SELECT s.id, s.starts_at, s.ends_at, s.discipline, s.ability_level, s.format, s.age_group, s.meeting_place, s.capacity, s.level_min, s.level_max, s.age_min, s.age_max, s.kind, pr.id AS product_id, pr.name AS product, pr.base_price_cents,
        (SELECT COUNT(*) FROM lesson_bookings b WHERE b.tenant_id = s.tenant_id AND b.session_id = s.id AND b.status IN ('booked','attended')) AS booked
      FROM lesson_sessions s JOIN products pr ON pr.id = s.product_id AND pr.tenant_id = s.tenant_id
-     WHERE s.tenant_id = ? AND s.status = 'scheduled' AND pr.active = 1 AND s.starts_at >= ? AND DATE(s.starts_at) <= ? ORDER BY s.starts_at LIMIT 300`,
-    [t.id, earliest, addDays(today, 45)]);
+     WHERE s.tenant_id = ? AND s.status = 'scheduled' AND pr.active = 1 AND s.starts_at >= ? AND DATE(s.starts_at) <= ?${extraWhere} ORDER BY s.starts_at LIMIT 300`,
+    [t.id, earliest, addDays(today, 45), ...params]);
   // Spots held: requests waiting to be confirmed or paid, and waitlist offers not yet claimed.
   const held = await F.heldSpots(pool, t.id);
   const tiers = await rows(pool, 'SELECT product_id, tier, price_cents FROM price_tiers WHERE tenant_id = ?', [t.id]);
   const extras = await F.productExtras(pool, t.id);
-  const set = await S.get(pool, t.id);
-  const shape = (s) => ({
-    id: s.id, starts_at: s.starts_at, ends_at: s.ends_at, product: s.product, discipline: s.discipline, ability_level: s.ability_level, format: s.format, age_group: s.age_group, meeting_place: s.meeting_place,
+  return sessions.map((s) => ({
+    id: s.id, starts_at: s.starts_at, ends_at: s.ends_at, product: s.product, product_id: s.product_id, discipline: s.discipline, ability_level: s.ability_level, format: s.format, age_group: s.age_group, meeting_place: s.meeting_place,
+    pool: s.kind === 'pool', // 2026.11.9 (Track GUEST): a pool is booked as a time; the lineup places each student in a class
     level_min: s.level_min, level_max: s.level_max, level_words: L.range(s.level_min, s.level_max), age_min: s.age_min, age_max: s.age_max, ages: F.agesWords(s.age_min, s.age_max),
     offers_ticket: Boolean((extras.get(Number(s.product_id)) || {}).ticket_product_id), offers_rental: Boolean((extras.get(Number(s.product_id)) || {}).rental_product_id),
     price_cents: s.base_price_cents, prices: tiers.filter((x) => x.product_id === s.product_id).map((x) => ({ tier: x.tier, price_cents: x.price_cents })),
     spots_left: Math.max(s.capacity - Number(s.booked) - (held.get(Number(s.id)) || 0), 0),
-  });
-  const all = sessions.map(shape);
+  }));
+}
+
+router.get('/:slug/booking', async (req, res) => {
+  const t = await tenantFor(req.params.slug);
+  const set = await S.get(pool, t.id);
+  const all = await guestLessons(t);
   res.set('Cache-Control', 'no-store');
   res.json({
     // Family booking (2026.11.5): the waitlist for full lessons, the consents asked, the guest assistant only when it is on.
@@ -79,9 +89,41 @@ router.get('/:slug/booking', async (req, res) => {
     texts_available: await textsOn(t.id), photos_asked: Boolean(set.recap_photos), assistant: await assistantOn(t.id),
     guest_types: (await require('../lib/guesttypes').list(pool, t.id, { visibleOnly: true })).map((g) => ({ code: g.code, name: g.name })),
     mountain: t.name, phone: t.phone, message: t.booking_message, notice_hours: t.booking_notice_hours, cancel_hours: t.cancel_hours, waiver_text: t.waiver_text, pay_online: t.pay_online, policy: policyText(t), policy_tiers: policyTiers(t), policy_notes: policyNotes(t),
+    placement: P.publicShape(P.questionsFrom(set)), // 2026.11.9: three questions per discipline that place a student on the level scale
     lessons: all.filter((s) => s.spots_left > 0),
   });
 });
+
+/**
+ * A full lesson the guest wanted (2026.11.9, Track GUEST): the next times with room for the same lesson product and age
+ * band, the same day first and then the next 7 days, and whether the full one has a waitlist. Each look at a full lesson is
+ * noted for the director's demand view (lib/lessondemand.js, Track STAFF).
+ */
+router.get('/:slug/booking/next/:id', async (req, res) => {
+  const t = await tenantFor(req.params.slug);
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) throw notFound('Lesson');
+  const s = await one(pool, "SELECT id, product_id, format, age_min, age_max, starts_at, capacity FROM lesson_sessions WHERE tenant_id = ? AND id = ? AND status = 'scheduled'", [t.id, id]);
+  if (!s) throw notFound('Lesson');
+  const day = String(s.starts_at).slice(0, 10);
+  const list = await guestLessons(t, ' AND s.product_id = ? AND s.age_min <=> ? AND s.age_max <=> ? AND DATE(s.starts_at) BETWEEN ? AND ?', [s.product_id, s.age_min, s.age_max, day, addDays(day, 7)]);
+  const me = list.find((x) => x.id === id);
+  const full = me ? me.spots_left <= 0 : true;
+  if (full) await noteFull(t.id, id);
+  const next = list.filter((x) => x.id !== id && x.spots_left > 0)
+    .sort((a, b) => (String(a.starts_at).slice(0, 10) === day ? 0 : 1) - (String(b.starts_at).slice(0, 10) === day ? 0 : 1) || String(a.starts_at).localeCompare(String(b.starts_at)))
+    .slice(0, 6);
+  res.set('Cache-Control', 'no-store');
+  res.json({ session_id: id, full, waitlist: full && s.format === 'group', next });
+});
+
+/** Tells the demand view a guest found this lesson full. Track STAFF provides lessondemand.noteFull; until then nothing. Never throws. */
+async function noteFull(tenantId, sessionId) {
+  try {
+    const D = require('../lib/lessondemand');
+    if (D && typeof D.noteFull === 'function') await D.noteFull(pool, tenantId, sessionId);
+  } catch (_) { /* the demand note is a nice-to-have; the guest still sees the next times */ }
+}
 
 /** Is the guest assistant on for the booking page? (Assistant Plus and the page chosen.) The page only loads it then. */
 async function assistantOn(tenantId) {

@@ -6,6 +6,7 @@ import { typeName } from '../guesttypes.js';
 import { get, post } from '../api.js';
 import { h, clear, ctx, money, toCents, centsToInput, state, input, select, field, button, toast, dialog, label, errorBox, fmtDateTime, fmtTime, appendAll } from '../ui.js';
 import { safetyFields } from './lesson-safety.js';
+import { levelName } from '../levels.js';
 import { customerCapture } from './customer-form.js';
 import { printButtons } from '../print.js';
 
@@ -137,7 +138,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
         extra.push(h('label', { class: 'check limits-ok' }, cb, h('span', null, ' ', who, ' meets the limits', h('small', { class: 'muted' }, ` ${l.attraction.limits_text}`))));
       }
       whoBox.append(h('div', { class: `who-row${needsLimits(s) ? ' who-limits' : ''}` }, h('div', null, h('strong', null, s.text), h('small', { class: 'muted' }, ` ${l.detail || ''}`)), sel, ...extra));
-      if (l.type === 'lesson') whoBox.append(safety.get(s).box);
+      if (l.type === 'lesson') whoBox.append(safety.get(s).box, placementFor(s));
     }
     whoBox.append(button('Someone else is taking part', () => addPerson(), { small: true }));
     renameRiders();
@@ -162,6 +163,37 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       get(`/skischool/lesson-safety/${person.id}`).then((r) => x.f.fill(r.safety || {})).catch(() => {});
     }
   }
+  // ---- "Ask 3 questions" (2026.11.9, Track GUEST): the placement questions for a student with no level yet. The answers
+  // go with the lesson line; the lineup uses the level they point to when it splits the lesson into classes.
+  const placement = new Map(); // slot -> [true|false, ...]
+  let questionsP = null;
+  const placementQs = () => { if (!questionsP) questionsP = get('/skischool/placement').then((r) => r.questions).catch(() => { questionsP = null; return null; }); return questionsP; };
+  const placedLevel = (qs, answers) => { for (let i = 0; i < qs.length; i++) { if (typeof answers[i] !== 'boolean') return null; const to = answers[i] ? qs[i].yes : qs[i].no; if (to) return to; } return null; };
+  function placementFor(s) {
+    const disc = s.line.discipline;
+    if (!['ski', 'snowboard'].includes(disc)) return null;
+    const box = h('div', { class: 'sell-placement', 'data-placement': '' });
+    const draw = async () => {
+      const answers = placement.get(s);
+      if (!answers) { clear(box).append(button('Ask 3 questions', () => { placement.set(s, []); draw(); }, { small: true, label: `Ask the 3 level questions for ${s.text}` }), h('small', { class: 'muted' }, ' to place a student with no level yet')); return; }
+      const qs = ((await placementQs()) || {})[disc] || [];
+      clear(box).append(h('strong', null, 'Level questions'));
+      for (let i = 0; i < qs.length; i++) {
+        const a = answers[i];
+        const set = (v) => { placement.set(s, [...answers.slice(0, i), v]); draw(); };
+        const yes = button('Yes', () => set(true), { small: true, kind: a === true ? 'primary' : null }); yes.setAttribute('aria-pressed', String(a === true));
+        const no = button('No', () => set(false), { small: true, kind: a === false ? 'primary' : null }); no.setAttribute('aria-pressed', String(a === false));
+        box.append(h('div', { class: 'sp-q', role: 'group', 'aria-label': qs[i].text }, h('span', null, qs[i].text), yes, no));
+        if (typeof a !== 'boolean' || (a ? qs[i].yes : qs[i].no)) break;
+      }
+      const lv = placedLevel(qs, answers);
+      box.append(h('div', { class: 'row', role: 'status' }, lv ? state(levelName(lv, disc), 'good') : null, button(lv ? 'Clear' : 'Skip', () => { placement.delete(s); draw(); }, { small: true, kind: 'link' })));
+    };
+    draw();
+    return box;
+  }
+  const placementAnswers = (slot) => { const a = placement.get(slot); return a && a.length ? a : undefined; };
+
   /** The rider's name beside each limits box, kept up to date as names are typed. */
   const riderEls = new Map();
   function renameRiders() {
@@ -498,7 +530,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
         return lineApi(l, null, keys);
       }
       const mine = slots.filter((s) => s.line === l);
-      if (l.type === 'lesson' && mine.length && safety.has(mine[0])) { const v = safety.get(mine[0]).f.value(); l.safety = Object.keys(v).length ? v : undefined; }
+      if (l.type === 'lesson' && mine.length && safety.has(mine[0])) { const v = { ...safety.get(mine[0]).f.value(), placement: placementAnswers(mine[0]) }; if (!v.placement) delete v.placement; l.safety = Object.keys(v).length ? v : undefined; }
       if (l.type === 'ticket') return lineApi(l, null, mine.map((s) => assign.get(s)));
       const who = mine.length ? assign.get(mine[0]) : null;
       return lineApi(l, who && who !== 'customer' ? who : null, null, mine.length ? limitsOk.get(mine[0]) : false);

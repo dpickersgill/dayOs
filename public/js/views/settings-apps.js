@@ -12,7 +12,7 @@ import { card, row, toggle, amount, linkRow, formTracker, nothingHere } from './
 const SOURCES = {
   sell: [['gate', 'gate'], ['partners', 'sell'], ['guest-rewards', 'sell'], ['guest-fair', 'sell']],
   shop: [['shop', 'shop']],
-  school: [['school', 'school'], ['availability', 'availability']],
+  school: [['school', 'school'], ['school-guest', 'school'], ['availability', 'availability']], // school-guest: 2026.11.9, Track GUEST
   programs: [['programs', 'programs']],
   rentals: [['rentals', 'rentals']],
   attractions: [['attractions', 'conditions']],

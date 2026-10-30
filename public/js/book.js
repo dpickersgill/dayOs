@@ -6,7 +6,7 @@
 import './stage.js';
 import { mountGuestAssistant } from './guest-assistant.js'; // the staging band (shows only on staging)
 import { h, clear } from './ui.js';
-import { levelOptions, levelName } from './levels.js';
+import { levelOptions, levelName, levelList } from './levels.js';
 import { quizPanel, rememberedLevel, rememberLevel } from './levelpicker.js';
 
 const slug = decodeURIComponent(location.pathname.split('/').filter(Boolean)[1] || '');
@@ -24,6 +24,7 @@ async function call(method, path, body) {
 
 const ES = {"From": "Desde", "Only": "Solo", "left": "disponibles", "Total": "Total", "Includes": "Incluye", "tax": "de impuestos", "Student": "Alumno", "Meet at:": "Punto de encuentro:", "Ages:": "Edades:", "All lessons": "Todas las clases", "Already booked?": "¿Ya reservaste?", "Anyone under 18 must be booked by a parent or guardian.": "Los menores de 18 deben ser reservados por un padre o tutor.", "Anything we should know? (optional)": "¿Algo que debamos saber? (opcional)", "Before you pay": "Antes de pagar", "Before you send": "Antes de enviar", "Book another lesson": "Reservar otra clase", "Boot size": "Talla de bota", "Cancel and refund under the policy": "Cancelar y reembolsar según la política", "Cancel this request": "Cancelar esta solicitud", "Cancellation policy": "Política de cancelación", "Canceled": "Cancelada", "Canceled. This was inside the no-refund window, so nothing is refunded.": "Cancelada. Fue dentro del plazo sin reembolso, así que no se reembolsa nada.", "Choose a day": "Elige un día", "Choose a lesson": "Elige una clase", "Confirmed. Pay at the ski school desk": "Confirmada. Paga en el mostrador de la escuela de esquí", "Confirming your payment…": "Confirmando tu pago…", "Continue to payment": "Continuar al pago", "Date of birth": "Fecha de nacimiento", "Email you used": "El correo que usaste", "Fears, injuries, goals, or who they would like to ski with.": "Miedos, lesiones, metas o con quién le gustaría esquiar.", "Find my booking": "Buscar mi reserva", "Find your booking with the reference we gave you and your email. You can cancel from here too.": "Busca tu reserva con la referencia que te dimos y tu correo. También puedes cancelar desde aquí.", "First name": "Nombre", "Good to know": "Bueno saber", "Height (inches)": "Estatura (pulgadas)", "I have read and accept the cancellation policy.": "He leído y acepto la política de cancelación.", "I have read and accept the waiver, for myself and for each student named above who is under 18.": "He leído y acepto la exención, por mí y por cada alumno menor de 18 nombrado arriba.", "Keep this reference. You can look up or cancel your booking at the bottom of this page.": "Guarda esta referencia. Puedes consultar o cancelar tu reserva al final de esta página.", "Keep your reference and email to check or cancel your request below.": "Guarda tu referencia y correo para consultar o cancelar tu solicitud abajo.", "Last name": "Apellido", "Last spot": "Último lugar", "Looking further ahead?": "¿Buscas más adelante?", "Need a hand?": "¿Necesitas ayuda?", "No tax added": "Sin impuestos", "Not booked": "No reservada", "Not completed (payment not taken)": "No completada (no se cobró)", "Not sure which lesson is right, or booking for a group? The ski school is happy to help.": "¿No sabes qué clase elegir o reservas para un grupo? La escuela de esquí te ayuda con gusto.", "Online booking is not available": "La reserva en línea no está disponible", "Paid and confirmed": "Pagada y confirmada", "Paid at the ski school desk": "Pagada en el mostrador de la escuela", "Pay at the ski school desk": "Paga en el mostrador de la escuela de esquí", "Payment was canceled, so nothing was booked. Pick a lesson to try again.": "El pago se canceló, así que no se reservó nada. Elige una clase para intentarlo de nuevo.", "Payments are handled by Stripe. We never see or store your card number.": "Los pagos los procesa Stripe. Nunca vemos ni guardamos tu número de tarjeta.", "Please accept the cancellation policy to continue.": "Acepta la política de cancelación para continuar.", "Please accept the waiver to continue.": "Acepta la exención para continuar.", "Please call or visit the ski school to book a lesson.": "Llama o visita la escuela de esquí para reservar una clase.", "Please fill in your name, email and phone number.": "Escribe tu nombre, correo y teléfono.", "Read the waiver": "Leer la exención", "Reference": "Referencia", "Request sent": "Solicitud enviada", "Secure card payment": "Pago seguro con tarjeta", "Send request": "Enviar solicitud", "Size details for gear (optional)": "Tallas para el equipo (opcional)", "Ski and snowboard lessons": "Clases de esquí y snowboard", "Snowboard": "Snowboard", "So the ski school can reach you if the lesson changes.": "Para que la escuela te contacte si la clase cambia.", "Something went wrong. Please try again or call the ski school.": "Algo salió mal. Inténtalo de nuevo o llama a la escuela de esquí.", "Taking you to the payment page…": "Llevándote a la página de pago…", "Thank you": "Gracias", "The ski school could not take this request": "La escuela de esquí no pudo aceptar esta solicitud", "Waiting for payment": "Esperando el pago", "Waiting for the ski school to confirm": "Esperando la confirmación de la escuela", "We could not find a booking with that reference and email.": "No encontramos una reserva con esa referencia y correo.", "We will show your total on the next step.": "Te mostraremos el total en el siguiente paso.", "Weight (pounds)": "Peso (libras)", "Who is booking?": "¿Quién reserva?", "You are booked": "Tu reserva está hecha", "Your details": "Tus datos", "Your reference is ": "Tu referencia es ", "Your reference is": "Tu referencia es", "Try again": "Intentar de nuevo", "We could not reach the mountain. Check your connection and try again.": "No pudimos conectar con la montaña. Revisa tu conexión e inténtalo de nuevo.", "Buy lift tickets online": "Compra boletos de remontes en línea",
   "Who is coming?": "¿Quién viene?", "Add someone": "Agregar a alguien", "Remove": "Quitar", "Ski": "Esquí", "Level": "Nivel", "Not sure? Find the level": "¿No sabes? Encuentra el nivel", "Pick a level, or find it with five quick questions.": "Elige un nivel o encuéntralo con cinco preguntas rápidas.", "Next: pick lessons": "Siguiente: elegir clases", "Pick a lesson for": "Elige una clase para", "Good fit": "Buena opción", "Not a fit": "No es para", "Show all lessons": "Mostrar todas las clases", "Show good fits only": "Mostrar solo buenas opciones", "Pick this lesson": "Elegir esta clase", "Picked": "Elegida", "Add a lift ticket": "Agregar boleto de remonte", "Add a rental": "Agregar equipo de alquiler", "Full": "Llena", "Join the waitlist": "Unirse a la lista de espera", "Next: your details": "Siguiente: tus datos", "Each person needs a lesson. Pick one, or remove the person.": "Cada persona necesita una clase. Elige una o quita a la persona.", "Safety details": "Datos de seguridad", "Allergies": "Alergias", "Medical notes": "Notas médicas", "Who may pick up": "Quién puede recoger", "Photos in the lesson recap": "Fotos en el resumen de la clase", "Text me about these lessons": "Envíame mensajes de texto sobre estas clases", "Sex": "Sexo", "Female": "Femenino", "Male": "Masculino", "Other": "Otro", "Choose": "Elige", "Your booking": "Tu reserva", "Want a private lesson? Ask for an instructor": "¿Quieres una clase privada? Pide un instructor", "Lift ticket": "Boleto de remonte", "Rental": "Alquiler", "You are on the waitlist": "Estás en la lista de espera", "We email you if a spot opens.": "Te escribimos si se abre un lugar.", "Your email": "Tu correo", "Your phone": "Tu teléfono", "Your name": "Tu nombre", "Back": "Atrás", "Edit": "Editar", "Age": "Edad",
+  "Yes": "Sí", "No": "No", "Three quick questions": "Tres preguntas rápidas", "They help the ski school put everyone in the right class.": "Ayudan a la escuela a poner a cada uno en la clase correcta.", "Placed at": "Nivel según las respuestas:", "Change the answers": "Cambiar las respuestas", "Group lesson by time": "Clase grupal por horario", "See other times": "Ver otros horarios", "Next times with room": "Próximos horarios con lugar", "No other times with room in the next week.": "No hay otros horarios con lugar la próxima semana.", "Pick this time": "Elegir este horario",
 };
 let LANG = (navigator.language || '').toLowerCase().startsWith('es') ? 'es' : 'en';
 try { const saved = localStorage.getItem('shop-lang'); if (saved === 'en' || saved === 'es') LANG = saved; } catch (_) { /* private mode */ }
@@ -49,9 +50,25 @@ function fitsPerson(l, p) {
   if (p.discipline && l.discipline !== p.discipline && l.discipline !== 'adaptive' && p.discipline !== 'adaptive') return { ok: false, why: `${discWord(l.discipline)} lesson` };
   const age = ageOn(p.dob, l.starts_at.slice(0, 10));
   if (age !== null && ((l.age_min != null && age < l.age_min) || (l.age_max != null && age > l.age_max))) return { ok: false, why: l.ages };
-  const lv = Number(p.level) || null;
+  const lv = Number(p.level) || placedLevel(p) || null;
   if (lv && ((l.level_min && lv < l.level_min) || (l.level_max && lv > l.level_max))) return { ok: false, why: l.level_words };
   return { ok: true };
+}
+
+/**
+ * The level the three placement questions point to for this person (2026.11.9), or null. questions: the mountain's
+ * questions for the person's discipline ({ text, yes, no }: a level, or null for the next question).
+ */
+let PLACEMENT = { ski: [], snowboard: [] };
+function placedLevel(p) {
+  const qs = PLACEMENT[p.discipline] || [];
+  if (!qs.length || !Array.isArray(p.placement)) return null;
+  for (let i = 0; i < qs.length; i++) {
+    if (typeof p.placement[i] !== 'boolean') return null;
+    const to = p.placement[i] ? qs[i].yes : qs[i].no;
+    if (to) return to;
+  }
+  return null;
 }
 
 function lessonPrice(l) {
@@ -87,6 +104,7 @@ async function main() {
       offline ? h('p', null, h('button', { class: 'btn primary', type: 'button', onclick: () => location.reload() }, T('Try again'))) : null)));
     return;
   }
+  PLACEMENT = page.placement || PLACEMENT;
   if (page.assistant) mountGuestAssistant('booking'); // only when the mountain has it on (no request otherwise)
   document.documentElement.lang = LANG;
   document.title = `${page.mountain}: book a ski lesson`;
@@ -129,10 +147,38 @@ async function main() {
   // ---- the family: who is coming, and what each has picked
   let seq = 0;
   const remembered = rememberedLevel(slug);
-  const newPerson = () => ({ id: ++seq, first_name: '', last_name: '', dob: '', discipline: (remembered && remembered.discipline) || 'ski', level: seq === 1 && remembered ? String(remembered.level) : '', lessonId: null, ticket: false, rental: false });
+  const newPerson = () => ({ id: ++seq, first_name: '', last_name: '', dob: '', discipline: (remembered && remembered.discipline) || 'ski', level: seq === 1 && remembered ? String(remembered.level) : '', placement: null, lessonId: null, ticket: false, rental: false });
   const people = [newPerson()];
   const lessonOf = (id) => all.find((l) => l.id === id) || null;
   const chosenCount = (id, except) => people.filter((p) => p !== except && p.lessonId === id).length;
+
+  // ---- level placement (2026.11.9): three yes or no questions when no level is picked, one at a time. The answers go
+  // with the booking and the lineup uses the level they point to to place the student in a class.
+  function placementBox(p, slot) {
+    clear(slot);
+    const qs = PLACEMENT[p.discipline] || [];
+    if (!qs.length || p.level) return;
+    const who = p.first_name.trim();
+    const box = h('fieldset', { class: 'placement', 'data-placement': p.id }, h('legend', null, `${T('Three quick questions')}${who ? ` ${LANG === 'es' ? 'sobre' : 'about'} ${who}` : ''}`),
+      h('p', { class: 'muted small' }, `${T('They help the ski school put everyone in the right class.')} ${LANG === 'es' ? '' : 'Answer for the student.'}`.trim()));
+    const answers = Array.isArray(p.placement) ? p.placement : [];
+    for (let i = 0; i < qs.length; i++) {
+      const q = qs[i]; const a = answers[i];
+      const set = (v) => { p.placement = [...answers.slice(0, i), v]; placementBox(p, slot); slot.querySelector(`[data-q="${i + 1}"] button`)?.focus(); };
+      box.append(h('div', { class: 'pq', 'data-q': i }, h('span', { class: 'pq-text', id: `pq-${p.id}-${i}` }, q.text),
+        h('div', { class: 'types', role: 'group', 'aria-labelledby': `pq-${p.id}-${i}` },
+          h('button', { type: 'button', class: 'pill', 'aria-pressed': String(a === true), onclick: () => set(true) }, T('Yes')),
+          h('button', { type: 'button', class: 'pill', 'aria-pressed': String(a === false), onclick: () => set(false) }, T('No')))));
+      if (typeof a !== 'boolean' || (a ? q.yes : q.no)) break;
+    }
+    const lv = placedLevel(p);
+    if (lv) {
+      const can = (levelList(p.discipline)[lv - 1] || {}).can;
+      box.append(h('div', { class: 'pq-result', role: 'status' }, h('strong', null, `${T('Placed at')} ${levelName(lv, p.discipline)}`), can ? h('span', { class: 'small' }, `“${can}”`) : null,
+        h('button', { type: 'button', class: 'btn link', onclick: () => { p.placement = null; placementBox(p, slot); } }, T('Change the answers'))));
+    }
+    slot.append(box);
+  }
 
   // ================================================================ step 1: who is coming
   function drawPeople() {
@@ -147,8 +193,9 @@ async function main() {
         const first = h('input', { id: `p${n}-first`, value: p.first_name, maxlength: 100, autocomplete: 'off', required: '', oninput: (e) => { p.first_name = e.target.value; } });
         const last = h('input', { id: `p${n}-last`, value: p.last_name, maxlength: 100, autocomplete: 'off', required: '', oninput: (e) => { p.last_name = e.target.value; } });
         const dob = h('input', { id: `p${n}-dob`, type: 'date', value: p.dob, required: '', 'aria-describedby': `p${n}-dob-hint`, onchange: (e) => { p.dob = e.target.value; }, oninput: (e) => { p.dob = e.target.value; } });
-        const disc = h('div', { class: 'types', role: 'radiogroup', 'aria-label': `${T('Ski')} / ${T('Snowboard')}` }, ['ski', 'snowboard'].map((d) => h('button', { type: 'button', class: 'pill', role: 'radio', 'aria-checked': String(p.discipline === d), 'aria-pressed': String(p.discipline === d), onclick: () => { p.discipline = d; p.level = ''; draw(); } }, discWord(d))));
-        const level = h('select', { id: `p${n}-level`, 'aria-describedby': `p${n}-level-hint`, onchange: (e) => { p.level = e.target.value; } }, h('option', { value: '' }, T('Choose')), levelOptions(p.discipline).map(([v, t]) => h('option', { value: v, selected: v === String(p.level) }, t)));
+        const disc = h('div', { class: 'types', role: 'radiogroup', 'aria-label': `${T('Ski')} / ${T('Snowboard')}` }, ['ski', 'snowboard'].map((d) => h('button', { type: 'button', class: 'pill', role: 'radio', 'aria-checked': String(p.discipline === d), 'aria-pressed': String(p.discipline === d), onclick: () => { p.discipline = d; p.level = ''; p.placement = null; draw(); } }, discWord(d))));
+        const plSlot = h('div', { class: 'placement-slot' });
+        const level = h('select', { id: `p${n}-level`, 'aria-describedby': `p${n}-level-hint`, onchange: (e) => { p.level = e.target.value; placementBox(p, plSlot); } }, h('option', { value: '' }, T('Choose')), levelOptions(p.discipline).map(([v, t]) => h('option', { value: v, selected: v === String(p.level) }, t)));
         const quizSlot = h('div');
         const quizBtn = h('button', { type: 'button', class: 'btn', 'aria-expanded': 'false', onclick: () => {
           if (quizSlot.firstChild) { clear(quizSlot); quizBtn.setAttribute('aria-expanded', 'false'); return; }
@@ -161,7 +208,8 @@ async function main() {
           h('div', { class: 'row2' }, lab(`p${n}-first`, T('First name'), first), lab(`p${n}-last`, T('Last name'), last)),
           h('div', { class: 'row2' }, lab(`p${n}-dob`, T('Date of birth'), dob, T('Anyone under 18 must be booked by a parent or guardian.')), h('div', { class: 'field' }, h('span', { class: 'legend' }, `${T('Ski')} / ${T('Snowboard')}`), disc)),
           h('div', { class: 'row2' }, lab(`p${n}-level`, T('Level'), level, T('Pick a level, or find it with five quick questions.')), h('div', { class: 'field quiz-open' }, quizBtn)),
-          quizSlot));
+          quizSlot, plSlot));
+        placementBox(p, plSlot);
       });
       more.disabled = people.length >= MAX_PEOPLE;
     };
@@ -198,7 +246,7 @@ async function main() {
     const tabsRow = people.length > 1 ? h('div', { class: 'types', role: 'tablist', 'aria-label': 'Students' }, people.map((q, i) => h('button', { type: 'button', class: 'pill', role: 'tab', 'aria-selected': String(i === idx), 'aria-pressed': String(i === idx), onclick: () => drawLessons(i) },
       `${q.first_name || `${T('Student')} ${i + 1}`}${q.lessonId ? ' ✓' : ''}`))) : null;
     const lv = Number(p.level) || null;
-    const who = h('p', { class: 'muted' }, [p.first_name, p.dob ? `${T('Age')} ${ageOn(p.dob, today)}` : null, discWord(p.discipline), lv ? levelName(lv, p.discipline) : 'Level not set'].filter(Boolean).join(' · '),
+    const who = h('p', { class: 'muted' }, [p.first_name, p.dob ? `${T('Age')} ${ageOn(p.dob, today)}` : null, discWord(p.discipline), lv ? levelName(lv, p.discipline) : placedLevel(p) ? `${levelName(placedLevel(p), p.discipline)} (from the questions)` : 'Level not set'].filter(Boolean).join(' · '),
       ' ', h('button', { type: 'button', class: 'btn link', onclick: drawPeople }, T('Edit')));
     const dayRow = h('div', { class: 'days', role: 'group', 'aria-label': T('Choose a day') });
     const dayIn = h('input', { type: 'date', id: 'pick-day', value: view.day, min: today, max: addDay(today, 45), onchange: (e) => { if (e.target.value) { view.day = e.target.value; drawLessons(idx); } } });
@@ -251,13 +299,36 @@ async function main() {
       l.offers_ticket ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: p.ticket, onchange: (e) => { p.ticket = e.target.checked; } }), h('span', null, `${T('Add a lift ticket')} for ${p.first_name || 'this student'}`)) : null,
       l.offers_rental ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: p.rental, onchange: (e) => { p.rental = e.target.checked; } }), h('span', null, `${T('Add a rental')} (skis or board, boots, helmet)`)) : null) : null;
     const wl = h('div', { class: 'wl-slot' });
-    return h('article', { class: `lesson${mine ? ' picked' : ''}${fit.ok ? '' : ' nofit'}`, 'data-lesson': l.id },
+    const nextSlot = h('div', { class: 'next-slot', 'aria-live': 'polite' });
+    // A pool is booked as a time; the lineup places each student in a class by level at the meeting place.
+    const poolLine = l.pool ? h('p', { class: 'pool-line' }, h('span', { class: 'badge pool' }, T('Group lesson by time')), ' ',
+      `${p.dob && ageOn(p.dob, l.starts_at.slice(0, 10)) !== null && ageOn(p.dob, l.starts_at.slice(0, 10)) < 18 ? 'Your child is' : 'You are'} placed in a class by level at the meeting place.`) : null;
+    return h('article', { class: `lesson${mine ? ' picked' : ''}${fit.ok ? '' : ' nofit'}${l.pool ? ' is-pool' : ''}`, 'data-lesson': l.id },
       h('div', null, h('div', { class: 'when' }, `${clock(l.starts_at)} – ${clock(l.ends_at)}`), h('div', { class: 'what' }, l.product),
-        h('div', { class: 'badges' }, badges), l.meeting_place ? h('p', { class: 'meet' }, `${T('Meet at:')} ${l.meeting_place}`) : null, extras, wl),
+        h('div', { class: 'badges' }, badges), poolLine, l.meeting_place ? h('p', { class: 'meet' }, `${T('Meet at:')} ${l.meeting_place}`) : null, extras, nextSlot, wl),
       h('div', { class: 'buy' }, h('div', { class: 'price' }, pr.text, h('small', null, pr.note)),
-        isFull ? h('button', { type: 'button', class: 'btn', onclick: () => { if (!wl.firstChild) wl.append(waitlistForm(l, p)); } }, `${T('Full')}: ${T('Join the waitlist')}`)
+        isFull ? h('div', { class: 'full-actions' },
+          h('button', { type: 'button', class: 'btn primary', 'aria-expanded': 'false', onclick: (e) => nextTimes(l, p, idx, nextSlot, e.currentTarget) }, `${T('Full')}: ${T('See other times')}`),
+          h('button', { type: 'button', class: 'btn', onclick: () => { if (!wl.firstChild) wl.append(waitlistForm(l, p)); } }, T('Join the waitlist')))
           : mine ? h('button', { type: 'button', class: 'btn primary', 'aria-pressed': 'true', onclick: () => { p.lessonId = null; p.ticket = false; p.rental = false; drawLessons(idx); } }, `✓ ${T('Picked')}`)
             : h('button', { type: 'button', class: 'btn primary', disabled: left <= 0, 'aria-label': `${T('Pick this lesson')}: ${clock(l.starts_at)} ${l.product} for ${p.first_name}`, onclick: () => { p.lessonId = l.id; p.ticket = false; p.rental = false; drawLessons(idx); } }, T('Pick this lesson'))));
+  }
+
+  /** A full lesson: the next times with room for the same lesson and ages (the same day first, then the next week). */
+  async function nextTimes(l, p, idx, slot, btn) {
+    if (slot.firstChild) { clear(slot); btn.setAttribute('aria-expanded', 'false'); return; }
+    btn.setAttribute('aria-expanded', 'true');
+    let r;
+    try { r = await call('GET', `/booking/next/${l.id}`); } catch (err) { slot.append(h('p', { class: 'error-box', role: 'alert' }, err.message)); return; }
+    const box = h('div', { class: 'next-times' }, h('h3', null, T('Next times with room')));
+    if (!r.next.length) box.append(h('p', { class: 'muted small' }, T('No other times with room in the next week.')));
+    for (const x of r.next) {
+      if (!all.some((y) => y.id === x.id)) all.push(x);
+      const when = x.starts_at.slice(0, 10) === l.starts_at.slice(0, 10) ? clock(x.starts_at) : `${fmt(x.starts_at.slice(0, 10), { weekday: 'short', month: 'short', day: 'numeric' })}, ${clock(x.starts_at)}`;
+      box.append(h('div', { class: 'next-row' }, h('span', null, h('strong', null, when), ` · ${x.spots_left} ${x.spots_left === 1 ? 'spot' : 'spots'} left`),
+        h('button', { type: 'button', class: 'btn small', 'aria-label': `${T('Pick this time')}: ${when}`, onclick: () => { p.lessonId = x.id; p.ticket = false; p.rental = false; view.day = x.starts_at.slice(0, 10); drawLessons(idx); } }, T('Pick this time'))));
+    }
+    slot.append(box);
   }
 
   function waitlistForm(l, p) {
@@ -276,7 +347,7 @@ async function main() {
       if (!name.value.trim() || !email.value.trim()) { msg.append(h('p', { class: 'error-box', role: 'alert' }, 'Add your name and email.')); return; }
       try {
         const r = await call('POST', '/waitlist', { session_id: l.id, contact_name: name.value.trim(), contact_email: email.value.trim(), contact_phone: phone.value.trim() || undefined, text_ok: texts ? texts.checked : false,
-          student: { first_name: p.first_name.trim(), last_name: p.last_name.trim(), ...(p.dob ? { date_of_birth: p.dob } : {}), ...(p.level ? { level: Number(p.level) } : {}) } });
+          student: { first_name: p.first_name.trim(), last_name: p.last_name.trim(), ...(p.dob ? { date_of_birth: p.dob } : {}), ...(p.level || placedLevel(p) ? { level: Number(p.level) || placedLevel(p) } : {}) } });
         clear(box).append(h('p', { class: 'status ok', role: 'status' }, `${T('You are on the waitlist')} (#${r.position}). ${T('We email you if a spot opens.')}`));
       } catch (err) { msg.append(h('p', { class: 'error-box', role: 'alert' }, err.message)); }
     });
@@ -355,7 +426,7 @@ async function main() {
           items: studs.map((s) => ({
             session_id: s.p.lessonId, ticket: s.p.ticket || undefined, rental: s.p.rental || undefined,
             student: {
-              first_name: s.p.first_name.trim(), last_name: s.p.last_name.trim(), date_of_birth: s.p.dob, sex: s.sex.value, discipline: s.p.discipline, ...(s.p.level ? { level: Number(s.p.level) } : {}),
+              first_name: s.p.first_name.trim(), last_name: s.p.last_name.trim(), date_of_birth: s.p.dob, sex: s.sex.value, discipline: s.p.discipline, ...(s.p.level ? { level: Number(s.p.level) } : {}), ...(!s.p.level && placedLevel(s.p) ? { placement: s.p.placement } : {}),
               allergies: v(s.allergies), medical: v(s.medical), pickup: v(s.pickup), photo_ok: s.photo ? s.photo.checked : undefined, text_ok: textOk ? textOk.checked : undefined,
               ...(s.height_in.value ? { height_in: Number(s.height_in.value) } : {}), ...(s.weight_lb.value ? { weight_lb: Number(s.weight_lb.value) } : {}), boot_size: v(s.boot_size),
             },

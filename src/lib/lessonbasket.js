@@ -12,6 +12,7 @@ const { quoteFor } = require('./onlinesale');
 const { ageOn } = require('./guesttypes');
 const L = require('./levels');
 const F = require('./lessonfamily');
+const P = require('./placement');
 const { spotsLeft } = require('./lessonrules');
 const stripe = require('./stripe');
 const connect = require('./connect');
@@ -34,6 +35,7 @@ const studentSchema = z.object({
   boot_size: opt(10),
   allergies: opt(300), medical: opt(500), pickup: opt(300),
   text_ok: z.boolean().optional(), photo_ok: z.boolean().optional(),
+  placement: z.array(z.boolean()).min(1).max(3).optional(), // 2026.11.9: answers to the three placement questions (lib/placement.js)
 });
 const basketSchema = z.object({
   contact_first_name: z.string().trim().min(1).max(100),
@@ -112,10 +114,12 @@ async function create(t, b, { base, slug, waitlistId = null } = {}) {
       if (it.rental) { if (!x.rental_product_id) throw conflict('That lesson does not offer a rental online'); if (t.pay_online) extraLines.push(await F.extraLine(conn, t.id, 'rental', x.rental_product_id, it.student, day, keyOf(it.student))); else wishes.push(`${it.student.first_name}: rental`); }
     }
     const extras = await F.priceExtras(conn, t.id, extraLines);
-    // One request per lesson.
+    // One request per lesson. A student with placement answers carries the level they point to (saved on the booking).
+    const qs = await P.questions(conn, t.id);
+    const placed = (st, s) => { const p = st.placement ? P.place(qs, st.discipline || s.discipline, st.placement) : null; const { placement, ...rest } = st; return p ? { ...rest, ...p } : rest; };
     const groups = [];
     for (const id of ids) {
-      const students = b.items.filter((it) => it.session_id === id).map((it) => ({ ...it.student, discipline: it.student.discipline || sessions.get(id).discipline, key: keyOf(it.student), ...(it.student.level ? { ability_level: L.toLegacy(it.student.level) } : {}) }));
+      const students = b.items.filter((it) => it.session_id === id).map((it) => ({ ...placed(it.student, sessions.get(id)), discipline: it.student.discipline || sessions.get(id).discipline, key: keyOf(it.student), ...(it.student.level ? { ability_level: L.toLegacy(it.student.level) } : {}) }));
       const quote = t.pay_online ? await quoteFor(conn, t.id, sessions.get(id), students) : null;
       if (quote && quote.total <= 0) throw bad('That lesson has no price set. Please call the ski school.');
       groups.push({ session: sessions.get(id), students, quote });

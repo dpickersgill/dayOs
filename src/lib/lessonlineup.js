@@ -150,7 +150,7 @@ async function board(db, tenantId, lineupId) {
     FROM lesson_sessions s LEFT JOIN staff st ON st.tenant_id = s.tenant_id AND st.id = s.instructor_id LEFT JOIN people ip ON ip.tenant_id = st.tenant_id AND ip.id = st.person_id
     WHERE s.tenant_id = ? AND s.lineup_id = ? AND s.status <> 'cancelled' ORDER BY COALESCE(s.level_min, 0), s.id`, [tenantId, lineupId]);
   const day = String(lineup.starts_at).slice(0, 10);
-  const students = sessions.length ? await rows(db, `SELECT b.id AS booking_id, b.session_id, b.person_id, b.status, b.checked_in_at, b.checked_in_via, b.level, b.unpaid,
+  const students = sessions.length ? await rows(db, `SELECT b.id AS booking_id, b.session_id, b.person_id, b.status, b.checked_in_at, b.checked_in_via, b.level, b.placement_level, b.unpaid,
       (b.allergies IS NOT NULL AND b.allergies <> '') AS has_allergy, (b.medical IS NOT NULL AND b.medical <> '') AS has_medical,
       p.first_name, p.last_name, p.date_of_birth, p.ski_level, p.snowboard_level
     FROM lesson_bookings b JOIN people p ON p.tenant_id = b.tenant_id AND p.id = b.person_id
@@ -162,7 +162,7 @@ async function board(db, tenantId, lineupId) {
   const now = nowIn(tz);
   const shape = (x, s) => ({ booking_id: x.booking_id, session_id: x.session_id, person_id: x.person_id, first_name: x.first_name, last_name: x.last_name, status: x.status,
     checked_in: Boolean(x.checked_in_at), checked_in_via: x.checked_in_via, age: ageOn(x.date_of_birth, day), unpaid: Boolean(Number(x.unpaid)),
-    level: Number(x.level) || L.personLevel(x, s.discipline) || null, has_allergy: Boolean(Number(x.has_allergy)), has_medical: Boolean(Number(x.has_medical)), code: bookingCode(x.booking_id) });
+    level: Number(x.level) || L.personLevel(x, s.discipline) || null, placement_level: Number(x.placement_level) || null, has_allergy: Boolean(Number(x.has_allergy)), has_medical: Boolean(Number(x.has_medical)), code: bookingCode(x.booking_id) });
   const classes = sessions.map((s, i) => ({ ...s, color: COLORS[i % COLORS.length], level_words: L.range(s.level_min, s.level_max),
     instructor: s.instructor_id ? `${s.instructor_first || ''} ${s.instructor_last || ''}`.trim() : null,
     students: students.filter((x) => x.session_id === s.id).map((x) => shape(x, s)) }));
@@ -222,7 +222,7 @@ async function suggestSplit(db, tenantId, lineupId, { from = 'checked_in' } = {}
   if (!b.classes.length) throw conflict('This lineup has no lessons');
   const tmpl = b.classes[0];
   const fallback = (c) => Number(c.level_min) || 1;
-  let students = b.classes.flatMap((c) => c.students.filter((x) => x.status !== 'no_show').map((x) => ({ ...x, sortLevel: x.level || fallback(c) })));
+  let students = b.classes.flatMap((c) => c.students.filter((x) => x.status !== 'no_show').map((x) => ({ ...x, sortLevel: x.level || x.placement_level || fallback(c) }))); // 2026.11.9: the placement questions when no level is known
   const leftOut = from === 'checked_in' ? students.filter((x) => !x.checked_in) : [];
   if (from === 'checked_in') students = students.filter((x) => x.checked_in);
   students.sort((a, c) => a.sortLevel - c.sortLevel || (a.age ?? 99) - (c.age ?? 99) || String(a.first_name).localeCompare(c.first_name));

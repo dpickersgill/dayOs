@@ -253,3 +253,20 @@ details.more .row3 { display: grid; gap: 12px; margin-top: 8px; }
 /* ---- the family lesson page: the desk check-in code */
 .checkin-code { display: grid; justify-items: start; gap: 4px; margin-top: 8px; }
 .checkin-code svg { max-width: 100%; height: auto; background: #fff; }
+
+/* ---- lesson planning, best of breed (2026.11.9, Track GUEST): placement questions, pools, the next times with room */
+.placement { margin: 4px 0 0; padding: 14px 16px; border: 1.5px solid var(--line); border-radius: var(--r-sm); background: #fbfcfd; display: grid; gap: 10px; }
+.placement legend { font-weight: 700; padding: 0 6px; }
+.pq { display: grid; gap: 6px; }
+@media (min-width: 560px) { .pq { grid-template-columns: 1fr auto; align-items: center; column-gap: 12px; } }
+.pq-text { font-size: 1.0625rem; }
+.pq .types { flex-wrap: nowrap; }
+.pq .pill { min-width: 72px; }
+.pq-result { display: grid; gap: 4px; justify-items: start; padding: 10px 12px; border-radius: var(--r-sm); background: var(--green-tint); color: var(--green); }
+.pq-result .small { color: var(--ink-soft); }
+.pool-line { margin-top: 8px; font-size: 0.9375rem; color: var(--ink-soft); }
+.badge.pool { background: var(--green-tint); color: var(--green); }
+.full-actions { display: grid; gap: 8px; justify-items: inherit; }
+.next-times { margin-top: 12px; padding: 12px 14px; border-radius: var(--r-sm); border: 1.5px solid var(--line); background: #fbfcfd; display: grid; gap: 8px; }
+.next-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.btn.small { min-height: 40px; padding: 0 16px; font-size: 0.9375rem; }

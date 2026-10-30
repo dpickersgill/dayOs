@@ -3545,3 +3545,22 @@ button.fill-day:hover { border-color: var(--line-strong); }
   .fill-bar .btn { flex: 1 1 auto; }
   .fill-title { order: -1; flex-basis: 100%; }
 }
+
+/* ---- Lesson planning, Track GUEST (2026.11.9): pools and privates, level questions (school-guest.js), Sell's level questions and next times */
+.gs-set { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }
+.gs-set legend { font-weight: 700; margin-bottom: 6px; }
+.gs-radios { display: grid; gap: 8px; }
+.gs-radio { align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.gs-radio span { display: grid; gap: 2px; }
+.gs-disc { display: grid; gap: 12px; }
+.gs-q { display: grid; grid-template-columns: 32px 1fr; gap: 10px; align-items: start; }
+.gs-num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: var(--surface-2); }
+.gs-q-body { display: grid; gap: 8px; min-width: 0; }
+.gs-leads { display: grid; gap: 8px; }
+@media (min-width: 700px) { .gs-leads { grid-template-columns: 1fr 1fr; } }
+.gs-looks { margin: 0; }
+.sell-placement { display: grid; gap: 6px; margin: 4px 0 10px; }
+.sell-placement .sp-q { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.sell-placement .sp-q > span { flex: 1 1 220px; }
+.sl-next { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.gs-intro { margin: 0 0 12px; }

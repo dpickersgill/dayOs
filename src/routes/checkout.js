@@ -290,7 +290,7 @@ checkout.get('/menu', ...lessonMenu, async (req, res) => {
                 FROM products p WHERE p.tenant_id = ? AND p.active = 1 ORDER BY sold DESC, p.name`, [tenantId]),
     rows(pool, 'SELECT product_id, tier, price_cents FROM price_tiers WHERE tenant_id = ?', [tenantId]),
     rows(pool, `SELECT s.id, s.product_id, pr.name, pr.base_price_cents, s.discipline, s.ability_level, s.format, s.age_group, s.meeting_place, s.starts_at, s.ends_at, s.capacity,
-                  s.level_min, s.level_max, s.age_min, s.age_max, ip.first_name AS instructor_first,
+                  s.level_min, s.level_max, s.age_min, s.age_max, s.kind, ip.first_name AS instructor_first,
                   (SELECT COUNT(*) FROM lesson_bookings b WHERE b.tenant_id = s.tenant_id AND b.session_id = s.id AND b.status IN ('booked','attended')) AS booked
                 FROM lesson_sessions s JOIN products pr ON pr.id = s.product_id AND pr.tenant_id = s.tenant_id
                 LEFT JOIN staff st ON st.tenant_id = s.tenant_id AND st.id = s.instructor_id LEFT JOIN people ip ON ip.tenant_id = st.tenant_id AND ip.id = st.person_id
