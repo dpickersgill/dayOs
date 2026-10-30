@@ -126,6 +126,9 @@ export function seasonFor(date) {
 export const isManager = () => ['owner', 'manager'].includes(ctx.me && ctx.me.role);
 // Someone on the patrol roster can use Patrol whatever their login role (a lift operator who also patrols).
 export const can = (...roles) => isManager() || roles.includes(ctx.me && ctx.me.role) || Boolean(roles.includes('patrol') && ctx.me && ctx.me.on_patrol);
+// The ski school access level (2026.11.9, Track ROLE fills this in): schoolCan('director') or schoolCan('supervisor').
+// Owners and managers can do everything; until Track ROLE lands this is managers only.
+export const schoolCan = (_level) => isManager();
 
 // Stored values keep their spelling ("cancelled"); on screen they read in US English.
 const US_WORDS = { cancelled: 'canceled', cancelling: 'canceling', colour: 'color', organisation: 'organization' }; // spelling-ok
