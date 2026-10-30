@@ -124,7 +124,7 @@
 .rise-note { margin: 0; padding: 8px 12px; border-radius: var(--r-sm); background: var(--amber-tint, #fbefd6); color: #6b4300; font-weight: 600; }
 .cal-p.rise::after { content: ''; display: block; width: 14px; height: 3px; margin: 1px auto 0; border-radius: 2px; background: #b45f06; }
 .add-row { align-items: center; gap: 8px; }
-.add-row .qty { min-height: 44px; font: inherit; padding: 0 8px; border: 1.5px solid var(--line-strong); border-radius: var(--r-sm); background: #fff; }
+.add-row .qty, #shop .add-row select.qty { width: auto; min-width: 64px; min-height: 44px; font: inherit; padding: 0 8px; border: 1.5px solid var(--line-strong); border-radius: var(--r-sm); background: #fff; }
 .reward-pick select { width: 100%; min-height: 44px; font: inherit; }
 .gift-exp { border-top: 1px solid var(--line); padding-top: 12px; }
 .gift-exp fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 8px 16px; }

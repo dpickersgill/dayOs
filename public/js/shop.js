@@ -467,7 +467,7 @@ async function showShop() {
       if (gifts.length >= 5) return showErr('You can add up to 5 gift cards.');
       gifts.push({ amount_cents: Number(gAmt.value), recipient_name: gTo.value.trim() || undefined, message: gMsg.value.trim() || undefined });
       gTo.value = ''; gMsg.value = ''; drawGifts(); sync();
-    } }, T('Add gift card'))), giftList, expBox);
+    } }, T('Add gift card'))), giftList);
   // A gift experience: a theme, what it includes, who it is for and the day it arrives in their inbox.
   const expBox = h('div', { class: 'stack gift-exp' }, h('p', { class: 'muted small' }, T('Loading…')));
   (async () => {
@@ -501,6 +501,7 @@ async function showShop() {
       h('div', { class: 'cols' }, lab('gx-from', T('From'), from), lab('gx-to', T('For'), toName), lab('gx-email', T('Their email'), toEmail), lab('gx-when', T('Send it on'), when)),
       lab('gx-note', T('A short message (optional)'), note), worth, h('div', { class: 'row' }, addIt));
   })();
+  giftEl.append(expBox);
   const promoEl = h('div', { class: 'stack' }, lab('promo', T('Promo code'), promo));
   const addonsOf = () => [...[...qtys].filter(([, n]) => n > 0).map(([product_id, quantity]) => ({ product_id, quantity })),
     ...basket.flatMap((r, i) => [...(r.extras || new Map())].filter(([, cb]) => cb.checked).map(([product_id]) => ({ product_id, quantity: 1, for_item: i })))];
@@ -567,7 +568,7 @@ async function showShop() {
 
   // ---- rewards the household holds (signed in) and "Pay in N" when the mountain offers it
   const rewardSel = h('select', { id: 'rw-pick', 'aria-label': T('Use a reward') }, h('option', { value: '' }, T('No reward')),
-    ...((acct && acct.rewards) || []).flatMap((r) => r.choices.map((c) => h('option', { value: `${r.id}|${c.choice}`, selected: qs.get('reward') === String(r.id) && c === r.choices[0] }, `${r.first_name}: ${c.words}`))));
+    ...((acct && acct.rewards) || []).flatMap((r) => r.choices.map((c) => h('option', { value: `${r.id}|${c.choice}`, selected: qs.get('reward') === String(r.id) && c === r.choices[0] || undefined }, `${r.first_name}: ${c.words}`))));
   rewardSel.addEventListener('change', sync);
   const rewardEl = acct && acct.rewards && acct.rewards.length ? h('div', { class: 'field reward-pick' }, h('label', { for: 'rw-pick' }, T('Use a reward')), rewardSel) : null;
   const rewardPick = () => {
@@ -577,6 +578,7 @@ async function showShop() {
     const forItem = Math.max(0, basket.findIndex((b) => b.personId === r.person_id));
     return { id: Number(id), choice, ...(choice === 'credit' ? {} : { for_item: forItem }) };
   };
+  if (rewardEl && qs.get('reward')) setTimeout(() => { const d = rewardEl.closest('details'); if (d) d.open = true; sync(); }, 0);
   const planBox = h('input', { type: 'checkbox', id: 'c-plan' });
   const planText = h('span');
   planBox.addEventListener('change', sync);
@@ -608,7 +610,7 @@ async function showShop() {
       h('div', { class: 'hp' }, h('label', null, T('Leave this empty'), hp))),
     giftEl),
     // The order summary: beside the form on a wide screen, stuck to the bottom on a phone.
-    h('aside', { class: 'shop-aside' }, h('section', { class: 'card stack paybar' }, h('h2', { class: 'sum-h' }, T('Your order')), totalEl, rewardEl, planRow, h('details', { class: 'promo-link' }, h('summary', null, T('Have a promo code?')), promoEl), err, h('div', { class: 'row' }, pay))));
+    h('aside', { class: 'shop-aside' }, h('section', { class: 'card stack paybar' }, h('h2', { class: 'sum-h' }, T('Your order')), totalEl, planRow, h('details', { class: 'promo-link' }, h('summary', null, rewardEl ? T('Use a reward or a promo code') : T('Have a promo code?')), rewardEl, promoEl), err, h('div', { class: 'row' }, pay))));
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault(); showErr('');

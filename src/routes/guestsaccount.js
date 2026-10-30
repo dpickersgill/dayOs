@@ -240,8 +240,8 @@ const giftHash = (token) => crypto.createHash('sha256').update(String(token)).di
 /** What a gift experience can include, priced from the mountain's online products (an adult's price). */
 async function includesMenu(db, tenantId) {
   const pick = async (sql) => one(db, sql, [tenantId]);
-  const ticket = await pick("SELECT id, name, base_price_cents AS cents FROM products WHERE tenant_id = ? AND active = 1 AND online = 1 AND kind = 'day_ticket' ORDER BY valid_days, base_price_cents, id LIMIT 1");
-  const rental = await pick("SELECT id, name, base_price_cents AS cents FROM products WHERE tenant_id = ? AND active = 1 AND kind = 'rental' ORDER BY base_price_cents, id LIMIT 1");
+  const ticket = await pick("SELECT id, name, base_price_cents AS cents FROM products WHERE tenant_id = ? AND active = 1 AND online = 1 AND kind = 'day_ticket' AND valid_days = 1 ORDER BY base_price_cents DESC, id LIMIT 1"); // the full day, not a night or half day
+  const rental = await pick("SELECT id, name, base_price_cents AS cents FROM products WHERE tenant_id = ? AND active = 1 AND kind = 'rental' ORDER BY base_price_cents DESC, id LIMIT 1"); // the full package, not a helmet
   const lesson = await pick("SELECT id, name, base_price_cents AS cents FROM products WHERE tenant_id = ? AND active = 1 AND kind = 'lesson' ORDER BY base_price_cents, id LIMIT 1");
   return Object.fromEntries(Object.entries({ ticket, rental, lesson }).filter(([, v]) => v && v.cents > 0));
 }

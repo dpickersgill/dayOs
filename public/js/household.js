@@ -66,9 +66,9 @@ function buyCard(d, acall, slug) {
         if (out.missing_age.length) { msg.append(h('p', { class: 'error-box' }, `Add the birthday for ${out.missing_age.map((x) => x.first_name).join(', ')} under Your family: it sets the price.`)); return; }
         basket = out.basket; lessonLink = out.lesson_link;
         quote = await acall('POST', '/shop/quote', basket);
-        msg.append(h('div', { class: 'hh-total' }, h('span', null, `${basket.items.length} ${basket.items.length === 1 ? 'ticket' : 'tickets'}${basket.addons.length ? ` and ${basket.addons.length} ${basket.addons.length === 1 ? 'rental' : 'rentals'}` : ''}, ${fmtDay(day)}`),
+        msg.append(...[h('div', { class: 'hh-total' }, h('span', null, `${basket.items.length} ${basket.items.length === 1 ? 'ticket' : 'tickets'}${basket.addons.length ? ` and ${basket.addons.length} ${basket.addons.length === 1 ? 'rental' : 'rentals'}` : ''}, ${fmtDay(day)}`),
           quote.tax_cents ? h('span', { class: 'muted small' }, `Tax ${money(quote.tax_cents)}`) : null, h('b', null, `Total ${money(quote.total_cents)}`)),
-        out.lesson_for.length ? h('p', { class: 'small' }, `After paying, book the lesson for ${out.lesson_for.join(' and ')} on the lesson page. It opens on this day.`) : null);
+        out.lesson_for.length ? h('p', { class: 'small' }, `After paying, book the lesson for ${out.lesson_for.join(' and ')} on the lesson page. It opens on this day.`) : null].filter(Boolean));
         pay.textContent = `Pay ${money(quote.total_cents)}`;
         return;
       }
