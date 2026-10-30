@@ -15,7 +15,7 @@
 .fair-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .fair-actions .btn { flex: 1 1 auto; }
 .fair label { font-weight: 700; display: grid; gap: 6px; }
-.fair textarea { width: 100%; min-height: 96px; padding: 10px 12px; border: 1.5px solid var(--line-strong); border-radius: var(--r-sm); font: inherit; color: var(--ink); background: #fff; resize: vertical; }
+.fair textarea { font-weight: 400; width: 100%; min-height: 96px; padding: 10px 12px; border: 1.5px solid var(--line-strong); border-radius: var(--r-sm); font: inherit; color: var(--ink); background: #fff; resize: vertical; }
 .fair-note { color: var(--muted); font-size: 0.9375rem; }
 .fair-sched { width: 100%; border-collapse: collapse; font-size: 0.9375rem; }
 .fair-sched th, .fair-sched td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }

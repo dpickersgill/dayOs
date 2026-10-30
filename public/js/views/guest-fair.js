@@ -11,6 +11,8 @@ import { row, infoRow, toggle, amount, formTracker } from './settings-kit.js';
 
 const PLAN_STATE = { active: ['On track', 'good'], late: ['Late', 'warn'], suspended: ['On hold at the gate', 'bad'], paid: ['Paid', 'good'], settled: ['Settled', 'good'], canceled: ['Canceled', 'neutral'] };
 const CHARGE_STATE = { paid: 'Paid', due: 'Coming up', failed: 'Did not go through', canceled: 'Canceled', settled: 'Settled' };
+/** Appends what is there: a null or false (a part not shown) is skipped, not written out. */
+const add = (el, ...xs) => el.append(...xs.filter((x) => x !== null && x !== undefined && x !== false && x !== ''));
 const reload = async (panel, fn) => { clear(panel).append(loading()); try { clear(panel); await fn(panel); } catch (err) { clear(panel).append(errorBox(err)); } };
 
 // ---------------------------------------------------------------- the promises
@@ -51,7 +53,7 @@ async function promises(panel) {
   const sync = () => { capAmt.disabled = !capOn.checked; hours.disabled = !guar.checked; count.disabled = !plans.checked; renewOn.disabled = rule.disabled = !renew.checked; };
   [capOn, guar, plans, renew].forEach((el) => el.addEventListener('change', sync)); sync();
   const sect = (title) => h('h3', { class: 'fair-set-head' }, title);
-  panel.append(
+  add(panel, 
     h('p', { class: 'muted' }, 'Promises that make buying feel fair. Each is off until you turn it on. When one is on, the online shop shows its badge.'),
     s.badges.length ? h('div', { class: 'fair-badges', 'aria-label': 'Badges the shop shows now' }, s.badges.map((b) => h('span', { class: 'fair-badge', title: b.detail }, b.text))) : null,
     sect('Prices'),
@@ -77,7 +79,7 @@ async function promises(panel) {
 // ---------------------------------------------------------------- closure credits
 async function closures(panel) {
   const [s, c] = await Promise.all([get('/guests/fair/settings'), get('/guests/fair/closures')]);
-  if (!s.closure_credit_on) panel.append(h('p', { class: 'muted' }, 'Closure credits are off. Turn them on under Fair promises to give them.'));
+  if (!s.closure_credit_on) add(panel, h('p', { class: 'muted' }, 'Closure credits are off. Turn them on under Fair promises to give them.'));
   const dayIn = input({ type: 'date', name: 'day', value: c.suggested[0] ? c.suggested[0].day : s.today, max: s.today, required: true });
   const scope = select([['mountain', 'The whole mountain'], ['main_lifts', 'The main lifts']], 'mountain', { name: 'scope' });
   const from = input({ type: 'time', name: 'closed_from' });
@@ -86,7 +88,7 @@ async function closures(panel) {
   const body = () => ({ day: dayIn.value, scope: scope.value, closed_from: from.value || null, reason: reason.value.trim() || null });
   const preview = button('Preview credits', async () => {
     const p = await post('/guests/fair/closures/preview', body());
-    clear(out).append(
+    clear(out).append(...[
       h('p', null, h('strong', null, `${p.items.length} guest${p.items.length === 1 ? '' : 's'} would get a credit, ${money(p.total_cents)} in all.`), p.skipped ? ` ${p.skipped} ticket${p.skipped === 1 ? ' has' : 's have'} no name and no customer, so they are left out.` : ''),
       p.items.length ? table([{ head: 'Guest', cell: (r) => r.name }, { head: 'Ticket', cell: (r) => r.product }, { head: 'Why', cell: (r) => r.why }, { head: 'Credit', num: true, cell: (r) => money(r.cents) }], p.items.slice(0, 50)) : null,
       p.items.length > 50 ? h('p', { class: 'muted' }, `And ${p.items.length - 50} more.`) : null,
@@ -94,9 +96,9 @@ async function closures(panel) {
         const r = await post('/guests/fair/closures', body());
         toast(`${r.issued} credit${r.issued === 1 ? '' : 's'} given`);
         await reload(panel, closures);
-      }, { kind: 'primary' }) : null);
+      }, { kind: 'primary' }) : null].filter(Boolean).map((x) => (x.tagName === 'BUTTON' ? h('div', { class: 'row' }, x) : x)));
   });
-  panel.append(
+  add(panel, 
     c.suggested.length ? h('div', { class: 'notice', role: 'status' }, `Marked closed in the calendar: ${c.suggested.map((d) => fmtDay(d.day)).join(', ')}. Preview the credits for ${c.suggested.length === 1 ? 'that day' : 'those days'}.`) : null,
     row('Day', dayIn), row('What closed', scope), row('Closed from', from, 'Leave empty for the whole day. With a time, guests who scanned before it do not get a credit.'), row('Reason (in the email)', reason),
     h('div', { class: 'row' }, preview), out,
@@ -111,7 +113,7 @@ async function guarantee(panel) {
   sw.addEventListener('change', async () => {
     try { await put(`/guests/fair/guarantee/off/${g.today}`, { off: !sw.checked }); toast(sw.checked ? 'The guarantee is on today' : 'The guarantee is off today'); } catch (err) { sw.checked = !sw.checked; toast(err.message, 'error'); }
   });
-  panel.append(
+  add(panel, 
     s.conditions_guarantee_on ? null : h('p', { class: 'muted' }, 'The conditions guarantee is off. Turn it on under Fair promises.'),
     row('Offer the guarantee today', sw, 'Turn it off for a day you cannot stand behind (a storm cycle you announced, say). Guests see "the guarantee is off today".'),
     g.data.length ? table([{ head: 'When', cell: (r) => fmtDateTime(r.at) }, { head: 'Guest', cell: (r) => r.name }, { head: 'What they said', cell: (r) => (r.reason || '').replace(/^Conditions guarantee:?\s*/, '') || '' }, { head: 'Credit', num: true, cell: (r) => money(r.cents) }, { head: 'Used', cell: (r) => state(r.status === 'redeemed' ? 'Used' : 'Not yet', r.status === 'redeemed' ? 'good' : 'neutral') }], g.data)
@@ -140,7 +142,7 @@ async function review(panel) {
   const r = await get('/guests/fair/review');
   const open = r.flags.filter((f) => f.status === 'open');
   const person = (x) => h('div', { class: 'fair-who' }, x.photo ? h('img', { src: x.photo, alt: `Photo of ${x.name || 'the holder'}`, width: 40, height: 40 }) : null, h('div', null, h('strong', null, x.name || 'No name'), h('div', { class: 'muted small' }, [x.product, x.code].filter(Boolean).join(', '))));
-  panel.append(
+  add(panel, 
     h('p', { class: 'muted' }, 'Unusual scans land here with what was seen. Nothing is blocked unless a manager does it, and the guest always gets the reason and a way to answer.'),
     h('div', { class: 'row' }, button('Check today\'s scans now', async () => { const x = await post('/guests/fair/review/check'); toast(`${x.flagged} new`); await reload(panel, review); }),
       button('Put a pass on hold', () => blockDialog(panel, {}))),
@@ -171,7 +173,7 @@ function planDialog(panel, p) {
 }
 async function plansView(panel) {
   const { data } = await get('/guests/fair/plans');
-  panel.append(data.length ? table([{ head: 'Guest', cell: (p) => p.name || p.email || 'Guest' }, { head: 'Paid', num: true, cell: (p) => `${money(p.paid_cents)} of ${money(p.total_cents)}` },
+  add(panel, data.length ? table([{ head: 'Guest', cell: (p) => p.name || p.email || 'Guest' }, { head: 'Paid', num: true, cell: (p) => `${money(p.paid_cents)} of ${money(p.total_cents)}` },
     { head: 'Next', cell: (p) => { const n = p.charges.find((c) => ['due', 'failed'].includes(c.status)); return n ? `${fmtDay(n.next_try_on || n.due_on)}, ${money(n.cents)}` : ''; } },
     { head: 'Status', cell: (p) => state(...(PLAN_STATE[p.status] || [p.status, 'neutral'])) },
     { actions: true, cell: (p) => button('Open', () => planDialog(panel, p), { small: true, label: `Open the plan for ${p.name || 'this guest'}` }) }], data) : empty('No payment plans yet. They start when a guest picks "Pay in" at the online shop.'));
@@ -180,18 +182,18 @@ async function plansView(panel) {
 // ---------------------------------------------------------------- passes: plans, caps, the waitlist, renewals
 async function passes(panel) {
   const [{ data }, ren] = await Promise.all([get('/guests/fair/waitlist'), get('/guests/fair/renewals')]);
-  if (!data.length) panel.append(empty('No season passes, multi-day tickets or punch cards yet.'));
+  if (!data.length) add(panel, empty('No season passes, multi-day tickets or punch cards yet.'));
   for (const p of data) {
     const cap = input({ type: 'number', min: 1, name: `cap-${p.product_id}`, value: p.cap ?? '', placeholder: 'No cap', 'aria-label': `Cap for ${p.name}` });
     const plan = toggle({ checked: p.plan_ok, disabled: p.kind === 'season_pass', 'aria-label': `${p.name} can be paid in a plan` });
     const save = button('Save', async () => { await put(`/guests/fair/products/${p.product_id}`, { cap: cap.value ? Number(cap.value) : null, ...(p.kind === 'season_pass' ? {} : { plan_ok: plan.checked }) }); toast('Saved'); await reload(panel, passes); }, { small: true, label: `Save ${p.name}` });
-    panel.append(h('div', { class: 'fair-pass' },
+    add(panel, h('div', { class: 'fair-pass' },
       infoRow(p.name, p.cap !== null ? `${p.sold} sold of ${p.cap}${p.left !== null ? `, ${p.left} open` : ''}. ${p.waiting.length} on the waitlist.` : 'No cap.', save),
       row('Most sold (a waitlist opens when full)', amount(cap, 'passes')),
       row('Can be paid in a plan', plan, p.kind === 'season_pass' ? 'Season passes always can when plans are on.' : null),
       p.waiting.length ? table([{ head: 'Waiting', cell: (w) => `${w.first_name} ${w.last_name}` }, { head: 'Email', cell: (w) => w.email }, { head: 'Status', cell: (w) => (w.status === 'offered' ? state(`Offered until ${fmtDateTime(w.offer_expires_at)}`, 'warn') : state('Waiting')) }], p.waiting) : null));
   }
-  panel.append(h('h3', null, 'Renew automatically'),
+  add(panel, h('h3', null, 'Renew automatically'),
     ren.data.length ? table([{ head: 'Guest', cell: (r) => r.name }, { head: 'Pass', cell: (r) => r.pass }, { head: 'Auto-renew', cell: (r) => state(r.status === 'on' ? 'On' : 'Off', r.status === 'on' ? 'good' : 'neutral') },
       { head: 'Card', cell: (r) => (r.has_card ? `Ending ${r.last4}` : h('span', { class: 'muted' }, 'None yet')) }, { head: 'Last', cell: (r) => (r.last_error ? state('Did not go through', 'bad') : r.renewed_for ? `Renewed for ${r.renewed_for}` : '') }], ren.data) : empty('Nobody has turned on auto-renew yet.'));
 }

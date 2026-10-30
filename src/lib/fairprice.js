@@ -320,7 +320,7 @@ async function closurePreview(db, tenantId, day, { closedFrom = null } = {}) {
     if (!personId) { skipped += 1; continue; }
     const cents = Math.round(Number(k.unit_price_cents));
     if (!cents) continue;
-    items.push({ ticket_id: k.id, person_id: personId, name: k.first_name ? `${k.first_name} ${k.last_name}` : 'Guest', product: k.product, cents, why: scan ? `scanned at ${scan.slice(0, 5)}, before the closure` : 'did not scan' });
+    items.push({ ticket_id: k.id, person_id: personId, name: k.first_name ? `${k.first_name} ${k.last_name}` : 'Guest', product: k.product, cents, why: scan ? `Scanned at ${scan.slice(0, 5)}, before the closure` : 'Did not scan' });
   }
   return { day, items, skipped, total_cents: items.reduce((n, i) => n + i.cents, 0), today: todayIn(t.timezone) };
 }
