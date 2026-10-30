@@ -1,5 +1,5 @@
 // Help: short how-to articles for each app, searchable, shown only for what this person can use.
-import { h, clear, ctx, can, isManager, input, empty, errorBox, state, label } from '../ui.js';
+import { h, clear, ctx, can, isManager, schoolCan, input, empty, errorBox, state, label } from '../ui.js';
 import { get, post, session } from '../api.js';
 import { SECTIONS, ARTICLES, articleById } from '../help-content.js';
 
@@ -9,7 +9,8 @@ const roleOk = (who) => who === null || who === undefined || can(...who);
 
 const sectionOf = (key) => SECTIONS.find((s) => s.key === key);
 const sectionOpen = (s) => appOn(s.key) && roleOk(s.who);
-const articleOpen = (a) => { const s = sectionOf(a.app); return Boolean(s) && sectionOpen(s) && roleOk(a.who); };
+// A school director sees the ski school's manager articles too.
+const articleOpen = (a) => { const s = sectionOf(a.app); return Boolean(s) && sectionOpen(s) && (roleOk(a.who) || (a.app === 'school' && schoolCan('director'))); };
 const visible = () => ARTICLES.filter(articleOpen);
 
 const words = (text) => String(text || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
