@@ -84,7 +84,13 @@ async function fill(tenantId, dates) {
     const past = date < day(L.now);
     for (const g of groups) {
       g.have = g.taken.length; g.available = g.taken.length + g.spare.length; g.short = Math.max(0, g.need - g.have);
-      g.mark = past ? null : g.short > 0 ? 'red' : (g.need_full > g.available || g.available - g.need < SPARE) && g.need_full > 0 ? 'amber' : 'green';
+      // Spare at that moment, across every lesson time running then (an instructor counts once).
+      const at = groups.filter((x) => x.s <= g.s && x.e > g.s);
+      const spareAt = new Set(at.flatMap((x) => [...x.taken, ...x.spare])).size - at.reduce((n, x) => n + x.need, 0);
+      g.spare_at = spareAt;
+      // A lesson that follows staff and is full below its cap is turning guests away for want of instructors.
+      g.staff_full = g.lessons.some((l) => l.follows_staff && l.open === 0 && l.capacity < l.cap);
+      g.mark = past ? null : g.short > 0 ? 'red' : g.need_full > g.available || g.staff_full || (g.need > 0 && spareAt < SPARE) ? 'amber' : 'green';
       g.words = g.short ? `Short ${plural(g.short, 'instructor')} ${dayText(date)}, ${clock(g.time)}, ${groupName(g)}` : null;
     }
     // The day's peak: the moment the most instructors are needed at once.
@@ -105,7 +111,7 @@ async function fill(tenantId, dates) {
       short: groups.reduce((n, g) => n + g.short, 0),
       groups: groups.map((g) => ({ time: g.time, starts_at: g.s, ends_at: g.e, discipline: g.discipline, band: g.band, level_max: g.level_max, booked: g.booked, held: g.held, capacity: g.capacity,
         open: g.lessons.reduce((k, l) => k + l.open, 0), waitlist: g.waitlist, need: g.need, need_full: g.need_full, have: g.have, available: g.available, short: g.short, mark: g.mark, words: g.words,
-        ratio: ratio(g), lessons: g.lessons, free_ids: [...g.taken, ...g.spare] })),
+        ratio: ratio(g), staff_full: g.staff_full, lessons: g.lessons, free_ids: [...g.taken, ...g.spare] })),
     });
   }
   return { L, days: out };

@@ -302,7 +302,7 @@ function reasonWords(r) {
   if (!r || r.instructors == null) return null;
   if (r.advance) return `No instructor availability in yet for this day, so it sells up to the cap of ${r.cap}`;
   const base = `${r.instructors} instructor${r.instructors === 1 ? '' : 's'} free x ${r.ratio} = ${r.instructors * r.ratio} spots, cap ${r.cap}`;
-  if (r.spots > Math.min(r.cap, r.instructors * r.ratio)) return `${base}. Kept at ${r.spots} because ${r.booked + r.held} are booked or held`;
+  if (r.spots > Math.min(r.cap, r.instructors * r.ratio)) return `${base}. Kept at ${r.spots} because ${r.booked + r.held} ${r.booked + r.held === 1 ? 'is' : 'are'} booked or held`;
   return base;
 }
 

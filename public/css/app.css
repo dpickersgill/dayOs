@@ -3481,6 +3481,7 @@ button.fill-day:hover { border-color: var(--line-strong); }
 .fill-nums { margin: 0; }
 .fill-lessons { display: grid; gap: 6px; margin: 0; }
 .fill-suggest { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.fill-needs { margin-bottom: 12px; }
 .fill-need { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
 @media (max-width: 720px) {
   /* A phone: the days that have lessons, one under the other. */

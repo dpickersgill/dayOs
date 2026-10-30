@@ -6,7 +6,7 @@
 //   the director acts on it. Below the calendar: sold-out demand and suggestions to add a slot (director only).
 //   needsCard(el): the staffing target on My day for instructors ("Saturday, Jan 9 needs 2 more people") with I can work.
 import { get, post } from '../api.js';
-import { h, clear, ctx as uiCtx, schoolCan, state, button, toast, dialog, fmtDay, empty, errorBox, fail, loading, hashParam, withHashParam, label } from '../ui.js';
+import { h, clear, appendAll, ctx as uiCtx, schoolCan, state, button, toast, dialog, fmtDay, empty, errorBox, fail, loading, hashParam, withHashParam, label } from '../ui.js';
 import * as planPart from './school-plan.js';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -74,7 +74,7 @@ async function fillTab(root) {
       title.textContent = monthName(month);
       const ahead = v.days.filter((d) => !d.past);
       const red = ahead.filter((d) => d.mark === 'red');
-      clear(summary).append(h('div', { class: 'stats' },
+      appendAll(clear(summary), h('div', { class: 'stats' },
         stat(ahead.reduce((n, d) => n + d.booked, 0), 'students booked'),
         stat(ahead.reduce((n, d) => n + d.open, 0), 'spots open'),
         stat(red.length, red.length === 1 ? 'day short now' : 'days short now'),
@@ -87,11 +87,11 @@ async function fillTab(root) {
   function dayCell(d, today) {
     const n = Number(d.date.slice(8));
     if (!d.lessons) return h('div', { class: 'fill-day empty' }, h('span', { class: 'fill-num' }, String(n)));
-    const words = `${dayText(d.date)}: ${plural(d.booked, 'student')} booked, ${d.open} spots open, ${d.need} instructors needed, ${d.available} free${d.mark ? `, ${MARK[d.mark][0]}` : ''}${d.waitlist ? `, ${d.waitlist} on the waitlist` : ''}`;
+    const words = d.past ? `${dayText(d.date)}: ${plural(d.booked, 'student')} booked` : `${dayText(d.date)}: ${plural(d.booked, 'student')} booked, ${d.open} spots open, ${d.need} instructors needed, ${d.available} free${d.mark ? `, ${MARK[d.mark][0]}` : ''}${d.waitlist ? `, ${d.waitlist} on the waitlist` : ''}`;
     return h('button', { type: 'button', class: `fill-day${d.mark ? ` mark-${d.mark}` : ''}${d.past ? ' past' : ''}${d.date === today ? ' today' : ''}`, 'aria-label': words, onclick: () => dayDialog(d.date, load) },
       h('span', { class: 'fill-head' }, h('span', { class: 'fill-num' }, String(n)), h('span', { class: 'fill-wdname' }, dayText(d.date)), d.mark ? markState(d.mark) : null),
-      h('span', { class: 'fill-line' }, `${d.booked} booked, ${d.open} open`),
-      h('span', { class: 'fill-line' }, `Need ${d.need}, ${d.available} free`),
+      h('span', { class: 'fill-line' }, d.past ? `${d.booked} booked` : `${d.booked} booked, ${d.open} open`),
+      d.past ? null : h('span', { class: 'fill-line' }, `Need ${d.need}, ${d.available} free`),
       d.waitlist ? h('span', { class: 'fill-line' }, `${d.waitlist} waiting`) : null,
       d.advance && !d.past ? h('span', { class: 'fill-line muted' }, 'No availability in yet') : null);
   }
@@ -100,7 +100,7 @@ async function fillTab(root) {
     if (!schoolCan('director')) return;
     try {
       const v = await get('/skischool/staff/demand');
-      clear(demand).append(
+      appendAll(clear(demand),
         h('p', { class: 'muted small' }, 'Lesson times that filled this season, how early, and the guests turned away (waitlist sign-ups and booking page searches that found it full). Suggestions only: nothing is added unless you add it to the season plan.'),
         v.suggestions.length ? h('ul', { class: 'plain stack' }, v.suggestions.slice(0, 5).map((s) => h('li', { class: 'fill-suggest' },
           h('div', null, h('strong', null, s.words), h('div', { class: 'muted small' }, s.why)),
@@ -133,17 +133,20 @@ async function dayDialog(date, onChange) {
       const lessons = h('ul', { class: 'plain fill-lessons' }, g.lessons.map((l) => h('li', null,
         h('strong', null, l.product), ` ${clock(String(l.starts_at).slice(11, 16))} to ${clock(String(l.ends_at).slice(11, 16))}, ${l.level_words || 'All levels'}${l.instructor ? `, ${l.instructor}` : ''}`,
         h('div', { class: 'muted small' }, `${l.capacity} spots, ${l.booked} booked${l.held ? `, ${l.held} held` : ''}, ${l.open} open${l.waitlist ? `, ${l.waitlist} waiting` : ''}. `,
-          l.follows_staff ? `Follows staff: ${l.reason || `cap ${l.cap}`}.` : 'Spots are the number typed.'))));
+          l.follows_staff ? `Follows staff: ${l.reason || `cap ${l.cap}`}.` : 'Spots are the number typed.',
+          l.follows_staff && l.open === 0 && l.capacity < l.cap ? h('strong', null, ' Full until more instructors are free.') : null))));
+      const asked = v.asks.find((a) => a.time === g.time && a.discipline === g.discipline && a.band === g.band && a.status === 'open');
       const act = g.short && schoolCan('director') && !v.past
-        ? button(`Fill the gap: ask for ${plural(g.short, 'instructor')}`, async () => {
+        ? button(asked ? 'Ask again' : `Fill the gap: ask for ${plural(g.short, 'instructor')}`, async () => {
           try {
             const r = await post('/skischool/staff/fill/ask', { date, time: g.time, discipline: g.discipline, band: g.band });
             toast(`Asked ${plural(r.asked.length, 'instructor')}: ${r.asked.join(', ')}`);
             await draw(); if (onChange) onChange();
           } catch (err) { fail(err); }
-        }, { kind: 'primary', label: `Fill the gap at ${clock(g.time)}, ${groupWords(g)}: ask for ${plural(g.short, 'instructor')}` })
+        }, { kind: asked ? undefined : 'primary', label: `${asked ? 'Ask again' : 'Fill the gap'} at ${clock(g.time)}, ${groupWords(g)}: ask for ${plural(g.short, 'instructor')}` })
         : null;
-      body.append(h('section', { class: `fill-group${g.mark ? ` mark-${g.mark}` : ''}` }, head, g.words ? h('p', { class: 'fill-short' }, g.words) : null, nums, lessons, act));
+      body.append(h('section', { class: `fill-group${g.mark ? ` mark-${g.mark}` : ''}` }, head, g.words ? h('p', { class: 'fill-short' }, g.words) : null, nums, lessons,
+        asked ? h('p', { class: 'muted small' }, `Asked ${plural(asked.asked.length, 'instructor')}, waiting for a yes. See below.`) : null, act));
     }
     if (v.asks.length) {
       body.append(h('section', { class: 'stack' }, h('h3', null, 'Asked to fill the gap'), h('ul', { class: 'plain stack' }, v.asks.map((a) => h('li', null,
