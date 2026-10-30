@@ -147,7 +147,7 @@ async function editor(root, planId) {
         button('All plans', () => { go(null); planList(clear(root)); }, { small: true }),
         button('Name and dates', () => editPlan(), { small: true }),
         button('Save as pattern', () => savePattern(), { small: true }),
-        plan.status === 'draft' && !plan.last_publish ? button('Delete plan', () => confirmDialog(`Delete ${plan.name}?`, 'It has never been published, so no lessons go with it.', 'Delete plan', async () => { await del(`/skischool/plans/${planId}`); toast('Plan deleted'); go(null); await planList(clear(root)); }, { danger: true }), { small: true, kind: 'quiet' }) : null));
+        !plan.published_ever ? button('Delete plan', () => confirmDialog(`Delete ${plan.name}?`, 'It has never been published, so no lessons go with it.', 'Delete plan', async () => { await del(`/skischool/plans/${planId}`); toast('Plan deleted'); go(null); await planList(clear(root)); }, { danger: true }), { small: true, kind: 'quiet' }) : null));
   }
   function editPlan() {
     formDialog('Name and dates', [
@@ -549,7 +549,7 @@ async function historyPart(root, ctx) {
   appendAll(clear(root),
     h('p', { class: 'muted' }, 'Each publish, newest first. Only the newest can be undone; undo them one at a time to go further back.'),
     data.length ? table([
-      { head: 'When', cell: (x) => fmtDateTime(String(x.created_at).replace(' ', 'T')) },
+      { head: 'When', cell: (x) => fmtDateTime(x.created_at) },
       { head: 'By', cell: (x) => x.by_email || '' },
       { head: 'What it did', cell: (x) => x.summary || `${plural(x.created_n, 'lesson')} added` },
       { head: '', actions: true, cell: (x) => (x.undone_at ? state('Undone', 'neutral') : x.can_undo ? button('Undo', () => undoPublish(x.id, ctx, () => historyPart(root, ctx)), { small: true, label: 'Undo the newest publish' }) : null) },

@@ -11,7 +11,7 @@
 // Directors (and owners and managers) plan; supervisors can read the calendar.
 const express = require('express');
 const { pool, tx, one, rows } = require('../db');
-const { z, dateStr, validate, paramId } = require('../lib/util');
+const { z, dateStr, validate, paramId, localTime } = require('../lib/util');
 const { notFound, bad, conflict } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { school } = require('../lib/schoolaccess');
@@ -42,8 +42,9 @@ async function full(tenantId, p) {
   const doc = LP.parseDoc(JSON.parse(p.doc));
   const last = await one(pool, 'SELECT id, doc_sha, created_at, summary FROM lesson_plan_publishes WHERE tenant_id = ? AND plan_id = ? AND undone_at IS NULL ORDER BY id DESC LIMIT 1', [tenantId, p.id]);
   const n = await one(pool, "SELECT COUNT(*) AS n FROM lesson_sessions WHERE tenant_id = ? AND plan_id = ? AND status <> 'cancelled'", [tenantId, p.id]);
+  const ever = await one(pool, 'SELECT COUNT(*) AS n FROM lesson_plan_publishes WHERE tenant_id = ? AND plan_id = ?', [tenantId, p.id]);
   return { id: p.id, name: p.name, from_on: String(p.from_on).slice(0, 10), to_on: String(p.to_on).slice(0, 10), status: p.status, published_at: p.published_at, updated_at: p.updated_at,
-    doc, lessons: Number(n.n), last_publish: last ? { id: last.id, at: last.created_at, words: last.summary } : null, unpublished: Boolean(last && last.doc_sha !== LP.shaOf(doc)) };
+    doc, lessons: Number(n.n), published_ever: Number(ever.n) > 0, last_publish: last ? { id: last.id, at: last.created_at, words: last.summary } : null, unpublished: Boolean(last && last.doc_sha !== LP.shaOf(doc)) };
 }
 
 router.get('/plans', supervisor, async (req, res) => {
@@ -155,7 +156,9 @@ router.get('/plans/:id/publishes', director, async (req, res) => {
   const list = await rows(pool, `SELECT pp.id, pp.created_n, pp.updated_n, pp.removed_n, pp.kept_n, pp.summary, pp.created_at, pp.undone_at, u.email AS by_email
     FROM lesson_plan_publishes pp LEFT JOIN users u ON u.tenant_id = pp.tenant_id AND u.id = pp.created_by WHERE pp.tenant_id = ? AND pp.plan_id = ? ORDER BY pp.id DESC LIMIT 50`, [t, paramId(req)]);
   const latest = list.find((x) => !x.undone_at);
-  res.json({ data: list.map((x) => ({ ...x, can_undo: Boolean(latest && latest.id === x.id) })) });
+  const tz = (await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [t])).timezone;
+  // Stamped by the database in UTC; shown in the mountain's time.
+  res.json({ data: list.map((x) => ({ ...x, created_at: localTime(x.created_at, tz), undone_at: x.undone_at ? localTime(x.undone_at, tz) : null, can_undo: Boolean(latest && latest.id === x.id) })) });
 });
 
 router.post('/plans/publishes/:id/undo', director, async (req, res) => {
