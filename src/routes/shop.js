@@ -112,9 +112,50 @@ async function tenantFor(slug) {
   return t;
 }
 
+// ---- the signed-in household (Guests round 2, ACCOUNT): the same session as the household account (/family/<mountain>).
+const HH = require('../lib/household');
+async function householdOf(req, t) {
+  const token = req.get('x-family-session');
+  if (!token) return null;
+  const email = await require('../lib/programplus').sessionEmail(t.id, token);
+  if (!email) return null;
+  const hh = await HH.forEmail(pool, t.id, email);
+  return hh.ids.length ? { ...hh, email } : null;
+}
+/**
+ * Fills in holders picked from the household (holder.person_id): their names, date of birth, and for a pass renewal the
+ * photo on file when the guest said it is still them. Refuses a person outside the household. Returns the extras for quote().
+ */
+async function prepare(req, t, b) {
+  const hh = await householdOf(req, t);
+  const fill = async (h, { photo = false } = {}) => {
+    if (!h || !h.person_id) return;
+    if (!HH.has(hh, h.person_id)) throw bad('Sign in again to buy for your family');
+    const p = await one(pool, 'SELECT first_name, last_name, date_of_birth, photo FROM people WHERE tenant_id = ? AND id = ?', [t.id, h.person_id]);
+    h.first_name = p.first_name; h.last_name = p.last_name;
+    if (p.date_of_birth && !h.age_group) h.date_of_birth = String(p.date_of_birth instanceof Date ? p.date_of_birth.toISOString() : p.date_of_birth).slice(0, 10);
+    if (photo && h.use_photo_on_file && !h.photo && p.photo && /^data:image\/jpeg;base64,/.test(p.photo)) h.photo = p.photo;
+    delete h.use_photo_on_file;
+  };
+  for (const it of b.items || []) await fill(it.holder, { photo: true });
+  for (const a of b.activities || []) await fill(a.holder);
+  for (const a of b.addons || []) await fill(a.holder);
+  const extras = { ...b, household: hh };
+  if (b.reload_card) {
+    const today = todayIn(t.timezone);
+    const card = await shop.reloadable(pool, t.id, b.reload_card, today);
+    const one1 = (b.items || []).length === 1 && !(b.activities || []).length && !(b.gifts || []).length;
+    if (!card || card.busy || !one1) throw conflict('We could not load a day onto that card. Check the number on the back of the card, or buy at the ticket window.');
+    extras.reload = { card_id: Number(card.id) };
+  }
+  return extras;
+}
+
 const holderSchema = z.object({
-  first_name: z.string().trim().min(1).max(60),
-  last_name: z.string().trim().min(1).max(60),
+  person_id: z.number().int().positive().optional(), // someone in the signed-in household
+  use_photo_on_file: z.boolean().optional(), // a pass renewal: the guest confirmed last season's photo is still them
+  first_name: z.string().trim().min(1).max(60).optional(), // filled from the household when person_id is given
+  last_name: z.string().trim().min(1).max(60).optional(),
   date_of_birth: dateStr.optional(),
   age_group: z.string().trim().toLowerCase().max(30).optional(), // a guest type code marked for online sale
   photo: z.string().max(120000).regex(/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/, 'The photo must be a JPEG').optional(), // season pass holders only
@@ -133,7 +174,12 @@ const basketShape = {
   gifts: z.array(giftSchema).max(5).default([]),
   activities: z.array(activitySchema).max(shop.MAX_ITEMS).default([]),
   promo_code: z.string().trim().max(40).optional(),
+  reward: z.object({ id: z.number().int().positive(), choice: z.enum(['free_ticket', 'percent', 'credit']), for_item: z.number().int().min(0).max(shop.MAX_ITEMS - 1).optional() }).optional(),
+  plan: z.boolean().optional(), // pay in parts (a payment plan), when offered
+  reload_card: z.string().trim().max(40).optional(), // the number on the back of an RFID card: the day goes onto it
 };
+/** Every holder needs a name by the time the basket is priced: typed, or filled from the household. */
+const named = (b) => [...b.items, ...b.activities].every((x) => x.holder.first_name && x.holder.last_name) && b.addons.every((a) => !a.holder || (a.holder.first_name && a.holder.last_name));
 const nonEmpty = (b) => b.items.length + b.addons.length + b.gifts.length + b.activities.length > 0;
 
 publicRouter.get('/:slug/shop', async (req, res) => {
@@ -173,7 +219,7 @@ publicRouter.get('/:slug/shop', async (req, res) => {
   const activities = atts.map((a) => ({ attraction: { ...ACT.attractionOut(a), status_note: undefined }, products: acts.filter((p) => p.attraction_id === a.id).map((p) => ({ id: p.id, name: p.name, timed: Boolean(p.timed), base_price_cents: p.base_price_cents, prices: actTiers.filter((x) => x.product_id === p.id).map((x) => ({ tier: x.tier, price_cents: x.price_cents })) })) }));
   res.json({ activities, addons: addons.map((a) => ({ id: a.id, kind: a.kind, name: a.name, valid_days: a.valid_days, uses: a.uses, price_cents: a.base_price_cents, per_person: a.kind !== 'voucher',
     prices: addonTiers.filter((x) => x.product_id === a.id && onlineCodes.has(x.tier)).map((x) => ({ tier: x.tier, price_cents: x.price_cents })) })),
-    lesson_booking: Boolean(booking && booking.online_booking && Number(booking.lessons)) ? { link: `/book/${encodeURIComponent(t.slug)}` } : null, gift: { min_cents: 500, max_cents: 100000 }, mountain: t.name, brand: brand ? { ...brand, opening_day: brand.opening_day ? String(brand.opening_day).slice(0, 10) : null } : null, conditions, phone: t.phone, message: t.shop_message, open: t.open, today, waiver_text: t.waiver_text || null, products: out, guest_types: guestTypes });
+    badges: await require('../lib/fairprice').badges(pool, t.id).catch(() => []), lesson_booking: Boolean(booking && booking.online_booking && Number(booking.lessons)) ? { link: `/book/${encodeURIComponent(t.slug)}` } : null, gift: { min_cents: 500, max_cents: 100000 }, mountain: t.name, brand: brand ? { ...brand, opening_day: brand.opening_day ? String(brand.opening_day).slice(0, 10) : null } : null, conditions, phone: t.phone, message: t.shop_message, open: t.open, today, waiver_text: t.waiver_text || null, products: out, guest_types: guestTypes });
 });
 
 publicRouter.get('/:slug/shop/month', async (req, res) => {
@@ -181,7 +227,15 @@ publicRouter.get('/:slug/shop/month', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   const ym = String(req.query.month || '');
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(ym)) throw bad('month must be YYYY-MM');
-  res.json({ month: ym, days: await shop.monthView(pool, t, ym) });
+  // The price calendar (Track FAIR's lib/fairprice.js): when each day's price rises next, for the ticket the day shows.
+  const days = await shop.monthView(pool, t, ym);
+  const fair = require('../lib/fairprice');
+  const out = {};
+  for (const [d, v] of Object.entries(days)) {
+    const rise = v.product_id ? await fair.nextRise(pool, t.id, v.product_id, d).catch(() => null) : null;
+    out[d] = { ...v, product_id: undefined, next_rise: rise || null };
+  }
+  res.json({ month: ym, days: out, badges: await fair.badges(pool, t.id).catch(() => []) });
 });
 
 publicRouter.get('/:slug/shop/day', async (req, res) => {
@@ -224,8 +278,10 @@ publicRouter.get('/:slug/shop/activities', async (req, res) => {
 publicRouter.post('/:slug/shop/quote', validate(z.object(basketShape).refine(nonEmpty, 'Add something to your order')), async (req, res) => {
   const t = await tenantFor(req.params.slug);
   res.set('Cache-Control', 'no-store');
-  const q = await shop.quote(pool, t, req.body.items, req.body);
-  res.json({ lines: q.lines.map((l) => ({ name: l.name, valid_on: l.valid_on, tier: l.tier, unit_cents: l.unit, saved_cents: l.saved || 0, tax_cents: l.tax })),
+  const extras = await prepare(req, t, req.body);
+  if (!named(req.body)) throw bad('Fill in the name for every ticket');
+  const q = await shop.quote(pool, t, req.body.items, extras);
+  res.json({ plan: q.plan ? { count: q.plan.count, first_cents: q.plan.first_cents, then: q.plan.then } : null, reward: q.reward ? { id: q.reward.id, choice: q.reward.choice, cents: q.reward.cents, words: q.reward.words } : null, reload: Boolean(q.reload), lines: q.lines.map((l) => ({ name: l.name, valid_on: l.valid_on, tier: l.tier, unit_cents: l.unit, saved_cents: l.saved || 0, tax_cents: l.tax })),
     activities: q.activities.map((a) => ({ name: a.name, attraction: a.attraction, valid_on: a.valid_on, start_time: a.start_time, tier: a.tier, unit_cents: a.unit, tax_cents: a.tax, limits_text: a.limits_text })), addons: q.addons.map((a) => ({ product_id: a.product_id, name: a.name, kind: a.kind, quantity: a.quantity, unit_cents: a.unit, tier: a.tier, valid_on: a.valid_on, for_item: a.for_item, for_name: a.holder ? `${a.holder.first_name} ${a.holder.last_name}` : null })), gifts: q.gifts, promo: q.promo, discount_cents: q.discount, subtotal_cents: q.subtotal, tax_cents: q.tax, total_cents: q.total });
 });
 
@@ -252,30 +308,32 @@ publicRouter.post('/:slug/shop/orders', validate(z.object({
       WHERE p.tenant_id = ? AND p.id IN (?) AND (a.min_height_in IS NOT NULL OR a.min_weight_lb IS NOT NULL OR a.max_weight_lb IS NOT NULL OR a.min_age IS NOT NULL)`, [t.id, b.activities.map((a) => a.product_id)])).length) {
     throw bad('Please confirm every rider meets the height, weight and age limits');
   }
+  const extras = await prepare(req, t, b);
+  if (!named(b)) throw bad('Fill in the name for every ticket');
   const sha = t.waiver_text ? crypto.createHash('sha256').update(t.waiver_text).digest('hex') : null;
   const accepted = Boolean(b.waiver_accepted && t.waiver_text); // with no waiver wording there is nothing to accept
   const made = await tx(async (conn) => {
     await conn.query('SELECT id FROM tenants WHERE id = ? FOR UPDATE', [t.id]); // one basket at a time per mountain, so two guests cannot both take the last ticket
     const { n } = await one(conn, "SELECT COUNT(*) AS n FROM shop_orders WHERE tenant_id = ? AND status = 'awaiting_payment' AND created_at > DATE_SUB(NOW(), INTERVAL 40 MINUTE)", [t.id]);
     if (Number(n) >= MAX_OPEN_BASKETS) throw conflict('A lot of people are buying right now. Please try again in a few minutes.');
-    const quote = await shop.quote(conn, t, b.items, { ...b, needPhoto: true });
+    const quote = await shop.quote(conn, t, b.items, { ...extras, needPhoto: true });
     const basket = JSON.stringify({ contact: { first_name: b.contact_first_name, last_name: b.contact_last_name }, quote });
     for (let attempt = 0; ; attempt++) {
       const ref = shop.reference(); const token = crypto.randomBytes(16).toString('hex');
       try {
         const [r] = await conn.query(
           'INSERT INTO shop_orders (tenant_id, reference, view_token, contact_name, contact_email, contact_phone, basket, waiver_accepted, waiver_text_sha, news_opt_in, amount_cents, promo_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [t.id, ref, token, `${b.contact_first_name} ${b.contact_last_name}`, b.contact_email, b.contact_phone, basket, accepted ? 1 : 0, accepted ? sha : null, b.news_opt_in ? 1 : 0, quote.total, quote.promo || null]);
-        return { id: r.insertId, ref, token, quote };
+          [t.id, ref, token, `${b.contact_first_name} ${b.contact_last_name}`, b.contact_email, b.contact_phone, basket, accepted ? 1 : 0, accepted ? sha : null, b.news_opt_in ? 1 : 0, quote.plan ? quote.plan.first_cents : quote.total, quote.promo || null]);
+        return { id: r.insertId, ref, token, quote, charge: quote.plan ? quote.plan.first_cents : quote.total };
       } catch (err) { if (err.code === 'ER_DUP_ENTRY' && attempt < 4) continue; throw err; }
     }
   });
   let co;
   try {
-    const pay = connect.checkoutFor(await connect.payeeOrThrow(t.id), made.quote.total, { tenant_id: String(t.id), request_id: String(made.id), shop_order_id: String(made.id), kind: 'shop', reference: made.ref });
+    const pay = connect.checkoutFor(await connect.payeeOrThrow(t.id), made.charge, { tenant_id: String(t.id), request_id: String(made.id), shop_order_id: String(made.id), kind: 'shop', reference: made.ref });
     const n = made.quote.lines.length + made.quote.activities.length + made.quote.addons.reduce((x, a) => x + a.quantity, 0) + made.quote.gifts.length;
     co = await stripe.createCheckout({
-      amountCents: made.quote.total, name: `${t.name}: ${n} item${n > 1 ? 's' : ''}`, description: [...made.quote.lines.map((l) => `${l.name} ${dayText(l.valid_on)}`), ...made.quote.activities.map((a) => `${a.name} ${dayText(a.valid_on)}${a.start_time ? ` ${ACT.clock(a.start_time)}` : ''}`), ...made.quote.addons.map((a) => `${a.quantity} x ${a.name}`), ...made.quote.gifts.map(() => 'Gift card')].join(', ').slice(0, 480),
+      amountCents: made.charge, saveCard: Boolean(made.quote.plan), name: `${t.name}: ${n} item${n > 1 ? 's' : ''}`, description: [...made.quote.lines.map((l) => `${l.name} ${dayText(l.valid_on)}`), ...made.quote.activities.map((a) => `${a.name} ${dayText(a.valid_on)}${a.start_time ? ` ${ACT.clock(a.start_time)}` : ''}`), ...made.quote.addons.map((a) => `${a.quantity} x ${a.name}`), ...made.quote.gifts.map(() => 'Gift card')].join(', ').slice(0, 480),
       email: b.contact_email, reference: made.ref, ...pay, idempotencyKey: `shop-${made.id}`,
       successUrl: `${baseUrl(req)}/shop/${req.params.slug}?order=${made.token}`, cancelUrl: `${baseUrl(req)}/shop/${req.params.slug}?cancelled=${made.token}`,
     });
@@ -284,7 +342,7 @@ publicRouter.post('/:slug/shop/orders', validate(z.object({
     throw err;
   }
   await pool.query('UPDATE shop_orders SET stripe_session_id = ? WHERE tenant_id = ? AND id = ?', [co.id, t.id, made.id]);
-  res.status(201).json({ ok: true, reference: made.ref, checkout_url: co.url, amount_cents: made.quote.total });
+  res.status(201).json({ ok: true, reference: made.ref, checkout_url: co.url, amount_cents: made.charge });
 });
 
 // The guest came back from the card page without paying: their basket stops holding tickets and promo uses at once.

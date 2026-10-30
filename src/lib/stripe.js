@@ -89,7 +89,8 @@ async function tryCall(path, body, opts) {
  * Stripe refuses a reused key for a different request for a day, so a key shared by two rows would turn the second guest
  * away. The amount is added, so a retry at a new price is a new request rather than a refused one.
  */
-async function createCheckout({ amountCents, name, description, email, reference, metadata, successUrl, cancelUrl, account = null, feeCents = 0, idempotencyKey }) {
+// saveCard: keep the card for later charges by the mountain (a payment plan's next installments, lib/paymentplans.js).
+async function createCheckout({ amountCents, name, description, email, reference, metadata, successUrl, cancelUrl, account = null, feeCents = 0, idempotencyKey, saveCard = false }) {
   if (!idempotencyKey || !/^[a-z_]+-\d+$/.test(String(idempotencyKey))) throw new Error('createCheckout needs an idempotencyKey naming its table and row, like lesson-12');
   const s = await call('/v1/checkout/sessions', {
     mode: 'payment',
@@ -101,7 +102,8 @@ async function createCheckout({ amountCents, name, description, email, reference
     expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
     line_items: [{ quantity: 1, price_data: { currency: 'usd', unit_amount: amountCents, product_data: { name, description } } }],
     metadata,
-    payment_intent_data: { metadata, ...(account && feeCents > 0 ? { application_fee_amount: Math.min(feeCents, amountCents) } : {}) },
+    ...(saveCard ? { customer_creation: 'always' } : {}),
+    payment_intent_data: { metadata, ...(saveCard ? { setup_future_usage: 'off_session' } : {}), ...(account && feeCents > 0 ? { application_fee_amount: Math.min(feeCents, amountCents) } : {}) },
   }, { idempotencyKey: `checkout-${idempotencyKey}-${amountCents}`, account });
   return { id: s.id, url: s.url };
 }
