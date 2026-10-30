@@ -102,7 +102,7 @@ function birthdays(panel, { g, x }) {
     row('A credit', h('span', { class: 'gr-pair' }, creditOn, amount(credit, 'dollars'))),
     row('Good for', win, 'A birthday outside the season gets its gift on opening day instead, good for 30 days.'),
     row('Season opening day', opens, [seasonWords, ' The last day is the season end under ', h('a', { href: '#/settings/team' }, 'Team and logins'), '.']),
-    est ? h('p', { class: 'gr-cost' }, h('b', null, 'What it may cost: '), `about ${est} gifts a season at your size${perGift ? `, up to ${money(est * perGift)} if every guest used one` : ''}. Most mountains see about half used.`) : null,
+    est ? h('p', { class: 'gr-cost' }, h('b', null, 'What it may cost: '), `about ${est} gifts a season at your size${perGift ? `, up to ${money(est * perGift)} if every guest used one` : ''}.`) : null,
   );
 }
 
