@@ -132,6 +132,26 @@ async function nextRise(db, tenantId, productId, day, { tier = 'adult', today = 
   return { on: addDays(day, -(days - 1)), cents: off, from_cents: base - off, to_cents: base };
 }
 
+/**
+ * For the shop calendar: adds next_rise to each open day of a month view (lib/shopsale.js monthView), for the online
+ * one-day ticket whose early price is the one shown. Only products with an early-buy discount can rise.
+ */
+async function calendarRises(db, tenant, days) {
+  const prods = await rows(db, "SELECT * FROM products WHERE tenant_id = ? AND active = 1 AND online = 1 AND kind IN ('day_ticket','multi_day') AND advance_days > 0 AND advance_percent > 0", [tenant.id]);
+  if (!prods.length) return days;
+  const today = todayIn(tenant.timezone);
+  for (const [d, v] of Object.entries(days)) {
+    if (!v || !['open', 'few'].includes(v.state)) continue;
+    let pick = null;
+    for (const p of prods) {
+      const r = await nextRise(db, tenant.id, p.id, d, { today, product: p });
+      if (r && (!pick || r.from_cents === v.from_cents)) pick = { ...r, product_id: p.id };
+    }
+    if (pick) v.next_rise = pick;
+  }
+  return days;
+}
+
 /** Badges for the shop: one per promise the mountain has on, with the words the guest sees. */
 async function badges(db, tenantId) {
   const s = await G.get(db, tenantId);
@@ -470,7 +490,7 @@ async function holdFor(conn, tenantId, ticket) {
 
 module.exports = {
   TICKET_KINDS, settings, saveFair, newLink, linkFor, hash, mail, contactOf, seasonEnd, system, baseOf,
-  capWalkup, walkup, bestOnline, nextRise, badges, guaranteeLink, guaranteeView, claimGuarantee, guaranteeClaims,
+  capWalkup, walkup, bestOnline, nextRise, calendarRises, badges, guaranteeLink, guaranteeView, claimGuarantee, guaranteeClaims,
   priceDrops, closurePreview, closureIssue, closureSuggestions,
   detect, noteFailedReload, reviewList, dismissFlag, block, unblock, blockedView, blockedReply, holdFor, FLAG_WORDS,
 };

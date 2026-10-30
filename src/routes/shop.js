@@ -181,7 +181,10 @@ publicRouter.get('/:slug/shop/month', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   const ym = String(req.query.month || '');
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(ym)) throw bad('month must be YYYY-MM');
-  res.json({ month: ym, days: await shop.monthView(pool, t, ym) });
+  // FAIR: each day's next price rise and the mountain's fair badges (lib/fairprice.js). The month view is cached, so a copy is marked.
+  const F = require('../lib/fairprice');
+  const days = await F.calendarRises(pool, { id: t.id, timezone: t.timezone }, JSON.parse(JSON.stringify(await shop.monthView(pool, t, ym))));
+  res.json({ month: ym, days, badges: await F.badges(pool, t.id) });
 });
 
 publicRouter.get('/:slug/shop/day', async (req, res) => {
