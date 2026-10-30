@@ -5,7 +5,7 @@
 //
 // Pages: #/settings/<page>. #/settings on its own opens Your profile and sign-in on a computer, and the list on a phone.
 import { get } from '../api.js';
-import { h, clear, ctx, isManager, errorBox, loading, confirmDialog } from '../ui.js';
+import { h, clear, ctx, isManager, schoolCan, errorBox, loading, confirmDialog } from '../ui.js';
 import { hasUnsaved } from './settings-kit.js';
 
 const GROUPS = { you: 'You', mountain: 'The mountain', apps: 'Apps' };
@@ -54,7 +54,7 @@ async function visiblePages(who) {
     if (ctx.me.role === 'area') continue;
     if (group === 'mountain') { if (who.manager) out.push(p); continue; }
     if (!moduleOn(APP_OF[key][2])) continue;
-    if (key === 'patrol' ? !(who.manager || who.patrol) : !who.manager) continue; // patrol: the cards decide, by permission
+    if (key === 'patrol' ? !(who.manager || who.patrol) : key === 'school' ? !(who.manager || who.schoolDirector) : !who.manager) continue; // school: a ski school director too (2026.11.9) // patrol: the cards decide, by permission
     if (await apps.pageHasSetup(key, who)) out.push(p);
   }
   return out;
@@ -84,7 +84,7 @@ export async function render(root, params = []) {
   const asked = params[0] || null;
   const manager = isManager();
   const pl = manager ? null : await patrolLevel();
-  const who = { manager, patrolAdmin: Boolean(pl && (pl.level === 'admin' || pl.features.includes('manage_settings'))), patrol: pl };
+  const who = { manager, schoolDirector: !manager && schoolCan('director'), patrolAdmin: Boolean(pl && (pl.level === 'admin' || pl.features.includes('manage_settings'))), patrol: pl };
   const pages = await visiblePages(who);
   const page = pages.find((p) => p[0] === asked) || pages[0];
   const home = !asked || !pages.some((p) => p[0] === asked);

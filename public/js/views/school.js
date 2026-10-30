@@ -1,5 +1,5 @@
 import { get, post, patch, put, del } from '../api.js';
-import { h, clear, ctx, can, isManager, table, state, input, select, field, button, toast, formDialog, dialog, val, num, todayStr, addDays, fmtDateTime, fmtDate, fmtTime, fmtRange, label, empty, errorBox, tabs, money, confirmDialog, fail, appendAll, hashParam, withHashParam } from '../ui.js';
+import { h, clear, ctx, can, isManager, schoolCan, table, state, input, select, field, button, toast, formDialog, dialog, val, num, todayStr, addDays, fmtDateTime, fmtDate, fmtTime, fmtRange, label, empty, errorBox, tabs, money, confirmDialog, fail, appendAll, hashParam, withHashParam } from '../ui.js';
 import { levelOptions, levelName, levelList } from '../levels.js';
 import * as myDay from './school-myday.js';
 import { flags } from './school-myday.js';
@@ -26,26 +26,26 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const pill = (s) => (s.format && s.format !== 'group' ? h('span', { class: 'muted' }, `  ${label(s.format)}`) : null);
 
 export async function render(root) {
-  const staff = isManager() ? (await get('/workforce/staff?status=active')).data : [];
-  const certs = isManager() ? (await get('/workforce/certifications?limit=500')).data : [];
+  const staff = isManager() ? (await get('/workforce/staff?status=active')).data : schoolCan('supervisor') ? (await get('/skischool/instructors')).data : [];
+  const certs = schoolCan('director') ? (await get('/workforce/certifications?limit=500')).data : [];
   const names = new Map(staff.map((s) => [s.id, `${s.first_name} ${s.last_name}`]));
   let pending = 0;
-  if (can('counter')) { try { pending = (await get('/skischool/requests?status=pending')).pending; } catch (_) { /* leave at 0 */ } }
+  if (can('counter') || schoolCan('supervisor')) { try { pending = (await get('/skischool/requests?status=pending')).pending; } catch (_) { /* leave at 0 */ } }
 
   // An instructor opens on My day (their lessons and program groups). The desk opens on Today, the board of who teaches what.
   const instructor = ctx.me && ctx.me.role === 'instructor';
   const items = [];
   if (instructor || (isManager() && ctx.me.staff_id)) items.push(['myday', 'My day', (b) => myDay.render(b)]);
   items.push(['today', 'Board', (b) => boardTab(b, { staff })], ['lessons', 'Lessons', (b) => lessonsTab(b, { staff, certs, names })]);
-  if (can('counter')) items.push(['requests', pending ? `Online requests (${pending})` : 'Online requests', (b) => requestsTab(b)]);
-  if (isManager()) items.push(['instructors', 'Who teaches what', (b) => instructorsTab(b, { certs })], ['hours', 'Instructor hours', (b) => hoursTab(b)]);
+  if (can('counter') || schoolCan('supervisor')) items.push(['requests', pending ? `Online requests (${pending})` : 'Online requests', (b) => requestsTab(b)]);
+  if (schoolCan('director')) items.push(['instructors', 'Who teaches what', (b) => instructorsTab(b, { certs })], ['hours', 'Instructor hours', (b) => hoursTab(b)]);
   for (const part of PARTS) items.push(...part.tabs({ staff, certs, names }));
   // Four groups instead of a long row: the day, bookings, instructors, planning. Each group shows its own small row of
   // views; a group with one view shows none. The group is ?tab= in the address, the view ?view=.
   const GROUPS = [
     ['day', 'Today', ['myday', 'today', 'checkin', 'lineup']],
     ['bookings', pending ? `Bookings (${pending})` : 'Bookings', ['lessons', 'requests', 'privates', 'waitlist']],
-    ['team', instructor ? 'My work' : 'Instructors', ['recaps', 'offers', 'mypay', 'guests', 'instructors', 'payroll', 'hours']],
+    ['team', instructor && !schoolCan('director') ? 'My work' : 'Instructors', ['recaps', 'offers', 'mypay', 'guests', 'instructors', 'payroll', 'hours']],
     ['plan', 'Planning', ['season', 'fill', 'weather', 'copy', 'staffing', 'reports']],
   ];
   const byKey = new Map(items.map((i) => [i[0], i]));
@@ -80,8 +80,8 @@ async function lessonsTab(root, { staff, certs, names }) {
   const from = input({ type: 'date', value: todayStr() });
   const to = input({ type: 'date', value: addDays(todayStr(), 14) });
   const body = h('div');
-  root.append(h('div', { class: 'row' }, isManager() ? button('Add lesson session', () => addSession(staff, certs, load), { kind: 'primary' }) : null, isManager() ? button('Add a series of days', () => addSeries(staff, certs, load)) : null,
-    isManager() ? button('Weather: delay or cancel a day', () => { location.hash = '#/school?tab=plan&view=weather'; }) : null), // Track DIRECTOR: one weather playbook for lessons and programs (cancelDays below is no longer reached)
+  root.append(h('div', { class: 'row' }, schoolCan('director') ? button('Add lesson session', () => addSession(staff, certs, load), { kind: 'primary' }) : null, schoolCan('director') ? button('Add a series of days', () => addSeries(staff, certs, load)) : null,
+    schoolCan('supervisor') ? button('Weather: delay or cancel a day', () => { location.hash = '#/school?tab=plan&view=weather'; }) : null), // Track DIRECTOR: one weather playbook for lessons and programs (cancelDays below is no longer reached)
     h('div', { class: 'inline-form' }, field('From', from), field('To', to), button('Show', () => load(), { kind: 'primary' })), body);
 
   async function load() {
@@ -96,9 +96,9 @@ async function lessonsTab(root, { staff, certs, names }) {
         { head: 'Status', cell: (s) => h('span', null, state(label(s.status), s.status === 'scheduled' ? 'good' : s.status === 'cancelled' ? 'bad' : 'neutral'), s.cancel_reason ? h('div', { class: 'muted small' }, s.cancel_reason) : null) },
         { head: '', actions: true, cell: (s) => [
           button('Roster', () => roster(s, load), { small: true }),
-          isManager() && s.status === 'scheduled' ? button('Instructor', () => setInstructor(s, load), { small: true }) : null,
-          isManager() && s.status === 'scheduled' ? button('Edit', () => editSession(s, load), { small: true, label: `Edit ${s.product} ${fmtRange(s.starts_at, s.ends_at)}` }) : null,
-          isManager() && s.status === 'scheduled' ? button('Cancel', () => cancelOne(s, load), { small: true }) : null,
+          schoolCan('supervisor') && s.status === 'scheduled' ? button('Instructor', () => setInstructor(s, load), { small: true }) : null,
+          schoolCan('director') && s.status === 'scheduled' ? button('Edit', () => editSession(s, load), { small: true, label: `Edit ${s.product} ${fmtRange(s.starts_at, s.ends_at)}` }) : null,
+          schoolCan('director') && s.status === 'scheduled' ? button('Cancel', () => cancelOne(s, load), { small: true }) : null,
         ] },
       ], data, { rowClass: (s) => (s.status === 'scheduled' && !s.instructor_id ? 'attention' : null) }) : empty('No lessons in this range.'));
     } catch (err) { clear(body).append(errorBox(err)); }
@@ -344,7 +344,7 @@ async function boardTab(root, { staff }) {
             x.status !== 'booked' ? h('span', { class: 'muted small' }, `  ${label(x.status)}`) : null))) : h('p', { class: 'muted small' }, 'Nobody booked yet.'),
           h('div', { class: 'row' }, button('Roster', () => roster(s, load), { small: true }),
             can('instructor') ? button('Notes and tip', () => sessionDetails(s, load), { small: true }) : null,
-            isManager() ? button('Instructor', () => setInstructor(s, load), { small: true }) : null)))) : empty('No lessons on this day.'));
+            schoolCan('supervisor') ? button('Instructor', () => setInstructor(s, load), { small: true }) : null)))) : empty('No lessons on this day.'));
     } catch (err) { clear(body).append(errorBox(err)); }
   }
   await load();
@@ -442,7 +442,7 @@ async function roster(session, done) {
         x.contact_phone ? h('div', { class: 'small' }, h('a', { href: `tel:${String(x.contact_phone).replace(/[^\d+]/g, '')}` }, `${x.contact_name || 'Contact'}: ${x.contact_phone}`)) : null,
         x.checked_in_at ? h('div', null, state('Checked in', 'good')) : null) },
       { head: 'Level', cell: (x) => (x.level ? levelName(x.level, session.discipline) : h('span', { class: 'muted' }, 'Not set')) },
-      { head: 'Status', cell: (x) => (can('counter') || r.details ? select([['booked', 'Booked'], ['attended', 'Attended'], ['no_show', 'No show'], ...(can('counter') ? [['cancelled', 'Cancel']] : [])], x.status, {
+      { head: 'Status', cell: (x) => (can('counter') || schoolCan('supervisor') || r.details ? select([['booked', 'Booked'], ['attended', 'Attended'], ['no_show', 'No show'], ...(can('counter') || schoolCan('supervisor') ? [['cancelled', 'Cancel']] : [])], x.status, {
         'aria-label': `Status for ${x.first_name} ${x.last_name}`,
         onChange: async (e) => { try { await patch(`/skischool/bookings/${x.booking_id}`, { status: e.target.value }); toast('Updated'); if (e.target.value === 'cancelled') await load(); } catch (err) { fail(err); } },
       }) : label(x.status)) },
@@ -450,7 +450,7 @@ async function roster(session, done) {
         button('Report card', () => cardDialog(x.person_id, { discipline: session.discipline }), { small: true, label: `Report card for ${x.first_name}` }),
         r.details ? button('Safety', () => editSafety(x, load), { small: true, label: `Safety details for ${x.first_name}` }) : null,
         can('instructor') && r.details ? button('Lesson note', () => bookingNote(x, load), { small: true }) : null,
-        can('counter') ? button(x.confirmed_at ? 'Resend confirmation' : 'Send confirmation', async () => { const o = await post(`/skischool/bookings/${x.booking_id}/confirmation`, {}); toast(`Confirmation sent to ${o.to}`); await load(); }, { small: true, label: `Send the confirmation for ${x.first_name}` }) : null,
+        can('counter') || schoolCan('supervisor') ? button(x.confirmed_at ? 'Resend confirmation' : 'Send confirmation', async () => { const o = await post(`/skischool/bookings/${x.booking_id}/confirmation`, {}); toast(`Confirmation sent to ${o.to}`); await load(); }, { small: true, label: `Send the confirmation for ${x.first_name}` }) : null,
       ] },
     ], data) : h('p', { class: 'muted' }, 'No one is booked yet.'));
   }
@@ -556,10 +556,10 @@ async function levelsTab(root) {
         levels.map((l) => h('details', { class: 'level' },
           h('summary', null, `Level ${l.rank_no}: ${l.name}`, h('span', { class: 'muted' }, `  ${l.skills.length} skill${l.skills.length === 1 ? '' : 's'}`)),
           h('p', { class: 'muted small' }, l.description || (levelList(d)[l.rank_no - 1] || {}).can || ''),
-          h('ul', { class: 'skills' }, l.skills.map((sk) => h('li', null, sk.name, isManager() ? h('span', { class: 'row' }, ' ',
+          h('ul', { class: 'skills' }, l.skills.map((sk) => h('li', null, sk.name, schoolCan('director') ? h('span', { class: 'row' }, ' ',
             button('Rename', () => formDialog('Rename skill', h('div', { class: 'form' }, field('Skill', input({ name: 'name', required: true, maxlength: 160, value: sk.name }))), async (fd) => { await patch(`/skischool/skills/${sk.id}`, { name: val(fd, 'name') }); await load(); }), { small: true, label: `Rename ${sk.name}` }),
             button('Remove', () => confirmDialog('Remove this skill?', sk.name, 'Remove', async () => { try { await del(`/skischool/skills/${sk.id}`); await load(); } catch (err) { fail(err); } }, { danger: true }), { small: true, label: `Remove ${sk.name}` })) : null))),
-          isManager() ? h('div', { class: 'row' },
+          schoolCan('director') ? h('div', { class: 'row' },
             button('Add a skill', () => formDialog(`Add a skill to level ${l.rank_no}`, h('div', { class: 'form' }, field('Skill', input({ name: 'name', required: true, maxlength: 160, placeholder: 'Start with "I can", for example: I can stop on the beginner slope' }))), async (fd) => { await post(`/skischool/levels/${l.id}/skills`, { name: val(fd, 'name') }); await load(); }), { small: true }),
             button('Describe level', () => formDialog(`Level ${l.rank_no}: ${l.name}`, h('div', { class: 'form' }, h('div', { class: 'wide' }, field('What a student at this level can do', input({ name: 'description', maxlength: 300, value: l.description || '' })))), async (fd) => { await patch(`/skischool/levels/${l.id}`, { description: val(fd, 'description') }); await load(); }), { small: true })) : null))));
     }

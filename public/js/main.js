@@ -12,13 +12,13 @@ import * as alerts from './alerts.js';
 import { flush as flushOutbox, waitingCounts, forgetCases, setDeviceKey, dropDeviceKey } from './outbox.js';
 import { buildFrame, GROUP_OF, PATROL_SECTIONS, patrolSection } from './nav.js';
 import { icon } from './icons.js';
-import { h, svg, clear, ctx, can, isManager, toast, loading, errorBox, button, field, input, closeAllDialogs, newPage, hashPath, todayStr } from './ui.js';
+import { h, svg, clear, ctx, can, isManager, schoolCan, toast, loading, errorBox, button, field, input, closeAllDialogs, newPage, hashPath, todayStr } from './ui.js';
 
 const VIEWS = [
   // [hash, label, who may open it, loader]
   ['dashboard', 'Today', () => true, () => import('./views/dashboard.js')],
   ['inbox', 'Inbox', () => true, () => import('./views/inbox.js')],
-  ['sell', 'Sell', () => can('counter'), () => import('./views/sell.js')],
+  ['sell', 'Sell', () => can('counter') || schoolCan('director'), () => import('./views/sell.js')],
   ['gate', 'Gate', () => can('counter', 'staff'), () => import('./views/gate.js')],
   ['conditions', 'Mountain status', () => true, () => import('./views/conditions.js')],
   ['park', 'Terrain park', () => true, () => import('./views/park.js')],
@@ -33,7 +33,7 @@ const VIEWS = [
   ['waivers', 'Waivers', () => can('counter', 'instructor'), () => import('./views/waivers.js')],
   ['lostfound', 'Lost and found', () => can('counter', 'staff'), () => import('./views/lostfound.js')],
   ['shop', 'Online shop', () => can('counter'), () => import('./views/shop.js')],
-  ['catalog', 'Products and prices', () => isManager(), () => import('./views/catalog.js')],
+  ['catalog', 'Products and prices', () => isManager() || schoolCan('director'), () => import('./views/catalog.js')],
   ['messages', 'Messages', () => isManager(), () => import('./views/messages.js')],
   ['money', 'Money', () => isManager(), () => import('./views/money.js')],
   ['workforce', 'Staff and schedule', () => isManager(), () => import('./views/workforce.js')],
@@ -303,7 +303,7 @@ async function showPinSignIn(message) {
 function showEnrollment() {
   clear(app);
   const done = async () => { await start(); };
-  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-logo-dark.png', alt: 'Verdynt/OS, resort operating system', width: '220', height: '109' })), h('h1', null, 'Protect your account.'), h('p', null, ctx.me.mfa_rule === 'mountain' ? 'Your mountain requires two-step sign-in.' : ctx.me.mfa_rule === 'patrol' ? 'Patrol holds patient details, so patrollers use two-step sign-in.' : 'Owners, managers and patrol leads use two-step sign-in, because they can change everything.')), ridge()),
+  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-logo-dark.png', alt: 'Verdynt/OS, resort operating system', width: '220', height: '109' })), h('h1', null, 'Protect your account.'), h('p', null, ctx.me.mfa_rule === 'mountain' ? 'Your mountain requires two-step sign-in.' : ctx.me.mfa_rule === 'patrol' ? 'Patrol holds patient details, so patrollers use two-step sign-in.' : ctx.me.mfa_rule === 'school_director' ? 'Ski school directors sell, refund and approve pay, so they use two-step sign-in.' : 'Owners, managers and patrol leads use two-step sign-in, because they can change everything.')), ridge()),
     h('section', { class: 'signin-form stack' }, h('p', null, 'Add a passkey (quickest: your fingerprint or face) or an authenticator app. Either one works.'), passkeysPanel(done), mfaPanel(done), button('Sign out', () => signOut(), { small: true }))));
 }
 

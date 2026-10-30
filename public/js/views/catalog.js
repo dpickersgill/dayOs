@@ -1,5 +1,5 @@
 import { get, post, put, patch, del } from '../api.js';
-import { h, clear, money, toCents, centsToInput, table, state, input, select, field, button, toast, formDialog, confirmDialog, dialog, tabs, val, num, fmtDate, label, empty, isManager, errorBox, todayStr } from '../ui.js';
+import { h, clear, money, toCents, centsToInput, table, state, input, select, field, button, toast, formDialog, confirmDialog, dialog, tabs, val, num, fmtDate, label, empty, isManager, schoolDirectorOnly, errorBox, todayStr } from '../ui.js';
 import { loadTypes, typeName, forget } from '../guesttypes.js';
 
 const KINDS = ['day_ticket', 'multi_day', 'season_pass', 'punch_card', 'lesson', 'rental', 'program', 'voucher', 'activity'];
@@ -7,7 +7,9 @@ const TICKET_KINDS = ['day_ticket', 'multi_day', 'season_pass', 'punch_card', 'v
 
 export async function render(root) {
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Products and prices')),
-    tabs([['products', 'Products', drawProducts], ['types', 'Guest types', drawTypes], ['promos', 'Promo codes', drawPromos]]));
+    // A ski school director (2026.11.9) sees and changes lesson products and their prices only.
+    schoolDirectorOnly() ? h('p', { class: 'muted' }, 'Lesson products and their prices. Other products belong to a manager.') : null,
+    tabs([['products', 'Products', drawProducts], ...(schoolDirectorOnly() ? [] : [['types', 'Guest types', drawTypes], ['promos', 'Promo codes', drawPromos]])]));
 }
 
 // ---------------------------------------------------------------- guest types (routes/guesttypes.js)
@@ -62,7 +64,7 @@ function need(cents, name) {
 
 // ---------------------------------------------------------------- products
 async function drawProducts(box) {
-  const [{ data }, opts] = await Promise.all([get('/products?limit=500'), get('/products/activity-options').catch(() => ({ attractions: [] }))]);
+  const [{ data }, opts] = await Promise.all([get(`/products?limit=500${schoolDirectorOnly() ? '&kind=lesson' : ''}`), get('/products/activity-options').catch(() => ({ attractions: [] }))]);
   const atts = opts.attractions || [];
   const attName = (id) => (atts.find((a) => a.id === id) || {}).name || 'an attraction no longer in use';
   const reload = async () => { clear(box); box.append(...(await rebuild())); };
@@ -98,7 +100,7 @@ function rulesText(p) {
 function editProduct(p, done, atts = []) {
   const mask = p && p.sale_days ? p.sale_days : 127;
   // An activity: the attraction it is for, and whether it sells by time slot or for the whole day.
-  const kindSel = select(KINDS, p ? p.kind : 'day_ticket', { name: 'kind' });
+  const kindSel = select(schoolDirectorOnly() ? ['lesson'] : KINDS, p ? p.kind : schoolDirectorOnly() ? 'lesson' : 'day_ticket', { name: 'kind' });
   const attSel = select([['', 'Choose…'], ...atts.map((a) => [String(a.id), a.name])], p && p.attraction_id ? String(p.attraction_id) : '', { name: 'attraction_id' });
   const timedSlots = h('input', { type: 'radio', name: 'timed', value: '1', checked: !p || p.kind !== 'activity' || Boolean(p.timed) });
   const timedDay = h('input', { type: 'radio', name: 'timed', value: '0', checked: Boolean(p && p.kind === 'activity' && !p.timed) });

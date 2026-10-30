@@ -6,7 +6,7 @@
 //   Reports: seat fill, revenue, first lesson to return, no-shows, privates and requests, recaps and tips (counts).
 //   Shift offers (instructors): offers sent to me, first to say yes gets it.
 import { get, post, put, del, download } from '../api.js';
-import { h, clear, isManager, can, ctx as uiCtx, table, state, input, select, field, button, toast, formDialog, dialog, confirmDialog, val, num, todayStr, addDays, fmtDate, fmtDateLong, fmtTime, fmtRange, label, empty, errorBox, money, fail, appendAll, loading, hashParam } from '../ui.js';
+import { h, clear, isManager, can, schoolCan, ctx as uiCtx, table, state, input, select, field, button, toast, formDialog, dialog, confirmDialog, val, num, todayStr, addDays, fmtDate, fmtDateLong, fmtTime, fmtRange, label, empty, errorBox, money, fail, appendAll, loading, hashParam } from '../ui.js';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const weekday = (d) => new Date(`${d}T12:00:00Z`).getUTCDay();
@@ -18,12 +18,12 @@ const isInstructorOnly = () => !isManager() && uiCtx.me && uiCtx.me.role === 'in
 
 export function tabs(ctx) {
   const out = [];
-  if (isManager()) {
+  if (schoolCan('director')) {
     out.push(['copy', 'Copy a day', (p) => copyTab(p, ctx)]);
     out.push(['weather', 'Weather', (p) => weatherTab(p, ctx)]);
     out.push(['staffing', 'Staffing', (p) => staffingTab(p, ctx)]);
     out.push(['reports', 'Reports', (p) => reportsTab(p)]);
-  } else if (can('counter')) {
+  } else if (can('counter') || schoolCan('supervisor')) {
     out.push(['weather', 'Weather', (p) => weatherTab(p, ctx)]);
   }
   if (isInstructorOnly()) out.push(['offers', 'Shift offers', (p) => offersTab(p)]);
@@ -165,7 +165,7 @@ const ACTIONS = [
 
 async function weatherTab(root) {
   const history = h('div', { class: 'stack' });
-  if (isManager()) root.append(callForm(() => loadHistory()));
+  if (schoolCan('supervisor')) root.append(callForm(() => loadHistory()));
   root.append(h('section', { class: 'panel stack', 'aria-labelledby': 'wx-hist' }, h('h2', { id: 'wx-hist' }, 'Weather calls and family choices'),
     h('p', { class: 'muted small' }, 'See what each family chose. If a family calls or comes to the window, choose for them here.'), history));
   async function loadHistory() {

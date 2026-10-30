@@ -3,7 +3,7 @@
 // check-in, attendance in one tap, the report card, and the pay line (school-pay.js). Works where the signal drops:
 // the last day loaded is kept on this phone (sealed, see outbox.js) and attendance taps wait and send when back online.
 import { get } from '../api.js';
-import { h, clear, ctx, isManager, state, button, toast, dialog, fmtTime, todayStr, addDays, empty, errorBox, fail, label, field, select } from '../ui.js';
+import { h, clear, ctx, schoolCan, state, button, toast, dialog, fmtTime, todayStr, addDays, empty, errorBox, fail, label, field, select } from '../ui.js';
 import { send, keepCase, keptCase, onChange, pending, flush } from '../outbox.js';
 import { cardDialog } from './school-card.js';
 import * as payPart from './school-pay.js';
@@ -23,7 +23,7 @@ export async function render(root, opts = {}) {
   const body = h('div', { class: 'stack myday', 'aria-live': 'polite' });
   root.append(top, bar, body);
   let staffId = ctx.me.staff_id || null;
-  if (isManager() && !opts.compact) {
+  if (schoolCan('supervisor') && !opts.compact) {
     try {
       const { data } = await get('/skischool/instructors');
       const teach = data.filter((x) => x.teaches);
@@ -56,7 +56,7 @@ export async function render(root, opts = {}) {
     clear(body).append(h('p', { class: 'loading' }, 'Loading…'));
     let note = null;
     try {
-      data = await get(`/skischool/my-day?date=${date}${isManager() && staffId !== ctx.me.staff_id ? `&staff_id=${staffId}` : ''}`);
+      data = await get(`/skischool/my-day?date=${date}${schoolCan('supervisor') && staffId !== ctx.me.staff_id ? `&staff_id=${staffId}` : ''}`);
       keepCase(keepId(date, staffId), { data, at: Date.now() });
       flush();
     } catch (err) {
@@ -74,7 +74,7 @@ export async function render(root, opts = {}) {
   function draw(note) {
     clear(body);
     if (note) body.append(note);
-    body.append(h('h2', { class: 'myday-day' }, `${dayWords(date, data.today)}${data.staff && isManager() ? `: ${data.staff.name}` : ''}`));
+    body.append(h('h2', { class: 'myday-day' }, `${dayWords(date, data.today)}${data.staff && schoolCan('supervisor') ? `: ${data.staff.name}` : ''}`));
     if (!data.items.length) { body.append(empty(date === data.today ? 'No lessons or program groups today.' : 'No lessons or program groups on this day.')); return; }
     for (const it of data.items) body.append(it.kind === 'lesson' ? lessonCard(it) : meetingCard(it));
   }

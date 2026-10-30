@@ -119,11 +119,41 @@ export async function personPage(root, id) {
             h('p', { class: 'muted small' }, `Patrol access: ${label(p.patrol.access_level || 'patrol')}${Number(p.patrol.exceptions) ? `, with ${p.patrol.exceptions} exception${Number(p.patrol.exceptions) === 1 ? '' : 's'}` : ''}. ${isManager() ? 'Change it with Edit details, or single permissions in Patrol, People, Roster.' : 'A patrol Admin sets access and permissions in Patrol, People, Roster.'}`),
             p.login ? null : h('p', { class: 'muted small' }, 'They need a login to open Patrol. Create one under Sign-in.')]
             : h('p', { class: 'muted' }, 'Not on ski patrol. Putting them on adds them to the patrol roster and lets them open Patrol with their login.')),
-        card('Ski school', null, h('ul', { class: 'plain-list' },
+        card('Ski school', isManager() ? button('Change access', () => schoolAccessDialog(id, name, draw), { small: true, label: `Change ski school access for ${name}` }) : null, schoolAccessLine(id), h('ul', { class: 'plain-list' },
           h('li', null, p.instructor ? [h('b', null, 'Ski school: '), p.instructor.is_public ? 'public instructor profile' : 'instructor profile (not public)', p.instructor.disciplines ? `, ${p.instructor.disciplines}` : '', '. ', h('a', { href: '#/availability' }, 'Instructor availability')] : h('span', { class: 'muted' }, 'No instructor profile.')))),
         card('Contact', null, h('p', null, [p.email, p.phone].filter(Boolean).join(', ') || h('span', { class: 'muted' }, 'No email or phone.')))));
   }
   await draw();
+}
+
+// ---------------------------------------------------------------- ski school access (2026.11.9)
+// Instructor, Supervisor or Director on the person's instructor login (src/lib/schoolaccess.js). Owners and managers only.
+const SCHOOL_ACCESS = {
+  instructor: 'Teaches their own lessons: My day, rosters, recaps and pay.',
+  supervisor: 'Runs the day: the lineup, check-in, rosters, assigning instructors, bookings, online requests, waitlists and weather calls. No planning or pay.',
+  director: 'Runs the ski school: the season plan, lessons, instructors, pay approval, school settings and reports, lesson products and prices, and selling and refunding lessons. Never Money or billing. Must use two-step sign-in.',
+};
+function schoolAccessLine(id) {
+  const box = h('div', { class: 'school-access', 'data-school-access': '' });
+  get(`/skischool/access/${id}`).then((a) => {
+    const only = a.login_role && a.login_role !== 'instructor';
+    box.append(h('p', null, h('b', null, 'Ski school access: '), label(a.level), '. ', h('span', { class: 'muted small' }, SCHOOL_ACCESS[a.level])),
+      only ? h('p', { class: 'muted small' }, `Their login is ${label(a.login_role)}, so this level does not change what they can do.`) : null,
+      a.level === 'director' && !a.two_step ? h('p', { class: 'small', role: 'note' }, state('Two-step sign-in not set up', 'warn'), ' They are asked to set it up the next time they open the app.') : null);
+  }).catch(() => { /* not an owner or manager: nothing to show */ });
+  return box;
+}
+async function schoolAccessDialog(id, name, done) {
+  const now = await get(`/skischool/access/${id}`);
+  const choices = now.levels.map((l) => h('label', { class: 'check-row' }, h('input', { type: 'radio', name: 'level', value: l.key, checked: l.key === now.level }),
+    h('span', null, h('b', null, l.label), h('br'), h('span', { class: 'muted small' }, SCHOOL_ACCESS[l.key]))));
+  formDialog(`Ski school access for ${name}`, h('fieldset', { class: 'stack' }, h('legend', null, 'What they can do in Ski school'), choices,
+    now.login_role ? null : h('p', { class: 'muted small' }, 'They have no login yet. The level applies once they have an instructor login.')), async (fd) => {
+    const level = fd.get('level');
+    const out = await put(`/skischool/access/${id}`, { level });
+    toast(level === 'director' && !out.two_step ? `${name} is a Director. They set up two-step sign-in when they next open the app.` : `${name} is now ${label(level)} in Ski school`);
+    await done();
+  }, { submitText: 'Save' });
 }
 
 function editDetails(p, done) {

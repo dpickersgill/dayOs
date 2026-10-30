@@ -1012,6 +1012,21 @@ export const ARTICLES = [
     intro: 'Pass holders can renew automatically at the best price, and a pass you cap can have a waitlist that offers released places in order.',
     steps: ['Switch on Auto-renew under Fair promises, set the renewal day and the price: the lower of last season\'s and this season\'s, or this season\'s.', 'Guests turn it on from their account, or staff turn it on for them. A week before the day they get a reminder with the price and a link to turn it off or change the card.', 'On the renewal day the saved card is charged and the new pass is made and emailed.', 'To cap a pass, open Pass caps, waitlist and auto-renew and set Most sold. When a place opens, the first guest waiting is offered it by email for 48 hours, then the next.'],
     tips: ['A card that does not go through is tried again each day for two weeks, with an email asking for a new card.', 'Joining the waitlist never tells anyone whether an email is already on it.'], related: ['payment-plans'] },
+
+  // ---- Lesson planning 2026.11.9, Track ROLE: the ski school Director and Supervisor
+  { id: 'school-access-levels', app: 'workforce', title: 'Make someone the ski school Director or a Supervisor', keywords: 'ski school director supervisor access level role instructor promote lead coordinator two-step',
+    intro: 'An instructor login can have one of three ski school access levels: Instructor, Supervisor or Director. Only owners and managers set it.',
+    steps: ['Open Staff and schedule, Staff, and tap the person.', 'On the Ski school card, press Change access.', 'Pick Instructor, Supervisor or Director and press Save. It works from their next tap in the app.', 'A Director must use two-step sign-in. If they have not set it up, the app asks them to before anything else.'],
+    tips: ['The level applies to an instructor login. Owners and managers can already do everything.', 'Every change is kept in the audit log.', 'Setting a level for someone with no teaching profile makes one. Set what they teach under Ski school, Instructors, Who teaches what.'], related: ['school-director-role', 'school-supervisor-role'] },
+  { id: 'school-director-role', app: 'school', title: 'What the ski school Director can do', keywords: 'director role access plan season lessons pay approval prices sell lessons refund limit',
+    intro: 'The Director runs the ski school without a manager login: planning, lessons, instructors, pay and lesson prices.',
+    steps: ['Ski school: the season plan, adding and changing lessons, copy a day, holidays, weather calls, staffing and shift offers, reports, levels and skills, and the school settings.', 'Instructors: who teaches what, certifications on their teaching profiles, pay rates and payroll approval.', 'Products and prices: lesson products and their prices only.', 'Sell: lessons, lesson packages and gift cards at the window. Refunds of lesson orders up to the counter refund limit (Settings, Sell and gate).'],
+    tips: ['Never Money, billing, logins, other teams or other apps\' settings. A manager does those.', 'A sale with a ticket or rental in it is refused. Ask the counter to sell it.', 'The Director must use two-step sign-in, and cannot use a PIN.'], related: ['school-access-levels', 'school-supervisor-role'] },
+  { id: 'school-supervisor-role', app: 'school', title: 'What a ski school Supervisor can do', keywords: 'supervisor role run the day lineup check-in assign instructors bookings waitlist weather',
+    intro: 'A Supervisor runs the day on the hill and at the desk, without planning or pay.',
+    steps: ['Today: check-in, the lineup board (the suggested split, Use this split, class size) and moving students.', 'Bookings: rosters with each child\'s details, booking students, online requests, privates and the waitlist.', 'Assign instructors to lessons, see any instructor\'s My day, and make weather calls.', 'Planning: look at Fill and staff to see where the day is short.'],
+    tips: ['A Supervisor cannot add lessons, publish the season plan, change prices, approve pay or change school settings.', 'An instructor sees only their own lessons. A Supervisor sees every lesson of the day.'], related: ['school-access-levels', 'school-director-role'] },
+  // ---- end Track ROLE
 ];
 
 export const articleById = (id) => ARTICLES.find((a) => a.id === id) || null;

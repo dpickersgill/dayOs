@@ -2,7 +2,7 @@
 // and the customer's details added at the end. The gate scanner is its own page (gate.js).
 import { loadTypes, saleOptions, typeName } from '../guesttypes.js';
 import { get, post } from '../api.js';
-import { h, clear, ctx, isManager, money, toCents, table, state, input, select, field, button, toast, dialog, formDialog, todayStr, fmtDate, fmtDateTime, label, empty, errorBox, tabs, fail, fmtTime, addDays } from '../ui.js';
+import { h, clear, ctx, isManager, schoolDirectorOnly, money, toCents, table, state, input, select, field, button, toast, dialog, formDialog, todayStr, fmtDate, fmtDateTime, label, empty, errorBox, tabs, fail, fmtTime, addDays } from '../ui.js';
 import { loadCustomerForm } from './customer-form.js';
 import { checkoutDialog, lineApi } from './sell-checkout.js';
 import { drawActivities } from './sell-activities.js';
@@ -27,10 +27,11 @@ async function loadDrawer() {
 
 export async function render(root, params = []) {
   // Line mode (Track WINDOW): one phone screen for line-busting, today's tickets as big buttons. The full Sell stays.
-  const lineOn = queryMode() === 'line';
+  const lineOn = queryMode() === 'line' && !schoolDirectorOnly(); // a ski school director sells lessons only (2026.11.9)
   root.append(h('div', { class: 'page-head' }, h('h1', null, lineOn ? 'Sell: Line' : 'Sell'), h('div', { class: 'row' }, drawerBadge, button('Cash drawer', () => drawerDialog(loadDrawer), { small: true }),
     // the address changes (so a phone can keep #/sell?mode=line as a bookmark) and the page draws again in the other mode
     h('a', { class: 'btn', href: lineOn ? '#/sell' : '#/sell?mode=line', 'data-line-toggle': '', 'aria-pressed': String(lineOn), onclick: (e) => { e.preventDefault(); location.hash = lineOn ? '#/sell' : '#/sell?mode=line'; clear(root); render(root, params); } }, lineOn ? 'Full Sell' : 'Line mode'), h('a', { class: 'btn', href: '#/gate' }, 'Open the gate'))));
+  if (schoolDirectorOnly()) root.querySelectorAll('[data-line-toggle], a[href="#/gate"]').forEach((a) => a.remove());
   await loadDrawer();
   if (lineOn) { await lineMode(root, { drawerOpen: () => drawer.open, onOpenDrawer: (after) => drawerDialog(async () => { await loadDrawer(); after(); }) }); return; }
   const left = h('div', { class: 'stack sell-main' });
@@ -178,8 +179,10 @@ async function sellPanel(root) {
   ];
   // Partner passes is the last tab, unless the mountain turned it off (Settings, Sell and gate).
   if (partnerTab) items.push(['partners', 'Partner passes', async (b) => (await import('./partners.js')).drawPartners(b)]);
+  // A ski school director (2026.11.9) sells lessons, lesson packages and gift cards only.
+  if (schoolDirectorOnly()) items.splice(0, items.length, ...items.filter((i) => ['lessons', 'gift'].includes(i[0])));
   const asked = queryTab();
-  const menuBox = h('section', { class: 'card sell-menu' }, tabs(items, items.some((i) => i[0] === asked) ? asked : 'tickets'));
+  const menuBox = h('section', { class: 'card sell-menu' }, tabs(items, items.some((i) => i[0] === asked) ? asked : items[0][0]));
 
   // ---- the basket
   async function refresh() {
