@@ -203,6 +203,7 @@ const MESSAGES = {
   ok: 'Welcome', expired: 'Ticket expired', not_yet_valid: 'Not valid yet', void: 'Ticket voided', no_uses: 'No rides left',
   unknown: 'Not recognized', duplicate: 'Already used, see staff', card_blocked: 'Card blocked, see staff',
   wrong_place: 'Wrong attraction', too_early: 'Too early for this slot', too_late: 'This slot has ended', not_included: 'Not included, see staff',
+  blocked: 'Pass on hold, see staff', plan_unpaid: 'Payment overdue, see staff', // FAIR: a manager's block, a payment plan left unpaid
 };
 
 /** A device trades a manager's one-time code for its own long-lived key. The code works once and expires. */

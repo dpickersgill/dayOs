@@ -149,7 +149,7 @@ async function priceLines(conn, tenantId, lines, today) {
     if (ln.type === 'ticket') {
       const validOn = ln.valid_on || today;
       if (validOn < today) throw bad('Tickets cannot be sold for a past date');
-      const { product, cents } = await unitPrice(conn, tenantId, ln.product_id, ln.tier, validOn);
+      const { product, cents, walkup } = await unitPrice(conn, tenantId, ln.product_id, ln.tier, validOn, { at: 'window' }); // FAIR: the walk-up cap
       if (!TICKET_KINDS.includes(product.kind)) throw bad(`${product.name} is a ${product.kind} product and cannot be sold as a ticket`);
       if (ln.partner) {
         // One pass, one day, one person; the program's rules decide free or discounted (locked while selling).
@@ -163,7 +163,7 @@ async function priceLines(conn, tenantId, lines, today) {
         out.push({ i, line: ln, type: 'ticket', name: `${product.name} (${c.program.name}${c.kind === 'free' ? ', free day' : `, ${c.percent}% off`})`, detail: `${ln.tier}, ${validOn}`, quantity: 1, unit, product, validOn, partner: c, windowCents: cents });
         continue;
       }
-      out.push({ i, line: ln, type: 'ticket', name: product.name, detail: `${ln.tier}, ${validOn}`, quantity: ln.quantity, unit: cents, product, validOn });
+      out.push({ i, line: ln, type: 'ticket', name: product.name, detail: `${ln.tier}, ${validOn}${walkup ? ', walk-up cap applied' : ''}`, quantity: ln.quantity, unit: cents, product, validOn, walkup }); // FAIR: the cashier sees the cap
     } else if (ln.type === 'lesson') {
       const session = await one(conn, 'SELECT * FROM lesson_sessions WHERE tenant_id = ? AND id = ?', [tenantId, ln.session_id]);
       if (!session) throw notFound('Lesson session');
@@ -258,7 +258,7 @@ async function totals(conn, tenantId, priced, promoCode, today, lock) {
   return { subtotal, discount, tax, taxes, total: subtotal - discount + tax, giftCents, promo };
 }
 
-const describe = (p) => ({ index: p.i, type: p.type, name: p.name, detail: p.detail, quantity: p.quantity, unit_price_cents: p.unit, line_cents: p.cents, discount_cents: p.discount || 0, tax_cents: p.tax || 0,
+const describe = (p) => ({ index: p.i, type: p.type, name: p.name, detail: p.detail, quantity: p.quantity, unit_price_cents: p.unit, line_cents: p.cents, discount_cents: p.discount || 0, tax_cents: p.tax || 0, ...(p.walkup ? { walkup: p.walkup } : {}),
   ...(p.group ? { group: p.group } : {}), ...(p.rewardsUsed ? { reward_cents: (p.unitOff || []).reduce((n, c) => n + c, 0), rewards: p.rewardsUsed } : {}),
   ...(p.partner ? { partner: { program: p.partner.program.name, kind: p.partner.kind, percent: p.partner.percent, window_cents: p.windowCents, used: p.partner.used, free_days: p.partner.program.free_days, discount_days: p.partner.program.discount_days, history: p.partner.history.map((h) => String(h.on_date).slice(0, 10)) } } : {}) });
 

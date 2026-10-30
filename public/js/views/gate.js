@@ -23,6 +23,8 @@ const SCAN_TEXT = {
   too_early: ['Too early for this time', 'warn'],
   too_late: ['This time has ended', 'bad'],
   not_included: ['Not included', 'bad'],
+  blocked: ['Pass on hold', 'bad'], // FAIR: a manager's block (the guest was emailed the reason)
+  plan_unpaid: ['Payment overdue', 'bad'], // FAIR: a payment plan left unpaid
 };
 // Where this screen scans (kept on this device): the lifts, or one attraction, where activity tickets are checked.
 const PLACE_KEY = 'verdynt.gate.place';

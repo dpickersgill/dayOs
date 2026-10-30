@@ -1,0 +1,35 @@
+/* Fair by design guest pages (/guarantee, /blocked, /plan, /renew, /pass-offer): one private page each, from an email.
+   Uses book.css for the base (colors, hero, cards, buttons). */
+
+/* ---- the page */
+.fair { max-width: 640px; margin: -32px auto 0; padding: 0 16px 48px; display: grid; gap: 16px; position: relative; z-index: 2; }
+.fair .card { display: grid; gap: 12px; }
+.fair-what { display: grid; gap: 2px; }
+.fair-what .big { font-size: 1.25rem; font-weight: 700; line-height: 1.25; }
+.fair-status { padding: 12px 14px; border-radius: var(--r-sm); font-weight: 700; background: var(--blue-tint); color: var(--blue-dark); }
+.fair-status.good { background: var(--green-tint); color: var(--green); }
+.fair-status.warn { background: var(--amber-tint); color: var(--amber); }
+.fair-status.bad { background: var(--red-tint); color: var(--red); }
+.fair-err { padding: 12px 14px; border-radius: var(--r-sm); background: var(--red-tint); color: var(--red); }
+.fair-code { font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size: 1.75rem; letter-spacing: 0.12em; font-weight: 700; text-align: center; padding: 14px; border: 2px dashed var(--line-strong); border-radius: var(--r-sm); background: #fff; word-break: break-all; }
+.fair-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.fair-actions .btn { flex: 1 1 auto; }
+.fair label { font-weight: 700; display: grid; gap: 6px; }
+.fair textarea { font-weight: 400; width: 100%; min-height: 96px; padding: 10px 12px; border: 1.5px solid var(--line-strong); border-radius: var(--r-sm); font: inherit; color: var(--ink); background: #fff; resize: vertical; }
+.fair-note { color: var(--muted); font-size: 0.9375rem; }
+.fair-sched { width: 100%; border-collapse: collapse; font-size: 0.9375rem; }
+.fair-sched th, .fair-sched td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+.fair-sched td.amt { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fair-sched th.amt { text-align: right; }
+.fair-pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 0.8125rem; font-weight: 700; background: var(--snow); color: var(--muted); }
+.fair-pill.paid, .fair-pill.settled { background: var(--green-tint); color: var(--green); }
+.fair-pill.failed { background: var(--red-tint); color: var(--red); }
+.fair-pill.due { background: var(--blue-tint); color: var(--blue-dark); }
+.fair-switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1.5px solid var(--line-strong); border-radius: var(--r-sm); background: #fff; }
+.fair-switch strong { font-size: 1.0625rem; }
+.fair input.switch { appearance: none; -webkit-appearance: none; width: 52px; height: 30px; border-radius: 15px; background: var(--line-strong); border: 0; position: relative; cursor: pointer; margin: 0; flex: none; }
+.fair input.switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 12px; background: #fff; box-shadow: 0 1px 2px rgba(14, 38, 50, 0.3); transition: left 0.15s; }
+.fair input.switch:checked { background: var(--green); }
+.fair input.switch:checked::after { left: 25px; }
+.fair input.switch:disabled { opacity: 0.5; cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) { .fair input.switch::after { transition: none; } }

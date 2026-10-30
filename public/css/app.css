@@ -3437,3 +3437,12 @@ fieldset.safety legend { font-weight: 700; padding: 0 4px; }
   .gr-pair select { min-width: 0; max-width: 100%; }
   .gr-save .btn { flex: 1 1 auto; }
 }
+
+/* ---- Guests round 2, FAIR: the fair settings (Settings, Sell and gate) */
+.fair-set-head { margin: 18px 0 2px; font-size: 1rem; color: var(--ink-2); }
+.fair-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.fair-badge { display: inline-block; padding: 3px 12px; border-radius: 999px; background: var(--sel-bg); color: var(--sel-ink); font-weight: 700; font-size: .875rem; }
+.fair-who { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.fair-who img { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; flex: none; }
+.fair-pass { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 6px; display: grid; gap: 4px; }
+.fair-pass:first-of-type { border-top: 0; margin-top: 0; padding-top: 0; }
