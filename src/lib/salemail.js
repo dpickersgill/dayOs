@@ -119,7 +119,8 @@ async function confirmation(tenantId, { orderId = null, shopOrderId = null }, ba
   const cond = await arrival.conditions(pool, tenantId, todayIn(t.timezone)).catch(() => null);
   const fair = require('./fairprice');
   for (const k of tickets) k.guarantee = await fair.guaranteeLink(pool, tenantId, k.id, base).catch(() => null);
-  const firstTimers = tickets.filter((k) => k.first_timer).map((k) => k.first_name).filter(Boolean);
+  const firstTimers = [...new Set(tickets.filter((k) => k.first_timer).map((k) => k.first_name).filter(Boolean))];
+  const andList = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}` : xs[0] || '');
   const link = to.token && base ? `${base}/shop/${t.slug}?order=${to.token}` : null;
   const account = base ? `${base}/family/${t.slug}` : null;
   const condLink = base ? `${base}/shop/${t.slug}` : null;
@@ -130,12 +131,12 @@ async function confirmation(tenantId, { orderId = null, shopOrderId = null }, ba
   const who = (k) => `${k.first_name ? `${k.first_name} ${k.last_name}` : 'Guest'}`;
 
   const text = [`Hi ${first(to.name)},`, '', `You are all set for ${t.name} (${ref}, ${money(total)}).`, '',
-    ...tickets.map((k) => `- ${who(k)}: ${k.product}, ${daysText(k.valid_from, k.valid_to)}. Code ${k.code}${k.guarantee ? `. Conditions guarantee: ${k.guarantee}` : ''}`),
+    ...tickets.map((k) => `- ${k.product}${k.first_name ? `, ${who(k)}` : ''}: ${daysText(k.valid_from, k.valid_to)}. Code ${k.code}${k.guarantee ? `. Conditions guarantee: ${k.guarantee}` : ''}`),
     ...gifts.map((g) => `- Gift card ${g.code}, ${money(g.initial_cents)}${g.recipient_name ? ` for ${g.recipient_name}` : ''}`), '',
     'Show the barcode at the lift. Turn your screen brightness up.', link ? `Your tickets: ${link}` : '', '',
     `Where to park: ${arrive.park_text}`, `Where to go first: ${arrive.first_text}`, t.address ? `Find us: ${t.address}` : '',
     cond && cond.words ? `Today at ${t.name}: ${cond.words}.` : '', condLink ? `Conditions: ${condLink}` : '', '',
-    ...(firstTimers.length ? [`${firstTimers.join(' and ')}: your first day, step by step`, ...FIRST_DAY.map((x, i) => `${i + 1}. ${x}`), ''] : []),
+    ...(firstTimers.length ? [`${andList(firstTimers)}: your first day, step by step`, ...FIRST_DAY.map((x, i) => `${i + 1}. ${x}`), ''] : []),
     account ? `Your account (passes, family, rewards): ${account}` : '', t.phone ? `Questions? Call ${t.phone}.` : ''].filter((x, i, a) => x !== '' || a[i - 1] !== '').join('\n');
 
   const C = { ink: '#12303a', soft: '#5b6b73', line: '#d9e1e5', bg: '#f3f6f7', accent: '#1a5fb4' };
@@ -162,7 +163,7 @@ async function confirmation(tenantId, { orderId = null, shopOrderId = null }, ba
   <tr><td data-slot="wallet" style="display:none;max-height:0;overflow:hidden;mso-hide:all"></td></tr>
   ${td(h2('Getting here') + p(`<b>Park:</b> ${esc(arrive.park_text)}`) + p(`<b>First:</b> ${esc(arrive.first_text)}`) + (t.address ? p(esc(t.address), `color:${C.soft}`) : ''))}
   ${cond && cond.words ? td(h2('Today on the mountain') + p(`${esc(cond.words.charAt(0).toUpperCase() + cond.words.slice(1))}.${condLink ? ` <a href="${esc(condLink)}" style="color:${C.accent}">See conditions</a>` : ''}`)) : condLink ? td(p(`<a href="${esc(condLink)}" style="color:${C.accent}">Today's conditions</a>`)) : ''}
-  ${firstTimers.length ? td(h2(`${esc(firstTimers.join(' and '))}: your first day, step by step`) + `<ol style="margin:0 0 12px;padding-left:20px;font:15px/1.5 Arial,Helvetica,sans-serif;color:${C.ink}">${FIRST_DAY.map((x) => `<li style="margin:0 0 6px">${esc(x)}</li>`).join('')}</ol>`) : ''}
+  ${firstTimers.length ? td(h2(`${esc(andList(firstTimers))}: your first day, step by step`) + `<ol style="margin:0 0 12px;padding-left:20px;font:15px/1.5 Arial,Helvetica,sans-serif;color:${C.ink}">${FIRST_DAY.map((x) => `<li style="margin:0 0 6px">${esc(x)}</li>`).join('')}</ol>`) : ''}
   ${account ? td(p(`Passes, family and rewards are in <a href="${esc(account)}" style="color:${C.accent}">your account</a>.`, `color:${C.soft}`)) : ''}
   ${td(p(t.phone ? `Questions? Call ${esc(t.phone)}.` : '&nbsp;', `color:${C.soft};padding-bottom:12px`))}
 </table></td></tr></table></body></html>`;

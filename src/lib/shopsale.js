@@ -184,7 +184,7 @@ async function quote(conn, tenant, items, extras = {}) {
   for (const g of giftsIn) {
     if (g.amount_cents < GIFT_MIN || g.amount_cents > GIFT_MAX) throw bad(`A gift card is ${money(GIFT_MIN)} to ${money(GIFT_MAX)}`);
     priced.push({ type: 'gift_card', unit: g.amount_cents, cents: g.amount_cents });
-    gifts.push({ amount_cents: g.amount_cents, recipient_name: g.recipient_name || null, message: g.message || null });
+    gifts.push({ amount_cents: g.amount_cents, recipient_name: g.recipient_name || null, message: g.message || null, ...(g.experience ? { experience: g.experience } : {}) });
   }
   // Activities: a place in a time slot (or for the whole day) for each guest. Places are counted the same way as the
   // day limits above (sold plus baskets on the card page); placing the order counts them again under the products' locks.
@@ -510,6 +510,8 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
     await conn.query("INSERT INTO gift_card_txns (tenant_id, gift_card_id, order_id, kind, delta_cents, balance_after_cents) VALUES (?, ?, ?, 'issue', ?, ?)", [tenantId, gc.insertId, orderId, g.amount_cents, g.amount_cents]);
     await conn.query("INSERT INTO order_items (tenant_id, order_id, line_kind, person_id, gift_card_id, tier, quantity, unit_price_cents, discount_cents, tax_cents) VALUES (?, ?, 'gift_card', ?, ?, 'adult', 1, ?, 0, 0)", [tenantId, orderId, contact.id, gc.insertId, g.amount_cents]);
     giftCodes.push(code);
+    // A gift experience ("First day on snow"): delivered to the person receiving it on its date by the guests job.
+    if (g.experience) await require('../routes/guestsaccount').attachExperience(conn, tenantId, { giftCardId: gc.insertId, orderId, gift: g.experience });
   }
   // A reward used online: redeemed here, in the order's transaction under a row lock, so two orders cannot both use it
   // (the second payment is refunded in full). The line it paid for carries reward_id; a refund puts it back (rewards.release).
@@ -539,7 +541,7 @@ async function reloadable(conn, tenantId, number, today, lock = false) {
   const raw = String(number || '').trim().toUpperCase().replace(/[\s-]/g, '');
   if (raw.length < 4 || raw.length > 32) return null;
   const cands = [...new Set([raw, ...A.uidCandidates(raw)])];
-  const card = await one(conn, `SELECT * FROM rfid_cards WHERE tenant_id = ? AND (UPPER(REPLACE(label, ' ', '')) = ? OR uid IN (?)) ORDER BY id LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [tenantId, raw, cands]);
+  const card = await one(conn, `SELECT * FROM rfid_cards WHERE tenant_id = ? AND (UPPER(REPLACE(REPLACE(label, ' ', ''), '-', '')) = ? OR uid IN (?)) ORDER BY id LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [tenantId, raw, cands]);
   if (!card || !['free', 'assigned'].includes(card.status)) return null;
   if (card.ticket_id) {
     const held = await one(conn, 'SELECT t.status, t.valid_to, p.kind FROM tickets t JOIN products p ON p.tenant_id = t.tenant_id AND p.id = t.product_id WHERE t.tenant_id = ? AND t.id = ?', [tenantId, card.ticket_id]);

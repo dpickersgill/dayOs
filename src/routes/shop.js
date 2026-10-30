@@ -140,6 +140,13 @@ async function prepare(req, t, b) {
   for (const it of b.items || []) await fill(it.holder, { photo: true });
   for (const a of b.activities || []) await fill(a.holder);
   for (const a of b.addons || []) await fill(a.holder);
+  for (const g of b.gifts || []) {
+    if (!g.experience) continue;
+    const today = todayIn(t.timezone);
+    if (g.experience.deliver_on < today || g.experience.deliver_on > addDays(today, 365)) throw bad('Pick a delivery day from today to a year ahead');
+    g.amount_cents = (await require('./guestsaccount').giftValue(pool, t.id, g.experience)).cents;
+    g.recipient_name = g.experience.recipient_name; g.message = (g.experience.message || '').slice(0, 300) || undefined;
+  }
   const extras = { ...b, household: hh };
   if (b.reload_card) {
     const today = todayIn(t.timezone);
@@ -167,7 +174,14 @@ const addonSchema = z.object({ product_id: z.number().int().positive(), quantity
   holder: holderSchema.omit({ photo: true }).optional(), valid_on: dateStr.optional() });
 // An activity: one guest's place on an attraction on a day, in a time slot (none for a day pass).
 const activitySchema = z.object({ product_id: z.number().int().positive(), valid_on: dateStr, start_time: z.string().trim().max(8).optional(), holder: holderSchema });
-const giftSchema = z.object({ amount_cents: z.number().int().min(500).max(100000), recipient_name: z.string().trim().max(150).optional(), message: z.string().trim().max(300).optional() });
+// A gift experience (Guests round 2): a theme, what it includes, who it is for and when it arrives. Its price is worked out
+// on the server (lib routes/guestsaccount.js giftValue); amount_cents is then set from it.
+const experienceSchema = z.object({
+  theme: z.string().trim().min(1).max(80), includes: z.array(z.enum(['ticket', 'rental', 'lesson'])).max(3).default([]), amount_cents: z.number().int().min(0).max(100000).default(0),
+  from_name: z.string().trim().min(1).max(150), recipient_name: z.string().trim().min(1).max(150), recipient_email: z.string().trim().toLowerCase().email().max(255),
+  message: z.string().trim().max(500).optional(), deliver_on: dateStr,
+});
+const giftSchema = z.object({ amount_cents: z.number().int().min(0).max(100000).default(0), recipient_name: z.string().trim().max(150).optional(), message: z.string().trim().max(300).optional(), experience: experienceSchema.optional() });
 const basketShape = {
   items: z.array(itemSchema).max(shop.MAX_ITEMS).default([]),
   addons: z.array(addonSchema).max(10).default([]),
