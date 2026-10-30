@@ -32,6 +32,11 @@ const SOLUTIONS = [['ski-patrol', 'Ski patrol'], ['lift-ticket-software', 'Lift 
   ['ski-rental-software', 'Ski rentals'], ['ski-waiver-software', 'Online waivers'], ['lift-maintenance-software', 'Lift and fleet maintenance'],
   ['ski-area-pos', 'Ski area POS'], ['online-lift-ticket-sales', 'Online ticket sales'], ['terrain-park-software', 'Terrain park'], ['attraction-ticketing-software', 'Attractions and activities'], ['ski-area-staff-scheduling', 'Staff scheduling']];
 const SEO = require('../lib/seo');
+const GD = require('../lib/goodday');
+// The Good Day (guests round 2): the newsletter's home and its issues, one file each under src/site/good-day.
+PAGES['good-day'] = 'good-day/index';
+for (const i of GD.issues()) PAGES[i.slug] = i.slug;
+Object.assign(SEO.META, GD.meta());
 const cache = new Map();
 
 const hostOf = (req) => String(req.get('host') || '').toLowerCase().replace(/:\d+$/, '');
@@ -60,13 +65,20 @@ const CHEVRON = '<svg class="chev" width="12" height="12" viewBox="0 0 12 12" ar
  * in the Product menu, the phone menu, the phone bar and each page's own buttons.
  * Narrower screens: a Menu button opening a full-screen menu, its two buttons kept at the bottom; on phones a bar at the
  * bottom of the page holds the two things people came to do. */
+// The Resources menu: the guides, and The Good Day newsletter.
+const RESOURCES = [['resources', 'Guides and checklists', 'Printable checklists and how-to guides'], ['good-day', 'The Good Day', 'Our newsletter, every other week']];
 function header(current) {
   const cur = (s) => (s === current ? ' aria-current="page"' : '');
   const sols = SOLUTIONS.filter(([s]) => s !== 'ski-patrol');
-  const links = NAV.map(([s, t]) => `<li><a class="sn-a" href="{{SITE}}/${s}"${cur(s)}>${t}</a></li>`).join('\n        ');
+  const resOn = RESOURCES.some(([s]) => s === current) || /^good-day/.test(current || ''); // an issue sits under The Good Day
+  const resMenu = `<li class="sn-dd sn-dd-sm">
+          <a class="sn-a" href="{{SITE}}/resources"${resOn ? ` aria-current="${current === 'resources' ? 'page' : 'true'}"` : ''}>Resources${CHEVRON}</a>
+          <div class="sn-panel sm"><ul class="sn-sols" aria-label="Resources">${RESOURCES.map(([s, t, line]) => `<li><a href="{{SITE}}/${s}"${cur(s)}><b>${t}</b><span>${line}</span></a></li>`).join('')}</ul></div>
+        </li>`;
+  const links = NAV.map(([s, t]) => (s === 'resources' ? resMenu : `<li><a class="sn-a" href="{{SITE}}/${s}"${cur(s)}>${t}</a></li>`)).join('\n        ');
   const productOn = current === 'product' || sols.some(([s]) => s === current);
   const panel = sols.map(([s, t]) => `<li><a href="{{SITE}}/${s}"${cur(s)}><b>${t}</b><span>${SOLUTION_LINES[s]}</span></a></li>`).join('\n              ');
-  const phoneLinks = [['', 'Home', '{{HOME}}'], ['product', 'Product'], ...NAV].map(([s, t, href]) => `<li><a href="${href || `{{SITE}}/${s}`}"${cur(s)}>${t}</a></li>`).join('\n          ');
+  const phoneLinks = [['', 'Home', '{{HOME}}'], ['product', 'Product'], ...NAV, ['good-day', 'The Good Day']].map(([s, t, href]) => `<li><a href="${href || `{{SITE}}/${s}`}"${cur(s)}>${t}</a></li>`).join('\n          ');
   const phoneSols = sols.map(([s, t]) => `<li><a href="{{SITE}}/${s}"${cur(s)}>${t}</a></li>`).join('\n          ');
   const bar = current === 'contact' ? '' : `
 <div class="mcta"><a class="btn ghost" href="{{TRY}}">Try the demo</a><a class="btn" href="{{SITE}}/contact">Book a walkthrough</a></div>`;
@@ -136,6 +148,7 @@ const FOOTER = `<footer class="sf">
           <li><a href="{{SITE}}/pricing">Pricing</a></li>
           <li><a href="{{SITE}}/security">Security</a></li>
           <li><a href="{{SITE}}/resources">Guides and checklists</a></li>
+          <li><a href="{{SITE}}/good-day">The Good Day newsletter</a></li>
           <li><a href="{{SITE}}/about">About</a></li>
         </ul>
       </div>
@@ -158,6 +171,7 @@ const FOOTER = `<footer class="sf">
         <p class="sf-mail">Sales and questions: <a href="mailto:{{HELLO}}">{{HELLO}}</a><br>Customer support: <a href="mailto:{{SUPPORT}}">{{SUPPORT}}</a></p>
       </div>
     </div>
+    <!--GD:FOOTER-->
     <div class="sf-base"><span>&copy; {{YEAR}} Verdynt/OS. All rights reserved. Prices in US dollars.</span><span class="sf-legal">{{SOCIAL}}<a href="{{SITE}}/privacy">Privacy</a><a href="{{SITE}}/terms">Terms</a></span></div>
   </div>
 </footer>`;
@@ -233,7 +247,18 @@ function canonicalOrigin(req) {
 const isCopy = (req) => config.site.hosts.length > 0 && !onSite(req);
 
 /** Fill in the page's head and links for where it is being served. */
-async function render(req, name, slug) {
+/** The Good Day's parts in any page: the sign-up card, the footer line, the six moments, the archive and what is next. */
+function fillGoodDay(html) {
+  const next = GD.catalog().next;
+  return html
+    .replace(/<!--GD:CARD:([a-z0-9-]+)-->/g, (_m, src) => GD.card(src, { onIssue: /^issue-(\d+)$/.test(src) ? Number(src.slice(6)) : null }))
+    .replace('<!--GD:FOOTER-->', GD.footerLine())
+    .replace(/<!--GD:MOMENTS:([A-Za-z ]*)-->/g, (_m, on) => GD.momentStrip(on))
+    .replace('<!--GD:ARCHIVE-->', GD.archive())
+    .replace('<!--GD:NEXT-->', next ? `<p class="gd-next"><b>Next issue: ${escHtml(next.moment)}.</b> ${escHtml(next.question)}</p>` : '');
+}
+
+async function render(req, name, slug, words = null) {
   const site = onSite(req);
   const base = site ? '' : '/site';
   const origin = `${req.protocol}://${req.get('host')}`;
@@ -250,6 +275,8 @@ async function render(req, name, slug) {
     .replace('<div class="sx">', name === 'contact' ? '<div class="sx">' : '<div class="sx has-mcta">')
     .replace(/<!--HEADER:?([a-z-]*)-->/, (_m, cur) => header(cur))
     .replace('<!--FOOTER-->', FOOTER);
+  html = fillGoodDay(html);
+  if (words) html = html.replace(/\{\{GD_([A-Z]+)\}\}/g, (_m, k) => words[k.toLowerCase()] ?? '');
   return html
     .replaceAll('{{HOME}}', `${base}/`)
     .replaceAll('{{SITE}}', base)
@@ -264,10 +291,10 @@ async function render(req, name, slug) {
     .replaceAll('{{YEAR}}', String(new Date().getUTCFullYear()));
 }
 
-async function send(req, res, name, slug, status = 200) {
-  const body = await render(req, name, slug);
+async function send(req, res, name, slug, status = 200, words = null) {
+  const body = await render(req, name, slug, words);
   res.status(status).set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=300' });
-  if (isCopy(req) || name === 'notfound') res.set('X-Robots-Tag', 'noindex, follow');
+  if ((isCopy(req) || name === 'notfound') && !res.get('X-Robots-Tag')) res.set('X-Robots-Tag', 'noindex, follow');
   res.send(body);
 }
 
@@ -286,6 +313,8 @@ const ASSET_V = (() => {
 const modified = (name) => { try { return fs.statSync(path.join(DIR, `${name}.html`)).mtime.toISOString().slice(0, 10); } catch (_) { return null; } };
 const PRIORITY = { '': '1.0', product: '0.9', 'ski-patrol': '0.9', 'ski-area-risk-management': '0.9', pricing: '0.9', resources: '0.7', about: '0.6', contact: '0.7', security: '0.6', privacy: '0.2', terms: '0.2' };
 for (const [s] of SOLUTIONS) if (!PRIORITY[s]) PRIORITY[s] = '0.8';
+PRIORITY['good-day'] = '0.7';
+for (const i of GD.issues()) PRIORITY[i.slug] = '0.6';
 for (const s of ['chairlift-inspection-checklist', 'terrain-park-inspection-checklist', 'ski-area-incident-report-guide', 'how-to-choose-ski-area-software']) PRIORITY[s] = '0.7';
 
 const pages = express.Router();
@@ -308,6 +337,13 @@ pages.get('/site/{:page}', (req, res, next) => {
   if (!(slug in PAGES)) return next();
   send(req, res, PAGES[slug], slug).catch(next);
 });
+pages.get('/site/good-day/:issue', (req, res, next) => {
+  const slug = `good-day/${req.params.issue}`;
+  if (!(slug in PAGES)) return next();
+  send(req, res, PAGES[slug], slug).catch(next);
+});
+goodDayPages(pages);
+
 // The app itself, at /app, for a website address where / is the home page.
 pages.get('/app', (_req, res) => res.set('Cache-Control', 'no-cache').sendFile(path.join(__dirname, '..', '..', 'public', 'index.html')));
 
@@ -364,6 +400,11 @@ Verdynt/OS runs in a web browser on counter computers, phones and tablets, with 
 - [Terrain park daily inspection checklist](${page('terrain-park-inspection-checklist')}): features, landings, signs and the daily park record
 - [How to write a ski area incident report](${page('ski-area-incident-report-guide')}): what to record, what to leave out, and a review checklist (and a free review of ten of your own reports)
 - [How to choose ski area management software](${page('how-to-choose-ski-area-software')}): when to switch, what to compare, questions for vendors
+
+## The Good Day newsletter
+
+- [The Good Day](${page('good-day')}): a newsletter for ski area owners, GMs and patrol directors, every other week. Each issue takes apart one moment of the guest's day (Plan, Arrive, Learn, Ride, Get help, Come back): the guest's question, the process behind the answer, one number to watch and a quick test.
+${GD.issues().map((i) => `- [Issue ${i.n}: ${i.question}](${page(i.slug)}): ${i.moment}. ${i.title}. ${i.teaser}`).join('\n')}
 
 ## Plans (US dollars, before sales tax)
 
@@ -459,4 +500,86 @@ api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.e
   res.status(201).json({ ok: true, copy });
 });
 
-module.exports = { pages, notFound, api, forgetPlans, PAGES, onSite };
+// ---------------------------------------------------------------- The Good Day: sign-up, confirm, unsubscribe
+/** The website's own address for links in emails: https://www.runmyresort.com, or this address plus /site before then. */
+const linkOrigin = (req) => canonicalOrigin(req);
+const siteBase = (req) => (onSite(req) ? '' : '/site');
+const subscribeBody = z.object({
+  email: z.string().trim().toLowerCase().email('Enter an email address like you@yourmountain.com').max(255),
+  name: z.string().trim().max(100).optional().default(''),
+  role: z.enum(['owner_gm', 'patrol', 'other', '']).optional().default(''),
+  source: z.string().trim().max(40).regex(/^[a-z0-9-]*$/).optional().default(''),
+  website: z.string().max(200).optional().default(''), // a field people never see: bots fill it
+});
+const SAME = 'Check your inbox for a link to confirm. If you are already subscribed, there is nothing more to do.';
+api.post('/site/good-day/subscribe', express.urlencoded({ extended: false, limit: '10kb' }),
+  rateLimit({ windowMs: 3_600_000, max: Number(process.env.GOODDAY_SUBSCRIBE_LIMIT) || 10, message: 'Too many sign-ups from this address. Try again in an hour.' }), async (req, res) => {
+    const asForm = req.is('application/x-www-form-urlencoded');
+    const parsed = subscribeBody.safeParse(req.body || {});
+    const back = (q) => res.redirect(303, `${siteBase(req)}/good-day/check-your-email${q ? `?${q}` : ''}`);
+    if (!parsed.success) return asForm ? back('bad=1') : res.status(400).json({ error: parsed.error.issues[0].message });
+    const b = parsed.data;
+    if (!b.website) {
+      const mail = await GD.subscribe({ email: b.email, name: b.name || null, role: b.role || null, source: b.source || 'website', ip: req.ip, origin: linkOrigin(req) });
+      GD.deliverLater(mail);
+    }
+    return asForm ? back('') : res.status(201).json({ ok: true, message: SAME });
+  });
+
+/** The confirm, unsubscribe and check-your-email pages, at /site/good-day/... everywhere and /good-day/... on the website. */
+function goodDayPages(router) {
+  const both = (p) => [`/site/good-day/${p}`, `/good-day/${p}`];
+  const here = (req, next) => req.path.startsWith('/site/') || onSite(req) || next();
+  const card = (src) => `<div class="gd-again">${GD.card(src)}</div>`;
+  const page = (req, res, status, words) => {
+    res.set({ 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' });
+    return send(req, res, 'good-day/notice', 'good-day/notice', status, words);
+  };
+  const B = (req) => siteBase(req);
+  // Issue 1 first: it sets out the six moments the later issues build on.
+  const readLinks = (req) => { const n = (GD.issues().slice(-1)[0] || { n: 1 }).n; return `<div class="ctas gd-ctas"><a class="gd-btn" href="${B(req)}/good-day/issue-${n}">Read Issue ${n}</a><a class="gd-btn ghost" href="${B(req)}/good-day">Every issue</a></div>`; };
+
+  router.get(both('check-your-email'), (req, res, next) => here(req, next) === true && page(req, res, 200, req.query.bad
+    ? { eyebrow: 'Almost', title: 'That email address did not look right', body: `<p>Try again with an address like you@yourmountain.com.</p>${card('retry')}` }
+    : { eyebrow: 'One more step', title: 'Check your email', body: `<p>${SAME}</p><p>The link works for 7 days. Not there in a few minutes? Look in your spam or promotions folder.</p>${readLinks(req)}` }).catch(next));
+
+  router.get(both('confirm/:token'), async (req, res, next) => {
+    if (here(req, next) !== true) return;
+    try {
+      const r = await GD.confirm(req.params.token, { ip: req.ip, origin: linkOrigin(req) });
+      const W = {
+        confirmed: [200, { eyebrow: 'You are in', title: 'Welcome to The Good Day', body: `<p>Thanks for confirming ${escHtml(r.email)}. A welcome email is on its way, and the next issue comes in about two weeks.</p>${readLinks(req)}` }],
+        already: [200, { eyebrow: 'All set', title: 'You are already subscribed', body: `<p>${escHtml(r.email)} gets The Good Day. There is nothing more to do.</p>${readLinks(req)}` }],
+        expired: [410, { eyebrow: 'Link expired', title: 'That link has expired', body: `<p>Confirmation links work for 7 days. Sign up again and we send a new one.</p>${card('expired')}` }],
+        unsubscribed: [200, { eyebrow: 'Not subscribed', title: 'This address unsubscribed', body: `<p>It was unsubscribed after that link was sent, so the link no longer signs it up. To come back, sign up again.</p>${card('resubscribe')}` }],
+        invalid: [404, { eyebrow: 'Link not found', title: 'That link does not work', body: `<p>It may have been copied only in part. Sign up again and we send a new one.</p>${card('retry')}` }],
+      }[r.state];
+      await page(req, res, W[0], W[1]);
+    } catch (err) { next(err); }
+  });
+
+  // Unsubscribe: the link shows a page with one button (a link checker opening every link in an email must not
+  // unsubscribe anyone); a mail app's own unsubscribe button posts here directly (RFC 8058) and is done in one step.
+  router.get(both('unsubscribe/:token'), async (req, res, next) => {
+    if (here(req, next) !== true) return;
+    try {
+      const r = await GD.peekUnsubscribe(req.params.token);
+      if (r.state === 'invalid') return await page(req, res, 404, { eyebrow: 'Link not found', title: 'That link does not work', body: `<p>It may have been copied only in part. To stop The Good Day, use the link at the bottom of any issue, or write to <a href="mailto:${escHtml(config.site.helloEmail)}?subject=Unsubscribe">${escHtml(config.site.helloEmail)}</a> and we take you off the list.</p>` });
+      if (r.state === 'already') return await page(req, res, 200, { eyebrow: 'Unsubscribed', title: 'You are unsubscribed', body: `<p>${escHtml(r.email)} gets no more issues of The Good Day.</p>${card('resubscribe')}` });
+      return await page(req, res, 200, { eyebrow: 'Unsubscribe', title: 'Stop getting The Good Day?', body: `<p>${escHtml(r.email)} will get no more issues. Nothing else changes.</p>
+        <form method="post" class="gd-unsub"><button type="submit" class="gd-btn">Unsubscribe</button></form><p class="gd-fine">Changed your mind? Just close this page.</p>` });
+    } catch (err) { return next(err); }
+  });
+  router.post(both('unsubscribe/:token'), express.urlencoded({ extended: false, limit: '2kb' }), rateLimit({ windowMs: 60_000, max: 30 }), async (req, res, next) => {
+    if (here(req, next) !== true) return;
+    try {
+      const oneClick = req.body && req.body['List-Unsubscribe'] === 'One-Click';
+      const r = await GD.unsubscribe(req.params.token, oneClick ? 'one-click' : 'page');
+      if (r.state === 'invalid') return oneClick ? res.status(404).send('Not found') : await page(req, res, 404, { eyebrow: 'Link not found', title: 'That link does not work', body: `<p>Write to <a href="mailto:${escHtml(config.site.helloEmail)}?subject=Unsubscribe">${escHtml(config.site.helloEmail)}</a> and we take you off the list.</p>` });
+      if (oneClick) return res.status(200).type('text/plain').send('Unsubscribed');
+      return await page(req, res, 200, { eyebrow: 'Done', title: 'You are unsubscribed', body: `<p>${escHtml(r.email)} gets no more issues of The Good Day. Thank you for reading.</p>${card('resubscribe')}` });
+    } catch (err) { return next(err); }
+  });
+}
+
+module.exports = { pages, notFound, api, forgetPlans, PAGES, onSite, canonicalOrigin };
