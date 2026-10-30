@@ -1,6 +1,101 @@
 {
   "releases": [
     {
+      "version": "2026.11.7",
+      "date": "2026-10-30",
+      "title": "Selling fixes: season passes online, add-ons for the right person and day, day limits at the window, holiday prices by guest type, and a blind till count",
+      "notes": [
+        {
+          "kind": "fixed",
+          "app": "shop",
+          "who": null,
+          "text": "Season passes can be bought online again: the pass photo box shows on the shop page (it uses the phone camera), and a pass that needs a photo is never issued without one.",
+          "help": "shop-setup"
+        },
+        {
+          "kind": "fixed",
+          "app": "shop",
+          "who": null,
+          "text": "Rentals and lesson packs bought online belong to the person on that ticket, on the day they ski, at their guest type's price, and a rental waits in the rental shop's Ready to fit for them. Single lessons are booked on the lesson booking page, which opens on the day the family picked.",
+          "help": "shop-extras"
+        },
+        {
+          "kind": "fixed",
+          "app": "sell",
+          "who": ["counter"],
+          "text": "Sell on a phone: the basket comes first and the Checkout bar sits above the bottom menu.",
+          "help": "sell-basket"
+        },
+        {
+          "kind": "improved",
+          "app": "sell",
+          "who": ["counter"],
+          "text": "The window warns when a day is at its limit and only a manager can sell past it, with a reason that is kept. Online, asking for more than are left says \"Only 1 left\" instead of sold out.",
+          "help": "shop-calendar"
+        },
+        {
+          "kind": "fixed",
+          "app": "sell",
+          "who": null,
+          "text": "Holiday prices from the price calendar are set per guest type, or as a percent or amount change on each type's own price, so a child is no longer charged the adult holiday price.",
+          "help": "shop-calendar"
+        },
+        {
+          "kind": "fixed",
+          "app": "sell",
+          "who": null,
+          "text": "A child bought for online again is matched to the one already in the family instead of being added twice, the duplicate finder also matches name and guardian, and managers have Merge with another record on the customer.",
+          "help": "sell-people"
+        },
+        {
+          "kind": "new",
+          "app": "sell",
+          "who": null,
+          "text": "Guests get an email after a refund (what, how much, and where the money goes) and after an online date change (old day, new day).",
+          "help": "sell-refund"
+        },
+        {
+          "kind": "improved",
+          "app": "sell",
+          "who": null,
+          "text": "Dates on receipts, order pages and shop emails read like \"Sat, Oct 31, 2026\"."
+        },
+        {
+          "kind": "fixed",
+          "app": "sell",
+          "who": null,
+          "text": "A customer's spend total is now after refunds."
+        },
+        {
+          "kind": "improved",
+          "app": "sell",
+          "who": ["counter"],
+          "text": "Blind count at the till: the cashier counts first and sees the expected amount and the difference after. Managers still see everything in Money.",
+          "help": "sell-drawer"
+        },
+        {
+          "kind": "fixed",
+          "app": "shop",
+          "who": null,
+          "text": "A waiver is never recorded online when the mountain has no waiver wording; Settings, Online shop says so.",
+          "help": "shop-setup"
+        },
+        {
+          "kind": "improved",
+          "app": "gate",
+          "who": ["staff"],
+          "text": "The gate shows the guest type in large letters, yellow when it is not Adult, so an adult on a child ticket is caught.",
+          "help": "gate-scan"
+        },
+        {
+          "kind": "fixed",
+          "app": "shop",
+          "who": null,
+          "text": "Window-only prices (such as Military) are no longer in the online shop's data, and the product dialog points to Settings, Online shop."
+        }
+      ]
+    },
+    {
       "version": "2026.11.6",
       "date": "2026-10-29",
       "title": "Ski school in four groups instead of one long row of tabs",
