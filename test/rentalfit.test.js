@@ -286,7 +286,8 @@ test('online rentals wait in Ready to fit; a refund takes a not-yet-fitted renta
   try {
     await conn.beginTransaction();
     const tenant = (await conn.query('SELECT * FROM tenants WHERE id = ?', [A.tid]))[0][0];
-    const quote = await S.quote(conn, tenant, [], { addons: [{ product_id: pkg, quantity: 2 }] });
+    // 2026.11.7: a rental names its renter and day
+    const quote = await S.quote(conn, tenant, [], { addons: [{ product_id: pkg, holder: { first_name: 'Olly', last_name: 'Onfit', age_group: 'adult' }, valid_on: today }, { product_id: pkg, holder: { first_name: 'Oona', last_name: 'Onfit', age_group: 'adult' }, valid_on: today }] });
     const row = { id: 0, basket: JSON.stringify({ quote, contact: { first_name: 'Olly', last_name: 'Online' } }), contact_email: 'olly@fit.test', contact_phone: null, contact_name: 'Olly Online', waiver_accepted: 0, news_opt_in: 0 };
     out = await S.fulfil(conn, A.tid, row, { paymentIntent: 'pi_test_fit' });
     await conn.commit();
@@ -294,7 +295,8 @@ test('online rentals wait in Ready to fit; a refund takes a not-yet-fitted renta
   const cs = await q('SELECT * FROM rental_contracts WHERE order_id = ?', [out.orderId]);
   assert.equal(cs.length, 2);
   assert.ok(cs.every((c) => c.status === 'to_fit' && String(c.valid_on) === today && c.order_item_id));
-  assert.ok((await api('GET', '/rentals/fit/ready?q=Olly', { token: counterTok })).body.data.length === 2);
+  assert.ok((await api('GET', '/rentals/fit/ready?q=Onfit', { token: counterTok })).body.data.length === 2);
+  assert.equal(new Set(cs.map((c) => c.person_id)).size, 2, 'each renter has their own contract');
   // a rental sold at the window and refunded before anyone fitted it leaves the list
   const sold = await sell(counterTok, { customer: { details: { first_name: 'Rory', last_name: 'Refund', email: 'rory@fit.test', ...ADULT } }, lines: [{ type: 'rental', product_id: pkg }], payments: [{ tender: 'cash', amount_cents: 4500 }] });
   assert.equal(sold.status, 201, JSON.stringify(sold.body));

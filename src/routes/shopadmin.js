@@ -104,6 +104,8 @@ router.post('/calendar', requireRole('manager'), validate(applySchema), async (r
         } else if (b.action === 'price' && b.change) {
           // the base price (for types with no price of their own), then each type's own price, each changed the same way
           const o = own.get(p.id);
+          // a change starts from the products' own prices, so earlier special prices that day go first
+          await conn.query('DELETE FROM price_calendar WHERE tenant_id = ? AND product_id = ? AND on_date = ? AND blackout = 0', [tenantId, p.id, d]);
           await setPrice(conn, p.id, d, null, changed(o.base));
           for (const t of o.tiers) await setPrice(conn, p.id, d, t.tier, changed(t.price_cents));
         } else if (b.action === 'price') {

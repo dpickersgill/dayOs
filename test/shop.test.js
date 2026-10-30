@@ -342,11 +342,12 @@ test('a mountain can brand its shop page, and the page shows conditions and the 
 });
 
 test('a basket can hold add-ons, a gift card and a promo code; payment makes vouchers and a gift card', async () => {
-  const [lr] = await pool.query("INSERT INTO products (tenant_id, kind, name, base_price_cents, valid_days, active, online) VALUES (?, 'lesson', 'Group lesson', 6000, 30, 1, 1)", [A.id]);
+  // 2026.11.7: a lesson add-on is a lesson package for the person on a ticket (a single lesson is booked on the lesson page)
+  const [lr] = await pool.query("INSERT INTO products (tenant_id, kind, name, base_price_cents, valid_days, uses, active, online) VALUES (?, 'lesson', 'Lesson pack', 6000, 30, 3, 1, 1)", [A.id]);
   const lessonP = lr.insertId;
   await pool.query("INSERT INTO promo_codes (tenant_id, code, percent_off) VALUES (?, 'SAVE10', 10)", [A.id]);
   const items = [{ product_id: adultP, valid_on: day, holder: adult }];
-  const full = { items, addons: [{ product_id: lessonP, quantity: 2 }], gifts: [{ amount_cents: 5000, recipient_name: 'Gran', message: 'Enjoy!' }], promo_code: 'save10' };
+  const full = { items, addons: [{ product_id: lessonP, quantity: 1, for_item: 0 }], gifts: [{ amount_cents: 5000, recipient_name: 'Gran', message: 'Enjoy!' }], promo_code: 'save10' };
   const qt = await pub('POST', '/shop/quote', { body: full });
   assert.equal(qt.status, 200, JSON.stringify(qt.body));
   const noPromo = (await pub('POST', '/shop/quote', { body: { ...full, promo_code: undefined } })).body;
@@ -363,13 +364,13 @@ test('a basket can hold add-ons, a gift card and a promo code; payment makes vou
   assert.equal((await webhook(ev)).status, 200);
   const o = (await q('SELECT * FROM orders WHERE tenant_id = ? AND payment_ref = ?', [A.id, ev.data.object.payment_intent]))[0];
   assert.equal(o.promo_code, 'SAVE10'); assert.equal(o.discount_cents, qt.body.discount_cents);
-  assert.equal((await q('SELECT COUNT(*) AS n FROM tickets t JOIN order_items i ON i.id = t.order_item_id WHERE i.order_id = ? AND t.product_id = ?', [o.id, lessonP]))[0].n, 2, 'two lesson vouchers');
+  assert.equal((await q('SELECT COUNT(*) AS n FROM tickets t JOIN order_items i ON i.id = t.order_item_id WHERE i.order_id = ? AND t.product_id = ?', [o.id, lessonP]))[0].n, 1, 'one lesson package voucher');
   const gc = (await q('SELECT * FROM gift_cards WHERE tenant_id = ? AND order_id = ?', [A.id, o.id]))[0];
   assert.equal(gc.balance_cents, 5000); assert.equal(gc.recipient_name, 'Gran');
   assert.equal((await q("SELECT used_count FROM promo_codes WHERE tenant_id = ? AND code = 'SAVE10'", [A.id]))[0].used_count, 1);
   const tok = (await q('SELECT view_token FROM shop_orders WHERE id = ?', [row.id]))[0].view_token;
   const view = (await pub('GET', `/shop/orders/${tok}`)).body;
-  assert.equal(view.gift_cards[0].code, gc.code); assert.equal(view.tickets.length, 3);
+  assert.equal(view.gift_cards[0].code, gc.code); assert.equal(view.tickets.length, 2);
   await pool.query('UPDATE products SET active = 0 WHERE id = ?', [lessonP]);
 });
 
@@ -405,7 +406,7 @@ test('a guest can move a ticket to another day: free when the price is the same,
   const ev = { id: `evt_${++n}`, type: 'checkout.session.completed', data: { object: { id: ch.stripe_session_id, payment_status: 'paid', amount_total: 550, payment_intent: `pi_chg_${n}`, metadata: { tenant_id: String(A.id), change_id: String(ch.id), kind: 'shop_change', request_id: `chg${ch.id}` } } } };
   assert.equal((await webhook(ev)).status, 200);
   assert.equal(String((await q('SELECT valid_from FROM tickets WHERE code = ?', [code]))[0].valid_from).slice(0, 10), plus(today, 7));
-  const fo = (await q('SELECT * FROM orders WHERE tenant_id = ? AND payment_ref = ?', [A.id, `pi_chg_${n}`]))[0];
+  const fo = (await q('SELECT * FROM orders WHERE tenant_id = ? AND payment_ref = ?', [A.id, ev.data.object.payment_intent]))[0]; // the change email moves the mock's counter
   assert.equal(fo.total_cents, 550);
   assert.deepEqual((await q('SELECT line_kind, label FROM order_items WHERE order_id = ?', [fo.id])).map((x) => `${x.line_kind}:${x.label}`), ['fee:Date change fee'], 'a fee line, not a ticket');
   assert.equal((await webhook(ev)).body.duplicate, true);
@@ -487,7 +488,7 @@ test('a manager can change prices, closures and limits for many days at once', a
   const apply = (body) => api('POST', '/online-shop/calendar', { token: A.owner, body: { from, to, ...body } });
   assert.equal((await api('POST', '/online-shop/calendar', { token: B.owner, body: { from, to, action: 'close' } })).status, 200, 'B changes only its own');
   const wk = (d) => new Date(`${d}T12:00:00Z`).getUTCDay();
-  const r1 = await apply({ action: 'price', price_cents: 9000, product_id: adultP, weekdays: [0, 6] });
+  const r1 = await apply({ action: 'price', price_cents: 9000, tier: 'adult', product_id: adultP, weekdays: [0, 6] }); // 2026.11.7: a flat price no longer overwrites the child price
   assert.equal(r1.status, 200, r1.text);
   const view = (await api('GET', `/online-shop/calendar?from=${from}&to=${to}`, { token: A.owner })).body;
   const sat = view.days.find((d) => wk(d.date) === 6); const tue = view.days.find((d) => wk(d.date) === 2);
@@ -556,7 +557,7 @@ test('an online order never overwrites a customer on file, and a stranger cannot
   await pool.query("INSERT INTO person_links (tenant_id, adult_id, member_id, relation) VALUES (?, ?, ?, 'guardian')", [A.id, p.insertId, c.insertId]);
   const { row } = await buy({ contact_first_name: 'Vic', contact_last_name: 'Tim', contact_email: 'vic@x.test', contact_phone: '999-999-9999',
     items: [{ product_id: passP, holder: { first_name: 'Vic', last_name: 'Tim', date_of_birth: `${year - 40}-01-01`, photo: 'data:image/jpeg;base64,/9j/ATTACKER' } },
-      { product_id: passP, holder: { first_name: 'Kid', last_name: 'Tim', date_of_birth: `${year - 8}-03-03` } }] });
+      { product_id: passP, holder: { first_name: 'Kid', last_name: 'Tim', date_of_birth: `${year - 8}-03-03`, photo: 'data:image/jpeg;base64,/9j/KID' } }] });
   assert.equal((await webhook(paidEvent(row, A.id))).status, 200);
   const vic = (await q('SELECT phone, photo FROM people WHERE id = ?', [p.insertId]))[0];
   assert.equal(vic.phone, '610-555-0001', 'phone kept'); assert.match(vic.photo, /ORIGINAL/, 'gate photo kept');
@@ -678,7 +679,9 @@ test('a card refund Stripe cannot send is kept as owed and can be retried; cash 
   assert.equal(sale.status, 201, sale.text);
   const tillId = till.id || (await q("SELECT id FROM till_sessions WHERE tenant_id = ? AND status = 'open' ORDER BY id DESC LIMIT 1", [A.id]))[0].id;
   assert.equal((await api('POST', `/orders/${sale.body.id}/refund`, { token: A.owner, body: { reason: 'customer_request', till_id: tillId } })).status, 200);
-  const cur = (await api('GET', '/till/current', { token: ct })).body.till;
+  // the counter counts blind (2026.11.7); a manager sees the figures
+  assert.equal((await api('GET', '/till/current', { token: ct })).body.till.expected_cents, null);
+  const cur = (await api('GET', `/till?date=${today}`, { token: A.owner })).body.data.find((x) => x.id === tillId);
   assert.equal(cur.cash_refunds_cents, 6600, 'the counter drawer that paid out the cash');
   assert.equal(cur.expected_cents, 10000, 'float + sale - refund');
 });

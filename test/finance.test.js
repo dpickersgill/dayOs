@@ -169,7 +169,8 @@ test('the cash drawer: open with a float, move money, close counted, and a varia
   assert.equal((await api('POST', '/till/moves', { token: T.counter2, body: { kind: 'payout', amount_cents: 500 } })).status, 400, 'say what a payout was for');
   const mv = await api('POST', '/till/moves', { token: T.counter2, body: { kind: 'payout', amount_cents: 500, reason: 'Buy tape' } });
   assert.equal(mv.status, 201, mv.text);
-  assert.equal(mv.body.till.expected_cents, 20000 + 10600 - 500);
+  assert.equal(mv.body.till.expected_cents, null, 'counter staff count blind (2026.11.7)');
+  assert.equal((await api('GET', `/till?date=${today}`, { token: T.manager })).body.data.find((x) => x.id === mv.body.till.id).expected_cents, 20000 + 10600 - 500);
   const short = await api('POST', '/till/close', { token: T.counter2, body: { counted_cents: 29100 } });
   assert.equal(short.status, 400);
   assert.match(short.body.error, /short by \$10\.00/);
