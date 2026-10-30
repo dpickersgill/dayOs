@@ -117,7 +117,7 @@ test('the Good Day home and Issue 1 are pages of the site: its header and footer
   assert.ok(issue.text.includes('href="mailto:hello@runmyresort.com?subject='), 'Reply is a mailto');
   const own = await onHost('/good-day/issue-1');
   assert.ok(own.text.includes('"@type":"Article"') && own.text.includes('<meta name="robots" content="index, follow'), 'an indexed article on the website\'s own address');
-  assert.ok(!/—/.test(issue.text), 'no em dashes');
+  assert.ok(!/\u2014/.test(issue.text), 'no em dashes');
 });
 
 test('the card is on Resources, Home and About, a sign-up line is in every footer, and the menu, sitemap and llms.txt list it', async () => {
@@ -290,7 +290,7 @@ test('send an issue: preview, a test, then every confirmed subscriber once; pend
   assert.ok(pv.body.html.includes('CAN I TRUST') || pv.body.html.includes('Can I trust what I&#39;m about to buy?'));
   assert.ok(pv.body.html.includes('First one. Tell me what you think.') && pv.body.html.includes('Read Issue 1') && pv.body.html.includes('PO Box 12'));
   assert.ok(pv.body.text.includes('Read Issue 1: ') && pv.body.text.includes('Unsubscribe: '));
-  assert.ok(!/—/.test(pv.body.html + pv.body.text), 'no em dashes in the email');
+  assert.ok(!/\u2014/.test(pv.body.html + pv.body.text), 'no em dashes in the email');
 
   const me = addr('operator');
   assert.equal((await api('POST', '/platform/goodday/test', { n: 1, to: me })).status, 200);

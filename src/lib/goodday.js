@@ -180,7 +180,7 @@ const button = (href, label) => `<table role="presentation" cellpadding="0" cell
 <a href="${esc(href)}" style="display:inline-block;padding:13px 26px;font-family:${FONT};font-size:17px;font-weight:bold;color:${ink};text-decoration:none;border-radius:999px;">${esc(label)}</a></td></tr></table>`;
 const p = (t) => `<p style="margin:0 0 14px;">${t}</p>`;
 const unsubHeaders = (url) => [{ Name: 'List-Unsubscribe', Value: `<${url}>, <mailto:${config.site.helloEmail}?subject=unsubscribe>` }, { Name: 'List-Unsubscribe-Post', Value: 'List-Unsubscribe=One-Click' }];
-const footHtml = (unsubUrl, postal, why) => `${esc(why)} <a href="${esc(unsubUrl)}" style="color:#1d5b47;">Unsubscribe</a> in one click.${postal ? `<br>Verdynt/OS, ${esc(postal)}` : ''}`;
+const footHtml = (unsubUrl, postal, why) => `${esc(why)} <a href="${esc(unsubUrl)}" style="color:#1d5b47;">Unsubscribe</a> any time.${postal ? `<br>Verdynt/OS, ${esc(postal)}` : ''}`;
 const footText = (unsubUrl, postal, why) => `${why}\nUnsubscribe: ${unsubUrl}${postal ? `\nVerdynt/OS, ${postal}` : ''}`;
 const hi = (name) => (name ? `Hi ${String(name).split(/\s+/)[0]},` : 'Hello,');
 

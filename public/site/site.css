@@ -1004,6 +1004,8 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 
 /* the Resources menu in the header: a small panel under Resources */
 .sn-dd-sm{position:relative}
-.sn-panel.sm{left:0;right:auto;width:330px;grid-template-columns:minmax(0,1fr)}
+.sn-panel.sm{left:0;right:auto;top:calc(100% + 12px);width:330px;grid-template-columns:minmax(0,1fr)}
+/* the bridge from the link to the panel stays below the link, so a click on Resources goes to the Resources page */
+.sn-panel.sm:before{top:-14px;height:14px}
 .sn-panel.sm .sn-sols{grid-template-columns:minmax(0,1fr)}
 @media print{.sf-gd,.gd-card,.gd-end{display:none!important}}

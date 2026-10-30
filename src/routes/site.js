@@ -66,7 +66,7 @@ const CHEVRON = '<svg class="chev" width="12" height="12" viewBox="0 0 12 12" ar
  * Narrower screens: a Menu button opening a full-screen menu, its two buttons kept at the bottom; on phones a bar at the
  * bottom of the page holds the two things people came to do. */
 // The Resources menu: the guides, and The Good Day newsletter.
-const RESOURCES = [['resources', 'Guides and checklists', 'Printable checklists and how-to guides'], ['good-day', 'The Good Day', 'Our newsletter: one moment of the guest\'s day']];
+const RESOURCES = [['resources', 'Guides and checklists', 'Printable checklists and how-to guides'], ['good-day', 'The Good Day', 'Our newsletter, every other week']];
 function header(current) {
   const cur = (s) => (s === current ? ' aria-current="page"' : '');
   const sols = SOLUTIONS.filter(([s]) => s !== 'ski-patrol');
