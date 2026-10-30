@@ -208,6 +208,7 @@ export async function lineMode(root, { drawerOpen, onOpenDrawer }) {
     if ((quote.over_limit || []).length) { msg.append(h('div', { class: 'notice warn', role: 'alert' }, quote.over_limit.map((o) => o.words).join(' '), ' Use the full Sell screen.')); return; }
     const quickOk = menu.quick_sale.allowed && !guest;
     const open = (way) => checkoutDialog({ basket: basketOf(), quote, def, promo: '', comp: menu.comp, waiverText: menu.waiver_text, quickSale: menu.quick_sale, drawerOpen, onOpenDrawer, guest, receiptBy: true, startPay: way, onSold: (out) => done(out) });
+    setTimeout(() => pay.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 50);
     pay.append(h('p', { class: 'basket-total' }, `Total ${money(quote.total_cents)}`),
       h('div', { class: 'line-pay-buttons' },
         button(`Cash, exact ${money(quote.total_cents)}`, async () => {
@@ -226,7 +227,8 @@ export async function lineMode(root, { drawerOpen, onOpenDrawer }) {
       h('div', { class: 'codes' }, out.tickets.map((t) => h('div', { class: 'code' }, t.code, h('small', null, [t.holder, t.product, typeName(t.tier)].filter(Boolean).join(', '))))),
       receiptSender(out, guest && guest.person ? guest.person.email || '' : ''),
       hasCards ? h('div', { class: 'row' }, out.tickets.map((t) => button(`Load on a card${out.tickets.length > 1 ? `: ${t.code.slice(-6)}` : ''}`, () => loadCard(t.code), { small: true }))) : null,
-      h('div', { class: 'row' }, button('Next guest', () => { clear(msg); guest = null; drawGuest(); qty = 1; qtyIn.value = '1'; }, { kind: 'primary' }))));
+      h('div', { class: 'row' }, button('Next guest', () => { clear(msg); guest = null; drawGuest(); qty = 1; qtyIn.value = '1'; screen.scrollIntoView({ block: 'start' }); }, { kind: 'primary' }))));
+    msg.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
   function loadCard(code) {
     const uid = input({ name: 'uid', autocomplete: 'off', 'aria-label': 'Card (tap it on the reader or type the number)' });

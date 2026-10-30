@@ -29,7 +29,8 @@ export async function render(root, params = []) {
   // Line mode (Track WINDOW): one phone screen for line-busting, today's tickets as big buttons. The full Sell stays.
   const lineOn = queryMode() === 'line';
   root.append(h('div', { class: 'page-head' }, h('h1', null, lineOn ? 'Sell: Line' : 'Sell'), h('div', { class: 'row' }, drawerBadge, button('Cash drawer', () => drawerDialog(loadDrawer), { small: true }),
-    h('a', { class: 'btn', href: lineOn ? '#/sell' : '#/sell?mode=line', 'data-line-toggle': '', 'aria-pressed': String(lineOn) }, lineOn ? 'Full Sell' : 'Line mode'), h('a', { class: 'btn', href: '#/gate' }, 'Open the gate'))));
+    // the address changes (so a phone can keep #/sell?mode=line as a bookmark) and the page draws again in the other mode
+    h('a', { class: 'btn', href: lineOn ? '#/sell' : '#/sell?mode=line', 'data-line-toggle': '', 'aria-pressed': String(lineOn), onclick: (e) => { e.preventDefault(); location.hash = lineOn ? '#/sell' : '#/sell?mode=line'; clear(root); render(root, params); } }, lineOn ? 'Full Sell' : 'Line mode'), h('a', { class: 'btn', href: '#/gate' }, 'Open the gate'))));
   await loadDrawer();
   if (lineOn) { await lineMode(root, { drawerOpen: () => drawer.open, onOpenDrawer: (after) => drawerDialog(async () => { await loadDrawer(); after(); }) }); return; }
   const left = h('div', { class: 'stack sell-main' });
@@ -342,7 +343,7 @@ async function showOrder(id, menu = null) {
   if (o.tickets.length) showTickets(box, { tickets: o.tickets.map((t) => ({ code: t.code, product: 'Ticket', valid_from: t.valid_from, valid_to: t.valid_to, status: t.status })) }, true);
   // change day at the window (Track WINDOW): a dated ticket moves to another day, the same code
   const movable = o.tickets.filter((t) => t.status === 'active' && String(t.valid_to).slice(0, 10) >= todayStr());
-  if (movable.length) box.append(h('div', { class: 'row change-day-row' }, movable.map((t) => button(`Change day: ${t.code.slice(-6)}`, () => changeDayDialog(t, () => { dlg.close(); showOrder(id, menu); }), { small: true, label: `Change the day of ticket ${t.code}` }))));
+  if (movable.length) box.append(h('div', { class: 'row change-day-row' }, movable.map((t) => button(`Change day: ${t.code.slice(-6)}`, () => changeDayDialog(t, () => { dlg.close(); showOrder(id, menu); }), { small: true, label: `Change day for ticket ${t.code}` }))));
   if (o.gift_cards.length) box.append(h('section', { class: 'section' }, h('header', null, h('h2', null, 'Gift cards')), h('div', { class: 'codes' }, o.gift_cards.map((g) => h('div', { class: 'code' }, g.code, h('small', null, `${money(g.initial_cents)}${g.recipient_name ? ` for ${g.recipient_name}` : ''}${g.status === 'void' ? ', canceled' : ''}`))))));
   if (o.status === 'paid' && canRefund(menu)) box.append(h('div', { class: 'row' }, button('Refund…', () => refund(o, null, menu), { small: true, kind: 'danger' })));
   const dlg = dialog(`Order #${id}`, box, { wide: true });

@@ -43,6 +43,8 @@ const tzOf = async (db, tenantId) => (await one(db, 'SELECT timezone FROM tenant
 const ORDINAL = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
 
 const { birthdayThisWeek } = WIN;
+/** A reward's choices in words, with money the app's way: "a free All-day lift ticket or a $25.00 credit". */
+const rewardWords = (r, names = {}) => RW.words(r, names).replace(/a (\d+\.\d\d) credit/, (_, d) => `a ${money(Math.round(Number(d) * 100))} credit`);
 
 /** The people in this person's family: themselves first, then their guardians, dependents and household. */
 async function familyIds(db, tenantId, personId, day) {
@@ -144,7 +146,7 @@ async function welcome(db, tenantId, personId, day) {
     birthday_this_week: bday,
     family,
     rewards: rewards.map((r) => ({ id: r.id, code: r.code, kind: r.kind, reason: r.reason, options: r.options, valid_to: d10(r.valid_to), person_id: r.person_id,
-      person: (bits.get(r.person_id) || {}).first_name || null, words: RW.words(r, productNames) })),
+      person: (bits.get(r.person_id) || {}).first_name || null, words: rewardWords(r, productNames) })),
     badges: Array.isArray(badges) ? badges : [],
     line,
   };
@@ -192,7 +194,7 @@ router.get('/people/:id/history', requireRole(...front), async (req, res) => {
     passes: tickets.filter((t) => t.kind === 'season_pass').map((t) => tag({ ...t, scans: Number(t.scans), valid_from: d10(t.valid_from), valid_to: d10(t.valid_to) })),
     lessons: lessons.map((l) => tag({ ...l, day: d10(l.starts_at), level_name: l.level ? levels.name(l.level, l.discipline === 'snowboard' ? 'snowboard' : 'ski') : null })),
     rentals: rentals.map(tag), programs: programs.map(tag),
-    rewards: rewards.map((r) => tag({ ...RW.shape(r), valid_from: d10(r.valid_from), valid_to: d10(r.valid_to), words: RW.words(r) })),
+    rewards: rewards.map((r) => tag({ ...RW.shape(r), valid_from: d10(r.valid_from), valid_to: d10(r.valid_to), words: rewardWords(r) })),
     can_give_goodwill: isMgr(req),
   });
 });
@@ -218,7 +220,7 @@ router.post('/people/:id/goodwill', requireRole('manager'), validate(goodwillBod
     await audit(conn, req, 'goodwill', 'guest_rewards', r.id, { person_id: id, reason: b.reason, credit_cents: b.credit_cents || null, free_ticket: b.free_ticket_product_id || null, percent: b.percent || null });
     return r;
   });
-  res.status(201).json({ ...RW.shape(out), valid_from: d10(out.valid_from), valid_to: d10(out.valid_to), words: RW.words(out) });
+  res.status(201).json({ ...RW.shape(out), valid_from: d10(out.valid_from), valid_to: d10(out.valid_to), words: rewardWords(out) });
 });
 
 // ---------------------------------------------------------------- scan to find
@@ -255,7 +257,7 @@ router.get('/find', requireRole(...sellers), async (req, res) => {
     const L = c.license;
     const byDob = L.date_of_birth ? await rows(pool, 'SELECT id FROM people WHERE tenant_id = ? AND last_name = ? AND date_of_birth = ? LIMIT 10', [tenantId, L.last_name, L.date_of_birth]) : [];
     ids = byDob.length ? byDob.map((x) => x.id) : (await rows(pool, 'SELECT id FROM people WHERE tenant_id = ? AND first_name = ? AND last_name = ? LIMIT 10', [tenantId, L.first_name, L.last_name])).map((x) => x.id);
-    out.title = ids.length ? `License: ${L.first_name} ${L.last_name}` : `License: ${L.first_name} ${L.last_name}, not on file yet`;
+    out.title = ids.length ? `${L.first_name} ${L.last_name}` : `${L.first_name} ${L.last_name}, not on file yet`;
   } else if (c.kind === 'order' || c.kind === 'shop') {
     const o = c.kind === 'order' ? await one(pool, 'SELECT id, person_id FROM orders WHERE tenant_id = ? AND id = ?', [tenantId, c.order_id])
       : await one(pool, 'SELECT o.id, o.person_id FROM shop_orders so JOIN orders o ON o.tenant_id = so.tenant_id AND o.id = so.order_id WHERE so.tenant_id = ? AND so.reference = ?', [tenantId, c.reference]);
@@ -275,7 +277,7 @@ router.get('/find', requireRole(...sellers), async (req, res) => {
     }
   } else if (c.kind === 'reward') {
     const r = await RW.byCode(pool, tenantId, c.code);
-    if (r) { out.reward = { id: r.id, code: r.code, kind: r.kind, status: r.status, options: r.options, valid_from: d10(r.valid_from), valid_to: d10(r.valid_to), words: RW.words(r) }; ids = [r.person_id]; out.title = `Reward ${r.code}`; }
+    if (r) { out.reward = { id: r.id, code: r.code, kind: r.kind, status: r.status, options: r.options, valid_from: d10(r.valid_from), valid_to: d10(r.valid_to), words: rewardWords(r) }; ids = [r.person_id]; out.title = `Reward ${r.code}`; }
   } else if (c.kind === 'card') {
     const { card } = await require('../lib/access').findCard(pool, tenantId, c.raw);
     if (card && card.ticket_id) {
