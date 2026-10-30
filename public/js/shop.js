@@ -13,8 +13,12 @@ const root = document.getElementById('shop');
 const base = `/api/v1/public/${encodeURIComponent(slug)}/shop`;
 const qs = new URLSearchParams(location.search);
 
-async function call(method, path, body) {
-  const res = await fetch(`${base}${path}`, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+// The household account's session (the family page, /family/<mountain>): signed in, the shop knows the family.
+const SKEY = `family.${slug}`;
+let session = (() => { try { return localStorage.getItem(SKEY); } catch (_) { return null; } })();
+async function call(method, path, body, root = base) {
+  const res = await fetch(`${root}${path}`, { method, headers: { 'content-type': 'application/json', ...(session ? { 'x-family-session': session } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  if (res.status === 401 && root !== base) { session = null; try { localStorage.removeItem(SKEY); } catch (_) { /* ignore */ } }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Something went wrong. Please try again or call the mountain.');
   return data;
@@ -67,7 +71,7 @@ function hero(page, title, sub) {
     presale ? h('p', { class: 'presale' }, `We open ${fmtDay(b.opening_day)}.${b.opening_note ? ` ${b.opening_note}` : ' Buy ahead and pick any day.'}`) : null,
     conditionsStrip(page), h('p', { class: 'sub' }, sub || title),
     page.message ? h('p', { class: 'note' }, page.message) : null,
-    h('div', { class: 'chips-row' }, langToggle(), h('span', { class: 'trust' }, T('Secure card payment')), tel ? h('a', { class: 'call', href: tel }, `Call ${page.phone}`) : null)));
+    h('div', { class: 'chips-row' }, langToggle(), h('span', { class: 'trust' }, T('Secure card payment')), ...(page.badges || []).map((b) => h('span', { class: 'trust fair-badge' }, b.text)), tel ? h('a', { class: 'call', href: tel }, `Call ${page.phone}`) : null)));
 }
 const shell = (...kids) => h('div', { class: 'layout' }, h('main', { class: 'main stack', id: 'shop-main' }, ...kids));
 
@@ -166,6 +170,9 @@ async function showShop() {
   } catch (_) {
     clear(root).append(shell(h('section', { class: 'card stack' }, h('h1', null, 'Online sales are not available'), h('p', { class: 'muted' }, 'Please buy at the ticket window.')))); return;
   }
+  // Signed in: the household's people, the buyer's details and the rewards they hold (never typed again).
+  let acct = null;
+  if (session) { try { acct = await call('GET', '/account', null, `/api/v1/public/${encodeURIComponent(slug)}`); } catch (_) { acct = null; } }
   document.title = `${page.mountain}: ${LANG === 'es' ? 'boletos y pases' : 'buy tickets and passes'}`;
   document.documentElement.lang = LANG;
   clear(root);
@@ -208,9 +215,9 @@ async function showShop() {
       const d = `${shown}-${String(n).padStart(2, '0')}`;
       const di = info[d];
       const off = d < today || d > lastDay || closed(d) || (di && (di.state === 'sold_out' || di.state === 'closed'));
-      const sub = !off && di && di.from_cents ? h('small', { class: `cal-p${di.state === 'few' ? ' few' : ''}` }, `$${Math.round(di.from_cents / 100)}`) : (di && di.state === 'sold_out' ? h('small', { class: 'cal-p' }, 'Sold out') : null);
+      const sub = !off && di && di.from_cents ? h('small', { class: `cal-p${di.state === 'few' ? ' few' : ''}${di.next_rise ? ' rise' : ''}` }, `$${Math.round(di.from_cents / 100)}`) : (di && di.state === 'sold_out' ? h('small', { class: 'cal-p' }, 'Sold out') : null);
       cells.push(h('button', { type: 'button', class: `cal-day${d === picked ? ' on' : ''}${used.has(d) ? ' has' : ''}${d === today ? ' today' : ''}`, disabled: off, 'aria-pressed': d === picked ? 'true' : 'false',
-        'aria-label': `${dayLong(d)}${off ? ', not available' : ''}${!off && di && di.from_cents ? `, from $${Math.round(di.from_cents / 100)}` : ''}${!off && di && di.state === 'few' ? ', few left' : ''}${used.has(d) ? ', tickets in your order' : ''}`, onclick: () => pickDay(d) }, h('span', null, String(n)), sub));
+        'aria-label': `${dayLong(d)}${off ? ', not available' : ''}${!off && di && di.from_cents ? `, from $${Math.round(di.from_cents / 100)}` : ''}${!off && di && di.state === 'few' ? ', few left' : ''}${!off && di && di.next_rise ? `, price goes up ${dayLong(di.next_rise.on)}` : ''}${used.has(d) ? ', tickets in your order' : ''}`, onclick: () => pickDay(d) }, h('span', null, String(n)), sub));
     }
     clear(calEl).append(
       h('div', { class: 'cal-head' },
@@ -218,7 +225,7 @@ async function showShop() {
         h('strong', { 'aria-live': 'polite' }, `${MONTHS[m - 1]} ${y}`),
         h('button', { type: 'button', class: 'btn', disabled: !nextOk, 'aria-label': T('Next month'), onclick: () => { shown = addMonth(shown, 1); drawCal(); } }, '›')),
       h('div', { class: 'cal-grid', role: 'group', 'aria-label': 'Choose a day' }, ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((w) => h('span', { class: 'cal-w', 'aria-hidden': 'true' }, w)), cells),
-      h('p', { class: 'hint' }, 'Prices are the lowest ticket that day. Amber prices mean few are left. Gray days are not on sale or are sold out.'));
+      h('p', { class: 'hint' }, `Prices are the lowest ticket that day. Amber prices mean few are left. Gray days are not on sale or are sold out.${Object.values(info).some((x) => x.next_rise) ? ' A small mark under a price means it goes up soon.' : ''}`));
   }
   const addMonth = (ym, k) => { const [y, m] = ym.split('-').map(Number); const d = new Date(Date.UTC(y, m - 1 + k, 1)); return d.toISOString().slice(0, 7); };
 
@@ -228,6 +235,9 @@ async function showShop() {
     const ph = document.getElementById('pick-hint'); if (ph) ph.hidden = true;
     const ll = document.getElementById('lesson-link'); if (ll && page.lesson_booking) ll.href = `${page.lesson_booking.link}?date=${d}`; // the lesson page opens on this day
     svcHead.textContent = `2. Choose services for ${dayLong(d)}`;
+    const nr = (months.get(d.slice(0, 7)) || {})[d];
+    const riseEl = document.getElementById('rise-note');
+    if (riseEl) { riseEl.hidden = !(nr && nr.next_rise); riseEl.textContent = nr && nr.next_rise ? `Buy now: this day's price goes up ${money(nr.next_rise.cents)} on ${dayLong(nr.next_rise.on)}.` : ''; }
     clear(svcEl).append(h('p', { class: 'muted', role: 'status' }, T('Loading prices…')));
     try {
       const out = await call('GET', `/day?date=${d}`);
@@ -242,7 +252,11 @@ async function showShop() {
           p.available
             ? h('ul', { class: 'agelist' }, same ? h('li', null, h('span', null, T('Everyone')), h('b', null, money(p.prices[0].price_cents))) : p.prices.map((x) => h('li', null, h('span', null, AGE[x.tier]), h('b', null, x.was_cents ? [h('s', { class: 'was' }, money(x.was_cents)), ' ', money(x.price_cents)] : money(x.price_cents)))))
             : h('span', { class: 'bad' }, p.reason || 'Not sold on this day.'),
-          p.available ? h('button', { class: 'btn', type: 'button', onclick: () => add(p, d) }, T('Add a ticket')) : null);
+          p.available ? (() => {
+            // A quantity for same-type tickets: names can wait until paying.
+            const qty = h('select', { class: 'qty', 'aria-label': `${p.name}: ${T('How many tickets?')}` }, Array.from({ length: 10 }, (_, i) => h('option', { value: String(i + 1) }, String(i + 1))));
+            return h('div', { class: 'row add-row' }, p.kind === 'season_pass' ? null : qty, h('button', { class: 'btn', type: 'button', onclick: () => { const n = p.kind === 'season_pass' ? 1 : Number(qty.value) || 1; for (let i = 0; i < n; i++) add(p, d, i === 0); } }, T('Add a ticket')));
+          })() : null);
       });
       const soldOut = out.products.filter((p) => p.kind !== 'season_pass').length > 0 && out.products.filter((p) => p.kind !== 'season_pass').every((p) => !p.available && /Sold out/.test(p.reason || ''));
       clear(svcEl).append(cards.length ? h('div', { class: 'prod-grid' }, cards) : h('p', { class: 'muted' }, T('Nothing is on sale online for this day.')), ...(soldOut ? [waitlistBox(d)] : []));
@@ -340,7 +354,7 @@ async function showShop() {
     } catch (_) { /* storage can be off; the shop works without it */ }
   };
 
-  function add(p, date) {
+  function add(p, date, focus = true) {
     const id = ++uid;
     const f = h('input', { id: `f${id}`, autocomplete: 'off', maxlength: 60, required: true });
     const l = h('input', { id: `l${id}`, autocomplete: 'off', maxlength: 60, required: true });
@@ -368,19 +382,38 @@ async function showShop() {
       extras.set(a.id, cb);
       return h('label', { class: 'check-row', for: `x${id}-${a.id}` }, cb, h('span', null, `${T('Add')} ${a.name}`, h('span', { class: 'muted' }, ` ${addonFrom(a)}`)));
     })) : null;
-    const row = { id, product: p, date, f, l, dob, age, pass, shot, priceEl, badEl, extras };
+    const row = { id, product: p, date, f, l, dob, age, pass, shot, priceEl, badEl, extras, personId: null };
     row.el = h('div', { class: 'ticket-row' },
       h('div', { class: 'row-head' }, h('div', null, h('h3', null, p.name), h('span', { class: 'muted' }, dayLong(date))), h('span', null, priceEl, ' ', h('button', { class: 'btn link', type: 'button', onclick: () => { basket.splice(basket.indexOf(row), 1); row.el.remove(); drawCal(); sync(); } }, T('Remove')))),
       h('div', { class: 'cols' }, lab(`f${id}`, T('First name of the person using it'), f), lab(`l${id}`, T('Last name'), l), pass ? lab(`b${id}`, T('Date of birth'), dob, T('Needed for a season pass')) : lab(`a${id}`, T('Age group'), age, T('Sets the price'))),
       photoField, extrasEl, badEl);
     for (const el of [f, l, dob, age]) el.addEventListener('input', sync);
-    const saved = pass ? [] : loadGuests().filter((g) => !basket.some((r) => r.f.value.trim() === g.f && r.l.value.trim() === g.l));
+    // Signed in: tap a person from the household; their name, age and (for a pass) birthday come from the account.
+    if (acct && acct.members.length) {
+      const fieldsEl = row.el.querySelector('.cols');
+      const chips = h('div', { class: 'saved-row', role: 'group', 'aria-label': T('Who is this for?') }, h('span', { class: 'muted small' }, `${T('Who is this for?')}`),
+        acct.members.map((m) => h('button', { type: 'button', class: 'chip', 'aria-pressed': 'false', dataset: { person: String(m.id) }, onclick: (ev) => {
+          const on = row.personId === m.id ? null : m.id;
+          row.personId = on;
+          for (const b of chips.querySelectorAll('.chip')) { const yes = Number(b.dataset.person) === on; b.classList.toggle('on', yes); b.setAttribute('aria-pressed', yes ? 'true' : 'false'); }
+          f.value = on ? m.first_name : ''; l.value = on ? m.last_name : '';
+          if (pass && on && m.date_of_birth) dob.value = m.date_of_birth;
+          fieldsEl.hidden = Boolean(on && m.date_of_birth); // without a birthday on file, they still pick the age group
+          ev.currentTarget.focus(); sync();
+        } }, m.first_name)),
+        h('button', { type: 'button', class: 'chip', onclick: () => { row.personId = null; fieldsEl.hidden = false; f.value = ''; l.value = ''; for (const b of chips.querySelectorAll('.chip')) { b.classList.remove('on'); b.setAttribute('aria-pressed', 'false'); } f.focus(); sync(); } }, T('Someone else')));
+      row.el.insertBefore(chips, fieldsEl);
+      // The next household member not already on a ticket for this day is picked for them.
+      const free = acct.members.find((m) => !basket.some((r) => r.personId === m.id && r.date === date && r.product.id === p.id));
+      if (free) setTimeout(() => chips.querySelector(`[data-person="${free.id}"]`).click(), 0);
+    }
+    const saved = pass || acct ? [] : loadGuests().filter((g) => !basket.some((r) => r.f.value.trim() === g.f && r.l.value.trim() === g.l));
     if (saved.length) {
       row.el.insertBefore(h('div', { class: 'saved-row', role: 'group', 'aria-label': T('Saved guests') }, h('span', { class: 'muted small' }, T('Saved guests') + ':'),
         saved.map((g) => h('button', { type: 'button', class: 'chip', onclick: () => { f.value = g.f; l.value = g.l; age.value = g.a; sync(); } }, `${g.f} ${g.l}`))), row.el.children[1]);
     }
     basket.push(row); rowsEl.append(row.el); drawCal(); sync();
-    f.focus();
+    if (focus && !acct) f.focus();
   }
 
   function waitlistBox(d) {
@@ -396,7 +429,10 @@ async function showShop() {
     return h('div', { class: 'ticket-row' }, h('h3', null, T('This day is sold out')), h('div', { class: 'cols' }, lab('wl-email', T('Email'), em), lab('wl-name', T('Name'), nm), lab('wl-size', T('How many tickets?'), ps)), h('div', { class: 'row' }, go), msg);
   }
 
-  const ready = (r) => r.f.value.trim() && r.l.value.trim() && (r.pass ? r.dob.value && r.shot.data : r.age.value);
+  // Priced as soon as the age group is set (names can wait until paying); a household person is ready at once.
+  const known = (r) => r.personId && acct && (acct.members.find((m) => m.id === r.personId) || {}).date_of_birth;
+  const priceable = (r) => (r.personId && (known(r) || r.age.value || (r.pass && r.dob.value))) || (r.pass ? r.dob.value && r.shot.data : r.age.value);
+  const ready = (r) => priceable(r) && (r.personId || (r.f.value.trim() && r.l.value.trim()));
   let timer = 0; let seq = 0; let last = null;
 
   // ---- extras: add-ons, gift cards, promo code
@@ -406,7 +442,7 @@ async function showShop() {
   promo.addEventListener('input', sync);
   const giftList = h('div', { class: 'saved-row', 'aria-live': 'polite' });
   const drawGifts = () => {
-    clear(giftList).append(...gifts.map((g, i) => h('span', { class: 'chip on' }, `${T('Gift card')} ${money(g.amount_cents)}${g.recipient_name ? ` · ${g.recipient_name}` : ''} `, h('button', { type: 'button', class: 'btn link', 'aria-label': `${T('Remove')} ${T('Gift card')}`, onclick: () => { gifts.splice(i, 1); drawGifts(); sync(); } }, '×'))));
+    clear(giftList).append(...gifts.map((g, i) => h('span', { class: 'chip on' }, `${g.experience ? g.experience.theme : T('Gift card')} ${money(g.amount_cents)}${g.recipient_name ? ` · ${g.recipient_name}` : ''} `, h('button', { type: 'button', class: 'btn link', 'aria-label': `${T('Remove')} ${T('Gift card')}`, onclick: () => { gifts.splice(i, 1); drawGifts(); sync(); } }, '×'))));
   };
   const vouchers = (page.addons || []).filter((a) => !a.per_person);
   const lessonLink = page.lesson_booking ? h('div', { class: 'ticket-row lesson-link' }, h('h3', null, T('Ski and snowboard lessons')),
@@ -431,7 +467,40 @@ async function showShop() {
       if (gifts.length >= 5) return showErr('You can add up to 5 gift cards.');
       gifts.push({ amount_cents: Number(gAmt.value), recipient_name: gTo.value.trim() || undefined, message: gMsg.value.trim() || undefined });
       gTo.value = ''; gMsg.value = ''; drawGifts(); sync();
-    } }, T('Add gift card'))), giftList);
+    } }, T('Add gift card'))), giftList, expBox);
+  // A gift experience: a theme, what it includes, who it is for and the day it arrives in their inbox.
+  const expBox = h('div', { class: 'stack gift-exp' }, h('p', { class: 'muted small' }, T('Loading…')));
+  (async () => {
+    let menu; try { menu = await call('GET', '/gifts/menu', null, `/api/v1/public/${encodeURIComponent(slug)}`); } catch (_) { expBox.remove(); return; }
+    const theme = h('select', { id: 'gx-theme' }, menu.themes.map((x) => h('option', { value: x }, x)));
+    const incs = menu.includes.map((i) => ({ i, cb: h('input', { type: 'checkbox', id: `gx-${i.key}`, checked: i.key === 'ticket' }) }));
+    const extra = h('select', { id: 'gx-amt' }, [0, 2500, 5000, 10000].map((c) => h('option', { value: String(c) }, c ? money(c) : T('Nothing extra'))));
+    const from = h('input', { id: 'gx-from', maxlength: 150, autocomplete: 'name' });
+    const toName = h('input', { id: 'gx-to', maxlength: 150, autocomplete: 'off' });
+    const toEmail = h('input', { id: 'gx-email', type: 'email', maxlength: 255, autocomplete: 'off' });
+    const when = h('input', { id: 'gx-when', type: 'date', min: menu.today, value: menu.today });
+    const note = h('input', { id: 'gx-note', maxlength: 300, autocomplete: 'off' });
+    const worth = h('p', { class: 'small', role: 'status' });
+    const value = () => incs.filter((x) => x.cb.checked).reduce((n, x) => n + x.i.cents, 0) + Number(extra.value);
+    const showWorth = () => { worth.textContent = `${T('Gift value')}: ${money(value())}`; };
+    for (const el of [...incs.map((x) => x.cb), extra]) el.addEventListener('change', showWorth);
+    showWorth();
+    const addIt = h('button', { class: 'btn', type: 'button' }, T('Add the gift'));
+    addIt.addEventListener('click', () => {
+      const exp = { theme: theme.value, includes: incs.filter((x) => x.cb.checked).map((x) => x.i.key), amount_cents: Number(extra.value), from_name: from.value.trim(), recipient_name: toName.value.trim(), recipient_email: toEmail.value.trim(), deliver_on: when.value, ...(note.value.trim() ? { message: note.value.trim() } : {}) };
+      if (!exp.from_name || !exp.recipient_name || !exp.recipient_email || !exp.deliver_on) return showErr(T('Fill in who it is from, who it is for, their email and the day.'));
+      if (value() < 500) return showErr(T('Add something to the gift.'));
+      if (gifts.length >= 5) return showErr('You can add up to 5 gift cards.');
+      gifts.push({ amount_cents: value(), recipient_name: exp.recipient_name, experience: exp });
+      toName.value = ''; toEmail.value = ''; note.value = ''; drawGifts(); sync();
+    });
+    clear(expBox).append(h('h3', null, T('Or give an experience')),
+      h('p', { class: 'muted small' }, T('We email it to them on the day you pick, with a page to open it. It becomes their account here.')),
+      h('div', { class: 'cols' }, lab('gx-theme', T('Theme'), theme), lab('gx-amt', T('Add an amount'), extra)),
+      h('fieldset', null, h('legend', null, T('What it includes')), incs.map((x) => h('label', { class: 'check-row', for: `gx-${x.i.key}` }, x.cb, h('span', null, `${x.i.name} (${money(x.i.cents)})`)))),
+      h('div', { class: 'cols' }, lab('gx-from', T('From'), from), lab('gx-to', T('For'), toName), lab('gx-email', T('Their email'), toEmail), lab('gx-when', T('Send it on'), when)),
+      lab('gx-note', T('A short message (optional)'), note), worth, h('div', { class: 'row' }, addIt));
+  })();
   const promoEl = h('div', { class: 'stack' }, lab('promo', T('Promo code'), promo));
   const addonsOf = () => [...[...qtys].filter(([, n]) => n > 0).map(([product_id, quantity]) => ({ product_id, quantity })),
     ...basket.flatMap((r, i) => [...(r.extras || new Map())].filter(([, cb]) => cb.checked).map(([product_id]) => ({ product_id, quantity: 1, for_item: i })))];
@@ -447,9 +516,14 @@ async function showShop() {
     showEstimate();
     timer = setTimeout(quote, 350);
   }
-  const itemsOf = (withPhoto = false) => basket.map((r) => ({ product_id: r.product.id, valid_on: r.date, holder: { first_name: r.f.value.trim(), last_name: r.l.value.trim(), ...(r.pass ? { date_of_birth: r.dob.value, ...(withPhoto ? { photo: r.shot.data } : {}) } : { age_group: r.age.value }) } }));
-  const activitiesOf = () => acts.map((r) => ({ product_id: r.product.id, valid_on: r.date, ...(r.start ? { start_time: r.start } : {}), holder: { first_name: r.f.value.trim(), last_name: r.l.value.trim(), age_group: r.age.value } }));
-  const basketOf = (withPhoto = false) => ({ items: itemsOf(withPhoto), addons: addonsOf(), gifts, activities: activitiesOf(), ...(promo.value.trim() ? { promo_code: promo.value.trim() } : {}) });
+  // For a price check, a ticket without names yet goes as "Guest 1" (the name is asked for before paying).
+  const nameOf = (r, i, stand) => ({ first_name: r.f.value.trim() || (stand ? 'Guest' : ''), last_name: r.l.value.trim() || (stand ? String(i + 1) : '') });
+  const holderOf = (r, i, withPhoto, stand) => (r.personId ? { person_id: r.personId, ...(known(r) ? {} : r.pass ? { date_of_birth: r.dob.value } : { age_group: r.age.value }), ...(r.pass && withPhoto && r.shot.data ? { photo: r.shot.data } : {}) }
+    : { ...nameOf(r, i, stand), ...(r.pass ? { date_of_birth: r.dob.value, ...(withPhoto ? { photo: r.shot.data } : {}) } : { age_group: r.age.value }) });
+  const itemsOf = (withPhoto = false, stand = false) => basket.map((r, i) => ({ product_id: r.product.id, valid_on: r.date, holder: holderOf(r, i, withPhoto, stand) }));
+  const activitiesOf = (stand = false) => acts.map((r, i) => ({ product_id: r.product.id, valid_on: r.date, ...(r.start ? { start_time: r.start } : {}), holder: { ...nameOf(r, basket.length + i, stand), age_group: r.age.value } }));
+  const basketOf = (withPhoto = false, stand = false) => ({ items: itemsOf(withPhoto, stand), addons: addonsOf(), gifts, activities: activitiesOf(stand), ...(promo.value.trim() ? { promo_code: promo.value.trim() } : {}),
+    ...(rewardPick() ? { reward: rewardPick() } : {}), ...(planBox.checked && !planRow.hidden ? { plan: true } : {}) });
   // A running estimate from the listed prices, shown straight away; the exact total (tax, discounts) follows once every
   // ticket is filled in.
   function showEstimate() {
@@ -470,21 +544,43 @@ async function showShop() {
   async function quote() {
     for (const r of [...basket, ...acts]) { r.badEl.textContent = ''; r.priceEl.textContent = ''; }
     for (const r of basket) if (r.pass && r.f.value.trim() && r.l.value.trim() && r.dob.value && !r.shot.data) r.badEl.textContent = T('Add a photo to buy the pass.');
-    if (!basket.every(ready) || !acts.every(ready)) { showEstimate(); return; }
+    if (!basket.every(priceable) || !acts.every(priceable)) { showEstimate(); return; }
     const mine = ++seq;
     try {
-      const q = await call('POST', '/quote', basketOf());
+      const q = await call('POST', '/quote', basketOf(false, true));
       if (mine !== seq) return;
       last = q;
       q.lines.forEach((ln, i) => { basket[i].priceEl.textContent = `${TIER[ln.tier] || ''} ${money(ln.unit_cents)}`; });
       (q.activities || []).forEach((ln, i) => { if (acts[i]) acts[i].priceEl.textContent = `${TIER[ln.tier] || ''} ${money(ln.unit_cents)}`; });
       const saved = q.lines.reduce((n, l) => n + (l.saved_cents || 0), 0);
+      const offer = q.plan || q.plan_offer;
+      planRow.hidden = !offer;
+      if (offer) clear(planText).append(`Pay in ${offer.count}: ${money(offer.first_cents)} today, then ${offer.then.map((x) => `${money(x.cents)} on ${dayLong(x.on)}`).join(', ')}.`);
       appendAll(clear(totalEl), ...[saved ? h('span', { class: 'save-note' }, `You save ${money(saved)} by buying online`) : null, h('span', { class: 'muted' }, `Subtotal ${money(q.subtotal_cents)}`),
+        q.reward ? h('span', { class: 'save-note' }, `${T('Reward')}: -${money(q.reward.cents)}`) : null,
         q.discount_cents ? h('span', { class: 'save-note' }, `${q.promo}: -${money(q.discount_cents)}`) : null,
         q.tax_cents ? h('span', { class: 'muted' }, `Tax ${money(q.tax_cents)}`) : null, h('span', { class: 'grand' }, `Total ${money(q.total_cents)}`)]);
-      pay.disabled = !page.open; pay.textContent = page.open ? `${LANG === 'es' ? 'Pagar' : 'Pay'} ${money(q.total_cents)}` : T('Online sales are closed');
+      const now = q.plan ? q.plan.first_cents : q.total_cents;
+      pay.disabled = !page.open; pay.textContent = page.open ? `${LANG === 'es' ? 'Pagar' : 'Pay'} ${money(now)}${q.plan ? ` ${T('today')}` : ''}` : T('Online sales are closed');
     } catch (e) { if (mine === seq) { showErr(e.message); clear(totalEl); } }
   }
+
+  // ---- rewards the household holds (signed in) and "Pay in N" when the mountain offers it
+  const rewardSel = h('select', { id: 'rw-pick', 'aria-label': T('Use a reward') }, h('option', { value: '' }, T('No reward')),
+    ...((acct && acct.rewards) || []).flatMap((r) => r.choices.map((c) => h('option', { value: `${r.id}|${c.choice}`, selected: qs.get('reward') === String(r.id) && c === r.choices[0] }, `${r.first_name}: ${c.words}`))));
+  rewardSel.addEventListener('change', sync);
+  const rewardEl = acct && acct.rewards && acct.rewards.length ? h('div', { class: 'field reward-pick' }, h('label', { for: 'rw-pick' }, T('Use a reward')), rewardSel) : null;
+  const rewardPick = () => {
+    if (!rewardEl || !rewardSel.value) return null;
+    const [id, choice] = rewardSel.value.split('|');
+    const r = acct.rewards.find((x) => String(x.id) === id);
+    const forItem = Math.max(0, basket.findIndex((b) => b.personId === r.person_id));
+    return { id: Number(id), choice, ...(choice === 'credit' ? {} : { for_item: forItem }) };
+  };
+  const planBox = h('input', { type: 'checkbox', id: 'c-plan' });
+  const planText = h('span');
+  planBox.addEventListener('change', sync);
+  const planRow = h('label', { class: 'check-row', for: 'c-plan', hidden: true }, planBox, planText);
 
   // ---- buyer details
   const bf = h('input', { id: 'c-first', autocomplete: 'given-name', maxlength: 60, required: true });
@@ -499,7 +595,7 @@ async function showShop() {
 
   const form = h('form', { class: 'shop-grid', novalidate: true }, h('div', { class: 'stack shop-main' },
     h('section', { class: 'card stack' }, h('h2', null, T('1. Pick a day')), calEl),
-    h('section', { class: 'card stack' }, svcHead, h('p', { id: 'pick-hint', class: 'muted' }, T('Pick a day above to see what is on sale and the price for each age.')), svcEl),
+    h('section', { class: 'card stack' }, svcHead, h('p', { id: 'pick-hint', class: 'muted' }, T('Pick a day above to see what is on sale and the price for each age.')), h('p', { id: 'rise-note', class: 'rise-note', hidden: true }), svcEl),
     actsEl,
     h('section', { class: 'card stack' }, h('h2', null, T('3. Who is each ticket for?')), rowsEl, hint),
     addonsEl,
@@ -512,12 +608,16 @@ async function showShop() {
       h('div', { class: 'hp' }, h('label', null, T('Leave this empty'), hp))),
     giftEl),
     // The order summary: beside the form on a wide screen, stuck to the bottom on a phone.
-    h('aside', { class: 'shop-aside' }, h('section', { class: 'card stack paybar' }, h('h2', { class: 'sum-h' }, T('Your order')), totalEl, h('details', { class: 'promo-link' }, h('summary', null, T('Have a promo code?')), promoEl), err, h('div', { class: 'row' }, pay))));
+    h('aside', { class: 'shop-aside' }, h('section', { class: 'card stack paybar' }, h('h2', { class: 'sum-h' }, T('Your order')), totalEl, rewardEl, planRow, h('details', { class: 'promo-link' }, h('summary', null, T('Have a promo code?')), promoEl), err, h('div', { class: 'row' }, pay))));
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault(); showErr('');
     if (basket.some((r) => r.pass && !r.shot.data)) return showErr(T('Add a photo for each season pass.'));
-    if (!anything() || !basket.every(ready) || !acts.every(ready)) return showErr(T('Fill in the name and age group for every ticket.'));
+    if (!anything() || !basket.every(ready) || !acts.every((r) => priceable(r) && r.f.value.trim() && r.l.value.trim())) {
+      const r = [...basket, ...acts].find((x) => !x.personId && !(x.f.value.trim() && x.l.value.trim()));
+      if (r) { r.el.querySelector('.cols').hidden = false; r.f.focus(); }
+      return showErr(T('Fill in the name and age group for every ticket.'));
+    }
     if (!limitsRow.hidden && !limitsCb.checked) return showErr('Please confirm every rider meets the limits for their activity.');
     if (![bf, bl, be, bp].every((x) => x.value.trim())) return showErr(T('Fill in your name, email and phone.'));
     if (page.waiver_text && !waiver.checked) return showErr(T('Please read and accept the waiver.'));
@@ -531,6 +631,7 @@ async function showShop() {
   });
 
   try { const me = JSON.parse(localStorage.getItem(`${GKEY}-me`) || 'null'); if (me) { bf.value = me.f || ''; bl.value = me.l || ''; be.value = me.e || ''; bp.value = me.p || ''; } } catch (_) { /* ignore */ }
+  if (acct && acct.me) { bf.value = acct.me.first_name; bl.value = acct.me.last_name; be.value = acct.email; bp.value = acct.me.phone || bp.value; }
   drawCal();
   // The first open day is picked for them, so the services are showing straight away.
   const firstOpen = (() => { for (let i = 0; i <= 365; i++) { const d = addDay(today, i); if (!closed(d)) return d; } return null; })();
@@ -541,16 +642,88 @@ async function showShop() {
   if (back && /^[0-9a-f]{32}$/.test(back)) call('POST', `/orders/${back}/abandon`).catch(() => {});
   root.append(hero(page, '', page.open ? T('Pick a day, choose your tickets, see the exact total, and pay by card. Your tickets arrive by email and on screen.') : T('Online sales are not open right now.')),
     shell(qs.get('cancelled') ? h('div', { class: 'card' }, h('strong', null, 'Payment canceled. '), 'Nothing was charged. You can start again below.') : null,
+      page.open ? h('div', { class: 'card account-strip' }, acct ? [h('span', null, `${T('Signed in as')} ${acct.email}. `), h('a', { href: `/family/${encodeURIComponent(slug)}` }, T('Your account'))]
+        : [h('span', null, T('Been here before?')), ' ', h('a', { href: `/family/${encodeURIComponent(slug)}` }, T('Sign in')), h('span', null, ` ${T('and your family fills in by itself.')}`)]) : null,
       page.open ? form : h('section', { class: 'card stack' }, h('h2', null, T('Online sales are closed')), h('p', { class: 'muted' }, `Please buy at the ticket window${page.phone ? ` or call ${page.phone}` : ''}.`))),
     ...(page.open ? [shell(groupBox())] : []),
     h('p', { class: 'footer' }, T('Payments are handled by Stripe. We never see or store your card number.')));
   if (firstOpen) { drawCal(); await pickDay(firstOpen); }
 }
 
+// ---------------------------------------------------------------- reload a card online (/reload/<mountain>)
+// The guest types the number from the back of their card, picks the day and the ticket, pays, and goes straight to the
+// lift: the gate reads the card. The server never says whose card it is.
+async function showReload() {
+  let page;
+  try { page = await call('GET', ''); } catch (_) { clear(root).append(shell(h('section', { class: 'card stack' }, h('h1', null, 'Online sales are not available'), h('p', { class: 'muted' }, 'Please buy at the ticket window.')))); return; }
+  if (page.guest_types) { TYPES = page.guest_types; ONLINE_TYPES = TYPES.filter((t) => t.online).map((t) => t.code); }
+  document.title = `${page.mountain}: reload your card`;
+  const pubRoot = `/api/v1/public/${encodeURIComponent(slug)}`;
+  let acct = null; if (session) { try { acct = await call('GET', '/account', null, pubRoot); } catch (_) { acct = null; } }
+  const card = h('input', { id: 'rl-card', autocomplete: 'off', inputmode: 'text', maxlength: 40, required: true, 'aria-describedby': 'rl-card-hint' });
+  const cardMsg = h('p', { role: 'status', class: 'small' });
+  const check = h('button', { type: 'button', class: 'btn' }, 'Check the card');
+  const step2 = h('div', { class: 'stack', hidden: true });
+  const err = h('div', { role: 'alert', class: 'error-box', hidden: true });
+  let day = page.today; let product = null;
+  const prodEl = h('div', { class: 'stack', 'aria-live': 'polite' });
+  const dayEl = h('div', { class: 'saved-row', role: 'group', 'aria-label': 'Which day?' });
+  const age = h('select', { id: 'rl-age' }, h('option', { value: '' }, T('Choose…')), ONLINE_TYPES.map((k) => h('option', { value: k }, AGE[k])));
+  const f = h('input', { id: 'rl-f', autocomplete: 'given-name', maxlength: 60, value: acct && acct.me ? acct.me.first_name : '' });
+  const l = h('input', { id: 'rl-l', autocomplete: 'family-name', maxlength: 60, value: acct && acct.me ? acct.me.last_name : '' });
+  const em = h('input', { id: 'rl-e', type: 'email', autocomplete: 'email', maxlength: 255, value: acct ? acct.email : '' });
+  const ph = h('input', { id: 'rl-p', type: 'tel', autocomplete: 'tel', maxlength: 40, value: acct && acct.me ? acct.me.phone || '' : '' });
+  const terms = h('input', { type: 'checkbox', id: 'rl-terms' });
+  const waiver = h('input', { type: 'checkbox', id: 'rl-waiver' });
+  const pay = h('button', { type: 'button', class: 'btn primary big' }, 'Pay and load the card');
+  const drawDays = async () => {
+    clear(dayEl).append(...[page.today, addDay(page.today, 1)].map((d) => h('button', { type: 'button', class: `chip${d === day ? ' on' : ''}`, 'aria-pressed': d === day ? 'true' : 'false', onclick: () => { day = d; drawDays(); } }, d === page.today ? `Today, ${dayLong(d)}` : `Tomorrow, ${dayLong(d)}`)));
+    clear(prodEl).append(h('p', { class: 'muted' }, T('Loading prices…')));
+    try {
+      const out = (await call('GET', `/day?date=${day}`)).products.filter((p) => p.available && p.kind === 'day_ticket' && p.valid_days === 1);
+      product = out[0] || null;
+      clear(prodEl).append(...(out.length ? out.map((p) => h('label', { class: 'check-row', for: `rl-p${p.id}` }, h('input', { type: 'radio', name: 'rl-prod', id: `rl-p${p.id}`, checked: p === product, onchange: () => { product = p; } }), h('span', null, h('b', null, p.name), ` ${p.prices.map((x) => `${AGE[x.tier]} ${money(x.price_cents)}`).join(', ')}`))) : [h('p', { class: 'muted' }, 'No day tickets are on sale online for this day.')]));
+    } catch (e) { clear(prodEl).append(h('p', { class: 'error-box' }, e.message)); }
+  };
+  check.addEventListener('click', async () => {
+    cardMsg.textContent = '';
+    if (!card.value.trim()) { cardMsg.textContent = 'Type the number from the back of the card.'; return; }
+    try {
+      const r = await call('POST', '/reload/check', { card: card.value.trim() }, pubRoot);
+      if (!r.ok) { cardMsg.textContent = r.reason; step2.hidden = true; return; }
+      cardMsg.textContent = 'Card found. Pick the day and ticket below.'; step2.hidden = false; drawDays();
+    } catch (e) { cardMsg.textContent = e.message; }
+  });
+  pay.addEventListener('click', async () => {
+    err.hidden = true;
+    const say = (m) => { err.textContent = m; err.hidden = false; };
+    if (!product) return say('Pick a ticket.');
+    if (!age.value) return say('Pick the age group of the person using the card.');
+    if (![f, l, em, ph].every((x) => x.value.trim())) return say(T('Fill in your name, email and phone.'));
+    if (page.waiver_text && !waiver.checked) return say(T('Please read and accept the waiver.'));
+    if (!terms.checked) return say(T('Please confirm you understand tickets are not refundable online.'));
+    pay.disabled = true;
+    try {
+      const out = await call('POST', '/orders', { contact_first_name: f.value.trim(), contact_last_name: l.value.trim(), contact_email: em.value.trim(), contact_phone: ph.value.trim(),
+        items: [{ product_id: product.id, valid_on: day, holder: { first_name: f.value.trim(), last_name: l.value.trim(), age_group: age.value } }], reload_card: card.value.trim(), terms_accepted: true, waiver_accepted: waiver.checked });
+      location.href = out.checkout_url;
+    } catch (e) { say(e.message); pay.disabled = false; }
+  });
+  appendAll(step2, h('h2', null, '2. The day and the ticket'), dayEl, prodEl,
+    h('h2', null, '3. Who uses the card, and your details'),
+    h('div', { class: 'cols' }, lab('rl-f', T('First name'), f), lab('rl-l', T('Last name'), l), lab('rl-age', T('Age group'), age, T('Sets the price')), lab('rl-e', T('Email (we send the tickets here)'), em), lab('rl-p', T('Mobile phone'), ph)),
+    page.waiver_text ? [h('div', { class: 'waiver-box', tabindex: '0' }, page.waiver_text), h('label', { class: 'check-row', for: 'rl-waiver' }, waiver, h('span', null, T('I have read the waiver. I accept it for myself and for any child under 18 in this order. Other adults in the order will sign at the mountain.')))] : null,
+    h('label', { class: 'check-row', for: 'rl-terms' }, terms, h('span', null, T('I understand tickets bought online are not refundable. If the mountain closes, I can call for help.'))), err, h('div', { class: 'row' }, pay));
+  clear(root).append(hero(page, '', 'Reload your card online and go straight to the lift. No stop at the window.'),
+    shell(h('section', { class: 'card stack reload-steps' }, h('h2', null, '1. Your card'),
+      lab('rl-card', 'Card number', card, 'The number printed on the back of your lift card.'), h('span', { id: 'rl-card-hint', hidden: true }), h('div', { class: 'row' }, check), cardMsg, step2)),
+    h('p', { class: 'footer' }, T('Payments are handled by Stripe. We never see or store your card number.')));
+}
+
 (async () => {
   document.getElementById('shop-loading')?.remove();
   const token = qs.get('order');
-  if (token) await showOrder(token); else await showShop();
+  if (token) await showOrder(token); else if (location.pathname.split('/')[1] === 'reload') await showReload(); else await showShop();
 })();
 
 mountGuestAssistant('shop');

@@ -295,7 +295,9 @@ publicRouter.post('/:slug/shop/quote', validate(z.object(basketShape).refine(non
   const extras = await prepare(req, t, req.body);
   if (!named(req.body)) throw bad('Fill in the name for every ticket');
   const q = await shop.quote(pool, t, req.body.items, extras);
-  res.json({ plan: q.plan ? { count: q.plan.count, first_cents: q.plan.first_cents, then: q.plan.then } : null, reward: q.reward ? { id: q.reward.id, choice: q.reward.choice, cents: q.reward.cents, words: q.reward.words } : null, reload: Boolean(q.reload), lines: q.lines.map((l) => ({ name: l.name, valid_on: l.valid_on, tier: l.tier, unit_cents: l.unit, saved_cents: l.saved || 0, tax_cents: l.tax })),
+  // "Pay in N" offered for this basket (Track FAIR's lib/paymentplans.js): shown as a choice; asked for with plan: true.
+  const offer = q.plan ? null : await require('../lib/paymentplans').quote(pool, t.id, { lines: q.lines, addons: q.addons, total: q.total }).catch(() => null);
+  res.json({ plan_offer: offer && offer.available ? { count: offer.count, first_cents: offer.first_cents, then: offer.then } : null, plan: q.plan ? { count: q.plan.count, first_cents: q.plan.first_cents, then: q.plan.then } : null, reward: q.reward ? { id: q.reward.id, choice: q.reward.choice, cents: q.reward.cents, words: q.reward.words } : null, reload: Boolean(q.reload), lines: q.lines.map((l) => ({ name: l.name, valid_on: l.valid_on, tier: l.tier, unit_cents: l.unit, saved_cents: l.saved || 0, tax_cents: l.tax })),
     activities: q.activities.map((a) => ({ name: a.name, attraction: a.attraction, valid_on: a.valid_on, start_time: a.start_time, tier: a.tier, unit_cents: a.unit, tax_cents: a.tax, limits_text: a.limits_text })), addons: q.addons.map((a) => ({ product_id: a.product_id, name: a.name, kind: a.kind, quantity: a.quantity, unit_cents: a.unit, tier: a.tier, valid_on: a.valid_on, for_item: a.for_item, for_name: a.holder ? `${a.holder.first_name} ${a.holder.last_name}` : null })), gifts: q.gifts, promo: q.promo, discount_cents: q.discount, subtotal_cents: q.subtotal, tax_cents: q.tax, total_cents: q.total });
 });
 

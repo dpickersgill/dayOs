@@ -159,6 +159,8 @@ function createApp() {
   app.get('/shop/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'shop.html')));
   app.get('/programs/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'register.html')));
   app.get('/family/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'family.html')));
+  app.get('/reload/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'shop.html'))); // reload an RFID card online (Guests round 2)
+  app.get(['/gift/:slug/:token', '/gift-balance/:slug'], (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'gift.html'))); // a gift experience, the gift card balance
   app.get('/try', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'try.html')));
   app.get('/platform', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'platform.html')));
   // The public waiver signing page: /waiver/<mountain>, and a signed copy at /waiver/<mountain>?copy=<token>.
