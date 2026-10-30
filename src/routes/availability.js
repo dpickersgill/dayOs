@@ -120,6 +120,7 @@ router.post('/windows', crew, validate(z.object({ staff_id: z.number().int().pos
     }
     await audit(conn, req, 'open_times', 'instructor_open', s.id, { dates: dates.length });
   });
+  await require('../lib/lessonspots').after(req.auth.tenantId, { dates }, req); // Track STAFF: spots that follow staff
   res.status(201).json({ ok: true, days: dates.length });
 });
 
@@ -129,6 +130,7 @@ router.delete('/windows/:id', crew, async (req, res) => {
   if (!w) throw notFound('Time');
   if (w.staff_id !== req.auth.staffId && !isManager(req)) throw forbidden('You can only change your own availability');
   await pool.query('DELETE FROM instructor_open WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, id]);
+  await require('../lib/lessonspots').afterAhead(req.auth.tenantId, req); // Track STAFF
   res.status(204).end();
 });
 
@@ -136,6 +138,7 @@ router.delete('/windows/:id', crew, async (req, res) => {
 router.post('/windows/clear', crew, validate(z.object({ staff_id: z.number().int().positive().optional(), dates: z.array(dateStr).min(1).max(62) })), async (req, res) => {
   const s = await target(pool, req, req.body.staff_id);
   const [r] = await pool.query(`DELETE FROM instructor_open WHERE tenant_id = ? AND staff_id = ? AND open_date IN (${req.body.dates.map(() => '?').join(',')}) AND open_date >= ?`, [req.auth.tenantId, s.id, ...req.body.dates, todayIn(await tz(req.auth.tenantId))]);
+  await require('../lib/lessonspots').after(req.auth.tenantId, { dates: req.body.dates }, req); // Track STAFF
   res.json({ cleared: r.affectedRows });
 });
 

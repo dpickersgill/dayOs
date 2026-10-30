@@ -289,6 +289,7 @@ router.put(
       await conn.query('DELETE FROM availability WHERE tenant_id = ? AND staff_id = ?', [req.auth.tenantId, staffId]);
       for (const w of req.body.windows) await conn.query('INSERT INTO availability (tenant_id, staff_id, weekday, start_time, end_time) VALUES (?, ?, ?, ?, ?)', [req.auth.tenantId, staffId, w.weekday, w.start_time, w.end_time]);
     });
+    await require('../lib/lessonspots').afterAhead(req.auth.tenantId, req); // Track STAFF: spots that follow staff
     res.json({ ok: true });
   },
 );

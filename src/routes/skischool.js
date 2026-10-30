@@ -12,6 +12,7 @@ const { bookStudent, saveDetails, lastDetails, safetyShape } = require('../lib/l
 const { sendConfirmation } = require('../lib/lessonconfirm');
 const { instructorFit, NOT_SET_UP } = require('../lib/school');
 const { baseUrl } = require('../lib/baseurl');
+const LS = require('../lib/lessonspots'); // 2026.11.9 Track STAFF: spots that follow staff recount after a change
 
 const router = express.Router();
 const school = ['instructor', 'manager', 'counter'];
@@ -145,6 +146,7 @@ router.patch('/sessions/:id/instructor', requireRole('manager'), validate(z.obje
     await conn.query('UPDATE lesson_sessions SET instructor_id = ? WHERE tenant_id = ? AND id = ?', [req.body.instructor_id, tenantId, sid]);
     await audit(conn, req, 'assign_instructor', 'lesson_sessions', sid, req.body);
   });
+  await LS.after(tenantId, { sessionIds: [sid] }, req);
   res.json({ ok: true });
 });
 
@@ -166,6 +168,7 @@ router.patch('/sessions/:id', requireRole('manager'), validate(z.object({
       [la.level_min, la.level_max, la.age_min, la.age_max, la.ability_level, la.age_group, b.meeting_place ?? null, cap, b.format, tenantId, s.id]);
     await audit(conn, req, 'update', 'lesson_sessions', s.id, req.body);
   });
+  await LS.after(tenantId, { sessionIds: [paramId(req)] }, req);
   res.json({ ok: true });
 });
 
@@ -261,7 +264,9 @@ router.get('/sessions/:id/cancel-preview', requireRole('manager'), async (req, r
   res.json(s);
 });
 router.post('/sessions/:id/cancel', requireRole('manager'), validate(reasonSchema), async (req, res) => {
-  res.json(await LC.cancelSession(req.auth.tenantId, paramId(req), req.body.reason, req));
+  const out = await LC.cancelSession(req.auth.tenantId, paramId(req), req.body.reason, req);
+  await LS.after(req.auth.tenantId, { sessionIds: [paramId(req)] }, req);
+  res.json(out);
 });
 router.delete('/sessions/:id', requireRole('manager'), async (req, res) => {
   await LC.deleteSession(req.auth.tenantId, paramId(req), req);

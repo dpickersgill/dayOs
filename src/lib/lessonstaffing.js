@@ -43,11 +43,11 @@ function suits(i, { discipline, level_max: levelMax, kids }) {
 }
 
 /** Free, available and suited instructors for a time. */
-async function freeFor(db, tenantId, want, exclude = new Set()) {
+async function freeFor(db, tenantId, want, exclude = new Set(), { skipAvailability = false } = {}) {
   const out = [];
   for (const i of await instructors(db, tenantId)) {
     if (exclude.has(i.id) || !suits(i, want)) continue;
-    const problems = await staffProblems(db, tenantId, { staffId: i.id, startsAt: want.starts_at, endsAt: want.ends_at });
+    const problems = await staffProblems(db, tenantId, { staffId: i.id, startsAt: want.starts_at, endsAt: want.ends_at, skipAvailability });
     if (!problems.length) out.push(i);
   }
   return out;
@@ -148,7 +148,8 @@ async function createOffer(tenantId, b, req, base) {
   if (b.ends_at <= b.starts_at) throw bad('The end must be after the start');
   const t = await one(pool, 'SELECT id, name, slug FROM tenants WHERE id = ?', [tenantId]);
   const want = { discipline: b.discipline, level_max: b.level_max, kids: Boolean(b.kids), starts_at: b.starts_at, ends_at: b.ends_at };
-  let to = await freeFor(pool, tenantId, want);
+  // Fill the gap (Track STAFF) asks people who have not said they work then: any_time skips availability, exclude skips those counted already.
+  let to = await freeFor(pool, tenantId, want, new Set(b.exclude || []), { skipAvailability: Boolean(b.any_time) });
   if (b.staff_ids && b.staff_ids.length) to = to.filter((i) => b.staff_ids.includes(i.id));
   if (!to.length) throw conflict('Nobody free and cleared for that time. Try another time or level.');
   if (b.session_id && !(await one(pool, "SELECT id FROM lesson_sessions WHERE tenant_id = ? AND id = ? AND status = 'scheduled'", [tenantId, b.session_id]))) throw notFound('Lesson');
@@ -199,6 +200,7 @@ async function accept(tenantId, offerId, staffId, req) {
     return { offer: o, filled };
   });
   if (out.filled) await tellFilled(tenantId, out.offer);
+  if (out.offer) await require('./lessonspots').after(tenantId, { dates: [String(out.offer.starts_at).slice(0, 10)] }, req); // Track STAFF: the new instructor counts
   return { ok: true, filled: Boolean(out.filled), already: Boolean(out.already) };
 }
 
