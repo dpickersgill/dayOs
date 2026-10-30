@@ -1287,7 +1287,7 @@ test('sell: a mandatory detail is starred at checkout and a sale cannot go on wi
   }
 });
 
-test('sell: every ticket is named, and an under-18 needs a date of birth and sex but no phone or email', skip(), async () => {
+test('sell: every ticket is named; a day ticket needs no date of birth or sex, and an under-18 no phone or email', skip(), async () => {
   await closeOverlays();
   const root = await renderView('sell', 'counter', T.counter);
   tileFor(root, 'Adult Day').click(); await settle();
@@ -1298,7 +1298,8 @@ test('sell: every ticket is named, and an under-18 needs a date of birth and sex
   const sels = [...dlg.querySelectorAll('select')].filter((x) => /^Who is Adult Day/.test(x.getAttribute('aria-label') || ''));
   assert.equal(sels.length, 2, 'one "who is it for" choice per ticket');
   const starred = (scope, text) => { const l = [...scope.querySelectorAll('label.field')].find((x) => x.querySelector('span') && x.querySelector('span').textContent.startsWith(text)); return l && l.querySelector('.req') && !l.querySelector('.req').hidden; };
-  for (const f of ['First name', 'Last name', 'Date of birth', 'Sex']) assert.ok(starred(dlg, f), `${f} is starred`);
+  for (const f of ['First name', 'Last name']) assert.ok(starred(dlg, f), `${f} is starred`);
+  for (const f of ['Date of birth', 'Sex']) assert.ok(!starred(dlg, f), `${f} is not needed for a day ticket (2026.11.8)`);
   typeInto(dlg, 'first_name', 'Gus'); typeInto(dlg, 'last_name', 'Guardian'); typeInto(dlg, 'date_of_birth', '1983-03-03'); typeInto(dlg, 'sex', 'male');
   clickBtn(dlg, 'Next: payment'); await settle();
   assert.match(dlg.textContent, /Phone or email/, 'an adult needs a phone or an email');

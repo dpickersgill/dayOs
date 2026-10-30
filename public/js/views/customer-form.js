@@ -53,7 +53,7 @@ export function customerFields({ def, scope = null, person = null, groups = null
     if (!sale) return;
     const minor = isMinor();
     for (const [key, st] of stars) st.hidden = minor && (key === 'phone' || key === 'email');
-    ruleNote.textContent = light ? (noContact ? 'A day ticket needs only a name.' : 'A day ticket needs only a name, and a phone number or an email for the buyer.')
+    ruleNote.textContent = light ? (minor ? 'Under 18: a name is all we need for a day ticket.' : noContact ? 'A day ticket needs only a name.' : 'A day ticket needs only a name, and a phone number or an email for the buyer.')
       : minor ? 'Under 18: name, date of birth and sex are all we need.' : 'Name, date of birth and sex are required. Adults also need a phone number or an email.';
   };
   const wrap = h('div', { class: 'stack' });
