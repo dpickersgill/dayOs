@@ -18,6 +18,7 @@ const reload = async (panel, fn) => { clear(panel).append(loading()); try { clea
 // ---------------------------------------------------------------- the promises
 async function promises(panel) {
   const s = await get('/guests/fair/settings');
+  // Saved with its own button: the page's save bar belongs to the Sell and gate settings above it.
   const f = formTracker(async (changed) => {
     const g = {}; const fair = {};
     const centsOf = (el, what) => { const c = toCents(el.value || '0'); if (c === null) throw new Error(`Enter ${what} in dollars, for example 10.00`); return c; };
@@ -73,7 +74,7 @@ async function promises(panel) {
     row('Renewal price', rule),
     sect('Scan review'),
     row('Flag a pass seen at two lifts within', amount(travel, 'minutes'), 'Scans closer together than this at different lifts go to the scan review list. Nothing is blocked without a manager.'),
-    f.bar);
+    h('div', { class: 'row' }, button('Save fair promises', async () => { const bar = f.bar.querySelector('.set-save'); bar.click(); }, { kind: 'primary' })));
 }
 
 // ---------------------------------------------------------------- closure credits
