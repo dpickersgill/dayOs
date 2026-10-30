@@ -86,16 +86,33 @@ export function drawLessons(b, { menu, tiers, first, add, price }) {
   function card(s, fit) {
     const full = !s.spots_left;
     const add1 = button(full ? 'Full' : 'Add', () => {
-      add({ type: 'lesson', session_id: s.id, name: s.name, tier: tier.value, quantity: 1, day: String(s.starts_at).slice(0, 10), detail: `${fmtDate(s.starts_at)} ${fmtTime(s.starts_at)}${student ? `, for ${student.person.first_name}` : ''}`, ...(student ? { student: student.person, safety_prefill: student.safety } : {}) });
+      add({ type: 'lesson', session_id: s.id, name: s.name, discipline: s.discipline, tier: tier.value, quantity: 1, day: String(s.starts_at).slice(0, 10), detail: `${fmtDate(s.starts_at)} ${fmtTime(s.starts_at)}${student ? `, for ${student.person.first_name}` : ''}`, ...(student ? { student: student.person, safety_prefill: student.safety } : {}) });
       toast(`${s.name} added${student ? ` for ${student.person.first_name}` : ''}`);
     }, { kind: fit ? 'primary' : null, label: `Add ${s.name} at ${fmtTime(s.starts_at)}` });
     add1.disabled = full;
     return h('article', { class: `sl-card${fit ? '' : ' unfit'}`, 'data-session': s.id },
       h('div', { class: 'sl-time' }, h('strong', null, fmtTime(s.starts_at)), h('small', { class: 'muted' }, `to ${fmtTime(s.ends_at)}`)),
-      h('div', { class: 'sl-what' }, h('strong', null, s.name), h('div', { class: 'small' }, [label(s.discipline), s.level_words, s.age_words].join(', ')),
+      h('div', { class: 'sl-what' }, h('strong', null, s.name), h('div', { class: 'small' }, [label(s.discipline), s.kind === 'pool' && !s.level_min && !s.level_max ? 'Placed by level at lineup' : s.level_words, s.age_words].join(', ')),
         h('div', { class: 'muted small' }, [s.instructor_first ? `with ${s.instructor_first}` : 'instructor not set yet', s.meeting_place ? `meet at ${s.meeting_place}` : null, s.format !== 'group' ? label(s.format) : null].filter(Boolean).join(', ')),
-        s.started ? state('Started', 'warn') : null),
+        s.started ? state('Started', 'warn') : null, full ? nextWithRoom(s) : null),
       h('div', { class: 'sl-side' }, h('span', { class: 'tile-price' }, money(price(s, tier.value))), h('small', null, full ? state('Full', 'bad') : `${s.spots_left} left`), add1));
+  }
+
+  /**
+   * A full lesson (2026.11.9, Track GUEST): the next times with room for the same lesson product and ages, the same day
+   * first, then the next 7 days, each with Add. The waitlist is under Bookings, Waitlist.
+   */
+  function nextWithRoom(s) {
+    const day0 = String(s.starts_at).slice(0, 10);
+    const same = (x) => x.id !== s.id && x.product_id === s.product_id && (x.age_min ?? null) === (s.age_min ?? null) && (x.age_max ?? null) === (s.age_max ?? null) && x.spots_left > 0 && !x.started;
+    const inWeek = (x) => { const d = String(x.starts_at).slice(0, 10); return d >= day0 && d <= addDays(day0, 7); };
+    const list = menu.lessons.filter((x) => same(x) && inWeek(x))
+      .sort((a, b2) => (String(a.starts_at).slice(0, 10) === day0 ? 0 : 1) - (String(b2.starts_at).slice(0, 10) === day0 ? 0 : 1) || String(a.starts_at).localeCompare(String(b2.starts_at))).slice(0, 3);
+    if (!list.length) return h('p', { class: 'muted small' }, 'Full. No other time with room in the next week. Offer the waitlist.');
+    return h('div', { class: 'sl-next' }, h('span', { class: 'small' }, 'Full. Next with room: '), ...list.map((x) => {
+      const when = String(x.starts_at).slice(0, 10) === day0 ? fmtTime(x.starts_at) : `${fmtDate(x.starts_at)} ${fmtTime(x.starts_at)}`;
+      return button(`${when} (${x.spots_left} left)`, () => { day = String(x.starts_at).slice(0, 10); draw(); document.querySelector(`.sl-card[data-session="${x.id}"]`)?.scrollIntoView?.({ block: 'center' }); }, { small: true, label: `Show ${x.name} at ${when}, ${x.spots_left} left` });
+    }));
   }
 
   tier.addEventListener('change', draw);

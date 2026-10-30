@@ -193,7 +193,7 @@ async function lineupTab(root) {
   function studentChip(s, { classes, onPick, draggable = true, color = null }) {
     const chip = h('li', { class: `lu-chip${s.checked_in ? ' in' : ''}`, draggable: draggable ? 'true' : 'false', 'data-booking': s.booking_id, tabindex: '0', role: 'button',
       'aria-label': `${s.first_name} ${s.last_name}${s.level ? `, level ${s.level}` : ''}${s.checked_in ? ', checked in' : ', not checked in'}. Press Enter for choices.` },
-    swatch(color), h('span', { class: 'lu-chip-name' }, `${s.first_name} ${s.last_name.slice(0, 1)}.`), h('span', { class: 'lu-chip-meta' }, [s.level ? `L${s.level}` : 'L?', s.age !== null ? `${s.age}y` : null].filter(Boolean).join(' ')),
+    swatch(color), h('span', { class: 'lu-chip-name' }, `${s.first_name} ${s.last_name.slice(0, 1)}.`), h('span', { class: 'lu-chip-meta' }, [s.level ? `L${s.level}` : s.placement_level ? `L${s.placement_level}?` : 'L?', s.age !== null ? `${s.age}y` : null].filter(Boolean).join(' ')),
     s.has_allergy || s.has_medical ? h('span', { class: 'lu-chip-flag', title: 'Allergy or medical note' }, '!') : null);
     chip.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', String(s.booking_id)); chip.classList.add('dragging'); });
     chip.addEventListener('dragend', () => chip.classList.remove('dragging'));
@@ -211,7 +211,7 @@ async function lineupTab(root) {
   // a student tapped on the live board: check in or undo, move, label
   function studentMenu(s) {
     const d = dialog(`${s.first_name} ${s.last_name}`, h('div', { class: 'stack' },
-      h('p', null, [s.level ? `Level ${s.level}` : 'Level not known yet', s.age !== null ? `age ${s.age}` : null].filter(Boolean).join(', '), ' ', ...flags(s), s.unpaid ? state('Unpaid', 'warn') : null),
+      h('p', null, [s.level ? `Level ${s.level}` : s.placement_level ? `Level ${s.placement_level} from the booking questions` : 'Level not known yet', s.age !== null ? `age ${s.age}` : null].filter(Boolean).join(', '), ' ', ...flags(s), s.unpaid ? state('Unpaid', 'warn') : null),
       h('div', { class: 'row' },
         s.checked_in ? button('Undo check-in', async () => { try { await del(`/skischool/bookings/${s.booking_id}/checkin`); d.close(); await loadBoard(); } catch (err) { fail(err); } })
           : button('Check in', async () => { try { await post(`/skischool/bookings/${s.booking_id}/checkin`, {}); d.close(); await loadBoard(); } catch (err) { fail(err); } }, { kind: 'primary' }),

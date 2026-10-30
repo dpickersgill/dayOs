@@ -76,7 +76,7 @@ function kidsIn(r) {
 }
 
 /** The times the instructor is busy on a day: lessons, shifts, patrol shifts and program meetings they coach. */
-async function busy(db, tenantId, staffId, day) {
+async function busy(db, tenantId, staffId, day, { exceptRequestId = 0 } = {}) {
   const next = addDays(day, 1);
   const list = await rows(db, `SELECT starts_at, ends_at FROM lesson_sessions WHERE tenant_id = ? AND instructor_id = ? AND status <> 'cancelled' AND starts_at < ? AND ends_at > ?
     UNION ALL SELECT starts_at, ends_at FROM shifts WHERE tenant_id = ? AND staff_id = ? AND status <> 'cancelled' AND starts_at < ? AND ends_at > ?
@@ -85,7 +85,7 @@ async function busy(db, tenantId, staffId, day) {
       AND (ps.coach_staff_id = ? OR EXISTS (SELECT 1 FROM program_levels pl WHERE pl.tenant_id = ps.tenant_id AND pl.group_id = ps.group_id AND pl.coach_staff_id = ?))`,
   [tenantId, staffId, next, day, tenantId, staffId, next, day, tenantId, staffId, next, day, tenantId, next, day, staffId, staffId]);
   // Requests already waiting for this instructor hold their time too, so two families are not promised the same hour.
-  const held = await rows(db, "SELECT starts_at, minutes FROM private_requests WHERE tenant_id = ? AND staff_id = ? AND status IN ('awaiting_payment','waiting') AND DATE(starts_at) = ?", [tenantId, staffId, day]);
+  const held = await rows(db, "SELECT starts_at, minutes FROM private_requests WHERE tenant_id = ? AND staff_id = ? AND status IN ('awaiting_payment','waiting') AND DATE(starts_at) = ? AND id <> ?", [tenantId, staffId, day, exceptRequestId]);
   return [...list, ...held.map((h) => ({ starts_at: h.starts_at, ends_at: plusMinutes(h.starts_at, h.minutes) }))];
 }
 
@@ -93,10 +93,10 @@ async function busy(db, tenantId, staffId, day) {
  * Start times (every 30 minutes) an instructor can take a private of this length on a day: inside a date they marked
  * open, and clear of everything they already have. earliest: the first allowed start ('YYYY-MM-DD HH:MM:SS', local).
  */
-async function freeTimes(db, tenantId, staffId, day, minutes, earliest) {
+async function freeTimes(db, tenantId, staffId, day, minutes, earliest, { exceptRequestId = 0 } = {}) {
   const wins = await rows(db, 'SELECT start_time, end_time FROM instructor_open WHERE tenant_id = ? AND staff_id = ? AND open_date = ? ORDER BY start_time', [tenantId, staffId, day]);
   if (!wins.length) return [];
-  const taken = (await busy(db, tenantId, staffId, day)).map((b) => [b.starts_at.slice(0, 10) < day ? 0 : toMin(b.starts_at.slice(11, 16)), b.ends_at.slice(0, 10) > day ? 24 * 60 : toMin(b.ends_at.slice(11, 16))]);
+  const taken = (await busy(db, tenantId, staffId, day, { exceptRequestId })).map((b) => [b.starts_at.slice(0, 10) < day ? 0 : toMin(b.starts_at.slice(11, 16)), b.ends_at.slice(0, 10) > day ? 24 * 60 : toMin(b.ends_at.slice(11, 16))]);
   const out = new Set();
   for (const w of wins) {
     const a = toMin(w.start_time); const z = toMin(w.end_time);
@@ -119,6 +119,71 @@ async function freeInstructors(db, tenantId, { discipline, levelMax, kids, start
     if ((await freeTimes(db, tenantId, ins.id, day, minutes, null)).includes(t)) out.push(ins);
   }
   return out;
+}
+
+// ---------------------------------------------------------------- private hours (2026.11.9, Track GUEST)
+// A published season plan writes one lesson_private_hours row per day (lib/lessonplan.js, Track PLAN): the hours privates
+// may start and end in, the lengths sold that day, how many privates may run at once (null: as many as instructors allow)
+// and whether the day is closed. A day with no row works as before: any time an instructor marked open.
+
+/** The private hours row for a day: { start, end, at_once, lengths: [minutes], closed } or null when none is set. */
+async function dayHours(db, tenantId, day, { lock = false } = {}) {
+  const r = await one(db, `SELECT start_time, end_time, at_once, lengths, closed FROM lesson_private_hours WHERE tenant_id = ? AND on_date = ?${lock ? ' FOR UPDATE' : ''}`, [tenantId, day]);
+  if (!r) return null;
+  return { start: String(r.start_time).slice(0, 5), end: String(r.end_time).slice(0, 5), at_once: r.at_once === null ? null : Number(r.at_once),
+    lengths: String(r.lengths || '').split(',').map(Number).filter((n) => n > 0), closed: Boolean(Number(r.closed)) };
+}
+
+/** Why a length cannot be sold on a day with these hours, in plain words, or null when it can. */
+function lengthProblem(hours, minutes) {
+  if (!hours) return null;
+  if (hours.closed) return 'Private lessons are not offered on this day.';
+  if (hours.lengths.length && !hours.lengths.includes(Number(minutes))) return `${lengthWords(minutes)} privates are not offered on this day. This day offers ${hours.lengths.map(lengthWords).join(', ')}.`;
+  return null;
+}
+
+/** Does a private of this length starting at time ('HH:MM') sit inside the day's private hours? */
+const insideHours = (hours, time, minutes) => !hours || (toMin(time) >= toMin(hours.start) && toMin(time) + Number(minutes) <= toMin(hours.end));
+
+/**
+ * How many privates run at some point between startsAt and startsAt + minutes: private lessons already made and requests
+ * still open (waiting for payment, for an instructor, or for the family to pick another). exceptRequestId leaves one out.
+ */
+async function privatesOverlapping(db, tenantId, startsAt, minutes, { exceptRequestId = 0 } = {}) {
+  const endsAt = plusMinutes(startsAt, minutes);
+  const a = await one(db, "SELECT COUNT(*) AS n FROM lesson_sessions WHERE tenant_id = ? AND format = 'private' AND status <> 'cancelled' AND starts_at < ? AND ends_at > ?", [tenantId, endsAt, startsAt]);
+  const b = await one(db, `SELECT COUNT(*) AS n FROM private_requests WHERE tenant_id = ? AND status IN ('awaiting_payment','waiting','offered') AND id <> ?
+    AND starts_at < ? AND DATE_ADD(starts_at, INTERVAL minutes MINUTE) > ?`, [tenantId, exceptRequestId, endsAt, startsAt]);
+  return Number(a.n) + Number(b.n);
+}
+
+/**
+ * The start times ('HH:MM') of a day that the private hours allow: inside the hours and, with an "at once" limit, fewer
+ * privates running then than the limit. times: candidate start times from the instructors' free times.
+ */
+async function allowedTimes(db, tenantId, day, minutes, times, hours) {
+  if (!hours) return times;
+  if (lengthProblem(hours, minutes)) return [];
+  const out = [];
+  for (const t of times) {
+    if (!insideHours(hours, t, minutes)) continue;
+    if (hours.at_once !== null && (await privatesOverlapping(db, tenantId, `${day} ${t}:00`, minutes)) >= hours.at_once) continue;
+    out.push(t);
+  }
+  return out;
+}
+
+/**
+ * Re-checks a new request against the day's private hours, under a lock on that day's row so two families cannot take the
+ * last private at once. Throws 409 with a plain reason.
+ */
+async function checkHours(conn, tenantId, day, time, minutes) {
+  const hours = await dayHours(conn, tenantId, day, { lock: true });
+  if (!hours) return;
+  const why = lengthProblem(hours, minutes);
+  if (why) throw conflict(why);
+  if (!insideHours(hours, time, minutes)) throw conflict(`Private lessons that day run from ${clock(`2000-01-01 ${hours.start}`)} to ${clock(`2000-01-01 ${hours.end}`)}. Please pick another time.`);
+  if (hours.at_once !== null && (await privatesOverlapping(conn, tenantId, `${day} ${time}:00`, minutes)) >= hours.at_once) throw conflict('That time was just taken. Please pick another.');
 }
 
 /** The price: the offer's lesson product for the lesson, plus the extra-student price for each student after the first, with tax. */
@@ -207,9 +272,17 @@ async function markPaid(tenantId, requestId, obj, account) {
   return out;
 }
 
-/** Once a request is waiting: tell the instructor(s) and the family. */
+/**
+ * Once a request is waiting: with "confirm automatically" on (school_settings.private_confirm 'auto') and a cleared
+ * instructor free, it is booked straight away (autoConfirm). Otherwise tell the instructor(s) and the family, as before.
+ * Returns { auto: true, staff_id } when it was booked automatically, else { auto: false }.
+ */
 async function afterWaiting(tenantId, requestId) {
   const r = await one(pool, 'SELECT * FROM private_requests WHERE tenant_id = ? AND id = ?', [tenantId, requestId]);
+  if (r && r.status === 'waiting' && (await S.get(pool, tenantId)).private_confirm === 'auto') {
+    const done = await autoConfirm(tenantId, r);
+    if (done) return { auto: true, staff_id: done.staff_id };
+  }
   await tellInstructors(tenantId, r);
   const who = r.staff_id ? (await staffContact(pool, tenantId, r.staff_id)).first_name : 'our instructors';
   const mins = (await S.get(pool, tenantId)).private_accept_minutes;
@@ -218,6 +291,41 @@ async function afterWaiting(tenantId, requestId) {
     text: `Thank you. We sent your request for ${dayWords(r.starts_at)} at ${clock(r.starts_at)} to ${who}. You will hear back within ${mins >= 120 ? `${Math.round(mins / 60)} hours` : `${mins} minutes`}.${r.pay_at_desk ? ' You pay at the ski school desk.' : ' If the lesson cannot go ahead, you get your money back in full.'}`,
     sms: `${who === 'our instructors' ? 'Your private lesson request was sent' : `We asked ${who} about your private lesson`}. We will text you when they answer.`,
   });
+  return { auto: false };
+}
+
+/**
+ * "Confirm automatically when an instructor is free" (2026.11.9, Track GUEST). The named instructor, or for "any
+ * instructor" the best fit among the public instructors who teach it and are open and free then (fewest lessons that day
+ * first, then the one cleared the least far above what is needed, so the most senior stay free), takes the request through
+ * the same path as an instructor's accept: the lesson is made, the students booked and the family told. Returns
+ * { staff_id, session_id } or null when nobody could take it (the request then waits for an instructor as before).
+ */
+async function autoConfirm(tenantId, r) {
+  const st = parseStudents(r);
+  const levelMax = Math.max(...st.map((x) => Number(x.level) || 1));
+  const day = String(r.starts_at).slice(0, 10); const time = String(r.starts_at).slice(11, 16);
+  const list = r.staff_id ? [await publicInstructor(pool, tenantId, r.staff_id)].filter(Boolean) : await publicInstructors(pool, tenantId);
+  const declined = ids(r.declined_ids);
+  const picks = [];
+  for (const ins of list) {
+    if (declined.includes(ins.id) || !teaches(ins, r.discipline, levelMax, { kids: kidsIn(r) })) continue;
+    if (!(await freeTimes(pool, tenantId, ins.id, day, r.minutes, null, { exceptRequestId: r.id })).includes(time)) continue;
+    const { n } = await one(pool, "SELECT COUNT(*) AS n FROM lesson_sessions WHERE tenant_id = ? AND instructor_id = ? AND status <> 'cancelled' AND starts_at >= ? AND starts_at < ?", [tenantId, ins.id, day, addDays(day, 1)]);
+    picks.push({ id: ins.id, lessons: Number(n), cap: Number(r.discipline === 'snowboard' ? ins.snowboard_level_max : ins.ski_level_max) || 10 });
+  }
+  picks.sort((a, b) => a.lessons - b.lessons || a.cap - b.cap || a.id - b.id);
+  const who = { auth: { tenantId, userId: null } };
+  for (const p of picks) {
+    try {
+      const out = await accept(who, r.id, p.id);
+      await audit(pool, who, 'private_auto_confirm', 'private_requests', r.id, { staff_id: p.id, session_id: out.session_id });
+      return { staff_id: p.id, session_id: out.session_id };
+    } catch (err) {
+      if (err.status !== 409) { console.error(JSON.stringify({ severity: 'ERROR', job: 'private_auto', message: err.message })); return null; }
+    }
+  }
+  return null;
 }
 
 /**
@@ -409,4 +517,5 @@ async function tick() {
 
 module.exports = { kidsIn, sha, newToken, looksRight, reference, plusMinutes, clock, dayWords, lengthWords, ids, parseStudents, shortName, utcIn,
   publicInstructor, publicInstructors, teaches, freeTimes, freeInstructors, quote, byToken, familyLink, staffContact, tellFamily,
-  markPaid, afterWaiting, accept, decline, pick, refundByFamily, tick, OPEN };
+  markPaid, afterWaiting, accept, decline, pick, refundByFamily, tick, OPEN,
+  dayHours, lengthProblem, insideHours, privatesOverlapping, allowedTimes, checkHours, autoConfirm };

@@ -518,6 +518,25 @@ router.get('/pay/payroll/runs/:id/:kind.csv', manager, async (req, res) => {
   res.send(kind === 'summary' ? files.summary_csv : files.lines_csv);
 });
 
+// ================================================================ level placement questions (2026.11.9, Track GUEST)
+// The three questions per discipline guests answer when they book (lib/placement.js). Everyone who sells or runs lessons
+// reads them (Sell's "Ask 3 questions"); the director changes the wording and where each answer leads, or goes back to
+// the built-in ones with { questions: null }.
+const PL = require('../lib/placement');
+const { school: schoolLevel } = require('../lib/schoolaccess');
+router.get('/placement', requireRole('instructor', 'manager', 'counter'), async (req, res) => {
+  const s = await S.get(pool, req.auth.tenantId);
+  res.json({ questions: PL.questionsFrom(s), built_in: PL.BUILT_IN, custom: Boolean(s.placement_questions), levels: { ski: levels.list('ski'), snowboard: levels.list('snowboard') } });
+});
+router.put('/placement', schoolLevel('director'), validate(PL.schema), async (req, res) => {
+  await tx(async (conn) => {
+    await S.save(conn, req.auth.tenantId, { placement_questions: req.body.questions ? JSON.stringify(req.body.questions) : null });
+    await audit(conn, req, 'update', 'school_settings', req.auth.tenantId, { placement_questions: req.body.questions ? 'custom' : 'built-in' });
+  });
+  const s = await S.get(pool, req.auth.tenantId);
+  res.json({ questions: PL.questionsFrom(s), custom: Boolean(s.placement_questions) });
+});
+
 // ================================================================ the public page: /private/<mountain>
 const publicLimit = rateLimit({ windowMs: 3_600_000, max: Number(process.env.BOOKING_RATE_LIMIT) || 8, message: 'Too many requests from this address. Please call the ski school.' });
 const lookLimit = rateLimit({ windowMs: 60_000, max: 60, message: 'Too many requests. Please wait a minute.' });
@@ -571,11 +590,19 @@ publicRouter.get('/:slug/private/times', lookLimit, async (req, res) => {
       by.get(tm).push(ins.id);
     }
   }
+  // 2026.11.9 (Track GUEST): the day's private hours from the season plan: only inside them, only the lengths offered,
+  // nothing on a closed day, and no more privates at once than the plan allows.
+  const hours = await PR.dayHours(pool, t.id, date);
+  const allowed = new Set(await PR.allowedTimes(pool, t.id, date, offer.minutes, [...by.keys()], hours));
   // The days in the next two weeks this instructor (or anyone) has open, so the page can point at them.
   const open = await rows(pool, `SELECT DISTINCT o.open_date FROM instructor_open o JOIN instructor_profiles ip ON ip.tenant_id = o.tenant_id AND ip.staff_id = o.staff_id AND ip.is_public = 1
     WHERE o.tenant_id = ? AND o.open_date BETWEEN ? AND ?${wanted ? ' AND o.staff_id = ?' : ''} ORDER BY o.open_date`, wanted ? [t.id, today, addDays(today, 60), wanted] : [t.id, today, addDays(today, 60)]);
+  const shut = await rows(pool, 'SELECT on_date, lengths, closed FROM lesson_private_hours WHERE tenant_id = ? AND on_date BETWEEN ? AND ?', [t.id, today, addDays(today, 60)]);
+  const noLength = new Set(shut.filter((h) => Number(h.closed) || (String(h.lengths || '') && !String(h.lengths).split(',').map(Number).includes(offer.minutes))).map((h) => String(h.on_date).slice(0, 10)));
   res.set('Cache-Control', 'no-store');
-  res.json({ date, times: [...by].sort().map(([time, ins]) => ({ time, instructors: ins })), open_days: open.map((o) => String(o.open_date).slice(0, 10)) });
+  res.json({ date, times: [...by].filter(([time]) => allowed.has(time)).sort().map(([time, ins]) => ({ time, instructors: ins })),
+    open_days: open.map((o) => String(o.open_date).slice(0, 10)).filter((d) => !noLength.has(d)),
+    hours: hours ? { start: hours.start, end: hours.end, lengths: hours.lengths, closed: hours.closed } : null, note: PR.lengthProblem(hours, offer.minutes) });
 });
 
 const studentSchema = z.object({
@@ -610,6 +637,8 @@ publicRouter.post('/:slug/private', publicLimit, validate(requestSchema), async 
   const textsOn = await familynotify.textsOn(t.id);
   const token = PR.newToken();
   const out = await tx(async (conn) => {
+    // The day's private hours first (its row locked, so two families cannot take the last private at once).
+    await PR.checkHours(conn, t.id, b.date, b.time, offer.minutes);
     // The time must still be open: for a named instructor, them; for "any", at least one instructor who teaches it.
     let staffId = null;
     if (b.instructor !== 'any') {
@@ -639,8 +668,8 @@ publicRouter.post('/:slug/private', publicLimit, validate(requestSchema), async 
   });
   const pageUrl = PR.familyLink(baseUrl(req), t.slug, token);
   if (!t.pay_online) {
-    await PR.afterWaiting(t.id, out.id);
-    return res.status(201).json({ ok: true, reference: out.ref, token, status: 'waiting', amount_cents: out.quote.total, page: pageUrl });
+    const after = await PR.afterWaiting(t.id, out.id); // with "confirm automatically" on, it may be booked already
+    return res.status(201).json({ ok: true, reference: out.ref, token, status: after && after.auto ? 'accepted' : 'waiting', amount_cents: out.quote.total, page: pageUrl });
   }
   let co;
   try {

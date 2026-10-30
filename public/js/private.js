@@ -126,7 +126,9 @@ async function main() {
       strip.append(h('button', { type: 'button', class: `day${open ? '' : ' empty'}`, 'aria-pressed': String(d === st.day), 'aria-label': `${dayLong(d)}${open ? '' : ', no open times'}`, onclick: () => { st.day = d; st.time = null; drawWhen(); } },
         h('span', { class: 'dow' }, fmt(d, { weekday: 'short' })), h('span', { class: 'num' }, fmt(d, { day: 'numeric' })), h('span', { class: 'cnt' }, open ? 'Open' : '')));
     }
-    if (!res.times.length) { slots.append(h('p', { class: 'empty-day' }, T('No open times that day. Try another day.'))); who.hidden = true; return; }
+    // 2026.11.9: the day's private hours from the season plan, and why a length is not sold that day.
+    if (res.hours && !res.hours.closed) slots.before(h('p', { class: 'muted small hours-line' }, `Privates this day start and finish between ${clock(res.hours.start)} and ${clock(res.hours.end)}.`));
+    if (!res.times.length) { slots.append(h('p', { class: 'empty-day' }, res.note || T('No open times that day. Try another day.'))); who.hidden = true; return; }
     for (const t of res.times) {
       slots.append(h('button', { type: 'button', class: 'pill', 'aria-pressed': String(st.time === t.time), onclick: () => { st.time = t.time; drawWhen(); drawWho(); who.hidden = false; who.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, clock(t.time)));
     }
