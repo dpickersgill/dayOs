@@ -158,6 +158,7 @@ router.post('/lineups/:id/apply', SA.school('supervisor'), validate(z.object({ c
   const classes = req.body.classes.filter((c) => c.session_id || c.booking_ids.length);
   for (const c of classes) if (c.level_min && c.level_max && c.level_min > c.level_max) throw bad('A class has its lowest level above its highest');
   const moves = await tx((conn) => LL.applySplit(conn, req, paramId(req), classes, { isManager: isManager(req) }));
+  await require('../lib/lessonspots').after(tenantId, { sessionIds: [...classes.map((c) => c.session_id), ...moves.flatMap((m) => [m.from && m.from.id, m.to && m.to.id])].filter(Boolean) }, req); // Track STAFF
   const told = [];
   for (const m of moves) told.push(await LL.tellMoved(pool, tenantId, m));
   res.json({ moved: moves.length, board: await LL.board(pool, tenantId, paramId(req)), told: told.length });
@@ -209,6 +210,7 @@ router.post('/bookings/:id/move', requireRole('instructor', ...desk), validate(z
   const { tenantId } = req.auth;
   await mayMove(req, paramId(req));
   const moved = await tx((conn) => LL.moveBooking(conn, req, paramId(req), req.body.session_id, { reason: req.body.reason, isManager: isManager(req) }));
+  await require('../lib/lessonspots').after(tenantId, { sessionIds: [moved.from.id, moved.to.id] }, req); // Track STAFF
   const told = await LL.tellMoved(pool, tenantId, moved);
   res.json({ ok: true, booking_id: moved.booking.id, from_session_id: moved.from.id, to_session_id: moved.to.id, over_by_one: moved.over, told: { family: Boolean(told.family && told.family.email), instructor: Boolean(told.instructor) } });
 });

@@ -9,6 +9,7 @@ import { cardDialog } from './school-card.js';
 import * as payPart from './school-pay.js';
 import * as parentsPart from './school-parents.js';
 import { moveDialog } from './school-lineup.js';
+import { needsCard } from './school-staff.js';
 
 const OUTBOX = 0; // attendance taps queue under this "case" in the phone's outbox
 const keepId = (date, staffId) => -Number(`${String(staffId || 0).slice(-4)}${date.replace(/-/g, '')}`); // a negative id: never a patrol case
@@ -40,6 +41,7 @@ export async function render(root, opts = {}) {
   if (typeof parentsPart.recapCount === 'function') {
     try { const n = await parentsPart.recapCount(); if (n) top.append(h('p', null, h('a', { href: '#/school?tab=team&view=recaps', class: 'btn' }, `Recaps to send (${n})`))); } catch (_) { /* none */ }
   }
+  try { await needsCard(top); } catch (_) { /* the staffing target is a nice to have (Track STAFF) */ }
   const today = todayStr();
   let date = today;
   const pick = h('input', { type: 'date', value: date, 'aria-label': 'Day' });
