@@ -72,6 +72,7 @@ const dayTypeSchema = z.object({
   name: z.string().trim().min(1, 'Name each day type').max(40),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default('#7f8c8d'),
   closed: z.boolean().default(false),
+  is_holiday: z.boolean().optional(), // school holidays use this day type (at most one has it)
   slots: z.array(slotSchema).max(60).default([]),
   private: privateSchema.nullable().optional(),
 });
@@ -89,6 +90,7 @@ const docSchema = z.object({
 }).superRefine((d, ctx) => {
   const keys = new Set();
   d.day_types.forEach((t, i) => { if (keys.has(t.key)) ctx.addIssue({ code: 'custom', path: ['day_types', i, 'key'], message: 'Two day types have the same key' }); keys.add(t.key); });
+  if (d.day_types.filter((t) => t.is_holiday).length > 1) ctx.addIssue({ code: 'custom', path: ['day_types'], message: 'Only one day type can be used for school holidays' });
   const known = (k) => k == null || keys.has(k);
   d.weekdays.forEach((k, i) => { if (!known(k)) ctx.addIssue({ code: 'custom', path: ['weekdays', i], message: 'Pick a day type for each weekday' }); });
   d.periods.forEach((p, i) => {
@@ -128,13 +130,33 @@ function parseDoc(raw) {
   return doc;
 }
 
+/** The day type school holidays use: the one marked is_holiday, or (plans saved before the flag) the one keyed 'holiday'. */
+function holidayType(doc) {
+  const t = doc.day_types.find((x) => x.is_holiday) || (doc.day_types.some((x) => x.is_holiday === false) ? null : doc.day_types.find((x) => x.key === 'holiday'));
+  return t ? t.key : null;
+}
+
+/** Slots whose certification is not one of this mountain's: [{ path, message }] (empty: all fine). */
+async function certProblems(db, tenantId, doc) {
+  const where = [];
+  doc.day_types.forEach((t, i) => t.slots.forEach((sl, j) => { if (sl.cert) where.push({ cert: sl.cert, path: `day_types.${i}.slots.${j}.cert`, at: `${t.name} ${sl.start}` }); }));
+  doc.exceptions.forEach((x, i) => x.add.forEach((sl, j) => { if (sl.cert) where.push({ cert: sl.cert, path: `exceptions.${i}.add.${j}.cert`, at: `${x.date} ${sl.start}` }); }));
+  if (!where.length) return [];
+  const known = new Set((await rows(db, 'SELECT id FROM certifications WHERE tenant_id = ? AND id IN (?)', [tenantId, [...new Set(where.map((w) => w.cert))]])).map((r) => Number(r.id)));
+  return where.filter((w) => !known.has(Number(w.cert))).map((w) => ({ path: w.path, message: `The ${w.at} lesson time asks for a certification this mountain does not have. Pick one from the list.` }));
+}
+async function checkCerts(db, tenantId, doc) {
+  const problems = await certProblems(db, tenantId, doc);
+  if (problems.length) throw bad('The plan has a problem', problems);
+}
+
 /** A new plan: five day types with no slots yet, Monday to Friday Weekday, Saturday and Sunday Weekend. */
 function defaults() {
   return {
     day_types: [
       { key: 'weekday', name: 'Weekday', color: COLORS[0], closed: false, slots: [], private: null },
       { key: 'weekend', name: 'Weekend', color: COLORS[1], closed: false, slots: [], private: null },
-      { key: 'holiday', name: 'Holiday', color: COLORS[2], closed: false, slots: [], private: null },
+      { key: 'holiday', name: 'Holiday', color: COLORS[2], closed: false, is_holiday: true, slots: [], private: null },
       { key: 'holiday_week', name: 'Holiday week', color: COLORS[3], closed: false, slots: [], private: null },
       { key: 'closed', name: 'Closed', color: COLORS[4], closed: true, slots: [], private: null },
     ],
@@ -152,13 +174,14 @@ function datesOf(from, to) {
 }
 
 /**
- * Each date's day type and slots. Order: the day's exception, then a period, then a school holiday (the Holiday day
- * type, key 'holiday'), then the weekday default. holidays: Map of date -> name.
+ * Each date's day type and slots. Order: the day's exception, then a period, then a school holiday (the day type marked
+ * is_holiday; plans saved before that flag use the one keyed 'holiday'), then the weekday default. holidays: Map of date -> name.
  * -> [{ date, day_type, source, holiday, closed, slots, private, exception }]
  */
 function expand(doc, from, to, holidays = new Map()) {
   const types = new Map(doc.day_types.map((t) => [t.key, t]));
   const exceptions = new Map(doc.exceptions.map((x) => [x.date, x]));
+  const holidayKey = holidayType(doc);
   const out = [];
   for (const date of datesOf(from, to)) {
     const x = exceptions.get(date);
@@ -168,7 +191,7 @@ function expand(doc, from, to, holidays = new Map()) {
       const p = [...doc.periods].reverse().find((q) => q.from <= date && q.to >= date && types.has(q.day_type));
       if (p) { typeKey = p.day_type; source = 'period'; }
     }
-    if (!typeKey && holidays.has(date) && types.has('holiday')) { typeKey = 'holiday'; source = 'holiday'; }
+    if (!typeKey && holidays.has(date) && holidayKey) { typeKey = holidayKey; source = 'holiday'; }
     if (!typeKey) typeKey = doc.weekdays[weekdayOf(date)];
     const t = types.get(typeKey) || null;
     const closed = Boolean(t && t.closed);
@@ -212,6 +235,8 @@ function lessonRow(slot, date, planId, poolMode) {
 const COMPARE = ['product_id', 'discipline', 'level_min', 'level_max', 'age_min', 'age_max', 'format', 'meeting_place', 'starts_at', 'ends_at', 'spots_cap', 'spots_mode', 'kind', 'required_certification_id'];
 const FIELD_WORDS = { product_id: 'lesson product', discipline: 'discipline', level_min: 'levels', level_max: 'levels', age_min: 'ages', age_max: 'ages', format: 'type', meeting_place: 'meeting place',
   starts_at: 'time', ends_at: 'time', spots_cap: 'spots', capacity: 'spots', spots_mode: 'follows staff', kind: 'pool or set class', required_certification_id: 'certification', instructor_id: 'instructor' };
+// A change to any of these can make the lesson's instructor no longer fit (time, discipline, levels, ages, type, cert).
+const FIT_FIELDS = ['discipline', 'level_min', 'level_max', 'age_min', 'age_max', 'format', 'starts_at', 'ends_at', 'kind', 'required_certification_id'];
 const same = (a, b) => (a == null ? null : String(a)) === (b == null ? null : String(b));
 /** The fields of an existing lesson that differ from what the plan wants now. */
 function differs(cur, want) {
@@ -250,6 +275,27 @@ const USE_SQL = `(SELECT COUNT(*) FROM lesson_bookings b WHERE b.tenant_id = s.t
    + (SELECT COUNT(*) FROM lesson_waitlist w WHERE w.tenant_id = s.tenant_id AND w.session_id = s.id) + (SELECT COUNT(*) FROM order_items i WHERE i.tenant_id = s.tenant_id AND i.session_id = s.id)) AS refs`;
 const inUse = (s) => Number(s.booked) + Number(s.asked) + Number(s.waiting) > 0;
 
+/**
+ * The same counts as USE_SQL, read with locking reads (latest committed rows, not the transaction's snapshot). A publish or
+ * an undo runs in REPEATABLE READ: its first plain read fixes the snapshot, so a booking that commits while it waits for a
+ * lesson's row lock would be invisible to a plain read. Call it after the lessons are locked FOR UPDATE; it overwrites
+ * booked, asked, waiting and refs on each row of list (rows with an id).
+ */
+async function lockedUse(db, tenantId, list) {
+  const ids = [...new Set(list.map((s) => Number(s.id)))];
+  if (!ids.length) return list;
+  const count = new Map(ids.map((i) => [i, { booked: 0, asked: 0, waiting: 0, refs: 0 }]));
+  const add = (rowsIn, field, active) => { for (const r of rowsIn) { const c = count.get(Number(r.session_id)); if (!c) continue; c.refs += 1; if (active.includes(r.status)) c[field] += 1; } };
+  add(await rows(db, 'SELECT session_id, status FROM lesson_bookings WHERE tenant_id = ? AND session_id IN (?) LOCK IN SHARE MODE', [tenantId, ids]), 'booked', ['booked', 'attended', 'no_show']);
+  add(await rows(db, 'SELECT session_id, status FROM lesson_requests WHERE tenant_id = ? AND session_id IN (?) LOCK IN SHARE MODE', [tenantId, ids]), 'asked', ['pending', 'awaiting_payment']);
+  add(await rows(db, 'SELECT session_id, status FROM lesson_waitlist WHERE tenant_id = ? AND session_id IN (?) LOCK IN SHARE MODE', [tenantId, ids]), 'waiting', ['waiting', 'offered']);
+  for (const r of await rows(db, 'SELECT session_id, COUNT(*) AS n FROM order_items WHERE tenant_id = ? AND session_id IN (?) GROUP BY session_id', [tenantId, ids])) {
+    const c = count.get(Number(r.session_id)); if (c) c.refs += Number(r.n);
+  }
+  for (const s of list) Object.assign(s, count.get(Number(s.id)));
+  return list;
+}
+
 async function tzOf(db, tenantId) { return (await one(db, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone; }
 
 async function holidaysOf(db, tenantId, from, to) {
@@ -258,9 +304,11 @@ async function holidaysOf(db, tenantId, from, to) {
 
 /** The plan's lessons from a day on (not cancelled), with how they are used. lock: FOR UPDATE inside a publish. */
 async function planLessons(db, tenantId, planId, fromDate, { lock = false } = {}) {
-  if (lock) await db.query("SELECT id FROM lesson_sessions WHERE tenant_id = ? AND plan_id = ? AND status <> 'cancelled' AND starts_at >= ? FOR UPDATE", [tenantId, planId, `${fromDate} 00:00:00`]);
-  return rows(db, `SELECT s.*, ${USE_SQL} FROM lesson_sessions s WHERE s.tenant_id = ? AND s.plan_id = ? AND s.status <> 'cancelled' AND s.starts_at >= ? ORDER BY s.starts_at, s.id`,
+  // Inside a publish the lessons are read with FOR UPDATE (a locking read sees the latest rows, not the snapshot) and what
+  // is booked is read the same way (see lockedUse).
+  const list = await rows(db, `SELECT s.*, ${USE_SQL} FROM lesson_sessions s WHERE s.tenant_id = ? AND s.plan_id = ? AND s.status <> 'cancelled' AND s.starts_at >= ? ORDER BY s.starts_at, s.id${lock ? ' FOR UPDATE' : ''}`,
     [tenantId, planId, `${fromDate} 00:00:00`]);
+  return lock ? lockedUse(db, tenantId, list) : list;
 }
 
 /**
@@ -321,45 +369,74 @@ async function preview(db, tenantId, plan, { lock = false } = {}) {
   for (const { slot, why, dates } of badSlot.values()) warn('product', `${clock(slot.start)} slot: ${why}. It is left out on ${dates.length === 1 ? dayText(dates[0]) : `${dates.length} days`}.`, { block: false });
   for (const [pid, m] of priceGaps) for (const [problem, dates] of m) warn('price', `${products.get(pid).name} ${problem} on ${dates.length === 1 ? 'one day' : `${dates.length} days`}: ${daysWords(dates)}. Guests cannot buy it those days until it has a price.`, { dates: [...new Set(dates)] });
   for (const slot of odd.values()) warn('time', `A slot runs ${clock(slot.start)} to ${clock(slot.end)}, outside 6:00 AM to 9:00 PM. Check the time.`);
+  const certGaps = await certProblems(db, tenantId, doc);
+  if (certGaps.length) { blocked = true; warn('cert', `${certGaps[0].message}${certGaps.length > 1 ? ` (${certGaps.length} lesson times)` : ''}`, { block: true }); }
   if (wanted.length > MAX_LESSONS) { blocked = true; warn('size', `That would be ${wanted.length.toLocaleString('en-US')} lessons. A plan makes at most ${MAX_LESSONS.toLocaleString('en-US')}; shorten the dates or split the season into two plans.`, { block: true }); }
 
   // Match what the plan wants with the lessons it already made: by slot key first, then the same time and product.
-  const existing = blocked ? [] : await planLessons(db, tenantId, plan.id, from, { lock });
+  // Every future lesson of this plan from today (not only from the plan's first day): when the first day moves later, the
+  // unbooked lessons before it are listed to remove like any other lesson the plan no longer makes.
+  const existing = blocked ? [] : await planLessons(db, tenantId, plan.id, today, { lock });
   const byDay = new Map();
   for (const e of existing) { const k = String(e.starts_at).slice(0, 10); if (!byDay.has(k)) byDay.set(k, []); byDay.get(k).push(e); }
   const create = []; const update = []; const keep = []; const taken = new Set();
-  const matchFor = (w) => {
-    const list = (byDay.get(w.date) || []).filter((e) => !taken.has(e.id));
-    return list.find((e) => e.plan_slot === w.slot.key)
-      || list.find((e) => String(e.starts_at).slice(11, 16) === w.slot.start && e.product_id === w.row.product_id && e.discipline === w.row.discipline);
-  };
+  // Every slot claims its own lesson by key first; only then may a slot with no lesson of its own take one at the same
+  // time with the same product, and only a lesson no slot claimed by key (so a new slot never takes another slot's lesson).
+  const matched = new Map();
+  for (const w of blocked ? [] : wanted) {
+    const e = (byDay.get(w.date) || []).find((x) => !taken.has(x.id) && x.plan_slot === w.slot.key);
+    if (e) { taken.add(e.id); matched.set(w, e); }
+  }
+  for (const w of blocked ? [] : wanted) {
+    if (matched.has(w)) continue;
+    const e = (byDay.get(w.date) || []).find((x) => !taken.has(x.id) && String(x.starts_at).slice(11, 16) === w.slot.start && x.product_id === w.row.product_id && x.discipline === w.row.discipline);
+    if (e) { taken.add(e.id); matched.set(w, e); }
+  }
   const assignLater = [];
   const busyBy = []; // instructors this plan already gives a lesson, so two slots do not share one person
+  // Can this instructor teach the lesson as the plan now wants it? -> [problems] (empty: yes).
+  const fit = async (staffId, row, e) => {
+    const m = staff.get(staffId);
+    let problems = m ? clearanceGaps(m, row) : ['Not an instructor'];
+    if (!problems.length) problems = await staffProblems(db, tenantId, { staffId, certificationIds: row.required_certification_id ? [row.required_certification_id] : [], startsAt: row.starts_at, endsAt: row.ends_at, ignoreLessonId: e ? e.id : null });
+    if (!problems.length && busyBy.some((b) => b.id === staffId && b.s < row.ends_at && b.e > row.starts_at)) problems = ['Named on another slot of this plan at that time'];
+    return problems;
+  };
+  const later = (w, staffId, problem) => {
+    const m = staff.get(staffId);
+    assignLater.push({ date: w.date, start: w.slot.start, product: w.product, instructor_id: staffId, instructor: m ? `${m.first_name} ${m.last_name}` : 'Unknown', problem });
+  };
   for (const w of blocked ? [] : wanted) {
-    const e = matchFor(w);
-    if (e) taken.add(e.id);
+    const e = matched.get(w);
     if (e && String(e.starts_at) <= now) continue;
     // A named instructor who is busy, not cleared or not free that day: the lesson is made with "Assign later".
     if (w.row.instructor_id && !(e && inUse(e))) {
-      const m = staff.get(w.row.instructor_id);
-      let problems = m ? clearanceGaps(m, w.row) : ['Not an instructor'];
-      if (!problems.length) problems = await staffProblems(db, tenantId, { staffId: w.row.instructor_id, certificationIds: w.row.required_certification_id ? [w.row.required_certification_id] : [], startsAt: w.row.starts_at, endsAt: w.row.ends_at, ignoreLessonId: e ? e.id : null });
-      if (!problems.length && busyBy.some((b) => b.id === w.row.instructor_id && b.s < w.row.ends_at && b.e > w.row.starts_at)) problems = ['Named on another slot of this plan at that time'];
+      const problems = await fit(w.row.instructor_id, w.row, e);
       if (problems.length) {
-        assignLater.push({ date: w.date, start: w.slot.start, product: w.product, instructor_id: w.row.instructor_id, instructor: m ? `${m.first_name} ${m.last_name}` : 'Unknown', problem: problems[0] });
+        later(w, w.row.instructor_id, problems[0]);
         w.row.instructor_id = null;
       } else busyBy.push({ id: w.row.instructor_id, s: w.row.starts_at, e: w.row.ends_at });
     }
     if (!e) { create.push(w); continue; }
     const diff = differs(e, w.row);
     if (e.plan_slot !== w.slot.key) diff.push('plan_slot');
-    if (!diff.length) continue;
+    if (!diff.length) {
+      if (e.instructor_id) busyBy.push({ id: e.instructor_id, s: String(e.starts_at), e: String(e.ends_at) });
+      continue;
+    }
     if (inUse(e)) {
       const shown = words(diff.filter((f) => f !== 'plan_slot'));
       if (shown.length) keep.push({ id: e.id, date: w.date, start: String(e.starts_at).slice(11, 16), product: w.product, booked: Number(e.booked), asked: Number(e.asked), waiting: Number(e.waiting), differs: shown });
       continue;
     }
-    update.push({ id: e.id, date: w.date, product: w.product, before: e, row: w.row, differs: words(diff.filter((f) => f !== 'plan_slot')) });
+    // The lesson changes and keeps the instructor it has: check them against the lesson as it will be. If they no longer
+    // fit (busy at the new time, not cleared for the new level, missing the certification), it becomes "Assign later".
+    let clear = false;
+    if (!w.row.instructor_id && e.instructor_id && diff.some((f) => FIT_FIELDS.includes(f))) {
+      const problems = await fit(Number(e.instructor_id), w.row, e);
+      if (problems.length) { later(w, Number(e.instructor_id), problems[0]); clear = true; diff.push('instructor_id'); } else busyBy.push({ id: Number(e.instructor_id), s: w.row.starts_at, e: w.row.ends_at });
+    }
+    update.push({ id: e.id, date: w.date, product: w.product, before: e, row: w.row, clear_instructor: clear, differs: words(diff.filter((f) => f !== 'plan_slot')) });
   }
   const remove = existing.filter((e) => !taken.has(e.id) && String(e.starts_at) > now).map((e) => ({ id: e.id, date: String(e.starts_at).slice(0, 10), start: String(e.starts_at).slice(11, 16), product_id: e.product_id, booked: Number(e.booked), asked: Number(e.asked), waiting: Number(e.waiting), in_use: inUse(e), refs: Number(e.refs), before: e }));
   // Lessons made by hand (or by another plan) at the same time with the same product: the plan's lesson is made too.
@@ -432,7 +509,7 @@ async function publish(conn, tenantId, planId, { remove = false, userId = null }
     if (r.spots_mode === 'staff' && u.before.spots_mode === 'staff' && Number(u.before.spots_cap) === r.spots_cap) r.capacity = u.before.capacity;
     const sets = UPDATE_COLS.map((c) => `${c} = ?`);
     const vals = UPDATE_COLS.map((c) => r[c] ?? null);
-    if (r.instructor_id) { sets.push('instructor_id = ?'); vals.push(r.instructor_id); }
+    if (r.instructor_id) { sets.push('instructor_id = ?'); vals.push(r.instructor_id); } else if (u.clear_instructor) sets.push('instructor_id = NULL');
     await conn.query(`UPDATE lesson_sessions SET ${sets.join(', ')} WHERE tenant_id = ? AND id = ?`, [...vals, tenantId, u.id]);
     before.push({ id: u.id, how: 'updated', row: pick(u.before, RESTORE_COLS) });
     touched.push(u.id);
@@ -488,9 +565,13 @@ async function undo(conn, tenantId, publishId, userId = null) {
   if (later) throw conflict('Undo the later publish first. Only the most recent publish can be undone.');
   const kept = []; let removed = 0; let restored = 0; const synced = [];
   const ids = JSON.parse(pub.created_ids || '[]');
+  const befores = JSON.parse(pub.before_rows || '[]');
+  // Lock every lesson the undo may touch, then read them and what is booked on them with locking reads (lockedUse): a
+  // booking that committed while the undo waited for a lock must be seen.
+  const allIds = [...new Set([...ids, ...befores.map((b) => b.id)])];
+  if (allIds.length) await conn.query('SELECT id FROM lesson_sessions WHERE tenant_id = ? AND id IN (?) FOR UPDATE', [tenantId, allIds]);
   if (ids.length) {
-    await conn.query('SELECT id FROM lesson_sessions WHERE tenant_id = ? AND id IN (?) FOR UPDATE', [tenantId, ids]);
-    const list = await rows(conn, `SELECT s.id, s.starts_at, s.status, pr.name AS product, ${USE_SQL} FROM lesson_sessions s JOIN products pr ON pr.tenant_id = s.tenant_id AND pr.id = s.product_id WHERE s.tenant_id = ? AND s.id IN (?)`, [tenantId, ids]);
+    const list = await lockedUse(conn, tenantId, await rows(conn, 'SELECT s.id, s.starts_at, s.status, (SELECT pr.name FROM products pr WHERE pr.tenant_id = s.tenant_id AND pr.id = s.product_id) AS product FROM lesson_sessions s WHERE s.tenant_id = ? AND s.id IN (?) FOR UPDATE', [tenantId, ids]));
     for (const s of list) {
       if (inUse(s)) { kept.push({ id: s.id, starts_at: s.starts_at, product: s.product, booked: Number(s.booked) }); continue; }
       if (Number(s.refs)) await conn.query("UPDATE lesson_sessions SET status = 'cancelled' WHERE tenant_id = ? AND id = ?", [tenantId, s.id]);
@@ -498,9 +579,12 @@ async function undo(conn, tenantId, publishId, userId = null) {
       removed += 1;
     }
   }
-  for (const b of JSON.parse(pub.before_rows || '[]')) {
-    const cur = await one(conn, `SELECT s.id, s.starts_at, s.status, ${USE_SQL} FROM lesson_sessions s WHERE s.tenant_id = ? AND s.id = ? FOR UPDATE`, [tenantId, b.id]);
+  for (const b of befores) {
+    const cur = await one(conn, 'SELECT s.id, s.starts_at, s.status FROM lesson_sessions s WHERE s.tenant_id = ? AND s.id = ? FOR UPDATE', [tenantId, b.id]);
+    if (cur) await lockedUse(conn, tenantId, [cur]);
     if (cur && inUse(cur)) { kept.push({ id: b.id, starts_at: cur.starts_at, product: null, booked: Number(cur.booked) }); continue; }
+    // A lesson cancelled by hand after the publish stays cancelled (the publish itself never cancels an updated lesson).
+    if (cur && b.how === 'updated' && cur.status === 'cancelled' && b.row.status !== 'cancelled') continue;
     if (b.how === 'deleted' && !cur) {
       const cols = Object.keys(b.row);
       await conn.query(`INSERT INTO lesson_sessions (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, cols.map((c) => b.row[c]));
@@ -561,4 +645,4 @@ async function templateSlots(db, tenantId, templateId, poolMode) {
   });
 }
 
-module.exports = { MAX_TYPES, MAX_DAYS, MAX_LESSONS, LENGTHS, COLORS, docSchema, slotSchema, parseDoc, defaults, expand, preview, shape, publish, undo, calendar, templateSlots, summaryWords, lessonRow, newKey, shaOf };
+module.exports = { MAX_TYPES, MAX_DAYS, MAX_LESSONS, LENGTHS, COLORS, docSchema, slotSchema, parseDoc, checkCerts, defaults, holidayType, expand, preview, shape, publish, undo, calendar, templateSlots, summaryWords, lessonRow, newKey, shaOf };

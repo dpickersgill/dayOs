@@ -296,3 +296,161 @@ test('patterns, day templates and a plan with too many lessons', async () => {
   assert.equal((await call('POST', `/skischool/plans/${big.id}/publish`, { token: M.owner, body: {} })).status, 409);
   assert.equal(await q('SELECT COUNT(*) AS n FROM lesson_sessions WHERE tenant_id = ? AND plan_id = ?', [M.id, big.id]).then((r) => Number(r[0].n)), 0);
 });
+
+// ---------------------------------------------------------------- review fixes (2026.11.9)
+/** A one-day plan with the same slots on weekday and weekend days, published once. -> { plan, doc, put(slots), publish(body) } */
+async function oneDay(M, day, slots) {
+  const plan = ok(await call('POST', '/skischool/plans', { token: M.owner, body: { name: 'Season', from_on: day, to_on: day } }), 201);
+  const doc = plan.doc;
+  const put = async (list) => { doc.day_types[0].slots = list.map((s) => ({ ...s, key: `w${s.key}` })); doc.day_types[1].slots = list.map((s) => ({ ...s, key: `e${s.key}` })); return ok(await call('PUT', `/skischool/plans/${plan.id}`, { token: M.owner, body: { doc } })); };
+  const publish = async (body = {}) => ok(await call('POST', `/skischool/plans/${plan.id}/publish`, { token: M.owner, body }), 201);
+  await put(slots);
+  const first = await publish();
+  return { plan, doc, put, publish, first };
+}
+
+/** Books lesson id in an open transaction that holds the lesson's row lock (as the window and booking page do). -> commit() */
+async function bookingInFlight(M, id) {
+  const conn = await pool.getConnection();
+  await conn.beginTransaction();
+  await conn.query('SELECT id FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [M.id, id]);
+  const [p] = await conn.query('INSERT INTO people (tenant_id, first_name, last_name) VALUES (?, ?, ?)', [M.id, 'Racer', 'Guest']);
+  await conn.query("INSERT INTO lesson_bookings (tenant_id, session_id, person_id, status) VALUES (?, ?, ?, 'booked')", [M.id, id, p.insertId]);
+  return async () => { await conn.commit(); conn.release(); };
+}
+
+test('publish and undo never change a lesson booked while they waited for its lock', async () => {
+  const M = await mountain('fix');
+  const day = addDays(today, 3);
+  const P = await oneDay(M, day, [pool930(M, { key: 'k', spots_mode: 'fixed' })]);
+  const [L] = await q('SELECT id, starts_at FROM lesson_sessions WHERE tenant_id = ? AND plan_id = ?', [M.id, P.plan.id]);
+  // Publish: the slot moves to 10:00 while a booking on the lesson is in flight.
+  await P.put([pool930(M, { key: 'k', start: '10:00', end: '12:00', spots_mode: 'fixed' })]);
+  let commit = await bookingInFlight(M, L.id);
+  const pub = call('POST', `/skischool/plans/${P.plan.id}/publish`, { token: M.owner, body: {} });
+  await new Promise((r) => setTimeout(r, 800));
+  await commit();
+  const r = ok(await pub, 201);
+  assert.equal(r.counts.update, 0); assert.equal(r.counts.keep, 1, 'the booked lesson is kept and listed');
+  assert.equal((await q('SELECT starts_at FROM lesson_sessions WHERE id = ?', [L.id]))[0].starts_at, L.starts_at, 'not moved');
+  // Undo: a second lesson moved by a publish is booked while the undo waits; it is kept where it is.
+  const M2 = M;
+  const P2 = await oneDay(M2, addDays(today, 4), [pool930(M2, { key: 'k', spots_mode: 'fixed' })]);
+  await P2.put([pool930(M2, { key: 'k', start: '10:00', end: '12:00', spots_mode: 'fixed' })]);
+  const second = await P2.publish();
+  const [L2] = await q('SELECT id, starts_at FROM lesson_sessions WHERE tenant_id = ? AND plan_id = ?', [M2.id, P2.plan.id]);
+  commit = await bookingInFlight(M2, L2.id);
+  const undo = call('POST', `/skischool/plans/publishes/${second.publish_id}/undo`, { token: M2.owner });
+  await new Promise((r2) => setTimeout(r2, 800));
+  await commit();
+  const u = ok(await undo);
+  assert.equal(u.restored, 0); assert.equal(u.kept.length, 1);
+  assert.equal((await q('SELECT starts_at FROM lesson_sessions WHERE id = ?', [L2.id]))[0].starts_at, L2.starts_at, 'not moved back');
+});
+
+test('a new slot at the same time never takes another slot\'s lesson; a kept instructor is checked when the lesson moves', async () => {
+  const M = await mountain('fix');
+  const day = addDays(today, 5);
+  const kids = { ...pool930(M, { key: 'kids', spots_mode: 'fixed' }) };
+  const adults = { key: 'adult', start: '09:30', end: '11:30', product_id: M.group, kind: 'pool', discipline: 'ski', age_min: 18, age_max: null, spots: 30, spots_mode: 'fixed' };
+  const P = await oneDay(M, day, [kids]);
+  const [K] = await q('SELECT id FROM lesson_sessions WHERE tenant_id = ? AND plan_id = ?', [M.id, P.plan.id]);
+  await sell(M, K.id, 'Kiddo');
+  await P.put([kids, adults]); // the adult key sorts before the kids key
+  const pv = ok(await call('POST', `/skischool/plans/${P.plan.id}/preview`, { token: M.owner }));
+  assert.equal(pv.counts.create, 1); assert.equal(pv.counts.keep, 0, 'the booked kids pool is its own slot\'s lesson, unchanged');
+  await P.publish();
+  const list = await q("SELECT age_min, age_max FROM lesson_sessions WHERE tenant_id = ? AND plan_id = ? AND status = 'scheduled' ORDER BY id", [M.id, P.plan.id]);
+  assert.deepEqual(list.map((s) => [s.age_min, s.age_max]), [[7, 12], [18, null]]);
+
+  // A set class with Ivy assigned moves to 1 PM, where Ivy already teaches: "Assign later", listed in the preview.
+  const M2 = M;
+  const cls = { key: 'c', start: '09:30', end: '11:30', product_id: M2.group, kind: 'class', format: 'group', discipline: 'ski', level_min: 1, level_max: 3, age_min: 7, age_max: 12, spots: 6 };
+  const day2 = addDays(today, 6);
+  const P2 = await oneDay(M2, day2, [cls]);
+  const [C] = await q('SELECT id FROM lesson_sessions WHERE tenant_id = ? AND plan_id = ?', [M2.id, P2.plan.id]);
+  ok(await call('PATCH', `/skischool/sessions/${C.id}/instructor`, { token: M2.owner, body: { instructor_id: M2.ivyId } }));
+  // A meeting place change keeps her (nothing about the fit changed).
+  await P2.put([{ ...cls, meeting_place: 'Flagpole' }]);
+  await P2.publish();
+  assert.equal((await q('SELECT instructor_id FROM lesson_sessions WHERE id = ?', [C.id]))[0].instructor_id, M2.ivyId);
+  ok(await call('POST', '/skischool/sessions', { token: M2.owner, body: { product_id: M2.group, starts_at: `${day2}T13:00`, ends_at: `${day2}T15:00`, instructor_id: M2.ivyId } }));
+  await P2.put([{ ...cls, meeting_place: 'Flagpole', start: '13:00', end: '15:00' }]);
+  const pv2 = ok(await call('POST', `/skischool/plans/${P2.plan.id}/preview`, { token: M2.owner }));
+  assert.equal(pv2.assign_later.length, 1);
+  assert.equal(pv2.assign_later[0].instructor_id, M2.ivyId);
+  assert.match(pv2.assign_later[0].problem, /Teaching a lesson/);
+  assert.ok(pv2.warnings.some((w) => w.code === 'instructor'));
+  assert.ok(pv2.update[0].differs.includes('instructor'));
+  await P2.publish();
+  const after = (await q('SELECT starts_at, instructor_id FROM lesson_sessions WHERE id = ?', [C.id]))[0];
+  assert.equal(after.starts_at, `${day2} 13:00:00`); assert.equal(after.instructor_id, null, 'Assign later, not two lessons at once');
+});
+
+test('undo never brings back a lesson cancelled after the publish; a shorter plan lists its lessons outside the dates to remove', async () => {
+  const M = await mountain('fix');
+  const day = addDays(today, 7);
+  const P = await oneDay(M, day, [pool930(M, { key: 'k', spots_mode: 'fixed' })]);
+  await P.put([pool930(M, { key: 'k', start: '10:00', end: '12:00', spots_mode: 'fixed' })]);
+  const second = await P.publish();
+  const [L] = await q('SELECT id FROM lesson_sessions WHERE tenant_id = ? AND plan_id = ?', [M.id, P.plan.id]);
+  ok(await call('POST', `/skischool/sessions/${L.id}/cancel`, { token: M.owner, body: { reason: 'Not enough snow' } }));
+  ok(await call('POST', `/skischool/plans/publishes/${second.publish_id}/undo`, { token: M.owner }));
+  assert.equal((await q('SELECT status FROM lesson_sessions WHERE id = ?', [L.id]))[0].status, 'cancelled', 'stays cancelled');
+
+  // A three-day plan: the first day moves one day later and the last day one day earlier.
+  const M2 = M;
+  const a = addDays(today, 8); const b = addDays(a, 1); const c = addDays(a, 2);
+  const plan = ok(await call('POST', '/skischool/plans', { token: M2.owner, body: { name: 'Season', from_on: a, to_on: c } }), 201);
+  for (const t of plan.doc.day_types) if (!t.closed) t.slots = [pool930(M2, { key: `k${t.key.replace('_', '')}`, spots_mode: 'fixed' })];
+  ok(await call('PUT', `/skischool/plans/${plan.id}`, { token: M2.owner, body: { doc: plan.doc } }));
+  ok(await call('POST', `/skischool/plans/${plan.id}/publish`, { token: M2.owner, body: {} }), 201);
+  ok(await call('PUT', `/skischool/plans/${plan.id}`, { token: M2.owner, body: { from_on: b, to_on: b } }));
+  const pv = ok(await call('POST', `/skischool/plans/${plan.id}/preview`, { token: M2.owner }));
+  assert.deepEqual(pv.remove.map((r) => r.date).sort(), [a, c], 'the days before the new first day and after the new last day');
+  const kept = ok(await call('POST', `/skischool/plans/${plan.id}/publish`, { token: M2.owner, body: {} }), 201);
+  assert.equal(kept.counts.removed, 0, 'only when asked');
+  assert.equal((await q("SELECT COUNT(*) AS n FROM lesson_sessions WHERE tenant_id = ? AND plan_id = ? AND status <> 'cancelled'", [M2.id, plan.id]))[0].n, 3);
+  const gone = ok(await call('POST', `/skischool/plans/${plan.id}/publish`, { token: M2.owner, body: { remove: true } }), 201);
+  assert.equal(gone.counts.removed, 2);
+  assert.deepEqual((await q("SELECT DATE_FORMAT(starts_at, '%Y-%m-%d') AS d FROM lesson_sessions WHERE tenant_id = ? AND plan_id = ? AND status <> 'cancelled'", [M2.id, plan.id])).map((r) => r.d), [b]);
+});
+
+test('school holidays use the day type marked for them; a slot\'s certification must be the mountain\'s own', async () => {
+  const base = LP.defaults();
+  assert.equal(base.day_types.find((t) => t.key === 'holiday').is_holiday, true, 'the default Holiday day type is marked');
+  const slot = { key: 'p', start: '10:00', end: '12:00', product_id: 1, kind: 'pool', format: 'group', discipline: 'ski', spots: 20 };
+  const doc = LP.parseDoc({ ...base, day_types: [...base.day_types.map((t) => ({ ...t, is_holiday: false })), { key: 'peak', name: 'Peak day', is_holiday: true, slots: [slot] }] });
+  const mon = nextWd(addDays(today, 3), 1);
+  const days = LP.expand(doc, mon, addDays(mon, 1), new Map([[mon, 'Presidents Day']]));
+  assert.equal(days[0].day_type, 'peak', 'a renamed holiday day type with any key');
+  assert.equal(days[0].source, 'holiday');
+  assert.equal(days[1].day_type, 'weekday');
+  // An older plan with no marks: the day type keyed holiday, as before.
+  const old = LP.parseDoc({ ...base, day_types: base.day_types.map(({ is_holiday: _, ...t }) => t) });
+  assert.equal(LP.expand(old, mon, mon, new Map([[mon, 'X']]))[0].day_type, 'holiday');
+  // Unmarked on every day type: holidays use the weekday default.
+  const none = LP.parseDoc({ ...base, day_types: base.day_types.map((t) => ({ ...t, is_holiday: false })) });
+  assert.equal(LP.expand(none, mon, mon, new Map([[mon, 'X']]))[0].day_type, 'weekday');
+  assert.throws(() => LP.parseDoc({ ...base, day_types: base.day_types.map((t) => ({ ...t, is_holiday: true })) }), /problem/, 'only one');
+
+  const M = await mountain('fix');
+  const O = await mountain('a');
+  const mine = ok(await call('POST', '/workforce/certifications', { token: M.owner, body: { name: 'PSIA Children' } }), 201).id;
+  const theirs = ok(await call('POST', '/workforce/certifications', { token: O.owner, body: { name: 'Other mountain cert' } }), 201).id;
+  const day = addDays(today, 11);
+  const plan = ok(await call('POST', '/skischool/plans', { token: M.owner, body: { name: 'Season', from_on: day, to_on: day } }), 201);
+  plan.doc.day_types[0].slots = [clinic(M, { cert: theirs })];
+  const refused = await call('PUT', `/skischool/plans/${plan.id}`, { token: M.owner, body: { doc: plan.doc } });
+  assert.equal(refused.status, 400);
+  assert.match(JSON.stringify(refused.body), /certification this mountain does not have/);
+  plan.doc.day_types[0].slots = [clinic(M, { cert: mine })];
+  ok(await call('PUT', `/skischool/plans/${plan.id}`, { token: M.owner, body: { doc: plan.doc } }));
+  // A plan saved before the check (or a certification since deleted) cannot publish.
+  const raw = JSON.parse((await q('SELECT doc FROM lesson_plans WHERE id = ?', [plan.id]))[0].doc);
+  raw.day_types[0].slots[0].cert = theirs; raw.day_types[1].slots = [{ ...raw.day_types[0].slots[0], key: 'clinic2' }];
+  await q('UPDATE lesson_plans SET doc = ? WHERE id = ?', [JSON.stringify(raw), plan.id]);
+  const pv = ok(await call('POST', `/skischool/plans/${plan.id}/preview`, { token: M.owner }));
+  assert.equal(pv.blocked, true); assert.ok(pv.warnings.some((w) => w.code === 'cert'));
+  assert.equal((await call('POST', `/skischool/plans/${plan.id}/publish`, { token: M.owner, body: {} })).status, 409);
+});

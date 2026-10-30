@@ -49,6 +49,22 @@ function whoseStaff(req, asked) {
 }
 
 // ================================================================ pay rates
+/**
+ * Separation of duties (2026.11.9): a school Director (an instructor login, not an owner or manager) never sets their own
+ * pay. Not a rate of their own, and not a school-wide default rate of a kind they have no rate of their own for (that
+ * default is what they are paid). Owners and managers are not limited.
+ */
+async function ownRateCheck(req, staffId, kind) {
+  if (!SA.isSchoolDirector(req)) return;
+  const me = req.auth.staffId;
+  if (!me) return;
+  if (staffId && Number(staffId) === Number(me)) throw forbidden('You cannot change your own pay rate. Ask an owner or manager.');
+  if (!staffId) {
+    const mine = await one(pool, 'SELECT id FROM instructor_pay_rates WHERE tenant_id = ? AND staff_id = ? AND kind = ? LIMIT 1', [req.auth.tenantId, me, kind]);
+    if (!mine) throw forbidden('This default rate is also your own pay. Ask an owner or manager to change it, or to set a rate for you first.');
+  }
+}
+
 const rateSchema = z.object({
   staff_id: z.number().int().positive().nullable(),
   kind: z.enum(P.KINDS),
@@ -73,6 +89,7 @@ router.get('/pay/rates', manager, async (req, res) => {
 router.post('/pay/rates', manager, validate(rateSchema), async (req, res) => {
   const t = req.auth.tenantId; const b = req.body;
   if (b.staff_id && !(await one(pool, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ?', [t, b.staff_id]))) throw notFound('Instructor');
+  await ownRateCheck(req, b.staff_id, b.kind);
   const from = b.effective_from || todayIn(await tzOf(t));
   const id = await tx(async (conn) => {
     const [r] = await conn.query(`INSERT INTO instructor_pay_rates (tenant_id, staff_id, kind, cents, effective_from, created_by) VALUES (?, ?, ?, ?, ?, ?)
@@ -87,6 +104,7 @@ router.delete('/pay/rates/:id', manager, async (req, res) => {
   const t = req.auth.tenantId; const id = paramId(req);
   const r = await one(pool, 'SELECT * FROM instructor_pay_rates WHERE tenant_id = ? AND id = ?', [t, id]);
   if (!r) throw notFound('Rate');
+  await ownRateCheck(req, r.staff_id, r.kind);
   await tx(async (conn) => {
     await conn.query('DELETE FROM instructor_pay_rates WHERE tenant_id = ? AND id = ?', [t, id]);
     await audit(conn, req, 'pay_rate_delete', 'instructor_pay_rates', id, { staff_id: r.staff_id, kind: r.kind, cents: r.cents });
@@ -269,11 +287,18 @@ router.post('/pay/requests/:id/assign', desk, validate(z.object({ staff_id: z.nu
   res.json(await PR.accept(req, paramId(req), req.body.staff_id, { byHand: true }));
 });
 
-// A manager cancels an open request and refunds it in full.
+// A manager cancels an open request and refunds it in full. A school Director may too, up to the counter refund limit
+// (guests settings, as for lesson-only orders: sales.js and guestswindow.refundAllowed); with no limit set, only a manager.
 router.post('/pay/requests/:id/refund', manager, async (req, res) => {
   const r = await one(pool, 'SELECT id FROM private_requests WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, paramId(req)]);
   if (!r) throw notFound('Private request');
-  const out = await PR.refundByFamily(req.auth.tenantId, r.id);
+  const allow = SA.isSchoolDirector(req) ? async (conn, row) => {
+    const lim = (await require('../lib/guestsettings').get(conn, req.auth.tenantId)).counter_refund_limit_cents;
+    if (!lim) throw forbidden('Only a manager can give money back. Ask a manager.');
+    const cents = row.pay_at_desk || !row.payment_intent ? 0 : Number(row.amount_cents);
+    if (cents > lim) throw forbidden(`You can give back up to ${require('../lib/format').money(lim)} at a time. This request paid more. Ask a manager.`);
+  } : null;
+  const out = await PR.refundByFamily(req.auth.tenantId, r.id, { allow });
   await audit(pool, req, 'private_staff_refund', 'private_requests', r.id, out);
   res.json(out);
 });
@@ -406,6 +431,8 @@ router.get('/pay/payroll', manager, async (req, res) => {
 
 router.post('/pay/payroll/approve', manager, validate(z.object({ from: dateStr, to: dateStr, staff_ids: z.array(z.number().int().positive()).min(1).max(500), approved: z.boolean() })), async (req, res) => {
   const t = req.auth.tenantId; const { from, to } = period(req, req.body);
+  // Separation of duties: a school Director never approves (or takes back) their own pay. Owners and managers can.
+  if (SA.isSchoolDirector(req) && req.auth.staffId && req.body.staff_ids.includes(Number(req.auth.staffId))) throw forbidden('You cannot approve your own pay. Ask an owner or manager.');
   const now = await payroll(pool, t, from, to);
   await tx(async (conn) => {
     const run = await runFor(conn, t, from, to, req.auth.userId, true);

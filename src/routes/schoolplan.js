@@ -79,6 +79,7 @@ router.post('/plans', director, validate(z.object({ ...planBody, pattern_id: z.n
     doc = { ...JSON.parse(other.doc), periods: [], exceptions: [] }; // periods and one-off days belong to their own season
   }
   doc = LP.parseDoc(doc);
+  await LP.checkCerts(pool, t, doc);
   const id = await tx(async (conn) => {
     const [r] = await conn.query('INSERT INTO lesson_plans (tenant_id, name, from_on, to_on, doc, created_by) VALUES (?, ?, ?, ?, ?, ?)', [t, b.name, b.from_on, b.to_on, JSON.stringify(doc), req.auth.userId || null]);
     await audit(conn, req, 'create', 'lesson_plans', r.insertId, { name: b.name, from_on: b.from_on, to_on: b.to_on, pattern_id: b.pattern_id || null, copy_of: b.copy_of || null });
@@ -96,6 +97,7 @@ router.put('/plans/:id', director, validate(z.object({ name: planBody.name.optio
     const from = b.from_on || String(p.from_on).slice(0, 10); const to = b.to_on || String(p.to_on).slice(0, 10);
     checkDates(from, to);
     const doc = b.doc !== undefined ? LP.parseDoc(b.doc) : null;
+    if (doc) await LP.checkCerts(conn, t, doc);
     await conn.query('UPDATE lesson_plans SET name = ?, from_on = ?, to_on = ?, doc = ? WHERE tenant_id = ? AND id = ?', [b.name || p.name, from, to, doc ? JSON.stringify(doc) : p.doc, t, pid]);
     const what = doc ? { day_types: doc.day_types.length, slots: doc.day_types.reduce((n, x) => n + x.slots.length, 0), periods: doc.periods.length, exceptions: doc.exceptions.length } : null;
     await audit(conn, req, 'update', 'lesson_plans', pid, { name: b.name, from_on: b.from_on, to_on: b.to_on, doc: what });
