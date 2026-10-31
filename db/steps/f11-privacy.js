@@ -32,7 +32,11 @@ module.exports = ({ tableExists, columnExists }) => [
     KEY ix_goodday_consent_email (email, id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
   // The history so far, from what each subscriber row says today (once, when the table is new and empty).
-  ['goodday_consent_events backfill', async (c) => { const [[r]] = await c.query('SELECT COUNT(*) AS n FROM goodday_consent_events'); return Number(r.n) > 0 || !(await tableExists(c, 'goodday_subscribers')); }, [
+  ['goodday_consent_events backfill', async (c) => {
+    if (!(await tableExists(c, 'goodday_subscribers'))) return true;
+    const [[r]] = await c.query('SELECT (SELECT COUNT(*) FROM goodday_consent_events) AS e, (SELECT COUNT(*) FROM goodday_subscribers) AS s');
+    return Number(r.e) > 0 || Number(r.s) === 0;
+  }, [
     `INSERT INTO goodday_consent_events (email, event, wording, source, ip, created_at)
        SELECT email, 'subscribe', consent_wording, source, consent_ip, COALESCE(consent_at, created_at) FROM goodday_subscribers WHERE consent_at IS NOT NULL OR status <> 'unsubscribed'`,
     `INSERT INTO goodday_consent_events (email, event, ip, created_at)

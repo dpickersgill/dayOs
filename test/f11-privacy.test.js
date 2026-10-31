@@ -155,3 +155,125 @@ test('DP-1: the download has every table holding the guest; anonymise clears chi
 test('DP-1: guest page audit rows carry an email reference, not the address', async () => {
   for (const f of ['src/routes/family.js', 'src/routes/guestsaccount.js']) assert.ok(!/audit\([^\n]*[{,] email \}/.test(read(f)), `${f} audits the email itself`);
 });
+
+// ---------------------------------------------------------------- DP-4, DP-5, DP-6: texts and promotional email
+const newPerson = async (body) => { const r = await api('POST', '/people', { token: A.manager, body }); assert.equal(r.status, 201, r.text); return r.body.id || r.body.data.id; };
+const consent = (id, channel, status) => api('POST', `/people/${id}/consent`, { token: A.manager, body: { channel, status, source: 'counter' } });
+async function campaign(channel, extra = {}) {
+  const cm = await api('POST', '/messages/campaigns', { token: A.manager, body: { name: `C ${Math.random()}`, channel, subject: channel === 'email' ? 'Powder day sale' : undefined, body: 'Half price tickets this weekend.', audience: 'all', ...extra } });
+  assert.equal(cm.status, 201, cm.text);
+  return cm.body.id;
+}
+const texts = (mark, phone) => sent(mark, (x) => x.u.includes('/Messages.json')).map((x) => new URLSearchParams(x.b)).filter((p) => p.get('To') === `+1${phone}`);
+const mails = (mark, to) => sent(mark, (x) => x.u === '/email').map((x) => JSON.parse(x.b)).filter((m) => m.To === to);
+
+test('DP-4: a text opt-out covers the phone, not one record (family sharing a phone)', async () => {
+  const quiet = require('../src/lib/quiet');
+  quiet.clock.now = () => new Date('2026-12-15T17:00:00Z'); // noon at the mountain
+  try {
+    const phone = `484555${String(Date.now()).slice(-4)}`;
+    const parent = await newPerson({ first_name: 'Parent', last_name: `Txt${suffix}`, phone });
+    const child = await newPerson({ first_name: 'Child', last_name: `Txt${suffix}`, phone });
+    for (const id of [parent, child]) await consent(id, 'sms', 'opted_in');
+    assert.equal((await consent(parent, 'sms', 'opted_out')).status, 201);
+    const [[c]] = await pool.query("SELECT status FROM consent_events WHERE tenant_id = ? AND person_id = ? AND channel = 'sms' ORDER BY id DESC LIMIT 1", [A.id, child]);
+    assert.equal(c.status, 'opted_out', 'the shared phone’s other record says no too');
+    const mark = sink.length;
+    const s = await api('POST', `/messages/campaigns/${await campaign('sms')}/send`, { token: A.manager, body: { confirm: true } });
+    assert.equal(s.status, 200);
+    await wait(100);
+    assert.equal(texts(mark, phone).length, 0, 'the opted-out phone gets no campaign text');
+    // An older record that still says yes (from before this release) is covered by the audience rule too.
+    await pool.query("INSERT INTO consent_events (tenant_id, person_id, channel, status, source, wording) VALUES (?, ?, 'sms', 'opted_in', 'counter', 'v1')", [A.id, child]);
+    await pool.query("INSERT INTO consent_events (tenant_id, person_id, channel, status, source, wording) VALUES (?, ?, 'sms', 'opted_out', 'counter', 'v1')", [A.id, parent]);
+    const list = await require('../src/lib/messaging').audienceOf({ id: A.id, timezone: 'America/New_York' }, 'sms', 'all');
+    assert.ok(!list.some((p) => String(p.addr).replace(/\D/g, '').endsWith(phone)));
+  } finally { quiet.clock.now = () => new Date(); }
+});
+
+test('DP-4: campaign texts between 9 PM and 8 AM at the mountain wait for 8 AM, and are dropped if the phone says no first', async () => {
+  const quiet = require('../src/lib/quiet');
+  const sms = require('../src/lib/sms');
+  const phone = `610777${String(Date.now()).slice(-4)}`; const phone2 = `610778${String(Date.now()).slice(-4)}`;
+  const p1 = await newPerson({ first_name: 'Night', last_name: `Owl${suffix}`, phone });
+  const p2 = await newPerson({ first_name: 'Late', last_name: `Change${suffix}`, phone: phone2 });
+  await consent(p1, 'sms', 'opted_in'); await consent(p2, 'sms', 'opted_in');
+  quiet.clock.now = () => new Date('2026-12-16T04:30:00Z'); // 11:30 PM at the mountain
+  try {
+    const mark = sink.length;
+    const id = await campaign('sms');
+    const s = await api('POST', `/messages/campaigns/${id}/send`, { token: A.manager, body: { confirm: true } });
+    assert.equal(s.status, 200); assert.ok(s.body.held >= 2, JSON.stringify(s.body));
+    await wait(100);
+    assert.equal(texts(mark, phone).length, 0, 'nothing is texted at night');
+    const [[h]] = await pool.query('SELECT send_after FROM sms_held WHERE tenant_id = ? AND phone_key = ? ORDER BY id DESC LIMIT 1', [A.id, phone]);
+    assert.equal(new Date(h.send_after).toISOString().slice(0, 16), '2026-12-16T13:00', 'held until 8 AM Eastern');
+    const [[log]] = await pool.query("SELECT status FROM message_log WHERE tenant_id = ? AND campaign_id = ? AND person_id = ?", [A.id, id, p1]);
+    assert.equal(log.status, 'held');
+    // The second guest says no before morning.
+    await consent(p2, 'sms', 'opted_out');
+    // Still night: the job sends nothing.
+    await pool.query('UPDATE sms_held SET send_after = UTC_TIMESTAMP() - INTERVAL 1 MINUTE WHERE tenant_id = ?', [A.id]);
+    await sms.sendHeld();
+    assert.equal(texts(mark, phone).length, 0);
+    quiet.clock.now = () => new Date('2026-12-16T13:05:00Z'); // 8:05 AM
+    await pool.query('UPDATE sms_held SET send_after = UTC_TIMESTAMP() - INTERVAL 1 MINUTE WHERE tenant_id = ?', [A.id]);
+    const out = await sms.sendHeld();
+    await wait(100);
+    assert.ok(out.sent >= 1 && out.dropped >= 1, JSON.stringify(out));
+    assert.equal(texts(mark, phone).length, 1, 'sent at 8 AM');
+    assert.equal(texts(mark, phone2).length, 0, 'the phone that said no overnight is never texted');
+    const [[log2]] = await pool.query("SELECT status FROM message_log WHERE tenant_id = ? AND campaign_id = ? AND person_id = ?", [A.id, id, p1]);
+    assert.equal(log2.status, 'sent');
+  } finally { quiet.clock.now = () => new Date(); }
+});
+
+test('DP-6: a marketing email needs the mountain’s postal address, and carries the one-click unsubscribe headers', async () => {
+  const email = `promo${suffix}@guest.example`;
+  const id = await newPerson({ first_name: 'Mark', last_name: `Eting${suffix}`, email });
+  await consent(id, 'email', 'opted_in');
+  await pool.query('UPDATE tenants SET address = NULL, mail_address = NULL WHERE id = ?', [A.id]);
+  try {
+    const mark = sink.length;
+    const s = await api('POST', `/messages/campaigns/${await campaign('email')}/send`, { token: A.manager, body: { confirm: true } });
+    assert.equal(s.status, 409); assert.match(s.body.error, /postal address/);
+    assert.equal(mails(mark, email).length, 0);
+    assert.equal((await api('GET', '/messages/status', { token: A.manager })).body.postal_address, null);
+  } finally { await pool.query("UPDATE tenants SET address = '12 Summit Road, Spring City, PA 19475' WHERE id = ?", [A.id]); }
+  const mark = sink.length;
+  const s = await api('POST', `/messages/campaigns/${await campaign('email')}/send`, { token: A.manager, body: { confirm: true } });
+  assert.equal(s.status, 200);
+  await wait(100);
+  const [m] = mails(mark, email);
+  assert.ok(m, 'sent once the address is there');
+  assert.match(m.TextBody, /12 Summit Road/);
+  const hs = Object.fromEntries((m.Headers || []).map((x) => [x.Name, x.Value]));
+  assert.match(hs['List-Unsubscribe'], /\/api\/v1\/public\/unsub\//);
+  assert.equal(hs['List-Unsubscribe-Post'], 'List-Unsubscribe=One-Click');
+  assert.equal(m.MessageStream, 'broadcast');
+  // One click: a POST to the link records the opt-out.
+  const r = await fetch(hs['List-Unsubscribe'].slice(1, -1).replace(/^https?:\/\/[^/]+/, base), { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'List-Unsubscribe=One-Click' });
+  assert.equal(r.status, 200);
+  const [[c]] = await pool.query("SELECT status FROM consent_events WHERE tenant_id = ? AND person_id = ? AND channel = 'email' ORDER BY id DESC LIMIT 1", [A.id, id]);
+  assert.equal(c.status, 'opted_out');
+});
+
+test('DP-5: reward and loyalty email honors unsubscribe and carries the footer; every email is classified in one place', async () => {
+  const kinds = require('../src/lib/mailkinds');
+  for (const t of ['msg-campaign', 'loyalty-thanks', 'reward-birthday', 'reward-loyalty', 'recap-day', 'recap-season', 'lesson-followup']) assert.equal(kinds.kindOf(t), 'promotional', t);
+  for (const t of ['shop-tickets', 'confirmation', 'msg-rental_overdue', 'sign-in-code', 'patrol-followup', 'goodday-confirm']) assert.equal(kinds.kindOf(t), 'transactional', t);
+  const out = await newPerson({ first_name: 'Gone', last_name: `Away${suffix}`, email: `gone${suffix}@guest.example` });
+  const stay = await newPerson({ first_name: 'Still', last_name: `Here${suffix}`, email: `here${suffix}@guest.example` });
+  await consent(out, 'email', 'opted_in');
+  const { unsubToken } = require('../src/lib/messaging');
+  assert.equal((await fetch(`${base}/api/v1/public/unsub/${unsubToken(A.id, out, 'email')}`, { method: 'POST' })).status, 200);
+  const mark = sink.length;
+  const r = await api('POST', '/guests/loyalty/top/thanks', { token: A.manager, body: { person_ids: [out, stay], note: 'Passes are 20% off until Friday!' } });
+  assert.equal(r.status, 200, r.text);
+  await wait(100);
+  assert.equal(mails(mark, `gone${suffix}@guest.example`).length, 0, 'an unsubscribed guest gets no promotional email');
+  const [m] = mails(mark, `here${suffix}@guest.example`);
+  assert.ok(m);
+  assert.match(m.TextBody, /12 Summit Road/); assert.match(m.TextBody, /To stop these emails: http/);
+  assert.ok((m.Headers || []).some((x) => x.Name === 'List-Unsubscribe-Post'));
+});

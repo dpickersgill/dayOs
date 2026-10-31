@@ -188,11 +188,12 @@ ${button ? `<p style="margin:8px 0 6px"><a href="${esc(button.href)}" style="dis
 </td></tr></table></td></tr></table></body></html>`;
 }
 
-async function sendMail(t, to, { subject, text, html, tag }) {
-  try { return await mailer.send({ tenantId: t.id, to, fromName: t.name, subject, text, html, tag }); } catch (err) { return { ok: false, error: err.message }; }
+async function sendMail(t, to, { subject, text, html, tag, personId, base }) {
+  try { return await mailer.send({ tenantId: t.id, to, fromName: t.name, subject, text, html, tag, personId, base }); } catch (err) { return { ok: false, error: err.message }; }
 }
 async function sendText(t, to, body) {
-  try { return await sms.send({ tenantId: t.id, to, body }); } catch (err) { return { ok: false, error: err.message }; }
+  // Recaps by text are marketing: held for quiet hours (8 AM to 9 PM at the mountain).
+  try { return await sms.send({ tenantId: t.id, to, body, promotional: true, tag: 'recap' }); } catch (err) { return { ok: false, error: err.message }; }
 }
 
 /**
@@ -241,7 +242,7 @@ async function mailReward(t, reward, person, day, base, extraLines = {}) {
   const gift = several ? `The gift is your choice of ${choices}. Pick one when you use it.` : `The gift is ${choices}.`;
   const text = [hi, '', lead, '', gift, when, '', how, '', 'See you soon,', t.name].join('\n');
   const html = mailHtml(t, { title, paras: [esc(hi), esc(lead), esc(gift), esc(when), `To use it, buy online while signed in to your account, or show this code at the ticket window:`], code: s.code, button: { href: shop, text: 'Buy online' } });
-  const r = await sendMail(t, to.email, { subject, text, html, tag: `reward-${s.kind}` });
+  const r = await sendMail(t, to.email, { subject, text, html, tag: `reward-${s.kind}`, personId: to.id, base });
   if (r && r.ok) await pool.query('UPDATE guest_reward_mails SET emailed = 1 WHERE tenant_id = ? AND reward_id = ?', [t.id, reward.id]);
   return Boolean(r && r.ok);
 }
@@ -476,7 +477,7 @@ async function dayRecaps(tenantId, day, base) {
     const text = [`Hi ${group.to.first_name || 'there'},`, '', greet, ...lines, '', 'See you soon,', t.name, '', `Your day: ${link}`, 'Rather not get these? Open the link and choose "Stop these emails".'].join('\n');
     const html = mailHtml(t, { title: greet, paras: [...lines.map(esc), 'See you soon.', `<span style="color:#5b6b72;font-size:13px">Rather not get these? Open your day and choose Stop these emails.</span>`], button: { href: link, text: 'See your day' } });
     let emailed = false; let texted = false;
-    if (await emailOk(pool, tenantId, group.to.id)) emailed = Boolean((await sendMail(t, group.to.email, { subject, text, html, tag: 'recap-day' })).ok);
+    if (await emailOk(pool, tenantId, group.to.id)) emailed = Boolean((await sendMail(t, group.to.email, { subject, text, html, tag: 'recap-day', personId: group.to.id, base })).ok);
     if (await textOk(pool, tenantId, group.to)) {
       texted = Boolean((await sendText(t, group.to.phone, `${t.name}: ${greet} ${one1 ? dayLine(stats.get(Number(p0.id))) : ''} See you soon. ${link}`.replace(/\s+/g, ' '))).ok);
     }
@@ -548,7 +549,7 @@ async function seasonRecaps(tenantId, label, base, { preview = false, req = null
     const text = [`Hi ${group.to.first_name || 'there'},`, '', `What a season. Thank you for spending it with us.`, ...lines, '', `See your season: ${link}`, '', 'See you next season,', t.name].join('\n');
     const html = mailHtml(t, { title: 'Your season, in numbers', paras: [esc(`Hi ${group.to.first_name || 'there'},`), 'What a season. Thank you for spending it with us.', ...lines.map(esc), 'See you next season.'], button: { href: link, text: 'See your season' } });
     let emailed = false; let texted = false;
-    if (await emailOk(pool, tenantId, group.to.id)) emailed = Boolean((await sendMail(t, group.to.email, { subject, text, html, tag: 'recap-season' })).ok);
+    if (await emailOk(pool, tenantId, group.to.id)) emailed = Boolean((await sendMail(t, group.to.email, { subject, text, html, tag: 'recap-season', personId: group.to.id, base })).ok);
     if (await textOk(pool, tenantId, group.to)) texted = Boolean((await sendText(t, group.to.phone, `${t.name}: thank you for this season. Your season in numbers: ${link}`)).ok);
     await pool.query('UPDATE guest_recaps SET emailed = ?, texted = ? WHERE tenant_id = ? AND id IN (?)', [emailed ? 1 : 0, texted ? 1 : 0, tenantId, claimed.map((c) => c.recap_id)]);
     if (emailed) out.sent += 1;

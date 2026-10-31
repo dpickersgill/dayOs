@@ -71,7 +71,8 @@ router.post('/loyalty/top/thanks', manager, validate(z.object({
       const to = await Y.recipientFor(pool, tenantId, p, day);
       if (!to) { out.skipped += 1; continue; }
       const text = [`Hi ${to.first_name || 'there'},`, '', `${to.self ? 'You are' : `${p.first_name} is`} one of our most loyal guests this season, and we wanted to say thank you.${req.body.note ? ` ${req.body.note}` : ''}`, '', 'See you soon,', t.name].join('\n');
-      const r = await require('../lib/mailer').send({ tenantId, to: to.email, fromName: t.name, subject: `Thank you from ${t.name}`, text, tag: 'loyalty-thanks' });
+      const r = await require('../lib/mailer').send({ tenantId, to: to.email, fromName: t.name, subject: `Thank you from ${t.name}`, text, tag: 'loyalty-thanks', personId: to.id, base: baseUrl(req) });
+      if (r && r.refused) { out.skipped += 1; continue; } // said no to email, or no postal address (lib/mailkinds.js)
       out.thanked += 1; if (r && r.ok) out.emailed += 1;
     }
   }

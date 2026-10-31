@@ -12,6 +12,7 @@ const { baseUrl } = require('../lib/baseurl');
 const mailer = require('../lib/mailer');
 const sms = require('../lib/sms');
 const messaging = require('../lib/messaging');
+const mailkinds = require('../lib/mailkinds');
 
 const router = express.Router();
 const publicRouter = express.Router();
@@ -19,8 +20,9 @@ const mgr = requireRole('manager');
 const tenantOf = (req) => one(pool, 'SELECT * FROM tenants WHERE id = ?', [req.auth.tenantId]);
 const AUD = messaging.AUDIENCES.map((a) => a.key);
 
-router.get('/status', mgr, async (_req, res) => {
-  res.json({ email_ready: mailer.enabled(), sms_ready: sms.enabled(), audiences: messaging.AUDIENCES, max_recipients: messaging.MAX_RECIPIENTS });
+router.get('/status', mgr, async (req, res) => {
+  const postal = await mailkinds.postalAddress(pool, req.auth.tenantId);
+  res.json({ email_ready: mailer.enabled(), sms_ready: sms.enabled(), audiences: messaging.AUDIENCES, max_recipients: messaging.MAX_RECIPIENTS, postal_address: postal ? postal.address : null, quiet_hours: messaging.QUIET });
 });
 
 const previewBody = z.object({ channel: z.enum(['email', 'sms']), audience: z.enum(AUD) });
@@ -42,7 +44,7 @@ const campaignBody = z.object({
 });
 
 router.get('/campaigns', mgr, async (req, res) => {
-  res.json({ data: await rows(pool, 'SELECT id, name, channel, audience, status, created_at, sent_at, total, sent, failed FROM campaigns WHERE tenant_id = ? ORDER BY id DESC LIMIT 100', [req.auth.tenantId]) });
+  res.json({ data: await rows(pool, 'SELECT id, name, channel, audience, status, created_at, sent_at, total, sent, failed, held FROM campaigns WHERE tenant_id = ? ORDER BY id DESC LIMIT 100', [req.auth.tenantId]) });
 });
 
 router.post('/campaigns', mgr, validate(campaignBody), async (req, res) => {
@@ -106,6 +108,8 @@ router.post('/campaigns/:id/send', mgr, validate(z.object({ confirm: z.literal(t
   const t = await tenantOf(req);
   if (c.channel === 'email' && !mailer.enabled()) throw conflict('Email is not set up yet');
   if (c.channel === 'sms' && !sms.enabled()) throw conflict('Text messages are not set up yet');
+  // Marketing email must carry the mountain's postal address (CAN-SPAM); refused before anything is sent.
+  if (c.channel === 'email' && !(await mailkinds.postalAddress(pool, t.id))) throw conflict(mailkinds.NO_ADDRESS);
   // Claim it so a double click cannot send twice.
   const [claim] = await pool.query("UPDATE campaigns SET status = 'sending' WHERE tenant_id = ? AND id = ? AND status = 'draft'", [t.id, c.id]);
   if (!claim.affectedRows) throw conflict('This message has already been sent');
@@ -114,7 +118,7 @@ router.post('/campaigns/:id/send', mgr, validate(z.object({ confirm: z.literal(t
     await pool.query("UPDATE campaigns SET status = 'draft' WHERE tenant_id = ? AND id = ?", [t.id, c.id]);
     throw err;
   }
-  await pool.query("UPDATE campaigns SET status = 'sent', sent_at = NOW(), total = ?, sent = ?, failed = ? WHERE tenant_id = ? AND id = ?", [result.total, result.sent, result.failed, t.id, c.id]);
+  await pool.query("UPDATE campaigns SET status = 'sent', sent_at = NOW(), total = ?, sent = ?, failed = ?, held = ? WHERE tenant_id = ? AND id = ?", [result.total, result.sent, result.failed, result.held || 0, t.id, c.id]);
   await audit(pool, req, 'campaign_send', 'campaigns', c.id, result);
   res.json(result);
 });

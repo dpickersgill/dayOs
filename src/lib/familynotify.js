@@ -15,13 +15,13 @@ async function textsOn(tenantId) {
  * tenant: the tenants row (id, name). to: { email, phone, textOk }. subject and text: the email. smsText: the text
  * message (keep it under 300 characters, with the link). tag: a short Postmark tag.
  */
-async function notify({ tenant, to, subject, text, html, smsText, tag }) {
+async function notify({ tenant, to, subject, text, html, smsText, tag, base, promotional }) {
   const out = { email: null, text: null };
   try {
-    if (to.email && subject) out.email = await mailer.send({ tenantId: tenant.id, to: to.email, fromName: tenant.name, subject, text, html, tag: tag || 'lessons' });
+    if (to.email && subject) out.email = await mailer.send({ tenantId: tenant.id, to: to.email, fromName: tenant.name, subject, text, html, tag: tag || 'lessons', base });
   } catch (err) { out.email = { ok: false, error: err.message }; }
   try {
-    if (smsText && to.phone && to.textOk && (await textsOn(tenant.id))) out.text = await sms.send({ tenantId: tenant.id, to: to.phone, body: smsText });
+    if (smsText && to.phone && to.textOk && (await textsOn(tenant.id))) out.text = await sms.send({ tenantId: tenant.id, to: to.phone, body: smsText, promotional: Boolean(promotional), tag });
   } catch (err) { out.text = { ok: false, error: err.message }; }
   return out;
 }

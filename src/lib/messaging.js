@@ -49,10 +49,13 @@ async function unsubscribe({ tenantId, personId, channel }) {
 }
 
 // ---------------------------------------------------------------- who gets a campaign
+// The answer that counts is the latest one for the address itself: on any customer record at the mountain with that email
+// or phone (a family shares a phone; "stop texting me" said on the parent's record covers the child's record too).
 const AGREED = {
-  email: "p.email IS NOT NULL AND p.email <> '' AND (SELECT c.status FROM consent_events c WHERE c.tenant_id = p.tenant_id AND c.person_id = p.id AND c.channel = 'email' ORDER BY c.id DESC LIMIT 1) = 'opted_in' AND NOT EXISTS (SELECT 1 FROM email_suppressions s WHERE s.tenant_id = p.tenant_id AND s.email = LOWER(p.email))",
-  sms: "p.phone_key IS NOT NULL AND CHAR_LENGTH(p.phone_key) = 10 AND (SELECT c.status FROM consent_events c WHERE c.tenant_id = p.tenant_id AND c.person_id = p.id AND c.channel = 'sms' ORDER BY c.id DESC LIMIT 1) = 'opted_in'",
+  email: "p.email IS NOT NULL AND p.email <> '' AND (SELECT c.status FROM consent_events c JOIN people q ON q.tenant_id = c.tenant_id AND q.id = c.person_id WHERE c.tenant_id = p.tenant_id AND q.email = p.email AND c.channel = 'email' ORDER BY c.id DESC LIMIT 1) = 'opted_in' AND NOT EXISTS (SELECT 1 FROM email_suppressions s WHERE s.tenant_id = p.tenant_id AND s.email = LOWER(p.email))",
+  sms: "p.phone_key IS NOT NULL AND CHAR_LENGTH(p.phone_key) = 10 AND (SELECT c.status FROM consent_events c JOIN people q ON q.tenant_id = c.tenant_id AND q.id = c.person_id WHERE c.tenant_id = p.tenant_id AND q.phone_key = p.phone_key AND c.channel = 'sms' ORDER BY c.id DESC LIMIT 1) = 'opted_in'",
 };
+const QUIET = { from: '8 AM', until: '9 PM' };
 const PASS = "t.status = 'active' AND pr.kind = 'season_pass'";
 const SEGMENT = {
   all: () => '1 = 1',
@@ -108,16 +111,17 @@ async function deliver({ tenant, campaign, person, kind, refId, channel, build, 
   else if (channel === 'email') {
     const m = build();
     r = await mailer.send({ tenantId: tenant.id, stream: kind === 'campaign' ? 'broadcast' : undefined, to: person.addr, fromName: tenant.name, replyTo: tenant.reply_to || undefined, subject: m.subject, text: m.text, html: m.html, tag: `msg-${kind}`,
-      headers: m.unsubscribe ? [{ Name: 'List-Unsubscribe', Value: `<${m.unsubscribe}>` }] : undefined });
-  } else r = await sms.send({ tenantId: tenant.id, to: person.addr, body: build() });
-  await pool.query('UPDATE message_log SET status = ?, error = ? WHERE tenant_id = ? AND id = ?', [r.ok ? 'sent' : 'failed', r.ok ? null : r.error, tenant.id, claim.insertId]);
-  return r.ok ? 'sent' : 'failed';
+      headers: m.unsubscribe ? [{ Name: 'List-Unsubscribe', Value: `<${m.unsubscribe}>` }] : undefined, personId: person.id, base });
+  } else r = await sms.send({ tenantId: tenant.id, to: person.addr, body: build(), promotional: kind === 'campaign', tag: `msg-${kind}`, logId: claim.insertId });
+  // A campaign text between 9 PM and 8 AM waits for 8 AM at the mountain (lib/sms.js sends it and updates this row).
+  await pool.query('UPDATE message_log SET status = ?, error = ? WHERE tenant_id = ? AND id = ?', [r.held ? 'held' : r.ok ? 'sent' : 'failed', r.held ? `Held until 8 AM (${r.send_after} UTC)` : r.ok ? null : r.error, tenant.id, claim.insertId]);
+  return r.held ? 'held' : r.ok ? 'sent' : 'failed';
 }
 
 /** Sends a campaign to its audience. Returns { total, sent, failed }. */
 async function sendCampaign(tenant, campaign, base) {
   const people = (await audienceOf(tenant, campaign.channel, campaign.audience)).slice(0, MAX_RECIPIENTS);
-  let sent = 0; let failed = 0;
+  let sent = 0; let failed = 0; let held = 0;
   const queue = [...people];
   const worker = async () => {
     for (let p = queue.shift(); p; p = queue.shift()) {
@@ -126,11 +130,11 @@ async function sendCampaign(tenant, campaign, base) {
         tenant, campaign, person: p, kind: 'campaign', refId: campaign.id, channel: campaign.channel, base,
         build: campaign.channel === 'email' ? () => ({ ...renderEmail(tenant, campaign, p, base, url), unsubscribe: url }) : () => renderSms(tenant, campaign, p),
       });
-      if (result === 'sent') sent += 1; else if (result === 'failed') failed += 1;
+      if (result === 'sent') sent += 1; else if (result === 'held') held += 1; else if (result === 'failed') failed += 1;
     }
   };
   await Promise.all(Array.from({ length: 6 }, worker));
-  return { total: people.length, sent, failed };
+  return { total: people.length, sent, failed, held };
 }
 
 // ---------------------------------------------------------------- automatic reminders (run by the daily job)
@@ -172,4 +176,4 @@ async function runAll(base) {
   return eachTenant('messages_reminders', (t) => runReminders(t, base));
 }
 
-module.exports = { AUDIENCES, MAX_RECIPIENTS, audienceOf, sendCampaign, renderEmail, renderSms, unsubToken, readUnsub, unsubscribe, unsubUrl, deliver, runReminders, runAll, fill };
+module.exports = { QUIET, AUDIENCES, MAX_RECIPIENTS, audienceOf, sendCampaign, renderEmail, renderSms, unsubToken, readUnsub, unsubscribe, unsubUrl, deliver, runReminders, runAll, fill };
