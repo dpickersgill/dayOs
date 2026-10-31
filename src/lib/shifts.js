@@ -16,6 +16,8 @@ const plusMinutes = (dt, m) => new Date(Date.parse(`${dt.replace(' ', 'T')}Z`) +
 
 /** Monday of the week a date falls in. */
 function weekOf(date) {
+  // A date that is not one (a missing or mistyped ?start=) is the request's mistake: 400, never a 500 (2026.11.11).
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date)) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) throw require('./errors').bad('Give a date as YYYY-MM-DD');
   const wd = new Date(`${date}T00:00:00Z`).getUTCDay();
   return addDays(date, -((wd + 6) % 7));
 }

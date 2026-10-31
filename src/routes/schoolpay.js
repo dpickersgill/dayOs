@@ -28,6 +28,8 @@ const familynotify = require('../lib/familynotify');
 const { isSandbox } = require('../lib/sandbox');
 const { policyText, policyTiers } = require('../lib/onlinesale');
 
+// Downloads that carry names (guests, staff health, pay) need the second check, like patient and customer lists (2026.11.11).
+const { stepUp } = require('../lib/stepup');
 const router = express.Router();
 const publicRouter = express.Router();
 const SA = require('../lib/schoolaccess'); // 2026.11.9: the school director and supervisor
@@ -535,7 +537,7 @@ router.get('/pay/payroll/runs', manager, async (req, res) => {
       (SELECT COALESCE(SUM(IF(kind = 'tip', 0, cents)), 0) FROM payroll_items i WHERE i.tenant_id = r.tenant_id AND i.run_id = r.id) AS pay_cents
     FROM payroll_runs r WHERE r.tenant_id = ? AND r.exported_at IS NOT NULL ORDER BY r.period_from DESC LIMIT 50`, [req.auth.tenantId]) });
 });
-router.get('/pay/payroll/runs/:id/:kind.csv', manager, async (req, res) => {
+router.get('/pay/payroll/runs/:id/:kind.csv', manager, stepUp('download payroll'), async (req, res) => {
   const t = req.auth.tenantId; const id = paramId(req);
   const run = await one(pool, 'SELECT * FROM payroll_runs WHERE tenant_id = ? AND id = ?', [t, id]);
   if (!run) throw notFound('Pay period');

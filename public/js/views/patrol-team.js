@@ -104,7 +104,7 @@ function memberDialog(m, again) {
     toast('Saved');
     await again();
   });
-  d.body.append(button('Remove from roster', () => confirmDialog('Remove from roster?', `${m.first_name} ${m.last_name} comes off the patrol shifts still ahead (left open for someone else). Their cases and training stay on record.`, 'Remove', async () => { await del(`/patrol/team/${m.staff_id}`); d.close(); toast('Removed from roster'); await again(); }, { danger: true }), { small: true }));
+  d.body.append(button('Remove from roster', () => confirmDialog('Remove from roster?', `${m.first_name} ${m.last_name} comes off the patrol shifts still ahead (left open for someone else). Their cases and training stay on record. Their login stops opening Patrol and patient records at once. To switch the login off altogether, a manager uses Team and logins.`, 'Remove', async () => { await del(`/patrol/team/${m.staff_id}`); d.close(); toast('Removed from roster'); await again(); }, { danger: true }), { small: true }));
 }
 
 /**

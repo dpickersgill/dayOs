@@ -12,6 +12,8 @@ const { audit } = require('../lib/audit');
 const { toCsv } = require('../lib/csv');
 const IR = require('../lib/injuryregister');
 
+// Downloads that carry names (guests, staff health, pay) need the second check, like patient and customer lists (2026.11.11).
+const { stepUp } = require('../lib/stepup');
 const router = express.Router();
 router.use(authenticate);
 const me = (req) => ({ id: req.auth.userId, role: req.auth.role });
@@ -49,7 +51,7 @@ router.get('/summary', async (req, res) => {
 });
 
 /** The year's log as a spreadsheet, in the Form 300 columns. A privacy case shows "Privacy case" instead of the name. */
-router.get('/log.csv', async (req, res) => {
+router.get('/log.csv', stepUp('download the staff injury log'), async (req, res) => {
   const t = req.auth.tenantId;
   const year = Number(req.query.year) || new Date().getUTCFullYear();
   const list = (await rows(pool, `${SELECT} WHERE si.tenant_id = ? AND si.year = ? AND si.outcome IN (?) ORDER BY si.seq`, [t, year, IR.RECORDABLE])).map(shape);

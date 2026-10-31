@@ -27,6 +27,8 @@ const { money } = require('../lib/format');
 const mailer = require('../lib/mailer');
 const P = require('../lib/partnerpasses');
 
+// Downloads that carry names (guests, staff health, pay) need the second check, like patient and customer lists (2026.11.11).
+const { stepUp } = require('../lib/stepup');
 const router = express.Router();
 const publicRouter = express.Router();
 const desk = requireRole('counter', 'manager');
@@ -189,7 +191,7 @@ router.get('/:id/redemptions', desk, async (req, res) => {
   });
 });
 
-router.get('/:id/redemptions.csv', desk, async (req, res) => {
+router.get('/:id/redemptions.csv', desk, stepUp('download pass holders\' names'), async (req, res) => {
   const { tenantId } = req.auth;
   const p = await one(pool, 'SELECT * FROM partner_programs WHERE tenant_id = ? AND id = ?', [tenantId, paramId(req)]);
   if (!p) throw notFound('Partner pass');

@@ -35,6 +35,10 @@ const router = express.Router();
 const publicRouter = express.Router();
 const sellers = ['counter', 'manager'];
 const front = ['counter', 'manager', 'staff', 'instructor'];
+// A customer's whole record (the family, ages, live ticket and pass codes, children's next lessons) is for the desk: the
+// same roles that may open the customer record at /people/:id. Lift staff (staff) see what a scan shows them, not this
+// (2026.11.11: before, a lift login could walk every customer id and collect ticket barcodes and children's ages).
+const desk = ['counter', 'manager', 'instructor'];
 const isMgr = (req) => ['owner', 'manager'].includes(req.auth.role);
 const d10 = (d) => (d instanceof Date ? d.toISOString() : String(d || '')).slice(0, 10);
 const WEEKDAY = (d) => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long' }).format(new Date(`${d}T12:00:00Z`));
@@ -153,7 +157,7 @@ async function welcome(db, tenantId, personId, day) {
   };
 }
 
-router.get('/people/:id/welcome', requireRole(...front), async (req, res) => {
+router.get('/people/:id/welcome', requireRole(...desk), async (req, res) => {
   const { tenantId } = req.auth;
   const day = req.query.day ? String(req.query.day) : todayIn(await tzOf(pool, tenantId));
   if (!dateStr.safeParse(day).success) throw bad('day must be YYYY-MM-DD');
@@ -163,7 +167,7 @@ router.get('/people/:id/welcome', requireRole(...front), async (req, res) => {
 });
 
 // ---------------------------------------------------------------- the customer record: the whole family's history
-router.get('/people/:id/history', requireRole(...front), async (req, res) => {
+router.get('/people/:id/history', requireRole(...desk), async (req, res) => {
   const { tenantId } = req.auth;
   const id = paramId(req);
   const tz = await tzOf(pool, tenantId);
