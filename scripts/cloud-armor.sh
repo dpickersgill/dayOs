@@ -66,6 +66,12 @@ if [ "$MODE" = build ]; then
   gcloud compute security-policies rules create 100 --security-policy "$P-armor" --src-ip-ranges='*' \
     --action=throttle --rate-limit-threshold-count=600 --rate-limit-threshold-interval-sec=60 \
     --conform-action=allow --exceed-action=deny-429 --enforce-on-key=IP --description "Per-address rate limit"
+  # Rule 90: sign-in and account recovery get a tighter limit of their own, 60 a minute per address (2026.11.11).
+  gcloud compute security-policies rules delete 90 --security-policy "$P-armor" --quiet >/dev/null 2>&1 || true
+  gcloud compute security-policies rules create 90 --security-policy "$P-armor" \
+    --expression "request.path.startsWith('/api/v1/auth/') || request.path.startsWith('/api/v1/platform/login')" \
+    --action=throttle --rate-limit-threshold-count=60 --rate-limit-threshold-interval-sec=60 \
+    --conform-action=allow --exceed-action=deny-429 --enforce-on-key=IP --description "Sign-in rate limit"
   # Rules 1000+: the standard attack signatures (SQL injection, scripting, file access, scanners), logged only for now.
   n=1000
   for r in "${WAF_RULES[@]}"; do
@@ -87,10 +93,13 @@ if [ "$MODE" = build ]; then
   CERT="$P-cert-$(printf '%s' "${DOMAINS[*]}" | md5sum | cut -c1-8)"
   gcloud compute ssl-certificates describe "$CERT" --global >/dev/null 2>&1 || \
     gcloud compute ssl-certificates create "$CERT" --global --domains "$(IFS=,; echo "${DOMAINS[*]}")"
+  # TLS 1.2 or newer with modern ciphers only (2026.11.11): the default policy still allows TLS 1.0.
+  gcloud compute ssl-policies describe "$P-tls" --global >/dev/null 2>&1 || \
+    gcloud compute ssl-policies create "$P-tls" --profile MODERN --min-tls-version 1.2 --global
   if gcloud compute target-https-proxies describe "$P-https" >/dev/null 2>&1; then
-    gcloud compute target-https-proxies update "$P-https" --ssl-certificates "$CERT" --global-ssl-certificates
+    gcloud compute target-https-proxies update "$P-https" --ssl-certificates "$CERT" --global-ssl-certificates --ssl-policy "$P-tls" --global-ssl-policy
   else
-    gcloud compute target-https-proxies create "$P-https" --url-map "$P-lb" --ssl-certificates "$CERT"
+    gcloud compute target-https-proxies create "$P-https" --url-map "$P-lb" --ssl-certificates "$CERT" --ssl-policy "$P-tls"
   fi
   gcloud compute addresses describe "$P-ip" --global >/dev/null 2>&1 || gcloud compute addresses create "$P-ip" --global --ip-version IPV4
   IP="$(gcloud compute addresses describe "$P-ip" --global --format='value(address)')"

@@ -10,6 +10,9 @@ PROJECT=summitops-510715
 RUN_SA="summitops-run@${PROJECT}.iam.gserviceaccount.com"
 # Staging runs as its own account, which may read the summitops-staging-* secrets and no live one (staging-setup.sh).
 STAGING_SA="summitops-staging@${PROJECT}.iam.gserviceaccount.com"
+# Builds (deploy.sh, staging-setup.sh: gcloud run deploy --source) run as their own account (2026.11.11), never as the
+# default compute account, which has Editor on a new project and could read the weekly database copies.
+BUILD_SA="summitops-build@${PROJECT}.iam.gserviceaccount.com"
 
 # The weekly database copy (scripts/backups-setup.sh). BACKUP_PROJECT can be a separate project, so the app's project
 # (and anything that can build or deploy in it) cannot read or delete the copies.
@@ -127,4 +130,54 @@ sql_user_set() {
   local rc=$?; rm -f "$hdr"; [ $rc -eq 0 ] || return $rc
   for _ in $(seq 1 30); do gcloud sql users list --instance="$inst" --format='value(name)' | grep -qx "$user" && return 0; sleep 2; done
   echo "sql_user_set: $user did not appear on $inst."; return 1
+}
+
+# The build account: push the built image to Artifact Registry, write build logs, read the uploaded source. Nothing else:
+# no secrets, no database, no other bucket. Safe to run again; it prints only what it changes.
+ensure_build_sa() {
+  if ! gcloud iam service-accounts describe "$BUILD_SA" >/dev/null 2>&1; then
+    gcloud iam service-accounts create summitops-build --display-name "Verdynt/OS builds (Cloud Build)" --quiet >/dev/null
+    echo "  Made $BUILD_SA for builds."
+    sleep 5
+  fi
+  local role policy
+  policy="$(gcloud projects get-iam-policy "$PROJECT" --format=json)"
+  for role in roles/artifactregistry.writer roles/logging.logWriter; do
+    if ! echo "$policy" | jq -e --arg r "$role" --arg m "serviceAccount:$BUILD_SA" '[.bindings[]? | select(.role == $r and .condition == null) | .members[]?] | any(. == $m)' >/dev/null; then
+      gcloud projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$BUILD_SA" --role "$role" --condition=None --quiet >/dev/null
+      echo "  $BUILD_SA now has $role"
+    fi
+  done
+  # The source upload buckets only (not the project's other buckets, and never the backup bucket).
+  local b
+  for b in "gs://run-sources-${PROJECT}-${REGION}" "gs://${PROJECT}_cloudbuild"; do
+    gcloud storage buckets describe "$b" >/dev/null 2>&1 || continue
+    gcloud storage buckets add-iam-policy-binding "$b" --member "serviceAccount:$BUILD_SA" --role roles/storage.objectViewer --quiet >/dev/null
+  done
+}
+BUILD_FLAG=(--build-service-account "projects/${PROJECT}/serviceAccounts/${BUILD_SA}")
+
+# Scheduled jobs sign in with a Google ID token for this account (2026.11.11, scripts/jobs-oidc.sh), so no key sits in
+# Cloud Scheduler. The account has no roles: it exists only to be named in the token, which the app checks
+# (src/lib/jobauth.js). Needs the live service loaded (load_service). Sets JOB_AUTH for gcloud scheduler jobs.
+JOBS_SA="summitops-jobs@${PROJECT}.iam.gserviceaccount.com"
+ensure_jobs_oidc() {
+  # Only a live site on 2026.11.11 or later checks these tokens; an older one would turn every job away.
+  local live; live="$(curl -s --max-time 15 "$(check_url)/version" | jq -r '.version // empty' 2>/dev/null || true)"
+  if ! node -e "const p=(v)=>String(v).split('.').map(Number);const [a,b]=[p(process.argv[1]),[2026,11,11]];process.exit(a[0]*1e6+a[1]*1e3+a[2]>=b[0]*1e6+b[1]*1e3+b[2]?0:1)" "${live:-0.0.0}"; then
+    echo "The live site runs ${live:-an unknown version}. Signed job calls need 2026.11.11 or later: run bash promote.sh first."; exit 1
+  fi
+  if ! gcloud iam service-accounts describe "$JOBS_SA" >/dev/null 2>&1; then
+    gcloud iam service-accounts create summitops-jobs --display-name "Verdynt/OS scheduled jobs (signs the job calls)" --quiet >/dev/null
+    echo "  Made $JOBS_SA for the scheduled jobs."
+    sleep 5
+  fi
+  local aud="$SVC_URL"
+  [ -n "$(envval PUBLIC_URL)" ] && aud="$aud,$(envval PUBLIC_URL)"
+  if [ "$(envval JOBS_OIDC_EMAIL)" != "$JOBS_SA" ] || [ "$(envval JOBS_OIDC_AUDIENCES)" != "$aud" ]; then
+    gcloud run services update "$SERVICE" --region "$REGION" --quiet --update-env-vars "^|^JOBS_OIDC_EMAIL=$JOBS_SA|JOBS_OIDC_AUDIENCES=$aud" >/dev/null
+    echo "  $SERVICE now accepts job calls signed for $JOBS_SA ($aud)."
+    load_service
+  fi
+  JOB_AUTH=(--oidc-service-account-email "$JOBS_SA" --oidc-token-audience "$SVC_URL")
 }

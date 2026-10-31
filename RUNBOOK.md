@@ -227,23 +227,26 @@ Limits to know: all money goes to the one Stripe account whose key you set (seve
 One-time setup, in Cloud Shell:
 
 1. **Postmark.** In Postmark, create or pick a server, verify the sender address you will send from, and copy the Server API token.
-2. **Secrets.** Store the token and a job key (never paste these into chat):
+2. **Secrets.** Store the token (never paste it into chat, or on a command line, where the shell history keeps it).
+   `read -s` asks for it without showing it or saving it:
    ```
-   printf '%s' 'PASTE_POSTMARK_TOKEN' | gcloud secrets create postmark-server-token --data-file=-
-   openssl rand -hex 32 | tr -d '\n' | gcloud secrets create jobs-key --data-file=-
+   read -r -s -p "Postmark server token: " T; printf '%s' "$T" | gcloud secrets create postmark-server-token --data-file=-; unset T
    ```
-   Cloud Run's service account needs read access to both, as it has for the Stripe secrets.
-3. **Connect them to the service.**
+   Cloud Run's service account needs read access to it, as it has for the Stripe secrets.
+3. **Connect it to the service.**
    ```
    gcloud run services update summitops-api --region us-east1 \
-     --update-secrets=POSTMARK_SERVER_TOKEN=postmark-server-token:latest,JOBS_KEY=jobs-key:latest \
+     --update-secrets=POSTMARK_SERVER_TOKEN=postmark-server-token:latest \
      --update-env-vars=MAIL_FROM=patrol@yourdomain.org,PUBLIC_URL=https://summitops-api-33271059248.us-east1.run.app
    ```
-4. **Daily schedule** (7:30 am Eastern):
+4. **Daily schedule** (7:30 am Eastern). The job signs its call with a Google ID token for the summitops-jobs account
+   (2026.11.11): no key is stored in Cloud Scheduler. Run `bash scripts/jobs-oidc.sh` once first (it makes the account
+   and tells the app to accept it), then:
    ```
    gcloud scheduler jobs create http summitops-daily --location us-east1 --schedule "30 7 * * *" --time-zone "America/New_York" \
      --uri "https://summitops-api-33271059248.us-east1.run.app/api/v1/internal/jobs/daily" --http-method POST \
-     --headers "x-jobs-key=$(gcloud secrets versions access latest --secret=jobs-key)"
+     --oidc-service-account-email summitops-jobs@summitops-510715.iam.gserviceaccount.com \
+     --oidc-token-audience "https://summitops-api-33271059248.us-east1.run.app" --attempt-deadline=900s
    ```
    Check it with `gcloud scheduler jobs run summitops-daily --location us-east1`, then look at Patrol, Follow-up.
 5. **In the app**: Patrol, Follow-up, Settings. Switch follow-up on, set the name shown on the email, a mailing address, who replies go to, and the gift amounts. Leave the tax note blank until your board or accountant gives you the wording.

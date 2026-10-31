@@ -44,10 +44,10 @@ load_service
 
 step "Every 30 minutes on weekdays (Cloud Scheduler)"
 BASE="$(check_url)"
-JOBS="$(secretof JOBS_KEY)"
-if [ -z "$JOBS" ]; then echo "The service has no JOBS_KEY yet (see RUNBOOK.md, Patrol follow-up emails). Add it, then run this again."; exit 1; fi
-ARGS=(--location "$REGION" --schedule "*/30 8-17 * * 1-5" --time-zone "America/New_York" --uri "$BASE/api/v1/internal/jobs/outreach" --http-method POST --headers "x-jobs-key=$(secret_read "$JOBS")" --attempt-deadline=300s --quiet)
-if gcloud scheduler jobs describe summitops-outreach --location "$REGION" >/dev/null 2>&1; then gcloud scheduler jobs update http summitops-outreach "${ARGS[@]}"
+# Signed with a Google ID token for summitops-jobs, checked by the app (2026.11.11): no key is stored in the job.
+ensure_jobs_oidc
+ARGS=(--location "$REGION" --schedule "*/30 8-17 * * 1-5" --time-zone "America/New_York" --uri "$BASE/api/v1/internal/jobs/outreach" --http-method POST "${JOB_AUTH[@]}" --attempt-deadline=300s --quiet)
+if gcloud scheduler jobs describe summitops-outreach --location "$REGION" >/dev/null 2>&1; then gcloud scheduler jobs update http summitops-outreach "${ARGS[@]}" --remove-headers x-jobs-key
 else gcloud scheduler jobs create http summitops-outreach "${ARGS[@]}"; fi
 
 CLIENT_ID="$(gcloud iam service-accounts describe "$OSA" --format='value(oauth2ClientId)')"

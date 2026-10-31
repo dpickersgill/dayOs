@@ -37,6 +37,13 @@ for a in "$@"; do case "$a" in --yes) YES=1 ;; *) PASS+=("$a") ;; esac; done
 step "Checking you are signed in to Google Cloud"
 signed_in
 
+# Before anything changes: the live app runs as summitops-run (harden.sh), never as the default compute account (Editor on a new project).
+if ! gcloud iam service-accounts describe "$RUN_SA" >/dev/null 2>&1; then
+  echo "The live app needs its own service account ($RUN_SA) and will not be deployed as the default compute account."
+  echo "Run this once, then promote again:   bash scripts/harden.sh"
+  exit 1
+fi
+
 step "Checking staging is running this release"
 NEW_VERSION="$(node -p "require('./package.json').version")"
 NEW_BUILD="$(node -p "(()=>{try{return require('./src/release/build.json').build||'dev'}catch(_){return 'dev'}})()")"
@@ -76,7 +83,8 @@ if [ -z "$YES" ]; then
 fi
 
 step "Installing"
-npm install --omit=dev --no-audit --no-fund
+# Exactly the locked versions (npm ci), and no package's install scripts: they would run here with your Google sign-in.
+npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
 step "Migrating the live database"
 AS=migrator open_db
@@ -86,14 +94,17 @@ if secret_exists summitops-db-migrator && [ "$(envval DB_USER)" = summitops_app 
 fi
 
 step "Putting it live (this takes a minute or two)"
+# A new server takes traffic only once /readyz answers (the startup probe: database reachable and migrated for this
+# version); one that never does is not used, and the version before keeps serving. The 900-second timeout is for the
+# daily job; every other request is limited to 5 minutes inside the app (REQUEST_TIMEOUT_MS, src/app.js).
 # The same image staging ran. One server always warm (LIVE_MIN_SERVERS), up to LIVE_MAX_SERVERS at peak, LIVE_DB_POOL
 # database connections each, 1 GiB each, 15-minute requests for the daily job, and a faster start. Rate limits are
 # counted in the database (rate_limits, migrated above), so they hold across every server.
-SA_FLAG=()
-if gcloud iam service-accounts describe "$RUN_SA" >/dev/null 2>&1; then SA_FLAG=(--service-account "$RUN_SA"); fi
+SA_FLAG=(--service-account "$RUN_SA")
 echo "Servers: $LIVE_MIN_SERVERS always running, at most $LIVE_MAX_SERVERS, $LIVE_DB_POOL database connections each ($NEEDED at most, with staging and tools)."
 gcloud run deploy "$SERVICE" --image "$IMAGE" --region "$REGION" --quiet "${SA_FLAG[@]}" \
   --min-instances="$LIVE_MIN_SERVERS" --max-instances="$LIVE_MAX_SERVERS" --concurrency=40 --memory=1Gi --cpu-boost --timeout=900 \
+  --startup-probe=httpGet.path=/readyz,initialDelaySeconds=0,periodSeconds=5,timeoutSeconds=4,failureThreshold=24 \
   --update-env-vars "DB_POOL=$LIVE_DB_POOL,RATE_STORE=mysql,DEPLOYED_BY=$(gcloud config get-value account 2>/dev/null || echo unknown)"
 
 # A rollback (update-traffic --to-revisions=...=100) pins traffic, and Cloud Run then keeps every later deploy at 0%.

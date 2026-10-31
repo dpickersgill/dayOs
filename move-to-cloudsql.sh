@@ -86,7 +86,7 @@ export DB_HOST=127.0.0.1 DB_PORT=3307 DB_USER="$DBUSER" DB_PASSWORD="$PW" DB_NAM
 export JWT_SECRET="$(gcloud secrets versions access latest --secret="$(secretof JWT_SECRET)")"
 
 step "Installing"
-npm install --omit=dev --no-audit --no-fund >/dev/null
+npm ci --omit=dev --ignore-scripts --no-audit --no-fund >/dev/null # locked versions, no install scripts
 
 step "Setting up the tables"
 npm run migrate

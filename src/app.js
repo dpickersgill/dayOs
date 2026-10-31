@@ -63,6 +63,18 @@ function createApp() {
   // cloud-armor.sh sets TRUST_PROXY_HOPS=2; otherwise every visitor would share the load balancer's address for rate limits.
   app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS || 1));
   app.disable('x-powered-by');
+  // An answer that has not started after REQUEST_TIMEOUT_MS (default 5 minutes) gets "took too long", so a stuck request
+  // cannot hold one of the server's places for Cloud Run's 15 minutes. The scheduled jobs are exempt (the daily job may
+  // take up to 15 minutes), and so is anything already answering (event streams send their headers at once).
+  const answerLimit = Number(process.env.REQUEST_TIMEOUT_MS) || 300_000;
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api/v1/internal/jobs/')) return next();
+    const t = setTimeout(() => { if (!res.headersSent) res.status(503).json({ error: 'That took too long. Please try again.' }); }, answerLimit);
+    t.unref();
+    const done = () => clearTimeout(t);
+    res.on('finish', done); res.on('close', done);
+    return next();
+  });
   // The patrol map loads tile images from the configured tile servers, so only those hosts are added to img-src.
   const tileHosts = [...new Set(config.map.layers.map((l) => (l.url.match(/^https:\/\/[^/]+/) || [''])[0].replace('{s}', '*')).filter(Boolean))];
   // On the product website's own addresses only, Cloudflare Web Analytics may load its beacon and report visits (no

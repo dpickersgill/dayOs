@@ -1,3 +1,4 @@
+# Pin to a digest with scripts/pin-base-image.sh (a tag moves; a digest never does). deploy.sh warns while unpinned.
 FROM node:22-slim
 ENV NODE_ENV=production
 WORKDIR /app
@@ -8,7 +9,8 @@ COPY package.json package-lock.json ./
 #   - the drawing library built for Alpine Linux (musl); this image is Debian, so only the glibc build is loaded
 #   - the larger English language data (src/lib/doctext.js loads 4.0.0_best_int only)
 #   - the OCR engine builds for web browsers (*.wasm.js) and the older non-LSTM engine (doctext.js asks for LSTM)
-RUN npm ci --omit=dev && npm cache clean --force \
+# --ignore-scripts: no package's install script runs in the build (the only one, tesseract.js's, prints a donation note).
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force \
  && rm -rf node_modules/@napi-rs/canvas-linux-x64-musl \
            node_modules/@tesseract.js-data/eng/4.0.0 \
            node_modules/tesseract.js-core/*.wasm.js \

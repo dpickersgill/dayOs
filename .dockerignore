@@ -8,3 +8,6 @@ test
 *.zip
 *.tar.gz
 *.tgz
+# Tools run from Cloud Shell, never inside the server (2026.11.11): they can empty or overwrite a database.
+db/reset.js
+db/copy-db.js
