@@ -6,7 +6,8 @@ const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
 const { z, dateStr, validate, paramId, todayIn, addDays, dayRange, localDay, localTime } = require('../lib/util');
-const { notFound, conflict, bad } = require('../lib/errors');
+const { notFound, conflict, bad, forbidden } = require('../lib/errors');
+const { money } = require('../lib/format');
 const { audit } = require('../lib/audit');
 const { toCsv, dollars } = require('../lib/csv');
 
@@ -163,6 +164,13 @@ router.post('/till/moves', sellers, validate(z.object({ kind: z.enum(['paid_in',
   const till = await tx(async (conn) => {
     const t = await one(conn, "SELECT * FROM till_sessions WHERE tenant_id = ? AND opened_by = ? AND status = 'open' ORDER BY id DESC LIMIT 1 FOR UPDATE", [req.auth.tenantId, req.auth.userId]);
     if (!t) throw conflict('Open your drawer first');
+    // A payout is cash leaving the drawer for something bought (2026.11.11): counter staff can pay out up to
+    // TILL_PAYOUT_LIMIT_CENTS a drawer ($50 by default); above that, a manager.
+    if (req.body.kind === 'payout' && !['owner', 'manager'].includes(req.auth.role)) {
+      const lim = Number(process.env.TILL_PAYOUT_LIMIT_CENTS ?? 5000);
+      const { c } = await one(conn, "SELECT COALESCE(SUM(amount_cents), 0) AS c FROM till_moves WHERE tenant_id = ? AND till_id = ? AND kind = 'payout'", [req.auth.tenantId, t.id]);
+      if (Number(c) + req.body.amount_cents > lim) throw forbidden(`Counter staff can pay out up to ${money(lim)} from a drawer. Ask a manager.`);
+    }
     await conn.query('INSERT INTO till_moves (tenant_id, till_id, kind, amount_cents, reason) VALUES (?, ?, ?, ?, ?)', [req.auth.tenantId, t.id, req.body.kind, req.body.amount_cents, req.body.reason ?? null]);
     await audit(conn, req, req.body.kind, 'till_sessions', t.id, { amount_cents: req.body.amount_cents });
     return t;

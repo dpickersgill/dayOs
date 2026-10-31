@@ -405,6 +405,9 @@ async function recordDonation(event, obj) {
 }
 
 async function handleWebhook(event, base) {
+  // A refund given in the Stripe dashboard, or a dispute (lib/stripeevents.js, 2026.11.11).
+  const outside = await require('../lib/stripeevents').handle(event);
+  if (outside) return outside;
   const obj = event && event.data && event.data.object;
   // A card reader payment at the counter (routes/terminal.js).
   if (obj && obj.metadata && obj.metadata.kind === 'counter' && String(event.type || '').startsWith('payment_intent.')) return require('./terminal').handleWebhook(event, obj);

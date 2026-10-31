@@ -171,7 +171,8 @@ router.get('/orders/:id', lessonOrder, async (req, res) => {
   const giftCards = await rows(pool, 'SELECT code, initial_cents, recipient_name, status FROM gift_cards WHERE tenant_id = ? AND order_id = ?', [req.auth.tenantId, order.id]);
   const refunds = await rows(pool, 'SELECT id, reason, note, amount_cents, tax_cents, method, created_at, card_status, card_error FROM order_refunds WHERE tenant_id = ? AND order_id = ? ORDER BY id', [req.auth.tenantId, order.id]);
   const taxes = await rows(pool, 'SELECT name, rate_bps, amount_cents FROM order_taxes WHERE tenant_id = ? AND order_id = ? ORDER BY id', [req.auth.tenantId, order.id]);
-  res.json({ ...order, items, lines, tickets, payments, taxes, refunds, gift_cards: giftCards });
+  const disputes = await rows(pool, 'SELECT dispute_id, amount_cents, reason, status, evidence_due_by, created_at FROM payment_disputes WHERE tenant_id = ? AND order_id = ? ORDER BY id', [req.auth.tenantId, order.id]);
+  res.json({ ...order, items, lines, tickets, payments, taxes, refunds, gift_cards: giftCards, disputes });
 });
 
 const REFUND_REASONS = ['customer_request', 'weather', 'injury', 'wrong_item', 'duplicate', 'staff_error', 'other'];
@@ -343,6 +344,13 @@ router.post('/orders/:id/refund', lessonOrder, validate(refundBody), async (req,
         : await one(conn, "SELECT id FROM till_sessions WHERE tenant_id = ? AND opened_by = ? AND status = 'open' ORDER BY id DESC LIMIT 1", [tenantId, req.auth.userId]);
       if (body.till_id && !till) throw bad('That cash drawer is not open');
       tillId = till ? till.id : null;
+      // Cash never leaves untracked while drawers are open (2026.11.11): pick the drawer it comes out of. With no drawer
+      // open anywhere (the office safe, after closing), it is allowed and written down for the manager.
+      if (!tillId) {
+        const anyOpen = await one(conn, "SELECT id FROM till_sessions WHERE tenant_id = ? AND status = 'open' LIMIT 1", [tenantId]);
+        if (anyOpen) throw conflict('Pick the cash drawer the money comes out of, or open your own drawer first');
+        await audit(conn, req, 'refund_cash_no_drawer', 'orders', orderId, { cents: plan.filter((x) => x.method === 'cash').reduce((n, x) => n + x.cents, 0) });
+      }
     }
     // Card money goes back to each card it came from (an order paid with two cards refunds to both), oldest first.
     const parts = [];
