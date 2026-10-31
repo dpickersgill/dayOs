@@ -288,3 +288,28 @@ test('DP-9: staff injury notices go only to owners and the people named for the 
     for (const g of box.got) assert.doesNotMatch(`${g.Subject} ${g.TextBody}`, /Pia|Privatedp9/);
   });
 });
+
+// ---------------------------------------------------------------- PATROL-6
+test('PATROL-6: a kit check sent late with an older time is kept but does not undo a newer use', async () => {
+  const m = await patrolMountain();
+  ok(await api('POST', '/patrol/kits/types/starter', { token: m.owner, body: { names: ['Trauma bag'] } }), 201);
+  let board = ok(await api('GET', '/patrol/kits', { token: m.owner }));
+  const type = board.types[0];
+  const kit = ok(await api('POST', '/patrol/kits', { token: m.owner, body: { type_id: type.id, count: 1, location: 'Summit shack' } }), 201).data[0];
+  const full = Object.fromEntries(type.contents.map((c) => [c.key, { qty: c.qty, expires_on: c.expires ? '2027-06-30' : null }]));
+  const c = await readyCase(m.pat);
+  ok(await api('POST', `/patrol/kits/${kit.id}/checks`, { token: m.owner, body: { kind: 'use', used: { tourniquet: 1 }, incident_id: c.id } }), 201);
+  const late = ok(await api('POST', `/patrol/kits/${kit.id}/checks`, { token: m.pat, body: { kind: 'full', items: full, at: `${tzNow(-90).replace('T', ' ')}:00`, client_ref: `offline${suffix}` } }), 201);
+  assert.equal(late.applied, false);
+  board = ok(await api('GET', '/patrol/kits', { token: m.owner }));
+  const end = board.kits.find((k) => k.id === kit.id);
+  const stock = typeof end.stock === 'string' ? JSON.parse(end.stock) : end.stock || {};
+  assert.notEqual(end.status, 'ready');
+  assert.equal(stock.tourniquet.qty, 0);
+  const one = ok(await api('GET', `/patrol/kits/${kit.id}`, { token: m.owner }));
+  assert.ok(one.checks.some((x) => x.kind === 'full' && Number(x.applied) === 0), 'the late check is on the record');
+  // A check made now does change it.
+  ok(await api('POST', `/patrol/kits/${kit.id}/checks`, { token: m.pat, body: { kind: 'full', items: full } }), 201);
+  board = ok(await api('GET', '/patrol/kits', { token: m.owner }));
+  assert.equal(board.kits.find((k) => k.id === kit.id).status, 'ready');
+});

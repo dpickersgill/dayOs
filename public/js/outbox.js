@@ -209,7 +209,9 @@ function settle(temp, out) {
     let path = x.path.startsWith(fromCase) ? `/patrol/incidents/${out.id}/${x.path.slice(fromCase.length)}` : x.path;
     if (fromPatient && (path.includes(`${fromPatient}/`) || path.endsWith(fromPatient))) path = path.replace(fromPatient, `/patients/${out.patient_id}`);
     // a signature, a skip or an N/A answer names its patient in the body too
-    const body = temp.patientId && out.patient_id && x.body && x.body.patient_id === temp.patientId ? { ...x.body, patient_id: out.patient_id } : x.body;
+    let body = temp.patientId && out.patient_id && x.body && x.body.patient_id === temp.patientId ? { ...x.body, patient_id: out.patient_id } : x.body;
+    // supplies used from a kit name the case in the body (2026.11.11: they were left with no case)
+    if (body && body.incident_id === temp.caseId) body = { ...body, incident_id: out.id };
     return { ...x, caseId: out.id, path, body };
   }));
   try { const m = JSON.parse(globalThis.sessionStorage.getItem(MAP_KEY) || '{}'); m[temp.caseId] = out.id; globalThis.sessionStorage.setItem(MAP_KEY, JSON.stringify(m)); } catch (_) { /* the page reloads the list instead */ }
