@@ -6,8 +6,8 @@
 #       Builds the load balancer with Cloud Armor and prints the address to point your domains at. Nothing changes for
 #       visitors until you change DNS. The attack rules start in preview (logged, not blocking) so you can check them.
 #   bash scripts/cloud-armor.sh --lock www.example.com app.example.com
-#       Once the certificate shows ACTIVE: only the load balancer can reach the app, the daily job is sent through it,
-#       and the attack rules start blocking. The run.app address stops answering.
+#       Once the certificate shows ACTIVE: only the load balancer can reach the app, every scheduled job that calls the
+#       app (daily, guests, lessons, outreach) is sent through it, and the attack rules start blocking. The run.app address stops answering.
 #   bash scripts/cloud-armor.sh --unlock
 #       Opens the run.app address again (if something goes wrong). The firewall stays in front of the domains.
 set -euo pipefail
@@ -27,9 +27,28 @@ load_service
 P=summitops
 WAF_RULES=(sqli-v33-stable xss-v33-stable lfi-v33-stable rfi-v33-stable rce-v33-stable scannerdetection-v33-stable protocolattack-v33-stable)
 
+# Every scheduled job that calls the app (summitops-daily, -guests, -lessons, -outreach and any added later) is moved
+# from one address to the other, keeping its path. A job left on the run.app address would stop silently after --lock.
+move_jobs() { # from to
+  local from="$1" to="$2" name uri job n=0
+  [ -n "$from" ] && [ -n "$to" ] && [ "$from" != "$to" ] || return 0
+  while read -r name uri; do
+    [ -n "$uri" ] || continue
+    case "$uri" in
+      "$from"/*)
+        job="${name##*/}"
+        gcloud scheduler jobs update http "$job" --location "$REGION" --uri "$to${uri#"$from"}" --quiet >/dev/null
+        echo "  $job now calls $to${uri#"$from"}"; n=$((n + 1)) ;;
+    esac
+  done < <(gcloud scheduler jobs list --location "$REGION" --format='value(name,httpTarget.uri)')
+  echo "  $n scheduled job(s) moved to $to."
+  local left; left="$(gcloud scheduler jobs list --location "$REGION" --format='value(name,httpTarget.uri)' | grep -F "$from/" || true)"
+  if [ -n "$left" ]; then echo "Warning: these jobs still call $from: $left"; fi
+}
+
 if [ "$MODE" = unlock ]; then
   gcloud run services update "$SERVICE" --region "$REGION" --ingress all --update-env-vars TRUST_PROXY_HOPS=1 --quiet
-  echo "The run.app address answers again."
+  echo "The run.app address answers again. Scheduled jobs keep going through $(envval PUBLIC_URL), which still works."
   exit 0
 fi
 [ ${#DOMAINS[@]} -gt 0 ] || { echo "Name the domains, for example: bash scripts/cloud-armor.sh www.example.com app.example.com"; exit 1; }
@@ -111,8 +130,5 @@ step "Only the load balancer reaches the app"
 PUBLIC="$(envval PUBLIC_URL)"; [ -n "$PUBLIC" ] || PUBLIC="https://$APP_DOMAIN"
 gcloud run services update "$SERVICE" --region "$REGION" --ingress internal-and-cloud-load-balancing \
   --update-env-vars "TRUST_PROXY_HOPS=2,PUBLIC_URL=$PUBLIC" --quiet
-if gcloud scheduler jobs describe summitops-daily --location "$REGION" >/dev/null 2>&1; then
-  gcloud scheduler jobs update http summitops-daily --location "$REGION" --uri "$PUBLIC/api/v1/internal/jobs/daily" --quiet
-  echo "The daily job now goes through $PUBLIC."
-fi
+move_jobs "$SVC_URL" "$PUBLIC"
 echo "Done. Visitors reach Verdynt/OS only through Cloud Armor at ${DOMAINS[*]}. If anything breaks: bash scripts/cloud-armor.sh --unlock"

@@ -68,7 +68,7 @@ echo "Copied in $(( (T1 - T0) / 60 )) minutes $(( (T1 - T0) % 60 )) seconds."
 step "2. Comparing the copy with the live database"
 SERVICE="$PROD_SERVICE"; load_service
 AS=migrator open_db # the live database through the proxy on port 3307
-PROXY="$HOME/cloud-sql-proxy"
+PROXY="$(proxy_path)"
 "$PROXY" --gcloud-auth --port 3308 "$DRILL_CONN" >/tmp/cloud-sql-proxy-drill.log 2>&1 &
 DRILL_PROXY=$!
 trap '[ -n "$PROXY_PID" ] && kill "$PROXY_PID" 2>/dev/null; kill "$DRILL_PROXY" 2>/dev/null || true' EXIT

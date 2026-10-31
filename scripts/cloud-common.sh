@@ -11,7 +11,32 @@ RUN_SA="summitops-run@${PROJECT}.iam.gserviceaccount.com"
 # Staging runs as its own account, which may read the summitops-staging-* secrets and no live one (staging-setup.sh).
 STAGING_SA="summitops-staging@${PROJECT}.iam.gserviceaccount.com"
 
+# The weekly database copy (scripts/backups-setup.sh). BACKUP_PROJECT can be a separate project, so the app's project
+# (and anything that can build or deploy in it) cannot read or delete the copies.
+BACKUP_PROJECT="${BACKUP_PROJECT:-$PROJECT}"
+BACKUP_BUCKET="${BACKUP_BUCKET:-gs://${BACKUP_PROJECT}-backups}"
+
 step() { printf '\n== %s\n' "$1"; }
+
+# The Cloud SQL Auth Proxy, downloaded once and checked against the checksum Google publishes for this version
+# (https://github.com/GoogleCloudPlatform/cloud-sql-proxy/releases/tag/v2.26.0). A download that does not match is
+# deleted and nothing runs. To move to a newer version, change both lines from that version's release page.
+PROXY_VERSION=v2.26.0
+PROXY_SHA256=a38fe97690a27490e60a7945a8a178186ff9464abb81fe2bc652a3f773443387
+proxy_path() {
+  local proxy="$HOME/cloud-sql-proxy-$PROXY_VERSION"
+  if [ ! -x "$proxy" ] || [ "$(sha256sum "$proxy" | cut -d' ' -f1)" != "$PROXY_SHA256" ]; then
+    rm -f "$proxy"
+    curl -sSfo "$proxy.download" "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/$PROXY_VERSION/cloud-sql-proxy.linux.amd64"
+    if [ "$(sha256sum "$proxy.download" | cut -d' ' -f1)" != "$PROXY_SHA256" ]; then
+      rm -f "$proxy.download"
+      echo "The Cloud SQL Auth Proxy download does not match its published checksum. Stopping." >&2
+      return 1
+    fi
+    mv "$proxy.download" "$proxy"; chmod +x "$proxy"
+  fi
+  echo "$proxy"
+}
 
 signed_in() {
   if ! gcloud auth print-access-token >/dev/null 2>&1; then
@@ -69,11 +94,7 @@ open_db() {
   if [ -n "$socket" ]; then
     # Cloud SQL: reach it from Cloud Shell through the Cloud SQL Auth Proxy, on a local port.
     SQL_CONN="${socket#/cloudsql/}"
-    local proxy="$HOME/cloud-sql-proxy"
-    if [ ! -x "$proxy" ]; then
-      curl -sSfo "$proxy" https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.26.0/cloud-sql-proxy.linux.amd64
-      chmod +x "$proxy"
-    fi
+    local proxy; proxy="$(proxy_path)" || exit 1
     if [ -z "$PROXY_PID" ]; then
       "$proxy" --gcloud-auth --port 3307 "$SQL_CONN" >/tmp/cloud-sql-proxy.log 2>&1 &
       PROXY_PID=$!
@@ -86,4 +107,24 @@ open_db() {
     export DB_HOST="$(envval DB_HOST)" DB_PORT="$(envval DB_PORT)" DB_SSL=true
     export DB_CA="$(secret_read "$(secretof DB_CA)")"
   fi
+}
+
+# Makes a Cloud SQL login, or sets its password, with the password read from stdin (2026.11.11). It goes to the Cloud SQL
+# Admin API in the request body, never on a command line, where other programs and the shell history could see it.
+#   printf %s "$PW" | sql_user_set <instance> <user>
+sql_user_set() {
+  local inst="$1" user="$2" pw hdr api
+  pw="$(cat)"
+  [ ${#pw} -ge 16 ] || { echo "sql_user_set: the password for $user is missing or too short."; return 1; }
+  api="https://sqladmin.googleapis.com/v1/projects/$PROJECT/instances/$inst/users"
+  hdr="$(mktemp)"; chmod 600 "$hdr"
+  printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$(gcloud auth print-access-token)" > "$hdr"
+  if gcloud sql users list --instance="$inst" --format='value(name)' | grep -qx "$user"; then
+    SQLPW="$pw" jq -n --arg n "$user" '{name:$n,host:"%",password:env.SQLPW}' | curl -sSf -X PUT -H @"$hdr" --data-binary @- "$api?name=$user&host=%25" >/dev/null
+  else
+    SQLPW="$pw" jq -n --arg n "$user" '{name:$n,host:"%",password:env.SQLPW}' | curl -sSf -X POST -H @"$hdr" --data-binary @- "$api" >/dev/null
+  fi
+  local rc=$?; rm -f "$hdr"; [ $rc -eq 0 ] || return $rc
+  for _ in $(seq 1 30); do gcloud sql users list --instance="$inst" --format='value(name)' | grep -qx "$user" && return 0; sleep 2; done
+  echo "sql_user_set: $user did not appear on $inst."; return 1
 }

@@ -87,6 +87,14 @@ Migrations only add tables and columns, so the previous revision keeps working a
 the exact command for the revision it replaced. RECOVERY.md has the whole recovery plan: targets, backups, restoring the
 database, who to tell, and the drill.
 
+This holds all traffic on that revision: Cloud Run then gives a later deploy no traffic until it is told to. `promote.sh`
+does that itself (since 2026.11.11), so the next release goes live as usual. To return to the newest revision by hand,
+once the problem is fixed:
+
+```bash
+gcloud run services update-traffic summitops-api --region us-east1 --to-latest
+```
+
 ## Ready for the busiest morning (2026.11.10): once, when this release goes live
 
 Run these from the unzipped 2026.11.10 folder in Cloud Shell, in this order. Each is safe to run again.

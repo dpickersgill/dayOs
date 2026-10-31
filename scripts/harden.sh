@@ -72,7 +72,7 @@ else
   else gcloud secrets create summitops-db-migrator --replication-policy=automatic --data-file=/tmp/migrator.json >/dev/null; fi
   rm -f /tmp/migrator.json
   APP_PW="$(openssl rand -base64 48 | tr -d '/+=\n' | cut -c1-40)"
-  node scripts/db-runtime-user.js summitops_app "$APP_PW"
+  printf %s "$APP_PW" | node scripts/db-runtime-user.js summitops_app -
   if secret_exists summitops-db-app-password; then printf '%s' "$APP_PW" | gcloud secrets versions add summitops-db-app-password --data-file=- >/dev/null
   else printf '%s' "$APP_PW" | gcloud secrets create summitops-db-app-password --replication-policy=automatic --data-file=- >/dev/null; fi
   APP_DB_SECRET="summitops-db-app-password"

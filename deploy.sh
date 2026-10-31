@@ -53,6 +53,9 @@ gcloud run deploy "$SERVICE" --source . --region "$REGION" --quiet --service-acc
   --min-instances=0 --max-instances="${STAGING_MAX_SERVERS:-1}" --concurrency=40 --memory=1Gi --cpu-boost --timeout=900 \
   --update-env-vars "DB_POOL=4,RATE_STORE=mysql,DEPLOYED_BY=$(gcloud config get-value account 2>/dev/null || echo unknown)"
 
+# Send all traffic to this build, even if staging was rolled back (pinned to an older revision) before.
+gcloud run services update-traffic "$SERVICE" --to-latest --region "$REGION" --quiet
+
 step "Checking staging"
 load_service
 URL="$(check_url)"

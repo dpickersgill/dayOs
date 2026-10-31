@@ -75,11 +75,7 @@ gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$SA" 
 echo "Done for $SA"
 
 step "Connecting to it from here"
-PROXY="$HOME/cloud-sql-proxy"
-if [ ! -x "$PROXY" ]; then
-  curl -sSfo "$PROXY" https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.26.0/cloud-sql-proxy.linux.amd64
-  chmod +x "$PROXY"
-fi
+PROXY="$(bash -c 'source "$(dirname "$0")/scripts/cloud-common.sh"; proxy_path' "$0")" # checked against its published checksum
 "$PROXY" --gcloud-auth --port 3307 "$CONN" >/tmp/cloud-sql-proxy.log 2>&1 &
 PROXY_PID=$!
 trap 'kill "$PROXY_PID" 2>/dev/null || true' EXIT

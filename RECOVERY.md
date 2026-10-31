@@ -59,6 +59,14 @@ gcloud run services update-traffic summitops-api --region us-east1 --to-revision
 
 `promote.sh` printed the exact command for the revision it replaced. Check `/version` answers the older version.
 
+This holds all traffic on that revision: Cloud Run then gives a later deploy no traffic until it is told to. `promote.sh`
+does that itself (since 2026.11.11), so the next release goes live as usual. To return to the newest revision by hand,
+once the problem is fixed:
+
+```bash
+gcloud run services update-traffic summitops-api --region us-east1 --to-latest
+```
+
 ## Restoring the database
 
 Use this when data is wrong or gone (a mistaken bulk change, a bad migration), or the server is broken. It never
@@ -72,19 +80,24 @@ overwrites the live server: it makes a new one, and the app is pointed at it.
    ```bash
    gcloud sql instances clone summitops-db summitops-restored --point-in-time=2026-11-08T14:05:00Z
    ```
-   From the daily backup instead (the zone or the logs are lost):
+   From the daily backup or the weekly copy instead (the zone or the logs are lost, or the server is gone), use the
+   script. It makes the new server with the live server's protections (encrypted connections only, deletion
+   protection, daily backups, point-in-time recovery), lets it read the backup bucket only for the import, makes the
+   app's logins on it with the same passwords (a weekly copy holds the data but not the logins), and compares it with
+   the live database:
    ```bash
    gcloud sql backups list --instance summitops-db
-   gcloud sql instances create summitops-restored --database-version=MYSQL_8_4 --edition=enterprise --tier=db-g1-small --region=us-east1
-   gcloud sql backups restore <BACKUP_ID> --restore-instance=summitops-restored --backup-instance=summitops-db
+   bash scripts/restore-copy.sh --backup <BACKUP_ID>
+   bash scripts/restore-copy.sh --weekly                     # the newest weekly copy
+   gcloud storage ls -a gs://summitops-510715-backups/weekly/  # older weekly copies; then:
+   bash scripts/restore-copy.sh --weekly 'gs://summitops-510715-backups/weekly/summitops.sql.gz#<generation>'
    ```
-   From the weekly copy (the server is gone): create `summitops-restored` as above, then
-   `gcloud sql import sql summitops-restored gs://summitops-510715-backups/weekly/summitops.sql.gz --database=summitops`
-   (`gcloud storage ls -a gs://summitops-510715-backups/weekly/` lists older versions).
-4. **Check the copy** against the live database (reads only):
+   Add `--private-network <vpc>` to give the new server a private address only. If the weekly copies live in a separate
+   backup project (backups-setup.sh, `BACKUP_PROJECT`), run it with the same `BACKUP_PROJECT=<project>` in front.
+4. **Check the copy** against the live database (reads only). `restore-copy.sh` already did this; after a clone:
    ```bash
    bash -c 'source scripts/cloud-common.sh; load_service; AS=migrator open_db; \
-     ~/cloud-sql-proxy --gcloud-auth --port 3308 summitops-510715:us-east1:summitops-restored & sleep 5; \
+     "$(proxy_path)" --gcloud-auth --port 3308 summitops-510715:us-east1:summitops-restored & sleep 5; \
      DRILL_PORT=3308 node scripts/restore-check.js'
    ```
 5. **Point the app at it** (staging first if there is time):
@@ -93,8 +106,9 @@ overwrites the live server: it makes a new one, and the app is pointed at it.
    gcloud run services update summitops-api --region us-east1 --add-cloudsql-instances $CONN --update-env-vars DB_SOCKET=/cloudsql/$CONN
    curl -s https://app.runmyresort.com/readyz
    ```
-   The logins and passwords are the same on the copy. Run `bash scripts/backups-setup.sh` with `INSTANCE=summitops-restored`
-   so the new server is backed up too, and keep the old server (stopped is fine) until you are sure.
+   A clone or a daily backup carries the logins and passwords over. A weekly copy does not, which is why
+   `restore-copy.sh` makes them. Then run `INSTANCE=summitops-restored bash scripts/backups-setup.sh` so the new server
+   is backed up too (and the weekly copy comes from it), and keep the old server (stopped is fine) until you are sure.
 6. **Data entered after the moment you chose** is not in the copy. If only part of the data was damaged, it can be
    better to copy just the lost rows back from the clone into the live server by hand. Ask for help with that.
 7. **Tell people** what was lost, if anything, and close the status note. If you paused the daily job:

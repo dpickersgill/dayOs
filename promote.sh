@@ -60,7 +60,13 @@ SERVICE="$PROD_SERVICE"
 load_service
 LIVE_VERSION="$(curl -s --max-time 15 "$(check_url)/version" | jq -r '.version // empty' 2>/dev/null || true)"
 node scripts/check-version.js "$LIVE_VERSION" "${PASS[@]}"
-PREV_REV="$(echo "$SVC_JSON" | jq -r '.status.latestReadyRevisionName // empty')"
+# The revision visitors reach now. After a rollback that is not the newest one (traffic was pinned to an older revision).
+PREV_REV="$(echo "$SVC_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0) > 0)] | sort_by(-(.percent)) | .[0].revisionName // empty')"
+[ -n "$PREV_REV" ] || PREV_REV="$(echo "$SVC_JSON" | jq -r '.status.latestReadyRevisionName // empty')"
+PINNED="$(echo "$SVC_JSON" | jq -r '[.spec.traffic[]? | select((.percent // 0) > 0 and (.latestRevision // false) != true)] | length')"
+if [ "${PINNED:-0}" != 0 ]; then
+  echo "Traffic is held on $PREV_REV (a rollback). This release sends all traffic to the new version again."
+fi
 
 if [ -z "$YES" ]; then
   echo ""
@@ -90,6 +96,10 @@ gcloud run deploy "$SERVICE" --image "$IMAGE" --region "$REGION" --quiet "${SA_F
   --min-instances="$LIVE_MIN_SERVERS" --max-instances="$LIVE_MAX_SERVERS" --concurrency=40 --memory=1Gi --cpu-boost --timeout=900 \
   --update-env-vars "DB_POOL=$LIVE_DB_POOL,RATE_STORE=mysql,DEPLOYED_BY=$(gcloud config get-value account 2>/dev/null || echo unknown)"
 
+# A rollback (update-traffic --to-revisions=...=100) pins traffic, and Cloud Run then keeps every later deploy at 0%.
+# Always send all traffic to the revision just deployed, so a release after a rollback does not stay dark.
+gcloud run services update-traffic "$SERVICE" --to-latest --region "$REGION" --quiet
+
 step "Checking the live site"
 load_service
 URL="$(check_url)"
@@ -100,7 +110,8 @@ BACK="gcloud run services update-traffic $SERVICE --to-revisions=$PREV_REV=100 -
 case "$OUT" in
   *'"ok":true'*'"version":"'"$NEW_VERSION"'"'*)
     echo "Done. $URL is running $NEW_VERSION, migrated."
-    [ -n "$PREV_REV" ] && echo "To switch back to the version before, if you ever need to:   $BACK" ;;
+    [ -n "$PREV_REV" ] && echo "To switch back to the version before, if you ever need to:   $BACK"
+    [ -n "$PREV_REV" ] && echo "That holds traffic on the older version. The next promote.sh sends it to the newest again, or now: gcloud run services update-traffic $SERVICE --to-latest --region $REGION" ;;
   *'"ok":true'*) echo "The site is up but is not answering as $NEW_VERSION yet. Wait a minute and run: curl -s $URL/version"; exit 1 ;;
   *) echo "The new version did not answer as expected. Switch back with:   $BACK"; exit 1 ;;
 esac

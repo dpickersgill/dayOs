@@ -7,7 +7,8 @@
 // It only adds what is missing and takes away only what is wrong, table by table, and never starts from nothing: the
 // live app keeps serving while this runs, and a login stripped of everything (even for a second, or for good if the
 // connection drops part way) would fail every request. Run again, it reads the login's grants once and changes nothing.
-//   node scripts/db-runtime-user.js <user> <password>   make the login, or set its password, and grant
+//   node scripts/db-runtime-user.js <user> -            make the login, or set its password (read from stdin, never the
+//                                                       command line, where other programs and the shell history see it)
 //   node scripts/db-runtime-user.js <user>              only refresh the grants (after a migration)
 //   add --dry-run to print the statements without running them
 
@@ -83,14 +84,19 @@ function statements(db, user, p) {
   ];
 }
 
+// The password, from stdin (one line; the trailing newline is dropped).
+const readStdin = async () => { let d = ''; for await (const c of process.stdin) d += c; return d.replace(/\r?\n$/, ''); };
+
 async function main() {
   const { pool } = require('../src/db');
   const args = process.argv.slice(2);
   const dry = args.includes('--dry-run');
-  const [user, password] = args.filter((a) => a !== '--dry-run');
+  const [user, pwArg] = args.filter((a) => a !== '--dry-run');
   try {
+    if (pwArg !== undefined && pwArg !== '-') throw new Error('Give the password on stdin (db-runtime-user.js <user> -), never on the command line.');
+    const password = pwArg === '-' ? await readStdin() : undefined;
     if (!/^[a-z_][a-z0-9_]{2,31}$/.test(user || '') || (password !== undefined && password.length < 24)) {
-      throw new Error('Usage: db-runtime-user.js <user> [password of 24+ characters] [--dry-run]');
+      throw new Error('Usage: db-runtime-user.js <user> [-] [--dry-run]   (with -, a password of 24+ characters on stdin)');
     }
     const db = String(process.env.DB_NAME).replace(/`/g, '');
     if (password !== undefined && !dry) {
