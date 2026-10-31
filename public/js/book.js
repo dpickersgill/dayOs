@@ -25,10 +25,15 @@ async function call(method, path, body) {
 const ES = {"From": "Desde", "Only": "Solo", "left": "disponibles", "Total": "Total", "Includes": "Incluye", "tax": "de impuestos", "Student": "Alumno", "Meet at:": "Punto de encuentro:", "Ages:": "Edades:", "All lessons": "Todas las clases", "Already booked?": "¿Ya reservaste?", "Anyone under 18 must be booked by a parent or guardian.": "Los menores de 18 deben ser reservados por un padre o tutor.", "Anything we should know? (optional)": "¿Algo que debamos saber? (opcional)", "Before you pay": "Antes de pagar", "Before you send": "Antes de enviar", "Book another lesson": "Reservar otra clase", "Boot size": "Talla de bota", "Cancel and refund under the policy": "Cancelar y reembolsar según la política", "Cancel this request": "Cancelar esta solicitud", "Cancellation policy": "Política de cancelación", "Canceled": "Cancelada", "Canceled. This was inside the no-refund window, so nothing is refunded.": "Cancelada. Fue dentro del plazo sin reembolso, así que no se reembolsa nada.", "Choose a day": "Elige un día", "Choose a lesson": "Elige una clase", "Confirmed. Pay at the ski school desk": "Confirmada. Paga en el mostrador de la escuela de esquí", "Confirming your payment…": "Confirmando tu pago…", "Continue to payment": "Continuar al pago", "Date of birth": "Fecha de nacimiento", "Email you used": "El correo que usaste", "Fears, injuries, goals, or who they would like to ski with.": "Miedos, lesiones, metas o con quién le gustaría esquiar.", "Find my booking": "Buscar mi reserva", "Find your booking with the reference we gave you and your email. You can cancel from here too.": "Busca tu reserva con la referencia que te dimos y tu correo. También puedes cancelar desde aquí.", "First name": "Nombre", "Good to know": "Bueno saber", "Height (inches)": "Estatura (pulgadas)", "I have read and accept the cancellation policy.": "He leído y acepto la política de cancelación.", "I have read and accept the waiver, for myself and for each student named above who is under 18.": "He leído y acepto la exención, por mí y por cada alumno menor de 18 nombrado arriba.", "Keep this reference. You can look up or cancel your booking at the bottom of this page.": "Guarda esta referencia. Puedes consultar o cancelar tu reserva al final de esta página.", "Keep your reference and email to check or cancel your request below.": "Guarda tu referencia y correo para consultar o cancelar tu solicitud abajo.", "Last name": "Apellido", "Last spot": "Último lugar", "Looking further ahead?": "¿Buscas más adelante?", "Need a hand?": "¿Necesitas ayuda?", "No tax added": "Sin impuestos", "Not booked": "No reservada", "Not completed (payment not taken)": "No completada (no se cobró)", "Not sure which lesson is right, or booking for a group? The ski school is happy to help.": "¿No sabes qué clase elegir o reservas para un grupo? La escuela de esquí te ayuda con gusto.", "Online booking is not available": "La reserva en línea no está disponible", "Paid and confirmed": "Pagada y confirmada", "Paid at the ski school desk": "Pagada en el mostrador de la escuela", "Pay at the ski school desk": "Paga en el mostrador de la escuela de esquí", "Payment was canceled, so nothing was booked. Pick a lesson to try again.": "El pago se canceló, así que no se reservó nada. Elige una clase para intentarlo de nuevo.", "Payments are handled by Stripe. We never see or store your card number.": "Los pagos los procesa Stripe. Nunca vemos ni guardamos tu número de tarjeta.", "Please accept the cancellation policy to continue.": "Acepta la política de cancelación para continuar.", "Please accept the waiver to continue.": "Acepta la exención para continuar.", "Please call or visit the ski school to book a lesson.": "Llama o visita la escuela de esquí para reservar una clase.", "Please fill in your name, email and phone number.": "Escribe tu nombre, correo y teléfono.", "Read the waiver": "Leer la exención", "Reference": "Referencia", "Request sent": "Solicitud enviada", "Secure card payment": "Pago seguro con tarjeta", "Send request": "Enviar solicitud", "Size details for gear (optional)": "Tallas para el equipo (opcional)", "Ski and snowboard lessons": "Clases de esquí y snowboard", "Snowboard": "Snowboard", "So the ski school can reach you if the lesson changes.": "Para que la escuela te contacte si la clase cambia.", "Something went wrong. Please try again or call the ski school.": "Algo salió mal. Inténtalo de nuevo o llama a la escuela de esquí.", "Taking you to the payment page…": "Llevándote a la página de pago…", "Thank you": "Gracias", "The ski school could not take this request": "La escuela de esquí no pudo aceptar esta solicitud", "Waiting for payment": "Esperando el pago", "Waiting for the ski school to confirm": "Esperando la confirmación de la escuela", "We could not find a booking with that reference and email.": "No encontramos una reserva con esa referencia y correo.", "We will show your total on the next step.": "Te mostraremos el total en el siguiente paso.", "Weight (pounds)": "Peso (libras)", "Who is booking?": "¿Quién reserva?", "You are booked": "Tu reserva está hecha", "Your details": "Tus datos", "Your reference is ": "Tu referencia es ", "Your reference is": "Tu referencia es", "Try again": "Intentar de nuevo", "We could not reach the mountain. Check your connection and try again.": "No pudimos conectar con la montaña. Revisa tu conexión e inténtalo de nuevo.", "Buy lift tickets online": "Compra boletos de remontes en línea",
   "Who is coming?": "¿Quién viene?", "Add someone": "Agregar a alguien", "Remove": "Quitar", "Ski": "Esquí", "Level": "Nivel", "Not sure? Find the level": "¿No sabes? Encuentra el nivel", "Pick a level, or find it with five quick questions.": "Elige un nivel o encuéntralo con cinco preguntas rápidas.", "Next: pick lessons": "Siguiente: elegir clases", "Pick a lesson for": "Elige una clase para", "Good fit": "Buena opción", "Not a fit": "No es para", "Show all lessons": "Mostrar todas las clases", "Show good fits only": "Mostrar solo buenas opciones", "Pick this lesson": "Elegir esta clase", "Picked": "Elegida", "Add a lift ticket": "Agregar boleto de remonte", "Add a rental": "Agregar equipo de alquiler", "Full": "Llena", "Join the waitlist": "Unirse a la lista de espera", "Next: your details": "Siguiente: tus datos", "Each person needs a lesson. Pick one, or remove the person.": "Cada persona necesita una clase. Elige una o quita a la persona.", "Safety details": "Datos de seguridad", "Allergies": "Alergias", "Medical notes": "Notas médicas", "Who may pick up": "Quién puede recoger", "Photos in the lesson recap": "Fotos en el resumen de la clase", "Text me about these lessons": "Envíame mensajes de texto sobre estas clases", "Sex": "Sexo", "Female": "Femenino", "Male": "Masculino", "Other": "Otro", "Choose": "Elige", "Your booking": "Tu reserva", "Want a private lesson? Ask for an instructor": "¿Quieres una clase privada? Pide un instructor", "Lift ticket": "Boleto de remonte", "Rental": "Alquiler", "You are on the waitlist": "Estás en la lista de espera", "We email you if a spot opens.": "Te escribimos si se abre un lugar.", "Your email": "Tu correo", "Your phone": "Tu teléfono", "Your name": "Tu nombre", "Back": "Atrás", "Edit": "Editar", "Age": "Edad",
   "Yes": "Sí", "No": "No", "Three quick questions": "Tres preguntas rápidas", "They help the ski school put everyone in the right class.": "Ayudan a la escuela a poner a cada uno en la clase correcta.", "Placed at": "Nivel según las respuestas:", "Change the answers": "Cambiar las respuestas", "Group lesson by time": "Clase grupal por horario", "See other times": "Ver otros horarios", "Next times with room": "Próximos horarios con lugar", "No other times with room in the next week.": "No hay otros horarios con lugar la próxima semana.", "Pick this time": "Elegir este horario",
+  // 2026.11.11 (Track SCHOOL AND GUEST): the rest of the page, and the built-in placement questions (a mountain's own questions show as written).
+  "hours": "horas", "Cancel {a} or more before the lesson": "Cancela {a} o más antes de la clase", "Cancel less than {a} before, or do not show up": "Cancela menos de {a} antes, o no te presentas", "Cancel {a} to {b} before the lesson": "Cancela entre {a} y {b} antes de la clase", "None": "Nada", "Call": "Llamar al", "Please call the mountain on {p} for updates.": "Llama a la montaña al {p} para novedades.", "Please call the mountain for updates.": "Llama a la montaña para novedades.", "Tell us who is coming, pick a lesson for each person and pay once. You will see your total before you pay.": "Dinos quién viene, elige una clase para cada persona y paga una sola vez. Verás el total antes de pagar.", "Tell us who is coming and pick a lesson for each person. The ski school confirms it, and you pay at the desk.": "Dinos quién viene y elige una clase para cada persona. La escuela de esquí la confirma y pagas en el mostrador.", "Full refund up to {a} before": "Reembolso completo hasta {a} antes", "Progress": "Progreso", "Find my level": "Encuentra mi nivel", "Answer for the student.": "Responde por el alumno.", "Please add the name and date of birth for student {n}.": "Agrega el nombre y la fecha de nacimiento del alumno {n}.", "Add everyone who wants a lesson. Each person can pick a different lesson, so brothers and sisters at different levels are fine.": "Agrega a todos los que quieren clase. Cada persona puede elegir una clase distinta, así que hermanos de niveles diferentes no hay problema.", "Students": "Alumnos", "from the questions": "según las preguntas", "Level not set": "Nivel sin elegir", "Today": "Hoy", "fit": "opción", "fits": "opciones", "Next:": "Siguiente:", "No places left": "No quedan lugares", "spots open": "lugares libres", "Your child is placed in a class by level at the meeting place.": "Tu hijo o hija queda en una clase según su nivel en el punto de encuentro.", "You are placed in a class by level at the meeting place.": "Quedas en una clase según tu nivel en el punto de encuentro.", "If a spot opens, the first family waiting gets an email with a link to claim it. The spot is held for a short time.": "Si se abre un lugar, la primera familia en espera recibe un correo con un enlace para tomarlo. El lugar se guarda por poco tiempo.", "Text me too when a spot opens. Message and data rates may apply. Reply STOP to stop.": "Envíame también un mensaje de texto cuando se abra un lugar. Pueden aplicarse tarifas de mensajes y datos. Responde STOP para dejar de recibirlos.", "Add your name and email.": "Agrega tu nombre y correo.", "Names of the grown-ups who may collect them.": "Nombres de los adultos que pueden recogerle.", "Only the instructor and the desk see this.": "Solo el instructor y el mostrador lo ven.", "Anything the instructor should know.": "Lo que el instructor deba saber.", "You may take photos of my child during the lesson for the lesson recap. You can change this any time.": "Pueden tomar fotos de mi hijo o hija durante la clase para el resumen. Puedes cambiarlo cuando quieras.", "Email": "Correo", "Phone": "Teléfono", "Refund: {m} back to your card (allow a few days).": "Reembolso: {m} a tu tarjeta (puede tardar unos días).", "Canceled. {p}% refunded: {m}.": "Cancelada. Se reembolsó el {p}%: {m}.", "Each family gets an email with a private link for every student: check in, see the details and change the date there.": "Cada familia recibe un correo con un enlace privado para cada alumno: para registrarse, ver los detalles y cambiar la fecha.", "That booking could not be made and any payment is refunded.": "No se pudo hacer esa reserva y cualquier pago se reembolsa.", "That lesson could not be booked and any payment is refunded.": "No se pudo reservar esa clase y cualquier pago se reembolsa.", "person": "persona", "people": "personas", "per person": "por persona",
+  "Your payment is being processed. Your reference is {r}. Watch for the confirmation email.": "Tu pago se está procesando. Tu referencia es {r}. Espera el correo de confirmación.", "Have you skied before?": "¿Has esquiado antes?", "Can you stop and turn on a green trail?": "¿Puedes frenar y girar en una pista verde?", "Can you make parallel turns on a blue trail?": "¿Puedes hacer giros en paralelo en una pista azul?", "Have you snowboarded before?": "¿Has hecho snowboard antes?", "Can you link turns on a green trail?": "¿Puedes encadenar giros en una pista verde?", "Can you ride a blue trail with linked turns?": "¿Puedes bajar una pista azul encadenando giros?",
 };
 let LANG = (navigator.language || '').toLowerCase().startsWith('es') ? 'es' : 'en';
 try { const saved = localStorage.getItem('shop-lang'); if (saved === 'en' || saved === 'es') LANG = saved; } catch (_) { /* private mode */ }
 const T = (en) => (LANG === 'es' && ES[en]) || en;
+/** T with {name} slots filled after translating. */
+const TF = (en, v = {}) => T(en).replace(/\{(\w+)\}/g, (_, k) => String(v[k] ?? ''));
 const langToggle = () => h('button', { type: 'button', class: 'btn link lang', lang: LANG === 'es' ? 'en' : 'es', onclick: () => { try { localStorage.setItem('shop-lang', LANG === 'es' ? 'en' : 'es'); } catch (_) { /* ignore */ } location.reload(); } }, LANG === 'es' ? 'English' : 'Español');
 // ---- small helpers. Native append() would print "null" for a missing piece, so optional pieces go through put().
 const put = (el, ...kids) => { for (const k of kids) if (k) el.append(k); return el; };
@@ -39,7 +44,7 @@ const dayLong = (s) => fmt(s, { weekday: 'long', month: 'long', day: 'numeric' }
 const clock = (s) => { const hr = +s.slice(11, 13); const m = s.slice(14, 16); return `${hr % 12 || 12}:${m} ${hr < 12 ? 'AM' : 'PM'}`; };
 const addDay = (s, n) => { const d = dateOf(s); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const localToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-const hoursText = (n) => `${n} hours`;
+const hoursText = (n) => `${n} ${T('hours')}`;
 const lab = (id, text, el, hint) => h('div', { class: 'field' }, h('label', { for: id }, text), el, hint ? h('span', { class: 'hint', id: `${id}-hint` }, hint) : null);
 const badge = (t, cls = '') => h('span', { class: `badge ${cls}`.trim() }, t);
 const ageOn = (dob, day) => { if (!/^\d{4}-\d{2}-\d{2}$/.test(dob || '')) return null; let a = +day.slice(0, 4) - +dob.slice(0, 4); if (day.slice(5) < dob.slice(5)) a -= 1; return a; };
@@ -74,7 +79,7 @@ function placedLevel(p) {
 function lessonPrice(l) {
   const all = l.prices.length ? l.prices.map((p) => p.price_cents) : [l.price_cents];
   const lo = Math.min(...all); const hi = Math.max(...all);
-  return { text: lo !== hi ? `${T('From')} ${money(lo)}` : money(lo), note: 'per person' };
+  return { text: lo !== hi ? `${T('From')} ${money(lo)}` : money(lo), note: T('per person') };
 }
 
 /** The cancellation policy drawn as three plain steps, so nobody has to read a paragraph to know what they get back. */
@@ -82,9 +87,9 @@ function tiersList(page) {
   const tiers = page.policy_tiers || [];
   return h('ul', { class: 'tiers' }, tiers.map((t, i) => {
     const last = i === tiers.length - 1 && t.percent === 0;
-    const when = i === 0 ? `Cancel ${hoursText(t.from_hours)} or more before the lesson` : last ? `Cancel less than ${hoursText(tiers[i - 1].from_hours)} before, or do not show up` : `Cancel ${hoursText(t.from_hours)} to ${hoursText(tiers[i - 1].from_hours)} before the lesson`;
+    const when = i === 0 ? TF('Cancel {a} or more before the lesson', { a: hoursText(t.from_hours) }) : last ? TF('Cancel less than {a} before, or do not show up', { a: hoursText(tiers[i - 1].from_hours) }) : TF('Cancel {a} to {b} before the lesson', { a: hoursText(t.from_hours), b: hoursText(tiers[i - 1].from_hours) });
     const cls = t.percent === 100 ? 'full' : t.percent === 0 ? 'none' : 'part';
-    return h('li', { class: `tier ${cls}` }, h('span', { class: 'pct' }, t.percent === 0 ? 'None' : `${t.percent}%`), h('span', { class: 'when' }, when));
+    return h('li', { class: `tier ${cls}` }, h('span', { class: 'pct' }, t.percent === 0 ? T('None') : `${t.percent}%`), h('span', { class: 'when' }, when));
   }));
 }
 
@@ -99,7 +104,7 @@ async function main() {
     root.append(h('div', { class: 'layout' }, h('div', { class: 'card stack' },
       h('h1', null, offline ? T('Something went wrong. Please try again or call the ski school.') : T('Online booking is not available')),
       h('p', { class: 'muted' }, offline ? T('We could not reach the mountain. Check your connection and try again.') : T('Please call or visit the ski school to book a lesson.')),
-      other && other.phone ? h('p', null, h('a', { class: 'btn', href: `tel:${other.phone.replace(/[^\d+]/g, '')}` }, `${LANG === 'es' ? 'Llamar al' : 'Call'} ${other.phone}`)) : null,
+      other && other.phone ? h('p', null, h('a', { class: 'btn', href: `tel:${other.phone.replace(/[^\d+]/g, '')}` }, `${T('Call')} ${other.phone}`)) : null,
       other ? h('p', null, h('a', { class: 'btn', href: `/shop/${encodeURIComponent(slug)}` }, T('Buy lift tickets online'))) : null,
       offline ? h('p', null, h('button', { class: 'btn primary', type: 'button', onclick: () => location.reload() }, T('Try again'))) : null)));
     return;
@@ -109,7 +114,7 @@ async function main() {
   document.documentElement.lang = LANG;
   document.title = `${page.mountain}: book a ski lesson`;
   const tel = page.phone ? `tel:${page.phone.replace(/[^\d+]/g, '')}` : null;
-  const callLine = page.phone ? ` Please call the mountain on ${page.phone} for updates.` : ' Please call the mountain for updates.';
+  const callLine = page.phone ? ` ${TF('Please call the mountain on {p} for updates.', { p: page.phone })}` : ` ${T('Please call the mountain for updates.')}`;
   const tiers = page.policy_tiers || [];
   const params = new URLSearchParams(location.search);
   const wantLesson = Number(params.get('lesson')) || null;
@@ -120,14 +125,14 @@ async function main() {
   const hero = h('header', { class: 'hero' }, h('div', { class: 'hero-in' },
     h('span', { class: 'eyebrow' }, T('Ski and snowboard lessons')),
     h('h1', null, page.mountain),
-    h('p', { class: 'sub' }, page.pay_online ? 'Tell us who is coming, pick a lesson for each person and pay once. You will see your total before you pay.' : 'Tell us who is coming and pick a lesson for each person. The ski school confirms it, and you pay at the desk.'),
+    h('p', { class: 'sub' }, page.pay_online ? T('Tell us who is coming, pick a lesson for each person and pay once. You will see your total before you pay.') : T('Tell us who is coming and pick a lesson for each person. The ski school confirms it, and you pay at the desk.')),
     page.message ? h('p', { class: 'note' }, page.message) : null,
     h('div', { class: 'chips-row' }, langToggle(),
       page.pay_online ? h('span', { class: 'trust' }, T('Secure card payment')) : h('span', { class: 'trust' }, T('Pay at the ski school desk')),
-      page.pay_online && tiers.length ? h('span', { class: 'trust' }, `Full refund up to ${hoursText(tiers[0].from_hours)} before`) : null,
-      tel ? h('a', { class: 'call', href: tel }, `Call ${page.phone}`) : null)));
+      page.pay_online && tiers.length ? h('span', { class: 'trust' }, TF('Full refund up to {a} before', { a: hoursText(tiers[0].from_hours) })) : null,
+      tel ? h('a', { class: 'call', href: tel }, `${T('Call')} ${page.phone}`) : null)));
   const stepNames = [LANG === 'es' ? 'Quién' : 'Who', LANG === 'es' ? 'Clases' : 'Lessons', page.pay_online ? (LANG === 'es' ? 'Pagar' : 'Pay') : (LANG === 'es' ? 'Enviar' : 'Send')];
-  const stepsEl = h('nav', { class: 'steps', 'aria-label': 'Progress' }, h('ol', null, stepNames.map((n, i) => h('li', { 'data-step': i + 1 }, `${i + 1}. ${n}`))));
+  const stepsEl = h('nav', { class: 'steps', 'aria-label': T('Progress') }, h('ol', null, stepNames.map((n, i) => h('li', { 'data-step': i + 1 }, `${i + 1}. ${n}`))));
   const setStep = (n) => stepsEl.querySelectorAll('li').forEach((li, i) => { li.className = i + 1 < n ? 'done' : ''; if (i + 1 === n) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current'); });
 
   // ---- the main column
@@ -137,9 +142,9 @@ async function main() {
   const policyCard = page.pay_online ? h('section', { class: 'card stack', id: 'policy-top' }, h('h2', null, T('Cancellation policy')), tiersList(page), ...(page.policy_notes || []).map((x) => h('p', { class: 'small muted' }, x))) : null;
   const helpCard = h('section', { class: 'card stack' }, h('h2', null, T('Need a hand?')),
     h('p', { class: 'muted' }, T('Not sure which lesson is right, or booking for a group? The ski school is happy to help.')),
-    h('a', { class: 'btn', href: `/level/${encodeURIComponent(slug)}` }, 'Find my level'),
+    h('a', { class: 'btn', href: `/level/${encodeURIComponent(slug)}` }, T('Find my level')),
     h('a', { class: 'btn', href: `/private/${encodeURIComponent(slug)}`, id: 'private-link' }, T('Want a private lesson? Ask for an instructor')),
-    tel ? h('a', { class: 'btn', href: tel }, `Call ${page.phone}`) : null);
+    tel ? h('a', { class: 'btn', href: tel }, `${T('Call')} ${page.phone}`) : null);
   const aside = h('aside', { class: 'aside stack', 'aria-label': T('Good to know') }, policyCard, helpCard);
   const main = h('main', { class: 'main', id: 'book-main' }, topSlot, stage);
   put(root, hero, stepsEl, h('div', { class: 'layout' }, main, aside), h('div', { class: 'below' }, lookup), h('p', { class: 'footer' }, page.pay_online ? T('Payments are handled by Stripe. We never see or store your card number.') : ''));
@@ -160,12 +165,12 @@ async function main() {
     if (!qs.length || p.level) return;
     const who = p.first_name.trim();
     const box = h('fieldset', { class: 'placement', 'data-placement': p.id }, h('legend', null, `${T('Three quick questions')}${who ? ` ${LANG === 'es' ? 'sobre' : 'about'} ${who}` : ''}`),
-      h('p', { class: 'muted small' }, `${T('They help the ski school put everyone in the right class.')} ${LANG === 'es' ? '' : 'Answer for the student.'}`.trim()));
+      h('p', { class: 'muted small' }, `${T('They help the ski school put everyone in the right class.')} ${T('Answer for the student.')}`.trim()));
     const answers = Array.isArray(p.placement) ? p.placement : [];
     for (let i = 0; i < qs.length; i++) {
       const q = qs[i]; const a = answers[i];
       const set = (v) => { p.placement = [...answers.slice(0, i), v]; placementBox(p, slot); slot.querySelector(`[data-q="${i + 1}"] button`)?.focus(); };
-      box.append(h('div', { class: 'pq', 'data-q': i }, h('span', { class: 'pq-text', id: `pq-${p.id}-${i}` }, q.text),
+      box.append(h('div', { class: 'pq', 'data-q': i }, h('span', { class: 'pq-text', id: `pq-${p.id}-${i}` }, T(q.text)),
         h('div', { class: 'types', role: 'group', 'aria-labelledby': `pq-${p.id}-${i}` },
           h('button', { type: 'button', class: 'pill', 'aria-pressed': String(a === true), onclick: () => set(true) }, T('Yes')),
           h('button', { type: 'button', class: 'pill', 'aria-pressed': String(a === false), onclick: () => set(false) }, T('No')))));
@@ -219,7 +224,7 @@ async function main() {
       clear(msg);
       for (const [i, p] of people.entries()) {
         if (!p.first_name.trim() || !p.last_name.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(p.dob) || +p.dob.slice(0, 4) < 1900) {
-          msg.append(h('p', { class: 'error-box', role: 'alert' }, `Please add the name and date of birth for student ${i + 1}.`));
+          msg.append(h('p', { class: 'error-box', role: 'alert' }, TF('Please add the name and date of birth for student {n}.', { n: i + 1 })));
           document.getElementById(`p${p.id}-${!p.first_name.trim() ? 'first' : !p.last_name.trim() ? 'last' : 'dob'}`)?.focus();
           return;
         }
@@ -227,8 +232,8 @@ async function main() {
       drawLessons(0);
     } }, T('Next: pick lessons'));
     stage.append(h('section', { class: 'card stack section' }, h('h2', null, T('Who is coming?')),
-      h('p', { class: 'muted small' }, 'Add everyone who wants a lesson. Each person can pick a different lesson, so brothers and sisters at different levels are fine.'),
-      list, h('div', null, more), msg), h('div', { class: 'actionbar' }, h('span', { class: 'muted small' }, `${people.length} ${people.length === 1 ? 'person' : 'people'}`), next));
+      h('p', { class: 'muted small' }, T('Add everyone who wants a lesson. Each person can pick a different lesson, so brothers and sisters at different levels are fine.')),
+      list, h('div', null, more), msg), h('div', { class: 'actionbar' }, h('span', { class: 'muted small' }, `${people.length} ${T(people.length === 1 ? 'person' : 'people')}`), next));
   }
 
   // ================================================================ step 2: a lesson for each person
@@ -243,10 +248,10 @@ async function main() {
       const want = wantLesson ? lessonOf(wantLesson) : null;
       view.day = want ? want.starts_at.slice(0, 10) : wantDay && wantDay >= today ? wantDay : ([...new Set(all.filter(goodFor).map((l) => l.starts_at.slice(0, 10)))].sort().find((d) => d >= today) || today);
     }
-    const tabsRow = people.length > 1 ? h('div', { class: 'types', role: 'tablist', 'aria-label': 'Students' }, people.map((q, i) => h('button', { type: 'button', class: 'pill', role: 'tab', 'aria-selected': String(i === idx), 'aria-pressed': String(i === idx), onclick: () => drawLessons(i) },
+    const tabsRow = people.length > 1 ? h('div', { class: 'types', role: 'tablist', 'aria-label': T('Students') }, people.map((q, i) => h('button', { type: 'button', class: 'pill', role: 'tab', 'aria-selected': String(i === idx), 'aria-pressed': String(i === idx), onclick: () => drawLessons(i) },
       `${q.first_name || `${T('Student')} ${i + 1}`}${q.lessonId ? ' ✓' : ''}`))) : null;
     const lv = Number(p.level) || null;
-    const who = h('p', { class: 'muted' }, [p.first_name, p.dob ? `${T('Age')} ${ageOn(p.dob, today)}` : null, discWord(p.discipline), lv ? levelName(lv, p.discipline) : placedLevel(p) ? `${levelName(placedLevel(p), p.discipline)} (from the questions)` : 'Level not set'].filter(Boolean).join(' · '),
+    const who = h('p', { class: 'muted' }, [p.first_name, p.dob ? `${T('Age')} ${ageOn(p.dob, today)}` : null, discWord(p.discipline), lv ? levelName(lv, p.discipline) : placedLevel(p) ? `${levelName(placedLevel(p), p.discipline)} (${T('from the questions')})` : T('Level not set')].filter(Boolean).join(' · '),
       ' ', h('button', { type: 'button', class: 'btn link', onclick: drawPeople }, T('Edit')));
     const dayRow = h('div', { class: 'days', role: 'group', 'aria-label': T('Choose a day') });
     const dayIn = h('input', { type: 'date', id: 'pick-day', value: view.day, min: today, max: addDay(today, 45), onchange: (e) => { if (e.target.value) { view.day = e.target.value; drawLessons(idx); } } });
@@ -254,7 +259,7 @@ async function main() {
     for (let i = 0; i < DAYS_SHOWN; i++) {
       const d = addDay(today, i); const nOpen = all.filter((l) => l.starts_at.startsWith(d) && goodFor(l) && l.spots_left > 0).length;
       dayRow.append(h('button', { type: 'button', class: `day${nOpen ? '' : ' empty'}`, 'data-day': d, 'aria-pressed': String(d === view.day), 'aria-label': `${dayLong(d)}, ${nOpen ? `${nOpen} good fit${nOpen === 1 ? '' : 's'}` : 'no good fits'}`, onclick: () => { view.day = d; drawLessons(idx); } },
-        h('span', { class: 'dow' }, i === 0 ? 'Today' : fmt(d, { weekday: 'short' })), h('span', { class: 'num' }, fmt(d, { day: 'numeric' })), h('span', { class: 'cnt' }, nOpen ? `${nOpen} fit${nOpen === 1 ? '' : 's'}` : '')));
+        h('span', { class: 'dow' }, i === 0 ? T('Today') : fmt(d, { weekday: 'short' })), h('span', { class: 'num' }, fmt(d, { day: 'numeric' })), h('span', { class: 'cnt' }, nOpen ? `${nOpen} ${T(nOpen === 1 ? 'fit' : 'fits')}` : '')));
     }
     const ls = pool(view.day).sort((a, b) => (goodFor(b) - goodFor(a)) || a.starts_at.localeCompare(b.starts_at));
     const hidden = all.filter((l) => l.starts_at.startsWith(view.day) && !goodFor(l)).length;
@@ -263,7 +268,7 @@ async function main() {
       list.append(h('div', { class: 'empty-day', id: 'no-lessons', role: 'status' },
         h('p', null, `No lessons that fit ${p.first_name || 'this student'} on ${dayLong(view.day)}.${hidden ? '' : callLine}`),
         hidden ? h('button', { type: 'button', class: 'btn', onclick: () => { view.showAll = true; drawLessons(idx); } }, `${T('Show all lessons')} (${hidden})`) : null,
-        tel ? h('a', { class: 'btn', href: tel }, `Call ${page.phone}`) : null));
+        tel ? h('a', { class: 'btn', href: tel }, `${T('Call')} ${page.phone}`) : null));
     }
     for (const l of ls) list.append(lessonCard(l, p, idx));
     const done = people.every((q) => q.lessonId);
@@ -276,7 +281,7 @@ async function main() {
         (hidden || view.showAll) ? h('button', { type: 'button', class: 'btn link', 'aria-pressed': String(view.showAll), onclick: () => { view.showAll = !view.showAll; drawLessons(idx); } }, view.showAll ? T('Show good fits only') : `${T('Show all lessons')} (${hidden} more)`) : null)),
     list,
     h('div', { class: 'actionbar' }, h('button', { type: 'button', class: 'btn', onclick: drawPeople }, `← ${T('Back')}`), msg,
-      nextIdx >= 0 && p.lessonId ? h('button', { type: 'button', class: 'btn primary big', onclick: () => { view.showAll = false; drawLessons(nextIdx); } }, `Next: ${people[nextIdx].first_name || `${T('Student')} ${nextIdx + 1}`}`)
+      nextIdx >= 0 && p.lessonId ? h('button', { type: 'button', class: 'btn primary big', onclick: () => { view.showAll = false; drawLessons(nextIdx); } }, `${T('Next:')} ${people[nextIdx].first_name || `${T('Student')} ${nextIdx + 1}`}`)
         : h('button', { type: 'button', class: 'btn primary big', id: 'to-details', onclick: () => {
           clear(msg);
           const missing = people.findIndex((q) => !q.lessonId);
@@ -294,7 +299,7 @@ async function main() {
     const isFull = l.spots_left <= 0;
     const badges = [badge(fit.ok ? T('Good fit') : `${T('Not a fit')}: ${fit.why}`, fit.ok ? 'good' : 'warm'), badge(l.level_words), badge(l.ages), badge(discWord(l.discipline))];
     if (l.format !== 'group') badges.push(badge(l.format.replace('_', ' ')));
-    if (!isFull) badges.push(left <= 2 ? badge(left === 1 ? T('Last spot') : left <= 0 ? 'No places left' : `${T('Only')} ${left} ${T('left')}`, 'warm') : badge(`${left} spots open`));
+    if (!isFull) badges.push(left <= 2 ? badge(left === 1 ? T('Last spot') : left <= 0 ? T('No places left') : `${T('Only')} ${left} ${T('left')}`, 'warm') : badge(`${left} ${T('spots open')}`));
     const extras = mine && (l.offers_ticket || l.offers_rental) ? h('div', { class: 'extras' },
       l.offers_ticket ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: p.ticket, onchange: (e) => { p.ticket = e.target.checked; } }), h('span', null, `${T('Add a lift ticket')} for ${p.first_name || 'this student'}`)) : null,
       l.offers_rental ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: p.rental, onchange: (e) => { p.rental = e.target.checked; } }), h('span', null, `${T('Add a rental')} (skis or board, boots, helmet)`)) : null) : null;
@@ -302,7 +307,7 @@ async function main() {
     const nextSlot = h('div', { class: 'next-slot', 'aria-live': 'polite' });
     // A pool is booked as a time; the lineup places each student in a class by level at the meeting place.
     const poolLine = l.pool ? h('p', { class: 'pool-line' }, h('span', { class: 'badge pool' }, T('Group lesson by time')), ' ',
-      `${p.dob && ageOn(p.dob, l.starts_at.slice(0, 10)) !== null && ageOn(p.dob, l.starts_at.slice(0, 10)) < 18 ? 'Your child is' : 'You are'} placed in a class by level at the meeting place.`) : null;
+      (p.dob && ageOn(p.dob, l.starts_at.slice(0, 10)) !== null && ageOn(p.dob, l.starts_at.slice(0, 10)) < 18 ? T('Your child is placed in a class by level at the meeting place.') : T('You are placed in a class by level at the meeting place.'))) : null;
     return h('article', { class: `lesson${mine ? ' picked' : ''}${fit.ok ? '' : ' nofit'}${l.pool ? ' is-pool' : ''}`, 'data-lesson': l.id },
       h('div', null, h('div', { class: 'when' }, `${clock(l.starts_at)} – ${clock(l.ends_at)}`), h('div', { class: 'what' }, l.product),
         h('div', { class: 'badges' }, badges), poolLine, l.meeting_place ? h('p', { class: 'meet' }, `${T('Meet at:')} ${l.meeting_place}`) : null, extras, nextSlot, wl),
@@ -338,13 +343,13 @@ async function main() {
     const texts = page.texts_available ? h('input', { type: 'checkbox', id: `wl-text-${l.id}` }) : null;
     const msg = h('div', { role: 'status', 'aria-live': 'polite' });
     const box = h('form', { class: 'card stack wl', novalidate: '' }, h('h3', null, `${T('Join the waitlist')}: ${p.first_name}`),
-      h('p', { class: 'muted small' }, 'If a spot opens, the first family waiting gets an email with a link to claim it. The spot is held for a short time.'),
+      h('p', { class: 'muted small' }, T('If a spot opens, the first family waiting gets an email with a link to claim it. The spot is held for a short time.')),
       lab(`wl-name-${l.id}`, T('Your name'), name), h('div', { class: 'row2' }, lab(`wl-email-${l.id}`, T('Your email'), email), lab(`wl-phone-${l.id}`, T('Your phone'), phone)),
-      texts ? h('label', { class: 'check' }, texts, h('span', null, 'Text me too when a spot opens. Message and data rates may apply. Reply STOP to stop.')) : null,
+      texts ? h('label', { class: 'check' }, texts, h('span', null, T('Text me too when a spot opens. Message and data rates may apply. Reply STOP to stop.'))) : null,
       msg, h('button', { type: 'submit', class: 'btn primary' }, T('Join the waitlist')));
     box.addEventListener('submit', async (e) => {
       e.preventDefault(); clear(msg);
-      if (!name.value.trim() || !email.value.trim()) { msg.append(h('p', { class: 'error-box', role: 'alert' }, 'Add your name and email.')); return; }
+      if (!name.value.trim() || !email.value.trim()) { msg.append(h('p', { class: 'error-box', role: 'alert' }, T('Add your name and email.'))); return; }
       try {
         const r = await call('POST', '/waitlist', { session_id: l.id, contact_name: name.value.trim(), contact_email: email.value.trim(), contact_phone: phone.value.trim() || undefined, text_ok: texts ? texts.checked : false,
           student: { first_name: p.first_name.trim(), last_name: p.last_name.trim(), ...(p.dob ? { date_of_birth: p.dob } : {}), ...(p.level || placedLevel(p) ? { level: Number(p.level) || placedLevel(p) } : {}) } });
@@ -381,9 +386,9 @@ async function main() {
         height_in: h('input', { id: `s${n}-h`, type: 'number', min: 20, max: 96, inputmode: 'numeric' }), weight_lb: h('input', { id: `s${n}-w`, type: 'number', min: 20, max: 500, inputmode: 'numeric' }), boot_size: h('input', { id: `s${n}-b`, maxlength: 10 }),
       };
       s.box = h('fieldset', { class: 'student', 'data-student': n }, h('legend', null, `${p.first_name} ${p.last_name}`),
-        h('div', { class: 'row2' }, lab(`s${n}-sex`, T('Sex'), s.sex), lab(`s${n}-pickup`, T('Who may pick up'), s.pickup, 'Names of the grown-ups who may collect them.')),
-        h('div', { class: 'row2' }, lab(`s${n}-allergies`, T('Allergies'), s.allergies, 'Only the instructor and the desk see this.'), lab(`s${n}-medical`, T('Medical notes'), s.medical, 'Anything the instructor should know.')),
-        s.photo ? h('label', { class: 'check' }, s.photo, h('span', null, 'You may take photos of my child during the lesson for the lesson recap. You can change this any time.')) : null,
+        h('div', { class: 'row2' }, lab(`s${n}-sex`, T('Sex'), s.sex), lab(`s${n}-pickup`, T('Who may pick up'), s.pickup, T('Names of the grown-ups who may collect them.'))),
+        h('div', { class: 'row2' }, lab(`s${n}-allergies`, T('Allergies'), s.allergies, T('Only the instructor and the desk see this.')), lab(`s${n}-medical`, T('Medical notes'), s.medical, T('Anything the instructor should know.'))),
+        s.photo ? h('label', { class: 'check' }, s.photo, h('span', null, T('You may take photos of my child during the lesson for the lesson recap. You can change this any time.'))) : null,
         p.ticket || p.rental ? h('details', { class: 'more', open: p.rental }, h('summary', null, T('Size details for gear (optional)')), h('div', { class: 'row3' }, lab(`s${n}-h`, T('Height (inches)'), s.height_in), lab(`s${n}-w`, T('Weight (pounds)'), s.weight_lb), lab(`s${n}-b`, T('Boot size'), s.boot_size))) : null);
       return s;
     });
@@ -398,7 +403,7 @@ async function main() {
       h('button', { type: 'button', class: 'btn link back', onclick: () => drawLessons(0) }, `← ${T('Back')}`), summary,
       h('section', { class: 'card section' }, h('h3', null, h('span', { class: 'num-dot' }, '1'), T('Who is booking?')),
         h('div', { class: 'row2' }, lab('c-first_name', T('First name'), f.first_name), lab('c-last_name', T('Last name'), f.last_name)),
-        h('div', { class: 'row2' }, lab('c-email', 'Email', f.email, T('So the ski school can reach you if the lesson changes.')), lab('c-phone', 'Phone', f.phone)),
+        h('div', { class: 'row2' }, lab('c-email', T('Email'), f.email, T('So the ski school can reach you if the lesson changes.')), lab('c-phone', T('Phone'), f.phone)),
         textOk ? h('label', { class: 'check' }, textOk, h('span', null, `${T('Text me about these lessons')}: the confirmation, changes, check-in and the recap. Message and data rates may apply. Reply STOP to stop.`)) : null),
       h('section', { class: 'card section' }, h('h3', null, h('span', { class: 'num-dot' }, '2'), T('Safety details')), studs.map((s) => s.box),
         lab('note', T('Anything we should know? (optional)'), note, T('Fears, injuries, goals, or who they would like to ski with.'))),
@@ -467,13 +472,13 @@ async function main() {
       put(out, h('div', { class: 'stack' }, h('span', { class: `status ${tone}`.trim() }, words),
         h('p', null, `${r.product}, ${dayLong(r.starts_at.slice(0, 10))} at ${clock(r.starts_at)}, ${r.students} student${r.students === 1 ? '' : 's'}.`),
         r.staff_note ? h('p', { class: 'muted' }, r.staff_note) : null,
-        r.refund_cents ? h('p', null, `Refund: ${money(r.refund_cents)} back to your card (allow a few days).`) : null,
+        r.refund_cents ? h('p', null, TF('Refund: {m} back to your card (allow a few days).', { m: money(r.refund_cents) })) : null,
         ['pending', 'confirmed', 'awaiting_payment'].includes(r.status) ? h('div', null, h('button', { type: 'button', class: 'btn', id: 'l-cancel', onclick: async () => {
           try {
             const c = await call('POST', `/requests/${encodeURIComponent(ref.value.trim())}/cancel`, { email: email.value.trim() });
             await check();
             if (c.message) put(out, h('p', { role: 'status' }, c.message));
-            else if (c.refund_percent !== undefined && r.amount_cents && (r.status === 'confirmed' || c.refund_cents)) put(out, h('p', { role: 'status' }, c.refund_cents ? `Canceled. ${c.refund_percent}% refunded: ${money(c.refund_cents)}.` : T('Canceled. This was inside the no-refund window, so nothing is refunded.')));
+            else if (c.refund_percent !== undefined && r.amount_cents && (r.status === 'confirmed' || c.refund_cents)) put(out, h('p', { role: 'status' }, c.refund_cents ? TF('Canceled. {p}% refunded: {m}.', { p: c.refund_percent, m: money(c.refund_cents) }) : T('Canceled. This was inside the no-refund window, so nothing is refunded.')));
           } catch (err) { clear(out).append(h('p', { class: 'error-box', role: 'alert' }, err.message)); }
         } }, r.amount_cents && r.status === 'confirmed' ? T('Cancel and refund under the policy') : T('Cancel this request'))) : null));
     } catch (_) { out.append(h('p', { class: 'error-box', role: 'alert' }, T('We could not find a booking with that reference and email.'))); }
@@ -498,20 +503,20 @@ async function main() {
             const r = await call('POST', `/lesson-basket/${basketRef}/status`, { email: saved });
             if (r.status === 'paid') {
               clear(banner).append(h('h2', null, T('You are booked')), h('ul', { class: 'booked-list' }, r.lessons.map((x) => h('li', null, `${x.product}, ${dayLong(x.starts_at.slice(0, 10))} at ${clock(x.starts_at)}. ${T('Reference')} `, h('strong', null, x.reference)))),
-                h('p', { class: 'muted small' }, 'Each family gets an email with a private link for every student: check in, see the details and change the date there.'));
+                h('p', { class: 'muted small' }, T('Each family gets an email with a private link for every student: check in, see the details and change the date there.')));
               return;
             }
-            if (['expired', 'cancelled'].includes(r.status)) { clear(banner).append(h('h2', null, T('Not booked')), h('p', null, `That booking could not be made and any payment is refunded.${callLine}`)); return; }
+            if (['expired', 'cancelled'].includes(r.status)) { clear(banner).append(h('h2', null, T('Not booked')), h('p', null, `${T('That booking could not be made and any payment is refunded.')}${callLine}`)); return; }
           } else {
             const r = await call('POST', `/requests/${paidRef}/status`, { email: saved });
             if (r.status === 'confirmed') { ref.value = paidRef; clear(banner).append(h('h2', null, T('You are booked')), h('p', null, `${r.product}, ${dayLong(r.starts_at.slice(0, 10))} at ${clock(r.starts_at)}.`), h('p', null, T('Your reference is '), h('strong', { class: 'reference' }, paidRef)), h('p', { class: 'muted small' }, T('Keep this reference. You can look up or cancel your booking at the bottom of this page.'))); return; }
-            if (['expired', 'cancelled'].includes(r.status)) { clear(banner).append(h('h2', null, T('Not booked')), h('p', null, `That lesson could not be booked and any payment is refunded.${callLine}`)); return; }
+            if (['expired', 'cancelled'].includes(r.status)) { clear(banner).append(h('h2', null, T('Not booked')), h('p', null, `${T('That lesson could not be booked and any payment is refunded.')}${callLine}`)); return; }
           }
         } catch (_) { /* try again */ }
         await new Promise((r) => setTimeout(r, 2000));
       }
     }
-    clear(banner).append(h('h2', null, T('Thank you')), h('p', null, `Your payment is being processed. Your reference is ${backRef}. Watch for the confirmation email.`));
+    clear(banner).append(h('h2', null, T('Thank you')), h('p', null, TF('Your payment is being processed. Your reference is {r}. Watch for the confirmation email.', { r: backRef })));
   } else {
     if (params.get('cancelled')) topSlot.append(h('p', { class: 'card', role: 'status' }, T('Payment was canceled, so nothing was booked. Pick a lesson to try again.')));
     drawPeople();
