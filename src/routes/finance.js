@@ -326,9 +326,10 @@ router.get('/exports/daily-summary.csv', managers, async (req, res) => {
   const dayOfOrder = new Map(orders.map((o) => [o.id, localDay(o.created_at, t)]));
   for (const o of orders) { const d = day(dayOfOrder.get(o.id)); d.orders += 1; d.gross_sales += o.subtotal_cents; d.discounts += o.discount_cents; d.tax += o.tax_cents; }
   for (const g of await rows(pool, "SELECT i.order_id, SUM(i.unit_price_cents * i.quantity) AS cents FROM order_items i JOIN orders o ON o.id = i.order_id AND o.tenant_id = i.tenant_id WHERE i.tenant_id = ? AND i.line_kind = 'gift_card' AND o.created_at >= ? AND o.created_at < ? GROUP BY i.order_id", [req.auth.tenantId, r.start, r.end])) day(dayOfOrder.get(g.order_id)).gift_cards_sold += Number(g.cents);
-  for (const p of await rows(pool, 'SELECT p.order_id, p.tender, p.amount_cents FROM order_payments p WHERE p.tenant_id = ? AND p.created_at >= ? AND p.created_at < ?', [req.auth.tenantId, r.start, r.end])) {
-    const d = dayOfOrder.has(p.order_id) ? day(dayOfOrder.get(p.order_id)) : null;
-    if (!d) continue;
+  // Takings by the day the money came in (2026.11.11): a payment plan installment charged today counts today, even for
+  // a pass sold last month, so the journal matches payments.csv and the bank deposit.
+  for (const p of await rows(pool, "SELECT p.order_id, p.tender, p.amount_cents, p.created_at FROM order_payments p JOIN orders o ON o.tenant_id = p.tenant_id AND o.id = p.order_id WHERE p.tenant_id = ? AND p.created_at >= ? AND p.created_at < ? AND o.status IN ('paid','refunded')", [req.auth.tenantId, r.start, r.end])) {
+    const d = day(localDay(p.created_at, t));
     if (p.tender === 'comp') d.comps += p.amount_cents; else if (p.tender === 'gift_card') d.gift_card_redeemed += p.amount_cents; else d[p.tender] += p.amount_cents;
   }
   for (const f of await rows(pool, 'SELECT created_at, amount_cents FROM order_refunds WHERE tenant_id = ? AND created_at >= ? AND created_at < ?', [req.auth.tenantId, r.start, r.end])) day(localDay(f.created_at, t)).refunds += f.amount_cents;
