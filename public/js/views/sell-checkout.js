@@ -297,6 +297,9 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   const authCode = input({ name: 'auth_code', maxlength: 40, autocomplete: 'off', placeholder: 'Optional', 'aria-label': 'Approval code' });
   const compReason = select([['', 'Choose a reason'], ...((comp && comp.reasons) || []).map((r) => [r, label(r)])], '', { name: 'comp_reason', 'aria-label': 'Reason this is free' });
   const cardCode = input({ name: 'giftcode', autocomplete: 'off', autocapitalize: 'characters', 'aria-label': 'Gift card code' });
+  // "Other" money (a check, a partner voucher) never reaches the drawer: it needs a reference and a reason (2026.11.11).
+  const otherRef = input({ name: 'other_reference', maxlength: 100, autocomplete: 'off', 'aria-label': 'Reference of the other payment', placeholder: 'Check number, voucher or receipt' });
+  const otherReason = input({ name: 'other_reason', maxlength: 40, autocomplete: 'off', 'aria-label': 'Why it is paid another way', placeholder: 'For example: partner voucher' });
   const payList = h('div', { class: 'stack' });
   const due = h('div', { class: 'basket-total', role: 'status' });
   const changeBig = h('div', { class: 'change-due', role: 'status', hidden: true });
@@ -406,7 +409,12 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       if (t !== null && (t === undefined || t < cents)) throw new Error('The cash handed over is less than the amount');
       if (t && t > cents) p.tendered_cents = t;
     }
-    if (tender === 'card' || tender === 'other') { if (reference.value.trim()) p.reference = reference.value.trim(); }
+    if (tender === 'card') { if (reference.value.trim()) p.reference = reference.value.trim(); }
+    if (tender === 'other') {
+      if (!otherRef.value.trim()) throw new Error('Enter the reference: the check number, voucher or receipt');
+      if (!otherReason.value.trim()) throw new Error('Say why this is paid another way');
+      p.reference = otherRef.value.trim(); p.reason = otherReason.value.trim();
+    }
     if (tender === 'card') {
       const last4 = cardLast4.value.trim();
       if (last4 && !/^\d{4}$/.test(last4)) throw new Error('Enter just the last four digits of the card, or leave it blank');
@@ -429,7 +437,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       toast(`Gift card balance after this: ${money(card.balance_cents - cents)}`);
     }
     payments.push(p);
-    tendered.value = ''; reference.value = ''; cardCode.value = ''; cardLast4.value = ''; authCode.value = ''; cardBrand.value = ''; compReason.value = '';
+    tendered.value = ''; reference.value = ''; otherRef.value = ''; otherReason.value = ''; cardCode.value = ''; cardLast4.value = ''; authCode.value = ''; cardBrand.value = ''; compReason.value = '';
     drawPayments();
   }
   // Cash: one tap for the note handed over; the change shows in large type.
@@ -460,7 +468,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
           h('details', { class: 'more-pay' }, h('summary', null, 'Card taken another way'), h('div', { class: 'stack' }, h('div', { class: 'form' }, field('Last 4 digits', cardLast4), field('Card brand', cardBrand), field('Approval code', authCode), field('Card reference', reference)), h('div', { class: 'row' }, take('Record card'))))];
       },
       gift_card: () => [h('div', { class: 'form' }, field('Amount', amount), field('Gift card code', cardCode)), basket.some((l) => l.type === 'gift_card') ? h('p', { class: 'muted small' }, 'A gift card cannot be used to buy another gift card.') : null, h('div', { class: 'row' }, take('Use gift card'))],
-      other: () => [h('div', { class: 'form' }, field('Amount', amount), field('Reference', reference)), h('div', { class: 'row' }, take('Record payment'))],
+      other: () => [h('div', { class: 'form' }, field('Amount', amount), field('Reference', otherRef), field('Reason', otherReason)), h('p', { class: 'muted small' }, 'Money taken another way does not go in the drawer. Counter staff can record it up to the comp limit; above that, a manager.'), h('div', { class: 'row' }, take('Record payment'))],
       comp: () => [h('div', { class: 'form' }, field('Amount', amount), field('Reason', compReason, comp && comp.counter_limit_cents ? undefined : 'Managers only')), h('div', { class: 'row' }, take('Give free of charge'))],
     };
     appendAll(clear(panel), forms[way]()); // built on demand: each field lives in one place at a time

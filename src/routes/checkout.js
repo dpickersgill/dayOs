@@ -104,6 +104,7 @@ const paymentSchema = z.object({
   tendered_cents: z.number().int().min(1).max(10_000_000).optional(), // cash handed over, when it is more than the amount (change is due)
   reference: z.string().max(100).optional(),
   code: z.string().max(40).optional(), // gift card code
+  reason: z.string().trim().max(40).optional(), // why a payment was taken another way (tender 'other'), kept as its comp_reason
   terminal_payment_id: z.number().int().positive().optional(), // a card taken on the counter's card reader (routes/terminal.js)
 });
 
@@ -408,6 +409,8 @@ async function runSale(conn, req, body, { check = false } = {}) {
     const compPaid = body.payments.filter((p) => p.tender === 'comp').reduce((n, p) => n + p.amount_cents, 0);
     if (giftPaid + compPaid > t.total - t.giftCents) throw bad('A gift card or a comp cannot be used to buy a gift card');
     // Free of charge: managers always; counter staff only up to the limit the manager has set (default none).
+    // "Other" money never reaches the drawer: a reference and a reason, and within the counter comp limit (lib/tenders.js).
+    if (!check) require('../lib/tenders').checkOther(req, tenant, body.payments.filter((p) => p.tender === 'other').map((p) => ({ ...p, reason: p.reason || '' })), compPaid);
     if (compPaid && !['owner', 'manager'].includes(req.auth.role) && compPaid > tenant.comp_counter_limit_cents) throw forbidden(compPaid && tenant.comp_counter_limit_cents ? `Counter staff can comp up to ${money(tenant.comp_counter_limit_cents)}. Ask a manager.` : 'Only a manager can give things away free of charge');
 
     // ---- a partner pass day: the photo ID was checked, when the program asks for it, and never on a quick sale
@@ -812,7 +815,7 @@ async function runSale(conn, req, body, { check = false } = {}) {
         continue;
       }
       await conn.query('INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, tendered_cents, reference, gift_card_id, card_brand, card_last4, auth_code, processor, comp_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [tenantId, orderId, p.tender, p.amount_cents, p.tendered_cents ?? null, p.reference ?? null, cardId, p.card_brand ?? null, p.card_last4 ?? null, p.auth_code ?? null, p.processor ?? null, p.comp_reason ?? null]);
+        [tenantId, orderId, p.tender, p.amount_cents, p.tendered_cents ?? null, p.reference ?? null, cardId, p.card_brand ?? null, p.card_last4 ?? null, p.auth_code ?? null, p.processor ?? null, (p.tender === 'other' ? p.reason : p.comp_reason) ?? null]);
     }
 
     await audit(conn, req, 'create', 'orders', orderId, { total_cents: t.total, tickets: done.tickets.length, lessons: done.lessons.length, rentals: done.rentals.length, programs: done.programs.length, activities: done.activities.length, gift_cards: done.gift_cards.length, tenders: body.payments.map((p) => p.tender), tax_cents: t.tax });

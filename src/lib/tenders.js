@@ -12,7 +12,7 @@
 // Giving back: the gift card share goes back on the gift card (never as cash), the comp share gives back nothing, the
 // unpaid share comes off the plan's later installments, and only the free share goes back as cash, card or other.
 const { rows, one } = require('../db');
-const { conflict } = require('./errors');
+const { conflict, bad, forbidden } = require('./errors');
 const { money } = require('./format');
 
 const n = (x) => Number(x || 0);
@@ -103,4 +103,22 @@ async function backOnCards(conn, tenantId, orderId, pays, cents) {
   }
 }
 
-module.exports = { mix, plan, leftOf, backOnCards, lineValue };
+/**
+ * "Other" money (a check, a partner voucher, a payment taken outside the app) never goes in the drawer, so at the counter
+ * it is treated like a comp (2026.11.11): it needs a reference and a reason, and counter staff can record it, together
+ * with any comp on the same sale, only up to the mountain's counter comp limit. Managers and owners always can.
+ * tenant: { comp_counter_limit_cents }. other: [{ amount_cents, reference, reason }]; compCents: comp on the same sale.
+ */
+function checkOther(req, tenant, other, compCents = 0) {
+  if (!other.length) return;
+  for (const p of other) {
+    if (!String(p.reference || '').trim()) throw bad('An "other" payment needs a reference (the check number, voucher or receipt)');
+    if (p.reason !== undefined && !String(p.reason || '').trim()) throw bad('Say why this is paid another way');
+  }
+  const cents = other.reduce((s, p) => s + n(p.amount_cents), 0) + n(compCents);
+  if (['owner', 'manager'].includes(req.auth.role)) return;
+  const limit = n(tenant && tenant.comp_counter_limit_cents);
+  if (cents > limit) throw forbidden(limit ? `Counter staff can record free or "other" payments up to ${money(limit)} on a sale. Ask a manager.` : 'Only a manager can record a payment taken another way. Ask a manager.');
+}
+
+module.exports = { mix, plan, leftOf, backOnCards, lineValue, checkOther };

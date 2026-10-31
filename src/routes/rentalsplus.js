@@ -297,13 +297,15 @@ router.post(
 );
 
 /** Takes payment for a fee (or returns a deposit). Fees become a paid order so they appear in sales reports. */
-router.post('/charges/:id/collect', requireRole(...counter), validate(z.object({ method: z.enum(['cash', 'card', 'other']) })), async (req, res) => {
+router.post('/charges/:id/collect', requireRole(...counter), validate(z.object({ method: z.enum(['cash', 'card', 'other']), reference: z.string().trim().max(100).optional() })), async (req, res) => {
   const { tenantId } = req.auth;
   const id = paramId(req);
   const orderId = await tx(async (conn) => {
     const ch = await one(conn, 'SELECT * FROM rental_charges WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, id]);
     if (!ch) throw notFound('Charge');
     if (ch.status !== 'due') throw conflict(`That charge is already ${ch.status}`);
+    // "Other" money never reaches the drawer: like a waive, counter staff only within the comp limit (lib/tenders.js).
+    if (req.body.method === 'other' && ch.kind !== 'deposit') require('../lib/tenders').checkOther(req, await one(conn, 'SELECT comp_counter_limit_cents FROM tenants WHERE id = ?', [tenantId]), [{ amount_cents: ch.cents, reference: req.body.reference || 'rental charge' }]);
     const contract = await one(conn, 'SELECT person_id FROM rental_contracts WHERE tenant_id = ? AND id = ?', [tenantId, ch.contract_id]);
     // a deposit is held, not sold: record it as paid without creating a sale
     let oid = null;

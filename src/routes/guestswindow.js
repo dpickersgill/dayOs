@@ -448,6 +448,8 @@ router.post('/tickets/:code/change-day', requireRole(...sellers), validate(chang
     }
     if (back) await refundAllowed(conn, req, t.order_id, back);
     if (owed && !b.payment) throw bad(`The new day costs ${money(owed)} more. Take the payment first.`);
+    // "Other" money never reaches the drawer: a reference, and counter staff only within the comp limit (lib/tenders.js).
+    if (owed && b.payment.tender === 'other') require('../lib/tenders').checkOther(req, await one(conn, 'SELECT comp_counter_limit_cents FROM tenants WHERE id = ?', [tenantId]), [{ amount_cents: owed, reference: b.payment.reference }]);
     // move it: the same code, the new day
     const to = addDays(b.date, Math.max(Number(t.valid_days), 1) - 1);
     await conn.query('UPDATE tickets SET valid_from = ?, valid_to = ? WHERE tenant_id = ? AND id = ?', [b.date, to, tenantId, t.id]);

@@ -32,6 +32,7 @@ const orderSchema = z.object({
   channel: z.enum(['window', 'online', 'phone', 'group']).default('window'),
   promo_code: z.string().optional(),
   payment_ref: z.string().max(100).optional(),
+  over_limit_reason: z.string().trim().max(300).optional(), // a manager selling over a day's ticket limit says why
   items: z
     .array(
       z.object({
@@ -49,14 +50,16 @@ const orderSchema = z.object({
  * Create a paid order and issue one ticket per unit (the simple API sale, for integrations; staff use /checkout).
  * Pricing and tax are always computed on the server; the client never supplies a price. Payment is taken outside this
  * service: pass the processor's reference as payment_ref. It is recorded as one 'other' payment, so refunds, drawers and
- * reports treat it like any other sale.
+ * reports treat it like any other sale. Money that never reaches a drawer is a manager's call (2026.11.11): only managers
+ * and owners can use this, and the day ticket limit holds here as it does at the window (over it only with
+ * over_limit_reason, audited).
  */
-router.post('/orders', requireRole(...sellers), validate(orderSchema), async (req, res) => {
+router.post('/orders', requireRole('manager'), validate(orderSchema), async (req, res) => {
   const { tenantId } = req.auth;
   const body = req.body;
 
   const result = await tx(async (conn) => {
-    const tenant = await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId]);
+    const tenant = await one(conn, 'SELECT id, timezone, online_daily_limit FROM tenants WHERE id = ?', [tenantId]);
     const today = todayIn(tenant.timezone);
 
     // The purchaser goes into the shared customer record: an existing customer is reused, a new one is created.
@@ -77,6 +80,10 @@ router.post('/orders', requireRole(...sellers), validate(orderSchema), async (re
       priced.push({ it, product, cents, validOn });
       subtotal += cents * it.quantity;
     }
+    // The day ticket limit (online and window together), under the same lock the window and the shop take.
+    await conn.query('SELECT id FROM tenants WHERE id = ? FOR UPDATE', [tenantId]);
+    const over = await require('../lib/shopsale').overLimits(conn, tenant, priced.map((p) => ({ product: p.product, valid_on: p.validOn, quantity: p.it.quantity })));
+    if (over.length && !body.over_limit_reason) throw conflict(`${over.map((o) => o.words).join(' ')} Only a manager can sell over the limit, and says why.`, { over_limit: over });
 
     let discount = 0;
     let promoCode = null;
@@ -115,6 +122,7 @@ router.post('/orders', requireRole(...sellers), validate(orderSchema), async (re
       }
     }
     await audit(conn, req, 'create', 'orders', o.insertId, { total_cents: total });
+    if (over.length) await audit(conn, req, 'sell_over_limit', 'orders', o.insertId, { reason: body.over_limit_reason, days: over.map((x) => ({ date: x.date, product_id: x.product_id, limit: x.limit, sold: x.sold, wanted: x.wanted })) });
     return { id: o.insertId, person_id: personId, customer: buyer.id ? { id: buyer.id, created: buyer.created, matched: buyer.matched } : null, subtotal_cents: subtotal, discount_cents: discount, tax_cents: tax, total_cents: total, tickets };
   });
 
