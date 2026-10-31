@@ -27,6 +27,9 @@ const is = (r, status, why) => assert.equal(r.status, status, `${why || ''} ${JS
 const codeAt = (secret, offset = 0) => totp.hotp(secret, totp.stepAt(Date.now()) + offset);
 
 test.before(async () => {
+  // These tests start from "no operator yet" (the key adds the first one). On a shared test database, earlier test files
+  // leave operators behind, so turn them off first; nothing outside tests uses this database.
+  await pool.query('UPDATE platform_operators SET active = 0');
   const app = createApp();
   await new Promise((r) => { server = app.listen(0, r); });
   base = `http://127.0.0.1:${server.address().port}`;

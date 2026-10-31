@@ -290,7 +290,11 @@ test('the console: operators open a mountain with a reason, and sign in with a p
   const P = A;
   const plat = (method, path, { session, key, body } = {}) => api(method, `/platform${path}`, { body, headers: { ...(session ? { 'x-platform-session': session } : {}), ...(key ? { 'x-platform-key': key } : {}) } });
   const email = `op-${suffix}@example.test`; const opPw = 'a-long-operator-password';
-  is(await plat('POST', '/operators', { key: KEY, body: { email, name: 'Opal', password: opPw } }), 201);
+  // The key alone adds only the first operator (2026.11.10); on a shared test database one with two-step may exist already.
+  const added = await plat('POST', '/operators', { key: KEY, body: { email, name: 'Opal', password: opPw } });
+  if (added.status === 403) {
+    await pool.query('INSERT INTO platform_operators (email, name, password_hash, password_changed_at, created_by) VALUES (?, ?, ?, UTC_TIMESTAMP(), ?)', [email, 'Opal', await require('bcryptjs').hash(opPw, 12), 'test']);
+  } else is(added, 201);
   const first = await plat('POST', '/login', { body: { email, password: opPw } });
   const secret = first.body.secret;
   const s = (await plat('POST', '/login/setup', { body: { setup_token: first.body.setup_token, code: totp.hotp(secret, totp.stepAt(Date.now())) } })).body.session;

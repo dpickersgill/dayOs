@@ -199,7 +199,13 @@ test('a sign-in without a device id (or with one that is not a device id) is a n
 test('operator sign-in: parallel codes get 5 checks, and the password is never confirmed before the code', async () => {
   const plat = async (p, body) => { const res = await fetch(`${base}/api/v1/platform${p}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-platform-key': 'test-bootstrap-key' }, body: JSON.stringify(body) }); return { status: res.status, body: await res.json() }; };
   const email = `op-${suffix}@example.test`; const opPw = 'operator-password-long';
-  assert.equal((await plat('/operators', { email, name: 'Lock Op', password: opPw })).status, 201);
+  // The key alone adds only the first operator (2026.11.10): on a shared test database another operator may already have
+  // two-step, so add this one directly then.
+  const added = await plat('/operators', { email, name: 'Lock Op', password: opPw });
+  if (added.status === 403) {
+    const { pool } = require('../src/db');
+    await pool.query('INSERT INTO platform_operators (email, name, password_hash, password_changed_at, created_by) VALUES (?, ?, ?, UTC_TIMESTAMP(), ?)', [email, 'Lock Op', await require('bcryptjs').hash(opPw, 12), 'test']);
+  } else assert.equal(added.status, 201);
   const first = await plat('/login', { email, password: opPw });
   const secret = first.body.secret;
   assert.equal((await plat('/login/setup', { setup_token: first.body.setup_token, code: totp.hotp(secret, totp.stepAt(Date.now())) })).status, 200);

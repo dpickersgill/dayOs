@@ -1,6 +1,135 @@
 {
   "releases": [
     {
+      "version": "2026.11.10",
+      "date": "2026-11-01",
+      "title": "Easier sign-in, a Mountain calendar, ready for the busiest morning, and lift checklists by lift type",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Remember me on this device: your mountain and username are filled in next time (never your password), and a link opened in a new tab opens signed in.",
+          "help": "remember-me"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "A tab you have not used for 10 minutes locks itself and asks for your password, passkey or an emailed code; your other tabs keep working. When every tab is idle or closed, you are signed out.",
+          "help": "idle"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Show password: an eye button on every password box, so you can check what you typed.",
+          "help": "sign-in"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Demo mountains now say plainly that they don't send email and hide the email buttons; the check-your-email screen says what to do if nothing arrives.",
+          "help": "email-sign-in"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Where you are signed in shows when each session was last used and when it ends if unused, and no longer lists sessions that have already ended.",
+          "help": "sign-in"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Usernames say they are not case sensitive, the mountain you sign in to is shown with a Change link, and a failed sign-in reminds you to check the mountain name.",
+          "help": "sign-in"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "The Mountain calendar: what is happening at the mountain in one place, by month, week or the next 14 days, filtered to your teams. It gathers closed days, opening and closing day, events, groups, programs, school holidays and holiday weeks, patrol training, maintenance and inspections coming due, and price blackouts, and anyone allowed can add events, meetings, trainings and closures for chosen teams.",
+          "help": "calendar-read"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Coming up on the Today page: the next three days from the Mountain calendar.",
+          "help": "calendar-today"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Put the Mountain calendar on your phone's calendar with a private link you can turn off any time.",
+          "help": "calendar-phone"
+        },
+        {
+          "kind": "new",
+          "app": "conditions",
+          "who": [
+            "staff",
+            "patrol"
+          ],
+          "text": "Lift inspections by lift type: a daily and a weekly checklist for fixed-grip and detachable chairs, gondolas and trams, surface lifts and magic carpets, which your mountain can edit. A failed required item opens a work order and keeps the lift from opening until it passes.",
+          "help": "lift-checks-types"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "One word for a lift's status on every screen (Today, Mountain status, patrol and reports).",
+          "help": "lift-status-words"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "A public status page at /status shows whether the app, the online shop and booking pages, card payments, email and texts are working, with incidents and planned maintenance.",
+          "help": "status-page"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Ready for the busiest morning: one server always warm and up to four at peak, with limits shared across servers so a crew signing in at opening is not slowed down.",
+          "help": "too-many-tries"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "A guest who texts STOP (or START) is recorded on their text consent automatically.",
+          "help": "texts-stop"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Demo mountains now have the guest pages on: a sample waiver, lessons to book and products in the online shop (paying is off).",
+          "help": "demo-guest-pages"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "The app loads faster after the first visit: scripts and styles are kept by release, and images and the QR reader are smaller.",
+          "help": null
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": "platform",
+          "text": "The platform key alone can no longer read a mountain or reset access to one; that needs a named operator or two-step.",
+          "help": null
+        }
+      ]
+    },
+    {
       "version": "2026.11.9",
       "date": "2026-10-30",
       "title": "Lesson planning: plan the season in minutes, spots that follow your staff, and a ski school director login",
