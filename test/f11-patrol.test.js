@@ -379,3 +379,30 @@ test('suspicion: a patient marked entered in error gives back the medication giv
   ok(await api('POST', `/patrol/incidents/${c.id}/patients/${c.pid}/void`, { token: m.pat, body: { reason: 'Wrong patient' } }));
   assert.equal(Number((await q('SELECT quantity FROM patrol_med_stock WHERE id = ?', [lot]))[0].quantity), 5);
 });
+
+// ---------------------------------------------------------------- PATROL-8 (the browser side is checked with Playwright: proof patrol-9)
+test('PATROL-8: /sw.js names this release and keeps its app shell at the /r/<release>/ addresses', async () => {
+  const assets = require('../src/lib/appassets');
+  const res = await fetch(`${base}/sw.js`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'no-cache');
+  assert.match(res.headers.get('content-type'), /javascript/);
+  const text = await res.text();
+  assert.ok(text.includes(`const RELEASE = ${JSON.stringify(assets.RELEASE)};`), 'the release is filled in');
+  const list = JSON.parse(/const SHELL = (\[.*?\]);/.exec(text)[1]);
+  assert.ok(list.includes('/'), 'the app page');
+  assert.ok(list.includes(`${assets.PREFIX}/js/main.js`) && list.includes(`${assets.PREFIX}/js/outbox.js`) && list.includes(`${assets.PREFIX}/css/app.css`), 'scripts and styles at this release');
+  assert.ok(!list.some((u) => u.startsWith('/js/') || u.startsWith('/api/')), 'nothing outside the release addresses, and never the API');
+  assert.match(text, /name !== CACHE\) await caches\.delete/, 'a new release removes the old cache');
+  // the page the shell keeps loads its scripts from the same release
+  const page = await (await fetch(`${base}/`)).text();
+  assert.ok(page.includes(`${assets.PREFIX}/js/main.js`));
+});
+
+test('PATROL-8: the app keeps the sign-in on a network error and clears it only on a real 401', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'public', 'js', 'main.js'), 'utf8');
+  const boot = src.slice(src.indexOf('async function start()'), src.indexOf('/** Opened with no signal'));
+  assert.match(boot, /err && err\.status === 401\) \{\s*session\.clear\(\)/);
+  assert.match(boot, /session\.keptMe\(\)/);
+  assert.match(src, /navigator\.serviceWorker\.register\('\/sw\.js'/);
+});

@@ -122,6 +122,7 @@ function createApp() {
   // (src/lib/appassets.js).
   const assets = require('./lib/appassets');
   const page = assets.page;
+  app.get('/sw.js', assets.serviceWorker); // the service worker, with this release's app shell to keep for no signal (2026.11.11)
   app.use(assets.directPages);
   app.use(assets.releaseFiles);
   app.use(express.static(path.join(__dirname, '..', 'public'), { setHeaders: assets.staticHeaders }));
