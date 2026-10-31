@@ -617,22 +617,19 @@ router.post('/incidents/:id/rentals', patrol, needs('create_case'), validate(z.o
     if (b.patient_id && !(await one(conn, 'SELECT id FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ? AND voided_at IS NULL', [t, id, b.patient_id]))) throw notFound('Patient');
     const it = await one(conn, 'SELECT id, sku, status FROM rental_items WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, b.rental_item_id]);
     if (!it) throw notFound('Rental item');
-    const before = await one(conn, 'SELECT id, voided_at FROM incident_rentals WHERE tenant_id = ? AND incident_id = ? AND rental_item_id = ?', [t, id, it.id]);
-    if (before && !before.voided_at) throw conflict(`${it.sku} is already on this case`);
+    // Gear marked entered in error and then added again gets a new row; the struck-through one stays on the record.
+    const before = await one(conn, 'SELECT id FROM incident_rentals WHERE tenant_id = ? AND incident_id = ? AND rental_item_id = ? AND voided_at IS NULL', [t, id, it.id]);
+    if (before) throw conflict(`${it.sku} is already on this case`);
     const detail = await rentalDetail(conn, t, it.id, b.contract_id || null);
     const settings = await RENTALS.getSettings(conn, t);
     const hold = settings.hold_after_incident;
     const now = nowIn((await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [t])).timezone);
     const vals = [b.patient_id || null, (detail.contract && detail.contract.id) || b.contract_id || null, JSON.stringify(detail), hold ? 1 : 0, it.status, req.auth.userId, now];
-    // Gear marked entered in error and then added again: the same row comes back (one row per item per case); the
-    // earlier marking stays in the audit trail.
-    const [r] = before
-      ? await conn.query('UPDATE incident_rentals SET patient_id = ?, contract_id = ?, detail = ?, held = ?, status_before = ?, added_by = ?, added_at = ?, released_at = NULL, released_by = NULL, inspection_note = NULL, voided_at = NULL, void_reason = NULL, voided_by = NULL WHERE tenant_id = ? AND id = ?', [...vals, t, before.id])
-      : await conn.query('INSERT INTO incident_rentals (tenant_id, incident_id, rental_item_id, patient_id, contract_id, detail, held, status_before, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [t, id, it.id, ...vals]);
+    const [r] = await conn.query('INSERT INTO incident_rentals (tenant_id, incident_id, rental_item_id, patient_id, contract_id, detail, held, status_before, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [t, id, it.id, ...vals]);
     // Back on the rack only after the shop inspects it. Gear still out on the contract goes to the shop when it is returned.
     if (hold && it.status === 'available') await conn.query("UPDATE rental_items SET status = 'maintenance' WHERE tenant_id = ? AND id = ?", [t, it.id]);
     await audit(conn, req, 'add_rental', 'incidents', id, { rental_item_id: it.id, held: hold });
-    return { id: before ? Number(before.id) : r.insertId, held: hold };
+    return { id: r.insertId, held: hold };
   });
   res.status(201).json(out);
 });
@@ -1353,10 +1350,10 @@ async function addResponder(conn, req, id, staffId, role) {
   await editableCase(conn, req, id);
   if (!(await one(conn, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, staffId]))) throw notFound('Staff member');
   if (role === 'lead') await conn.query("UPDATE incident_responders SET role = 'assist' WHERE tenant_id = ? AND incident_id = ? AND role = 'lead' AND voided_at IS NULL", [req.auth.tenantId, id]);
-  // Someone marked entered in error and then added again comes back on the same row (one per person per case); the
-  // earlier marking stays in the audit trail.
+  // Someone marked entered in error and then added again gets a new row: the struck-through one stays on the record with
+  // its reason (one live row per person per case: uq_iresp_live). Adding someone already on the case changes their role.
   const [r] = await conn.query(
-    'INSERT INTO incident_responders (tenant_id, incident_id, staff_id, role) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE role = VALUES(role), voided_at = NULL, void_reason = NULL, voided_by = NULL, id = LAST_INSERT_ID(id)',
+    'INSERT INTO incident_responders (tenant_id, incident_id, staff_id, role) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE role = VALUES(role), id = LAST_INSERT_ID(id)',
     [req.auth.tenantId, id, staffId, role],
   );
   await audit(conn, req, 'add_responders', 'incidents', id, { staff_id: staffId, role });

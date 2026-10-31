@@ -155,9 +155,11 @@ test('witnesses, responders and collision parties are marked entered in error, n
   // a voided lead does not count as the lead
   const sub = await api('POST', `${b}/submit`, { token: pat });
   assert.equal(sub.status, 409); assert.match(sub.text, /led the response/);
-  // named again: back on the record
-  ok(await api('POST', `${b}/responders`, { token: pat, body: { staff_id: patStaff, role: 'lead' } }), 201);
-  assert.equal(ok(await api('GET', b, { token: pat })).responders.find((x) => x.id === r).voided_at, null);
+  // named again: a new row on the record, and the struck-through one stays with its reason (2026.11.11, PATROL-11)
+  const again = ok(await api('POST', `${b}/responders`, { token: pat, body: { staff_id: patStaff, role: 'lead' } }), 201);
+  const after = ok(await api('GET', b, { token: pat })).responders;
+  assert.ok(after.find((x) => x.id === r).voided_at, 'the old row stays struck through');
+  assert.equal(after.find((x) => x.id === again.id).voided_at, null);
   const cf = ok(await api('GET', `${b}/claim-file`, { token: A.owner }));
   assert.ok(cf.report.witnesses.find((x) => x.id === w).voided_at, 'and in the claim file');
 

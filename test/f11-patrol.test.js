@@ -447,3 +447,21 @@ test('PATROL-10: a photo time from the phone must fall in the case window, and w
   assert.equal(cs.photos[0].taken_from, 'phone');
   assert.equal(cs.photos[0].taken_outside, false);
 });
+
+// ---------------------------------------------------------------- PATROL-11
+test('PATROL-11: adding a responder again after an entered-in-error marking makes a new row and keeps the struck one', async () => {
+  const m = await patrolMountain();
+  const s2 = await staff(m, 'Quinn');
+  const c = await readyCase(m.pat);
+  const r = ok(await api('POST', `/patrol/incidents/${c.id}/responders`, { token: m.pat, body: { staff_id: s2, role: 'assist' } }), 201);
+  ok(await api('POST', `/patrol/incidents/${c.id}/responders/${r.id}/void`, { token: m.pat, body: { reason: 'Not on this call' } }));
+  const r2 = ok(await api('POST', `/patrol/incidents/${c.id}/responders`, { token: m.pat, body: { staff_id: s2, role: 'transport' } }), 201);
+  assert.notEqual(r2.id, r.id);
+  // adding the same person again while they are on the case changes their role, still one live row
+  ok(await api('POST', `/patrol/incidents/${c.id}/responders`, { token: m.pat, body: { staff_id: s2, role: 'assist' } }), 201);
+  const cs = ok(await api('GET', `/patrol/incidents/${c.id}`, { token: m.owner }));
+  const rows = cs.responders.filter((x) => x.staff_id === s2);
+  assert.equal(rows.length, 2);
+  assert.equal(rows.filter((x) => !x.voided_at).length, 1);
+  assert.equal(rows.find((x) => x.voided_at).void_reason, 'Not on this call');
+});

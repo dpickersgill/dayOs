@@ -6,6 +6,7 @@
 //   dispatch_calls.sender_hash/ip_hash/flood_of  guest help floods grouped, never refused (PATROL-4).
 //   patrol_kits.changed_at, patrol_kit_checks.applied  a late offline kit check never undoes a newer change (PATROL-6).
 //   incident_media.taken_from/taken_outside  where a photo's time came from (PATROL-10).
+//   incident_responders.live_staff, incident_rentals.live_item  re-adding makes a new row (PATROL-11).
 //   patrol_med_moves/counts.status, witness_*  controlled moves and counts wait for the witness to confirm (PATROL-7).
 module.exports = ({ tableExists, columnExists }) => [
   ['patrol_sweep_marks.resolution', (c) => columnExists(c, 'patrol_sweep_marks', 'resolution'),
@@ -44,6 +45,12 @@ module.exports = ({ tableExists, columnExists }) => [
   // PATROL-10: where a photo's time came from (the photo file, or the phone), and a photo-file time outside the case.
   ['incident_media.taken_from', (c) => columnExists(c, 'incident_media', 'taken_from'),
     "ALTER TABLE incident_media ADD COLUMN taken_from ENUM('photo','phone') NULL, ADD COLUMN taken_outside TINYINT(1) NOT NULL DEFAULT 0"],
+  // PATROL-11: re-adding a responder or rental gear marked entered in error makes a new row; one live row per person or
+  // item per case (the voided ones drop out of the unique key through a stored column that is NULL once voided).
+  ['incident_responders.live_staff', (c) => columnExists(c, 'incident_responders', 'live_staff'),
+    'ALTER TABLE incident_responders ADD COLUMN live_staff BIGINT UNSIGNED AS (IF(voided_at IS NULL, staff_id, NULL)) STORED, DROP KEY uq_iresp, ADD UNIQUE KEY uq_iresp_live (tenant_id, incident_id, live_staff), ADD KEY ix_iresp_staff (tenant_id, staff_id)'],
+  ['incident_rentals.live_item', (c) => columnExists(c, 'incident_rentals', 'live_item'),
+    'ALTER TABLE incident_rentals ADD COLUMN live_item BIGINT UNSIGNED AS (IF(voided_at IS NULL, rental_item_id, NULL)) STORED, DROP KEY uq_irental, ADD UNIQUE KEY uq_irental_live (tenant_id, incident_id, live_item)'],
   ['patrol_kit_checks.applied', (c) => columnExists(c, 'patrol_kit_checks', 'applied'),
     'ALTER TABLE patrol_kit_checks ADD COLUMN applied TINYINT(1) NOT NULL DEFAULT 1'],
 ];
