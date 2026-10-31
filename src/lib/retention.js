@@ -19,7 +19,7 @@ const OSHA_YEARS = 5;
 // patients, care, statements, photos, frozen versions and signatures), what was released to whom, signed waivers and the
 // wording signed, and the audit trail that shows who saw a record. No retention runs out for these on its own.
 const KEEP = new Set(['incidents', 'patrol_scenes', 'patrol_witness_links', 'patrol_records_requests', 'claim_shares', 'claim_share_views',
-  'waivers', 'waiver_signings', 'waiver_texts', 'audit_log']);
+  'waivers', 'waiver_signings', 'waiver_texts', 'audit_log', 'deletion_ledger']);
 const kept = (name) => KEEP.has(name) || name.startsWith('incident_');
 // Kept until OSHA's five years after the year are over, then deleted by the next deletion run.
 const OSHA = ['staff_injuries', 'staff_injury_years'];
@@ -106,6 +106,8 @@ async function deleteClosed(id, record) {
         const [[c]] = await conn.query(`SELECT COUNT(*) AS n FROM ${q(name)} WHERE tenant_id = ?`, [id]);
         if (Number(c.n)) left[name] = Number(c.n);
       }
+      // The ledger row lets a restore from an older backup apply this deletion again (db/deletions.js).
+      await require('./deletions').record(conn, { tenantId: id, kind: 'mountain', refId: id, by: 'operator' });
       if (record) await record(conn, { deleted, kept: left });
       await conn.commit();
       require('./modules').invalidate(id);

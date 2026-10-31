@@ -11,7 +11,7 @@
 //   node scripts/db-runtime-user.js <user>              only refresh the grants (after a migration)
 //   add --dry-run to print the statements without running them
 
-const APPEND_ONLY = ['audit_log', 'platform_audit']; // read and add only: nothing in the app edits or removes audit rows
+const APPEND_ONLY = ['audit_log', 'platform_audit', 'deletion_ledger', 'goodday_consent_events']; // read and add only: nothing in the app edits or removes audit rows
 const RUNTIME = ['SELECT', 'INSERT', 'UPDATE', 'DELETE'];
 const APPEND = ['SELECT', 'INSERT'];
 // What ALL PRIVILEGES means on one table, so a table granted ALL can be trimmed to what the app needs.

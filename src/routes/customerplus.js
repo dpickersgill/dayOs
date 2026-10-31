@@ -11,6 +11,8 @@ const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { VALID } = require('../lib/waivers');
 const { CHANNELS, recordConsent, currentConsent } = require('../lib/consent');
+const personal = require('../lib/personal');
+const ledger = require('../lib/deletions');
 
 const router = express.Router();
 const front = ['manager', 'counter', 'instructor'];
@@ -152,6 +154,7 @@ router.delete('/:id/notes/:noteId', requireRole('manager'), async (req, res) => 
 });
 
 // ---------------------------------------------------------------- one person's data: download it, or anonymise it
+// Both read the registry in lib/personal.js, which lists every table that holds a customer.
 router.get('/:id/data-export', requireRole('manager'), stepUp('download everything about a guest'), async (req, res) => {
   const { tenantId } = req.auth;
   const p = await person(req);
@@ -159,6 +162,7 @@ router.get('/:id/data-export', requireRole('manager'), stepUp('download everythi
   const q = (sql) => rows(pool, sql, [tenantId, id]);
   const record = await one(pool, 'SELECT * FROM people WHERE tenant_id = ? AND id = ?', [tenantId, id]);
   delete record.photo; record.has_photo = Boolean(await one(pool, 'SELECT 1 AS x FROM people WHERE tenant_id = ? AND id = ? AND photo IS NOT NULL', [tenantId, id]));
+  const all = await personal.exportOf(pool, tenantId, id);
   const out = {
     exported_at: new Date().toISOString(),
     person: record,
@@ -171,6 +175,9 @@ router.get('/:id/data-export', requireRole('manager'), stepUp('download everythi
     lessons: await q('SELECT b.status, s.starts_at FROM lesson_bookings b JOIN lesson_sessions s ON s.id = b.session_id AND s.tenant_id = b.tenant_id WHERE b.tenant_id = ? AND b.person_id = ? ORDER BY b.id'),
     rentals: await q('SELECT status, checked_out_at, due_at FROM rental_contracts WHERE tenant_id = ? AND person_id = ? ORDER BY id'),
     programs: await q('SELECT e.status, p.name, p.season FROM program_enrollments e JOIN programs p ON p.id = e.program_id AND p.tenant_id = e.tenant_id WHERE e.tenant_id = ? AND e.person_id = ? ORDER BY e.id'),
+    // Every row in every table that holds this person (lib/personal.js), by table name.
+    all_records: all.tables,
+    patrol_records: all.patrol_records,
   };
   await audit(pool, req, 'data_export', 'people', id, null);
   res.set('Content-Type', 'application/json; charset=utf-8').set('Content-Disposition', `attachment; filename="customer-${id}-data.json"`).send(JSON.stringify(out, null, 2));
@@ -178,8 +185,10 @@ router.get('/:id/data-export', requireRole('manager'), stepUp('download everythi
 
 const anonBody = z.object({ confirm: z.literal(true) });
 /**
- * Removes who this person is while keeping what the mountain needs for its books and its legal duties: sales, tickets, rentals
- * and signed waivers stay (with no name attached to them any more), and the consent history stays so the withdrawal is provable.
+ * Removes who this person is everywhere the registry lists (lib/personal.js), including children's allergies, medical
+ * notes and pickup people, contact details on requests and forms, and messages sent. It keeps what the mountain needs for
+ * its books and its legal duties: sales, tickets and rentals (no name on them), signed waivers (the wording, typed name and
+ * signature), patrol care records, the do-not-email list and the consent history. The answer lists what stayed and why.
  */
 router.post('/:id/anonymise', requireRole('manager'), validate(anonBody), async (req, res) => {
   const { tenantId } = req.auth;
@@ -188,25 +197,28 @@ router.post('/:id/anonymise', requireRole('manager'), validate(anonBody), async 
   if (await one(pool, 'SELECT id FROM staff WHERE tenant_id = ? AND person_id = ?', [tenantId, p.id])) throw conflict('That customer is a staff member, so they cannot be anonymised here');
   if (await one(pool, 'SELECT id FROM users WHERE tenant_id = ? AND person_id = ?', [tenantId, p.id])) throw conflict('That customer has a sign-in, so they cannot be anonymised');
   if (await one(pool, "SELECT id FROM rental_contracts WHERE tenant_id = ? AND person_id = ? AND status IN ('out','overdue')", [tenantId, p.id])) throw conflict('This customer still has rental gear out');
-  await tx(async (conn) => {
-    for (const channel of CHANNELS) {
-      const cur = (await currentConsent(conn, tenantId, p.id))[channel];
-      if (cur && cur.status === 'opted_in') await recordConsent(conn, tenantId, p.id, channel, 'opted_out', 'erasure', { userId: req.auth.userId });
-    }
-    await conn.query(`UPDATE people SET first_name = 'Former', last_name = 'customer', email = NULL, phone = NULL, date_of_birth = NULL, sex = NULL, height_in = NULL, weight_lb = NULL,
-      boot_size = NULL, stance = NULL, skier_type = NULL, photo = NULL, address_line1 = NULL, address_line2 = NULL, city = NULL, region = NULL, postal_code = NULL, country = NULL,
-      emergency_name = NULL, emergency_phone = NULL, discipline = NULL, ability_level = NULL, marketing_opt_in = 0, notes = NULL, anonymised_at = NOW() WHERE tenant_id = ? AND id = ?`, [tenantId, p.id]);
-    await conn.query('DELETE FROM person_notes WHERE tenant_id = ? AND person_id = ?', [tenantId, p.id]);
-    await conn.query('DELETE FROM person_flags WHERE tenant_id = ? AND person_id = ?', [tenantId, p.id]);
-    await conn.query('DELETE FROM person_links WHERE tenant_id = ? AND (adult_id = ? OR member_id = ?)', [tenantId, p.id, p.id]);
-    await conn.query('DELETE FROM rental_profiles WHERE tenant_id = ? AND person_id = ?', [tenantId, p.id]);
-    // A signed waiver is the mountain's legal record, so the wording, the typed name and the signature are kept. The contact
-    // details and device of anyone this person signed as are removed.
-    await conn.query('UPDATE waiver_signings SET signer_email = NULL, signer_phone = NULL, ip = NULL, user_agent = NULL WHERE tenant_id = ? AND signer_person_id = ?', [tenantId, p.id]);
-    await conn.query('INSERT INTO person_tombstones (tenant_id, old_id, kept_id, action, done_by) VALUES (?, ?, NULL, ?, ?)', [tenantId, p.id, 'anonymise', req.auth.userId]);
-    await audit(conn, req, 'anonymise', 'people', p.id, null);
-  });
-  res.json({ ok: true, id: p.id });
+  const result = await tx(async (conn) => anonymise(conn, tenantId, p.id, req.auth.userId, req));
+  res.json({ ok: true, id: p.id, kept: result.kept });
 });
 
+/** The erase itself, shared with db/deletions.js (which replays erasures after a restore). */
+async function anonymise(conn, tenantId, personId, userId, req) {
+  for (const channel of CHANNELS) {
+    const cur = (await currentConsent(conn, tenantId, personId))[channel];
+    if (cur && cur.status === 'opted_in') await recordConsent(conn, tenantId, personId, channel, 'opted_out', 'erasure', userId ? { userId } : null);
+  }
+  const who = await personal.identityOf(conn, tenantId, personId);
+  const result = await personal.erase(conn, tenantId, personId, who);
+  await conn.query(`UPDATE people SET first_name = 'Former', last_name = 'customer', email = NULL, phone = NULL, date_of_birth = NULL, sex = NULL, height_in = NULL, weight_lb = NULL,
+    boot_size = NULL, stance = NULL, skier_type = NULL, photo = NULL, address_line1 = NULL, address_line2 = NULL, city = NULL, region = NULL, postal_code = NULL, country = NULL,
+    emergency_name = NULL, emergency_phone = NULL, discipline = NULL, ability_level = NULL, marketing_opt_in = 0, notes = NULL, anonymised_at = COALESCE(anonymised_at, NOW()) WHERE tenant_id = ? AND id = ?`, [tenantId, personId]);
+  if (req) {
+    await conn.query('INSERT INTO person_tombstones (tenant_id, old_id, kept_id, action, done_by) VALUES (?, ?, NULL, ?, ?)', [tenantId, personId, 'anonymise', userId]);
+    await ledger.record(conn, { tenantId, kind: 'anonymise', refId: personId, by: userId });
+    await audit(conn, req, 'anonymise', 'people', personId, { tables: Object.keys(result.changed) });
+  }
+  return result;
+}
+
 module.exports = router;
+module.exports.anonymise = anonymise;

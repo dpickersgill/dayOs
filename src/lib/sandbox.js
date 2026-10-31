@@ -37,7 +37,7 @@ async function purgeTenant(id) {
     if (!t) return false;
     const [tables] = await conn.query(
       `SELECT c.table_name AS t FROM information_schema.columns c JOIN information_schema.tables x ON x.table_schema = c.table_schema AND x.table_name = c.table_name
-       WHERE c.table_schema = DATABASE() AND c.column_name = 'tenant_id' AND x.table_type = 'BASE TABLE' AND c.table_name NOT IN ('tenants', 'sandbox_signups', 'audit_log', 'platform_audit')`,
+       WHERE c.table_schema = DATABASE() AND c.column_name = 'tenant_id' AND x.table_type = 'BASE TABLE' AND c.table_name NOT IN ('tenants', 'sandbox_signups', 'audit_log', 'platform_audit', 'deletion_ledger')`,
     );
     await conn.query('SET FOREIGN_KEY_CHECKS = 0');
     try {

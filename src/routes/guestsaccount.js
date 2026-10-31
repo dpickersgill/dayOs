@@ -14,6 +14,7 @@ const { z, dateStr, validate, todayIn, addDays, nowIn, seasonFor, dayRange } = r
 const { notFound, conflict, bad, unauthorized, forbidden } = require('../lib/errors');
 const { baseUrl } = require('../lib/baseurl');
 const { audit } = require('../lib/audit');
+const { emailRef } = require('../lib/personal');
 const { money, dayText, esc } = require('../lib/format');
 const mailer = require('../lib/mailer');
 const PP = require('../lib/programplus');
@@ -96,7 +97,7 @@ publicRouter.get('/:slug/account', async (req, res) => {
     }
   }
   const last = await lastOrder(t.id, email, hh);
-  await audit(pool, system(t.id), 'account_view', 'people', null, { email });
+  await audit(pool, system(t.id), 'account_view', 'people', null, { email_ref: emailRef(email) });
   const meRow = hh.primary ? await one(pool, 'SELECT first_name, last_name, phone FROM people WHERE tenant_id = ? AND id = ?', [t.id, hh.primary]) : null;
   const day = await rows(pool, "SELECT id, name, base_price_cents FROM products WHERE tenant_id = ? AND active = 1 AND online = 1 AND kind = 'rental' ORDER BY id LIMIT 1", [t.id]);
   res.json({ mountain: t.name, phone: t.phone, email, today, me: meRow, rental_offered: day.length > 0, lessons_link: `/book/${t.slug}`, members, tickets, rewards, receipts, recaps, renew, rebuy: last ? { people: last.people.map((p) => p.first_name), products: [...new Set(last.lines.map((l) => l.name))] } : null,
@@ -133,7 +134,7 @@ publicRouter.patch('/:slug/account/people/:id', validate(personSchema.partial())
   if (req.body.date_of_birth && req.body.date_of_birth > todayIn(t.timezone)) throw bad('A birthday cannot be in the future');
   await tx(async (conn) => {
     await conn.query(`UPDATE people SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE tenant_id = ? AND id = ?`, [...keys.map((k) => req.body[k]), t.id, id]);
-    await audit(conn, system(t.id), 'account_person_update', 'people', id, { fields: keys, email });
+    await audit(conn, system(t.id), 'account_person_update', 'people', id, { fields: keys, email_ref: emailRef(email) });
   });
   res.json({ ok: true });
 });
@@ -151,7 +152,7 @@ publicRouter.post('/:slug/account/people', validate(personSchema.extend({ adult:
     const [r] = await conn.query(`INSERT INTO people (tenant_id, ${keys.join(', ')}${b.adult && b.email ? ', email' : ''}, source) VALUES (?, ${keys.map(() => '?').join(', ')}${b.adult && b.email ? ', ?' : ''}, 'online')`,
       [t.id, ...keys.map((k) => b[k]), ...(b.adult && b.email ? [b.email] : [])]);
     await HH.link(conn, t.id, hh.primary, r.insertId, !b.adult);
-    await audit(conn, system(t.id), 'account_person_add', 'people', r.insertId, { adult: b.adult, email });
+    await audit(conn, system(t.id), 'account_person_add', 'people', r.insertId, { adult: b.adult, email_ref: emailRef(email) });
     return r.insertId;
   });
   res.status(201).json({ id });
