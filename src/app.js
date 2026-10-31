@@ -183,11 +183,8 @@ function createApp() {
       return res.status(503).json({ ok: false, reason: 'database' });
     }
     // The database is reachable; is it migrated for this version?
-    const { LATEST } = require('./schema');
-    const [r] = LATEST.column
-      ? await pool.query('SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? LIMIT 1', [LATEST.table, LATEST.column])
-      : await pool.query('SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? LIMIT 1', [LATEST.table, LATEST.index]);
-    if (!r.length) return res.status(503).json({ ok: false, reason: 'run npm run migrate', version: release.VERSION });
+    // Every step of this release's migration finished (src/lib/schemaready.js), not only its last column.
+    if (!(await require('./lib/schemaready').migrated(pool))) return res.status(503).json({ ok: false, reason: 'run npm run migrate', version: release.VERSION });
     // Staging also says which build it runs, so promote.sh can check it is putting live exactly what was checked.
     return res.json({ ok: true, version: release.VERSION, ...(config.staging ? { stage: 'staging', build: release.BUILD } : {}) });
   });
