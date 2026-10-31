@@ -67,6 +67,8 @@ test.before(async () => {
     res.writeHead(fakeAnswers[kind] || 404, { 'content-type': 'application/json' }).end('{}');
   });
   await new Promise((r) => { fake.listen(FAKE_PORT, '127.0.0.1', r); });
+  // The status page reads every note on the server: start from none (a test database only).
+  await pool.query('DELETE FROM status_notes');
   const app = createApp();
   await new Promise((r) => { server = app.listen(0, r); });
   base = `http://127.0.0.1:${server.address().port}`;
