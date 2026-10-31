@@ -50,7 +50,8 @@ const AREA_PATHS = /^\/api\/v1\/(auth\/|area(\/|$)|whats-new)/;
 const ROOM_PATHS = /^\/api\/v1\/(patrol\/(duty|duty\/sign-in|duty\/sign-out|room|room\/end|alerts\/unsubscribe)|auth\/(me|logout|closing|back|step-up|step-up\/options))$/;
 
 // While two-step is still to be set up, or a temporary password replaced, only these are open.
-const SETUP_PATHS = /\/auth\/(me|logout|closing|back|change-password|mfa\/(setup|enable|status)|passkeys(\/options)?)$/;
+// The second check is open too: adding the first passkey or app needs it (with the password, 2026.11.11).
+const SETUP_PATHS = /\/auth\/(me|logout|closing|back|change-password|step-up(\/options)?|mfa\/(setup|enable|status)|passkeys(\/options)?)$/;
 
 /**
  * Verifies the bearer token, then re-checks the user in the database on every request, so that
@@ -79,7 +80,7 @@ async function authenticate(req, _res, next) {
   let rows;
   try {
     [rows] = await pool.query(
-      `SELECT u.id, u.role, u.staff_id, u.totp_enabled, u.must_change_password, (u.access_ends_on IS NOT NULL AND u.access_ends_on < CURDATE()) AS access_over,
+      `SELECT u.id, u.role, u.staff_id, u.totp_enabled, u.must_change_password, u.access_ends_on, t.timezone AS tenant_timezone,
          ${TIER_SQL}, t.status, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over,
          ${sessions.STATE_SQL}
        FROM users u JOIN tenants t ON t.id = u.tenant_id ${sessions.JOIN_SQL}
@@ -92,7 +93,7 @@ async function authenticate(req, _res, next) {
   const row = rows[0];
   // The server's own record of the session: signed out, idle too long, or ended from elsewhere.
   if (!payload.sid || !Number(row.session_open)) return next(unauthorized('Session ended. Sign in again.'));
-  if (Number(row.access_over)) return next(unauthorized('Your access has ended for the season. Ask a manager if you are coming back.'));
+  if (require('../lib/accessend').over(row.access_ends_on, row.tenant_timezone)) return next(unauthorized('Your access has ended for the season. Ask a manager if you are coming back.'));
   const display = row.session_display || null;
   // A background poll (x-poll: 1) is not someone using the app, so it does not keep the session open. The patrol-room
   // screen is the exception: it stays up all day, and can do nothing but the room's own work (below).

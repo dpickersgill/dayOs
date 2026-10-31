@@ -54,6 +54,12 @@ async function opened(out) {
   await home();
 }
 
+/** Sign out: the server ends this session too, so a copy of it stops working (2026.11.11). */
+async function signOut() {
+  try { await call('POST', '/logout'); } catch (_) { /* already ended */ }
+  signIn('Signed out.');
+}
+
 /** Email, password, then the code from the authenticator app. The platform key is a link underneath, for emergencies. */
 function signIn(message) {
   session = ''; me = { name: '', operator: false };
@@ -144,7 +150,7 @@ async function home() {
   const filter = input({ type: 'search', placeholder: 'Find a mountain', 'aria-label': 'Find a mountain' });
   app.append(h('main', { class: 'platform-box wide stack' },
     h('header', { class: 'row between' }, h('h1', null, 'Mountains'),
-      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), leadsButton(), button('Prospects', () => openProspects({ app, call, session: () => session, back: () => home(), signIn: (m) => signIn(m) }), { small: true }), button('Newsletter', () => openGoodDay({ app, call, session: () => session, back: () => home(), signIn: (m) => signIn(m) }), { small: true }), button('Status page', () => openStatus({ app, call, session: () => session, back: () => home(), signIn: (m) => signIn(m) }), { small: true }), button('Plans and prices', () => billingPlans(), { small: true }), button('Demos', () => demos(), { small: true }), button('Injury report', () => injuryReport(), { small: true }), button('Releases', () => releases(), { small: true }), button('Activity', () => activity(), { small: true }), button('Operators', () => operators(), { small: true }), me.operator ? button('My passkeys', () => myPasskeys(), { small: true }) : null, me.operator ? button('Change my password', () => myPassword(), { small: true }) : null, button('Sign out', () => signIn('Signed out.'), { small: true }))),
+      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), leadsButton(), button('Prospects', () => openProspects({ app, call, session: () => session, back: () => home(), signIn: (m) => signIn(m) }), { small: true }), button('Newsletter', () => openGoodDay({ app, call, session: () => session, back: () => home(), signIn: (m) => signIn(m) }), { small: true }), button('Status page', () => openStatus({ app, call, session: () => session, back: () => home(), signIn: (m) => signIn(m) }), { small: true }), button('Plans and prices', () => billingPlans(), { small: true }), button('Demos', () => demos(), { small: true }), button('Injury report', () => injuryReport(), { small: true }), button('Releases', () => releases(), { small: true }), button('Activity', () => activity(), { small: true }), button('Operators', () => operators(), { small: true }), me.operator ? button('My passkeys', () => myPasskeys(), { small: true }) : null, me.operator ? button('Change my password', () => myPassword(), { small: true }) : null, button('Sign out', () => signOut(), { small: true }))),
     filter, body));
   try {
     const { data: all } = await call('GET', '/tenants');
@@ -657,11 +663,19 @@ async function myPasskeys() {
   };
   draw();
   const name = input({ name: 'name', maxlength: 60, placeholder: 'For example: Work laptop' });
+  // A fresh check first: the code from your app, or (when you have one) one of your passkeys.
+  const code = input({ name: 'code', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6, placeholder: '6 digits' });
   const err = h('div');
   const add = button('Add a passkey on this device', async () => {
     clear(err); add.disabled = true;
     try {
-      const { handle, options } = await call('POST', '/me/passkeys/options');
+      let check = { code: code.value.trim() };
+      if (!check.code && data.length) {
+        const c = await call('POST', '/me/passkeys/check-options');
+        check = { handle: c.handle, response: await passkey.use(c.options) };
+      }
+      const { handle, options } = await call('POST', '/me/passkeys/options', check);
+      code.value = '';
       const { id } = await call('POST', '/me/passkeys', { handle, response: await passkey.create(options), name: name.value.trim() || undefined });
       data = [...data, { id, name: name.value.trim() || 'Passkey', created_at: new Date().toISOString(), last_used_at: null }];
       name.value = ''; toast('Passkey added. From now on, sign in with it.'); draw();
@@ -669,7 +683,7 @@ async function myPasskeys() {
     add.disabled = false;
   }, { kind: 'primary' });
   dialog('My passkeys', h('div', { class: 'stack' }, h('p', null, 'A passkey signs you in with your fingerprint, face or device PIN. Once you have one, the console no longer accepts your password and code, so a phished password is useless. Add one on a second device too, in case you lose one.'),
-    list, passkey.supported() ? h('div', { class: 'form' }, field('Name', name), h('div', { class: 'row' }, add), err) : h('p', { class: 'muted' }, 'This browser cannot make passkeys.')), { wide: true });
+    list, passkey.supported() ? h('div', { class: 'form' }, field('Name', name), field('Code from your authenticator app', code, 'To confirm it is you. With a passkey already, you can leave this empty and use it instead.'), h('div', { class: 'row' }, add), err) : h('p', { class: 'muted' }, 'This browser cannot make passkeys.')), { wide: true });
 }
 
 function myPassword() {

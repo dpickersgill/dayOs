@@ -366,13 +366,18 @@ publicRouter.get('/claim-share/:token', async (req, res) => {
   if (s.passcode_hash) {
     const code = String(req.get('x-share-code') || '').replace(/\D/g, '');
     if (!code) return res.status(401).json({ error: 'Enter the 6-digit passcode the mountain sent you', needs_code: true, kind: s.kind });
+    // Each try is claimed before the passcode is compared (2026.11.11): one UPDATE that only succeeds while tries are left,
+    // so guesses sent all at once get MAX_TRIES comparisons in all, not one each. A right passcode gives its try back.
+    const [claim] = await pool.query('UPDATE claim_shares SET failed_attempts = LAST_INSERT_ID(failed_attempts + 1) WHERE id = ? AND failed_attempts < ?', [s.id, MAX_TRIES]);
+    if (claim.affectedRows !== 1) return res.status(423).json({ error: 'Too many wrong passcodes. Ask the mountain for a new link.' });
+    const used = Number(claim.insertId);
     const want = Buffer.from(s.passcode_hash); const got = Buffer.from(codeHash(token, code));
     if (!crypto.timingSafeEqual(want, got)) {
-      await pool.query('UPDATE claim_shares SET failed_attempts = failed_attempts + 1 WHERE id = ?', [s.id]);
-      const left = MAX_TRIES - Number(s.failed_attempts) - 1;
+      const left = MAX_TRIES - used;
       if (left <= 0) return res.status(423).json({ error: 'Too many wrong passcodes. Ask the mountain for a new link.' });
       return res.status(401).json({ error: `That passcode is not right. ${left} ${left === 1 ? 'try' : 'tries'} left.`, needs_code: true, kind: s.kind });
     }
+    await pool.query('UPDATE claim_shares SET failed_attempts = GREATEST(failed_attempts - 1, 0) WHERE id = ?', [s.id]);
   }
   const data = s.kind === 'claim' ? await sharedClaim(s) : { kind: 'risk', ...(await riskReport(pool, s.tenant_id, s.season, await OPS.clock(pool, s.tenant_id))) };
   await logView(req, s, now);

@@ -62,13 +62,14 @@ async function viewer(db, auth) {
 
 /** The sign-in fields a calendar feed needs, read for one login (null when the login is gone, off or past its access). */
 async function authOfUser(db, tenantId, userId) {
-  const u = await one(db, `SELECT u.id, u.tenant_id, u.role, u.staff_id,
+  const u = await one(db, `SELECT u.id, u.tenant_id, u.role, u.staff_id, u.access_ends_on, t.timezone,
       (u.staff_id IS NOT NULL AND EXISTS (SELECT 1 FROM patrol_members m JOIN staff s2 ON s2.tenant_id = m.tenant_id AND s2.id = m.staff_id AND s2.status = 'active' WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id)) AS on_patrol,
       (SELECT ip.school_access FROM instructor_profiles ip JOIN staff s3 ON s3.tenant_id = ip.tenant_id AND s3.id = ip.staff_id AND s3.status = 'active' WHERE ip.tenant_id = u.tenant_id AND ip.staff_id = u.staff_id) AS school_access
     FROM users u JOIN tenants t ON t.id = u.tenant_id
-    WHERE u.tenant_id = ? AND u.id = ? AND u.active = 1 AND t.status = 'active' AND (u.access_ends_on IS NULL OR u.access_ends_on >= CURDATE())
+    WHERE u.tenant_id = ? AND u.id = ? AND u.active = 1 AND t.status = 'active'
       AND (t.sandbox_expires_at IS NULL OR t.sandbox_expires_at >= NOW())`, [tenantId, userId]);
   if (!u || u.role === 'area') return null; // the ski area's read-only login has no calendar
+  if (require('./accessend').over(u.access_ends_on, u.timezone)) return null; // past their last day, at the mountain
   return { tenantId: Number(u.tenant_id), userId: Number(u.id), role: u.role, staffId: u.staff_id ? Number(u.staff_id) : null, onPatrol: Boolean(Number(u.on_patrol)), schoolLevel: u.role === 'instructor' ? (u.school_access || 'instructor') : null };
 }
 
