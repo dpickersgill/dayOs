@@ -57,4 +57,7 @@ async function save(conn, tenantId, fields) {
   await conn.query(`INSERT INTO school_settings (tenant_id, ${cols}) VALUES (?, ${marks}) ON DUPLICATE KEY UPDATE ${upd}`, [tenantId, ...keys.map((k) => fields[k])]);
 }
 
-module.exports = { DEFAULTS, schema, get, save };
+/** The settings that set instructors' pay: owners and managers change them, a school director does not. */
+const PAY_FIELDS = ['pay_mode', 'lineup_paid', 'lineup_minutes', 'request_bonus_cents'];
+
+module.exports = { DEFAULTS, PAY_FIELDS, schema, get, save };
