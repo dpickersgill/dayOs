@@ -15,7 +15,7 @@ const LV = require('./levels');
 const { allowedOn } = require('./saledays');
 const { priceFrom } = require('./pricing');
 const { staffProblems } = require('./workforce');
-const { teachingStaff, clearanceGaps } = require('./school');
+const { teachingStaff, clearanceGaps, instructorFit, NOT_SET_UP } = require('./school');
 const settings = require('./schoolsettings');
 
 const MAX_TYPES = 6;
@@ -563,7 +563,7 @@ async function undo(conn, tenantId, publishId, userId = null) {
   await one(conn, 'SELECT id FROM lesson_plans WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, pub.plan_id]);
   const later = await one(conn, 'SELECT id FROM lesson_plan_publishes WHERE tenant_id = ? AND plan_id = ? AND id > ? AND undone_at IS NULL LIMIT 1', [tenantId, pub.plan_id, publishId]);
   if (later) throw conflict('Undo the later publish first. Only the most recent publish can be undone.');
-  const kept = []; let removed = 0; let restored = 0; const synced = [];
+  const kept = []; let removed = 0; let restored = 0; const synced = []; const assignLater = [];
   const ids = JSON.parse(pub.created_ids || '[]');
   const befores = JSON.parse(pub.before_rows || '[]');
   // Lock every lesson the undo may touch, then read them and what is booked on them with locking reads (lockedUse): a
@@ -585,6 +585,13 @@ async function undo(conn, tenantId, publishId, userId = null) {
     if (cur && inUse(cur)) { kept.push({ id: b.id, starts_at: cur.starts_at, product: null, booked: Number(cur.booked) }); continue; }
     // A lesson cancelled by hand after the publish stays cancelled (the publish itself never cancels an updated lesson).
     if (cur && b.how === 'updated' && cur.status === 'cancelled' && b.row.status !== 'cancelled') continue;
+    // The instructor it had is checked again before they are put back (2026.11.11): since the publish they may have been
+    // given another lesson at that time, or lost a clearance. If so the lesson goes back with "Assign later".
+    if (b.row.instructor_id && b.row.status !== 'cancelled') {
+      const [fit] = await instructorFit(conn, tenantId, { ...b.row, id: b.id }, { onlyStaffId: b.row.instructor_id, ignoreLessonId: b.id });
+      const hard = fit ? fit.problems.filter((x) => x !== NOT_SET_UP) : ['Not found'];
+      if (hard.length) { assignLater.push({ id: b.id, starts_at: b.row.starts_at, instructor: fit ? fit.name : 'The instructor', problem: hard[0] }); b.row = { ...b.row, instructor_id: null }; }
+    }
     if (b.how === 'deleted' && !cur) {
       const cols = Object.keys(b.row);
       await conn.query(`INSERT INTO lesson_sessions (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, cols.map((c) => b.row[c]));
@@ -608,7 +615,7 @@ async function undo(conn, tenantId, publishId, userId = null) {
   const left = await one(conn, 'SELECT COUNT(*) AS n FROM lesson_plan_publishes WHERE tenant_id = ? AND plan_id = ? AND undone_at IS NULL', [tenantId, pub.plan_id]);
   if (!Number(left.n)) await conn.query("UPDATE lesson_plans SET status = 'draft' WHERE tenant_id = ? AND id = ?", [tenantId, pub.plan_id]);
   if (synced.length) await require('./lessonspots').sync(conn, tenantId, { sessionIds: synced });
-  return { plan_id: pub.plan_id, removed, restored, kept };
+  return { plan_id: pub.plan_id, removed, restored, kept, assign_later: assignLater };
 }
 
 /**

@@ -550,6 +550,7 @@ function undoPublish(id, ctx, after) {
   confirmDialog('Undo this publish?', 'The lessons it made that nobody has booked are removed, and lessons it changed go back to how they were. Anything with a booking stays and is listed.', 'Undo publish', async () => {
     const r = await post(`/skischool/plans/publishes/${id}/undo`, {});
     toast(`Undone: ${plural(r.removed, 'lesson')} removed, ${plural(r.restored, 'lesson')} put back`);
+    if (r.assign_later && r.assign_later.length) dialog('Assign an instructor later', h('div', { class: 'stack' }, h('p', null, 'These lessons went back without their instructor, who is no longer free or cleared for them:'), h('ul', null, r.assign_later.map((k) => h('li', null, `${fmtDateTime(k.starts_at)}: ${k.instructor}. ${k.problem}`)))));
     if (r.kept.length) dialog('Some lessons stayed', h('div', { class: 'stack' }, h('p', null, 'These have bookings, so they stay. Cancel them from Lessons if you need to.'), h('ul', null, r.kept.map((k) => h('li', null, `${k.product || 'Lesson'}, ${fmtDateTime(k.starts_at)}, ${plural(k.booked, 'student')}`)))));
     ctx.plan = await get(`/skischool/plans/${ctx.plan.id}`);
     ctx.redraw();
