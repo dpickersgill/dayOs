@@ -475,7 +475,7 @@ router.post('/tickets/:code/change-day', requireRole(...sellers), validate(chang
       // was paid: a Stripe card through Stripe (retried, never twice), else the desk's card machine, or cash from the
       // cashier's drawer.
       const TD = require('../lib/tenders');
-      const order = await one(conn, 'SELECT * FROM orders WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, t.order_id]);
+      const order = await one(conn, 'SELECT * FROM orders WHERE tenant_id = ? AND id = ?', [tenantId, t.order_id]); // the ticket's row lock is held
       const PPL = require('../lib/paymentplans');
       if (await PPL.charging(conn, tenantId, { orderId: t.order_id })) throw conflict(PPL.BUSY);
       const pays = await rows(conn, 'SELECT * FROM order_payments WHERE tenant_id = ? AND order_id = ? ORDER BY id', [tenantId, t.order_id]);
