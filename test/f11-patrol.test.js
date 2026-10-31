@@ -313,3 +313,17 @@ test('PATROL-6: a kit check sent late with an older time is kept but does not un
   board = ok(await api('GET', '/patrol/kits', { token: m.owner }));
   assert.equal(board.kits.find((k) => k.id === kit.id).status, 'ready');
 });
+
+// ---------------------------------------------------------------- suspicion: a phone clock running fast
+test('suspicion: an entry refused for a future time carries the server clock so the phone can correct and resend it', async () => {
+  const m = await patrolMountain();
+  const c = await readyCase(m.pat);
+  const far = new Date(Date.parse(`${tzNow()}:00Z`) + 3 * 86400000).toISOString().slice(0, 16);
+  const r = await api('POST', `/patrol/incidents/${c.id}/patients/${c.pid}/vitals`, { token: m.pat, body: { taken_at: far, pulse: 80, client_ref: `fast${suffix}` } });
+  assert.equal(r.status, 400);
+  assert.equal(r.body.details.code, 'future_time');
+  assert.equal(r.body.details.field, 'taken_at');
+  assert.match(r.body.details.server_now, /^\d{4}-\d\d-\d\d \d\d:\d\d/);
+  const fixed = await api('POST', `/patrol/incidents/${c.id}/patients/${c.pid}/vitals`, { token: m.pat, body: { taken_at: r.body.details.server_now.replace(' ', 'T').slice(0, 16), pulse: 80, client_ref: `fast${suffix}` } });
+  assert.equal(fixed.status, 201);
+});

@@ -20,7 +20,9 @@ const LEGACY = 'so.patrol.outbox'; // plain text, before 2026.10.16: read once, 
 const BOX = (w) => `so.patrol.outbox.${w}`;
 const COUNTS = 'so.patrol.outbox.counts';
 const KEY_SLOT = 'so.dk';
-const KEEP_HOURS = 72; // an entry nobody has sent in three days is dropped, so patient details do not sit on a phone
+// An entry nobody has sent in three days is kept (sealed) and shown with a warning: it is part of a patient record, so it
+// is never dropped without the patroller seeing it (they send it, or discard it).
+const KEEP_HOURS = 72;
 const listeners = new Set();
 let timer = null;
 let flushing = null;
@@ -100,10 +102,11 @@ export function dropDeviceKey() {
 let memory = null;
 const ready = () => key && keyOwner === who();
 function read() {
-  const cut = Date.now() - KEEP_HOURS * 3600000;
-  memory = (memory || []).filter((x) => Date.parse(x.queued || 0) > cut);
+  memory = memory || [];
   return memory;
 }
+/** Waiting longer than three days: the case strip warns about it. */
+export const isOld = (x) => Date.parse(x.queued || 0) < Date.now() - KEEP_HOURS * 3600000;
 async function persist() {
   const st = store(); const me = who();
   if (!st || !me || !ready()) return; // no key yet: memory only, never in the clear
@@ -186,7 +189,7 @@ export function flush() {
       } catch (err) {
         if (unreachable(err) || err.status === 401) break; // no signal, or signed out: try again later
         // The server refused it (for example the report was locked meanwhile). Keep it, marked, so nothing is silently lost.
-        write(all().map((x) => (x.id === item.id ? { ...x, error: err.message } : x)));
+        write(all().map((x) => (x.id === item.id ? { ...x, error: err.message, details: err.details || null, refused_phone_at: nowStamp() } : x)));
       }
     }
     return sent;
@@ -224,6 +227,26 @@ export function realCaseId(tmp) {
 
 /** Tries a refused entry again (after the report was sent back to draft, say). */
 export function retry(id) { write(all().map((x) => (x.id === id ? { ...x, error: undefined } : x))); schedule(); return flush(); }
+/**
+ * An entry refused because its time is in the future (this phone's clock runs fast): moves its time back by how far the
+ * phone's clock is ahead of the server's, says so on the entry, and sends it again.
+ */
+export function fixClock(id) {
+  const x = all().find((e) => e.id === id);
+  const d = x && x.details;
+  if (!d || d.code !== 'future_time' || !d.field || !x.body || !x.body[d.field]) return retry(id);
+  const ms = (v) => Date.parse(String(v).replace(' ', 'T').slice(0, 19));
+  const ahead = Math.max(0, ms(x.refused_phone_at || x.at || '') - ms(d.server_now)) || 0;
+  let fixed = new Date(ms(x.body[d.field]) - ahead);
+  if (!(fixed.getTime() <= ms(d.server_now))) fixed = new Date(ms(d.server_now));
+  const p2 = (n) => String(n).padStart(2, '0');
+  const stamp = `${fixed.getFullYear()}-${p2(fixed.getMonth() + 1)}-${p2(fixed.getDate())}T${p2(fixed.getHours())}:${p2(fixed.getMinutes())}`;
+  const mins = Math.round(ahead / 60000);
+  write(all().map((e) => (e.id === id ? { ...e, body: { ...e.body, [d.field]: stamp }, error: undefined, details: null, label: `${e.label} (time moved back ${mins} min: this phone's clock was ahead)` } : e)));
+  schedule();
+  return flush();
+}
+
 /** Drops one entry the server refused, after the patroller has seen it. */
 export function discard(id) { write(all().filter((x) => x.id !== id)); }
 
