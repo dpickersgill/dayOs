@@ -761,7 +761,7 @@ async function runSale(conn, req, body, { check = false } = {}) {
         for (const [k, x] of p.reg.parts.entries()) {
           // A pass the cashier was told about is looked up now the child is known: found, or flagged for the first lesson.
           if (x.pass_status === 'claimed') x.pass_status = await PP.passStatus(conn, tenantId, { personId: participant }, (await PP.termStart(conn, tenantId, x.term.id)) || PS.dstr(x.term.starts_on), true);
-          const e = await PS.enroll(conn, tenantId, { program: p.program, term: x.term, group: x.group, personId: participant, guardianId: guardian, priceCents: x.list_cents, discountCents: x.discount_cents || 0, paidCents: paidShare[k], bundleId: p.reg.bundle ? p.reg.bundle.id : null, orderId, mustFit: true, details: PS.detailsOf(p.reg, x, ln) });
+          const e = await PS.enroll(conn, tenantId, { program: p.program, term: x.term, group: x.group, personId: participant, guardianId: guardian, priceCents: x.list_cents, discountCents: x.discount_cents || 0, paidCents: paidShare[k], bundleId: p.reg.bundle ? p.reg.bundle.id : null, orderId, orderItemId: itemId, mustFit: true, details: PS.detailsOf(p.reg, x, ln) });
           const ticket = await PS.issueTicket(conn, tenantId, { program: p.program, group: x.group, personId: participant, orderId, enrollmentId: e.id });
           await audit(conn, req, 'enroll', 'programs', p.program.id, { person_id: participant, term_id: x.term.id, group_id: x.group.id, order_id: orderId, order_item: itemId });
           done.programs.push({ enrollment_id: e.id, program_id: p.program.id, person_id: participant, name: `${p.program.name}: ${x.term.name}, ${PS.WEEKDAYS[x.group.weekday]}s`, ticket: ticket ? ticket.code : null });

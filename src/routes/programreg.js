@@ -263,7 +263,7 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
     const share = p.parts.map((x) => x.list_cents - (x.discount_cents || 0));
     for (const [k, x] of p.parts.entries()) {
       if (x.pass_status === 'claimed') x.pass_status = await PP.passStatus(conn, tenantId, { personId: kid }, (await PP.termStart(conn, tenantId, x.term.id)) || PS.dstr(x.term.starts_on), true);
-      const e = await PS.enroll(conn, tenantId, { program: p.program, term: x.term, group: x.group, personId: kid, guardianId: contact.id, priceCents: x.list_cents, discountCents: x.discount_cents || 0, paidCents: share[k], bundleId: p.bundle ? p.bundle.id : null, orderId, mustFit: true, details: PS.detailsOf(p, x, p.answers) });
+      const e = await PS.enroll(conn, tenantId, { program: p.program, term: x.term, group: x.group, personId: kid, guardianId: contact.id, priceCents: x.list_cents, discountCents: x.discount_cents || 0, paidCents: share[k], bundleId: p.bundle ? p.bundle.id : null, orderId, orderItemId: it.insertId, mustFit: true, details: PS.detailsOf(p, x, p.answers) });
       await PS.issueTicket(conn, tenantId, { program: p.program, group: x.group, personId: kid, orderId, enrollmentId: e.id });
     }
     await audit(conn, { auth: { tenantId, userId: null } }, 'register_online', 'programs', p.program.id, { order_id: orderId, order_item: it.insertId });

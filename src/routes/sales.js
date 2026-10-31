@@ -307,10 +307,20 @@ router.post('/orders/:id/refund', lessonOrder, validate(refundBody), async (req,
       } else if (l.line_kind === 'lesson') {
         await conn.query("UPDATE lesson_bookings SET status = 'cancelled' WHERE tenant_id = ? AND session_id = ? AND person_id = ? AND status = 'booked'", [tenantId, l.session_id, l.person_id]);
       } else if (l.line_kind === 'program') {
-        const e = await one(conn, 'SELECT id, status FROM program_enrollments WHERE tenant_id = ? AND program_id = ? AND person_id = ?', [tenantId, l.program_id, l.person_id]);
-        if (e && e.status !== 'withdrawn') {
-          await conn.query("UPDATE program_enrollments SET status = 'withdrawn' WHERE tenant_id = ? AND id = ?", [tenantId, e.id]);
-          if (e.status === 'enrolled') {
+        // Every place sold on this line (each session of a bundle), and never a place from another order (2026.11.11).
+        // Older places carry no line: those of this order for this child and program; older still, the one place.
+        let es = await rows(conn, "SELECT id, status, group_id FROM program_enrollments WHERE tenant_id = ? AND order_item_id = ? AND status <> 'withdrawn' FOR UPDATE", [tenantId, l.id]);
+        if (!es.length && !(await one(conn, 'SELECT id FROM program_enrollments WHERE tenant_id = ? AND order_item_id = ? LIMIT 1', [tenantId, l.id]))) {
+          es = await rows(conn, "SELECT id, status, group_id FROM program_enrollments WHERE tenant_id = ? AND order_id = ? AND program_id = ? AND person_id = ? AND order_item_id IS NULL AND status <> 'withdrawn' FOR UPDATE", [tenantId, orderId, l.program_id, l.person_id]);
+          if (!es.length) es = await rows(conn, "SELECT id, status, group_id FROM program_enrollments WHERE tenant_id = ? AND program_id = ? AND person_id = ? AND order_id IS NULL AND status <> 'withdrawn' LIMIT 1 FOR UPDATE", [tenantId, l.program_id, l.person_id]);
+        }
+        for (const e of es) {
+          await conn.query("UPDATE program_enrollments SET status = 'withdrawn', withdrawn_at = NOW() WHERE tenant_id = ? AND id = ?", [tenantId, e.id]);
+          if (e.status !== 'enrolled') continue;
+          if (e.group_id) {
+            const g = await one(conn, 'SELECT id, term_id FROM program_groups WHERE tenant_id = ? AND id = ?', [tenantId, e.group_id]);
+            if (g) await require('../lib/programsessions').promoteWaitlist(conn, tenantId, g);
+          } else {
             const next = await one(conn, "SELECT id FROM program_enrollments WHERE tenant_id = ? AND program_id = ? AND status = 'waitlist' ORDER BY id LIMIT 1", [tenantId, l.program_id]);
             if (next) await conn.query("UPDATE program_enrollments SET status = 'enrolled' WHERE tenant_id = ? AND id = ?", [tenantId, next.id]);
           }
