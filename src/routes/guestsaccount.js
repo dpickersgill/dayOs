@@ -269,7 +269,7 @@ publicRouter.post('/:slug/reload/check', validate(z.object({ card: z.string().tr
 });
 
 // ---------------------------------------------------------------- gift experiences
-const THEMES = ['First day on snow', 'A Saturday with Grandpa', 'A day on the mountain', 'Learn to ride'];
+const { THEMES, oneLine } = require('../lib/giftthemes');
 const INCLUDES = ['ticket', 'rental', 'lesson'];
 const giftHash = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
 
@@ -282,8 +282,8 @@ async function includesMenu(db, tenantId) {
   return Object.fromEntries(Object.entries({ ticket, rental, lesson }).filter(([, v]) => v && v.cents > 0));
 }
 const giftSchema = z.object({
-  theme: z.string().trim().min(1).max(80), includes: z.array(z.enum(INCLUDES)).max(3).default([]), amount_cents: z.number().int().min(0).max(100000).default(0),
-  from_name: z.string().trim().min(1).max(150), recipient_name: z.string().trim().min(1).max(150), recipient_email: z.string().trim().toLowerCase().email().max(255),
+  theme: z.enum(THEMES), includes: z.array(z.enum(INCLUDES)).max(3).default([]), amount_cents: z.number().int().min(0).max(100000).default(0),
+  from_name: z.string().transform((v) => oneLine(v)).pipe(z.string().min(1, 'Add who the gift is from')), recipient_name: z.string().transform((v) => oneLine(v)).pipe(z.string().min(1, 'Add who the gift is for')), recipient_email: z.string().trim().toLowerCase().email().max(255),
   message: z.string().trim().max(500).optional(), deliver_on: dateStr,
 });
 /** The value of a gift experience: its included items at today's adult price, plus any amount. */
@@ -323,7 +323,7 @@ async function deliver(t, g, base) {
 <tr><td style="padding:20px 24px;font:16px/1.5 Arial,Helvetica,sans-serif;color:#12303a">${esc(g.from_name)} sent you a gift from ${esc(t.name)}: <b>${esc(g.theme)}</b>.${g.message ? `<br><br><i>"${esc(g.message)}"</i>` : ''}</td></tr>
 <tr><td style="padding:0 24px 28px"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#1a5fb4" style="border-radius:6px"><a href="${esc(link)}" style="display:inline-block;padding:14px 22px;font:600 16px Arial,Helvetica,sans-serif;color:#ffffff;text-decoration:none">Open your gift</a></td></tr></table></td></tr>
 </table></td></tr></table></body></html>`;
-  const r = await mailer.send({ tenantId: t.id, to: g.recipient_email, fromName: t.name, subject: `${g.from_name} sent you a gift: ${g.theme}`, text, html, tag: 'gift-experience' });
+  const r = await mailer.send({ tenantId: t.id, to: g.recipient_email, fromName: t.name, subject: `${oneLine(g.from_name)} sent you a gift: ${oneLine(g.theme, 80)}`, text, html, tag: 'gift-experience' });
   if (!r.ok) await pool.query('UPDATE gift_experiences SET delivered_at = NULL WHERE tenant_id = ? AND id = ?', [t.id, g.id]);
   return r.ok;
 }

@@ -177,9 +177,10 @@ const addonSchema = z.object({ product_id: z.number().int().positive(), quantity
 const activitySchema = z.object({ product_id: z.number().int().positive(), valid_on: dateStr, start_time: z.string().trim().max(8).optional(), holder: holderSchema });
 // A gift experience (Guests round 2): a theme, what it includes, who it is for and when it arrives. Its price is worked out
 // on the server (lib routes/guestsaccount.js giftValue); amount_cents is then set from it.
+const { THEMES, oneLine } = require('../lib/giftthemes');
 const experienceSchema = z.object({
-  theme: z.string().trim().min(1).max(80), includes: z.array(z.enum(['ticket', 'rental', 'lesson'])).max(3).default([]), amount_cents: z.number().int().min(0).max(100000).default(0),
-  from_name: z.string().trim().min(1).max(150), recipient_name: z.string().trim().min(1).max(150), recipient_email: z.string().trim().toLowerCase().email().max(255),
+  theme: z.enum(THEMES), includes: z.array(z.enum(['ticket', 'rental', 'lesson'])).max(3).default([]), amount_cents: z.number().int().min(0).max(100000).default(0),
+  from_name: z.string().transform((v) => oneLine(v)).pipe(z.string().min(1, 'Add who the gift is from')), recipient_name: z.string().transform((v) => oneLine(v)).pipe(z.string().min(1, 'Add who the gift is for')), recipient_email: z.string().trim().toLowerCase().email().max(255),
   message: z.string().trim().max(500).optional(), deliver_on: dateStr,
 });
 const giftSchema = z.object({ amount_cents: z.number().int().min(0).max(100000).default(0), recipient_name: z.string().trim().max(150).optional(), message: z.string().trim().max(300).optional(), experience: experienceSchema.optional() });
