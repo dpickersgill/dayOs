@@ -32,6 +32,12 @@ const hero = (name, sub, extra) => h('header', { class: 'hero' }, h('div', { cla
 
 async function start() {
   const t = new URLSearchParams(location.search).get('t');
+  // A second adult confirming their email from the invite (2026.11.11): the link signs them in too.
+  const join = new URLSearchParams(location.search).get('join');
+  if (join) {
+    history.replaceState(null, '', location.pathname);
+    try { const s = await acall('POST', '/account/join', { token: join }); session = s.session; store.set(session); } catch (e) { return signIn(e.message); }
+  }
   if (t) {
     history.replaceState(null, '', location.pathname);
     try { const s = await call('POST', '/session', { token: t }); session = s.session; store.set(session); } catch (e) { return signIn(e.message); }
