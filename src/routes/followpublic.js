@@ -117,6 +117,7 @@ jobs.post('/daily', async (req, res) => {
     out.patrol_day_reminders = await stage('patrol_day_reminders', () => require('./patrolduty').remindAll());
     out.patrol_short_weekend = await stage('patrol_short_weekend', () => require('./patrolcrews').shortAlertAll());
     out.patrol_stock_flags = await stage('patrol_stock_flags', () => require('./patrolmeds').flagAll());
+    out.staff_injury_notices = await stage('staff_injury_notices', () => require('../lib/staffinjury').retryDue(base)); // notices that could not be sent (2026.11.11)
     out.day_records = await stage('day_records', () => require('../lib/dayrecord').runAll());
     out.program_reminders = await stage('program_reminders', () => require('../lib/programplus').remindAll());
     out.lessons = await stage('lessons_daily', () => require('../lib/schooltick').daily());
@@ -145,7 +146,10 @@ jobs.post('/guests', async (req, res) => {
   try {
     const [[got]] = await conn.query("SELECT GET_LOCK('summitops_guests_job', 5) AS ok");
     if (!Number(got.ok)) throw new AppError(409, 'The guests job is already running');
-    res.json(await require('../lib/guesttick').tick());
+    const out = await require('../lib/guesttick').tick();
+    // Staff injury notices whose email could not go out are tried again every 5 minutes (OSHA's 8 and 24 hours).
+    out.staff_injury_notices = await require('../lib/staffinjury').retryDue(baseUrl(req)).catch((e) => ({ error: e.message }));
+    res.json(out);
   } finally {
     await conn.query("SELECT RELEASE_LOCK('summitops_guests_job')").catch(() => {});
     conn.release();

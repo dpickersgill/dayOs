@@ -217,3 +217,74 @@ test('PATROL-14: number boxes (height, weight) are at least 64 px wide, even in 
   const css = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'public', 'css', 'app.css'), 'utf8');
   assert.match(css, /\.input-row input\.short-num[^{]*\{[^}]*min-width:\s*64px/);
 });
+
+// ---------------------------------------------------------------- PATROL-5, DP-9: staff injury notices
+/** Turns email on for one test, with a stand-in Postmark that can be down. */
+async function withMail(fn) {
+  const http = require('node:http');
+  const mailer = require('../src/lib/mailer');
+  const box = { up: true, got: [] };
+  const pm = http.createServer((req, res) => {
+    let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => {
+      if (!box.up) { res.writeHead(503, { 'content-type': 'application/json' }); res.end('{"ErrorCode":503,"Message":"down"}'); return; }
+      box.got.push(JSON.parse(b)); res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ErrorCode":0,"MessageID":"x"}');
+    });
+  });
+  await new Promise((r) => pm.listen(0, '127.0.0.1', r));
+  const was = { base: mailer.settings.apiBase, token: process.env.POSTMARK_SERVER_TOKEN, from: process.env.MAIL_FROM };
+  mailer.settings.apiBase = `http://127.0.0.1:${pm.address().port}`; process.env.POSTMARK_SERVER_TOKEN = 'test'; process.env.MAIL_FROM = 'patrol@example.test';
+  try { await fn(box); } finally {
+    mailer.settings.apiBase = was.base;
+    if (was.token === undefined) delete process.env.POSTMARK_SERVER_TOKEN; else process.env.POSTMARK_SERVER_TOKEN = was.token;
+    if (was.from === undefined) delete process.env.MAIL_FROM; else process.env.MAIL_FROM = was.from;
+    pm.close();
+  }
+}
+
+test('PATROL-5: an OSHA notice that could not be sent is not marked sent, and is sent on the next save or by the job', async () => {
+  const m = await patrolMountain();
+  await withMail(async (box) => {
+    box.up = false;
+    const c = await newCase(m.pat, { severity: 'serious' });
+    const p = ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: m.pat, body: { first_name: 'Lee', last_name: 'Liftop', form: { patient_type: 'staff_work' }, disposition: 'transported_ambulance' } }), 201);
+    const row = (await q('SELECT staff_noted_at, staff_serious_noted_at FROM incident_patients WHERE id = ?', [p.id]))[0];
+    assert.equal(row.staff_noted_at, null, 'not marked sent while Postmark is down');
+    assert.equal(row.staff_serious_noted_at, null);
+    box.up = true;
+    const SI = require('../src/lib/staffinjury');
+    const r = await SI.retryDue('http://app.test');
+    assert.ok(r.sent >= 1);
+    assert.equal(box.got.filter((g) => /OSHA/.test(g.TextBody)).length, 1, 'the OSHA notice went out once');
+    const again = await SI.retryDue('http://app.test');
+    assert.equal(box.got.filter((g) => /OSHA/.test(g.TextBody)).length, 1, 'and only once');
+    assert.equal(again.due >= 0, true);
+  });
+});
+
+test('DP-9: staff injury notices go only to owners and the people named for the register, with no name in the subject', async () => {
+  const m = await patrolMountain();
+  await addUser(m, `mgr@${m.slug}.test`, 'manager');
+  const named = await addUser(m, `hr@${m.slug}.test`, 'manager');
+  const hrId = (await q('SELECT id FROM users WHERE tenant_id = ? AND email = ?', [m.tenantId, `hr@${m.slug}.test`]))[0].id;
+  await q('INSERT INTO staff_injury_access (tenant_id, user_id) VALUES (?, ?)', [m.tenantId, hrId]);
+  assert.ok(named);
+  await withMail(async (box) => {
+    const c = await newCase(m.pat, { severity: 'serious' });
+    ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: m.pat, body: { first_name: 'Erin', last_name: 'Workerdp9', form: { patient_type: 'staff_work' }, disposition: 'transported_ambulance' } }), 201);
+    const to = box.got.map((g) => g.To).sort();
+    assert.deepEqual(to, [`hr@${m.slug}.test`, `owner@${m.slug}.test`]);
+    for (const g of box.got) {
+      assert.doesNotMatch(g.Subject, /Erin|Workerdp9|hospital/);
+      assert.match(g.TextBody, /Erin Workerdp9/, 'the body, to the register people only, names them');
+    }
+  });
+  // A privacy case is never named, not even in the body.
+  const c2 = await newCase(m.pat, { severity: 'minor' });
+  const p2 = ok(await api('POST', `/patrol/incidents/${c2.id}/patients`, { token: m.pat, body: { first_name: 'Pia', last_name: 'Privatedp9', form: { patient_type: 'staff_work' }, disposition: 'treated_released' } }), 201);
+  await q('UPDATE staff_injuries SET privacy_case = 1 WHERE tenant_id = ? AND patient_id = ?', [m.tenantId, p2.id]);
+  await withMail(async (box) => {
+    ok(await api('PATCH', `/patrol/incidents/${c2.id}/patients/${p2.id}`, { token: m.pat, body: { disposition: 'transported_ambulance' } }));
+    assert.ok(box.got.length >= 1);
+    for (const g of box.got) assert.doesNotMatch(`${g.Subject} ${g.TextBody}`, /Pia|Privatedp9/);
+  });
+});
