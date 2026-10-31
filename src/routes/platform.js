@@ -32,7 +32,10 @@ const digest = (s) => crypto.createHash('sha256').update(String(s)).digest();
 //     recorded with that name.
 //   Without PLATFORM_TOTP_SECRET the key works alone, as before.
 const SESSION_HOURS = 2;
-let lastStep = -1; // a code works once
+let lastStep = -1; // a code works once on this server
+// ...and once across every server: each code's time step is claimed in the shared store (lib/ratestore.js), 2026.11.10.
+const stepClaims = require('../lib/ratestore').storeFor('platform-totp-step');
+stepClaims.init({ windowMs: 5 * 60_000 });
 const keyOk = (supplied) => Boolean(config.bootstrapKey) && crypto.timingSafeEqual(digest(supplied || ''), digest(config.bootstrapKey));
 // Sessions are signed with a key of their own (derived from JWT_SECRET), never with the platform key, so holding the
 // platform key does not let anyone make an operator's session. A platform-key session also carries a fingerprint of the
@@ -109,7 +112,7 @@ router.post('/session', validate(z.object({ key: z.string().min(1).max(500), nam
   const secret = process.env.PLATFORM_TOTP_SECRET;
   const step = secret ? totp.verify(secret, req.body.code) : null;
   if (secret && step === null) throw forbidden('That code is not right');
-  if (secret && step <= lastStep) throw forbidden('That code was just used. Wait for the next one.');
+  if (secret && (step <= lastStep || (await stepClaims.increment(String(step))).totalHits > 1)) throw forbidden('That code was just used. Wait for the next one.');
   if (secret) lastStep = step;
   await pool.query('INSERT INTO platform_audit (tenant_id, action, actor, detail) VALUES (NULL, ?, ?, NULL)', ['sign_in', `key: ${req.body.name}`]);
   require('../lib/audit').trail({ console: true, action: 'sign_in', actor: `key: ${req.body.name}`, ip: req.ip || null });
@@ -419,6 +422,7 @@ router.post('/billing/plans/:id/sync', async (req, res) => {
 router.use('/prospects', require('./platformprospects')(log));
 router.use('/outreach', require('./platformoutreach')(log));
 router.use('/goodday', require('./platformgoodday')(log)); // The Good Day newsletter (guests round 2, SITE)
+router.use('/status', require('./status').platformRouter(log)); // the public status page's incidents and maintenance (2026.11.10, READY)
 
 // ---------------------------------------------------------------- website leads (Contact page)
 router.get('/leads', async (req, res) => {

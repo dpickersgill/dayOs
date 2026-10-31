@@ -23,6 +23,8 @@ function recordStart() {
 function shutdown(signal) {
   console.log(`${signal} received, shutting down`);
   server.close(async () => {
+    // With several servers, Cloud Run stops the extra ones when it gets quiet: write the demo usage still in memory first.
+    await require('./lib/demousage').flush().catch(() => {});
     await pool.end().catch(() => {});
     process.exit(0);
   });

@@ -142,6 +142,12 @@ const META = {
     og: 'Careful with guest and patient information',
     crumb: 'Security',
   },
+  status: {
+    title: 'Service Status | Verdynt/OS',
+    description: 'Whether each part of Verdynt/OS is working right now: the app, online shop and booking pages, card payments, email and texts, with incidents and maintenance.',
+    og: 'Is Verdynt/OS working?',
+    crumb: 'Status',
+  },
   contact: {
     title: 'Request a Demo or a Free 14-Day Trial | Verdynt/OS',
     description: 'Book a 20-minute walkthrough of Verdynt/OS, start a 14-day free trial on your own mountain, or join the founding group of independent ski areas.',

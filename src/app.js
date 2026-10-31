@@ -214,10 +214,12 @@ function createApp() {
   const api = express.Router();
   // Responses can hold guest and patient details: tell browsers and proxies never to keep a copy.
   api.use((_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
-  // 10 sign-in attempts a minute per address. LOGIN_RATE_LIMIT exists so automated tests can raise it.
-  api.use('/auth/login', rateLimit({ windowMs: 60_000, max: Number(process.env.LOGIN_RATE_LIMIT) || 10, message: 'Too many login attempts' }));
+  // 10 failed sign-in attempts a minute per address. LOGIN_RATE_LIMIT exists so automated tests can raise it.
+  // Since 2026.11.10 the counts are shared by every server, and a sign-in that works gives its count back
+  // (skipSuccessful), so a crew signing in at opening from the mountain's one address is never turned away.
+  api.use('/auth/login', rateLimit({ windowMs: 60_000, max: Number(process.env.LOGIN_RATE_LIMIT) || 10, message: 'Too many login attempts', skipSuccessful: true }));
   api.use('/auth/mfa', rateLimit({ windowMs: 60_000, max: Number(process.env.LOGIN_RATE_LIMIT) || 20, message: 'Too many attempts' }));
-  api.use(['/auth/passkey', '/auth/pin-login', '/auth/terminal'], rateLimit({ windowMs: 60_000, max: Number(process.env.LOGIN_RATE_LIMIT) || 20, message: 'Too many sign-in attempts' }));
+  api.use(['/auth/passkey', '/auth/pin-login', '/auth/terminal'], rateLimit({ windowMs: 60_000, max: Number(process.env.LOGIN_RATE_LIMIT) || 20, message: 'Too many sign-in attempts', skipSuccessful: true }));
   // Emailed sign-in and reset codes: asking for one is limited per address (each sends an email), and so is trying them.
   api.post('/auth/email-code', rateLimit({ windowMs: 600_000, max: Number(process.env.LOGIN_RATE_LIMIT) || 6, message: 'Too many codes asked for from here. Wait a few minutes, or sign in with your password.' }));
   api.use(['/auth/email-code/verify', '/auth/password-reset'], rateLimit({ windowMs: 60_000, max: Number(process.env.LOGIN_RATE_LIMIT) || 10, message: 'Too many attempts' }));
@@ -258,7 +260,10 @@ function createApp() {
   api.post(['/platform/login', '/platform/login/setup', '/platform/login/passkey', '/platform/login/passkey/options'], rateLimit({ windowMs: 15 * 60_000, max: Number(process.env.PLATFORM_LOGIN_RATE_LIMIT) || 20, message: 'Too many sign-in attempts from this address. Try again in 15 minutes.' }));
   api.use('/platform', rateLimit({ windowMs: 60_000, max: Number(process.env.PLATFORM_RATE_LIMIT) || 60, message: 'Too many attempts' }), platform);
   api.use(site.api); // the website's plans and contact form (no sign-in)
-  api.use('/public', rateLimit({ windowMs: 60_000, max: 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/lostfound').publicRouter, require('./routes/partnerpasses').publicRouter, require('./routes/patrolclaims').publicRouter, require('./routes/patrolscene').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter, require('./routes/rentalforms').publicRouter, require('./routes/schoollineup').publicRouter, require('./routes/schoolparents').publicRouter, require('./routes/schoolpay').publicRouter, require('./routes/schooldirector').publicRouter, require('./routes/guestswindow').publicRouter, require('./routes/guestsaccount').publicRouter, require('./routes/guestsloyalty').publicRouter, require('./routes/guestsfair').publicRouter);
+  // The status page's numbers (no sign-in, nothing about any mountain). Cached for a minute on each server.
+  api.get('/status', rateLimit({ windowMs: 60_000, max: 60, message: 'Too many looks, slow down' }), require('./routes/status').publicStatus);
+  // 120 a minute per address for every guest page. PUBLIC_RATE_LIMIT exists so a load test on staging can raise it (DEPLOY.md).
+  api.use('/public', rateLimit({ windowMs: 60_000, max: Number(process.env.PUBLIC_RATE_LIMIT) || 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/lostfound').publicRouter, require('./routes/partnerpasses').publicRouter, require('./routes/patrolclaims').publicRouter, require('./routes/patrolscene').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter, require('./routes/rentalforms').publicRouter, require('./routes/schoollineup').publicRouter, require('./routes/schoolparents').publicRouter, require('./routes/schoolpay').publicRouter, require('./routes/schooldirector').publicRouter, require('./routes/guestswindow').publicRouter, require('./routes/guestsaccount').publicRouter, require('./routes/guestsloyalty').publicRouter, require('./routes/guestsfair').publicRouter);
   api.use(authRoutes); // login, tenants, users, me (each route applies authenticate itself where needed)
   api.use(require('./routes/security')); // passkeys, the second check, sessions, devices, PINs, terminals (each route authenticates)
 

@@ -8,6 +8,7 @@ import { qr } from './barcode.js';
 import * as passkey from './passkey.js';
 import { openProspects } from './platform-prospects.js';
 import { openGoodDay } from './platform-goodday.js';
+import { openStatus } from './platform-status.js';
 
 const app = document.getElementById('app');
 let session = '';
@@ -141,7 +142,7 @@ async function home() {
   const filter = input({ type: 'search', placeholder: 'Find a mountain', 'aria-label': 'Find a mountain' });
   app.append(h('main', { class: 'platform-box wide stack' },
     h('header', { class: 'row between' }, h('h1', null, 'Mountains'),
-      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), leadsButton(), button('Prospects', () => openProspects({ app, call, session: () => session, back: () => home(), signIn: (m) => signIn(m) }), { small: true }), button('Newsletter', () => openGoodDay({ app, call, session: () => session, back: () => home(), signIn: (m) => signIn(m) }), { small: true }), button('Plans and prices', () => billingPlans(), { small: true }), button('Demos', () => demos(), { small: true }), button('Injury report', () => injuryReport(), { small: true }), button('Releases', () => releases(), { small: true }), button('Activity', () => activity(), { small: true }), button('Operators', () => operators(), { small: true }), me.operator ? button('My passkeys', () => myPasskeys(), { small: true }) : null, me.operator ? button('Change my password', () => myPassword(), { small: true }) : null, button('Sign out', () => signIn('Signed out.'), { small: true }))),
+      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), leadsButton(), button('Prospects', () => openProspects({ app, call, session: () => session, back: () => home(), signIn: (m) => signIn(m) }), { small: true }), button('Newsletter', () => openGoodDay({ app, call, session: () => session, back: () => home(), signIn: (m) => signIn(m) }), { small: true }), button('Status page', () => openStatus({ app, call, session: () => session, back: () => home(), signIn: (m) => signIn(m) }), { small: true }), button('Plans and prices', () => billingPlans(), { small: true }), button('Demos', () => demos(), { small: true }), button('Injury report', () => injuryReport(), { small: true }), button('Releases', () => releases(), { small: true }), button('Activity', () => activity(), { small: true }), button('Operators', () => operators(), { small: true }), me.operator ? button('My passkeys', () => myPasskeys(), { small: true }) : null, me.operator ? button('Change my password', () => myPassword(), { small: true }) : null, button('Sign out', () => signIn('Signed out.'), { small: true }))),
     filter, body));
   try {
     const { data: all } = await call('GET', '/tenants');

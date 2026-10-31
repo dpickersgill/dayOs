@@ -6,9 +6,30 @@
 # command that switches back to the version before.
 #   bash promote.sh --allow-older   put an older release live on purpose (it must be on staging first)
 #   bash promote.sh --yes           skip the typed confirmation (for an automated Sunday deploy)
+#
+# Servers (2026.11.10): the live site keeps one server always running, so the first guest of the morning never waits
+# for one to start, and grows to at most LIVE_MAX_SERVERS (default 4) when it is busy. Each server opens at most
+# LIVE_DB_POOL (default 8) database connections. DEPLOY.md, "Servers and database connections", has the math.
 set -euo pipefail
 DAYOS_TARGET=summitops-staging
 source "$(dirname "$0")/scripts/cloud-common.sh"
+
+LIVE_MIN_SERVERS="${LIVE_MIN_SERVERS:-1}"
+LIVE_MAX_SERVERS="${LIVE_MAX_SERVERS:-4}"
+LIVE_DB_POOL="${LIVE_DB_POOL:-8}"
+# Connections the database server must hold at the busiest moment: every live server full, staging (at most 2 servers
+# x 4, during a load test), and 4 more for a migration and the Cloud SQL proxy in Cloud Shell. Cloud SQL's smallest MySQL servers allow
+# 250; DB_CONNECTION_BUDGET keeps well under that, because each connection also takes memory on a small server.
+DB_CONNECTION_BUDGET="${DB_CONNECTION_BUDGET:-60}"
+NEEDED=$(( LIVE_MAX_SERVERS * LIVE_DB_POOL + 8 + 4 ))
+if [ "$LIVE_MIN_SERVERS" -gt "$LIVE_MAX_SERVERS" ] || [ "$LIVE_MAX_SERVERS" -lt 1 ]; then
+  echo "LIVE_MIN_SERVERS ($LIVE_MIN_SERVERS) must be 0 or more and no more than LIVE_MAX_SERVERS ($LIVE_MAX_SERVERS)."; exit 1
+fi
+if [ "$NEEDED" -gt "$DB_CONNECTION_BUDGET" ]; then
+  echo "$LIVE_MAX_SERVERS servers x $LIVE_DB_POOL connections, plus staging and tools, is $NEEDED database connections, more than the budget of $DB_CONNECTION_BUDGET."
+  echo "Lower LIVE_MAX_SERVERS or LIVE_DB_POOL, or read DEPLOY.md (Servers and database connections) before raising DB_CONNECTION_BUDGET."
+  exit 1
+fi
 
 YES=""; PASS=()
 for a in "$@"; do case "$a" in --yes) YES=1 ;; *) PASS+=("$a") ;; esac; done
@@ -59,13 +80,15 @@ if secret_exists summitops-db-migrator && [ "$(envval DB_USER)" = summitops_app 
 fi
 
 step "Putting it live (this takes a minute or two)"
-# The same image staging ran. At most 4 servers (so the database never runs out of connections), 8 connections each,
-# 1 GiB each, 15-minute requests for the daily job, and a faster start. In season, add --min-instances=1.
+# The same image staging ran. One server always warm (LIVE_MIN_SERVERS), up to LIVE_MAX_SERVERS at peak, LIVE_DB_POOL
+# database connections each, 1 GiB each, 15-minute requests for the daily job, and a faster start. Rate limits are
+# counted in the database (rate_limits, migrated above), so they hold across every server.
 SA_FLAG=()
 if gcloud iam service-accounts describe "$RUN_SA" >/dev/null 2>&1; then SA_FLAG=(--service-account "$RUN_SA"); fi
+echo "Servers: $LIVE_MIN_SERVERS always running, at most $LIVE_MAX_SERVERS, $LIVE_DB_POOL database connections each ($NEEDED at most, with staging and tools)."
 gcloud run deploy "$SERVICE" --image "$IMAGE" --region "$REGION" --quiet "${SA_FLAG[@]}" \
-  --max-instances=4 --concurrency=40 --memory=1Gi --cpu-boost --timeout=900 \
-  --update-env-vars "DB_POOL=8,DEPLOYED_BY=$(gcloud config get-value account 2>/dev/null || echo unknown)"
+  --min-instances="$LIVE_MIN_SERVERS" --max-instances="$LIVE_MAX_SERVERS" --concurrency=40 --memory=1Gi --cpu-boost --timeout=900 \
+  --update-env-vars "DB_POOL=$LIVE_DB_POOL,RATE_STORE=mysql,DEPLOYED_BY=$(gcloud config get-value account 2>/dev/null || echo unknown)"
 
 step "Checking the live site"
 load_service

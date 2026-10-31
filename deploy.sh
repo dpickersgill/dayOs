@@ -47,9 +47,11 @@ npm run migrate
 
 step "Deploying to staging (this takes a few minutes)"
 # One server is plenty for checking a release, and it shuts down when nobody is using it, so staging costs almost nothing.
+# Staging stays at no server when idle (--min-instances=0); only the live site keeps one warm (promote.sh). For a load
+# test on staging (scripts/loadtest.js), deploy with STAGING_MAX_SERVERS=2 to check the shared rate limits across servers.
 gcloud run deploy "$SERVICE" --source . --region "$REGION" --quiet --service-account "$STAGING_SA" \
-  --min-instances=0 --max-instances=1 --concurrency=40 --memory=1Gi --cpu-boost --timeout=900 \
-  --update-env-vars "DB_POOL=4,DEPLOYED_BY=$(gcloud config get-value account 2>/dev/null || echo unknown)"
+  --min-instances=0 --max-instances="${STAGING_MAX_SERVERS:-1}" --concurrency=40 --memory=1Gi --cpu-boost --timeout=900 \
+  --update-env-vars "DB_POOL=4,RATE_STORE=mysql,DEPLOYED_BY=$(gcloud config get-value account 2>/dev/null || echo unknown)"
 
 step "Checking staging"
 load_service
