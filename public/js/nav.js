@@ -15,8 +15,8 @@ export const GROUPS = [
   ['Office', 'office', ['catalog', 'money', 'workforce', 'messages', 'documents']],
 ];
 export const GROUP_OF = Object.fromEntries(GROUPS.flatMap(([name, id, keys]) => keys.map((k) => [k, { id, name }])));
-const START = ['dashboard', 'inbox', 'myshifts'];
-const MINE = ['inbox', 'myshifts']; // always in a role menu, after the role's own apps
+const START = ['dashboard', 'calendar', 'inbox', 'myshifts'];
+const MINE = ['inbox', 'myshifts', 'calendar']; // always in a role menu, after the role's own apps (Calendar: 2026.11.10)
 const BOTTOM = ['settings', 'help'];
 const PHONE_FIRST = ['dashboard', 'sell', 'gate', 'patrol', 'area', 'school', 'conditions', 'myshifts'];
 
@@ -45,7 +45,8 @@ const ALSO = {
   assets: 'fleet vehicles trucks groomers equipment maintenance parts inventory stock purchase orders vendors fuel inspection qr tag registration insurance warranty depreciation',
   waivers: 'waiver release liability sign signature signed guardian minor consent form',
   lostfound: 'lost found missing handed in phone wallet keys gloves goggles claim return guest services',
-  myshifts: 'my schedule clock in out', settings: 'account setup password security two-step passkey profile mountain team logins billing subscription plan invoice menus',
+  myshifts: 'my schedule clock in out', calendar: 'mountain calendar events meetings training closures holidays groups what is happening this week month ics phone',
+  settings: 'account setup password security two-step passkey profile mountain team logins billing subscription plan invoice menus',
   help: 'how to guide instructions support questions articles',
 };
 const RECENT_KEY = 'so.recent';

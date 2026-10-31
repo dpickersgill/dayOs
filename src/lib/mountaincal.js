@@ -178,7 +178,7 @@ const SOURCES = [
     FROM program_sessions s JOIN programs p ON p.tenant_id = s.tenant_id AND p.id = s.program_id
     WHERE s.tenant_id = ? AND s.starts_at >= ? AND s.starts_at < ? GROUP BY p.id, p.name, DATE(s.starts_at) ORDER BY on_date, start_t LIMIT 400`, [t, `${from} 00:00:00`, `${addDays(to, 1)} 00:00:00`]))
     .map((s) => { const off = Number(s.running) === 0; return item({ id: `program:${s.id}:${ymd(s.on_date)}`, source: 'programs', source_label: 'Programs', kind: off ? 'closure' : 'event',
-      title: `${off ? 'Cancelled: ' : ''}${s.name}`, starts_on: ymd(s.on_date), all_day: false, start_time: hhmm(s.start_t), end_time: hhmm(s.end_t), teams: ['ski_school', 'front_desk'], link: `#/programs/${s.id}` }); })],
+      title: `${off ? 'Canceled: ' : ''}${s.name}`, starts_on: ymd(s.on_date), all_day: false, start_time: hhmm(s.start_t), end_time: hhmm(s.end_t), teams: ['ski_school', 'front_desk'], link: `#/programs/${s.id}` }); })],
   // School holidays (Ski school, Planning).
   ['school', async (db, t, from, to) => (await rows(db, 'SELECT id, on_date, name FROM school_holidays WHERE tenant_id = ? AND on_date BETWEEN ? AND ? ORDER BY on_date LIMIT 200', [t, from, to]))
     .map((d) => item({ id: `holiday:${d.id}`, source: 'school', source_label: 'School holiday', kind: 'other', title: `School holiday: ${d.name}`, starts_on: ymd(d.on_date), teams: ['ski_school', 'front_desk'], link: '#/school?tab=plan&view=season' }))],
