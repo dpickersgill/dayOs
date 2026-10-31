@@ -1009,3 +1009,47 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 .sn-panel.sm:before{top:-14px;height:14px}
 .sn-panel.sm .sn-sols{grid-template-columns:minmax(0,1fr)}
 @media print{.sf-gd,.gd-card,.gd-end{display:none!important}}
+
+/* ---------------------------------------------------------------- the status page (/status, 2026.11.10 READY)
+   Each part as a row with its state word, a 90-day strip of small day marks, then the notes. Color is never the only
+   signal: every state has its word, and each day mark has a hidden label for screen readers. */
+.st{--st-ok:var(--spruce);--st-slow:#B7791F;--st-down:var(--patrol);--st-maint:var(--trail);--st-unknown:var(--line2);max-width:880px}
+.st-sum{display:flex;align-items:center;gap:14px;padding:18px 20px;border-radius:var(--r);background:var(--white);border:1.5px solid var(--line)}
+.st-sum p{margin:0;display:flex;flex-direction:column}
+.st-sum b{font-size:22px;line-height:1.3}
+.st-sum span{font-size:15px;color:var(--muted)}
+.st-dot{flex:none;width:14px;height:14px;border-radius:50%;background:var(--st-ok)}
+.st-sum.st-slow{border-color:var(--st-slow)}
+.st-slow>.st-dot,.st-part.st-slow .st-dot{background:var(--st-slow)}
+.st-down>.st-dot,.st-part.st-down .st-dot{background:var(--st-down)}
+.st-maintenance>.st-dot,.st-part.st-maintenance .st-dot{background:var(--st-maint)}
+.st-part.st-unknown .st-dot{background:var(--st-unknown)}
+.st-sum.st-down{border-color:var(--st-down)}
+.st-parts{list-style:none;margin:22px 0 0;padding:0;display:grid;gap:12px}
+.st-part{padding:16px 18px;border-radius:var(--r);background:var(--white);border:1px solid var(--line)}
+.st-row{display:flex;align-items:flex-start;gap:12px}
+.st-row .st-dot{margin-top:7px}
+.st-row>div{flex:1;min-width:0}
+.st-row h3{margin:0;font-size:18px;line-height:1.4}
+.st-row p{margin:0;font-size:15px;color:var(--muted)}
+.st-row>b{flex:none;font-size:16px;white-space:nowrap}
+.st-part.st-down .st-row>b{color:var(--st-down)}
+.st-days{list-style:none;margin:12px 0 0;padding:0;display:grid;grid-template-columns:repeat(90,minmax(0,1fr));gap:1px;height:26px}
+.st-days li{background:var(--st-ok);border-radius:2px;opacity:.75}
+.st-days li.st-slow{background:var(--st-slow);opacity:1}
+.st-days li.st-down{background:var(--st-down);opacity:1}
+.st-scale{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-top:4px}
+.st-sec{margin-top:34px}
+.st-sec h2{font-size:24px;margin:0 0 10px}
+.st-note{padding:14px 18px;border-left:4px solid var(--st-slow);background:var(--white);border-radius:0 var(--r-sm) var(--r-sm) 0;margin:0 0 10px}
+.st-note.st-maintenance{border-left-color:var(--st-maint)}
+.st-note h3{margin:0;font-size:18px}
+.st-note p{margin:6px 0 0;font-size:16px}
+.st-meta{color:var(--muted);font-size:15px!important}
+.st-none{color:var(--muted)}
+.st-help{margin-top:30px;font-size:16px;color:var(--ink2)}
+@media (max-width:560px){
+  .st-row{flex-wrap:wrap}
+  .st-row>b{width:100%;padding-left:26px}
+  .st-days{height:22px;gap:0}
+}

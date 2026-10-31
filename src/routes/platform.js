@@ -419,6 +419,7 @@ router.post('/billing/plans/:id/sync', async (req, res) => {
 router.use('/prospects', require('./platformprospects')(log));
 router.use('/outreach', require('./platformoutreach')(log));
 router.use('/goodday', require('./platformgoodday')(log)); // The Good Day newsletter (guests round 2, SITE)
+router.use('/status', require('./status').platformRouter(log)); // the public status page's incidents and maintenance (2026.11.10, READY)
 
 // ---------------------------------------------------------------- website leads (Contact page)
 router.get('/leads', async (req, res) => {

@@ -26,6 +26,8 @@ const PAGES = {
   pricing: 'pricing', security: 'security', contact: 'contact', privacy: 'privacy', terms: 'terms',
   // For owners, GMs and insurers: the record, the claim file, the documentation score and the season risk report.
   'ski-area-risk-management': 'risk',
+  // Is everything working: live checks, incidents and planned maintenance (2026.11.10, lib/status.js).
+  status: 'status',
 };
 // The pages written for one search each ("ski school software"), linked from the menu and the footer.
 const SOLUTIONS = [['ski-patrol', 'Ski patrol'], ['lift-ticket-software', 'Lift tickets and passes'], ['ski-school-software', 'Ski school'],
@@ -147,6 +149,7 @@ const FOOTER = `<footer class="sf">
           <li><a href="{{SITE}}/ski-area-risk-management">For owners and insurers</a></li>
           <li><a href="{{SITE}}/pricing">Pricing</a></li>
           <li><a href="{{SITE}}/security">Security</a></li>
+          <li><a href="{{SITE}}/status">Status</a></li>
           <li><a href="{{SITE}}/resources">Guides and checklists</a></li>
           <li><a href="{{SITE}}/good-day">The Good Day newsletter</a></li>
           <li><a href="{{SITE}}/about">About</a></li>
@@ -277,7 +280,7 @@ async function render(req, name, slug, words = null) {
     .replace('<!--FOOTER-->', FOOTER);
   html = fillGoodDay(html);
   if (words) html = html.replace(/\{\{GD_([A-Z]+)\}\}/g, (_m, k) => words[k.toLowerCase()] ?? '');
-  return html
+  const out = html
     .replaceAll('{{HOME}}', `${base}/`)
     .replaceAll('{{SITE}}', base)
     .replaceAll('{{APP}}', app || '/')
@@ -289,11 +292,19 @@ async function render(req, name, slug, words = null) {
     .replaceAll('{{HELLO}}', escHtml(config.site.helloEmail))
     .replaceAll('{{SUPPORT}}', escHtml(config.site.supportEmail))
     .replaceAll('{{YEAR}}', String(new Date().getUTCFullYear()));
+  // Filled last, so nothing written in the console is read as a {{TOKEN}}.
+  return FILL[name] ? FILL[name](out, req) : out;
 }
+// Pages with live parts: name -> async (html, req) => html.
+const FILL = {
+  status: async (html) => { const S = require('../lib/status'); return html.replace('<!--STATUS-->', S.pageHtml(await S.snapshot())); },
+};
+// How long browsers and proxies may keep a page. The status page changes by the minute.
+const MAX_AGE = { status: 60 };
 
 async function send(req, res, name, slug, status = 200, words = null) {
   const body = await render(req, name, slug, words);
-  res.status(status).set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=300' });
+  res.status(status).set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': `public, max-age=${MAX_AGE[name] || 300}` });
   if ((isCopy(req) || name === 'notfound') && !res.get('X-Robots-Tag')) res.set('X-Robots-Tag', 'noindex, follow');
   res.send(body);
 }
@@ -314,6 +325,7 @@ const modified = (name) => { try { return fs.statSync(path.join(DIR, `${name}.ht
 const PRIORITY = { '': '1.0', product: '0.9', 'ski-patrol': '0.9', 'ski-area-risk-management': '0.9', pricing: '0.9', resources: '0.7', about: '0.6', contact: '0.7', security: '0.6', privacy: '0.2', terms: '0.2' };
 for (const [s] of SOLUTIONS) if (!PRIORITY[s]) PRIORITY[s] = '0.8';
 PRIORITY['good-day'] = '0.7';
+PRIORITY.status = '0.3';
 for (const i of GD.issues()) PRIORITY[i.slug] = '0.6';
 for (const s of ['chairlift-inspection-checklist', 'terrain-park-inspection-checklist', 'ski-area-incident-report-guide', 'how-to-choose-ski-area-software']) PRIORITY[s] = '0.7';
 
