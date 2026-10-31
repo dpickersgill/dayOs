@@ -31,8 +31,23 @@ async function quoteFor(conn, tenantId, session, students) {
   return { lines: priced.map((p) => ({ tier: p.tier, unit: p.unit, tax: p.tax })), subtotal, tax, taxes, total: subtotal + tax, name: priced[0] ? priced[0].name : '' };
 }
 
-/** Hours from `nowLocal` ('YYYY-MM-DD HH:MM:SS') to the lesson start, both in the mountain's wall-clock time. */
-const hoursUntil = (startsAt, nowLocal) => (new Date(`${startsAt.slice(0, 19).replace(' ', 'T')}Z`) - new Date(`${nowLocal.replace(' ', 'T')}Z`)) / 3_600_000;
+/** The real moment (ms) of a wall-clock time ('YYYY-MM-DD HH:MM:SS') in a time zone: two passes, so a clock change is right. */
+function utcMs(local, timeZone) {
+  const g = Date.parse(`${String(local).slice(0, 19).replace(' ', 'T')}Z`);
+  if (!timeZone) return g;
+  const offset = (ms) => {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+    return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - ms;
+  };
+  let t = g - offset(g); t = g - offset(t);
+  return t;
+}
+/**
+ * Hours from `nowLocal` ('YYYY-MM-DD HH:MM:SS') to the lesson start, both the mountain's wall-clock time. With the
+ * mountain's time zone (2026.11.11) both are turned into real moments first, so a night the clocks change counts its
+ * 23 or 25 hours, not 24.
+ */
+const hoursUntil = (startsAt, nowLocal, timeZone = null) => (utcMs(startsAt, timeZone) - utcMs(nowLocal, timeZone)) / 3_600_000;
 
 /** The refund a guest gets for canceling now: { percent, ... } under the mountain's tiers. */
 function refundPercent(tenant, hoursLeft) {

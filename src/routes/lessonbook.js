@@ -366,7 +366,7 @@ async function giveBack(tenantId, requestId, obj, account, why) {
 async function cancelPaid(conn, t, r) {
   const order = await one(conn, 'SELECT id, total_cents, tax_cents, refunded_cents FROM orders WHERE tenant_id = ? AND id = ? FOR UPDATE', [t.id, r.order_id]);
   const nowLocal = nowIn(t.timezone);
-  const hours = hoursUntil(r.starts_at, nowLocal);
+  const hours = hoursUntil(r.starts_at, nowLocal, t.timezone);
   if (hours <= 0) throw conflict(`This lesson has already started. Please call the ski school${t.phone ? ` on ${t.phone}` : ''}.`);
   const percent = refundPercent(t, hours);
   const cents = Math.floor(((order.total_cents - order.refunded_cents) * percent) / 100);
