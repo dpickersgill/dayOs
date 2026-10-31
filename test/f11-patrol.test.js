@@ -43,8 +43,12 @@ const tzNow = (addMin = 0) => {
   const p = Object.fromEntries(f.formatToParts(new Date(Date.now() + addMin * 60000)).map((x) => [x.type, x.value]));
   return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
 };
-async function patrolMountain(tag) {
+// A new mountain is limited to 5 a minute from one address: tests share mountains unless they need a fresh one.
+const made = new Map();
+async function patrolMountain(tag = 'main') {
+  if (made.has(tag)) return made.get(tag);
   const m = await mountain(tag);
+  made.set(tag, m);
   m.s1 = await staff(m, 'Pat');
   m.pat = await addUser(m, `pat@${m.slug}.test`, 'patrol', { staff_id: m.s1 });
   return m;
@@ -71,7 +75,7 @@ test.after(async () => { await new Promise((r) => server.close(r)); await pool.e
 
 // ---------------------------------------------------------------- PATROL-1
 test('PATROL-1: a case on legal hold cannot be reopened, signed off or approved, and its protocol stamp never changes', async () => {
-  const m = await patrolMountain('lh');
+  const m = await patrolMountain();
   ok(await api('PUT', '/patrol/ops-settings', { token: m.owner, body: { medical_director: 'Dr. Original', protocol_version: 'v1' } }));
   const c = await approvedCase(m);
   ok(await api('PUT', `/patrol/incidents/${c.id}/legal-hold`, { token: m.owner, body: { hold: true, note: 'Claim received' } }));
@@ -91,7 +95,7 @@ test('PATROL-1: a case on legal hold cannot be reopened, signed off or approved,
 });
 
 test('PATROL-1: re-signing a reopened report keeps the first protocol stamp', async () => {
-  const m = await patrolMountain('ps');
+  const m = await patrolMountain();
   ok(await api('PUT', '/patrol/ops-settings', { token: m.owner, body: { medical_director: 'Dr. Original', protocol_version: 'v1' } }));
   const c = await approvedCase(m);
   const first = ok(await api('GET', `/patrol/incidents/${c.id}`, { token: m.owner })).protocol_stamp;
@@ -104,7 +108,7 @@ test('PATROL-1: re-signing a reopened report keeps the first protocol stamp', as
 
 // ---------------------------------------------------------------- PATROL-2
 test('PATROL-2: a reopened report is not shown or released as approved', async () => {
-  const m = await patrolMountain('ro');
+  const m = await patrolMountain();
   const c = await approvedCase(m);
   ok(await api('POST', `/patrol/incidents/${c.id}/reopen`, { token: m.owner, body: { reason: 'Wrong outcome recorded' } }));
   const cf = ok(await api('GET', `/patrol/incidents/${c.id}/claim-file`, { token: m.owner }));
@@ -122,7 +126,7 @@ test('PATROL-2: a reopened report is not shown or released as approved', async (
 
 // ---------------------------------------------------------------- PATROL-13
 test('PATROL-13: the Reopened note is stamped on the mountain clock', async () => {
-  const m = await patrolMountain('rn');
+  const m = await patrolMountain();
   const c = await approvedCase(m);
   ok(await api('POST', `/patrol/incidents/${c.id}/reopen`, { token: m.owner, body: { reason: 'Wrong disposition' } }));
   ok(await api('POST', `/patrol/incidents/${c.id}/notes`, { token: m.owner, body: { body: 'Corrected after reopening.' } }), 201);
@@ -131,4 +135,50 @@ test('PATROL-13: the Reopened note is stamped on the mountain clock', async () =
   assert.match(reopen.body, /^Reopened/);
   assert.ok(String(reopen.created_at) <= String(later.created_at), `${reopen.created_at} > ${later.created_at}`);
   assert.ok(Math.abs(Date.parse(String(reopen.created_at).replace(' ', 'T')) - Date.parse(tzNow())) < 5 * 60000);
+});
+
+// ---------------------------------------------------------------- PATROL-3
+async function sweepOn(m) {
+  const t1 = ok(await api('POST', '/schedule/trails', { token: m.owner, body: { name: `Upper ${n}`, difficulty: 'blue' } }), 201).id;
+  const t2 = ok(await api('POST', '/schedule/trails', { token: m.owner, body: { name: `Lower ${n}`, difficulty: 'green' } }), 201).id;
+  const route = ok(await api('POST', '/patrol/sweep/routes', { token: m.owner, body: { name: 'Ridge', items: [{ trail_id: t1 }, { trail_id: t2 }] } }), 201).id;
+  ok(await api('POST', '/patrol/sweep/start', { token: m.owner, body: { assignments: [{ route_id: route, staff_id: m.s1 }] } }), 201);
+  const sw = ok(await api('GET', '/patrol/sweep', { token: m.pat }));
+  return (sw.sweep || sw).runs[0];
+}
+test('PATROL-3: a person found on the sweep cannot be overwritten or deleted; undo keeps it with a reason', async () => {
+  const m = await patrolMountain('sw');
+  const run = await sweepOn(m);
+  const [a, b] = run.stops;
+  ok(await api('POST', `/patrol/sweep/runs/${run.id}/marks`, { token: m.pat, body: { item_id: a.id, flag: 'person', note: 'Child in trees' } }), 201);
+  assert.equal((await api('POST', `/patrol/sweep/runs/${run.id}/marks`, { token: m.pat, body: { item_id: a.id, flag: 'none' } })).status, 409);
+  assert.equal((await api('DELETE', `/patrol/sweep/runs/${run.id}/marks/${a.id}`, { token: m.pat })).status, 400, 'undo needs a reason');
+  ok(await api('POST', `/patrol/sweep/runs/${run.id}/marks`, { token: m.pat, body: { item_id: b.id } }), 201);
+  ok(await api('POST', `/patrol/sweep/runs/${run.id}/clear`, { token: m.pat, body: {} }));
+  const clear = await api('POST', '/patrol/sweep/clear', { token: m.owner, body: {} });
+  assert.equal(clear.status, 409);
+  assert.match(clear.body.error, /dispatch call/);
+  const log = ok(await api('GET', '/patrol/daily-log', { token: m.owner }));
+  assert.equal(Number(log.sweep.routes[0].finds), 1);
+});
+
+test('PATROL-3: undo of a find marks it entered in error; a hazard needs a resolution before Mountain clear; all of it is logged', async () => {
+  const m = await patrolMountain('sh');
+  const run = await sweepOn(m);
+  const [a, b] = run.stops;
+  ok(await api('POST', `/patrol/sweep/runs/${run.id}/marks`, { token: m.pat, body: { item_id: a.id, flag: 'person', note: 'Thought I saw someone' } }), 201);
+  assert.equal((await api('DELETE', `/patrol/sweep/runs/${run.id}/marks/${a.id}`, { token: m.pat, body: { reason: 'Tapped the wrong stop' } })).status, 204);
+  const mk = (await q('SELECT * FROM patrol_sweep_marks WHERE tenant_id = ? AND run_id = ? AND item_id = ?', [m.tenantId, run.id, a.id]))[0];
+  assert.equal(mk.flag, 'person');
+  assert.equal(mk.resolved_kind, 'error');
+  assert.equal(mk.resolution, 'Tapped the wrong stop');
+  const hz = ok(await api('POST', `/patrol/sweep/runs/${run.id}/marks`, { token: m.pat, body: { item_id: b.id, flag: 'hazard', note: 'Rock exposed by the cat track' } }), 201).id;
+  ok(await api('POST', `/patrol/sweep/runs/${run.id}/clear`, { token: m.pat, body: {} }));
+  const blocked = await api('POST', '/patrol/sweep/clear', { token: m.owner, body: {} });
+  assert.equal(blocked.status, 409);
+  assert.match(blocked.body.error, /hazard/);
+  ok(await api('POST', `/patrol/sweep/marks/${hz}/resolve`, { token: m.owner, body: { resolution: 'Roped off and signed' } }));
+  ok(await api('POST', '/patrol/sweep/clear', { token: m.owner, body: {} }));
+  const hist = await q('SELECT action, flag FROM patrol_sweep_mark_log WHERE tenant_id = ? AND run_id = ? ORDER BY id', [m.tenantId, run.id]);
+  assert.deepEqual(hist.map((x) => `${x.action}:${x.flag}`), ['mark:person', 'error:person', 'mark:hazard', 'resolve:hazard']);
 });

@@ -204,7 +204,7 @@ router.get('/daily-log', patrol, async (req, res) => {
     rows(pool, 'SELECT e.kind, e.started_at, e.ended_at, e.guests, l.name AS lift FROM patrol_lift_evacs e JOIN lifts l ON l.tenant_id = e.tenant_id AND l.id = e.lift_id WHERE e.tenant_id = ? AND e.started_at >= ? AND e.started_at < ? ORDER BY e.started_at', [t, from, to]),
   ]);
   let sweepRoutes = [];
-  if (sweep) sweepRoutes = await rows(pool, `SELECT ro.name AS route, r.status, r.cleared_at, ${NAME} AS by_name, (SELECT COUNT(*) FROM patrol_sweep_marks k WHERE k.tenant_id = r.tenant_id AND k.run_id = r.id AND k.flag <> 'none') AS finds
+  if (sweep) sweepRoutes = await rows(pool, `SELECT ro.name AS route, r.status, r.cleared_at, ${NAME} AS by_name, (SELECT COUNT(*) FROM patrol_sweep_marks k WHERE k.tenant_id = r.tenant_id AND k.run_id = r.id AND k.flag <> 'none' AND (k.resolved_kind IS NULL OR k.resolved_kind <> 'error')) AS finds, (SELECT COUNT(*) FROM patrol_sweep_marks k WHERE k.tenant_id = r.tenant_id AND k.run_id = r.id AND k.resolved_kind = 'error') AS finds_in_error
     FROM patrol_sweep_runs r JOIN patrol_sweep_routes ro ON ro.tenant_id = r.tenant_id AND ro.id = r.route_id LEFT JOIN staff s ON s.tenant_id = r.tenant_id AND s.id = r.staff_id LEFT JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE r.tenant_id = ? AND r.sweep_id = ? ORDER BY ro.sort, ro.name`, [t, sweep.id]);
   res.json({
     date, today, notes: log ? log.notes : null, signed: log && log.signed_at ? { at: log.signed_at, by: log.signed_by_name } : null, addenda,

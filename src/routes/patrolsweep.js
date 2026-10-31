@@ -206,6 +206,12 @@ router.patch('/sweep/runs/:id', patrol, needs('run_sweep'), validate(z.object({ 
   res.json({ ok: true });
 });
 
+/** A find that must be dealt with before the mountain is called clear, and is never overwritten or deleted. */
+const FIND = ['person', 'hazard'];
+const logMark = (conn, req, r, itemId, markId, action, flag, note, reason, now) => conn.query(
+  'INSERT INTO patrol_sweep_mark_log (tenant_id, run_id, item_id, mark_id, action, flag, note, reason, at, by_user, by_staff) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  [req.auth.tenantId, r.id, itemId, markId || null, action, flag, note || null, reason || null, now, req.auth.userId, req.auth.staffId || null]);
+
 /** A stop swept, with anything found: a person, a hazard, a rope or sign down. */
 router.post('/sweep/runs/:id/marks', patrol, validate(z.object({ item_id: z.number().int().positive(), flag: z.enum(['none', 'person', 'hazard', 'rope', 'other']).default('none'), note: z.string().trim().max(255).nullable().optional() })), async (req, res) => {
   const t = req.auth.tenantId; const b = req.body;
@@ -214,26 +220,68 @@ router.post('/sweep/runs/:id/marks', patrol, validate(z.object({ item_id: z.numb
     const r = await runFor(conn, req, paramId(req), { lock: true });
     await mayMark(req, r);
     if (!(await one(conn, 'SELECT id FROM patrol_sweep_items WHERE tenant_id = ? AND id = ? AND route_id = ?', [t, b.item_id, r.route_id]))) throw notFound('Stop on this route');
+    // A person or hazard found here stays on the record: it is called in, dealt with, or marked entered in error with a reason.
+    const was = await one(conn, 'SELECT * FROM patrol_sweep_marks WHERE tenant_id = ? AND run_id = ? AND item_id = ? FOR UPDATE', [t, r.id, b.item_id]);
+    if (was && FIND.includes(was.flag)) throw conflict(`A ${was.flag === 'person' ? 'person' : 'hazard'} was found here and stays on the record. Call it in, record how it was dealt with, or use Undo with a reason if it was a mistake.`);
     const { now } = await OPS.clock(conn, t);
     const [x] = await conn.query(`INSERT INTO patrol_sweep_marks (tenant_id, run_id, item_id, swept_at, by_staff, by_user, flag, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE swept_at = VALUES(swept_at), by_staff = VALUES(by_staff), by_user = VALUES(by_user), flag = VALUES(flag), note = VALUES(note), id = LAST_INSERT_ID(id)`, [t, r.id, b.item_id, now, req.auth.staffId || null, req.auth.userId, b.flag, b.note || null]);
+    await logMark(conn, req, r, b.item_id, x.insertId, 'mark', b.flag, b.note, null, now);
     if (r.status === 'waiting') await conn.query("UPDATE patrol_sweep_runs SET status = 'sweeping', staff_id = COALESCE(staff_id, ?) WHERE tenant_id = ? AND id = ?", [req.auth.staffId || null, t, r.id]);
-    await audit(conn, req, 'sweep_mark', 'patrol_sweep_runs', r.id, { item_id: b.item_id, flag: b.flag });
+    await audit(conn, req, 'sweep_mark', 'patrol_sweep_runs', r.id, { item_id: b.item_id, flag: b.flag, ...(was ? { replaced: was.flag } : {}) });
     return x.insertId;
   });
   res.status(201).json({ id });
 });
 
-/** Undo a mark (tapped the wrong stop). */
+/**
+ * Undo a mark (tapped the wrong stop). A plain mark is taken off. A person or hazard is never deleted: it is marked
+ * entered in error with the reason (who and when kept), and stays on the record struck through.
+ */
 router.delete('/sweep/runs/:id/marks/:itemId', patrol, async (req, res) => {
   const t = req.auth.tenantId;
+  const reason = String((req.body && req.body.reason) || req.query.reason || '').trim().slice(0, 255);
   await tx(async (conn) => {
     const r = await runFor(conn, req, paramId(req), { lock: true });
     await mayMark(req, r);
     if (r.status === 'clear') throw conflict('This route is already marked clear');
-    await conn.query('DELETE FROM patrol_sweep_marks WHERE tenant_id = ? AND run_id = ? AND item_id = ? AND call_id IS NULL', [t, r.id, paramId(req, 'itemId')]);
+    const itemId = paramId(req, 'itemId');
+    const k = await one(conn, 'SELECT * FROM patrol_sweep_marks WHERE tenant_id = ? AND run_id = ? AND item_id = ? FOR UPDATE', [t, r.id, itemId]);
+    if (!k) return;
+    if (k.call_id) throw conflict('This find has a dispatch call, so it stays on the record');
+    const { now } = await OPS.clock(conn, t);
+    if (FIND.includes(k.flag)) {
+      if (k.resolved_at) throw conflict('This find is already resolved');
+      if (reason.length < 3) throw bad('Say why this find was a mistake');
+      await conn.query("UPDATE patrol_sweep_marks SET resolution = ?, resolved_kind = 'error', resolved_at = ?, resolved_by = ? WHERE tenant_id = ? AND id = ?", [reason, now, req.auth.userId, t, k.id]);
+      await logMark(conn, req, r, itemId, k.id, 'error', k.flag, k.note, reason, now);
+      await audit(conn, req, 'sweep_find_error', 'patrol_sweep_runs', r.id, { item_id: itemId, flag: k.flag, mark: Number(k.id) });
+      return;
+    }
+    await logMark(conn, req, r, itemId, k.id, 'undo', k.flag, k.note, reason || null, now);
+    await conn.query('DELETE FROM patrol_sweep_marks WHERE tenant_id = ? AND id = ?', [t, k.id]);
+    await audit(conn, req, 'sweep_unmark', 'patrol_sweep_runs', r.id, { item_id: itemId, flag: k.flag });
   });
   res.status(204).end();
+});
+
+/** A hazard (or a person who needed no call) found on the sweep, dealt with: how, kept with the find. */
+router.post('/sweep/marks/:id/resolve', patrol, validate(z.object({ resolution: z.string().trim().min(3, 'Say how it was dealt with').max(255) })), async (req, res) => {
+  const t = req.auth.tenantId;
+  await tx(async (conn) => {
+    const k = await one(conn, 'SELECT * FROM patrol_sweep_marks WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, paramId(req)]);
+    if (!k) throw notFound('Sweep mark');
+    const r = await runFor(conn, req, k.run_id, { lock: false });
+    await mayMark(req, r);
+    if (k.flag === 'none') throw bad('Nothing was found here');
+    if (k.flag === 'person' && !k.call_id) throw conflict('A person found on the sweep is called in first');
+    if (k.resolved_at) throw conflict('This find is already resolved');
+    const { now } = await OPS.clock(conn, t);
+    await conn.query("UPDATE patrol_sweep_marks SET resolution = ?, resolved_kind = 'dealt_with', resolved_at = ?, resolved_by = ? WHERE tenant_id = ? AND id = ?", [req.body.resolution, now, req.auth.userId, t, k.id]);
+    await logMark(conn, req, r, k.item_id, k.id, 'resolve', k.flag, k.note, req.body.resolution, now);
+    await audit(conn, req, 'sweep_find_resolved', 'patrol_sweep_runs', r.id, { mark: Number(k.id), flag: k.flag });
+  });
+  res.json({ ok: true });
 });
 
 /** A person found on the sweep becomes a dispatch call in one tap. */
@@ -282,8 +330,11 @@ router.post('/sweep/clear', patrol, needs('run_sweep'), validate(z.object({ note
     if (s.status === 'clear') throw conflict('The mountain is already called clear');
     const open = await rows(conn, `SELECT ro.name FROM patrol_sweep_runs r JOIN patrol_sweep_routes ro ON ro.tenant_id = r.tenant_id AND ro.id = r.route_id WHERE r.tenant_id = ? AND r.sweep_id = ? AND r.status <> 'clear'`, [t, s.id]);
     if (open.length) throw conflict(`Not every route is clear: ${open.map((o) => o.name).join(', ')}`);
-    const people = await one(conn, "SELECT COUNT(*) AS n FROM patrol_sweep_marks k JOIN patrol_sweep_runs r ON r.tenant_id = k.tenant_id AND r.id = k.run_id WHERE k.tenant_id = ? AND r.sweep_id = ? AND k.flag = 'person' AND k.call_id IS NULL", [t, s.id]);
+    // Every find has a resolution: a person has a dispatch call (or was entered in error), a hazard was dealt with.
+    const people = await one(conn, "SELECT COUNT(*) AS n FROM patrol_sweep_marks k JOIN patrol_sweep_runs r ON r.tenant_id = k.tenant_id AND r.id = k.run_id WHERE k.tenant_id = ? AND r.sweep_id = ? AND k.flag = 'person' AND k.call_id IS NULL AND k.resolved_at IS NULL", [t, s.id]);
     if (Number(people.n)) throw conflict('Someone was found on the sweep and has no dispatch call yet. Call it in first.');
+    const hazards = await one(conn, "SELECT COUNT(*) AS n FROM patrol_sweep_marks k JOIN patrol_sweep_runs r ON r.tenant_id = k.tenant_id AND r.id = k.run_id WHERE k.tenant_id = ? AND r.sweep_id = ? AND k.flag = 'hazard' AND k.call_id IS NULL AND k.resolved_at IS NULL", [t, s.id]);
+    if (Number(hazards.n)) throw conflict(`${Number(hazards.n) === 1 ? 'A hazard' : `${hazards.n} hazards`} found on the sweep ${Number(hazards.n) === 1 ? 'has' : 'have'} no resolution yet. Record how each was dealt with first.`);
     await conn.query("UPDATE patrol_sweeps SET status = 'clear', clear_at = ?, clear_by = ?, clear_note = ? WHERE tenant_id = ? AND id = ?", [now, req.auth.userId, req.body.note || null, t, s.id]);
     const [d] = await conn.query('UPDATE patrol_duty SET signed_out_at = ?, auto_closed = 1, signed_out_by = ? WHERE tenant_id = ? AND on_date = ? AND signed_out_at IS NULL', [now, req.auth.userId, t, today]);
     await audit(conn, req, 'mountain_clear', 'patrol_sweeps', s.id, { signed_out: d.affectedRows });

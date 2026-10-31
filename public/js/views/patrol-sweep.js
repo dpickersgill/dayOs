@@ -9,6 +9,7 @@ import { get, post, patch, del } from '../api.js';
 import { h, clear, select, input, field, button, toast, formDialog, empty, errorBox, state, fmtTime, label, act } from '../ui.js';
 
 const t = (v) => (v ? fmtTime(String(v).replace(' ', 'T')) : '');
+const FIND = ['person', 'hazard'];
 const FLAGS = [['none', 'Clear'], ['person', 'Person found'], ['hazard', 'Hazard'], ['rope', 'Rope or sign down'], ['other', 'Other']];
 
 export async function drawSweep(box) {
@@ -55,17 +56,40 @@ function runCard(d, s, r, again) {
     assign || h('p', { class: 'muted small' }, r.staff_name ? `Swept by ${r.staff_name}` : 'Not assigned'),
     h('ol', { class: 'sweep-stops' }, r.stops.map((x) => {
       const m = x.mark;
+      // A person or hazard found stays on the record: called in, dealt with, or marked entered in error with a reason.
+      const find = m && FIND.includes(m.flag);
+      const err = m && m.resolved_kind === 'error';
       return h('li', { class: m ? (m.flag === 'none' ? 'is-swept' : 'is-flag') : null },
         h('span', { class: 'stop-name' }, h('b', null, x.name), h('small', null, ` ${label(x.kind)}`)),
-        m ? h('span', { class: 'stop-mark' }, `${t(m.swept_at)}${m.flag !== 'none' ? `: ${label(m.flag)}${m.note ? `, ${m.note}` : ''}` : ''}`,
-          m.flag === 'person' && !m.call_id ? button('Call it in', async () => { const c = await post(`/patrol/sweep/marks/${m.id}/call`); toast(`Call ${c.call_no} on the dispatch board`); await again(); }, { small: true, kind: 'danger' }) : null,
+        m ? h('span', { class: 'stop-mark' }, h(err ? 's' : 'span', null, `${t(m.swept_at)}${m.flag !== 'none' ? `: ${label(m.flag)}${m.note ? `, ${m.note}` : ''}` : ''}`),
+          m.resolved_at ? h('span', { class: 'small' }, err ? ` Entered in error: ${m.resolution}` : ` Dealt with: ${m.resolution}`) : null,
+          m.flag === 'person' && !m.call_id && !m.resolved_at ? button('Call it in', async () => { const c = await post(`/patrol/sweep/marks/${m.id}/call`); toast(`Call ${c.call_no} on the dispatch board`); await again(); }, { small: true, kind: 'danger' }) : null,
           m.call_id ? h('a', { class: 'small', href: '#/patrol/now?tab=dispatch' }, ' Dispatch call') : null,
-          can && !m.call_id ? button('Undo', async () => { await del(`/patrol/sweep/runs/${r.id}/marks/${x.id}`); await again(); }, { small: true, kind: 'ghost', label: `Undo ${x.name}` }) : null)
+          s.status === 'running' && (mine || d.can_run) && m.flag !== 'none' && m.flag !== 'person' && !m.resolved_at ? button('Dealt with', () => resolveDialog(m, x, again), { small: true, label: `${x.name}: record how it was dealt with` }) : null,
+          can && !m.call_id && !m.resolved_at ? button('Undo', () => (find ? undoFindDialog(r, x, m, again) : del(`/patrol/sweep/runs/${r.id}/marks/${x.id}`).then(again)), { small: true, kind: 'ghost', label: `Undo ${x.name}` }) : null)
           : can ? h('span', { class: 'row tight' },
             button('Swept', (e) => act(e.currentTarget, async () => { await post(`/patrol/sweep/runs/${r.id}/marks`, { item_id: x.id }); await again(); })(e), { small: true, kind: 'primary', label: `${x.name} swept` }),
             button('Found something', () => flagDialog(r, x, again), { small: true })) : h('span', { class: 'muted small' }, 'Not yet'));
     })),
     can && done === r.stops.length ? h('div', { class: 'row' }, button('Route clear', (e) => act(e.currentTarget, async () => { await post(`/patrol/sweep/runs/${r.id}/clear`, {}); toast(`${r.route} clear`); await again(); })(e), { kind: 'primary' })) : null);
+}
+
+function resolveDialog(m, x, again) {
+  formDialog(`Dealt with at ${x.name}`, h('div', { class: 'form' }, h('div', { class: 'wide' }, field('How', input({ name: 'resolution', required: true, minlength: 3, maxlength: 255, placeholder: 'Roped off and signed. Groomers told.' })))), async (fd) => {
+    await post(`/patrol/sweep/marks/${m.id}/resolve`, { resolution: String(fd.get('resolution')).trim() });
+    toast('Recorded');
+    await again();
+  }, { submitText: 'Record' });
+}
+
+function undoFindDialog(r, x, m, again) {
+  formDialog(`Undo the ${label(m.flag).toLowerCase()} at ${x.name}?`, h('div', { class: 'form' },
+    h('p', { class: 'wide muted' }, 'A find is never deleted. It stays on the record, struck through, with your reason.'),
+    h('div', { class: 'wide' }, field('Why was it a mistake?', input({ name: 'reason', required: true, minlength: 3, maxlength: 255, placeholder: 'Tapped the wrong stop' })))), async (fd) => {
+    await del(`/patrol/sweep/runs/${r.id}/marks/${x.id}`, { reason: String(fd.get('reason')).trim() });
+    toast('Marked entered in error');
+    await again();
+  }, { submitText: 'Mark entered in error' });
 }
 
 function flagDialog(r, x, again) {
