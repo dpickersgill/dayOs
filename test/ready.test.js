@@ -147,6 +147,17 @@ test('two servers share one sign-in limit: the attempt over the limit is refused
   assert.equal((await api('POST', '/auth/login', { body: body(max + 1) }, max % 2 ? a : b)).status, 429, 'and on the other one too');
 });
 
+test('sign-ins that work do not use up the limit, so a whole crew can sign in at opening from one address', async () => {
+  const max = 5 + ((Date.now() + 17) % 40);
+  const env = { RATE_STORE: 'mysql', LOGIN_RATE_LIMIT: String(max), NODE_ENV: 'test' };
+  const [a, b] = await Promise.all([startServer(env), startServer(env)]);
+  const good = { tenant: owner.slug, email: `owner@${owner.slug}.test`, password: PW };
+  for (let i = 0; i < max + 3; i += 1) assert.equal((await api('POST', '/auth/login', { body: good }, i % 2 ? b : a)).status, 200, `sign-in ${i + 1}`);
+  const wrong = (i) => ({ tenant: owner.slug, email: `nobody-${i}@${owner.slug}.test`, password: 'nope-nope-nope' });
+  for (let i = 0; i < max; i += 1) assert.equal((await api('POST', '/auth/login', { body: wrong(i) }, i % 2 ? b : a)).status, 401);
+  assert.equal((await api('POST', '/auth/login', { body: wrong(max) }, a)).status, 429, 'wrong passwords from the address still hit the limit');
+});
+
 test('a console sign-in code works once across servers, not once per server', async () => {
   const secret = 'JBSWY3DPEHPK3PXP';
   const env = { RATE_STORE: 'mysql', PLATFORM_TOTP_SECRET: secret, PLATFORM_KEY_SIGNIN: 'on', NODE_ENV: 'test' };
@@ -154,6 +165,8 @@ test('a console sign-in code works once across servers, not once per server', as
   // A code for a moment no other run used: the next 30-second step, which verify() accepts for clock drift.
   const step = Math.floor(Date.now() / 30_000) + 1;
   const code = totpAt(secret, step);
+  // A run of this test less than 30 seconds ago used the same step: forget that claim first.
+  await pool.query('DELETE FROM rate_limits WHERE k = ?', [new RS.MysqlStore({ prefix: 'platform-totp-step' }).rowKey(String(step))]);
   const first = await api('POST', '/platform/session', { body: { key: KEY, name: 'Dan', code } }, a);
   assert.equal(first.status, 200, first.text);
   const again = await api('POST', '/platform/session', { body: { key: KEY, name: 'Dan', code } }, b);

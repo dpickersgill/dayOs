@@ -24,7 +24,12 @@ function callSite() {
   return 'unknown';
 }
 
-function rateLimit({ windowMs, max, message = 'Too many requests, slow down', keyOf = (req) => req.ip, name = null }) {
+/**
+ * skipSuccessful: a request that ends well (an answer under 400) gives its count back, so only failures use up the
+ * limit. For sign-in: a whole crew signing in from the mountain's one internet address at opening is never stopped,
+ * while wrong passwords from that address still are.
+ */
+function rateLimit({ windowMs, max, message = 'Too many requests, slow down', keyOf = (req) => req.ip, name = null, skipSuccessful = false }) {
   const store = storeFor(`${name || callSite()}|${windowMs}|${max}`);
   store.init({ windowMs });
 
@@ -38,6 +43,7 @@ function rateLimit({ windowMs, max, message = 'Too many requests, slow down', ke
         res.set('Retry-After', String(secs));
         return res.status(429).json({ error: message });
       }
+      if (skipSuccessful) res.on('finish', () => { if (res.statusCode < 400) store.decrement(key).catch(() => {}); });
       return next();
     } catch (err) {
       return next(err);
