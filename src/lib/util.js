@@ -28,13 +28,39 @@ const id = z.coerce.number().int().positive();
 // A guest type's code (lib/guesttypes.js): each mountain has its own list; routes check the code is one of them.
 const tierEnum = z.string().trim().toLowerCase().regex(/^[a-z0-9_]{1,30}$/, 'Choose a guest type');
 
+/** 'person.first_name' -> 'First name': the last part of a field's path, as words. */
+const fieldLabel = (path) => {
+  const last = [...path].reverse().find((p) => typeof p === 'string') || 'This';
+  const words = last.replace(/_id$/, '').replace(/_/g, ' ').trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : 'This';
+};
+/**
+ * One zod issue in plain words, for the person at the screen (2026.11.11, UI-5): "First name is too long (at most 100
+ * characters)" instead of "Too big: expected string to have <=100 characters". A message a schema wrote itself (a
+ * refine, or a regex with its own words) is kept as it is.
+ */
+function plainIssue(i) {
+  const label = fieldLabel(i.path);
+  const n = i.maximum ?? i.minimum;
+  const own = i.message && !/^(Invalid|Too (big|small)|Expected|Required|String must|Number must)/i.test(i.message);
+  if (i.code === 'invalid_type') return (i.input === undefined || i.input === null || /received (undefined|null)/.test(i.message)) ? `${label} is required` : `${label} is not valid`;
+  if (i.code === 'too_big') return i.origin === 'string' ? `${label} is too long (at most ${n} characters)` : i.origin === 'array' || i.origin === 'set' ? `${label} has too many (at most ${n})` : `${label} must be ${n} or less`;
+  if (i.code === 'too_small') return i.origin === 'string' ? (Number(n) <= 1 ? `${label} is required` : `${label} is too short (at least ${n} characters)`) : i.origin === 'array' || i.origin === 'set' ? `${label} needs at least ${n}` : `${label} must be ${n} or more`;
+  if (own) return `${label}: ${i.message}`;
+  if (i.code === 'invalid_format' || i.code === 'invalid_string') return i.format === 'email' ? `${label} is not a valid email address` : `${label} is not in the right form`;
+  if (i.code === 'invalid_value' || i.code === 'invalid_enum_value') return `${label} is not one of the choices`;
+  if (i.code === 'unrecognized_keys') return 'Something unexpected was sent. Reload the page and try again.';
+  return `${label} is not valid`;
+}
+
 /** Express middleware: validate req.body with a zod schema and replace it with the parsed value. */
 function validate(schema) {
   return (req, _res, next) => {
     const result = schema.safeParse(req.body ?? {});
     if (!result.success) {
-      const details = result.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
-      return next(bad('Validation failed', details));
+      // path stays for programs (and the app maps it to the form's own label); message and label are plain words.
+      const details = result.error.issues.map((i) => ({ path: i.path.join('.'), label: fieldLabel(i.path), message: plainIssue(i) }));
+      return next(bad(details.length === 1 ? details[0].message : 'Some answers need a look', details));
     }
     req.body = result.data;
     return next();

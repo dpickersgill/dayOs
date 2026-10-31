@@ -49,7 +49,7 @@ echo "summitops-run can reach the database and write logs. It gets its own secre
 
 step "2. Keys into Secret Manager"
 SECRETS=()
-# MOVABLE is also read by rotate-secrets.sh. ANTHROPIC_API_KEY is the patrol assistant's (BAA) key; ASSISTANT_API_KEY the
+# ANTHROPIC_API_KEY is the patrol assistant's (BAA) key; ASSISTANT_API_KEY the
 # in-app assistant's (assistant-key.sh puts that one in Secret Manager already).
 MOVABLE=(STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET STRIPE_CONNECT_WEBHOOK_SECRET POSTMARK_SERVER_TOKEN TWILIO_AUTH_TOKEN JOBS_KEY BOOTSTRAP_KEY TOTP_KEY LINK_SECRET KIOSK_SECRET PLATFORM_TOTP_SECRET PLATFORM_KEY ANTHROPIC_API_KEY ASSISTANT_API_KEY)
 for name in "${MOVABLE[@]}"; do
@@ -192,19 +192,8 @@ fi
 step "8. Older revisions that still hold a key in a plain setting"
 # A key moved to Secret Manager is still written, in plain text, in every earlier revision of the service. Those
 # revisions are deleted (the one serving now, and the newest, are never touched).
-if [ ${#SECRETS[@]} -gt 0 ] || [ "${CLEAN_REVISIONS:-}" = 1 ]; then
-  NAMES_JSON="$(printf '%s\n' "${MOVABLE[@]}" | jq -R . | jq -s .)"
-  SERVING="$(gcloud run services describe "$SERVICE" --region "$REGION" --format=json | jq -r '[.status.traffic[]? | select((.percent // 0) > 0) | .revisionName] + [.status.latestReadyRevisionName] | .[]')"
-  gcloud run revisions list --service "$SERVICE" --region "$REGION" --format=json \
-    | jq -r --argjson names "$NAMES_JSON" '.[] | select([.spec.containers[0].env[]? | select(.value != null and (.name as $n | $names | index($n)))] | length > 0) | .metadata.name' \
-    | while read -r rev; do
-        if echo "$SERVING" | grep -qx "$rev"; then continue; fi
-        gcloud run revisions delete "$rev" --region "$REGION" --quiet >/dev/null && echo "  Deleted $rev (it held a key in a plain setting)"
-      done
-  echo "Rolling back can only go to revisions made after this. Now give each key a new value: bash scripts/rotate-secrets.sh"
-else
-  echo "  Nothing moved this time. To check again anyway: CLEAN_REVISIONS=1 bash scripts/harden.sh"
-fi
+clean_plain_revisions
+echo "Rolling back can only go to revisions made after this. Give each key a new value: bash scripts/rotate-secrets.sh"
 
 printf '\nSecurity setup finished.\n'
 echo "Optional: bash scripts/cloud-armor.sh www.yourdomain.com app.yourdomain.com   (web firewall in front of the app; see RUNBOOK.md)"

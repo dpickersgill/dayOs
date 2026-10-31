@@ -181,3 +181,19 @@ ensure_jobs_oidc() {
   fi
   JOB_AUTH=(--oidc-service-account-email "$JOBS_SA" --oidc-token-audience "$SVC_URL")
 }
+
+# Deletes older revisions of $SERVICE that still hold a key in a plain setting (2026.11.11). The revision serving now and
+# the newest one are never touched. Used by harden.sh (step 8) and rotate-secrets.sh.
+PLAIN_KEYS=(STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET STRIPE_CONNECT_WEBHOOK_SECRET POSTMARK_SERVER_TOKEN TWILIO_AUTH_TOKEN JOBS_KEY BOOTSTRAP_KEY TOTP_KEY LINK_SECRET KIOSK_SECRET PLATFORM_TOTP_SECRET PLATFORM_KEY ANTHROPIC_API_KEY ASSISTANT_API_KEY DB_PASSWORD JWT_SECRET OUTREACH_GMAIL_KEY)
+clean_plain_revisions() {
+  local names serving rev n=0
+  names="$(printf '%s\n' "${PLAIN_KEYS[@]}" | jq -R . | jq -s .)"
+  serving="$(gcloud run services describe "$SERVICE" --region "$REGION" --format=json | jq -r '[.status.traffic[]? | select((.percent // 0) > 0) | .revisionName] + [.status.latestReadyRevisionName] | .[]')"
+  while read -r rev; do
+    [ -n "$rev" ] || continue
+    if echo "$serving" | grep -qx "$rev"; then echo "  $rev holds a plain key but is serving now: move its keys (harden.sh) and run this again."; continue; fi
+    gcloud run revisions delete "$rev" --region "$REGION" --quiet >/dev/null && echo "  Deleted $rev (it held a key in a plain setting)" && n=$((n + 1))
+  done < <(gcloud run revisions list --service "$SERVICE" --region "$REGION" --format=json \
+    | jq -r --argjson names "$names" '.[] | select([.spec.containers[0].env[]? | select(.value != null and .value != "" and (.name as $n | $names | index($n)))] | length > 0) | .metadata.name')
+  echo "  $n older revision(s) with plain keys deleted."
+}

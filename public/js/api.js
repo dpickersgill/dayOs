@@ -180,16 +180,25 @@ export async function fetchBlob(path) {
   return res.blob();
 }
 
-/** One readable sentence for any API error, including the lists of reasons the server sends back. */
-export function describeError(err) {
+/**
+ * One readable sentence for any API error, including the lists of reasons the server sends back. A form passes
+ * labelFor(path), so a field the server names (person.first_name) is called what the screen calls it (First name).
+ * The server already words each reason plainly (src/lib/util.js validate) and never shows an internal field name.
+ */
+export function describeError(err, labelFor) {
   if (!(err instanceof ApiError)) return err && err.message ? err.message : 'Something went wrong';
   const parts = Array.isArray(err.details)
     ? err.details.map((d) => {
         if (typeof d === 'string') return d;
         if (d && d.sku) return `${d.sku} is ${d.status}`;
-        if (d && d.message) return d.path ? `${d.path}: ${d.message}` : d.message;
+        if (d && d.message && d.label && labelFor) {
+          const shown = labelFor(d.path);
+          return shown && d.message.startsWith(d.label) ? shown + d.message.slice(d.label.length) : d.message;
+        }
+        if (d && d.message) return d.label || !d.path ? d.message : `${d.path}: ${d.message}`;
         return '';
       }).filter(Boolean)
     : [];
+  if (parts.length === 1 && err.details.length === 1 && err.details[0] && err.details[0].message === err.message) return parts[0];
   return parts.length ? `${err.message}: ${parts.join('; ')}` : err.message;
 }

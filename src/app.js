@@ -128,6 +128,8 @@ function createApp() {
   // The product website: its pages at /site everywhere, and at / on its own addresses (SITE_HOSTS).
   const site = require('./routes/site');
   app.use(site.pages);
+  // The status page at /status on the app's address too (Help says "/status"); the website's own addresses serve it above.
+  app.get('/status', (_req, res) => res.redirect(302, '/site/status'));
 
   // The admin web app: plain files, no build step. The pages revalidate on every load so an update shows up at once; the
   // scripts and styles they load are at /r/<release>/ addresses and kept a year; fonts never change and are kept a year

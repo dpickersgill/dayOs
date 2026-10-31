@@ -303,7 +303,10 @@ const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 const newFeedToken = () => crypto.randomBytes(32).toString('base64url');
 
 /** RFC 5545 text: escape \ ; , and new lines, and fold lines at 75 octets. */
-const icsText = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+// RFC 5545 TEXT: backslash, semicolon and comma escaped, every line break (CRLF, LF or a bare CR) as \n, and every other
+// control character dropped, so a title can never end its line and start a property of its own (2026.11.11, CR-5).
+const icsText = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,')
+  .replace(/\r\n|\r|\n|\u2028|\u2029/g, '\\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '');
 function fold(line) {
   const out = []; let cur = '';
   for (const ch of line) {
