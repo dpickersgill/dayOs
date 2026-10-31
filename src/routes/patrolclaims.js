@@ -63,10 +63,16 @@ const plusDays = (now, days) => `${addDays(now.slice(0, 10), days)} ${now.slice(
  */
 async function reportOf(db, t, id, live) {
   const v = await one(db, "SELECT id, version_no, kind, snapshot, created_at FROM incident_versions WHERE tenant_id = ? AND incident_id = ? AND kind = 'approved' ORDER BY version_no DESC LIMIT 1", [t, id]);
+  // The frozen copy counts only while the report is approved. A reopened report's earlier approval was withdrawn:
+  // it is shown as it stands, marked not approved, and cannot be released until it is approved again.
+  if (live.report_state !== 'approved') {
+    const withdrawn = v ? { version_no: v.version_no, created_at: v.created_at } : null;
+    return { report: live, basis: withdrawn ? 'reopened' : live.report_state === 'submitted' ? 'submitted' : 'draft', version: null, withdrawn };
+  }
   const snap = v && parseJSON(v.snapshot);
   if (snap && Array.isArray(snap.checklist)) snap.checklist = require('../lib/checklists').labelTicks(snap.checklist); // frozen before ticks kept their words
   if (snap && snap.id) return { report: snap, basis: 'approved', version: { id: Number(v.id), version_no: v.version_no, created_at: v.created_at } };
-  return { report: live, basis: live.report_state === 'submitted' ? 'submitted' : live.report_state === 'approved' ? 'approved_live' : 'draft', version: null };
+  return { report: live, basis: 'approved_live', version: null };
 }
 
 async function sceneOf(db, t, id) {
@@ -102,7 +108,7 @@ async function claimFile(db, req, id) {
   const t = req.auth.tenantId;
   const live = await loadCase(db, t, id);
   if (!live) throw notFound('Case');
-  const { report, basis, version } = await reportOf(db, t, id, live);
+  const { report, basis, version, withdrawn } = await reportOf(db, t, id, live);
   const [score, scene, records, trail, canRecords, canAudit] = await Promise.all([
     DS.forCase(db, t, report),
     sceneOf(db, t, id),
@@ -118,7 +124,7 @@ async function claimFile(db, req, id) {
   // checklist ticks are stamped in UTC; the document reads the mountain's clock like every other time on it
   if (Array.isArray(report.checklist)) report.checklist = report.checklist.map((r) => ({ ...r, done_local: r.done_at ? localOf(r.done_at, tz) : null }));
   return {
-    id, case_number: live.case_number || caseNo(live), basis, version,
+    id, case_number: live.case_number || caseNo(live), basis, version, withdrawn: withdrawn || null,
     report_state: live.report_state, legal_hold: Boolean(Number(live.legal_hold)), legal_hold_note: live.legal_hold_note || null,
     resort: live.resort,
     report, score, scene,

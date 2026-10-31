@@ -758,7 +758,8 @@ async function fillFromBedside(conn, req, inc) {
   const ops = await OPS.settingsOf(conn, req.auth.tenantId);
   if (ops.medical_director || ops.protocol_version) {
     const stamp = [ops.medical_director && `Medical director: ${ops.medical_director}`, ops.protocol_version && `Protocols: ${ops.protocol_version}`].filter(Boolean).join('. ');
-    await conn.query('UPDATE incidents SET protocol_stamp = ? WHERE tenant_id = ? AND id = ?', [stamp.slice(0, 255), req.auth.tenantId, inc.id]);
+    // The first stamp ever set is kept: re-signing a reopened report never rewrites which protocols the care was given under.
+    await conn.query('UPDATE incidents SET protocol_stamp = ? WHERE tenant_id = ? AND id = ? AND protocol_stamp IS NULL', [stamp.slice(0, 255), req.auth.tenantId, inc.id]);
   }
   if (req.auth.staffId && (isEmpty(c.form.completed_by_name) || isEmpty(c.form.completed_by_number))) {
     const me = await one(conn, 'SELECT p.first_name, p.last_name, m.patrol_number, m.callsign FROM staff s JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id LEFT JOIN patrol_members m ON m.staff_id = s.id AND m.tenant_id = s.tenant_id WHERE s.tenant_id = ? AND s.id = ?', [req.auth.tenantId, req.auth.staffId]);
@@ -788,12 +789,14 @@ async function keepVersion(conn, req, incidentId, kind) {
  * still has gaps is refused with the list. allowExceptions(conn, inc, problems) may accept some gaps (the Patrol
  * Director approving with an exception) and returns the problems that are left.
  */
-async function setState(req, res, { from, to, check, extra, version, allowExceptions }) {
+async function setState(req, res, { from, to, check, extra, version, allowExceptions, onHold = false }) {
   const id = paramId(req);
   let out = { ok: true };
   await tx(async (conn) => {
     const inc = await one(conn, 'SELECT * FROM incidents WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id]);
     if (!inc) throw notFound('Incident');
+    // Legal hold freezes the report as it is: no sign-off, approval, send back or reopen (onHold: escalation only).
+    if (Number(inc.legal_hold) && !onHold) throw conflict('This case is on legal hold: the report cannot be signed off, approved, sent back or reopened. Add a note instead.');
     if (!from.includes(inc.report_state)) throw conflict(`This report is ${inc.report_state}`);
     let rules = null;
     if (check) {
@@ -904,7 +907,7 @@ router.post('/incidents/:id/return', patrol, reviewer, validate(z.object({ comme
 }));
 
 router.post('/incidents/:id/escalate', patrol, reviewer, validate(z.object({ note: z.string().trim().min(3).max(1000) })), (req, res) => setState(req, res, {
-  from: ['submitted'], to: 'escalate', check: false,
+  from: ['submitted'], to: 'escalate', check: false, onHold: true,
   extra: async (conn, inc, now) => {
     if (Number(inc.submitted_by) === req.auth.userId) throw forbidden('You signed off this report, so another member of the review group must decide on it');
     if (inc.escalated_at) throw conflict('This report has already been escalated');
@@ -927,9 +930,10 @@ router.post('/incidents/:id/reopen', patrol, reviewer, validate(z.object({ reaso
   const s = await R.settingsOf(pool, req.auth.tenantId);
   return setState(req, res, {
     from: s.enabled ? ['approved'] : ['submitted', 'approved'], to: 'reopen', check: false,
-    extra: async (conn, inc) => {
+    extra: async (conn, inc, now) => {
       await conn.query("UPDATE incidents SET report_state = 'draft', status = 'open', approved_by = NULL, approved_at = NULL, returned_at = NULL, returned_by = NULL WHERE tenant_id = ? AND id = ?", [inc.tenant_id, inc.id]);
-      await conn.query('INSERT INTO incident_notes (tenant_id, incident_id, author_user, body) VALUES (?, ?, ?, ?)', [inc.tenant_id, inc.id, req.auth.userId, `Reopened: ${req.body.reason}`]);
+      // the mountain's clock, like every other note on the case
+      await conn.query('INSERT INTO incident_notes (tenant_id, incident_id, author_user, body, created_at) VALUES (?, ?, ?, ?, ?)', [inc.tenant_id, inc.id, req.auth.userId, `Reopened: ${req.body.reason}`, now]);
     },
   });
 });

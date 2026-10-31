@@ -61,6 +61,9 @@ router.post('/records/:id/release', patrol, needs('records'), stepUp('release a 
     if (!r) throw notFound('Request');
     if (r.status !== 'open') throw conflict(`This request is already ${r.status}`);
     if (r.authorization === 'none') throw conflict('Record the authorization first (a signed release, subpoena, court order, police request, or the patient asking for their own)');
+    // Only a report that is approved now: a reopened report's earlier approval was withdrawn and is never released.
+    const inc = await one(conn, 'SELECT report_state FROM incidents WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, r.incident_id]);
+    if (!inc || inc.report_state !== 'approved') throw conflict('This report was reopened and is not approved now. It can be released once it is approved again.');
     const v = await one(conn, "SELECT id, version_no FROM incident_versions WHERE tenant_id = ? AND incident_id = ? AND kind = 'approved' ORDER BY version_no DESC LIMIT 1", [t, r.incident_id]);
     if (!v) throw conflict('Only an approved report is released. Approve it first.');
     const { now } = await OPS.clock(conn, t);

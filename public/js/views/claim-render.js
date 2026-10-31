@@ -30,6 +30,7 @@ const BASIS = {
   approved_live: ['Approved', 'Approved, shown as it stands (no frozen copy was found).'],
   submitted: ['Not approved yet: the latest version', 'Signed off and waiting for review. It may still change.'],
   draft: ['Not approved: a draft', 'A draft. It may still change and has not been signed off.'],
+  reopened: ['Not approved: reopened', 'An earlier approval was withdrawn when the report was reopened. This is the report as it stands. It may still change and cannot be released until it is approved again.'],
 };
 
 function ageOf(p, onDay) {
