@@ -198,6 +198,10 @@ test('in the browser: Remember me, show password, two tabs, and the 10-minute ta
     assert.ok(stored.shared && !stored.tab, 'the token is shared by the tabs of this browser');
     assert.equal(JSON.parse(stored.remember).login, `owner@${A.slug}.test`);
     assert.ok(!/correct-horse/.test(JSON.stringify(stored)), 'never the password');
+    // A reload of the only tab stays signed in (the token steps aside while it reloads, and comes back).
+    await tab1.reload();
+    await tab1.waitForSelector('#main .page-head', { timeout: 15000 });
+    assert.equal(await tab1.evaluate(() => localStorage.getItem('so.token')), stored.shared, 'the same sign-in after a reload');
     // A second tab (a link opened in a new tab) opens signed in.
     const tab2 = await ctx.newPage();
     const busy2 = setInterval(() => { tab2.mouse.move(Math.random() * 300, Math.random() * 300).catch(() => {}); }, 150);
@@ -240,6 +244,27 @@ test('in the browser: Remember me, show password, two tabs, and the 10-minute ta
     assert.equal(await tab3.inputValue('input[name=password]'), '');
     assert.equal(await tab3.isChecked('input[name=remember]'), true);
     await ctx.close();
+
+    // Remember me, then the last tab closes: the token leaves the browser and the server ends the session soon after.
+    const ctxC = await browser.newContext();
+    const c1 = await ctxC.newPage();
+    await c1.goto(`${base}/`);
+    await c1.fill('input[name=tenant]', A.slug);
+    await c1.fill('input[name=login]', `owner@${A.slug}.test`);
+    await c1.fill('input[name=password]', PW);
+    await c1.check('input[name=remember]');
+    await c1.click('form[data-step=signin] button[type=submit]');
+    await c1.waitForSelector('#main .page-head', { timeout: 15000 });
+    const closedTok = await c1.evaluate(() => localStorage.getItem('so.token'));
+    const keep = await ctxC.newPage(); // a page of the browser on another site, so the browser itself stays open
+    await keep.goto('about:blank');
+    await c1.close({ runBeforeUnload: true });
+    await new Promise((r) => setTimeout(r, 800));
+    const c2 = await ctxC.newPage();
+    await c2.goto(`${base}/`);
+    await c2.waitForSelector('form[data-step=signin]');
+    assert.ok((await sessionRow(closedTok)).closing_at, 'the server was told the last tab closed');
+    await ctxC.close();
 
     // Without Remember me: one tab only, the mountain alone is remembered, and a new tab asks to sign in.
     const ctx2 = await browser.newContext();

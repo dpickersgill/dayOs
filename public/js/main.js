@@ -9,7 +9,7 @@ import { confirmItsYou } from './stepup.js';
 import { readTerminal, saveTerminal } from './terminal.js';
 import { passkeysPanel } from './views/security.js';
 import { watchPasswords } from './showpw.js';
-import { startTabWatch, activity as tabActivity, checkNow as tabCheckNow, msLeft as tabMsLeft, LOCK_MINUTES } from './tablock.js';
+import { startTabWatch, activity as tabActivity, checkNow as tabCheckNow, msLeft as tabMsLeft, refresh as tabRefresh, LOCK_MINUTES } from './tablock.js';
 import * as alerts from './alerts.js';
 import { flush as flushOutbox, waitingCounts, forgetCases, setDeviceKey, dropDeviceKey } from './outbox.js';
 import { buildFrame, GROUP_OF, PATROL_SECTIONS, patrolSection } from './nav.js';
@@ -101,6 +101,7 @@ async function signedIn(out) {
   const shared = keepShared && !readTerminal();
   const before = shared ? session.sharedToken() : null;
   session.save(out.token, { shared });
+  tabRefresh();
   // A sign-in that replaces the browser's shared token (a locked tab signed in again): the old session ends.
   if (before && before !== out.token) fetch('/api/v1/auth/logout', { method: 'POST', headers: { authorization: `Bearer ${before}` }, keepalive: true }).catch(() => {});
   if (out.recovery_codes_left !== undefined && out.recovery_codes_left < 3) toast(`Recovery code used. ${out.recovery_codes_left} left: make new ones in Settings.`);
@@ -148,7 +149,7 @@ function showSignIn(message) {
   const slugField = field('Mountain', slug, 'The short name you were given, such as spring-mountain');
   const note = h('div', { 'aria-live': 'polite', 'data-mountain-note': '' });
   const change = h('button', { type: 'button', class: 'btn link', 'aria-label': `Change the mountain (now ${known})` }, 'Change');
-  const shown = known ? h('p', { class: 'signin-mountain', 'data-mountain': known }, 'Mountain: ', h('strong', null, known), '. ', change) : null;
+  const shown = known ? h('p', { class: 'signin-mountain', 'data-mountain': known }, 'Mountain: ', h('strong', null, known), '.', change) : null;
   if (shown) slugField.hidden = true;
   change.addEventListener('click', () => { shown.remove(); slugField.hidden = false; slug.focus(); slug.select(); });
   const form = h('form', { novalidate: true, 'data-step': 'signin' },
@@ -168,7 +169,7 @@ function showSignIn(message) {
       keepShared = Boolean(remember && remember.checked);
       const out = await post('/auth/login', { tenant, login, password: pw.value });
       saveSlug(tenant);
-      saveRemember(keepShared ? { tenant, login } : null);
+      saveRemember(keepShared ? { tenant, login: login.includes('@') ? login : login.toLowerCase() } : null);
       if (out.mfa_required) { showSecondStep(out); return; }
       await signedIn(out);
     } catch (ex) {
@@ -200,7 +201,7 @@ function showSignIn(message) {
   // Which mountain this is decides what the page can offer (a demo sends no email); checked as the name is typed.
   let asked = 0; let wait = null;
   const check = async () => { const my = ++asked; const o = await mountainOptions(slug.value.trim().toLowerCase()); if (my === asked) sayMountain(o, note, emailRow); };
-  slug.addEventListener('input', () => { clearTimeout(wait); wait = setTimeout(check, 500); });
+  slug.addEventListener('input', () => { clear(err); clearTimeout(wait); wait = setTimeout(check, 500); });
   slug.addEventListener('change', () => { clearTimeout(wait); check(); });
   check();
   app.append(h('div', { class: 'signin' },

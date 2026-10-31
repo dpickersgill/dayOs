@@ -17,6 +17,11 @@ export const LOCK_MINUTES = 10;
 const LOCK_MS = (LOCK_MINUTES * 60_000) / SPEED;
 const BEAT_MS = Math.max(40, 15_000 / SPEED); // how often each tab says it is still open (and checks its own clock)
 const ALIVE_MS = Math.max(BEAT_MS * 4, 180_000 / SPEED, 3000); // a record older than this belongs to a tab that is gone (hidden tabs tick slowly)
+// A shared token found when a tab opens, with no tab heard from in this long, was left by a browser that crashed or was
+// killed (a normal close takes the token away): it is dropped and its session ended. Generous, because a browser may
+// suspend a tab in the background for a while.
+const STALE_MS = Math.max(ALIVE_MS, (15 * 60_000) / SPEED);
+const FORGET_MS = Math.max(STALE_MS * 4, 3_600_000 / SPEED); // a record this old is removed
 const PREFIX = 'so.tab.';
 const HANDOFF = 'so.handoff'; // the shared token, kept in this tab's own storage while it reloads
 
@@ -28,7 +33,7 @@ let timer = null;
 const ls = () => { try { return globalThis.localStorage; } catch (_) { return null; } };
 const ss = () => { try { return globalThis.sessionStorage; } catch (_) { return null; } };
 
-function records() {
+function records(within = ALIVE_MS) {
   const out = [];
   const st = ls();
   if (!st) return out;
@@ -38,7 +43,9 @@ function records() {
     if (!k || !k.startsWith(PREFIX)) continue;
     let r = null;
     try { r = JSON.parse(st.getItem(k)); } catch (_) { /* a broken record */ }
-    if (!r || !(now - Number(r.beat) < ALIVE_MS)) { try { st.removeItem(k); } catch (_) { /* fine */ } continue; } // a tab that is gone
+    const age = r ? now - Number(r.beat) : Infinity;
+    if (!(age < FORGET_MS)) { try { st.removeItem(k); } catch (_) { /* fine */ } continue; } // a tab long gone
+    if (!(age < within)) continue; // not heard from lately: gone, or asleep in the background
     out.push({ ...r, id: k.slice(PREFIX.length) });
   }
   return out;
@@ -86,16 +93,20 @@ export function activity() {
 /** Check now (after this tab locked itself): ends the shared session when no tab is in use any more. */
 export function checkNow() { writeOwn(); if (session.sharedToken() && allIdle()) endShared(); }
 
+/** Signed in (or out) in this tab: say so at once, so a tab opened next finds this one. */
+export function refresh() { seen = Date.now(); writeOwn(); }
+
 /** How long until this tab locks, in ms (for the tests). */
 export function msLeft() { return Math.max(0, LOCK_MS - (Date.now() - seen)); }
 
 // A reload of the last tab: put the shared token back where every tab reads it.
 function restoreHandoff() {
   const st = ss();
-  if (!st) return;
+  if (!st) return false;
   let kept = null;
-  try { kept = st.getItem(HANDOFF); st.removeItem(HANDOFF); } catch (_) { return; }
-  if (kept && !session.sharedToken()) session.setSharedToken(kept);
+  try { kept = st.getItem(HANDOFF); st.removeItem(HANDOFF); } catch (_) { return false; }
+  if (kept && !session.sharedToken()) { session.setSharedToken(kept); return true; }
+  return false;
 }
 
 function closingNotice(token) {
@@ -129,7 +140,14 @@ export function startTabWatch(h) {
   if (timer && timer.unref) timer.unref(); // (test runners only)
 }
 
-restoreHandoff();
+// A shared token left behind by a browser that did not close normally (see STALE_MS).
+function dropStale() {
+  if (!session.sharedToken()) return;
+  if (records(STALE_MS).some((r) => r.shared)) return;
+  endShared();
+}
+
+if (!restoreHandoff()) dropStale();
 if (typeof window !== 'undefined') {
   window.addEventListener('pagehide', leaving);
   window.addEventListener('pageshow', (e) => { if (e.persisted) { restoreHandoff(); seen = Date.now(); writeOwn(); } });

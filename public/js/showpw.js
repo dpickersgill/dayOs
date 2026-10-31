@@ -46,6 +46,7 @@ function scan(root) {
 /** Watches the page: every password box that appears gets the button. */
 export function watchPasswords(root = document.body) {
   scan(root);
+  if (typeof MutationObserver === 'undefined') return; // (a test page without it: the boxes there stay as they are)
   new MutationObserver((list) => { for (const m of list) for (const node of m.addedNodes) if (node.nodeType === 1) scan(node); })
     .observe(root, { childList: true, subtree: true });
 }

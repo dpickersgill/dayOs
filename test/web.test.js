@@ -436,7 +436,7 @@ test('sign in through the real form, move around, and sign out', skip(), async (
   bad('tenant', slug); bad('login', `owner@${slug}.test`); bad('password', 'wrong-password-here');
   form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await settle();
-  assert.match(document.querySelector('.signin').textContent, /Invalid credentials/);
+  assert.match(document.querySelector('.signin').textContent, /Wrong username or password\. Check the mountain name too/);
 
   bad('password', PW);
   form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));

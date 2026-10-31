@@ -3574,9 +3574,10 @@ button.fill-day:hover { border-color: var(--line-strong); }
 .pw-reveal:hover { color: var(--ink); }
 .pw-reveal:focus-visible { outline: 2px solid var(--trail-blue); outline-offset: -2px; }
 .pw-reveal[aria-pressed='true'] { color: var(--trail-blue); }
-.signin-mountain { margin: 0; font-size: 0.9375rem; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.signin-mountain { margin: 0; font-size: 0.9375rem; }
 .signin-mountain strong { overflow-wrap: anywhere; }
-.signin-mountain .btn.link { min-height: 32px; font-weight: 700; }
+.signin-mountain .btn.link { min-height: 32px; margin-left: 4px; font-weight: 700; }
+[data-mountain-note]:empty { display: none; }
 .signin-note { margin: 0; padding: 8px 10px; border-left: 3px solid var(--line-strong); background: var(--surface-2, transparent); font-size: 0.875rem; }
 .signin-note.warn { border-left-color: var(--warn, #c98a00); }
 .signin-form .signin-hint { margin: 0 0 0 32px; font-size: 0.8125rem; color: var(--quiet); max-width: 38ch; }
