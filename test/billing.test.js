@@ -246,7 +246,7 @@ test('read only: sales and new records stop, patrol and billing keep working, th
   // The operator records a check: everything is back straight away
   assert.equal((await plat('PUT', `/tenants/${tenantId}/billing`, { paid_until: daysFrom(300), notes: 'Check 1042' })).status, 200);
   assert.equal((await api('POST', '/products', { token: owner, body: { kind: 'day_ticket', name: 'Day ticket', base_price_cents: 5000 } })).status, 201);
-  const detail = (await plat('GET', `/tenants/${tenantId}`)).body;
+  const detail = (await (await require('./helpers/platform-operator').operatorConsole(base, KEY))('GET', `/tenants/${tenantId}`)).body;
   assert.equal(detail.billing_standing.kind, 'paid_manually'); assert.equal(detail.billing.notes, 'Check 1042');
   assert.ok(detail.billing_events.some((e) => e.kind === 'operator_change'));
 });

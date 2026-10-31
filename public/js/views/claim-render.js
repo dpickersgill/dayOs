@@ -2,6 +2,7 @@
 // (#/patrol/claim/:id, #/patrol/risk-report) and for the secure links an insurer or broker opens (/c/<token>).
 // Built with h() only (no innerHTML). Times are the mountain's wall clock, shown with the date and year.
 import { h, label } from '../ui.js';
+import { liftText } from '../liftstatus.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const m = (s) => /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(String(s || ''));
@@ -92,7 +93,7 @@ function conditionsBlock(s) {
     ['Trail check', tr && tr.checked ? `${when(tr.checked.at)}${tr.checked.hazards ? `: ${tr.checked.hazards}` : ''}` : null],
     ['Snow', sn ? [nn(sn.base_in) ? `${sn.base_in}" base` : null, nn(sn.new_snow_in) ? `${sn.new_snow_in}" new` : null, sn.surface ? label(sn.surface) : null, sn.quality ? label(sn.quality) : null].filter(Boolean).join(', ') + ` (${when(sn.at)})` : null],
     ['Weather', w ? [nn(w.temp_f) ? `${w.temp_f} °F` : null, w.sky ? (SKY[w.sky] || label(w.sky)) : null, nn(w.wind_mph) ? `wind ${w.wind_mph} mph${w.wind_dir ? ` ${w.wind_dir}` : ''}` : null, nn(w.gust_mph) ? `gusts ${w.gust_mph}` : null].filter(Boolean).join(', ') + ` (${when(w.at)}${w.place ? `, ${w.place}` : ''})` : null],
-    ['Lift', l ? `${l.name}${l.status ? `, ${label(l.status)}` : ''}` : null],
+    ['Lift', l ? `${l.name}${l.status ? `, ${liftText(l.status)}` : ''}` : null],
     ['Lift stop', l && l.stop ? `${when(l.stop.started_at)} to ${l.stop.ended_at ? clock(l.stop.ended_at) : 'still stopped'}: ${label(l.stop.reason || '')}${l.stop.note ? `, ${l.stop.note}` : ''}` : null],
     ['Evacuation', l && l.evac ? `${when(l.evac.started_at)}${nn(l.evac.guests) ? `, ${l.evac.guests} guests` : ''}` : null],
   ]);

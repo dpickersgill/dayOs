@@ -108,7 +108,8 @@ router.put('/brand', requireRole('manager'), validate(brandSchema), async (req, 
 async function tenantFor(slug) {
   const t = await one(pool, 'SELECT id, name, slug, address, phone, timezone, waiver_text, online_shop, shop_message, online_daily_limit, shop_change_hours, shop_change_fee_cents, stripe_account, stripe_charges_enabled FROM tenants WHERE slug = ?', [slug]);
   if (!t || !t.online_shop) throw notFound('Shop');
-  t.open = connect.readyRow(t) && !(await sandbox.isSandbox(t.id)); // card payments go to the mountain's own Stripe account
+  t.demo = await sandbox.isSandbox(t.id); // a demo mountain shows its shop to look around, and never takes a card
+  t.open = connect.readyRow(t) && !t.demo; // card payments go to the mountain's own Stripe account
   return t;
 }
 
@@ -233,7 +234,7 @@ publicRouter.get('/:slug/shop', async (req, res) => {
   const activities = atts.map((a) => ({ attraction: { ...ACT.attractionOut(a), status_note: undefined }, products: acts.filter((p) => p.attraction_id === a.id).map((p) => ({ id: p.id, name: p.name, timed: Boolean(p.timed), base_price_cents: p.base_price_cents, prices: actTiers.filter((x) => x.product_id === p.id).map((x) => ({ tier: x.tier, price_cents: x.price_cents })) })) }));
   res.json({ activities, addons: addons.map((a) => ({ id: a.id, kind: a.kind, name: a.name, valid_days: a.valid_days, uses: a.uses, price_cents: a.base_price_cents, per_person: a.kind !== 'voucher',
     prices: addonTiers.filter((x) => x.product_id === a.id && onlineCodes.has(x.tier)).map((x) => ({ tier: x.tier, price_cents: x.price_cents })) })),
-    badges: await require('../lib/fairprice').badges(pool, t.id).catch(() => []), lesson_booking: Boolean(booking && booking.online_booking && Number(booking.lessons)) ? { link: `/book/${encodeURIComponent(t.slug)}` } : null, gift: { min_cents: 500, max_cents: 100000 }, mountain: t.name, brand: brand ? { ...brand, opening_day: brand.opening_day ? String(brand.opening_day).slice(0, 10) : null } : null, conditions, phone: t.phone, message: t.shop_message, open: t.open, today, waiver_text: t.waiver_text || null, products: out, guest_types: guestTypes });
+    badges: await require('../lib/fairprice').badges(pool, t.id).catch(() => []), lesson_booking: Boolean(booking && booking.online_booking && Number(booking.lessons)) ? { link: `/book/${encodeURIComponent(t.slug)}` } : null, gift: { min_cents: 500, max_cents: 100000 }, mountain: t.name, brand: brand ? { ...brand, opening_day: brand.opening_day ? String(brand.opening_day).slice(0, 10) : null } : null, conditions, phone: t.phone, message: t.shop_message, open: t.open, demo: Boolean(t.demo), today, waiver_text: t.waiver_text || null, products: out, guest_types: guestTypes });
 });
 
 publicRouter.get('/:slug/shop/month', async (req, res) => {

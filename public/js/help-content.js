@@ -1095,6 +1095,21 @@ export const ARTICLES = [
     steps: ['Wait a minute and try again. Most limits last one minute; guest forms and emailed codes last up to an hour.', 'Check the password, the username and the mountain name before trying again: only wrong tries count. A sign-in that works never uses up the limit, so a whole crew can sign in at opening.'],
     tips: ['Ten wrong passwords for one login lock that login for 15 minutes, whatever the address. A manager can reset the password to unlock it sooner.', 'The limits are the same on every one of our servers, so trying again in another tab or on another computer at the mountain does not help: wait instead.'], related: ['status-page', 'password'] },
   // ---- end Track READY
+
+  // ---- Release 2026.11.10, Track SLIM: text STOP replies, one word for a lift's status, the demo's guest pages
+  { id: 'texts-stop', app: 'messages', title: 'When a guest replies STOP to a text', keywords: 'stop start unsubscribe text message sms opt out consent reply twilio',
+    intro: 'A guest who replies STOP to any text from Verdynt/OS gets no more texts, and their customer record says so.',
+    steps: ['The guest replies STOP (or UNSUBSCRIBE, CANCEL, END or QUIT). They get one reply saying they will get no more texts.', 'Their consent record changes to Opted out, from a text reply. Text campaigns skip them from then on.', 'If they reply START later, texts start again and the record changes back.'],
+    tips: ['All mountains on Verdynt/OS text from the same number, so a STOP stops texts from every mountain to that phone.', 'Staff cannot turn texts back on for a guest who replied STOP. Only the guest can, by replying START.'], related: [] },
+  { id: 'lift-status-words', app: 'conditions', title: 'What a lift\'s status means', keywords: 'lift status open on hold wind hold closed cannot open inspection failed word',
+    intro: 'Every screen uses the same word for a lift: Mountain status, Today, the wall screen, patrol reports and the public conditions page.',
+    steps: ['Open: running for guests.', 'On hold: stopped for now, for any reason but wind.', 'Wind hold: stopped for wind.', 'Closed: not running today.', 'Cannot open: today\'s inspection failed. Pass a new inspection to open it.'],
+    tips: ['Change a lift on Mountain status. The other screens follow straight away.'], related: [] },
+  { id: 'demo-guest-pages', app: 'shop', title: 'The guest pages on a demo mountain', keywords: 'demo try sample guest pages online shop lesson booking waiver paying off',
+    intro: 'A demo mountain has its guest pages switched on, so you can see what a guest sees: the online shop, lesson booking and a sample waiver.',
+    steps: ['Open the online shop from Online shop. Pick a day and add tickets to see prices and the total.', 'The pay button says paying is off: a demo mountain never takes a card or sends email.', 'The waiver is a sample marked SAMPLE ONLY. On your own mountain, write your own wording in Waivers and have your lawyer approve it.'],
+    tips: ['The demo deletes itself after a week.'], related: [] },
+  // ---- end Track SLIM
 ];
 
 export const articleById = (id) => ARTICLES.find((a) => a.id === id) || null;

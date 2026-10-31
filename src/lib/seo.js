@@ -150,7 +150,7 @@ const META = {
   },
   contact: {
     title: 'Request a Demo or a Free 14-Day Trial | Verdynt/OS',
-    description: 'Book a 20-minute walkthrough of Verdynt/OS, start a 14-day free trial on your own mountain, or join the founding group of independent ski areas.',
+    description: 'Book a 20-minute walkthrough of Verdynt/OS, start a 14-day free trial on your own mountain, or apply for the Founding Mountain Program (three places, open until March 31, 2027).',
     og: 'See your mountain on the board',
     crumb: 'Contact',
   },

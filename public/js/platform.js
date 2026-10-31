@@ -318,7 +318,7 @@ function leadsButton() {
   call('GET', '/leads?status=new').then((r) => { if (r.new_count) b.append(' ', badge(String(r.new_count), 'warn')); }).catch(() => {});
   return b;
 }
-const LEAD_KIND = { walkthrough: 'Walkthrough', trial: 'Trial', founding: 'Founding group', question: 'Question', patrol: 'Patrol only', review: 'Report review', setup: 'Guided setup' };
+const LEAD_KIND = { walkthrough: 'Walkthrough', trial: 'Trial', founding: 'Founding Mountain Program', question: 'Question', patrol: 'Patrol only', review: 'Report review', setup: 'Guided setup' };
 const LEAD_STATUS = [['new', 'New'], ['contacted', 'Contacted'], ['trial', 'On a trial'], ['won', 'Paying'], ['lost', 'Not now']];
 async function leads() {
   let r;
@@ -328,7 +328,7 @@ async function leads() {
     table([
       { head: 'When', cell: (l) => dayTime(l.created_at) },
       { head: 'Who', cell: (l) => h('span', null, h('b', null, l.mountain), h('br'), `${l.name}${l.role ? `, ${l.role}` : ''}`, h('br'), h('a', { href: `mailto:${l.email}` }, l.email), l.phone ? ` ${l.phone}` : '') },
-      { head: 'Wants', cell: (l) => h('span', null, LEAD_KIND[l.kind] || l.kind, l.founding && l.kind !== 'founding' ? ', founding group' : '', l.plan_interest ? h('span', { class: 'muted small' }, ` (${l.plan_interest})`) : null, l.lifts ? h('span', { class: 'muted small' }, `, ${l.lifts} lifts`) : null, l.message ? h('p', { class: 'small' }, l.message) : null) },
+      { head: 'Wants', cell: (l) => h('span', null, LEAD_KIND[l.kind] || l.kind, l.founding && l.kind !== 'founding' ? ', Founding Mountain Program' : '', l.plan_interest ? h('span', { class: 'muted small' }, ` (${l.plan_interest})`) : null, l.lifts ? h('span', { class: 'muted small' }, `, ${l.lifts} lifts`) : null, l.message ? h('p', { class: 'small' }, l.message) : null) },
       { head: 'Status', cell: (l) => { const sel = h('select', { 'aria-label': `Status for ${l.mountain}`, style: 'min-width:9.5em' }, ...LEAD_STATUS.map(([v, t]) => { const o = h('option', { value: v }, t); o.selected = l.status === v; return o; })); sel.addEventListener('change', async () => { try { await call('PATCH', `/leads/${l.id}`, { status: sel.value }); toast('Saved.'); } catch (ex) { fail(ex); } }); return h('span', null, sel, l.slug ? h('div', { class: 'small muted' }, `Mountain: ${l.slug}`) : null, l.operator_note ? h('div', { class: 'small' }, l.operator_note) : null); } },
       { actions: true, cell: (l) => h('span', { class: 'row' }, ...[
         !l.tenant_id ? button('Make their mountain', () => { const [first, ...rest] = l.name.split(' '); addMountain({ name: l.mountain, email: l.email, first, last: rest.join(' ') || first }, async (made) => { await call('PATCH', `/leads/${l.id}`, { tenant_id: made.id, status: 'trial' }); dlg.close(); }); }, { small: true }) : null,

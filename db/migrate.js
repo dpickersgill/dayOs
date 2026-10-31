@@ -1320,33 +1320,9 @@ const outreachSteps = [
   ) ENGINE=InnoDB`],
 ];
 
-// Research batches shipped in db/data are loaded once each (by batch name), so deleting a prospect never brings it back.
-async function loadProspectBatches(conn) {
-  const dir = path.join(__dirname, 'data');
-  if (!fs.existsSync(dir)) return;
-  const { importBatch } = require('../src/lib/prospects');
-  for (const f of fs.readdirSync(dir).filter((x) => /^prospects-.*\.json$/.test(x)).sort()) {
-    const file = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
-    const name = String(file.batch || f).slice(0, 100);
-    const [[done]] = await conn.query('SELECT name FROM prospect_batches WHERE name = ?', [name]);
-    if (done) continue;
-    const r = await importBatch(conn, file.prospects || [], { checkedOn: file.checked_on || null });
-    await conn.query('INSERT INTO prospect_batches (name, added) VALUES (?, ?)', [name, r.added]);
-    console.log(`Prospects: loaded "${name}" (${r.added} new, ${r.contacts} contacts)`);
-  }
-  // Indy Pass partner resorts came off the list (Oct 26, 2026). Where the first batch was loaded before that, the ones
-  // nobody has worked on yet are removed once: still being researched, with nothing on their timeline.
-  const cleanup = 'cleanup: Indy Pass resorts 2026-10';
-  const [[cleaned]] = await conn.query('SELECT name FROM prospect_batches WHERE name = ?', [cleanup]);
-  if (!cleaned) {
-    const first = path.join(dir, 'prospects-2026-10.json');
-    const names = fs.existsSync(first) ? JSON.parse(fs.readFileSync(first, 'utf8')).excluded_indy_pass || [] : [];
-    const [r] = await conn.query(`DELETE FROM prospects WHERE stage = 'research' AND (indy_pass = 1${names.length ? ` OR name IN (${names.map(() => '?').join(', ')})` : ''})
-      AND NOT EXISTS (SELECT 1 FROM prospect_notes n WHERE n.prospect_id = prospects.id)`, names);
-    await conn.query('INSERT INTO prospect_batches (name, added) VALUES (?, 0)', [cleanup]);
-    if (r.affectedRows) console.log(`Prospects: removed ${r.affectedRows} Indy Pass resort${r.affectedRows === 1 ? '' : 's'}`);
-  }
-}
+// Research batches of prospects are no longer shipped in the server build (2026.11.10). The platform operator loads each
+// research file once in the console (Prospects, Import research); src/lib/prospects.js loadBatch records it by name in
+// prospect_batches, so loading it again changes nothing. The files are in research/ in the release zip.
 
 const skiAreaSteps = [
   ['ski_area_cache', (c) => tableExists(c, 'ski_area_cache'), `CREATE TABLE ski_area_cache (
@@ -1609,7 +1585,7 @@ async function main() {
   await seedPatrolPlan(conn);
   await seedAssistantAddon(conn);
   let applied = 0;
-  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...cardReturnSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps, ...crewSteps, ...caseLinkSteps, ...injuryRegisterSteps, ...lostFoundSteps, ...kitSteps, ...teamSteps, ...prospectSteps, ...partnerSteps, ...outreachSteps, ...require('./steps/claims')({ tableExists, columnExists }), ...require('./steps/scene')({ tableExists, columnExists }), ...require('./steps/site')({ tableExists, columnExists }), ...require('./steps/pricing')({ tableExists, columnExists }), ...require('./steps/records')({ tableExists, columnExists }), ...require('./steps/attractions')({ tableExists, columnExists }), ...require('./steps/attractions2')({ tableExists, columnExists }), ...require('./steps/checklists')({ tableExists, columnExists }), ...require('./steps/activities')({ tableExists, columnExists }), ...require('./steps/waiverlinks')({ tableExists, columnExists }), ...require('./steps/planblurb')({ tableExists, columnExists }), ...require('./steps/rentals2')({ tableExists, columnExists }), ...require('./steps/rentals2-fit')({ tableExists, columnExists }), ...require('./steps/rentals2-returns')({ tableExists, columnExists }), ...require('./steps/rentals2-guards')({ tableExists, columnExists }), ...require('./steps/lessons2')({ tableExists, columnExists }), ...require('./steps/lessons2-core')({ tableExists, columnExists }), ...require('./steps/lessons2-parents')({ tableExists, columnExists }), ...require('./steps/lessons2-pay')({ tableExists, columnExists }), ...require('./steps/lessons2-director')({ tableExists, columnExists }), ...require('./steps/guests')({ tableExists, columnExists }), ...require('./steps/guests-window')({ tableExists, columnExists }), ...require('./steps/guests-account')({ tableExists, columnExists }), ...require('./steps/guests-loyalty')({ tableExists, columnExists }), ...require('./steps/guests-fair')({ tableExists, columnExists }), ...require('./steps/guests-site')({ tableExists, columnExists }), ...require('./steps/guests-fix')({ tableExists, columnExists }), ...require('./steps/lessons3')({ tableExists, columnExists }), ...require('./steps/lessons3-plan')({ tableExists, columnExists }), ...require('./steps/lessons3-staff')({ tableExists, columnExists }), ...require('./steps/lessons3-fix')({ tableExists, columnExists }), ...require('./steps/r10-ready')({ tableExists, columnExists })]) {
+  for (const [name, done, ddl] of [...steps, ...patrolSteps, ...kioskSteps, ...accessSteps, ...waiverSteps, ...careSteps, ...assetSteps, ...gateSteps, ...opsSteps, ...securitySteps, ...connectSteps, ...trySteps, ...terminalSteps, ...cardReturnSteps, ...lessonCancelSteps, ...pinSteps, ...guestTypeSteps, ...dayRecordSteps, ...mapFeatureSteps, ...storyFillSteps, ...programSessionSteps, ...programPlusSteps, ...assistantSteps, ...demoMailSteps, ...fieldKitSteps, ...staffInjurySteps, ...skiAreaSteps, ...reportRuleSteps, ...crewSteps, ...caseLinkSteps, ...injuryRegisterSteps, ...lostFoundSteps, ...kitSteps, ...teamSteps, ...prospectSteps, ...partnerSteps, ...outreachSteps, ...require('./steps/claims')({ tableExists, columnExists }), ...require('./steps/scene')({ tableExists, columnExists }), ...require('./steps/site')({ tableExists, columnExists }), ...require('./steps/pricing')({ tableExists, columnExists }), ...require('./steps/records')({ tableExists, columnExists }), ...require('./steps/attractions')({ tableExists, columnExists }), ...require('./steps/attractions2')({ tableExists, columnExists }), ...require('./steps/checklists')({ tableExists, columnExists }), ...require('./steps/activities')({ tableExists, columnExists }), ...require('./steps/waiverlinks')({ tableExists, columnExists }), ...require('./steps/planblurb')({ tableExists, columnExists }), ...require('./steps/rentals2')({ tableExists, columnExists }), ...require('./steps/rentals2-fit')({ tableExists, columnExists }), ...require('./steps/rentals2-returns')({ tableExists, columnExists }), ...require('./steps/rentals2-guards')({ tableExists, columnExists }), ...require('./steps/lessons2')({ tableExists, columnExists }), ...require('./steps/lessons2-core')({ tableExists, columnExists }), ...require('./steps/lessons2-parents')({ tableExists, columnExists }), ...require('./steps/lessons2-pay')({ tableExists, columnExists }), ...require('./steps/lessons2-director')({ tableExists, columnExists }), ...require('./steps/guests')({ tableExists, columnExists }), ...require('./steps/guests-window')({ tableExists, columnExists }), ...require('./steps/guests-account')({ tableExists, columnExists }), ...require('./steps/guests-loyalty')({ tableExists, columnExists }), ...require('./steps/guests-fair')({ tableExists, columnExists }), ...require('./steps/guests-site')({ tableExists, columnExists }), ...require('./steps/guests-fix')({ tableExists, columnExists }), ...require('./steps/lessons3')({ tableExists, columnExists }), ...require('./steps/lessons3-plan')({ tableExists, columnExists }), ...require('./steps/lessons3-staff')({ tableExists, columnExists }), ...require('./steps/lessons3-fix')({ tableExists, columnExists }), ...require('./steps/r10-ready')({ tableExists, columnExists }), ...require('./steps/r10-slim')({ tableExists, columnExists })]) {
     if (await done(conn)) continue;
     for (const statement of Array.isArray(ddl) ? ddl : [ddl]) await conn.query(statement);
     applied += 1;
@@ -1622,7 +1598,6 @@ async function main() {
   if (moved) console.log(`Moved ${moved} upcoming patrol shift${moved === 1 ? '' : 's'} to the Patrol schedule`);
   // Keep the wording each mountain uses today, so waivers already signed against it can be shown word for word.
   await conn.query('INSERT IGNORE INTO waiver_texts (tenant_id, sha, body) SELECT id, SHA2(waiver_text, 256), waiver_text FROM tenants WHERE CHAR_LENGTH(waiver_text) > 0');
-  await loadProspectBatches(conn);
   const numbered = await backfillCaseNumbers(conn);
   if (numbered) console.log(`Numbered ${numbered} existing incident report${numbered === 1 ? '' : 's'}`);
   await conn.end();

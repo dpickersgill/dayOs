@@ -7,3 +7,10 @@ node_modules
 .env
 *.log
 test
+# Packages and archives never go into the server build
+*.whl
+*.zip
+*.tar.gz
+*.tgz
+# Prospect research files are loaded once in the platform console, not shipped in the server build
+research

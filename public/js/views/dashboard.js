@@ -1,5 +1,6 @@
 import { get, poll, put, post, patch, del } from '../api.js';
 import { icon } from '../icons.js';
+import { liftWord } from '../liftstatus.js';
 import { ctx, h, svg, can, clear, money, state, input, field, select, button, todayStr, fmtDate, fmtDateLong, fmtTime, fmtDateTime, label, empty, errorBox, loading, toast, fail, isManager, confirmDialog } from '../ui.js';
 
 const ROLES = [['counter', 'Counter'], ['instructor', 'Instructors'], ['patrol', 'Patrol'], ['staff', 'Staff'], ['manager', 'Managers and owners']];
@@ -169,7 +170,6 @@ function alertList(alerts) {
 const link = (text, key) => h('a', { href: `#/${key}` }, text);
 const big = (n, text, sub) => h('div', { class: 'figure' }, h('strong', null, String(n)), h('span', null, text), sub ? h('em', null, sub) : null);
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many || `${one}s`}`;
-const LIFT = { open: ['Open', 'good'], hold: ['On hold', 'warn'], wind_hold: ['Wind hold', 'warn'], closed: ['Closed', 'neutral'] };
 
 // The morning board: one dark card with every lift and why, patrol's opening, grooming, machines due, and three numbers.
 const SHAPE = { good: '<circle cx="6" cy="6" r="5"/>', warn: '<rect x="1" y="1" width="10" height="10"/>', bad: '<path d="M6 0.5 L11.5 6 L6 11.5 L0.5 6 Z"/>', neutral: '<circle cx="6" cy="6" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/>' };
@@ -189,11 +189,10 @@ function serviceWhen(f) {
 
 const TILES = {
   morning: (d) => {
-    const LIFTCHIP = { open: ['Open', 'good'], hold: ['On hold', 'warn'], wind_hold: ['Wind hold', 'warn'], closed: ['Closed', 'neutral'] };
     const liftCol = [mbHead('Lifts', 'conditions')];
     if (!d.lifts.length) liftCol.push(mbRow('No lifts set up yet', null, null));
     for (const l of d.lifts) {
-      const [t, k] = l.check === 'fail' ? ['Cannot open', 'bad'] : LIFTCHIP[l.status] || [label(l.status), 'neutral'];
+      const [t, k] = liftWord(l.status, l.check);
       liftCol.push(mbRow(l.name, l.detail, chip(t, k)));
     }
     if (d.attractions && d.attractions.length) {
@@ -237,7 +236,7 @@ const TILES = {
   lifts: (d) => {
     if (!d.lifts.length) return empty('No lifts set up yet.', link('Add lifts', 'conditions'));
     return h('ul', { class: 'bd-list' }, d.lifts.map((l) => {
-      const [text, kind] = l.check === 'fail' ? ['Cannot open', 'bad'] : LIFT[l.status] || [label(l.status), 'neutral'];
+      const [text, kind] = liftWord(l.status, l.check);
       return h('li', null, h('span', null, h('b', null, l.name), l.check === 'fail' ? h('small', null, ' failed inspection') : l.check === 'pass' ? h('small', null, ' inspected') : null), state(text, kind));
     }));
   },

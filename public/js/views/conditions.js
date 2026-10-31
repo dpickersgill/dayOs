@@ -1,7 +1,9 @@
 import { get, put, patch, post } from '../api.js';
+import { LIFT_STATES } from '../liftstatus.js';
 import { h, clear, ctx, can, isManager, tabs, table, state, trailMark, input, select, field, button, toast, formDialog, val, todayStr, label, empty, errorBox, fail } from '../ui.js';
 
-const LIFT_STATES = [['open', 'Open', 'good'], ['hold', 'On hold', 'warn'], ['wind_hold', 'Wind hold', 'warn'], ['closed', 'Closed', 'bad']];
+// The lift words are shared (liftstatus.js); here Closed is red, like a closed trail or attraction on this screen.
+const LIFT_SEG = LIFT_STATES.map(([v, t, k]) => [v, t, v === 'closed' ? 'bad' : k]);
 const TRAIL_STATES = [['open', 'Open', 'good'], ['closed', 'Closed', 'bad']];
 const DIFFICULTY = [['green', 'Easy'], ['blue', 'Intermediate'], ['black', 'Advanced'], ['double_black', 'Expert'], ['park', 'Terrain park']];
 
@@ -98,7 +100,7 @@ async function drawLifts(box, canSet) {
   if (!data.length) { box.append(empty('No lifts yet.')); return; }
   box.append(table([
     { head: 'Lift', cell: (l) => h('strong', null, l.name) },
-    { head: 'Status', cell: (l) => segmented(LIFT_STATES, l.status, canSet, (v) => patch(`/schedule/lifts/${l.id}`, { status: v })) },
+    { head: 'Status', cell: (l) => segmented(LIFT_SEG, l.status, canSet, (v) => patch(`/schedule/lifts/${l.id}`, { status: v })) },
   ], data));
 }
 function addLift(done) {

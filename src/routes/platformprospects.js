@@ -101,13 +101,15 @@ module.exports = function prospectsRouter(log) {
     res.set('content-type', 'text/csv; charset=utf-8').set('content-disposition', 'attachment; filename="verdynt-prospects.csv"').send(csv);
   });
 
-  // A research batch in the db/data/prospects-*.json format: { prospects: [...] } or the list itself.
+  // A research file in the research/prospects-*.json format: { batch, prospects: [...] }, or the list itself.
+  // A file with a batch name loads once; loading it again says so and changes nothing.
   router.post('/import', async (req, res) => {
     const list = Array.isArray(req.body) ? req.body : req.body && Array.isArray(req.body.prospects) ? req.body.prospects : null;
     if (!list || !list.length) throw bad('That file has no prospects in it. It needs a list of ski areas, each with at least a name.');
     if (list.length > 2000) throw bad('Up to 2,000 ski areas at a time');
-    const r = await P.importBatch(pool, list, { checkedOn: (req.body && req.body.checked_on) || null });
-    await log(pool, req, null, 'prospects_import', r);
+    const batch = !Array.isArray(req.body) && typeof req.body.batch === 'string' && req.body.batch.trim() ? req.body.batch : null;
+    const r = batch ? await P.loadBatch(pool, req.body) : await P.importBatch(pool, list, { checkedOn: (req.body && req.body.checked_on) || null });
+    await log(pool, req, null, r.already ? 'prospects_import_again' : 'prospects_import', r);
     res.json(r);
   });
 

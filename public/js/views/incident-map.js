@@ -10,8 +10,8 @@ export function loadLeaflet() {
   if (window.L) return Promise.resolve(window.L);
   if (!leafletReady) {
     leafletReady = new Promise((resolve, reject) => {
-      document.head.append(h('link', { rel: 'stylesheet', href: '/vendor/leaflet/leaflet.css' }));
-      const s = h('script', { src: '/vendor/leaflet/leaflet.js' });
+      document.head.append(h('link', { rel: 'stylesheet', href: new URL('../../vendor/leaflet/leaflet.css', import.meta.url).href }));
+      const s = h('script', { src: new URL('../../vendor/leaflet/leaflet.js', import.meta.url).href });
       s.addEventListener('load', () => resolve(window.L));
       s.addEventListener('error', () => { leafletReady = null; reject(new Error('The map could not be loaded. Check your connection and try again.')); });
       document.head.append(s);

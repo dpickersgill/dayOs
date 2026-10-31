@@ -117,28 +117,25 @@ function createApp() {
   const site = require('./routes/site');
   app.use(site.pages);
 
-  // The admin web app: plain files, no build step. HTML/JS/CSS revalidate on every load so an update
-  // shows up immediately; fonts never change and cache for a year.
-  app.use(
-    express.static(path.join(__dirname, '..', 'public'), {
-      setHeaders(res, file) {
-        // Fonts never change. The website's own files are asked for with ?v=<version>, so they can be kept a year too.
-        const versioned = res.req && res.req.query && res.req.query.v && /[\\/]public[\\/]site[\\/]/.test(file);
-        res.setHeader('Cache-Control', file.endsWith('.woff2') || versioned ? 'public, max-age=31536000, immutable' : 'no-cache');
-      },
-    }),
-  );
+  // The admin web app: plain files, no build step. The pages revalidate on every load so an update shows up at once; the
+  // scripts and styles they load are at /r/<release>/ addresses and kept a year; fonts never change and are kept a year
+  // (src/lib/appassets.js).
+  const assets = require('./lib/appassets');
+  const page = assets.page;
+  app.use(assets.directPages);
+  app.use(assets.releaseFiles);
+  app.use(express.static(path.join(__dirname, '..', 'public'), { setHeaders: assets.staticHeaders }));
 
   // The guest help page (opened from a QR code on a trail sign). It is a static page that reads its mountain from the URL.
   // Locating a caller: the one-time link dispatch texts to a guest.
-  app.get('/locate/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'locate.html')));
-  app.get('/help/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'help.html')));
-  app.get('/lost/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'lost.html')));
-  app.get('/reserve/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'reserve.html')));
-  app.get('/c/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'claim-share.html'))); // a claim file or season report shared with an insurer
-  app.get('/w/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'witness.html'))); // a witness writes their own statement
+  app.get('/locate/:token', page('locate.html'));
+  app.get('/help/:slug', page('help.html'));
+  app.get('/lost/:slug', page('lost.html'));
+  app.get('/reserve/:slug', page('reserve.html'));
+  app.get('/c/:token', page('claim-share.html')); // a claim file or season report shared with an insurer
+  app.get('/w/:token', page('witness.html')); // a witness writes their own statement
   // An outreach email's "not interested" link: the page, and a mail app's one-click unsubscribe (a POST to the same address).
-  app.get('/o/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'outreach-stop.html')));
+  app.get('/o/:token', page('outreach-stop.html'));
   app.post('/o/:token', rateLimit({ windowMs: 60_000, max: 30 }), async (req, res, next) => {
     try {
       if (!/^[a-f0-9]{32}$/.test(req.params.token)) return res.status(404).send('Not found');
@@ -148,35 +145,35 @@ function createApp() {
   });
 
   // The public lesson booking page, one per mountain, read from the URL like the help page.
-  app.get('/book/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'book.html')));
+  app.get('/book/:slug', page('book.html'));
   // The ski school's family pages (2026.11.5): one lesson booking (check in, details, change the date, the recap and a tip),
   // find my level, claiming a waitlist spot, asking for a private by name, and a weather change to choose from.
-  app.get('/lesson/:slug/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'lesson.html')));
-  app.get('/level/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'level.html')));
-  app.get('/waitlist/:slug/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'waitlist.html')));
-  app.get('/private/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'private.html')));
-  app.get('/weather/:slug/:token', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'weather.html')));
-  app.get(['/season/:slug/:token', '/season/:slug/share/:token'], (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'season.html'))); // a guest's day or season recap (guests round 2)
+  app.get('/lesson/:slug/:token', page('lesson.html'));
+  app.get('/level/:slug', page('level.html'));
+  app.get('/waitlist/:slug/:token', page('waitlist.html'));
+  app.get('/private/:slug', page('private.html'));
+  app.get('/weather/:slug/:token', page('weather.html'));
+  app.get(['/season/:slug/:token', '/season/:slug/share/:token'], page('season.html')); // a guest's day or season recap (guests round 2)
   // Fair by design (guests round 2, FAIR): the conditions guarantee, a pass on hold, a payment plan's card, a renewal, a waitlist offer.
-  app.get(['/guarantee/:slug/:token', '/blocked/:slug/:token', '/plan/:slug/:token', '/renew/:slug/:token', '/pass-offer/:slug/:token'], (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'fair.html')));
-  app.get('/shop/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'shop.html')));
-  app.get('/programs/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'register.html')));
-  app.get('/family/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'family.html')));
-  app.get('/reload/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'shop.html'))); // reload an RFID card online (Guests round 2)
-  app.get(['/gift/:slug/:token', '/gift-balance/:slug'], (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'gift.html'))); // a gift experience, the gift card balance
-  app.get('/try', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'try.html')));
-  app.get('/platform', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'platform.html')));
+  app.get(['/guarantee/:slug/:token', '/blocked/:slug/:token', '/plan/:slug/:token', '/renew/:slug/:token', '/pass-offer/:slug/:token'], page('fair.html'));
+  app.get('/shop/:slug', page('shop.html'));
+  app.get('/programs/:slug', page('register.html'));
+  app.get('/family/:slug', page('family.html'));
+  app.get('/reload/:slug', page('shop.html')); // reload an RFID card online (Guests round 2)
+  app.get(['/gift/:slug/:token', '/gift-balance/:slug'], page('gift.html')); // a gift experience, the gift card balance
+  app.get('/try', page('try.html'));
+  app.get('/platform', page('platform.html'));
   // The public waiver signing page: /waiver/<mountain>, and a signed copy at /waiver/<mountain>?copy=<token>.
   // The guest rental form: /rental-form/<mountain>, with ?t= for an order or ?g= for a group.
-  app.get('/rental-form/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'rental-form.html')));
-  app.get('/waiver/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'waiver.html')));
-  app.get('/availability/:slug', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'availability.html')));
+  app.get('/rental-form/:slug', page('rental-form.html'));
+  app.get('/waiver/:slug', page('waiver.html'));
+  app.get('/availability/:slug', page('availability.html'));
 
   // Pages behind the follow-up email: /f/<token> (rate us, give, stop) and /give/<mountain> (give).
-  app.get(['/f/:token', '/give/:slug'], (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'give.html')));
+  app.get(['/f/:token', '/give/:slug'], page('give.html'));
 
   // The time clock kiosk page: /kiosk on a paired tablet, /kiosk/<code> once, to pair it.
-  app.get(['/kiosk', '/kiosk/:code'], (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'kiosk.html')));
+  app.get(['/kiosk', '/kiosk/:code'], page('kiosk.html'));
 
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
   app.get('/readyz', async (_req, res) => {
@@ -260,6 +257,7 @@ function createApp() {
   api.post(['/platform/login', '/platform/login/setup', '/platform/login/passkey', '/platform/login/passkey/options'], rateLimit({ windowMs: 15 * 60_000, max: Number(process.env.PLATFORM_LOGIN_RATE_LIMIT) || 20, message: 'Too many sign-in attempts from this address. Try again in 15 minutes.' }));
   api.use('/platform', rateLimit({ windowMs: 60_000, max: Number(process.env.PLATFORM_RATE_LIMIT) || 60, message: 'Too many attempts' }), platform);
   api.use(site.api); // the website's plans and contact form (no sign-in)
+  api.use('/twilio', require('./routes/twilioinbound').router); // STOP and START replies to our texts (signed by Twilio)
   // The status page's numbers (no sign-in, nothing about any mountain). Cached for a minute on each server.
   api.get('/status', rateLimit({ windowMs: 60_000, max: 60, message: 'Too many looks, slow down' }), require('./routes/status').publicStatus);
   // 120 a minute per address for every guest page. PUBLIC_RATE_LIMIT exists so a load test on staging can raise it (DEPLOY.md).

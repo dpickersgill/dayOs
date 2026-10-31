@@ -181,7 +181,7 @@ test('a fee set in the console is kept by Stripe from each payment, and given ba
   is(await webhook(paid(row, A.id, acctA, { platform_fee_cents: String(fee) })), 200);
   const o = (await q('SELECT id FROM orders WHERE tenant_id = ? AND payment_ref = ?', [A.id, `pi_${row.stripe_session_id}`]))[0];
   assert.equal((await q('SELECT platform_fee_cents FROM order_payments WHERE tenant_id = ? AND order_id = ?', [A.id, o.id]))[0].platform_fee_cents, fee);
-  const consoleView = (await api('GET', `/platform/tenants/${A.id}`, { headers: { 'x-platform-key': KEY } })).body;
+  const consoleView = (await (await require('./helpers/platform-operator').operatorConsole(base, KEY))('GET', `/tenants/${A.id}`)).body;
   assert.equal(consoleView.card_payments.status, 'ready'); assert.ok(Number(consoleView.platform_fees.fee_cents) >= fee);
   // Staff refund: back through the mountain's account, with the fee returned
   const mark = calls.length;

@@ -4,6 +4,7 @@
 // A person's own choice wins, then a manager's default for their role, then the built-in layout.
 const express = require('express');
 const { pool, rows, one } = require('../db');
+const { liftWord } = require('../lib/liftstatus');
 const { requireRole } = require('../middleware/auth');
 const { z, validate, paramId, dateStr, todayIn, nowIn, addDays, dayRange } = require('../lib/util');
 const { bad, notFound, forbidden } = require('../lib/errors');
@@ -107,7 +108,7 @@ const TILE_DATA = {
       const k = lastCheck.get(l.id); const d = down.get(l.id);
       let detail;
       if (k && k.result === 'fail') detail = `Inspection failed${k.note ? `: ${k.note}` : ''}`;
-      else if (d && l.status !== 'open') detail = `${l.status === 'wind_hold' ? 'Wind hold' : 'Stopped'} since ${String(d.started_at).slice(11, 16)}${d.note ? `: ${d.note}` : d.reason ? `, ${REASON[d.reason] || d.reason}` : ''}`;
+      else if (d && l.status !== 'open') detail = `${liftWord(l.status)} since ${String(d.started_at).slice(11, 16)}${d.note ? `: ${d.note}` : d.reason ? `, ${REASON[d.reason] || d.reason}` : ''}`;
       else if (k) detail = `Passed inspection at ${hhmm(localFromUtc(k.checked_at, c.tz))}`;
       else detail = 'Not inspected yet today';
       return { name: l.name, status: l.status, check: l.check, detail };

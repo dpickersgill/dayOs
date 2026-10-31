@@ -113,6 +113,14 @@ async function main() {
   }
 }
 
+/** The sample waiver from the Waivers screen (public/js/views/waivers.js), so the demo and the app offer the same words. */
+function sampleWaiver() {
+  try {
+    const m = require('fs').readFileSync(require('path').join(__dirname, '..', 'public', 'js', 'views', 'waivers.js'), 'utf8').match(/const SAMPLE = `([^`$]*)`;/);
+    return m ? m[1] : null;
+  } catch (_) { return null; }
+}
+
 async function load(o) {
   const C = (m, p, b) => call(m, p, b, o);
 
@@ -152,6 +160,17 @@ async function load(o) {
   await addProduct('program', { kind: 'program', name: 'Junior race team season', base_price_cents: 62000 });
   for (const [code, pct] of [['WELCOME10', 10], ['SENIORS15', 15], ['FRIENDS20', 20]]) await soft(`promo ${code}`, () => C('POST', '/pricing/promos', { code, percent_off: pct }));
   await soft('tax', () => C('POST', '/tax-rules', { name: AREA ? `Sales tax (sample: set your own rate)` : 'PA sales tax', applies_to: 'all', rate_percent: 6 }));
+
+  // ---------------------------------------------------------------- guest pages (2026.11.10)
+  // A demo shows the guest side switched on: the online shop selling tickets, passes and rentals, online lesson booking,
+  // and a sample waiver to sign (the same sample as Waivers, Start from a sample, marked SAMPLE ONLY). Demo mountains
+  // never take a card or send email, so the pages show everything up to paying.
+  log('Guest pages');
+  for (const k of ['day', 'half', 'night', 'two', 'season', 'rental', 'boardrental', 'helmet']) if (prod[k]) await soft(`online ${k}`, () => C('PATCH', `/products/${prod[k]}`, { online: 1 }));
+  await soft('guest pages on', () => C('PUT', '/tenant/profile', { online_shop: true, online_booking: true, booking_notice_hours: 2,
+    booking_message: 'This is a demo mountain. Book a lesson to see what a family sees.' })); // the shop says it is a demo by itself
+  const sample = sampleWaiver();
+  if (sample) await soft('sample waiver', () => C('PUT', '/waivers/text', { text: sample.replaceAll('[MOUNTAIN LEGAL NAME]', mountainName) }));
 
   // ---------------------------------------------------------------- staff
   log('Staff');
