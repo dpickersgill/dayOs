@@ -8,7 +8,7 @@ const { one } = require('../db');
 const { unitPrice } = require('./pricing');
 const { loadRules, applyTax } = require('./tax');
 const { resolvePerson } = require('./customers');
-const { addLink, isMinor, mayActAsGuardian } = require('./family');
+const { addLink, isMinor, mayActAsGuardian, kinOf } = require('./family');
 const { seasonFor, todayIn } = require('./util');
 const { conflict, bad } = require('./errors');
 const { audit } = require('./audit');
@@ -96,7 +96,9 @@ async function confirmRequest(conn, tenantId, raw, { paid = false, auditReq, pay
     for (const k of ['height_in', 'weight_lb', 'boot_size', 'ability_level', 'discipline']) if (st[k] !== undefined && st[k] !== null && st[k] !== '') details[k] = st[k];
     // The mountain's mandatory lesson details are checked for the guest who booked; other students only give what the
     // booking form asks for, so a paid family booking is never refused for a missing email.
-    const who = await resolvePerson(conn, tenantId, { personId: sameAsContact && !minor ? contact.id : undefined, details, scope: sameAsContact ? 'lesson' : 'none', source: 'online', fillOnly: true });
+    // A child already in the buyer's care with this name is that child; otherwise matching never picks a household record.
+    const kin = !sameAsContact ? await kinOf(conn, tenantId, contact.id, st) : null;
+    const who = await resolvePerson(conn, tenantId, { personId: sameAsContact && !minor ? contact.id : kin || undefined, details, scope: sameAsContact ? 'lesson' : 'none', source: 'online', fillOnly: true });
     if (!who.id) throw bad(`Could not save ${st.first_name} ${st.last_name}`);
     const guardianOk = minor && await mayActAsGuardian(conn, tenantId, contact.id, who.id, who.created);
     if (guardianOk) await addLink(conn, tenantId, contact.id, who.id, 'guardian');
@@ -147,8 +149,11 @@ async function confirmRequest(conn, tenantId, raw, { paid = false, auditReq, pay
 /** The person who made the request, found by email or by name and phone, otherwise added. Only their name and contact details are needed. */
 async function contactPerson(conn, tenantId, d) {
   const key = String(d.phone || '').replace(/\D/g, '').slice(-10);
-  let p = await one(conn, 'SELECT id FROM people WHERE tenant_id = ? AND email = ? AND first_name = ? AND last_name = ? ORDER BY id LIMIT 1', [tenantId, d.email, d.first_name, d.last_name]);
-  if (!p && key.length >= 7) p = await one(conn, 'SELECT id FROM people WHERE tenant_id = ? AND first_name = ? AND last_name = ? AND phone_key = ? ORDER BY id LIMIT 1', [tenantId, d.first_name, d.last_name, key]);
+  // A record someone added on their own household account is never the buyer (2026.11.11): its name and email are what
+  // another guest typed, so matching it would hand this buyer's children to that household.
+  const notHousehold = "(source IS NULL OR source <> 'household')";
+  let p = await one(conn, `SELECT id FROM people WHERE tenant_id = ? AND email = ? AND first_name = ? AND last_name = ? AND ${notHousehold} ORDER BY id LIMIT 1`, [tenantId, d.email, d.first_name, d.last_name]);
+  if (!p && key.length >= 7) p = await one(conn, `SELECT id FROM people WHERE tenant_id = ? AND first_name = ? AND last_name = ? AND phone_key = ? AND ${notHousehold} ORDER BY id LIMIT 1`, [tenantId, d.first_name, d.last_name, key]);
   if (p) return p;
   const [r] = await conn.query("INSERT INTO people (tenant_id, first_name, last_name, email, phone, source) VALUES (?, ?, ?, ?, ?, 'online')", [tenantId, d.first_name, d.last_name, d.email, d.phone]);
   return { id: r.insertId };

@@ -138,7 +138,12 @@ publicRouter.patch('/:slug/account/people/:id', validate(personSchema.partial())
   res.json({ ok: true });
 });
 
-/** Saved family: add a child (you are their parent or guardian) or a second adult (relation family, with their own email to sign in). */
+/**
+ * Saved family: add a child (you are their parent or guardian) or a second adult (relation family). A second adult's email
+ * is never put on their record from here: the person at that address gets a link to confirm it first (2026.11.11), so
+ * nobody can plant another parent's email in their own household and catch that family's next online purchase. Records
+ * made here are marked source 'household', and online sales never match them by name or email.
+ */
 publicRouter.post('/:slug/account/people', validate(personSchema.extend({ adult: z.boolean().default(false), email: z.string().trim().toLowerCase().email().max(255).optional() })), async (req, res) => {
   const { t, hh, email } = await householdFor(req);
   if (!hh.primary) throw conflict('Buy a ticket or register first, so we know who you are.');
@@ -146,15 +151,46 @@ publicRouter.post('/:slug/account/people', validate(personSchema.extend({ adult:
   const b = req.body;
   if (b.date_of_birth && b.date_of_birth > todayIn(t.timezone)) throw bad('A birthday cannot be in the future');
   if (!b.adult && !b.date_of_birth) throw bad('Add the birthday for a child: it sets their ticket price');
+  const invite = b.adult && b.email && b.email !== email ? b.email : null;
+  if (invite) {
+    const n = await one(pool, 'SELECT COUNT(*) AS n FROM household_invites WHERE tenant_id = ? AND invited_by = ? AND created_at > DATE_SUB(NOW(), INTERVAL 1 DAY)', [t.id, hh.primary]);
+    if (Number(n.n) >= 3) throw conflict('You have asked three people to join today. Please try again tomorrow.');
+  }
+  const token = invite ? crypto.randomBytes(24).toString('base64url') : null;
   const id = await tx(async (conn) => {
     const keys = FIELDS.filter((k) => b[k] !== undefined && b[k] !== null);
-    const [r] = await conn.query(`INSERT INTO people (tenant_id, ${keys.join(', ')}${b.adult && b.email ? ', email' : ''}, source) VALUES (?, ${keys.map(() => '?').join(', ')}${b.adult && b.email ? ', ?' : ''}, 'online')`,
-      [t.id, ...keys.map((k) => b[k]), ...(b.adult && b.email ? [b.email] : [])]);
+    const [r] = await conn.query(`INSERT INTO people (tenant_id, ${keys.join(', ')}, source) VALUES (?, ${keys.map(() => '?').join(', ')}, 'household')`, [t.id, ...keys.map((k) => b[k])]);
     await HH.link(conn, t.id, hh.primary, r.insertId, !b.adult);
-    await audit(conn, system(t.id), 'account_person_add', 'people', r.insertId, { adult: b.adult, email });
+    if (invite) await conn.query('INSERT INTO household_invites (tenant_id, person_id, invited_by, email, token_hash, expires_at) VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY))', [t.id, r.insertId, hh.primary, invite, PP.hash(token)]);
+    await audit(conn, system(t.id), 'account_person_add', 'people', r.insertId, { adult: b.adult, invited: Boolean(invite) });
     return r.insertId;
   });
-  res.status(201).json({ id });
+  res.status(201).json({ id, invite_sent: Boolean(invite && mailer.enabled()) });
+  // Sent after the reply. Nothing the guest typed goes into it: only the mountain's name and the link.
+  if (invite && mailer.enabled()) {
+    const link = `${baseUrl(req)}/family/${t.slug}?join=${token}`;
+    mailer.send({ tenantId: t.id, to: invite, fromName: t.name, subject: `Confirm your email for a family account at ${t.name}`, tag: 'household-invite',
+      text: [`Someone with an account at ${t.name} added this email address as a second adult in their family.`, '', 'If you know them and want to share one family account (tickets, passes and lessons for the same children), confirm here. The link works for 7 days:', link, '', 'If you do not know them, ignore this email. Nothing is shared until you confirm.', t.name].join('\n') }).catch(() => {});
+  }
+});
+
+/**
+ * The second adult confirms their email from the invite link: the email goes on their record and they are signed in.
+ * A link already used, expired or for a record that already has an email does nothing.
+ */
+publicRouter.post('/:slug/account/join', validate(z.object({ token: z.string().trim().min(20).max(100) })), async (req, res) => {
+  const t = await tenantFor(req.params.slug);
+  res.set('Cache-Control', 'no-store');
+  const out = await tx(async (conn) => {
+    const inv = await one(conn, 'SELECT * FROM household_invites WHERE tenant_id = ? AND token_hash = ? AND confirmed_at IS NULL AND expires_at > NOW() FOR UPDATE', [t.id, PP.hash(req.body.token)]);
+    if (!inv) throw bad('This link has expired or was already used. Ask the person who added you to add you again.');
+    const [u] = await conn.query("UPDATE people SET email = ? WHERE tenant_id = ? AND id = ? AND email IS NULL AND anonymised_at IS NULL", [inv.email, t.id, inv.person_id]);
+    if (!u.affectedRows) throw bad('This link no longer works. Ask the person who added you to add you again.');
+    await conn.query('UPDATE household_invites SET confirmed_at = NOW() WHERE id = ?', [inv.id]);
+    await audit(conn, system(t.id), 'account_adult_confirmed', 'people', inv.person_id, { invited_by: inv.invited_by });
+    return inv.email;
+  });
+  res.json({ session: await PP.newToken(t.id, out, 'session'), email: out });
 });
 
 // ---------------------------------------------------------------- one prefilled checkout, rebuy and renewal

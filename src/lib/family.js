@@ -30,16 +30,32 @@ async function familyOf(conn, tenantId, id, today) {
 }
 
 /**
- * May this buyer act as guardian for this child online? Yes when the child record was just made, has no guardian yet,
- * or already lists the buyer. A stranger who knows a child's name and birth date cannot attach themselves.
+ * May this adult act as guardian for this child? Yes when the child record was just made for them, or already lists them
+ * as guardian. A child already on file with no guardian is not open to anyone who knows the name and birth date: online,
+ * nobody becomes that child's guardian (2026.11.11). Staff, who checked who is standing at the counter, pass staff: true
+ * and may name the first guardian of a child who has none.
  */
-async function mayActAsGuardian(conn, tenantId, adultId, childId, justCreated) {
+async function mayActAsGuardian(conn, tenantId, adultId, childId, justCreated, { staff = false } = {}) {
   if (!adultId) return false;
   if (justCreated) return true;
   const g = await rows(conn, "SELECT adult_id FROM person_links WHERE tenant_id = ? AND member_id = ? AND relation = 'guardian'", [tenantId, childId]);
-  return !g.length || g.some((x) => x.adult_id === adultId);
+  if (g.some((x) => Number(x.adult_id) === Number(adultId))) return true;
+  return staff && !g.length;
+}
+
+/**
+ * A child already in this adult's care with the same name (and birth date, when both have one): an online buyer buying
+ * again for their own child gets the same record, without matching anyone else's child by name.
+ */
+async function kinOf(conn, tenantId, adultId, { first_name, last_name, date_of_birth }) {
+  if (!adultId) return null;
+  const kin = await rows(conn, `SELECT p.id, p.date_of_birth FROM person_links l JOIN people p ON p.tenant_id = l.tenant_id AND p.id = l.member_id
+    WHERE l.tenant_id = ? AND l.adult_id = ? AND l.relation = 'guardian' AND p.first_name = ? AND p.last_name = ? AND p.anonymised_at IS NULL ORDER BY p.id`, [tenantId, adultId, first_name, last_name]);
+  const d10 = (v) => (v ? (v instanceof Date ? v.toISOString() : String(v)).slice(0, 10) : null);
+  const hit = kin.find((k) => !date_of_birth || !k.date_of_birth || d10(k.date_of_birth) === date_of_birth);
+  return hit ? hit.id : null;
 }
 
 const isMinor = (dob, today) => { const a = ageOn(dob, today); return a !== null && a < MINOR_AGE; };
 
-module.exports = { MINOR_AGE, addLink, familyOf, isMinor, mayActAsGuardian };
+module.exports = { MINOR_AGE, addLink, familyOf, isMinor, mayActAsGuardian, kinOf };

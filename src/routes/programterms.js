@@ -12,6 +12,7 @@ const { audit } = require('../lib/audit');
 const { todayIn, addDays } = require('../lib/util');
 const PS = require('../lib/programsessions');
 const PP = require('../lib/programplus');
+const { addLink } = require('../lib/family');
 const { coachBusy, instructorBusy } = require('../lib/workforce');
 
 const manager = requireRole('manager');
@@ -222,6 +223,12 @@ module.exports = function mount(router) {
       if (g.term_id !== term.id) throw bad('That day is not part of this session');
       const program = await programOf(conn, t, term.program_id);
       if (!(await one(conn, 'SELECT id FROM people WHERE tenant_id = ? AND id = ?', [t, b.person_id]))) throw notFound('Person');
+      // The guardian staff name is checked at this mountain and becomes the child's guardian on file (the family page counts
+      // only guardian links, 2026.11.11).
+      if (b.guardian_id) {
+        if (!(await one(conn, 'SELECT id FROM people WHERE tenant_id = ? AND id = ?', [t, b.guardian_id]))) throw notFound('Guardian');
+        await addLink(conn, t, b.guardian_id, b.person_id, 'guardian');
+      }
       const reg = await PS.priceRegistration(conn, t, { program_id: program.id, term_id: term.id, group_id: g.id, discipline: b.discipline, needs_rental: b.needs_rental, needs_helmet: b.needs_helmet },
         today, { pass: PP.passResolver(conn, t, { personId: b.person_id }, Boolean(b.has_pass)) });
       const x = reg.parts[0];

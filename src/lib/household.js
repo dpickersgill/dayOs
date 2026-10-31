@@ -34,7 +34,8 @@ async function membersOf(db, tenantId, personId) {
 
 /**
  * The household behind a signed-in email: the adults with that email (the oldest record first is "you") and everyone in
- * their households, plus children on a program place they booked. { adults: [ids], ids: [all], primary: id|null }.
+ * their households. A program place someone booked or a waitlist entry does not add the child: only guardian links count
+ * (2026.11.11). { adults: [ids], ids: [all], primary: id|null }.
  */
 async function forEmail(db, tenantId, email) {
   const adults = await rows(db, 'SELECT id FROM people WHERE tenant_id = ? AND LOWER(email) = ? AND anonymised_at IS NULL ORDER BY id', [tenantId, String(email || '').toLowerCase()]);
@@ -42,8 +43,6 @@ async function forEmail(db, tenantId, email) {
   const a = adults.map((x) => Number(x.id));
   const all = new Set(a);
   for (const id of a) for (const m of await idsOf(db, tenantId, id)) all.add(m);
-  const prog = await rows(db, 'SELECT DISTINCT person_id FROM program_enrollments WHERE tenant_id = ? AND guardian_id IN (?)', [tenantId, a]).catch(() => []);
-  for (const p of prog) all.add(Number(p.person_id));
   return { adults: a, ids: [...all], primary: a[0] };
 }
 

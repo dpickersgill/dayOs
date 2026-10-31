@@ -151,14 +151,17 @@ async function resolvePerson(conn, tenantId, { personId, details, scope, source,
     if (supplied.length) await applyDetails(conn, tenantId, person, d, fillOnly ? 'fill' : 'overwrite'); // online orders only fill blanks
   } else if (supplied.length) {
     if (isBlank(d.first_name) || isBlank(d.last_name)) throw bad('First and last name are required');
-    if (!isBlank(d.email)) person = await one(conn, `SELECT ${COLS} FROM people WHERE tenant_id = ? AND email = ? ORDER BY id LIMIT 1 FOR UPDATE`, [tenantId, d.email]);
+    // An online sale never matches a record a guest added on their household account (2026.11.11): its name, birthday and
+    // email are what that guest typed, so a match would put this buyer's child under that household.
+    const own = source === 'online' ? " AND (source IS NULL OR source <> 'household')" : '';
+    if (!isBlank(d.email)) person = await one(conn, `SELECT ${COLS} FROM people WHERE tenant_id = ? AND email = ?${own} ORDER BY id LIMIT 1 FOR UPDATE`, [tenantId, d.email]);
     if (!person && !isBlank(d.date_of_birth)) {
-      person = await one(conn, `SELECT ${COLS} FROM people WHERE tenant_id = ? AND first_name = ? AND last_name = ? AND date_of_birth = ? ORDER BY id LIMIT 1 FOR UPDATE`, [tenantId, d.first_name, d.last_name, d.date_of_birth]);
+      person = await one(conn, `SELECT ${COLS} FROM people WHERE tenant_id = ? AND first_name = ? AND last_name = ? AND date_of_birth = ?${own} ORDER BY id LIMIT 1 FOR UPDATE`, [tenantId, d.first_name, d.last_name, d.date_of_birth]);
     }
     const key = isBlank(d.phone) ? '' : String(d.phone).replace(/\D/g, '').slice(-10);
     if (!person && key.length >= 7) {
       // Same first and last name on the same phone number (a family may share a phone, so the name must match too).
-      person = await one(conn, `SELECT ${COLS} FROM people WHERE tenant_id = ? AND first_name = ? AND last_name = ? AND phone_key = ? ORDER BY id LIMIT 1 FOR UPDATE`, [tenantId, d.first_name, d.last_name, key]);
+      person = await one(conn, `SELECT ${COLS} FROM people WHERE tenant_id = ? AND first_name = ? AND last_name = ? AND phone_key = ?${own} ORDER BY id LIMIT 1 FOR UPDATE`, [tenantId, d.first_name, d.last_name, key]);
     }
     if (person) {
       matched = true;

@@ -20,7 +20,7 @@ const mailer = require('../lib/mailer');
 const { audit } = require('../lib/audit');
 const { loadRules, applyTax } = require('../lib/tax');
 const { resolvePerson } = require('../lib/customers');
-const { addLink, mayActAsGuardian, isMinor } = require('../lib/family');
+const { addLink, mayActAsGuardian, isMinor, kinOf } = require('../lib/family');
 const { contactPerson } = require('../lib/onlinesale');
 const { ON_FILE, shaOf } = require('../lib/waivers');
 const { money } = require('../lib/format');
@@ -196,7 +196,9 @@ publicRouter.post('/:slug/programs/waitlist', validate(z.object({ ...contactShap
 async function childPerson(conn, tenantId, contact, c, today, sizes = null) {
   const details = { first_name: c.first_name, last_name: c.last_name, date_of_birth: c.date_of_birth };
   if (sizes) for (const k of ['height_in', 'weight_lb', 'boot_size']) if (sizes[k] != null && sizes[k] !== '') details[k] = sizes[k];
-  const who = await resolvePerson(conn, tenantId, { details, scope: 'none', source: 'online', fillOnly: true });
+  // A child already in this contact's care is that child; a record on someone else's household account is never matched.
+  const kin = await kinOf(conn, tenantId, contact.id, c);
+  const who = await resolvePerson(conn, tenantId, { personId: kin || undefined, details, scope: 'none', source: 'online', fillOnly: true });
   if (!who.id) throw bad(`Could not save ${c.first_name} ${c.last_name}`);
   if (isMinor(c.date_of_birth, today) && await mayActAsGuardian(conn, tenantId, contact.id, who.id, who.created)) await addLink(conn, tenantId, contact.id, who.id, 'guardian');
   return who.id;

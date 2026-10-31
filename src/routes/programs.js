@@ -8,6 +8,7 @@ const { partialOf, z, dateStr, dateTimeStr, validate, paramId, normDateTime } = 
 const { notFound, conflict, bad, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const PS = require('../lib/programsessions');
+const { addLink } = require('../lib/family');
 const { instructorBusy } = require('../lib/workforce');
 
 /**
@@ -70,6 +71,11 @@ router.post('/:id/enrollments', requireRole(...coord, 'counter'), validate(z.obj
     if (!program) throw notFound('Program');
     const person = await one(conn, 'SELECT date_of_birth FROM people WHERE tenant_id = ? AND id = ?', [tenantId, req.body.person_id]);
     if (!person) throw notFound('Person');
+    // The guardian staff name is checked at this mountain and becomes the child's guardian on file (2026.11.11).
+    if (req.body.guardian_id) {
+      if (!(await one(conn, 'SELECT id FROM people WHERE tenant_id = ? AND id = ?', [tenantId, req.body.guardian_id]))) throw notFound('Guardian');
+      await addLink(conn, tenantId, req.body.guardian_id, req.body.person_id, 'guardian');
+    }
     const existing = await one(conn, "SELECT id, status FROM program_enrollments WHERE tenant_id = ? AND program_id = ? AND person_id = ?", [tenantId, pid, req.body.person_id]);
     if (existing && existing.status !== 'withdrawn') throw conflict(`Already ${existing.status} in this program`);
 

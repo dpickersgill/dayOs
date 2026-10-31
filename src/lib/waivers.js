@@ -117,7 +117,9 @@ async function sign(conn, tenant, input, ctx) {
   // Without a record named at the counter, a person is matched only on first name, last name and date of birth together,
   // never on an email address alone (a family often shares one), and a match never has its contact details changed.
   const findOrMake = async (first, last, dob, contact, note = null, forceNew = false) => {
-    const hit = forceNew ? null : await one(conn, 'SELECT id, email FROM people WHERE tenant_id = ? AND first_name = ? AND last_name = ? AND date_of_birth = ? AND anonymised_at IS NULL ORDER BY id LIMIT 1 FOR UPDATE', [tenant.id, first, last, dob]);
+    // Online, a record a guest added on their household account is never matched (2026.11.11).
+    const own = counter ? '' : " AND (source IS NULL OR source <> 'household')";
+    const hit = forceNew ? null : await one(conn, `SELECT id, email FROM people WHERE tenant_id = ? AND first_name = ? AND last_name = ? AND date_of_birth = ? AND anonymised_at IS NULL${own} ORDER BY id LIMIT 1 FOR UPDATE`, [tenant.id, first, last, dob]);
     if (hit) return { id: hit.id, email: hit.email, created: false };
     // An address already on someone else's record stays theirs: the new record does not get it, and no copy is sent to it.
     const taken = contact && email ? await one(conn, 'SELECT id FROM people WHERE tenant_id = ? AND email = ? LIMIT 1', [tenant.id, email]) : null;
@@ -143,11 +145,13 @@ async function sign(conn, tenant, input, ctx) {
       const r = await findOrMake(clean(k.c.first_name), clean(k.c.last_name), k.dob, false);
       childId = r.id; created = r.created;
     }
-    // A child already on file with other guardians is only signed for by one of them. Anyone else's signing goes on a new
+    // A child already on file is only signed for online by one of their guardians. Anyone else's signing goes on a new
     // record (marked as a possible duplicate) for staff to check, rather than onto another family's child.
-    if (!(await mayActAsGuardian(conn, tenant.id, signer.id, childId, created))) {
+    // Online, a child already on file is only linked to a signer who is already their guardian (2026.11.11): a child with
+    // no guardian on file is not open to whoever knows the name and birth date.
+    if (!(await mayActAsGuardian(conn, tenant.id, signer.id, childId, created, { staff: counter }))) {
       if (counter) throw bad(`${k.name} has another parent or guardian on file. Check with them, or add this adult to the family first.`);
-      childId = (await findOrMake(clean(k.c.first_name), clean(k.c.last_name), k.dob, false, 'Added from an online waiver signed by someone who is not a guardian on file for a child with the same name and date of birth. Check before merging.', true)).id;
+      childId = (await findOrMake(clean(k.c.first_name), clean(k.c.last_name), k.dob, false, 'Added from an online waiver signed by someone who is not a guardian on file for a child with the same name and date of birth. Check who the parent is before merging.', true)).id;
     }
     await addLink(conn, tenant.id, signer.id, childId, 'guardian');
     if (!covered.some((x) => x.id === childId)) covered.push({ id: childId, name: k.name, relation: 'guardian' });
