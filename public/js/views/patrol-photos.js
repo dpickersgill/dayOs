@@ -4,6 +4,8 @@
 // place. Opening a photo shows the original, with Verify (the stored file still matches its fingerprint) and Download.
 import { get, post, sendBytes, fetchBlob, download } from '../api.js';
 import { h, clear, button, toast, dialog, formDialog, field, input, select, fmtDateTime, state, errorBox } from '../ui.js';
+// Where a photo's time came from (2026.11.11): the photo file itself, or the phone's date for the file.
+const TAKEN_FROM = { photo: ' (from the photo)', phone: ' (from the phone, not the photo)' };
 
 const urls = new Map(); // photo id -> object URL of its preview, kept while the page is open
 const ref = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
@@ -57,7 +59,8 @@ export function photosPanel(c, { id, editable, reload, readOnly = false }) {
     const verdict = h('div', { role: 'status' });
     const d = dialog(p.caption || `Photo ${p.id}`, h('div', { class: 'stack' }, holder,
       h('dl', { class: 'photo-facts' },
-        h('dt', null, 'Taken'), h('dd', null, p.taken_at ? fmtDateTime(p.taken_at) : 'Not recorded in the photo'),
+        h('dt', null, 'Taken'), h('dd', null, p.taken_at ? `${fmtDateTime(p.taken_at)}${TAKEN_FROM[p.taken_from] || ''}` : 'Not recorded in the photo',
+          p.taken_outside ? h('span', { class: 'warn-note small' }, ' Outside the case\'s time: check the camera\'s clock.') : null),
         h('dt', null, 'Where'), h('dd', null, p.taken_lat !== null ? h('a', { href: `https://www.google.com/maps/search/?api=1&query=${p.taken_lat},${p.taken_lng}`, target: '_blank', rel: 'noopener' }, `${p.taken_lat.toFixed(5)}, ${p.taken_lng.toFixed(5)}`) : 'Not recorded'),
         h('dt', null, 'Added'), h('dd', null, `${fmtDateTime(p.uploaded_at)}${p.uploaded_by_name ? `, ${p.uploaded_by_name}` : ''}`),
         h('dt', null, 'File'), h('dd', null, `${p.mime.replace('image/', '').toUpperCase()}, ${mb(p.bytes)}`),

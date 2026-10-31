@@ -5,6 +5,7 @@
 //   patrol_sweep_mark_log                     every mark, change, undo and resolution, append-only.
 //   dispatch_calls.sender_hash/ip_hash/flood_of  guest help floods grouped, never refused (PATROL-4).
 //   patrol_kits.changed_at, patrol_kit_checks.applied  a late offline kit check never undoes a newer change (PATROL-6).
+//   incident_media.taken_from/taken_outside  where a photo's time came from (PATROL-10).
 //   patrol_med_moves/counts.status, witness_*  controlled moves and counts wait for the witness to confirm (PATROL-7).
 module.exports = ({ tableExists, columnExists }) => [
   ['patrol_sweep_marks.resolution', (c) => columnExists(c, 'patrol_sweep_marks', 'resolution'),
@@ -40,6 +41,9 @@ module.exports = ({ tableExists, columnExists }) => [
     "ALTER TABLE patrol_med_moves ADD COLUMN status ENUM('done','pending','declined') NOT NULL DEFAULT 'done', ADD COLUMN witness_user BIGINT UNSIGNED NULL, ADD COLUMN witness_confirmed_at DATETIME NULL, ADD COLUMN witness_via ENUM('login','pin') NULL"],
   ['patrol_med_counts.status', (c) => columnExists(c, 'patrol_med_counts', 'status'),
     "ALTER TABLE patrol_med_counts ADD COLUMN status ENUM('done','pending','declined') NOT NULL DEFAULT 'done', ADD COLUMN witness_user BIGINT UNSIGNED NULL, ADD COLUMN witness_confirmed_at DATETIME NULL, ADD COLUMN witness_via ENUM('login','pin') NULL"],
+  // PATROL-10: where a photo's time came from (the photo file, or the phone), and a photo-file time outside the case.
+  ['incident_media.taken_from', (c) => columnExists(c, 'incident_media', 'taken_from'),
+    "ALTER TABLE incident_media ADD COLUMN taken_from ENUM('photo','phone') NULL, ADD COLUMN taken_outside TINYINT(1) NOT NULL DEFAULT 0"],
   ['patrol_kit_checks.applied', (c) => columnExists(c, 'patrol_kit_checks', 'applied'),
     'ALTER TABLE patrol_kit_checks ADD COLUMN applied TINYINT(1) NOT NULL DEFAULT 1'],
 ];

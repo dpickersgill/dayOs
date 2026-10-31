@@ -28,10 +28,10 @@ const MAX_PREVIEW = 600 * 1024;
 const raw = (limit) => express.raw({ type: () => true, limit });
 const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 
-const META = `m.id, m.incident_id, m.patient_id, m.mime, m.file_name, m.bytes, m.sha256, m.caption, m.taken_at, m.taken_lat, m.taken_lng, m.uploaded_at,
+const META = `m.id, m.incident_id, m.patient_id, m.mime, m.file_name, m.bytes, m.sha256, m.caption, m.taken_at, m.taken_from, m.taken_outside, m.taken_lat, m.taken_lng, m.uploaded_at,
   (m.preview IS NOT NULL) AS has_preview, m.preview_sha256, m.voided_at, m.void_reason, COALESCE(u.email, u.username) AS uploaded_by_name, COALESCE(vu.email, vu.username) AS voided_by_email`;
 const JOINS = 'LEFT JOIN users u ON u.id = m.uploaded_by AND u.tenant_id = m.tenant_id LEFT JOIN users vu ON vu.id = m.voided_by AND vu.tenant_id = m.tenant_id';
-const shape = (r) => ({ ...r, has_preview: Boolean(r.has_preview), taken_lat: r.taken_lat === null ? null : Number(r.taken_lat), taken_lng: r.taken_lng === null ? null : Number(r.taken_lng) });
+const shape = (r) => ({ ...r, taken_outside: Boolean(Number(r.taken_outside)), has_preview: Boolean(r.has_preview), taken_lat: r.taken_lat === null ? null : Number(r.taken_lat), taken_lng: r.taken_lng === null ? null : Number(r.taken_lng) });
 
 /** The photos on a case, newest last, without their bytes. Used by the case page and the frozen versions. */
 async function listFor(conn, tenantId, incidentId) {
@@ -84,14 +84,27 @@ router.post('/incidents/:id/photos', patrol, needs('create_case'), raw(MAX_BYTES
     const facts = photoFacts(buf);
     const fromPhoto = Boolean(facts.taken_at || facts.lat !== null);
     const tz = (await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone;
+    const now = nowIn(tz);
+    // When it was taken, and where that time came from: the photo file itself, or the phone (the file's date). A time
+    // from the phone must fall in the case's window (from a day before the incident to now); one from the photo is kept as
+    // it is (it is the file's own record) but marked when it falls outside, so a wrong camera clock shows.
+    const inc = await one(conn, 'SELECT occurred_at FROM incidents WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, id]);
+    const from = String(inc.occurred_at).replace('T', ' ').slice(0, 19);
+    const lo = new Date(Date.parse(`${from.replace(' ', 'T')}Z`) - 86_400_000).toISOString().slice(0, 19).replace('T', ' ');
+    const hi = new Date(Date.parse(`${now.replace(' ', 'T')}Z`) + Number(process.env.PATROL_FUTURE_SLACK_MIN || 5) * 60_000).toISOString().slice(0, 19).replace('T', ' ');
+    const phoneAt = b.taken_at ? b.taken_at.replace('T', ' ').slice(0, 19).padEnd(19, ':00').slice(0, 19) : null;
+    if (!facts.taken_at && phoneAt && (phoneAt < lo || phoneAt > hi)) throw bad('The photo\'s time is outside this case (more than a day before it, or in the future). Check the phone\'s date and time.');
+    const takenAt = facts.taken_at || phoneAt;
+    const takenFrom = facts.taken_at ? 'photo' : phoneAt ? 'phone' : null;
+    const outside = Boolean(facts.taken_at && (facts.taken_at < lo || facts.taken_at > hi));
     const hash = sha(buf);
-    const [r] = await conn.query(`INSERT INTO incident_media (tenant_id, incident_id, patient_id, mime, file_name, bytes, sha256, original, caption, taken_at, taken_lat, taken_lng, client_ref, uploaded_by, uploaded_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    const [r] = await conn.query(`INSERT INTO incident_media (tenant_id, incident_id, patient_id, mime, file_name, bytes, sha256, original, caption, taken_at, taken_from, taken_outside, taken_lat, taken_lng, client_ref, uploaded_by, uploaded_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [req.auth.tenantId, id, b.patient_id ?? null, mime, b.file_name || null, buf.length, hash, buf, b.caption || null,
-      facts.taken_at || (b.taken_at ? b.taken_at.replace('T', ' ').slice(0, 19) : null), facts.lat ?? b.lat ?? null, facts.lng ?? b.lng ?? null,
-      b.client_ref || null, req.auth.userId, nowIn(tz)]);
-    await audit(conn, req, 'add_photo', 'incidents', id, { photo_id: r.insertId, sha256: hash, bytes: buf.length, facts_from: fromPhoto ? 'photo' : 'phone' });
-    return { id: r.insertId, sha256: hash, bytes: buf.length, taken_at: facts.taken_at, from_photo: fromPhoto };
+      takenAt, takenFrom, outside ? 1 : 0, facts.lat ?? b.lat ?? null, facts.lng ?? b.lng ?? null,
+      b.client_ref || null, req.auth.userId, now]);
+    await audit(conn, req, 'add_photo', 'incidents', id, { photo_id: r.insertId, sha256: hash, bytes: buf.length, facts_from: fromPhoto ? 'photo' : 'phone', taken_from: takenFrom, ...(outside ? { taken_outside: true } : {}) });
+    return { id: r.insertId, sha256: hash, bytes: buf.length, taken_at: takenAt, taken_from: takenFrom, taken_outside: outside, from_photo: fromPhoto };
   });
   res.status(out.repeat ? 200 : 201).json(out);
 });

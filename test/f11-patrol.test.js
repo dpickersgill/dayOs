@@ -427,3 +427,23 @@ test('PATROL-9: a kind the group does not review is not approved at once while a
   assert.equal(sub2.review, 'not_required');
   assert.equal(ok(await api('GET', `/patrol/incidents/${col2.id}`, { token: m.owner })).report_state, 'approved');
 });
+
+// ---------------------------------------------------------------- PATROL-10
+test('PATROL-10: a photo time from the phone must fall in the case window, and where the time came from is kept and shown', async () => {
+  const m = await patrolMountain();
+  const c = await readyCase(m.pat);
+  const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201a7a5d5a50000000049454e44ae426082', 'hex');
+  const up = async (taken) => {
+    const res = await fetch(`${base}/api/v1/patrol/incidents/${c.id}/photos?caption=Scene&taken_at=${encodeURIComponent(taken)}`, { method: 'POST', headers: { authorization: `Bearer ${m.pat}`, 'content-type': 'image/png' }, body: PNG });
+    return { status: res.status, body: await res.json() };
+  };
+  assert.equal((await up('2025-01-15T09:00')).status, 400, 'a year before the case');
+  assert.equal((await up('2099-03-01T12:00')).status, 400, 'in the future');
+  const good = await up(tzNow(-10));
+  assert.equal(good.status, 201);
+  assert.equal(good.body.taken_from, 'phone');
+  const cs = ok(await api('GET', `/patrol/incidents/${c.id}`, { token: m.owner }));
+  assert.equal(cs.photos.length, 1);
+  assert.equal(cs.photos[0].taken_from, 'phone');
+  assert.equal(cs.photos[0].taken_outside, false);
+});
