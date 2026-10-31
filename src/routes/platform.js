@@ -42,8 +42,8 @@ const sessionSig = (body) => crypto.createHmac('sha256', sessionKey()).update(bo
 const keyPrint = () => crypto.createHash('sha256').update(`key:${config.bootstrapKey || ''}`).digest('hex').slice(0, 16);
 // A session names who opened it: an operator (o = their id) or someone using the platform key (no o). typ 'setup' is the
 // short-lived ticket an operator holds between their password and setting up their authenticator app; it opens nothing else.
-function makeSession(name, operatorId = null, { typ = null, minutes = SESSION_HOURS * 60, epoch = 0, secretPrint = null } = {}) {
-  const body = Buffer.from(JSON.stringify({ n: name, o: operatorId, e: epoch, typ, h: secretPrint, k: operatorId ? null : keyPrint(), exp: Date.now() + minutes * 60_000 })).toString('base64url');
+function makeSession(name, operatorId = null, { typ = null, minutes = SESSION_HOURS * 60, epoch = 0, secretPrint = null, twoStep = false } = {}) {
+  const body = Buffer.from(JSON.stringify({ n: name, o: operatorId, e: epoch, typ, h: secretPrint, k: operatorId ? null : keyPrint(), t: twoStep ? 1 : 0, exp: Date.now() + minutes * 60_000 })).toString('base64url');
   return `${body}.${sessionSig(body)}`;
 }
 function readSession(token) {
@@ -91,6 +91,7 @@ router.use(async (req, _res, next) => {
       } else {
         if (!(await keyAllowed()) || session.k !== keyPrint()) return next(forbidden('Sign in to the console again'));
         req.operator = `key: ${session.n}`; // someone using the platform key, never mistaken for a named operator
+        req.keyTwoStep = session.t === 1 && Boolean(process.env.PLATFORM_TOTP_SECRET); // the key plus an authenticator code
       }
       return next();
     }
@@ -113,7 +114,7 @@ router.post('/session', validate(z.object({ key: z.string().min(1).max(500), nam
   if (secret) lastStep = step;
   await pool.query('INSERT INTO platform_audit (tenant_id, action, actor, detail) VALUES (NULL, ?, ?, NULL)', ['sign_in', `key: ${req.body.name}`]);
   require('../lib/audit').trail({ console: true, action: 'sign_in', actor: `key: ${req.body.name}`, ip: req.ip || null });
-  res.json({ session: makeSession(req.body.name), hours: SESSION_HOURS, two_step: Boolean(secret) });
+  res.json({ session: makeSession(req.body.name, null, { twoStep: Boolean(secret) }), hours: SESSION_HOURS, two_step: Boolean(secret) });
 });
 
 // ---------------------------------------------------------------- operators: their own sign-in
@@ -355,7 +356,19 @@ router.post('/tenants/:id/access/close', async (req, res) => {
   res.json({ ok: true });
 });
 
-router.get('/tenants/:id', async (req, res) => {
+/**
+ * Reading one mountain (its owners and managers, history, billing and payments) needs two-step sign-in (2026.11.10): a
+ * named operator (always two-step), or the platform key with an authenticator code (PLATFORM_TOTP_SECRET). The key alone,
+ * for first setup or break-glass, can still list mountains and make a recorded change, but not read a mountain's details.
+ */
+function twoStepRead(req, _res, next) {
+  if (req.operatorId || req.keyTwoStep) return next();
+  const err = forbidden('Reading a mountain needs two-step sign-in. Sign in by name with your authenticator code.');
+  err.details = { code: 'two_step_required' };
+  return next(err);
+}
+
+router.get('/tenants/:id', twoStepRead, async (req, res) => {
   const id = paramId(req);
   const t = await one(pool, 'SELECT id, slug, name, status, timezone, created_at, storage_cap_mb, platform_notes, closed_at, delete_after, delete_due_at, data_deleted_at FROM tenants WHERE id = ?', [id]);
   if (!t) throw notFound('Mountain');

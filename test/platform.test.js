@@ -97,7 +97,9 @@ test('pausing signs everyone out and shuts the public pages; resuming brings it 
 });
 
 test('a reset password works and ends old sessions', async () => {
-  const detail = await plat('GET', `/tenants/${id}`);
+  // Reading a mountain needs two-step: the key alone is refused, a named operator reads it.
+  assert.equal((await plat('GET', `/tenants/${id}`)).status, 403);
+  const detail = await (await require('./helpers/platform-operator').operatorConsole(base, KEY))('GET', `/tenants/${id}`);
   assert.equal(detail.body.users.length, 1);
   assert.ok(detail.body.history.length >= 4);
   const newPw = 'a-brand-new-password';

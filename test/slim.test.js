@@ -4,6 +4,7 @@
 // buyer-review leftovers. Each test says what it proves.
 process.env.BOOTSTRAP_KEY = 'test-bootstrap-key';
 process.env.LOGIN_RATE_LIMIT = '1000';
+process.env.TWILIO_AUTH_TOKEN = 'slim-test-twilio-token'; // only the inbound check uses it: no texts are sent without the other two settings
 
 const fs = require('fs');
 const os = require('os');
@@ -202,4 +203,86 @@ test('the compact QR reader still reads a QR code', async () => {
     assert.ok(out, 'a code was found');
     assert.equal(out.data, text);
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+// ---------------------------------------------------------------- 7. buyer-review leftovers
+test('the website names the Founding Mountain Program and the Security page has a support sheet', async () => {
+  const page = async (p) => (await fetch(`${base}/site${p}`)).text();
+  const pricing = await page('/pricing');
+  assert.match(pricing, /Founding Mountain Program: three places, open until March 31, 2027/);
+  assert.match(await page('/'), /Founding Mountain Program/);
+  assert.match(await page('/contact'), /Founding Mountain Program/);
+  const sec = await page('/security');
+  assert.match(sec, /id="support"/);
+  for (const w of [/Hours:/, /Response time:/, /backed up every day/, /point-in-time recovery/, /60 days to download everything/]) assert.match(sec, w);
+});
+
+test('STOP and START text replies are written to the consent record at every mountain, and only Twilio can send them', async () => {
+  const { signature } = require('../src/routes/twilioinbound');
+  const { recordConsent, currentConsent } = require('../src/lib/consent');
+  const A = await mountain(`sa-${suffix}`); const B = await mountain(`sb-${suffix}`);
+  const idOf = async (slug) => (await pool.query('SELECT id FROM tenants WHERE slug = ?', [slug]))[0][0].id;
+  const tA = await idOf(A.slug); const tB = await idOf(B.slug);
+  const phone = `610555${String(Date.now()).slice(-4)}`;
+  const person = async (t) => (await pool.query('INSERT INTO people (tenant_id, first_name, last_name, phone) VALUES (?, ?, ?, ?)', [t, 'Text', 'Guest', `(${phone.slice(0, 3)}) ${phone.slice(3, 6)}-${phone.slice(6)}`]))[0].insertId;
+  const pA = await person(tA); const pB = await person(tB);
+  await recordConsent(pool, tA, pA, 'sms', 'opted_in', 'lesson_window', null);
+  const url = `${base}/api/v1/twilio/sms`;
+  const send = (fields, sig) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', ...(sig === undefined ? {} : { 'x-twilio-signature': sig }) }, body: new URLSearchParams(fields) });
+  const stop = { From: `+1${phone}`, To: '+16105550100', Body: 'Stop', MessageSid: 'SM1' };
+  assert.equal((await send(stop)).status, 403, 'no signature');
+  assert.equal((await send(stop, signature('wrong-token', url, stop))).status, 403, 'signed with another token');
+  const ok = await send(stop, signature(process.env.TWILIO_AUTH_TOKEN, url, stop));
+  assert.equal(ok.status, 200); assert.match(await ok.text(), /<Response><\/Response>/);
+  for (const [t, p] of [[tA, pA], [tB, pB]]) assert.deepEqual([(await currentConsent(pool, t, p)).sms.status, (await currentConsent(pool, t, p)).sms.source], ['opted_out', 'text_reply']);
+  // A second STOP adds nothing; START undoes only an opt-out that came from a text.
+  await send(stop, signature(process.env.TWILIO_AUTH_TOKEN, url, stop));
+  assert.equal((await pool.query("SELECT COUNT(*) AS n FROM consent_events WHERE tenant_id = ? AND person_id = ? AND channel = 'sms' AND status = 'opted_out'", [tA, pA]))[0][0].n, 1);
+  const start = { From: `+1${phone}`, Body: 'START', OptOutType: 'START' };
+  assert.equal((await send(start, signature(process.env.TWILIO_AUTH_TOKEN, url, start))).status, 200);
+  assert.equal((await currentConsent(pool, tA, pA)).sms.status, 'opted_in');
+  const other = { From: `+1${phone}`, Body: 'What time do you open?' };
+  assert.equal((await send(other, signature(process.env.TWILIO_AUTH_TOKEN, url, other))).status, 200, 'other replies are accepted and change nothing');
+  assert.equal((await currentConsent(pool, tA, pA)).sms.status, 'opted_in');
+});
+
+test('a lift has one status word everywhere: the screens and the server agree', async () => {
+  const server = require('../src/lib/liftstatus');
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'slim-lift-'));
+  try {
+    fs.copyFileSync(nodePath.join(root, 'public', 'js', 'liftstatus.js'), nodePath.join(tmp, 'liftstatus.mjs'));
+    const client = await import(nodePath.join(tmp, 'liftstatus.mjs'));
+    for (const [status] of client.LIFT_STATES) for (const check of [null, 'pass', 'fail']) assert.equal(client.liftText(status, check), server.liftWord(status, check), `${status} ${check}`);
+    assert.equal(client.liftText('closed', 'fail'), 'Cannot open');
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  // No screen keeps its own list of lift words any more.
+  for (const f of ['views/dashboard.js', 'views/patrol-conditions.js', 'views/conditions.js', 'views/claim-render.js']) {
+    const src = read(`public/js/${f}`);
+    assert.match(src, /from '\.\.\/liftstatus\.js'/, f);
+    assert.doesNotMatch(src, /wind_hold: ['[]/, `${f} has its own words`);
+  }
+  const m = await mountain(`sl-${suffix}`);
+  assert.equal((await api('POST', '/schedule/lifts', { token: m.owner, body: { name: 'Summit Quad', status: 'wind_hold' } })).status, 201);
+  const feed = await (await fetch(`${base}/api/v1/public/${m.slug}/conditions`)).json();
+  assert.equal(feed.lifts[0].status_word, 'Wind hold');
+});
+
+test('the platform key alone cannot read a mountain; a named operator with two-step can', async () => {
+  const m = await mountain(`sk-${suffix}`);
+  const id = (await pool.query('SELECT id FROM tenants WHERE slug = ?', [m.slug]))[0][0].id;
+  const byKey = await api('GET', `/platform/tenants/${id}`, { headers: { 'x-platform-key': 'test-bootstrap-key' } });
+  assert.equal(byKey.status, 403); assert.equal(byKey.body.details.code, 'two_step_required');
+  assert.equal((await api('GET', '/platform/tenants', { headers: { 'x-platform-key': 'test-bootstrap-key' } })).status, 200, 'the list of mountains still opens');
+  const op = await require('./helpers/platform-operator').operatorConsole(base, 'test-bootstrap-key');
+  const read = await op('GET', `/tenants/${id}`);
+  assert.equal(read.status, 200); assert.equal(read.body.slug, m.slug);
+});
+
+test('demo mountains seed their guest pages: online products, lesson booking and the sample waiver', () => {
+  const demo = read('db/demo.js');
+  assert.match(demo, /online_shop: true, online_booking: true/);
+  assert.match(demo, /\/waivers\/text/);
+  const m = read('public/js/views/waivers.js').match(/const SAMPLE = `([^`$]*)`;/);
+  assert.ok(m && m[1].startsWith('SAMPLE ONLY'), 'the demo finds the sample waiver it signs against');
+  assert.match(read('src/routes/shop.js'), /demo: Boolean\(t\.demo\)/);
 });
