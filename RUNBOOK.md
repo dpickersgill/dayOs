@@ -83,8 +83,8 @@ What changed in the app with this release:
 Every failure is written to the logs as one line with `"severity":"ERROR"` and a `job` name (`email`, `sms`,
 `stripe_webhook`, `card_refund`, `daily`, and the daily job stages). Each finished daily job writes `daily job finished`.
 
-1. **Uptime check:** Cloud console, Monitoring, Uptime checks, Create. Target: HTTPS, your service address, path
-   `/readyz`, every 5 minutes. Alert by email.
+1. **Uptime check:** `bash scripts/uptime-setup.sh +1XXXXXXXXXX you@example.com` (2026.11.10): live `/readyz` every
+   minute and the website's `/status`, with a text and an email when either is down. See DEPLOY.md, Uptime checks.
 2. **Error alert:** Cloud console, Logging, Logs Explorer. Query:
    `resource.type="cloud_run_revision" AND jsonPayload.severity="ERROR"`. Choose Actions, Create log alert, notify by
    email, at most one email every 30 minutes.
@@ -98,7 +98,8 @@ Every failure is written to the logs as one line with `"severity":"ERROR"` and a
 ## Backups
 
 Cloud SQL backs up the database every day at 07:00 UTC, keeps 14 backups, and can restore to any moment in the last
-week (point-in-time recovery). For a copy you hold yourself, once a month (or before a risky change):
+week (point-in-time recovery). `bash scripts/backups-setup.sh` checks all of that, turns on what is missing and adds a
+weekly copy in Cloud Storage; RECOVERY.md has the restore steps and the drill. For an extra copy before a risky change:
 
 ```bash
 gsutil mb -l us-east1 gs://summitops-510715-backups 2>/dev/null || true
@@ -106,7 +107,7 @@ gsutil iam ch "serviceAccount:$(gcloud sql instances describe summitops-db --for
 gcloud sql export sql summitops-db "gs://summitops-510715-backups/summitops-$(date +%F).sql.gz" --database=summitops
 ```
 
-Test a restore into a scratch instance once a season.
+Test a restore once a season: `bash scripts/restore-drill.sh` (RECOVERY.md, The drill).
 
 ## Moving the database to Cloud SQL
 

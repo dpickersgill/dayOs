@@ -84,7 +84,107 @@ gcloud run services update-traffic summitops-api --region us-east1 --to-revision
 ```
 
 Migrations only add tables and columns, so the previous revision keeps working after a rollback. `promote.sh` prints
-the exact command for the revision it replaced.
+the exact command for the revision it replaced. RECOVERY.md has the whole recovery plan: targets, backups, restoring the
+database, who to tell, and the drill.
+
+## Ready for the busiest morning (2026.11.10): once, when this release goes live
+
+Run these from the unzipped 2026.11.10 folder in Cloud Shell, in this order. Each is safe to run again.
+
+```bash
+bash deploy.sh                                     # as always: staging first (creates rate_limits and status_notes there)
+bash promote.sh                                    # live: migrates, then one server always running, at most 4
+bash scripts/backups-setup.sh                      # checks backups and point-in-time recovery, adds the weekly copy
+gcloud scheduler jobs run summitops-weekly-export --location us-east1   # the first weekly copy, now
+bash scripts/uptime-setup.sh +1XXXXXXXXXX you@example.com              # your mobile number and email: texts when live is down
+```
+
+`uptime-setup.sh` asks for the code Google texts to your phone. `backups-setup.sh` asks before anything that restarts
+the database (only if point-in-time recovery was off); say no during the day and run it again after closing.
+Then, once: the load test on staging (Load test, below), and the restore drill (RECOVERY.md, The drill).
+
+### Servers and database connections
+
+`promote.sh` keeps **one live server always running** (`--min-instances=1`), so the first guest of the morning never
+waits for a server to start (a cold start is several seconds), and lets Cloud Run add servers up to **4** when it is
+busy. Staging stays at none when idle (`--min-instances=0`, at most 1 server).
+
+The math: each server holds at most `DB_POOL` database connections (8 on live, 4 on staging), and a server serves up to
+40 requests at once, which share those 8. At the busiest moment that is 4 x 8 = 32 live connections, plus staging
+(at most 2 x 4 = 8, during a staging load test), plus 4 for a migration and the Cloud SQL proxy in Cloud Shell:
+**44 connections**. Cloud SQL's smallest MySQL servers allow at least 250 (see yours with
+`SHOW VARIABLES LIKE 'max_connections'` through the proxy), but each connection also uses memory on a small server, so
+`promote.sh` refuses any setting above a budget of 60. To change it: `LIVE_MAX_SERVERS=6 LIVE_DB_POOL=6 bash promote.sh`
+(6 x 6 + 12 = 48). Raise `DB_CONNECTION_BUDGET` only after moving the database to a bigger server
+(`gcloud sql instances patch summitops-db --tier=db-custom-1-3840`). A server always running costs a little each month
+even when nobody uses it (Cloud Run bills an idle server at a lower rate); see Cloud Run pricing.
+
+### What changed so several servers agree
+
+With more than one server, anything a server kept in its own memory would differ from server to server. This is
+what was in memory, and what happened to it:
+
+| In memory before | Now |
+|---|---|
+| Every rate limit (sign-in, codes, the console, every guest form, gates, the online shop, the assistant, the website) | Counted in the database, table `rate_limits` (`src/lib/ratestore.js`, behind express-rate-limit's store interface). 10 a minute is 10 a minute across all servers. A sign-in that works gives its count back, so a crew signing in at opening from one address is never turned away; wrong passwords still count. The daily job removes old counts. If the database does not answer within 1.5 seconds, a server falls back to its own count for that request and logs `rate_store`. |
+| The console's "a code works once" (`PLATFORM_TOTP_SECRET`) | Each code is claimed in the same table, so it works once across servers. |
+| Demo usage counts (added up for 30 seconds, then written) | Kept, but now also written when Cloud Run stops a server, so a quiet-time scale-down loses nothing. |
+| Login lockouts, emailed codes and their tries, sessions, passkey challenges | Already in the database. Nothing to do. |
+| Caches (plans, apps on, billing standing, website pages, the status checks) | Kept per server on purpose: each lasts 10 to 60 seconds. |
+| How many demos build at once (3), one scanned document read at a time | Kept per server on purpose: they protect each server's own memory. |
+
+### Load test
+
+`scripts/loadtest.js` plays a holiday Saturday morning against one mountain: gates scanning, counters selling day
+tickets for cash, and an online shop rush (`node scripts/loadtest.js --help`). It refuses the live site: it only runs
+against this computer or an address whose `/version` says staging.
+
+On staging, with its demo mountain (made at staging's `/try`), a counter login, and a pairing code from Gate, Devices,
+Add a device. Every request comes from Cloud Shell's one address, so raise staging's per-address guest limits for the
+test, and put them back after:
+
+```bash
+STG=$(gcloud run services describe summitops-staging --region us-east1 --format='value(status.url)')
+gcloud run services update summitops-staging --region us-east1 --update-env-vars PUBLIC_RATE_LIMIT=100000,SHOP_RATE_LIMIT=100000,DEVICE_RATE_LIMIT=100000
+node scripts/loadtest.js --url "$STG" --mountain <demo slug> --login <counter login> --password '<password>' \
+  --staging-password "$(gcloud secrets versions access latest --secret=summitops-staging-gate)" --pair-code <code> --json ~/loadtest.json
+gcloud run services update summitops-staging --region us-east1 --remove-env-vars PUBLIC_RATE_LIMIT,SHOP_RATE_LIMIT,DEVICE_RATE_LIMIT
+```
+
+To see the limits hold across servers, deploy staging with two servers first: `STAGING_MAX_SERVERS=2 bash deploy.sh`.
+Staging has at most 1 or 2 servers and a small database, so its numbers are a floor for live, not a promise.
+`--orders 10` also makes 10 online orders, each opening a Stripe checkout in test mode.
+
+Results on a developer computer (one server, the shared limits in the database, MariaDB on the same machine,
+120 seconds, 6 gates scanning every 2 seconds, 6 counters selling every 10 seconds, 120 online shoppers, 0 errors):
+
+| Request | Per minute | p50 | p95 | p99 |
+|---|---|---|---|---|
+| Gate scan | 166 | 14 ms | 43 ms | 108 ms |
+| Counter sale | 33 | 22 ms | 80 ms | 120 ms |
+| Shop day (prices and spots) | 55 | 23 ms | 44 ms | 85 ms |
+| Everything (541 a minute) | | 14 ms | 41 ms | 85 ms |
+
+At three times that (1,860 requests a minute) p95 was 70 ms and p99 149 ms, with 0 errors; counting the limits in
+memory instead was p95 50 ms, so the shared limits cost about 20 ms at the 95th percentile under that load.
+
+### Uptime checks that text you
+
+`bash scripts/uptime-setup.sh +1XXXXXXXXXX you@example.com` makes, in Cloud Monitoring: a text channel to your phone
+(confirmed with a code) and an email channel; an uptime check on live `/readyz` every minute from three US regions
+(it passes only on `"ok":true`, so a database that cannot be reached or a missing migration also alerts); a check on
+the website's `/status` every 5 minutes (when `SITE_HOSTS` is set); and an alert for each when two regions fail for a
+minute, with another message when it is back. `--dry-run` shows what it would do. To change the phone, run it again
+with the new number. Staging is not checked.
+
+### The status page
+
+`/status` on the website (and `/site/status`) shows each part (the app, online shop and booking pages, card payments,
+email, texts) as Working, Slow or partly working, Not working, or Not checked (that part is not set up). Each server
+checks them itself at most once a minute: the database, and whether Stripe, Postmark and Twilio accept our keys
+(`STATUS_PROBES=off` skips those three). Incidents and planned maintenance are written in the console (Status page);
+an open note sets its parts' state. It shows the last 90 days and never any customer data. It is linked from the
+website's footer and the Security page. `GET /api/v1/status` gives the same as JSON.
 
 ## Staging
 
@@ -131,7 +231,11 @@ made the account and its permissions:
 | `STRIPE_GUEST_FALLBACK` | Leave unset. In production a mountain takes guest card payments only once it has connected its own Stripe account. `on` would let unconnected mountains take payments into the platform's account (tests and local runs only). |
 | `JOBS_KEY` | The daily job (`POST /api/v1/internal/jobs/daily` with header `x-jobs-key`), called by Cloud Scheduler once a day |
 | `BOOTSTRAP_KEY` | Creating mountains and the platform console |
-| `DB_POOL` | Database connections per server (deploy.sh sets 8; with at most 4 servers that is 32 connections) |
+| `DB_POOL` | Database connections per server (promote.sh sets 8 on live, deploy.sh 4 on staging; see Servers and database connections) |
+| `RATE_STORE`, `RATE_STORE_TIMEOUT_MS` | Where rate limits are counted: `mysql` (shared by every server; deploy.sh and promote.sh set it) or `memory` (this server only; the default outside production). How long to wait for the database before counting in memory (default 1500 ms). |
+| `PUBLIC_RATE_LIMIT`, `DEVICE_RATE_LIMIT`, `SHOP_RATE_LIMIT` | Per-address limits on guest pages (120 a minute), gates (600 a minute) and online orders (12 an hour). Raise them on staging only, for a load test. |
+| `STATUS_PROBES`, `STATUS_CACHE_MS` | The status page's outside checks (`off` skips Stripe, Postmark and Twilio) and how long each server keeps its checks (default 60000 ms). |
+| `LIVE_MIN_SERVERS`, `LIVE_MAX_SERVERS`, `LIVE_DB_POOL`, `STAGING_MAX_SERVERS` | Not service settings: set them in Cloud Shell before `bash promote.sh` or `bash deploy.sh` to change the number of servers (defaults 1, 4, 8 and 1). |
 | `POSTMARK_BROADCAST_STREAM` | The Postmark stream for marketing messages (default `broadcast`); tickets, reminders and patrol mail use `POSTMARK_STREAM` (default `outbound`) |
 | `TOTP_KEY`, `LINK_SECRET`, `KIOSK_SECRET` | Separate keys for two-step secrets, unsubscribe links and staff badges. Each falls back to `JWT_SECRET`. See RUNBOOK.md before rotating `JWT_SECRET`. |
 | `SITE_HOSTS`, `APP_URL`, `SITE_CONTACT_EMAIL` | The product website on its own domain. `SITE_HOSTS` lists the website's addresses (`www.runmyresort.com,runmyresort.com`): on those, `/` is the website. `APP_URL` is where staff sign in (`https://app.runmyresort.com`). `SITE_CONTACT_EMAIL` gets the Contact page's requests (they are also in the console, Leads). The website is always at `/site` too. See "Putting the website live" below. |
