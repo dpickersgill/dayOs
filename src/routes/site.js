@@ -345,7 +345,7 @@ pages.get('/site/good-day/:issue', (req, res, next) => {
 goodDayPages(pages);
 
 // The app itself, at /app, for a website address where / is the home page.
-pages.get('/app', (_req, res) => res.set('Cache-Control', 'no-cache').sendFile(path.join(__dirname, '..', '..', 'public', 'index.html')));
+pages.get('/app', require('../lib/appassets').page('index.html')); // never cached long; its scripts are kept by release
 
 /** robots.txt: on the website, everything but the app; on the app's address, the mountains' public pages only. */
 pages.get('/robots.txt', (req, res) => {

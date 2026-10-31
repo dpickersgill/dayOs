@@ -84,7 +84,7 @@ try { if ('BarcodeDetector' in window) detector = new window.BarcodeDetector({ f
 let jsqrReady = null;
 const loadJsqr = () => {
   if (window.jsQR) return Promise.resolve();
-  if (!jsqrReady) jsqrReady = new Promise((ok, no) => { const s = document.createElement('script'); s.src = '/vendor/jsqr/jsQR.js'; s.onload = ok; s.onerror = () => no(new Error('The scanner could not load')); document.head.append(s); });
+  if (!jsqrReady) jsqrReady = new Promise((ok, no) => { const s = document.createElement('script'); s.src = new URL('../vendor/jsqr/jsQR.js', import.meta.url).href; s.onload = ok; s.onerror = () => no(new Error('The scanner could not load')); document.head.append(s); });
   return jsqrReady;
 };
 async function readFrame(v, canvas) {

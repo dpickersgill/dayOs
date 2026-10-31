@@ -28,7 +28,7 @@ export async function mountGuestAssistant(page, { session } = {}) {
   let on = false;
   try { on = (await call('GET', `?page=${page}`)).on; } catch (_) { on = false; }
   if (!on) return;
-  document.head.append(el('link', { rel: 'stylesheet', href: '/css/guest-assistant.css' }));
+  document.head.append(el('link', { rel: 'stylesheet', href: new URL('../css/guest-assistant.css', import.meta.url).href }));
   const chat = [];
   const log = el('div', { class: 'ga-log', 'aria-live': 'polite' });
   const box = el('textarea', { rows: '2', maxlength: '600', placeholder: 'Ask about hours, prices, programs…', 'aria-label': 'Your question' });
