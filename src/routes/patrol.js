@@ -842,9 +842,10 @@ router.post('/incidents/:id/submit', patrol, needs('submit_case'), (req, res) =>
   from: ['draft'], to: 'submit', check: 'submit', version: (r) => (r && r.reply && r.reply.review === 'not_required' ? 'approved' : 'submitted'),
   extra: async (conn, inc, now) => {
     await conn.query("UPDATE incidents SET report_state = 'submitted', submitted_by = ?, submitted_at = ? WHERE tenant_id = ? AND id = ?", [req.auth.userId, now, inc.tenant_id, inc.id]);
-    const routed = await R.afterSubmit(conn, req, { ...inc, submitted_by: req.auth.userId }, now);
-    // What the reviewer will still need: "required to approve" items not answered yet. Submitting is not held up by them.
-    const later = routed === 'not_required' ? [] : (await reportProblems(conn, req.auth.tenantId, inc, { stage: 'approve' })).filter((x) => x.level === 'approve');
+    // What the reviewer will still need: "required to approve" items not answered yet. Submitting is not held up by them,
+    // but a kind the group does not review is approved at once only when there are none (PATROL-9).
+    const later = (await reportProblems(conn, req.auth.tenantId, inc, { stage: 'approve' })).filter((x) => x.level === 'approve');
+    const routed = await R.afterSubmit(conn, req, { ...inc, submitted_by: req.auth.userId }, now, { approveGaps: later.length });
     return { reply: { review: routed, for_approval: later }, audit: { review: routed, for_approval: later.length } };
   },
 }));

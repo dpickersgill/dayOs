@@ -406,3 +406,24 @@ test('PATROL-8: the app keeps the sign-in on a network error and clears it only 
   assert.match(boot, /session\.keptMe\(\)/);
   assert.match(src, /navigator\.serviceWorker\.register\('\/sw\.js'/);
 });
+
+// ---------------------------------------------------------------- PATROL-9
+test('PATROL-9: a kind the group does not review is not approved at once while a "Required to approve" item is missing', async () => {
+  const m = await patrolMountain('nr');
+  const ownerId = (await q("SELECT id FROM users WHERE tenant_id = ? AND role = 'owner'", [m.tenantId]))[0].id;
+  ok(await api('PUT', '/patrol/review/settings', { token: m.owner, body: { reviewers: [{ user_id: ownerId, lead: true }], categories: ['injury'], nudge_hours: 72 } }));
+  ok(await api('PUT', '/patrol/requirements', { token: m.owner, body: { rules: { collision: { 'patient.phone': { level: 'approve' } } } } }));
+  const col = await readyCase(m.pat, { category: 'collision', summary: 'Two skiers collided' });
+  const sub = ok(await api('POST', `/patrol/incidents/${col.id}/submit`, { token: m.pat }));
+  assert.equal(sub.review, 'review');
+  assert.equal(sub.for_approval.length, 1);
+  const cs = ok(await api('GET', `/patrol/incidents/${col.id}`, { token: m.owner }));
+  assert.equal(cs.report_state, 'submitted');
+  assert.ok(!cs.versions.some((v) => v.kind === 'approved'));
+  // With the item filled in, the same kind is still signed off and approved at once.
+  const col2 = await readyCase(m.pat, { category: 'collision', summary: 'Second collision' });
+  ok(await api('PATCH', `/patrol/incidents/${col2.id}/patients/${col2.pid}`, { token: m.pat, body: { phone: '610-555-0100' } }));
+  const sub2 = ok(await api('POST', `/patrol/incidents/${col2.id}/submit`, { token: m.pat }));
+  assert.equal(sub2.review, 'not_required');
+  assert.equal(ok(await api('GET', `/patrol/incidents/${col2.id}`, { token: m.owner })).report_state, 'approved');
+});
