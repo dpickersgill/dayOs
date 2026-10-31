@@ -8,6 +8,8 @@ import * as passkey from './passkey.js';
 import { confirmItsYou } from './stepup.js';
 import { readTerminal, saveTerminal } from './terminal.js';
 import { passkeysPanel } from './views/security.js';
+import { watchPasswords } from './showpw.js';
+import { startTabWatch, activity as tabActivity, checkNow as tabCheckNow, msLeft as tabMsLeft, refresh as tabRefresh, LOCK_MINUTES } from './tablock.js';
 import * as alerts from './alerts.js';
 import { flush as flushOutbox, waitingCounts, forgetCases, setDeviceKey, dropDeviceKey } from './outbox.js';
 import { buildFrame, GROUP_OF, PATROL_SECTIONS, patrolSection } from './nav.js';
@@ -84,34 +86,94 @@ function ridge() {
 function readSlug() { try { return localStorage.getItem(SLUG_KEY) || ''; } catch (_) { return ''; } }
 function saveSlug(v) { try { localStorage.setItem(SLUG_KEY, v); } catch (_) { /* private mode */ } }
 
+// "Remember me on this device": the mountain and the username (or email) are kept in this browser and filled in next
+// time, and the sign-in is shared by this browser's tabs (api.js, tablock.js). Never the password. Without it, only the
+// mountain is kept (as before). Not offered on a shared terminal.
+const REMEMBER_KEY = 'so.remember';
+function readRemember() { try { const r = JSON.parse(localStorage.getItem(REMEMBER_KEY) || 'null'); return r && r.tenant ? r : null; } catch (_) { return null; } }
+function saveRemember(r) { try { if (r) localStorage.setItem(REMEMBER_KEY, JSON.stringify({ tenant: r.tenant, login: r.login })); else localStorage.removeItem(REMEMBER_KEY); } catch (_) { /* private mode */ } }
+// Whether the sign-in under way keeps its token for every tab (Remember me was ticked, or a locked tab was shared).
+let keepShared = false;
+const NOT_CASE = 'Not case sensitive: JSmith and jsmith are the same.';
+
 /** Signed in: keep the token and open the app. */
 async function signedIn(out) {
-  session.token = out.token;
+  const shared = keepShared && !readTerminal();
+  const before = shared ? session.sharedToken() : null;
+  session.save(out.token, { shared });
+  tabRefresh();
+  // A sign-in that replaces the browser's shared token (a locked tab signed in again): the old session ends.
+  if (before && before !== out.token) fetch('/api/v1/auth/logout', { method: 'POST', headers: { authorization: `Bearer ${before}` }, keepalive: true }).catch(() => {});
   if (out.recovery_codes_left !== undefined && out.recovery_codes_left < 3) toast(`Recovery code used. ${out.recovery_codes_left} left: make new ones in Settings.`);
   await start();
 }
 
+/** What the sign-in page may offer for a mountain (server: GET /auth/signin-options). null when it cannot tell. */
+async function mountainOptions(tenant) {
+  try {
+    const r = await fetch(`/api/v1/auth/signin-options?tenant=${encodeURIComponent(tenant || '')}`, { cache: 'no-store' });
+    return r.ok ? await r.json() : null;
+  } catch (_) { return null; }
+}
+/** The line under the mountain, and whether the email buttons show. Returns true when emailed codes can work. */
+function sayMountain(o, note, emailRow) {
+  clear(note);
+  let usable = true; let say = '';
+  if (o && o.tenant && !o.known) { usable = false; say = `We can't find a mountain called "${o.tenant}". Check the spelling, or ask your manager for the short name.`; }
+  else if (o && o.demo) { usable = false; say = "Demo mountains don't send email. Sign in with your password."; }
+  else if (o && !o.email_set_up) { usable = false; say = "Email sign-in isn't set up here yet."; }
+  if (say) note.append(h('p', { class: o && o.tenant && !o.known ? 'signin-note warn' : 'signin-note' }, say));
+  if (emailRow) emailRow.hidden = !usable;
+  return usable;
+}
+
+const signinFailed = (ex, tenant) => {
+  if (ex instanceof ApiError && ex.status === 429) return new Error('Too many attempts. Wait a minute and try again.');
+  if (ex instanceof ApiError && ex.status === 401) return new Error(`Wrong username or password. Check the mountain name too: you are signing in to ${tenant}.`);
+  return ex;
+};
+
 function showSignIn(message) {
   clear(app);
+  const term = readTerminal();
+  const remembered = term ? null : readRemember();
+  const known = readSlug();
   const err = h('div');
-  const slug = input({ name: 'tenant', autocomplete: 'organization', autocapitalize: 'none', spellcheck: 'false', value: readSlug(), required: true });
-  const email = input({ name: 'login', type: 'text', autocomplete: 'username', autocapitalize: 'none', spellcheck: 'false', required: true });
+  const slug = input({ name: 'tenant', autocomplete: 'organization', autocapitalize: 'none', spellcheck: 'false', value: known, required: true });
+  const email = input({ name: 'login', type: 'text', autocomplete: 'username', autocapitalize: 'none', spellcheck: 'false', required: true, value: remembered && remembered.tenant === known ? remembered.login || '' : '' });
   const pw = input({ name: 'password', type: 'password', autocomplete: 'current-password', required: true });
+  const remember = term ? null : h('input', { type: 'checkbox', name: 'remember', checked: Boolean(remembered) });
   const go = h('button', { type: 'submit', class: 'btn primary' }, 'Sign in');
-  const form = h('form', { novalidate: true },
-    field('Mountain', slug, 'The short name you were given, such as spring-mountain'),
-    field('Username or email', email), field('Password', pw), err, go);
+  // The remembered mountain is said plainly, with a way to change it: signing in to the wrong mountain looks exactly like a
+  // wrong password.
+  const slugField = field('Mountain', slug, 'The short name you were given, such as spring-mountain');
+  const note = h('div', { 'aria-live': 'polite', 'data-mountain-note': '' });
+  const change = h('button', { type: 'button', class: 'btn link', 'aria-label': `Change the mountain (now ${known})` }, 'Change');
+  const shown = known ? h('p', { class: 'signin-mountain', 'data-mountain': known }, 'Mountain: ', h('strong', null, known), '.', change) : null;
+  if (shown) slugField.hidden = true;
+  change.addEventListener('click', () => { shown.remove(); slugField.hidden = false; slug.focus(); slug.select(); });
+  const form = h('form', { novalidate: true, 'data-step': 'signin' },
+    shown, slugField, note,
+    field('Username or email', email, NOT_CASE), field('Password', pw),
+    remember ? h('div', { class: 'stack tight' }, h('label', { class: 'check' }, remember, ' Remember me on this device'),
+      h('p', { class: 'hint signin-hint' }, 'Keeps your mountain and username here, and keeps you signed in when you open a new tab. Never your password. Leave it off on a computer other people use.')) : null,
+    err, go);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     clear(err);
+    const tenant = slug.value.trim().toLowerCase();
+    const login = email.value.trim();
+    if (!tenant) { slugField.hidden = false; if (shown) shown.remove(); err.append(errorBox(new Error('Type your mountain first'))); slug.focus(); return; }
     go.disabled = true;
     try {
-      const out = await post('/auth/login', { tenant: slug.value.trim().toLowerCase(), login: email.value.trim(), password: pw.value });
-      saveSlug(slug.value.trim().toLowerCase());
+      keepShared = Boolean(remember && remember.checked);
+      const out = await post('/auth/login', { tenant, login, password: pw.value });
+      saveSlug(tenant);
+      saveRemember(keepShared ? { tenant, login: login.includes('@') ? login : login.toLowerCase() } : null);
       if (out.mfa_required) { showSecondStep(out); return; }
       await signedIn(out);
     } catch (ex) {
-      err.append(errorBox(ex instanceof ApiError && ex.status === 429 ? new Error('Too many attempts. Wait a minute and try again.') : ex));
+      err.append(errorBox(signinFailed(ex, tenant)));
       go.disabled = false;
     }
   });
@@ -120,29 +182,87 @@ function showSignIn(message) {
   const pk = passkey.supported() ? button('Sign in with a passkey', async () => {
     clear(pkErr);
     const tenant = slug.value.trim().toLowerCase();
-    if (!tenant) { pkErr.append(errorBox(new Error('Type your mountain first'))); slug.focus(); return; }
+    if (!tenant) { pkErr.append(errorBox(new Error('Type your mountain first'))); slugField.hidden = false; slug.focus(); return; }
     pk.disabled = true;
     try {
+      keepShared = Boolean(remember && remember.checked);
       const { handle, options } = await post('/auth/passkey/options', { tenant });
       const response = await passkey.use(options);
       const out = await post('/auth/passkey', { tenant, handle, response });
       saveSlug(tenant);
+      if (!keepShared) saveRemember(null);
       await signedIn(out);
     } catch (ex) { pkErr.append(errorBox(ex)); pk.disabled = false; }
   }, { small: false }) : null;
-  const term = readTerminal();
+  const toEmail = (purpose) => { keepShared = Boolean(remember && remember.checked); showEmailCode(purpose, slug.value.trim().toLowerCase(), email.value.trim()); };
+  const emailRow = h('div', { class: 'row signin-email' },
+    button('Email me a code instead', () => toEmail('signin'), { small: true }),
+    button('Forgot password?', () => toEmail('reset'), { small: true, kind: 'quiet' }));
+  // Which mountain this is decides what the page can offer (a demo sends no email); checked as the name is typed.
+  let asked = 0; let wait = null;
+  const check = async () => { const my = ++asked; const o = await mountainOptions(slug.value.trim().toLowerCase()); if (my === asked) sayMountain(o, note, emailRow); };
+  slug.addEventListener('input', () => { clear(err); clearTimeout(wait); wait = setTimeout(check, 500); });
+  slug.addEventListener('change', () => { clearTimeout(wait); check(); });
+  check();
   app.append(h('div', { class: 'signin' },
     h('section', { class: 'signin-side' },
       h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-logo-dark.png', alt: 'Verdynt/OS, resort operating system', width: '220', height: '109' })), h('h1', null, 'Run the mountain from one screen.'),
         h('p', null, 'Tickets, lifts, rentals, lessons, patrol and staff schedules for your mountain.')), ridge()),
     h('section', { class: 'signin-form' }, h('h2', null, 'Sign in'), message ? h('p', { class: 'muted', role: 'status' }, message) : null, form,
       pk ? h('div', { class: 'stack tight signin-passkey' }, h('p', { class: 'muted small' }, 'Or, if you added a passkey on this phone or computer:'), pk, pkErr) : null,
-      h('div', { class: 'row signin-email' },
-        button('Email me a code instead', () => showEmailCode('signin', slug.value.trim().toLowerCase(), email.value.trim()), { small: true }),
-        button('Forgot password?', () => showEmailCode('reset', slug.value.trim().toLowerCase(), email.value.trim()), { small: true, kind: 'quiet' })),
+      emailRow,
       term ? h('p', { class: 'small' }, button(`Back to the PIN screen (${term.name})`, () => showPinSignIn(), { small: true })) : null,
       signInVersion())));
-  (slug.value ? email : slug).focus();
+  (!slug.value ? slug : email.value ? pw : email).focus();
+}
+
+/**
+ * A tab nobody used for 10 minutes: it locked itself (tablock.js) and reads no token until someone signs in here again.
+ * With Remember me, the other tabs carry on; signing in here replaces the shared sign-in, and the page opens where it was.
+ */
+function showLocked(who, message) {
+  keepShared = Boolean(who.shared);
+  const err = h('div');
+  const pw = input({ name: 'password', type: 'password', autocomplete: 'current-password', required: true });
+  const user = h('input', { type: 'text', name: 'login', autocomplete: 'username', value: who.login || '', hidden: true, readonly: true, tabindex: '-1', 'aria-hidden': 'true' });
+  const go = h('button', { type: 'submit', class: 'btn primary' }, 'Continue');
+  const form = h('form', { novalidate: true, 'data-step': 'locked' }, user, field('Password', pw), err, h('div', { class: 'row' }, go));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault(); clear(err);
+    if (!pw.value) { err.append(errorBox(new Error('Type your password'))); pw.focus(); return; }
+    go.disabled = true;
+    try {
+      const out = await post('/auth/login', { tenant: who.tenant, login: who.login, password: pw.value });
+      if (out.mfa_required) { showSecondStep(out); return; }
+      await signedIn(out);
+    } catch (ex) { err.append(errorBox(signinFailed(ex, who.tenant))); go.disabled = false; pw.select(); }
+  });
+  const other = h('div', { class: 'stack tight' });
+  const pkErr = h('div');
+  if (passkey.supported()) {
+    const pk = button('Use a passkey', async () => {
+      clear(pkErr); pk.disabled = true;
+      try {
+        const { handle, options } = await post('/auth/passkey/options', { tenant: who.tenant });
+        const response = await passkey.use(options);
+        await signedIn(await post('/auth/passkey', { tenant: who.tenant, handle, response }));
+      } catch (ex) { pkErr.append(errorBox(ex)); pk.disabled = false; }
+    }, { small: true });
+    other.append(pk, pkErr);
+  }
+  const emailRow = h('div', { class: 'row' }, button('Email me a code instead', () => showEmailCode('signin', who.tenant, who.login), { small: true }));
+  emailRow.hidden = true;
+  const note = h('div', { 'aria-live': 'polite' });
+  mountainOptions(who.tenant).then((o) => sayMountain(o, note, emailRow));
+  signInFrame(`Locked after ${LOCK_MINUTES} minutes.`,
+    who.shared ? `Nobody used this tab for ${LOCK_MINUTES} minutes, so it locked to keep guest and patient details private. Your other tabs are not affected.` : `Nobody used this tab for ${LOCK_MINUTES} minutes, so it locked and signed out, to keep guest and patient details private.`,
+    'Locked',
+    message ? h('p', { class: 'muted', role: 'status' }, message) : null,
+    h('p', { 'data-locked-as': who.login || '' }, who.shared ? 'Signed in as ' : 'You were signed in as ', h('strong', null, who.name || who.login || 'you'), ` at ${who.tenant}. Type your password to carry on where you were.`),
+    form, other, note, emailRow,
+    h('p', { class: 'small' }, button('Sign in as someone else', () => { keepShared = false; showSignIn(); }, { small: true, kind: 'quiet' })));
+  document.title = 'Locked · Verdynt/OS';
+  pw.focus();
 }
 
 /** The sign-in page frame used by the email screens: the ridge on one side, the form on the other. */
@@ -162,7 +282,7 @@ function showEmailCode(purpose, tenant0 = readSlug(), login0 = '') {
   const slug = input({ name: 'tenant', autocomplete: 'organization', autocapitalize: 'none', spellcheck: 'false', value: tenant0 || readSlug(), required: true });
   const who = input({ name: 'login', type: 'text', autocomplete: 'username', autocapitalize: 'none', spellcheck: 'false', value: login0, required: true });
   const go = h('button', { type: 'submit', class: 'btn primary' }, 'Email me a code');
-  const form = h('form', { novalidate: true, 'data-step': 'email-ask' }, field('Mountain', slug), field('Username or email', who, 'The code goes to the email on your login. No email on your login? Ask a manager to add one, or sign in with your password.'), err, h('div', { class: 'row' }, go, button('Back to sign in', () => showSignIn(), { small: true })));
+  const form = h('form', { novalidate: true, 'data-step': 'email-ask' }, field('Mountain', slug), field('Username or email', who, `The code goes to the email on your login. No email on your login? Ask a manager to add one, or sign in with your password. ${NOT_CASE}`), err, h('div', { class: 'row' }, go, button('Back to sign in', () => showSignIn(), { small: true })));
   form.addEventListener('submit', async (e) => {
     e.preventDefault(); clear(err);
     const tenant = slug.value.trim().toLowerCase(); const login = who.value.trim();
@@ -186,7 +306,7 @@ function showEmailCodeEntry(purpose, { tenant, login, request, minutes = 10, lin
   const again = reset ? input({ name: 'again', type: 'password', autocomplete: 'new-password', minlength: 12, required: true }) : null;
   const go = h('button', { type: 'submit', class: 'btn primary' }, reset ? 'Save my new password' : 'Sign in');
   const form = h('form', { novalidate: true, 'data-step': reset ? 'email-reset' : 'email-code' },
-    code ? field('Code from your email', code, `If there is a login for ${login} at this mountain with an email, we sent a six-digit code to it. It works for ${minutes} minutes. Check spam if it is not there in a minute.`) : null,
+    code ? field('Code from your email', code, `If there is a login for ${login} at this mountain with an email, we sent a six-digit code to it. It works for ${minutes} minutes. ${NO_MAIL}`) : null,
     reset ? field('New password', next, 'At least 12 characters') : null, reset ? field('New password again', again) : null,
     err, h('div', { class: 'row' }, go, button('Start again', () => showSignIn(), { small: true })));
   form.addEventListener('submit', async (e) => {
@@ -212,6 +332,9 @@ function showEmailCodeEntry(purpose, { tenant, login, request, minutes = 10, lin
   (code || next).focus();
 }
 
+// Said wherever we tell someone to look for an emailed code.
+const NO_MAIL = "If it doesn't arrive in 2 minutes, check spam, or ask your manager to make sure your login has an email address.";
+
 /** Opened from the link in a sign-in or reset email (#email-link=… or #reset-link=…). Returns true when it took over. */
 async function fromEmailLink() {
   const m = /^#(email-link|reset-link)=([A-Za-z0-9_-]+\.\d{6})$/.exec(location.hash);
@@ -221,7 +344,8 @@ async function fromEmailLink() {
   try {
     const out = await post('/auth/email-code/verify', { link: m[2] });
     if (out.mfa_required) { showSecondStep(out); return true; }
-    session.token = out.token;
+    keepShared = false;
+    session.save(out.token); // this tab only: a link from an email never signs in every tab
     return false; // signed in: start() carries on
   } catch (ex) { showSignIn(ex.message); return true; }
 }
@@ -256,7 +380,7 @@ function showSecondStep(first) {
   if (methods.app || methods.email) {
     code = input({ name: 'code', inputmode: methods.email ? 'numeric' : 'text', autocomplete: 'one-time-code', autocapitalize: 'characters', spellcheck: 'false', required: true, 'aria-label': 'Code' });
     const go = h('button', { type: 'submit', class: methods.passkey ? 'btn' : 'btn primary' }, 'Verify');
-    const hint = methods.email ? `We emailed a six-digit code to ${first.sent_to}, because this device has not signed in before. It works for 10 minutes.` : 'From your authenticator app. Lost your phone? Type one of your recovery codes instead.';
+    const hint = methods.email ? `We emailed a six-digit code to ${first.sent_to}, because this device has not signed in before. It works for 10 minutes. ${NO_MAIL}` : 'From your authenticator app. Lost your phone? Type one of your recovery codes instead.';
     const form = h('form', { novalidate: true, 'data-step': 'mfa' }, field(methods.email ? 'Code from your email' : methods.passkey ? 'Or the six-digit code' : 'Six-digit code', code, hint), h('div', { class: 'row' }, go));
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -283,7 +407,7 @@ async function showPinSignIn(message) {
   const who = input({ name: 'login', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', required: true });
   const pin = input({ name: 'pin', type: 'password', inputmode: 'numeric', autocomplete: 'off', pattern: '[0-9]*', maxlength: 8, required: true });
   const go = h('button', { type: 'submit', class: 'btn primary' }, 'Start');
-  const form = h('form', { novalidate: true, 'data-step': 'pin' }, field('Username', who), field('PIN', pin, 'Your 6 to 8 digit PIN. Set it in Settings after signing in with your password.'), err, go);
+  const form = h('form', { novalidate: true, 'data-step': 'pin' }, field('Username', who, NOT_CASE), field('PIN', pin, 'Your 6 to 8 digit PIN. Set it in Settings after signing in with your password.'), err, go);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     clear(err);
@@ -582,25 +706,77 @@ hooks.onSignedOut = () => { if (ctx.me) signOut('Your session ended. Sign in aga
 hooks.stepUp = (details) => confirmItsYou(details);
 hooks.signOut = () => signOut();
 
-// Automatic sign-out: a phone or screen left open should not leave guest and patient details on display.
+// A phone or screen left open should not leave guest and patient details on display.
+// - A shared terminal (a computer a manager enrolled for PIN sign-in) keeps its own rule: signed out after 15 minutes.
+// - Everywhere else, a tab nobody uses for 10 minutes locks itself (tablock.js, showLocked). The patrol-room screen stays up.
 const IDLE_MINUTES = 15;
+const onTerminal = () => Boolean(readTerminal());
 let idleTimer = null;
 function resetIdle() {
   clearTimeout(idleTimer);
-  if (!ctx.me) return;
+  if (!ctx.me || !onTerminal()) return;
   // The patrol-room screen stays up all day on a shared tablet. The server holds its session to that screen (names, signing in
   // and out, never patient details), and leaving it needs the leader's password, passkey or code.
   idleTimer = setTimeout(() => { if (ctx.me && ctx.me.display === 'patrol_room') { resetIdle(); return; } if (ctx.me) signOut(`Signed out after ${IDLE_MINUTES} minutes without activity.`); }, IDLE_MINUTES * 60_000);
   if (idleTimer && idleTimer.unref) idleTimer.unref(); // (test runners only: a pending timer must not keep the process alive)
 }
-const touchedPage = () => { noteActivity(); resetIdle(); };
+const touchedPage = () => { noteActivity(); resetIdle(); tabActivity(); };
 for (const ev of ['pointerdown', 'keydown', 'scroll', 'touchstart']) document.addEventListener(ev, touchedPage, { passive: true, capture: true });
+// Moving the mouse over the page, or coming back to the tab, counts as using it for the tab lock (not for the server).
+document.addEventListener('pointermove', () => tabActivity(), { passive: true, capture: true });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') tabActivity(); });
 // Arm the timer shortly after sign-in, and again whenever it has been cleared by a sign-out and back in.
 setInterval(() => { if (ctx.me && !idleTimer) resetIdle(); if (!ctx.me) { clearTimeout(idleTimer); idleTimer = null; } }, 5_000).unref?.();
+
+let locking = false;
+/** This tab was idle 10 minutes: tidy up like a sign-out, lock it, and load the page again (nothing stays in memory). */
+async function lockTab() {
+  if (locking || signingOut || !ctx.me || onTerminal() || ctx.me.display === 'patrol_room') return;
+  locking = true;
+  const shared = session.shared;
+  const token = session.token;
+  const who = { tenant: ctx.me.tenant, login: ctx.me.login_name || ctx.me.username || ctx.me.email, name: [ctx.me.first_name, ctx.me.last_name].filter(Boolean).join(' ') || null, shared };
+  endTour();
+  await within(closeAllDialogs(), 8000);
+  await within(import('./assistant.js').then((m) => m.resetAssistant()).catch(() => {}), 2000);
+  dropDeviceKey();
+  session.lock(who);
+  ctx.me = null;
+  navToken += 1;
+  if (!shared) {
+    // This tab's own sign-in (no Remember me): no other tab uses it, so it ends now.
+    session.unlock(); session.clear(); session.lock(who);
+    if (token) fetch('/api/v1/auth/logout', { method: 'POST', headers: { authorization: `Bearer ${token}` }, keepalive: true }).catch(() => {});
+  } else tabCheckNow(); // the last tab in use: the shared sign-in ends too
+  showLocked(who);
+  location.reload();
+}
+
+startTabWatch({
+  enabled: () => Boolean(ctx.me) && !onTerminal() && ctx.me.display !== 'patrol_room',
+  awake: () => Boolean(ctx.me) && ctx.me.display === 'patrol_room',
+  onLock: () => { lockTab(); },
+});
+
+// Other tabs of this browser share a Remember me sign-in. When it ends there (Sign out, or every tab idle), this tab
+// follows; when someone else signs in with Remember me, this tab reloads as them rather than mixing two people.
+const tokenUser = (t) => { try { const p = JSON.parse(atob(String(t).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); return `${p.tid}:${p.sub}`; } catch (_) { return null; } };
+window.addEventListener('storage', (e) => {
+  if (e.key !== 'so.token' || session.locked()) return;
+  if (ctx.me && !e.newValue && e.oldValue && !session.token) {
+    // Every tab was idle (this one too): it locks like the others. Otherwise someone signed out in another tab.
+    if (!tabMsLeft() && !onTerminal()) lockTab(); else signOut('Your sign-in ended in another tab. Sign in again.');
+    return;
+  }
+  if (ctx.me && e.newValue && e.oldValue && tokenUser(e.newValue) !== tokenUser(e.oldValue) && session.token === e.newValue) { location.reload(); return; }
+  if (!ctx.me && e.newValue && !signingOut && app.querySelector('form[data-step="signin"]')) start(); // signed in in another tab
+});
 
 async function start() {
   if (/^#(email|reset)-link=/.test(location.hash) && await fromEmailLink()) return;
   const said = takeSaid();
+  const lockedAs = session.locked();
+  if (lockedAs) { if (readTerminal()) { session.unlock(); session.clear(); } else { showLocked(lockedAs, said); return; } }
   if (!session.token) { if (readTerminal()) showPinSignIn(said); else showSignIn(said); return; }
   try {
     ctx.me = await get('/auth/me');
@@ -645,6 +821,7 @@ window.addEventListener('hashchange', () => {
   if (ctx.me && frame && drawnPath !== null && now === drawnPath && currentPath().key) return;
   route();
 });
+watchPasswords();
 start();
 
 export { route };

@@ -84,15 +84,15 @@ function addLogin(staff, isOwner, done) {
   syncHint();
   const f = h('div', { class: 'form' },
     field('Staff record', staffSel, 'Linking lets them see their shifts and clock in'),
-    field('Username', uname, 'What they type to sign in. Letters, numbers, dots and dashes.'),
+    field('Username', uname, 'What they type to sign in. Letters, numbers, dots and dashes. Not case sensitive: JSmith and jsmith are the same.'),
     h('label', { class: 'field' }, 'Email', email, emailHint),
     field('Role', role),
-    field('Temporary password', input({ name: 'password', type: 'text', required: true, minlength: 12, autocomplete: 'off' }), 'At least 12 characters. Tell them in person or by phone.'),
+    field('Temporary password', input({ name: 'password', type: 'password', required: true, minlength: 12, autocomplete: 'new-password' }), 'At least 12 characters. Tell them in person or by phone. Press the eye to see what you typed.'),
     h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name: 'temporary', checked: true }), ' They choose their own password when they first sign in'));
   formDialog('Add a login', f, async (fd) => {
     if (needsEmail(val(fd, 'role')) && !val(fd, 'email')) throw new Error(val(fd, 'role') === 'area' ? 'A ski area login needs an email' : 'Managers need an email');
     const r = await post('/users', { username: val(fd, 'username') || undefined, email: val(fd, 'email') || undefined, password: fd.get('password'), role: val(fd, 'role'), staff_id: num(fd, 'staff_id') || undefined, temporary: Boolean(fd.get('temporary')) });
-    toast(`Login created. They sign in as ${r.username}`);
+    toast(`Login created. Saved as ${r.username}: they sign in as ${r.username}`);
     await done();
   }, { submitText: 'Create login' });
   suggest();
@@ -100,11 +100,11 @@ function addLogin(staff, isOwner, done) {
 
 function editLogin(u, done) {
   formDialog(`Edit ${who(u)}`, h('div', { class: 'form' },
-    field('Username', input({ name: 'username', value: u.username || '', required: true, maxlength: 40, autocapitalize: 'none', spellcheck: 'false' }), 'Letters, numbers, dots and dashes'),
+    field('Username', input({ name: 'username', value: u.username || '', required: true, maxlength: 40, autocapitalize: 'none', spellcheck: 'false' }), 'Letters, numbers, dots and dashes. Not case sensitive: JSmith and jsmith are the same.'),
     field('Email', input({ name: 'email', type: 'email', value: u.email || '' }), needsEmail(u.role) ? 'Required for managers.' : 'Optional. Leave blank if they have none.'),
     needsEmail(u.role) ? null : field('Access ends after', input({ name: 'access_ends_on', type: 'date', value: u.access_ends_on ? String(u.access_ends_on).slice(0, 10) : '' }), 'They cannot sign in after this day. Leave blank for no end. Clear it to bring someone back.')), async (fd) => {
-    await patch(`/users/${u.id}`, { username: val(fd, 'username'), email: val(fd, 'email'), ...(needsEmail(u.role) ? {} : { access_ends_on: val(fd, 'access_ends_on') }) });
-    toast('Saved');
+    const r = await patch(`/users/${u.id}`, { username: val(fd, 'username'), email: val(fd, 'email'), ...(needsEmail(u.role) ? {} : { access_ends_on: val(fd, 'access_ends_on') }) });
+    toast(r && r.username ? `Saved. They sign in as ${r.username}` : 'Saved');
     await done();
   });
 }
@@ -143,7 +143,7 @@ function changeRole(u, isOwner, done) {
 
 function resetPassword(u) {
   formDialog(`New password for ${who(u)}`, h('div', { class: 'form' },
-    field('New password', input({ name: 'password', type: 'text', required: true, minlength: 12, autocomplete: 'off' }), 'At least 12 characters. They are signed out everywhere until they use it. Tell them in person or by phone.'),
+    field('New password', input({ name: 'password', type: 'password', required: true, minlength: 12, autocomplete: 'new-password' }), 'At least 12 characters. They are signed out everywhere until they use it. Tell them in person or by phone. Press the eye to see what you typed.'),
     h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name: 'temporary', checked: true }), ' Temporary: they choose their own password when they next sign in')), async (fd) => {
     await post(`/users/${u.id}/reset-password`, { new_password: fd.get('password'), temporary: Boolean(fd.get('temporary')) });
     toast(`Password reset. They sign in as ${who(u)}`);

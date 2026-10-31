@@ -69,17 +69,37 @@ export function pinPanel(sec) {
   return box;
 }
 
-/** Where you are signed in now, and the devices you have used. */
+// "12 minutes ago", from the server's clock (now) so a device with the wrong time still reads right.
+const utcMs = (v) => Date.parse(`${String(v).replace(' ', 'T')}Z`);
+function ago(v, now) {
+  const min = Math.max(0, Math.round((utcMs(now) - utcMs(v)) / 60000));
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} minute${min === 1 ? '' : 's'} ago`;
+  const hr = Math.floor(min / 60);
+  return `${hr} hour${hr === 1 ? '' : 's'} ago`;
+}
+// The end time in this device's own time ("8:45 PM"), with the day when it is not today.
+function at(v) {
+  const d = new Date(utcMs(v));
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}, ${time}`;
+}
+
+/**
+ * Where you are signed in now, and the devices you have used. Only sessions still open by the server's rules are listed
+ * (not signed out, not idle past the limit, not past 8 hours, not closed with the browser). "This tab" is the one in use.
+ */
 export function sessionsPanel(sec, redraw) {
+  const now = sec.now || new Date().toISOString().slice(0, 19).replace('T', ' ');
   return h('section', { class: 'panel stack', 'data-panel': 'sessions' },
     h('h2', null, 'Where you are signed in'),
-    h('p', null, 'Each sign-in ends after an hour unused, or 8 hours at most. If you see one that is not you, sign it out and change your password.'),
+    h('p', null, 'Each sign-in ends after an hour unused (15 minutes on a shared terminal), or 8 hours at most. Closing every tab of a browser ends its sign-in too. If you see one that is not you, sign it out and change your password.'),
     table([
-      { head: 'Device', cell: (x) => [h('strong', null, x.device), x.current ? h('span', { class: 'muted small' }, ' (this one)') : null] },
+      { head: 'Device', cell: (x) => [h('strong', null, x.device), x.current ? h('span', { class: 'tag this-tab' }, 'This tab') : null] },
       { head: 'How', cell: (x) => METHOD[x.method] || x.method },
       { head: 'Signed in', cell: (x) => when(x.created_at) },
-      { head: 'Last active', cell: (x) => when(x.last_seen) },
-      { head: '', actions: true, cell: (x) => (x.current ? null : button('Sign out', async () => { await del(`/auth/sessions/${x.id}`); toast('Signed out there'); redraw(); }, { small: true })) },
+      { head: 'Use', cell: (x) => h('span', { class: 'session-use' }, h('span', null, x.current ? 'In use now' : `Last used ${ago(x.last_seen, now)}`), x.ends_at ? h('span', { class: 'muted small' }, `Ends at ${at(x.ends_at)} if unused`) : null) },
+      { head: '', actions: true, cell: (x) => (x.current ? null : button('Sign out', async () => { await del(`/auth/sessions/${x.id}`); toast('Signed out there'); redraw(); }, { small: true, label: `Sign out ${x.device}` })) },
     ], sec.sessions),
     sec.sessions.length > 1 ? h('div', { class: 'row' }, button('Sign out everywhere else', () => confirmDialog('Sign out everywhere else?', 'Every other phone and computer signed in as you is signed out now.', 'Sign out', async () => { await post('/auth/sessions/end-others'); toast('Signed out everywhere else'); redraw(); }, { danger: true }), { small: true })) : null,
     h('h3', null, 'Devices you have used'),

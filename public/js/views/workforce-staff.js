@@ -232,13 +232,13 @@ async function createLogin(p, done) {
   const { username } = await get(`/users/suggest-username?staff_id=${p.id}`);
   const role = select([['staff', 'Staff'], ['counter', 'Counter'], ['instructor', 'Instructor'], ['patrol', 'Patrol'], ['manager', 'Manager']], p.patrol ? 'patrol' : 'staff', { name: 'role' });
   formDialog(`Create a login for ${fullName(p)}`, h('div', { class: 'form' },
-    field('Username', input({ name: 'username', value: username, required: true, maxlength: 40, autocapitalize: 'none', spellcheck: 'false' }), 'What they type to sign in'),
+    field('Username', input({ name: 'username', value: username, required: true, maxlength: 40, autocapitalize: 'none', spellcheck: 'false' }), 'What they type to sign in. Not case sensitive: JSmith and jsmith are the same.'),
     field('Email', input({ name: 'email', type: 'email', value: p.email || '' }), 'Optional, except for managers'),
     field('Role', role, p.patrol ? 'Being on ski patrol already opens Patrol; the role decides what else they use' : 'What they use in Verdynt/OS'),
-    field('Temporary password', input({ name: 'password', type: 'text', required: true, minlength: 10, autocomplete: 'off' }), 'At least 10 characters. Tell them in person or by phone.'),
+    field('Temporary password', input({ name: 'password', type: 'password', required: true, minlength: 12, autocomplete: 'new-password' }), 'At least 12 characters. Tell them in person or by phone. Press the eye to see what you typed.'),
     h('label', { class: 'check wide' }, h('input', { type: 'checkbox', name: 'temporary', checked: true }), ' They choose their own password when they first sign in')), async (fd) => {
     const r = await post('/users', { username: String(fd.get('username') || '').trim(), email: String(fd.get('email') || '').trim() || undefined, password: String(fd.get('password')), role: String(fd.get('role')), staff_id: Number(p.id), temporary: Boolean(fd.get('temporary')) });
-    toast(`Login created. They sign in as ${r.username}`);
+    toast(`Login created. Saved as ${r.username}: they sign in as ${r.username}`);
     await done();
   }, { submitText: 'Create login' });
 }

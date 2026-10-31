@@ -29,11 +29,11 @@ export async function renderSettingsPage(root) {
 function accountCard() {
   const name = h('b', null, ctx.me.username || '');
   const change = ctx.me.username ? button('Change', () => formDialog('Change your username', h('div', { class: 'form' },
-    field('Username', input({ name: 'username', value: ctx.me.username, required: true, maxlength: 40, autocapitalize: 'none', spellcheck: 'false' }), 'What you type to sign in. Letters, numbers, dots and dashes.')), async (fd) => {
+    field('Username', input({ name: 'username', value: ctx.me.username, required: true, maxlength: 40, autocapitalize: 'none', spellcheck: 'false' }), 'What you type to sign in. Letters, numbers, dots and dashes. Not case sensitive: JSmith and jsmith are the same.')), async (fd) => {
     const r = await post('/auth/username', { username: String(fd.get('username') || '') });
     ctx.me.username = r.username;
     name.textContent = r.username;
-    toast(`You now sign in as ${r.username}`);
+    toast(`Saved as ${r.username}. You now sign in as ${r.username}`);
   }), { small: true, label: 'Change your username' }) : null;
   const how = ctx.me.username && ctx.me.email ? `You can sign in with your username or ${ctx.me.email}.` : `You sign in as ${ctx.me.username || ctx.me.email}.`;
   return card('You', [

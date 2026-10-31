@@ -29,8 +29,7 @@ router.get('/auth/security', authenticate, async (req, res) => {
   const user = await me(req);
   const [keys, open, seen] = await Promise.all([
     passkeys.listFor('user', user.id),
-    rows(pool, `SELECT s.id_hash, s.created_at, s.last_seen, s.agent, s.method, s.device_hash, x.name AS terminal FROM user_sessions s LEFT JOIN terminals x ON x.id = s.terminal_id
-      WHERE s.user_id = ? AND s.ended_at IS NULL AND s.expires_at > UTC_TIMESTAMP() AND s.last_seen > DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? MINUTE) ORDER BY s.last_seen DESC LIMIT 30`, [user.id, Number(process.env.SESSION_IDLE_MINUTES || 60)]),
+    sessions.listOpen(user.id),
     rows(pool, 'SELECT id, device_hash, label, first_seen, last_seen FROM user_devices WHERE user_id = ? ORDER BY last_seen DESC LIMIT 30', [user.id]),
   ]);
   const label = require('../lib/devices').label;
@@ -38,7 +37,10 @@ router.get('/auth/security', authenticate, async (req, res) => {
   res.json({
     passkeys: keys.map((k) => ({ id: k.id, name: k.name, created_at: k.created_at, last_used_at: k.last_used_at })),
     app_enabled: Boolean(user.totp_enabled), pin_set: Boolean(user.pin_hash), can_have_pin: CREW_ROLES.includes(user.role),
-    sessions: open.map((s) => ({ id: shortId(s.id_hash), current: s.id_hash === mine, created_at: s.created_at, last_seen: s.last_seen, device: s.terminal ? `Shared terminal: ${s.terminal}` : label(s.agent), method: s.method })),
+    // Times are UTC ("YYYY-MM-DD HH:MM:SS"); the screen shows them in the viewer's own time. now: the server's clock, so
+    // "Last used 12 minutes ago" is right even when the device's clock is not.
+    sessions: open.map((s) => ({ id: shortId(s.id_hash), current: s.id_hash === mine, created_at: s.created_at, last_seen: s.last_seen, ends_at: s.ends_at, device: s.terminal ? `Shared terminal: ${s.terminal}` : label(s.agent), method: s.method, terminal: Boolean(s.terminal) })),
+    now: new Date().toISOString().slice(0, 19).replace('T', ' '),
     devices: seen.map((d) => ({ id: d.id, label: d.label, first_seen: d.first_seen, last_seen: d.last_seen, current: d.device_hash === req.auth.deviceHash })),
     signed_in_with: req.auth.method,
   });

@@ -1,4 +1,11 @@
-// Talks to the Verdynt/OS API. The token lives in sessionStorage, so closing the tab signs you out.
+// Talks to the Verdynt/OS API. Where the sign-in token lives:
+// - Signed in without "Remember me": in this tab only (sessionStorage), as before. A new tab asks to sign in.
+// - With "Remember me": in localStorage, which every tab of this browser reads, so a link opened in a new tab opens signed
+//   in. localStorage rather than sessionStorage plus a BroadcastChannel hand-off: a new tab finds the token at once, with no
+//   wait for another tab to answer (a locked, sleeping or busy tab may not), and it is no easier to read from a script on
+//   the page than sessionStorage is. tablock.js removes it when every tab has been idle 10 minutes or the last tab closes.
+// - A tab that locked itself (10 minutes idle) reads no token at all until the person signs in again in that tab.
+// The token never goes in a URL.
 
 export const config = { base: '' };
 // stepUp(details): asks the person to confirm it is them (passkey, app code or password) and resolves when they have,
@@ -33,12 +40,40 @@ export function deviceId() {
 const isStepUp = (status, data) => status === 403 && data && data.details && data.details.code === 'step_up_required';
 
 const TOKEN_KEY = 'so.token';
-const store = () => globalThis.sessionStorage;
+const LOCK_KEY = 'so.locked'; // this tab locked itself: { tenant, login, name, shared } (sessionStorage, survives a reload)
+const tabStore = () => globalThis.sessionStorage;
+const sharedStore = () => { try { return globalThis.localStorage; } catch (_) { return null; } };
+const read = (st, k) => { try { return st ? st.getItem(k) : null; } catch (_) { return null; } };
+const write = (st, k, v) => { try { if (!st) return; if (v) st.setItem(k, v); else st.removeItem(k); } catch (_) { /* private mode */ } };
 
 export const session = {
-  get token() { return store().getItem(TOKEN_KEY); },
-  set token(v) { if (v) store().setItem(TOKEN_KEY, v); else store().removeItem(TOKEN_KEY); },
-  clear() { store().removeItem(TOKEN_KEY); },
+  /** The token this tab uses: its own, else the browser's shared one. None while the tab is locked. */
+  get token() {
+    if (read(tabStore(), LOCK_KEY)) return null;
+    return read(tabStore(), TOKEN_KEY) || read(sharedStore(), TOKEN_KEY);
+  },
+  /** Keeps a fresh token where the current one is (a changed password, a step that issues a new token). */
+  set token(v) { session.save(v, { shared: session.shared }); },
+  /** Whether this tab uses the browser's shared token (signed in with Remember me). */
+  get shared() { return !read(tabStore(), TOKEN_KEY) && Boolean(read(sharedStore(), TOKEN_KEY)); },
+  /** A new sign-in: shared across this browser's tabs (Remember me) or this tab only. Unlocks the tab. */
+  save(v, { shared = false } = {}) {
+    write(tabStore(), LOCK_KEY, null);
+    if (!v) { session.clear(); return; }
+    if (shared && sharedStore()) { write(sharedStore(), TOKEN_KEY, v); write(tabStore(), TOKEN_KEY, null); } else { write(tabStore(), TOKEN_KEY, v); }
+  },
+  /** Signed out: this tab's token, and the shared one if this tab was using it (every tab of the browser signs out). */
+  clear() {
+    if (session.shared) write(sharedStore(), TOKEN_KEY, null);
+    write(tabStore(), TOKEN_KEY, null);
+  },
+  /** The raw stores, for tablock.js (which moves the shared token aside while the last tab reloads). */
+  sharedToken() { return read(sharedStore(), TOKEN_KEY); },
+  setSharedToken(v) { write(sharedStore(), TOKEN_KEY, v); },
+  /** Locks this tab: it reads no token until someone signs in again here. who: shown on the locked screen. */
+  lock(who) { write(tabStore(), LOCK_KEY, JSON.stringify(who || {})); },
+  locked() { try { return JSON.parse(read(tabStore(), LOCK_KEY) || 'null'); } catch (_) { return null; } },
+  unlock() { write(tabStore(), LOCK_KEY, null); },
 };
 
 export class ApiError extends Error {
@@ -53,7 +88,8 @@ export async function api(method, path, body, retried = false, { poll = false } 
   const headers = {};
   if (poll && !touched) headers['x-poll'] = '1'; else touched = false;
   if (body !== undefined) headers['content-type'] = 'application/json';
-  if (session.token) headers.authorization = `Bearer ${session.token}`;
+  const used = session.token;
+  if (used) headers.authorization = `Bearer ${used}`;
   const dev = deviceId();
   if (dev) headers['x-device'] = dev;
   const res = await fetch(`${config.base}/api/v1${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -61,6 +97,8 @@ export async function api(method, path, body, retried = false, { poll = false } 
   const isJson = (res.headers.get('content-type') || '').includes('json');
   const data = isJson ? await res.json() : await res.text();
   if (!res.ok) {
+    // Another tab signed in again meanwhile and the shared token changed under this request: send it again with the new one.
+    if (res.status === 401 && used && !retried && session.token && session.token !== used) return api(method, path, body, true, { poll });
     const signedIn = Boolean(session.token);
     if (res.status === 401 && signedIn && path !== '/auth/login' && path !== '/auth/change-password' && !path.startsWith('/auth/step-up')) {
       session.clear();
