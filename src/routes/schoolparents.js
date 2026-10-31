@@ -6,7 +6,7 @@
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
-const { z, validate, paramId } = require('../lib/util');
+const { z, validate, paramId, nowIn } = require('../lib/util');
 const { notFound, conflict, bad, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { baseUrl } = require('../lib/baseurl');
@@ -257,8 +257,29 @@ publicRouter.post('/:slug/waitlist/:token/claim', validate(claimSchema), async (
 });
 
 // ---------------------------------------------------------------- jobs
+/**
+ * Places held by online requests that can no longer turn into bookings are let go (2026.11.11), without waiting for
+ * Stripe's "expired" message: a card page lasts 31 minutes (lib/stripe.js), so a request or basket still waiting for
+ * payment after 45 minutes is expired (a payment that still arrives is refunded in full by the webhook), and a request
+ * waiting for staff whose lesson has started is expired too.
+ */
+async function sweepHolds() {
+  const [a] = await pool.query("UPDATE lesson_baskets SET status = 'expired' WHERE status = 'awaiting_payment' AND created_at < NOW() - INTERVAL 45 MINUTE");
+  const [b] = await pool.query("UPDATE lesson_requests SET status = 'expired', decided_at = NOW() WHERE status = 'awaiting_payment' AND created_at < NOW() - INTERVAL 45 MINUTE");
+  const due = await rows(pool, `SELECT r.id, r.tenant_id, t.timezone, s.starts_at FROM lesson_requests r JOIN lesson_sessions s ON s.tenant_id = r.tenant_id AND s.id = r.session_id
+    JOIN tenants t ON t.id = r.tenant_id WHERE r.status = 'pending' AND s.starts_at < NOW() + INTERVAL 1 DAY LIMIT 500`);
+  let c = 0;
+  for (const r of due) {
+    if (String(r.starts_at).slice(0, 19) > nowIn(r.timezone)) continue;
+    const [u] = await pool.query("UPDATE lesson_requests SET status = 'expired', decided_at = NOW(), staff_note = 'The lesson started before the request was confirmed' WHERE tenant_id = ? AND id = ? AND status = 'pending'", [r.tenant_id, r.id]);
+    c += u.affectedRows;
+  }
+  return a.affectedRows + b.affectedRows + c;
+}
+
 async function tick() {
   const out = {};
+  out.holds_expired = await sweepHolds();
   out.waitlist = await W.tick(jobBase());
   out.recaps_due = await R.tick();
   return out;

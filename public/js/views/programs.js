@@ -497,6 +497,7 @@ function enrollDialog(r, groupId, reload) {
     if (!picker.get()) throw new Error('Choose the child');
     const out = await post(`/programs/terms/${r.term.id}/enroll`, { person_id: picker.get().id, group_id: groupId, guardian_id: guardian.get() ? guardian.get().id : null, any_day: any.checked });
     toast(out.status === 'waitlist' ? 'This day is full. Added to its waitlist' : 'Enrolled. Take payment in Sell, or record it on the roster.');
+    if (out.clashes && out.clashes.length) toast(`Also booked in a lesson at the same time on ${out.clashes.map((c) => fmtDate(`${c.day} 12:00:00`)).join(', ')}. Check with the family.`, 'warn');
     dlg.close();
     await reload();
   }, { kind: 'primary' });
