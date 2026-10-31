@@ -274,8 +274,9 @@ function editSession(s, done) {
     field('Type', select(FORMATS, s.format, { name: 'format' })), ...la.els,
     field('Spots', input({ type: 'number', name: 'capacity', min: 1, max: 60, value: s.capacity })),
     field('Meet at', input({ name: 'meeting_place', maxlength: 120, value: s.meeting_place || '' }))), async (fd) => {
-    await patch(`/skischool/sessions/${s.id}`, { ...levelAgeBody(fd), format: val(fd, 'format'), capacity: num(fd, 'capacity') || undefined, meeting_place: val(fd, 'meeting_place') });
-    toast('Lesson saved');
+    const r = await patch(`/skischool/sessions/${s.id}`, { ...levelAgeBody(fd), format: val(fd, 'format'), capacity: num(fd, 'capacity') || undefined, meeting_place: val(fd, 'meeting_place') });
+    // An instructor no longer cleared for the lesson as edited comes off it (Assign later).
+    if (r && r.instructor_removed) toast(`Lesson saved. ${r.instructor_removed.message}`, 'warn'); else toast('Lesson saved');
     await done();
   });
 }

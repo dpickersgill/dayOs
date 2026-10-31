@@ -157,7 +157,7 @@ router.patch('/sessions/:id', SA.school('director'), validate(z.object({
   meeting_place: z.string().trim().max(120).nullable().optional(), capacity: z.number().int().min(1).max(60).optional(), format: z.enum(formats).optional(),
 })), async (req, res) => {
   const { tenantId } = req.auth;
-  await tx(async (conn) => {
+  const out = await tx(async (conn) => {
     const s = await one(conn, 'SELECT s.*, pr.name AS product_name FROM lesson_sessions s JOIN products pr ON pr.tenant_id = s.tenant_id AND pr.id = s.product_id WHERE s.tenant_id = ? AND s.id = ? FOR UPDATE', [tenantId, paramId(req)]);
     if (!s) throw notFound('Lesson session');
     const b = { ...s, ...req.body };
@@ -165,12 +165,21 @@ router.patch('/sessions/:id', SA.school('director'), validate(z.object({
     const cap = seatsFor({ format: b.format, capacity: b.capacity }, { name: s.product_name });
     const { n } = await one(conn, "SELECT COUNT(*) AS n FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND status IN ('booked','attended')", [tenantId, s.id]);
     if (cap < Number(n)) throw conflict(`${n} students are booked, so the lesson needs at least ${n} spots`);
-    await conn.query('UPDATE lesson_sessions SET level_min = ?, level_max = ?, age_min = ?, age_max = ?, ability_level = ?, age_group = ?, meeting_place = ?, capacity = ?, format = ? WHERE tenant_id = ? AND id = ?',
-      [la.level_min, la.level_max, la.age_min, la.age_max, la.ability_level, la.age_group, b.meeting_place ?? null, cap, b.format, tenantId, s.id]);
-    await audit(conn, req, 'update', 'lesson_sessions', s.id, req.body);
+    // The instructor is checked again against the lesson as edited (2026.11.11): a new level range, ages or type can
+    // be one they are not cleared for. If so they come off it (Assign later), and the screen says who and why.
+    let removed = null;
+    if (s.instructor_id) {
+      const [fit] = await instructorFit(conn, tenantId, { ...s, ...la, format: b.format }, { onlyStaffId: s.instructor_id, ignoreLessonId: s.id });
+      const hard = fit ? fit.problems.filter((x) => x !== NOT_SET_UP) : [];
+      if (hard.length) removed = { instructor_id: s.instructor_id, name: fit.name, why: hard[0] };
+    }
+    await conn.query('UPDATE lesson_sessions SET level_min = ?, level_max = ?, age_min = ?, age_max = ?, ability_level = ?, age_group = ?, meeting_place = ?, capacity = ?, format = ?, instructor_id = ? WHERE tenant_id = ? AND id = ?',
+      [la.level_min, la.level_max, la.age_min, la.age_max, la.ability_level, la.age_group, b.meeting_place ?? null, cap, b.format, removed ? null : s.instructor_id, tenantId, s.id]);
+    await audit(conn, req, 'update', 'lesson_sessions', s.id, { ...req.body, ...(removed ? { instructor_removed: removed.instructor_id, why: removed.why } : {}) });
+    return removed;
   });
   await LS.after(tenantId, { sessionIds: [paramId(req)] }, req);
-  res.json({ ok: true });
+  res.json({ ok: true, instructor_removed: out ? { name: out.name, why: out.why, message: `${out.name} came off this lesson: ${out.why}. Assign an instructor later.` } : null });
 });
 
 router.get('/sessions', requireRole(...school), async (req, res) => {
