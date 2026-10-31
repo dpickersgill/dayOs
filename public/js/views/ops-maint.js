@@ -1,5 +1,6 @@
 import { get, post, patch, del } from '../api.js';
 import { shareButton } from '../share.js';
+import { drawChecks } from './lift-checks.js';
 import { h, clear, ctx, isManager, table, state, tabs, input, select, field, button, toast, formDialog, confirmDialog, val, num, todayStr, fmtDate, fmtDateTime, empty, label } from '../ui.js';
 
 const PRIORITY_TONE = { urgent: 'bad', high: 'warn', normal: 'neutral', low: 'neutral' };
@@ -90,50 +91,7 @@ async function drawOrders(box, openId = null) {
 }
 
 // ---------------------------------------------------------------- lift inspections
-async function drawChecks(box) {
-  const date = input({ type: 'date', value: todayStr(), 'aria-label': 'Date' });
-  const body = h('div');
-  clear(box).append(h('header', null, h('h2', null, 'Lift inspections'), field('Date', date)),
-    h('p', { class: 'muted small' }, 'Walk each lift before it opens. A failed item opens a work order and the lift cannot be set to open until a new inspection passes.'), body);
-  const meta = await get('/ops/meta');
-  async function load() {
-    const { data } = await get(`/ops/lift-checks/day?date=${date.value}`);
-    clear(body);
-    if (!data.length) { body.append(empty('No lifts yet. Add them on the Status tab.')); return; }
-    body.append(table([
-      { head: 'Lift', cell: (r) => h('strong', null, r.name) },
-      { head: 'Lift status', cell: (r) => label(r.status) },
-      { head: 'Inspection', cell: (r) => (r.result ? state(r.result === 'pass' ? 'Passed' : 'Failed', r.result === 'pass' ? 'good' : 'bad') : state('Not done', 'warn')) },
-      { head: 'By', cell: (r) => (r.inspector ? `${r.inspector}, ${fmtDateTime(r.checked_at)}` : '') },
-      { head: '', cell: (r) => h('span', { class: 'row' }, button(r.result ? 'Inspect again' : 'Inspect', () => inspect(r), { small: true, kind: r.result ? null : 'primary' }), button('History', () => history(r), { small: true })) },
-    ], data));
-  }
-  function inspect(r) {
-    const rows = meta.lift_checklist.map((i) => {
-      const result = select([['pass', 'Pass'], ['fail', 'Fail'], ['na', 'Not applicable']], 'pass', { name: `r_${i.key}`, 'aria-label': i.label });
-      const note = input({ name: `n_${i.key}`, maxlength: 255, placeholder: 'What is wrong', hidden: true });
-      result.addEventListener('change', () => { note.hidden = result.value !== 'fail'; if (!note.hidden) note.focus(); });
-      return h('div', { class: 'chk-row' }, h('span', null, i.label), result, note);
-    });
-    formDialog(`Inspect ${r.name}`, h('div', { class: 'stack' }, ...rows, field('Inspector', input({ name: 'inspector', maxlength: 100, placeholder: 'Defaults to you' })), field('Note', input({ name: 'note', maxlength: 500 }))), async (fd) => {
-      const items = meta.lift_checklist.map((i) => ({ key: i.key, result: fd.get(`r_${i.key}`), note: val(fd, `n_${i.key}`) }));
-      const out = await post('/ops/lift-checks', { lift_id: r.lift_id, check_date: date.value, items, inspector: val(fd, 'inspector'), note: val(fd, 'note') });
-      toast(out.result === 'pass' ? 'Inspection passed' : 'Inspection failed. A work order was opened.', out.result === 'pass' ? 'ok' : 'error');
-      await load();
-    }, { submitText: 'Save inspection', wide: true });
-  }
-  async function history(r) {
-    const { data } = await get(`/ops/lift-checks?lift_id=${r.lift_id}&limit=30`);
-    formDialog(`${r.name} inspections`, data.length ? table([
-      { head: 'Date', cell: (c) => fmtDate(c.check_date) },
-      { head: 'Result', cell: (c) => state(c.result === 'pass' ? 'Passed' : 'Failed', c.result === 'pass' ? 'good' : 'bad') },
-      { head: 'By', cell: (c) => c.inspector || '' },
-      { head: 'Problems', cell: (c) => c.items.filter((i) => i.result === 'fail').map((i) => `${i.label}: ${i.note}`).join('; ') },
-    ], data) : empty('No inspections yet.'), async () => {}, { submitText: 'Close', wide: true });
-  }
-  date.addEventListener('change', () => date.value && load());
-  await load();
-}
+// By lift type, item by item, signed off (2026.11.10): views/lift-checks.js.
 
 // ---------------------------------------------------------------- recurring jobs
 async function drawPm(box) {

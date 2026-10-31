@@ -108,5 +108,19 @@ async function syncDowntime(conn, tenantId, liftId, from, to, { userId = null } 
 const latestCheck = (conn, tenantId, liftId, date) =>
   one(conn, 'SELECT id, result, kind, checked_at FROM lift_checks WHERE tenant_id = ? AND lift_id = ? AND check_date = ? AND kind = ? ORDER BY id DESC LIMIT 1', [tenantId, liftId, date, 'pre_open']);
 
+/**
+ * Why a lift cannot be set to open, or null. Today's latest daily (pre-opening) inspection failed, or its latest weekly
+ * inspection failed (on any day) and no weekly one has passed since. Both are cleared only by a new inspection that passes.
+ */
+async function openBlock(conn, tenantId, liftId, date) {
+  const daily = await latestCheck(conn, tenantId, liftId, date);
+  if (daily && daily.result === 'fail') return 'This lift failed its inspection today. Pass a new inspection before opening it.';
+  const weekly = await one(conn, "SELECT result, check_date FROM lift_checks WHERE tenant_id = ? AND lift_id = ? AND kind = 'periodic' ORDER BY check_date DESC, id DESC LIMIT 1", [tenantId, liftId]);
+  if (weekly && weekly.result === 'fail') {
+    const d = weekly.check_date instanceof Date ? weekly.check_date.toISOString().slice(0, 10) : String(weekly.check_date).slice(0, 10);
+    return `This lift failed its weekly inspection on ${d}. Pass a new weekly inspection before opening it.`;
+  }
+  return null;
+}
 
-module.exports = { ASSET_KINDS, ASSET_KIND_KEYS, CATEGORY_OF, SURFACES, SURFACE_KEYS, DOWNTIME_REASONS, DEPARTMENTS, LIFT_CHECKLIST, pmStatus, localStamp, syncDowntime, latestCheck };
+module.exports = { ASSET_KINDS, ASSET_KIND_KEYS, CATEGORY_OF, SURFACES, SURFACE_KEYS, DOWNTIME_REASONS, DEPARTMENTS, LIFT_CHECKLIST, pmStatus, localStamp, syncDowntime, latestCheck, openBlock };

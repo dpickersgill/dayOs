@@ -55,7 +55,7 @@ const eventFields = {
 };
 
 // Lift and trail status changes are routine operations, so patrol and general staff may update them too.
-// A lift with a failed pre-opening inspection today cannot be opened until a new inspection passes. Status changes also keep the
+// A lift with a failed pre-opening inspection today (or a failed weekly one) cannot be opened until a new inspection passes. Status changes also keep the
 // downtime log in step, so the daily report knows how long each lift was down.
 schedule.patch('/lifts/:id', async (req, res, next) => {
   try {
@@ -66,8 +66,8 @@ schedule.patch('/lifts/:id', async (req, res, next) => {
     if (!cur || cur.status === status) return next();
     if (status === 'open') {
       const tz = (await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone;
-      const check = await ops.latestCheck(pool, req.auth.tenantId, id, todayIn(tz));
-      if (check && check.result === 'fail') throw conflict('This lift failed its inspection today. Pass a new inspection before opening it.');
+      const why = await ops.openBlock(pool, req.auth.tenantId, id, todayIn(tz)); // a failed daily or weekly inspection
+      if (why) throw conflict(why);
     }
     res.on('finish', () => {
       if (res.statusCode !== 200) return;

@@ -147,9 +147,10 @@ export const ARTICLES = [
     intro: 'The Status tab shows each lift and trail. Changing a lift status is one press.',
     steps: ['Open Mountain status, then Status.', 'Pick the new status for the lift. Anything other than Open starts a downtime entry automatically.', 'Set it back to Open and the downtime entry ends.'],
     tips: ['A lift whose inspection failed today cannot be set to Open until a new inspection passes.', 'Guests see the status on your public conditions page.'], related: ['cond-inspect'] },
-  { id: 'cond-inspect', app: 'conditions', title: 'Do a lift inspection', keywords: 'checklist pre-opening failed work order',
-    intro: 'Each lift has a standard ten-item pre-opening checklist that works on a phone.',
-    steps: ['Open Maintenance, then Inspections, and choose the lift.', 'Mark each item as passed or failed. A failed item needs a note.', 'Press Save. A failed item opens a high priority work order and blocks the lift from opening.'] },
+  { id: 'cond-inspect', app: 'conditions', title: 'Do a lift inspection', keywords: 'checklist pre-opening daily failed work order sign off lift type',
+    intro: 'Each lift is inspected from the checklist for its type, item by item on a phone, then signed off. See Lift inspections by lift type for the lists.',
+    steps: ['Open Mountain status, then Maintenance, then Lift inspections.', 'Press Daily inspection beside the lift. The list comes from the lift\'s type.', 'Press Pass or Fail on each item. A failed item needs a note saying what is wrong. Every tick is saved with your name and the time, so you can stop and come back with Continue daily.', 'Press Sign off. A failed required item fails the inspection, opens a high priority work order, and the lift cannot be set to open until a new inspection passes.'],
+    related: ['lift-checks-types', 'lift-checks-weekly', 'cond-lift'] },
   { id: 'attr-status', app: 'conditions', title: 'Open, hold or close an attraction', keywords: 'attraction zipline zip line coaster tubing ice rink skating bike park aerial climbing status hold closed open downtime',
     intro: 'Attractions show under Lifts and Trails on the Status tab, with the same Open, On hold and Closed as a lift.',
     steps: ['Open Mountain status, then Status, and find the attraction under Attractions.', 'Press Open, On hold or Closed. On hold asks why and a note for staff, such as wind over the limit at the top platform. Closed asks why, with Closed for the day ready for the end of the day.', 'Leaving Open starts a downtime entry with the reason you gave. Pressing Open again ends it.'],
@@ -1093,6 +1094,17 @@ export const ARTICLES = [
     steps: ['Open the online shop from Online shop. Pick a day and add tickets to see prices and the total.', 'The pay button says paying is off: a demo mountain never takes a card or sends email.', 'The waiver is a sample marked SAMPLE ONLY. On your own mountain, write your own wording in Waivers and have your lawyer approve it.'],
     tips: ['The demo deletes itself after a week.'], related: [] },
   // ---- end Track SLIM
+
+  // ---- Release 2026.11.10, Track SLIM 7d (the rest): lift inspections by lift type
+  { id: 'lift-checks-types', app: 'conditions', title: 'Lift inspections by lift type', keywords: 'lift type fixed grip detachable chairlift gondola tram t-bar j-bar platter rope tow surface lift magic carpet conveyor checklist edit required optional manufacturer state inspector',
+    intro: 'Each lift has a type, and each type has a daily and a weekly checklist. The lists start from what daily and weekly lift inspections usually cover. Your mountain can change them.',
+    steps: ['Open Mountain status, then Maintenance, then Lift inspections.', 'Managers: press Type beside a lift and choose Fixed-grip chairlift, Detachable chairlift, Gondola or tram, Surface lift (T-bar, J-bar, platter or rope tow) or Conveyor (magic carpet). A lift with no type uses the standard list.', 'To change a list, press Checklists by lift type. Pick the lift type and Daily or Weekly inspection.', 'Reword, reorder, add or remove items. Untick Required for an item that should not keep the lift closed, such as a log entry. Press Save list.', 'Press Use the built-in list, then Save list, to go back to the list that came with Verdynt/OS.'],
+    tips: ['The lists are memory aids. The manufacturer\'s manual, your own lift procedures and your state lift inspector\'s rules come first: make the lists match them.', 'Changing a list never changes an inspection already done or under way: it keeps the words it was started with.', 'A failed item that is not required still opens a work order, but the inspection passes.', 'An item that is not required can be marked Not needed, for example a canopy your carpet does not have.'], related: ['cond-inspect', 'lift-checks-weekly'] },
+  { id: 'lift-checks-weekly', app: 'conditions', title: 'Do a weekly lift inspection', keywords: 'weekly periodic inspection lift grips brakes sheaves towers due failed cannot open',
+    intro: 'The weekly inspection is the deeper walk: grips, brakes, sheaves, towers, the drive and the evacuation gear. Lift inspections shows when each lift last passed one.',
+    steps: ['Open Mountain status, then Maintenance, then Lift inspections. The Weekly column shows the date of the last one, in amber when a week has gone by.', 'Press Weekly inspection beside the lift and work through the list. It can take more than one day: press Keep for later and come back with Continue weekly.', 'Press Sign off. A failed required item fails it, opens a work order, and the lift shows Cannot open on every day after, until a new weekly inspection passes.'],
+    tips: ['A daily inspection that passes does not clear a failed weekly one.', 'Every inspection is kept with who ticked each item and who signed it off. Press History beside a lift to see them.'], related: ['lift-checks-types', 'cond-inspect'] },
+  // ---- end Track SLIM 7d
 
   // ---- Signing in, Track SIGNIN (2026.11.10): Remember me, show password, the 10-minute tab lock, email sign-in notes, where you are signed in
   { id: 'idle', app: 'start', title: 'Why a tab locked, or I was signed out', keywords: 'timeout inactivity logged out session locked lock idle 10 minutes tabs',

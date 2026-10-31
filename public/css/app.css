@@ -3658,3 +3658,13 @@ button.fill-day:hover { border-color: var(--line-strong); }
   .mcal-coming-list li { grid-template-columns: 5rem 1fr; }
   .mcal-coming-list li > .muted { grid-column: 2; }
 }
+
+/* ---- Lift inspections by lift type (2026.11.10, SLIM 7d: lift-checks.js): the checklist editor. The ticking list uses the attraction styles. */
+.liftchk-edit { margin: 0; padding-left: 1.5em; display: grid; gap: 6px; }
+.liftchk-edit li { display: flex; gap: 6px; align-items: center; }
+.liftchk-edit li input[type='text'], .liftchk-edit li input:not([type]) { flex: 1 1 auto; min-width: 0; min-height: 44px; }
+.liftchk-req { display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; min-height: 44px; }
+@media (max-width: 640px) {
+  .liftchk-edit li { flex-wrap: wrap; }
+  .liftchk-edit li input:not([type]) { flex-basis: 100%; }
+}

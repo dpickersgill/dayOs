@@ -340,6 +340,7 @@ function createApp() {
   api.use('/park', park);
   api.use('/ops', opsRoutes);
   api.use('/ops', maintenance);
+  api.use('/ops', require('./routes/liftchecks').router); // 2026.11.10: lift inspections by lift type
   api.use('/assets', assetRoutes);
   api.use('/access', accessRoutes.adminRouter);
   api.use('/documents', documents);
