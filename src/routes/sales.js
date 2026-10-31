@@ -193,6 +193,9 @@ router.post('/orders/:id/refund', lessonOrder, validate(refundBody), async (req,
     if (!order) throw notFound('Order');
     await require('./guestswindow').refundAllowed(conn, req, orderId, 0); // counter staff with no refund limit: a manager, first
     if (order.status !== 'paid') throw conflict(`Order is ${order.status}`);
+    // A payment plan installment being charged right now would change what was paid: wait for it (lib/paymentplans.js).
+    const PPL = require('../lib/paymentplans');
+    if (await PPL.charging(conn, tenantId, { orderId })) throw conflict(PPL.BUSY);
     const open = await rows(conn, 'SELECT * FROM order_items WHERE tenant_id = ? AND order_id = ? AND refunded_at IS NULL ORDER BY id', [tenantId, orderId]);
     if (!open.length) throw conflict('Everything on this order has been refunded');
     let lines = open;
@@ -371,7 +374,6 @@ router.post('/orders/:id/refund', lessonOrder, validate(refundBody), async (req,
     if (creditOff) await audit(conn, req, 'refund_less_credit', 'orders', orderId, { credit_cents: creditOff });
     const stillOpen = open.length - lines.length;
     // A payment plan: a whole refund stops its charges; a part refund takes the unpaid part of those lines off what is to come.
-    const PPL = require('../lib/paymentplans');
     if (!stillOpen) await PPL.stopForRefund(conn, tenantId, orderId, req);
     else await PPL.lowerForRefund(conn, tenantId, orderId, Math.max(worth - amount, 0), req);
     await conn.query('UPDATE orders SET refunded_cents = refunded_cents + ?, status = ? WHERE tenant_id = ? AND id = ?', [amount, stillOpen ? 'paid' : 'refunded', tenantId, orderId]);

@@ -71,7 +71,9 @@ async function applyChange(conn, tenantId, ticket, newDate) {
 
 /** Starts a change. Free: done. Otherwise a card page is made and the change waits for the payment. */
 async function requestChange({ tenant, shopRow, code, newDate, successUrl, cancelUrl }) {
-  return tx(async (conn) => {
+  // The change is written down under the lock; the card page is made after the commit, so a slow Stripe never holds the
+  // mountain's row (2026.11.11). A page that cannot be made leaves the change expired.
+  const made = await tx(async (conn) => {
     await conn.query('SELECT id FROM tenants WHERE id = ? FOR UPDATE', [tenant.id]);
     const c = await changeCheck(conn, tenant, shopRow, code, newDate);
     if (c.due === 0) {
@@ -83,15 +85,24 @@ async function requestChange({ tenant, shopRow, code, newDate, successUrl, cance
     const payTo = await require('./connect').payee(tenant.id, conn);
     if (!payTo.ok) throw conflict('Card payment is not available right now. Please call.');
     const [r] = await conn.query("INSERT INTO shop_changes (tenant_id, shop_order_id, ticket_id, from_date, to_date, due_cents, basis_cents) VALUES (?, ?, ?, ?, ?, ?, ?)", [tenant.id, shopRow.id, c.ticket.id, day10(c.ticket.valid_from), newDate, c.due, c.basis]);
-    const co = await stripe.createCheckout({
+    return { pending: true, c, payTo, id: r.insertId };
+  });
+  if (!made.pending) return made;
+  const { c, payTo, id } = made;
+  let co;
+  try {
+    co = await stripe.createCheckout({
       amountCents: c.due, name: `${tenant.name}: change of day`, description: `${c.product.name}: ${dayText(day10(c.ticket.valid_from))} to ${dayText(newDate)}`,
       email: shopRow.contact_email, reference: shopRow.reference,
-      ...require('./connect').checkoutFor(payTo, c.due, { tenant_id: String(tenant.id), request_id: `chg${r.insertId}`, change_id: String(r.insertId), kind: 'shop_change', reference: shopRow.reference }),
-      successUrl, cancelUrl, idempotencyKey: `shopchange-${r.insertId}`,
+      ...require('./connect').checkoutFor(payTo, c.due, { tenant_id: String(tenant.id), request_id: `chg${id}`, change_id: String(id), kind: 'shop_change', reference: shopRow.reference }),
+      successUrl, cancelUrl, idempotencyKey: `shopchange-${id}`,
     });
-    await conn.query('UPDATE shop_changes SET stripe_session_id = ? WHERE tenant_id = ? AND id = ?', [co.id, tenant.id, r.insertId]);
-    return { done: false, due_cents: c.due, checkout_url: co.url };
-  });
+  } catch (err) {
+    await pool.query("UPDATE shop_changes SET status = 'expired' WHERE tenant_id = ? AND id = ? AND status = 'awaiting_payment' AND stripe_session_id IS NULL", [tenant.id, id]);
+    throw err;
+  }
+  await pool.query('UPDATE shop_changes SET stripe_session_id = ? WHERE tenant_id = ? AND id = ?', [co.id, tenant.id, id]);
+  return { done: false, due_cents: c.due, checkout_url: co.url };
 }
 
 /** Stripe webhook for a paid change (metadata.kind === 'shop_change'). Anything we cannot honor is refunded in full. */

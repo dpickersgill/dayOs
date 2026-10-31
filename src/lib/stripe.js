@@ -11,6 +11,10 @@ const config = require('../config');
 const { AppError } = require('./errors');
 
 const enabled = () => Boolean(config.stripe.secretKey && config.stripe.webhookSecret);
+// Every call to Stripe gives up after this long (STRIPE_TIMEOUT_MS, 15 s by default), so a slow Stripe can never hold a
+// request, a job or a database lock for minutes. A call that timed out may still have happened at Stripe: callers that
+// move money send an idempotency key and look the result up before trying anything new (lib/paymentplans.js).
+const timeout = () => AbortSignal.timeout(Number(process.env.STRIPE_TIMEOUT_MS) || 15000);
 
 /** Stripe wants nested form fields: { a: { b: 1 }, c: [x] } becomes a[b]=1&c[0]=x. */
 function encode(obj, prefix = '', out = new URLSearchParams()) {
@@ -38,6 +42,7 @@ async function call(path, body, { idempotencyKey, account } = {}) {
       method: 'POST',
       headers: { authorization: `Bearer ${config.stripe.secretKey}`, 'content-type': 'application/x-www-form-urlencoded', ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}), ...onAccount(account) },
       body: encode(body).toString(),
+      signal: timeout(),
     });
   } catch (_) {
     throw new AppError(502, 'The card service could not be reached. Please try again in a minute.');
@@ -53,7 +58,7 @@ async function call(path, body, { idempotencyKey, account } = {}) {
 /** A GET to Stripe (a subscription, a customer's invoices). */
 async function get(path, { account } = {}) {
   let res;
-  try { res = await fetch(`${config.stripe.apiBase}${path}`, { headers: { authorization: `Bearer ${config.stripe.secretKey}`, ...onAccount(account) } }); } catch (_) { throw new AppError(502, 'The card service could not be reached.'); }
+  try { res = await fetch(`${config.stripe.apiBase}${path}`, { headers: { authorization: `Bearer ${config.stripe.secretKey}`, ...onAccount(account) }, signal: timeout() }); } catch (_) { throw new AppError(502, 'The card service could not be reached.'); }
   const json = await res.json().catch(() => ({}));
   if (!res.ok) { console.error('Stripe error', res.status, json && json.error && json.error.message); throw new AppError(502, 'The card service refused that request.'); }
   return json;
@@ -62,7 +67,7 @@ async function get(path, { account } = {}) {
 /** A DELETE to Stripe (a card reader taken off an account). */
 async function del(path, { account } = {}) {
   let res;
-  try { res = await fetch(`${config.stripe.apiBase}${path}`, { method: 'DELETE', headers: { authorization: `Bearer ${config.stripe.secretKey}`, ...onAccount(account) } }); } catch (_) { throw new AppError(502, 'The card service could not be reached.'); }
+  try { res = await fetch(`${config.stripe.apiBase}${path}`, { method: 'DELETE', headers: { authorization: `Bearer ${config.stripe.secretKey}`, ...onAccount(account) }, signal: timeout() }); } catch (_) { throw new AppError(502, 'The card service could not be reached.'); }
   const json = await res.json().catch(() => ({}));
   if (!res.ok && res.status !== 404) { console.error('Stripe error', res.status, json && json.error && json.error.message); throw new AppError(502, 'The card service refused that request.'); }
   return json;
@@ -76,10 +81,12 @@ async function tryCall(path, body, opts) {
       method: 'POST',
       headers: { authorization: `Bearer ${config.stripe.secretKey}`, 'content-type': 'application/x-www-form-urlencoded', ...(opts && opts.idempotencyKey ? { 'idempotency-key': opts.idempotencyKey } : {}), ...onAccount(opts && opts.account) },
       body: encode(body || {}).toString(),
+      signal: timeout(),
     });
-  } catch (_) { return { ok: false, status: 0, error: 'The card service could not be reached.' }; }
+  } catch (_) { return { ok: false, status: 0, unknown: true, error: 'The card service could not be reached.' }; }
   const json = await res.json().catch(() => ({}));
-  return res.ok ? { ok: true, json } : { ok: false, status: res.status, error: (json && json.error && json.error.message) || `Stripe said ${res.status}`, code: json && json.error && json.error.code };
+  // unknown: no answer, or Stripe's own server error. The request may still have gone through at Stripe.
+  return res.ok ? { ok: true, json } : { ok: false, status: res.status, unknown: res.status >= 500, error: (json && json.error && json.error.message) || `Stripe said ${res.status}`, code: json && json.error && json.error.code };
 }
 
 /**
@@ -149,7 +156,7 @@ async function refund({ paymentIntent, amountCents, key, metadata, account = nul
 async function listRefunds(paymentIntent, { account = null } = {}) {
   let res;
   try {
-    res = await fetch(`${config.stripe.apiBase}/v1/refunds?payment_intent=${encodeURIComponent(paymentIntent)}&limit=100`, { headers: { authorization: `Bearer ${config.stripe.secretKey}`, ...onAccount(account) } });
+    res = await fetch(`${config.stripe.apiBase}/v1/refunds?payment_intent=${encodeURIComponent(paymentIntent)}&limit=100`, { headers: { authorization: `Bearer ${config.stripe.secretKey}`, ...onAccount(account) }, signal: timeout() });
   } catch (_) { throw new AppError(502, 'The card service could not be reached.'); }
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new AppError(502, 'The card service refused that request.');
