@@ -448,7 +448,7 @@ router.post('/auth/pin-login', validate(z.object({ tenant: slug, terminal: z.str
 router.get('/auth/me', authenticate, async (req, res) => {
   const user = await one(
     pool,
-    `SELECT u.id, u.email, u.username, u.must_change_password, u.role, u.staff_id, u.totp_enabled, u.access_ends_on, (u.pin_hash IS NOT NULL) AS pin_set,
+    `SELECT u.id, u.email, u.username, u.must_change_password, u.role, u.staff_id, u.totp_enabled, u.access_ends_on, (u.pin_hash IS NOT NULL) AS pin_set, u.device_key_epoch,
        t.slug AS tenant, t.name AS tenant_name, t.timezone, t.sandbox_expires_at, t.role_menus, ${TIER_SQL}
      FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE u.id = ? AND u.tenant_id = ?`,
     [req.auth.userId, req.auth.tenantId],
@@ -458,8 +458,12 @@ router.get('/auth/me', authenticate, async (req, res) => {
   const strong = Boolean(Number(user.strong));
   // Patrollers who will need two-step soon (the two-week start for mountains that already existed): the date it begins.
   const soon = !rule && config.requireAdminMfa && !Number(user.sandbox) && (user.role === 'patrol' || Number(user.on_patrol)) && !Number(user.patrol_host) && Number(user.mfa_for_patrol) && user.patrol_mfa_from ? String(user.patrol_mfa_from).slice(0, 10) : null;
-  // The key that seals this person's patrol entries kept on a phone (see public/js/outbox.js); the same for every sign-in.
-  const deviceKey = crypto.createHmac('sha256', config.linkSecret).update(`device:${req.auth.tenantId}:${req.auth.userId}`).digest('base64');
+  // The key that seals this person's patrol entries kept on a phone (see public/js/outbox.js). Since 2026.11.11 it is this
+  // device's own (the browser's device id, or this session when it sent none), and it changes whenever every session of
+  // the login ends (a password change or reset, Sign out everywhere: users.device_key_epoch). Before, it was one fixed key
+  // per person, the same on every phone for ever, so a key seen once opened that person's entries anywhere.
+  const where = req.auth.deviceHash || `session:${sessions.hash(req.auth.sid)}`;
+  const deviceKey = crypto.createHmac('sha256', config.linkSecret).update(`device:${req.auth.tenantId}:${req.auth.userId}:${where}:${Number(user.device_key_epoch || 0)}`).digest('base64');
   const modules = await moduleGate.enabledKeys(req.auth.tenantId);
   const sandbox = user.sandbox_expires_at ? { expires_at: user.sandbox_expires_at, contact_url: config.marketingUrl || (config.site.hosts[0] ? `https://${config.site.hosts[0]}/contact` : null) } : null;
   const billing = await require('../lib/billing').standingOf(req.auth.tenantId);
