@@ -48,6 +48,8 @@ test.before(async () => {
   mailer.settings.apiBase = `http://127.0.0.1:${pm.address().port}`;
   process.env.TWILIO_API_BASE = `http://127.0.0.1:${tw.address().port}`;
   A = await mountain(`ms-a-${suffix}`); B = await mountain(`ms-b-${suffix}`);
+  // Marketing email needs the mountain's postal address (2026.11.11, lib/mailkinds.js).
+  await pool.query("UPDATE tenants SET address = '1 Ridge Road, Spring City, PA 19475' WHERE slug IN (?, ?)", [A.slug, B.slug]);
   for (const role of ['manager', 'counter']) {
     assert.equal((await api('POST', '/users', { token: A.token, body: { email: `${role}@${A.slug}.test`, password: PW, role } })).status, 201);
     T[role] = (await api('POST', '/auth/login', { body: { tenant: A.slug, email: `${role}@${A.slug}.test`, password: PW } })).body.token;

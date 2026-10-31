@@ -86,6 +86,7 @@ test.before(async () => {
   D.bday = await mk({ kind: 'day_ticket', name: 'Birthday ticket', base_price_cents: 6000 });
   D.bDay = await mk({ kind: 'day_ticket', name: 'B day', base_price_cents: 5000 }, B);
   await q('UPDATE tenants SET season_ends_on = ? WHERE id IN (?)', ['2027-04-10', [A.id, B.id]]);
+  await q("UPDATE tenants SET address = '1 Ridge Road, Spring City, PA 19475' WHERE id IN (?)", [[A.id, B.id]]); // marketing email needs it (2026.11.11)
   await settings({ season_opens_on: '2026-11-20' });
   await settings({ season_opens_on: '2026-11-20', birthday_on: false }, B);
   assert.equal((await api('POST', '/users', { token: A.owner, body: { email: `desk@${A.slug}.test`, password: PW, role: 'counter' } })).status, 201);

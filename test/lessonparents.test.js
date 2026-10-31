@@ -365,7 +365,7 @@ test('recaps: only the lesson\'s instructor writes one, nothing goes out until a
   D.done = { done, yes, no, recapToken };
 });
 
-test('the AI writer drafts only with the add-on, and sends only the first name, skills and note', async () => {
+test('the AI writer drafts only with the add-on, and sends only the skills and note, never the name (2026.11.11)', async () => {
   await pool.query("INSERT INTO tenant_modules (tenant_id, module, enabled) VALUES (?, 'lesson_ai', 1) ON DUPLICATE KEY UPDATE enabled = 1", [A.id]);
   modules.invalidate(A.id);
   let sentToModel = null;
@@ -377,7 +377,7 @@ test('the AI writer drafts only with the add-on, and sends only the first name, 
     assert.match(r.body.body, /great day/);
     assert.equal(r.body.body.includes('—'), false, 'no em dashes');
     const said = JSON.stringify(sentToModel.messages);
-    assert.match(said, /Sam/);
+    assert.equal(/Sam/.test(said), false, 'no name: the model writes STUDENT and the name goes in here');
     assert.match(said, /Great stops/);
     assert.equal(said.includes('Family'), false, 'no last name');
     assert.equal(said.includes('parent@x.test'), false, 'no contact details');

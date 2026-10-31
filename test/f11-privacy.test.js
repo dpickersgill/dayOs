@@ -364,3 +364,16 @@ test('suspicion: a patrol phone alert shows where to go, never what was reported
   const d = read('src/routes/dispatch.js');
   assert.ok(!/body: `\$\{call\.location\}\$\{call\.description/.test(d));
 });
+
+test('DP-5: an address with no customer record gets its own unsubscribe link, and using it stops later marketing email', async () => {
+  const kinds = require('../src/lib/mailkinds');
+  const to = `contact${suffix}@family.example`;
+  const p = await kinds.prepare(pool, { tenantId: A.id, to, text: 'Book the next lesson', base });
+  assert.equal(p.ok, true, p.error);
+  const url = /To stop these emails: (\S+)/.exec(p.text)[1];
+  assert.equal((await fetch(url, { method: 'POST' })).status, 200);
+  const again = await kinds.prepare(pool, { tenantId: A.id, to, text: 'Book the next lesson', base });
+  assert.equal(again.ok, false); assert.equal(again.unsubscribed, true);
+  const forged = url.replace(/\.[a-f0-9]{32}$/, `.${'0'.repeat(32)}`);
+  assert.equal((await fetch(forged, { method: 'POST' })).status, 404);
+});

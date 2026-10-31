@@ -54,9 +54,10 @@ async function prepare(db, { tenantId, to, text, html, headers, personId, base }
   let pid = personId;
   if (!pid) pid = (await one(db, 'SELECT MIN(id) AS id FROM people WHERE tenant_id = ? AND email = ? AND anonymised_at IS NULL', [tenantId, String(to).trim().toLowerCase()]) || {}).id;
   const root = base || config.stripe.publicUrl;
-  if (!pid || !root) return { ok: false, error: 'No way to unsubscribe from this email, so it was not sent' };
+  if (!root) return { ok: false, error: 'No way to unsubscribe from this email, so it was not sent' };
   const messaging = require('./messaging');
-  const url = messaging.unsubUrl(root, tenantId, pid, 'email');
+  // A customer's own link when the address is on a record; otherwise a link for the address itself.
+  const url = pid ? messaging.unsubUrl(root, tenantId, pid, 'email') : messaging.unsubEmailUrl(root, tenantId, String(to).trim().toLowerCase());
   let t = String(text || ''); let hBody = html;
   if (!t.includes(url)) t = `${t}\n\n--\n${postal.name}, ${postal.address}\nYou get this because you are a guest of ${postal.name}. To stop these emails: ${url}`;
   else if (!t.includes(postal.address)) t = `${t}\n${postal.address}`;

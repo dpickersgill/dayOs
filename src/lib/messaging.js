@@ -28,7 +28,15 @@ const AUDIENCES = [
 // ---------------------------------------------------------------- unsubscribe links
 const sign = (payload) => crypto.createHmac('sha256', config.linkSecret).update(`unsub:${payload}`).digest('hex').slice(0, 32);
 const unsubToken = (tenantId, personId, channel) => { const p = `${tenantId}.${personId}.${channel}`; return `${p}.${sign(p)}`; };
+// An address with no customer record (the contact on a lesson booking, say) gets a link for the address itself (2026.11.11).
+const unsubEmailToken = (tenantId, email) => { const p = `${tenantId}.e.${Buffer.from(String(email).trim().toLowerCase()).toString('base64url')}`; return `${p}.${sign(p)}`; };
 function readUnsub(token) {
+  const e = /^(\d{1,12})\.e\.([A-Za-z0-9_-]{4,400})\.([a-f0-9]{32})$/.exec(String(token || ''));
+  if (e) {
+    const given = Buffer.from(e[3]); const want = Buffer.from(sign(`${e[1]}.e.${e[2]}`));
+    if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) return null;
+    return { tenantId: Number(e[1]), personId: null, email: Buffer.from(e[2], 'base64url').toString('utf8'), channel: 'email' };
+  }
   const m = /^(\d{1,12})\.(\d{1,12})\.(email|sms)\.([a-f0-9]{32})$/.exec(String(token || ''));
   if (!m) return null;
   const given = Buffer.from(m[4]); const want = Buffer.from(sign(`${m[1]}.${m[2]}.${m[3]}`));
@@ -36,7 +44,13 @@ function readUnsub(token) {
   return { tenantId: Number(m[1]), personId: Number(m[2]), channel: m[3] };
 }
 /** Records the opt-out from an unsubscribe link. Safe to repeat. */
-async function unsubscribe({ tenantId, personId, channel }) {
+async function unsubscribe({ tenantId, personId, channel, email }) {
+  if (email) {
+    await pool.query('INSERT IGNORE INTO email_suppressions (tenant_id, email) VALUES (?, ?)', [tenantId, email.toLowerCase()]);
+    const same = await rows(pool, 'SELECT id FROM people WHERE tenant_id = ? AND email = ? AND anonymised_at IS NULL', [tenantId, email]);
+    for (const x of same) await recordConsent(pool, tenantId, x.id, 'email', 'opted_out', 'unsubscribe_link', null);
+    return true;
+  }
   const p = await one(pool, 'SELECT id, email, marketing_opt_in FROM people WHERE tenant_id = ? AND id = ?', [tenantId, personId]);
   if (!p) return false;
   const last = await one(pool, 'SELECT status FROM consent_events WHERE tenant_id = ? AND person_id = ? AND channel = ? ORDER BY id DESC LIMIT 1', [tenantId, personId, channel]);
@@ -93,6 +107,7 @@ ${body.split(/\n{2,}/).map((para) => `<p>${esc(para).replace(/\n/g, '<br>')}</p>
 const renderSms = (tenant, campaign, person) => `${fill(campaign.body, { first_name: person.first_name || 'there', mountain: tenant.name })}\n${tenant.name}. Reply STOP to opt out.`.slice(0, 640);
 
 const unsubUrl = (base, tenantId, personId, channel) => `${base}/api/v1/public/unsub/${unsubToken(tenantId, personId, channel)}`;
+const unsubEmailUrl = (base, tenantId, email) => `${base}/api/v1/public/unsub/${unsubEmailToken(tenantId, email)}`;
 
 const isSandbox = (tenantId) => sandbox.isSandbox(tenantId);
 
@@ -176,4 +191,4 @@ async function runAll(base) {
   return eachTenant('messages_reminders', (t) => runReminders(t, base));
 }
 
-module.exports = { QUIET, AUDIENCES, MAX_RECIPIENTS, audienceOf, sendCampaign, renderEmail, renderSms, unsubToken, readUnsub, unsubscribe, unsubUrl, deliver, runReminders, runAll, fill };
+module.exports = { unsubEmailUrl, QUIET, AUDIENCES, MAX_RECIPIENTS, audienceOf, sendCampaign, renderEmail, renderSms, unsubToken, readUnsub, unsubscribe, unsubUrl, deliver, runReminders, runAll, fill };
