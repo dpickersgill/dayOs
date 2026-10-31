@@ -209,7 +209,7 @@ router.get('/sessions', requireRole(...school), async (req, res) => {
 const studentSchema = z.object({ ...personFields, first_name: personFields.first_name.optional(), last_name: personFields.last_name.optional() });
 router.post(
   '/sessions/:id/bookings',
-  requireRole(...school),
+  SA.school('supervisor', 'counter'), // the desk, managers and supervisors; a plain instructor does not book or record waivers (2026.11.11)
   validate(z.object({
     person_id: z.number().int().positive().optional(), student: studentSchema.optional(), sign_waiver: z.boolean().optional(), use_credit_id: z.number().int().positive().optional(), requested_instructor_id: z.number().int().positive().optional(),
     ...safetyShape, send_confirmation: z.boolean().optional(),
@@ -345,6 +345,8 @@ const DETAIL_KEYS = ['allergies', 'medical', 'pickup', 'contact_name', 'contact_
 router.get('/sessions/:id/roster', requireRole(...school), async (req, res) => {
   const s = await one(pool, 'SELECT id, instructor_id, discipline FROM lesson_sessions WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, paramId(req)]);
   if (!s) throw notFound('Lesson session');
+  // A plain instructor reads only the rosters of their own lessons (2026.11.11).
+  if (SA.ownOnly(req) && s.instructor_id !== req.auth.staffId) throw forbidden('Instructors can only see the rosters of their own lessons');
   const data = await rows(
     pool,
     `SELECT b.id AS booking_id, b.status, b.unpaid, b.credit_id, b.instructor_notes, b.level AS booked_level, b.allergies, b.medical, b.pickup, b.contact_name, b.contact_phone, b.contact_email,
