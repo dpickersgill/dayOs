@@ -940,7 +940,7 @@ export const ARTICLES = [
   { id: 'change-day', app: 'sell', title: 'Change the day of a ticket', keywords: 'move date reschedule another day exchange swap',
     intro: 'A dated ticket that has not been used can move to another day at the window. It keeps the same code.',
     steps: ['Find the order (scan the receipt or the ticket) and open it.', 'Press Change day on the ticket and pick the new day.', 'The screen shows what the new day costs: more, the same, or money back.', 'Take the difference if there is one, then press Move the ticket. The guest gets an email with the new day.'],
-    tips: ['Money back goes the way they paid: to their card, or in cash from your drawer, within the counter refund limit.', 'A day at its ticket limit needs a manager and a reason.', 'A ticket already scanned at the gate cannot move.', 'A ticket bought with a reward or a promo keeps it: a free ticket moves free to a day at the same price.', 'Money already given back on a ticket (an earlier change or a price drop) is never given back again.'], related: ['sell-refund'] },
+    tips: ['Money back goes to what paid for the ticket: its gift card share back on the gift card, a free (comp) ticket gives nothing back, and the rest to their card or in cash from your drawer, within the counter refund limit.', 'A day at its ticket limit needs a manager and a reason.', 'A ticket already scanned at the gate cannot move.', 'A ticket bought with a reward or a promo keeps it: a free ticket moves free to a day at the same price.', 'Money already given back on a ticket (an earlier change or a price drop) is never given back again.'], related: ['sell-refund'] },
   { id: 'line-mode', app: 'sell', title: 'Line mode: sell from a phone in the line', keywords: 'line busting phone mobile fast queue walk up tablet',
     intro: 'Line mode is one phone screen for walking the line on a busy morning: today\u2019s tickets as big buttons, cash or the card reader, and the receipt.',
     steps: ['In Sell, press Line mode.', 'Pick the guest type, how many, then the ticket.', 'Press Cash, exact, or Card for the card reader. One adult paying cash is two taps.', 'Send the receipt by email (or by text when the guest said yes to texts), load the ticket on a card if your mountain uses them, then press Next guest.'],
@@ -1156,6 +1156,28 @@ export const ARTICLES = [
     steps: ['Open Today. Coming up lists the next few items for your teams, with the day and the time.', 'Tap an item, or press Calendar, to open the calendar.'],
     tips: ['The card is not shown on the wall screen.'], related: ['calendar-read'] },
   // ---- end Track CALENDAR
+  // ---- 2026.11.11 Track MONEY: where refund money goes, other payments, plans, card numbers, Stripe refunds and disputes
+  { id: 'refund-where', app: 'sell', title: 'Where the money goes back in a refund', keywords: 'refund tender gift card cash comp split mixed basket drawer which way back',
+    intro: 'A refund gives back what paid for the lines you refund, to the tenders that paid for them.',
+    steps: ['Gift card money goes back on the gift card. It is never paid out as cash, even in a basket that also took cash.', 'A free of charge (comp) share gives nothing back.', 'Cash, card and other money goes back the way it came, last payment first.', 'A new gift card in the basket was paid in cash, card or other, so refunding it gives that back.'],
+    tips: ['If you pick a way to give the money back and part of it was paid by gift card, the refund says so. Leave the way empty, or pick gift card.', 'While any cash drawer is open, a cash refund comes out of a drawer: your own, or the one you pick. With no drawer open anywhere, it is allowed and written in the audit log.', 'Changing a ticket to a cheaper day follows the same rule.'], related: ['sell-refund', 'change-day'] },
+  { id: 'sell-other', app: 'sell', title: 'Record a payment taken another way', keywords: 'other tender check voucher partner reference reason comp limit drawer',
+    intro: 'Other is for money that never reaches your drawer or card machine, such as a check or a partner voucher.',
+    steps: ['Choose Other as the payment.', 'Type the reference: the check number, voucher or receipt.', 'Type the reason, for example partner voucher, and record the payment.'],
+    tips: ['Counter staff can record other payments, together with any comp on the same sale, up to the comp limit in Settings. Above that, a manager does it.', 'The same limit applies to an other payment for a change of day and for rental fees.', 'Payouts from a drawer by counter staff are limited too: up to 50 dollars a drawer, then a manager.'], related: ['sell-pay'] },
+  { id: 'card-numbers', app: 'sell', title: 'Never type a card number', keywords: 'card number pan approval code reference pci security last 4',
+    intro: 'Approval codes, references and refund notes refuse anything that looks like a whole card number.',
+    steps: ['Type only the last 4 digits of a card, and the approval code the card machine prints.', 'If the screen says not to type card numbers, remove the long number and try again.'],
+    tips: ['Card numbers typed in before were masked to their last 4 digits.', 'Keeping card numbers out of Verdynt/OS keeps your mountain under the simplest card rules.'], related: ['sell-pay'] },
+  { id: 'plan-charges', app: 'sell', who: [], title: 'How plan payments are charged', keywords: 'payment plan installment charge gift card up front refund wait charging no answer stripe dispute',
+    intro: 'Each plan payment is charged once, and a refund never races it.',
+    steps: ['A gift card or gift experience in a plan basket is paid in full with the first payment. Only the rest is spread over the months.', 'While a payment is being charged, a refund, Cancel or Settle on that plan waits. Try again in a minute.', 'If the card service does not answer, the payment is not counted as failed. The next try first asks Stripe whether it went through, so the guest is never charged twice.'],
+    tips: ['A payment charged today counts in today’s takings in the Daily report and the daily summary, whatever day the pass was sold.', 'A one-use promo code is used once online. If a second basket with it is paid, that payment is refunded in full and the order is not made.'], related: ['payment-plans'] },
+  { id: 'stripe-outside', app: 'money', title: 'Refunds and disputes made in Stripe', keywords: 'stripe dashboard refund dispute chargeback bank evidence',
+    intro: 'Refunds you give in your own Stripe dashboard, and disputes from a guest’s bank, show on the order.',
+    steps: ['A refund given in the Stripe dashboard is added to the order as a card refund, Refunded in the Stripe dashboard. Tickets are not voided: do that from the order if needed.', 'A dispute shows as a warning on the order with the amount and the day the answer is due. Answer it in your Stripe dashboard.'],
+    tips: ['Refunds given in Verdynt/OS are never counted twice.', 'The simple order sale for other systems (POST /orders) is for managers only and keeps the day ticket limit.'], related: ['sell-refund'] },
+  // ---- end Track MONEY
 ];
 
 export const articleById = (id) => ARTICLES.find((a) => a.id === id) || null;
