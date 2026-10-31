@@ -23,6 +23,7 @@ const MAX_COPIES_PER_HOUR = 3; // signed copies emailed to one address in an hou
 /** The season after the given one ('2025-26' -> '2026-27'). */
 const nextSeason = (season) => seasonFor(`${Number(season.slice(0, 4)) + 1}-08-01`);
 
+const signature = require('./signature');
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const isPng = (dataUrl) => {
   const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
@@ -107,6 +108,7 @@ async function sign(conn, tenant, input, ctx) {
   if (!sameName(input.typed_name, fullName)) throw bad(`Type your full name exactly as above (${fullName}) to sign`);
   const sig = String(input.signature || '');
   if (!isPng(sig)) throw bad('Please sign in the box');
+  if (sig.length <= MAX_SIGNATURE_CHARS) { const drawn = signature.check(sig); if (!drawn.ok) throw bad(drawn.why); } // a real drawing, not a blank box (2026.11.11)
   if (sig.length > MAX_SIGNATURE_CHARS) throw bad('That signature is too detailed to save. Clear it and sign again.');
 
   await archive(conn, tenant.id, live.waiver_text, ctx.userId || null);

@@ -14,7 +14,7 @@ const { pool } = require('../src/db');
 let server; let base;
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const PW = 'correct-horse-battery';
-const SIG = `data:image/png;base64,${Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('a tiny drawn signature')]).toString('base64')}`;
+const SIG = require('./helpers/signature').signaturePng(); // a drawn signature (2026.11.11: a blank box is refused)
 const WORDING = 'Skiing is risky. I accept the risks and release the mountain.';
 const yearsAgo = (n) => { const d = new Date(); d.setUTCFullYear(d.getUTCFullYear() - n); return d.toISOString().slice(0, 10); };
 

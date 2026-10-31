@@ -58,6 +58,7 @@ const ageOn = (dob, day) => {
 };
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const signature = require('./signature');
 function isPng(dataUrl) {
   const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl || ''));
   return Boolean(m) && Buffer.from(m[1].slice(0, 16), 'base64').subarray(0, 8).equals(PNG_MAGIC);
@@ -94,7 +95,7 @@ function cleanPerson(p, day) {
   if (age >= ADULT_AGE && out.signer_name.toLowerCase() !== `${out.first_name} ${out.last_name}`.toLowerCase()) throw bad(`${who} signs for themselves. Type their own name.`);
   if (!p.agree) throw bad(`Tick the box to confirm the details for ${who} are true`);
   if (String(p.signature || '').length > MAX_SIGNATURE_CHARS) throw bad(`The signature for ${who} is too detailed. Clear it and sign again.`);
-  if (!isPng(p.signature)) throw bad(`Please sign for ${who}`);
+  if (!isPng(p.signature) || !signature.check(p.signature).ok) throw bad(`Please sign for ${who}`); // a real drawing, not a blank box (2026.11.11)
   out.skier_type = ABILITY[out.ability];
   out.signature = p.signature;
   return out;
