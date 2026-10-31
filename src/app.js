@@ -74,7 +74,10 @@ function createApp() {
   // cookies); the app, the console and the mountains' pages keep the strict policy.
   const siteOnly = (value) => (req) => (config.site.hosts.includes(String(req.hostname || '').toLowerCase()) ? value : "'self'");
   app.use(helmet({ contentSecurityPolicy: { directives: { ...helmet.contentSecurityPolicy.getDefaultDirectives(), 'img-src': ["'self'", 'data:', 'blob:', ...tileHosts],
-    'script-src': ["'self'", siteOnly('https://static.cloudflareinsights.com')], 'connect-src': ["'self'", siteOnly('https://cloudflareinsights.com')] } } }));
+    'script-src': ["'self'", siteOnly('https://static.cloudflareinsights.com')], 'connect-src': ["'self'", siteOnly('https://cloudflareinsights.com')],
+    // Stylesheets only from this address (2026.11.11: helmet's default also allowed any https: address; nothing uses one).
+    // 'unsafe-inline' stays: the website's pages, the server-made pages and some screens set style attributes in their HTML.
+    'style-src': ["'self'", "'unsafe-inline'"] } } }));
   // Smaller pages for slow mountain connections and faster loads (search engines rank on it). Event streams are left alone.
   app.use(require('compression')({ filter: (req, res) => !String(res.getHeader('Content-Type') || '').includes('event-stream') && require('compression').filter(req, res) }));
   const origins = (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);

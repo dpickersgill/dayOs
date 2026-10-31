@@ -688,7 +688,13 @@ router.post(
       if (!s) throw notFound('Staff member');
       personId = personId || s.person_id;
       named = s;
-    } else if (personId) named = await one(pool, 'SELECT first_name, last_name FROM people WHERE tenant_id = ? AND id = ?', [t, personId]);
+    }
+    // A person named by id must be this mountain's (2026.11.11: before, another mountain's person id was stored as given).
+    if (person_id) {
+      const p = await one(pool, 'SELECT first_name, last_name FROM people WHERE tenant_id = ? AND id = ?', [t, person_id]);
+      if (!p) throw notFound('Person');
+      if (!named) named = p;
+    }
     if (!req.body.username && !email && !named) throw bad('Give a username or an email');
     const taken = new Set((await rows(pool, 'SELECT username FROM users WHERE tenant_id = ? AND username IS NOT NULL', [t])).map((r) => r.username));
     const uname = req.body.username || UN.suggestUsername({ ...(named || {}), email }, taken);
@@ -758,6 +764,7 @@ router.patch(
     if (NEEDS_EMAIL.includes(nextRole) && !nextEmail) throw bad('Managers and ski area logins need an email, for security notices and getting back into their account');
     if (target.id === req.auth.userId && (req.body.active === false || req.body.role)) throw forbidden('You cannot deactivate or re-role your own login');
     if (req.body.role === 'manager' && req.auth.role !== 'owner') throw forbidden('Only the owner can create managers');
+    if (req.body.staff_id && !(await one(pool, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, req.body.staff_id]))) throw notFound('Staff member'); // this mountain's only
     const set = setClause({ ...req.body, active: req.body.active === undefined ? undefined : req.body.active ? 1 : 0 }, ['active', 'role', 'staff_id', 'username', 'email', 'access_ends_on']);
     if (!set) throw bad('No updatable fields supplied');
     try {

@@ -129,10 +129,12 @@ async function mountainFor(slug) {
   delete t.stripe_account; delete t.stripe_charges_enabled;
   return t;
 }
-async function familyBooking(req) {
+async function familyBooking(req, { change = false } = {}) {
   const t = await mountainFor(req.params.slug);
   const b = await F.bookingByToken(pool, t.id, req.params.token);
   if (!b) throw notFound('Lesson');
+  // The link in a recap email is passed around more than the booking's own: it can look, not change (2026.11.11).
+  if (change && b.via_recap) throw forbidden('This link from the recap email shows the lesson only. To change it, use the link in the booking email, or call the ski school.');
   return { t, b };
 }
 const noStore = (res) => res.set('Cache-Control', 'no-store');
@@ -155,7 +157,7 @@ const detailsSchema = z.object({
   text_ok: z.boolean().optional(), photo_ok: z.boolean().optional(),
 });
 publicRouter.patch('/:slug/lesson/:token', validate(detailsSchema), async (req, res) => {
-  const { t, b } = await familyBooking(req);
+  const { t, b } = await familyBooking(req, { change: true });
   noStore(res);
   if (req.body.text_ok && !(await textsOn(t.id))) delete req.body.text_ok;
   await F.updateDetails(t, b, req.body);
@@ -168,7 +170,7 @@ publicRouter.get('/:slug/lesson/:token/dates', async (req, res) => {
   res.json({ can_change: pol.can_change, why: pol.why, lessons: pol.can_change ? await F.moveChoices(pool, t, b) : [] });
 });
 publicRouter.post('/:slug/lesson/:token/move', validate(z.object({ session_id: z.number().int().positive() })), async (req, res) => {
-  const { t, b } = await familyBooking(req);
+  const { t, b } = await familyBooking(req, { change: true });
   noStore(res);
   const out = await F.moveBooking(t, b, req.body.session_id);
   await require('../lib/lessonconfirm').sendConfirmation(pool, t.id, b.id, baseUrl(req), { moved: true }).catch(() => {});
@@ -176,7 +178,7 @@ publicRouter.post('/:slug/lesson/:token/move', validate(z.object({ session_id: z
   res.json({ ok: true });
 });
 publicRouter.post('/:slug/lesson/:token/cancel', async (req, res) => {
-  const { t, b } = await familyBooking(req);
+  const { t, b } = await familyBooking(req, { change: true });
   noStore(res);
   const out = await F.cancelBooking(t, b);
   if (out.refundId) await require('../lib/cardrefund').send(t.id, out.refundId);
