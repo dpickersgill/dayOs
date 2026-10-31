@@ -465,3 +465,20 @@ test('PATROL-11: adding a responder again after an entered-in-error marking make
   assert.equal(rows.filter((x) => !x.voided_at).length, 1);
   assert.equal(rows.find((x) => x.voided_at).void_reason, 'Not on this call');
 });
+
+// ---------------------------------------------------------------- PATROL-12
+test('PATROL-12: a change of legal authority on a records request is audited before and after, and the release names it', async () => {
+  const m = await patrolMountain();
+  const c = await approvedCase(m);
+  const rq = ok(await api('POST', '/patrol/records', { token: m.owner, body: { incident_id: c.id, requester_kind: 'attorney', requester_name: 'Plaintiff counsel', received_on: tzNow().slice(0, 10) } }), 201);
+  ok(await api('PATCH', `/patrol/records/${rq.id}`, { token: m.owner, body: { authorization: 'subpoena', auth_note: 'Subpoena 26-CV-001' } }));
+  ok(await api('PATCH', `/patrol/records/${rq.id}`, { token: m.owner, body: { authorization: 'court_order', auth_note: 'Order of Judge X' } }));
+  ok(await api('POST', '/auth/step-up', { token: m.owner, body: { password: PW } }));
+  ok(await api('POST', `/patrol/records/${rq.id}/release`, { token: m.owner, body: {} }));
+  const aud = await q("SELECT action, detail FROM audit_log WHERE tenant_id = ? AND entity = 'incidents' AND entity_id = ? AND action LIKE 'records%' ORDER BY id", [m.tenantId, c.id]);
+  const d = (a) => (typeof a.detail === 'string' ? JSON.parse(a.detail) : a.detail);
+  const changes = aud.filter((a) => a.action === 'records_request_change').map(d);
+  assert.deepEqual(changes.map((x) => [x.authorization_before, x.authorization_after]), [['none', 'subpoena'], ['subpoena', 'court_order']]);
+  assert.ok(changes.every((x) => x.auth_note_changed === true && !JSON.stringify(x).includes('Judge')), 'the typed note is not copied into the audit');
+  assert.equal(d(aud.find((a) => a.action === 'records_release')).authorization, 'court_order');
+});
