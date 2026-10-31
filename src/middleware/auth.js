@@ -47,10 +47,10 @@ const AREA_PATHS = /^\/api\/v1\/(auth\/|area(\/|$)|whats-new)/;
 // The patrol-room screen (a leader's session turned into the room's display) reaches only these: who is on duty, signing
 // people in and out, and leaving the screen with a second check or signing out (which turns this device's alerts off).
 // Never a patient record.
-const ROOM_PATHS = /^\/api\/v1\/(patrol\/(duty|duty\/sign-in|duty\/sign-out|room|room\/end|alerts\/unsubscribe)|auth\/(me|logout|step-up|step-up\/options))$/;
+const ROOM_PATHS = /^\/api\/v1\/(patrol\/(duty|duty\/sign-in|duty\/sign-out|room|room\/end|alerts\/unsubscribe)|auth\/(me|logout|closing|step-up|step-up\/options))$/;
 
 // While two-step is still to be set up, or a temporary password replaced, only these are open.
-const SETUP_PATHS = /\/auth\/(me|logout|change-password|mfa\/(setup|enable|status)|passkeys(\/options)?)$/;
+const SETUP_PATHS = /\/auth\/(me|logout|closing|change-password|mfa\/(setup|enable|status)|passkeys(\/options)?)$/;
 
 /**
  * Verifies the bearer token, then re-checks the user in the database on every request, so that

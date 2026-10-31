@@ -8,6 +8,7 @@ import { qr } from './barcode.js';
 import * as passkey from './passkey.js';
 import { openProspects } from './platform-prospects.js';
 import { openGoodDay } from './platform-goodday.js';
+import { watchPasswords } from './showpw.js';
 
 const app = document.getElementById('app');
 let session = '';
@@ -678,6 +679,7 @@ function myPassword() {
   }, { submitText: 'Change password' });
 }
 
+watchPasswords();
 signIn();
 
 // ---------------------------------------------------------------- injury network report

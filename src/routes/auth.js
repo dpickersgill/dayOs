@@ -275,6 +275,29 @@ router.post('/auth/mfa/passkey-options', validate(z.object({ mfa_token: z.string
   res.json(await passkeys.authenticationOptions(req, { kind: 'user', purpose: 'second', ownerId: user.id, tenantId: user.tenant_id }));
 });
 
+/**
+ * What the sign-in page may offer for a mountain: whether it exists (a mistyped or ended mountain is the usual reason a
+ * right password fails), whether it is a demo (demos never send email, and that is not a secret), and whether this server
+ * can send email at all. It says nothing about any login.
+ */
+const optionsLimit = rateLimit({ windowMs: 60_000, max: Number(process.env.LOGIN_RATE_LIMIT) || 60, message: 'Too many looks. Wait a minute.', keyOf: (req) => `signin-options:${req.ip}` });
+router.get('/auth/signin-options', optionsLimit, async (req, res) => {
+  const email = mailer.enabled();
+  const tenant = String(req.query.tenant || '').trim().toLowerCase();
+  const parsed = slug.safeParse(tenant);
+  const t = parsed.success ? await one(pool, "SELECT (sandbox_expires_at IS NOT NULL) AS demo, (sandbox_expires_at IS NOT NULL AND sandbox_expires_at < NOW()) AS demo_over, status FROM tenants WHERE slug = ?", [tenant]) : null;
+  res.set('cache-control', 'no-store');
+  res.json({
+    tenant: parsed.success ? tenant : null,
+    known: Boolean(t),
+    demo: Boolean(t && Number(t.demo)),
+    demo_over: Boolean(t && Number(t.demo_over)),
+    email_set_up: email,
+    // Emailed codes can reach someone here: email is set up and the mountain is not a demo.
+    email_codes: Boolean(email && !(t && Number(t.demo))),
+  });
+});
+
 /** Sign in with a passkey alone: the phone offers whichever passkey it holds for this mountain; no name or password typed. */
 router.post('/auth/passkey/options', validate(z.object({ tenant: slug })), async (req, res) => {
   const t = await one(pool, 'SELECT id FROM tenants WHERE slug = ?', [req.body.tenant]);
@@ -505,6 +528,15 @@ router.post(
   },
 );
 
+/**
+ * The last browser tab using this session closed (or is reloading). The session ends in two minutes unless it is used again
+ * first (sessions.closing). Sent with x-poll: 1, so the sign-in check does not count this call itself as use.
+ */
+router.post('/auth/closing', authenticate, async (req, res) => {
+  if (req.auth.sid) await sessions.closing(req.auth.sid);
+  res.status(204).end();
+});
+
 /** Sign out: the server ends this session, so the token stops working even if a copy was kept somewhere. */
 router.post('/auth/logout', authenticate, async (req, res) => {
   if (req.auth.sid) await sessions.end(req.auth.sid, 'signed_out');
@@ -703,7 +735,7 @@ router.patch(
     }
     if (req.body.active === false || req.body.role) await sessions.endAll(pool, target.id, req.body.role ? 'role_changed' : 'switched_off');
     await audit(pool, req, 'update', 'users', target.id, req.body);
-    res.json({ ok: true });
+    res.json({ ok: true, ...(req.body.username ? { username: req.body.username } : {}) }); // the username as saved (lowercase)
   },
 );
 

@@ -39,7 +39,7 @@ function form() {
   const status = h('p', { class: 'muted', role: 'status' });
   const go = h('button', { type: 'submit', class: 'btn primary' }, 'Continue');
   const f = h('form', { novalidate: true },
-    field('Your name', name), field('Email', email, 'We use it as your demo login.'),
+    field('Your name', name), field('Email', email, 'We use it as your demo login. One demo per email: a new demo with the same email replaces the last one.'),
     field('Your mountain’s name (optional)', mountain, 'With your state, we find your mountain on the map and build the demo on its own lifts and trails.'),
     field('State', state),
     trap, err, go, status);
@@ -177,7 +177,7 @@ function chooseArea(formEl, typed, st) {
 }
 
 function done(out) {
-  session.token = out.token;
+  session.save(out.token); // this tab only, like a sign-in without Remember me
   try { localStorage.setItem(SLUG_KEY, out.tenant); } catch (_) { /* private mode: the sign-in page will ask for it */ }
   clear(app);
   const row = (k, v) => h('div', { class: 'cred-row' }, h('dt', null, k), h('dd', null, v));
@@ -205,7 +205,7 @@ async function fromEmail(kind, token) {
     const out = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(out.error || out.message || 'That link did not work.');
     if (kind === 'stop') { clear(box).append(h('h2', null, 'Done'), h('p', null, 'You will not get any more emails about your demo.'), h('a', { class: 'btn', href: '/' }, 'Open my demo')); return; }
-    session.token = out.token;
+    session.save(out.token);
     try { localStorage.setItem(SLUG_KEY, out.tenant); } catch (_) { /* private mode */ }
     const to = params.get('to');
     location.replace(to && /^[a-z-]{2,30}$/.test(to) ? `/#/${to}` : '/');
