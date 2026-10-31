@@ -353,30 +353,57 @@ publicRouter.get('/:slug/gift/:token', async (req, res) => {
  * Redeems the gift once: the person receiving it joins (or starts) their household account with the email it was sent
  * to, the gift card becomes theirs, and the page shows the code to use at the window. A second try says it is done.
  */
-publicRouter.post('/:slug/gift/:token/redeem', validate(z.object({ first_name: z.string().trim().min(1).max(60), last_name: z.string().trim().min(1).max(60), date_of_birth: dateStr.optional() })), async (req, res) => {
+publicRouter.post('/:slug/gift/:token/redeem', validate(z.object({
+  first_name: z.string().trim().min(1).max(60), last_name: z.string().trim().min(1).max(60), date_of_birth: dateStr.optional(),
+  parent_first_name: z.string().trim().min(1).max(60).optional(), parent_last_name: z.string().trim().min(1).max(60).optional(),
+  parent_email: z.string().trim().toLowerCase().email().max(255).optional(), parent_consent: z.boolean().optional(),
+})), async (req, res) => {
   const t = await tenantFor(req.params.slug);
   res.set('Cache-Control', 'no-store');
   const g0 = await giftByToken(t, req.params.token);
+  const b = req.body;
+  // Under 13 by the birth date entered (COPPA, 2026.11.11): the account is the parent's, with the child as a family
+  // member, and the parent gives consent here. The child's own email is never kept and never written to.
+  const age = b.date_of_birth ? require('../lib/guesttypes').ageOn(b.date_of_birth, todayIn(t.timezone)) : null;
+  const child = age !== null && age < 13;
+  if (child) {
+    if (!b.parent_first_name || !b.parent_last_name || !b.parent_email) throw bad('A parent or guardian adds a gift for someone under 13. Add their name and email.');
+    if (b.parent_email === String(g0.recipient_email).toLowerCase()) throw bad("Use the parent's or guardian's own email address.");
+    if (!b.parent_consent) throw bad('The parent or guardian needs to tick the box to agree.');
+  }
   const out = await tx(async (conn) => {
     const g = await one(conn, 'SELECT * FROM gift_experiences WHERE tenant_id = ? AND id = ? FOR UPDATE', [t.id, g0.id]);
     if (g.redeemed_at) throw conflict('This gift has already been opened and added to an account');
-    let p = await one(conn, 'SELECT id FROM people WHERE tenant_id = ? AND LOWER(email) = ? AND first_name = ? AND last_name = ? AND anonymised_at IS NULL ORDER BY id LIMIT 1', [t.id, g.recipient_email, req.body.first_name, req.body.last_name]);
-    if (!p) {
-      const [r] = await conn.query("INSERT INTO people (tenant_id, first_name, last_name, email, date_of_birth, source) VALUES (?, ?, ?, ?, ?, 'online')", [t.id, req.body.first_name, req.body.last_name, g.recipient_email, req.body.date_of_birth || null]);
-      p = { id: r.insertId };
+    let p;
+    if (child) {
+      // The parent: matched on their own email and name (never a record another guest added to their household), else new.
+      p = await one(conn, "SELECT id FROM people WHERE tenant_id = ? AND LOWER(email) = ? AND first_name = ? AND last_name = ? AND anonymised_at IS NULL AND (source IS NULL OR source <> 'household') ORDER BY id LIMIT 1", [t.id, b.parent_email, b.parent_first_name, b.parent_last_name]);
+      if (!p) p = { id: (await conn.query("INSERT INTO people (tenant_id, first_name, last_name, email, source) VALUES (?, ?, ?, ?, 'online')", [t.id, b.parent_first_name, b.parent_last_name, b.parent_email]))[0].insertId };
+      const [k] = await conn.query("INSERT INTO people (tenant_id, first_name, last_name, date_of_birth, source) VALUES (?, ?, ?, ?, 'online')", [t.id, b.first_name, b.last_name, b.date_of_birth]);
+      await require('../lib/family').addLink(conn, t.id, p.id, k.insertId, 'guardian');
+      await audit(conn, system(t.id), 'parent_consent', 'people', k.insertId, { parent_id: p.id, gift_id: g.id, method: 'gift_redeem', under: 13 });
+    } else {
+      p = await one(conn, 'SELECT id FROM people WHERE tenant_id = ? AND LOWER(email) = ? AND first_name = ? AND last_name = ? AND anonymised_at IS NULL ORDER BY id LIMIT 1', [t.id, g.recipient_email, b.first_name, b.last_name]);
+      if (!p) {
+        const [r] = await conn.query("INSERT INTO people (tenant_id, first_name, last_name, email, date_of_birth, source) VALUES (?, ?, ?, ?, ?, 'online')", [t.id, b.first_name, b.last_name, g.recipient_email, b.date_of_birth || null]);
+        p = { id: r.insertId };
+      }
     }
     await conn.query('UPDATE gift_experiences SET redeemed_at = UTC_TIMESTAMP(), redeemed_person_id = ? WHERE tenant_id = ? AND id = ?', [p.id, t.id, g.id]);
-    if (g.gift_card_id) await conn.query('UPDATE gift_cards SET recipient_name = ? WHERE tenant_id = ? AND id = ?', [`${req.body.first_name} ${req.body.last_name}`, t.id, g.gift_card_id]);
+    if (g.gift_card_id) await conn.query('UPDATE gift_cards SET recipient_name = ? WHERE tenant_id = ? AND id = ?', [`${b.first_name} ${b.last_name}`, t.id, g.gift_card_id]);
     await audit(conn, system(t.id), 'gift_redeem', 'gift_experiences', g.id, { person_id: p.id });
     return p.id;
   });
-  // A sign-in link to the new account, so the person receiving the gift can see it there.
+  // A sign-in link to the account: the parent's for a child under 13, otherwise the person receiving the gift.
   if (mailer.enabled()) {
-    const token = await PP.newToken(t.id, g0.recipient_email, 'link');
-    await mailer.send({ tenantId: t.id, to: g0.recipient_email, fromName: t.name, subject: `Your account at ${t.name}`, tag: 'gift-account',
-      text: [`Hi ${req.body.first_name},`, '', `Your gift is in your account at ${t.name}. Sign in here (the link works once, for 30 minutes):`, `${baseUrl(req)}/family/${t.slug}?t=${token}`, '', t.name].join('\n') }).catch(() => {});
+    const to = child ? b.parent_email : g0.recipient_email;
+    const token = await PP.newToken(t.id, to, 'link');
+    const lines = child
+      ? [`Hi ${b.parent_first_name},`, '', `A gift from ${t.name} was added to your family account, and you agreed to us keeping your child's name and birthday for it.`, 'Sign in here (the link works once, for 30 minutes):', `${baseUrl(req)}/family/${t.slug}?t=${token}`, '', `If this was not you, call ${t.name}${t.phone ? ` on ${t.phone}` : ''} and we delete the child's details.`, t.name]
+      : [`Hi ${b.first_name},`, '', `Your gift is in your account at ${t.name}. Sign in here (the link works once, for 30 minutes):`, `${baseUrl(req)}/family/${t.slug}?t=${token}`, '', t.name];
+    await mailer.send({ tenantId: t.id, to, fromName: t.name, subject: `Your account at ${t.name}`, tag: 'gift-account', text: lines.join('\n') }).catch(() => {});
   }
-  res.json({ ...giftOut(t, await giftByToken(t, req.params.token)), person_id: undefined, joined: Boolean(out) });
+  res.json({ ...giftOut(t, await giftByToken(t, req.params.token)), person_id: undefined, joined: Boolean(out), parent: child });
 });
 
 /** The gift card balance page: a code in, the balance out. Rate limited with the rest of /public. */
