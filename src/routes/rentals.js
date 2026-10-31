@@ -5,7 +5,7 @@ const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { crud } = require('../lib/crud');
 const { requireRole } = require('../middleware/auth');
-const { partialOf, z, dateTimeStr, validate, paramId, normDateTime, seasonFor, todayIn } = require('../lib/util');
+const { partialOf, z, dateTimeStr, validate, paramId, normDateTime, seasonFor, todayIn, nowIn } = require('../lib/util');
 const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const R = require('../lib/rentals');
@@ -131,7 +131,12 @@ router.get('/contracts', requireRole(...counter), async (req, res) => {
     where.push('c.status = ?');
     params.push(String(req.query.status));
   }
-  if (req.query.overdue === 'true') where.push("c.status = 'out' AND c.due_at < NOW()");
+  if (req.query.overdue === 'true') {
+    // due_at is the mountain's wall clock (rentalfit.dueFor): compare it with the mountain's time now, not UTC.
+    const tz = (await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone;
+    where.push("c.status = 'out' AND c.due_at < ?");
+    params.push(nowIn(tz));
+  }
   const data = await rows(
     pool,
     `SELECT c.*, p.first_name, p.last_name FROM rental_contracts c JOIN people p ON p.id = c.person_id AND p.tenant_id = c.tenant_id

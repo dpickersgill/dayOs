@@ -2,7 +2,7 @@
 
 // The day's numbers for one mountain: used by the Today screen, the day board and the weekly report.
 const { pool, one, rows } = require('../db');
-const { dateStr, todayIn, dayRange } = require('./util');
+const { dateStr, todayIn, nowIn, dayRange } = require('./util');
 const { bad } = require('./errors');
 
 /** The day's numbers for one mountain (also used by the day board). date: YYYY-MM-DD, or null for the mountain's today. */
@@ -31,7 +31,8 @@ async function dailyReport(tenantId, requested) {
     one(pool, "SELECT COUNT(*) AS n FROM shifts WHERE tenant_id = ? AND status <> 'cancelled' AND staff_id IS NULL AND DATE(starts_at) = ?", [tenantId, date]),
     one(pool, "SELECT COUNT(*) AS opened_today, (SELECT COUNT(*) FROM incidents WHERE tenant_id = ? AND status = 'open') AS open_total FROM incidents WHERE tenant_id = ? AND DATE(occurred_at) = ?", [tenantId, tenantId, date]),
     one(pool, "SELECT COUNT(*) AS n FROM rental_contracts WHERE tenant_id = ? AND status = 'out'", [tenantId]),
-    one(pool, "SELECT COUNT(*) AS n FROM rental_contracts WHERE tenant_id = ? AND status = 'out' AND due_at < NOW()", [tenantId]),
+    // due_at is the mountain's wall clock (rentalfit.dueFor), so it is compared with the mountain's time now, not UTC.
+    one(pool, "SELECT COUNT(*) AS n FROM rental_contracts WHERE tenant_id = ? AND status = 'out' AND due_at < ?", [tenantId, nowIn(tenant.timezone)]),
     one(pool, "SELECT COUNT(*) AS sessions, COALESCE(SUM((SELECT COUNT(*) FROM lesson_bookings b WHERE b.tenant_id = s.tenant_id AND b.session_id = s.id AND b.status IN ('booked','attended'))), 0) AS students FROM lesson_sessions s WHERE s.tenant_id = ? AND s.status <> 'cancelled' AND DATE(s.starts_at) = ?", [tenantId, date]),
   ]);
 

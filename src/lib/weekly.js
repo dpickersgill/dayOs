@@ -4,7 +4,7 @@
 // Weeks run Monday to Sunday in the mountain's own time. Day figures come from the same code as the Today screen, so the
 // two never disagree. Sandbox (demo) mountains never send.
 const { pool, one, rows } = require('../db');
-const { todayIn, addDays, weekdayOf, dayRange } = require('./util');
+const { todayIn, nowIn, addDays, weekdayOf, dayRange } = require('./util');
 const mailer = require('./mailer');
 const { isSandbox } = require('./sandbox');
 const { dailyReport } = require('./daily');
@@ -57,7 +57,7 @@ async function buildWeek(tenantId, weekStart) {
   const lessons = await one(pool, "SELECT COUNT(*) AS sessions, COALESCE(SUM((SELECT COUNT(*) FROM lesson_bookings b WHERE b.tenant_id = s.tenant_id AND b.session_id = s.id AND b.status IN ('booked','attended'))), 0) AS students FROM lesson_sessions s WHERE s.tenant_id = ? AND s.status <> 'cancelled' AND DATE(s.starts_at) >= ? AND DATE(s.starts_at) <= ?", [tenantId, weekStart, end]);
   const inc = await one(pool, 'SELECT COUNT(*) AS n FROM incidents WHERE tenant_id = ? AND DATE(occurred_at) >= ? AND DATE(occurred_at) <= ?', [tenantId, weekStart, end]);
   const [overdue, unfilled, passes, openInc] = await Promise.all([
-    one(pool, "SELECT COUNT(*) AS n FROM rental_contracts WHERE tenant_id = ? AND status = 'out' AND due_at < NOW()", [tenantId]),
+    one(pool, "SELECT COUNT(*) AS n FROM rental_contracts WHERE tenant_id = ? AND status = 'out' AND due_at < ?", [tenantId, nowIn(tz)]), // due_at: local wall clock
     one(pool, "SELECT COUNT(*) AS n FROM shifts WHERE tenant_id = ? AND status <> 'cancelled' AND staff_id IS NULL AND DATE(starts_at) >= ? AND DATE(starts_at) < ?", [tenantId, today, addDays(today, 7)]),
     one(pool, "SELECT COUNT(*) AS n FROM tickets t JOIN products p ON p.id = t.product_id AND p.tenant_id = t.tenant_id WHERE t.tenant_id = ? AND p.kind = 'season_pass' AND t.status = 'active' AND t.valid_to >= ? AND t.valid_to <= ?", [tenantId, today, addDays(today, 14)]),
     one(pool, "SELECT COUNT(*) AS n FROM incidents WHERE tenant_id = ? AND status = 'open'", [tenantId]),

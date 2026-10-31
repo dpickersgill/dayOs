@@ -65,6 +65,24 @@ function dayRange(timeZone, date) {
   return [midnight(date), midnight(addDays(date, 1))];
 }
 
+/**
+ * A local wall-clock time ('YYYY-MM-DD HH:MM[:SS]') in a time zone as database (UTC) time ('YYYY-MM-DD HH:MM:SS').
+ * Two passes over the zone's offset, like dayRange, so a time after a daylight-saving change gets that day's new offset
+ * (06:00 the morning clocks fall back is 11:00 UTC in New York, not 10:00). A time that does not exist (02:30 the morning
+ * clocks spring forward) comes out as the hour after it.
+ */
+function utcFromLocal(local, timeZone) {
+  const offset = (ms) => {
+    const f = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+    const p = Object.fromEntries(f.formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+    return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - ms;
+  };
+  const t = String(local).replace(' ', 'T').slice(0, 19);
+  const g = Date.parse(`${t.length === 16 ? `${t}:00` : t}Z`);
+  let u = g - offset(g); u = g - offset(u);
+  return new Date(u).toISOString().slice(0, 19).replace('T', ' ');
+}
+
 /** The local calendar date ('YYYY-MM-DD') of a database timestamp (UTC) in a time zone. */
 function localDay(dbTime, timeZone) {
   const ms = Date.parse(`${String(dbTime).replace(' ', 'T').slice(0, 19)}Z`);
@@ -131,5 +149,5 @@ async function mapLimit(items, limit, fn) {
 
 module.exports = {
   mapLimit, partialOf, z, dateStr, dateTimeStr, timeStr, id, tierEnum,
-  validate, paramId, normDateTime, todayIn, nowIn, dayRange, localDay, localTime, addDays, weekdayOf, seasonFor, newCode, setClause,
+  validate, paramId, normDateTime, todayIn, nowIn, dayRange, utcFromLocal, localDay, localTime, addDays, weekdayOf, seasonFor, newCode, setClause,
 };

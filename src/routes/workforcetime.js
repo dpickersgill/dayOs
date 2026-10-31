@@ -9,7 +9,7 @@
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
-const { z, dateStr, dateTimeStr, validate, paramId, normDateTime, dayRange, addDays, localTime } = require('../lib/util');
+const { z, dateStr, dateTimeStr, validate, paramId, normDateTime, dayRange, addDays, localTime, utcFromLocal } = require('../lib/util');
 const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { tenantOf } = require('../lib/kiosk');
@@ -21,13 +21,9 @@ const mgr = requireRole('manager');
 const OVERTIME_AFTER = 40 * 60;
 const LONG_SHIFT = 14 * 60;
 
-/** A local wall-clock time ('YYYY-MM-DD HH:MM:SS') in the mountain's zone as database (UTC) time. */
-function toDb(local, tz) {
-  const day = local.slice(0, 10);
-  const [start] = dayRange(tz, day); // UTC time of local midnight
-  const sinceMidnight = Date.parse(`${local.replace(' ', 'T')}Z`) - Date.parse(`${day}T00:00:00Z`);
-  return new Date(Date.parse(`${start.replace(' ', 'T')}Z`) + sinceMidnight).toISOString().slice(0, 19).replace('T', ' ');
-}
+/** A local wall-clock time ('YYYY-MM-DD HH:MM:SS') in the mountain's zone as database (UTC) time, right across a
+ *  daylight-saving change (lib/util utcFromLocal). */
+const toDb = (local, tz) => utcFromLocal(local, tz);
 const dbNow = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 
 /** The week's punches and shifts, per person, with totals and anything that needs a look. */
@@ -49,7 +45,7 @@ async function weekOf(t, tz, start) {
     if (!by.has(id)) by.set(id, { staff_id: id, scheduled_minutes: 0, worked_minutes: 0, entries: [], shifts: [] });
     return by.get(id);
   };
-  for (const s of [...shifts, ...patrolShifts]) { const r = row(Number(s.staff_id)); r.scheduled_minutes += SH.minutesBetween(s.starts_at, s.ends_at); r.shifts.push(s); }
+  for (const s of [...shifts, ...patrolShifts]) { const r = row(Number(s.staff_id)); r.scheduled_minutes += SH.minutesBetween(s.starts_at, s.ends_at, tz); r.shifts.push(s); }
   for (const e of entries) {
     const r = row(Number(e.staff_id));
     const minutes = SH.minutesBetween(e.clock_in, e.clock_out || now);
