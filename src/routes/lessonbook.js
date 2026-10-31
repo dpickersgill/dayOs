@@ -63,7 +63,7 @@ async function guestLessons(t, extraWhere = '', params = []) {
        (SELECT COUNT(*) FROM lesson_bookings b WHERE b.tenant_id = s.tenant_id AND b.session_id = s.id AND b.status IN ('booked','attended')) AS booked
      FROM lesson_sessions s JOIN products pr ON pr.id = s.product_id AND pr.tenant_id = s.tenant_id
      WHERE s.tenant_id = ? AND s.status = 'scheduled' AND pr.active = 1 AND s.starts_at >= ? AND DATE(s.starts_at) <= ?${extraWhere} ORDER BY s.starts_at LIMIT 300`,
-    [t.id, earliest, addDays(today, 45), ...params]);
+    [t.id, earliest, addDays(today, F.BOOK_AHEAD_DAYS), ...params]);
   // Spots held: requests waiting to be confirmed or paid, and waitlist offers not yet claimed.
   const held = await F.heldSpots(pool, t.id);
   const tiers = await rows(pool, 'SELECT product_id, tier, price_cents FROM price_tiers WHERE tenant_id = ?', [t.id]);
@@ -219,6 +219,9 @@ router.post('/:slug/requests', validate(requestSchema), async (req, res) => {
     if (!s) throw notFound('Lesson');
     if (s.starts_at < inHours(t.timezone, t.booking_notice_hours)) throw conflict(`Online requests close ${t.booking_notice_hours} hours before the lesson. Please call the ski school.`);
     const day = s.starts_at.slice(0, 10);
+    // The same checks as the booking page (2026.11.11): the lesson is one the page lists, and every student fits it.
+    if (!(await guestLessons(t, ' AND s.id = ?', [s.id])).length) throw notFound('Lesson');
+    for (const st of b.students) { const why = F.misfit(s, st); if (why) throw conflict(why); }
     const { n } = await one(conn, "SELECT COUNT(*) AS n FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND status IN ('booked','attended')", [t.id, s.id]);
     const pend = await rows(conn, `SELECT students FROM lesson_requests WHERE tenant_id = ? AND session_id = ? AND status IN ${HOLD}`, [t.id, s.id]);
     let held = 0;

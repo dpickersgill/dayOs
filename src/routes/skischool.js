@@ -291,17 +291,19 @@ router.post('/sessions/cancel-days', SA.school('director'), validate(reasonSchem
 router.patch('/bookings/:id', requireRole(...school), validate(z.object({ status: z.enum(['booked', 'attended', 'no_show', 'cancelled']) })), async (req, res) => {
   const { tenantId } = req.auth;
   await tx(async (conn) => {
-    const b = await one(conn, 'SELECT b.id, b.status, b.credit_id, b.session_id, s.instructor_id FROM lesson_bookings b JOIN lesson_sessions s ON s.tenant_id = b.tenant_id AND s.id = b.session_id WHERE b.tenant_id = ? AND b.id = ? FOR UPDATE', [tenantId, paramId(req)]);
-    if (!b) throw notFound('Booking');
+    const b0 = await one(conn, 'SELECT b.id, b.status, b.person_id, b.session_id, s.instructor_id FROM lesson_bookings b JOIN lesson_sessions s ON s.tenant_id = b.tenant_id AND s.id = b.session_id WHERE b.tenant_id = ? AND b.id = ?', [tenantId, paramId(req)]);
+    if (!b0) throw notFound('Booking');
     // An instructor marks attendance only on their own lessons (the desk and managers on any), and cannot cancel a booking.
-    if (SA.ownOnly(req) && (b.instructor_id !== req.auth.staffId || req.body.status === 'cancelled')) throw forbidden('Instructors can only mark attendance on their own lessons');
-    // Bringing a canceled booking back takes a seat again: lock the lesson and check it still has one.
-    if (b.status === 'cancelled' && req.body.status !== 'cancelled') {
-      const s = await one(conn, 'SELECT capacity, status FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, b.session_id]);
-      if (s.status !== 'scheduled') throw conflict(`Session is ${s.status}`);
-      const { n } = await one(conn, "SELECT COUNT(*) AS n FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND status IN ('booked','attended')", [tenantId, b.session_id]);
-      if (n >= s.capacity) throw conflict('Session is full');
+    if (SA.ownOnly(req) && (b0.instructor_id !== req.auth.staffId || req.body.status === 'cancelled')) throw forbidden('Instructors can only mark attendance on their own lessons');
+    // Bringing a canceled booking back is a new booking (2026.11.11): it goes through bookStudent, so the student is
+    // checked for a clash with another lesson or a program meeting, a waiver on file, a free seat and seats held for the
+    // waitlist and online requests, with the same locks in the same order as every other way of booking.
+    if (b0.status === 'cancelled' && req.body.status !== 'cancelled') {
+      if (SA.ownOnly(req)) throw forbidden('Ask the desk to book this student again');
+      await bookStudent(conn, req, { sessionId: b0.session_id, personId: b0.person_id });
     }
+    const b = await one(conn, 'SELECT id, status, credit_id, session_id FROM lesson_bookings WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, b0.id]);
+    if (b0.status === 'cancelled') b.status = 'cancelled';
     await conn.query('UPDATE lesson_bookings SET status = ? WHERE tenant_id = ? AND id = ?', [req.body.status, tenantId, b.id]);
     await audit(conn, req, 'attendance', 'lesson_bookings', b.id, { from: b.status, to: req.body.status });
     // Canceling gives a package lesson back.

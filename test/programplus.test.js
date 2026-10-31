@@ -249,7 +249,9 @@ test('the family page: a sign-in link by email, every child and date, update det
   };
   is(await call('/api/v1/public', 'GET', `/${M.slug}/family`), 401);
   const page = ok(await fam('GET', ''));
-  assert.deepEqual(page.people.map((p) => p.first_name).sort(), ['Ana', 'Bo', 'Cy']);
+  // Ana was on file before Pat registered her online, with no guardian: since 2026.11.11 registering online does not make
+  // Pat her guardian (anyone who knows a name and birthday could), so she shows once staff link them.
+  assert.deepEqual(page.people.map((p) => p.first_name).sort(), ['Bo', 'Cy']);
   const bo = page.people.find((p) => p.first_name === 'Bo').places[0];
   assert.equal(bo.dates.length, 4); assert.equal(bo.makeup_reserve.length, 1);
   assert.equal(bo.owes_cents, 8000);

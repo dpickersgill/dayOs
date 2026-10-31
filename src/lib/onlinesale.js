@@ -86,6 +86,9 @@ async function confirmRequest(conn, tenantId, raw, { paid = false, auditReq, pay
   const waiverNeeded = [];
   const booked = [];
   const found = [];
+  // Every student still fits the lesson when the request becomes a booking (2026.11.11): the lesson's ages, discipline or
+  // levels may have changed since the family asked, and a request saved before this check existed is checked here too.
+  for (const st of r.students) { const why = require('./lessonfamily').misfit(s0, st); if (why) throw conflict(why); }
   for (const st of r.students) {
     const sameAsContact = st.first_name.toLowerCase() === String(c.first_name).toLowerCase() && st.last_name.toLowerCase() === String(c.last_name).toLowerCase();
     const minor = isMinor(st.date_of_birth, day);
