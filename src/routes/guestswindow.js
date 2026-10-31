@@ -381,7 +381,7 @@ const changeBody = z.object({
   check: z.boolean().optional(),
   over_limit_reason: z.string().trim().max(300).optional(),
   // when the new day costs more: how the difference is paid (as at checkout)
-  payment: z.object({ tender: z.enum(['cash', 'card', 'other']), card_last4: z.string().regex(/^\d{4}$/).optional(), reference: z.string().max(100).optional(), terminal_payment_id: z.number().int().positive().optional() }).optional(),
+  payment: z.object({ tender: z.enum(['cash', 'card', 'other']), card_last4: z.string().regex(/^\d{4}$/).optional(), reference: require('../lib/pan').payText(100).optional(), terminal_payment_id: z.number().int().positive().optional() }).optional(),
 });
 /** The counter's refund limit: what has gone back on this order already plus this, against the mountain's limit. */
 async function refundAllowed(conn, req, orderId, cents) {

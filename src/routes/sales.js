@@ -31,7 +31,7 @@ const orderSchema = z.object({
   purchaser: purchaserSchema.optional(),
   channel: z.enum(['window', 'online', 'phone', 'group']).default('window'),
   promo_code: z.string().optional(),
-  payment_ref: z.string().max(100).optional(),
+  payment_ref: require('../lib/pan').payText(100).optional(), // never a card number (lib/pan.js)
   over_limit_reason: z.string().trim().max(300).optional(), // a manager selling over a day's ticket limit says why
   items: z
     .array(
@@ -177,7 +177,7 @@ router.get('/orders/:id', lessonOrder, async (req, res) => {
 const REFUND_REASONS = ['customer_request', 'weather', 'injury', 'wrong_item', 'duplicate', 'staff_error', 'other'];
 const refundBody = z.object({
   reason: z.enum(REFUND_REASONS),
-  note: z.string().trim().max(300).optional(),
+  note: require('../lib/pan').payText(300).optional(),
   item_ids: z.array(z.number().int().positive()).min(1).max(100).optional(), // omit to refund everything not yet refunded
   method: z.enum(['cash', 'card', 'gift_card', 'other']).optional(), // omit to send the money back the way it came
   till_id: z.number().int().positive().optional(), // the cash drawer that pays out any cash part (default: your own open drawer)

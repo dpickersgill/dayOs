@@ -297,7 +297,7 @@ router.post(
 );
 
 /** Takes payment for a fee (or returns a deposit). Fees become a paid order so they appear in sales reports. */
-router.post('/charges/:id/collect', requireRole(...counter), validate(z.object({ method: z.enum(['cash', 'card', 'other']), reference: z.string().trim().max(100).optional() })), async (req, res) => {
+router.post('/charges/:id/collect', requireRole(...counter), validate(z.object({ method: z.enum(['cash', 'card', 'other']), reference: require('../lib/pan').payText(100).optional() })), async (req, res) => {
   const { tenantId } = req.auth;
   const id = paramId(req);
   const orderId = await tx(async (conn) => {

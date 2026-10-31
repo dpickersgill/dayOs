@@ -98,13 +98,13 @@ const paymentSchema = z.object({
   comp_reason: z.enum(COMP_REASONS).optional(), // a comp (free of charge) always says why
   card_brand: z.enum(['visa', 'mastercard', 'amex', 'discover', 'other']).optional(),
   card_last4: z.string().regex(/^\d{4}$/, 'The last 4 digits of the card').optional(),
-  auth_code: z.string().max(30).optional(),
-  processor: z.string().max(30).optional(),
+  auth_code: require('../lib/pan').payText(30).optional(), // never a card number (lib/pan.js)
+  processor: require('../lib/pan').payText(30).optional(),
   amount_cents: z.number().int().min(1).max(10_000_000),
   tendered_cents: z.number().int().min(1).max(10_000_000).optional(), // cash handed over, when it is more than the amount (change is due)
-  reference: z.string().max(100).optional(),
+  reference: require('../lib/pan').payText(100).optional(),
   code: z.string().max(40).optional(), // gift card code
-  reason: z.string().trim().max(40).optional(), // why a payment was taken another way (tender 'other'), kept as its comp_reason
+  reason: require('../lib/pan').payText(40).optional(), // why a payment was taken another way (tender 'other'), kept as its comp_reason
   terminal_payment_id: z.number().int().positive().optional(), // a card taken on the counter's card reader (routes/terminal.js)
 });
 
