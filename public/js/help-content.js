@@ -1156,6 +1156,32 @@ export const ARTICLES = [
     steps: ['Open Today. Coming up lists the next few items for your teams, with the day and the time.', 'Tap an item, or press Calendar, to open the calendar.'],
     tips: ['The card is not shown on the wall screen.'], related: ['calendar-read'] },
   // ---- end Track CALENDAR
+  // ---- 2026.11.11, Track SCHOOL AND GUEST: who counts as family online, lesson checks, instructors stay cleared, gifts for children
+  { id: 'family-who-counts', app: 'shop', title: 'Who sees a child on the family page', keywords: 'family page guardian parent waitlist waiver second adult confirm household child access stranger',
+    intro: 'Online, a child shows on an adult\u2019s family page and account only when that adult is the child\u2019s parent or guardian on file.',
+    steps: ['A child added new by their parent online (a registration, a lesson, a waiver) gets that parent as guardian.', 'A child already on file is never linked online to someone who is not already their guardian. A waiver signed online for them goes on a new record marked for staff to check.', 'Joining a waitlist or paying for a place does not make anyone family.', 'At the desk, staff can name the guardian when they enroll a child. That person becomes the child\u2019s guardian on file.', 'A second adult added on an account gets an email to confirm their address. Until they confirm, the record has no email, so they cannot sign in.'],
+    tips: ['If a parent cannot see their child, open the child in Customers and link the parent as guardian.', 'Records a guest adds on their own account are never matched to a new online order by name or email.'], related: ['household-account', 'waiver-sign'] },
+  { id: 'school-online-checks', app: 'school', title: 'What online lesson booking checks', keywords: 'online booking age level discipline fit hidden lesson revive canceled booking double booked waitlist held spots',
+    intro: 'Guests can only book a lesson that fits them and that the booking page lists.',
+    steps: ['Each student must fit the lesson\u2019s ages, discipline and levels. The level is the one they pick, or the one their placement answers point to.', 'The check runs again when a request is confirmed, so a lesson you changed since is checked too.', 'Lessons not on the booking page (more than 45 days ahead, or a product taken off sale) cannot be booked by guessing their number.', 'Bringing back a canceled booking is a new booking: the student needs a free spot, a waiver, and no other lesson at that time.'],
+    tips: ['Online requests waiting for payment let go of their spots after 45 minutes.', 'A request waiting for the desk is closed once its lesson has started.', 'Moving a student at the lineup checks the class takes their age and discipline.'], related: ['school-weather'] },
+  { id: 'school-instructor-cleared', app: 'school', title: 'Instructors stay cleared for their lessons', keywords: 'instructor cleared level kids adaptive certification edit lesson copy day undo plan split lineup assign later private',
+    intro: 'An instructor is only put on a lesson they are cleared for and free to teach.',
+    steps: ['Editing a lesson\u2019s levels, ages or type checks its instructor again. If they are no longer cleared, they come off it and the screen says why. Assign someone later.', 'Copying a day with instructors checks each one like assigning by hand: levels, kids, adaptive, the discipline and certifications.', 'Undoing a plan publish puts an instructor back only if they are still free and cleared.', 'Applying a lineup split checks each class as it ends up, with its required certification.', 'Assigning a private by hand needs an instructor cleared for the discipline, the level and children.'],
+    tips: ['Copying keeps each lesson\u2019s length, so an evening lesson that runs past midnight ends the next day.', 'A plain instructor sees only the rosters of their own lessons and does not book students. Supervisors, the desk and managers do.', 'Only owners and managers change how instructors are paid (pay type, lineup time, request bonus).'], related: ['school-copy-day', 'pay-settings'] },
+  { id: 'school-weather-overlap', app: 'school', title: 'A weather delay that would overlap lessons', keywords: 'weather delay overlap clash two places instructor student window',
+    intro: 'A delay is refused if it would put a student or an instructor in two places at once.',
+    steps: ['Check the weather call. If a delayed lesson would run into another lesson or a program meeting, the summary lists who and when.', 'Choose a shorter delay, delay a wider time window, or move those people first. Then check again.'],
+    tips: ['Delaying the whole day moves every lesson together, so nothing overlaps.'], related: ['school-weather'] },
+  { id: 'gift-child-under-13', app: 'shop', title: 'A gift for a child under 13', keywords: 'gift experience child under 13 parent consent coppa email',
+    intro: 'When the person opening a gift gives a birthday under 13, a parent or guardian adds it to their own account.',
+    steps: ['The gift page asks for the parent\u2019s name and email, and the parent ticks the box to agree.', 'The account is the parent\u2019s. The child is added as their family member, with no email of their own.', 'The sign-in link goes to the parent. Nothing is sent to the child\u2019s address.'],
+    tips: ['If a parent says it was not them, remove the child\u2019s details from Customers.'], related: ['gift-experiences'] },
+  { id: 'signature-drawn', app: 'waivers', title: 'A signature must be drawn', keywords: 'signature blank empty waiver rental form sign box',
+    intro: 'Waivers and rental forms are only saved with a real signature drawn in the box.',
+    steps: ['If the box is empty, or only a dot, the page asks the guest to sign in the box.', 'Clear the box and sign again if the page says the signature cannot be read.'],
+    tips: ['This works the same on the online waiver, the counter waiver and the rental form.'], related: ['waiver-sign'] },
+  // ---- end Track SCHOOL AND GUEST
 ];
 
 export const articleById = (id) => ARTICLES.find((a) => a.id === id) || null;
