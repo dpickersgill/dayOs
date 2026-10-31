@@ -34,11 +34,13 @@ if [ -n "$FINISH" ]; then
   # shellcheck disable=SC1090
   source "$STATE"
   case "$DRILL" in summitops-drill-*) ;; *) echo "Refusing: $DRILL is not a drill copy."; exit 1 ;; esac
+  if [ "${SKIP_STAGING:-}" != 1 ]; then
   step "Pointing staging back at $SOURCE"
   gcloud run services update "$STAGING_SERVICE" --region "$REGION" --quiet \
     --update-env-vars "DB_SOCKET=$OLD_SOCKET" --remove-cloudsql-instances "$DRILL_CONN" --add-cloudsql-instances "${OLD_SOCKET#/cloudsql/}"
   DAYOS_TARGET="$STAGING_SERVICE"; SERVICE="$STAGING_SERVICE"; load_service
   sleep 5; echo "Staging: $(curl -s "$(check_url)/readyz")"
+  fi
   step "Deleting the copy $DRILL"
   gcloud sql instances delete "$DRILL" --quiet
   rm -f "$STATE"
@@ -74,6 +76,18 @@ DRILL_PROXY=$!
 trap '[ -n "$PROXY_PID" ] && kill "$PROXY_PID" 2>/dev/null; kill "$DRILL_PROXY" 2>/dev/null || true' EXIT
 for _ in $(seq 1 20); do (echo > /dev/tcp/127.0.0.1/3308) 2>/dev/null && break; sleep 1; done
 DRILL_PORT=3308 DRILL_AT="$AT" node scripts/restore-check.js
+
+# Since 2026.11.11 staging normally has its own database server (staging-setup.sh) and may connect to that server only,
+# so the copy of the live server holds no staging database for it. Then the drill ends at the check above.
+if [ "${OLD_SOCKET#/cloudsql/}" != "$(gcloud sql instances describe "$SOURCE" --format='value(connectionName)')" ]; then
+  T2=$(date +%s)
+  echo ""
+  echo "Staging has its own database server, so it is not pointed at the copy. The check above is the drill's result."
+  echo "From the start to a checked copy: $(( (T2 - T0) / 60 )) minutes. Target: under 60."
+  echo "When you are done, the same day:   bash scripts/restore-drill.sh --finish"
+  echo "SKIP_STAGING=1" >> "$STATE"
+  exit 0
+fi
 
 step "3. Pointing staging at the copy"
 gcloud run services update "$STAGING_SERVICE" --region "$REGION" --quiet \

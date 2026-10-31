@@ -143,8 +143,13 @@ fi
 if [ "$LOCK_AUDIT" = 1 ]; then
   gcloud logging buckets update summitops-audit --location=global --locked --quiet
   echo "Locked: audit events are kept 400 days and nobody can shorten that."
+elif [ "$(gcloud logging buckets describe summitops-audit --location=global --format='value(locked)' 2>/dev/null)" = True ]; then
+  echo "Locked already: audit events are kept 400 days and nobody can shorten that."
 else
-  echo "Kept 400 days. To lock it so nobody can delete or shorten it (cannot be undone): bash scripts/harden.sh --lock-audit"
+  # Asked every run until it is locked (2026.11.11): an unlocked audit trail can be cut short by anyone with Editor.
+  echo "Kept 400 days, but not locked: someone with enough access could still shorten or delete it."
+  read -r -p "Type lock to lock it now (cannot be undone), or press Enter to leave it for now: " L
+  if [ "$L" = lock ]; then gcloud logging buckets update summitops-audit --location=global --locked --quiet; echo "Locked."; fi
 fi
 
 step "6. Redeploying with the new account, keys and login"
