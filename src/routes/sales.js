@@ -248,12 +248,15 @@ router.post('/orders/:id/refund', lessonOrder, validate(refundBody), async (req,
 
     // What the refund is worth: what each line still holds (its price less its discount, less what already went back on
     // its tickets for a change of day or a price drop: lib/linevalue.js), less a credit used for it, plus its tax share.
-    // Free-of-charge (comp) payments are not money to give back, so only the part actually paid is refunded.
+    // It goes back to the tenders that paid for those lines (lib/tenders.js): gift card money back on the gift card, a
+    // comp's share gives nothing back, a payment plan's unpaid share comes off its later installments.
     const pays = await rows(conn, 'SELECT * FROM order_payments WHERE tenant_id = ? AND order_id = ? ORDER BY id', [tenantId, orderId]);
     const real = pays.filter((p) => p.tender !== 'comp');
     const realPaid = real.reduce((n, p) => n + p.amount_cents, 0);
     const LV = require('../lib/linevalue');
-    let worth = 0; let worthTax = 0; let creditOff = 0;
+    const TD = require('../lib/tenders');
+    const allItems = await rows(conn, 'SELECT * FROM order_items WHERE tenant_id = ? AND order_id = ?', [tenantId, orderId]);
+    let worth = 0; let worthTax = 0; let creditOff = 0; const picks = [];
     for (const l of lines) {
       const gross = Math.max(l.unit_price_cents * l.quantity - l.discount_cents, 0);
       const used = usedCredit.get(l.id) || 0;
@@ -261,33 +264,29 @@ router.post('/orders/:id/refund', lessonOrder, validate(refundBody), async (req,
       const pre = Math.max(kept - used, 0);
       const tax = gross > 0 ? Math.round(l.tax_cents * pre / gross) : 0;
       worth += pre + tax; worthTax += tax; creditOff += Math.min(used, kept);
+      picks.push({ line: l, cents: pre + tax });
     }
-    const ratio = order.total_cents ? realPaid / order.total_cents : 0;
-    let amount = Math.round(worth * ratio);
-    let taxPart = Math.round(worthTax * ratio);
+    const left = await TD.leftOf(conn, tenantId, orderId, pays);
+    const parts0 = TD.mix(order, allItems, pays, picks);
+    let share = { gift: parts0.gift, free: parts0.free };
+    let amount = share.gift + share.free;
+    let taxPart = worth ? Math.round(worthTax * amount / worth) : 0;
     if (lines.length === open.length) {
       // The last of the order: return exactly what is left, so rounding on earlier part refunds can never block it.
+      const ratio = order.total_cents ? realPaid / order.total_cents : 0;
       const back = await one(conn, 'SELECT COALESCE(SUM(amount_cents), 0) AS cents, COALESCE(SUM(tax_cents), 0) AS tax FROM order_refunds WHERE tenant_id = ? AND order_id = ?', [tenantId, orderId]);
       amount = Math.max(realPaid - Number(back.cents) - Math.round(creditOff * ratio), 0);
       taxPart = Math.min(Math.max(Math.round(order.tax_cents * ratio) - Number(back.tax), 0), amount);
+      const gift = Math.min(Math.max(left('gift_card'), 0), amount);
+      share = { gift, free: amount - gift };
     }
     await require('./guestswindow').refundAllowed(conn, req, orderId, amount);
     // A large refund needs the second check (STEP_UP_REFUND_CENTS, $200 by default).
     const big = Number(process.env.STEP_UP_REFUND_CENTS || 20000);
     if (amount > big) require('../lib/stepup').require(req, `refund more than $${(big / 100).toFixed(0)}`);
 
-    // Send the money back the way it came, last payment first, never more than was paid and not yet returned that way.
-    const returned = await rows(conn, 'SELECT method, SUM(amount_cents) AS cents FROM order_refunds WHERE tenant_id = ? AND order_id = ? GROUP BY method', [tenantId, orderId]);
-    const left = (tender) => real.filter((p) => p.tender === tender).reduce((n, p) => n + p.amount_cents, 0) - Number((returned.find((r) => r.method === tender) || {}).cents || 0);
-    const plan = [];
-    let todo = amount;
-    const tenders = body.method ? [body.method] : [...new Set(real.map((p) => p.tender).reverse())];
-    for (const tender of tenders) {
-      if (todo <= 0) break;
-      const give = Math.min(todo, Math.max(left(tender), 0));
-      if (give > 0) { plan.push({ method: tender, cents: give }); todo -= give; }
-    }
-    if (todo > 0) throw conflict(body.method ? `Only ${money(Math.max(left(body.method), 0))} is left to return by ${body.method.replace('_', ' ')}` : 'There is not enough left to refund from what was paid');
+    // Send the money back to the tenders that paid for these lines, never more than was paid and not yet returned that way.
+    const plan = TD.plan(share, real, left, body.method || null);
 
     // Undo what was sold.
     const ids = lines.map((l) => l.id);
@@ -316,23 +315,7 @@ router.post('/orders/:id/refund', lessonOrder, validate(refundBody), async (req,
     }
     // Gift card money goes back on the card (unless the card itself has since been canceled).
     const giftBack = plan.find((x) => x.method === 'gift_card');
-    if (giftBack) {
-      let remaining = giftBack.cents;
-      for (const p of pays.filter((x) => x.tender === 'gift_card').reverse()) {
-        if (remaining <= 0) break;
-        // Each card gets back at most what it paid less what earlier refunds already put back on it.
-        const already = await one(conn, "SELECT COALESCE(SUM(delta_cents), 0) AS cents FROM gift_card_txns WHERE tenant_id = ? AND gift_card_id = ? AND order_id = ? AND kind = 'refund'", [tenantId, p.gift_card_id, orderId]);
-        const put = Math.min(remaining, Math.max(p.amount_cents - Number(already.cents), 0));
-        if (put <= 0) continue;
-        const g = await one(conn, 'SELECT status, balance_cents FROM gift_cards WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, p.gift_card_id]);
-        if (g && g.status === 'active') {
-          const next = g.balance_cents + put;
-          await conn.query('UPDATE gift_cards SET balance_cents = ? WHERE tenant_id = ? AND id = ?', [next, tenantId, p.gift_card_id]);
-          await conn.query("INSERT INTO gift_card_txns (tenant_id, gift_card_id, order_id, kind, delta_cents, balance_after_cents) VALUES (?, ?, ?, 'refund', ?, ?)", [tenantId, p.gift_card_id, orderId, put, next]);
-        }
-        remaining -= put;
-      }
-    }
+    if (giftBack) await TD.backOnCards(conn, tenantId, orderId, pays, giftBack.cents);
 
     // Cash comes out of a drawer: the one chosen, or the refunder's own open drawer, so that drawer's count stays right.
     let tillId = null;
@@ -375,7 +358,7 @@ router.post('/orders/:id/refund', lessonOrder, validate(refundBody), async (req,
     const stillOpen = open.length - lines.length;
     // A payment plan: a whole refund stops its charges; a part refund takes the unpaid part of those lines off what is to come.
     if (!stillOpen) await PPL.stopForRefund(conn, tenantId, orderId, req);
-    else await PPL.lowerForRefund(conn, tenantId, orderId, Math.max(worth - amount, 0), req);
+    else await PPL.lowerForRefund(conn, tenantId, orderId, parts0.unpaid, req);
     await conn.query('UPDATE orders SET refunded_cents = refunded_cents + ?, status = ? WHERE tenant_id = ? AND id = ?', [amount, stillOpen ? 'paid' : 'refunded', tenantId, orderId]);
     await audit(conn, req, 'refund', 'orders', orderId, { amount_cents: amount, reason: body.reason, lines: ids.length, whole: !stillOpen });
     return { amount_cents: amount, returns: plan.map((x) => ({ method: x.method, amount_cents: x.cents })), whole_order: !stillOpen, refund_ids: refundIds, card_rows: cardRows, item_ids: ids };
