@@ -209,7 +209,7 @@ const skip = () => !JSDOM && { skip: 'jsdom is not installed' };
 
 test('owner: every screen renders with real data and its dialogs open', skip(), async () => {
   ok(await api('POST', '/documents/categories', { token: T.owner, body: { name: 'Policies' } }));
-  for (const v of ['dashboard', 'sell', 'gate', 'conditions', 'catalog', 'rentals', 'workforce', 'school', 'programs', 'patrol', 'people', 'myshifts', 'settings', 'money', 'documents', 'availability']) {
+  for (const v of ['dashboard', 'sell', 'gate', 'conditions', 'catalog', 'rentals', 'workforce', 'school', 'programs', 'patrol', 'people', 'myshifts', 'settings', 'money', 'documents', 'availability', 'calendar']) {
     const root = await renderView(v, 'owner', T.owner);
     assert.ok(root.textContent.length > 20, `${v} is empty`);
     await exercise(root, `owner/${v}`);
@@ -225,10 +225,10 @@ test('dashboard shows the real numbers', skip(), async () => {
 
 test('each role sees working screens (and only screens built for it)', skip(), async () => {
   const plan = {
-    counter: ['sell', 'gate', 'conditions', 'rentals', 'school', 'programs', 'people', 'myshifts', 'settings'],
-    instructor: ['conditions', 'school', 'programs', 'people', 'myshifts', 'settings'],
-    patrol: ['patrol', 'conditions', 'myshifts', 'settings'],
-    staff: ['gate', 'conditions', 'myshifts', 'settings'],
+    counter: ['sell', 'gate', 'conditions', 'rentals', 'school', 'programs', 'people', 'myshifts', 'settings', 'calendar'],
+    instructor: ['conditions', 'school', 'programs', 'people', 'myshifts', 'settings', 'calendar'],
+    patrol: ['patrol', 'conditions', 'myshifts', 'settings', 'calendar'],
+    staff: ['gate', 'conditions', 'myshifts', 'settings', 'calendar'],
   };
   for (const [role, views] of Object.entries(plan)) {
     for (const v of views) {
@@ -445,7 +445,7 @@ test('sign in through the real form, move around, and sign out', skip(), async (
   assert.equal(document.querySelector('.nav a[aria-current=page]').textContent, 'Today');
 
   const links = [...document.querySelectorAll('.nav a.nav-row')];
-  assert.equal(links.length, 23, 'owner sees every app (Inbox, Waivers, Lost and found, Settings and Help included; Partner passes is a Sell tab and Billing a Settings page now)');
+  assert.equal(links.length, 24, 'owner sees every app (Calendar, Inbox, Waivers, Lost and found, Settings and Help included; Partner passes is a Sell tab and Billing a Settings page now)');
   assert.equal(document.querySelectorAll('.nav-title').length, 5, 'the five groups, always open');
   assert.equal(document.querySelector('.nav button[aria-expanded]'), null, 'no folding groups');
   assert.equal(document.querySelector('.rail-toggle'), null, 'no collapsing rail');
@@ -625,7 +625,7 @@ test('role menus: a counter sees only their apps, starts on Sell, and finds the 
     assert.ok(document.querySelector('.shell.role-menu'));
     assert.equal(document.querySelectorAll('.rail .nav-title').length, 0, 'no group headings');
     const rows = [...document.querySelectorAll('.rail nav[aria-label=Main] .nav-row')].map((a) => a.dataset.key);
-    assert.deepEqual(rows, ['sell', 'gate', 'rentals', 'people', 'waivers', 'shop', 'inbox', 'myshifts'], 'the menu order, then Inbox and My shifts');
+    assert.deepEqual(rows, ['sell', 'gate', 'rentals', 'people', 'waivers', 'shop', 'inbox', 'myshifts', 'calendar'], 'the menu order, then Inbox, My shifts and Calendar');
     assert.deepEqual([...document.querySelectorAll('.rail .nav-bottom a')].map((a) => a.textContent), ['Settings', 'Help']);
     const all = document.querySelector('.rail .nav-all');
     const n = Number(/(\d+) more/.exec(all.textContent)[1]);
@@ -662,7 +662,7 @@ test('role menus: a patroller starts on Patrol; the phone Menu shows Patrol sect
   try {
     await signInAs(`patrol@${slug}.test`);
     assert.equal(window.location.hash, '#/patrol');
-    assert.deepEqual([...document.querySelectorAll('.rail nav[aria-label=Main] .nav-row')].map((a) => a.dataset.key), ['patrol', 'conditions', 'inbox', 'myshifts']);
+    assert.deepEqual([...document.querySelectorAll('.rail nav[aria-label=Main] .nav-row')].map((a) => a.dataset.key), ['patrol', 'conditions', 'inbox', 'myshifts', 'calendar']);
     assert.equal(document.querySelector('.rail .nav-sections').hidden, false, 'Patrol sections in the side menu');
     assert.deepEqual([...document.querySelectorAll('.tabbar .tab')].map((t) => t.textContent), ['Patrol', 'Mountain', 'Inbox', 'My shifts', 'Menu']);
     await go('#/patrol/cases');

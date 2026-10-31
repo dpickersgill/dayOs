@@ -264,6 +264,8 @@ function createApp() {
   api.use('/public', rateLimit({ windowMs: 60_000, max: Number(process.env.PUBLIC_RATE_LIMIT) || 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/lostfound').publicRouter, require('./routes/partnerpasses').publicRouter, require('./routes/patrolclaims').publicRouter, require('./routes/patrolscene').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter, require('./routes/rentalforms').publicRouter, require('./routes/schoollineup').publicRouter, require('./routes/schoolparents').publicRouter, require('./routes/schoolpay').publicRouter, require('./routes/schooldirector').publicRouter, require('./routes/guestswindow').publicRouter, require('./routes/guestsaccount').publicRouter, require('./routes/guestsloyalty').publicRouter, require('./routes/guestsfair').publicRouter);
   api.use(authRoutes); // login, tenants, users, me (each route applies authenticate itself where needed)
   api.use(require('./routes/security')); // passkeys, the second check, sessions, devices, PINs, terminals (each route authenticates)
+  // A person's private calendar link for their phone's calendar app (2026.11.10): no sign-in, the link is the key.
+  api.use('/calendar-feed', rateLimit({ windowMs: 60_000, max: Number(process.env.CALENDAR_FEED_RATE_LIMIT) || 30, message: 'Too many requests, slow down' }), require('./routes/mountaincal').feedRouter);
 
   // Everything below requires a valid token; tenant comes from the token only.
   api.use(authenticate);
@@ -346,6 +348,7 @@ function createApp() {
   api.use('/programs', programs);
   api.use('/reports', reports);
   api.use('/board', board);
+  api.use('/calendar', require('./routes/mountaincal').router); // 2026.11.10: the Mountain calendar
   api.use(finance); // tax rules, tenant profile, till, reconciliation, receipts, exports
 
   app.use('/api/v1', api);

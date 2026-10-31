@@ -40,6 +40,7 @@ const VIEWS = [
   ['money', 'Money', () => isManager(), () => import('./views/money.js')],
   ['workforce', 'Staff and schedule', () => isManager(), () => import('./views/workforce.js')],
   ['myshifts', 'My shifts', () => true, () => import('./views/myshifts.js')],
+  ['calendar', 'Calendar', () => ctx.me.role !== 'area', () => import('./views/calendar.js')],
   ['settings', 'Settings', () => true, () => import('./views/settings.js')],
   ['help', 'Help', () => true, () => import('./views/help.js')],
   ['area', 'Patrol summary', () => ctx.me.role === 'area', () => import('./views/area.js')],
@@ -463,7 +464,7 @@ let navToken = 0;
 const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
 
 // An app the platform has turned off for this mountain is hidden for everyone, including the owner.
-const ALWAYS = ['dashboard', 'inbox', 'people', 'waivers', 'lostfound', 'myshifts', 'settings', 'help', 'area'];
+const ALWAYS = ['dashboard', 'calendar', 'inbox', 'people', 'waivers', 'lostfound', 'myshifts', 'settings', 'help', 'area'];
 const appOn = (key) => ALWAYS.includes(key) || !ctx.me.modules || ctx.me.modules.includes(key);
 function visibleViews() {
   // The ski area's read-only login sees the patrol summary and its own account, nothing else.
