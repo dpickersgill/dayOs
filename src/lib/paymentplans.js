@@ -31,8 +31,13 @@ function split(total, count) {
   const per = Math.floor(total / count);
   return [total - per * (count - 1), ...Array(count - 1).fill(per)];
 }
-/** The schedule: [{ n, on, cents }] from day, monthly. */
-const schedule = (total, count, day) => split(total, count).map((cents, i) => ({ n: i + 1, on: addMonths(day, i), cents }));
+/**
+ * The schedule: [{ n, on, cents }] from day, monthly. upfront: the part paid in full with the first installment (gift
+ * cards and gift experiences are never bought on credit, 2026.11.11); only the rest is spread.
+ */
+const schedule = (total, count, day, upfront = 0) => split(total - upfront, count).map((cents, i) => ({ n: i + 1, on: addMonths(day, i), cents: i === 0 ? cents + upfront : cents }));
+/** What in a basket is paid in full up front: gift cards and gift experiences. */
+const upfrontOf = (gifts) => (gifts || []).reduce((n, g) => n + Number(g.amount_cents || 0), 0);
 
 /** Products that can be paid in a plan: season passes, and products a manager marked. */
 async function planProducts(db, tenantId, ids) {
@@ -51,13 +56,15 @@ async function quote(db, tenantId, basket) {
   if (!Number(s.plans_on)) return { available: false };
   const total = Number(basket && (basket.total_cents !== undefined ? basket.total_cents : basket.total)); // the shop sends total
   const count = Number(s.plans_count) || 3;
-  if (!(total >= count * 100)) return { available: false };
+  const upfront = Math.max(Number(basket && basket.upfront_cents) || 0, 0);
+  if (!(total - upfront >= count * 100)) return { available: false };
   const ids = [...new Set(((basket && basket.lines) || []).map((l) => Number(l.product_id)).filter(Boolean))];
   if (!(await planProducts(db, tenantId, ids)).length) return { available: false };
   if (!(await connect.payee(tenantId, db)).ok) return { available: false };
   const t = await one(db, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId]);
-  const sch = schedule(total, count, basket.today || todayIn(t.timezone));
-  return { available: true, provider: 'stripe', count, first_cents: sch[0].cents, then: sch.slice(1).map((x) => ({ on: x.on, cents: x.cents })), words: `Pay in ${count}: ${money(sch[0].cents)} today, then ${money(sch[1].cents)} a month` };
+  const sch = schedule(total, count, basket.today || todayIn(t.timezone), upfront);
+  return { available: true, provider: 'stripe', count, upfront_cents: upfront, first_cents: sch[0].cents, then: sch.slice(1).map((x) => ({ on: x.on, cents: x.cents })),
+    words: `Pay in ${count}: ${money(sch[0].cents)} today${upfront ? ` (gift cards in full)` : ''}, then ${money(sch[1].cents)} a month` };
 }
 
 /**
@@ -80,7 +87,8 @@ async function start(conn, tenantId, order, opts = {}) {
   const t = await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId]);
   const today = opts.today || todayIn(t.timezone);
   const total = Number(order.total_cents);
-  const sch = schedule(total, count, today);
+  const upfront = Math.max(Number((opts.plan && opts.plan.upfront_cents) || order.upfront_cents || 0), 0);
+  const sch = schedule(total, count, today, upfront);
   const [c] = await conn.query('INSERT INTO fair_cards (tenant_id, person_id, email, provider, account, customer, payment_intent, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     [tenantId, order.person_id || null, order.email || null, 'stripe', order.account || null, order.customer || null, order.payment_intent || null, order.payment_method || null]);
   const [p] = await conn.query('INSERT INTO payment_plans (tenant_id, order_id, person_id, email, name, provider, card_id, count, total_cents) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -406,4 +414,4 @@ async function planCardDone(l, sessionId) {
   return guestView(pool, l);
 }
 
-module.exports = { PROVIDERS, charging, BUSY, quote, start, checkoutExtra, schedule, addMonths, split, chargeOne, chargeDue, list, get, chargeNow, settle, cancel, stopForRefund, lowerForRefund, guestView, cardSession, cardDone, planCardDone };
+module.exports = { PROVIDERS, charging, BUSY, upfrontOf, quote, start, checkoutExtra, schedule, addMonths, split, chargeOne, chargeDue, list, get, chargeNow, settle, cancel, stopForRefund, lowerForRefund, guestView, cardSession, cardDone, planCardDone };

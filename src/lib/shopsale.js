@@ -250,7 +250,9 @@ async function quote(conn, tenant, items, extras = {}) {
   // "Pay in N" (lib/paymentplans.js, Track FAIR): only when the guest asked for it and the mountain's plans allow this basket.
   let plan = null;
   if (extras.plan) {
-    const pq = await require('./paymentplans').quote(conn, tenant.id, { lines: detail, addons, total: subtotal - rewardCents - discount + tax });
+    // Gift cards and gift experiences are never bought on credit: they are paid in full with the first installment.
+    const PPL = require('./paymentplans');
+    const pq = await PPL.quote(conn, tenant.id, { lines: detail, addons, total: subtotal - rewardCents - discount + tax, upfront_cents: PPL.upfrontOf(gifts) });
     if (!pq || !pq.available) throw conflict('Paying in parts is not offered for this order');
     plan = pq;
   }
