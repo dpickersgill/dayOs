@@ -151,13 +151,14 @@ router.post(
       const known = await devices.known(user, devices.hashOf(req));
       if (!known) await bcrypt.compare(pw, DUMMY_HASH);
       if (!known || !(await bcrypt.compare(pw, user.password_hash))) throw new AppError(429, TOO_MANY);
+      // In on a known device: the lock stays for everyone else until it runs out.
     } else if (!(await bcrypt.compare(pw, user.password_hash))) {
       if (tries === LOGIN_LOCK_AFTER) {
         await pool.query("INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id, detail) VALUES (?, NULL, 'login_locked', 'users', ?, ?)", [user.tenant_id, user.id, JSON.stringify({ after: LOGIN_LOCK_AFTER })]).catch(() => {});
       }
       throw unauthorized('Invalid credentials');
     }
-    await pool.query('UPDATE users SET login_failures = 0, login_locked_until = NULL WHERE id = ?', [user.id]);
+    if (tries) await pool.query('UPDATE users SET login_failures = 0, login_locked_until = NULL WHERE id = ?', [user.id]);
     refuseClosed(user);
     const keys = await passkeys.count('user', user.id);
     if (user.totp_enabled || keys) {

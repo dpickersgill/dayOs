@@ -1156,6 +1156,24 @@ export const ARTICLES = [
     steps: ['Open Today. Coming up lists the next few items for your teams, with the day and the time.', 'Tap an item, or press Calendar, to open the calendar.'],
     tips: ['The card is not shown on the wall screen.'], related: ['calendar-read'] },
   // ---- end Track CALENDAR
+  // ---- 2026.11.11, Track ACCESS: the second check, locked logins, the season's last day, the patrol roster, family links
+  { id: 'confirm-more', app: 'settings', title: 'When you are asked to confirm it is you', keywords: 'confirm it is you second check step up passkey add authenticator app recovery codes email end date download export names sales refunds payroll hours injury log locked login password wrong',
+    intro: 'Being signed in is not enough for some actions. You confirm it is you with your passkey, a code from your app, or, if you have neither, your password. It lasts 10 minutes.',
+    steps: ['Adding a passkey or setting up an authenticator app asks first. If you have neither yet, your password is enough.', 'New recovery codes ask for a code from your app or your passkey. Your password alone is not enough.', 'A manager changing the email or the last day of someone else\'s login confirms first. The old email address is told about the change.', 'Downloads with names in them ask first: sales and refunds, partner pass holders, payroll, hours for payroll and the staff injury log, as well as customer, waiver and patient lists.'],
+    tips: ['If you have a passkey or an authenticator app, your password alone never counts as the check, not even right after you change your password.', 'Wrong passwords count toward the 10 that lock a login for 15 minutes wherever they are typed, including here.', 'While a login is locked, the right password still works on a phone or computer that person has signed in from before. Anyone else is told to wait, whether or not the login exists.', 'A shared counter computer signed in with a PIN cannot change sign-in settings: no passkeys, no authenticator app, no new username. Sign in with your password for that.'], related: ['password', 'terminals'] },
+  { id: 'season-last-day', app: 'settings', title: 'The last day of a seasonal login', keywords: 'season end last day access ends midnight mountain time zone seasonal login stops',
+    intro: 'A seasonal login works through its last day, until midnight at the mountain. The mountain\'s own time zone decides, not the time on the server.',
+    steps: ['Open Settings, Team and logins, Logins.', 'Set Season end, or edit one person\'s date. The earliest date you can pick is today at the mountain.', 'To bring someone back, clear or move their date. A manager confirms it is them first.'],
+    tips: ['The calendar link on a phone stops after the last day too.'], related: ['terminals'] },
+  { id: 'patrol-roster-off', app: 'patrol', title: 'Taking someone off the patrol roster', keywords: 'remove roster leave patrol login access patient records host level',
+    intro: 'Removing someone from the roster ends their patrol access at once. Their login can no longer open cases or patient records.',
+    steps: ['Open Patrol, People, and the person.', 'Press Remove from roster and confirm. Their cases and training stay on record.', 'To switch the login off altogether, a manager opens Settings, Team and logins and turns it off.'],
+    tips: ['A patrol login linked to someone who is not on the roster has no patrol access. Add them to the roster to give it back.'] },
+  { id: 'family-links-end', app: 'school', title: 'How long family lesson links work', keywords: 'family link lesson email recap link expire 60 days change date cancel tip',
+    intro: 'The link in a lesson booking email works until 60 days after the lesson. The link in a recap email shows the lesson and takes a tip, but cannot change or cancel it.',
+    steps: ['To change a date or cancel, the family uses the link in the booking email.', 'If that link has run out, or they only have the recap, they call the ski school.'],
+    tips: ['A family asking for a sign-in link to their family page gets the same answer whether or not their email is on file. The email follows a moment later.'] },
+  // ---- end Track ACCESS
 ];
 
 export const articleById = (id) => ARTICLES.find((a) => a.id === id) || null;
