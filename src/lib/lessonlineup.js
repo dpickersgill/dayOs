@@ -299,6 +299,10 @@ async function moveBooking(conn, req, bookingId, toSessionId, { reason = null, i
   if (String(to.starts_at).slice(0, 10) !== String(from.starts_at).slice(0, 10)) throw bad('Move a student to a class on the same day. To change the day, use the family page or cancel and book again.');
   const clash = await studentClash(conn, tenantId, b.person_id, to.starts_at, to.ends_at, { ignoreSessionId: from.id, lock: true });
   if (clash) throw conflict(clashWords(clash));
+  // The class takes this student's age and discipline (2026.11.11). The level is the staff's call at the lineup.
+  const pe = await one(conn, 'SELECT first_name, date_of_birth FROM people WHERE tenant_id = ? AND id = ?', [tenantId, b.person_id]);
+  const why = pe && require('./lessonfamily').misfit(to, { first_name: pe.first_name, date_of_birth: pe.date_of_birth ? String(pe.date_of_birth instanceof Date ? pe.date_of_birth.toISOString() : pe.date_of_birth).slice(0, 10) : null, discipline: from.discipline });
+  if (why) throw conflict(why.replace(' Pick another lesson.', ' Pick another class.'));
   // On the day, at the lineup: only the students in the class count (lib/lessonrules.spotsLeft, under the lesson lock).
   const { booked: n } = await spotsLeft(conn, tenantId, to, { holds: false });
   let over = false;
