@@ -247,7 +247,7 @@ router.get('/risk-report', patrol, needs('reports'), async (req, res) => {
 // ================================================================ secure links
 function newToken() { return crypto.randomBytes(24).toString('base64url'); }
 const codeHash = (token, code) => sha(`${token}:${code}`);
-const linkOf = (req, token) => `${(process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '')}/c/${token}`;
+const linkOf = (req, token) => `${(process.env.APP_URL || require('../lib/baseurl').baseUrl(req)).replace(/\/$/, '')}/c/${token}`; // never the Host header in production
 
 const shareBody = z.object({
   shared_with: z.string().trim().min(2).max(150),

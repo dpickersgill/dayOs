@@ -27,8 +27,13 @@ load_service
 P=summitops
 WAF_RULES=(sqli-v33-stable xss-v33-stable lfi-v33-stable rfi-v33-stable rce-v33-stable scannerdetection-v33-stable protocolattack-v33-stable)
 
+# The visitor's address (2026.11.11): the app trusts the load balancer's own address in X-Forwarded-For
+# (TRUST_PROXY_LB_IPS) and nothing a visitor sends, so it is right whether run.app is open or not (src/lib/clientip.js).
+lb_ip() { gcloud compute addresses describe "$P-ip" --global --format='value(address)' 2>/dev/null || true; }
+
 if [ "$MODE" = unlock ]; then
-  gcloud run services update "$SERVICE" --region "$REGION" --ingress all --update-env-vars TRUST_PROXY_HOPS=1 --quiet
+  LBIP="$(lb_ip)"
+  gcloud run services update "$SERVICE" --region "$REGION" --ingress all --update-env-vars "TRUST_PROXY_HOPS=1${LBIP:+,TRUST_PROXY_LB_IPS=$LBIP}" --quiet
   echo "The run.app address answers again."
   exit 0
 fi
@@ -85,6 +90,10 @@ if [ "$MODE" = build ]; then
     gcloud compute forwarding-rules create "$P-http-rule" --global --load-balancing-scheme=EXTERNAL_MANAGED --address "$P-ip" --target-http-proxy "$P-http" --ports 80
   fi
 
+  # From now on the load balancer's address is trusted in X-Forwarded-For, so visitors coming through it keep their own
+  # address for rate limits while run.app is still open (2026.11.11).
+  gcloud run services update "$SERVICE" --region "$REGION" --update-env-vars "TRUST_PROXY_HOPS=1,TRUST_PROXY_LB_IPS=$IP" --quiet
+
   printf '\nBuilt. Now point each domain at %s with an A record at your domain registrar:\n' "$IP"
   for d in "${DOMAINS[@]}"; do echo "  $d  A  $IP"; done
   echo "The certificate turns ACTIVE 15 to 60 minutes after DNS points here. Check with:"
@@ -110,7 +119,7 @@ done
 step "Only the load balancer reaches the app"
 PUBLIC="$(envval PUBLIC_URL)"; [ -n "$PUBLIC" ] || PUBLIC="https://$APP_DOMAIN"
 gcloud run services update "$SERVICE" --region "$REGION" --ingress internal-and-cloud-load-balancing \
-  --update-env-vars "TRUST_PROXY_HOPS=2,PUBLIC_URL=$PUBLIC" --quiet
+  --update-env-vars "TRUST_PROXY_HOPS=1,TRUST_PROXY_LB_IPS=$(lb_ip),PUBLIC_URL=$PUBLIC" --quiet
 if gcloud scheduler jobs describe summitops-daily --location "$REGION" >/dev/null 2>&1; then
   gcloud scheduler jobs update http summitops-daily --location "$REGION" --uri "$PUBLIC/api/v1/internal/jobs/daily" --quiet
   echo "The daily job now goes through $PUBLIC."

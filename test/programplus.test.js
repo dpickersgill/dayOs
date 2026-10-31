@@ -237,9 +237,11 @@ test('the family page: a sign-in link by email, every child and date, update det
   const email = `pat.a.${suffix}@x.test`;
   const before = mails.length;
   ok(await pub('POST', '/family/link', { body: { email: 'nobody@x.test' } }));
+  await new Promise((r) => setTimeout(r, 200)); // the link is sent after the reply (2026.11.11)
   assert.equal(mails.length, before, 'an unknown email gets nothing, and the reply does not say so');
   ok(await pub('POST', '/family/link', { body: { email } }));
-  const mail = mails.slice(before).find((m) => m.To === email);
+  let mail;
+  for (let i = 0; i < 100 && !mail; i += 1) { mail = mails.slice(before).find((m) => m.To === email); if (!mail) await new Promise((r) => setTimeout(r, 20)); }
   const token = mail.TextBody.match(/\?t=([A-Za-z0-9_-]+)/)[1];
   const s = ok(await pub('POST', '/family/session', { body: { token } }));
   is(await pub('POST', '/family/session', { body: { token } }), 400, 'a link works once');

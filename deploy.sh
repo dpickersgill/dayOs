@@ -30,6 +30,7 @@ step "Checking the version"
 NEW_VERSION="$(node -p "require('./package.json').version")"
 NEW_BUILD="$(node -p "(()=>{try{return require('./src/release/build.json').build||'dev'}catch(_){return 'dev'}})()")"
 load_service
+source scripts/settings-check.sh && settings_check # production refuses unsafe settings from 2026.11.11
 STAGING_VERSION="$(curl -s --max-time 15 "$(check_url)/version" | jq -r '.version // empty' 2>/dev/null || true)"
 node scripts/check-version.js "$STAGING_VERSION" "$@"
 

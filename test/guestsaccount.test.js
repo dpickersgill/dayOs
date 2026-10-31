@@ -65,7 +65,8 @@ async function household(last, email, kids = 3) {
 async function signIn(email) {
   const before = mails.length;
   assert.equal((await pub('POST', '/family/link', { body: { email } })).status, 200);
-  const m = mails.slice(before).find((x) => x.To === email);
+  let m; // the link is sent after the reply (2026.11.11), so wait a moment for it
+  for (let i = 0; i < 100 && !m; i += 1) { m = mails.slice(before).find((x) => x.To === email); if (!m) await new Promise((r) => setTimeout(r, 20)); }
   assert.ok(m, 'a sign-in link was emailed');
   const token = /\?t=([A-Za-z0-9_-]+)/.exec(m.TextBody)[1];
   const s = await pub('POST', '/family/session', { body: { token } });
@@ -118,6 +119,7 @@ test('sign-in is by emailed link only, and the answer never says whether an emai
   const b = await pub('POST', '/family/link', { body: { email: 'nobody@x.test' } });
   assert.equal(a.status, 200); assert.equal(b.status, 200);
   assert.deepEqual(a.body, b.body, 'the same reply for a known and an unknown email');
+  for (let i = 0; i < 100 && !mails.slice(before).some((m) => m.To === 'known@x.test'); i += 1) await new Promise((r) => setTimeout(r, 20)); // sent after the reply
   assert.equal(mails.slice(before).filter((m) => m.To === 'nobody@x.test').length, 0);
   assert.equal(mails.slice(before).filter((m) => m.To === 'known@x.test').length, 1);
   assert.equal((await pub('GET', '/account')).status, 401, 'no session, no account');
