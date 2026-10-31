@@ -32,21 +32,33 @@ test.before(async () => {
 });
 test.after(async () => { await new Promise((r) => server.close(r)); await pool.end(); });
 
-test('the shipped research batch is well formed and was loaded by the migration', async () => {
-  const file = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'db', 'data', 'prospects-2026-10.json'), 'utf8'));
+test('the research files are well formed, load once from the console, and are not part of the server build', async () => {
+  const file = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'research', 'prospects-2026-10.json'), 'utf8'));
   assert.ok(file.batch && Array.isArray(file.prospects) && file.prospects.length >= 20);
   for (const p of file.prospects) {
     assert.ok(P.fromResearch(p).name, 'every ski area has a name');
     for (const c of p.contacts || []) assert.ok(!c.name || c.source_url, `${p.name}: ${c.name} needs a source`);
   }
+  const shipped = fs.readdirSync(path.join(__dirname, '..', 'db'), { recursive: true }).filter((f) => /prospects-.*\.json$/.test(f));
+  assert.deepEqual(shipped, [], 'no research files in db/, which the Dockerfile copies');
+  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'utf8'), /COPY research/);
+  // A shared test database may have it from an earlier run; a fresh one loads it now.
+  const [[before]] = await pool.query('SELECT name FROM prospect_batches WHERE name = ?', [file.batch]);
+  const first = await plat('POST', '/prospects/import', file);
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  if (!before) assert.ok(first.body.added >= 20, 'a fresh database gets the whole batch');
+  const again = await plat('POST', '/prospects/import', file);
+  assert.deepEqual(again.body, { batch: file.batch, already: true }, 'a batch loads once');
   const [[b]] = await pool.query('SELECT name FROM prospect_batches WHERE name = ?', [file.batch]);
-  assert.ok(b, 'the migration loaded the batch');
+  assert.ok(b, 'the batch is recorded');
   const list = await plat('GET', '/prospects?stage=');
   assert.equal(list.status, 200);
   assert.ok(list.body.data.length >= 20);
   assert.ok(!list.body.data.some((p) => p.indy_pass), 'no Indy Pass resorts');
   for (const n of file.excluded_indy_pass || []) assert.ok(!list.body.data.some((p) => p.name === n), `${n} is not on the list`);
   assert.ok(list.body.data.some((p) => p.leader && p.leader.name), 'the list shows who runs each area');
+  const second = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'research', 'prospects-2026-10b.json'), 'utf8'));
+  assert.equal((await plat('POST', '/prospects/import', second)).status, 200);
 });
 
 test('only the console sees prospects', async () => {

@@ -4,8 +4,9 @@
 // Each prospect has the area's facts (size, what it runs, who owns it, the software it uses today), the people to talk
 // to, a stage in the sales pipeline, the next step with a date, and a timeline of notes.
 //
-// A research batch (a JSON file in the format of db/data/prospects-2026-10.json) is loaded once by the migration, and
-// later batches can be imported from the console. Indy Pass partner resorts are never added. Importing never overwrites what an operator has changed: a known
+// A research batch (a JSON file in the format of research/prospects-2026-10.json) is loaded from the console by the
+// platform operator (Import research). A file with a batch name loads once (loadBatch); loading it again changes nothing.
+// The files are not part of the server build. Indy Pass partner resorts are never added. Importing never overwrites what an operator has changed: a known
 // prospect (same name and state) only gets facts that are still empty, and contacts it does not have yet.
 
 const STAGES = [
@@ -144,6 +145,30 @@ async function importBatch(conn, list, { region = null, checkedOn = null } = {})
   return { added, updated, contacts, skipped };
 }
 
+/**
+ * Loads a research file ({ batch, checked_on, prospects, excluded_indy_pass }) once, by its batch name. Ski areas named
+ * in excluded_indy_pass are left out like any Indy Pass resort. Returns { batch, already: true } when that batch was
+ * loaded before, or { batch, added, updated, contacts, skipped }. pool is a mysql2 pool: the batch is claimed and loaded
+ * in one transaction, so two uploads of the same file at once load it once.
+ */
+async function loadBatch(pool, file) {
+  const name = String(file.batch || '').trim().slice(0, 100);
+  if (!name) throw new Error('loadBatch needs a batch name');
+  const excluded = new Set((Array.isArray(file.excluded_indy_pass) ? file.excluded_indy_pass : []).map((n) => String(n).trim().toLowerCase()));
+  const list = (file.prospects || []).filter((p) => !(p && excluded.has(String(p.name || '').trim().toLowerCase())));
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [claim] = await conn.query('INSERT IGNORE INTO prospect_batches (name, added) VALUES (?, 0)', [name]);
+    if (!claim.affectedRows) { await conn.rollback(); return { batch: name, already: true }; }
+    const r = await importBatch(conn, list, { checkedOn: file.checked_on || null });
+    r.skipped += (file.prospects || []).length - list.length;
+    await conn.query('UPDATE prospect_batches SET added = ? WHERE name = ?', [r.added, name]);
+    await conn.commit();
+    return { batch: name, ...r };
+  } catch (err) { await conn.rollback().catch(() => {}); throw err; } finally { conn.release(); }
+}
+
 /** A prospect row as the console shows it. */
 function shape(p) {
   return {
@@ -155,4 +180,4 @@ function shape(p) {
   };
 }
 
-module.exports = { STAGES, STAGE_KEYS, OPEN_STAGES, ROLES, ROLE_KEYS, LEADER_ORDER, NOTE_KINDS, PATROL_KINDS, OFFERS, fromResearch, contactFrom, importBatch, shape };
+module.exports = { STAGES, STAGE_KEYS, OPEN_STAGES, ROLES, ROLE_KEYS, LEADER_ORDER, NOTE_KINDS, PATROL_KINDS, OFFERS, fromResearch, contactFrom, importBatch, loadBatch, shape };

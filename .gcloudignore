@@ -12,3 +12,5 @@ test
 *.zip
 *.tar.gz
 *.tgz
+# Prospect research files are loaded once in the platform console, not shipped in the server build
+research

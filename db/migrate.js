@@ -1320,33 +1320,9 @@ const outreachSteps = [
   ) ENGINE=InnoDB`],
 ];
 
-// Research batches shipped in db/data are loaded once each (by batch name), so deleting a prospect never brings it back.
-async function loadProspectBatches(conn) {
-  const dir = path.join(__dirname, 'data');
-  if (!fs.existsSync(dir)) return;
-  const { importBatch } = require('../src/lib/prospects');
-  for (const f of fs.readdirSync(dir).filter((x) => /^prospects-.*\.json$/.test(x)).sort()) {
-    const file = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
-    const name = String(file.batch || f).slice(0, 100);
-    const [[done]] = await conn.query('SELECT name FROM prospect_batches WHERE name = ?', [name]);
-    if (done) continue;
-    const r = await importBatch(conn, file.prospects || [], { checkedOn: file.checked_on || null });
-    await conn.query('INSERT INTO prospect_batches (name, added) VALUES (?, ?)', [name, r.added]);
-    console.log(`Prospects: loaded "${name}" (${r.added} new, ${r.contacts} contacts)`);
-  }
-  // Indy Pass partner resorts came off the list (Oct 26, 2026). Where the first batch was loaded before that, the ones
-  // nobody has worked on yet are removed once: still being researched, with nothing on their timeline.
-  const cleanup = 'cleanup: Indy Pass resorts 2026-10';
-  const [[cleaned]] = await conn.query('SELECT name FROM prospect_batches WHERE name = ?', [cleanup]);
-  if (!cleaned) {
-    const first = path.join(dir, 'prospects-2026-10.json');
-    const names = fs.existsSync(first) ? JSON.parse(fs.readFileSync(first, 'utf8')).excluded_indy_pass || [] : [];
-    const [r] = await conn.query(`DELETE FROM prospects WHERE stage = 'research' AND (indy_pass = 1${names.length ? ` OR name IN (${names.map(() => '?').join(', ')})` : ''})
-      AND NOT EXISTS (SELECT 1 FROM prospect_notes n WHERE n.prospect_id = prospects.id)`, names);
-    await conn.query('INSERT INTO prospect_batches (name, added) VALUES (?, 0)', [cleanup]);
-    if (r.affectedRows) console.log(`Prospects: removed ${r.affectedRows} Indy Pass resort${r.affectedRows === 1 ? '' : 's'}`);
-  }
-}
+// Research batches of prospects are no longer shipped in the server build (2026.11.10). The platform operator loads each
+// research file once in the console (Prospects, Import research); src/lib/prospects.js loadBatch records it by name in
+// prospect_batches, so loading it again changes nothing. The files are in research/ in the release zip.
 
 const skiAreaSteps = [
   ['ski_area_cache', (c) => tableExists(c, 'ski_area_cache'), `CREATE TABLE ski_area_cache (
@@ -1622,7 +1598,6 @@ async function main() {
   if (moved) console.log(`Moved ${moved} upcoming patrol shift${moved === 1 ? '' : 's'} to the Patrol schedule`);
   // Keep the wording each mountain uses today, so waivers already signed against it can be shown word for word.
   await conn.query('INSERT IGNORE INTO waiver_texts (tenant_id, sha, body) SELECT id, SHA2(waiver_text, 256), waiver_text FROM tenants WHERE CHAR_LENGTH(waiver_text) > 0');
-  await loadProspectBatches(conn);
   const numbered = await backfillCaseNumbers(conn);
   if (numbered) console.log(`Numbered ${numbered} existing incident report${numbered === 1 ? '' : 's'}`);
   await conn.end();
