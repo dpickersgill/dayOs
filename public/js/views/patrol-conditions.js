@@ -4,6 +4,7 @@
 import { get, post, patch } from '../api.js';
 import { h, clear, input, select, field, button, toast, formDialog, dialog, val, nowInput, fmtTime, fmtDateTime, label, fail } from '../ui.js';
 import { send, pending } from '../outbox.js';
+import { liftText } from '../liftstatus.js';
 import { voidDialog, sentToast } from './patrol-tools.js';
 import { voidedNote } from './patrol-bedside.js';
 
@@ -12,7 +13,6 @@ export const METHOD = [['phone', 'Phone'], ['in_person', 'In person'], ['text', 
 const whoText = (k) => (WHO.find((x) => x[0] === k) || [k, label(k)])[1];
 const methodText = (k) => (METHOD.find((x) => x[0] === k) || [k, label(k)])[1];
 const SKY = { clear: 'Clear', partly: 'Partly cloudy', overcast: 'Overcast', snow: 'Snowing', rain: 'Raining', mixed: 'Mixed snow and rain', fog: 'Fog' };
-const LIFT = { open: 'Open', hold: 'On hold', wind_hold: 'Wind hold', closed: 'Closed' };
 const DIFF = { green: 'Easiest', blue: 'More difficult', black: 'Most difficult', double_black: 'Expert', park: 'Terrain park' };
 
 /** What the mountain's records said at the time, as a short list. Fixed once taken; the patroller can take it again. */
@@ -32,7 +32,7 @@ export function conditionsBox({ c, editable, id, onDone }) {
   }
   if (s && s.lift) {
     const l = s.lift;
-    rows.push(['Lift', [l.name, l.status ? LIFT[l.status] : null, l.stop ? `stopped ${fmtTime(l.stop.started_at)}${l.stop.ended_at ? ` to ${fmtTime(l.stop.ended_at)}` : ''}, ${label(l.stop.reason)}${l.stop.note ? `: ${l.stop.note}` : ''}` : null].filter(Boolean).join(', ')]);
+    rows.push(['Lift', [l.name, l.status ? liftText(l.status) : null, l.stop ? `stopped ${fmtTime(l.stop.started_at)}${l.stop.ended_at ? ` to ${fmtTime(l.stop.ended_at)}` : ''}, ${label(l.stop.reason)}${l.stop.note ? `: ${l.stop.note}` : ''}` : null].filter(Boolean).join(', ')]);
   }
   const retake = editable ? button('Take again', async () => { try { await post(`/patrol/incidents/${id}/conditions`, {}); toast('Conditions taken again'); await onDone(); } catch (err) { fail(err); } }, { small: true }) : null;
   return h('div', { class: 'cond-box', 'data-area': 'conditions-records' },

@@ -2,6 +2,7 @@
 
 const express = require('express');
 const { pool, rows, one } = require('../db');
+const { liftWord } = require('../lib/liftstatus');
 const { crud } = require('../lib/crud');
 const { requireRole } = require('../middleware/auth');
 const { partialOf, z, dateStr, dateTimeStr, timeStr, validate, normDateTime, addDays, todayIn } = require('../lib/util');
@@ -101,7 +102,7 @@ publicRouter.get('/:slug/conditions', async (req, res) => {
     date: today,
     day: day || { status: 'closed' },
     lifts_open: lifts.filter((l) => l.status === 'open').length,
-    lifts,
+    lifts: lifts.map((l) => ({ ...l, status_word: liftWord(l.status) })), // the word every screen uses (src/lib/liftstatus.js)
     trails_open: trails.filter((t) => t.status === 'open').length,
     trails,
     upcoming_events: events,

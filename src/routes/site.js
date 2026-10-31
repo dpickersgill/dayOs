@@ -488,7 +488,7 @@ api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.e
   let copy = false;
   if (config.site.contactEmail && mailer.enabled()) {
     const lines = [`${KINDS[b.kind]} from the website`, '', `Name: ${b.name}`, `Mountain: ${b.mountain}`, b.role ? `Role: ${b.role}` : null, `Email: ${b.email}`, b.phone ? `Phone: ${b.phone}` : null,
-      b.lifts ? `Lifts: ${b.lifts}` : null, b.plan_interest ? `Interested in: ${b.plan_interest}` : null, b.founding ? 'Wants to be considered for the founding group.' : null, b.message ? `\n${b.message}` : null,
+      b.lifts ? `Lifts: ${b.lifts}` : null, b.plan_interest ? `Interested in: ${b.plan_interest}` : null, b.founding ? 'Wants to apply for the Founding Mountain Program.' : null, b.message ? `\n${b.message}` : null,
       '', 'Reply to this email to answer them. It is also in the console, under Leads.'].filter((x) => x !== null);
     const sent = await mailer.sendPlatform({ to: config.site.contactEmail, replyTo: b.email, subject: `${KINDS[b.kind]}: ${b.mountain}`, text: lines.join('\n'), tag: 'site-lead' });
     if (sent.ok) {
