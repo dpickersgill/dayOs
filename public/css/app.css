@@ -3668,3 +3668,10 @@ button.fill-day:hover { border-color: var(--line-strong); }
   .liftchk-edit li { flex-wrap: wrap; }
   .liftchk-edit li input:not([type]) { flex-basis: 100%; }
 }
+
+/* ---- Patrol fixes (2026.11.11, Track PATROL): guest help repeats on the board, the sweep's finds, number boxes, photo time source */
+.call-repeats { font-size: .9rem; }
+.call-repeats summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 600; }
+.call-repeats ul { margin: 4px 0 0; padding-left: 18px; }
+.sweep-stops .stop-mark s { color: var(--muted); }
+.short-num, .input-row input.short-num { min-width: 64px; }

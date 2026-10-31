@@ -3,6 +3,7 @@
 //   patrol_sweep_marks.resolution/resolved_*  how a person or hazard found on the sweep was dealt with, or why it was
 //                                             entered in error. A find is never overwritten or deleted (PATROL-3).
 //   patrol_sweep_mark_log                     every mark, change, undo and resolution, append-only.
+//   dispatch_calls.sender_hash/ip_hash/flood_of  guest help floods grouped, never refused (PATROL-4).
 module.exports = ({ tableExists, columnExists }) => [
   ['patrol_sweep_marks.resolution', (c) => columnExists(c, 'patrol_sweep_marks', 'resolution'),
     "ALTER TABLE patrol_sweep_marks ADD COLUMN resolution VARCHAR(255) NULL, ADD COLUMN resolved_kind ENUM('dealt_with','error') NULL, ADD COLUMN resolved_at DATETIME NULL, ADD COLUMN resolved_by BIGINT UNSIGNED NULL"],
@@ -22,4 +23,8 @@ module.exports = ({ tableExists, columnExists }) => [
     KEY ix_psmlog_run (tenant_id, run_id, item_id),
     CONSTRAINT fk_psmlog_run FOREIGN KEY (tenant_id, run_id) REFERENCES patrol_sweep_runs(tenant_id, id)
   ) ENGINE=InnoDB`],
+  // PATROL-4: guest help requests are always accepted; repeats from one phone (sender_hash) or address (ip_hash), both
+  // keyed hashes, fold under the first of the group (flood_of) and patrol is alerted once (flood_alerted_at).
+  ['dispatch_calls.sender_hash', (c) => columnExists(c, 'dispatch_calls', 'sender_hash'),
+    'ALTER TABLE dispatch_calls ADD COLUMN sender_hash CHAR(64) NULL, ADD COLUMN ip_hash CHAR(64) NULL, ADD COLUMN flood_of BIGINT UNSIGNED NULL, ADD COLUMN flood_alerted_at DATETIME NULL, ADD KEY ix_dcall_sender (tenant_id, sender_hash, received_at), ADD KEY ix_dcall_ip (tenant_id, ip_hash, received_at)'],
 ];

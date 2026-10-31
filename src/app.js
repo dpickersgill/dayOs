@@ -223,11 +223,12 @@ function createApp() {
   api.use('/tenants', rateLimit({ windowMs: 60_000, max: 5 }));
   api.use('/auth/change-password', rateLimit({ windowMs: 60_000, max: 10, message: 'Too many attempts' }));
   api.use('/users', rateLimit({ windowMs: 60_000, max: 60 }));
-  // The guest help form is open to anyone with the link, so it gets its own tight limit: 5 requests per 10 minutes per address.
+  // The caller-location link is open to anyone with it: 30 tries per 10 minutes per address.
   api.post('/public/locate/:token', rateLimit({ windowMs: 600_000, max: 30, message: 'Too many tries. Please call patrol.' }));
   api.post('/public/:slug/partner/:id/reserve', rateLimit({ windowMs: 600_000, max: Number(process.env.HELP_RATE_LIMIT) || 10, message: 'Too many reservations from here. Please call the mountain.' }));
   api.post('/public/:slug/lost', rateLimit({ windowMs: 600_000, max: Number(process.env.HELP_RATE_LIMIT) || 5, message: 'Too many reports from here. Please call the mountain.' }));
-  api.post('/public/:slug/help', rateLimit({ windowMs: 600_000, max: Number(process.env.HELP_RATE_LIMIT) || 5, message: 'Too many requests. Please call patrol or flag down a patroller.' }));
+  // The guest help form has no address limit here: a request for help is always accepted. dispatch.js groups repeats from
+  // one phone or address on the board and alerts patrol instead of refusing anyone.
   // Online lesson requests take a name and contact details from anyone, so they get a tight limit too: 8 a hour per address.
   // "Next times with room" for a full lesson: a guest looks a few times; a script inflating sold-out demand does not get far.
   api.get('/public/:slug/booking/next/:id', rateLimit({ windowMs: 600_000, max: Number(process.env.NEXT_TIMES_RATE_LIMIT) || 30, message: 'Too many looks from this address. Please try again in a few minutes.' }));

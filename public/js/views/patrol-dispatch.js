@@ -21,6 +21,10 @@ function callCard(c, onOpen) {
     c.description ? h('div', null, c.description) : null,
     h('div', { class: 'muted' }, `${fmtTime(c.received_at)} · ${c.source === 'guest' ? 'Guest request' : label(c.source)}${c.caller_name ? ` · ${c.caller_name}` : ''}${c.caller_phone ? ` · ${c.caller_phone}` : ''}`),
     h('div', null, who ? `Responding: ${who}` : h('span', { class: 'muted' }, 'No one sent yet')),
+    // Repeated guest requests from one phone or address, grouped here so a flood does not bury the board. Each is listed.
+    c.repeats && c.repeats.length ? h('details', { class: 'call-repeats' },
+      h('summary', null, `${c.repeats.length} more from the same phone or address`),
+      h('ul', null, c.repeats.map((x) => h('li', null, h('b', null, x.location), x.description ? ` ${x.description}` : '', h('span', { class: 'muted' }, ` ${fmtTime(x.received_at)}, call ${x.call_no}`))))) : null,
     button('Open', onOpen, { small: true, kind: c.status === 'new' ? 'primary' : undefined }));
 }
 

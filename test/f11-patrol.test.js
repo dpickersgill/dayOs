@@ -182,3 +182,38 @@ test('PATROL-3: undo of a find marks it entered in error; a hazard needs a resol
   const hist = await q('SELECT action, flag FROM patrol_sweep_mark_log WHERE tenant_id = ? AND run_id = ? ORDER BY id', [m.tenantId, run.id]);
   assert.deepEqual(hist.map((x) => `${x.action}:${x.flag}`), ['mark:person', 'error:person', 'mark:hazard', 'resolve:hazard']);
 });
+
+// ---------------------------------------------------------------- PATROL-4
+test('PATROL-4: a flood of guest help requests never shuts the page; repeats from one phone are grouped on the board', async () => {
+  const m = await patrolMountain('gh');
+  ok(await api('PUT', '/patrol/guest-help', { token: m.owner, body: { enabled: true, message: 'Tell us where you are' } }));
+  const send = (body, dev, ip) => api('POST', `/public/${m.slug}/help`, { body, headers: { 'x-forwarded-for': ip, ...(dev ? { 'x-device': dev } : {}) } });
+  let made = 0; let warned = 0;
+  for (let i = 0; i < 25; i++) {
+    const r = await send({ location: `Lift ${i} tower`, description: 'help' }, 'prank-phone-0123456789', '203.0.113.9');
+    if (r.status === 201) made += 1;
+    if (r.body.warning) warned += 1;
+  }
+  assert.equal(made, 25, 'every request is accepted');
+  assert.ok(warned >= 15, 'the same phone sending again and again is told patrol already has its requests');
+  const real = await send({ location: 'Upper Ridge, by the trees', description: 'My son hit a tree' }, 'real-guest-phone-abcdef12', '198.51.100.77');
+  assert.equal(real.status, 201);
+  assert.equal(real.body.warning, undefined);
+  const board = ok(await api('GET', '/patrol/dispatch', { token: m.owner }));
+  const realCall = board.data.find((c) => c.location.startsWith('Upper Ridge'));
+  assert.ok(realCall && !realCall.flood_of, 'the real request is on the board on its own');
+  const group = board.data.find((c) => c.repeats && c.repeats.length);
+  assert.ok(group, 'the flood is grouped');
+  assert.equal(group.repeats.length, 23);
+  assert.equal(board.data.filter((c) => c.location.startsWith('Lift ')).length, 2, 'the first two from the phone, then one group');
+  assert.equal(group.sender_hash, undefined);
+  assert.equal(group.ip_hash, undefined);
+  const n = (await q("SELECT COUNT(*) AS n FROM dispatch_calls WHERE tenant_id = ? AND source = 'guest'", [m.tenantId]))[0].n;
+  assert.equal(Number(n), 26, 'nothing is dropped');
+});
+
+// ---------------------------------------------------------------- PATROL-14
+test('PATROL-14: number boxes (height, weight) are at least 64 px wide, even in an input row', () => {
+  const css = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'public', 'css', 'app.css'), 'utf8');
+  assert.match(css, /\.input-row input\.short-num[^{]*\{[^}]*min-width:\s*64px/);
+});
