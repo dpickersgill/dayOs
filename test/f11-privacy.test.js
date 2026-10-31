@@ -319,3 +319,48 @@ test('DP-11: a closed mountain’s owner signs in to export-only mode during the
   const late = await api('POST', '/auth/login', { body: { tenant: m.slug, email: `o@${m.slug}.test`, password: PW } });
   assert.equal(late.status, 403);
 });
+
+// ---------------------------------------------------------------- DP-12, DP-13, DP-14 and the disclosures
+test('DP-12: weekly copies are kept 35 days by default, the pages say so, and a restore replays every erasure', async () => {
+  const sh = read('scripts/backups-setup.sh');
+  assert.ok(!sh.includes('daysSinceNoncurrentTime":365'));
+  assert.match(sh, /WEEKLY_DAYS="\$\{WEEKLY_DAYS:-35\}"/);
+  assert.match(read('src/site/privacy.html'), /weekly copy of the database kept 35 days/);
+  assert.match(read('src/site/security.html'), /kept outside the database server for 35 days/);
+  assert.match(read('RECOVERY.md'), /node db\/deletions\.js replay ledger\.json/);
+  // The ledger is add-only for the app, and survives a mountain's deletion.
+  assert.ok(require('../scripts/db-runtime-user').APPEND_ONLY.includes('deletion_ledger'));
+  assert.ok(require('../src/lib/retention').KEEP.has('deletion_ledger'));
+  // Replay: a guest anonymised after the backup comes back in a restore, and the replay erases them again.
+  const [p] = await pool.query("INSERT INTO people (tenant_id, first_name, last_name, email) VALUES (?, 'Back', 'Again', ?)", [A.id, `back${suffix}@x.test`]);
+  const file = path.join(require('os').tmpdir(), `ledger-${suffix}.json`);
+  fs.writeFileSync(file, JSON.stringify({ rows: [{ tenant_id: A.id, kind: 'anonymise', ref_id: p.insertId, done_by: '1', done_at: new Date().toISOString() }] }));
+  const { parse } = require('../db/deletions');
+  assert.equal(parse(fs.readFileSync(file, 'utf8')).length, 1);
+  assert.equal(parse(JSON.stringify([{ timestamp: 'x', jsonPayload: { action: 'deletion_ledger', tenant: A.id, entity: 'anonymise', entity_id: p.insertId } }])).length, 1, 'Cloud Logging entries replay too');
+  await require('../db/deletions').replay(file);
+  const [[after]] = await pool.query('SELECT first_name, email, anonymised_at FROM people WHERE id = ?', [p.insertId]);
+  assert.equal(after.first_name, 'Former'); assert.equal(after.email, null); assert.ok(after.anonymised_at);
+  fs.unlinkSync(file);
+});
+
+test('DP-13: the recap writer sends no name and no health sentence; Stripe gets no child name; the privacy page lists every flow', async () => {
+  const { noteForModel } = require('../src/lib/lessonrecap');
+  const out = noteForModel('Ollie cried after falling. Mentioned his ADHD meds wore off. Ollie Smith carved great turns!', ['Ollie', 'Smith']);
+  assert.ok(!/Ollie|Smith/.test(out)); assert.ok(!/ADHD|meds/.test(out)); assert.match(out, /carved great turns/);
+  assert.ok(!/childDetails\.first_name\}:/.test(read('src/routes/programreg.js')), 'no child name in the Stripe description');
+  const lr = read('src/lib/lessonrecap.js');
+  assert.ok(!/Student first name/.test(lr));
+  const privacy = read('src/site/privacy.html');
+  for (const word of [/recap/i, /Gmail|Workspace/, /push/i, /prospect outreach/i]) assert.match(privacy, word);
+});
+
+test('DP-14: the security page says plainly that health data is not encrypted field by field', async () => {
+  assert.match(read('src/site/security.html'), /not encrypted field by field/);
+  assert.match(read('docs/BACKLOG-privacy.md'), /Field-level encryption/);
+});
+
+test('suspicion: a patrol phone alert shows where to go, never what was reported', async () => {
+  const d = read('src/routes/dispatch.js');
+  assert.ok(!/body: `\$\{call\.location\}\$\{call\.description/.test(d));
+});

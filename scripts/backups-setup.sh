@@ -6,8 +6,11 @@
 #   1. Daily automated backups at 07:00 UTC (2 or 3 AM Eastern), 14 kept
 #   2. Point-in-time recovery (binary logs) kept 7 days, so the database can go back to any minute of the last week
 #   3. Deletion protection, so the server cannot be deleted by accident
-#   4. A weekly copy of the whole database outside the server, in a Cloud Storage bucket, every version kept a year
-#      (automated backups are lost if the server itself is ever deleted; this copy is not)
+#   4. A weekly copy of the whole database outside the server, in a Cloud Storage bucket, each older version kept
+#      WEEKLY_DAYS days (35 by default, so about five weekly copies; automated backups are lost if the server itself is
+#      ever deleted; this copy is not). Guests anonymised and mountains deleted stay in older copies until they age
+#      out, so the privacy and security pages state the real time, and a restore applies every erasure again
+#      (RECOVERY.md, "After any restore": node db/deletions.js).
 # Options:
 #   --ha        also make the database server highly available (a standby in a second zone; about twice the database
 #               cost). Without it, losing the server's zone means restoring from backup (RECOVERY.md).
@@ -21,6 +24,8 @@ BUCKET="gs://${PROJECT}-backups"
 BACKUP_SA="summitops-backup@${PROJECT}.iam.gserviceaccount.com"
 JOB=summitops-weekly-export
 
+WEEKLY_DAYS="${WEEKLY_DAYS:-35}"
+case "$WEEKLY_DAYS" in ''|*[!0-9]*) echo "WEEKLY_DAYS must be a number of days"; exit 1 ;; esac
 DRY=""; HA=""
 for a in "$@"; do case "$a" in --dry-run) DRY=1 ;; --ha) HA=1 ;; *) echo "Unknown option $a"; exit 1 ;; esac; done
 run() { if [ -n "$DRY" ]; then printf '  would run: %s\n' "$*"; else "$@"; fi; }
@@ -84,10 +89,10 @@ step "A weekly copy outside the database server"
 if ! gcloud storage buckets describe "$BUCKET" >/dev/null 2>&1; then
   run gcloud storage buckets create "$BUCKET" --location="$REGION" --uniform-bucket-level-access --public-access-prevention
 fi
-# Every weekly copy has the same name; the bucket keeps each older version for a year, then deletes it.
+# Every weekly copy has the same name; the bucket keeps each older version WEEKLY_DAYS days (35 by default), then deletes it.
 run gcloud storage buckets update "$BUCKET" --versioning
 LIFE="$(mktemp)"
-echo '{"rule":[{"action":{"type":"Delete"},"condition":{"isLive":false,"daysSinceNoncurrentTime":365}}]}' > "$LIFE"
+echo "{\"rule\":[{\"action\":{\"type\":\"Delete\"},\"condition\":{\"isLive\":false,\"daysSinceNoncurrentTime\":$WEEKLY_DAYS}}]}" > "$LIFE"
 run gcloud storage buckets update "$BUCKET" --lifecycle-file="$LIFE"
 rm -f "$LIFE"
 # The database server writes the copy into the bucket itself.
@@ -109,7 +114,7 @@ else
   run gcloud scheduler jobs create http "$JOB" --location "$REGION" --schedule="0 8 * * 2" --time-zone=Etc/UTC --uri="$URI" --http-method=POST \
     --message-body="$BODY" --oauth-service-account-email="$BACKUP_SA" --quiet
 fi
-echo "  Every Tuesday at 08:00 UTC: $BUCKET/weekly/summitops.sql.gz (older copies kept a year)."
+echo "  Every Tuesday at 08:00 UTC: $BUCKET/weekly/summitops.sql.gz (older copies kept $WEEKLY_DAYS days)."
 echo "  Make the first copy now:   gcloud scheduler jobs run $JOB --location $REGION"
 
 echo ""

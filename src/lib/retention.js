@@ -12,6 +12,8 @@ const { pool } = require('../db');
 const { trail } = require('./audit');
 
 const LEAD_YEARS = 2;
+// The record of each message sent to a guest, and the questions asked of the assistant, are kept 13 months (privacy page).
+const LOG_DAYS = 395;
 // OSHA (29 CFR 1904.33): the 300 log, the 300A summary and the 301 forms are kept five years after the end of their year.
 const OSHA_YEARS = 5;
 
@@ -55,6 +57,9 @@ async function runAll() {
   // Operators' openings of a mountain that ran out are kept as history; nothing to delete.
   const [l] = await pool.query('DELETE FROM site_leads WHERE created_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? YEAR)', [LEAD_YEARS]);
   out.leads = l.affectedRows;
+  const [ml] = await pool.query('DELETE FROM message_log WHERE created_at < UTC_TIMESTAMP() - INTERVAL ? DAY LIMIT 50000', [LOG_DAYS]);
+  const [al] = await pool.query('DELETE FROM assistant_log WHERE created_at < UTC_TIMESTAMP() - INTERVAL ? DAY LIMIT 50000', [LOG_DAYS]);
+  out.message_log = ml.affectedRows; out.assistant_log = al.affectedRows;
   out.demos = await require('./sandbox').purgeExpired();
   out.due_for_deletion = await markDue();
   trail({ action: 'retention_run', actor: 'daily job', detail: JSON.stringify(out) });
@@ -122,4 +127,4 @@ async function deleteClosed(id, record) {
   }
 }
 
-module.exports = { runAll, markDue, deleteClosed, Refused, LEAD_YEARS, OSHA_YEARS, KEEP };
+module.exports = { runAll, markDue, deleteClosed, Refused, LEAD_YEARS, OSHA_YEARS, KEEP, LOG_DAYS };

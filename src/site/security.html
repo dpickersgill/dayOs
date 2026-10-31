@@ -162,6 +162,7 @@
           <ul>
             <li>The database is backed up every day, and 14 daily backups are kept.</li>
             <li>It can be put back to any moment in the last 7 days (point-in-time recovery).</li>
+            <li>A weekly copy of the database is kept outside the database server for 35 days. A guest who was anonymised, or a mountain that was deleted, stays in these copies until they age out. After any restore, every anonymise and deletion is applied again before the app uses the copy.</li>
             <li>Backups stay on Google Cloud in the United States, like everything else.</li>
           </ul>
         </div>
@@ -184,6 +185,7 @@
       <div class="honest">
         <h2 id="h-honest">What we have not done yet.</h2>
         <p>Verdynt/OS has not had an outside security audit or a formal certification. If your board, your insurer or your state needs one, tell us when you ask for a walkthrough and we will say plainly where we are.</p>
+        <p>Health details (patient care records, patient photos, children's allergies and medical notes, the staff injury log) are encrypted at rest by Google Cloud SQL and in transit by TLS, like everything else. They are not encrypted field by field inside the database, so anyone with access to the database or a backup could read them. Access to both is limited to Verdynt/OS's operators and logged. Field-level encryption is on our roadmap.</p>
       </div>
     </div>
   </section>

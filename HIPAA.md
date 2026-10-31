@@ -58,6 +58,9 @@ checks the rows are identical before and after). Pulling is logged.
 ## Known gaps (worth knowing)
 
 - Data is encrypted in transit and the database host encrypts disks, but the app does not add its own field-level encryption.
+  The Security page says so plainly (2026.11.11). Backlog: field-level encryption of incident_patients (allergies,
+  medications, medical_history, assessment), incident_media, lesson_bookings and program_enrollments (allergies, medical,
+  pickup), waiver_signings.signer_dob and staff_injuries, with keys in Cloud KMS. Not built yet; see docs/BACKLOG-privacy.md.
 - Free-text fields (case summary, notes, treatment descriptions) can contain anything a patroller types, including names.
   They are protected the same way as the rest of the case, and kept out of exports.
 - The audit log lives in the same database. For stronger tamper-resistance, ship it to a separate write-once store.

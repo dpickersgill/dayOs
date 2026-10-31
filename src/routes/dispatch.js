@@ -102,7 +102,8 @@ router.get('/dispatch/available', patrol, needs('dispatch'), async (req, res) =>
 
 /** Alert the people sent to a call on their phones, and text them too on a critical call when the mountain allows it. */
 async function alertResponders(tenantId, call, staffIds, { text = false } = {}) {
-  const msg = { title: `${call.priority === 'critical' ? 'CRITICAL: ' : ''}Patrol call ${callNo(call)}`, body: `${call.location}${call.description ? `. ${call.description}` : ''}`, url: '#/patrol/dispatch', tag: `call-${call.id}` };
+  // A phone alert or text shows on a locked screen: where to go, never what was reported about the person (2026.11.11).
+  const msg = { title: `${call.priority === 'critical' ? 'CRITICAL: ' : ''}Patrol call ${callNo(call)}`, body: `${call.location}. Open the app for details.`, url: '#/patrol/dispatch', tag: `call-${call.id}` };
   await PUSH.notifyStaff(tenantId, staffIds, msg);
   await pool.query('UPDATE dispatch_responders SET notified_at = UTC_TIMESTAMP() WHERE tenant_id = ? AND call_id = ? AND staff_id IN (?)', [tenantId, call.id, staffIds]);
   if (!text) return 0;
@@ -136,7 +137,7 @@ router.post('/dispatch', patrol, needs('dispatch'), validate(callFields), async 
   // A critical call goes to everyone on duty at once, so the nearest can answer on the radio.
   if (req.body.priority === 'critical') {
     const call = await loadCall(pool, tenant.id, out.id);
-    out.alerted = await PUSH.notifyStaff(tenant.id, await OPS.onDutyIds(pool, tenant.id), { title: `CRITICAL: Patrol call ${callNo(call)}`, body: `${call.location}${call.description ? `. ${call.description}` : ''}`, url: '#/patrol/dispatch', tag: `call-${call.id}` });
+    out.alerted = await PUSH.notifyStaff(tenant.id, await OPS.onDutyIds(pool, tenant.id), { title: `CRITICAL: Patrol call ${callNo(call)}`, body: `${call.location}. Open the app for details.`, url: '#/patrol/dispatch', tag: `call-${call.id}` });
   }
   res.status(201).json(out);
 });

@@ -162,7 +162,7 @@ publicRouter.post('/:slug/programs/register', validate(z.object({ ...contactShap
   try {
     const pay = connect.checkoutFor(await connect.payeeOrThrow(t.id), made.q.total, { tenant_id: String(t.id), registration_id: String(made.id), kind: 'program', reference: made.ref });
     co = await stripe.createCheckout({
-      amountCents: made.q.total, name: `${t.name}: program registration`, description: made.q.priced.map((p) => `${p.childDetails.first_name}: ${p.name}, ${p.detail}`).join('; ').slice(0, 480),
+      amountCents: made.q.total, name: `${t.name}: program registration`, description: made.q.priced.map((p) => `${p.name}, ${p.detail}`).join('; ').slice(0, 480), // no child's name goes to Stripe
       email: b.contact_email, reference: made.ref, ...pay, idempotencyKey: `program-${made.id}`,
       successUrl: `${baseUrl(req)}/programs/${req.params.slug}?registration=${made.token}`, cancelUrl: `${baseUrl(req)}/programs/${req.params.slug}?cancelled=${made.token}`,
     });
