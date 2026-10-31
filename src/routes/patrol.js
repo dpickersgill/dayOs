@@ -1097,6 +1097,11 @@ router.post('/incidents/:id/patients/:pid/void', patrol, needs('create_case'), v
     await conn.query('UPDATE incident_patients SET voided_at = ?, void_reason = ?, voided_by = ?, vitals_due_at = NULL WHERE tenant_id = ? AND id = ?', [nowIn(tenant.timezone), req.body.reason, req.auth.userId, req.auth.tenantId, pid]);
     await conn.query('UPDATE incident_parties SET patient_id = NULL WHERE tenant_id = ? AND patient_id = ?', [req.auth.tenantId, pid]);
     await conn.query("DELETE FROM followups WHERE tenant_id = ? AND patient_id = ? AND status <> 'sent'", [req.auth.tenantId, pid]);
+    // Medication doses given to them go back to their lots, as when one treatment is entered in error (a controlled one
+    // waits for a witness).
+    for (const tr of await rows(conn, 'SELECT id FROM incident_treatments WHERE tenant_id = ? AND patient_id = ? AND voided_at IS NULL', [req.auth.tenantId, pid])) {
+      await MEDS.returnStock(conn, req, { id: tr.id }, nowIn(tenant.timezone));
+    }
     await audit(conn, req, 'void_patient', 'incidents', id, { patient_id: pid, reason: req.body.reason });
   });
   res.json({ ok: true });

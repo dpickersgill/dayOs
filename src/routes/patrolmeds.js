@@ -11,7 +11,9 @@ const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
 const { z, validate, paramId, dateStr } = require('../lib/util');
-const { notFound, bad, conflict } = require('../lib/errors');
+const { notFound, bad, conflict, forbidden } = require('../lib/errors');
+const PUSH = require('../lib/push');
+const label = (v) => { const x = String(v || '').replace(/_/g, ' '); return x.charAt(0).toUpperCase() + x.slice(1); };
 const { audit } = require('../lib/audit');
 const PA = require('../lib/patrolaccess');
 const OPS = require('../lib/patrolops');
@@ -107,12 +109,44 @@ async function useStock(conn, req, stock, amount, incidentId, treatmentId, at) {
   await conn.query("INSERT INTO patrol_med_moves (tenant_id, stock_id, delta, reason, incident_id, treatment_id, by_user, at) VALUES (?, ?, ?, 'used', ?, ?, ?, ?)", [req.auth.tenantId, stock.id, -amount, incidentId, treatmentId, req.auth.userId, at]);
 }
 
-/** A medication entered in error puts its dose back in the lot it came from. */
+/**
+ * A medication entered in error puts its dose back in the lot it came from. A controlled medication goes back only when a
+ * second person witnesses it: the return waits (pending) until someone else on the roster confirms it.
+ */
 async function returnStock(conn, req, treatment, at) {
-  const move = await one(conn, "SELECT stock_id, delta FROM patrol_med_moves WHERE tenant_id = ? AND treatment_id = ? AND reason = 'used'", [req.auth.tenantId, treatment.id]);
+  const move = await one(conn, "SELECT m.stock_id, m.delta, f.controlled FROM patrol_med_moves m JOIN patrol_med_stock k ON k.tenant_id = m.tenant_id AND k.id = m.stock_id JOIN patrol_formulary f ON f.tenant_id = k.tenant_id AND f.id = k.formulary_id WHERE m.tenant_id = ? AND m.treatment_id = ? AND m.reason = 'used'", [req.auth.tenantId, treatment.id]);
   if (!move) return;
+  if (await one(conn, "SELECT id FROM patrol_med_moves WHERE tenant_id = ? AND treatment_id = ? AND reason = 'adjust'", [req.auth.tenantId, treatment.id])) return; // already returned
+  if (Number(move.controlled)) {
+    await conn.query("INSERT INTO patrol_med_moves (tenant_id, stock_id, delta, reason, treatment_id, by_user, at, note, status) VALUES (?, ?, ?, 'adjust', ?, ?, ?, 'Entered in error on the case', 'pending')", [req.auth.tenantId, move.stock_id, -move.delta, treatment.id, req.auth.userId, at]);
+    return;
+  }
   await conn.query('UPDATE patrol_med_stock SET quantity = quantity - ? WHERE tenant_id = ? AND id = ?', [move.delta, req.auth.tenantId, move.stock_id]);
   await conn.query("INSERT INTO patrol_med_moves (tenant_id, stock_id, delta, reason, treatment_id, by_user, at, note) VALUES (?, ?, ?, 'adjust', ?, ?, ?, 'Entered in error on the case')", [req.auth.tenantId, move.stock_id, -move.delta, treatment.id, req.auth.userId, at]);
+}
+
+/**
+ * The witness to a controlled-medication move or count, checked: signed in as themselves, or their own PIN typed on this
+ * phone. Never the person who recorded it. Returns the witness's staff id.
+ */
+async function witnessCheck(conn, req, { named, recordedBy, pin }) {
+  const t = req.auth.tenantId;
+  const recorder = await one(conn, 'SELECT staff_id FROM users WHERE tenant_id = ? AND id = ?', [t, recordedBy]);
+  const recorderStaff = recorder && recorder.staff_id ? Number(recorder.staff_id) : null;
+  let staffId;
+  if (pin) {
+    staffId = Number(named || req.body.witness_staff || 0);
+    if (!staffId) throw bad('Choose who is witnessing');
+    await require('./kiosk').checkPin(t, staffId, String(pin));
+  } else {
+    if (Number(req.auth.userId) === Number(recordedBy)) throw forbidden('The witness confirms it themselves: signed in as themselves, or with their PIN on this phone');
+    staffId = Number(req.auth.staffId || 0);
+    if (!staffId) throw forbidden('Only a patroller on the roster can witness');
+    if (named && Number(named) !== staffId) throw forbidden('Only the person named as witness can confirm this');
+  }
+  if (recorderStaff && staffId === recorderStaff) throw bad('The witness must be someone else');
+  if (!(await one(conn, 'SELECT staff_id FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [t, staffId]))) throw notFound('Witness on the roster');
+  return staffId;
 }
 
 // ---------------------------------------------------------------- the medications page
@@ -145,9 +179,25 @@ router.get('/meds', patrol, async (req, res) => {
       else if (d(e[k]) && d(e[k]) <= soon) flags.push({ level: 'warn', text: `${e.name}: ${word} expire ${d(e[k])}` });
     }
   }
+  // Controlled moves and counts waiting for their witness (PATROL-7): every one, not just the latest.
+  const WNAME = "CONCAT(wp.first_name, ' ', wp.last_name)";
+  const [pendMoves, pendCounts] = await Promise.all([
+    rows(pool, `SELECT m.id, m.stock_id, m.delta, m.reason, m.at, m.by_user, m.witness_staff, m.treatment_id, f.name AS drug, k.lot, k.unit, COALESCE(u.email, u.username) AS by_name, ${WNAME} AS witness
+      FROM patrol_med_moves m JOIN patrol_med_stock k ON k.tenant_id = m.tenant_id AND k.id = m.stock_id JOIN patrol_formulary f ON f.tenant_id = k.tenant_id AND f.id = k.formulary_id
+      LEFT JOIN users u ON u.tenant_id = m.tenant_id AND u.id = m.by_user LEFT JOIN staff ws ON ws.tenant_id = m.tenant_id AND ws.id = m.witness_staff LEFT JOIN people wp ON wp.tenant_id = ws.tenant_id AND wp.id = ws.person_id
+      WHERE m.tenant_id = ? AND m.status = 'pending' ORDER BY m.at`, [t]),
+    rows(pool, `SELECT c.id, c.counted_at, c.by_user, c.witness_staff, c.discrepancy, COALESCE(u.email, u.username) AS by_name, ${WNAME} AS witness FROM patrol_med_counts c
+      LEFT JOIN users u ON u.tenant_id = c.tenant_id AND u.id = c.by_user LEFT JOIN staff ws ON ws.tenant_id = c.tenant_id AND ws.id = c.witness_staff LEFT JOIN people wp ON wp.tenant_id = ws.tenant_id AND wp.id = ws.person_id
+      WHERE c.tenant_id = ? AND c.status = 'pending' ORDER BY c.counted_at`, [t]),
+  ]);
+  for (const m of pendMoves) flags.push({ level: 'warn', text: `${m.drug}: ${m.treatment_id ? 'a voided dose going back' : label(m.reason)} waits for ${m.witness || 'a witness'} to confirm` });
+  for (const c of pendCounts) flags.push({ level: 'warn', text: `A controlled count waits for ${c.witness || 'its witness'} to confirm` });
   res.json({
     formulary, stock: stock.map((k) => ({ ...k, id: Number(k.id), quantity: Number(k.quantity), low_at: k.low_at === null ? null : Number(k.low_at), controlled: Boolean(k.controlled) })),
-    moves, counts, equipment, flags, controlled_counts: settings.controlled_counts, o2_refill_psi: settings.o2_refill_psi,
+    moves, counts, equipment, flags,
+    pending: { moves: pendMoves.map((m) => ({ ...m, id: Number(m.id), delta: Number(m.delta), mine: Number(m.by_user) === req.auth.userId, i_witness: Boolean(req.auth.staffId) && (m.witness_staff ? Number(m.witness_staff) === Number(req.auth.staffId) : Number(m.by_user) !== req.auth.userId) })),
+      counts: pendCounts.map((c) => ({ ...c, id: Number(c.id), mine: Number(c.by_user) === req.auth.userId, i_witness: Boolean(req.auth.staffId) && Number(c.witness_staff) === Number(req.auth.staffId) })) },
+    me: req.auth.staffId ? Number(req.auth.staffId) : null, controlled_counts: settings.controlled_counts, o2_refill_psi: settings.o2_refill_psi,
     medical_director: settings.medical_director, protocol_version: settings.protocol_version,
     certs: CERTS.map((c) => [c, CERT_LABEL[c]]), units: UNITS, routes: ROUTES,
     can_edit: await PA.can(pool, req, 'manage_meds'),
@@ -222,7 +272,7 @@ router.post('/meds/stock/:id/moves', patrol, needs('manage_meds'), validate(z.ob
   note: z.string().trim().max(255).nullable().optional(), witness_staff: z.number().int().positive().nullable().optional(),
 })), async (req, res) => {
   const t = req.auth.tenantId; const b = req.body;
-  await tx(async (conn) => {
+  const out = await tx(async (conn) => {
     const k = await one(conn, 'SELECT k.*, f.controlled, f.name FROM patrol_med_stock k JOIN patrol_formulary f ON f.tenant_id = k.tenant_id AND f.id = k.formulary_id WHERE k.tenant_id = ? AND k.id = ? FOR UPDATE', [t, paramId(req)]);
     if (!k) throw notFound('Lot');
     const delta = ['wasted', 'expired'].includes(b.reason) ? -Math.abs(b.delta) : b.reason === 'received' ? Math.abs(b.delta) : b.delta;
@@ -234,11 +284,55 @@ router.post('/meds/stock/:id/moves', patrol, needs('manage_meds'), validate(z.ob
     }
     if (b.reason === 'adjust' && !b.note) throw bad('Say why the amount changed');
     const { now } = await OPS.clock(conn, t);
-    await conn.query('UPDATE patrol_med_stock SET quantity = quantity + ?, active = IF(? = \'expired\' AND quantity + ? <= 0, 0, active) WHERE tenant_id = ? AND id = ?', [delta, b.reason, delta, t, k.id]);
-    await conn.query('INSERT INTO patrol_med_moves (tenant_id, stock_id, delta, reason, by_user, witness_staff, at, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [t, k.id, delta, b.reason, req.auth.userId, b.witness_staff || null, now, b.note || null]);
-    await audit(conn, req, `stock_${b.reason}`, 'patrol_med_stock', k.id, { delta });
+    // A controlled move waits for the witness to confirm it themselves (pending); the count changes only then.
+    const pending = Number(k.controlled) && b.reason !== 'received';
+    if (!pending) await conn.query('UPDATE patrol_med_stock SET quantity = quantity + ?, active = IF(? = \'expired\' AND quantity + ? <= 0, 0, active) WHERE tenant_id = ? AND id = ?', [delta, b.reason, delta, t, k.id]);
+    const [r] = await conn.query('INSERT INTO patrol_med_moves (tenant_id, stock_id, delta, reason, by_user, witness_staff, at, note, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [t, k.id, delta, b.reason, req.auth.userId, b.witness_staff || null, now, b.note || null, pending ? 'pending' : 'done']);
+    await audit(conn, req, `stock_${b.reason}`, 'patrol_med_stock', k.id, { delta, ...(pending ? { pending: true, move: r.insertId } : {}) });
+    return { id: r.insertId, pending };
   });
-  res.status(201).json({ ok: true });
+  if (out.pending) {
+    PUSH.notifyStaff(t, [b.witness_staff], { title: 'Witness a controlled medication', body: 'You were named as witness. Open Medications to confirm it, or decline.', url: '#/patrol/gear?tab=meds', tag: `med-move-${out.id}` }).catch(() => {});
+  }
+  res.status(201).json({ ok: true, id: out.id, pending: out.pending });
+});
+
+/**
+ * The witness confirms a pending controlled move (a waste, an expiry, an adjustment, or a voided dose going back): signed
+ * in as themselves, or with their own PIN on the recorder's phone. The lot changes now.
+ */
+router.post('/meds/moves/:id/confirm', patrol, validate(z.object({ pin: z.string().regex(/^\d{4,8}$/).optional(), witness_staff: z.number().int().positive().optional() })), async (req, res) => {
+  const t = req.auth.tenantId;
+  await tx(async (conn) => {
+    const m = await one(conn, 'SELECT * FROM patrol_med_moves WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, paramId(req)]);
+    if (!m) throw notFound('Stock change');
+    if (m.status !== 'pending') throw conflict(`This change is already ${m.status === 'done' ? 'confirmed' : 'declined'}`);
+    const witness = await witnessCheck(conn, req, { named: m.witness_staff, recordedBy: m.by_user, pin: req.body.pin });
+    const k = await one(conn, 'SELECT id, quantity, unit FROM patrol_med_stock WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, m.stock_id]);
+    if (Number(k.quantity) + Number(m.delta) < 0) throw conflict(`Only ${Number(k.quantity)} ${k.unit} in this lot now`);
+    const { now } = await OPS.clock(conn, t);
+    await conn.query('UPDATE patrol_med_stock SET quantity = quantity + ?, active = IF(? = \'expired\' AND quantity + ? <= 0, 0, active) WHERE tenant_id = ? AND id = ?', [m.delta, m.reason, m.delta, t, k.id]);
+    await conn.query("UPDATE patrol_med_moves SET status = 'done', witness_staff = ?, witness_user = ?, witness_confirmed_at = ?, witness_via = ? WHERE tenant_id = ? AND id = ?", [witness, req.body.pin ? null : req.auth.userId, now, req.body.pin ? 'pin' : 'login', t, m.id]);
+    await audit(conn, req, 'stock_witnessed', 'patrol_med_stock', k.id, { move: Number(m.id), via: req.body.pin ? 'pin' : 'login' });
+  });
+  res.json({ ok: true });
+});
+
+/** The named witness says no (they did not see it), or the recorder takes it back. Nothing changes in the lot. */
+router.post('/meds/moves/:id/decline', patrol, async (req, res) => {
+  const t = req.auth.tenantId;
+  await tx(async (conn) => {
+    const m = await one(conn, 'SELECT * FROM patrol_med_moves WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, paramId(req)]);
+    if (!m) throw notFound('Stock change');
+    if (m.status !== 'pending') throw conflict('This change is not waiting for a witness');
+    const mine = Number(m.by_user) === Number(req.auth.userId) || (m.witness_staff && Number(m.witness_staff) === Number(req.auth.staffId));
+    if (!mine) throw forbidden('Only the witness or the person who recorded it can decline it');
+    if (m.reason === 'adjust' && m.treatment_id) throw conflict('A voided dose waits for a witness to put it back. Ask someone on the roster to confirm it.');
+    const { now } = await OPS.clock(conn, t);
+    await conn.query("UPDATE patrol_med_moves SET status = 'declined', witness_confirmed_at = ?, witness_user = ? WHERE tenant_id = ? AND id = ?", [now, req.auth.userId, t, m.id]);
+    await audit(conn, req, 'stock_witness_declined', 'patrol_med_stock', m.stock_id, { move: Number(m.id) });
+  });
+  res.json({ ok: true });
 });
 
 router.patch('/meds/stock/:id', patrol, needs('manage_meds'), validate(z.object({ low_at: z.number().min(0).max(100000).nullable().optional(), active: z.boolean().optional(), station_id: z.number().int().positive().nullable().optional() })), async (req, res) => {
@@ -252,8 +346,9 @@ router.patch('/meds/stock/:id', patrol, needs('manage_meds'), validate(z.object(
 });
 
 /**
- * A two-person count of controlled medications (at a change of shift). Each lot counted is set to the number found;
- * a difference is flagged and needs a note.
+ * A two-person count of controlled medications (at a change of shift). The count is recorded, then waits for the witness
+ * to confirm it themselves (signed in, or their PIN on this phone). Only then is each lot set to the number found; a
+ * difference is flagged and needs a note.
  */
 router.post('/meds/counts', patrol, needs('manage_meds'), validate(z.object({
   witness_staff: z.number().int().positive(), lines: z.array(z.object({ stock_id: z.number().int().positive(), counted: z.number().min(0).max(100000) })).min(1).max(200),
@@ -266,22 +361,61 @@ router.post('/meds/counts', patrol, needs('manage_meds'), validate(z.object({
     const { now } = await OPS.clock(conn, t);
     const lines = []; let off = false;
     for (const l of b.lines) {
-      const k = await one(conn, 'SELECT id, quantity FROM patrol_med_stock WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, l.stock_id]);
+      const k = await one(conn, 'SELECT id, quantity FROM patrol_med_stock WHERE tenant_id = ? AND id = ?', [t, l.stock_id]);
       if (!k) throw notFound('Lot');
-      const expected = Number(k.quantity);
-      lines.push({ stock_id: l.stock_id, expected, counted: l.counted });
-      if (expected !== l.counted) {
-        off = true;
-        await conn.query('UPDATE patrol_med_stock SET quantity = ? WHERE tenant_id = ? AND id = ?', [l.counted, t, k.id]);
-        await conn.query("INSERT INTO patrol_med_moves (tenant_id, stock_id, delta, reason, by_user, witness_staff, at, note) VALUES (?, ?, ?, 'count', ?, ?, ?, ?)", [t, k.id, l.counted - expected, req.auth.userId, b.witness_staff, now, 'Count did not match']);
-      }
+      lines.push({ stock_id: l.stock_id, expected: Number(k.quantity), counted: l.counted });
+      if (Number(k.quantity) !== l.counted) off = true;
     }
     if (off && !b.note) throw bad('The count does not match. Say what happened in the note.');
-    const [r] = await conn.query('INSERT INTO patrol_med_counts (tenant_id, counted_at, by_user, witness_staff, count_lines, discrepancy, note) VALUES (?, ?, ?, ?, ?, ?, ?)', [t, now, req.auth.userId, b.witness_staff, JSON.stringify(lines), off ? 1 : 0, b.note || null]);
-    await audit(conn, req, 'med_count', 'patrol_med_counts', r.insertId, { discrepancy: off });
-    return { id: r.insertId, discrepancy: off };
+    const [r] = await conn.query("INSERT INTO patrol_med_counts (tenant_id, counted_at, by_user, witness_staff, count_lines, discrepancy, note, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')", [t, now, req.auth.userId, b.witness_staff, JSON.stringify(lines), off ? 1 : 0, b.note || null]);
+    await audit(conn, req, 'med_count', 'patrol_med_counts', r.insertId, { discrepancy: off, pending: true });
+    return { id: r.insertId, discrepancy: off, pending: true };
   });
+  PUSH.notifyStaff(t, [b.witness_staff], { title: 'Witness a medication count', body: 'You were named as witness. Open Medications to confirm the count, or decline.', url: '#/patrol/gear?tab=meds', tag: `med-count-${out.id}` }).catch(() => {});
   res.status(201).json(out);
+});
+
+/** The witness confirms a count: each lot is set to the number found now. */
+router.post('/meds/counts/:id/confirm', patrol, validate(z.object({ pin: z.string().regex(/^\d{4,8}$/).optional() })), async (req, res) => {
+  const t = req.auth.tenantId;
+  const out = await tx(async (conn) => {
+    const c = await one(conn, 'SELECT * FROM patrol_med_counts WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, paramId(req)]);
+    if (!c) throw notFound('Count');
+    if (c.status !== 'pending') throw conflict(`This count is already ${c.status === 'done' ? 'confirmed' : 'declined'}`);
+    const witness = await witnessCheck(conn, req, { named: c.witness_staff, recordedBy: c.by_user, pin: req.body.pin });
+    const { now } = await OPS.clock(conn, t);
+    const lines = typeof c.count_lines === 'string' ? JSON.parse(c.count_lines) : c.count_lines || [];
+    let off = false;
+    for (const l of lines) {
+      const k = await one(conn, 'SELECT id, quantity FROM patrol_med_stock WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, l.stock_id]);
+      if (!k) continue;
+      const expected = Number(k.quantity);
+      l.expected = expected;
+      if (expected !== Number(l.counted)) {
+        off = true;
+        await conn.query('UPDATE patrol_med_stock SET quantity = ? WHERE tenant_id = ? AND id = ?', [l.counted, t, k.id]);
+        await conn.query("INSERT INTO patrol_med_moves (tenant_id, stock_id, delta, reason, by_user, witness_staff, at, note, witness_user, witness_confirmed_at, witness_via) VALUES (?, ?, ?, 'count', ?, ?, ?, ?, ?, ?, ?)",
+          [t, k.id, Number(l.counted) - expected, c.by_user, witness, now, 'Count did not match', req.body.pin ? null : req.auth.userId, now, req.body.pin ? 'pin' : 'login']);
+      }
+    }
+    await conn.query("UPDATE patrol_med_counts SET status = 'done', count_lines = ?, discrepancy = ?, witness_user = ?, witness_confirmed_at = ?, witness_via = ? WHERE tenant_id = ? AND id = ?",
+      [JSON.stringify(lines), off ? 1 : 0, req.body.pin ? null : req.auth.userId, now, req.body.pin ? 'pin' : 'login', t, c.id]);
+    await audit(conn, req, 'med_count_witnessed', 'patrol_med_counts', c.id, { discrepancy: off, via: req.body.pin ? 'pin' : 'login' });
+    return { ok: true, discrepancy: off };
+  });
+  res.json(out);
+});
+
+router.post('/meds/counts/:id/decline', patrol, async (req, res) => {
+  const t = req.auth.tenantId;
+  const c = await one(pool, 'SELECT * FROM patrol_med_counts WHERE tenant_id = ? AND id = ?', [t, paramId(req)]);
+  if (!c) throw notFound('Count');
+  if (c.status !== 'pending') throw conflict('This count is not waiting for a witness');
+  if (Number(c.by_user) !== Number(req.auth.userId) && Number(c.witness_staff) !== Number(req.auth.staffId)) throw forbidden('Only the witness or the person who counted can decline it');
+  const { now } = await OPS.clock(pool, t);
+  await pool.query("UPDATE patrol_med_counts SET status = 'declined', witness_user = ?, witness_confirmed_at = ? WHERE tenant_id = ? AND id = ? AND status = 'pending'", [req.auth.userId, now, t, c.id]);
+  await audit(pool, req, 'med_count_declined', 'patrol_med_counts', c.id);
+  res.json({ ok: true });
 });
 
 /** The daily job: equipment past its expiry date (or AED pads or battery) is flagged for attention. */

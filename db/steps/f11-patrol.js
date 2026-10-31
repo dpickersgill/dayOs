@@ -5,6 +5,7 @@
 //   patrol_sweep_mark_log                     every mark, change, undo and resolution, append-only.
 //   dispatch_calls.sender_hash/ip_hash/flood_of  guest help floods grouped, never refused (PATROL-4).
 //   patrol_kits.changed_at, patrol_kit_checks.applied  a late offline kit check never undoes a newer change (PATROL-6).
+//   patrol_med_moves/counts.status, witness_*  controlled moves and counts wait for the witness to confirm (PATROL-7).
 module.exports = ({ tableExists, columnExists }) => [
   ['patrol_sweep_marks.resolution', (c) => columnExists(c, 'patrol_sweep_marks', 'resolution'),
     "ALTER TABLE patrol_sweep_marks ADD COLUMN resolution VARCHAR(255) NULL, ADD COLUMN resolved_kind ENUM('dealt_with','error') NULL, ADD COLUMN resolved_at DATETIME NULL, ADD COLUMN resolved_by BIGINT UNSIGNED NULL"],
@@ -34,6 +35,11 @@ module.exports = ({ tableExists, columnExists }) => [
     'ALTER TABLE patrol_kits ADD COLUMN changed_at DATETIME NULL'],
   ['patrol_kits.changed_at backfill', async (c) => !(await columnExists(c, 'patrol_kits', 'changed_at')) || Number((await c.query('SELECT COUNT(*) AS n FROM patrol_kits k WHERE k.changed_at IS NULL AND EXISTS (SELECT 1 FROM patrol_kit_checks x WHERE x.tenant_id = k.tenant_id AND x.kit_id = k.id)'))[0][0].n) === 0,
     'UPDATE patrol_kits k SET k.changed_at = (SELECT MAX(x.done_at) FROM patrol_kit_checks x WHERE x.tenant_id = k.tenant_id AND x.kit_id = k.id) WHERE k.changed_at IS NULL'],
+  // PATROL-7: a controlled-medication move or count waits (pending) until the witness confirms it themselves.
+  ['patrol_med_moves.status', (c) => columnExists(c, 'patrol_med_moves', 'status'),
+    "ALTER TABLE patrol_med_moves ADD COLUMN status ENUM('done','pending','declined') NOT NULL DEFAULT 'done', ADD COLUMN witness_user BIGINT UNSIGNED NULL, ADD COLUMN witness_confirmed_at DATETIME NULL, ADD COLUMN witness_via ENUM('login','pin') NULL"],
+  ['patrol_med_counts.status', (c) => columnExists(c, 'patrol_med_counts', 'status'),
+    "ALTER TABLE patrol_med_counts ADD COLUMN status ENUM('done','pending','declined') NOT NULL DEFAULT 'done', ADD COLUMN witness_user BIGINT UNSIGNED NULL, ADD COLUMN witness_confirmed_at DATETIME NULL, ADD COLUMN witness_via ENUM('login','pin') NULL"],
   ['patrol_kit_checks.applied', (c) => columnExists(c, 'patrol_kit_checks', 'applied'),
     'ALTER TABLE patrol_kit_checks ADD COLUMN applied TINYINT(1) NOT NULL DEFAULT 1'],
 ];

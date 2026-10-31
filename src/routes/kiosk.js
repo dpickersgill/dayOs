@@ -330,4 +330,4 @@ adminRouter.patch('/entries/:id', validate(z.object({ clock_in: dateTimeStr.opti
   res.json({ ok: true });
 });
 
-module.exports = { publicRouter, adminRouter };
+module.exports = { publicRouter, adminRouter, checkPin }; // checkPin: a controlled-medication witness confirms with their PIN (2026.11.11)

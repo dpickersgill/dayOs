@@ -327,3 +327,55 @@ test('suspicion: an entry refused for a future time carries the server clock so 
   const fixed = await api('POST', `/patrol/incidents/${c.id}/patients/${c.pid}/vitals`, { token: m.pat, body: { taken_at: r.body.details.server_now.replace(' ', 'T').slice(0, 16), pulse: 80, client_ref: `fast${suffix}` } });
   assert.equal(fixed.status, 201);
 });
+
+// ---------------------------------------------------------------- PATROL-7
+test('PATROL-7: a controlled waste, count or voided dose waits until the witness confirms it themselves', async () => {
+  const m = await patrolMountain('cs');
+  const sWit = await staff(m, 'Wanda');
+  const wit = await addUser(m, `wanda@${m.slug}.test`, 'patrol', { staff_id: sWit });
+  await q("INSERT IGNORE INTO patrol_members (tenant_id, staff_id, level, access_level) VALUES (?, ?, 'patroller', 'patrol'), (?, ?, 'leader', 'manager')", [m.tenantId, sWit, m.tenantId, m.s1]);
+  await q("UPDATE patrol_members SET access_level = 'manager' WHERE tenant_id = ? AND staff_id = ?", [m.tenantId, m.s1]);
+  const drug = ok(await api('POST', '/patrol/meds/formulary', { token: m.owner, body: { name: 'Fentanyl nasal', authority: 'standing_order', routes: ['intranasal'], max_dose: 100, dose_unit: 'mcg', min_cert: 'none', controlled: true } }), 201).id;
+  const lot = ok(await api('POST', '/patrol/meds/stock', { token: m.owner, body: { formulary_id: drug, lot: 'F1', quantity: 10, unit: 'doses' } }), 201).id;
+  const qty = async () => Number((await q('SELECT quantity FROM patrol_med_stock WHERE id = ?', [lot]))[0].quantity);
+  // (a) a waste naming a witness is pending; the recorder cannot confirm it; the witness can.
+  const w = ok(await api('POST', `/patrol/meds/stock/${lot}/moves`, { token: m.pat, body: { reason: 'wasted', delta: 3, note: 'Dropped vials', witness_staff: sWit } }), 201);
+  assert.equal(w.pending, true);
+  assert.equal(await qty(), 10, 'nothing changes until the witness confirms');
+  assert.equal((await api('POST', `/patrol/meds/moves/${w.id}/confirm`, { token: m.pat, body: {} })).status, 403, 'the recorder cannot confirm their own witness');
+  const meds = ok(await api('GET', '/patrol/meds', { token: wit }));
+  assert.ok(meds.pending.moves.some((x) => x.id === w.id && x.i_witness));
+  ok(await api('POST', `/patrol/meds/moves/${w.id}/confirm`, { token: wit, body: {} }));
+  assert.equal(await qty(), 7);
+  const mv = (await q('SELECT status, witness_user, witness_via FROM patrol_med_moves WHERE id = ?', [w.id]))[0];
+  assert.equal(mv.status, 'done'); assert.equal(mv.witness_via, 'login'); assert.ok(mv.witness_user);
+  // (b) a voided dose goes back only once someone else witnesses it.
+  const c = await readyCase(m.pat);
+  const tr = ok(await api('POST', `/patrol/incidents/${c.id}/patients/${c.pid}/treatments`, { token: m.pat, body: { kind: 'medication', medication: 'Fentanyl nasal', dose: '50 mcg', route: 'intranasal', detail: { dose_value: 50, dose_unit: 'mcg', stock_id: lot, stock_amount: 1, allergy_checked: true } } }), 201);
+  assert.equal(await qty(), 6);
+  ok(await api('POST', `/patrol/incidents/${c.id}/patients/${c.pid}/treatments/${tr.id}/void`, { token: m.pat, body: { reason: 'wrong entry' } }));
+  assert.equal(await qty(), 6, 'the voided dose waits for a witness');
+  const back = (await q("SELECT id, status FROM patrol_med_moves WHERE stock_id = ? AND reason = 'adjust'", [lot]))[0];
+  assert.equal(back.status, 'pending');
+  assert.equal((await api('POST', `/patrol/meds/moves/${back.id}/decline`, { token: m.pat })).status, 409, 'a voided dose cannot be declined away');
+  ok(await api('POST', `/patrol/meds/moves/${back.id}/confirm`, { token: wit, body: {} }));
+  assert.equal(await qty(), 7);
+  // (c) a count waits too, and a wrong PIN does not confirm it.
+  const cnt = ok(await api('POST', '/patrol/meds/counts', { token: m.pat, body: { witness_staff: sWit, lines: [{ stock_id: lot, counted: 6 }], note: 'One missing' } }), 201);
+  assert.equal(cnt.pending, true);
+  assert.equal(await qty(), 7);
+  assert.equal((await api('POST', `/patrol/meds/counts/${cnt.id}/confirm`, { token: m.pat, body: { pin: '9999' } })).status, 401);
+  ok(await api('POST', `/patrol/meds/counts/${cnt.id}/confirm`, { token: wit, body: {} }));
+  assert.equal(await qty(), 6);
+});
+
+test('suspicion: a patient marked entered in error gives back the medication given to them', async () => {
+  const m = await patrolMountain('cs');
+  const drug = ok(await api('POST', '/patrol/meds/formulary', { token: m.owner, body: { name: 'Glucose paste F11', authority: 'standing_order', routes: ['oral'], max_dose: 30, dose_unit: 'g', min_cert: 'none' } }), 201).id;
+  const lot = ok(await api('POST', '/patrol/meds/stock', { token: m.owner, body: { formulary_id: drug, lot: 'G1', quantity: 5, unit: 'tubes' } }), 201).id;
+  const c = await readyCase(m.pat);
+  ok(await api('POST', `/patrol/incidents/${c.id}/patients/${c.pid}/treatments`, { token: m.pat, body: { kind: 'medication', medication: 'Glucose paste F11', dose: '15 g', route: 'oral', detail: { dose_value: 15, dose_unit: 'g', stock_id: lot, stock_amount: 1, allergy_checked: true } } }), 201);
+  assert.equal(Number((await q('SELECT quantity FROM patrol_med_stock WHERE id = ?', [lot]))[0].quantity), 4);
+  ok(await api('POST', `/patrol/incidents/${c.id}/patients/${c.pid}/void`, { token: m.pat, body: { reason: 'Wrong patient' } }));
+  assert.equal(Number((await q('SELECT quantity FROM patrol_med_stock WHERE id = ?', [lot]))[0].quantity), 5);
+});
