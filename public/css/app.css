@@ -3647,7 +3647,8 @@ button.fill-day:hover { border-color: var(--line-strong); }
 .mcal-coming-list li { display: grid; grid-template-columns: 6rem 1fr auto; gap: 4px 12px; align-items: baseline; padding: 6px 0 6px 10px; border-left: 4px solid var(--k); }
 .mcal-coming-day { font-weight: 700; color: var(--ink-2); }
 .wall .mcal-coming-host { display: none; }
-@media (max-width: 900px) {
+/* The week reads as seven columns only where each column has room; below that, one day under the next. */
+@media (max-width: 1200px) {
   .mcal-week { grid-template-columns: 1fr; }
   .mcal-week .mcal-day { min-height: 0; }
   .mcal-week .mcal-meta { display: block; }
