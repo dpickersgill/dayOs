@@ -5,7 +5,7 @@
 // See src/lib/prospects.js.
 const express = require('express');
 const { pool, rows, one } = require('../db');
-const { z, validate, paramId } = require('../lib/util');
+const { z, validate, paramId, dateStr } = require('../lib/util');
 const { bad, notFound } = require('../lib/errors');
 const { cell } = require('../lib/csv');
 const P = require('../lib/prospects');
@@ -13,7 +13,7 @@ const P = require('../lib/prospects');
 const s = (max) => z.string().trim().max(max);
 // An emptied box arrives as '' and is saved as nothing.
 const opt = (schema) => z.preprocess((v) => (typeof v === 'string' && !v.trim() ? null : v), schema.nullable().optional());
-const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'A date like 2026-11-02');
+const date = dateStr;
 
 const prospectFields = {
   name: s(150).min(1),

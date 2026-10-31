@@ -16,7 +16,7 @@ const { stepUp, require: stepUpCheck } = require('../lib/stepup');
 const PWR = require('../lib/passwords');
 const sessions = require('../lib/sessions');
 const { rateLimit } = require('../middleware/rateLimit');
-const { z, validate, paramId, setClause } = require('../lib/util');
+const { z, validate, paramId, setClause, dateStr } = require('../lib/util');
 const { AppError, unauthorized, forbidden, notFound, bad, conflict } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const totp = require('../lib/totp');
@@ -54,7 +54,7 @@ router.post(
       slug,
       name: z.string().min(2).max(255),
       timezone: z.string().default('America/New_York'),
-      owner: z.object({ email: z.string().email(), password, first_name: z.string().min(1), last_name: z.string().min(1) }),
+      owner: z.object({ email: z.string().email().max(255), password, first_name: z.string().trim().min(1).max(100), last_name: z.string().trim().min(1).max(100) }),
     }),
   ),
   async (req, res) => {
@@ -655,7 +655,7 @@ router.post(
       person_id: z.coerce.number().int().positive().optional(),
       staff_id: z.coerce.number().int().positive().optional(),
       temporary: z.boolean().default(false), // they must choose their own password when they first sign in
-      access_ends_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+      access_ends_on: dateStr.nullable().optional(),
     }),
   ),
   async (req, res) => {
@@ -723,7 +723,7 @@ router.patch(
       staff_id: z.number().int().positive().nullable().optional(),
       username: username.optional(),
       email: z.string().trim().email().max(255).nullable().optional().or(z.literal('').transform(() => null)),
-      access_ends_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), // the day after which they cannot sign in
+      access_ends_on: dateStr.nullable().optional(), // the day after which they cannot sign in
     }),
   ),
   async (req, res) => {
@@ -789,7 +789,7 @@ router.delete('/users/:id/pin', authenticate, adminOnly, async (req, res) => {
  * The season's end: every counter, instructor, staff and patrol login (not managers) stops working after this day,
  * and new ones get it too. Bring someone back by clearing or moving their date. null clears it for new logins only.
  */
-router.post('/users/season-end', authenticate, adminOnly, validate(z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), roles: z.array(z.enum(['staff', 'counter', 'instructor', 'patrol'])).max(4).default(['staff', 'counter', 'instructor', 'patrol']), apply_to_current: z.boolean().default(true) })), async (req, res) => {
+router.post('/users/season-end', authenticate, adminOnly, validate(z.object({ date: dateStr.nullable(), roles: z.array(z.enum(['staff', 'counter', 'instructor', 'patrol'])).max(4).default(['staff', 'counter', 'instructor', 'patrol']), apply_to_current: z.boolean().default(true) })), async (req, res) => {
   const { date, roles, apply_to_current: now } = req.body;
   if (date && date < new Date().toISOString().slice(0, 10)) throw bad('Choose a date from today on');
   await pool.query('UPDATE tenants SET season_ends_on = ? WHERE id = ?', [date, req.auth.tenantId]);

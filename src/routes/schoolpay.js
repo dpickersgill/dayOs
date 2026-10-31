@@ -8,7 +8,7 @@ const crypto = require('crypto');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/rateLimit');
-const { z, dateStr, validate, paramId, todayIn, nowIn, addDays, seasonFor } = require('../lib/util');
+const { z, dateStr, validate, paramId, todayIn, nowIn, addDays, seasonFor, dateTimeStr } = require('../lib/util');
 const { notFound, conflict, bad, forbidden, AppError } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { toCsv, dollars } = require('../lib/csv');
@@ -345,7 +345,7 @@ router.post('/pay/guests/:id/offer', requireRole('instructor', 'manager'), valid
 });
 
 // A manager books a past guest straight into a new private with the instructor (origin 'rebook'; paid at the desk).
-router.post('/pay/guests/:id/book', manager, validate(z.object({ staff_id: z.number().int().positive(), offer_id: z.number().int().positive(), starts_at: z.string().regex(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/), sign_waiver: z.boolean().optional() })), async (req, res) => {
+router.post('/pay/guests/:id/book', manager, validate(z.object({ staff_id: z.number().int().positive(), offer_id: z.number().int().positive(), starts_at: dateTimeStr, sign_waiver: z.boolean().optional() })), async (req, res) => {
   const t = req.auth.tenantId; const personId = paramId(req); const b = req.body;
   const startsAt = `${b.starts_at.slice(0, 10)} ${b.starts_at.slice(11, 16)}:00`;
   const out = await tx(async (conn) => {

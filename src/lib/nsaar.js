@@ -1,4 +1,5 @@
 'use strict';
+const U = require('./util'); // real dates only (2026.11.11)
 
 // The incident form, following the National Ski Area Accident Report (NSAAR) form and its review guide.
 //
@@ -235,7 +236,7 @@ function valueSchema(f) {
     case 'longtext': return z.string().max(20000);
     case 'tel': return z.string().max(40);
     case 'email': return z.string().email().max(255);
-    case 'date': return z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+    case 'date': return U.dateStr;
     case 'time': return z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use 24 hour time, HH:MM');
     case 'number': return z.number().min(f.min ?? 0).max(f.max ?? 1e6);
     case 'check': return z.boolean();

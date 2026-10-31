@@ -6,7 +6,7 @@
 const express = require('express');
 const { pool, tx, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
-const { z, validate, paramId, dateStr, todayIn, addDays } = require('../lib/util');
+const { z, validate, paramId, dateStr, todayIn, addDays, dateTimeStr } = require('../lib/util');
 const { notFound, bad, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { baseUrl } = require('../lib/baseurl');
@@ -26,7 +26,7 @@ const manager = SA.school('director');
 const desk = SA.school('supervisor', 'counter');
 const DISCIPLINES = ['ski', 'snowboard', 'telemark', 'adaptive'];
 const hhmm = z.string().regex(/^\d{2}:\d{2}$/, 'Use HH:MM');
-const dt = z.string().regex(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/).transform((s) => { const t = s.replace('T', ' '); return t.length === 16 ? `${t}:00` : t; });
+const dt = dateTimeStr.transform((s) => { const t = s.replace('T', ' '); return t.length === 16 ? `${t}:00` : t; });
 const tzOf = async (tenantId) => (await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone;
 
 // ---------------------------------------------------------------- copy a day, templates

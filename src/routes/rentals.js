@@ -5,7 +5,7 @@ const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { crud } = require('../lib/crud');
 const { requireRole } = require('../middleware/auth');
-const { partialOf, z, dateTimeStr, validate, paramId, normDateTime, seasonFor, todayIn, nowIn } = require('../lib/util');
+const { partialOf, z, dateTimeStr, validate, paramId, normDateTime, seasonFor, todayIn, nowIn, dateStr } = require('../lib/util');
 const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const R = require('../lib/rentals');
@@ -26,7 +26,7 @@ const itemFields = {
   serial_no: z.string().max(80).nullable().optional(),
   tier: z.enum(R.TIERS).optional(),
   boot_sole_mm: z.number().int().min(150).max(400).nullable().optional(),
-  purchased_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  purchased_on: dateStr.nullable().optional(),
   cost_cents: z.number().int().min(0).nullable().optional(),
   grade: z.enum(['A', 'B', 'C', 'D']).nullable().optional(),
   location: z.string().max(60).nullable().optional(),

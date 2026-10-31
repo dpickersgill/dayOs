@@ -6,7 +6,7 @@ const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/rateLimit');
-const { z, validate, paramId, todayIn, addDays } = require('../lib/util');
+const { z, validate, paramId, todayIn, addDays, dateStr } = require('../lib/util');
 const { notFound, bad, unauthorized } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { baseUrl } = require('../lib/baseurl');
@@ -18,7 +18,7 @@ const router = express.Router();
 const publicRouter = express.Router();
 const manager = requireRole('manager');
 const staff = requireRole('counter', 'manager', 'staff');
-const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
+const day = dateStr;
 const tzOf = async (tenantId) => (await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone;
 
 // ================================================================ staff

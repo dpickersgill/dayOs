@@ -12,7 +12,7 @@
 // items never carry a guest's, patient's or payroll detail: a group shows its name and size only.
 const crypto = require('crypto');
 const { rows, one } = require('../db');
-const { z, dateStr, timeStr, addDays, todayIn } = require('./util');
+const { z, dateStr, planDateStr, timeStr, addDays, todayIn } = require('./util');
 const { bad, forbidden } = require('./errors');
 const modules = require('./modules');
 const patrolAccess = require('./patrolaccess');
@@ -90,8 +90,8 @@ const teamsOf = (raw) => (raw ? String(raw).split(',').filter((t) => TEAM_KEYS.i
 const eventFields = {
   title: z.string().trim().min(1, 'Give the event a title').max(120),
   kind: z.enum(KIND_KEYS).default('event'),
-  starts_on: dateStr,
-  ends_on: dateStr.nullable().optional(),
+  starts_on: planDateStr, // 2000 to 2099: a calendar event in 1900 is a typing slip
+  ends_on: planDateStr.nullable().optional(),
   all_day: z.boolean().default(true),
   start_time: timeStr.nullable().optional(),
   end_time: timeStr.nullable().optional(),

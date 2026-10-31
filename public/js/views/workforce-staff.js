@@ -65,8 +65,8 @@ function addStaff() {
   rankField.hidden = true;
   patrol.addEventListener('change', () => { rankField.hidden = !patrol.checked; });
   formDialog('Add a staff member', h('div', { class: 'form' },
-    field('First name', input({ name: 'first', required: true })), field('Last name', input({ name: 'last', required: true })),
-    field('Email', input({ name: 'email', type: 'email' })), field('Phone', input({ name: 'phone', type: 'tel' })),
+    field('First name', input({ name: 'first', required: true, maxlength: 100 })), field('Last name', input({ name: 'last', required: true, maxlength: 100 })),
+    field('Email', input({ name: 'email', type: 'email', maxlength: 255 })), field('Phone', input({ name: 'phone', type: 'tel', maxlength: 40 })),
     field('Paid or volunteer', select([['employee', 'Employee (paid)'], ['volunteer', 'Volunteer']], 'employee', { name: 'kind' }), 'Volunteers do not use the time clock or appear in payroll'),
     field('Status', select(STAFF_STATUS, 'active', { name: 'status' }), 'Only active people can be scheduled'), field('Hired on', input({ name: 'hired_on', type: 'date' })),
     h('label', { class: 'check wide' }, patrol, ' On ski patrol (they appear in Patrol, where the director sets their access)'), rankField), async (fd) => {

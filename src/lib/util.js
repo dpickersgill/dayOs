@@ -4,11 +4,26 @@ const crypto = require('crypto');
 const { z } = require('zod');
 const { bad } = require('./errors');
 
-const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
+// A date that exists (no February 31 or month 13) in a year from 1900 to 2100. Before 2026.11.11 the format alone was
+// checked, so an impossible date reached the database and came back as a 500.
+const realDate = (s, minYear = 1900, maxYear = 2100) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s));
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (y < minYear || y > maxYear || mo < 1 || mo > 12 || d < 1) return false;
+  return d <= new Date(Date.UTC(y, mo, 0)).getUTCDate();
+};
+const realTime = (s) => { const m = /(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(String(s)); return Boolean(m) && Number(m[1]) < 24 && Number(m[2]) < 60 && Number(m[3] || 0) < 60; };
+const DATE_MSG = 'Enter a real date (year, month, day)';
+const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').refine((s) => realDate(s), DATE_MSG);
 const dateTimeStr = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/, 'Use YYYY-MM-DDTHH:MM[:SS]');
-const timeStr = z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, 'Use HH:MM[:SS]');
+  .regex(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/, 'Use YYYY-MM-DDTHH:MM[:SS]')
+  .refine((s) => realDate(s) && realTime(s), 'Enter a real date and time');
+/** A date for planning (calendar events, shifts, rentals): a real date from 2000 to 2099. */
+const planDateStr = dateStr.refine((s) => realDate(s, 2000, 2099), 'Choose a date from 2000 to 2099');
+const planDateTimeStr = dateTimeStr.refine((s) => realDate(s, 2000, 2099), 'Choose a date from 2000 to 2099');
+const timeStr = z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, 'Use HH:MM[:SS]').refine(realTime, 'Enter a real time');
 const id = z.coerce.number().int().positive();
 // A guest type's code (lib/guesttypes.js): each mountain has its own list; routes check the code is one of them.
 const tierEnum = z.string().trim().toLowerCase().regex(/^[a-z0-9_]{1,30}$/, 'Choose a guest type');
@@ -148,6 +163,6 @@ async function mapLimit(items, limit, fn) {
 }
 
 module.exports = {
-  mapLimit, partialOf, z, dateStr, dateTimeStr, timeStr, id, tierEnum,
+  mapLimit, partialOf, z, dateStr, dateTimeStr, planDateStr, planDateTimeStr, realDate, timeStr, id, tierEnum,
   validate, paramId, normDateTime, todayIn, nowIn, dayRange, utcFromLocal, localDay, localTime, addDays, weekdayOf, seasonFor, newCode, setClause,
 };
