@@ -44,7 +44,7 @@ async function mountainPage(root) {
     card('The mountain', [
       row('Mountain name', name, 'Shown to guests on receipts, emails and your public pages.', { wide: true }),
       row('Phone', phone, 'Printed on receipts and ticket slips.'),
-      row('Address', address, 'Printed at the top of receipts and ticket slips.', { wide: true }),
+      row('Address', address, 'Printed at the top of receipts and ticket slips, and at the foot of every marketing email (the law requires a postal address there).', { wide: true }),
       row('Receipt footer', footer, 'For example: opening hours, a thank-you, or the refund policy.', { wide: true }),
     ], { id: 'details' }),
     card('Time zone', [

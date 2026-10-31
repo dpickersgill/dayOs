@@ -35,8 +35,11 @@ async function list(box) {
 
 function setupNote(status) {
   const missing = [!status.email_ready && 'email', !status.sms_ready && 'text messages'].filter(Boolean);
-  if (!missing.length) return null;
-  return h('p', { class: 'muted' }, `Not set up yet: ${missing.join(' and ')}. You can write drafts now. Sending starts once the account is connected (see Help, "Set up email and text messages").`);
+  const notes = [];
+  if (missing.length) notes.push(h('p', { class: 'muted' }, `Not set up yet: ${missing.join(' and ')}. You can write drafts now. Sending starts once the account is connected (see Help, "Set up email and text messages").`));
+  if (!status.postal_address) notes.push(h('p', { class: 'muted' }, 'Email messages cannot go out until the mountain\u2019s postal address is in Settings, Mountain details. The law requires it at the foot of every marketing email.'));
+  notes.push(h('p', { class: 'muted' }, `Texts go out between ${(status.quiet_hours || {}).from || '8 AM'} and ${(status.quiet_hours || {}).until || '9 PM'} at the mountain. A text sent later waits until 8 AM.`));
+  return h('div', null, ...notes);
 }
 
 /** The editor, for a new message or a saved draft. */
@@ -95,7 +98,7 @@ async function editor(id, status, done) {
 async function detail(id) {
   const c = await get(`/messages/campaigns/${id}`);
   dialog(c.name, h('div', { class: 'stack' },
-    h('p', null, `${c.channel === 'sms' ? 'Text message' : 'Email'} sent ${fmtDateTime(c.sent_at)}. Reached ${c.sent} of ${c.total}${c.failed ? `; ${c.failed} could not be delivered` : ''}.`),
+    h('p', null, `${c.channel === 'sms' ? 'Text message' : 'Email'} sent ${fmtDateTime(c.sent_at)}. Reached ${c.sent} of ${c.total}${c.held ? `; ${c.held} waiting for 8 AM` : ''}${c.failed ? `; ${c.failed} could not be delivered` : ''}.`),
     c.subject ? h('p', null, h('strong', null, 'Subject: '), c.subject) : null,
     h('pre', { class: 'msg-body' }, c.body),
     c.problems.length ? h('div', null, h('h3', null, 'Could not be delivered'), h('ul', { class: 'plain' }, c.problems.map((p) => h('li', null, `${p.to_addr}: ${p.error}`)))) : null), { wide: true });

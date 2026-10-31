@@ -277,3 +277,20 @@ test('DP-5: reward and loyalty email honors unsubscribe and carries the footer; 
   assert.match(m.TextBody, /12 Summit Road/); assert.match(m.TextBody, /To stop these emails: http/);
   assert.ok((m.Headers || []).some((x) => x.Name === 'List-Unsubscribe-Post'));
 });
+
+// ---------------------------------------------------------------- DP-7
+test('DP-7: a stranger signing up an unsubscribed Good Day reader erases nothing; every step is in the consent history', async () => {
+  const email = `gd${suffix}@reader.example`;
+  await pool.query(`INSERT INTO goodday_subscribers (email, name, role, status, source, consent_at, consent_wording, consent_ip, confirmed_at, unsubscribed_at, unsubscribe_how)
+    VALUES (?, NULL, 'other', 'unsubscribed', 'website', '2025-11-02 10:00:00', 'Send me The Good Day (Signed up on: website)', '198.51.100.7', '2025-11-02 10:05:00', '2026-09-10 08:00:00', 'one-click')`, [email]);
+  const [[before]] = await pool.query('SELECT status, consent_at, consent_ip, unsubscribed_at, unsubscribe_how FROM goodday_subscribers WHERE email = ?', [email]);
+  const r = await fetch(`${base}/api/v1/site/good-day/subscribe`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, name: 'Someone Else', source: 'attacker' }) });
+  assert.ok(r.status < 300);
+  const [[after]] = await pool.query('SELECT status, consent_at, consent_ip, unsubscribed_at, unsubscribe_how FROM goodday_subscribers WHERE email = ?', [email]);
+  assert.deepEqual(after, before, 'the unsubscribe and the earlier consent are untouched');
+  const ev = await q('SELECT event, source FROM goodday_consent_events WHERE email = ? ORDER BY id', [email]);
+  assert.deepEqual(ev.map((e) => e.event), ['subscribe']);
+  assert.equal(ev[0].source, 'attacker');
+  // The app may only add to the history (scripts/db-runtime-user.js).
+  assert.ok(require('../scripts/db-runtime-user').APPEND_ONLY.includes('goodday_consent_events'));
+});
