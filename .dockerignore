@@ -3,3 +3,8 @@ test
 .env
 .git
 *.md
+# Packages and archives never go into the server build
+*.whl
+*.zip
+*.tar.gz
+*.tgz

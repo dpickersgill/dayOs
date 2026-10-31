@@ -2,3 +2,8 @@ node_modules
 .env
 *.log
 src/release/build.json
+# Packages and archives never go in the repository (test/slim.test.js checks git ls-files)
+*.whl
+*.zip
+*.tar.gz
+*.tgz
