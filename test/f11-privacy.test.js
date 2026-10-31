@@ -294,3 +294,28 @@ test('DP-7: a stranger signing up an unsubscribed Good Day reader erases nothing
   // The app may only add to the history (scripts/db-runtime-user.js).
   assert.ok(require('../scripts/db-runtime-user').APPEND_ONLY.includes('goodday_consent_events'));
 });
+
+// ---------------------------------------------------------------- DP-11
+test('DP-11: a closed mountain’s owner signs in to export-only mode during the window, and only then', async () => {
+  const m = await mountain(`f11c-${suffix}`);
+  assert.equal((await api('POST', '/users', { token: m.token, body: { email: `mgr@${m.slug}.test`, password: PW, role: 'manager' } })).status, 201);
+  await pool.query("UPDATE tenants SET status = 'suspended', closed_at = UTC_TIMESTAMP(), delete_after = DATE_ADD(CURDATE(), INTERVAL 60 DAY) WHERE id = ?", [m.id]);
+  const tok = await login(m.slug, `o@${m.slug}.test`);
+  const me = await api('GET', '/auth/me', { token: tok });
+  assert.equal(me.status, 200); assert.equal(me.body.export_only, true);
+  const x = await api('GET', '/closed-export', { token: tok });
+  assert.equal(x.status, 200); assert.ok(x.body.files.some((f) => f.href === '/people/export.csv'));
+  const csv = await api('GET', '/people/export.csv', { token: tok });
+  assert.equal(csv.status, 200, csv.text);
+  for (const [method, p] of [['GET', '/people'], ['POST', '/people'], ['GET', '/messages/campaigns'], ['DELETE', '/people/1']]) {
+    const r = await api(method, p, { token: tok, body: method === 'POST' ? { first_name: 'A', last_name: 'B' } : undefined });
+    assert.equal(r.status, 403, `${method} ${p} is closed`);
+  }
+  // Only the owner, and only inside the window.
+  const mgr = await api('POST', '/auth/login', { body: { tenant: m.slug, email: `mgr@${m.slug}.test`, password: PW } });
+  assert.equal(mgr.status, 403);
+  await pool.query('UPDATE tenants SET delete_after = DATE_SUB(CURDATE(), INTERVAL 2 DAY) WHERE id = ?', [m.id]);
+  assert.equal((await api('GET', '/auth/me', { token: tok })).status, 403, 'the window is over');
+  const late = await api('POST', '/auth/login', { body: { tenant: m.slug, email: `o@${m.slug}.test`, password: PW } });
+  assert.equal(late.status, 403);
+});

@@ -6,6 +6,7 @@ const { pool } = require('../db');
 const demoUsage = require('../lib/demousage');
 const sessions = require('../lib/sessions');
 const { unauthorized, forbidden } = require('../lib/errors');
+const closedExport = require('../lib/closedexport');
 
 const MANAGER_ROLES = ['owner', 'manager'];
 const CREW_ROLES = ['counter', 'instructor', 'staff'];
@@ -80,7 +81,7 @@ async function authenticate(req, _res, next) {
   try {
     [rows] = await pool.query(
       `SELECT u.id, u.role, u.staff_id, u.totp_enabled, u.must_change_password, (u.access_ends_on IS NOT NULL AND u.access_ends_on < CURDATE()) AS access_over,
-         ${TIER_SQL}, t.status, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over,
+         ${TIER_SQL}, t.status, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over, t.closed_at, t.delete_after, t.data_deleted_at, t.timezone,
          ${sessions.STATE_SQL}
        FROM users u JOIN tenants t ON t.id = u.tenant_id ${sessions.JOIN_SQL}
        WHERE u.id = ? AND u.tenant_id = ? AND u.active = 1
@@ -100,7 +101,15 @@ async function authenticate(req, _res, next) {
   // A poll from a tab that is on screen: someone still has the app open, so a closing mark (a reload whose first request
   // beat the closing notice) is cleared. It is still not use, so the idle limit applies (lib/sessions.js).
   else if (req.headers['x-visible'] === '1' && Number(row.session_closing)) sessions.shown(payload.sid);
-  if (row.status !== 'active') return next(forbidden('This mountain is paused. Contact Verdynt/OS.'));
+  // A closed mountain: its owner, during the export window, reaches the spreadsheets and nothing else (lib/closedexport.js).
+  const exportOnly = row.status !== 'active' && closedExport.ownerMayExport(row);
+  if (row.status !== 'active' && !exportOnly) return next(forbidden('This mountain is paused. Contact Verdynt/OS.'));
+  if (exportOnly && !(['GET', 'HEAD'].includes(req.method) || /\/auth\/(logout|back|closing)$/.test(req.path)) ) return next(forbidden('This mountain is closed. You can only download its records.'));
+  if (exportOnly && !closedExport.allowedPath(req.originalUrl)) {
+    const err = forbidden('This mountain is closed. You can only download its records.');
+    err.details = { code: 'export_only' };
+    return next(err);
+  }
   if (row.sandbox_over) return next(forbidden('This demo has ended. Start a new one, or ask Verdynt/OS for a walkthrough.'));
   const path = req.originalUrl.split('?')[0];
   if (display === 'patrol_room' && !ROOM_PATHS.test(path)) {
@@ -130,6 +139,7 @@ async function authenticate(req, _res, next) {
     method: row.session_method, terminalId: row.session_terminal ? Number(row.session_terminal) : null, deviceHash: row.session_device || null,
     steppedUp: Boolean(Number(row.stepped_up)), strong: Boolean(Number(row.strong)), mfaRule: mfaRule(row), display,
     schoolLevel: row.role === 'instructor' ? (row.school_access || 'instructor') : null, // lib/schoolaccess.js
+    exportOnly,
   };
   if (Number(row.sandbox)) demoUsage.touch(payload.tid, req.originalUrl, req.method); // for the platform's Demos dashboard
   return next();

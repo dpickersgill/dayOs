@@ -792,6 +792,7 @@ async function start() {
   try { if (await setDeviceKey(ctx.me.device_key) && waitingCounts().mine) flushOutbox(); } catch (_) { /* nothing waiting */ }
   if (ctx.me.must_change_password) { showPasswordChange(); return; }
   if (ctx.me.mfa_enrollment_required) { showEnrollment(); return; }
+  if (ctx.me.export_only) { (await import('./views/closed-export.js')).show(app, signOut); return; } // a closed mountain's owner
   buildShell();
   if (ctx.me.mfa_starts_on && !ctx.me.mfa_enabled) {
     main.before(h('div', { class: 'banner warn', role: 'status', 'data-banner': 'mfa-soon' }, `From ${new Date(`${ctx.me.mfa_starts_on}T12:00:00`).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}, patrollers need two-step sign-in, because Patrol holds patient details. `,

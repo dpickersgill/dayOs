@@ -3668,3 +3668,10 @@ button.fill-day:hover { border-color: var(--line-strong); }
   .liftchk-edit li { flex-wrap: wrap; }
   .liftchk-edit li input:not([type]) { flex-basis: 100%; }
 }
+
+/* ---- Privacy (2026.11.11, track PRIVACY): a closed mountain's export screen, and what stayed after an anonymise. */
+.closed-export-page { max-width: 640px; margin: 0 auto; padding: 32px 16px; }
+.closed-export h1 { margin-top: 0; }
+.closed-export-files { list-style: none; margin: 16px 0; padding: 0; display: grid; gap: 8px; }
+.closed-export-files .btn { min-height: 44px; width: 100%; justify-content: flex-start; }
+.kept-list { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; }
