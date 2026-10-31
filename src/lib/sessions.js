@@ -5,7 +5,15 @@
 // and not past its end (JWT_TTL, 8 hours). Signing out, changing a password and the console all end sessions at once.
 // A shared terminal's session ends after TERMINAL_IDLE_MINUTES (15) unused, and at once if the terminal is revoked.
 // When the last browser tab using a session closes, the app marks it closing (closing_at). It ends CLOSING_GRACE_SECONDS
-// (120) later unless it is used again first: a reload uses it again within a second or two, a closed browser never does.
+// (30 minutes) later unless it is used again first: a reload uses it again within a second or two, a trip to Stripe and
+// back within the half hour, and a closed browser never does. The grace is long so that leaving the app in the same tab
+// (Stripe onboarding, checkout) is never mistaken for a close (2026.11.10 fix). What ends a closing mark:
+//   - any normal request (not a background poll), and the "back" notice a page sends as it opens (back);
+//   - a background poll from a tab that is on screen (x-visible: 1). Polls from a hidden tab do not, so polls alone never
+//     keep a closed session going; a visible tab's polls never touch last_seen either, so the idle limit still applies.
+// A closing notice from an older page that arrives just after a newer page's "back" notice (a reload whose first request
+// beat the notice) is ignored. Each page says when it opened (its own clock), so a page that opens and closes at once
+// still counts as closed.
 const crypto = require('node:crypto');
 const jwt = require('jsonwebtoken');
 const config = require('../config');
@@ -46,13 +54,14 @@ const STEP_UP_MIN = () => Number(process.env.STEP_UP_MINUTES || 10);
  * Columns for the sign-in check (users u LEFT JOIN user_sessions s): whether the session is open (not signed out, not
  * idle too long, not past its end, its terminal not revoked) and whether a second check was made recently.
  */
-const CLOSING_GRACE_SECONDS = 120;
+const CLOSING_GRACE_SECONDS = 30 * 60;
+const BACK_RACE_SECONDS = 15; // a closing notice this soon after a back notice is the reload race, not a close
 const CLOSING_SQL = `(s.closing_at IS NULL OR s.closing_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL ${CLOSING_GRACE_SECONDS} SECOND))`;
 const STATE_SQL = `(s.id_hash IS NOT NULL AND s.ended_at IS NULL AND s.expires_at > UTC_TIMESTAMP()
     AND s.last_seen > DATE_SUB(UTC_TIMESTAMP(), INTERVAL IF(s.terminal_id IS NULL, ?, ?) MINUTE) AND ${CLOSING_SQL}
     AND (s.terminal_id IS NULL OR EXISTS (SELECT 1 FROM terminals x WHERE x.id = s.terminal_id AND x.tenant_id = s.tenant_id AND x.revoked_at IS NULL))) AS session_open,
   (s.stepped_up_at IS NOT NULL AND s.stepped_up_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? MINUTE)) AS stepped_up,
-  s.method AS session_method, s.terminal_id AS session_terminal, s.device_hash AS session_device, s.display AS session_display`;
+  (s.closing_at IS NOT NULL) AS session_closing, s.method AS session_method, s.terminal_id AS session_terminal, s.device_hash AS session_device, s.display AS session_display`;
 const stateParams = () => [IDLE_MIN(), TERMINAL_IDLE_MIN(), STEP_UP_MIN()];
 const JOIN_SQL = 'LEFT JOIN user_sessions s ON s.id_hash = ? AND s.user_id = u.id';
 
@@ -71,17 +80,33 @@ function touch(sid) {
 }
 
 /** The last tab using this session closed (or is reloading): it ends unless used again within CLOSING_GRACE_SECONDS. */
-async function closing(sid) {
-  await pool.query('UPDATE user_sessions SET closing_at = UTC_TIMESTAMP() WHERE id_hash = ? AND ended_at IS NULL', [hash(sid)]);
+async function closing(sid, page = null) {
+  // Ignored only when a back notice came in the last few seconds from a page that opened after the one closing (or, when
+  // the closing page did not say when it opened, from any page).
+  await pool.query(`UPDATE user_sessions SET closing_at = UTC_TIMESTAMP() WHERE id_hash = ? AND ended_at IS NULL
+    AND NOT (back_at IS NOT NULL AND back_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ${BACK_RACE_SECONDS} SECOND)
+      AND (? IS NULL OR back_page IS NULL OR back_page > ?))`, [hash(sid), page, page]);
+}
+
+/** A page of the app opened (or came back) with this session: it is in use, and any closing mark is cleared. */
+async function back(sid, page = null) {
+  await pool.query('UPDATE user_sessions SET back_at = UTC_TIMESTAMP(), back_page = ?, last_seen = UTC_TIMESTAMP(), closing_at = NULL WHERE id_hash = ? AND ended_at IS NULL', [page, hash(sid)]);
+}
+
+/** A tab on screen is still showing this session (a visible tab's poll): clears a closing mark, but is not use. */
+function shown(sid) {
+  pool.query('UPDATE user_sessions SET closing_at = NULL WHERE id_hash = ? AND closing_at IS NOT NULL', [hash(sid)]).catch(() => {});
 }
 
 /**
  * The sessions to list on "Where you are signed in": still open by every rule the sign-in check uses, with when each
- * ends if nobody uses it (the idle limit, or the 8-hour end, whichever is sooner). Newest use first.
+ * ends if nobody uses it (the idle limit, the 8-hour end, or for a session whose last tab closed, the closing grace,
+ * whichever is soonest). Newest use first.
  */
 async function listOpen(userId) {
   const [list] = await pool.query(`SELECT s.id_hash, s.created_at, s.last_seen, s.agent, s.method, s.device_hash, x.name AS terminal,
-      LEAST(s.expires_at, DATE_ADD(s.last_seen, INTERVAL IF(s.terminal_id IS NULL, ?, ?) MINUTE)) AS ends_at
+      LEAST(s.expires_at, DATE_ADD(s.last_seen, INTERVAL IF(s.terminal_id IS NULL, ?, ?) MINUTE),
+        COALESCE(DATE_ADD(s.closing_at, INTERVAL ${CLOSING_GRACE_SECONDS} SECOND), s.expires_at)) AS ends_at, (s.closing_at IS NOT NULL) AS closing
     FROM user_sessions s LEFT JOIN terminals x ON x.id = s.terminal_id AND x.tenant_id = s.tenant_id
     WHERE s.user_id = ? AND s.ended_at IS NULL AND s.expires_at > UTC_TIMESTAMP()
       AND s.last_seen > DATE_SUB(UTC_TIMESTAMP(), INTERVAL IF(s.terminal_id IS NULL, ?, ?) MINUTE) AND ${CLOSING_SQL}
@@ -102,9 +127,13 @@ async function setDisplay(sid, display) {
 async function end(sid, why = 'signed_out') {
   await pool.query('UPDATE user_sessions SET ended_at = UTC_TIMESTAMP(), ended_why = ? WHERE id_hash = ? AND ended_at IS NULL', [why, hash(sid)]);
 }
-/** Ends every open session of a user, except (optionally) the one making the change. */
+/**
+ * Ends every open session of a user, except (optionally) the one making the change. The private calendar feed link goes
+ * too (2026.11.10 fix): a password change, a reset and "Sign out everywhere" each turn it off, like a session.
+ */
 async function endAll(db, userId, why, exceptSid) {
   await db.query(`UPDATE user_sessions SET ended_at = UTC_TIMESTAMP(), ended_why = ? WHERE user_id = ? AND ended_at IS NULL${exceptSid ? ' AND id_hash <> ?' : ''}`, exceptSid ? [why, userId, hash(exceptSid)] : [why, userId]);
+  await db.query('DELETE FROM calendar_feeds WHERE user_id = ?', [userId]);
 }
 /** The daily job: sessions over a month old are removed. */
 async function prune() {
@@ -112,4 +141,4 @@ async function prune() {
   return r.affectedRows;
 }
 
-module.exports = { open, STATE_SQL, CLOSING_GRACE_SECONDS, closing, listOpen, IDLE_MIN, stateParams, JOIN_SQL, steppedUp, STEP_UP_MIN, TERMINAL_IDLE_MIN, touch, setDisplay, end, endAll, prune, hash };
+module.exports = { open, STATE_SQL, CLOSING_GRACE_SECONDS, BACK_RACE_SECONDS, closing, back, shown, listOpen, IDLE_MIN, stateParams, JOIN_SQL, steppedUp, STEP_UP_MIN, TERMINAL_IDLE_MIN, touch, setDisplay, end, endAll, prune, hash };

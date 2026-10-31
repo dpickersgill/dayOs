@@ -43,29 +43,42 @@ echo "  Point-in-time recovery:   ${BINLOG:-false} (${LOGDAYS:-?} days of logs)"
 echo "  Deletion protection:      ${PROTECTED:-false}"
 echo "  High availability:        $([ "$AVAIL" = REGIONAL ] && echo on || echo off)"
 
-PATCH=(); RESTARTS=""
-[ "$ON" = true ] || PATCH+=(--backup-start-time=07:00)
-[ "${KEPT:-0}" -ge 14 ] 2>/dev/null || PATCH+=(--retained-backups-count=14)
-if [ "$BINLOG" != true ]; then PATCH+=(--enable-bin-log); RESTARTS="point-in-time recovery"; fi
-[ "${LOGDAYS:-0}" -ge 7 ] 2>/dev/null || PATCH+=(--retained-transaction-log-days=7)
-[ "$PROTECTED" = true ] || PATCH+=(--deletion-protection)
-if [ -n "$HA" ] && [ "$AVAIL" != REGIONAL ]; then PATCH+=(--availability-type=REGIONAL); RESTARTS="${RESTARTS:+$RESTARTS and }high availability"; fi
+# Each change below is its own step (2026.11.10 fix): one that is skipped or fails never stops the others, so saying no to
+# the restart still turns on deletion protection and the daily backups. The log-days setting is sent only when
+# point-in-time recovery is on, or is being turned on in the same step (Cloud SQL refuses it otherwise).
+FAILED=""
+patch() { # what, then the gcloud sql instances patch options
+  local what="$1"; shift
+  if run gcloud sql instances patch "$INSTANCE" "$@" --quiet; then echo "  $what: done ($*)"; else echo "  $what: FAILED. Run this again, or set it in the Cloud console."; FAILED=1; fi
+}
+ask_restart() { # what; true when the person types restart (a dry run never asks and counts as yes)
+  [ -n "$DRY" ] && return 0
+  echo "  Turning on $1 restarts the database server: the app stops answering for a minute or two."
+  read -r -p "  Type restart to go ahead now (do it after closing time), anything else to skip it: " OK
+  if [ "$OK" = restart ]; then return 0; fi
+  echo "  Skipped $1. Run this again after closing time to turn it on."
+  return 1
+}
 
 step "Turning on what is missing"
-if [ "${#PATCH[@]}" -eq 0 ]; then
-  echo "  Nothing: every backup setting is on."
+CHANGED=""
+BACKUPS=()
+[ "$ON" = true ] || BACKUPS+=(--backup-start-time=07:00)
+[ "${KEPT:-0}" -ge 14 ] 2>/dev/null || BACKUPS+=(--retained-backups-count=14)
+if [ "${#BACKUPS[@]}" -gt 0 ]; then patch "Daily backups" "${BACKUPS[@]}"; CHANGED=1; fi
+if [ "$PROTECTED" != true ]; then patch "Deletion protection" --deletion-protection; CHANGED=1; fi
+if [ "$BINLOG" = true ]; then
+  # Already on: only the number of days, when it is short.
+  if ! [ "${LOGDAYS:-0}" -ge 7 ] 2>/dev/null; then patch "Point-in-time recovery days" --retained-transaction-log-days=7; CHANGED=1; fi
 else
-  if [ -n "$RESTARTS" ] && [ -z "$DRY" ]; then
-    echo "  Turning on $RESTARTS restarts the database server: the app stops answering for a minute or two."
-    read -r -p "  Type restart to go ahead now (do it after closing time), anything else to skip those: " OK
-    if [ "$OK" != restart ]; then
-      PATCH=("${PATCH[@]/--enable-bin-log}"); PATCH=("${PATCH[@]/--availability-type=REGIONAL}")
-      echo "  Skipped. Run this again after closing time to turn them on."
-    fi
-  fi
-  CLEAN=(); for p in "${PATCH[@]}"; do [ -n "$p" ] && CLEAN+=("$p"); done
-  if [ "${#CLEAN[@]}" -gt 0 ]; then run gcloud sql instances patch "$INSTANCE" "${CLEAN[@]}" --quiet; echo "  Changed: ${CLEAN[*]}"; fi
+  CHANGED=1
+  if ask_restart "point-in-time recovery"; then patch "Point-in-time recovery" --enable-bin-log --retained-transaction-log-days=7; fi
 fi
+if [ -n "$HA" ] && [ "$AVAIL" != REGIONAL ]; then
+  CHANGED=1
+  if ask_restart "high availability"; then patch "High availability" --availability-type=REGIONAL; fi
+fi
+[ -n "$CHANGED" ] || echo "  Nothing: every backup setting is on."
 
 step "A weekly copy outside the database server"
 if ! gcloud storage buckets describe "$BUCKET" >/dev/null 2>&1; then
@@ -103,3 +116,4 @@ echo ""
 if [ -n "$DRY" ]; then echo "Dry run: nothing was changed."; else
   echo "Done. Check it in the Cloud console: SQL, $INSTANCE, Backups. RECOVERY.md has the restore steps and the drill."
 fi
+if [ -n "$FAILED" ]; then echo "Some settings could not be changed (marked FAILED above)."; exit 1; fi

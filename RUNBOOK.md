@@ -72,6 +72,11 @@ What changed in the app with this release:
   `PWNED_CHECK=off` skips it).
 - The platform key stops working once any operator has two-step sign-in. `PLATFORM_KEY_SIGNIN=on` is the break-glass
   setting if every operator is locked out; set it back afterwards.
+- The key alone (no authenticator code) can list mountains and make recorded changes, but it cannot read a mountain or
+  hand over access: resetting a mountain login's password or two-step, setting an operator's password, resetting their
+  two-step, switching an operator back on and adding an operator all need two-step (2026.11.10). The one exception is
+  adding the first operator, while no active operator has two-step. If every operator has lost their phone, set
+  `PLATFORM_TOTP_SECRET` too and sign in with the key and a code from that secret: that counts as two-step.
 - Offline patrol notes on phones are sealed with a key made from `LINK_SECRET` and the person's login. Before rotating
   `LINK_SECRET`, make sure patrol phones have sent everything waiting, or those notes cannot be opened afterwards.
 - Close mountain (console, Manage): paused now, deleted by the daily job after the window. The console's history of it is kept.
@@ -145,7 +150,7 @@ and a code from an authenticator app; everything they do is in the Activity log 
    authenticator app and type the code. From then on you sign in with email, password and the app's code.
 3. **More operators:** Operators, Add an operator. Give them their first password by phone or in person; they set up
    their app at their first sign-in and can change the password (Change my password).
-4. **Lost phone:** another operator chooses **Reset two-step** on them (or use the platform key). **Leaving:** Switch off.
+4. **Lost phone:** another operator chooses **Reset two-step** on them (or use the platform key with a code, see above). **Leaving:** Switch off.
    Either ends their open sessions at once.
 5. **Once your own login works, turn key sign-in off** so the key alone opens nothing:
    `gcloud run services update summitops-api --region us-east1 --update-env-vars PLATFORM_KEY_SIGNIN=off`.

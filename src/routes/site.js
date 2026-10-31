@@ -182,6 +182,9 @@ const FOOTER = `<footer class="sf">
 // ---------------------------------------------------------------- plans in the page itself
 // Home and Pricing show the live plans in the HTML, so search engines and people without JavaScript see the real prices.
 // site.js draws the same cards again (and the yearly prices) once it runs.
+// Every fill of page HTML uses a function as the replacement (2026.11.10 fix): a replacement string reads "$'", "$&", "$`"
+// and "$$" as patterns, so text written in the console (a status note, a plan name) could paste parts of the page into itself.
+const lit = (v) => () => String(v ?? '');
 const escHtml = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const dollars = (cents) => `$${Math.round(cents / 100).toLocaleString('en-US')}`;
 const SYMS = ['<circle cx="17" cy="17" r="15" fill="#2C7A57"/>', '<rect x="2" y="2" width="30" height="30" rx="2" fill="#1B5FC1"/>', '<path d="M17 1 L33 17 L17 33 L1 17 Z" fill="#12303A"/>'];
@@ -255,10 +258,10 @@ function fillGoodDay(html) {
   const next = GD.catalog().next;
   return html
     .replace(/<!--GD:CARD:([a-z0-9-]+)-->/g, (_m, src) => GD.card(src, { onIssue: /^issue-(\d+)$/.test(src) ? Number(src.slice(6)) : null }))
-    .replace('<!--GD:FOOTER-->', GD.footerLine())
+    .replace('<!--GD:FOOTER-->', () => GD.footerLine())
     .replace(/<!--GD:MOMENTS:([A-Za-z ]*)-->/g, (_m, on) => GD.momentStrip(on))
-    .replace('<!--GD:ARCHIVE-->', GD.archive())
-    .replace('<!--GD:NEXT-->', next ? `<p class="gd-next"><b>Next issue: ${escHtml(next.moment)}.</b> ${escHtml(next.question)}</p>` : '');
+    .replace('<!--GD:ARCHIVE-->', () => GD.archive())
+    .replace('<!--GD:NEXT-->', () => (next ? `<p class="gd-next"><b>Next issue: ${escHtml(next.moment)}.</b> ${escHtml(next.question)}</p>` : ''));
 }
 
 async function render(req, name, slug, words = null) {
@@ -270,34 +273,34 @@ async function render(req, name, slug, words = null) {
   const plans = await loadPlans().catch(() => null);
   // Prices in the page's words (FAQ answers included), so the structured data says the same as the page.
   const cut = noCut(plans);
-  const prices = (s) => Object.entries(cut).reduce((t, [k, v]) => t.replaceAll(k, v), s.replaceAll('{{PATROL_FROM}}', patrolFrom(plans)).replaceAll('{{PATROL_ADDON}}', patrolAddon(plans)));
+  const prices = (s) => Object.entries(cut).reduce((t, [k, v]) => t.replaceAll(k, lit(v)), s.replaceAll('{{PATROL_FROM}}', lit(patrolFrom(plans))).replaceAll('{{PATROL_ADDON}}', lit(patrolAddon(plans))));
   html = prices(html);
   const head = SEO.head({ slug: name === 'notfound' ? 'notfound' : slug, origin: canonicalOrigin(req), html, plans, verify: config.site.verify, sameAs: config.site.sameAs, noindex: isCopy(req), modified: modified(name), asset: ASSET_V });
   html = fillPlans(html, plans).replace(/<!--\/?(PLANS|ADDONS)(:[a-z]+)?-->/g, '');
-  html = html.replace('<!--HEAD-->', head)
-    .replace('<div class="sx">', name === 'contact' ? '<div class="sx">' : '<div class="sx has-mcta">')
+  html = html.replace('<!--HEAD-->', lit(head))
+    .replace('<div class="sx">', lit(name === 'contact' ? '<div class="sx">' : '<div class="sx has-mcta">'))
     .replace(/<!--HEADER:?([a-z-]*)-->/, (_m, cur) => header(cur))
-    .replace('<!--FOOTER-->', FOOTER);
+    .replace('<!--FOOTER-->', lit(FOOTER));
   html = fillGoodDay(html);
   if (words) html = html.replace(/\{\{GD_([A-Z]+)\}\}/g, (_m, k) => words[k.toLowerCase()] ?? '');
   const out = html
-    .replaceAll('{{HOME}}', `${base}/`)
-    .replaceAll('{{SITE}}', base)
-    .replaceAll('{{APP}}', app || '/')
-    .replaceAll('{{TRY}}', `${config.site.appUrl}/try`)
+    .replaceAll('{{HOME}}', lit(`${base}/`))
+    .replaceAll('{{SITE}}', lit(base))
+    .replaceAll('{{APP}}', lit(app || '/'))
+    .replaceAll('{{TRY}}', lit(`${config.site.appUrl}/try`))
     // the Patrol only price, from the plans the console marks active (so the website never shows an old price)
-    .replaceAll('{{PATROL_FROM}}', patrolFrom(plans))
-    .replaceAll('{{ROOT}}', origin)
-    .replaceAll('{{SOCIAL}}', config.site.sameAs.filter((u) => /linkedin\.com/i.test(u)).slice(0, 1).map((u) => `<a href="${escHtml(u)}" rel="me noopener">LinkedIn</a>`).join(''))
-    .replaceAll('{{HELLO}}', escHtml(config.site.helloEmail))
-    .replaceAll('{{SUPPORT}}', escHtml(config.site.supportEmail))
-    .replaceAll('{{YEAR}}', String(new Date().getUTCFullYear()));
+    .replaceAll('{{PATROL_FROM}}', lit(patrolFrom(plans)))
+    .replaceAll('{{ROOT}}', lit(origin))
+    .replaceAll('{{SOCIAL}}', lit(config.site.sameAs.filter((u) => /linkedin\.com/i.test(u)).slice(0, 1).map((u) => `<a href="${escHtml(u)}" rel="me noopener">LinkedIn</a>`).join('')))
+    .replaceAll('{{HELLO}}', lit(escHtml(config.site.helloEmail)))
+    .replaceAll('{{SUPPORT}}', lit(escHtml(config.site.supportEmail)))
+    .replaceAll('{{YEAR}}', lit(String(new Date().getUTCFullYear())));
   // Filled last, so nothing written in the console is read as a {{TOKEN}}.
   return FILL[name] ? FILL[name](out, req) : out;
 }
 // Pages with live parts: name -> async (html, req) => html.
 const FILL = {
-  status: async (html) => { const S = require('../lib/status'); return html.replace('<!--STATUS-->', S.pageHtml(await S.snapshot())); },
+  status: async (html) => { const S = require('../lib/status'); const body = S.pageHtml(await S.snapshot()); return html.replace('<!--STATUS-->', () => body); },
 };
 // How long browsers and proxies may keep a page. The status page changes by the minute.
 const MAX_AGE = { status: 60 };
@@ -313,12 +316,9 @@ async function send(req, res, name, slug, status = 200, words = null) {
 // and still get the new ones the moment a release changes the address.
 // The build is part of the address too: several builds can share a version while it is on staging, and a browser that
 // kept an earlier build's script for a year would otherwise go on running it (old prices, old buttons).
-const ASSET_V = (() => {
-  const { version } = require('../../package.json');
-  let build = '';
-  try { build = String(require('../release/build.json').build || '').replace(/[^0-9a-z]/gi, ''); } catch (_) { /* a copy without a stamped build */ }
-  return build && build !== 'dev' ? `${version}-${build}` : version;
-})();
+// 2026.11.10 fix: the address also carries a hash of the website's files and keeps a dirty build's "+" (as "-dirty"), so
+// two builds with different files never share it, and only a stamped build is kept a year (lib/appassets.js).
+const ASSET_V = require('../lib/appassets').SITE_V;
 
 /** When each page last changed, for the sitemap. */
 const modified = (name) => { try { return fs.statSync(path.join(DIR, `${name}.html`)).mtime.toISOString().slice(0, 10); } catch (_) { return null; } };

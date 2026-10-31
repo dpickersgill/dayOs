@@ -10,7 +10,7 @@ const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
 const { z, validate, paramId, todayIn, localTime } = require('../lib/util');
-const { bad, unauthorized, notFound, conflict } = require('../lib/errors');
+const { AppError, bad, unauthorized, notFound, conflict } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { requireModule } = require('../lib/modules');
 const K = require('../lib/kiosk');
@@ -218,11 +218,31 @@ deviceRouter.post('/pair', validate(z.object({ code: z.string().min(4).max(20) }
   res.json({ token, device: { id: d.id, name: d.name, location: d.location, kind: d.kind } });
 });
 
-async function deviceAuth(req, _res, next) {
+/**
+ * The gates' limits (2026.11.10 fix), set by app.js. Every gate at a mountain shares one internet address, and so does the
+ * lodge Wi-Fi, so a limit by address let a busy morning (or a guest) use up every gate's allowance:
+ *   use   counts each paired device on its own (by its id, once its key is checked): DEVICE_RATE_LIMIT a minute, 600.
+ *   miss  counts only requests with no key or a wrong one, by address: DEVICE_MISS_LIMIT a minute, 30. A paired gate's
+ *         requests never count here and are never stopped by it, so a guest sending junk cannot hold up a gate.
+ */
+let limits = { use: null, miss: null };
+const setDeviceLimits = (l) => { limits = { ...limits, ...l }; };
+async function overLimit(c, key, res) {
+  if (!c) return false;
+  const { over, retryAfter } = await c.hit(key);
+  if (over) res.set('Retry-After', String(retryAfter));
+  return over;
+}
+
+async function deviceAuth(req, res, next) {
   const header = String(req.get('authorization') || '');
   const token = header.startsWith('Device ') ? header.slice(7).trim() : String(req.get('x-device-token') || '');
   const d = token ? await one(pool, 'SELECT id, tenant_id, name, location, attraction_id FROM access_devices WHERE token_hash = ? AND active = 1', [K.tokenHash(token)]) : null;
-  if (!d) { const e = unauthorized('This device is not paired. Ask a manager for a pairing code.'); e.details = { code: 'device_unpaired' }; throw e; }
+  if (!d) {
+    if (await overLimit(limits.miss, `miss:${req.ip}`, res)) throw new AppError(429, 'Too many requests, slow down');
+    const e = unauthorized('This device is not paired. Ask a manager for a pairing code.'); e.details = { code: 'device_unpaired' }; throw e;
+  }
+  if (await overLimit(limits.use, `device:${d.id}`, res)) throw new AppError(429, 'Too many requests, slow down');
   await requireModule(d.tenant_id, 'gate');
   req.device = { tenantId: d.tenant_id, id: d.id, location: d.location || d.name, attractionId: d.attraction_id || null };
   await pool.query('UPDATE access_devices SET last_seen_at = NOW() WHERE id = ? AND (last_seen_at IS NULL OR last_seen_at < DATE_SUB(NOW(), INTERVAL 30 SECOND))', [d.id]);
@@ -330,4 +350,4 @@ deviceRouter.post('/scans', validate(z.object({ scans: z.array(offlineScan).min(
   res.json({ saved, repeats, rejected });
 });
 
-module.exports = { adminRouter, deviceRouter };
+module.exports = { adminRouter, deviceRouter, setDeviceLimits };

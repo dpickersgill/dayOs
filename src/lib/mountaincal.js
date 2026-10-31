@@ -134,6 +134,7 @@ function eventItem(e, who) {
 const item = (o) => ({ all_day: true, start_time: null, end_time: null, place: null, note: null, teams: null, link: null, editable: false, ends_on: o.starts_on, ...o });
 const ymd = (v) => (v ? String(v).slice(0, 10) : null);
 const clampDay = (d, from, to) => (d < from ? from : d > to ? to : d);
+const TRAINING_WORD = /\b(train|training|trainings)\b/i;
 const plural = (n, word) => `${n} ${word}${Number(n) === 1 ? '' : 's'}`;
 
 /** Each gathered source: [module it belongs to (null: always), fn(db, tenantId, from, to, today) -> items]. */
@@ -203,12 +204,25 @@ const SOURCES = [
     }
     return out;
   }],
-  // Patrol training on the published patrol schedule (a shift whose role or note says training).
-  ['patrol', async (db, t, from, to) => (await rows(db, `SELECT DATE(starts_at) AS on_date, COALESCE(NULLIF(role_label, ''), 'Training') AS what, MIN(TIME(starts_at)) AS start_t, MAX(TIME(ends_at)) AS end_t, COUNT(*) AS people
-    FROM patrol_shifts WHERE tenant_id = ? AND status = 'published' AND starts_at >= ? AND starts_at < ? AND (role_label LIKE '%train%' OR notes LIKE '%train%')
-    GROUP BY DATE(starts_at), COALESCE(NULLIF(role_label, ''), 'Training') ORDER BY on_date LIMIT 200`, [t, `${from} 00:00:00`, `${addDays(to, 1)} 00:00:00`]))
-    .map((s) => item({ id: `patroltrain:${ymd(s.on_date)}:${s.what}`, source: 'patrol', source_label: 'Patrol schedule', kind: 'training', title: /train/i.test(s.what) ? `Patrol: ${s.what}` : `Patrol training: ${s.what}`,
-      starts_on: ymd(s.on_date), all_day: false, start_time: hhmm(s.start_t), end_time: hhmm(s.end_t), note: plural(s.people, 'patroller'), teams: ['patrol'], link: '#/patrol/schedule' }))],
+  // Patrol training on the published patrol schedule (a shift whose role or note says training). The words "train" and
+  // "training" count as whole words only, so a note about a back strain is not training (2026.11.10 fix).
+  ['patrol', async (db, t, from, to) => {
+    const list = await rows(db, `SELECT DATE(starts_at) AS on_date, COALESCE(NULLIF(role_label, ''), 'Training') AS what, role_label, notes, TIME(starts_at) AS start_t, TIME(ends_at) AS end_t
+      FROM patrol_shifts WHERE tenant_id = ? AND status = 'published' AND starts_at >= ? AND starts_at < ? AND (role_label LIKE '%train%' OR notes LIKE '%train%')
+      ORDER BY starts_at LIMIT 2000`, [t, `${from} 00:00:00`, `${addDays(to, 1)} 00:00:00`]);
+    const groups = new Map();
+    for (const s of list) {
+      if (!TRAINING_WORD.test(String(s.role_label || '')) && !TRAINING_WORD.test(String(s.notes || ''))) continue;
+      const key = `${ymd(s.on_date)}|${s.what}`;
+      const g = groups.get(key) || { on_date: ymd(s.on_date), what: s.what, start_t: s.start_t, end_t: s.end_t, people: 0 };
+      if (String(s.start_t) < String(g.start_t)) g.start_t = s.start_t;
+      if (String(s.end_t) > String(g.end_t)) g.end_t = s.end_t;
+      g.people += 1;
+      groups.set(key, g);
+    }
+    return [...groups.values()].slice(0, 200).map((s) => item({ id: `patroltrain:${s.on_date}:${s.what}`, source: 'patrol', source_label: 'Patrol schedule', kind: 'training', title: TRAINING_WORD.test(s.what) ? `Patrol: ${s.what}` : `Patrol training: ${s.what}`,
+      starts_on: s.on_date, all_day: false, start_time: hhmm(s.start_t), end_time: hhmm(s.end_t), note: plural(s.people, 'patroller'), teams: ['patrol'], link: '#/patrol/schedule' }));
+  }],
   // Preventive maintenance coming due (by days), on lifts and machines. Overdue shows on today.
   ['conditions', async (db, t, from, to, today) => (await rows(db, `SELECT k.id, k.name, k.interval_days, k.last_done_on, l.name AS lift, a.name AS asset
     FROM pm_tasks k LEFT JOIN lifts l ON l.tenant_id = k.tenant_id AND l.id = k.lift_id LEFT JOIN ops_assets a ON a.tenant_id = k.tenant_id AND a.id = k.asset_id

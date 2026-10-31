@@ -39,7 +39,7 @@ router.get('/auth/security', authenticate, async (req, res) => {
     app_enabled: Boolean(user.totp_enabled), pin_set: Boolean(user.pin_hash), can_have_pin: CREW_ROLES.includes(user.role),
     // Times are UTC ("YYYY-MM-DD HH:MM:SS"); the screen shows them in the viewer's own time. now: the server's clock, so
     // "Last used 12 minutes ago" is right even when the device's clock is not.
-    sessions: open.map((s) => ({ id: shortId(s.id_hash), current: s.id_hash === mine, created_at: s.created_at, last_seen: s.last_seen, ends_at: s.ends_at, device: s.terminal ? `Shared terminal: ${s.terminal}` : label(s.agent), method: s.method, terminal: Boolean(s.terminal) })),
+    sessions: open.map((s) => ({ id: shortId(s.id_hash), current: s.id_hash === mine, created_at: s.created_at, last_seen: s.last_seen, ends_at: s.ends_at, closing: Boolean(Number(s.closing)), device: s.terminal ? `Shared terminal: ${s.terminal}` : label(s.agent), method: s.method, terminal: Boolean(s.terminal) })),
     now: new Date().toISOString().slice(0, 19).replace('T', ' '),
     devices: seen.map((d) => ({ id: d.id, label: d.label, first_seen: d.first_seen, last_seen: d.last_seen, current: d.device_hash === req.auth.deviceHash })),
     signed_in_with: req.auth.method,

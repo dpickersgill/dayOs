@@ -2,7 +2,7 @@
 
 // Replies to Verdynt/OS text messages (2026.11.10). Twilio posts every text a guest sends back to our number here:
 //   POST /api/v1/twilio/sms   (set as "A message comes in" on the Twilio number or messaging service, see RUNBOOK.md)
-// STOP (and Twilio's other opt-out words) is written to the consent record of every customer with that phone number, at
+// A message that is exactly STOP (or one of Twilio's other opt-out words, nothing else in it) is written to the consent record of every customer with that phone number, at
 // every mountain: all mountains text from the one Verdynt/OS number, and Twilio stops all texts to that phone after a
 // STOP, so every mountain's record must say so. START (or UNSTOP) undoes only an opt-out that came from a text reply.
 // Twilio itself sends the standard reply to STOP, START and HELP, so this answers with an empty reply.
@@ -33,12 +33,23 @@ function signedByTwilio(req) {
   return given.length === want.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(want));
 }
 
-/** What the reply asks for: 'stop', 'start' or null. Twilio's Advanced Opt-Out says it in OptOutType. */
+/** The whole message as one keyword: trimmed, upper case, punctuation and spaces at the ends dropped. Twilio only treats a
+ *  message that is exactly one keyword as an opt-out or opt-in ("Stop." counts, "Cancel my lesson" does not). */
+function keywordOf(text) {
+  const t = String(text || '').trim().toUpperCase().replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/g, '');
+  return /^[A-Z]+$/.test(t) ? t : '';
+}
+
+/** What the reply asks for: 'stop', 'start' or null. Twilio's Advanced Opt-Out says it in OptOutType; when Twilio sends
+ *  OptOutType it decides (HELP or anything else means no change). Without it, only an exact single keyword counts. */
 function intentOf(body) {
-  const type = String(body.OptOutType || '').toUpperCase();
-  if (type === 'STOP') return 'stop';
-  if (type === 'START') return 'start';
-  const word = String(body.Body || '').trim().split(/\s+/)[0].toUpperCase().replace(/[^A-Z]/g, '');
+  if (body.OptOutType !== undefined && String(body.OptOutType).trim() !== '') {
+    const type = String(body.OptOutType).trim().toUpperCase();
+    if (type === 'STOP') return 'stop';
+    if (type === 'START') return 'start';
+    return null;
+  }
+  const word = keywordOf(body.Body);
   if (STOP_WORDS.has(word)) return 'stop';
   if (START_WORDS.has(word)) return 'start';
   return null;
@@ -72,4 +83,4 @@ router.post('/sms', express.urlencoded({ extended: false, limit: '20kb' }), asyn
   return res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
 });
 
-module.exports = { router, signature, intentOf, applyReply };
+module.exports = { router, signature, intentOf, keywordOf, applyReply };

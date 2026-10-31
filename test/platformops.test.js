@@ -173,8 +173,13 @@ test('the platform key cannot make an operator session, and key actions are mark
     return `${body}.${crypto.createHmac('sha256', `platform-session:${KEY}`).update(body).digest('base64url')}`;
   })();
   is(await api('GET', '/tenants', { session: forged }), 403, 'a session signed with the key is not accepted');
-  is(await api('POST', '/operators', { key: KEY, body: { email: `cy-${suffix}@example.test`, name: 'Cy', password: PW } }), 201);
-  const [[a]] = await pool.query("SELECT actor FROM platform_audit WHERE action = 'add_operator' ORDER BY id DESC LIMIT 1");
+  // Once an operator has two-step, the key alone cannot add another one (that would hand over access, 2026.11.10 fix).
+  const refused = await api('POST', '/operators', { key: KEY, body: { email: `cy-${suffix}@example.test`, name: 'Cy', password: PW } });
+  is(refused, 403); assert.equal(refused.body.details.code, 'two_step_required');
+  const op = await require('./helpers/platform-operator').operatorConsole(base, KEY);
+  is(await op('POST', '/operators', { email: `cy-${suffix}@example.test`, name: 'Cy', password: PW }), 201);
+  is(await api('POST', '/sandboxes/purge', { key: KEY }), 200);
+  const [[a]] = await pool.query("SELECT actor FROM platform_audit WHERE action = 'purge_demos' ORDER BY id DESC LIMIT 1");
   assert.match(a.actor, /^key: /);
 });
 
@@ -184,6 +189,9 @@ test('a setup ticket stops working once a newer sign-in or a password reset happ
   const second = await api('POST', '/login', { body: { email: cy, password: PW } });
   is(await api('POST', '/login/setup', { body: { setup_token: first.body.setup_token, code: codeAt(first.body.secret) } }), 403, 'the older ticket is void');
   const [[c]] = await pool.query('SELECT id FROM platform_operators WHERE email = ?', [cy]);
-  is(await api('POST', `/operators/${c.id}/password`, { key: KEY, body: { password: 'brand-new-password-1' } }), 200);
+  is(await api('POST', `/operators/${c.id}/password`, { key: KEY, body: { password: 'brand-new-password-1' } }), 403, 'the key alone cannot set an operator password');
+  is(await api('POST', `/operators/${c.id}/reset-two-step`, { key: KEY }), 403, 'nor reset their two-step');
+  const op = await require('./helpers/platform-operator').operatorConsole(base, KEY);
+  is(await op('POST', `/operators/${c.id}/password`, { password: 'brand-new-password-1' }), 200);
   is(await api('POST', '/login/setup', { body: { setup_token: second.body.setup_token, code: codeAt(second.body.secret) } }), 403, 'a reset voids it too');
 });

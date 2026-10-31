@@ -86,7 +86,11 @@ export class ApiError extends Error {
 
 export async function api(method, path, body, retried = false, { poll = false } = {}) {
   const headers = {};
-  if (poll && !touched) headers['x-poll'] = '1'; else touched = false;
+  if (poll && !touched) {
+    headers['x-poll'] = '1';
+    // On screen: someone still has the app open, so the server clears a closing mark (it is still not use).
+    try { if (globalThis.document && document.visibilityState === 'visible') headers['x-visible'] = '1'; } catch (_) { /* fine */ }
+  } else touched = false;
   if (body !== undefined) headers['content-type'] = 'application/json';
   const used = session.token;
   if (used) headers.authorization = `Bearer ${used}`;

@@ -5,7 +5,13 @@
 // (so.tab.<id>: when it was last used, a heartbeat, whether it is locked). When every live tab of the browser has been idle
 // for 10 minutes, or locked, the shared token is removed and the server session is ended. When the last tab closes, the
 // token is moved aside into that tab's own storage (a reload puts it back) and the server is told the session is closing:
-// it ends two minutes later unless it is used again. The server's 60-minute idle limit stays as the backstop.
+// it ends 30 minutes later unless it is used again. The server's 60-minute idle limit stays as the backstop.
+//
+// Leaving the app in the same tab is not closing it (2026.11.10 fix): the owner sent to Stripe comes back with the Back
+// button or Stripe's return link. So the closing notice goes only when the page is really going away for good: not when
+// the page is kept for the Back button (pagehide with persisted), and not when the app itself sent the tab elsewhere
+// (leaveApp below, or a link or script navigation the browser reports through its Navigation API). Whenever a page of
+// the app opens or comes back, it tells the server (POST /auth/back), which clears any closing mark.
 //
 // Test hook: window.__SO_IDLE_SPEED__ (set before the app loads) makes every clock here run that many times faster. It can
 // only shorten the 10 minutes, never stretch them, and nothing in the app sets it.
@@ -24,6 +30,10 @@ const STALE_MS = Math.max(ALIVE_MS, (15 * 60_000) / SPEED);
 const FORGET_MS = Math.max(STALE_MS * 4, 3_600_000 / SPEED); // a record this old is removed
 const PREFIX = 'so.tab.';
 const HANDOFF = 'so.handoff'; // the shared token, kept in this tab's own storage while it reloads
+
+const OPENED = Date.now(); // when this page opened: the server tells a reload's old page from its new one by it
+const LEAVE_MS = 30_000; // a navigation started this recently is why the page is going away
+let leavingAt = 0;
 
 const id = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('');
 let seen = Date.now();
@@ -110,21 +120,42 @@ function restoreHandoff() {
 }
 
 function closingNotice(token) {
-  fetch('/api/v1/auth/closing', { method: 'POST', headers: { authorization: `Bearer ${token}`, 'x-poll': '1' }, keepalive: true }).catch(() => { /* the idle limit ends it */ });
+  fetch('/api/v1/auth/closing', { method: 'POST', headers: { authorization: `Bearer ${token}`, 'x-poll': '1', 'content-type': 'application/json' }, body: JSON.stringify({ page: OPENED }), keepalive: true }).catch(() => { /* the idle limit ends it */ });
+}
+
+/** The page opened or came back with a session: the server clears any closing mark (a normal request, not a poll). */
+function backNotice() {
+  if (session.locked()) return;
+  const token = session.token;
+  if (!token) return;
+  fetch('/api/v1/auth/back', { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ page: OPENED }) }).catch(() => { /* the next request does it */ });
+}
+
+/** Sends this tab to another site (Stripe) on purpose. Not a close: the session waits for the person to come back. */
+export function leaveApp(url) {
+  leavingAt = Date.now();
+  location.assign(url);
+}
+
+/** Is the page going away for good (a closed tab or window), rather than kept for Back or sent elsewhere? */
+export function goingForGood(e, now = Date.now()) {
+  if (e && e.persisted) return false; // kept for the Back button
+  return now - leavingAt > LEAVE_MS; // not a navigation the app or a link started
 }
 
 // This tab is going (closed, reloaded or sent elsewhere). The last one out takes the shared token with it.
-function leaving() {
+function leaving(e) {
   const st = ls();
   try { if (st) st.removeItem(PREFIX + id); } catch (_) { /* fine */ }
   if (session.locked()) return;
   const token = session.token;
   if (!token) return;
-  if (!session.shared) { closingNotice(token); return; } // this tab's own session: a reload uses it again at once
+  const forGood = goingForGood(e);
+  if (!session.shared) { if (forGood) closingNotice(token); return; } // this tab's own session: a reload uses it again at once
   if (records().some((r) => r.shared && r.id !== id)) return; // other tabs still use it
   try { ss().setItem(HANDOFF, token); } catch (_) { /* a reload asks to sign in */ }
   session.setSharedToken(null);
-  closingNotice(token);
+  if (forGood) closingNotice(token);
 }
 
 /**
@@ -148,7 +179,18 @@ function dropStale() {
 }
 
 if (!restoreHandoff()) dropStale();
+backNotice();
 if (typeof window !== 'undefined') {
   window.addEventListener('pagehide', leaving);
-  window.addEventListener('pageshow', (e) => { if (e.persisted) { restoreHandoff(); seen = Date.now(); writeOwn(); } });
+  window.addEventListener('pageshow', (e) => { leavingAt = 0; if (e.persisted) { restoreHandoff(); seen = Date.now(); writeOwn(); backNotice(); } }); // back from a trip: the next close is a close
+  // A link or a script sending this tab to another page (not a reload, not a download, not a change within the app).
+  try {
+    const nav = globalThis.navigation;
+    if (nav && nav.addEventListener) {
+      nav.addEventListener('navigate', (e) => {
+        if (e.downloadRequest || e.hashChange || (e.destination && e.destination.sameDocument) || e.navigationType === 'reload') return;
+        leavingAt = Date.now();
+      });
+    }
+  } catch (_) { /* no Navigation API: leaveApp still marks the app's own trips */ }
 }

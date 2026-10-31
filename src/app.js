@@ -6,7 +6,7 @@ const helmet = require('helmet');
 const cors = require('cors');
 const { pool } = require('./db');
 const { authenticate } = require('./middleware/auth');
-const { rateLimit } = require('./middleware/rateLimit');
+const { rateLimit, counter } = require('./middleware/rateLimit');
 const followPublic = require('./routes/followpublic');
 const patrolPlus = require('./routes/patrolplus');
 const kiosk = require('./routes/kiosk');
@@ -248,7 +248,13 @@ function createApp() {
   api.use('/kiosk', rateLimit({ windowMs: 60_000, max: Number(process.env.KIOSK_RATE_LIMIT) || 60, message: 'Too many requests, slow down' }), kiosk.publicRouter);
   // Gates, turnstiles and handheld readers: no login, the device's own key. A busy gate checks a tap every few seconds.
   api.post('/device/pair', rateLimit({ windowMs: 600_000, max: Number(process.env.DEVICE_PAIR_LIMIT) || 10, message: 'Too many tries. Ask a manager for a new code.' }));
-  api.use('/device', rateLimit({ windowMs: 60_000, max: Number(process.env.DEVICE_RATE_LIMIT) || 600, message: 'Too many requests, slow down' }), accessRoutes.deviceRouter);
+  // Gates: counted per paired device, and failed keys per address, so a guest on the lodge Wi-Fi (the same address as the
+  // gates) cannot use up a gate's allowance (routes/access.js, 2026.11.10 fix).
+  accessRoutes.setDeviceLimits({
+    use: counter({ name: 'device-use', windowMs: 60_000, max: Number(process.env.DEVICE_RATE_LIMIT) || 600 }),
+    miss: counter({ name: 'device-miss', windowMs: 60_000, max: Number(process.env.DEVICE_MISS_LIMIT) || 30 }),
+  });
+  api.use('/device', accessRoutes.deviceRouter);
   api.use('/internal/jobs', rateLimit({ windowMs: 60_000, max: 10 }), followPublic.jobs);
   // Map lookups on the demo page ("Is this you?") have their own limit, so looking for your mountain does not use up demos.
   const trialLimit = rateLimit({ windowMs: 3_600_000, max: Number(process.env.SANDBOX_RATE_LIMIT) || 15, message: 'Too many demo requests from this address. Try again later, or ask us for a walkthrough.' });
@@ -260,8 +266,13 @@ function createApp() {
   api.use('/twilio', require('./routes/twilioinbound').router); // STOP and START replies to our texts (signed by Twilio)
   // The status page's numbers (no sign-in, nothing about any mountain). Cached for a minute on each server.
   api.get('/status', rateLimit({ windowMs: 60_000, max: 60, message: 'Too many looks, slow down' }), require('./routes/status').publicStatus);
-  // 120 a minute per address for every guest page. PUBLIC_RATE_LIMIT exists so a load test on staging can raise it (DEPLOY.md).
-  api.use('/public', rateLimit({ windowMs: 60_000, max: Number(process.env.PUBLIC_RATE_LIMIT) || 120 }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/lostfound').publicRouter, require('./routes/partnerpasses').publicRouter, require('./routes/patrolclaims').publicRouter, require('./routes/patrolscene').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter, require('./routes/rentalforms').publicRouter, require('./routes/schoollineup').publicRouter, require('./routes/schoolparents').publicRouter, require('./routes/schoolpay').publicRouter, require('./routes/schooldirector').publicRouter, require('./routes/guestswindow').publicRouter, require('./routes/guestsaccount').publicRouter, require('./routes/guestsloyalty').publicRouter, require('./routes/guestsfair').publicRouter);
+  // PUBLIC_RATE_LIMIT and PUBLIC_RATE_LIMIT_ALL exist so a load test on staging can raise them (DEPLOY.md).
+  // Guest pages: counted per address AND mountain (2026.11.10 fix). A lodge's Wi-Fi puts every guest on one address: 600 a
+  // minute for one mountain is about 100 phones each opening a guest page a minute (a page makes 3 to 6 calls), the
+  // busiest hour at a small lodge, and a guest at one mountain never uses up another's. PUBLIC_RATE_LIMIT_ALL (2400 a
+  // minute) caps one address across every mountain, so moving from mountain to mountain does not multiply the limit.
+  api.use('/public', rateLimit({ name: 'public-all', windowMs: 60_000, max: Number(process.env.PUBLIC_RATE_LIMIT_ALL) || 2400 }),
+    rateLimit({ name: 'public-mountain', windowMs: 60_000, max: Number(process.env.PUBLIC_RATE_LIMIT) || 600, keyOf: (req) => `${req.ip}|${String(req.path.split('/')[1] || '').toLowerCase().slice(0, 80)}` }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/lostfound').publicRouter, require('./routes/partnerpasses').publicRouter, require('./routes/patrolclaims').publicRouter, require('./routes/patrolscene').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter, require('./routes/rentalforms').publicRouter, require('./routes/schoollineup').publicRouter, require('./routes/schoolparents').publicRouter, require('./routes/schoolpay').publicRouter, require('./routes/schooldirector').publicRouter, require('./routes/guestswindow').publicRouter, require('./routes/guestsaccount').publicRouter, require('./routes/guestsloyalty').publicRouter, require('./routes/guestsfair').publicRouter);
   api.use(authRoutes); // login, tenants, users, me (each route applies authenticate itself where needed)
   api.use(require('./routes/security')); // passkeys, the second check, sessions, devices, PINs, terminals (each route authenticates)
   // A person's private calendar link for their phone's calendar app (2026.11.10): no sign-in, the link is the key.

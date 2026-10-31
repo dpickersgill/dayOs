@@ -371,6 +371,28 @@ function twoStepRead(req, _res, next) {
   return next(err);
 }
 
+/**
+ * Anything that hands over or resets access (2026.11.10 fix): resetting a mountain login's password or two-step, setting
+ * an operator's password, resetting their two-step, turning an operator back on, or adding an operator. Each of these
+ * would let the person who did it sign in and read a mountain, so each needs the same two-step sign-in as reading. Adding
+ * the very first operator is the one exception: until an active operator has two-step set up, the key alone may add one
+ * (that is how a new install is reached at all).
+ */
+function twoStepAccess(req, _res, next) {
+  if (req.operatorId || req.keyTwoStep) return next();
+  const err = forbidden('Resetting or handing over sign-in access needs two-step sign-in. Sign in by name with your authenticator code.');
+  err.details = { code: 'two_step_required' };
+  return next(err);
+}
+async function twoStepUnlessFirstOperator(req, res, next) {
+  if (req.operatorId || req.keyTwoStep) return next();
+  try {
+    const [[r]] = await pool.query('SELECT COUNT(*) AS n FROM platform_operators WHERE active = 1 AND totp_enabled = 1');
+    if (Number(r.n) === 0) return next();
+  } catch (e) { return next(e); }
+  return twoStepAccess(req, res, next);
+}
+
 router.get('/tenants/:id', twoStepRead, async (req, res) => {
   const id = paramId(req);
   const t = await one(pool, 'SELECT id, slug, name, status, timezone, created_at, storage_cap_mb, platform_notes, closed_at, delete_after, delete_due_at, data_deleted_at FROM tenants WHERE id = ?', [id]);
@@ -619,7 +641,7 @@ router.put('/tenants/:id/modules', needsAccess, validate(z.object({ modules: z.r
 });
 
 /** Set a new password for one of a mountain's owner or manager logins. Signs that person out everywhere. */
-router.post('/tenants/:id/reset-password', needsAccess, validate(z.object({ user_id: z.number().int().positive(), password, clear_two_step: z.boolean().default(false), temporary: z.boolean().default(false) })), async (req, res) => {
+router.post('/tenants/:id/reset-password', twoStepAccess, needsAccess, validate(z.object({ user_id: z.number().int().positive(), password, clear_two_step: z.boolean().default(false), temporary: z.boolean().default(false) })), async (req, res) => {
   const id = paramId(req);
   const u = await one(pool, "SELECT u.id, u.username, u.email, t.slug, t.name FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE u.id = ? AND u.tenant_id = ? AND u.role IN ('owner','manager')", [req.body.user_id, id]);
   if (!u) throw notFound('Login');
@@ -665,7 +687,7 @@ router.get('/operators', async (req, res) => {
   res.json({ data: data.map((o) => ({ ...opView(o), you: o.id === req.operatorId })) });
 });
 
-router.post('/operators', validate(z.object({ email: z.string().trim().toLowerCase().email().max(255), name: z.string().trim().min(1).max(100), password })), async (req, res) => {
+router.post('/operators', twoStepUnlessFirstOperator, validate(z.object({ email: z.string().trim().toLowerCase().email().max(255), name: z.string().trim().min(1).max(100), password })), async (req, res) => {
   await PWR.refuseWeak(req.body.password, { email: req.body.email, username: req.body.name });
   const hash = await bcrypt.hash(req.body.password, 12);
   try {
@@ -687,6 +709,8 @@ async function operatorOr404(id) {
 router.post('/operators/:id/active', validate(z.object({ active: z.boolean() })), async (req, res) => {
   const o = await operatorOr404(paramId(req));
   if (o.id === req.operatorId && !req.body.active) throw bad('You cannot switch yourself off. Ask another operator.');
+  // Switching an operator off works with the key alone (break-glass); switching one back on hands access back, so it needs two-step.
+  if (req.body.active && !req.operatorId && !req.keyTwoStep) { const err = forbidden('Turning an operator back on needs two-step sign-in. Sign in by name with your authenticator code.'); err.details = { code: 'two_step_required' }; throw err; }
   if (!req.body.active && process.env.PLATFORM_KEY_SIGNIN === 'off') {
     const [[n]] = await pool.query('SELECT COUNT(*) AS n FROM platform_operators WHERE active = 1 AND totp_enabled = 1 AND id <> ?', [o.id]);
     if (!Number(n.n)) throw bad('That would leave nobody able to sign in. Add another operator first.');
@@ -698,7 +722,7 @@ router.post('/operators/:id/active', validate(z.object({ active: z.boolean() }))
 
 // A new password set for someone else, or a reset of their authenticator app (they set it up again at their next sign-in).
 // Either one ends their open sessions.
-router.post('/operators/:id/password', validate(z.object({ password })), async (req, res) => {
+router.post('/operators/:id/password', twoStepAccess, validate(z.object({ password })), async (req, res) => {
   const o = await operatorOr404(paramId(req));
   if (o.id === req.operatorId) throw bad('Use "Change my password" for your own');
   await PWR.refuseWeak(req.body.password, { email: o.email, username: o.name });
@@ -706,7 +730,7 @@ router.post('/operators/:id/password', validate(z.object({ password })), async (
   await log(pool, req, null, 'reset_operator_password', { email: o.email });
   res.json({ ok: true });
 });
-router.post('/operators/:id/reset-two-step', async (req, res) => {
+router.post('/operators/:id/reset-two-step', twoStepAccess, async (req, res) => {
   const o = await operatorOr404(paramId(req));
   if (o.id === req.operatorId) throw bad('Ask another operator to reset yours, or use the platform key');
   await pool.query('UPDATE platform_operators SET totp_enabled = 0, totp_secret = NULL, totp_last_step = NULL, session_epoch = session_epoch + 1, failures = 0, locked_until = NULL WHERE id = ?', [o.id]);

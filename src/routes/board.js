@@ -12,7 +12,7 @@ const { audit } = require('../lib/audit');
 const modules = require('../lib/modules');
 const { dailyReport } = require('../lib/daily');
 const patrolaccess = require('../lib/patrolaccess');
-const { pmStatus } = require('../lib/ops');
+const { pmStatus, openBlocks } = require('../lib/ops');
 const { typeLabel } = require('../lib/attractions');
 
 const router = express.Router();
@@ -108,10 +108,11 @@ const TILE_DATA = {
       const k = lastCheck.get(l.id); const d = down.get(l.id);
       let detail;
       if (k && k.result === 'fail') detail = `Inspection failed${k.note ? `: ${k.note}` : ''}`;
+      else if (l.blocked) detail = l.blocked.replace(/^This lift failed/, 'Failed').replace(/ Pass a new .*$/, ''); // an earlier weekly one
       else if (d && l.status !== 'open') detail = `${liftWord(l.status)} since ${String(d.started_at).slice(11, 16)}${d.note ? `: ${d.note}` : d.reason ? `, ${REASON[d.reason] || d.reason}` : ''}`;
       else if (k) detail = `Passed inspection at ${hhmm(localFromUtc(k.checked_at, c.tz))}`;
       else detail = 'Not inspected yet today';
-      return { name: l.name, status: l.status, check: l.check, detail };
+      return { name: l.name, status: l.status, check: l.check, blocked: Boolean(l.blocked), detail };
     });
     const out = { lifts: liftRows, attractions: (await get('attractions')).list, grooming: { plan: trails.plan, groomed: trails.groomed, total: trails.total, open: trails.open } };
     if (on.has('patrol')) {
@@ -146,7 +147,10 @@ const TILE_DATA = {
     const lifts = await rows(pool, 'SELECT id, name, status FROM lifts WHERE tenant_id = ? ORDER BY name', [c.tenantId]);
     const checks = await rows(pool, 'SELECT lift_id, result FROM lift_checks WHERE tenant_id = ? AND check_date = ? ORDER BY checked_at, id', [c.tenantId, c.today]);
     const latest = new Map(checks.map((k) => [Number(k.lift_id), k.result]));
-    return { lifts: lifts.map((l) => ({ id: Number(l.id), name: l.name, status: l.status, check: latest.get(Number(l.id)) || null })) };
+    // A lift that cannot be opened (today's failed inspection, or a failed weekly one from an earlier day) says so, as on
+    // Mountain status and in the open check (lib/ops.js openBlocks): check 'fail' makes every screen say Cannot open.
+    const blocks = await openBlocks(pool, c.tenantId, c.today);
+    return { lifts: lifts.map((l) => { const why = blocks.get(Number(l.id)) || null; return { id: Number(l.id), name: l.name, status: l.status, check: why ? 'fail' : latest.get(Number(l.id)) || null, blocked: why }; }) };
   },
   /** Active attractions with why each is or isn't open (not a tile of its own: the morning board and the alerts use it). */
   async attractions(c) {

@@ -93,12 +93,12 @@ export function sessionsPanel(sec, redraw) {
   const now = sec.now || new Date().toISOString().slice(0, 19).replace('T', ' ');
   return h('section', { class: 'panel stack', 'data-panel': 'sessions' },
     h('h2', null, 'Where you are signed in'),
-    h('p', null, 'Each sign-in ends after an hour unused (15 minutes on a shared terminal), or 8 hours at most. Closing every tab of a browser ends its sign-in too. If you see one that is not you, sign it out and change your password.'),
+    h('p', null, 'Each sign-in ends after an hour unused (15 minutes on a shared terminal), or 8 hours at most. Closing every tab of a browser ends its sign-in 30 minutes later, unless it is opened again. If you see one that is not you, sign it out and change your password.'),
     table([
       { head: 'Device', cell: (x) => [h('strong', null, x.device), x.current ? h('span', { class: 'tag this-tab' }, 'This tab') : null] },
       { head: 'How', cell: (x) => METHOD[x.method] || x.method },
       { head: 'Signed in', cell: (x) => when(x.created_at) },
-      { head: 'Use', cell: (x) => h('span', { class: 'session-use' }, h('span', null, x.current ? 'In use now' : `Last used ${ago(x.last_seen, now)}`), x.ends_at ? h('span', { class: 'muted small' }, `Ends at ${at(x.ends_at)} if unused`) : null) },
+      { head: 'Use', cell: (x) => h('span', { class: 'session-use' }, h('span', null, x.current ? 'In use now' : `Last used ${ago(x.last_seen, now)}`), x.ends_at ? h('span', { class: 'muted small' }, x.closing && !x.current ? `Closed in the browser. Ends at ${at(x.ends_at)} unless it is opened again` : `Ends at ${at(x.ends_at)} if unused`) : null) },
       { head: '', actions: true, cell: (x) => (x.current ? null : button('Sign out', async () => { await del(`/auth/sessions/${x.id}`); toast('Signed out there'); redraw(); }, { small: true, label: `Sign out ${x.device}` })) },
     ], sec.sessions),
     sec.sessions.length > 1 ? h('div', { class: 'row' }, button('Sign out everywhere else', () => confirmDialog('Sign out everywhere else?', 'Every other phone and computer signed in as you is signed out now.', 'Sign out', async () => { await post('/auth/sessions/end-others'); toast('Signed out everywhere else'); redraw(); }, { danger: true }), { small: true })) : null,

@@ -13,7 +13,12 @@ async function operatorConsole(base, key) {
     return json;
   };
   const email = `op-${crypto.randomBytes(5).toString('hex')}@operators.test`; const password = 'a-long-operator-password';
-  await post('/operators', { email, name: 'Test Operator', password }, { 'x-platform-key': key });
+  // The key alone adds only the first operator (2026.11.10 fix): once one has two-step, a test adds its operator directly.
+  const add = await fetch(`${base}/api/v1/platform/operators`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-platform-key': key }, body: JSON.stringify({ email, name: 'Test Operator', password }) });
+  if (add.status === 403) {
+    const { pool } = require('../../src/db');
+    await pool.query('INSERT INTO platform_operators (email, name, password_hash, password_changed_at, created_by) VALUES (?, ?, ?, UTC_TIMESTAMP(), ?)', [email, 'Test Operator', await require('bcryptjs').hash(password, 4), 'test']);
+  } else if (add.status !== 201) throw new Error(`/operators: ${add.status} ${await add.text()}`);
   const first = await post('/login', { email, password });
   const { session } = await post('/login/setup', { setup_token: first.setup_token, code: totp.hotp(first.secret, totp.stepAt(Date.now())) });
   return async (method, path, body) => {

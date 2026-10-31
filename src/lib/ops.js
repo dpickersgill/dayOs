@@ -108,19 +108,33 @@ async function syncDowntime(conn, tenantId, liftId, from, to, { userId = null } 
 const latestCheck = (conn, tenantId, liftId, date) =>
   one(conn, 'SELECT id, result, kind, checked_at FROM lift_checks WHERE tenant_id = ? AND lift_id = ? AND check_date = ? AND kind = ? ORDER BY id DESC LIMIT 1', [tenantId, liftId, date, 'pre_open']);
 
+const ymdOf = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
+
 /**
- * Why a lift cannot be set to open, or null. Today's latest daily (pre-opening) inspection failed, or its latest weekly
- * inspection failed (on any day) and no weekly one has passed since. Both are cleared only by a new inspection that passes.
+ * Why each lift cannot be set to open (a Map of lift id to the reason; lifts that can open are left out). Today's latest
+ * daily (pre-opening) inspection failed, or its latest weekly inspection failed (on any day) and no weekly one has passed
+ * since. Both are cleared only by a new inspection that passes. liftId: only that lift.
+ * The open check (openBlock), the Today page and the wall screen (routes/board.js) all read it, so every screen agrees.
  */
-async function openBlock(conn, tenantId, liftId, date) {
-  const daily = await latestCheck(conn, tenantId, liftId, date);
-  if (daily && daily.result === 'fail') return 'This lift failed its inspection today. Pass a new inspection before opening it.';
-  const weekly = await one(conn, "SELECT result, check_date FROM lift_checks WHERE tenant_id = ? AND lift_id = ? AND kind = 'periodic' ORDER BY check_date DESC, id DESC LIMIT 1", [tenantId, liftId]);
-  if (weekly && weekly.result === 'fail') {
-    const d = weekly.check_date instanceof Date ? weekly.check_date.toISOString().slice(0, 10) : String(weekly.check_date).slice(0, 10);
-    return `This lift failed its weekly inspection on ${d}. Pass a new weekly inspection before opening it.`;
+async function openBlocks(conn, tenantId, date, liftId = null) {
+  const only = liftId === null ? '' : ' AND lift_id = ?';
+  const args = liftId === null ? [] : [liftId];
+  const [daily] = await conn.query(`SELECT lift_id, result FROM lift_checks WHERE tenant_id = ? AND check_date = ? AND kind = 'pre_open'${only} ORDER BY id`, [tenantId, date, ...args]);
+  const [weekly] = await conn.query(`SELECT lift_id, result, check_date FROM lift_checks WHERE tenant_id = ? AND kind = 'periodic'${only} ORDER BY check_date, id`, [tenantId, ...args]);
+  const lastDaily = new Map(daily.map((r) => [Number(r.lift_id), r]));
+  const lastWeekly = new Map(weekly.map((r) => [Number(r.lift_id), r]));
+  const out = new Map();
+  for (const id of new Set([...lastDaily.keys(), ...lastWeekly.keys()])) {
+    const d = lastDaily.get(id); const w = lastWeekly.get(id);
+    if (d && d.result === 'fail') out.set(id, 'This lift failed its inspection today. Pass a new inspection before opening it.');
+    else if (w && w.result === 'fail') out.set(id, `This lift failed its weekly inspection on ${ymdOf(w.check_date)}. Pass a new weekly inspection before opening it.`);
   }
-  return null;
+  return out;
 }
 
-module.exports = { ASSET_KINDS, ASSET_KIND_KEYS, CATEGORY_OF, SURFACES, SURFACE_KEYS, DOWNTIME_REASONS, DEPARTMENTS, LIFT_CHECKLIST, pmStatus, localStamp, syncDowntime, latestCheck, openBlock };
+/** Why a lift cannot be set to open, or null (openBlocks, for one lift). */
+async function openBlock(conn, tenantId, liftId, date) {
+  return (await openBlocks(conn, tenantId, date, Number(liftId))).get(Number(liftId)) || null;
+}
+
+module.exports = { ASSET_KINDS, ASSET_KIND_KEYS, CATEGORY_OF, SURFACES, SURFACE_KEYS, DOWNTIME_REASONS, DEPARTMENTS, LIFT_CHECKLIST, pmStatus, localStamp, syncDowntime, latestCheck, openBlock, openBlocks };

@@ -1,7 +1,7 @@
 'use strict';
 
 // Signing in, 2026.11.10 (what an outside tester reported): what the sign-in page may offer for a mountain (a demo sends
-// no email; a server with no email set up offers no email sign-in), a session whose last tab closed ends two minutes later
+// no email; a server with no email set up offers no email sign-in), a session whose last tab closed ends 30 minutes later
 // unless it is used again, "Where you are signed in" lists only open sessions with when each ends, usernames are not case
 // sensitive and come back as saved, and the browser side: Remember me, show password, the 10-minute tab lock with two
 // tabs (Playwright, skipped when it is not installed).
@@ -92,7 +92,7 @@ test('"Email me a code" answers the same for a real login, an unknown one and a 
   mailOff();
 });
 
-test('a session whose last tab closed ends two minutes later, unless it is used again first (a reload)', async () => {
+test('a session whose last tab closed ends 30 minutes later, unless it is used again first (a reload)', async () => {
   const t = await login(A.slug, `owner@${A.slug}.test`);
   assert.equal((await api('POST', '/auth/closing', { token: t, headers: { 'x-poll': '1' } })).status, 204);
   assert.ok((await sessionRow(t)).closing_at, 'marked closing');
@@ -100,9 +100,9 @@ test('a session whose last tab closed ends two minutes later, unless it is used 
   assert.equal((await api('GET', '/auth/me', { token: t })).status, 200);
   await new Promise((r) => setTimeout(r, 200));
   assert.equal((await sessionRow(t)).closing_at, null, 'used again: no longer closing');
-  // Closed for good: two minutes later it no longer works, and the list does not show it.
+  // Closed for good: 30 minutes later it no longer works, and the list does not show it.
   await api('POST', '/auth/closing', { token: t, headers: { 'x-poll': '1' } });
-  await pool.query('UPDATE user_sessions SET closing_at = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 3 MINUTE) WHERE id_hash = ?', [require('../src/lib/sessions').hash(sidOf(t))]);
+  await pool.query('UPDATE user_sessions SET closing_at = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 31 MINUTE) WHERE id_hash = ?', [require('../src/lib/sessions').hash(sidOf(t))]);
   assert.equal((await api('GET', '/auth/me', { token: t })).status, 401, 'a closed browser does not come back');
   const sec = (await api('GET', '/auth/security', { token: A.owner })).body;
   assert.ok(!sec.sessions.some((s) => s.id === require('../src/lib/sessions').hash(sidOf(t)).slice(0, 16)), 'not listed');

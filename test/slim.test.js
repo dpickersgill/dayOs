@@ -131,8 +131,10 @@ test('the release zip leaves out the tests and packages, and deploy.sh and promo
 
 // ---------------------------------------------------------------- 4. scripts and styles cached by release
 test('every script and stylesheet the app loads has a release address kept a year; the pages and the service worker are not kept', async () => {
-  const { RELEASE } = require('../src/lib/appassets');
+  const { RELEASE, STAMPED } = require('../src/lib/appassets');
   const rel = `/r/${RELEASE}/`;
+  // The year-long promise is made only by a stamped build (2026.11.10 fix); this copy may have none (see the next test).
+  const KEPT = STAMPED ? 'public, max-age=31536000, immutable' : 'no-cache';
   const get = (p) => fetch(`${base}${p}`, { redirect: 'manual' });
   const local = (html) => [...html.matchAll(/<(?:script[^>]*\ssrc|link[^>]*\shref)=["'](\/[^"']+)["']/g)].map((m) => m[1]).filter((u) => /\.(js|css)(\?|$)/.test(u));
   const pagesIn = fs.readdirSync(nodePath.join(root, 'public')).filter((f) => f.endsWith('.html'));
@@ -150,7 +152,7 @@ test('every script and stylesheet the app loads has a release address kept a yea
   for (const u of seen) {
     const r = await get(u);
     assert.equal(r.status, 200, u);
-    assert.equal(r.headers.get('cache-control'), 'public, max-age=31536000, immutable', u);
+    assert.equal(r.headers.get('cache-control'), KEPT, u);
   }
   // A script loaded by another one stays under the same address: scripts use relative imports and paths only.
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(nodePath.join(d, e.name)) : [nodePath.join(d, e.name)]));
@@ -160,7 +162,7 @@ test('every script and stylesheet the app loads has a release address kept a yea
     assert.doesNotMatch(src, /['"`]\/(js|css|vendor)\//, `${f} loads a script or style by an absolute path`);
   }
   const lazy = await get(`${rel}js/views/dashboard.js`);
-  assert.equal(lazy.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+  assert.equal(lazy.headers.get('cache-control'), KEPT);
   assert.equal((await get(`${rel}vendor/jsqr/jsQR.js`)).status, 200);
   // An address from another release gets today's file without the year-long promise; pages are never under /r/.
   const old = await get('/r/2020.1.1-old/js/main.js');

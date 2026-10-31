@@ -99,15 +99,20 @@ test('pausing signs everyone out and shuts the public pages; resuming brings it 
 test('a reset password works and ends old sessions', async () => {
   // Reading a mountain needs two-step: the key alone is refused, a named operator reads it.
   assert.equal((await plat('GET', `/tenants/${id}`)).status, 403);
-  const detail = await (await require('./helpers/platform-operator').operatorConsole(base, KEY))('GET', `/tenants/${id}`);
+  const op = await require('./helpers/platform-operator').operatorConsole(base, KEY);
+  const detail = await op('GET', `/tenants/${id}`);
   assert.equal(detail.body.users.length, 1);
   assert.ok(detail.body.history.length >= 4);
   const newPw = 'a-brand-new-password';
-  assert.equal((await plat('POST', `/tenants/${id}/reset-password`, { user_id: detail.body.users[0].id, password: newPw })).status, 200);
+  // Resetting hands over access, so the key alone is refused like reading (2026.11.10 fix); the named operator opens the mountain first.
+  const byKey = await plat('POST', `/tenants/${id}/reset-password`, { user_id: detail.body.users[0].id, password: newPw, clear_two_step: true });
+  assert.equal(byKey.status, 403); assert.equal(byKey.body.details.code, 'two_step_required');
+  assert.equal((await op('POST', `/tenants/${id}/access`, { reason: 'Owner locked out, ticket 12', hours: 1 })).status, 201);
+  assert.equal((await op('POST', `/tenants/${id}/reset-password`, { user_id: detail.body.users[0].id, password: newPw })).status, 200);
   await new Promise((r) => setTimeout(r, 1100)); // sessions are cut at whole seconds
   assert.equal((await api('GET', '/people', { token: owner })).status, 401, 'old session ended');
   assert.equal((await login(slug, `o@${slug}.test`)).status, 401, 'old password');
   assert.equal((await login(slug, `o@${slug}.test`, newPw)).status, 200);
-  assert.equal((await plat('POST', `/tenants/${id}/reset-password`, { user_id: 999999999, password: newPw })).status, 404);
+  assert.equal((await op('POST', `/tenants/${id}/reset-password`, { user_id: 999999999, password: newPw })).status, 404);
   assert.equal((await plat('GET', '/audit')).status, 200);
 });

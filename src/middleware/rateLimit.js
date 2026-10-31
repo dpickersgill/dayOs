@@ -30,19 +30,17 @@ function callSite() {
  * while wrong passwords from that address still are.
  */
 function rateLimit({ windowMs, max, message = 'Too many requests, slow down', keyOf = (req) => req.ip, name = null, skipSuccessful = false }) {
-  const store = storeFor(`${name || callSite()}|${windowMs}|${max}`);
-  store.init({ windowMs });
+  const c = counter({ windowMs, max, name: name || callSite() });
 
   return async (req, res, next) => {
     try {
       const key = keyOf(req);
-      const { totalHits, resetTime } = await store.increment(key);
-      if (totalHits > max) {
-        const reset = resetTime || (store.resetTimeOf ? await store.resetTimeOf(key) : undefined);
-        const secs = reset ? Math.max(1, Math.ceil((reset.getTime() - Date.now()) / 1000)) : Math.ceil(windowMs / 1000);
-        res.set('Retry-After', String(secs));
+      const { over, retryAfter } = await c.hit(key);
+      if (over) {
+        res.set('Retry-After', String(retryAfter));
         return res.status(429).json({ error: message });
       }
+      const store = c.store;
       if (skipSuccessful) res.on('finish', () => { if (res.statusCode < 400) store.decrement(key).catch(() => {}); });
       return next();
     } catch (err) {
@@ -51,4 +49,22 @@ function rateLimit({ windowMs, max, message = 'Too many requests, slow down', ke
   };
 }
 
-module.exports = { rateLimit, callSite };
+/**
+ * The count behind a limit, for code that decides itself when a request counts (the gates' failed sign-ins, 2026.11.10):
+ * hit(key) counts one and says whether the key is over max, and for how many seconds.
+ */
+function counter({ windowMs, max, name = null }) {
+  const store = storeFor(`${name || callSite()}|${windowMs}|${max}`);
+  store.init({ windowMs });
+  return {
+    store,
+    async hit(key) {
+      const { totalHits, resetTime } = await store.increment(key);
+      if (totalHits <= max) return { over: false, retryAfter: 0 };
+      const reset = resetTime || (store.resetTimeOf ? await store.resetTimeOf(key) : undefined);
+      return { over: true, retryAfter: reset ? Math.max(1, Math.ceil((reset.getTime() - Date.now()) / 1000)) : Math.ceil(windowMs / 1000) };
+    },
+  };
+}
+
+module.exports = { rateLimit, counter, callSite };

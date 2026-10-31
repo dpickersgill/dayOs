@@ -4,6 +4,7 @@
 // Settings, Payments and card readers: where guests' card payments go (the mountain's own Stripe account), and the card
 // readers at the counter. #/billing sends people to Settings.
 import { get, post, put, del } from '../api.js';
+import { leaveApp } from '../tablock.js';
 import { h, clear, ctx, money, state, button, table, toast, formDialog, field, input, errorBox, loading, label, fmtDate, fmtDateTime, confirmDialog } from '../ui.js';
 
 const STATUS_WORDS = {
@@ -115,10 +116,10 @@ async function renderBilling(root, query) {
       if (isLive) {
         return h('div', { class: 'row' }, ...[
           changed ? button('Change plan', () => confirmDialog('Change the plan?', 'Stripe charges or credits the difference for the rest of this period, and the apps change straight away.', 'Change plan', async () => { await saveChoice(); toast('Plan changed'); await load(); }), { kind: 'primary' }) : null,
-          button('Manage payment', async () => { const { url } = await post('/billing/portal'); location.assign(url); }),
+          button('Manage payment', async () => { const { url } = await post('/billing/portal'); leaveApp(url); }),
         ].filter(Boolean), h('span', { class: 'muted small' }, 'Change the card or bank account, see receipts or cancel, on Stripe\'s secure page.'));
       }
-      const pay = (method) => async () => { if (!choice.plan_id) throw new Error('Choose a plan first'); await saveChoice(); const { url } = await post('/billing/checkout', { method }); location.assign(url); };
+      const pay = (method) => async () => { if (!choice.plan_id) throw new Error('Choose a plan first'); await saveChoice(); const { url } = await post('/billing/checkout', { method }); leaveApp(url); };
       return h('div', { class: 'stack' },
         h('h3', null, 'How would you like to pay?'),
         h('div', { class: 'pay-ways' },
@@ -177,7 +178,7 @@ function cardPaymentsPanel(query) {
     const draw = () => {
       const [word, kind] = CARD_STATE[s.status] || [s.status, 'neutral'];
       const fee = s.platform_fee_bps || s.platform_fee_cents ? `${(s.platform_fee_bps / 100).toFixed(2).replace(/\.?0+$/, '')}%${s.platform_fee_cents ? ` plus ${money(s.platform_fee_cents)}` : ''} of each guest card payment` : null;
-      const go = async () => { const r = await post('/payments/stripe/link', {}); location.href = r.url; };
+      const go = async () => { const r = await post('/payments/stripe/link', {}); leaveApp(r.url); };
       const text = {
         ready: `Online shop orders, lesson payments, date changes and gifts to the patrol are paid straight into your own Stripe account${s.business_name ? ` (${s.business_name})` : ''}, and Stripe pays them out to your bank. ${s.payouts_enabled ? '' : 'Payouts are not on yet: finish your bank details in Stripe. '}Refunds come back out of the same account.`,
         unfinished: 'Your Stripe account is connected, but Stripe still needs some details (the business, a person, a bank account) before it can take payments. Card payments open as soon as Stripe is happy.',

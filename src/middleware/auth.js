@@ -47,10 +47,10 @@ const AREA_PATHS = /^\/api\/v1\/(auth\/|area(\/|$)|whats-new)/;
 // The patrol-room screen (a leader's session turned into the room's display) reaches only these: who is on duty, signing
 // people in and out, and leaving the screen with a second check or signing out (which turns this device's alerts off).
 // Never a patient record.
-const ROOM_PATHS = /^\/api\/v1\/(patrol\/(duty|duty\/sign-in|duty\/sign-out|room|room\/end|alerts\/unsubscribe)|auth\/(me|logout|closing|step-up|step-up\/options))$/;
+const ROOM_PATHS = /^\/api\/v1\/(patrol\/(duty|duty\/sign-in|duty\/sign-out|room|room\/end|alerts\/unsubscribe)|auth\/(me|logout|closing|back|step-up|step-up\/options))$/;
 
 // While two-step is still to be set up, or a temporary password replaced, only these are open.
-const SETUP_PATHS = /\/auth\/(me|logout|closing|change-password|mfa\/(setup|enable|status)|passkeys(\/options)?)$/;
+const SETUP_PATHS = /\/auth\/(me|logout|closing|back|change-password|mfa\/(setup|enable|status)|passkeys(\/options)?)$/;
 
 /**
  * Verifies the bearer token, then re-checks the user in the database on every request, so that
@@ -97,6 +97,9 @@ async function authenticate(req, _res, next) {
   // A background poll (x-poll: 1) is not someone using the app, so it does not keep the session open. The patrol-room
   // screen is the exception: it stays up all day, and can do nothing but the room's own work (below).
   if (req.headers['x-poll'] !== '1' || display) sessions.touch(payload.sid);
+  // A poll from a tab that is on screen: someone still has the app open, so a closing mark (a reload whose first request
+  // beat the closing notice) is cleared. It is still not use, so the idle limit applies (lib/sessions.js).
+  else if (req.headers['x-visible'] === '1' && Number(row.session_closing)) sessions.shown(payload.sid);
   if (row.status !== 'active') return next(forbidden('This mountain is paused. Contact Verdynt/OS.'));
   if (row.sandbox_over) return next(forbidden('This demo has ended. Start a new one, or ask Verdynt/OS for a walkthrough.'));
   const path = req.originalUrl.split('?')[0];

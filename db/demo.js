@@ -92,6 +92,21 @@ function names() {
   };
 }
 
+/**
+ * A lift's type (src/lib/liftchecks.js TYPES) for the demo: from OpenStreetMap's kind on a real mountain, else from its name.
+ */
+const OSM_TYPE = { cable_car: 'gondola_tram', gondola: 'gondola_tram', mixed_lift: 'detachable', chair_lift: 'fixed_grip', drag_lift: 'surface', 't-bar': 'surface', 'j-bar': 'surface', platter: 'surface', rope_tow: 'surface', magic_carpet: 'carpet' };
+function liftTypeOf(name) {
+  const real = AREA && (AREA.lifts || []).find((l) => l.name === name);
+  if (real && OSM_TYPE[real.kind]) return OSM_TYPE[real.kind];
+  const n = String(name).toLowerCase();
+  if (/gondola|tram|cable car/.test(n)) return 'gondola_tram';
+  if (/carpet|conveyor/.test(n)) return 'carpet';
+  if (/t-?bar|j-?bar|platter|rope|tow|surface|poma/.test(n)) return 'surface';
+  if (/express|detach|high.?speed|six|eight|chondola/.test(n)) return 'detachable';
+  return 'fixed_grip';
+}
+
 async function main() {
   const [[t]] = await pool.query('SELECT id, name, require_mfa FROM tenants WHERE slug = ?', [slug]);
   if (!t) throw new Error(`No mountain with the slug "${slug}"`);
@@ -135,6 +150,9 @@ async function load(o) {
   }
   const N = names();
   for (const [name, status] of N.lifts) await soft(`lift ${name}`, () => C('POST', '/schedule/lifts', { name, status }));
+  // Each lift gets its type (2026.11.10 fix), so its inspection lists are the right ones and no "no type yet" note shows.
+  const madeLifts = (await soft('lift types', () => C('GET', '/schedule/lifts?limit=100')) || { data: [] }).data || [];
+  for (const l of madeLifts) await soft(`lift type ${l.name}`, () => C('PATCH', `/ops/lifts/${l.id}/type`, { lift_type: liftTypeOf(l.name) }));
   for (const [name, difficulty] of N.trails) await soft(`trail ${name}`, () => C('POST', '/schedule/trails', { name, difficulty, status: N.closed.includes(name) ? 'closed' : 'open' }));
 
   // ---------------------------------------------------------------- products

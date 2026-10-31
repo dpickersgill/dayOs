@@ -529,11 +529,21 @@ router.post(
 );
 
 /**
- * The last browser tab using this session closed (or is reloading). The session ends in two minutes unless it is used again
+ * The last browser tab using this session closed (or is reloading). The session ends in 30 minutes unless it is used again
  * first (sessions.closing). Sent with x-poll: 1, so the sign-in check does not count this call itself as use.
  */
+const pageOf = (b) => { const n = Number(b && b.page); return Number.isSafeInteger(n) && n > 0 ? n : null; }; // when the page opened (its clock, ms)
 router.post('/auth/closing', authenticate, async (req, res) => {
-  if (req.auth.sid) await sessions.closing(req.auth.sid);
+  if (req.auth.sid) await sessions.closing(req.auth.sid, pageOf(req.body));
+  res.status(204).end();
+});
+
+/**
+ * A page of the app opened, or came back (a reload, the Back button from Stripe): the session is in use again, and a
+ * closing notice that arrives in the next few seconds (the reload race) is ignored (sessions.back).
+ */
+router.post('/auth/back', authenticate, async (req, res) => {
+  if (req.auth.sid) await sessions.back(req.auth.sid, pageOf(req.body));
   res.status(204).end();
 });
 
