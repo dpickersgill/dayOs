@@ -44,6 +44,12 @@ module.exports = ({ tableExists, columnExists }) => [
     `INSERT INTO goodday_consent_events (email, event, how, created_at)
        SELECT email, 'unsubscribe', unsubscribe_how, unsubscribed_at FROM goodday_subscribers WHERE unsubscribed_at IS NOT NULL`,
   ]],
+  // An unsubscribed reader keeps only the address and the consent history (the name and role are not needed any more).
+  ['goodday_subscribers unsubscribed: no name or role', async (c) => {
+    if (!(await tableExists(c, 'goodday_subscribers'))) return true;
+    const [[r]] = await c.query("SELECT COUNT(*) AS n FROM goodday_subscribers WHERE status = 'unsubscribed' AND (name IS NOT NULL OR role <> 'other')");
+    return Number(r.n) === 0;
+  }, "UPDATE goodday_subscribers SET name = NULL, role = 'other' WHERE status = 'unsubscribed' AND (name IS NOT NULL OR role <> 'other')"],
   ['sms_held', (c) => tableExists(c, 'sms_held'), `CREATE TABLE sms_held (
     id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id   BIGINT UNSIGNED NOT NULL,
