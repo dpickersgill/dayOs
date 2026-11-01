@@ -642,7 +642,7 @@ async function followups(base) {
       if (!email && !b.contact_phone) continue;
       const link = `${base}/book/${encodeURIComponent(t.slug)}`;
       const what = b.discipline === 'snowboard' ? 'ride' : 'ski';
-      await notify({ tenant: t, to: { email, phone: b.contact_phone, textOk: Boolean(b.text_ok) }, tag: 'lesson-followup',
+      await notify({ tenant: t, to: { email, phone: b.contact_phone, textOk: Boolean(b.text_ok) }, tag: 'lesson-followup', base, promotional: true,
         subject: `${b.first_name}'s next lesson at ${t.name}`,
         text: [`Hi,`, '', `${b.first_name} did great at ${t.name}. The next lesson is where it all clicks.`, `Book ${b.first_name}'s next lesson here: ${link}`, '', `See you on the snow,`, t.name].join('\n'),
         smsText: `${t.name}: ready for ${b.first_name}'s next lesson? Keep the ${what === 'ride' ? 'riding' : 'skiing'} going: ${link}` });

@@ -113,10 +113,11 @@ async function finishSignIn(user, req, res, { method, extra = {} }) {
 const ACCESS_OVER = 'Your access has ended for the season. Ask a manager if you are coming back.';
 // The last day is the mountain's own day, not the UTC one (2026.11.11): a login ending on the 31st works until midnight there.
 const accessOver = (u) => require('../lib/accessend').over(u.access_ends_on, u.tenant_timezone);
-const USER_SQL = `SELECT u.*, t.status AS tenant_status, t.slug AS tenant_slug, t.timezone AS tenant_timezone, (t.sandbox_expires_at IS NOT NULL) AS sandbox, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over
+const USER_SQL = `SELECT u.*, t.status AS tenant_status, t.slug AS tenant_slug, t.timezone AS tenant_timezone, t.closed_at, t.delete_after, t.data_deleted_at, t.timezone, (t.sandbox_expires_at IS NOT NULL) AS sandbox, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over
   FROM users u JOIN tenants t ON t.id = u.tenant_id`;
 function refuseClosed(user) {
-  if (user.tenant_status !== 'active') throw forbidden('This mountain is paused. Contact Verdynt/OS.');
+  // A closed mountain's owner may still sign in during the export window, to export-only mode (lib/closedexport.js).
+  if (user.tenant_status !== 'active' && !require('../lib/closedexport').ownerMayExport(user)) throw forbidden('This mountain is paused. Contact Verdynt/OS.');
   if (user.sandbox_over) throw forbidden('This demo has ended. Start a new one, or ask Verdynt/OS for a walkthrough.');
   if (accessOver(user)) throw forbidden(ACCESS_OVER);
 }
@@ -481,7 +482,17 @@ router.get('/auth/me', authenticate, async (req, res) => {
     menu: menus.menuFor(user.role, user.role_menus, user.school_access),
     // The ski school access level (lib/schoolaccess.js): director for owners and managers, the teaching profile's for an instructor.
     school_access: ['owner', 'manager'].includes(user.role) ? 'director' : user.role === 'instructor' ? (user.school_access || 'instructor') : null,
+    // A closed mountain inside its export window: the app shows only the download screen (GET /closed-export).
+    export_only: Boolean(req.auth.exportOnly),
   });
+});
+
+/** A closed mountain's owner, in export-only mode: the files to download, and the day the data is deleted. */
+router.get('/closed-export', authenticate, async (req, res) => {
+  const ce = require('../lib/closedexport');
+  if (!req.auth.exportOnly) throw forbidden('This is only for a closed mountain\u2019s owner');
+  const t = await one(pool, 'SELECT name, closed_at, delete_after FROM tenants WHERE id = ?', [req.auth.tenantId]);
+  res.json({ mountain: t.name, closed_at: t.closed_at, delete_after: String(t.delete_after instanceof Date ? t.delete_after.toISOString() : t.delete_after).slice(0, 10), files: ce.FILES.map(([label, href]) => ({ label, href: href.replace('/api/v1', '') })) });
 });
 
 // ---------------------------------------------------------------- menus for each role (Settings, Team and logins)

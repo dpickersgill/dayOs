@@ -48,6 +48,8 @@ test.before(async () => {
   mailer.settings.apiBase = `http://127.0.0.1:${pm.address().port}`;
   process.env.TWILIO_API_BASE = `http://127.0.0.1:${tw.address().port}`;
   A = await mountain(`ms-a-${suffix}`); B = await mountain(`ms-b-${suffix}`);
+  // Marketing email needs the mountain's postal address (2026.11.11, lib/mailkinds.js).
+  await pool.query("UPDATE tenants SET address = '1 Ridge Road, Spring City, PA 19475' WHERE slug IN (?, ?)", [A.slug, B.slug]);
   for (const role of ['manager', 'counter']) {
     assert.equal((await api('POST', '/users', { token: A.token, body: { email: `${role}@${A.slug}.test`, password: PW, role } })).status, 201);
     T[role] = (await api('POST', '/auth/login', { body: { tenant: A.slug, email: `${role}@${A.slug}.test`, password: PW } })).body.token;
@@ -119,6 +121,10 @@ test('the unsubscribe link records the opt-out and stops later campaigns', async
 });
 
 test('texts need their own consent, add the stop line, and go to one number once', async () => {
+  // Marketing texts wait for 8 AM at the mountain (2026.11.11); this test sends at midday, whatever the time of the run.
+  const quiet = require('../src/lib/quiet');
+  quiet.clock.now = () => new Date('2026-12-15T17:00:00Z');
+  try {
   const a = await person(T.counter, { first_name: 'Tex', phone: '610-555-0142' });
   const b = await person(T.counter, { first_name: 'Nope', phone: '610-555-0143' });
   assert.ok(b.id);
@@ -135,6 +141,7 @@ test('texts need their own consent, add the stop line, and go to one number once
   assert.equal(texts.some((x) => x.To === '+16105550143'), false);
   const test1 = await api('POST', `/messages/campaigns/${c.body.id}/test`, { token: T.manager, body: {} });
   assert.equal(test1.status, 400, 'a text test needs a number');
+  } finally { quiet.clock.now = () => new Date(); }
 });
 
 test('audiences: current pass holders and lapsed pass holders', async () => {

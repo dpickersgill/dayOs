@@ -12,6 +12,8 @@ const { pool } = require('../db');
 const { trail } = require('./audit');
 
 const LEAD_YEARS = 2;
+// The record of each message sent to a guest, and the questions asked of the assistant, are kept 13 months (privacy page).
+const LOG_DAYS = 395;
 // OSHA (29 CFR 1904.33): the 300 log, the 300A summary and the 301 forms are kept five years after the end of their year.
 const OSHA_YEARS = 5;
 
@@ -19,7 +21,7 @@ const OSHA_YEARS = 5;
 // patients, care, statements, photos, frozen versions and signatures), what was released to whom, signed waivers and the
 // wording signed, and the audit trail that shows who saw a record. No retention runs out for these on its own.
 const KEEP = new Set(['incidents', 'patrol_scenes', 'patrol_witness_links', 'patrol_records_requests', 'claim_shares', 'claim_share_views',
-  'waivers', 'waiver_signings', 'waiver_texts', 'audit_log']);
+  'waivers', 'waiver_signings', 'waiver_texts', 'audit_log', 'deletion_ledger']);
 const kept = (name) => KEEP.has(name) || name.startsWith('incident_');
 // Kept until OSHA's five years after the year are over, then deleted by the next deletion run.
 const OSHA = ['staff_injuries', 'staff_injury_years'];
@@ -56,6 +58,9 @@ async function runAll() {
   // Operators' openings of a mountain that ran out are kept as history; nothing to delete.
   const [l] = await pool.query('DELETE FROM site_leads WHERE created_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? YEAR)', [LEAD_YEARS]);
   out.leads = l.affectedRows;
+  const [ml] = await pool.query('DELETE FROM message_log WHERE created_at < UTC_TIMESTAMP() - INTERVAL ? DAY LIMIT 50000', [LOG_DAYS]);
+  const [al] = await pool.query('DELETE FROM assistant_log WHERE created_at < UTC_TIMESTAMP() - INTERVAL ? DAY LIMIT 50000', [LOG_DAYS]);
+  out.message_log = ml.affectedRows; out.assistant_log = al.affectedRows;
   out.demos = await require('./sandbox').purgeExpired();
   out.due_for_deletion = await markDue();
   trail({ action: 'retention_run', actor: 'daily job', detail: JSON.stringify(out) });
@@ -107,6 +112,8 @@ async function deleteClosed(id, record) {
         const [[c]] = await conn.query(`SELECT COUNT(*) AS n FROM ${q(name)} WHERE tenant_id = ?`, [id]);
         if (Number(c.n)) left[name] = Number(c.n);
       }
+      // The ledger row lets a restore from an older backup apply this deletion again (db/deletions.js).
+      await require('./deletions').record(conn, { tenantId: id, kind: 'mountain', refId: id, by: 'operator' });
       if (record) await record(conn, { deleted, kept: left });
       await conn.commit();
       require('./modules').invalidate(id);
@@ -121,4 +128,4 @@ async function deleteClosed(id, record) {
   }
 }
 
-module.exports = { runAll, markDue, deleteClosed, Refused, LEAD_YEARS, OSHA_YEARS, KEEP };
+module.exports = { runAll, markDue, deleteClosed, Refused, LEAD_YEARS, OSHA_YEARS, KEEP, LOG_DAYS };

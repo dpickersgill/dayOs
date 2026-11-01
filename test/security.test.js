@@ -214,7 +214,13 @@ test('closing a mountain signs everyone out now; the daily job only marks it due
   assert.equal(closed.status, 200, JSON.stringify(closed.body));
   assert.ok(closed.body.delete_after);
   assert.equal((await api('GET', '/auth/me', { token: D.token })).status, 401, 'signed out at once');
-  assert.notEqual((await login(D.slug, `o@${D.slug}.test`)).status, 200, 'and cannot sign in');
+  // The owner can still sign in during the export window, to export-only mode (2026.11.11, DP-11); nothing else opens.
+  const back = await login(D.slug, `o@${D.slug}.test`);
+  assert.equal(back.status, 200, 'the owner may sign in, to download');
+  if (back.status === 200 && back.body.token) {
+    assert.equal((await api('GET', '/auth/me', { token: back.body.token })).body.export_only, true);
+    assert.equal((await api('GET', '/people', { token: back.body.token })).status, 403, 'export only');
+  }
   const listed = (await plat('GET', '/tenants')).body.data.find((t) => t.id === D.id);
   assert.ok(listed.delete_after && listed.status === 'suspended');
 

@@ -251,10 +251,13 @@ test('unsubscribe: the link shows a button (a link checker cannot unsubscribe), 
   assert.equal(await oc.text(), 'Unsubscribed');
   assert.equal((await row(email2)).unsubscribe_how, 'one-click');
   assert.equal((await fetch(`${base}/site/good-day/unsubscribe/${'x'.repeat(43)}`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'List-Unsubscribe=One-Click' })).status, 404);
-  // signing up again after unsubscribing starts over with a new consent and a new link
+  // signing up again after unsubscribing sends a new link; the unsubscribe stands until that link is used (2026.11.11, DP-7)
   await subscribe({ email: email2 });
   await waitFor(() => mailsTo(email2).length >= 3);
-  assert.equal((await row(email2)).status, 'pending');
+  assert.equal((await row(email2)).status, 'unsubscribed');
+  const again = tokenIn(mailsTo(email2)[2], 'confirm');
+  await get(`/site/good-day/confirm/${again}`);
+  assert.equal((await row(email2)).status, 'confirmed');
 });
 
 // ---------------------------------------------------------------- sending from the console

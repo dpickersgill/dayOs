@@ -1,6 +1,6 @@
 // Customers: alerts, consent history, dated notes, and the manager's data actions for one person.
 import { get, post, del, download } from '../api.js';
-import { h, clear, can, isManager, state, field, select, button, toast, fail, confirmDialog, formDialog, fmtDate, fmtDateTime, errorBox, input, val } from '../ui.js';
+import { h, clear, can, isManager, state, field, select, button, toast, fail, confirmDialog, formDialog, dialog, fmtDate, fmtDateTime, errorBox, input, val } from '../ui.js';
 
 export const FLAG_LABELS = { do_not_rent: 'Do not rent', unpaid_balance: 'Unpaid balance', medical_alert: 'Medical alert', vip: 'VIP', banned: 'Banned', other: 'Note' };
 const FLAG_TONE = { do_not_rent: 'bad', banned: 'bad', unpaid_balance: 'warn', medical_alert: 'warn', vip: 'good', other: 'neutral' };
@@ -110,8 +110,13 @@ export function dataActions(person, done) {
   return h('div', { class: 'row' },
     button('Download this person’s data', async () => { try { await download(`/people/${person.id}/data-export`, `customer-${person.id}-data.json`); } catch (e) { fail(e); } }, { small: true }),
     button('Anonymise', () => confirmDialog(`Anonymise ${person.first_name} ${person.last_name}?`,
-      'Their name, contact details, photo, notes and alerts are removed for good. Sales, tickets, rentals and signed waivers stay, with no name on them, and the record of their consent stays. This cannot be undone.',
-      'Anonymise', async () => { await post(`/people/${person.id}/anonymise`, { confirm: true }); toast('Anonymised'); await done(); }, { danger: true }), { small: true }));
+      'Their name, contact details, photo, notes and alerts are removed for good, and so are children\u2019s allergies, medical notes and pickup people, contact details on lesson and program requests, and messages sent to them. Sales, tickets and rentals stay with no name on them. Signed waivers, patrol care records and the record of their consent stay, and you are told why. This cannot be undone.',
+      'Anonymise', async () => {
+        const r = await post(`/people/${person.id}/anonymise`, { confirm: true });
+        toast('Anonymised');
+        if (r && r.kept && r.kept.length) dialog('What stayed, and why', h('ul', { class: 'kept-list' }, ...r.kept.map((k) => h('li', null, h('strong', null, `${k.what}. `), k.why))));
+        await done();
+      }, { danger: true }), { small: true }));
 }
 
 /** A strip across the top of the Customers screen: what is missing, in plain counts. */

@@ -3692,3 +3692,10 @@ button.fill-day:hover { border-color: var(--line-strong); }
 .call-repeats ul { margin: 4px 0 0; padding-left: 18px; }
 .sweep-stops .stop-mark s { color: var(--muted); }
 .short-num, .input-row input.short-num { min-width: 64px; }
+
+/* ---- Privacy (2026.11.11, track PRIVACY): a closed mountain's export screen, and what stayed after an anonymise. */
+.closed-export-page { max-width: 640px; margin: 0 auto; padding: 32px 16px; }
+.closed-export h1 { margin-top: 0; }
+.closed-export-files { list-style: none; margin: 16px 0; padding: 0; display: grid; gap: 8px; }
+.closed-export-files .btn { min-height: 44px; width: 100%; justify-content: flex-start; }
+.kept-list { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; }

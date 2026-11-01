@@ -18,10 +18,18 @@ const enabled = () => Boolean(token() && from());
  * tenantId is required: demo (sandbox) mountains never send, whoever asks. stream 'broadcast' is for marketing campaigns,
  * which Postmark requires to be kept apart from tickets, reminders and patrol mail. Every failure is logged.
  */
-async function send({ tenantId, to, fromName, replyTo, subject, text, html, tag, headers, stream }) {
+async function send({ tenantId, to, fromName, replyTo, subject, text, html, tag, headers, stream, personId, base }) {
   if (!enabled()) return { ok: false, error: 'Email is not set up' };
   if (!tenantId) { logFailure({ job: 'email', tag, message: 'send without a mountain' }); return { ok: false, error: 'No mountain given' }; }
   if (await isSandbox(tenantId)) return { ok: false, error: 'Demo mountains do not send email' };
+  // Promotional email (lib/mailkinds.js decides by tag) only goes to guests who have not said no, with the postal address,
+  // an unsubscribe link and the one-click headers. personId and base build that link.
+  const kinds = require('./mailkinds');
+  if (kinds.isPromotional(tag)) {
+    const p = await kinds.prepare(require('../db').pool, { tenantId, to, text, html, headers, personId, base });
+    if (!p.ok) return { ok: false, error: p.error, refused: true };
+    ({ text, html, headers, stream } = p);
+  }
   const r = await post({ to, fromName, replyTo, subject, text, html, tag, headers, stream });
   if (!r.ok) logFailure({ job: 'email', tenant: tenantId, tag, message: r.error });
   return r;

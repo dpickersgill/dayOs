@@ -45,7 +45,11 @@ async function ownHistory(req, ids) {
 router.post('/ask', perPerson, validate(z.object({ question: z.string().trim().min(2).max(1000), page: z.string().trim().max(40).optional(), views: z.array(z.string().max(40)).max(80).optional(), history_ids: z.array(z.number().int().positive()).max(6).optional(), history })), async (req, res) => {
   const s = await A.settingsOf(pool, req.auth.tenantId);
   if (!s.staff_on) throw new AppError(403, 'The assistant is turned off for your mountain');
-  const out = await A.ask({ tenantId: req.auth.tenantId, audience: 'staff', userId: req.auth.userId, role: req.auth.role, page: req.body.page, views: req.body.views || [] }, req.body.question, { history: await ownHistory(req, req.body.history_ids) });
+  // A patrol login's question loses obvious names, contact details, dates and ages before it goes to Anthropic or the log
+  // (lib/patrolscrub.js, 2026.11.11). The assistant answers from Help; it never needs to know who a patient is.
+  const scrub = require('../lib/patrolscrub');
+  const question = scrub.isPatrol(req.auth) ? scrub.scrub(req.body.question) : req.body.question;
+  const out = await A.ask({ tenantId: req.auth.tenantId, audience: 'staff', userId: req.auth.userId, role: req.auth.role, page: req.body.page, views: req.body.views || [] }, question, { history: await ownHistory(req, req.body.history_ids) });
   res.json(out);
 });
 

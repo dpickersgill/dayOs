@@ -12,6 +12,7 @@ const { baseUrl } = require('../lib/baseurl');
 const mailer = require('../lib/mailer');
 const cardrefund = require('../lib/cardrefund');
 const { audit } = require('../lib/audit');
+const { emailRef } = require('../lib/personal');
 const { studentCard } = require('../lib/school');
 const PS = require('../lib/programsessions');
 const PP = require('../lib/programplus');
@@ -145,7 +146,7 @@ publicRouter.get('/:slug/family', async (req, res) => {
       p.progress = await LF.progressCard(pool, t.id, p.id, { recapBodies: true });
     }
   }
-  await audit(pool, system(t.id), 'family_view', 'people', null, { email });
+  await audit(pool, system(t.id), 'family_view', 'people', null, { email_ref: emailRef(email) });
   res.json({ mountain: t.name, phone: t.phone, email, today, people });
 });
 
@@ -162,7 +163,7 @@ publicRouter.patch('/:slug/family/places/:id', validate(z.object({ allergies: z.
   await tx(async (conn) => {
     const e = await placeOf(conn, t, fam, Number(req.params.id));
     await PS.saveDetails(conn, t.id, e.id, req.body);
-    await audit(conn, system(t.id), 'family_update_place', 'programs', e.program_id, { enrollment_id: e.id, fields: Object.keys(req.body), email });
+    await audit(conn, system(t.id), 'family_update_place', 'programs', e.program_id, { enrollment_id: e.id, fields: Object.keys(req.body), email_ref: emailRef(email) });
   });
   res.json({ ok: true });
 });
@@ -176,7 +177,7 @@ publicRouter.post('/:slug/family/places/:id/switch', validate(z.object({ group_i
     const pol = await policyFor(conn, t.id, e, program, today);
     if (!pol.switch_to.some((g) => g.group_id === req.body.group_id)) throw conflict('That day cannot be chosen now. Please call the mountain.');
     await PS.moveDay(conn, t.id, e, req.body.group_id);
-    await audit(conn, system(t.id), 'family_switch_day', 'programs', e.program_id, { enrollment_id: e.id, to: req.body.group_id, email });
+    await audit(conn, system(t.id), 'family_switch_day', 'programs', e.program_id, { enrollment_id: e.id, to: req.body.group_id, email_ref: emailRef(email) });
   });
   res.json({ ok: true });
 });
@@ -195,7 +196,7 @@ publicRouter.post('/:slug/family/places/:id/withdraw', async (req, res) => {
     await conn.query("UPDATE program_enrollments SET status = 'withdrawn', withdrawn_at = NOW(), refund_cents = ? WHERE tenant_id = ? AND id = ?", [refund.cents || 0, t.id, e.id]);
     if (e.ticket_id) await conn.query("UPDATE tickets SET status = 'void' WHERE tenant_id = ? AND id = ?", [t.id, e.ticket_id]);
     if (e.status === 'enrolled') await PS.promoteWaitlist(conn, t.id, await one(conn, 'SELECT * FROM program_groups WHERE tenant_id = ? AND id = ?', [t.id, e.group_id]));
-    await audit(conn, system(t.id), 'family_withdraw', 'programs', e.program_id, { enrollment_id: e.id, refund: refund.cents || 0, how: refund.how, email });
+    await audit(conn, system(t.id), 'family_withdraw', 'programs', e.program_id, { enrollment_id: e.id, refund: refund.cents || 0, how: refund.how, email_ref: emailRef(email) });
     return refund;
   });
   if (out.refund_id) await cardrefund.send(t.id, out.refund_id);

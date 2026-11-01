@@ -127,25 +127,38 @@ async function saveDraft(req, bookingId, b) {
   });
 }
 
+// Words that make a sentence of the instructor's note a health detail: that sentence never leaves Verdynt/OS.
+const HEALTH = /\b(adhd|autis\w*|asthma\w*|inhaler\w*|epi-?pen\w*|allerg\w*|anaphyla\w*|diabet\w*|insulin|seizure\w*|epilep\w*|meds?|medication\w*|medicine\w*|prescri\w*|pills?|doctor\w*|hospital\w*|therap\w*|diagnos\w*|anxiety|anxious|depress\w*|panic|concuss\w*|injur\w*|fracture\w*|broken|surgery|disab\w*|wheelchair|hearing aid|deaf|blind|sick|ill|illness|nause\w*|vomit\w*|bleed\w*|faint\w*|condition)\b/i;
+/** The note as sent to the AI writer: the child's names replaced by "the student", and any sentence about health dropped. */
+function noteForModel(note, names) {
+  let text = String(note || '').slice(0, 1000);
+  for (const n of names.filter((x) => x && String(x).trim().length > 1)) text = text.replace(new RegExp(`\\b${String(n).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi'), 'the student');
+  text = text.replace(/\bthe student(\s+the student)+\b/gi, 'the student');
+  return text.split(/(?<=[.!?\n])\s+/).filter((s) => !HEALTH.test(s)).join(' ').trim();
+}
+
 /**
- * The AI writer drafts the recap from the first name, the ticked skills, the level words and the instructor's note. No
- * allergies, medical notes, photos, last names or contact details are sent. Only with AI recaps on.
+ * The AI writer drafts the recap from the ticked skills, the level words and the instructor's note. The child is "the
+ * student" to the model: no name, and no sentence of the note that mentions health (noteForModel). The first name goes
+ * into the draft here, after the answer comes back. No allergies, medical notes, photos, names or contact details are
+ * sent. Only with AI recaps on. The privacy page lists this flow (Anthropic, lesson recap writer).
  */
 async function aiDraft(req, bookingId, b) {
   if (!(await aiRecapsOn(req.auth.tenantId))) throw forbidden('AI recaps are not on for this mountain');
   const r = await recapOf(pool, req, bookingId);
   const skills = cleanSkills(b.skills).map((s) => s.name);
   const level = L.valid(Number(b.level)) ? L.name(Number(b.level), r.discipline) : null;
-  const note = String(b.note || '').slice(0, 1000);
+  const who = await one(pool, 'SELECT last_name FROM people WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, r.person_id]);
+  const note = noteForModel(b.note, [r.first_name, who && who.last_name]);
   const config = require('../config');
   const A = require('./assistant');
   const sport = r.discipline === 'snowboard' ? 'snowboard' : 'ski';
   const out = await A.callModel({
     model: config.assistant.model,
-    system: `You write short, warm lesson recaps that a ${sport} instructor sends to a family after a lesson. Write 3 to 5 plain sentences in US English, to the family, about the student by first name. Mention what they can do now and one thing to practice next. No em dashes, no emojis, no made-up facts. Write only the recap.`,
-    messages: [{ role: 'user', content: `Student first name: ${r.first_name}\nSkills ticked today: ${skills.length ? skills.join('; ') : '(none ticked)'}\nLevel now: ${level || '(not set)'}\nInstructor's note: ${note || '(none)'}` }],
+    system: `You write short, warm lesson recaps that a ${sport} instructor sends to a family after a lesson. Write 3 to 5 plain sentences in US English, to the family, about the student. Wherever you would use the student's name, write STUDENT exactly. Mention what they can do now and one thing to practice next. No em dashes, no emojis, no made-up facts, nothing about health. Write only the recap.`,
+    messages: [{ role: 'user', content: `Skills ticked today: ${skills.length ? skills.join('; ') : '(none ticked)'}\nLevel now: ${level || '(not set)'}\nInstructor's note: ${note || '(none)'}` }],
   });
-  const text = (out.content || []).filter((x) => x.type === 'text').map((x) => x.text).join('\n').trim().replace(/—|–/g, ',');
+  const text = (out.content || []).filter((x) => x.type === 'text').map((x) => x.text).join('\n').trim().replace(/—|–/g, ',').replace(/\bSTUDENT\b/g, r.first_name || 'your skier');
   await pool.query('UPDATE lesson_recaps SET ai_used = 1 WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, r.id]);
   return { body: text };
 }
@@ -252,4 +265,4 @@ async function familyPhoto(tenantId, booking, photoId) {
     WHERE ph.tenant_id = ? AND ph.booking_id = ? AND ph.id = ? AND r.status = 'sent'`, [tenantId, booking.id, photoId]);
 }
 
-module.exports = { ensureDue, tick, cleanup, skillsFor, listFor, recapCount, saveDraft, aiDraft, approveAndSend, skip, addPhoto, photosOf, removePhoto, staffPhoto, familyPhoto, MAX_PHOTOS, KEEP_PHOTO_DAYS };
+module.exports = { noteForModel, ensureDue, tick, cleanup, skillsFor, listFor, recapCount, saveDraft, aiDraft, approveAndSend, skip, addPhoto, photosOf, removePhoto, staffPhoto, familyPhoto, MAX_PHOTOS, KEEP_PHOTO_DAYS };

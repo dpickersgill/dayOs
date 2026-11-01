@@ -145,7 +145,7 @@ async function mint(conn, subscriberId, purpose) {
 }
 async function find(token, purpose) {
   if (!looksLikeToken(token)) return null;
-  return one(pool, `SELECT t.id AS token_id, t.expires_at, t.expires_at IS NOT NULL AND t.expires_at < UTC_TIMESTAMP() AS expired, s.*
+  return one(pool, `SELECT t.id AS token_id, t.used_at AS token_used_at, t.expires_at, t.expires_at IS NOT NULL AND t.expires_at < UTC_TIMESTAMP() AS expired, s.*
     FROM goodday_tokens t JOIN goodday_subscribers s ON s.id = t.subscriber_id WHERE t.token_hash = ? AND t.purpose = ?`, [hash(token), purpose]);
 }
 /** "d***@yourmountain.com": enough for the person to know it is theirs, not enough to read someone else's. */
@@ -233,6 +233,13 @@ const fromName = async () => (await settings()).from_name || 'The Good Day';
 const sendFrom = () => (process.env.GOODDAY_FROM ? { fromAddress: process.env.GOODDAY_FROM } : {});
 
 // ---------------------------------------------------------------- sign-up, confirm, unsubscribe
+// Consent history (2026.11.11): every sign-up, confirmation and unsubscribe is one row in goodday_consent_events, never
+// edited. A sign-up never erases an earlier unsubscribe: an unsubscribed reader stays unsubscribed until they confirm again
+// from the new link, and both stay in the history.
+const history = (conn, email, event, { wording = null, source = null, how = null, ip = null } = {}) => conn.query(
+  'INSERT INTO goodday_consent_events (email, event, wording, source, how, ip) VALUES (?, ?, ?, ?, ?, ?)',
+  [email, event, wording, source ? String(source).slice(0, 40) : null, how, ip ? String(ip).slice(0, 64) : null],
+);
 /**
  * A sign-up from the website. Always resolves to the same thing, whatever the address's state, and sends any email
  * after the database work, in the background, so neither the answer nor its timing says who is subscribed.
@@ -242,7 +249,7 @@ async function subscribe({ email, name, role, source, ip, origin }) {
   const addr = String(email).trim().toLowerCase();
   const wording = `${CONSENT} (Signed up on: ${String(source || 'website').slice(0, 40)})`;
   return tx(async (conn) => {
-    const s = await one(conn, 'SELECT id, status, name, confirm_sent_at, confirm_sent_at > UTC_TIMESTAMP() - INTERVAL ? MINUTE AS recent FROM goodday_subscribers WHERE email = ? FOR UPDATE', [RESEND_MINUTES, addr]);
+    const s = await one(conn, 'SELECT id, status, name, confirm_sent_at, confirm_sent_at > UTC_TIMESTAMP() - INTERVAL ? MINUTE AND (unsubscribed_at IS NULL OR confirm_sent_at > unsubscribed_at) AS recent FROM goodday_subscribers WHERE email = ? FOR UPDATE', [RESEND_MINUTES, addr]);
     let id;
     if (!s) {
       const [r] = await conn.query(`INSERT INTO goodday_subscribers (email, name, role, status, source, consent_at, consent_wording, consent_ip, confirm_sent_at)
@@ -251,12 +258,20 @@ async function subscribe({ email, name, role, source, ip, origin }) {
     } else if (s.status === 'confirmed') {
       return null; // already on the list: nothing to do, and nothing to say
     } else {
-      if (s.recent && s.status === 'pending') return null; // a link went a few minutes ago: no second email, so the form cannot be used to flood an inbox
-      // pending again, or back after unsubscribing: the new consent replaces the old, and a new link goes
-      await conn.query(`UPDATE goodday_subscribers SET status = 'pending', name = COALESCE(?, name), role = IF(? IS NULL, role, ?), source = ?, consent_at = UTC_TIMESTAMP(), consent_wording = ?, consent_ip = ?,
-        confirm_sent_at = UTC_TIMESTAMP(), unsubscribed_at = NULL, unsubscribe_how = NULL WHERE id = ?`, [name || null, role || null, role || null, source || null, wording, ip || null, s.id]);
+      if (s.recent) return null; // a link went a few minutes ago (since any unsubscribe): no second email, so the form cannot be used to flood an inbox
+      if (s.status === 'pending') {
+        // never confirmed: the newer sign-up's details replace the unconfirmed ones (both stay in the history)
+        await conn.query(`UPDATE goodday_subscribers SET name = COALESCE(?, name), role = IF(? IS NULL, role, ?), source = ?, consent_at = UTC_TIMESTAMP(), consent_wording = ?, consent_ip = ?,
+          confirm_sent_at = UTC_TIMESTAMP() WHERE id = ?`, [name || null, role || null, role || null, source || null, wording, ip || null, s.id]);
+      } else {
+        // back after unsubscribing: the unsubscribe and the earlier consent stay as they are. Only a click on the new link
+        // (by whoever holds the inbox) signs them up again. Older confirmation links stop working.
+        await conn.query('UPDATE goodday_subscribers SET confirm_sent_at = UTC_TIMESTAMP() WHERE id = ?', [s.id]);
+        await conn.query("UPDATE goodday_tokens SET used_at = COALESCE(used_at, UTC_TIMESTAMP()) WHERE subscriber_id = ? AND purpose = 'confirm'", [s.id]);
+      }
       id = s.id;
     }
+    await history(conn, addr, 'subscribe', { wording, source: source || 'website', ip });
     const token = await mint(conn, id, 'confirm');
     return { to: addr, ...confirmEmail({ name: name || (s && s.name), url: `${origin}/good-day/confirm/${token}` }), tag: 'goodday-confirm' };
   });
@@ -279,12 +294,20 @@ async function confirm(token, { ip, origin }) {
   if (!t) return { state: 'invalid' };
   if (t.status === 'confirmed') return { state: 'already', email: masked(t.email) };
   if (Number(t.expired)) return { state: 'expired' };
-  // An unsubscribe after this link was sent wins: an old confirmation link does not sign someone back up.
-  if (t.status === 'unsubscribed') return { state: 'unsubscribed' };
+  // An unsubscribe after this link was sent wins: an old confirmation link does not sign someone back up. A link sent by
+  // a sign-up after the unsubscribe (still unused) does: that is the reader asking again, from their own inbox.
+  if (t.status === 'unsubscribed' && t.token_used_at) return { state: 'unsubscribed' };
   const welcome = await tx(async (conn) => {
-    const [r] = await conn.query("UPDATE goodday_subscribers SET status = 'confirmed', confirmed_at = UTC_TIMESTAMP(), confirmed_ip = ? WHERE id = ? AND status = 'pending'", [ip || null, t.id]);
+    const back = t.status === 'unsubscribed';
+    const last = back ? await one(conn, "SELECT wording, source, ip, created_at FROM goodday_consent_events WHERE email = ? AND event = 'subscribe' ORDER BY id DESC LIMIT 1", [t.email]) : null;
+    const [r] = back
+      ? await conn.query(`UPDATE goodday_subscribers SET status = 'confirmed', confirmed_at = UTC_TIMESTAMP(), confirmed_ip = ?, consent_at = ?, consent_wording = ?, consent_ip = ?, source = ?,
+          unsubscribed_at = NULL, unsubscribe_how = NULL WHERE id = ? AND status = 'unsubscribed'`, [ip || null, last ? last.created_at : new Date(), last ? last.wording : CONSENT, last ? last.ip : null, last ? last.source : null, t.id])
+      : await conn.query("UPDATE goodday_subscribers SET status = 'confirmed', confirmed_at = UTC_TIMESTAMP(), confirmed_ip = ? WHERE id = ? AND status = 'pending'", [ip || null, t.id]);
     await conn.query('UPDATE goodday_tokens SET used_at = COALESCE(used_at, UTC_TIMESTAMP()) WHERE id = ?', [t.token_id]);
     if (r.affectedRows !== 1) return null;
+    await history(conn, t.email, 'confirm', { ip });
+    if (back) return null; // they had the welcome before
     const [w] = await conn.query('UPDATE goodday_subscribers SET welcome_sent_at = UTC_TIMESTAMP() WHERE id = ? AND welcome_sent_at IS NULL', [t.id]);
     if (w.affectedRows !== 1) return null;
     const unsub = `${origin}/good-day/unsubscribe/${await mint(conn, t.id, 'unsubscribe')}`;
@@ -305,7 +328,15 @@ async function peekUnsubscribe(token) {
 async function unsubscribe(token, how = 'page') {
   const t = await find(token, 'unsubscribe');
   if (!t) return { state: 'invalid' };
-  const [r] = await pool.query("UPDATE goodday_subscribers SET status = 'unsubscribed', unsubscribed_at = UTC_TIMESTAMP(), unsubscribe_how = ? WHERE id = ? AND status <> 'unsubscribed'", [how, t.id]);
+  // The name and role go (nothing more is sent); the address and the consent history stay, as proof of the unsubscribe.
+  const r = await tx(async (conn) => {
+    const [u] = await conn.query("UPDATE goodday_subscribers SET status = 'unsubscribed', unsubscribed_at = UTC_TIMESTAMP(), unsubscribe_how = ?, name = NULL, role = 'other' WHERE id = ? AND status <> 'unsubscribed'", [how, t.id]);
+    if (u.affectedRows) {
+      await history(conn, t.email, 'unsubscribe', { how });
+      await conn.query("UPDATE goodday_tokens SET used_at = COALESCE(used_at, UTC_TIMESTAMP()) WHERE subscriber_id = ? AND purpose = 'confirm'", [t.id]);
+    }
+    return u;
+  });
   return { state: r.affectedRows ? 'unsubscribed' : 'already', email: masked(t.email) };
 }
 

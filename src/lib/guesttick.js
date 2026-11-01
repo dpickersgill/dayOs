@@ -9,6 +9,10 @@ async function run(kind) {
       out[p] = { error: err.message };
     }
   }
+  // Marketing texts held overnight (quiet hours) go out from 8 AM at each mountain.
+  if (kind === 'tick') {
+    try { out.held_texts = await require('./sms').sendHeld(); } catch (err) { out.held_texts = { error: err.message }; }
+  }
   return out;
 }
 module.exports = { tick: () => run('tick'), daily: () => run('daily') };

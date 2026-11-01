@@ -95,6 +95,7 @@ test.before(async () => {
   await new Promise((r) => { server = createApp().listen(0, r); });
   base = `http://127.0.0.1:${server.address().port}`;
   A = await mountain(`pa-${suffix}`); B = await mountain(`pb-${suffix}`);
+  await q("UPDATE tenants SET address = '1 Ridge Road, Spring City, PA 19475' WHERE id IN (?)", [[A.id, B.id]]); // marketing email needs it (2026.11.11)
   pub = (m, p, o) => call('/api/v1/public', m, `/${A.slug}${p}`, o);
   const mk = async (body) => { const r = await api('POST', '/products', { token: A.owner, body }); assert.equal(r.status, 201, r.text); return r.body.id; };
   D.group = await mk({ kind: 'lesson', name: 'Kids Group', base_price_cents: 8000 });
@@ -367,7 +368,7 @@ test('recaps: only the lesson\'s instructor writes one, nothing goes out until a
   D.done = { done, yes, no, recapToken };
 });
 
-test('the AI writer drafts only with the add-on, and sends only the first name, skills and note', async () => {
+test('the AI writer drafts only with the add-on, and sends only the skills and note, never the name (2026.11.11)', async () => {
   await pool.query("INSERT INTO tenant_modules (tenant_id, module, enabled) VALUES (?, 'lesson_ai', 1) ON DUPLICATE KEY UPDATE enabled = 1", [A.id]);
   modules.invalidate(A.id);
   let sentToModel = null;
@@ -379,7 +380,7 @@ test('the AI writer drafts only with the add-on, and sends only the first name, 
     assert.match(r.body.body, /great day/);
     assert.equal(r.body.body.includes('—'), false, 'no em dashes');
     const said = JSON.stringify(sentToModel.messages);
-    assert.match(said, /Sam/);
+    assert.equal(/Sam/.test(said), false, 'no name: the model writes STUDENT and the name goes in here');
     assert.match(said, /Great stops/);
     assert.equal(said.includes('Family'), false, 'no last name');
     assert.equal(said.includes('parent@x.test'), false, 'no contact details');

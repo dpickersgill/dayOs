@@ -109,9 +109,22 @@ overwrites the live server: it makes a new one, and the app is pointed at it.
    A clone or a daily backup carries the logins and passwords over. A weekly copy does not, which is why
    `restore-copy.sh` makes them. Then run `INSTANCE=summitops-restored bash scripts/backups-setup.sh` so the new server
    is backed up too (and the weekly copy comes from it), and keep the old server (stopped is fine) until you are sure.
-6. **Data entered after the moment you chose** is not in the copy. If only part of the data was damaged, it can be
+6. **After any restore: apply every erasure again.** The copy is older than the deletion ledger, so guests anonymised
+   and mountains deleted since that moment are back in it. Before step 5 (while the live server still answers), save
+   the ledger, then replay it on the copy with the migrator login:
+   ```bash
+   bash -c 'source scripts/cloud-common.sh; load_service; AS=migrator open_db; node db/deletions.js export > ledger.json'
+   bash -c 'source scripts/cloud-common.sh; load_service; AS=migrator open_db; \
+     ~/cloud-sql-proxy --gcloud-auth --port 3308 summitops-510715:us-east1:summitops-restored & sleep 5; \
+     DB_PORT=3308 node db/migrate.js && DB_PORT=3308 node db/deletions.js replay ledger.json'
+   ```
+   If the live server is gone, take the ledger from Cloud Logging instead (every erasure is logged there too):
+   `gcloud logging read 'jsonPayload.action="deletion_ledger"' --freshness=400d --format=json > ledger.json`, then
+   replay it the same way. The replay prints how many guests and mountains it erased again; a mountain on legal hold
+   is listed as refused (delete it from the console once the hold is lifted). Keep `ledger.json` out of the repo.
+7. **Data entered after the moment you chose** is not in the copy. If only part of the data was damaged, it can be
    better to copy just the lost rows back from the clone into the live server by hand. Ask for help with that.
-7. **Tell people** what was lost, if anything, and close the status note. If you paused the daily job:
+8. **Tell people** what was lost, if anything, and close the status note. If you paused the daily job:
    `gcloud scheduler jobs resume summitops-daily --location us-east1`.
 
 ## The drill (once a season, before the first busy weekend)

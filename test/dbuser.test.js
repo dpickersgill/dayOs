@@ -90,5 +90,5 @@ test('the scripts never strip the login, and the app never edits or removes audi
   walk(path.join(root, 'src'));
   assert.deepEqual(offenders, [], 'audit rows are read and added only');
   const sandbox = fs.readFileSync(path.join(root, 'src/lib/sandbox.js'), 'utf8');
-  assert.match(sandbox, /NOT IN \('tenants', 'sandbox_signups', 'audit_log', 'platform_audit'\)/, 'removing a mountain leaves its audit trail');
+  assert.match(sandbox, /NOT IN \('tenants', 'sandbox_signups', 'audit_log', 'platform_audit', 'deletion_ledger'\)/, 'removing a mountain leaves its audit trail (and the deletion ledger, 2026.11.11)');
 });
