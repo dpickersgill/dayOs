@@ -307,7 +307,7 @@ exit 0
 `, { mode: 0o755 });
   fs.writeFileSync(path.join(dir, 'curl'), `#!/usr/bin/env bash
 echo "curl $*" >> "$STUB_LOG"
-case "$*" in *readyz*) echo "{\\"ok\\":true,\\"version\\":\\"$STUB_VERSION\\",\\"build\\":\\"dev\\"}" ;; *version*) echo '{"version":"2026.11.9"}' ;; *healthz*) echo ok ;; esac
+case "$*" in *readyz*) echo "{\\"ok\\":true,\\"version\\":\\"$STUB_VERSION\\",\\"build\\":\\"$STUB_BUILD\\"}" ;; *version*) echo '{"version":"2026.11.9"}' ;; *healthz*) echo ok ;; esac
 `, { mode: 0o755 });
   fs.writeFileSync(path.join(dir, 'npm'), '#!/usr/bin/env bash\necho "npm $*" >> "$STUB_LOG"\n', { mode: 0o755 });
   const svc = { metadata: { annotations: {} }, spec: { traffic: [{ revisionName: 'summitops-api-00040-old', percent: 100 }], template: { spec: { containers: [{ env: [{ name: 'DB_NAME', value: 'x' }, { name: 'DB_USER', value: 'u' }, { name: 'PUBLIC_URL', value: 'https://app.example' }] }] } } },
@@ -336,7 +336,7 @@ test('OPS-6b and INF-13: cloud-armor.sh --lock moves every job that calls the ap
 test('OPS-6a: promote.sh sends traffic to the new revision after a rollback pinned it, and names the serving revision to go back to', () => {
   const dir = stubDir(); const log = path.join(dir, 'log');
   const version = require('../package.json').version;
-  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, HOME: dir, STUB_LOG: log, STUB_SVC: path.join(dir, 'svc.json'), STUB_JOBS: path.join(dir, 'jobs.txt'), STUB_VERSION: version };
+  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, HOME: dir, STUB_LOG: log, STUB_SVC: path.join(dir, 'svc.json'), STUB_JOBS: path.join(dir, 'jobs.txt'), STUB_VERSION: version, STUB_BUILD: (() => { try { return require('../src/release/build.json').build; } catch { return 'dev'; } })() };
   // The database steps need the real proxy and a database: stop the run at npm ci, after the checks, by reading what it would do.
   const promote = read('promote.sh');
   const deployAt = promote.indexOf('gcloud run deploy "$SERVICE" --image');

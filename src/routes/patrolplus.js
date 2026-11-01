@@ -144,7 +144,9 @@ function utcOf(local, timeZone) {
   };
   const g = Date.parse(`${local.replace(' ', 'T')}Z`);
   let t = g - offset(g); t = g - offset(t);
-  return t;
+  // In the hour the clocks go back, 1:30 happens twice: take the latest that is not ahead of now (a tick is never in the future).
+  const fits = [t - 3600000, t, t + 3600000].filter((x) => x + offset(x) === g && x <= Date.now() + 5 * 60000);
+  return fits.length ? Math.max(...fits) : t;
 }
 
 // A tick sent from the phone's outbox carries the time it was taken (`at`, the mountain's clock) and its own id.

@@ -165,7 +165,7 @@ test('audiences: current pass holders and lapsed pass holders', async () => {
 test('the daily job sends rental and pass reminders once each', async () => {
   const [[t]] = await pool.query('SELECT id FROM tenants WHERE slug = ?', [A.slug]);
   const p = await person(T.counter, { first_name: 'Ray', email: `ray${suffix}@example.com` });
-  await pool.query("INSERT INTO rental_contracts (tenant_id, person_id, status, due_at) VALUES (?, ?, 'out', NOW() - INTERVAL 5 HOUR)", [t.id, p.id]);
+  await pool.query("INSERT INTO rental_contracts (tenant_id, person_id, status, due_at) VALUES (?, ?, 'out', ? - INTERVAL 5 HOUR)", [t.id, p.id, require('../src/lib/util').nowIn((await pool.query('SELECT timezone FROM tenants WHERE id = ?', [t.id]))[0][0].timezone)]); // due_at is the mountain's wall clock
   const [pr] = await pool.query("INSERT INTO products (tenant_id, name, kind, base_price_cents) VALUES (?, 'Pass B', 'season_pass', 40000)", [t.id]);
   const [or] = await pool.query("INSERT INTO orders (tenant_id, status, channel, total_cents) VALUES (?, 'paid', 'window', 40000)", [t.id]);
   const [oi] = await pool.query("INSERT INTO order_items (tenant_id, order_id, product_id, quantity, unit_price_cents, line_kind) VALUES (?, ?, ?, 1, 40000, 'ticket')", [t.id, or.insertId, pr.insertId]);

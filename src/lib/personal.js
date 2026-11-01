@@ -24,6 +24,7 @@ const REGISTRY = [
   { table: 'person_notes', by: { person: ['person_id'] }, erase: 'delete' },
   { table: 'person_flags', by: { person: ['person_id'] }, erase: 'delete' },
   { table: 'person_links', by: { person: ['adult_id', 'member_id'] }, erase: 'delete' },
+  { table: 'household_invites', by: { person: ['person_id'], email: ['email'] }, erase: 'delete' },
   { table: 'rental_profiles', by: { person: ['person_id'] }, erase: 'delete' },
   // Sales and what was sold: kept for the books.
   { table: 'orders', by: { person: ['person_id'] }, erase: { keep: KEEP_LINK } },
