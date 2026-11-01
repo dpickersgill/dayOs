@@ -97,6 +97,8 @@ export async function openAssistant({ page, views = ctx.views || [], question } 
   panel = h('aside', { class: 'ask-panel', role: 'complementary', 'aria-label': 'Assistant' },
     h('header', null, h('h2', null, 'Ask'), close),
     h('p', { class: 'ask-intro' }, state.plus ? `Answers come from Help, ${ctx.me.tenant_name}'s setup and today's numbers. It can explain and link a screen, but never changes anything.` : `Answers come from Help and ${ctx.me.tenant_name}'s setup. It can explain and link a screen, but never changes anything.`),
+    // Patrol logins: names, phone numbers, dates and ages are taken out before a question leaves (2026.11.11, privacy).
+    (ctx.me.role === 'patrol' || ctx.me.on_patrol) ? h('p', { class: 'ask-intro' }, 'Do not type patient names or details. Names, phone numbers, dates and ages are removed before your question is sent.') : null,
     log, h('div', { class: 'ask-box' }, box, go));
   if (!chat.length) log.append(starters(page));
   else for (const c of chat) log.append(answerEl(c.q, c.r));

@@ -377,3 +377,28 @@ test('DP-5: an address with no customer record gets its own unsubscribe link, an
   const forged = url.replace(/\.[a-f0-9]{32}$/, `.${'0'.repeat(32)}`);
   assert.equal((await fetch(forged, { method: 'POST' })).status, 404);
 });
+
+test('suspicion: a patrol login’s question to the assistant loses names, phones, emails, dates and ages before Anthropic or the log', async () => {
+  const s = require('../src/lib/patrolscrub');
+  const config = require('../src/config'); const was = config.assistant;
+  config.assistant = { ...was, on: true, key: 'k', apiBase: sinkBase, model: was.model || 'claude-haiku-5-5' };
+  try {
+  assert.equal(s.scrub('How do I open Patrol Records?'), 'How do I open Patrol Records?', 'screen names stay');
+  assert.equal((await api('PUT', '/assistant/settings', { token: A.token, body: { staff_on: true, guest_pages: [] } })).status, 200);
+  assert.equal((await api('POST', '/users', { token: A.token, body: { email: `pat@${A.slug}.test`, password: PW, role: 'patrol' } })).status, 201);
+  const pat = await login(A.slug, `pat@${A.slug}.test`);
+  const mark = sink.length;
+  const r = await api('POST', '/assistant/ask', { token: pat, body: { question: 'Jane Doe, 42 years old, born 3/4/1984, phone 610-555-0199, jane.doe@family.example: how do I start her case?' } });
+  assert.equal(r.status, 200, r.text);
+  const model = sent(mark, (x) => x.u.startsWith('/v1/messages')).map((x) => x.b).join('\n');
+  assert.ok(model.length, 'the question reached the model');
+  for (const bad of ['Jane Doe', '42 years', '3/4/1984', '610-555-0199', 'jane.doe@']) assert.equal(model.includes(bad), false, `not sent: ${bad}`);
+  const [[row]] = await pool.query("SELECT question FROM assistant_log WHERE tenant_id = ? ORDER BY id DESC LIMIT 1", [A.id]);
+  assert.equal(row.question.includes('Jane Doe'), false); assert.equal(row.question.includes('610-555-0199'), false);
+  assert.match(row.question, /how do I start her case/);
+  // An owner's question is not changed (only patrol logins are filtered).
+  await api('POST', '/assistant/ask', { token: A.token, body: { question: 'Where does Mary Smith find her receipt?' } });
+  const [[own]] = await pool.query("SELECT question FROM assistant_log WHERE tenant_id = ? ORDER BY id DESC LIMIT 1", [A.id]);
+  assert.match(own.question, /Mary Smith/);
+  } finally { config.assistant = was; }
+});

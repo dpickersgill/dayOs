@@ -13,8 +13,14 @@ Searching, exports and the patrol pull need decrypt paths; the weekly SQL copy t
 
 ## Search terms in request logs
 Customer search sends the name or phone in the address (GET /people?q=). Cloud Run's request log keeps the full address
-for 30 days (the privacy page says so). Plan: move searches to POST, or a log sink exclusion that drops query strings.
+for 30 days (the privacy page says so). Plan: move searches to POST (about eight screens across tracks, so not in
+2026.11.11). Until then, Dan can drop the search requests from the request log with one exclusion (run once in Cloud Shell;
+errors are still logged by the app itself):
+
+    gcloud logging sinks update _Default --add-exclusion=name=no-search-terms,description="Customer and patient search terms",filter='log_id("run.googleapis.com/requests") AND httpRequest.requestUrl=~"[?&]q="'
 
 ## The assistant and patrol logins
-Questions typed into the assistant go to Anthropic and stay in assistant_log for 13 months. Plan: filter obvious names and
-health words from questions asked by patrol logins, or turn the assistant off for patrol logins by default.
+Done in 2026.11.11: a patrol login's question loses email addresses, phone numbers, dates, ages and capitalized name
+pairs (src/lib/patrolscrub.js) before it goes to Anthropic or assistant_log, and assistant_log is deleted after 13 months.
+Left: a single first name ("is Jane's form done") is not caught. A better filter would match the question against the
+names of the mountain's own patients from the last few days.

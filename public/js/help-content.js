@@ -760,6 +760,10 @@ export const ARTICLES = [
     intro: 'When your mountain closes its account, it is paused at once, and the owner has a window (60 days unless agreed otherwise) to download its records.',
     steps: ['Sign in as the owner during the window. The app opens on one screen: the mountain is closed, the day the data is deleted, and the downloads.', 'Choose each download: customers, sales, payments, refunds, the daily summary, signed waivers and patrol case records.', 'Keep the files somewhere safe. After the last day the data is deleted.'],
     tips: ['Only the owner can sign in during the window, and only to download.', 'Some records are kept after deletion because the law requires it: patrol reports, signed waivers, the staff injury log and the audit trail.', 'Copies in backups age out within 35 days of the deletion.'] },
+  { id: 'patrol-assistant-privacy', app: 'patrol', who: ['patrol'], title: 'Patient details and the assistant', keywords: 'assistant ask patient name privacy removed patrol question ai',
+    intro: 'The assistant answers how to use Verdynt/OS from Help. It never needs to know who a patient is, so do not type names or details about a patient.',
+    steps: ['Ask about the screen or the task, for example How do I add a witness statement.', 'If your question has a name, phone number, email, date or age in it, that part is replaced with [removed] before the question is sent or saved.'],
+    tips: ['Questions to the assistant are deleted after 13 months.', 'The filter catches the obvious patterns only. Keep patient details in the patrol report, where they are protected and logged.'] },
 
   // ------------------------------------------------------------ Online shop
   { id: 'shop-setup', app: 'catalog', title: 'Sell tickets and passes online', keywords: 'online shop buy tickets passes website stripe card link share',
