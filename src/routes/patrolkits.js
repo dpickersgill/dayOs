@@ -134,7 +134,7 @@ router.get('/kits/:id', patrol, async (req, res) => {
   const all = await kitList(pool, t, today);
   const kit = all.kits.find((k) => k.id === paramId(req));
   if (!kit) throw notFound('Kit');
-  const checks = await rows(pool, `SELECT c.id, c.kind, c.result, c.items, c.seal_no, c.note, c.incident_id, c.done_at, COALESCE(u.email, u.username) AS done_by,
+  const checks = await rows(pool, `SELECT c.id, c.kind, c.result, c.items, c.seal_no, c.note, c.incident_id, c.done_at, c.applied, COALESCE(u.email, u.username) AS done_by,
       CONCAT(i.season, '-', LPAD(i.seq, 4, '0')) AS case_number FROM patrol_kit_checks c LEFT JOIN users u ON u.id = c.done_by AND u.tenant_id = c.tenant_id
       LEFT JOIN incidents i ON i.tenant_id = c.tenant_id AND i.id = c.incident_id WHERE c.tenant_id = ? AND c.kit_id = ? ORDER BY c.done_at DESC, c.id DESC LIMIT 30`, [t, kit.id]);
   res.json({ kit, type: all.types.find((x) => x.id === kit.type_id), checks: checks.map((c) => ({ ...c, items: K.parse(c.items, {}) })), seals: (await OPS.settingsOf(pool, t)).kit_seals, today });
@@ -191,13 +191,18 @@ router.post('/kits/:id/checks', patrol, validate(z.object({
       result = ev.result; status = ev.result; stock = ev.stock; earliest = ev.earliest;
       if (seals && b.seal_no) { sealed = 1; sealNo = b.seal_no; } else { sealed = 0; sealNo = null; }
     }
-    const [r] = await conn.query('INSERT INTO patrol_kit_checks (tenant_id, kit_id, kind, result, items, seal_no, note, incident_id, done_by, done_at, client_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [t, kit.id, b.kind, result, items ? JSON.stringify(items) : null, b.seal_no || null, b.note || null, b.incident_id || null, req.auth.userId, at, b.client_ref || null]);
-    const checked = b.kind === 'use' ? kit.last_check_at : at;
-    await conn.query('UPDATE patrol_kits SET status = ?, stock = ?, earliest_expiry = ?, sealed = ?, seal_no = ?, last_check_at = ? WHERE tenant_id = ? AND id = ?',
-      [kit.status === 'out_of_service' && b.kind !== 'restock' && b.kind !== 'full' ? 'out_of_service' : status, JSON.stringify(stock), earliest, sealed, sealNo, checked, t, kit.id]);
-    await audit(conn, req, `kit_${b.kind}`, 'patrol_kits', kit.id, { result, incident_id: b.incident_id || null });
-    return { id: r.insertId, result };
+    // A check made with no signal that arrives after a newer change to the kit (a use, a restock, another check) is kept on
+    // the kit's record but does not change its state or stock: the newer change is what the kit holds now.
+    const stale = Boolean(kit.changed_at && at < String(kit.changed_at).replace('T', ' ').slice(0, 19));
+    const [r] = await conn.query('INSERT INTO patrol_kit_checks (tenant_id, kit_id, kind, result, items, seal_no, note, incident_id, done_by, done_at, client_ref, applied) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [t, kit.id, b.kind, result, items ? JSON.stringify(items) : null, b.seal_no || null, b.note || null, b.incident_id || null, req.auth.userId, at, b.client_ref || null, stale ? 0 : 1]);
+    if (!stale) {
+      const checked = b.kind === 'use' ? kit.last_check_at : at;
+      await conn.query('UPDATE patrol_kits SET status = ?, stock = ?, earliest_expiry = ?, sealed = ?, seal_no = ?, last_check_at = ?, changed_at = ? WHERE tenant_id = ? AND id = ?',
+        [kit.status === 'out_of_service' && b.kind !== 'restock' && b.kind !== 'full' ? 'out_of_service' : status, JSON.stringify(stock), earliest, sealed, sealNo, checked, at, t, kit.id]);
+    }
+    await audit(conn, req, `kit_${b.kind}`, 'patrol_kits', kit.id, { result, incident_id: b.incident_id || null, ...(stale ? { applied: false } : {}) });
+    return { id: r.insertId, result, ...(stale ? { applied: false, message: 'Kept on the kit\'s record. The kit changed after this was done, so its state and stock stay as they are.' } : {}) };
   });
   res.status(201).json(out);
 });

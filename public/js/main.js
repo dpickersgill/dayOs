@@ -11,7 +11,7 @@ import { passkeysPanel } from './views/security.js';
 import { watchPasswords } from './showpw.js';
 import { startTabWatch, activity as tabActivity, checkNow as tabCheckNow, msLeft as tabMsLeft, refresh as tabRefresh, LOCK_MINUTES } from './tablock.js';
 import * as alerts from './alerts.js';
-import { flush as flushOutbox, waitingCounts, forgetCases, setDeviceKey, dropDeviceKey } from './outbox.js';
+import { flush as flushOutbox, waitingCounts, forgetCases, setDeviceKey, restoreDeviceKey, dropDeviceKey } from './outbox.js';
 import { buildFrame, GROUP_OF, PATROL_SECTIONS, patrolSection } from './nav.js';
 import { icon } from './icons.js';
 import { h, svg, clear, ctx, can, isManager, schoolCan, toast, loading, errorBox, button, field, input, closeAllDialogs, dirtyDialogOpen, newPage, hashPath, todayStr } from './ui.js';
@@ -779,17 +779,30 @@ async function start() {
   const lockedAs = session.locked();
   if (lockedAs) { if (readTerminal()) { session.unlock(); session.clear(); } else { showLocked(lockedAs, said); return; } }
   if (!session.token) { if (readTerminal()) showPinSignIn(said); else showSignIn(said); return; }
+  let offline = false;
   try {
     ctx.me = await get('/auth/me');
-  } catch (_) {
-    session.clear();
-    if (readTerminal()) showPinSignIn(); else showSignIn();
-    return;
+    session.keepMe(ctx.me);
+  } catch (err) {
+    // Only the server saying the sign-in is over (401) signs out. No signal, a timeout or a server hiccup keeps the
+    // sign-in: the app opens in offline mode from what this tab last knew, so a patroller at the bedside loses nothing.
+    if (err && err.status === 401) {
+      session.clear();
+      if (readTerminal()) showPinSignIn(); else showSignIn();
+      return;
+    }
+    const kept = session.keptMe();
+    if (!kept) { showNoSignal(); return; }
+    ctx.me = kept; offline = true;
   }
   ctx.tz = ctx.me.timezone || ctx.tz;
-  if (ctx.me.display === 'patrol_room') { await showRoom(); return; }
+  if (ctx.me.display === 'patrol_room' && !offline) { await showRoom(); return; }
   // Opens (and sends) any patrol entries this person left waiting on this phone; they are sealed with this key.
-  try { if (await setDeviceKey(ctx.me.device_key) && waitingCounts().mine) flushOutbox(); } catch (_) { /* nothing waiting */ }
+  try {
+    const opened = offline ? await restoreDeviceKey() : await setDeviceKey(ctx.me.device_key);
+    if (opened && waitingCounts().mine && !offline) flushOutbox();
+  } catch (_) { /* nothing waiting */ }
+  if (offline) { buildShell(); offlineBanner(); await route(); return; }
   if (ctx.me.must_change_password) { showPasswordChange(); return; }
   if (ctx.me.mfa_enrollment_required) { showEnrollment(); return; }
   buildShell();
@@ -799,6 +812,24 @@ async function start() {
   }
   await route();
   if (ctx.me.sandbox) { resumeTour(); welcomeOnce(); }
+}
+
+/** Opened with no signal: a strip says so, and offers to reload once the signal is back. */
+function offlineBanner() {
+  const again = h('button', { type: 'button', class: 'btn small', hidden: true }, 'Signal is back: reload');
+  again.addEventListener('click', () => location.reload());
+  main.before(h('div', { class: 'banner warn', role: 'status', 'data-banner': 'offline' }, 'No signal: opened from this phone. Patrol cases kept here, new cases and bedside entries work and send later. Other pages need a signal. ', again));
+  window.addEventListener('online', () => { again.hidden = false; }, { once: true });
+}
+
+/** No signal and nothing kept in this tab yet: the sign-in is kept, and the page tries again when the signal returns. */
+function showNoSignal() {
+  clear(app);
+  const retry = h('button', { type: 'button', class: 'btn primary' }, 'Try again');
+  retry.addEventListener('click', () => location.reload());
+  app.append(h('main', { class: 'main', id: 'main' }, h('section', { class: 'panel stack', role: 'status', 'data-area': 'no-signal' },
+    h('h1', null, 'No signal'), h('p', null, 'Verdynt/OS cannot reach the server. You are still signed in. It tries again when the signal returns.'), retry)));
+  window.addEventListener('online', () => location.reload(), { once: true });
 }
 
 /** The patrol-room screen on its own, without the menu: this session can do nothing else (the server holds it to that). */
@@ -830,6 +861,8 @@ window.addEventListener('hashchange', () => {
   route();
 });
 watchPasswords();
+// The service worker keeps this release's app on the phone, so a reload with no signal still opens it (public/sw.js).
+try { if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {}); } catch (_) { /* not available */ }
 start();
 
 export { route };

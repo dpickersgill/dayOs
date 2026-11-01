@@ -30,6 +30,7 @@ const BASIS = {
   approved_live: ['Approved', 'Approved, shown as it stands (no frozen copy was found).'],
   submitted: ['Not approved yet: the latest version', 'Signed off and waiting for review. It may still change.'],
   draft: ['Not approved: a draft', 'A draft. It may still change and has not been signed off.'],
+  reopened: ['Not approved: reopened', 'An earlier approval was withdrawn when the report was reopened. This is the report as it stands. It may still change and cannot be released until it is approved again.'],
 };
 
 function ageOf(p, onDay) {
@@ -178,7 +179,7 @@ export function claimDoc(f, { photoSrc = null, extra = [], header = null } = {})
       if (photoSrc && p.has_preview !== false) photoSrc(p, img);
       return h('figure', { class: 'cf-photo' }, img, h('figcaption', null,
         h('b', null, p.caption || `Photo ${p.id}`),
-        h('span', null, `Taken ${p.taken_at ? when(p.taken_at) : 'time not in the file'}${nn(p.taken_lat) ? ` at ${Number(p.taken_lat).toFixed(5)}, ${Number(p.taken_lng).toFixed(5)}` : ''}`),
+        h('span', null, `Taken ${p.taken_at ? `${when(p.taken_at)}${p.taken_from === 'phone' ? ' (time from the phone, not the photo)' : p.taken_from === 'photo' ? ' (time from the photo)' : ''}${p.taken_outside ? ', outside the case time' : ''}` : 'time not in the file'}${nn(p.taken_lat) ? ` at ${Number(p.taken_lat).toFixed(5)}, ${Number(p.taken_lng).toFixed(5)}` : ''}`),
         h('span', null, `Added ${when(p.uploaded_at)}${p.uploaded_by_name ? ` by ${p.uploaded_by_name}` : ''}`),
         h('code', { class: 'cf-sha', title: 'SHA-256 fingerprint of the original file' }, `SHA-256 ${p.sha256}`)));
     })), h('p', { class: 'muted small' }, 'Each fingerprint identifies the original file exactly: any copy with the same fingerprint is the same photo, unaltered.')) : null,

@@ -5,8 +5,12 @@
 //   - On duty (staff or volunteer): not a guest injury. Left out of the injury network and guest stats, and never sent a
 //     guest follow-up email.
 //   - Off duty: an ordinary guest case (OSHA does not count injuries from voluntary recreation), but the owner is told.
-//   - Every kind: the owner and GM get an email straight away, and a text if texting is set up and they have a phone
-//     number. A volunteer is flagged: whether they count as staff depends on the state and the insurer.
+//   - Every kind: the owners, and the people the owner named for the staff injury register, get an email straight away,
+//     and a text if texting is set up and they have a phone number. Nobody else (the register is private). Subjects and
+//     texts never carry the name; a privacy case is never named anywhere. A volunteer is flagged: whether they count as
+//     staff depends on the state and the insurer.
+//   - A notice is marked sent only once an email went out. If none could be sent it is tried again on the next save and
+//     by the 5-minute and daily jobs (retryDue), for 7 days.
 //   - If the patient goes to hospital, or the case is critical, a second notice gives OSHA's deadlines.
 // The notice says who, when and where, and how they left. It never carries the injury or any treatment.
 const { pool, rows, one } = require('../db');
@@ -36,9 +40,10 @@ const onDuty = (p) => Boolean(KINDS[kindOf(p)] && KINDS[kindOf(p)].onDuty);
 /** SQL that is true for a patient row aliased `p` who is NOT staff or a volunteer working (for guest-only figures). */
 const GUEST_SQL = "(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.form, '$.patient_type')), '') NOT IN ('staff_work','volunteer_work') AND COALESCE(p.activity, '') <> 'staff')";
 
-function message(tenant, inc, p, kind, serious, link) {
+function message(tenant, inc, p, kind, serious, link, { privacy = false } = {}) {
   const k = KINDS[kind];
-  const name = `${p.first_name} ${p.last_name}`.trim() || 'A patient';
+  const name = privacy ? 'A staff member (a privacy case, so not named)' : (`${p.first_name} ${p.last_name}`.trim() || 'A patient');
+  const caseNo = inc.case_number || inc.id;
   const when = String(inc.occurred_at).slice(0, 16).replace('T', ' ');
   const outcome = { treated_released: 'treated and released', transported_ambulance: 'taken to hospital by ambulance', transported_private: 'taken to hospital by private vehicle', refused_care: 'refused care', no_injury: 'no injury found', referred: 'referred to a doctor', other: 'other' }[p.disposition] || 'not recorded yet';
   const lines = [
@@ -55,8 +60,9 @@ function message(tenant, inc, p, kind, serious, link) {
   }
   if (k.onDuty) lines.push('', 'It is in your staff injury register (Staff and schedule, Injuries), ready for the OSHA log details.');
   lines.push('', `The case: ${link}`, '', 'This note has no injury or treatment details. Open the case to see them.');
-  const subject = serious && k.onDuty ? `Staff injury, went to hospital: check OSHA's deadline (${name})` : `Staff injury: ${name} (${k.label.toLowerCase()})`;
-  return { subject, text: lines.join('\n'), sms: `${tenant.name}: ${name} (${k.label.toLowerCase()}) seen by patrol, case ${inc.case_number || inc.id}.${serious && k.onDuty ? ' Went to hospital: OSHA 24h rule if admitted, 8h for a death, 1-800-321-6742.' : ''} Details in email.` };
+  // No name and no "went to hospital" in a subject or a text: both show on lock screens and in inbox lists.
+  const subject = serious && k.onDuty ? `Staff injury, case ${caseNo}: check OSHA's deadline` : `Staff injury, case ${caseNo} (${k.label.toLowerCase()})`;
+  return { subject, text: lines.join('\n'), sms: `${tenant.name}: patrol saw a ${k.label.toLowerCase()}, case ${caseNo}.${serious && k.onDuty ? ' Check OSHA\'s deadline today.' : ''} Details in email.` };
 }
 
 /**
@@ -78,20 +84,32 @@ async function notifyIfDue(tenantId, incidentId, patientId, base) {
     const first = !p.staff_noted_at;
     const escalate = KINDS[kind].onDuty && serious && !p.staff_serious_noted_at;
     if (!first && !escalate) return { sent: 0 };
-    // Claim the notice before sending, so two quick saves cannot send it twice.
+    // Claim the notice before sending, so two quick saves cannot send it twice. The claim is a unique mark; it is given
+    // back if no email could be sent, so the notice is tried again (next save, or retryDue from the jobs).
     const col = first ? 'staff_noted_at' : 'staff_serious_noted_at';
-    const extra = first && escalate ? ', staff_serious_noted_at = NOW()' : '';
-    const [claim] = await pool.query(`UPDATE incident_patients SET ${col} = NOW()${extra} WHERE tenant_id = ? AND id = ? AND ${col} IS NULL`, [tenantId, patientId]);
+    const both = first && escalate;
+    const mark = new Date(Date.now() - (Date.now() % 1000)).toISOString().slice(0, 19).replace('T', ' ');
+    const [claim] = await pool.query(`UPDATE incident_patients SET ${col} = ?${both ? ', staff_serious_noted_at = ?' : ''} WHERE tenant_id = ? AND id = ? AND ${col} IS NULL`, [mark, ...(both ? [mark] : []), tenantId, patientId]);
     if (!claim.affectedRows) return { sent: 0 };
     if (await isSandbox(tenantId)) return { sent: 0 };
-    const tenant = await one(pool, 'SELECT id, name FROM tenants WHERE id = ?', [tenantId]);
-    const m = message(tenant, inc, p, kind, serious, `${base}/#/patrol/case/${incidentId}`);
-    const to = await rows(pool, `SELECT u.email, pe.phone FROM users u LEFT JOIN people pe ON pe.tenant_id = u.tenant_id AND pe.id = u.person_id
-      WHERE u.tenant_id = ? AND u.active = 1 AND u.role IN ('owner','manager')`, [tenantId]);
     let sent = 0;
-    for (const u of to) {
-      if (u.email && (await mailer.send({ tenantId, to: u.email, subject: m.subject, text: m.text, tag: 'staff-injury' })).ok) sent += 1;
-      if (u.phone && KINDS[kind].onDuty) await sms.send({ tenantId, to: u.phone, body: m.sms });
+    try {
+      const tenant = await one(pool, 'SELECT id, name FROM tenants WHERE id = ?', [tenantId]);
+      const reg = await one(pool, 'SELECT privacy_case FROM staff_injuries WHERE tenant_id = ? AND patient_id = ?', [tenantId, patientId]);
+      const m = message(tenant, inc, p, kind, serious, `${base}/#/patrol/case/${incidentId}`, { privacy: Boolean(reg && Number(reg.privacy_case)) });
+      // The owners and the people the owner named for the register: nobody else hears about a staff injury.
+      const to = await rows(pool, `SELECT u.email, pe.phone FROM users u LEFT JOIN people pe ON pe.tenant_id = u.tenant_id AND pe.id = u.person_id
+        WHERE u.tenant_id = ? AND u.active = 1 AND (u.role = 'owner' OR u.id IN (SELECT a.user_id FROM staff_injury_access a WHERE a.tenant_id = u.tenant_id))`, [tenantId]);
+      for (const u of to) {
+        if (u.email && (await mailer.send({ tenantId, to: u.email, subject: m.subject, text: m.text, tag: 'staff-injury' })).ok) sent += 1;
+        if (u.phone && KINDS[kind].onDuty) await sms.send({ tenantId, to: u.phone, body: m.sms });
+      }
+    } finally {
+      // Given back only when email is set up but nothing went out (with no email set up there is nothing to retry).
+      if (!sent && mailer.enabled()) {
+        await pool.query(`UPDATE incident_patients SET ${col} = NULL${both ? ', staff_serious_noted_at = NULL' : ''} WHERE tenant_id = ? AND id = ? AND ${col} = ?`, [tenantId, patientId, mark]);
+        logFailure({ job: 'staff_injury_notice', tenant: tenantId, message: 'no email could be sent; it will be tried again' });
+      }
     }
     return { sent };
   } catch (e) {
@@ -100,4 +118,19 @@ async function notifyIfDue(tenantId, incidentId, patientId, base) {
   }
 }
 
-module.exports = { KINDS, kindOf, onDuty, GUEST_SQL, message, notifyIfDue };
+/**
+ * Notices not sent yet (a failed send gives its claim back): tried again for patients marked staff or a volunteer in the
+ * last 7 days. Runs from the 5-minute and daily jobs.
+ */
+async function retryDue(base) {
+  const due = await rows(pool, `SELECT p.tenant_id, p.incident_id, p.id FROM incident_patients p JOIN incidents i ON i.tenant_id = p.tenant_id AND i.id = p.incident_id
+    WHERE p.voided_at IS NULL AND i.occurred_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 8 DAY)
+      AND (COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.form, '$.patient_type')), '') IN ('staff_work','volunteer_work','staff_off') OR p.activity = 'staff')
+      AND (p.staff_noted_at IS NULL OR (p.staff_serious_noted_at IS NULL AND (p.disposition IN (?) OR i.severity = 'critical')))
+    ORDER BY p.id LIMIT 200`, [HOSPITAL]);
+  let sent = 0;
+  for (const d of due) sent += (await notifyIfDue(Number(d.tenant_id), Number(d.incident_id), Number(d.id), base)).sent;
+  return { due: due.length, sent };
+}
+
+module.exports = { KINDS, kindOf, onDuty, GUEST_SQL, message, notifyIfDue, retryDue };

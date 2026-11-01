@@ -187,6 +187,8 @@ router.get('/incidents', patrol, needs('view_cases'), async (req, res) => {
   );
   const total = data.length < limit && (offset === 0 || data.length > 0) ? offset + data.length
     : Number((await rows(pool, `SELECT COUNT(*) AS n FROM incidents i WHERE ${where}`, params))[0].n);
+  // A search can find a patient by name: it is on the access log, with the cases it found (never the words searched).
+  if (req.query.q) await audit(pool, req, 'search', 'incidents', null, { matches: data.length, ids: data.slice(0, 50).map((r) => r.id) });
   res.json({ data: data.map(withNumber), total, offset, limit });
 });
 
@@ -360,10 +362,10 @@ async function loadCase(conn, tenantId, id) {
   const mine = (list, pid) => list.filter((x) => x.patient_id === pid);
   const tenant = await one(conn, 'SELECT name, legal_name FROM tenants WHERE id = ?', [tenantId]);
   // Photos without their bytes: a frozen version records each one's fingerprint, so the approved report names the exact files.
-  const photos = (await rows(conn, `SELECT m.id, m.patient_id, m.mime, m.bytes, m.sha256, m.caption, m.taken_at, m.taken_lat, m.taken_lng, m.uploaded_at, (m.preview IS NOT NULL) AS has_preview, m.preview_sha256,
+  const photos = (await rows(conn, `SELECT m.id, m.patient_id, m.mime, m.bytes, m.sha256, m.caption, m.taken_at, m.taken_from, m.taken_outside, m.taken_lat, m.taken_lng, m.uploaded_at, (m.preview IS NOT NULL) AS has_preview, m.preview_sha256,
       m.voided_at, m.void_reason, COALESCE(u.email, u.username) AS uploaded_by_name, COALESCE(vu.email, vu.username) AS voided_by_email
     FROM incident_media m LEFT JOIN users u ON u.id = m.uploaded_by AND u.tenant_id = m.tenant_id ${VOIDED_BY('m')} WHERE m.tenant_id = ? AND m.incident_id = ? ORDER BY m.id`, [tenantId, id]))
-    .map((m) => ({ ...m, has_preview: Boolean(m.has_preview), taken_lat: m.taken_lat === null ? null : Number(m.taken_lat), taken_lng: m.taken_lng === null ? null : Number(m.taken_lng) }));
+    .map((m) => ({ ...m, taken_outside: Boolean(Number(m.taken_outside)), has_preview: Boolean(m.has_preview), taken_lat: m.taken_lat === null ? null : Number(m.taken_lat), taken_lng: m.taken_lng === null ? null : Number(m.taken_lng) }));
   // Items answered N/A (with the reason), checklist items skipped before the patient left, and items approved with an
   // exception. All three are part of the report: they travel with every frozen copy, including copies released outside.
   const [skips, exceptions, contacts, rentals] = await Promise.all([
@@ -413,6 +415,7 @@ router.get('/incidents/:id/check', patrol, needs('view_cases'), async (req, res)
   const reqs = await requirementsOf(pool, req, c);
   const inc = c.report_state === 'draft' ? await one(pool, 'SELECT * FROM incidents WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, c.id]) : null;
   const required = inc ? await reportProblems(pool, req.auth.tenantId, inc, { stage: 'submit' }) : [];
+  await audit(pool, req, 'view_check', 'incidents', c.id); // it names the patient: on the access log
   res.json({ data: [...checkCase(c), ...recommendedChecks(reqs.items)], required });
 });
 
@@ -622,22 +625,19 @@ router.post('/incidents/:id/rentals', patrol, needs('create_case'), validate(z.o
     if (b.patient_id && !(await one(conn, 'SELECT id FROM incident_patients WHERE tenant_id = ? AND incident_id = ? AND id = ? AND voided_at IS NULL', [t, id, b.patient_id]))) throw notFound('Patient');
     const it = await one(conn, 'SELECT id, sku, status FROM rental_items WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, b.rental_item_id]);
     if (!it) throw notFound('Rental item');
-    const before = await one(conn, 'SELECT id, voided_at FROM incident_rentals WHERE tenant_id = ? AND incident_id = ? AND rental_item_id = ?', [t, id, it.id]);
-    if (before && !before.voided_at) throw conflict(`${it.sku} is already on this case`);
+    // Gear marked entered in error and then added again gets a new row; the struck-through one stays on the record.
+    const before = await one(conn, 'SELECT id FROM incident_rentals WHERE tenant_id = ? AND incident_id = ? AND rental_item_id = ? AND voided_at IS NULL', [t, id, it.id]);
+    if (before) throw conflict(`${it.sku} is already on this case`);
     const detail = await rentalDetail(conn, t, it.id, b.contract_id || null);
     const settings = await RENTALS.getSettings(conn, t);
     const hold = settings.hold_after_incident;
     const now = nowIn((await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [t])).timezone);
     const vals = [b.patient_id || null, (detail.contract && detail.contract.id) || b.contract_id || null, JSON.stringify(detail), hold ? 1 : 0, it.status, req.auth.userId, now];
-    // Gear marked entered in error and then added again: the same row comes back (one row per item per case); the
-    // earlier marking stays in the audit trail.
-    const [r] = before
-      ? await conn.query('UPDATE incident_rentals SET patient_id = ?, contract_id = ?, detail = ?, held = ?, status_before = ?, added_by = ?, added_at = ?, released_at = NULL, released_by = NULL, inspection_note = NULL, voided_at = NULL, void_reason = NULL, voided_by = NULL WHERE tenant_id = ? AND id = ?', [...vals, t, before.id])
-      : await conn.query('INSERT INTO incident_rentals (tenant_id, incident_id, rental_item_id, patient_id, contract_id, detail, held, status_before, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [t, id, it.id, ...vals]);
+    const [r] = await conn.query('INSERT INTO incident_rentals (tenant_id, incident_id, rental_item_id, patient_id, contract_id, detail, held, status_before, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [t, id, it.id, ...vals]);
     // Back on the rack only after the shop inspects it. Gear still out on the contract goes to the shop when it is returned.
     if (hold && it.status === 'available') await conn.query("UPDATE rental_items SET status = 'maintenance' WHERE tenant_id = ? AND id = ?", [t, it.id]);
     await audit(conn, req, 'add_rental', 'incidents', id, { rental_item_id: it.id, held: hold });
-    return { id: before ? Number(before.id) : r.insertId, held: hold };
+    return { id: r.insertId, held: hold };
   });
   res.status(201).json(out);
 });
@@ -657,7 +657,7 @@ async function voidRental(req, res) {
     if (Number(r.held) && r.status_before === 'available' && !(await RENTALS.patrolHold(conn, t, r.rental_item_id))) {
       await conn.query("UPDATE rental_items SET status = 'available' WHERE tenant_id = ? AND id = ? AND status = 'maintenance'", [t, r.rental_item_id]);
     }
-    await audit(conn, req, 'void_rental', 'incidents', id, { row: Number(r.id), rental_item_id: Number(r.rental_item_id), reason: req.body.reason });
+    await audit(conn, req, 'void_rental', 'incidents', id, { row: Number(r.id), rental_item_id: Number(r.rental_item_id), reason_given: true });
   });
   res.json({ ok: true });
 }
@@ -763,7 +763,8 @@ async function fillFromBedside(conn, req, inc) {
   const ops = await OPS.settingsOf(conn, req.auth.tenantId);
   if (ops.medical_director || ops.protocol_version) {
     const stamp = [ops.medical_director && `Medical director: ${ops.medical_director}`, ops.protocol_version && `Protocols: ${ops.protocol_version}`].filter(Boolean).join('. ');
-    await conn.query('UPDATE incidents SET protocol_stamp = ? WHERE tenant_id = ? AND id = ?', [stamp.slice(0, 255), req.auth.tenantId, inc.id]);
+    // The first stamp ever set is kept: re-signing a reopened report never rewrites which protocols the care was given under.
+    await conn.query('UPDATE incidents SET protocol_stamp = ? WHERE tenant_id = ? AND id = ? AND protocol_stamp IS NULL', [stamp.slice(0, 255), req.auth.tenantId, inc.id]);
   }
   if (req.auth.staffId && (isEmpty(c.form.completed_by_name) || isEmpty(c.form.completed_by_number))) {
     const me = await one(conn, 'SELECT p.first_name, p.last_name, m.patrol_number, m.callsign FROM staff s JOIN people p ON p.id = s.person_id AND p.tenant_id = s.tenant_id LEFT JOIN patrol_members m ON m.staff_id = s.id AND m.tenant_id = s.tenant_id WHERE s.tenant_id = ? AND s.id = ?', [req.auth.tenantId, req.auth.staffId]);
@@ -793,12 +794,14 @@ async function keepVersion(conn, req, incidentId, kind) {
  * still has gaps is refused with the list. allowExceptions(conn, inc, problems) may accept some gaps (the Patrol
  * Director approving with an exception) and returns the problems that are left.
  */
-async function setState(req, res, { from, to, check, extra, version, allowExceptions }) {
+async function setState(req, res, { from, to, check, extra, version, allowExceptions, onHold = false }) {
   const id = paramId(req);
   let out = { ok: true };
   await tx(async (conn) => {
     const inc = await one(conn, 'SELECT * FROM incidents WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id]);
     if (!inc) throw notFound('Incident');
+    // Legal hold freezes the report as it is: no sign-off, approval, send back or reopen (onHold: escalation only).
+    if (Number(inc.legal_hold) && !onHold) throw conflict('This case is on legal hold: the report cannot be signed off, approved, sent back or reopened. Add a note instead.');
     if (!from.includes(inc.report_state)) throw conflict(`This report is ${inc.report_state}`);
     let rules = null;
     if (check) {
@@ -844,9 +847,10 @@ router.post('/incidents/:id/submit', patrol, needs('submit_case'), (req, res) =>
   from: ['draft'], to: 'submit', check: 'submit', version: (r) => (r && r.reply && r.reply.review === 'not_required' ? 'approved' : 'submitted'),
   extra: async (conn, inc, now) => {
     await conn.query("UPDATE incidents SET report_state = 'submitted', submitted_by = ?, submitted_at = ? WHERE tenant_id = ? AND id = ?", [req.auth.userId, now, inc.tenant_id, inc.id]);
-    const routed = await R.afterSubmit(conn, req, { ...inc, submitted_by: req.auth.userId }, now);
-    // What the reviewer will still need: "required to approve" items not answered yet. Submitting is not held up by them.
-    const later = routed === 'not_required' ? [] : (await reportProblems(conn, req.auth.tenantId, inc, { stage: 'approve' })).filter((x) => x.level === 'approve');
+    // What the reviewer will still need: "required to approve" items not answered yet. Submitting is not held up by them,
+    // but a kind the group does not review is approved at once only when there are none (PATROL-9).
+    const later = (await reportProblems(conn, req.auth.tenantId, inc, { stage: 'approve' })).filter((x) => x.level === 'approve');
+    const routed = await R.afterSubmit(conn, req, { ...inc, submitted_by: req.auth.userId }, now, { approveGaps: later.length });
     return { reply: { review: routed, for_approval: later }, audit: { review: routed, for_approval: later.length } };
   },
 }));
@@ -909,7 +913,7 @@ router.post('/incidents/:id/return', patrol, reviewer, validate(z.object({ comme
 }));
 
 router.post('/incidents/:id/escalate', patrol, reviewer, validate(z.object({ note: z.string().trim().min(3).max(1000) })), (req, res) => setState(req, res, {
-  from: ['submitted'], to: 'escalate', check: false,
+  from: ['submitted'], to: 'escalate', check: false, onHold: true,
   extra: async (conn, inc, now) => {
     if (Number(inc.submitted_by) === req.auth.userId) throw forbidden('You signed off this report, so another member of the review group must decide on it');
     if (inc.escalated_at) throw conflict('This report has already been escalated');
@@ -932,9 +936,10 @@ router.post('/incidents/:id/reopen', patrol, reviewer, validate(z.object({ reaso
   const s = await R.settingsOf(pool, req.auth.tenantId);
   return setState(req, res, {
     from: s.enabled ? ['approved'] : ['submitted', 'approved'], to: 'reopen', check: false,
-    extra: async (conn, inc) => {
+    extra: async (conn, inc, now) => {
       await conn.query("UPDATE incidents SET report_state = 'draft', status = 'open', approved_by = NULL, approved_at = NULL, returned_at = NULL, returned_by = NULL WHERE tenant_id = ? AND id = ?", [inc.tenant_id, inc.id]);
-      await conn.query('INSERT INTO incident_notes (tenant_id, incident_id, author_user, body) VALUES (?, ?, ?, ?)', [inc.tenant_id, inc.id, req.auth.userId, `Reopened: ${req.body.reason}`]);
+      // the mountain's clock, like every other note on the case
+      await conn.query('INSERT INTO incident_notes (tenant_id, incident_id, author_user, body, created_at) VALUES (?, ?, ?, ?, ?)', [inc.tenant_id, inc.id, req.auth.userId, `Reopened: ${req.body.reason}`, now]);
     },
   });
 });
@@ -1098,7 +1103,12 @@ router.post('/incidents/:id/patients/:pid/void', patrol, needs('create_case'), v
     await conn.query('UPDATE incident_patients SET voided_at = ?, void_reason = ?, voided_by = ?, vitals_due_at = NULL WHERE tenant_id = ? AND id = ?', [nowIn(tenant.timezone), req.body.reason, req.auth.userId, req.auth.tenantId, pid]);
     await conn.query('UPDATE incident_parties SET patient_id = NULL WHERE tenant_id = ? AND patient_id = ?', [req.auth.tenantId, pid]);
     await conn.query("DELETE FROM followups WHERE tenant_id = ? AND patient_id = ? AND status <> 'sent'", [req.auth.tenantId, pid]);
-    await audit(conn, req, 'void_patient', 'incidents', id, { patient_id: pid, reason: req.body.reason });
+    // Medication doses given to them go back to their lots, as when one treatment is entered in error (a controlled one
+    // waits for a witness).
+    for (const tr of await rows(conn, 'SELECT id FROM incident_treatments WHERE tenant_id = ? AND patient_id = ? AND voided_at IS NULL', [req.auth.tenantId, pid])) {
+      await MEDS.returnStock(conn, req, { id: tr.id }, nowIn(tenant.timezone));
+    }
+    await audit(conn, req, 'void_patient', 'incidents', id, { patient_id: pid, reason_given: true });
   });
   res.json({ ok: true });
 });
@@ -1253,7 +1263,8 @@ for (const [name, def] of Object.entries(sub)) {
       if (def.time && !data[def.time]) data[def.time] = now;
       // A time in the future is a typing slip (23:45 for 13:45), and it would put the record out of order.
       // (PATROL_FUTURE_SLACK_MIN only widens the 5 minutes for the test suite, whose cases are written at fixed morning times.)
-      if (def.time && data[def.time] > plusMin(now, Number(process.env.PATROL_FUTURE_SLACK_MIN || 5))) throw bad(`That time (${String(data[def.time]).slice(11, 16)}) is in the future. Check the hour.`);
+      // The server's clock goes back with it, so a phone whose clock runs fast can correct its waiting entries and resend.
+      if (def.time && data[def.time] > plusMin(now, Number(process.env.PATROL_FUTURE_SLACK_MIN || 5))) throw bad(`That time (${String(data[def.time]).slice(11, 16)}) is in the future. Check the hour.`, { code: 'future_time', field: def.time, server_now: now });
       const checked = def.check ? await def.check(conn, req, parent, data) : null;
       if (def.entered) data.entered_at = now; // when it was typed in; a reading taken earlier shows as entered late
       const keys = Object.keys(data).filter((k) => def.cols.includes(k) || (k === 'entered_at' && def.entered));
@@ -1292,7 +1303,7 @@ for (const [name, def] of Object.entries(sub)) {
         const tenant = await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId]);
         await conn.query(`UPDATE \`${def.table}\` SET voided_at = ?, void_reason = ?, voided_by = ? WHERE tenant_id = ? AND id = ?`, [nowIn(tenant.timezone), req.body.reason, req.auth.userId, req.auth.tenantId, rowId]);
         if (name === 'treatments') await MEDS.returnStock(conn, req, { id: rowId }, nowIn(tenant.timezone));
-        await audit(conn, req, `void_${name}`, 'incidents', id, { row: rowId, reason: req.body.reason });
+        await audit(conn, req, `void_${name}`, 'incidents', id, { row: rowId, reason_given: true });
       });
       res.json({ ok: true });
     };
@@ -1347,10 +1358,10 @@ async function addResponder(conn, req, id, staffId, role) {
   await editableCase(conn, req, id);
   if (!(await one(conn, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, staffId]))) throw notFound('Staff member');
   if (role === 'lead') await conn.query("UPDATE incident_responders SET role = 'assist' WHERE tenant_id = ? AND incident_id = ? AND role = 'lead' AND voided_at IS NULL", [req.auth.tenantId, id]);
-  // Someone marked entered in error and then added again comes back on the same row (one per person per case); the
-  // earlier marking stays in the audit trail.
+  // Someone marked entered in error and then added again gets a new row: the struck-through one stays on the record with
+  // its reason (one live row per person per case: uq_iresp_live). Adding someone already on the case changes their role.
   const [r] = await conn.query(
-    'INSERT INTO incident_responders (tenant_id, incident_id, staff_id, role) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE role = VALUES(role), voided_at = NULL, void_reason = NULL, voided_by = NULL, id = LAST_INSERT_ID(id)',
+    'INSERT INTO incident_responders (tenant_id, incident_id, staff_id, role) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE role = VALUES(role), id = LAST_INSERT_ID(id)',
     [req.auth.tenantId, id, staffId, role],
   );
   await audit(conn, req, 'add_responders', 'incidents', id, { staff_id: staffId, role });
@@ -1420,7 +1431,7 @@ async function voidResponder(req, res) {
   await tx(async (conn) => {
     await editableCase(conn, req, id);
     const r = await voidCaseRow(conn, req, id, 'incident_responders', paramId(req, 'rowId'), 'Responder');
-    await audit(conn, req, 'void_responders', 'incidents', id, { row: Number(r.id), staff_id: Number(r.staff_id), reason: req.body.reason });
+    await audit(conn, req, 'void_responders', 'incidents', id, { row: Number(r.id), staff_id: Number(r.staff_id), reason_given: true });
   });
   res.json({ ok: true });
 }

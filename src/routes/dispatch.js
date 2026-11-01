@@ -28,20 +28,39 @@ const STATUS_FOR = { dispatched: 'dispatched', on_scene: 'on_scene', transportin
 const callNo = (c) => `${String(c.call_date).slice(5).replace('-', '')}-${String(c.seq).padStart(2, '0')}`; // 1215-03
 
 /** Creates the call and its first timeline entry. Call numbers restart each day; a collision retries. */
-async function createCall(tenant, b, { source, userId = null, staffId = null }) {
+async function createCall(tenant, b, { source, userId = null, staffId = null, sender = null }) {
   for (let attempt = 0; ; attempt++) {
     try {
       return await tx(async (conn) => {
         const now = nowIn(tenant.timezone);
         const date = now.slice(0, 10);
         const { n } = await one(conn, 'SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM dispatch_calls WHERE tenant_id = ? AND call_date = ?', [tenant.id, date]);
+        // A guest request from a phone or address that has sent several in the last 10 minutes joins that sender's group
+        // on the board (flood_of: the first in the group). It is never refused.
+        let floodOf = null;
+        if (sender) {
+          const since = new Date(Date.parse(`${now.replace(' ', 'T')}Z`) - FLOOD_WINDOW_MS).toISOString().slice(0, 19).replace('T', ' ');
+          const recent = await rows(conn, `SELECT id, flood_of, sender_hash = ? AS same_device FROM dispatch_calls WHERE tenant_id = ? AND source = 'guest' AND received_at >= ?
+            AND (sender_hash = ? OR ip_hash = ?) ORDER BY id`, [sender.device, tenant.id, since, sender.device, sender.ip]);
+          const sameDevice = recent.filter((x) => Number(x.same_device)).length;
+          if (sameDevice >= FLOOD_DEVICE || recent.length >= FLOOD_ADDRESS) {
+            const head = recent.find((x) => !x.flood_of) || recent[0];
+            floodOf = head.flood_of || head.id;
+          }
+          sender.repeats = sameDevice;
+        }
         const [r] = await conn.query(
-          `INSERT INTO dispatch_calls (tenant_id, call_date, seq, source, priority, location, description, caller_name, caller_phone, gps_lat, gps_lng, received_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [tenant.id, date, n, source, b.priority ?? 'normal', b.location, b.description ?? null, b.caller_name ?? null, b.caller_phone ?? null, b.gps_lat ?? null, b.gps_lng ?? null, now],
+          `INSERT INTO dispatch_calls (tenant_id, call_date, seq, source, priority, location, description, caller_name, caller_phone, gps_lat, gps_lng, received_at, sender_hash, ip_hash, flood_of)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [tenant.id, date, n, source, b.priority ?? 'normal', b.location, b.description ?? null, b.caller_name ?? null, b.caller_phone ?? null, b.gps_lat ?? null, b.gps_lng ?? null, now,
+            sender ? sender.device : null, sender ? sender.ip : null, floodOf],
         );
+        if (floodOf) {
+          const [first] = await conn.query('UPDATE dispatch_calls SET flood_alerted_at = ? WHERE tenant_id = ? AND id = ? AND flood_alerted_at IS NULL', [now, tenant.id, floodOf]);
+          if (sender) sender.alert = first.affectedRows ? floodOf : null;
+        }
         await conn.query("INSERT INTO dispatch_events (tenant_id, call_id, at, kind, staff_id, note, user_id) VALUES (?, ?, ?, 'received', ?, ?, ?)", [tenant.id, r.insertId, now, staffId, source === 'guest' ? 'Guest help request' : null, userId]);
-        return { id: r.insertId, call_no: callNo({ call_date: date, seq: n }) };
+        return { id: r.insertId, call_no: callNo({ call_date: date, seq: n }), flood_of: floodOf };
       });
     } catch (err) {
       if (err.code === 'ER_DUP_ENTRY' && attempt < 4) continue;
@@ -50,7 +69,15 @@ async function createCall(tenant, b, { source, userId = null, staffId = null }) 
   }
 }
 
-const withNo = (c) => { const out = { ...c, call_no: callNo(c) }; delete out.locate_token; return out; };
+const withNo = (c) => { const out = { ...c, call_no: callNo(c) }; delete out.locate_token; delete out.sender_hash; delete out.ip_hash; return out; };
+
+// Guest help floods: a phone sending its 3rd request in 10 minutes, or an address its 6th (several phones on one
+// connection), joins a group on the board. A phone past HELP_REPEAT_WARN is told patrol already has its requests.
+const FLOOD_WINDOW_MS = 10 * 60000;
+const FLOOD_DEVICE = 2;
+const FLOOD_ADDRESS = 5;
+const HELP_REPEAT_WARN = Number(process.env.HELP_RATE_LIMIT) || 5;
+const senderKey = (tenantId, kind, v) => require('crypto').createHmac('sha256', require('../config').linkSecret).update(`help:${tenantId}:${kind}:${v}`).digest('hex');
 
 // ---------------------------------------------------------------- the board
 router.get('/dispatch', patrol, needs('dispatch'), async (req, res) => {
@@ -63,7 +90,11 @@ router.get('/dispatch', patrol, needs('dispatch'), async (req, res) => {
     if (!dateStr.safeParse(String(req.query.date)).success) throw bad('date must be YYYY-MM-DD');
     where.push('c.call_date = ?'); params.push(String(req.query.date));
   }
-  const calls = await rows(pool, `SELECT c.* FROM dispatch_calls c WHERE ${where.join(' AND ')} ORDER BY FIELD(c.priority,'critical','high','normal','low'), c.received_at DESC LIMIT 200`, params);
+  const all = await rows(pool, `SELECT c.* FROM dispatch_calls c WHERE ${where.join(' AND ')} ORDER BY FIELD(c.priority,'critical','high','normal','low'), c.received_at DESC LIMIT 500`, params);
+  // Repeats from one guest phone or address fold under the first of the group; each one is still listed with its place.
+  const heads = new Set(all.filter((c) => !c.flood_of).map((c) => Number(c.id)));
+  const folded = all.filter((c) => c.flood_of && heads.has(Number(c.flood_of)));
+  const calls = all.filter((c) => !(c.flood_of && heads.has(Number(c.flood_of)))).slice(0, 200);
   const ids = calls.map((c) => c.id);
   const responders = ids.length
     ? await rows(pool, `SELECT r.call_id, r.staff_id, p.first_name, p.last_name, m.callsign FROM dispatch_responders r
@@ -71,7 +102,10 @@ router.get('/dispatch', patrol, needs('dispatch'), async (req, res) => {
                         LEFT JOIN patrol_members m ON m.staff_id = r.staff_id AND m.tenant_id = r.tenant_id
                         WHERE r.tenant_id = ? AND r.call_id IN (?)`, [tenantId, ids])
     : [];
-  res.json({ data: calls.map((c) => ({ ...withNo(c), responders: responders.filter((r) => r.call_id === c.id) })) });
+  res.json({ data: calls.map((c) => {
+    const rep = folded.filter((f) => Number(f.flood_of) === Number(c.id));
+    return { ...withNo(c), responders: responders.filter((r) => r.call_id === c.id), ...(rep.length ? { repeats: rep.map((f) => ({ id: f.id, call_no: callNo(f), location: f.location, description: f.description, received_at: f.received_at, status: f.status, gps_lat: f.gps_lat, gps_lng: f.gps_lng })) } : {}) };
+  }) });
 });
 
 /**
@@ -168,7 +202,7 @@ router.patch('/dispatch/:id', patrol, needs('dispatch'), validate(z.object({ pri
   const keys = Object.keys(req.body);
   if (!keys.length) throw bad('No updatable fields supplied');
   await pool.query(`UPDATE dispatch_calls SET ${keys.map((k) => `\`${k}\` = ?`).join(', ')} WHERE tenant_id = ? AND id = ?`, [...keys.map((k) => req.body[k]), req.auth.tenantId, c.id]);
-  await audit(pool, req, 'update', 'dispatch_calls', c.id, req.body);
+  await audit(pool, req, 'update', 'dispatch_calls', c.id, { fields: Object.keys(req.body) }); // field names only, never the patient's condition
   res.json({ ok: true });
 });
 
@@ -311,11 +345,18 @@ publicRouter.post(
     if (!t || !t.guest_help_enabled) throw notFound('Help page');
     res.set('Cache-Control', 'no-store');
     if (req.body.website) return res.status(202).json({ ok: true }); // pretend success, create nothing
-    // Beyond the per-address limit, never let a flood bury the board: at most 20 untouched guest calls at once.
-    const { n } = await one(pool, "SELECT COUNT(*) AS n FROM dispatch_calls WHERE tenant_id = ? AND source = 'guest' AND status = 'new'", [t.id]);
-    if (n >= 20) return res.status(503).json({ error: 'Patrol is busy. Please call the patrol phone number or flag down a patroller.' });
-    const out = await createCall(t, { location: req.body.location, description: req.body.description, caller_name: req.body.name, caller_phone: req.body.phone, gps_lat: req.body.gps_lat, gps_lng: req.body.gps_lng, priority: 'normal' }, { source: 'guest' });
-    return res.status(201).json({ ok: true, reference: out.call_no });
+    // Always accepted: a real request for help is never refused because others sent junk. Repeats from one phone or
+    // address are grouped on the board and patrol is alerted to the flood.
+    const dev = String(req.get('x-device') || '');
+    const ip = String(req.ip || '');
+    const sender = { ip: senderKey(t.id, 'ip', ip), device: senderKey(t.id, 'dev', /^[A-Za-z0-9_-]{16,64}$/.test(dev) ? dev : `ip:${ip}`) };
+    const out = await createCall(t, { location: req.body.location, description: req.body.description, caller_name: req.body.name, caller_phone: req.body.phone, gps_lat: req.body.gps_lat, gps_lng: req.body.gps_lng, priority: 'normal' }, { source: 'guest', sender });
+    if (sender.alert) {
+      const on = await OPS.onDutyIds(pool, t.id).catch(() => []);
+      if (on.length) PUSH.notifyStaff(t.id, on, { title: 'Guest help: many requests from one phone', body: 'They are grouped on the dispatch board. Check each place listed.', url: '#/patrol/dispatch', tag: `flood-${sender.alert}` }).catch(() => {});
+    }
+    const warning = sender.repeats >= HELP_REPEAT_WARN ? 'Patrol already has several requests from this phone. Stay where you are. If things get worse, call 911.' : undefined;
+    return res.status(201).json({ ok: true, reference: out.call_no, ...(warning ? { warning } : {}) });
   },
 );
 

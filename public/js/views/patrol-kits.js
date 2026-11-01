@@ -4,7 +4,7 @@
 // wait on the phone and send when the signal returns. Those who manage equipment set the contents and how often.
 import { get, post, patch } from '../api.js';
 import { h, clear, input, select, field, button, toast, formDialog, dialog, empty, errorBox, state, fmtDate, fmtDateTime, nowStamp, ctx, fail } from '../ui.js';
-import { send } from '../outbox.js';
+import { send, realCaseId } from '../outbox.js';
 import { qr } from '../barcode.js';
 
 const STANDING = { ready: ['Ready', 'good'], check_due: ['Check due', 'warn'], needs_restock: ['Needs restock', 'bad'], expired: ['Expired items', 'bad'], not_ready: ['Not ready', 'bad'], out_of_service: ['Out of service', 'neutral'] };
@@ -151,7 +151,7 @@ export async function renderKitPage(root, id) {
       h('section', { class: 'panel stack' }, h('h2', null, 'Contents'),
         h('ul', { class: 'plain kit-contents' }, t.contents.map((c) => { const s = k.stock[c.key] || {}; return h('li', { class: 'spread' }, h('span', null, c.label), h('span', { class: 'muted' }, `${s.qty ?? '?'} of ${c.qty}${c.expires ? `, ${s.expires_on ? `expires ${fmtDate(s.expires_on)}` : 'no date'}` : ''}`)); }))),
       r.checks.length ? h('section', { class: 'panel stack' }, h('h2', null, 'History'),
-        h('ul', { class: 'plain' }, r.checks.map((c) => h('li', null, h('b', null, fmtDateTime(c.done_at)), ` ${{ full: 'Checked', seal: 'Seal checked', restock: 'Restocked', use: 'Used on a case' }[c.kind]}`, c.case_number ? h('span', null, ' ', h('a', { href: `#/patrol/case/${c.incident_id}` }, c.case_number)) : null, h('span', { class: 'muted' }, `, ${c.done_by}${c.note ? `: ${c.note}` : ''}`), ' ', state(...STANDING[c.result === 'needs_restock' ? 'needs_restock' : c.result]))))) : null,
+        h('ul', { class: 'plain' }, r.checks.map((c) => h('li', null, h('b', null, fmtDateTime(c.done_at)), ` ${{ full: 'Checked', seal: 'Seal checked', restock: 'Restocked', use: 'Used on a case' }[c.kind]}`, c.case_number ? h('span', null, ' ', h('a', { href: `#/patrol/case/${c.incident_id}` }, c.case_number)) : null, h('span', { class: 'muted' }, `, ${c.done_by}${c.note ? `: ${c.note}` : ''}`), ' ', state(...STANDING[c.result === 'needs_restock' ? 'needs_restock' : c.result]), Number(c.applied) === 0 ? h('span', { class: 'muted small' }, ' Sent late: the kit had changed since, so this did not change it.') : null)))) : null,
       h('section', { class: 'panel row' }, qr(kitUrl(k.id), { size: 96 }), h('p', { class: 'muted small' }, 'This kit’s QR label opens this page. Print labels from the Kits board.')),
       ...(r.offline ? [h('p', { class: 'muted small' }, 'Offline: what you record waits on this phone and sends when the signal returns.')] : []));
   }
@@ -174,7 +174,7 @@ function checkDialog(k, t, seals, kind, onDone) {
     seal ? field('Seal', seal, 'Leave blank if you are not sealing it') : null, field('Note', note)), async () => {
     const items = Object.fromEntries(rowsEl.map((x) => [x.c.key, { qty: Number(x.qty.value || 0), expires_on: x.exp && x.exp.value ? x.exp.value : null }]));
     const r = await send('POST', `/patrol/kits/${k.id}/checks`, { kind, items, seal_no: seal && seal.value.trim() ? seal.value.trim() : null, note: note.value.trim() || null, at: nowStamp() }, { caseId: 0, label: `Kit ${k.label}` });
-    toast(r && r.queued ? 'Kept on this phone. It sends when the signal returns.' : r && r.result === 'ready' ? `${k.label} is ready` : `${k.label} saved: not ready yet`);
+    toast(r && r.queued ? 'Kept on this phone. It sends when the signal returns.' : r && r.applied === false ? r.message : r && r.result === 'ready' ? `${k.label} is ready` : `${k.label} saved: not ready yet`);
     await onDone();
   }, { submitText: 'Save', wide: true });
 }
@@ -226,7 +226,9 @@ async function useDialog(caseId, onDone) {
   formDialog('Supplies used from a kit', h('div', { class: 'stack' }, field('Kit', pick), h('p', { class: 'muted small' }, 'How many of each were used. The kit then shows as needing a restock.'), box), async () => {
     const used = Object.fromEntries([...box.querySelectorAll('input[data-key]')].filter((x) => Number(x.value) > 0).map((x) => [x.dataset.key, Number(x.value)]));
     if (!Object.keys(used).length) throw new Error('Say what was used');
-    const r = await send('POST', `/patrol/kits/${pick.value}/checks`, { kind: 'use', used, incident_id: caseId > 0 ? caseId : null, at: nowStamp() }, { caseId, label: 'Kit supplies used' });
+    // A case started with no signal has a temporary id: the outbox points this at the real case when the case is sent.
+    const incident = caseId > 0 ? caseId : caseId < 0 ? (realCaseId(caseId) || caseId) : null;
+    const r = await send('POST', `/patrol/kits/${pick.value}/checks`, { kind: 'use', used, incident_id: incident, at: nowStamp() }, { caseId: incident || caseId, label: 'Kit supplies used' });
     toast(r && r.queued ? 'Kept on this phone. It sends when the signal returns.' : 'Recorded. The kit needs a restock.');
     await onDone();
   }, { submitText: 'Save', wide: true });

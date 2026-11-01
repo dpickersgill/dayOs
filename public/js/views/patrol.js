@@ -53,10 +53,16 @@ const newCaseButton = () => !has('create_case') ? null : h('button', { type: 'bu
 const ONE = /^\d+$/;
 const CASE_ID = /^-?\d+$/; // a case started with no signal has a temporary negative id until it reaches the server
 // The last answers from the server, so a case can still be opened in a dead spot (the app itself is already loaded).
-let lastMe = null; let lastRoster = [];
+// Patrol access is also kept in this tab (session storage), so a reload with no signal still opens a kept case.
+const ME_SLOT = 'so.patrol.me';
+let lastMe = (() => { try { return JSON.parse(sessionStorage.getItem(ME_SLOT) || 'null'); } catch (_) { return null; } })();
+let lastRoster = [];
 export async function render(root, params = []) {
   let me;
-  try { me = await get('/patrol/me'); lastMe = me; } catch (err) { if (!lastMe || (err && err.status && err.status < 500)) throw err; me = lastMe; }
+  try {
+    me = await get('/patrol/me'); lastMe = me;
+    try { sessionStorage.setItem(ME_SLOT, JSON.stringify(me)); } catch (_) { /* memory only */ }
+  } catch (err) { if (!lastMe || (err && err.status && err.status < 500)) throw err; me = lastMe; }
   setAccess(me);
   // Keep the report form's layout, the trails and the attractions on this phone while there is a signal, so a case can
   // be started, and name its trail, where there is none.

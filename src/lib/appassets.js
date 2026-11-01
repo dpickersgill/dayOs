@@ -92,6 +92,31 @@ releaseFiles.use('/r/:release', (req, res, next) => {
   return serve(req, res, next);
 });
 
+/**
+ * /sw.js: the service worker with this release filled in, and the app shell it keeps for no signal: the app page and
+ * every file under /r/<release>/ (js, css, vendor), the fonts and the app icons. A new release changes the file, so the
+ * browser installs the new worker, which replaces the old release's cache (public/sw.js). Never cached long.
+ */
+let swText = null;
+function shellList() {
+  const out = ['/'];
+  const walk = (dir, url) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      if (e.name.startsWith('.')) continue;
+      if (e.isDirectory()) walk(path.join(dir, e.name), `${url}${e.name}/`);
+      else out.push(`${url}${e.name}`);
+    }
+  };
+  for (const d of VERSIONED_DIRS) { try { walk(path.join(PUBLIC, d), `${PREFIX}/${d}/`); } catch (_) { /* no such folder */ } }
+  for (const d of ['fonts', 'icons', 'brand']) { try { walk(path.join(PUBLIC, d), `/${d}/`); } catch (_) { /* none */ } }
+  return out;
+}
+function serviceWorker(_req, res) {
+  if (!swText) swText = fs.readFileSync(path.join(PUBLIC, 'sw.js'), 'utf8').replace("'__RELEASE__'", JSON.stringify(RELEASE)).replace('[]; /* __SHELL__ */', `${JSON.stringify(shellList())};`);
+  res.set({ 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'no-cache' });
+  res.send(swText);
+}
+
 /** Cache-Control for everything else in public/: fonts a year, the website's ?v= files a year, the rest no-cache. */
 function staticHeaders(res, file) {
   // The website's ?v= address names its content (routes/site.js, ASSET_V): kept a year only by a stamped build that asks for it.
@@ -102,4 +127,4 @@ function staticHeaders(res, file) {
 /** The website's stylesheet and script version (?v=): release, build and a hash of public/site's content. */
 const SITE_V = `${RELEASE_BASE}-${contentHash(['site'])}`;
 
-module.exports = { RELEASE, PREFIX, STAMPED, BUILD, SITE_V, contentHash, rewrite, sendPage, page, directPages, releaseFiles, staticHeaders, VERSIONED_DIRS };
+module.exports = { RELEASE, PREFIX, STAMPED, BUILD, SITE_V, contentHash, rewrite, sendPage, page, directPages, releaseFiles, staticHeaders, VERSIONED_DIRS, serviceWorker, shellList };

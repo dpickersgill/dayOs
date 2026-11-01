@@ -119,7 +119,7 @@ async function syncThread(conn, tenantId, byUser) {
 }
 
 /** Called inside the sign-off transaction. Returns 'review' (sent to the group) or 'not_required' (signed off). */
-async function afterSubmit(conn, req, inc, now) {
+async function afterSubmit(conn, req, inc, now, { approveGaps = 0 } = {}) {
   const s = await settingsOf(conn, req.auth.tenantId);
   if (!s.enabled) return 'review';
   const link = [{ type: 'patrol_case', id: inc.id }];
@@ -127,7 +127,9 @@ async function afterSubmit(conn, req, inc, now) {
   // dropping a kind of case from review cannot be used to skip review of one's own report.
   const changedGroup = await one(conn, `SELECT 1 AS y FROM audit_log WHERE tenant_id = ? AND action = 'review_group' AND user_id = ?
     AND at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY) LIMIT 1`, [inc.tenant_id, req.auth.userId, CHANGED_DAYS]);
-  if (!needsReview(s, inc.category) && !changedGroup) {
+  // A kind the group does not review is approved at once only when nothing "Required to approve" is missing. Otherwise it
+  // waits for the review group like any other: they add the items (sent back) or the Patrol Director records exceptions.
+  if (!needsReview(s, inc.category) && !changedGroup && !approveGaps) {
     await conn.query("UPDATE incidents SET report_state = 'approved', status = 'closed', approved_by = NULL, approved_at = ?, review_round = review_round + 1, returned_at = NULL, returned_by = NULL, escalated_at = NULL, escalated_by = NULL, escalation_note = NULL WHERE tenant_id = ? AND id = ?", [now, inc.tenant_id, inc.id]);
     await conn.query("INSERT INTO incident_reviews (tenant_id, incident_id, round, outcome, note) VALUES (?, ?, ?, 'not_required', ?)", [inc.tenant_id, inc.id, (inc.review_round || 0) + 1, `The review group does not review ${inc.category.replace('_', ' ')} cases`]);
     return 'not_required';
@@ -136,7 +138,8 @@ async function afterSubmit(conn, req, inc, now) {
   await conn.query('UPDATE incidents SET review_round = review_round + 1, last_nudge_at = NULL, returned_at = NULL, returned_by = NULL, escalated_at = NULL, escalated_by = NULL, escalation_note = NULL WHERE tenant_id = ? AND id = ?', [inc.tenant_id, inc.id]);
   const who = await nameOf(conn, inc.tenant_id, req.auth.userId);
   const again = inc.returned_at ? ' (corrected and signed again)' : '';
-  await postSystem(conn, inc.tenant_id, s.thread_id, `${who || 'A patroller'} signed off Case ${caseNo(inc)}${again}: ${inc.severity} ${inc.category.replace('_', ' ')}. Waiting for review.`, link);
+  const why = !needsReview(s, inc.category) && approveGaps ? ` It is a kind the group does not review, but ${approveGaps} item${approveGaps === 1 ? ' is' : 's are'} required to approve.` : '';
+  await postSystem(conn, inc.tenant_id, s.thread_id, `${who || 'A patroller'} signed off Case ${caseNo(inc)}${again}: ${inc.severity} ${inc.category.replace('_', ' ')}. Waiting for review.${why}`, link);
   return 'review';
 }
 

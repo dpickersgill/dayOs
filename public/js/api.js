@@ -40,6 +40,8 @@ export function deviceId() {
 const isStepUp = (status, data) => status === 403 && data && data.details && data.details.code === 'step_up_required';
 
 const TOKEN_KEY = 'so.token';
+const ME_KEY = 'so.me'; // the last /auth/me for this tab's sign-in, without the outbox key (offline reloads)
+const tokenOwner = (t) => { try { const p = JSON.parse(atob(String(t).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); return `${p.tid}:${p.sub}`; } catch (_) { return null; } };
 const LOCK_KEY = 'so.locked'; // this tab locked itself: { tenant, login, name, shared } (sessionStorage, survives a reload)
 const tabStore = () => globalThis.sessionStorage;
 const sharedStore = () => { try { return globalThis.localStorage; } catch (_) { return null; } };
@@ -66,6 +68,17 @@ export const session = {
   clear() {
     if (session.shared) write(sharedStore(), TOKEN_KEY, null);
     write(tabStore(), TOKEN_KEY, null);
+    write(tabStore(), ME_KEY, null);
+    write(tabStore(), 'so.patrol.me', null);
+  },
+  /** Who is signed in, as the server last said, kept in this tab so a reload with no signal still opens the app. */
+  keepMe(me) {
+    if (!me) return;
+    const { device_key: _key, ...rest } = me; // never kept: the outbox key has its own slot
+    write(tabStore(), ME_KEY, JSON.stringify({ for: tokenOwner(session.token), me: rest }));
+  },
+  keptMe() {
+    try { const k = JSON.parse(read(tabStore(), ME_KEY) || 'null'); return k && k.for && k.for === tokenOwner(session.token) ? k.me : null; } catch (_) { return null; }
   },
   /** The raw stores, for tablock.js (which moves the shared token aside while the last tab reloads). */
   sharedToken() { return read(sharedStore(), TOKEN_KEY); },

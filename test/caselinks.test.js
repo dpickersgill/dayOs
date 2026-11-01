@@ -170,5 +170,7 @@ test('rental gear on a case: found three ways, held until the shop inspects it',
   assert.equal(await status(boot), 'available');
   // the report requirement "only when rental gear" now holds for this case
   const rq = ok(await api('GET', `/patrol/incidents/${M.case}`, { token: M.patT }));
-  assert.ok(rq.rentals.length === 2);
+  // two live, and the one added again after its entered-in-error marking is a new row (2026.11.11, PATROL-11)
+  assert.equal(rq.rentals.filter((x) => !x.voided_at).length, 2);
+  assert.ok(rq.rentals.find((x) => x.id === r2.id).voided_at, 'the struck-through row stays');
 });

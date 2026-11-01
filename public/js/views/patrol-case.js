@@ -15,7 +15,7 @@ import { bedsideCard, voidedNote } from './patrol-bedside.js';
 import { collisionPanel } from './patrol-collision.js';
 import { checklistPanel, loadChecklists } from './patrol-checklists.js';
 import { voidDialog, sentToast } from './patrol-tools.js';
-import { send, pending, onChange as onOutbox, flush, retry, discard, waitingCounts, keepCase, keptCase, realCaseId, cachedList } from '../outbox.js';
+import { send, pending, onChange as onOutbox, flush, retry, fixClock, isOld, discard, waitingCounts, keepCase, keptCase, realCaseId, cachedList } from '../outbox.js';
 import { draftNarrative } from '../narrative.js';
 import { live, lateNote, treatmentName, atTime } from '../care-text.js';
 import { searchPanel, recordsPanel } from './patrol-search.js';
@@ -239,9 +239,10 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
     return h('section', { class: `outbox-strip${offline ? ' no-signal' : ''}`, role: 'status', 'data-area': 'outbox', 'data-offline': offline ? 'true' : 'false' },
       head || words ? h('div', { class: 'spread' }, h('span', null, h('b', null, head), words),
         waiting.length && !offline ? button('Send now', async () => { const n = await flush(); toast(n ? `Sent ${n}` : 'Still no connection', n ? 'ok' : 'warn'); }, { small: true }) : null) : null, // Send now once there is a signal to send with
+      waiting.some(isOld) ? h('p', { class: 'warn-note' }, h('b', null, `${waiting.filter(isOld).length} waiting more than three days. `), 'They are still part of this patient record. Send them when you have a signal, or discard any that are wrong.') : null,
       others ? h('p', null, h('b', null, `${others} entr${others === 1 ? 'y' : 'ies'} for this case from another patroller ${others === 1 ? 'is' : 'are'} waiting on this phone. `), 'They send when that patroller signs in here with a signal.') : null,
       refused.map((x) => h('div', { class: 'spread refused' }, h('span', null, h('b', null, `Not saved: ${x.label}. `), x.error),
-        h('span', { class: 'row tight' }, button('Try again', () => retry(x.id), { small: true }), button('Discard', () => confirmDialog('Discard this entry?', `${x.label}, taken ${fmtDateTime(x.at)}. It was never saved to the report.`, 'Discard', () => discard(x.id), { danger: true }), { small: true, kind: 'quiet-danger' })))));
+        h('span', { class: 'row tight' }, x.details && x.details.code === 'future_time' ? button('Fix the time and send', () => fixClock(x.id), { small: true, kind: 'primary' }) : button('Try again', () => retry(x.id), { small: true }), button('Discard', () => confirmDialog('Discard this entry?', `${x.label}, taken ${fmtDateTime(x.at)}. It was never saved to the report.`, 'Discard', () => discard(x.id), { danger: true }), { small: true, kind: 'quiet-danger' })))));
   }
 
   /** What the form needs to know about the rest of the report: who has signed and how many witnesses are on file. */

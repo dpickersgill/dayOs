@@ -69,7 +69,9 @@ test('who the patient is: legacy activity "staff" counts as on duty; on duty is 
   assert.equal(SI.onDuty({ form: { patient_type: 'volunteer_work' } }), true);
   const m = SI.message({ name: 'X' }, { id: 1, case_number: '2026-0001', occurred_at: '2026-12-01 10:00:00', location: 'Base' }, { first_name: 'Val', last_name: 'Unteer', disposition: 'transported_ambulance' }, 'volunteer_work', true, 'http://x/#/patrol/case/1');
   assert.match(m.text, /volunteer/i); assert.match(m.text, /8 hours/); assert.match(m.text, /1-800-321-6742/);
-  assert.match(m.subject, /went to hospital/);
+  assert.match(m.subject, /OSHA's deadline/);
+  assert.doesNotMatch(m.subject, /Val|Unteer|hospital/, 'no name or hospital in a subject (2026.11.11)');
+  assert.doesNotMatch(m.sms, /Val|Unteer|hospital/, 'no name or hospital in a text');
 });
 
 test('marking a patient staff on duty tells the owner once, and again (once) when they go to hospital', async () => {
@@ -79,7 +81,7 @@ test('marking a patient staff on duty tells the owner once, and again (once) whe
   ok(await api('PATCH', path, { token: T.pat, body: { form: { patient_type: 'staff_work' } } }));
   const first = toOwner().slice(before);
   assert.equal(first.length, 1);
-  assert.match(first[0].Subject, /Staff injury: Liam Liftop \(staff member, on duty\)/);
+  assert.match(first[0].Subject, /^Staff injury, case \S+ \(staff member, on duty\)$/);
   assert.match(first[0].TextBody, /tell your workers' comp insurer/i);
   assert.doesNotMatch(first[0].TextBody, /went to hospital or the case is critical/);
   // saving again does not send again
@@ -90,7 +92,7 @@ test('marking a patient staff on duty tells the owner once, and again (once) whe
   ok(await api('PATCH', path, { token: T.pat, body: { disposition: 'transported_ambulance' } }));
   const second = toOwner().slice(before + 1);
   assert.equal(second.length, 1);
-  assert.match(second[0].Subject, /went to hospital/);
+  assert.match(second[0].Subject, /OSHA's deadline/);
   assert.match(second[0].TextBody, /within 24 hours/);
   ok(await api('PATCH', path, { token: T.pat, body: { disposition: 'transported_ambulance' } }));
   assert.equal(toOwner().length, before + 2);

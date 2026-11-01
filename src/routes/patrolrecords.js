@@ -61,13 +61,16 @@ router.post('/records/:id/release', patrol, needs('records'), stepUp('release a 
     if (!r) throw notFound('Request');
     if (r.status !== 'open') throw conflict(`This request is already ${r.status}`);
     if (r.authorization === 'none') throw conflict('Record the authorization first (a signed release, subpoena, court order, police request, or the patient asking for their own)');
+    // Only a report that is approved now: a reopened report's earlier approval was withdrawn and is never released.
+    const inc = await one(conn, 'SELECT report_state FROM incidents WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, r.incident_id]);
+    if (!inc || inc.report_state !== 'approved') throw conflict('This report was reopened and is not approved now. It can be released once it is approved again.');
     const v = await one(conn, "SELECT id, version_no FROM incident_versions WHERE tenant_id = ? AND incident_id = ? AND kind = 'approved' ORDER BY version_no DESC LIMIT 1", [t, r.incident_id]);
     if (!v) throw conflict('Only an approved report is released. Approve it first.');
     const { now } = await OPS.clock(conn, t);
     const { n } = await one(conn, "SELECT COUNT(*) + 1 AS n FROM patrol_records_requests WHERE tenant_id = ? AND release_no IS NOT NULL AND YEAR(released_at) = YEAR(?)", [t, now]);
     const releaseNo = `R${now.slice(0, 4)}-${String(n).padStart(3, '0')}`;
     await conn.query("UPDATE patrol_records_requests SET status = 'released', version_id = ?, release_no = ?, released_at = ?, decided_by = ?, decision_note = ? WHERE tenant_id = ? AND id = ?", [v.id, releaseNo, now, req.auth.userId, req.body.note || null, t, r.id]);
-    await audit(conn, req, 'records_release', 'incidents', r.incident_id, { request: r.id, release_no: releaseNo, version: v.version_no });
+    await audit(conn, req, 'records_release', 'incidents', r.incident_id, { request: r.id, release_no: releaseNo, version: v.version_no, authorization: r.authorization });
     return { release_no: releaseNo, version_id: Number(v.id) };
   });
   res.json(out);
@@ -87,8 +90,16 @@ router.patch('/records/:id', patrol, needs('records'), validate(z.object({ autho
   const t = req.auth.tenantId; const b = req.body;
   const cols = Object.keys(b).filter((k) => b[k] !== undefined);
   if (!cols.length) throw bad('Nothing to change');
-  const [r] = await pool.query(`UPDATE patrol_records_requests SET ${cols.map((k) => `${k} = ?`).join(', ')} WHERE tenant_id = ? AND id = ? AND status = 'open'`, [...cols.map((k) => b[k]), t, paramId(req)]);
-  if (!r.affectedRows) throw conflict('Only an open request can be changed');
+  await tx(async (conn) => {
+    const was = await one(conn, "SELECT * FROM patrol_records_requests WHERE tenant_id = ? AND id = ? AND status = 'open' FOR UPDATE", [t, paramId(req)]);
+    if (!was) throw conflict('Only an open request can be changed');
+    await conn.query(`UPDATE patrol_records_requests SET ${cols.map((k) => `${k} = ?`).join(', ')} WHERE tenant_id = ? AND id = ?`, [...cols.map((k) => b[k]), t, was.id]);
+    // The legal authority to release is audited before and after (its name, never the typed note: only that it changed).
+    const detail = { request: Number(was.id) };
+    if (b.authorization !== undefined && b.authorization !== was.authorization) Object.assign(detail, { authorization_before: was.authorization, authorization_after: b.authorization });
+    for (const k of ['auth_note', 'contact']) if (b[k] !== undefined && (b[k] || null) !== (was[k] || null)) detail[`${k}_changed`] = true;
+    if (Object.keys(detail).length > 1) await audit(conn, req, 'records_request_change', 'incidents', was.incident_id, detail);
+  });
   res.json({ ok: true });
 });
 
@@ -116,11 +127,14 @@ router.put('/incidents/:id/legal-hold', patrol, needs('records'), validate(z.obj
 
 // ================================================================ lost-person search
 async function caseFor(conn, req, id) {
-  const inc = await one(conn, 'SELECT id, report_state, category FROM incidents WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, id]);
+  const inc = await one(conn, 'SELECT id, report_state, category, legal_hold FROM incidents WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, id]);
   if (!inc) throw notFound('Case');
   return inc;
 }
-const editable = (inc) => { if (inc.report_state !== 'draft') throw conflict('This report is not a draft. Add a note instead.'); };
+const editable = (inc) => {
+  if (Number(inc.legal_hold)) throw conflict('This case is on legal hold: the search details cannot change. Add a note instead.');
+  if (inc.report_state !== 'draft') throw conflict('This report is not a draft. Add a note instead.');
+};
 
 router.get('/incidents/:id/search', patrol, needs('view_cases'), async (req, res) => {
   const t = req.auth.tenantId; const id = paramId(req);
@@ -201,7 +215,7 @@ router.get('/daily-log', patrol, async (req, res) => {
     rows(pool, 'SELECT e.kind, e.started_at, e.ended_at, e.guests, l.name AS lift FROM patrol_lift_evacs e JOIN lifts l ON l.tenant_id = e.tenant_id AND l.id = e.lift_id WHERE e.tenant_id = ? AND e.started_at >= ? AND e.started_at < ? ORDER BY e.started_at', [t, from, to]),
   ]);
   let sweepRoutes = [];
-  if (sweep) sweepRoutes = await rows(pool, `SELECT ro.name AS route, r.status, r.cleared_at, ${NAME} AS by_name, (SELECT COUNT(*) FROM patrol_sweep_marks k WHERE k.tenant_id = r.tenant_id AND k.run_id = r.id AND k.flag <> 'none') AS finds
+  if (sweep) sweepRoutes = await rows(pool, `SELECT ro.name AS route, r.status, r.cleared_at, ${NAME} AS by_name, (SELECT COUNT(*) FROM patrol_sweep_marks k WHERE k.tenant_id = r.tenant_id AND k.run_id = r.id AND k.flag <> 'none' AND (k.resolved_kind IS NULL OR k.resolved_kind <> 'error')) AS finds, (SELECT COUNT(*) FROM patrol_sweep_marks k WHERE k.tenant_id = r.tenant_id AND k.run_id = r.id AND k.resolved_kind = 'error') AS finds_in_error
     FROM patrol_sweep_runs r JOIN patrol_sweep_routes ro ON ro.tenant_id = r.tenant_id AND ro.id = r.route_id LEFT JOIN staff s ON s.tenant_id = r.tenant_id AND s.id = r.staff_id LEFT JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE r.tenant_id = ? AND r.sweep_id = ? ORDER BY ro.sort, ro.name`, [t, sweep.id]);
   res.json({
     date, today, notes: log ? log.notes : null, signed: log && log.signed_at ? { at: log.signed_at, by: log.signed_by_name } : null, addenda,

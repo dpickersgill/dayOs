@@ -8,6 +8,18 @@ const root = document.getElementById('help');
 const api = `/api/v1/public/${encodeURIComponent(slug)}/help`;
 
 function note(text) { return h('p', { class: 'muted' }, text); }
+// A random id kept on this phone, so patrol can group repeated requests from one phone. It says nothing about the guest.
+function phoneId() {
+  try {
+    let id = localStorage.getItem('so.help.device');
+    if (!id || !/^[A-Za-z0-9_-]{16,64}$/.test(id)) {
+      const b = new Uint8Array(18); crypto.getRandomValues(b);
+      id = btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      localStorage.setItem('so.help.device', id);
+    }
+    return id;
+  } catch (_) { return undefined; }
+}
 
 async function main() {
   document.getElementById('help-loading')?.remove();
@@ -56,14 +68,15 @@ async function main() {
     }
     try {
       const res = await fetch(api, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
+        method: 'POST', headers: { 'content-type': 'application/json', ...(phoneId() ? { 'x-device': phoneId() } : {}) },
         body: JSON.stringify({ location: where.value.trim(), description: what.value.trim() || undefined, name: name.value.trim() || undefined, phone: phone.value.trim() || undefined, gps_lat: pos ? pos.latitude : undefined, gps_lng: pos ? pos.longitude : undefined, website: trap.value || undefined }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Could not send. Please flag down a patroller or call 911.');
       clear(root).append(h('div', { class: 'help-done' }, h('h1', null, 'Request sent'),
         data.reference ? h('p', null, 'Reference: ', h('b', null, data.reference)) : null,
-        h('p', null, pos ? 'Patrol has your location, and where your phone is. Stay where you are,' : 'Patrol has your location. Stay where you are, keep warm, and keep the phone with you. If things get worse, call 911.')));
+        data.warning ? h('p', { class: 'help-msg', role: 'status' }, data.warning) : null,
+        h('p', null, pos ? 'Patrol has your location, and where your phone is. Stay where you are, keep warm, and keep the phone with you. If things get worse, call 911.' : 'Patrol has your location. Stay where you are, keep warm, and keep the phone with you. If things get worse, call 911.')));
     } catch (err) {
       send.disabled = false;
       msg.append(h('p', { class: 'error-box', role: 'alert' }, err.message));

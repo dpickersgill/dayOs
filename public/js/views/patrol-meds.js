@@ -18,6 +18,7 @@ export async function drawMeds(box) {
       h('div', null, h('h2', null, 'Medications and oxygen'),
         h('p', { class: 'muted' }, [d.medical_director ? `Medical director: ${d.medical_director}.` : 'No medical director recorded (Settings, Patrol, Patrol settings).', d.protocol_version ? ` Protocols: ${d.protocol_version}.` : ''].join(''))),
       d.flags.length ? h('ul', { class: 'flag-list', role: 'status' }, d.flags.map((f) => h('li', null, state(f.level === 'bad' ? 'Now' : 'Soon', f.level), ` ${f.text}`))) : h('p', { class: 'muted' }, 'Nothing expired, low or owed.'),
+      pendingPanel(d, load),
 
       h('section', { class: 'panel stack' },
         h('div', { class: 'spread' }, h('h3', null, 'Formulary'), edit ? button('Add a medication', () => drugDialog(d, null, load), { small: true }) : null),
@@ -62,6 +63,36 @@ export async function drawMeds(box) {
   await load();
 }
 
+/**
+ * Controlled moves and counts waiting for their witness. The witness confirms signed in as themselves, or types their own
+ * PIN on the recorder's phone. Nothing changes in the stock until they do.
+ */
+function pendingPanel(d, again) {
+  const p = d.pending || { moves: [], counts: [] };
+  if (!p.moves.length && !p.counts.length) return null;
+  const acts = (kind, x) => h('span', { class: 'row tight' },
+    x.i_witness ? button('Confirm as witness', async () => { await post(`/patrol/meds/${kind}/${x.id}/confirm`, {}); toast('Confirmed'); await again(); }, { small: true, kind: 'primary' }) : null,
+    x.mine ? button('Witness PIN', () => pinDialog(kind, x, again), { small: true, label: 'The witness types their PIN on this phone' }) : null,
+    (x.mine || x.i_witness) && !(kind === 'moves' && x.treatment_id) ? button('Decline', async () => { await post(`/patrol/meds/${kind}/${x.id}/decline`, {}); toast('Declined. Nothing changed.'); await again(); }, { small: true, kind: 'quiet-danger' }) : null);
+  return h('section', { class: 'panel stack', 'data-area': 'med-pending' }, h('h3', null, 'Waiting for a witness'),
+    h('p', { class: 'muted small' }, 'A controlled medication change or count counts only once the witness confirms it: signed in as themselves, or with their own PIN on this phone.'),
+    h('ul', { class: 'plain' },
+      ...p.moves.map((m) => h('li', { class: 'spread' }, h('span', null, h('b', null, m.drug), ` ${m.treatment_id ? 'voided dose going back' : label(m.reason).toLowerCase()} ${Math.abs(m.delta)} ${m.unit}, ${fmtDateTime(m.at)}, by ${m.by_name || ''}. Witness: ${m.witness || 'anyone on the roster'}`), acts('moves', m))),
+      ...p.counts.map((c) => h('li', { class: 'spread' }, h('span', null, h('b', null, 'Controlled count'), ` ${fmtDateTime(c.counted_at)}, by ${c.by_name || ''}. Witness: ${c.witness || ''}`), acts('counts', c)))));
+}
+
+async function pinDialog(kind, x, again) {
+  const { data: roster } = await get('/patrol/team');
+  const who = x.witness_staff ? null : select(roster.map((m) => [m.staff_id, `${m.first_name} ${m.last_name}`]), '', { name: 'witness_staff' });
+  formDialog('Witness confirms with their PIN', h('div', { class: 'form' },
+    h('p', { class: 'wide muted' }, `Hand the phone to ${x.witness || 'the witness'}. They type their own time clock PIN.`),
+    who ? field('Witness', who) : null,
+    field('PIN', input({ name: 'pin', type: 'password', inputmode: 'numeric', autocomplete: 'off', required: true, minlength: 4, maxlength: 8, pattern: '[0-9]*' }))), async (fd) => {
+    await post(`/patrol/meds/${kind}/${x.id}/confirm`, { pin: String(fd.get('pin')), ...(who ? { witness_staff: Number(fd.get('witness_staff')) } : {}) });
+    toast('Confirmed by the witness'); await again();
+  }, { submitText: 'Confirm' });
+}
+
 function drugDialog(d, f, again) {
   const routes = h('div', { class: 'row' }, d.routes.map((r) => h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'routes', value: r, checked: f ? f.routes.includes(r) : false }), ` ${label(r)}`)));
   formDialog(f ? `Edit ${f.name}` : 'Add a medication', h('div', { class: 'form' },
@@ -100,8 +131,8 @@ async function moveDialog(d, k, again) {
     field(`Amount (${k.unit})`, input({ name: 'delta', type: 'number', step: 'any', required: true }), `On hand now: ${k.quantity}. For a correction, a minus number takes away.`),
     k.controlled ? field('Witness', select(roster.map((m) => [m.staff_id, `${m.first_name} ${m.last_name}`]), '', { name: 'witness_staff' }), 'A controlled medication needs a second person') : null,
     h('div', { class: 'wide' }, field('Note', input({ name: 'note', maxlength: 255 })))), async (fd) => {
-    await post(`/patrol/meds/stock/${k.id}/moves`, { reason: fd.get('reason'), delta: Number(fd.get('delta')), note: String(fd.get('note') || '').trim() || null, witness_staff: fd.get('witness_staff') ? Number(fd.get('witness_staff')) : null });
-    toast('Stock changed'); await again();
+    const r = await post(`/patrol/meds/stock/${k.id}/moves`, { reason: fd.get('reason'), delta: Number(fd.get('delta')), note: String(fd.get('note') || '').trim() || null, witness_staff: fd.get('witness_staff') ? Number(fd.get('witness_staff')) : null });
+    toast(r.pending ? 'Saved. It counts once the witness confirms it.' : 'Stock changed'); await again();
   }, { submitText: 'Save' });
 }
 
@@ -109,11 +140,11 @@ async function countDialog(d, again) {
   const { data: roster } = await get('/patrol/team');
   const lots = d.stock.filter((k) => k.controlled);
   formDialog('Controlled medication count', h('div', { class: 'stack' },
-    h('p', { class: 'muted' }, 'Count each lot with a second person. A lot that does not match is set to what you count, and needs a note.'),
+    h('p', { class: 'muted' }, 'Count each lot with a second person. A lot that does not match is set to what you count, and needs a note. The count applies once the witness confirms it.'),
     field('Witness', select(roster.map((m) => [m.staff_id, `${m.first_name} ${m.last_name}`]), '', { name: 'witness_staff' })),
     ...lots.map((k) => field(`${k.drug}, lot ${k.lot || k.id}${k.station ? `, ${k.station}` : ''} (record shows ${k.quantity})`, input({ name: `lot-${k.id}`, type: 'number', step: 'any', min: 0, required: true }))),
     field('Note', input({ name: 'note', maxlength: 500 }))), async (fd) => {
     const r = await post('/patrol/meds/counts', { witness_staff: Number(fd.get('witness_staff')), lines: lots.map((k) => ({ stock_id: k.id, counted: Number(fd.get(`lot-${k.id}`)) })), note: String(fd.get('note') || '').trim() || null });
-    toast(r.discrepancy ? 'Count saved: it did not match and is flagged' : 'Count matched'); await again();
+    toast(r.discrepancy ? 'Count saved: it does not match. It applies once the witness confirms it.' : 'Count saved. It applies once the witness confirms it.'); await again();
   }, { submitText: 'Save count', wide: true });
 }
