@@ -4,13 +4,14 @@ const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { crud } = require('../lib/crud');
 const { requireRole, isManager } = require('../middleware/auth');
-const { partialOf, z, dateStr, dateTimeStr, timeStr, validate, paramId, normDateTime, setClause } = require('../lib/util');
+const { partialOf, z, dateStr, dateTimeStr, planDateTimeStr, timeStr, validate, paramId, normDateTime, setClause } = require('../lib/util');
 const { notFound, conflict, bad, forbidden } = require('../lib/errors');
 const { staffProblems } = require('../lib/workforce');
 const { audit } = require('../lib/audit');
 const { tenantOf, localTime } = require('../lib/kiosk');
 const { dayRange, addDays, nowIn, todayIn } = require('../lib/util');
 const SH = require('../lib/shifts');
+const { personFields } = require('../lib/customers');
 
 const router = express.Router();
 const mgr = ['manager'];
@@ -86,7 +87,8 @@ router.post(
   validate(
     z.object({
       person_id: z.number().int().positive().optional(),
-      person: z.object({ first_name: z.string().min(1), last_name: z.string().min(1), email: z.string().email().optional(), phone: z.string().optional() }).optional(),
+      // The same rules as every other form that adds a person (lib/customers personFields): names at most 100 characters.
+      person: z.object({ first_name: personFields.first_name, last_name: personFields.last_name, email: personFields.email, phone: personFields.phone }).optional(),
       status: z.enum(['applicant', 'onboarding', 'active', 'inactive']).default('onboarding'),
       hired_on: dateStr.optional(),
       needs_housing: z.boolean().default(false),
@@ -301,8 +303,8 @@ router.put(
 const shiftSchema = z.object({
   position_id: z.number().int().positive(),
   staff_id: z.number().int().positive().optional(),
-  starts_at: dateTimeStr.transform(normDateTime),
-  ends_at: dateTimeStr.transform(normDateTime),
+  starts_at: planDateTimeStr.transform(normDateTime),
+  ends_at: planDateTimeStr.transform(normDateTime),
   notes: z.string().trim().max(200).optional(),
   override_availability: z.boolean().default(false),
 });

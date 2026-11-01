@@ -40,11 +40,7 @@ async function probe(url, headers) {
 async function checkApp() {
   try {
     await pool.query('SELECT 1');
-    const { LATEST } = require('../schema');
-    const [r] = LATEST.column
-      ? await pool.query('SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? LIMIT 1', [LATEST.table, LATEST.column])
-      : await pool.query('SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? LIMIT 1', [LATEST.table, LATEST.index]);
-    return r.length ? 'ok' : 'slow';
+    return (await require('./schemaready').migrated(pool)) ? 'ok' : 'slow';
   } catch (_) { return 'down'; }
 }
 

@@ -27,11 +27,7 @@ async function describe(conn) {
       out[t] = { n: Number(r.n), newest: r.newest || null };
     } catch (err) { out[t] = { error: err.code || err.message }; }
   }
-  const { LATEST } = require('../src/schema');
-  const [m] = LATEST.column
-    ? await conn.query('SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?', [LATEST.table, LATEST.column])
-    : await conn.query('SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?', [LATEST.table, LATEST.index]);
-  out.migrated = m.length > 0;
+  out.migrated = await require('../src/lib/schemaready').migrated(conn); // the same test as /readyz
   return out;
 }
 

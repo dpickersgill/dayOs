@@ -11,6 +11,11 @@ const server = app.listen(config.port, () => {
   console.log(`Verdynt/OS ${release.VERSION} (build ${release.BUILD}) listening on :${config.port}`);
   recordStart();
 });
+// A client gets 20 seconds to send its headers and 2 minutes for the whole request (a photo over a weak mountain phone
+// signal fits), so a slow sender cannot hold a server's place for Cloud Run's 15 minutes (2026.11.11, review INF-13).
+// How long the app may take to ANSWER is limited in app.js (REQUEST_TIMEOUT_MS; the scheduled jobs are exempt).
+server.headersTimeout = 20_000;
+server.requestTimeout = 120_000;
 
 // The console's deploy history: each version and build that has started on this database, first and latest start,
 // and who deployed it (deploy.sh passes the Google account). Before the migration has run, the table is missing: skip.

@@ -5,7 +5,7 @@ const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { crud } = require('../lib/crud');
 const { requireRole } = require('../middleware/auth');
-const { partialOf, z, dateTimeStr, validate, paramId, normDateTime, seasonFor, todayIn } = require('../lib/util');
+const { partialOf, z, dateTimeStr, validate, paramId, normDateTime, seasonFor, todayIn, nowIn, dateStr } = require('../lib/util');
 const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const R = require('../lib/rentals');
@@ -26,7 +26,7 @@ const itemFields = {
   serial_no: z.string().max(80).nullable().optional(),
   tier: z.enum(R.TIERS).optional(),
   boot_sole_mm: z.number().int().min(150).max(400).nullable().optional(),
-  purchased_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  purchased_on: dateStr.nullable().optional(),
   cost_cents: z.number().int().min(0).nullable().optional(),
   grade: z.enum(['A', 'B', 'C', 'D']).nullable().optional(),
   location: z.string().max(60).nullable().optional(),
@@ -131,7 +131,12 @@ router.get('/contracts', requireRole(...counter), async (req, res) => {
     where.push('c.status = ?');
     params.push(String(req.query.status));
   }
-  if (req.query.overdue === 'true') where.push("c.status = 'out' AND c.due_at < NOW()");
+  if (req.query.overdue === 'true') {
+    // due_at is the mountain's wall clock (rentalfit.dueFor): compare it with the mountain's time now, not UTC.
+    const tz = (await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone;
+    where.push("c.status = 'out' AND c.due_at < ?");
+    params.push(nowIn(tz));
+  }
   const data = await rows(
     pool,
     `SELECT c.*, p.first_name, p.last_name FROM rental_contracts c JOIN people p ON p.id = c.person_id AND p.tenant_id = c.tenant_id

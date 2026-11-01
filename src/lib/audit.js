@@ -5,7 +5,8 @@
  * "Audit trail"), nobody who can change the database, the app included, can change this copy.
  */
 function trail(fields) {
-  if (process.env.AUDIT_LOG_STDOUT === 'off') return;
+  // Tests may turn the copy off; in production it cannot be (2026.11.11): it is the copy nobody in the app can change.
+  if (process.env.AUDIT_LOG_STDOUT === 'off' && process.env.NODE_ENV !== 'production') return;
   const entry = { severity: 'NOTICE', logName: 'summitops-audit', audit: true, at: new Date().toISOString(), ...fields };
   if (entry.detail && entry.detail.length > 2000) entry.detail = `${entry.detail.slice(0, 2000)}...`;
   process.stdout.write(`${JSON.stringify(entry)}\n`);

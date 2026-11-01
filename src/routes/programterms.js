@@ -9,7 +9,7 @@ const { requireRole } = require('../middleware/auth');
 const { z, dateStr, validate, paramId } = require('../lib/util');
 const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
-const { todayIn, addDays } = require('../lib/util');
+const { todayIn, addDays, nowIn } = require('../lib/util');
 const PS = require('../lib/programsessions');
 const PP = require('../lib/programplus');
 const { coachBusy, instructorBusy } = require('../lib/workforce');
@@ -177,7 +177,11 @@ module.exports = function mount(router) {
       if (!keys.length) throw bad('Nothing to change');
       if (b.coach_staff_id) { const busy = await coachBusy(conn, t, b.coach_staff_id, g.id); if (busy) throw conflict(`That coach is busy: ${busy}`); } // one rule with lessons (lib/workforce)
       await conn.query(`UPDATE program_groups SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE tenant_id = ? AND id = ?`, [...keys.map((k) => b[k]), t, g.id]);
-      if (b.coach_staff_id !== undefined) await conn.query("UPDATE program_sessions SET coach_staff_id = ? WHERE tenant_id = ? AND group_id = ? AND status <> 'cancelled' AND starts_at >= NOW()", [b.coach_staff_id, t, g.id]);
+      // starts_at is the mountain's wall clock: "from now on" is the mountain's now, not UTC (2026.11.11).
+      if (b.coach_staff_id !== undefined) {
+        const tz = (await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [t])).timezone;
+        await conn.query("UPDATE program_sessions SET coach_staff_id = ? WHERE tenant_id = ? AND group_id = ? AND status <> 'cancelled' AND starts_at >= ?", [b.coach_staff_id, t, g.id, nowIn(tz)]);
+      }
       const fresh = await groupOf(conn, t, g.id);
       const moved = [];
       for (;;) {

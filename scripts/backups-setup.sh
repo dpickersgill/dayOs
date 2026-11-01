@@ -12,17 +12,34 @@
 #   --ha        also make the database server highly available (a standby in a second zone; about twice the database
 #               cost). Without it, losing the server's zone means restoring from backup (RECOVERY.md).
 #   --dry-run   print what would change, change nothing
+#   --kms-key projects/<p>/locations/us-east1/keyRings/<ring>/cryptoKeys/<key>
+#               encrypt the weekly copies with your own key (Cloud KMS) instead of Google's. Whoever cannot use the
+#               key cannot read a copy, even with access to the bucket. The bucket's storage service agent needs
+#               "Cloud KMS CryptoKey Encrypter/Decrypter" on the key; the script grants it.
+# The weekly copies can live in a SEPARATE project (2026.11.11), so nothing in the app's project (a build, a leaked
+# app account, Editor on the default account) can read or delete them: make a project for backups, then run
+#   BACKUP_PROJECT=<backup project id> bash scripts/backups-setup.sh
+# and use the same BACKUP_PROJECT= in front of restore-copy.sh. Overwritten or deleted copies stay recoverable for 90
+# days (soft delete), on top of the year of older versions.
 # Turning on point-in-time recovery or high availability restarts the database (a minute or two): it asks first.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/cloud-common.sh
 INSTANCE="${INSTANCE:-summitops-db}"
-BUCKET="gs://${PROJECT}-backups"
+BUCKET="$BACKUP_BUCKET" # gs://<BACKUP_PROJECT>-backups (cloud-common.sh); the app's own project unless BACKUP_PROJECT is set
 BACKUP_SA="summitops-backup@${PROJECT}.iam.gserviceaccount.com"
 JOB=summitops-weekly-export
 
-DRY=""; HA=""
-for a in "$@"; do case "$a" in --dry-run) DRY=1 ;; --ha) HA=1 ;; *) echo "Unknown option $a"; exit 1 ;; esac; done
+DRY=""; HA=""; KMS=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY=1 ;;
+    --ha) HA=1 ;;
+    --kms-key) KMS="${2:-}"; shift; [[ "$KMS" =~ ^projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+$ ]] || { echo "Give the key as projects/<p>/locations/<l>/keyRings/<r>/cryptoKeys/<k>"; exit 1; } ;;
+    *) echo "Unknown option $1"; exit 1 ;;
+  esac
+  shift
+done
 run() { if [ -n "$DRY" ]; then printf '  would run: %s\n' "$*"; else "$@"; fi; }
 
 step "Checking you are signed in to Google Cloud"
@@ -82,7 +99,16 @@ fi
 
 step "A weekly copy outside the database server"
 if ! gcloud storage buckets describe "$BUCKET" >/dev/null 2>&1; then
-  run gcloud storage buckets create "$BUCKET" --location="$REGION" --uniform-bucket-level-access --public-access-prevention
+  run gcloud storage buckets create "$BUCKET" --project="$BACKUP_PROJECT" --location="$REGION" --uniform-bucket-level-access --public-access-prevention
+fi
+[ "$BACKUP_PROJECT" = "$PROJECT" ] && echo "  The copies are in the app's own project. A separate backup project keeps them out of its reach (see the top of this script)."
+# A copy that is overwritten or deleted can still be brought back for 90 days.
+run gcloud storage buckets update "$BUCKET" --soft-delete-duration=90d
+if [ -n "$KMS" ]; then
+  GCS_SA="$(gcloud storage service-agent --project="$BACKUP_PROJECT")"
+  run gcloud kms keys add-iam-policy-binding "$KMS" --member="serviceAccount:$GCS_SA" --role=roles/cloudkms.cryptoKeyEncrypterDecrypter --quiet >/dev/null
+  run gcloud storage buckets update "$BUCKET" --default-encryption-key="$KMS"
+  echo "  New copies are encrypted with $KMS."
 fi
 # Every weekly copy has the same name; the bucket keeps each older version for a year, then deletes it.
 run gcloud storage buckets update "$BUCKET" --versioning

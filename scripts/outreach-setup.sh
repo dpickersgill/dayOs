@@ -4,10 +4,11 @@
 #
 #   bash scripts/outreach-setup.sh dan@your-outreach-domain.com
 #
-# It turns on the Gmail API, makes a service account for outreach with a key kept in Secret Manager, gives the key and
-# the mailbox to the live service only (staging never sends outreach), and adds a Cloud Scheduler job that runs
-# outreach every 30 minutes on weekdays. At the end it prints the client ID to authorize in Google Workspace Admin.
-# Safe to run again (a new key replaces the old one).
+# It turns on the Gmail API, makes a service account for outreach, lets the live app's own account sign in as it (no key
+# is made: since 2026.11.11 Google signs each sign-in through IAM Credentials, so there is no key to leak, copy or
+# rotate), deletes any key an earlier run made, gives the mailbox to the live service only (staging never sends
+# outreach), and adds a Cloud Scheduler job that runs outreach every 30 minutes on weekdays. At the end it prints the
+# client ID to authorize in Google Workspace Admin. Safe to run again.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/cloud-common.sh
@@ -22,32 +23,37 @@ gcloud services enable gmail.googleapis.com --quiet
 
 step "Service account for outreach"
 gcloud iam service-accounts describe "$OSA" >/dev/null 2>&1 || gcloud iam service-accounts create summitops-outreach --display-name "Verdynt/OS outreach (Gmail)" --quiet
-KEYFILE="$(mktemp)"
-trap 'rm -f "$KEYFILE"' EXIT
-if ! gcloud iam service-accounts keys create "$KEYFILE" --iam-account "$OSA" --quiet; then
-  echo "Could not make a key. If your organization blocks service account keys (iam.disableServiceAccountKeyCreation), allow it for this project and run this again."
-  exit 1
-fi
-
-step "Into Secret Manager"
-if secret_exists "$NAME"; then gcloud secrets versions add "$NAME" --data-file="$KEYFILE" >/dev/null
-else gcloud secrets create "$NAME" --replication-policy=automatic --data-file="$KEYFILE" >/dev/null; fi
+gcloud services enable iamcredentials.googleapis.com --quiet
 
 SERVICE="$PROD_SERVICE"
 load_service
 SA="$(echo "$SVC_JSON" | jq -r '.spec.template.spec.serviceAccountName // empty')"
-[ -n "$SA" ] && gcloud secrets add-iam-policy-binding "$NAME" --member "serviceAccount:$SA" --role roles/secretmanager.secretAccessor --quiet >/dev/null
+[ -n "$SA" ] || { echo "The live service has no service account of its own yet. Run bash scripts/harden.sh first."; exit 1; }
+
+step "The app may sign in as the outreach account (no key)"
+# Token Creator on the outreach account ONLY (not the project): the app can sign for summitops-outreach and nothing else.
+gcloud iam service-accounts add-iam-policy-binding "$OSA" --member "serviceAccount:$SA" --role roles/iam.serviceAccountTokenCreator --quiet >/dev/null
+echo "  $SA may sign in as $OSA."
+
+step "Old keys deleted"
+for k in $(gcloud iam service-accounts keys list --iam-account "$OSA" --managed-by=user --format='value(name.basename())'); do
+  gcloud iam service-accounts keys delete "$k" --iam-account "$OSA" --quiet >/dev/null && echo "  Deleted key $k"
+done
+REMOVE=()
+if [ -n "$(secretof OUTREACH_GMAIL_KEY)" ]; then REMOVE=(--remove-secrets OUTREACH_GMAIL_KEY); fi
 
 step "On $SERVICE"
-gcloud run services update "$SERVICE" --region "$REGION" --update-secrets "OUTREACH_GMAIL_KEY=$NAME:latest" --update-env-vars "OUTREACH_SENDER=$SENDER" --quiet
+gcloud run services update "$SERVICE" --region "$REGION" "${REMOVE[@]}" --update-env-vars "OUTREACH_SENDER=$SENDER,OUTREACH_GMAIL_SA=$OSA" --quiet
 load_service
+# Only now that the service no longer reads it: the secret that held the old key goes too.
+secret_exists "$NAME" && { gcloud secrets delete "$NAME" --quiet >/dev/null; echo "  Deleted the secret $NAME (it held a key)."; } || true
 
 step "Every 30 minutes on weekdays (Cloud Scheduler)"
 BASE="$(check_url)"
-JOBS="$(secretof JOBS_KEY)"
-if [ -z "$JOBS" ]; then echo "The service has no JOBS_KEY yet (see RUNBOOK.md, Patrol follow-up emails). Add it, then run this again."; exit 1; fi
-ARGS=(--location "$REGION" --schedule "*/30 8-17 * * 1-5" --time-zone "America/New_York" --uri "$BASE/api/v1/internal/jobs/outreach" --http-method POST --headers "x-jobs-key=$(secret_read "$JOBS")" --attempt-deadline=300s --quiet)
-if gcloud scheduler jobs describe summitops-outreach --location "$REGION" >/dev/null 2>&1; then gcloud scheduler jobs update http summitops-outreach "${ARGS[@]}"
+# Signed with a Google ID token for summitops-jobs, checked by the app (2026.11.11): no key is stored in the job.
+ensure_jobs_oidc
+ARGS=(--location "$REGION" --schedule "*/30 8-17 * * 1-5" --time-zone "America/New_York" --uri "$BASE/api/v1/internal/jobs/outreach" --http-method POST "${JOB_AUTH[@]}" --attempt-deadline=300s --quiet)
+if gcloud scheduler jobs describe summitops-outreach --location "$REGION" >/dev/null 2>&1; then gcloud scheduler jobs update http summitops-outreach "${ARGS[@]}" --remove-headers x-jobs-key
 else gcloud scheduler jobs create http summitops-outreach "${ARGS[@]}"; fi
 
 CLIENT_ID="$(gcloud iam service-accounts describe "$OSA" --format='value(oauth2ClientId)')"

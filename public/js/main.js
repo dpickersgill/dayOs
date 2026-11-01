@@ -14,7 +14,7 @@ import * as alerts from './alerts.js';
 import { flush as flushOutbox, waitingCounts, forgetCases, setDeviceKey, dropDeviceKey } from './outbox.js';
 import { buildFrame, GROUP_OF, PATROL_SECTIONS, patrolSection } from './nav.js';
 import { icon } from './icons.js';
-import { h, svg, clear, ctx, can, isManager, schoolCan, toast, loading, errorBox, button, field, input, closeAllDialogs, newPage, hashPath, todayStr } from './ui.js';
+import { h, svg, clear, ctx, can, isManager, schoolCan, toast, loading, errorBox, button, field, input, closeAllDialogs, dirtyDialogOpen, newPage, hashPath, todayStr } from './ui.js';
 
 const VIEWS = [
   // [hash, label, who may open it, loader]
@@ -815,8 +815,15 @@ async function showRoom() {
 // Moving to another page closes any dialog left open on the last one (for example a customer opened from an Inbox link).
 // A change to the query alone (Back to the last tab) stays on the page: the tabs follow the address themselves.
 let lastPath = hashPath();
+let lastHash = location.hash;
 window.addEventListener('hashchange', () => {
   const now = hashPath();
+  // Back (or a link) while a form has something typed in it: ask first, and stay on the page if the answer is no.
+  if (now !== lastPath && dirtyDialogOpen() && !window.confirm('Leave this page? What you typed in the open form will be lost.')) {
+    history.pushState(null, '', lastHash);
+    return;
+  }
+  lastHash = location.hash;
   if (now !== lastPath) closeAllDialogs();
   lastPath = now;
   if (ctx.me && frame && drawnPath !== null && now === drawnPath && currentPath().key) return;

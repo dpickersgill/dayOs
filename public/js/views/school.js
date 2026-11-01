@@ -1,5 +1,5 @@
 import { get, post, patch, put, del } from '../api.js';
-import { h, clear, ctx, can, isManager, schoolCan, table, state, input, select, field, button, toast, formDialog, dialog, val, num, todayStr, addDays, fmtDateTime, fmtDate, fmtTime, fmtRange, label, empty, errorBox, tabs, money, confirmDialog, fail, appendAll, hashParam, withHashParam } from '../ui.js';
+import { closeAllDialogs, h, clear, ctx, can, isManager, schoolCan, table, state, input, select, field, button, toast, formDialog, dialog, val, num, todayStr, addDays, fmtDateTime, fmtDate, fmtTime, fmtRange, label, empty, errorBox, tabs, money, confirmDialog, fail, appendAll, hashParam, withHashParam } from '../ui.js';
 import { levelOptions, levelName, levelList } from '../levels.js';
 import * as myDay from './school-myday.js';
 import { flags } from './school-myday.js';
@@ -138,7 +138,7 @@ async function cancelOne(s, done) {
   const deletable = Number(p.ever_booked) === 0;
   formDialog(deletable ? 'Cancel or delete this lesson' : 'Cancel this lesson', h('div', { class: 'stack' }, f,
     deletable ? h('p', { class: 'muted small' }, 'Nobody has ever booked it. If it was added by mistake, you can delete it instead: ', button('Delete lesson', async () => {
-      await del(`/skischool/sessions/${s.id}`); toast('Lesson deleted'); document.querySelectorAll('.overlay').forEach((o) => o.remove()); await done();
+      await del(`/skischool/sessions/${s.id}`); toast('Lesson deleted'); await closeAllDialogs(); await done();
     }, { small: true })) : null), async (fd) => {
     const r = await post(`/skischool/sessions/${s.id}/cancel`, { reason: val(fd, 'reason') });
     toast('Lesson canceled');

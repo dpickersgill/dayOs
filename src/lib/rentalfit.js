@@ -4,7 +4,7 @@
 // setting is chosen from, the renter's signed confirmation of those details, the binding suggestion from the shop's own
 // chart, and handing the gear out. Shared by the Rentals screen, Sell (checkout), the online shop and the group hand-out.
 const { rows, one } = require('../db');
-const { z, todayIn, addDays, seasonFor, dayRange, nowIn } = require('./util');
+const { z, todayIn, addDays, seasonFor, dayRange, nowIn, dateStr, dateTimeStr } = require('./util');
 const { notFound, conflict, bad, forbidden } = require('./errors');
 const { ON_FILE } = require('./waivers');
 const R = require('./rentals');
@@ -65,7 +65,7 @@ const ageOn = (dob, day) => {
 const detailsSchema = z.object({
   height_in: z.number().int().min(20).max(100).nullable().optional(),
   weight_lb: z.number().int().min(20).max(500).nullable().optional(),
-  date_of_birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  date_of_birth: dateStr.nullable().optional(),
   boot_size: z.string().max(10).nullable().optional(),
   boot_sole_mm: z.number().int().min(150).max(400).nullable().optional(),
   stance: z.enum(['regular', 'goofy']).nullable().optional(),
@@ -227,7 +227,7 @@ async function signoffProblem(conn, tenantId, gear, defaultPersonId, settings, {
 
 const handoutSchema = z.object({
   items: z.array(R.gearLine).max(60), // empty is fine when gear was set aside on the contract (a group, the night before)
-  due_at: z.string().regex(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/).optional(),
+  due_at: dateTimeStr.optional(),
   deposit_cents: z.number().int().min(0).max(1_000_000).optional(),
   // a rental with no paid sale behind it: managers only, and they say why
   unpaid_reason: z.string().max(200).optional(),

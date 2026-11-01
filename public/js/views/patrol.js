@@ -253,7 +253,7 @@ async function drawCases(box, { canAdmin } = {}) {
   function clearAll() { Object.assign(f, REMEMBER); q.value = ''; category.value = ''; severity.value = ''; from.value = ''; to.value = ''; sync(); load(); }
   function drawSummary(count) {
     const pills = active();
-    clear(summary).append(h('b', null, count == null ? 'Loading…' : `${count}${count === 500 ? '+' : ''} case${count === 1 ? '' : 's'}`),
+    clear(summary).append(h('b', null, count == null ? 'Loading…' : `${count} case${count === 1 ? '' : 's'}`),
       ...pills.map(([name, value, undo]) => h('button', { type: 'button', class: 'pill', 'aria-label': `Remove ${name} filter: ${value}`, onclick: () => { undo(); q.value = f.q; category.value = f.category; severity.value = f.severity; from.value = f.from; to.value = f.to; sync(); load(); } }, `${value} ×`)),
       ...(pills.length ? [button('Clear all', clearAll, { small: true, kind: 'ghost' })] : []));
   }
@@ -263,11 +263,27 @@ async function drawCases(box, { canAdmin } = {}) {
     drawSummary(null);
     clear(list).append(h('p', { class: 'loading' }, 'Loading…'));
     try {
-      const { data } = await get(`/patrol/incidents${query() ? `?${query()}` : ''}`);
+      const { data, total } = await get(`/patrol/incidents${query() ? `?${query()}` : ''}`);
       if (my !== token) return;
-      drawSummary(data.length);
-      clear(list).append(data.length ? h('div', { class: 'case-list' }, data.map((i) => caseRow(i, { reportState: true })))
-        : h('div', { class: 'empty' }, h('p', null, active().length ? 'No cases match these filters.' : 'There are no cases yet.'), active().length ? button('Clear filters', clearAll, { small: true }) : null));
+      drawSummary(total);
+      if (!data.length) {
+        clear(list).append(h('div', { class: 'empty' }, h('p', null, active().length ? 'No cases match these filters.' : 'There are no cases yet.'), active().length ? button('Clear filters', clearAll, { small: true }) : null));
+        return;
+      }
+      // A page of 500 at a time; Show more fetches the next page (2026.11.11).
+      const rowsBox = h('div', { class: 'case-list' }, data.map((i) => caseRow(i, { reportState: true })));
+      const more = h('div', { class: 'row' });
+      let shown = data.length;
+      const drawMore = () => clear(more).append(...(shown < total ? [h('span', { class: 'muted small' }, `Showing ${shown} of ${total}`),
+        button('Show more', async () => {
+          const next = await get(`/patrol/incidents?${query()}${query() ? '&' : ''}offset=${shown}`);
+          if (my !== token) return;
+          rowsBox.append(...next.data.map((i) => caseRow(i, { reportState: true })));
+          shown = next.data.length ? shown + next.data.length : total;
+          drawMore();
+        }, { small: true })] : []));
+      drawMore();
+      clear(list).append(rowsBox, more);
     } catch (err) { if (my === token) clear(list).append(errorBox(err)); }
   }
   let timer;

@@ -15,6 +15,7 @@ const { baseUrl } = require('../lib/baseurl');
 const { isSandbox } = require('../lib/sandbox');
 const kiosk = require('../lib/kiosk');
 const messaging = require('../lib/messaging');
+const { jobAuth } = require('../lib/jobauth'); // Cloud Scheduler's Google-signed token, or the old key until that is set up
 const weekly = require('../lib/weekly');
 const shopafter = require('../lib/shopafter');
 const cardrefund = require('../lib/cardrefund');
@@ -88,11 +89,7 @@ publicRouter.post('/:slug/give', validate(giftSchema), async (req, res) => {
 });
 
 // ---------------------------------------------------------------- the daily job (Cloud Scheduler)
-jobs.post('/daily', async (req, res) => {
-  const key = process.env.JOBS_KEY || '';
-  const given = String(req.get('x-jobs-key') || '');
-  const a = Buffer.from(given); const b = Buffer.from(key);
-  if (!key || a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new AppError(401, 'Not allowed');
+jobs.post('/daily', jobAuth, async (req, res) => {
   // Only one run at a time, across every server: a second call waits up to a minute for the first to finish, then is
   // turned away (each email is also claimed before sending, so even an overlap could not send twice).
   const conn = await pool.getConnection();
@@ -136,11 +133,7 @@ jobs.post('/daily', async (req, res) => {
 
 // ---------------------------------------------------------------- guests (Cloud Scheduler, every 5 minutes)
 // Birthday gifts due, evening recaps, price promises, payment plan charges, waitlist and renewal offers.
-jobs.post('/guests', async (req, res) => {
-  const key = process.env.JOBS_KEY || '';
-  const given = String(req.get('x-jobs-key') || '');
-  const a = Buffer.from(given); const b = Buffer.from(key);
-  if (!key || a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new AppError(401, 'Not allowed');
+jobs.post('/guests', jobAuth, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const [[got]] = await conn.query("SELECT GET_LOCK('summitops_guests_job', 5) AS ok");
@@ -154,11 +147,7 @@ jobs.post('/guests', async (req, res) => {
 
 // ---------------------------------------------------------------- the ski school (Cloud Scheduler, every 5 minutes)
 // Waitlist offers that ran out, privates the instructor did not answer in time, recaps due, weather choices.
-jobs.post('/lessons', async (req, res) => {
-  const key = process.env.JOBS_KEY || '';
-  const given = String(req.get('x-jobs-key') || '');
-  const a = Buffer.from(given); const b = Buffer.from(key);
-  if (!key || a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new AppError(401, 'Not allowed');
+jobs.post('/lessons', jobAuth, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const [[got]] = await conn.query("SELECT GET_LOCK('summitops_lessons_job', 5) AS ok");
@@ -172,11 +161,7 @@ jobs.post('/lessons', async (req, res) => {
 
 // ---------------------------------------------------------------- prospect outreach (Cloud Scheduler, every 30 minutes on weekdays)
 // Sends what is due inside the sending hours and checks threads for replies and bounces (lib/outreach.js).
-jobs.post('/outreach', async (req, res) => {
-  const key = process.env.JOBS_KEY || '';
-  const given = String(req.get('x-jobs-key') || '');
-  const a = Buffer.from(given); const b = Buffer.from(key);
-  if (!key || a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new AppError(401, 'Not allowed');
+jobs.post('/outreach', jobAuth, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const [[got]] = await conn.query("SELECT GET_LOCK('summitops_outreach_job', 5) AS ok");

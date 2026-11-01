@@ -173,16 +173,21 @@ const filters = (req) => {
   return { where: where.join(' AND '), params };
 };
 
+// A page of cases at a time (500 at most), with the total, so a busy season's older cases can still be reached (2026.11.11).
 router.get('/incidents', patrol, needs('view_cases'), async (req, res) => {
   const { where, params } = filters(req);
+  const limit = Math.min(Math.max(Math.trunc(Number(req.query.limit)) || 500, 1), 500);
+  const offset = Math.max(Math.trunc(Number(req.query.offset)) || 0, 0);
   const data = await rows(
     pool,
     `SELECT i.id, i.season, i.seq, i.occurred_at, i.location, i.category, i.severity, i.summary, i.disposition, i.status, i.report_state,
             (SELECT COUNT(*) FROM incident_patients p WHERE p.tenant_id = i.tenant_id AND p.incident_id = i.id AND p.voided_at IS NULL) AS patient_count
-     FROM incidents i WHERE ${where} ORDER BY i.occurred_at DESC, i.id DESC LIMIT 500`,
-    params,
+     FROM incidents i WHERE ${where} ORDER BY i.occurred_at DESC, i.id DESC LIMIT ? OFFSET ?`,
+    [...params, limit, offset],
   );
-  res.json({ data: data.map(withNumber) });
+  const total = data.length < limit && (offset === 0 || data.length > 0) ? offset + data.length
+    : Number((await rows(pool, `SELECT COUNT(*) AS n FROM incidents i WHERE ${where}`, params))[0].n);
+  res.json({ data: data.map(withNumber), total, offset, limit });
 });
 
 // ---------------------------------------------------------------- access log (who looked at patient records)

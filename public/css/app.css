@@ -3668,3 +3668,20 @@ button.fill-day:hover { border-color: var(--line-strong); }
   .liftchk-edit li { flex-wrap: wrap; }
   .liftchk-edit li input:not([type]) { flex-basis: 100%; }
 }
+
+/* ---- Fix release 2026.11.11, Track OPS (ui.js dialogs, tables) */
+/* A table's hidden screen-reader text (.sr, absolutely placed) stays inside its own scroller, so a wide table scrolls
+   in its box and never makes the whole page scroll sideways (UI-2). */
+.table-wrap { position: relative; }
+/* "Close and lose what you typed here?" at the top of a dialog (UI-1). */
+.discard-ask { border: 1px solid var(--line); border-left: 4px solid var(--warn, #b45309); border-radius: 8px; padding: var(--sp-3, 12px) var(--sp-4, 16px); background: var(--surface); }
+.discard-ask p { margin: 0 0 8px; font-weight: 600; }
+.discard-ask .row { display: flex; flex-wrap: wrap; gap: 8px; }
+.discard-ask .btn { min-height: 44px; }
+/* On a touch screen (iPad, phone) there is no hover: the schedule grid's "+" in each cell is always shown. */
+@media (hover: none) {
+  .cell-add { border-color: var(--line); color: var(--trail-blue); }
+}
+/* The weekly report's "needs attention" lines are sentences: they wrap at phone width instead of running 3 px off. */
+.bd-list .state { white-space: normal; align-items: flex-start; }
+.bd-list .state::before { margin-top: 0.3em; }

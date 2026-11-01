@@ -109,7 +109,8 @@ export const nowStamp = () => { const p = zoned({ second: '2-digit' }); return `
 
 export function addDays(date, n) {
   const [y, m, d] = date.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+  const dt = new Date(0); dt.setUTCFullYear(y, m - 1, d + n); // Date.UTC would read a year under 100 as 1900 plus it
+  return dt.toISOString().slice(0, 10);
 }
 export function weekStart(date) {
   const [y, m, d] = date.split('-').map(Number);
@@ -171,7 +172,7 @@ export function select(options, value, attrs = {}) {
 }
 
 export function loading(text = 'Loading') { return h('p', { class: 'loading', role: 'status' }, `${text}…`); }
-export function errorBox(err) { return h('div', { class: 'error-box', role: 'alert' }, describeError(err)); }
+export function errorBox(err, labelFor) { return h('div', { class: 'error-box', role: 'alert' }, describeError(err, labelFor)); }
 export function empty(text, action) { return h('div', { class: 'empty' }, h('p', null, text), action || null); }
 
 // ---------------------------------------------------------------- table
@@ -222,47 +223,94 @@ const openDialogs = new Set();
  * the reader goes back to the guest). Resolves when that clean-up has finished, so sign-out can wait for it.
  */
 export function closeAllDialogs() { return Promise.allSettled([...openDialogs].map((close) => close())); }
+// Dialogs with something typed in them (2026.11.11, UI-1): main.js asks before a move to another page throws that away.
+const dirtyChecks = new Map();
+export const dirtyDialogOpen = () => [...dirtyChecks.values()].some((isDirty) => isDirty());
+// A dialog whose overlay was taken off the page some other way (not through its close) is closed properly here, so the
+// page behind does not stay inert and a form no longer on screen does not count as typed in.
+const sweepDialogs = () => { for (const isDirty of [...dirtyChecks.values()]) isDirty(); };
+// What a keyboard can reach inside a dialog (2026.11.11, UI-3: focus stays in the open dialog).
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const focusables = (el) => [...el.querySelectorAll(FOCUSABLE)].filter((x) => !x.closest('[hidden]') && x.getClientRects().length > 0);
 
 export function dialog(title, content, { wide = false, footer, onClose } = {}) {
+  sweepDialogs();
   const previous = document.activeElement;
   const titleId = `dlg-${Math.random().toString(36).slice(2, 8)}`;
   const closeBtn = h('button', { type: 'button', class: 'btn small', 'aria-label': 'Close' }, 'Close');
   const body = h('div', { class: 'stack' }, content);
+  // Asked before anything typed is thrown away (Escape, Close, Cancel): Keep editing is the safe answer, and has focus.
+  const keepBtn = h('button', { type: 'button', class: 'btn primary' }, 'Keep editing');
+  const dropBtn = h('button', { type: 'button', class: 'btn danger' }, 'Discard');
+  const askId = `${titleId}-ask`;
+  const ask = h('div', { class: 'discard-ask', role: 'alertdialog', 'aria-labelledby': askId, hidden: true },
+    h('p', { id: askId }, 'Close and lose what you typed here?'), h('div', { class: 'row' }, keepBtn, dropBtn));
   const box = h('div', { class: wide ? 'dialog wide' : 'dialog', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId },
-    h('header', null, h('h2', { id: titleId }, title), closeBtn), body, footer ? h('div', { class: 'footer' }, footer) : null);
+    h('header', null, h('h2', { id: titleId }, title), closeBtn), ask, body, footer ? h('div', { class: 'footer' }, footer) : null);
   const overlay = h('div', { class: 'overlay' }, box);
-  // Escape closes only the dialog on top, and focus goes back to what was focused when this one opened.
+  const onTop = () => { const all = document.querySelectorAll('.overlay'); return !all.length || all[all.length - 1] === overlay; };
+  let dirty = false;
+  box.addEventListener('input', (e) => { if (!ask.contains(e.target)) dirty = true; });
+  const keep = () => { ask.hidden = true; const f = focusables(body)[0]; (f || closeBtn).focus(); };
+  /** Close, unless something was typed: then ask first. */
+  function requestClose() {
+    if (!dirty) return close();
+    ask.hidden = false;
+    keepBtn.focus();
+    return undefined;
+  }
+  keepBtn.addEventListener('click', keep);
+  dropBtn.addEventListener('click', () => close());
+  // Escape closes only the dialog on top (asking first when something was typed; Escape again keeps editing), and Tab
+  // stays inside it: from the last control it goes to the first, and Shift+Tab the other way.
   const onKey = (e) => {
-    if (e.key !== 'Escape') return;
-    const all = document.querySelectorAll('.overlay');
-    if (all.length && all[all.length - 1] !== overlay) return;
-    close();
+    if (!onTop()) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (!ask.hidden) keep(); else requestClose();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const list = focusables(box);
+    if (!list.length) { e.preventDefault(); return; }
+    const first = list[0]; const last = list[list.length - 1];
+    if (!box.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+    else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   };
+  // Focus that lands outside (a click on the page behind, a screen reader) comes back to the dialog.
+  const onFocus = (e) => { if (onTop() && !overlay.contains(e.target) && !e.target.closest?.('.toasts')) { const f = focusables(box)[0]; if (f) f.focus(); } };
+  // The page behind is inert while the dialog is open: no clicks, focus or screen reader browsing (toasts stay live).
+  const inerted = [...document.body.children].filter((el) => el !== overlay && !el.inert && !el.classList.contains('toasts'));
   let closed = false;
   function close() {
-    if (closed) return;
+    if (closed) return undefined;
     closed = true;
     openDialogs.delete(close);
+    dirtyChecks.delete(close);
     document.removeEventListener('keydown', onKey);
+    document.removeEventListener('focusin', onFocus);
+    for (const el of inerted) el.inert = false;
     overlay.remove();
     if (previous && previous.isConnected) previous.focus();
     return onClose ? onClose() : undefined; // lets a dialog that holds the camera or NFC let go of it however it was closed
   }
-  closeBtn.addEventListener('click', close);
+  closeBtn.addEventListener('click', requestClose);
   // A tap outside closes the dialog only while nothing has been typed in it, so a stray tap never throws work away.
-  let dirty = false;
-  box.addEventListener('input', () => { dirty = true; });
   overlay.addEventListener('mousedown', (e) => {
     if (e.target !== overlay) return;
     if (!dirty) { close(); return; }
     box.classList.remove('nudge'); void box.offsetWidth; box.classList.add('nudge'); // a small shake: use Close or Cancel
   });
   document.addEventListener('keydown', onKey);
+  document.addEventListener('focusin', onFocus);
   document.body.append(overlay);
+  for (const el of inerted) el.inert = true;
   openDialogs.add(close);
+  dirtyChecks.set(close, () => { if (!overlay.isConnected) { close(); return false; } return dirty; });
   const first = box.querySelector('input:not([type=hidden]), select, textarea');
   (first || closeBtn).focus();
-  return { close, body, box };
+  return { close, requestClose, body, box, isDirty: () => dirty, setDirty: (v) => { dirty = Boolean(v); } };
 }
 
 /**
@@ -275,16 +323,31 @@ export function formDialog(title, fieldsEl, submit, { submitText = 'Save', wide 
   const cancel = h('button', { type: 'button', class: 'btn' }, 'Cancel');
   const form = h('form', { class: 'stack', novalidate: true }, fieldsEl, errorSlot, h('div', { class: 'footer row' }, cancel, save));
   const dlg = dialog(title, form, { wide, onClose });
-  cancel.addEventListener('click', dlg.close);
+  cancel.addEventListener('click', dlg.requestClose);
+  // The server names fields by their API path (person.first_name); this finds what the form calls the same field.
+  const labelFor = (path) => {
+    const last = String(path || '').split('.').pop();
+    const el = form.querySelector(`[name="${CSS.escape(last)}"]`) || form.querySelector(`[data-field="${CSS.escape(String(path))}"]`);
+    const lab = el && (el.closest('label') || form.querySelector(`label[for="${CSS.escape(el.id || '-')}"]`) || el.closest('.field')?.querySelector('label, .label'));
+    const text = lab ? (lab.firstChild && lab.firstChild.nodeType === 3 ? lab.firstChild.textContent : lab.textContent) : '';
+    return String(text || '').trim().replace(/\s*\*$/, '') || null;
+  };
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     clear(errorSlot);
+    // The browser's own checks first (required, min, max, maxlength), in its own words, at the field (2026.11.11, UI-5).
+    if (!form.checkValidity()) { form.reportValidity(); return; }
     save.disabled = true;
+    // While Save is working the typing is being kept, not lost: a save that moves to the new record's page must not be
+    // asked "leave this page?". If it fails, the dialog stays and counts as typed in again.
+    const wasDirty = dlg.isDirty();
+    dlg.setDirty(false);
     try {
       await submit(new FormData(form), form);
       dlg.close();
     } catch (err) {
-      errorSlot.append(errorBox(err));
+      dlg.setDirty(wasDirty);
+      errorSlot.append(errorBox(err, labelFor));
     } finally {
       save.disabled = false;
     }

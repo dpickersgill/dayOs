@@ -241,6 +241,10 @@ router.post('/contracts/:id/extend', requireRole(...counter), validate(z.object(
     if (!c) throw notFound('Contract');
     if (c.status === 'returned') throw conflict('That contract is already returned');
     if (dueAt <= String(c.due_at)) throw bad('The new return time must be later than the current one');
+    // At most a year from now (2026.11.11, UI-4): a mistyped year (2100) would hide the gear from Due today and overdue for good.
+    const tz = await tzOf(tenantId);
+    const yearOn = `${addDays(nowIn(tz).slice(0, 10), 366)} 23:59:59`;
+    if (dueAt > yearOn) throw bad(`The new return time must be within a year (by ${yearOn.slice(0, 10)}). Check the year.`);
     // A card hold only lasts a few days. Gear due back after the hold ends would have no deposit behind it.
     const holdEnds = await require('../lib/rentaldeposit').holdEndsLocal(conn, tenantId, id, await tzOf(tenantId));
     if (holdEnds && dueAt > holdEnds) {

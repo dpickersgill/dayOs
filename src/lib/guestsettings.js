@@ -2,7 +2,7 @@
 // A mountain's guest settings (guest_settings, one row per mountain): birthdays and loyalty, recaps, the fair pricing
 // promises, payment plans and the counter's refund limit. A mountain with no row gets the defaults.
 const { one } = require('../db');
-const { z } = require('./util');
+const { z, dateStr } = require('./util');
 
 const DEFAULTS = {
   season_opens_on: null,
@@ -15,7 +15,7 @@ const DEFAULTS = {
 const bool = z.union([z.boolean(), z.literal(0), z.literal(1)]).transform((v) => (v ? 1 : 0));
 const cents = z.number().int().min(0).max(10_000_000).nullable();
 const schema = z.object({
-  season_opens_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  season_opens_on: dateStr.nullable(),
   birthday_on: bool, birthday_ticket_product_id: z.number().int().positive().nullable(), birthday_percent: z.number().int().min(1).max(100).nullable(),
   birthday_credit_cents: cents, birthday_window: z.enum(['week', 'month']),
   recap_day_on: bool, recap_season_on: bool, milestones_on: bool, firsttimer_on: bool,

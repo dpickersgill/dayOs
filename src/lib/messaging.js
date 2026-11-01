@@ -11,7 +11,7 @@ const config = require('../config');
 const mailer = require('./mailer');
 const sms = require('./sms');
 const { recordConsent } = require('./consent');
-const { todayIn, addDays } = require('./util');
+const { todayIn, nowIn, addDays } = require('./util');
 
 const MAX_RECIPIENTS = 1000;
 const { esc } = require('./format');
@@ -149,8 +149,8 @@ async function runReminders(tenant, base) {
   if (!mailer.enabled() || !(await enabledFor(tenant.id))) return out;
   const today = todayIn(tenant.timezone);
   const overdue = await rows(pool, `SELECT c.id AS ref, p.id, p.first_name, LOWER(p.email) AS addr, c.due_at FROM rental_contracts c JOIN people p ON p.id = c.person_id AND p.tenant_id = c.tenant_id
-    WHERE c.tenant_id = ? AND c.status IN ('out','overdue') AND c.due_at < NOW() - INTERVAL 1 HOUR AND p.email IS NOT NULL AND p.anonymised_at IS NULL
-    AND NOT EXISTS (SELECT 1 FROM message_log m WHERE m.tenant_id = c.tenant_id AND m.kind = 'rental_overdue' AND m.ref_id = c.id AND (m.status = 'sent' OR m.created_at >= NOW() - INTERVAL 1 HOUR)) LIMIT 200`, [tenant.id]);
+    WHERE c.tenant_id = ? AND c.status IN ('out','overdue') AND c.due_at < ? - INTERVAL 1 HOUR AND p.email IS NOT NULL AND p.anonymised_at IS NULL
+    AND NOT EXISTS (SELECT 1 FROM message_log m WHERE m.tenant_id = c.tenant_id AND m.kind = 'rental_overdue' AND m.ref_id = c.id AND (m.status = 'sent' OR m.created_at >= NOW() - INTERVAL 1 HOUR)) LIMIT 200`, [tenant.id, nowIn(tenant.timezone)]); // due_at: local wall clock
   for (const r of overdue) {
     const res = await deliver({ tenant, person: r, kind: 'rental_overdue', refId: r.ref, channel: 'email', base,
       build: () => simpleEmail(tenant, `Your rental gear is overdue at ${tenant.name}`, [`Hi ${r.first_name},`, `Your rental gear from ${tenant.name} was due back and has not been returned yet. Please bring it back to the rental counter as soon as you can. Late fees may apply.`, 'If you already returned it, thank you, and please ignore this note.']) });

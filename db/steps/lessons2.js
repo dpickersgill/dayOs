@@ -4,13 +4,15 @@
 // Each entry: [name, (conn) => done?, ddl]. Track-only tables live in db/steps/lessons2-<track>.js.
 module.exports = ({ tableExists, columnExists }) => [
   // ---- one level scale: 1 (first time) to 9 (all terrain), the PSIA-AASI levels. A lesson teaches a range of levels.
+  // The fills only touch rows not filled yet, so picking up a cut-off migration (db/stepruns.js) never overwrites a level.
   ['lesson_sessions.level_min', (c) => columnExists(c, 'lesson_sessions', 'level_min'), [
     'ALTER TABLE lesson_sessions ADD COLUMN level_min TINYINT UNSIGNED NULL, ADD COLUMN level_max TINYINT UNSIGNED NULL, ADD COLUMN age_min TINYINT UNSIGNED NULL, ADD COLUMN age_max TINYINT UNSIGNED NULL',
     // the old four words, on the new scale
     `UPDATE lesson_sessions SET
        level_min = CASE ability_level WHEN 'first_timer' THEN 1 WHEN 'beginner' THEN 2 WHEN 'intermediate' THEN 4 ELSE 7 END,
-       level_max = CASE ability_level WHEN 'first_timer' THEN 1 WHEN 'beginner' THEN 3 WHEN 'intermediate' THEN 6 ELSE 9 END`,
-    "UPDATE lesson_sessions SET age_min = CASE age_group WHEN 'kids' THEN 4 WHEN 'teens' THEN 13 WHEN 'adults' THEN 18 ELSE NULL END, age_max = CASE age_group WHEN 'kids' THEN 12 WHEN 'teens' THEN 17 ELSE NULL END",
+       level_max = CASE ability_level WHEN 'first_timer' THEN 1 WHEN 'beginner' THEN 3 WHEN 'intermediate' THEN 6 ELSE 9 END
+     WHERE level_min IS NULL AND level_max IS NULL`,
+    "UPDATE lesson_sessions SET age_min = CASE age_group WHEN 'kids' THEN 4 WHEN 'teens' THEN 13 WHEN 'adults' THEN 18 ELSE NULL END, age_max = CASE age_group WHEN 'kids' THEN 12 WHEN 'teens' THEN 17 ELSE NULL END WHERE age_min IS NULL AND age_max IS NULL",
   ]],
   // where the lesson came from: typed in, a series, copied from another day, split off at lineup, a private request, an instructor's rebooking
   ['lesson_sessions.origin', (c) => columnExists(c, 'lesson_sessions', 'origin'), "ALTER TABLE lesson_sessions ADD COLUMN origin ENUM('manual','series','copy','split','request','rebook') NOT NULL DEFAULT 'manual', ADD COLUMN delay_minutes SMALLINT UNSIGNED NOT NULL DEFAULT 0"],
@@ -20,8 +22,9 @@ module.exports = ({ tableExists, columnExists }) => [
     `UPDATE people SET
        snowboard_level = IF(discipline = 'snowboard', CASE ability_level WHEN 'first_timer' THEN 1 WHEN 'beginner' THEN 2 WHEN 'intermediate' THEN 4 WHEN 'advanced' THEN 7 END, NULL),
        ski_level = IF(discipline <=> 'snowboard', NULL, CASE ability_level WHEN 'first_timer' THEN 1 WHEN 'beginner' THEN 2 WHEN 'intermediate' THEN 4 WHEN 'advanced' THEN 7 END),
-       level_source = IF(ability_level IS NULL, NULL, 'import')
-     WHERE ability_level IS NOT NULL`,
+       level_source = IF(ability_level IS NULL, NULL, 'import'),
+       updated_at = updated_at
+     WHERE ability_level IS NOT NULL AND ski_level IS NULL AND snowboard_level IS NULL AND level_source IS NULL`,
   ]],
   // what an instructor may teach, on the same scale
   ['instructor_profiles.teach levels', (c) => columnExists(c, 'instructor_profiles', 'ski_level_max'), `ALTER TABLE instructor_profiles

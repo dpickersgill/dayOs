@@ -9,17 +9,23 @@
 #   4. The database refuses unencrypted connections and cannot be deleted by accident [L4]
 #   5. A copy of every audit event kept for 400 days in its own log bucket, outside the database [M5]
 #   6. The app redeployed with all of the above, then checked
-# Two steps cannot be undone, so they only run when asked for:
-#   --lock-audit      locks the audit log bucket so nobody (you included) can shorten or delete it
-#   --remove-editor   takes the Editor role away from the default compute account (after giving it what builds need)
+#   7. (2026.11.11) Builds run as their own account (summitops-build: Artifact Registry, logs, the uploaded source), and
+#      the default compute account loses Editor and any project-wide read of storage (the weekly database copies)
+#   8. (2026.11.11) Older app revisions that still hold a key in a plain setting are deleted, so the key is gone from
+#      them too. Then rotate each key at its provider: bash scripts/rotate-secrets.sh
+# Options:
+#   --lock-audit      locks the audit log bucket so nobody (you included) can shorten or delete it (cannot be undone)
+#   --keep-editor     leaves Editor on the default compute account (not recommended; only if something else of yours
+#                     runs as that account and needs it)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/cloud-common.sh
-LOCK_AUDIT=0; REMOVE_EDITOR=0
+LOCK_AUDIT=0; REMOVE_EDITOR=1
 for a in "$@"; do
   case "$a" in
     --lock-audit) LOCK_AUDIT=1 ;;
-    --remove-editor) REMOVE_EDITOR=1 ;;
+    --remove-editor) REMOVE_EDITOR=1 ;; # the default since 2026.11.11; kept so older notes still work
+    --keep-editor) REMOVE_EDITOR=0 ;;
     *) echo "Unknown option $a"; exit 1 ;;
   esac
 done
@@ -43,7 +49,10 @@ echo "summitops-run can reach the database and write logs. It gets its own secre
 
 step "2. Keys into Secret Manager"
 SECRETS=()
-for name in STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET STRIPE_CONNECT_WEBHOOK_SECRET POSTMARK_SERVER_TOKEN TWILIO_AUTH_TOKEN JOBS_KEY BOOTSTRAP_KEY TOTP_KEY LINK_SECRET KIOSK_SECRET PLATFORM_TOTP_SECRET PLATFORM_KEY; do
+# ANTHROPIC_API_KEY is the patrol assistant's (BAA) key; ASSISTANT_API_KEY the
+# in-app assistant's (assistant-key.sh puts that one in Secret Manager already).
+MOVABLE=(STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET STRIPE_CONNECT_WEBHOOK_SECRET POSTMARK_SERVER_TOKEN TWILIO_AUTH_TOKEN JOBS_KEY BOOTSTRAP_KEY TOTP_KEY LINK_SECRET KIOSK_SECRET PLATFORM_TOTP_SECRET PLATFORM_KEY ANTHROPIC_API_KEY ASSISTANT_API_KEY)
+for name in "${MOVABLE[@]}"; do
   val="$(envval "$name")"
   [ -z "$val" ] && continue
   sname="summitops-$(echo "$name" | tr 'A-Z_' 'a-z-')"
@@ -72,7 +81,7 @@ else
   else gcloud secrets create summitops-db-migrator --replication-policy=automatic --data-file=/tmp/migrator.json >/dev/null; fi
   rm -f /tmp/migrator.json
   APP_PW="$(openssl rand -base64 48 | tr -d '/+=\n' | cut -c1-40)"
-  node scripts/db-runtime-user.js summitops_app "$APP_PW"
+  printf %s "$APP_PW" | node scripts/db-runtime-user.js summitops_app -
   if secret_exists summitops-db-app-password; then printf '%s' "$APP_PW" | gcloud secrets versions add summitops-db-app-password --data-file=- >/dev/null
   else printf '%s' "$APP_PW" | gcloud secrets create summitops-db-app-password --replication-policy=automatic --data-file=- >/dev/null; fi
   APP_DB_SECRET="summitops-db-app-password"
@@ -134,8 +143,13 @@ fi
 if [ "$LOCK_AUDIT" = 1 ]; then
   gcloud logging buckets update summitops-audit --location=global --locked --quiet
   echo "Locked: audit events are kept 400 days and nobody can shorten that."
+elif [ "$(gcloud logging buckets describe summitops-audit --location=global --format='value(locked)' 2>/dev/null)" = True ]; then
+  echo "Locked already: audit events are kept 400 days and nobody can shorten that."
 else
-  echo "Kept 400 days. To lock it so nobody can delete or shorten it (cannot be undone): bash scripts/harden.sh --lock-audit"
+  # Asked every run until it is locked (2026.11.11): an unlocked audit trail can be cut short by anyone with Editor.
+  echo "Kept 400 days, but not locked: someone with enough access could still shorten or delete it."
+  read -r -p "Type lock to lock it now (cannot be undone), or press Enter to leave it for now: " L
+  if [ "$L" = lock ]; then gcloud logging buckets update summitops-audit --location=global --locked --quiet; echo "Locked."; fi
 fi
 
 step "6. Redeploying with the new account, keys and login"
@@ -160,16 +174,26 @@ case "$OUT" in
   *) echo "The app did not answer as expected. Roll back in the console: Cloud Run, summitops-api, Revisions, send traffic to the previous one."; exit 1 ;;
 esac
 
+step "7. Builds as their own account; the default compute account loses Editor"
+ensure_build_sa
+# Before 2026.11.11 --remove-editor gave the default account what builds needed, including read of EVERY bucket in the
+# project (the weekly database copies too). Builds now run as summitops-build, so the default account needs none of it.
+for role in roles/storage.objectViewer roles/cloudbuild.builds.builder roles/artifactregistry.writer; do
+  gcloud projects remove-iam-policy-binding "$PROJECT" --member "serviceAccount:$COMPUTE_SA" --role "$role" --condition=None --quiet >/dev/null 2>&1 && echo "  $COMPUTE_SA no longer has $role" || true
+done
 if [ "$REMOVE_EDITOR" = 1 ]; then
-  step "Taking Editor away from the default compute account"
-  # Builds (gcloud run deploy --source) run as this account, so give it what a build needs first.
-  for role in roles/cloudbuild.builds.builder roles/artifactregistry.writer roles/logging.logWriter roles/storage.objectViewer; do
-    gcloud projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$COMPUTE_SA" --role "$role" --condition=None --quiet >/dev/null
-  done
-  gcloud projects remove-iam-policy-binding "$PROJECT" --member "serviceAccount:$COMPUTE_SA" --role roles/editor --condition=None --quiet >/dev/null 2>&1 || true
-  echo "Done. If a later deploy fails at the build step, run: gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$COMPUTE_SA --role roles/editor"
+  gcloud projects remove-iam-policy-binding "$PROJECT" --member "serviceAccount:$COMPUTE_SA" --role roles/editor --condition=None --quiet >/dev/null 2>&1 && echo "  $COMPUTE_SA no longer has Editor" || true
+  echo "The default compute account has no Editor role. Builds run as $BUILD_SA."
+else
+  echo "WARNING: --keep-editor: $COMPUTE_SA keeps Editor. Anything running as it can change the whole project and read every"
+  echo "  bucket, the weekly database copies included. Run bash scripts/harden.sh without --keep-editor when you can."
 fi
 
+step "8. Older revisions that still hold a key in a plain setting"
+# A key moved to Secret Manager is still written, in plain text, in every earlier revision of the service. Those
+# revisions are deleted (the one serving now, and the newest, are never touched).
+clean_plain_revisions
+echo "Rolling back can only go to revisions made after this. Give each key a new value: bash scripts/rotate-secrets.sh"
+
 printf '\nSecurity setup finished.\n'
-[ "$REMOVE_EDITOR" = 1 ] || echo "Optional: bash scripts/harden.sh --remove-editor   (default compute account loses Editor)"
 echo "Optional: bash scripts/cloud-armor.sh www.yourdomain.com app.yourdomain.com   (web firewall in front of the app; see RUNBOOK.md)"

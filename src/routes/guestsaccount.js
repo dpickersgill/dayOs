@@ -412,6 +412,8 @@ async function runMorning(t, base, { now: at = null } = {}) {
       const phone = await one(pool, 'SELECT phone FROM people WHERE tenant_id = ? AND id = ?', [t.id, s.person_id]);
       if (c.sms && c.sms.status === 'opted_in' && phone && phone.phone) texted = (await sms.send({ tenantId: t.id, to: phone.phone, body: `Today at ${t.name}: ${words} Your tickets: ${link}` })).ok;
     }
+    // Nothing went out (the email service was down): let the claim go, so the next run (5 minutes later) tries again.
+    if (!r.ok && !texted) { await pool.query('DELETE FROM morning_messages WHERE tenant_id = ? AND order_id = ? AND on_date = ?', [t.id, s.order_id, today]); continue; }
     await pool.query('UPDATE morning_messages SET emailed = ?, texted = ? WHERE tenant_id = ? AND order_id = ? AND on_date = ?', [r.ok ? 1 : 0, texted ? 1 : 0, t.id, s.order_id, today]);
     if (r.ok) sent += 1;
   }

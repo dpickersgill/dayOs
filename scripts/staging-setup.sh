@@ -8,8 +8,13 @@
 #   - its own Cloud Run service (summitops-staging): one server at most, and none when nobody is using it
 #   - its own service account (summitops-staging): it can reach the database server and write logs, and read the
 #     summitops-staging-* secrets and nothing else, so code on staging can never read a live key
-#   - its own database (summitops_staging) on the same database server, with a login that can reach nothing else
-#   - its own keys (sign-in, bootstrap, its own copy of the email key) and a shared password in front of the whole site
+#   - its own small database server (summitops-staging-db, 2026.11.11) with its own database (summitops_staging) and a
+#     login that can reach nothing else. Its account may connect to that server only (an IAM condition), never to the
+#     live one. With --shared-db it uses the live server instead (as before 2026.11.11), with limits: at most 10
+#     connections, no scheduled events, and still only the staging database
+#   - its own keys (sign-in, bootstrap) and a shared password in front of the whole site. Email needs a SEPARATE
+#     Postmark server's token (it asks; the live token is refused, since a server token can read every message the
+#     live server sent). The assistant gets a separate key or stays off (scripts/assistant-key.sh)
 #   - Stripe in test mode only (live keys are refused), with its own test webhooks
 #   - every email goes to your inbox instead of to the person it names; no text messages are sent
 #   - hidden from search engines
@@ -21,10 +26,14 @@ source scripts/cloud-common.sh
 
 STG_DB=summitops_staging
 STG_USER=summitops_stg
+SHARED=""
+for a in "$@"; do case "$a" in --shared-db) SHARED=1 ;; *) echo "Unknown option $a"; exit 1 ;; esac; done
+STG_INSTANCE="${STAGING_INSTANCE:-summitops-staging-db}"
 SECRETS=(summitops-staging-db-password summitops-staging-jwt summitops-staging-bootstrap summitops-staging-gate)
 
 rand() { openssl rand -base64 48 | tr -d '/+=\n' | cut -c1-"$1"; }
-put_secret() { # name value: create the secret, or add a new version only when asked to
+put_secret() { # name value: create the secret, or add a new version only when asked to (printf is a shell builtin: the
+  # value never appears on a command line)
   if secret_exists "$1"; then printf '%s' "$2" | gcloud secrets versions add "$1" --data-file=- >/dev/null
   else printf '%s' "$2" | gcloud secrets create "$1" --replication-policy=automatic --data-file=- >/dev/null; fi
 }
@@ -65,22 +74,71 @@ if ! secret_exists summitops-staging-stripe-key; then
     *) echo "That is not a test key. Staging only takes a key starting sk_test_. Nothing was saved."; exit 1 ;;
   esac
 else STRIPE_KEY="$(secret_read summitops-staging-stripe-key)"; fi
+# Email: a separate Postmark server for staging, never the live token (2026.11.11).
+LIVE_PM="$PM_PLAIN"; [ -n "$PM_SECRET" ] && LIVE_PM="$(secret_read "$PM_SECRET")"
+if secret_exists summitops-staging-postmark && [ -n "$LIVE_PM" ] && [ "$(secret_read summitops-staging-postmark)" = "$LIVE_PM" ]; then
+  echo "Staging holds the LIVE Postmark token (an earlier staging-setup.sh copied it). It is removed now."
+  gcloud secrets delete summitops-staging-postmark --quiet >/dev/null
+fi
+if ! secret_exists summitops-staging-postmark; then
+  echo "Email for staging: in Postmark, Servers, Create server (call it Verdynt/OS staging), and copy its Server API token."
+  echo "Never the live server's token: a server token can read every message the live server sent."
+  read -r -s -p "Paste the staging server's token, or press Enter to leave email off on staging: " STG_PM; echo
+  if [ -n "$STG_PM" ]; then
+    if [ "$STG_PM" = "$LIVE_PM" ]; then echo "That is the live server's token. Staging only takes a separate server's token. Nothing was saved."; exit 1; fi
+    put_secret summitops-staging-postmark "$STG_PM"
+  fi
+  unset STG_PM
+fi
+# The assistant: a separate key or nothing (scripts/assistant-key.sh). A copy of the live key is removed.
+if secret_exists summitops-staging-assistant-api-key && secret_exists summitops-assistant-api-key \
+  && [ "$(secret_read summitops-staging-assistant-api-key)" = "$(secret_read summitops-assistant-api-key)" ]; then
+  gcloud secrets delete summitops-staging-assistant-api-key --quiet >/dev/null
+  echo "Removed staging's copy of the LIVE assistant key: the assistant is off on staging until bash scripts/assistant-key.sh gives it its own key."
+fi
+unset LIVE_PM
 
 step "Installing"
-npm install --omit=dev --no-audit --no-fund
+# Exactly the locked versions, and no package's install scripts run here (they would run with your Google sign-in).
+npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
-step "1. The staging database"
-if gcloud sql databases describe "$STG_DB" --instance "$INSTANCE" >/dev/null 2>&1; then echo "$STG_DB is already there."
-else gcloud sql databases create "$STG_DB" --instance "$INSTANCE" --charset=utf8mb4 --quiet; fi
+step "1. The staging database server and database"
+if [ -n "$SHARED" ]; then
+  STG_INSTANCE="$INSTANCE"
+  echo "Sharing the live server $INSTANCE (--shared-db): the staging login gets at most 10 connections and no events."
+elif gcloud sql instances describe "$STG_INSTANCE" >/dev/null 2>&1; then echo "$STG_INSTANCE is already there."
+else
+  # The smallest server: staging holds test data only. Encrypted connections only; no public network access.
+  gcloud sql instances create "$STG_INSTANCE" --database-version=MYSQL_8_4 --edition=enterprise --tier="${STAGING_TIER:-db-f1-micro}" \
+    --region="$REGION" --storage-type=SSD --storage-size=10 --ssl-mode=ENCRYPTED_ONLY --quiet
+  rand 40 | sql_user_set "$STG_INSTANCE" root
+fi
+STG_CONN="$(gcloud sql instances describe "$STG_INSTANCE" --format='value(connectionName)')"
+if gcloud sql databases describe "$STG_DB" --instance "$STG_INSTANCE" >/dev/null 2>&1; then echo "$STG_DB is already there."
+else gcloud sql databases create "$STG_DB" --instance "$STG_INSTANCE" --charset=utf8mb4 --quiet; fi
 
 step "2. Keys, and a database login that can only reach the staging database"
 ensure_secret summitops-staging-db-password "$(rand 40)"
 ensure_secret summitops-staging-jwt "$(rand 64)"
 ensure_secret summitops-staging-bootstrap "$(rand 32)"
 STG_PW="$(secret_read summitops-staging-db-password)"
-AS=migrator open_db
-node scripts/staging-db-user.js "$STG_USER" "$STG_PW" "$STG_DB"
-export DB_USER="$STG_USER" DB_PASSWORD="$STG_PW" DB_NAME="$STG_DB"
+if [ -n "$SHARED" ]; then
+  AS=migrator open_db # the live server's migration login makes the staging login
+  STG_PORT=3307
+else
+  # The staging server's own admin login (staging's account cannot read it) makes the staging login.
+  ensure_secret summitops-staging-db-admin "$(rand 40)"
+  secret_read summitops-staging-db-admin | sql_user_set "$STG_INSTANCE" summitops_stg_admin
+  "$(proxy_path)" --gcloud-auth --port 3309 "$STG_CONN" >/tmp/cloud-sql-proxy-staging.log 2>&1 &
+  STG_PROXY=$!
+  trap 'kill "$STG_PROXY" 2>/dev/null || true; [ -n "$PROXY_PID" ] && kill "$PROXY_PID" 2>/dev/null || true' EXIT
+  for _ in $(seq 1 30); do (echo > /dev/tcp/127.0.0.1/3309) 2>/dev/null && break; sleep 1; done
+  export DB_HOST=127.0.0.1 DB_PORT=3309 DB_SSL=false DB_USER=summitops_stg_admin DB_NAME=mysql NODE_ENV=production
+  DB_PASSWORD="$(secret_read summitops-staging-db-admin)"; export DB_PASSWORD
+  STG_PORT=3309
+fi
+printf '%s' "$STG_PW" | node scripts/staging-db-user.js "$STG_USER" - "$STG_DB"
+export DB_HOST=127.0.0.1 DB_PORT="$STG_PORT" DB_USER="$STG_USER" DB_PASSWORD="$STG_PW" DB_NAME="$STG_DB"
 export JWT_SECRET="$(secret_read summitops-staging-jwt)"
 npm run migrate
 
@@ -91,10 +149,17 @@ else
   echo "Made $SA."
   sleep 5
 fi
-# Reach the database server (the staging login can only open the staging database) and write logs and metrics. Nothing else.
+# Write logs and metrics, and connect to the staging database server only (an IAM condition names it). Nothing else.
 POLICY="$(gcloud projects get-iam-policy "$PROJECT" --format=json)"
 has_role() { echo "$POLICY" | jq -e --arg r "$1" --arg m "serviceAccount:$SA" '[.bindings[]? | select(.role == $r and .condition == null) | .members[]?] | any(. == $m)' >/dev/null; }
-for role in roles/cloudsql.client roles/logging.logWriter roles/monitoring.metricWriter; do
+if has_role roles/cloudsql.client; then
+  gcloud projects remove-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role roles/cloudsql.client --condition=None --quiet >/dev/null
+  echo "  $SA may no longer connect to every database server"
+fi
+COND="expression=resource.name == 'projects/$PROJECT/instances/$STG_INSTANCE',title=staging-db-only,description=Staging connects to its own database server only"
+gcloud projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role roles/cloudsql.client --condition="$COND" --quiet >/dev/null
+echo "  $SA may connect to $STG_INSTANCE only"
+for role in roles/logging.logWriter roles/monitoring.metricWriter; do
   if ! has_role "$role"; then
     gcloud projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role "$role" --condition=None --quiet >/dev/null
     echo "  $SA now has $role"
@@ -104,18 +169,12 @@ if has_role roles/secretmanager.secretAccessor; then
   gcloud projects remove-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role roles/secretmanager.secretAccessor --condition=None --quiet >/dev/null
   echo "  $SA may no longer read every secret in the project"
 fi
-# Email: staging gets its own copy of the Postmark key, so it never needs to read the live secret.
-PM_VALUE="$PM_PLAIN"; [ -n "$PM_SECRET" ] && PM_VALUE="$(secret_read "$PM_SECRET")"
-if [ -n "$PM_VALUE" ] && ! secret_exists summitops-staging-postmark; then
-  put_secret summitops-staging-postmark "$PM_VALUE"; echo "  Copied the email (Postmark) key to summitops-staging-postmark"
-fi
-if secret_exists summitops-assistant-api-key && ! secret_exists summitops-staging-assistant-api-key; then
-  put_secret summitops-staging-assistant-api-key "$(secret_read summitops-assistant-api-key)"; echo "  Copied the assistant key to summitops-staging-assistant-api-key"
-fi
 STG_SECRETS=("${SECRETS[@]}")
 for s in summitops-staging-stripe-key summitops-staging-postmark summitops-staging-stripe-webhook summitops-staging-stripe-connect-webhook summitops-staging-assistant-api-key; do
   secret_exists "$s" && STG_SECRETS+=("$s")
 done
+# The staging server's admin login is for this script only: staging's account never reads it.
+secret_exists summitops-staging-db-admin && stop_read summitops-staging-db-admin "$SA"
 for s in "${STG_SECRETS[@]}"; do
   let_read "$s" "$SA"
   # A staging made before it had its own account ran as the live account (or the default one); they lose staging's keys.
@@ -123,13 +182,13 @@ for s in "${STG_SECRETS[@]}"; do
 done
 echo "Checking staging cannot read any live secret"
 for s in $(gcloud secrets list --format='value(name.basename())'); do
-  case "$s" in summitops-staging-*) continue ;; esac
+  case "$s" in summitops-staging-db-admin) ;; summitops-staging-*) continue ;; esac
   stop_read "$s" "$SA"
 done
 echo "Done. Staging can read only: ${STG_SECRETS[*]}"
 
 step "4. Deploying staging (this takes a few minutes)"
-ENVS="NODE_ENV=production|STAGE=staging|STAGING_INBOX=$INBOX|DB_SOCKET=$SOCKET|DB_USER=$STG_USER|DB_NAME=$STG_DB|DB_POOL=4|STRIPE_GUEST_FALLBACK=on"
+ENVS="NODE_ENV=production|STAGE=staging|STAGING_INBOX=$INBOX|DB_SOCKET=/cloudsql/$STG_CONN|DB_USER=$STG_USER|DB_NAME=$STG_DB|DB_POOL=4|STRIPE_GUEST_FALLBACK=on"
 [ -n "$MAIL_FROM_V" ] && ENVS="$ENVS|MAIL_FROM=$MAIL_FROM_V"
 SECS="DB_PASSWORD=summitops-staging-db-password:latest,JWT_SECRET=summitops-staging-jwt:latest,BOOTSTRAP_KEY=summitops-staging-bootstrap:latest,STAGING_GATE=summitops-staging-gate:latest"
 secret_exists summitops-staging-postmark && SECS="$SECS,POSTMARK_SERVER_TOKEN=summitops-staging-postmark:latest"
@@ -137,16 +196,19 @@ secret_exists summitops-staging-stripe-key && SECS="$SECS,STRIPE_SECRET_KEY=summ
 secret_exists summitops-staging-stripe-webhook && SECS="$SECS,STRIPE_WEBHOOK_SECRET=summitops-staging-stripe-webhook:latest"
 secret_exists summitops-staging-stripe-connect-webhook && SECS="$SECS,STRIPE_CONNECT_WEBHOOK_SECRET=summitops-staging-stripe-connect-webhook:latest"
 secret_exists summitops-staging-assistant-api-key && SECS="$SECS,ASSISTANT_API_KEY=summitops-staging-assistant-api-key:latest"
-gcloud run deploy "$STAGING_SERVICE" --source . --region "$REGION" --quiet --service-account "$SA" \
-  --add-cloudsql-instances "$SQL_CONN" --allow-unauthenticated \
+ensure_build_sa # builds run as summitops-build, never the default compute account
+gcloud run deploy "$STAGING_SERVICE" --source . --region "$REGION" --quiet --service-account "$SA" "${BUILD_FLAG[@]}" \
+  --set-cloudsql-instances "$STG_CONN" --allow-unauthenticated \
   --min-instances=0 --max-instances=1 --concurrency=40 --memory=1Gi --cpu-boost --timeout=900 \
   --set-env-vars "^|^$ENVS" --set-secrets "$SECS"
 URL="$(gcloud run services describe "$STAGING_SERVICE" --region "$REGION" --format='value(status.url)')"
 
 if [ -n "$STRIPE_KEY" ] && ! secret_exists summitops-staging-stripe-webhook; then
   step "5. Stripe test-mode webhooks for staging"
+  # The key goes in a header file only this account can read, never on curl's command line.
+  HDR="$(mktemp)"; chmod 600 "$HDR"; printf 'Authorization: Bearer %s\n' "$STRIPE_KEY" > "$HDR"
   hook() { # extra curl args: creates a webhook endpoint at staging and prints its signing secret
-    curl -sS -u "$STRIPE_KEY:" https://api.stripe.com/v1/webhook_endpoints -d "url=$URL/api/v1/stripe/webhook" \
+    curl -sS -H @"$HDR" https://api.stripe.com/v1/webhook_endpoints -d "url=$URL/api/v1/stripe/webhook" \
       -d "description=Verdynt/OS staging" "$@" | jq -r '.secret // empty'
   }
   W1="$(hook -d 'enabled_events[]=checkout.session.completed' -d 'enabled_events[]=checkout.session.expired' \
@@ -154,6 +216,7 @@ if [ -n "$STRIPE_KEY" ] && ! secret_exists summitops-staging-stripe-webhook; the
     -d 'enabled_events[]=invoice.paid' -d 'enabled_events[]=invoice.payment_failed' -d 'enabled_events[]=invoice.finalized')"
   W2="$(hook -d connect=true -d 'enabled_events[]=checkout.session.completed' -d 'enabled_events[]=checkout.session.expired' \
     -d 'enabled_events[]=account.updated' -d 'enabled_events[]=account.application.deauthorized')"
+  rm -f "$HDR"
   if [ -n "$W1" ] && [ -n "$W2" ]; then
     put_secret summitops-staging-stripe-webhook "$W1"; put_secret summitops-staging-stripe-connect-webhook "$W2"
     for s in summitops-staging-stripe-webhook summitops-staging-stripe-connect-webhook; do let_read "$s" "$SA"; done

@@ -4,7 +4,11 @@
 // bounces. It never uses Postmark: Postmark carries the mountains' own email and does not allow cold outreach.
 //
 // It signs in as a Google service account with domain-wide delegation, acting as the sender's mailbox:
-//   OUTREACH_GMAIL_KEY  the service account's JSON key (from Secret Manager)
+//   OUTREACH_GMAIL_SA   the outreach service account's email (2026.11.11). No key exists: the app's own account asks
+//                       Google (IAM Credentials, signJwt) to sign the sign-in for it, which it may do for this one
+//                       account only (scripts/outreach-setup.sh grants that). Nothing to leak or rotate.
+//   OUTREACH_GMAIL_KEY  the older way: the service account's JSON key (from Secret Manager), used only when
+//                       OUTREACH_GMAIL_SA is not set. outreach-setup.sh moves to the keyless way and deletes the keys.
 //   OUTREACH_SENDER     the mailbox it sends as, for example dan@verdynt-mail.com
 // In Google Workspace Admin, Security, API controls, Domain-wide delegation, the service account's client ID is given
 // the scopes in SCOPES. Tests replace the transport with setTransport().
@@ -20,17 +24,39 @@ function keyFile() {
   try { const k = JSON.parse(raw); return k.client_email && k.private_key ? k : null; } catch (_) { return null; }
 }
 const sender = () => String(process.env.OUTREACH_SENDER || '').trim().toLowerCase();
+const keylessAccount = () => String(process.env.OUTREACH_GMAIL_SA || '').trim();
+
+// The app's own access token, from the Cloud Run metadata server.
+async function runToken() {
+  const res = await fetch('http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token', { headers: { 'Metadata-Flavor': 'Google' }, signal: AbortSignal.timeout(5000) });
+  if (!res.ok) throw new Error(`Could not get the app's own Google token (${res.status})`);
+  return (await res.json()).access_token;
+}
+/** The sign-in assertion: signed by Google for the outreach account (keyless), or with its key (the older way). */
+async function assertion(claimsObj) {
+  const sa = keylessAccount();
+  if (sa) {
+    const res = await fetch(`https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${encodeURIComponent(sa)}:signJwt`, {
+      method: 'POST', headers: { authorization: `Bearer ${await runToken()}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ payload: JSON.stringify({ ...claimsObj, iss: sa }) }), signal: AbortSignal.timeout(20000) });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`Google would not sign for ${sa}: ${(j.error && j.error.message) || res.status}. Run bash scripts/outreach-setup.sh again.`);
+    return j.signedJwt;
+  }
+  const k = keyFile();
+  const head = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+  const claims = b64url(JSON.stringify({ ...claimsObj, iss: k.client_email }));
+  const sig = b64url(crypto.createSign('RSA-SHA256').update(`${head}.${claims}`).sign(k.private_key));
+  return `${head}.${claims}.${sig}`;
+}
 
 let token = { value: null, until: 0 };
 async function accessToken() {
   if (token.value && Date.now() < token.until - 60_000) return token.value;
-  const k = keyFile();
   const now = Math.floor(Date.now() / 1000);
-  const head = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-  const claims = b64url(JSON.stringify({ iss: k.client_email, sub: sender(), scope: SCOPES.join(' '), aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 }));
-  const sig = b64url(crypto.createSign('RSA-SHA256').update(`${head}.${claims}`).sign(k.private_key));
+  const signed = await assertion({ sub: sender(), scope: SCOPES.join(' '), aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 });
   const res = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: `${head}.${claims}.${sig}` }), signal: AbortSignal.timeout(20000) });
+    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: signed }), signal: AbortSignal.timeout(20000) });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`Google sign-in failed: ${j.error_description || j.error || res.status}. Check domain-wide delegation for the service account.`);
   token = { value: j.access_token, until: Date.now() + Number(j.expires_in || 3600) * 1000 };
@@ -58,7 +84,7 @@ function compose({ fromName, from, to, subject, text, unsubscribeUrl, inReplyTo 
 }
 
 const real = {
-  ready: () => Boolean(keyFile() && sender()),
+  ready: () => Boolean((keylessAccount() || keyFile()) && sender()),
   sender,
   /** Sends; a follow-up goes in the same thread. Returns { id, threadId, messageId }. */
   async send(msg) {

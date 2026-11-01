@@ -158,7 +158,7 @@ async function afterPassBought(tenantId, adjustments) {
  */
 async function remindAll() {
   if (!mailer.enabled()) return { skipped: 'email is not set up' };
-  const tenants = await rows(pool, "SELECT DISTINCT s.tenant_id, t.timezone, t.name, t.phone FROM program_sessions s JOIN tenants t ON t.id = s.tenant_id WHERE s.status = 'scheduled' AND s.group_id IS NOT NULL AND s.starts_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 3 DAY)");
+  const tenants = await rows(pool, "SELECT DISTINCT s.tenant_id, t.timezone, t.name, t.phone FROM program_sessions s JOIN tenants t ON t.id = s.tenant_id WHERE s.status = 'scheduled' AND s.group_id IS NOT NULL AND s.starts_at BETWEEN DATE_SUB(NOW(), INTERVAL 1 DAY) AND DATE_ADD(NOW(), INTERVAL 3 DAY)"); // a rough first cut: starts_at is local time, so a day either side of UTC
   let sent = 0;
   for (const t of tenants) {
     const set = await settingsOf(pool, t.tenant_id);

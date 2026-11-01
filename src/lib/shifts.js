@@ -7,10 +7,16 @@
 // time and are converted where the two meet.
 const { rows, one } = require('../db');
 const { staffProblems, span, AVAILABILITY } = require('./workforce');
-const { addDays, mapLimit } = require('./util');
+const { addDays, mapLimit, utcFromLocal } = require('./util');
 const { direct } = require('./review');
 
-const minutesBetween = (a, b) => Math.round((Date.parse(`${String(b).replace(' ', 'T')}Z`) - Date.parse(`${String(a).replace(' ', 'T')}Z`)) / 60000);
+// Minutes from a to b. Punches are database (UTC) times; shifts are the mountain's wall clock, so for those pass the
+// mountain's time zone and a shift across a daylight-saving change counts the hours really worked (10 PM to 6 AM the
+// night clocks fall back is 9 hours).
+const minutesBetween = (a, b, tz) => {
+  const ms = (x) => Date.parse(`${(tz ? utcFromLocal(x, tz) : String(x)).replace(' ', 'T').slice(0, 19)}Z`);
+  return Math.round((ms(b) - ms(a)) / 60000);
+};
 const shiftDt = (date, time) => `${date} ${String(time).slice(0, 8).padEnd(8, ':00')}`;
 const plusMinutes = (dt, m) => new Date(Date.parse(`${dt.replace(' ', 'T')}Z`) + m * 60000).toISOString().slice(0, 19).replace('T', ' ');
 
@@ -30,8 +36,9 @@ async function weekMinutes(db, tenantId, start, ignoreShiftId = 0) {
     ...await rows(db, "SELECT staff_id, starts_at, ends_at FROM shifts WHERE tenant_id = ? AND staff_id IS NOT NULL AND status <> 'cancelled' AND id <> ? AND starts_at >= ? AND starts_at < ?", [tenantId, ignoreShiftId, ...range]),
     ...await rows(db, "SELECT staff_id, starts_at, ends_at FROM patrol_shifts WHERE tenant_id = ? AND staff_id IS NOT NULL AND status <> 'cancelled' AND starts_at >= ? AND starts_at < ?", [tenantId, ...range]),
   ];
+  const tz = (await rows(db, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId]))[0]?.timezone;
   const out = new Map();
-  for (const s of list) out.set(Number(s.staff_id), (out.get(Number(s.staff_id)) || 0) + minutesBetween(s.starts_at, s.ends_at));
+  for (const s of list) out.set(Number(s.staff_id), (out.get(Number(s.staff_id)) || 0) + minutesBetween(s.starts_at, s.ends_at, tz));
   return out;
 }
 

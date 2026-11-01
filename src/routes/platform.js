@@ -7,7 +7,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const { pool, tx, rows, one } = require('../db');
 const config = require('../config');
-const { z, validate, paramId, partialOf } = require('../lib/util');
+const { z, validate, paramId, partialOf, dateStr } = require('../lib/util');
 const { AppError, bad, forbidden, notFound } = require('../lib/errors');
 const M = require('../lib/modules');
 const sandbox = require('../lib/sandbox');
@@ -479,7 +479,7 @@ router.patch('/leads/:id', validate(z.object({ status: z.enum(['new', 'contacted
 /** One mountain's billing, as the operator sets it: plan, trial end, free (comped), paid outside Stripe until a date. */
 router.put('/tenants/:id/billing', needsAccess, validate(z.object({
   plan_id: z.number().int().positive().nullable().optional(), addons: z.array(z.number().int().positive()).max(20).optional(), interval: z.enum(['month', 'year', 'season']).optional(),
-  comped: z.boolean().optional(), trial_ends_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), paid_until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  comped: z.boolean().optional(), trial_ends_on: dateStr.nullable().optional(), paid_until: dateStr.nullable().optional(),
   billing_email: z.string().trim().email().max(255).nullable().optional(), notes: z.string().max(500).nullable().optional(), apply_apps: z.boolean().default(false),
 })), async (req, res) => {
   const id = paramId(req); const b = req.body;
@@ -505,7 +505,7 @@ router.post('/tenants', validate(z.object({
   slug, name: z.string().min(2).max(255), timezone: z.string().default('America/New_York'),
   storage_cap_mb: z.number().int().min(10).max(100000).optional(),
   modules: z.record(z.string(), z.boolean()).optional(),
-  owner: z.object({ email: z.string().email(), password, first_name: z.string().min(1), last_name: z.string().min(1) }),
+  owner: z.object({ email: z.string().email().max(255), password, first_name: z.string().trim().min(1).max(100), last_name: z.string().trim().min(1).max(100) }),
   billing: z.enum(['trial', 'comped']).default('trial'), plan_id: z.number().int().positive().nullable().optional(),
 })), async (req, res) => {
   const b = req.body;

@@ -245,7 +245,8 @@ export function collect(charge, done) {
 }
 
 export function extend(c, done) {
-  formDialog(`Extend ${who(c)}`, h('div', { class: 'form' }, field('New return time', input({ type: 'datetime-local', name: 'due', required: true, value: String(c.due_at).replace(' ', 'T').slice(0, 16) }))), async (fd) => {
+  formDialog(`Extend ${who(c)}`, h('div', { class: 'form' }, field('New return time', input({ type: 'datetime-local', name: 'due', required: true, value: String(c.due_at).replace(' ', 'T').slice(0, 16),
+    min: String(c.due_at).replace(' ', 'T').slice(0, 16), max: `${new Date().getFullYear() + 1}-12-31T23:59` }), 'Later than now, and within a year')), async (fd) => {
     try {
       await post(`/rentals/contracts/${c.id}/extend`, { due_at: val(fd, 'due') });
     } catch (err) {

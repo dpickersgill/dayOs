@@ -75,11 +75,7 @@ gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$SA" 
 echo "Done for $SA"
 
 step "Connecting to it from here"
-PROXY="$HOME/cloud-sql-proxy"
-if [ ! -x "$PROXY" ]; then
-  curl -sSfo "$PROXY" https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.26.0/cloud-sql-proxy.linux.amd64
-  chmod +x "$PROXY"
-fi
+PROXY="$(bash -c 'source "$(dirname "$0")/scripts/cloud-common.sh"; proxy_path' "$0")" # checked against its published checksum
 "$PROXY" --gcloud-auth --port 3307 "$CONN" >/tmp/cloud-sql-proxy.log 2>&1 &
 PROXY_PID=$!
 trap 'kill "$PROXY_PID" 2>/dev/null || true' EXIT
@@ -90,7 +86,7 @@ export DB_HOST=127.0.0.1 DB_PORT=3307 DB_USER="$DBUSER" DB_PASSWORD="$PW" DB_NAM
 export JWT_SECRET="$(gcloud secrets versions access latest --secret="$(secretof JWT_SECRET)")"
 
 step "Installing"
-npm install --omit=dev --no-audit --no-fund >/dev/null
+npm ci --omit=dev --ignore-scripts --no-audit --no-fund >/dev/null # locked versions, no install scripts
 
 step "Setting up the tables"
 npm run migrate

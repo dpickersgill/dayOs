@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
-const { z, validate, paramId, nowIn } = require('../lib/util');
+const { z, validate, paramId, nowIn, dateTimeStr } = require('../lib/util');
 const { notFound, bad, AppError } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const PA = require('../lib/patrolaccess');
@@ -70,7 +70,7 @@ router.post('/incidents/:id/photos', patrol, needs('create_case'), raw(MAX_BYTES
     client_ref: z.string().regex(/^[A-Za-z0-9_-]{6,40}$/).optional(),
     file_name: z.string().trim().max(200).optional(),
     lat: z.coerce.number().min(-90).max(90).optional(), lng: z.coerce.number().min(-180).max(180).optional(),
-    taken_at: z.string().regex(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/).optional(),
+    taken_at: dateTimeStr.optional(),
   }).safeParse(req.query);
   if (!q.success) throw bad('Something about that photo upload was not right');
   const b = q.data;

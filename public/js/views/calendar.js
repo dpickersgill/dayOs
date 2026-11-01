@@ -65,7 +65,9 @@ export async function render(root) {
 
   const today = todayStr();
   let view = VIEWS.some((v) => v[0] === hashParam('view')) ? hashParam('view') : (phone() ? 'list' : 'month');
-  let anchor = /^\d{4}-\d{2}-\d{2}$/.test(hashParam('day') || '') ? hashParam('day') : today;
+  // A day that does not exist (2026-02-31) or is outside 2000 to 2099 in a link opens today instead (2026.11.11).
+  const realDay = (s) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || ''); return Boolean(m) && +m[1] >= 2000 && +m[1] <= 2099 && addDays(s, 0) === s; };
+  let anchor = realDay(hashParam('day')) ? hashParam('day') : today;
   let team = '';
   const off = readOff();
   let meta = null; let data = null; let picked = null;
@@ -299,7 +301,12 @@ export async function render(root) {
       }
       box.append(h('div', { class: 'footer row' },
         st.on ? button('Turn my link off', async () => { await del('/calendar/feed'); toast('Link turned off. Calendar apps stop updating.'); await show(null); }, { small: true }) : null,
-        button(st.on ? 'Make a new link' : 'Make my link', async () => { const r = await post('/calendar/feed', {}); await show(r); }, { kind: 'primary', small: true })));
+        // A new link stops the old one in every calendar app using it: ask first (2026.11.11).
+        button(st.on ? 'Make a new link' : 'Make my link', async () => {
+          const make = async () => { const r = await post('/calendar/feed', {}); await show(r); };
+          if (st.on) confirmDialog('Make a new link?', 'The link you have now stops working. Every calendar app using it stops updating until you add the new link.', 'Make a new link', make);
+          else await make();
+        }, { kind: 'primary', small: true })));
     }
     try { await show(null); } catch (err) { clear(box).append(errorBox(err)); }
     void dlg;

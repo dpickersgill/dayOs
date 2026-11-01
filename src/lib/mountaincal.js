@@ -12,7 +12,7 @@
 // items never carry a guest's, patient's or payroll detail: a group shows its name and size only.
 const crypto = require('crypto');
 const { rows, one } = require('../db');
-const { z, dateStr, timeStr, addDays, todayIn } = require('./util');
+const { z, dateStr, planDateStr, timeStr, addDays, todayIn } = require('./util');
 const { bad, forbidden } = require('./errors');
 const modules = require('./modules');
 const patrolAccess = require('./patrolaccess');
@@ -90,8 +90,8 @@ const teamsOf = (raw) => (raw ? String(raw).split(',').filter((t) => TEAM_KEYS.i
 const eventFields = {
   title: z.string().trim().min(1, 'Give the event a title').max(120),
   kind: z.enum(KIND_KEYS).default('event'),
-  starts_on: dateStr,
-  ends_on: dateStr.nullable().optional(),
+  starts_on: planDateStr, // 2000 to 2099: a calendar event in 1900 is a typing slip
+  ends_on: planDateStr.nullable().optional(),
   all_day: z.boolean().default(true),
   start_time: timeStr.nullable().optional(),
   end_time: timeStr.nullable().optional(),
@@ -303,7 +303,10 @@ const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 const newFeedToken = () => crypto.randomBytes(32).toString('base64url');
 
 /** RFC 5545 text: escape \ ; , and new lines, and fold lines at 75 octets. */
-const icsText = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+// RFC 5545 TEXT: backslash, semicolon and comma escaped, every line break (CRLF, LF or a bare CR) as \n, and every other
+// control character dropped, so a title can never end its line and start a property of its own (2026.11.11, CR-5).
+const icsText = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,')
+  .replace(/\r\n|\r|\n|\u2028|\u2029/g, '\\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '');
 function fold(line) {
   const out = []; let cur = '';
   for (const ch of line) {

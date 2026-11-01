@@ -63,6 +63,18 @@ function createApp() {
   // cloud-armor.sh sets TRUST_PROXY_HOPS=2; otherwise every visitor would share the load balancer's address for rate limits.
   app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS || 1));
   app.disable('x-powered-by');
+  // An answer that has not started after REQUEST_TIMEOUT_MS (default 5 minutes) gets "took too long", so a stuck request
+  // cannot hold one of the server's places for Cloud Run's 15 minutes. The scheduled jobs are exempt (the daily job may
+  // take up to 15 minutes), and so is anything already answering (event streams send their headers at once).
+  const answerLimit = Number(process.env.REQUEST_TIMEOUT_MS) || 300_000;
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api/v1/internal/jobs/')) return next();
+    const t = setTimeout(() => { if (!res.headersSent) res.status(503).json({ error: 'That took too long. Please try again.' }); }, answerLimit);
+    t.unref();
+    const done = () => clearTimeout(t);
+    res.on('finish', done); res.on('close', done);
+    return next();
+  });
   // The patrol map loads tile images from the configured tile servers, so only those hosts are added to img-src.
   const tileHosts = [...new Set(config.map.layers.map((l) => (l.url.match(/^https:\/\/[^/]+/) || [''])[0].replace('{s}', '*')).filter(Boolean))];
   // On the product website's own addresses only, Cloudflare Web Analytics may load its beacon and report visits (no
@@ -116,6 +128,8 @@ function createApp() {
   // The product website: its pages at /site everywhere, and at / on its own addresses (SITE_HOSTS).
   const site = require('./routes/site');
   app.use(site.pages);
+  // The status page at /status on the app's address too (Help says "/status"); the website's own addresses serve it above.
+  app.get('/status', (_req, res) => res.redirect(302, '/site/status'));
 
   // The admin web app: plain files, no build step. The pages revalidate on every load so an update shows up at once; the
   // scripts and styles they load are at /r/<release>/ addresses and kept a year; fonts never change and are kept a year
@@ -183,11 +197,8 @@ function createApp() {
       return res.status(503).json({ ok: false, reason: 'database' });
     }
     // The database is reachable; is it migrated for this version?
-    const { LATEST } = require('./schema');
-    const [r] = LATEST.column
-      ? await pool.query('SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? LIMIT 1', [LATEST.table, LATEST.column])
-      : await pool.query('SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? LIMIT 1', [LATEST.table, LATEST.index]);
-    if (!r.length) return res.status(503).json({ ok: false, reason: 'run npm run migrate', version: release.VERSION });
+    // Every step of this release's migration finished (src/lib/schemaready.js), not only its last column.
+    if (!(await require('./lib/schemaready').migrated(pool))) return res.status(503).json({ ok: false, reason: 'run npm run migrate', version: release.VERSION });
     // Staging also says which build it runs, so promote.sh can check it is putting live exactly what was checked.
     return res.json({ ok: true, version: release.VERSION, ...(config.staging ? { stage: 'staging', build: release.BUILD } : {}) });
   });

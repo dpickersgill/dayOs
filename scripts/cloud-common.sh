@@ -10,8 +10,36 @@ PROJECT=summitops-510715
 RUN_SA="summitops-run@${PROJECT}.iam.gserviceaccount.com"
 # Staging runs as its own account, which may read the summitops-staging-* secrets and no live one (staging-setup.sh).
 STAGING_SA="summitops-staging@${PROJECT}.iam.gserviceaccount.com"
+# Builds (deploy.sh, staging-setup.sh: gcloud run deploy --source) run as their own account (2026.11.11), never as the
+# default compute account, which has Editor on a new project and could read the weekly database copies.
+BUILD_SA="summitops-build@${PROJECT}.iam.gserviceaccount.com"
+
+# The weekly database copy (scripts/backups-setup.sh). BACKUP_PROJECT can be a separate project, so the app's project
+# (and anything that can build or deploy in it) cannot read or delete the copies.
+BACKUP_PROJECT="${BACKUP_PROJECT:-$PROJECT}"
+BACKUP_BUCKET="${BACKUP_BUCKET:-gs://${BACKUP_PROJECT}-backups}"
 
 step() { printf '\n== %s\n' "$1"; }
+
+# The Cloud SQL Auth Proxy, downloaded once and checked against the checksum Google publishes for this version
+# (https://github.com/GoogleCloudPlatform/cloud-sql-proxy/releases/tag/v2.26.0). A download that does not match is
+# deleted and nothing runs. To move to a newer version, change both lines from that version's release page.
+PROXY_VERSION=v2.26.0
+PROXY_SHA256=a38fe97690a27490e60a7945a8a178186ff9464abb81fe2bc652a3f773443387
+proxy_path() {
+  local proxy="$HOME/cloud-sql-proxy-$PROXY_VERSION"
+  if [ ! -x "$proxy" ] || [ "$(sha256sum "$proxy" | cut -d' ' -f1)" != "$PROXY_SHA256" ]; then
+    rm -f "$proxy"
+    curl -sSfo "$proxy.download" "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/$PROXY_VERSION/cloud-sql-proxy.linux.amd64"
+    if [ "$(sha256sum "$proxy.download" | cut -d' ' -f1)" != "$PROXY_SHA256" ]; then
+      rm -f "$proxy.download"
+      echo "The Cloud SQL Auth Proxy download does not match its published checksum. Stopping." >&2
+      return 1
+    fi
+    mv "$proxy.download" "$proxy"; chmod +x "$proxy"
+  fi
+  echo "$proxy"
+}
 
 signed_in() {
   if ! gcloud auth print-access-token >/dev/null 2>&1; then
@@ -69,11 +97,7 @@ open_db() {
   if [ -n "$socket" ]; then
     # Cloud SQL: reach it from Cloud Shell through the Cloud SQL Auth Proxy, on a local port.
     SQL_CONN="${socket#/cloudsql/}"
-    local proxy="$HOME/cloud-sql-proxy"
-    if [ ! -x "$proxy" ]; then
-      curl -sSfo "$proxy" https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.26.0/cloud-sql-proxy.linux.amd64
-      chmod +x "$proxy"
-    fi
+    local proxy; proxy="$(proxy_path)" || exit 1
     if [ -z "$PROXY_PID" ]; then
       "$proxy" --gcloud-auth --port 3307 "$SQL_CONN" >/tmp/cloud-sql-proxy.log 2>&1 &
       PROXY_PID=$!
@@ -86,4 +110,90 @@ open_db() {
     export DB_HOST="$(envval DB_HOST)" DB_PORT="$(envval DB_PORT)" DB_SSL=true
     export DB_CA="$(secret_read "$(secretof DB_CA)")"
   fi
+}
+
+# Makes a Cloud SQL login, or sets its password, with the password read from stdin (2026.11.11). It goes to the Cloud SQL
+# Admin API in the request body, never on a command line, where other programs and the shell history could see it.
+#   printf %s "$PW" | sql_user_set <instance> <user>
+sql_user_set() {
+  local inst="$1" user="$2" pw hdr api
+  pw="$(cat)"
+  [ ${#pw} -ge 16 ] || { echo "sql_user_set: the password for $user is missing or too short."; return 1; }
+  api="https://sqladmin.googleapis.com/v1/projects/$PROJECT/instances/$inst/users"
+  hdr="$(mktemp)"; chmod 600 "$hdr"
+  printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$(gcloud auth print-access-token)" > "$hdr"
+  if gcloud sql users list --instance="$inst" --format='value(name)' | grep -qx "$user"; then
+    SQLPW="$pw" jq -n --arg n "$user" '{name:$n,host:"%",password:env.SQLPW}' | curl -sSf -X PUT -H @"$hdr" --data-binary @- "$api?name=$user&host=%25" >/dev/null
+  else
+    SQLPW="$pw" jq -n --arg n "$user" '{name:$n,host:"%",password:env.SQLPW}' | curl -sSf -X POST -H @"$hdr" --data-binary @- "$api" >/dev/null
+  fi
+  local rc=$?; rm -f "$hdr"; [ $rc -eq 0 ] || return $rc
+  for _ in $(seq 1 30); do gcloud sql users list --instance="$inst" --format='value(name)' | grep -qx "$user" && return 0; sleep 2; done
+  echo "sql_user_set: $user did not appear on $inst."; return 1
+}
+
+# The build account: push the built image to Artifact Registry, write build logs, read the uploaded source. Nothing else:
+# no secrets, no database, no other bucket. Safe to run again; it prints only what it changes.
+ensure_build_sa() {
+  if ! gcloud iam service-accounts describe "$BUILD_SA" >/dev/null 2>&1; then
+    gcloud iam service-accounts create summitops-build --display-name "Verdynt/OS builds (Cloud Build)" --quiet >/dev/null
+    echo "  Made $BUILD_SA for builds."
+    sleep 5
+  fi
+  local role policy
+  policy="$(gcloud projects get-iam-policy "$PROJECT" --format=json)"
+  for role in roles/artifactregistry.writer roles/logging.logWriter; do
+    if ! echo "$policy" | jq -e --arg r "$role" --arg m "serviceAccount:$BUILD_SA" '[.bindings[]? | select(.role == $r and .condition == null) | .members[]?] | any(. == $m)' >/dev/null; then
+      gcloud projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$BUILD_SA" --role "$role" --condition=None --quiet >/dev/null
+      echo "  $BUILD_SA now has $role"
+    fi
+  done
+  # The source upload buckets only (not the project's other buckets, and never the backup bucket).
+  local b
+  for b in "gs://run-sources-${PROJECT}-${REGION}" "gs://${PROJECT}_cloudbuild"; do
+    gcloud storage buckets describe "$b" >/dev/null 2>&1 || continue
+    gcloud storage buckets add-iam-policy-binding "$b" --member "serviceAccount:$BUILD_SA" --role roles/storage.objectViewer --quiet >/dev/null
+  done
+}
+BUILD_FLAG=(--build-service-account "projects/${PROJECT}/serviceAccounts/${BUILD_SA}")
+
+# Scheduled jobs sign in with a Google ID token for this account (2026.11.11, scripts/jobs-oidc.sh), so no key sits in
+# Cloud Scheduler. The account has no roles: it exists only to be named in the token, which the app checks
+# (src/lib/jobauth.js). Needs the live service loaded (load_service). Sets JOB_AUTH for gcloud scheduler jobs.
+JOBS_SA="summitops-jobs@${PROJECT}.iam.gserviceaccount.com"
+ensure_jobs_oidc() {
+  # Only a live site on 2026.11.11 or later checks these tokens; an older one would turn every job away.
+  local live; live="$(curl -s --max-time 15 "$(check_url)/version" | jq -r '.version // empty' 2>/dev/null || true)"
+  if ! node -e "const p=(v)=>String(v).split('.').map(Number);const [a,b]=[p(process.argv[1]),[2026,11,11]];process.exit(a[0]*1e6+a[1]*1e3+a[2]>=b[0]*1e6+b[1]*1e3+b[2]?0:1)" "${live:-0.0.0}"; then
+    echo "The live site runs ${live:-an unknown version}. Signed job calls need 2026.11.11 or later: run bash promote.sh first."; exit 1
+  fi
+  if ! gcloud iam service-accounts describe "$JOBS_SA" >/dev/null 2>&1; then
+    gcloud iam service-accounts create summitops-jobs --display-name "Verdynt/OS scheduled jobs (signs the job calls)" --quiet >/dev/null
+    echo "  Made $JOBS_SA for the scheduled jobs."
+    sleep 5
+  fi
+  local aud="$SVC_URL"
+  [ -n "$(envval PUBLIC_URL)" ] && aud="$aud,$(envval PUBLIC_URL)"
+  if [ "$(envval JOBS_OIDC_EMAIL)" != "$JOBS_SA" ] || [ "$(envval JOBS_OIDC_AUDIENCES)" != "$aud" ]; then
+    gcloud run services update "$SERVICE" --region "$REGION" --quiet --update-env-vars "^|^JOBS_OIDC_EMAIL=$JOBS_SA|JOBS_OIDC_AUDIENCES=$aud" >/dev/null
+    echo "  $SERVICE now accepts job calls signed for $JOBS_SA ($aud)."
+    load_service
+  fi
+  JOB_AUTH=(--oidc-service-account-email "$JOBS_SA" --oidc-token-audience "$SVC_URL")
+}
+
+# Deletes older revisions of $SERVICE that still hold a key in a plain setting (2026.11.11). The revision serving now and
+# the newest one are never touched. Used by harden.sh (step 8) and rotate-secrets.sh.
+PLAIN_KEYS=(STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET STRIPE_CONNECT_WEBHOOK_SECRET POSTMARK_SERVER_TOKEN TWILIO_AUTH_TOKEN JOBS_KEY BOOTSTRAP_KEY TOTP_KEY LINK_SECRET KIOSK_SECRET PLATFORM_TOTP_SECRET PLATFORM_KEY ANTHROPIC_API_KEY ASSISTANT_API_KEY DB_PASSWORD JWT_SECRET OUTREACH_GMAIL_KEY)
+clean_plain_revisions() {
+  local names serving rev n=0
+  names="$(printf '%s\n' "${PLAIN_KEYS[@]}" | jq -R . | jq -s .)"
+  serving="$(gcloud run services describe "$SERVICE" --region "$REGION" --format=json | jq -r '[.status.traffic[]? | select((.percent // 0) > 0) | .revisionName] + [.status.latestReadyRevisionName] | .[]')"
+  while read -r rev; do
+    [ -n "$rev" ] || continue
+    if echo "$serving" | grep -qx "$rev"; then echo "  $rev holds a plain key but is serving now: move its keys (harden.sh) and run this again."; continue; fi
+    gcloud run revisions delete "$rev" --region "$REGION" --quiet >/dev/null && echo "  Deleted $rev (it held a key in a plain setting)" && n=$((n + 1))
+  done < <(gcloud run revisions list --service "$SERVICE" --region "$REGION" --format=json \
+    | jq -r --argjson names "$names" '.[] | select([.spec.containers[0].env[]? | select(.value != null and .value != "" and (.name as $n | $names | index($n)))] | length > 0) | .metadata.name')
+  echo "  $n older revision(s) with plain keys deleted."
 }
