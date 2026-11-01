@@ -190,6 +190,8 @@ router.delete('/team/:staffId', patrol, needs('manage_team'), async (req, res) =
   await tx(async (conn) => {
     const [r] = await conn.query('DELETE FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [t, staffId]);
     if (!r.affectedRows) throw notFound('Patrol member');
+    // Their patrol login stops opening Patrol at once (lib/patrolaccess.js levelOf; 2026.11.11).
+    await conn.query('UPDATE users SET patrol_removed_at = UTC_TIMESTAMP() WHERE tenant_id = ? AND staff_id = ?', [t, staffId]);
     // Off the roster means off the patrol shifts still ahead: they are left open for someone else, and the person is told.
     const now = nowIn((await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [t])).timezone);
     const ahead = await rows(conn, `SELECT ps.*, st.name AS station FROM patrol_shifts ps LEFT JOIN patrol_stations st ON st.tenant_id = ps.tenant_id AND st.id = ps.station_id

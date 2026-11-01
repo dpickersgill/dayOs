@@ -42,7 +42,6 @@ test.before(async () => {
   A = await mountain(`ma-${suffix}`);
   B = await mountain(`mb-${suffix}`);
   const staff = (await api('POST', '/workforce/staff', { token: A.owner, body: { person: { first_name: 'Pat', last_name: 'Patroller' }, status: 'active' } })).body.id;
-  await pool.query("INSERT INTO patrol_members (tenant_id, staff_id, level, access_level) SELECT id, ?, 'patroller', 'patrol' FROM tenants WHERE slug = ?", [staff, A.slug]); // on the roster (2026.11.11)
   T.patrol = await addUser(A, `pat@${A.slug}.test`, 'patrol', { staff_id: staff });
   T.staff = await addUser(A, `staff@${A.slug}.test`, 'staff');
 });

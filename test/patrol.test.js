@@ -57,8 +57,6 @@ test.before(async () => {
   await api('POST', '/patrol/meds/formulary', { token: o, body: { name: 'Ibuprofen', authority: 'standing_order', routes: ['oral'], max_dose: 800, dose_unit: 'mg', min_cert: 'none' } }); // this patrol's medical director allows it
   T.pat = await addUser(A, `pat@${A.slug}.test`, 'patrol', { staff_id: D.s1 });
   T.quinn = await addUser(A, `quinn@${A.slug}.test`, 'patrol', { staff_id: D.s2 });
-  // A patrol login linked to a person needs that person on the roster to use Patrol (2026.11.11).
-  for (const s of [D.s1, D.s2]) await pool.query("INSERT INTO patrol_members (tenant_id, staff_id, level, access_level) SELECT id, ?, 'patroller', 'patrol' FROM tenants WHERE slug = ?", [s, A.slug]);
   T.unlinked = await addUser(A, `unlinked@${A.slug}.test`, 'patrol');
   T.counter = await addUser(A, `counter@${A.slug}.test`, 'counter');
   T.otherPat = await addUser(B, `pat@${B.slug}.test`, 'patrol');
@@ -294,7 +292,6 @@ test('analytics and exports reflect the cases and keep names out', async () => {
 
 test('team: roster, levels, certification flags and who may see what', async () => {
   const o = A.owner;
-  await pool.query('DELETE m FROM patrol_members m JOIN tenants t ON t.id = m.tenant_id WHERE t.slug = ? AND m.staff_id IN (?, ?)', [A.slug, D.s1, D.s2]); // the roster is built here
   ok(await api('POST', '/team'.replace('/team', '/patrol/team'), { token: o, body: { staff_id: D.s1, level: 'leader', callsign: 'Patrol 1', emergency_contact: 'Jo 555-0111' } }), 201);
   ok(await api('POST', '/patrol/team', { token: o, body: { staff_id: D.s2, callsign: 'Patrol 2' } }), 201);
   assert.equal((await api('POST', '/patrol/team', { token: o, body: { staff_id: D.s2 } })).status, 409, 'already on the roster');

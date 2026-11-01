@@ -1168,7 +1168,7 @@ export const ARTICLES = [
   { id: 'patrol-roster-off', app: 'patrol', title: 'Taking someone off the patrol roster', keywords: 'remove roster leave patrol login access patient records host level',
     intro: 'Removing someone from the roster ends their patrol access at once. Their login can no longer open cases or patient records.',
     steps: ['Open Patrol, People, and the person.', 'Press Remove from roster and confirm. Their cases and training stay on record.', 'To switch the login off altogether, a manager opens Settings, Team and logins and turns it off.'],
-    tips: ['A patrol login linked to someone who is not on the roster has no patrol access. Add them to the roster to give it back.'] },
+    tips: ['Putting the person back on the roster gives their patrol access back, at the level you choose.'] },
   { id: 'family-links-end', app: 'school', title: 'How long family lesson links work', keywords: 'family link lesson email recap link expire 60 days change date cancel tip',
     intro: 'The link in a lesson booking email works until 60 days after the lesson. The link in a recap email shows the lesson and takes a tip, but cannot change or cancel it.',
     steps: ['To change a date or cancel, the family uses the link in the booking email.', 'If that link has run out, or they only have the recap, they call the ski school.'],

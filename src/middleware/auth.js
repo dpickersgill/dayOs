@@ -37,7 +37,7 @@ const TIER_SQL = `(u.totp_enabled = 1 OR EXISTS (SELECT 1 FROM user_passkeys k W
   (u.staff_id IS NOT NULL AND EXISTS (SELECT 1 FROM patrol_members m JOIN staff s2 ON s2.tenant_id = m.tenant_id AND s2.id = m.staff_id AND s2.status = 'active' WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id)) AS on_patrol,
   (u.staff_id IS NOT NULL AND EXISTS (SELECT 1 FROM patrol_members m WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id AND m.access_level IN ('admin','manager'))) AS patrol_lead,
   (u.staff_id IS NOT NULL AND EXISTS (SELECT 1 FROM patrol_members m WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id AND m.access_level = 'host')) AS patrol_host,
-  (u.staff_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM patrol_members m WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id)) AS off_roster,
+  (u.staff_id IS NOT NULL AND u.patrol_removed_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM patrol_members m WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id)) AS off_roster,
   (SELECT ip.school_access FROM instructor_profiles ip JOIN staff s3 ON s3.tenant_id = ip.tenant_id AND s3.id = ip.staff_id AND s3.status = 'active' WHERE ip.tenant_id = u.tenant_id AND ip.staff_id = u.staff_id) AS school_access,
   t.require_mfa, t.mfa_for_patrol, (t.patrol_mfa_from IS NULL OR t.patrol_mfa_from <= CURDATE()) AS patrol_mfa_due, t.patrol_mfa_from,
   (t.sandbox_expires_at IS NOT NULL) AS sandbox`;
@@ -129,7 +129,7 @@ async function authenticate(req, _res, next) {
   // onPatrol: this login's person is on the patrol roster, so they can use Patrol whatever their login role is.
   req.auth = {
     tenantId: payload.tid, userId, role: row.role, staffId: row.staff_id, onPatrol: Boolean(Number(row.on_patrol)), sid: payload.sid,
-    offRoster: row.role === 'patrol' && Boolean(Number(row.off_roster)), // a patrol login whose person is not on the roster: no Patrol (2026.11.11)
+    offRoster: row.role === 'patrol' && Boolean(Number(row.off_roster)), // a patrol login whose person was taken off the roster: no Patrol (2026.11.11)
     method: row.session_method, terminalId: row.session_terminal ? Number(row.session_terminal) : null, deviceHash: row.session_device || null,
     steppedUp: Boolean(Number(row.stepped_up)), strong: Boolean(Number(row.strong)), mfaRule: mfaRule(row), display,
     schoolLevel: row.role === 'instructor' ? (row.school_access || 'instructor') : null, // lib/schoolaccess.js
@@ -144,7 +144,7 @@ const isManager = (req) => MANAGER_ROLES.includes(req.auth.role);
 function requireRole(...roles) {
   return (req, _res, next) => {
     if (!req.auth) return next(unauthorized());
-    // A patrol login whose person is not on the roster (taken off it) has no Patrol: the /patrol routes refuse it, while
+    // A patrol login whose person was taken off the roster has no Patrol: the /patrol routes refuse it, while
     // what a patrol login does elsewhere (a lift's or an attraction's status) is unchanged (2026.11.11).
     const offPatrol = req.auth.role === 'patrol' && req.auth.offRoster && /^\/api\/v1\/patrol(\/|$)/.test(req.originalUrl);
     if (req.auth.role === 'owner' || (roles.includes(req.auth.role) && !offPatrol)) return next();

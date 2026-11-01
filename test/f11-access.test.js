@@ -196,6 +196,18 @@ test('ACC-5: someone taken off the patrol roster has no patrol access', async ()
   assert.equal((await api('GET', `/patrol/incidents/${inc.body.id}`, { token: leeTok })).status, 403);
   assert.equal((await api('GET', '/patrol/incidents', { token: leeTok })).status, 403);
   assert.equal((await api('POST', '/patrol/incidents', { token: leeTok, body: { occurred_at: '2026-10-31 11:00:00', location: 'Base', category: 'other', summary: 'x' } })).status, 403);
+  // a Host taken off the roster is not raised to Patrol either
+  const host = await user(m, 'patrol', { staff: true });
+  await pool.query("INSERT INTO patrol_members (tenant_id, staff_id, level, access_level) VALUES (?, ?, 'patroller', 'host')", [m.id, host.staffId]);
+  const hostTok = await login(m.slug, host.email);
+  assert.ok((await api('DELETE', `/patrol/team/${host.staffId}`, { token: dir.token })).status < 300);
+  assert.equal((await api('GET', `/patrol/incidents/${inc.body.id}`, { token: hostTok })).status, 403);
+  // put back on the roster: access at the level chosen
+  assert.equal((await api('POST', '/patrol/team', { token: dir.token, body: { staff_id: lee.staffId, level: 'patroller' } })).status, 201);
+  assert.equal((await api('GET', `/patrol/incidents/${inc.body.id}`, { token: leeTok })).status, 200, 'back on the roster');
+  // a patrol login never put on the roster is a plain Patrol, as before
+  const fresh = await user(m, 'patrol', { staff: true });
+  assert.equal((await api('GET', '/patrol/incidents', { token: await login(m.slug, fresh.email) })).status, 200);
 });
 
 // ---------------------------------------------------------------- ACC-6
