@@ -210,10 +210,8 @@ test('safety details are saved, prefilled next time, and shown only to the desk,
   const mine = ok(await api('GET', `/skischool/sessions/${D.a}/roster`, { token: D.ivy.token }));
   assert.equal(mine.details, true);
   assert.equal(mine.data.find((x) => x.person_id === D.leo).allergies, 'Peanuts');
-  const theirs = ok(await api('GET', `/skischool/sessions/${D.a}/roster`, { token: D.max.token }));
-  const leo = theirs.data.find((x) => x.person_id === D.leo);
-  assert.equal(leo.allergies, undefined); assert.equal(leo.medical, undefined); assert.equal(leo.contact_phone, undefined);
-  assert.equal(leo.has_allergies, true, 'the flag shows, the words do not');
+  // Since 2026.11.11 a plain instructor does not open another instructor's roster at all.
+  assert.equal((await api('GET', `/skischool/sessions/${D.a}/roster`, { token: D.max.token })).status, 403);
   const desk = ok(await api('GET', `/skischool/sessions/${D.a}/roster`, { token: T.counter }));
   assert.equal(desk.data.find((x) => x.person_id === D.leo).medical, 'Asthma, inhaler in pocket');
   const board = ok(await api('GET', `/skischool/board?date=${day}`, { token: D.max.token }));

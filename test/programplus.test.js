@@ -248,10 +248,15 @@ test('the family page: a sign-in link by email, every child and date, update det
     return { status: res.status, body: await res.json().catch(() => ({})), text: '' };
   };
   is(await call('/api/v1/public', 'GET', `/${M.slug}/family`), 401);
-  const page = ok(await fam('GET', ''));
+  let page = ok(await fam('GET', ''));
   // Ana was on file before Pat registered her online, with no guardian: since 2026.11.11 registering online does not make
   // Pat her guardian (anyone who knows a name and birthday could), so she shows once staff link them.
   assert.deepEqual(page.people.map((p) => p.first_name).sort(), ['Bo', 'Cy']);
+  const pat = (await q('SELECT id FROM people WHERE tenant_id = ? AND email = ? ORDER BY id LIMIT 1', [M.id, email]))[0].id;
+  const anaId = (await q("SELECT id FROM people WHERE tenant_id = ? AND first_name = 'Ana' AND last_name = 'Pass' ORDER BY id LIMIT 1", [M.id]))[0].id;
+  ok(await api('POST', `/people/${pat}/family`, { token: M.owner, body: { other_id: anaId, relation: 'guardian', as: 'guardian_of' } }));
+  page = ok(await fam('GET', ''));
+  assert.deepEqual(page.people.map((p) => p.first_name).sort(), ['Ana', 'Bo', 'Cy']);
   const bo = page.people.find((p) => p.first_name === 'Bo').places[0];
   assert.equal(bo.dates.length, 4); assert.equal(bo.makeup_reserve.length, 1);
   assert.equal(bo.owes_cents, 8000);

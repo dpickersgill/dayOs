@@ -224,7 +224,7 @@ test('an instructor and a manager are unchanged', async () => {
   no(await call('PATCH', `/products/${M.group}`, { token: M.ivy, body: { base_price_cents: 1 } }), 'lesson prices');
   assert.equal((await call('GET', `/skischool/my-day?staff_id=${M.samId}`, { token: M.ivy })).status, 403, 'only her own day');
   ok(await call('GET', `/skischool/my-day?date=${day}`, { token: M.ivy }));
-  assert.equal(ok(await call('GET', `/skischool/sessions/${other}/roster`, { token: M.ivy })).details, false, 'no children\'s details on someone else\'s lesson');
+  assert.equal((await call('GET', `/skischool/sessions/${other}/roster`, { token: M.ivy })).status, 403, 'no roster of someone else\'s lesson (2026.11.11)');
   assert.equal(ok(await call('GET', `/skischool/sessions/${mine}/roster`, { token: M.ivy })).details, true);
   assert.equal(ok(await call('GET', '/auth/me', { token: M.ivy })).menu.apps.includes('sell'), false);
   // a manager does everything as before
