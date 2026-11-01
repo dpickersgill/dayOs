@@ -65,6 +65,7 @@ echo "Staging runs $NEW_VERSION build $NEW_BUILD: $IMAGE"
 step "Checking the live version"
 SERVICE="$PROD_SERVICE"
 load_service
+source scripts/settings-check.sh && settings_check # production refuses unsafe settings from 2026.11.11
 LIVE_VERSION="$(curl -s --max-time 15 "$(check_url)/version" | jq -r '.version // empty' 2>/dev/null || true)"
 node scripts/check-version.js "$LIVE_VERSION" "${PASS[@]}"
 # The revision visitors reach now. After a rollback that is not the newest one (traffic was pinned to an older revision).

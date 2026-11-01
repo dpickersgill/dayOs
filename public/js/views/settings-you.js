@@ -5,6 +5,7 @@ import { h, clear, ctx, input, field, button, toast, formDialog, errorBox, selec
 import { mfaPanel } from './mfa.js';
 import { passkeysPanel, pinPanel, sessionsPanel } from './security.js';
 import { card, row } from './settings-kit.js';
+import { refreshDeviceKey } from '../outbox.js';
 
 export async function renderSettingsPage(root) {
   root.append(accountCard(), passwordCard());
@@ -60,6 +61,7 @@ function passwordCard() {
     try {
       const out = await post('/auth/change-password', { current_password: cur.value, new_password: next.value });
       session.token = out.token; // this device stays signed in; every other session ends
+      await refreshDeviceKey(); // the key for entries kept offline changed too: seal what waits with the new one
       cur.value = next.value = again.value = '';
       toast('Password changed. Other devices were signed out');
     } catch (err) {

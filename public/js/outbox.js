@@ -7,8 +7,10 @@
 // Only the person who typed an entry can send it: entries are tagged with the signed-in user and stay put if someone else
 // signs in on the same phone. Entries are removed from the phone once the server has them.
 //
-// Encrypted on the phone: what is kept is sealed (AES-GCM) with a key that belongs to the signed-in person and comes from
-// the server at sign-in (GET /auth/me, device_key). The key lives only in this tab's memory and session storage, so a lost
+// Encrypted on the phone: what is kept is sealed (AES-GCM) with a key that belongs to the signed-in person on this device and
+// comes from the server at sign-in (GET /auth/me, device_key). It changes when every session of the login ends (password
+// change, Sign out everywhere), and differs from phone to phone (2026.11.11). The browser holds it as a key that cannot be
+// read back out (non-extractable), in this tab's memory only, so a lost
 // phone, a shared tablet or another person signing in finds sealed data it cannot read. Until the key arrives, entries are
 // held in memory only, never written in the clear. Each person's entries are sealed separately; the only thing kept in the
 // clear is how many entries each person has waiting (for the sign-out warning).
@@ -46,10 +48,14 @@ async function seal(value) {
   const ct = await subtle().encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(value)));
   return JSON.stringify({ v: 1, iv: b64(iv), ct: b64(ct) });
 }
-async function open(text) {
+async function open(text, k = key) {
   const o = JSON.parse(text);
-  const pt = await subtle().decrypt({ name: 'AES-GCM', iv: unb64(o.iv) }, key, unb64(o.ct));
+  const pt = await subtle().decrypt({ name: 'AES-GCM', iv: unb64(o.iv) }, k, unb64(o.ct));
   return JSON.parse(new TextDecoder().decode(pt));
+}
+/** Opens with the new key, or with the key this tab held before it changed (then persist() seals it again with the new one). */
+async function openEither(text, prev) {
+  try { return await open(text); } catch (e) { if (prev) return open(text, prev); throw e; }
 }
 
 /**
@@ -59,14 +65,17 @@ async function open(text) {
 export async function setDeviceKey(raw) {
   const me = who();
   if (!raw || !me || !subtle()) return false;
+  // The key this tab held for the same person before (a password change or Sign out everywhere gives a new one): what is
+  // on the phone is opened with it and sealed again with the new key, so nothing waiting is lost.
+  const prev = key && keyOwner === me ? key : null;
   try {
-    key = await subtle().importKey('raw', unb64(raw), 'AES-GCM', false, ['encrypt', 'decrypt']);
+    key = await subtle().importKey('raw', unb64(raw), 'AES-GCM', false, ['encrypt', 'decrypt']); // non-extractable
     keyOwner = me;
-    try { globalThis.sessionStorage.setItem(KEY_SLOT, raw); } catch (_) { /* kept in memory only */ }
+    try { globalThis.sessionStorage.removeItem(KEY_SLOT); } catch (_) { /* never kept there now */ }
     const st = store();
     let mine = [];
     const sealed = st && st.getItem(BOX(me));
-    if (sealed) { try { mine = await open(sealed); } catch (_) { mine = []; } }
+    if (sealed) { try { mine = await openEither(sealed, prev); } catch (_) { mine = []; } }
     const legacy = st && st.getItem(LEGACY);
     if (legacy) {
       const old = JSON.parse(legacy || '[]');
@@ -76,7 +85,7 @@ export async function setDeviceKey(raw) {
     }
     memory = [...mine, ...(memory || []).filter((x) => x.who === me && !mine.some((m) => m.id === x.id))];
     const kept = st && st.getItem(CASES_BOX(me));
-    cases = []; if (kept) { try { cases = await open(kept); } catch (_) { cases = []; } }
+    cases = []; if (kept) { try { cases = await openEither(kept, prev); } catch (_) { cases = []; } }
     const plainCases = st && st.getItem(CASES_LEGACY);
     if (plainCases) st.removeItem(CASES_LEGACY);
     await persist();
@@ -86,9 +95,12 @@ export async function setDeviceKey(raw) {
     return true;
   } catch (_) { key = null; keyOwner = null; return false; }
 }
-/** On page load: the key kept for this tab, if the same person is still signed in. */
+/** After a password change or Sign out everywhere: the new key from the server; what waits is sealed again with it. */
+export async function refreshDeviceKey() {
+  try { const me = await api('GET', '/auth/me'); return await setDeviceKey(me.device_key); } catch (_) { return false; }
+}
+/** Kept for older callers: the key is no longer stored in the tab (2026.11.11); main.js asks the server on load. */
 export function restoreDeviceKey() {
-  try { const raw = globalThis.sessionStorage.getItem(KEY_SLOT); if (raw) return setDeviceKey(raw); } catch (_) { /* none */ }
   return Promise.resolve(false);
 }
 /** On sign-out: forget the key (the sealed entries stay, unreadable, until this person signs in again). */

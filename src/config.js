@@ -17,6 +17,26 @@ if (isProd && (!env.JWT_SECRET || env.JWT_SECRET.length < 32)) {
   throw new Error('JWT_SECRET must be set to at least 32 characters in production');
 }
 
+// Production refuses settings that are unsafe however they came about (2026.11.11). Each message says what to set.
+//   JWT_SECRET      at least 32 characters and not a run of a few characters ("aaaa...", "abcabc..."): it signs every session.
+//   BOOTSTRAP_KEY   empty (the platform key is off) or at least 24 characters with some variety: it opens the console.
+//   DB_USER         set, and not root: the app signs in to the database as its own limited login (scripts/harden.sh).
+//   DB_SSL          on when the database is reached over the network (DB_HOST that is not this machine, no DB_SOCKET).
+//   PUBLIC_URL      set, https: links in emails and the website's own address never come from a request's Host header.
+// The automated tests and local runs are not production, so none of this applies there. It runs when the server starts
+// (src/server.js), not when this file loads, so scripts that read the settings (migrations from Cloud Shell) still work.
+const variety = (v) => new Set(String(v)).size;
+function refuseUnsafe() {
+  const problems = [];
+  if (env.JWT_SECRET && variety(env.JWT_SECRET) < 10) problems.push('JWT_SECRET is too simple (a run of a few characters). Use a long random value: openssl rand -base64 48');
+  if (env.BOOTSTRAP_KEY && (env.BOOTSTRAP_KEY.length < 24 || variety(env.BOOTSTRAP_KEY) < 10)) problems.push('BOOTSTRAP_KEY (the platform key) must be at least 24 random characters, or left empty to turn it off');
+  if (!env.DB_USER || env.DB_USER === 'root') problems.push('DB_USER must be set to the app\'s own database login, not root (scripts/harden.sh sets summitops_app)');
+  const local = ['127.0.0.1', 'localhost', '::1'].includes(String(env.DB_HOST || '127.0.0.1'));
+  if (!env.DB_SOCKET && !local && env.DB_SSL !== 'true') problems.push('DB_SSL=true is needed when the database is reached over the network (or use DB_SOCKET for Cloud SQL)');
+  if (!/^https:\/\/[^\s/]+/.test(String(env.PUBLIC_URL || ''))) problems.push('PUBLIC_URL must be set to this service\'s https address (deploy.sh and promote.sh set it)');
+  if (problems.length) throw new Error(`Unsafe settings for production:\n  - ${problems.join('\n  - ')}`);
+}
+
 // Map tiles for the patrol map. The defaults are the free OpenStreetMap-based layers, which are fine for a
 // small admin tool but have usage limits and no guarantee. For production use, take a plan from a tile
 // provider (MapTiler, Stadia, Mapbox and others) and set MAP_TILE_URL, for example
@@ -142,3 +162,6 @@ module.exports = {
 module.exports.db.sslOptions = module.exports.db.ssl
   ? (module.exports.db.ca ? { ca: module.exports.db.ca, rejectUnauthorized: true } : { rejectUnauthorized: true })
   : undefined;
+
+/** src/server.js calls this at start: production refuses unsafe settings (see refuseUnsafe above). */
+module.exports.refuseUnsafe = () => { if (isProd) refuseUnsafe(); };

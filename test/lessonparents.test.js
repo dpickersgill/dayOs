@@ -360,7 +360,9 @@ test('recaps: only the lesson\'s instructor writes one, nothing goes out until a
   assert.equal(fam.progress.recaps.length, 1);
   assert.equal((await api('POST', `/skischool/recaps/${yes.booking}/send`, { token: T.ivy, body: { body: 'Again and again and again' } })).status, 409, 'sent once');
   // saying no to photos later hides them
-  await pub('PATCH', `/lesson/${recapToken}`, { body: { photo_ok: false } });
+  assert.equal((await pub('PATCH', `/lesson/${recapToken}`, { body: { photo_ok: false } })).status, 403, 'the recap email link looks, it does not change (2026.11.11)');
+  assert.equal((await pub('GET', `/lesson/${recapToken}/photos/${fam.recap.photos[0]}`)).status, 200);
+  assert.equal((await pub('PATCH', `/lesson/${yes.token}`, { body: { photo_ok: false } })).status, 200, 'the booking link changes it');
   assert.equal((await pub('GET', `/lesson/${recapToken}/photos/${fam.recap.photos[0]}`)).status, 404);
   D.done = { done, yes, no, recapToken };
 });

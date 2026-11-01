@@ -129,11 +129,14 @@ async function end(sid, why = 'signed_out') {
 }
 /**
  * Ends every open session of a user, except (optionally) the one making the change. The private calendar feed link goes
- * too (2026.11.10 fix): a password change, a reset and "Sign out everywhere" each turn it off, like a session.
+ * too (2026.11.10 fix): a password change, a reset and "Sign out everywhere" each turn it off, like a session. So does the
+ * key for offline entries (device_key_epoch, 2026.11.11).
  */
 async function endAll(db, userId, why, exceptSid) {
   await db.query(`UPDATE user_sessions SET ended_at = UTC_TIMESTAMP(), ended_why = ? WHERE user_id = ? AND ended_at IS NULL${exceptSid ? ' AND id_hash <> ?' : ''}`, exceptSid ? [why, userId, hash(exceptSid)] : [why, userId]);
   await db.query('DELETE FROM calendar_feeds WHERE user_id = ?', [userId]);
+  // The key that seals offline patient entries on a phone changes too (2026.11.11, routes/auth.js /auth/me device_key).
+  await db.query('UPDATE users SET device_key_epoch = device_key_epoch + 1 WHERE id = ?', [userId]);
 }
 /** The daily job: sessions over a month old are removed. */
 async function prune() {

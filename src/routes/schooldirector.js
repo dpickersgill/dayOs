@@ -130,7 +130,9 @@ router.delete('/director/holidays/:id', manager, async (req, res) => {
 });
 router.get('/director/offers', manager, async (req, res) => res.json({ data: await ST.offersForManager(req.auth.tenantId, todayIn(await tzOf(req.auth.tenantId))) }));
 router.get('/director/offers/free', manager, async (req, res) => {
-  const q = z.object({ starts_at: dt, ends_at: dt, discipline: z.enum(DISCIPLINES).default('ski'), level_max: z.coerce.number().int().min(1).max(9).optional(), kids: z.enum(['0', '1']).optional() }).parse(req.query);
+  const parsed = z.object({ starts_at: dt, ends_at: dt, discipline: z.enum(DISCIPLINES).default('ski'), level_max: z.coerce.number().int().min(1).max(9).optional(), kids: z.enum(['0', '1']).optional() }).safeParse(req.query);
+  if (!parsed.success) throw bad('Give starts_at and ends_at as YYYY-MM-DD HH:MM', parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })));
+  const q = parsed.data;
   const list = await ST.freeFor(pool, req.auth.tenantId, { ...q, kids: q.kids === '1' });
   res.json({ data: list.map((i) => ({ id: i.id, name: `${i.first_name} ${i.last_name}`, has_phone: Boolean(i.phone), has_email: Boolean(i.email) })) });
 });

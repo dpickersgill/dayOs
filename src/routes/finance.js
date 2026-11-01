@@ -10,6 +10,8 @@ const { notFound, conflict, bad } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { toCsv, dollars } = require('../lib/csv');
 
+// Downloads that carry names need the second check, like patient and customer lists (2026.11.11).
+const { stepUp } = require('../lib/stepup');
 const router = express.Router();
 const sellers = requireRole('counter', 'manager');
 const managers = requireRole('manager');
@@ -281,7 +283,7 @@ async function range(req) {
 }
 const send = (res, name, body) => res.set('Content-Type', 'text/csv; charset=utf-8').set('Content-Disposition', `attachment; filename="${name}"`).send(body);
 
-router.get('/exports/sales.csv', managers, async (req, res) => {
+router.get('/exports/sales.csv', managers, stepUp('download sales with guest names'), async (req, res) => {
   const r = await range(req);
   const data = await rows(pool, `SELECT o.id AS order_id, o.created_at, o.channel, o.status AS order_status, o.promo_code, i.line_kind, COALESCE(i.label, pr.name, pg.name, CASE i.line_kind WHEN 'gift_card' THEN 'Gift card' WHEN 'rental' THEN 'Rental charge' WHEN 'fee' THEN 'Fee' ELSE 'Item' END) AS item, i.tier, i.quantity, i.unit_price_cents, i.discount_cents, i.tax_cents,
       i.refunded_at, p.first_name, p.last_name, COALESCE(u.email, u.username) AS sold_by,
@@ -307,7 +309,7 @@ router.get('/exports/payments.csv', managers, async (req, res) => {
   send(res, `payments-${r.from}-to-${r.to}.csv`, toCsv(['date', 'time', 'order', 'tender', 'amount', 'cash_handed_over', 'reference', 'card_brand', 'card_last4', 'auth_code', 'processor', 'comp_reason'], out));
 });
 
-router.get('/exports/refunds.csv', managers, async (req, res) => {
+router.get('/exports/refunds.csv', managers, stepUp('download refunds and their notes'), async (req, res) => {
   const r = await range(req);
   const data = await rows(pool, `SELECT f.created_at, f.order_id, f.reason, f.note, f.amount_cents, f.tax_cents, f.method, COALESCE(u.email, u.username) AS by_user FROM order_refunds f LEFT JOIN users u ON u.id = f.user_id
     WHERE f.tenant_id = ? AND f.created_at >= ? AND f.created_at < ? ORDER BY f.id`, [req.auth.tenantId, r.start, r.end]);

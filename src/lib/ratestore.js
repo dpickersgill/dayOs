@@ -16,9 +16,9 @@
 // If the database cannot answer within RATE_STORE_TIMEOUT_MS (default 250), or the table is missing because the
 // migration has not run, the request is counted in this server's memory instead and the problem is logged once a minute.
 // A limit never stops the site because the database is slow: it falls back to the old per-server count.
-// Slow queries never pile up (2026.11.10 fix): while a count for one key is still on its way to the database (even after
-// its request gave up waiting), further hits on that key are counted in memory instead of sending another query, and at
-// most RATE_STORE_MAX_PENDING (default 10) counting queries are in flight per server at once; past that, memory again.
+// Slow queries never pile up (2026.11.10 fix): at most one counting query per key and RATE_STORE_MAX_PENDING (default
+// 10) in all are in flight per server at once. Hits that arrive meanwhile wait and go in the next query together
+// (2026.11.11), so every hit reaches the shared count; a hit that cannot wait longer uses this server's memory count.
 const crypto = require('node:crypto');
 
 const env = process.env;
@@ -73,6 +73,8 @@ class MysqlStore {
     this.prefix = prefix; this.localKeys = false; this.windowMs = 60_000;
     this.pool = pool; this.fallback = new MemoryStore();
     this.pending = new Set(); // row keys (hex) with a query still running
+    this.queues = new Map(); // row key (hex) -> { waiting: hits not yet sent, running: a counting query is on its way }
+    this.blocked = new Set(); // row keys whose hits wait because too many queries were in flight
   }
   /** Runs a query for this row unless one for it is still running or too many are: then returns null (use memory). */
   guarded(k, run) {
@@ -87,27 +89,65 @@ class MysqlStore {
   db() { return this.pool || require('../db').pool; }
   rowKey(key) { return crypto.createHash('sha256').update(`${this.prefix}\u0000${key}`).digest(); }
   async increment(key) {
-    const now = Date.now(); const end = now + this.windowMs; const k = this.rowKey(key);
-    // Every hit is also counted in this server's memory, and the answer is never lower than that count: a hit counted in
-    // memory while a query was still running is never lost, and two hits at once on one server never both count as the first.
+    const k = this.rowKey(key);
+    // Every hit is also counted in this server's memory, and the answer is never lower than that count: two hits at once on
+    // one server never both count as the first, and the answer is there even when the database is slow.
     const local = await this.fallback.increment(key);
+    // Every hit reaches the shared row (2026.11.11). Hits that arrive while a count for the same key is on its way to the
+    // database (or while too many counts are in flight) wait in a queue, and the next query adds them all at once and hands
+    // each its own number. Before, those hits were counted in memory only, so a burst sent at once put one hit per server
+    // in the shared row and got past the limit. A hit whose answer takes longer than RATE_STORE_TIMEOUT_MS uses the
+    // memory count, but is still added to the shared row when its query goes.
+    const q = this.queueOf(k);
+    const answer = new Promise((resolve) => { q.waiting.push({ resolve, local }); });
+    this.flush(k);
     try {
-      // A new row counts 1. An existing row counts one more, or starts again at 1 once its window has ended.
-      // LAST_INSERT_ID(x) hands the new count back with the write itself (insertId is 0 when the row was new).
-      const sent = this.guarded(k, () => this.db().query(
-        `INSERT INTO rate_limits (k, hits, reset_ms) VALUES (?, 1, ?)
-         ON DUPLICATE KEY UPDATE hits = LAST_INSERT_ID(IF(reset_ms <= ?, 1, hits + 1)), reset_ms = IF(reset_ms <= ?, ?, reset_ms)`,
-        [k, end, now, now, end]));
-      if (!sent) return local; // a query for this key is still running: count here, send nothing
-      const [r] = await sent;
-      const shared = Number(r.insertId) || 1;
-      const totalHits = Math.max(shared, local.totalHits);
-      if (totalHits === 1) return { totalHits, resetTime: new Date(end) };
-      return { totalHits, resetTime: shared >= local.totalHits ? undefined : local.resetTime, row: k };
+      const got = await withTimeout(answer, timeoutMs());
+      if (!got) return local;
+      return got;
     } catch (err) {
       warn(err.message);
       return local;
     }
+  }
+  /** The queue of hits for one row key (hex), made when first needed and dropped when empty. */
+  queueOf(k) {
+    const id = k.toString('hex');
+    let q = this.queues.get(id);
+    if (!q) { q = { waiting: [], running: false }; this.queues.set(id, q); }
+    return q;
+  }
+  /** Sends the waiting hits for a key in one query, unless one is running for it or too many are in flight. */
+  flush(k) {
+    const id = k.toString('hex');
+    const q = this.queues.get(id);
+    if (!q || q.running || !q.waiting.length) return;
+    if (inFlight >= maxPending()) { this.blocked.add(id); return; }
+    const batch = q.waiting.splice(0);
+    const n = batch.length;
+    q.running = true; inFlight += 1;
+    const now = Date.now(); const end = now + this.windowMs;
+    // A new row counts n. An existing row counts n more, or starts again at n once its window has ended.
+    // LAST_INSERT_ID(x) hands the new count back with the write itself (insertId is 0 when the row was new).
+    Promise.resolve().then(() => this.db().query(
+      `INSERT INTO rate_limits (k, hits, reset_ms) VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE hits = LAST_INSERT_ID(IF(reset_ms <= ?, ?, hits + ?)), reset_ms = IF(reset_ms <= ?, ?, reset_ms)`,
+      [k, n, end, now, n, n, now, end])).then(([r]) => {
+      const total = Number(r.insertId) || n;
+      batch.forEach((w, i) => {
+        const shared = total - n + 1 + i;
+        const totalHits = Math.max(shared, w.local.totalHits);
+        w.resolve(totalHits === 1 ? { totalHits, resetTime: new Date(end) } : { totalHits, resetTime: shared >= w.local.totalHits ? undefined : w.local.resetTime, row: k });
+      });
+    }, (err) => { warn(err.message); batch.forEach((w) => w.resolve(null)); }).finally(() => {
+      q.running = false; inFlight -= 1;
+      if (q.waiting.length) this.flush(k); else this.queues.delete(id);
+      for (const other of [...this.blocked]) { // hits held back by the in-flight cap go next
+        if (inFlight >= maxPending()) break;
+        this.blocked.delete(other);
+        this.flush(Buffer.from(other, 'hex'));
+      }
+    });
   }
   /** When the window of a key ends (only read when a visitor is over the limit, for Retry-After). */
   async resetTimeOf(key) {

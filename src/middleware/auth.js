@@ -37,6 +37,7 @@ const TIER_SQL = `(u.totp_enabled = 1 OR EXISTS (SELECT 1 FROM user_passkeys k W
   (u.staff_id IS NOT NULL AND EXISTS (SELECT 1 FROM patrol_members m JOIN staff s2 ON s2.tenant_id = m.tenant_id AND s2.id = m.staff_id AND s2.status = 'active' WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id)) AS on_patrol,
   (u.staff_id IS NOT NULL AND EXISTS (SELECT 1 FROM patrol_members m WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id AND m.access_level IN ('admin','manager'))) AS patrol_lead,
   (u.staff_id IS NOT NULL AND EXISTS (SELECT 1 FROM patrol_members m WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id AND m.access_level = 'host')) AS patrol_host,
+  (u.staff_id IS NOT NULL AND u.patrol_removed_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM patrol_members m WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id)) AS off_roster,
   (SELECT ip.school_access FROM instructor_profiles ip JOIN staff s3 ON s3.tenant_id = ip.tenant_id AND s3.id = ip.staff_id AND s3.status = 'active' WHERE ip.tenant_id = u.tenant_id AND ip.staff_id = u.staff_id) AS school_access,
   t.require_mfa, t.mfa_for_patrol, (t.patrol_mfa_from IS NULL OR t.patrol_mfa_from <= CURDATE()) AS patrol_mfa_due, t.patrol_mfa_from,
   (t.sandbox_expires_at IS NOT NULL) AS sandbox`;
@@ -50,7 +51,8 @@ const AREA_PATHS = /^\/api\/v1\/(auth\/|area(\/|$)|whats-new)/;
 const ROOM_PATHS = /^\/api\/v1\/(patrol\/(duty|duty\/sign-in|duty\/sign-out|room|room\/end|alerts\/unsubscribe)|auth\/(me|logout|closing|back|step-up|step-up\/options))$/;
 
 // While two-step is still to be set up, or a temporary password replaced, only these are open.
-const SETUP_PATHS = /\/auth\/(me|logout|closing|back|change-password|mfa\/(setup|enable|status)|passkeys(\/options)?)$/;
+// The second check is open too: adding the first passkey or app needs it (with the password, 2026.11.11).
+const SETUP_PATHS = /\/auth\/(me|logout|closing|back|change-password|step-up(\/options)?|mfa\/(setup|enable|status)|passkeys(\/options)?)$/;
 
 /**
  * Verifies the bearer token, then re-checks the user in the database on every request, so that
@@ -79,7 +81,7 @@ async function authenticate(req, _res, next) {
   let rows;
   try {
     [rows] = await pool.query(
-      `SELECT u.id, u.role, u.staff_id, u.totp_enabled, u.must_change_password, (u.access_ends_on IS NOT NULL AND u.access_ends_on < CURDATE()) AS access_over,
+      `SELECT u.id, u.role, u.staff_id, u.totp_enabled, u.must_change_password, u.access_ends_on, t.timezone AS tenant_timezone,
          ${TIER_SQL}, t.status, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over,
          ${sessions.STATE_SQL}
        FROM users u JOIN tenants t ON t.id = u.tenant_id ${sessions.JOIN_SQL}
@@ -92,7 +94,7 @@ async function authenticate(req, _res, next) {
   const row = rows[0];
   // The server's own record of the session: signed out, idle too long, or ended from elsewhere.
   if (!payload.sid || !Number(row.session_open)) return next(unauthorized('Session ended. Sign in again.'));
-  if (Number(row.access_over)) return next(unauthorized('Your access has ended for the season. Ask a manager if you are coming back.'));
+  if (require('../lib/accessend').over(row.access_ends_on, row.tenant_timezone)) return next(unauthorized('Your access has ended for the season. Ask a manager if you are coming back.'));
   const display = row.session_display || null;
   // A background poll (x-poll: 1) is not someone using the app, so it does not keep the session open. The patrol-room
   // screen is the exception: it stays up all day, and can do nothing but the room's own work (below).
@@ -127,6 +129,7 @@ async function authenticate(req, _res, next) {
   // onPatrol: this login's person is on the patrol roster, so they can use Patrol whatever their login role is.
   req.auth = {
     tenantId: payload.tid, userId, role: row.role, staffId: row.staff_id, onPatrol: Boolean(Number(row.on_patrol)), sid: payload.sid,
+    offRoster: row.role === 'patrol' && Boolean(Number(row.off_roster)), // a patrol login whose person was taken off the roster: no Patrol (2026.11.11)
     method: row.session_method, terminalId: row.session_terminal ? Number(row.session_terminal) : null, deviceHash: row.session_device || null,
     steppedUp: Boolean(Number(row.stepped_up)), strong: Boolean(Number(row.strong)), mfaRule: mfaRule(row), display,
     schoolLevel: row.role === 'instructor' ? (row.school_access || 'instructor') : null, // lib/schoolaccess.js
@@ -141,7 +144,10 @@ const isManager = (req) => MANAGER_ROLES.includes(req.auth.role);
 function requireRole(...roles) {
   return (req, _res, next) => {
     if (!req.auth) return next(unauthorized());
-    if (req.auth.role === 'owner' || roles.includes(req.auth.role)) return next();
+    // A patrol login whose person was taken off the roster has no Patrol: the /patrol routes refuse it, while
+    // what a patrol login does elsewhere (a lift's or an attraction's status) is unchanged (2026.11.11).
+    const offPatrol = req.auth.role === 'patrol' && req.auth.offRoster && /^\/api\/v1\/patrol(\/|$)/.test(req.originalUrl);
+    if (req.auth.role === 'owner' || (roles.includes(req.auth.role) && !offPatrol)) return next();
     // Someone on the patrol roster can do what a patrol login can, whatever their login role (a lift operator who also patrols).
     if (req.auth.onPatrol && roles.includes('patrol')) return next();
     return next(forbidden('Your role cannot do that'));

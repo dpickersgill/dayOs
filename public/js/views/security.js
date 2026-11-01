@@ -5,6 +5,7 @@ import { get, post, put, patch, del } from '../api.js';
 import { h, clear, ctx, isManager, table, state, input, field, button, toast, formDialog, confirmDialog, errorBox, empty } from '../ui.js';
 import * as passkey from '../passkey.js';
 import { readTerminal, saveTerminal } from '../terminal.js';
+import { refreshDeviceKey } from '../outbox.js';
 
 const when = (v) => (v ? new Date(`${String(v).replace(' ', 'T')}Z`).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Never');
 const METHOD = { password: 'Password', mfa: 'Password and code', passkey: 'Passkey', email: 'Password and emailed code', pin: 'PIN' };
@@ -101,7 +102,7 @@ export function sessionsPanel(sec, redraw) {
       { head: 'Use', cell: (x) => h('span', { class: 'session-use' }, h('span', null, x.current ? 'In use now' : `Last used ${ago(x.last_seen, now)}`), x.ends_at ? h('span', { class: 'muted small' }, x.closing && !x.current ? `Closed in the browser. Ends at ${at(x.ends_at)} unless it is opened again` : `Ends at ${at(x.ends_at)} if unused`) : null) },
       { head: '', actions: true, cell: (x) => (x.current ? null : button('Sign out', async () => { await del(`/auth/sessions/${x.id}`); toast('Signed out there'); redraw(); }, { small: true, label: `Sign out ${x.device}` })) },
     ], sec.sessions),
-    sec.sessions.length > 1 ? h('div', { class: 'row' }, button('Sign out everywhere else', () => confirmDialog('Sign out everywhere else?', 'Every other phone and computer signed in as you is signed out now.', 'Sign out', async () => { await post('/auth/sessions/end-others'); toast('Signed out everywhere else'); redraw(); }, { danger: true }), { small: true })) : null,
+    sec.sessions.length > 1 ? h('div', { class: 'row' }, button('Sign out everywhere else', () => confirmDialog('Sign out everywhere else?', 'Every other phone and computer signed in as you is signed out now.', 'Sign out', async () => { await post('/auth/sessions/end-others'); await refreshDeviceKey(); toast('Signed out everywhere else'); redraw(); }, { danger: true }), { small: true })) : null,
     h('h3', null, 'Devices you have used'),
     h('p', { class: 'muted small' }, 'A sign-in from a device not on this list is emailed to you. Without two-step sign-in, a code is emailed first. Forget a device you no longer use.'),
     sec.devices.length ? table([

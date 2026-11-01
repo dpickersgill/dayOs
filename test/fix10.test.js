@@ -234,18 +234,21 @@ test('7: a slow database: a count gives up after about 250 ms, and slow queries 
   const took = Date.now() - t0;
   assert.ok(took >= 200 && took < 900, `gave up after ${took} ms`);
   assert.equal(first.totalHits, 1);
-  // The first query is still running: 30 more hits on the key send nothing and are counted here, at once.
+  // The first query is still running: 30 more hits on the key send nothing yet. They wait (2026.11.11: to go to the
+  // shared row together once the first query is back) and, the database being slow, answer from memory after the timeout.
   const t1 = Date.now();
   const more = await Promise.all(Array.from({ length: 30 }, () => store.increment('lodge')));
-  assert.ok(Date.now() - t1 < 150, 'answered from memory without waiting');
+  assert.ok(Date.now() - t1 < 900, 'answered from memory after the timeout, not stuck');
   assert.equal(sent, 1, 'one query for the key, not 31');
   assert.equal(Math.max(...more.map((x) => x.totalHits)), 31, 'every hit still counts');
   // Other keys: at most 10 queries in flight on this server at once.
   await Promise.all(Array.from({ length: 25 }, (_v, i) => store.increment(`addr-${i}`)));
   assert.ok(sent <= 10, `${sent} queries in flight`);
   assert.ok(RS.inFlight() <= 10);
-  release.forEach((f) => f()); await wait(20);
+  // Releasing the queries lets the waiting hits go (all 30 'lodge' hits in one query), until nothing is left.
+  for (let i = 0; i < 20 && release.length; i += 1) { release.splice(0).forEach((f) => f()); await wait(20); }
   assert.equal(RS.inFlight(), 0, 'all finished');
+  assert.ok(sent <= 1 + 1 + 25, `queued hits went together (${sent} queries)`);
   // Two hits at once on one server never both count as the first (the console's one-time codes rely on it).
   const fastPool = { query: async () => [{ insertId: 0 }] };
   const claims = new RS.MysqlStore({ prefix: 'fix10-claims', pool: fastPool });

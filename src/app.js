@@ -59,9 +59,14 @@ const whatsNew = require('./routes/whatsnew');
 
 function createApp() {
   const app = express();
-  // Cloud Run terminates TLS in front of the container (one hop). Behind the Cloud Armor load balancer there are two, so
-  // cloud-armor.sh sets TRUST_PROXY_HOPS=2; otherwise every visitor would share the load balancer's address for rate limits.
-  app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS || 1));
+  // Which address is the visitor's (every rate limit and PLATFORM_ALLOW_IPS key on it). Cloud Run's front end is the one
+  // hop always trusted: it adds the address it saw to X-Forwarded-For. The Cloud Armor load balancer adds its own address
+  // after the visitor's, so its address (TRUST_PROXY_LB_IPS, which scripts/cloud-armor.sh sets) and Google's front-end
+  // ranges are trusted too, and nothing else (2026.11.11). That is right in every state cloud-armor.sh leaves: the load
+  // balancer in front with run.app still open (a visitor cannot choose their own address by sending X-Forwarded-For), and
+  // only the load balancer. Before, a fixed hop count (TRUST_PROXY_HOPS) was wrong in two of them. Without
+  // TRUST_PROXY_LB_IPS the hop count still applies, as before.
+  app.set('trust proxy', require('./lib/clientip').trustProxy());
   app.disable('x-powered-by');
   // An answer that has not started after REQUEST_TIMEOUT_MS (default 5 minutes) gets "took too long", so a stuck request
   // cannot hold one of the server's places for Cloud Run's 15 minutes. The scheduled jobs are exempt (the daily job may
@@ -81,7 +86,10 @@ function createApp() {
   // cookies); the app, the console and the mountains' pages keep the strict policy.
   const siteOnly = (value) => (req) => (config.site.hosts.includes(String(req.hostname || '').toLowerCase()) ? value : "'self'");
   app.use(helmet({ contentSecurityPolicy: { directives: { ...helmet.contentSecurityPolicy.getDefaultDirectives(), 'img-src': ["'self'", 'data:', 'blob:', ...tileHosts],
-    'script-src': ["'self'", siteOnly('https://static.cloudflareinsights.com')], 'connect-src': ["'self'", siteOnly('https://cloudflareinsights.com')] } } }));
+    'script-src': ["'self'", siteOnly('https://static.cloudflareinsights.com')], 'connect-src': ["'self'", siteOnly('https://cloudflareinsights.com')],
+    // Stylesheets only from this address (2026.11.11: helmet's default also allowed any https: address; nothing uses one).
+    // 'unsafe-inline' stays: the website's pages, the server-made pages and some screens set style attributes in their HTML.
+    'style-src': ["'self'", "'unsafe-inline'"] } } }));
   // Smaller pages for slow mountain connections and faster loads (search engines rank on it). Event streams are left alone.
   app.use(require('compression')({ filter: (req, res) => !String(res.getHeader('Content-Type') || '').includes('event-stream') && require('compression').filter(req, res) }));
   const origins = (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -271,7 +279,8 @@ function createApp() {
   const trialLimit = rateLimit({ windowMs: 3_600_000, max: Number(process.env.SANDBOX_RATE_LIMIT) || 15, message: 'Too many demo requests from this address. Try again later, or ask us for a walkthrough.' });
   api.use('/trial', (req, res, next) => (['/find', '/area'].includes(req.path) ? next() : trialLimit(req, res, next)), sandboxRoutes);
   // Operator sign-in has its own, tighter limit (on top of each login's lockout).
-  api.post(['/platform/login', '/platform/login/setup', '/platform/login/passkey', '/platform/login/passkey/options'], rateLimit({ windowMs: 15 * 60_000, max: Number(process.env.PLATFORM_LOGIN_RATE_LIMIT) || 20, message: 'Too many sign-in attempts from this address. Try again in 15 minutes.' }));
+  // The platform key's own sign-in (/platform/session) too (2026.11.11): before, guesses at the key had only the general 60 a minute.
+  api.post(['/platform/session', '/platform/login', '/platform/login/setup', '/platform/login/passkey', '/platform/login/passkey/options'], rateLimit({ windowMs: 15 * 60_000, max: Number(process.env.PLATFORM_LOGIN_RATE_LIMIT) || 20, message: 'Too many sign-in attempts from this address. Try again in 15 minutes.' }));
   api.use('/platform', rateLimit({ windowMs: 60_000, max: Number(process.env.PLATFORM_RATE_LIMIT) || 60, message: 'Too many attempts' }), platform);
   api.use(site.api); // the website's plans and contact form (no sign-in)
   api.use('/twilio', require('./routes/twilioinbound').router); // STOP and START replies to our texts (signed by Twilio)

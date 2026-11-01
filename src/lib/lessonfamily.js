@@ -263,7 +263,11 @@ async function handleWebhook(event, obj) {
 }
 
 // ---------------------------------------------------------------- the family lesson page
-/** The booking a family link points to: the booking's own link, or the link in a recap email. */
+/**
+ * The booking a family link points to: the booking's own link, or the link in a recap email. Both run out 60 days after
+ * the lesson (lib/lessonlinks.js). A recap email's link is marked via_recap: it shows the lesson and takes a tip, but
+ * changes nothing (2026.11.11; routes/schoolparents.js).
+ */
 async function bookingByToken(db, tenantId, token) {
   const b = await links.find(db, tenantId, token);
   if (b) return b;
@@ -274,7 +278,7 @@ async function bookingByToken(db, tenantId, token) {
       s.instructor_id, s.product_id, s.format, s.delay_minutes, pr.name AS product, p.first_name, p.last_name
     FROM lesson_bookings b JOIN lesson_sessions s ON s.tenant_id = b.tenant_id AND s.id = b.session_id
     JOIN products pr ON pr.tenant_id = s.tenant_id AND pr.id = s.product_id JOIN people p ON p.tenant_id = b.tenant_id AND p.id = b.person_id
-    WHERE b.tenant_id = ? AND b.id = ?`, [tenantId, r.booking_id]);
+    WHERE b.tenant_id = ? AND b.id = ?`, [tenantId, r.booking_id]).then((b) => (b && !links.expired(b) ? { ...b, via_recap: true } : null));
 }
 
 /** Wall-clock time plus minutes, as 'YYYY-MM-DD HH:MM:SS'. */

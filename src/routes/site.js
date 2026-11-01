@@ -245,8 +245,11 @@ function fillPlans(html, d) {
 }
 
 /** The address search engines should treat as the page's own: the website's first address once it has one. */
+// Never from the request's Host header when PUBLIC_URL is set (always, in production): the pages are cached publicly, so a
+// made-up Host would otherwise end up in everyone's canonical and og:url (2026.11.11).
 function canonicalOrigin(req) {
   if (config.site.hosts.length) return `https://${config.site.hosts[0]}`;
+  if (config.stripe.publicUrl) return `${config.stripe.publicUrl}/site`;
   return `${req.protocol}://${req.get('host')}/site`;
 }
 /** Served at /site on an address that is not the website, once the website has its own: a copy search engines skip. */
@@ -267,7 +270,7 @@ function fillGoodDay(html) {
 async function render(req, name, slug, words = null) {
   const site = onSite(req);
   const base = site ? '' : '/site';
-  const origin = `${req.protocol}://${req.get('host')}`;
+  const origin = config.stripe.publicUrl || `${req.protocol}://${req.get('host')}`; // never the Host header in production (2026.11.11)
   const app = config.site.appUrl || (site ? '/app' : '');
   let html = template(name);
   const plans = await loadPlans().catch(() => null);
@@ -366,7 +369,7 @@ pages.get('/robots.txt', (req, res) => {
   else {
     lines.push('Disallow: /api/', 'Disallow: /app', 'Disallow: /platform', 'Disallow: /kiosk');
     if (config.site.hosts.length) lines.push('Disallow: /site');
-    else lines.push(`Sitemap: ${req.protocol}://${req.get('host')}/site/sitemap.xml`);
+    else lines.push(`Sitemap: ${canonicalOrigin(req)}/sitemap.xml`);
   }
   res.type('text/plain').set('Cache-Control', 'public, max-age=3600').send(`${lines.join('\n')}\n`);
 });
@@ -505,8 +508,12 @@ api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.e
     const sent = await mailer.sendPlatform({ to: config.site.contactEmail, replyTo: b.email, subject: `${KINDS[b.kind]}: ${b.mountain}`, text: lines.join('\n'), tag: 'site-lead' });
     if (sent.ok) {
       await pool.query('UPDATE site_leads SET emailed = 1 WHERE id = ?', [r.insertId]);
+      // The copy carries nothing that was typed (2026.11.11): the form takes any address without confirming it, so a name or
+      // a mountain written into the copy would let anyone make our sending domain deliver their words and links to any inbox.
+      // The demo link only from the configured address, never from the request's Host.
+      const tryUrl = config.site.appUrl ? `\n\nTo look around in the meantime, start a demo mountain: ${config.site.appUrl}/try` : '';
       copy = (await mailer.sendPlatform({ to: b.email, replyTo: config.site.contactEmail, subject: 'We have your Verdynt/OS request', tag: 'site-lead-thanks',
-        text: `Hello ${b.name},\n\nThank you for writing about ${b.mountain}. A person will reply within one business day${b.kind === 'trial' ? ' to set up your trial' : b.kind === 'patrol' ? ' to set up your patrol, with a 14-day trial' : b.kind === 'review' ? ' with a safe way to send your ten reports (please do not email patient records)' : ' to set a time'}.\n\nTo look around in the meantime, start a demo mountain: ${config.site.appUrl || `${req.protocol}://${req.get('host')}`}/try\n\nVerdynt/OS` })).ok;
+        text: `Hello,\n\nThank you for writing to Verdynt/OS. A person will reply within one business day${b.kind === 'trial' ? ' to set up your trial' : b.kind === 'patrol' ? ' to set up your patrol, with a 14-day trial' : b.kind === 'review' ? ' with a safe way to send your ten reports (please do not email patient records)' : ' to set a time'}.${tryUrl}\n\nIf you did not write to us, you can ignore this email.\n\nVerdynt/OS` })).ok;
     }
   }
   res.status(201).json({ ok: true, copy });

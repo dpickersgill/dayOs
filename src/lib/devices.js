@@ -33,6 +33,13 @@ async function isNew(user, deviceHash) {
   return Number(r.n) > 0 && !Number(r.mine);
 }
 
+/** Has this person signed in from this device before? (A locked login still lets them in from one, routes/auth.js.) */
+async function known(user, deviceHash) {
+  if (!deviceHash) return false;
+  const [[r]] = await pool.query('SELECT COUNT(*) AS n FROM user_devices WHERE user_id = ? AND device_hash = ?', [user.id, deviceHash]);
+  return Number(r.n) > 0;
+}
+
 /** Notes the device; on a device not seen before (or one that did not say which it is), writes the audit log and emails the person. Never throws. */
 async function remember(user, req, deviceHash, { method } = {}) {
   try {
@@ -54,4 +61,4 @@ async function remember(user, req, deviceHash, { method } = {}) {
   } catch (e) { console.error('Could not note sign-in device', e.message); }
 }
 
-module.exports = { hashOf, label, isNew, remember };
+module.exports = { hashOf, label, isNew, known, remember };

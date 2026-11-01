@@ -16,6 +16,8 @@ const { tenantOf } = require('../lib/kiosk');
 const { toCsv } = require('../lib/csv');
 const SH = require('../lib/shifts');
 
+// Downloads that carry names (guests, staff health, pay) need the second check, like patient and customer lists (2026.11.11).
+const { stepUp } = require('../lib/stepup');
 const router = express.Router();
 const mgr = requireRole('manager');
 const OVERTIME_AFTER = 40 * 60;
@@ -179,7 +181,7 @@ router.post('/time/unapprove', mgr, validate(z.object({ start: dateStr, staff_id
 });
 
 /** Payroll export for a week: one row per person (or one per punch with detail=1), hours in decimals. */
-router.get('/time/export', mgr, async (req, res) => {
+router.get('/time/export', mgr, stepUp('download hours for payroll'), async (req, res) => {
   const t = req.auth.tenantId;
   const tz = (await tenantOf(pool, t)).timezone;
   const start = SH.weekOf(String(req.query.start || ''));

@@ -16,6 +16,7 @@ const { z, validate, paramId } = require('../lib/util');
 const { bad, forbidden, notFound } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { rateLimit } = require('../middleware/rateLimit');
+const { checkPassword } = require('../lib/logintries');
 
 const router = express.Router();
 const limit = rateLimit({ windowMs: 60_000, max: Number(process.env.LOGIN_RATE_LIMIT) || 20, message: 'Too many attempts', keyOf: (req) => `sec:${req.ip}` });
@@ -47,16 +48,19 @@ router.get('/auth/security', authenticate, async (req, res) => {
 });
 
 // ---------------------------------------------------------------- passkeys
-router.post('/auth/passkeys/options', authenticate, notOnTerminal, limit, async (req, res) => {
+// Adding a passkey needs the second check first (2026.11.11), and adding one is not itself the check: a session alone (a
+// copied token, a computer left signed in) must never be able to add a way in that outlasts it. Someone setting up their
+// first passkey confirms with their password (step-up allows that only for logins with no passkey or app yet).
+const addCheck = stepUp('add a passkey');
+router.post('/auth/passkeys/options', authenticate, notOnTerminal, limit, addCheck, async (req, res) => {
   const user = await me(req);
   const t = await one(pool, 'SELECT name FROM tenants WHERE id = ?', [user.tenant_id]);
   res.json(await passkeys.registrationOptions(req, { kind: 'user', ownerId: user.id, tenantId: user.tenant_id, userName: `${user.username || user.email} (${t.name})`, displayName: user.username || user.email }));
 });
 
-router.post('/auth/passkeys', authenticate, notOnTerminal, limit, validate(z.object({ handle: z.string().max(100), response: z.any(), name: z.string().trim().max(60).optional() })), async (req, res) => {
+router.post('/auth/passkeys', authenticate, notOnTerminal, limit, addCheck, validate(z.object({ handle: z.string().max(100), response: z.any(), name: z.string().trim().max(60).optional() })), async (req, res) => {
   const user = await me(req);
   const id = await passkeys.register(req, { kind: 'user', ownerId: user.id, tenantId: user.tenant_id, handle: req.body.handle, response: req.body.response, name: req.body.name || require('../lib/devices').label(req.get('user-agent')) });
-  await sessions.steppedUp(req.auth.sid); // they just proved it with the passkey
   await audit(pool, req, 'passkey_add', 'users', user.id, { passkey: id });
   res.status(201).json({ id });
 });
@@ -105,7 +109,7 @@ router.post('/auth/step-up', authenticate, limit, validate(z.object({ password: 
   } else if (req.body.password !== undefined) {
     // Someone with a passkey or an app must use it: a password alone is what an attacker would have.
     if (strong) throw forbidden('Use your passkey or the code from your app');
-    if (!(await bcrypt.compare(req.body.password, user.password_hash))) throw forbidden('That password is not right');
+    await checkPassword(user, req.body.password); // counts toward the login's lock (2026.11.11)
     how = 'password';
   } else throw bad('Confirm with your passkey, a code or your password');
   await sessions.steppedUp(req.auth.sid);
@@ -151,7 +155,7 @@ function weakPin(pin) {
 router.put('/auth/pin', authenticate, notOnTerminal, limit, validate(z.object({ password: z.string().min(1).max(200), pin: z.string().regex(/^\d{6,8}$/, 'Use 6 to 8 digits') })), async (req, res) => {
   const user = await me(req);
   if (!CREW_ROLES.includes(user.role)) throw forbidden('PINs are for counter, lift and instructor staff. You sign in with a passkey or two-step.');
-  if (!(await bcrypt.compare(req.body.password, user.password_hash))) throw forbidden('That password is not right');
+  await checkPassword(user, req.body.password);
   if (weakPin(req.body.pin)) throw bad('That PIN is too easy to guess (a run, a repeat, a year or a common PIN). Choose another.');
   await pool.query('UPDATE users SET pin_hash = ?, pin_failures = 0, pin_locked_until = NULL WHERE id = ?', [await bcrypt.hash(req.body.pin, 10), user.id]);
   await audit(pool, req, 'pin_set', 'users', user.id);

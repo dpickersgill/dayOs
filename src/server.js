@@ -1,6 +1,7 @@
 'use strict';
 
 const config = require('./config');
+config.refuseUnsafe(); // production will not start with a weak key or secret, the root database login, or no PUBLIC_URL (2026.11.11)
 const { createApp } = require('./app');
 const { pool } = require('./db');
 

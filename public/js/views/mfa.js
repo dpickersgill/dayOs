@@ -61,10 +61,10 @@ export function mfaPanel(onChange) {
     return dlgForm;
   }
 
+  // The server asks for a code from the app or a passkey first (the "Confirm it is you" box), not the password.
   function newCodes() {
-    const pw = input({ name: 'password', type: 'password', autocomplete: 'current-password', required: true });
-    formDialog('New recovery codes', h('div', { class: 'stack' }, h('p', null, 'This makes a fresh set of ten codes. The old ones stop working.'), h('div', { class: 'form' }, field('Your password', pw))),
-      async () => { const out = await post('/auth/mfa/recovery-codes', { password: pw.value }); showCodes(out.recovery_codes, async () => {}); },
+    formDialog('New recovery codes', h('div', { class: 'stack' }, h('p', null, 'This makes a fresh set of ten codes. The old ones stop working. You will confirm with a code from your app or your passkey.')),
+      async () => { const out = await post('/auth/mfa/recovery-codes', {}); showCodes(out.recovery_codes, async () => {}); },
       { submitText: 'Make new codes' });
   }
 

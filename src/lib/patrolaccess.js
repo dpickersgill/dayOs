@@ -75,13 +75,19 @@ const levelForRank = (rank) => ({ director: 'admin', leader: 'manager' }[rank] |
 
 const isSystemAdmin = (req) => ['owner', 'manager'].includes(req.auth.role);
 
-/** The person's patrol access level: admin for owners and managers; the roster record for patrol logins. */
+/**
+ * The person's patrol access level: admin for owners and managers; the roster record for patrol logins. A patrol login
+ * whose person was taken off the roster (users.patrol_removed_at, req.auth.offRoster) has no patrol access at all
+ * (2026.11.11): before, it fell back to Patrol, so someone removed from the roster kept every case and patient record,
+ * and a Host whose record went was raised to Patrol. A patrol login never put on the roster, or linked to nobody, is a
+ * plain Patrol, as before; putting the person back on the roster gives the roster level again.
+ */
 async function levelOf(pool, req) {
   if (isSystemAdmin(req)) return 'admin';
   if (req.auth.role !== 'patrol' && !req.auth.onPatrol) return null;
   if (!req.auth.staffId) return 'patrol';
   const m = await one(pool, 'SELECT access_level FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [req.auth.tenantId, req.auth.staffId]);
-  return m ? m.access_level : 'patrol';
+  return m ? m.access_level : (req.auth.offRoster ? null : 'patrol');
 }
 
 /** One person's exceptions to their level: { feature: true (added) | false (taken away) }. */

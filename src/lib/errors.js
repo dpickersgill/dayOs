@@ -20,6 +20,10 @@ function errorHandler(err, req, res, _next) {
     // extra: a few plain flags the screen can act on (for example whether an exception is possible); never data from the request
     return res.status(err.status).json({ error: err.message, details: err.details, ...(err.extra && typeof err.extra === 'object' ? err.extra : {}) });
   }
+  // A zod .parse() of the query string in a route (2026.11.11): the request was wrong, not the server.
+  if (err && err.name === 'ZodError' && Array.isArray(err.issues)) {
+    return res.status(400).json({ error: 'Validation failed', details: err.issues.map((i) => ({ path: (i.path || []).join('.'), message: i.message })) });
+  }
   if (err && err.type === 'entity.parse.failed') {
     return res.status(400).json({ error: 'Invalid JSON body' });
   }

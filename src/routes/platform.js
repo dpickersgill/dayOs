@@ -46,7 +46,8 @@ const keyPrint = () => crypto.createHash('sha256').update(`key:${config.bootstra
 // A session names who opened it: an operator (o = their id) or someone using the platform key (no o). typ 'setup' is the
 // short-lived ticket an operator holds between their password and setting up their authenticator app; it opens nothing else.
 function makeSession(name, operatorId = null, { typ = null, minutes = SESSION_HOURS * 60, epoch = 0, secretPrint = null, twoStep = false } = {}) {
-  const body = Buffer.from(JSON.stringify({ n: name, o: operatorId, e: epoch, typ, h: secretPrint, k: operatorId ? null : keyPrint(), t: twoStep ? 1 : 0, exp: Date.now() + minutes * 60_000 })).toString('base64url');
+  // i: the session's own id, so signing out can end this one session on the server (2026.11.11).
+  const body = Buffer.from(JSON.stringify({ n: name, o: operatorId, e: epoch, typ, h: secretPrint, k: operatorId ? null : keyPrint(), t: twoStep ? 1 : 0, i: crypto.randomBytes(16).toString('base64url'), exp: Date.now() + minutes * 60_000 })).toString('base64url');
   return `${body}.${sessionSig(body)}`;
 }
 function readSession(token) {
@@ -56,6 +57,7 @@ function readSession(token) {
   if (sig.length !== want.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return null;
   try { const p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')); return p.exp > Date.now() ? p : null; } catch (_) { return null; }
 }
+const endedHash = (id) => crypto.createHash('sha256').update(`platform-session:${id}`).digest('hex');
 const allowedIps = () => String(process.env.PLATFORM_ALLOW_IPS || '').split(',').map((x) => x.trim()).filter(Boolean);
 
 /**
@@ -85,7 +87,10 @@ router.use(async (req, _res, next) => {
     if (req.method === 'POST' && OPEN.has(req.path)) return next();
     const session = readSession(req.get('x-platform-session'));
     if (session && session.typ) return next(forbidden('Finish signing in first'));
+    // A session ended by signing out stops working at once, even if a copy was kept (2026.11.11).
+    if (session && session.i && await one(pool, 'SELECT 1 AS x FROM platform_sessions_ended WHERE id_hash = ?', [endedHash(session.i)])) return next(forbidden('Sign in to the console again'));
     if (session) {
+      req.platformSession = session;
       if (session.o) {
         // An operator's session ends when they are switched off, or their password or two-step is changed or reset.
         const op = await one(pool, 'SELECT id, name, active, session_epoch FROM platform_operators WHERE id = ?', [session.o]);
@@ -739,15 +744,44 @@ router.post('/operators/:id/reset-two-step', twoStepAccess, async (req, res) => 
   res.json({ ok: true });
 });
 
+/** Sign out: this session ends on the server, so a copy of it (a shared laptop, a browser profile) no longer works. */
+router.post('/logout', async (req, res) => {
+  const s = req.platformSession;
+  if (s && s.i) {
+    await pool.query('INSERT IGNORE INTO platform_sessions_ended (id_hash, ends_at) VALUES (?, ?)', [endedHash(s.i), new Date(s.exp).toISOString().slice(0, 19).replace('T', ' ')]);
+    await log(pool, req, null, 'sign_out', null);
+  }
+  res.status(204).end();
+});
+
 // Your own passkeys. Once you have one, the console signs you in with it only.
+// Adding one needs a fresh check (2026.11.11): a code from your authenticator app, or one of your passkeys. The session
+// alone is not enough, or a copied session could add the passkey that then becomes your only way in.
 const opOnly = (req) => { if (!req.operatorId) throw bad('You signed in with the platform key. Sign in with your email to add a passkey.'); };
+async function freshCheck(req, o) {
+  const { code, handle, response } = req.body || {};
+  if (response) { await passkeys.authenticate(req, { kind: 'operator', purpose: 'stepup', handle, response, ownerId: o.id }); return; }
+  if (!code) { const err = forbidden('Confirm it is you: type the code from your authenticator app, or use one of your passkeys.'); err.details = { code: 'fresh_check_required' }; throw err; }
+  if (!o.totp_enabled || !o.totp_secret) throw forbidden('Set up your authenticator app first');
+  if (!(await opClaim(o.id))) throw forbidden(`Too many wrong tries. Wait ${LOCK_MINUTES} minutes.`);
+  const step = totp.verify(totp.open(o.totp_secret), String(code));
+  if (step === null) throw forbidden('That code is not right. Type the newest one in your app.');
+  const [r] = await pool.query('UPDATE platform_operators SET totp_last_step = ?, failures = 0, locked_until = NULL WHERE id = ? AND (totp_last_step IS NULL OR totp_last_step < ?)', [step, o.id, step]);
+  if (r.affectedRows !== 1) throw forbidden('That code was just used. Wait for the next one in your app.');
+}
+/** The passkey challenge for the fresh check (only offered when you already have a passkey). */
+router.post('/me/passkeys/check-options', async (req, res) => {
+  opOnly(req);
+  res.json(await passkeys.authenticationOptions(req, { kind: 'operator', purpose: 'stepup', ownerId: req.operatorId }));
+});
 router.get('/me/passkeys', async (req, res) => {
   opOnly(req);
   res.json({ data: (await passkeys.listFor('operator', req.operatorId)).map((k) => ({ id: k.id, name: k.name, created_at: k.created_at, last_used_at: k.last_used_at })) });
 });
-router.post('/me/passkeys/options', async (req, res) => {
+router.post('/me/passkeys/options', validate(z.object({ code: z.string().max(10).optional(), handle: z.string().max(100).optional(), response: z.any().optional() })), async (req, res) => {
   opOnly(req);
   const o = await operatorOr404(req.operatorId);
+  await freshCheck(req, o);
   res.json(await passkeys.registrationOptions(req, { kind: 'operator', ownerId: o.id, userName: `${o.email} (Verdynt/OS console)`, displayName: o.name }));
 });
 router.post('/me/passkeys', validate(z.object({ handle: z.string().max(100), response: z.any(), name: z.string().trim().max(60).optional() })), async (req, res) => {
@@ -767,9 +801,10 @@ router.delete('/me/passkeys/:id', async (req, res) => {
 router.post('/me/password', validate(z.object({ current: z.string().max(200), password })), async (req, res) => {
   if (!req.operatorId) throw bad('You signed in with the platform key. Sign in with your email to change your password.');
   const o = await operatorOr404(req.operatorId);
+  if (!(await opClaim(o.id))) throw forbidden(`Too many wrong tries. Wait ${LOCK_MINUTES} minutes.`); // counts toward the lock (2026.11.11)
   if (!(await bcrypt.compare(req.body.current, o.password_hash))) throw bad('Your current password is not right');
   await PWR.refuseWeak(req.body.password, { email: o.email, username: o.name });
-  await pool.query('UPDATE platform_operators SET password_hash = ?, password_changed_at = UTC_TIMESTAMP(), session_epoch = session_epoch + 1 WHERE id = ?', [await bcrypt.hash(req.body.password, 12), o.id]);
+  await pool.query('UPDATE platform_operators SET password_hash = ?, password_changed_at = UTC_TIMESTAMP(), session_epoch = session_epoch + 1, failures = 0, locked_until = NULL WHERE id = ?', [await bcrypt.hash(req.body.password, 12), o.id]);
   await log(pool, req, null, 'change_own_password', null);
   const [[fresh]] = await pool.query('SELECT session_epoch FROM platform_operators WHERE id = ?', [o.id]);
   res.json({ ok: true, session: makeSession(o.name, o.id, { epoch: Number(fresh.session_epoch) }) }); // a fresh session, since the change ends the old ones

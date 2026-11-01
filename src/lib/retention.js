@@ -50,8 +50,9 @@ async function runAll() {
   out.sessions = await require('./sessions').prune();
   out.challenges = await require('./challenges').prune();
   // Seasonal logins whose last day has passed: their sessions end now (signing in is already refused).
-  const [ended] = await pool.query("UPDATE user_sessions s JOIN users u ON u.id = s.user_id SET s.ended_at = UTC_TIMESTAMP(), s.ended_why = 'access_ended' WHERE s.ended_at IS NULL AND u.access_ends_on IS NOT NULL AND u.access_ends_on < CURDATE()");
-  out.access_ended = ended.affectedRows;
+  // Each mountain's own date (2026.11.11), not the UTC one.
+  out.access_ended = await require('./accessend').endSessions(pool);
+  await pool.query('DELETE FROM platform_sessions_ended WHERE ends_at < UTC_TIMESTAMP()').catch(() => {}); // console sign-outs past their session's end
   // Operators' openings of a mountain that ran out are kept as history; nothing to delete.
   const [l] = await pool.query('DELETE FROM site_leads WHERE created_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? YEAR)', [LEAD_YEARS]);
   out.leads = l.affectedRows;

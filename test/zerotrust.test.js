@@ -313,8 +313,10 @@ test('the console: operators open a mountain with a reason, and sign in with a p
   is(await plat('PATCH', `/tenants/${P.id}`, { key: KEY, body: { platform_notes: 'break glass' } }), 200, 'the key is not asked (and is recorded)');
   // A passkey: then the password and code no longer work for this operator
   const console_ = new SoftAuthenticator(base);
-  const o = await plat('POST', '/me/passkeys/options', { session: s });
+  is(await plat('POST', '/me/passkeys/options', { session: s }), 403, 'the session alone does not add a passkey (2026.11.11)');
+  const o = await plat('POST', '/me/passkeys/options', { session: s, body: { code: totp.hotp(secret, totp.stepAt(Date.now()) + 1) } });
   is(await plat('POST', '/me/passkeys', { session: s, body: { handle: o.body.handle, response: console_.create(o.body.options), name: 'Laptop' } }), 201);
+  await pool.query('UPDATE platform_operators SET totp_last_step = NULL WHERE email = ?', [email]); // the code above was used for the fresh check
   const pw = await plat('POST', '/login', { body: { email, password: opPw, code: totp.hotp(secret, totp.stepAt(Date.now()) + 1) } });
   is(pw, 403); assert.match(pw.body.error, /passkey/);
   const lo = await plat('POST', '/login/passkey/options');

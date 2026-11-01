@@ -38,16 +38,21 @@ async function familyFor(req) {
 publicRouter.post('/:slug/family/link', validate(z.object({ email: z.string().trim().toLowerCase().email().max(255), website: z.string().max(200).optional() })), async (req, res) => {
   const t = await tenantFor(req.params.slug);
   res.set('Cache-Control', 'no-store');
-  if (req.body.website) return res.json({ ok: true });
-  const fam = await PP.familyOf(pool, t.id, req.body.email);
-  const recent = await one(pool, "SELECT COUNT(*) AS n FROM family_tokens WHERE tenant_id = ? AND email = ? AND kind = 'link' AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)", [t.id, req.body.email]);
-  if (fam.adults.length && Number(recent.n) < 5 && mailer.enabled()) {
-    const token = await PP.newToken(t.id, req.body.email, 'link');
-    const link = `${baseUrl(req)}/family/${t.slug}?t=${token}`;
-    await mailer.send({ tenantId: t.id, to: req.body.email, fromName: t.name, subject: `Sign in to your family page at ${t.name}`, tag: 'family-link',
-      text: [`Hi ${fam.adults[0].first_name},`, '', `Here is your sign-in link for ${t.name}. It works once, for the next 30 minutes:`, link, '', 'If you did not ask for it, you can ignore this email.', t.name].join('\n') }).catch(() => {});
-  }
+  // The reply goes first, and everything that depends on whether the email is known happens after it (2026.11.11): before,
+  // the reply waited for the email to send only for known addresses, so its timing told anyone who is a customer.
   res.json({ ok: true });
+  if (req.body.website) return;
+  const base = baseUrl(req);
+  (async () => {
+    const fam = await PP.familyOf(pool, t.id, req.body.email);
+    const recent = await one(pool, "SELECT COUNT(*) AS n FROM family_tokens WHERE tenant_id = ? AND email = ? AND kind = 'link' AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)", [t.id, req.body.email]);
+    if (fam.adults.length && Number(recent.n) < 5 && mailer.enabled()) {
+      const token = await PP.newToken(t.id, req.body.email, 'link');
+      const link = `${base}/family/${t.slug}?t=${token}`;
+      await mailer.send({ tenantId: t.id, to: req.body.email, fromName: t.name, subject: `Sign in to your family page at ${t.name}`, tag: 'family-link',
+        text: [`Hi ${fam.adults[0].first_name},`, '', `Here is your sign-in link for ${t.name}. It works once, for the next 30 minutes:`, link, '', 'If you did not ask for it, you can ignore this email.', t.name].join('\n') });
+    }
+  })().catch((e) => console.error('Family sign-in link not sent:', e.message));
 });
 
 publicRouter.post('/:slug/family/session', validate(z.object({ token: z.string().trim().min(10).max(100) })), async (req, res) => {

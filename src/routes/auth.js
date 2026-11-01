@@ -35,12 +35,21 @@ const NEEDS_EMAIL = [...MANAGERS, 'area']; // security notices and getting back 
 
 // A real bcrypt hash of a throwaway string, compared against when the user is unknown so that
 // response time does not reveal whether a username or email exists. Same cost (12) as real password hashes.
-const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(8).toString('hex'), 12);
+const { claimTry, checkPassword, DUMMY_HASH, LOGIN_LOCK_AFTER: lockAfter } = require('../lib/logintries');
+const { counter } = require('../middleware/rateLimit');
 
-/** Token issued at an explicit second, so it is never older than the password change that created it. */
-function tokenIssuedAt(user, iat, req) {
+/** A shared terminal's PIN session changes no sign-in settings (two-step, username): the person signs in with their password for that. */
+const notOnTerminal = (req, _res, next) => (req.auth.method === 'pin' ? next(forbidden('Sign in with your password (not your PIN) to change your sign-in settings')) : next());
+
+/**
+ * Token issued at an explicit second, so it is never older than the password change that created it. It counts as the
+ * second check only when the password is that person's check (no passkey, no app), or when this session already had it:
+ * a password alone is never enough for someone with two-step (2026.11.11).
+ */
+async function tokenIssuedAt(user, iat, req) {
   const a = req.auth || {};
-  return sessions.open(user, req, { iat, method: a.method || 'password', deviceHash: a.deviceHash || null, terminalId: a.terminalId || null, steppedUp: true });
+  const strong = Number(user.totp_enabled) || (await passkeys.count('user', user.id)) > 0;
+  return sessions.open(user, req, { iat, method: a.method || 'password', deviceHash: a.deviceHash || null, terminalId: a.terminalId || null, steppedUp: Boolean(a.steppedUp) || !strong });
 }
 
 /**
@@ -102,8 +111,9 @@ async function finishSignIn(user, req, res, { method, extra = {} }) {
   res.json({ token: await signToken(user, req, { method, deviceHash, steppedUp }), role: user.role, tenant_id: user.tenant_id, must_change_password: Boolean(user.must_change_password), ...extra });
 }
 const ACCESS_OVER = 'Your access has ended for the season. Ask a manager if you are coming back.';
-const accessOver = (u) => Boolean(u.access_ends_on) && String(u.access_ends_on).slice(0, 10) < new Date().toISOString().slice(0, 10);
-const USER_SQL = `SELECT u.*, t.status AS tenant_status, t.slug AS tenant_slug, (t.sandbox_expires_at IS NOT NULL) AS sandbox, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over
+// The last day is the mountain's own day, not the UTC one (2026.11.11): a login ending on the 31st works until midnight there.
+const accessOver = (u) => require('../lib/accessend').over(u.access_ends_on, u.tenant_timezone);
+const USER_SQL = `SELECT u.*, t.status AS tenant_status, t.slug AS tenant_slug, t.timezone AS tenant_timezone, (t.sandbox_expires_at IS NOT NULL) AS sandbox, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over
   FROM users u JOIN tenants t ON t.id = u.tenant_id`;
 function refuseClosed(user) {
   if (user.tenant_status !== 'active') throw forbidden('This mountain is paused. Contact Verdynt/OS.');
@@ -123,22 +133,32 @@ router.post(
     const who = String(req.body.login || req.body.email).trim();
     const byEmail = who.includes('@');
     const user = await one(pool, `${USER_SQL} WHERE t.slug = ? AND ${byEmail ? 'u.email' : 'u.username'} = ? AND u.active = 1`, [tenant, byEmail ? who : UN.normalize(who)]);
-    if (!user) { await bcrypt.compare(pw, DUMMY_HASH); throw unauthorized('Invalid credentials'); }
+    // An unknown login is counted too, by what was typed, and answers exactly as a locked real one does after the same
+    // number of tries (2026.11.11): before, only real logins ever said "too many", which told anyone which logins exist.
+    if (!user) {
+      const { over } = await unknownTries.hit(`${tenant}\u0000${byEmail ? who.toLowerCase() : UN.normalize(who)}`);
+      await bcrypt.compare(pw, DUMMY_HASH);
+      if (over) throw new AppError(429, TOO_MANY);
+      throw unauthorized('Invalid credentials');
+    }
     // A login is locked for 15 minutes after 10 wrong passwords in a row, whatever address they come from (so guessing
     // from many machines is slowed too). Each try is counted before the password is checked (see claimTry), so guesses
     // sent all at once still get only 10 checks. A wrong password answers "Invalid credentials", like an unknown login.
+    // While locked, the right password from a device this person has signed in from before still works (2026.11.11), so
+    // someone guessing at a login cannot keep its owner out. Every other try while locked gets the same answer.
     const tries = await claimTry('login', user.id);
     if (!tries) {
-      await bcrypt.compare(pw, DUMMY_HASH);
-      throw new AppError(429, 'Too many wrong passwords for this login. Wait 15 minutes, or ask your manager to reset it.');
-    }
-    if (!(await bcrypt.compare(pw, user.password_hash))) {
+      const known = await devices.known(user, devices.hashOf(req));
+      if (!known) await bcrypt.compare(pw, DUMMY_HASH);
+      if (!known || !(await bcrypt.compare(pw, user.password_hash))) throw new AppError(429, TOO_MANY);
+      // In on a known device: the lock stays for everyone else until it runs out.
+    } else if (!(await bcrypt.compare(pw, user.password_hash))) {
       if (tries === LOGIN_LOCK_AFTER) {
         await pool.query("INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id, detail) VALUES (?, NULL, 'login_locked', 'users', ?, ?)", [user.tenant_id, user.id, JSON.stringify({ after: LOGIN_LOCK_AFTER })]).catch(() => {});
       }
       throw unauthorized('Invalid credentials');
     }
-    await pool.query('UPDATE users SET login_failures = 0, login_locked_until = NULL WHERE id = ?', [user.id]);
+    if (tries) await pool.query('UPDATE users SET login_failures = 0, login_locked_until = NULL WHERE id = ?', [user.id]);
     refuseClosed(user);
     const keys = await passkeys.count('user', user.id);
     if (user.totp_enabled || keys) {
@@ -166,22 +186,13 @@ router.post(
 // locked" (61 guesses got 61 checks against a limit of 10). The try that reaches the limit sets the lock; a right answer
 // clears the count. Returns the try's number, or 0 when the login is locked (the caller answers 429).
 // The per-address limits in app.js are per server; these per-login counts are what holds across servers.
+// claimTry and the password lock live in lib/logintries.js (2026.11.11), so passwords typed after sign-in count too.
 const LOCK_AFTER = 5; // wrong codes in a row, then 5 minutes
-const LOGIN_LOCK_AFTER = Number(process.env.LOGIN_LOCK_AFTER || 10); // wrong passwords in a row, then 15 minutes
-const PIN_LOCK_AFTER = 5; // wrong PINs in a row, then 15 minutes
+const LOGIN_LOCK_AFTER = lockAfter();
 const CODE_DAY_CAP = 50; // wrong codes in a day, then signing in with an emailed code stops for that login (see claimCode)
-const COUNTERS = {
-  login: ['login_failures', 'login_locked_until', () => LOGIN_LOCK_AFTER, 15],
-  pin: ['pin_failures', 'pin_locked_until', () => PIN_LOCK_AFTER, 15],
-};
-async function claimTry(kind, id) {
-  const [count, until, limit, minutes] = COUNTERS[kind];
-  // A lock that has run out starts the count again at 1. MySQL applies SET left to right, so the second line sees the new count.
-  const [r] = await pool.query(`UPDATE users SET ${count} = LAST_INSERT_ID(IF(${until} IS NOT NULL, 1, ${count} + 1)),
-      ${until} = IF(${count} >= ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? MINUTE), NULL)
-    WHERE id = ? AND (${until} IS NULL OR ${until} < UTC_TIMESTAMP())`, [limit(), minutes, id]);
-  return r.affectedRows === 1 ? Number(r.insertId) : 0;
-}
+const TOO_MANY = 'Too many wrong tries for this login. Wait 15 minutes, or ask your manager to reset it.';
+// Tries at logins that do not exist, by mountain and what was typed, for the same 15 minutes as a real lock.
+const unknownTries = counter({ name: 'login-unknown', windowMs: 15 * 60_000, max: LOGIN_LOCK_AFTER });
 // Codes (app codes, recovery codes and emailed codes) the same way: 5 wrong in a row lock them for 5 minutes. They also
 // count toward a day's total. Signing in with an emailed code needs only the mountain and a username, so at 5 tries every
 // few minutes a six-digit code could be worn down all day (about 1,440 tries a day). The 50th wrong code within 24 hours
@@ -422,7 +433,7 @@ router.post('/auth/pin-login', validate(z.object({ tenant: slug, terminal: z.str
   if (!term) throw forbidden(NOT_TERMINAL);
   const who = req.body.login;
   const byEmail = who.includes('@');
-  const user = await one(pool, `SELECT u.*, t.status AS tenant_status, t.slug AS tenant_slug, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over, ${TIER_SQL}
+  const user = await one(pool, `SELECT u.*, t.status AS tenant_status, t.slug AS tenant_slug, t.timezone AS tenant_timezone, (t.sandbox_expires_at IS NOT NULL AND t.sandbox_expires_at < NOW()) AS sandbox_over, ${TIER_SQL}
     FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE u.tenant_id = ? AND ${byEmail ? 'u.email' : 'u.username'} = ? AND u.active = 1`, [t.id, byEmail ? who : UN.normalize(who)]);
   const NO = 'That username and PIN do not match';
   if (!user || !user.pin_hash) { await bcrypt.compare(req.body.pin, DUMMY_HASH); throw unauthorized(user ? 'Set a PIN first: sign in with your password, then open Account.' : NO); }
@@ -438,7 +449,7 @@ router.post('/auth/pin-login', validate(z.object({ tenant: slug, terminal: z.str
 router.get('/auth/me', authenticate, async (req, res) => {
   const user = await one(
     pool,
-    `SELECT u.id, u.email, u.username, u.must_change_password, u.role, u.staff_id, u.totp_enabled, u.access_ends_on, (u.pin_hash IS NOT NULL) AS pin_set,
+    `SELECT u.id, u.email, u.username, u.must_change_password, u.role, u.staff_id, u.totp_enabled, u.access_ends_on, (u.pin_hash IS NOT NULL) AS pin_set, u.device_key_epoch,
        t.slug AS tenant, t.name AS tenant_name, t.timezone, t.sandbox_expires_at, t.role_menus, ${TIER_SQL}
      FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE u.id = ? AND u.tenant_id = ?`,
     [req.auth.userId, req.auth.tenantId],
@@ -448,8 +459,12 @@ router.get('/auth/me', authenticate, async (req, res) => {
   const strong = Boolean(Number(user.strong));
   // Patrollers who will need two-step soon (the two-week start for mountains that already existed): the date it begins.
   const soon = !rule && config.requireAdminMfa && !Number(user.sandbox) && (user.role === 'patrol' || Number(user.on_patrol)) && !Number(user.patrol_host) && Number(user.mfa_for_patrol) && user.patrol_mfa_from ? String(user.patrol_mfa_from).slice(0, 10) : null;
-  // The key that seals this person's patrol entries kept on a phone (see public/js/outbox.js); the same for every sign-in.
-  const deviceKey = crypto.createHmac('sha256', config.linkSecret).update(`device:${req.auth.tenantId}:${req.auth.userId}`).digest('base64');
+  // The key that seals this person's patrol entries kept on a phone (see public/js/outbox.js). Since 2026.11.11 it is this
+  // device's own (the browser's device id, or this session when it sent none), and it changes whenever every session of
+  // the login ends (a password change or reset, Sign out everywhere: users.device_key_epoch). Before, it was one fixed key
+  // per person, the same on every phone for ever, so a key seen once opened that person's entries anywhere.
+  const where = req.auth.deviceHash || `session:${sessions.hash(req.auth.sid)}`;
+  const deviceKey = crypto.createHmac('sha256', config.linkSecret).update(`device:${req.auth.tenantId}:${req.auth.userId}:${where}:${Number(user.device_key_epoch || 0)}`).digest('base64');
   const modules = await moduleGate.enabledKeys(req.auth.tenantId);
   const sandbox = user.sandbox_expires_at ? { expires_at: user.sandbox_expires_at, contact_url: config.marketingUrl || (config.site.hosts[0] ? `https://${config.site.hosts[0]}/contact` : null) } : null;
   const billing = await require('../lib/billing').standingOf(req.auth.tenantId);
@@ -515,7 +530,8 @@ router.post(
   async (req, res) => {
     const { current_password, new_password } = req.body;
     const user = await one(pool, 'SELECT * FROM users WHERE id = ? AND tenant_id = ?', [req.auth.userId, req.auth.tenantId]);
-    if (!user || !(await bcrypt.compare(current_password, user.password_hash))) throw forbidden('Current password is not correct');
+    if (!user) throw forbidden('Current password is not correct');
+    await checkPassword(user, current_password, 'Current password is not correct');
     if (current_password === new_password) throw bad('Choose a password different from the current one');
     await refuseWeakFor(user, new_password);
     const now = Math.floor(Date.now() / 1000);
@@ -554,7 +570,7 @@ router.post('/auth/logout', authenticate, async (req, res) => {
 });
 
 /** Change your own username (what you type to sign in). */
-router.post('/auth/username', authenticate, validate(z.object({ username })), async (req, res) => {
+router.post('/auth/username', authenticate, notOnTerminal, validate(z.object({ username })), async (req, res) => {
   try {
     await pool.query('UPDATE users SET username = ? WHERE id = ? AND tenant_id = ?', [req.body.username, req.auth.userId, req.auth.tenantId]);
   } catch (err) {
@@ -569,8 +585,12 @@ router.post('/auth/username', authenticate, validate(z.object({ username })), as
 const mfaLimit = rateLimit({ windowMs: 60_000, max: 20, message: 'Too many attempts' });
 async function me(req) { return one(pool, 'SELECT * FROM users WHERE id = ? AND tenant_id = ?', [req.auth.userId, req.auth.tenantId]); }
 
-/** Step 1: make a secret to put into an authenticator app. Nothing changes about sign-in until step 2 is confirmed. */
-router.post('/auth/mfa/setup', authenticate, mfaLimit, async (req, res) => {
+/**
+ * Step 1: make a secret to put into an authenticator app. Nothing changes about sign-in until step 2 is confirmed.
+ * Never from a PIN session, and only after the second check (2026.11.11): a session alone, a copied token or a terminal
+ * left signed in, must not be able to add a second step only someone else holds.
+ */
+router.post('/auth/mfa/setup', authenticate, notOnTerminal, mfaLimit, stepUp('set up an authenticator app'), async (req, res) => {
   const user = await me(req);
   if (user.totp_enabled) throw bad('Two-step sign-in is already on. Turn it off first to set it up again.');
   const secret = totp.newSecret();
@@ -580,7 +600,7 @@ router.post('/auth/mfa/setup', authenticate, mfaLimit, async (req, res) => {
 });
 
 /** Step 2: prove the app shows the right code. Turns it on and returns ten recovery codes, shown only this once. */
-router.post('/auth/mfa/enable', authenticate, mfaLimit, validate(z.object({ code: z.string().min(6).max(10) })), async (req, res) => {
+router.post('/auth/mfa/enable', authenticate, notOnTerminal, mfaLimit, validate(z.object({ code: z.string().min(6).max(10) })), async (req, res) => {
   const user = await me(req);
   if (user.totp_enabled) throw bad('Two-step sign-in is already on');
   if (!user.totp_secret) throw bad('Start the setup first');
@@ -596,11 +616,13 @@ router.post('/auth/mfa/enable', authenticate, mfaLimit, validate(z.object({ code
   res.json({ enabled: true, recovery_codes: codes });
 });
 
-/** Make a fresh set of recovery codes (the old ones stop working). Needs your password. */
-router.post('/auth/mfa/recovery-codes', authenticate, mfaLimit, validate(z.object({ password: z.string().min(1).max(200) })), async (req, res) => {
+/**
+ * Make a fresh set of recovery codes (the old ones stop working). Needs the second check, which for someone with an app
+ * is a code from it or a passkey (2026.11.11): before, the password alone made codes that sign in without the phone.
+ */
+router.post('/auth/mfa/recovery-codes', authenticate, notOnTerminal, mfaLimit, stepUp('make new recovery codes'), async (req, res) => {
   const user = await me(req);
   if (!user.totp_enabled) throw bad('Two-step sign-in is not on');
-  if (!(await bcrypt.compare(req.body.password, user.password_hash))) throw forbidden('Password is not correct');
   const codes = totp.newRecoveryCodes();
   await tx(async (conn) => {
     await conn.query('DELETE FROM user_recovery_codes WHERE user_id = ?', [user.id]);
@@ -611,11 +633,11 @@ router.post('/auth/mfa/recovery-codes', authenticate, mfaLimit, validate(z.objec
 });
 
 /** Turn it off. Needs your password and a current code, and is not allowed while the mountain requires it. */
-router.post('/auth/mfa/disable', authenticate, mfaLimit, validate(z.object({ password: z.string().min(1).max(200), code: z.string().min(6).max(20) })), async (req, res) => {
+router.post('/auth/mfa/disable', authenticate, notOnTerminal, mfaLimit, validate(z.object({ password: z.string().min(1).max(200), code: z.string().min(6).max(20) })), async (req, res) => {
   const user = await me(req);
   if (!user.totp_enabled) throw bad('Two-step sign-in is not on');
   if (req.auth.mfaRule && !(await passkeys.count('user', user.id))) throw forbidden('You must have two-step sign-in, so the app can only be turned off once you have a passkey');
-  if (!(await bcrypt.compare(req.body.password, user.password_hash))) throw forbidden('Password is not correct');
+  await checkPassword(user, req.body.password, 'Password is not correct');
   if (!(await checkSecondStep(pool, user, req.body.code))) throw forbidden('That code is not right');
   await tx(async (conn) => {
     await conn.query('UPDATE users SET totp_enabled = 0, totp_secret = NULL, totp_last_step = NULL WHERE id = ?', [user.id]);
@@ -671,7 +693,13 @@ router.post(
       if (!s) throw notFound('Staff member');
       personId = personId || s.person_id;
       named = s;
-    } else if (personId) named = await one(pool, 'SELECT first_name, last_name FROM people WHERE tenant_id = ? AND id = ?', [t, personId]);
+    }
+    // A person named by id must be this mountain's (2026.11.11: before, another mountain's person id was stored as given).
+    if (person_id) {
+      const p = await one(pool, 'SELECT first_name, last_name FROM people WHERE tenant_id = ? AND id = ?', [t, person_id]);
+      if (!p) throw notFound('Person');
+      if (!named) named = p;
+    }
     if (!req.body.username && !email && !named) throw bad('Give a username or an email');
     const taken = new Set((await rows(pool, 'SELECT username FROM users WHERE tenant_id = ? AND username IS NOT NULL', [t])).map((r) => r.username));
     const uname = req.body.username || UN.suggestUsername({ ...(named || {}), email }, taken);
@@ -729,12 +757,19 @@ router.patch(
   async (req, res) => {
     const target = await loadTarget(req);
     if ((req.body.role && req.body.role !== target.role) || req.body.active === false) stepUpCheck(req, req.body.role ? 'change what this login can do' : 'switch this login off');
-    const cur = await one(pool, 'SELECT email FROM users WHERE id = ?', [target.id]);
+    const cur = await one(pool, 'SELECT u.email, u.username, u.access_ends_on, t.name AS tenant_name FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE u.id = ?', [target.id]);
+    // A new email is where "Forgot password?" sends the code, and an end date can switch a login off: both need the second
+    // check, like setting a new password or switching a login off (2026.11.11).
+    const emailChanged = req.body.email !== undefined && (req.body.email || null) !== (cur.email || null);
+    const endsBefore = cur.access_ends_on ? String(cur.access_ends_on).slice(0, 10) : null;
+    if (emailChanged) stepUpCheck(req, 'change the email of this login');
+    if (req.body.access_ends_on !== undefined && (req.body.access_ends_on || null) !== endsBefore) stepUpCheck(req, 'change when this login stops working');
     const nextRole = req.body.role || target.role;
     const nextEmail = req.body.email === undefined ? cur.email : req.body.email;
     if (NEEDS_EMAIL.includes(nextRole) && !nextEmail) throw bad('Managers and ski area logins need an email, for security notices and getting back into their account');
     if (target.id === req.auth.userId && (req.body.active === false || req.body.role)) throw forbidden('You cannot deactivate or re-role your own login');
     if (req.body.role === 'manager' && req.auth.role !== 'owner') throw forbidden('Only the owner can create managers');
+    if (req.body.staff_id && !(await one(pool, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, req.body.staff_id]))) throw notFound('Staff member'); // this mountain's only
     const set = setClause({ ...req.body, active: req.body.active === undefined ? undefined : req.body.active ? 1 : 0 }, ['active', 'role', 'staff_id', 'username', 'email', 'access_ends_on']);
     if (!set) throw bad('No updatable fields supplied');
     try {
@@ -744,7 +779,12 @@ router.patch(
       throw err;
     }
     if (req.body.active === false || req.body.role) await sessions.endAll(pool, target.id, req.body.role ? 'role_changed' : 'switched_off');
-    await audit(pool, req, 'update', 'users', target.id, req.body);
+    // The old address is told, so a quiet change of where reset codes go does not go unnoticed (2026.11.11).
+    if (emailChanged && cur.email) {
+      mailer.send({ tenantId: req.auth.tenantId, to: cur.email, fromName: `${cur.tenant_name} (Verdynt/OS)`, tag: 'email-changed', subject: 'The email on your Verdynt/OS login was changed',
+        text: `A manager at ${cur.tenant_name} changed the email on your Verdynt/OS login${cur.username ? ` (${cur.username})` : ''}. Sign-in codes and password resets now go to the new address, not this one.\n\nIf you did not expect this, tell your manager or the owner straight away.` }).catch(() => {});
+    }
+    await audit(pool, req, 'update', 'users', target.id, { ...req.body, ...(emailChanged ? { email: req.body.email ? 'changed' : 'removed' } : {}) });
     res.json({ ok: true, ...(req.body.username ? { username: req.body.username } : {}) }); // the username as saved (lowercase)
   },
 );
@@ -791,7 +831,8 @@ router.delete('/users/:id/pin', authenticate, adminOnly, async (req, res) => {
  */
 router.post('/users/season-end', authenticate, adminOnly, validate(z.object({ date: dateStr.nullable(), roles: z.array(z.enum(['staff', 'counter', 'instructor', 'patrol'])).max(4).default(['staff', 'counter', 'instructor', 'patrol']), apply_to_current: z.boolean().default(true) })), async (req, res) => {
   const { date, roles, apply_to_current: now } = req.body;
-  if (date && date < new Date().toISOString().slice(0, 10)) throw bad('Choose a date from today on');
+  const tz = (await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone;
+  if (date && date < require('../lib/util').todayIn(tz || 'America/New_York')) throw bad('Choose a date from today on'); // the mountain's today
   await pool.query('UPDATE tenants SET season_ends_on = ? WHERE id = ?', [date, req.auth.tenantId]);
   let changed = 0;
   if (now && date && roles.length) {

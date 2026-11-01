@@ -46,8 +46,13 @@ move_jobs() { # from to
   if [ -n "$left" ]; then echo "Warning: these jobs still call $from: $left"; fi
 }
 
+# The visitor's address (2026.11.11): the app trusts the load balancer's own address in X-Forwarded-For
+# (TRUST_PROXY_LB_IPS) and nothing a visitor sends, so it is right whether run.app is open or not (src/lib/clientip.js).
+lb_ip() { gcloud compute addresses describe "$P-ip" --global --format='value(address)' 2>/dev/null || true; }
+
 if [ "$MODE" = unlock ]; then
-  gcloud run services update "$SERVICE" --region "$REGION" --ingress all --update-env-vars TRUST_PROXY_HOPS=1 --quiet
+  LBIP="$(lb_ip)"
+  gcloud run services update "$SERVICE" --region "$REGION" --ingress all --update-env-vars "TRUST_PROXY_HOPS=1${LBIP:+,TRUST_PROXY_LB_IPS=$LBIP}" --quiet
   echo "The run.app address answers again. Scheduled jobs keep going through $(envval PUBLIC_URL), which still works."
   exit 0
 fi
@@ -113,6 +118,10 @@ if [ "$MODE" = build ]; then
     gcloud compute forwarding-rules create "$P-http-rule" --global --load-balancing-scheme=EXTERNAL_MANAGED --address "$P-ip" --target-http-proxy "$P-http" --ports 80
   fi
 
+  # From now on the load balancer's address is trusted in X-Forwarded-For, so visitors coming through it keep their own
+  # address for rate limits while run.app is still open (2026.11.11).
+  gcloud run services update "$SERVICE" --region "$REGION" --update-env-vars "TRUST_PROXY_HOPS=1,TRUST_PROXY_LB_IPS=$IP" --quiet
+
   printf '\nBuilt. Now point each domain at %s with an A record at your domain registrar:\n' "$IP"
   for d in "${DOMAINS[@]}"; do echo "  $d  A  $IP"; done
   echo "The certificate turns ACTIVE 15 to 60 minutes after DNS points here. Check with:"
@@ -138,6 +147,6 @@ done
 step "Only the load balancer reaches the app"
 PUBLIC="$(envval PUBLIC_URL)"; [ -n "$PUBLIC" ] || PUBLIC="https://$APP_DOMAIN"
 gcloud run services update "$SERVICE" --region "$REGION" --ingress internal-and-cloud-load-balancing \
-  --update-env-vars "TRUST_PROXY_HOPS=2,PUBLIC_URL=$PUBLIC" --quiet
+  --update-env-vars "TRUST_PROXY_HOPS=1,TRUST_PROXY_LB_IPS=$(lb_ip),PUBLIC_URL=$PUBLIC" --quiet
 move_jobs "$SVC_URL" "$PUBLIC"
 echo "Done. Visitors reach Verdynt/OS only through Cloud Armor at ${DOMAINS[*]}. If anything breaks: bash scripts/cloud-armor.sh --unlock"
