@@ -226,11 +226,15 @@ export function closeAllDialogs() { return Promise.allSettled([...openDialogs].m
 // Dialogs with something typed in them (2026.11.11, UI-1): main.js asks before a move to another page throws that away.
 const dirtyChecks = new Map();
 export const dirtyDialogOpen = () => [...dirtyChecks.values()].some((isDirty) => isDirty());
+// A dialog whose overlay was taken off the page some other way (not through its close) is closed properly here, so the
+// page behind does not stay inert and a form no longer on screen does not count as typed in.
+const sweepDialogs = () => { for (const isDirty of [...dirtyChecks.values()]) isDirty(); };
 // What a keyboard can reach inside a dialog (2026.11.11, UI-3: focus stays in the open dialog).
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 const focusables = (el) => [...el.querySelectorAll(FOCUSABLE)].filter((x) => !x.closest('[hidden]') && x.getClientRects().length > 0);
 
 export function dialog(title, content, { wide = false, footer, onClose } = {}) {
+  sweepDialogs();
   const previous = document.activeElement;
   const titleId = `dlg-${Math.random().toString(36).slice(2, 8)}`;
   const closeBtn = h('button', { type: 'button', class: 'btn small', 'aria-label': 'Close' }, 'Close');
@@ -280,7 +284,7 @@ export function dialog(title, content, { wide = false, footer, onClose } = {}) {
   const inerted = [...document.body.children].filter((el) => el !== overlay && !el.inert && !el.classList.contains('toasts'));
   let closed = false;
   function close() {
-    if (closed) return;
+    if (closed) return undefined;
     closed = true;
     openDialogs.delete(close);
     dirtyChecks.delete(close);
@@ -303,10 +307,10 @@ export function dialog(title, content, { wide = false, footer, onClose } = {}) {
   document.body.append(overlay);
   for (const el of inerted) el.inert = true;
   openDialogs.add(close);
-  dirtyChecks.set(close, () => dirty);
+  dirtyChecks.set(close, () => { if (!overlay.isConnected) { close(); return false; } return dirty; });
   const first = box.querySelector('input:not([type=hidden]), select, textarea');
   (first || closeBtn).focus();
-  return { close, requestClose, body, box, isDirty: () => dirty };
+  return { close, requestClose, body, box, isDirty: () => dirty, setDirty: (v) => { dirty = Boolean(v); } };
 }
 
 /**
@@ -334,10 +338,15 @@ export function formDialog(title, fieldsEl, submit, { submitText = 'Save', wide 
     // The browser's own checks first (required, min, max, maxlength), in its own words, at the field (2026.11.11, UI-5).
     if (!form.checkValidity()) { form.reportValidity(); return; }
     save.disabled = true;
+    // While Save is working the typing is being kept, not lost: a save that moves to the new record's page must not be
+    // asked "leave this page?". If it fails, the dialog stays and counts as typed in again.
+    const wasDirty = dlg.isDirty();
+    dlg.setDirty(false);
     try {
       await submit(new FormData(form), form);
       dlg.close();
     } catch (err) {
+      dlg.setDirty(wasDirty);
       errorSlot.append(errorBox(err, labelFor));
     } finally {
       save.disabled = false;

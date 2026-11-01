@@ -432,3 +432,10 @@ test('addDays keeps years under 100; a shift from 9:00 to 9:00 is refused, not 2
   assert.match(read('public/js/views/lift-checks.js'), /Switch without saving\?/);
   assert.match(read('public/css/app.css'), /@media \(hover: none\) \{\n  \.cell-add/);
 });
+
+test('UI-1 follow-up: a form being saved is not "typed in", and a dialog taken off the page some other way lets go of the page', () => {
+  const ui = read('public/js/ui.js');
+  assert.match(ui, /dlg\.setDirty\(false\);\n\s*try \{\n\s*await submit/);
+  assert.match(ui, /if \(!overlay\.isConnected\) \{ close\(\); return false; \}/);
+  assert.ok(!/querySelectorAll\('\.overlay'\)\.forEach\(\(o\) => o\.remove\(\)\)/.test(read('public/js/views/school.js')));
+});

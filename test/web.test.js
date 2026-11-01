@@ -3566,7 +3566,8 @@ test('attractions: Mountain status opens, holds and inspects them; a failed insp
   // Hold asks why.
   btn(row(root, 'Village Rink'), 'On hold').click(); await settle();
   await submitTop();
-  assert.match(topDialog().textContent, /Say why it is on hold/, 'a hold needs a note');
+  // The browser's own check stops it at the field (2026.11.11, UI-5); the app and the server say the same if it gets past.
+  assert.ok(!topDialog().querySelector('[name=note]').checkValidity(), 'a hold needs a note');
   topDialog().querySelector('[name=note]').value = 'Resurfacing late';
   pick(topDialog().querySelector('[name=reason]'), 'mechanical');
   await submitTop();
