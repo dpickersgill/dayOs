@@ -144,7 +144,10 @@ const isManager = (req) => MANAGER_ROLES.includes(req.auth.role);
 function requireRole(...roles) {
   return (req, _res, next) => {
     if (!req.auth) return next(unauthorized());
-    if (req.auth.role === 'owner' || (roles.includes(req.auth.role) && !(req.auth.role === 'patrol' && req.auth.offRoster))) return next();
+    // A patrol login whose person is not on the roster (taken off it) has no Patrol: the /patrol routes refuse it, while
+    // what a patrol login does elsewhere (a lift's or an attraction's status) is unchanged (2026.11.11).
+    const offPatrol = req.auth.role === 'patrol' && req.auth.offRoster && /^\/api\/v1\/patrol(\/|$)/.test(req.originalUrl);
+    if (req.auth.role === 'owner' || (roles.includes(req.auth.role) && !offPatrol)) return next();
     // Someone on the patrol roster can do what a patrol login can, whatever their login role (a lift operator who also patrols).
     if (req.auth.onPatrol && roles.includes('patrol')) return next();
     return next(forbidden('Your role cannot do that'));
