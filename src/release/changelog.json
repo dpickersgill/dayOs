@@ -1,6 +1,118 @@
 {
   "releases": [
     {
+      "version": "2026.11.11",
+      "date": "2026-11-01",
+      "title": "Safer sign-in, patient records and family pages: 108 fixes before testing",
+      "notes": [
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": null,
+          "text": "Two-step sign-in is now required for everything that needs it: adding a passkey, using a recovery code and changing a password all ask you to confirm it is you, and signing out ends the session on the server.",
+          "help": "confirm-more"
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": null,
+          "text": "A seasonal login stops at midnight mountain time on its last day, not at midnight in London.",
+          "help": "season-last-day"
+        },
+        {
+          "kind": "fixed",
+          "app": "patrol",
+          "who": ["patrol"],
+          "text": "Taking someone off the patrol roster ends their access to patient records at once.",
+          "help": "patrol-roster-off"
+        },
+        {
+          "kind": "fixed",
+          "app": "patrol",
+          "who": ["patrol"],
+          "text": "Approved reports stay as approved: legal hold, reopening with a reason, and a stamped record of every release.",
+          "help": "patrol-1111-records"
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": ["patrol"],
+          "text": "Controlled medications need a witness for waste and voids, and the count is kept on every dose.",
+          "help": "patrol-1111-meds"
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": ["patrol"],
+          "text": "A find on the sweep stays on the record, guest help requests are always taken (repeats are grouped), and the app reloads with no signal.",
+          "help": "patrol-1111-sweep"
+        },
+        {
+          "kind": "fixed",
+          "app": "shop",
+          "who": null,
+          "text": "Only a child's guardian sees the child on the family page. Joining a waitlist, signing a waiver or adding a second adult never makes a stranger family.",
+          "help": "family-who-counts"
+        },
+        {
+          "kind": "improved",
+          "app": "school",
+          "who": null,
+          "text": "Family lesson links and recap links end 60 days after the lesson.",
+          "help": "family-links-end"
+        },
+        {
+          "kind": "fixed",
+          "app": "school",
+          "who": null,
+          "text": "Online lesson booking checks age, level and discipline, and instructors stay cleared for every lesson they are put on.",
+          "help": "school-online-checks"
+        },
+        {
+          "kind": "improved",
+          "app": "sell",
+          "who": ["counter"],
+          "text": "Recording a payment taken another way needs a reference and counts toward the comp limit; a cash refund needs an open drawer.",
+          "help": "sell-other"
+        },
+        {
+          "kind": "fixed",
+          "app": "money",
+          "who": null,
+          "text": "Refunds and disputes made in Stripe now show in Verdynt/OS.",
+          "help": "stripe-outside"
+        },
+        {
+          "kind": "improved",
+          "app": "messages",
+          "who": null,
+          "text": "Every marketing message follows one set of rules: texts wait for 8 AM, email carries the mountain's postal address, and STOP is honored for that phone everywhere.",
+          "help": "messages-privacy-rules"
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": null,
+          "text": "A blank signature box no longer counts as a signature.",
+          "help": "signature-drawn"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Forms in a window ask before closing when you have typed something.",
+          "help": "form-windows"
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": "platform",
+          "text": "Production refuses to start with unsafe settings, the scripts run each job as its own account, and the release passed a review of 108 findings from the break-it review and the security test.",
+          "help": null
+        }
+      ]
+    },
+    {
       "version": "2026.11.10",
       "date": "2026-11-01",
       "title": "Easier sign-in, a Mountain calendar, ready for the busiest morning, and lift checklists by lift type",
