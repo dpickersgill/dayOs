@@ -342,6 +342,8 @@ async function showOrder(id, menu = null) {
     { head: 'When', cell: (r) => fmtDateTime(r.created_at) }, { head: 'Why', cell: (r) => [label(r.reason), r.note ? h('small', { class: 'muted' }, ` ${r.note}`) : null] },
     { head: 'Returned by', cell: (r) => [label(r.method), r.card_status === 'failed' ? h('div', { class: 'small', role: 'alert' }, state('Card refund not sent', 'bad'), ' ', isManager() ? button('Try again', async () => { try { await post(`/orders/${id}/refunds/${r.id}/retry`, {}); toast('Card refund sent'); } catch (e) { fail(e); } }, { small: true }) : null) : r.card_status === 'pending' ? h('div', { class: 'small muted' }, 'Card refund on its way') : null] },
     { head: 'Amount', num: true, cell: (r) => money(r.amount_cents) }], o.refunds)));
+  // A guest's bank disputed a card payment (2026.11.11): answer it in the Stripe dashboard.
+  if ((o.disputes || []).length) box.append(h('div', { class: 'notice warn', role: 'alert' }, o.disputes.map((d) => `The guest's bank disputed ${money(d.amount_cents)} of this order (${label(d.status)}${d.reason ? `, ${label(d.reason)}` : ''}). Answer it in your Stripe dashboard${d.evidence_due_by ? ` by ${fmtDateTime(d.evidence_due_by)}` : ''}.`).join(' ')));
   box.append(h('div', { class: 'row' }, printButtons(id, { hasTickets: o.tickets.some((t) => t.status !== 'void') }), shareButton('order', id)));
   if (o.tickets.length) showTickets(box, { tickets: o.tickets.map((t) => ({ code: t.code, product: 'Ticket', valid_from: t.valid_from, valid_to: t.valid_to, status: t.status })) }, true);
   // change day at the window (Track WINDOW): a dated ticket moves to another day, the same code

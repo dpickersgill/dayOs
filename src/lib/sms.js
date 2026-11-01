@@ -44,6 +44,7 @@ async function post({ to: named, body: written }) {
       method: 'POST',
       headers: { authorization: `Basic ${Buffer.from(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`).toString('base64')}`, 'content-type': 'application/x-www-form-urlencoded' },
       body: form,
+      signal: AbortSignal.timeout(15000), // a slow Twilio never holds a request or a job for minutes
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: String(json.message || `Twilio said ${res.status}`).slice(0, 200) };

@@ -31,8 +31,13 @@ function split(total, count) {
   const per = Math.floor(total / count);
   return [total - per * (count - 1), ...Array(count - 1).fill(per)];
 }
-/** The schedule: [{ n, on, cents }] from day, monthly. */
-const schedule = (total, count, day) => split(total, count).map((cents, i) => ({ n: i + 1, on: addMonths(day, i), cents }));
+/**
+ * The schedule: [{ n, on, cents }] from day, monthly. upfront: the part paid in full with the first installment (gift
+ * cards and gift experiences are never bought on credit, 2026.11.11); only the rest is spread.
+ */
+const schedule = (total, count, day, upfront = 0) => split(total - upfront, count).map((cents, i) => ({ n: i + 1, on: addMonths(day, i), cents: i === 0 ? cents + upfront : cents }));
+/** What in a basket is paid in full up front: gift cards and gift experiences. */
+const upfrontOf = (gifts) => (gifts || []).reduce((n, g) => n + Number(g.amount_cents || 0), 0);
 
 /** Products that can be paid in a plan: season passes, and products a manager marked. */
 async function planProducts(db, tenantId, ids) {
@@ -51,13 +56,15 @@ async function quote(db, tenantId, basket) {
   if (!Number(s.plans_on)) return { available: false };
   const total = Number(basket && (basket.total_cents !== undefined ? basket.total_cents : basket.total)); // the shop sends total
   const count = Number(s.plans_count) || 3;
-  if (!(total >= count * 100)) return { available: false };
+  const upfront = Math.max(Number(basket && basket.upfront_cents) || 0, 0);
+  if (!(total - upfront >= count * 100)) return { available: false };
   const ids = [...new Set(((basket && basket.lines) || []).map((l) => Number(l.product_id)).filter(Boolean))];
   if (!(await planProducts(db, tenantId, ids)).length) return { available: false };
   if (!(await connect.payee(tenantId, db)).ok) return { available: false };
   const t = await one(db, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId]);
-  const sch = schedule(total, count, basket.today || todayIn(t.timezone));
-  return { available: true, provider: 'stripe', count, first_cents: sch[0].cents, then: sch.slice(1).map((x) => ({ on: x.on, cents: x.cents })), words: `Pay in ${count}: ${money(sch[0].cents)} today, then ${money(sch[1].cents)} a month` };
+  const sch = schedule(total, count, basket.today || todayIn(t.timezone), upfront);
+  return { available: true, provider: 'stripe', count, upfront_cents: upfront, first_cents: sch[0].cents, then: sch.slice(1).map((x) => ({ on: x.on, cents: x.cents })),
+    words: `Pay in ${count}: ${money(sch[0].cents)} today${upfront ? ` (gift cards in full)` : ''}, then ${money(sch[1].cents)} a month` };
 }
 
 /**
@@ -80,7 +87,8 @@ async function start(conn, tenantId, order, opts = {}) {
   const t = await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId]);
   const today = opts.today || todayIn(t.timezone);
   const total = Number(order.total_cents);
-  const sch = schedule(total, count, today);
+  const upfront = Math.max(Number((opts.plan && opts.plan.upfront_cents) || order.upfront_cents || 0), 0);
+  const sch = schedule(total, count, today, upfront);
   const [c] = await conn.query('INSERT INTO fair_cards (tenant_id, person_id, email, provider, account, customer, payment_intent, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     [tenantId, order.person_id || null, order.email || null, 'stripe', order.account || null, order.customer || null, order.payment_intent || null, order.payment_method || null]);
   const [p] = await conn.query('INSERT INTO payment_plans (tenant_id, order_id, person_id, email, name, provider, card_id, count, total_cents) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -104,53 +112,130 @@ async function cardReady(card) {
   return { ...card, payment_method: pm.id || null, customer, brand: (pm.card && pm.card.brand) || null, last4: (pm.card && pm.card.last4) || null };
 }
 
-/** Charges one installment now, under a row lock (the job, a manager, or a new card). Returns 'paid' or 'failed'. */
+// How long a charge may stay claimed (charging_at) before a later run treats the claim as abandoned (a crash, a lost
+// reply) and looks the payment up at Stripe.
+const CLAIM_MIN = 10;
+const claimOpen = (c) => c.charging_at && Date.now() - new Date(`${String(c.charging_at instanceof Date ? c.charging_at.toISOString() : c.charging_at).replace(' ', 'T').slice(0, 19)}Z`).getTime() < CLAIM_MIN * 60000;
+/** True while an installment of this order's plan is being charged at Stripe: refunds, cancel and settle wait for it. */
+async function charging(conn, tenantId, { orderId = null, planId = null }) {
+  const c = await one(conn, `SELECT c.charging_at FROM payment_plan_charges c JOIN payment_plans p ON p.id = c.plan_id
+    WHERE c.tenant_id = ? AND ${orderId ? 'p.order_id = ?' : 'p.id = ?'} AND c.status IN ('due','failed') AND c.charging_at IS NOT NULL ORDER BY c.charging_at DESC LIMIT 1`, [tenantId, orderId || planId]);
+  return Boolean(c && claimOpen(c));
+}
+const BUSY = 'A payment on this plan is being charged right now. Try again in a minute.';
+
+/**
+ * Looks at Stripe for a PaymentIntent already made for this installment (by its metadata), after an earlier try whose
+ * outcome was never known. Returns { id, status } or null; throws when Stripe cannot be asked.
+ */
+async function findAtStripe(ch, card) {
+  const query = `metadata['charge_id']:'${Number(ch.id)}' AND metadata['kind']:'payment_plan'`;
+  const r = await stripe.get(`/v1/payment_intents/search?query=${encodeURIComponent(query)}&limit=10`, { account: (card && card.account) || null });
+  const list = Array.isArray(r && r.data) ? r.data : [];
+  return list.find((x) => x.status === 'succeeded') || list.find((x) => ['processing', 'requires_capture'].includes(x.status)) || null;
+}
+
+/**
+ * Charges one installment now (the job, a manager, or a new card). Returns 'paid', 'failed', 'unknown' or 'skipped'.
+ * Claim, commit, call, record (2026.11.11): no database lock is held while Stripe is asked.
+ *  1. Under the order's lock (the same lock a refund takes first), then the plan's and the installment's, check the order
+ *     is still paid and claim the installment (charging_at). A refund, cancel or settle that comes in while the claim is
+ *     open is refused with "try again in a minute", so it can never work from a figure that is about to change.
+ *  2. Ask Stripe with a key that is the same for every try of this installment until one has a known outcome
+ *     (plan-charge-<id>-<n>-<card>). A dropped reply is asked again with the same key, which Stripe answers with the
+ *     first result instead of charging twice; an earlier unknown try is first looked up at Stripe by its metadata.
+ *  3. Record what happened under the locks again. An unknown outcome is not a failure: nothing is counted against the
+ *     guest, and the next run looks it up before trying anything new.
+ */
 async function chargeOne(chargeId, { base = null, notify = true } = {}) {
-  const out = await tx(async (conn) => {
+  const head = await one(pool, 'SELECT c.plan_id, p.tenant_id, p.order_id FROM payment_plan_charges c JOIN payment_plans p ON p.id = c.plan_id WHERE c.id = ?', [chargeId]);
+  if (!head) return 'skipped';
+  // 1. claim
+  const claim = await tx(async (conn) => {
+    const order = await one(conn, "SELECT o.status, (SELECT COUNT(*) FROM order_items i WHERE i.tenant_id = o.tenant_id AND i.order_id = o.id AND i.refunded_at IS NULL) AS open FROM orders o WHERE o.tenant_id = ? AND o.id = ? FOR UPDATE", [head.tenant_id, head.order_id]);
+    const plan = await one(conn, 'SELECT * FROM payment_plans WHERE id = ? FOR UPDATE', [head.plan_id]);
     const ch = await one(conn, "SELECT * FROM payment_plan_charges WHERE id = ? AND status IN ('due','failed') FOR UPDATE", [chargeId]);
-    if (!ch) return { result: 'skipped' };
-    const plan = await one(conn, 'SELECT * FROM payment_plans WHERE id = ? FOR UPDATE', [ch.plan_id]);
-    if (!['active', 'late', 'suspended'].includes(plan.status)) return { result: 'skipped' };
+    if (!ch || claimOpen(ch)) return null;
+    if (!['active', 'late', 'suspended'].includes(plan.status)) return null;
     // Never charge for an order that was refunded (or whose every line was): stop the plan instead.
-    const order = await one(conn, "SELECT o.status, (SELECT COUNT(*) FROM order_items i WHERE i.tenant_id = o.tenant_id AND i.order_id = o.id AND i.refunded_at IS NULL) AS open FROM orders o WHERE o.tenant_id = ? AND o.id = ?", [plan.tenant_id, plan.order_id]);
     if (!order || order.status !== 'paid' || !Number(order.open)) {
       await stopForRefund(conn, plan.tenant_id, plan.order_id);
-      return { result: 'skipped' };
+      return null;
     }
-    let card = await one(conn, 'SELECT * FROM fair_cards WHERE id = ?', [plan.card_id]);
-    let error = null; let ref = null; let fee = 0;
-    try {
-      card = await cardReady(card);
-      if (!card || !card.payment_method || !card.customer) throw new Error('No saved card');
-      const p = await connect.payee(plan.tenant_id, conn);
+    const card = await one(conn, 'SELECT * FROM fair_cards WHERE id = ?', [plan.card_id]);
+    const [u] = await conn.query('UPDATE payment_plan_charges SET charging_at = UTC_TIMESTAMP() WHERE id = ?', [ch.id]);
+    return u.affectedRows ? { plan, ch, card } : null;
+  });
+  if (!claim) return 'skipped';
+  const { plan, ch } = claim;
+  let card = claim.card;
+  // 2. call, with no lock held
+  let error = null; let ref = null; let fee = 0; let unknown = false; let key = ch.charge_key || null;
+  try {
+    card = await cardReady(card);
+    if (!card || !card.payment_method || !card.customer) throw new Error('No saved card');
+    if (ch.charge_key) { // an earlier try never got an answer: did it go through?
+      const found = await findAtStripe(ch, card);
+      if (found && found.status === 'succeeded') ref = found.id;
+      else if (found) { unknown = true; error = 'The card payment is still being processed'; }
+    }
+    if (!ref && !unknown) {
+      if (!key || !key.endsWith(`-${card.payment_method}`)) key = `plan-charge-${ch.id}-${Number(ch.attempts) + 1}-${card.payment_method}`;
+      await pool.query('UPDATE payment_plan_charges SET charge_key = ? WHERE id = ?', [key, ch.id]);
+      const p = await connect.payee(plan.tenant_id);
       fee = p.ok && (p.account || null) === (card.account || null) ? connect.feeFor(p, Number(ch.cents)) : 0;
-      const r = await stripe.tryCall('/v1/payment_intents', {
+      const body = {
         amount: Number(ch.cents), currency: 'usd', customer: card.customer, payment_method: card.payment_method, payment_method_types: ['card'], off_session: true, confirm: true,
         description: `Payment ${ch.n} of ${plan.count}, order ${plan.order_id}`, metadata: { tenant_id: String(plan.tenant_id), kind: 'payment_plan', plan_id: String(plan.id), charge_id: String(ch.id) },
         ...(fee ? { application_fee_amount: fee } : {}),
-      }, { account: card.account || null, idempotencyKey: `plan-charge-${ch.id}-${ch.attempts + 1}` });
-      if (!r.ok) error = r.error;
+      };
+      let r = await stripe.tryCall('/v1/payment_intents', body, { account: card.account || null, idempotencyKey: key });
+      if (!r.ok && r.unknown) r = await stripe.tryCall('/v1/payment_intents', body, { account: card.account || null, idempotencyKey: key }); // the same key: Stripe answers with the first result
+      if (!r.ok && r.unknown) { unknown = true; error = 'No answer from the card service yet; it is checked again before any new try'; } else if (!r.ok) error = r.error;
       else if (r.json.status !== 'succeeded') error = 'The bank asked the guest to confirm this payment';
       else ref = r.json.id;
-    } catch (err) { error = err.message || 'The card could not be charged'; }
+    }
+  } catch (err) {
+    // A failure before the charge was sent (no card, Stripe not reachable for the card lookup) is a plain failure; one
+    // while looking up an earlier unknown try stays unknown.
+    if (ch.charge_key) unknown = true;
+    error = err.message || 'The card could not be charged';
+  }
+  // 3. record
+  const out = await tx(async (conn) => {
+    await one(conn, 'SELECT id FROM orders WHERE tenant_id = ? AND id = ? FOR UPDATE', [plan.tenant_id, plan.order_id]);
+    const now = await one(conn, 'SELECT * FROM payment_plans WHERE id = ? FOR UPDATE', [plan.id]);
+    const c = await one(conn, 'SELECT * FROM payment_plan_charges WHERE id = ? FOR UPDATE', [ch.id]);
     const today = todayIn((await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [plan.tenant_id])).timezone);
     if (ref) {
-      await conn.query("UPDATE payment_plan_charges SET status = 'paid', attempts = attempts + 1, reference = ?, paid_at = UTC_TIMESTAMP(), last_error = NULL, next_try_on = NULL WHERE id = ?", [ref, ch.id]);
+      if (c.status === 'paid' || (await one(conn, 'SELECT id FROM order_payments WHERE tenant_id = ? AND order_id = ? AND reference = ? LIMIT 1', [plan.tenant_id, plan.order_id, ref]))) {
+        await conn.query('UPDATE payment_plan_charges SET charging_at = NULL WHERE id = ?', [ch.id]);
+        return { result: 'skipped' };
+      }
+      // The money moved, so it is recorded whatever happened to the plan meanwhile.
+      await conn.query("UPDATE payment_plan_charges SET status = 'paid', attempts = attempts + 1, reference = ?, paid_at = UTC_TIMESTAMP(), last_error = NULL, next_try_on = NULL, charging_at = NULL, charge_key = NULL WHERE id = ?", [ref, ch.id]);
       await conn.query("INSERT INTO order_payments (tenant_id, order_id, tender, amount_cents, reference, card_brand, card_last4, processor, processor_account, platform_fee_cents) VALUES (?, ?, 'card', ?, ?, ?, ?, 'stripe', ?, ?)",
         [plan.tenant_id, plan.order_id, ch.cents, ref, card.brand || null, card.last4 || null, card.account || null, fee]);
       const left = await one(conn, "SELECT COUNT(*) AS n, SUM(status = 'failed' OR (status = 'due' AND due_on <= ?)) AS late FROM payment_plan_charges WHERE plan_id = ? AND status IN ('due','failed')", [today, plan.id]);
-      const status = Number(left.n) === 0 ? 'paid' : Number(left.late) > 0 ? plan.status : 'active';
+      let status = now.status;
+      if (['active', 'late', 'suspended'].includes(now.status)) status = Number(left.n) === 0 ? 'paid' : Number(left.late) > 0 ? now.status : 'active';
       await conn.query('UPDATE payment_plans SET status = ? WHERE id = ?', [status, plan.id]);
       await audit(conn, F.system(plan.tenant_id), 'plan_charge_paid', 'payment_plans', plan.id, { charge: ch.n, cents: Number(ch.cents), reference: ref });
       return { result: 'paid', plan, ch, status };
     }
-    const attempts = Number(ch.attempts) + 1;
+    if (unknown) {
+      // Not counted as a try: the guest is not told the card failed, and the next run (today or tomorrow) looks first.
+      await conn.query('UPDATE payment_plan_charges SET charging_at = NULL, last_error = ?, next_try_on = ? WHERE id = ?', [String(error).slice(0, 250), c.status === 'failed' ? today : c.next_try_on, ch.id]);
+      await audit(conn, F.system(plan.tenant_id), 'plan_charge_unknown', 'payment_plans', plan.id, { charge: ch.n });
+      return { result: 'unknown' };
+    }
+    const attempts = Number(c.attempts) + 1;
     const final = attempts > RETRY_DAYS.length;
-    await conn.query("UPDATE payment_plan_charges SET status = 'failed', attempts = ?, last_error = ?, next_try_on = ? WHERE id = ?",
+    await conn.query("UPDATE payment_plan_charges SET status = 'failed', attempts = ?, last_error = ?, next_try_on = ?, charging_at = NULL, charge_key = NULL WHERE id = ?",
       [attempts, String(error).slice(0, 250), final ? null : addDays(today, RETRY_DAYS[attempts - 1]), ch.id]);
-    await conn.query('UPDATE payment_plans SET status = ? WHERE id = ?', [final ? 'suspended' : 'late', plan.id]);
+    if (['active', 'late', 'suspended'].includes(now.status)) await conn.query('UPDATE payment_plans SET status = ? WHERE id = ?', [final ? 'suspended' : 'late', plan.id]);
     await audit(conn, F.system(plan.tenant_id), final ? 'plan_suspended' : 'plan_charge_failed', 'payment_plans', plan.id, { charge: ch.n, attempt: attempts, error: String(error).slice(0, 200) });
-    return { result: 'failed', plan, ch, attempts, final, next: final ? null : addDays(today, RETRY_DAYS[attempts - 1]) };
+    return { result: 'failed', plan, ch: c, attempts, final, next: final ? null : addDays(today, RETRY_DAYS[attempts - 1]) };
   });
   if (notify && out.plan && out.plan.email) await tellGuest(out, base).catch(() => {});
   return out.result;
@@ -221,6 +306,7 @@ async function settle(req, id, note) {
     const p = await one(conn, 'SELECT * FROM payment_plans WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id]);
     if (!p) throw notFound('Payment plan');
     if (['paid', 'settled'].includes(p.status)) throw conflict(`This plan is already ${p.status}`);
+    if (await charging(conn, req.auth.tenantId, { planId: id })) throw conflict(BUSY);
     const [r] = await conn.query("UPDATE payment_plan_charges SET status = 'settled' WHERE plan_id = ? AND status IN ('due','failed','canceled')", [id]);
     await conn.query("UPDATE payment_plans SET status = 'settled', note = ? WHERE id = ?", [note || null, id]);
     await audit(conn, req, 'plan_settled', 'payment_plans', id, { installments: r.affectedRows, note: note || null });
@@ -235,6 +321,7 @@ async function cancel(req, id, note) {
     const p = await one(conn, 'SELECT * FROM payment_plans WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id]);
     if (!p) throw notFound('Payment plan');
     if (['paid', 'settled', 'canceled'].includes(p.status)) throw conflict(`This plan is already ${p.status}`);
+    if (await charging(conn, req.auth.tenantId, { planId: id })) throw conflict(BUSY);
     const [r] = await conn.query("UPDATE payment_plan_charges SET status = 'canceled' WHERE plan_id = ? AND status IN ('due','failed')", [id]);
     await conn.query("UPDATE payment_plans SET status = 'canceled', note = ? WHERE id = ?", [note || null, id]);
     await audit(conn, req, 'plan_canceled', 'payment_plans', id, { installments: r.affectedRows, note: note || null });
@@ -327,4 +414,4 @@ async function planCardDone(l, sessionId) {
   return guestView(pool, l);
 }
 
-module.exports = { PROVIDERS, quote, start, checkoutExtra, schedule, addMonths, split, chargeOne, chargeDue, list, get, chargeNow, settle, cancel, stopForRefund, lowerForRefund, guestView, cardSession, cardDone, planCardDone };
+module.exports = { PROVIDERS, charging, BUSY, upfrontOf, quote, start, checkoutExtra, schedule, addMonths, split, chargeOne, chargeDue, list, get, chargeNow, settle, cancel, stopForRefund, lowerForRefund, guestView, cardSession, cardDone, planCardDone };

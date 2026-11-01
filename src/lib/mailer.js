@@ -51,6 +51,7 @@ async function post({ to: named, fromName, fromAddress, replyTo, subject: asked,
         From: safeName ? `${safeName} <${fromAddress || from()}>` : (fromAddress || from()), To: to, ReplyTo: replyTo || undefined, Subject: subject, TextBody: text, HtmlBody: html,
         MessageStream: stream === 'broadcast' ? (env.POSTMARK_BROADCAST_STREAM || 'broadcast') : (env.POSTMARK_STREAM || 'outbound'), Tag: tag || undefined, Headers: headers || undefined, TrackOpens: false, TrackLinks: 'None',
       }),
+      signal: AbortSignal.timeout(Number(env.MAIL_TIMEOUT_MS) || 15000), // a slow Postmark never holds a request or a job for minutes
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok || (json.ErrorCode && json.ErrorCode !== 0)) return { ok: false, error: String(json.Message || `Postmark said ${res.status}`).slice(0, 200) };

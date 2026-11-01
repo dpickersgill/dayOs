@@ -385,7 +385,7 @@ const changeBody = z.object({
   check: z.boolean().optional(),
   over_limit_reason: z.string().trim().max(300).optional(),
   // when the new day costs more: how the difference is paid (as at checkout)
-  payment: z.object({ tender: z.enum(['cash', 'card', 'other']), card_last4: z.string().regex(/^\d{4}$/).optional(), reference: z.string().max(100).optional(), terminal_payment_id: z.number().int().positive().optional() }).optional(),
+  payment: z.object({ tender: z.enum(['cash', 'card', 'other']), card_last4: z.string().regex(/^\d{4}$/).optional(), reference: require('../lib/pan').payText(100).optional(), terminal_payment_id: z.number().int().positive().optional() }).optional(),
 });
 /** The counter's refund limit: what has gone back on this order already plus this, against the mountain's limit. */
 async function refundAllowed(conn, req, orderId, cents) {
@@ -437,9 +437,23 @@ router.post('/tickets/:code/change-day', requireRole(...sellers), validate(chang
     const owed = diff > 0 ? diff + tax : 0;
     const back = diff < 0 ? Math.abs(diff) + tax : 0;
     const quote = { ticket: { code: t.code, product: t.name, from, to: b.date }, old_cents: old, new_cents: target, day_cents: cents, diff_cents: diff, tax_cents: diff ? tax : 0, owed_cents: owed, back_cents: back, over_limit: over };
-    if (b.check) return { ...quote, check: true };
+    if (b.check) {
+      // What actually goes back: the comp share of the ticket gives nothing back (lib/tenders.js)
+      if (back) {
+        const TD = require('../lib/tenders');
+        const order = await one(conn, 'SELECT * FROM orders WHERE tenant_id = ? AND id = ?', [tenantId, t.order_id]);
+        const pays = await rows(conn, 'SELECT * FROM order_payments WHERE tenant_id = ? AND order_id = ? ORDER BY id', [tenantId, t.order_id]);
+        const items = await rows(conn, 'SELECT * FROM order_items WHERE tenant_id = ? AND order_id = ?', [tenantId, t.order_id]);
+        const share = TD.mix(order, items, pays, [{ line: items.find((x) => x.id === t.item_id), cents: back }]);
+        quote.back_cents = share.gift + share.free;
+        if (share.gift) quote.back_gift_cents = share.gift;
+      }
+      return { ...quote, check: true };
+    }
     if (back) await refundAllowed(conn, req, t.order_id, back);
     if (owed && !b.payment) throw bad(`The new day costs ${money(owed)} more. Take the payment first.`);
+    // "Other" money never reaches the drawer: a reference, and counter staff only within the comp limit (lib/tenders.js).
+    if (owed && b.payment.tender === 'other') require('../lib/tenders').checkOther(req, await one(conn, 'SELECT comp_counter_limit_cents FROM tenants WHERE id = ?', [tenantId]), [{ amount_cents: owed, reference: b.payment.reference }]);
     // move it: the same code, the new day
     const to = addDays(b.date, Math.max(Number(t.valid_days), 1) - 1);
     await conn.query('UPDATE tickets SET valid_from = ?, valid_to = ? WHERE tenant_id = ? AND id = ?', [b.date, to, tenantId, t.id]);
@@ -460,22 +474,45 @@ router.post('/tickets/:code/change-day', requireRole(...sellers), validate(chang
     }
     let refundId = null;
     if (back) {
-      // the difference goes back the way the order was paid: a Stripe card through Stripe (retried, never twice), else
-      // the desk's card machine, or cash from the cashier's drawer
+      // The difference goes back to the tenders that paid for this ticket (lib/tenders.js, 2026.11.11): a comp's share
+      // gives nothing back, a gift card's share goes back on the gift card, and only the rest goes back the way the order
+      // was paid: a Stripe card through Stripe (retried, never twice), else the desk's card machine, or cash from the
+      // cashier's drawer.
+      const TD = require('../lib/tenders');
+      const order = await one(conn, 'SELECT * FROM orders WHERE tenant_id = ? AND id = ?', [tenantId, t.order_id]); // the ticket's row lock is held
+      const PPL = require('../lib/paymentplans');
+      if (await PPL.charging(conn, tenantId, { orderId: t.order_id })) throw conflict(PPL.BUSY);
       const pays = await rows(conn, 'SELECT * FROM order_payments WHERE tenant_id = ? AND order_id = ? ORDER BY id', [tenantId, t.order_id]);
+      const items = await rows(conn, 'SELECT * FROM order_items WHERE tenant_id = ? AND order_id = ?', [tenantId, t.order_id]);
+      const share = TD.mix(order, items, pays, [{ line: items.find((x) => x.id === t.item_id), cents: back }]);
+      const left = await TD.leftOf(conn, tenantId, t.order_id, pays);
       const real = pays.filter((p) => p.tender !== 'comp');
-      const lastTender = real.length ? real[real.length - 1].tender : 'cash';
+      const freeTenders = real.filter((p) => ['cash', 'card', 'other'].includes(p.tender));
+      const lastTender = freeTenders.length ? freeTenders[freeTenders.length - 1].tender : 'cash';
       const method = lastTender === 'card' ? 'card' : 'cash';
-      const parts = method === 'card' ? await cardrefund.splitCard(conn, tenantId, t.order_id, pays, back) : [{ method: 'cash', cents: back }];
-      const till = method === 'cash' ? await one(conn, "SELECT id FROM till_sessions WHERE tenant_id = ? AND opened_by = ? AND status = 'open' ORDER BY id DESC LIMIT 1", [tenantId, req.auth.userId]) : null;
+      // never more than each still has to give back; gift card money is never turned into cash
+      const gift = Math.min(share.gift, Math.max(left('gift_card'), 0));
+      const free = Math.min(share.free, ['cash', 'card', 'other'].reduce((n, x) => n + Math.max(left(x), 0), 0));
+      const parts = [];
+      if (gift > 0) parts.push({ method: 'gift_card', cents: gift });
+      if (free > 0) parts.push(...(method === 'card' ? await cardrefund.splitCard(conn, tenantId, t.order_id, pays, free) : [{ method: 'cash', cents: free }]));
+      if (gift > 0) await TD.backOnCards(conn, tenantId, t.order_id, pays, gift);
+      const till = parts.some((x) => x.method === 'cash') ? await one(conn, "SELECT id FROM till_sessions WHERE tenant_id = ? AND opened_by = ? AND status = 'open' ORDER BY id DESC LIMIT 1", [tenantId, req.auth.userId]) : null;
+      const given = gift + free;
+      // The tax share follows the money actually given back.
+      const taxBack = back ? Math.round(tax * given / back) : 0;
       for (const [k, x] of parts.entries()) {
         const [r] = await conn.query("INSERT INTO order_refunds (tenant_id, order_id, user_id, reason, note, amount_cents, tax_cents, method, till_id) VALUES (?, ?, ?, 'customer_request', ?, ?, ?, ?, ?)",
-          [tenantId, t.order_id, req.auth.userId, `Changed day: ${from} to ${b.date}`, x.cents, k === parts.length - 1 ? tax : 0, x.method, till ? till.id : null]);
+          [tenantId, t.order_id, req.auth.userId, `Changed day: ${from} to ${b.date}`, x.cents, k === parts.length - 1 ? taxBack : 0, x.method, x.method === 'cash' && till ? till.id : null]);
         if (!refundId) refundId = r.insertId;
         if (x.method === 'card' && x.ref) { await cardrefund.markPending(conn, tenantId, r.insertId, x.ref); refundRow = r.insertId; }
       }
-      await conn.query('UPDATE orders SET refunded_cents = refunded_cents + ? WHERE tenant_id = ? AND id = ?', [back, tenantId, t.order_id]);
-      quote.back_method = method;
+      if (given) await conn.query('UPDATE orders SET refunded_cents = refunded_cents + ? WHERE tenant_id = ? AND id = ?', [given, tenantId, t.order_id]);
+      // A payment plan's unpaid share comes off its later installments.
+      if (share.unpaid) await PPL.lowerForRefund(conn, tenantId, t.order_id, share.unpaid, req);
+      quote.back_cents = given;
+      quote.back_method = gift && !free ? 'gift_card' : given ? method : null;
+      quote.back_parts = parts.map((x) => ({ method: x.method, amount_cents: x.cents }));
     }
     const [w] = await conn.query('INSERT INTO window_changes (tenant_id, ticket_id, order_id, from_date, to_date, old_cents, new_cents, diff_cents, paid_order_id, refund_id, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [tenantId, t.id, t.order_id, from, b.date, old, target, diff, paidOrder, refundId, req.auth.userId]);
@@ -499,7 +536,7 @@ async function changeEmail(tenantId, c) {
   const text = [`Hi ${firstName},`, '', `Your ticket at ${t.name} has moved to a new day.`, '',
     `- ${c.ticket.product}${k && k.first_name ? `, ${k.first_name} ${k.last_name}` : ''}`,
     `- Was: ${dayText(c.ticket.from)}`, `- Now: ${dayText(c.ticket.to)}`,
-    c.owed_cents ? `- You paid ${money(c.owed_cents)} for the change.` : c.back_cents ? `- ${money(c.back_cents)} goes back to you${c.back_method === 'card' ? ' on your card. It usually shows in 5 to 10 business days' : ' in cash at the window'}.` : '- The change was free.', '',
+    c.owed_cents ? `- You paid ${money(c.owed_cents)} for the change.` : c.back_cents ? `- ${money(c.back_cents)} goes back to you${c.back_method === 'card' ? ' on your card. It usually shows in 5 to 10 business days' : c.back_method === 'gift_card' ? ' on your gift card' : ' in cash at the window'}.` : '- The change was free.', '',
     'The barcode is the same. Show it at the gate on the new day.', '',
     t.phone ? `Questions? Call ${t.phone}.` : ''].join('\n');
   const r = await mailer.send({ tenantId, to: to.email, fromName: t.name, subject: `Your ticket is now for ${dayText(c.ticket.to)}`, text, tag: 'window-change' });

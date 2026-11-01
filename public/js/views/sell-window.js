@@ -140,7 +140,7 @@ export function changeDayDialog(ticket, done) {
     clear(quoteBox); last = null;
     try {
       last = await post(`/guests/tickets/${ticket.code}/change-day`, { date: day.value, check: true });
-      const words = last.owed_cents ? `The new day costs ${money(last.owed_cents)} more${last.tax_cents ? ' (with tax)' : ''}.` : last.back_cents ? `${money(last.back_cents)} goes back to the guest${last.tax_cents ? ' (with tax)' : ''}, the way they paid.` : 'Same price. Nothing to pay.';
+      const words = last.owed_cents ? `The new day costs ${money(last.owed_cents)} more${last.tax_cents ? ' (with tax)' : ''}.` : last.back_cents ? `${money(last.back_cents)} goes back to the guest${last.tax_cents ? ' (with tax)' : ''}, the way they paid${last.back_gift_cents ? ` (${money(last.back_gift_cents)} back on the gift card)` : ''}.` : last.diff_cents < 0 ? 'The new day costs less, but this ticket was free of charge, so nothing goes back.' : 'Same price. Nothing to pay.';
       quoteBox.append(h('p', { class: 'basket-total' }, words), last.over_limit.length ? h('div', { class: 'notice warn', role: 'alert' }, last.over_limit.map((o) => o.words).join(' '), isManager() ? '' : ' Only a manager can sell over the limit.') : null);
       payF.hidden = !last.owed_cents; reasonF.hidden = !(last.over_limit.length && isManager());
     } catch (err) { quoteBox.append(errorBox(err)); }

@@ -376,7 +376,7 @@ async function heldSpots(db, tenantId) {
 /** What the family may do now: change the date and cancel, with the reason when they cannot. */
 async function policyNow(db, t, b) {
   const nowLocal = nowIn(t.timezone);
-  const hours = hoursUntil(String(b.starts_at), nowLocal);
+  const hours = hoursUntil(String(b.starts_at), nowLocal, t.timezone);
   const out = { can_change: false, can_cancel: false, refund_percent: 0, change_until_hours: freeHours(t), why: null };
   if (b.status !== 'booked' || b.session_status !== 'scheduled') { out.why = b.status === 'cancelled' ? 'This booking is canceled.' : null; return out; }
   if (hours <= 0) { out.why = 'The lesson has started.'; return out; }

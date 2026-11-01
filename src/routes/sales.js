@@ -31,7 +31,8 @@ const orderSchema = z.object({
   purchaser: purchaserSchema.optional(),
   channel: z.enum(['window', 'online', 'phone', 'group']).default('window'),
   promo_code: z.string().optional(),
-  payment_ref: z.string().max(100).optional(),
+  payment_ref: require('../lib/pan').payText(100).optional(), // never a card number (lib/pan.js)
+  over_limit_reason: z.string().trim().max(300).optional(), // a manager selling over a day's ticket limit says why
   items: z
     .array(
       z.object({
@@ -49,14 +50,16 @@ const orderSchema = z.object({
  * Create a paid order and issue one ticket per unit (the simple API sale, for integrations; staff use /checkout).
  * Pricing and tax are always computed on the server; the client never supplies a price. Payment is taken outside this
  * service: pass the processor's reference as payment_ref. It is recorded as one 'other' payment, so refunds, drawers and
- * reports treat it like any other sale.
+ * reports treat it like any other sale. Money that never reaches a drawer is a manager's call (2026.11.11): only managers
+ * and owners can use this, and the day ticket limit holds here as it does at the window (over it only with
+ * over_limit_reason, audited).
  */
-router.post('/orders', requireRole(...sellers), validate(orderSchema), async (req, res) => {
+router.post('/orders', requireRole('manager'), validate(orderSchema), async (req, res) => {
   const { tenantId } = req.auth;
   const body = req.body;
 
   const result = await tx(async (conn) => {
-    const tenant = await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId]);
+    const tenant = await one(conn, 'SELECT id, timezone, online_daily_limit FROM tenants WHERE id = ?', [tenantId]);
     const today = todayIn(tenant.timezone);
 
     // The purchaser goes into the shared customer record: an existing customer is reused, a new one is created.
@@ -77,6 +80,10 @@ router.post('/orders', requireRole(...sellers), validate(orderSchema), async (re
       priced.push({ it, product, cents, validOn });
       subtotal += cents * it.quantity;
     }
+    // The day ticket limit (online and window together), under the same lock the window and the shop take.
+    await conn.query('SELECT id FROM tenants WHERE id = ? FOR UPDATE', [tenantId]);
+    const over = await require('../lib/shopsale').overLimits(conn, tenant, priced.map((p) => ({ product: p.product, valid_on: p.validOn, quantity: p.it.quantity })));
+    if (over.length && !body.over_limit_reason) throw conflict(`${over.map((o) => o.words).join(' ')} Only a manager can sell over the limit, and says why.`, { over_limit: over });
 
     let discount = 0;
     let promoCode = null;
@@ -115,6 +122,7 @@ router.post('/orders', requireRole(...sellers), validate(orderSchema), async (re
       }
     }
     await audit(conn, req, 'create', 'orders', o.insertId, { total_cents: total });
+    if (over.length) await audit(conn, req, 'sell_over_limit', 'orders', o.insertId, { reason: body.over_limit_reason, days: over.map((x) => ({ date: x.date, product_id: x.product_id, limit: x.limit, sold: x.sold, wanted: x.wanted })) });
     return { id: o.insertId, person_id: personId, customer: buyer.id ? { id: buyer.id, created: buyer.created, matched: buyer.matched } : null, subtotal_cents: subtotal, discount_cents: discount, tax_cents: tax, total_cents: total, tickets };
   });
 
@@ -163,13 +171,14 @@ router.get('/orders/:id', lessonOrder, async (req, res) => {
   const giftCards = await rows(pool, 'SELECT code, initial_cents, recipient_name, status FROM gift_cards WHERE tenant_id = ? AND order_id = ?', [req.auth.tenantId, order.id]);
   const refunds = await rows(pool, 'SELECT id, reason, note, amount_cents, tax_cents, method, created_at, card_status, card_error FROM order_refunds WHERE tenant_id = ? AND order_id = ? ORDER BY id', [req.auth.tenantId, order.id]);
   const taxes = await rows(pool, 'SELECT name, rate_bps, amount_cents FROM order_taxes WHERE tenant_id = ? AND order_id = ? ORDER BY id', [req.auth.tenantId, order.id]);
-  res.json({ ...order, items, lines, tickets, payments, taxes, refunds, gift_cards: giftCards });
+  const disputes = await rows(pool, 'SELECT dispute_id, amount_cents, reason, status, evidence_due_by, created_at FROM payment_disputes WHERE tenant_id = ? AND order_id = ? ORDER BY id', [req.auth.tenantId, order.id]);
+  res.json({ ...order, items, lines, tickets, payments, taxes, refunds, gift_cards: giftCards, disputes });
 });
 
 const REFUND_REASONS = ['customer_request', 'weather', 'injury', 'wrong_item', 'duplicate', 'staff_error', 'other'];
 const refundBody = z.object({
   reason: z.enum(REFUND_REASONS),
-  note: z.string().trim().max(300).optional(),
+  note: require('../lib/pan').payText(300).optional(),
   item_ids: z.array(z.number().int().positive()).min(1).max(100).optional(), // omit to refund everything not yet refunded
   method: z.enum(['cash', 'card', 'gift_card', 'other']).optional(), // omit to send the money back the way it came
   till_id: z.number().int().positive().optional(), // the cash drawer that pays out any cash part (default: your own open drawer)
@@ -193,6 +202,9 @@ router.post('/orders/:id/refund', lessonOrder, validate(refundBody), async (req,
     if (!order) throw notFound('Order');
     await require('./guestswindow').refundAllowed(conn, req, orderId, 0); // counter staff with no refund limit: a manager, first
     if (order.status !== 'paid') throw conflict(`Order is ${order.status}`);
+    // A payment plan installment being charged right now would change what was paid: wait for it (lib/paymentplans.js).
+    const PPL = require('../lib/paymentplans');
+    if (await PPL.charging(conn, tenantId, { orderId })) throw conflict(PPL.BUSY);
     const open = await rows(conn, 'SELECT * FROM order_items WHERE tenant_id = ? AND order_id = ? AND refunded_at IS NULL ORDER BY id', [tenantId, orderId]);
     if (!open.length) throw conflict('Everything on this order has been refunded');
     let lines = open;
@@ -245,12 +257,15 @@ router.post('/orders/:id/refund', lessonOrder, validate(refundBody), async (req,
 
     // What the refund is worth: what each line still holds (its price less its discount, less what already went back on
     // its tickets for a change of day or a price drop: lib/linevalue.js), less a credit used for it, plus its tax share.
-    // Free-of-charge (comp) payments are not money to give back, so only the part actually paid is refunded.
+    // It goes back to the tenders that paid for those lines (lib/tenders.js): gift card money back on the gift card, a
+    // comp's share gives nothing back, a payment plan's unpaid share comes off its later installments.
     const pays = await rows(conn, 'SELECT * FROM order_payments WHERE tenant_id = ? AND order_id = ? ORDER BY id', [tenantId, orderId]);
     const real = pays.filter((p) => p.tender !== 'comp');
     const realPaid = real.reduce((n, p) => n + p.amount_cents, 0);
     const LV = require('../lib/linevalue');
-    let worth = 0; let worthTax = 0; let creditOff = 0;
+    const TD = require('../lib/tenders');
+    const allItems = await rows(conn, 'SELECT * FROM order_items WHERE tenant_id = ? AND order_id = ?', [tenantId, orderId]);
+    let worth = 0; let worthTax = 0; let creditOff = 0; const picks = [];
     for (const l of lines) {
       const gross = Math.max(l.unit_price_cents * l.quantity - l.discount_cents, 0);
       const used = usedCredit.get(l.id) || 0;
@@ -258,33 +273,29 @@ router.post('/orders/:id/refund', lessonOrder, validate(refundBody), async (req,
       const pre = Math.max(kept - used, 0);
       const tax = gross > 0 ? Math.round(l.tax_cents * pre / gross) : 0;
       worth += pre + tax; worthTax += tax; creditOff += Math.min(used, kept);
+      picks.push({ line: l, cents: pre + tax });
     }
-    const ratio = order.total_cents ? realPaid / order.total_cents : 0;
-    let amount = Math.round(worth * ratio);
-    let taxPart = Math.round(worthTax * ratio);
+    const left = await TD.leftOf(conn, tenantId, orderId, pays);
+    const parts0 = TD.mix(order, allItems, pays, picks);
+    let share = { gift: parts0.gift, free: parts0.free };
+    let amount = share.gift + share.free;
+    let taxPart = worth ? Math.round(worthTax * amount / worth) : 0;
     if (lines.length === open.length) {
       // The last of the order: return exactly what is left, so rounding on earlier part refunds can never block it.
+      const ratio = order.total_cents ? realPaid / order.total_cents : 0;
       const back = await one(conn, 'SELECT COALESCE(SUM(amount_cents), 0) AS cents, COALESCE(SUM(tax_cents), 0) AS tax FROM order_refunds WHERE tenant_id = ? AND order_id = ?', [tenantId, orderId]);
       amount = Math.max(realPaid - Number(back.cents) - Math.round(creditOff * ratio), 0);
       taxPart = Math.min(Math.max(Math.round(order.tax_cents * ratio) - Number(back.tax), 0), amount);
+      const gift = Math.min(Math.max(left('gift_card'), 0), amount);
+      share = { gift, free: amount - gift };
     }
     await require('./guestswindow').refundAllowed(conn, req, orderId, amount);
     // A large refund needs the second check (STEP_UP_REFUND_CENTS, $200 by default).
     const big = Number(process.env.STEP_UP_REFUND_CENTS || 20000);
     if (amount > big) require('../lib/stepup').require(req, `refund more than $${(big / 100).toFixed(0)}`);
 
-    // Send the money back the way it came, last payment first, never more than was paid and not yet returned that way.
-    const returned = await rows(conn, 'SELECT method, SUM(amount_cents) AS cents FROM order_refunds WHERE tenant_id = ? AND order_id = ? GROUP BY method', [tenantId, orderId]);
-    const left = (tender) => real.filter((p) => p.tender === tender).reduce((n, p) => n + p.amount_cents, 0) - Number((returned.find((r) => r.method === tender) || {}).cents || 0);
-    const plan = [];
-    let todo = amount;
-    const tenders = body.method ? [body.method] : [...new Set(real.map((p) => p.tender).reverse())];
-    for (const tender of tenders) {
-      if (todo <= 0) break;
-      const give = Math.min(todo, Math.max(left(tender), 0));
-      if (give > 0) { plan.push({ method: tender, cents: give }); todo -= give; }
-    }
-    if (todo > 0) throw conflict(body.method ? `Only ${money(Math.max(left(body.method), 0))} is left to return by ${body.method.replace('_', ' ')}` : 'There is not enough left to refund from what was paid');
+    // Send the money back to the tenders that paid for these lines, never more than was paid and not yet returned that way.
+    const plan = TD.plan(share, real, left, body.method || null);
 
     // Undo what was sold.
     const ids = lines.map((l) => l.id);
@@ -297,10 +308,20 @@ router.post('/orders/:id/refund', lessonOrder, validate(refundBody), async (req,
       } else if (l.line_kind === 'lesson') {
         await conn.query("UPDATE lesson_bookings SET status = 'cancelled' WHERE tenant_id = ? AND session_id = ? AND person_id = ? AND status = 'booked'", [tenantId, l.session_id, l.person_id]);
       } else if (l.line_kind === 'program') {
-        const e = await one(conn, 'SELECT id, status FROM program_enrollments WHERE tenant_id = ? AND program_id = ? AND person_id = ?', [tenantId, l.program_id, l.person_id]);
-        if (e && e.status !== 'withdrawn') {
-          await conn.query("UPDATE program_enrollments SET status = 'withdrawn' WHERE tenant_id = ? AND id = ?", [tenantId, e.id]);
-          if (e.status === 'enrolled') {
+        // Every place sold on this line (each session of a bundle), and never a place from another order (2026.11.11).
+        // Older places carry no line: those of this order for this child and program; older still, the one place.
+        let es = await rows(conn, "SELECT id, status, group_id FROM program_enrollments WHERE tenant_id = ? AND order_item_id = ? AND status <> 'withdrawn' FOR UPDATE", [tenantId, l.id]);
+        if (!es.length && !(await one(conn, 'SELECT id FROM program_enrollments WHERE tenant_id = ? AND order_item_id = ? LIMIT 1', [tenantId, l.id]))) {
+          es = await rows(conn, "SELECT id, status, group_id FROM program_enrollments WHERE tenant_id = ? AND order_id = ? AND program_id = ? AND person_id = ? AND order_item_id IS NULL AND status <> 'withdrawn' FOR UPDATE", [tenantId, orderId, l.program_id, l.person_id]);
+          if (!es.length) es = await rows(conn, "SELECT id, status, group_id FROM program_enrollments WHERE tenant_id = ? AND program_id = ? AND person_id = ? AND order_id IS NULL AND status <> 'withdrawn' LIMIT 1 FOR UPDATE", [tenantId, l.program_id, l.person_id]);
+        }
+        for (const e of es) {
+          await conn.query("UPDATE program_enrollments SET status = 'withdrawn', withdrawn_at = NOW() WHERE tenant_id = ? AND id = ?", [tenantId, e.id]);
+          if (e.status !== 'enrolled') continue;
+          if (e.group_id) {
+            const g = await one(conn, 'SELECT id, term_id FROM program_groups WHERE tenant_id = ? AND id = ?', [tenantId, e.group_id]);
+            if (g) await require('../lib/programsessions').promoteWaitlist(conn, tenantId, g);
+          } else {
             const next = await one(conn, "SELECT id FROM program_enrollments WHERE tenant_id = ? AND program_id = ? AND status = 'waitlist' ORDER BY id LIMIT 1", [tenantId, l.program_id]);
             if (next) await conn.query("UPDATE program_enrollments SET status = 'enrolled' WHERE tenant_id = ? AND id = ?", [tenantId, next.id]);
           }
@@ -313,23 +334,7 @@ router.post('/orders/:id/refund', lessonOrder, validate(refundBody), async (req,
     }
     // Gift card money goes back on the card (unless the card itself has since been canceled).
     const giftBack = plan.find((x) => x.method === 'gift_card');
-    if (giftBack) {
-      let remaining = giftBack.cents;
-      for (const p of pays.filter((x) => x.tender === 'gift_card').reverse()) {
-        if (remaining <= 0) break;
-        // Each card gets back at most what it paid less what earlier refunds already put back on it.
-        const already = await one(conn, "SELECT COALESCE(SUM(delta_cents), 0) AS cents FROM gift_card_txns WHERE tenant_id = ? AND gift_card_id = ? AND order_id = ? AND kind = 'refund'", [tenantId, p.gift_card_id, orderId]);
-        const put = Math.min(remaining, Math.max(p.amount_cents - Number(already.cents), 0));
-        if (put <= 0) continue;
-        const g = await one(conn, 'SELECT status, balance_cents FROM gift_cards WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, p.gift_card_id]);
-        if (g && g.status === 'active') {
-          const next = g.balance_cents + put;
-          await conn.query('UPDATE gift_cards SET balance_cents = ? WHERE tenant_id = ? AND id = ?', [next, tenantId, p.gift_card_id]);
-          await conn.query("INSERT INTO gift_card_txns (tenant_id, gift_card_id, order_id, kind, delta_cents, balance_after_cents) VALUES (?, ?, ?, 'refund', ?, ?)", [tenantId, p.gift_card_id, orderId, put, next]);
-        }
-        remaining -= put;
-      }
-    }
+    if (giftBack) await TD.backOnCards(conn, tenantId, orderId, pays, giftBack.cents);
 
     // Cash comes out of a drawer: the one chosen, or the refunder's own open drawer, so that drawer's count stays right.
     let tillId = null;
@@ -339,6 +344,13 @@ router.post('/orders/:id/refund', lessonOrder, validate(refundBody), async (req,
         : await one(conn, "SELECT id FROM till_sessions WHERE tenant_id = ? AND opened_by = ? AND status = 'open' ORDER BY id DESC LIMIT 1", [tenantId, req.auth.userId]);
       if (body.till_id && !till) throw bad('That cash drawer is not open');
       tillId = till ? till.id : null;
+      // Cash never leaves untracked while drawers are open (2026.11.11): pick the drawer it comes out of. With no drawer
+      // open anywhere (the office safe, after closing), it is allowed and written down for the manager.
+      if (!tillId) {
+        const anyOpen = await one(conn, "SELECT id FROM till_sessions WHERE tenant_id = ? AND status = 'open' LIMIT 1", [tenantId]);
+        if (anyOpen) throw conflict('Pick the cash drawer the money comes out of, or open your own drawer first');
+        await audit(conn, req, 'refund_cash_no_drawer', 'orders', orderId, { cents: plan.filter((x) => x.method === 'cash').reduce((n, x) => n + x.cents, 0) });
+      }
     }
     // Card money goes back to each card it came from (an order paid with two cards refunds to both), oldest first.
     const parts = [];
@@ -371,9 +383,8 @@ router.post('/orders/:id/refund', lessonOrder, validate(refundBody), async (req,
     if (creditOff) await audit(conn, req, 'refund_less_credit', 'orders', orderId, { credit_cents: creditOff });
     const stillOpen = open.length - lines.length;
     // A payment plan: a whole refund stops its charges; a part refund takes the unpaid part of those lines off what is to come.
-    const PPL = require('../lib/paymentplans');
     if (!stillOpen) await PPL.stopForRefund(conn, tenantId, orderId, req);
-    else await PPL.lowerForRefund(conn, tenantId, orderId, Math.max(worth - amount, 0), req);
+    else await PPL.lowerForRefund(conn, tenantId, orderId, parts0.unpaid, req);
     await conn.query('UPDATE orders SET refunded_cents = refunded_cents + ?, status = ? WHERE tenant_id = ? AND id = ?', [amount, stillOpen ? 'paid' : 'refunded', tenantId, orderId]);
     await audit(conn, req, 'refund', 'orders', orderId, { amount_cents: amount, reason: body.reason, lines: ids.length, whole: !stillOpen });
     return { amount_cents: amount, returns: plan.map((x) => ({ method: x.method, amount_cents: x.cents })), whole_order: !stillOpen, refund_ids: refundIds, card_rows: cardRows, item_ids: ids };

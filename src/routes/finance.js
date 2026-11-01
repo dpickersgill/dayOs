@@ -6,7 +6,8 @@ const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
 const { z, dateStr, validate, paramId, todayIn, addDays, dayRange, localDay, localTime } = require('../lib/util');
-const { notFound, conflict, bad } = require('../lib/errors');
+const { notFound, conflict, bad, forbidden } = require('../lib/errors');
+const { money } = require('../lib/format');
 const { audit } = require('../lib/audit');
 const { toCsv, dollars } = require('../lib/csv');
 
@@ -165,6 +166,13 @@ router.post('/till/moves', sellers, validate(z.object({ kind: z.enum(['paid_in',
   const till = await tx(async (conn) => {
     const t = await one(conn, "SELECT * FROM till_sessions WHERE tenant_id = ? AND opened_by = ? AND status = 'open' ORDER BY id DESC LIMIT 1 FOR UPDATE", [req.auth.tenantId, req.auth.userId]);
     if (!t) throw conflict('Open your drawer first');
+    // A payout is cash leaving the drawer for something bought (2026.11.11): counter staff can pay out up to
+    // TILL_PAYOUT_LIMIT_CENTS a drawer ($50 by default); above that, a manager.
+    if (req.body.kind === 'payout' && !['owner', 'manager'].includes(req.auth.role)) {
+      const lim = Number(process.env.TILL_PAYOUT_LIMIT_CENTS ?? 5000);
+      const { c } = await one(conn, "SELECT COALESCE(SUM(amount_cents), 0) AS c FROM till_moves WHERE tenant_id = ? AND till_id = ? AND kind = 'payout'", [req.auth.tenantId, t.id]);
+      if (Number(c) + req.body.amount_cents > lim) throw forbidden(`Counter staff can pay out up to ${money(lim)} from a drawer. Ask a manager.`);
+    }
     await conn.query('INSERT INTO till_moves (tenant_id, till_id, kind, amount_cents, reason) VALUES (?, ?, ?, ?, ?)', [req.auth.tenantId, t.id, req.body.kind, req.body.amount_cents, req.body.reason ?? null]);
     await audit(conn, req, req.body.kind, 'till_sessions', t.id, { amount_cents: req.body.amount_cents });
     return t;
@@ -328,9 +336,10 @@ router.get('/exports/daily-summary.csv', managers, async (req, res) => {
   const dayOfOrder = new Map(orders.map((o) => [o.id, localDay(o.created_at, t)]));
   for (const o of orders) { const d = day(dayOfOrder.get(o.id)); d.orders += 1; d.gross_sales += o.subtotal_cents; d.discounts += o.discount_cents; d.tax += o.tax_cents; }
   for (const g of await rows(pool, "SELECT i.order_id, SUM(i.unit_price_cents * i.quantity) AS cents FROM order_items i JOIN orders o ON o.id = i.order_id AND o.tenant_id = i.tenant_id WHERE i.tenant_id = ? AND i.line_kind = 'gift_card' AND o.created_at >= ? AND o.created_at < ? GROUP BY i.order_id", [req.auth.tenantId, r.start, r.end])) day(dayOfOrder.get(g.order_id)).gift_cards_sold += Number(g.cents);
-  for (const p of await rows(pool, 'SELECT p.order_id, p.tender, p.amount_cents FROM order_payments p WHERE p.tenant_id = ? AND p.created_at >= ? AND p.created_at < ?', [req.auth.tenantId, r.start, r.end])) {
-    const d = dayOfOrder.has(p.order_id) ? day(dayOfOrder.get(p.order_id)) : null;
-    if (!d) continue;
+  // Takings by the day the money came in (2026.11.11): a payment plan installment charged today counts today, even for
+  // a pass sold last month, so the journal matches payments.csv and the bank deposit.
+  for (const p of await rows(pool, "SELECT p.order_id, p.tender, p.amount_cents, p.created_at FROM order_payments p JOIN orders o ON o.tenant_id = p.tenant_id AND o.id = p.order_id WHERE p.tenant_id = ? AND p.created_at >= ? AND p.created_at < ? AND o.status IN ('paid','refunded')", [req.auth.tenantId, r.start, r.end])) {
+    const d = day(localDay(p.created_at, t));
     if (p.tender === 'comp') d.comps += p.amount_cents; else if (p.tender === 'gift_card') d.gift_card_redeemed += p.amount_cents; else d[p.tender] += p.amount_cents;
   }
   for (const f of await rows(pool, 'SELECT created_at, amount_cents FROM order_refunds WHERE tenant_id = ? AND created_at >= ? AND created_at < ?', [req.auth.tenantId, r.start, r.end])) day(localDay(f.created_at, t)).refunds += f.amount_cents;

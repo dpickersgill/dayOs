@@ -301,13 +301,18 @@ router.post(
 );
 
 /** Takes payment for a fee (or returns a deposit). Fees become a paid order so they appear in sales reports. */
-router.post('/charges/:id/collect', requireRole(...counter), validate(z.object({ method: z.enum(['cash', 'card', 'other']) })), async (req, res) => {
+router.post('/charges/:id/collect', requireRole(...counter), validate(z.object({ method: z.enum(['cash', 'card', 'other']), reference: require('../lib/pan').payText(100).optional() })), async (req, res) => {
   const { tenantId } = req.auth;
   const id = paramId(req);
   const orderId = await tx(async (conn) => {
     const ch = await one(conn, 'SELECT * FROM rental_charges WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, id]);
     if (!ch) throw notFound('Charge');
     if (ch.status !== 'due') throw conflict(`That charge is already ${ch.status}`);
+    // Not while the card deposit is being charged for the fees (lib/rentaldeposit.js take): it would be paid twice.
+    const dep = await rows(conn, 'SELECT status FROM rental_deposits WHERE tenant_id = ? AND contract_id = ? FOR UPDATE', [tenantId, ch.contract_id]);
+    if (ch.kind !== 'deposit' && dep.some((x) => x.status === 'taking')) throw conflict('The card deposit is being charged for the fees right now. Refresh in a moment.');
+    // "Other" money never reaches the drawer: like a waive, counter staff only within the comp limit (lib/tenders.js).
+    if (req.body.method === 'other' && ch.kind !== 'deposit') require('../lib/tenders').checkOther(req, await one(conn, 'SELECT comp_counter_limit_cents FROM tenants WHERE id = ?', [tenantId]), [{ amount_cents: ch.cents, reference: req.body.reference || 'rental charge' }]);
     const contract = await one(conn, 'SELECT person_id FROM rental_contracts WHERE tenant_id = ? AND id = ?', [tenantId, ch.contract_id]);
     // a deposit is held, not sold: record it as paid without creating a sale
     let oid = null;
@@ -326,8 +331,14 @@ router.post('/charges/:id/collect', requireRole(...counter), validate(z.object({
 router.post('/charges/:id/waive', requireRole(...manager), validate(z.object({ note: z.string().max(250).optional() })), async (req, res) => {
   const { tenantId } = req.auth;
   const id = paramId(req);
-  const [r] = await pool.query("UPDATE rental_charges SET status = 'waived', resolved_at = NOW(), note = COALESCE(?, note) WHERE tenant_id = ? AND id = ? AND status = 'due'", [req.body.note ?? null, tenantId, id]);
-  if (!r.affectedRows) throw conflict('That charge is not waiting for payment');
+  await tx(async (conn) => {
+    const ch = await one(conn, 'SELECT contract_id, kind FROM rental_charges WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, id]);
+    // Not while the card deposit is being charged for the fees (lib/rentaldeposit.js take).
+    const dep = ch ? await rows(conn, 'SELECT status FROM rental_deposits WHERE tenant_id = ? AND contract_id = ? FOR UPDATE', [tenantId, ch.contract_id]) : [];
+    if (ch && ch.kind !== 'deposit' && dep.some((x) => x.status === 'taking')) throw conflict('The card deposit is being charged for the fees right now. Refresh in a moment.');
+    const [r] = await conn.query("UPDATE rental_charges SET status = 'waived', resolved_at = NOW(), note = COALESCE(?, note) WHERE tenant_id = ? AND id = ? AND status = 'due'", [req.body.note ?? null, tenantId, id]);
+    if (!r.affectedRows) throw conflict('That charge is not waiting for payment');
+  });
   await audit(pool, req, 'waive', 'rental_charges', id, req.body);
   res.json({ ok: true });
 });

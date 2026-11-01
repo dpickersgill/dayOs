@@ -123,7 +123,7 @@ function regOpen(term, today) {
  * Puts a person in one day of a session. A full day puts them on that day's waitlist (or throws when `mustFit`, as a paid
  * sale must). One place per person per session.
  */
-async function enroll(conn, tenantId, { program, term, group, personId, guardianId = null, priceCents = 0, discountCents = 0, paidCents = 0, bundleId = null, orderId = null, anyDay = false, mustFit = false, details = null }) {
+async function enroll(conn, tenantId, { program, term, group, personId, guardianId = null, priceCents = 0, discountCents = 0, paidCents = 0, bundleId = null, orderId = null, orderItemId = null, anyDay = false, mustFit = false, details = null }) {
   await conn.query('SELECT id FROM program_groups WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, group.id]);
   const existing = await one(conn, 'SELECT id, status, group_id FROM program_enrollments WHERE tenant_id = ? AND program_id = ? AND term_key = ? AND person_id = ?', [tenantId, program.id, term.id, personId]);
   if (existing && existing.status !== 'withdrawn') throw conflict(`Already ${existing.status === 'waitlist' ? 'on the waitlist' : 'enrolled'} in ${term.name}`);
@@ -131,13 +131,13 @@ async function enroll(conn, tenantId, { program, term, group, personId, guardian
   const full = group.capacity != null && Number(n) >= group.capacity;
   if (full && mustFit) throw conflict(`${WEEKDAYS[group.weekday]}s in ${term.name} are full`);
   const status = full ? 'waitlist' : 'enrolled';
-  const vals = [status, guardianId, term.id, group.id, bundleId, anyDay ? 1 : 0, priceCents, discountCents, paidCents, orderId];
+  const vals = [status, guardianId, term.id, group.id, bundleId, anyDay ? 1 : 0, priceCents, discountCents, paidCents, orderId, orderItemId];
   let id;
   if (existing) {
-    await conn.query('UPDATE program_enrollments SET status = ?, guardian_id = ?, term_id = ?, group_id = ?, bundle_id = ?, any_day = ?, price_cents = ?, discount_cents = ?, paid_cents = ?, order_id = ?, level_id = NULL, created_at = NOW() WHERE tenant_id = ? AND id = ?', [...vals, tenantId, existing.id]);
+    await conn.query('UPDATE program_enrollments SET status = ?, guardian_id = ?, term_id = ?, group_id = ?, bundle_id = ?, any_day = ?, price_cents = ?, discount_cents = ?, paid_cents = ?, order_id = ?, order_item_id = ?, level_id = NULL, created_at = NOW() WHERE tenant_id = ? AND id = ?', [...vals, tenantId, existing.id]);
     id = existing.id;
   } else {
-    const [r] = await conn.query('INSERT INTO program_enrollments (tenant_id, program_id, person_id, status, guardian_id, term_id, group_id, bundle_id, any_day, price_cents, discount_cents, paid_cents, order_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [tenantId, program.id, personId, ...vals]);
+    const [r] = await conn.query('INSERT INTO program_enrollments (tenant_id, program_id, person_id, status, guardian_id, term_id, group_id, bundle_id, any_day, price_cents, discount_cents, paid_cents, order_id, order_item_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [tenantId, program.id, personId, ...vals]);
     id = r.insertId;
   }
   if (details) await saveDetails(conn, tenantId, id, details);

@@ -556,7 +556,7 @@ async function showShop() {
       const saved = q.lines.reduce((n, l) => n + (l.saved_cents || 0), 0);
       const offer = q.plan || q.plan_offer;
       planRow.hidden = !offer;
-      if (offer) clear(planText).append(`Pay in ${offer.count}: ${money(offer.first_cents)} today, then ${offer.then.map((x) => `${money(x.cents)} on ${dayLong(x.on)}`).join(', ')}.`);
+      if (offer) clear(planText).append(`Pay in ${offer.count}: ${money(offer.first_cents)} today, then ${offer.then.map((x) => `${money(x.cents)} on ${dayLong(x.on)}`).join(', ')}.${offer.upfront_cents ? ' Gift cards are paid in full today.' : ''}`);
       appendAll(clear(totalEl), ...[saved ? h('span', { class: 'save-note' }, `You save ${money(saved)} by buying online`) : null, h('span', { class: 'muted' }, `Subtotal ${money(q.subtotal_cents)}`),
         q.reward ? h('span', { class: 'save-note' }, `${T('Reward')}: -${money(q.reward.cents)}`) : null,
         q.discount_cents ? h('span', { class: 'save-note' }, `${q.promo}: -${money(q.discount_cents)}`) : null,

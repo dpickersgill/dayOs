@@ -45,13 +45,14 @@ async function buildWeek(tenantId, weekStart) {
   for (const d of days) for (const [k, v] of Object.entries(d.tenders)) tenders[k] = (tenders[k] || 0) + Number(v);
   const top = new Map();
   for (const d of days) for (const p of d.top) top.set(p.name, (top.get(p.name) || 0) + Number(p.units));
-  const channels = await rows(pool, "SELECT channel, COUNT(*) AS orders, COALESCE(SUM(total_cents), 0) AS cents FROM orders WHERE tenant_id = ? AND status = 'paid' AND created_at >= ? AND created_at < ? GROUP BY channel ORDER BY cents DESC", [tenantId, from, to]);
-  const types = await rows(pool, "SELECT i.line_kind AS kind, COALESCE(SUM(i.unit_price_cents * i.quantity - i.discount_cents), 0) AS cents FROM order_items i JOIN orders o ON o.id = i.order_id AND o.tenant_id = i.tenant_id WHERE i.tenant_id = ? AND o.status = 'paid' AND o.created_at >= ? AND o.created_at < ? GROUP BY i.line_kind ORDER BY cents DESC", [tenantId, from, to]);
+  // Before refunds, like the Daily report: an order refunded later still counts where it was sold (2026.11.11).
+  const channels = await rows(pool, "SELECT channel, COUNT(*) AS orders, COALESCE(SUM(total_cents), 0) AS cents FROM orders WHERE tenant_id = ? AND status IN ('paid','refunded') AND created_at >= ? AND created_at < ? GROUP BY channel ORDER BY cents DESC", [tenantId, from, to]);
+  const types = await rows(pool, "SELECT i.line_kind AS kind, COALESCE(SUM(i.unit_price_cents * i.quantity - i.discount_cents), 0) AS cents FROM order_items i JOIN orders o ON o.id = i.order_id AND o.tenant_id = i.tenant_id WHERE i.tenant_id = ? AND o.status IN ('paid','refunded') AND o.created_at >= ? AND o.created_at < ? GROUP BY i.line_kind ORDER BY cents DESC", [tenantId, from, to]);
   // Activities by attraction (zipline, coaster, skating...): places sold and sales, counted like Sales by type.
   const attractions = await rows(pool, `SELECT a.name, COUNT(*) AS units, COALESCE(SUM(i.unit_price_cents * i.quantity - i.discount_cents), 0) AS cents
     FROM order_items i JOIN orders o ON o.id = i.order_id AND o.tenant_id = i.tenant_id JOIN products p ON p.id = i.product_id AND p.tenant_id = i.tenant_id
     JOIN attractions a ON a.id = p.attraction_id AND a.tenant_id = p.tenant_id
-    WHERE i.tenant_id = ? AND i.line_kind = 'activity' AND o.status = 'paid' AND o.created_at >= ? AND o.created_at < ? GROUP BY a.id, a.name ORDER BY cents DESC`, [tenantId, from, to]);
+    WHERE i.tenant_id = ? AND i.line_kind = 'activity' AND o.status IN ('paid','refunded') AND o.created_at >= ? AND o.created_at < ? GROUP BY a.id, a.name ORDER BY cents DESC`, [tenantId, from, to]);
   const people = await one(pool, 'SELECT COUNT(*) AS n FROM people WHERE tenant_id = ? AND anonymised_at IS NULL AND created_at >= ? AND created_at < ?', [tenantId, from, to]);
   const optIns = await one(pool, "SELECT COUNT(*) AS n FROM consent_events WHERE tenant_id = ? AND channel = 'email' AND status = 'opted_in' AND created_at >= ? AND created_at < ?", [tenantId, from, to]);
   const lessons = await one(pool, "SELECT COUNT(*) AS sessions, COALESCE(SUM((SELECT COUNT(*) FROM lesson_bookings b WHERE b.tenant_id = s.tenant_id AND b.session_id = s.id AND b.status IN ('booked','attended'))), 0) AS students FROM lesson_sessions s WHERE s.tenant_id = ? AND s.status <> 'cancelled' AND DATE(s.starts_at) >= ? AND DATE(s.starts_at) <= ?", [tenantId, weekStart, end]);

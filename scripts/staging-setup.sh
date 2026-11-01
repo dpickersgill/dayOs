@@ -213,9 +213,11 @@ if [ -n "$STRIPE_KEY" ] && ! secret_exists summitops-staging-stripe-webhook; the
   }
   W1="$(hook -d 'enabled_events[]=checkout.session.completed' -d 'enabled_events[]=checkout.session.expired' \
     -d 'enabled_events[]=customer.subscription.created' -d 'enabled_events[]=customer.subscription.updated' -d 'enabled_events[]=customer.subscription.deleted' \
-    -d 'enabled_events[]=invoice.paid' -d 'enabled_events[]=invoice.payment_failed' -d 'enabled_events[]=invoice.finalized')"
+    -d 'enabled_events[]=invoice.paid' -d 'enabled_events[]=invoice.payment_failed' -d 'enabled_events[]=invoice.finalized' \
+    -d 'enabled_events[]=charge.refunded' -d 'enabled_events[]=charge.dispute.created' -d 'enabled_events[]=charge.dispute.updated' -d 'enabled_events[]=charge.dispute.closed')"
   W2="$(hook -d connect=true -d 'enabled_events[]=checkout.session.completed' -d 'enabled_events[]=checkout.session.expired' \
-    -d 'enabled_events[]=account.updated' -d 'enabled_events[]=account.application.deauthorized')"
+    -d 'enabled_events[]=account.updated' -d 'enabled_events[]=account.application.deauthorized' \
+    -d 'enabled_events[]=charge.refunded' -d 'enabled_events[]=charge.dispute.created' -d 'enabled_events[]=charge.dispute.updated' -d 'enabled_events[]=charge.dispute.closed')"
   rm -f "$HDR"
   if [ -n "$W1" ] && [ -n "$W2" ]; then
     put_secret summitops-staging-stripe-webhook "$W1"; put_secret summitops-staging-stripe-connect-webhook "$W2"

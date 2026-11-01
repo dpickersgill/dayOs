@@ -261,7 +261,7 @@ async function take(req, contractId) {
   d = await settle(d);
   if (!['held', 'saved'].includes(d.status)) throw conflict('The card deposit is not ready yet');
   const contract = await one(pool, 'SELECT * FROM rental_contracts WHERE tenant_id = ? AND id = ?', [tenantId, contractId]);
-  const fees = await dueFees(pool, tenantId, contractId);
+  let fees = await dueFees(pool, tenantId, contractId);
   if (!fees.length) throw conflict('Nothing is owed on this rental. Release the deposit instead.');
   const manager = ['owner', 'manager'].includes(req.auth.role);
   if (fees.some((f) => f.kind === 'loss') && !manager) throw forbidden('Charging for lost gear needs a manager');
@@ -269,7 +269,6 @@ async function take(req, contractId) {
   // A saved card can be charged any amount with nobody there to tap, so a manager decides every such charge. Counter
   // staff can only capture from a hold, and never more than is owed or than the hold.
   if (d.kind === 'saved' && !manager) throw forbidden('Charging a saved card needs a manager. Ask a manager to confirm the fees and charge it.');
-  const owed = fees.reduce((a, f) => a + Number(f.cents), 0);
   const acct = { account: d.account || null };
   const p = await connect.payee(tenantId);
   // Claim the deposit first, so a second press of Take (or a second screen) stops here instead of taking it again.
@@ -277,6 +276,13 @@ async function take(req, contractId) {
   const [claim] = await pool.query("UPDATE rental_deposits SET status = 'taking' WHERE id = ? AND status IN ('held','saved')", [d.id]);
   if (!claim.affectedRows) throw conflict('Someone is already taking this deposit. Refresh to see the result.');
   const restore = () => pool.query("UPDATE rental_deposits SET status = ? WHERE id = ? AND status = 'taking'", [was, d.id]);
+  // The fees are read again after the claim (2026.11.11): while the deposit is being taken, a fee cannot be collected
+  // or waived another way (routes/rentalsplus.js waits on the deposit row), so the card is never charged for a fee
+  // that was just paid in cash.
+  fees = await dueFees(pool, tenantId, contractId);
+  if (!fees.length) { await restore(); throw conflict('Nothing is owed on this rental any more. Release the deposit instead.'); }
+  if (fees.some((f) => f.kind === 'loss') && !manager) { await restore(); throw forbidden('Charging for lost gear needs a manager'); }
+  const owed = fees.reduce((a, f) => a + Number(f.cents), 0);
   let amount; let ref = d.intent;
   try {
     if (d.kind === 'hold') {

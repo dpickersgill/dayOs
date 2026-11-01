@@ -167,7 +167,7 @@ function planDialog(panel, p) {
     p.note ? h('p', { class: 'muted' }, p.note) : null);
   const done = ['paid', 'settled', 'canceled'].includes(p.status);
   const actions = done ? null : h('div', { class: 'row' },
-    button('Charge now', async () => { const r = await post(`/guests/fair/plans/${p.id}/charge`); toast(r.result === 'paid' ? 'Paid' : 'The card did not go through'); await reload(panel, plansView); }),
+    button('Charge now', async () => { const r = await post(`/guests/fair/plans/${p.id}/charge`); toast({ paid: 'Paid', unknown: 'No answer from the card service yet. It is checked again before any new try.', skipped: 'A payment on this plan is being charged right now. Try again in a minute.' }[r.result] || 'The card did not go through'); await reload(panel, plansView); }),
     button('Settle', () => formDialog('Settle this plan', field('How was the rest paid?', input({ name: 'note', maxlength: 300, placeholder: 'For example: paid in cash at the window' })), async (fd) => { await post(`/guests/fair/plans/${p.id}/settle`, { note: val(fd, 'note') }); toast('Settled. The pass works.'); await reload(panel, plansView); }, { submitText: 'Settle' })),
     button('Cancel plan', () => confirmDialog('Cancel this plan?', 'Nothing more will be charged, and the pass stays on hold at the gate until you settle or refund it.', 'Cancel plan', async () => { await post(`/guests/fair/plans/${p.id}/cancel`, {}); await reload(panel, plansView); }, { danger: true })));
   formDialog(`Payment plan ${p.id}`, h('div', { class: 'stack' }, body, actions), async () => {}, { submitText: 'Close', wide: true });

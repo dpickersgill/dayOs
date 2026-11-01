@@ -44,6 +44,7 @@ test.before(async () => {
   A = await mountain(`ca-${suffix}`);
   B = await mountain(`cb-${suffix}`);
   T.counter = await addUser(A, `counter@${A.slug}.test`, 'counter');
+  T.seller = await addUser(A, `seller@${A.slug}.test`, 'manager'); // the simple POST /orders sale is for managers (2026.11.11)
   T.patrol = await addUser(A, `patrol@${A.slug}.test`, 'patrol');
   T.staff = await addUser(A, `staff@${A.slug}.test`, 'staff');
   D.day = (await api('POST', '/products', { token: A.owner, body: { kind: 'day_ticket', name: 'Adult Day', base_price_cents: 6000 } })).body.id;
@@ -52,7 +53,7 @@ test.before(async () => {
 test.after(async () => { await new Promise((r) => server.close(r)); await pool.end(); });
 
 test('a ticket sale captures the purchaser into the shared customer record', async () => {
-  const r = await sell(T.counter, { purchaser: buyer({ marketing_opt_in: true }) });
+  const r = await sell(T.seller, { purchaser: buyer({ marketing_opt_in: true }) });
   assert.equal(r.status, 201, r.text);
   assert.ok(r.body.person_id);
   assert.equal(r.body.customer.created, true);
@@ -71,7 +72,7 @@ test('a ticket sale captures the purchaser into the shared customer record', asy
 });
 
 test('the same purchaser coming back is matched, not duplicated; only blanks are filled', async () => {
-  const r = await sell(T.counter, { purchaser: buyer({ email: 'BEA@example.test', phone: '999-000-0000', emergency_name: 'Sam Buyer', marketing_opt_in: false }) });
+  const r = await sell(T.seller, { purchaser: buyer({ email: 'BEA@example.test', phone: '999-000-0000', emergency_name: 'Sam Buyer', marketing_opt_in: false }) });
   assert.equal(r.status, 201, r.text);
   assert.equal(r.body.person_id, D.bea);
   assert.equal(r.body.customer.matched, true);
@@ -84,17 +85,17 @@ test('the same purchaser coming back is matched, not duplicated; only blanks are
 });
 
 test('choosing an existing customer lets the clerk correct their details', async () => {
-  const r = await sell(T.counter, { person_id: D.bea, purchaser: { phone: '610-555-0199', marketing_opt_in: false } });
+  const r = await sell(T.seller, { person_id: D.bea, purchaser: { phone: '610-555-0199', marketing_opt_in: false } });
   assert.equal(r.status, 201, r.text);
   const p = (await api('GET', `/people/${D.bea}`, { token: T.counter })).body;
   assert.equal(p.phone, '610-555-0199');
   assert.equal(p.marketing_opt_in, 0);
-  assert.equal((await sell(T.counter, { person_id: 999999 })).status, 404);
-  assert.equal((await sell(T.counter, { purchaser: { email: 'x@y.test' } })).status, 400, 'a name is needed once any detail is given');
+  assert.equal((await sell(T.seller, { person_id: 999999 })).status, 404);
+  assert.equal((await sell(T.seller, { purchaser: { email: 'x@y.test' } })).status, 400, 'a name is needed once any detail is given');
 });
 
 test('a sale without a purchaser still works until the mountain requires one', async () => {
-  assert.equal((await sell(T.counter, {})).status, 201);
+  assert.equal((await sell(T.seller, {})).status, 201);
 });
 
 test('managers choose which details are mandatory; sales and bookings enforce it', async () => {
@@ -111,25 +112,25 @@ test('managers choose which details are mandatory; sales and bookings enforce it
   assert.equal(after.can_admin, true);
   assert.deepEqual(after.required.ticket.sort(), ['_purchaser', 'address_line1', 'phone', 'postal_code']);
 
-  const none = await sell(T.counter, {});
+  const none = await sell(T.seller, {});
   assert.equal(none.status, 400);
   assert.match(none.body.error, /purchaser/i);
-  const thin = await sell(T.counter, { purchaser: { first_name: 'Cal', last_name: 'Cash', email: 'cal@example.test' } });
+  const thin = await sell(T.seller, { purchaser: { first_name: 'Cal', last_name: 'Cash', email: 'cal@example.test' } });
   assert.equal(thin.status, 400);
   assert.match(thin.body.error, /Phone/);
   assert.match(thin.body.error, /Street address/);
   assert.match(thin.body.error, /ZIP/);
   assert.equal((await api('GET', '/people?q=Cash', { token: T.counter })).body.data.length, 0, 'a refused sale leaves no half-saved customer');
-  const good = await sell(T.counter, { purchaser: { first_name: 'Cal', last_name: 'Cash', email: 'cal@example.test', phone: '1', address_line1: '1 Main', postal_code: '1' } });
+  const good = await sell(T.seller, { purchaser: { first_name: 'Cal', last_name: 'Cash', email: 'cal@example.test', phone: '1', address_line1: '1 Main', postal_code: '1' } });
   assert.equal(good.status, 201, good.text);
   // Bea was already on file with everything needed.
-  assert.equal((await sell(T.counter, { person_id: D.bea })).status, 201);
+  assert.equal((await sell(T.seller, { person_id: D.bea })).status, 201);
   // An existing customer who lacks a mandatory detail is refused until it is supplied.
   const bare = (await api('POST', '/people', { token: T.counter, body: { first_name: 'Bare', last_name: 'Bones' } })).body.id;
-  const refused = await sell(T.counter, { person_id: bare });
+  const refused = await sell(T.seller, { person_id: bare });
   assert.equal(refused.status, 400);
   assert.match(refused.body.error, /Bare Bones/);
-  assert.equal((await sell(T.counter, { person_id: bare, purchaser: { phone: '2', address_line1: '2 Main', postal_code: '2' } })).status, 201);
+  assert.equal((await sell(T.seller, { person_id: bare, purchaser: { phone: '2', address_line1: '2 Main', postal_code: '2' } })).status, 201);
 });
 
 test('lesson bookings capture the student; the customer is kept even when the booking needs a waiver', async () => {

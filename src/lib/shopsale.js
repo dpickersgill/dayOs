@@ -250,7 +250,9 @@ async function quote(conn, tenant, items, extras = {}) {
   // "Pay in N" (lib/paymentplans.js, Track FAIR): only when the guest asked for it and the mountain's plans allow this basket.
   let plan = null;
   if (extras.plan) {
-    const pq = await require('./paymentplans').quote(conn, tenant.id, { lines: detail, addons, total: subtotal - rewardCents - discount + tax });
+    // Gift cards and gift experiences are never bought on credit: they are paid in full with the first installment.
+    const PPL = require('./paymentplans');
+    const pq = await PPL.quote(conn, tenant.id, { lines: detail, addons, total: subtotal - rewardCents - discount + tax, upfront_cents: PPL.upfrontOf(gifts) });
     if (!pq || !pq.available) throw conflict('Paying in parts is not offered for this order');
     plan = pq;
   }
@@ -417,6 +419,13 @@ async function fulfil(conn, tenantId, row, { paymentIntent, payee = { account: n
   if (row.news_opt_in) {
     await conn.query('UPDATE people SET marketing_opt_in = 1 WHERE tenant_id = ? AND id = ?', [tenantId, contact.id]);
     await recordConsent(conn, tenantId, contact.id, 'email', 'opted_in', 'online', null);
+  }
+  // A promo code with a use limit is checked again, under its row lock, when the payment lands (2026.11.11). The rule:
+  // the first payment to land gets the code; a later one finds it used up and is refunded in full (handleWebhook), so a
+  // guest who opened several baskets with a one-use code can never use it more than once.
+  if (q.promo) {
+    const pc = await one(conn, 'SELECT used_count, max_uses FROM promo_codes WHERE tenant_id = ? AND code = ? FOR UPDATE', [tenantId, q.promo]);
+    if (pc && pc.max_uses !== null && Number(pc.used_count) >= Number(pc.max_uses)) throw conflict(`The promo code ${q.promo} was used up before this payment arrived`);
   }
   const [o] = await conn.query("INSERT INTO orders (tenant_id, person_id, user_id, status, promo_code, subtotal_cents, discount_cents, tax_cents, total_cents, channel, payment_ref) VALUES (?, ?, NULL, 'paid', ?, ?, ?, ?, ?, 'online', ?)", [tenantId, contact.id, q.promo || null, q.subtotal, (q.discount || 0) + (q.reward_cents || 0), q.tax, q.total, paymentIntent]);
   const orderId = o.insertId;
