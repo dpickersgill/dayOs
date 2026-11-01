@@ -95,6 +95,7 @@ test.before(async () => {
   await new Promise((r) => { server = createApp().listen(0, r); });
   base = `http://127.0.0.1:${server.address().port}`;
   A = await mountain(`pa-${suffix}`); B = await mountain(`pb-${suffix}`);
+  await q("UPDATE tenants SET address = '1 Ridge Road, Spring City, PA 19475' WHERE id IN (?)", [[A.id, B.id]]); // marketing email needs it (2026.11.11)
   pub = (m, p, o) => call('/api/v1/public', m, `/${A.slug}${p}`, o);
   const mk = async (body) => { const r = await api('POST', '/products', { token: A.owner, body }); assert.equal(r.status, 201, r.text); return r.body.id; };
   D.group = await mk({ kind: 'lesson', name: 'Kids Group', base_price_cents: 8000 });

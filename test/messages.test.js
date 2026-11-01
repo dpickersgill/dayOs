@@ -121,6 +121,10 @@ test('the unsubscribe link records the opt-out and stops later campaigns', async
 });
 
 test('texts need their own consent, add the stop line, and go to one number once', async () => {
+  // Marketing texts wait for 8 AM at the mountain (2026.11.11); this test sends at midday, whatever the time of the run.
+  const quiet = require('../src/lib/quiet');
+  quiet.clock.now = () => new Date('2026-12-15T17:00:00Z');
+  try {
   const a = await person(T.counter, { first_name: 'Tex', phone: '610-555-0142' });
   const b = await person(T.counter, { first_name: 'Nope', phone: '610-555-0143' });
   assert.ok(b.id);
@@ -137,6 +141,7 @@ test('texts need their own consent, add the stop line, and go to one number once
   assert.equal(texts.some((x) => x.To === '+16105550143'), false);
   const test1 = await api('POST', `/messages/campaigns/${c.body.id}/test`, { token: T.manager, body: {} });
   assert.equal(test1.status, 400, 'a text test needs a number');
+  } finally { quiet.clock.now = () => new Date(); }
 });
 
 test('audiences: current pass holders and lapsed pass holders', async () => {
