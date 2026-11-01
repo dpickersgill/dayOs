@@ -191,7 +191,7 @@ router.post('/incidents/:id/witness-statements/:wid/void', patrol, needs('create
     if (!w) throw notFound('Statement');
     if (w.voided_at) throw conflict('Already marked entered in error');
     await conn.query('UPDATE incident_witnesses SET voided_at = ?, void_reason = ?, voided_by = ? WHERE id = ?', [nowIn(await tzOf(conn, req.auth.tenantId)), req.body.reason, req.auth.userId, w.id]);
-    await audit(conn, req, 'void_witness_statement', 'incidents', id, { row: w.id, reason: req.body.reason });
+    await audit(conn, req, 'void_witness_statement', 'incidents', id, { row: w.id, reason_given: true });
   });
   res.json({ ok: true });
 });
@@ -237,11 +237,13 @@ publicRouter.post('/witness-link/:token', rateLimit({ windowMs: 10 * 60_000, max
   const out = await tx(async (conn) => {
     const { l, tenant, now, status } = await publicLink(conn, req.params.token, { lock: true });
     if (!['sent', 'opened'].includes(status)) throw closed(status);
-    const inc = await one(conn, 'SELECT id, report_state FROM incidents WHERE tenant_id = ? AND id = ? FOR UPDATE', [l.tenant_id, l.incident_id]);
+    const inc = await one(conn, 'SELECT id, report_state, legal_hold FROM incidents WHERE tenant_id = ? AND id = ? FOR UPDATE', [l.tenant_id, l.incident_id]);
     const ip = String(req.ip || '').slice(0, 45);
     let witnessId = null; let noteId = null;
     const contact = [b.phone, b.email, [b.address, b.city, b.region, b.postal].filter(Boolean).join(' ')].filter(Boolean).join(', ');
-    if (inc.report_state === 'draft') {
+    // On legal hold the case does not change: the statement arrives as a note (notes stay open), like an addendum.
+    const held = Boolean(Number(inc.legal_hold));
+    if (inc.report_state === 'draft' && !held) {
       const [w] = await conn.query(`INSERT INTO incident_witnesses (tenant_id, incident_id, relation, name, phone, email, address, city, region, postal, statement, source, statement_signature, received_at, received_ip)
         VALUES (?, ?, 'witnessed_by', ?, ?, ?, ?, ?, ?, ?, ?, 'link', ?, ?, ?)`,
       [l.tenant_id, l.incident_id, b.name, b.phone || null, b.email || null, b.address || null, b.city || null, b.region || null, b.postal || null, b.statement, b.signature, now, ip]);
@@ -252,7 +254,7 @@ publicRouter.post('/witness-link/:token', rateLimit({ windowMs: 10 * 60_000, max
     } else {
       // The report has been signed off: the statement goes in as an addendum, and the frozen report stays as it was.
       const [n] = await conn.query('INSERT INTO incident_notes (tenant_id, incident_id, author_user, body, created_at) VALUES (?, ?, ?, ?, ?)',
-        [l.tenant_id, l.incident_id, l.created_by, `Addendum: witness statement received after the report was signed off, from ${b.name}, written and signed by them on their own phone.\nContact: ${contact}\n\nIn their own words:\n${b.statement}`, now]);
+        [l.tenant_id, l.incident_id, l.created_by, `Addendum: witness statement received ${held ? 'while the case is on legal hold' : 'after the report was signed off'}, from ${b.name}, written and signed by them on their own phone.\nContact: ${contact}\n\nIn their own words:\n${b.statement}`, now]);
       noteId = n.insertId;
     }
     await conn.query("UPDATE patrol_witness_links SET status = 'received', received_at = ?, witness_id = ?, note_id = ?, statement = ?, signature = ?, received_ip = ? WHERE id = ?", [now, witnessId, noteId, b.statement, b.signature, ip, l.id]);

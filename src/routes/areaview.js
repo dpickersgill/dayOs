@@ -58,6 +58,20 @@ router.get('/reports', async (req, res) => {
   res.json({ data: data.map((r) => ({ id: r.id, case_number: caseNo(r), occurred_at: r.occurred_at, category: r.category, severity: r.severity, location: r.location, disposition: r.disposition, approved_at: r.approved_at })) });
 });
 
+/**
+ * The ski area login reads the report, not the patrol's sign-ins: who typed a note, struck an entry or uploaded a photo is
+ * kept as a patrol sign-in (an email) in the frozen copy, and is taken out here (2026.11.11). Responders stay, by name
+ * and role, as on any injury report.
+ */
+const STAFF_KEY = /^(author|author_user|[a-z_]*_email|[a-z_]*_by_name|recorded_by|voided_by|staff_id|reported_by_staff|submitted_by|approved_by|returned_by|escalated_by)$/;
+function forArea(v) {
+  if (Array.isArray(v)) return v.map(forArea);
+  if (!v || typeof v !== 'object') return v;
+  const out = {};
+  for (const [k, x] of Object.entries(v)) out[k] = STAFF_KEY.test(k) && k !== 'guardian_email' && k !== 'email' ? null : forArea(x);
+  return out;
+}
+
 /** One approved report: the frozen copy made when it was approved, never the case as it is being edited. */
 router.get('/reports/:id', async (req, res) => {
   const t = req.auth.tenantId; const id = paramId(req);
@@ -66,7 +80,9 @@ router.get('/reports/:id', async (req, res) => {
   const v = await one(pool, "SELECT version_no, snapshot, created_at FROM incident_versions WHERE tenant_id = ? AND incident_id = ? AND kind = 'approved' ORDER BY version_no DESC LIMIT 1", [t, id]);
   if (!v) throw notFound('Approved report');
   await audit(pool, req, 'area_view', 'incidents', id, { version: v.version_no });
-  res.json({ case_number: caseNo(i), version_no: v.version_no, approved_at: v.created_at, case: JSON.parse(v.snapshot) });
+  const snap = JSON.parse(v.snapshot);
+  res.json({ case_number: caseNo(i), version_no: v.version_no, approved_at: v.created_at, case: req.auth.role === 'area' ? forArea(snap) : snap });
 });
 
 module.exports = router;
+module.exports.forArea = forArea;

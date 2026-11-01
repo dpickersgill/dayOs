@@ -1156,6 +1156,36 @@ export const ARTICLES = [
     steps: ['Open Today. Coming up lists the next few items for your teams, with the day and the time.', 'Tap an item, or press Calendar, to open the calendar.'],
     tips: ['The card is not shown on the wall screen.'], related: ['calendar-read'] },
   // ---- end Track CALENDAR
+  // ---- 2026.11.11, Track PATROL: safer patient records, the sweep, guest help, witnesses, offline, the access log
+  { id: 'patrol-1111-records', app: 'patrol', title: 'Legal hold, reopened reports and records releases', keywords: 'legal hold reopen approved release protocol stamp authority subpoena court order frozen',
+    intro: 'A case on legal hold stays exactly as it is. A reopened report is not approved until it is approved again.',
+    steps: ['While a case is on legal hold it cannot be reopened, signed off, sent back or approved. Take it off hold first.', 'The protocol stamp (the medical director and protocol version) is set the first time a report is signed off and never changes after that.', 'A reopened report shows Reopened, not approved. It cannot be released until it is approved again.', 'The Reopened note uses the mountain\'s own clock.', 'If you change the legal authority on a records request, the old and new authority are kept in the audit log, and the release names the authority used.'],
+    tips: ['On legal hold, lost-person search details cannot change, and a witness statement sent by link arrives as a note.', 'The ski area login reads approved reports without the patrol\'s sign-in emails.'], related: ['patrol-records'] },
+  { id: 'patrol-1111-sweep', app: 'patrol', title: 'A find on the sweep stays on the record', keywords: 'sweep found person hazard undo entered in error resolution mountain clear',
+    intro: 'A person or hazard found on the closing sweep is never overwritten or deleted.',
+    steps: ['Marking a found person or hazard again does not replace the first mark.', 'Undo marks the find entered in error. You give a reason, and the find stays on the log, struck through.', 'A hazard needs a resolution, a short note on how it was dealt with, before Mountain clear.', 'A found person needs a dispatch call before Mountain clear.'],
+    tips: ['Every mark and every undo is kept in order with who did it and when.'], related: ['patrol-sweep'] },
+  { id: 'patrol-1111-guest-help', app: 'patrol', title: 'Guest help requests are always taken', keywords: 'guest help request flood repeat spam grouped phone qr dispatch board',
+    intro: 'The guest help page always takes a request, even when someone sends many junk ones.',
+    steps: ['Many requests from one phone or one address are grouped on the Dispatch board as one line with a count.', 'Patrol gets an alert when that happens, so a real call is not missed.', 'A guest sending again and again from the same phone still gets through, with a note that patrol already has the request.'],
+    tips: ['The page keeps a random id on the guest\'s phone. It says nothing about who they are.'], related: ['patrol-find'] },
+  { id: 'patrol-1111-meds', app: 'patrol', title: 'Witnessed controlled medications', keywords: 'controlled medication witness waste count void dose pin sign in pending stock',
+    intro: 'A controlled medication waste, count or voided dose waits until the witness confirms it.',
+    steps: ['Name the witness. The entry shows Waiting for the witness.', 'The witness confirms with their own sign-in or their PIN. Nobody can confirm for them.', 'Stock changes only once the witness confirms.', 'A dose voided in error, or given to a patient marked entered in error, goes back to stock as a witnessed move.'],
+    tips: ['Kit checks sent late from a phone with no signal are kept, but never undo a newer change to the kit.'], related: ['patrol-meds'] },
+  { id: 'patrol-1111-offline', app: 'patrol', title: 'Reload with no signal', keywords: 'offline reload no signal signed out app shell service worker phone clock',
+    intro: 'The app opens with no signal, in offline mode, and keeps you signed in.',
+    steps: ['Open the app once with signal after each new release. The phone then keeps this release, so a reload with no signal still opens it.', 'With no signal you stay signed in. Only a real sign-out from the server signs you out.', 'Entries waiting more than three days are kept, with a warning. Send them when you have signal.', 'If the phone clock was fast, an entry refused for its time can be corrected and sent again.'],
+    tips: ['When a new release arrives, the app moves to it the next time it opens with signal.'], related: ['patrol-offline'] },
+  { id: 'patrol-1111-photos', app: 'patrol', title: 'Photo times and re-adding people', keywords: 'photo time taken source phone file typed responder rental re-add entered in error',
+    intro: 'Each photo shows where its time came from: the photo file, the phone, or typed.',
+    steps: ['A time from the phone or typed must fall within the case.', 'A photo-file time outside the case is kept and marked.', 'Adding a responder or rental gear again after marking it entered in error adds a new line. The struck-through line keeps its reason.'],
+    tips: ['Height and weight boxes are wider on a phone.'], related: ['patrol-case'] },
+  { id: 'patrol-1111-access', app: 'patrol', title: 'What the access log and audit log keep', keywords: 'access log audit search report check record score session address roster privacy free text',
+    intro: 'The access log shows who looked at a patient, and the audit log never keeps what anyone typed about a person.',
+    steps: ['Searching cases is logged with the cases found, never the words searched.', 'Opening the report check or the record score is logged, like opening the case.', 'Each audit entry notes which sign-in and which address it came from, kept as a code, not the address itself.', 'Reading a lesson roster with children\'s safety details is logged.', 'Audit entries keep field names and record numbers. Typed notes, descriptions and personal details are left out.'],
+    tips: ['Staff injury notices go only to owners and the people named for the register, with no name in the subject or text.'], related: ['patrol-access', 'staff-injuries'] },
+  // ---- end Track PATROL
 ];
 
 export const articleById = (id) => ARTICLES.find((a) => a.id === id) || null;

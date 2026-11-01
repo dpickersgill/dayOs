@@ -127,11 +127,14 @@ router.put('/incidents/:id/legal-hold', patrol, needs('records'), validate(z.obj
 
 // ================================================================ lost-person search
 async function caseFor(conn, req, id) {
-  const inc = await one(conn, 'SELECT id, report_state, category FROM incidents WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, id]);
+  const inc = await one(conn, 'SELECT id, report_state, category, legal_hold FROM incidents WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, id]);
   if (!inc) throw notFound('Case');
   return inc;
 }
-const editable = (inc) => { if (inc.report_state !== 'draft') throw conflict('This report is not a draft. Add a note instead.'); };
+const editable = (inc) => {
+  if (Number(inc.legal_hold)) throw conflict('This case is on legal hold: the search details cannot change. Add a note instead.');
+  if (inc.report_state !== 'draft') throw conflict('This report is not a draft. Add a note instead.');
+};
 
 router.get('/incidents/:id/search', patrol, needs('view_cases'), async (req, res) => {
   const t = req.auth.tenantId; const id = paramId(req);
