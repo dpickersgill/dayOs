@@ -141,7 +141,14 @@ async function enroll(conn, tenantId, { program, term, group, personId, guardian
     id = r.insertId;
   }
   if (details) await saveDetails(conn, tenantId, id, details);
-  return { id, status };
+  // Single lessons the child is already booked into at the time of one of this day's meetings (2026.11.11). A program runs
+  // for weeks, so this does not stop the place; the dates are returned for the desk to sort out with the family.
+  const clashes = status === 'enrolled' ? await rows(conn, `SELECT DATE_FORMAT(ps.starts_at, '%Y-%m-%d') AS day, pr.name AS lesson FROM program_sessions ps
+      JOIN lesson_bookings b ON b.tenant_id = ps.tenant_id AND b.person_id = ? AND b.status IN ('booked','attended')
+      JOIN lesson_sessions ls ON ls.tenant_id = b.tenant_id AND ls.id = b.session_id AND ls.status <> 'cancelled' AND ls.starts_at < ps.ends_at AND ls.ends_at > ps.starts_at
+      JOIN products pr ON pr.tenant_id = ls.tenant_id AND pr.id = ls.product_id
+    WHERE ps.tenant_id = ? AND ps.group_id = ? AND ps.status = 'scheduled' ORDER BY ps.starts_at LIMIT 10`, [personId, tenantId, group.id]) : [];
+  return { id, status, clashes };
 }
 
 const DETAIL_COLS = ['discipline', 'pass_status', 'needs_rental', 'needs_helmet', 'lesson_cents', 'ticket_cents', 'rental_cents', 'helmet_cents', 'allergies', 'medical', 'pickup'];

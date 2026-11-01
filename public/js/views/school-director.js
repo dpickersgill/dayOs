@@ -219,11 +219,13 @@ function callForm(done) {
       const c = p.counts;
       appendAll(clear(what),
         c.lessons || c.meetings ? h('p', { class: 'notice' }, p.words) : empty('No lessons or program meetings are scheduled then.'),
+        p.clashes && p.clashes.length ? h('div', { class: 'notice warn', role: 'alert' }, h('p', null, h('strong', null, 'This delay cannot be made: these people would be in two places at once.')),
+          h('ul', { class: 'plain' }, p.clashes.map((x) => h('li', null, `${x.who}: ${x.what}`))), h('p', { class: 'small' }, 'Choose a shorter delay or a wider time window, or move them first.')) : null,
         c.lessons ? h('details', null, h('summary', null, plural(c.lessons, 'lesson')), h('ul', { class: 'plain' }, p.lessons.map((s) => h('li', null, `${fmtTime(s.starts_at)} ${s.product}, ${s.level_words}: ${plural(s.booked, 'student')}`)))) : null,
         c.meetings ? h('details', null, h('summary', null, plural(c.meetings, 'program meeting')), h('ul', { class: 'plain' }, p.meetings.map((m) => h('li', null, `${fmtTime(m.starts_at)} ${m.program}${m.term ? `, ${m.term}` : ''}: ${plural(m.enrolled, 'child', 'children')}${action === 'cancel' ? (m.makeup_date ? `. Makeup week ${fmtDate(`${m.makeup_date} 12:00:00`)}` : '. No makeup week left') : ''}`)))) : null,
         action !== 'delay' && (c.paid_online || c.paid_desk || c.on_package) ? h('p', { class: 'muted small' }, `How they paid: ${[c.paid_online ? `${c.paid_online} online` : null, c.paid_desk ? `${c.paid_desk} at the desk` : null, c.on_package ? `${c.on_package} on a package` : null, c.unpaid ? `${c.unpaid} not yet` : null].filter(Boolean).join(', ')}. Card refunds go back to the card; the rest are listed for the desk.`) : null,
         action !== 'delay' && c.meetings && !p.credit_product ? h('p', { class: 'notice warn' }, 'Program families can only choose a makeup or a refund: add a single lesson product to offer a lesson credit too.') : null);
-      go.disabled = !(c.lessons || c.meetings);
+      go.disabled = !(c.lessons || c.meetings) || Boolean(p.clashes && p.clashes.length);
     } catch (err) { clear(what).append(errorBox(err)); go.disabled = true; }
   }
   async function run() {

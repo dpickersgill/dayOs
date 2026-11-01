@@ -157,7 +157,7 @@ router.patch('/sessions/:id', SA.school('director'), validate(z.object({
   meeting_place: z.string().trim().max(120).nullable().optional(), capacity: z.number().int().min(1).max(60).optional(), format: z.enum(formats).optional(),
 })), async (req, res) => {
   const { tenantId } = req.auth;
-  await tx(async (conn) => {
+  const out = await tx(async (conn) => {
     const s = await one(conn, 'SELECT s.*, pr.name AS product_name FROM lesson_sessions s JOIN products pr ON pr.tenant_id = s.tenant_id AND pr.id = s.product_id WHERE s.tenant_id = ? AND s.id = ? FOR UPDATE', [tenantId, paramId(req)]);
     if (!s) throw notFound('Lesson session');
     const b = { ...s, ...req.body };
@@ -165,12 +165,21 @@ router.patch('/sessions/:id', SA.school('director'), validate(z.object({
     const cap = seatsFor({ format: b.format, capacity: b.capacity }, { name: s.product_name });
     const { n } = await one(conn, "SELECT COUNT(*) AS n FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND status IN ('booked','attended')", [tenantId, s.id]);
     if (cap < Number(n)) throw conflict(`${n} students are booked, so the lesson needs at least ${n} spots`);
-    await conn.query('UPDATE lesson_sessions SET level_min = ?, level_max = ?, age_min = ?, age_max = ?, ability_level = ?, age_group = ?, meeting_place = ?, capacity = ?, format = ? WHERE tenant_id = ? AND id = ?',
-      [la.level_min, la.level_max, la.age_min, la.age_max, la.ability_level, la.age_group, b.meeting_place ?? null, cap, b.format, tenantId, s.id]);
-    await audit(conn, req, 'update', 'lesson_sessions', s.id, req.body);
+    // The instructor is checked again against the lesson as edited (2026.11.11): a new level range, ages or type can
+    // be one they are not cleared for. If so they come off it (Assign later), and the screen says who and why.
+    let removed = null;
+    if (s.instructor_id) {
+      const [fit] = await instructorFit(conn, tenantId, { ...s, ...la, format: b.format }, { onlyStaffId: s.instructor_id, ignoreLessonId: s.id });
+      const hard = fit ? fit.problems.filter((x) => x !== NOT_SET_UP) : [];
+      if (hard.length) removed = { instructor_id: s.instructor_id, name: fit.name, why: hard[0] };
+    }
+    await conn.query('UPDATE lesson_sessions SET level_min = ?, level_max = ?, age_min = ?, age_max = ?, ability_level = ?, age_group = ?, meeting_place = ?, capacity = ?, format = ?, instructor_id = ? WHERE tenant_id = ? AND id = ?',
+      [la.level_min, la.level_max, la.age_min, la.age_max, la.ability_level, la.age_group, b.meeting_place ?? null, cap, b.format, removed ? null : s.instructor_id, tenantId, s.id]);
+    await audit(conn, req, 'update', 'lesson_sessions', s.id, { ...req.body, ...(removed ? { instructor_removed: removed.instructor_id, why: removed.why } : {}) });
+    return removed;
   });
   await LS.after(tenantId, { sessionIds: [paramId(req)] }, req);
-  res.json({ ok: true });
+  res.json({ ok: true, instructor_removed: out ? { name: out.name, why: out.why, message: `${out.name} came off this lesson: ${out.why}. Assign an instructor later.` } : null });
 });
 
 router.get('/sessions', requireRole(...school), async (req, res) => {
@@ -200,7 +209,7 @@ router.get('/sessions', requireRole(...school), async (req, res) => {
 const studentSchema = z.object({ ...personFields, first_name: personFields.first_name.optional(), last_name: personFields.last_name.optional() });
 router.post(
   '/sessions/:id/bookings',
-  requireRole(...school),
+  SA.school('supervisor', 'counter'), // the desk, managers and supervisors; a plain instructor does not book or record waivers (2026.11.11)
   validate(z.object({
     person_id: z.number().int().positive().optional(), student: studentSchema.optional(), sign_waiver: z.boolean().optional(), use_credit_id: z.number().int().positive().optional(), requested_instructor_id: z.number().int().positive().optional(),
     ...safetyShape, send_confirmation: z.boolean().optional(),
@@ -291,17 +300,19 @@ router.post('/sessions/cancel-days', SA.school('director'), validate(reasonSchem
 router.patch('/bookings/:id', requireRole(...school), validate(z.object({ status: z.enum(['booked', 'attended', 'no_show', 'cancelled']) })), async (req, res) => {
   const { tenantId } = req.auth;
   await tx(async (conn) => {
-    const b = await one(conn, 'SELECT b.id, b.status, b.credit_id, b.session_id, s.instructor_id FROM lesson_bookings b JOIN lesson_sessions s ON s.tenant_id = b.tenant_id AND s.id = b.session_id WHERE b.tenant_id = ? AND b.id = ? FOR UPDATE', [tenantId, paramId(req)]);
-    if (!b) throw notFound('Booking');
+    const b0 = await one(conn, 'SELECT b.id, b.status, b.person_id, b.session_id, s.instructor_id FROM lesson_bookings b JOIN lesson_sessions s ON s.tenant_id = b.tenant_id AND s.id = b.session_id WHERE b.tenant_id = ? AND b.id = ?', [tenantId, paramId(req)]);
+    if (!b0) throw notFound('Booking');
     // An instructor marks attendance only on their own lessons (the desk and managers on any), and cannot cancel a booking.
-    if (SA.ownOnly(req) && (b.instructor_id !== req.auth.staffId || req.body.status === 'cancelled')) throw forbidden('Instructors can only mark attendance on their own lessons');
-    // Bringing a canceled booking back takes a seat again: lock the lesson and check it still has one.
-    if (b.status === 'cancelled' && req.body.status !== 'cancelled') {
-      const s = await one(conn, 'SELECT capacity, status FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, b.session_id]);
-      if (s.status !== 'scheduled') throw conflict(`Session is ${s.status}`);
-      const { n } = await one(conn, "SELECT COUNT(*) AS n FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND status IN ('booked','attended')", [tenantId, b.session_id]);
-      if (n >= s.capacity) throw conflict('Session is full');
+    if (SA.ownOnly(req) && (b0.instructor_id !== req.auth.staffId || req.body.status === 'cancelled')) throw forbidden('Instructors can only mark attendance on their own lessons');
+    // Bringing a canceled booking back is a new booking (2026.11.11): it goes through bookStudent, so the student is
+    // checked for a clash with another lesson or a program meeting, a waiver on file, a free seat and seats held for the
+    // waitlist and online requests, with the same locks in the same order as every other way of booking.
+    if (b0.status === 'cancelled' && req.body.status !== 'cancelled') {
+      if (SA.ownOnly(req)) throw forbidden('Ask the desk to book this student again');
+      await bookStudent(conn, req, { sessionId: b0.session_id, personId: b0.person_id });
     }
+    const b = await one(conn, 'SELECT id, status, credit_id, session_id FROM lesson_bookings WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, b0.id]);
+    if (b0.status === 'cancelled') b.status = 'cancelled';
     await conn.query('UPDATE lesson_bookings SET status = ? WHERE tenant_id = ? AND id = ?', [req.body.status, tenantId, b.id]);
     await audit(conn, req, 'attendance', 'lesson_bookings', b.id, { from: b.status, to: req.body.status });
     // Canceling gives a package lesson back.
@@ -334,6 +345,8 @@ const DETAIL_KEYS = ['allergies', 'medical', 'pickup', 'contact_name', 'contact_
 router.get('/sessions/:id/roster', requireRole(...school), async (req, res) => {
   const s = await one(pool, 'SELECT id, instructor_id, discipline FROM lesson_sessions WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, paramId(req)]);
   if (!s) throw notFound('Lesson session');
+  // A plain instructor reads only the rosters of their own lessons (2026.11.11).
+  if (SA.ownOnly(req) && s.instructor_id !== req.auth.staffId) throw forbidden('Instructors can only see the rosters of their own lessons');
   const data = await rows(
     pool,
     `SELECT b.id AS booking_id, b.status, b.unpaid, b.credit_id, b.instructor_notes, b.level AS booked_level, b.allergies, b.medical, b.pickup, b.contact_name, b.contact_phone, b.contact_email,

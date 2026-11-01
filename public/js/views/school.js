@@ -95,7 +95,7 @@ async function lessonsTab(root, { staff, certs, names }) {
         { head: 'Booked', num: true, cell: (s) => `${s.booked} of ${s.capacity}` },
         { head: 'Status', cell: (s) => h('span', null, state(label(s.status), s.status === 'scheduled' ? 'good' : s.status === 'cancelled' ? 'bad' : 'neutral'), s.cancel_reason ? h('div', { class: 'muted small' }, s.cancel_reason) : null) },
         { head: '', actions: true, cell: (s) => [
-          button('Roster', () => roster(s, load), { small: true }),
+          seesRoster(s) ? button('Roster', () => roster(s, load), { small: true }) : null,
           schoolCan('supervisor') && s.status === 'scheduled' ? button('Instructor', () => setInstructor(s, load), { small: true }) : null,
           schoolCan('director') && s.status === 'scheduled' ? button('Edit', () => editSession(s, load), { small: true, label: `Edit ${s.product} ${fmtRange(s.starts_at, s.ends_at)}` }) : null,
           schoolCan('director') && s.status === 'scheduled' ? button('Cancel', () => cancelOne(s, load), { small: true }) : null,
@@ -274,8 +274,9 @@ function editSession(s, done) {
     field('Type', select(FORMATS, s.format, { name: 'format' })), ...la.els,
     field('Spots', input({ type: 'number', name: 'capacity', min: 1, max: 60, value: s.capacity })),
     field('Meet at', input({ name: 'meeting_place', maxlength: 120, value: s.meeting_place || '' }))), async (fd) => {
-    await patch(`/skischool/sessions/${s.id}`, { ...levelAgeBody(fd), format: val(fd, 'format'), capacity: num(fd, 'capacity') || undefined, meeting_place: val(fd, 'meeting_place') });
-    toast('Lesson saved');
+    const r = await patch(`/skischool/sessions/${s.id}`, { ...levelAgeBody(fd), format: val(fd, 'format'), capacity: num(fd, 'capacity') || undefined, meeting_place: val(fd, 'meeting_place') });
+    // An instructor no longer cleared for the lesson as edited comes off it (Assign later).
+    if (r && r.instructor_removed) toast(`Lesson saved. ${r.instructor_removed.message}`, 'warn'); else toast('Lesson saved');
     await done();
   });
 }
@@ -342,7 +343,7 @@ async function boardTab(root, { staff }) {
           s.students.length ? h('ul', { class: 'students' }, s.students.map((x) => h('li', null, h('a', { href: '#', class: 'link', onclick: (e) => { e.preventDefault(); cardDialog(x.person_id, { onChange: load, discipline: s.discipline }); } }, `${x.first_name} ${x.last_name}`),
             x.level ? h('span', { class: 'muted small' }, `  ${levelName(x.level, s.discipline)}`) : null, flags(x), x.unpaid ? h('span', null, ' ', state('Unpaid', 'warn')) : null, x.requested_instructor_id && x.requested_instructor_id === s.instructor_id ? h('span', null, ' ', state('Requested', 'good')) : null,
             x.status !== 'booked' ? h('span', { class: 'muted small' }, `  ${label(x.status)}`) : null))) : h('p', { class: 'muted small' }, 'Nobody booked yet.'),
-          h('div', { class: 'row' }, button('Roster', () => roster(s, load), { small: true }),
+          h('div', { class: 'row' }, seesRoster(s) ? button('Roster', () => roster(s, load), { small: true }) : null,
             can('instructor') ? button('Notes and tip', () => sessionDetails(s, load), { small: true }) : null,
             schoolCan('supervisor') ? button('Instructor', () => setInstructor(s, load), { small: true }) : null)))) : empty('No lessons on this day.'));
     } catch (err) { clear(body).append(errorBox(err)); }
@@ -400,6 +401,9 @@ function safetyFields(prefix = '') {
   };
   return { el, fill, read, els };
 }
+
+/** The desk, managers and supervisors open any roster; a plain instructor only their own lessons' (2026.11.11). */
+const seesRoster = (s) => can('counter') || schoolCan('supervisor') || (ctx.me && ctx.me.staff_id && s.instructor_id === ctx.me.staff_id);
 
 async function roster(session, done) {
   const list = h('div');
@@ -476,7 +480,7 @@ async function roster(session, done) {
     await load();
     if (done) done();
   }, { kind: 'primary' });
-  const canBook = can('counter', 'instructor');
+  const canBook = can('counter') || schoolCan('supervisor'); // a plain instructor does not book students (2026.11.11)
   dialog(`${fmtDateTime(session.starts_at)}, ${session.product}`, [
     h('p', { class: 'muted' }, `${lessonWords(session)}. ${session.capacity} spots.${canBook ? ' Students need a signed waiver for the season.' : ''}`),
     list, canBook ? [h('h3', null, 'Add a student'), capture.el, signRow, wslot, creditSlot, safety.el, confirmRow, h('div', { class: 'row' }, book)] : null], { wide: true });

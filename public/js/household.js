@@ -177,6 +177,11 @@ function personDialog(m, acall, onChange) {
   const ski = sel('pd-sk', Array.from({ length: 9 }, (_, i) => [i + 1, `Level ${i + 1}`]), m && m.ski_level);
   const board = sel('pd-sb', Array.from({ length: 9 }, (_, i) => [i + 1, `Level ${i + 1}`]), m && m.snowboard_level);
   const adult = h('input', { type: 'checkbox', id: 'pd-adult' });
+  // A second adult's email is only used once they confirm it from the email we send them (2026.11.11).
+  const email = inp('pd-em', '', { type: 'email', maxlength: 255, autocomplete: 'off' });
+  const emailF = f('pd-em', 'Their email (optional)', email, 'We email them a link. They can sign in once they confirm it.');
+  emailF.hidden = true;
+  adult.addEventListener('change', () => { emailF.hidden = !adult.checked; });
   const photoIn = h('input', { type: 'file', accept: 'image/*', id: 'pd-ph' });
   let photo; photoIn.addEventListener('change', async () => { try { photo = await shrink(photoIn.files[0]); } catch (e) { err.textContent = e.message; err.hidden = false; } });
   const err = h('p', { class: 'error-box', role: 'alert', hidden: true });
@@ -188,6 +193,7 @@ function personDialog(m, acall, onChange) {
       f('pd-h', 'Height (inches)', ht), f('pd-w', 'Weight (pounds)', wt), f('pd-boot', 'Boot or shoe size', boot), f('pd-st', 'Snowboard stance', stance),
       f('pd-ab', 'Ability', ability), f('pd-sk', 'Ski level', ski), f('pd-sb', 'Snowboard level', board), f('pd-ph', 'Pass photo (a clear face)', photoIn)),
     m ? null : h('label', { class: 'check-row', for: 'pd-adult' }, adult, h('span', null, 'This is another adult (not a child in my care)')),
+    m ? null : emailF,
     err, h('div', { class: 'row' }, close, save));
   close.addEventListener('click', () => dlg.close());
   form.addEventListener('submit', async (e) => {
@@ -197,7 +203,8 @@ function personDialog(m, acall, onChange) {
       stance: stance.value || null, ability_level: ability.value || null, ski_level: ski.value ? Number(ski.value) : null, snowboard_level: board.value ? Number(board.value) : null, ...(photo ? { photo } : {}) };
     try {
       if (m) await acall('PATCH', `/account/people/${m.id}`, body);
-      else { if (!adult.checked && !body.date_of_birth) { err.textContent = 'Add the birthday for a child: it sets their ticket price.'; err.hidden = false; return; } await acall('POST', '/account/people', { ...body, adult: adult.checked }); }
+      else { if (!adult.checked && !body.date_of_birth) { err.textContent = 'Add the birthday for a child: it sets their ticket price.'; err.hidden = false; return; } const r = await acall('POST', '/account/people', { ...body, adult: adult.checked, ...(adult.checked && email.value.trim() ? { email: email.value.trim() } : {}) });
+        if (r && r.invite_sent) alert(`We emailed ${email.value.trim()} a link. They join your family account once they confirm it.`); }
       dlg.close(); onChange();
     } catch (ex) { err.textContent = ex.message; err.hidden = false; }
   });

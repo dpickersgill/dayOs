@@ -16,7 +16,7 @@ let server; let base;
 const suffix = Date.now().toString(36) + Math.floor(Math.random() * 100);
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
 const addDays = (d, n) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
-const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+const PNG = require('./helpers/signature').signaturePng(); // a drawn signature (2026.11.11: a blank box is refused)
 let A; let B;
 
 async function api(method, path, { token, body } = {}) {

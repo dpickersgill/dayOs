@@ -21,6 +21,16 @@ const { dayRange, addDays } = require('./util');
 const KINDS = ['group', 'semi_private', 'private', 'hourly', 'program'];
 const KIND_WORDS = { group: 'group lesson', semi_private: 'semi-private', private: 'private', hourly: 'hourly', program: 'program meeting' };
 const amount = (cents) => (Number(cents || 0) / 100).toFixed(2);
+/** UTC milliseconds of a mountain wall-clock time ('YYYY-MM-DD HH:MM:SS'), two passes over the zone offset. */
+function utcMs(local, tz) {
+  const g = Date.parse(`${String(local).replace(' ', 'T').slice(0, 19)}Z`);
+  if (!tz) return g;
+  const off = (ms) => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms)).map((x) => [x.type, x.value])); return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - ms; };
+  let t = g - off(g); t = g - off(t);
+  return t;
+}
+/** Real minutes between two mountain wall-clock times: a lesson across a daylight saving change is paid for the time it ran (2026.11.11). */
+const zoneMinutes = (a, b, tz) => Math.max(Math.round((utcMs(b, tz) - utcMs(a, tz)) / 60000), 0);
 const minutesBetween = (a, b) => Math.max(Math.round((Date.parse(`${String(b).replace(' ', 'T').slice(0, 19)}Z`) - Date.parse(`${String(a).replace(' ', 'T').slice(0, 19)}Z`)) / 60000), 0);
 const hoursText = (min) => { const h = Math.round((min / 60) * 100) / 100; return `${h} h`; };
 const prorate = (cents, minutes) => Math.round((Number(cents) * minutes) / 60);
@@ -91,7 +101,7 @@ async function lines(db, tenantId, { from, to, staffId = null, tipsMode = 'lesso
   // ---- lessons
   for (const l of lessons) {
     const day = l.starts_at.slice(0, 10);
-    const minutes = minutesBetween(l.starts_at, l.ends_at);
+    const minutes = zoneMinutes(l.starts_at, l.ends_at, tz);
     const parts = []; const notes = [];
     if (!Number(l.students)) {
       out.push({ key: `lesson:${l.id}`, staff_id: l.instructor_id, kind: 'lesson', day, starts_at: l.starts_at, ends_at: l.ends_at, title: l.product, session_id: l.id, minutes, cents: 0, parts, words: '', note: 'No students booked, so no pay for this lesson yet.' });
@@ -138,7 +148,7 @@ async function lines(db, tenantId, { from, to, staffId = null, tipsMode = 'lesso
   // ---- program meetings
   for (const m of meetings) {
     const day = m.starts_at.slice(0, 10);
-    const minutes = minutesBetween(m.starts_at, m.ends_at);
+    const minutes = zoneMinutes(m.starts_at, m.ends_at, tz);
     const parts = []; const notes = [];
     const pr = rateFrom(rates, m.staff_id, 'program', day);
     if (pr !== null) parts.push({ label: 'program meeting', cents: pr });
@@ -232,4 +242,4 @@ function forMyDay(list) {
   return out;
 }
 
-module.exports = { KINDS, KIND_WORDS, lines, byInstructor, forMyDay, rateFrom, wordsOf, amount, lineDone, minusMinutes };
+module.exports = { KINDS, KIND_WORDS, lines, byInstructor, forMyDay, rateFrom, wordsOf, amount, lineDone, minusMinutes, zoneMinutes };

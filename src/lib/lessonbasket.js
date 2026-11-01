@@ -5,7 +5,7 @@
 // requests wait for staff as before and tickets and rentals are noted for the desk.
 const crypto = require('crypto');
 const { tx, one } = require('../db');
-const { z, dateStr, nowIn } = require('./util');
+const { z, dateStr, nowIn, todayIn, addDays } = require('./util');
 const { conflict, bad, notFound } = require('./errors');
 const { isMinor } = require('./family');
 const { quoteFor } = require('./onlinesale');
@@ -65,7 +65,9 @@ async function create(t, b, { base, slug, waitlistId = null } = {}) {
     const sessions = new Map();
     for (const id of ids) {
       const s = await one(conn, "SELECT * FROM lesson_sessions WHERE tenant_id = ? AND id = ? AND status = 'scheduled' FOR UPDATE", [t.id, id]);
-      if (!s) throw notFound('Lesson');
+      // Only a lesson the booking page lists (2026.11.11): its product on sale, and no further ahead than the page shows.
+      const onSale = s && await one(conn, 'SELECT id FROM products WHERE tenant_id = ? AND id = ? AND active = 1', [t.id, s.product_id]);
+      if (!s || !onSale || String(s.starts_at).slice(0, 10) > addDays(todayIn(t.timezone), F.BOOK_AHEAD_DAYS)) throw notFound('Lesson');
       if (s.starts_at < earliest) throw conflict(`Online booking closes ${t.booking_notice_hours} hours before the lesson. Please call the ski school.`);
       sessions.set(id, s);
     }
@@ -79,12 +81,15 @@ async function create(t, b, { base, slug, waitlistId = null } = {}) {
     }
     const { total } = await one(conn, "SELECT COUNT(*) AS total FROM lesson_requests WHERE tenant_id = ? AND status IN ('pending','awaiting_payment')", [t.id]);
     if (Number(total) >= MAX_PENDING_TOTAL) throw conflict('The ski school has a lot of bookings waiting right now. Please call to book.');
-    // Every student fits their lesson, nobody is in two lessons at once, and each lesson has room.
+    // Every student fits their lesson (age, discipline and level, including the level their placement answers point to),
+    // nobody is in two lessons at once, and each lesson has room.
+    const qs = await P.questions(conn, t.id);
+    const placed = (st, s) => { const p = st.placement ? P.place(qs, st.discipline || s.discipline, st.placement) : null; const { placement, ...rest } = st; return p ? { ...rest, ...p } : rest; };
     const want = new Map();
     for (const it of b.items) {
-      const s = sessions.get(it.session_id); const st = it.student;
-      const age = ageOn(st.date_of_birth, String(s.starts_at).slice(0, 10));
-      if (!F.fits(s, { age })) throw conflict(`${st.first_name} is ${age}, and that lesson is for ${F.agesWords(s.age_min, s.age_max).toLowerCase()}. Pick another lesson.`);
+      const s = sessions.get(it.session_id);
+      const why = F.misfit(s, placed(it.student, s));
+      if (why) throw conflict(why);
       want.set(s.id, (want.get(s.id) || 0) + 1);
     }
     for (const [i, a] of b.items.entries()) {
@@ -115,8 +120,6 @@ async function create(t, b, { base, slug, waitlistId = null } = {}) {
     }
     const extras = await F.priceExtras(conn, t.id, extraLines);
     // One request per lesson. A student with placement answers carries the level they point to (saved on the booking).
-    const qs = await P.questions(conn, t.id);
-    const placed = (st, s) => { const p = st.placement ? P.place(qs, st.discipline || s.discipline, st.placement) : null; const { placement, ...rest } = st; return p ? { ...rest, ...p } : rest; };
     const groups = [];
     for (const id of ids) {
       const students = b.items.filter((it) => it.session_id === id).map((it) => ({ ...placed(it.student, sessions.get(id)), discipline: it.student.discipline || sessions.get(id).discipline, key: keyOf(it.student), ...(it.student.level ? { ability_level: L.toLegacy(it.student.level) } : {}) }));

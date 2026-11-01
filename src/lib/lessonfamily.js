@@ -71,6 +71,29 @@ function fits(session, { age = null, level = null, discipline = null } = {}) {
   }
   return L.fits(level, session.level_min, session.level_max);
 }
+/** How far ahead the booking page lists lessons. A lesson further out is not on sale online, by id either. */
+const BOOK_AHEAD_DAYS = 45;
+
+/**
+ * Why one student does not fit one lesson online, in words for the guest, or null when they fit (2026.11.11). Checks the
+ * student's age on the lesson day, their discipline, and their level: the level they picked, the one their placement
+ * answers point to, or the old four words (which fit when any level in that band fits). Used by every online path when
+ * the request is made and again when it is confirmed (lib/onlinesale.js confirmRequest).
+ */
+function misfit(session, st) {
+  const day = String(session.starts_at).slice(0, 10);
+  const name = st.first_name || 'This student';
+  const age = st.date_of_birth ? ageOn(st.date_of_birth, day) : null;
+  if (age !== null && !fits(session, { age })) return `${name} is ${age}, and that lesson is for ${agesWords(session.age_min, session.age_max).toLowerCase()}. Pick another lesson.`;
+  if (st.discipline && !fits(session, { discipline: st.discipline })) return `${name} is booked to ${st.discipline}, and that lesson is a ${session.discipline} lesson. Pick another lesson.`;
+  const level = Number(st.level || st.placement_level) || null;
+  const band = !level && st.ability_level ? L.fromLegacy(st.ability_level) : null;
+  let ok = true;
+  if (level) ok = L.fits(level, session.level_min, session.level_max);
+  else if (band) { ok = false; for (let n = band[0]; n <= band[1]; n++) if (L.fits(n, session.level_min, session.level_max)) ok = true; }
+  if (!ok) return `${name} is at ${level ? `level ${level}` : String(st.ability_level).replace('_', ' ')}, and that lesson is for ${L.range(session.level_min, session.level_max).toLowerCase()}. Pick another lesson.`;
+  return null;
+}
 const agesWords = (min, max) => (min != null && max != null ? `Ages ${min} to ${max}` : min != null ? `Ages ${min} and up` : max != null ? `Ages up to ${max}` : 'All ages');
 
 // ---------------------------------------------------------------- after a request becomes bookings
@@ -630,7 +653,7 @@ async function followups(base) {
 }
 
 module.exports = {
-  FAMILY_DEFAULTS, familySchema, familySettings, saveFamilySettings, DEFAULT_TIP_POLICY, productExtras, fits, agesWords, afterConfirm, extraLine, priceExtras,
+  FAMILY_DEFAULTS, familySchema, familySettings, saveFamilySettings, DEFAULT_TIP_POLICY, productExtras, fits, misfit, BOOK_AHEAD_DAYS, agesWords, afterConfirm, extraLine, priceExtras,
   fulfilBasket, handleWebhook, markTipPaid, checkTip, bookingByToken, plusMinutes, checkinOpen, moveChoices, heldSpots, policyNow, progressCard, nextSteps,
   familyView, updateDetails, moveBooking, cancelBooking, followups, firstOf, seasonFor,
 };

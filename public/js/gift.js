@@ -27,21 +27,34 @@ async function reveal() {
   box.addEventListener('click', () => { box.classList.add('open'); setTimeout(() => { box.hidden = true; inside.hidden = false; inside.querySelector('h2').focus(); }, 650); });
   const what = [...g.includes, g.amount_cents ? `${money(g.amount_cents)} to spend` : null].filter(Boolean);
   const done = (x) => h('div', { class: 'stack' }, h('p', { class: 'gift-code-label' }, 'Your gift code'), h('p', { class: 'gift-code' }, x.code),
-    h('p', null, `Worth ${money(x.balance_cents)}. Show this code at the ticket window, or tell them it is a gift experience. It is in your account too.`),
+    h('p', null, `Worth ${money(x.balance_cents)}. Show this code at the ticket window, or tell them it is a gift experience. It is in ${x.parent ? 'the parent\'s' : 'your'} account too.`),
     h('a', { class: 'btn primary', href: x.account }, 'Open my account'));
   const f = h('input', { id: 'g-f', autocomplete: 'given-name', maxlength: 60, required: true });
   const l = h('input', { id: 'g-l', autocomplete: 'family-name', maxlength: 60, required: true });
   const b = h('input', { id: 'g-b', type: 'date' });
   const msg = h('p', { role: 'alert', class: 'error-box', hidden: true });
   const go = h('button', { type: 'submit', class: 'btn primary big' }, 'Add it to my account');
+  // Under 13 (2026.11.11): a parent or guardian adds the gift to their own account and agrees to us keeping the child's
+  // name and birthday. The sign-in link goes to the parent, never to the child.
+  const pf = h('input', { id: 'g-pf', autocomplete: 'off', maxlength: 60 });
+  const pl = h('input', { id: 'g-pl', autocomplete: 'off', maxlength: 60 });
+  const pe = h('input', { id: 'g-pe', type: 'email', autocomplete: 'off', maxlength: 255 });
+  const pc = h('input', { id: 'g-pc', type: 'checkbox' });
+  const parentBox = h('fieldset', { class: 'stack', hidden: true }, h('legend', null, 'A parent or guardian'),
+    h('p', { class: 'small' }, 'This gift is for someone under 13, so a parent or guardian adds it to their own account. We send the sign-in link to the parent.'),
+    h('div', { class: 'gift-cols' }, lab('g-pf', 'Parent first name', pf), lab('g-pl', 'Parent last name', pl), lab('g-pe', 'Parent email', pe)),
+    h('label', { class: 'check-row', for: 'g-pc' }, pc, h('span', null, 'I am their parent or guardian, and I agree to the mountain keeping their name and birthday for this gift.')));
+  const under13 = () => { if (!b.value) return false; const d = new Date(`${b.value}T12:00:00Z`); const n = new Date(); let a = n.getFullYear() - d.getUTCFullYear(); if (n.getMonth() < d.getUTCMonth() || (n.getMonth() === d.getUTCMonth() && n.getDate() < d.getUTCDate())) a -= 1; return a < 13; };
+  b.addEventListener('change', () => { parentBox.hidden = !under13(); });
   const form = h('form', { class: 'stack', novalidate: true }, h('p', null, 'Add it to your account to keep it safe. We send you a sign-in link.'),
-    h('div', { class: 'gift-cols' }, lab('g-f', 'First name', f), lab('g-l', 'Last name', l), lab('g-b', 'Birthday (optional, sets the ticket price)', b)), msg, go);
+    h('div', { class: 'gift-cols' }, lab('g-f', 'First name', f), lab('g-l', 'Last name', l), lab('g-b', 'Birthday (optional, sets the ticket price)', b)), parentBox, msg, go);
   const slot = h('div', { class: 'stack', 'aria-live': 'polite' }, g.redeemed ? done(g) : form);
   form.addEventListener('submit', async (e) => {
     e.preventDefault(); msg.hidden = true;
     if (!f.value.trim() || !l.value.trim()) { msg.textContent = 'Add your first and last name.'; msg.hidden = false; return; }
     go.disabled = true;
-    try { const x = await call('POST', `/gift/${encodeURIComponent(token)}/redeem`, { first_name: f.value.trim(), last_name: l.value.trim(), ...(b.value ? { date_of_birth: b.value } : {}) }); clear(slot).append(done(x)); } catch (ex) { msg.textContent = ex.message; msg.hidden = false; go.disabled = false; }
+    const parent = under13() ? { parent_first_name: pf.value.trim() || undefined, parent_last_name: pl.value.trim() || undefined, parent_email: pe.value.trim() || undefined, parent_consent: pc.checked } : {};
+    try { const x = await call('POST', `/gift/${encodeURIComponent(token)}/redeem`, { first_name: f.value.trim(), last_name: l.value.trim(), ...(b.value ? { date_of_birth: b.value } : {}), ...parent }); clear(slot).append(done(x)); } catch (ex) { msg.textContent = ex.message; msg.hidden = false; go.disabled = false; }
   });
   inside.append(h('p', { class: 'gift-eyebrow' }, g.mountain), h('h2', { tabindex: '-1' }, g.theme), h('p', { class: 'gift-from' }, `For ${g.recipient_name}, from ${g.from_name}`),
     g.message ? h('blockquote', { class: 'gift-msg' }, g.message) : null,

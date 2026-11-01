@@ -242,7 +242,7 @@ async function suggestSplit(db, tenantId, lineupId, { from = 'checked_in' } = {}
   // instructors: keep the class's own when cleared; fill the rest from the highest class down with the least cleared fit
   const pool = await teachers(db, tenantId);
   const taken = new Set(classes.concat(empty).map((c) => c.instructor_id).filter(Boolean));
-  const when = { discipline: b.lineup.discipline, kids: b.lineup.kids, startsAt: tmpl.starts_at, endsAt: tmpl.ends_at };
+  const when = { discipline: b.lineup.discipline, kids: b.lineup.kids, startsAt: tmpl.starts_at, endsAt: tmpl.ends_at, certIds: tmpl.required_certification_id ? [tmpl.required_certification_id] : [] };
   const capOf = (t) => Number(b.lineup.discipline === 'snowboard' ? t.snowboard_level_max : t.ski_level_max) || 10;
   for (const c of [...classes].sort((x, y) => y.level_max - x.level_max)) {
     if (c.instructor_id) {
@@ -299,6 +299,10 @@ async function moveBooking(conn, req, bookingId, toSessionId, { reason = null, i
   if (String(to.starts_at).slice(0, 10) !== String(from.starts_at).slice(0, 10)) throw bad('Move a student to a class on the same day. To change the day, use the family page or cancel and book again.');
   const clash = await studentClash(conn, tenantId, b.person_id, to.starts_at, to.ends_at, { ignoreSessionId: from.id, lock: true });
   if (clash) throw conflict(clashWords(clash));
+  // The class takes this student's age and discipline (2026.11.11). The level is the staff's call at the lineup.
+  const pe = await one(conn, 'SELECT first_name, date_of_birth FROM people WHERE tenant_id = ? AND id = ?', [tenantId, b.person_id]);
+  const why = pe && require('./lessonfamily').misfit(to, { first_name: pe.first_name, date_of_birth: pe.date_of_birth ? String(pe.date_of_birth instanceof Date ? pe.date_of_birth.toISOString() : pe.date_of_birth).slice(0, 10) : null, discipline: from.discipline });
+  if (why) throw conflict(why.replace(' Pick another lesson.', ' Pick another class.'));
   // On the day, at the lineup: only the students in the class count (lib/lessonrules.spotsLeft, under the lesson lock).
   const { booked: n } = await spotsLeft(conn, tenantId, to, { holds: false });
   let over = false;
@@ -370,10 +374,16 @@ async function applySplit(conn, req, lineupId, classes, { isManager = false } = 
   const moves = [];
   const target = [];
   for (const c of classes) {
-    if (c.instructor_id) {
-      const t = (await teachers(conn, tenantId)).find((x) => x.id === c.instructor_id);
+    // The instructor the class will have and the levels it will have, as saved below (2026.11.11): a class that keeps its
+    // instructor or its levels is checked as it ends up, with the lesson's required certification.
+    const own = c.session_id ? sessions.find((x) => x.id === c.session_id) : null;
+    const staffId = c.instructor_id === undefined ? (own ? own.instructor_id : null) : c.instructor_id;
+    const levelMax = c.level_max ?? (own ? own.level_max : null);
+    const cert = (own || tmpl).required_certification_id;
+    if (staffId) {
+      const t = (await teachers(conn, tenantId)).find((x) => x.id === staffId);
       if (!t) throw bad('That instructor is not an active instructor');
-      const why = await teacherProblem(conn, tenantId, t, { discipline: tmpl.discipline, levelMax: c.level_max, kids, startsAt: tmpl.starts_at, endsAt: tmpl.ends_at, ignoreLessonId: c.session_id || null });
+      const why = await teacherProblem(conn, tenantId, t, { discipline: tmpl.discipline, levelMax, kids, startsAt: tmpl.starts_at, endsAt: tmpl.ends_at, ignoreLessonId: c.session_id || null, certIds: cert ? [cert] : [] });
       if (why) throw conflict(`${t.first_name} ${t.last_name} cannot take this class: ${why}`);
     }
     let sid = c.session_id;

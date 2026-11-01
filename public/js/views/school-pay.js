@@ -7,7 +7,7 @@
 // Settings, Ski school: Pay (how the school pays), Pay rates, Privates online (the lengths sold on /private/<mountain>).
 // payLine(lesson) and myDayTop(panel) are used by the instructor's My day (school-myday.js).
 import { get, post, patch, del, download } from '../api.js';
-import { h, clear, ctx, can, schoolCan, table, state, input, select, field, button, toast, formDialog, dialog, val, money, toCents, centsToInput,
+import { h, clear, ctx, can, schoolCan, isManager, table, state, input, select, field, button, toast, formDialog, dialog, val, money, toCents, centsToInput,
   todayStr, addDays, weekStart, fmtDate, fmtTime, fmtRange, label, empty, errorBox, loading, confirmDialog, fail, appendAll } from '../ui.js';
 
 const KINDS = [['group', 'Group lesson'], ['semi_private', 'Semi-private'], ['private', 'Private'], ['hourly', 'Hourly'], ['program', 'Program meeting']];
@@ -370,8 +370,12 @@ async function paySettings(panel) {
   const accept = select([[30, '30 minutes'], [60, '1 hour'], [120, '2 hours'], [240, '4 hours'], [480, '8 hours'], [1440, '1 day']].map(([v, t]) => [v, t]), s.private_accept_minutes, { name: 'private_accept_minutes' });
   if (![30, 60, 120, 240, 480, 1440].includes(Number(s.private_accept_minutes))) accept.append(h('option', { value: s.private_accept_minutes, selected: true }, `${s.private_accept_minutes} minutes`));
   const decline = select([['offer_other', 'Offer the family another instructor who is free then, or a full refund'], ['refund', 'Refund the family in full straight away']], s.private_decline, { name: 'private_decline' });
+  // How instructors are paid: owners and managers only (a ski school director sees it, and changes the rest).
+  const payLocked = !isManager();
+  for (const el of [mode, lineup, lineupMin, bonus]) el.disabled = payLocked;
   const form = h('form', { class: 'stack', novalidate: true },
     h('section', { class: 'panel stack' }, h('h2', null, 'How instructors are paid'),
+      payLocked ? h('p', { class: 'muted small' }, 'Only an owner or manager can change how instructors are paid.') : null,
       field('Pay', mode, 'Set the amounts in Pay rates. Instructors see their pay under each lesson on My day.'),
       h('label', { class: 'check' }, lineup, ' Pay lineup time before group lessons'),
       field('Lineup minutes', lineupMin, 'Paid at the hourly rate, once per start time. Not added when the instructor is paid from the time card.'),
@@ -385,7 +389,7 @@ async function paySettings(panel) {
     const cents = toCents(bonus.value || '0');
     if (cents === null) { fail(new Error('Write the request bonus as an amount, such as 5.00')); return; }
     try {
-      await patch('/skischool/settings', { pay_mode: mode.value, lineup_paid: lineup.checked, lineup_minutes: Number(lineupMin.value) || 0, request_bonus_cents: cents, private_accept_minutes: Number(accept.value), private_decline: decline.value });
+      await patch('/skischool/settings', { ...(payLocked ? {} : { pay_mode: mode.value, lineup_paid: lineup.checked, lineup_minutes: Number(lineupMin.value) || 0, request_bonus_cents: cents }), private_accept_minutes: Number(accept.value), private_decline: decline.value });
       refreshPay();
       toast('Saved');
     } catch (err) { fail(err); }

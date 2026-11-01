@@ -23,6 +23,7 @@ const MAX_COPIES_PER_HOUR = 3; // signed copies emailed to one address in an hou
 /** The season after the given one ('2025-26' -> '2026-27'). */
 const nextSeason = (season) => seasonFor(`${Number(season.slice(0, 4)) + 1}-08-01`);
 
+const signature = require('./signature');
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const isPng = (dataUrl) => {
   const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
@@ -107,6 +108,7 @@ async function sign(conn, tenant, input, ctx) {
   if (!sameName(input.typed_name, fullName)) throw bad(`Type your full name exactly as above (${fullName}) to sign`);
   const sig = String(input.signature || '');
   if (!isPng(sig)) throw bad('Please sign in the box');
+  if (sig.length <= MAX_SIGNATURE_CHARS) { const drawn = signature.check(sig); if (!drawn.ok) throw bad(drawn.why); } // a real drawing, not a blank box (2026.11.11)
   if (sig.length > MAX_SIGNATURE_CHARS) throw bad('That signature is too detailed to save. Clear it and sign again.');
 
   await archive(conn, tenant.id, live.waiver_text, ctx.userId || null);
@@ -117,7 +119,9 @@ async function sign(conn, tenant, input, ctx) {
   // Without a record named at the counter, a person is matched only on first name, last name and date of birth together,
   // never on an email address alone (a family often shares one), and a match never has its contact details changed.
   const findOrMake = async (first, last, dob, contact, note = null, forceNew = false) => {
-    const hit = forceNew ? null : await one(conn, 'SELECT id, email FROM people WHERE tenant_id = ? AND first_name = ? AND last_name = ? AND date_of_birth = ? AND anonymised_at IS NULL ORDER BY id LIMIT 1 FOR UPDATE', [tenant.id, first, last, dob]);
+    // Online, a record a guest added on their household account is never matched (2026.11.11).
+    const own = counter ? '' : " AND (source IS NULL OR source <> 'household')";
+    const hit = forceNew ? null : await one(conn, `SELECT id, email FROM people WHERE tenant_id = ? AND first_name = ? AND last_name = ? AND date_of_birth = ? AND anonymised_at IS NULL${own} ORDER BY id LIMIT 1 FOR UPDATE`, [tenant.id, first, last, dob]);
     if (hit) return { id: hit.id, email: hit.email, created: false };
     // An address already on someone else's record stays theirs: the new record does not get it, and no copy is sent to it.
     const taken = contact && email ? await one(conn, 'SELECT id FROM people WHERE tenant_id = ? AND email = ? LIMIT 1', [tenant.id, email]) : null;
@@ -143,11 +147,13 @@ async function sign(conn, tenant, input, ctx) {
       const r = await findOrMake(clean(k.c.first_name), clean(k.c.last_name), k.dob, false);
       childId = r.id; created = r.created;
     }
-    // A child already on file with other guardians is only signed for by one of them. Anyone else's signing goes on a new
+    // A child already on file is only signed for online by one of their guardians. Anyone else's signing goes on a new
     // record (marked as a possible duplicate) for staff to check, rather than onto another family's child.
-    if (!(await mayActAsGuardian(conn, tenant.id, signer.id, childId, created))) {
+    // Online, a child already on file is only linked to a signer who is already their guardian (2026.11.11): a child with
+    // no guardian on file is not open to whoever knows the name and birth date.
+    if (!(await mayActAsGuardian(conn, tenant.id, signer.id, childId, created, { staff: counter }))) {
       if (counter) throw bad(`${k.name} has another parent or guardian on file. Check with them, or add this adult to the family first.`);
-      childId = (await findOrMake(clean(k.c.first_name), clean(k.c.last_name), k.dob, false, 'Added from an online waiver signed by someone who is not a guardian on file for a child with the same name and date of birth. Check before merging.', true)).id;
+      childId = (await findOrMake(clean(k.c.first_name), clean(k.c.last_name), k.dob, false, 'Added from an online waiver signed by someone who is not a guardian on file for a child with the same name and date of birth. Check who the parent is before merging.', true)).id;
     }
     await addLink(conn, tenant.id, signer.id, childId, 'guardian');
     if (!covered.some((x) => x.id === childId)) covered.push({ id: childId, name: k.name, relation: 'guardian' });

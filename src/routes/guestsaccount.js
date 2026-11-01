@@ -138,7 +138,12 @@ publicRouter.patch('/:slug/account/people/:id', validate(personSchema.partial())
   res.json({ ok: true });
 });
 
-/** Saved family: add a child (you are their parent or guardian) or a second adult (relation family, with their own email to sign in). */
+/**
+ * Saved family: add a child (you are their parent or guardian) or a second adult (relation family). A second adult's email
+ * is never put on their record from here: the person at that address gets a link to confirm it first (2026.11.11), so
+ * nobody can plant another parent's email in their own household and catch that family's next online purchase. Records
+ * made here are marked source 'household', and online sales never match them by name or email.
+ */
 publicRouter.post('/:slug/account/people', validate(personSchema.extend({ adult: z.boolean().default(false), email: z.string().trim().toLowerCase().email().max(255).optional() })), async (req, res) => {
   const { t, hh, email } = await householdFor(req);
   if (!hh.primary) throw conflict('Buy a ticket or register first, so we know who you are.');
@@ -146,15 +151,46 @@ publicRouter.post('/:slug/account/people', validate(personSchema.extend({ adult:
   const b = req.body;
   if (b.date_of_birth && b.date_of_birth > todayIn(t.timezone)) throw bad('A birthday cannot be in the future');
   if (!b.adult && !b.date_of_birth) throw bad('Add the birthday for a child: it sets their ticket price');
+  const invite = b.adult && b.email && b.email !== email ? b.email : null;
+  if (invite) {
+    const n = await one(pool, 'SELECT COUNT(*) AS n FROM household_invites WHERE tenant_id = ? AND invited_by = ? AND created_at > DATE_SUB(NOW(), INTERVAL 1 DAY)', [t.id, hh.primary]);
+    if (Number(n.n) >= 3) throw conflict('You have asked three people to join today. Please try again tomorrow.');
+  }
+  const token = invite ? crypto.randomBytes(24).toString('base64url') : null;
   const id = await tx(async (conn) => {
     const keys = FIELDS.filter((k) => b[k] !== undefined && b[k] !== null);
-    const [r] = await conn.query(`INSERT INTO people (tenant_id, ${keys.join(', ')}${b.adult && b.email ? ', email' : ''}, source) VALUES (?, ${keys.map(() => '?').join(', ')}${b.adult && b.email ? ', ?' : ''}, 'online')`,
-      [t.id, ...keys.map((k) => b[k]), ...(b.adult && b.email ? [b.email] : [])]);
+    const [r] = await conn.query(`INSERT INTO people (tenant_id, ${keys.join(', ')}, source) VALUES (?, ${keys.map(() => '?').join(', ')}, 'household')`, [t.id, ...keys.map((k) => b[k])]);
     await HH.link(conn, t.id, hh.primary, r.insertId, !b.adult);
-    await audit(conn, system(t.id), 'account_person_add', 'people', r.insertId, { adult: b.adult, email });
+    if (invite) await conn.query('INSERT INTO household_invites (tenant_id, person_id, invited_by, email, token_hash, expires_at) VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY))', [t.id, r.insertId, hh.primary, invite, PP.hash(token)]);
+    await audit(conn, system(t.id), 'account_person_add', 'people', r.insertId, { adult: b.adult, invited: Boolean(invite) });
     return r.insertId;
   });
-  res.status(201).json({ id });
+  res.status(201).json({ id, invite_sent: Boolean(invite && mailer.enabled()) });
+  // Sent after the reply. Nothing the guest typed goes into it: only the mountain's name and the link.
+  if (invite && mailer.enabled()) {
+    const link = `${baseUrl(req)}/family/${t.slug}?join=${token}`;
+    mailer.send({ tenantId: t.id, to: invite, fromName: t.name, subject: `Confirm your email for a family account at ${t.name}`, tag: 'household-invite',
+      text: [`Someone with an account at ${t.name} added this email address as a second adult in their family.`, '', 'If you know them and want to share one family account (tickets, passes and lessons for the same children), confirm here. The link works for 7 days:', link, '', 'If you do not know them, ignore this email. Nothing is shared until you confirm.', t.name].join('\n') }).catch(() => {});
+  }
+});
+
+/**
+ * The second adult confirms their email from the invite link: the email goes on their record and they are signed in.
+ * A link already used, expired or for a record that already has an email does nothing.
+ */
+publicRouter.post('/:slug/account/join', validate(z.object({ token: z.string().trim().min(20).max(100) })), async (req, res) => {
+  const t = await tenantFor(req.params.slug);
+  res.set('Cache-Control', 'no-store');
+  const out = await tx(async (conn) => {
+    const inv = await one(conn, 'SELECT * FROM household_invites WHERE tenant_id = ? AND token_hash = ? AND confirmed_at IS NULL AND expires_at > NOW() FOR UPDATE', [t.id, PP.hash(req.body.token)]);
+    if (!inv) throw bad('This link has expired or was already used. Ask the person who added you to add you again.');
+    const [u] = await conn.query("UPDATE people SET email = ? WHERE tenant_id = ? AND id = ? AND email IS NULL AND anonymised_at IS NULL", [inv.email, t.id, inv.person_id]);
+    if (!u.affectedRows) throw bad('This link no longer works. Ask the person who added you to add you again.');
+    await conn.query('UPDATE household_invites SET confirmed_at = NOW() WHERE id = ?', [inv.id]);
+    await audit(conn, system(t.id), 'account_adult_confirmed', 'people', inv.person_id, { invited_by: inv.invited_by });
+    return inv.email;
+  });
+  res.json({ session: await PP.newToken(t.id, out, 'session'), email: out });
 });
 
 // ---------------------------------------------------------------- one prefilled checkout, rebuy and renewal
@@ -233,7 +269,7 @@ publicRouter.post('/:slug/reload/check', validate(z.object({ card: z.string().tr
 });
 
 // ---------------------------------------------------------------- gift experiences
-const THEMES = ['First day on snow', 'A Saturday with Grandpa', 'A day on the mountain', 'Learn to ride'];
+const { THEMES, oneLine } = require('../lib/giftthemes');
 const INCLUDES = ['ticket', 'rental', 'lesson'];
 const giftHash = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
 
@@ -246,8 +282,8 @@ async function includesMenu(db, tenantId) {
   return Object.fromEntries(Object.entries({ ticket, rental, lesson }).filter(([, v]) => v && v.cents > 0));
 }
 const giftSchema = z.object({
-  theme: z.string().trim().min(1).max(80), includes: z.array(z.enum(INCLUDES)).max(3).default([]), amount_cents: z.number().int().min(0).max(100000).default(0),
-  from_name: z.string().trim().min(1).max(150), recipient_name: z.string().trim().min(1).max(150), recipient_email: z.string().trim().toLowerCase().email().max(255),
+  theme: z.enum(THEMES), includes: z.array(z.enum(INCLUDES)).max(3).default([]), amount_cents: z.number().int().min(0).max(100000).default(0),
+  from_name: z.string().transform((v) => oneLine(v)).pipe(z.string().min(1, 'Add who the gift is from')), recipient_name: z.string().transform((v) => oneLine(v)).pipe(z.string().min(1, 'Add who the gift is for')), recipient_email: z.string().trim().toLowerCase().email().max(255),
   message: z.string().trim().max(500).optional(), deliver_on: dateStr,
 });
 /** The value of a gift experience: its included items at today's adult price, plus any amount. */
@@ -287,7 +323,7 @@ async function deliver(t, g, base) {
 <tr><td style="padding:20px 24px;font:16px/1.5 Arial,Helvetica,sans-serif;color:#12303a">${esc(g.from_name)} sent you a gift from ${esc(t.name)}: <b>${esc(g.theme)}</b>.${g.message ? `<br><br><i>"${esc(g.message)}"</i>` : ''}</td></tr>
 <tr><td style="padding:0 24px 28px"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#1a5fb4" style="border-radius:6px"><a href="${esc(link)}" style="display:inline-block;padding:14px 22px;font:600 16px Arial,Helvetica,sans-serif;color:#ffffff;text-decoration:none">Open your gift</a></td></tr></table></td></tr>
 </table></td></tr></table></body></html>`;
-  const r = await mailer.send({ tenantId: t.id, to: g.recipient_email, fromName: t.name, subject: `${g.from_name} sent you a gift: ${g.theme}`, text, html, tag: 'gift-experience' });
+  const r = await mailer.send({ tenantId: t.id, to: g.recipient_email, fromName: t.name, subject: `${oneLine(g.from_name)} sent you a gift: ${oneLine(g.theme, 80)}`, text, html, tag: 'gift-experience' });
   if (!r.ok) await pool.query('UPDATE gift_experiences SET delivered_at = NULL WHERE tenant_id = ? AND id = ?', [t.id, g.id]);
   return r.ok;
 }
@@ -317,30 +353,57 @@ publicRouter.get('/:slug/gift/:token', async (req, res) => {
  * Redeems the gift once: the person receiving it joins (or starts) their household account with the email it was sent
  * to, the gift card becomes theirs, and the page shows the code to use at the window. A second try says it is done.
  */
-publicRouter.post('/:slug/gift/:token/redeem', validate(z.object({ first_name: z.string().trim().min(1).max(60), last_name: z.string().trim().min(1).max(60), date_of_birth: dateStr.optional() })), async (req, res) => {
+publicRouter.post('/:slug/gift/:token/redeem', validate(z.object({
+  first_name: z.string().trim().min(1).max(60), last_name: z.string().trim().min(1).max(60), date_of_birth: dateStr.optional(),
+  parent_first_name: z.string().trim().min(1).max(60).optional(), parent_last_name: z.string().trim().min(1).max(60).optional(),
+  parent_email: z.string().trim().toLowerCase().email().max(255).optional(), parent_consent: z.boolean().optional(),
+})), async (req, res) => {
   const t = await tenantFor(req.params.slug);
   res.set('Cache-Control', 'no-store');
   const g0 = await giftByToken(t, req.params.token);
+  const b = req.body;
+  // Under 13 by the birth date entered (COPPA, 2026.11.11): the account is the parent's, with the child as a family
+  // member, and the parent gives consent here. The child's own email is never kept and never written to.
+  const age = b.date_of_birth ? require('../lib/guesttypes').ageOn(b.date_of_birth, todayIn(t.timezone)) : null;
+  const child = age !== null && age < 13;
+  if (child) {
+    if (!b.parent_first_name || !b.parent_last_name || !b.parent_email) throw bad('A parent or guardian adds a gift for someone under 13. Add their name and email.');
+    if (b.parent_email === String(g0.recipient_email).toLowerCase()) throw bad("Use the parent's or guardian's own email address.");
+    if (!b.parent_consent) throw bad('The parent or guardian needs to tick the box to agree.');
+  }
   const out = await tx(async (conn) => {
     const g = await one(conn, 'SELECT * FROM gift_experiences WHERE tenant_id = ? AND id = ? FOR UPDATE', [t.id, g0.id]);
     if (g.redeemed_at) throw conflict('This gift has already been opened and added to an account');
-    let p = await one(conn, 'SELECT id FROM people WHERE tenant_id = ? AND LOWER(email) = ? AND first_name = ? AND last_name = ? AND anonymised_at IS NULL ORDER BY id LIMIT 1', [t.id, g.recipient_email, req.body.first_name, req.body.last_name]);
-    if (!p) {
-      const [r] = await conn.query("INSERT INTO people (tenant_id, first_name, last_name, email, date_of_birth, source) VALUES (?, ?, ?, ?, ?, 'online')", [t.id, req.body.first_name, req.body.last_name, g.recipient_email, req.body.date_of_birth || null]);
-      p = { id: r.insertId };
+    let p;
+    if (child) {
+      // The parent: matched on their own email and name (never a record another guest added to their household), else new.
+      p = await one(conn, "SELECT id FROM people WHERE tenant_id = ? AND LOWER(email) = ? AND first_name = ? AND last_name = ? AND anonymised_at IS NULL AND (source IS NULL OR source <> 'household') ORDER BY id LIMIT 1", [t.id, b.parent_email, b.parent_first_name, b.parent_last_name]);
+      if (!p) p = { id: (await conn.query("INSERT INTO people (tenant_id, first_name, last_name, email, source) VALUES (?, ?, ?, ?, 'online')", [t.id, b.parent_first_name, b.parent_last_name, b.parent_email]))[0].insertId };
+      const [k] = await conn.query("INSERT INTO people (tenant_id, first_name, last_name, date_of_birth, source) VALUES (?, ?, ?, ?, 'online')", [t.id, b.first_name, b.last_name, b.date_of_birth]);
+      await require('../lib/family').addLink(conn, t.id, p.id, k.insertId, 'guardian');
+      await audit(conn, system(t.id), 'parent_consent', 'people', k.insertId, { parent_id: p.id, gift_id: g.id, method: 'gift_redeem', under: 13 });
+    } else {
+      p = await one(conn, 'SELECT id FROM people WHERE tenant_id = ? AND LOWER(email) = ? AND first_name = ? AND last_name = ? AND anonymised_at IS NULL ORDER BY id LIMIT 1', [t.id, g.recipient_email, b.first_name, b.last_name]);
+      if (!p) {
+        const [r] = await conn.query("INSERT INTO people (tenant_id, first_name, last_name, email, date_of_birth, source) VALUES (?, ?, ?, ?, ?, 'online')", [t.id, b.first_name, b.last_name, g.recipient_email, b.date_of_birth || null]);
+        p = { id: r.insertId };
+      }
     }
     await conn.query('UPDATE gift_experiences SET redeemed_at = UTC_TIMESTAMP(), redeemed_person_id = ? WHERE tenant_id = ? AND id = ?', [p.id, t.id, g.id]);
-    if (g.gift_card_id) await conn.query('UPDATE gift_cards SET recipient_name = ? WHERE tenant_id = ? AND id = ?', [`${req.body.first_name} ${req.body.last_name}`, t.id, g.gift_card_id]);
+    if (g.gift_card_id) await conn.query('UPDATE gift_cards SET recipient_name = ? WHERE tenant_id = ? AND id = ?', [`${b.first_name} ${b.last_name}`, t.id, g.gift_card_id]);
     await audit(conn, system(t.id), 'gift_redeem', 'gift_experiences', g.id, { person_id: p.id });
     return p.id;
   });
-  // A sign-in link to the new account, so the person receiving the gift can see it there.
+  // A sign-in link to the account: the parent's for a child under 13, otherwise the person receiving the gift.
   if (mailer.enabled()) {
-    const token = await PP.newToken(t.id, g0.recipient_email, 'link');
-    await mailer.send({ tenantId: t.id, to: g0.recipient_email, fromName: t.name, subject: `Your account at ${t.name}`, tag: 'gift-account',
-      text: [`Hi ${req.body.first_name},`, '', `Your gift is in your account at ${t.name}. Sign in here (the link works once, for 30 minutes):`, `${baseUrl(req)}/family/${t.slug}?t=${token}`, '', t.name].join('\n') }).catch(() => {});
+    const to = child ? b.parent_email : g0.recipient_email;
+    const token = await PP.newToken(t.id, to, 'link');
+    const lines = child
+      ? [`Hi ${b.parent_first_name},`, '', `A gift from ${t.name} was added to your family account, and you agreed to us keeping your child's name and birthday for it.`, 'Sign in here (the link works once, for 30 minutes):', `${baseUrl(req)}/family/${t.slug}?t=${token}`, '', `If this was not you, call ${t.name}${t.phone ? ` on ${t.phone}` : ''} and we delete the child's details.`, t.name]
+      : [`Hi ${b.first_name},`, '', `Your gift is in your account at ${t.name}. Sign in here (the link works once, for 30 minutes):`, `${baseUrl(req)}/family/${t.slug}?t=${token}`, '', t.name];
+    await mailer.send({ tenantId: t.id, to, fromName: t.name, subject: `Your account at ${t.name}`, tag: 'gift-account', text: lines.join('\n') }).catch(() => {});
   }
-  res.json({ ...giftOut(t, await giftByToken(t, req.params.token)), person_id: undefined, joined: Boolean(out) });
+  res.json({ ...giftOut(t, await giftByToken(t, req.params.token)), person_id: undefined, joined: Boolean(out), parent: child });
 });
 
 /** The gift card balance page: a code in, the balance out. Rate limited with the rest of /public. */

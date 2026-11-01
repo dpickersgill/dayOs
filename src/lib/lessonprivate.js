@@ -352,6 +352,9 @@ async function accept(req, requestId, staffId, { byHand = false } = {}) {
     const st = parseStudents(r);
     const lv = st.map((s) => Number(s.level) || 1);
     const endsAt = plusMinutes(r.starts_at, r.minutes);
+    // Cleared for this lesson (2026.11.11): the discipline, the highest level and kids, as when the request was offered.
+    const prof = await one(conn, 'SELECT * FROM instructor_profiles WHERE tenant_id = ? AND staff_id = ?', [tenantId, staffId]);
+    if (!teaches(prof, r.discipline, Math.max(...lv), { kids: kidsIn(r) })) throw conflict(byHand ? 'That instructor is not cleared to teach this lesson (the discipline, the level or children). Pick another instructor.' : 'You are not cleared to teach this lesson');
     const problems = await staffProblems(conn, tenantId, { staffId, startsAt: r.starts_at, endsAt, skipAvailability: true });
     if (problems.length) throw conflict(byHand ? 'That instructor cannot take this lesson' : 'You cannot take this lesson', problems);
     const [ins] = await conn.query(`INSERT INTO lesson_sessions (tenant_id, product_id, discipline, ability_level, format, age_group, meeting_place, notes, starts_at, ends_at, capacity, instructor_id, level_min, level_max, origin)

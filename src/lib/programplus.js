@@ -215,13 +215,16 @@ async function endSession(tenantId, token) {
   await pool.query("UPDATE family_tokens SET expires_at = NOW() WHERE tenant_id = ? AND token_hash = ? AND kind = 'session'", [tenantId, hash(token)]);
 }
 
-/** The family behind an email: the adults with it, and every child linked to them as guardian or on a place they booked. */
+/**
+ * The family behind an email: the adults with it, and every child linked to them as guardian. Only a guardian link counts:
+ * the contact on a waitlist entry or a registration is never family by that alone (2026.11.11), so a stranger who joins a
+ * waitlist naming someone else's child sees nothing of the child.
+ */
 async function familyOf(db, tenantId, email) {
   const adults = (await rows(db, 'SELECT id, first_name, last_name FROM people WHERE tenant_id = ? AND LOWER(email) = ? AND anonymised_at IS NULL', [tenantId, String(email).toLowerCase()]));
   if (!adults.length) return { adults: [], ids: [] };
   const aIds = adults.map((a) => a.id);
-  const kids = await rows(db, `SELECT DISTINCT p.id FROM people p WHERE p.tenant_id = ? AND (p.id IN (SELECT member_id FROM person_links WHERE tenant_id = ? AND adult_id IN (?) AND relation = 'guardian')
-    OR p.id IN (SELECT person_id FROM program_enrollments WHERE tenant_id = ? AND guardian_id IN (?)))`, [tenantId, tenantId, aIds, tenantId, aIds]);
+  const kids = await rows(db, "SELECT DISTINCT member_id AS id FROM person_links WHERE tenant_id = ? AND adult_id IN (?) AND relation = 'guardian'", [tenantId, aIds]);
   return { adults, ids: [...new Set([...aIds, ...kids.map((k) => k.id)])], adultIds: aIds };
 }
 

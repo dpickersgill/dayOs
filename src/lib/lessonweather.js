@@ -13,7 +13,7 @@ const { pool, tx, one, rows } = require('../db');
 const { bad, conflict, notFound } = require('./errors');
 const { audit } = require('./audit');
 const { addDays, todayIn, nowIn, seasonFor } = require('./util');
-const { staffProblems } = require('./workforce');
+const { staffProblems, instructorBusy } = require('./workforce');
 const { studentClash, clashWords, lockStudents, spotsLeft, moveBookingRow } = require('./lessonrules');
 const { ON_FILE } = require('./waivers');
 const levels = require('./levels');
@@ -148,6 +148,46 @@ async function meetingFamilies(db, tenantId, m) {
 // ---------------------------------------------------------------- preview
 const scopeSchemaKeys = ['date', 'from_time', 'to_time'];
 
+/**
+ * A delay moves lessons and meetings later; it must not push one into another (2026.11.11). Shifts them in this
+ * transaction, then checks each moved lesson's students and instructor, and each moved meeting's children and coach,
+ * against everything else at the new times. Returns [{ who, what }] in words; empty when nothing overlaps.
+ */
+async function shiftForDelay(conn, tenantId, lessons, meetings, d) {
+  for (const s of lessons) await conn.query('UPDATE lesson_sessions SET starts_at = ?, ends_at = ?, delay_minutes = delay_minutes + ? WHERE tenant_id = ? AND id = ?', [plusMinutes(s.starts_at, d), plusMinutes(s.ends_at, d), d, tenantId, s.id]);
+  for (const m of meetings) await conn.query('UPDATE program_sessions SET starts_at = ?, ends_at = ? WHERE tenant_id = ? AND id = ?', [plusMinutes(m.starts_at, d), plusMinutes(m.ends_at, d), tenantId, m.id]);
+  const problems = [];
+  for (const s of lessons) {
+    const from = plusMinutes(s.starts_at, d); const to = plusMinutes(s.ends_at, d);
+    const what = `${s.product} at ${clock(from)}`;
+    for (const f of await lessonFamilies(conn, tenantId, s.id)) {
+      const clash = await studentClash(conn, tenantId, f.person_id, from, to, { ignoreSessionId: s.id });
+      if (clash) problems.push({ who: `${f.first_name} ${f.last_name}`, what: `${what}: ${clashWords(clash)}` });
+    }
+    if (s.instructor_id) {
+      const busy = await instructorBusy(conn, tenantId, s.instructor_id, from, to, { ignoreLessonId: s.id });
+      if (busy) {
+        const st = await one(conn, 'SELECT p.first_name, p.last_name FROM staff x JOIN people p ON p.tenant_id = x.tenant_id AND p.id = x.person_id WHERE x.tenant_id = ? AND x.id = ?', [tenantId, s.instructor_id]).catch(() => null);
+        problems.push({ who: st ? `${st.first_name} ${st.last_name}` : 'The instructor', what: `${what}: ${busy}` });
+      }
+    }
+  }
+  for (const m of meetings) {
+    const from = plusMinutes(m.starts_at, d); const to = plusMinutes(m.ends_at, d);
+    const what = `${m.program} at ${clock(from)}`;
+    const kids = m.group_id ? await rows(conn, "SELECT e.person_id, p.first_name, p.last_name FROM program_enrollments e JOIN people p ON p.tenant_id = e.tenant_id AND p.id = e.person_id WHERE e.tenant_id = ? AND e.group_id = ? AND e.status = 'enrolled'", [tenantId, m.group_id]) : [];
+    for (const k of kids) {
+      const l = await one(conn, `SELECT s.starts_at, pr.name FROM lesson_bookings b JOIN lesson_sessions s ON s.tenant_id = b.tenant_id AND s.id = b.session_id JOIN products pr ON pr.tenant_id = s.tenant_id AND pr.id = s.product_id
+        WHERE b.tenant_id = ? AND b.person_id = ? AND b.status IN ('booked','attended') AND s.status <> 'cancelled' AND s.starts_at < ? AND s.ends_at > ? LIMIT 1`, [tenantId, k.person_id, to, from]);
+      if (l) problems.push({ who: `${k.first_name} ${k.last_name}`, what: `${what}: also in ${l.name} at ${clock(l.starts_at)}` });
+    }
+    const coach = m.coach_staff_id ? await instructorBusy(conn, tenantId, m.coach_staff_id, from, to, { ignoreProgramSessionId: m.id, ignoreGroupId: m.group_id || 0 }) : null;
+    if (coach) problems.push({ who: 'The coach', what: `${what}: ${coach}` });
+  }
+  return problems;
+}
+const delayWords = (problems) => `This delay would put ${problems.length === 1 ? 'someone' : `${problems.length} people`} in two places at once: ${problems.slice(0, 5).map((p) => `${p.who} (${p.what})`).join('; ')}${problems.length > 5 ? '; and more' : ''}. Choose a shorter delay or a wider time window, or move them first.`;
+
 /** What a call would do, in plain numbers: lessons, meetings, families, how they paid, and the instructors touched. */
 async function preview(tenantId, b) {
   const lessons = await lessonsIn(pool, tenantId, b);
@@ -171,7 +211,14 @@ async function preview(tenantId, b) {
   const instructors = new Set(lessons.filter((s) => s.instructor_id).map((s) => s.instructor_id));
   meetings.filter((m) => m.coach_staff_id).forEach((m) => instructors.add(m.coach_staff_id));
   const set = await settingsOf(pool, tenantId);
+  // A delay is tried in a transaction that is always rolled back, to list who would end up in two places at once.
+  let clashes = [];
+  if (b.action === 'delay' && b.delay_minutes > 0) {
+    const ROLLBACK = new Error('preview only');
+    await tx(async (conn) => { clashes = await shiftForDelay(conn, tenantId, await lessonsIn(conn, tenantId, b, true), await meetingsIn(conn, tenantId, b, true), b.delay_minutes); throw ROLLBACK; }).catch((e) => { if (e !== ROLLBACK) throw e; });
+  }
   return {
+    clashes, clash_words: clashes.length ? delayWords(clashes) : null,
     lessons: lessons.map((s) => ({ id: s.id, starts_at: s.starts_at, ends_at: s.ends_at, product: s.product, discipline: s.discipline, level_words: levels.range(s.level_min, s.level_max), booked: Number(s.booked), instructor_id: s.instructor_id, delay_minutes: s.delay_minutes, students: s.students })),
     meetings: meetings.map((m) => ({ id: m.id, starts_at: m.starts_at, ends_at: m.ends_at, program: m.program, term: m.term, enrolled: Number(m.enrolled), makeup_date: m.makeup ? String(m.makeup.starts_at).slice(0, 10) : null })),
     counts: { lessons: lessons.length, meetings: meetings.length, families: families.size, students, program_kids: programKids, paid_online: online, paid_desk: desk, on_package: pack, unpaid, lesson_value_cents: value, program_value_cents: programValue, instructors: instructors.size },
@@ -229,8 +276,10 @@ async function apply(conn, tenantId, b, req) {
 
   if (b.action === 'delay') {
     const d = b.delay_minutes;
+    // Nobody ends up in two places at once: the whole call is refused (and rolled back) if the delay would do that.
+    const clashes = await shiftForDelay(conn, tenantId, lessons, meetings, d);
+    if (clashes.length) throw conflict(delayWords(clashes), { clashes });
     for (const s of lessons) {
-      await conn.query('UPDATE lesson_sessions SET starts_at = ?, ends_at = ?, delay_minutes = delay_minutes + ? WHERE tenant_id = ? AND id = ?', [plusMinutes(s.starts_at, d), plusMinutes(s.ends_at, d), d, tenantId, s.id]);
       for (const f of await lessonFamilies(conn, tenantId, s.id)) {
         out.messages.push({ to: { email: f.contact_email || f.email, phone: f.contact_phone || f.phone, textOk: Boolean(f.text_ok) }, subject: `${f.first_name}'s lesson starts ${d} minutes later`,
           text: [`Hello,`, '', `Because of the weather, ${f.first_name}'s ${s.product} lesson today starts ${d} minutes later, at ${clock(plusMinutes(s.starts_at, d))} instead of ${clock(s.starts_at)}.`, b.reason ? `Why: ${b.reason}` : null, s.meeting_place ? `Same meeting place: ${s.meeting_place}.` : null, '', 'See you soon,', t.name].filter((x) => x !== null).join('\n'),
@@ -239,7 +288,6 @@ async function apply(conn, tenantId, b, req) {
       staffNote(s.instructor_id, `${s.product} now ${clock(plusMinutes(s.starts_at, d))} (was ${clock(s.starts_at)})`);
     }
     for (const m of meetings) {
-      await conn.query('UPDATE program_sessions SET starts_at = ?, ends_at = ? WHERE tenant_id = ? AND id = ?', [plusMinutes(m.starts_at, d), plusMinutes(m.ends_at, d), tenantId, m.id]);
       for (const f of await meetingFamilies(conn, tenantId, m)) {
         out.messages.push({ program: true, to: { email: f.email, phone: f.phone, textOk: false }, subject: `${m.program} starts ${d} minutes later today`,
           text: [`Hi ${f.to_first},`, '', `Because of the weather, ${m.program} today starts ${d} minutes later, at ${clock(plusMinutes(m.starts_at, d))}. Same place.`, b.reason ? `Why: ${b.reason}` : null, '', t.name].filter((x) => x !== null).join('\n'), tag: 'program-delay' });

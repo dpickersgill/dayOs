@@ -5,7 +5,7 @@ const express = require('express');
 const { pool, tx, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
 const { z, validate, paramId } = require('../lib/util');
-const { notFound } = require('../lib/errors');
+const { notFound, forbidden } = require('../lib/errors');
 const SA = require('../lib/schoolaccess');
 const { audit } = require('../lib/audit');
 const S = require('../lib/schoolsettings');
@@ -18,6 +18,13 @@ router.get('/settings', requireRole('instructor', 'manager', 'counter'), async (
 });
 
 router.patch('/settings', SA.school('director'), validate(S.schema), async (req, res) => {
+  // How instructors are paid is for owners and managers only (2026.11.11): a ski school director is paid by these
+  // settings too, so they cannot change them. A form that sends them back unchanged is fine.
+  if (!['owner', 'manager'].includes(req.auth.role)) {
+    const now = await S.get(pool, req.auth.tenantId);
+    const changed = S.PAY_FIELDS.filter((k) => req.body[k] !== undefined && String(req.body[k]) !== String(now[k]));
+    if (changed.length) throw forbidden('Only an owner or manager can change how instructors are paid');
+  }
   await tx(async (conn) => {
     await S.save(conn, req.auth.tenantId, req.body);
     await audit(conn, req, 'update', 'school_settings', req.auth.tenantId, req.body);

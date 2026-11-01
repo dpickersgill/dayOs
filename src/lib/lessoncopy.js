@@ -8,8 +8,8 @@ const { tx, one, rows, pool } = require('../db');
 const { bad, conflict, notFound } = require('./errors');
 const { audit } = require('./audit');
 const { addDays } = require('./util');
-const { staffProblems } = require('./workforce');
 const levels = require('./levels');
+const { instructorFit, NOT_SET_UP } = require('./school');
 
 const MAX_TARGETS = 30;
 const MAX_LESSONS = 400;
@@ -22,9 +22,20 @@ async function dayLessons(db, tenantId, date) {
   return list.map(asTemplate);
 }
 
-/** One lesson as a template row. A lesson that ran past midnight is not expected; the end time is kept as it is. */
+/** Minutes from one 'YYYY-MM-DD HH:MM[:SS]' to another (wall clock; both are the mountain's local time). */
+const minutesBetween = (a, b) => Math.round((Date.parse(`${String(b).slice(0, 16).replace(' ', 'T')}:00Z`) - Date.parse(`${String(a).slice(0, 16).replace(' ', 'T')}:00Z`)) / 60000);
+/** 'YYYY-MM-DD HH:MM:00' plus some minutes, on the wall clock. */
+const plusMinutes = (dt, m) => new Date(Date.parse(`${String(dt).slice(0, 16).replace(' ', 'T')}:00Z`) + m * 60000).toISOString().slice(0, 19).replace('T', ' ');
+/** How long a template row runs: its saved length, else from its times (an end at or before the start is the next day). */
+const lengthOf = (l) => {
+  if (Number(l.minutes) > 0) return Number(l.minutes);
+  const m = minutesBetween(`2000-01-01 ${l.start}`, `2000-01-01 ${l.end}`);
+  return m > 0 ? m : m + 24 * 60;
+};
+
+/** One lesson as a template row. Its length is kept too, so a lesson that runs past midnight ends the next day when copied. */
 const asTemplate = (s) => ({
-  start: hhmm(s.starts_at), end: hhmm(s.ends_at), product_id: s.product_id, product: s.product, discipline: s.discipline, ability_level: s.ability_level,
+  start: hhmm(s.starts_at), end: hhmm(s.ends_at), minutes: minutesBetween(s.starts_at, s.ends_at), product_id: s.product_id, product: s.product, discipline: s.discipline, ability_level: s.ability_level,
   level_min: s.level_min, level_max: s.level_max, age_min: s.age_min, age_max: s.age_max, age_group: s.age_group, format: s.format,
   capacity: s.capacity, meeting_place: s.meeting_place, notes: s.notes, instructor_id: s.instructor_id, required_certification_id: s.required_certification_id,
 });
@@ -57,21 +68,24 @@ async function plan(db, tenantId, { source, targets, with_instructors: withInstr
       const existing = await rows(db, "SELECT product_id, starts_at, discipline, level_min, level_max, age_min, age_max FROM lesson_sessions WHERE tenant_id = ? AND status <> 'cancelled' AND starts_at >= ? AND starts_at < ?",
         [tenantId, `${date} 00:00:00`, `${addDays(date, 1)} 00:00:00`]);
       const same = (l) => existing.some((e) => e.product_id === l.product_id && hhmm(e.starts_at) === l.start && e.discipline === l.discipline && (e.level_min || null) === (l.level_min || null) && (e.level_max || null) === (l.level_max || null) && (e.age_min || null) === (l.age_min || null) && (e.age_max || null) === (l.age_max || null));
-      for (const l of days[i]) out.push({ ...l, date, starts_at: `${date} ${l.start}:00`, ends_at: `${date} ${l.end}:00`, skip: same(l) ? 'Already on that day' : null, instructor_id: withInstructors ? l.instructor_id : null, instructor_problem: null });
+      for (const l of days[i]) out.push({ ...l, date, starts_at: `${date} ${l.start}:00`, ends_at: plusMinutes(`${date} ${l.start}:00`, lengthOf(l)), skip: same(l) ? 'Already on that day' : null, instructor_id: withInstructors ? l.instructor_id : null, instructor_problem: null });
     }
   }
   if (out.length > MAX_LESSONS) throw bad(`That would make ${out.length} lessons. Copy fewer days at once (at most ${MAX_LESSONS} lessons).`);
   return { label, lessons: out };
 }
 
-/** Checks each instructor on the plan the way assigning by hand does, counting the lessons the copy itself adds. */
+/**
+ * Checks each instructor on the plan the way assigning by hand does (lib/school.js instructorFit: a clash, a missing
+ * certification, availability, and cleared for the level, kids, adaptive and the discipline), counting the lessons the
+ * copy itself adds. "Not set up" (no teaching profile yet) stays soft, as when assigning by hand.
+ */
 async function checkInstructors(conn, tenantId, lessons) {
-  const profiles = new Map((await rows(conn, 'SELECT * FROM instructor_profiles WHERE tenant_id = ?', [tenantId])).map((p) => [p.staff_id, p]));
   const taken = [];
   for (const l of lessons) {
     if (l.skip || !l.instructor_id) continue;
-    let problems = await staffProblems(conn, tenantId, { staffId: l.instructor_id, certificationIds: l.required_certification_id ? [l.required_certification_id] : [], startsAt: l.starts_at, endsAt: l.ends_at });
-    if (!levels.instructorCovers(profiles.get(l.instructor_id), l.discipline, l.level_max)) problems = [...problems, `Not cleared to teach ${levels.range(l.level_min, l.level_max)}`];
+    const [fit] = await instructorFit(conn, tenantId, { ...l, id: null }, { onlyStaffId: l.instructor_id });
+    let problems = fit ? fit.problems.filter((x) => x !== NOT_SET_UP) : ['Not found'];
     if (taken.some((x) => x.id === l.instructor_id && x.s < l.ends_at && x.e > l.starts_at)) problems = [...problems, 'Teaching another copied lesson then'];
     if (problems.length) { l.instructor_problem = problems[0]; l.instructor_id = null; } else taken.push({ id: l.instructor_id, s: l.starts_at, e: l.ends_at });
   }
