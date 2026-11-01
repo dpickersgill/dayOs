@@ -5,7 +5,7 @@
 //   Managers set each lift's type and edit the mountain's own copy of each type's daily and weekly list.
 import { get, post, patch, put } from '../api.js';
 import { liftWord } from '../liftstatus.js';
-import { h, clear, isManager, input, select, field, button, toast, dialog, formDialog, table, state, empty, errorBox, fail, fmtDate, fmtTime, todayStr } from '../ui.js';
+import { h, clear, isManager, input, select, field, button, toast, dialog, formDialog, confirmDialog, table, state, empty, errorBox, fail, fmtDate, fmtTime, todayStr } from '../ui.js';
 
 const RESULT_WORD = { pass: 'Pass', fail: 'Fail', na: 'Not needed' };
 
@@ -90,7 +90,16 @@ export async function drawChecks(box) {
     let editor = null;
     const current = () => meta.types.find((t) => t.key === type.value).lists[kind.value];
     const draw = () => { editor = listEditor(current()); clear(slot).append(h('p', { class: 'muted small' }, current().custom ? 'Your mountain\'s own list.' : 'The built-in list. Your changes make it your mountain\'s own.'), editor.el); };
-    type.addEventListener('change', draw); kind.addEventListener('change', draw);
+    // Switching lift type or inspection with changes not saved asks first, instead of dropping them (2026.11.11).
+    let shown = [type.value, kind.value];
+    const switchTo = () => {
+      const go = () => { shown = [type.value, kind.value]; draw(); };
+      if (!editor || editor.value() === null) { go(); return; }
+      const want = [type.value, kind.value];
+      [type.value, kind.value] = shown;
+      confirmDialog('Switch without saving?', 'Your changes to this list are not saved. Switching drops them.', 'Switch and drop changes', () => { [type.value, kind.value] = want; go(); });
+    };
+    type.addEventListener('change', switchTo); kind.addEventListener('change', switchTo);
     const save = h('button', { type: 'button', class: 'btn primary' }, 'Save list');
     const dlg = dialog('Checklists by lift type', [
       h('p', { class: 'muted small' }, 'Start from the built-in list and make it match your manufacturer\'s manual, your own lift procedures and your state inspector\'s rules, which come first. Inspections already done keep the words they were done with.'),

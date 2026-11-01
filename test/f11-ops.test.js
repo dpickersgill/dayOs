@@ -400,3 +400,35 @@ test('INF-7: staging-db-user and db-runtime-user refuse a password on the comman
     assert.match(r.stderr, /stdin|never the command line/, script);
   }
 });
+
+// ---------------------------------------------------------------- suspicions found real (2026.11.11)
+test('Patrol case list pages past 500 with a total, so older cases can be reached', async () => {
+  const vals = Array.from({ length: 503 }, (_, i) => [A.id, `2026-01-01 08:00:00`, 'Lift 1', 'injury', `Case ${i}`]);
+  await pool.query('INSERT INTO incidents (tenant_id, occurred_at, location, category, summary) VALUES ?', [vals]);
+  const first = await api('GET', '/patrol/incidents', { token: A.owner });
+  assert.equal(first.status, 200, first.text);
+  assert.equal(first.body.data.length, 500); assert.equal(first.body.total, 503);
+  const next = await api('GET', '/patrol/incidents?offset=500', { token: A.owner });
+  assert.equal(next.body.data.length, 3); assert.equal(next.body.total, 503);
+  assert.ok(!next.body.data.some((x) => first.body.data.some((y) => y.id === x.id)), 'no case on two pages');
+  assert.match(read('public/js/views/patrol.js'), /Show more/);
+  await pool.query('DELETE FROM incidents WHERE tenant_id = ?', [A.id]);
+});
+
+test('addDays keeps years under 100; a shift from 9:00 to 9:00 is refused, not 24 hours; local-time job windows', () => {
+  const { addDays } = require('../src/lib/util');
+  assert.equal(addDays('0050-01-01', 1), '0050-01-02');
+  assert.equal(addDays('2026-12-31', 1), '2027-01-01');
+  assert.match(read('public/js/ui.js'), /setUTCFullYear\(y, m - 1, d \+ n\)/);
+  for (const f of ['public/js/views/workforce-shift.js', 'public/js/views/patrol-schedule.js']) {
+    const s = read(f);
+    assert.ok(!/to\.value <= from\.value/.test(s), `${f}: the same time is not overnight`);
+    assert.match(s, /to\.value === from\.value\) throw new Error\('The shift must end after it starts/);
+  }
+  assert.ok(!/starts_at >= NOW\(\)/.test(read('src/lib/workforce.js')), 'coachBusy uses the mountain\'s now');
+  assert.match(read('src/lib/programplus.js'), /BETWEEN DATE_SUB\(NOW\(\), INTERVAL 1 DAY\)/);
+  assert.match(read('public/js/views/calendar.js'), /Make a new link\?/);
+  assert.match(read('public/js/views/calendar.js'), /realDay\(hashParam\('day'\)\)/);
+  assert.match(read('public/js/views/lift-checks.js'), /Switch without saving\?/);
+  assert.match(read('public/css/app.css'), /@media \(hover: none\) \{\n  \.cell-add/);
+});

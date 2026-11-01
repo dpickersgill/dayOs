@@ -109,7 +109,8 @@ export const nowStamp = () => { const p = zoned({ second: '2-digit' }); return `
 
 export function addDays(date, n) {
   const [y, m, d] = date.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+  const dt = new Date(0); dt.setUTCFullYear(y, m - 1, d + n); // Date.UTC would read a year under 100 as 1900 plus it
+  return dt.toISOString().slice(0, 10);
 }
 export function weekStart(date) {
   const [y, m, d] = date.split('-').map(Number);

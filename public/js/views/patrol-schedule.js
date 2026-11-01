@@ -117,7 +117,7 @@ function shiftDialog({ shift, date, staffId, stations, onDone }) {
   const notes = input({ name: 'notes', maxlength: 200, value: editing ? shift.notes || '' : '' });
   const who = h('div', { class: 'cand-list', role: 'radiogroup', 'aria-label': 'Who is on this shift' });
   let chosen = editing ? Number(shift.staff_id || 0) : Number(staffId || 0);
-  const times = () => { const d = day.value; return [`${d}T${from.value}`, `${to.value <= from.value ? addDays(d, 1) : d}T${to.value}`]; };
+  const times = () => { const d = day.value; return [`${d}T${from.value}`, `${to.value < from.value ? addDays(d, 1) : d}T${to.value}`]; }; // the same time is not a 24-hour shift (2026.11.11)
   let token = 0;
   async function load() {
     const my = ++token;
@@ -142,6 +142,7 @@ function shiftDialog({ shift, date, staffId, stations, onDone }) {
     h('fieldset', { class: 'cand-box' }, h('legend', null, 'Who'), who),
     editing && shift.cover_status ? h('p', { class: 'cover-why' }, `${shift.name} has asked for cover on this shift (see the Cover tab). Putting someone else on it counts as covered; leaving it open or canceling it closes the request.`) : null,
     editing ? h('p', { class: 'muted small' }, shift.status === 'published' ? 'Published: anyone taken off, put on, or whose shift changes gets a message in their Inbox.' : 'A draft: patrollers see it once you publish.') : null), async () => {
+    if (to.value === from.value) throw new Error('The shift must end after it starts. Change Ends.');
     const [s, e] = times();
     const body = { starts_at: s, ends_at: e, station_id: station.value ? Number(station.value) : null, role_label: role.value.trim() || null, notes: notes.value.trim() || null, staff_id: chosen || null };
     if (editing) { await patch(`/patrol/schedule/${shift.id}`, body); toast('Patrol shift saved'); } else { await post('/patrol/schedule', body); toast('Patrol shift added as a draft'); }

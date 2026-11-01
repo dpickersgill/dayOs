@@ -3678,3 +3678,10 @@ button.fill-day:hover { border-color: var(--line-strong); }
 .discard-ask p { margin: 0 0 8px; font-weight: 600; }
 .discard-ask .row { display: flex; flex-wrap: wrap; gap: 8px; }
 .discard-ask .btn { min-height: 44px; }
+/* On a touch screen (iPad, phone) there is no hover: the schedule grid's "+" in each cell is always shown. */
+@media (hover: none) {
+  .cell-add { border-color: var(--line); color: var(--trail-blue); }
+}
+/* The weekly report's "needs attention" lines are sentences: they wrap at phone width instead of running 3 px off. */
+.bd-list .state { white-space: normal; align-items: flex-start; }
+.bd-list .state::before { margin-top: 0.3em; }

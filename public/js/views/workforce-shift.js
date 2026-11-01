@@ -24,14 +24,15 @@ export function shiftDialog({ shift, date, staffId, positions, onDone }) {
 
   const times = () => {
     const d = day.value;
-    const end = to.value <= from.value ? addDays(d, 1) : d;
+    // An end earlier than the start is the next morning; the same time is not a 24-hour shift (2026.11.11).
+    const end = to.value < from.value ? addDays(d, 1) : d;
     return [`${d}T${from.value}`, `${end}T${to.value}`];
   };
 
   let token = 0;
   async function loadCandidates() {
     const my = ++token;
-    overnight.hidden = !(to.value && from.value && to.value <= from.value);
+    overnight.hidden = !(to.value && from.value && to.value < from.value);
     if (!day.value || !from.value || !to.value) return;
     clear(who).append(h('p', { class: 'loading' }, 'Checking who can work it…'));
     const [s, e] = times();
@@ -73,6 +74,7 @@ export function shiftDialog({ shift, date, staffId, positions, onDone }) {
       : 'This shift is a draft. Staff see it once the week is published.') : null);
 
   const dlg = formDialog(editing ? `${shift.position}, ${dayLong(shift.starts_at.slice(0, 10))}` : 'Add a shift', fields, async () => {
+    if (to.value === from.value) throw new Error('The shift must end after it starts. Change Ends.');
     const [s, e] = times();
     const c = cands.find((x) => x.staff_id === chosen);
     const body = { position_id: Number(pos.value), starts_at: s, ends_at: e, notes: notes.value.trim() || (editing ? null : undefined), override_availability: Boolean(c && c.overridable) };

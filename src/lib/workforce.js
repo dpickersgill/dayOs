@@ -1,7 +1,7 @@
 'use strict';
 
 const { rows, one } = require('../db');
-const { weekdayOf } = require('./util');
+const { weekdayOf, nowIn } = require('./util');
 
 const datePart = (dt) => dt.slice(0, 10);
 const timePart = (dt) => dt.slice(11, 19);
@@ -90,7 +90,9 @@ async function instructorBusy(db, tenantId, staffId, startsAt, endsAt, { ignoreL
 /** Naming a coach for a program day (or a level class of it): the first of its coming meetings they are busy for, or null. */
 async function coachBusy(db, tenantId, staffId, groupId) {
   if (!staffId) return null;
-  const meetings = await rows(db, "SELECT id, starts_at, ends_at FROM program_sessions WHERE tenant_id = ? AND group_id = ? AND status = 'scheduled' AND starts_at >= NOW() ORDER BY starts_at LIMIT 200", [tenantId, groupId]);
+  // starts_at is the mountain's wall clock: the coming meetings start from the mountain's now, not UTC (2026.11.11).
+  const tz = ((await one(db, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])) || {}).timezone;
+  const meetings = await rows(db, "SELECT id, starts_at, ends_at FROM program_sessions WHERE tenant_id = ? AND group_id = ? AND status = 'scheduled' AND starts_at >= ? ORDER BY starts_at LIMIT 200", [tenantId, groupId, nowIn(tz)]);
   for (const m of meetings) {
     const busy = await instructorBusy(db, tenantId, staffId, m.starts_at, m.ends_at, { ignoreGroupId: groupId });
     if (busy) return busy;

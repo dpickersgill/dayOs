@@ -141,7 +141,8 @@ function localTime(dbTime, timeZone) {
 /** Add days to a YYYY-MM-DD string (UTC arithmetic, no DST surprises). */
 function addDays(date, days) {
   const [y, m, d] = date.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  // setUTCFullYear, not Date.UTC: Date.UTC reads a year under 100 as 1900 plus it (2026.11.11).
+  const dt = new Date(0); dt.setUTCFullYear(y, m - 1, d + days);
   return dt.toISOString().slice(0, 10);
 }
 
