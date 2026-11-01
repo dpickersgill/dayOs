@@ -163,12 +163,14 @@ test('owners and managers must set up two-step when the rule is on; crew roles a
   } finally { config.requireAdminMfa = was; }
 });
 
-test('each person gets their own key for the offline patrol store, the same on every sign-in', async () => {
+test('each person gets their own key for the offline patrol store, kept for the session (per device from 2026.11.11)', async () => {
   const me1 = (await api('GET', '/auth/me', { token: A.token })).body;
-  const again = (await login(A.slug, `o@${A.slug}.test`)).body.token;
-  const me2 = (await api('GET', '/auth/me', { token: again })).body;
+  const me2 = (await api('GET', '/auth/me', { token: A.token })).body;
   assert.ok(me1.device_key && Buffer.from(me1.device_key, 'base64').length === 32);
   assert.equal(me1.device_key, me2.device_key);
+  // a sign-in that names no device is its own device: another key (test/f11-access.test.js CR-4 covers the same phone)
+  const again = (await login(A.slug, `o@${A.slug}.test`)).body.token;
+  assert.notEqual((await api('GET', '/auth/me', { token: again })).body.device_key, me1.device_key);
   const staff = (await login(A.slug, `lock@${A.slug}.test`)).body.token;
   assert.notEqual((await api('GET', '/auth/me', { token: staff })).body.device_key, me1.device_key);
 });
