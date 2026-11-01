@@ -130,11 +130,12 @@ test('staging runs as its own service account, which is given staging secrets on
   assert.match(setup, /^SA="\$STAGING_SA"$/m);
   assert.match(setup, /--service-account "\$SA"/);
   assert.ok(!/RUN_SA"; then|SA="\$RUN_SA"|compute@developer/.test(setup.replace(/COMPUTE_SA="[^\n]*\n/, '')), 'no fallback to the live or default account');
-  // Every secret staging-setup.sh names is a staging one, except the two it copies from (read by the person running it).
+  // Every secret staging-setup.sh names is a staging one, except the live assistant key it compares with (to remove a copy),
+  // the live run account it moves staging off, and the build account (2026.11.11, INF-1 and INF-2).
   const named = new Set(setup.match(/summitops-[a-z0-9-]+/g).filter((n) => !n.startsWith('summitops-staging')));
-  assert.ok([...named].every((n) => ['summitops-assistant-api-key', 'summitops-run'].includes(n)), [...named].join(', '));
-  assert.match(setup, /put_secret summitops-staging-assistant-api-key "\$\(secret_read summitops-assistant-api-key\)"/);
-  assert.match(setup, /case "\$s" in summitops-staging-\*\) continue ;; esac\n\s*stop_read "\$s" "\$SA"/, 'checks every live secret and takes staging off it');
+  assert.ok([...named].every((n) => ['summitops-assistant-api-key', 'summitops-run', 'summitops-build'].includes(n)), [...named].join(', '));
+  assert.ok(!/put_secret summitops-staging-assistant-api-key "\$\(secret_read summitops-assistant-api-key\)"/.test(setup), 'staging never copies the live assistant key');
+  assert.match(setup, /case "\$s" in summitops-staging-db-admin\) ;; summitops-staging-\*\) continue ;; esac\n\s*stop_read "\$s" "\$SA"/, 'checks every live secret (and the staging admin login) and takes staging off it');
   assert.ok(!/add-iam-policy-binding "\$s"|secretAccessor --quiet >\/dev\/null\n\s*done/.test(setup), 'secrets are only granted through let_read');
   assert.match(read('scripts/harden.sh'), /stop_read "\$s" "\$STAGING_SA"/);
   // The permission helpers change only what is wrong, and say what they changed.

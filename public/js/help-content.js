@@ -1156,6 +1156,18 @@ export const ARTICLES = [
     steps: ['Open Today. Coming up lists the next few items for your teams, with the day and the time.', 'Tap an item, or press Calendar, to open the calendar.'],
     tips: ['The card is not shown on the wall screen.'], related: ['calendar-read'] },
   // ---- end Track CALENDAR
+  // ---- Fix release 2026.11.11, Track OPS: forms in a window, plain messages, extending a rental, a page that waited too long
+  { id: 'form-windows', app: 'start', title: 'Forms that open in a window', keywords: 'dialog window form escape close cancel back discard lose typed keep editing keyboard tab',
+    intro: 'Adding or changing something opens a small window over the page. What you type there is never thrown away without asking.',
+    steps: ['Fill in the window and press Save (or the button at the bottom).', 'To leave without saving, press Cancel, Close or the Escape key. If you typed anything, the window asks: Close and lose what you typed here? Press Keep editing to go back to it, or Discard to close.', 'Going Back in the browser while a window has typing in it asks first too. Choose Cancel to stay.'],
+    tips: ['A field that is missing or out of range is marked at the field when you press Save, in your browser\'s own words.', 'A message from Verdynt/OS names the field the way the form does, for example First name is too long (at most 100 characters).', 'While a window is open, the Tab key moves only between its own fields and buttons. The page behind waits until the window closes.', 'Names can be up to 100 characters. Dates must exist (no February 30).'],
+    related: ['idle'] },
+  { id: 'rental-extend', app: 'rentals', title: 'Extend a rental', keywords: 'rental extend return time later due back keep gear another day year',
+    intro: 'When a guest keeps gear longer, change the time it is due back so it shows in Due today and overdue at the right time.',
+    steps: ['Open Rentals, Out now, and press Extend on the guest\'s rental.', 'Choose the new return time. It must be later than the current one and within a year from today.', 'Press Save.'],
+    tips: ['A return time a year or more away is refused. That is almost always a mistyped year, and the gear would never show as overdue.', 'If the deposit is a card hold that ends sooner, you are asked to switch the deposit to a saved card first.', 'Due times are the mountain\'s own clock: gear due at 4:30 PM shows as overdue from 4:30 PM here.'],
+    related: [] },
+  // ---- end Track OPS
 ];
 
 export const articleById = (id) => ARTICLES.find((a) => a.id === id) || null;
