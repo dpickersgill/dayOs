@@ -26,7 +26,8 @@ const { pool, tx } = require('../src/db');
 const PPL = require('../src/lib/paymentplans');
 
 let server; let base; let stripeMock; let pmMock;
-const S = { n: 0, intents: new Map(), refunds: [], drop: 0, hang: false, hung: [], delay: 0 };
+// Mock Stripe ids start from the clock: Stripe ids are unique, and a database reused across runs must not see the same one twice.
+const S = { n: Date.now(), intents: new Map(), refunds: [], drop: 0, hang: false, hung: [], delay: 0 };
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const PW = 'correct-horse-battery';
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
@@ -78,8 +79,9 @@ async function planMountain(tag, extra = {}) {
   assert.equal((await webhook(paidEvent(A, row))).status, 200);
   A.order = (await q("SELECT id FROM orders WHERE tenant_id = ? AND channel = 'online' ORDER BY id DESC LIMIT 1", [A.id]))[0].id;
   A.plan = (await q('SELECT id FROM payment_plans WHERE tenant_id = ? AND order_id = ?', [A.id, A.order]))[0].id;
+  // Charged with chargeOne directly: no charge is made due today, so the guests job of another test file sharing this
+  // database never picks these up.
   A.charge = (await q('SELECT id FROM payment_plan_charges WHERE plan_id = ? AND n = 2', [A.plan]))[0].id;
-  await q('UPDATE payment_plan_charges SET due_on = ? WHERE id = ?', [today, A.charge]);
   return A;
 }
 
