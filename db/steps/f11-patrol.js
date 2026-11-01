@@ -7,6 +7,7 @@
 //   patrol_kits.changed_at, patrol_kit_checks.applied  a late offline kit check never undoes a newer change (PATROL-6).
 //   incident_media.taken_from/taken_outside  where a photo's time came from (PATROL-10).
 //   incident_responders.live_staff, incident_rentals.live_item  re-adding makes a new row (PATROL-11).
+//   audit_log.session_hash/ip_hash  which sign-in and address each row came from (DP-10).
 //   patrol_med_moves/counts.status, witness_*  controlled moves and counts wait for the witness to confirm (PATROL-7).
 module.exports = ({ tableExists, columnExists }) => [
   ['patrol_sweep_marks.resolution', (c) => columnExists(c, 'patrol_sweep_marks', 'resolution'),
@@ -51,6 +52,9 @@ module.exports = ({ tableExists, columnExists }) => [
     'ALTER TABLE incident_responders ADD COLUMN live_staff BIGINT UNSIGNED AS (IF(voided_at IS NULL, staff_id, NULL)) STORED, DROP KEY uq_iresp, ADD UNIQUE KEY uq_iresp_live (tenant_id, incident_id, live_staff), ADD KEY ix_iresp_staff (tenant_id, staff_id)'],
   ['incident_rentals.live_item', (c) => columnExists(c, 'incident_rentals', 'live_item'),
     'ALTER TABLE incident_rentals ADD COLUMN live_item BIGINT UNSIGNED AS (IF(voided_at IS NULL, rental_item_id, NULL)) STORED, DROP KEY uq_irental, ADD UNIQUE KEY uq_irental_live (tenant_id, incident_id, live_item)'],
+  // DP-10: which sign-in (start of the session's id hash) and which address (keyed hash) each audit row came from.
+  ['audit_log.session_hash', (c) => columnExists(c, 'audit_log', 'session_hash'),
+    'ALTER TABLE audit_log ADD COLUMN session_hash CHAR(16) NULL, ADD COLUMN ip_hash CHAR(16) NULL, ADD KEY ix_audit_session (tenant_id, session_hash)'],
   ['patrol_kit_checks.applied', (c) => columnExists(c, 'patrol_kit_checks', 'applied'),
     'ALTER TABLE patrol_kit_checks ADD COLUMN applied TINYINT(1) NOT NULL DEFAULT 1'],
 ];

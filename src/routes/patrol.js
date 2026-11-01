@@ -182,6 +182,8 @@ router.get('/incidents', patrol, needs('view_cases'), async (req, res) => {
      FROM incidents i WHERE ${where} ORDER BY i.occurred_at DESC, i.id DESC LIMIT 500`,
     params,
   );
+  // A search can find a patient by name: it is on the access log, with the cases it found (never the words searched).
+  if (req.query.q) await audit(pool, req, 'search', 'incidents', null, { matches: data.length, ids: data.slice(0, 50).map((r) => r.id) });
   res.json({ data: data.map(withNumber) });
 });
 
@@ -408,6 +410,7 @@ router.get('/incidents/:id/check', patrol, needs('view_cases'), async (req, res)
   const reqs = await requirementsOf(pool, req, c);
   const inc = c.report_state === 'draft' ? await one(pool, 'SELECT * FROM incidents WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, c.id]) : null;
   const required = inc ? await reportProblems(pool, req.auth.tenantId, inc, { stage: 'submit' }) : [];
+  await audit(pool, req, 'view_check', 'incidents', c.id); // it names the patient: on the access log
   res.json({ data: [...checkCase(c), ...recommendedChecks(reqs.items)], required });
 });
 
@@ -649,7 +652,7 @@ async function voidRental(req, res) {
     if (Number(r.held) && r.status_before === 'available' && !(await RENTALS.patrolHold(conn, t, r.rental_item_id))) {
       await conn.query("UPDATE rental_items SET status = 'available' WHERE tenant_id = ? AND id = ? AND status = 'maintenance'", [t, r.rental_item_id]);
     }
-    await audit(conn, req, 'void_rental', 'incidents', id, { row: Number(r.id), rental_item_id: Number(r.rental_item_id), reason: req.body.reason });
+    await audit(conn, req, 'void_rental', 'incidents', id, { row: Number(r.id), rental_item_id: Number(r.rental_item_id), reason_given: true });
   });
   res.json({ ok: true });
 }
@@ -1100,7 +1103,7 @@ router.post('/incidents/:id/patients/:pid/void', patrol, needs('create_case'), v
     for (const tr of await rows(conn, 'SELECT id FROM incident_treatments WHERE tenant_id = ? AND patient_id = ? AND voided_at IS NULL', [req.auth.tenantId, pid])) {
       await MEDS.returnStock(conn, req, { id: tr.id }, nowIn(tenant.timezone));
     }
-    await audit(conn, req, 'void_patient', 'incidents', id, { patient_id: pid, reason: req.body.reason });
+    await audit(conn, req, 'void_patient', 'incidents', id, { patient_id: pid, reason_given: true });
   });
   res.json({ ok: true });
 });
@@ -1295,7 +1298,7 @@ for (const [name, def] of Object.entries(sub)) {
         const tenant = await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId]);
         await conn.query(`UPDATE \`${def.table}\` SET voided_at = ?, void_reason = ?, voided_by = ? WHERE tenant_id = ? AND id = ?`, [nowIn(tenant.timezone), req.body.reason, req.auth.userId, req.auth.tenantId, rowId]);
         if (name === 'treatments') await MEDS.returnStock(conn, req, { id: rowId }, nowIn(tenant.timezone));
-        await audit(conn, req, `void_${name}`, 'incidents', id, { row: rowId, reason: req.body.reason });
+        await audit(conn, req, `void_${name}`, 'incidents', id, { row: rowId, reason_given: true });
       });
       res.json({ ok: true });
     };
@@ -1423,7 +1426,7 @@ async function voidResponder(req, res) {
   await tx(async (conn) => {
     await editableCase(conn, req, id);
     const r = await voidCaseRow(conn, req, id, 'incident_responders', paramId(req, 'rowId'), 'Responder');
-    await audit(conn, req, 'void_responders', 'incidents', id, { row: Number(r.id), staff_id: Number(r.staff_id), reason: req.body.reason });
+    await audit(conn, req, 'void_responders', 'incidents', id, { row: Number(r.id), staff_id: Number(r.staff_id), reason_given: true });
   });
   res.json({ ok: true });
 }

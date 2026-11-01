@@ -27,7 +27,10 @@ const q = async (sql, params) => (await pool.query(sql, params))[0];
 let n = 0;
 async function mountain(tag) {
   const slug = `f11p${tag}-${suffix}-${++n}`.slice(0, 40);
-  const res = await fetch(`${base}/api/v1/tenants`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-bootstrap-key': 'test-bootstrap-key' }, body: JSON.stringify({ slug, name: slug, owner: { email: `owner@${slug}.test`, password: PW, first_name: 'Olive', last_name: 'Owner' } }) });
+  const make = () => fetch(`${base}/api/v1/tenants`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-bootstrap-key': 'test-bootstrap-key' }, body: JSON.stringify({ slug, name: slug, owner: { email: `owner@${slug}.test`, password: PW, first_name: 'Olive', last_name: 'Owner' } }) });
+  let res = await make();
+  // five new mountains a minute from one address: wait out the limit rather than fail
+  for (let i = 0; res.status === 429 && i < 14; i++) { await new Promise((r) => setTimeout(r, 5000)); res = await make(); }
   assert.equal(res.status, 201);
   const owner = (await api('POST', '/auth/login', { body: { tenant: slug, email: `owner@${slug}.test`, password: PW } })).body.token;
   const tenantId = (await q('SELECT id FROM tenants WHERE slug = ?', [slug]))[0].id;
@@ -481,4 +484,121 @@ test('PATROL-12: a change of legal authority on a records request is audited bef
   assert.deepEqual(changes.map((x) => [x.authorization_before, x.authorization_after]), [['none', 'subpoena'], ['subpoena', 'court_order']]);
   assert.ok(changes.every((x) => x.auth_note_changed === true && !JSON.stringify(x).includes('Judge')), 'the typed note is not copied into the audit');
   assert.equal(d(aud.find((a) => a.action === 'records_release')).authorization, 'court_order');
+});
+
+// ---------------------------------------------------------------- CR-3
+test('CR-3: the audit trail never keeps free text about a patient, whatever a route passes it', async () => {
+  const { safeDetail } = require('../src/lib/audit');
+  const d = safeDetail({ description: 'Jane Roe, femur fracture, diabetic', patient: { first_name: 'Jane', last_name: 'Roe', allergies: 'penicillin', id: 7 }, notes: 'x', priority: 'high', reason: 'Card machine down', long: 'y'.repeat(500) });
+  assert.equal(d.description, undefined);
+  assert.equal(d.notes, undefined);
+  assert.deepEqual(d.patient, { id: 7 });
+  assert.equal(d.priority, 'high');
+  assert.equal(d.reason, 'Card machine down', 'a short override reason stays');
+  assert.ok(d.long.length <= 203);
+  assert.deepEqual(d.text_fields.sort(), ['allergies', 'description', 'first_name', 'last_name', 'notes']);
+  // a dispatch call edited with a patient's condition: neither the table nor stdout gets the words
+  const m = await patrolMountain();
+  const c = ok(await api('POST', '/patrol/dispatch', { token: m.owner, body: { location: 'Lift 2 unload', description: 'call came in' } }), 201);
+  const lines = [];
+  const w = process.stdout.write.bind(process.stdout);
+  process.stdout.write = (s, ...a) => { lines.push(String(s)); return w(s, ...a); };
+  try {
+    ok(await api('PATCH', `/patrol/dispatch/${c.id}`, { token: m.owner, body: { description: 'Jane Roe cr3, 14, suspected femur fracture' } }));
+  } finally { process.stdout.write = w; }
+  assert.ok(!lines.some((l) => l.includes('femur')), 'not on stdout');
+  const rows = await q("SELECT detail FROM audit_log WHERE tenant_id = ? AND entity = 'dispatch_calls' AND entity_id = ?", [m.tenantId, c.id]);
+  assert.ok(rows.length && !rows.some((r) => JSON.stringify(r.detail).includes('femur')), 'not in the audit table');
+});
+
+// ---------------------------------------------------------------- DP-8, DP-10
+test('DP-8: a search by patient name, the report check and the record score are on the patient access log', async () => {
+  const m = await patrolMountain();
+  const tag = `Neighbor${suffix}`;
+  const c = await newCase(m.owner);
+  ok(await api('POST', `/patrol/incidents/${c.id}/patients`, { token: m.owner, body: { first_name: 'Nina', last_name: tag } }), 201);
+  const count = async (fn) => {
+    const a0 = (await q('SELECT COALESCE(MAX(id), 0) AS m FROM audit_log'))[0].m;
+    await fn();
+    return (await q("SELECT action, entity_id, detail FROM audit_log WHERE id > ? AND tenant_id = ? AND entity = 'incidents'", [a0, m.tenantId]));
+  };
+  const s = await count(async () => ok(await api('GET', `/patrol/incidents?q=${tag}`, { token: m.pat })));
+  assert.equal(s[0].action, 'search');
+  const sd = typeof s[0].detail === 'string' ? JSON.parse(s[0].detail) : s[0].detail;
+  assert.deepEqual(sd.ids, [c.id]);
+  assert.ok(!JSON.stringify(sd).includes(tag), 'never the words searched');
+  assert.equal((await count(async () => ok(await api('GET', `/patrol/incidents/${c.id}/check`, { token: m.pat }))))[0].action, 'view_check');
+  assert.equal((await count(async () => ok(await api('GET', `/patrol/incidents/${c.id}/doc-score`, { token: m.pat }))))[0].action, 'view_score');
+  const log = ok(await api('GET', `/patrol/access-log?incident_id=${c.id}`, { token: m.owner }));
+  assert.ok(['view_check', 'view_score'].every((a) => log.data.some((r) => r.action === a)));
+});
+
+test('DP-10: audit rows say which sign-in and which address they came from (hashed)', async () => {
+  const m = await patrolMountain();
+  const second = (await api('POST', '/auth/login', { body: { tenant: m.slug, email: `owner@${m.slug}.test`, password: PW } })).body.token;
+  const c = await newCase(m.owner);
+  const a0 = (await q('SELECT COALESCE(MAX(id), 0) AS m FROM audit_log'))[0].m;
+  ok(await api('GET', `/patrol/incidents/${c.id}`, { token: m.owner }));
+  ok(await api('GET', `/patrol/incidents/${c.id}`, { token: second }));
+  const two = await q("SELECT session_hash, ip_hash FROM audit_log WHERE id > ? AND tenant_id = ? AND action = 'view' ORDER BY id", [a0, m.tenantId]);
+  assert.equal(two.length, 2);
+  assert.ok(two[0].session_hash && two[1].session_hash && two[0].session_hash !== two[1].session_hash, 'two sessions are told apart');
+  assert.match(two[0].ip_hash, /^[0-9a-f]{16}$/);
+  assert.notEqual(two[0].ip_hash, '127.0.0.1');
+  // the session part matches the start of the session's own id hash
+  const s = await q('SELECT id_hash FROM user_sessions WHERE id_hash LIKE ?', [`${two[0].session_hash}%`]);
+  assert.equal(s.length, 1);
+});
+
+test('DP-10: reading a lesson roster with children\'s safety details is audited', async () => {
+  const m = await patrolMountain();
+  const prod = ok(await api('POST', '/products', { token: m.owner, body: { kind: 'lesson', name: 'Group Lesson', base_price_cents: 5000 } }), 201).id;
+  const day = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const sid = ok(await api('POST', '/skischool/sessions', { token: m.owner, body: { product_id: prod, starts_at: `${day}T10:00`, ends_at: `${day}T12:00`, capacity: 4 } }), 201).id;
+  const kid = (await q("INSERT INTO people (tenant_id, first_name, last_name, date_of_birth) VALUES (?, 'Kid', 'Roster', '2018-02-02')", [m.tenantId])).insertId;
+  await q("INSERT INTO lesson_bookings (tenant_id, session_id, person_id, status, allergies, medical) VALUES (?, ?, ?, 'booked', 'bee stings', 'asthma')", [m.tenantId, sid, kid]);
+  ok(await api('GET', `/skischool/sessions/${sid}/roster`, { token: m.owner }));
+  const a = await q("SELECT detail FROM audit_log WHERE tenant_id = ? AND action = 'roster_view' AND entity_id = ?", [m.tenantId, sid]);
+  assert.equal(a.length, 1);
+  const d = typeof a[0].detail === 'string' ? JSON.parse(a[0].detail) : a[0].detail;
+  assert.equal(d.safety_details, true);
+  assert.ok(!JSON.stringify(d).includes('bee'), 'never the details themselves');
+});
+
+// ---------------------------------------------------------------- suspicions: legal hold on lost-person and witness links
+test('suspicion: on legal hold, lost-person details do not change and a witness statement arrives as a note', async () => {
+  const m = await patrolMountain();
+  const c = await newCase(m.pat, { category: 'lost_person', summary: 'Lost child' });
+  ok(await api('PUT', `/patrol/incidents/${c.id}/search`, { token: m.pat, body: { person_name: 'Lee', last_seen_place: 'Lodge' } }));
+  const link = ok(await api('POST', `/patrol/incidents/${c.id}/witness-links`, { token: m.pat, body: { name: 'Wendy', phone: '555-0199', send: 'show' } }), 201);
+  ok(await api('PUT', `/patrol/incidents/${c.id}/legal-hold`, { token: m.owner, body: { hold: true, note: 'Claim received' } }));
+  assert.equal((await api('PUT', `/patrol/incidents/${c.id}/search`, { token: m.pat, body: { last_seen_place: 'Changed' } })).status, 409);
+  assert.equal((await api('POST', `/patrol/incidents/${c.id}/search/areas`, { token: m.pat, body: { area: 'Glades' } })).status, 409);
+  assert.equal((await q('SELECT last_seen_place FROM incident_search WHERE tenant_id = ? AND incident_id = ?', [m.tenantId, c.id]))[0].last_seen_place, 'Lodge');
+  const token = link.link.split('/w/')[1];
+  ok(await api('POST', `/public/witness-link/${token}`, { body: { name: 'Wendy Witness', phone: '555-0199', statement: 'I saw the child walk toward the lodge.', signature: 'data:image/png;base64,iVBORw0KGgo=', confirm: true } }), 201);
+  assert.equal((await q('SELECT COUNT(*) AS n FROM incident_witnesses WHERE tenant_id = ? AND incident_id = ?', [m.tenantId, c.id]))[0].n, 0, 'the held case gains no witness row');
+  const notes = await q('SELECT body FROM incident_notes WHERE tenant_id = ? AND incident_id = ?', [m.tenantId, c.id]);
+  assert.ok(notes.some((n) => n.body.includes('on legal hold') && n.body.includes('walk toward the lodge')), 'the statement is kept as a note');
+  // the audit keeps the note's id (a number), never the statement
+  const a = (await q("SELECT detail FROM audit_log WHERE tenant_id = ? AND action = 'witness_statement_received' AND entity_id = ?", [m.tenantId, c.id]))[0];
+  const d = typeof a.detail === 'string' ? JSON.parse(a.detail) : a.detail;
+  assert.equal(typeof d.note, 'number');
+});
+
+test('suspicion: the ski area login reads an approved report without the patrol\'s sign-in emails', async () => {
+  const m = await patrolMountain();
+  ok(await api('POST', '/users', { token: m.owner, body: { username: `area${suffix}`, email: `gm@${m.slug}.test`, password: PW, role: 'area' } }), 201);
+  const area = (await api('POST', '/auth/login', { body: { tenant: m.slug, email: `gm@${m.slug}.test`, password: PW } })).body.token;
+  const c = await readyCase(m.pat);
+  ok(await api('POST', `/patrol/incidents/${c.id}/notes`, { token: m.owner, body: { body: 'Called the parent.' } }), 201);
+  ok(await api('POST', `/patrol/incidents/${c.id}/submit`, { token: m.pat }));
+  ok(await api('POST', `/patrol/incidents/${c.id}/approve`, { token: m.owner }));
+  const r = ok(await api('GET', `/area/reports/${c.id}`, { token: area }));
+  const text = JSON.stringify(r.case);
+  assert.ok(!text.includes(`@${m.slug}.test`), 'no staff sign-in emails');
+  assert.equal(r.case.patients[0].first_name, 'Sam', 'the report itself is all there');
+  assert.ok(r.case.notes.some((n) => n.body === 'Called the parent.' && n.author === null));
+  const own = ok(await api('GET', `/area/reports/${c.id}`, { token: m.owner }));
+  assert.ok(JSON.stringify(own.case).includes(`owner@${m.slug}.test`), 'owners still see who wrote it');
 });

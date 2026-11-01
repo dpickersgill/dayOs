@@ -344,6 +344,8 @@ router.get('/sessions/:id/roster', requireRole(...school), async (req, res) => {
     [req.auth.tenantId, s.id],
   );
   const show = seesDetails(req, s);
+  // Children's allergies, medical notes and pickup people: who read them is on the audit log (2026.11.11, DP-10).
+  if (show && data.length) await audit(pool, req, 'roster_view', 'lesson_sessions', s.id, { students: data.length, safety_details: data.some((r) => r.allergies || r.medical || r.pickup) });
   res.json({
     details: show,
     data: data.map((r) => {

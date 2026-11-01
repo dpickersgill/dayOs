@@ -98,7 +98,7 @@ async function voidParty(req, res) {
   await tx(async (conn) => {
     await editable(conn, req, id);
     const r = await patrolRouter.voidCaseRow(conn, req, id, 'incident_parties', paramId(req, 'rowId'), 'Party');
-    await audit(conn, req, 'void_party', 'incidents', id, { row: Number(r.id), reason: req.body.reason });
+    await audit(conn, req, 'void_party', 'incidents', id, { row: Number(r.id), reason_given: true });
   });
   res.json({ ok: true });
 }

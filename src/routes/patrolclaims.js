@@ -142,13 +142,14 @@ router.get('/incidents/:id/claim-file', patrol, anyOf(['view_cases', 'records'])
   res.json(out);
 });
 
-/** The panel on a case's Record view: its score, red flags, and links shared outside. Light: no audit trail. */
+/** The panel on a case's Record view: its score, red flags, and links shared outside. On the access log (it names the patient). */
 router.get('/incidents/:id/doc-score', patrol, anyOf(['view_cases', 'records']), async (req, res) => {
   const t = req.auth.tenantId; const id = paramId(req);
   const live = await loadCase(pool, t, id);
   if (!live) throw notFound('Case');
   const { report, basis } = await reportOf(pool, t, id, live);
   const canRecords = await PA.can(pool, req, 'records');
+  await audit(pool, req, 'view_score', 'incidents', id); // it names the patient: on the access log
   res.json({ ...(await DS.forCase(pool, t, report)), basis, shares: canRecords ? await sharesOf(pool, t, 'AND s.incident_id = ?', [id]) : [], can: { records: canRecords } });
 });
 

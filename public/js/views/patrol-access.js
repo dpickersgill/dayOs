@@ -8,6 +8,7 @@ const WHAT = {
   pull_from_customer: 'Pulled guest details into a patient', pull_preview: 'Looked up a guest\'s ticket and gear', lookup: 'Searched for a guest',
   export: 'Exported records', read: 'Viewed the incident map', view_signature: 'Opened a signature', view_access_log: 'Read this log',
   submitted: 'Submitted a report', approved: 'Approved a report', reopened: 'Reopened a report', add_note: 'Added a note',
+  search: 'Searched cases (the cases found are listed)', view_check: 'Opened the report check', view_score: 'Opened the record score',
 };
 const what = (a) => WHAT[a] || label(a);
 

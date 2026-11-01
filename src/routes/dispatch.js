@@ -202,7 +202,7 @@ router.patch('/dispatch/:id', patrol, needs('dispatch'), validate(z.object({ pri
   const keys = Object.keys(req.body);
   if (!keys.length) throw bad('No updatable fields supplied');
   await pool.query(`UPDATE dispatch_calls SET ${keys.map((k) => `\`${k}\` = ?`).join(', ')} WHERE tenant_id = ? AND id = ?`, [...keys.map((k) => req.body[k]), req.auth.tenantId, c.id]);
-  await audit(pool, req, 'update', 'dispatch_calls', c.id, req.body);
+  await audit(pool, req, 'update', 'dispatch_calls', c.id, { fields: Object.keys(req.body) }); // field names only, never the patient's condition
   res.json({ ok: true });
 });
 

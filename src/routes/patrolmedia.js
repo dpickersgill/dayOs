@@ -164,7 +164,7 @@ router.post('/incidents/:id/photos/:mid/void', patrol, needs('create_case'), val
     if (m.voided_at) throw bad('Already marked entered in error');
     const tz = (await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone;
     await conn.query('UPDATE incident_media SET voided_at = ?, voided_by = ?, void_reason = ? WHERE tenant_id = ? AND id = ?', [nowIn(tz), req.auth.userId, req.body.reason, req.auth.tenantId, mid]);
-    await audit(conn, req, 'void_photo', 'incidents', id, { photo_id: mid, reason: req.body.reason });
+    await audit(conn, req, 'void_photo', 'incidents', id, { photo_id: mid, reason_given: true });
   });
   res.json({ ok: true });
 });
