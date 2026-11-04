@@ -55,6 +55,10 @@ const addressTag = (req) => (req.ip ? crypto.createHmac('sha256', require('../co
 
 /** Append an audit row. `db` is the pool or a transaction connection so the audit commits with the change. */
 async function audit(db, req, action, entity, entityId, detail) {
+  // A patient record opened or changed: how it was allowed (lib/patientaccess.js: writing, wrote, responder, dispatched,
+  // on_duty, crew, or checked) and whether a fresh check was used, on every row about that case.
+  const pa = req && req.patientAccess;
+  if (pa && entity === 'incidents' && Number(entityId) === pa.id) detail = { ...(detail && typeof detail === 'object' && !Array.isArray(detail) ? detail : detail === undefined || detail === null ? {} : { value: detail }), access: pa.access, fresh: pa.fresh };
   const safe = safeDetail(detail);
   const text = safe ? JSON.stringify(safe) : null;
   const session = sessionTag(req); const address = addressTag(req);
@@ -65,4 +69,25 @@ async function audit(db, req, action, entity, entityId, detail) {
   trail({ tenant: req.auth.tenantId, user: req.auth.userId, action, entity, entity_id: entityId ?? null, detail: text, ip: req.ip || null, session });
 }
 
-module.exports = { audit, trail, safeDetail };
+/**
+ * A sign-in security event (2026.11.12): a sign-in or a failed one, a lock, a new device, a recovery code used, a reset.
+ * It always goes to the summitops-audit copy in Cloud Logging (trail), and with row: true to the audit log table too.
+ * It says who (the login's id, never what someone typed as a username), which mountain, the address (the request's IP,
+ * as every audit entry has), the device label ("Chrome on Windows"), how and the outcome, and why it failed. Never a
+ * password, a code, a token or a typed username.
+ */
+const SAFE_KEYS = new Set(['outcome', 'reason', 'method', 'device', 'after', 'left', 'where', 'by', 'target', 'role', 'level', 'from', 'to', 'kind', 'scope', 'console', 'no_device_id', 'passkey', 'operator', 'what']);
+async function securityEvent(req, { tenantId = null, userId = null, actor, action, entity = 'users', entityId = null, row = false, ...fields }) {
+  const label = req && req.get ? require('./devices').label(req.get('user-agent')) : null;
+  const detail = { device: label };
+  for (const [k, v] of Object.entries(fields)) if (SAFE_KEYS.has(k) && v !== undefined) detail[k] = typeof v === 'string' ? v.slice(0, 120) : v;
+  const text = JSON.stringify(detail);
+  const session = req ? sessionTag(req) : null; const address = req ? addressTag(req) : null;
+  if (row && tenantId) {
+    await require('../db').pool.query('INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id, detail, session_hash, ip_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [tenantId, actor === undefined ? userId : actor, action, entity, entityId ?? userId ?? null, text, session, address]).catch(() => {});
+  }
+  trail({ tenant: tenantId, user: userId, action, entity, entity_id: entityId ?? userId ?? null, detail: text, ip: (req && req.ip) || null, session, security: true });
+}
+
+module.exports = { audit, trail, safeDetail, securityEvent };

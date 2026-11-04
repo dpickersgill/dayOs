@@ -59,7 +59,7 @@ module.exports = function outreachRouter(log) {
   });
 
   router.put('/templates/:step', validate(z.object({ subject: z.string().trim().min(3).max(200), body: z.string().trim().min(20).max(4000) })), async (req, res) => {
-    const step = Number(req.params.step);
+    const step = (require('../lib/util').canonId(req.params.step) || 0);
     if (!Number.isInteger(step) || step < 1 || step > O.NURTURE) throw notFound('Template');
     const unknown = [...`${req.body.subject} ${req.body.body}`.matchAll(/\{([a-z_]+)\}/g)].map((m) => m[1]).filter((k) => !O.FIELDS.includes(k));
     if (unknown.length) throw bad(`Unknown field${unknown.length === 1 ? '' : 's'}: ${[...new Set(unknown)].map((k) => `{${k}}`).join(', ')}`);

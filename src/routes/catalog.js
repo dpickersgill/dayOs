@@ -11,7 +11,7 @@ const SA = require('../lib/schoolaccess');
 const lessonOnly = SA.directorFor([], async (req) => {
   if (req.body && req.body.kind !== undefined && req.body.kind !== 'lesson') return false;
   if (!req.params.id) return req.method === 'POST' && req.body && req.body.kind === 'lesson';
-  const p = await one(pool, 'SELECT kind FROM products WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, Number(req.params.id) || 0]);
+  const p = await one(pool, 'SELECT kind FROM products WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, (require('../lib/util').canonId(req.params.id) || 0)]);
   return Boolean(p) && p.kind === 'lesson';
 }, 'A ski school director can change lesson products only');
 const { partialOf, z, dateStr, tierEnum, validate, paramId } = require('../lib/util');
@@ -54,8 +54,8 @@ products.get('/activity-options', requireRole('manager', 'counter'), async (req,
 /** An activity must name one of this mountain's active attractions; another product must not name one. */
 products.use(async (req, _res, next) => {
   try {
-    if (!['POST', 'PATCH'].includes(req.method) || !/^\/(\d+)?$/.test(req.path) || !req.body || typeof req.body !== 'object') return next();
-    const cur = req.method === 'PATCH' ? await one(pool, 'SELECT kind, attraction_id FROM products WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, Number(req.path.slice(1))]) : null;
+    if (!['POST', 'PATCH'].includes(req.method) || !/^\/(\d+)?$/.test(require('../lib/pathcheck').normal(req.path) === '/' ? '/' : require('../lib/pathcheck').normal(req.path)) || !req.body || typeof req.body !== 'object') return next();
+    const cur = req.method === 'PATCH' ? await one(pool, 'SELECT kind, attraction_id FROM products WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, (require('../lib/util').canonId(require('../lib/pathcheck').normal(req.path).slice(1)) || 0)]) : null;
     const kind = req.body.kind || (cur && cur.kind);
     const att = req.body.attraction_id !== undefined ? req.body.attraction_id : (cur ? cur.attraction_id : null);
     if (kind === 'activity') {

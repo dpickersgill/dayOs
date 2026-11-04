@@ -10,7 +10,14 @@ const { refuseBreached } = require('./pwned');
 
 const MIN = 12;
 const MAX = 128;
-const schema = z.string().min(MIN, `Use at least ${MIN} characters. A short phrase is easiest to remember.`).max(MAX);
+// bcrypt reads only the first 72 bytes of a password, so anything after that would be ignored without saying so. A new
+// password longer than 72 bytes (UTF-8) is refused (feat/auth-hardening). Pre-hashing instead would lock out everyone
+// whose saved password is already longer, since their saved hash is of the first 72 bytes; refusing only new ones changes
+// nothing for anyone signing in today. Accented letters count as two bytes and emoji as four.
+const MAX_BYTES = 72;
+const BYTES_RULE = `Use at most ${MAX_BYTES} bytes. That is ${MAX_BYTES} plain letters or numbers; accented letters count as two and emoji as four.`;
+const bytes = (p) => Buffer.byteLength(String(p || ''), 'utf8');
+const schema = z.string().min(MIN, `Use at least ${MIN} characters. A short phrase is easiest to remember.`).max(MAX).refine((p) => bytes(p) <= MAX_BYTES, BYTES_RULE);
 
 const fold = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -19,6 +26,7 @@ async function refuseWeak(pw, { username, email, tenantSlug, tenantName } = {}) 
   const p = String(pw || '');
   if (p.length < MIN) throw bad(`Use at least ${MIN} characters. A short phrase is easiest to remember.`);
   if (p.length > MAX) throw bad(`Use at most ${MAX} characters`);
+  if (bytes(p) > MAX_BYTES) throw bad(BYTES_RULE);
   const f = fold(p);
   if (/^(.)\1+$/.test(p) || new Set(p).size < 4) throw bad('That password repeats too few characters. Use a phrase of a few words.');
   const words = [username, email && String(email).split('@')[0], tenantSlug, tenantName, 'summitops', 'dayos', 'verdynt', 'runmyresort']
@@ -29,4 +37,4 @@ async function refuseWeak(pw, { username, email, tenantSlug, tenantName } = {}) 
   await refuseBreached(p);
 }
 
-module.exports = { MIN, MAX, schema, refuseWeak };
+module.exports = { MIN, MAX, MAX_BYTES, BYTES_RULE, schema, refuseWeak };

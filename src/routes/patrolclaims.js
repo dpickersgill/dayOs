@@ -26,6 +26,9 @@ const config = require('../config');
 const { typeLabel } = require('../lib/attractions');
 
 const router = express.Router();
+// Every /incidents/:id address on this router needs the patient-record rule first (lib/patientaccess.js): the case is the
+// person's own recent work, or they made the fresh check in the last 30 minutes. Read from the id Express matched.
+router.use('/incidents/:id', require('../lib/patientaccess').byParam);
 const publicRouter = express.Router();
 const patrol = requireRole('patrol', 'manager');
 const needs = (f, m) => PA.needs(pool, f, m);

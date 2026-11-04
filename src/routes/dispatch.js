@@ -240,7 +240,7 @@ router.post('/dispatch/:id/responders', patrol, needs('dispatch'), validate(z.ob
     const c = await loadCall(conn, tenantId, paramId(req), true);
     if (!ACTIVE.includes(c.status)) throw conflict('This call is already closed');
     if (!(await one(conn, "SELECT id FROM staff WHERE tenant_id = ? AND id = ? AND status = 'active'", [tenantId, req.body.staff_id]))) throw conflict('That person is not an active staff member');
-    const [r] = await conn.query('INSERT IGNORE INTO dispatch_responders (tenant_id, call_id, staff_id) VALUES (?, ?, ?)', [tenantId, c.id, req.body.staff_id]);
+    const [r] = await conn.query('INSERT IGNORE INTO dispatch_responders (tenant_id, call_id, staff_id, added_by, added_at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP())', [tenantId, c.id, req.body.staff_id, req.auth.userId]); // who sent them, and when (lib/patientaccess.js)
     if (!r.affectedRows) throw conflict('Already sent to this call');
     await conn.query("INSERT INTO dispatch_events (tenant_id, call_id, at, kind, staff_id, user_id) VALUES (?, ?, ?, 'dispatched', ?, ?)", [tenantId, c.id, nowIn(tenant.timezone), req.body.staff_id, req.auth.userId]);
     if (c.status === 'new') await conn.query("UPDATE dispatch_calls SET status = 'dispatched' WHERE tenant_id = ? AND id = ?", [tenantId, c.id]);

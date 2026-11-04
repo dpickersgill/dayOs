@@ -321,7 +321,7 @@ router.get('/group-prices', requireRole(...sellers), async (req, res) => {
 });
 router.put('/group-prices/:productId', requireRole('manager'), validate(z.object({ min_people: z.number().int().min(2).max(500), price_cents: z.number().int().min(0).max(1_000_000) })), async (req, res) => {
   const { tenantId } = req.auth;
-  const pid = Number(req.params.productId);
+  const pid = (require('../lib/util').canonId(req.params.productId) || 0);
   const p = await one(pool, "SELECT id, kind FROM products WHERE tenant_id = ? AND id = ?", [tenantId, pid]);
   if (!p) throw notFound('Product');
   if (!['day_ticket', 'multi_day', 'punch_card', 'voucher'].includes(p.kind)) throw bad('Group prices are for day tickets, multi-day tickets, punch cards and vouchers');
@@ -332,7 +332,7 @@ router.put('/group-prices/:productId', requireRole('manager'), validate(z.object
   res.json({ product_id: pid, ...req.body });
 });
 router.delete('/group-prices/:productId', requireRole('manager'), async (req, res) => {
-  const pid = Number(req.params.productId);
+  const pid = (require('../lib/util').canonId(req.params.productId) || 0);
   await tx(async (conn) => {
     await conn.query('DELETE FROM group_prices WHERE tenant_id = ? AND product_id = ?', [req.auth.tenantId, pid]);
     await audit(conn, req, 'group_price_off', 'products', pid, {});

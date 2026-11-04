@@ -88,13 +88,14 @@ test('background polls (x-poll) do not keep a session open; a request someone ma
   const t = (await login(A.slug, `o@${A.slug}.test`)).body.token;
   const hash = crypto.createHash('sha256').update(jwt.decode(t).sid).digest('hex');
   const idle = async () => { await new Promise((r) => setTimeout(r, 150)); return Number((await pool.query('SELECT TIMESTAMPDIFF(MINUTE, last_seen, UTC_TIMESTAMP()) AS m FROM user_sessions WHERE id_hash = ?', [hash]))[0][0].m); };
-  await pool.query('UPDATE user_sessions SET last_seen = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 50 MINUTE) WHERE id_hash = ?', [hash]);
+  // An owner's session goes idle after 30 minutes (feat/auth-hardening; 60 for counter and lift staff).
+  await pool.query('UPDATE user_sessions SET last_seen = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 25 MINUTE) WHERE id_hash = ?', [hash]);
   for (let i = 0; i < 3; i += 1) assert.equal((await api('GET', '/inbox/unread', { token: t, headers: { 'x-poll': '1' } })).status, 200);
-  assert.ok(await idle() >= 49, 'polls left the session idle');
+  assert.ok(await idle() >= 24, 'polls left the session idle');
   assert.equal((await api('GET', '/inbox/unread', { token: t })).status, 200);
   assert.ok(await idle() <= 1, 'a request without the poll mark counts as use');
   // An unattended tab that only polls is signed out by the server's idle limit.
-  await pool.query('UPDATE user_sessions SET last_seen = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 61 MINUTE) WHERE id_hash = ?', [hash]);
+  await pool.query('UPDATE user_sessions SET last_seen = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 31 MINUTE) WHERE id_hash = ?', [hash]);
   assert.equal((await api('GET', '/inbox/unread', { token: t, headers: { 'x-poll': '1' } })).status, 401);
 });
 

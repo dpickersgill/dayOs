@@ -13,6 +13,9 @@ const { stepUp } = require('../lib/stepup');
 const OPS = require('../lib/patrolops');
 
 const router = express.Router();
+// Every /incidents/:id address on this router needs the patient-record rule first (lib/patientaccess.js): the case is the
+// person's own recent work, or they made the fresh check in the last 30 minutes. Read from the id Express matched.
+router.use('/incidents/:id', require('../lib/patientaccess').byParam);
 const patrol = requireRole('patrol', 'manager');
 const needs = (f, m) => PA.needs(pool, f, m);
 const NAME = "CONCAT(p.first_name, ' ', p.last_name)";
@@ -109,6 +112,7 @@ router.get('/records/:id/pack', patrol, needs('records'), async (req, res) => {
   const r = await one(pool, `${REQ} WHERE r.tenant_id = ? AND r.id = ?`, [t, paramId(req)]);
   if (!r) throw notFound('Request');
   if (r.status !== 'released') throw conflict('This request has not been released');
+  await require('../lib/patientaccess').guard(pool, req, r.incident_id); // the released report is a patient record
   const v = await one(pool, 'SELECT id, version_no, kind, snapshot, created_at FROM incident_versions WHERE tenant_id = ? AND id = ?', [t, r.version_id]);
   const tenant = await one(pool, 'SELECT name, legal_name FROM tenants WHERE id = ?', [t]);
   await audit(pool, req, 'records_pack_view', 'incidents', r.incident_id, { request: r.id });
@@ -214,13 +218,15 @@ router.get('/daily-log', patrol, async (req, res) => {
     rows(pool, 'SELECT x.shot_at, x.method, x.result, x.size_r, x.size_d, a.name AS path FROM patrol_avy_shots x JOIN patrol_avy_paths a ON a.tenant_id = x.tenant_id AND a.id = x.path_id WHERE x.tenant_id = ? AND x.shot_at >= ? AND x.shot_at < ? ORDER BY x.shot_at', [t, from, to]),
     rows(pool, 'SELECT e.kind, e.started_at, e.ended_at, e.guests, l.name AS lift FROM patrol_lift_evacs e JOIN lifts l ON l.tenant_id = e.tenant_id AND l.id = e.lift_id WHERE e.tenant_id = ? AND e.started_at >= ? AND e.started_at < ? ORDER BY e.started_at', [t, from, to]),
   ]);
+  // Summaries only for cases the person may open without the fresh check, or after it (lib/patientaccess.js).
+  const may = await require('../lib/patientaccess').openable(pool, req, cases.map((c) => c.id));
   let sweepRoutes = [];
   if (sweep) sweepRoutes = await rows(pool, `SELECT ro.name AS route, r.status, r.cleared_at, ${NAME} AS by_name, (SELECT COUNT(*) FROM patrol_sweep_marks k WHERE k.tenant_id = r.tenant_id AND k.run_id = r.id AND k.flag <> 'none' AND (k.resolved_kind IS NULL OR k.resolved_kind <> 'error')) AS finds, (SELECT COUNT(*) FROM patrol_sweep_marks k WHERE k.tenant_id = r.tenant_id AND k.run_id = r.id AND k.resolved_kind = 'error') AS finds_in_error
     FROM patrol_sweep_runs r JOIN patrol_sweep_routes ro ON ro.tenant_id = r.tenant_id AND ro.id = r.route_id LEFT JOIN staff s ON s.tenant_id = r.tenant_id AND s.id = r.staff_id LEFT JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE r.tenant_id = ? AND r.sweep_id = ? ORDER BY ro.sort, ro.name`, [t, sweep.id]);
   res.json({
     date, today, notes: log ? log.notes : null, signed: log && log.signed_at ? { at: log.signed_at, by: log.signed_by_name } : null, addenda,
     weather, snow, duty,
-    cases: viewCases ? cases.map((c) => ({ ...c, case_number: caseNo(c) })) : null, case_count: cases.length,
+    cases: viewCases ? cases.map((c) => require('../lib/patientaccess').trimRow({ ...c, case_number: caseNo(c) }, may)) : null, case_count: cases.length,
     calls: calls.map((c) => ({ ...c, call_no: `${String(c.call_date).slice(5).replace('-', '')}-${String(c.seq).padStart(2, '0')}` })),
     opening, closures, sweep: sweep ? { ...sweep, routes: sweepRoutes } : null, flagged, avalanche: { obs: avyObs, shots: avyShots }, evacs,
     can_write: Boolean(await logWriter(req)),
@@ -268,6 +274,24 @@ router.get('/daily-log/search', patrol, async (req, res) => {
     UNION ALL SELECT on_date, body AS text, 'addendum' AS kind FROM patrol_daily_addenda WHERE tenant_id = ? AND body LIKE ? ORDER BY on_date DESC LIMIT 50`, [t, like, t, like]);
   const snip = (text) => { const i = text.toLowerCase().indexOf(q.toLowerCase()); return `${i > 40 ? '…' : ''}${text.slice(Math.max(0, i - 40), i + q.length + 60)}${i + q.length + 60 < text.length ? '…' : ''}`; };
   res.json({ data: list.map((r) => ({ date: String(r.on_date).slice(0, 10), kind: r.kind, snippet: snip(r.text) })) });
+});
+
+// ================================================================ the weekly patient-record access summary
+/** On or off (lib/accesssummary.js). Anyone who can read the access log sees it; only the owner turns it off. */
+router.get('/access-summary', patrol, needs('view_access_log'), async (req, res) => {
+  const t = await one(pool, 'SELECT access_summary_off, access_summary_week FROM tenants WHERE id = ?', [req.auth.tenantId]);
+  res.json({ on: !Number(t.access_summary_off), last_week_sent: t.access_summary_week ? String(t.access_summary_week).slice(0, 10) : null, can_turn_off: req.auth.role === 'owner' });
+});
+router.put('/access-summary', patrol, needs('view_access_log'), validate(z.object({ on: z.boolean() })), async (req, res) => {
+  if (!req.body.on && req.auth.role !== 'owner') throw forbidden('Only the owner can turn off the weekly access summary');
+  const cur = await one(pool, 'SELECT access_summary_off FROM tenants WHERE id = ?', [req.auth.tenantId]);
+  await pool.query('UPDATE tenants SET access_summary_off = ? WHERE id = ?', [req.body.on ? 0 : 1, req.auth.tenantId]);
+  await audit(pool, req, 'access_summary_setting', 'tenants', req.auth.tenantId, { on: req.body.on });
+  // Someone other than the owner changed the summary that watches patient-record access: the owner is told.
+  if (req.auth.role !== 'owner' && Boolean(Number(cur.access_summary_off)) === req.body.on) {
+    require('../lib/securitymail').tellOwner(req.auth.tenantId, 'The weekly patient record access summary setting was changed', [`Someone other than the owner turned the weekly patient record access summary ${req.body.on ? 'on' : 'off'}.`]);
+  }
+  res.json({ on: req.body.on });
 });
 
 module.exports = { router };

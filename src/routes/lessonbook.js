@@ -103,7 +103,7 @@ router.get('/:slug/booking', async (req, res) => {
  */
 router.get('/:slug/booking/next/:id', async (req, res) => {
   const t = await tenantFor(req.params.slug);
-  const id = Number(req.params.id);
+  const id = (require('../lib/util').canonId(req.params.id) || 0);
   if (!Number.isInteger(id) || id <= 0) throw notFound('Lesson');
   const s = await one(pool, "SELECT id, product_id, format, age_min, age_max, starts_at, capacity FROM lesson_sessions WHERE tenant_id = ? AND id = ? AND status = 'scheduled'", [t.id, id]);
   if (!s) throw notFound('Lesson');

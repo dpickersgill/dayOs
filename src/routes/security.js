@@ -14,7 +14,12 @@ const totp = require('../lib/totp');
 const { stepUp } = require('../lib/stepup');
 const { z, validate, paramId } = require('../lib/util');
 const { bad, forbidden, notFound } = require('../lib/errors');
-const { audit } = require('../lib/audit');
+const { audit, securityEvent } = require('../lib/audit');
+const CT = require('../lib/codetries');
+const SM = require('../lib/securitymail');
+const jwt = require('jsonwebtoken');
+const config = require('../config');
+const { unauthorized } = require('../lib/errors');
 const { rateLimit } = require('../middleware/rateLimit');
 const { checkPassword } = require('../lib/logintries');
 
@@ -62,6 +67,7 @@ router.post('/auth/passkeys', authenticate, notOnTerminal, limit, addCheck, vali
   const user = await me(req);
   const id = await passkeys.register(req, { kind: 'user', ownerId: user.id, tenantId: user.tenant_id, handle: req.body.handle, response: req.body.response, name: req.body.name || require('../lib/devices').label(req.get('user-agent')) });
   await audit(pool, req, 'passkey_add', 'users', user.id, { passkey: id });
+  SM.notify(req, user.id, 'passkey_added');
   res.status(201).json({ id });
 });
 
@@ -78,6 +84,7 @@ router.delete('/auth/passkeys/:id', authenticate, notOnTerminal, stepUp('remove 
   const [r] = await pool.query('DELETE FROM user_passkeys WHERE id = ? AND user_id = ?', [paramId(req), user.id]);
   if (!r.affectedRows) throw notFound('Passkey');
   await audit(pool, req, 'passkey_remove', 'users', user.id, { passkey: paramId(req) });
+  SM.notify(req, user.id, 'passkey_removed');
   res.json({ ok: true });
 });
 
@@ -90,10 +97,12 @@ router.post('/auth/step-up/options', authenticate, limit, async (req, res) => {
   if (keys) methods.push('passkey');
   if (user.totp_enabled) methods.push('app');
   if (!methods.length) methods.push('password');
-  res.json({ methods, passkey: keys ? await passkeys.authenticationOptions(req, { kind: 'user', purpose: 'stepup', ownerId: user.id, tenantId: user.tenant_id }) : null, minutes: sessions.STEP_UP_MIN() });
+  res.json({ methods, passkey: keys ? await passkeys.authenticationOptions(req, { kind: 'user', purpose: 'stepup', ownerId: user.id, tenantId: user.tenant_id }) : null, minutes: req.body && req.body.scope === 'records' ? sessions.RECORDS_MIN() : sessions.STEP_UP_MIN() });
 });
 
-router.post('/auth/step-up', authenticate, limit, validate(z.object({ password: z.string().max(200).optional(), code: z.string().max(20).optional(), handle: z.string().max(100).optional(), response: z.any().optional() })), async (req, res) => {
+// scope 'records': the check made at the patient-record prompt. It also opens older and other people's patient care
+// records for the next 30 minutes (lib/patientaccess.js). Nothing else sets that, signing in included.
+router.post('/auth/step-up', authenticate, limit, validate(z.object({ password: z.string().max(200).optional(), code: z.string().max(20).optional(), handle: z.string().max(100).optional(), response: z.any().optional(), scope: z.enum(['records']).optional() })), async (req, res) => {
   const user = await me(req);
   const strong = user.totp_enabled || (await passkeys.count('user', user.id)) > 0;
   let how = null;
@@ -101,10 +110,14 @@ router.post('/auth/step-up', authenticate, limit, validate(z.object({ password: 
     await passkeys.authenticate(req, { kind: 'user', purpose: 'stepup', handle: req.body.handle, response: req.body.response, ownerId: user.id });
     how = 'passkey';
   } else if (req.body.code && user.totp_enabled) {
+    // Counted per login with the sign-in codes (feat/auth-hardening): before, only 20 a minute per address, so a stolen
+    // session could guess from many addresses. 5 wrong in a row lock app codes here and at sign-in for 5 minutes.
+    await CT.claimAppCode(user.id, 'Wait a few minutes and try the newest code.');
     const step = totp.verify(totp.open(user.totp_secret), req.body.code);
     if (step === null || (user.totp_last_step !== null && step <= Number(user.totp_last_step))) throw forbidden('That code is not right. Use the newest one in your app.');
     const [r] = await pool.query('UPDATE users SET totp_last_step = ? WHERE id = ? AND (totp_last_step IS NULL OR totp_last_step < ?)', [step, user.id, step]);
     if (r.affectedRows !== 1) throw forbidden('That code was just used. Wait for the next one.');
+    await CT.cleared(user.id);
     how = 'app';
   } else if (req.body.password !== undefined) {
     // Someone with a passkey or an app must use it: a password alone is what an attacker would have.
@@ -112,8 +125,71 @@ router.post('/auth/step-up', authenticate, limit, validate(z.object({ password: 
     await checkPassword(user, req.body.password); // counts toward the login's lock (2026.11.11)
     how = 'password';
   } else throw bad('Confirm with your passkey, a code or your password');
-  await sessions.steppedUp(req.auth.sid);
-  res.json({ ok: true, how, minutes: sessions.STEP_UP_MIN() });
+  const records = req.body.scope === 'records';
+  await sessions.steppedUp(req.auth.sid, { records });
+  if (records) await securityEvent(req, { tenantId: req.auth.tenantId, userId: req.auth.userId, action: 'records_check', method: how });
+  res.json({ ok: true, how, scope: records ? 'records' : undefined, minutes: records ? sessions.RECORDS_MIN() : sessions.STEP_UP_MIN() });
+});
+
+// ---------------------------------------------------------------- the tab lock and quick resume
+/**
+ * The tab locked itself after 10 minutes without use. A patrol or leader session (30-minute idle) is locked on the server,
+ * so the token does nothing until the person resumes; any other session ends, as before.
+ */
+router.post('/auth/lock', authenticate, async (req, res) => {
+  const locked = await sessions.lock(req.auth.sid);
+  res.json({ locked, resumable: locked && req.auth.strong });
+});
+
+/**
+ * The paused session behind this request's token, if it may be resumed: the token is genuine, its session is not signed
+ * out or ended (a password, role or two-step change, or Sign out everywhere end every session), it is within its 8 hours,
+ * not on a shared terminal, a patrol or leader session, and the login is still active and has a passkey or an app.
+ */
+async function paused(req) {
+  const m = /^Bearer (.+)$/.exec(req.headers.authorization || '');
+  let p = null;
+  if (m) { try { p = jwt.verify(m[1], config.jwtSecret, { algorithms: ['HS256'] }); } catch (_) { p = null; } }
+  if (!p || p.typ || !p.sid) throw unauthorized('Session ended. Sign in again.');
+  const u = await one(pool, `SELECT u.*, t.status AS tenant_status FROM users u JOIN tenants t ON t.id = u.tenant_id
+    JOIN user_sessions s ON s.id_hash = ? AND s.user_id = u.id AND s.tenant_id = u.tenant_id
+    WHERE u.id = ? AND u.tenant_id = ? AND u.active = 1 AND (u.password_changed_at IS NULL OR UNIX_TIMESTAMP(u.password_changed_at) <= ?)
+      AND s.ended_at IS NULL AND s.expires_at > UTC_TIMESTAMP() AND s.terminal_id IS NULL AND s.idle_min IS NOT NULL
+      AND (s.closing_at IS NULL OR s.closing_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL ${sessions.CLOSING_GRACE_SECONDS} SECOND))`,
+  [sessions.hash(p.sid), Number(p.sub), p.tid, Number(p.iat) || 0]);
+  if (!u || u.tenant_status !== 'active') throw unauthorized('Session ended. Sign in again.');
+  const keys = await passkeys.count('user', u.id);
+  if (!keys && !u.totp_enabled) throw unauthorized('Session ended. Sign in again.');
+  return { user: u, sid: p.sid, keys };
+}
+
+router.post('/auth/resume/options', limit, async (req, res) => {
+  const { user, keys } = await paused(req);
+  res.json({ methods: [...(keys ? ['passkey'] : []), ...(user.totp_enabled ? ['app'] : [])], passkey: keys ? await passkeys.authenticationOptions(req, { kind: 'user', purpose: 'resume', ownerId: user.id, tenantId: user.tenant_id }) : null });
+});
+
+/** Quick resume: a passkey or an app code (counted per login) opens the paused session again, with the same 8-hour end. */
+router.post('/auth/resume', limit, validate(z.object({ code: z.string().max(20).optional(), handle: z.string().max(100).optional(), response: z.any().optional() })), async (req, res) => {
+  const { user, sid } = await paused(req);
+  let how;
+  if (req.body.response) {
+    await passkeys.authenticate(req, { kind: 'user', purpose: 'resume', handle: req.body.handle, response: req.body.response, ownerId: user.id });
+    how = 'passkey';
+  } else if (req.body.code && user.totp_enabled) {
+    await CT.claimAppCode(user.id, 'Wait a few minutes and try the newest code.');
+    const step = totp.verify(totp.open(user.totp_secret), req.body.code);
+    if (step === null || (user.totp_last_step !== null && step <= Number(user.totp_last_step))) {
+      await securityEvent(req, { tenantId: user.tenant_id, userId: user.id, action: 'sign_in_failed', outcome: 'refused', method: 'resume', reason: 'wrong_code' });
+      throw forbidden('That code is not right. Use the newest one in your app.');
+    }
+    const [r] = await pool.query('UPDATE users SET totp_last_step = ? WHERE id = ? AND (totp_last_step IS NULL OR totp_last_step < ?)', [step, user.id, step]);
+    if (r.affectedRows !== 1) throw forbidden('That code was just used. Wait for the next one.');
+    how = 'app';
+  } else throw bad('Use your passkey or the code from your app');
+  await CT.cleared(user.id);
+  if (!(await sessions.resume(sid))) throw unauthorized('Session ended. Sign in again.');
+  await securityEvent(req, { tenantId: user.tenant_id, userId: user.id, action: 'session_resumed', outcome: 'ok', method: how });
+  res.json({ ok: true, how });
 });
 
 // ---------------------------------------------------------------- where you are signed in, and your devices

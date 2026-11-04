@@ -14,6 +14,7 @@ const { pool } = require('../src/db');
 const modules = require('../src/lib/modules');
 
 let server; let base;
+const REC = require('./helpers/records').records(() => base, () => PW); // one patient-record check per sign-in (feat/auth-hardening)
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const PW = 'correct-horse-battery';
 
@@ -31,7 +32,7 @@ async function mountain(name) {
   const slug = `${name}-${suffix}`;
   const res = await fetch(`${base}/api/v1/tenants`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-bootstrap-key': 'test-bootstrap-key' }, body: JSON.stringify({ slug, name, owner: { email: `owner@${slug}.test`, password: PW, first_name: 'Olive', last_name: 'Owner' } }) });
   assert.equal(res.status, 201);
-  const login = async (email) => (await api('POST', '/auth/login', { body: { tenant: slug, email, password: PW } })).body.token;
+  const login = async (email) => await REC((await api('POST', '/auth/login', { body: { tenant: slug, email, password: PW } })).body.token);
   const m = { slug, owner: await login(`owner@${slug}.test`) };
   const [[t]] = await pool.query('SELECT id FROM tenants WHERE slug = ?', [slug]);
   m.id = Number(t.id);
@@ -85,7 +86,7 @@ test('links show each reader only what they may open', async () => {
     return Object.fromEntries(m.links.map((l) => [l.type, l]));
   };
   const owner = await linksFor(a.owner);
-  assert.equal(owner.patrol_case.state, 'ok'); assert.match(owner.patrol_case.title, /^Case /); assert.match(owner.patrol_case.subtitle, /Knee/);
+  assert.equal(owner.patrol_case.state, 'ok'); assert.match(owner.patrol_case.title, /^Case /); assert.match(owner.patrol_case.subtitle, /^Injury · /); assert.doesNotMatch(owner.patrol_case.subtitle, /Knee/, 'a chat preview never shows the case summary (feat/auth-hardening M3)');
   assert.equal(owner.customer.title, 'Gwen Guest');
   assert.equal(owner.order.state, 'gone');
   const counter = await linksFor(a.counter);

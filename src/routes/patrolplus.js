@@ -14,6 +14,9 @@ const mailer = require('../lib/mailer');
 const patrolRouter = require('./patrol');
 
 const router = express.Router();
+// Every /incidents/:id address on this router needs the patient-record rule first (lib/patientaccess.js): the case is the
+// person's own recent work, or they made the fresh check in the last 30 minutes. Read from the id Express matched.
+router.use('/incidents/:id', require('../lib/patientaccess').byParam);
 const patrol = requireRole('patrol', 'manager');
 const PA = require('../lib/patrolaccess');
 const { baseUrl } = require('../lib/baseurl');
@@ -331,7 +334,10 @@ router.get('/home', patrol, async (req, res) => {
   const t = await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId]);
   const today = todayIn(t.timezone);
   const [stale] = !canView ? [{ n: 0 }] : await rows(pool, "SELECT COUNT(*) AS n FROM incidents WHERE tenant_id = ? AND report_state = 'draft' AND occurred_at < ? AND category IN ('injury','medical','collision')", [tenantId, `${addDays(today, -1)} 00:00:00`]);
-  res.json({ mine: mine.map(num), recent: recent.map(num), waiting: waiting.map(num), followups_held: held.n, stale_drafts: stale.n, can_approve: canApprove, can_view_cases: canView });
+  // Summaries only for cases the person may open without the fresh check, or after it (lib/patientaccess.js).
+  const may = await require('../lib/patientaccess').openable(pool, req, [...mine, ...recent, ...waiting].map((r) => r.id));
+  const show = (r) => require('../lib/patientaccess').trimRow(num(r), may);
+  res.json({ mine: mine.map(show), recent: recent.map(show), waiting: waiting.map(show), followups_held: held.n, stale_drafts: stale.n, can_approve: canApprove, can_view_cases: canView });
 });
 
 // ---------------------------------------------------------------- follow-up desk (directors and managers)

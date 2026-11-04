@@ -1,8 +1,9 @@
 'use strict';
 
 // Sessions the server can end. A sign-in token carries a random session id (sid); the server keeps only its hash, and
-// every request checks the session is still open: not signed out, not idle for longer than SESSION_IDLE_MINUTES (60),
-// and not past its end (JWT_TTL, 8 hours). Signing out, changing a password and the console all end sessions at once.
+// every request checks the session is still open: not signed out, not idle for longer than SESSION_IDLE_MINUTES (60; 30
+// for patrol, the ski area login, owners and managers, LEADER_IDLE_MINUTES), not locked by its tab, and not past its end
+// (JWT_TTL, 8 hours, for everyone). Signing out, changing a password and the console all end sessions at once.
 // A shared terminal's session ends after TERMINAL_IDLE_MINUTES (15) unused, and at once if the terminal is revoked.
 // When the last browser tab using a session closes, the app marks it closing (closing_at). It ends CLOSING_GRACE_SECONDS
 // (30 minutes) later unless it is used again first: a reload uses it again within a second or two, a trip to Stripe and
@@ -32,17 +33,36 @@ const utc = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
  * method: how the person proved who they are (password, mfa, passkey, email, pin). steppedUp: counts as the second check
  * for sensitive actions for the next few minutes (a fresh passkey or two-step sign-in does).
  */
-async function open(user, req, { iat, method = 'password', deviceHash = null, terminalId = null, steppedUp = false } = {}) {
+async function open(user, req, { iat, method = 'password', deviceHash = null, terminalId = null, steppedUp = false, remember = false } = {}) {
   const sid = crypto.randomBytes(32).toString('base64url');
   const now = new Date();
   const ip = req && req.ip ? crypto.createHash('sha256').update(`${config.linkSecret}:${req.ip}`).digest('hex') : null;
   const agent = req && req.get ? String(req.get('user-agent') || '').slice(0, 120) : null;
-  await pool.query(`INSERT INTO user_sessions (id_hash, tenant_id, user_id, created_at, last_seen, expires_at, ip_hash, agent, method, device_hash, terminal_id, stepped_up_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  [hash(sid), user.tenant_id, user.id, utc(now), utc(now), utc(new Date(now.getTime() + ttlSeconds() * 1000)), ip, agent, method, deviceHash, terminalId, steppedUp ? utc(now) : null]);
+  const idle = await idleFor(user, terminalId);
+  // The records check (records_checked_at) is never set here: signing in is not the check for opening patient records.
+  await pool.query(`INSERT INTO user_sessions (id_hash, tenant_id, user_id, created_at, last_seen, expires_at, ip_hash, agent, method, device_hash, terminal_id, stepped_up_at, remember, idle_min)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  [hash(sid), user.tenant_id, user.id, utc(now), utc(now), utc(new Date(now.getTime() + ttlSeconds() * 1000)), ip, agent, method, deviceHash, terminalId, steppedUp ? utc(now) : null, remember && !terminalId ? 1 : 0, idle]);
   const claims = { tid: user.tenant_id, role: user.role, sid };
   if (iat) claims.iat = iat;
   return jwt.sign(claims, config.jwtSecret, { algorithm: 'HS256', subject: String(user.id), expiresIn: config.jwtTtl });
+}
+
+/**
+ * Patrol, the ski area login, owners and managers: their sessions go idle after LEADER_IDLE_MINUTES (30), not 60, and can
+ * be resumed with a passkey or an app code within the 8 hours (resume below). Everyone else keeps SESSION_IDLE_MINUTES.
+ * Decided when the session opens and kept with it (user_sessions.idle_min): a role change ends every session anyway.
+ */
+const LEADER_IDLE_MIN = () => Number(process.env.LEADER_IDLE_MINUTES || 30);
+const LEADER_ROLES = ['owner', 'manager', 'patrol', 'area'];
+async function idleFor(user, terminalId) {
+  if (terminalId) return null;
+  if (LEADER_ROLES.includes(user.role)) return LEADER_IDLE_MIN();
+  if (user.staff_id) {
+    const [[m]] = await pool.query('SELECT COUNT(*) AS n FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [user.tenant_id, user.staff_id]);
+    if (Number(m.n)) return LEADER_IDLE_MIN();
+  }
+  return null;
 }
 
 /** A shared terminal's sessions end sooner when left alone (TERMINAL_IDLE_MINUTES, 15). */
@@ -57,17 +77,44 @@ const STEP_UP_MIN = () => Number(process.env.STEP_UP_MINUTES || 10);
 const CLOSING_GRACE_SECONDS = 30 * 60;
 const BACK_RACE_SECONDS = 15; // a closing notice this soon after a back notice is the reload race, not a close
 const CLOSING_SQL = `(s.closing_at IS NULL OR s.closing_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL ${CLOSING_GRACE_SECONDS} SECOND))`;
-const STATE_SQL = `(s.id_hash IS NOT NULL AND s.ended_at IS NULL AND s.expires_at > UTC_TIMESTAMP()
-    AND s.last_seen > DATE_SUB(UTC_TIMESTAMP(), INTERVAL IF(s.terminal_id IS NULL, ?, ?) MINUTE) AND ${CLOSING_SQL}
+// session_resumable: not open, but only because it went idle or its tab locked it, and it may be resumed (a patrol or
+// leader session, not on a shared terminal, not signed out or ended, within its 8 hours, its tab not closed).
+const STATE_SQL = `(s.id_hash IS NOT NULL AND s.ended_at IS NULL AND s.expires_at > UTC_TIMESTAMP() AND s.locked_at IS NULL
+    AND s.last_seen > DATE_SUB(UTC_TIMESTAMP(), INTERVAL IF(s.terminal_id IS NULL, COALESCE(s.idle_min, ?), ?) MINUTE) AND ${CLOSING_SQL}
     AND (s.terminal_id IS NULL OR EXISTS (SELECT 1 FROM terminals x WHERE x.id = s.terminal_id AND x.tenant_id = s.tenant_id AND x.revoked_at IS NULL))) AS session_open,
+  (s.id_hash IS NOT NULL AND s.ended_at IS NULL AND s.expires_at > UTC_TIMESTAMP() AND s.terminal_id IS NULL AND s.idle_min IS NOT NULL AND ${CLOSING_SQL}) AS session_resumable,
   (s.stepped_up_at IS NOT NULL AND s.stepped_up_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? MINUTE)) AS stepped_up,
-  (s.closing_at IS NOT NULL) AS session_closing, s.method AS session_method, s.terminal_id AS session_terminal, s.device_hash AS session_device, s.display AS session_display`;
-const stateParams = () => [IDLE_MIN(), TERMINAL_IDLE_MIN(), STEP_UP_MIN()];
+  (s.records_checked_at IS NOT NULL AND s.records_checked_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? MINUTE)) AS records_checked,
+  (s.closing_at IS NOT NULL) AS session_closing, s.method AS session_method, s.terminal_id AS session_terminal, s.device_hash AS session_device, s.display AS session_display, s.remember AS session_remember, s.idle_min AS session_idle_min`;
+const RECORDS_MIN = () => Number(process.env.RECORDS_CHECK_MINUTES || 30);
+const stateParams = () => [IDLE_MIN(), TERMINAL_IDLE_MIN(), STEP_UP_MIN(), RECORDS_MIN()];
 const JOIN_SQL = 'LEFT JOIN user_sessions s ON s.id_hash = ? AND s.user_id = u.id';
 
-/** The person proved it was them again: sensitive actions are allowed for the next STEP_UP_MINUTES. */
-async function steppedUp(sid) {
-  await pool.query('UPDATE user_sessions SET stepped_up_at = UTC_TIMESTAMP() WHERE id_hash = ? AND ended_at IS NULL', [hash(sid)]);
+/**
+ * The person proved it was them again: sensitive actions are allowed for the next STEP_UP_MINUTES. records: the check was
+ * made at the patient-record prompt, so opening older or other people's patient records is allowed for RECORDS_MINUTES
+ * (30). Only that check sets records_checked_at: never signing in, never an ordinary second check (and it is not one).
+ */
+async function steppedUp(sid, { records = false } = {}) {
+  // The two checks are kept apart: a records check does not count for exports and resets, and the reverse.
+  await pool.query(`UPDATE user_sessions SET ${records ? 'records_checked_at' : 'stepped_up_at'} = UTC_TIMESTAMP() WHERE id_hash = ? AND ended_at IS NULL`, [hash(sid)]);
+}
+
+/**
+ * The tab locked itself (10 minutes without use): a patrol or leader session is locked on the server too, so the token
+ * does nothing until the person resumes with a passkey or app code (or signs in again). Other sessions are ended.
+ */
+async function lock(sid) {
+  const [r] = await pool.query('UPDATE user_sessions SET locked_at = UTC_TIMESTAMP() WHERE id_hash = ? AND ended_at IS NULL AND idle_min IS NOT NULL AND terminal_id IS NULL', [hash(sid)]);
+  if (!r.affectedRows) await end(sid, 'tab_locked');
+  return r.affectedRows === 1;
+}
+
+/** Quick resume: the session opens again, with the same 8-hour end (expires_at never moves). True when it did. */
+async function resume(sid) {
+  const [r] = await pool.query(`UPDATE user_sessions SET last_seen = UTC_TIMESTAMP(), locked_at = NULL, closing_at = NULL
+    WHERE id_hash = ? AND ended_at IS NULL AND expires_at > UTC_TIMESTAMP() AND terminal_id IS NULL AND idle_min IS NOT NULL`, [hash(sid)]);
+  return r.affectedRows === 1;
 }
 
 /**
@@ -105,12 +152,12 @@ function shown(sid) {
  */
 async function listOpen(userId) {
   const [list] = await pool.query(`SELECT s.id_hash, s.created_at, s.last_seen, s.agent, s.method, s.device_hash, x.name AS terminal,
-      LEAST(s.expires_at, DATE_ADD(s.last_seen, INTERVAL IF(s.terminal_id IS NULL, ?, ?) MINUTE),
+      LEAST(s.expires_at, DATE_ADD(s.last_seen, INTERVAL IF(s.terminal_id IS NULL, COALESCE(s.idle_min, ?), ?) MINUTE),
         COALESCE(DATE_ADD(s.closing_at, INTERVAL ${CLOSING_GRACE_SECONDS} SECOND), s.expires_at)) AS ends_at, (s.closing_at IS NOT NULL) AS closing
     FROM user_sessions s LEFT JOIN terminals x ON x.id = s.terminal_id AND x.tenant_id = s.tenant_id
     WHERE s.user_id = ? AND s.ended_at IS NULL AND s.expires_at > UTC_TIMESTAMP()
-      AND s.last_seen > DATE_SUB(UTC_TIMESTAMP(), INTERVAL IF(s.terminal_id IS NULL, ?, ?) MINUTE) AND ${CLOSING_SQL}
-      AND (s.terminal_id IS NULL OR x.revoked_at IS NULL)
+      AND s.last_seen > DATE_SUB(UTC_TIMESTAMP(), INTERVAL IF(s.terminal_id IS NULL, COALESCE(s.idle_min, ?), ?) MINUTE) AND ${CLOSING_SQL}
+      AND s.locked_at IS NULL AND (s.terminal_id IS NULL OR x.revoked_at IS NULL)
     ORDER BY s.last_seen DESC LIMIT 30`, [IDLE_MIN(), TERMINAL_IDLE_MIN(), userId, IDLE_MIN(), TERMINAL_IDLE_MIN()]);
   return list;
 }
@@ -144,4 +191,4 @@ async function prune() {
   return r.affectedRows;
 }
 
-module.exports = { open, STATE_SQL, CLOSING_GRACE_SECONDS, BACK_RACE_SECONDS, closing, back, shown, listOpen, IDLE_MIN, stateParams, JOIN_SQL, steppedUp, STEP_UP_MIN, TERMINAL_IDLE_MIN, touch, setDisplay, end, endAll, prune, hash };
+module.exports = { open, idleFor, lock, resume, LEADER_IDLE_MIN, RECORDS_MIN, STATE_SQL, CLOSING_GRACE_SECONDS, BACK_RACE_SECONDS, closing, back, shown, listOpen, IDLE_MIN, stateParams, JOIN_SQL, steppedUp, STEP_UP_MIN, TERMINAL_IDLE_MIN, touch, setDisplay, end, endAll, prune, hash };

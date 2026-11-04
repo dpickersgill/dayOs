@@ -16,6 +16,9 @@ const OPS = require('../lib/patrolops');
 const K = require('../lib/patrolkits');
 
 const router = express.Router();
+// Every /incidents/:id address on this router needs the patient-record rule first (lib/patientaccess.js): the case is the
+// person's own recent work, or they made the fresh check in the last 30 minutes. Read from the id Express matched.
+router.use('/incidents/:id', require('../lib/patientaccess').byParam);
 const patrol = requireRole('patrol', 'manager');
 const manage = PA.needs(pool, 'manage_equipment', 'Only those who manage patrol equipment can change kits');
 const clock = async (db, t) => { const tz = (await one(db, 'SELECT timezone FROM tenants WHERE id = ?', [t])).timezone; return { now: nowIn(tz), today: todayIn(tz) }; };

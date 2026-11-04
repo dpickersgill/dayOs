@@ -16,8 +16,10 @@ const { requireModule } = require('../lib/modules');
 const MSG_PIN = 'That PIN did not match';
 const DUMMY = bcrypt.hashSync('not-a-real-pin', 8);
 
-async function kioskAudit(db, tenantId, action, entityId, detail, userId = null) {
-  await db.query('INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id, detail) VALUES (?, ?, ?, ?, ?, ?)', [tenantId, userId, action, 'time_entries', entityId ?? null, JSON.stringify(detail)]);
+// entity: what the id is. Time punches are time_entries; tablet changes are kiosk_devices (feat/auth-hardening: before,
+// a tablet's changes were filed under time_entries, so a punch's history showed "device added" when the ids matched).
+async function kioskAudit(db, tenantId, action, entityId, detail, userId = null, entity = 'time_entries') {
+  await db.query('INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id, detail) VALUES (?, ?, ?, ?, ?, ?)', [tenantId, userId, action, entity, entityId ?? null, JSON.stringify(detail)]);
 }
 
 // ================================================================ the tablet
@@ -160,7 +162,7 @@ publicRouter.post('/punch', validate(z.object({ session: z.string().max(400), ac
 // ================================================================ the manager
 const adminRouter = express.Router();
 adminRouter.use(requireRole('manager'));
-const mgrAudit = (db, req, action, entityId, detail) => kioskAudit(db, req.auth.tenantId, action, entityId, detail, req.auth.userId);
+const mgrAudit = (db, req, action, entityId, detail) => kioskAudit(db, req.auth.tenantId, action, entityId, detail, req.auth.userId, /^kiosk_device/.test(action) ? 'kiosk_devices' : 'time_entries');
 
 adminRouter.get('/overview', async (req, res) => {
   const { tenantId } = req.auth;
@@ -177,14 +179,15 @@ adminRouter.get('/overview', async (req, res) => {
   ]);
   res.json({
     mountain: { name: t.name },
-    settings: { photos: Boolean(t.kiosk_photos), photo_days: t.kiosk_photo_days },
+    settings: { photos: Boolean(t.kiosk_photos), photo_days: t.kiosk_photo_days, pin_four: Boolean(t.kiosk_pin_four) },
     devices: devices.map((d) => ({ id: d.id, name: d.name, active: Boolean(d.active), paired: Boolean(d.paired), waiting: Boolean(d.waiting), last_seen_at: d.last_seen_at ? localTime(d.last_seen_at, t.timezone) : null })),
     people: people.map((p) => ({ staff_id: p.staff_id, name: `${p.first_name} ${p.last_name}`, pin_set: Boolean(p.pin_set), badge_issued: Boolean(p.badge_issued), locked: Boolean(p.locked), clocked_in: Boolean(p.clocked_in) })),
   });
 });
 
-adminRouter.put('/settings', validate(z.object({ photos: z.boolean(), photo_days: z.number().int().min(1).max(365) })), async (req, res) => {
+adminRouter.put('/settings', validate(z.object({ photos: z.boolean(), photo_days: z.number().int().min(1).max(365), pin_four: z.boolean().optional() })), async (req, res) => {
   await pool.query('UPDATE tenants SET kiosk_photos = ?, kiosk_photo_days = ? WHERE id = ?', [req.body.photos ? 1 : 0, req.body.photo_days, req.auth.tenantId]);
+  if (req.body.pin_four !== undefined) await pool.query('UPDATE tenants SET kiosk_pin_four = ? WHERE id = ?', [req.body.pin_four ? 1 : 0, req.auth.tenantId]);
   await mgrAudit(pool, req, 'kiosk_settings', null, req.body);
   res.json({ ok: true });
 });
@@ -235,7 +238,8 @@ adminRouter.put('/people/:id/pin', validate(z.object({ pin: z.string().optional(
   const id = paramId(req);
   await activeStaff(req, id);
   const pin = req.body.pin === undefined || req.body.pin === '' ? K.randomPin() : req.body.pin;
-  const problem = K.pinProblem(pin);
+  const allowFour = Boolean(Number((await one(pool, 'SELECT kiosk_pin_four FROM tenants WHERE id = ?', [req.auth.tenantId])).kiosk_pin_four));
+  const problem = K.pinProblem(pin, { allowFour });
   if (problem) throw bad(problem);
   await pool.query('INSERT INTO kiosk_credentials (tenant_id, staff_id, pin_hash, pin_set_at) VALUES (?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE pin_hash = VALUES(pin_hash), pin_set_at = NOW(), failed_attempts = 0, locked_until = NULL', [req.auth.tenantId, id, await bcrypt.hash(pin, 10)]);
   await mgrAudit(pool, req, 'kiosk_pin_set', null, { staff_id: id });

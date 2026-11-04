@@ -33,7 +33,7 @@ router.get('/orders', requireRole('manager', 'counter'), async (req, res) => {
 });
 
 router.post('/orders/:id/resend', requireRole('manager', 'counter'), async (req, res) => {
-  const row = await one(pool, 'SELECT id, status FROM shop_orders WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, Number(req.params.id)]);
+  const row = await one(pool, 'SELECT id, status FROM shop_orders WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, (require('../lib/util').canonId(req.params.id) || 0)]);
   if (!row) throw notFound('Online order');
   if (row.status !== 'paid') throw conflict('Only a paid order has tickets to send');
   await pool.query('UPDATE shop_orders SET emailed_at = NULL WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, row.id]);
@@ -71,7 +71,7 @@ router.get('/groups', requireRole('manager', 'counter'), async (req, res) => {
   res.json({ data: await rows(pool, "SELECT id, contact_name, organisation, email, phone, group_size, preferred_on, note, status, created_at FROM group_enquiries WHERE tenant_id = ? ORDER BY FIELD(status, 'new','contacted','booked','closed'), id DESC LIMIT 200", [req.auth.tenantId]) });
 });
 router.patch('/groups/:id', requireRole('manager', 'counter'), validate(z.object({ status: z.enum(['new', 'contacted', 'booked', 'closed']) })), async (req, res) => {
-  const [r] = await pool.query('UPDATE group_enquiries SET status = ? WHERE tenant_id = ? AND id = ?', [req.body.status, req.auth.tenantId, Number(req.params.id)]);
+  const [r] = await pool.query('UPDATE group_enquiries SET status = ? WHERE tenant_id = ? AND id = ?', [req.body.status, req.auth.tenantId, (require('../lib/util').canonId(req.params.id) || 0)]);
   if (!r.affectedRows) throw notFound('Inquiry');
   res.json({ ok: true });
 });

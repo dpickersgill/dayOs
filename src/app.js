@@ -231,6 +231,8 @@ function createApp() {
   const api = express.Router();
   // Responses can hold guest and patient details: tell browsers and proxies never to keep a copy.
   api.use((_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+  // One spelling per address: a %-escaped letter, digit or - . _ ~ is refused before any check reads the path (lib/pathcheck.js).
+  api.use(require('./lib/pathcheck').oneSpelling);
   // 10 failed sign-in attempts a minute per address. LOGIN_RATE_LIMIT exists so automated tests can raise it.
   // Since 2026.11.10 the counts are shared by every server, and a sign-in that works gives its count back
   // (skipSuccessful), so a crew signing in at opening from the mountain's one address is never turned away.

@@ -50,7 +50,7 @@ function platformRouter(log) {
   });
 
   const load = async (req) => {
-    const id = Number(req.params.id);
+    const id = (require('../lib/util').canonId(req.params.id) || 0);
     const n = Number.isInteger(id) && id > 0 ? await one(pool, 'SELECT * FROM status_notes WHERE id = ?', [id]) : null;
     if (!n) throw notFound('Note');
     return n;

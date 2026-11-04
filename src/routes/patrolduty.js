@@ -161,7 +161,7 @@ router.post('/duty/sign-out', patrol, validate(z.object({ staff_id: z.number().i
 /** Change the station or radio of someone on duty (they moved huts mid-day). */
 router.patch('/duty/:staffId', patrol, validate(z.object({ station_id: z.number().int().positive().nullable().optional(), radio: z.string().trim().max(30).nullable().optional() })), async (req, res) => {
   const t = req.auth.tenantId;
-  const staffId = await actingFor(req, Number(req.params.staffId));
+  const staffId = await actingFor(req, (require('../lib/util').canonId(req.params.staffId) || 0));
   const d = await one(pool, 'SELECT id FROM patrol_duty WHERE tenant_id = ? AND staff_id = ? AND signed_out_at IS NULL', [t, staffId]);
   if (!d) throw conflict('Not signed in');
   if (req.body.station_id && !(await one(pool, 'SELECT id FROM patrol_stations WHERE tenant_id = ? AND id = ?', [t, req.body.station_id]))) throw notFound('Station');

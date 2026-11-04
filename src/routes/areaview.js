@@ -77,6 +77,9 @@ router.get('/reports/:id', async (req, res) => {
   const t = req.auth.tenantId; const id = paramId(req);
   const i = await one(pool, "SELECT id, season, seq FROM incidents WHERE tenant_id = ? AND id = ? AND report_state = 'approved'", [t, id]);
   if (!i) throw notFound('Approved report');
+  // A patient record: the same rule as Patrol (lib/patientaccess.js). The ski area login has no cases of its own, so it
+  // makes the fresh check (30 minutes) before opening a report.
+  await require('../lib/patientaccess').guard(pool, req, id);
   const v = await one(pool, "SELECT version_no, snapshot, created_at FROM incident_versions WHERE tenant_id = ? AND incident_id = ? AND kind = 'approved' ORDER BY version_no DESC LIMIT 1", [t, id]);
   if (!v) throw notFound('Approved report');
   await audit(pool, req, 'area_view', 'incidents', id, { version: v.version_no });

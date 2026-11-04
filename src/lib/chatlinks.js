@@ -18,7 +18,7 @@ const TYPES = {
   patrol_case: {
     label: 'Patrol case', path: (id) => `#/patrol/case/${id}`, module: 'patrol',
     allowed: async (req) => is(req, 'patrol', 'manager') && PA.can(pool, req, 'view_cases'),
-    titles: async (t, ids) => rows(pool, "SELECT id, CONCAT('Case ', COALESCE(CONCAT(season, '-', LPAD(seq, 4, '0')), id)) AS title, CONCAT(summary, ' · ', DATE_FORMAT(occurred_at, '%b %e')) AS subtitle FROM incidents WHERE tenant_id = ? AND id IN (?)", [t, ids]),
+    titles: async (t, ids) => rows(pool, "SELECT id, CONCAT('Case ', COALESCE(CONCAT(season, '-', LPAD(seq, 4, '0')), id)) AS title, CONCAT(UPPER(LEFT(category, 1)), SUBSTRING(REPLACE(category, '_', ' '), 2), ' · ', DATE_FORMAT(occurred_at, '%b %e')) AS subtitle FROM incidents WHERE tenant_id = ? AND id IN (?)", [t, ids]),
   },
   asset: {
     label: 'Asset', path: (id) => `#/assets/a/${id}`, module: 'assets',

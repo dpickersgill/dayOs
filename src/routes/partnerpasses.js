@@ -208,15 +208,15 @@ router.get('/:id/redemptions.csv', desk, stepUp('download pass holders\' names')
 
 router.post('/redemptions/:rid/id-checked', desk, async (req, res) => {
   const { tenantId } = req.auth;
-  const [r] = await pool.query("UPDATE partner_redemptions SET id_checked = 1 WHERE tenant_id = ? AND id = ? AND status = 'active'", [tenantId, Number(req.params.rid) || 0]);
+  const [r] = await pool.query("UPDATE partner_redemptions SET id_checked = 1 WHERE tenant_id = ? AND id = ? AND status = 'active'", [tenantId, (require('../lib/util').canonId(req.params.rid) || 0)]);
   if (!r.affectedRows) throw notFound('Visit');
-  await audit(pool, req, 'id_checked', 'partner_redemptions', Number(req.params.rid));
+  await audit(pool, req, 'id_checked', 'partner_redemptions', (require('../lib/util').canonId(req.params.rid) || 0));
   res.json({ ok: true });
 });
 
 router.post('/redemptions/:rid/void', boss, validate(z.object({ reason: z.string().trim().min(3, 'Say why').max(200) })), async (req, res) => {
   const { tenantId } = req.auth;
-  const rid = Number(req.params.rid) || 0;
+  const rid = (require('../lib/util').canonId(req.params.rid) || 0);
   await tx(async (conn) => {
     const r = await one(conn, 'SELECT * FROM partner_redemptions WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, rid]);
     if (!r) throw notFound('Visit');
