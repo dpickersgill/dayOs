@@ -57,11 +57,11 @@ export function accessSummaryPanel() {
     const save = button('Save', async () => {
       try { await put('/patrol/access-summary', { on: on.checked }); toast('Saved'); } catch (err) { toast(err.message, 'error'); on.checked = !on.checked; }
     }, { kind: 'primary', small: true });
-    clear(box).append(h('h3', null, 'Patient record access'),
+    clear(box).append(...[h('h3', null, 'Patient record access'),
       h('p', null, 'Every Monday morning the owner and patrol Admins get one email: how many patient care records were opened last week, and every open outside the person\'s own work in their shift (who, case number, when, and whether they confirmed it was them). Case numbers only, never patient details.'),
       h('label', { class: 'check wide' }, on, ' Send the weekly access summary'),
       s.can_turn_off ? null : h('p', { class: 'muted small' }, 'Only the owner can turn it off.'),
-      h('div', { class: 'row' }, save));
+      h('div', { class: 'row' }, save)].filter(Boolean));
     box.hidden = false;
   })();
   return box;

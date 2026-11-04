@@ -45,7 +45,7 @@ async function householdFor(req) {
   const hh = await HH.forEmail(pool, t.id, email);
   return { t, email, hh };
 }
-const inHousehold = (hh, id) => { if (!HH.has(hh, id)) throw notFound('Person'); return Number(id); };
+const inHousehold = (hh, id) => { const n = require('../lib/util').canonId(id); if (!n || !HH.has(hh, n)) throw notFound('Person'); return n; }; // plain digits only (canonId)
 
 // ---------------------------------------------------------------- the household account
 /** Everything the account page shows. */
