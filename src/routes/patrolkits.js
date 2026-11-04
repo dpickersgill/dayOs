@@ -160,6 +160,7 @@ router.post('/kits/:id/checks', patrol, validate(z.object({
 })), async (req, res) => {
   const t = req.auth.tenantId;
   const b = req.body;
+  if (b.incident_id) await require('../lib/patientaccess').guard(pool, req, b.incident_id); // supplies used on a case are case evidence
   const out = await tx(async (conn) => {
     if (b.client_ref) {
       const seen = await one(conn, 'SELECT id, result FROM patrol_kit_checks WHERE tenant_id = ? AND client_ref = ?', [t, b.client_ref]);

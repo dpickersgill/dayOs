@@ -35,6 +35,7 @@ const SESSION_HOURS = 2;
 let lastStep = -1; // a code works once on this server
 // ...and once across every server: each code's time step is claimed in the shared store (lib/ratestore.js), 2026.11.10.
 const stepClaims = require('../lib/ratestore').storeFor('platform-totp-step');
+const keyCodeTries = require('../middleware/rateLimit').counter({ name: 'platform-key-code', windowMs: 15 * 60_000, max: 5 });
 stepClaims.init({ windowMs: 5 * 60_000 });
 const keyOk = (supplied) => Boolean(config.bootstrapKey) && crypto.timingSafeEqual(digest(supplied || ''), digest(config.bootstrapKey));
 // Sessions are signed with a key of their own (derived from JWT_SECRET), never with the platform key, so holding the
@@ -116,8 +117,12 @@ router.post('/session', validate(z.object({ key: z.string().min(1).max(500), nam
   if (!(await keyAllowed())) throw forbidden(KEY_OFF);
   if (!keyOk(req.body.key)) throw forbidden('That platform key is not right');
   const secret = process.env.PLATFORM_TOTP_SECRET;
+  // The key's code is counted for the key itself, across every address and server (feat/auth-hardening: before, only per
+  // address): 5 tries in 15 minutes, each counted before it is checked; a right code gives its try back.
+  if (secret && (await keyCodeTries.hit('platform-key')).over) { require('../lib/audit').trail({ console: true, action: 'sign_in_failed', detail: JSON.stringify({ reason: 'key_code_locked' }), ip: req.ip || null, security: true }); throw new AppError(429, 'Too many wrong codes for the platform key. Wait 15 minutes.'); }
   const step = secret ? totp.verify(secret, req.body.code) : null;
-  if (secret && step === null) throw forbidden('That code is not right');
+  if (secret && step === null) { require('../lib/audit').trail({ console: true, action: 'sign_in_failed', detail: JSON.stringify({ reason: 'key_wrong_code' }), ip: req.ip || null, security: true }); throw forbidden('That code is not right'); }
+  if (secret) await keyCodeTries.store.decrement('platform-key');
   if (secret && (step <= lastStep || (await stepClaims.increment(String(step))).totalHits > 1)) throw forbidden('That code was just used. Wait for the next one.');
   if (secret) lastStep = step;
   await pool.query('INSERT INTO platform_audit (tenant_id, action, actor, detail) VALUES (NULL, ?, ?, NULL)', ['sign_in', `key: ${req.body.name}`]);
@@ -412,7 +417,7 @@ router.get('/tenants/:id', twoStepRead, async (req, res) => {
   // who nobody at the mountain but the owner or a patrol Admin may reset (feat/auth-hardening).
   const users = await rows(pool, `SELECT u.id, u.email, u.username, u.role, u.active, u.totp_enabled, m.access_level AS patrol_level FROM users u
     LEFT JOIN patrol_members m ON m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id
-    WHERE u.tenant_id = ? AND (u.role IN ('owner','manager') OR m.access_level IN ('admin','manager')) ORDER BY u.role, u.email`, [id]);
+    WHERE u.tenant_id = ? AND (u.role IN ('owner','manager') OR m.access_level IN ('admin','manager','approver')) ORDER BY u.role, u.email`, [id]);
   const history = await rows(pool, 'SELECT at, action, actor, detail FROM platform_audit WHERE tenant_id = ? ORDER BY id DESC LIMIT 30', [id]);
   const bill = await one(pool, 'SELECT * FROM tenant_billing WHERE tenant_id = ?', [id]);
   const billEvents = await rows(pool, 'SELECT at, kind, detail, by_operator FROM billing_events WHERE tenant_id = ? ORDER BY id DESC LIMIT 30', [id]);
@@ -662,7 +667,7 @@ router.post('/tenants/:id/reset-password', twoStepAccess, needsAccess, validate(
   reason: z.string().trim().min(10, 'Say how you confirmed it is them, for example "Confirmed by phone call with the owner"').max(300) })), async (req, res) => {
   const id = paramId(req);
   const u = await one(pool, `SELECT u.id, u.username, u.email, u.role, t.slug, t.name FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE u.id = ? AND u.tenant_id = ?
-    AND (u.role IN ('owner','manager') OR EXISTS (SELECT 1 FROM patrol_members m WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id AND m.access_level IN ('admin','manager')))`, [req.body.user_id, id]);
+    AND (u.role IN ('owner','manager') OR EXISTS (SELECT 1 FROM patrol_members m WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id AND m.access_level IN ('admin','manager','approver')))`, [req.body.user_id, id]);
   if (!u) throw notFound('Login');
   await PWR.refuseWeak(req.body.password, { username: u.username, email: u.email, tenantSlug: u.slug, tenantName: u.name });
   const hash = await bcrypt.hash(req.body.password, 12);

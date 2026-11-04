@@ -88,7 +88,7 @@ async function checkGrant(req, level, staffId = null, from = null) {
 /** Only the owner or a roster Admin changes or removes an Admin or Manager, so nobody can demote a director and reset them. */
 async function checkTarget(req, currentLevel, staffId = null) {
   if (currentLevel === 'admin' && (await PA.levelOf(pool, req)) !== 'admin') throw forbidden('Only a patrol Admin can change or remove an Admin');
-  if (RR.LEADER_LEVELS.includes(currentLevel) && !(await RR.rosterAdmin(pool, req))) throw forbidden('Only the owner or a patrol Admin on the roster can change or remove an Admin or Manager');
+  if (RR.LEADER_LEVELS.includes(currentLevel) && !(await RR.rosterAdmin(pool, req))) throw forbidden('Only the owner or a patrol Admin on the roster can change or remove an Admin, Manager or Approver');
   if (staffId && req.auth.staffId && Number(staffId) === Number(req.auth.staffId) && currentLevel === 'admin' && req.auth.role !== 'owner') throw forbidden('Ask the owner or another patrol Admin to change your own Admin level');
 }
 

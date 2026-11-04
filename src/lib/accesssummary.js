@@ -17,10 +17,12 @@ const { eachTenant } = require('./jobs');
 const { isSandbox } = require('./sandbox');
 const PX = require('./patientaccess');
 
-// The actions that open a patient record (the access log's reads).
-const OPENS = ['view', 'view_check', 'view_version', 'view_signature', 'view_photo', 'view_photo_preview', 'view_photos', 'view_scene', 'view_score', 'claim_file_view', 'story_fill', 'handoff_print', 'records_pack_view', 'area_view'];
-const WHAT = { view: 'case', view_check: 'report check', view_version: 'saved copy', view_signature: 'signature', view_photo: 'photo', view_photo_preview: 'photo', view_photos: 'photos', view_scene: 'scene', view_score: 'documentation score', claim_file_view: 'claim file', story_fill: 'story fill', handoff_print: 'hand-off sheet', records_pack_view: 'release pack', area_view: 'approved report' };
-const HOW = { checked: 'fresh check', responder: 'responder', responder_self: 'added themselves as responder', dispatched: 'sent to the call', on_duty: 'on duty', crew: 'crew', writing: 'own draft, older than 12 hours', wrote: 'wrote it' };
+// What is listed comes from one place: every audit row about a case that passed the patient-record rule carries how it
+// was allowed (lib/audit.js adds req.patientAccess to it), so every read or change of a case through Patrol, the area
+// login, a records request or a witness link is here, whatever its action is called. Rows that show a case without that
+// rule (a chat link preview, an outside claim-file link being opened) are listed by name in PX.ALSO_LISTED.
+const WHAT = PX.ACTION_LABELS;
+const HOW = { no_rule: 'a preview in a message', outside_link: 'an outside link', checked: 'fresh check', responder: 'responder', responder_self: 'added themselves as responder', dispatched: 'sent to the call', on_duty: 'on duty', crew: 'crew', writing: 'own draft, older than 12 hours', wrote: 'wrote it' };
 
 const caseNo = (r) => (r.seq ? `${r.season}-${String(r.seq).padStart(4, '0')}` : `Case ${r.incident_id}`);
 const parse = (d) => { if (!d) return {}; if (typeof d === 'object') return d; try { return JSON.parse(d); } catch (_) { return {}; } };
@@ -35,16 +37,16 @@ async function build(tenantId, weekStart) {
     FROM audit_log a JOIN incidents i ON i.tenant_id = a.tenant_id AND i.id = a.entity_id
       LEFT JOIN users u ON u.tenant_id = a.tenant_id AND u.id = a.user_id LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id
       LEFT JOIN staff st ON st.tenant_id = u.tenant_id AND st.id = u.staff_id LEFT JOIN people sp ON sp.tenant_id = st.tenant_id AND sp.id = st.person_id
-    WHERE a.tenant_id = ? AND a.entity = 'incidents' AND a.action IN (?) AND a.at >= ? AND a.at < ? ORDER BY a.at`, [tenantId, OPENS, from, to]);
+    WHERE a.tenant_id = ? AND a.entity = 'incidents' AND (JSON_EXTRACT(a.detail, '$.access') IS NOT NULL OR a.action IN (?)) AND a.at >= ? AND a.at < ? ORDER BY a.at`, [tenantId, PX.ALSO_LISTED, from, to]);
   const records = new Set(list.map((r) => `${r.user_id}|${r.incident_id}`));
   const lines = new Map();
   for (const r of list) {
     const d = parse(r.detail);
-    const access = d.access || null;
-    if (!access || access === 'wrote') continue; // their own recent work
+    const access = d.access || (r.user_id ? 'no_rule' : 'outside_link');
+    if (access === 'wrote') continue; // their own recent work
     if (access === 'writing' && Date.parse(`${String(r.at).replace(' ', 'T')}Z`) - Date.parse(`${String(r.created_at).replace(' ', 'T')}Z`) <= PX.CASE_HOURS * 3_600_000) continue;
     const key = `${r.user_id}|${r.incident_id}`;
-    if (!lines.has(key)) lines.set(key, { who: r.who || 'Unknown login', user_id: Number(r.user_id), case_number: caseNo(r), first_at: r.at, last_at: r.at, times: 0, what: new Set(), how: new Set(), fresh: false });
+    if (!lines.has(key)) lines.set(key, { who: r.who || (r.user_id ? 'Unknown login' : `Outside link${d.shared_with ? ` (${String(d.shared_with).slice(0, 60)})` : ''}`), user_id: Number(r.user_id), case_number: caseNo(r), first_at: r.at, last_at: r.at, times: 0, what: new Set(), how: new Set(), fresh: false });
     const l = lines.get(key);
     l.times += 1; l.last_at = r.at; l.what.add(WHAT[r.action] || r.action); l.how.add(access); if (d.fresh) l.fresh = true;
   }
@@ -92,4 +94,4 @@ async function runForTenant(t, { now, base } = {}) {
 
 const runAll = (base) => eachTenant('access_summary', (t) => runForTenant(t, { base }));
 
-module.exports = { build, render, runForTenant, runAll, recipients, OPENS };
+module.exports = { build, render, runForTenant, runAll, recipients };

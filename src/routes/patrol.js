@@ -234,7 +234,12 @@ const csvCell = (v) => {
 const toCsv = (cols, data) => [cols.join(','), ...data.map((r) => cols.map((c) => csvCell(r[c])).join(','))].join('\r\n');
 
 /** CSV for insurers and state reporting. Names and free text (the summary can hold a name) stay out of it. */
+// A search in an export can single out a patient by name: it needs the records check too, and is on the access log.
+const exportSearch = async (req, data, what) => {
+  if (req.query.q) await audit(pool, req, 'search', 'incidents', null, { export: what, matches: data.length, ids: data.slice(0, 50).map((r) => r.id).filter(Boolean) });
+};
 router.get('/incidents.csv', patrol, needs('reports'), stepUp('download case records'), async (req, res) => {
+  if (req.query.q) PX.searchCheck(req);
   const { where, params } = filters(req);
   const data = await rows(
     pool,
@@ -246,15 +251,17 @@ router.get('/incidents.csv', patrol, needs('reports'), stepUp('download case rec
   const out = data.map((r) => ({ ...r, case_number: caseNumber(r) }));
   const cols = ['case_number', 'id', 'occurred_at', 'location', 'category', 'severity', 'disposition', 'status', 'report_state', 'patients'];
   await audit(pool, req, 'export', 'incidents', null, { rows: data.length });
+  await exportSearch(req, data, 'incidents.csv');
   res.set('Content-Type', 'text/csv; charset=utf-8').set('Content-Disposition', 'attachment; filename="incidents.csv"').send(toCsv(cols, out));
 });
 
 /** One row per patient with structured fields only (no names, no free text), for injury statistics. */
 router.get('/patients.csv', patrol, needs('reports'), stepUp('download patient statistics'), async (req, res) => {
+  if (req.query.q) PX.searchCheck(req);
   const { where, params } = filters(req);
   const data = await rows(
     pool,
-    `SELECT i.season, i.seq, i.occurred_at, p.age_years, p.sex, p.activity, p.ability, p.helmet, p.rental_equipment, p.disposition,
+    `SELECT i.id, i.season, i.seq, i.occurred_at, p.age_years, p.sex, p.activity, p.ability, p.helmet, p.rental_equipment, p.disposition,
             (SELECT GROUP_CONCAT(CONCAT(j.body_region, ':', j.injury_type) SEPARATOR ' | ') FROM incident_injuries j WHERE j.tenant_id = p.tenant_id AND j.patient_id = p.id AND j.voided_at IS NULL) AS injuries
      FROM incident_patients p JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id
      WHERE ${where} AND p.voided_at IS NULL ORDER BY i.occurred_at, p.id`,
@@ -263,6 +270,7 @@ router.get('/patients.csv', patrol, needs('reports'), stepUp('download patient s
   const out = data.map((r) => ({ ...r, case_number: caseNumber(r) }));
   const cols = ['case_number', 'occurred_at', 'age_years', 'sex', 'activity', 'ability', 'helmet', 'rental_equipment', 'disposition', 'injuries'];
   await audit(pool, req, 'export', 'incident_patients', null, { rows: data.length });
+  await exportSearch(req, data, 'patients.csv');
   res.set('Content-Type', 'text/csv; charset=utf-8').set('Content-Disposition', 'attachment; filename="patients.csv"').send(toCsv(cols, out));
 });
 

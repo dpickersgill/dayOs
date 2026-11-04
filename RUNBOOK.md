@@ -130,8 +130,8 @@ typed as a username.
   the big passkey button, or set up a passkey in Settings.
 - **Quick resume:** patrol, the ski area login, owners and managers pause after 30 minutes without use; a passkey or app
   code carries on, within the 8 hours. Without either, they sign in again.
-- **Who resets whom:** a manager cannot reset a manager (only the owner), or a patrol director or patrol admin (only the
-  owner or a patrol Admin on the roster). A patrol Admin who is not a manager resets patrol logins only. A login whose patrol
+- **Who resets whom:** a manager cannot reset a manager (only the owner), or a patrol leader at Admin, Manager or Approver
+  (only the owner or a patrol Admin on the roster). A patrol Admin who is not a manager resets patrol logins only. A login whose patrol
   level, role or staff link was lowered in the last 24 hours, or by the person asking, cannot be reset by them (the owner can).
 - **When nobody at the mountain can reset a director:** the console resets owners, managers, patrol directors and patrol
   admins. Confirm it is them by phone first, and type how in "How you confirmed it is them" (kept in the mountain's history).

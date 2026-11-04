@@ -640,3 +640,149 @@ test('the weekly summary lists opens outside the opener\'s own work, with no pat
   const [[off]] = await pool.query('SELECT * FROM tenants WHERE id = ?', [M.id]);
   assert.equal((await AS.runForTenant(off, { now: require('../src/lib/util').addDays(nextMonday, 7), base })).skipped, 'off');
 });
+
+// ================================================================ the third review (C+): every route keyed by another id
+/** An approved case started 30 hours ago by the owner, with a patient, and an approved frozen copy. */
+async function approvedOldCase(summary = 'Fall on the ridge') {
+  const id = await newCase(M.owner, { summary });
+  ok(await api('POST', `/patrol/incidents/${id}/patients`, { token: M.owner, body: { first_name: 'Celia', last_name: 'Brightwater' } }));
+  await pool.query("UPDATE incidents SET report_state = 'approved' WHERE id = ?", [id]);
+  await pool.query("INSERT INTO incident_versions (tenant_id, incident_id, version_no, kind, snapshot, created_by) VALUES (?, ?, 1, 'approved', ?, ?)", [M.id, id, JSON.stringify({ id, summary, patients: [{ first_name: 'Celia' }], photos: [] }), U.Dir.id]);
+  await age(id, 30);
+  return id;
+}
+
+test('R1: witness links are keyed by their own id, and still need the records check on their case', async () => {
+  const id = await newCase(U.Pat.token);
+  const link = ok(await api('POST', `/patrol/incidents/${id}/witness-links`, { token: U.Pat.token, body: { name: 'Wanda Witness', phone: '+12155550111', send: 'show' } }));
+  const t = await tokenOf(U.Pia.login);
+  asks(await api('POST', `/patrol/witness-links/${link.id}/resend`, { token: t, body: { send: 'show' } }), 'resend by someone with no tie to the case');
+  asks(await api('POST', `/patrol/witness-links/${link.id}/cancel`, { token: t }), 'cancel too');
+  for (const form of [`${link.id}.0`, `0${link.id}`]) is(await api('POST', `/patrol/witness-links/${form}/resend`, { token: t, body: { send: 'show' } }), 400, form);
+  const [[l]] = await pool.query('SELECT status FROM patrol_witness_links WHERE id = ?', [link.id]);
+  assert.equal(l.status, 'sent', 'untouched');
+  ok(await records(t));
+  ok(await api('POST', `/patrol/witness-links/${link.id}/resend`, { token: t, body: { send: 'show' } }));
+  ok(await api('POST', `/patrol/witness-links/${link.id}/resend`, { token: U.Pat.token, body: { send: 'show' } }), 'the patroller who wrote it, no check');
+});
+
+test('R2: a search inside an export needs the records check and is on the access log', async () => {
+  const id = await approvedOldCase();
+  const t = await tokenOf(U.Dir.login);
+  ok(await stepUp(t)); // the ordinary second check the exports ask for
+  ok(await raw('GET', '/api/v1/patrol/incidents.csv', { token: t }), 'no search: as before');
+  asks(await raw('GET', '/api/v1/patrol/incidents.csv?q=Brightwater', { token: t }), 'incidents.csv search');
+  asks(await raw('GET', '/api/v1/patrol/patients.csv?q=Brightwater', { token: t }), 'patients.csv search');
+  ok(await records(t));
+  const csv = await raw('GET', '/api/v1/patrol/patients.csv?q=Brightwater', { token: t });
+  is(csv, 200);
+  const [[a]] = await pool.query("SELECT detail FROM audit_log WHERE tenant_id = ? AND user_id = ? AND action = 'search' ORDER BY id DESC LIMIT 1", [M.id, U.Dir.id]);
+  const d = typeof a.detail === 'string' ? JSON.parse(a.detail) : a.detail;
+  assert.equal(d.export, 'patients.csv'); assert.ok(d.ids.includes(id), 'the case found is named');
+  assert.ok(!JSON.stringify(d).includes('Brightwater'), 'never the words searched');
+});
+
+test('R3: releasing a record and making an outside link need the records check on that case; both, and the link opened, are in the weekly summary', async () => {
+  const id = await approvedOldCase();
+  const t = await tokenOf(U.Dir.login);
+  ok(await stepUp(t));
+  asks(await api('POST', '/patrol/records', { token: t, body: { incident_id: id, requester_kind: 'insurer', requester_name: 'Acme Mutual', received_on: today, authorization: 'signed_release' } }), 'logging a request names the case');
+  ok(await records(t));
+  const r = ok(await api('POST', '/patrol/records', { token: t, body: { incident_id: id, requester_kind: 'insurer', requester_name: 'Acme Mutual', received_on: today, authorization: 'signed_release' } }));
+  await pool.query('UPDATE user_sessions SET records_checked_at = NULL WHERE id_hash = ?', [sidHash(t)]);
+  asks(await api('POST', `/patrol/records/${r.id}/release`, { token: t, body: {} }), 'release with only the ordinary check');
+  asks(await api('POST', `/patrol/records/${r.id}/share`, { token: t, body: { shared_with: 'Acme Mutual', passcode: false } }), 'outside link');
+  asks(await api('GET', `/patrol/records/${r.id}/pack`, { token: t }), 'the pack');
+  ok(await records(t));
+  ok(await api('POST', `/patrol/records/${r.id}/release`, { token: t, body: {} }));
+  const share = ok(await api('POST', `/patrol/records/${r.id}/share`, { token: t, body: { shared_with: 'Acme Mutual', passcode: false } }));
+  const token = share.url.split('/').pop();
+  ok(await api('GET', `/public/claim-share/${token}`, { device: null }));
+  const s = await require('../src/lib/accesssummary').build(M.id, require('../src/lib/weekly').weekStartOf(today));
+  const mine = s.entries.filter((e) => e.user_id === U.Dir.id).flatMap((e) => e.what);
+  assert.ok(mine.includes('records release') && mine.includes('outside claim-file link made'), mine.join(', '));
+  assert.ok(s.entries.some((e) => !e.user_id && e.what.includes('outside claim-file link opened') && /Acme/.test(e.who)), 'the outside link being opened');
+});
+
+test('R4: the dispatch board shows active and today\'s calls unchecked, hides words on calls whose case the person may not open, and needs the check for the season', async () => {
+  const id = await newCase(M.owner, { summary: 'Celebrity fall' });
+  await age(id, 20);
+  const call = ok(await api('POST', '/patrol/dispatch', { token: M.owner, body: { location: 'Lift 3', description: 'Celebrity fall, says her name is Vera', caller_name: 'Vera Caller' } }));
+  await pool.query('UPDATE dispatch_calls SET incident_id = ? WHERE id = ?', [id, call.id]);
+  const old = ok(await api('POST', '/patrol/dispatch', { token: M.owner, body: { location: 'Glades', description: 'Old call words' } }));
+  await pool.query("UPDATE dispatch_calls SET status = 'closed', call_date = DATE_SUB(call_date, INTERVAL 3 DAY) WHERE id = ?", [old.id]);
+  const t = await tokenOf(U.Pia.login);
+  const board = ok(await api('GET', '/patrol/dispatch', { token: t }));
+  const row = board.data.find((c) => c.id === call.id);
+  assert.equal(row.description, null); assert.equal(row.caller_name, null); assert.equal(row.words_hidden, true);
+  const one_ = ok(await api('GET', `/patrol/dispatch/${call.id}`, { token: t }));
+  assert.equal(one_.description, null); assert.ok(!JSON.stringify(one_).includes('Vera'));
+  asks(await api('GET', '/patrol/dispatch?status=all', { token: t }), 'the season');
+  asks(await api('GET', `/patrol/dispatch?status=closed&date=${require('../src/lib/util').addDays(today, -3)}`, { token: t }), 'another day');
+  asks(await api('GET', `/patrol/dispatch/${old.id}`, { token: t }), 'an old call with no case');
+  asks(await api('PATCH', `/patrol/dispatch/${old.id}`, { token: t, body: { description: 'changed' } }), 'changing an old call');
+  ok(await api('GET', '/patrol/dispatch/available', { token: t }), 'other dispatch routes are unaffected');
+  ok(await records(t));
+  assert.ok(ok(await api('GET', '/patrol/dispatch?status=all', { token: t })).data.some((c) => c.id === call.id && /Vera/.test(c.description)));
+  ok(await api('GET', `/patrol/dispatch/${old.id}`, { token: t }));
+});
+
+test('R5: the Approver level is a leader level: only the owner or a patrol Admin grants, changes, resets or relinks it', async () => {
+  const mona = await tokenOf(U.Mona.login); ok(await stepUp(mona));
+  is(await api('PATCH', `/users/${U.Appr.id}`, { token: mona, body: { email: `moved-${suffix}@example.com` } }), 403, 'email of an Approver');
+  const r = await api('POST', `/users/${U.Appr.id}/reset-password`, { token: mona, body: { new_password: PW, temporary: false } });
+  is(r, 403); assert.equal(r.body.details.code, 'reset_refused');
+  const v = await person('Vic', { level: 'patrol' });
+  is(await api('PUT', `/patrol/team/${v.staff}/access`, { token: mona, body: { access_level: 'approver' } }), 403, 'a manager grants Approver');
+  is(await api('PATCH', `/patrol/team/${v.staff}`, { token: mona, body: { access_level: 'approver' } }), 403);
+  is(await api('PUT', `/patrol/team/${U.Appr.staff}/access`, { token: mona, body: { access_level: 'patrol' } }), 403, 'a manager lowers an Approver');
+  mails.length = 0;
+  ok(await api('PUT', `/patrol/team/${v.staff}/access`, { token: M.owner, body: { access_level: 'approver' } }));
+  assert.ok((await pool.query("SELECT id FROM login_access_changes WHERE user_id = ? AND kind = 'granted' AND to_value = 'approver'", [v.id]))[0].length);
+  await settle();
+  assert.ok(mails.some((m) => m.To === `owner@${M.slug}.test` && /Approver level/.test(m.Subject)));
+  ok(await api('PUT', `/patrol/team/${v.staff}/access`, { token: M.owner, body: { access_level: 'patrol' } }));
+  is(await api('POST', `/users/${v.id}/reset-password`, { token: mona, body: { new_password: PW, temporary: false } }), 403, 'lowered from Approver: the 24-hour hold');
+});
+
+test('R7: a leader\'s username and the season end are for the owner or a patrol Admin', async () => {
+  const mona = await tokenOf(U.Mona.login); ok(await stepUp(mona));
+  is(await api('PATCH', `/users/${U.Dir.id}`, { token: mona, body: { username: `dirx-${suffix}` } }), 403, 'a director\'s username');
+  const end = require('../src/lib/util').addDays(today, 30);
+  const out = ok(await api('POST', '/users/season-end', { token: mona, body: { date: end, roles: ['patrol'] } }));
+  assert.ok(out.leaders_kept >= 1);
+  const endOf = async (id) => (await pool.query('SELECT access_ends_on FROM users WHERE id = ?', [id]))[0][0].access_ends_on;
+  assert.equal(await endOf(U.Dir.id), null, 'a director keeps no end date from a manager');
+  assert.equal(String(await endOf(U.Pat.id)).slice(0, 10), end);
+  ok(await api('POST', '/users/season-end', { token: M.owner, body: { date: end, roles: ['patrol'] } }));
+  assert.equal(String(await endOf(U.Dir.id)).slice(0, 10), end, 'the owner may');
+  await pool.query('UPDATE users SET access_ends_on = NULL WHERE tenant_id = ?', [M.id]);
+  await pool.query('UPDATE tenants SET season_ends_on = NULL WHERE id = ?', [M.id]);
+});
+
+test('R9: the console platform-key code is counted for the key, not per address', async () => {
+  const secret = totp.newSecret();
+  const tries = require('../src/middleware/rateLimit').counter({ name: 'platform-key-code', windowMs: 15 * 60_000, max: 5 });
+  await tries.store.resetKey('platform-key');
+  process.env.PLATFORM_TOTP_SECRET = secret;
+  try {
+    const key = process.env.PLATFORM_KEY || process.env.BOOTSTRAP_KEY;
+    const wrong = codeNow(secret) === '000000' ? '111111' : '000000';
+    const answers = [];
+    for (let i = 0; i < 6; i += 1) answers.push((await api('POST', '/platform/session', { body: { key, name: 'probe', code: wrong } })).status);
+    assert.deepEqual(answers, [403, 403, 403, 403, 403, 429]);
+    is(await api('POST', '/platform/session', { body: { key, name: 'probe', code: codeNow(secret) } }), 429, 'the right code is refused while locked');
+  } finally { delete process.env.PLATFORM_TOTP_SECRET; await tries.store.resetKey('platform-key'); }
+});
+
+test('R10: the weekly summary lists every row that passed the records rule, writes included, and chat previews', async () => {
+  const id = await approvedOldCase();
+  const t = await tokenOf(U.Pete.login);
+  ok(await records(t));
+  ok(await api('POST', `/patrol/incidents/${id}/notes`, { token: t, body: { body: 'A correction' } }));
+  await pool.query("INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id, detail) VALUES (?, ?, 'view_link', 'incidents', ?, NULL)", [M.id, U.Pete.id, id]);
+  const s = await require('../src/lib/accesssummary').build(M.id, require('../src/lib/weekly').weekStartOf(today));
+  const what = s.entries.filter((e) => e.user_id === U.Pete.id).flatMap((e) => e.what);
+  assert.ok(what.includes('chat link preview'), what.join(', '));
+  assert.ok(what.some((w) => /note/.test(w)), `a write through the rule: ${what.join(', ')}`);
+});

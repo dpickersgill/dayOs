@@ -23,6 +23,28 @@ const PA = require('../lib/patrolaccess');
 const needs = (feature, message) => PA.needs(pool, feature, message);
 
 const ACTIVE = ['new', 'dispatched', 'on_scene', 'transporting'];
+const PX = require('../lib/patientaccess');
+const { todayIn } = require('../lib/util');
+
+// The board and the patient-record rule (feat/auth-hardening): what a caller said becomes the case's summary, so
+//   - without the records check the board shows active calls and today's; a past day, a status other than active, or the
+//     season view needs the check;
+//   - a call that has a case shows its words (description, caller, the timeline's notes) only to someone who may open
+//     that case without the check, or who made it;
+//   - a call that is neither active nor today's is opened or changed only by them too.
+const todayOf = async (tenantId) => todayIn(((await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])) || {}).timezone || 'America/New_York');
+const currentCall = (c, today) => ACTIVE.includes(c.status) || String(c.call_date).slice(0, 10) === today;
+async function wordsHidden(req, calls) {
+  const withCase = calls.filter((c) => c.incident_id).map((c) => Number(c.incident_id));
+  if (!withCase.length) return () => false;
+  const may = await PX.openable(pool, req, withCase);
+  return (c) => Boolean(c.incident_id) && !may.has(Number(c.incident_id));
+}
+const HIDE = (c) => ({ ...c, description: null, caller_name: null, caller_phone: null, words_hidden: true });
+router.use('/dispatch/:id', PX.byChild('id', 'SELECT id, incident_id, status, call_date FROM dispatch_calls WHERE tenant_id = ? AND id = ?', {
+  skipOther: true, // /dispatch/available and others share the address
+  allow: async (req, c) => currentCall(c, await todayOf(req.auth.tenantId)) || req.auth.recordsChecked,
+}));
 // Timeline event -> the call status it sets. Notes and "at aid room" leave the status alone.
 const STATUS_FOR = { dispatched: 'dispatched', on_scene: 'on_scene', transporting: 'transporting', closed: 'closed', cancelled: 'cancelled' };
 const callNo = (c) => `${String(c.call_date).slice(5).replace('-', '')}-${String(c.seq).padStart(2, '0')}`; // 1215-03
@@ -82,6 +104,9 @@ const senderKey = (tenantId, kind, v) => require('crypto').createHmac('sha256', 
 // ---------------------------------------------------------------- the board
 router.get('/dispatch', patrol, needs('dispatch'), async (req, res) => {
   const { tenantId } = req.auth;
+  const today = await todayOf(tenantId);
+  const current = (!req.query.status || req.query.status === 'active') || String(req.query.date || '') === today;
+  if (!current && !req.auth.recordsChecked) throw PX.needed(); // the season's calls, or another day's
   const where = ['c.tenant_id = ?'];
   const params = [tenantId];
   if (req.query.status === 'active' || !req.query.status) { where.push(`c.status IN (${ACTIVE.map(() => '?').join(',')})`); params.push(...ACTIVE); }
@@ -102,8 +127,10 @@ router.get('/dispatch', patrol, needs('dispatch'), async (req, res) => {
                         LEFT JOIN patrol_members m ON m.staff_id = r.staff_id AND m.tenant_id = r.tenant_id
                         WHERE r.tenant_id = ? AND r.call_id IN (?)`, [tenantId, ids])
     : [];
-  res.json({ data: calls.map((c) => {
-    const rep = folded.filter((f) => Number(f.flood_of) === Number(c.id));
+  const hidden = await wordsHidden(req, [...calls, ...folded]);
+  res.json({ data: calls.map((c0) => {
+    const c = hidden(c0) ? HIDE(c0) : c0;
+    const rep = folded.filter((f) => Number(f.flood_of) === Number(c.id)).map((f) => (hidden(f) ? HIDE(f) : f));
     return { ...withNo(c), responders: responders.filter((r) => r.call_id === c.id), ...(rep.length ? { repeats: rep.map((f) => ({ id: f.id, call_no: callNo(f), location: f.location, description: f.description, received_at: f.received_at, status: f.status, gps_lat: f.gps_lat, gps_lng: f.gps_lng })) } : {}) };
   }) });
 });
@@ -194,7 +221,8 @@ router.get('/dispatch/:id', patrol, needs('dispatch'), async (req, res) => {
                 WHERE r.tenant_id = ? AND r.call_id = ?`, [req.auth.tenantId, id]),
     c.incident_id ? one(pool, 'SELECT id, season, seq FROM incidents WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, c.incident_id]) : null,
   ]);
-  res.json({ ...withNo(c), events, responders, case: incident ? { id: incident.id, case_number: `${incident.season}-${String(incident.seq).padStart(4, '0')}` } : null });
+  const hide = (await wordsHidden(req, [c]))(c);
+  res.json({ ...withNo(hide ? HIDE(c) : c), events: hide ? events.map((e) => ({ ...e, note: null })) : events, responders, case: incident ? { id: incident.id, case_number: `${incident.season}-${String(incident.seq).padStart(4, '0')}` } : null });
 });
 
 router.patch('/dispatch/:id', patrol, needs('dispatch'), validate(z.object({ priority: z.enum(['low', 'normal', 'high', 'critical']).optional(), location: z.string().min(1).max(255).optional(), description: z.string().max(500).nullable().optional() })), async (req, res) => {

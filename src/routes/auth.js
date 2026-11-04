@@ -860,9 +860,10 @@ router.patch(
     const curStaff = (await one(pool, 'SELECT staff_id FROM users WHERE id = ?', [target.id])).staff_id;
     const curLevel = await RR.levelOfStaff(pool, req.auth.tenantId, curStaff);
     const staffChanged = req.body.staff_id !== undefined && (req.body.staff_id || null) !== (curStaff ? Number(curStaff) : null);
-    const guarded = staffChanged || (req.body.role && req.body.role !== target.role) || req.body.active !== undefined || emailChanged || (req.body.access_ends_on !== undefined && (req.body.access_ends_on || null) !== endsBefore);
+    const guarded = staffChanged || (req.body.role && req.body.role !== target.role) || req.body.active !== undefined || emailChanged || (req.body.access_ends_on !== undefined && (req.body.access_ends_on || null) !== endsBefore)
+      || (req.body.username !== undefined && req.body.username !== cur.username); // what they type to sign in, too
     if (RR.LEADER_LEVELS.includes(curLevel) && guarded && !(await RR.rosterAdmin(pool, req))) {
-      const err = forbidden('This login belongs to a patrol director or patrol admin. Only the owner or a patrol Admin can change it.');
+      const err = forbidden('This login belongs to a patrol leader (Admin, Manager or Approver). Only the owner or a patrol Admin can change it.');
       err.details = { code: 'leader_login' };
       throw err;
     }
@@ -952,12 +953,17 @@ router.post('/users/season-end', authenticate, adminOnly, validate(z.object({ da
   if (date && date < require('../lib/util').todayIn(tz || 'America/New_York')) throw bad('Choose a date from today on'); // the mountain's today
   await pool.query('UPDATE tenants SET season_ends_on = ? WHERE id = ?', [date, req.auth.tenantId]);
   let changed = 0;
+  let kept = 0;
   if (now && date && roles.length) {
-    const [r] = await pool.query('UPDATE users SET access_ends_on = ? WHERE tenant_id = ? AND role IN (?) AND active = 1', [date, req.auth.tenantId, roles]);
+    // Patrol leaders' logins (Admin, Manager, Approver) get an end date only from the owner or a patrol Admin: an end date
+    // switches a login off, and nobody else may switch a leader off (lib/resetrules.js).
+    const leaders = (await RR.rosterAdmin(pool, req)) ? '' : ` AND NOT EXISTS (SELECT 1 FROM patrol_members m WHERE m.tenant_id = users.tenant_id AND m.staff_id = users.staff_id AND m.access_level IN (${RR.LEADER_LEVELS.map(() => '?').join(',')}))`;
+    const [r] = await pool.query(`UPDATE users SET access_ends_on = ? WHERE tenant_id = ? AND role IN (?) AND active = 1${leaders}`, [date, req.auth.tenantId, roles, ...(leaders ? RR.LEADER_LEVELS : [])]);
     changed = r.affectedRows;
+    if (leaders) kept = Number((await one(pool, `SELECT COUNT(*) AS n FROM users u JOIN patrol_members m ON m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id WHERE u.tenant_id = ? AND u.role IN (?) AND u.active = 1 AND m.access_level IN (?)`, [req.auth.tenantId, roles, RR.LEADER_LEVELS])).n);
   }
-  await audit(pool, req, 'season_end', 'tenants', req.auth.tenantId, { date, roles, changed });
-  res.json({ ok: true, season_ends_on: date, changed });
+  await audit(pool, req, 'season_end', 'tenants', req.auth.tenantId, { date, roles, changed, leaders_kept: kept });
+  res.json({ ok: true, season_ends_on: date, changed, ...(kept ? { leaders_kept: kept, note: 'Patrol leaders keep their logins: the owner or a patrol Admin sets their last day.' } : {}) });
 });
 
 module.exports = router;

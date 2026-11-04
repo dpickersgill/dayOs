@@ -155,6 +155,27 @@ function byParam(req, _res, next) {
   })().then(() => next(), next);
 }
 
+/**
+ * Router guard for an address keyed by a child id (a witness link, a records request, a dispatch call): the row's case
+ * gets the same rule as /incidents/:id. sql: one row by (tenant, id) with an incident_id column (null: no case, no rule).
+ * A non-canonical id is refused (400) unless skipOther is set (a sibling route such as /dispatch/available).
+ */
+function byChild(param, sql, { skipOther = false, allow = null } = {}) {
+  return (req, _res, next) => {
+    (async () => {
+      if (!req.auth || !(['owner', 'manager', 'patrol'].includes(req.auth.role) || req.auth.onPatrol)) return;
+      const n = canonId(req.params[param]);
+      if (!n) { if (skipOther) return; throw bad('Invalid id'); }
+      const pool = require('../db').pool;
+      const row = await one(pool, sql, [req.auth.tenantId, n]);
+      if (!row) return; // the route answers "not found"
+      if (allow && (await allow(req, row))) return;
+      if (row.incident_id) await check(pool, req, Number(row.incident_id));
+      else if (allow) throw needed(); // a row that is not open to everyone and has no case of its own: the check
+    })().then(() => next(), next);
+  };
+}
+
 /** For a read that names a case some other way (a records request's pack, the area login's report). */
 const guard = (db, req, id) => check(db, req, id);
 
@@ -184,4 +205,14 @@ function trimRow(row, may, idKey = 'id') {
   return out;
 }
 
-module.exports = { relations, check, byParam, guard, searchCheck, openable, trimRow, needed, wallClock, CASE_HOURS, SCENE_MINUTES, RECORDS_MINUTES, HIDDEN };
+// Names for the weekly summary (any other action is shown by its own name), and the actions that show a case without
+// passing the rule above, listed anyway.
+const ACTION_LABELS = {
+  view: 'case', view_check: 'report check', view_version: 'saved copy', view_signature: 'signature', view_photo: 'photo', view_photo_preview: 'photo', view_photos: 'photos',
+  view_scene: 'scene', view_score: 'documentation score', claim_file_view: 'claim file', story_fill: 'story fill', handoff_print: 'hand-off sheet', records_pack_view: 'release pack',
+  area_view: 'approved report', view_link: 'chat link preview', claim_share: 'outside claim-file link made', claim_share_view: 'outside claim-file link opened', records_release: 'records release',
+  records_request: 'records request', witness_link: 'witness link', witness_link_resend: 'witness link sent again', witness_link_cancel: 'witness link canceled', update: 'case changed', add_note: 'note added',
+};
+const ALSO_LISTED = ['view_link', 'claim_share_view'];
+
+module.exports = { ACTION_LABELS, ALSO_LISTED, relations, check, byParam, byChild, guard, searchCheck, openable, trimRow, needed, wallClock, CASE_HOURS, SCENE_MINUTES, RECORDS_MINUTES, HIDDEN };

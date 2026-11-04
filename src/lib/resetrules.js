@@ -6,12 +6,12 @@
 // Resets (POST /users/:id/reset-password and /reset-mfa):
 //   - the owner login: never here (the console, Verdynt/OS support, with a logged reason);
 //   - a manager: only the owner;
-//   - a patrol director or patrol admin (a login whose staff record is on the roster at Admin or Manager): only the owner
+//   - a patrol leader (a login whose staff record is on the roster at Admin, Manager or Approver): only the owner
 //     or a roster Admin (a real roster row at Admin, not a manager's implied Admin);
 //   - someone whose only authority is patrol (a roster Admin who is not a manager): only logins whose role is patrol;
 //   - a login whose patrol level, role or staff link was lowered in the last 24 hours, or ever by the person asking:
 //     refused (the owner excepted). This stops "demote, reset, restore".
-// Granting (lib/patrolaccess.js levels): giving or taking away Admin or Manager, per-person permissions, level rules and
+// Granting (lib/patrolaccess.js levels): giving or taking away Admin, Manager or Approver, per-person permissions, level rules and
 // the review group need the owner or a roster Admin; nobody raises their own level. Linking a login to a staff record
 // above Patrol (Admin, Manager, Approver) needs the owner or a roster Admin, and self-service never does it.
 const { one, rows } = require('../db');
@@ -19,7 +19,9 @@ const { forbidden } = require('./errors');
 
 const RANK = { host: 1, patrol: 2, approver: 3, manager: 4, admin: 5 };
 const rank = (level) => RANK[level] || 0;
-const LEADER_LEVELS = ['admin', 'manager'];
+// Patrol leader levels: Admin, Manager and Approver. An Approver approves reports and is a root adder for the link rule
+// (lib/patientaccess.js), so it is protected like the others: grant, change, reset, edit, link, owner email, 24-hour hold.
+const LEADER_LEVELS = ['admin', 'manager', 'approver'];
 const ABOVE_PATROL = ['admin', 'manager', 'approver'];
 
 /** The owner, or someone whose own staff record is on the roster at Admin. A manager's implied Admin does not count. */
@@ -50,7 +52,7 @@ async function record(db, req, { userId = null, staffId = null, kind, from = nul
 
 /**
  * A staff record's patrol level changed from `from` to `to` (null: off the roster). Filed against the staff record and
- * every login linked to it; a grant of Admin or Manager emails the owner.
+ * every login linked to it; a grant of Admin, Manager or Approver emails the owner.
  */
 async function levelChanged(db, req, staffId, from, to) {
   if ((from || null) === (to || null)) return;
@@ -61,15 +63,16 @@ async function levelChanged(db, req, staffId, from, to) {
   if (kind === 'granted') {
     const p = await one(db, 'SELECT p.first_name, p.last_name FROM staff s JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE s.tenant_id = ? AND s.id = ?', [req.auth.tenantId, staffId]);
     const name = p ? `${p.first_name} ${p.last_name}` : `staff record ${staffId}`;
-    require('./securitymail').tellOwner(req.auth.tenantId, `${name} was given the patrol ${to === 'admin' ? 'Admin' : 'Manager'} level`,
-      [`${name} now has the patrol ${to === 'admin' ? 'Admin' : 'Manager'} level in Verdynt/OS. It opens every patient care record and lets them reset patrol logins.`]);
+    const label = { admin: 'Admin', manager: 'Manager', approver: 'Approver' }[to];
+    require('./securitymail').tellOwner(req.auth.tenantId, `${name} was given the patrol ${label} level`,
+      [`${name} now has the patrol ${label} level in Verdynt/OS. It opens patient care records, approves reports, and can hand others access to a case.`]);
   }
 }
 
-/** Only the owner or a roster Admin may give, change or take away the Admin or Manager level (H2, 2026.11.12). */
+/** Only the owner or a roster Admin may give, change or take away the Admin, Manager or Approver level (H2, 2026.11.12). */
 async function mayChangeLevel(db, req, staffId, from, to) {
   const leader = LEADER_LEVELS.includes(from) || LEADER_LEVELS.includes(to);
-  if (leader && !(await rosterAdmin(db, req))) throw forbidden('Only the owner or a patrol Admin on the roster can give or change the Admin or Manager level');
+  if (leader && !(await rosterAdmin(db, req))) throw forbidden('Only the owner or a patrol Admin on the roster can give or change the Admin, Manager or Approver level');
   if (req.auth.staffId && Number(staffId) === Number(req.auth.staffId) && rank(to) > rank(from) && req.auth.role !== 'owner') throw forbidden('You cannot raise your own patrol level. Ask the owner or another patrol Admin.');
 }
 
@@ -112,7 +115,7 @@ async function resetTarget(db, req, targetId) {
   if (t.role === 'owner') throw REFUSED('The owner login is reset by Verdynt/OS support, after confirming it is them');
   if (t.role === 'manager' && !isOwner) throw REFUSED('Only the owner can reset a manager');
   const level = await levelOfStaff(db, req.auth.tenantId, t.staff_id);
-  if (LEADER_LEVELS.includes(level) && !admin) throw REFUSED('A patrol director or patrol admin can be reset only by the owner or a patrol Admin. If none is available, Verdynt/OS support can do it after a phone call.');
+  if (LEADER_LEVELS.includes(level) && !admin) throw REFUSED('A patrol leader (Admin, Manager or Approver) can be reset only by the owner or a patrol Admin. If none is available, Verdynt/OS support can do it after a phone call.');
   if (!isOwner && !isManager) {
     // Authority from the patrol roster only: patrol logins and nothing else.
     if (!admin) throw REFUSED('Your role cannot reset other logins');

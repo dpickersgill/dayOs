@@ -16,6 +16,8 @@ const router = express.Router();
 // Every /incidents/:id address on this router needs the patient-record rule first (lib/patientaccess.js): the case is the
 // person's own recent work, or they made the fresh check in the last 30 minutes. Read from the id Express matched.
 router.use('/incidents/:id', require('../lib/patientaccess').byParam);
+// A records request (release, decide, change, pack, outside link) is about one case: that case gets the same rule.
+router.use('/records/:id', require('../lib/patientaccess').byChild('id', 'SELECT incident_id FROM patrol_records_requests WHERE tenant_id = ? AND id = ?'));
 const patrol = requireRole('patrol', 'manager');
 const needs = (f, m) => PA.needs(pool, f, m);
 const NAME = "CONCAT(p.first_name, ' ', p.last_name)";
@@ -47,6 +49,7 @@ router.post('/records', patrol, needs('records'), validate(z.object({
 })), async (req, res) => {
   const t = req.auth.tenantId; const b = req.body;
   if (!(await one(pool, 'SELECT id FROM incidents WHERE tenant_id = ? AND id = ?', [t, b.incident_id]))) throw notFound('Case');
+  await require('../lib/patientaccess').guard(pool, req, b.incident_id); // a request names a case: the records rule on it
   const [r] = await pool.query(`INSERT INTO patrol_records_requests (tenant_id, incident_id, requester_kind, requester_name, contact, received_on, authorization, auth_note, created_by)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [t, b.incident_id, b.requester_kind, b.requester_name, b.contact || null, b.received_on, b.authorization, b.auth_note || null, req.auth.userId]);
   await audit(pool, req, 'records_request', 'incidents', b.incident_id, { request: r.insertId, kind: b.requester_kind });

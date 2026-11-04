@@ -35,6 +35,8 @@ const router = express.Router();
 // Every /incidents/:id address on this router needs the patient-record rule first (lib/patientaccess.js): the case is the
 // person's own recent work, or they made the fresh check in the last 30 minutes. Read from the id Express matched.
 router.use('/incidents/:id', require('../lib/patientaccess').byParam);
+// A witness link is case evidence keyed by its own id: its case gets the same rule (link ids are sequential).
+router.use('/witness-links/:lid', require('../lib/patientaccess').byChild('lid', 'SELECT incident_id FROM patrol_witness_links WHERE tenant_id = ? AND id = ?'));
 const publicRouter = express.Router();
 const patrol = requireRole('patrol', 'manager');
 const needs = (feature, message) => PA.needs(pool, feature, message);
