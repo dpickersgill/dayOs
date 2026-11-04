@@ -1505,7 +1505,7 @@ async function seedPlans(conn) {
     ['lodge', 'Lodge', 'Small hills and community areas that need to sell, scan and keep the lifts honest.', 'plan', base, 199, 1],
     ['mountain', 'Mountain', 'The typical independent mountain, with a ski school, a rental shop and a crew to schedule.', 'plan', mid, 449, 2],
     // Resort holds everything Mountain does plus five apps, for less than adding them one by one.
-    ['resort', 'Resort', 'Larger operations with a patrol, a terrain park and attractions to run.', 'plan', [...mid, 'patrol', 'park', 'shop', 'assets', 'messages'], 799, 3],
+    ['resort', 'Resort', 'Larger operations with a patrol, a terrain park, an online shop and a fleet to run.', 'plan', [...mid, 'patrol', 'park', 'shop', 'assets', 'messages'], 799, 3],
     // Patrol is the same price on its own or with a plan (see seedPatrolPlan).
     ['patrol', 'Patrol', 'Patient care reports, dispatch, duty, the closing sweep, medications and records, for any plan.', 'addon', ['patrol'], 149, 1],
     ['shop', 'Online shop', 'Guests buy lift tickets, passes and gift cards online, picking the day first.', 'addon', ['shop'], 79, 2],

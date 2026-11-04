@@ -326,7 +326,10 @@ test('DP-12: weekly copies are kept 35 days by default, the pages say so, and a 
   assert.ok(!sh.includes('daysSinceNoncurrentTime":365'));
   assert.match(sh, /WEEKLY_DAYS="\$\{WEEKLY_DAYS:-35\}"/);
   assert.match(read('src/site/privacy.html'), /weekly copy of the database kept 35 days/);
-  assert.match(read('src/site/security.html'), /kept outside the database server for 35 days/);
+  // 2026.11 content review: the pages also say a deleted copy stays recoverable 90 more days (the bucket's soft delete)
+  assert.match(read('src/site/security.html'), /Each copy is kept 35 days after the next one replaces it, and a deleted copy can still be recovered for up to 90 more days/);
+  assert.match(read('src/site/privacy.html'), /recovered for up to 90 more days/);
+  assert.ok(!/kept a year/.test(read('RECOVERY.md')), 'RECOVERY.md no longer says a year');
   assert.match(read('RECOVERY.md'), /node db\/deletions\.js replay ledger\.json/);
   // The ledger is add-only for the app, and survives a mountain's deletion.
   assert.ok(require('../scripts/db-runtime-user').APPEND_ONLY.includes('deletion_ledger'));

@@ -120,17 +120,15 @@ test('the Good Day home and Issue 1 are pages of the site: its header and footer
   assert.ok(!/\u2014/.test(issue.text), 'no em dashes');
 });
 
-test('the card is on Resources, Home and About, a sign-up line is in every footer, and the menu, sitemap and llms.txt list it', async () => {
-  for (const p of ['/site/resources', '/site/', '/site/about']) {
-    const r = await get(p);
-    assert.ok(r.text.includes('class="gd-card"'), `${p} has the card`);
-  }
+// 2026.11 content review: the newsletter stays on Resources and its own pages, and is off the footer, Home and About.
+test('the card is on Resources, not on Home, About or the footer, and the menu, sitemap and llms.txt list it', async () => {
   const res = await get('/site/resources');
+  assert.ok(res.text.includes('class="gd-card"'), 'Resources has the card');
   assert.ok(res.text.indexOf('class="gd-card"') < res.text.indexOf('h-check'), 'Resources: the newsletter comes first');
-  const home = await get('/site/');
-  assert.ok(home.text.indexOf('class="gd-card"') < home.text.indexOf('id="h-contact"'), 'Home: above the final call to action');
+  for (const p of ['/site/', '/site/about']) assert.ok(!(await get(p)).text.includes('class="gd-card"'), `${p} has no card`);
   const pricing = await get('/site/pricing');
-  assert.ok(pricing.text.includes('class="sf-gd"') && pricing.text.includes('data-gd="footer"'), 'the footer sign-up line');
+  assert.ok(!pricing.text.includes('class="sf-gd"') && !pricing.text.includes('data-gd="footer"'), 'no footer sign-up line');
+  assert.ok(!pricing.text.includes('The Good Day newsletter</a></li>'), 'not in the footer links');
   assert.ok(pricing.text.includes('<a href="/site/good-day"><b>The Good Day</b>'), 'The Good Day in the Resources menu');
   const map = await get('/site/sitemap.xml');
   assert.ok(map.text.includes('https://www.site.test/good-day</loc>') && map.text.includes('https://www.site.test/good-day/issue-1</loc>'));

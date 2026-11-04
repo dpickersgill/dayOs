@@ -464,6 +464,7 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 .form .hp{position:absolute;left:-5000px;width:1px;height:1px;overflow:hidden}
 .kinds{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
 .kinds label{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:6px 14px;border:1.5px solid #7E97A2;border-radius:99px;font-weight:700;font-size:16px;cursor:pointer;background:#fff}
+.kinds label[hidden]{display:none}
 .kinds input{width:18px;height:18px;margin:0;accent-color:var(--trail)}
 .kinds label:has(input:checked){border-color:var(--trail);background:var(--trailWash);color:var(--trailDark)}
 
@@ -1086,3 +1087,12 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 }
 /* founding-program card alone in its section: no extra top margin */
 .wrap>.offer:first-child,.wrap>.found:first-child{margin-top:0}
+/* About: the founder, with a photo beside the words once there is one (the figure stays hidden until then) */
+.founder{display:grid;grid-template-columns:minmax(0,1fr);gap:24px;align-items:start}
+.founder:has(.founder-photo:not([hidden])){grid-template-columns:200px minmax(0,1fr)}
+.founder-photo{margin:0}
+.founder-photo img{display:block;width:100%;height:auto;border-radius:var(--r)}
+.founder h2{margin-top:0}
+@media (max-width:640px){.founder:has(.founder-photo:not([hidden])){grid-template-columns:minmax(0,1fr)}.founder-photo{max-width:200px}}
+/* "Switching this season?" above a solution page's pricing card */
+.wrap>.season-note:first-child{margin:0 0 28px}

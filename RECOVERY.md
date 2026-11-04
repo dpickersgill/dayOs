@@ -22,7 +22,8 @@ Check it any time with `bash scripts/backups-setup.sh` (it turns on whatever is 
 - **Point-in-time recovery**: the database's change log (binary log) is kept 7 days, so a copy can be made as it was at
   any moment in that week.
 - **A weekly copy outside the server**: every Tuesday at 08:00 UTC, the live database is written to
-  `gs://summitops-510715-backups/weekly/summitops.sql.gz`; older weekly copies are kept a year. Automated backups go
+  `gs://summitops-510715-backups/weekly/summitops.sql.gz`; each older weekly copy is kept 35 days after the next one replaces it (`WEEKLY_DAYS`), and a deleted copy stays
+  recoverable for 90 more days (the bucket's soft delete), so about 125 days in all. Automated backups go
   away if the server itself is deleted; this copy does not.
 - **Deletion protection** on the server.
 - **What is not in the database**: the code (every release zip, and git), and the secrets (Secret Manager keeps every

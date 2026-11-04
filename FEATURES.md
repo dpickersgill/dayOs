@@ -171,7 +171,7 @@ The Sell screen sells tickets, lessons, rental packages, program places and gift
 
 ### Money, safety and records
 - **Sales tax**: rates per kind (or all) in Money > Sales tax; shown on baskets, receipts, dashboard.
-- **Card payments**: card brand, last 4 and approval code are recorded and matched against a pasted processor statement (Money > Card statement). A live terminal integration (Square/Stripe) is NOT built; it needs a processor choice and keys.
+- **Card payments**: card brand, last 4 and approval code are recorded and matched against a pasted processor statement (Money > Card statement). A Stripe smart reader (S700/S710, WisePOS E, T600) is built: a manager pairs it under Billing, Card on reader sends the amount, and the guest taps, inserts or swipes; the charge goes to the mountain's own Stripe account (`src/routes/terminal.js`). Other processors (Square and the like) are not built.
 - **Cash drawer / end of day**: open and close drawers, count cash, see over/short (Sell > Cash drawer, Money > Cash drawers).
 - **Receipts and tickets**: print with Code 128 barcode and QR, reprint, email via the guest's mail app. QR code library is vendored in `public/vendor/qrcode`.
 - **Guardians and family links**: under-18s need a guardian, who signs the waiver; waiver text lives in mountain settings (have a lawyer review it).

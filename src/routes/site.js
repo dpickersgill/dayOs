@@ -63,7 +63,7 @@ const SOLUTION_LINES = {
 const CHEVRON = '<svg class="chev" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 /** The top of every page. Wide screens: the logo, Product (a menu of every solution page on hover or keyboard focus,
- * and a plain link to the Product page on a tap), four more links, then Sign in and Book a walkthrough. Try the demo sits
+ * and a plain link to the Product page on a tap), four more links, then Sign in and Book a 20-minute walkthrough. Try the demo sits
  * in the Product menu, the phone menu, the phone bar and each page's own buttons.
  * Narrower screens: a Menu button opening a full-screen menu, its two buttons kept at the bottom; on phones a bar at the
  * bottom of the page holds the two things people came to do. */
@@ -83,7 +83,7 @@ function header(current) {
   const phoneLinks = [['', 'Home', '{{HOME}}'], ['product', 'Product'], ...NAV, ['good-day', 'The Good Day']].map(([s, t, href]) => `<li><a href="${href || `{{SITE}}/${s}`}"${cur(s)}>${t}</a></li>`).join('\n          ');
   const phoneSols = sols.map(([s, t]) => `<li><a href="{{SITE}}/${s}"${cur(s)}>${t}</a></li>`).join('\n          ');
   const bar = current === 'contact' ? '' : `
-<div class="mcta"><a class="btn ghost" href="{{TRY}}">Try the demo</a><a class="btn" href="{{SITE}}/contact">Book a walkthrough</a></div>`;
+<div class="mcta"><a class="btn ghost" href="{{TRY}}">Try the demo</a><a class="btn" href="{{SITE}}/contact">Book a 20-minute walkthrough</a></div>`;
   return `<a class="skip" href="#main">Skip to the content</a>
 <header class="sn">
   <div class="wrap sn-in">
@@ -109,7 +109,7 @@ function header(current) {
     </nav>
     <div class="sn-act">
       <a class="sn-sign" href="{{APP}}">Sign in</a>
-      <a class="btn sm" href="{{SITE}}/contact">Book a walkthrough</a>
+      <a class="btn sm" href="{{SITE}}/contact">Book a 20-minute walkthrough</a>
     </div>
     <details class="sn-m">
       <summary><i aria-hidden="true"></i><span>Menu</span></summary>
@@ -125,7 +125,7 @@ function header(current) {
         </nav>
         <div class="sn-mact">
           <a class="btn ghost" href="{{TRY}}">Try the demo</a>
-          <a class="btn" href="{{SITE}}/contact">Book a walkthrough</a>
+          <a class="btn" href="{{SITE}}/contact">Book a 20-minute walkthrough</a>
           <a class="sn-sign" href="{{APP}}">Sign in</a>
         </div>
       </div>
@@ -151,7 +151,6 @@ const FOOTER = `<footer class="sf">
           <li><a href="{{SITE}}/security">Security</a></li>
           <li><a href="{{SITE}}/status">Status</a></li>
           <li><a href="{{SITE}}/resources">Guides and checklists</a></li>
-          <li><a href="{{SITE}}/good-day">The Good Day newsletter</a></li>
           <li><a href="{{SITE}}/about">About</a></li>
         </ul>
       </div>
@@ -164,18 +163,14 @@ const FOOTER = `<footer class="sf">
       <div>
         <h2>Talk to us</h2>
         <ul>
+          <li><a href="{{SITE}}/contact">Book a 20-minute walkthrough</a></li>
           <li><a href="{{TRY}}">Try the demo</a></li>
-          <li><a href="{{SITE}}/contact">Request a walkthrough</a></li>
-          <li><a href="{{SITE}}/contact?kind=trial">Start a 14-day trial</a></li>
-          <li><a href="{{SITE}}/contact?kind=founding">Become a founding mountain</a></li>
-          <li><a href="{{SITE}}/contact?kind=review">Free incident report review</a></li>
           <li><a href="{{APP}}">Sign in</a></li>
         </ul>
         <p class="sf-mail">Sales and questions: <a href="mailto:{{HELLO}}">{{HELLO}}</a><br>Customer support: <a href="mailto:{{SUPPORT}}">{{SUPPORT}}</a></p>
       </div>
     </div>
-    <!--GD:FOOTER-->
-    <div class="sf-base"><span>&copy; {{YEAR}} Verdynt/OS. All rights reserved. Prices in US dollars.</span><span class="sf-legal">{{SOCIAL}}<a href="{{SITE}}/privacy">Privacy</a><a href="{{SITE}}/terms">Terms</a></span></div>
+    <div class="sf-base"><span>&copy; {{YEAR}} {{COMPANY}}, {{PLACE}}. Prices in US dollars.</span><span class="sf-legal">{{SOCIAL}}<a href="{{SITE}}/privacy">Privacy</a><a href="{{SITE}}/terms">Terms</a></span></div>
   </div>
 </footer>`;
 
@@ -212,7 +207,7 @@ function pricingPlansHtml(d) {
     const items = [prev ? `<li class="plus">Everything in ${escHtml(prev.name)}, plus:</li>` : '', ...list].join('');
     return `<div class="plan${i === 1 ? ' feat' : ''}"><div class="sym">${sym(i, p.code)}<h2>${escHtml(p.name)}</h2></div><p class="who">${escHtml(p.blurb)}</p>`
       + `<div class="price"><b>${p.monthly_cents ? dollars(p.monthly_cents) : 'Ask us'}</b><span>${p.monthly_cents ? 'per month' : ''}</span></div><p class="setup">Billed monthly</p>`
-      + `<ul>${items}</ul><a class="btn go${i === 1 ? '' : ' ghost'}" href="{{SITE}}/contact?kind=trial&amp;plan=${encodeURIComponent(p.name)}">Start a ${escHtml(p.name)} trial</a></div>`;
+      + `<ul>${items}</ul><a class="btn go${i === 1 ? '' : ' ghost'}" href="{{SITE}}/contact?kind=trial&amp;plan=${encodeURIComponent(p.name)}">Request a trial mountain</a></div>`;
   }).join('\n        ');
 }
 /** "$149": the Patrol only plan's monthly price, or the Patrol add-on's when there is no such plan. */
@@ -297,6 +292,8 @@ async function render(req, name, slug, words = null) {
     .replaceAll('{{SOCIAL}}', lit(config.site.sameAs.filter((u) => /linkedin\.com/i.test(u)).slice(0, 1).map((u) => `<a href="${escHtml(u)}" rel="me noopener">LinkedIn</a>`).join('')))
     .replaceAll('{{HELLO}}', lit(escHtml(config.site.helloEmail)))
     .replaceAll('{{SUPPORT}}', lit(escHtml(config.site.supportEmail)))
+    .replaceAll('{{COMPANY}}', lit(escHtml(config.site.company.name)))
+    .replaceAll('{{PLACE}}', lit(escHtml(config.site.company.place)))
     .replaceAll('{{YEAR}}', lit(String(new Date().getUTCFullYear())));
   // Filled last, so nothing written in the console is read as a {{TOKEN}}.
   return FILL[name] ? FILL[name](out, req) : out;
@@ -406,7 +403,7 @@ Verdynt/OS runs in a web browser on counter computers, phones and tablets, with 
 - [About](${page('about')}): who Verdynt/OS is for and how it works with ski areas
 - [Pricing](${page('pricing')}): plans, add-ons and how paying works
 - [Security](${page('security')}): how guest and patient information is protected
-- [Contact](${page('contact')}): book a walkthrough or start a free trial
+- [Contact](${page('contact')}): book a 20-minute walkthrough, or ask for a trial mountain
 
 ## Guides and checklists
 
@@ -489,7 +486,7 @@ const contactBody = z.object({
   plan_interest: z.string().trim().max(60).optional().default(''), message: z.string().trim().max(2000).optional().default(''),
   founding: z.boolean().optional().default(false), website: z.string().max(200).optional().default(''), // a field people never see: bots fill it
 });
-const KINDS = { walkthrough: 'Walkthrough request', trial: '14-day trial request', founding: 'Founding group request', question: 'Question', patrol: 'Patrol only sign-up', review: 'Incident report review request', setup: 'Guided setup request' };
+const KINDS = { walkthrough: 'Walkthrough request', trial: 'Trial mountain request', founding: 'Walkthrough request (Founding Mountain Program)', question: 'Question', patrol: 'Patrol only sign-up', review: 'Incident report review request', setup: 'Guided setup request' };
 
 api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SITE_CONTACT_LIMIT) || 8, message: 'Too many messages from this address. Try again later, or email us.' }), validate(contactBody), async (req, res) => {
   const b = req.body;
@@ -513,7 +510,7 @@ api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.e
       // The demo link only from the configured address, never from the request's Host.
       const tryUrl = config.site.appUrl ? `\n\nTo look around in the meantime, start a demo mountain: ${config.site.appUrl}/try` : '';
       copy = (await mailer.sendPlatform({ to: b.email, replyTo: config.site.contactEmail, subject: 'We have your Verdynt/OS request', tag: 'site-lead-thanks',
-        text: `Hello,\n\nThank you for writing to Verdynt/OS. A person will reply within one business day${b.kind === 'trial' ? ' to set up your trial' : b.kind === 'patrol' ? ' to set up your patrol, with a 14-day trial' : b.kind === 'review' ? ' with a safe way to send your ten reports (please do not email patient records)' : ' to set a time'}.${tryUrl}\n\nIf you did not write to us, you can ignore this email.\n\nVerdynt/OS` })).ok;
+        text: `Hello,\n\nThank you for writing to Verdynt/OS. A person will reply within one business day${b.kind === 'trial' ? ' to set up your trial mountain' : b.kind === 'patrol' ? ' to set up your patrol, with a 14-day trial' : b.kind === 'review' ? ' with a safe way to send your 10 reports. Please take out names and identifying details first, and do not email patient records' : ' to set a time'}.${tryUrl}\n\nIf you did not write to us, you can ignore this email.\n\nVerdynt/OS` })).ok;
     }
   }
   res.status(201).json({ ok: true, copy });

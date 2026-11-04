@@ -9,7 +9,7 @@
 const META = {
   '': {
     title: 'Ski Area and Ski Resort Management Software | Verdynt/OS',
-    description: 'Run lifts, ski patrol, tickets, rentals, lessons, staff and your zipline, coaster or tubing hill from one screen. Built for independent ski areas. Plans from {{FROM}}/month, 14 days free.',
+    description: 'Run lifts, ski patrol, tickets, rentals, lessons, staff and your zipline, coaster or tubing hill from one screen. For independent ski areas. From {{FROM}}/month.',
     og: 'Run the whole mountain from one screen',
   },
   product: {
@@ -20,14 +20,14 @@ const META = {
   },
   'ski-patrol': {
     title: 'Ski Patrol Software: Incident Reports, Dispatch | Verdynt/OS',
-    description: 'Ski patrol incident reports written at the bedside, time-stamped and never deleted, with a one-click claim file. Dispatch, sweep and volunteers too.',
-    og: 'When the claim comes, the record is already written',
+    description: 'Ski patrol patient care reports written once at the bedside, even with no signal, with an EMS hand-off sheet. Dispatch, sweep and volunteers too.',
+    og: 'Write the report once, at the bedside',
     crumb: 'Ski patrol',
   },
   'ski-area-risk-management': {
     title: 'Ski Area Risk Management and Incident Records | Verdynt/OS',
     description: 'For ski area owners, GMs and insurers: a documentation score, a one-click claim file, a season risk report for renewal and secure insurer access.',
-    og: 'Know the record is complete before anyone asks',
+    og: 'When the claim comes, the record is already written',
     crumb: 'For owners and insurers',
   },
   'lift-ticket-software': {
@@ -185,7 +185,9 @@ const FEATURES = ['Lift and trail status and inspections', 'Grooming and snowmak
 function head({ slug, origin, html, plans, verify = {}, sameAs = [], noindex = false, modified = null, asset = '' }) {
   const key = slug in META ? slug : 'notfound';
   const m = META[key];
-  const from = plans && plans.plans.length ? dollars(Math.min(...plans.plans.map((p) => p.monthly_cents).filter(Boolean))) : '$199';
+  // The lowest ski area plan: Patrol only is left out, as lib/demomail.js does, so "from" never quotes the patrol's own price.
+  const areaPlans = plans ? plans.plans.filter((p) => p.code !== 'patrol-only' && p.monthly_cents) : [];
+  const from = areaPlans.length ? dollars(Math.min(...areaPlans.map((p) => p.monthly_cents))) : '$199';
   const fill = (s) => String(s || '').replaceAll('{{FROM}}', from);
   const url = `${origin}/${key === 'notfound' ? '' : slug}`;
   const image = `${origin.replace(/\/site$/, '')}/site/img/share.png`;
@@ -194,6 +196,9 @@ function head({ slug, origin, html, plans, verify = {}, sameAs = [], noindex = f
 
   const graph = [
     { '@type': 'Organization', '@id': `${origin}/#org`, name: 'Verdynt/OS', url: `${origin}/`, logo: `${origin.replace(/\/site$/, '')}/icons/icon-512.png`,
+      // the company behind it, from config.site.company (one place, so a legal suffix is a one-line change)
+      legalName: require('../config').site.company.name, founder: { '@type': 'Person', name: require('../config').site.company.founder },
+      address: { '@type': 'PostalAddress', addressLocality: 'Royersford', addressRegion: 'PA', addressCountry: 'US' },
       description: 'Operations software for independent ski areas.', ...(sameAs.length ? { sameAs } : {}), contactPoint: [
         { '@type': 'ContactPoint', contactType: 'sales', email: require('../config').site.helloEmail, url: `${origin}/contact`, availableLanguage: ['English'] },
         { '@type': 'ContactPoint', contactType: 'customer support', email: require('../config').site.supportEmail, availableLanguage: ['English'] },

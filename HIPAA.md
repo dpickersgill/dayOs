@@ -50,6 +50,10 @@ checks the rows are identical before and after). Pulling is logged.
    passwords, two-step and passkeys removed. Everything else is deleted. Patrol reports, waivers and the audit log are never
    deleted by the app; removing them later is a decision for the mountain and its lawyer. Demo mountains hold only made-up
    data and are removed whole when they end.
+
+   **Before the operator deletes a mountain:** the website's Privacy and Terms (2026.11) promise that these kept records stay
+   only under a written agreement with the mountain, or are handed over to it. The console's delete step does not check for
+   that agreement, so the operator gets it signed (or hands the records over) first, and notes it with the owner's export.
 7. **Backups and recovery.** Cloud SQL backups are on; test a restore. Keep backups under the same BAA.
 8. **Devices.** Phones and Chromebooks that open patient reports need screen locks and, ideally, device management.
 9. **People.** Remove a patroller's login the day they leave. Give the owner and manager logins only to people who need them.
