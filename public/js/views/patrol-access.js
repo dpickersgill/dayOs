@@ -9,8 +9,10 @@ const WHAT = {
   export: 'Exported records', read: 'Viewed the incident map', view_signature: 'Opened a signature', view_access_log: 'Read this log',
   submitted: 'Submitted a report', approved: 'Approved a report', reopened: 'Reopened a report', add_note: 'Added a note',
   search: 'Searched cases (the cases found are listed)', view_check: 'Opened the report check', view_score: 'Opened the record score',
+  view_scene: 'Opened the scene diagram', view_photos: 'Opened the photos', view_photo: 'Opened a photo', view_photo_preview: 'Opened a photo', reporter_change: 'Changed who wrote the report',
 };
 const what = (a) => WHAT[a] || label(a);
+const HOW = { checked: 'Confirmed it was them', writing: 'Their own draft', wrote: 'Wrote it, this shift', responder: 'Responder', responder_self: 'Added themselves as responder', dispatched: 'Sent to the call', on_duty: 'On duty', crew: 'Crew on the case' };
 
 export async function drawAccessLog(box) {
   const from = input({ type: 'date', name: 'from' });
@@ -27,6 +29,8 @@ export async function drawAccessLog(box) {
         { head: 'Who', cell: (r) => r.user_email || 'Unknown' },
         { head: 'What', cell: (r) => what(r.action) },
         { head: 'Case', cell: (r) => (r.case_number ? h('a', { href: `#/patrol/case/${r.entity_id}` }, r.case_number) : '') },
+        // How the open was allowed (feat/auth-hardening): their own recent work, an exception, or a fresh check.
+        { head: 'Allowed by', cell: (r) => (r.detail && r.detail.access ? `${HOW[r.detail.access] || label(r.detail.access)}${r.detail.fresh ? ' (fresh check)' : ''}` : '') },
         { head: 'Details', cell: (r) => (r.detail && r.detail.fields ? r.detail.fields.join(', ') : '') },
       ], data) : empty('No activity in that period.'));
     } catch (err) { clear(out); fail(err); }

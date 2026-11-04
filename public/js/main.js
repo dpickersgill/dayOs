@@ -14,7 +14,7 @@ import * as alerts from './alerts.js';
 import { flush as flushOutbox, waitingCounts, forgetCases, setDeviceKey, restoreDeviceKey, dropDeviceKey } from './outbox.js';
 import { buildFrame, GROUP_OF, PATROL_SECTIONS, patrolSection } from './nav.js';
 import { icon } from './icons.js';
-import { h, svg, clear, ctx, can, isManager, schoolCan, toast, loading, errorBox, button, field, input, closeAllDialogs, dirtyDialogOpen, newPage, hashPath, todayStr } from './ui.js';
+import { h, svg, clear, ctx, can, isManager, schoolCan, toast, loading, errorBox, button, field, input, dialog, closeAllDialogs, dirtyDialogOpen, newPage, hashPath, todayStr } from './ui.js';
 
 const VIEWS = [
   // [hash, label, who may open it, loader]
@@ -95,11 +95,31 @@ function readRemember() { try { const r = JSON.parse(localStorage.getItem(REMEMB
 function saveRemember(r) { try { if (r) localStorage.setItem(REMEMBER_KEY, JSON.stringify({ tenant: r.tenant, login: r.login })); else localStorage.removeItem(REMEMBER_KEY); } catch (_) { /* private mode */ } }
 // Whether the sign-in under way keeps its token for every tab (Remember me was ticked, or a locked tab was shared).
 let keepShared = false;
+// "This is my own device" (feat/auth-hardening): remembered for this browser. Remember me is offered only once it is
+// ticked, and the server decides: it never keeps a sign-in for every tab on a device not marked as the person's own, on a
+// shared terminal, or for anyone who can open patient care records (patrol, the ski area login).
+const OWN_KEY = 'so.own';
+const readOwn = () => { try { return localStorage.getItem(OWN_KEY) === '1'; } catch (_) { return false; } };
+const saveOwn = (v) => { try { if (v) localStorage.setItem(OWN_KEY, '1'); else localStorage.removeItem(OWN_KEY); } catch (_) { /* private mode */ } };
+let ownDevice = readOwn();
+/** What every sign-in call says about this device: Remember me asked, own device, and the shared terminal's key. */
+const asked = () => { const term = readTerminal(); return { remember: Boolean(keepShared && ownDevice && !term), own_device: Boolean(ownDevice && !term), ...(term ? { terminal: term.secret } : {}) }; };
+const PK_USED_KEY = 'so.pk.used'; // this browser signed in with a passkey before: the sign-in page offers it first
+const usedPasskeyHere = () => { try { return localStorage.getItem(PK_USED_KEY) === '1'; } catch (_) { return false; } };
+const notePasskeyHere = () => { try { localStorage.setItem(PK_USED_KEY, '1'); } catch (_) { /* private mode */ } };
+const REFUSED_WHY = {
+  patient_records: 'Remember me is off for logins that open patient records, so this tab signs out on its own.',
+  not_own_device: 'Remember me works only on a device you marked as your own.',
+  shared_terminal: 'Remember me is never used on a shared terminal.',
+  no_device_id: 'This browser did not keep its device id, so Remember me is off here.',
+};
 const NOT_CASE = 'Not case sensitive: JSmith and jsmith are the same.';
 
 /** Signed in: keep the token and open the app. */
 async function signedIn(out) {
-  const shared = keepShared && !readTerminal();
+  // The server says whether this sign-in may be kept for every tab (remember); the browser follows it.
+  const shared = keepShared && !readTerminal() && out.remember === true;
+  if (keepShared && !shared && out.remember_refused && REFUSED_WHY[out.remember_refused]) toast(REFUSED_WHY[out.remember_refused]);
   const before = shared ? session.sharedToken() : null;
   session.save(out.token, { shared });
   tabRefresh();
@@ -143,7 +163,11 @@ function showSignIn(message) {
   const slug = input({ name: 'tenant', autocomplete: 'organization', autocapitalize: 'none', spellcheck: 'false', value: known, required: true });
   const email = input({ name: 'login', type: 'text', autocomplete: 'username', autocapitalize: 'none', spellcheck: 'false', required: true, value: remembered && remembered.tenant === known ? remembered.login || '' : '' });
   const pw = input({ name: 'password', type: 'password', autocomplete: 'current-password', required: true });
-  const remember = term ? null : h('input', { type: 'checkbox', name: 'remember', checked: Boolean(remembered) });
+  const remember = term ? null : h('input', { type: 'checkbox', name: 'remember', checked: Boolean(remembered && readOwn()) });
+  const own = term ? null : h('input', { type: 'checkbox', name: 'own_device', checked: readOwn() });
+  const rememberRow = remember ? h('div', { class: 'stack tight', 'data-remember': '', hidden: !readOwn() }, h('label', { class: 'check' }, remember, ' Remember me on this device'),
+    h('p', { class: 'hint signin-hint' }, 'Keeps your mountain and username here, and keeps you signed in when you open a new tab. Never your password. Not used for logins that open patient records.')) : null;
+  if (own) own.addEventListener('change', () => { ownDevice = own.checked; saveOwn(own.checked); rememberRow.hidden = !own.checked; if (!own.checked) remember.checked = false; });
   const go = h('button', { type: 'submit', class: 'btn primary' }, 'Sign in');
   // The remembered mountain is said plainly, with a way to change it: signing in to the wrong mountain looks exactly like a
   // wrong password.
@@ -156,8 +180,9 @@ function showSignIn(message) {
   const form = h('form', { novalidate: true, 'data-step': 'signin' },
     shown, slugField, note,
     field('Username or email', email, NOT_CASE), field('Password', pw),
-    remember ? h('div', { class: 'stack tight' }, h('label', { class: 'check' }, remember, ' Remember me on this device'),
-      h('p', { class: 'hint signin-hint' }, 'Keeps your mountain and username here, and keeps you signed in when you open a new tab. Never your password. Leave it off on a computer other people use.')) : null,
+    own ? h('div', { class: 'stack tight' }, h('label', { class: 'check' }, own, ' This is my own device'),
+      h('p', { class: 'hint signin-hint' }, 'Tick it only on your own phone or computer, never on one other people use.')) : null,
+    rememberRow,
     err, go);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -167,8 +192,8 @@ function showSignIn(message) {
     if (!tenant) { slugField.hidden = false; if (shown) shown.remove(); err.append(errorBox(new Error('Type your mountain first'))); slug.focus(); return; }
     go.disabled = true;
     try {
-      keepShared = Boolean(remember && remember.checked);
-      const out = await post('/auth/login', { tenant, login, password: pw.value });
+      keepShared = Boolean(remember && remember.checked && ownDevice);
+      const out = await post('/auth/login', { tenant, login, password: pw.value, ...asked() });
       saveSlug(tenant);
       saveRemember(keepShared ? { tenant, login: login.includes('@') ? login : login.toLowerCase() } : null);
       if (out.mfa_required) { showSecondStep(out); return; }
@@ -186,16 +211,16 @@ function showSignIn(message) {
     if (!tenant) { pkErr.append(errorBox(new Error('Type your mountain first'))); slugField.hidden = false; slug.focus(); return; }
     pk.disabled = true;
     try {
-      keepShared = Boolean(remember && remember.checked);
+      keepShared = Boolean(remember && remember.checked && ownDevice);
       const { handle, options } = await post('/auth/passkey/options', { tenant });
       const response = await passkey.use(options);
-      const out = await post('/auth/passkey', { tenant, handle, response });
+      const out = await post('/auth/passkey', { tenant, handle, response, ...asked() });
       saveSlug(tenant);
       if (!keepShared) saveRemember(null);
       await signedIn(out);
     } catch (ex) { pkErr.append(errorBox(ex)); pk.disabled = false; }
   }, { small: false }) : null;
-  const toEmail = (purpose) => { keepShared = Boolean(remember && remember.checked); showEmailCode(purpose, slug.value.trim().toLowerCase(), email.value.trim()); };
+  const toEmail = (purpose) => { keepShared = Boolean(remember && remember.checked && ownDevice); showEmailCode(purpose, slug.value.trim().toLowerCase(), email.value.trim()); };
   const emailRow = h('div', { class: 'row signin-email' },
     button('Email me a code instead', () => toEmail('signin'), { small: true }),
     button('Forgot password?', () => toEmail('reset'), { small: true, kind: 'quiet' }));
@@ -205,17 +230,72 @@ function showSignIn(message) {
   slug.addEventListener('input', () => { clear(err); clearTimeout(wait); wait = setTimeout(check, 500); });
   slug.addEventListener('change', () => { clearTimeout(wait); check(); });
   check();
+  // Someone who signed in with a passkey on this device before sees it first (feat/auth-hardening): no code to type.
+  const pkFirst = Boolean(pk && usedPasskeyHere());
+  if (pkFirst) pk.classList.add('primary', 'passkey-big');
+  const pkBlock = pk ? h('div', { class: 'stack tight signin-passkey' }, h('p', { class: 'muted small' }, pkFirst ? 'You used a passkey here before: one touch signs you in.' : 'Or, if you added a passkey on this phone or computer:'), pk, pkErr) : null;
   app.append(h('div', { class: 'signin' },
     h('section', { class: 'signin-side' },
       h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-logo-dark.png', alt: 'Verdynt/OS, resort operating system', width: '220', height: '109' })), h('h1', null, 'Run the mountain from one screen.'),
         h('p', null, 'Tickets, lifts, rentals, lessons, patrol and staff schedules for your mountain.')), ridge()),
-    h('section', { class: 'signin-form' }, h('h2', null, 'Sign in'), message ? h('p', { class: 'muted', role: 'status' }, message) : null, form,
-      pk ? h('div', { class: 'stack tight signin-passkey' }, h('p', { class: 'muted small' }, 'Or, if you added a passkey on this phone or computer:'), pk, pkErr) : null,
+    h('section', { class: 'signin-form' }, h('h2', null, 'Sign in'), message ? h('p', { class: 'muted', role: 'status' }, message) : null, pkFirst ? pkBlock : null, form,
+      pkFirst ? null : pkBlock,
       emailRow,
       term ? h('p', { class: 'small' }, button(`Back to the PIN screen (${term.name})`, () => showPinSignIn(), { small: true })) : null,
       signInVersion())));
   (!slug.value ? slug : email.value ? pw : email).focus();
 }
+
+/**
+ * Quick resume (feat/auth-hardening): a patrol or leader session paused after 30 minutes without use, or locked by its
+ * tab. The token is kept; a passkey or a code from the authenticator app opens it again, without typing a password, as
+ * long as its 8 hours have not passed and nobody signed out or changed the password. Otherwise: sign in again.
+ */
+async function showResume(message) {
+  const kept = session.keptMe() || {};
+  const err = h('div');
+  const slot = h('div', { class: 'stack' });
+  signInFrame('Paused to keep patient details private.', 'Nobody used Verdynt/OS here for a while, so it paused. Your work is where you left it.', 'Carry on',
+    message ? h('p', { class: 'muted', role: 'status' }, message) : null,
+    h('p', { class: 'resume-lead', 'data-resume-as': kept.login_name || '' }, 'Signed in as ', h('strong', null, kept.login_name || kept.username || 'you'), kept.tenant_name ? ` at ${kept.tenant_name}` : '', '. Confirm it is you to carry on.'),
+    slot, err,
+    h('p', { class: 'small' }, button('Sign out', () => signOut(), { small: true, kind: 'quiet' })));
+  document.title = 'Paused · Verdynt/OS';
+  let opts;
+  try { opts = await post('/auth/resume/options'); } catch (ex) {
+    // Not resumable (past 8 hours, signed out, password changed): a full sign-in.
+    session.clear(); showSignIn(ex.message || 'Sign in again.'); return;
+  }
+  const done = async () => { toast('Welcome back'); await start(); };
+  if (opts.methods.includes('passkey') && opts.passkey) {
+    const b = button('Use my passkey', async () => {
+      clear(err); b.disabled = true;
+      try {
+        const fresh = b.dataset.used ? await post('/auth/resume/options') : opts;
+        b.dataset.used = '1';
+        const response = await passkey.use(fresh.passkey.options);
+        await post('/auth/resume', { handle: fresh.passkey.handle, response });
+        await done();
+      } catch (ex) { err.append(errorBox(ex)); b.disabled = false; }
+    }, { kind: 'primary' });
+    b.classList.add('big', 'passkey-big');
+    slot.append(b);
+  }
+  if (opts.methods.includes('app')) {
+    const code = input({ name: 'code', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6, 'aria-label': 'Six-digit code' });
+    const go = h('button', { type: 'submit', class: opts.methods.includes('passkey') ? 'btn' : 'btn primary' }, 'Carry on');
+    const f = h('form', { class: 'stack', novalidate: true, 'data-step': 'resume' }, field(opts.methods.includes('passkey') ? 'Or the code from your authenticator app' : 'Code from your authenticator app', code), h('div', { class: 'row' }, go));
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault(); clear(err); go.disabled = true;
+      try { await post('/auth/resume', { code: code.value.trim() }); await done(); } catch (ex) { err.append(errorBox(ex)); go.disabled = false; code.select(); }
+    });
+    slot.append(f);
+  }
+  const first = slot.querySelector('.btn.primary, input');
+  if (first) first.focus();
+}
+let resuming = false;
+hooks.onPaused = () => { if (resuming) return; resuming = true; closeAllDialogs().catch(() => {}); ctx.me = null; showResume().finally(() => { resuming = false; }); };
 
 /**
  * A tab nobody used for 10 minutes: it locked itself (tablock.js) and reads no token until someone signs in here again.
@@ -318,12 +398,12 @@ function showEmailCodeEntry(purpose, { tenant, login, request, minutes = 10, lin
     go.disabled = true;
     try {
       if (!reset) {
-        const out = await post('/auth/email-code/verify', proof);
+        const out = await post('/auth/email-code/verify', { ...proof, ...asked() });
         if (out.mfa_required) { showSecondStep(out); return; }
         await signedIn(out);
         return;
       }
-      const out = await post('/auth/password-reset', { ...proof, new_password: next.value });
+      const out = await post('/auth/password-reset', { ...proof, new_password: next.value, ...asked() });
       toast('Password saved. Every other device was signed out.');
       if (out.mfa_required) { showSecondStep(out); return; }
       await signedIn(out);
@@ -734,6 +814,21 @@ let locking = false;
 async function lockTab() {
   if (locking || signingOut || !ctx.me || onTerminal() || ctx.me.display === 'patrol_room') return;
   locking = true;
+  // A patrol or leader session with a passkey or app: locked on the server, kept, and resumed with one touch (showResume).
+  if (ctx.me.resumable && session.token) {
+    try {
+      const out = await post('/auth/lock');
+      if (out && out.locked && out.resumable) {
+        endTour();
+        await within(closeAllDialogs(), 8000);
+        dropDeviceKey();
+        ctx.me = null;
+        navToken += 1;
+        location.reload(); // nothing stays in memory; start() finds the paused session and shows the resume screen
+        return;
+      }
+    } catch (_) { /* the server may already have paused it: carry on as before */ }
+  }
   const shared = session.shared;
   const token = session.token;
   const who = { tenant: ctx.me.tenant, login: ctx.me.login_name || ctx.me.username || ctx.me.email, name: [ctx.me.first_name, ctx.me.last_name].filter(Boolean).join(' ') || null, shared };
@@ -786,6 +881,7 @@ async function start() {
   } catch (err) {
     // Only the server saying the sign-in is over (401) signs out. No signal, a timeout or a server hiccup keeps the
     // sign-in: the app opens in offline mode from what this tab last knew, so a patroller at the bedside loses nothing.
+    if (err && err.status === 401 && err.details && err.details.code === 'resume') { await showResume(); return; }
     if (err && err.status === 401) {
       session.clear();
       if (readTerminal()) showPinSignIn(); else showSignIn();
@@ -812,7 +908,46 @@ async function start() {
       h('a', { href: '#/settings' }, 'Set it up now in Settings'), ' (a passkey takes a minute).'));
   }
   await route();
+  if (ctx.me.signed_in_with === 'passkey') notePasskeyHere();
   if (ctx.me.sandbox) { resumeTour(); welcomeOnce(); }
+  else if (ctx.me.passkey_prompt) offerPasskey(ctx.me.passkey_prompt);
+}
+
+/**
+ * Passkeys as the default for leaders (feat/auth-hardening): owners, managers and patrol directors and admins are asked
+ * after signing in until they have two; patrollers and the ski area login are offered one once. Always skippable.
+ */
+function offerPasskey(p) {
+  const SKIP = 'so.pk.later';
+  try { if (sessionStorage.getItem(SKIP)) return; } catch (_) { /* fine */ }
+  if (!passkey.supported()) return;
+  const leader = p.kind === 'leader';
+  const err = h('div');
+  const later = async () => {
+    try { sessionStorage.setItem(SKIP, '1'); } catch (_) { /* fine */ }
+    if (!leader) post('/auth/passkey-prompt/seen').catch(() => {});
+    dlg.close();
+  };
+  const add = button(p.have ? 'Add a second passkey here' : 'Add a passkey on this device', async () => {
+    clear(err); add.disabled = true;
+    try {
+      const { addPasskey } = await import('./views/security.js');
+      await addPasskey();
+      notePasskeyHere();
+      toast(leader && p.have + 1 < 2 ? 'Passkey added. Add a second one on another phone or a security key, in Settings.' : 'Passkey added. Next time, one touch signs you in.');
+      try { sessionStorage.setItem(SKIP, '1'); } catch (_) { /* fine */ }
+      if (!leader) post('/auth/passkey-prompt/seen').catch(() => {});
+      dlg.close();
+    } catch (ex) { err.append(errorBox(ex)); add.disabled = false; }
+  }, { kind: 'primary' });
+  add.classList.add('big', 'passkey-big');
+  const body = h('div', { class: 'stack', 'data-passkey-prompt': p.kind },
+    h('p', { class: 'resume-lead' }, 'One touch with your fingerprint or face, and no code to type.'),
+    leader ? h('p', null, `You can see every patient record and change who can do what, so a passkey is the safest way in: nobody can phish it or guess it. Add two: one on this device, and a second on another phone or a security key, so a lost phone never locks you out. You have ${p.have} of 2.`)
+      : h('p', null, 'Patrol records are private. A passkey signs you in and opens records with one touch, even with cold hands.'),
+    h('p', { class: 'muted small' }, 'Your authenticator app and recovery codes keep working as a backup.'),
+    add, err, h('div', { class: 'row' }, button('Not now', later, { small: true, kind: 'quiet' })));
+  const dlg = dialog('Add a passkey', body, { onClose: () => { try { sessionStorage.setItem(SKIP, '1'); } catch (_) { /* fine */ } } });
 }
 
 /** Opened with no signal: a strip says so, and offers to reload once the signal is back. */

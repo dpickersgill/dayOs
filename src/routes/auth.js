@@ -732,8 +732,9 @@ router.get('/users', authenticate, adminOnly, async (req, res) => {
     pool,
     `SELECT u.id, u.email, u.username, u.role, u.active, u.staff_id, u.created_at, (u.totp_enabled = 1 OR EXISTS (SELECT 1 FROM user_passkeys k WHERE k.user_id = u.id)) AS mfa_enabled,
        (u.totp_enabled = 1) AS app_enabled, (SELECT COUNT(*) FROM user_passkeys k WHERE k.user_id = u.id) AS passkeys, (u.pin_hash IS NOT NULL) AS pin_set, u.access_ends_on,
-       (u.must_change_password = 1) AS must_change_password, p.first_name, p.last_name
+       (u.must_change_password = 1) AS must_change_password, p.first_name, p.last_name, pm.access_level AS patrol_level
      FROM users u LEFT JOIN people p ON p.id = u.person_id AND p.tenant_id = u.tenant_id
+       LEFT JOIN patrol_members pm ON pm.tenant_id = u.tenant_id AND pm.staff_id = u.staff_id
      WHERE u.tenant_id = ? ORDER BY u.role, u.username`,
     [req.auth.tenantId],
   );

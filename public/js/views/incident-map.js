@@ -174,7 +174,7 @@ export async function drawMapTab(box, { canAdmin } = {}) {
     const pts = [];
     for (const c of data) {
       const m = L.marker([c.gps_lat, c.gps_lng], { icon: pinIcon(L, c.severity), title: c.case_number || `Case ${c.id}` }).addTo(map);
-      m.bindPopup(h('div', { class: 'map-pop' }, h('a', { href: `#/patrol/case/${c.id}` }, c.case_number || `Case ${c.id}`), h('div', null, fmtDateTime(c.occurred_at)), h('div', null, `${label(c.category)}, ${label(c.severity)}`), h('div', null, c.summary)));
+      m.bindPopup(h('div', { class: 'map-pop' }, h('a', { href: `#/patrol/case/${c.id}` }, c.case_number || `Case ${c.id}`), h('div', null, fmtDateTime(c.occurred_at)), h('div', null, `${label(c.category)}, ${label(c.severity)}`), h('div', c.summary_hidden ? { class: 'muted' } : null, c.summary_hidden ? 'Open the case to see more' : c.summary)));
       group.push(m);
       pts.push([c.gps_lat, c.gps_lng]);
     }

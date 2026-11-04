@@ -3699,3 +3699,10 @@ button.fill-day:hover { border-color: var(--line-strong); }
 .closed-export-files { list-style: none; margin: 16px 0; padding: 0; display: grid; gap: 8px; }
 .closed-export-files .btn { min-height: 44px; width: 100%; justify-content: flex-start; }
 .kept-list { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; }
+
+/* Patient-record check and quick resume (feat/auth-hardening): one large passkey button first, for gloved hands. */
+.btn.passkey-big { width: 100%; min-height: 60px; font-size: 1.15rem; }
+.resume-lead { font-size: 1.05rem; }
+.signin-check { display: flex; gap: 8px; align-items: flex-start; }
+.passkey-count { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.passkey-count.short { color: var(--warn-ink, #8a5300); font-weight: 600; }

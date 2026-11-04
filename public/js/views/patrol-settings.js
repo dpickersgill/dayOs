@@ -44,9 +44,32 @@ export function runsPanel(canEdit) {
   return box;
 }
 
+/**
+ * Patient record access (feat/auth-hardening): the weekly summary of who opened which patient records outside their own
+ * work. Shown to those who can read the access log; only the owner can turn it off.
+ */
+export function accessSummaryPanel() {
+  const box = h('section', { class: 'panel stack', 'data-panel': 'access-summary', hidden: true });
+  (async () => {
+    let s;
+    try { s = await get('/patrol/access-summary'); } catch (_) { return; } // not for this login
+    const on = h('input', { type: 'checkbox', name: 'on', checked: s.on, disabled: s.on && !s.can_turn_off });
+    const save = button('Save', async () => {
+      try { await put('/patrol/access-summary', { on: on.checked }); toast('Saved'); } catch (err) { toast(err.message, 'error'); on.checked = !on.checked; }
+    }, { kind: 'primary', small: true });
+    clear(box).append(h('h3', null, 'Patient record access'),
+      h('p', null, 'Every Monday morning the owner and patrol Admins get one email: how many patient care records were opened last week, and every open outside the person\'s own work in their shift (who, case number, when, and whether they confirmed it was them). Case numbers only, never patient details.'),
+      h('label', { class: 'check wide' }, on, ' Send the weekly access summary'),
+      s.can_turn_off ? null : h('p', { class: 'muted small' }, 'Only the owner can turn it off.'),
+      h('div', { class: 'row' }, save));
+    box.hidden = false;
+  })();
+  return box;
+}
+
 export async function drawOpsSettings(box) {
   const body = h('div', { class: 'stack' });
-  clear(box).append(body);
+  clear(box).append(body, accessSummaryPanel());
   async function load() {
     try { draw(await get('/patrol/ops-settings')); } catch (err) { clear(body).append(errorBox(err)); }
   }

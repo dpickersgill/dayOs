@@ -9,7 +9,7 @@ const stateText = { draft: 'Draft', submitted: 'Waiting for review', approved: '
 /** opts: { reportState: show the draft / waiting / approved chip (default false) } */
 export function caseRow(i, { reportState = false } = {}) {
   return h('a', { class: 'case-row', href: `#/patrol/case/${i.id}` },
-    h('span', { class: 'cr-main' }, h('b', null, i.case_number || `Case ${i.id}`), ' ', h('span', null, i.summary)),
+    h('span', { class: 'cr-main' }, h('b', null, i.case_number || `Case ${i.id}`), ' ', h('span', i.summary_hidden ? { class: 'muted' } : null, i.summary_hidden ? `${String(i.category || '').replace('_', ' ')}. Open the case to see more` : i.summary)),
     h('span', { class: 'cr-meta muted small' }, `${fmtDateTime(i.occurred_at)} · ${i.location}`),
     h('span', { class: 'cr-tags' },
       state(label(i.severity), sevTone[i.severity]), ' ', state(label(i.category), 'neutral'),
