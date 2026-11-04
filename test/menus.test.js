@@ -47,27 +47,46 @@ test.after(async () => {
   await pool.end();
 });
 
-test('the standard menus: each role its own apps, Inbox and My shifts always in, and it opens on one of them', () => {
-  assert.deepEqual(menus.STANDARD.counter, { apps: ['sell', 'gate', 'rentals', 'people', 'waivers', 'shop', 'inbox', 'myshifts'], start: 'sell' });
-  assert.deepEqual(menus.STANDARD.instructor, { apps: ['school', 'availability', 'people', 'waivers', 'inbox', 'myshifts'], start: 'school' });
-  assert.deepEqual(menus.STANDARD.staff, { apps: ['dashboard', 'conditions', 'gate', 'lostfound', 'inbox', 'myshifts'], start: 'dashboard' });
-  assert.deepEqual(menus.STANDARD.patrol, { apps: ['patrol', 'conditions', 'inbox', 'myshifts'], start: 'patrol' });
+test('the standard menus: each role its own work apps, Home never in them, and it opens on one of them or on Home', () => {
+  assert.deepEqual(menus.STANDARD.owner, { apps: ['money', 'conditions', 'patrol', 'school', 'people', 'workforce'], start: 'dashboard' });
+  assert.deepEqual(menus.STANDARD.manager, { apps: ['conditions', 'sell', 'patrol', 'school', 'people', 'workforce'], start: 'dashboard' });
+  assert.deepEqual(menus.STANDARD.counter, { apps: ['sell', 'gate', 'rentals', 'people', 'waivers', 'shop'], start: 'sell' });
+  assert.deepEqual(menus.STANDARD.instructor, { apps: ['school', 'availability', 'people', 'waivers'], start: 'school' });
+  assert.deepEqual(menus.STANDARD.staff, { apps: ['conditions', 'gate', 'lostfound'], start: 'dashboard' });
+  assert.deepEqual(menus.STANDARD.patrol, { apps: ['patrol', 'conditions'], start: 'patrol' });
+  assert.deepEqual(menus.HOME, ['dashboard', 'inbox', 'calendar', 'myshifts']);
   for (const [role, m] of Object.entries(menus.STANDARD)) {
-    assert.ok(m.apps.includes(m.start), `${role} opens on an app in its menu`);
-    for (const k of menus.ALWAYS) assert.ok(m.apps.includes(k), `${role} has ${k}`);
+    assert.ok(m.apps.includes(m.start) || menus.HOME.includes(m.start), `${role} opens on an app in its menu or on Home`);
+    for (const k of menus.HOME) assert.ok(!m.apps.includes(k), `${role}: ${k} is pinned, not in the menu`);
     for (const k of m.apps) assert.ok(menus.ROLE_APPS[role].includes(k), `${role} may open ${k}`);
   }
-  assert.equal(menus.menuFor('owner', null), null);
-  assert.equal(menus.menuFor('manager', '{"counter":{"apps":["gate"],"start":"gate"}}'), null);
+  assert.ok(!menus.ROLE_APPS.owner.includes('availability') && !menus.ROLE_APPS.manager.includes('availability'), 'availability is a Lessons tab for owners and managers');
+  assert.deepEqual(menus.menuFor('owner', null), menus.STANDARD.owner);
+  assert.deepEqual(menus.menuFor('manager', '{"counter":{"apps":["gate"],"start":"gate"}}'), menus.STANDARD.manager);
+  assert.equal(menus.menuFor('area', null), null, 'the ski area login has no menu');
   assert.deepEqual(menus.menuFor('counter', null), menus.STANDARD.counter, 'nothing stored: the standard menu');
   assert.deepEqual(menus.menuFor('counter', 'not json'), menus.STANDARD.counter);
-  assert.deepEqual(menus.menuFor('counter', { counter: { apps: ['gate', 'sell'], start: 'gate' } }), { apps: ['gate', 'sell', 'inbox', 'myshifts'], start: 'gate' });
+  assert.deepEqual(menus.menuFor('counter', { counter: { apps: ['gate', 'sell'], start: 'gate' } }), { apps: ['gate', 'sell'], start: 'gate' });
   assert.deepEqual(menus.menuFor('counter', { counter: { apps: ['money'], start: 'money' } }), menus.STANDARD.counter, 'a stored menu that no longer checks out falls back to the standard');
 });
 
-test('/auth/me carries the menu for the person\'s role, and none for owners and managers', async () => {
-  assert.equal(ok(await api('GET', '/auth/me', { token: T.owner })).menu, null);
-  assert.equal(ok(await api('GET', '/auth/me', { token: T.manager })).menu, null);
+test('menus saved before Home was pinned drop Today, Inbox, Calendar and My shifts when read', () => {
+  const old = { counter: { apps: ['gate', 'sell', 'inbox', 'myshifts', 'calendar'], start: 'gate' }, staff: { apps: ['dashboard', 'gate', 'inbox', 'myshifts'], start: 'dashboard' }, patrol: { apps: ['inbox', 'myshifts'], start: 'inbox' } };
+  const read = menus.parse(JSON.stringify(old));
+  assert.deepEqual(read.counter, { apps: ['gate', 'sell'], start: 'gate' });
+  assert.deepEqual(read.staff, { apps: ['gate'], start: 'dashboard' }, 'it can still open on Today');
+  assert.equal(read.patrol, undefined, 'a menu of only Home apps is empty, so the standard one is used');
+  assert.deepEqual(menus.menuFor('patrol', old), menus.STANDARD.patrol);
+  // A counter menu that held Instructor availability: it is a Lessons tab for the counter now.
+  assert.deepEqual(menus.parse({ counter: { apps: ['sell', 'availability'], start: 'availability' } }).counter, { apps: ['sell'], start: 'sell' });
+  // check() leaves Home out of a menu being saved, and refuses one with nothing else.
+  assert.deepEqual(menus.check('owner', { apps: ['dashboard', 'money', 'inbox'], start: 'dashboard' }).menu, { apps: ['money'], start: 'dashboard' });
+  assert.match(menus.check('owner', { apps: ['dashboard', 'inbox'], start: 'dashboard' }).problem, /at least one app/);
+});
+
+test('/auth/me carries the menu for the person\'s role, owners and managers included', async () => {
+  assert.deepEqual(ok(await api('GET', '/auth/me', { token: T.owner })).menu, menus.STANDARD.owner);
+  assert.deepEqual(ok(await api('GET', '/auth/me', { token: T.manager })).menu, menus.STANDARD.manager);
   for (const role of ['counter', 'instructor', 'staff', 'patrol']) assert.deepEqual(ok(await api('GET', '/auth/me', { token: T[role] })).menu, menus.STANDARD[role], role);
 });
 
@@ -77,6 +96,9 @@ test('managers can read the menus; only the owner can change them', async () => 
   assert.equal(seen.roles.counter.standard, true);
   assert.deepEqual(seen.roles.counter.apps, menus.STANDARD.counter.apps);
   assert.ok(seen.roles.counter.can_open.includes('lostfound'));
+  assert.deepEqual(seen.home, ['dashboard', 'inbox', 'calendar', 'myshifts'], 'Home, shown as fixed');
+  assert.deepEqual(seen.roles.owner.apps, menus.STANDARD.owner.apps, 'the owner menu can be seen and changed too');
+  assert.deepEqual(seen.roles.manager.apps, menus.STANDARD.manager.apps);
   assert.equal(ok(await api('GET', '/settings/menus', { token: T.owner })).can_change, true);
   assert.equal((await api('GET', '/settings/menus', { token: T.counter })).status, 403);
   const body = { role: 'counter', menu: { apps: ['gate', 'sell'], start: 'gate' } };
@@ -89,12 +111,14 @@ test('an owner changes a role\'s menu: checked, kept, audited, and on /auth/me s
   await bad({ role: 'counter', menu: { apps: ['sell', 'nonsense'], start: 'sell' } }, 'unknown app', /Not an app: nonsense/);
   await bad({ role: 'counter', menu: { apps: ['sell', 'money'], start: 'sell' } }, 'an app the role cannot open', /Money|money/);
   await bad({ role: 'counter', menu: { apps: ['sell', 'gate'], start: 'rentals' } }, 'opens on an app not in the menu', /must be one of the apps/);
-  await bad({ role: 'manager', menu: { apps: ['sell'], start: 'sell' } }, 'managers see everything');
+  await bad({ role: 'manager', menu: { apps: ['availability'], start: 'availability' } }, 'availability is a Lessons tab for managers', /cannot be opened/);
+  await bad({ role: 'area', menu: { apps: ['patrol'], start: 'patrol' } }, 'no menu for the ski area login');
+  await bad({ role: 'counter', menu: { apps: ['inbox', 'myshifts'], start: 'inbox' } }, 'only Home apps', /at least one app/);
   await bad({ role: 'counter', menu: { apps: [], start: 'sell' } }, 'empty');
   await bad({ role: 'counter' }, 'no menu given');
 
   const out = ok(await api('PUT', '/settings/menus', { token: T.owner, body: { role: 'counter', menu: { apps: ['gate', 'sell', 'lostfound', 'myshifts'], start: 'gate' } } }));
-  assert.deepEqual(out.menu, { apps: ['gate', 'sell', 'lostfound', 'myshifts', 'inbox'], start: 'gate' }, 'Inbox is always in');
+  assert.deepEqual(out.menu, { apps: ['gate', 'sell', 'lostfound'], start: 'gate' }, 'My shifts is pinned in Home, so it is left out of the menu');
   assert.equal(out.standard, false);
   assert.deepEqual(ok(await api('GET', '/auth/me', { token: T.counter })).menu, out.menu);
   assert.deepEqual(ok(await api('GET', '/auth/me', { token: T.instructor })).menu, menus.STANDARD.instructor, 'other roles keep the standard menu');
@@ -124,6 +148,19 @@ test('a menu can hold an app the mountain has turned off (the app hides it until
   ok(await api('PUT', '/settings/menus', { token: T.owner, body: { role: 'staff', menu: { apps: ['assets', 'gate'], start: 'gate' } } }));
   const me = ok(await api('GET', '/auth/me', { token: T.staff }));
   assert.ok(!me.modules.includes('assets'), 'Assets and fleet is an add-on, off here');
-  assert.deepEqual(me.menu.apps, ['assets', 'gate', 'inbox', 'myshifts']);
+  assert.deepEqual(me.menu.apps, ['assets', 'gate']);
   ok(await api('PUT', '/settings/menus', { token: T.owner, body: { role: 'staff', menu: null } }));
+});
+
+test('the owner changes the owner and manager menus with the same checks; a manager may not', async () => {
+  const body = { role: 'manager', menu: { apps: ['sell', 'gate', 'conditions'], start: 'sell' } };
+  assert.equal((await api('PUT', '/settings/menus', { token: T.manager, body })).status, 403);
+  const out = ok(await api('PUT', '/settings/menus', { token: T.owner, body }));
+  assert.deepEqual(out.menu, { apps: ['sell', 'gate', 'conditions'], start: 'sell' });
+  assert.deepEqual(ok(await api('GET', '/auth/me', { token: T.manager })).menu, out.menu);
+  assert.deepEqual(ok(await api('GET', '/auth/me', { token: T.owner })).menu, menus.STANDARD.owner, 'the owner menu is its own');
+  const mine = ok(await api('PUT', '/settings/menus', { token: T.owner, body: { role: 'owner', menu: { apps: ['money', 'messages'], start: 'calendar' } } }));
+  assert.deepEqual(mine.menu, { apps: ['money', 'messages'], start: 'calendar' }, 'it may open on a Home app');
+  for (const role of ['manager', 'owner']) ok(await api('PUT', '/settings/menus', { token: T.owner, body: { role, menu: null } }));
+  assert.deepEqual(ok(await api('GET', '/auth/me', { token: T.manager })).menu, menus.STANDARD.manager);
 });

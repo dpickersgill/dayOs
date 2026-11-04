@@ -48,7 +48,29 @@ Visitors can start their own demo at `/try`: they enter a name and email, and ab
 
 ### Menu
 
-The side menu has Today at the top and five groups (Front desk, Mountain, Safety, Programs, Office), each with its own accent colour. Groups fold open and shut (remembered per browser; all start folded on a first visit and a page unfolds its own group), and the menu collapses to icons only. Account, My shifts, Help and Sign out sit behind one account button at the bottom. Every page title shows its group's icon, name and colour, and section tabs underline in that colour. Patrol is its own group so it can be offered separately. Press Ctrl+K (Cmd+K on Mac) or "/" to jump to any page by typing; the palette also lists recent pages. On phones the menu becomes a bottom bar with a "More" sheet. Code: `public/js/nav.js`, `public/js/icons.js`.
+Navigation v2 follows one rule everywhere: **the side menu picks the app; tabs on the page pick the part of the app.** No app has sub-items in the side menu, and a page has at most two rows of tabs.
+
+- **Pinned at the top, for everyone:** the brand, Jump to, and **Home**: Today, Inbox, Calendar and My shifts (whichever the person may open). Home is never inside a menu or All apps, so it is in one place for every role.
+- **The short menu.** Every role has one, owners and managers included. Owner: Money, Mountain status, Patrol, Lessons, Customers, Staff and schedule. Manager: Mountain status, Sell, Patrol, Lessons, Customers, Staff and schedule. Ticket window: Sell, Gate, Rentals, Customers, Waivers, Online shop. Instructor: Lessons, Instructor availability, Customers, Waivers. Lift and mountain staff: Mountain status, Gate, Lost and found. Patroller: Patrol, Mountain status. Owners and managers open on Today; the others open on their first app (staff on Today).
+- **All apps**, below the short menu (small and muted, in sentence case): everything else the person may open, in four groups that fold. **Guests and sales**: Sell, Gate, Online shop, Rentals, Customers, Waivers, Lost and found. **On the hill**: Mountain status, Terrain park, Patrol, Patrol summary, Assets and fleet. **Ski school**: Lessons (the Ski school app), Programs. **Back office**: Products and prices, Money, Staff and schedule, Messages, Documents. An app shows once: if it is in the short menu, it is not repeated in its group.
+- **Group headings** are buttons (`aria-expanded`), in Atkinson Hyperlegible semibold at menu-item size with a chevron on the right, and no counts. Groups start folded. Open or closed is kept on this device (`so.nav.open`). The group holding the page you are on is **locked open**: its heading is marked `aria-disabled` and a press does nothing.
+- **One row height for everyone** on a computer (34px rows, the same for a counter as for an owner).
+- **Pinned at the bottom:** Settings, Help, your name with the light or dark switch, Sign out and the version.
+- **Only the middle scrolls**, and its edge always rests between two rows: its height is cut to the last whole row that fits, never on a heading. A thin line and soft shadow mark an edge with more past it (no fade over the rows). The page you are on is scrolled into view, with a row of room past it, under the pinned top. On a 1366x768 laptop an owner sees their whole menu and the first group of All apps.
+- **Settings, Team and logins, Menus for each role** now has Managers and Owners too. The owner changes any role's menu with the same checks as before (only apps that role may open; it opens on an app in the menu or on a Home app). Home is shown there as fixed and is not offered. Managers can look. Menus are kept in `tenants.role_menus`; an unchanged role uses the standard menu. Who may open what is unchanged.
+- **Menus saved before this change** held Inbox and My shifts (and sometimes Today or Calendar). Those Home apps are dropped when the menu is read; the stored row is not rewritten. A menu left with nothing else falls back to the standard one.
+- **Phone:** a slim top bar (Jump to and Inbox) and a bottom bar with the person's first four apps (then My shifts and Today) and **Menu**. Menu opens a sheet: Jump to, Today, Calendar, My shifts and the short menu as tiles, then All apps in the same folding groups, then Settings, Help, the theme and Sign out. The whole sheet scrolls as one.
+- **Jump to** (Ctrl+K, Cmd+K or "/") finds every page the person may open, the parts of Patrol, All apps, the theme and Sign out. Typing "availability" finds Lessons.
+
+**Tabs on the page** use one component (`tabs()` and `linkTabs()` in `public/js/ui.js`) and one set of styles:
+- **Row 1**, the app's main tabs: words, with a line under the open one. **Row 2**, only where an app needs it: lighter and smaller, no line, the open one on a soft tint. Tabs drawn inside another tab are row 2 on their own. On a phone, row 2 wraps with 44px targets, so nothing hides off the edge.
+- **Filters look like filters**, not tabs: outlined, with a check mark on the one that is on (Patrol cases: All, Drafts, Any time and so on; Documents categories).
+- **Patrol:** the title is Patrol. Row 1 is **Now, Cases, People, Gear**, each its own address (`#/patrol/cases`); row 2 is that part's pages (Cases: All cases, Review group, Follow-up, Records requests, Statistics, Injury network, Risk report, Access log). The breadcrumb reads Patrol / Cases. Old addresses (`#/patrol/case/12`, `#/patrol/review`, `#/patrol/duty`) still land on the right part.
+- **Lessons** (the Ski school app): row 1 is Today, Bookings, Instructors, Planning; row 2 their pages. The bookings list is called All lessons. **Instructor availability** is Lessons, Instructors, Availability; whose calendar (one instructor or everyone) is a choice on the page, not a third row.
+- **Mountain status, Rentals, Money, Staff and schedule, Online shop, Products and prices, Messages, Waivers, Gate, Terrain park, Assets and fleet:** one row; Maintenance and Reports (Mountain status) and Reports (Rentals) have a row 2.
+- **Sell:** its Tickets, Lessons, Rentals, Programs, Gift cards and Partner passes pills choose what to sell inside the Sell card, so they keep their pill look.
+
+Code: `public/js/nav.js` (menu, groups, phone sheet, Jump to), `public/js/ui.js` (tabs), `src/lib/menus.js` (menus and checks), `public/js/views/settings-menus.js`. Tests: `test/nav-v2.test.js`, `test/menus.test.js`, `test/web.test.js`.
 
 ### In-app help
 **Help** is in the side menu under your name, and a **Help with this page** link sits under every page title. It holds short how-to articles for each app: numbered steps, a few tips and related articles, with a search box that looks through titles and text.
@@ -247,7 +269,7 @@ Money > Weekly report shows a Monday-to-Sunday week (in the mountain's time zone
 ## Ski school
 
 ### Ski school
-Ski school screen tabs: **Lessons**, **Today**, **Online requests**, **Levels and skills**, **Instructor hours**.
+The Ski school app is called **Lessons** in the menu (its group under All apps is Ski school). Its tabs: **Today**, **Bookings** (All lessons, Online requests, Privates, Waitlist), **Instructors** (Who teaches what, Availability, Payroll, Instructor hours and more) and **Planning**. Levels and skills are in Settings, Ski school.
 - **Lesson types**: group, semi-private (2 to 4) and private lessons, with an age group and a meeting place. The usual seats come from the type. "Add a series of days" makes the same lesson on many days at once. Pricing comes from the lesson product (add one per length, such as "Private 1 hour" and "Private half day").
 - **Packages**: a lesson product with 2 or more "rides" is a lesson package. It is sold from Sell > Lessons, then spent one lesson at a time when the student is booked in on the Roster. Cancelling a booking gives the lesson back; refunding an unused package voids it (a used one must be refunded by hand).
 - **Levels and skills**: a default ski and snowboard ladder is created the first time it is opened, and managers edit it. Instructors tick skills off and move a student up on the **report card** (printable). Lesson notes are written per student by the instructor.
@@ -256,7 +278,7 @@ Ski school screen tabs: **Lessons**, **Today**, **Online requests**, **Levels an
 - API: `/skischool/levels`, `/skischool/students/:id/card`, `/skischool/board`, `/skischool/hours`, `/skischool/credits`, `/skischool/requests`, `/skischool/sessions/series`, public `/api/v1/public/:slug/booking` and `/requests`.
 
 ### Instructor availability
-**Availability** (menu, under Programs) lets each instructor mark the dates and times they are open, whenever plans change.
+**Instructor availability** (Lessons, Instructors, Availability; an instructor keeps it as an item in their own menu, and `#/availability` still opens it for them and sends everyone else to the Lessons tab) lets each instructor mark the dates and times they are open, whenever plans change.
 - An instructor taps days on a month calendar (or picks all weekends or weekdays), chooses times (Morning, Afternoon, All day, or exact times, with an optional note) and presses Mark open. Overlapping times on a day join into one. They can remove a time or clear days at any point. Only today and later can be changed, up to a year ahead. Instructors can edit only their own; managers can pick any instructor.
 - The instructor's login must be linked to their staff record (Staff and schedule). The **Everyone** tab shows the ski school desk (counter and managers) who is open over the next two weeks.
 - **Public page:** a manager turns it on under Availability, Public page. It then lives at `/availability/<mountain slug>`, for your website or social media. It is read only: guests see names, a short bio, what each instructor teaches, levels and open times for the next 60 days. They cannot book, request or contact anyone from it. Each instructor decides whether to be listed (Public profile), and by default only a first name and last initial show. No emails, phone numbers or photos are shown, and past times drop off automatically.
@@ -375,7 +397,7 @@ Managers delete records; everyone on the crew creates them. Everything is in the
 This release adds tables (`db/assets.sql`) and columns, so run `npm run migrate` when upgrading.
 
 ### Terrain park
-**Terrain park** (menu, under Operations) tracks the features your park crew builds with and where they put them each day.
+**Terrain park** (All apps, On the hill) tracks the features your park crew builds with and where they put them each day.
 - **Features** is the catalog: rails, boxes, jumps, pipes and more (33 types), each with a size, length, whether the crew moves it day to day, notes, and a status (Ready, Needs attention, Closed, Retired).
 - **Daily map** shows the mountain map for any day. Press Place on a feature, then tap the map (or use your phone's location) to put it down. Drag a marker to adjust. Markers show a letter for the kind (R rail, B box, J jump, P pipe) and turn amber or red when a feature needs attention or is closed. A dashed outline means it has not been inspected yet today.
 - **Copy from…** starts a day from an earlier day's layout. It only adds features that are not placed yet; it never moves anything.
@@ -398,7 +420,7 @@ The **Today** page is a set of tiles each person can choose and reorder: Lifts, 
 ## Staff
 
 ### Staff and schedule
-**Staff and schedule** (menu, under Office) has four tabs: Schedule, Hours, Staff and Setup. Managers and owners only; staff see their own shifts in My shifts.
+**Staff and schedule** (in the owner's and manager's menu; All apps, Back office) has four tabs: Schedule, Hours, Staff and Setup. Managers and owners only; staff see their own shifts in My shifts.
 - **Schedule** is the week as a grid: people down the side, days across, a row of unfilled shifts at the top, each person's hours for the week at the end (over 40 marked). Each shift shows its time and position with a department colour on its edge; drafts have a dashed outline. A department filter narrows it. People not on any shift that week are folded away under "Show N more". On a phone it is one day at a time, with a strip of the seven days (each with its shift count; open shifts marked).
 - **Add or change a shift** from the + in any day cell, Add shift, or by clicking a shift: day, start and end (a shift that ends earlier than it starts runs past midnight; at most 24 hours), position, a note, and who works it. The person list puts first whoever can work it (active, holds every certification the position requires and current on the day, free of other shifts and lessons, inside their availability), trained-for-the-position before not, fewest hours that week first. People outside their availability are listed apart and can still be chosen; everyone else is listed with the reason (a missing or expired certification, "Already on Lift operator 8 AM to 4:30 PM on Sat, Oct 17", "Teaching a lesson …"). Every check runs again on save. A shift can be cancelled from the same dialog.
 - **Copy last week** and **week templates** make draft shifts. People are kept only where they can still work the shift; otherwise it is left unfilled and listed with the reason. A shift already there (same time, position and person) is skipped, so copying twice adds nothing. Templates are saved from a week (by name; the same name replaces) and listed on Setup.
@@ -429,7 +451,7 @@ A shared tablet by the staff door lets people clock in and out without an accoun
 ## Documents
 
 ### Documents
-**Documents** (menu, under Operations) is a shared library for policies, forms, manuals and plans.
+**Documents** (All apps, Back office) is a shared library for policies, forms, manuals and plans.
 - Managers and owners make **categories** (Safety, HR forms, Manuals) and choose, for each one, which roles can see it (staff, patrol, instructors, counter) and which of those can also add and remove documents. A category with no roles ticked is managers only. Managers and owners always see everything.
 - A document is a file (up to 10 MB: PDF, Word, Excel, PowerPoint, images, text, CSV, zip) or a web link. PDFs and images open in the browser; everything else downloads. Replacing a file keeps the same document and raises its version number.
 - A role that cannot see a category cannot see its documents, search results or files; they look like they do not exist. Web pages and scripts cannot be uploaded.
@@ -450,7 +472,7 @@ Every guest needs a waiver for the season before they rent gear or take a lesson
 - **Children:** only an adult (18 or over) signs, for themselves and up to 10 children. A child who already has a different guardian on file is never signed for by someone else: online, that signing goes on a new record marked as a possible duplicate for staff to check; at the counter, staff are told.
 - **Who is who:** the public page cannot name an existing record. It matches a person only on first name, last name and date of birth together, never on an email alone, and never changes a matched record's contact details. The signed copy shows names as the guest typed them.
 - **The guest's copy:** a private link (`/waiver/<mountain>?copy=<token>`) shows exactly what they signed, with a Print or Save as PDF button. It is emailed only when the address is the signer's own, at most 3 times an hour per address.
-- **Waivers screen (Front desk):** search everyone signed this season, open one to see and print exactly what was signed, void a mistake with a reason (managers; it stops counting but is kept), and download a CSV (managers). Patrol do not see the register.
+- **Waivers screen (All apps, Guests and sales):** search everyone signed this season, open one to see and print exactly what was signed, void a mistake with a reason (managers; it stops counting but is kept), and download a CSV (managers). Patrol do not see the register.
 - **Wording:** managers edit it under Waivers, Wording, with a sample to start from (not legal advice). Every version is kept. **Ask everyone to sign again** makes all earlier waivers stop counting, including boxes ticked against the old wording in shop baskets and lesson requests still being paid for.
 - **Next season:** a counter signing for a lesson next season is signed for that season (current or next only).
 - **Privacy:** anonymising a customer keeps their signed waivers (the mountain's legal record) but removes the signer's email, phone, address and browser from them. Merging customers moves their signings.

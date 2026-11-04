@@ -3674,7 +3674,6 @@ button.fill-day:hover { border-color: var(--line-strong); }
 .tabs.row2 button:hover { color: var(--ink); background: var(--surface-2); }
 .tabs.row2 button[aria-selected='true'] { color: var(--ink); font-weight: 700; background: var(--info-tint); }
 :root[data-theme='dark'] .tabs.row2 button[aria-selected='true'] { background: rgba(255, 255, 255, .08); }
-.tabs.row1 + .pbody > div > div > .tabs.row2, .tabs.row1 + div > .tabs.row2 { margin-top: -4px; }
 /* Sell's product pills choose what to sell inside the Sell card: they keep their own pill look (see .sell-menu). */
 .tabs.tabs-pills button { font-weight: 700; min-height: 44px; white-space: nowrap; }
 @media (max-width: 860px) {
