@@ -124,3 +124,30 @@ test('4: jobs-oidc.sh signs every app job through the Cloud Scheduler API, with 
     }
   } finally { s.done(); }
 });
+
+test('5: uptime-setup.sh confirms the phone through the Cloud Monitoring API, with or without "G-"', () => {
+  const sh = read('scripts/uptime-setup.sh');
+  assert.doesNotMatch(sh.replace(/^\s*#.*$/gm, ''), /channels (send-verification-code|verify)/, 'those gcloud commands no longer exist');
+  const s = stub({ cases: `
+  "alpha monitoring channels create"*"--type=sms"*) echo projects/summitops-510715/notificationChannels/111 ;;
+  "alpha monitoring channels create"*) echo projects/summitops-510715/notificationChannels/222 ;;
+  "alpha monitoring channels describe"*) echo UNVERIFIED ;;
+  "monitoring uptime create"*) echo projects/summitops-510715/uptimeCheckConfigs/check-1 ;;` });
+  try {
+    for (const typed of ['G-123456', '123456']) {
+      const r = s.run('scripts/uptime-setup.sh', ['+16105550123', 'dan@example.com'], `${typed}\n`);
+      assert.equal(r.status, 0, r.out);
+      assert.match(r.out, /The phone is confirmed/);
+      assert.match(r.calls, /curl -sSf -X POST -H @\S+ --data-binary @- https:\/\/monitoring.googleapis.com\/v3\/projects\/summitops-510715\/notificationChannels\/111:sendVerificationCode/);
+      assert.match(r.calls, /curl -sSf -X POST -H @\S+ --data-binary @- https:\/\/monitoring.googleapis.com\/v3\/projects\/summitops-510715\/notificationChannels\/111:verify/);
+      assert.doesNotMatch(r.calls.split('\n').filter((l) => l.startsWith('curl')).join('\n'), /token-abc/);
+      for (const [, , mode] of r.calls.matchAll(/^header file @(\S+): (\d+)/gm)) assert.equal(mode, '600');
+    }
+    const bodies = s.run('/dev/null').body.trim().split('\n');
+    assert.deepEqual(bodies, ['{}', '{"code":"G-123456"}', '{}', '{"code":"G-123456"}']);
+    // Something that is not a code stops before asking Google.
+    const bad = s.run('scripts/uptime-setup.sh', ['+16105550123', 'dan@example.com'], 'hello\n');
+    assert.equal(bad.status, 1);
+    assert.match(bad.out, /That is not the code Google texted/);
+  } finally { s.done(); }
+});
