@@ -193,3 +193,56 @@ test('7: security-alerts.sh turns on Cloud SQL audit logs under cloudsql.googlea
   assert.match(read('scripts/harden.sh'), /services enable .*sqladmin\.googleapis\.com/);
   assert.match(read('scripts/backups-setup.sh'), /https:\/\/sqladmin\.googleapis\.com\/v1\/projects/);
 });
+
+// backups-setup.sh with a server whose backup settings are all on, so only the weekly copy steps change anything.
+function backupStub(failGrants) {
+  const sql = JSON.stringify({ settings: { backupConfiguration: { enabled: true, binaryLogEnabled: true, transactionLogRetentionDays: 7, startTime: '07:00', backupRetentionSettings: { retainedBackups: 14 } }, deletionProtectionEnabled: true, availabilityType: 'ZONAL' } });
+  const s = stub({ cases: `
+  "sql instances describe"*"--format=json"*) echo '${sql}' ;;
+  "sql instances describe"*"serviceAccountEmailAddress"*) echo p1@gcp-sa-cloud-sql.iam.gserviceaccount.com ;;
+  "storage buckets describe"*) exit 0 ;;
+  "iam service-accounts describe"*) exit 1 ;;
+  "iam roles describe"*) exit 1 ;;
+  "scheduler jobs describe"*) exit 0 ;;
+  "projects add-iam-policy-binding"*) n=$(cat "$STUB_LOG.grants" 2>/dev/null || echo 0); echo $((n + 1)) > "$STUB_LOG.grants"
+    if [ "$n" -lt "${failGrants}" ]; then echo "ERROR: Service account summitops-backup@x does not exist." >&2; exit 1; fi ;;` });
+  fs.writeFileSync(path.join(s.dir, 'sleep'), '#!/usr/bin/env bash\necho "sleep $*" >> "$STUB_LOG"\n', { mode: 0o755 });
+  return s;
+}
+
+test('8: backups-setup.sh tries the role grant again for a brand-new copy account, and replaces the weekly job', () => {
+  const sh = read('scripts/backups-setup.sh');
+  assert.doesNotMatch(sh.replace(/^\s*#.*$/gm, ''), /scheduler jobs update http/, 'gcloud\'s update crashes');
+  // Google knows the new account on the third try: waits 5 and 10 seconds, then goes on.
+  const s = backupStub(2);
+  try {
+    const r = s.run('scripts/backups-setup.sh');
+    assert.equal(r.status, 0, r.out);
+    const grants = r.calls.split('\n').filter((l) => /projects add-iam-policy-binding summitops-510715 --member=serviceAccount:summitops-backup@/.test(l));
+    assert.equal(grants.length, 3, r.calls);
+    assert.deepEqual(r.calls.split('\n').filter((l) => l.startsWith('sleep')), ['sleep 5', 'sleep 10']);
+    // The job that is there is deleted, then made again (no update).
+    const del = r.calls.indexOf('gcloud scheduler jobs delete summitops-weekly-export --location us-east1 --quiet');
+    const make = r.calls.indexOf('gcloud scheduler jobs create http summitops-weekly-export');
+    assert.ok(del > 0 && make > del, r.calls);
+    assert.doesNotMatch(r.calls, /scheduler jobs update/);
+  } finally { s.done(); }
+  // Never known: 0, 5, 10, 20, 30 seconds, then it stops and says what to do.
+  const never = backupStub(99);
+  try {
+    const r = never.run('scripts/backups-setup.sh');
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /Could not give the copy account its role\. Run this again in a minute\./);
+    assert.deepEqual(r.calls.split('\n').filter((l) => l.startsWith('sleep')), ['sleep 5', 'sleep 10', 'sleep 20', 'sleep 30']);
+    assert.doesNotMatch(r.calls, /scheduler jobs create/);
+  } finally { never.done(); }
+  // A dry run prints the grant once and changes nothing.
+  const dry = backupStub(99);
+  try {
+    const r = dry.run('scripts/backups-setup.sh', ['--dry-run']);
+    assert.equal(r.status, 0, r.out);
+    assert.equal((r.out.match(/would run: gcloud projects add-iam-policy-binding \S+ --member=serviceAccount:summitops-backup@/g) || []).length, 1, r.out);
+    assert.doesNotMatch(r.calls, /^gcloud projects add-iam-policy-binding/m);
+    assert.match(r.out, /would run: gcloud scheduler jobs delete summitops-weekly-export/);
+  } finally { dry.done(); }
+});

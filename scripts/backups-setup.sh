@@ -128,18 +128,34 @@ run gcloud storage buckets add-iam-policy-binding "$BUCKET" --member="serviceAcc
 if ! gcloud iam service-accounts describe "$BACKUP_SA" >/dev/null 2>&1; then
   run gcloud iam service-accounts create summitops-backup --display-name "Verdynt/OS weekly database copy"
 fi
-run gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$BACKUP_SA" --role=roles/cloudsql.viewer --condition=None --quiet >/dev/null
+# A brand-new account takes Google a few seconds before a role can be granted to it ("does not exist"), so the grant
+# is tried again after 5, 10, 20 and 30 seconds. A dry run prints it once.
+grant_backup_role() { # role
+  local role="$1" w out=""
+  if [ -n "$DRY" ]; then
+    run gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$BACKUP_SA" --role="$role" --condition=None --quiet
+    return 0
+  fi
+  for w in 0 5 10 20 30; do
+    [ "$w" -gt 0 ] && sleep "$w"
+    if out="$(gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$BACKUP_SA" --role="$role" --condition=None --quiet 2>&1 >/dev/null)"; then return 0; fi
+  done
+  [ -n "$out" ] && printf '%s\n' "$out" | tail -3
+  echo "Could not give the copy account its role. Run this again in a minute."
+  exit 1
+}
+grant_backup_role roles/cloudsql.viewer
 run gcloud services enable cloudscheduler.googleapis.com --quiet
 load_service; DBNAME="$(envval DB_NAME)"; DBNAME="${DBNAME:-summitops}"
 BODY="{\"exportContext\":{\"fileType\":\"SQL\",\"uri\":\"$BUCKET/weekly/summitops.sql.gz\",\"databases\":[\"$DBNAME\"]}}"
 URI="https://sqladmin.googleapis.com/v1/projects/$PROJECT/instances/$INSTANCE/export"
+# gcloud scheduler jobs update http crashes in current gcloud (TypeError on NoneType), so a job that is there already is
+# replaced: deleted, then made again with today's settings.
 if gcloud scheduler jobs describe "$JOB" --location "$REGION" >/dev/null 2>&1; then
-  run gcloud scheduler jobs update http "$JOB" --location "$REGION" --schedule="0 8 * * 2" --time-zone=Etc/UTC --uri="$URI" --http-method=POST \
-    --message-body="$BODY" --oauth-service-account-email="$BACKUP_SA" --quiet
-else
-  run gcloud scheduler jobs create http "$JOB" --location "$REGION" --schedule="0 8 * * 2" --time-zone=Etc/UTC --uri="$URI" --http-method=POST \
-    --message-body="$BODY" --oauth-service-account-email="$BACKUP_SA" --quiet
+  run gcloud scheduler jobs delete "$JOB" --location "$REGION" --quiet
 fi
+run gcloud scheduler jobs create http "$JOB" --location "$REGION" --schedule="0 8 * * 2" --time-zone=Etc/UTC --uri="$URI" --http-method=POST \
+  --message-body="$BODY" --oauth-service-account-email="$BACKUP_SA" --quiet
 echo "  Every Tuesday at 08:00 UTC: $BUCKET/weekly/summitops.sql.gz (older copies kept $WEEKLY_DAYS days)."
 echo "  Make the first copy now:   gcloud scheduler jobs run $JOB --location $REGION"
 
