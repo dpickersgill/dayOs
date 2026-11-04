@@ -53,7 +53,8 @@ if [ "$LIVE_DB" = "$STG_DB" ]; then echo "The live database is already called $S
 MAIL_FROM_V="$(envval MAIL_FROM)"
 PM_SECRET="$(secretof POSTMARK_SERVER_TOKEN)"; PM_PLAIN="$(envval POSTMARK_SERVER_TOKEN)"
 SA="$STAGING_SA"
-COMPUTE_SA="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')-compute@developer.gserviceaccount.com"
+PROJECT_NUMBER="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')"
+COMPUTE_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 echo "Database server $INSTANCE; the live database is $LIVE_DB; staging runs as $SA."
 
 step "A few choices"
@@ -191,6 +192,11 @@ echo "Done. Staging can read only: ${STG_SECRETS[*]}"
 step "4. Deploying staging (this takes a few minutes)"
 ENVS="NODE_ENV=production|STAGE=staging|STAGING_INBOX=$INBOX|DB_SOCKET=/cloudsql/$STG_CONN|DB_USER=$STG_USER|DB_NAME=$STG_DB|DB_POOL=4|STRIPE_GUEST_FALLBACK=on"
 [ -n "$MAIL_FROM_V" ] && ENVS="$ENVS|MAIL_FROM=$MAIL_FROM_V"
+# The app refuses to start in production without an https PUBLIC_URL. Staging's is its run.app address: the one it has
+# now, or the one Cloud Run will give it on the first deploy (service name, project number, region).
+STG_PUBLIC="$(gcloud run services describe "$STAGING_SERVICE" --region "$REGION" --format='value(status.url)' 2>/dev/null || true)"
+[ -n "$STG_PUBLIC" ] || STG_PUBLIC="https://${STAGING_SERVICE}-${PROJECT_NUMBER}.${REGION}.run.app"
+ENVS="$ENVS|PUBLIC_URL=$STG_PUBLIC"
 SECS="DB_PASSWORD=summitops-staging-db-password:latest,JWT_SECRET=summitops-staging-jwt:latest,BOOTSTRAP_KEY=summitops-staging-bootstrap:latest,STAGING_GATE=summitops-staging-gate:latest"
 secret_exists summitops-staging-postmark && SECS="$SECS,POSTMARK_SERVER_TOKEN=summitops-staging-postmark:latest"
 secret_exists summitops-staging-stripe-key && SECS="$SECS,STRIPE_SECRET_KEY=summitops-staging-stripe-key:latest"

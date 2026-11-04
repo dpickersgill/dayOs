@@ -81,3 +81,14 @@ test('2: staging-setup.sh loads the staging JWT_SECRET before staging-db-user.js
   const r = spawnSync(process.execPath, ['-e', "require('./src/config')"], { cwd: root, env: { ...process.env, NODE_ENV: 'production', JWT_SECRET: '' }, encoding: 'utf8' });
   assert.notEqual(r.status, 0, 'config refuses production without JWT_SECRET');
 });
+
+test('3: staging-setup.sh gives staging an https PUBLIC_URL, which production requires', () => {
+  const sh = read('scripts/staging-setup.sh');
+  assert.match(sh, /STG_PUBLIC="\$\(gcloud run services describe "\$STAGING_SERVICE" --region "\$REGION" --format='value\(status\.url\)'/);
+  assert.match(sh, /STG_PUBLIC="https:\/\/\$\{STAGING_SERVICE\}-\$\{PROJECT_NUMBER\}\.\$\{REGION\}\.run\.app"/);
+  assert.match(sh, /ENVS="\$ENVS\|PUBLIC_URL=\$STG_PUBLIC"/);
+  assert.ok(sh.indexOf('PUBLIC_URL=$STG_PUBLIC') < sh.indexOf('gcloud run deploy "$STAGING_SERVICE"'), 'set before the deploy');
+  // The address made for a first deploy, with the stand-in project number.
+  const r = spawnSync('bash', ['-c', 'STAGING_SERVICE=summitops-staging PROJECT_NUMBER=123456789 REGION=us-east1; STG_PUBLIC=""; ' + sh.match(/^\[ -n "\$STG_PUBLIC" \] \|\| .*$/m)[0] + '; echo "$STG_PUBLIC"'], { encoding: 'utf8' });
+  assert.equal(r.stdout.trim(), 'https://summitops-staging-123456789.us-east1.run.app');
+});
