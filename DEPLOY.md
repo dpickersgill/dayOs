@@ -179,7 +179,8 @@ memory instead was p95 50 ms, so the shared limits cost about 20 ms at the 95th 
 ### Uptime checks that text you
 
 `bash scripts/uptime-setup.sh +1XXXXXXXXXX you@example.com` makes, in Cloud Monitoring: a text channel to your phone
-(confirmed with a code) and an email channel; an uptime check on live `/readyz` every minute from three US regions
+(confirmed with a code Google texts to it; the script asks for it and sends it through the Cloud Monitoring API, as
+`G-123456` or `123456`) and an email channel; an uptime check on live `/readyz` every minute from three US regions
 (it passes only on `"ok":true`, so a database that cannot be reached or a missing migration also alerts); a check on
 the website's `/status` every 5 minutes (when `SITE_HOSTS` is set); and an alert for each when two regions fail for a
 minute, with another message when it is back. `--dry-run` shows what it would do. To change the phone, run it again
@@ -207,6 +208,9 @@ website's footer and the Security page. `GET /api/v1/status` gives the same as J
 | Stripe | live keys | test keys only (a live key stops staging from starting), with its own test-mode webhooks |
 | Email and texts | to guests and staff | every email to `STAGING_INBOX`, with who it was for in the subject; no texts unless `STAGING_SMS_TO` is set |
 | Visitors | everyone | a shared password (`STAGING_GATE`) first; hidden from search engines; a yellow band on every page |
+
+Staging's `PUBLIC_URL` is its own run.app address (production refuses to start without an https one); the script
+sets it on every run.
 
 Staging starts empty. Use its `/try` page for a full demo mountain, or its bootstrap key to create a mountain or sign
 in to its console the first time. Read the staging password or the bootstrap key with

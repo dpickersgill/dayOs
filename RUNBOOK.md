@@ -96,15 +96,21 @@ Every failure is written to the logs as one line with `"severity":"ERROR"` and a
 3. **Daily job missed:** Logging, Log-based metrics, Create a counter metric named `daily_job_finished` for
    `jsonPayload.message="daily job finished"`. Then Monitoring, Alerting, Create policy on that metric: alert when it
    is absent for 26 hours.
-4. **Give the daily job time to finish:** it can run for several minutes as mountains grow.
-   `gcloud scheduler jobs update http summitops-daily --location us-east1 --attempt-deadline=900s`
+4. **Give the daily job time to finish:** it can run for several minutes as mountains grow. The command that makes
+   the daily job (below, Daily schedule) gives it `--attempt-deadline=900s`. `gcloud scheduler jobs update http`
+   crashes in current gcloud, so a job made without it is deleted
+   (`gcloud scheduler jobs delete summitops-daily --location us-east1`) and made again with that command, then
+   `bash scripts/jobs-oidc.sh` is run again.
 5. **Budget:** Billing, Budgets and alerts, a monthly budget (for example $50) with email alerts.
 
 ## Backups
 
 Cloud SQL backs up the database every day at 07:00 UTC, keeps 14 backups, and can restore to any moment in the last
 week (point-in-time recovery). `bash scripts/backups-setup.sh` checks all of that, turns on what is missing and adds a
-weekly copy in Cloud Storage; RECOVERY.md has the restore steps and the drill. For an extra copy before a risky change:
+weekly copy in Cloud Storage; RECOVERY.md has the restore steps and the drill. The copy is asked for by the
+`summitops-backup` account, which has one custom role, `summitopsWeeklyExport` ("Verdynt/OS weekly database copy": ask
+Cloud SQL for an export and read the server's details, nothing else). Cloud SQL Viewer no longer allows an export, and
+the roles that do can change the server. For an extra copy before a risky change:
 
 ```bash
 gsutil mb -l us-east1 gs://summitops-510715-backups 2>/dev/null || true
