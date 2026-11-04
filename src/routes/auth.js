@@ -652,7 +652,7 @@ router.post('/auth/username', authenticate, notOnTerminal, validate(z.object({ u
 });
 
 // ---------------------------------------------------------------- two-step sign-in setup (your own login)
-const mfaLimit = rateLimit({ windowMs: 60_000, max: 20, message: 'Too many attempts' });
+const mfaLimit = rateLimit({ windowMs: 60_000, max: Number(process.env.LOGIN_RATE_LIMIT) || 20, message: 'Too many attempts' }); // per address; codes are also counted per login
 async function me(req) { return one(pool, 'SELECT * FROM users WHERE id = ? AND tenant_id = ?', [req.auth.userId, req.auth.tenantId]); }
 
 /**

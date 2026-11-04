@@ -40,7 +40,7 @@ async function checkPassword(user, given, message = 'That password is not right'
   if (!n) { await bcrypt.compare(String(given || ''), DUMMY_HASH); throw new AppError(429, LOCKED); }
   if (!(await bcrypt.compare(String(given || ''), user.password_hash))) {
     if (n === LOGIN_LOCK_AFTER()) {
-      await pool.query("INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id, detail) VALUES (?, NULL, 'login_locked', 'users', ?, ?)", [user.tenant_id, user.id, JSON.stringify({ after: n, where: 'signed_in' })]).catch(() => {});
+      await require('./audit').securityEvent(null, { tenantId: user.tenant_id, userId: user.id, actor: null, action: 'login_locked', row: true, after: n, where: 'signed_in' });
     }
     throw forbidden(message);
   }

@@ -48,8 +48,8 @@ async function remember(user, req, deviceHash, { method } = {}) {
     if (deviceHash) await pool.query(`INSERT INTO user_devices (tenant_id, user_id, device_hash, label, first_seen, last_seen) VALUES (?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
       ON DUPLICATE KEY UPDATE last_seen = UTC_TIMESTAMP(), label = VALUES(label)`, [user.tenant_id, user.id, deviceHash, label(agent)]);
     if (!fresh) return;
-    await pool.query("INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id, detail) VALUES (?, ?, 'new_device', 'users', ?, ?)",
-      [user.tenant_id, user.id, user.id, JSON.stringify({ device: label(agent), method: method || null, ...(deviceHash ? {} : { no_device_id: true }) })]).catch(() => {});
+    // The database row and the outside audit copy (feat/auth-hardening: before, only the row).
+    await require('./audit').securityEvent(req, { tenantId: user.tenant_id, userId: user.id, action: 'new_device', row: true, method: method || null, ...(deviceHash ? {} : { no_device_id: true }) });
     if (!user.email) return;
     const t = await one(pool, 'SELECT name FROM tenants WHERE id = ?', [user.tenant_id]);
     const when = new Date().toUTCString().replace(' GMT', ' UTC');
