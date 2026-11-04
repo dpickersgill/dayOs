@@ -91,8 +91,9 @@ async function relations(db, req, ids) {
     if (out.has(id)) continue;
     const created = ms(i.created_at);
     const isRoot = (u) => {
+      if (!(u > 0)) return false; // no adder recorded (null) is never the creator, the submitter or anyone else
       const p = who.get(u);
-      return (p && (ROOT_ROLES.includes(p.role) || ROOT_LEVELS.includes(p.access_level))) || u === creatorOf.get(id) || u === Number(i.submitted_by);
+      return Boolean((p && (ROOT_ROLES.includes(p.role) || ROOT_LEVELS.includes(p.access_level))) || u === creatorOf.get(id) || (i.submitted_by !== null && u === Number(i.submitted_by)));
     };
     const mineLinks = links.filter((l) => Number(l.incident_id) === id);
     // A link passes on its own: from before this rule, made at the scene, or added by someone tied to the case.
@@ -100,7 +101,7 @@ async function relations(db, req, ids) {
     const baseStaff = new Set(mineLinks.filter(base).map((l) => Number(l.staff_id)));
     const counts = (l) => {
       if (base(l)) return true;
-      const adder = who.get(Number(l.added_by));
+      const adder = l.added_by === null ? null : who.get(Number(l.added_by));
       // Added later by someone else who holds a link that passes on its own (never by the person themselves).
       return Boolean(adder && adder.staff_id && Number(adder.staff_id) !== Number(l.staff_id) && baseStaff.has(Number(adder.staff_id)));
     };
