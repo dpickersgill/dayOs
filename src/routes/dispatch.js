@@ -41,9 +41,13 @@ async function wordsHidden(req, calls) {
   return (c) => Boolean(c.incident_id) && !may.has(Number(c.incident_id));
 }
 const HIDE = (c) => ({ ...c, description: null, caller_name: null, caller_phone: null, words_hidden: true });
+const caseWrite = (req) => req.method === 'PATCH' || (req.method === 'POST' && /^\/events\/?$/.test(req.path));
 router.use('/dispatch/:id', PX.byChild('id', 'SELECT id, incident_id, status, call_date FROM dispatch_calls WHERE tenant_id = ? AND id = ?', {
   skipOther: true, // /dispatch/available and others share the address
-  allow: async (req, c) => currentCall(c, await todayOf(req.auth.tenantId)) || req.auth.recordsChecked,
+  // Current calls stay open for reading (words hidden as on the board) and for sending people. Changing the words or the
+  // timeline (notes, status) of a call that has a case changes what that case shows: the case's rule decides, so anyone
+  // tied to it (dispatched, on duty, crew) goes on as before and anyone else needs the records check.
+  allow: async (req, c) => req.auth.recordsChecked || (currentCall(c, await todayOf(req.auth.tenantId)) && !(c.incident_id && caseWrite(req))),
 }));
 // Timeline event -> the call status it sets. Notes and "at aid room" leave the status alone.
 const STATUS_FOR = { dispatched: 'dispatched', on_scene: 'on_scene', transporting: 'transporting', closed: 'closed', cancelled: 'cancelled' };
@@ -298,7 +302,8 @@ router.get('/dispatch-mine', patrol, async (req, res) => {
   if (!staffId) return res.json({ data: [] });
   const list = await rows(pool, `SELECT c.*, r.acked_at FROM dispatch_responders r JOIN dispatch_calls c ON c.tenant_id = r.tenant_id AND c.id = r.call_id
     WHERE r.tenant_id = ? AND r.staff_id = ? AND c.status IN ('new','dispatched','on_scene','transporting') ORDER BY c.received_at DESC`, [tenantId, staffId]);
-  res.json({ data: list.map(withNo) });
+  const hidden = await wordsHidden(req, list); // as on the board: a late self-dispatch does not show a case's words
+  res.json({ data: list.map((c) => withNo(hidden(c) ? HIDE(c) : c)) });
 });
 
 /** Text a responder who has not acknowledged (the dispatcher's backup when the phone alert was missed). */

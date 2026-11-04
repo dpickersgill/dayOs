@@ -15,10 +15,10 @@ export async function drawRecords(box) {
   async function load() {
     try {
       const [d, links] = await Promise.all([get('/patrol/records'), get('/patrol/shares').catch(() => ({ data: [] }))]);
-      draw(d, links.data.filter((x) => x.kind === 'claim'));
+      draw(d, links.data.filter((x) => x.kind === 'claim'), links.case_links);
     } catch (err) { clear(body).append(errorBox(err)); }
   }
-  function draw(d, links = []) {
+  function draw(d, links = [], held = null) {
     clear(body).append(
       h('div', { class: 'spread' }, h('div', null, h('h2', null, 'Records requests'), h('p', { class: 'muted' }, 'Release only with an authorization on file. Only the approved report is released, frozen, with a release number.')),
         button('Log a request', () => requestDialog(load), { kind: 'primary' })),
@@ -37,7 +37,7 @@ export async function drawRecords(box) {
       ], d.data) : empty('No requests yet.'),
       h('section', { class: 'panel stack' }, h('h3', null, 'Secure links to claim files'),
         h('p', { class: 'muted small' }, 'A link opens only the approved report a release sent, until it expires or you stop it. Every opening is logged with the time and address.'),
-        sharesList(links, load)),
+        held && held.total ? h('p', { class: 'muted small', 'data-links-held': held.total }, `${held.total} case link${held.total === 1 ? '' : 's'} (${held.active} active). Make the records check to see who each was shared with.`) : sharesList(links, load)),
       h('section', { class: 'panel' }, h('h3', null, `Cases on legal hold (${d.holds.length})`), d.holds.length ? h('ul', { class: 'duty-list' }, d.holds.map((c) => h('li', null, h('a', { href: `#/patrol/case/${c.id}` }, c.case_number), ` ${label(c.category)}, ${fmtDate(String(c.occurred_at).slice(0, 10))}: ${c.legal_hold_note || ''}`)))
         : h('p', { class: 'muted small' }, 'None. Put a case on hold from its Record view when a claim or request arrives.')));
   }

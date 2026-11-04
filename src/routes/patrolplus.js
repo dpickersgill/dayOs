@@ -372,7 +372,14 @@ router.get('/followups', patrol, needs('followups'), async (req, res) => {
     FROM followups f JOIN incidents i ON i.tenant_id = f.tenant_id AND i.id = f.incident_id JOIN incident_patients p ON p.tenant_id = f.tenant_id AND p.id = f.patient_id
     WHERE f.tenant_id = ? ${status ? 'AND f.status = ?' : ''} ORDER BY FIELD(f.status, 'held', 'failed', 'queued', 'sent', 'skipped', 'unsubscribed'), f.due_on DESC, f.id DESC LIMIT 300`, status ? [req.auth.tenantId, status] : [req.auth.tenantId]);
   await audit(pool, req, 'view_followups', 'audit_log', null, { rows: data.length });
-  res.json({ data: data.map((r) => ({ ...r, case_number: r.seq ? `${r.season}-${String(r.seq).padStart(4, '0')}` : null })) });
+  // The patient's first name, email and comment only for cases this person may open without the records check, or after
+  // it (lib/patientaccess.js). Otherwise the case number, due date and state.
+  const PX = require('../lib/patientaccess');
+  const may = await PX.openable(pool, req, data.map((r) => r.incident_id));
+  res.json({ data: data.map((r0) => {
+    const r = may.has(r0.incident_id) ? r0 : { ...r0, first_name: null, to_email: null, comment: null, details_hidden: true };
+    return { ...r, case_number: r.seq ? `${r.season}-${String(r.seq).padStart(4, '0')}` : null };
+  }) });
 });
 
 router.get('/followup-summary', patrol, needs('followups'), async (req, res) => {
@@ -381,7 +388,8 @@ router.get('/followup-summary', patrol, needs('followups'), async (req, res) => 
   const by = await rows(pool, 'SELECT status, COUNT(*) AS n FROM followups WHERE tenant_id = ? GROUP BY status', [t]);
   const [fb] = await rows(pool, 'SELECT COUNT(rating) AS rated, ROUND(AVG(rating), 1) AS avg_rating FROM followups WHERE tenant_id = ?', [t]);
   const [don] = await rows(pool, 'SELECT COUNT(*) AS gifts, COALESCE(SUM(amount_cents), 0) AS cents, SUM(monthly) AS monthly FROM donations WHERE tenant_id = ?', [t]);
-  const comments = await rows(pool, "SELECT rating, comment, responded_at FROM followups WHERE tenant_id = ? AND comment IS NOT NULL AND comment <> '' ORDER BY responded_at DESC LIMIT 10", [t]);
+  // Patients' own words: only after the records check (they can name the person or their injury).
+  const comments = req.auth.recordsChecked ? await rows(pool, "SELECT rating, comment, responded_at FROM followups WHERE tenant_id = ? AND comment IS NOT NULL AND comment <> '' ORDER BY responded_at DESC LIMIT 10", [t]) : [];
   const gifts = await rows(pool, 'SELECT amount_cents, monthly, name, created_at, followup_id IS NOT NULL AS from_email FROM donations WHERE tenant_id = ? ORDER BY id DESC LIMIT 15', [t]);
   res.json({ by_status: Object.fromEntries(by.map((x) => [x.status, x.n])), rated: fb.rated, avg_rating: fb.avg_rating, gifts: don.gifts, total_cents: Number(don.cents), monthly_gifts: Number(don.monthly || 0), comments, recent_gifts: gifts });
 });
@@ -390,6 +398,7 @@ async function loadFollowup(req) {
   await admin(req);
   const f = await one(pool, 'SELECT * FROM followups WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, paramId(req)]);
   if (!f) throw notFound('Follow-up');
+  await require('../lib/patientaccess').guard(pool, req, f.incident_id); // an email to this case's patient: the case's rule
   return f;
 }
 router.post('/followups/:id/approve', patrol, needs('followups'), async (req, res) => {

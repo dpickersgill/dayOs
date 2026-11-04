@@ -786,3 +786,49 @@ test('R10: the weekly summary lists every row that passed the records rule, writ
   assert.ok(what.includes('chat link preview'), what.join(', '));
   assert.ok(what.some((w) => /note/.test(w)), `a write through the rule: ${what.join(', ')}`);
 });
+
+test('R11: follow-ups run the case rule on every action, and the list hides the patient for cases the person may not open', async () => {
+  const id = await approvedOldCase();
+  const [[p]] = await pool.query('SELECT id FROM incident_patients WHERE incident_id = ? LIMIT 1', [id]);
+  const [f] = await pool.query("INSERT INTO followups (tenant_id, incident_id, patient_id, to_email, for_guardian, due_on, status, token, comment) VALUES (?, ?, ?, 'celia.b@example.test', 0, ?, 'held', ?, 'My knee still hurts')", [M.id, id, p.id, today, `fu-${suffix}`]);
+  const t = await tokenOf(U.Dir.login);
+  const row = ok(await api('GET', '/patrol/followups', { token: t })).data.find((x) => x.id === f.insertId);
+  assert.ok(row.case_number && row.due_on && row.status, 'case number, due date and state stay');
+  assert.equal(row.first_name, null); assert.equal(row.to_email, null); assert.equal(row.comment, null); assert.equal(row.details_hidden, true);
+  for (const act of ['approve', 'skip', 'send']) asks(await api('POST', `/patrol/followups/${f.insertId}/${act}`, { token: t, body: {} }), act);
+  assert.ok(!JSON.stringify(ok(await api('GET', '/patrol/followup-summary', { token: t }))).includes('knee still'), 'summary comments');
+  ok(await records(t));
+  const after = ok(await api('GET', '/patrol/followups', { token: t })).data.find((x) => x.id === f.insertId);
+  assert.equal(after.first_name, 'Celia'); assert.equal(after.to_email, 'celia.b@example.test');
+  ok(await api('POST', `/patrol/followups/${f.insertId}/approve`, { token: t, body: {} }));
+  assert.ok(JSON.stringify(ok(await api('GET', '/patrol/followup-summary', { token: t }))).includes('knee still'));
+});
+
+test('R12: my calls hide a case\'s words after a late self-dispatch, and changing the words or timeline of a case call runs the rule', async () => {
+  const id = await newCase(M.owner, { summary: 'Private fall' });
+  await age(id, 20);
+  const call = ok(await api('POST', '/patrol/dispatch', { token: M.owner, body: { location: 'Lift 4', description: 'Says her name is Odile', caller_name: 'Odile Caller' } }));
+  await pool.query('UPDATE dispatch_calls SET incident_id = ?, received_at = DATE_SUB(received_at, INTERVAL 2 HOUR) WHERE id = ?', [id, call.id]);
+  const t = await tokenOf(U.Pia.login);
+  ok(await api('POST', `/patrol/dispatch/${call.id}/responders`, { token: t, body: { staff_id: U.Pia.staff } }), 'sending yourself stays open');
+  const mine = ok(await api('GET', '/patrol/dispatch-mine', { token: t })).data.find((c) => c.id === call.id);
+  assert.ok(mine, 'listed'); assert.ok(!JSON.stringify(mine).includes('Odile'), 'no words'); assert.equal(mine.words_hidden, true);
+  asks(await api('PATCH', `/patrol/dispatch/${call.id}`, { token: t, body: { description: 'changed' } }), 'the words');
+  asks(await api('POST', `/patrol/dispatch/${call.id}/events`, { token: t, body: { kind: 'note', note: 'added' } }), 'a timeline note');
+  asks(await api('POST', `/patrol/dispatch/${call.id}/events`, { token: t, body: { kind: 'closed' } }), 'a status');
+  const plain = ok(await api('POST', '/patrol/dispatch', { token: M.owner, body: { location: 'Base', description: 'No case yet' } }));
+  ok(await api('PATCH', `/patrol/dispatch/${plain.id}`, { token: t, body: { description: 'Still no case' } }), 'a current call with no case');
+  ok(await records(t));
+  ok(await api('PATCH', `/patrol/dispatch/${call.id}`, { token: t, body: { priority: 'high' } }));
+  assert.ok(JSON.stringify(ok(await api('GET', '/patrol/dispatch-mine', { token: t }))).includes('Odile'));
+});
+
+test('R13: the list of outside links shows who each case was shared with only after the records check', async () => {
+  const id = await approvedOldCase();
+  await pool.query("INSERT INTO claim_shares (tenant_id, kind, incident_id, shared_with, token_hash, expires_at, created_by, created_at) VALUES (?, 'claim', ?, 'Brokerage Insurer Ltd', ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 5 DAY), ?, UTC_TIMESTAMP())", [M.id, id, `h-${suffix}`, U.Dir.id]);
+  const t = await tokenOf(U.Dir.login);
+  const before = ok(await api('GET', '/patrol/shares', { token: t }));
+  assert.ok(!JSON.stringify(before).includes('Brokerage'), 'no names'); assert.ok(before.case_links.total >= 1); assert.equal(before.records_check_needed, true);
+  ok(await records(t));
+  assert.ok(JSON.stringify(ok(await api('GET', '/patrol/shares', { token: t }))).includes('Brokerage'));
+});
