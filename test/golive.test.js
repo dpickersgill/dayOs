@@ -70,3 +70,14 @@ test('1: the base image is pinned, and rotate-secrets.sh applies the values it c
     assert.match(r.calls, /secrets versions list summitops-stripe_secret_key/);
   } finally { s.done(); }
 });
+
+test('2: staging-setup.sh loads the staging JWT_SECRET before staging-db-user.js loads the config', () => {
+  const sh = read('scripts/staging-setup.sh');
+  const jwtAt = sh.indexOf('export JWT_SECRET="$(secret_read summitops-staging-jwt)"');
+  const userAt = sh.indexOf('node scripts/staging-db-user.js');
+  assert.ok(jwtAt > 0 && userAt > jwtAt, 'JWT_SECRET is exported before the staging login is made');
+  assert.ok(sh.indexOf('npm run migrate') > jwtAt);
+  // Without it the config throws in production: the reason the step failed on deploy night.
+  const r = spawnSync(process.execPath, ['-e', "require('./src/config')"], { cwd: root, env: { ...process.env, NODE_ENV: 'production', JWT_SECRET: '' }, encoding: 'utf8' });
+  assert.notEqual(r.status, 0, 'config refuses production without JWT_SECRET');
+});

@@ -137,9 +137,10 @@ else
   DB_PASSWORD="$(secret_read summitops-staging-db-admin)"; export DB_PASSWORD
   STG_PORT=3309
 fi
+# The app's config refuses to load in production without JWT_SECRET, and staging-db-user.js loads it.
+export JWT_SECRET="$(secret_read summitops-staging-jwt)"
 printf '%s' "$STG_PW" | node scripts/staging-db-user.js "$STG_USER" - "$STG_DB"
 export DB_HOST=127.0.0.1 DB_PORT="$STG_PORT" DB_USER="$STG_USER" DB_PASSWORD="$STG_PW" DB_NAME="$STG_DB"
-export JWT_SECRET="$(secret_read summitops-staging-jwt)"
 npm run migrate
 
 step "3. Staging's own service account, which can read staging's keys and none of the live site's"
