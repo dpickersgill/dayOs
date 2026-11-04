@@ -144,7 +144,19 @@ grant_backup_role() { # role
   echo "Could not give the copy account its role. Run this again in a minute."
   exit 1
 }
-grant_backup_role roles/cloudsql.viewer
+# Its role (2026): Google took instance export out of "Cloud SQL Viewer", and the roles that still have it (Cloud SQL
+# Admin and Editor) can change the server. So the copy account gets a role of its own that can ask for an export and
+# read the server's details, nothing else.
+EXPORT_ROLE_ID=summitopsWeeklyExport
+EXPORT_ROLE="projects/$PROJECT/roles/$EXPORT_ROLE_ID"
+if ! gcloud iam roles describe "$EXPORT_ROLE_ID" --project="$PROJECT" >/dev/null 2>&1; then
+  run gcloud iam roles create "$EXPORT_ROLE_ID" --project="$PROJECT" --title="Verdynt/OS weekly database copy" \
+    --description="Ask Cloud SQL for an export, nothing else" --permissions=cloudsql.instances.export,cloudsql.instances.get --stage=GA --quiet >/dev/null
+  echo "  Made the role $EXPORT_ROLE (export only)."
+fi
+grant_backup_role "$EXPORT_ROLE"
+# The old role, given by earlier versions of this script, which no longer allows an export.
+run gcloud projects remove-iam-policy-binding "$PROJECT" --member="serviceAccount:$BACKUP_SA" --role=roles/cloudsql.viewer --condition=None --quiet >/dev/null 2>&1 || true
 run gcloud services enable cloudscheduler.googleapis.com --quiet
 load_service; DBNAME="$(envval DB_NAME)"; DBNAME="${DBNAME:-summitops}"
 BODY="{\"exportContext\":{\"fileType\":\"SQL\",\"uri\":\"$BUCKET/weekly/summitops.sql.gz\",\"databases\":[\"$DBNAME\"]}}"

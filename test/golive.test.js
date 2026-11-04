@@ -246,3 +246,27 @@ test('8: backups-setup.sh tries the role grant again for a brand-new copy accoun
     assert.match(r.out, /would run: gcloud scheduler jobs delete summitops-weekly-export/);
   } finally { dry.done(); }
 });
+
+test('9: the copy account gets a custom export-only role, not Cloud SQL Viewer (which no longer allows export)', () => {
+  const s = backupStub(1);
+  try {
+    const r = s.run('scripts/backups-setup.sh');
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.calls, /gcloud iam roles create summitopsWeeklyExport --project=summitops-510715 --title=Verdynt\/OS weekly database copy --description=Ask Cloud SQL for an export, nothing else --permissions=cloudsql.instances.export,cloudsql.instances.get --stage=GA/);
+    const grants = r.calls.split('\n').filter((l) => l.startsWith('gcloud projects add-iam-policy-binding') && l.includes('summitops-backup@'));
+    assert.equal(grants.length, 2, 'tried again once (item 8)');
+    for (const g of grants) assert.match(g, /--role=projects\/summitops-510715\/roles\/summitopsWeeklyExport --condition=None/);
+    assert.doesNotMatch(r.calls, /add-iam-policy-binding .*--role=roles\/cloudsql\.viewer/);
+    assert.match(r.calls, /gcloud projects remove-iam-policy-binding summitops-510715 --member=serviceAccount:summitops-backup@summitops-510715.iam.gserviceaccount.com --role=roles\/cloudsql\.viewer --condition=None/);
+  } finally { s.done(); }
+  // The role is there already: not made again. Removing an old binding that is not there does not stop the script.
+  const again = backupStub(0);
+  try {
+    const g = fs.readFileSync(path.join(again.dir, 'gcloud'), 'utf8').replace('"iam roles describe"*) exit 1 ;;', '"iam roles describe"*) exit 0 ;;\n  "projects remove-iam-policy-binding"*) exit 1 ;;');
+    fs.writeFileSync(path.join(again.dir, 'gcloud'), g);
+    const r = again.run('scripts/backups-setup.sh');
+    assert.equal(r.status, 0, r.out);
+    assert.doesNotMatch(r.calls, /iam roles create/);
+    assert.match(r.calls, /--role=projects\/summitops-510715\/roles\/summitopsWeeklyExport/);
+  } finally { again.done(); }
+});
