@@ -14,6 +14,25 @@ signed_in
 SERVICE="$PROD_SERVICE"
 load_service
 
+# Signs one job's calls. `gcloud scheduler jobs update http` crashes in current gcloud (TypeError on NoneType), so this
+# changes the job through the Cloud Scheduler API: it reads the job, drops the old key header, the User-Agent header
+# (Google sets that one) and any OAuth token, adds the Google ID token, and sends back the httpTarget only. The access
+# token goes in a header file only this account can read, never on curl's command line.
+sched_sign() { # job
+  local j="$1" target hdr rc=0
+  target="$(gcloud scheduler jobs describe "$j" --location "$REGION" --format=json | jq -c --arg sa "$JOBS_SA" --arg aud "$SVC_URL" '
+    {httpTarget: (.httpTarget
+      | .headers = ((.headers // {}) | with_entries(select((.key | ascii_downcase) as $k | $k != "x-jobs-key" and $k != "user-agent")))
+      | del(.oauthToken)
+      | .oidcToken = {serviceAccountEmail: $sa, audience: $aud})}')"
+  hdr="$(mktemp)"; chmod 600 "$hdr"
+  printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$(gcloud auth print-access-token)" > "$hdr"
+  printf '%s' "$target" | curl -sSf -X PATCH -H @"$hdr" --data-binary @- \
+    "https://cloudscheduler.googleapis.com/v1/projects/$PROJECT/locations/$REGION/jobs/$j?updateMask=httpTarget" >/dev/null || rc=$?
+  rm -f "$hdr"
+  [ "$rc" -eq 0 ] || { echo "  Could not change $j through the Cloud Scheduler API (curl exit $rc). Nothing else was changed for it."; return "$rc"; }
+}
+
 step "1. The jobs account, and the app told to accept its signed calls"
 ensure_jobs_oidc
 
@@ -23,7 +42,7 @@ while read -r name uri; do
   [ -n "$uri" ] || continue
   case "$uri" in */api/v1/internal/jobs/*) ;; *) continue ;; esac
   job="${name##*/}"
-  gcloud scheduler jobs update http "$job" --location "$REGION" "${JOB_AUTH[@]}" --remove-headers x-jobs-key --quiet >/dev/null
+  sched_sign "$job"
   echo "  $job now signs its calls as $JOBS_SA"
   MOVED=$((MOVED + 1))
 done < <(gcloud scheduler jobs list --location "$REGION" --format='value(name,httpTarget.uri)')

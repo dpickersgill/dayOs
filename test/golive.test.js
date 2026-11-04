@@ -92,3 +92,35 @@ test('3: staging-setup.sh gives staging an https PUBLIC_URL, which production re
   const r = spawnSync('bash', ['-c', 'STAGING_SERVICE=summitops-staging PROJECT_NUMBER=123456789 REGION=us-east1; STG_PUBLIC=""; ' + sh.match(/^\[ -n "\$STG_PUBLIC" \] \|\| .*$/m)[0] + '; echo "$STG_PUBLIC"'], { encoding: 'utf8' });
   assert.equal(r.stdout.trim(), 'https://summitops-staging-123456789.us-east1.run.app');
 });
+
+test('4: jobs-oidc.sh signs every app job through the Cloud Scheduler API, with the token in a private header file', () => {
+  const sh = read('scripts/jobs-oidc.sh');
+  assert.doesNotMatch(sh.replace(/^\s*#.*$/gm, ''), /gcloud scheduler jobs update http/, 'gcloud\'s update crashes (TypeError NoneType)');
+  const job = (j) => JSON.stringify({ name: `projects/summitops-510715/locations/us-east1/jobs/summitops-${j}`, httpTarget: { uri: `https://summitops-api-xyz.a.run.app/api/v1/internal/jobs/${j}`, httpMethod: 'POST', headers: { 'x-jobs-key': 'old-key', 'User-Agent': 'Google-Cloud-Scheduler', 'Content-Type': 'application/json' }, oauthToken: { serviceAccountEmail: 'x@y' } } });
+  const s = stub({ cases: ['daily', 'guests', 'lessons', 'outreach'].map((j) => `  "scheduler jobs describe summitops-${j} "*"--format=json"*) echo '${job(j)}' ;;`).join('\n') + `
+  "scheduler jobs list"*) for j in daily guests lessons outreach; do printf 'projects/p/locations/us-east1/jobs/summitops-%s\\thttps://summitops-api-xyz.a.run.app/api/v1/internal/jobs/%s\\n' $j $j; done
+    printf 'projects/p/locations/us-east1/jobs/summitops-weekly-export\\thttps://sqladmin.googleapis.com/v1/projects/p/instances/db/export\\n' ;;` });
+  try {
+    const r = s.run('scripts/jobs-oidc.sh');
+    assert.equal(r.status, 0, r.out);
+    assert.doesNotMatch(r.calls, /scheduler jobs update/);
+    for (const j of ['daily', 'guests', 'lessons', 'outreach']) {
+      assert.match(r.calls, new RegExp(`curl -sSf -X PATCH -H @\\S+ --data-binary @- https://cloudscheduler.googleapis.com/v1/projects/summitops-510715/locations/us-east1/jobs/summitops-${j}\\?updateMask=httpTarget`));
+      assert.match(r.out, new RegExp(`summitops-${j} now signs its calls`));
+    }
+    assert.doesNotMatch(r.calls, /jobs\/summitops-weekly-export\?updateMask/, 'the database export job is not the app\'s');
+    // The token is in a file only this account can read, never on a command line, and the file is gone after.
+    assert.doesNotMatch(r.calls.split('\n').filter((l) => l.startsWith('curl')).join('\n'), /token-abc/);
+    const files = [...r.calls.matchAll(/^header file @(\S+): (\d+) (.*)$/gm)];
+    assert.ok(files.length >= 4);
+    for (const [, f, mode, text] of files) { assert.equal(mode, '600'); assert.match(text, /Authorization: Bearer token-abc/); assert.ok(!fs.existsSync(f), 'removed after'); }
+    const bodies = r.body.trim().split('\n').map((l) => JSON.parse(l));
+    assert.equal(bodies.length, 4);
+    for (const b of bodies) {
+      assert.deepEqual(Object.keys(b), ['httpTarget']);
+      assert.deepEqual(b.httpTarget.headers, { 'Content-Type': 'application/json' }, 'no x-jobs-key, no User-Agent');
+      assert.equal(b.httpTarget.oauthToken, undefined);
+      assert.deepEqual(b.httpTarget.oidcToken, { serviceAccountEmail: 'summitops-jobs@summitops-510715.iam.gserviceaccount.com', audience: 'https://summitops-api-xyz.a.run.app' });
+    }
+  } finally { s.done(); }
+});
