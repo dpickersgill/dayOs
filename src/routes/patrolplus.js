@@ -122,7 +122,11 @@ router.post('/incidents/:id/collision-printed', patrol, needs('create_case'), as
 
 /** The lists patrollers can use. With ?case=<id>, lists already ticked on that case come too, even if switched off. */
 router.get('/checklists', patrol, needs('view_cases'), async (req, res) => {
-  const caseId = /^\d{1,15}$/.test(String(req.query.case || '')) ? Number(req.query.case) : null;
+  const asked = /^\d{1,15}$/.test(String(req.query.case || '')) ? Number(req.query.case) : null;
+  // Another mountain's or a missing case id gives the plain lists, as before; this mountain's case follows its rule
+  // (which items were ticked on a case is part of it).
+  const caseId = asked && (await one(pool, 'SELECT id FROM incidents WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, asked])) ? asked : null;
+  if (caseId) await require('../lib/patientaccess').guard(pool, req, caseId);
   res.json({ data: await CL.listsFor(pool, req.auth.tenantId, { incidentId: caseId }) });
 });
 

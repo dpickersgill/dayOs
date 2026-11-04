@@ -157,7 +157,7 @@ router.get('/meds', patrol, async (req, res) => {
   const [formulary, stock, moves, counts, equipment, settings] = await Promise.all([
     formularyOf(pool, t),
     rows(pool, 'SELECT k.*, f.name AS drug, f.controlled, st.name AS station FROM patrol_med_stock k JOIN patrol_formulary f ON f.tenant_id = k.tenant_id AND f.id = k.formulary_id LEFT JOIN patrol_stations st ON st.tenant_id = k.tenant_id AND st.id = k.station_id WHERE k.tenant_id = ? AND k.active = 1 ORDER BY f.name, k.expires_on', [t]),
-    rows(pool, `SELECT m.*, f.name AS drug, k.lot, COALESCE(u.email, u.username) AS by_name FROM patrol_med_moves m JOIN patrol_med_stock k ON k.tenant_id = m.tenant_id AND k.id = m.stock_id JOIN patrol_formulary f ON f.tenant_id = k.tenant_id AND f.id = k.formulary_id
+    rows(pool, `SELECT m.*, f.name AS drug, k.lot, COALESCE(u.email, u.username) AS by_name, CONCAT(i.season, '-', LPAD(i.seq, 4, '0')) AS case_number FROM patrol_med_moves m LEFT JOIN incidents i ON i.tenant_id = m.tenant_id AND i.id = m.incident_id JOIN patrol_med_stock k ON k.tenant_id = m.tenant_id AND k.id = m.stock_id JOIN patrol_formulary f ON f.tenant_id = k.tenant_id AND f.id = k.formulary_id
       LEFT JOIN users u ON u.tenant_id = m.tenant_id AND u.id = m.by_user WHERE m.tenant_id = ? ORDER BY m.at DESC, m.id DESC LIMIT 60`, [t]),
     rows(pool, `SELECT c.*, COALESCE(u.email, u.username) AS by_name, CONCAT(p.first_name, ' ', p.last_name) AS witness FROM patrol_med_counts c LEFT JOIN users u ON u.tenant_id = c.tenant_id AND u.id = c.by_user
       LEFT JOIN staff s ON s.tenant_id = c.tenant_id AND s.id = c.witness_staff LEFT JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE c.tenant_id = ? ORDER BY c.counted_at DESC LIMIT 20`, [t]),
@@ -190,11 +190,14 @@ router.get('/meds', patrol, async (req, res) => {
       LEFT JOIN users u ON u.tenant_id = c.tenant_id AND u.id = c.by_user LEFT JOIN staff ws ON ws.tenant_id = c.tenant_id AND ws.id = c.witness_staff LEFT JOIN people wp ON wp.tenant_id = ws.tenant_id AND wp.id = ws.person_id
       WHERE c.tenant_id = ? AND c.status = 'pending' ORDER BY c.counted_at`, [t]),
   ]);
+  const mayMoves = await require('../lib/patientaccess').openable(pool, req, moves.filter((m) => m.incident_id).map((m) => m.incident_id));
   for (const m of pendMoves) flags.push({ level: 'warn', text: `${m.drug}: ${m.treatment_id ? 'a voided dose going back' : label(m.reason)} waits for ${m.witness || 'a witness'} to confirm` });
   for (const c of pendCounts) flags.push({ level: 'warn', text: `A controlled count waits for ${c.witness || 'its witness'} to confirm` });
   res.json({
     formulary, stock: stock.map((k) => ({ ...k, id: Number(k.id), quantity: Number(k.quantity), low_at: k.low_at === null ? null : Number(k.low_at), controlled: Boolean(k.controlled) })),
-    moves, counts, equipment, flags,
+    // Controlled-drug accountability keeps the drug, amount and case number on every move; the free-text note on a move
+    // tied to a case only for someone who may open that case (lib/patientaccess.js).
+    moves: moves.map((m) => (m.incident_id && !mayMoves.has(m.incident_id) ? { ...m, note: null, note_hidden: Boolean(m.note) } : m)), counts, equipment, flags,
     pending: { moves: pendMoves.map((m) => ({ ...m, id: Number(m.id), delta: Number(m.delta), mine: Number(m.by_user) === req.auth.userId, i_witness: Boolean(req.auth.staffId) && (m.witness_staff ? Number(m.witness_staff) === Number(req.auth.staffId) : Number(m.by_user) !== req.auth.userId) })),
       counts: pendCounts.map((c) => ({ ...c, id: Number(c.id), mine: Number(c.by_user) === req.auth.userId, i_witness: Boolean(req.auth.staffId) && Number(c.witness_staff) === Number(req.auth.staffId) })) },
     me: req.auth.staffId ? Number(req.auth.staffId) : null, controlled_counts: settings.controlled_counts, o2_refill_psi: settings.o2_refill_psi,

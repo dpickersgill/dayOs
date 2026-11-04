@@ -832,3 +832,25 @@ test('R13: the list of outside links shows who each case was shared with only af
   ok(await records(t));
   assert.ok(JSON.stringify(ok(await api('GET', '/patrol/shares', { token: t }))).includes('Brokerage'));
 });
+
+test('R14: case checklists follow the rule; kit checks and medication moves keep the case number and hide notes on cases the person may not open', async () => {
+  const id = await approvedOldCase();
+  const t = await tokenOf(U.Pia.login);
+  asks(await api('GET', `/patrol/checklists?case=${id}`, { token: t }), 'a case\'s ticked lists');
+  ok(await api('GET', '/patrol/checklists', { token: t }), 'the lists themselves stay open');
+  ok(await api('POST', '/patrol/kits/types/starter', { token: M.owner, body: { names: ['Trauma bag'] } }), 201);
+  const type = ok(await api('GET', '/patrol/kits', { token: M.owner })).types[0];
+  const kit = ok(await api('POST', '/patrol/kits', { token: M.owner, body: { type_id: type.id, count: 1, location: 'R14 shack' } }), 201).data[0];
+  await pool.query("INSERT INTO patrol_kit_checks (tenant_id, kit_id, kind, result, note, incident_id, done_by, done_at, applied) VALUES (?, ?, 'use', 'needs_restock', 'Used on Celia, open femur', ?, ?, UTC_TIMESTAMP(), 1)", [M.id, kit.id, id, U.Dir.id]);
+  const drug = ok(await api('POST', '/patrol/meds/formulary', { token: M.owner, body: { name: 'R14 Fentanyl', authority: 'standing_order', routes: ['intranasal'], max_dose: 100, dose_unit: 'mcg', min_cert: 'none', controlled: true } }), 201).id;
+  const lot = ok(await api('POST', '/patrol/meds/stock', { token: M.owner, body: { formulary_id: drug, lot: 'R14', quantity: 10, unit: 'doses' } }), 201).id;
+  await pool.query("INSERT INTO patrol_med_moves (tenant_id, stock_id, delta, reason, incident_id, by_user, at, note) VALUES (?, ?, -1, 'used', ?, ?, UTC_TIMESTAMP(), 'Celia, pain 9 of 10')", [M.id, lot, id, U.Dir.id]);
+  const check = ok(await api('GET', `/patrol/kits/${kit.id}`, { token: t })).checks.find((c) => c.incident_id === id);
+  assert.ok(check.case_number); assert.equal(check.note, null); assert.equal(check.note_hidden, true);
+  const move = ok(await api('GET', '/patrol/meds', { token: t })).moves.find((m) => m.incident_id === id);
+  assert.equal(move.drug, 'R14 Fentanyl'); assert.equal(Number(move.delta), -1); assert.ok(move.case_number); assert.equal(move.note, null);
+  ok(await records(t));
+  ok(await api('GET', `/patrol/checklists?case=${id}`, { token: t }));
+  assert.match(ok(await api('GET', `/patrol/kits/${kit.id}`, { token: t })).checks.find((c) => c.incident_id === id).note, /Celia/);
+  assert.match(ok(await api('GET', '/patrol/meds', { token: t })).moves.find((m) => m.incident_id === id).note, /Celia/);
+});
