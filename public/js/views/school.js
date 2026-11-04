@@ -12,6 +12,7 @@ import * as payPart from './school-pay.js';
 import * as directorPart from './school-director.js';
 import * as planPart from './school-plan.js';
 import * as staffPart from './school-staff.js';
+import { drawInLessons as drawAvailability } from './availability.js';
 
 const PARTS = [lineupPart, parentsPart, payPart, directorPart, planPart, staffPart];
 
@@ -36,16 +37,18 @@ export async function render(root) {
   const instructor = ctx.me && ctx.me.role === 'instructor';
   const items = [];
   if (instructor || (isManager() && ctx.me.staff_id)) items.push(['myday', 'My day', (b) => myDay.render(b)]);
-  items.push(['today', 'Board', (b) => boardTab(b, { staff })], ['lessons', 'Lessons', (b) => lessonsTab(b, { staff, certs, names })]);
+  items.push(['today', 'Board', (b) => boardTab(b, { staff })], ['lessons', 'All lessons', (b) => lessonsTab(b, { staff, certs, names })]);
   if (can('counter') || schoolCan('supervisor')) items.push(['requests', pending ? `Online requests (${pending})` : 'Online requests', (b) => requestsTab(b)]);
   if (schoolCan('director')) items.push(['instructors', 'Who teaches what', (b) => instructorsTab(b, { certs })], ['hours', 'Instructor hours', (b) => hoursTab(b)]);
   for (const part of PARTS) items.push(...part.tabs({ staff, certs, names }));
+  // Instructor availability lives here (it used to be its own menu item): who is open when, next to who teaches what.
+  items.push(['availability', 'Availability', (b) => drawAvailability(b)]);
   // Four groups instead of a long row: the day, bookings, instructors, planning. Each group shows its own small row of
   // views; a group with one view shows none. The group is ?tab= in the address, the view ?view=.
   const GROUPS = [
     ['day', 'Today', ['myday', 'today', 'checkin', 'lineup']],
     ['bookings', pending ? `Bookings (${pending})` : 'Bookings', ['lessons', 'requests', 'privates', 'waitlist']],
-    ['team', instructor && !schoolCan('director') ? 'My work' : 'Instructors', ['recaps', 'offers', 'mypay', 'guests', 'instructors', 'payroll', 'hours']],
+    ['team', instructor && !schoolCan('director') ? 'My work' : 'Instructors', ['recaps', 'offers', 'mypay', 'guests', 'instructors', 'availability', 'payroll', 'hours']],
     ['plan', 'Planning', ['season', 'fill', 'weather', 'copy', 'staffing', 'reports']],
   ];
   const byKey = new Map(items.map((i) => [i[0], i]));
@@ -65,7 +68,7 @@ export async function render(root) {
   }]);
   const page = tabs(top, 'day');
   page.classList.add('school-groups');
-  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Ski school')), page);
+  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Lessons')), page);
 }
 
 /** Setup shown in Settings, Ski school (managers): the level ladder and the skills for each level. */

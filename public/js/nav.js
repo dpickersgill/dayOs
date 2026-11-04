@@ -1,26 +1,29 @@
-// The menu. On a computer the side menu is always in view: managers and owners see every app in five groups, always
-// open; everyone else sees the short menu for their role (ctx.me.menu) with the rest under All apps. On a phone a
-// labeled bottom bar holds the person's first four items and Menu, which opens a sheet of everything. Jump to
-// (Ctrl+K, Cmd+K or "/") opens any page the person may use by typing a few letters.
+// The menu. On a computer the side menu is always in view. At the top, pinned: the brand, Jump to and Home (Today, Inbox,
+// Calendar, My shifts, whichever the person may open), the same for everyone. In the middle, the only part that scrolls:
+// the person's short menu (ctx.me.menu, owners and managers included), then All apps in four groups that fold. At the
+// bottom, pinned: Settings, Help and the person. On a phone a labeled bottom bar holds the first four items and Menu,
+// which opens a sheet: the short menu as tiles, then the same groups. Jump to (Ctrl+K, Cmd+K or "/") opens any page.
+// The side menu only picks the app: the parts of an app are tabs on its page (ui.js tabs()).
 import { h, clear, ctx, label, isManager } from './ui.js';
 import { icon } from './icons.js';
 import { readTerminal } from './terminal.js';
 
-// Menu groups: label, color key, apps. Today, Inbox and My shifts stand alone at the top. Each group has its own accent dot.
+// Home: pinned at the top for everyone, never inside All apps or a menu.
+export const HOME = ['dashboard', 'inbox', 'calendar', 'myshifts'];
+// All apps: four groups that fold. [heading, id, apps]. An app shows only for people who may open it.
 export const GROUPS = [
-  ['Front desk', 'front', ['sell', 'gate', 'shop', 'rentals', 'people', 'waivers', 'lostfound']],
-  ['Mountain', 'mountain', ['conditions', 'park', 'assets']],
-  ['Safety', 'safety', ['patrol', 'area']],
-  ['Programs', 'programs', ['school', 'programs', 'availability']],
-  ['Office', 'office', ['catalog', 'money', 'workforce', 'messages', 'documents']],
+  ['Guests and sales', 'sales', ['sell', 'gate', 'shop', 'rentals', 'people', 'waivers', 'lostfound']],
+  ['On the hill', 'hill', ['conditions', 'park', 'patrol', 'area', 'assets']],
+  ['Ski school', 'school', ['school', 'programs', 'availability']],
+  ['Back office', 'office', ['catalog', 'money', 'workforce', 'messages', 'documents']],
 ];
-export const GROUP_OF = Object.fromEntries(GROUPS.flatMap(([name, id, keys]) => keys.map((k) => [k, { id, name }])));
-const START = ['dashboard', 'calendar', 'inbox', 'myshifts'];
-const MINE = ['inbox', 'myshifts', 'calendar']; // always in a role menu, after the role's own apps (Calendar: 2026.11.10)
+export const GROUP_OF = Object.fromEntries([...HOME.map((k) => [k, { id: 'home', name: 'Home' }]), ...GROUPS.flatMap(([name, id, keys]) => keys.map((k) => [k, { id, name }]))]);
 const BOTTOM = ['settings', 'help'];
-const PHONE_FIRST = ['dashboard', 'sell', 'gate', 'patrol', 'area', 'school', 'conditions', 'myshifts'];
+// The phone bar: the person's first apps, then these (Inbox has its own button in the phone's top bar).
+const PHONE_HOME = ['myshifts', 'dashboard', 'calendar'];
+const OPEN_KEY = 'so.nav.open'; // which groups this device keeps open
 
-// Patrol is the one app with sections between the app and its tabs.
+// Patrol's four parts are its page tabs (row 1 on the Patrol page). The side menu has none of them.
 export const PATROL_SECTIONS = [['now', 'Now'], ['cases', 'Cases'], ['people', 'People'], ['gear', 'Gear']];
 const SECTION_OF = {
   now: 'now', home: 'now', board: 'now', duty: 'now', dispatch: 'now', map: 'now', opening: 'now', sweep: 'now', avalanche: 'now', log: 'now', room: 'now',
@@ -34,7 +37,7 @@ export const patrolSection = (params = []) => SECTION_OF[params[0]] || 'now';
 // Words people might type that are not in the page's name (old names included, so habits still work).
 const ALSO = {
   dashboard: 'home overview numbers today', sell: 'ticket pos register checkout basket partner passes indy pass reciprocal redeem', gate: 'scan lift ticket scanner check in',
-  conditions: 'lifts trails snow open closed status grooming groomer snowmaking weather maintenance work orders inspection fleet downtime handoff report', park: 'terrain park rails jumps boxes features freestyle halfpipe jib map', rentals: 'equipment skis boards boots rent', school: 'lessons instructors ski school',
+  conditions: 'lifts trails snow open closed status grooming groomer snowmaking weather maintenance work orders inspection fleet downtime handoff report', park: 'terrain park rails jumps boxes features freestyle halfpipe jib map', rentals: 'equipment skis boards boots rent', school: 'lessons instructors ski school availability instructor availability open dates',
   programs: 'clubs camps leagues teams', patrol: 'incident case injury first aid dispatch admin', people: 'customers guests search members',
   catalog: 'products prices passes items', money: 'sales refunds reports till drawer payments', workforce: 'staff schedule shifts hours kiosk time clock pin badge',
   availability: 'instructor calendar open dates times schedule days off private lessons',
@@ -108,89 +111,87 @@ function whoVersion() {
 
 /**
  * What the menu shows for this person. views: [[key, label]] already filtered for them; menu: ctx.me.menu.
- * A role menu ({ apps, start }) lists its apps in its order, then Inbox and My shifts; everything else they may open is
- * under All apps. No menu (owners and managers): every app in the five groups.
+ * home: Today, Inbox, Calendar, My shifts (pinned, the same for everyone). apps: their short menu, in its order, without
+ * Home. groups: everything else they may open, in the four groups of All apps. first: the phone bar's four items.
  */
 export function menuPlan(views, menu) {
   const keys = views.map(([k]) => k);
   const has = (k) => keys.includes(k);
+  const home = HOME.filter(has);
   const bottom = BOTTOM.filter(has);
-  if (menu && Array.isArray(menu.apps)) {
-    const apps = [...new Set(menu.apps)].filter((k) => has(k) && !MINE.includes(k) && !BOTTOM.includes(k));
-    const mine = MINE.filter(has);
-    const listed = new Set([...apps, ...mine, ...bottom]);
-    return { role: true, apps, mine, bottom, more: keys.filter((k) => !listed.has(k)), first: [...apps, ...mine].slice(0, 4) };
-  }
-  const start = START.filter(has);
-  const groups = GROUPS.map(([name, id, ks]) => ({ name, id, keys: ks.filter(has) })).filter((g) => g.keys.length);
-  const inGroups = new Set([...start, ...groups.flatMap((g) => g.keys), ...bottom]);
-  const extra = keys.filter((k) => !inGroups.has(k)); // nothing today; a new app shows somewhere rather than nowhere
-  if (extra.length) groups.push({ name: 'More', id: 'office', keys: extra });
-  return { role: false, start, groups, bottom, more: [], first: PHONE_FIRST.filter(has).slice(0, 4) };
+  const apps = menu && Array.isArray(menu.apps) ? [...new Set(menu.apps)].filter((k) => has(k) && !HOME.includes(k) && !BOTTOM.includes(k)) : [];
+  const listed = new Set([...home, ...apps, ...bottom]);
+  const more = keys.filter((k) => !listed.has(k));
+  const groups = GROUPS.map(([name, id, ks]) => ({ name, id, keys: ks.filter((k) => more.includes(k)) })).filter((g) => g.keys.length);
+  const extra = more.filter((k) => !groups.some((g) => g.keys.includes(k))); // a new app shows somewhere rather than nowhere
+  if (extra.length) groups.push({ name: 'More', id: 'more', keys: extra });
+  const first = [...apps, ...PHONE_HOME.filter(has)].slice(0, 4);
+  return { home, apps, groups, bottom, more, first };
 }
 
-/** Apps grouped the way the menu groups them: [[heading, id, keys]], for All apps and the phone sheet. */
-function grouped(keys) {
-  const out = [];
-  const start = START.filter((k) => keys.includes(k));
-  if (start.length) out.push(['Start', 'home', start]);
-  for (const [name, id, ks] of GROUPS) { const in_ = ks.filter((k) => keys.includes(k)); if (in_.length) out.push([name, id, in_]); }
-  const rest = keys.filter((k) => !out.some(([, , ks]) => ks.includes(k)) && !BOTTOM.includes(k));
-  if (rest.length) out.push(['More', 'office', rest]);
-  return out;
-}
+/** The group of All apps that holds this app, for this plan (null when the app is in Home or the short menu). */
+const groupHolding = (plan, key) => (plan.groups.find((g) => g.keys.includes(key)) || null);
+
+/** Which groups this device keeps open (ids). */
+function openGroups() { try { const v = JSON.parse(read(OPEN_KEY, '[]')); return Array.isArray(v) ? v : []; } catch (_) { return []; } }
+function keepOpen(id, open) { const now = new Set(openGroups()); if (open) now.add(id); else now.delete(id); write(OPEN_KEY, JSON.stringify([...now])); }
 
 /**
  * Builds the page frame. views: [[key, label]] already filtered for this person; menu: ctx.me.menu.
- * Returns { shell, setCurrent(key, params), openPalette(), openAllApps(), setBadge() }.
+ * Returns { shell, setCurrent(key, params), openPalette(), openAllApps(), openSheet(), setBadge(), plan }.
  */
 export function buildFrame({ views, main, signOut, menu = null }) {
   const byKey = new Map(views);
   const have = (k) => byKey.has(k);
   const plan = menuPlan(views, menu);
-  const shell = h('div', { class: `shell${plan.role ? ' role-menu' : ''}` });
+  const shell = h('div', { class: 'shell' });
   const links = new Map(); // key -> every <a> for that page (side menu, phone bar, sheet)
   const dots = new Set();
   let currentKey = null;
   let currentSection = null;
   const keep = (key, a) => { if (!links.has(key)) links.set(key, []); links.get(key).push(a); return a; };
-
   const link = (key, cls = 'nav-row') => keep(key, h('a', { href: `#/${key}`, class: cls, dataset: { key } }, icon(key, 18), h('span', { class: 'nav-label' }, byKey.get(key))));
 
-  // Patrol's sections, under Patrol while it is open (and as chips in the phone sheet).
-  const sectionLinks = [];
-  const sectionsBox = () => {
-    const box = h('div', { class: 'nav-sections', hidden: currentKey !== 'patrol', 'aria-label': 'Patrol sections', role: 'group' },
-      PATROL_SECTIONS.map(([id, text]) => { const a = h('a', { href: `#/patrol/${id}`, class: 'nav-sec', dataset: { section: id } }, text); sectionLinks.push(a); return a; }));
-    return box;
-  };
-  const sectionBoxes = [];
-  const appLink = (key) => {
-    const a = link(key);
-    if (key !== 'patrol') return a;
-    const box = sectionsBox();
-    sectionBoxes.push(box);
-    return [a, box];
-  };
-
-  // ---- side menu
-  let nav;
-  if (plan.role) {
-    nav = h('nav', { class: 'nav nav-role', 'aria-label': 'Main' },
-      h('div', { class: 'nav-group nav-mine' }, plan.apps.map(appLink)),
-      plan.mine.length ? h('div', { class: 'nav-group nav-mine nav-personal-apps' }, plan.mine.map((k) => link(k))) : null);
-  } else {
-    nav = h('nav', { class: 'nav', 'aria-label': 'Main' },
-      plan.start.length ? h('div', { class: 'nav-group nav-home' }, plan.start.map((k) => link(k))) : null,
-      plan.groups.map((g) => h('div', { class: 'nav-group', dataset: { group: g.id } },
-        h('p', { class: 'nav-title', id: `nav-${g.id}` }, h('span', null, g.name)),
-        h('div', { class: 'nav-items', role: 'group', 'aria-labelledby': `nav-${g.id}` }, g.keys.map(appLink)))));
+  /**
+   * A folding group: a heading button (aria-expanded) and its apps. The group holding the open page is locked open:
+   * its heading says so (aria-disabled) and a press does nothing. Open or closed is kept on this device.
+   */
+  const folds = []; // every folding group drawn (side menu and phone sheet): { id, btn, body }
+  function foldGroup(g, { prefix, item }) {
+    const bodyId = `${prefix}-${g.id}`;
+    const btn = h('button', { type: 'button', class: 'nav-fold', 'aria-expanded': 'false', 'aria-controls': bodyId, dataset: { group: g.id } },
+      h('span', { class: 'nav-fold-text' }, g.name), h('span', { class: 'nav-chev', 'aria-hidden': 'true' }));
+    const body = h('div', { class: 'nav-items', id: bodyId, role: 'group', 'aria-label': g.name, hidden: true }, g.keys.map(item));
+    const f = { id: g.id, btn, body };
+    btn.addEventListener('click', () => {
+      if (btn.getAttribute('aria-disabled') === 'true') return; // the group holding this page stays open
+      const open = btn.getAttribute('aria-expanded') !== 'true';
+      keepOpen(g.id, open);
+      paintFolds();
+      if (open) afterFold();
+    });
+    folds.push(f);
+    return h('div', { class: 'nav-group', dataset: { group: g.id } }, btn, body);
   }
-  const allBtn = () => {
-    const b = h('button', { type: 'button', class: 'nav-row nav-all', 'aria-haspopup': 'dialog' }, icon('apps', 18), h('span', { class: 'nav-label' }, 'All apps'), h('span', { class: 'nav-more' }, `${plan.more.length} more`));
-    b.addEventListener('click', () => openAllApps());
-    return b;
-  };
+  function paintFolds() {
+    const held = currentKey ? groupHolding(plan, currentKey) : null;
+    const kept = openGroups();
+    for (const f of folds) {
+      const locked = Boolean(held && held.id === f.id);
+      const open = locked || kept.includes(f.id);
+      f.btn.setAttribute('aria-expanded', String(open));
+      if (locked) { f.btn.setAttribute('aria-disabled', 'true'); f.btn.title = 'The page you are on is in this group, so it stays open'; } else { f.btn.removeAttribute('aria-disabled'); f.btn.removeAttribute('title'); }
+      f.body.hidden = !open;
+    }
+  }
+
+  // ---- side menu: Home pinned at the top; the short menu and All apps scroll; Settings, Help and the person at the bottom
+  const homeNav = plan.home.length ? h('nav', { class: 'nav nav-home', 'aria-label': 'Home' }, plan.home.map((k) => link(k))) : null;
+  const allHead = plan.groups.length ? h('p', { class: 'nav-all-head', id: 'nav-all-head' }, 'All apps') : null;
+  const nav = h('nav', { class: 'nav nav-scroll', 'aria-label': 'Main' },
+    plan.apps.length ? h('div', { class: 'nav-group nav-mine' }, plan.apps.map((k) => link(k))) : null,
+    allHead,
+    plan.groups.length ? h('div', { class: 'nav-all-groups', role: 'group', 'aria-labelledby': 'nav-all-head' }, plan.groups.map((g) => foldGroup(g, { prefix: 'nav-g', item: (k) => link(k) }))) : null);
 
   const search = h('button', { type: 'button', class: 'rail-search', 'aria-label': 'Jump to a page' }, icon('search', 18), h('span', { class: 'nav-label' }, 'Jump to'), h('kbd', null, isMac() ? '⌘K' : 'Ctrl K'));
   // Ask: the assistant's side panel, loaded the first time it is opened. Hidden until the server says it is on.
@@ -200,7 +201,7 @@ export function buildFrame({ views, main, signOut, menu = null }) {
   const ask = h('button', { type: 'button', class: 'rail-search rail-ask', 'aria-label': 'Ask the assistant', hidden: true }, icon('ask', 18), h('span', { class: 'nav-label' }, 'Ask'));
   const topAsk = h('button', { type: 'button', class: 'top-inbox top-ask', 'aria-label': 'Ask the assistant', hidden: true }, icon('ask', 22));
   ask.addEventListener('click', openAsk); topAsk.addEventListener('click', openAsk);
-  if (ctx.me.role !== 'area') import('./assistant.js').then((m) => m.assistantOn()).then((yes) => { ask.hidden = !yes; topAsk.hidden = !yes; }).catch(() => {});
+  if (ctx.me.role !== 'area') import('./assistant.js').then((m) => m.assistantOn()).then((yes) => { ask.hidden = !yes; topAsk.hidden = !yes; fit(); }).catch(() => {});
 
   const name = ctx.me.login_name || ctx.me.username || ctx.me.email;
   const roleText = ctx.me.role === 'area' ? 'Ski area (read-only)' : label(ctx.me.role);
@@ -212,21 +213,74 @@ export function buildFrame({ views, main, signOut, menu = null }) {
     h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(name)),
     h('span', { class: 'who-text' }, h('b', { title: ctx.me.email || name }, name), h('span', null, roleText)),
     themeControl('menu'));
+  const foot = h('div', { class: 'rail-foot' },
+    h('nav', { class: 'nav nav-bottom', 'aria-label': 'Settings and help' }, plan.bottom.map((k) => link(k))),
+    who,
+    h('div', { class: 'who-actions' }, switchBtn('btn small who-switch'), outBtn('rail-out'), whoVersion()));
   const rail = h('aside', { class: 'rail' },
-    h('div', { class: 'brand' }, h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: '', width: '48', height: '27' }),
-      h('div', { class: 'brand-text' }, h('strong', null, 'Verdynt/OS'), h('span', null, ctx.me.tenant_name))),
-    search, ask, nav,
-    h('div', { class: 'rail-foot' },
-      h('nav', { class: 'nav nav-bottom', 'aria-label': 'Settings and help' },
-        plan.role && plan.more.length ? allBtn() : null,
-        plan.bottom.map((k) => link(k))),
-      who,
-      h('div', { class: 'who-actions' }, switchBtn('btn small who-switch'), outBtn('rail-out'), whoVersion())));
+    h('div', { class: 'rail-top' },
+      h('div', { class: 'brand' }, h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: '', width: '48', height: '27' }),
+        h('div', { class: 'brand-text' }, h('strong', null, 'Verdynt/OS'), h('span', null, ctx.me.tenant_name))),
+      search, ask, homeNav),
+    nav, foot);
+
+  /**
+   * The scrolling middle rests between two rows, never through one: its height is cut to the last whole row that fits.
+   * A thin shadow at an edge says there is more past it (no fade: a fade dims the row under it).
+   */
+  const rowsIn = () => [...nav.querySelectorAll('.nav-row, .nav-fold, .nav-all-head')].filter((el) => el.offsetParent !== null);
+  function fit() {
+    if (!rail.isConnected || !nav.isConnected) return;
+    nav.style.flex = '';
+    nav.style.height = '';
+    const room = nav.clientHeight;
+    const rows = rowsIn();
+    if (!room || !rows.length) { edges(); return; }
+    const top = nav.getBoundingClientRect().top - nav.scrollTop;
+    const full = rows[rows.length - 1].getBoundingClientRect().bottom - top;
+    if (full <= room + 1) { edges(); return; } // everything fits
+    let last = -1;
+    rows.forEach((r, i) => { if (last === i - 1 && r.getBoundingClientRect().bottom - top <= room) last = i; });
+    // A heading is never the last row above the edge ("All apps" or an open group with none of its apps showing).
+    while (last > 0 && (rows[last].classList.contains('nav-all-head') || (rows[last].classList.contains('nav-fold') && rows[last].getAttribute('aria-expanded') === 'true'))) last -= 1;
+    if (last >= 0) { nav.style.flex = '0 0 auto'; nav.style.height = `${Math.floor(rows[last].getBoundingClientRect().bottom - top + 1)}px`; }
+    edges();
+  }
+  /** Marks the edges with more past them: rail.more-up, rail.more-down. */
+  function edges() {
+    const up = nav.scrollTop > 1;
+    const down = nav.scrollTop + nav.clientHeight < nav.scrollHeight - 1;
+    rail.classList.toggle('more-up', up);
+    rail.classList.toggle('more-down', down);
+  }
+  /** Scrolls the scrolling middle so this row is fully in view, resting on a row edge, with one row of room past it. */
+  function showRow(el) {
+    if (!el || !nav.clientHeight) return;
+    const rows = rowsIn();
+    const navTop = nav.getBoundingClientRect().top;
+    const at = (r) => r.getBoundingClientRect().top - navTop + nav.scrollTop;
+    const i = rows.indexOf(el);
+    const top = at(el); const bottom = top + el.offsetHeight;
+    if (top >= nav.scrollTop && bottom <= nav.scrollTop + nav.clientHeight) { edges(); return; }
+    if (top < nav.scrollTop) { nav.scrollTop = i > 0 ? at(rows[i - 1]) : 0; edges(); return; }
+    // Past the bottom: scroll down by whole rows until it and the row after it (when there is one) are in view.
+    const want = (rows[i + 1] ? at(rows[i + 1]) + rows[i + 1].offsetHeight : bottom) - nav.clientHeight;
+    const start = rows.find((r) => at(r) >= want);
+    nav.scrollTop = start ? at(start) : want;
+    edges();
+  }
+  /** After a group opens: keep its heading in view and show as much of it as fits. */
+  function afterFold() { fit(); }
+  nav.addEventListener('scroll', edges, { passive: true });
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    const onResize = () => { if (!shell.isConnected) { window.removeEventListener('resize', onResize); return; } fit(); };
+    window.addEventListener('resize', onResize);
+  }
 
   // ---- phone: slim top bar, a labeled bottom bar, and a sheet with everything
   const tabLinks = new Map();
   // The bottom bar has room for about ten letters a label: long names get a short one there (the full name is the link's title).
-  const SHORT = { conditions: 'Mountain', lostfound: 'Lost items', availability: 'Availability', workforce: 'Staff', documents: 'Docs', shop: 'Shop', dashboard: 'Today', myshifts: 'My shifts' };
+  const SHORT = { conditions: 'Mountain', lostfound: 'Lost items', availability: 'Availability', workforce: 'Staff', documents: 'Docs', shop: 'Shop', dashboard: 'Today', myshifts: 'My shifts', people: 'Customers', catalog: 'Products' };
   const tab = (key) => { const a = keep(key, h('a', { href: `#/${key}`, dataset: { key }, class: 'tab', title: byKey.get(key), 'aria-label': byKey.get(key) }, icon(key, 22), h('span', { 'aria-hidden': 'true' }, SHORT[key] || byKey.get(key)))); tabLinks.set(key, a); return a; };
   const more = h('button', { type: 'button', class: 'tab tab-menu', 'aria-haspopup': 'dialog' }, icon('menu', 22), h('span', null, 'Menu'));
   const tabbar = h('nav', { class: 'tabbar', 'aria-label': 'Quick links' }, plan.first.map(tab), more);
@@ -234,14 +288,14 @@ export function buildFrame({ views, main, signOut, menu = null }) {
   const topInbox = have('inbox') ? keep('inbox', h('a', { href: '#/inbox', class: 'top-inbox', dataset: { key: 'inbox' }, 'aria-label': 'Inbox' }, icon('inbox', 22))) : null;
   const topbar = h('header', { class: 'topbar' }, h('div', { class: 'top-brand' }, h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: 'Verdynt/OS', width: '53', height: '30' }), h('strong', null, ctx.me.tenant_name)), topSearch, topAsk, topInbox);
 
-  /** A sheet over the page (the phone menu and All apps). build(close) returns its content. */
+  /** A sheet over the page (the phone menu and All apps). build(close) returns its content. The whole sheet scrolls as one. */
   function sheet(title, cls, build) {
     const previous = document.activeElement;
     const closeBtn = h('button', { type: 'button', class: 'sheet-close', 'aria-label': `Close ${title.toLowerCase()}` }, icon('close', 20));
     const titleId = `sheet-${Math.random().toString(36).slice(2, 7)}`;
     const box = h('div', { class: `dialog menu-sheet ${cls}`, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId });
     const overlay = h('div', { class: 'overlay menu-overlay' }, box);
-    function close() { overlay.remove(); document.removeEventListener('keydown', onKey); if (previous && previous.isConnected && previous.focus) previous.focus(); }
+    function close() { overlay.remove(); document.removeEventListener('keydown', onKey); for (let i = folds.length - 1; i >= 0; i--) if (!folds[i].btn.isConnected) folds.splice(i, 1); if (previous && previous.isConnected && previous.focus) previous.focus(); }
     const onKey = (e) => { if (e.key === 'Escape') close(); };
     box.append(h('header', null, h('h2', { id: titleId }, title), closeBtn), build(close));
     box.addEventListener('click', (e) => { if (e.target.closest('a[href]')) close(); });
@@ -249,38 +303,32 @@ export function buildFrame({ views, main, signOut, menu = null }) {
     overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
     document.addEventListener('keydown', onKey);
     document.body.append(overlay);
+    paintFolds();
     closeBtn.focus();
     return { close, box };
   }
   const tile = (k) => h('a', { href: `#/${k}`, class: 'sheet-item', dataset: { key: k }, 'aria-current': currentKey === k ? 'page' : null }, icon(k, 20), h('span', null, byKey.get(k)), dots.has(k) ? h('span', { class: 'nav-badge dot', 'aria-label': 'new' }) : null);
-  const chips = () => h('div', { class: 'sheet-chips', role: 'group', 'aria-label': 'Patrol sections' },
-    PATROL_SECTIONS.map(([id, text]) => h('a', { href: `#/patrol/${id}`, class: 'sheet-chip', 'aria-current': currentKey === 'patrol' && currentSection === id ? 'true' : null }, text)));
-  const groupBlock = ([heading, id, keys], withHeading = true) => h('div', { class: 'sheet-group', dataset: { group: id } },
-    withHeading ? h('p', { class: 'nav-title' }, h('span', null, heading)) : null,
-    h('div', { class: 'sheet-grid' }, keys.map(tile)),
-    keys.includes('patrol') && currentKey === 'patrol' ? chips() : null);
+  const sheetGroups = (prefix) => plan.groups.map((g) => foldGroup(g, { prefix, item: tile }));
+  const sheetAllHead = () => (plan.groups.length ? h('p', { class: 'nav-all-head' }, 'All apps') : null);
 
-  /** Every other app this person may open (role menus): grouped, one tap away. */
+  /** All apps in a sheet (from Jump to): the four groups, folding the same way as in the side menu. */
   function openAllApps() {
-    return sheet('All apps', 'all-apps', () => h('div', { class: 'stack' },
-      h('p', { class: 'muted small' }, 'Apps you can use that are not in your menu.'),
-      grouped(plan.more).map((g) => groupBlock(g))));
+    return sheet('All apps', 'all-apps', () => h('div', { class: 'sheet-body' },
+      plan.groups.length ? h('div', { class: 'sheet-groups' }, sheetGroups('all-g')) : h('p', { class: 'muted small' }, 'Every app you can use is in your menu.')));
   }
 
   function openSheet() {
     const searchBox = h('input', { type: 'search', class: 'sheet-search', placeholder: 'Jump to an app or page', 'aria-label': 'Jump to an app or page', autocomplete: 'off' });
     const s = sheet('Menu', 'phone-menu', (close) => {
       searchBox.addEventListener('input', () => { const q = searchBox.value; close(); openPalette(q); });
-      const blocks = plan.role
-        ? [groupBlock(['Your apps', 'home', [...plan.apps, ...plan.mine]], false)]
-        : [...(plan.start.length ? [groupBlock(['Start', 'home', plan.start])] : []), ...plan.groups.map((g) => groupBlock([g.name, g.id, g.keys]))];
-      const all = plan.role && plan.more.length ? h('button', { type: 'button', class: 'sheet-row nav-all' }, icon('apps', 20), h('span', null, 'All apps'), h('span', { class: 'nav-more' }, `${plan.more.length} more`)) : null;
-      if (all) all.addEventListener('click', () => { close(); openAllApps(); });
+      const mine = [...plan.home.filter((k) => k !== 'inbox'), ...plan.apps];
       const signOutBtn = outBtn('btn small');
       signOutBtn.addEventListener('click', close, { capture: true });
       const sw = switchBtn('btn small');
       if (sw) sw.addEventListener('click', close, { capture: true });
-      return h('div', { class: 'sheet-body' }, searchBox, h('div', { class: 'sheet-groups' }, blocks, all),
+      return h('div', { class: 'sheet-body' }, searchBox,
+        mine.length ? h('div', { class: 'sheet-group sheet-mine' }, h('div', { class: 'sheet-grid' }, mine.map(tile))) : null,
+        plan.groups.length ? h('div', { class: 'sheet-groups' }, sheetAllHead(), sheetGroups('sheet-g')) : null,
         h('div', { class: 'sheet-foot' },
           plan.bottom.map((k) => h('a', { href: `#/${k}`, class: 'sheet-row', 'aria-current': currentKey === k ? 'page' : null }, icon(k, 20), h('span', null, byKey.get(k)), dots.has(k) ? h('span', { class: 'nav-badge dot', 'aria-label': 'new' }) : null)),
           h('div', { class: 'sheet-theme' }, h('span', { class: 'small muted' }, 'Theme'), themeControl('seg')),
@@ -294,7 +342,7 @@ export function buildFrame({ views, main, signOut, menu = null }) {
   function actions() {
     const list = [];
     if (isManager()) list.push({ id: 'kiosk', title: 'Open the time clock kiosk page', hint: 'New tab', icon: 'clock', words: 'kiosk tablet punch', run: () => window.open('/kiosk', '_blank', 'noopener') });
-    if (plan.role && plan.more.length) list.push({ id: 'all', title: 'All apps', hint: `${plan.more.length} more`, icon: 'apps', words: 'apps more everything', run: () => openAllApps() });
+    if (plan.groups.length) list.push({ id: 'all', title: 'All apps', hint: '', icon: 'apps', words: 'apps more everything groups', run: () => openAllApps() });
     for (const [id, text, ico] of THEMES) list.push({ id: `theme-${id}`, title: id === 'device' ? 'Theme: same as this device' : `Theme: ${text.toLowerCase()}`, hint: themePick() === id ? 'On now' : '', icon: ico, words: 'theme dark light mode night day colors', run: () => setTheme(id) });
     if (!ask.hidden) list.push({ id: 'ask', title: 'Ask the assistant', hint: '', icon: 'ask', words: 'assistant question how do i ai chat', run: () => openAsk() });
     if (terminal) list.push({ id: 'switch', title: 'Switch person', hint: '', icon: 'swap', words: 'pin shared terminal change user', run: () => signOut() });
@@ -383,17 +431,23 @@ export function buildFrame({ views, main, signOut, menu = null }) {
   document.addEventListener('keydown', onGlobalKey);
 
   shell.append(rail, h('div', { class: 'frame' }, topbar, main), tabbar);
+  paintFolds();
+  // Once the page is on screen and its fonts are in, the scrolling middle is cut to whole rows.
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => fit());
+  try { if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => fit()); } catch (_) { /* fit on the next page */ }
 
-  /** Marks where the person is: the app in the menus, and Patrol's section while Patrol is open. */
+  /**
+   * Marks where the person is: the app in the menus (Patrol's part is marked on the Patrol page itself). The group of
+   * All apps holding it opens and stays open, and the side menu scrolls so the app is in view under the pinned top.
+   */
   function setCurrent(key, params = []) {
     currentKey = key;
     currentSection = key === 'patrol' ? patrolSection(params) : null;
     for (const [k, anchors] of links) for (const a of anchors) { if (k === key) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); }
-    for (const box of sectionBoxes) box.hidden = key !== 'patrol';
-    for (const a of sectionLinks) { if (a.dataset.section === currentSection) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current'); }
-    // Keep the open app in view when the side menu is taller than the screen.
-    const here = (key === 'patrol' && sectionBoxes[0]) || nav.querySelector(`[data-key="${key}"]`);
-    if (here && here.scrollIntoView && shell.isConnected) { try { here.scrollIntoView({ block: 'nearest' }); } catch (_) { /* old browsers */ } }
+    paintFolds();
+    fit();
+    const here = nav.querySelector(`.nav-row[data-key="${key}"]`);
+    if (here && shell.isConnected) showRow(here); else edges();
     more.classList.toggle('on', !tabLinks.has(key));
     const rec = [key, ...recent().filter((k) => k !== key)].slice(0, 5);
     write(RECENT_KEY, JSON.stringify(rec));

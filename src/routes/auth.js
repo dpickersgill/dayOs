@@ -478,7 +478,8 @@ router.get('/auth/me', authenticate, async (req, res) => {
     access_ends_on: user.access_ends_on ? String(user.access_ends_on).slice(0, 10) : null,
     staff_injuries: await require('../lib/injuryregister').canSee(pool, req.auth.tenantId, { id: req.auth.userId, role: user.role }),
     signed_in_with: req.auth.method, terminal, stepped_up: req.auth.steppedUp, device_key: deviceKey, display: req.auth.display || null,
-    // This role's own menu (its apps in order, and the screen it opens on); null for owners and managers, who see everything.
+    // This role's own menu (its work apps in order, and the screen it opens on), owners and managers included. Home is pinned
+    // for everyone and never in it. null only for a login with no menu (the ski area's read-only login).
     menu: menus.menuFor(user.role, user.role_menus, user.school_access),
     // The ski school access level (lib/schoolaccess.js): director for owners and managers, the teaching profile's for an instructor.
     school_access: ['owner', 'manager'].includes(user.role) ? 'director' : user.role === 'instructor' ? (user.school_access || 'instructor') : null,
@@ -502,7 +503,9 @@ async function menusState(tenantId, role) {
   const changed = menus.parse(t && t.role_menus);
   return {
     can_change: role === 'owner',
-    always: menus.ALWAYS,
+    // Home (Today, Inbox, Calendar, My shifts): pinned at the top for everyone, never in a menu. "always" is the old name.
+    home: menus.HOME,
+    always: menus.HOME,
     apps: menus.APPS,
     roles: Object.fromEntries(menus.ROLES.map((r) => [r, { ...(changed[r] || menus.standardFor(r)), standard: !changed[r], can_open: menus.ROLE_APPS[r] }])),
     standard: Object.fromEntries(menus.ROLES.map((r) => [r, menus.standardFor(r)])),

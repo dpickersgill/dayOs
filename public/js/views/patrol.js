@@ -3,7 +3,7 @@
 import { get, download } from '../api.js';
 import { setAccess, has } from './patrol-feat.js';
 import { drawLevels } from './patrol-levels.js';
-import { h, clear, input, select, field, button, toast, formDialog, tabs, val, num, nowInput, todayStr, addDays, label, errorBox, empty, ctx, isManager } from '../ui.js';
+import { h, clear, input, select, field, button, toast, formDialog, tabs, linkTabs, val, num, nowInput, todayStr, addDays, label, errorBox, empty, ctx, isManager } from '../ui.js';
 import { renderCase, CATEGORIES, SEVERITY, compact, flow } from './patrol-case.js';
 import { renderHandoff } from './patrol-handoff.js';
 import { renderCollisionReport } from './patrol-collision.js';
@@ -114,14 +114,17 @@ export async function render(root, params = []) {
   if (!section) { root.append(h('div', { class: 'page-head' }, h('h1', null, 'Patrol')), empty('Your patrol access level does not open any page here. Ask a patrol Admin.')); return; }
   const fromLegacy = section.id !== want && want !== 'new' ? (want === 'home' ? 'board' : want) : null;
   const tabKey = [queryTab(), fromLegacy].find((k) => k && section.items.some((i) => i[0] === k)) || section.items[0][0];
-  // The page title is the section; Patrol settings is a button for those who set patrol up (patrol Admins and managers).
+  // The page title is Patrol. Its four parts (Now, Cases, People, Gear) are row 1, each its own address; the part's pages
+  // are row 2. Patrol settings is a button for those who set patrol up (patrol Admins and managers).
   const settingsBtn = me.access_level === 'admin' || isManager() ? h('a', { class: 'btn', href: '#/settings/patrol', 'data-act': 'patrol-settings' }, 'Patrol settings') : null;
   // New case is the one thing a patroller must always find: in the header on every screen size, and floating on a phone.
   const headNew = has('create_case') ? h('button', { type: 'button', class: 'btn primary patrol-new', 'data-act': 'new-case-head', onclick: () => newCase() }, h('span', { 'aria-hidden': 'true' }, '+'), ' New case') : null;
   const note = h('p', { class: 'page-note', 'data-section-note': section.id }, section.note);
+  const row1 = linkTabs(SECTIONS.map((s) => [s.id, s.text, `#/patrol/${s.id}`]), section.id, { label: 'Patrol' });
   root.append(h('div', { class: 'page-head patrol-head', 'data-section': section.id },
-    h('div', null, h('h1', null, section.text), note), h('div', { class: 'row patrol-actions' }, settingsBtn, headNew)),
-  h('div', { class: 'pbody' }, h('div', { class: section.items.length === 1 ? 'solo' : null }, tabs(section.items, tabKey))), newCaseButton());
+    h('div', null, h('h1', null, 'Patrol'), note), h('div', { class: 'row patrol-actions' }, settingsBtn, headNew)),
+  row1,
+  h('div', { class: 'pbody' }, h('div', { class: section.items.length === 1 ? 'solo' : null }, tabs(section.items, tabKey, { row: 2 }))), newCaseButton());
   // On Cases, say when reports are waiting for this person to approve.
   if (section.id === 'cases' && has('approve_case')) {
     get('/patrol/home').then((home) => {
