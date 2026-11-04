@@ -81,11 +81,12 @@ if [ "$PENDING" -gt 0 ]; then
 fi
 
 step "Data Access audit logs for Secret Manager and Cloud SQL"
+# The audit service for Cloud SQL is cloudsql.googleapis.com (Google rejects sqladmin.googleapis.com here).
 POLICY="$(mktemp)"
 gcloud projects get-iam-policy "$PROJECT" --format=json > "$POLICY"
-NEW="$(jq '.auditConfigs = ((.auditConfigs // []) | map(select(.service != "secretmanager.googleapis.com" and .service != "sqladmin.googleapis.com"))
+NEW="$(jq '.auditConfigs = ((.auditConfigs // []) | map(select(.service != "secretmanager.googleapis.com" and .service != "cloudsql.googleapis.com"))
   + [{"service":"secretmanager.googleapis.com","auditLogConfigs":[{"logType":"ADMIN_READ"},{"logType":"DATA_READ"},{"logType":"DATA_WRITE"}]},
-     {"service":"sqladmin.googleapis.com","auditLogConfigs":[{"logType":"ADMIN_READ"},{"logType":"DATA_READ"},{"logType":"DATA_WRITE"}]}])' "$POLICY")"
+     {"service":"cloudsql.googleapis.com","auditLogConfigs":[{"logType":"ADMIN_READ"},{"logType":"DATA_READ"},{"logType":"DATA_WRITE"}]}])' "$POLICY")"
 if [ "$(jq -S .auditConfigs "$POLICY")" != "$(echo "$NEW" | jq -S .auditConfigs)" ]; then
   echo "$NEW" > "$POLICY"
   run gcloud projects set-iam-policy "$PROJECT" "$POLICY" --quiet >/dev/null

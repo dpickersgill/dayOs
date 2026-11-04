@@ -175,3 +175,21 @@ test('6: security-alerts.sh marks an alert whose metric is still new "not yet", 
     assert.match(second.out, /^Done\./m);
   } finally { s.done(); }
 });
+
+test('7: security-alerts.sh turns on Cloud SQL audit logs under cloudsql.googleapis.com, the name Google accepts', () => {
+  const s = stub({ cases: `
+  "alpha monitoring channels list"*) printf 'projects/summitops-510715/notificationChannels/111\\tVerdynt/OS: text Dan\\n' ;;
+  "projects get-iam-policy"*) echo '{"bindings":[],"auditConfigs":[{"service":"allServices","auditLogConfigs":[{"logType":"ADMIN_READ"}]}]}' ;;
+  "projects set-iam-policy"*) cp "$4" "$STUB_LOG.policy" ;;` });
+  try {
+    const r = s.run('scripts/security-alerts.sh');
+    assert.equal(r.status, 0, r.out);
+    const policy = JSON.parse(fs.readFileSync(`${path.join(s.dir, 'log')}.policy`, 'utf8'));
+    assert.deepEqual(policy.auditConfigs.map((c) => c.service), ['allServices', 'secretmanager.googleapis.com', 'cloudsql.googleapis.com']);
+    assert.deepEqual(policy.auditConfigs[2].auditLogConfigs.map((c) => c.logType), ['ADMIN_READ', 'DATA_READ', 'DATA_WRITE']);
+    assert.doesNotMatch(JSON.stringify(policy), /sqladmin/);
+  } finally { s.done(); }
+  // sqladmin stays where it is the API's address or the API to enable.
+  assert.match(read('scripts/harden.sh'), /services enable .*sqladmin\.googleapis\.com/);
+  assert.match(read('scripts/backups-setup.sh'), /https:\/\/sqladmin\.googleapis\.com\/v1\/projects/);
+});
