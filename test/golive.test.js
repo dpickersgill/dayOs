@@ -151,3 +151,27 @@ test('5: uptime-setup.sh confirms the phone through the Cloud Monitoring API, wi
     assert.match(bad.out, /That is not the code Google texted/);
   } finally { s.done(); }
 });
+
+test('6: security-alerts.sh marks an alert whose metric is still new "not yet", and a second run finishes it', () => {
+  const s = stub({ cases: `
+  "alpha monitoring channels list"*) printf 'projects/summitops-510715/notificationChannels/111\\tVerdynt/OS: text Dan\\n' ;;
+  "alpha monitoring policies list"*) [ -f "$STUB_LOG.second" ] && printf 'p1\\tVerdynt/OS security: Stripe webhook signature refused\\n' ;;
+  "logging metrics describe"*) [ -f "$STUB_LOG.second" ] || exit 1 ;;
+  "alpha monitoring policies create"*) if [ ! -f "$STUB_LOG.second" ] && grep -q 'summitops-signin-lockouts\\|summitops-exports' "\${5#--policy-from-file=}" 2>/dev/null; then echo "metric not found" >&2; exit 1; fi ;;
+  "projects get-iam-policy"*) echo '{"bindings":[]}' ;;` });
+  try {
+    const first = s.run('scripts/security-alerts.sh');
+    assert.equal(first.status, 0, first.out);
+    assert.match(first.out, /  not yet: Verdynt\/OS security: Sign-in lockouts and too many attempts \(its metric is new; Google needs up to 10 minutes\)/);
+    assert.match(first.out, /  not yet: Verdynt\/OS security: Data exports in bulk/);
+    assert.match(first.out, /  made: Verdynt\/OS security: Server errors in a burst/);
+    assert.match(first.out, /Run this again in 10 minutes to finish the 2 alert\(s\) marked 'not yet'\. It keeps what is done\./);
+    assert.doesNotMatch(first.out, /^Done\./m);
+    fs.writeFileSync(`${path.join(s.dir, 'log')}.second`, '');
+    const second = s.run('scripts/security-alerts.sh');
+    assert.equal(second.status, 0, second.out);
+    assert.match(second.out, /  kept: Verdynt\/OS security: Stripe webhook signature refused/);
+    assert.doesNotMatch(second.out, /not yet|Run this again/);
+    assert.match(second.out, /^Done\./m);
+  } finally { s.done(); }
+});
