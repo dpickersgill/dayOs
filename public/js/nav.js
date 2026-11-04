@@ -229,7 +229,7 @@ export function buildFrame({ views, main, signOut, menu = null }) {
    * A thin shadow at an edge says there is more past it (no fade: a fade dims the row under it).
    */
   const rowsIn = () => [...nav.querySelectorAll('.nav-row, .nav-fold, .nav-all-head')].filter((el) => el.offsetParent !== null);
-  function fit() {
+  function fit(keepCurrent = true) {
     if (!rail.isConnected || !nav.isConnected) return;
     nav.style.flex = '';
     nav.style.height = '';
@@ -243,8 +243,14 @@ export function buildFrame({ views, main, signOut, menu = null }) {
     rows.forEach((r, i) => { if (last === i - 1 && r.getBoundingClientRect().bottom - top <= room) last = i; });
     // A heading is never the last row above the edge ("All apps" or an open group with none of its apps showing).
     while (last > 0 && (rows[last].classList.contains('nav-all-head') || (rows[last].classList.contains('nav-fold') && rows[last].getAttribute('aria-expanded') === 'true'))) last -= 1;
-    if (last >= 0) { nav.style.flex = '0 0 auto'; nav.style.height = `${Math.floor(rows[last].getBoundingClientRect().bottom - top + 1)}px`; }
-    edges();
+    if (last >= 0) {
+      const cut = Math.floor(rows[last].getBoundingClientRect().bottom - top + 1); // measured before the size changes, as scrolling may move the rows
+      nav.style.height = `${cut}px`;
+      nav.style.flex = '0 0 auto';
+    }
+    // The page you are on stays in view (after a resize, or once the fonts are in); not after opening a group by hand.
+    const cur = keepCurrent ? nav.querySelector('.nav-row[aria-current="page"]') : null;
+    if (cur) showRow(cur); else edges();
   }
   /** Marks the edges with more past them: rail.more-up, rail.more-down. */
   function edges() {
@@ -270,7 +276,7 @@ export function buildFrame({ views, main, signOut, menu = null }) {
     edges();
   }
   /** After a group opens: keep its heading in view and show as much of it as fits. */
-  function afterFold() { fit(); }
+  function afterFold() { fit(false); }
   nav.addEventListener('scroll', edges, { passive: true });
   if (typeof window !== 'undefined' && window.addEventListener) {
     const onResize = () => { if (!shell.isConnected) { window.removeEventListener('resize', onResize); return; } fit(); };
@@ -434,6 +440,18 @@ export function buildFrame({ views, main, signOut, menu = null }) {
   paintFolds();
   // Once the page is on screen and its fonts are in, the scrolling middle is cut to whole rows.
   if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => fit());
+  // And again whenever the rail, its pinned top or its foot change size (the stylesheet or fonts arriving late, the
+  // Ask button appearing, a zoom): the cut is always made against the room there really is.
+  if (typeof ResizeObserver === 'function') {
+    let queued = false;
+    const ro = new ResizeObserver(() => {
+      if (!shell.isConnected) { ro.disconnect(); return; }
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => { queued = false; fit(); });
+    });
+    for (const el of [rail, rail.firstChild, foot]) ro.observe(el);
+  }
   try { if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => fit()); } catch (_) { /* fit on the next page */ }
 
   /**
@@ -445,9 +463,7 @@ export function buildFrame({ views, main, signOut, menu = null }) {
     currentSection = key === 'patrol' ? patrolSection(params) : null;
     for (const [k, anchors] of links) for (const a of anchors) { if (k === key) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); }
     paintFolds();
-    fit();
-    const here = nav.querySelector(`.nav-row[data-key="${key}"]`);
-    if (here && shell.isConnected) showRow(here); else edges();
+    fit(); // cuts the middle to whole rows and scrolls the open app into view
     more.classList.toggle('on', !tabLinks.has(key));
     const rec = [key, ...recent().filter((k) => k !== key)].slice(0, 5);
     write(RECENT_KEY, JSON.stringify(rec));
