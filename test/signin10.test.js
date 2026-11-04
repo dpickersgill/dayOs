@@ -189,6 +189,7 @@ test('in the browser: Remember me, show password, two tabs, and the 10-minute ta
     assert.equal(await eye.getAttribute('aria-pressed'), 'true');
     await eye.click();
     assert.equal(await tab1.getAttribute('input[name=password]', 'type'), 'password');
+    await tab1.check('input[name=own_device]'); // Remember me shows once "This is my own device" is ticked (feat/auth-hardening)
     await tab1.check('input[name=remember]');
     // Keep tab 1 in use while it signs in (the fast clock would lock it).
     const busy = setInterval(() => { tab1.mouse.move(Math.random() * 300, Math.random() * 300).catch(() => {}); }, 150);
@@ -252,6 +253,7 @@ test('in the browser: Remember me, show password, two tabs, and the 10-minute ta
     await c1.fill('input[name=tenant]', A.slug);
     await c1.fill('input[name=login]', `owner@${A.slug}.test`);
     await c1.fill('input[name=password]', PW);
+    await c1.check('input[name=own_device]'); // Remember me shows once "This is my own device" is ticked (feat/auth-hardening)
     await c1.check('input[name=remember]');
     await c1.click('form[data-step=signin] button[type=submit]');
     await c1.waitForSelector('#main .page-head', { timeout: 15000 });

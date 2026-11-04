@@ -103,7 +103,7 @@ const readOwn = () => { try { return localStorage.getItem(OWN_KEY) === '1'; } ca
 const saveOwn = (v) => { try { if (v) localStorage.setItem(OWN_KEY, '1'); else localStorage.removeItem(OWN_KEY); } catch (_) { /* private mode */ } };
 let ownDevice = readOwn();
 /** What every sign-in call says about this device: Remember me asked, own device, and the shared terminal's key. */
-const asked = () => { const term = readTerminal(); return { remember: Boolean(keepShared && ownDevice && !term), own_device: Boolean(ownDevice && !term), ...(term ? { terminal: term.secret } : {}) }; };
+const signinFlags = () => { const term = readTerminal(); return { remember: Boolean(keepShared && ownDevice && !term), own_device: Boolean(ownDevice && !term), ...(term ? { terminal: term.secret } : {}) }; };
 const PK_USED_KEY = 'so.pk.used'; // this browser signed in with a passkey before: the sign-in page offers it first
 const usedPasskeyHere = () => { try { return localStorage.getItem(PK_USED_KEY) === '1'; } catch (_) { return false; } };
 const notePasskeyHere = () => { try { localStorage.setItem(PK_USED_KEY, '1'); } catch (_) { /* private mode */ } };
@@ -193,7 +193,7 @@ function showSignIn(message) {
     go.disabled = true;
     try {
       keepShared = Boolean(remember && remember.checked && ownDevice);
-      const out = await post('/auth/login', { tenant, login, password: pw.value, ...asked() });
+      const out = await post('/auth/login', { tenant, login, password: pw.value, ...signinFlags() });
       saveSlug(tenant);
       saveRemember(keepShared ? { tenant, login: login.includes('@') ? login : login.toLowerCase() } : null);
       if (out.mfa_required) { showSecondStep(out); return; }
@@ -214,7 +214,7 @@ function showSignIn(message) {
       keepShared = Boolean(remember && remember.checked && ownDevice);
       const { handle, options } = await post('/auth/passkey/options', { tenant });
       const response = await passkey.use(options);
-      const out = await post('/auth/passkey', { tenant, handle, response, ...asked() });
+      const out = await post('/auth/passkey', { tenant, handle, response, ...signinFlags() });
       saveSlug(tenant);
       if (!keepShared) saveRemember(null);
       await signedIn(out);
@@ -254,7 +254,7 @@ function showSignIn(message) {
 async function showResume(message) {
   const kept = session.keptMe() || {};
   const err = h('div');
-  const slot = h('div', { class: 'stack' });
+  const slot = h('div', { class: 'stack resume-slot' });
   signInFrame('Paused to keep patient details private.', 'Nobody used Verdynt/OS here for a while, so it paused. Your work is where you left it.', 'Carry on',
     message ? h('p', { class: 'muted', role: 'status' }, message) : null,
     h('p', { class: 'resume-lead', 'data-resume-as': kept.login_name || '' }, 'Signed in as ', h('strong', null, kept.login_name || kept.username || 'you'), kept.tenant_name ? ` at ${kept.tenant_name}` : '', '. Confirm it is you to carry on.'),
@@ -313,7 +313,7 @@ function showLocked(who, message) {
     if (!pw.value) { err.append(errorBox(new Error('Type your password'))); pw.focus(); return; }
     go.disabled = true;
     try {
-      const out = await post('/auth/login', { tenant: who.tenant, login: who.login, password: pw.value });
+      const out = await post('/auth/login', { tenant: who.tenant, login: who.login, password: pw.value, ...signinFlags() });
       if (out.mfa_required) { showSecondStep(out); return; }
       await signedIn(out);
     } catch (ex) { err.append(errorBox(signinFailed(ex, who.tenant))); go.disabled = false; pw.select(); }
@@ -326,7 +326,7 @@ function showLocked(who, message) {
       try {
         const { handle, options } = await post('/auth/passkey/options', { tenant: who.tenant });
         const response = await passkey.use(options);
-        await signedIn(await post('/auth/passkey', { tenant: who.tenant, handle, response }));
+        await signedIn(await post('/auth/passkey', { tenant: who.tenant, handle, response, ...signinFlags() }));
       } catch (ex) { pkErr.append(errorBox(ex)); pk.disabled = false; }
     }, { small: true });
     other.append(pk, pkErr);
@@ -398,12 +398,12 @@ function showEmailCodeEntry(purpose, { tenant, login, request, minutes = 10, lin
     go.disabled = true;
     try {
       if (!reset) {
-        const out = await post('/auth/email-code/verify', { ...proof, ...asked() });
+        const out = await post('/auth/email-code/verify', { ...proof, ...signinFlags() });
         if (out.mfa_required) { showSecondStep(out); return; }
         await signedIn(out);
         return;
       }
-      const out = await post('/auth/password-reset', { ...proof, new_password: next.value, ...asked() });
+      const out = await post('/auth/password-reset', { ...proof, new_password: next.value, ...signinFlags() });
       toast('Password saved. Every other device was signed out.');
       if (out.mfa_required) { showSecondStep(out); return; }
       await signedIn(out);
@@ -910,7 +910,8 @@ async function start() {
   await route();
   if (ctx.me.signed_in_with === 'passkey') notePasskeyHere();
   if (ctx.me.sandbox) { resumeTour(); welcomeOnce(); }
-  else if (ctx.me.passkey_prompt) offerPasskey(ctx.me.passkey_prompt);
+  // Offered once the first page has settled: opening a role's start page changes the address, which closes open dialogs.
+  else if (ctx.me.passkey_prompt) { const p = ctx.me.passkey_prompt; const who = ctx.me.id; setTimeout(() => { if (ctx.me && ctx.me.id === who) offerPasskey(p); }, 900); }
 }
 
 /**

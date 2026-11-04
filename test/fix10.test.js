@@ -125,7 +125,7 @@ test('2: the platform key alone cannot reset a login, clear two-step or hand an 
   // A named operator (two-step) still can, once the mountain is opened with a reason.
   const op2 = await operatorConsole(base, KEY);
   assert.equal((await op2('POST', `/tenants/${m.id}/access`, { reason: 'Owner locked out, ticket 7', hours: 1 })).status, 201);
-  assert.equal((await op2('POST', `/tenants/${m.id}/reset-password`, { user_id: owner.id, password: 'a-new-password-nobody-knows-77', clear_two_step: true })).status, 200);
+  assert.equal((await op2('POST', `/tenants/${m.id}/reset-password`, { user_id: owner.id, password: 'a-new-password-nobody-knows-77', clear_two_step: true, reason: 'Confirmed by phone call with the owner' })).status, 200);
   assert.ok(await login(m.slug, `owner@${m.slug}.test`, 'a-new-password-nobody-knows-77'));
   assert.ok(op);
 });
@@ -380,7 +380,7 @@ test('10: the calendar link stops with a password change, a console reset and si
   const op = await require('./helpers/platform-operator').operatorConsole(base, KEY);
   await op('POST', `/tenants/${m.id}/access`, { reason: 'Owner forgot password', hours: 1 });
   const [[owner]] = await pool.query("SELECT id FROM users WHERE tenant_id = ? AND role = 'owner'", [m.id]);
-  assert.equal((await op('POST', `/tenants/${m.id}/reset-password`, { user_id: owner.id, password: PW })).status, 200);
+  assert.equal((await op('POST', `/tenants/${m.id}/reset-password`, { user_id: owner.id, password: PW, reason: 'Confirmed by phone call with the owner' })).status, 200);
   assert.equal(await feedOk(url), false, 'a password reset');
 
   // Patrol training: whole words only.
@@ -453,7 +453,7 @@ test('3: a trip to Stripe and back keeps the session; a real close of the last t
   const signIn = async (page, remember) => {
     await page.goto(`${base}/`);
     await page.fill('input[name=tenant]', m.slug); await page.fill('input[name=login]', `owner@${m.slug}.test`); await page.fill('input[name=password]', PW);
-    if (remember) await page.check('input[name=remember]');
+    if (remember) { await page.check('input[name=own_device]'); await page.check('input[name=remember]'); } // Remember me shows once "This is my own device" is ticked
     await page.click('form[data-step=signin] button[type=submit]');
     await page.waitForSelector('#main .page-head', { timeout: 15000 });
     return page.evaluate(() => sessionStorage.getItem('so.token') || localStorage.getItem('so.token'));

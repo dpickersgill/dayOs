@@ -29,7 +29,7 @@ function allowedOrigins(req) {
   return [`${req.protocol}://${String(req.get('host') || '')}`];
 }
 function rp(req) {
-  const id = process.env.WEBAUTHN_RP_ID || (process.env.PUBLIC_URL ? (() => { try { return new URL(process.env.PUBLIC_URL).hostname; } catch (_) { return req.hostname; } })() : req.hostname);
+  const id = process.env.WEBAUTHN_RP_ID || req.hostname; // the site a passkey belongs to (unchanged; production sets WEBAUTHN_RP_ID)
   return { id, name: 'Verdynt/OS', origin: allowedOrigins(req) };
 }
 
