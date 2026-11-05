@@ -530,8 +530,10 @@ async function signOffDialog(a, day, again) {
     const body = { checklist: Object.fromEntries(ticks), supervisor_name: val(fd, 'supervisor_name'), notes: val(fd, 'notes'), at: nowStamp() };
     const r = await send('POST', `/park/areas/${a.id}/open`, body, { caseId: PARK_QUEUE, label: `Open ${a.name}` });
     toast(sentWord(r, `${a.name} is open`)); await again();
-  }, { submitText: blocked.length ? 'Try to open anyway' : 'Sign off and open', wide: true });
+  }, { submitText: blocked.length ? 'Open the area' : 'Sign off and open', wide: true });
   d.box.classList.add('park-dialog');
+  // No override: while a feature blocks the area (checked with the server each time this opens), the button stays off.
+  if (blocked.length) { const b = d.box.querySelector('button[type=submit]'); b.disabled = true; b.title = 'Inspect or rope off the features listed above first'; }
 }
 
 function closeAreaDialog(a, again) {
