@@ -214,6 +214,7 @@ test('the access log shows who looked at patient information, to patrol administ
 test('responses are never cached and the case export carries no free text', async () => {
   const res = await fetch(`${base}/api/v1/patrol/incidents`, { headers: { authorization: `Bearer ${T.patrol}` } });
   assert.equal(res.headers.get('cache-control'), 'no-store');
+  await require('./helpers/records').records(base, PW)(A.owner); // a full export needs the records check
   const csv = await fetch(`${base}/api/v1/patrol/incidents.csv`, { headers: { authorization: `Bearer ${A.owner}` } });
   assert.equal(csv.status, 200);
   assert.ok(!(await csv.text()).includes('Wrist injury'), 'the summary can hold a name, so it stays out');

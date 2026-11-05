@@ -4,7 +4,7 @@
 // independent reviews found (H1, H2, M1 to M4, L1 to L5, N1, N2, the M2 residual, non-digit ids, managers making
 // themselves roster Admin, the person_id link), each as a test:
 //   Remember me refused by the server; the fresh-check rule and its exceptions (own drafts, recent own work, responder,
-//   dispatched, on duty, crew) and their limits; sign-in and an ordinary check are never the records check; every
+//   dispatched, crew mate on duty together; never on duty alone) and their limits; sign-in and an ordinary check are never the records check; every
 //   patient-data read and write on another case needs it, however the address is spelled; summaries hidden on unchecked
 //   lists; quick resume and the 8-hour cap; the passkey prompts; reset rules; roster Admin rules; staff links above
 //   Patrol; the weekly access summary; responder rows from before the upgrade.
@@ -176,7 +176,7 @@ test('a password records check is counted per login: wrong ones lock like sign-i
 });
 
 // ================================================================ exceptions and their limits (588.2, M2)
-test('responder, sent to the call, on duty and crew open a case started in the last 12 hours, and not after', async () => {
+test('responder, sent to the call and crew open a case started in the last 12 hours, not on duty alone, and not after', async () => {
   const id = await newCase(M.owner);
   asks(await api('GET', `/patrol/incidents/${id}`, { token: U.Pia.token }));
   ok(await api('POST', `/patrol/incidents/${id}/responders`, { token: M.owner, body: { staff_id: U.Pia.staff, role: 'assist' } }));
@@ -188,26 +188,35 @@ test('responder, sent to the call, on duty and crew open a case started in the l
   ok(await api('POST', `/patrol/dispatch/${call.id}/responders`, { token: M.owner, body: { staff_id: U.Pete.staff } }));
   ok(await api('GET', `/patrol/incidents/${id}`, { token: U.Pete.token }));
   assert.equal((await accessRow(id, U.Pete.id)).access, 'dispatched');
-  // On duty when the case was started (the row began before it and had not ended).
+  // Being on duty when the case was started is not enough on its own (Dan, 2026-11-05).
   await onDuty(U.Paz.staff, 60);
   const later = await newCase(M.owner);
-  ok(await api('GET', `/patrol/incidents/${later}`, { token: U.Paz.token }));
-  assert.equal((await accessRow(later, U.Paz.id)).access, 'on_duty');
-  // Signing in on duty after the case started does not count; nor does a row that ended before it.
-  await onDuty(U.Pat.staff, 120, 90);
-  asks(await api('GET', `/patrol/incidents/${later}`, { token: U.Pat.token }), 'a shift that ended before the case');
-  await onDuty(U.Pat.staff, -1);
-  asks(await api('GET', `/patrol/incidents/${later}`, { token: U.Pat.token }), 'signed in after the case started');
-  // Crew: on duty, and an active crew shares a responder. An inactive crew does not count (it is plain on duty then).
+  asks(await api('GET', `/patrol/incidents/${later}`, { token: U.Paz.token }), 'on duty alone');
+  const listed = ok(await api('GET', '/patrol/incidents?limit=200', { token: U.Paz.token })).data.find((r) => r.id === later);
+  assert.equal(listed.summary, null, 'the list hides its summary too'); assert.equal(listed.summary_hidden, true);
+  // Crew: an active crew mate responded or was sent, and both were on duty when the case was started.
   const [crew] = await pool.query("INSERT INTO patrol_crews (tenant_id, name, days, start_time, end_time, target, minimum, active) VALUES (?, 'A crew', '1234567', '08:00', '16:00', 4, 2, 1)", [M.id]);
   for (const s of [U.Paz.staff, U.Pia.staff]) await pool.query('INSERT INTO patrol_crew_members (tenant_id, crew_id, staff_id) VALUES (?, ?, ?)', [M.id, crew.insertId, s]);
   const crewCase = await newCase(M.owner);
   ok(await api('POST', `/patrol/incidents/${crewCase}/responders`, { token: M.owner, body: { staff_id: U.Pia.staff, role: 'assist' } }));
+  asks(await api('GET', `/patrol/incidents/${crewCase}`, { token: U.Paz.token }), 'the crew mate was not on duty');
+  await onDuty(U.Pia.staff, 60);
   ok(await api('GET', `/patrol/incidents/${crewCase}`, { token: U.Paz.token }));
   assert.equal((await accessRow(crewCase, U.Paz.id)).access, 'crew');
+  const sentCase = await newCase(M.owner);
+  const call2 = ok(await api('POST', '/patrol/dispatch', { token: M.owner, body: { location: 'Lift 5' } }));
+  await pool.query('UPDATE dispatch_calls SET incident_id = ? WHERE id = ?', [sentCase, call2.id]);
+  ok(await api('POST', `/patrol/dispatch/${call2.id}/responders`, { token: M.owner, body: { staff_id: U.Pia.staff } }));
+  ok(await api('GET', `/patrol/incidents/${sentCase}`, { token: U.Paz.token }));
+  assert.equal((await accessRow(sentCase, U.Paz.id)).access, 'crew', 'a crew mate sent to the call');
+  // Not when the person themselves was off duty, nor for someone outside the crew who was on duty.
+  await onDuty(U.Pat.staff, 120, 90);
+  asks(await api('GET', `/patrol/incidents/${crewCase}`, { token: U.Pat.token }), 'a shift that ended before the case');
+  await onDuty(U.Pat.staff, -1);
+  asks(await api('GET', `/patrol/incidents/${crewCase}`, { token: U.Pat.token }), 'signed in after the case started, and not on the crew');
   await pool.query('UPDATE patrol_crews SET active = 0 WHERE id = ?', [crew.insertId]);
-  ok(await api('GET', `/patrol/incidents/${crewCase}`, { token: U.Paz.token }));
-  assert.equal((await accessRow(crewCase, U.Paz.id)).access, 'on_duty', 'an inactive crew does not count');
+  asks(await api('GET', `/patrol/incidents/${crewCase}`, { token: U.Paz.token }), 'an inactive crew does not count');
+  await offDuty(U.Pia.staff);
   await offDuty(U.Paz.staff); await offDuty(U.Pat.staff);
   // Past 12 hours every exception ends.
   await age(id, 13);
@@ -666,11 +675,12 @@ test('R1: witness links are keyed by their own id, and still need the records ch
   ok(await api('POST', `/patrol/witness-links/${link.id}/resend`, { token: U.Pat.token, body: { send: 'show' } }), 'the patroller who wrote it, no check');
 });
 
-test('R2: a search inside an export needs the records check and is on the access log', async () => {
+test('R2: every export needs the records check, searched or not, and is on the access log with its count of cases', async () => {
   const id = await approvedOldCase();
   const t = await tokenOf(U.Dir.login);
   ok(await stepUp(t)); // the ordinary second check the exports ask for
-  ok(await raw('GET', '/api/v1/patrol/incidents.csv', { token: t }), 'no search: as before');
+  asks(await raw('GET', '/api/v1/patrol/incidents.csv', { token: t }), 'a full export (Dan, 2026-11-05)');
+  asks(await raw('GET', '/api/v1/patrol/patients.csv', { token: t }), 'the statistics export too');
   asks(await raw('GET', '/api/v1/patrol/incidents.csv?q=Brightwater', { token: t }), 'incidents.csv search');
   asks(await raw('GET', '/api/v1/patrol/patients.csv?q=Brightwater', { token: t }), 'patients.csv search');
   ok(await records(t));
@@ -679,7 +689,11 @@ test('R2: a search inside an export needs the records check and is on the access
   const [[a]] = await pool.query("SELECT detail FROM audit_log WHERE tenant_id = ? AND user_id = ? AND action = 'search' ORDER BY id DESC LIMIT 1", [M.id, U.Dir.id]);
   const d = typeof a.detail === 'string' ? JSON.parse(a.detail) : a.detail;
   assert.equal(d.export, 'patients.csv'); assert.ok(d.ids.includes(id), 'the case found is named');
-  assert.ok(!JSON.stringify(d).includes('Brightwater'), 'never the words searched');
+  assert.ok(!JSON.stringify(d).includes('Brightwater'), 'never the words searched');  ok(await raw('GET', '/api/v1/patrol/incidents.csv', { token: t }));
+  const [[e]] = await pool.query("SELECT detail FROM audit_log WHERE tenant_id = ? AND user_id = ? AND action = 'export' AND entity = 'incidents' ORDER BY id DESC LIMIT 1", [M.id, U.Dir.id]);
+  const x = typeof e.detail === 'string' ? JSON.parse(e.detail) : e.detail;
+  const [[n]] = await pool.query('SELECT COUNT(*) AS n FROM incidents WHERE tenant_id = ?', [M.id]);
+  assert.equal(x.cases, Number(n.n), 'the count of cases included'); assert.equal(x.file, 'incidents.csv');
 });
 
 test('R3: releasing a record and making an outside link need the records check on that case; both, and the link opened, are in the weekly summary', async () => {

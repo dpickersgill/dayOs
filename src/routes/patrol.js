@@ -239,7 +239,7 @@ const exportSearch = async (req, data, what) => {
   if (req.query.q) await audit(pool, req, 'search', 'incidents', null, { export: what, matches: data.length, ids: data.slice(0, 50).map((r) => r.id).filter(Boolean) });
 };
 router.get('/incidents.csv', patrol, needs('reports'), stepUp('download case records'), async (req, res) => {
-  if (req.query.q) PX.searchCheck(req);
+  PX.searchCheck(req); // a full export is every case at once: the records check, searched or not (Dan, 2026-11-05)
   const { where, params } = filters(req);
   const data = await rows(
     pool,
@@ -250,14 +250,14 @@ router.get('/incidents.csv', patrol, needs('reports'), stepUp('download case rec
   );
   const out = data.map((r) => ({ ...r, case_number: caseNumber(r) }));
   const cols = ['case_number', 'id', 'occurred_at', 'location', 'category', 'severity', 'disposition', 'status', 'report_state', 'patients'];
-  await audit(pool, req, 'export', 'incidents', null, { rows: data.length });
+  await audit(pool, req, 'export', 'incidents', null, { file: 'incidents.csv', rows: data.length, cases: new Set(data.map((r) => r.id)).size, fresh: true });
   await exportSearch(req, data, 'incidents.csv');
   res.set('Content-Type', 'text/csv; charset=utf-8').set('Content-Disposition', 'attachment; filename="incidents.csv"').send(toCsv(cols, out));
 });
 
 /** One row per patient with structured fields only (no names, no free text), for injury statistics. */
 router.get('/patients.csv', patrol, needs('reports'), stepUp('download patient statistics'), async (req, res) => {
-  if (req.query.q) PX.searchCheck(req);
+  PX.searchCheck(req); // as incidents.csv
   const { where, params } = filters(req);
   const data = await rows(
     pool,
@@ -269,7 +269,7 @@ router.get('/patients.csv', patrol, needs('reports'), stepUp('download patient s
   );
   const out = data.map((r) => ({ ...r, case_number: caseNumber(r) }));
   const cols = ['case_number', 'occurred_at', 'age_years', 'sex', 'activity', 'ability', 'helmet', 'rental_equipment', 'disposition', 'injuries'];
-  await audit(pool, req, 'export', 'incident_patients', null, { rows: data.length });
+  await audit(pool, req, 'export', 'incident_patients', null, { file: 'patients.csv', rows: data.length, cases: new Set(data.map((r) => r.id)).size, fresh: true });
   await exportSearch(req, data, 'patients.csv');
   res.set('Content-Type', 'text/csv; charset=utf-8').set('Content-Disposition', 'attachment; filename="patients.csv"').send(toCsv(cols, out));
 });

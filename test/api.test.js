@@ -297,6 +297,8 @@ test('patrol: role gating, audit trail and safe CSV export', async () => {
 
   // Patrol cannot export; managers can, and formulas are neutralized.
   assert.equal((await api('GET', '/patrol/incidents.csv', { token: patrolToken })).status, 403);
+  assert.equal((await api('GET', '/patrol/incidents.csv', { token: A.token })).status, 403, 'a full export needs the records check');
+  await require('./helpers/records').records(base, 'correct-horse-battery')(A.token);
   const csv = await api('GET', '/patrol/incidents.csv', { token: A.token });
   assert.equal(csv.status, 200);
   assert.ok(csv.body.includes(`"'=HYPERLINK`), 'formula injection should be neutralized');

@@ -56,7 +56,7 @@ const addressTag = (req) => (req.ip ? crypto.createHmac('sha256', require('../co
 /** Append an audit row. `db` is the pool or a transaction connection so the audit commits with the change. */
 async function audit(db, req, action, entity, entityId, detail) {
   // A patient record opened or changed: how it was allowed (lib/patientaccess.js: writing, wrote, responder, dispatched,
-  // on_duty, crew, or checked) and whether a fresh check was used, on every row about that case.
+  // crew, or checked; on_duty on rows from before 2026-11-05) and whether a fresh check was used, on every row about that case.
   const pa = req && req.patientAccess;
   if (pa && entity === 'incidents' && Number(entityId) === pa.id) detail = { ...(detail && typeof detail === 'object' && !Array.isArray(detail) ? detail : detail === undefined || detail === null ? {} : { value: detail }), access: pa.access, fresh: pa.fresh };
   const safe = safeDetail(detail);

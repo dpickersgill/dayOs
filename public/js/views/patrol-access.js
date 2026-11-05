@@ -12,7 +12,7 @@ const WHAT = {
   view_scene: 'Opened the scene diagram', view_photos: 'Opened the photos', view_photo: 'Opened a photo', view_photo_preview: 'Opened a photo', reporter_change: 'Changed who wrote the report',
 };
 const what = (a) => WHAT[a] || label(a);
-const HOW = { checked: 'Confirmed it was them', writing: 'Their own draft', wrote: 'Wrote it, this shift', responder: 'Responder', responder_self: 'Added themselves as responder', dispatched: 'Sent to the call', on_duty: 'On duty', crew: 'Crew on the case' };
+const HOW = { checked: 'Confirmed it was them', writing: 'Their own draft', wrote: 'Wrote it, this shift', responder: 'Responder', responder_self: 'Added themselves as responder', dispatched: 'Sent to the call', on_duty: 'On duty (earlier rule)', crew: 'Crew mate on the case, both on duty' };
 
 export async function drawAccessLog(box) {
   const from = input({ type: 'date', name: 'from' });

@@ -3,7 +3,7 @@
 // The weekly patient-record access summary (feat/auth-hardening). One email on Monday morning, in the mountain's time
 // zone, to the owner and the patrol Admins (a real roster row at Admin): how many patient care records were opened last
 // week, and every open that was not of a case the person created and is working on in their shift. That includes opens
-// after a fresh check, opens by an exception (responder, sent to the call, on duty, crew, a self-added responder) and
+// after a fresh check, opens by an exception (responder, sent to the call, crew mate on duty together, a self-added responder; on duty alone from before 2026-11-05) and
 // writing access to the person's own drafts older than 12 hours. One line per person and case: what was opened (the
 // case, photos, signatures, the scene, the report check), how often, how it was allowed and whether a fresh check was
 // used. Case numbers and dates only: never a patient's name or any detail of their care. A link goes to the access log.
@@ -22,7 +22,7 @@ const PX = require('./patientaccess');
 // login, a records request or a witness link is here, whatever its action is called. Rows that show a case without that
 // rule (a chat link preview, an outside claim-file link being opened) are listed by name in PX.ALSO_LISTED.
 const WHAT = PX.ACTION_LABELS;
-const HOW = { no_rule: 'a preview in a message', outside_link: 'an outside link', checked: 'fresh check', responder: 'responder', responder_self: 'added themselves as responder', dispatched: 'sent to the call', on_duty: 'on duty', crew: 'crew', writing: 'own draft, older than 12 hours', wrote: 'wrote it' };
+const HOW = { no_rule: 'a preview in a message', outside_link: 'an outside link', checked: 'fresh check', responder: 'responder', responder_self: 'added themselves as responder', dispatched: 'sent to the call', on_duty: 'on duty (earlier rule)', crew: 'crew mate on the case, both on duty', writing: 'own draft, older than 12 hours', wrote: 'wrote it' };
 
 const caseNo = (r) => (r.seq ? `${r.season}-${String(r.seq).padStart(4, '0')}` : `Case ${r.incident_id}`);
 const parse = (d) => { if (!d) return {}; if (typeof d === 'object') return d; try { return JSON.parse(d); } catch (_) { return {}; } };

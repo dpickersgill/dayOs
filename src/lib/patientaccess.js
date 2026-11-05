@@ -9,10 +9,11 @@
 //   and, for a case started (incidents.created_at) in the last 12 hours, when the person:
 //   responder        is a responder on it (incident_responders, not marked entered in error);
 //   dispatched       was sent to its call (dispatch_calls.incident_id with dispatch_responders);
-//   on_duty          was signed in on patrol duty (patrol_duty) when the case was started: the row began before the case
-//                    was created and had not ended then;
-//   crew             shares an active crew (patrol_crews.active, patrol_crew_members) with one of its counted
-//                    responders, and was on duty when the case was started.
+//   crew             shares an active crew (patrol_crews.active, patrol_crew_members) with someone who responded to it
+//                    or was dispatched to it (a counted link), and both were signed in on patrol duty (patrol_duty) when
+//                    the case was started: on duty with that crew.
+// Being on duty alone is not enough (Dan, 2026-11-05): someone on shift who had no part in a case, and no crew mate
+// who did, makes the records check like anyone else.
 // A responder or dispatch link counts only when it is believable (LINK_RULE):
 //   - it was there before this rule (added_by 0), or it was added within 30 minutes of the case being created (a
 //     responder adding themselves at the scene), or
@@ -50,7 +51,7 @@ const ms = (s) => new Date(`${String(s).replace(' ', 'T')}Z`).getTime();
 
 /**
  * How this person may open each of these cases without a fresh check: Map id -> access ('writing', 'wrote',
- * 'responder', 'responder_self', 'dispatched', 'on_duty', 'crew'), or no entry when the check is needed.
+ * 'responder', 'responder_self', 'dispatched', 'crew'), or no entry when the check is needed.
  */
 async function relations(db, req, ids) {
   const out = new Map();
@@ -82,10 +83,11 @@ async function relations(db, req, ids) {
     WHERE u.tenant_id = ? AND u.id IN (?)`, [t, adders]) : [];
   const who = new Map(people.map((p) => [Number(p.id), p]));
   const tz = ((await one(db, 'SELECT timezone FROM tenants WHERE id = ?', [t])) || {}).timezone || 'America/New_York';
-  const duty = await rows(db, 'SELECT staff_id, signed_in_at, signed_out_at FROM patrol_duty WHERE tenant_id = ? AND staff_id = ? AND on_date >= DATE_SUB(CURDATE(), INTERVAL 2 DAY)', [t, myStaff]);
   const crewMates = await rows(db, `SELECT DISTINCT b.staff_id FROM patrol_crew_members a JOIN patrol_crews c ON c.tenant_id = a.tenant_id AND c.id = a.crew_id AND c.active = 1
     JOIN patrol_crew_members b ON b.tenant_id = a.tenant_id AND b.crew_id = a.crew_id WHERE a.tenant_id = ? AND a.staff_id = ? AND b.staff_id <> a.staff_id`, [t, myStaff]);
   const mates = new Set(crewMates.map((r) => Number(r.staff_id)));
+  const duty = await rows(db, 'SELECT staff_id, signed_in_at, signed_out_at FROM patrol_duty WHERE tenant_id = ? AND staff_id IN (?) AND on_date >= DATE_SUB(CURDATE(), INTERVAL 2 DAY)', [t, [myStaff, ...mates]]);
+  const onDutyAt = (staff, at) => duty.some((d) => Number(d.staff_id) === staff && String(d.signed_in_at) <= at && (!d.signed_out_at || String(d.signed_out_at) > at));
   for (const i of recent) {
     const id = Number(i.id);
     if (out.has(id)) continue;
@@ -108,11 +110,10 @@ async function relations(db, req, ids) {
     const counted = mineLinks.filter(counts);
     const own = counted.find((l) => Number(l.staff_id) === myStaff);
     if (own) { out.set(id, own.kind === 'responder' && Number(own.added_by) === me ? 'responder_self' : own.kind); continue; }
+    if (!mates.size) continue;
     const at = wallClock(i.created_at, tz);
-    const onDuty = duty.some((d) => String(d.signed_in_at) <= at && (!d.signed_out_at || String(d.signed_out_at) > at));
-    if (!onDuty) continue;
-    if (counted.some((l) => l.kind === 'responder' && mates.has(Number(l.staff_id)))) out.set(id, 'crew');
-    else out.set(id, 'on_duty');
+    if (!onDutyAt(myStaff, at)) continue;
+    if (counted.some((l) => mates.has(Number(l.staff_id)) && onDutyAt(Number(l.staff_id), at))) out.set(id, 'crew');
   }
   return out;
 }
