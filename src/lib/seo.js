@@ -74,7 +74,7 @@ const META = {
   },
   'terrain-park-software': {
     title: 'Terrain Park Software: Feature Map, Inspections | Verdynt/OS',
-    description: 'A catalog of rails, boxes and jumps, a daily park map with GPS pins dropped from a phone, and inspections that close a feature everywhere when it fails.',
+    description: 'A catalog of rails, boxes and jumps, a daily park map with GPS pins dropped from a phone, and inspections that close a feature when it fails, with only an inspection to reopen it.',
     og: 'Terrain park software: every feature, where it is, and whether it passed',
     crumb: 'Terrain park',
   },

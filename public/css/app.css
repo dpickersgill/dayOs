@@ -1119,6 +1119,8 @@ span.park-row { cursor: default; }
 .park-plot { width: 100%; max-width: 760px; height: auto; border-radius: var(--radius); }
 .park-history s, .park-record s { color: var(--quiet); text-decoration-thickness: 2px; }
 .park-dialog.dialog { max-width: 760px; }
+.park-snap { border: 1px solid var(--line); border-left: 6px solid var(--trail-blue); border-radius: var(--radius); padding: 8px 12px; margin: 8px 0 12px; }
+.park-snap .plain li { padding: 2px 0; border: 0; }
 @media (max-width: 520px) {
   .park-actions { grid-template-columns: 1fr; }
   .park-check { grid-template-columns: 1fr; }

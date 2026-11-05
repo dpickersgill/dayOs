@@ -135,7 +135,7 @@ async function drawLayout(box, list) {
     return L.divIcon({ className: 'park-pin-wrap', html: el, iconSize: [34, 34], iconAnchor: [17, 17], popupAnchor: [0, -18] });
   };
 
-  const inspectedLine = (p) => (waitingFor(p.feature_id).length ? 'Inspection waiting to send' : p.inspected_result ? `${RESULT_SHORT[p.inspected_result]}, ${fmtTime(p.inspected_at)}` : isToday() ? 'Not inspected yet today' : '');
+  const inspectedLine = (p) => (waitingFor(p.feature_id).length ? 'Inspection waiting to send' : p.inspected_result ? `Last inspection: ${RESULT_SHORT[p.inspected_result].toLowerCase()}, ${fmtTime(p.inspected_at)}` : isToday() ? 'Not inspected yet today' : '');
   function popup(p) {
     const k = kindInfo(list, p.kind);
     const body = h('div', { class: 'map-pop park-pop' },
@@ -195,7 +195,7 @@ async function drawLayout(box, list) {
         p.roped_off ? state('Roped off', 'warn') : null, p.needs_post_incident ? state('Post-incident', 'bad') : null,
         h('span', { class: 'muted small park-when' }, queued.length ? (queued.some((x) => x.error) ? 'Not saved' : 'Waiting to send') : inspectedLine(p))),
       canInspect ? h('div', { class: 'park-actions' },
-        button('All checks OK', () => inspectDialog(p, list, refresh, { quick: true }), { kind: 'primary big', label: `All checks OK: ${p.name}` }),
+        button(['closed', 'needs_attention'].includes(p.feature_status) ? 'Reopen: all checks OK' : 'All checks OK', () => inspectDialog(p, list, refresh, { quick: true }), { kind: 'primary big', label: `All checks OK: ${p.name}` }),
         button('Inspect', () => inspectDialog(p, list, refresh), { kind: 'big', label: `Inspect ${p.name}` })) : null);
   }
 
@@ -220,7 +220,7 @@ async function drawLayout(box, list) {
     areaStrip.append(h('ul', { class: 'park-area-list' }, live.map((a) => {
       const today = isToday() ? AREA_TODAY[a.today_status] : null;
       return h('li', { class: 'park-area', 'data-area': a.id },
-        h('span', null, h('b', null, a.name), h('span', { class: 'muted small' }, ` ${a.level_label}`), ' ', today ? state(...today) : null,
+        h('span', null, h('b', null, a.name), h('span', { class: 'muted small' }, a.level === 'beginner' ? ` ${a.level_label}` : ` rated ${a.level_label}`), ' ', today ? state(...today) : null,
           isToday() && a.today ? h('span', { class: 'muted small' }, a.today.action === 'open' ? ` Signed off by ${a.today.supervisor_name}, ${fmtTime(a.today.at)}` : ` ${label(a.today.reason_kind)}, ${fmtTime(a.today.at)}`) : null),
         h('span', { class: 'row tight' },
           canEdit && isToday() && a.today_status !== 'open' ? button('Open the area', () => signOffDialog(a, data, refresh), { kind: 'primary', small: true }) : null,
@@ -629,13 +629,13 @@ async function historyDialog(f, list) {
     { head: 'What', cell: (c) => CHANGE_FIELD[c.field] || label(c.field) },
     { head: 'Change', cell: (c) => h('span', null, h('s', null, changeValue(c.field, c.before_value)), ' to ', h('b', null, changeValue(c.field, c.after_value))) },
     { head: 'Why', cell: (c) => h('span', null, c.reason || '', h('div', { class: 'muted small' }, SOURCE[c.source] || label(c.source))) },
-    { head: 'By', cell: (c) => c.changed_by || '' },
+    { head: 'By', cell: (c) => c.changed_by || 'A login since removed' },
   ], hist.changes) : empty('No changes yet.');
   const placeRows = hist.data.length ? table([
     { head: 'Day', cell: (p) => (p.voided_at ? h('s', null, fmtDate(String(p.on_date).slice(0, 10))) : fmtDate(String(p.on_date).slice(0, 10))) },
     { head: 'Area', cell: (p) => p.area || '' },
     { head: 'Note', cell: (p) => h('span', null, p.note || '', p.late ? h('div', { class: 'warn-note small' }, `Late entry: ${p.late_reason}`) : null, p.voided_at ? h('div', { class: 'muted small' }, `Removed by correction: ${p.void_reason}`) : null, p.roped_off ? h('div', { class: 'muted small' }, 'Roped off') : null) },
-  ], hist.data, { rowClass: (p) => (p.voided_at ? 'voided' : null) }) : empty('It has not been placed yet.');
+  ], hist.data) : empty('It has not been placed yet.');
   const corrRows = hist.corrections.length ? h('ul', { class: 'plain park-corrections' }, hist.corrections.map((c) => h('li', null,
     h('b', null, `${fmtDate(String(c.on_date).slice(0, 10))}: `), c.action === 'remove' ? 'taken off the day' : c.action === 'restore' ? 'put back on the day' : 'placement corrected',
     c.before ? h('span', null, ' (was ', h('s', null, `${c.before.lat.toFixed ? c.before.lat.toFixed(5) : c.before.lat}, ${c.before.lng.toFixed ? c.before.lng.toFixed(5) : c.before.lng}${c.before.note ? `, ${c.before.note}` : ''}`), ')') : null,
@@ -643,13 +643,13 @@ async function historyDialog(f, list) {
   const correct = (c) => (isManager() && !c.voided_at ? button('Correct', () => correctDialog(c, again), { small: true }) : null);
   const checkRows = checks.length ? table([
     { head: 'When', cell: (c) => h('span', null, c.voided_at ? h('s', null, fmtDateTime(c.inspected_at)) : fmtDateTime(c.inspected_at), c.received_at && c.received_at.slice(0, 16) !== String(c.inspected_at).slice(0, 16) ? h('div', { class: 'muted small' }, `Sent ${fmtTime(c.received_at)}`) : null) },
-    { head: 'Inspection', cell: (c) => c.kind_label || '' },
+    { head: 'Inspection', cell: (c) => (c.voided_at ? h('s', null, c.kind_label || '') : c.kind_label || '') },
     { head: 'Result', cell: (c) => h('span', null, c.voided_at ? h('s', null, RESULT[c.result]) : RESULT[c.result], c.reopened ? h('div', { class: 'muted small' }, `Reopened. Fixed: ${c.fixed}`) : null, c.corrects_id ? h('div', { class: 'muted small' }, 'Correction of an earlier entry') : null) },
     { head: 'Checklist', cell: (c) => (c.checklist ? h('span', { class: 'small' }, c.checklist.filter((x) => x.result === 'fail').map((x) => `${x.label}: ${x.note}`).join('; ') || `${c.checklist.length} items, none failed`) : h('span', { class: 'muted small' }, 'No checklist')) },
-    { head: 'By', cell: (c) => c.inspected_by || '' },
+    { head: 'By', cell: (c) => c.inspected_by || 'A login since removed' },
     { head: 'Notes', cell: (c) => h('span', null, c.notes || '', c.photos ? h('div', { class: 'muted small' }, `${c.photos} photo${c.photos === 1 ? '' : 's'}`) : null, c.voided_at ? h('div', { class: 'muted small' }, `Entered in error (${c.voided_by}, ${fmtDateTime(c.voided_at)}): ${c.void_reason}`) : null) },
     { head: '', actions: true, cell: correct },
-  ], checks, { rowClass: (c) => (c.voided_at ? 'voided' : null) }) : empty('No inspections yet.');
+  ], checks) : empty('No inspections yet.');
   dialog(f.name, h('div', { class: 'stack park-history' },
     h('h3', null, 'Changes'), changeRows,
     h('h3', null, 'Inspections'), checkRows,
@@ -732,7 +732,7 @@ function layoutSvg(features) {
     const x = pts.length === 1 ? W / 2 : sx(p.lng); const y = pts.length === 1 ? H / 2 : sy(p.lat);
     root.append(svg('circle', { cx: x, cy: y, r: 11, fill: p.status === 'closed' ? '#b3201a' : p.status === 'needs_attention' ? '#b87400' : '#2f7d4f', stroke: '#000' }));
     const t = svg('text', { x, y: y + 4, 'text-anchor': 'middle', 'font-size': 11, fill: '#fff', 'font-weight': 700 }); t.textContent = String(i + 1); root.append(t);
-    const n = svg('text', { x: x + 14, y: y + 4, 'font-size': 11, fill: '#111' }); n.textContent = p.name; root.append(n);
+    const right = x > W * 0.7; const n = svg('text', { x: right ? x - 14 : x + 14, y: y + 4, 'font-size': 11, fill: '#111', 'text-anchor': right ? 'end' : 'start' }); n.textContent = p.name; root.append(n);
   });
   return root;
 }
@@ -746,7 +746,7 @@ async function drawRecord(root, list, areaId, date) {
   const plotted = live.length ? live : r.features;
   root.append(h('div', { class: 'stack park-record' },
     h('div', { class: 'page-head spread' }, h('h1', null, `${r.area.name}: day record`), h('span', { class: 'row no-print' }, h('a', { class: 'btn small', href: '#/park' }, 'Back to the park'), button('Print', () => window.print(), { kind: 'primary', small: true }))),
-    h('p', null, h('b', null, fmtDateLong(date)), ` · Rated ${r.area.level_label} · Times are ${r.timezone}`),
+    h('p', null, h('b', null, `${r.area.name}, ${fmtDateLong(date)}`), ` · Rated ${r.area.level_label} · Times are ${r.timezone}`),
     h('h2', null, 'Opening sign-off and closures'),
     r.days.length ? h('ul', { class: 'plain' }, r.days.map((d) => h('li', null, d.action === 'open'
       ? h('span', null, h('b', null, `Opened ${fmtTime(d.at)}`), `, signed off by ${d.supervisor_name} (login ${d.signed_by || 'unknown'}). Checked: ${(d.checklist || []).map((c) => c.label).join('; ')}.${d.reason ? ` Notes: ${d.reason}` : ''}`)
@@ -759,18 +759,18 @@ async function drawRecord(root, list, areaId, date) {
       { head: 'Type and size', cell: (f) => `${f.kind_label}, ${f.size_label}${f.dimensions ? `, ${f.dimensions}` : ''}` },
       { head: 'Status now', cell: (f) => (STATUS[f.status] || [f.status])[0] },
       { head: 'Notes', cell: (f) => h('span', { class: 'small' }, [f.roped_off ? `Roped off: ${f.roped_note || ''}` : '', f.over_rating ? `Larger than the area's rating: ${f.size_override || ''}` : '', f.late ? `Late entry: ${f.late_reason}` : '', f.voided_at ? `Removed by correction: ${f.void_reason}` : ''].filter(Boolean).join('. ')) },
-    ], r.features, { rowClass: (f) => (f.voided_at ? 'voided' : null) }) : empty('No features were placed in this area that day.'),
+    ], r.features) : empty('No features were placed in this area that day.'),
     h('h2', null, 'Status changes'),
     r.changes.filter((c) => c.field === 'status' || c.field === 'roped' || c.field === 'area').length ? table([
       { head: 'Time', cell: (c) => fmtTime(c.changed_at) }, { head: 'Feature', cell: (c) => nameOf(c.feature_id) },
-      { head: 'Change', cell: (c) => `${changeValue(c.field, c.before_value)} to ${changeValue(c.field, c.after_value)}` }, { head: 'Why', cell: (c) => `${SOURCE[c.source] || c.source}${c.reason ? `: ${c.reason}` : ''}` }, { head: 'By', cell: (c) => c.changed_by || '' },
+      { head: 'Change', cell: (c) => `${changeValue(c.field, c.before_value)} to ${changeValue(c.field, c.after_value)}` }, { head: 'Why', cell: (c) => `${SOURCE[c.source] || c.source}${c.reason ? `: ${c.reason}` : ''}` }, { head: 'By', cell: (c) => c.changed_by || 'A login since removed' },
     ], r.changes.filter((c) => c.field === 'status' || c.field === 'roped' || c.field === 'area')) : empty('No status changes.'),
     h('h2', null, 'Inspections'),
     r.inspections.length ? table([
       { head: 'Time', cell: (i) => (i.voided_at ? h('s', null, fmtTime(i.inspected_at)) : fmtTime(i.inspected_at)) }, { head: 'Feature', cell: (i) => nameOf(i.feature_id) }, { head: 'Inspection', cell: (i) => i.kind_label || '' },
-      { head: 'Result', cell: (i) => (i.voided_at ? h('s', null, i.result_label) : i.result_label) }, { head: 'By', cell: (i) => i.inspected_by || '' },
+      { head: 'Result', cell: (i) => (i.voided_at ? h('s', null, i.result_label) : i.result_label) }, { head: 'By', cell: (i) => i.inspected_by || 'A login since removed' },
       { head: 'Details', cell: (i) => h('span', { class: 'small' }, [i.checklist ? `${i.checklist.length} items${i.checklist.some((x) => x.result === 'fail') ? `, failed: ${i.checklist.filter((x) => x.result === 'fail').map((x) => `${x.label} (${x.note})`).join('; ')}` : ', none failed'}` : '', i.notes, i.fixed ? `Fixed: ${i.fixed}` : '', i.photos ? `${i.photos} photo${i.photos === 1 ? '' : 's'}` : '', i.voided_at ? `Entered in error by ${i.voided_by}, ${fmtDateTime(i.voided_at)}: ${i.void_reason}` : '', i.corrects_id ? 'Correction of an earlier entry' : ''].filter(Boolean).join('. ')) },
-    ], r.inspections, { rowClass: (i) => (i.voided_at ? 'voided' : null) }) : empty('No inspections that day.'),
+    ], r.inspections) : empty('No inspections that day.'),
     h('h2', null, 'Corrections'),
     r.corrections.length ? h('ul', { class: 'plain' }, r.corrections.map((c) => h('li', null, h('b', null, nameOf(c.feature_id)), `: ${c.action === 'remove' ? 'taken off the day' : c.action === 'restore' ? 'put back' : 'placement changed'} by ${c.corrected_by || 'unknown'}, ${fmtDateTime(c.corrected_at)}. Why: ${c.reason}`))) : h('p', { class: 'muted' }, 'No corrections.'),
     h('p', { class: 'muted small' }, 'This record lists what the crew recorded. It is not a statement that any feature is safe.')));
