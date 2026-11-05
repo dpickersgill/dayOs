@@ -95,7 +95,8 @@ router.get('/areas', async (req, res) => {
   const days = await rows(pool, `SELECT d.area_id, d.action, d.at, d.supervisor_name, d.reason_kind, d.reason FROM park_area_days d
     WHERE d.tenant_id = ? AND d.on_date = ? ORDER BY d.at, d.id`, [t, today]);
   const last = new Map(); for (const d of days) last.set(Number(d.area_id), d);
-  res.json({ data: list.map((a) => { const d = last.get(Number(a.id)); return { ...a, level_label: OPS.levelLabel(a.level), today_status: d ? (d.action === 'open' ? 'open' : 'closed') : 'not_opened', today: d || null }; }), today });
+  const tz = await OPS.tzOf(pool, t);
+  res.json({ data: list.map((a) => { const d = last.get(Number(a.id)); return { ...a, level_label: OPS.levelLabel(a.level), today_status: d ? (d.action === 'open' ? 'open' : 'closed') : 'not_opened', today: d ? OPS.local(d, tz) : null }; }), today });
 });
 
 router.post('/areas', crew, validate(z.object(areaFields)), async (req, res) => {
@@ -137,7 +138,8 @@ const featureOut = (f) => ({ ...f, portable: Boolean(f.portable), needs_post_inc
 
 router.get('/features', async (req, res) => {
   const data = await rows(pool, `${featureSelect} WHERE f.tenant_id = ? ORDER BY f.status = 'retired', f.kind, f.name`, [req.auth.tenantId]);
-  res.json({ data: data.map(featureOut) });
+  const tz = await OPS.tzOf(pool, req.auth.tenantId);
+  res.json({ data: data.map((f) => featureOut({ ...f, last_inspected_at: f.last_inspected_at ? OPS.local({ at: f.last_inspected_at }, tz).at : null })) });
 });
 
 router.post('/features', crew, validate(z.object({ ...featureFields, status: z.any().optional() })), async (req, res) => {
@@ -222,7 +224,8 @@ router.get('/placements/:date', async (req, res) => {
   const placed = await rows(pool, `${placementSelect} WHERE p.tenant_id = ? AND p.on_date = ? AND p.voided_at IS NULL ORDER BY f.kind, f.name`, [tenantId, date]);
   const unplaced = await rows(pool, `${featureSelect} WHERE f.tenant_id = ? AND f.status <> 'retired' AND f.id NOT IN (SELECT feature_id FROM park_placements WHERE tenant_id = ? AND on_date = ? AND voided_at IS NULL) ORDER BY f.kind, f.name`, [tenantId, tenantId, date]);
   const today = await tenantToday(tenantId);
-  res.json({ date, today, placed: placed.map(placementOut), unplaced: unplaced.map(featureOut), editable: date >= today, correctable: isManager(req) });
+  const tz = await OPS.tzOf(pool, tenantId);
+  res.json({ date, today, placed: OPS.local(placed.map(placementOut), tz), unplaced: unplaced.map(featureOut), editable: date >= today, correctable: isManager(req) });
 });
 
 const PLACE_COLS = ['area_id', 'lat', 'lng', 'note'];
@@ -411,7 +414,7 @@ router.post('/features/:id/inspections', crew, validate(inspectSchema), async (r
     }
     const [r] = await conn.query(`INSERT INTO park_inspections (tenant_id, feature_id, inspected_on, inspected_at, inspected_by, result, notes, kind, checklist, fixed, no_photo_reason, client_ref, received_at, reopened)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), ?)`,
-    [tenantId, id, when.date, when.utc, req.auth.userId, b.result, b.notes || null, b.kind, JSON.stringify(j.checklist), j.reopen || b.fixed ? b.fixed || null : null, b.no_photo_reason || null, b.client_ref || null, j.reopen ? 1 : 0]);
+    [tenantId, id, when.date, when.utc, req.auth.userId, b.result, b.notes || null, b.kind, JSON.stringify(j.checklist), b.fixed || null, b.no_photo_reason || null, b.client_ref || null, j.reopen ? 1 : 0]);
     if (ids.length) await conn.query('UPDATE park_photos SET inspection_id = ? WHERE tenant_id = ? AND feature_id = ? AND id IN (?)', [r.insertId, tenantId, id, ids]);
     const status = b.result === 'ok' ? 'ready' : b.result;
     const clearsIncident = b.result === 'ok' && b.kind === 'post_incident' && Number(f.needs_post_incident);
@@ -437,7 +440,8 @@ const inspectionRows = (where, params) => rows(pool, `SELECT i.id, i.feature_id,
 const inspectionOut = (i) => ({ ...i, checklist: typeof i.checklist === 'string' ? JSON.parse(i.checklist) : i.checklist, reopened: Boolean(Number(i.reopened)), photos: Number(i.photos), result_label: OPS.resultLabel(i.result), kind_label: i.kind ? OPS.inspectionKindLabel(i.kind) : null });
 
 router.get('/features/:id/inspections', async (req, res) => {
-  res.json({ data: (await inspectionRows('i.tenant_id = ? AND i.feature_id = ?', [req.auth.tenantId, paramId(req)])).map(inspectionOut) });
+  const tz = await OPS.tzOf(pool, req.auth.tenantId);
+  res.json({ data: OPS.local((await inspectionRows('i.tenant_id = ? AND i.feature_id = ?', [req.auth.tenantId, paramId(req)])).map(inspectionOut), tz) });
 });
 
 /**

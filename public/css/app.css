@@ -1086,6 +1086,45 @@ span.park-row { cursor: default; }
 .park-controls .row select { max-width: 190px; }
 .park-controls > button { min-width: 40px; }
 @media (min-width: 801px) { .park-map { height: 62vh; } }
+/* Terrain park records (2026.11.12): big targets for gloves, the checklist, areas for the day, the day record. */
+.btn.big { min-height: 56px; padding: 10px 18px; font-size: 1.05rem; }
+.big-select { min-height: 56px; font-size: 1.05rem; }
+.park-items { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 10px; }
+.park-item { border: 1px solid var(--line); border-left: 6px solid var(--open); border-radius: var(--radius); padding: 8px 10px; background: var(--surface); }
+.park-item.st-closed { border-left-color: var(--closed); }
+.park-item.st-needs_attention { border-left-color: var(--hold); }
+.park-item.st-new { border-left-color: var(--line-strong); }
+.park-when { display: block; width: 100%; }
+.park-actions { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; margin-top: 6px; }
+.park-checks { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.park-check { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.park-check input { grid-column: 1 / -1; }
+.park-check-label { font-weight: 700; }
+.segs { display: inline-flex; gap: 4px; }
+.seg { min-width: 64px; min-height: 56px; font: inherit; font-weight: 700; border: 2px solid var(--line-strong); background: var(--surface); color: var(--ink); border-radius: var(--radius); cursor: pointer; }
+.seg[aria-pressed="true"].seg-pass { background: var(--open); border-color: var(--open); color: var(--on-accent); }
+.seg[aria-pressed="true"].seg-fail { background: var(--closed); border-color: var(--closed); color: var(--on-accent); }
+.seg[aria-pressed="true"].seg-na { background: var(--ink-2); border-color: var(--ink-2); color: var(--on-accent); }
+.big-check { min-height: 56px; display: flex; align-items: center; gap: 10px; font-weight: 700; }
+.big-check input { width: 28px; height: 28px; }
+.sr-file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.park-photos li { margin: 4px 0; }
+.park-nearest { background: var(--info-tint); border-radius: var(--radius); padding: 8px 12px; font-weight: 700; }
+.park-area-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.park-area { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; background: var(--surface-2); }
+.park-outbox { border: 1px solid var(--hold); background: var(--hold-tint); border-radius: var(--radius); padding: 8px 12px; display: grid; gap: 6px; }
+.park-outbox .refused { color: var(--closed-ink); }
+.park-blocked ul { margin: 6px 0 0 18px; }
+.park-pin.roped { outline: 3px dotted #d98a00; }
+.park-plot { width: 100%; max-width: 760px; height: auto; border-radius: var(--radius); }
+.park-history s, .park-record s { color: var(--quiet); text-decoration-thickness: 2px; }
+.park-dialog.dialog { max-width: 760px; }
+@media (max-width: 520px) {
+  .park-actions { grid-template-columns: 1fr; }
+  .park-check { grid-template-columns: 1fr; }
+  .segs { display: grid; grid-template-columns: repeat(3, 1fr); }
+}
+@media print { .park-record .no-print { display: none !important; } .park-record table { font-size: 11px; } }
 
 /* ---- Patrol: search and case lists ---- */
 .solo > div > .tabs { display: none; }

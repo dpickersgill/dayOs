@@ -72,7 +72,9 @@ router.post('/features/:id/photos', crew, raw, async (req, res) => {
 });
 
 router.get('/features/:id/photos', async (req, res) => {
-  res.json({ data: await rows(pool, `SELECT ${PHOTO_META} FROM park_photos ph ${PHOTO_JOIN} WHERE ph.tenant_id = ? AND ph.feature_id = ? ORDER BY ph.id DESC LIMIT 200`, [req.auth.tenantId, paramId(req)]) });
+  if (!(await one(pool, 'SELECT id FROM park_features WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, paramId(req)]))) throw notFound('Park feature');
+  const tz = await OPS.tzOf(pool, req.auth.tenantId);
+  res.json({ data: OPS.local(await rows(pool, `SELECT ${PHOTO_META} FROM park_photos ph ${PHOTO_JOIN} WHERE ph.tenant_id = ? AND ph.feature_id = ? ORDER BY ph.id DESC LIMIT 200`, [req.auth.tenantId, paramId(req)]), tz) });
 });
 
 /** The original, byte for byte, with its recorded fingerprint. */
@@ -217,10 +219,11 @@ router.get('/features/:id/history', async (req, res) => {
       .map((r) => ({ incident_id: Number(r.incident_id), case_number: caseNo({ ...r, id: r.incident_id }), date: r.occurred_on }));
   }
   const js = (v) => (v === null || v === undefined ? null : typeof v === 'string' ? JSON.parse(v) : v);
+  const tz = await OPS.tzOf(pool, t);
   res.json({
-    data: places.map((p) => ({ ...p, late: Boolean(Number(p.late)), roped_off: Boolean(Number(p.roped_off)) })),
-    corrections: corrections.map((c) => ({ ...c, before: js(c.before_json), after: js(c.after_json), before_json: undefined, after_json: undefined })),
-    changes, incidents,
+    data: OPS.local(places.map((p) => ({ ...p, late: Boolean(Number(p.late)), roped_off: Boolean(Number(p.roped_off)) })), tz),
+    corrections: OPS.local(corrections.map((c) => ({ ...c, before: js(c.before_json), after: js(c.after_json), before_json: undefined, after_json: undefined })), tz),
+    changes: OPS.local(changes, tz), incidents,
   });
 });
 
@@ -232,7 +235,8 @@ router.get('/areas/:id/history', async (req, res) => {
     LEFT JOIN users u ON u.tenant_id = c.tenant_id AND u.id = c.changed_by WHERE c.tenant_id = ? AND c.area_id = ? ORDER BY c.changed_at DESC LIMIT 200`, [t, id]);
   const days = await rows(pool, `SELECT d.on_date, d.action, d.at, d.supervisor_name, d.reason_kind, d.reason, d.features_closed, COALESCE(u.email, u.username) AS signed_by FROM park_area_days d
     LEFT JOIN users u ON u.tenant_id = d.tenant_id AND u.id = d.signed_by WHERE d.tenant_id = ? AND d.area_id = ? ORDER BY d.at DESC LIMIT 200`, [t, id]);
-  res.json({ changes, days });
+  const tz = await OPS.tzOf(pool, t);
+  res.json({ changes: OPS.local(changes, tz), days: OPS.local(days, tz) });
 });
 
 // ---------------------------------------------------------------- the day record
@@ -269,10 +273,10 @@ router.get('/areas/:id/record/:date', async (req, res) => {
   await audit(pool, req, 'view_day_record', 'park_areas', id, { date });
   res.json({
     area: { ...area, level_label: OPS.levelLabel(area.level) }, date, timezone: tz,
-    features: placed.map((p) => ({ ...p, lat: Number(p.lat), lng: Number(p.lng), late: Boolean(Number(p.late)), roped_off: Boolean(Number(p.roped_off)), kind_label: OPS.kindLabel(p.kind), size_label: OPS.sizeLabel(p.size), over_rating: P.overRating(p.size, area.level) })),
-    inspections: inspections.map((i) => ({ ...i, checklist: js(i.checklist), reopened: Boolean(Number(i.reopened)), photos: Number(i.photos), result_label: OPS.resultLabel(i.result), kind_label: i.kind ? OPS.inspectionKindLabel(i.kind) : null })),
-    changes, days: days.map((d) => ({ ...d, checklist: js(d.checklist) })),
-    corrections: corrections.map((c) => ({ ...c, before: js(c.before_json), after: js(c.after_json), before_json: undefined, after_json: undefined })),
+    features: OPS.local(placed.map((p) => ({ ...p, lat: Number(p.lat), lng: Number(p.lng), late: Boolean(Number(p.late)), roped_off: Boolean(Number(p.roped_off)), kind_label: OPS.kindLabel(p.kind), size_label: OPS.sizeLabel(p.size), over_rating: P.overRating(p.size, area.level) })), tz),
+    inspections: OPS.local(inspections.map((i) => ({ ...i, checklist: js(i.checklist), reopened: Boolean(Number(i.reopened)), photos: Number(i.photos), result_label: OPS.resultLabel(i.result), kind_label: i.kind ? OPS.inspectionKindLabel(i.kind) : null })), tz),
+    changes: OPS.local(changes, tz), days: OPS.local(days.map((d) => ({ ...d, checklist: js(d.checklist) })), tz),
+    corrections: OPS.local(corrections.map((c) => ({ ...c, before: js(c.before_json), after: js(c.after_json), before_json: undefined, after_json: undefined })), tz),
     can_correct: isManager(req),
   });
 });

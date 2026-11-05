@@ -42,7 +42,8 @@ const linkRows = (t, id) => rows(pool, `SELECT l.id, l.feature_id, l.on_date, l.
 router.get('/incidents/:id/park-links', patrol, needs('view_cases'), async (req, res) => {
   const id = paramId(req); const t = req.auth.tenantId;
   if (!(await one(pool, 'SELECT id FROM incidents WHERE tenant_id = ? AND id = ?', [t, id]))) throw notFound('Incident');
-  res.json({ data: (await linkRows(t, id)).map((l) => ({ ...l, snapshot: js(l.snapshot) })) });
+  const tz = await OPS.tzOf(pool, t);
+  res.json({ data: OPS.local((await linkRows(t, id)).map((l) => ({ ...l, snapshot: js(l.snapshot) })), tz) });
 });
 
 /** Link a placed feature to the case, keeping a snapshot of it. Fills the typed park feature field if it is still empty. */

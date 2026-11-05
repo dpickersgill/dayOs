@@ -5,7 +5,7 @@
 // feature after an incident (and telling the park supervisor), and the snapshot of a feature a patrol case keeps.
 const { one, rows } = require('../db');
 const { bad } = require('./errors');
-const { nowIn, todayIn, normDateTime, utcFromLocal } = require('./util');
+const { nowIn, todayIn, normDateTime, utcFromLocal, localTime } = require('./util');
 const { KINDS, SIZES, LEVELS, RESULTS, INSPECTION_KINDS } = require('./park');
 
 const label = (list, key) => (list.find((x) => x[0] === key) || [key, key])[1];
@@ -17,6 +17,16 @@ const inspectionKindLabel = (k) => label(INSPECTION_KINDS, k);
 const STATUS_LABEL = { new: 'Not inspected yet', ready: 'Open', needs_attention: 'Needs attention', closed: 'Closed', retired: 'Retired' };
 const statusLabel = (s) => STATUS_LABEL[s] || s;
 
+// Times the park keeps are database (UTC) times; every screen shows the mountain's wall clock, so they go out as that.
+const TIME_FIELDS = ['inspected_at', 'received_at', 'changed_at', 'corrected_at', 'at', 'linked_at', 'closed_at', 'uploaded_at', 'voided_at', 'roped_at', 'created_at', 'taken_at_utc'];
+/** A copy of a row (or rows) with its UTC times as the mountain's local time. */
+function local(row, tz) {
+  if (Array.isArray(row)) return row.map((r) => local(r, tz));
+  if (!row || typeof row !== 'object') return row;
+  const out = { ...row };
+  for (const k of TIME_FIELDS) if (out[k]) out[k] = localTime(out[k], tz);
+  return out;
+}
 const tzOf = async (db, tenantId) => (await one(db, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone;
 const utcNow = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 const shift = (local, minutes) => new Date(Date.parse(`${local.replace(' ', 'T')}Z`) + minutes * 60000).toISOString().slice(0, 19).replace('T', ' ');
@@ -101,9 +111,9 @@ async function snapshot(db, tenantId, featureId, onDate, beforeUtc) {
     feature_id: Number(f.id), name: f.name, kind: f.kind, kind_label: kindLabel(f.kind), size: f.size, size_label: sizeLabel(f.size), dimensions: f.dimensions || null,
     on_date: onDate, placed: Boolean(p), area: p ? p.area || null : null, area_level: p ? p.area_level || null : null, area_level_label: p && p.area_level ? levelLabel(p.area_level) : null,
     roped_off: Boolean(p && Number(p.roped_off)), status: f.status, status_label: statusLabel(f.status),
-    last_inspection: i ? { id: Number(i.id), result: i.result, result_label: resultLabel(i.result), kind: i.kind || null, kind_label: i.kind ? inspectionKindLabel(i.kind) : null, at: i.inspected_at, by: i.by_name || null } : null,
-    taken_at: utcNow(),
+    last_inspection: i ? { id: Number(i.id), result: i.result, result_label: resultLabel(i.result), kind: i.kind || null, kind_label: i.kind ? inspectionKindLabel(i.kind) : null, at: localTime(i.inspected_at, await tzOf(db, tenantId)), by: i.by_name || null } : null,
+    taken_at: localTime(utcNow(), await tzOf(db, tenantId)),
   };
 }
 
-module.exports = { phoneTime, logChange, setStatus, closeForIncident, tellSupervisors, supervisors, snapshot, statusLabel, sizeLabel, levelLabel, resultLabel, kindLabel, inspectionKindLabel, tzOf, utcNow, STATUS_LABEL };
+module.exports = { local, phoneTime, logChange, setStatus, closeForIncident, tellSupervisors, supervisors, snapshot, statusLabel, sizeLabel, levelLabel, resultLabel, kindLabel, inspectionKindLabel, tzOf, utcNow, STATUS_LABEL };
