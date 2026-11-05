@@ -71,7 +71,7 @@ const SIGNED = {
   'dispatch.js': { router: '/patrol' }, 'documents.js': { router: '/documents' }, 'finance.js': { router: '' }, 'form.js': { router: '/patrol' },
   'guests.js': { router: '/guests' }, 'guestsaccount.js': { router: '/guests' }, 'guestsfair.js': { router: '/guests' }, 'guestsloyalty.js': { router: '/guests' }, 'guestswindow.js': { router: '/guests' },
   'guesttypes.js': { router: '/guest-types' }, 'inbox.js': { router: '/inbox' }, 'kiosk.js': { adminRouter: '/kiosk-admin' }, 'liftchecks.js': { router: '/ops' }, 'lostfound.js': { router: '/lost-found' },
-  'maintenance.js': { router: '/ops' }, 'map.js': { router: '/patrol' }, 'messages.js': { router: '/messages' }, 'mountaincal.js': { router: '/calendar' }, 'ops.js': { router: '/ops' }, 'park.js': { router: '/park' },
+  'maintenance.js': { router: '/ops' }, 'map.js': { router: '/patrol' }, 'messages.js': { router: '/messages' }, 'mountaincal.js': { router: '/calendar' }, 'ops.js': { router: '/ops' }, 'park.js': { router: '/park' }, 'parkrecords.js': { router: '/park' }, 'patrolpark.js': { router: '/patrol' },
   'partnerpasses.js': { router: '/partner-passes' }, 'patrol.js': { router: '/patrol' }, 'patrolclaims.js': { router: '/patrol' }, 'patrolcover.js': { router: '/patrol' }, 'patrolcrews.js': { router: '/patrol' },
   'patrolduty.js': { router: '/patrol' }, 'patrolkits.js': { router: '/patrol' }, 'patrolmedia.js': { router: '/patrol' }, 'patrolmeds.js': { router: '/patrol' }, 'patrolplus.js': { router: '/patrol' },
   'patrolrecords.js': { router: '/patrol' }, 'patrolreview.js': { router: '/patrol' }, 'patrolscene.js': { router: '/patrol' }, 'patrolschedule.js': { router: '/patrol' }, 'patrolsweep.js': { router: '/patrol' },
