@@ -13,6 +13,7 @@ const { pool } = require('../src/db');
 const { derive, bodyMap } = require('../src/lib/carederive');
 
 let server; let base;
+const REC = require('./helpers/records').records(() => base, () => PW); // one patient-record check per sign-in (feat/auth-hardening)
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const PW = 'correct-horse-battery';
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
@@ -35,11 +36,11 @@ test.before(async () => {
   const slug = `pc-${suffix}`;
   const res = await fetch(`${base}/api/v1/tenants`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-bootstrap-key': 'test-bootstrap-key' }, body: JSON.stringify({ slug, name: slug, owner: { email: `owner@${slug}.test`, password: PW, first_name: 'Olive', last_name: 'Owner' } }) });
   assert.equal(res.status, 201);
-  T.owner = (await api('POST', '/auth/login', { body: { tenant: slug, email: `owner@${slug}.test`, password: PW } })).body.token;
+  T.owner = await REC((await api('POST', '/auth/login', { body: { tenant: slug, email: `owner@${slug}.test`, password: PW } })).body.token);
   D.s1 = ok(await api('POST', '/workforce/staff', { token: T.owner, body: { person: { first_name: 'Pat', last_name: 'Rescuer' }, status: 'active' } })).id;
   ok(await api('POST', '/patrol/team', { token: T.owner, body: { staff_id: D.s1, callsign: 'Patrol 4', patrol_number: '417' } }));
   ok(await api('POST', '/users', { token: T.owner, body: { email: `pat@${slug}.test`, password: PW, role: 'patrol', staff_id: D.s1 } }));
-  T.pat = (await api('POST', '/auth/login', { body: { tenant: slug, email: `pat@${slug}.test`, password: PW } })).body.token;
+  T.pat = await REC((await api('POST', '/auth/login', { body: { tenant: slug, email: `pat@${slug}.test`, password: PW } })).body.token);
   await api('POST', '/patrol/meds/formulary', { token: T.owner, body: { name: 'Acetaminophen', authority: 'standing_order', routes: ['oral'], max_dose: 1000, dose_unit: 'mg' } });
 });
 test.after(async () => { await new Promise((r) => server.close(r)); await pool.end(); });

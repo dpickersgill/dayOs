@@ -3698,3 +3698,11 @@ button.fill-day:hover { border-color: var(--line-strong); }
 .rail .who-actions { gap: 4px; }
 .rail .who-actions .rail-out { padding: 0 8px; }
 .rail .who-version { padding: 0 2px; white-space: nowrap; }
+
+/* Patient-record check and quick resume (feat/auth-hardening): one large passkey button first, for gloved hands. */
+.btn.passkey-big, .signin-form .btn.passkey-big { width: 100%; min-height: 60px; font-size: 1.15rem; justify-content: center; }
+.resume-lead { font-size: 1.05rem; }
+.signin-check { display: flex; gap: 8px; align-items: flex-start; }
+.signin-form .resume-slot, .signin-form .signin-passkey { width: min(380px, 100%); }
+.passkey-count { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.passkey-count.short { color: var(--warn-ink, #8a5300); font-weight: 600; }

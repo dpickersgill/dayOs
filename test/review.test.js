@@ -15,6 +15,7 @@ const { pool } = require('../src/db');
 const R = require('../src/lib/review');
 
 let server; let base;
+const REC = require('./helpers/records').records(() => base, () => PW); // one patient-record check per sign-in (feat/auth-hardening)
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const PW = 'correct-horse-battery';
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
@@ -36,7 +37,7 @@ test.before(async () => {
   slug = `rv-${suffix}`;
   const res = await fetch(`${base}/api/v1/tenants`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-bootstrap-key': 'test-bootstrap-key' }, body: JSON.stringify({ slug, name: 'Review Peak', owner: { email: `owner@${slug}.test`, password: PW, first_name: 'Olive', last_name: 'Owner' } }) });
   assert.equal(res.status, 201);
-  const login = async (email) => (await api('POST', '/auth/login', { body: { tenant: slug, email, password: PW } })).body.token;
+  const login = async (email) => await REC((await api('POST', '/auth/login', { body: { tenant: slug, email, password: PW } })).body.token);
   T.owner = await login(`owner@${slug}.test`);
   for (const [key, first] of [['director', 'Dana'], ['backup', 'Ben'], ['pat', 'Pat']]) {
     S[key] = ok(await api('POST', '/workforce/staff', { token: T.owner, body: { person: { first_name: first, last_name: 'Ridge' }, status: 'active' } })).id;

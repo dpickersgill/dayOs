@@ -81,7 +81,7 @@ router.post('/readers', requireRole('manager'), validate(z.object({
 });
 
 router.delete('/readers/:id', requireRole('manager'), async (req, res) => {
-  const r = await readerRow(req.auth.tenantId, Number(req.params.id));
+  const r = await readerRow(req.auth.tenantId, (require('../lib/util').canonId(req.params.id) || 0));
   if (!r) throw notFound('Reader');
   if (stripe.enabled()) await stripe.del(`/v1/terminal/readers/${encodeURIComponent(r.stripe_reader)}`, { account: r.account || null }).catch(() => {}); // gone at Stripe already: fine
   await pool.query('UPDATE terminal_readers SET active = 0 WHERE id = ? AND tenant_id = ?', [r.id, req.auth.tenantId]);
@@ -152,14 +152,14 @@ async function settle(row) {
 const payRow = (tenantId, id) => one(pool, 'SELECT * FROM terminal_payments WHERE tenant_id = ? AND id = ?', [tenantId, id]);
 
 router.get('/payments/:id', requireRole(...sellers), async (req, res) => {
-  const row = await payRow(req.auth.tenantId, Number(req.params.id));
+  const row = await payRow(req.auth.tenantId, (require('../lib/util').canonId(req.params.id) || 0));
   if (!row) throw notFound('Payment');
   res.json(payShape(await settle(row)));
 });
 
 /** Test mode only: makes a simulated reader act as if a card was tapped (Stripe's test card, or a declined one). */
 router.post('/payments/:id/simulate', requireRole(...sellers), validate(z.object({ outcome: z.enum(['approve', 'decline']).default('approve') })), async (req, res) => {
-  const row = await payRow(req.auth.tenantId, Number(req.params.id));
+  const row = await payRow(req.auth.tenantId, (require('../lib/util').canonId(req.params.id) || 0));
   if (!row) throw notFound('Payment');
   const reader = await one(pool, 'SELECT * FROM terminal_readers WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, row.reader_id]);
   if (!testMode() || !reader || !Number(reader.simulated)) throw bad('Only a test reader in Stripe test mode can be simulated.');
@@ -174,7 +174,7 @@ router.post('/payments/:id/simulate', requireRole(...sellers), validate(z.object
  * (the sale failed, or the line was removed): the guest's money goes back to their card.
  */
 router.post('/payments/:id/cancel', requireRole(...sellers), validate(z.object({ keep_if_paid: z.boolean().optional() })), async (req, res) => {
-  let row = await payRow(req.auth.tenantId, Number(req.params.id));
+  let row = await payRow(req.auth.tenantId, (require('../lib/util').canonId(req.params.id) || 0));
   if (!row) throw notFound('Payment');
   row = await settle(row);
   const acct = { account: row.account || null };

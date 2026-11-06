@@ -59,6 +59,8 @@ test.before(async () => {
   bea = await staffOf(B, 'Bea', 'Other');
   devA = await pair(A);
   devB = await pair(B);
+  // These mountains allow 4-digit PINs for new staff (Kiosk, Settings; off by default since feat/auth-hardening).
+  for (const m of [A, B]) await q('UPDATE tenants SET kiosk_pin_four = 1 WHERE slug = ?', [m.slug]);
 });
 test.after(async () => { server.close(); await pool.end(); });
 
@@ -99,7 +101,7 @@ test('PINs: weak ones are refused, a random one is made when none is given, and 
   for (const bad of ['1234', '1111', '0000', '98765', '12', 'abcd', '1234567']) assert.equal((await adm('PUT', `/people/${sam}/pin`, { token: A.owner, body: { pin: bad } })).status, 400, `${bad} is refused`);
   assert.deepEqual((await kio('GET', '/roster', { kiosk: devA.token })).body.people, [], 'nobody is listed before they have a PIN');
   const random = await setPin(A, sam);
-  assert.match(random.pin, /^\d{4}$/);
+  assert.match(random.pin, /^\d{6}$/, 'a random PIN is 6 digits');
   assert.equal(K.pinProblem(random.pin), null);
   const hash = (await q('SELECT pin_hash FROM kiosk_credentials WHERE staff_id = ?', [sam]))[0].pin_hash;
   assert.ok(hash.startsWith('$2'), 'the PIN is stored as a bcrypt hash');

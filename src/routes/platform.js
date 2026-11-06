@@ -35,6 +35,7 @@ const SESSION_HOURS = 2;
 let lastStep = -1; // a code works once on this server
 // ...and once across every server: each code's time step is claimed in the shared store (lib/ratestore.js), 2026.11.10.
 const stepClaims = require('../lib/ratestore').storeFor('platform-totp-step');
+const keyCodeTries = require('../middleware/rateLimit').counter({ name: 'platform-key-code', windowMs: 15 * 60_000, max: 5 });
 stepClaims.init({ windowMs: 5 * 60_000 });
 const keyOk = (supplied) => Boolean(config.bootstrapKey) && crypto.timingSafeEqual(digest(supplied || ''), digest(config.bootstrapKey));
 // Sessions are signed with a key of their own (derived from JWT_SECRET), never with the platform key, so holding the
@@ -116,8 +117,12 @@ router.post('/session', validate(z.object({ key: z.string().min(1).max(500), nam
   if (!(await keyAllowed())) throw forbidden(KEY_OFF);
   if (!keyOk(req.body.key)) throw forbidden('That platform key is not right');
   const secret = process.env.PLATFORM_TOTP_SECRET;
+  // The key's code is counted for the key itself, across every address and server (feat/auth-hardening: before, only per
+  // address): 5 tries in 15 minutes, each counted before it is checked; a right code gives its try back.
+  if (secret && (await keyCodeTries.hit('platform-key')).over) { require('../lib/audit').trail({ console: true, action: 'sign_in_failed', detail: JSON.stringify({ reason: 'key_code_locked' }), ip: req.ip || null, security: true }); throw new AppError(429, 'Too many wrong codes for the platform key. Wait 15 minutes.'); }
   const step = secret ? totp.verify(secret, req.body.code) : null;
-  if (secret && step === null) throw forbidden('That code is not right');
+  if (secret && step === null) { require('../lib/audit').trail({ console: true, action: 'sign_in_failed', detail: JSON.stringify({ reason: 'key_wrong_code' }), ip: req.ip || null, security: true }); throw forbidden('That code is not right'); }
+  if (secret) await keyCodeTries.store.decrement('platform-key');
   if (secret && (step <= lastStep || (await stepClaims.increment(String(step))).totalHits > 1)) throw forbidden('That code was just used. Wait for the next one.');
   if (secret) lastStep = step;
   await pool.query('INSERT INTO platform_audit (tenant_id, action, actor, detail) VALUES (NULL, ?, ?, NULL)', ['sign_in', `key: ${req.body.name}`]);
@@ -153,15 +158,18 @@ async function opSignedIn(op, step) {
   return { session: makeSession(op.name, op.id, { epoch: Number(op.session_epoch) }), hours: SESSION_HOURS, two_step: true, name: op.name, operator: true };
 }
 
+// A failed console sign-in goes to the outside audit copy too (feat/auth-hardening), with the operator's id when the email
+// is one, never what was typed. RUNBOOK.md, Security alerts: "Failed console sign-ins".
+const consoleFailed = (req, op, reason) => require('../lib/audit').trail({ console: true, action: 'sign_in_failed', operator: op ? op.id : null, detail: JSON.stringify({ reason }), ip: req.ip || null, security: true });
 router.post('/login', validate(z.object({ email: z.string().trim().toLowerCase().max(255), password: z.string().max(200), code: z.string().max(10).optional() })), async (req, res) => {
   const op = await one(pool, 'SELECT * FROM platform_operators WHERE email = ? AND active = 1', [req.body.email]);
   // With the app set up (or an unknown email), the code is asked for before anything is checked, so this answer says
   // nothing about the password (or whether the email is an operator's). Nothing is counted: nothing was checked.
   if (!req.body.code && (!op || op.totp_enabled)) { await bcrypt.compare(req.body.password, DUMMY_HASH); return res.json({ code_required: true }); }
   const NO = req.body.code ? NO_MATCH_CODE : NO_MATCH; // once a code is sent, every failure gets the same answer
-  if (op && !(await opClaim(op.id))) { await bcrypt.compare(req.body.password, DUMMY_HASH); throw forbidden(NO); } // locked: the same answer as a wrong try
+  if (op && !(await opClaim(op.id))) { await bcrypt.compare(req.body.password, DUMMY_HASH); consoleFailed(req, op, 'locked'); throw forbidden(NO); } // locked: the same answer as a wrong try
   const okPw = await bcrypt.compare(req.body.password, op ? op.password_hash : DUMMY_HASH);
-  if (!op || !okPw) throw forbidden(NO);
+  if (!op || !okPw) { consoleFailed(req, op, op ? 'wrong_password' : 'unknown_operator'); throw forbidden(NO); }
   if (!op.totp_enabled) {
     // An operator with a passkey signs in with it only: a password and code can be phished, a passkey cannot.
     if (await passkeys.count('operator', op.id)) throw forbidden('Sign in with your passkey (the "Sign in with a passkey" button).');
@@ -173,7 +181,7 @@ router.post('/login', validate(z.object({ email: z.string().trim().toLowerCase()
     return res.json({ setup_required: true, setup_token: makeSession(op.name, op.id, { typ: 'setup', minutes: 10, epoch: Number(op.session_epoch), secretPrint: printOf(secret) }), secret, otpauth_uri: totp.otpauthUri(secret, op.email, 'Verdynt/OS platform') });
   }
   const step = totp.verify(totp.open(op.totp_secret), req.body.code);
-  if (step === null || (op.totp_last_step !== null && step <= Number(op.totp_last_step))) throw forbidden(NO_MATCH_CODE);
+  if (step === null || (op.totp_last_step !== null && step <= Number(op.totp_last_step))) { consoleFailed(req, op, 'wrong_code'); throw forbidden(NO_MATCH_CODE); }
   if (await passkeys.count('operator', op.id)) throw forbidden('Sign in with your passkey (the "Sign in with a passkey" button).');
   res.json(await opSignedIn(op, step));
 });
@@ -405,7 +413,11 @@ router.get('/tenants/:id', twoStepRead, async (req, res) => {
   t.legal_holds = Number((await one(pool, 'SELECT COUNT(*) AS n FROM incidents WHERE tenant_id = ? AND legal_hold = 1', [id])).n);
   M.invalidate(id);
   const used = await usage([id]);
-  const users = await rows(pool, "SELECT id, email, username, role, active, totp_enabled FROM users WHERE tenant_id = ? AND role IN ('owner','manager') ORDER BY role, email", [id]);
+  // The logins the console may reset: owners, managers, and patrol directors and admins (a roster row at Admin or Manager),
+  // who nobody at the mountain but the owner or a patrol Admin may reset (feat/auth-hardening).
+  const users = await rows(pool, `SELECT u.id, u.email, u.username, u.role, u.active, u.totp_enabled, m.access_level AS patrol_level FROM users u
+    LEFT JOIN patrol_members m ON m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id
+    WHERE u.tenant_id = ? AND (u.role IN ('owner','manager') OR m.access_level IN ('admin','manager','approver')) ORDER BY u.role, u.email`, [id]);
   const history = await rows(pool, 'SELECT at, action, actor, detail FROM platform_audit WHERE tenant_id = ? ORDER BY id DESC LIMIT 30', [id]);
   const bill = await one(pool, 'SELECT * FROM tenant_billing WHERE tenant_id = ?', [id]);
   const billEvents = await rows(pool, 'SELECT at, kind, detail, by_operator FROM billing_events WHERE tenant_id = ? ORDER BY id DESC LIMIT 30', [id]);
@@ -645,10 +657,17 @@ router.put('/tenants/:id/modules', needsAccess, validate(z.object({ modules: z.r
   res.json(result);
 });
 
-/** Set a new password for one of a mountain's owner or manager logins. Signs that person out everywhere. */
-router.post('/tenants/:id/reset-password', twoStepAccess, needsAccess, validate(z.object({ user_id: z.number().int().positive(), password, clear_two_step: z.boolean().default(false), temporary: z.boolean().default(false) })), async (req, res) => {
+/**
+ * Set a new password for one of a mountain's owner, manager, patrol director or patrol admin logins (a staff record on the
+ * roster at Admin or Manager): the way back in when nobody at the mountain may reset them (lib/resetrules.js). Signs that
+ * person out everywhere and emails them. A reason is required ("Confirmed by phone call with ...") and kept in the
+ * console's history (feat/auth-hardening).
+ */
+router.post('/tenants/:id/reset-password', twoStepAccess, needsAccess, validate(z.object({ user_id: z.number().int().positive(), password, clear_two_step: z.boolean().default(false), temporary: z.boolean().default(false),
+  reason: z.string().trim().min(10, 'Say how you confirmed it is them, for example "Confirmed by phone call with the owner"').max(300) })), async (req, res) => {
   const id = paramId(req);
-  const u = await one(pool, "SELECT u.id, u.username, u.email, t.slug, t.name FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE u.id = ? AND u.tenant_id = ? AND u.role IN ('owner','manager')", [req.body.user_id, id]);
+  const u = await one(pool, `SELECT u.id, u.username, u.email, u.role, t.slug, t.name FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE u.id = ? AND u.tenant_id = ?
+    AND (u.role IN ('owner','manager') OR EXISTS (SELECT 1 FROM patrol_members m WHERE m.tenant_id = u.tenant_id AND m.staff_id = u.staff_id AND m.access_level IN ('admin','manager','approver')))`, [req.body.user_id, id]);
   if (!u) throw notFound('Login');
   await PWR.refuseWeak(req.body.password, { username: u.username, email: u.email, tenantSlug: u.slug, tenantName: u.name });
   const hash = await bcrypt.hash(req.body.password, 12);
@@ -662,8 +681,9 @@ router.post('/tenants/:id/reset-password', twoStepAccess, needsAccess, validate(
       await conn.query('DELETE FROM user_recovery_codes WHERE user_id = ?', [u.id]);
       await conn.query('DELETE FROM user_passkeys WHERE user_id = ?', [u.id]);
     }
-    await log(conn, req, id, 'password_reset', { user_id: u.id, cleared_two_step: req.body.clear_two_step, temporary: req.body.temporary });
+    await log(conn, req, id, 'password_reset', { user_id: u.id, role: u.role, cleared_two_step: req.body.clear_two_step, temporary: req.body.temporary, reason: req.body.reason });
   });
+  require('../lib/securitymail').notify(req, u.id, 'console_reset', { byOther: true });
   res.json({ ok: true });
 });
 

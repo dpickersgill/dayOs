@@ -70,16 +70,35 @@ const memberFields = {
   cert_level: z.enum(['none', 'oec', 'emr', 'emt', 'aemt', 'paramedic', 'rn', 'md']).optional(),
 };
 
-/** Anyone who can manage the roster may make someone Patrol or Host; the higher levels are set by an Admin. */
-async function checkGrant(req, level) {
+const RR = require('../lib/resetrules');
+/**
+ * Anyone who can manage the roster may make someone Patrol or Host; Approver needs a patrol Admin (an owner or manager
+ * counts); Admin and Manager need the owner or a roster Admin (a real roster row at Admin, never a manager's implied
+ * Admin), and nobody raises their own level (feat/auth-hardening: a manager could make themselves a roster Admin and then
+ * reset the patrol director). staffId: whose level; from: their level now (null when not on the roster).
+ */
+async function checkGrant(req, level, staffId = null, from = null) {
   if (!level) return;
   const mine = await PA.levelOf(pool, req);
   if (mine !== 'admin' && !['patrol', 'host'].includes(level)) throw forbidden('Only a patrol Admin can give the Admin, Manager or Approver level');
+  await RR.mayChangeLevel(pool, req, staffId, from, level);
+  if (req.auth.role !== 'owner' && staffId && req.auth.staffId && Number(staffId) === Number(req.auth.staffId) && RR.rank(level) > RR.rank(from) && RR.rank(level) > RR.rank('patrol')) throw forbidden('You cannot raise your own patrol level. Ask the owner or another patrol Admin.');
 }
 
-/** Only an Admin changes or removes another Admin, so a roster manager cannot lock the Admins out. */
-async function checkTarget(req, currentLevel) {
+/** Only the owner or a roster Admin changes or removes an Admin or Manager, so nobody can demote a director and reset them. */
+async function checkTarget(req, currentLevel, staffId = null) {
   if (currentLevel === 'admin' && (await PA.levelOf(pool, req)) !== 'admin') throw forbidden('Only a patrol Admin can change or remove an Admin');
+  if (RR.LEADER_LEVELS.includes(currentLevel) && !(await RR.rosterAdmin(pool, req))) throw forbidden('Only the owner or a patrol Admin on the roster can change or remove an Admin, Manager or Approver');
+  if (staffId && req.auth.staffId && Number(staffId) === Number(req.auth.staffId) && currentLevel === 'admin' && req.auth.role !== 'owner') throw forbidden('Ask the owner or another patrol Admin to change your own Admin level');
+}
+
+/**
+ * Someone put on the roster whose login is not a patrol login (counter, lift, ski school, staff): unless the owner or a
+ * roster Admin does it, they join as Host, which sees no case or patient details (M1). Raising them later needs the same.
+ */
+async function nonPatrolLogin(conn, tenantId, staffId) {
+  if (!staffId) return false;
+  return Boolean(await one(conn, "SELECT id FROM users WHERE tenant_id = ? AND staff_id = ? AND role NOT IN ('patrol')", [tenantId, staffId]));
 }
 
 /**
@@ -91,8 +110,13 @@ router.post('/team', patrol, needs('manage_team'), validate(z.object({ staff_id:
   const t = req.auth.tenantId;
   const b = req.body;
   if (!b.staff_id && !b.person) throw bad('Choose someone on the staff list, or enter a new person');
-  const access = b.access_level || PA.levelForRank(b.level);
-  await checkGrant(req, access);
+  let access = b.access_level || PA.levelForRank(b.level);
+  const admin = await RR.rosterAdmin(pool, req);
+  if (b.staff_id && !admin && (await nonPatrolLogin(pool, t, b.staff_id))) {
+    if (b.access_level && b.access_level !== 'host') throw forbidden('This person signs in for other work. Only the owner or a patrol Admin can give them more than Host on the patrol roster.');
+    access = 'host';
+  }
+  await checkGrant(req, access, b.staff_id || null, null);
   const staffId = await tx(async (conn) => {
     let id = b.staff_id;
     if (id) {
@@ -106,6 +130,7 @@ router.post('/team', patrol, needs('manage_team'), validate(z.object({ staff_id:
       await conn.query('INSERT INTO patrol_members (tenant_id, staff_id, level, access_level, callsign, patrol_number, emergency_contact, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [t, id, b.level, access, b.callsign ?? null, b.patrol_number ?? null, b.emergency_contact ?? null, b.notes ?? null]);
     } catch (err) { if (err.code === 'ER_DUP_ENTRY') throw conflict('Already on the roster'); throw err; }
     await audit(conn, req, 'add_member', 'patrol_members', id, { level: b.level, access_level: access, new_person: !b.staff_id });
+    await RR.levelChanged(conn, req, id, null, access);
     return id;
   });
   res.status(201).json({ staff_id: staffId, access_level: access });
@@ -170,22 +195,24 @@ router.patch('/team/:staffId', patrol, needs('manage_team'), validate(partialOf(
   }
   const cur = await one(pool, 'SELECT level, access_level FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [req.auth.tenantId, staffId]);
   if (!cur) throw notFound('Patrol member');
-  if (body.access_level) { if (body.access_level !== cur.access_level) { await checkGrant(req, body.access_level); await checkTarget(req, cur.access_level); } else delete body.access_level; }
+  const raiseHost = async (to) => { if (cur.access_level === 'host' && RR.rank(to) > RR.rank('host') && !(await RR.rosterAdmin(pool, req)) && (await nonPatrolLogin(pool, req.auth.tenantId, staffId))) throw forbidden('This person signs in for other work. Only the owner or a patrol Admin can give them more than Host.'); };
+  if (body.access_level) { if (body.access_level !== cur.access_level) { await raiseHost(body.access_level); await checkGrant(req, body.access_level, staffId, cur.access_level); await checkTarget(req, cur.access_level, staffId); } else delete body.access_level; }
   // A new rank moves the access level with it, but only when the level was still the one the old rank gave.
   else if (body.level && body.level !== cur.level && cur.access_level === PA.levelForRank(cur.level)) {
     const next = PA.levelForRank(body.level);
-    if (next !== cur.access_level) { await checkGrant(req, next); await checkTarget(req, cur.access_level); body.access_level = next; }
+    if (next !== cur.access_level) { await raiseHost(next); await checkGrant(req, next, staffId, cur.access_level); await checkTarget(req, cur.access_level, staffId); body.access_level = next; }
   }
   const set = setClause(body, Object.keys(memberFields));
   if (!set) throw bad('No updatable fields supplied');
   await pool.query(`UPDATE patrol_members SET ${set.sql} WHERE tenant_id = ? AND staff_id = ?`, [...set.values, req.auth.tenantId, staffId]);
   await audit(pool, req, 'update_member', 'patrol_members', staffId, body);
+  if (body.access_level) await RR.levelChanged(pool, req, staffId, cur.access_level, body.access_level);
   res.json({ ok: true });
 });
 
 router.delete('/team/:staffId', patrol, needs('manage_team'), async (req, res) => {
   const cur = await one(pool, 'SELECT access_level FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [req.auth.tenantId, paramId(req, 'staffId')]);
-  if (cur) await checkTarget(req, cur.access_level);
+  if (cur) await checkTarget(req, cur.access_level, paramId(req, 'staffId'));
   const t = req.auth.tenantId; const staffId = paramId(req, 'staffId');
   await tx(async (conn) => {
     const [r] = await conn.query('DELETE FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [t, staffId]);
@@ -204,6 +231,7 @@ router.delete('/team/:staffId', patrol, needs('manage_team'), async (req, res) =
     // Offers they made to cover someone else's shift are withdrawn, and those shifts are open for others again.
     await conn.query("UPDATE patrol_cover_requests SET status = 'open', taken_by = NULL, taken_at = NULL WHERE tenant_id = ? AND taken_by = ? AND status = 'pending'", [t, staffId]);
     await audit(conn, req, 'remove_member', 'patrol_members', staffId, { unassigned: ahead.length });
+    await RR.levelChanged(conn, req, staffId, cur ? cur.access_level : 'patrol', null);
   });
   res.status(204).end();
 });
@@ -627,6 +655,11 @@ router.get('/me', patrol, async (req, res) => {
 const adminOnly = async (req, _res, next) => {
   try { if ((await PA.levelOf(pool, req)) !== 'admin') throw forbidden('Only a patrol Admin can change access'); next(); } catch (err) { next(err); }
 };
+// Changing access (per-person permissions, level rules, someone's level) needs the owner or a roster Admin: a manager may
+// look at these screens but not change them (feat/auth-hardening).
+const rosterAdminOnly = async (req, _res, next) => {
+  try { if (!(await RR.rosterAdmin(pool, req))) throw forbidden('Only the owner or a patrol Admin on the roster can change patrol access'); next(); } catch (err) { next(err); }
+};
 
 /** Everything the Access screen shows: the levels, the features, what each level can do, and who has which level. */
 router.get('/access', patrol, adminOnly, async (req, res) => {
@@ -660,7 +693,7 @@ router.get('/team/:staffId/permissions', patrol, adminOnly, async (req, res) => 
   });
 });
 
-router.put('/team/:staffId/permissions', patrol, adminOnly, validate(z.object({
+router.put('/team/:staffId/permissions', patrol, rosterAdminOnly, validate(z.object({
   exceptions: z.array(z.object({ feature: z.string().max(40), allowed: z.boolean().nullable() })).max(50),
 })), async (req, res) => {
   const t = req.auth.tenantId; const staffId = paramId(req, 'staffId');
@@ -679,7 +712,7 @@ router.put('/team/:staffId/permissions', patrol, adminOnly, validate(z.object({
 });
 
 /** Switch features on or off for a level. The Admin level always has everything. */
-router.put('/access/rules', patrol, adminOnly, validate(z.object({
+router.put('/access/rules', patrol, rosterAdminOnly, validate(z.object({
   rules: z.array(z.object({ level: z.enum(['manager', 'approver', 'patrol', 'host']), feature: z.string().max(40), allowed: z.boolean() })).min(1).max(200),
 })), async (req, res) => {
   const { tenantId } = req.auth;
@@ -699,18 +732,23 @@ router.put('/access/rules', patrol, adminOnly, validate(z.object({
 });
 
 /** Put every level back to the built-in defaults. */
-router.delete('/access/rules', patrol, adminOnly, async (req, res) => {
+router.delete('/access/rules', patrol, rosterAdminOnly, async (req, res) => {
   await pool.query('DELETE FROM patrol_access_rules WHERE tenant_id = ?', [req.auth.tenantId]);
   await audit(pool, req, 'patrol_access_reset', 'patrol_access_rules', null, {});
   res.json({ matrix: await PA.matrix(pool, req.auth.tenantId) });
 });
 
 /** Change one person's access level. */
-router.put('/team/:staffId/access', patrol, adminOnly, validate(z.object({ access_level: z.enum(PA.LEVELS) })), async (req, res) => {
+router.put('/team/:staffId/access', patrol, rosterAdminOnly, validate(z.object({ access_level: z.enum(PA.LEVELS) })), async (req, res) => {
   const staffId = paramId(req, 'staffId');
+  const cur = await one(pool, 'SELECT access_level FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [req.auth.tenantId, staffId]);
+  if (!cur) throw notFound('Patrol member');
+  await checkGrant(req, req.body.access_level, staffId, cur.access_level);
+  await checkTarget(req, cur.access_level, staffId);
   const [r] = await pool.query('UPDATE patrol_members SET access_level = ? WHERE tenant_id = ? AND staff_id = ?', [req.body.access_level, req.auth.tenantId, staffId]);
   if (!r.affectedRows) throw notFound('Patrol member');
   await audit(pool, req, 'patrol_access_level', 'patrol_members', staffId, { access_level: req.body.access_level });
+  await RR.levelChanged(pool, req, staffId, cur.access_level, req.body.access_level);
   res.json({ ok: true });
 });
 

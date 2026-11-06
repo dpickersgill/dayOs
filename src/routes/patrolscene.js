@@ -32,6 +32,11 @@ const mailer = require('../lib/mailer');
 const cases = require('./patrol');
 
 const router = express.Router();
+// Every /incidents/:id address on this router needs the patient-record rule first (lib/patientaccess.js): the case is the
+// person's own recent work, or they made the fresh check in the last 30 minutes. Read from the id Express matched.
+router.use('/incidents/:id', require('../lib/patientaccess').byParam);
+// A witness link is case evidence keyed by its own id: its case gets the same rule (link ids are sequential).
+router.use('/witness-links/:lid', require('../lib/patientaccess').byChild('lid', 'SELECT incident_id FROM patrol_witness_links WHERE tenant_id = ? AND id = ?'));
 const publicRouter = express.Router();
 const patrol = requireRole('patrol', 'manager');
 const needs = (feature, message) => PA.needs(pool, feature, message);
@@ -65,6 +70,7 @@ router.get('/incidents/:id/scene', patrol, needs('view_cases'), async (req, res)
   const id = paramId(req);
   await incidentOf(pool, req.auth.tenantId, id);
   const s = await one(pool, `SELECT s.data, s.svg, s.updated_at, COALESCE(u.email, u.username) AS updated_by FROM patrol_scenes s LEFT JOIN users u ON u.id = s.updated_by AND u.tenant_id = s.tenant_id WHERE s.tenant_id = ? AND s.incident_id = ?`, [req.auth.tenantId, id]);
+  await audit(pool, req, 'view_scene', 'incidents', id); // opened on its own: on the access log and the weekly summary
   if (!s) { res.json({ data: null, svg: null }); return; }
   let data = null; try { data = JSON.parse(s.data); } catch (_) { data = null; }
   res.json({ data, svg: s.svg, updated_at: s.updated_at, updated_by: s.updated_by });

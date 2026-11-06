@@ -285,10 +285,12 @@ function resetPassword(id, u) {
   const pw = input({ name: 'pw', type: 'password', autocomplete: 'new-password', required: true });
   const clearTwo = h('input', { type: 'checkbox' });
   const temp = h('input', { type: 'checkbox', checked: true });
+  const reason = input({ name: 'reason', required: true, maxlength: 300, placeholder: 'Confirmed by phone call with ...' });
   formDialog(`Reset password for ${u.username || u.email}`, h('div', { class: 'stack' }, field('New password', pw, 'At least 12 characters. Tell them in person or by phone.'),
+    field('How you confirmed it is them', reason, 'Required. Kept in this mountain\'s history.'),
     h('label', { class: 'check' }, temp, 'Temporary: they choose their own password when they next sign in'),
     u.totp_enabled ? h('label', { class: 'check' }, clearTwo, 'Also turn off their two-step sign-in (use when they lost their phone)') : null), async () => {
-    await call('POST', `/tenants/${id}/reset-password`, { user_id: u.id, password: pw.value, clear_two_step: Boolean(u.totp_enabled && clearTwo.checked), temporary: temp.checked });
+    await call('POST', `/tenants/${id}/reset-password`, { user_id: u.id, password: pw.value, clear_two_step: Boolean(u.totp_enabled && clearTwo.checked), temporary: temp.checked, reason: reason.value.trim() });
     toast('Password reset. They are signed out everywhere.');
   }, { submitText: 'Reset password' });
 }

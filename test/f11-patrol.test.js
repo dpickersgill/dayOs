@@ -11,6 +11,7 @@ const { createApp } = require('../src/app');
 const { pool } = require('../src/db');
 
 let server;
+const REC = require('./helpers/records').records(() => base, () => PW); // one patient-record check per sign-in (feat/auth-hardening)
 let base;
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const PW = 'correct-horse-battery';
@@ -32,13 +33,13 @@ async function mountain(tag) {
   // five new mountains a minute from one address: wait out the limit rather than fail
   for (let i = 0; res.status === 429 && i < 14; i++) { await new Promise((r) => setTimeout(r, 5000)); res = await make(); }
   assert.equal(res.status, 201);
-  const owner = (await api('POST', '/auth/login', { body: { tenant: slug, email: `owner@${slug}.test`, password: PW } })).body.token;
+  const owner = await REC((await api('POST', '/auth/login', { body: { tenant: slug, email: `owner@${slug}.test`, password: PW } })).body.token);
   const tenantId = (await q('SELECT id FROM tenants WHERE slug = ?', [slug]))[0].id;
   return { slug, owner, tenantId };
 }
 async function addUser(m, email, role, extra = {}) {
   ok(await api('POST', '/users', { token: m.owner, body: { email, password: PW, role, ...extra } }), 201);
-  return (await api('POST', '/auth/login', { body: { tenant: m.slug, email, password: PW } })).body.token;
+  return await REC((await api('POST', '/auth/login', { body: { tenant: m.slug, email, password: PW } })).body.token);
 }
 const staff = async (m, first) => ok(await api('POST', '/workforce/staff', { token: m.owner, body: { person: { first_name: first, last_name: 'Patroller' }, status: 'active' } }), 201).id;
 const tzNow = (addMin = 0) => {
@@ -535,7 +536,7 @@ test('DP-8: a search by patient name, the report check and the record score are 
 
 test('DP-10: audit rows say which sign-in and which address they came from (hashed)', async () => {
   const m = await patrolMountain();
-  const second = (await api('POST', '/auth/login', { body: { tenant: m.slug, email: `owner@${m.slug}.test`, password: PW } })).body.token;
+  const second = await REC((await api('POST', '/auth/login', { body: { tenant: m.slug, email: `owner@${m.slug}.test`, password: PW } })).body.token);
   const c = await newCase(m.owner);
   const a0 = (await q('SELECT COALESCE(MAX(id), 0) AS m FROM audit_log'))[0].m;
   ok(await api('GET', `/patrol/incidents/${c.id}`, { token: m.owner }));
@@ -589,7 +590,7 @@ test('suspicion: on legal hold, lost-person details do not change and a witness 
 test('suspicion: the ski area login reads an approved report without the patrol\'s sign-in emails', async () => {
   const m = await patrolMountain();
   ok(await api('POST', '/users', { token: m.owner, body: { username: `area${suffix}`, email: `gm@${m.slug}.test`, password: PW, role: 'area' } }), 201);
-  const area = (await api('POST', '/auth/login', { body: { tenant: m.slug, email: `gm@${m.slug}.test`, password: PW } })).body.token;
+  const area = await REC((await api('POST', '/auth/login', { body: { tenant: m.slug, email: `gm@${m.slug}.test`, password: PW } })).body.token);
   const c = await readyCase(m.pat);
   ok(await api('POST', `/patrol/incidents/${c.id}/notes`, { token: m.owner, body: { body: 'Called the parent.' } }), 201);
   ok(await api('POST', `/patrol/incidents/${c.id}/submit`, { token: m.pat }));

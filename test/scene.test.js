@@ -11,6 +11,7 @@ const { createApp } = require('../src/app');
 const { pool } = require('../src/db');
 
 let server;
+const REC = require('./helpers/records').records(() => base, () => PW); // one patient-record check per sign-in (feat/auth-hardening)
 let base;
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const PW = 'correct-horse-battery';
@@ -33,11 +34,11 @@ async function mountain(slug) {
   const res = await fetch(`${base}/api/v1/tenants`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-bootstrap-key': 'test-bootstrap-key' }, body: JSON.stringify({ slug, name: `Mount ${slug}`, owner: { email: `owner@${slug}.test`, password: PW, first_name: 'Olive', last_name: 'Owner' } }) });
   assert.equal(res.status, 201);
   const l = await api('POST', '/auth/login', { body: { tenant: slug, email: `owner@${slug}.test`, password: PW } });
-  return { slug, owner: l.body.token };
+  return { slug, owner: await REC(l.body.token) };
 }
 async function addUser(m, email, role, extra = {}) {
   is(await api('POST', '/users', { token: m.owner, body: { email, password: PW, role, ...extra } }), 201);
-  return (await api('POST', '/auth/login', { body: { tenant: m.slug, email, password: PW } })).body.token;
+  return await REC((await api('POST', '/auth/login', { body: { tenant: m.slug, email, password: PW } })).body.token);
 }
 
 let A; let B;

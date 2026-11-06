@@ -61,7 +61,7 @@ export async function drawKiosk(box) {
   // ------------------------------------------------------------ people
   function pinDialog(p) {
     const pin = input({ name: 'pin', inputmode: 'numeric', autocomplete: 'off', maxlength: 6, pattern: '[0-9]*', placeholder: 'Leave blank for a random PIN' });
-    formDialog(`PIN for ${p.name}`, field('PIN (4 to 6 digits)', pin, 'Not 1234, 1111 and similar. It cannot be read back later, only replaced.'), async (fd) => {
+    formDialog(`PIN for ${p.name}`, field(data.settings.pin_four ? 'PIN (4 to 6 digits)' : 'PIN (6 digits)', pin, 'Not 123456, 111111 and similar. It cannot be read back later, only replaced.'), async (fd) => {
       const res = await put(`/kiosk-admin/people/${p.staff_id}/pin`, { pin: val(fd, 'pin') || undefined });
       await reload();
       dialog(`PIN for ${p.name}`, h('div', { class: 'stack' }, h('p', null, 'Give them this PIN now. It is not shown again.'), h('div', { class: 'pair-code', 'data-new-pin': '' }, res.pin)));
@@ -102,11 +102,15 @@ export async function drawKiosk(box) {
   function settingsPanel() {
     const on = h('input', { type: 'checkbox', name: 'photos', checked: data.settings.photos });
     const days = input({ type: 'number', name: 'days', min: 1, max: 365, value: data.settings.photo_days });
+    const four = h('input', { type: 'checkbox', name: 'pin_four', checked: Boolean(data.settings.pin_four) });
     const save = button('Save', async () => {
-      await put('/kiosk-admin/settings', { photos: on.checked, photo_days: Number(days.value) });
+      await put('/kiosk-admin/settings', { photos: on.checked, photo_days: Number(days.value), pin_four: four.checked });
       toast('Saved'); await reload();
     }, { kind: 'primary' });
-    return h('section', { class: 'panel stack', 'data-kiosk': 'settings' }, h('h3', null, 'Snapshots'),
+    return h('section', { class: 'panel stack', 'data-kiosk': 'settings' }, h('h3', null, 'PINs'),
+      h('label', { class: 'check' }, four, ' Allow 4-digit PINs for new staff'),
+      h('p', { class: 'muted small' }, 'Off: every new PIN is 6 digits, which is far harder to guess next to a list of names. PINs already set keep working until they are changed.'),
+      h('h3', null, 'Snapshots'),
       h('label', { class: 'check' }, on, ' Take a snapshot with each clock-in and clock-out'),
       field('Delete snapshots after (days)', days, 'The tablet shows a notice to everyone. Snapshots are only for checking timesheets, are never matched to faces, and can only be seen by managers (each view is logged).'),
       h('p', { class: 'muted small' }, 'Tell your staff in writing that snapshots are taken and how long they are kept. Check your state rules if you are unsure.'), save);

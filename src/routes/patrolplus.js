@@ -14,6 +14,9 @@ const mailer = require('../lib/mailer');
 const patrolRouter = require('./patrol');
 
 const router = express.Router();
+// Every /incidents/:id address on this router needs the patient-record rule first (lib/patientaccess.js): the case is the
+// person's own recent work, or they made the fresh check in the last 30 minutes. Read from the id Express matched.
+router.use('/incidents/:id', require('../lib/patientaccess').byParam);
 const patrol = requireRole('patrol', 'manager');
 const PA = require('../lib/patrolaccess');
 const { baseUrl } = require('../lib/baseurl');
@@ -119,7 +122,11 @@ router.post('/incidents/:id/collision-printed', patrol, needs('create_case'), as
 
 /** The lists patrollers can use. With ?case=<id>, lists already ticked on that case come too, even if switched off. */
 router.get('/checklists', patrol, needs('view_cases'), async (req, res) => {
-  const caseId = /^\d{1,15}$/.test(String(req.query.case || '')) ? Number(req.query.case) : null;
+  const asked = /^\d{1,15}$/.test(String(req.query.case || '')) ? Number(req.query.case) : null;
+  // Another mountain's or a missing case id gives the plain lists, as before; this mountain's case follows its rule
+  // (which items were ticked on a case is part of it).
+  const caseId = asked && (await one(pool, 'SELECT id FROM incidents WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, asked])) ? asked : null;
+  if (caseId) await require('../lib/patientaccess').guard(pool, req, caseId);
   res.json({ data: await CL.listsFor(pool, req.auth.tenantId, { incidentId: caseId }) });
 });
 
@@ -331,7 +338,10 @@ router.get('/home', patrol, async (req, res) => {
   const t = await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId]);
   const today = todayIn(t.timezone);
   const [stale] = !canView ? [{ n: 0 }] : await rows(pool, "SELECT COUNT(*) AS n FROM incidents WHERE tenant_id = ? AND report_state = 'draft' AND occurred_at < ? AND category IN ('injury','medical','collision')", [tenantId, `${addDays(today, -1)} 00:00:00`]);
-  res.json({ mine: mine.map(num), recent: recent.map(num), waiting: waiting.map(num), followups_held: held.n, stale_drafts: stale.n, can_approve: canApprove, can_view_cases: canView });
+  // Summaries only for cases the person may open without the fresh check, or after it (lib/patientaccess.js).
+  const may = await require('../lib/patientaccess').openable(pool, req, [...mine, ...recent, ...waiting].map((r) => r.id));
+  const show = (r) => require('../lib/patientaccess').trimRow(num(r), may);
+  res.json({ mine: mine.map(show), recent: recent.map(show), waiting: waiting.map(show), followups_held: held.n, stale_drafts: stale.n, can_approve: canApprove, can_view_cases: canView });
 });
 
 // ---------------------------------------------------------------- follow-up desk (directors and managers)
@@ -366,7 +376,14 @@ router.get('/followups', patrol, needs('followups'), async (req, res) => {
     FROM followups f JOIN incidents i ON i.tenant_id = f.tenant_id AND i.id = f.incident_id JOIN incident_patients p ON p.tenant_id = f.tenant_id AND p.id = f.patient_id
     WHERE f.tenant_id = ? ${status ? 'AND f.status = ?' : ''} ORDER BY FIELD(f.status, 'held', 'failed', 'queued', 'sent', 'skipped', 'unsubscribed'), f.due_on DESC, f.id DESC LIMIT 300`, status ? [req.auth.tenantId, status] : [req.auth.tenantId]);
   await audit(pool, req, 'view_followups', 'audit_log', null, { rows: data.length });
-  res.json({ data: data.map((r) => ({ ...r, case_number: r.seq ? `${r.season}-${String(r.seq).padStart(4, '0')}` : null })) });
+  // The patient's first name, email and comment only for cases this person may open without the records check, or after
+  // it (lib/patientaccess.js). Otherwise the case number, due date and state.
+  const PX = require('../lib/patientaccess');
+  const may = await PX.openable(pool, req, data.map((r) => r.incident_id));
+  res.json({ data: data.map((r0) => {
+    const r = may.has(r0.incident_id) ? r0 : { ...r0, first_name: null, to_email: null, comment: null, details_hidden: true };
+    return { ...r, case_number: r.seq ? `${r.season}-${String(r.seq).padStart(4, '0')}` : null };
+  }) });
 });
 
 router.get('/followup-summary', patrol, needs('followups'), async (req, res) => {
@@ -375,7 +392,8 @@ router.get('/followup-summary', patrol, needs('followups'), async (req, res) => 
   const by = await rows(pool, 'SELECT status, COUNT(*) AS n FROM followups WHERE tenant_id = ? GROUP BY status', [t]);
   const [fb] = await rows(pool, 'SELECT COUNT(rating) AS rated, ROUND(AVG(rating), 1) AS avg_rating FROM followups WHERE tenant_id = ?', [t]);
   const [don] = await rows(pool, 'SELECT COUNT(*) AS gifts, COALESCE(SUM(amount_cents), 0) AS cents, SUM(monthly) AS monthly FROM donations WHERE tenant_id = ?', [t]);
-  const comments = await rows(pool, "SELECT rating, comment, responded_at FROM followups WHERE tenant_id = ? AND comment IS NOT NULL AND comment <> '' ORDER BY responded_at DESC LIMIT 10", [t]);
+  // Patients' own words: only after the records check (they can name the person or their injury).
+  const comments = req.auth.recordsChecked ? await rows(pool, "SELECT rating, comment, responded_at FROM followups WHERE tenant_id = ? AND comment IS NOT NULL AND comment <> '' ORDER BY responded_at DESC LIMIT 10", [t]) : [];
   const gifts = await rows(pool, 'SELECT amount_cents, monthly, name, created_at, followup_id IS NOT NULL AS from_email FROM donations WHERE tenant_id = ? ORDER BY id DESC LIMIT 15', [t]);
   res.json({ by_status: Object.fromEntries(by.map((x) => [x.status, x.n])), rated: fb.rated, avg_rating: fb.avg_rating, gifts: don.gifts, total_cents: Number(don.cents), monthly_gifts: Number(don.monthly || 0), comments, recent_gifts: gifts });
 });
@@ -384,6 +402,7 @@ async function loadFollowup(req) {
   await admin(req);
   const f = await one(pool, 'SELECT * FROM followups WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, paramId(req)]);
   if (!f) throw notFound('Follow-up');
+  await require('../lib/patientaccess').guard(pool, req, f.incident_id); // an email to this case's patient: the case's rule
   return f;
 }
 router.post('/followups/:id/approve', patrol, needs('followups'), async (req, res) => {

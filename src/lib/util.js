@@ -67,10 +67,21 @@ function validate(schema) {
   };
 }
 
-/** Parse a numeric URL param such as :id. */
+/**
+ * An id as it must be written: plain digits, no leading zero, no sign, no spaces, at most 15 digits (feat/auth-hardening).
+ * Number() alone took 1.0, 1e0, 0x1, " 1" and "+1" as 1, so one record had many spellings, and a check keyed on one
+ * spelling could be walked around with another. Returns the number, or null.
+ */
+function canonId(v) {
+  if (typeof v === 'number') return Number.isSafeInteger(v) && v > 0 ? v : null;
+  const s = String(v ?? '');
+  return /^[1-9]\d{0,14}$/.test(s) ? Number(s) : null;
+}
+
+/** Parse a numeric URL param such as :id (canonId: plain digits only). */
 function paramId(req, name = 'id') {
-  const n = Number(req.params[name]);
-  if (!Number.isInteger(n) || n <= 0) throw bad(`Invalid ${name}`);
+  const n = canonId(req.params[name]);
+  if (!n) throw bad(`Invalid ${name}`);
   return n;
 }
 
@@ -190,6 +201,7 @@ async function mapLimit(items, limit, fn) {
 }
 
 module.exports = {
+  canonId,
   mapLimit, partialOf, z, dateStr, dateTimeStr, planDateStr, planDateTimeStr, realDate, timeStr, id, tierEnum,
   validate, paramId, normDateTime, todayIn, nowIn, dayRange, utcFromLocal, localDay, localTime, addDays, weekdayOf, seasonFor, newCode, setClause,
 };

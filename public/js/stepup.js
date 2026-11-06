@@ -8,34 +8,43 @@ import * as passkey from './passkey.js';
 
 let waiting = null; // one dialog at a time: several requests asking together share it
 
+// details.scope 'records': the patient-record check (feat/auth-hardening). Asked in place when someone opens a case that is
+// not their own recent work; the case opens straight after. One check covers patient records for 30 minutes. Gloves in
+// mind: the passkey is one large button, first.
 export function confirmItsYou(details = {}) {
   if (waiting) return waiting;
+  const records = details.scope === 'records';
   waiting = new Promise((resolve, reject) => {
     let done = false;
-    const finish = (ok, err) => { if (done) return; done = true; waiting = null; dlg.close(); if (ok) resolve(); else reject(err || new Error('Not confirmed, so nothing was changed')); };
+    const finish = (ok, err) => { if (done) return; done = true; waiting = null; dlg.close(); if (ok) resolve(); else reject(err || new Error(records ? 'Not confirmed, so the record stays closed' : 'Not confirmed, so nothing was changed')); };
     const slot = h('div');
-    const body = h('div', { class: 'stack', 'data-step-up': '' }, h('p', null, `To ${details.what || 'do this'}, confirm it is you.`), h('p', { class: 'muted small' }, 'Being signed in is not enough for this. You will not be asked again for the next few minutes.'), slot);
-    const dlg = dialog('Confirm it is you', body, { onClose: () => finish(false) });
+    const body = records
+      ? h('div', { class: 'stack', 'data-step-up': 'records' }, h('p', null, 'This patient record is not one of your cases from this shift. Confirm it is you to open it.'),
+        h('p', { class: 'muted small' }, 'Patient records are private. One check opens older and other people\'s cases for the next 30 minutes, and every open is on the access log.'), slot)
+      : h('div', { class: 'stack', 'data-step-up': '' }, h('p', null, `To ${details.what || 'do this'}, confirm it is you.`), h('p', { class: 'muted small' }, 'Being signed in is not enough for this. You will not be asked again for the next few minutes.'), slot);
+    const dlg = dialog(records ? 'Open a patient record' : 'Confirm it is you', body, { onClose: () => finish(false) });
+    const scope = records ? { scope: 'records' } : {};
     (async () => {
       let opts;
-      try { opts = await post('/auth/step-up/options'); } catch (e) { slot.append(errorBox(e)); return; }
+      try { opts = await post('/auth/step-up/options', scope); } catch (e) { slot.append(errorBox(e)); return; }
       const err = h('div');
       const go = async (payload, btn) => {
         clear(err);
         if (btn) btn.disabled = true;
-        try { await post('/auth/step-up', payload); finish(true); } catch (e) { err.append(errorBox(e)); if (btn) btn.disabled = false; }
+        try { await post('/auth/step-up', { ...payload, ...scope }); finish(true); } catch (e) { err.append(errorBox(e)); if (btn) btn.disabled = false; }
       };
       const parts = [];
       if (opts.methods.includes('passkey') && opts.passkey) {
-        const b = button('Use my passkey', async () => {
+        const b = button(records ? 'Use my passkey to open it' : 'Use my passkey', async () => {
           clear(err);
           try {
-            const fresh = b.dataset.used ? await post('/auth/step-up/options') : opts; // a challenge works once
+            const fresh = b.dataset.used ? await post('/auth/step-up/options', scope) : opts; // a challenge works once
             b.dataset.used = '1';
             const response = await passkey.use(fresh.passkey.options);
             await go({ handle: fresh.passkey.handle, response }, b);
           } catch (e) { err.append(errorBox(e)); }
         }, { kind: 'primary' });
+        if (records) b.classList.add('big', 'passkey-big');
         parts.push(h('div', { class: 'row' }, b));
       }
       if (opts.methods.includes('app')) {

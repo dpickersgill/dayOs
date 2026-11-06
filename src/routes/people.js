@@ -323,7 +323,7 @@ router.post('/:id/family', requireRole(...front), validate(linkBody), async (req
 });
 router.delete('/:id/family/:otherId', requireRole(...front), async (req, res) => {
   const id = paramId(req);
-  const other = Number(req.params.otherId);
+  const other = (require('../lib/util').canonId(req.params.otherId) || 0);
   if (!Number.isInteger(other)) throw bad('Bad id');
   await pool.query('DELETE FROM person_links WHERE tenant_id = ? AND ((adult_id = ? AND member_id = ?) OR (adult_id = ? AND member_id = ?))', [req.auth.tenantId, id, other, other, id]);
   await audit(pool, req, 'unlink', 'people', id, { other_id: other });

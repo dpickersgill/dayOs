@@ -15,6 +15,7 @@ const { pool } = require('../src/db');
 const config = require('../src/config');
 
 let server; let base;
+const REC = require('./helpers/records').records(() => base, () => PW); // one patient-record check per sign-in (feat/auth-hardening)
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const PW = 'correct-horse-battery';
 const KEY = 'test-bootstrap-key';
@@ -28,7 +29,7 @@ async function api(method, path, { token, body, headers = {} } = {}) {
   return { status: res.status, body: json };
 }
 const is = (r, status, why) => assert.equal(r.status, status, `${why || ''} ${JSON.stringify(r.body)}`);
-const login = async (who) => (await api('POST', '/auth/login', { body: { tenant: slug, login: who, password: PW } })).body.token;
+const login = async (who) => await REC((await api('POST', '/auth/login', { body: { tenant: slug, login: who, password: PW } })).body.token);
 
 test.before(async () => {
   await new Promise((r) => { server = createApp().listen(0, r); });

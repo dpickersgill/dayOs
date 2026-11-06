@@ -19,6 +19,7 @@ const { audit } = require('../lib/audit');
 const PA = require('../lib/patrolaccess');
 const { stepUp } = require('../lib/stepup');
 const OPS = require('../lib/patrolops');
+const PX = require('../lib/patientaccess');
 const DS = require('../lib/docscore');
 const S = require('../lib/safety');
 const K = require('../lib/patrolkits');
@@ -26,6 +27,11 @@ const config = require('../config');
 const { typeLabel } = require('../lib/attractions');
 
 const router = express.Router();
+// Every /incidents/:id address on this router needs the patient-record rule first (lib/patientaccess.js): the case is the
+// person's own recent work, or they made the fresh check in the last 30 minutes. Read from the id Express matched.
+router.use('/incidents/:id', require('../lib/patientaccess').byParam);
+// A records request (release, decide, change, pack, outside link) is about one case: that case gets the same rule.
+router.use('/records/:id', require('../lib/patientaccess').byChild('id', 'SELECT incident_id FROM patrol_records_requests WHERE tenant_id = ? AND id = ?'));
 const publicRouter = express.Router();
 const patrol = requireRole('patrol', 'manager');
 const needs = (f, m) => PA.needs(pool, f, m);
@@ -299,6 +305,14 @@ router.post('/records/:id/share', patrol, needs('records'), stepUp('share a pati
 /** Every link made, with its views: for the Patrol Director. */
 router.get('/shares', patrol, anyOf(['records', 'reports']), async (req, res) => {
   const canRecords = await PA.can(pool, req, 'records');
+  // Who each case was shared with is about that case: without the records check, the season risk links (no case) and a
+  // count of the case links.
+  if (!req.auth.recordsChecked) {
+    const t = req.auth.tenantId;
+    const risk = await sharesOf(pool, t, 'AND s.incident_id IS NULL' + (canRecords ? '' : " AND s.kind = 'risk'"), []);
+    const [c] = canRecords ? await rows(pool, 'SELECT COUNT(*) AS n, COALESCE(SUM(revoked_at IS NULL AND expires_at > ?), 0) AS live FROM claim_shares WHERE tenant_id = ? AND incident_id IS NOT NULL', [(await OPS.clock(pool, t)).now, t]) : [{ n: 0, live: 0 }];
+    return res.json({ data: risk, case_links: { total: Number(c.n), active: Number(c.live) }, records_check_needed: Number(c.n) > 0 });
+  }
   res.json({ data: await sharesOf(pool, req.auth.tenantId, canRecords ? '' : "AND s.kind = 'risk'", []) });
 });
 
@@ -309,6 +323,7 @@ router.get('/incidents/:id/shares', patrol, needs('records'), async (req, res) =
 router.post('/shares/:id/revoke', patrol, anyOf(['records', 'reports']), async (req, res) => {
   const t = req.auth.tenantId;
   const s = await one(pool, 'SELECT * FROM claim_shares WHERE tenant_id = ? AND id = ?', [t, paramId(req)]);
+  if (s && s.incident_id) await PX.guard(pool, req, s.incident_id); // stopping a case's link is a change to that case
   if (!s) throw notFound('Link');
   if (s.kind === 'claim' && !(await PA.can(pool, req, 'records'))) throw forbidden('Only a patrol admin can stop a claim file link');
   if (s.revoked_at) return res.json({ ok: true, already: true });

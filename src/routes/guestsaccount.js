@@ -45,7 +45,7 @@ async function householdFor(req) {
   const hh = await HH.forEmail(pool, t.id, email);
   return { t, email, hh };
 }
-const inHousehold = (hh, id) => { if (!HH.has(hh, id)) throw notFound('Person'); return Number(id); };
+const inHousehold = (hh, id) => { const n = require('../lib/util').canonId(id); if (!n || !HH.has(hh, n)) throw notFound('Person'); return n; }; // plain digits only (canonId)
 
 // ---------------------------------------------------------------- the household account
 /** Everything the account page shows. */
@@ -169,7 +169,7 @@ publicRouter.post('/:slug/account/people', validate(personSchema.extend({ adult:
   res.status(201).json({ id, invite_sent: Boolean(invite && mailer.enabled()) });
   // Sent after the reply. Nothing the guest typed goes into it: only the mountain's name and the link.
   if (invite && mailer.enabled()) {
-    const link = `${baseUrl(req)}/family/${t.slug}?join=${token}`;
+    const link = `${baseUrl(req)}/family/${t.slug}#join=${token}`;
     mailer.send({ tenantId: t.id, to: invite, fromName: t.name, subject: `Confirm your email for a family account at ${t.name}`, tag: 'household-invite',
       text: [`Someone with an account at ${t.name} added this email address as a second adult in their family.`, '', 'If you know them and want to share one family account (tickets, passes and lessons for the same children), confirm here. The link works for 7 days:', link, '', 'If you do not know them, ignore this email. Nothing is shared until you confirm.', t.name].join('\n') }).catch(() => {});
   }
@@ -400,8 +400,8 @@ publicRouter.post('/:slug/gift/:token/redeem', validate(z.object({
     const to = child ? b.parent_email : g0.recipient_email;
     const token = await PP.newToken(t.id, to, 'link');
     const lines = child
-      ? [`Hi ${b.parent_first_name},`, '', `A gift from ${t.name} was added to your family account, and you agreed to us keeping your child's name and birthday for it.`, 'Sign in here (the link works once, for 30 minutes):', `${baseUrl(req)}/family/${t.slug}?t=${token}`, '', `If this was not you, call ${t.name}${t.phone ? ` on ${t.phone}` : ''} and we delete the child's details.`, t.name]
-      : [`Hi ${b.first_name},`, '', `Your gift is in your account at ${t.name}. Sign in here (the link works once, for 30 minutes):`, `${baseUrl(req)}/family/${t.slug}?t=${token}`, '', t.name];
+      ? [`Hi ${b.parent_first_name},`, '', `A gift from ${t.name} was added to your family account, and you agreed to us keeping your child's name and birthday for it.`, 'Sign in here (the link works once, for 30 minutes):', `${baseUrl(req)}/family/${t.slug}#t=${token}`, '', `If this was not you, call ${t.name}${t.phone ? ` on ${t.phone}` : ''} and we delete the child's details.`, t.name]
+      : [`Hi ${b.first_name},`, '', `Your gift is in your account at ${t.name}. Sign in here (the link works once, for 30 minutes):`, `${baseUrl(req)}/family/${t.slug}#t=${token}`, '', t.name];
     await mailer.send({ tenantId: t.id, to, fromName: t.name, subject: `Your account at ${t.name}`, tag: 'gift-account', text: lines.join('\n') }).catch(() => {});
   }
   res.json({ ...giftOut(t, await giftByToken(t, req.params.token)), person_id: undefined, joined: Boolean(out), parent: child });

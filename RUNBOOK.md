@@ -103,6 +103,44 @@ Every failure is written to the logs as one line with `"severity":"ERROR"` and a
    `bash scripts/jobs-oidc.sh` is run again.
 5. **Budget:** Billing, Budgets and alerts, a monthly budget (for example $50) with email alerts.
 
+## Security alerts
+
+`bash scripts/security-alerts.sh` (run once from Cloud Shell, after `scripts/uptime-setup.sh`, and again after a release
+that adds an alert). It makes a log-based metric and an alert policy for each item below, sent to the same text and email
+channels. A new metric needs a few minutes before a policy can use it: if the script says "not yet", run it again 10
+minutes later. Each alert's text points here.
+
+| Alert | What it means | What to do |
+| --- | --- | --- |
+| Stripe webhook signature refused | Payment events with the wrong signature. | Check `STRIPE_WEBHOOK_SECRET` matches the Stripe dashboard. If it does, someone is sending fake events: nothing is changed by them. |
+| Sign-in lockouts and too many attempts | Over 20 lockouts or "too many" answers on sign-in in 5 minutes. | Logs Explorer: `jsonPayload.action="sign_in_failed"` shows which logins and addresses. Tell the mountain if one login is the target. |
+| Failed staff sign-ins | Over 30 failed staff sign-ins in 5 minutes (the `sign_in_failed` audit event). This catches a slow password spray across many logins, which never locks any one of them. | Same query. Many logins from one address: block it in Cloud Armor. Many addresses on one login: ask the person to add a passkey, and reset their password if they think it is known. |
+| Platform console sign-in | Every console sign-in. | You should recognize each one. If not, turn the operator off in the console and rotate the console's keys (Rotating keys). |
+| Failed console sign-ins | More than 2 failed console sign-ins in 15 minutes. | Someone is trying the console. Check the addresses (`jsonPayload.console=true`). Make sure every operator signs in with a passkey. |
+| Data exports in bulk | More than 10 exports in an hour. | Check who exported (`jsonPayload.action=~"^export"`) and ask them why. |
+| Server errors in a burst | Over 20 errors in 5 minutes. | Logs Explorer, `severity="ERROR"`, then the release notes for the last deploy. |
+| A scheduled job call refused | A call to a job address was refused. | Check the scheduler job's credentials (DEPLOY.md, Scheduled jobs). |
+
+The sign-in events in the outside copy (`summitops-audit`) are `sign_in`, `sign_in_failed`, `login_locked`, `codes_stopped`,
+`new_device`, `password_reset_by_email`, `mfa_recovery_used`, `staff_password_reset`, `staff_mfa_reset`, `records_check` and
+`session_resumed`, plus the usual audit rows for two-step and passkey changes. None holds a password, a code or what someone
+typed as a username.
+
+## Patient record access and resets (feat/auth-hardening)
+
+- **Fresh check:** opening a case that is not the person's own recent work asks for their passkey or app code (or password,
+  for someone with neither) once per 30 minutes. A help call "the case will not open" is usually this: tell them to use
+  the big passkey button, or set up a passkey in Settings.
+- **Quick resume:** patrol, the ski area login, owners and managers pause after 30 minutes without use; a passkey or app
+  code carries on, within the 8 hours. Without either, they sign in again.
+- **Who resets whom:** a manager cannot reset a manager (only the owner), or a patrol leader at Admin, Manager or Approver
+  (only the owner or a patrol Admin on the roster). A patrol Admin who is not a manager resets patrol logins only. A login whose patrol
+  level, role or staff link was lowered in the last 24 hours, or by the person asking, cannot be reset by them (the owner can).
+- **When nobody at the mountain can reset a director:** the console resets owners, managers, patrol directors and patrol
+  admins. Confirm it is them by phone first, and type how in "How you confirmed it is them" (kept in the mountain's history).
+  The person gets an email.
+- **Weekly access summary:** Monday mornings to the owner and patrol Admins. Only the owner turns it off (Patrol, Settings).
+
 ## Backups
 
 Cloud SQL backs up the database every day at 07:00 UTC, keeps 14 backups, and can restore to any moment in the last

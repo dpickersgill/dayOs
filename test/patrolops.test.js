@@ -16,6 +16,7 @@ const { todayIn, nowIn, addDays } = require('../src/lib/util');
 const PUSH = require('../src/lib/push');
 
 let server; let base;
+const REC = require('./helpers/records').records(() => base, () => PW); // one patient-record check per sign-in (feat/auth-hardening)
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const PW = 'correct-horse-battery';
 async function api(method, p, { token, body, headers } = {}) {
@@ -37,7 +38,7 @@ test.before(async () => {
   M.slug = slug;
   const res = await fetch(`${base}/api/v1/tenants`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-bootstrap-key': 'test-bootstrap-key' }, body: JSON.stringify({ slug, name: 'Ops Peak', owner: { email: `owner@${slug}.test`, password: PW, first_name: 'Olive', last_name: 'Owner' } }) });
   assert.equal(res.status, 201);
-  const login = async (email) => (await api('POST', '/auth/login', { body: { tenant: slug, email, password: PW } })).body.token;
+  const login = async (email) => await REC((await api('POST', '/auth/login', { body: { tenant: slug, email, password: PW } })).body.token);
   M.owner = await login(`owner@${slug}.test`);
   M.id = Number((await pool.query('SELECT id FROM tenants WHERE slug = ?', [slug]))[0][0].id);
   tz = (await pool.query('SELECT timezone FROM tenants WHERE id = ?', [M.id]))[0][0].timezone;
@@ -98,7 +99,8 @@ test('the patrol-room screen is locked to duty sign-in, stays open on its own po
   }
   // Its polls keep the display signed in all day (other screens' polls do not count; see security.test.js).
   const sid = require('../src/lib/sessions').hash(JSON.parse(Buffer.from(lee.split('.')[1], 'base64url')).sid);
-  await pool.query('UPDATE user_sessions SET last_seen = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 59 MINUTE) WHERE id_hash = ?', [sid]);
+  // A patrol leader's session goes idle after 30 minutes (feat/auth-hardening); the room's polls keep it open.
+  await pool.query('UPDATE user_sessions SET last_seen = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 29 MINUTE) WHERE id_hash = ?', [sid]);
   ok(await api('GET', '/patrol/duty', { token: lee, headers: { 'x-poll': '1' } }));
   await new Promise((r) => setTimeout(r, 150));
   assert.ok(Number((await pool.query('SELECT TIMESTAMPDIFF(MINUTE, last_seen, UTC_TIMESTAMP()) AS m FROM user_sessions WHERE id_hash = ?', [sid]))[0][0].m) <= 1);

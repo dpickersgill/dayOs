@@ -10,7 +10,9 @@
 export const config = { base: '' };
 // stepUp(details): asks the person to confirm it is them (passkey, app code or password) and resolves when they have,
 // or rejects if they cancel. signOut(): signs out on purpose. Set by main.js.
-export const hooks = { onSignedOut() {}, stepUp: null, signOut: null };
+// onPaused(): the server paused this session (30 minutes idle, or the tab lock) and it can be resumed with a passkey or app
+// code: the token is kept and the resume screen shows (feat/auth-hardening).
+export const hooks = { onSignedOut() {}, onPaused: null, stepUp: null, signOut: null };
 
 // Whether the person has touched the page since the last request went out. A background poll is marked x-poll: 1 when
 // they have not, so the server does not count it as use and an unattended tab still ends after an hour; when they have
@@ -117,6 +119,11 @@ export async function api(method, path, body, retried = false, { poll = false } 
     // Another tab signed in again meanwhile and the shared token changed under this request: send it again with the new one.
     if (res.status === 401 && used && !retried && session.token && session.token !== used) return api(method, path, body, true, { poll });
     const signedIn = Boolean(session.token);
+    // Paused, not ended: keep the token, and offer quick resume (never for the resume calls themselves).
+    if (res.status === 401 && signedIn && isJson && data && data.details && data.details.code === 'resume' && hooks.onPaused && !path.startsWith('/auth/resume')) {
+      hooks.onPaused();
+      throw new ApiError(401, data.error || 'Paused', data.details);
+    }
     if (res.status === 401 && signedIn && path !== '/auth/login' && path !== '/auth/change-password' && !path.startsWith('/auth/step-up')) {
       session.clear();
       hooks.onSignedOut();

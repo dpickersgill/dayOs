@@ -55,7 +55,10 @@ router.get('/map-pins', patrol, needs('view_cases'), async (req, res) => {
   if (f.category) { where.push('category = ?'); params.push(f.category); }
   const data = await rows(pool, `SELECT id, season, seq, occurred_at, category, severity, location, summary, report_state, gps_lat, gps_lng FROM incidents WHERE ${where.join(' AND ')} ORDER BY occurred_at DESC LIMIT 1000`, params);
   await audit(pool, req, 'read', 'incident_pins', null, { rows: data.length });
-  res.json({ data: data.map((r) => ({ ...r, gps_lat: Number(r.gps_lat), gps_lng: Number(r.gps_lng), case_number: r.seq ? `${r.season}-${String(r.seq).padStart(4, '0')}` : null })) });
+  // Summaries only for cases the person may open without the fresh check, or after it (lib/patientaccess.js).
+  const PX = require('../lib/patientaccess');
+  const may = await PX.openable(pool, req, data.map((r) => r.id));
+  res.json({ data: data.map((r) => PX.trimRow({ ...r, gps_lat: Number(r.gps_lat), gps_lng: Number(r.gps_lng), case_number: r.seq ? `${r.season}-${String(r.seq).padStart(4, '0')}` : null }, may)) });
 });
 
 module.exports = router;

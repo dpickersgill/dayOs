@@ -42,7 +42,7 @@ const recapBody = z.object({
   note: z.string().trim().max(1000).nullable().optional(),
   body: z.string().trim().max(4000).nullable().optional(),
 });
-const bookingParam = (req) => { const n = Number(req.params.bookingId); if (!Number.isInteger(n) || n <= 0) throw bad('Bad booking'); return n; };
+const bookingParam = (req) => { const n = (require('../lib/util').canonId(req.params.bookingId) || 0); if (!Number.isInteger(n) || n <= 0) throw bad('Bad booking'); return n; };
 router.put('/recaps/:bookingId', teach, validate(recapBody), async (req, res) => res.json(await R.saveDraft(req, bookingParam(req), req.body)));
 router.post('/recaps/:bookingId/write', teach, validate(recapBody), async (req, res) => res.json(await R.aiDraft(req, bookingParam(req), req.body)));
 router.post('/recaps/:bookingId/send', teach, validate(recapBody), async (req, res) => res.json(await R.approveAndSend(req, bookingParam(req), req.body, baseUrl(req))));
@@ -50,10 +50,10 @@ router.post('/recaps/:bookingId/skip', teach, async (req, res) => res.json(await
 router.get('/recaps/:bookingId/photos', teach, async (req, res) => res.json({ data: await R.photosOf(req, bookingParam(req)) }));
 router.post('/recaps/:bookingId/photos', teach, express.raw({ type: () => true, limit: '4mb' }), async (req, res) => res.status(201).json(await R.addPhoto(req, bookingParam(req), req.body)));
 router.get('/recaps/:bookingId/photos/:pid', teach, async (req, res) => {
-  const p = await R.staffPhoto(req, bookingParam(req), Number(req.params.pid));
+  const p = await R.staffPhoto(req, bookingParam(req), (require('../lib/util').canonId(req.params.pid) || 0));
   res.set('Cache-Control', 'private, no-store').type(p.mime).send(p.data);
 });
-router.delete('/recaps/:bookingId/photos/:pid', teach, async (req, res) => res.json(await R.removePhoto(req, bookingParam(req), Number(req.params.pid))));
+router.delete('/recaps/:bookingId/photos/:pid', teach, async (req, res) => res.json(await R.removePhoto(req, bookingParam(req), (require('../lib/util').canonId(req.params.pid) || 0))));
 
 // ---------------------------------------------------------------- staff: waitlists
 /** Every upcoming lesson with families waiting, for the desk. */
@@ -187,7 +187,7 @@ publicRouter.post('/:slug/lesson/:token/cancel', async (req, res) => {
 });
 publicRouter.get('/:slug/lesson/:token/photos/:pid', async (req, res) => {
   const { t, b } = await familyBooking(req);
-  const p = await R.familyPhoto(t.id, b, Number(req.params.pid));
+  const p = await R.familyPhoto(t.id, b, (require('../lib/util').canonId(req.params.pid) || 0));
   if (!p) throw notFound('Photo');
   res.set('Cache-Control', 'private, no-store').type(p.mime).send(p.data);
 });

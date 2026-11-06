@@ -60,7 +60,7 @@ const eventFields = {
 schedule.patch('/lifts/:id', async (req, res, next) => {
   try {
     const status = req.body && req.body.status;
-    const id = Number(req.params.id);
+    const id = (require('../lib/util').canonId(req.params.id) || 0);
     if (!status || !Number.isInteger(id) || !['owner', 'manager', 'patrol', 'staff'].includes(req.auth.role)) return next();
     const cur = await one(pool, 'SELECT status FROM lifts WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, id]);
     if (!cur || cur.status === status) return next();

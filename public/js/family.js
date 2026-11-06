@@ -31,15 +31,18 @@ const lab = (id, text, el, hint) => h('div', { class: 'field' }, h('label', { fo
 const hero = (name, sub, extra) => h('header', { class: 'hero' }, h('div', { class: 'hero-in' }, h('span', { class: 'eyebrow' }, 'Your account'), h('h1', null, name || 'Tickets, passes and lessons'), h('p', { class: 'sub' }, sub), extra || null));
 
 async function start() {
-  const t = new URLSearchParams(location.search).get('t');
+  // The one-time token is after # in the emailed link (feat/auth-hardening), so it never reaches a server's request log.
+  // Older emails put it in ?t= or ?join=; those still work once. Either way the address is cleared before anything else.
+  const frag = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const query = new URLSearchParams(location.search);
+  const t = frag.get('t') || query.get('t');
   // A second adult confirming their email from the invite (2026.11.11): the link signs them in too.
-  const join = new URLSearchParams(location.search).get('join');
+  const join = frag.get('join') || query.get('join');
+  if (t || join) history.replaceState(null, '', location.pathname);
   if (join) {
-    history.replaceState(null, '', location.pathname);
     try { const s = await acall('POST', '/account/join', { token: join }); session = s.session; store.set(session); } catch (e) { return signIn(e.message); }
   }
   if (t) {
-    history.replaceState(null, '', location.pathname);
     try { const s = await call('POST', '/session', { token: t }); session = s.session; store.set(session); } catch (e) { return signIn(e.message); }
   }
   if (!session) return signIn();

@@ -13,11 +13,24 @@ const { bad, forbidden } = require('./errors');
 
 const utcNow = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 
+/**
+ * Where passkey answers may come from (feat/auth-hardening): PUBLIC_URL's origin, plus any listed in WEBAUTHN_ORIGINS,
+ * and never the request's own Host header. Before, with WEBAUTHN_ORIGINS unset, the origin came from Host, so a script on
+ * any address under WEBAUTHN_RP_ID could get a passkey answer and replay it with a matching Host. Production already
+ * refuses to start without PUBLIC_URL, so this cannot stop a deploy. Without PUBLIC_URL (local runs and tests) it is the
+ * request's own address, as before.
+ */
+function allowedOrigins(req) {
+  const listed = String(process.env.WEBAUTHN_ORIGINS || '').split(',').map((x) => x.trim().replace(/\/+$/, '')).filter(Boolean);
+  let pub = null;
+  try { pub = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).origin : null; } catch (_) { pub = null; }
+  if (pub) return [...new Set([pub, ...listed])];
+  if (listed.length) return listed;
+  return [`${req.protocol}://${String(req.get('host') || '')}`];
+}
 function rp(req) {
-  const host = String(req.get('host') || '');
-  const id = process.env.WEBAUTHN_RP_ID || req.hostname;
-  const origins = String(process.env.WEBAUTHN_ORIGINS || '').split(',').map((x) => x.trim()).filter(Boolean);
-  return { id, name: 'Verdynt/OS', origin: origins.length ? origins : `${req.protocol}://${host}` };
+  const id = process.env.WEBAUTHN_RP_ID || req.hostname; // the site a passkey belongs to (unchanged; production sets WEBAUTHN_RP_ID)
+  return { id, name: 'Verdynt/OS', origin: allowedOrigins(req) };
 }
 
 // Which table: the mountains' logins, or the console's operators.
@@ -120,4 +133,4 @@ async function count(kind, ownerId) {
   return Number(r.n);
 }
 
-module.exports = { rp, listFor, registrationOptions, register, authenticationOptions, authenticate, count };
+module.exports = { rp, allowedOrigins, listFor, registrationOptions, register, authenticationOptions, authenticate, count };

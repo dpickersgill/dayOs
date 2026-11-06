@@ -18,7 +18,7 @@ const mgr = ['manager'];
 const selfRoles = ['staff', 'counter', 'instructor', 'patrol'];
 // 2026.11.9: a ski school director sets certifications on instructors' teaching profiles (someone who teaches), nobody else's.
 const teacherCerts = require('../lib/schoolaccess').directorFor(mgr, async (req) => Boolean(await one(pool, `SELECT st.id FROM staff st WHERE st.tenant_id = ? AND st.id = ?
-  AND (EXISTS (SELECT 1 FROM instructor_profiles ip WHERE ip.tenant_id = st.tenant_id AND ip.staff_id = st.id) OR EXISTS (SELECT 1 FROM users u WHERE u.tenant_id = st.tenant_id AND u.staff_id = st.id AND u.role = 'instructor'))`, [req.auth.tenantId, Number(req.params.id) || 0])), 'A ski school director can change certifications for instructors only');
+  AND (EXISTS (SELECT 1 FROM instructor_profiles ip WHERE ip.tenant_id = st.tenant_id AND ip.staff_id = st.id) OR EXISTS (SELECT 1 FROM users u WHERE u.tenant_id = st.tenant_id AND u.staff_id = st.id AND u.role = 'instructor'))`, [req.auth.tenantId, (require('../lib/util').canonId(req.params.id) || 0)])), 'A ski school director can change certifications for instructors only');
 
 /**
  * Staff may only act on their own staff record. Managers pass any id (or fall back to their own).

@@ -49,7 +49,7 @@ publicRouter.post('/:slug/family/link', validate(z.object({ email: z.string().tr
     const recent = await one(pool, "SELECT COUNT(*) AS n FROM family_tokens WHERE tenant_id = ? AND email = ? AND kind = 'link' AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)", [t.id, req.body.email]);
     if (fam.adults.length && Number(recent.n) < 5 && mailer.enabled()) {
       const token = await PP.newToken(t.id, req.body.email, 'link');
-      const link = `${base}/family/${t.slug}?t=${token}`;
+      const link = `${base}/family/${t.slug}#t=${token}`;
       await mailer.send({ tenantId: t.id, to: req.body.email, fromName: t.name, subject: `Sign in to your family page at ${t.name}`, tag: 'family-link',
         text: [`Hi ${fam.adults[0].first_name},`, '', `Here is your sign-in link for ${t.name}. It works once, for the next 30 minutes:`, link, '', 'If you did not ask for it, you can ignore this email.', t.name].join('\n') });
     }
@@ -161,7 +161,7 @@ const pickup = z.array(z.object({ name: z.string().trim().min(1).max(100), phone
 publicRouter.patch('/:slug/family/places/:id', validate(z.object({ allergies: z.string().trim().max(300).nullable().optional(), medical: z.string().trim().max(500).nullable().optional(), pickup: pickup.optional() })), async (req, res) => {
   const { t, fam, email } = await familyFor(req);
   await tx(async (conn) => {
-    const e = await placeOf(conn, t, fam, Number(req.params.id));
+    const e = await placeOf(conn, t, fam, (require('../lib/util').canonId(req.params.id) || 0));
     await PS.saveDetails(conn, t.id, e.id, req.body);
     await audit(conn, system(t.id), 'family_update_place', 'programs', e.program_id, { enrollment_id: e.id, fields: Object.keys(req.body), email_ref: emailRef(email) });
   });
@@ -172,7 +172,7 @@ publicRouter.post('/:slug/family/places/:id/switch', validate(z.object({ group_i
   const { t, fam, email } = await familyFor(req);
   const today = todayIn(t.timezone);
   await tx(async (conn) => {
-    const e = await placeOf(conn, t, fam, Number(req.params.id));
+    const e = await placeOf(conn, t, fam, (require('../lib/util').canonId(req.params.id) || 0));
     const program = await one(conn, 'SELECT * FROM programs WHERE tenant_id = ? AND id = ?', [t.id, e.program_id]);
     const pol = await policyFor(conn, t.id, e, program, today);
     if (!pol.switch_to.some((g) => g.group_id === req.body.group_id)) throw conflict('That day cannot be chosen now. Please call the mountain.');
@@ -187,7 +187,7 @@ publicRouter.post('/:slug/family/places/:id/withdraw', async (req, res) => {
   const { t, fam, email } = await familyFor(req);
   const today = todayIn(t.timezone);
   const out = await tx(async (conn) => {
-    const e = await placeOf(conn, t, fam, Number(req.params.id));
+    const e = await placeOf(conn, t, fam, (require('../lib/util').canonId(req.params.id) || 0));
     const program = await one(conn, 'SELECT * FROM programs WHERE tenant_id = ? AND id = ?', [t.id, e.program_id]);
     const pol = await policyFor(conn, t.id, e, program, today);
     if (!pol.can_withdraw) throw conflict(pol.withdraw_until ? `Online cancellation closed on ${pol.withdraw_until}. Please call the mountain.` : 'Please call the mountain to cancel.');

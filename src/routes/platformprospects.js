@@ -173,7 +173,7 @@ module.exports = function prospectsRouter(log) {
   });
 
   router.patch('/:id/contacts/:cid', validate(z.object(contactFields).partial()), async (req, res) => {
-    const cid = Number(req.params.cid);
+    const cid = (require('../lib/util').canonId(req.params.cid) || 0);
     if (!Number.isInteger(cid) || cid < 1) throw notFound('Contact');
     const set = Object.keys(req.body).filter((k) => req.body[k] !== undefined);
     if (!set.length) throw bad('Nothing to change');
@@ -184,9 +184,9 @@ module.exports = function prospectsRouter(log) {
   });
 
   router.delete('/:id/contacts/:cid', async (req, res) => {
-    const [r] = await pool.query('DELETE FROM prospect_contacts WHERE id = ? AND prospect_id = ?', [Number(req.params.cid) || 0, paramId(req)]);
+    const [r] = await pool.query('DELETE FROM prospect_contacts WHERE id = ? AND prospect_id = ?', [(require('../lib/util').canonId(req.params.cid) || 0), paramId(req)]);
     if (!r.affectedRows) throw notFound('Contact');
-    await log(pool, req, null, 'prospect_contact_remove', { prospect: paramId(req), contact: Number(req.params.cid) });
+    await log(pool, req, null, 'prospect_contact_remove', { prospect: paramId(req), contact: (require('../lib/util').canonId(req.params.cid) || 0) });
     res.json({ ok: true });
   });
 

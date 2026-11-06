@@ -16,6 +16,9 @@ const OPS = require('../lib/patrolops');
 const K = require('../lib/patrolkits');
 
 const router = express.Router();
+// Every /incidents/:id address on this router needs the patient-record rule first (lib/patientaccess.js): the case is the
+// person's own recent work, or they made the fresh check in the last 30 minutes. Read from the id Express matched.
+router.use('/incidents/:id', require('../lib/patientaccess').byParam);
 const patrol = requireRole('patrol', 'manager');
 const manage = PA.needs(pool, 'manage_equipment', 'Only those who manage patrol equipment can change kits');
 const clock = async (db, t) => { const tz = (await one(db, 'SELECT timezone FROM tenants WHERE id = ?', [t])).timezone; return { now: nowIn(tz), today: todayIn(tz) }; };
@@ -137,7 +140,10 @@ router.get('/kits/:id', patrol, async (req, res) => {
   const checks = await rows(pool, `SELECT c.id, c.kind, c.result, c.items, c.seal_no, c.note, c.incident_id, c.done_at, c.applied, COALESCE(u.email, u.username) AS done_by,
       CONCAT(i.season, '-', LPAD(i.seq, 4, '0')) AS case_number FROM patrol_kit_checks c LEFT JOIN users u ON u.id = c.done_by AND u.tenant_id = c.tenant_id
       LEFT JOIN incidents i ON i.tenant_id = c.tenant_id AND i.id = c.incident_id WHERE c.tenant_id = ? AND c.kit_id = ? ORDER BY c.done_at DESC, c.id DESC LIMIT 30`, [t, kit.id]);
-  res.json({ kit, type: all.types.find((x) => x.id === kit.type_id), checks: checks.map((c) => ({ ...c, items: K.parse(c.items, {}) })), seals: (await OPS.settingsOf(pool, t)).kit_seals, today });
+  // Supplies used on a case keep their case number; the free-text note only for a case this person may open (lib/patientaccess.js).
+  const may = await require('../lib/patientaccess').openable(pool, req, checks.filter((c) => c.incident_id).map((c) => c.incident_id));
+  const shown = (c) => (c.incident_id && !may.has(c.incident_id) ? { ...c, note: null, note_hidden: Boolean(c.note) } : c);
+  res.json({ kit, type: all.types.find((x) => x.id === kit.type_id), checks: checks.map((c) => ({ ...shown(c), items: K.parse(c.items, {}) })), seals: (await OPS.settingsOf(pool, t)).kit_seals, today });
 });
 
 const stockItem = z.object({ qty: z.number().int().min(0).max(500), expires_on: dateStr.nullable().optional() });
@@ -157,6 +163,7 @@ router.post('/kits/:id/checks', patrol, validate(z.object({
 })), async (req, res) => {
   const t = req.auth.tenantId;
   const b = req.body;
+  if (b.incident_id) await require('../lib/patientaccess').guard(pool, req, b.incident_id); // supplies used on a case are case evidence
   const out = await tx(async (conn) => {
     if (b.client_ref) {
       const seen = await one(conn, 'SELECT id, result FROM patrol_kit_checks WHERE tenant_id = ? AND client_ref = ?', [t, b.client_ref]);

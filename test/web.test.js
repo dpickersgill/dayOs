@@ -28,6 +28,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
 
 let server; let base; let dom; let mods; let tmp;
+const REC = require('./helpers/records').records(() => base, () => PW); // one patient-record check per sign-in (feat/auth-hardening)
 let inflight = 0;
 const T = {}; // tokens by role
 const D = {}; // seeded ids
@@ -146,7 +147,7 @@ test.before(async (t) => {
 
   const res = await fetch(`${base}/api/v1/tenants`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-bootstrap-key': 'test-bootstrap-key' }, body: JSON.stringify({ slug, name: 'Web Test Mountain', owner: { email: `owner@${slug}.test`, password: PW, first_name: 'Olive', last_name: 'Owner' } }) });
   assert.equal(res.status, 201);
-  const login = async (email) => ok(await api('POST', '/auth/login', { body: { tenant: slug, email, password: PW } })).token;
+  const login = async (email) => REC(ok(await api('POST', '/auth/login', { body: { tenant: slug, email, password: PW } })).token);
   T.owner = await login(`owner@${slug}.test`);
   const o = T.owner;
 
@@ -492,6 +493,7 @@ async function signInAs(email) {
   form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await settle(); await sleep(60); await settle();
   assert.ok(document.querySelector('.rail'), `${email} signed in`);
+  await REC(mods.api.session.token); // the patient-record check, once for this sign-in (feat/auth-hardening)
 }
 async function go(hash) { window.location.hash = hash; await settle(); await sleep(40); await settle(); }
 const selectedTab = () => document.querySelector('main [role=tab][aria-selected=true]');
@@ -747,7 +749,7 @@ test('patrol: the Access levels tab edits the matrix, and a Host sees only the t
   const hostStaff = ok(await api('POST', '/workforce/staff', { token: o, body: { person: { first_name: 'Hal', last_name: 'Host' }, status: 'active' } })).id;
   ok(await api('POST', '/users', { token: o, body: { email: `host@${slug}.test`, password: PW, role: 'patrol', staff_id: hostStaff } }));
   ok(await api('POST', '/patrol/team', { token: o, body: { staff_id: hostStaff, access_level: 'host' } }));
-  T.host = ok(await api('POST', '/auth/login', { body: { tenant: slug, email: `host@${slug}.test`, password: PW } })).token;
+  T.host = await REC(ok(await api('POST', '/auth/login', { body: { tenant: slug, email: `host@${slug}.test`, password: PW } })).token);
 
   const tabNames = patNames;
   assert.equal((await tabNames(await renderView('patrol', 'owner', T.owner))).includes('Access levels'), false, 'Access levels is no longer a Patrol tab');
@@ -1734,7 +1736,7 @@ const adult = (first, last, extra = {}) => ({ details: { first_name: first, last
 /** Starts the app (main.js) afresh: the module is cached after its first import, so each start gets its own copy. */
 let bootN = 0;
 const bootMain = async () => { await import(new URL(`file://${tmp}/js/main.js?boot=${++bootN}`).href); await settle(); };
-const login2 = async (email) => ok(await api('POST', '/auth/login', { body: { tenant: slug, email, password: PW } })).token;
+const login2 = async (email) => REC(ok(await api('POST', '/auth/login', { body: { tenant: slug, email, password: PW } })).token);
 const freshUser = async (name, role) => { ok(await api('POST', '/users', { token: T.owner, body: { email: `${name}@${slug}.test`, password: PW, role } })); return login2(`${name}@${slug}.test`); };
 const sellApi = (token, body) => api('POST', '/checkout', { token, body: { channel: 'window', ...body } });
 
@@ -2488,7 +2490,7 @@ test('settings: menus for each role, changed by the owner and read only for mana
   assert.ok([...owner.querySelectorAll('select[name=start] option')].some((o) => o.value === 'dashboard'), 'it can open on Today');
 
   ok(await api('POST', '/users', { token: T.owner, body: { email: `mgr-menus@${slug}.test`, password: PW, role: 'manager' } }));
-  const mtoken = ok(await api('POST', '/auth/login', { body: { tenant: slug, email: `mgr-menus@${slug}.test`, password: PW } })).token;
+  const mtoken = await REC(ok(await api('POST', '/auth/login', { body: { tenant: slug, email: `mgr-menus@${slug}.test`, password: PW } })).token);
   const mgr = await renderView('settings', 'manager', mtoken, {}, ['team']);
   [...mgr.querySelectorAll('[role=tab]')].find((t) => t.textContent === 'Menus for each role').click(); await settle();
   assert.match(mgr.textContent, /Only the owner can change the menus/);
@@ -2741,7 +2743,7 @@ test('with no signal, New case offers the trails and attractions kept on the pho
 
 test('"Me" tops the responder picker, and links an unlinked patroller to their own staff record', skip(), async () => {
   const o = T.owner;
-  const mine = await (async () => { ok(await api('POST', '/users', { token: o, body: { email: `solo.patroller@${slug}.test`, password: PW, role: 'patrol' } })); return ok(await api('POST', '/auth/login', { body: { tenant: slug, email: `solo.patroller@${slug}.test`, password: PW } })).token; })();
+  const mine = await (async () => { ok(await api('POST', '/users', { token: o, body: { email: `solo.patroller@${slug}.test`, password: PW, role: 'patrol' } })); return REC(ok(await api('POST', '/auth/login', { body: { tenant: slug, email: `solo.patroller@${slug}.test`, password: PW } })).token); })();
   const c = ok(await api('POST', '/patrol/incidents', { token: mine, body: { occurred_at: `${today}T11:05`, location: 'Ridge Run', category: 'injury', severity: 'minor', summary: 'Solo case' } }));
   assert.equal(ok(await api('GET', `/patrol/incidents/${c.id}`, { token: mine })).responders.length, 0, 'an unlinked filer is not the lead yet');
   const root = await renderView('patrol', 'patrol', mine, {}, ['case', String(c.id), 'report']);
@@ -3301,7 +3303,7 @@ test('kiosk admin: add a tablet, set a PIN, print a badge, snapshots and fixing 
   clickBtn(settings, 'Save');
   await settle();
   const ov = ok(await api('GET', '/kiosk-admin/overview', { token: o }));
-  assert.deepEqual(ov.settings, { photos: true, photo_days: 14 });
+  assert.deepEqual(ov.settings, { photos: true, photo_days: 14, pin_four: false });
   ok(await api('PUT', '/kiosk-admin/settings', { token: o, body: { photos: false, photo_days: 30 } }));
 });
 

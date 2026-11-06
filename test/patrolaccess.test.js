@@ -10,6 +10,7 @@ const { createApp } = require('../src/app');
 const { pool } = require('../src/db');
 
 let server; let base;
+const REC = require('./helpers/records').records(() => base, () => PW); // one patient-record check per sign-in (feat/auth-hardening)
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const PW = 'correct-horse-battery';
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
@@ -26,9 +27,9 @@ const is = (r, status, why) => assert.equal(r.status, status, `${why || ''} ${JS
 async function mountain(slug) {
   const res = await fetch(`${base}/api/v1/tenants`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-bootstrap-key': 'test-bootstrap-key' }, body: JSON.stringify({ slug, name: slug, owner: { email: `owner@${slug}.test`, password: PW, first_name: 'Olive', last_name: 'Owner' } }) });
   assert.equal(res.status, 201);
-  return { slug, owner: (await api('POST', '/auth/login', { body: { tenant: slug, email: `owner@${slug}.test`, password: PW } })).body.token };
+  return { slug, owner: await REC((await api('POST', '/auth/login', { body: { tenant: slug, email: `owner@${slug}.test`, password: PW } })).body.token) };
 }
-async function login(m, email) { return (await api('POST', '/auth/login', { body: { tenant: m.slug, email, password: PW } })).body.token; }
+async function login(m, email) { return await REC((await api('POST', '/auth/login', { body: { tenant: m.slug, email, password: PW } })).body.token); }
 
 let A; let B; const T = {}; const D = {};
 

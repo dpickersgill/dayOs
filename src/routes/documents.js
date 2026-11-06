@@ -326,7 +326,7 @@ router.get('/documents/:id/versions', async (req, res) => {
 router.get('/documents/:id/versions/:v/file', async (req, res) => {
   const id = paramId(req);
   await needDocument(pool, req, id, 'view');
-  const v = await one(pool, 'SELECT file_name, mime_type, content FROM document_versions WHERE tenant_id = ? AND document_id = ? AND version = ?', [req.auth.tenantId, id, Number(req.params.v)]);
+  const v = await one(pool, 'SELECT file_name, mime_type, content FROM document_versions WHERE tenant_id = ? AND document_id = ? AND version = ?', [req.auth.tenantId, id, (require('../lib/util').canonId(req.params.v) || 0)]);
   if (!v) throw notFound('Version');
   sendFile(res, v, { inline: INLINE.has(v.mime_type) && req.query.download !== '1' });
 });
@@ -334,7 +334,7 @@ router.get('/documents/:id/versions/:v/file', async (req, res) => {
 /** Bring an earlier version back. It becomes the newest version, so nothing later is lost. */
 router.post('/documents/:id/versions/:v/restore', async (req, res) => {
   const id = paramId(req);
-  const n = Number(req.params.v);
+  const n = (require('../lib/util').canonId(req.params.v) || 0);
   const version = await tx(async (conn) => {
     const d = await lockDocument(conn, req, id);
     const v = await one(conn, 'SELECT file_name, mime_type, content FROM document_versions WHERE tenant_id = ? AND document_id = ? AND version = ?', [req.auth.tenantId, id, n]);

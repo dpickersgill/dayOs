@@ -58,7 +58,7 @@ const SETUP_PATHS = /\/auth\/(me|logout|closing|back|change-password|step-up(\/o
 /**
  * Verifies the bearer token, then re-checks the user in the database on every request, so that
  * deactivating a login, changing a role, or changing a password takes effect immediately instead of
- * after the token expires. Sets req.auth = { tenantId, userId, role, staffId, onPatrol, sid, method, terminalId, steppedUp, strong, display, schoolLevel }.
+ * after the token expires. Sets req.auth = { tenantId, userId, role, staffId, onPatrol, sid, method, terminalId, steppedUp, recordsChecked, strong, display, schoolLevel }.
  *
  * tenantId comes ONLY from the signed token, never from the request body, query or URL,
  * so one mountain can never read or write another mountain's rows.
@@ -94,7 +94,16 @@ async function authenticate(req, _res, next) {
   if (!rows.length) return next(unauthorized('Session ended. Sign in again.'));
   const row = rows[0];
   // The server's own record of the session: signed out, idle too long, or ended from elsewhere.
-  if (!payload.sid || !Number(row.session_open)) return next(unauthorized('Session ended. Sign in again.'));
+  if (!payload.sid || !Number(row.session_open)) {
+    // A patrol or leader session that only went idle (30 minutes) or was locked by its tab: it can be resumed with a
+    // passkey or app code (POST /auth/resume) within its 8 hours, not past them. Someone with neither signs in again.
+    if (payload.sid && Number(row.session_resumable) && Number(row.strong)) {
+      const err = unauthorized('Your session is paused. Confirm it is you to carry on.');
+      err.details = { code: 'resume' };
+      return next(err);
+    }
+    return next(unauthorized('Session ended. Sign in again.'));
+  }
   if (require('../lib/accessend').over(row.access_ends_on, row.tenant_timezone)) return next(unauthorized('Your access has ended for the season. Ask a manager if you are coming back.'));
   const display = row.session_display || null;
   // A background poll (x-poll: 1) is not someone using the app, so it does not keep the session open. The patrol-room
@@ -141,6 +150,8 @@ async function authenticate(req, _res, next) {
     offRoster: row.role === 'patrol' && Boolean(Number(row.off_roster)), // a patrol login whose person was taken off the roster: no Patrol (2026.11.11)
     method: row.session_method, terminalId: row.session_terminal ? Number(row.session_terminal) : null, deviceHash: row.session_device || null,
     steppedUp: Boolean(Number(row.stepped_up)), strong: Boolean(Number(row.strong)), mfaRule: mfaRule(row), display,
+    // The patient-record check (lib/patientaccess.js): made at the records prompt in the last 30 minutes. Never sign-in.
+    recordsChecked: Boolean(Number(row.records_checked)), remember: Boolean(Number(row.session_remember)), idleMin: row.session_idle_min ? Number(row.session_idle_min) : null,
     schoolLevel: row.role === 'instructor' ? (row.school_access || 'instructor') : null, // lib/schoolaccess.js
     exportOnly,
   };
@@ -156,7 +167,7 @@ function requireRole(...roles) {
     if (!req.auth) return next(unauthorized());
     // A patrol login whose person was taken off the roster has no Patrol: the /patrol routes refuse it, while
     // what a patrol login does elsewhere (a lift's or an attraction's status) is unchanged (2026.11.11).
-    const offPatrol = req.auth.role === 'patrol' && req.auth.offRoster && /^\/api\/v1\/patrol(\/|$)/.test(req.originalUrl);
+    const offPatrol = req.auth.role === 'patrol' && req.auth.offRoster && /^\/api\/v1\/patrol(\/|$)/.test(require('../lib/pathcheck').normal(req.originalUrl)); // any spelling
     if (req.auth.role === 'owner' || (roles.includes(req.auth.role) && !offPatrol)) return next();
     // Someone on the patrol roster can do what a patrol login can, whatever their login role (a lift operator who also patrols).
     if (req.auth.onPatrol && roles.includes('patrol')) return next();

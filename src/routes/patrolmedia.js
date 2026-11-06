@@ -21,6 +21,9 @@ const { photoFacts, sniff } = require('../lib/exif');
 const cases = require('./patrol');
 
 const router = express.Router();
+// Every /incidents/:id address on this router needs the patient-record rule first (lib/patientaccess.js): the case is the
+// person's own recent work, or they made the fresh check in the last 30 minutes. Read from the id Express matched.
+router.use('/incidents/:id', require('../lib/patientaccess').byParam);
 const patrol = requireRole('patrol', 'manager');
 const needs = (feature, message) => PA.needs(pool, feature, message);
 const MAX_BYTES = 15 * 1024 * 1024; // a phone photo at full size is 2 to 8 MB
@@ -51,7 +54,9 @@ async function mediaOf(tenantId, incidentId, mid) {
 
 router.get('/incidents/:id/photos', patrol, needs('view_cases'), async (req, res) => {
   await caseOf(req.auth.tenantId, paramId(req));
-  res.json({ data: await listFor(pool, req.auth.tenantId, paramId(req)) });
+  const data = await listFor(pool, req.auth.tenantId, paramId(req));
+  await audit(pool, req, 'view_photos', 'incidents', paramId(req), { photos: data.length }); // captions can describe the patient
+  res.json({ data });
 });
 
 /**

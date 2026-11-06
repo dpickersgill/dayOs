@@ -27,8 +27,13 @@ const staffInjury = require('../lib/staffinjury');
 const COND = require('../lib/caseconditions');
 const { baseUrl } = require('../lib/baseurl');
 const { typeLabel } = require('../lib/attractions');
+const PX = require('../lib/patientaccess');
+const RR = require('../lib/resetrules');
 
 const router = express.Router();
+// Every /incidents/:id address on this router needs the patient-record rule first (lib/patientaccess.js): the case is the
+// person's own recent work, or they made the fresh check in the last 30 minutes. Read from the id Express matched.
+router.use('/incidents/:id', require('../lib/patientaccess').byParam);
 // Incident records can contain injury details about guests, so access is limited to patrol and managers.
 const patrol = requireRole('patrol', 'manager');
 const PA = require('../lib/patrolaccess');
@@ -134,7 +139,7 @@ async function createCase(req, body) {
         );
         // The person filing the report is the lead responder unless someone else is named later.
         if (req.auth.staffId) {
-          await conn.query("INSERT INTO incident_responders (tenant_id, incident_id, staff_id, role) VALUES (?, ?, ?, 'lead')", [req.auth.tenantId, r.insertId, req.auth.staffId]);
+          await conn.query("INSERT INTO incident_responders (tenant_id, incident_id, staff_id, role, added_by, added_at) VALUES (?, ?, ?, 'lead', ?, UTC_TIMESTAMP())", [req.auth.tenantId, r.insertId, req.auth.staffId, req.auth.userId]);
         }
         let patientId = null;
         if (patient && (patient.first_name || patient.last_name || patient.chief_complaint)) {
@@ -174,7 +179,12 @@ const filters = (req) => {
 };
 
 // A page of cases at a time (500 at most), with the total, so a busy season's older cases can still be reached (2026.11.11).
+// Without the fresh check, the list shows case number, date, place, category, severity, state, disposition and patient
+// count for every case, and the summary only for cases the person may open without the check (lib/patientaccess.js):
+// the summary is often the chief complaint and can hold a name. Searching (q) can find a patient by name, so it always
+// needs the check.
 router.get('/incidents', patrol, needs('view_cases'), async (req, res) => {
+  if (req.query.q) PX.searchCheck(req);
   const { where, params } = filters(req);
   const limit = Math.min(Math.max(Math.trunc(Number(req.query.limit)) || 500, 1), 500);
   const offset = Math.max(Math.trunc(Number(req.query.offset)) || 0, 0);
@@ -189,7 +199,8 @@ router.get('/incidents', patrol, needs('view_cases'), async (req, res) => {
     : Number((await rows(pool, `SELECT COUNT(*) AS n FROM incidents i WHERE ${where}`, params))[0].n);
   // A search can find a patient by name: it is on the access log, with the cases it found (never the words searched).
   if (req.query.q) await audit(pool, req, 'search', 'incidents', null, { matches: data.length, ids: data.slice(0, 50).map((r) => r.id) });
-  res.json({ data: data.map(withNumber), total, offset, limit });
+  const may = await PX.openable(pool, req, data.map((r) => r.id));
+  res.json({ data: data.map((r) => PX.trimRow(withNumber(r), may)), total, offset, limit });
 });
 
 // ---------------------------------------------------------------- access log (who looked at patient records)
@@ -223,7 +234,12 @@ const csvCell = (v) => {
 const toCsv = (cols, data) => [cols.join(','), ...data.map((r) => cols.map((c) => csvCell(r[c])).join(','))].join('\r\n');
 
 /** CSV for insurers and state reporting. Names and free text (the summary can hold a name) stay out of it. */
+// A search in an export can single out a patient by name: it needs the records check too, and is on the access log.
+const exportSearch = async (req, data, what) => {
+  if (req.query.q) await audit(pool, req, 'search', 'incidents', null, { export: what, matches: data.length, ids: data.slice(0, 50).map((r) => r.id).filter(Boolean) });
+};
 router.get('/incidents.csv', patrol, needs('reports'), stepUp('download case records'), async (req, res) => {
+  PX.searchCheck(req); // a full export is every case at once: the records check, searched or not (Dan, 2026-11-05)
   const { where, params } = filters(req);
   const data = await rows(
     pool,
@@ -234,16 +250,18 @@ router.get('/incidents.csv', patrol, needs('reports'), stepUp('download case rec
   );
   const out = data.map((r) => ({ ...r, case_number: caseNumber(r) }));
   const cols = ['case_number', 'id', 'occurred_at', 'location', 'category', 'severity', 'disposition', 'status', 'report_state', 'patients'];
-  await audit(pool, req, 'export', 'incidents', null, { rows: data.length });
+  await audit(pool, req, 'export', 'incidents', null, { file: 'incidents.csv', rows: data.length, cases: new Set(data.map((r) => r.id)).size, fresh: true });
+  await exportSearch(req, data, 'incidents.csv');
   res.set('Content-Type', 'text/csv; charset=utf-8').set('Content-Disposition', 'attachment; filename="incidents.csv"').send(toCsv(cols, out));
 });
 
 /** One row per patient with structured fields only (no names, no free text), for injury statistics. */
 router.get('/patients.csv', patrol, needs('reports'), stepUp('download patient statistics'), async (req, res) => {
+  PX.searchCheck(req); // as incidents.csv
   const { where, params } = filters(req);
   const data = await rows(
     pool,
-    `SELECT i.season, i.seq, i.occurred_at, p.age_years, p.sex, p.activity, p.ability, p.helmet, p.rental_equipment, p.disposition,
+    `SELECT i.id, i.season, i.seq, i.occurred_at, p.age_years, p.sex, p.activity, p.ability, p.helmet, p.rental_equipment, p.disposition,
             (SELECT GROUP_CONCAT(CONCAT(j.body_region, ':', j.injury_type) SEPARATOR ' | ') FROM incident_injuries j WHERE j.tenant_id = p.tenant_id AND j.patient_id = p.id AND j.voided_at IS NULL) AS injuries
      FROM incident_patients p JOIN incidents i ON i.id = p.incident_id AND i.tenant_id = p.tenant_id
      WHERE ${where} AND p.voided_at IS NULL ORDER BY i.occurred_at, p.id`,
@@ -251,7 +269,8 @@ router.get('/patients.csv', patrol, needs('reports'), stepUp('download patient s
   );
   const out = data.map((r) => ({ ...r, case_number: caseNumber(r) }));
   const cols = ['case_number', 'occurred_at', 'age_years', 'sex', 'activity', 'ability', 'helmet', 'rental_equipment', 'disposition', 'injuries'];
-  await audit(pool, req, 'export', 'incident_patients', null, { rows: data.length });
+  await audit(pool, req, 'export', 'incident_patients', null, { file: 'patients.csv', rows: data.length, cases: new Set(data.map((r) => r.id)).size, fresh: true });
+  await exportSearch(req, data, 'patients.csv');
   res.set('Content-Type', 'text/csv; charset=utf-8').set('Content-Disposition', 'attachment; filename="patients.csv"').send(toCsv(cols, out));
 });
 
@@ -541,6 +560,17 @@ router.patch('/incidents/:id', patrol, needs('create_case'), validate(partialOf(
   await tx(async (conn) => {
     const inc = await editableCase(conn, req, id);
     const body = { ...req.body };
+    // Who wrote the report (reported_by_staff) never opens a case (lib/patientaccess.js counts only the create row and
+    // submitted_by). Changing it is for an approver, the case's creator, or someone already on the case before the change;
+    // the old and new names are logged (feat/auth-hardening H1).
+    if (body.reported_by_staff !== undefined && (body.reported_by_staff || null) !== (inc.reported_by_staff ? Number(inc.reported_by_staff) : null)) {
+      const creator = await one(conn, "SELECT user_id FROM audit_log WHERE tenant_id = ? AND entity = 'incidents' AND entity_id = ? AND action = 'create' ORDER BY id LIMIT 1", [req.auth.tenantId, id]);
+      const onCase = req.auth.staffId && await one(conn, 'SELECT id FROM incident_responders WHERE tenant_id = ? AND incident_id = ? AND staff_id = ? AND voided_at IS NULL', [req.auth.tenantId, id, req.auth.staffId]);
+      const allowed = (creator && Number(creator.user_id) === req.auth.userId) || onCase || (await PA.can(pool, req, 'approve_case'));
+      if (!allowed) throw forbidden('Only an approver, or someone on this case, can change who wrote the report');
+      if (body.reported_by_staff && !(await one(conn, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, body.reported_by_staff]))) throw notFound('Staff member');
+      await audit(conn, req, 'reporter_change', 'incidents', id, { from_staff: inc.reported_by_staff ? Number(inc.reported_by_staff) : null, to_staff: body.reported_by_staff || null });
+    }
     // Once a report has been signed off, its kind of case stays: changing it could take it out of review.
     if (body.category && body.category !== inc.category && Number(inc.review_round) > 0) throw conflict('The type of case cannot change after the report has been signed off. Add a note if it was recorded wrongly.');
     if (body.occurred_at && seasonFor(body.occurred_at.slice(0, 10)) !== inc.season) delete body.occurred_at; // the case number stays with its season
@@ -1360,9 +1390,10 @@ async function addResponder(conn, req, id, staffId, role) {
   if (role === 'lead') await conn.query("UPDATE incident_responders SET role = 'assist' WHERE tenant_id = ? AND incident_id = ? AND role = 'lead' AND voided_at IS NULL", [req.auth.tenantId, id]);
   // Someone marked entered in error and then added again gets a new row: the struck-through one stays on the record with
   // its reason (one live row per person per case: uq_iresp_live). Adding someone already on the case changes their role.
+  // Who added the responder and when (lib/patientaccess.js LINK_RULE): the first add is kept when someone is added again.
   const [r] = await conn.query(
-    'INSERT INTO incident_responders (tenant_id, incident_id, staff_id, role) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE role = VALUES(role), id = LAST_INSERT_ID(id)',
-    [req.auth.tenantId, id, staffId, role],
+    'INSERT INTO incident_responders (tenant_id, incident_id, staff_id, role, added_by, added_at) VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE role = VALUES(role), id = LAST_INSERT_ID(id)',
+    [req.auth.tenantId, id, staffId, role, req.auth.userId],
   );
   await audit(conn, req, 'add_responders', 'incidents', id, { staff_id: staffId, role });
   return r.insertId;
@@ -1405,6 +1436,13 @@ router.post('/incidents/:id/responders/me', patrol, needs('create_case'), valida
         await conn.query('UPDATE users SET person_id = ? WHERE tenant_id = ? AND id = ?', [personId, t, user.id]);
       }
       const existing = await one(conn, 'SELECT id FROM staff WHERE tenant_id = ? AND person_id = ?', [t, personId]);
+      // Never a link to a staff record above Patrol (Admin, Manager, Approver) from here: that would hand this login a
+      // patrol leader's access. Only the owner or a roster Admin links a login to one, in Team and logins (614).
+      if (existing && RR.ABOVE_PATROL.includes(await RR.levelOfStaff(conn, t, existing.id))) {
+        const err = forbidden('Your login is not linked to your patrol record yet, and that record is a patrol leader\u2019s. Ask the owner or a patrol Admin to link it in Settings, Team and logins.');
+        err.details = { code: 'link_refused' };
+        throw err;
+      }
       if (existing) staffId = existing.id;
       else {
         const [s] = await conn.query("INSERT INTO staff (tenant_id, person_id, status, in_workforce) VALUES (?, ?, 'active', 0)", [t, personId]);
@@ -1413,6 +1451,7 @@ router.post('/incidents/:id/responders/me', patrol, needs('create_case'), valida
       await conn.query('UPDATE users SET staff_id = ? WHERE tenant_id = ? AND id = ?', [staffId, t, user.id]);
       linked = true;
       await audit(conn, req, 'link_staff', 'users', user.id, { staff_id: staffId, created_staff: created, person_id: personId, from: 'responder_me' });
+      await RR.linked(conn, req, user.id, staffId, await RR.levelOfStaff(conn, t, staffId), 'responder_me');
     }
     // on the patrol roster (department patrol), so the name shows as a patroller from now on
     if (!(await one(conn, 'SELECT id FROM patrol_members WHERE tenant_id = ? AND staff_id = ?', [t, staffId]))) {

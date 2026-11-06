@@ -40,6 +40,8 @@ async function drawLogins(box) {
         { head: 'Staff record', cell: (u) => (u.staff_id ? staffName.get(u.staff_id) || `#${u.staff_id}` : h('span', { class: 'muted' }, 'Not linked')) },
         { head: 'Status', cell: (u) => state(u.active ? 'Active' : 'Deactivated', u.active ? 'good' : 'neutral') },
         { head: 'Two-step', cell: (u) => (u.mfa_enabled ? state(Number(u.passkeys) ? (u.app_enabled ? 'Passkey and app' : 'Passkey') : 'App', 'good') : h('span', { class: 'muted' }, 'Off')) },
+        // Passkeys first for leaders (feat/auth-hardening): owners, managers, patrol directors and admins are asked for two.
+        { head: 'Passkeys', cell: (u) => { const n = Number(u.passkeys) || 0; const lead = ['owner', 'manager'].includes(u.role) || ['admin', 'manager'].includes(u.patrol_level); return h('span', { class: `passkey-count${lead && n < 2 ? ' short' : ''}`, 'data-passkeys': String(n) }, lead ? (n >= 2 ? '2 of 2' : `${n} of 2`) : String(n)); } },
         { head: 'Access ends', cell: (u) => (u.access_ends_on ? (String(u.access_ends_on).slice(0, 10) < today() ? state(`Ended ${String(u.access_ends_on).slice(0, 10)}`, 'neutral') : String(u.access_ends_on).slice(0, 10)) : h('span', { class: 'muted' }, '-')) },
         { head: '', actions: true, cell: (u) => (canManage(u) ? [
           button('Edit', () => editLogin(u, reload), { small: true, label: `Edit ${u.username}` }),

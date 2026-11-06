@@ -122,7 +122,7 @@ router.post('/:id/flags', requireRole('manager'), validate(flagBody), async (req
 router.delete('/:id/flags/:flagId', requireRole('manager'), async (req, res) => {
   const { tenantId } = req.auth;
   const p = await person(req);
-  const flagId = Number(req.params.flagId);
+  const flagId = (require('../lib/util').canonId(req.params.flagId) || 0);
   const [r] = await pool.query('UPDATE person_flags SET cleared_at = NOW(), cleared_by_name = ? WHERE tenant_id = ? AND person_id = ? AND id = ? AND cleared_at IS NULL', [await actor(req), tenantId, p.id, flagId]);
   if (!r.affectedRows) throw notFound('Flag');
   await audit(pool, req, 'flag_clear', 'people', p.id, { flag_id: flagId });
@@ -147,9 +147,9 @@ router.post('/:id/notes', requireRole(...front), validate(noteBody), async (req,
 
 router.delete('/:id/notes/:noteId', requireRole('manager'), async (req, res) => {
   const p = await person(req);
-  const [r] = await pool.query('DELETE FROM person_notes WHERE tenant_id = ? AND person_id = ? AND id = ?', [req.auth.tenantId, p.id, Number(req.params.noteId)]);
+  const [r] = await pool.query('DELETE FROM person_notes WHERE tenant_id = ? AND person_id = ? AND id = ?', [req.auth.tenantId, p.id, (require('../lib/util').canonId(req.params.noteId) || 0)]);
   if (!r.affectedRows) throw notFound('Note');
-  await audit(pool, req, 'note_delete', 'people', p.id, { note_id: Number(req.params.noteId) });
+  await audit(pool, req, 'note_delete', 'people', p.id, { note_id: (require('../lib/util').canonId(req.params.noteId) || 0) });
   res.json({ ok: true });
 });
 

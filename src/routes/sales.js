@@ -20,7 +20,7 @@ const sellers = ['counter', 'manager'];
 // counter refund limit like counter staff.
 const SA = require('../lib/schoolaccess');
 const LESSON_ONLY_SQL = "NOT EXISTS (SELECT 1 FROM order_items x WHERE x.tenant_id = o.tenant_id AND x.order_id = o.id AND x.line_kind <> 'lesson')";
-const lessonOrder = SA.directorFor(sellers, async (req) => Boolean(await one(pool, `SELECT o.id FROM orders o WHERE o.tenant_id = ? AND o.id = ? AND ${LESSON_ONLY_SQL}`, [req.auth.tenantId, Number(req.params.id) || 0])),
+const lessonOrder = SA.directorFor(sellers, async (req) => Boolean(await one(pool, `SELECT o.id FROM orders o WHERE o.tenant_id = ? AND o.id = ? AND ${LESSON_ONLY_SQL}`, [req.auth.tenantId, (require('../lib/util').canonId(req.params.id) || 0)])),
   'A ski school director can see and refund lesson orders only');
 
 // The purchaser's details (name, address, phone, ...). Same fields as the customer record; names are required once any detail is sent.
@@ -403,7 +403,7 @@ router.post('/orders/:id/refund', lessonOrder, validate(refundBody), async (req,
 
 /** A manager retries a card refund that Stripe refused or could not be reached for (same idempotency key: never twice). */
 router.post('/orders/:id/refunds/:rid/retry', requireRole('manager'), async (req, res) => {
-  const r = await one(pool, 'SELECT id, card_status FROM order_refunds WHERE tenant_id = ? AND order_id = ? AND id = ?', [req.auth.tenantId, paramId(req), Number(req.params.rid)]);
+  const r = await one(pool, 'SELECT id, card_status FROM order_refunds WHERE tenant_id = ? AND order_id = ? AND id = ?', [req.auth.tenantId, paramId(req), (require('../lib/util').canonId(req.params.rid) || 0)]);
   if (!r) throw notFound('Refund');
   if (!['failed', 'pending'].includes(r.card_status)) throw conflict('That refund is not waiting to go back to a card');
   const s = await cardrefund.send(req.auth.tenantId, r.id);

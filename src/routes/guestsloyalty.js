@@ -30,7 +30,7 @@ router.patch('/loyalty/settings', manager, validate(Y.extraSchema), async (req, 
 // ---------------------------------------------------------------- badges for the welcome-back card (WINDOW calls the lib directly)
 router.get('/people/:id/badges', desk, async (req, res) => {
   const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day || '')) ? req.query.day : todayIn(await tzOf(req.auth.tenantId));
-  res.json({ data: await Y.badgesFor(pool, req.auth.tenantId, Number(req.params.id), day) });
+  res.json({ data: await Y.badgesFor(pool, req.auth.tenantId, (require('../lib/util').canonId(req.params.id) || 0), day) });
 });
 
 // ---------------------------------------------------------------- reports for managers

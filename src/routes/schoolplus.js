@@ -79,7 +79,7 @@ router.get('/students/:id/card', requireRole(...school), async (req, res) => {
 router.put('/students/:id/skills/:skillId', requireRole('instructor', 'manager'), validate(z.object({ passed: z.boolean(), date: dateStr.optional() })), async (req, res) => {
   const { tenantId } = req.auth;
   const personId = paramId(req);
-  const skillId = Number(req.params.skillId);
+  const skillId = (require('../lib/util').canonId(req.params.skillId) || 0);
   if (!(await one(pool, 'SELECT id FROM people WHERE tenant_id = ? AND id = ?', [tenantId, personId]))) throw notFound('Student');
   if (!(await one(pool, 'SELECT id FROM school_skills WHERE tenant_id = ? AND id = ?', [tenantId, skillId]))) throw notFound('Skill');
   if (req.body.passed) {

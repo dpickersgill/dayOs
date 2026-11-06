@@ -19,7 +19,7 @@ router.get('/review/settings', patrol, async (req, res) => {
   const t = req.auth.tenantId;
   const s = await R.settingsOf(pool, t);
   const canEdit = await R.canManage(pool, req, s);
-  const canEditGroup = (await require('../lib/patrolaccess').levelOf(pool, req)) === 'admin';
+  const canEditGroup = await require('../lib/resetrules').rosterAdmin(pool, req); // the owner or a roster Admin (feat/auth-hardening)
   // Who could be in the group: anyone who can open Patrol (patrol logins, owners and managers).
   const candidates = canEdit ? await rows(pool, `SELECT u.id, COALESCE(NULLIF(TRIM(CONCAT(COALESCE(p.first_name, sp.first_name, ''), ' ', COALESCE(p.last_name, sp.last_name, ''))), ''), u.email, u.username) AS name, u.role
       FROM users u LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id LEFT JOIN staff st ON st.tenant_id = u.tenant_id AND st.id = u.staff_id LEFT JOIN people sp ON sp.tenant_id = st.tenant_id AND sp.id = st.person_id
@@ -46,7 +46,8 @@ router.put('/review/settings', patrol, validate(z.object({
   // (who may be about to submit a report) cannot change them: only a patrol admin can.
   const shape = (reviewers, categories) => JSON.stringify({ r: reviewers.map((r) => `${r.user_id}${r.lead ? '*' : ''}`).sort(), c: [...categories].sort() });
   const groupChanged = shape(before.reviewers.filter((r) => r.active), before.categories) !== shape(ids.map((id) => ({ user_id: id, lead: b.reviewers.some((r) => r.user_id === id && r.lead) })), b.categories);
-  const admin = (await require('../lib/patrolaccess').levelOf(pool, req)) === 'admin';
+  // Who reviews is a patient-record decision: the owner or a roster Admin, never a manager's implied Admin (feat/auth-hardening).
+  const admin = await require('../lib/resetrules').rosterAdmin(pool, req);
   if (groupChanged && !admin) throw forbidden('Only a patrol admin can change who reviews, the Patrol Director or which kinds of case are reviewed');
   if (b.reviewers.filter((r) => r.lead).length > 1) throw bad('Choose one Patrol Director');
   if (ids.length) {
@@ -84,10 +85,13 @@ router.get('/review/queue', patrol, async (req, res) => {
     FROM incidents i LEFT JOIN users u ON u.tenant_id = i.tenant_id AND u.id = i.submitted_by
       LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id LEFT JOIN staff st ON st.tenant_id = u.tenant_id AND st.id = u.staff_id LEFT JOIN people sp ON sp.tenant_id = st.tenant_id AND sp.id = st.person_id
     WHERE i.tenant_id = ? AND i.report_state = 'submitted' ORDER BY i.submitted_at LIMIT 200`, [t]);
+  // Reviewers see the summaries once they have made the records check for this session (one check per review sitting);
+  // before it, only for cases they may open without it (lib/patientaccess.js).
+  const may = await require('../lib/patientaccess').openable(pool, req, list.map((r) => r.id));
   res.json({
-    can_review: true, nudge_hours: s.nudge_hours,
+    can_review: true, nudge_hours: s.nudge_hours, records_checked: req.auth.recordsChecked,
     data: list.map((r) => ({
-      id: r.id, case_number: R.caseNo(r), occurred_at: r.occurred_at, location: r.location, category: r.category, severity: r.severity, summary: r.summary,
+      id: r.id, case_number: R.caseNo(r), occurred_at: r.occurred_at, location: r.location, category: r.category, severity: r.severity, summary: may.has(r.id) ? r.summary : null, summary_hidden: !may.has(r.id),
       submitted_at: r.submitted_at, submitted_by: r.submitted_by_name, own: Number(r.submitted_by) === req.auth.userId,
       waiting_hours: r.submitted_at ? Math.max(0, Math.floor((now - Date.parse(`${String(r.submitted_at).replace(' ', 'T')}Z`)) / 3_600_000)) : null,
       escalated: Boolean(r.escalated_at), round: r.review_round,

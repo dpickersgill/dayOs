@@ -87,7 +87,7 @@ async function familySession(M, email) {
   let m = null; // sent after the reply
   for (let i = 0; i < 100 && !m; i += 1) { m = mails.slice(before).find((x) => x.To === email); if (!m) await new Promise((r) => setTimeout(r, 20)); }
   if (!m) return null;
-  return ok(await M.pub('POST', '/family/session', { body: { token: /\?t=([A-Za-z0-9_-]+)/.exec(m.TextBody)[1] } })).session;
+  return ok(await M.pub('POST', '/family/session', { body: { token: /[#?]t=([A-Za-z0-9_-]+)/.exec(m.TextBody)[1] } })).session;
 }
 /** Registers and pays for a program place online (the Stripe webhook comes back paid). */
 async function payProgram(M, P, contact, child, extra = {}) {

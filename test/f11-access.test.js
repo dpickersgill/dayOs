@@ -92,6 +92,8 @@ test.before(async () => {
   mailer.settings.apiBase = `http://127.0.0.1:${stub.address().port}`;
   await new Promise((r) => { server = createApp().listen(0, '127.0.0.1', r); });
   base = `http://localhost:${server.address().port}`;
+  // Passkey answers are accepted only from PUBLIC_URL and WEBAUTHN_ORIGINS (feat/auth-hardening): this server's own address is listed.
+  process.env.WEBAUTHN_ORIGINS = base;
 });
 test.after(async () => { await new Promise((r) => server.close(r)); await new Promise((r) => stub.close(r)); await pool.end(); });
 
@@ -189,6 +191,8 @@ test('ACC-5: someone taken off the patrol roster has no patrol access', async ()
   const lee = await user(m, 'patrol', { staff: true });
   await pool.query("INSERT INTO patrol_members (tenant_id, staff_id, level, access_level) VALUES (?, ?, 'patroller', 'patrol')", [m.id, lee.staffId]);
   const leeTok = await login(m.slug, lee.email);
+  // Someone else's case: one patient-record check first (feat/auth-hardening).
+  assert.equal((await api('POST', '/auth/step-up', { token: leeTok, body: { scope: 'records', password: PW } })).status, 200);
   const inc = await api('POST', '/patrol/incidents', { token: m.owner, body: { occurred_at: '2026-10-31 10:00:00', location: 'Upper Ridge', category: 'injury', summary: 'Fall' } });
   assert.equal(inc.status, 201, inc.text);
   assert.equal((await api('GET', `/patrol/incidents/${inc.body.id}`, { token: leeTok })).status, 200, 'on the roster: opens the case');

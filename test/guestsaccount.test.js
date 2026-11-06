@@ -68,7 +68,7 @@ async function signIn(email) {
   let m; // the link is sent after the reply (2026.11.11), so wait a moment for it
   for (let i = 0; i < 100 && !m; i += 1) { m = mails.slice(before).find((x) => x.To === email); if (!m) await new Promise((r) => setTimeout(r, 20)); }
   assert.ok(m, 'a sign-in link was emailed');
-  const token = /\?t=([A-Za-z0-9_-]+)/.exec(m.TextBody)[1];
+  const token = /[#?]t=([A-Za-z0-9_-]+)/.exec(m.TextBody)[1];
   const s = await pub('POST', '/family/session', { body: { token } });
   assert.equal(s.status, 200);
   return s.body.session;

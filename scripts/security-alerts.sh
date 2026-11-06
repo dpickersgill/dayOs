@@ -8,6 +8,11 @@
 #   4. Data exports (more than 10 in an hour): someone pulling data out in bulk
 #   5. Server errors (more than 20 answers of 500 or more in 5 minutes)
 #   6. A scheduled job call refused (any): the job is misconfigured, or someone is calling the job address
+#   7. Failed staff sign-ins (more than 30 in 5 minutes): a slow password spray across many logins never trips the
+#      lockout or "too many" alert, so the sign_in_failed audit events are counted (feat/auth-hardening)
+#   8. Failed console sign-ins (more than 2 in 15 minutes): someone trying the platform console
+# What to do about each: RUNBOOK.md, "Security alerts". A new metric needs a few minutes before an alert can use it: if
+# a policy says "not yet", run this again 10 minutes later.
 # It also turns on Data Access audit logs for Secret Manager and Cloud SQL, so every read of a secret and every
 # database administration call is recorded by Google (Logging, Logs Explorer, "data_access").
 #   --dry-run   print what would change, change nothing
@@ -33,6 +38,8 @@ ALERTS=(
   "summitops-exports|Data exports in bulk|$RUN AND jsonPayload.logName=\"summitops-audit\" AND jsonPayload.action=~\"^export\"|10|3600"
   "summitops-5xx-burst|Server errors in a burst|$RUN AND httpRequest.status>=500|20|300"
   "summitops-job-refused|A scheduled job call refused|$RUN AND jsonPayload.job_auth=\"refused\"|0|300"
+  "summitops-signin-failures|Failed staff sign-ins|$RUN AND jsonPayload.logName=\"summitops-audit\" AND jsonPayload.action=\"sign_in_failed\" AND NOT jsonPayload.console=true|30|300"
+  "summitops-console-signin-failures|Failed console sign-ins|$RUN AND jsonPayload.logName=\"summitops-audit\" AND jsonPayload.console=true AND jsonPayload.action=\"sign_in_failed\"|2|900"
 )
 
 step "Log-based metrics and alert policies"
@@ -68,6 +75,7 @@ for a in "${ALERTS[@]}"; do
   "documentation": { "content": "RUNBOOK.md, Security alerts, says what to do.", "mimeType": "text/markdown" }
 }
 JSON
+  # A metric made a moment ago may not be ready for a policy yet: say so, count it, and carry on (run the script again later).
   if run "${ALPHA[@]}" policies create --policy-from-file="$file" >/dev/null 2>&1; then
     echo "  made: $title"
   else

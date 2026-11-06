@@ -134,7 +134,7 @@ router.patch('/:id', validate(z.object(fields).partial()), async (req, res) => {
 /** The hours worked and average employees for the year's summary, and who certified it. */
 router.put('/years/:year', validate(z.object({ hours_worked: z.number().int().min(0).max(100_000_000).nullable(), avg_employees: z.number().int().min(0).max(100_000).nullable(), certified_by: z.string().trim().max(150).nullable().optional(), certified_at: dateStr.nullable().optional() })), async (req, res) => {
   const t = req.auth.tenantId;
-  const year = Number(req.params.year);
+  const year = (require('../lib/util').canonId(req.params.year) || 0);
   if (!(year >= 2000 && year <= 2100)) throw bad('Choose a year');
   const b = req.body;
   await pool.query(`INSERT INTO staff_injury_years (tenant_id, year, hours_worked, avg_employees, certified_by, certified_at) VALUES (?, ?, ?, ?, ?, ?)

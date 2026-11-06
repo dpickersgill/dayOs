@@ -134,7 +134,7 @@ test('"Where you are signed in": open sessions only, with last use, when each en
   assert.ok(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(sec.now));
   const mins = (a, b) => (Date.parse(`${a.replace(' ', 'T')}Z`) - Date.parse(`${b.replace(' ', 'T')}Z`)) / 60000;
   assert.ok(Math.abs(mins(sec.now, o.last_seen) - 12) < 1.5, 'last used 12 minutes ago');
-  assert.ok(Math.abs(mins(o.ends_at, o.last_seen) - 60) < 0.1, 'ends an hour after its last use');
+  assert.ok(Math.abs(mins(o.ends_at, o.last_seen) - 30) < 0.1, 'an owner\'s session ends 30 minutes after its last use (feat/auth-hardening)');
   // Near the 8-hour end, the end comes first.
   await pool.query('UPDATE user_sessions SET expires_at = DATE_ADD(UTC_TIMESTAMP(), INTERVAL 5 MINUTE) WHERE id_hash = ?', [hash(other)]);
   const o2 = (await api('GET', '/auth/security', { token: here })).body.sessions.find((s) => s.id === hash(other).slice(0, 16));
@@ -189,6 +189,7 @@ test('in the browser: Remember me, show password, two tabs, and the 10-minute ta
     assert.equal(await eye.getAttribute('aria-pressed'), 'true');
     await eye.click();
     assert.equal(await tab1.getAttribute('input[name=password]', 'type'), 'password');
+    await tab1.check('input[name=own_device]'); // Remember me shows once "This is my own device" is ticked (feat/auth-hardening)
     await tab1.check('input[name=remember]');
     // Keep tab 1 in use while it signs in (the fast clock would lock it).
     const busy = setInterval(() => { tab1.mouse.move(Math.random() * 300, Math.random() * 300).catch(() => {}); }, 150);
@@ -252,6 +253,7 @@ test('in the browser: Remember me, show password, two tabs, and the 10-minute ta
     await c1.fill('input[name=tenant]', A.slug);
     await c1.fill('input[name=login]', `owner@${A.slug}.test`);
     await c1.fill('input[name=password]', PW);
+    await c1.check('input[name=own_device]'); // Remember me shows once "This is my own device" is ticked (feat/auth-hardening)
     await c1.check('input[name=remember]');
     await c1.click('form[data-step=signin] button[type=submit]');
     await c1.waitForSelector('#main .page-head', { timeout: 15000 });

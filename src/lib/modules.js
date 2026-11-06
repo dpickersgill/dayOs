@@ -97,7 +97,7 @@ function moduleFor(path) {
 /** Signed-in requests: refuse the ones that belong to an app this mountain has turned off. */
 function moduleGate(req, _res, next) {
   (async () => {
-    const path = req.path;
+    const path = require('./pathcheck').normal(req.path); // capitals or a trailing slash reach the same routes
     const key = moduleFor(path);
     if (!key) return;
     const { on } = await stateOf(req.auth.tenantId);
