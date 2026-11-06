@@ -12,6 +12,13 @@ const pool = mysql.createPool({
   database: config.db.database,
   connectionLimit: config.db.connectionLimit,
   waitForConnections: true,
+  // A connection left idle is closed by us after 5 minutes, before the database or the network path can drop it quietly.
+  // A quietly dropped connection fails the next query at once (seen as /readyz answering 503 in a few ms, Nov 5 and 6, 2026).
+  // One idle connection is kept warm so a quiet service still answers its first request without opening a new one.
+  maxIdle: 1,
+  idleTimeout: 5 * 60 * 1000,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 30 * 1000,
   // Return DATE / DATETIME as plain strings so no timezone conversion happens.
   dateStrings: true,
   // Keep BIGINT ids as numbers (they stay well under 2^53 for this workload).

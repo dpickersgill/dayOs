@@ -200,14 +200,23 @@ function createApp() {
 
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
   app.get('/readyz', async (_req, res) => {
-    try {
-      await pool.query('SELECT 1');
-    } catch (_) {
+    // One retry: a connection the database or the network dropped while idle fails at once, and the pool replaces it.
+    let dbErr = null;
+    for (let i = 0; i < 2; i += 1) {
+      try { await pool.query('SELECT 1'); dbErr = null; break; } catch (e) { dbErr = e; }
+    }
+    if (dbErr) {
+      console.error(JSON.stringify({ severity: 'ERROR', message: 'readyz: database not reachable', code: dbErr.code || null, errno: dbErr.errno || null }));
       return res.status(503).json({ ok: false, reason: 'database' });
     }
     // The database is reachable; is it migrated for this version?
     // Every step of this release's migration finished (src/lib/schemaready.js), not only its last column.
-    if (!(await require('./lib/schemaready').migrated(pool))) return res.status(503).json({ ok: false, reason: 'run npm run migrate', version: release.VERSION });
+    let ready = false;
+    try { ready = await require('./lib/schemaready').migrated(pool); } catch (e) {
+      console.error(JSON.stringify({ severity: 'ERROR', message: 'readyz: migration check failed', code: e.code || null, errno: e.errno || null }));
+    }
+    if (!ready) console.error(JSON.stringify({ severity: 'ERROR', message: 'readyz: not migrated for this version', version: release.VERSION }));
+    if (!ready) return res.status(503).json({ ok: false, reason: 'run npm run migrate', version: release.VERSION });
     // Staging also says which build it runs, so promote.sh can check it is putting live exactly what was checked.
     return res.json({ ok: true, version: release.VERSION, ...(config.staging ? { stage: 'staging', build: release.BUILD } : {}) });
   });
