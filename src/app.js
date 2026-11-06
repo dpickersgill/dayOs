@@ -381,7 +381,9 @@ function createApp() {
   api.use('/patrol', require('./routes/patrolsweep').router);
   api.use('/patrol', require('./routes/patrolmeds').router);
   api.use('/patrol', require('./routes/patrolrecords').router);
+  api.use('/patrol', require('./routes/patrolpark')); // a case linked to a terrain park feature
   api.use('/park', park);
+  api.use('/park', require('./routes/parkrecords')); // photos, opening an area, history, the day record
   api.use('/ops', opsRoutes);
   api.use('/ops', maintenance);
   api.use('/ops', require('./routes/liftchecks').router); // 2026.11.10: lift inspections by lift type

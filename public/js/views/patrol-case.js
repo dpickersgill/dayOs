@@ -21,6 +21,7 @@ import { live, lateNote, treatmentName, atTime } from '../care-text.js';
 import { searchPanel, recordsPanel } from './patrol-search.js';
 import { legalHoldControl } from './patrol-records.js';
 import { photosPanel } from './patrol-photos.js';
+import { parkFeatureBox } from './patrol-park.js';
 import { leaveDialog, leavePanel, skipLabel } from '../leavecheck.js';
 import { conditionsBox, contactsPanel, liftBox, attractionBox, rentalsPanel } from './patrol-conditions.js';
 import { kitUsePanel } from './patrol-kits.js';
@@ -453,7 +454,7 @@ export async function renderCase(root, id, { roster = [], me = {}, mode: wanted,
       ...pts.map((p) => [`patient-${p.id}`, `Patient form: ${p.first_name} ${p.last_name}`.trim(), patientCard(c, p, editable)]),
       ['witness', 'Witnesses', caseSection(c, editable, 'witness', witnessList(c, editable))],
       version ? null : ['scene', 'Scene diagram', scenePanel({ c, editable, id, onDone: load, version }) || h('div', { hidden: true })],
-      ['location', 'Location', caseSection(c, editable, 'location', [liftBox({ c, editable, lifts, id, onDone: load }), attractionBox({ c, editable, attractions, id, onDone: load })])],
+      ['location', 'Location', caseSection(c, editable, 'location', [liftBox({ c, editable, lifts, id, onDone: load }), attractionBox({ c, editable, attractions, id, onDone: load }), version ? null : parkFeatureBox({ c, editable, id })])],
       ['conditions', 'Conditions', caseSection(c, editable, 'conditions', conditionsBox({ c, editable, id, onDone: load }), editable ? c.conditions_suggest || {} : {})],
       ['contacts', 'Who was told', contactsPanel({ c, editable, id, onDone: load, redraw })],
       ['rentals', 'Rental gear', rentalsPanel({ c, editable, id, onDone: load })],

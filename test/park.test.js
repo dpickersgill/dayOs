@@ -46,12 +46,24 @@ test.before(async () => {
 });
 test.after(async () => { await new Promise((r) => server.close(r)); await pool.end(); });
 
+// Every inspection answers its feature type's checklist (2026.11.12): this one passes every item.
+let KINDS = null;
+const checks = (kind, result = 'pass') => KINDS.find((k) => k.key === kind).checks.map((c) => ({ key: c.key, result, ...(result === 'fail' ? { note: 'Worn' } : {}) }));
+const inspect = (kind, result, more = {}) => ({ result, kind: 'morning', checklist: checks(kind, result === 'ok' ? 'pass' : 'pass'), ...more });
+async function photo(token, featureId) {
+  const jpeg = Buffer.from('ffd8ffe000104a46494600010100000100010000ffd9', 'hex');
+  const res = await fetch(`${base}/api/v1/park/features/${featureId}/photos`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'image/jpeg' }, body: jpeg });
+  const text = await res.text();
+  assert.equal(res.status, 201, text);
+  return JSON.parse(text).id;
+}
 const spot = (n = 0) => ({ lat: 44.1234 + n * 0.0001, lng: -71.5678 - n * 0.0001 });
 
 test('the catalog: types, areas and features, with crew allowed to edit and others only to look', async () => {
   const kinds = ok(await api('GET', '/park/kinds', { token: T.counter })).data;
+  KINDS = kinds;
   assert.ok(kinds.find((k) => k.key === 'butter_box' && k.portable) && kinds.find((k) => k.key === 'halfpipe' && !k.portable));
-  D.area = ok(await api('POST', '/park/areas', { token: T.staff, body: { name: 'Main Park', level: 'medium' } }), 201).id;
+  D.area = ok(await api('POST', '/park/areas', { token: T.staff, body: { name: 'Main Park', level: 'l' } }), 201).id;
   is(await api('POST', '/park/areas', { token: T.staff, body: { name: 'Main Park' } }), 409, 'duplicate area name');
   is(await api('POST', '/park/features', { token: T.counter, body: { name: 'Nope', kind: 'butter_box' } }), 403, 'a counter login cannot add features');
   is(await api('POST', '/park/features', { token: T.staff, body: { name: 'Bad', kind: 'trampoline' } }), 400, 'unknown type');
@@ -63,7 +75,7 @@ test('the catalog: types, areas and features, with crew allowed to edit and othe
   assert.equal(list.length, 3);
   assert.equal(list.find((f) => f.id === D.hip).portable, false, 'a hip is not portable by default');
   assert.equal(list.find((f) => f.id === D.box).portable, true);
-  ok(await api('PATCH', `/park/features/${D.rail}`, { token: T.staff, body: { dimensions: '14 ft', size: 'l' } }));
+  ok(await api('PATCH', `/park/features/${D.rail}`, { token: T.staff, body: { dimensions: '14 ft', size: 'l', reason: 'Rebuilt longer' } }));
   is(await api('PATCH', `/park/features/${D.rail}`, { token: T.counter, body: { size: 'm' } }), 403);
 });
 
@@ -107,8 +119,9 @@ test('a pin remembers how it was put down: GPS with its accuracy, a tap, or a dr
 
 test('a past day is a record: crew cannot change it but a manager can; tomorrow can be planned; copy a day forward', async () => {
   is(await api('PUT', `/park/placements/${yesterday}/${D.box}`, { token: T.staff, body: spot() }), 403, 'crew cannot edit yesterday');
-  is(await api('PUT', `/park/placements/${yesterday}/${D.box}`, { token: T.manager, body: spot() }), 201, 'a manager can');
-  is(await api('PUT', `/park/placements/${yesterday}/${D.rail}`, { token: T.manager, body: spot(5) }), 201);
+  is(await api('PUT', `/park/placements/${yesterday}/${D.box}`, { token: T.manager, body: spot() }), 400, 'a manager says why');
+  is(await api('PUT', `/park/placements/${yesterday}/${D.box}`, { token: T.manager, body: { ...spot(), reason: 'Missed on the day' } }), 201, 'a manager can, as a late entry');
+  is(await api('PUT', `/park/placements/${yesterday}/${D.rail}`, { token: T.manager, body: { ...spot(5), reason: 'Missed on the day' } }), 201);
   assert.equal(ok(await api('GET', `/park/placements/${yesterday}`, { token: T.staff })).editable, false);
   is(await api('POST', `/park/placements/${today}/copy`, { token: T.staff, body: { from: today } }), 400, 'cannot copy a day onto itself');
   const c = ok(await api('POST', `/park/placements/${today}/copy`, { token: T.staff, body: { from: yesterday } }));
@@ -124,14 +137,14 @@ test('a past day is a record: crew cannot change it but a manager can; tomorrow 
 });
 
 test('inspections move a feature to ready, needs attention or closed, and show on the day', async () => {
-  is(await api('POST', `/park/features/${D.box}/inspections`, { token: T.counter, body: { result: 'ok' } }), 403);
-  is(await api('POST', `/park/features/${D.box}/inspections`, { token: T.staff, body: { result: 'closed' } }), 400, 'a problem needs a note');
-  assert.equal(ok(await api('POST', `/park/features/${D.box}/inspections`, { token: T.staff, body: { result: 'needs_attention', notes: 'Loose bolt' } }), 201).status, 'needs_attention');
+  is(await api('POST', `/park/features/${D.box}/inspections`, { token: T.counter, body: inspect('butter_box', 'ok') }), 403);
+  is(await api('POST', `/park/features/${D.box}/inspections`, { token: T.staff, body: inspect('butter_box', 'closed') }), 400, 'a problem needs a note');
+  assert.equal(ok(await api('POST', `/park/features/${D.box}/inspections`, { token: T.staff, body: inspect('butter_box', 'needs_attention', { notes: 'Loose bolt' }) }), 201).status, 'needs_attention');
   let d = ok(await api('GET', `/park/placements/${today}`, { token: T.staff }));
   assert.equal(d.placed.find((p) => p.feature_id === D.box).feature_status, 'needs_attention');
   assert.equal(d.placed.find((p) => p.feature_id === D.box).inspected_result, 'needs_attention');
   assert.equal(d.placed.find((p) => p.feature_id === D.rail).inspected_result, null, 'not inspected yet today');
-  ok(await api('POST', `/park/features/${D.box}/inspections`, { token: T.staff, body: { result: 'ok', notes: 'Tightened' } }), 201);
+  ok(await api('POST', `/park/features/${D.box}/inspections`, { token: T.staff, body: inspect('butter_box', 'ok', { notes: 'Tightened', fixed: 'Tightened the bolt', photo_ids: [await photo(T.staff, D.box)] }) }), 201);
   d = ok(await api('GET', `/park/placements/${today}`, { token: T.staff }));
   assert.equal(d.placed.find((p) => p.feature_id === D.box).feature_status, 'ready');
   const hist = ok(await api('GET', `/park/features/${D.box}/inspections`, { token: T.patrol })).data;
@@ -141,9 +154,9 @@ test('inspections move a feature to ready, needs attention or closed, and show o
 });
 
 test('retired features cannot be placed or inspected, and one mountain never sees another\'s park', async () => {
-  ok(await api('PATCH', `/park/features/${D.hip}`, { token: T.manager, body: { status: 'retired' } }));
+  ok(await api('POST', `/park/features/${D.hip}/retire`, { token: T.manager, body: { reason: 'Melted out' } }));
   is(await api('PUT', `/park/placements/${today}/${D.hip}`, { token: T.staff, body: spot() }), 409);
-  is(await api('POST', `/park/features/${D.hip}/inspections`, { token: T.staff, body: { result: 'ok' } }), 409);
+  is(await api('POST', `/park/features/${D.hip}/inspections`, { token: T.staff, body: inspect('hip', 'ok') }), 409);
   assert.ok(!ok(await api('GET', `/park/placements/${today}`, { token: T.staff })).unplaced.some((f) => f.id === D.hip), 'retired features are not offered');
   assert.equal(ok(await api('GET', '/park/features', { token: B.owner })).data.length, 0);
   is(await api('PUT', `/park/placements/${today}/${D.box}`, { token: B.owner, body: spot() }), 404, 'another mountain cannot place our feature');
@@ -151,6 +164,6 @@ test('retired features cannot be placed or inspected, and one mountain never see
   const m = ok(await api('GET', '/park/map', { token: T.staff }));
   assert.ok(m.layers.length && m.can_edit && m.center && m.center.source === 'park', 'the map opens on the placements');
   assert.equal(ok(await api('GET', '/park/map', { token: T.counter })).can_edit, false);
-  ok(await api('PATCH', `/park/areas/${D.area}`, { token: T.staff, body: { status: 'closed' } }));
-  assert.equal(ok(await api('GET', '/park/areas', { token: T.patrol })).data[0].status, 'closed');
+  is(await api('PATCH', `/park/areas/${D.area}`, { token: T.staff, body: { status: 'open' } }), 400, 'an area opens only with the sign-off');
+  assert.equal(ok(await api('GET', '/park/areas', { token: T.patrol })).data[0].today_status, 'not_opened');
 });

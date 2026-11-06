@@ -399,8 +399,10 @@ async function load(o) {
 
   // ---------------------------------------------------------------- terrain park
   log('Terrain park');
-  const main = await soft('park area', () => C('POST', '/park/areas', { name: 'Main park', level: 'medium' }));
-  const mini = await soft('park area', () => C('POST', '/park/areas', { name: 'Mini park', level: 'learn' }));
+  const main = await soft('park area', () => C('POST', '/park/areas', { name: 'Main park', level: 'l' }));
+  const mini = await soft('park area', () => C('POST', '/park/areas', { name: 'Mini park', level: 'beginner' }));
+  const kinds = (await soft('park kinds', () => C('GET', '/park/kinds'))) || { data: [] };
+  const allPass = (kind) => ((kinds.data.find((k) => k.key === kind) || { checks: [] }).checks).map((c) => ({ key: c.key, result: 'pass' }));
   const parkFeatures = [
     ['Butter box 1', 'butter_box', 's', '8 ft', main], ['Butter box 2', 'butter_box', 'm', '12 ft', main], ['Down rail 1', 'rail_down', 'm', '14 ft', main],
     ['Rainbow rail', 'rail_rainbow', 'm', '12 ft', main], ['Flat rail 1', 'rail_flat', 's', '10 ft', mini], ['Kinked rail', 'rail_kinked', 'l', '16 ft', main],
@@ -415,7 +417,13 @@ async function load(o) {
     const lat = baseLat + (i % 4) * 0.0004 - (i >= 8 ? 0.0012 : 0);
     const lng = baseLng + Math.floor(i / 4) * 0.0005;
     await soft(`place ${name}`, () => C('PUT', `/park/placements/${today}/${f.id}`, { lat, lng, area_id: area ? area.id : null }));
-    if (i % 3 !== 2) await soft(`inspect ${name}`, () => C('POST', `/park/features/${f.id}/inspections`, { result: 'ok' }));
+    // The mini park and two of every three in the main park are inspected this morning (each with its checklist).
+    if (i % 3 !== 2 || area === mini) await soft(`inspect ${name}`, () => C('POST', `/park/features/${f.id}/inspections`, { result: 'ok', kind: 'morning', checklist: allPass(kind) }));
+  }
+  // The mini park is all inspected, so it opens with its supervisor's sign-off; the main park waits for the rest.
+  if (mini) {
+    const placedMini = parkFeatures.filter((x) => x[4] === mini).length;
+    if (placedMini) await soft('open the mini park', () => C('POST', `/park/areas/${mini.id}/open`, { checklist: { entrance_sign: true, code_sign: true, size_signs: true, ropes: true, visibility: true, test_ride: true }, supervisor_name: 'Park supervisor' }));
   }
 
   // ---------------------------------------------------------------- mountain operations

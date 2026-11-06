@@ -147,6 +147,11 @@ function othersWaiting() {
   } catch (_) { return 0; }
 }
 
+// The terrain park's entries (inspections, placements, rope lines, an area opened or closed) wait in the same outbox,
+// under queue 0: no patrol case has that id (cases are positive, and negative while started with no signal). They are
+// sealed, sent in order and refused the same way as patrol's (2026.11.12).
+export const PARK_QUEUE = 0;
+
 /** Entries for one case that have not reached the server yet: [{ id, method, path, body, label, at, error }]. */
 export function pending(caseId) {
   const me = who();
