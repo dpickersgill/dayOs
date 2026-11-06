@@ -56,14 +56,25 @@ channel() { # display-name type label=value
 step "Where alerts go"
 SMS_CH="$(channel 'Verdynt/OS: text Dan' sms "number=$PHONE")"
 MAIL_CH="$(channel 'Verdynt/OS: email Dan' email "email_address=$EMAIL")"
-# A text channel only works once its number is confirmed with a code Google texts to it.
+# A text channel only works once its number is confirmed with a code Google texts to it. gcloud no longer has the
+# send-verification-code and verify commands, so this asks the Cloud Monitoring API directly. The access token goes in a
+# header file only this account can read, never on curl's command line.
+mon_api() { # method body: POSTs body to https://monitoring.googleapis.com/v3/$SMS_CH:method
+  local method="$1" body="$2" hdr rc=0
+  hdr="$(mktemp)"; chmod 600 "$hdr"
+  printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$(gcloud auth print-access-token)" > "$hdr"
+  printf '%s' "$body" | curl -sSf -X POST -H @"$hdr" --data-binary @- "https://monitoring.googleapis.com/v3/$SMS_CH:$method" >/dev/null || rc=$?
+  rm -f "$hdr"
+  return "$rc"
+}
 if [ -z "$DRY" ]; then
   STATE="$("${ALPHA[@]}" channels describe "$SMS_CH" --format='value(verificationStatus)' 2>/dev/null || true)"
   if [ "$STATE" != "VERIFIED" ]; then
-    "${ALPHA[@]}" channels send-verification-code "$SMS_CH"
+    mon_api sendVerificationCode '{}' || { echo "Google could not text a code to $PHONE. Check the number and run this again."; exit 1; }
     read -r -p "Google just texted a code to $PHONE. Type it here (G-123456 or 123456): " CODE
-    CODE="${CODE#G-}"
-    "${ALPHA[@]}" channels verify "$SMS_CH" --verification-code="G-$CODE" || "${ALPHA[@]}" channels verify "$SMS_CH" --verification-code="$CODE"
+    CODE="$(printf '%s' "$CODE" | tr -d '[:space:]')"; CODE="${CODE#G-}"; CODE="${CODE#g-}"
+    [[ "$CODE" =~ ^[0-9]+$ ]] || { echo "That is not the code Google texted (G- and digits). Run this again for a new code."; exit 1; }
+    mon_api verify "$(jq -nc --arg c "G-$CODE" '{code: $c}')" || { echo "Google did not accept that code. Run this again for a new code."; exit 1; }
     echo "  The phone is confirmed."
   else
     echo "  The phone was already confirmed."

@@ -42,7 +42,7 @@ for name in "${ASK[@]}"; do
   read -r -s -p "  New $name (Enter to skip): " V; echo
   [ -n "$V" ] || continue
   if [ "$V" = "$(secret_read "$s")" ]; then echo "  That is the value it has now. Skipped."; unset V; continue; fi
-  printf '%s' "$V" | newval "$s"; unset V
+  newval "$s" < <(printf '%s' "$V"); unset V
   echo "  $name: new value saved in $s"
 done
 
@@ -51,7 +51,7 @@ for name in "${MAKE[@]}"; do
   s="$(secretof "$name")"; [ -n "$s" ] || continue
   read -r -p "  Make a new random $name? Type yes, or Enter to skip: " Y
   [ "$Y" = yes ] || continue
-  rand 48 | newval "$s"
+  newval "$s" < <(rand 48)
   echo "  $name: new value saved in $s (read it with: gcloud secrets versions access latest --secret=$s)"
 done
 

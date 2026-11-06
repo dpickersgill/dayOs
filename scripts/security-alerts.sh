@@ -37,6 +37,9 @@ ALERTS=(
 
 step "Log-based metrics and alert policies"
 EXISTING="$("${ALPHA[@]}" policies list --format='value(name,displayName)' 2>/dev/null || true)"
+# A log-based metric made a moment ago can take Google up to 10 minutes before an alert policy may use it. Such an alert
+# is marked "not yet", and a second run makes it.
+PENDING=0
 for a in "${ALERTS[@]}"; do
   IFS='|' read -r name desc filter threshold window <<< "$a"
   if gcloud logging metrics describe "$name" >/dev/null 2>&1; then
@@ -65,17 +68,25 @@ for a in "${ALERTS[@]}"; do
   "documentation": { "content": "RUNBOOK.md, Security alerts, says what to do.", "mimeType": "text/markdown" }
 }
 JSON
-  run "${ALPHA[@]}" policies create --policy-from-file="$file" >/dev/null
+  if run "${ALPHA[@]}" policies create --policy-from-file="$file" >/dev/null 2>&1; then
+    echo "  made: $title"
+  else
+    echo "  not yet: $title (its metric is new; Google needs up to 10 minutes)"
+    PENDING=$((PENDING + 1))
+  fi
   rm -f "$file"
-  echo "  made: $title"
 done
+if [ "$PENDING" -gt 0 ]; then
+  echo "Run this again in 10 minutes to finish the $PENDING alert(s) marked 'not yet'. It keeps what is done."
+fi
 
 step "Data Access audit logs for Secret Manager and Cloud SQL"
+# The audit service for Cloud SQL is cloudsql.googleapis.com (Google rejects sqladmin.googleapis.com here).
 POLICY="$(mktemp)"
 gcloud projects get-iam-policy "$PROJECT" --format=json > "$POLICY"
-NEW="$(jq '.auditConfigs = ((.auditConfigs // []) | map(select(.service != "secretmanager.googleapis.com" and .service != "sqladmin.googleapis.com"))
+NEW="$(jq '.auditConfigs = ((.auditConfigs // []) | map(select(.service != "secretmanager.googleapis.com" and .service != "cloudsql.googleapis.com"))
   + [{"service":"secretmanager.googleapis.com","auditLogConfigs":[{"logType":"ADMIN_READ"},{"logType":"DATA_READ"},{"logType":"DATA_WRITE"}]},
-     {"service":"sqladmin.googleapis.com","auditLogConfigs":[{"logType":"ADMIN_READ"},{"logType":"DATA_READ"},{"logType":"DATA_WRITE"}]}])' "$POLICY")"
+     {"service":"cloudsql.googleapis.com","auditLogConfigs":[{"logType":"ADMIN_READ"},{"logType":"DATA_READ"},{"logType":"DATA_WRITE"}]}])' "$POLICY")"
 if [ "$(jq -S .auditConfigs "$POLICY")" != "$(echo "$NEW" | jq -S .auditConfigs)" ]; then
   echo "$NEW" > "$POLICY"
   run gcloud projects set-iam-policy "$PROJECT" "$POLICY" --quiet >/dev/null
@@ -85,4 +96,5 @@ else
 fi
 rm -f "$POLICY"
 echo ""
-echo "Done. Alerts go to the same text and email as the uptime checks."
+if [ "$PENDING" -gt 0 ]; then echo "Nearly done. The alerts made so far go to the same text and email as the uptime checks."
+else echo "Done. Alerts go to the same text and email as the uptime checks."; fi

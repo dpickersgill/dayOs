@@ -23,7 +23,7 @@
 # app account, Editor on the default account) can read or delete them: make a project for backups, then run
 #   BACKUP_PROJECT=<backup project id> bash scripts/backups-setup.sh
 # and use the same BACKUP_PROJECT= in front of restore-copy.sh. Overwritten or deleted copies stay recoverable for 90
-# days (soft delete), on top of the year of older versions.
+# days (soft delete), on top of the WEEKLY_DAYS of older versions.
 # Turning on point-in-time recovery or high availability restarts the database (a minute or two): it asks first.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -128,18 +128,46 @@ run gcloud storage buckets add-iam-policy-binding "$BUCKET" --member="serviceAcc
 if ! gcloud iam service-accounts describe "$BACKUP_SA" >/dev/null 2>&1; then
   run gcloud iam service-accounts create summitops-backup --display-name "Verdynt/OS weekly database copy"
 fi
-run gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$BACKUP_SA" --role=roles/cloudsql.viewer --condition=None --quiet >/dev/null
+# A brand-new account takes Google a few seconds before a role can be granted to it ("does not exist"), so the grant
+# is tried again after 5, 10, 20 and 30 seconds. A dry run prints it once.
+grant_backup_role() { # role
+  local role="$1" w out=""
+  if [ -n "$DRY" ]; then
+    run gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$BACKUP_SA" --role="$role" --condition=None --quiet
+    return 0
+  fi
+  for w in 0 5 10 20 30; do
+    [ "$w" -gt 0 ] && sleep "$w"
+    if out="$(gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$BACKUP_SA" --role="$role" --condition=None --quiet 2>&1 >/dev/null)"; then return 0; fi
+  done
+  [ -n "$out" ] && printf '%s\n' "$out" | tail -3
+  echo "Could not give the copy account its role. Run this again in a minute."
+  exit 1
+}
+# Its role (2026): Google took instance export out of "Cloud SQL Viewer", and the roles that still have it (Cloud SQL
+# Admin and Editor) can change the server. So the copy account gets a role of its own that can ask for an export and
+# read the server's details, nothing else.
+EXPORT_ROLE_ID=summitopsWeeklyExport
+EXPORT_ROLE="projects/$PROJECT/roles/$EXPORT_ROLE_ID"
+if ! gcloud iam roles describe "$EXPORT_ROLE_ID" --project="$PROJECT" >/dev/null 2>&1; then
+  run gcloud iam roles create "$EXPORT_ROLE_ID" --project="$PROJECT" --title="Verdynt/OS weekly database copy" \
+    --description="Ask Cloud SQL for an export, nothing else" --permissions=cloudsql.instances.export,cloudsql.instances.get --stage=GA --quiet >/dev/null
+  echo "  Made the role $EXPORT_ROLE (export only)."
+fi
+grant_backup_role "$EXPORT_ROLE"
+# The old role, given by earlier versions of this script, which no longer allows an export.
+run gcloud projects remove-iam-policy-binding "$PROJECT" --member="serviceAccount:$BACKUP_SA" --role=roles/cloudsql.viewer --condition=None --quiet >/dev/null 2>&1 || true
 run gcloud services enable cloudscheduler.googleapis.com --quiet
 load_service; DBNAME="$(envval DB_NAME)"; DBNAME="${DBNAME:-summitops}"
 BODY="{\"exportContext\":{\"fileType\":\"SQL\",\"uri\":\"$BUCKET/weekly/summitops.sql.gz\",\"databases\":[\"$DBNAME\"]}}"
 URI="https://sqladmin.googleapis.com/v1/projects/$PROJECT/instances/$INSTANCE/export"
+# gcloud scheduler jobs update http crashes in current gcloud (TypeError on NoneType), so a job that is there already is
+# replaced: deleted, then made again with today's settings.
 if gcloud scheduler jobs describe "$JOB" --location "$REGION" >/dev/null 2>&1; then
-  run gcloud scheduler jobs update http "$JOB" --location "$REGION" --schedule="0 8 * * 2" --time-zone=Etc/UTC --uri="$URI" --http-method=POST \
-    --message-body="$BODY" --oauth-service-account-email="$BACKUP_SA" --quiet
-else
-  run gcloud scheduler jobs create http "$JOB" --location "$REGION" --schedule="0 8 * * 2" --time-zone=Etc/UTC --uri="$URI" --http-method=POST \
-    --message-body="$BODY" --oauth-service-account-email="$BACKUP_SA" --quiet
+  run gcloud scheduler jobs delete "$JOB" --location "$REGION" --quiet
 fi
+run gcloud scheduler jobs create http "$JOB" --location "$REGION" --schedule="0 8 * * 2" --time-zone=Etc/UTC --uri="$URI" --http-method=POST \
+  --message-body="$BODY" --oauth-service-account-email="$BACKUP_SA" --quiet
 echo "  Every Tuesday at 08:00 UTC: $BUCKET/weekly/summitops.sql.gz (older copies kept $WEEKLY_DAYS days)."
 echo "  Make the first copy now:   gcloud scheduler jobs run $JOB --location $REGION"
 
