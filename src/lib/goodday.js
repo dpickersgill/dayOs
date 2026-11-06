@@ -109,11 +109,16 @@ function card(source, { onIssue = null } = {}) {
   const get = read
     ? '<p class="gd-get"><strong>Get the next issue.</strong> Every other week, one moment of your guest\'s day taken apart.</p>'
     : `<p class="gd-get">Every other week, one moment of your guest's day taken apart.${next ? ` Next: <strong>${esc(next.moment)}</strong>, "${esc(next.question)}"` : ''}</p>`;
+  // Two parts, so a wide card can put the pitch on the left and the sign-up on the right (site.css .gd-band)
   return `<section class="gd-card" aria-labelledby="gd-h-${esc(source)}">
+  <div class="gd-pitch">
   <p class="gd-eye">The Good Day &middot; for ski area owners, GMs and patrol directors</p>
   <h2 id="gd-h-${esc(source)}">${read ? esc(i.question) : 'Get the next issue.'}</h2>${read}
+  </div>
+  <div class="gd-signup">
   ${get}
   ${form(source)}
+  </div>
 </section>`;
 }
 
