@@ -340,10 +340,11 @@ test('content review: the from price, push alerts, BAA, no-fee promise, company,
   const sec = await get('/site/security');
   assert.ok(sec.text.includes('An alert says only the call number and where the call is'), 'push alerts as the code sends them');
   assert.ok(!sec.text.includes('what was reported. The patient'), 'the old alert sentence is gone');
-  for (const p of ['/site/security', '/site/privacy', '/site/terms', '/site/ski-area-risk-management']) assert.match((await get(p)).text, /business associate agreement \(BAA\)/, `${p} offers a BAA`);
-  const terms = await get('/site/terms');
-  assert.ok(terms.text.includes('We take no fee and no share of what your guests pay you'), 'the no-fee promise is in Terms');
-  for (const p of ['/site/terms', '/site/privacy', '/site/']) assert.ok((await get(p)).text.includes('Verdynt Consulting Group'), `${p} names the company`);
+  // LEGAL HOLD (2026.11.12): Terms and Privacy stay at their 2026.11.11 wording until Dan's lawyer approves the new text.
+  // Reverting the commit "Hold the Terms and Privacy changes for legal review" brings back both pages and these checks:
+  // Privacy and Terms offer a BAA, the no-fee promise is in Terms, and Terms and Privacy name the company.
+  for (const p of ['/site/security', '/site/ski-area-risk-management']) assert.match((await get(p)).text, /business associate agreement \(BAA\)/, `${p} offers a BAA`);
+  for (const p of ['/site/']) assert.ok((await get(p)).text.includes('Verdynt Consulting Group'), `${p} names the company`);
   const home = await get('/site/');
   assert.ok(home.text.includes('&copy; 2026 Verdynt Consulting Group, Royersford, Pennsylvania.') || home.text.includes(`&copy; ${new Date().getUTCFullYear()} Verdynt Consulting Group, Royersford, Pennsylvania.`), 'the footer names the company');
   assert.ok(home.text.includes('Book a 20-minute walkthrough') && !home.text.includes('Start a 14-day trial') && !home.text.includes('Become a founding mountain'));

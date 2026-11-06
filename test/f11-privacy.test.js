@@ -328,7 +328,9 @@ test('DP-12: weekly copies are kept 35 days by default, the pages say so, and a 
   assert.match(read('src/site/privacy.html'), /weekly copy of the database kept 35 days/);
   // 2026.11 content review: the pages also say a deleted copy stays recoverable 90 more days (the bucket's soft delete)
   assert.match(read('src/site/security.html'), /Each copy is kept 35 days after the next one replaces it, and a deleted copy can still be recovered for up to 90 more days/);
-  assert.match(read('src/site/privacy.html'), /recovered for up to 90 more days/);
+  // LEGAL HOLD (2026.11.12): Privacy stays at its 2026.11.11 wording for legal review, so it does not say this yet.
+  // Reverting the hold commit brings back the page and this check:
+  // assert.match(read('src/site/privacy.html'), /recovered for up to 90 more days/);
   assert.ok(!/kept a year/.test(read('RECOVERY.md')), 'RECOVERY.md no longer says a year');
   assert.match(read('RECOVERY.md'), /node db\/deletions\.js replay ledger\.json/);
   // The ledger is add-only for the app, and survives a mountain's deletion.
