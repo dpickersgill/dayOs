@@ -28,6 +28,23 @@ const pool = mysql.createPool({
   ssl: config.db.sslOptions,
 });
 
+// With maxIdle below connectionLimit, mysql2 checks for idle connections every second on a timer that keeps Node running,
+// so a script or test that only loads this file never exited (2026.11.12). The check still runs; it just no longer holds
+// the process open. The server stays up on its own listener.
+{
+  const base = pool.pool;
+  if (base && typeof base._removeIdleTimeoutConnections === 'function') {
+    const schedule = base._removeIdleTimeoutConnections.bind(base);
+    base._removeIdleTimeoutConnections = () => {
+      schedule();
+      const t = base._removeIdleTimeoutConnectionsTimer;
+      if (t && typeof t.unref === 'function') t.unref();
+    };
+    const t = base._removeIdleTimeoutConnectionsTimer;
+    if (t && typeof t.unref === 'function') t.unref();
+  }
+}
+
 // Every timestamp the app writes and compares is UTC (dayRange turns a mountain's local day into UTC), so each connection
 // uses UTC whatever the database server's own setting is.
 pool.pool.on('connection', (conn) => { conn.query("SET time_zone = '+00:00'"); });

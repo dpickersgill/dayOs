@@ -345,6 +345,28 @@ test('patrol picks the feature, the case keeps a snapshot, and a post-incident c
   assert.ok(ok(await api('GET', `/patrol/incidents/${c.id}/park-links`, { token: T.patrol })).data[0].voided_at, 'kept, marked entered in error');
 });
 
+// 2026.11.12 merge: a case's park links follow the patient-record rule (feat/auth-hardening), and the feature's history
+// lists the linked cases by case number and date only.
+test('park links on a case need the records check for someone with no part in it; the feature lists case number and date only', async () => {
+  const c = ok(await api('POST', '/patrol/incidents', { token: T.patrol, body: { occurred_at: localNow(1), location: 'Main park', category: 'injury', severity: 'minor', summary: 'Slid out on the rail', form: { incident_location: 'freestyle_terrain' } } }));
+  const link = ok(await api('POST', `/patrol/incidents/${c.id}/park-links`, { token: T.patrol, body: { feature_id: D.rail } }), 201);
+  const l = { id: link.id, incident_id: c.id, feature_id: D.rail };
+  const other = Number(ok(await api('POST', '/patrol/team', { token: A.owner, body: { person: { first_name: 'Sam', last_name: 'Other' }, level: 'patroller' } })).staff_id);
+  ok(await api('POST', '/users', { token: A.owner, body: { email: `pat2@${A.slug}.test`, password: PW, role: 'patrol', staff_id: other } }));
+  const t2 = await login(A, `pat2@${A.slug}.test`);
+  let r = is(await api('GET', `/patrol/incidents/${l.incident_id}/park-links`, { token: t2 }), 403, 'not their case');
+  assert.equal(r.details.code, 'step_up_required');
+  r = is(await api('POST', `/patrol/incidents/${l.incident_id}/park-links/${l.id}/close`, { token: t2 }), 403, 'no write either');
+  assert.equal(r.details.scope, 'records');
+  is(await api('GET', `/patrol/incidents/0${l.incident_id}/park-links`, { token: t2 }), 400, 'one spelling of the id');
+  await require('./helpers/records').records(base, PW)(t2);
+  assert.ok(ok(await api('GET', `/patrol/incidents/${l.incident_id}/park-links`, { token: t2 })).data.length, 'opens after the check');
+  const hist = ok(await api('GET', `/park/features/${l.feature_id}/history`, { token: T.staff }));
+  assert.ok(hist.incidents.length);
+  for (const i of hist.incidents) assert.deepEqual(Object.keys(i).sort(), ['case_number', 'date', 'incident_id']);
+  assert.equal(ok(await api('GET', `/park/features/${l.feature_id}/history`, { token: T.counter })).incidents, null, 'not for the ticket window');
+});
+
 test('entries sent later from the phone keep their own time, are kept once, and a time in the future is refused', async () => {
   const at = localNow(-45);
   const ref = `ph${suffix}x1`;

@@ -21,6 +21,9 @@ const { parseForm, mergeForm, isEmpty } = require('../lib/nsaar');
 const cases = require('./patrol');
 
 const router = express.Router();
+// The patient-record rule (lib/patientaccess.js) on every /incidents/:id address here, like the other patrol routers: a
+// case's park links are part of the case, so they open only for someone who may open the case.
+router.use('/incidents/:id', require('../lib/patientaccess').byParam);
 const patrol = requireRole('patrol', 'manager');
 const needs = (f, m) => PA.needs(pool, f, m);
 const reasonField = z.string().trim().min(3, 'Say why, in a few words').max(255);

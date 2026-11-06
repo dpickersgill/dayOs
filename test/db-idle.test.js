@@ -36,3 +36,9 @@ test('/readyz retries once when a pooled connection was dropped', async () => {
     await pool.end();
   }
 });
+
+// 2026.11.12: the idle check runs on a timer that must not keep a script (or a test file) that only loads src/db.js alive.
+test('loading the database module does not keep Node running', () => {
+  const r = require('node:child_process').spawnSync(process.execPath, ['-e', "require('./src/db')"], { cwd: require('node:path').join(__dirname, '..'), timeout: 15000, env: process.env });
+  assert.strictEqual(r.status, 0, `exited on its own (${r.signal || 'no signal'})`);
+});
