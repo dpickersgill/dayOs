@@ -156,7 +156,7 @@
             : interval === 'season' ? (p.yearly_cents ? `November to April only: ${dollars(p.yearly_cents)} a year` : 'Not offered over the season') : 'Billed monthly'),
           // Patrol only is one app, so its card says what that app holds for a patrol (as the page's own HTML does)
           el('ul', null, prev ? el('li', { class: 'plus' }, `Everything in ${prev.name}, plus:`) : null, ...(p.code === 'patrol-only' ? PATROL_ONLY : added.map((a) => a.label)).map((t) => el('li', null, t))),
-          el('a', { class: `btn go${i === 1 ? '' : ' ghost'}`, href: `${base}/contact?kind=trial&plan=${encodeURIComponent(p.name)}` }, `Start a ${p.name} trial`));
+          el('a', { class: `btn go${i === 1 ? '' : ' ghost'}`, href: `${base}/contact?kind=trial&plan=${encodeURIComponent(p.name)}` }, 'Request a trial mountain'));
       }));
       $('#planfine').textContent = `Prices are in US dollars, before any sales tax. ${interval === 'year' ? 'Yearly prices are shown per month and charged once a year.'
         : interval === 'season' ? 'Over the season, the yearly price is paid in six monthly payments, November to April, and nothing in the months between. Everything keeps working all year. Starting between May and October, the first payment is November 1.'
@@ -200,7 +200,8 @@
   function contact() {
     const form = $('#leadform'); if (!form) return;
     const q = new URLSearchParams(location.search);
-    const kind = q.get('kind'); if (kind && LABELS[kind]) { const r = form.querySelector(`input[name=kind][value="${kind}"]`); if (r) r.checked = true; }
+    // three choices show; the others (founding, patrol, review, setup) appear only when a page links here for one
+    const kind = q.get('kind'); if (kind && LABELS[kind]) { const r = form.querySelector(`input[name=kind][value="${kind}"]`); if (r) { r.closest('label').hidden = false; r.checked = true; } }
     const plan = q.get('plan'); if (plan) { const s = $('#f-plan'); if ([...s.options].some((o) => o.value === plan)) s.value = plan; }
     const msgLabel = $('#l-msg');
     const syncKind = () => {
@@ -208,7 +209,7 @@
       msgLabel.firstChild.textContent = `${LABELS[k]} `;
       msgLabel.querySelector('.opt').hidden = k === 'question';
       if (k === 'founding') $('#f-found').checked = true;
-      $('#f-send').textContent = { walkthrough: 'Request a walkthrough', trial: 'Ask for my trial', founding: 'Apply for the founding group', question: 'Send my question', patrol: 'Set up our patrol', review: 'Ask for a report review', setup: 'Ask for guided setup' }[k];
+      $('#f-send').textContent = { walkthrough: 'Book my walkthrough', trial: 'Ask for a trial mountain', founding: 'Book my walkthrough', question: 'Send my question', patrol: 'Set up our patrol', review: 'Ask for a report review', setup: 'Ask for guided setup' }[k];
     };
     form.addEventListener('change', (e) => { if (e.target.name === 'kind') syncKind(); });
     syncKind();

@@ -11,7 +11,7 @@
   <section class="pagehead" style="padding-bottom:56px" aria-labelledby="h-ct">
     <div class="wrap">
       <h1 id="h-ct">See your mountain on the board.</h1>
-      <p>Book a 20-minute walkthrough, or ask for a free trial on your own mountain. Tell us what you run and which part of the day is hardest, and we will start there.</p>
+      <p>Book a 20-minute walkthrough. Tell us what you run and which part of the day is hardest, and we will start there. If it fits, we set up a free 14-day trial mountain for you after the call.</p>
     </div>
   </section>
 
@@ -22,9 +22,9 @@
           <li><b>You send a few details.</b><span>Your mountain, your role and what you are curious about. It takes two minutes.</span></li>
           <li><b>A person replies within one business day.</b><span>To set a time for a 20-minute video call, or to set up your trial mountain.</span></li>
           <li><b>You see your hardest part first.</b><span>If it is lift checks, we start there. If it is patrol, lessons or the fleet, we start there.</span></li>
-          <li><b>You decide, with no pressure.</b><span>The trial is free for 14 days with no card. We will tell you which plan fits, even when it is the smaller one.</span></li>
+          <li><b>You decide, with no pressure.</b><span>A trial mountain is free for 14 days with no card. We will tell you which plan fits, even when it is the smaller one. Ask about the Founding Mountain Program on the call: half price in your first season.</span></li>
         </ol>
-        <p style="margin-top:26px;font-size:18px"><b>Want to look around first?</b> <a href="{{TRY}}">Start a demo on your own mountain</a>: type its name and the demo opens on your own lifts and trails. No card.</p>
+        <p style="margin-top:26px;font-size:18px"><b>Want to look around first?</b> <a href="{{TRY}}">Try the demo</a>: give your name, email and your mountain's name, and in about 20 seconds it opens on your own lifts and trails. No card.</p>
         <p class="contact-mail" style="margin-top:16px;font-size:17px"><b>Rather email?</b> Write to <a href="mailto:{{HELLO}}">{{HELLO}}</a>. Already a customer? <a href="mailto:{{SUPPORT}}">{{SUPPORT}}</a> reaches support.</p>
       </div>
 
@@ -33,13 +33,14 @@
         <fieldset style="border:0;padding:0;margin:0">
           <legend class="vh">What you would like</legend>
           <div class="kinds">
-            <label><input type="radio" name="kind" value="walkthrough" checked> A walkthrough</label>
-            <label><input type="radio" name="kind" value="trial"> A 14-day trial</label>
-            <label><input type="radio" name="kind" value="founding"> The Founding Mountain Program</label>
-            <label><input type="radio" name="kind" value="patrol"> Patrol only, for our patrol</label>
-            <label><input type="radio" name="kind" value="review"> A free review of 10 incident reports</label>
-            <label><input type="radio" name="kind" value="setup"> Guided setup</label>
+            <label><input type="radio" name="kind" value="walkthrough" checked> A 20-minute walkthrough</label>
+            <label><input type="radio" name="kind" value="trial"> A trial mountain</label>
             <label><input type="radio" name="kind" value="question"> A question</label>
+            <!-- Shown only when a page links here for them (?kind=...): site.js unhides the one asked for. -->
+            <label hidden><input type="radio" name="kind" value="founding"> The Founding Mountain Program</label>
+            <label hidden><input type="radio" name="kind" value="patrol"> Patrol only, for our patrol</label>
+            <label hidden><input type="radio" name="kind" value="review"> A free review of 10 reports, with names and identifying details removed</label>
+            <label hidden><input type="radio" name="kind" value="setup"> Guided setup</label>
           </div>
         </fieldset>
         <div class="fr">

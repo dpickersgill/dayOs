@@ -127,7 +127,12 @@ module.exports = {
   site: {
     hosts: String(env.SITE_HOSTS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean),
     appUrl: (env.APP_URL || '').replace(/\/$/, ''),
-    // The public addresses on the website and in the app: sales and general questions, and help for customers.
+    // The company behind Verdynt/OS, named in the footer, Terms, Privacy and the structured data. Dan: add the legal suffix
+    // here when it is settled (for example "Verdynt Consulting Group, LLC"); every page reads it from this one place.
+    company: { name: 'Verdynt Consulting Group', place: 'Royersford, Pennsylvania', founder: 'Dan Pickersgill' },
+    // The public addresses on the website and in the app: sales and general questions, and help for customers. These are
+    // the only place the email domain is set (runmyresort.com today): change these three lines, or set SITE_HELLO_EMAIL,
+    // SITE_SUPPORT_EMAIL and SITE_CONTACT_EMAIL, when the new domain arrives.
     helloEmail: env.SITE_HELLO_EMAIL || 'hello@runmyresort.com',
     supportEmail: env.SITE_SUPPORT_EMAIL || 'support@runmyresort.com',
     // Where Contact page requests go: hello@ unless SITE_CONTACT_EMAIL says otherwise.

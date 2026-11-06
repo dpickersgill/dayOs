@@ -23,7 +23,7 @@
 # app account, Editor on the default account) can read or delete them: make a project for backups, then run
 #   BACKUP_PROJECT=<backup project id> bash scripts/backups-setup.sh
 # and use the same BACKUP_PROJECT= in front of restore-copy.sh. Overwritten or deleted copies stay recoverable for 90
-# days (soft delete), on top of the WEEKLY_DAYS of older versions.
+# days (soft delete), on top of the WEEKLY_DAYS (35) that older versions are kept.
 # Turning on point-in-time recovery or high availability restarts the database (a minute or two): it asks first.
 set -euo pipefail
 cd "$(dirname "$0")/.."

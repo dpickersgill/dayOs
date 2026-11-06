@@ -233,7 +233,7 @@ test('the attractions page: its own search title, questions in the structured da
   assert.ok(home.text.includes('The zipline opens on its check.') && home.text.includes('We run a zipline and a tubing hill too. Does it handle those?'));
   assert.ok(home.text.includes('<div class="bt">Attractions</div>') && home.text.includes('Alpine Coaster'), 'on the morning board');
   assert.ok(home.text.indexOf('id="day"') < home.text.indexOf('id="risk"'), 'the day comes before the claims section');
-  assert.ok(home.text.includes('Built in Pennsylvania, and support is answered by the people who build it.'));
+  assert.ok(home.text.includes('Built in Royersford, Pennsylvania, by Dan Pickersgill, the founder'), 'the home line names the founder');
   assert.ok(!/[\u2014]/.test(home.text + page.text), 'no em dashes');
   const llms = (await onHost('/llms.txt')).text;
   assert.match(llms, /attractions and activities/);
@@ -253,7 +253,7 @@ test('the Contact form keeps the request for Leads and emails it, and bots and b
   assert.equal(row.kind, 'trial'); assert.equal(row.founding, 1); assert.equal(row.emailed, 1); assert.ok(row.ip_hash && !row.ip_hash.includes('127.0.0.1'));
   assert.equal(mails.length, 2);
   assert.equal(mails[0].To, 'sales@site.test'); assert.equal(mails[0].ReplyTo, 'pat@ridge.test');
-  assert.match(mails[0].Subject, /14-day trial request/); assert.match(mails[0].TextBody, /Volunteer patrol of 30/);
+  assert.match(mails[0].Subject, /Trial mountain request/); assert.match(mails[0].TextBody, /Volunteer patrol of 30/);
   assert.equal(mails[1].To, 'pat@ridge.test');
 
   // The console's Leads
@@ -328,4 +328,30 @@ test('the privacy page names every outside service, and Security says what the a
   assert.match(pv.text, /Never patient care records/);
   const sec = await get('/site/security');
   assert.match(sec.text, /It never sees patient care records or patrol reports/);
+});
+
+// 2026.11 content review (Dan's decisions A to F): the claims the website makes now match the product and the company.
+test('content review: the from price, push alerts, BAA, no-fee promise, company, buttons and the contact choices', async () => {
+  const pricing = await get('/site/pricing');
+  assert.match(pricing.text, /<title>Pricing: Ski Area Software from \$\d+\/month/);
+  const plans = (await api('GET', '/site/plans')).body.plans;
+  const area = plans.filter((p) => p.code !== 'patrol-only').map((p) => p.monthly_cents);
+  assert.ok(pricing.text.includes(`from $${Math.round(Math.min(...area) / 100)}/month`), 'the from price leaves out Patrol only');
+  const sec = await get('/site/security');
+  assert.ok(sec.text.includes('An alert says only the call number and where the call is'), 'push alerts as the code sends them');
+  assert.ok(!sec.text.includes('what was reported. The patient'), 'the old alert sentence is gone');
+  for (const p of ['/site/security', '/site/privacy', '/site/terms', '/site/ski-area-risk-management']) assert.match((await get(p)).text, /business associate agreement \(BAA\)/, `${p} offers a BAA`);
+  const terms = await get('/site/terms');
+  assert.ok(terms.text.includes('We take no fee and no share of what your guests pay you'), 'the no-fee promise is in Terms');
+  for (const p of ['/site/terms', '/site/privacy', '/site/']) assert.ok((await get(p)).text.includes('Verdynt Consulting Group'), `${p} names the company`);
+  const home = await get('/site/');
+  assert.ok(home.text.includes('&copy; 2026 Verdynt Consulting Group, Royersford, Pennsylvania.') || home.text.includes(`&copy; ${new Date().getUTCFullYear()} Verdynt Consulting Group, Royersford, Pennsylvania.`), 'the footer names the company');
+  assert.ok(home.text.includes('Book a 20-minute walkthrough') && !home.text.includes('Start a 14-day trial') && !home.text.includes('Become a founding mountain'));
+  assert.ok(!home.text.includes('named for the trail signs'));
+  const contact = await get('/site/contact');
+  const shown = (contact.text.match(/<label><input type="radio" name="kind"/g) || []).length;
+  assert.equal(shown, 3, 'three choices on the contact form; the others only when a page links to them');
+  const about = await get('/site/about');
+  assert.ok(about.text.includes('class="founder-photo" hidden'), 'the photo slot shows nothing until there is a photo');
+  assert.ok(!/rugby|\bBRP\b/i.test(about.text), 'the brand rules: no rugby, no BRP');
 });

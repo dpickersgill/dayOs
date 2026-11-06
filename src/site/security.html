@@ -88,7 +88,7 @@
         <div>
           <ul>
             <li>Alerts go only to the phones a patroller turned them on for, and are encrypted from our servers to the phone.</li>
-            <li>An alert says where the call is and what was reported. The patient's record stays behind the sign-in.</li>
+            <li>An alert says only the call number and where the call is, and asks the patroller to open the app. What was reported, and the patient's record, stay behind the sign-in.</li>
           </ul>
         </div>
       </div>
@@ -144,13 +144,13 @@
 
   <section class="sec" id="support" aria-labelledby="h-support">
     <div class="wrap">
-      <div class="gh"><h2 id="h-support">Support sheet.</h2><p>What you get when something goes wrong, on one page you can print for your board or your insurer.</p></div>
+      <div class="gh"><h2 id="h-support">Support and your records.</h2><p>What you get when something goes wrong, who answers, and what happens to your records if you leave.</p></div>
       <div class="sg">
-        <div><h2>Getting help.</h2><p class="lead">A person answers, not a bot.</p></div>
+        <div><h2>Getting help.</h2><p class="lead">The founder answers, not a bot.</p></div>
         <div>
           <ul>
             <li><b>How:</b> email <a href="mailto:{{SUPPORT}}">{{SUPPORT}}</a>, or use Help in the app, which answers most how-to questions at once.</li>
-            <li><b>Hours:</b> Monday to Friday, 8 AM to 6 PM Eastern.</li>
+            <li><b>Hours:</b> Monday to Friday, 8 AM to 6 PM Eastern. December through March, also weekends and holidays, 7 AM to 5 PM Eastern, by phone to Dan, the founder, directly (every mountain gets the number when it signs up), and by email.</li>
             <li><b>Response time:</b> a person replies within one business day, and the same day when Verdynt/OS is down or you cannot sell.</li>
             <li><b>Setting up:</b> Help walks through each app, and a guided setup is offered on the pricing page.</li>
           </ul>
@@ -162,7 +162,7 @@
           <ul>
             <li>The database is backed up every day, and 14 daily backups are kept.</li>
             <li>It can be put back to any moment in the last 7 days (point-in-time recovery).</li>
-            <li>A weekly copy of the database is kept outside the database server for 35 days. A guest who was anonymised, or a mountain that was deleted, stays in these copies until they age out. After any restore, every anonymise and deletion is applied again before the app uses the copy.</li>
+            <li>A weekly copy of the database is kept outside the database server. Each copy is kept 35 days after the next one replaces it, and a deleted copy can still be recovered for up to 90 more days. So a guest who was anonymised, or a mountain that was deleted, can stay in these copies for about 130 days before they age out. After any restore, every anonymise and deletion is applied again before the app uses the copy.</li>
             <li>Backups stay on Google Cloud in the United States, like everything else.</li>
           </ul>
         </div>
@@ -173,7 +173,7 @@
           <ul>
             <li>Owners and managers download customers, sales, payments, refunds, incident reports, signed waivers and asset costs as spreadsheets whenever they want.</li>
             <li>Everything held about one guest downloads as one file, for a guest who asks.</li>
-            <li>If you leave, you have 60 days to download everything before we delete it, unless the law requires us to keep something.</li>
+            <li>If you leave, we hand over a full export, and you have 60 days to download everything. Then we delete your mountain's records, except patrol reports, signed waivers, the audit trail and the staff injury log, which we keep only under a written agreement with you, or hand over to you.</li>
           </ul>
         </div>
       </div>
@@ -185,6 +185,7 @@
       <div class="honest">
         <h2 id="h-honest">What we have not done yet.</h2>
         <p>Verdynt/OS has not had an outside security audit or a formal certification. If your board, your insurer or your state needs one, tell us when you ask for a walkthrough and we will say plainly where we are.</p>
+        <p>We will sign a business associate agreement (BAA) with a patrol or mountain that needs one under HIPAA. Ask for it before any real patient records go in.</p>
         <p>Health details (patient care records, patient photos, children's allergies and medical notes, the staff injury log) are encrypted at rest by Google Cloud SQL and in transit by TLS, like everything else. They are not encrypted field by field inside the database, so anyone with access to the database or a backup could read them. Access to both is limited to Verdynt/OS's operators and logged. Field-level encryption is on our roadmap.</p>
       </div>
     </div>
