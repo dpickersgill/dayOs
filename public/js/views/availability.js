@@ -12,14 +12,41 @@ const clock = (t) => { const hr = +t.slice(0, 2); const m = t.slice(3, 5); retur
 const range = (w) => `${clock(w.start_time)}–${clock(w.end_time)}`;
 const longClock = (t) => { const hr = +t.slice(0, 2); return `${hr % 12 || 12}:${t.slice(3, 5)} ${hr < 12 ? 'AM' : 'PM'}`; };
 
-export async function render(root) {
+/** Who sees what: their own calendar (an instructor linked to a staff member, or a manager setting it), and everyone's. */
+async function parts() {
   const settings = await get('/availability/settings');
   const linked = Boolean(ctx.me.staff_id) && ctx.me.role === 'instructor';
   const items = [];
   if (linked || isManager()) items.push(['mine', isManager() && !linked ? 'Set availability' : 'My availability', (box) => drawMine(box, settings)]);
   items.push(['all', 'Everyone', drawAll]);
+  return items;
+}
+
+/** The page of its own: an instructor's menu item (#/availability). Everyone else is sent to Lessons, Instructors, Availability. */
+export async function render(root) {
+  const items = await parts();
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Instructor availability'),
     h('p', { class: 'page-note' }, 'Mark the dates and times you are open. Change them whenever plans change.')), tabs(items, items[0][0]));
+}
+
+/**
+ * Inside Lessons, Instructors, Availability. Lessons already has two rows of tabs, so the choice between one person's
+ * calendar and everyone's is a choice on the page (a segmented control), not a third row of tabs.
+ */
+export async function drawInLessons(box) {
+  const items = await parts();
+  const body = h('div');
+  const buttons = items.map(([key, text]) => h('button', { type: 'button', 'aria-pressed': 'false', dataset: { key } }, text));
+  const pick = async (key) => {
+    for (const b of buttons) b.setAttribute('aria-pressed', String(b.dataset.key === key));
+    clear(body);
+    await items.find((i) => i[0] === key)[2](body);
+  };
+  for (const b of buttons) b.addEventListener('click', () => pick(b.dataset.key).catch(fail));
+  box.append(h('div', { class: 'stack' },
+    h('p', { class: 'page-note' }, 'Mark the dates and times instructors are open. Change them whenever plans change.'),
+    items.length > 1 ? h('div', { class: 'seg avail-seg', role: 'group', 'aria-label': 'Whose availability' }, buttons) : null, body));
+  await pick(items[0][0]);
 }
 
 /** Setup shown in Settings, Ski school (managers): the public availability page. */

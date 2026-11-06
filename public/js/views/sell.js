@@ -182,7 +182,7 @@ async function sellPanel(root) {
   // A ski school director (2026.11.9) sells lessons, lesson packages and gift cards only.
   if (schoolDirectorOnly()) items.splice(0, items.length, ...items.filter((i) => ['lessons', 'gift'].includes(i[0])));
   const asked = queryTab();
-  const menuBox = h('section', { class: 'card sell-menu' }, tabs(items, items.some((i) => i[0] === asked) ? asked : items[0][0]));
+  const menuBox = h('section', { class: 'card sell-menu' }, tabs(items, items.some((i) => i[0] === asked) ? asked : items[0][0], { look: 'pills' }));
 
   // ---- the basket
   async function refresh() {

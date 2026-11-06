@@ -27,7 +27,7 @@ const VIEWS = [
   ['assets', 'Assets and fleet', () => can('staff'), () => import('./views/assets.js')],
   ['documents', 'Documents', () => true, () => import('./views/documents.js')],
   ['rentals', 'Rentals', () => can('counter'), () => import('./views/rentals.js')],
-  ['school', 'Ski school', () => can('instructor', 'counter'), () => import('./views/school.js')],
+  ['school', 'Lessons', () => can('instructor', 'counter'), () => import('./views/school.js')], // the Ski school app; its group in All apps is Ski school
   ['programs', 'Programs', () => can('instructor', 'counter'), () => import('./views/programs.js')],
   ['availability', 'Instructor availability', () => can('instructor', 'counter'), () => import('./views/availability.js')],
   ['patrol', 'Patrol', () => can('patrol'), () => import('./views/patrol.js')],
@@ -46,11 +46,16 @@ const VIEWS = [
   ['area', 'Patrol summary', () => ctx.me.role === 'area', () => import('./views/area.js')],
 ];
 
-// Old addresses that still work: Partner passes is the last tab of Sell, Billing is a page of Settings.
+// Old addresses that still work: Partner passes is the last tab of Sell, Billing is a page of Settings. Instructor
+// availability is Lessons, Instructors, Availability for everyone but an instructor, whose own menu keeps the page.
 const REDIRECTS = {
   partners: () => '#/sell?tab=partners',
   billing: (query) => `#/settings/billing${query ? `?${query}` : ''}`,
+  availability: () => (ownAvailability() ? null : AVAILABILITY_TAB),
 };
+export const AVAILABILITY_TAB = '#/school?tab=team&view=availability';
+/** An instructor keeps Instructor availability as its own page (it is their own work); everyone else finds it in Lessons. */
+const ownAvailability = () => Boolean(ctx.me) && ctx.me.role === 'instructor';
 
 const app = document.getElementById('app');
 const SLUG_KEY = 'so.mountain';
@@ -63,14 +68,15 @@ function defaultView() {
   const open = (k) => visibleViews().some((v) => v[0] === k);
   if (role === 'area') return 'area';
   if (patrolOnly()) return open('patrol') ? 'patrol' : 'settings';
-  if (isManager()) return 'dashboard';
-  // A role menu starts on its start app, or on the first app in it this person can open.
+  // A menu (owners and managers have one too) starts on its start screen, or on the first app in it this person can open.
   const menu = ctx.me.menu;
   if (menu && Array.isArray(menu.apps)) {
     if (menu.start && open(menu.start)) return menu.start;
+    if (isManager() && open('dashboard')) return 'dashboard';
     const first = menu.apps.find(open);
     if (first) return first;
   }
+  if (isManager()) return 'dashboard';
   const home = { counter: 'sell', instructor: 'school', patrol: 'patrol' }[role] || 'conditions';
   return visibleViews().some((v) => v[0] === home) ? home : (visibleViews()[0] || ['settings'])[0];
 }
@@ -477,7 +483,9 @@ function visibleViews() {
 let frame = null;
 function buildShell() {
   clear(app);
-  frame = buildFrame({ views: visibleViews().map(([key, text]) => [key, text]), main, signOut: () => signOut(), menu: ctx.me.menu || null });
+  // Instructor availability is a tab of Lessons for everyone but an instructor, so it is not a menu item for them.
+  const inMenu = visibleViews().filter(([key]) => key !== 'availability' || ownAvailability());
+  frame = buildFrame({ views: inMenu.map(([key, text]) => [key, text]), main, signOut: () => signOut(), menu: ctx.me.menu || null });
   app.append(frame.shell);
   if (ctx.me.sandbox) app.append(demoPill(ctx.me.sandbox));
   showBillingBanner();
@@ -537,7 +545,8 @@ async function route() {
   if (!ctx.me) return;
   if (ctx.me.display === 'patrol_room') { if (location.hash !== '#/patrol/room') history.replaceState(null, '', `${location.pathname}#/patrol/room`); return; } // the room screen goes nowhere else
   const { key, params, raw } = currentPath();
-  if (REDIRECTS[raw]) { location.replace(REDIRECTS[raw](location.hash.split('?')[1] || '')); return; }
+  const moved = REDIRECTS[raw] ? REDIRECTS[raw](location.hash.split('?')[1] || '') : null;
+  if (moved) { location.replace(moved); return; }
   if (!key) { location.replace(`#/${defaultView()}`); return; }
   const my = ++navToken;
   drawnPath = hashPath();
@@ -571,6 +580,8 @@ export function settingsPageFor(key, mod) {
   return null;
 }
 const appName = (key) => (VIEWS.find((v) => v[0] === key) || [key, key])[1];
+// The settings button keeps the Settings page's own name ("Ski school settings" for Lessons).
+const SETTINGS_NAME = { school: 'Ski school', availability: 'Ski school' };
 
 /**
  * The page header, the same on every page: a breadcrumb (App / Tab) where the page has tabs (Patrol / Section on
@@ -578,7 +589,7 @@ const appName = (key) => (VIEWS.find((v) => v[0] === key) || [key, key])[1];
  * each screen only says its title and summary.
  */
 function decorateHead(holder, key, params, mod) {
-  const area = key === 'dashboard' ? { id: 'home' } : GROUP_OF[key];
+  const area = GROUP_OF[key];
   if (area) holder.dataset.group = area.id;
   holder.dataset.app = key;
   const head = holder.querySelector('.page-head');
@@ -600,7 +611,7 @@ function decorateHead(holder, key, params, mod) {
   // Help and the app's settings: next to the title, before the page's own buttons.
   const tools = h('div', { class: 'head-tools' });
   const page = isManager() ? settingsPageFor(key, mod) : null;
-  if (page) tools.append(h('a', { class: 'btn small head-settings', href: `#/settings/${page}` }, icon('settings', 16), h('span', null, `${appName(key)} settings`)));
+  if (page) tools.append(h('a', { class: 'btn small head-settings', href: `#/settings/${page}` }, icon('settings', 16), h('span', null, `${SETTINGS_NAME[key] || appName(key)} settings`)));
   if (key !== 'help') tools.append(h('a', { class: 'btn small help-btn', href: `#/help/for-${key}`, 'aria-label': `Help with ${appName(key)}` }, icon('help', 16), h('span', null, 'Help')));
   if (tools.firstChild) lead.after(tools);
 }

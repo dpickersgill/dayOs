@@ -143,12 +143,6 @@ label.check { display: flex; gap: 10px; align-items: center; font-weight: 700; m
 .inline-form label.field { min-width: 150px; flex: 1 1 150px; }
 .inline-form .btn { flex: none; }
 
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line-strong); margin-bottom: 20px; overflow-x: auto; }
-.tabs button {
-  font: inherit; font-weight: 700; background: none; border: none; padding: 10px 16px; min-height: 44px; cursor: pointer;
-  color: var(--quiet); border-bottom: 3px solid transparent; margin-bottom: -1px; white-space: nowrap;
-}
-.tabs button[aria-selected='true'] { color: var(--ink); border-bottom-color: var(--trail-blue); }
 
 /* ---------- tables ---------- */
 .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
@@ -569,13 +563,6 @@ fieldset.field legend { font-weight: 700; padding: 0 6px; }
    A gloved thumb in the cold: 48 px or larger targets, one clear primary action, and status told in words as well as colour. */
 :root { --watch: #8a5300; --watch-tint: #fbefd6; --alert: #b42318; --alert-tint: #fbe5e2; --ok-tint: #e3f3ea; }
 
-.tabs { scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
-.tabs button { scroll-snap-align: start; white-space: nowrap; }
-@media (max-width: 640px) {
-  .tabs { gap: 6px; border-bottom: none; padding-bottom: 6px; }
-  .tabs button { border: 1.5px solid var(--line); border-radius: 999px; padding: 8px 16px; margin: 0; background: var(--surface); min-height: 44px; }
-  .tabs button[aria-selected='true'] { background: var(--sel-bg); border-color: var(--sel-bg); color: var(--sel-ink); }
-}
 
 .bedside { border-radius: 14px; border-left: 6px solid var(--trail-blue); box-shadow: var(--lift); gap: 14px; }
 .bedside h3 { font-size: 1.375rem; line-height: 1.2; }
@@ -784,12 +771,6 @@ input[type='datetime-local'], input[type='date'], input[type='time'] { min-width
 .form { grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 20px; align-items: start; }
 .inline-form { gap: var(--sp-3); }
 
-/* tabs: pills, so many tabs read as a toolbar and not as a row of stray words */
-.tabs { gap: var(--sp-2); border-bottom: none; margin-bottom: var(--sp-5); padding: 0 0 var(--sp-1); }
-.tabs button { border: 1px solid transparent; border-radius: 999px; padding: 0 18px; min-height: 42px; margin: 0; color: var(--ink-2); background: transparent; }
-.tabs button:hover { background: rgba(18, 48, 58, 0.07); }
-.tabs button[aria-selected='true'] { background: var(--sel-bg); border-color: var(--sel-bg); color: var(--sel-ink); }
-
 /* tables */
 th, td { padding: 14px 18px; }
 .table-wrap { border-radius: var(--radius-lg); }
@@ -925,9 +906,6 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
 
 .rail .nav { flex: 0 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; margin: 0 -6px; padding: 0 6px; scrollbar-width: thin; }
 .nav-group { display: grid; gap: 1px; }
-.nav-title { display: flex; align-items: center; gap: 8px; margin: 0; padding: 10px 10px 3px; font-size: .75rem; font-weight: 700; color: var(--side-muted); }
-.nav-title span { display: inline-flex; align-items: center; gap: 8px; }
-.nav-title span::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--area, var(--side-muted)); flex: none; }
 .nav-items { display: grid; gap: 1px; }
 .nav-row { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--side-ink); font: inherit; font-size: .9375rem; text-align: left; text-decoration: none; cursor: pointer; }
 .nav-row .ico { color: var(--side-muted); }
@@ -936,11 +914,6 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
 .nav-row[aria-current='page'] .ico { color: currentColor; }
 .nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-more { font-size: .8125rem; color: var(--side-muted); font-weight: 400; white-space: nowrap; }
-/* Patrol's sections, under Patrol while it is open */
-.nav-sections { display: grid; gap: 1px; margin: 2px 0 6px 19px; padding-left: 10px; border-left: 1px solid var(--side-line); }
-.nav-sec { display: flex; align-items: center; min-height: 32px; padding: 0 10px; border-radius: 7px; color: var(--side-muted); font-size: .875rem; text-decoration: none; }
-.nav-sec:hover { background: var(--side-hover); color: var(--ink); }
-.nav-sec[aria-current] { background: var(--side-sec-bg); color: var(--ink); font-weight: 700; }
 
 /* Settings, Help, the person, the theme and Sign out: always at the bottom */
 .rail-foot { margin-top: auto; flex: none; display: grid; gap: 8px; padding-top: 6px; }
@@ -974,10 +947,6 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
 .theme-seg .theme-choice[aria-checked='true']::after { content: none; }
 .theme-seg .theme-choice .ico { display: none; }
 
-/* A role's own menu: only their apps, bigger rows for a counter screen, no group headings */
-.role-menu .rail .nav-row { min-height: 46px; padding: 0 12px; gap: 12px; border-radius: 10px; font-size: 1rem; }
-.role-menu .rail .nav-bottom .nav-row { min-height: 42px; }
-.role-menu .nav-personal-apps { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--side-line); }
 
 /* jump-to palette */
 .palette-overlay { place-items: start center; padding-top: min(14vh, 120px); }
@@ -1021,21 +990,16 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
 .sheet-search { width: 100%; min-height: 44px; border-radius: 12px; border: 1px solid var(--side-line); background: var(--side-field); color: var(--ink); padding: 0 14px; font: inherit; }
 .sheet-groups { display: grid; gap: 4px; }
 .sheet-group { display: grid; gap: 6px; }
-.sheet-group .nav-title { padding: 8px 4px 0; }
 .sheet-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
 .sheet-item { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 12px; border-radius: 12px; background: var(--side-field); color: var(--side-ink); text-decoration: none; overflow-wrap: anywhere; line-height: 1.2; }
 .sheet-item .ico { color: var(--side-muted); }
 .sheet-item:hover { color: var(--ink); }
 .sheet-item[aria-current='page'] { background: var(--side-active-bg); color: var(--side-active-ink); font-weight: 700; }
 .sheet-item[aria-current='page'] .ico { color: currentColor; }
-.sheet-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 2px 2px; }
-.sheet-chip { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid var(--side-line); color: var(--side-ink); text-decoration: none; font-size: .9375rem; }
-.sheet-chip[aria-current] { border-color: var(--trail-blue); background: var(--side-active-bg); color: var(--side-active-ink); font-weight: 700; }
 .sheet-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 46px; padding: 0 12px; border: 0; border-radius: 12px; background: none; color: var(--side-ink); font: inherit; text-align: left; text-decoration: none; cursor: pointer; }
 .sheet-row:hover { background: var(--side-hover); }
 .sheet-row[aria-current='page'] { background: var(--side-active-bg); color: var(--side-active-ink); font-weight: 700; }
 .sheet-row > span:not(.nav-badge):not(.nav-more) { flex: 1; }
-.sheet-groups > .nav-all { margin-top: 6px; border: 1px solid var(--side-line); }
 .sheet-foot { display: grid; gap: 4px; padding-top: 10px; border-top: 1px solid var(--side-line); }
 .sheet-theme { display: grid; gap: 4px; padding: 6px 2px; }
 .sheet-who { border-top: 0; padding: 6px 2px 0; flex-wrap: wrap; }
@@ -1115,10 +1079,6 @@ span.park-row { cursor: default; }
 
 /* Patrol: the title, and its pages as quiet underline tabs */
 .patrol-head { justify-content: flex-start; gap: 10px 20px; margin-bottom: 12px; }
-.pbody > div > div > .tabs { gap: 2px; margin: 0 0 14px; padding: 0; border-bottom: 1px solid var(--line-strong); }
-.pbody > div > div > .tabs button { min-height: 38px; padding: 0 12px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--quiet); font-size: 0.9375rem; }
-.pbody > div > div > .tabs button:hover { background: rgba(18, 48, 58, 0.05); color: var(--ink); }
-.pbody > div > div > .tabs button[aria-selected='true'] { background: none; color: var(--ink); border-bottom-color: var(--trail-blue); }
 
 /* Access levels: names and ticks side by side, small enough to see the whole grid */
 .levels .lv-legend { font-size: 0.875rem; color: var(--quiet); }
@@ -1166,8 +1126,6 @@ span.park-row { cursor: default; }
   th, td { padding: 7px 12px; }
   th { font-size: 0.8125rem; }
   .table-wrap { border-radius: 10px; }
-  .tabs { margin-bottom: 12px; gap: 4px; }
-  .tabs button { min-height: 34px; padding: 0 14px; }
   .case-list { gap: 8px; }
   .case-row { padding: 9px 14px; border-radius: 10px; }
   .cr-tags { margin-top: 2px; }
@@ -1208,11 +1166,7 @@ span.park-row { cursor: default; }
   input, select { min-height: 44px; font-size: 1rem; }
   .row { gap: 8px; }
   .case-row { padding: 10px 12px; }
-  .tabs { margin-bottom: 10px; }
   .patrol-head { display: grid; gap: 8px; }
-  .pbody > div > div > .tabs { margin-bottom: 10px; overflow-x: auto; flex-wrap: nowrap; }
-  .pbody > div > div > .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; min-height: 42px; padding: 0 12px; margin: 0 0 -1px; }
-  .pbody > div > div > .tabs button[aria-selected='true'] { background: none; color: var(--ink); border-bottom-color: var(--trail-blue); }
   .fchips button { min-height: 38px; padding: 0 12px; }
   .cases-filters { gap: 8px; }
   .cases-filters select { flex: 1 1 0; min-width: 0; }
@@ -1557,27 +1511,7 @@ input[type='search'][aria-label='Search documents'] { min-width: min(20rem, 100%
 .cust-quality summary { cursor: pointer; font-weight: 700; }
 
 /* ---------- Area identity, grouped menu and one tab style (design review, release 1) ---------- */
-:root {
-  --g-home: #1b5fc1;
-  --g-front: #2f6fd0;
-  --g-mountain: #138a8f;
-  --g-safety: #7a56c8;
-  --g-programs: #b8581f;
-  --g-office: #55687a;
-}
-/* A group's accent: on the menu rows... */
-.nav-group[data-group='front'] { --area: var(--g-front); }
-.nav-group[data-group='mountain'] { --area: var(--g-mountain); }
-.nav-group[data-group='safety'] { --area: var(--g-safety); }
-.nav-group[data-group='programs'] { --area: var(--g-programs); }
-.nav-group[data-group='office'] { --area: var(--g-office); }
-/* ...and on the page itself. */
-[data-group='home'] { --area: var(--g-home); }
-[data-group='front'] { --area: var(--g-front); }
-[data-group='mountain'] { --area: var(--g-mountain); }
-[data-group='safety'] { --area: var(--g-safety); }
-[data-group='programs'] { --area: var(--g-programs); }
-[data-group='office'] { --area: var(--g-office); }
+/* The page carries its group (data-group on the page: home, sales, hill, school, office) for any page-level accent. */
 
 /* Page header, the same on every page (main.js adds the breadcrumb, Help and "<App> settings"): a breadcrumb where
    the page has tabs, the title in Barlow Condensed, the one-line summary, then Help, the app's settings and the
@@ -1602,18 +1536,10 @@ input[type='search'][aria-label='Search documents'] { min-width: min(20rem, 100%
 .moved-close { margin-left: auto; width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 8px; background: none; color: var(--quiet); cursor: pointer; }
 .moved-close:hover { background: var(--surface-2); color: var(--ink); }
 
-/* One tab style: one row of words with an underline in the accent; the open tab is bold. Sell keeps big pills (tap work). */
-.tabs { gap: 22px; border-bottom: 1px solid var(--line); padding: 0; margin-bottom: 20px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-.tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 0 1px; min-height: 44px; margin: 0 0 -1px; color: var(--quiet); white-space: nowrap; }
-.tabs button:hover { background: none; color: var(--ink); }
-.tabs button[aria-selected='true'] { background: none; color: var(--ink); font-weight: 700; border-bottom-color: var(--trail-blue); }
-.tabs { mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
-@media (min-width: 900px) { .tabs { mask-image: none; -webkit-mask-image: none; } }
 .sell-menu .tabs button[aria-selected='true'] { border-color: var(--ink); }
 @media (max-width: 640px) {
   .page-head h1 { font-size: 1.75rem; }
   .head-tools .btn { min-height: 44px; }
-  .tabs { gap: 18px; }
 }
 
 /* Dates and short fields do not need the whole page */
@@ -2489,17 +2415,12 @@ body:has(.tour-card) .demo-pill { display: none; }
 .patrol-head { flex-wrap: wrap; align-items: center; }
 .patrol-new { margin-left: auto; min-height: 44px; font-size: 1rem; gap: 6px; }
 .patrol-new span { font-size: 1.35rem; line-height: 1; }
-.pbody > div > div > .tabs button { min-height: 44px; font-size: 1rem; }
 @media (min-width: 901px) { .fab[data-act='new-case'] { display: none; } }
 @media (max-width: 900px) {
   .patrol-head { gap: 10px; }
   .patrol-head h1 { flex: 1 1 auto; }
   .patrol-new { margin-left: 0; }
-  .pbody > div > div > .tabs { mask-image: none; -webkit-mask-image: none; flex-wrap: wrap; overflow: visible; gap: 8px; border-bottom: none; padding-bottom: 4px; margin-bottom: 16px; scroll-snap-type: none; }
-  .pbody > div > div > .tabs button { flex: 1 1 calc(33.333% - 8px); min-width: 0; justify-content: center; text-align: center; white-space: normal; line-height: 1.2; padding: 8px 10px; border: 1.5px solid var(--line-strong); border-radius: 10px; margin: 0; background: var(--surface); color: var(--ink-2); }
-  .pbody > div > div > .tabs button[aria-selected='true'] { background: var(--sel-bg); border-color: var(--sel-bg); color: var(--sel-ink); }
 }
-@media (max-width: 420px) { .pbody > div > div > .tabs button { flex-basis: calc(50% - 8px); } }
 
 /* ---- patrol report check and fill in from the story */
 .report-check { border-left: 4px solid var(--hold); background: var(--hold-tint); border-radius: 8px; padding: 10px 14px; }
@@ -3325,14 +3246,6 @@ fieldset.safety legend { font-weight: 700; padding: 0 4px; }
   .wx-choices { grid-template-columns: 1fr; }
 }
 
-/* ---- Ski school: four groups, each with a small row of views (2026.11.5) */
-.subtabs > .tabs { gap: 6px; border-bottom: 0; margin: -6px 0 18px; flex-wrap: wrap; overflow: visible; mask-image: none; -webkit-mask-image: none; }
-.subtabs > .tabs button { min-height: 36px; padding: 0 14px; border: 1px solid var(--line); border-radius: 999px; margin: 0; color: var(--ink-2); font-weight: 600; font-size: .95rem; }
-.subtabs > .tabs button:hover { color: var(--ink); border-color: var(--line-strong); }
-.subtabs > .tabs button[aria-selected='true'] { background: var(--sel-bg); border-color: var(--sel-bg); color: var(--sel-ink); font-weight: 700; }
-@media (max-width: 640px) {
-  .subtabs > .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-}
 
 /* ---------------------------------------------------------------- 2026.11.7: Sell on a phone, the day limit, the gate's guest type */
 /* On a phone the basket comes straight after the menu (before Sold today), and the Checkout bar sits above the bottom navigation. */
@@ -3699,3 +3612,89 @@ button.fill-day:hover { border-color: var(--line-strong); }
 .closed-export-files { list-style: none; margin: 16px 0; padding: 0; display: grid; gap: 8px; }
 .closed-export-files .btn { min-height: 44px; width: 100%; justify-content: flex-start; }
 .kept-list { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; }
+
+/* ---- Navigation v2: the side menu picks the app; tabs on the page pick the part of the app ---- */
+/* The side menu: brand, Jump to and Home pinned at the top; the short menu and All apps scroll in between (cut to whole
+   rows by nav.js, so the edge rests between two rows); Settings, Help and the person pinned at the bottom. One row height
+   for everyone. */
+.rail { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; }
+@media (max-width: 860px) { .rail { display: none; } }
+.rail-top { flex: none; display: grid; gap: 10px; }
+.rail .nav { margin: 0 -6px; padding: 0 6px; }
+.rail .nav-home { flex: none; overflow: visible; display: grid; gap: 2px; padding-bottom: 8px; border-bottom: 1px solid var(--side-line); }
+.rail .nav-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 2px; padding-top: 2px; scrollbar-width: thin; }
+.nav-mine, .nav-all-groups, .nav-items { display: grid; gap: 2px; }
+.nav-group { display: grid; gap: 2px; }
+.rail .nav-row { min-height: 34px; }
+/* "All apps": small and muted, sentence case */
+.nav-all-head { display: flex; align-items: flex-end; min-height: 34px; margin: 0; padding: 0 10px 4px; font-size: .8125rem; font-weight: 400; color: var(--side-muted); }
+/* A group heading: a button, quieter than a page heading but clearly structure (no count beside it) */
+.nav-fold { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; font-size: .9375rem; font-weight: 600; text-align: left; cursor: pointer; }
+.nav-fold:hover { background: var(--side-hover); }
+.nav-fold-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-chev { flex: none; width: 7px; height: 7px; margin-right: 3px; border-right: 2px solid var(--side-muted); border-bottom: 2px solid var(--side-muted); transform: rotate(-45deg); transition: transform .15s ease; }
+.nav-fold[aria-expanded='true'] .nav-chev { transform: translateY(-2px) rotate(45deg); }
+/* The group holding the open page stays open: its heading is not a control while it does */
+.nav-fold[aria-disabled='true'] { cursor: default; }
+.nav-fold[aria-disabled='true']:hover { background: none; }
+.nav-fold[aria-disabled='true'] .nav-chev { opacity: .45; }
+/* The scroll edge: a thin line and a soft shadow where there is more (no fade over the rows) */
+.rail.more-down .nav-scroll { border-bottom: 1px solid var(--side-line); box-shadow: 0 7px 6px -6px rgba(8, 28, 36, .30); }
+.rail.more-up .nav-scroll { box-shadow: 0 -7px 6px -6px rgba(8, 28, 36, .30) inset; }
+.rail.more-up.more-down .nav-scroll { box-shadow: 0 -7px 6px -6px rgba(8, 28, 36, .30) inset, 0 7px 6px -6px rgba(8, 28, 36, .30); }
+:root[data-theme='dark'] .rail.more-down .nav-scroll { box-shadow: 0 7px 6px -6px rgba(0, 0, 0, .7); }
+:root[data-theme='dark'] .rail.more-up .nav-scroll { box-shadow: 0 -7px 6px -6px rgba(0, 0, 0, .7) inset; }
+:root[data-theme='dark'] .rail.more-up.more-down .nav-scroll { box-shadow: 0 -7px 6px -6px rgba(0, 0, 0, .7) inset, 0 7px 6px -6px rgba(0, 0, 0, .7); }
+.rail-foot { padding-top: 8px; }
+
+/* The phone Menu sheet: the person's apps as tiles, then All apps in the same folding groups. The sheet scrolls as one. */
+.sheet-mine .sheet-grid { gap: 6px; }
+.sheet-groups { display: grid; gap: 4px; }
+.sheet-groups .nav-all-head { padding: 6px 4px 2px; min-height: 0; }
+.sheet-groups .nav-fold { min-height: 48px; padding: 0 12px; font-size: 1rem; border-radius: 12px; }
+.sheet-groups .nav-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; padding: 0 0 8px; }
+@media (max-width: 860px) {
+  .sheet-groups .nav-items { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* A block overlay, so the sheet grows with what is in it (in a grid it stopped at the screen's height and its
+     content spilled past its background); the overlay scrolls, so the sheet scrolls as one. */
+  .overlay.menu-overlay { display: block; overflow-y: auto; overscroll-behavior: contain; }
+  .dialog.menu-sheet { min-height: 100%; height: auto; max-height: none; overflow: visible; }
+}
+
+/* Tabs: the one tab component (ui.js tabs() and linkTabs()). Row 1, the app's main tabs: words, a line under the open
+   one. Row 2, only where an app needs it: lighter, smaller, no line, the open one on a soft tint. */
+.tabs { display: flex; align-items: stretch; }
+.tabs button, .tabs > a { font: inherit; cursor: pointer; white-space: nowrap; text-decoration: none; }
+.tabs.row1 { gap: 22px; margin: 0 0 14px; padding: 0; border-bottom: 1px solid var(--line); flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.tabs.row1 button, .tabs.row1 > a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 1px; margin: 0 0 -1px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--quiet); font-size: 1rem; font-weight: 400; }
+.tabs.row1 button:hover, .tabs.row1 > a:hover { color: var(--ink); background: none; }
+.tabs.row1 button[aria-selected='true'], .tabs.row1 > a[aria-current] { color: var(--ink); font-weight: 700; border-bottom-color: var(--trail-blue); }
+.tabs.row2 { gap: 4px; margin: -4px 0 18px; padding: 0; border: 0; flex-wrap: wrap; overflow: visible; }
+.tabs.row2 button { display: inline-flex; align-items: center; min-height: 34px; padding: 0 12px; margin: 0; border: 0; border-radius: 8px; background: none; color: var(--quiet); font-size: .9375rem; font-weight: 400; }
+.tabs.row2 button:hover { color: var(--ink); background: var(--surface-2); }
+.tabs.row2 button[aria-selected='true'] { color: var(--ink); font-weight: 700; background: var(--info-tint); }
+:root[data-theme='dark'] .tabs.row2 button[aria-selected='true'] { background: rgba(255, 255, 255, .08); }
+/* Sell's product pills choose what to sell inside the Sell card: they keep their own pill look (see .sell-menu). */
+.tabs.tabs-pills button { font-weight: 700; min-height: 44px; white-space: nowrap; }
+@media (max-width: 860px) {
+  .tabs.row1 { gap: 18px; mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+  /* Row 2 wraps on a phone, so nothing hides off the edge, with 44px targets for gloved hands */
+  .tabs.row2 { gap: 6px; }
+  .tabs.row2 button { min-height: 44px; padding: 0 14px; }
+}
+
+/* Filters look like filters, not tabs: outlined, and a check mark on the one that is on. */
+.fchips button { display: inline-flex; align-items: center; gap: 6px; border: 1.5px solid var(--line-strong); background: transparent; color: var(--ink-2); font-weight: 400; }
+.fchips button:hover { border-color: var(--quiet); color: var(--ink); }
+.fchips button[aria-pressed='true'] { background: transparent; border-color: var(--trail-blue); color: var(--ink); font-weight: 700; }
+.fchips button[aria-pressed='true']::before { content: '✓'; font-weight: 700; color: var(--trail-blue); }
+.avail-seg { width: fit-content; max-width: 100%; }
+.avail-seg button[aria-pressed='true'] { background: var(--sel-bg); color: var(--sel-ink); }
+
+/* Settings, Menus: Home is fixed at the top for everyone */
+.set-fixed { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 14px 20px 18px; list-style: none; }
+.set-fixed-app { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px; border: 1px dashed var(--line-strong); border-radius: 999px; color: var(--ink-2); }
+/* Sign out and the version share one line, so a short laptop keeps more of the menu in view */
+.rail .who-actions { gap: 4px; }
+.rail .who-actions .rail-out { padding: 0 8px; }
+.rail .who-version { padding: 0 2px; white-space: nowrap; }

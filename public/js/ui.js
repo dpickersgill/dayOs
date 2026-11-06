@@ -414,12 +414,16 @@ if (typeof window !== 'undefined' && window.addEventListener) {
 }
 
 /**
- * Tabs: tabs = [[key, label, render(panel)]]. initial: the tab to open when the address names none.
- * opts.param: the query name that keeps the open tab (default 'tab'); opts.address: false keeps the tabs local.
+ * Tabs, the one tab component every app uses. tabs = [[key, label, render(panel)]]. initial: the tab to open when the
+ * address names none. opts.param: the query name that keeps the open tab (default 'tab'); opts.address: false keeps the
+ * tabs local. A page has at most two rows: row 1, the app's main tabs (words with a line under the open one), and row 2,
+ * lighter (smaller, no line, the open one on a soft tint). Tabs drawn inside another tab are row 2 on their own;
+ * opts.row sets it. opts.look: 'pills' keeps a set that is not page navigation (Sell's products) out of both looks.
  */
 export function tabs(items, initial, opts = {}) {
   const param = opts.param || 'tab';
-  const bar = h('div', { class: 'tabs', role: 'tablist' });
+  const row = opts.row || (nesting > 0 ? 2 : 1);
+  const bar = h('div', { class: opts.look === 'pills' ? 'tabs tabs-pills' : `tabs row${row}`, role: 'tablist' });
   const panel = h('div', { role: 'tabpanel' });
   const wrap = h('div', null, bar, panel);
   const buttons = new Map();
@@ -483,4 +487,14 @@ export function tabs(items, initial, opts = {}) {
   if (bound) { bar.dataset.address = param; addressed.add(binding); }
   show((bound && fromAddress()) || fallback);
   return wrap;
+}
+
+/**
+ * Row 1 as links, for an app whose main parts are pages of their own (Patrol: Now, Cases, People, Gear). The same look
+ * as tabs() row 1. items: [[key, label, href]]; current: the open key. A plain list of links in a nav, with
+ * aria-current on the open one, so it reads as navigation and Back works as usual.
+ */
+export function linkTabs(items, current, { label: name = 'Sections' } = {}) {
+  return h('nav', { class: 'tabs row1 link-tabs', 'aria-label': name },
+    items.map(([key, text, href]) => h('a', { href, dataset: { key }, 'aria-current': key === current ? 'page' : null }, text)));
 }
