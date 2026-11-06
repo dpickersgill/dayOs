@@ -1,6 +1,141 @@
 {
   "releases": [
     {
+      "version": "2026.11.12",
+      "date": "2026-11-08",
+      "title": "Protected patient records, a new menu and terrain park records",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Opening a patient record that is not your own recent work asks you to confirm it is you once, with a passkey, app code or password. One check covers 30 minutes. Your own drafts, and cases from the last 12 hours that you wrote, responded to, were dispatched to or worked with your crew, open straight away.",
+          "help": "patrol-records-check"
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "Being on duty alone no longer opens a case: you need a part in it, or a crew mate on duty with you who had one. Full exports of cases and patients, and searching cases, need the records check too. Lists show the case number and category until you make the check.",
+          "help": "patrol-records-check"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "A weekly patient record access summary goes to the owner and patrol Admins every Monday: who opened which case outside their own work, and how it was allowed. Case numbers only.",
+          "help": "patrol-access-summary"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Patrol, owners and managers pause after 30 minutes without use. With a passkey or an authenticator app, a paused tab carries on right where you were, within 8 hours of signing in.",
+          "help": "idle"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Remember me is offered only after you say the device is your own, and never on a shared computer or for patrol logins.",
+          "help": "remember-me"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "Owners, managers and patrol leaders are asked to add two passkeys, so signing in and opening records takes one touch. You can skip it. Team and logins shows how many each login has.",
+          "help": "passkey-leaders"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "You get an email when your password, two-step sign-in, recovery codes or passkeys change, saying when, from which device, and what to do if it was not you.",
+          "help": "password"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Clearer reset rules: only the owner resets a manager, only the owner or a patrol Admin resets patrol leaders, and nobody resets a login they lowered, or one lowered in the last 24 hours. Only the owner or a patrol Admin gives or takes away the patrol Admin, Manager and Approver levels, and nobody raises their own.",
+          "help": "reset-rules"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": null,
+          "text": "A new menu: Home is pinned at the top for everyone, each role has a short menu of its own apps, and everything else is in four folding groups under All apps. Inside an app, tabs along the top pick the part, such as Now, Cases, People and Gear in Patrol.",
+          "help": "getting-around"
+        },
+        {
+          "kind": "improved",
+          "app": "school",
+          "who": [
+            "instructor"
+          ],
+          "text": "The ski school is called Lessons in the menu, and instructor availability is now under Lessons, Instructors, Availability.",
+          "help": "avail-post"
+        },
+        {
+          "kind": "new",
+          "app": "park",
+          "who": [
+            "staff"
+          ],
+          "text": "Only an inspection opens a terrain park feature. Each feature type has its own checklist, with photos, and one big All checks OK button per feature for a fast pass. Inspections made with no signal are sent when it returns.",
+          "help": "park-inspect"
+        },
+        {
+          "kind": "new",
+          "app": "park",
+          "who": [
+            "staff"
+          ],
+          "text": "Every change to a feature is kept with the value before and after, who and why. A manager corrects a past day with a reason, and the original stays, struck through.",
+          "help": "park-history"
+        },
+        {
+          "kind": "new",
+          "app": "park",
+          "who": [
+            "staff"
+          ],
+          "text": "Park areas are rated S, M, L or XL and open each day with the supervisor's sign-off. Each area has a printable day record of its layout, inspections, sign-off and closures.",
+          "help": "park-open"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": [
+            "patrol"
+          ],
+          "text": "On a case in the terrain park, patrol picks the feature from that day's park map, and the case keeps a snapshot of it and its last inspection. Close for post-incident inspection closes the feature and tells the park supervisor.",
+          "help": "park-patrol"
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "who": null,
+          "text": "Verdynt/OS no longer reports itself down for a moment after a quiet spell.",
+          "help": null
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "The Verdynt/OS website is easier to read and describes what the app does today.",
+          "help": null
+        }
+      ]
+    },
+    {
       "version": "2026.11.11",
       "date": "2026-11-01",
       "title": "Safer sign-in, patient records and family pages: 108 fixes before testing",
