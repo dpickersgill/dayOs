@@ -297,17 +297,19 @@ test('the Demos dashboard shows sign-ins, activity, apps used, changes and last 
   assert.ok(row.requests >= 5 && row.changes >= 1 && row.apps.length >= 2, 'usage is kept after the demo is removed');
 });
 
-test('the demo welcome email comes from the founder, with a sign-in link that works until the demo ends', async () => {
+test('the demo welcome email comes from Verdynt/OS, with a sign-in link that works until the demo ends', async () => {
   const email = `wendy-${suffix}@example.org`;
   const r = await start(email, { name: 'Wendy Welcome' });
   assert.equal(r.status, 201);
   await welcomed(email);
   const m = mailTo(email).find((x) => /demo mountain is ready/.test(x.Subject));
   assert.ok(m, 'a welcome email');
-  assert.match(m.From, /^Dan Pickersgill </);
+  assert.match(m.From, /^Verdynt\/OS </);
+  assert.match(m.TextBody, /The Verdynt\/OS team\nVerdynt Consulting Group\n/, 'signed by the team');
+  assert.doesNotMatch(m.TextBody, /\bDan\b|Pickersgill|founder|\bI'd\b/, 'no person named');
   assert.equal(m.ReplyTo, require('../src/config').site.helloEmail);
   assert.match(m.TextBody, /^Hi Wendy,/);
-  assert.match(m.TextBody, /Three things I'd try first/);
+  assert.match(m.TextBody, /Three things to try first/);
   assert.doesNotMatch(m.TextBody, new RegExp(r.body.password), 'the password is never emailed');
   const token = decodeURIComponent(/try\?open=([^\s&]+)/.exec(m.TextBody)[1]);
   const opened = await api('POST', '/trial/open', { body: { token } });
