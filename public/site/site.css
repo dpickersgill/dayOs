@@ -828,7 +828,7 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 }
 
 /* ---------- The Good Day (the newsletter, guests round 2)
-   Its own identity inside the site: the spruce masthead with a ridgeline and an amber button, kept from Dan's design so an
+   Its own identity inside the site: the spruce masthead with a ridgeline and an amber button, kept from the original design so an
    issue reads as a publication, not a product page. The site's own fonts (Barlow Condensed and Atkinson Hyperlegible, both
    served from /fonts), so nothing loads from Google. The issue pages follow the reader's light or dark setting. */
 .gd-page,.gd-card,.sf-gd{--gd-bg:#f3f6f8;--gd-surface:#fff;--gd-ink:#14212b;--gd-muted:#4d5f6e;--gd-line:#d3dde5;--gd-accent:#1d5b47;--gd-accent-ink:#fff;
@@ -909,7 +909,7 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 .gd-shipped p{font-size:17px;color:var(--gd-muted)}
 .gd-shipped strong{color:var(--gd-ink)}
 
-/* from the sideline, and the close */
+/* before the season, and the close */
 .gd-sideline{border-top:1px solid var(--gd-line);padding-top:32px}
 .gd-close{background:var(--gd-surface);border:1px solid var(--gd-line);border-radius:12px;padding:28px;display:flex;flex-direction:column;gap:16px}
 .sx .gd-page a.gd-cta{align-self:flex-start;display:inline-flex;align-items:center;min-height:52px;padding:10px 26px;border-radius:8px;background:var(--gd-accent);color:var(--gd-accent-ink);font-weight:700;text-decoration:none}
@@ -1055,7 +1055,7 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
   .st-days{height:22px;gap:0}
 }
 
-/* ---------------------------------------------------------------- spacing and type (2026.11, approved by Dan)
+/* ---------------------------------------------------------------- spacing and type (2026.11, approved)
    Content 1,320px wide, sections up to 72px top and bottom, and two neighbors with the same background share one gap
    instead of two. The page title or hero and a plain section under it share one gap the same way. */
 .sec:not(.alt)+.sec:not(.alt),.sec.alt+.sec.alt,.band+.band,
@@ -1087,12 +1087,5 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 }
 /* founding-program card alone in its section: no extra top margin */
 .wrap>.offer:first-child,.wrap>.found:first-child{margin-top:0}
-/* About: the founder, with a photo beside the words once there is one (the figure stays hidden until then) */
-.founder{display:grid;grid-template-columns:minmax(0,1fr);gap:24px;align-items:start}
-.founder:has(.founder-photo:not([hidden])){grid-template-columns:200px minmax(0,1fr)}
-.founder-photo{margin:0}
-.founder-photo img{display:block;width:100%;height:auto;border-radius:var(--r)}
-.founder h2{margin-top:0}
-@media (max-width:640px){.founder:has(.founder-photo:not([hidden])){grid-template-columns:minmax(0,1fr)}.founder-photo{max-width:200px}}
 /* "Switching this season?" above a solution page's pricing card */
 .wrap>.season-note:first-child{margin:0 0 28px}
