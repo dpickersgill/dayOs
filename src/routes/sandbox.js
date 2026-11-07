@@ -194,7 +194,7 @@ router.post('/', validate(z.object({
 
   // Starting the demo signs them straight in, so that counts as the first sign-in and first use.
   const [su] = await pool.query('INSERT INTO sandbox_signups (email, name, mountain, tenant_id, expires_at, ip_hash, sign_ins, first_used_at, last_used_at, email_verified, area_ref) VALUES (?, ?, ?, ?, ?, ?, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?, ?)', [email, name, mountain, created.tenantId, created.expires, ipHash, codeId ? 1 : 0, area ? area.ref : null]);
-  // The welcome email (a sign-in link, what to try first), from the founder. Sent after the reply so the demo opens at once.
+  // The welcome email (a sign-in link, what to try first), from Verdynt/OS. Sent after the reply so the demo opens at once.
   setImmediate(() => { demoMail.welcome(baseUrl(req), su.insertId).catch(() => {}); });
   res.status(201).json({
     token: await signToken({ id: created.userId, tenant_id: created.tenantId, role: 'owner' }, req),

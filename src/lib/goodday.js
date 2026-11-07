@@ -210,10 +210,10 @@ function welcomeEmail({ name, origin, unsubUrl, postal }) {
     preheader: first ? `Start with Issue ${first.n}: ${first.question}` : 'The first issue is on its way.', eyebrow: 'Welcome',
     body: p(esc(hi(name))) + p('You are in. A guest\'s day on your mountain is six moments: Plan, Arrive, Learn, Ride, Get help and Come back. Every other week, The Good Day takes one of them apart: the question in the guest\'s head, the process behind the answer, one number to watch and a quick test.')
       + (first ? p(`Start with Issue ${first.n}, on ${esc(first.moment)}: <strong>${esc(first.question)}</strong>`) + button(read, `Read Issue ${first.n}`) : '')
-      + p('One ask: reply and tell me which moment of your guest\'s day is hardest right now. I read every reply.') + p('Dan<br><span style="color:#4d5f6e;">Verdynt/OS</span>'),
+      + p('One ask: reply and tell us which moment of your guest\'s day is hardest right now. We read every reply.') + p(`The Verdynt/OS team<br><span style="color:#4d5f6e;">${esc(config.site.company.name)}</span>`),
     foot: footHtml(unsubUrl, postal, why),
   });
-  const text = `${hi(name)}\n\nYou are in. A guest's day on your mountain is six moments: Plan, Arrive, Learn, Ride, Get help and Come back. Every other week, The Good Day takes one of them apart.\n\n${first ? `Start with Issue ${first.n}, on ${first.moment}: ${first.question}\n${read}\n\n` : ''}One ask: reply and tell me which moment of your guest's day is hardest right now. I read every reply.\n\nDan\nVerdynt/OS\n\n--\n${footText(unsubUrl, postal, why)}`;
+  const text = `${hi(name)}\n\nYou are in. A guest's day on your mountain is six moments: Plan, Arrive, Learn, Ride, Get help and Come back. Every other week, The Good Day takes one of them apart.\n\n${first ? `Start with Issue ${first.n}, on ${first.moment}: ${first.question}\n${read}\n\n` : ''}One ask: reply and tell us which moment of your guest's day is hardest right now. We read every reply.\n\nThe Verdynt/OS team\n${config.site.company.name}\n\n--\n${footText(unsubUrl, postal, why)}`;
   return { subject, html, text };
 }
 

@@ -71,7 +71,7 @@ module.exports = ({ tableExists }) => [
   ) ENGINE=InnoDB`],
   ['goodday_settings', (c) => tableExists(c, 'goodday_settings'), `CREATE TABLE goodday_settings (
     id              TINYINT UNSIGNED NOT NULL PRIMARY KEY,
-    from_name       VARCHAR(100) NOT NULL DEFAULT 'Dan at The Good Day',
+    from_name       VARCHAR(100) NOT NULL DEFAULT 'The Good Day',
     postal_address  VARCHAR(300) NULL,
     updated_by      VARCHAR(100) NULL,
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP

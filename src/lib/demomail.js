@@ -1,6 +1,6 @@
 'use strict';
 
-// Emails to people who start a demo mountain, written as personal notes from the founder (SITE_FOUNDER_NAME), replies to
+// Emails to people who start a demo mountain, written as notes from the Verdynt/OS team (DEMO_MAIL_NAME), replies to
 // hello@. Three at most: the welcome as the demo is built (a sign-in link, three things to try, what Verdynt/OS is), a
 // nudge about a part they have not opened yet (day 2, from the daily job), and a note before the demo ends. Each has a
 // stop link. Nobody who has since asked for a walkthrough or a trial gets the follow-ups.
@@ -57,7 +57,7 @@ async function fromPrice() {
 }
 
 function signature() {
-  return `${config.site.founderFirst}\n\n${config.site.founderName}\nVerdynt/OS\n${config.site.helloEmail}`;
+  return `The Verdynt/OS team\n${config.site.company.name}\n${config.site.helloEmail}`;
 }
 const footer = (base, s) => `\n\n--\nYou are getting this because you started a demo at Verdynt/OS. No more emails about it: ${appBase(base)}/try?stop=${stopToken(s.id)}`;
 
@@ -74,7 +74,7 @@ ${openUrl(base, token)}
 
 Keep it to yourself, since it opens your demo. If you'd rather use a password, set one under Account once you're in.
 
-Three things I'd try first:
+Three things to try first:
 
 1. Sell a lift ticket in Sell, then scan it at the Gate.
 2. Put a lift on hold in Mountain status, and watch the public conditions page change.
@@ -84,7 +84,7 @@ Today has guided tours if you'd like a walk through each part. Everything in the
 
 In short, Verdynt/OS runs the whole day at an independent ski area in one place: tickets and the gate, rentals, ski school and programs, lifts and trails, maintenance, patrol and staff. You turn on only the parts you run, prices are published${from ? ` (from ${from} a month)` : ''}, and every plan starts with a 14-day free trial on your own mountain. Founding mountains also pay half in their first season.
 
-If you'd like me to walk you through it with your own mountain in mind, just reply and we'll find a time.
+If you'd like us to walk you through it with your own mountain in mind, just reply and we'll find a time.
 
 ${signature()}${footer(base, s)}`,
   };
@@ -108,7 +108,7 @@ async function nudgeText(base, s) {
   if (!pick) {
     return { subject: 'How is the demo going?', text: `Hi ${firstName(s)},
 
-I can see you've been all over ${s.mountain}, which is great. Is there anything that didn't work the way your mountain does it? That's the most useful thing I can hear.
+We can see you've been all over ${s.mountain}, which is great. Is there anything that didn't work the way your mountain does it? That's the most useful thing we can hear.
 
 If it would help to see it with your own lifts, products and staff, reply and we'll set up a walkthrough. Your demo is here when you want it:
 ${openUrl(base, token)}
@@ -142,14 +142,14 @@ If it looks like a fit, there are two easy next steps:
 1. Reply to this email and we'll set up a walkthrough with your own mountain in mind.
 2. Or ask for a 14-day free trial on your real mountain, set up with your lifts and products: ${siteBase(base)}/contact
 
-Either way I'd like to hear what you thought, good or bad.
+Either way we'd like to hear what you thought, good or bad.
 
 ${signature()}${footer(base, s)}`,
   };
 }
 
 async function send(s, { subject, text }, tag) {
-  return mailer.sendPlatform({ to: s.email, fromName: config.site.founderName, fromAddress: config.site.demoFrom || undefined, replyTo: config.site.helloEmail, subject, text, tag });
+  return mailer.sendPlatform({ to: s.email, fromName: config.site.demoFromName, fromAddress: config.site.demoFrom || undefined, replyTo: config.site.helloEmail, subject, text, tag });
 }
 
 /** The welcome, right after a demo is built. Never throws: a demo works without it. */
@@ -174,7 +174,7 @@ async function sendLink(base, signupId) {
 Here's a new link to your demo mountain, ${s.mountain}. It signs you straight in, and it works until the demo ends on ${dayName(s.expires_at, s.tz)}:
 ${openUrl(base, token)}
 
-Any links I sent before no longer work.
+Any links we sent before no longer work.
 
 ${signature()}${footer(base, s)}` }, 'demo-link');
 }

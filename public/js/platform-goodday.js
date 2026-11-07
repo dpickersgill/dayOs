@@ -122,7 +122,7 @@ function settingsDialog(r) {
   if (!r) return;
   const name = input({ name: 'from_name', required: true, maxlength: 100, value: r.settings.from_name || '' });
   const postal = input({ name: 'postal_address', required: true, maxlength: 300, value: r.settings.postal_address || '', placeholder: 'Street, town, state and ZIP, or a PO box' });
-  formDialog('Sender and address', h('div', { class: 'stack' }, field('From name', name, 'For example: Dan at The Good Day. The address is the service\'s MAIL_FROM (or GOODDAY_FROM).'),
+  formDialog('Sender and address', h('div', { class: 'stack' }, field('From name', name, 'For example: The Good Day from Verdynt/OS. The address is the service\'s MAIL_FROM (or GOODDAY_FROM).'),
     field('Postal address', postal, 'Required at the bottom of every issue (CAN-SPAM). A PO box works.')), async () => {
     await ctx.call('PUT', '/goodday/settings', { from_name: name.value.trim(), postal_address: postal.value.trim() });
     toast('Saved.'); draw();
