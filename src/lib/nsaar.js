@@ -295,4 +295,27 @@ function describe() {
   };
 }
 
-module.exports = { FIELDS, SECTIONS, BY_KEY, formSchema, parseForm, mergeForm, isEmpty, applies, describe, BODY_SIDED, BODY_PLAIN };
+// Fields saved on a case that are not on the printed form, and the words the case screen uses for them.
+const OTHER_LABELS = {
+  first_name: 'First name', last_name: 'Last name', summary: 'Summary', category: 'Type', severity: 'Severity', occurred_at: 'When it happened',
+  narrative: 'Narrative', status: 'Status', report_state: 'Report state', person_id: 'Linked guest', reporter_staff_id: 'Who wrote the report',
+  gps_lng: 'GPS', notes: 'Notes', form: 'Form answers', patients: 'Patients', responders: 'Responders',
+};
+/**
+ * The label the case report uses for a field name kept in the audit log (a field key, its column, or form:a|b), so the
+ * access log never shows database names such as chief_complaint (review 2026.11.12). Unknown names read as words.
+ */
+function fieldLabels(names) {
+  const byName = new Map();
+  for (const f of FIELDS) { if (!byName.has(f.key)) byName.set(f.key, f.label); if (f.col && !byName.has(f.col)) byName.set(f.col, f.label); }
+  const one = (k) => byName.get(k) || OTHER_LABELS[k] || (String(k).charAt(0).toUpperCase() + String(k).slice(1)).replace(/_/g, ' ');
+  const out = [];
+  for (const n of Array.isArray(names) ? names : []) {
+    const k = String(n);
+    if (k.startsWith('form:')) out.push(...k.slice(5).split('|').filter(Boolean).map(one));
+    else out.push(one(k));
+  }
+  return [...new Set(out)];
+}
+
+module.exports = { FIELDS, SECTIONS, BY_KEY, fieldLabels, formSchema, parseForm, mergeForm, isEmpty, applies, describe, BODY_SIDED, BODY_PLAIN };
