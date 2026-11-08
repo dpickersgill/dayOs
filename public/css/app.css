@@ -5,7 +5,7 @@
 @font-face { font-family: 'Atkinson Hyperlegible'; font-weight: 700; font-style: normal; font-display: swap; src: url('/fonts/atkinson-hyperlegible-latin-700-normal.woff2') format('woff2'); }
 
 :root {
-  /* Brand: slate and spruce with gold #d8b672. Gold is a fill (with dark slate text, 8:1) or a line, never text on white. */
+  /* Brand: slate and spruce with brand gold. Gold is a fill (with dark slate text, 8:1) or a line, never text on white. */
   --snowpack: #edf1f3;
   --powder: #ffffff;
   --spruce: #0e2632;
@@ -198,6 +198,11 @@ input, select, textarea {
   font-weight: 400;
 }
 textarea { min-height: 96px; resize: vertical; }
+/* Form controls and every button take the body font (browsers default some to Arial) */
+button, input, select, textarea, optgroup { font-family: inherit; }
+body .leaflet-container, body .leaflet-container .leaflet-control-attribution, body .leaflet-control-layers, body .leaflet-popup-content { font-family: inherit; }
+/* Map zoom buttons are 44 px targets on every device */
+body .leaflet-container .leaflet-bar a, body .leaflet-touch .leaflet-bar a { width: 44px; height: 44px; line-height: 44px; font-size: 22px; }
 input[type='checkbox'] { width: 22px; min-height: 22px; height: 22px; accent-color: var(--link); }
 label.check { display: flex; gap: 10px; align-items: center; font-weight: 700; min-height: 44px; }
 .form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; align-items: end; }
@@ -1174,6 +1179,7 @@ span.park-row { cursor: default; }
 .menu-pop { position: relative; }
 .menu-pop summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; }
 .menu-pop summary::-webkit-details-marker { display: none; }
+.menu-pop:not([open]) > .menu-items { display: none; } /* closed: the items are not there for a click, a tab or a screen reader */
 .menu-items { position: absolute; right: 0; z-index: 20; margin-top: 6px; min-width: 240px; padding: 10px; background: var(--surface); border: 1.5px solid var(--line-strong); border-radius: var(--radius-md); box-shadow: var(--lift); }
 .menu-items .btn { width: 100%; justify-content: flex-start; }
 @media (min-width: 900px) { .cases .case-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; } .cases .cr-meta { grid-column: 1; } .cases .cr-tags { grid-column: 2; grid-row: 1 / span 2; justify-content: flex-end; margin: 0; } }
@@ -1587,6 +1593,8 @@ input[type='search'][aria-label='Search documents'] { min-width: min(20rem, 100%
 .help-back { margin: 0 0 12px; }
 .help-article { max-width: 46rem; }
 .help-article h1 { margin: 0 0 8px; }
+/* Help topic titles match every other page title: Barlow Condensed */
+.help-article h1, .help h1, .help-done h1 { font-family: 'Barlow Condensed', 'Atkinson Hyperlegible', system-ui, sans-serif; font-weight: 700; font-size: 2.125rem; line-height: 1.05; }
 .help-intro { font-size: 1.0625rem; color: var(--ink-2); margin: 0 0 16px; }
 .help-article ol { padding-left: 1.4rem; display: grid; gap: 10px; }
 .help-tips, .help-related { margin-top: 20px; padding: 12px 16px; border-left: 4px solid var(--accent-line); background: var(--info-tint); border-radius: var(--radius-sm); }
@@ -3821,3 +3829,36 @@ button.fill-day:hover { border-color: var(--line-strong); }
 .signin-form .resume-slot, .signin-form .signin-passkey { width: min(380px, 100%); }
 .passkey-count { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .passkey-count.short { color: var(--warn-ink); font-weight: 600; }
+
+/* Phones: buttons and check boxes are at least 44 px targets. Small buttons keep their padding and font, only their height
+   grows; a check box or radio button grows its label's hit area instead of the box itself. */
+@media (max-width: 600px) {
+  .btn:not(.link), .btn.small:not(.link), summary.btn { min-height: 44px; }
+  label:has(> input[type='checkbox']), label:has(> input[type='radio']) { min-height: 44px; display: flex; align-items: center; gap: 10px; }
+  label.field:has(> input[type='checkbox']), label.field:has(> input[type='radio']) { display: grid; align-content: center; }
+  td > input[type='checkbox'], td > input[type='radio'], th > input[type='checkbox'] { margin: 11px 4px; }
+  .seg button, .chip, .fchips button { min-height: 44px; }
+}
+
+/* ---------- Printing a patrol case (Care, Report and Record on paper) ----------
+   The case header starts page 1 with Care under it (no page of its own); Report and Record each start a page. The printout
+   keeps what was recorded and drops the controls: buttons, helper text, how long ago, open dialogs and the sticky bars.
+   Date and time boxes print as words in the same format as the rest of the page (see printableTimes in ui.js). */
+.print-value { display: none; }
+@media print {
+  .case-page .wristband { position: static !important; top: auto; }
+  .case-page .case > .pane { break-before: auto !important; }
+  .case-page .case > .pane ~ .pane { break-before: page !important; }
+  .case-page .panel, .case-page .bedside, .case-page details { break-inside: auto; box-shadow: none; }
+  .case-page h2, .case-page h3, .case-page h4, .case-page summary { break-after: avoid; }
+  .case-page .vgrid, .case-page .vtile, .case-page tr, .case-page li { break-inside: avoid; }
+  .case-page .hint, .case-page .field .hint, .case-page .no-print, .case-page .seg:not(:has([aria-pressed='true'])),
+  .case-page .chip-row, .case-page .fchips, .case-page .add-row, .case-page .discard-ask { display: none !important; }
+  .case-page input[type='datetime-local'], .case-page input[type='date'], .case-page input[type='time'] { display: none !important; }
+  .case-page .print-value { display: inline; font-weight: 400; }
+  .case-page input:placeholder-shown, .case-page textarea:placeholder-shown { color: transparent; }
+  .case-page details.nsaar-sec:not([open])::details-content, .case-page .bedside details.more:not([open])::details-content { content-visibility: visible; display: block; }
+  .case-page select { appearance: none; -webkit-appearance: none; background-image: none !important; }
+  .case-page details > summary { pointer-events: none; }
+  body:not(:has(.print-overlay)) .overlay, .topbar, .tabbar, .offline-banner, .demo-pill, .toasts, .fab { display: none !important; }
+}
