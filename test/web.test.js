@@ -610,12 +610,14 @@ test('theme: follows the device until the person picks Light or Dark beside thei
   assert.equal(document.documentElement.getAttribute('data-theme'), 'light', 'this test device has no dark preference');
 });
 
-test('What moved: managers see the note for two weeks from November 8, and can dismiss it', skip(), async () => {
+test('What moved: managers see the note for 30 days from the November 8 release, and can dismiss it per login', skip(), async () => {
   const main = await mods.imp('main.js');
   assert.equal(main.movedNoteDue('rentals', '2026-11-07'), false);
   assert.equal(main.movedNoteDue('rentals', '2026-11-08'), true);
   assert.equal(main.movedNoteDue('patrol', '2026-11-21'), true);
-  assert.equal(main.movedNoteDue('rentals', '2026-11-22'), false);
+  assert.equal(main.movedNoteDue('school', '2026-12-07'), true, 'still on day 30');
+  assert.equal(main.movedNoteDue('school', '2026-12-08'), false, 'gone after 30 days');
+  assert.equal(main.movedNoticeKey('availability'), 'moved:school', 'Lessons and its Availability view share one dismissal');
   assert.equal(main.movedNoteDue('conditions', '2026-11-10'), false, 'only apps whose setup moved');
   assert.equal(main.settingsPageFor('availability'), 'school');
   assert.equal(main.settingsPageFor('programs', {}), null, 'Programs only when it has setup to show');

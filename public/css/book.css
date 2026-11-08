@@ -270,3 +270,17 @@ details.more .row3 { display: grid; gap: 12px; margin-top: 8px; }
 .next-times { margin-top: 12px; padding: 12px 14px; border-radius: var(--r-sm); border: 1.5px solid var(--line); background: #fbfcfd; display: grid; gap: 8px; }
 .next-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .btn.small { min-height: 40px; padding: 0 16px; font-size: 0.9375rem; }
+
+/* feat/school-pay: the 0 to 10 question, a learn to ski ladder's progress, a group's booking link */
+.nps-row { display: grid; grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 4px; }
+.nps-row .pill.nps-n { min-height: 44px; padding: 0; min-width: 0; }
+.nps-ends { display: flex; justify-content: space-between; }
+@media (max-width: 420px) { .nps-row { grid-template-columns: repeat(6, minmax(0, 1fr)); } .nps-ends { display: none; } }
+.ladder-bar { display: flex; gap: 6px; }
+.ladder-bar span { flex: 1; height: 10px; border-radius: 999px; background: var(--line); }
+.ladder-bar span.done { background: var(--blue); }
+.code { font-family: ui-monospace, monospace; letter-spacing: 0.08em; }
+.gp-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.gp-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.gp-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.gp-link { width: 100%; font-size: 0.85em; }

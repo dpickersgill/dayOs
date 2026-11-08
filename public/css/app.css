@@ -3747,3 +3747,10 @@ button.fill-day:hover { border-color: var(--line-strong); }
 .signin-form .resume-slot, .signin-form .signin-passkey { width: min(380px, 100%); }
 .passkey-count { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .passkey-count.short { color: var(--warn-ink, #8a5300); font-weight: 600; }
+
+/* feat/school-pay: setup warning, satisfaction score, add-on summary, group links */
+.pay-setup ul { margin: 0; }
+.nps-chip { white-space: nowrap; }
+.extras-summary { align-items: center; gap: 6px; }
+.link-box { width: 100%; }
+.my-score { margin: 0; }
