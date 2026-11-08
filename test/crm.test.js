@@ -170,8 +170,11 @@ test('the customer history gathers purchases, tickets and lessons in one place',
 });
 
 test('patrol can look a guest up but does not see address, emergency contact or consent', async () => {
-  // patrol finds a guest by searching; opening a record by number is only for patients on a case
-  assert.equal((await api('GET', `/people/${D.bea}`, { token: T.patrol })).status, 404);
+  // patrol finds a guest by searching; opening a record by number is only for patients on a case the person may open.
+  // Before the records check, someone who is not a patient gets the same answer as someone else's patient (the check).
+  const byId = await api('GET', `/people/${D.bea}`, { token: T.patrol });
+  assert.equal(byId.status, 403);
+  assert.equal(byId.body.details.code, 'step_up_required');
   const list = (await api('GET', '/people?q=Bea', { token: T.patrol })).body.data;
   const p = list.find((x) => x.id === D.bea);
   assert.equal(p.first_name, 'Bea');
