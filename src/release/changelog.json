@@ -16,14 +16,14 @@
           "kind": "new",
           "app": "school",
           "who": ["instructor", "counter"],
-          "text": "A Lost child button on My day and at the desk sends patrol a call with the child's age, jacket and helmet colors and where they were last seen. The school sees the status, and Found closes it with who, where and when.",
+          "text": "A Lost child button on My day and at the desk sends patrol a call with the child's age, jacket and helmet colors and where they were last seen. The school sees the status, and Found closes it with who, where and when. Patrol can open the report and photo only while the search is on.",
           "help": "lesson-lost-child"
         },
         {
           "kind": "new",
           "app": "school",
           "who": ["instructor", "counter"],
-          "text": "Class sizes by age band. The desk is warned when a class is over its size or a student is outside the lesson's ages, and a manager can book anyway with a reason. Online booking stops at the size. The lineup board shows Over ratio in red.",
+          "text": "Class sizes by age band. The desk is warned when a class is over its size or a student is outside the lesson's ages, including two children in one sale, and a manager can book or move a child anyway with a reason. Online booking stops at the size. The lineup board shows Over ratio in red.",
           "help": "lesson-ratios"
         },
         {
@@ -58,7 +58,7 @@
           "kind": "new",
           "app": "school",
           "who": null,
-          "text": "Learn to ski ladders: a first-timer package of 3 or 4 lessons. Checking a student in for a ladder lesson issues the included lift ticket for that day and opens the included rental, ready to fit. Graduates get a season pass offer.",
+          "text": "Learn to ski ladders: a first-timer package of 3 or 4 lessons. Checking a student in for a ladder lesson issues the included lift ticket for that day, at the student's own ticket type, and opens the included rental, ready to fit. A lesson moved for weather takes them along. Graduates get a season pass offer.",
           "help": "school-learn-ladder"
         },
         {
