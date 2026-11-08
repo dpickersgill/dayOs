@@ -67,7 +67,7 @@ async function recapsTab(root) {
     try {
       const d = await get('/skischool/recaps');
       clear(body);
-      if (!d.on) { body.append(empty('Recaps are turned off. A manager can turn them on in Settings, Ski school, Families.')); return; }
+      if (!d.on) { body.append(empty('Recaps are turned off. A manager can turn them on in Settings, Lessons, Families.')); return; }
       if (!d.lessons.length) { body.append(empty('No recaps to send. They show here when your lessons end.')); return; }
       for (const l of d.lessons) {
         body.append(h('section', { class: 'panel stack recap-lesson', 'data-session': l.session_id },

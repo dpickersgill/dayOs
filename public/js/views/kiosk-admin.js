@@ -6,7 +6,7 @@ import { printDialog } from '../print.js';
 const hrs = (m) => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
 const METHOD = { login: 'Sign-in', pin: 'PIN', badge: 'Badge', manager: 'Manager' };
 
-/** The Kiosk tab on the Workforce page: tablets, people's PINs and badges, snapshot settings, and punch review. */
+/** The time clock kiosk, in Settings, Staff and schedule: tablets, people's PINs and badges, snapshot settings, and punch review. */
 export async function drawKiosk(box) {
   const data = await get('/kiosk-admin/overview');
   const mountainName = (data.mountain && data.mountain.name) || '';

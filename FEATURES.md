@@ -465,9 +465,9 @@ The **Today** page is a set of tiles each person can choose and reorder: Lifts, 
 
 A shared tablet by the staff door lets people clock in and out without an account: tap your name and enter a PIN, or scan a QR badge.
 
-- Set up (Staff and schedule, Setup tab, Time clock kiosk): give each person a PIN, add a tablet, open the pairing link on it, and optionally print badges.
+- Set up (Settings, Staff and schedule, Time clock kiosk): give each person a PIN, add a tablet, open the pairing link on it, and optionally print badges.
 - Pairing codes work once and expire in 30 minutes. A tablet's token is stored only as a hash and the tablet can be turned off or removed at any time.
-- New PINs are 6 digits (random ones too); a mountain can allow 4-digit PINs for new staff (Kiosk, Settings, "Allow 4-digit PINs for new staff", off by default). PINs already set keep working until changed. Stored hashed, and five wrong tries lock that person for 10 minutes (a manager can unlock). Tablet changes are filed as tablets in the audit log. Badges are derived from the server secret, so they can be reprinted; "Lost badge" makes the old one stop working.
+- New PINs are 6 digits (random ones too); a mountain can allow 4-digit PINs for new staff (Settings, Staff and schedule, Time clock kiosk: "Allow 4-digit PINs for new staff", off by default). PINs already set keep working until changed. Stored hashed, and five wrong tries lock that person for 10 minutes (a manager can unlock). Tablet changes are filed as tablets in the audit log. Badges are derived from the server secret, so they can be reprinted; "Lost badge" makes the old one stop working.
 - Each punch must match the person's current state (in or out), and the confirm step expires after 90 seconds, so a stray tap cannot flip someone's status.
 - Snapshots are off by default. When on, the tablet shows a notice, one photo is saved per punch, only managers can view it (each view is logged), and the daily job deletes it after the chosen number of days. Nothing is matched to faces.
 - Managers can fix a forgotten clock-out; the change is written to the audit log. Entries open more than 14 hours are flagged.

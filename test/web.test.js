@@ -2329,11 +2329,11 @@ test('public booking page: lists open lessons, takes a request, and lets the gue
 const saveBar = (root) => root.querySelector('.set-savebar');
 const change = (el, v) => { if (el.type === 'checkbox') el.checked = v; else el.value = v; el.dispatchEvent(new window.Event(el.type === 'checkbox' ? 'change' : 'input', { bubbles: true })); };
 
-test('settings: Ski school carries the online booking switch, its link, and saves from the save bar', skip(), async () => {
+test('settings: Lessons carries the online booking switch, its link, and saves from the save bar', skip(), async () => {
   const root = await renderView('settings', 'owner', T.owner, {}, ['school']);
   clean(root, 'settings / school');
-  assert.equal(root.querySelector('h1').textContent, 'Ski school');
-  assert.equal(root.querySelector('.set-link[aria-current=page]').textContent, 'Ski school');
+  assert.equal(root.querySelector('h1').textContent, 'Lessons');
+  assert.equal(root.querySelector('.set-link[aria-current=page]').textContent, 'Lessons');
   const section = root.querySelector('[data-card=online-booking]');
   assert.ok(section);
   assert.match(section.textContent, new RegExp(`/book/${slug}`));

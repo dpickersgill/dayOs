@@ -1,5 +1,5 @@
 // Help: short how-to articles for each app, searchable, shown only for what this person can use.
-import { h, clear, ctx, can, isManager, schoolCan, input, empty, errorBox, state, label } from '../ui.js';
+import { h, clear, ctx, can, isManager, schoolCan, input, empty, errorBox, state, label, backTo, hashParam } from '../ui.js';
 import { get, post, session } from '../api.js';
 import { SECTIONS, ARTICLES, articleById } from '../help-content.js';
 
@@ -27,6 +27,19 @@ function search(query) {
 }
 
 const back = (href, text) => h('p', { class: 'help-back' }, h('a', { href }, `← ${text}`));
+
+// Patrol's four parts (Now, Cases, People, Gear) and their articles: Help opened from Patrol, Gear opens Gear help.
+const PATROL_PARTS = {
+  now: ['Now', 'Who is on, the calls, the map and today\u2019s checks.', ['patrol-duty', 'patrol-sweep', 'patrol-1111-sweep', 'patrol-log', 'patrol-avalanche', 'patrol-locate', 'patrol-find', 'patrol-offline', 'patrol-1111-offline']],
+  cases: ['Cases', 'Every patrol report and what follows from it.', ['patrol-case', 'patrol-records-check', 'patrol-checklists', 'patrol-bedside', 'patrol-errors', 'patrol-photos', 'patrol-1111-photos', 'patrol-review', 'patrol-followup', 'patrol-records', 'patrol-1111-records', 'patrol-claim-file', 'patrol-requirements', 'patrol-conditions', 'patrol-rentals', 'patrol-staff', 'park-patrol', 'attr-patrol', 'patrol-scene', 'patrol-secure-links', 'patrol-witness-links', 'patrol-network', 'patrol-doc-score', 'patrol-risk-report', 'patrol-access-summary', 'patrol-1111-access']],
+  people: ['People', 'The schedule, crews, posts, roster and training.', ['patrol-schedule', 'patrol-crews', 'patrol-cover', 'patrol-roster', 'patrol-roster-off', 'patrol-access']],
+  gear: ['Gear', 'Kits, equipment, medications and lift evacuation.', ['patrol-kits', 'patrol-meds', 'patrol-1111-meds', 'patrol-lifts']],
+};
+/** The back link to the page Help was opened from, when it was in this app (Patrol, Gear). */
+function backToApp(key) {
+  const was = backTo();
+  return was && was.key === key ? back(was.hash, `Back to ${was.name}`) : null;
+}
 const articleLink = (a, withSection) => h('li', null, h('a', { href: `#/help/${a.id}` }, a.title), withSection ? h('small', { class: 'muted' }, ` ${sectionOf(a.app).label}`) : null);
 
 function home(root) {
@@ -126,7 +139,19 @@ function section(root, key) {
   const s = sectionOf(key);
   if (!s || !sectionOpen(s)) { root.append(back('#/help', 'All help'), empty('That topic is not available to you.')); return; }
   const list = visible().filter((a) => a.app === key);
-  root.append(back('#/help', 'All help'), h('div', { class: 'page-head' }, h('div', null, h('h1', null, s.label), h('p', { class: 'muted' }, s.blurb))),
+  const links = h('div', { class: 'help-backs' }, backToApp(key), back('#/help', 'All help'));
+  // Patrol's Help from one of its parts: that part's articles first, then the rest of Patrol's.
+  const part = key === 'patrol' ? PATROL_PARTS[hashParam('part')] : null;
+  if (part) {
+    const mine = part[2].map((id) => list.find((a) => a.id === id)).filter(Boolean);
+    const rest = list.filter((a) => !mine.includes(a));
+    root.append(links, h('div', { class: 'page-head' }, h('div', null, h('h1', null, `${s.label}: ${part[0]}`), h('p', { class: 'muted' }, part[1]))),
+      mine.length ? h('ul', { class: 'help-results', 'data-part': hashParam('part') }, mine.map((a) => articleLink(a))) : empty('No articles here yet.'),
+      rest.length ? h('h2', { class: 'help-more' }, `More ${s.label} help`) : null,
+      rest.length ? h('ul', { class: 'help-results' }, rest.map((a) => articleLink(a))) : null, stuck());
+    return;
+  }
+  root.append(links, h('div', { class: 'page-head' }, h('div', null, h('h1', null, s.label), h('p', { class: 'muted' }, s.blurb))),
     list.length ? h('ul', { class: 'help-results' }, list.map((a) => articleLink(a))) : empty('No articles here yet.'), stuck());
 }
 
@@ -135,7 +160,10 @@ function article(root, id) {
   if (!a || !articleOpen(a)) { root.append(back('#/help', 'All help'), empty('That article is not available to you.')); return; }
   const s = sectionOf(a.app);
   const related = (a.related || []).map(articleById).filter((r) => r && articleOpen(r));
-  root.append(back(`#/help/for-${a.app}`, s.label),
+  // From Patrol's Help for one part (Patrol: Gear), back to that part.
+  const was = backTo();
+  const part = a.app === 'patrol' && was && was.key === 'patrol' && PATROL_PARTS[was.part] && PATROL_PARTS[was.part][2].includes(a.id) ? was.part : null;
+  root.append(part ? back(`#/help/for-patrol?part=${part}`, `${s.label}: ${PATROL_PARTS[part][0]}`) : back(`#/help/for-${a.app}`, s.label),
     h('article', { class: 'help-article' },
       h('h1', null, a.title),
       h('p', { class: 'help-intro' }, a.intro),

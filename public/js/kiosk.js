@@ -124,7 +124,7 @@ function showPair(message) {
   const code = h('input', { class: 'k-code', type: 'text', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', maxlength: 9, placeholder: 'ABCD-EFGH', 'aria-label': 'Pairing code' });
   const msg = h('div', { class: 'k-msg bad', role: 'alert', hidden: !message }, message || '');
   const go = h('button', { class: 'k-btn primary', type: 'submit' }, 'Set up this tablet');
-  const form = h('form', { class: 'k-card' }, h('h2', null, 'Set up this tablet'), h('p', { class: 'k-fine' }, 'A manager makes a code in the staff app: Staff and schedule, then Kiosk, then Add a tablet. Type it here.'), code, msg, go);
+  const form = h('form', { class: 'k-card' }, h('h2', null, 'Set up this tablet'), h('p', { class: 'k-fine' }, 'A manager makes a code in the staff app: Settings, Staff and schedule, then Add a tablet under Time clock kiosk. Type it here.'), code, msg, go);
   form.addEventListener('submit', async (e) => {
     e.preventDefault(); go.disabled = true; msg.hidden = true;
     try { await pairWith(code.value); } catch (err) { msg.textContent = err.message; msg.hidden = false; go.disabled = false; }
@@ -150,7 +150,7 @@ async function showHome(notice) {
   const draw = () => {
     const q = query.trim().toLowerCase();
     const list = roster.people.filter((p) => !q || p.name.toLowerCase().includes(q));
-    grid.replaceChildren(...(list.length ? list.map((p) => h('button', { class: `k-tile${p.in ? ' in' : ''}`, type: 'button', role: 'listitem', onclick: () => showPin(p) }, h('b', null, p.name), h('span', { class: 'st' }, p.in ? 'Clocked in' : 'Clocked out'))) : [h('p', { class: 'k-empty' }, roster.people.length ? `No name matches "${query.trim()}".` : 'No one is set up on this clock yet. A manager adds PINs under Staff and schedule, then Kiosk.')]));
+    grid.replaceChildren(...(list.length ? list.map((p) => h('button', { class: `k-tile${p.in ? ' in' : ''}`, type: 'button', role: 'listitem', onclick: () => showPin(p) }, h('b', null, p.name), h('span', { class: 'st' }, p.in ? 'Clocked in' : 'Clocked out'))) : [h('p', { class: 'k-empty' }, roster.people.length ? `No name matches "${query.trim()}".` : 'No one is set up on this clock yet. A manager adds PINs in Settings, Staff and schedule, under Time clock kiosk.')]));
   };
   search.addEventListener('input', () => { query = search.value; draw(); });
   search.addEventListener('keydown', (e) => { if (e.key === 'Enter' && search.value.startsWith('SO1.')) { e.preventDefault(); identifyBadge(search.value.trim()); } });

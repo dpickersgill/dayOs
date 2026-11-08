@@ -25,7 +25,7 @@ async function parts() {
 /** The page of its own: an instructor's menu item (#/availability). Everyone else is sent to Lessons, Instructors, Availability. */
 export async function render(root) {
   const items = await parts();
-  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Instructor availability'),
+  root.append(h('div', { class: 'page-head' }, h('h1', null, ctx.me && ctx.me.role === 'instructor' ? 'My availability' : 'Instructor availability'),
     h('p', { class: 'page-note' }, 'Mark the dates and times you are open. Change them whenever plans change.')), tabs(items, items[0][0]));
 }
 
