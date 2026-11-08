@@ -15,7 +15,7 @@ export async function drawReservations(box) {
     shown.length ? table([
       { head: 'Pickup', cell: (r) => `${fmtDate(r.pickup_on)} · ${r.days} day${r.days === 1 ? '' : 's'}` },
       { head: 'Renter', cell: (r) => h('strong', null, `${r.first_name} ${r.last_name}`) },
-      { head: 'Gear', cell: (r) => r.lines.map((l) => `${l.quantity} ${l.tier === 'performance' ? 'performance ' : ''}${l.category}`).join(', ') },
+      { head: 'Gear', cell: (r) => r.lines.map((l) => `${l.quantity} ${l.tier === 'performance' ? 'performance ' : ''}${label(l.category).toLowerCase()}`).join(', ') },
       { head: 'Status', cell: (r) => state(label(r.status), r.status === 'held' ? 'neutral' : r.status === 'picked_up' ? 'good' : 'warn') },
       { head: '', actions: true, cell: (r) => (r.status === 'held' ? h('span', { class: 'row' },
         button('No-show', async () => { await patch(`/rentals/reservations/${r.id}`, { status: 'no_show' }); await reload(); }, { small: true }),
@@ -34,7 +34,7 @@ function newReservation(done) {
   async function showAvail() {
     if (!pickup.value) return;
     const r = await get(`/rentals/availability?from=${pickup.value}&days=${days.value || 1}`);
-    avail.textContent = r.data.length ? `Free for those dates: ${r.data.map((d) => `${d.free} ${d.tier === 'performance' ? 'performance ' : ''}${d.category}`).join(', ')}` : 'Add gear to your inventory first.';
+    avail.textContent = r.data.length ? `Free for those dates: ${r.data.map((d) => `${d.free} ${d.tier === 'performance' ? 'performance ' : ''}${label(d.category).toLowerCase()}`).join(', ')}` : 'Add gear to your inventory first.';
   }
   pickup.addEventListener('change', showAvail); days.addEventListener('change', showAvail);
   function addLine() {

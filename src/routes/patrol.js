@@ -10,7 +10,7 @@ const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
 const CL = require('../lib/checklists');
-const { partialOf, z, dateStr, dateTimeStr, validate, paramId, normDateTime, setClause, seasonFor, todayIn, nowIn } = require('../lib/util');
+const { partialOf, z, dateStr, dateTimeStr, validate, paramId, normDateTime, setClause, seasonFor, todayIn, nowIn, clock } = require('../lib/util');
 const { notFound, bad, conflict, forbidden } = require('../lib/errors');
 const R = require('../lib/review');
 const { audit } = require('../lib/audit');
@@ -1296,7 +1296,7 @@ for (const [name, def] of Object.entries(sub)) {
       // A time in the future is a typing slip (23:45 for 13:45), and it would put the record out of order.
       // (PATROL_FUTURE_SLACK_MIN only widens the 5 minutes for the test suite, whose cases are written at fixed morning times.)
       // The server's clock goes back with it, so a phone whose clock runs fast can correct its waiting entries and resend.
-      if (def.time && data[def.time] > plusMin(now, Number(process.env.PATROL_FUTURE_SLACK_MIN || 5))) throw bad(`That time (${String(data[def.time]).slice(11, 16)}) is in the future. Check the hour.`, { code: 'future_time', field: def.time, server_now: now });
+      if (def.time && data[def.time] > plusMin(now, Number(process.env.PATROL_FUTURE_SLACK_MIN || 5))) throw bad(`That time (${clock(data[def.time])}) is in the future. Check the hour.`, { code: 'future_time', field: def.time, server_now: now });
       const checked = def.check ? await def.check(conn, req, parent, data) : null;
       if (def.entered) data.entered_at = now; // when it was typed in; a reading taken earlier shows as entered late
       const keys = Object.keys(data).filter((k) => def.cols.includes(k) || (k === 'entered_at' && def.entered));

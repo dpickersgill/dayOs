@@ -24,7 +24,7 @@ export function runsPanel(canEdit) {
         button('Remove', () => confirmDialog(`Remove ${x.name}?`, 'Past cases keep the name they were written with.', 'Remove', async () => { await del(`/schedule/${kind}/${x.id}`); await draw(); }, { danger: true }), { small: true })) : null)),
     items.length ? null : h('li', { class: 'muted' }, extra));
     const addForm = (kind) => {
-      const name = input({ name: 'name', maxlength: 100, required: true, placeholder: kind === 'lifts' ? 'For example: Summit Quad' : 'For example: Upper Ridge' });
+      const name = input({ name: 'name', maxlength: 100, required: true, 'aria-label': kind === 'lifts' ? 'New lift name' : 'New run name', placeholder: kind === 'lifts' ? 'For example: Summit Quad' : 'For example: Upper Ridge' });
       const diff = kind === 'trails' ? select(DIFFICULTY, 'blue', { name: 'difficulty', 'aria-label': 'Difficulty' }) : null;
       const f = h('form', { class: 'row', novalidate: true }, name, diff, button(kind === 'lifts' ? 'Add lift' : 'Add run', null, { type: 'submit', small: true }));
       f.addEventListener('submit', async (e) => {

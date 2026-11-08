@@ -4,7 +4,8 @@
 // them in the form as already filled in (the patroller can change any of them), the submit check counts them as answered,
 // and submitting copies them into the blanks so the stored report stands on its own.
 
-const hhmm = (t) => (t ? String(t).slice(11, 16) : null);
+const hhmm = (t) => (t ? String(t).slice(11, 16) : null); // form time fields hold HH:MM
+const { clock } = require('./util');
 const live = (list) => (list || []).filter((x) => !x.voided_at);
 const word = (k) => String(k).replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
@@ -48,7 +49,7 @@ function treatmentText(t) {
   if (d.effect) bits.push(`effect: ${d.effect}`);
   if (t.description) bits.push(t.description);
   const name = t.kind === 'rosc' ? 'Pulse returned' : t.kind === 'aed' ? 'AED' : t.kind === 'cpr' ? 'CPR' : word(t.kind);
-  return `${hhmm(t.performed_at)} ${name}${bits.length ? ` (${bits.join('; ')})` : ''}`;
+  return `${clock(t.performed_at)} ${name}${bits.length ? ` (${bits.join('; ')})` : ''}`;
 }
 
 /** What on the Care tab shows a head injury: a head or face injury, concussion, lost consciousness, memory loss, GCS under 15. */

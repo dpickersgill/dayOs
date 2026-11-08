@@ -943,7 +943,12 @@ async function start() {
   if (ctx.me.signed_in_with === 'passkey') notePasskeyHere();
   if (ctx.me.sandbox) { resumeTour(); welcomeOnce(); }
   // Offered once the first page has settled: opening a role's start page changes the address, which closes open dialogs.
-  else if (ctx.me.passkey_prompt) { const p = ctx.me.passkey_prompt; const who = ctx.me.id; setTimeout(() => { if (ctx.me && ctx.me.id === who) offerPasskey(p); }, 900); }
+  // Never on top of a dialog the person already opened (Add lift, say): it waits until no dialog is open.
+  else if (ctx.me.passkey_prompt) {
+    const p = ctx.me.passkey_prompt; const who = ctx.me.id;
+    const when = () => { if (!ctx.me || ctx.me.id !== who) return; if (document.querySelector('.overlay')) { setTimeout(when, 1500); return; } offerPasskey(p); };
+    setTimeout(when, 900);
+  }
 }
 
 /**

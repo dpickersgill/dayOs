@@ -3,7 +3,7 @@
 // days for the season as drafts and publish them from the Schedule; patrollers sign up for the open spots. Below the
 // crews, the coming weeks by day: filled against needed, so short days stand out.
 import { get, post, patch, put, del } from '../api.js';
-import { h, clear, input, select, field, button, toast, formDialog, confirmDialog, dialog, empty, errorBox, todayStr, addDays, state, fail, closeAllDialogs } from '../ui.js';
+import { h, clear, input, select, field, button, toast, formDialog, confirmDialog, dialog, empty, errorBox, todayStr, addDays, state, fail, closeAllDialogs, fmtTime } from '../ui.js';
 import { dayShort, monthDay } from './workforce-common.js';
 
 const WEEK = [[1, 'Mon'], [2, 'Tue'], [3, 'Wed'], [4, 'Thu'], [5, 'Fri'], [6, 'Sat'], [0, 'Sun']];
@@ -251,7 +251,7 @@ export function signupsDialog(list, onDone) {
   let dlg = null;
   const rowFor = (s) => h('li', { class: 'signup-row' },
     h('div', null, h('b', null, s.name), h('span', { class: 'muted' }, ` ${s.level || ''}`), h('br'),
-      h('span', null, `${dayShort(s.starts_at.slice(0, 10))} ${monthDay(s.starts_at.slice(0, 10))}, ${s.starts_at.slice(11, 16)} to ${s.ends_at.slice(11, 16)}${s.crew ? `, ${s.crew}` : ''}${s.role_label ? `, ${s.role_label}` : ''}`),
+      h('span', null, `${dayShort(s.starts_at.slice(0, 10))} ${monthDay(s.starts_at.slice(0, 10))}, ${fmtTime(s.starts_at)} to ${fmtTime(s.ends_at)}${s.crew ? `, ${s.crew}` : ''}${s.role_label ? `, ${s.role_label}` : ''}`),
       s.taken ? h('p', { class: 'cover-why' }, 'Someone is already on this spot.') : null),
     h('div', { class: 'cover-actions' },
       s.taken ? null : button('Approve', async () => { try { await post(`/patrol/signups/${s.id}/approve`); toast(`${s.name} is on`); dlg.close(); await onDone(); } catch (err) { fail(err); } }, { kind: 'primary', small: true }),

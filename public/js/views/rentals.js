@@ -35,7 +35,7 @@ async function drawInventory(box) {
   const counts = ITEM_STATUS.map((s) => `${data.filter((i) => i.status === s).length} ${label(s).toLowerCase()}`).join(', ');
   const needle = input({ type: 'search', placeholder: 'Search SKU, brand, model or serial', 'aria-label': 'Search inventory' });
   const body = h('div');
-  const catSel = select([['', 'All types'], ...CATEGORIES.map((c) => [c, label(c)])], '');
+  const catSel = select([['', 'All types'], ...CATEGORIES.map((c) => [c, label(c)])], '', { 'aria-label': 'Gear type' });
   function drawRows() {
     const q = needle.value.trim().toLowerCase();
     const shown = data.filter((i) => (!catSel.value || i.category === catSel.value) && (!q || [i.sku, i.brand, i.model, i.serial_no].filter(Boolean).join(' ').toLowerCase().includes(q)));

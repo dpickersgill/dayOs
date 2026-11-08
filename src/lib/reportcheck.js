@@ -12,7 +12,8 @@ const CLINICAL = ['injury', 'medical', 'collision'];
 const live = (list) => (list || []).filter((x) => !x.voided_at);
 const blank = (v) => v === undefined || v === null || (typeof v === 'string' && !v.trim());
 const time = (t) => Date.parse(`${String(t).replace(' ', 'T')}Z`);
-const hhmm = (t) => String(t).slice(11, 16);
+const { clock } = require('./util');
+const hhmm = (t) => clock(t); // "10:58 AM", as on every screen
 
 const HEAD_REGIONS = new Set(['head', 'face']);
 const SPINE_REGIONS = new Set(['neck', 'back']);

@@ -85,8 +85,8 @@ test('the morning board: why each lift is or is not open, patrol opening, servic
   const m = (await api('GET', '/board', { token: T.manager })).body.data.morning;
   const lift = (n) => m.lifts.find((l) => l.name === n);
   assert.match(lift('Valley Double').detail, /Inspection failed: North stop slow to trip/);
-  assert.match(lift('Ridge Triple').detail, /^Wind hold since 09:10: Gusts over 35/);
-  assert.match(lift('Summit Quad').detail, /^Passed inspection at \d\d:\d\d/);
+  assert.match(lift('Ridge Triple').detail, /^Wind hold since 9:10 AM: Gusts over 35/, 'times read 12-hour with AM or PM');
+  assert.match(lift('Summit Quad').detail, /^Passed inspection at \d{1,2}:\d\d [AP]M$/, 'not "at 22:54"');
   assert.equal(m.patrol.checked, 1); assert.equal(m.patrol.trails, 2); assert.equal(m.patrol.on_duty, 0);
   assert.deepEqual(m.patrol.holds, [{ name: 'Upper Ridge', reason: 'Rope line down at the cat track' }]);
   const due = m.fleet.due.find((f) => f.task === 'Gearbox oil');

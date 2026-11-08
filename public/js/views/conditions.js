@@ -34,7 +34,13 @@ async function drawStatus(root, canSet) {
   const drawAttr = async () => { try { await (await import('./attractions.js')).drawAttractions(attractions, canSet); } catch (err) { attractions.hidden = false; clear(attractions).append(errorBox(err)); } };
   await Promise.all([drawDay(day), drawLifts(lifts, canSet), drawTrails(trails, canSet), drawAttr()]);
   if (isManager()) {
-    root.append(h('p', { class: 'muted small' }, `Public feed for your website: /api/v1/public/${ctx.me.tenant}/conditions`));
+    // The full address, ready to paste into the website's conditions widget.
+    const feed = `${location.origin}/api/v1/public/${ctx.me.tenant}/conditions`;
+    const box = input({ value: feed, readonly: true, class: 'mcal-link', 'aria-describedby': 'feed-hint' });
+    root.append(h('section', { class: 'section stack tight feed-address' },
+      field('Conditions feed address for your website', box),
+      h('p', { class: 'muted small', id: 'feed-hint' }, 'Your web designer adds this address to show lifts and trails on your website. It updates within a minute of a change here.'),
+      h('div', { class: 'row' }, button('Copy address', async () => { try { await navigator.clipboard.writeText(feed); toast('Address copied'); } catch (_) { box.select(); toast('Select the address and copy it'); } }, { small: true }))));
   }
 }
 
@@ -128,7 +134,7 @@ async function drawTrails(box, canSet) {
       cb.addEventListener('change', async () => {
         try { await patch(`/schedule/trails/${t.id}`, { groomed: cb.checked ? 1 : 0 }); } catch (err) { cb.checked = !cb.checked; fail(err); }
       });
-      return cb;
+      return h('label', { class: 'check-hit' }, cb); // a 44 px target around the box
     } },
   ], data));
 }

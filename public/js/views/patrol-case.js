@@ -5,7 +5,7 @@
 // A wristband bar at the top always says whose record this is and what might hurt them, and switches between the views.
 
 import { get, post, patch } from '../api.js';
-import { h, clear, state, input, select, field, button, toast, formDialog, dialog, confirmDialog, val, num, nowInput, nowStamp, fmtDateTime, fmtTime, fmtDate, fmtTimeZoned, label, empty, errorBox, fail, ctx } from '../ui.js';
+import { h, clear, state, input, select, field, button, toast, formDialog, dialog, confirmDialog, val, num, nowInput, nowStamp, fmtDateTime, fmtTime, fmtDate, fmtTimeZoned, label, empty, errorBox, fail, ctx, printableTimes } from '../ui.js';
 import { has } from './patrol-feat.js';
 import { shareButton } from '../share.js';
 import { signaturePad } from '../sigpad.js';
@@ -52,8 +52,9 @@ export const flow = { addPatient: false, vitalsNext: false };
  * opts: { roster, me, mode, version }. `version` opens a frozen copy (read only); `mode` picks the first view.
  */
 export async function renderCase(root, id, { roster = [], me = {}, mode: wanted, version } = {}) {
-  const page = h('div');
+  const page = h('div', { class: 'case-page' });
   root.append(page);
+  printableTimes(page); // the printout shows each date and time box in words
   let def = null;
   let trails = null;
   let lifts = null;

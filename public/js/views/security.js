@@ -2,12 +2,13 @@
 // the devices you have used; for managers, this mountain's shared terminals; for the owner, the patrol two-step rule.
 
 import { get, post, put, patch, del } from '../api.js';
-import { h, clear, ctx, isManager, table, state, input, field, button, toast, formDialog, confirmDialog, errorBox, empty } from '../ui.js';
+import { h, clear, ctx, isManager, table, state, input, field, button, toast, formDialog, confirmDialog, errorBox, empty, fmtInstant, fmtInstantTime } from '../ui.js';
 import * as passkey from '../passkey.js';
 import { readTerminal, saveTerminal } from '../terminal.js';
 import { refreshDeviceKey } from '../outbox.js';
 
-const when = (v) => (v ? new Date(`${String(v).replace(' ', 'T')}Z`).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Never');
+// Times are the mountain's clock, like every other screen (not this device's zone).
+const when = (v) => (v ? fmtInstant(v) : 'Never');
 const METHOD = { password: 'Password', mfa: 'Password and code', passkey: 'Passkey', email: 'Password and emailed code', pin: 'PIN' };
 
 /** Add a passkey on this device. Resolves with its id. */
@@ -79,12 +80,8 @@ function ago(v, now) {
   const hr = Math.floor(min / 60);
   return `${hr} hour${hr === 1 ? '' : 's'} ago`;
 }
-// The end time in this device's own time ("8:45 PM"), with the day when it is not today.
-function at(v) {
-  const d = new Date(utcMs(v));
-  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}, ${time}`;
-}
+// The end time on the mountain's clock ("8:45 PM"), with the day when it is not today.
+const at = (v) => fmtInstantTime(v);
 
 /**
  * Where you are signed in now, and the devices you have used. Only sessions still open by the server's rules are listed

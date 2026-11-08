@@ -164,8 +164,8 @@ test('the receiving provider signs, submit fills the form from the bedside, and 
   const d = before.patients[0].derived;
   assert.deepEqual([d.scene_on, d.base_in, d.base_out, d.handoff_time], ['10:20', '10:50', '11:05', '11:05']);
   assert.deepEqual(d.body_parts, { knee: 'L' });
-  assert.match(d.fa_scene, /10:25 Ice/);
-  assert.match(d.fa_base, /10:55 Bandage/);
+  assert.match(d.fa_scene, /10:25 AM Ice/, "12-hour, like every screen");
+  assert.match(d.fa_base, /10:55 AM Bandage/);
   assert.equal(before.signatures.find((s) => s.kind === 'receiving_provider').signer_role, 'Paramedic, Medic 12');
 
   ok(await api('POST', `/patrol/incidents/${id}/submit`, { token: T.pat }));

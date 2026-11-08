@@ -175,7 +175,7 @@ export async function renderHandoff(root, id, pid) {
             h('div', null, h('span', { class: 'k' }, 'Last ate or drank'), sampleVal(d.sample.lastIntake))))),
         h('div', { class: 'stack' },
           section('Key times', d.times.length ? h('ul', { class: 'plain times' }, d.times.map(([k, t]) => h('li', null, h('span', null, k), h('b', null, t)))) : none('No times stamped.')),
-          section('Transport', h('p', null, d.transport.how || 'Not recorded'), d.transport.destination || d.transport.facility ? h('p', null, h('b', null, 'Going to: '), [d.transport.destination, d.transport.facility].filter(Boolean).join(', ')) : null, d.transport.outcome ? h('p', { class: 'muted' }, `Outcome: ${d.transport.outcome}`) : null))),
+          section('Transport', h('p', null, d.transport.how || 'Not recorded'), d.transport.destination || d.transport.facility ? h('p', null, h('b', null, 'Going to: '), [d.transport.destination, d.transport.facility].filter(Boolean).join(', ')) : null, d.transport.outcome ? h('p', { class: 'muted' }, `Outcome: ${label(d.transport.outcome)}`) : null))),
       h('div', { class: 'hs-sign' },
         h('div', null, h('span', { class: 'k' }, 'Care handed to'), h('div', { class: 'line' }, d.handoff.to)),
         h('div', null, h('span', { class: 'k' }, 'Time'), h('div', { class: 'line' }, d.handoff.time)),

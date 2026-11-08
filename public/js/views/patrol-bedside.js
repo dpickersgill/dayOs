@@ -203,7 +203,7 @@ export function bedsideCard(p, c, opts) {
     refused.length ? h('div', { class: 'outbox-refused', role: 'alert' }, h('b', null, `${refused.length} entr${refused.length === 1 ? 'y' : 'ies'} could not be saved. `), refused.map((x) => `${x.label}: ${x.error}`).join('; ')) : null,
     h('div', { class: 'bed-grid' },
       h('div', { class: 'bed-now stack', 'data-area': 'vitals' },
-        h('div', { class: 'vhead spread' }, h('h4', null, cur ? `Vitals at ${fmtTime(cur.taken_at)} (${agoText(minutesSince(String(cur.taken_at)))})` : 'Vitals'), due),
+        h('div', { class: 'vhead spread' }, h('h4', null, cur ? [`Vitals at ${fmtTime(cur.taken_at)}`, h('span', { class: 'no-print' }, ` (${agoText(minutesSince(String(cur.taken_at)))})`)] : 'Vitals'), due),
         cur ? strip : h('p', { class: 'muted' }, queuedVitals.length ? 'Vitals are waiting to send.' : 'No vitals recorded yet.'),
         extras ? h('p', { class: 'small muted' }, extras) : null,
         actions, headQ, tools, allVitals),

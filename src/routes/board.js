@@ -6,7 +6,7 @@ const express = require('express');
 const { pool, rows, one } = require('../db');
 const { liftWord } = require('../lib/liftstatus');
 const { requireRole } = require('../middleware/auth');
-const { z, validate, paramId, dateStr, todayIn, nowIn, addDays, dayRange } = require('../lib/util');
+const { z, validate, paramId, dateStr, todayIn, nowIn, addDays, dayRange, clock } = require('../lib/util');
 const { bad, notFound, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const modules = require('../lib/modules');
@@ -84,14 +84,13 @@ function dataFor(c) {
   return get;
 }
 
-const hhmm = (local) => String(local || '').slice(11, 16);
 const REASON = { wind: 'wind', mechanical: 'a mechanical problem', electrical: 'an electrical problem', weather: 'weather', rescue: 'a rescue', staffing: 'staffing', inspection: 'inspection', scheduled: 'scheduled work', other: 'another reason' };
 
 const TILE_DATA = {
   /**
    * The morning board: the whole mountain on one card, as the website shows it. Each lift with why it is or isn't
    * open, patrol's opening (who is on duty, runs checked, holds), tonight's grooming, machines due for service, and
-   * the three numbers that need someone: unfilled shifts, open work orders, open incidents. Only the apps the
+   * the three numbers that need someone: unfilled shifts, open work orders, open cases. Only the apps the
    * mountain has on; patrol is counts and run names only, never patients.
    */
   async morning(c, get) {
@@ -109,8 +108,8 @@ const TILE_DATA = {
       let detail;
       if (k && k.result === 'fail') detail = `Inspection failed${k.note ? `: ${k.note}` : ''}`;
       else if (l.blocked) detail = l.blocked.replace(/^This lift failed/, 'Failed').replace(/ Pass a new .*$/, ''); // an earlier weekly one
-      else if (d && l.status !== 'open') detail = `${liftWord(l.status)} since ${String(d.started_at).slice(11, 16)}${d.note ? `: ${d.note}` : d.reason ? `, ${REASON[d.reason] || d.reason}` : ''}`;
-      else if (k) detail = `Passed inspection at ${hhmm(localFromUtc(k.checked_at, c.tz))}`;
+      else if (d && l.status !== 'open') detail = `${liftWord(l.status)} since ${clock(d.started_at)}${d.note ? `: ${d.note}` : d.reason ? `, ${REASON[d.reason] || d.reason}` : ''}`;
+      else if (k) detail = `Passed inspection at ${clock(localFromUtc(k.checked_at, c.tz))}`;
       else detail = 'Not inspected yet today';
       return { name: l.name, status: l.status, check: l.check, blocked: Boolean(l.blocked), detail };
     });
@@ -169,8 +168,8 @@ const TILE_DATA = {
         let detail;
         if (check === 'fail') detail = going ? 'Inspection failed, a new one is under way' : 'Inspection failed';
         else if (a.status !== 'open' && a.status_note) detail = a.status_note;
-        else if (d && a.status !== 'open') detail = `Stopped since ${String(d.started_at).slice(11, 16)}${d.note ? `: ${d.note}` : ''}`;
-        else if (check === 'pass') detail = `Passed inspection at ${String(done.finished_at).slice(11, 16)}`;
+        else if (d && a.status !== 'open') detail = `Stopped since ${clock(d.started_at)}${d.note ? `: ${d.note}` : ''}`;
+        else if (check === 'pass') detail = `Passed inspection at ${clock(done.finished_at)}`;
         else detail = going ? 'Inspection under way' : 'Not inspected yet today';
         return { name: a.name, type: a.type, type_label: typeLabel(a.type), status: a.status, check, detail };
       }),
@@ -267,7 +266,7 @@ async function alertsFor(c, has, get) {
   if (has('patrol')) {
     const p = await get('patrol');
     if (p.active_calls) out.push({ level: 'stop', text: `${p.active_calls} active patrol call${p.active_calls === 1 ? '' : 's'}`, link: 'patrol' });
-    else if (p.open_incidents) out.push({ level: 'warn', text: `${p.open_incidents} incident${p.open_incidents === 1 ? '' : 's'} still open`, link: 'patrol' });
+    else if (p.open_incidents) out.push({ level: 'warn', text: `${p.open_incidents} case${p.open_incidents === 1 ? '' : 's'} still open`, link: 'patrol' });
   }
   if (has('staffing')) {
     const s = await get('staffing');

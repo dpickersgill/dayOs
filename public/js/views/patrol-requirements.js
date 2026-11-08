@@ -194,7 +194,7 @@ export async function drawRequirements(box) {
     if (!d.history.length) return null;
     return h('details', { class: 'panel', 'data-panel': 'history' },
       h('summary', null, `Changes (${d.history.length})`),
-      h('ol', { class: 'stack tight' }, d.history.map((v) => h('li', null, fmtDateTime(v.created_at), ' ', v.changed_by ? `by ${v.changed_by}` : '', v.preset ? ` — started from ${(d.presets.find((p) => p.key === v.preset) || {}).label}` : '', v.note ? h('span', { class: 'muted' }, ` — ${v.note}`) : null))));
+      h('ol', { class: 'stack tight' }, d.history.map((v) => h('li', null, fmtDateTime(v.created_at), ' ', v.changed_by ? `by ${v.changed_by}` : '', v.preset ? `, started from ${(d.presets.find((p) => p.key === v.preset) || {}).label}` : '', v.note ? h('span', { class: 'muted' }, `, ${v.note}`) : null))));
   }
 
   let bar;

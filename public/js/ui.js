@@ -109,6 +109,53 @@ export const fmtTimeZoned = (s) => { const d = asUtc(s); return d ? `${parts(d, 
 export const fmtDateTime = (s) => (s ? `${fmtDate(s)}, ${fmtTime(s)}` : '');
 export const fmtRange = (a, b) => { const d = asUtc(b); return `${fmtDate(a)}, ${fmtTime(a).replace(zoneTail(a), '')} to ${d ? parts(d, { hour: 'numeric', minute: '2-digit' }) : ''}${zoneTail(b)}`; };
 export const dayOf = (s) => String(s || '').slice(0, 10);
+// ---- printouts: date and time boxes print as words in the one format the rest of a printout uses
+// ("Sun, Nov 8, 9:02 AM ET"), not the browser's "11/08/2026, 09:02 AM". A hidden span after each box holds the words;
+// the print style sheet shows it in place of the box.
+const PRINT_TIME = 'input[type=datetime-local], input[type=date], input[type=time]';
+function printWords(el) {
+  const v = el.value;
+  if (!v) return '';
+  if (el.type === 'date') return fmtDay(v);
+  if (el.type === 'time') return fmtTimeZoned(`2000-01-01T${v}`);
+  return `${fmtDate(v)}, ${fmtTimeZoned(v)}`;
+}
+const printWatched = new WeakSet();
+export function printableTimes(root) {
+  if (!root || printWatched.has(root)) return;
+  printWatched.add(root);
+  const sync = () => {
+    for (const el of root.querySelectorAll(PRINT_TIME)) {
+      let s = el.nextElementSibling;
+      if (!s || !s.classList.contains('print-value')) { s = document.createElement('span'); s.className = 'print-value'; s.setAttribute('aria-hidden', 'true'); el.after(s); }
+      const t = printWords(el);
+      if (s.textContent !== t) s.textContent = t;
+    }
+  };
+  let queued = false;
+  const later = () => { if (queued) return; queued = true; queueMicrotask(() => { queued = false; sync(); }); };
+  const MO = (typeof window !== 'undefined' && window.MutationObserver) || globalThis.MutationObserver;
+  if (MO) new MO(later).observe(root, { childList: true, subtree: true });
+  root.addEventListener('input', later); root.addEventListener('change', later);
+  window.addEventListener('beforeprint', sync);
+  sync();
+}
+/**
+ * A UTC instant (a database timestamp "YYYY-MM-DD HH:MM:SS" that the server keeps in UTC, or an ISO string) as the
+ * mountain's wall clock, "YYYY-MM-DDTHH:MM", so the helpers above can show it. Sign-ins and devices use this.
+ */
+export function mountainClock(v) {
+  if (!v) return '';
+  const str = String(v);
+  const d = new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(str) ? str : `${str.replace(' ', 'T')}Z`);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: ctx.tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(d).map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
+}
+/** A UTC instant on the mountain's clock: "Sun, Nov 8, 9:35 AM" (with the zone when this device is elsewhere). */
+export const fmtInstant = (v) => { const w = mountainClock(v); return w ? fmtDateTime(w) : ''; };
+/** Just the time of a UTC instant on the mountain's clock: "9:35 AM", with the day when it is not today. */
+export const fmtInstantTime = (v) => { const w = mountainClock(v); if (!w) return ''; return w.slice(0, 10) === todayStr() ? fmtTime(w) : fmtDateTime(w); };
 
 function zoned(extra) {
   const f = new Intl.DateTimeFormat('en-CA', { timeZone: ctx.tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', ...extra });
@@ -148,7 +195,15 @@ export const schoolDirectorOnly = () => !isManager() && schoolCan('director');
 
 // Stored values keep their spelling ("cancelled"); on screen they read in US English.
 const US_WORDS = { cancelled: 'canceled', cancelling: 'canceling', colour: 'color', organisation: 'organization' }; // spelling-ok
-export const label = (s) => String(s || '').replace(/_/g, ' ').replace(/\b(cancelled|cancelling|colour|organisation)\b/gi, (w) => { const u = US_WORDS[w.toLowerCase()]; return w[0] === w[0].toUpperCase() ? u[0].toUpperCase() + u.slice(1) : u; }).replace(/^./, (c) => c.toUpperCase()); // spelling-ok
+// Stored values whose plain spelling-out reads wrong ("Sprain strain"): the words the forms use.
+const WORDS = {
+  sprain_strain: 'Sprain or strain', wrist_hand: 'Wrist or hand', ankle_foot: 'Ankle or foot', head_face: 'Head and face', neck_back: 'Neck and back',
+  treated_released: 'Treated and released', refused_care: 'Refused care', no_injury: 'No injury', transported_ambulance: 'Ambulance',
+  transported_private: 'Private vehicle to care', spinal_motion_restriction: 'Spinal motion restriction', cpr: 'CPR', aed: 'AED', gcs: 'GCS',
+  lost_person: 'Lost person', nordic_touring: 'Nordic or touring', non_skiing: 'Not on snow', walk_ski: 'Walked or skied',
+};
+/** A stored value as words: "packed_powder" reads "Packed powder"; a null reads as nothing, never "null". */
+export const label = (s) => (s && WORDS[s] ? WORDS[s] : String(s || '').replace(/^(null|undefined)$/, '').replace(/_/g, ' ').replace(/\b(cancelled|cancelling|colour|organisation)\b/gi, (w) => { const u = US_WORDS[w.toLowerCase()]; return w[0] === w[0].toUpperCase() ? u[0].toUpperCase() + u.slice(1) : u; }).replace(/^./, (c) => c.toUpperCase())); // spelling-ok
 
 // ---------------------------------------------------------------- small pieces
 export function state(text, kind = 'neutral') {

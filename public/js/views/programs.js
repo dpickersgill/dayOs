@@ -6,14 +6,14 @@
 // A program can run in sessions (Session 1, Session 2), each meeting weekly on the days the mountain picks, with makeup
 // weeks held in reserve for weather. An older program without sessions keeps its single roster.
 import { get, post, put, patch, del } from '../api.js';
-import { h, clear, can, isManager, money, toCents, centsToInput, table, state, input, select, field, button, toast, formDialog, confirmDialog, dialog, tabs, val, num, todayStr, fmtDate, fmtRange, label, empty, errorBox, fail } from '../ui.js';
+import { h, clear, can, isManager, money, toCents, centsToInput, table, state, input, select, field, button, toast, formDialog, confirmDialog, dialog, tabs, val, num, todayStr, fmtDate, fmtRange, label, empty, errorBox, fail, appendAll } from '../ui.js';
 import { personPicker } from '../widgets.js';
 import { cardDialog } from './school-card.js';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const ageOf = (dob) => { if (!dob) return ''; const d = new Date(`${dob}T12:00:00Z`); const n = new Date(); let a = n.getUTCFullYear() - d.getUTCFullYear(); if (n.getUTCMonth() < d.getUTCMonth() || (n.getUTCMonth() === d.getUTCMonth() && n.getUTCDate() < d.getUTCDate())) a -= 1; return String(a); };
-const time12 = (t) => { if (!t) return ''; const [hh, mm] = t.split(':').map(Number); return `${((hh + 11) % 12) + 1}:${String(mm).padStart(2, '0')}${hh < 12 ? ' am' : ' pm'}`; };
+const time12 = (t) => { if (!t) return ''; const [hh, mm] = t.split(':').map(Number); return `${((hh + 11) % 12) + 1}:${String(mm).padStart(2, '0')}${hh < 12 ? ' AM' : ' PM'}`; };
 const shortDate = (d) => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' }).format(new Date(`${d}T12:00:00Z`));
 const back = (href, text) => h('a', { class: 'back-link', href }, `‹ ${text}`);
 
@@ -197,7 +197,7 @@ async function programView(root, id) {
       state(p.level_mode === 'preset' ? 'Classes preset by the school' : 'Classes split on the first day'),
     ];
     const link = `${location.origin}/programs/${o.slug}`;
-    clear(page).append(
+    appendAll(clear(page),
       back('#/programs', 'All programs'),
       h('div', { class: 'page-head' }, h('div', null, h('h1', null, p.name), h('p', { class: 'muted' }, `${(typesCache || []).find((x) => x.id === p.type_id)?.name || 'No type'}, ${p.season}${p.meeting_place ? `. Meet at ${p.meeting_place}` : ''}`)),
         h('div', { class: 'row' },
@@ -359,7 +359,7 @@ function stormDialog(reload) {
     if (!date.value) return;
     try {
       const pv = await post('/programs/cancel-day', { date: date.value, reason: reason.value.trim() || 'Weather', preview: true });
-      list.append(pv.data.length ? h('ul', { class: 'plain' }, pv.data.map((m) => h('li', null, `${m.program}, ${m.term || ''} ${m.weekday != null ? `${DAYS[m.weekday]}s` : ''}, ${String(m.starts_at).slice(11, 16)}`))) : h('p', { class: 'muted' }, 'No program lessons that day.'));
+      list.append(pv.data.length ? h('ul', { class: 'plain' }, pv.data.map((m) => h('li', null, `${m.program}, ${m.term || ''} ${m.weekday != null ? `${DAYS[m.weekday]}s` : ''}, ${time12(String(m.starts_at).slice(11, 16))}`))) : h('p', { class: 'muted' }, 'No program lessons that day.'));
     } catch (err) { list.append(errorBox(err)); }
   };
   date.addEventListener('change', look);
@@ -458,7 +458,7 @@ async function dayView(root, programId, groupId) {
         button('More', () => detailsDialog(x, r.program, load, { move: () => moveDialog(x, term, groupId, load), withdraw: () => withdraw(x, load) }), { small: true, label: `More for ${x.first_name}` })] },
     ].filter(Boolean);
     const byLevel = [...levels.map((l) => [l.name, enrolled.filter((x) => x.level_id === l.id), l]), ['Not placed yet', enrolled.filter((x) => !x.level_id || !levels.some((l) => l.id === x.level_id)), null]].filter(([, list, l]) => list.length || l);
-    clear(page).append(
+    appendAll(clear(page),
       back(`#/programs/${programId}`, r.program.name),
       h('div', { class: 'page-head' },
         h('div', null, h('h1', null, `${r.group.day}s, ${r.term.name}`), h('p', { class: 'muted' }, `${r.program.name}. ${time12(g.start_time)} to ${time12(g.end_time)}. ${enrolled.length}${g.capacity ? ` of ${g.capacity}` : ''} enrolled${waiting.length ? `, ${waiting.length} waiting` : ''}.`)),
