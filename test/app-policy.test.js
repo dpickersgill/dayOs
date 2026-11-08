@@ -171,3 +171,16 @@ test('client: labels, the mountain clock and printed date boxes', { skip: !JSDOM
   await new Promise((r) => setTimeout(r, 10));
   assert.match(words.textContent, /^Sat, Nov 7, 7:05 AM/);
 });
+
+test('2026.11.13: new screens use the theme tokens; status switches never break a word on a phone', () => {
+  // the ski school safety and pay screens, the group page and the menu v3 code paint with tokens, not raw colors
+  for (const f of ['public/js/views/school-safety.js', 'public/js/views/school-money.js', 'public/js/group.js', 'public/js/jumpindex.js', 'public/js/views/settings-menus.js', 'public/js/nav.js']) {
+    assert.ok(!/#[0-9a-f]{6}\b|#[0-9a-f]{3}\b(?![\w-])|rgba?\(/i.test(read(f).replace(/\/\/.*$/gm, '')), `${f} has no raw colors`);
+  }
+  const school = css.slice(css.indexOf('/* ---------------------------------------------------------------- ski school safety'));
+  assert.ok(!/#[0-9a-f]{3,6}\b/i.test(school.replace(/\/\*[\s\S]*?\*\//g, '')), 'the school blocks in app.css use tokens');
+  assert.ok(!/1b5fc1/i.test(read('public/css/book.css').slice(read('public/css/book.css').indexOf('feat/school-safety'))), 'the family page blocks add no blue');
+  // Mountain status on a phone: the switch takes the card's width and keeps each word whole
+  assert.match(css, /table\.rt td:has\(> \.seg\) \{ flex-direction: column;/);
+  assert.match(css, /table\.rt td > \.seg button \{[^}]*white-space: nowrap; overflow-wrap: normal;/);
+});

@@ -1293,6 +1293,11 @@ span.park-row { cursor: default; }
   table.rt td.actions { justify-content: flex-end; flex-wrap: wrap; gap: 6px; padding-top: 6px; }
   table.rt td.actions .btn { flex: none; white-space: nowrap; overflow-wrap: normal; }
   table.rt td.actions .btn + .btn { margin-left: 0; }
+  /* A status switch (Open, On hold, Wind hold, Closed) takes the card's full width under its label, and a word never
+     breaks inside a button (2026.11.13: lifts read "Op en" and "Clos ed" on phones) */
+  table.rt td:has(> .seg) { flex-direction: column; align-items: stretch; gap: 4px; }
+  table.rt td > .seg { display: flex; width: 100%; }
+  table.rt td > .seg button { flex: 1 1 auto; padding: 4px 8px; white-space: nowrap; overflow-wrap: normal; min-height: 44px; }
   .levels .matrix th:first-child, .levels .matrix td:first-child { width: 138px; }
   .levels .matrix th.center, .levels .matrix td.center { width: 58px; padding: 5px 2px; }
   .levels .matrix .lv-admin { display: none; }
