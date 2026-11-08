@@ -36,7 +36,7 @@ export async function render(root, opts = {}) {
       }
     } catch (_) { /* their own day */ }
   }
-  if (!staffId) { body.append(empty('Your login is not linked to a staff record, so there is no day to show. Ask a manager to link it in Account.')); return; }
+  if (!staffId) { body.append(empty('Your login is not linked to a staff record, so there is no day to show. Ask a manager to link it in Settings, Team and logins.')); return; }
   try { await payPart.myDayTop(top); } catch (_) { /* nothing waiting */ }
   if (typeof parentsPart.recapCount === 'function') {
     try { const n = await parentsPart.recapCount(); if (n) top.append(h('p', null, h('a', { href: '#/school?tab=team&view=recaps', class: 'btn' }, `Recaps to send (${n})`))); } catch (_) { /* none */ }
