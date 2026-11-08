@@ -8,7 +8,10 @@
 @font-face{font-family:'Barlow Condensed';font-weight:700;font-style:normal;font-display:swap;src:url('/fonts/barlow-condensed-latin-700-normal.woff2') format('woff2')}
 
 :root{
-  --ink:#12303A;--ink2:#1E4553;--snow:#F4F8FA;--glacier:#DCE9F0;--frost:#EAF2F6;--line:#C7D9E3;--line2:#B5CCD9;
+  /* brand: slate and spruce with gold (The Good Day, Designed). Gold is a fill with slate text, or an accent on slate:
+     slate on gold is 7.2:1; gold text on a light background fails contrast, so it is never used that way. */
+  --slate:#12303A;--slate2:#1E4553;--slate-deep:#0B222B;--gold:#D8B672;--gold-hover:#E3C78C;--on-gold:var(--slate);--gold-wash:#F7F0E1;--gold-deep:#8A6A2B;
+  --ink:var(--slate);--ink2:var(--slate2);--snow:#F4F8FA;--glacier:#DCE9F0;--frost:#EAF2F6;--line:#C7D9E3;--line2:#B5CCD9;
   --trail:#1B5FC1;--trailDark:#154A99;--trailWash:#E8F0FB;--patrol:#D63A2F;--spruce:#2C7A57;--muted:#4B6570;--white:#FFFFFF;
   --onink:#EAF3F7;--onink2:#A9C2CD;--onink3:#C7DAE3;
   --r-sm:8px;--r:14px;--r-lg:20px;
@@ -34,13 +37,13 @@ body{margin:0;background:var(--snow)}
 .skip:focus{left:8px}
 
 /* ---------- buttons */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:10px 22px;border-radius:10px;font-weight:700;font-size:17px;line-height:1.2;text-align:center;text-decoration:none;border:2px solid var(--trail);background:var(--trail);color:var(--white)!important;cursor:pointer;font-family:inherit;transition:background-color .15s,border-color .15s,color .15s,transform .15s var(--ease)}
-.btn:hover{background:var(--trailDark);border-color:var(--trailDark)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:10px 22px;border-radius:10px;font-weight:700;font-size:17px;line-height:1.2;text-align:center;text-decoration:none;border:2px solid var(--gold);background:var(--gold);color:var(--on-gold)!important;cursor:pointer;font-family:inherit;transition:background-color .15s,border-color .15s,color .15s,transform .15s var(--ease)}
+.btn:hover{background:var(--gold-hover);border-color:var(--gold-hover)}
 .btn:active{transform:translateY(1px)}
 .btn.ghost{background:transparent;color:var(--ink)!important;border-color:var(--ink)}
 .btn.ghost:hover{background:var(--ink);color:var(--white)!important}
-.btn.onink{background:var(--white);border-color:var(--white);color:var(--ink)!important}
-.btn.onink:hover{background:var(--glacier);border-color:var(--glacier)}
+.btn.onink{background:var(--gold);border-color:var(--gold);color:var(--on-gold)!important}
+.btn.onink:hover{background:var(--gold-hover);border-color:var(--gold-hover)}
 .btn.line{background:transparent;border-color:rgba(255,255,255,.75);color:var(--white)!important}
 .btn.line:hover{background:rgba(255,255,255,.12);border-color:var(--white)}
 .btn.sm{min-height:42px;padding:8px 16px;font-size:16px}
@@ -289,10 +292,10 @@ body{margin:0;background:var(--snow)}
 .faq details p{padding:0 48px 24px 0;color:var(--ink2);max-width:52em}
 
 /* closing call to action */
-.contact{background:var(--trail);color:var(--white);padding:var(--sec) 0;position:relative;overflow:hidden}
+.contact{background:var(--slate);color:var(--white);padding:var(--sec) 0;position:relative;overflow:hidden}
 .contact:after{content:'';position:absolute;right:-60px;bottom:-80px;width:420px;height:300px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 22'%3E%3Cpath d='M0 22 L11 4 L17 13 L22 7 L32 22 Z' fill='%23ffffff' fill-opacity='.09'/%3E%3C/svg%3E") no-repeat center/contain;pointer-events:none}
 .contact h2{font-size:clamp(38px,4.2vw,56px);line-height:.96;max-width:16em;position:relative}
-.contact p{font-size:20px;max-width:34em;margin-top:22px;color:#E6EFFC;position:relative}
+.contact p{font-size:20px;max-width:34em;margin-top:22px;color:var(--onink3);position:relative}
 .contact .ctas{position:relative}
 
 /* ---------- plans (home and pricing) */
@@ -649,6 +652,9 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
   .sx *,.sx *:before,.sx *:after{transition:none!important;animation:none!important}
 }
 /* The search term the home page is about, set small above its headline (inside the h1) */
+/* the brand line above the Home headline: sentence case, not a tracked-out eyebrow, with a short gold rule */
+.brandline{display:flex;align-items:center;gap:12px;margin-bottom:12px!important;font-family:'Barlow Condensed','Arial Narrow',sans-serif;font-weight:600;font-size:clamp(22px,2.1vw,27px);line-height:1.15;color:var(--spruce)}
+.brandline:before{content:'';flex:none;width:30px;height:4px;border-radius:2px;background:var(--gold)}
 .kicker{display:block;font-family:inherit;font-size:20px;font-weight:700;letter-spacing:0;line-height:1.3;color:var(--trailDark);margin-bottom:14px}
 /* Guides: practical articles and printable checklists (Resources) */
 .guide-meta{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:14px;font-size:16px;color:var(--muted)}
@@ -828,15 +834,16 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 }
 
 /* ---------- The Good Day (the newsletter, guests round 2)
-   Its own identity inside the site: the spruce masthead with a ridgeline and an amber button, kept from the original design so an
-   issue reads as a publication, not a product page. The site's own fonts (Barlow Condensed and Atkinson Hyperlegible, both
-   served from /fonts), so nothing loads from Google. The issue pages follow the reader's light or dark setting. */
-.gd-page,.gd-card,.sf-gd{--gd-bg:#f3f6f8;--gd-surface:#fff;--gd-ink:#14212b;--gd-muted:#4d5f6e;--gd-line:#d3dde5;--gd-accent:#1d5b47;--gd-accent-ink:#fff;
-  --gd-mast:#0f3b2e;--gd-mast-ink:#eef6f2;--gd-mast-dim:#a9c7b8;--gd-ridge1:#1a5a45;--gd-ridge2:#0b2f24;--gd-flag:#b45309;--gd-flag-bg:#fbf1e4;--gd-frame:#e7eef3;
-  --gd-focus:#1f6fb2;--gd-amber:#f0a04b;--gd-on-amber:#14212b;--gd-disp:'Barlow Condensed','Arial Narrow',Arial,sans-serif}
+   Its own identity inside the site, in the brand colors: a slate masthead with a ridgeline, gold accents and a gold button,
+   so an issue reads as a publication, not a product page. Every color comes from the brand tokens in :root. The site's own
+   fonts (Barlow Condensed and Atkinson Hyperlegible, both served from /fonts), so nothing loads from Google. The issue pages
+   follow the reader's light or dark setting. */
+.gd-page,.gd-card,.sf-gd{--gd-bg:#f3f6f8;--gd-surface:#fff;--gd-ink:var(--slate);--gd-muted:#4d5f6e;--gd-line:#d3dde5;--gd-accent:var(--spruce);--gd-accent-ink:#fff;
+  --gd-mast:var(--slate);--gd-mast-ink:#eef4f7;--gd-mast-dim:var(--onink2);--gd-mast-accent:var(--gold);--gd-ridge1:var(--slate2);--gd-ridge2:var(--slate-deep);--gd-flag:var(--gold-deep);--gd-flag-bg:var(--gold-wash);--gd-frame:#e7eef3;
+  --gd-focus:#1f6fb2;--gd-gold:var(--gold);--gd-gold-hover:var(--gold-hover);--gd-on-gold:var(--on-gold);--gd-disp:'Barlow Condensed','Arial Narrow',Arial,sans-serif}
 @media (prefers-color-scheme:dark){
-  .gd-page{--gd-bg:#0e1a22;--gd-surface:#15252f;--gd-ink:#e8eff4;--gd-muted:#9fb2c1;--gd-line:#27404f;--gd-accent:#5fc19a;--gd-accent-ink:#0e1a22;--gd-mast:#0a2a21;
-    --gd-mast-dim:#8db5a2;--gd-ridge1:#14493a;--gd-ridge2:#071e17;--gd-flag:#f0a04b;--gd-flag-bg:#2a2216;--gd-frame:#1b2f3b;--gd-focus:#7bbcf2;color-scheme:dark}
+  .gd-page{--gd-bg:#0e1a22;--gd-surface:#15252f;--gd-ink:#e8eff4;--gd-muted:#9fb2c1;--gd-line:#27404f;--gd-accent:#5fc19a;--gd-accent-ink:#0e1a22;--gd-mast:var(--slate-deep);
+    --gd-mast-dim:var(--onink2);--gd-ridge1:var(--slate);--gd-ridge2:#071820;--gd-flag:var(--gold);--gd-flag-bg:#2a2416;--gd-frame:#1b2f3b;--gd-focus:#7bbcf2;color-scheme:dark}
 }
 .gd-page{background:var(--gd-bg);color:var(--gd-ink);padding:clamp(16px,3vw,36px) 0 clamp(56px,7vw,96px)}
 .gd-col{max-width:764px;margin:0 auto;padding:0 var(--gut);display:flex;flex-direction:column;gap:40px}
@@ -854,7 +861,7 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 /* masthead */
 .gd-mast{background:var(--gd-mast);color:var(--gd-mast-ink);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
 .gd-mast-top{padding:28px 28px 8px;display:flex;flex-direction:column;gap:10px}
-.gd-mast .gd-eyebrow{color:var(--gd-mast-dim)}
+.gd-mast .gd-eyebrow{color:var(--gd-mast-accent)}
 .sx .gd-mast h1,.gd-mast .gd-name{display:block;margin:0;font-family:var(--gd-disp);font-weight:700;text-transform:uppercase;line-height:.9;font-size:clamp(3.4rem,15vw,6.4rem);letter-spacing:.005em;color:var(--gd-mast-ink)}
 .sx .gd-mast.small h1{font-size:clamp(2.4rem,9vw,4rem);line-height:.95}
 .gd-sub{color:var(--gd-mast-dim);font-size:17px;line-height:1.45;max-width:46ch}
@@ -951,23 +958,23 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 .gd-band .gd-card{margin:0 auto}
 .gd-band .sh+.gd-card{margin:var(--stack) 0 0}
 .gd-page .gd-card{width:100%}
-.gd-eye{margin:0 0 8px!important;font-size:15px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--gd-mast-dim)}
+.gd-eye{margin:0 0 8px!important;font-size:15px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--gd-mast-accent)}
 .sx .gd-card h2{margin:0 0 8px;font-family:var(--gd-disp);font-size:clamp(1.7rem,5vw,2.4rem);line-height:1.04;text-transform:uppercase;font-weight:700;color:var(--gd-mast-ink)}
 .gd-card p{margin:0 0 14px;color:var(--gd-mast-ink);font-size:17px}
 .gd-card .gd-q{font-size:19px;font-weight:700}
 .gd-card hr{border:0;border-top:1px solid rgba(255,255,255,.2);margin:20px 0}
-.sx a.gd-btn,.sx .gd-page a.gd-btn,.sx button.gd-btn,.gd-form button{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:10px 22px;border:2px solid var(--gd-amber);border-radius:999px;background:var(--gd-amber);color:var(--gd-on-amber);font:700 17px/1.2 'Atkinson Hyperlegible',system-ui,sans-serif;text-decoration:none;cursor:pointer}
-.sx a.gd-btn:hover,.sx .gd-page a.gd-btn:hover,.sx button.gd-btn:hover,.gd-form button:hover{background:#f5b56d;border-color:#f5b56d;color:var(--gd-on-amber)}
+.sx a.gd-btn,.sx .gd-page a.gd-btn,.sx button.gd-btn,.gd-form button{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:10px 22px;border:2px solid var(--gd-gold);border-radius:999px;background:var(--gd-gold);color:var(--gd-on-gold);font:700 17px/1.2 'Atkinson Hyperlegible',system-ui,sans-serif;text-decoration:none;cursor:pointer}
+.sx a.gd-btn:hover,.sx .gd-page a.gd-btn:hover,.sx button.gd-btn:hover,.gd-form button:hover{background:var(--gd-gold-hover);border-color:var(--gd-gold-hover);color:var(--gd-on-gold)}
 .sx .gd-page a.gd-btn.ghost{background:transparent;color:var(--gd-ink);border-color:var(--gd-line)}
 .sx .gd-page a.gd-btn.ghost:hover{border-color:var(--gd-accent);color:var(--gd-ink)}
 .sx .gd-card a:not(.gd-btn){color:var(--gd-mast-ink)}
 .gd-form{display:flex;flex-direction:column;gap:10px;margin-top:4px}
 .gd-row{display:flex;flex-wrap:wrap;gap:10px}
-.gd-form input,.gd-form select{min-height:48px;padding:10px 16px;border-radius:999px;border:1px solid var(--gd-mast-dim);background:#fff;color:#14212b;font:17px 'Atkinson Hyperlegible',system-ui,sans-serif;width:100%}
+.gd-form input,.gd-form select{min-height:48px;padding:10px 16px;border-radius:999px;border:1px solid var(--gd-mast-dim);background:#fff;color:var(--slate);font:17px 'Atkinson Hyperlegible',system-ui,sans-serif;width:100%}
 .gd-row input{flex:1 1 220px;width:auto;min-width:0}
 .gd-row button{flex:none}
 .gd-form select{appearance:auto;border-radius:12px}
-.gd-form [aria-invalid="true"]{border:2px solid #f0a04b;box-shadow:0 0 0 2px rgba(240,160,75,.35)}
+.gd-form [aria-invalid="true"]{border:2px solid var(--gold);box-shadow:0 0 0 2px rgba(216,182,114,.45)}
 .gd-more{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .gd-fld{display:flex;flex-direction:column;gap:4px;font-size:15px;color:var(--gd-mast-dim)}
 .gd-fld i{font-style:normal;opacity:.85}
