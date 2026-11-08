@@ -326,7 +326,7 @@ async function ladderSettings(panel) {
     const d = await get('/skischool/pay/ladder');
     const cur = (rung, kind) => d.ladder.filter((r) => r.rung === rung && r.kind === kind && String(r.effective_from).slice(0, 10) <= d.today).sort((a, b) => (a.effective_from < b.effective_from ? 1 : -1))[0] || null;
     const cell = (rung, kind) => { const r = cur(rung, kind); return r ? money(r.cents) : h('span', { class: 'muted' }, 'Not set'); };
-    clear(body).append(
+    appendAll(clear(body),
       d.can_edit ? null : h('p', { class: 'muted small' }, 'Only an owner or manager can change the pay ladder.'),
       h('h3', null, 'Certification levels'),
       table([
@@ -371,7 +371,7 @@ async function learnSettings(panel) {
   async function load() {
     clear(body).append(loading());
     const d = await get('/skischool/ladders');
-    clear(body).append(d.data.length ? table([
+    appendAll(clear(body), d.data.length ? table([
       { head: 'Package', cell: (l) => h('span', null, h('strong', null, l.name), h('div', { class: 'muted small' }, `${plural(l.lessons, 'lesson')}, ${money(l.price_cents)}${l.includes ? `, includes ${l.includes}` : ''}`)) },
       { head: 'Graduate offer', cell: (l) => (l.pass_percent && l.pass ? `${l.pass_percent}% off ${l.pass}, for ${l.pass_days} days` : h('span', { class: 'muted' }, 'None')) },
       { head: 'Sold', cell: (l) => state(l.active ? 'On sale' : 'Off', l.active ? 'good' : 'neutral') },

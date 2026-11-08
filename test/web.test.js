@@ -1398,9 +1398,12 @@ test('crm: a new student is captured while booking a lesson, with the waiver rec
   typeInto(dlg, 'first_name', 'Skyler'); typeInto(dlg, 'last_name', 'Student'); typeInto(dlg, 'date_of_birth', '2014-01-09');
   typeInto(dlg, 'emergency_name', 'Pat Student'); typeInto(dlg, 'emergency_phone', '610-555-0188'); typeInto(dlg, 'discipline', 'snowboard');
   dlg.querySelector('[name=sign_waiver]').checked = true;
+  typeInto(dlg, 'waiver_signer', 'Pat Student'); // a student under 18: the parent or guardian who signed (feat/school-pay)
   [...dlg.querySelectorAll('button')].find((b) => b.textContent === 'Book student').click();
   await settle();
   const s = ok(await api('GET', '/people?q=Skyler', { token: T.owner })).data[0];
+  const w = (await pool.query('SELECT signed_by_name, signer_relation FROM waivers WHERE person_id = ?', [s.id]))[0][0];
+  assert.deepEqual([w.signed_by_name, w.signer_relation], ['Pat Student', 'guardian'], 'the guardian who signed is kept');
   assert.equal(s.discipline, 'snowboard');
   assert.equal(s.emergency_phone, '610-555-0188');
   assert.equal(s.source, 'lesson');
