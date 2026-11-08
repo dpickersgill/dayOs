@@ -28,8 +28,12 @@ Who signs in how:
 
 - **Passkeys** belong to the address they were made on. If the app moves to its own domain (for example from the run.app
   address to app.yourdomain.com), people add their passkey again. Set `WEBAUTHN_RP_ID=yourdomain.com` before people add
-  passkeys so one passkey works on every address under that domain. `WEBAUTHN_ORIGINS` (comma-separated
-  `https://...` addresses) pins which pages may use them; by default it is the address the request came to.
+  passkeys so one passkey works on every address under that domain. Passkeys work only on the address in
+  `PUBLIC_URL`, plus any listed in `WEBAUTHN_ORIGINS` (comma-separated `https://...` addresses), never on the address a
+  request happens to come to. So `PUBLIC_URL` must be the address people use, for example `https://app.yourdomain.com`,
+  and any other address staff sign in on (the run.app address during a move, a second domain) must be listed in
+  `WEBAUTHN_ORIGINS`. `scripts/settings-check.sh` (run by deploy.sh and promote.sh) warns when `PUBLIC_URL` is still a
+  run.app address while `WEBAUTHN_RP_ID` is your own domain.
 - **Second check** (`STEP_UP_MINUTES`, 10): refunds over `STEP_UP_REFUND_CENTS` (20000 = $200), changing a role,
   switching a login off, adding a manager, resetting someone's password or two-step, customer, waiver and patrol
   downloads, releasing a patient record, billing, turning off the two-step rules, removing a passkey, and enrolling or
@@ -282,8 +286,12 @@ One-time setup, in Cloud Shell:
    ```
    gcloud run services update summitops-api --region us-east1 \
      --update-secrets=POSTMARK_SERVER_TOKEN=postmark-server-token:latest \
-     --update-env-vars=MAIL_FROM=patrol@yourdomain.org,PUBLIC_URL=https://summitops-api-33271059248.us-east1.run.app
+     --update-env-vars=MAIL_FROM=patrol@yourdomain.org,PUBLIC_URL=https://app.yourdomain.org
    ```
+   `PUBLIC_URL` is the address people use, for example `https://app.yourdomain.org`: links in emails use it, and
+   passkeys work only on it and on the addresses in `WEBAUTHN_ORIGINS`. If staff still use the run.app address too, add
+   it to `WEBAUTHN_ORIGINS`. Before the app has its own domain, the run.app address is the address people use, so it is
+   right there.
 4. **Daily schedule** (7:30 am Eastern). The job signs its call with a Google ID token for the summitops-jobs account
    (2026.11.11): no key is stored in Cloud Scheduler. Run:
    ```

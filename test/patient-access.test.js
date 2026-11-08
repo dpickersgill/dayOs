@@ -455,7 +455,8 @@ test('quick resume is for patrol and leaders with a passkey or app; others keep 
 
 // ================================================================ passkeys for leaders (588.4)
 test('leaders are asked for two passkeys after signing in, patrollers once; the logins list shows each one\'s count', async () => {
-  const me = async (t) => ok(await api('GET', '/auth/me', { token: t })).passkey_prompt;
+  // kind, have and want (app and codes, what else the login signs in with, are checked in patientaccess-review.test.js)
+  const me = async (t) => { const p = ok(await api('GET', '/auth/me', { token: t })).passkey_prompt; return p && { kind: p.kind, have: p.have, want: p.want }; };
   assert.deepEqual(await me(M.owner), { kind: 'leader', have: 0, want: 2 });
   assert.deepEqual(await me(await tokenOf(U.Dir.login)), { kind: 'leader', have: 0, want: 2 });
   assert.deepEqual(await me(await tokenOf(U.Mona.login)), { kind: 'leader', have: 0, want: 2 });

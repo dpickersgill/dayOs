@@ -31,7 +31,7 @@ export async function drawAccessLog(box) {
         { head: 'Case', cell: (r) => (r.case_number ? h('a', { href: `#/patrol/case/${r.entity_id}` }, r.case_number) : '') },
         // How the open was allowed (feat/auth-hardening): their own recent work, an exception, or a fresh check.
         { head: 'Allowed by', cell: (r) => (r.detail && r.detail.access ? `${HOW[r.detail.access] || label(r.detail.access)}${r.detail.fresh ? ' (fresh check)' : ''}` : '') },
-        { head: 'Details', cell: (r) => (r.detail && r.detail.fields ? r.detail.fields.join(', ') : '') },
+        { head: 'Details', cell: (r) => (r.detail && (r.detail.field_labels || r.detail.fields) ? (r.detail.field_labels || r.detail.fields.map(label)).join(', ') : '') },
       ], data) : empty('No activity in that period.'));
     } catch (err) { clear(out); fail(err); }
   }

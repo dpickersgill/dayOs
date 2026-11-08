@@ -929,6 +929,15 @@ async function start() {
  * Passkeys as the default for leaders (feat/auth-hardening): owners, managers and patrol directors and admins are asked
  * after signing in until they have two; patrollers and the ski area login are offered one once. Always skippable.
  */
+/** "Keeps working as a backup", only for what this login really has (passkey_prompt.app and .codes from /auth/me). */
+function backupLine(p) {
+  if (p.app && p.codes) return 'Your authenticator app and recovery codes keep working as a backup.';
+  if (p.app) return 'Your authenticator app keeps working as a backup.';
+  if (p.codes) return 'Your recovery codes keep working as a backup.';
+  if (p.have) return p.have === 1 ? 'The passkey you have keeps working.' : 'The passkeys you have keep working.';
+  return null;
+}
+
 function offerPasskey(p) {
   const SKIP = 'so.pk.later';
   try { if (sessionStorage.getItem(SKIP)) return; } catch (_) { /* fine */ }
@@ -957,7 +966,7 @@ function offerPasskey(p) {
     h('p', { class: 'resume-lead' }, 'One touch with your fingerprint or face, and no code to type.'),
     leader ? h('p', null, `You can see every patient record and change who can do what, so a passkey is the safest way in: nobody can phish it or guess it. Add two: one on this device, and a second on another phone or a security key, so a lost phone never locks you out. You have ${p.have} of 2.`)
       : h('p', null, 'Patrol records are private. A passkey signs you in and opens records with one touch, even with cold hands.'),
-    h('p', { class: 'muted small' }, 'Your authenticator app and recovery codes keep working as a backup.'),
+    backupLine(p) ? h('p', { class: 'muted small', 'data-backup': '' }, backupLine(p)) : null,
     add, err, h('div', { class: 'row' }, button('Not now', later, { small: true, kind: 'quiet' })));
   const dlg = dialog('Add a passkey', body, { onClose: () => { try { sessionStorage.setItem(SKIP, '1'); } catch (_) { /* fine */ } } });
 }

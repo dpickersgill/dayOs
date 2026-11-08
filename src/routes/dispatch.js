@@ -41,12 +41,18 @@ async function wordsHidden(req, calls) {
   return (c) => Boolean(c.incident_id) && !may.has(Number(c.incident_id));
 }
 const HIDE = (c) => ({ ...c, description: null, caller_name: null, caller_phone: null, words_hidden: true });
-const caseWrite = (req) => req.method === 'PATCH' || (req.method === 'POST' && /^\/events\/?$/.test(req.path));
+// Express matches addresses without regard to case or a trailing slash, so the address is compared as lib/pathcheck reads
+// it (lower case, no trailing slash): POST /dispatch/7/Events is the same timeline write as /events (review 2026.11.12).
+const caseWrite = (req) => {
+  const at = require('../lib/pathcheck').normal(req.path);
+  return req.method === 'PATCH' || (req.method === 'POST' && at === '/events') || (req.method === 'DELETE' && /^\/responders\/[^/]+$/.test(at));
+};
 router.use('/dispatch/:id', PX.byChild('id', 'SELECT id, incident_id, status, call_date FROM dispatch_calls WHERE tenant_id = ? AND id = ?', {
   skipOther: true, // /dispatch/available and others share the address
   // Current calls stay open for reading (words hidden as on the board) and for sending people. Changing the words or the
-  // timeline (notes, status) of a call that has a case changes what that case shows: the case's rule decides, so anyone
-  // tied to it (dispatched, on duty, crew) goes on as before and anyone else needs the records check.
+  // timeline (notes, status) of a call that has a case, or taking someone off it, changes what that case shows: the
+  // case's rule decides, so anyone tied to it (dispatched, on duty, crew) goes on as before and anyone else needs the
+  // records check.
   allow: async (req, c) => req.auth.recordsChecked || (currentCall(c, await todayOf(req.auth.tenantId)) && !(c.incident_id && caseWrite(req))),
 }));
 // Timeline event -> the call status it sets. Notes and "at aid room" leave the status alone.
@@ -110,7 +116,7 @@ router.get('/dispatch', patrol, needs('dispatch'), async (req, res) => {
   const { tenantId } = req.auth;
   const today = await todayOf(tenantId);
   const current = (!req.query.status || req.query.status === 'active') || String(req.query.date || '') === today;
-  if (!current && !req.auth.recordsChecked) throw PX.needed(); // the season's calls, or another day's
+  if (!current && !req.auth.recordsChecked) throw PX.needed('past_calls'); // the season's calls, or another day's
   const where = ['c.tenant_id = ?'];
   const params = [tenantId];
   if (req.query.status === 'active' || !req.query.status) { where.push(`c.status IN (${ACTIVE.map(() => '?').join(',')})`); params.push(...ACTIVE); }
@@ -319,10 +325,28 @@ router.post('/dispatch/:id/responders/:staffId/text', patrol, needs('dispatch'),
   res.json({ ok: true });
 });
 
+/**
+ * Takes a responder off a call. It is written to the audit log. On a call that has a case, the removed person keeps the
+ * tie to that case they had from being sent (dispatch_responders_removed, read by lib/patientaccess.js): taking someone
+ * off the board does not take away their own scene case. The tie still counts only by the link rule (sent within 30
+ * minutes of the case starting, or by someone tied to it). Removing someone from a call with a case needs the case rule
+ * (the guard above).
+ */
 router.delete('/dispatch/:id/responders/:staffId', patrol, needs('dispatch'), async (req, res) => {
   const { tenantId } = req.auth;
-  const [r] = await pool.query('DELETE FROM dispatch_responders WHERE tenant_id = ? AND call_id = ? AND staff_id = ?', [tenantId, paramId(req), paramId(req, 'staffId')]);
-  if (!r.affectedRows) throw notFound('Responder');
+  const callId = paramId(req); const staffId = paramId(req, 'staffId');
+  const gone = await tx(async (conn) => {
+    const r = await one(conn, `SELECT d.staff_id, d.added_by, d.added_at, d.acked_at, c.incident_id FROM dispatch_responders d JOIN dispatch_calls c ON c.tenant_id = d.tenant_id AND c.id = d.call_id
+      WHERE d.tenant_id = ? AND d.call_id = ? AND d.staff_id = ? FOR UPDATE`, [tenantId, callId, staffId]);
+    if (!r) throw notFound('Responder');
+    if (r.incident_id) {
+      await conn.query(`INSERT INTO dispatch_responders_removed (tenant_id, call_id, staff_id, added_by, added_at, removed_by, removed_at)
+        VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`, [tenantId, callId, staffId, r.added_by, r.added_at, req.auth.userId]);
+    }
+    await conn.query('DELETE FROM dispatch_responders WHERE tenant_id = ? AND call_id = ? AND staff_id = ?', [tenantId, callId, staffId]);
+    return r;
+  });
+  await audit(pool, req, 'remove_responder', 'dispatch_calls', callId, { staff_id: staffId, acked: Boolean(gone.acked_at), incident_id: gone.incident_id ? Number(gone.incident_id) : null });
   res.status(204).end();
 });
 

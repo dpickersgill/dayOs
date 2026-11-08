@@ -529,11 +529,13 @@ async function passkeyPrompt(user, req) {
   if (req.auth.terminalId || req.auth.display || Number(user.sandbox_expires_at ? 1 : 0)) return null;
   const have = await passkeys.count('user', user.id);
   const leader = ['owner', 'manager'].includes(user.role) || Number(user.patrol_lead);
-  if (leader) return have >= 2 ? null : { kind: 'leader', have, want: 2 };
+  // What else this login signs in with, so the offer says "keep working as a backup" only about what it really has.
+  const backup = async () => ({ app: Boolean(Number(user.totp_enabled)), codes: Number((await one(pool, 'SELECT COUNT(*) AS n FROM user_recovery_codes WHERE user_id = ? AND used_at IS NULL', [user.id])).n) > 0 });
+  if (leader) return have >= 2 ? null : { kind: 'leader', have, want: 2, ...(await backup()) };
   const records = user.role === 'patrol' || user.role === 'area' || Number(user.on_patrol);
   if (!records || have) return null;
   const offered = await one(pool, "SELECT id FROM audit_log WHERE tenant_id = ? AND user_id = ? AND action = 'passkey_offer_seen' LIMIT 1", [req.auth.tenantId, req.auth.userId]);
-  return offered ? null : { kind: 'once', have, want: 1 };
+  return offered ? null : { kind: 'once', have, want: 1, ...(await backup()) };
 }
 /** "Not now" on the passkey offer: a line patroller is not offered it again (leaders are, at their next sign-in). */
 router.post('/auth/passkey-prompt/seen', authenticate, async (req, res) => {
