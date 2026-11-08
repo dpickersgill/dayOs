@@ -134,7 +134,7 @@ async function drawTrails(box, canSet) {
       cb.addEventListener('change', async () => {
         try { await patch(`/schedule/trails/${t.id}`, { groomed: cb.checked ? 1 : 0 }); } catch (err) { cb.checked = !cb.checked; fail(err); }
       });
-      return cb;
+      return h('label', { class: 'check-hit' }, cb); // a 44 px target around the box
     } },
   ], data));
 }

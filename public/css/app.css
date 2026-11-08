@@ -3830,13 +3830,15 @@ button.fill-day:hover { border-color: var(--line-strong); }
 .passkey-count { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .passkey-count.short { color: var(--warn-ink); font-weight: 600; }
 
+/* A check box on its own (in a table cell) sits in a 44 px label, so the whole square around it can be pressed. */
+label.check-hit { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; margin: -11px 0; cursor: pointer; }
+
 /* Phones: buttons and check boxes are at least 44 px targets. Small buttons keep their padding and font, only their height
    grows; a check box or radio button grows its label's hit area instead of the box itself. */
 @media (max-width: 600px) {
   .btn:not(.link), .btn.small:not(.link), summary.btn { min-height: 44px; }
-  label:has(> input[type='checkbox']), label:has(> input[type='radio']) { min-height: 44px; display: flex; align-items: center; gap: 10px; }
+  label:not(.check-hit):has(> input[type='checkbox']), label:not(.check-hit):has(> input[type='radio']) { min-height: 44px; display: flex; align-items: center; gap: 10px; }
   label.field:has(> input[type='checkbox']), label.field:has(> input[type='radio']) { display: grid; align-content: center; }
-  td > input[type='checkbox'], td > input[type='radio'], th > input[type='checkbox'] { margin: 11px 4px; }
   .seg button, .chip, .fchips button { min-height: 44px; }
 }
 

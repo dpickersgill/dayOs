@@ -109,7 +109,8 @@ test('raw values: the conditions feed is labeled with a copy button; programs ne
 test('accessibility: phone targets, map zoom, labels, closed menus', () => {
   const phone = css.slice(css.lastIndexOf('@media (max-width: 600px) {'));
   assert.match(phone, /\.btn:not\(\.link\), \.btn\.small:not\(\.link\), summary\.btn \{ min-height: 44px; \}/);
-  assert.match(phone, /label:has\(> input\[type='checkbox'\]\), label:has\(> input\[type='radio'\]\) \{ min-height: 44px;/);
+  assert.match(phone, /label:not\(\.check-hit\):has\(> input\[type='checkbox'\]\)[^{]*\{ min-height: 44px;/);
+  assert.match(css, /label\.check-hit \{[^}]*min-width: 44px; min-height: 44px;/);
   assert.match(css, /\.leaflet-bar a[^{]*\{ width: 44px; height: 44px;/);
   assert.match(css, /\.menu-pop:not\(\[open\]\) > \.menu-items \{ display: none; \}/, 'closed Options menus have no nameless buttons');
   assert.match(view('rentals'), /'aria-label': 'Gear type'/);
