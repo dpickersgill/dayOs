@@ -78,6 +78,8 @@ const SIGNED = {
   'people.js': { router: '/people' }, 'programs.js': { router: '/programs' }, 'programterms.js': { router: '/programs' }, 'rentaldeposits.js': { router: '/rentals' }, 'rentalforms.js': { router: '/rentals' },
   'rentals.js': { router: '/rentals' }, 'rentalsfit.js': { router: '/rentals' }, 'rentalsplus.js': { router: '/rentals' }, 'rentalsreturns.js': { router: '/rentals' }, 'reports.js': { router: '/reports' },
   'safety.js': { router: '/patrol' }, 'sales.js': { router: '' }, 'schedule.js': { schedule: '/schedule' }, 'schooldirector.js': { router: '/skischool' }, 'schoollineup.js': { router: '/skischool' },
+  // 2026.11.13: ski school safety and pay, and the dismissed notes
+  'schoolsafety.js': { router: '/skischool' }, 'schoolmoney.js': { router: '/skischool' }, 'schoolreports.js': { router: '/skischool' }, 'schoolgroups.js': { router: '/skischool' }, 'notices.js': { router: '/notices' },
   'schoolparents.js': { router: '/skischool' }, 'schoolpay.js': { router: '/skischool' }, 'schoolplan.js': { router: '/skischool' }, 'schoolplus.js': { router: '/skischool' }, 'schoolsettings.js': { router: '/skischool' },
   'schoolstaff.js': { router: '/skischool' }, 'security.js': { router: '' }, 'shop.js': { router: '/online-shop' }, 'shopadmin.js': { router: '/online-shop' }, 'skischool.js': { router: '/skischool' },
   'staffinjuries.js': { router: '/staff-injuries' }, 'team.js': { router: '/patrol' }, 'terminal.js': { router: '/terminal' }, 'waivers.js': { router: '/waivers' }, 'whatsnew.js': { router: '/whats-new' },
@@ -91,6 +93,7 @@ const PUBLIC = {
   'programreg.js': { publicRouter: '/public' }, 'rentalforms.js': { publicRouter: '/public' }, 'schedule.js': { publicRouter: '/public' }, 'schooldirector.js': { publicRouter: '/public' },
   'schoollineup.js': { publicRouter: '/public' }, 'schoolparents.js': { publicRouter: '/public' }, 'schoolpay.js': { publicRouter: '/public' }, 'shop.js': { publicRouter: '/public' },
   'waivers.js': { publicRouter: '/public' },
+  'schoolsafety.js': { publicRouter: '/public' }, 'schoolmoney.js': { publicRouter: '/public' }, 'schoolgroups.js': { publicRouter: '/public' },
 };
 // Whole files, or single routers inside a file ('file.js:name'), left out of the sweep, and why.
 const EXEMPT = {
