@@ -99,6 +99,22 @@ test('brand: gold buttons with slate text, colors as tokens, no Good Day amber o
   assert.match(home, /<p class="brandline">The good day, designed\.<\/p>\s*<h1 id="h-hero"><span class="kicker">Ski area management software<\/span> Run the whole mountain from one screen\.<\/h1>/);
 });
 
+test('brand: no trail blue on the website; links are dark slate, the small heading over the headline is spruce (2026.11.13)', () => {
+  const css = read('public/site/site.css');
+  assert.ok(!/--trail/.test(css), 'no trail tokens are left');
+  assert.ok(!/#1B5FC1|#154A99|#E8F0FB|#BBD3F6/i.test(css), 'no old blue values');
+  assert.match(css, /--link:var\(--slate2\)/);
+  assert.match(css, /\.sx a\{color:var\(--link\);/);
+  assert.match(css, /\.kicker\{[^}]*color:var\(--spruce\)/);
+  // the blue square is a trail-sign symbol (plan tiers), and that is the only place the blue stays
+  for (const f of ['src/site/index.html', 'src/site/pricing.html']) {
+    const page = read(f);
+    for (const m of page.matchAll(/#1B5FC1/gi)) assert.match(page.slice(Math.max(0, m.index - 80), m.index), /<rect x="2" y="2" width="30" height="30" rx="2" fill="$/, `${f}: blue only in the blue square`);
+  }
+  const L = (h) => { const c = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+  for (const [fg, bg] of [['#1E4553', '#F4F8FA'], ['#2C7A57', '#F4F8FA'], ['#1E4553', '#FFFFFF']]) assert.ok((L(bg) + 0.05) / (L(fg) + 0.05) >= 4.5, `${fg} on ${bg}`);
+});
+
 test('Good Day emails: brand colors and Atkinson Hyperlegible for body text', () => {
   const src = read('src/lib/goodday.js');
   assert.match(src, /const FONT = "'Atkinson Hyperlegible',Helvetica,Arial,sans-serif";/);
