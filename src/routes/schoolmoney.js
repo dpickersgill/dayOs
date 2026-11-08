@@ -266,6 +266,8 @@ router.patch('/ladders/:id', director, validate(LL.schema.partial()), async (req
   await tx(async (conn) => LL.update(conn, req, paramId(req), req.body));
   res.json({ ok: true });
 });
-router.get('/ladders/progress/:personId', school, async (req, res) => res.json({ data: await LL.progress(pool, req.auth.tenantId, Number(req.params.personId) || 0) }));
+// Read only, for the desk and above (2026.11.13 review): the graduate's offer is made when the last lesson is marked
+// attended (routes/skischool.js), never by reading.
+router.get('/ladders/progress/:personId', desk, async (req, res) => res.json({ data: await LL.progress(pool, req.auth.tenantId, Number(req.params.personId) || 0, { issue: false }) }));
 
 module.exports = { router, publicRouter, setupCheck };

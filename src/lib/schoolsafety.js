@@ -77,16 +77,17 @@ async function bookedAges(db, tenantId, s) {
 
 /**
  * What is wrong with putting these students (ages) in this lesson: [{ kind: 'age'|'ratio', message }]. The ratio counts
- * the students already booked plus these. extraHeld: seats held by online requests not booked yet.
+ * the students already booked plus these. extraHeld: seats held by online requests not booked yet. extraAges: students
+ * on their way into the class but not booked yet (earlier lines of the same basket): counted in the ratio, not age-checked.
  */
-async function problemsFor(db, tenantId, s, newcomers, { settings = null, extraHeld = 0 } = {}) {
+async function problemsFor(db, tenantId, s, newcomers, { settings = null, extraHeld = 0, extraAges = [] } = {}) {
   const set = settings || (await S.get(db, tenantId));
   const out = [];
   for (const n of newcomers) {
     if (!ageFits(s, n.age)) out.push({ kind: 'age', message: `${n.first_name || 'This student'} is ${n.age}, and this lesson is for ${agesWords(s.age_min, s.age_max)}.` });
   }
   if (ratioApplies(s)) {
-    const ages = [...(await bookedAges(db, tenantId, s)), ...newcomers.map((n) => n.age)];
+    const ages = [...(await bookedAges(db, tenantId, s)), ...extraAges, ...newcomers.map((n) => n.age)];
     const lim = classLimit(s, ages, set);
     const count = ages.length + Number(extraHeld || 0);
     if (lim && count > lim.size) {
@@ -105,13 +106,14 @@ const mayOverride = (req) => SA.atLeast(req, 'supervisor');
  * with { needs_override, problems } so the screen can ask a manager; with a reason from a manager it books anyway and
  * the reason goes on the audit log and the booking. Returns the reason used, or null.
  */
-async function deskCheck(conn, req, s, personId, overrideReason) {
+async function deskCheck(conn, req, s, personId, overrideReason, { earlier = [] } = {}) {
   const p = await one(conn, 'SELECT first_name, date_of_birth FROM people WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, personId]);
   const age = p ? ageOn(p.date_of_birth, String(s.starts_at).slice(0, 10)) : null;
   // already in this lesson: nothing changes
   const already = await one(conn, "SELECT id FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND person_id = ? AND status IN ('booked','attended')", [req.auth.tenantId, s.id, personId]);
   if (already) return null;
-  const problems = await problemsFor(conn, req.auth.tenantId, s, [{ first_name: p && p.first_name, age }]);
+  // earlier: students for this class already checked in the same basket, not booked yet; they count in the ratio
+  const problems = await problemsFor(conn, req.auth.tenantId, s, [{ first_name: p && p.first_name, age }], { extraAges: earlier.map((x) => x.age) });
   if (!problems.length) return null;
   const words = problems.map((x) => x.message).join(' ');
   if (!overrideReason) {

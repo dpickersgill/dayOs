@@ -90,6 +90,8 @@ async function moveBookingRow(conn, tenantId, booking, fromSessionId, to, { stat
     [to.id, ...(status ? [status] : []), fromSessionId, tenantId, booking.id]);
   await conn.query("UPDATE order_items SET session_id = ?, valid_on = ? WHERE tenant_id = ? AND session_id = ? AND person_id = ? AND line_kind = 'lesson' AND refunded_at IS NULL",
     [to.id, String(to.starts_at).slice(0, 10), tenantId, fromSessionId, booking.person_id]);
+  // a learn to ski ladder lesson: the ticket and rental its check-in issued move to the new day (lib/learnladder.js)
+  await require('./learnladder').carryIncluded(conn, tenantId, booking.id, String(to.starts_at).slice(0, 10));
 }
 
 module.exports = { studentClash, clashWords, lockStudents, spotsLeft, moveBookingRow };

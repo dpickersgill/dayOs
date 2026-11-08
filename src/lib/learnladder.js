@@ -125,16 +125,21 @@ async function progress(db, tenantId, personId, { issue = true } = {}) {
  * { ticket, rental } (null for what the ladder does not include or was already issued), or null for any other lesson.
  */
 async function issueIncluded(conn, tenantId, bookingId, { userId = null } = {}) {
-  const b = await one(conn, `SELECT b.id, b.person_id, b.credit_id, b.ladder_ticket_id, b.ladder_contract_id, DATE_FORMAT(s.starts_at, '%Y-%m-%d') AS day
-    FROM lesson_bookings b JOIN lesson_sessions s ON s.tenant_id = b.tenant_id AND s.id = b.session_id WHERE b.tenant_id = ? AND b.id = ? FOR UPDATE`, [tenantId, bookingId]);
+  const b = await one(conn, `SELECT b.id, b.person_id, b.credit_id, b.ladder_ticket_id, b.ladder_contract_id, DATE_FORMAT(s.starts_at, '%Y-%m-%d') AS day, p.date_of_birth
+    FROM lesson_bookings b JOIN lesson_sessions s ON s.tenant_id = b.tenant_id AND s.id = b.session_id JOIN people p ON p.tenant_id = b.tenant_id AND p.id = b.person_id
+    WHERE b.tenant_id = ? AND b.id = ? FOR UPDATE`, [tenantId, bookingId]);
   if (!b || !b.credit_id) return null;
   const l = await forCredit(conn, tenantId, b.credit_id);
   if (!l || (!l.ticket_product_id && !l.rental_product_id)) return null;
-  const sale = await one(conn, 'SELECT i.order_id FROM lesson_credits c JOIN order_items i ON i.tenant_id = c.tenant_id AND i.id = c.order_item_id WHERE c.tenant_id = ? AND c.id = ?', [tenantId, b.credit_id]);
-  if (!sale) return null; // a package not sold through an order (none today): nothing to hang the lines on
+  // Only while the package is good: the credit active and its sale line not refunded (2026.11.13 review).
+  const sale = await one(conn, `SELECT i.order_id FROM lesson_credits c JOIN order_items i ON i.tenant_id = c.tenant_id AND i.id = c.order_item_id
+    WHERE c.tenant_id = ? AND c.id = ? AND c.status = 'active' AND i.refunded_at IS NULL`, [tenantId, b.credit_id]);
+  if (!sale) return null; // refunded or void, or a package not sold through an order: nothing is issued
+  // The ticket's tier is the student's, on the lesson day (child, youth, adult...), as a window sale would price it.
+  const tier = b.date_of_birth ? await require('./guesttypes').forBirthday(conn, tenantId, b.date_of_birth, b.day) : 'adult';
   const line = async (product, kind) => (await conn.query(
     `INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents, list_cents, reward_cents, label)
-     VALUES (?, ?, ?, ?, ?, 'adult', 1, 0, ?, 0, 0, 0, 0, ?)`, [tenantId, sale.order_id, product.id, kind, b.person_id, b.day, `Included: ${l.name}`.slice(0, 80)]))[0].insertId;
+     VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, 0, 0, 0, 0, ?)`, [tenantId, sale.order_id, product.id, kind, b.person_id, tier || 'adult', b.day, `Included: ${l.name}`.slice(0, 80)]))[0].insertId;
   const out = { ticket: null, rental: null };
   if (l.ticket_product_id && !b.ladder_ticket_id) {
     const product = await one(conn, 'SELECT id, name, valid_days, uses FROM products WHERE tenant_id = ? AND id = ?', [tenantId, l.ticket_product_id]);
@@ -160,4 +165,43 @@ async function issueIncluded(conn, tenantId, bookingId, { userId = null } = {}) 
   return out;
 }
 
-module.exports = { schema, create, update, list, forCredit, progress, includesWords, issueIncluded };
+/**
+ * A ladder lesson moved to another day (a weather makeup, a family or staff move): what its check-in issued moves with it
+ * (2026.11.13 review). Choice: the ticket already issued is reused. If it is still active and unused it is re-dated to
+ * the new day, and a rental still waiting to be fitted is re-dated too, so check-in on the new day issues nothing more.
+ * A ticket already scanned, used up or void (or a rental already out) stays as it was and the booking forgets it, so
+ * check-in on the new day issues a fresh one. Never two live tickets for one lesson, and never none.
+ */
+async function carryIncluded(conn, tenantId, bookingId, newDay) {
+  const b = await one(conn, 'SELECT ladder_ticket_id, ladder_contract_id FROM lesson_bookings WHERE tenant_id = ? AND id = ?', [tenantId, bookingId]);
+  if (!b || (!b.ladder_ticket_id && !b.ladder_contract_id)) return null;
+  const out = { ticket: null, rental: null };
+  if (b.ladder_ticket_id) {
+    const t = await one(conn, `SELECT t.id, t.status, t.valid_from, t.valid_to, (SELECT COUNT(*) FROM scans x WHERE x.tenant_id = t.tenant_id AND x.ticket_id = t.id) AS scans
+      FROM tickets t WHERE t.tenant_id = ? AND t.id = ?`, [tenantId, b.ladder_ticket_id]);
+    if (t && t.status === 'active' && !Number(t.scans)) {
+      const span = Math.round((Date.parse(String(t.valid_to).slice(0, 10)) - Date.parse(String(t.valid_from).slice(0, 10))) / 86400000);
+      await conn.query('UPDATE tickets SET valid_from = ?, valid_to = ? WHERE tenant_id = ? AND id = ?', [newDay, addDays(newDay, span), tenantId, t.id]);
+      await conn.query("UPDATE order_items SET valid_on = ? WHERE tenant_id = ? AND id = (SELECT order_item_id FROM tickets WHERE tenant_id = ? AND id = ?)", [newDay, tenantId, tenantId, t.id]);
+      out.ticket = 'moved';
+    } else {
+      await conn.query('UPDATE lesson_bookings SET ladder_ticket_id = NULL WHERE tenant_id = ? AND id = ?', [tenantId, bookingId]);
+      out.ticket = 'reissue';
+    }
+  }
+  if (b.ladder_contract_id) {
+    const c = await one(conn, 'SELECT id, status, kind FROM rental_contracts WHERE tenant_id = ? AND id = ?', [tenantId, b.ladder_contract_id]);
+    if (c && c.status === 'to_fit') {
+      const F = require('./rentalfit');
+      const due = F.dueFor(await F.fitSettings(conn, tenantId), c.kind || 'day', newDay, 1);
+      await conn.query('UPDATE rental_contracts SET valid_on = ?, due_at = ? WHERE tenant_id = ? AND id = ?', [newDay, due, tenantId, c.id]);
+      out.rental = 'moved';
+    } else {
+      await conn.query('UPDATE lesson_bookings SET ladder_contract_id = NULL WHERE tenant_id = ? AND id = ?', [tenantId, bookingId]);
+      out.rental = 'reissue';
+    }
+  }
+  return out;
+}
+
+module.exports = { schema, create, update, list, forCredit, progress, includesWords, issueIncluded, carryIncluded };

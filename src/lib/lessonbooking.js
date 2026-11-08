@@ -59,7 +59,7 @@ async function bookStudent(conn, req, { sessionId, personId, details = {}, signW
   if (s.status !== 'scheduled') throw conflict(`Session is ${s.status}`, { person_id: personId });
   const season = seasonFor(s.starts_at.slice(0, 10));
   let waiver = await one(conn, ON_FILE, [tenantId, personId, season]);
-  if (!waiver && signWaiver) waiver = { id: await recordCounterWaiver(conn, req, { personId, season, day: s.starts_at.slice(0, 10), signer: waiverSigner }) };
+  if (!waiver && signWaiver) waiver = { id: await recordCounterWaiver(conn, req, { personId, season, day: s.starts_at.slice(0, 10), signer: waiverSigner, session: s }) };
   if (!waiver) throw conflict('Student needs a signed waiver for this season before booking', { person_id: personId });
   const prior = await one(conn, 'SELECT id, status FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND person_id = ?', [tenantId, s.id, personId]);
   const already = prior && ['booked', 'attended'].includes(prior.status);
@@ -111,14 +111,16 @@ async function bookStudent(conn, req, { sessionId, personId, details = {}, signW
  * Records a season waiver signed at the desk, as Sell does (routes/checkout.js ensureWaiver): who signed it, as what, and
  * the wording they signed (its SHA-256). A student under 18 on the lesson day needs a parent or guardian's name; an adult
  * signs for themselves. signer: { name, person_id } (person_id: a guardian on file, optional). Returns the waiver id.
+ * session: the lesson. In a kids lesson a student with no birth date on file counts as a minor (2026.11.13 review): a
+ * guardian signs, never the child.
  */
-async function recordCounterWaiver(conn, req, { personId, season, day, signer }) {
+async function recordCounterWaiver(conn, req, { personId, season, day, signer, session = null }) {
   const tenantId = req.auth.tenantId;
   const me = await one(conn, 'SELECT id, first_name, last_name, date_of_birth FROM people WHERE tenant_id = ? AND id = ?', [tenantId, personId]);
   const dob = me && me.date_of_birth ? String(me.date_of_birth instanceof Date ? me.date_of_birth.toISOString() : me.date_of_birth).slice(0, 10) : null;
   let age = null;
   if (dob) { age = Number(day.slice(0, 4)) - Number(dob.slice(0, 4)); if (day.slice(5) < dob.slice(5)) age -= 1; }
-  const minor = age !== null && age < 18;
+  const minor = age !== null ? age < 18 : require('./schoolsafety').isKidsLesson(session);
   let by = null; let name = null; let relation = 'self';
   if (minor) {
     name = signer && String(signer.name || '').trim();
@@ -128,8 +130,8 @@ async function recordCounterWaiver(conn, req, { personId, season, day, signer })
       if (!g) throw conflict('That person is not a parent or guardian of the student on file. Type the name of the parent or guardian who signed.', { person_id: personId });
       by = g.id; name = name || `${g.first_name} ${g.last_name}`;
     }
-    if (!name || name.length < 3) throw conflict(`${me.first_name} is under 18: a parent or guardian must sign the waiver. Enter the name of the parent or guardian who signed.`, { person_id: personId, needs_guardian: true });
-    if (name.toLowerCase() === `${me.first_name} ${me.last_name}`.toLowerCase()) throw conflict(`${me.first_name} is under 18 and cannot sign their own waiver. Enter the parent or guardian's name.`, { person_id: personId, needs_guardian: true });
+    if (!name || name.length < 3) throw conflict(age === null ? `${me.first_name} has no date of birth on file and this is a kids lesson: a parent or guardian must sign the waiver. Enter the name of the parent or guardian who signed.` : `${me.first_name} is under 18: a parent or guardian must sign the waiver. Enter the name of the parent or guardian who signed.`, { person_id: personId, needs_guardian: true });
+    if (name.toLowerCase() === `${me.first_name} ${me.last_name}`.toLowerCase()) throw conflict(age === null ? `${me.first_name} cannot sign their own waiver for a kids lesson. Enter the parent or guardian's name.` : `${me.first_name} is under 18 and cannot sign their own waiver. Enter the parent or guardian's name.`, { person_id: personId, needs_guardian: true });
     relation = 'guardian';
   } else { by = me.id; name = `${me.first_name} ${me.last_name}`; }
   const t = await one(conn, 'SELECT waiver_text FROM tenants WHERE id = ?', [tenantId]);

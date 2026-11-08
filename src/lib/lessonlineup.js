@@ -325,6 +325,20 @@ async function moveBooking(conn, req, bookingId, toSessionId, { reason = null, i
   const pe = await one(conn, 'SELECT first_name, date_of_birth FROM people WHERE tenant_id = ? AND id = ?', [tenantId, b.person_id]);
   const why = pe && require('./lessonfamily').misfit(to, { first_name: pe.first_name, date_of_birth: pe.date_of_birth ? String(pe.date_of_birth instanceof Date ? pe.date_of_birth.toISOString() : pe.date_of_birth).slice(0, 10) : null, discipline: from.discipline });
   if (why) throw conflict(why.replace(' Pick another lesson.', ' Pick another class.'));
+  // The class's ages and its size by age band (school safety, 2026.11.13 review): past them only a manager or school
+  // supervisor, with a reason, and the override is audited. The split (skipCapacity) already sizes classes by band.
+  let bandOverride = null;
+  if (!skipCapacity) {
+    const SS = require('./schoolsafety');
+    const problems = await SS.problemsFor(conn, tenantId, to, [{ first_name: pe && pe.first_name, age: SS.ageOn(pe && pe.date_of_birth, String(to.starts_at).slice(0, 10)) }]);
+    if (problems.length) {
+      const words = problems.map((x) => x.message).join(' ');
+      if (!SS.mayOverride(req)) throw conflict(`${words} A manager can move them anyway with a reason.`, { needs_override: true, problems });
+      if (!reason) throw conflict(`${words} Give a reason to move them anyway.`, { needs_override: true, needs_reason: true, problems });
+      bandOverride = problems;
+      await audit(conn, req, problems.some((x) => x.kind === 'age') ? 'age_override' : 'ratio_override', 'lesson_sessions', to.id, { person_id: b.person_id, booking_id: b.id, problems: problems.map((x) => x.kind), reason, via: 'move' });
+    }
+  }
   // On the day, at the lineup: only the students in the class count (lib/lessonrules.spotsLeft, under the lesson lock).
   const { booked: n } = await spotsLeft(conn, tenantId, to, { holds: false });
   let over = false;
@@ -341,7 +355,8 @@ async function moveBooking(conn, req, bookingId, toSessionId, { reason = null, i
   if (old) await conn.query('DELETE FROM lesson_bookings WHERE tenant_id = ? AND id = ?', [tenantId, old.id]);
   // The same booking row moves and its sale line follows (a check-in at the lineup stays: same day, same student).
   await moveBookingRow(conn, tenantId, b, from.id, to, { utc: true, resetCheckin: false });
-  await audit(conn, req, 'move_student', 'lesson_bookings', b.id, { from_session_id: from.id, to_session_id: to.id, ...(over ? { over_by_one: true, reason } : {}) });
+  await audit(conn, req, 'move_student', 'lesson_bookings', b.id, { from_session_id: from.id, to_session_id: to.id, ...(over ? { over_by_one: true, reason } : {}), ...(bandOverride ? { band_override: true, reason } : {}) });
+  if (bandOverride) await conn.query('UPDATE lesson_bookings SET override_reason = ? WHERE tenant_id = ? AND id = ?', [reason, tenantId, b.id]);
   return { booking: b, from, to, over, quiet };
 }
 

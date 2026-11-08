@@ -366,7 +366,7 @@ async function moveChoices(db, t, b) {
   const person = await one(db, 'SELECT date_of_birth, ski_level, snowboard_level FROM people WHERE tenant_id = ? AND id = ?', [t.id, b.person_id]);
   const level = b.level || L.personLevel(person, b.discipline);
   const earliest = plusMinutes(nowLocal, Number(t.booking_notice_hours || 0) * 60);
-  const list = await rows(db, `SELECT s.id, s.starts_at, s.ends_at, s.discipline, s.level_min, s.level_max, s.age_min, s.age_max, s.capacity, s.meeting_place, s.product_id, pr.name AS product,
+  const list = await rows(db, `SELECT s.id, s.starts_at, s.ends_at, s.discipline, s.format, s.kind, s.age_group, s.level_min, s.level_max, s.age_min, s.age_max, s.capacity, s.meeting_place, s.product_id, pr.name AS product,
       (SELECT COUNT(*) FROM lesson_bookings x WHERE x.tenant_id = s.tenant_id AND x.session_id = s.id AND x.status IN ('booked','attended')) AS booked
     FROM lesson_sessions s JOIN products pr ON pr.tenant_id = s.tenant_id AND pr.id = s.product_id
     WHERE s.tenant_id = ? AND s.status = 'scheduled' AND s.id <> ? AND s.discipline = ? AND s.starts_at >= ? AND DATE(s.starts_at) <= ? ORDER BY s.starts_at LIMIT 200`,
@@ -375,10 +375,16 @@ async function moveChoices(db, t, b) {
   const unit = await paidUnit(db, t.id, b);
   const tier = person && person.date_of_birth ? await tierFor(db, t.id, person.date_of_birth, String(b.starts_at).slice(0, 10)) : 'adult';
   const out = [];
+  const SS = require('./schoolsafety');
+  const settings = await require('./schoolsettings').get(db, t.id);
   for (const s of list) {
     if (s.capacity - Number(s.booked) - (held.get(Number(s.id)) || 0) <= 0) continue;
     const age = person && person.date_of_birth ? ageOn(person.date_of_birth, String(s.starts_at).slice(0, 10)) : null;
     if (!fits(s, { age, level })) continue;
+    // the class's size for its youngest age band, and its ages (school safety): a family sees only classes that can take
+    // this child without a manager's reason (2026.11.13 review)
+    if (Number(s.booked) + (held.get(Number(s.id)) || 0) >= SS.bandCap(s, settings)) continue;
+    if ((await SS.problemsFor(db, t.id, s, [{ age }], { settings, extraHeld: held.get(Number(s.id)) || 0 })).length) continue;
     if (!(await samePrice(db, t, b, s, { tier, unit }))) continue;
     out.push({ id: s.id, starts_at: s.starts_at, ends_at: s.ends_at, product: s.product, level_words: L.range(s.level_min, s.level_max), meeting_place: s.meeting_place });
     if (out.length >= 40) break;
@@ -437,7 +443,7 @@ async function progressCard(db, tenantId, personId, { recapBodies = true } = {})
       LEFT JOIN program_terms pt ON pt.tenant_id = e.tenant_id AND pt.id = e.term_id
       WHERE e.tenant_id = ? AND e.person_id = ? AND e.status = 'enrolled' GROUP BY pr.id, pr.name, e.term_id ORDER BY starts_on DESC LIMIT 12`, [tenantId, personId]))
     .map((r) => ({ name: r.name, term: r.term || null, season: r.starts_on ? seasonFor(String(r.starts_on).slice(0, 10)) : null }));
-  const ladders = await require('./learnladder').progress(db, tenantId, personId); // learn to ski: lesson 2 of 3, the graduate offer (feat/school-pay)
+  const ladders = await require('./learnladder').progress(db, tenantId, personId, { issue: false }); // learn to ski: lesson 2 of 3, the graduate offer once made (made at attendance, never by reading)
   return { first_name: p.first_name, levels, passed, skills, recaps, lessons: Number(lessons.n), programs, ladders };
 }
 
@@ -569,6 +575,11 @@ async function moveBooking(t, b, toSessionId) {
     if (!pol.can_change) throw conflict(pol.why || 'This booking cannot be changed now');
     if (!to || to.status !== 'scheduled') throw conflict('That lesson is no longer open');
     if ((await spotsLeft(conn, t.id, to)).left < 1) throw conflict('That lesson just filled up. Pick another.');
+    // ages and the class size by age band, checked again under the lock: a family never moves past them (school safety)
+    const me = await one(conn, 'SELECT first_name, date_of_birth FROM people WHERE tenant_id = ? AND id = ?', [t.id, cur.person_id]);
+    const SS = require('./schoolsafety');
+    const problems = await SS.problemsFor(conn, t.id, to, [{ first_name: me && me.first_name, age: SS.ageOn(me && me.date_of_birth, String(to.starts_at).slice(0, 10)) }]);
+    if (problems.length) throw conflict(`${problems.map((x) => x.message).join(' ')} Pick another lesson, or call the ski school.`, { problems });
     const clash = await studentClash(conn, t.id, cur.person_id, to.starts_at, to.ends_at, { ignoreSessionId: from.id, lock: true });
     if (clash) throw conflict(clashWords(clash));
     const old = await one(conn, 'SELECT id, status FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND person_id = ?', [t.id, to.id, cur.person_id]);

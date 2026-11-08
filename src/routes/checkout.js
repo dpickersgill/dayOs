@@ -541,6 +541,9 @@ async function runSale(conn, req, body, { check = false } = {}) {
       await audit(conn, req, 'sign_waiver', 'waivers', w.insertId, { person_id: personId, season, signed_by: signer.id });
     };
     // A lesson's session, locked, with the student's place: refused when it is not running, full, or already theirs.
+    // Students already checked for each lesson in this basket (2026.11.13 review): two lines for the same class count
+    // each other in the age-band ratio, so two kids cannot both take the last place of a small class without a reason.
+    const fitSoFar = new Map();
     const lessonCheck = async (p, student) => {
       const s = await one(conn, 'SELECT * FROM lesson_sessions WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, p.session.id]);
       if (s.status !== 'scheduled') throw conflict(`That lesson is ${s.status}`);
@@ -556,7 +559,16 @@ async function runSale(conn, req, body, { check = false } = {}) {
       const clash = await studentClash(conn, tenantId, student, s.starts_at, s.ends_at, { ignoreSessionId: s.id, lock: true });
       if (clash) throw conflict(`${(personRows.get(student) || {}).first_name || 'The student'}: ${clashWords(clash)}`);
       // outside the lesson's ages or over its ratio by age band: a manager sells it anyway with a reason (feat/school-safety)
-      if (!adopting && !p.fitChecked) { await require('../lib/schoolsafety').deskCheck(conn, req, s, student, (p.line.safety && p.line.safety.override_reason) || null); p.fitChecked = true; }
+      if (!adopting && !p.fitChecked) {
+        const SS = require('../lib/schoolsafety');
+        const earlier = fitSoFar.get(s.id) || [];
+        const me = personRows.get(student) || await one(conn, 'SELECT first_name, date_of_birth FROM people WHERE tenant_id = ? AND id = ?', [tenantId, student]);
+        // the reason is kept only when an override actually happened (deskCheck returns it then, and audits it)
+        p.overridden = await SS.deskCheck(conn, req, s, student, (p.line.safety && p.line.safety.override_reason) || null, { earlier });
+        earlier.push({ first_name: me && me.first_name, age: SS.ageOn(me && me.date_of_birth, String(s.starts_at).slice(0, 10)) });
+        fitSoFar.set(s.id, earlier);
+        p.fitChecked = true;
+      }
       return { s, existing, adopting };
     };
     // An activity rider: the clerk's word on the limits, old enough, and (when the attraction asks) a waiver.
@@ -705,7 +717,7 @@ async function runSale(conn, req, body, { check = false } = {}) {
           bookingId = (await conn.query('INSERT INTO lesson_bookings (tenant_id, session_id, person_id) VALUES (?, ?, ?)', [tenantId, s.id, student]))[0].insertId;
         }
         await item({ product_id: s.product_id, person_id: student, session_id: s.id });
-        await LS.saveSafety(conn, req, tenantId, bookingId, student, s, ln.safety);
+        await LS.saveSafety(conn, req, tenantId, bookingId, student, s, ln.safety, { overridden: p.overridden || null });
         await audit(conn, req, 'book', 'lesson_sessions', s.id, { person_id: student, order_id: orderId });
         done.lessons.push({ booking_id: bookingId, session_id: s.id, person_id: student, name: p.name, starts_at: s.starts_at, ...(await LS.receiptBits(conn, tenantId, s, student)) });
       } else if (p.type === 'rental') {

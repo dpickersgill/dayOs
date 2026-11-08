@@ -22,7 +22,7 @@ const safetySchema = z.object({
 });
 
 /** Saves a lesson line's safety details on its booking, the level it was booked at, and a text consent when given. */
-async function saveSafety(conn, req, tenantId, bookingId, personId, session, safety) {
+async function saveSafety(conn, req, tenantId, bookingId, personId, session, safety, { overridden = null } = {}) {
   const p = await one(conn, 'SELECT ski_level, snowboard_level, emergency_name, emergency_phone FROM people WHERE tenant_id = ? AND id = ?', [tenantId, personId]);
   const level = L.personLevel(p, session.discipline);
   await conn.query('UPDATE lesson_bookings SET level = COALESCE(level, ?) WHERE tenant_id = ? AND id = ?', [level || null, tenantId, bookingId]);
@@ -35,7 +35,8 @@ async function saveSafety(conn, req, tenantId, bookingId, personId, session, saf
   const SS = require('./schoolsafety');
   if (safety.pickup_adults) await SS.savePickup(conn, tenantId, bookingId, safety.pickup_adults, { consent: Boolean(safety.pickup_photo_consent), via: 'window' });
   if (safety.adaptive && session.discipline === 'adaptive') await SS.saveAdaptive(conn, tenantId, bookingId, safety.adaptive, req.auth.userId || null);
-  if (safety.override_reason) await conn.query('UPDATE lesson_bookings SET override_reason = ? WHERE tenant_id = ? AND id = ?', [safety.override_reason, tenantId, bookingId]);
+  // the reason deskCheck used (and audited), only when an override happened (2026.11.13 review): a reason typed with nothing to override is not kept
+  if (overridden) await conn.query('UPDATE lesson_bookings SET override_reason = ? WHERE tenant_id = ? AND id = ?', [overridden, tenantId, bookingId]);
   if (safety.placement) {
     const placed = P.place(await P.questions(conn, tenantId), session.discipline, safety.placement);
     if (placed) await conn.query('UPDATE lesson_bookings SET placement_level = ?, placement_answers = ? WHERE tenant_id = ? AND id = ?', [placed.placement_level, placed.placement_answers, tenantId, bookingId]);

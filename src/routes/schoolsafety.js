@@ -373,6 +373,13 @@ router.get('/lost/:id', requireRole('instructor', 'manager', 'counter', 'patrol'
   if (!lc) throw notFound('Report');
   const b = await bookingRow(pool, tenantId, lc.booking_id);
   if (req.auth.role !== 'patrol') mayActOn(req, b, 'this report');
+  else {
+    // Patrol reads a report (and the child's photo) only while the search is on: the report open, or its dispatch call
+    // still active. Once the child is found or the report closed, patrol's access ends (2026.11.13 review).
+    const call = lc.call_id ? await one(pool, 'SELECT status FROM dispatch_calls WHERE tenant_id = ? AND id = ?', [tenantId, lc.call_id]) : null;
+    const callActive = Boolean(call) && !['closed', 'cancelled'].includes(call.status);
+    if (lc.status !== 'open' && !callActive) throw forbidden('This child has been found and the report is closed. Patrol can no longer open it.');
+  }
   const p = await one(pool, 'SELECT photo FROM people WHERE tenant_id = ? AND id = ?', [tenantId, b.person_id]);
   await audit(pool, req, 'lost_child_view', 'school_lost_children', lc.id);
   res.set('Cache-Control', 'private, no-store');

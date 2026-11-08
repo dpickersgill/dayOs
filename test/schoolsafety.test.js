@@ -354,6 +354,13 @@ test('lost child: opens a patrol dispatch call with the child\'s details; the sc
   assert.equal(c2.status, 'closed');
   const ev = await q('SELECT note FROM dispatch_events WHERE call_id = ? ORDER BY id', [lost.call_id]);
   assert.ok(ev.some((e) => /Found by Patroller Sam at Lift 2 base/.test(e.note || '')));
+  // 2026.11.13 review: once found (report found, call closed) patrol can no longer read the report or the photo; the school still can
+  assert.equal((await call('GET', `/skischool/lost/${lost.id}`, { token: patrol })).status, 403, 'patrol: closed report');
+  ok(await call('GET', `/skischool/lost/${lost.id}`, { token: T.ian }));
+  // while the dispatch call is still active patrol keeps access, even if the report itself was marked found
+  await q("UPDATE dispatch_calls SET status = 'on_scene' WHERE id = ?", [lost.call_id]);
+  ok(await call('GET', `/skischool/lost/${lost.id}`, { token: patrol }));
+  await q("UPDATE dispatch_calls SET status = 'closed' WHERE id = ?", [lost.call_id]);
   D.liveSession = sid; D.emma = kid.id;
 });
 
@@ -436,4 +443,79 @@ test('places: "We\'re at" a named spot and a lift scan show on the board for tod
   await SSR.daily();
   const left = await q('SELECT on_date FROM school_group_places WHERE tenant_id = ?', [tid]);
   assert.ok(left.length >= 1 && left.every((r) => String(r.on_date).slice(0, 10) === today));
+});
+
+// ---------------------------------------------------------------- 2026.11.13 review fixes
+const sell = async (token, body) => {
+  const quote = await call('POST', '/checkout/quote', { token, body: { lines: body.lines } });
+  assert.equal(quote.status, 200, quote.text);
+  return call('POST', '/checkout', { token, body: { channel: 'window', ...body, payments: [{ tender: 'cash', amount_cents: quote.body.total_cents }] } });
+};
+const age4 = (n) => `${Number(day2.slice(0, 4)) - 4}-01-${String(n).padStart(2, '0')}`; // 4 on day2
+
+test('review 1: a kids lesson student with no birth date on file needs a guardian to sign, at the roster, the desk and online', async () => {
+  const sid = await session({ age_min: 5, age_max: 12, starts_at: `${day2}T08:00`, ends_at: `${day2}T09:00` });
+  const [p] = await pool.query('INSERT INTO people (tenant_id, first_name, last_name) VALUES (?, ?, ?)', [tid, 'Nodob', `Kidd${suffix}`]);
+  // the roster API: no signer is refused (before: 201, with the child signing their own waiver)
+  const none = await call('POST', `/skischool/sessions/${sid}/bookings`, { token: T.counter, body: { person_id: p.insertId, sign_waiver: true, send_confirmation: false } });
+  assert.equal(none.status, 409, none.text);
+  assert.equal(none.body.details.needs_guardian, true);
+  assert.equal((await call('POST', `/skischool/sessions/${sid}/bookings`, { token: T.counter, body: { person_id: p.insertId, sign_waiver: true, waiver_signer: { name: `Nodob Kidd${suffix}` }, send_confirmation: false } })).status, 409, 'not the child themselves');
+  ok(await call('POST', `/skischool/sessions/${sid}/bookings`, { token: T.counter, body: { person_id: p.insertId, sign_waiver: true, waiver_signer: { name: 'Gina Guardian' }, send_confirmation: false } }), 201);
+  const [w] = await q('SELECT signer_relation, signed_by_name FROM waivers WHERE person_id = ?', [p.insertId]);
+  assert.deepEqual([w.signer_relation, w.signed_by_name], ['guardian', 'Gina Guardian']);
+  // an adult lesson with no birth date: the student signs for themselves, as before
+  const adultSid = await session({ age_min: 18, starts_at: `${day2}T08:00`, ends_at: `${day2}T09:00`, product_id: D.group });
+  const [a] = await pool.query('INSERT INTO people (tenant_id, first_name, last_name) VALUES (?, ?, ?)', [tid, 'Grown', `Nodob${suffix}`]);
+  ok(await call('POST', `/skischool/sessions/${adultSid}/bookings`, { token: T.counter, body: { person_id: a.insertId, sign_waiver: true, send_confirmation: false } }), 201);
+  // the desk (Sell) and online booking never take a lesson student without a birth date
+  const desk = await sell(T.counter, { customer: { person_id: p.insertId, sign_waiver: true }, lines: [{ type: 'lesson', session_id: sid }] });
+  assert.equal(desk.status, 400, desk.text); assert.match(desk.body.error, /Date of birth/);
+  ok(await call('PUT', '/tenant/profile', { token: A.owner, body: { online_booking: true, waiver_text: 'I accept the risks.', booking_notice_hours: 1 } }));
+  const online = await call('POST', `/public/${A.slug}/requests`, { body: { session_id: sid, contact_first_name: 'Pat', contact_last_name: 'Nodob', contact_email: `pn.${suffix}@x.test`, contact_phone: '215-555-0100',
+    students: [{ first_name: 'No', last_name: 'Birthday', sex: 'female' }], waiver_accepted: true } });
+  assert.equal(online.status, 400, online.text);
+});
+
+test('review 3 and 6: two kids for the last place of a small class in one desk basket are refused without a reason; a reason is kept only when used', async () => {
+  const sid = await session({ age_min: 3, age_max: 4, capacity: 10, starts_at: `${day2}T13:00`, ends_at: `${day2}T14:00` });
+  for (let i = 1; i <= 3; i++) ok(await book(sid, `Small${i}`, age4(i)), 201); // 3 of the 4 a 3 to 4 class takes
+  const parent = { first_name: 'Paula', last_name: `Basket${suffix}`, email: `pb.${suffix}@x.test`, phone: '(610) 555-0188', date_of_birth: '1985-05-05', sex: 'female' };
+  const kid = (n) => ({ details: { first_name: `Twin${n}`, last_name: `Basket${suffix}`, date_of_birth: age4(20 + n), sex: 'male' }, sign_waiver: true });
+  const two = await sell(T.counter, { customer: { details: parent }, participants: { a: kid(1), b: kid(2) }, lines: [{ type: 'lesson', session_id: sid, participant: 'a' }, { type: 'lesson', session_id: sid, participant: 'b' }] });
+  assert.equal(two.status, 409, two.text);
+  assert.equal(two.body.details.needs_override, true);
+  assert.match(two.body.error, /take 4 students per instructor\. This one would have 5/);
+  assert.equal((await q("SELECT COUNT(*) AS n FROM lesson_bookings WHERE session_id = ? AND status = 'booked'", [sid]))[0].n, 3, 'nothing booked');
+  // a manager sells both with a reason on the line that goes over: that booking keeps the reason, the other none
+  const okTwo = await sell(A.owner, { customer: { details: parent }, participants: { a: kid(1), b: kid(2) },
+    lines: [{ type: 'lesson', session_id: sid, participant: 'a', safety: { override_reason: 'Not needed here' } }, { type: 'lesson', session_id: sid, participant: 'b', safety: { override_reason: 'Twins stay together' } }] });
+  assert.equal(okTwo.status, 201, okTwo.text);
+  const rows = await q(`SELECT p.first_name, b.override_reason FROM lesson_bookings b JOIN people p ON p.id = b.person_id WHERE b.session_id = ? AND p.first_name LIKE 'Twin%' ORDER BY p.first_name`, [sid]);
+  assert.deepEqual(rows.map((r) => [r.first_name, r.override_reason]), [['Twin1', null], ['Twin2', 'Twins stay together']], 'a reason typed with nothing to override is not kept');
+  const [a] = await q("SELECT detail FROM audit_log WHERE tenant_id = ? AND action = 'ratio_override' ORDER BY id DESC LIMIT 1", [tid]);
+  assert.match(JSON.stringify(a.detail), /Twins stay together/);
+});
+
+test('review 4: a family sees and may take only classes inside the ages and band size; a staff move past them needs a manager and a reason', async () => {
+  const small = await session({ age_min: 3, age_max: 4, capacity: 10, starts_at: `${day2}T15:00`, ends_at: `${day2}T16:00` });
+  for (let i = 1; i <= 4; i++) ok(await book(small, `Full${i}`, age4(10 + i)), 201); // at the band size of 4
+  const wide = await session({ age_min: 3, age_max: 12, capacity: 10, starts_at: `${day2}T15:00`, ends_at: `${day2}T16:00` });
+  const mover = ok(await book(wide, 'Mover', age4(15)), 201);
+  ok(await call('PUT', '/tenant/profile', { token: A.owner, body: { online_booking: true, waiver_text: 'I accept the risks.', booking_notice_hours: 1 } }));
+  const token = await require('../src/lib/lessonlinks').issue(pool, tid, mover.id);
+  const dates = ok(await call('GET', `/public/${A.slug}/lesson/${token}/dates`));
+  assert.equal(dates.lessons.some((l) => l.id === small), false, 'a class at its band size is not offered');
+  const fam = await call('POST', `/public/${A.slug}/lesson/${token}/move`, { body: { session_id: small } });
+  assert.equal(fam.status, 409, fam.text);
+  // staff at the lineup: the counter cannot, a manager needs a reason, and the override is audited
+  const counter = await call('POST', `/skischool/bookings/${mover.id}/move`, { token: T.counter, body: { session_id: small } });
+  assert.equal(counter.status, 409, counter.text); assert.equal(counter.body.details.needs_override, true);
+  const noReason = await call('POST', `/skischool/bookings/${mover.id}/move`, { token: A.owner, body: { session_id: small } });
+  assert.equal(noReason.status, 409, noReason.text); assert.equal(noReason.body.details.needs_reason, true);
+  ok(await call('POST', `/skischool/bookings/${mover.id}/move`, { token: A.owner, body: { session_id: small, reason: 'Sister is in this class' } }));
+  const [b] = await q('SELECT session_id, override_reason FROM lesson_bookings WHERE id = ?', [mover.id]);
+  assert.deepEqual([Number(b.session_id), b.override_reason], [small, 'Sister is in this class']);
+  const [a] = await q("SELECT detail FROM audit_log WHERE tenant_id = ? AND action = 'ratio_override' ORDER BY id DESC LIMIT 1", [tid]);
+  assert.match(JSON.stringify(a.detail), /Sister is in this class/);
 });

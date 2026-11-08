@@ -345,7 +345,12 @@ router.post('/sessions/:id/all-present', requireRole(...school), async (req, res
     if (SA.ownOnly(req) && s.instructor_id !== req.auth.staffId) throw forbidden('Instructors can only mark attendance on their own lessons');
     const [r] = await conn.query("UPDATE lesson_bookings SET status = 'attended' WHERE tenant_id = ? AND session_id = ? AND status = 'booked'", [tenantId, s.id]);
     await audit(conn, req, 'all_present', 'lesson_sessions', s.id, { marked: r.affectedRows });
-    return r.affectedRows;
+    return { n: r.affectedRows, s };
+  }).then(async ({ n: marked, s }) => {
+    // a learn to ski ladder's last lesson attended: the graduate's offer is made now, as for one student (2026.11.13)
+    const LL = require('../lib/learnladder');
+    for (const b of await rows(pool, 'SELECT DISTINCT person_id FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND status = ? AND credit_id IS NOT NULL', [tenantId, s.id, 'attended'])) await LL.progress(pool, tenantId, b.person_id).catch(() => null);
+    return marked;
   });
   res.json({ ok: true, marked: n });
 });

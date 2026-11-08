@@ -335,6 +335,81 @@ test('2026.11.13: checking in a ladder lesson issues its lift ticket and opens i
   assert.equal(plain.included, undefined);
 });
 
+test('review 5: ladder issue only on a good package, at the student\'s ticket tier, and carried with a moved lesson (the issued ticket is reused)', async () => {
+  const lid = ok(await api('POST', '/skischool/ladders', { token: T.owner, body: { name: 'Ladder review', lessons: 4, price_cents: 15000, ticket_product_id: D.ticket, rental_product_id: D.rental } }), 201).id;
+  const l = ok(await api('GET', '/skischool/ladders', { token: T.counter })).data.find((x) => x.id === lid);
+  const buy = async (student) => {
+    const sale = ok(await api('POST', '/checkout', { token: T.counter, body: { channel: 'window', customer: { details: adult(), sign_waiver: true }, participants: { kid: { details: student, sign_waiver: true } },
+      lines: [{ type: 'lesson_package', product_id: l.product_id, participant: 'kid' }], payments: [{ tender: 'cash', amount_cents: 15000 }] } }), 201);
+    return { pid: sale.packages[0].person_id, credit: sale.packages[0].credit_id };
+  };
+  const checkin = async (bid) => ok(await api('POST', `/skischool/bookings/${bid}/checkin`, { token: T.counter, body: {} }));
+  const signer = { waiver_signer: { name: 'Pat Parent' } };
+  // a child: the ticket is sold at the child's own tier, not adult
+  const kid = await buy(child());
+  const sid = await lesson(today, '13:00', '14:00');
+  const b = ok(await book(sid, { person_id: kid.pid, use_credit_id: kid.credit, level: 1, ...signer }), 201);
+  const first = await checkin(b.id);
+  assert.ok(first.included && first.included.ticket, JSON.stringify(first));
+  const [line] = await q('SELECT i.tier FROM tickets t JOIN order_items i ON i.id = t.order_item_id WHERE t.id = ?', [first.included.ticket.id]);
+  const [[pp]] = await pool.query('SELECT date_of_birth FROM people WHERE id = ?', [kid.pid]);
+  const want = await require('../src/lib/guesttypes').forBirthday(pool, M.id, pp.date_of_birth, today);
+  assert.equal(line.tier, want); assert.notEqual(line.tier, 'adult');
+  // the lesson moves to another day (a weather makeup moves the same booking row): the ticket and rental move with it
+  const makeup = await lesson(plus(today, 2), '13:00', '14:00');
+  const moveTo = async (to, day) => { const conn = await pool.getConnection(); try { await conn.beginTransaction(); await require('../src/lib/lessonrules').moveBookingRow(conn, M.id, { id: b.id, person_id: kid.pid }, sid, { id: to, starts_at: `${day} 13:00:00` }); await conn.commit(); } finally { conn.release(); } };
+  await moveTo(makeup, plus(today, 2));
+  const [tk] = await q('SELECT valid_from, status FROM tickets WHERE id = ?', [first.included.ticket.id]);
+  assert.equal(String(tk.valid_from).slice(0, 10), plus(today, 2), 'the issued ticket now reads the makeup day');
+  const [rc] = await q('SELECT valid_on, status FROM rental_contracts WHERE id = ?', [first.included.rental.contract_id]);
+  assert.deepEqual([String(rc.valid_on).slice(0, 10), rc.status], [plus(today, 2), 'to_fit']);
+  const again = await checkin(b.id); // check-in on the makeup day
+  assert.ok(!again.included || (!again.included.ticket && !again.included.rental), 'no second ticket or rental');
+  assert.equal((await q('SELECT COUNT(*) AS n FROM tickets WHERE person_id = ?', [kid.pid]))[0].n, 1);
+  // a ticket already used at the gate is not moved: the next day's check-in issues one, so the lesson is never without
+  await q("INSERT INTO scans (tenant_id, ticket_id, code, result) SELECT tenant_id, id, code, 'ok' FROM tickets WHERE id = ?", [first.included.ticket.id]);
+  const third = await lesson(plus(today, 3), '13:00', '14:00');
+  await moveTo(third, plus(today, 3));
+  const fresh = await checkin(b.id);
+  assert.ok(fresh.included && fresh.included.ticket, 'a used ticket is replaced on the new day');
+  assert.equal(String(fresh.included.ticket.valid_from).slice(0, 10), plus(today, 3));
+  assert.equal((await q("SELECT COUNT(*) AS n FROM tickets WHERE person_id = ? AND valid_from = ?", [kid.pid, plus(today, 3)]))[0].n, 1);
+  // a refunded (or void) package issues nothing at check-in
+  const gone = await buy(child());
+  const sid2 = await lesson(today, '15:00', '16:00');
+  const b2 = ok(await book(sid2, { person_id: gone.pid, use_credit_id: gone.credit, level: 1, ...signer }), 201);
+  await q('UPDATE order_items SET refunded_at = NOW() WHERE id = (SELECT order_item_id FROM lesson_credits WHERE id = ?)', [gone.credit]);
+  const none = await checkin(b2.id);
+  assert.equal(none.included, undefined, 'refunded: nothing issued');
+  assert.equal((await q('SELECT COUNT(*) AS n FROM tickets WHERE person_id = ?', [gone.pid]))[0].n, 0);
+  const voided = await buy(child());
+  const sid3 = await lesson(today, '16:00', '17:00');
+  const b3 = ok(await book(sid3, { person_id: voided.pid, use_credit_id: voided.credit, level: 1, ...signer }), 201);
+  await q("UPDATE lesson_credits SET status = 'void' WHERE id = ?", [voided.credit]);
+  assert.equal((await checkin(b3.id)).included, undefined, 'void: nothing issued');
+});
+
+test('review 7: ladder progress is for the desk and above, and reading it never makes the graduate offer; marking the last lesson attended does', async () => {
+  const lid = ok(await api('POST', '/skischool/ladders', { token: T.owner, body: { name: 'Ladder read only', lessons: 3, price_cents: 9000, pass_product_id: D.pass, pass_percent: 20, pass_days: 30 } }), 201).id;
+  const l = ok(await api('GET', '/skischool/ladders', { token: T.counter })).data.find((x) => x.id === lid);
+  const sale = ok(await api('POST', '/checkout', { token: T.counter, body: { channel: 'window', customer: { details: adult(), sign_waiver: true }, lines: [{ type: 'lesson_package', product_id: l.product_id }], payments: [{ tender: 'cash', amount_cents: 9000 }] } }), 201);
+  const pid = sale.packages[0].person_id; const credit = sale.packages[0].credit_id;
+  const sids = [];
+  for (const d of [-6, -5, -4]) { const sid = await lesson(plus(today, d), '11:00', '12:00'); sids.push(sid); ok(await book(sid, { person_id: pid, use_credit_id: credit, level: 1 }), 201); }
+  is(await api('GET', `/skischool/ladders/progress/${pid}`, { token: T.ivy }), 403, 'an instructor');
+  // all three attended without the attendance route (as an import would): reading does not make the offer
+  await q("UPDATE lesson_bookings SET status = 'attended' WHERE person_id = ? AND credit_id = ?", [pid, credit]);
+  const read = ok(await api('GET', `/skischool/ladders/progress/${pid}`, { token: T.counter })).data.find((x) => x.ladder_id === lid);
+  assert.equal(read.graduated, true); assert.equal(read.offer, null, 'a read makes no offer');
+  assert.equal((await q('SELECT COUNT(*) AS n FROM guest_rewards WHERE tenant_id = ? AND person_id = ?', [M.id, pid]))[0].n, 0);
+  // the instructor's "all present" on the last lesson makes it
+  await q("UPDATE lesson_bookings SET status = 'booked' WHERE person_id = ? AND session_id = ?", [pid, sids[2]]);
+  ok(await api('POST', `/skischool/sessions/${sids[2]}/all-present`, { token: T.owner, body: {} }));
+  assert.equal((await q('SELECT COUNT(*) AS n FROM guest_rewards WHERE tenant_id = ? AND person_id = ?', [M.id, pid]))[0].n, 1);
+  const after = ok(await api('GET', `/skischool/ladders/progress/${pid}`, { token: T.counter })).data.find((x) => x.ladder_id === lid);
+  assert.match(after.offer.code, /^[A-Z0-9]{10}$/);
+});
+
 // ---------------------------------------------------------------- 7. owner reports
 test('owner reports: revenue per hour, cost against revenue, instructor return rate and first-timer conversion, with CSV; owners and managers only', async () => {
   // last season: Ivy and Max taught; this season only Ivy (and Dana, new)
