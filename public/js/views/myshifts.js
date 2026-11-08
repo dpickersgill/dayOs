@@ -42,7 +42,7 @@ export async function render(root) {
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'My shifts')));
   const me = await get('/workforce/me');
   if (!me.linked) {
-    root.append(empty('Your login is not linked to a staff record, so there are no shifts to show. Ask a manager to link it in Account.'));
+    root.append(empty('Your login is not linked to a staff record, so there are no shifts to show. Ask a manager to link it in Settings, Team and logins.'));
     return;
   }
   const instructor = ctx.me && ctx.me.role === 'instructor';

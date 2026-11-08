@@ -699,7 +699,7 @@ test('menu plan: Home first, then the person\'s apps in order, then everything e
   assert.deepEqual(plan.home, ['dashboard', 'inbox', 'myshifts']);
   assert.deepEqual(plan.apps, ['conditions', 'gate', 'lostfound'], 'Sell is left out (this person cannot open it), and Home apps are never in the menu');
   assert.deepEqual(plan.groups.map((g) => [g.name, g.keys]), [['Back office', ['documents']]]);
-  assert.deepEqual(plan.first, ['conditions', 'gate', 'lostfound', 'myshifts']);
+  assert.deepEqual(plan.first, ['dashboard', 'conditions', 'gate', 'lostfound'], 'the phone bar starts with the screen the menu opens on');
   const none = menuPlan(views, null);
   assert.deepEqual(none.apps, []);
   assert.deepEqual(none.groups.map((g) => g.name), ['Guests and sales', 'On the hill', 'Back office']);
@@ -2329,11 +2329,11 @@ test('public booking page: lists open lessons, takes a request, and lets the gue
 const saveBar = (root) => root.querySelector('.set-savebar');
 const change = (el, v) => { if (el.type === 'checkbox') el.checked = v; else el.value = v; el.dispatchEvent(new window.Event(el.type === 'checkbox' ? 'change' : 'input', { bubbles: true })); };
 
-test('settings: Ski school carries the online booking switch, its link, and saves from the save bar', skip(), async () => {
+test('settings: Lessons carries the online booking switch, its link, and saves from the save bar', skip(), async () => {
   const root = await renderView('settings', 'owner', T.owner, {}, ['school']);
   clean(root, 'settings / school');
-  assert.equal(root.querySelector('h1').textContent, 'Ski school');
-  assert.equal(root.querySelector('.set-link[aria-current=page]').textContent, 'Ski school');
+  assert.equal(root.querySelector('h1').textContent, 'Lessons');
+  assert.equal(root.querySelector('.set-link[aria-current=page]').textContent, 'Lessons');
   const section = root.querySelector('[data-card=online-booking]');
   assert.ok(section);
   assert.match(section.textContent, new RegExp(`/book/${slug}`));

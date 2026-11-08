@@ -5,7 +5,7 @@ import { h, clear, table, state, input, select, field, button, toast, fail, form
 
 export async function render(root) {
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Messages')),
-    tabs([['sent', 'Messages', list], ['auto', 'Automatic reminders', auto]], 'sent'));
+    tabs([['sent', 'Sent', list], ['auto', 'Automatic reminders', auto]], 'sent'));
 }
 
 const CHANNELS = [['email', 'Email'], ['sms', 'Text message']];

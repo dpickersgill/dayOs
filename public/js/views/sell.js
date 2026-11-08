@@ -106,7 +106,7 @@ async function sellPanel(root) {
       const t = select(TIERS, FIRST, { name: 'package-tier', 'aria-label': 'Package guest type' });
       if ((menu.packages || []).length) {
         b.append(h('div', { class: 'menu-tools' }, field('Package guest type', t)));
-        b.append(h('h3', null, 'Lesson packages'), h('p', { class: 'muted small' }, 'Sold once, then spent one lesson at a time when the student is booked in (Ski school > Roster).'),
+        b.append(h('h3', null, 'Lesson packages'), h('p', { class: 'muted small' }, 'Sold once, then spent one lesson at a time when the student is booked in (Lessons, Roster).'),
           h('div', { class: 'tiles' }, menu.packages.map((p) => h('button', { type: 'button', class: 'tile', 'data-package': p.id, onclick: () => add({ type: 'lesson_package', product_id: p.id, name: p.name, tier: t.value, quantity: 1, detail: `${p.uses} lessons` }) },
             h('strong', null, p.name), h('small', { class: 'muted' }, `${p.uses} lessons${p.valid_days > 1 ? `, valid ${p.valid_days} days` : ''}`), h('span', { class: 'tile-price' }, money(price(p, t.value)))))));
       }

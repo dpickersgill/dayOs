@@ -52,5 +52,5 @@ test('the help text is plain: no long dashes and no placeholders left in', () =>
 
 test('the app mounts the Help screen and a link to it on every page', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'main.js'), 'utf8');
-  assert.ok(/\['help', 'Help'/.test(main) && main.includes('decorateHead(holder, key, params, mod)') && main.includes("href: `#/help/for-${key}`"));
+  assert.ok(/\['help', 'Help'/.test(main) && main.includes('decorateHead(holder, key, params, mod)') && main.includes('href: helpHref(key, params)') && main.includes("return `#/help/for-${key}`;"));
 });

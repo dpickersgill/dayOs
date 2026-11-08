@@ -192,7 +192,7 @@ function schoolCards(root, t) {
   for (const el of [fullHrs, halfHrs, halfPct, cancelHrs, cancelNote]) el.addEventListener('input', showPreview);
   root.append(
     card('Online lesson booking', [
-      row('Guests can ask for a lesson online', booking, 'Your public booking page takes requests. Without card payment, staff confirm each one under Ski school, Online requests, and the guest pays at the desk.'),
+      row('Guests can ask for a lesson online', booking, 'Your public booking page takes requests. Without card payment, staff confirm each one under Lessons, Bookings, Online requests, and the guest pays at the desk.'),
       stripeNote(t, 'guests cannot pay when they book'),
       row('Guests pay by card when they book', payOn, ['The lesson is booked once the card goes through. Money goes to your own Stripe account. ', h('a', { href: '#/settings/payments' }, 'Payments and card readers')]),
       row('Requests close before a lesson', amount(notice, 'hours'), 'How close to the start a guest can still ask.'),

@@ -42,7 +42,8 @@ export async function render(root) {
   if (schoolCan('director')) items.push(['instructors', 'Who teaches what', (b) => instructorsTab(b, { certs })], ['hours', 'Instructor hours', (b) => hoursTab(b)]);
   for (const part of PARTS) items.push(...part.tabs({ staff, certs, names }));
   // Instructor availability lives here (it used to be its own menu item): who is open when, next to who teaches what.
-  items.push(['availability', 'Availability', (b) => drawAvailability(b)]);
+  // An instructor has it once, as My availability in their menu, so not here as well.
+  if (!instructor) items.push(['availability', 'Availability', (b) => drawAvailability(b)]);
   // Four groups instead of a long row: the day, bookings, instructors, planning. Each group shows its own small row of
   // views; a group with one view shows none. The group is ?tab= in the address, the view ?view=.
   const GROUPS = [

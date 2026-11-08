@@ -474,6 +474,14 @@ router.post('/auth/pin-login', validate(z.object({ tenant: slug, terminal: z.str
   res.json({ token: await signToken(user, req, { method: 'pin', terminalId: term.id }), role: user.role, tenant_id: user.tenant_id, must_change_password: Boolean(user.must_change_password), terminal: term.name });
 });
 
+/** A staff member's positions (Staff and schedule), in a steady order: [{ id, name, department }]. */
+async function staffPositions(tenantId, staffId) {
+  const [list] = await pool.query(
+    `SELECT p.id, p.name, p.department FROM staff_positions sp JOIN positions p ON p.tenant_id = sp.tenant_id AND p.id = sp.position_id
+      WHERE sp.tenant_id = ? AND sp.staff_id = ? ORDER BY p.name, p.id`, [tenantId, staffId]);
+  return list.map((p) => ({ id: Number(p.id), name: p.name, department: p.department }));
+}
+
 router.get('/auth/me', authenticate, async (req, res) => {
   const user = await one(
     pool,
@@ -497,6 +505,11 @@ router.get('/auth/me', authenticate, async (req, res) => {
   const sandbox = user.sandbox_expires_at ? { expires_at: user.sandbox_expires_at, contact_url: config.marketingUrl || (config.site.hosts[0] ? `https://${config.site.hosts[0]}/contact` : null) } : null;
   const billing = await require('../lib/billing').standingOf(req.auth.tenantId);
   const terminal = req.auth.terminalId ? await one(pool, 'SELECT id, name FROM terminals WHERE id = ?', [req.auth.terminalId]) : null;
+  // The positions this person works (Staff and schedule): a lift and mountain staff or ticket window login linked to a
+  // staff member gets their positions' menu and Today buttons (Park crew: the terrain park, not the lifts).
+  const positions = user.staff_id && menus.POSITION_ROLES.includes(user.role) ? await staffPositions(req.auth.tenantId, user.staff_id) : [];
+  const who = { patrolLead: Boolean(Number(user.patrol_lead)), positions };
+  const menu = menus.menuFor(user.role, user.role_menus, user.school_access, who);
   const pick = ({ id, email, username, role, staff_id: staffId, tenant, tenant_name: tenantName, timezone }) => ({ id, email, username, role, staff_id: staffId, tenant, tenant_name: tenantName, timezone });
   res.json({
     ...pick(user), billing, must_change_password: Boolean(user.must_change_password), login_name: user.email || user.username, on_patrol: Boolean(req.auth.onPatrol), sandbox, modules,
@@ -510,7 +523,11 @@ router.get('/auth/me', authenticate, async (req, res) => {
     passkey_prompt: await passkeyPrompt(user, req),
     // This role's own menu (its work apps in order, and the screen it opens on), owners and managers included. Home is pinned
     // for everyone and never in it. null only for a login with no menu (the ski area's read-only login).
-    menu: menus.menuFor(user.role, user.role_menus, user.school_access),
+    menu,
+    // The shortcuts in that menu (a page inside an app, such as Patrol's Records requests), and which menu it is: the
+    // role's, 'patrol_director' or 'pos:<id>'. work: the kinds of work of their positions (park, lifts, grooming...).
+    menu_links: menus.linksIn(menu), menu_row: menus.rowFor(user.role, user.role_menus, who),
+    positions: positions.map((p) => p.name), work: menus.kindsOf(positions), patrol_lead: who.patrolLead,
     // The ski school access level (lib/schoolaccess.js): director for owners and managers, the teaching profile's for an instructor.
     school_access: ['owner', 'manager'].includes(user.role) ? 'director' : user.role === 'instructor' ? (user.school_access || 'instructor') : null,
     // A closed mountain inside its export window: the app shows only the download screen (GET /closed-export).
@@ -552,29 +569,54 @@ router.get('/closed-export', authenticate, async (req, res) => {
 });
 
 // ---------------------------------------------------------------- menus for each role (Settings, Team and logins)
-/** Each role's menu now, the standard one, and what each role could have. Managers may look; only the owner changes. */
+/** The mountain's positions (Staff and schedule), for the position menus. */
+async function tenantPositions(tenantId) {
+  const [list] = await pool.query('SELECT id, name, department FROM positions WHERE tenant_id = ? ORDER BY name, id', [tenantId]);
+  return list.map((p) => ({ id: Number(p.id), name: p.name, department: p.department }));
+}
+/**
+ * Each menu now, the standard one, and what it could hold: the six roles, the patrol director, and one for each position
+ * (a position with no standard menu of its own uses its people's role menu until the owner gives it one). Managers may
+ * look; only the owner changes.
+ */
 async function menusState(tenantId, role) {
   const t = await one(pool, 'SELECT role_menus FROM tenants WHERE id = ?', [tenantId]);
   const changed = menus.parse(t && t.role_menus);
+  const rows = [...menus.ROLES, menus.DIRECTOR];
+  const positions = await tenantPositions(tenantId);
   return {
     can_change: role === 'owner',
     // Home (Today, Inbox, Calendar, My shifts): pinned at the top for everyone, never in a menu. "always" is the old name.
     home: menus.HOME,
     always: menus.HOME,
-    apps: menus.APPS,
-    roles: Object.fromEntries(menus.ROLES.map((r) => [r, { ...(changed[r] || menus.standardFor(r)), standard: !changed[r], can_open: menus.ROLE_APPS[r] }])),
-    standard: Object.fromEntries(menus.ROLES.map((r) => [r, menus.standardFor(r)])),
+    apps: { ...menus.APPS, ...Object.fromEntries(Object.entries(menus.LINKS).map(([k, l]) => [k, l.label])) },
+    links: Object.fromEntries(Object.entries(menus.LINKS).map(([k, l]) => [k, { label: l.label, app: l.app }])),
+    roles: Object.fromEntries(rows.map((r) => [r, { ...(changed[r] || menus.standardFor(r)), standard: !changed[r], can_open: menus.canOpen(r) }])),
+    positions: positions.map((p) => {
+      const key = `pos:${p.id}`;
+      const std = menus.standardFor(key, p);
+      const now = changed[key] || std;
+      return { key, id: p.id, name: p.name, department: p.department, kind: menus.positionKind(p), apps: now ? now.apps : null, start: now ? now.start : null, own: Boolean(now), standard: !changed[key], can_open: menus.POSITION_APPS };
+    }),
+    standard: Object.fromEntries([...rows.map((r) => [r, menus.standardFor(r)]), ...positions.map((p) => [`pos:${p.id}`, menus.standardFor(`pos:${p.id}`, p)])]),
   };
 }
 router.get('/settings/menus', authenticate, requireRole(...MANAGERS), async (req, res) => {
   res.json(await menusState(req.auth.tenantId, req.auth.role));
 });
+const MENU_ROW = z.string().max(30).refine((r) => menus.ROLES.includes(r) || r === menus.DIRECTOR || menus.isPositionKey(r), 'Not a role, the patrol director or a position');
 router.put('/settings/menus', authenticate, requireRole('owner'), validate(z.object({
-  role: z.enum(menus.ROLES),
-  // null puts back the standard menu for that role
-  menu: z.object({ apps: z.array(z.string().max(30)).min(1).max(menus.KEYS.length), start: z.string().max(30) }).nullable(),
+  // a role, 'patrol_director', or 'pos:<position id>'
+  role: MENU_ROW,
+  // null puts back the standard menu (for a position: its standard one, or its people's role menu)
+  menu: z.object({ apps: z.array(z.string().max(30)).min(1).max(menus.KEYS.length + Object.keys(menus.LINKS).length), start: z.string().max(30) }).nullable(),
 })), async (req, res) => {
   const { role, menu } = req.body;
+  let position = null;
+  if (menus.isPositionKey(role)) {
+    position = await one(pool, 'SELECT id, name, department FROM positions WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, Number(role.slice(4))]);
+    if (!position) throw bad('No such position at this mountain');
+  }
   const out = await tx(async (conn) => {
     const [[t]] = await conn.query('SELECT role_menus FROM tenants WHERE id = ? FOR UPDATE', [req.auth.tenantId]);
     const all = menus.parse(t && t.role_menus);
@@ -585,10 +627,10 @@ router.put('/settings/menus', authenticate, requireRole('owner'), validate(z.obj
       all[role] = r.menu;
     } else delete all[role];
     await conn.query('UPDATE tenants SET role_menus = ? WHERE id = ?', [Object.keys(all).length ? JSON.stringify(all) : null, req.auth.tenantId]);
-    await audit(conn, req, 'update_role_menu', 'tenants', req.auth.tenantId, { role, before, after: all[role] || null });
+    await audit(conn, req, 'update_role_menu', 'tenants', req.auth.tenantId, { role, before, after: all[role] || null, ...(position ? { position: position.name } : {}) });
     return all[role] || null;
   });
-  res.json({ role, menu: out || menus.standardFor(role), standard: !out });
+  res.json({ role, menu: out || menus.standardFor(role, position), standard: !out });
 });
 
 /** Change your own password. Signs out every other session and returns a fresh token for this one. */

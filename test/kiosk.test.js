@@ -59,7 +59,7 @@ test.before(async () => {
   bea = await staffOf(B, 'Bea', 'Other');
   devA = await pair(A);
   devB = await pair(B);
-  // These mountains allow 4-digit PINs for new staff (Kiosk, Settings; off by default since feat/auth-hardening).
+  // These mountains allow 4-digit PINs for new staff (Settings, Staff and schedule, Time clock kiosk; off by default since feat/auth-hardening).
   for (const m of [A, B]) await q('UPDATE tenants SET kiosk_pin_four = 1 WHERE slug = ?', [m.slug]);
 });
 test.after(async () => { server.close(); await pool.end(); });

@@ -267,7 +267,7 @@ async function guestsTab(root) {
   }
   async function bookDialog(g) {
     if (!offers) offers = (await get('/skischool/pay/private-offers')).offers.filter((o) => o.active);
-    if (!offers.length) { toast('Add a private lesson length first, in Settings, Ski school, Privates online.', 'error'); return; }
+    if (!offers.length) { toast('Add a private lesson length first, in Settings, Lessons, Privates online.', 'error'); return; }
     const when = input({ type: 'datetime-local', name: 'starts_at', required: true, value: `${addDays(todayStr(), 1)}T10:00` });
     const len = select(offers.map((o) => [o.id, `${lengthWords(o.minutes)}, ${o.product}`]), offers[0].id, { name: 'offer_id' });
     const waiver = input({ type: 'checkbox', name: 'sign_waiver' });

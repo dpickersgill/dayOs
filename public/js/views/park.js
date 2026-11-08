@@ -407,6 +407,16 @@ async function drawLayout(box, list) {
   const offOutbox = onOutbox(() => { if (data.placed.length) drawLists(); });
   removeWhenGone(mapEl, { remove: offOutbox });
   await refresh(true);
+  // Today's Inspections button (#/park?tab=layout&go=inspect): straight to the list of features to inspect.
+  // The page is put on screen after it is drawn, so wait for that (up to 3 seconds).
+  if (new URLSearchParams(location.hash.split('?')[1] || '').get('go') === 'inspect') {
+    let tries = 0;
+    const show = () => {
+      const head = onMap.previousElementSibling;
+      if (head && head.isConnected && head.scrollIntoView) { head.style.scrollMarginTop = '84px'; head.scrollIntoView({ block: 'start' }); } else if ((tries += 1) < 30) setTimeout(show, 100);
+    };
+    show();
+  }
 }
 
 /** Asks for a short reason. Resolves with it, or rejects (quietly) when the dialog is closed. */

@@ -33,13 +33,13 @@ const tokenHash = (t) => sha256(t);
 
 // ---- PINs
 // New PINs are 6 digits (feat/auth-hardening): 4 digits next to a list of names is 10,000 tries at most. A mountain can
-// allow 4-digit PINs for new staff (Kiosk, Settings, "Allow 4-digit PINs for new staff", off by default, tenants
+// allow 4-digit PINs for new staff (Settings, Staff and schedule, Time clock kiosk: "Allow 4-digit PINs for new staff", off by default, tenants
 // .kiosk_pin_four). PINs already set keep working at the tablet whatever their length, until they are changed.
 // pinProblem(pin, { allowFour }) checks a PIN being set; the tablet checks any 4 to 6 digits against what is stored.
 function pinProblem(pin, { allowFour = false } = {}) {
   const p = String(pin);
   if (!/^\d{4,6}$/.test(p)) return allowFour ? 'A PIN is 4 to 6 digits' : 'A PIN is 6 digits';
-  if (!allowFour && p.length !== 6) return 'A PIN is 6 digits. A manager can allow 4-digit PINs in Kiosk, Settings.';
+  if (!allowFour && p.length !== 6) return 'A PIN is 6 digits. A manager can allow 4-digit PINs in Settings, Staff and schedule, under Time clock kiosk.';
   if (/^(\d)\1+$/.test(p)) return 'Pick a PIN that is not one digit repeated';
   if ('0123456789'.includes(p) || '9876543210'.includes(p)) return 'Pick a PIN that is not a run of digits';
   return null;

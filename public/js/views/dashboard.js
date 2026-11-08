@@ -29,6 +29,8 @@ export async function render(root) {
   const dayField = isManager() ? field('Day', date) : null;
   const customize = button('Customize', () => startEdit(), { small: true });
   const wallBtn = button('Wall screen', () => toggleWall(true), { small: true });
+  wallBtn.classList.add('wall-btn'); // hidden on a phone: a wall screen is a big screen
+  bar.classList.add('dash-actions');
   bar.append(...[dayField, customize, wallBtn].filter(Boolean));
 
   async function load(quiet, timed) { // timed: the wall screen's own refresh, which is not someone using the app
@@ -99,7 +101,7 @@ export async function render(root) {
 const ALWAYS_ON = ['dashboard', 'inbox', 'people', 'waivers', 'lostfound', 'myshifts'];
 const appOn = (key) => ALWAYS_ON.includes(key) || !ctx.me || !ctx.me.modules || ctx.me.modules.includes(key);
 const MAY = { sell: () => can('counter'), shop: () => can('counter'), gate: () => can('counter', 'staff'), conditions: () => can('patrol', 'staff'), lostfound: () => can('counter', 'staff'),
-  school: () => can('instructor', 'counter'), availability: () => can('instructor', 'counter'), patrol: () => can('patrol') };
+  school: () => can('instructor', 'counter'), availability: () => can('instructor', 'counter'), patrol: () => can('patrol'), park: () => true, assets: () => can('staff'), rentals: () => can('counter') };
 export const mayOpen = (key) => appOn(key) && Boolean(MAY[key] && MAY[key]());
 const JOB_ICON = { check: 'M9 11l3 3 8-8M20 12v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h10', alert: 'M12 9v4M12 17h.01M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z' };
 const jobIcon = (name) => (JOB_ICON[name] ? svg('svg', { class: 'ico', width: 28, height: 28, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.75, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' }, svg('path', { d: JOB_ICON[name] })) : icon(name, 28));
@@ -123,11 +125,47 @@ const JOBS = {
     { app: 'patrol', act: 'new-case', label: 'New case', note: 'Start a patient report', href: '#/patrol/new', icon: 'plus', needs: 'create_case' },
   ],
 };
-/** The job buttons for this person: their role's, plus patrol's for a staff member who is also on patrol. */
+// The job buttons for a position's work (Staff and schedule), used instead of the role's: Park crew gets the park, not
+// the lifts. me.work: the kinds of work of the person's positions, from the server (src/lib/menus.js positionKind).
+const WORK_JOBS = {
+  lifts: JOBS.staff,
+  park: [
+    { app: 'park', act: 'park-map', label: 'Daily map', note: 'Place today\'s features and see what is open', href: '#/park?tab=layout', icon: 'park' },
+    { app: 'park', act: 'park-area', label: 'Open an area', note: 'The supervisor\'s sign-off before it opens', href: '#/park?tab=areas', icon: 'check' },
+    { app: 'park', act: 'park-inspect', label: 'Inspections', note: 'Inspect each feature on today\'s map', href: '#/park?tab=layout&go=inspect', icon: 'alert' },
+  ],
+  grooming: [
+    { app: 'conditions', act: 'grooming', label: 'Grooming', note: 'Tonight\'s plan and what was groomed', href: '#/conditions?tab=grooming', icon: 'conditions' },
+    { app: 'assets', act: 'pre-use', label: 'Pre-use inspection', note: 'Check your machine before the shift', href: '#/assets', icon: 'check' },
+    { app: 'conditions', act: 'work-order', label: 'Report a problem', note: 'A work order for maintenance', href: '#/conditions/wo/new', icon: 'alert' },
+  ],
+  maintenance: [
+    { app: 'conditions', act: 'work-orders', label: 'Work orders', note: 'What is open and what is due', href: '#/conditions?tab=maint&sub=orders', icon: 'conditions' },
+    { app: 'conditions', act: 'opening-check', label: 'Lift inspections', note: 'Lift inspections before opening', href: '#/conditions?tab=maint&sub=checks', icon: 'check' },
+    { app: 'assets', act: 'assets', label: 'Assets and fleet', note: 'Service, parts and inspections', href: '#/assets', icon: 'assets' },
+  ],
+  rentals: [
+    { app: 'rentals', act: 'rent', label: 'Rental counter', note: 'Fit and hand out gear', href: '#/rentals?tab=counter', icon: 'rentals' },
+    { app: 'rentals', act: 'returns', label: 'Returns', note: 'Check gear back in', href: '#/rentals?tab=returns', icon: 'check' },
+    { app: 'lostfound', act: 'lost-found', label: 'Lost and found', note: 'Log something handed in', href: '#/lostfound', icon: 'lostfound' },
+  ],
+  food: [
+    { app: 'sell', act: 'sell', label: 'Sell', note: 'Ring up a sale', href: '#/sell', icon: 'sell' },
+    { app: 'lostfound', act: 'lost-found', label: 'Lost and found', note: 'Log something handed in', href: '#/lostfound', icon: 'lostfound' },
+  ],
+};
+/**
+ * The job buttons for this person: their positions' work when they have any (Park crew: Daily map, Open an area,
+ * Inspections), else their role's, plus patrol's for a staff member who is also on patrol. Only what they may open.
+ */
 export function jobsFor(me) {
   if (!me || ['owner', 'manager', 'area'].includes(me.role)) return [];
-  const list = [...(JOBS[me.role] || []), ...(me.role !== 'patrol' && me.on_patrol ? JOBS.patrol : [])];
-  return list.filter((j) => mayOpen(j.app));
+  const work = ['staff', 'counter'].includes(me.role) && Array.isArray(me.work) ? me.work.filter((k) => WORK_JOBS[k]) : [];
+  const own = work.length ? work.flatMap((k) => WORK_JOBS[k]) : JOBS[me.role] || [];
+  const seen = new Set();
+  const list = [...own, ...(me.role !== 'patrol' && me.on_patrol ? JOBS.patrol : [])].filter((j) => (seen.has(j.act) ? false : seen.add(j.act)));
+  const shown = list.filter((j) => mayOpen(j.app));
+  return shown.length || !work.length ? shown : (JOBS[me.role] || []).filter((j) => mayOpen(j.app)); // nothing of theirs opens here: the role's
 }
 async function jobButtons(host) {
   let jobs = jobsFor(ctx.me);
