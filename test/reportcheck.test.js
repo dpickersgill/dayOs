@@ -86,7 +86,7 @@ test('the check finds the gaps a reviewer would, and points at each one', async 
   assert.ok(has(list, /oxygen .* without the flow rate/), 'flow');
   assert.ok(has(list, /abnormal \(pulse 132\)/), 'abnormal vitals');
   assert.ok(has(list, /no pain score/), 'pain');
-  assert.ok(has(list, /On scene \(10:12\) is before Call received \(10:20\)/), 'times out of order');
+  assert.ok(has(list, /On scene \(10:12 AM\) is before Call received \(10:20 AM\)/), 'times out of order');
   assert.ok(has(list, /"obviously"/) && has(list, /"drunk"/) && has(list, /"his fault"/), 'loaded words');
   const head = list.find((x) => /head injury questions/.test(x.message));
   assert.deepEqual([head.scope, head.section, head.field, head.patient_id], ['patient', 'head', 'head_loc', p.id], 'a jump link to the field');
