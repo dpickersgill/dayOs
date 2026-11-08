@@ -510,7 +510,7 @@ api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.e
       // The demo link only from the configured address, never from the request's Host.
       const tryUrl = config.site.appUrl ? `\n\nTo look around in the meantime, start a demo mountain: ${config.site.appUrl}/try` : '';
       copy = (await mailer.sendPlatform({ to: b.email, replyTo: config.site.contactEmail, subject: 'We have your Verdynt/OS request', tag: 'site-lead-thanks',
-        text: `Hello,\n\nThank you for writing to Verdynt/OS. A person will reply within one business day${b.kind === 'trial' ? ' to set up your trial mountain' : b.kind === 'patrol' ? ' to set up your patrol, with a 14-day trial' : b.kind === 'review' ? ' with a safe way to send your 10 reports. Please take out names and identifying details first, and do not email patient records' : ' to set a time'}.${tryUrl}\n\nIf you did not write to us, you can ignore this email.\n\nVerdynt/OS` })).ok;
+        text: `Hello,\n\nThank you for writing to Verdynt/OS. A person will reply${b.kind === 'trial' ? ' to set up your trial mountain' : b.kind === 'patrol' ? ' to set up your patrol, with a 14-day trial' : b.kind === 'review' ? ' with a safe way to send your 10 reports. Please take out names and identifying details first, and do not email patient records' : ' to set a time'}.${tryUrl}\n\nIf you did not write to us, you can ignore this email.\n\nVerdynt/OS` })).ok;
     }
   }
   res.status(201).json({ ok: true, copy });

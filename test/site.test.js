@@ -233,7 +233,7 @@ test('the attractions page: its own search title, questions in the structured da
   assert.ok(home.text.includes('The zipline opens on its check.') && home.text.includes('We run a zipline and a tubing hill too. Does it handle those?'));
   assert.ok(home.text.includes('<div class="bt">Attractions</div>') && home.text.includes('Alpine Coaster'), 'on the morning board');
   assert.ok(home.text.indexOf('id="day"') < home.text.indexOf('id="risk"'), 'the day comes before the claims section');
-  assert.ok(home.text.includes('Built in Royersford, Pennsylvania by Verdynt Consulting Group. Our own support team answers when you call.'), 'the home line names the company');
+  assert.ok(home.text.includes('Built in Pennsylvania by Verdynt Consulting Group. Our own support team answers when you call.'), 'the home line names the company');
   assert.ok(!/[\u2014]/.test(home.text + page.text), 'no em dashes');
   const llms = (await onHost('/llms.txt')).text;
   assert.match(llms, /attractions and activities/);
@@ -346,7 +346,7 @@ test('content review: the from price, push alerts, BAA, no-fee promise, company,
   for (const p of ['/site/security', '/site/ski-area-risk-management']) assert.match((await get(p)).text, /business associate agreement \(BAA\)/, `${p} offers a BAA`);
   for (const p of ['/site/']) assert.ok((await get(p)).text.includes('Verdynt Consulting Group'), `${p} names the company`);
   const home = await get('/site/');
-  assert.ok(home.text.includes('&copy; 2026 Verdynt Consulting Group, Royersford, Pennsylvania.') || home.text.includes(`&copy; ${new Date().getUTCFullYear()} Verdynt Consulting Group, Royersford, Pennsylvania.`), 'the footer names the company');
+  assert.ok(home.text.includes(`&copy; ${new Date().getUTCFullYear()} Verdynt Consulting Group, Pennsylvania.`), 'the footer names the company');
   assert.ok(home.text.includes('Book a 20-minute walkthrough') && !home.text.includes('Start a 14-day trial') && !home.text.includes('Become a founding mountain'));
   assert.ok(!home.text.includes('named for the trail signs'));
   const contact = await get('/site/contact');

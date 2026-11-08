@@ -198,7 +198,7 @@ function head({ slug, origin, html, plans, verify = {}, sameAs = [], noindex = f
     { '@type': 'Organization', '@id': `${origin}/#org`, name: 'Verdynt/OS', url: `${origin}/`, logo: `${origin.replace(/\/site$/, '')}/icons/icon-512.png`,
       // the company behind it, from config.site.company (one place, so a legal suffix is a one-line change)
       legalName: require('../config').site.company.name,
-      address: { '@type': 'PostalAddress', addressLocality: 'Royersford', addressRegion: 'PA', addressCountry: 'US' },
+      address: { '@type': 'PostalAddress', addressRegion: 'PA', addressCountry: 'US' },
       description: 'Operations software for independent ski areas.', ...(sameAs.length ? { sameAs } : {}), contactPoint: [
         { '@type': 'ContactPoint', contactType: 'sales', email: require('../config').site.helloEmail, url: `${origin}/contact`, availableLanguage: ['English'] },
         { '@type': 'ContactPoint', contactType: 'customer support', email: require('../config').site.supportEmail, availableLanguage: ['English'] },
