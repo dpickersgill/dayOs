@@ -699,7 +699,7 @@ test('menu plan: Home first, then the person\'s apps in order, then everything e
   assert.deepEqual(plan.home, ['dashboard', 'inbox', 'myshifts']);
   assert.deepEqual(plan.apps, ['conditions', 'gate', 'lostfound'], 'Sell is left out (this person cannot open it), and Home apps are never in the menu');
   assert.deepEqual(plan.groups.map((g) => [g.name, g.keys]), [['Back office', ['documents']]]);
-  assert.deepEqual(plan.first, ['conditions', 'gate', 'lostfound', 'myshifts']);
+  assert.deepEqual(plan.first, ['dashboard', 'conditions', 'gate', 'lostfound'], 'the phone bar starts with the screen the menu opens on');
   const none = menuPlan(views, null);
   assert.deepEqual(none.apps, []);
   assert.deepEqual(none.groups.map((g) => g.name), ['Guests and sales', 'On the hill', 'Back office']);

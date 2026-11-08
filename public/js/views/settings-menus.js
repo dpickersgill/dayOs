@@ -125,7 +125,7 @@ export async function drawMenus(box) {
       : role === 'patrol_director' ? 'For patrollers whose roster access is Admin or Manager. Other patrollers get the Patroller menu.'
         : role === 'patrol' ? 'For patrollers. The Patrol director has a menu of its own.'
           : role === 'staff' && positions.length ? 'For lift and mountain staff whose positions have no menu of their own.' : null;
-    body.append(who ? h('p', { class: 'set-hint' }, who) : null, homeCard,
+    body.append(...[who ? h('p', { class: 'set-hint' }, who) : null, homeCard].filter(Boolean),
       h('div', { class: 'set-two' },
         h('section', { class: 'set-card', 'aria-labelledby': 'set-in-h' }, h('div', { class: 'set-card-head' }, h('h2', { id: 'set-in-h' }, 'In their menu'), h('span', { class: 'set-hint' }, 'In this order')), inList),
         h('section', { class: 'set-card', 'aria-labelledby': 'set-out-h' }, h('div', { class: 'set-card-head' }, h('h2', { id: 'set-out-h' }, 'Under All apps'), h('span', { class: 'set-hint' }, 'Still one click away')), outList)),
