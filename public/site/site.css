@@ -292,7 +292,7 @@ body{margin:0;background:var(--snow)}
 .faq details p{padding:0 48px 24px 0;color:var(--ink2);max-width:52em}
 
 /* closing call to action */
-.contact{background:var(--slate);color:var(--white);padding:var(--sec) 0;position:relative;overflow:hidden}
+.contact{background:var(--slate2);color:var(--white);padding:var(--sec) 0;position:relative;overflow:hidden}
 .contact:after{content:'';position:absolute;right:-60px;bottom:-80px;width:420px;height:300px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 22'%3E%3Cpath d='M0 22 L11 4 L17 13 L22 7 L32 22 Z' fill='%23ffffff' fill-opacity='.09'/%3E%3C/svg%3E") no-repeat center/contain;pointer-events:none}
 .contact h2{font-size:clamp(38px,4.2vw,56px);line-height:.96;max-width:16em;position:relative}
 .contact p{font-size:20px;max-width:34em;margin-top:22px;color:var(--onink3);position:relative}
