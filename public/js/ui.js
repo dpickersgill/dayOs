@@ -122,7 +122,8 @@ export function printableTimes(root) {
   };
   let queued = false;
   const later = () => { if (queued) return; queued = true; queueMicrotask(() => { queued = false; sync(); }); };
-  new MutationObserver(later).observe(root, { childList: true, subtree: true });
+  const MO = (typeof window !== 'undefined' && window.MutationObserver) || globalThis.MutationObserver;
+  if (MO) new MO(later).observe(root, { childList: true, subtree: true });
   root.addEventListener('input', later); root.addEventListener('change', later);
   window.addEventListener('beforeprint', sync);
   sync();
