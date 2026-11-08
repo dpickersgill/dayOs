@@ -37,7 +37,7 @@ A mountain that has never been touched in the console has every app on. The cons
 
 ### Try-it demo
 
-Visitors can start their own demo at `/try`: they enter a name and email, and about 20 seconds later they are signed in to a private demo mountain with every app on and made-up lifts, tickets, lessons, patrol cases, staff and documents. It is a real mountain (named `try-xxxxxxxxxx`) built by the same loader as `node db/demo.js`.
+Visitors can start their own demo at `/try`: they enter a name and email, and about 20 seconds later they are signed in to a private demo mountain with every app on and made-up lifts, tickets, lessons, patrol cases, staff and documents. It is a real mountain (named `try-xxxxxxxxxx`) built by the same loader as `node db/demo.js`. The loader can run after `node db/seed.js` and again on the same mountain without adding anything twice. Its ski school has four instructors with certifications and pay rates, kids and adult lessons on each of the next 7 days, and a six-week Saturday program; staff get 6-digit kiosk PINs and patrollers a published week on the patrol schedule.
 
 - **Expires:** after `SANDBOX_DAYS` days (default 7). A finished demo cannot sign in. It is removed with every row it owns the next time anyone starts a demo, or when you run the purge (below). The sign-up row stays, so `/platform` > **Demo sign-ups** is your list of leads.
 - **Safe:** a demo can never send email or take a card payment, has a 25 MB document limit, and is hidden from the main mountain list in `/platform`. Starting again with the same email replaces that person's old demo.
