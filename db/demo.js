@@ -150,6 +150,8 @@ async function load(o, T) {
     if ((await q(sql, params)).length) { kept.push(what); return null; }
     return fn();
   };
+  // A name read back from the API matches in any case too (a mountain seeded before 2026.11.13 says Main Quad, not Main quad).
+  const same = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
   // Found by name (any case), else made: so the demo after db/seed.js, or a second run, makes no second one.
   const findOrMake = async (what, table, name, path, body, extraWhere = '') => {
     const have = await idOf(`SELECT id FROM \`${table}\` WHERE tenant_id = ? AND LOWER(name) = LOWER(?)${extraWhere} ORDER BY id LIMIT 1`, [T, name]);
@@ -554,16 +556,16 @@ async function load(o, T) {
     await soft('snow reading', () => C('POST', '/ops/snow', { base_in: 38, new_snow_in: 4, surface: 'packed_powder', quality: 'good', note: 'Light snow overnight' }));
     await soft('weather', () => C('POST', '/ops/weather', { place: 'Base', temp_f: 24, wind_mph: 8, gust_mph: 15, wind_dir: 'NW', sky: 'partly', precip_in: 0 }));
     await soft('weather', () => C('POST', '/ops/weather', { place: 'Summit', temp_f: 17, wind_mph: 22, gust_mph: 34, wind_dir: 'NW', sky: 'snow', precip_in: 0.1 }));
-    const lowTrail = trailList.find((x) => x.name === N.bunny);
+    const lowTrail = trailList.find((x) => same(x.name, N.bunny));
     if (lowTrail) {
       const run = await soft('snowmaking', () => C('POST', '/ops/snowmaking', { trail_id: lowTrail.id, guns: 8, temp_f: 21 }));
       if (run) await soft('snowmaking stop', () => C('POST', `/ops/snowmaking/${run.id}/stop`, { water_gal: 120000 }));
     }
     const wo = await soft('work order', () => C('POST', '/ops/work-orders', { title: 'Replace left track on Groomer 2', priority: 'high', asset_id: assetIds['Groomer 2'] || null, description: 'Track is cracking at the third cleat.' }));
-    await soft('work order', () => C('POST', '/ops/work-orders', { title: `Re-grease ${N.small} bearings`.slice(0, 200), priority: 'normal', lift_id: (liftList.find((l) => l.name === N.small) || {}).id || null }));
+    await soft('work order', () => C('POST', '/ops/work-orders', { title: `Re-grease ${N.small} bearings`.slice(0, 200), priority: 'normal', lift_id: (liftList.find((l) => same(l.name, N.small)) || {}).id || null }));
     if (wo) await soft('work order note', () => C('POST', `/ops/work-orders/${wo.id}/notes`, { body: 'Track ordered, arrives Thursday' }));
     await soft('pm', () => C('POST', '/ops/pm', { name: 'Groomer oil change', asset_id: assetIds['Groomer 1'], interval_hours: 250, interval_days: 180 }));
-    await soft('pm', () => C('POST', '/ops/pm', { name: 'Annual rope inspection', lift_id: (liftList.find((l) => l.name === N.summit) || {}).id, interval_days: 365 }));
+    await soft('pm', () => C('POST', '/ops/pm', { name: 'Annual rope inspection', lift_id: (liftList.find((l) => same(l.name, N.summit)) || {}).id, interval_days: 365 }));
     await soft('pm', () => C('POST', '/ops/pm', { name: 'Snowmobile belt check', asset_id: assetIds['Snowmobile 1'], interval_hours: 100 }));
     const meta = await soft('ops meta', () => C('GET', '/ops/meta'));
     if (meta) {
@@ -573,7 +575,7 @@ async function load(o, T) {
         await soft(`inspect ${lift.name}`, () => C('POST', '/ops/lift-checks', { lift_id: lift.id, items }));
       }
     }
-    const tl = liftList.find((l) => l.name === N.second);
+    const tl = liftList.find((l) => same(l.name, N.second));
     if (tl) await soft('downtime', () => C('POST', '/ops/downtime', { lift_id: tl.id, started_at: `${today} 08:10`, ended_at: `${today} 08:55`, reason: 'wind', note: 'Gusts over 35 at the top' }));
     await soft('handoff', () => C('POST', '/ops/handoffs', { dept: 'grooming', shift: 'night', body: `${N.black1} and ${N.black2} still need a second pass. Groomer 2 is down for the track.` }));
     await soft('handoff', () => C('POST', '/ops/handoffs', { dept: 'lifts', shift: 'day', body: `${N.hold} stays on hold until the north stop is fixed and re-inspected.` }));

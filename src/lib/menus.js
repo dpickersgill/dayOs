@@ -80,10 +80,14 @@ const KIND_MENUS = {
   rentals: { apps: ['rentals', 'sell', 'waivers', 'people', 'lostfound'], start: 'rentals' },
   food: { apps: ['sell', 'lostfound', 'conditions'], start: 'dashboard' },
 };
-/** 'park' for Park crew or Terrain park, 'grooming' for a groomer, and so on; null when nothing fits. */
+/**
+ * 'park' for Park crew or Terrain park, 'grooming' for a groomer, and so on; null when nothing fits. The name matches in
+ * any case (Lift Operator, Lift operator and LIFT OPERATOR are the same position: 2026.11.13 seed names are sentence case).
+ */
 function positionKind(p) {
   if (!p) return null;
   const n = String(p.name || '').toLowerCase();
+  p = { ...p, department: String(p.department || '').toLowerCase() };
   if (/\bpark\b|terrain/.test(n)) return 'park';
   if (p.department === 'grooming' || /groom|snowcat|snow ?mak/.test(n)) return 'grooming';
   if (p.department === 'lifts' || /\blift/.test(n)) return 'lifts';

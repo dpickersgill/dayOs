@@ -92,3 +92,23 @@ test('seed then demo runs cleanly, uses the seed\'s records, and has what a ski 
   delete before.audit_log; delete after.audit_log;
   assert.deepEqual(after, before);
 });
+
+test('2026.11.13: sentence-case seed names reach new mountains only; nothing matches the old names by case', async () => {
+  // a second seed of the same mountain is refused and changes nothing
+  const before = await counts();
+  await assert.rejects(run('db/seed.js'), 'seeding a mountain that exists fails on purpose');
+  assert.deepEqual(await counts(), before, 'an existing mountain is not touched');
+  // no migration step renames a mountain's records
+  const fs = require('node:fs');
+  const steps = [path.join(root, 'db/migrate.js'), ...fs.readdirSync(path.join(root, 'db/steps')).map((f) => path.join(root, 'db/steps', f))];
+  for (const f of steps) assert.ok(!/UPDATE\s+`?(positions|products|certifications|lifts|trails)`?\s+SET\s+[^;'"]*\bname\s*=/i.test(fs.readFileSync(f, 'utf8')), `${path.basename(f)} renames no records`);
+  // production code never looks for the old Title Case seed names
+  const OLD = /'(Lift Operator|Rental Technician|Ski Instructor|Ticket Window|Main Quad|Season Pass|Beginner Group Lesson|All-Day Lift Ticket|2-Day Lift Ticket|5-Visit Card|Lift Operator Training|CPR\/First Aid)'/;
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
+  for (const f of [...walk(path.join(root, 'src')), ...walk(path.join(root, 'public/js'))]) assert.ok(!OLD.test(fs.readFileSync(f, 'utf8')), `${path.relative(root, f)} names an old seed record`);
+  // position menus (menu v3) match a position's name in any case
+  const menus = require('../src/lib/menus');
+  for (const name of ['Lift operator', 'Lift Operator', 'LIFT OPERATOR']) assert.equal(menus.positionKind({ name, department: 'guest_services' }), 'lifts', name);
+  for (const name of ['Park crew', 'Park Crew', 'TERRAIN PARK']) assert.equal(menus.positionKind({ name }), 'park', name);
+  assert.equal(menus.positionKind({ name: 'Crew', department: 'Grooming' }), 'grooming');
+});
