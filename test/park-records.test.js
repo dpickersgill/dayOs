@@ -389,7 +389,7 @@ test('entries sent later from the phone keep their own time, are kept once, and 
   for (const what of ['/inspections`, body, { caseId: PARK_QUEUE', '/open`, body, { caseId: PARK_QUEUE', '/close`, {', '/rope`, {', "send('PUT', `/park/placements/"]) assert.ok(view.includes(what), `the view queues ${what}`);
   assert.match(view, /Not saved: \$\{x\.label\}/, 'a refused entry shows as Not saved');
   assert.match(view, /fixClock/, 'with Fix the time and send');
-  assert.match(view, /Photos need a signal/);
+  assert.match(view, /sendPhoto(`/park/features/${fid}/photos/, 'inspection photos go through the outbox too (2026.11.13)');
   assert.match(view, /All checks OK/);
 });
 

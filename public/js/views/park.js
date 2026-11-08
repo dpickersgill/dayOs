@@ -2,7 +2,7 @@
 // Tap the map to put a feature down, drag it to adjust. A past day is a record: a manager corrects it, with a reason, and
 // the original stays. Only an inspection opens a feature, and an area opens each day with its supervisor's sign-off.
 // Inspections, pins, rope lines and area openings are kept on the phone with no signal and sent when it returns
-// (the same outbox as patrol); photos need a signal.
+// (the same outbox as patrol); an inspection photo taken with no signal waits there too and is sent first.
 
 import { get, post, put, patch } from '../api.js';
 import { h, clear, can, isManager, state, input, select, field, button, toast, formDialog, dialog, confirmDialog, tabs, table, val, num, todayStr, addDays, fmtDateLong, fmtDateTime, fmtTime, fmtDate, label, empty, errorBox, fail, appendAll, nowStamp, ctx } from '../ui.js';
