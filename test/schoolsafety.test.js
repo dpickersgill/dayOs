@@ -74,6 +74,9 @@ test.before(async () => {
   T.ian = await addUser(`ian@${slug}.test`, 'instructor', { staff_id: D.ian });
   T.ola = await addUser(`ola@${slug}.test`, 'instructor', { staff_id: D.ola });
   T.ada = await addUser(`ada@${slug}.test`, 'instructor', { staff_id: D.ada });
+  const pst = ok(await call('POST', '/workforce/staff', { token: A.owner, body: { person: { first_name: 'Pat', last_name: 'Rol' }, status: 'active' } }), 201);
+  T.patrol = await addUser(`patrol@${slug}.test`, 'patrol', { staff_id: pst.id });
+  // email on only after signing in (a new device would otherwise be asked for an emailed code)
   process.env.POSTMARK_SERVER_TOKEN = 'pm-test-token';
   process.env.MAIL_FROM = 'hello@summitops.test';
   D.group = ok(await call('POST', '/products', { token: A.owner, body: { kind: 'lesson', name: 'Group lesson', base_price_cents: 8000 } }), 201).id;
@@ -100,6 +103,19 @@ test('ages: the desk is warned about an adult in a kids lesson; a manager books 
   assert.match(JSON.stringify(a.detail), /Assisting a child/);
   // a child in range books with no warning
   ok(await book(sid, 'Kid', KID), 201);
+});
+
+test('online: the family\'s pickup list and an adaptive intake go on the booking when the request is confirmed', async () => {
+  ok(await call('PUT', '/tenant/profile', { token: A.owner, body: { online_booking: true, waiver_text: 'I accept the risks.', booking_notice_hours: 1 } }));
+  const sid = await session({ discipline: 'adaptive', format: 'semi_private', capacity: 2, starts_at: `${day2}T14:00`, ends_at: `${day2}T15:00` });
+  const r = ok(await call('POST', `/public/${A.slug}/requests`, { body: { session_id: sid, contact_first_name: 'Pat', contact_last_name: 'Online', contact_email: `po.${suffix}@x.test`, contact_phone: '215-555-0100',
+    students: [{ first_name: 'Ona', last_name: 'Line', date_of_birth: KID, sex: 'female', pickup_adults: [{ name: 'Pat Online', relationship: 'Mom', phone: '215-555-0100' }], adaptive: { needs: 'Autism', equipment: ['tethers'] } }], waiver_accepted: true } }), 201);
+  const req = (await q('SELECT id FROM lesson_requests WHERE reference = ?', [r.reference]))[0];
+  ok(await call('POST', `/skischool/requests/${req.id}/confirm`, { token: T.counter, body: {} }));
+  const [b] = await q('SELECT id, pickup FROM lesson_bookings WHERE session_id = ?', [sid]);
+  assert.equal(b.pickup, 'Pat Online (Mom)');
+  const [ai] = await q('SELECT needs, equipment FROM lesson_adaptive_intake WHERE booking_id = ?', [b.id]);
+  assert.deepEqual([ai.needs, ai.equipment], ['Autism', 'tethers']);
 });
 
 test('ages: online booking refuses a student outside the lesson ages', async () => {
@@ -320,6 +336,15 @@ test('lost child: opens a patrol dispatch call with the child\'s details; the sc
   // the report with the photo: the school and patrol
   ok(await call('GET', `/skischool/lost/${lost.id}`, { token: T.ian }));
   assert.equal((await call('GET', `/skischool/lost/${lost.id}`, { token: T.ola })).status, 403);
+  // patrol, on the dispatch board, finds the report behind the call and the child's photo
+  const patrol = T.patrol;
+  const byCall = ok(await call('GET', `/skischool/lost-by-call/${lost.call_id}`, { token: patrol }));
+  assert.equal(byCall.id, lost.id);
+  const seen = ok(await call('GET', `/skischool/lost/${lost.id}`, { token: patrol }));
+  assert.equal(seen.first_name, 'Emma');
+  assert.equal(seen.jacket_color, 'Red');
+  assert.equal(seen.last_name, undefined);
+  assert.equal((await call('GET', `/skischool/lost-by-call/${lost.call_id}`, { token: T.counter })).status, 403, 'the lookup by call is for patrol');
   // found
   ok(await call('POST', `/skischool/lost/${lost.id}/found`, { token: T.counter, body: { found_by: 'Patroller Sam', found_where: 'Lift 2 base' } }));
   const [lc] = await q('SELECT status, found_by, found_where, found_at FROM school_lost_children WHERE id = ?', [lost.id]);
