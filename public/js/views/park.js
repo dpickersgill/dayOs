@@ -765,7 +765,7 @@ async function drawRecord(root, list, areaId, date) {
     h('h2', null, 'Opening sign-off and closures'),
     r.days.length ? h('ul', { class: 'plain' }, r.days.map((d) => h('li', null, d.action === 'open'
       ? h('span', null, h('b', null, `Opened ${fmtTime(d.at)}`), `, signed off by ${d.supervisor_name} (login ${d.signed_by || 'unknown'}). Checked: ${(d.checklist || []).map((c) => c.label).join('; ')}.${d.reason ? ` Notes: ${d.reason}` : ''}`)
-      : h('span', null, h('b', null, `Closed ${fmtTime(d.at)}`), ` (${label(d.reason_kind)}): ${d.reason}. ${d.features_closed} feature${d.features_closed === 1 ? '' : 's'} closed, by ${d.signed_by || 'unknown'}.`, d.late_message ? h('span', { class: 'warn-note small' }, ` ${d.late_message}`) : null)))) : h('p', { class: 'warn-note' }, 'No opening sign-off recorded for this day.'),
+      : h('span', null, h('b', null, `Closed ${fmtTime(d.at)}`), ` (${label(d.reason_kind)}): ${d.reason}. ${d.features_closed} feature${d.features_closed === 1 ? '' : 's'} closed, by ${d.signed_by || 'unknown'}.`, d.late_message ? h('div', { class: 'warn-note small' }, d.late_message) : null)))) : h('p', { class: 'warn-note' }, 'No opening sign-off recorded for this day.'),
     h('h2', null, 'Layout'), layoutSvg(plotted),
     h('h2', null, 'Features'),
     r.features.length ? table([

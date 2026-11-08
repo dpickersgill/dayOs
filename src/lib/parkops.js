@@ -60,7 +60,7 @@ async function phoneTime(db, tenantId, at) {
  */
 function areaState(days, tz) {
   const ms = (v) => (v ? Date.parse(`${String(v).replace(' ', 'T').slice(0, 19)}Z`) : NaN);
-  const hm = (v) => localTime(v, tz).slice(11, 16);
+  const hm = (v) => { const [hh, mm] = localTime(v, tz).slice(11, 16).split(':').map(Number); return `${hh % 12 || 12}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`; }; // as every screen shows a time
   const closes = days.filter((d) => d.action === 'close');
   const opens = days.filter((d) => d.action === 'open');
   // A closing counts from its own time, or from when it arrived if that is later (never earlier: a clock running fast).

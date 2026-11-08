@@ -83,7 +83,7 @@ const featureOf = async (id) => ok(await api('GET', '/park/features', { token: T
 const areaOf = async (id) => ok(await api('GET', '/park/areas', { token: T.staff })).data.find((a) => a.id === id);
 const storedStatus = async (id) => (await pool.query('SELECT status FROM park_areas WHERE id = ?', [id]))[0][0].status;
 const openArea = (id, more = {}) => api('POST', `/park/areas/${id}/open`, { token: T.staff, body: { checklist: all, supervisor_name: 'Sam Super', ...more } });
-const hm = (local) => local.slice(11, 16);
+const hm = (local) => { const [h, m] = local.slice(11, 16).split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
 const sleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
 
 test('a feature closed after an incident stays closed through a needs-attention inspection, and its area cannot open', async () => {
@@ -194,7 +194,7 @@ test('the rule itself: a tie or an unclear order is closed', () => {
   assert.equal(S([open('2026-11-08 15:10:00'), close('2026-11-08 15:20:00', '2026-11-08 15:20:00'), open('2026-11-08 15:50:00', 3)]), 'open');
   assert.equal(S([close('2026-11-08 15:20:00', '2026-11-08 15:10:00')]), 'closed', 'a closing with a fast clock still counts from its own time');
   const late = OPS.areaState([open('2026-11-08 15:30:00'), close('2026-11-08 15:20:00', '2026-11-08 15:41:00')], TZ).late;
-  assert.deepEqual(late.map((x) => x.message), ['A closing sent at 10:20 arrived at 10:41 and closed the area.']);
+  assert.deepEqual(late.map((x) => x.message), ['A closing sent at 10:20 AM arrived at 10:41 AM and closed the area.']);
 });
 
 test('crew add photos only to a standing inspection from today; a manager corrects with a reason', async () => {
