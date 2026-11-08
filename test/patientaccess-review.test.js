@@ -207,3 +207,37 @@ test('a Host who makes the records check still sees no case-tied kit or medicati
   ok(await records(paz));
   assert.match(await notes(paz), /open femur/);
 });
+
+// ---------------------------------------------------------------- the screens these rules show
+test('the records check says which action asked for it', async () => {
+  const pia = await tokenOf(U.Pia.login);
+  const r = await api('GET', '/patrol/incidents?q=Gina', { token: pia });
+  asks(r, 'a search');
+  assert.equal(r.body.details.reason, 'search');
+  assert.match(r.body.error, /Searching cases by name can find a patient/);
+  const opened = await api('GET', `/patrol/incidents/${await newCase(U.Pat.token)}`, { token: pia });
+  asks(opened); assert.equal(opened.body.details.reason, 'open');
+  const past = await api('GET', '/patrol/dispatch?status=all', { token: pia });
+  asks(past); assert.equal(past.body.details.reason, 'past_calls');
+});
+
+test('the passkey offer knows whether the login has an app or recovery codes', async () => {
+  const fresh = await person('Quin', { level: 'patrol' });
+  const me = ok(await api('GET', '/auth/me', { token: fresh.token }));
+  assert.equal(me.passkey_prompt.kind, 'once');
+  assert.equal(me.passkey_prompt.app, false); assert.equal(me.passkey_prompt.codes, false);
+  // The app's words: only what is true.
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'public', 'js', 'main.js'), 'utf8');
+  assert.doesNotMatch(src, /h\('p', \{ class: 'muted small' \}, 'Your authenticator app and recovery codes keep working as a backup\.'\)/, 'never said to everyone');
+  assert.match(src, /if \(p\.app && p\.codes\) return 'Your authenticator app and recovery codes keep working as a backup\.'/);
+});
+
+test('the access log names fields as the case report does', async () => {
+  const { guest, id } = await guestOn(U.Pat.token, 'Lena');
+  const [[p]] = await pool.query('SELECT id FROM incident_patients WHERE incident_id = ? AND person_id = ?', [id, guest.id]);
+  ok(await api('PATCH', `/patrol/incidents/${id}/patients/${p.id}`, { token: U.Pat.token, body: { chief_complaint: 'Knee', allergies: 'None known' } }));
+  const log = ok(await api('GET', `/patrol/access-log?incident_id=${id}`, { token: M.owner }));
+  const row = log.data.find((r) => r.action === 'update_patient');
+  assert.deepEqual(row.detail.fields.sort(), ['allergies', 'chief_complaint']);
+  assert.deepEqual(row.detail.field_labels.sort(), ['Allergies', 'Chief complaint']);
+});
