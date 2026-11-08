@@ -14,10 +14,8 @@ SERVICE="$PROD_SERVICE"
 load_service
 
 step "Every 5 minutes (Cloud Scheduler)"
-BASE="$(check_url)"
 # Signed with a Google ID token for summitops-jobs, checked by the app (2026.11.11): no key is stored in the job.
 ensure_jobs_oidc
-ARGS=(--location "$REGION" --schedule "*/5 * * * *" --time-zone "America/New_York" --uri "$BASE/api/v1/internal/jobs/guests" --http-method POST "${JOB_AUTH[@]}" --attempt-deadline=120s --quiet)
-if gcloud scheduler jobs describe summitops-guests --location "$REGION" >/dev/null 2>&1; then gcloud scheduler jobs update http summitops-guests "${ARGS[@]}" --remove-headers x-jobs-key
-else gcloud scheduler jobs create http summitops-guests "${ARGS[@]}"; fi
+# Made, or changed in place through the Cloud Scheduler API (app_job in cloud-common.sh: gcloud's update crashes).
+app_job summitops-guests "*/5 * * * *" /api/v1/internal/jobs/guests 120s
 echo "Done. Check it with: gcloud scheduler jobs run summitops-guests --location $REGION"

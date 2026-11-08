@@ -161,13 +161,20 @@ run gcloud services enable cloudscheduler.googleapis.com --quiet
 load_service; DBNAME="$(envval DB_NAME)"; DBNAME="${DBNAME:-summitops}"
 BODY="{\"exportContext\":{\"fileType\":\"SQL\",\"uri\":\"$BUCKET/weekly/summitops.sql.gz\",\"databases\":[\"$DBNAME\"]}}"
 URI="https://sqladmin.googleapis.com/v1/projects/$PROJECT/instances/$INSTANCE/export"
-# gcloud scheduler jobs update http crashes in current gcloud (TypeError on NoneType), so a job that is there already is
-# replaced: deleted, then made again with today's settings.
-if gcloud scheduler jobs describe "$JOB" --location "$REGION" >/dev/null 2>&1; then
-  run gcloud scheduler jobs delete "$JOB" --location "$REGION" --quiet
+# A job that is there already is changed in place through the Cloud Scheduler API (sched_patch in cloud-common.sh):
+# gcloud's update crashes, and deleting the job first would leave no weekly copy at all if making it again failed. If the
+# change fails, the old job stays as it was and this script stops with an error.
+if sched_exists "$JOB"; then
+  if ! jq -nc --arg uri "$URI" --arg body "$(printf '%s' "$BODY" | base64 -w0)" --arg sa "$BACKUP_SA" \
+      '{schedule: "0 8 * * 2", timeZone: "Etc/UTC", httpTarget: {uri: $uri, httpMethod: "POST", body: $body, headers: {"Content-Type": "application/json"}, oauthToken: {serviceAccountEmail: $sa, scope: "https://www.googleapis.com/auth/cloud-platform"}}}' \
+      | sched_patch "$JOB" schedule,timeZone,httpTarget; then
+    echo "The weekly copy job could not be changed. It is still there with its old settings. Run this again."
+    exit 1
+  fi
+else
+  run gcloud scheduler jobs create http "$JOB" --location "$REGION" --schedule="0 8 * * 2" --time-zone=Etc/UTC --uri="$URI" --http-method=POST \
+    --message-body="$BODY" --headers=Content-Type=application/json --oauth-service-account-email="$BACKUP_SA" --quiet
 fi
-run gcloud scheduler jobs create http "$JOB" --location "$REGION" --schedule="0 8 * * 2" --time-zone=Etc/UTC --uri="$URI" --http-method=POST \
-  --message-body="$BODY" --oauth-service-account-email="$BACKUP_SA" --quiet
 echo "  Every Tuesday at 08:00 UTC: $BUCKET/weekly/summitops.sql.gz (older copies kept $WEEKLY_DAYS days)."
 echo "  Make the first copy now:   gcloud scheduler jobs run $JOB --location $REGION"
 

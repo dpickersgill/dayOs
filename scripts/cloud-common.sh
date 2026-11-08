@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared by deploy.sh, promote.sh, scripts/staging-setup.sh, scripts/harden.sh and scripts/cloud-armor.sh: signs in, reads
+# Shared by deploy.sh, promote.sh and the scripts in scripts/ (staging-setup.sh, harden.sh, cloud-armor.sh and others): signs in, reads
 # a service's settings and opens a database connection on 127.0.0.1:3307 (through the Cloud SQL Auth Proxy). Source it;
 # do not run it. SERVICE is the live service unless the script sets DAYOS_TARGET to the staging one first.
 PROD_SERVICE=summitops-api
@@ -180,6 +180,54 @@ ensure_jobs_oidc() {
     load_service
   fi
   JOB_AUTH=(--oidc-service-account-email "$JOBS_SA" --oidc-token-audience "$SVC_URL")
+}
+
+# Cloud Scheduler jobs are changed through the Cloud Scheduler API (2026.11.12). `gcloud scheduler jobs update http`
+# crashes in current gcloud (TypeError on NoneType), and deleting a job to make it again leaves no job at all if the new
+# one cannot be made. A PATCH changes the job in place: it is there the whole time, and a change that fails leaves it as
+# it was. The access token goes in a header file only this account can read (chmod 600), never on a command line, and
+# the file is removed after. Used by jobs-oidc.sh, guests-job.sh, lessons-job.sh, outreach-setup.sh, cloud-armor.sh and
+# backups-setup.sh. With DRY set (a --dry-run), it prints what it would send and changes nothing.
+#   printf '%s' "$fields_json" | sched_patch <job> <updateMask>
+sched_patch() {
+  local j="$1" mask="$2" hdr out rc=0
+  local url="https://cloudscheduler.googleapis.com/v1/projects/$PROJECT/locations/$REGION/jobs/$j?updateMask=$mask"
+  if [ -n "${DRY:-}" ]; then printf '  would run: PATCH %s with %s\n' "$url" "$(cat)"; return 0; fi
+  hdr="$(mktemp)"; chmod 600 "$hdr"; out="$(mktemp)"
+  printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$(gcloud auth print-access-token)" > "$hdr"
+  curl -sS --fail-with-body -X PATCH -H @"$hdr" --data-binary @- -o "$out" "$url" || rc=$?
+  rm -f "$hdr"
+  if [ "$rc" -ne 0 ]; then
+    echo "  Could not change $j through the Cloud Scheduler API (curl exit $rc). The job is as it was."
+    if [ -s "$out" ]; then { jq -r '.error.message // empty' "$out" 2>/dev/null || cat "$out"; } | sed 's/^/    /'; fi
+  fi
+  rm -f "$out"
+  return "$rc"
+}
+sched_exists() { gcloud scheduler jobs describe "$1" --location "$REGION" >/dev/null 2>&1; }
+# The job's http target, cleaned for sending back: no User-Agent header (Google sets that one) and, unless asked to keep
+# it, no old x-jobs-key header.   sched_target <job> [keep-key]
+sched_target() {
+  gcloud scheduler jobs describe "$1" --location "$REGION" --format=json | jq -c --arg keep "${2:-}" '.httpTarget
+    | .headers = ((.headers // {}) | with_entries(select((.key | ascii_downcase) as $k | $k != "user-agent" and ($keep != "" or $k != "x-jobs-key"))))'
+}
+
+# A scheduled job that calls the app, signed with a Google ID token for summitops-jobs (no key stored in the job). Made
+# when it is not there; otherwise its schedule, address, time limit and signing are set in place (sched_patch). Needs
+# ensure_jobs_oidc first (JOBS_SA, JOB_AUTH) and the live service loaded.
+#   app_job <job> <cron schedule> <path, such as /api/v1/internal/jobs/guests> <time limit, such as 120s>
+app_job() {
+  local j="$1" sched="$2" path="$3" deadline="$4" uri
+  uri="$(check_url)$path"
+  if sched_exists "$j"; then
+    sched_target "$j" | jq -c --arg s "$sched" --arg tz America/New_York --arg d "$deadline" --arg uri "$uri" --arg sa "$JOBS_SA" --arg aud "$SVC_URL" \
+      '{schedule: $s, timeZone: $tz, attemptDeadline: $d, httpTarget: (. | .uri = $uri | .httpMethod = "POST" | del(.oauthToken) | .oidcToken = {serviceAccountEmail: $sa, audience: $aud})}' \
+      | sched_patch "$j" schedule,timeZone,attemptDeadline,httpTarget
+    echo "  $j updated: $sched (America/New_York), $uri"
+  else
+    gcloud scheduler jobs create http "$j" --location "$REGION" --schedule "$sched" --time-zone America/New_York --uri "$uri" --http-method POST "${JOB_AUTH[@]}" --attempt-deadline="$deadline" --quiet
+    echo "  $j made: $sched (America/New_York), $uri"
+  fi
 }
 
 # Deletes older revisions of $SERVICE that still hold a key in a plain setting (2026.11.11). The revision serving now and

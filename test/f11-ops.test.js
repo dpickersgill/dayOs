@@ -299,6 +299,7 @@ case "$*" in
   "iam service-accounts describe"*) exit 0 ;;
   "secrets describe"*) exit 1 ;;
   "scheduler jobs list"*) cat "$STUB_JOBS" ;;
+  "scheduler jobs describe"*"--format=json"*) j="\${4#summitops-}"; printf '{"name":"projects/p/locations/us-east1/jobs/%s","httpTarget":{"uri":"https://summitops-api-xyz.a.run.app/api/v1/internal/jobs/%s","httpMethod":"POST","headers":{"User-Agent":"Google-Cloud-Scheduler"},"oidcToken":{"serviceAccountEmail":"summitops-jobs@p","audience":"https://summitops-api-xyz.a.run.app"}}}\n' "$4" "$j" ;;
   "compute ssl-certificates describe"*) echo ACTIVE ;;
   "compute ssl-policies describe"*) exit 1 ;;
   "compute target-https-proxies describe"*) exit 1 ;;
@@ -308,6 +309,7 @@ exit 0
   fs.writeFileSync(path.join(dir, 'curl'), `#!/usr/bin/env bash
 echo "curl $*" >> "$STUB_LOG"
 case "$*" in *readyz*) echo "{\\"ok\\":true,\\"version\\":\\"$STUB_VERSION\\",\\"build\\":\\"$STUB_BUILD\\"}" ;; *version*) echo '{"version":"2026.11.9"}' ;; *healthz*) echo ok ;; esac
+case "$*" in *"@-"*) cat >> "$STUB_LOG.body"; echo >> "$STUB_LOG.body" ;; esac
 `, { mode: 0o755 });
   fs.writeFileSync(path.join(dir, 'npm'), '#!/usr/bin/env bash\necho "npm $*" >> "$STUB_LOG"\n', { mode: 0o755 });
   const svc = { metadata: { annotations: {} }, spec: { traffic: [{ revisionName: 'summitops-api-00040-old', percent: 100 }], template: { spec: { containers: [{ env: [{ name: 'DB_NAME', value: 'x' }, { name: 'DB_USER', value: 'u' }, { name: 'PUBLIC_URL', value: 'https://app.example' }] }] } } },
@@ -323,8 +325,22 @@ test('OPS-6b and INF-13: cloud-armor.sh --lock moves every job that calls the ap
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, HOME: dir, STUB_LOG: log, STUB_SVC: path.join(dir, 'svc.json'), STUB_JOBS: path.join(dir, 'jobs.txt') };
   execFileSync('bash', ['scripts/cloud-armor.sh', '--lock', 'www.example.com', 'app.example.com'], { cwd: root, env, stdio: 'pipe' });
   const calls = fs.readFileSync(log, 'utf8');
-  for (const j of ['daily', 'guests', 'lessons', 'outreach']) assert.match(calls, new RegExp(`scheduler jobs update http summitops-${j} .*--uri https://app.example/api/v1/internal/jobs/${j}`));
-  assert.doesNotMatch(calls, /jobs update http summitops-weekly-export/);
+  // Moved through the Cloud Scheduler API (2026.11.12: gcloud's update crashes), each keeping its signing and path.
+  assert.doesNotMatch(calls, /scheduler jobs update/);
+  for (const j of ['daily', 'guests', 'lessons', 'outreach']) assert.match(calls, new RegExp(`^curl -sS --fail-with-body -X PATCH -H @\\S+ --data-binary @- -o \\S+ https://cloudscheduler.googleapis.com/v1/projects/summitops-510715/locations/us-east1/jobs/summitops-${j}\\?updateMask=httpTarget$`, 'm'));
+  assert.doesNotMatch(calls, /jobs\/summitops-weekly-export\?/);
+  const sent = fs.readFileSync(`${log}.body`, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  assert.deepEqual(sent.map((b) => b.httpTarget.uri), ['daily', 'guests', 'lessons', 'outreach'].map((j) => `https://app.example/api/v1/internal/jobs/${j}`));
+  for (const b of sent) { assert.deepEqual(b.httpTarget.headers, {}, 'no User-Agent'); assert.equal(b.httpTarget.oidcToken.audience, 'https://summitops-api-xyz.a.run.app'); }
+  // One job Google refuses to change: the others are still moved, it is named, and --lock ends with an error.
+  fs.writeFileSync(path.join(dir, 'curl'), fs.readFileSync(path.join(dir, 'curl'), 'utf8').replace('echo "curl $*" >> "$STUB_LOG"\n', 'echo "curl $*" >> "$STUB_LOG"\ncase "$*" in *jobs/summitops-guests\\?*) cat >/dev/null; exit 22 ;; esac\n'));
+  fs.writeFileSync(log, '');
+  const part = spawnSync('bash', ['scripts/cloud-armor.sh', '--lock', 'www.example.com', 'app.example.com'], { cwd: root, env, encoding: 'utf8' });
+  assert.equal(part.status, 1, part.stdout);
+  assert.match(part.stdout, /Could not change summitops-guests through the Cloud Scheduler API \(curl exit 22\)\. The job is as it was\./);
+  assert.match(part.stdout, /summitops-lessons now calls https:\/\/app\.example/);
+  assert.match(part.stdout, /3 scheduled job\(s\) moved to https:\/\/app\.example\.\n[\s\S]*1 job\(s\) could not be moved \(see above\)\. Run this again to move them\./);
+  fs.writeFileSync(path.join(dir, 'curl'), fs.readFileSync(path.join(dir, 'curl'), 'utf8').replace(/case "\$\*" in \*jobs\/summitops-guests[^\n]*\n/, ''));
   fs.writeFileSync(log, '');
   execFileSync('bash', ['scripts/cloud-armor.sh', 'www.example.com', 'app.example.com'], { cwd: root, env, stdio: 'pipe' });
   const built = fs.readFileSync(log, 'utf8');

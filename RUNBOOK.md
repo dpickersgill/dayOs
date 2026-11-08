@@ -96,11 +96,10 @@ Every failure is written to the logs as one line with `"severity":"ERROR"` and a
 3. **Daily job missed:** Logging, Log-based metrics, Create a counter metric named `daily_job_finished` for
    `jsonPayload.message="daily job finished"`. Then Monitoring, Alerting, Create policy on that metric: alert when it
    is absent for 26 hours.
-4. **Give the daily job time to finish:** it can run for several minutes as mountains grow. The command that makes
-   the daily job (below, Daily schedule) gives it `--attempt-deadline=900s`. `gcloud scheduler jobs update http`
-   crashes in current gcloud, so a job made without it is deleted
-   (`gcloud scheduler jobs delete summitops-daily --location us-east1`) and made again with that command, then
-   `bash scripts/jobs-oidc.sh` is run again.
+4. **Give the daily job time to finish:** it can run for several minutes as mountains grow. `bash scripts/daily-job.sh`
+   (below, Daily schedule) gives it `--attempt-deadline=900s`, and run again it sets that on a job made without it, in
+   place. (`gcloud scheduler jobs update http` crashes in current gcloud, so the scripts change jobs through the Cloud
+   Scheduler API instead, and never delete a job to make it again.)
 5. **Budget:** Billing, Budgets and alerts, a monthly budget (for example $50) with email alerts.
 
 ## Security alerts
@@ -286,14 +285,11 @@ One-time setup, in Cloud Shell:
      --update-env-vars=MAIL_FROM=patrol@yourdomain.org,PUBLIC_URL=https://summitops-api-33271059248.us-east1.run.app
    ```
 4. **Daily schedule** (7:30 am Eastern). The job signs its call with a Google ID token for the summitops-jobs account
-   (2026.11.11): no key is stored in Cloud Scheduler. Run `bash scripts/jobs-oidc.sh` once first (it makes the account
-   and tells the app to accept it), then:
+   (2026.11.11): no key is stored in Cloud Scheduler. Run:
    ```
-   gcloud scheduler jobs create http summitops-daily --location us-east1 --schedule "30 7 * * *" --time-zone "America/New_York" \
-     --uri "https://summitops-api-33271059248.us-east1.run.app/api/v1/internal/jobs/daily" --http-method POST \
-     --oidc-service-account-email summitops-jobs@summitops-510715.iam.gserviceaccount.com \
-     --oidc-token-audience "https://summitops-api-33271059248.us-east1.run.app" --attempt-deadline=900s
+   bash scripts/daily-job.sh
    ```
+   It makes the jobs account if needed, tells the app to accept it, and makes the job (or sets an existing one right).
    Check it with `gcloud scheduler jobs run summitops-daily --location us-east1`, then look at Patrol, Follow-up.
 5. **In the app**: Patrol, Follow-up, Settings. Switch follow-up on, set the name shown on the email, a mailing address, who replies go to, and the gift amounts. Leave the tax note blank until your board or accountant gives you the wording.
 6. **Stripe webhook**: the existing endpoint already receives `checkout.session.completed`, which is what records gifts.
