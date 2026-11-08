@@ -301,6 +301,40 @@ test('a learn to ski ladder is sold as a package, shows lesson 2 of 3 on the pro
   assert.equal(view.progress.ladders[0].offer.code, prog.offer.code);
 });
 
+test('2026.11.13: checking in a ladder lesson issues its lift ticket and opens its rental, as a desk sale does, once per lesson', async () => {
+  const lid = ok(await api('POST', '/skischool/ladders', { token: T.owner, body: { name: 'Ladder check-in', lessons: 3, price_cents: 15000, ticket_product_id: D.ticket, rental_product_id: D.rental } }), 201).id;
+  const l = ok(await api('GET', '/skischool/ladders', { token: T.counter })).data.find((x) => x.id === lid);
+  const sale = ok(await api('POST', '/checkout', { token: T.counter, body: { channel: 'window', customer: { details: adult(), sign_waiver: true }, lines: [{ type: 'lesson_package', product_id: l.product_id }], payments: [{ tender: 'cash', amount_cents: 15000 }] } }), 201);
+  const pid = sale.packages[0].person_id; const credit = sale.packages[0].credit_id;
+  const [order] = await q('SELECT o.id, o.total_cents FROM lesson_credits c JOIN order_items i ON i.id = c.order_item_id JOIN orders o ON o.id = i.order_id WHERE c.id = ?', [credit]);
+  const sid = await lesson(today, '09:00', '10:00');
+  const b = ok(await book(sid, { person_id: pid, use_credit_id: credit, level: 1 }), 201);
+  const first = ok(await api('POST', `/skischool/bookings/${b.id}/checkin`, { token: T.counter, body: {} }));
+  assert.equal(first.included.ticket.product, 'Day Ticket'); assert.equal(first.included.rental.product, 'Ski Rental');
+  const tickets = await q('SELECT t.id, t.code, t.product_id, t.valid_from, t.valid_to, t.status, i.order_id, i.unit_price_cents, i.label FROM tickets t JOIN order_items i ON i.id = t.order_item_id WHERE t.tenant_id = ? AND t.person_id = ?', [M.id, pid]);
+  assert.equal(tickets.length, 1, 'one lift ticket for the lesson');
+  const t = tickets[0];
+  assert.equal(Number(t.product_id), D.ticket); assert.equal(String(t.valid_from).slice(0, 10), today); assert.equal(t.status, 'active');
+  assert.equal(Number(t.order_id), Number(order.id), 'on the package\'s own order'); assert.equal(Number(t.unit_price_cents), 0, 'included: nothing more is charged');
+  assert.match(t.label, /^Included: Ladder check-in/);
+  assert.match(t.code, /^[A-Z0-9]{8,20}$/, 'a ticket code like one sold at the window (lib/ticketissue.js)');
+  const contracts = await q("SELECT id, status, order_id, valid_on FROM rental_contracts WHERE tenant_id = ? AND person_id = ?", [M.id, pid]);
+  assert.equal(contracts.length, 1, 'one rental, ready to fit');
+  assert.equal(contracts[0].status, 'to_fit'); assert.equal(String(contracts[0].valid_on).slice(0, 10), today); assert.equal(Number(contracts[0].order_id), Number(order.id));
+  const [after] = await q('SELECT total_cents FROM orders WHERE id = ?', [order.id]);
+  assert.equal(Number(after.total_cents), Number(order.total_cents), 'the order total does not change');
+  // undo and check in again: nothing more is issued
+  ok(await api('DELETE', `/skischool/bookings/${b.id}/checkin`, { token: T.counter }));
+  const again = ok(await api('POST', `/skischool/bookings/${b.id}/checkin`, { token: T.counter, body: {} }));
+  assert.ok(!again.included || (!again.included.ticket && !again.included.rental), 'once per lesson');
+  assert.equal((await q('SELECT COUNT(*) AS n FROM tickets WHERE tenant_id = ? AND person_id = ?', [M.id, pid]))[0].n, 1);
+  assert.equal((await q('SELECT COUNT(*) AS n FROM rental_contracts WHERE tenant_id = ? AND person_id = ?', [M.id, pid]))[0].n, 1);
+  // a lesson that is not on a ladder issues nothing
+  const other = ok(await book(await lesson(today, '11:00', '12:00'), { student: adult() }), 201);
+  const plain = ok(await api('POST', `/skischool/bookings/${other.id}/checkin`, { token: T.counter, body: {} }));
+  assert.equal(plain.included, undefined);
+});
+
 // ---------------------------------------------------------------- 7. owner reports
 test('owner reports: revenue per hour, cost against revenue, instructor return rate and first-timer conversion, with CSV; owners and managers only', async () => {
   // last season: Ivy and Max taught; this season only Ivy (and Dana, new)

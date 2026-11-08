@@ -56,10 +56,15 @@ function checkinOpen(b, now) {
   return now >= plusMinutes(start, -90) && now < String(b.ends_at).slice(0, 19);
 }
 
-/** Marks a booking checked in (once: a second check-in keeps the first time). via: link, desk or instructor. */
+/**
+ * Marks a booking checked in (once: a second check-in keeps the first time). via: link, desk or instructor. Returns false
+ * when it was already checked in, else { included }: what a learn to ski ladder lesson issued (or null).
+ */
 async function checkIn(conn, tenantId, bookingId, { via, userId = null }) {
   const [r] = await conn.query('UPDATE lesson_bookings SET checked_in_at = UTC_TIMESTAMP(), checked_in_via = ?, checked_in_by = ? WHERE tenant_id = ? AND id = ? AND checked_in_at IS NULL', [via, userId, tenantId, bookingId]);
-  return r.affectedRows > 0;
+  // A learn to ski ladder lesson: its included lift ticket and rental are issued now, once per lesson (2026.11.13).
+  if (!r.affectedRows) return false;
+  return { included: await require('./learnladder').issueIncluded(conn, tenantId, bookingId, { userId }) };
 }
 
 const tzOf = async (db, tenantId) => (await one(db, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone;

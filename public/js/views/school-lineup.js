@@ -11,6 +11,8 @@ import { printDialog } from '../print.js';
 import { levelOptions } from '../levels.js';
 import { row, toggle } from './settings-kit.js';
 import { takePayment } from './school-money.js'; // feat/school-pay: Take payment for an unpaid lesson
+// A learn to ski ladder lesson issues its lift ticket and opens its rental at check-in (2026.11.13): the toast says so.
+const includedWords = (inc) => { if (!inc) return ''; const w = [inc.ticket ? `${inc.ticket.product} issued` : null, inc.rental ? `${inc.rental.product} ready to fit in Rentals` : null].filter(Boolean); return w.length ? `. ${w.join('; ')}.` : ''; };
 
 const desk = () => can('counter') || schoolCan('supervisor');
 const store = {
@@ -77,7 +79,7 @@ async function checkinTab(root) {
     try {
       const r = await post('/skischool/checkin/scan', { code });
       scan.value = '';
-      status.append(h('div', { class: 'notice good' }, r.data.map((x) => h('div', null, h('strong', null, `${x.first_name} ${x.last_name}`), x.already ? ' was already checked in' : ' checked in', `: ${x.product} ${fmtTime(x.starts_at)}`,
+      status.append(h('div', { class: 'notice good' }, r.data.map((x) => h('div', null, h('strong', null, `${x.first_name} ${x.last_name}`), x.already ? ' was already checked in' : ' checked in', `: ${x.product} ${fmtTime(x.starts_at)}`, includedWords(x.included),
         ...problems(x)))));
       await load();
       await after(r.data.filter((x) => !x.already));
@@ -111,7 +113,7 @@ async function checkinTab(root) {
               h('span', { class: 'row tight' }, ...flags(r), ...problems(r), r.delay_minutes ? state(`Delayed ${r.delay_minutes} min`, 'warn') : null)),
             h('div', { class: 'lu-act' },
               r.checked_in_at ? [state(r.checked_in_via === 'link' ? 'Here (family link)' : 'Here', 'good'), button('Undo', async () => { try { await del(`/skischool/bookings/${r.booking_id}/checkin`); await load(); } catch (err) { fail(err); } }, { small: true, label: `Undo check-in for ${r.first_name}` })]
-                : button('Check in', async () => { try { const x = await post(`/skischool/bookings/${r.booking_id}/checkin`, {}); toast(`${r.first_name} checked in`); await load(); await after([x]); } catch (err) { fail(err); } }, { kind: 'primary', small: true, label: `Check in ${r.first_name} ${r.last_name}` }),
+                : button('Check in', async () => { try { const x = await post(`/skischool/bookings/${r.booking_id}/checkin`, {}); toast(`${r.first_name} checked in${includedWords(x.included)}`); await load(); await after([x]); } catch (err) { fail(err); } }, { kind: 'primary', small: true, label: `Check in ${r.first_name} ${r.last_name}` }),
               button('Label', () => printLabels(`booking_ids=${r.booking_id}`, `Label for ${r.first_name}`), { small: true, label: `Print a label for ${r.first_name}` }))))));
         sec.addEventListener('toggle', () => { if (sec.open) openClasses.add(sid); else openClasses.delete(sid); });
         body.append(sec);

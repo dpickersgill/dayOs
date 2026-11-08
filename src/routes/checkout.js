@@ -675,15 +675,14 @@ async function runSale(conn, req, body, { check = false } = {}) {
       };
 
       if (p.type === 'ticket') {
-        const validTo = addDays(p.validOn, Math.max(p.product.valid_days, 1) - 1);
         for (const key of holdersOf(ln)) { // one line item and one ticket per person, so every ticket carries a name
           const holder = people.get(key);
           const itemId = await item({ product_id: p.product.id, person_id: holder, valid_on: p.validOn, quantity: 1 });
-          const code = newCode();
-          const [tk] = await conn.query('INSERT INTO tickets (tenant_id, order_item_id, person_id, product_id, code, valid_from, valid_to, uses_remaining) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [tenantId, itemId, holder, p.product.id, code, p.validOn, validTo, p.product.uses ?? null]);
+          const tk = await require('../lib/ticketissue').issueTicket(conn, tenantId, { orderItemId: itemId, personId: holder, product: p.product, validOn: p.validOn });
+          const { code } = tk; const validTo = tk.valid_to;
           done.tickets.push({ code, product: p.product.name, tier: ln.tier, valid_from: p.validOn, valid_to: validTo, person_id: holder, holder: names.get(holder) });
           if (p.partner) {
-            const rid = await PPS.record(conn, tenantId, p.partner, { date: p.validOn, windowCents: p.windowCents, chargedCents: p.unit, personId: holder, orderId, itemId, ticketId: tk.insertId, channel: body.channel, idChecked: Boolean(ln.partner.id_checked), userId: req.auth.userId });
+            const rid = await PPS.record(conn, tenantId, p.partner, { date: p.validOn, windowCents: p.windowCents, chargedCents: p.unit, personId: holder, orderId, itemId, ticketId: tk.id, channel: body.channel, idChecked: Boolean(ln.partner.id_checked), userId: req.auth.userId });
             done.partner = (done.partner || []).concat({ id: rid, program: p.partner.program.name, kind: p.partner.kind, percent: p.partner.percent, number: p.partner.number, used: { free: p.partner.used.free + (p.partner.kind === 'free' ? 1 : 0), discount: p.partner.used.discount + (p.partner.kind === 'discount' ? 1 : 0) } });
           }
           // A season pass for a child already in a program with a lift ticket part: refund or credit it, per the mountain.

@@ -3,8 +3,9 @@
 // lessons, the price, the lift ticket and rental it includes, and the season pass offer for graduates.
 //   - It is a lesson package (products.kind 'lesson', uses = the lessons), so Sell and the online shop sell it as any
 //     package, and the roster spends it one lesson at a time (lesson_credits). learn_ladders holds the rest.
-//   - The included lift ticket and rental are named on the roster and at check-in for each ladder lesson, so the desk
-//     hands them out; they are part of the package price (nothing more is charged).
+//   - The included lift ticket and rental are named on the roster and at check-in for each ladder lesson. Checking the
+//     student in issues them (issueIncluded, 2026.11.13), once per lesson: the ticket for the lesson day and a rental
+//     contract to fit, the way a desk sale of a lesson, a ticket and a rental does. They are part of the package price.
 //   - A student who has attended every lesson on it graduates: they get a season pass offer (a guest reward, percent
 //     off the named pass, valid for pass_days), which Sell and the online shop take like any other reward.
 //   - The family's progress card shows "Lesson 2 of 3" and, once they graduate, the offer and its code.
@@ -116,4 +117,47 @@ async function progress(db, tenantId, personId, { issue = true } = {}) {
   return out;
 }
 
-module.exports = { schema, create, update, list, forCredit, progress, includesWords };
+/**
+ * At check-in for a ladder lesson (2026.11.13): issues the lift ticket and opens the rental the ladder includes, the way
+ * Sell does for a lesson sold with a ticket and a rental (lib/ticketissue.js; a rental with no gear yet is a contract to
+ * fit, lib/rentalfit.js). Once per lesson: the booking keeps the ticket and contract ids, so undoing and redoing the
+ * check-in issues nothing more. Each is a no-charge line on the package's own order, labelled as included. Returns
+ * { ticket, rental } (null for what the ladder does not include or was already issued), or null for any other lesson.
+ */
+async function issueIncluded(conn, tenantId, bookingId, { userId = null } = {}) {
+  const b = await one(conn, `SELECT b.id, b.person_id, b.credit_id, b.ladder_ticket_id, b.ladder_contract_id, DATE_FORMAT(s.starts_at, '%Y-%m-%d') AS day
+    FROM lesson_bookings b JOIN lesson_sessions s ON s.tenant_id = b.tenant_id AND s.id = b.session_id WHERE b.tenant_id = ? AND b.id = ? FOR UPDATE`, [tenantId, bookingId]);
+  if (!b || !b.credit_id) return null;
+  const l = await forCredit(conn, tenantId, b.credit_id);
+  if (!l || (!l.ticket_product_id && !l.rental_product_id)) return null;
+  const sale = await one(conn, 'SELECT i.order_id FROM lesson_credits c JOIN order_items i ON i.tenant_id = c.tenant_id AND i.id = c.order_item_id WHERE c.tenant_id = ? AND c.id = ?', [tenantId, b.credit_id]);
+  if (!sale) return null; // a package not sold through an order (none today): nothing to hang the lines on
+  const line = async (product, kind) => (await conn.query(
+    `INSERT INTO order_items (tenant_id, order_id, product_id, line_kind, person_id, tier, quantity, unit_price_cents, valid_on, discount_cents, tax_cents, list_cents, reward_cents, label)
+     VALUES (?, ?, ?, ?, ?, 'adult', 1, 0, ?, 0, 0, 0, 0, ?)`, [tenantId, sale.order_id, product.id, kind, b.person_id, b.day, `Included: ${l.name}`.slice(0, 80)]))[0].insertId;
+  const out = { ticket: null, rental: null };
+  if (l.ticket_product_id && !b.ladder_ticket_id) {
+    const product = await one(conn, 'SELECT id, name, valid_days, uses FROM products WHERE tenant_id = ? AND id = ?', [tenantId, l.ticket_product_id]);
+    if (product) {
+      const t = await require('./ticketissue').issueTicket(conn, tenantId, { orderItemId: await line(product, 'ticket'), personId: b.person_id, product, validOn: b.day });
+      await conn.query('UPDATE lesson_bookings SET ladder_ticket_id = ? WHERE tenant_id = ? AND id = ?', [t.id, tenantId, b.id]);
+      out.ticket = { id: t.id, code: t.code, product: product.name, valid_from: t.valid_from, valid_to: t.valid_to };
+    }
+  }
+  if (l.rental_product_id && !b.ladder_contract_id) {
+    const product = await one(conn, 'SELECT id, name, valid_days, rental_kind FROM products WHERE tenant_id = ? AND id = ?', [tenantId, l.rental_product_id]);
+    if (product) {
+      const itemId = await line(product, 'rental');
+      const c = await require('./rentalfit').createToFit(conn, tenantId, { personId: b.person_id, orderId: sale.order_id, orderItemId: itemId, validOn: b.day, product, notes: `Included in ${l.name}`.slice(0, 300) });
+      await conn.query('UPDATE order_items SET contract_id = ? WHERE tenant_id = ? AND id = ?', [c.id, tenantId, itemId]);
+      await conn.query('UPDATE lesson_bookings SET ladder_contract_id = ? WHERE tenant_id = ? AND id = ?', [c.id, tenantId, b.id]);
+      out.rental = { contract_id: c.id, product: product.name, status: 'to_fit', due_at: c.due_at };
+    }
+  }
+  if (out.ticket || out.rental) {
+    await audit(conn, { auth: { tenantId, userId }, ip: null }, 'ladder_issue', 'lesson_bookings', b.id, { ticket_id: out.ticket && out.ticket.id, contract_id: out.rental && out.rental.contract_id, ladder: l.id });
+  }
+  return out;
+}
+
+module.exports = { schema, create, update, list, forCredit, progress, includesWords, issueIncluded };

@@ -59,7 +59,8 @@ async function deskCheckIn(req, bookingId) {
     return ok;
   });
   const [row] = await LL.checkinList(pool, tenantId, { date: String(b.starts_at).slice(0, 10), q: LL.bookingCode(b.id) });
-  return { ...row, already: !done };
+  // a learn to ski ladder lesson: the lift ticket and rental it includes, issued with this check-in (2026.11.13)
+  return { ...row, already: !done, ...(done && done.included ? { included: done.included } : {}) };
 }
 
 router.post('/bookings/:id/checkin', SA.school('supervisor', ...desk), async (req, res) => {
