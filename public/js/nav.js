@@ -309,7 +309,7 @@ export function buildFrame({ views, main, signOut, menu = null, links = {} }) {
   // ---- phone: slim top bar, a labeled bottom bar, and a sheet with everything
   const tabLinks = new Map();
   // The bottom bar has room for about ten letters a label: long names get a short one there (the full name is the link's title).
-  const SHORT = { conditions: 'Mountain', lostfound: 'Lost items', availability: 'Availability', workforce: 'Staff', documents: 'Docs', shop: 'Shop', dashboard: 'Today', myshifts: 'My shifts', people: 'Customers', catalog: 'Products', area: 'Summary', 'patrol-records': 'Records', 'patrol-access': 'Access log', 'patrol-review': 'Review' };
+  const SHORT = { conditions: 'Mountain', lostfound: 'Lost items', availability: 'Availability', workforce: 'Staff', documents: 'Docs', shop: 'Shop', dashboard: 'Today', myshifts: 'My shifts', people: 'Customers', catalog: 'Products', park: 'Park', area: 'Summary', 'patrol-records': 'Records', 'patrol-access': 'Access log', 'patrol-review': 'Review' };
   const tab = (key) => { const a = keep(key, h('a', { href: hrefOf(key), dataset: { key }, class: 'tab', title: byKey.get(key), 'aria-label': byKey.get(key) }, icon(iconOf(key), 22), h('span', { 'aria-hidden': 'true' }, SHORT[key] || byKey.get(key)))); tabLinks.set(key, a); return a; };
   const more = h('button', { type: 'button', class: 'tab tab-menu', 'aria-haspopup': 'dialog' }, icon('menu', 22), h('span', null, 'Menu'));
   const tabbar = h('nav', { class: 'tabbar', 'aria-label': 'Quick links' }, plan.first.map(tab), more);

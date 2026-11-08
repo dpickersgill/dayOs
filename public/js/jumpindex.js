@@ -71,7 +71,7 @@ export const SUB_PAGES = [
   ['school', 'Season plan', '#/school?tab=plan&view=season', 'season plan publish', school('director')],
   ['school', 'Weather', '#/school?tab=plan&view=weather', 'weather delay cancel', school('director')],
   ['school', 'Staffing', '#/school?tab=plan&view=staffing', 'staffing enough instructors', school('director')],
-  ['school', 'Lessons reports', '#/school?tab=plan&view=reports', 'reports', school('director')],
+  ['school', 'Reports', '#/school?tab=plan&view=reports', 'lessons reports', school('director')],
   // Sell, gate, shop, rentals, waivers
   ['sell', 'Partner passes', '#/sell?tab=partners', 'partner indy pass'],
   ['sell', 'Gift cards', '#/sell?tab=gift', 'gift card'],
