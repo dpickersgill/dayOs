@@ -1,6 +1,7 @@
 // Patrol: cases (patient care reports), team, posts, equipment, training, trail checks and statistics.
 
 import { get, download } from '../api.js';
+import { icon } from '../icons.js';
 import { setAccess, has } from './patrol-feat.js';
 import { drawLevels } from './patrol-levels.js';
 import { h, clear, input, select, field, button, toast, formDialog, tabs, linkTabs, val, num, nowInput, todayStr, addDays, label, errorBox, empty, ctx, isManager } from '../ui.js';
@@ -116,8 +117,10 @@ export async function render(root, params = []) {
   const tabKey = [queryTab(), fromLegacy].find((k) => k && section.items.some((i) => i[0] === k)) || section.items[0][0];
   // The page title is Patrol. Its four parts (Now, Cases, People, Gear) are row 1, each its own address; the part's pages
   // are row 2. Patrol settings is a button for those who set patrol up (patrol Admins and managers).
-  const settingsBtn = me.access_level === 'admin' || isManager() ? h('a', { class: 'btn', href: '#/settings/patrol', 'data-act': 'patrol-settings' }, 'Patrol settings') : null;
-  // New case is the one thing a patroller must always find: in the header on every screen size, and floating on a phone.
+  // main.js moves it beside Help in the title row (an icon button on a phone).
+  const settingsBtn = me.access_level === 'admin' || isManager() ? h('a', { class: 'btn small head-settings', href: '#/settings/patrol', 'data-act': 'patrol-settings' }, icon('settings', 16), h('span', { class: 'head-btn-text' }, 'Patrol settings')) : null;
+  // New case is the one thing a patroller must always find: in the header on a computer, floating on a phone (the
+  // header one hides there, so the work starts higher on the screen).
   const headNew = has('create_case') ? h('button', { type: 'button', class: 'btn primary patrol-new', 'data-act': 'new-case-head', onclick: () => newCase() }, h('span', { 'aria-hidden': 'true' }, '+'), ' New case') : null;
   const note = h('p', { class: 'page-note', 'data-section-note': section.id }, section.note);
   const row1 = linkTabs(SECTIONS.map((s) => [s.id, s.text, `#/patrol/${s.id}`]), section.id, { label: 'Patrol' });

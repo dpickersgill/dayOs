@@ -7,6 +7,7 @@
 import { h, clear, ctx, label, isManager } from './ui.js';
 import { icon } from './icons.js';
 import { readTerminal } from './terminal.js';
+import { subPagesFor } from './jumpindex.js';
 
 // Home: pinned at the top for everyone, never inside All apps or a menu.
 export const HOME = ['dashboard', 'inbox', 'calendar', 'myshifts'];
@@ -19,8 +20,23 @@ export const GROUPS = [
 ];
 export const GROUP_OF = Object.fromEntries([...HOME.map((k) => [k, { id: 'home', name: 'Home' }]), ...GROUPS.flatMap(([name, id, keys]) => keys.map((k) => [k, { id, name }]))]);
 const BOTTOM = ['settings', 'help'];
-// The phone bar: the person's first apps, then these (Inbox has its own button in the phone's top bar).
+// The phone bar: the screen the person's menu opens on first, then their apps, then these (Inbox has its own button in
+// the phone's top bar).
 const PHONE_HOME = ['myshifts', 'dashboard', 'calendar'];
+
+// What each role is called, the same in the person's name card and in Settings, Team and logins, Menus for each role.
+export const ROLE_NAMES = {
+  owner: 'Owner', manager: 'Manager', counter: 'Ticket window and rentals', instructor: 'Instructor', staff: 'Lift and mountain staff',
+  patrol: 'Patroller', patrol_director: 'Patrol director', area: 'Ski area (read-only)',
+};
+/** The name of this person's role: a patroller whose roster access is Admin or Manager is the Patrol director. */
+export function roleName(me) {
+  if (!me) return '';
+  if (me.role === 'patrol' && me.patrol_lead) return ROLE_NAMES.patrol_director;
+  return ROLE_NAMES[me.role] || label(me.role);
+}
+// The ski area's read-only login: its menu is the patrol summary (and Help), never All apps.
+export const AREA_MENU = { apps: ['area'], start: 'area' };
 const OPEN_KEY = 'so.nav.open'; // which groups this device keeps open
 
 // Patrol's four parts are its page tabs (row 1 on the Patrol page). The side menu has none of them.
@@ -114,18 +130,22 @@ function whoVersion() {
  * home: Today, Inbox, Calendar, My shifts (pinned, the same for everyone). apps: their short menu, in its order, without
  * Home. groups: everything else they may open, in the four groups of All apps. first: the phone bar's four items.
  */
-export function menuPlan(views, menu) {
+export function menuPlan(views, menu, links = {}) {
   const keys = views.map(([k]) => k);
   const has = (k) => keys.includes(k);
+  // A shortcut (a page inside an app, such as Patrol's Records requests) shows when the person may open its app.
+  const usable = (k) => has(k) || Boolean(links && links[k] && has(links[k].app));
   const home = HOME.filter(has);
   const bottom = BOTTOM.filter(has);
-  const apps = menu && Array.isArray(menu.apps) ? [...new Set(menu.apps)].filter((k) => has(k) && !HOME.includes(k) && !BOTTOM.includes(k)) : [];
+  const apps = menu && Array.isArray(menu.apps) ? [...new Set(menu.apps)].filter((k) => usable(k) && !HOME.includes(k) && !BOTTOM.includes(k)) : [];
   const listed = new Set([...home, ...apps, ...bottom]);
   const more = keys.filter((k) => !listed.has(k));
   const groups = GROUPS.map(([name, id, ks]) => ({ name, id, keys: ks.filter((k) => more.includes(k)) })).filter((g) => g.keys.length);
   const extra = more.filter((k) => !groups.some((g) => g.keys.includes(k))); // a new app shows somewhere rather than nowhere
   if (extra.length) groups.push({ name: 'More', id: 'more', keys: extra });
-  const first = [...apps, ...PHONE_HOME.filter(has)].slice(0, 4);
+  // The phone bar always starts with the screen the menu opens on (Today, Patrol, Lessons, Sell, Patrol summary).
+  const start = menu && menu.start && has(menu.start) && menu.start !== 'inbox' ? [menu.start] : [];
+  const first = [...new Set([...start, ...apps, ...PHONE_HOME.filter(has)])].slice(0, 4);
   return { home, apps, groups, bottom, more, first };
 }
 
@@ -140,17 +160,20 @@ function keepOpen(id, open) { const now = new Set(openGroups()); if (open) now.a
  * Builds the page frame. views: [[key, label]] already filtered for this person; menu: ctx.me.menu.
  * Returns { shell, setCurrent(key, params), openPalette(), openAllApps(), openSheet(), setBadge(), plan }.
  */
-export function buildFrame({ views, main, signOut, menu = null }) {
+export function buildFrame({ views, main, signOut, menu = null, links = {} }) {
   const byKey = new Map(views);
-  const have = (k) => byKey.has(k);
-  const plan = menuPlan(views, menu);
+  for (const [k, l] of Object.entries(links || {})) if (!byKey.has(k) && byKey.has(l.app)) byKey.set(k, l.label);
+  const have = (k) => byKey.has(k) && !(links && links[k]);
+  const plan = menuPlan(views, menu, links);
+  const hrefOf = (k) => (links && links[k] ? `#/${links[k].href}` : `#/${k}`);
+  const iconOf = (k) => (links && links[k] ? links[k].icon || links[k].app : k);
   const shell = h('div', { class: 'shell' });
-  const links = new Map(); // key -> every <a> for that page (side menu, phone bar, sheet)
+  const links_ = new Map(); // key -> every <a> for that page (side menu, phone bar, sheet)
   const dots = new Set();
   let currentKey = null;
   let currentSection = null;
-  const keep = (key, a) => { if (!links.has(key)) links.set(key, []); links.get(key).push(a); return a; };
-  const link = (key, cls = 'nav-row') => keep(key, h('a', { href: `#/${key}`, class: cls, dataset: { key } }, icon(key, 18), h('span', { class: 'nav-label' }, byKey.get(key))));
+  const keep = (key, a) => { if (!links_.has(key)) links_.set(key, []); links_.get(key).push(a); return a; };
+  const link = (key, cls = 'nav-row') => keep(key, h('a', { href: hrefOf(key), class: cls, dataset: { key } }, icon(iconOf(key), 18), h('span', { class: 'nav-label' }, byKey.get(key))));
 
   /**
    * A folding group: a heading button (aria-expanded) and its apps. The group holding the open page is locked open:
@@ -204,7 +227,7 @@ export function buildFrame({ views, main, signOut, menu = null }) {
   if (ctx.me.role !== 'area') import('./assistant.js').then((m) => m.assistantOn()).then((yes) => { ask.hidden = !yes; topAsk.hidden = !yes; fit(); }).catch(() => {});
 
   const name = ctx.me.login_name || ctx.me.username || ctx.me.email;
-  const roleText = ctx.me.role === 'area' ? 'Ski area (read-only)' : label(ctx.me.role);
+  const roleText = roleName(ctx.me);
   const terminal = Boolean(ctx.me.terminal) || Boolean(readTerminal());
   const outBtn = (cls) => { const b = h('button', { type: 'button', class: cls }, icon('signout', 17), h('span', null, 'Sign out')); b.addEventListener('click', () => signOut()); return b; };
   // A shared counter computer: the next person switches in with their PIN (signing out shows the PIN screen there).
@@ -286,8 +309,8 @@ export function buildFrame({ views, main, signOut, menu = null }) {
   // ---- phone: slim top bar, a labeled bottom bar, and a sheet with everything
   const tabLinks = new Map();
   // The bottom bar has room for about ten letters a label: long names get a short one there (the full name is the link's title).
-  const SHORT = { conditions: 'Mountain', lostfound: 'Lost items', availability: 'Availability', workforce: 'Staff', documents: 'Docs', shop: 'Shop', dashboard: 'Today', myshifts: 'My shifts', people: 'Customers', catalog: 'Products' };
-  const tab = (key) => { const a = keep(key, h('a', { href: `#/${key}`, dataset: { key }, class: 'tab', title: byKey.get(key), 'aria-label': byKey.get(key) }, icon(key, 22), h('span', { 'aria-hidden': 'true' }, SHORT[key] || byKey.get(key)))); tabLinks.set(key, a); return a; };
+  const SHORT = { conditions: 'Mountain', lostfound: 'Lost items', availability: 'Availability', workforce: 'Staff', documents: 'Docs', shop: 'Shop', dashboard: 'Today', myshifts: 'My shifts', people: 'Customers', catalog: 'Products', area: 'Summary', 'patrol-records': 'Records', 'patrol-access': 'Access log', 'patrol-review': 'Review' };
+  const tab = (key) => { const a = keep(key, h('a', { href: hrefOf(key), dataset: { key }, class: 'tab', title: byKey.get(key), 'aria-label': byKey.get(key) }, icon(iconOf(key), 22), h('span', { 'aria-hidden': 'true' }, SHORT[key] || byKey.get(key)))); tabLinks.set(key, a); return a; };
   const more = h('button', { type: 'button', class: 'tab tab-menu', 'aria-haspopup': 'dialog' }, icon('menu', 22), h('span', null, 'Menu'));
   const tabbar = h('nav', { class: 'tabbar', 'aria-label': 'Quick links' }, plan.first.map(tab), more);
   const topSearch = h('button', { type: 'button', class: 'top-search', 'aria-label': 'Jump to a page' }, icon('search', 18), h('span', null, 'Jump to a page'), h('kbd', null, isMac() ? '⌘K' : 'Ctrl K'));
@@ -313,7 +336,7 @@ export function buildFrame({ views, main, signOut, menu = null }) {
     closeBtn.focus();
     return { close, box };
   }
-  const tile = (k) => h('a', { href: `#/${k}`, class: 'sheet-item', dataset: { key: k }, 'aria-current': currentKey === k ? 'page' : null }, icon(k, 20), h('span', null, byKey.get(k)), dots.has(k) ? h('span', { class: 'nav-badge dot', 'aria-label': 'new' }) : null);
+  const tile = (k) => h('a', { href: hrefOf(k), class: 'sheet-item', dataset: { key: k }, 'aria-current': hereKey() === k ? 'page' : null }, icon(iconOf(k), 20), h('span', null, byKey.get(k)), dots.has(k) ? h('span', { class: 'nav-badge dot', 'aria-label': 'new' }) : null);
   const sheetGroups = (prefix) => plan.groups.map((g) => foldGroup(g, { prefix, item: tile }));
   const sheetAllHead = () => (plan.groups.length ? h('p', { class: 'nav-all-head' }, 'All apps') : null);
 
@@ -368,9 +391,15 @@ export function buildFrame({ views, main, signOut, menu = null }) {
     const overlay = h('div', { class: 'overlay palette-overlay' }, panel);
     let shown = []; let at = 0;
 
+    // Pages inside apps (the tabs of row 1 and row 2), with the app's name, only those this person may open.
+    const appName = (k) => byKey.get(k) || k;
+    const subs = () => subPagesFor(viewKeys, { manager: isManager(), role: ctx.me.role, school: ctx.me.school_access, patrol: patrolInfo }).map((p) => ({
+      id: `sub-${p.href}`, title: p.title, app: appName(p.app), hint: location.hash === p.href ? 'You are here' : '', icon: p.app, words: `${p.title} ${appName(p.app)} ${p.words}`, run: () => { location.hash = p.href; },
+    }));
     const everything = () => [
       ...views.map(([key, text]) => ({ id: `page-${key}`, title: text, hint: key === currentKey ? 'You are here' : '', icon: key, words: `${text} ${ALSO[key] || ''}`, run: () => { location.hash = `#/${key}`; } })),
       ...(have('patrol') ? PATROL_SECTIONS.map(([id, text]) => ({ id: `patrol-${id}`, title: `Patrol: ${text}`, hint: currentKey === 'patrol' && currentSection === id ? 'You are here' : '', icon: 'patrol', words: `patrol ${text}`, run: () => { location.hash = `#/patrol/${id}`; } })) : []),
+      ...subs(),
       ...actions(),
     ];
     function score(item, q) {
@@ -388,7 +417,7 @@ export function buildFrame({ views, main, signOut, menu = null }) {
       let rows;
       if (!q) {
         const rec = recent().filter((k) => k !== currentKey).slice(0, 3).map((k) => all.find((i) => i.id === `page-${k}`)).filter(Boolean);
-        const rest = all.filter((i) => !rec.includes(i));
+        const rest = all.filter((i) => !rec.includes(i) && !i.app); // pages inside apps show once something is typed
         rows = [...(rec.length ? [{ heading: 'Recent' }, ...rec] : []), { heading: rec.length ? 'Everything' : 'Pages and commands' }, ...rest];
       } else {
         const hits = all.map((i) => [i, score(i, q)]).filter(([, s]) => s > 0).sort((a, b) => b[1] - a[1]).map(([i]) => i);
@@ -403,7 +432,7 @@ export function buildFrame({ views, main, signOut, menu = null }) {
         if (r.none) { list.append(h('li', { class: 'palette-none', role: 'presentation' }, `Nothing matches "${box.value.trim()}". Try a page name like Sell or Patrol.`)); continue; }
         n += 1;
         const idx = n;
-        const li = h('li', { class: 'palette-item', role: 'option', id: `pal-${idx}`, 'aria-selected': String(idx === at) }, icon(r.icon, 18), h('span', { class: 'p-title' }, r.title), r.hint ? h('span', { class: 'p-hint' }, r.hint) : null);
+        const li = h('li', { class: 'palette-item', role: 'option', id: `pal-${idx}`, 'aria-selected': String(idx === at) }, icon(r.icon, 18), h('span', { class: 'p-title' }, r.title, r.app ? h('span', { class: 'p-app' }, ` in ${r.app}`) : null), r.hint ? h('span', { class: 'p-hint' }, r.hint) : null);
         li.addEventListener('mousemove', () => { if (at !== idx) { at = idx; mark(); } });
         li.addEventListener('click', () => choose(idx));
         list.append(li);
@@ -426,6 +455,14 @@ export function buildFrame({ views, main, signOut, menu = null }) {
     document.body.append(overlay);
     paint();
     box.focus();
+    // Patrol's pages depend on the person's Patrol access: load it once, then show those pages too.
+    if (have('patrol') && !patrolInfo && !isManager()) loadPatrol().then(() => { if (overlay.isConnected) paint(); });
+  }
+  let patrolInfo = null;
+  async function loadPatrol() {
+    try { patrolInfo = JSON.parse(sessionStorage.getItem('so.patrol.me') || 'null'); } catch (_) { patrolInfo = null; }
+    if (patrolInfo) return;
+    try { const { get } = await import('./api.js'); patrolInfo = await get('/patrol/me'); } catch (_) { patrolInfo = null; }
   }
   search.addEventListener('click', () => openPalette());
   topSearch.addEventListener('click', () => openPalette());
@@ -458,15 +495,35 @@ export function buildFrame({ views, main, signOut, menu = null }) {
    * Marks where the person is: the app in the menus (Patrol's part is marked on the Patrol page itself). The group of
    * All apps holding it opens and stays open, and the side menu scrolls so the app is in view under the pinned top.
    */
+  /** The menu item for where the person is: a shortcut when the address is its page (Patrol, Records requests), else the app. */
+  function hereKey() {
+    const at = (typeof location !== 'undefined' && location.hash) || '';
+    const tab = (hsh) => { try { return new URLSearchParams(hsh.split('?')[1] || '').get('tab'); } catch (_) { return null; } };
+    for (const [k, l] of Object.entries(links || {})) {
+      const want = `#/${l.href}`;
+      if (anchorsFor(k) && at.split('?')[0] === want.split('?')[0] && tab(at) === tab(want)) return k;
+    }
+    return currentKey;
+  }
+  const anchorsFor = (k) => (links_.get(k) || []).length > 0;
+  function mark() {
+    const key = hereKey();
+    for (const [k, anchors] of links_) for (const a of anchors) { if (k === key) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); }
+    more.classList.toggle('on', !tabLinks.has(key));
+  }
   function setCurrent(key, params = []) {
     currentKey = key;
     currentSection = key === 'patrol' ? patrolSection(params) : null;
-    for (const [k, anchors] of links) for (const a of anchors) { if (k === key) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); }
+    mark();
     paintFolds();
     fit(); // cuts the middle to whole rows and scrolls the open app into view
-    more.classList.toggle('on', !tabLinks.has(key));
     const rec = [key, ...recent().filter((k) => k !== key)].slice(0, 5);
     write(RECENT_KEY, JSON.stringify(rec));
+  }
+  // A tab change inside a page does not draw the page again, but a shortcut to that tab is lit (or no longer lit).
+  if (typeof window !== 'undefined' && window.addEventListener && links && Object.keys(links).length) {
+    const onHash = () => { if (!shell.isConnected) { window.removeEventListener('hashchange', onHash); return; } if (currentKey) mark(); };
+    window.addEventListener('hashchange', onHash);
   }
   /**
    * A count on a page's menu links (unread messages on Inbox). 0 removes it. With { dot: true } it is a small dot
@@ -474,7 +531,7 @@ export function buildFrame({ views, main, signOut, menu = null }) {
    * the page sits inside the menu sheet there.
    */
   function setBadge(key, n, { dot = false, says = 'unread' } = {}) {
-    for (const a of links.get(key) || []) {
+    for (const a of links_.get(key) || []) {
       let b = a.querySelector('.nav-badge');
       if (!n) { if (b) b.remove(); a.removeAttribute('aria-description'); continue; }
       if (!b) { b = h('span', { class: 'nav-badge', 'aria-hidden': 'true' }); a.append(b); }

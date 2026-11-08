@@ -406,6 +406,8 @@ async function drawLayout(box, list) {
   const offOutbox = onOutbox(() => { if (data.placed.length) drawLists(); });
   removeWhenGone(mapEl, { remove: offOutbox });
   await refresh(true);
+  // Today's Inspections button (#/park?tab=layout&go=inspect): straight to the list of features to inspect.
+  if (new URLSearchParams(location.hash.split('?')[1] || '').get('go') === 'inspect' && onMap.scrollIntoView) onMap.previousElementSibling.scrollIntoView({ block: 'start' });
 }
 
 /** Asks for a short reason. Resolves with it, or rejects (quietly) when the dialog is closed. */

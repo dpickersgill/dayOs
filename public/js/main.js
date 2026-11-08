@@ -12,9 +12,9 @@ import { watchPasswords } from './showpw.js';
 import { startTabWatch, activity as tabActivity, checkNow as tabCheckNow, msLeft as tabMsLeft, refresh as tabRefresh, LOCK_MINUTES } from './tablock.js';
 import * as alerts from './alerts.js';
 import { flush as flushOutbox, waitingCounts, forgetCases, setDeviceKey, restoreDeviceKey, dropDeviceKey } from './outbox.js';
-import { buildFrame, GROUP_OF, PATROL_SECTIONS, patrolSection } from './nav.js';
+import { buildFrame, GROUP_OF, PATROL_SECTIONS, patrolSection, AREA_MENU } from './nav.js';
 import { icon } from './icons.js';
-import { h, svg, clear, ctx, can, isManager, schoolCan, toast, loading, errorBox, button, field, input, dialog, closeAllDialogs, dirtyDialogOpen, newPage, hashPath, todayStr } from './ui.js';
+import { h, svg, clear, ctx, can, isManager, schoolCan, toast, loading, errorBox, button, field, input, dialog, closeAllDialogs, dirtyDialogOpen, newPage, hashPath, todayStr, noteBack } from './ui.js';
 
 const VIEWS = [
   // [hash, label, who may open it, loader]
@@ -27,9 +27,9 @@ const VIEWS = [
   ['assets', 'Assets and fleet', () => can('staff'), () => import('./views/assets.js')],
   ['documents', 'Documents', () => true, () => import('./views/documents.js')],
   ['rentals', 'Rentals', () => can('counter'), () => import('./views/rentals.js')],
-  ['school', 'Lessons', () => can('instructor', 'counter'), () => import('./views/school.js')], // the Ski school app; its group in All apps is Ski school
+  ['school', 'Lessons', () => can('instructor', 'counter'), () => import('./views/school.js')], // its group in All apps is Ski school (Lessons and Programs)
   ['programs', 'Programs', () => can('instructor', 'counter'), () => import('./views/programs.js')],
-  ['availability', 'Instructor availability', () => can('instructor', 'counter'), () => import('./views/availability.js')],
+  ['availability', 'My availability', () => can('instructor', 'counter'), () => import('./views/availability.js')], // an instructor's own page; everyone else is sent to Lessons
   ['patrol', 'Patrol', () => can('patrol'), () => import('./views/patrol.js')],
   ['people', 'Customers', () => can('counter', 'instructor'), () => import('./views/people.js')],
   ['waivers', 'Waivers', () => can('counter', 'instructor'), () => import('./views/waivers.js')],
@@ -565,7 +565,9 @@ function buildShell() {
   clear(app);
   // Instructor availability is a tab of Lessons for everyone but an instructor, so it is not a menu item for them.
   const inMenu = visibleViews().filter(([key]) => key !== 'availability' || ownAvailability());
-  frame = buildFrame({ views: inMenu.map(([key, text]) => [key, text]), main, signOut: () => signOut(), menu: ctx.me.menu || null });
+  // The ski area's read-only login has a menu of its own: the patrol summary (and Help), no All apps.
+  const menu = ctx.me.role === 'area' ? AREA_MENU : ctx.me.menu || null;
+  frame = buildFrame({ views: inMenu.map(([key, text]) => [key, text]), main, signOut: () => signOut(), menu, links: ctx.me.menu_links || {} });
   app.append(frame.shell);
   if (ctx.me.sandbox) app.append(demoPill(ctx.me.sandbox));
   showBillingBanner();
@@ -642,6 +644,7 @@ async function route() {
     if (my !== navToken) return;
     clear(main).append(holder);
     decorateHead(holder, key, params, mod);
+    noteWork(key, params);
     movedNote(holder, key);
     main.focus({ preventScroll: true });
   } catch (err) {
@@ -660,8 +663,23 @@ export function settingsPageFor(key, mod) {
   return null;
 }
 const appName = (key) => (VIEWS.find((v) => v[0] === key) || [key, key])[1];
-// The settings button keeps the Settings page's own name ("Ski school settings" for Lessons).
-const SETTINGS_NAME = { school: 'Ski school', availability: 'Ski school' };
+// The settings button is named for the app ("Lessons settings"); Instructor availability's setup is in Lessons settings.
+const SETTINGS_NAME = { availability: 'Lessons' };
+
+/**
+ * Notes the page someone is working on (every page but Settings and Help), so "Back to the app" in Settings and the back
+ * link on Help return to it, tab and all: Patrol, Gear rather than Today.
+ */
+function noteWork(key = currentPath().key, params = currentPath().params) {
+  if (!key || key === 'settings' || key === 'help') return;
+  const part = key === 'patrol' ? (PATROL_SECTIONS.find(([id]) => id === patrolSection(params)) || [])[1] : null;
+  noteBack({ hash: location.hash, key, name: part ? `${appName(key)}, ${part}` : appName(key), part: key === 'patrol' ? patrolSection(params) : null });
+}
+/** Where an app's Help button goes: its Help page, and for Patrol the part it was pressed on (Patrol, Gear: Gear help). */
+export function helpHref(key, params = []) {
+  if (key === 'patrol') return `#/help/for-patrol?part=${patrolSection(params)}`;
+  return `#/help/for-${key}`;
+}
 
 /**
  * The page header, the same on every page: a breadcrumb (App / Tab) where the page has tabs (Patrol / Section on
@@ -689,10 +707,13 @@ function decorateHead(holder, key, params, mod) {
   const crumbs = key === 'settings' ? null : breadcrumb(holder, key, params); // Settings draws its own
   if (crumbs) lead.prepend(crumbs);
   // Help and the app's settings: next to the title, before the page's own buttons.
+  // On a phone both are icon buttons in the title row (the words hide; the names stay for screen readers).
   const tools = h('div', { class: 'head-tools' });
   const page = isManager() ? settingsPageFor(key, mod) : null;
-  if (page) tools.append(h('a', { class: 'btn small head-settings', href: `#/settings/${page}` }, icon('settings', 16), h('span', null, `${SETTINGS_NAME[key] || appName(key)} settings`)));
-  if (key !== 'help') tools.append(h('a', { class: 'btn small help-btn', href: `#/help/for-${key}`, 'aria-label': `Help with ${appName(key)}` }, icon('help', 16), h('span', null, 'Help')));
+  const own = head.querySelector('.head-settings'); // an app that draws its own (Patrol settings, for patrol Admins too)
+  const setName = own ? own.textContent.trim() : `${SETTINGS_NAME[key] || appName(key)} settings`;
+  if (own) { own.classList.add('btn', 'small'); own.setAttribute('aria-label', setName); own.title = setName; tools.append(own); } else if (page) tools.append(h('a', { class: 'btn small head-settings', href: `#/settings/${page}`, 'aria-label': setName, title: setName }, icon('settings', 16), h('span', { class: 'head-btn-text' }, setName)));
+  if (key !== 'help') tools.append(h('a', { class: 'btn small help-btn', href: helpHref(key, params), 'aria-label': `Help with ${appName(key)}`, title: 'Help' }, icon('help', 16), h('span', { class: 'head-btn-text' }, 'Help')));
   if (tools.firstChild) lead.after(tools);
 }
 
@@ -1005,7 +1026,7 @@ window.addEventListener('hashchange', () => {
   lastHash = location.hash;
   if (now !== lastPath) closeAllDialogs();
   lastPath = now;
-  if (ctx.me && frame && drawnPath !== null && now === drawnPath && currentPath().key) return;
+  if (ctx.me && frame && drawnPath !== null && now === drawnPath && currentPath().key) { noteWork(); return; } // a tab change: remember the tab
   route();
 });
 watchPasswords();

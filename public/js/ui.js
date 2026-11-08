@@ -5,6 +5,18 @@ import { describeError } from './api.js';
 
 export const ctx = { me: null, tz: 'America/New_York' };
 
+// The page someone was working on before they opened Settings or Help: "Back to the app" in Settings and the back link
+// on an app's Help return there (main.js notes it on every page change). { hash, key, name } or null.
+const BACK_KEY = 'so.back';
+export function noteBack(back) {
+  ctx.back = back;
+  try { sessionStorage.setItem(BACK_KEY, JSON.stringify(back)); } catch (_) { /* this tab only */ }
+}
+export function backTo() {
+  if (ctx.back) return ctx.back;
+  try { const v = JSON.parse(sessionStorage.getItem(BACK_KEY) || 'null'); return v && typeof v.hash === 'string' && v.hash.startsWith('#/') ? v : null; } catch (_) { return null; }
+}
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 export function h(tag, attrs, ...children) {
@@ -292,7 +304,9 @@ export function dialog(title, content, { wide = false, footer, onClose } = {}) {
     document.removeEventListener('focusin', onFocus);
     for (const el of inerted) el.inert = false;
     overlay.remove();
-    if (previous && previous.isConnected) previous.focus();
+    // Back to the page itself (a dialog that opened as the page loaded, like the passkey offer): no scroll, or a phone's
+    // sticky top bar covers the page title.
+    if (previous && previous.isConnected) previous.focus(previous.id === 'main' ? { preventScroll: true } : undefined);
     return onClose ? onClose() : undefined; // lets a dialog that holds the camera or NFC let go of it however it was closed
   }
   closeBtn.addEventListener('click', requestClose);
@@ -413,6 +427,14 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('hashchange', syncTabsFromAddress);
 }
 
+/** A tab row that slides sideways (row 2 on a phone): the open tab is brought into view, without moving the page. */
+function showTab(bar, b) {
+  if (!b || !bar || bar.scrollWidth <= bar.clientWidth + 1) return;
+  const left = b.offsetLeft - bar.offsetLeft;
+  if (left < bar.scrollLeft) bar.scrollLeft = Math.max(0, left - 16);
+  else if (left + b.offsetWidth > bar.scrollLeft + bar.clientWidth) bar.scrollLeft = left + b.offsetWidth - bar.clientWidth + 32;
+}
+
 /**
  * Tabs, the one tab component every app uses. tabs = [[key, label, render(panel)]]. initial: the tab to open when the
  * address names none. opts.param: the query name that keeps the open tab (default 'tab'); opts.address: false keeps the
@@ -438,6 +460,8 @@ export function tabs(items, initial, opts = {}) {
     const my = ++token;
     current = key;
     for (const [k, b] of buttons) { b.setAttribute('aria-selected', String(k === key)); b.tabIndex = k === key ? 0 : -1; }
+    showTab(bar, buttons.get(key));
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => showTab(bar, buttons.get(key))); // once it is on screen
     panel.setAttribute('aria-labelledby', `tab-${uid}-${key}`);
     clear(panel).append(loading());
     try { wrap.dispatchEvent(new Event('tabs:change', { bubbles: true })); } catch (_) { /* the breadcrumb catches up on the next page */ }

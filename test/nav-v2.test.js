@@ -98,9 +98,10 @@ test('menu plans: Home, then the role\'s own apps, then everything else it may o
     staff: ['conditions', 'gate', 'lostfound'],
     patrol: ['patrol', 'conditions'],
   };
+  // The phone bar starts with the screen the menu opens on (2026.11.13): Today for owners, managers and staff.
   const phone = {
-    owner: ['money', 'conditions', 'patrol', 'school'], manager: ['conditions', 'sell', 'patrol', 'school'], counter: ['sell', 'gate', 'rentals', 'people'],
-    instructor: ['school', 'availability', 'people', 'waivers'], staff: ['conditions', 'gate', 'lostfound', 'myshifts'], patrol: ['patrol', 'conditions', 'myshifts', 'dashboard'],
+    owner: ['dashboard', 'money', 'conditions', 'patrol'], manager: ['dashboard', 'conditions', 'sell', 'patrol'], counter: ['sell', 'gate', 'rentals', 'people'],
+    instructor: ['school', 'availability', 'people', 'waivers'], staff: ['dashboard', 'conditions', 'gate', 'lostfound'], patrol: ['patrol', 'conditions', 'myshifts', 'dashboard'],
   };
   for (const role of Object.keys(want)) {
     const views = viewsFor(role);
@@ -155,10 +156,10 @@ test('Instructor availability: reachable for everyone who could open it, inside 
   const main = read('public/js/main.js');
   assert.match(main, /availability: \(\) => \(ownAvailability\(\) \? null : AVAILABILITY_TAB\)/, 'others are sent to the Lessons tab');
   assert.match(main, /AVAILABILITY_TAB = '#\/school\?tab=team&view=availability'/);
-  assert.match(main, /\['availability', 'Instructor availability', \(\) => can\('instructor', 'counter'\)/, 'the route and who may open it are unchanged');
+  assert.match(main, /\['availability', 'My availability', \(\) => can\('instructor', 'counter'\)/, 'the route and who may open it are unchanged; an instructor knows it as My availability');
   const school = read('public/js/views/school.js');
   assert.match(school, /\['team', [^\n]*'instructors', 'availability', 'payroll'/, 'Lessons, Instructors, Availability');
-  assert.match(school, /items\.push\(\['availability', 'Availability'/);
+  assert.match(school, /if \(!instructor\) items\.push\(\['availability', 'Availability'/, 'not for an instructor, who has My availability in their menu');
 });
 
 test('Patrol: old addresses resolve to the right part, and the parts are page tabs, not menu items', () => {
@@ -192,7 +193,8 @@ test('the look: quiet group headings, sentence case All apps, one row height, a 
   assert.ok(!/\.pbody > div > div > \.tabs/.test(css) && !/\.subtabs > \.tabs/.test(css), 'no app-specific tab rows left');
   assert.equal((css.match(/\n\.tabs\.row1 \{/g) || []).length, 1, 'row 1 is defined once');
   assert.equal((css.match(/\n\.tabs\.row2 \{/g) || []).length, 1, 'row 2 is defined once');
-  assert.match(rule('.tabs.row2'), /flex-wrap: wrap/, 'row 2 wraps');
+  assert.match(rule('.tabs.row2'), /flex-wrap: wrap/, 'row 2 wraps on a computer');
+  assert.match(css, /\n {2}\.tabs\.row2 \{ gap: 6px; flex-wrap: nowrap; overflow-x: auto;/, 'and slides sideways in one line on a phone');
   assert.match(css, /\n {2}\.tabs\.row2 button \{ min-height: 44px;/, 'with 44px targets on phones');
   const ui = read('public/js/ui.js');
   assert.match(ui, /const row = opts\.row \|\| \(nesting > 0 \? 2 : 1\);/, 'tabs inside a tab are row 2 on their own');

@@ -1582,6 +1582,25 @@ input[type='search'][aria-label='Search documents'] { min-width: min(20rem, 100%
   .page-head h1 { font-size: 1.75rem; }
   .head-tools .btn { min-height: 44px; }
 }
+/* Phone page header (2026.11.13): the work starts higher. Help and the app's settings are round icon buttons in the
+   title row (their words stay for screen readers and as the tooltip); Patrol's header New case hides (the floating one
+   stays) and so does Wall screen; Today's Day and Customize share one row. */
+.p-app { color: var(--quiet); font-weight: 400; }
+@media (max-width: 860px) {
+  .page-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+  .page-head > * { grid-column: 1 / -1; }
+  .page-head > .head-lead { grid-column: 1; grid-row: 1; }
+  .page-head > .head-tools { grid-column: 2; grid-row: 1; align-self: start; flex-wrap: nowrap; gap: 6px; }
+  .page-head > .head-lead:has(> .crumbs) + .head-tools { margin-top: 20px; }
+  .head-tools .btn { width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0; justify-content: center; border-radius: 999px; }
+  .head-tools .btn .ico { color: var(--ink); }
+  .head-tools .head-btn-text { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  .patrol-head .patrol-new, .page-head .wall-btn { display: none; }
+  .patrol-head .patrol-actions:not(:has(> :not(.patrol-new))) { display: none; }
+  .page-head .actions.dash-actions { flex-wrap: nowrap; align-items: flex-end; }
+  .page-head .actions.dash-actions .field { flex: 1 1 auto; min-width: 0; }
+  .page-head .actions.dash-actions .btn { flex: 0 0 auto; }
+}
 
 /* Dates and short fields do not need the whole page */
 .field input[type='date'], .field input[type='datetime-local'], .field input[type='time'] { max-width: 15rem; }
@@ -3719,8 +3738,11 @@ button.fill-day:hover { border-color: var(--line-strong); }
 .tabs.tabs-pills button { font-weight: 700; min-height: 44px; white-space: nowrap; }
 @media (max-width: 860px) {
   .tabs.row1 { gap: 18px; mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
-  /* Row 2 wraps on a phone, so nothing hides off the edge, with 44px targets for gloved hands */
-  .tabs.row2 { gap: 6px; }
+  /* Row 2 stays one line on a phone and slides sideways (it wrapped to three lines on Patrol, Cases), with 44px
+     targets for gloved hands; the open tab is scrolled into view (ui.js) */
+  .tabs.row2 { gap: 6px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+  .tabs.row2::-webkit-scrollbar { display: none; }
+  .tabs.row2 button { flex: none; }
   .tabs.row2 button { min-height: 44px; padding: 0 14px; }
 }
 

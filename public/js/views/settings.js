@@ -5,7 +5,7 @@
 //
 // Pages: #/settings/<page>. #/settings on its own opens Your profile and sign-in on a computer, and the list on a phone.
 import { get } from '../api.js';
-import { h, clear, ctx, isManager, schoolCan, errorBox, loading, confirmDialog } from '../ui.js';
+import { h, clear, ctx, isManager, schoolCan, errorBox, loading, confirmDialog, backTo } from '../ui.js';
 import { hasUnsaved } from './settings-kit.js';
 
 const GROUPS = { you: 'You', mountain: 'The mountain', apps: 'Apps' };
@@ -21,7 +21,7 @@ const PAGES = [
   ['assistant', 'mountain', 'Assistant', 'Who can ask the assistant, which guest pages show it, and this month’s use.', () => import('./settings-mountain.js')],
   ['sell', 'apps', 'Sell and gate', 'The ticket window’s limits, quick sale, partner passes, and the gate. Only owners and managers see this page.', () => import('./settings-apps.js')],
   ['shop', 'apps', 'Online shop', 'Whether guests can buy online, date changes, limits and prices by day, and how the shop page looks.', () => import('./settings-apps.js')],
-  ['school', 'apps', 'Ski school', 'Online lesson booking, cancellations and refunds, and the levels you teach. Only owners, managers and the ski school Director see this page.', () => import('./settings-apps.js')],
+  ['school', 'apps', 'Lessons', 'Online lesson booking, cancellations and refunds, and the levels you teach. Only owners, managers and the ski school Director see this page.', () => import('./settings-apps.js')],
   ['programs', 'apps', 'Programs', 'How families register for programs.', () => import('./settings-apps.js')],
   ['rentals', 'apps', 'Rentals', 'How the rental counter works: fees, deposits and the binding chart.', () => import('./settings-apps.js')],
   ['attractions', 'apps', 'Attractions', 'Ziplines, a coaster, tubing, the rink and more: limits, waivers and each one’s daily opening checks.', () => import('./settings-apps.js')],
@@ -33,7 +33,7 @@ const PAGES = [
 export const PAGE_KEYS = PAGES.map((p) => p[0]);
 
 // The app each Apps page opens, and the module that must be on for the page to show.
-export const APP_OF = { sell: ['sell', 'Sell', ['sell', 'gate']], shop: ['shop', 'Online shop', ['shop']], school: ['school', 'Ski school', ['school']], programs: ['programs', 'Programs', ['programs']],
+export const APP_OF = { sell: ['sell', 'Sell', ['sell', 'gate']], shop: ['shop', 'Online shop', ['shop']], school: ['school', 'Lessons', ['school']], programs: ['programs', 'Programs', ['programs']],
   rentals: ['rentals', 'Rentals', ['rentals']], attractions: ['conditions', 'Mountain status', ['conditions']], waivers: ['waivers', 'Waivers', null], patrol: ['patrol', 'Patrol', ['patrol']], workforce: ['workforce', 'Staff and schedule', ['workforce']], messages: ['messages', 'Messages', ['messages']] };
 
 const moduleOn = (keys) => !keys || !ctx.me.modules || keys.some((k) => ctx.me.modules.includes(k));
@@ -92,7 +92,9 @@ export async function render(root, params = []) {
 
   const phone = Boolean(window.matchMedia && window.matchMedia('(max-width: 860px)').matches);
   // ---- the list
-  const back = guarded(h('a', { class: 'set-backapp', href: ctx.me.menu && ctx.me.menu.start ? `#/${ctx.me.menu.start}` : '#/' }, h('span', { 'aria-hidden': 'true' }, '‹'), 'Back to the app'));
+  // Back to the page that opened Settings (Patrol, Lessons, a tab inside them), or the screen the menu opens on.
+  const was = backTo();
+  const back = guarded(h('a', { class: 'set-backapp', href: was ? was.hash : ctx.me.menu && ctx.me.menu.start ? `#/${ctx.me.menu.start}` : '#/', title: was ? `Back to ${was.name}` : null }, h('span', { 'aria-hidden': 'true' }, '‹'), 'Back to the app'));
   const nav = h('nav', { class: 'set-nav', 'aria-label': 'Settings' }, back, h('p', { class: 'set-nav-title', role: 'heading', 'aria-level': '2' }, 'Settings'),
     Object.entries(GROUPS).map(([g, name]) => {
       const mine = pages.filter((p) => p[1] === g);
