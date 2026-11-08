@@ -31,8 +31,8 @@ export function confirmItsYou(details = {}) {
   waiting = new Promise((resolve, reject) => {
     let done = false;
     const reason = RECORDS[details.reason] ? details.reason : 'open';
-    const [title, why, passkeyLabel, cancelled] = recordsText(reason);
-    const cancel = () => { const e = new Error(records ? cancelled : 'Not confirmed, so nothing was changed'); e.code = 'step_up_cancelled'; e.reason = records ? reason : null; return e; };
+    const [title, why, passkeyLabel, canceled] = recordsText(reason);
+    const cancel = () => { const e = new Error(records ? canceled : 'Not confirmed, so nothing was changed'); e.code = 'step_up_cancelled'; e.reason = records ? reason : null; return e; };
     const finish = (ok, err) => { if (done) return; done = true; waiting = null; dlg.close(); if (ok) resolve(); else reject(err || cancel()); };
     const slot = h('div');
     const body = records

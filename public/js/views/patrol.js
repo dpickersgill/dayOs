@@ -296,7 +296,7 @@ async function drawCases(box, { canAdmin } = {}) {
       clear(list).append(rowsBox, more);
     } catch (err) {
       if (my !== token) return;
-      // Cancelling the records check a search asks for leaves a page that still works: the search is not run, and the
+      // Canceling the records check a search asks for leaves a page that still works: the search is not run, and the
       // person can clear it (the list comes back without the check) or confirm and search again.
       if (err && err.code === 'step_up_cancelled' && f.q.trim()) {
         drawSummary(false);
