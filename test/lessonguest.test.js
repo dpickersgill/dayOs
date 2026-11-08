@@ -86,7 +86,7 @@ async function lesson(product, day, from, to, { pool: isPool = false, ...extra }
 let kid = 0;
 async function book(sessionId) {
   kid += 1;
-  return ok(await api('POST', `/skischool/sessions/${sessionId}/bookings`, { token: T.desk, body: { student: { first_name: `Kid${kid}`, last_name: `Guest${suffix}`, date_of_birth: `${year - 9}-02-02`, sex: 'female' }, sign_waiver: true } }), 201);
+  return ok(await api('POST', `/skischool/sessions/${sessionId}/bookings`, { token: T.desk, body: { student: { first_name: `Kid${kid}`, last_name: `Guest${suffix}`, date_of_birth: `${year - 9}-02-02`, sex: 'female' }, sign_waiver: true, waiver_signer: { name: 'Pat Parent' } } }), 201);
 }
 const contact = (k) => ({ contact_first_name: 'Pat', contact_last_name: `Parent${k}`, contact_email: `pat.${k}.${suffix}@x.test`, contact_phone: '215-555-0101' });
 

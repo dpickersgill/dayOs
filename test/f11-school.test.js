@@ -79,7 +79,7 @@ async function makeMountain(tag) {
   return M;
 }
 const lesson = (M, date, time, extra = {}, hours = 2) => api('POST', '/skischool/sessions', { token: M.owner, body: { product_id: M.group, starts_at: `${date}T${time}`, ends_at: `${date}T${String(Number(time.slice(0, 2)) + hours).padStart(2, '0')}:${time.slice(3)}`, ...extra } });
-const book = (M, sid, student, extra = {}, token) => api('POST', `/skischool/sessions/${sid}/bookings`, { token: token || M.counter, body: { student, sign_waiver: true, send_confirmation: false, ...extra } });
+const book = (M, sid, student, extra = {}, token) => api('POST', `/skischool/sessions/${sid}/bookings`, { token: token || M.counter, body: { student, sign_waiver: true, waiver_signer: { name: 'Pat Parent' }, send_confirmation: false, ...extra } });
 /** A family sign-in, through the emailed link. */
 async function familySession(M, email) {
   const before = mails.length;

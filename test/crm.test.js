@@ -151,7 +151,7 @@ test('lesson bookings capture the student; the customer is kept even when the bo
   const p = (await api('GET', `/people/${pid}`, { token: T.counter })).body;
   assert.equal(p.ability_level, 'first_timer');
   assert.equal(p.source, 'lesson');
-  const ok = await book({ person_id: pid, sign_waiver: true });
+  const ok = await book({ person_id: pid, sign_waiver: true, waiver_signer: { name: 'Pat Parent' } }); // a child: who signed (feat/school-pay)
   assert.equal(ok.status, 201, ok.text);
   assert.equal((await api('GET', `/people/${pid}/waivers`, { token: T.counter })).body.data.length, 1);
   // A second booking with the same details matches the same customer.

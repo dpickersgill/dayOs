@@ -53,7 +53,7 @@ export async function render(root) {
   const GROUPS = [
     ['day', 'Today', ['myday', 'today', 'checkin', 'lineup']],
     ['bookings', pending ? `Bookings (${pending})` : 'Bookings', ['lessons', 'requests', 'privates', 'waitlist', 'groups']],
-    ['team', instructor && !schoolCan('director') ? 'My work' : 'Instructors', ['recaps', 'offers', 'mypay', 'guests', 'instructors', 'availability', 'training', 'feedback', 'payroll', 'hours']],
+    ['team', instructor && !schoolCan('director') ? 'My work' : 'Instructors', ['recaps', 'offers', 'mypay', 'guests', 'instructors', 'availability', 'payroll', 'training', 'feedback', 'hours']],
     ['plan', 'Planning', ['season', 'fill', 'weather', 'copy', 'staffing', 'reports', 'owner']],
   ];
   const byKey = new Map(items.map((i) => [i[0], i]));

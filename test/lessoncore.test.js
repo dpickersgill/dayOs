@@ -70,7 +70,7 @@ test.before(async () => {
 test.after(async () => { await new Promise((r) => server.close(r)); await new Promise((r) => pm.close(r)); await pool.end(); });
 
 const lesson = (extra = {}, start = '10:00', end = '12:00') => api('POST', '/skischool/sessions', { token: A.owner, body: { product_id: D.group, starts_at: `${day}T${start}`, ends_at: `${day}T${end}`, ...extra } });
-const kid = (first, extra = {}) => ({ student: { first_name: first, last_name: 'Kidd', date_of_birth: '2017-02-02', ...extra }, sign_waiver: true });
+const kid = (first, extra = {}) => ({ student: { first_name: first, last_name: 'Kidd', date_of_birth: '2017-02-02', ...extra }, sign_waiver: true, waiver_signer: { name: 'Pat Kidd' } }); // a child: who signed (feat/school-pay)
 
 test('lessons use the nine levels and ages, and say the range in words', async () => {
   const s = ok(await lesson({ level_min: 2, level_max: 3, age_min: 5, age_max: 8, meeting_place: 'Magic carpet' }), 201);

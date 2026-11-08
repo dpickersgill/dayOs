@@ -2334,6 +2334,21 @@ test('public booking page: lists open lessons, takes a request, and lets the gue
 const saveBar = (root) => root.querySelector('.set-savebar');
 const change = (el, v) => { if (el.type === 'checkbox') el.checked = v; else el.value = v; el.dispatchEvent(new window.Event(el.type === 'checkbox' ? 'change' : 'input', { bubbles: true })); };
 
+test('settings: each lesson\'s ticket and rental sit behind a one-line summary with Change (feat/school-pay)', skip(), async () => {
+  ok(await api('PUT', `/skischool/families/extras/${D.lesson}`, { token: T.owner, body: { ticket_product_id: D.day, rental_product_id: null } }));
+  const root = await renderView('settings', 'owner', T.owner, {}, ['school']);
+  clean(root, 'settings / school / lesson add-ons');
+  const summaries = [...root.querySelectorAll('.extras-summary')];
+  assert.ok(summaries.length >= 1, 'a summary per lesson product');
+  assert.ok(summaries.some((x) => /^Offers Adult Day\./.test(x.textContent.trim())), summaries.map((x) => x.textContent).join(' | '));
+  assert.ok(summaries.every((x) => !x.textContent.includes('\u00b7')), 'no middle dot');
+  for (const pick of root.querySelectorAll('.extras-pick')) assert.equal(pick.hidden, true, 'the pickers are folded away');
+  const btn = [...root.querySelectorAll('.extras-summary button')].find((b) => b.textContent === 'Change');
+  btn.click();
+  assert.equal(btn.closest('.stack').querySelector('.extras-pick').hidden, false, 'Change opens the pickers for that lesson only');
+  assert.equal([...root.querySelectorAll('.extras-pick')].filter((x) => !x.hidden).length, 1);
+});
+
 test('settings: Ski school carries the online booking switch, its link, and saves from the save bar', skip(), async () => {
   const root = await renderView('settings', 'owner', T.owner, {}, ['school']);
   clean(root, 'settings / school');
