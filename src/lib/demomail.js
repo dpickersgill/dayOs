@@ -76,9 +76,9 @@ Keep it to yourself, since it opens your demo. If you'd rather use a password, s
 
 Three things to try first:
 
-1. Sell a lift ticket in Sell, then scan it at the Gate.
+1. Open Patrol on your phone and start a case, the way a patroller would on the hill.
 2. Put a lift on hold in Mountain status, and watch the public conditions page change.
-3. Open Patrol on your phone and start a case, the way a patroller would on the hill.
+3. For next season: sell a lift ticket in Sell, then scan it at the Gate.
 
 Today has guided tours if you'd like a walk through each part. Everything in the demo is made up, and email and card payments are switched off.
 

@@ -449,6 +449,7 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 .fld.full{grid-column:1 / -1}
 .fld label{font-weight:700;font-size:16px}
 .fld .opt{font-weight:400;color:var(--muted)}
+.form input,.form select,.form textarea{font:inherit}
 .fld input,.fld select,.fld textarea{font-family:inherit;font-size:17px;color:var(--ink);min-height:48px;padding:10px 12px;border:1.5px solid #7E97A2;border-radius:10px;background:#fff;width:100%}
 .fld textarea{min-height:120px;resize:vertical;line-height:1.45}
 .fld input:focus,.fld select:focus,.fld textarea:focus{border-color:var(--trail);outline:3px solid #BBD3F6;outline-offset:0}
@@ -505,6 +506,8 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 .sf p.sf-mail{font-size:15px;margin-top:16px;overflow-wrap:break-word}
 @media (max-width:700px){.sf-grid>div:last-child{grid-column:1 / -1}}
 .sf-mail a{color:var(--glacier)}
+/* phones: footer email links and breadcrumb links are at least 44px tall to tap */
+@media (max-width:640px){.sf-mail a,.crumbs a{display:inline-flex;align-items:center;min-height:44px}.crumbs{margin-bottom:8px}}
 .sf-mail a:hover{color:#fff}
 .contact-mail{margin-top:14px;font-size:17px;overflow-wrap:anywhere}
 .sf-legal a{color:var(--onink3);display:inline-block;padding:8px 0}
@@ -699,7 +702,7 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 .phone .ph-v b{display:block;font-family:'Barlow Condensed',sans-serif;font-size:20px;line-height:1}
 .phone .ph-v span{font-size:11px;color:var(--muted)}
 .cfile{position:absolute;z-index:2;right:-14px;top:150px;width:312px;background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:20px 20px 18px;box-shadow:9px 9px 0 -1px var(--white),9px 9px 0 0 var(--line),18px 18px 0 -1px var(--frost),18px 18px 0 0 var(--line),0 34px 60px -30px rgba(18,48,58,.55)}
-.cfile h3{font-size:28px;line-height:1}
+.sx .cfile .cf-h{font-family:'Barlow Condensed','Arial Narrow',sans-serif;font-weight:700;font-size:28px;line-height:1}
 .cfile .cf-sub{font-size:14px;color:var(--muted);margin-top:4px}
 .cfile ul{list-style:none;margin:14px 0 0;padding:0}
 .cfile li{display:grid;grid-template-columns:20px minmax(0,1fr);gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:14.5px;line-height:1.35}
@@ -1038,7 +1041,7 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 .st-row{display:flex;align-items:flex-start;gap:12px}
 .st-row .st-dot{margin-top:7px}
 .st-row>div{flex:1;min-width:0}
-.st-row h3{margin:0;font-size:18px;line-height:1.4}
+.sx .st-row h2{margin:0;font-size:18px;line-height:1.4}
 .st-row p{margin:0;font-size:15px;color:var(--muted)}
 .st-row>b{flex:none;font-size:16px;white-space:nowrap}
 .st-part.st-down .st-row>b{color:var(--st-down)}

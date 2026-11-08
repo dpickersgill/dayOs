@@ -74,13 +74,13 @@ const META = {
   },
   'terrain-park-software': {
     title: 'Terrain Park Software: Feature Map, Inspections | Verdynt/OS',
-    description: 'A catalog of rails, boxes and jumps, a daily park map with GPS pins dropped from a phone, and inspections that close a feature when it fails, with only an inspection to reopen it.',
+    description: 'A catalog of rails, boxes and jumps, a daily park map with GPS pins from a phone, and inspections that close a failed feature until it passes again.',
     og: 'Terrain park software: every feature, where it is, and whether it passed',
     crumb: 'Terrain park',
   },
   'attraction-ticketing-software': {
-    title: 'Zipline, Mountain Coaster and Tubing Software for Ski Areas | Verdynt/OS',
-    description: 'Run and sell your zipline, coaster, tubing hill or skating rink: a daily opening check, time slots with height, weight and age limits, sold at the counter and online.',
+    title: 'Ski Area Zipline, Coaster and Tubing Software | Verdynt/OS',
+    description: 'Run your zipline, coaster, tubing hill or rink: a daily opening check, and time slots with height, weight and age limits, sold at the counter and online.',
     og: 'Attractions and activities: open on the check, sold by the time slot',
     crumb: 'Attractions and activities',
   },
@@ -150,7 +150,7 @@ const META = {
   },
   contact: {
     title: 'Request a Demo or a Free 14-Day Trial | Verdynt/OS',
-    description: 'Book a 20-minute walkthrough of Verdynt/OS, start a 14-day free trial on your own mountain, or apply for the Founding Mountain Program (three places, open until March 31, 2027).',
+    description: 'Book a 20-minute walkthrough of Verdynt/OS, start a 14-day free trial, or apply for the Founding Mountain Program.',
     og: 'See your mountain on the board',
     crumb: 'Contact',
   },

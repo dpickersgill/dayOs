@@ -232,7 +232,7 @@
         const out = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(out.error || 'Something went wrong');
         form.querySelectorAll('input:not([type=radio]):not([type=checkbox]), textarea').forEach((i) => { i.value = ''; });
-        show(`Sent. ${k === 'trial' ? 'We will reply within one business day to set up your trial mountain.' : k === 'review' ? 'A person will reply within one business day with a safe way to send your reports. Please don\'t email them.' : 'A person will reply within one business day.'}${out.copy ? ' A copy is on its way to your email.' : ''}`, 'ok');
+        show(`Sent. ${k === 'trial' ? 'A person will reply to set up your trial mountain.' : k === 'review' ? 'A person will reply with a safe way to send your reports. Please don\'t email them.' : 'A person will reply.'}${out.copy ? ' A copy is on its way to your email.' : ''}`, 'ok');
       } catch (err) {
         show(`${err.message}. Try again in a moment.`, 'bad');
       } finally { btn.disabled = false; }

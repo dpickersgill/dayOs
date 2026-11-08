@@ -403,6 +403,7 @@ Verdynt/OS runs in a web browser on counter computers, phones and tablets, with 
 - [About](${page('about')}): who Verdynt/OS is for and how it works with ski areas
 - [Pricing](${page('pricing')}): plans, add-ons and how paying works
 - [Security](${page('security')}): how guest and patient information is protected
+- [Status](${page('status')}): whether each part of Verdynt/OS is working now, with incidents and planned maintenance
 - [Contact](${page('contact')}): book a 20-minute walkthrough, or ask for a trial mountain
 
 ## Guides and checklists

@@ -219,7 +219,7 @@ test('Pricing: pay monthly, yearly or over the season; setup packages; and the n
 test('the attractions page: its own search title, questions in the structured data, in the Product menu, llms.txt and the home page', async () => {
   const page = await onHost('/attraction-ticketing-software');
   assert.equal(page.status, 200);
-  assert.ok(page.text.includes('<title>Zipline, Mountain Coaster and Tubing Software for Ski Areas | Verdynt/OS</title>'));
+  assert.ok(page.text.includes('<title>Ski Area Zipline, Coaster and Tubing Software | Verdynt/OS</title>'));
   const graph = JSON.parse(page.text.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1])['@graph'];
   const faq = graph.find((g) => g['@type'] === 'FAQPage');
   for (const q of ['Can guests book a time slot online?', 'How does the daily inspection work?', 'Does it work in summer?']) assert.ok(faq.mainEntity.some((x) => x.name === q), q);
