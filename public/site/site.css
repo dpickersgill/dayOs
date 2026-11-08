@@ -1099,3 +1099,59 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 .wrap>.offer:first-child,.wrap>.found:first-child{margin-top:0}
 /* "Switching this season?" above a solution page's pricing card */
 .wrap>.season-note:first-child{margin:0 0 28px}
+
+/* ---------- The Good Day scorecard (/good-day/scorecard) and its card on Home, Product, Ski patrol and Pricing */
+.sc-strip{padding:var(--stack) 0}
+.sc-card{display:flex;align-items:center;justify-content:space-between;gap:18px 32px;flex-wrap:wrap;padding:24px 28px;border-radius:var(--r-lg);background:var(--slate);color:var(--onink)}
+.sc-card>div{flex:1 1 420px;min-width:0}
+.sc-card-k{font-size:15px;font-weight:700;color:var(--gold)}
+.sx .sc-card-t{margin-top:4px;font-size:clamp(26px,2.6vw,32px);line-height:1.05;color:var(--white)}
+.sc-card-p{margin-top:8px!important;font-size:17px;color:var(--onink3);max-width:46em}
+.sc-card .btn{flex:none}
+.sx .gd-mast .gd-title{margin:0;font-family:var(--gd-disp);font-weight:700;text-transform:uppercase;line-height:.95;font-size:clamp(2.6rem,9vw,4.4rem);color:var(--gd-mast-ink)}
+.sc-how li a{color:var(--gd-accent)}
+.sc-noscript{margin-top:12px;padding:12px 16px;border-radius:10px;background:var(--gd-flag-bg)}
+.sc-form{display:flex;flex-direction:column;gap:32px}
+.sc-area{display:flex;flex-direction:column;gap:14px}
+.sx .sc-area h2{font-size:clamp(1.6rem,5vw,2.1rem)}
+.sc-q{margin:0;padding:18px 20px 20px;border:1px solid var(--gd-line);border-radius:12px;background:var(--gd-surface);min-width:0}
+.sc-q legend{float:left;width:100%;padding:0;margin:0 0 12px;font-size:18px;font-weight:700;line-height:1.4;color:var(--gd-ink)}
+.sc-q legend+*{clear:both}
+.sc-n{color:var(--gd-accent)}
+.sc-q.missing{border:2px solid var(--patrol)}
+.sc-opts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.sc-opts label{position:relative;display:flex;align-items:center;gap:10px;min-height:48px;padding:8px 12px;border:1.5px solid var(--gd-line);border-radius:10px;cursor:pointer;font-size:16px;line-height:1.25;background:var(--gd-surface)}
+.sc-opts input{flex:none;width:20px;height:20px;margin:0;accent-color:var(--spruce)}
+.sc-opts label:has(input:checked){border-color:var(--slate);background:var(--gold-wash);font-weight:700}
+.sc-opts label:has(input:focus-visible){outline:3px solid var(--gd-focus);outline-offset:2px}
+@media (max-width:640px){.sc-opts{grid-template-columns:minmax(0,1fr)}}
+.sc-go{display:flex;flex-direction:column;align-items:flex-start;gap:10px}
+.sc-err{font-weight:700;color:#8A1F17}
+.sc-result{display:flex;flex-direction:column;gap:14px;padding:28px;border-radius:12px;background:var(--gd-surface);border:1px solid var(--gd-line);border-top:6px solid var(--gold)}
+.sc-result[hidden]{display:none}
+.sx .sc-result h2{font-size:clamp(2.6rem,9vw,3.6rem);line-height:1}
+.sc-band{font-family:var(--gd-disp);font-weight:700;font-size:clamp(1.5rem,5vw,1.9rem);line-height:1.1}
+.sx .sc-h{margin-top:10px;font-family:var(--gd-disp);font-weight:700;font-size:1.6rem;text-transform:uppercase;line-height:1.1}
+.sc-areas{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:10px}
+.sc-areas li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;font-size:16px}
+.sc-areas b{font-variant-numeric:tabular-nums}
+.sc-bar{grid-column:1 / -1;height:10px;border-radius:99px;background:var(--gd-line);overflow:hidden}
+.sc-bar i{display:block;height:100%;border-radius:99px;background:var(--spruce)}
+.sc-areas li.low .sc-bar i{background:var(--gold-deep)}
+.sc-steps{margin:0;padding-left:1.4em;display:flex;flex-direction:column;gap:10px}
+.sc-steps li b{display:block}
+.sc-ctas{margin-top:8px}
+.sc-bands-k{margin-top:6px!important;font-size:15px;color:var(--gd-muted)}
+.sc-bands{margin:0;padding-left:1.2em;font-size:15px;color:var(--gd-muted)}
+.sc-mail{display:flex;flex-direction:column;align-items:flex-start;gap:12px;margin-top:14px;padding:22px;border-radius:12px;background:var(--gd-mast);color:var(--gd-mast-ink)}
+.sx .sc-mail .sc-h{margin:0;color:var(--gd-mast-ink)}
+.sc-mail p{font-size:16px;color:var(--gd-mast-ink)}
+.sx .sc-mail a{color:var(--gd-mast-ink)}
+.sc-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;width:100%}
+@media (max-width:760px){.sc-fields{grid-template-columns:minmax(0,1fr)}}
+.sc-mail input{min-height:48px;padding:10px 14px;border-radius:10px;border:1px solid var(--gd-mast-dim);background:#fff;color:var(--slate);font:inherit;font-size:17px;width:100%}
+.sc-mail input[aria-invalid="true"]{border:2px solid var(--gold);box-shadow:0 0 0 2px rgba(216,182,114,.45)}
+.sc-mail .gd-fld span{color:var(--gd-mast-dim)}
+.sc-status:empty{display:none}
+.sc-status{font-weight:700}
+@media print{.sc-mail,.sc-go,.gd-end,.sc-ctas{display:none!important}}

@@ -156,6 +156,13 @@ const META = {
   },
   privacy: { title: 'Privacy Policy | Verdynt/OS', description: 'What Verdynt/OS collects, why, who it is shared with, how long it is kept, and the choices you have.', crumb: 'Privacy' },
   terms: { title: 'Terms of Service | Verdynt/OS', description: 'The terms for using Verdynt/OS: trials, subscriptions and payment, your data, and what each side is responsible for.', crumb: 'Terms' },
+  // The Good Day scorecard (2026.11 policy and brand review): a free tool, so it carries WebApplication data too.
+  'good-day/scorecard': {
+    title: 'The Good Day Scorecard for Ski Areas | Verdynt/OS',
+    description: 'Twelve questions on the guest\'s day at your ski area: tickets, lessons, lift checks, patrol, the park, staff and conditions. Free, with next steps.',
+    og: 'How good is your guest\'s day? The Good Day scorecard',
+    crumb: 'Scorecard', parent: 'good-day', tool: 'The Good Day scorecard',
+  },
   notfound: { title: 'Page Not Found | Verdynt/OS', description: 'That page is not here.', noindex: true },
 };
 
@@ -222,6 +229,11 @@ function head({ slug, origin, html, plans, verify = {}, sameAs = [], noindex = f
     // Home, then the section (Resources) for a guide, then the page itself.
     const trail = [{ name: 'Home', item: `${origin}/` }, ...(m.parent && META[m.parent] ? [{ name: META[m.parent].crumb, item: `${origin}/${m.parent}` }] : []), { name: m.crumb, item: url }];
     graph.push({ '@type': 'BreadcrumbList', itemListElement: trail.map((t, i) => ({ '@type': 'ListItem', position: i + 1, ...t })) });
+  }
+  // A free tool on the website (the Good Day scorecard): what it is, that it is free, and who made it.
+  if (m.tool) {
+    graph.push({ '@type': 'WebApplication', '@id': `${url}#app`, name: m.tool, url, description, applicationCategory: 'BusinessApplication', operatingSystem: 'Web browser',
+      isAccessibleForFree: true, offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' }, publisher: { '@id': `${origin}/#org` }, inLanguage: 'en-US' });
   }
   // Guides are articles: who published them and when, so search engines can show them as such.
   if (m.article) {

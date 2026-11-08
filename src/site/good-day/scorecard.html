@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!--HEAD-->
+</head>
+<body>
+<div class="sx">
+<!--HEADER:good-day/scorecard-->
+
+<main id="main" class="gd-page">
+<div class="gd-col gd-score">
+
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="{{HOME}}">Home</a><span aria-hidden="true">/</span><a href="{{SITE}}/good-day">The Good Day</a><span aria-hidden="true">/</span><span aria-current="page">Scorecard</span></nav>
+
+  <header class="gd-mast">
+    <div class="gd-mast-top">
+      <p class="gd-eyebrow">The Good Day &middot; scorecard</p>
+      <h1 class="gd-title">How good is your guest's day?</h1>
+      <p class="gd-sub">Twelve questions for ski area owners, GMs and patrol directors, about five minutes. Your score shows which part of the guest's day is weakest, and a plain next step for each gap.</p>
+    </div>
+    <svg class="gd-ridge" viewBox="0 0 800 84" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+      <polygon fill="var(--gd-ridge1)" points="0,84 0,52 70,30 130,48 210,14 290,44 360,26 450,54 530,22 610,46 690,18 760,40 800,30 800,84"/>
+      <polygon fill="var(--gd-ridge2)" points="0,84 0,66 90,50 170,66 260,40 340,64 430,46 520,68 620,44 700,62 800,48 800,84"/>
+    </svg>
+  </header>
+
+  <section class="gd-section" aria-labelledby="sc-how">
+    <h2 id="sc-how" class="vh">How it works</h2>
+    <ul class="gd-who sc-how">
+      <li><b>No account needed.</b>Your answers stay in this page. Nothing is saved unless you choose to email yourself the results.</li>
+      <li><b>Answer for an ordinary busy day,</b>not your best one. "Not sure" counts as no.</li>
+      <li><b>Rather use paper?</b><a href="/site/good-day-scorecard.pdf" download>Download the printable scorecard (PDF)</a> for a staff meeting.</li>
+    </ul>
+    <noscript><p class="sc-noscript">Scoring on this page needs JavaScript. The <a href="/site/good-day-scorecard.pdf">printable scorecard</a> works without it.</p></noscript>
+  </section>
+
+  <form id="sc-form" class="sc-form" novalidate>
+      <!--SC:QUESTIONS-->
+    <div class="sc-go">
+      <button type="submit" class="gd-btn">See my score</button>
+      <p class="sc-err" id="sc-err" role="alert" hidden></p>
+    </div>
+  </form>
+
+  <section id="sc-result" class="sc-result" aria-labelledby="sc-r-h" hidden tabindex="-1">
+    <p class="gd-eyebrow">Your score</p>
+    <h2 id="sc-r-h"><span id="sc-total">0</span> of <span id="sc-max">24</span></h2>
+    <p class="sc-band" id="sc-band"></p>
+    <p id="sc-line"></p>
+    <ul class="sc-areas" id="sc-areas" aria-label="Score by area"></ul>
+    <h3 class="sc-h">Your next steps</h3>
+    <ol class="sc-steps" id="sc-steps"></ol>
+    <p class="sc-none" id="sc-none" hidden>Every answer was yes, every day. Write down how each part runs, so it keeps running that way when people change.</p>
+    <div class="ctas sc-ctas">
+      <a class="gd-btn" href="{{SITE}}/contact?kind=walkthrough">Book a 20-minute walkthrough</a>
+      <a class="gd-btn ghost" href="/site/good-day-scorecard.pdf" download>Printable scorecard (PDF)</a>
+    </div>
+    <p class="sc-bands-k">The bands:</p>
+    <ul class="sc-bands" id="sc-bands"><!--SC:BANDS--></ul>
+
+    <form id="sc-mail" class="sc-mail" novalidate>
+      <h3 class="sc-h">Email me my results</h3>
+      <p>Optional. We email your score and next steps, and keep your name, mountain, email and score so we can follow up. Nothing else from this page is kept. See our <a href="{{SITE}}/privacy">Privacy policy</a>.</p>
+      <div class="sc-fields">
+        <label class="gd-fld" for="sc-name"><span>Your name</span><input id="sc-name" name="name" autocomplete="name" maxlength="150" required></label>
+        <label class="gd-fld" for="sc-mtn"><span>Mountain</span><input id="sc-mtn" name="mountain" autocomplete="organization" maxlength="150" required></label>
+        <label class="gd-fld" for="sc-email"><span>Email</span><input id="sc-email" name="email" type="email" autocomplete="email" maxlength="255" required></label>
+      </div>
+      <div class="gd-hp" aria-hidden="true"><label for="sc-web">Leave this empty</label><input id="sc-web" name="website" tabindex="-1" autocomplete="off"></div>
+      <button type="submit" class="gd-btn">Email my results</button>
+      <p class="sc-status" id="sc-status" role="status" aria-live="polite" tabindex="-1"></p>
+    </form>
+  </section>
+
+  <div class="gd-end">
+    <!--GD:CARD:scorecard-->
+  </div>
+
+</div>
+</main>
+<!--FOOTER-->
+</div>
+</body>
+</html>
