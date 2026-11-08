@@ -37,7 +37,7 @@ test.before(async () => {
 test.after(async () => { await new Promise((r) => server.close(r)); await pool.end(); });
 
 const ada = `ada-${suffix}@example.test`; const bo = `bo-${suffix}@example.test`;
-let adaSecret; let adaSession; let boId; let adaId;
+let adaSecret; let adaSession; let boId; let adaId; let adaSetupStep;
 
 test('the platform key adds the first operator; passwords are checked', async () => {
   is(await api('POST', '/operators', { body: { email: ada, name: 'Ada', password: PW } }), 403, 'needs the key or a session');
@@ -56,7 +56,8 @@ test('the first sign-in sets up the authenticator app, and only then opens the c
   adaSecret = first.body.secret;
   is(await api('GET', '/tenants', { session: first.body.setup_token }), 403, 'the setup ticket opens nothing');
   is(await api('POST', '/login/setup', { body: { setup_token: first.body.setup_token, code: '000000' } }), 400);
-  const done = await api('POST', '/login/setup', { body: { setup_token: first.body.setup_token, code: codeAt(adaSecret) } });
+  adaSetupStep = totp.stepAt(Date.now()); // the step the setup code is for (the next test reuses it, whatever the clock says then)
+  const done = await api('POST', '/login/setup', { body: { setup_token: first.body.setup_token, code: totp.hotp(adaSecret, adaSetupStep) } });
   is(done, 200);
   assert.equal(done.body.operator, true); assert.equal(done.body.name, 'Ada');
   adaSession = done.body.session;
@@ -69,8 +70,11 @@ test('later sign-ins need a fresh code, and a code works once', async () => {
   const noCode = await api('POST', '/login', { body: { email: ada, password: PW } });
   assert.equal(noCode.body.code_required, true, 'asks for the code');
   assert.equal(noCode.body.session, undefined);
-  is(await api('POST', '/login', { body: { email: ada, password: PW, code: codeAt(adaSecret) } }), 403, 'the code used at setup cannot be used again');
-  const ok = await api('POST', '/login', { body: { email: ada, password: PW, code: codeAt(adaSecret, 1) } });
+  // 2026.11.13: the setup code by its own step, not "the code now": when a 30-second step ended between setup and here,
+  // "now" was a fresh code that signed in, and the next one was two steps ahead and refused.
+  is(await api('POST', '/login', { body: { email: ada, password: PW, code: totp.hotp(adaSecret, adaSetupStep) } }), 403, 'the code used at setup cannot be used again');
+  // a later step than setup's, inside the one-step drift the server allows
+  const ok = await api('POST', '/login', { body: { email: ada, password: PW, code: totp.hotp(adaSecret, Math.max(adaSetupStep + 1, totp.stepAt(Date.now()) - 1)) } });
   is(ok, 200);
   adaSession = ok.body.session;
   const [[a]] = await pool.query("SELECT actor FROM platform_audit WHERE action = 'sign_in' ORDER BY id DESC LIMIT 1");

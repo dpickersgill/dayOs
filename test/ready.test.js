@@ -133,31 +133,40 @@ test('the daily clean-up removes counts a day past their window and keeps the re
   assert.match(require('node:fs').readFileSync(path.join(ROOT, 'src/routes/followpublic.js'), 'utf8'), /stage\('rate_limits_cleanup'/, 'the daily job runs it');
 });
 
+// Each sign-in limit test comes from an address of its own (the servers trust one proxy hop, so X-Forwarded-For sets
+// req.ip), so its window starts empty whatever ran before. 2026.11.13: these tests picked a "fresh" maximum from the
+// clock instead (5 + now % 40), which a run less than a minute earlier, or the other test in the same run, could share,
+// and used up to 47 tries, which on a busy machine outlasted the one-minute window: both made them fail now and then.
+const freshAddress = () => `10.${[0, 0, 0].map(() => Math.floor(Math.random() * 254) + 1).join('.')}`;
+
 test('two servers share one sign-in limit: the attempt over the limit is refused whichever server gets it', async () => {
-  // A limit no earlier run used, so the window starts empty (the limit's name includes its maximum).
-  const max = 5 + (Date.now() % 40);
+  const max = 6;
   const env = { RATE_STORE: 'mysql', LOGIN_RATE_LIMIT: String(max), NODE_ENV: 'test' };
   const [a, b] = await Promise.all([startServer(env), startServer(env)]);
+  const headers = { 'x-forwarded-for': freshAddress() };
   // Logins nobody has, so no login's own lock (ten wrong passwords) gets in the way: only the limit per address counts.
   const body = (i) => ({ tenant: owner.slug, email: `nobody-${i}@${owner.slug}.test`, password: 'not-the-password' });
   const codes = [];
-  for (let i = 0; i < max; i += 1) codes.push((await api('POST', '/auth/login', { body: body(i) }, i % 2 ? b : a)).status);
+  for (let i = 0; i < max; i += 1) codes.push((await api('POST', '/auth/login', { body: body(i), headers }, i % 2 ? b : a)).status);
   assert.ok(codes.every((c) => c === 401), `every try inside the limit is answered: ${codes}`);
-  const over = await api('POST', '/auth/login', { body: body(max) }, max % 2 ? b : a);
+  const over = await api('POST', '/auth/login', { body: body(max), headers }, max % 2 ? b : a);
   assert.equal(over.status, 429, 'the next try, on either server, is over the shared limit');
   assert.ok(Number(over.headers.get('retry-after')) >= 1 && Number(over.headers.get('retry-after')) <= 60);
-  assert.equal((await api('POST', '/auth/login', { body: body(max + 1) }, max % 2 ? a : b)).status, 429, 'and on the other one too');
+  assert.equal((await api('POST', '/auth/login', { body: body(max + 1), headers }, max % 2 ? a : b)).status, 429, 'and on the other one too');
+  // another address is not held back by this one
+  assert.equal((await api('POST', '/auth/login', { body: body(max + 2), headers: { 'x-forwarded-for': freshAddress() } }, a)).status, 401);
 });
 
 test('sign-ins that work do not use up the limit, so a whole crew can sign in at opening from one address', async () => {
-  const max = 5 + ((Date.now() + 17) % 40);
+  const max = 5;
   const env = { RATE_STORE: 'mysql', LOGIN_RATE_LIMIT: String(max), NODE_ENV: 'test' };
   const [a, b] = await Promise.all([startServer(env), startServer(env)]);
+  const headers = { 'x-forwarded-for': freshAddress() };
   const good = { tenant: owner.slug, email: `owner@${owner.slug}.test`, password: PW };
-  for (let i = 0; i < max + 3; i += 1) assert.equal((await api('POST', '/auth/login', { body: good }, i % 2 ? b : a)).status, 200, `sign-in ${i + 1}`);
+  for (let i = 0; i < max + 3; i += 1) assert.equal((await api('POST', '/auth/login', { body: good, headers }, i % 2 ? b : a)).status, 200, `sign-in ${i + 1}`);
   const wrong = (i) => ({ tenant: owner.slug, email: `nobody-${i}@${owner.slug}.test`, password: 'nope-nope-nope' });
-  for (let i = 0; i < max; i += 1) assert.equal((await api('POST', '/auth/login', { body: wrong(i) }, i % 2 ? b : a)).status, 401);
-  assert.equal((await api('POST', '/auth/login', { body: wrong(max) }, a)).status, 429, 'wrong passwords from the address still hit the limit');
+  for (let i = 0; i < max; i += 1) assert.equal((await api('POST', '/auth/login', { body: wrong(i), headers }, i % 2 ? b : a)).status, 401);
+  assert.equal((await api('POST', '/auth/login', { body: wrong(max), headers }, a)).status, 429, 'wrong passwords from the address still hit the limit');
 });
 
 test('a console sign-in code works once across servers, not once per server', async () => {
