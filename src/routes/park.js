@@ -92,11 +92,16 @@ router.get('/areas', async (req, res) => {
   const t = req.auth.tenantId;
   const today = await tenantToday(t);
   const list = await rows(pool, 'SELECT id, name, level, status, notes, active FROM park_areas WHERE tenant_id = ? ORDER BY active DESC, name', [t]);
-  const days = await rows(pool, `SELECT d.area_id, d.action, d.at, d.supervisor_name, d.reason_kind, d.reason FROM park_area_days d
-    WHERE d.tenant_id = ? AND d.on_date = ? ORDER BY d.at, d.id`, [t, today]);
-  const last = new Map(); for (const d of days) last.set(Number(d.area_id), d);
   const tz = await OPS.tzOf(pool, t);
-  res.json({ data: list.map((a) => { const d = last.get(Number(a.id)); return { ...a, level_label: OPS.levelLabel(a.level), today_status: d ? (d.action === 'open' ? 'open' : 'closed') : 'not_opened', today: d ? OPS.local(d, tz) : null }; }), today });
+  // Late entries from phones with no signal: the same rule as the public feed and the day record (OPS.areaState).
+  const states = await OPS.areaStates(pool, t, today, tz);
+  res.json({
+    data: list.map((a) => {
+      const s = states.get(Number(a.id)) || { status: 'not_opened', last: null, late: [] };
+      return { ...a, status: s.status === 'open' ? 'open' : 'closed', level_label: OPS.levelLabel(a.level), today_status: s.status, today: s.last ? OPS.local({ ...s.last, area_id: undefined, id: undefined }, tz) : null, late_notes: s.late.map((x) => x.message) };
+    }),
+    today,
+  });
 });
 
 router.post('/areas', crew, validate(z.object(areaFields)), async (req, res) => {
@@ -409,19 +414,26 @@ router.post('/features/:id/inspections', crew, validate(inspectSchema), async (r
     const j = judge(f, b);
     const ids = b.photo_ids || [];
     if (ids.length) {
-      const found = await rows(conn, 'SELECT id FROM park_photos WHERE tenant_id = ? AND feature_id = ? AND id IN (?) AND inspection_id IS NULL', [tenantId, id, ids]);
+      const found = await rows(conn, 'SELECT id, uploaded_at, taken_at, via_inspection FROM park_photos WHERE tenant_id = ? AND feature_id = ? AND id IN (?) AND inspection_id IS NULL', [tenantId, id, ids]);
       if (found.length !== new Set(ids).size) throw bad('A photo was not found for this feature, or is already on another inspection');
+      // A photo on an inspection (the one a reopening needs, too) is taken that day, in this feature's inspection: not
+      // an old one from the feature's photos or the phone's gallery.
+      const stale = found.filter((ph) => !Number(ph.via_inspection) || OPS.local({ at: ph.uploaded_at }, when.tz).at.slice(0, 10) !== when.date || (ph.taken_at && String(ph.taken_at).slice(0, 10) !== when.date));
+      if (stale.length) throw bad('Each photo on an inspection is taken that day, in the inspection. Take a new photo of the feature.', { code: 'photo_not_today', photos: stale.map((ph) => Number(ph.id)) });
     }
     const [r] = await conn.query(`INSERT INTO park_inspections (tenant_id, feature_id, inspected_on, inspected_at, inspected_by, result, notes, kind, checklist, fixed, no_photo_reason, client_ref, received_at, reopened)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), ?)`,
     [tenantId, id, when.date, when.utc, req.auth.userId, b.result, b.notes || null, b.kind, JSON.stringify(j.checklist), b.fixed || null, b.no_photo_reason || null, b.client_ref || null, j.reopen ? 1 : 0]);
     if (ids.length) await conn.query('UPDATE park_photos SET inspection_id = ? WHERE tenant_id = ? AND feature_id = ? AND id IN (?)', [r.insertId, tenantId, id, ids]);
-    const status = b.result === 'ok' ? 'ready' : b.result;
     const clearsIncident = b.result === 'ok' && b.kind === 'post_incident' && Number(f.needs_post_incident);
+    // Waiting for a post-incident inspection: nothing but a post-incident inspection that passes moves it off Closed.
+    // A Needs attention result is kept in the record, and the feature stays closed.
+    const held = Boolean(Number(f.needs_post_incident)) && !clearsIncident;
+    const status = held ? 'closed' : b.result === 'ok' ? 'ready' : b.result;
     await OPS.setStatus(conn, req, f, status, { reason: j.reopen ? b.fixed : (b.result === 'ok' ? null : b.notes), source: 'inspection', refId: r.insertId, onDate: when.date, extra: clearsIncident ? ', needs_post_incident = 0' : '' });
     if (clearsIncident && f.status === status) await conn.query('UPDATE park_features SET needs_post_incident = 0 WHERE tenant_id = ? AND id = ?', [tenantId, id]);
     await audit(conn, req, 'inspect', 'park_features', id, { result: b.result, kind: b.kind, reopened: j.reopen, failed_items: j.failed, photos: ids.length, ...(b.at ? { phone_time: true } : {}) });
-    return { id: r.insertId, status, reopened: j.reopen };
+    return { id: r.insertId, status, reopened: j.reopen, ...(held ? { needs_post_incident: true, message: 'Saved. It stays closed until a post-incident inspection finds no defects.' } : {}) };
   });
   let out;
   try { out = await save(); } catch (err) {

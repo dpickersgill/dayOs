@@ -10,8 +10,8 @@ const crypto = require('crypto');
 const express = require('express');
 const { pool, tx, rows, one } = require('../db');
 const { requireRole, isManager } = require('../middleware/auth');
-const { z, validate, paramId, dateStr, dateTimeStr, dayRange } = require('../lib/util');
-const { notFound, bad, conflict } = require('../lib/errors');
+const { z, validate, paramId, dateStr, dateTimeStr, dayRange, todayIn } = require('../lib/util');
+const { notFound, bad, conflict, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { photoFacts, sniff } = require('../lib/exif');
 const PA = require('../lib/patrolaccess');
@@ -29,14 +29,15 @@ const clientRef = z.string().regex(/^[A-Za-z0-9_-]{6,40}$/).optional();
 const atField = z.string().regex(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/).optional();
 
 // ---------------------------------------------------------------- photos
-const PHOTO_META = `ph.id, ph.feature_id, ph.inspection_id, ph.mime, ph.file_name, ph.bytes, ph.sha256, ph.caption, ph.taken_at, ph.taken_lat, ph.taken_lng, ph.uploaded_at,
+const PHOTO_META = `ph.id, ph.feature_id, ph.inspection_id, ph.via_inspection, ph.late_reason, ph.mime, ph.file_name, ph.bytes, ph.sha256, ph.caption, ph.taken_at, ph.taken_lat, ph.taken_lng, ph.uploaded_at,
   COALESCE(u.email, u.username) AS uploaded_by_name`;
 const PHOTO_JOIN = 'LEFT JOIN users u ON u.id = ph.uploaded_by AND u.tenant_id = ph.tenant_id';
 
 /**
  * Adds a photo of a feature: the body is the file itself, untouched. Query: caption, client_ref (so a repeated upload is
  * kept once), the phone's lat, lng and taken_at, and inspection_id to add it to an inspection already saved (a closing
- * recorded with no signal, whose photo follows).
+ * recorded with no signal, whose photo follows; the same day and not entered in error, or a manager with reason), and
+ * for=inspection when the inspection screen takes it (only those count as an inspection's photos, and only that day).
  */
 router.post('/features/:id/photos', crew, raw, async (req, res) => {
   const id = paramId(req);
@@ -48,6 +49,7 @@ router.post('/features/:id/photos', crew, raw, async (req, res) => {
     caption: z.string().trim().max(255).optional(), client_ref: clientRef, file_name: z.string().trim().max(200).optional(),
     lat: z.coerce.number().min(-90).max(90).optional(), lng: z.coerce.number().min(-180).max(180).optional(), taken_at: dateTimeStr.optional(),
     inspection_id: z.coerce.number().int().positive().optional(),
+    for: z.enum(['inspection']).optional(), reason: z.string().trim().min(3).max(255).optional(),
   }).safeParse(req.query);
   if (!q.success) throw bad('Something about that photo upload was not right');
   const b = q.data;
@@ -58,14 +60,27 @@ router.post('/features/:id/photos', crew, raw, async (req, res) => {
       if (seen) return { id: seen.id, sha256: seen.sha256, repeat: true };
     }
     if (!(await one(conn, 'SELECT id FROM park_features WHERE tenant_id = ? AND id = ?', [tenantId, id]))) throw notFound('Park feature');
-    if (b.inspection_id && !(await one(conn, 'SELECT id FROM park_inspections WHERE tenant_id = ? AND feature_id = ? AND id = ?', [tenantId, id, b.inspection_id]))) throw notFound('Inspection');
+    let lateReason = null;
+    if (b.inspection_id) {
+      // The photo that follows a closing saved with no signal: the crew adds it the same day, to an inspection that
+      // stands. Another day's inspection, or one entered in error, is a correction: a manager, with a reason.
+      const i = await one(conn, 'SELECT id, inspected_on, voided_at FROM park_inspections WHERE tenant_id = ? AND feature_id = ? AND id = ?', [tenantId, id, b.inspection_id]);
+      if (!i) throw notFound('Inspection');
+      const today = todayIn(await OPS.tzOf(conn, tenantId));
+      if (String(i.inspected_on).slice(0, 10) !== today || i.voided_at) {
+        const what = i.voided_at ? 'That inspection was marked entered in error' : 'That inspection was on another day';
+        if (!isManager(req)) throw forbidden(`${what}. Ask a manager to add the photo as a correction.`);
+        if (!b.reason) throw bad(`${what}. Say why the photo is being added; it is kept with the photo.`, { code: 'reason_required' });
+        lateReason = b.reason;
+      }
+    }
     const facts = photoFacts(buf);
     const hash = sha(buf);
-    const [r] = await conn.query(`INSERT INTO park_photos (tenant_id, feature_id, inspection_id, mime, file_name, bytes, sha256, original, caption, taken_at, taken_lat, taken_lng, client_ref, uploaded_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    const [r] = await conn.query(`INSERT INTO park_photos (tenant_id, feature_id, inspection_id, mime, file_name, bytes, sha256, original, caption, taken_at, taken_lat, taken_lng, client_ref, uploaded_by, via_inspection, late_reason)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [tenantId, id, b.inspection_id || null, mime, b.file_name || null, buf.length, hash, buf, b.caption || null, facts.taken_at || (b.taken_at ? b.taken_at.replace('T', ' ').slice(0, 19) : null),
-      facts.lat ?? b.lat ?? null, facts.lng ?? b.lng ?? null, b.client_ref || null, req.auth.userId]);
-    await audit(conn, req, 'add_photo', 'park_features', id, { photo_id: r.insertId, sha256: hash, bytes: buf.length, ...(b.inspection_id ? { inspection: b.inspection_id } : {}) });
+      facts.lat ?? b.lat ?? null, facts.lng ?? b.lng ?? null, b.client_ref || null, req.auth.userId, b.for === 'inspection' || b.inspection_id ? 1 : 0, lateReason]);
+    await audit(conn, req, lateReason ? 'correct_add_photo' : 'add_photo', 'park_features', id, { photo_id: r.insertId, sha256: hash, bytes: buf.length, ...(b.inspection_id ? { inspection: b.inspection_id } : {}), ...(lateReason ? { reason: lateReason } : {}) });
     return { id: r.insertId, sha256: hash, bytes: buf.length };
   });
   res.status(out.repeat ? 200 : 201).json(out);
@@ -94,14 +109,41 @@ router.get('/photos/:pid/verify', async (req, res) => {
 });
 
 // ---------------------------------------------------------------- opening and closing an area for the day
-/** The features placed in an area today that stop it opening: not inspected today, or closed (unless roped off). */
+/**
+ * The features placed in an area today that stop it opening, each with why and what to do. A feature blocks while it is
+ * closed, waits for a post-incident inspection, needs attention, has never passed an inspection, or was not inspected
+ * today. Roping it off (which takes a reason) lets the area open around it, the same for every one of these.
+ */
+const BLOCK = [
+  // [key, test, why, what to do], most serious first; the first that applies says why and what to do, and reasons lists all.
+  ['post_incident', (f) => Number(f.needs_post_incident), 'Needs a post-incident inspection', 'Do a post-incident inspection that finds no defects, or rope it off with a reason.'],
+  ['closed', (f) => f.status === 'closed', 'Closed', 'Fix it and log an inspection that finds no defects, or rope it off with a reason.'],
+  ['needs_attention', (f) => f.status === 'needs_attention', 'Needs attention', 'Fix it and log an inspection that finds no defects, or rope it off with a reason.'],
+  ['not_inspected', (f) => !Number(f.inspected), 'Not inspected today', 'Inspect it today, or rope it off with a reason.'],
+  ['never_passed', (f) => f.status === 'new' || !Number(f.passed), 'Never passed an inspection', 'Log an inspection that finds no defects, or rope it off with a reason.'],
+];
 async function blockers(db, tenantId, areaId, date) {
-  const list = await rows(db, `SELECT f.id, f.name, f.status, p.roped_off,
-      (SELECT COUNT(*) FROM park_inspections i WHERE i.tenant_id = p.tenant_id AND i.feature_id = p.feature_id AND i.inspected_on = p.on_date AND i.voided_at IS NULL) AS inspected
+  const list = await rows(db, `SELECT f.id, f.name, f.status, f.needs_post_incident, p.roped_off,
+      (SELECT COUNT(*) FROM park_inspections i WHERE i.tenant_id = p.tenant_id AND i.feature_id = p.feature_id AND i.inspected_on = p.on_date AND i.voided_at IS NULL) AS inspected,
+      (SELECT COUNT(*) FROM park_inspections i WHERE i.tenant_id = p.tenant_id AND i.feature_id = p.feature_id AND i.result = 'ok' AND i.voided_at IS NULL) AS passed
     FROM park_placements p JOIN park_features f ON f.tenant_id = p.tenant_id AND f.id = p.feature_id
     WHERE p.tenant_id = ? AND p.area_id = ? AND p.on_date = ? AND p.voided_at IS NULL ORDER BY f.name`, [tenantId, areaId, date]);
-  return list.filter((f) => !Number(f.roped_off) && (f.status === 'closed' || !Number(f.inspected)))
-    .map((f) => ({ feature_id: Number(f.id), name: f.name, why: f.status === 'closed' ? 'Closed' : 'Not inspected today' }));
+  const out = [];
+  for (const f of list) {
+    if (Number(f.roped_off)) continue;
+    const hits = BLOCK.filter(([, t]) => t(f));
+    if (!hits.length) continue;
+    out.push({ feature_id: Number(f.id), name: f.name, why: hits[0][2], reasons: hits.map((x) => x[0]), todo: hits[0][3] });
+  }
+  return out;
+}
+
+/** Works out how an area stands today (OPS.areaState) and keeps park_areas.status the same. Inside the caller's transaction. */
+async function storeState(conn, tenantId, areaId, date, tz) {
+  const days = await rows(conn, 'SELECT id, action, at, received_at FROM park_area_days WHERE tenant_id = ? AND area_id = ? AND on_date = ? ORDER BY at, id', [tenantId, areaId, date]);
+  const state = OPS.areaState(days, tz);
+  await conn.query('UPDATE park_areas SET status = ? WHERE tenant_id = ? AND id = ?', [state.status === 'open' ? 'open' : 'closed', tenantId, areaId]);
+  return state;
 }
 
 router.get('/areas/:id/open-check', async (req, res) => {
@@ -136,13 +178,15 @@ router.post('/areas/:id/open', crew, validate(z.object({
     const unticked = P.SIGNOFF.filter(([k]) => b.checklist[k] !== true);
     if (unticked.length) throw bad(`Tick every item before opening: ${unticked.map((x) => x[1]).join(', ')}`, { code: 'signoff_missing', missing: unticked.map((x) => x[0]) });
     const blocking = await blockers(conn, tenantId, id, when.today);
-    if (blocking.length) throw conflict(`${a.name} cannot open yet: ${blocking.map((x) => `${x.name} (${x.why.toLowerCase()})`).join(', ')}. Inspect each one, or rope it off.`, { code: 'area_blocked', blocking });
+    if (blocking.length) throw conflict(`${a.name} cannot open yet. ${blocking.map((x) => `${x.name}: ${x.why}. ${x.todo}`).join(' ')}`, { code: 'area_blocked', blocking });
     const checklist = P.SIGNOFF.map(([key, label]) => ({ key, label, done: true }));
-    const [r] = await conn.query(`INSERT INTO park_area_days (tenant_id, area_id, on_date, action, checklist, supervisor_name, reason, at, client_ref, signed_by) VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?)`,
-      [tenantId, id, when.today, JSON.stringify(checklist), b.supervisor_name, b.notes || null, when.utc, b.client_ref || null, req.auth.userId]);
-    await conn.query("UPDATE park_areas SET status = 'open' WHERE tenant_id = ? AND id = ?", [tenantId, id]);
-    await audit(conn, req, 'open_area', 'park_areas', id, { signoff: r.insertId, date: when.today });
-    return { id: r.insertId };
+    const [r] = await conn.query(`INSERT INTO park_area_days (tenant_id, area_id, on_date, action, checklist, supervisor_name, reason, at, client_ref, signed_by, received_at) VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?)`,
+      [tenantId, id, when.today, JSON.stringify(checklist), b.supervisor_name, b.notes || null, when.utc, b.client_ref || null, req.auth.userId, OPS.utcNow()]);
+    const state = await storeState(conn, tenantId, id, when.today, when.tz);
+    await audit(conn, req, 'open_area', 'park_areas', id, { signoff: r.insertId, date: when.today, ...(state.status !== 'open' ? { stays_closed: true } : {}) });
+    // An opening kept on a phone with no signal that was made before a closing reached the server: the closing wins.
+    if (state.status !== 'open') return { id: r.insertId, status: state.status, message: `${a.name} stays closed: a closing reached the server after this opening was made. Open it again to reopen it.` };
+    return { id: r.insertId, status: 'open' };
   });
   res.status(out.repeat ? 200 : 201).json(out);
 });
@@ -167,13 +211,14 @@ router.post('/areas/:id/close', crew, validate(z.object({
     if (!a) throw notFound('Park area');
     const feats = await rows(conn, `SELECT f.id, f.status FROM park_placements p JOIN park_features f ON f.tenant_id = p.tenant_id AND f.id = p.feature_id
       WHERE p.tenant_id = ? AND p.area_id = ? AND p.on_date = ? AND p.voided_at IS NULL AND f.status NOT IN ('closed','retired') FOR UPDATE`, [tenantId, id, when.date]);
-    const [r] = await conn.query(`INSERT INTO park_area_days (tenant_id, area_id, on_date, action, reason_kind, reason, at, features_closed, client_ref, signed_by) VALUES (?, ?, ?, 'close', ?, ?, ?, ?, ?, ?)`,
-      [tenantId, id, when.date, b.reason_kind, b.reason, when.utc, feats.length, b.client_ref || null, req.auth.userId]);
+    const [r] = await conn.query(`INSERT INTO park_area_days (tenant_id, area_id, on_date, action, reason_kind, reason, at, features_closed, client_ref, signed_by, received_at) VALUES (?, ?, ?, 'close', ?, ?, ?, ?, ?, ?, ?)`,
+      [tenantId, id, when.date, b.reason_kind, b.reason, when.utc, feats.length, b.client_ref || null, req.auth.userId, OPS.utcNow()]);
     const why = `${(P.CLOSE_REASONS.find((x) => x[0] === b.reason_kind) || [0, ''])[1]}: ${b.reason}`;
     for (const f of feats) await OPS.setStatus(conn, req, f, 'closed', { reason: why, source: 'area_close', refId: r.insertId, onDate: when.date });
-    await conn.query("UPDATE park_areas SET status = 'closed' WHERE tenant_id = ? AND id = ?", [tenantId, id]);
+    const state = when.date === when.today ? await storeState(conn, tenantId, id, when.today, when.tz) : null;
     await audit(conn, req, 'close_area', 'park_areas', id, { reason_kind: b.reason_kind, features_closed: feats.length, date: when.date });
-    return { id: r.insertId, closed: feats.length };
+    const late = state && state.late.find((x) => x.id === Number(r.insertId));
+    return { id: r.insertId, closed: feats.length, status: state ? state.status : 'closed', ...(late ? { message: late.message } : {}) };
   });
   res.status(out.repeat ? 200 : 201).json(out);
 });
@@ -265,17 +310,18 @@ router.get('/areas/:id/record/:date', async (req, res) => {
     FROM park_feature_changes c LEFT JOIN users u ON u.tenant_id = c.tenant_id AND u.id = c.changed_by
     WHERE c.tenant_id = ? AND ((c.feature_id IN (?) AND (c.on_date = ? OR (c.on_date IS NULL AND c.changed_at >= ? AND c.changed_at < ?))) OR (c.area_id = ? AND c.changed_at >= ? AND c.changed_at < ?)) ORDER BY c.changed_at, c.id`,
   [t, any, date, from, to, id, from, to]);
-  const days = await rows(pool, `SELECT d.id, d.action, d.at, d.checklist, d.supervisor_name, d.reason_kind, d.reason, d.features_closed, COALESCE(u.email, u.username) AS signed_by
+  const days = await rows(pool, `SELECT d.id, d.action, d.at, d.received_at, d.checklist, d.supervisor_name, d.reason_kind, d.reason, d.features_closed, COALESCE(u.email, u.username) AS signed_by
     FROM park_area_days d LEFT JOIN users u ON u.tenant_id = d.tenant_id AND u.id = d.signed_by WHERE d.tenant_id = ? AND d.area_id = ? AND d.on_date = ? ORDER BY d.at, d.id`, [t, id, date]);
   const corrections = await rows(pool, `SELECT c.feature_id, c.action, c.before_json, c.after_json, c.reason, c.corrected_at, COALESCE(u.email, u.username) AS corrected_by
     FROM park_placement_corrections c LEFT JOIN users u ON u.tenant_id = c.tenant_id AND u.id = c.corrected_by WHERE c.tenant_id = ? AND c.on_date = ? AND c.feature_id IN (?) ORDER BY c.id`, [t, date, any]);
   const js = (v) => (v === null || v === undefined ? null : typeof v === 'string' ? JSON.parse(v) : v);
+  const state = OPS.areaState(days, tz); // the same rule as the park screen and the public feed
   await audit(pool, req, 'view_day_record', 'park_areas', id, { date });
   res.json({
-    area: { ...area, level_label: OPS.levelLabel(area.level) }, date, timezone: tz,
+    area: { ...area, level_label: OPS.levelLabel(area.level) }, date, timezone: tz, status: state.status, late_notes: state.late.map((x) => x.message),
     features: OPS.local(placed.map((p) => ({ ...p, lat: Number(p.lat), lng: Number(p.lng), late: Boolean(Number(p.late)), roped_off: Boolean(Number(p.roped_off)), kind_label: OPS.kindLabel(p.kind), size_label: OPS.sizeLabel(p.size), over_rating: P.overRating(p.size, area.level) })), tz),
     inspections: OPS.local(inspections.map((i) => ({ ...i, checklist: js(i.checklist), reopened: Boolean(Number(i.reopened)), photos: Number(i.photos), result_label: OPS.resultLabel(i.result), kind_label: i.kind ? OPS.inspectionKindLabel(i.kind) : null })), tz),
-    changes: OPS.local(changes, tz), days: OPS.local(days.map((d) => ({ ...d, checklist: js(d.checklist) })), tz),
+    changes: OPS.local(changes, tz), days: OPS.local(days.map((d) => ({ ...d, checklist: js(d.checklist), late_message: (state.late.find((x) => x.id === Number(d.id)) || {}).message || null })), tz),
     corrections: OPS.local(corrections.map((c) => ({ ...c, before: js(c.before_json), after: js(c.after_json), before_json: undefined, after_json: undefined })), tz),
     can_correct: isManager(req),
   });

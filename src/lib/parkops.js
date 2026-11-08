@@ -49,6 +49,43 @@ async function phoneTime(db, tenantId, at) {
   return { local, utc: utcFromLocal(local, tz), date: local.slice(0, 10), now, today, tz };
 }
 
+/**
+ * How an area stands on a day, from that day's openings and closings (park_area_days rows with UTC at and received_at).
+ * An entry kept on a phone with no signal arrives late, so the phone's times alone do not decide it. A closing wins over
+ * every opening made before the closing reached the server, even one made after the closing's own time: the person who
+ * opened could not have known about it. An opening wins only when it was made after every closing that day had arrived.
+ * A tie, or anything unclear, is closed. Every screen, the public feed and the stored status use this one rule.
+ * Returns { status: 'open' | 'closed' | 'not_opened', last: the entry that decides it, late: closings that arrived after
+ * an opening made later than they were, each with its message }.
+ */
+function areaState(days, tz) {
+  const ms = (v) => (v ? Date.parse(`${String(v).replace(' ', 'T').slice(0, 19)}Z`) : NaN);
+  const hm = (v) => localTime(v, tz).slice(11, 16);
+  const closes = days.filter((d) => d.action === 'close');
+  const opens = days.filter((d) => d.action === 'open');
+  // A closing counts from its own time, or from when it arrived if that is later (never earlier: a clock running fast).
+  const arrived = (c) => Math.max(ms(c.at), ms(c.received_at || c.at));
+  const late = [];
+  for (const c of closes) {
+    const overrode = opens.filter((o) => ms(o.at) > ms(c.at) && ms(o.at) <= arrived(c));
+    if (overrode.length) late.push({ id: Number(c.id) || null, sent: hm(c.at), arrived: hm(c.received_at), message: `A closing sent at ${hm(c.at)} arrived at ${hm(c.received_at)} and closed the area.` });
+  }
+  if (!days.length) return { status: 'not_opened', last: null, late };
+  const winners = opens.filter((o) => Number.isFinite(ms(o.at)) && closes.every((c) => ms(o.at) > arrived(c)));
+  if (winners.length) return { status: 'open', last: winners.sort((a, b) => ms(a.at) - ms(b.at) || Number(a.id) - Number(b.id)).at(-1), late };
+  // Closed: the closing that decided it is the one that arrived last.
+  const lastClose = closes.slice().sort((a, b) => arrived(a) - arrived(b) || Number(a.id) - Number(b.id)).at(-1);
+  return { status: 'closed', last: lastClose || null, late };
+}
+
+/** areaState for every area of a mountain on a day: Map of area id to its state. */
+async function areaStates(db, tenantId, date, tz) {
+  const days = await rows(db, 'SELECT id, area_id, action, at, received_at, supervisor_name, reason_kind, reason FROM park_area_days WHERE tenant_id = ? AND on_date = ? ORDER BY at, id', [tenantId, date]);
+  const by = new Map();
+  for (const d of days) { const k = Number(d.area_id); if (!by.has(k)) by.set(k, []); by.get(k).push(d); }
+  return new Map([...by].map(([k, list]) => [k, areaState(list, tz)]));
+}
+
 /** One row of history: a field of a feature (or an area's rating) from one value to another, with who, why and where from. */
 async function logChange(conn, req, { featureId = null, areaId = null, onDate = null, field, before, after, reason = null, source = 'edit', refId = null }) {
   const s = (v) => (v === null || v === undefined ? null : String(v).slice(0, 255));
@@ -116,4 +153,4 @@ async function snapshot(db, tenantId, featureId, onDate, beforeUtc) {
   };
 }
 
-module.exports = { local, phoneTime, logChange, setStatus, closeForIncident, tellSupervisors, supervisors, snapshot, statusLabel, sizeLabel, levelLabel, resultLabel, kindLabel, inspectionKindLabel, tzOf, utcNow, STATUS_LABEL };
+module.exports = { areaState, areaStates, local, phoneTime, logChange, setStatus, closeForIncident, tellSupervisors, supervisors, snapshot, statusLabel, sizeLabel, levelLabel, resultLabel, kindLabel, inspectionKindLabel, tzOf, utcNow, STATUS_LABEL };

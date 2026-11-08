@@ -46,7 +46,7 @@ async function mountain(slug) {
 }
 const login = async (m, email) => (await api('POST', '/auth/login', { body: { tenant: m.slug, email, password: PW } })).body.token;
 const JPEG = Buffer.from('ffd8ffe000104a46494600010100000100010000ffd9', 'hex');
-async function photo(token, featureId, query = '') {
+async function photo(token, featureId, query = '?for=inspection') {
   const res = await fetch(`${base}/api/v1/park/features/${featureId}/photos${query}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'image/jpeg' }, body: JPEG });
   const text = await res.text();
   return { status: res.status, body: JSON.parse(text) };
