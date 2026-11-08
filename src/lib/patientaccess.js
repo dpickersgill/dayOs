@@ -8,7 +8,8 @@
 //   wrote    a case the person created or submitted (incidents.submitted_by), started in the last 12 hours;
 //   and, for a case started (incidents.created_at) in the last 12 hours, when the person:
 //   responder        is a responder on it (incident_responders, not marked entered in error);
-//   dispatched       was sent to its call (dispatch_calls.incident_id with dispatch_responders);
+//   dispatched       was sent to its call (dispatch_calls.incident_id with dispatch_responders, or with
+//                    dispatch_responders_removed: taken off a call that had a case keeps the tie they had);
 //   crew             shares an active crew (patrol_crews.active, patrol_crew_members) with someone who responded to it
 //                    or was dispatched to it (a counted link), and both were signed in on patrol duty (patrol_duty) when
 //                    the case was started: on duty with that crew.
@@ -74,7 +75,9 @@ async function relations(db, req, ids) {
   const [resp, disp] = await Promise.all([
     rows(db, 'SELECT incident_id, staff_id, added_by, added_at FROM incident_responders WHERE tenant_id = ? AND incident_id IN (?) AND voided_at IS NULL', [t, rid]),
     rows(db, `SELECT c.incident_id, d.staff_id, d.added_by, d.added_at FROM dispatch_responders d JOIN dispatch_calls c ON c.tenant_id = d.tenant_id AND c.id = d.call_id
-      WHERE d.tenant_id = ? AND c.incident_id IN (?)`, [t, rid]),
+      WHERE d.tenant_id = ? AND c.incident_id IN (?)
+      UNION ALL SELECT c.incident_id, x.staff_id, x.added_by, x.added_at FROM dispatch_responders_removed x JOIN dispatch_calls c ON c.tenant_id = x.tenant_id AND c.id = x.call_id
+      WHERE x.tenant_id = ? AND c.incident_id IN (?)`, [t, rid, t, rid]),
   ]);
   const links = [...resp.map((r) => ({ ...r, kind: 'responder' })), ...disp.map((r) => ({ ...r, kind: 'dispatched' }))];
   // Who added each link: their role, patrol level and staff record.
@@ -185,11 +188,17 @@ function searchCheck(req) {
   if (!req.auth.recordsChecked) throw needed();
 }
 
+/** Whether this person may see cases at all (the patrol feature "See cases"; owners and managers always may). */
+const caseReader = (db, req) => require('./patrolaccess').can(db, req, 'view_cases');
+
 /**
- * For lists that show cases (the case list, home, the review queue, the day log, map pins): which of these the person
- * may see the summary of. Without a fresh check, only the cases they could open without one.
+ * For lists that show cases (the case list, home, the review queue, the day log, map pins, kit and medication notes):
+ * which of these the person may see the summary of. Without a fresh check, only the cases they could open without one.
+ * The records check is never permission on its own: someone who may not see cases (a Host) sees none of them, checked
+ * or not (review 2026.11.12).
  */
 async function openable(db, req, ids) {
+  if (!(await caseReader(db, req))) return { all: false, has: () => false };
   if (req.auth.recordsChecked) return { all: true, has: () => true };
   const rel = await relations(db, req, ids);
   return { all: false, has: (id) => rel.has(Number(id)) };
@@ -216,4 +225,4 @@ const ACTION_LABELS = {
 };
 const ALSO_LISTED = ['view_link', 'claim_share_view'];
 
-module.exports = { ACTION_LABELS, ALSO_LISTED, relations, check, byParam, byChild, guard, searchCheck, openable, trimRow, needed, wallClock, CASE_HOURS, SCENE_MINUTES, RECORDS_MINUTES, HIDDEN };
+module.exports = { ACTION_LABELS, ALSO_LISTED, relations, check, byParam, byChild, guard, searchCheck, openable, caseReader, trimRow, needed, wallClock, CASE_HOURS, SCENE_MINUTES, RECORDS_MINUTES, HIDDEN };
