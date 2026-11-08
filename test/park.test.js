@@ -52,7 +52,7 @@ const checks = (kind, result = 'pass') => KINDS.find((k) => k.key === kind).chec
 const inspect = (kind, result, more = {}) => ({ result, kind: 'morning', checklist: checks(kind, result === 'ok' ? 'pass' : 'pass'), ...more });
 async function photo(token, featureId) {
   const jpeg = Buffer.from('ffd8ffe000104a46494600010100000100010000ffd9', 'hex');
-  const res = await fetch(`${base}/api/v1/park/features/${featureId}/photos`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'image/jpeg' }, body: jpeg });
+  const res = await fetch(`${base}/api/v1/park/features/${featureId}/photos?for=inspection`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'image/jpeg' }, body: jpeg });
   const text = await res.text();
   assert.equal(res.status, 201, text);
   return JSON.parse(text).id;

@@ -97,10 +97,11 @@ publicRouter.get('/:slug/conditions', async (req, res) => {
     // Attractions show by name, type and status only: the note on a hold is for staff.
     rows(pool, 'SELECT name, type, status FROM attractions WHERE tenant_id = ? AND active = 1 ORDER BY sort, name', [tenant.id]),
     // Terrain park areas by name, rating and whether they opened today with the opening sign-off (2026.11.12). Features
-    // and notes stay in the app: an area shows open only after its supervisor signed it off today.
-    rows(pool, `SELECT a.name, a.level, (SELECT d.action FROM park_area_days d WHERE d.tenant_id = a.tenant_id AND d.area_id = a.id AND d.on_date = ? ORDER BY d.at DESC, d.id DESC LIMIT 1) AS today
-      FROM park_areas a WHERE a.tenant_id = ? AND a.active = 1 ORDER BY a.name`, [today, tenant.id]),
+    // and notes stay in the app: an area shows open only after its supervisor signed it off today, and a closing that
+    // arrived late from a phone with no signal wins the same way it does on the park screen (lib/parkops areaState).
+    rows(pool, 'SELECT a.id, a.name, a.level FROM park_areas a WHERE a.tenant_id = ? AND a.active = 1 ORDER BY a.name', [tenant.id]),
   ]);
+  const parkStates = parkAreas.length ? await require('../lib/parkops').areaStates(pool, tenant.id, today, tenant.timezone) : new Map();
   res.set('Cache-Control', 'public, max-age=60');
   res.json({
     mountain: tenant.name,
@@ -113,7 +114,7 @@ publicRouter.get('/:slug/conditions', async (req, res) => {
     upcoming_events: events,
     attractions_open: attractions.filter((a) => a.status === 'open').length,
     attractions: attractions.map((a) => ({ name: a.name, type: a.type, type_label: typeLabel(a.type), status: a.status })),
-    park_areas: (await require('../lib/modules').stateOf(tenant.id)).on.has('park') ? parkAreas.map((a) => ({ name: a.name, rating: parkLevel(a.level), status: a.today === 'open' ? 'open' : 'closed' })) : [],
+    park_areas: (await require('../lib/modules').stateOf(tenant.id)).on.has('park') ? parkAreas.map((a) => ({ name: a.name, rating: parkLevel(a.level), status: (parkStates.get(Number(a.id)) || {}).status === 'open' ? 'open' : 'closed' })) : [],
   });
 });
 
