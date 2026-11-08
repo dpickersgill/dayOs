@@ -374,7 +374,8 @@ const inspectSchema = z.object({
  *   every item on the feature type's checklist is answered; a fail has a note; a fail cannot pass the feature
  *   anything other than a pass needs a note
  *   a pass on a closed or needs-attention feature reopens it: what was fixed, and a photo
- *   a feature closed after an incident reopens only through a post-incident inspection
+ *   a feature closed after an incident reopens only through a post-incident inspection; until one passes, any other
+ *   inspection is kept and the feature stays closed (the route holds it there)
  *   closing needs a photo, or why there is none (no signal: the photo follows)
  */
 function judge(f, b) {

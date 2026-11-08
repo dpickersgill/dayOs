@@ -156,7 +156,8 @@ router.get('/areas/:id/open-check', async (req, res) => {
 
 /**
  * Opens an area for the day: every item on the opening checklist, the supervisor's name and the time. Refused while any
- * feature placed in the area today is not inspected today or is closed, unless that feature is recorded as roped off.
+ * feature placed in the area today blocks it (see blockers), unless that feature is recorded as roped off. An opening
+ * kept on a phone and made before a closing reached the server is kept in the record, and the area stays closed.
  */
 router.post('/areas/:id/open', crew, validate(z.object({
   checklist: z.record(z.string().max(30), z.boolean()), supervisor_name: z.string().trim().min(2, 'Who is signing off?').max(100),
