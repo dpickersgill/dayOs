@@ -364,6 +364,9 @@ const inspectSchema = z.object({
   notes: z.string().trim().max(255).nullable().optional(),
   fixed: z.string().trim().max(255).nullable().optional(),
   photo_ids: z.array(z.number().int().positive()).max(10).optional(),
+  // photos taken in the inspection with no signal: the phone sends them first (the outbox keeps the order) and names them
+  // here by the client_ref each was sent with (2026.11.13)
+  photo_refs: z.array(z.string().regex(/^[A-Za-z0-9_-]{6,40}$/)).max(10).optional(),
   no_photo_reason: z.string().trim().max(255).nullable().optional(),
   at: atField, client_ref: clientRef,
 });
@@ -412,6 +415,11 @@ router.post('/features/:id/inspections', crew, validate(inspectSchema), async (r
     const f = await one(conn, 'SELECT id, kind, status, needs_post_incident FROM park_features WHERE tenant_id = ? AND id = ? FOR UPDATE', [tenantId, id]);
     if (!f) throw notFound('Park feature');
     if (f.status === 'retired') throw conflict('This feature is retired');
+    if (b.photo_refs && b.photo_refs.length) {
+      const got = await rows(conn, 'SELECT id, client_ref FROM park_photos WHERE tenant_id = ? AND feature_id = ? AND client_ref IN (?)', [tenantId, id, b.photo_refs]);
+      if (got.length !== new Set(b.photo_refs).size) throw bad('A photo taken with no signal has not reached the server yet. It is sent before the inspection; try again in a moment.', { code: 'photo_not_arrived' });
+      b.photo_ids = [...new Set([...(b.photo_ids || []), ...got.map((g) => Number(g.id))])];
+    }
     const j = judge(f, b);
     const ids = b.photo_ids || [];
     if (ids.length) {
@@ -419,7 +427,11 @@ router.post('/features/:id/inspections', crew, validate(inspectSchema), async (r
       if (found.length !== new Set(ids).size) throw bad('A photo was not found for this feature, or is already on another inspection');
       // A photo on an inspection (the one a reopening needs, too) is taken that day, in this feature's inspection: not
       // an old one from the feature's photos or the phone's gallery.
-      const stale = found.filter((ph) => !Number(ph.via_inspection) || OPS.local({ at: ph.uploaded_at }, when.tz).at.slice(0, 10) !== when.date || (ph.taken_at && String(ph.taken_at).slice(0, 10) !== when.date));
+      // A photo taken in the inspection with no signal (via_inspection 2) arrives later from the outbox: it counts when it
+      // was taken that day and reached the server within the outbox's three days.
+      const late = (ph) => Number(ph.via_inspection) === 2 && ph.taken_at && String(ph.taken_at).slice(0, 10) === when.date
+        && OPS.local({ at: ph.uploaded_at }, when.tz).at.slice(0, 10) <= require('../lib/util').addDays(when.date, 3);
+      const stale = found.filter((ph) => !late(ph) && (!Number(ph.via_inspection) || OPS.local({ at: ph.uploaded_at }, when.tz).at.slice(0, 10) !== when.date || (ph.taken_at && String(ph.taken_at).slice(0, 10) !== when.date)));
       if (stale.length) throw bad('Each photo on an inspection is taken that day, in the inspection. Take a new photo of the feature.', { code: 'photo_not_today', photos: stale.map((ph) => Number(ph.id)) });
     }
     const [r] = await conn.query(`INSERT INTO park_inspections (tenant_id, feature_id, inspected_on, inspected_at, inspected_by, result, notes, kind, checklist, fixed, no_photo_reason, client_ref, received_at, reopened)

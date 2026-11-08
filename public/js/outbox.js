@@ -15,7 +15,7 @@
 // held in memory only, never written in the clear. Each person's entries are sealed separately; the only thing kept in the
 // clear is how many entries each person has waiting (for the sign-out warning).
 
-import { api, session, ApiError } from './api.js';
+import { api, sendBytes, session, ApiError } from './api.js';
 import { nowStamp } from './ui.js';
 
 const LEGACY = 'so.patrol.outbox'; // plain text, before 2026.10.16: read once, sealed, then removed
@@ -188,6 +188,46 @@ export async function send(method, path, body, { caseId, label: text, temp, offl
   try { return await api(method, path, sendBody); } catch (err) { if (unreachable(err)) return queue(); throw err; }
 }
 
+// ---------------------------------------------------------------- photos with no signal (2026.11.13)
+// A terrain park inspection photo taken with no signal waits in the same queue, in order, so it reaches the server before
+// the inspection that names it. The entry (sealed, like the rest) holds the request; the photo itself is too large for the
+// sealed store, so it waits in this browser's IndexedDB under the entry's id and is removed once sent or discarded. It is
+// a picture of a park feature, never of a patient: patrol has no photo upload through the outbox.
+const FILES = 'so.outbox.files';
+function filesDb() {
+  return new Promise((resolve, reject) => {
+    if (!globalThis.indexedDB) { reject(new Error('no IndexedDB')); return; }
+    const r = globalThis.indexedDB.open(FILES, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('files');
+    r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error);
+  });
+}
+async function fileOp(mode, fn) {
+  const db = await filesDb();
+  return new Promise((resolve, reject) => {
+    const t = db.transaction('files', mode); const req = fn(t.objectStore('files'));
+    t.oncomplete = () => resolve(req && req.result); t.onerror = () => reject(t.error); t.onabort = () => reject(t.error);
+  });
+}
+const dropFile = (ref) => fileOp('readwrite', (st) => st.delete(ref)).catch(() => {});
+
+/**
+ * Sends a photo (raw bytes) to path, a URL that already carries its query and its client_ref. With no signal it waits
+ * on this phone and { queued: true } comes back; the waiting copy is sent with queued=1 so the server knows it was taken
+ * earlier than it arrived. A refusal from the server is thrown as usual.
+ */
+export async function sendPhoto(path, blob, { caseId, label: text, ref }) {
+  const queue = async () => {
+    await fileOp('readwrite', (st) => st.put(blob, ref));
+    const item = { id: ref, who: who(), caseId: Number(caseId), method: 'POST', path: `${path}${path.includes('?') ? '&' : '?'}queued=1`, file: ref, body: null, label: text, at: nowStamp(), queued: new Date().toISOString() };
+    write([...all(), item]);
+    schedule();
+    return { queued: true };
+  };
+  if ((globalThis.navigator && globalThis.navigator.onLine === false) || pending(caseId).some((x) => !x.error)) { const r = await queue(); flush(); return r; }
+  try { return await sendBytes('POST', path, blob); } catch (err) { if (unreachable(err)) return queue(); throw err; }
+}
+
 /** Sends what is waiting, oldest first. Stops at the first entry that still cannot get through. */
 export function flush() {
   if (flushing) return flushing;
@@ -199,7 +239,13 @@ export function flush() {
       const item = all().find((x) => x.id === queued.id);
       if (!item || item.error) continue;
       try {
-        const out = await api(item.method, item.path, item.body);
+        let out;
+        if (item.file) {
+          const blob = await fileOp('readonly', (st) => st.get(item.file)).catch(() => null);
+          if (!blob) throw new ApiError(410, 'This photo is no longer on this phone. Discard it and take it again.');
+          out = await sendBytes(item.method, item.path, blob);
+          dropFile(item.file);
+        } else out = await api(item.method, item.path, item.body);
         write(all().filter((x) => x.id !== item.id));
         if (item.temp && out && out.id) settle(item.temp, out);
         sent += 1;
@@ -265,7 +311,7 @@ export function fixClock(id) {
 }
 
 /** Drops one entry the server refused, after the patroller has seen it. */
-export function discard(id) { write(all().filter((x) => x.id !== id)); }
+export function discard(id) { const x = all().find((e) => e.id === id); if (x && x.file) dropFile(x.file); write(all().filter((e) => e.id !== id)); }
 
 function schedule() {
   if (timer) return;

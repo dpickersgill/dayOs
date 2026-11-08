@@ -4,9 +4,9 @@
 // Inspections, pins, rope lines and area openings are kept on the phone with no signal and sent when it returns
 // (the same outbox as patrol); photos need a signal.
 
-import { get, post, put, patch, sendBytes } from '../api.js';
+import { get, post, put, patch } from '../api.js';
 import { h, clear, can, isManager, state, input, select, field, button, toast, formDialog, dialog, confirmDialog, tabs, table, val, num, todayStr, addDays, fmtDateLong, fmtDateTime, fmtTime, fmtDate, label, empty, errorBox, fail, appendAll, nowStamp, ctx } from '../ui.js';
-import { send, pending, onChange as onOutbox, flush, retry, fixClock, discard, PARK_QUEUE, keepList, keptList } from '../outbox.js';
+import { send, sendPhoto, pending, onChange as onOutbox, flush, retry, fixClock, discard, PARK_QUEUE, keepList, keptList } from '../outbox.js';
 import { loadLeaflet, makeMap, removeWhenGone, fitMap } from './incident-map.js';
 
 const SIZES = [['xs', 'XS'], ['s', 'S'], ['m', 'M'], ['l', 'L'], ['xl', 'XL']];
@@ -461,19 +461,22 @@ function inspectDialog(f, list, again, { quick = false, note } = {}) {
   const fixedField = field('What was fixed', fixed, 'Needed to reopen a feature that was closed or needed attention.');
   const noPhotoField = field('No photo? Say why', noPhoto);
   const photoIds = [];
+  const photoRefs = []; // photos taken here with no signal: waiting in the outbox, sent before the inspection (2026.11.13)
   const photoList = h('ul', { class: 'plain park-photos' });
   const fileIn = h('input', { type: 'file', accept: 'image/*', capture: 'environment', multiple: true, class: 'sr-file', 'aria-label': 'Add a photo' });
   const photoBtn = button('Take or add a photo', () => fileIn.click(), { kind: 'big' });
   const photoNote = h('p', { class: 'muted small' });
   fileIn.addEventListener('change', async () => {
     for (const file of [...fileIn.files]) {
-      if (navigator.onLine === false) { toast('Photos need a signal. Try again when you have one.', 'warn'); break; }
       try {
-        const q = new URLSearchParams({ for: 'inspection', client_ref: `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, taken_at: nowStamp().slice(0, 16), file_name: file.name.slice(0, 200) });
-        const r = await sendBytes('POST', `/park/features/${fid}/photos?${q}`, file);
-        photoIds.push(r.id);
-        photoList.append(h('li', null, state(`Photo ${photoIds.length} saved`, 'good'), h('span', { class: 'muted small' }, ` ${file.name}`)));
-      } catch (err) { fail(err); }
+        // Every photo taken here says so (for=inspection) and when it was taken, also when the outbox sends it later.
+        const ref = `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+        const q = new URLSearchParams({ for: 'inspection', client_ref: ref, taken_at: nowStamp().slice(0, 16), file_name: file.name.slice(0, 200) });
+        const r = await sendPhoto(`/park/features/${fid}/photos?${q}`, file, { caseId: PARK_QUEUE, label: `Photo of ${f.name}`, ref });
+        const n = photoIds.length + photoRefs.length + 1;
+        if (r && r.queued) { photoRefs.push(ref); photoList.append(h('li', null, state(`Photo ${n} waiting to send`, 'warn'), h('span', { class: 'muted small' }, ` ${file.name}`))); }
+        else { photoIds.push(r.id); photoList.append(h('li', null, state(`Photo ${n} saved`, 'good'), h('span', { class: 'muted small' }, ` ${file.name}`))); }
+      } catch (err) { fail(err.message === 'no IndexedDB' ? new Error('Photos need a signal on this browser. Try again when you have one.') : err); }
     }
     fileIn.value = '';
     sync();
@@ -489,7 +492,7 @@ function inspectDialog(f, list, again, { quick = false, note } = {}) {
   function sync() {
     const reopen = result.value === 'ok' && ['closed', 'needs_attention'].includes(status);
     fixedField.hidden = !reopen;
-    noPhotoField.hidden = result.value !== 'closed' || photoIds.length > 0;
+    noPhotoField.hidden = result.value !== 'closed' || photoIds.length + photoRefs.length > 0;
     photoNote.textContent = reopen ? 'A photo is needed to reopen it.' : result.value === 'closed' ? 'A photo is needed to close it (or say why there is none).' : 'Photos are optional on a pass.';
   }
   result.addEventListener('change', sync);
@@ -507,10 +510,10 @@ function inspectDialog(f, list, again, { quick = false, note } = {}) {
     const checklist = items.map((i) => ({ key: i.key, result: ans.get(i.key).result, note: ans.get(i.key).note || null }));
     const unanswered = items.filter((i) => !ans.get(i.key).result);
     if (unanswered.length) throw new Error(`Answer every item: ${unanswered.map((i) => i.label).join(', ')}`);
-    const body = { result: result.value, kind: kind.value, checklist, notes: notes.value.trim() || null, fixed: fixed.value.trim() || null, photo_ids: photoIds, no_photo_reason: noPhoto.value.trim() || null, at: nowStamp() };
+    const body = { result: result.value, kind: kind.value, checklist, notes: notes.value.trim() || null, fixed: fixed.value.trim() || null, photo_ids: photoIds, ...(photoRefs.length ? { photo_refs: photoRefs } : {}), no_photo_reason: noPhoto.value.trim() || null, at: nowStamp() };
     const offline = navigator.onLine === false;
-    if (offline && body.result === 'closed' && !photoIds.length && !body.no_photo_reason) body.no_photo_reason = 'No signal: photo to follow';
-    if (offline && body.result === 'ok' && ['closed', 'needs_attention'].includes(status)) throw new Error('Reopening needs a photo, and photos need a signal. Keep it closed until you have one.');
+    if (offline && body.result === 'closed' && !photoIds.length && !photoRefs.length && !body.no_photo_reason) body.no_photo_reason = 'No signal: photo to follow';
+    if (offline && body.result === 'ok' && ['closed', 'needs_attention'].includes(status) && !photoIds.length && !photoRefs.length) throw new Error('Reopening needs a photo. Take one here: with no signal it waits on this phone and is sent first.');
     const r = await send('POST', `/park/features/${fid}/inspections`, body, { caseId: PARK_QUEUE, label: `Inspection of ${f.name}` });
     if (r && r.needs_post_incident) toast(`${f.name}: ${r.message}`, 'warn');
     else toast(sentWord(r, body.result === 'ok' ? `${f.name}: inspected, no defects found` : `${f.name}: ${RESULT_SHORT[body.result].toLowerCase()}`), r && r.queued ? 'warn' : 'ok');

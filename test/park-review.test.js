@@ -228,6 +228,45 @@ test('a reopening photo is taken that day in the feature\'s inspection, not an o
   assert.equal((await featureOf(id)).status, 'ready');
 });
 
+test('2026.11.13: a photo taken in the inspection with no signal counts when the outbox sends it later, named by its client ref', async () => {
+  const id = ok(await api('POST', '/park/features', { token: T.staff, body: { name: 'Offline box', kind: 'butter_box', size: 's' } }), 201).id;
+  const close = (more) => api('POST', `/park/features/${id}/inspections`, { token: T.staff, body: { result: 'closed', kind: 'midday', notes: 'Cracked lip', checklist: checks('butter_box'), ...more } });
+  const later = (pid) => pool.query('UPDATE park_photos SET uploaded_at = uploaded_at + INTERVAL 1 DAY WHERE id = ?', [pid]); // reached the server the next day
+  const taken = localNow(0);
+  // taken in the inspection screen with no signal, sent the next day by the outbox (queued=1): it counts
+  const ref = `pq${suffix}a`.slice(0, 40);
+  const qid = ok(await photo(T.staff, id, `?for=inspection&queued=1&client_ref=${ref}&taken_at=${taken}`), 201).id;
+  await later(qid);
+  const [[ph]] = await pool.query('SELECT via_inspection FROM park_photos WHERE id = ?', [qid]);
+  assert.equal(Number(ph.via_inspection), 2, 'marked as taken in the inspection with no signal');
+  const ins = ok(await close({ photo_refs: [ref] }), 201).id;
+  const [[att]] = await pool.query('SELECT inspection_id FROM park_photos WHERE id = ?', [qid]);
+  assert.equal(Number(att.inspection_id), ins, 'the photo is on the inspection');
+  // the same way, but taken the day before the inspection: it does not count
+  const ref2 = `pq${suffix}b`.slice(0, 40);
+  await later(ok(await photo(T.staff, id, `?for=inspection&queued=1&client_ref=${ref2}&taken_at=${yesterday}T14:58`), 201).id);
+  let r = is(await close({ photo_refs: [ref2] }), 400); assert.equal(r.details.code, 'photo_not_today');
+  // sent with a signal (no queued=1) and arriving another day: not counted (only the outbox's late copies are)
+  const plain = ok(await photo(T.staff, id, `?for=inspection&taken_at=${taken}`), 201).id;
+  await later(plain);
+  r = is(await close({ photo_ids: [plain] }), 400); assert.equal(r.details.code, 'photo_not_today');
+  // a ref the server has never seen: the photo has not arrived
+  r = is(await close({ photo_refs: ['pnever-arrived'] }), 400); assert.equal(r.details.code, 'photo_not_arrived');
+});
+
+test('2026.11.13: every inspection photo the app takes says for=inspection, and the outbox sends a waiting one with queued=1', () => {
+  const park = fs.readFileSync(path.join(__dirname, '../public/js/views/park.js'), 'utf8');
+  const box = fs.readFileSync(path.join(__dirname, '../public/js/outbox.js'), 'utf8');
+  const uploads = [...park.matchAll(/\/photos\?\$\{q\}/g)];
+  assert.equal(uploads.length, 1, 'one place in the app uploads park photos');
+  assert.ok(!/sendBytes\(/.test(park), 'the inspection screen goes through the outbox, not straight to the server');
+  assert.match(park, /new URLSearchParams\(\{ for: 'inspection', client_ref: ref, taken_at:/);
+  assert.match(park, /sendPhoto\(`\/park\/features\/\$\{fid\}\/photos\?\$\{q\}`, file, \{ caseId: PARK_QUEUE/);
+  assert.match(park, /photo_refs: photoRefs/);
+  assert.match(box, /path: `\$\{path\}\$\{path\.includes\('\?'\) \? '&' : '\?'\}queued=1`/);
+  assert.match(box, /out = await sendBytes\(item\.method, item\.path, blob\)/);
+});
+
 test('the day record names the time zone as people say it', () => {
   const src = fs.readFileSync(path.join(__dirname, '../public/js/views/park.js'), 'utf8');
   assert.ok(!src.includes('Times are ${r.timezone}'));

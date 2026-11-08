@@ -37,7 +37,8 @@ const PHOTO_JOIN = 'LEFT JOIN users u ON u.id = ph.uploaded_by AND u.tenant_id =
  * Adds a photo of a feature: the body is the file itself, untouched. Query: caption, client_ref (so a repeated upload is
  * kept once), the phone's lat, lng and taken_at, and inspection_id to add it to an inspection already saved (a closing
  * recorded with no signal, whose photo follows; the same day and not entered in error, or a manager with reason), and
- * for=inspection when the inspection screen takes it (only those count as an inspection's photos, and only that day).
+ * for=inspection when the inspection screen takes it (only those count as an inspection's photos, and only that day), with
+ * queued=1 when the phone had no signal and its outbox sends it later (it then counts when taken_at is that day).
  */
 router.post('/features/:id/photos', crew, raw, async (req, res) => {
   const id = paramId(req);
@@ -49,7 +50,7 @@ router.post('/features/:id/photos', crew, raw, async (req, res) => {
     caption: z.string().trim().max(255).optional(), client_ref: clientRef, file_name: z.string().trim().max(200).optional(),
     lat: z.coerce.number().min(-90).max(90).optional(), lng: z.coerce.number().min(-180).max(180).optional(), taken_at: dateTimeStr.optional(),
     inspection_id: z.coerce.number().int().positive().optional(),
-    for: z.enum(['inspection']).optional(), reason: z.string().trim().min(3).max(255).optional(),
+    for: z.enum(['inspection']).optional(), queued: z.enum(['1']).optional(), reason: z.string().trim().min(3).max(255).optional(),
   }).safeParse(req.query);
   if (!q.success) throw bad('Something about that photo upload was not right');
   const b = q.data;
@@ -79,7 +80,7 @@ router.post('/features/:id/photos', crew, raw, async (req, res) => {
     const [r] = await conn.query(`INSERT INTO park_photos (tenant_id, feature_id, inspection_id, mime, file_name, bytes, sha256, original, caption, taken_at, taken_lat, taken_lng, client_ref, uploaded_by, via_inspection, late_reason)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [tenantId, id, b.inspection_id || null, mime, b.file_name || null, buf.length, hash, buf, b.caption || null, facts.taken_at || (b.taken_at ? b.taken_at.replace('T', ' ').slice(0, 19) : null),
-      facts.lat ?? b.lat ?? null, facts.lng ?? b.lng ?? null, b.client_ref || null, req.auth.userId, b.for === 'inspection' || b.inspection_id ? 1 : 0, lateReason]);
+      facts.lat ?? b.lat ?? null, facts.lng ?? b.lng ?? null, b.client_ref || null, req.auth.userId, b.for === 'inspection' ? (b.queued ? 2 : 1) : b.inspection_id ? 1 : 0, lateReason]);
     await audit(conn, req, lateReason ? 'correct_add_photo' : 'add_photo', 'park_features', id, { photo_id: r.insertId, sha256: hash, bytes: buf.length, ...(b.inspection_id ? { inspection: b.inspection_id } : {}), ...(lateReason ? { reason: lateReason } : {}) });
     return { id: r.insertId, sha256: hash, bytes: buf.length };
   });
