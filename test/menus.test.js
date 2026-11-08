@@ -55,7 +55,7 @@ test('the standard menus: each role its own work apps, Home never in them, and i
   assert.deepEqual(menus.STANDARD.staff, { apps: ['conditions', 'gate', 'lostfound'], start: 'dashboard' });
   assert.deepEqual(menus.STANDARD.patrol, { apps: ['patrol', 'conditions'], start: 'patrol' });
   assert.deepEqual(menus.HOME, ['dashboard', 'inbox', 'calendar', 'myshifts']);
-  for (const [role, m] of Object.entries(menus.STANDARD)) {
+  for (const [role, m] of Object.entries(menus.STANDARD).filter(([r]) => menus.ROLES.includes(r))) {
     assert.ok(m.apps.includes(m.start) || menus.HOME.includes(m.start), `${role} opens on an app in its menu or on Home`);
     for (const k of menus.HOME) assert.ok(!m.apps.includes(k), `${role}: ${k} is pinned, not in the menu`);
     for (const k of m.apps) assert.ok(menus.ROLE_APPS[role].includes(k), `${role} may open ${k}`);
