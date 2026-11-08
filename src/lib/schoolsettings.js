@@ -38,7 +38,7 @@ const DEFAULT_BANDS = [
   { label: 'Adults', age_min: 18, age_max: null, size: 10 },
 ];
 const DEFAULT_WINDOWS = [
-  { label: 'Ages 3 to 6', age_min: 0, age_max: 6, minutes: 10 },
+  { label: 'Ages 6 and under', age_min: 0, age_max: 6, minutes: 10 },
   { label: 'Ages 7 to 12', age_min: 7, age_max: 12, minutes: 15 },
 ];
 const DEFAULT_PLACES = ['Magic carpet', 'Lift 2 base', 'Lodge'];

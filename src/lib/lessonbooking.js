@@ -131,7 +131,7 @@ const guardianOf = (db, tenantId, personId) => one(db, `SELECT g.id, g.first_nam
  * emergency contact. Staff only (it holds children's details).
  */
 async function lastDetails(db, tenantId, personId) {
-  const last = await one(db, `SELECT allergies, medical, pickup, contact_name, contact_phone, contact_email, text_ok, photo_ok FROM lesson_bookings
+  const last = await one(db, `SELECT id, allergies, medical, pickup, contact_name, contact_phone, contact_email, text_ok, photo_ok FROM lesson_bookings
     WHERE tenant_id = ? AND person_id = ? AND (allergies IS NOT NULL OR medical IS NOT NULL OR pickup IS NOT NULL OR contact_name IS NOT NULL OR contact_phone IS NOT NULL OR contact_email IS NOT NULL)
     ORDER BY id DESC LIMIT 1`, [tenantId, personId]);
   const p = await one(db, 'SELECT emergency_name, emergency_phone, email, phone, ski_level, snowboard_level FROM people WHERE tenant_id = ? AND id = ?', [tenantId, personId]);
@@ -145,6 +145,8 @@ async function lastDetails(db, tenantId, personId) {
     contact_email: (last && last.contact_email) || (guardian && guardian.email) || p.email || null,
     text_ok: Boolean(last && last.text_ok), photo_ok: Boolean(last && last.photo_ok),
     ski_level: p.ski_level, snowboard_level: p.snowboard_level, from_last_booking: Boolean(last),
+    // the adults on the last pickup list (names only: a photo stays with the booking it was given for)
+    pickup_adults: last ? (await SS.pickupFor(db, tenantId, last.id)).map((a) => ({ name: a.name, relationship: a.relationship, phone: a.phone })) : [],
   };
 }
 

@@ -4,7 +4,7 @@
 
 import { typeName } from '../guesttypes.js';
 import { get, post } from '../api.js';
-import { h, clear, ctx, money, toCents, centsToInput, state, input, select, field, button, toast, dialog, label, errorBox, fmtDateTime, fmtTime, appendAll } from '../ui.js';
+import { h, clear, ctx, schoolCan, formDialog, money, toCents, centsToInput, state, input, select, field, button, toast, dialog, label, errorBox, fmtDateTime, fmtTime, appendAll } from '../ui.js';
 import { safetyFields } from './lesson-safety.js';
 import { levelName } from '../levels.js';
 import { customerCapture } from './customer-form.js';
@@ -61,6 +61,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
   // with no name, and that is the first choice for it; the guest's details are a tap away.
   const quickOk = Boolean(quickSale && quickSale.allowed && basket.length && basket.every((l) => (l.type === 'ticket' && quickSale.kinds.includes(l.kind)) || l.type === 'gift_card'));
   let quick = false;
+  let overrideReason = null; // a manager's reason to sell a lesson outside its ages or over its class size (feat/school-safety)
   // A day ticket needs only a name (Track WINDOW): no date of birth or sex when the basket is day tickets and gift cards.
   const light = basket.every((l) => (l.type === 'ticket' && l.kind !== 'season_pass') || l.type === 'gift_card');
 
@@ -539,6 +540,7 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
       }
       const mine = slots.filter((s) => s.line === l);
       if (l.type === 'lesson' && mine.length && safety.has(mine[0])) { const v = { ...safety.get(mine[0]).f.value(), placement: placementAnswers(mine[0]) }; if (!v.placement) delete v.placement; l.safety = Object.keys(v).length ? v : undefined; }
+      if (l.type === 'lesson' && overrideReason) l.safety = { ...(l.safety || {}), override_reason: overrideReason };
       if (l.type === 'ticket') return lineApi(l, null, mine.map((s) => assign.get(s)));
       const who = mine.length ? assign.get(mine[0]) : null;
       return lineApi(l, who && who !== 'customer' ? who : null, null, mine.length ? limitsOk.get(mine[0]) : false);
@@ -585,7 +587,17 @@ export function checkoutDialog({ basket, quote, def, promo, onSold, comp = null,
     quick = asQuick;
     if (!asQuick) { const p = problems(); if (p) { errs.append(errorBox(new Error(p))); return; } }
     let r;
-    try { r = await check(); } catch (err) { errs.append(errorBox(err)); return; }
+    try { r = await check(); } catch (err) {
+      // outside a lesson's ages or over its class size: a manager sells it anyway with a reason (audited)
+      if (err.details && err.details.needs_override && schoolCan('supervisor') && !overrideReason) {
+        formDialog('Sell anyway?', h('div', { class: 'form' }, h('p', { class: 'wide notice warn' }, err.message), h('div', { class: 'wide' }, field('Reason (kept on the audit log)', input({ name: 'override_reason', required: true, minlength: 3, maxlength: 300 })))), async (fd) => {
+          overrideReason = String(fd.get('override_reason') || '').trim();
+          await toPayment(asQuick);
+        }, { submitText: 'Sell anyway' });
+        return;
+      }
+      errs.append(errorBox(err)); return;
+    }
     // a guest's type follows them (a child on the lesson is a child on the rental): the total may have changed
     if (r && typeof r.total_cents === 'number' && r.total_cents !== total) total = r.total_cents;
     clear(totalEl).append(`Total ${money(total)}`);

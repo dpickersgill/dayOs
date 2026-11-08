@@ -12,9 +12,10 @@ import * as payPart from './school-pay.js';
 import * as directorPart from './school-director.js';
 import * as planPart from './school-plan.js';
 import * as staffPart from './school-staff.js';
+import * as safetyPart from './school-safety.js'; // feat/school-safety: pickup, lost child, ratios, adaptive, places
 import { drawInLessons as drawAvailability } from './availability.js';
 
-const PARTS = [lineupPart, parentsPart, payPart, directorPart, planPart, staffPart];
+const PARTS = [lineupPart, parentsPart, payPart, directorPart, planPart, staffPart, safetyPart];
 
 const DISCIPLINES = ['ski', 'snowboard', 'telemark', 'adaptive'];
 const PSIA = [['none', 'None yet'], ['level1', 'PSIA-AASI Level 1'], ['level2', 'PSIA-AASI Level 2'], ['level3', 'PSIA-AASI Level 3']];
@@ -46,7 +47,7 @@ export async function render(root) {
   // Four groups instead of a long row: the day, bookings, instructors, planning. Each group shows its own small row of
   // views; a group with one view shows none. The group is ?tab= in the address, the view ?view=.
   const GROUPS = [
-    ['day', 'Today', ['myday', 'today', 'checkin', 'lineup']],
+    ['day', 'Today', ['myday', 'today', 'checkin', 'lineup', 'pickup']],
     ['bookings', pending ? `Bookings (${pending})` : 'Bookings', ['lessons', 'requests', 'privates', 'waitlist']],
     ['team', instructor && !schoolCan('director') ? 'My work' : 'Instructors', ['recaps', 'offers', 'mypay', 'guests', 'instructors', 'availability', 'payroll', 'hours']],
     ['plan', 'Planning', ['season', 'fill', 'weather', 'copy', 'staffing', 'reports']],
@@ -75,7 +76,7 @@ export async function render(root) {
 export const settingsPages = {
   basics: { title: 'Confirmations', render: (panel) => basicsPage(panel) },
   levels: { title: 'Levels and skills', render: (panel) => levelsTab(panel) },
-  ...lineupPart.settingsPages, ...parentsPart.settingsPages, ...payPart.settingsPages, ...directorPart.settingsPages,
+  ...lineupPart.settingsPages, ...safetyPart.settingsPages, ...parentsPart.settingsPages, ...payPart.settingsPages, ...directorPart.settingsPages,
 };
 
 // ---------------------------------------------------------------- lessons
@@ -349,6 +350,8 @@ async function boardTab(root, { staff }) {
           h('div', { class: 'row' }, seesRoster(s) ? button('Roster', () => roster(s, load), { small: true }) : null,
             can('instructor') ? button('Notes and tip', () => sessionDetails(s, load), { small: true }) : null,
             schoolCan('supervisor') ? button('Instructor', () => setInstructor(s, load), { small: true }) : null)))) : empty('No lessons on this day.'));
+      // class sizes by age band, the group's last place, who waits for pickup, lost children (feat/school-safety)
+      await safetyPart.decorateBoard(body, [...body.querySelectorAll('article[data-session]')], date.value, load);
     } catch (err) { clear(body).append(errorBox(err)); }
   }
   await load();
@@ -390,7 +393,7 @@ function safetyFields(prefix = '') {
     photo_ok: h('input', { type: 'checkbox', name: n('photo_ok') }),
   };
   const el = h('fieldset', { class: 'form safety' }, h('legend', null, 'Safety and contact'),
-    field('Allergies', els.allergies), h('div', { class: 'wide' }, field('Medical notes', els.medical)), h('div', { class: 'wide' }, field('Pickup', els.pickup)),
+    field('Allergies', els.allergies), h('div', { class: 'wide' }, field('Medical notes', els.medical)),
     field('Parent or contact', els.contact_name), field('Their phone', els.contact_phone), h('div', { class: 'wide' }, field('Email for the confirmation', els.contact_email)),
     textsOn() ? h('label', { class: 'check wide' }, els.text_ok, ` ${TEXT_WORDS}`) : null,
     h('label', { class: 'check wide' }, els.photo_ok, ` ${PHOTO_WORDS}`));
@@ -414,6 +417,8 @@ async function roster(session, done) {
   const wslot = h('div');
   const creditSlot = h('div');
   const safety = safetyFields();
+  const pickupEd = safetyPart.pickupEditor(); // who may pick up (feat/school-safety)
+  const adaptiveEd = session.discipline === 'adaptive' ? safetyPart.adaptiveEditor() : null;
   const confirmBox = h('input', { type: 'checkbox', name: 'send_confirmation', checked: true });
   const confirmRow = h('label', { class: 'check' }, confirmBox, ' Email the confirmation (time, meeting place, what to bring and their check-in link)');
   const syncConfirm = () => { const has = Boolean(safety.els.contact_email.value.trim()); confirmRow.hidden = !has; if (!has) confirmBox.checked = false; };
@@ -421,11 +426,11 @@ async function roster(session, done) {
   let credit = null;
   const capture = customerCapture({ def, scope: 'lesson', who: 'Student', onPick: async (p) => {
     clear(wslot); clear(creditSlot); credit = null;
-    safety.fill({});
+    safety.fill({}); pickupEd.fill([]);
     if (!p) { syncConfirm(); return; }
     wslot.append(waiverPanel(p.id, session.starts_at.slice(0, 10)));
     // Fill the safety details from their last booking (or their emergency contact); staff check them with the family.
-    try { const d = await get(`/skischool/students/${p.id}/safety`); safety.fill(d); confirmBox.checked = Boolean(d.contact_email); } catch (_) { /* typed fresh */ }
+    try { const d = await get(`/skischool/students/${p.id}/safety`); safety.fill(d); pickupEd.fill(d.pickup_adults || []); confirmBox.checked = Boolean(d.contact_email); } catch (_) { /* typed fresh */ }
     syncConfirm();
     try {
       const { data } = await get(`/skischool/credits?person_id=${p.id}`);
@@ -445,7 +450,8 @@ async function roster(session, done) {
     const data = r.data;
     clear(list).append(data.length ? table([
       { head: 'Student', cell: (x) => h('span', null, h('strong', null, `${x.first_name} ${x.last_name}`), x.unpaid ? h('span', null, ' ', state('Unpaid', 'warn')) : null, x.credit_id ? h('span', null, ' ', state('Package', 'neutral')) : null,
-        flags(x), x.pickup ? h('div', { class: 'small' }, `Pickup: ${x.pickup}`) : null,
+        flags(x), x.pickup ? h('div', { class: 'small' }, `Pickup: ${x.pickup}`) : null, safetyPart.releaseLine(x),
+        x.override_reason ? h('div', { class: 'small' }, state('Booked past a warning', 'warn'), ` ${x.override_reason}`) : null,
         x.contact_phone ? h('div', { class: 'small' }, h('a', { href: `tel:${String(x.contact_phone).replace(/[^\d+]/g, '')}` }, `${x.contact_name || 'Contact'}: ${x.contact_phone}`)) : null,
         x.checked_in_at ? h('div', null, state('Checked in', 'good')) : null) },
       { head: 'Level', cell: (x) => (x.level ? levelName(x.level, session.discipline) : h('span', { class: 'muted' }, 'Not set')) },
@@ -456,6 +462,9 @@ async function roster(session, done) {
       { head: '', actions: true, cell: (x) => [
         button('Report card', () => cardDialog(x.person_id, { discipline: session.discipline }), { small: true, label: `Report card for ${x.first_name}` }),
         r.details ? button('Safety', () => editSafety(x, load), { small: true, label: `Safety details for ${x.first_name}` }) : null,
+        r.details && (can('counter') || schoolCan('supervisor')) ? button('Pickup list', () => pickupListDialog(x, load), { small: true, label: `Pickup list for ${x.first_name}` }) : null,
+        r.details && x.needs_release && !x.released_to && x.status !== 'no_show' ? button('Release', () => safetyPart.releaseDialog(x, load), { small: true, label: `Release ${x.first_name}` }) : null,
+        r.details && session.discipline === 'adaptive' ? button('Adaptive notes', () => safetyPart.adaptiveDialog(x.booking_id, x.first_name), { small: true }) : null,
         can('instructor') && r.details ? button('Lesson note', () => bookingNote(x, load), { small: true }) : null,
         can('counter') || schoolCan('supervisor') ? button(x.confirmed_at ? 'Resend confirmation' : 'Send confirmation', async () => { const o = await post(`/skischool/bookings/${x.booking_id}/confirmation`, {}); toast(`Confirmation sent to ${o.to}`); await load(); }, { small: true, label: `Send the confirmation for ${x.first_name}` }) : null,
       ] },
@@ -463,22 +472,37 @@ async function roster(session, done) {
   }
   const book = button('Book student', async () => {
     capture.check();
-    const body = { ...capture.payload('student'), sign_waiver: signBox.checked, ...safety.read(), send_confirmation: confirmBox.checked };
+    const body = { ...capture.payload('student'), sign_waiver: signBox.checked, ...safety.read(), ...pickupEd.read(), ...(adaptiveEd ? { adaptive: adaptiveEd.read() } : {}), send_confirmation: confirmBox.checked };
+    if (!body.pickup_adults.length) delete body.pickup_adults;
     if (credit && credit.value) body.use_credit_id = Number(credit.value);
     let out;
     try {
       out = await post(`/skischool/sessions/${session.id}/bookings`, body);
     } catch (err) {
-      // The student was saved even though the booking was not (no waiver yet, the class is full, already in another lesson): keep them selected so a retry does not create a second record.
-      const pid = err.details && err.details.person_id;
-      if (pid && !capture.person()) { try { capture.usePerson(await get(`/people/${pid}`)); } catch (_) { /* leave the form as typed */ } }
-      throw err;
+      // Outside the lesson's ages or over its class size: a manager can book anyway with a reason (feat/school-safety).
+      if (err.details && err.details.needs_override) {
+        const pid = err.details.person_id;
+        if (pid && !capture.person()) { try { capture.usePerson(await get(`/people/${pid}`)); } catch (_) { /* as typed */ } }
+        if (!schoolCan('supervisor')) throw err;
+        await new Promise((resolve) => {
+          formDialog('Book anyway?', h('div', { class: 'form' }, h('p', { class: 'wide notice warn' }, err.message), h('div', { class: 'wide' }, field('Reason (kept on the audit log)', input({ name: 'override_reason', required: true, minlength: 3, maxlength: 300 })))), async (fd) => {
+            out = await post(`/skischool/sessions/${session.id}/bookings`, { ...body, ...(pid ? { person_id: pid, student: undefined } : {}), override_reason: val(fd, 'override_reason') });
+            resolve();
+          }, { submitText: 'Book anyway', onClose: () => resolve() });
+        });
+        if (!out) return;
+      } else {
+        // The student was saved even though the booking was not (no waiver yet, the class is full, already in another lesson): keep them selected so a retry does not create a second record.
+        const pid = err.details && err.details.person_id;
+        if (pid && !capture.person()) { try { capture.usePerson(await get(`/people/${pid}`)); } catch (_) { /* leave the form as typed */ } }
+        throw err;
+      }
     }
     const sent = out.confirmation && out.confirmation.ok ? ` Confirmation sent to ${out.confirmation.to}.` : out.confirmation && out.confirmation.error ? ` The confirmation was not sent: ${out.confirmation.error}.` : '';
     toast(`${out.customer.created ? 'Student saved and booked.' : 'Student booked.'}${sent}`);
     capture.reset();
     signBox.checked = false;
-    safety.fill({}); syncConfirm();
+    safety.fill({}); pickupEd.fill([]); syncConfirm();
     clear(creditSlot); clear(wslot); credit = null;
     await load();
     if (done) done();
@@ -486,8 +510,21 @@ async function roster(session, done) {
   const canBook = can('counter') || schoolCan('supervisor'); // a plain instructor does not book students (2026.11.11)
   dialog(`${fmtDateTime(session.starts_at)}, ${session.product}`, [
     h('p', { class: 'muted' }, `${lessonWords(session)}. ${session.capacity} spots.${canBook ? ' Students need a signed waiver for the season.' : ''}`),
-    list, canBook ? [h('h3', null, 'Add a student'), capture.el, signRow, wslot, creditSlot, safety.el, confirmRow, h('div', { class: 'row' }, book)] : null], { wide: true });
+    list, canBook ? [h('h3', null, 'Add a student'), capture.el, signRow, wslot, creditSlot, safety.el, pickupEd.el, adaptiveEd ? adaptiveEd.el : null, confirmRow, h('div', { class: 'row' }, book)] : null], { wide: true });
   await load();
+}
+
+/** The desk changes who may pick a child up (with photos and the family's consent). */
+async function pickupListDialog(x, done) {
+  let r;
+  try { r = await get(`/skischool/bookings/${x.booking_id}/pickup`); } catch (err) { fail(err); return; }
+  const ed = safetyPart.pickupEditor();
+  ed.fill(r.adults);
+  formDialog(`Who may pick up ${x.first_name}`, h('div', { class: 'stack' }, r.released ? h('p', { class: 'notice good' }, `Picked up by ${r.released.to} at ${fmtTime(r.released.at)}.`) : null, ed.el), async () => {
+    await put(`/skischool/bookings/${x.booking_id}/pickup`, ed.read());
+    toast('Pickup list saved');
+    await done();
+  }, { wide: true });
 }
 
 /** Change one booking's safety details and consents. */

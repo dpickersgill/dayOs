@@ -6,6 +6,7 @@ import './stage.js';
 import { h, clear } from './ui.js';
 import { levelList } from './levels.js';
 import { code128 } from './barcode.js';
+import { shrink } from './photo.js';
 
 const parts = location.pathname.split('/').filter(Boolean);
 const slug = decodeURIComponent(parts[1] || '');
@@ -82,6 +83,15 @@ function draw(v) {
   if (!B.checked_in_at && v.checkin_code && B.status === 'booked' && L.status !== 'cancelled' && !L.ended) {
     lessonCard.append(h('div', { class: 'checkin-code' }, h('p', { class: 'muted small' }, 'Or show this code at the ski school desk:'), code128(v.checkin_code, { height: 48, module: 2 }), h('p', { class: 'small' }, v.checkin_code)));
   }
+  // ---- pickup and what they wear (feat/school-safety)
+  const SF = v.safety || {};
+  if (SF.released) lessonCard.append(h('div', { class: 'notice ok', role: 'status' }, `Picked up by ${SF.released.to} at ${clock(SF.released.at)}.`));
+  else if (SF.needs_release && B.status !== 'cancelled' && L.status !== 'cancelled') lessonCard.append(h('p', { class: 'muted small' }, `At pickup, ${who} goes only to an adult on your pickup list, after the instructor sees their photo ID.`));
+  if (B.status === 'booked' && L.status !== 'cancelled' && !L.ended && L.starts_at.slice(0, 10) === (v.today || L.starts_at.slice(0, 10))) lessonCard.append(colorsForm(v));
+
+  // ---- live updates from the lesson
+  if (B.status !== 'cancelled' && (SF.updates && SF.updates.length || !L.ended)) main.append(updatesCard(v));
+
   if (v.credits && v.credits.length) {
     main.append(h('section', { class: 'card stack', 'aria-labelledby': 'cr-h' }, h('h2', { id: 'cr-h' }, 'Weather credits'),
       h('ul', null, ...v.credits.map((c) => h('li', null, `${c.left} ${c.left === 1 ? 'lesson' : 'lessons'}: ${c.product}${c.expires_on ? `, use by ${dayLong(String(c.expires_on).slice(0, 10))}` : ''}`))),
@@ -198,15 +208,78 @@ function detailsCard(v) {
   const save = async (body, note) => { clear(msg); try { await call('PATCH', '', body); msg.append(h('p', { class: 'status ok' }, note || 'Saved')); } catch (err) { msg.append(errorBox(err.message)); } };
   const photo = v.photos_asked ? h('input', { type: 'checkbox', id: 'sw-photo', checked: B.photo_ok, onchange: (e) => save({ photo_ok: e.target.checked }, e.target.checked ? 'Photos: yes' : 'Photos: no. Any photo not sent yet is deleted.') }) : null;
   const text = v.texts_available ? h('input', { type: 'checkbox', id: 'sw-text', checked: B.text_ok, onchange: (e) => save({ text_ok: e.target.checked }, e.target.checked ? 'Texts: yes' : 'Texts: no') }) : null;
-  const f = { allergies: h('input', { id: 'd-allergies', value: B.allergies || '', maxlength: 300 }), medical: h('input', { id: 'd-medical', value: B.medical || '', maxlength: 500 }), pickup: h('input', { id: 'd-pickup', value: B.pickup || '', maxlength: 300 }) };
+  const f = { allergies: h('input', { id: 'd-allergies', value: B.allergies || '', maxlength: 300 }), medical: h('input', { id: 'd-medical', value: B.medical || '', maxlength: 500 }) };
   const lab = (id, t, el, hint) => h('div', { class: 'field' }, h('label', { for: id }, t), el, hint ? h('span', { class: 'hint' }, hint) : null);
-  const form = h('form', { class: 'stack', novalidate: '' }, lab('d-allergies', 'Allergies', f.allergies), lab('d-medical', 'Medical notes', f.medical, 'Only the instructor, the desk and managers see these.'), lab('d-pickup', 'Who may pick up', f.pickup),
+  const form = h('form', { class: 'stack', novalidate: '' }, lab('d-allergies', 'Allergies', f.allergies), lab('d-medical', 'Medical notes', f.medical, 'Only the instructor, the desk and managers see these.'),
     h('div', null, h('button', { type: 'submit', class: 'btn' }, 'Save details')));
-  form.addEventListener('submit', (e) => { e.preventDefault(); save({ allergies: f.allergies.value.trim() || null, medical: f.medical.value.trim() || null, pickup: f.pickup.value.trim() || null }, 'Details saved'); });
+  form.addEventListener('submit', (e) => { e.preventDefault(); save({ allergies: f.allergies.value.trim() || null, medical: f.medical.value.trim() || null }, 'Details saved'); });
   return h('section', { class: 'card stack', 'aria-labelledby': 'det-h' }, h('h2', { id: 'det-h' }, 'Safety details and choices'),
     photo ? h('label', { class: 'check switch-row' }, photo, h('span', null, 'You may take photos of my child during the lesson for the lesson recap. You can change this any time.')) : null,
     text ? h('label', { class: 'check switch-row' }, text, h('span', null, 'Text me about this lesson (changes, check-in, the recap). Message and data rates may apply.')) : null,
-    form, msg);
+    form, msg, pickupCard(v));
+}
+
+// ---------------------------------------------------------------- feat/school-safety: pickup list, colors, live updates
+/** Who may pick up: name, relationship, phone and an optional photo (kept only with the family's consent). */
+function pickupCard(v) {
+  const SF = v.safety || {};
+  const who = v.student.first_name;
+  const list = h('div', { class: 'stack tight' });
+  const msg = h('div', { role: 'status', 'aria-live': 'polite' });
+  const rows = [];
+  const consent = h('input', { type: 'checkbox', id: 'pk-consent' });
+  const consentRow = h('label', { class: 'check', hidden: true }, consent, h('span', null, 'Keep these photos so staff can check who picks up. You can remove them any time.'));
+  const add = (a = {}) => {
+    const n = rows.length + 1;
+    const r = { id: a.id || null, photo: null, name: h('input', { id: `pk-n${n}`, value: a.name || '', maxlength: 150, autocomplete: 'off' }), rel: h('input', { id: `pk-r${n}`, value: a.relationship || '', maxlength: 60, autocomplete: 'off' }),
+      phone: h('input', { id: `pk-p${n}`, value: a.phone || '', maxlength: 40, type: 'tel', inputmode: 'tel', autocomplete: 'off' }) };
+    const pic = h('input', { type: 'file', accept: 'image/*', id: `pk-f${n}` });
+    const note = h('span', { class: 'hint' }, a.has_photo ? 'Photo on file' : 'Optional');
+    pic.addEventListener('change', async () => { try { r.photo = await shrink(pic.files[0]); note.textContent = 'New photo added'; consentRow.hidden = false; } catch (err) { note.textContent = err.message; } });
+    const lab = (id, t, el, hint) => h('div', { class: 'field' }, h('label', { for: id }, t), el, hint || null);
+    r.el = h('fieldset', { class: 'pk-adult' }, h('legend', null, `Adult ${n}`), h('div', { class: 'row2' }, lab(`pk-n${n}`, 'Name', r.name), lab(`pk-r${n}`, 'Relationship', r.rel)),
+      h('div', { class: 'row2' }, lab(`pk-p${n}`, 'Phone', r.phone), lab(`pk-f${n}`, 'Photo', pic, note)),
+      h('button', { type: 'button', class: 'btn link', onclick: () => { rows.splice(rows.indexOf(r), 1); r.el.remove(); } }, 'Remove'));
+    rows.push(r); list.append(r.el);
+  };
+  for (const a of SF.pickup_adults || []) add(a);
+  if (!rows.length) add();
+  const done = Boolean(SF.released);
+  const saveBtn = h('button', { type: 'button', class: 'btn', disabled: done, onclick: async () => {
+    clear(msg);
+    const adults = rows.map((r) => ({ ...(r.id ? { id: r.id } : {}), name: r.name.value.trim(), relationship: r.rel.value.trim() || null, phone: r.phone.value.trim() || null, ...(r.photo ? { photo: r.photo } : {}) })).filter((a) => a.name);
+    try { await call('PUT', '/pickup', { pickup_adults: adults, pickup_photo_consent: consent.checked }); msg.append(h('p', { class: 'status ok' }, 'Pickup list saved')); } catch (err) { msg.append(errorBox(err.message)); }
+  } }, 'Save the pickup list');
+  return h('section', { class: 'stack tight pickup-family', 'aria-labelledby': 'pk-h' }, h('h3', { id: 'pk-h' }, 'Who may pick up'),
+    h('p', { class: 'muted small' }, `${SF.needs_release ? `${who} goes only to an adult on this list, after staff see their photo ID.` : 'Adults on this list may collect the student.'} Only the instructor, the desk and managers see it.`),
+    list, done ? null : h('button', { type: 'button', class: 'btn link', onclick: () => add() }, 'Add another adult'), consentRow, h('div', null, saveBtn), msg);
+}
+
+/** Jacket and helmet colors on the lesson day: they help the instructor spot a child, and patrol if ever needed. */
+function colorsForm(v) {
+  const SF = v.safety || {};
+  const msg = h('span', { role: 'status', class: 'small' });
+  const jacket = h('input', { id: 'c-jacket', value: SF.jacket_color || '', maxlength: 40, placeholder: 'Red' });
+  const helmet = h('input', { id: 'c-helmet', value: SF.helmet_color || '', maxlength: 40, placeholder: 'White' });
+  const save = async () => { try { await call('PATCH', '/safety', { jacket_color: jacket.value.trim() || null, helmet_color: helmet.value.trim() || null }); msg.textContent = 'Saved'; } catch (err) { msg.textContent = err.message; } };
+  return h('details', { class: 'more colors-form', open: !SF.jacket_color && !SF.helmet_color },
+    h('summary', null, `What is ${v.student.first_name} wearing today?`),
+    h('div', { class: 'row2' }, h('div', { class: 'field' }, h('label', { for: 'c-jacket' }, 'Jacket color'), jacket), h('div', { class: 'field' }, h('label', { for: 'c-helmet' }, 'Helmet color'), helmet)),
+    h('p', { class: 'muted small' }, 'Helps the instructor spot them on the hill.'), h('div', null, h('button', { type: 'button', class: 'btn', onclick: save }, 'Save colors'), ' ', msg));
+}
+
+/** Live updates the instructor posts during the lesson (photos only when the family said yes to photos). */
+function updatesCard(v) {
+  const SF = v.safety || {};
+  const msg = h('span', { role: 'status', class: 'small' });
+  const on = h('input', { type: 'checkbox', id: 'sw-updates', checked: !SF.updates_off, onchange: async (e) => {
+    try { await call('PATCH', '/safety', { updates_off: !e.target.checked }); draw(await call('GET', '')); } catch (err) { msg.textContent = err.message; }
+  } });
+  const list = (SF.updates || []).map((u) => h('article', { class: 'update' }, h('p', { class: 'muted small' }, clock(u.at)), u.body ? h('p', null, u.body) : null,
+    u.photo ? h('img', { src: `${base}/updates/${u.id}/photo`, alt: `Photo from ${v.student.first_name}'s class`, loading: 'lazy' }) : null));
+  return h('section', { class: 'card stack', 'aria-labelledby': 'upd-h' }, h('h2', { id: 'upd-h' }, 'From the lesson'),
+    list.length ? h('div', { class: 'updates-list' }, ...list) : h('p', { class: 'muted' }, SF.updates_off ? 'Live updates are off.' : `${v.lesson.instructor || 'The instructor'} may post a line or a photo during the lesson. It shows here.`),
+    h('label', { class: 'check switch-row' }, on, h('span', null, 'Send me live updates during the lesson')), msg);
 }
 
 main();

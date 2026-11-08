@@ -10,6 +10,7 @@ import * as payPart from './school-pay.js';
 import * as parentsPart from './school-parents.js';
 import { moveDialog } from './school-lineup.js';
 import { needsCard } from './school-staff.js';
+import { releaseDialog, lostDialog, lostStrip, updateDialog, atDialog, adaptiveDialog } from './school-safety.js'; // feat/school-safety
 
 const OUTBOX = 0; // attendance taps queue under this "case" in the phone's outbox
 const keepId = (date, staffId) => -Number(`${String(staffId || 0).slice(-4)}${date.replace(/-/g, '')}`); // a negative id: never a patrol case
@@ -53,6 +54,10 @@ export async function render(root, opts = {}) {
   const showWaiting = () => { const n = pending(OUTBOX).length; waiting.textContent = n ? `${n} change${n === 1 ? '' : 's'} waiting for signal` : ''; };
   const off = onChange(showWaiting);
   let data = null;
+  const folds = new Map(); // lesson id -> open or not, as the instructor left it
+  let lostOpen = new Set(); // bookings reported lost and not found yet
+  const lostSlot = h('div');
+  top.append(lostSlot);
 
   async function load() {
     clear(body).append(h('p', { class: 'loading' }, 'Loading…'));
@@ -69,6 +74,12 @@ export async function render(root, opts = {}) {
     }
     draw(note);
     showWaiting();
+    // an open lost child report on this instructor's class stays on top until the child is found
+    if (date === today) get(`/skischool/lost?date=${date}`).then((r) => {
+      clear(lostSlot); const st = lostStrip(r.data, load); if (st) lostSlot.append(st);
+      lostOpen = new Set(r.data.filter((x) => x.status === 'open').map((x) => x.booking_id));
+      if (lostOpen.size) draw(note);
+    }).catch(() => {});
   }
   /** Keeps the day on the phone after a tap, so a reload with no signal shows it. */
   const keep = () => keepCase(keepId(date, staffId), { data, at: Date.now() });
@@ -78,20 +89,26 @@ export async function render(root, opts = {}) {
     if (note) body.append(note);
     body.append(h('h2', { class: 'myday-day' }, `${dayWords(date, data.today)}${data.staff && schoolCan('supervisor') ? `: ${data.staff.name}` : ''}`));
     if (!data.items.length) { body.append(empty(date === data.today ? 'No lessons or program groups today.' : 'No lessons or program groups on this day.')); return; }
-    for (const it of data.items) body.append(it.kind === 'lesson' ? lessonCard(it) : meetingCard(it));
+    const lessons = data.items.filter((it) => it.kind === 'lesson');
+    for (const it of data.items) body.append(it.kind === 'lesson' ? lessonCard(it, lessons.indexOf(it), lessons) : meetingCard(it));
   }
 
+  /** Release opens 30 minutes before the lesson ends, on its day (the server records it whenever it is asked). */
+  const releaseDue = (s) => date === data.today && data.now && data.now >= new Date(Date.parse(`${String(s.ends_at).slice(0, 19).replace(' ', 'T')}Z`) - 30 * 60000).toISOString().slice(0, 19).replace('T', ' ');
+
   // ---- one lesson
-  function lessonCard(s) {
+  function lessonCard(s, index, lessons) {
     const list = h('ul', { class: 'myday-roster' });
+    const isToday = date === data.today;
     const head = h('header', { class: 'myday-head' },
       h('div', null, h('strong', { class: 'myday-time' }, `${fmtTime(s.starts_at)} to ${fmtTime(s.ends_at)}`), s.delay_minutes ? h('span', null, ' ', state(`Delayed ${s.delay_minutes} min`, 'warn')) : null),
       h('div', { class: 'myday-title' }, s.product, s.format && s.format !== 'group' ? h('span', { class: 'muted' }, ` ${label(s.format)}`) : null),
       h('div', { class: 'muted small' }, [s.level_words, label(s.discipline), s.meeting_place ? `Meet: ${s.meeting_place}` : null].filter(Boolean).join('  ·  ')));
-    const count = h('p', { class: 'muted small' });
+    const count = h('span', { class: 'gf-count' });
     const drawRoster = () => {
       const present = s.students.filter((x) => x.status === 'attended').length;
-      count.textContent = `${s.students.length} student${s.students.length === 1 ? '' : 's'}${present ? `, ${present} here` : ''}`;
+      const toRelease = s.students.filter((x) => x.needs_release && !x.released && x.status !== 'no_show').length;
+      count.textContent = `${s.students.length} student${s.students.length === 1 ? '' : 's'}${present ? `, ${present} here` : ''}${toRelease && releaseDue(s) ? `, ${toRelease} to release` : ''}`;
       clear(list); for (const x of s.students) list.append(studentRow(s, x, () => drawRoster()));
     };
     drawRoster();
@@ -102,8 +119,30 @@ export async function render(root, opts = {}) {
       toast(out && out.queued ? 'Saved on this phone. It is sent when the signal is back.' : 'Everyone marked present');
     }, { kind: 'primary' }) : null;
     const pay = safePayLine(s);
+    // A long roster folds (feat/school-safety): open when it is the only lesson or a short one, else as the instructor left it.
+    const open = folds.has(s.id) ? folds.get(s.id) : (lessons.length === 1 || s.students.length <= 10 || index === 0);
+    const fold = h('details', { class: 'myday-fold group-fold', open }, h('summary', null, h('strong', null, 'Students'), ' ', count), list);
+    fold.addEventListener('toggle', () => folds.set(s.id, fold.open));
+    const tools = isToday ? h('div', { class: 'row wrap myday-tools' },
+      button('We\'re at', () => atDialog(s, () => {}), { small: true, label: `Say where the ${fmtTime(s.starts_at)} class is` }),
+      button('Post update', () => updateDialog(s), { small: true, label: `Post an update to the ${fmtTime(s.starts_at)} class's families` }),
+      button('Lost child', () => pickLost(s), { small: true, kind: 'danger', label: `Lost child from the ${fmtTime(s.starts_at)} class` })) : null;
     return h('article', { class: 'panel stack myday-card', 'data-lesson': s.id }, head, s.notes ? h('p', { class: 'small' }, s.notes) : null, pay,
-      h('div', { class: 'row myday-count' }, count, allBtn), list);
+      h('div', { class: 'row myday-count' }, allBtn), tools, fold);
+  }
+
+  /** "Lost child" on the class: pick the child, then one quick step for the colors. */
+  function pickLost(s) {
+    const list = s.students.filter((x) => x.status !== 'no_show' && !x.released && !lostOpen.has(x.booking_id));
+    const d = dialog('Which child is lost?', h('div', { class: 'at-grid' }, list.map((x) => button(`${x.first_name} ${x.last_name.slice(0, 1)}.`, () => { d.close(); lostDialog(x, () => load()); }))));
+  }
+  /** The rest of a student's actions, behind one button so a long roster stays short on a phone. */
+  function moreFor(s, x) {
+    const d = dialog(`${x.first_name} ${x.last_name}`, h('div', { class: 'stack' },
+      date === data.today && !x.released && x.status !== 'no_show' && !lostOpen.has(x.booking_id) ? button('Lost child', () => { d.close(); lostDialog(x, () => load()); }, { kind: 'danger' }) : null,
+      s.discipline === 'adaptive' ? button('Adaptive notes', () => { d.close(); adaptiveDialog(x.booking_id, x.first_name); }) : null,
+      button('Report card', () => { d.close(); cardDialog(x.person_id, { discipline: s.discipline }); }),
+      x.status !== 'no_show' ? button('Move group', () => { d.close(); moveDialog(x, () => load()); }) : null));
   }
 
   function studentRow(s, x, redraw) {
@@ -126,9 +165,12 @@ export async function render(root, opts = {}) {
         flags(x),
         x.pickup ? h('div', { class: 'small' }, `Pickup: ${x.pickup}`) : null,
         x.phone ? h('div', { class: 'small' }, h('a', { href: `tel:${String(x.phone).replace(/[^\d+]/g, '')}` }, `Call ${x.contact_name ? `${x.contact_name} ` : ''}${x.phone}`)) : null,
-        checkin(x)),
-      h('div', { class: 'myday-actions' }, toggles, button('Report card', () => cardDialog(x.person_id, { discipline: s.discipline }), { small: true, label: `Report card for ${x.first_name}` }),
-        x.status !== 'no_show' ? button('Move group', () => moveDialog(x, () => load()), { small: true, label: `Move ${x.first_name} to another group` }) : null));
+        checkin(x), x.released ? h('div', null, state(`Picked up by ${x.released_to}`, 'good')) : null),
+      h('div', { class: 'myday-actions' }, toggles,
+        // release at pickup (feat/school-safety): from 30 minutes before the end of today's lesson
+        releaseDue(s) && x.needs_release && !x.released && x.status !== 'no_show' ? button('Release', () => releaseDialog(x, async () => { x.released = true; await load(); }), { small: true, kind: 'primary', label: `Release ${x.first_name} to an adult on the list` }) : null,
+        lostOpen.has(x.booking_id) ? state('Reported lost', 'bad') : null,
+        button('More', () => moreFor(s, x), { small: true, label: `More for ${x.first_name}: lost child, report card, move group` })));
   }
 
   // ---- one program meeting

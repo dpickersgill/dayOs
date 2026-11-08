@@ -2,6 +2,7 @@
 // who to call, and the family's answers on texts and photos. Used by Sell for a lesson line (Track LINEUP); the
 // counter booking dialog (Track CORE) can use the same fields. Plain words a parent understands at the window.
 import { h, input } from '../ui.js';
+import { pickupEditor } from './school-safety.js'; // who may pick up, as a list of adults (feat/school-safety)
 
 export const PHOTO_WORDS = 'You may take photos of my child during the lesson for the lesson recap. You can change this any time.';
 export const TEXT_WORDS = 'Text me about this lesson (check-in, changes and the recap). Message and data rates may apply. Reply STOP to stop.';
@@ -18,14 +19,15 @@ export function safetyFields({ name = 'the student', texts = false, photos = tru
   };
   const [allergies, allergiesF] = f('allergies', 'Allergies', { maxlength: 300, placeholder: 'For example: peanuts, bee stings. Leave blank if none.' });
   const [medical, medicalF] = f('medical', 'Medical notes', { maxlength: 500, placeholder: 'For example: asthma inhaler in the left pocket' });
-  const [pickup, pickupF] = f('pickup', 'Who picks them up', { maxlength: 300, placeholder: 'Names of the adults who may pick up' });
+  const pickupEd = pickupEditor();
+  const pickup = { value: '' }; // the plain-words column follows the list on the server
   const [cname, cnameF] = f('contact_name', 'Who to call during the lesson', { maxlength: 150, autocomplete: 'name' });
   const [cphone, cphoneF] = f('contact_phone', 'Their phone', { maxlength: 40, type: 'tel', inputmode: 'tel', autocomplete: 'tel' });
   const [cemail, cemailF] = f('contact_email', 'Email for the confirmation', { maxlength: 255, type: 'email', autocomplete: 'email' });
   const textOk = h('input', { type: 'checkbox', name: 'text_ok' });
   const photoOk = h('input', { type: 'checkbox', name: 'photo_ok' });
   const el = h('div', { class: 'form lesson-safety', 'data-safety': '' },
-    allergiesF, medicalF, pickupF, cnameF, cphoneF, cemailF,
+    allergiesF, medicalF, pickupEd.el, cnameF, cphoneF, cemailF,
     texts ? h('label', { class: 'check wide' }, textOk, ` ${TEXT_WORDS}`) : null,
     photos ? h('label', { class: 'check wide' }, photoOk, ` ${PHOTO_WORDS}`) : null);
   el.setAttribute('aria-label', `Safety details for ${name}`);
@@ -34,13 +36,16 @@ export function safetyFields({ name = 'the student', texts = false, photos = tru
     for (const [k, inp] of [['allergies', allergies], ['medical', medical], ['pickup', pickup], ['contact_name', cname], ['contact_phone', cphone], ['contact_email', cemail]]) if (inp.value.trim()) out[k] = inp.value.trim();
     if (texts) out.text_ok = textOk.checked;
     if (photos) out.photo_ok = photoOk.checked;
+    const pk = pickupEd.read();
+    if (pk.pickup_adults.length) Object.assign(out, pk);
     return out;
   };
   const fill = (o = {}) => {
     for (const [k, inp] of [['allergies', allergies], ['medical', medical], ['pickup', pickup], ['contact_name', cname], ['contact_phone', cphone], ['contact_email', cemail]]) if (o[k] && !inp.value) inp.value = o[k];
     if (o.text_ok !== undefined) textOk.checked = Boolean(o.text_ok);
     if (o.photo_ok !== undefined) photoOk.checked = Boolean(o.photo_ok);
+    if (Array.isArray(o.pickup_adults) && o.pickup_adults.length && !pickupEd.touched()) pickupEd.fill(o.pickup_adults);
   };
-  const filled = () => Boolean(allergies.value.trim() || medical.value.trim() || pickup.value.trim() || cname.value.trim() || cphone.value.trim());
+  const filled = () => Boolean(allergies.value.trim() || medical.value.trim() || pickupEd.read().pickup_adults.length || cname.value.trim() || cphone.value.trim());
   return { el, value, fill, filled };
 }
