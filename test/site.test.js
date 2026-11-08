@@ -219,7 +219,7 @@ test('Pricing: pay monthly, yearly or over the season; setup packages; and the n
 test('the attractions page: its own search title, questions in the structured data, in the Product menu, llms.txt and the home page', async () => {
   const page = await onHost('/attraction-ticketing-software');
   assert.equal(page.status, 200);
-  assert.ok(page.text.includes('<title>Zipline, Mountain Coaster and Tubing Software for Ski Areas | Verdynt/OS</title>'));
+  assert.ok(page.text.includes('<title>Ski Area Zipline, Coaster and Tubing Software | Verdynt/OS</title>'));
   const graph = JSON.parse(page.text.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1])['@graph'];
   const faq = graph.find((g) => g['@type'] === 'FAQPage');
   for (const q of ['Can guests book a time slot online?', 'How does the daily inspection work?', 'Does it work in summer?']) assert.ok(faq.mainEntity.some((x) => x.name === q), q);
@@ -233,7 +233,7 @@ test('the attractions page: its own search title, questions in the structured da
   assert.ok(home.text.includes('The zipline opens on its check.') && home.text.includes('We run a zipline and a tubing hill too. Does it handle those?'));
   assert.ok(home.text.includes('<div class="bt">Attractions</div>') && home.text.includes('Alpine Coaster'), 'on the morning board');
   assert.ok(home.text.indexOf('id="day"') < home.text.indexOf('id="risk"'), 'the day comes before the claims section');
-  assert.ok(home.text.includes('Built in Royersford, Pennsylvania, by Dan Pickersgill, the founder'), 'the home line names the founder');
+  assert.ok(home.text.includes('Built in Pennsylvania by Verdynt Consulting Group. Our own support team answers when you call.'), 'the home line names the company');
   assert.ok(!/[\u2014]/.test(home.text + page.text), 'no em dashes');
   const llms = (await onHost('/llms.txt')).text;
   assert.match(llms, /attractions and activities/);
@@ -346,13 +346,45 @@ test('content review: the from price, push alerts, BAA, no-fee promise, company,
   for (const p of ['/site/security', '/site/ski-area-risk-management']) assert.match((await get(p)).text, /business associate agreement \(BAA\)/, `${p} offers a BAA`);
   for (const p of ['/site/']) assert.ok((await get(p)).text.includes('Verdynt Consulting Group'), `${p} names the company`);
   const home = await get('/site/');
-  assert.ok(home.text.includes('&copy; 2026 Verdynt Consulting Group, Royersford, Pennsylvania.') || home.text.includes(`&copy; ${new Date().getUTCFullYear()} Verdynt Consulting Group, Royersford, Pennsylvania.`), 'the footer names the company');
+  assert.ok(home.text.includes(`&copy; ${new Date().getUTCFullYear()} Verdynt Consulting Group, Pennsylvania.`), 'the footer names the company');
   assert.ok(home.text.includes('Book a 20-minute walkthrough') && !home.text.includes('Start a 14-day trial') && !home.text.includes('Become a founding mountain'));
   assert.ok(!home.text.includes('named for the trail signs'));
   const contact = await get('/site/contact');
   const shown = (contact.text.match(/<label><input type="radio" name="kind"/g) || []).length;
   assert.equal(shown, 3, 'three choices on the contact form; the others only when a page links to them');
   const about = await get('/site/about');
-  assert.ok(about.text.includes('class="founder-photo" hidden'), 'the photo slot shows nothing until there is a photo');
+  assert.ok(about.text.includes('We build Verdynt/OS for independent ski areas.') && about.text.includes('by phone to our support team'), 'About speaks as the company');
+  assert.ok(!about.text.includes('founder-photo') && !/\bI'm\b|\bI've\b/.test(about.text), 'no photo slot and no first person');
   assert.ok(!/rugby|\bBRP\b/i.test(about.text), 'the brand rules: no rugby, no BRP');
+});
+
+// The website speaks as the company, never as or about a named person (2026.11): no owner's name, no "founder", no sport.
+// Terms and Privacy are held for legal review and checked there, so they are left out here.
+test('no page on the website names a person, a founder or a sport', async () => {
+  const fs = require('node:fs'); const path = require('node:path');
+  const { PAGES } = require('../src/routes/site');
+  const BANNED = /pickersgill|\bdan[\s,]|founder|rugby|coaching/i;
+  const HELD = new Set(['privacy', 'terms']);
+  const found = [];
+  for (const slug of Object.keys(PAGES).filter((k) => !HELD.has(PAGES[k]))) {
+    const page = await get(`/site/${slug}`);
+    assert.equal(page.status, 200, `/site/${slug}`);
+    const m = BANNED.exec(page.text);
+    if (m) found.push(`/site/${slug}: "${page.text.slice(Math.max(0, m.index - 40), m.index + 40)}"`);
+  }
+  for (const extra of ['/llms.txt', '/site/site.css']) {
+    const m = BANNED.exec((await onHost(extra)).text);
+    if (m) found.push(`${extra}: ${m[0]}`);
+  }
+  // the source files too, for comments and pages no route serves yet
+  const dir = path.join(__dirname, '..', 'src', 'site');
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
+  for (const file of walk(dir).filter((x) => !/(^|\/)(terms|privacy)\.html$/.test(x))) {
+    const m = BANNED.exec(fs.readFileSync(file, 'utf8'));
+    if (m) found.push(`${path.relative(dir, file)}: ${m[0]}`);
+  }
+  assert.deepEqual(found, [], 'the website speaks as the company');
+  const org = JSON.parse(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec((await get('/site/about')).text)[1])['@graph'].find((g) => g['@type'] === 'Organization');
+  assert.equal(org.founder, undefined, 'no Person in the structured data');
+  assert.equal(org.legalName, 'Verdynt Consulting Group');
 });

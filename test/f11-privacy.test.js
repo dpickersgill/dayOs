@@ -326,8 +326,10 @@ test('DP-12: weekly copies are kept 35 days by default, the pages say so, and a 
   assert.ok(!sh.includes('daysSinceNoncurrentTime":365'));
   assert.match(sh, /WEEKLY_DAYS="\$\{WEEKLY_DAYS:-35\}"/);
   assert.match(read('src/site/privacy.html'), /weekly copy of the database kept 35 days/);
-  // 2026.11 content review: the pages also say a deleted copy stays recoverable 90 more days (the bucket's soft delete)
-  assert.match(read('src/site/security.html'), /Each copy is kept 35 days after the next one replaces it, and a deleted copy can still be recovered for up to 90 more days/);
+  // 2026.11 policy review: how long backup copies are kept is for the Privacy policy (held for legal review) to say; the
+  // Security page points there and gives no figure of its own.
+  assert.match(read('src/site/security.html'), /How long backup copies are kept is in our <a href="\{\{SITE\}\}\/privacy">Privacy policy<\/a>\./);
+  assert.doesNotMatch(read('src/site/security.html'), /130 days|90 more days/);
   // LEGAL HOLD (2026.11.12): Privacy stays at its 2026.11.11 wording for legal review, so it does not say this yet.
   // Reverting the hold commit brings back the page and this check:
   // assert.match(read('src/site/privacy.html'), /recovered for up to 90 more days/);

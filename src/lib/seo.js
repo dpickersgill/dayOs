@@ -74,13 +74,13 @@ const META = {
   },
   'terrain-park-software': {
     title: 'Terrain Park Software: Feature Map, Inspections | Verdynt/OS',
-    description: 'A catalog of rails, boxes and jumps, a daily park map with GPS pins dropped from a phone, and inspections that close a feature when it fails, with only an inspection to reopen it.',
+    description: 'A catalog of rails, boxes and jumps, a daily park map with GPS pins from a phone, and inspections that close a failed feature until it passes again.',
     og: 'Terrain park software: every feature, where it is, and whether it passed',
     crumb: 'Terrain park',
   },
   'attraction-ticketing-software': {
-    title: 'Zipline, Mountain Coaster and Tubing Software for Ski Areas | Verdynt/OS',
-    description: 'Run and sell your zipline, coaster, tubing hill or skating rink: a daily opening check, time slots with height, weight and age limits, sold at the counter and online.',
+    title: 'Ski Area Zipline, Coaster and Tubing Software | Verdynt/OS',
+    description: 'Run your zipline, coaster, tubing hill or rink: a daily opening check, and time slots with height, weight and age limits, sold at the counter and online.',
     og: 'Attractions and activities: open on the check, sold by the time slot',
     crumb: 'Attractions and activities',
   },
@@ -150,12 +150,19 @@ const META = {
   },
   contact: {
     title: 'Request a Demo or a Free 14-Day Trial | Verdynt/OS',
-    description: 'Book a 20-minute walkthrough of Verdynt/OS, start a 14-day free trial on your own mountain, or apply for the Founding Mountain Program (three places, open until March 31, 2027).',
+    description: 'Book a 20-minute walkthrough of Verdynt/OS, start a 14-day free trial, or apply for the Founding Mountain Program.',
     og: 'See your mountain on the board',
     crumb: 'Contact',
   },
   privacy: { title: 'Privacy Policy | Verdynt/OS', description: 'What Verdynt/OS collects, why, who it is shared with, how long it is kept, and the choices you have.', crumb: 'Privacy' },
   terms: { title: 'Terms of Service | Verdynt/OS', description: 'The terms for using Verdynt/OS: trials, subscriptions and payment, your data, and what each side is responsible for.', crumb: 'Terms' },
+  // The Good Day scorecard (2026.11 policy and brand review): a free tool, so it carries WebApplication data too.
+  'good-day/scorecard': {
+    title: 'The Good Day Scorecard for Ski Areas | Verdynt/OS',
+    description: 'Twelve questions on the guest\'s day at your ski area: tickets, lessons, lift checks, patrol, the park, staff and conditions. Free, with next steps.',
+    og: 'How good is your guest\'s day? The Good Day scorecard',
+    crumb: 'Scorecard', parent: 'good-day', tool: 'The Good Day scorecard',
+  },
   notfound: { title: 'Page Not Found | Verdynt/OS', description: 'That page is not here.', noindex: true },
 };
 
@@ -197,8 +204,8 @@ function head({ slug, origin, html, plans, verify = {}, sameAs = [], noindex = f
   const graph = [
     { '@type': 'Organization', '@id': `${origin}/#org`, name: 'Verdynt/OS', url: `${origin}/`, logo: `${origin.replace(/\/site$/, '')}/icons/icon-512.png`,
       // the company behind it, from config.site.company (one place, so a legal suffix is a one-line change)
-      legalName: require('../config').site.company.name, founder: { '@type': 'Person', name: require('../config').site.company.founder },
-      address: { '@type': 'PostalAddress', addressLocality: 'Royersford', addressRegion: 'PA', addressCountry: 'US' },
+      legalName: require('../config').site.company.name,
+      address: { '@type': 'PostalAddress', addressRegion: 'PA', addressCountry: 'US' },
       description: 'Operations software for independent ski areas.', ...(sameAs.length ? { sameAs } : {}), contactPoint: [
         { '@type': 'ContactPoint', contactType: 'sales', email: require('../config').site.helloEmail, url: `${origin}/contact`, availableLanguage: ['English'] },
         { '@type': 'ContactPoint', contactType: 'customer support', email: require('../config').site.supportEmail, availableLanguage: ['English'] },
@@ -222,6 +229,11 @@ function head({ slug, origin, html, plans, verify = {}, sameAs = [], noindex = f
     // Home, then the section (Resources) for a guide, then the page itself.
     const trail = [{ name: 'Home', item: `${origin}/` }, ...(m.parent && META[m.parent] ? [{ name: META[m.parent].crumb, item: `${origin}/${m.parent}` }] : []), { name: m.crumb, item: url }];
     graph.push({ '@type': 'BreadcrumbList', itemListElement: trail.map((t, i) => ({ '@type': 'ListItem', position: i + 1, ...t })) });
+  }
+  // A free tool on the website (the Good Day scorecard): what it is, that it is free, and who made it.
+  if (m.tool) {
+    graph.push({ '@type': 'WebApplication', '@id': `${url}#app`, name: m.tool, url, description, applicationCategory: 'BusinessApplication', operatingSystem: 'Web browser',
+      isAccessibleForFree: true, offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' }, publisher: { '@id': `${origin}/#org` }, inLanguage: 'en-US' });
   }
   // Guides are articles: who published them and when, so search engines can show them as such.
   if (m.article) {

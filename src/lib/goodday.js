@@ -161,8 +161,11 @@ async function settings() {
   await pool.query('INSERT IGNORE INTO goodday_settings (id) VALUES (1)');
   return one(pool, 'SELECT from_name, postal_address, updated_by, updated_at FROM goodday_settings WHERE id = 1');
 }
-const amber = '#f0a04b'; const spruce = '#0f3b2e'; const ink = '#14212b';
-const FONT = "'Helvetica Neue',Helvetica,Arial,sans-serif";
+// The brand colors, the same tokens as public/site/site.css: a slate masthead with gold accents, a gold button with slate
+// text (7.2:1), spruce for links and labels on white, and a deeper gold for marks on white (gold itself is too light there).
+const BRAND = { slate: '#12303A', spruce: '#2C7A57', gold: '#d8b672', goldDeep: '#8A6A2B', onSlate: '#eef4f7', onSlateDim: '#A9C2CD' };
+const gold = BRAND.gold; const mast = BRAND.slate; const ink = BRAND.slate;
+const FONT = "'Atkinson Hyperlegible',Helvetica,Arial,sans-serif";
 const DISPLAY = "'Barlow Condensed','Arial Narrow',Arial,sans-serif";
 
 /** A plain, sturdy HTML email: tables and inline styles (Gmail, Outlook, Apple Mail), 600 wide, the masthead on top. */
@@ -172,20 +175,20 @@ function shell({ preheader, eyebrow, body, foot }) {
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#f3f6f8;">${esc(preheader)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f3f6f8;"><tr><td align="center" style="padding:24px 12px;">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;">
-<tr><td style="background:${spruce};padding:26px 28px 22px;font-family:${FONT};">
-<p style="margin:0 0 6px;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#a9c7b8;font-weight:bold;">${esc(eyebrow)}</p>
-<p style="margin:0;font-family:${DISPLAY};font-size:44px;line-height:1;font-weight:bold;text-transform:uppercase;color:#eef6f2;">The Good Day</p>
-<p style="margin:8px 0 0;font-size:14px;color:#a9c7b8;">For ski area owners, GMs and patrol directors. Every other week.</p>
+<tr><td style="background:${mast};padding:26px 28px 22px;font-family:${FONT};">
+<p style="margin:0 0 6px;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:${BRAND.gold};font-weight:bold;">${esc(eyebrow)}</p>
+<p style="margin:0;font-family:${DISPLAY};font-size:44px;line-height:1;font-weight:bold;text-transform:uppercase;color:${BRAND.onSlate};">The Good Day</p>
+<p style="margin:8px 0 0;font-size:14px;color:${BRAND.onSlateDim};">For ski area owners, GMs and patrol directors. Every other week.</p>
 </td></tr>
 <tr><td style="padding:28px;font-family:${FONT};font-size:17px;line-height:1.55;color:${ink};">${body}</td></tr>
 <tr><td style="padding:18px 28px 26px;border-top:1px solid #d3dde5;font-family:${FONT};font-size:13px;line-height:1.5;color:#4d5f6e;">${foot}</td></tr>
 </table></td></tr></table></body></html>`;
 }
-const button = (href, label) => `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:22px 0 6px;"><tr><td style="background:${amber};border-radius:999px;">
+const button = (href, label) => `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:22px 0 6px;"><tr><td style="background:${gold};border-radius:999px;">
 <a href="${esc(href)}" style="display:inline-block;padding:13px 26px;font-family:${FONT};font-size:17px;font-weight:bold;color:${ink};text-decoration:none;border-radius:999px;">${esc(label)}</a></td></tr></table>`;
 const p = (t) => `<p style="margin:0 0 14px;">${t}</p>`;
 const unsubHeaders = (url) => [{ Name: 'List-Unsubscribe', Value: `<${url}>, <mailto:${config.site.helloEmail}?subject=unsubscribe>` }, { Name: 'List-Unsubscribe-Post', Value: 'List-Unsubscribe=One-Click' }];
-const footHtml = (unsubUrl, postal, why) => `${esc(why)} <a href="${esc(unsubUrl)}" style="color:#1d5b47;">Unsubscribe</a> any time.${postal ? `<br>Verdynt/OS, ${esc(postal)}` : ''}`;
+const footHtml = (unsubUrl, postal, why) => `${esc(why)} <a href="${esc(unsubUrl)}" style="color:${BRAND.spruce};">Unsubscribe</a> any time.${postal ? `<br>Verdynt/OS, ${esc(postal)}` : ''}`;
 const footText = (unsubUrl, postal, why) => `${why}\nUnsubscribe: ${unsubUrl}${postal ? `\nVerdynt/OS, ${postal}` : ''}`;
 const hi = (name) => (name ? `Hi ${String(name).split(/\s+/)[0]},` : 'Hello,');
 
@@ -210,10 +213,10 @@ function welcomeEmail({ name, origin, unsubUrl, postal }) {
     preheader: first ? `Start with Issue ${first.n}: ${first.question}` : 'The first issue is on its way.', eyebrow: 'Welcome',
     body: p(esc(hi(name))) + p('You are in. A guest\'s day on your mountain is six moments: Plan, Arrive, Learn, Ride, Get help and Come back. Every other week, The Good Day takes one of them apart: the question in the guest\'s head, the process behind the answer, one number to watch and a quick test.')
       + (first ? p(`Start with Issue ${first.n}, on ${esc(first.moment)}: <strong>${esc(first.question)}</strong>`) + button(read, `Read Issue ${first.n}`) : '')
-      + p('One ask: reply and tell me which moment of your guest\'s day is hardest right now. I read every reply.') + p('Dan<br><span style="color:#4d5f6e;">Verdynt/OS</span>'),
+      + p('One ask: reply and tell us which moment of your guest\'s day is hardest right now. We read every reply.') + p(`The Verdynt/OS team<br><span style="color:#4d5f6e;">${esc(config.site.company.name)}</span>`),
     foot: footHtml(unsubUrl, postal, why),
   });
-  const text = `${hi(name)}\n\nYou are in. A guest's day on your mountain is six moments: Plan, Arrive, Learn, Ride, Get help and Come back. Every other week, The Good Day takes one of them apart.\n\n${first ? `Start with Issue ${first.n}, on ${first.moment}: ${first.question}\n${read}\n\n` : ''}One ask: reply and tell me which moment of your guest's day is hardest right now. I read every reply.\n\nDan\nVerdynt/OS\n\n--\n${footText(unsubUrl, postal, why)}`;
+  const text = `${hi(name)}\n\nYou are in. A guest's day on your mountain is six moments: Plan, Arrive, Learn, Ride, Get help and Come back. Every other week, The Good Day takes one of them apart.\n\n${first ? `Start with Issue ${first.n}, on ${first.moment}: ${first.question}\n${read}\n\n` : ''}One ask: reply and tell us which moment of your guest's day is hardest right now. We read every reply.\n\nThe Verdynt/OS team\n${config.site.company.name}\n\n--\n${footText(unsubUrl, postal, why)}`;
   return { subject, html, text };
 }
 
@@ -224,9 +227,9 @@ function issueEmail({ i, subject, intro, origin, unsubUrl, postal }) {
   const introHtml = intro ? String(intro).trim().split(/\n{2,}/).map((x) => p(esc(x).replace(/\n/g, '<br>'))).join('') : '';
   const html = shell({
     preheader: i.lines[0] || i.teaser, eyebrow: `Issue ${i.n} · ${i.moment} · ${dayText(i.date)}`,
-    body: `<p style="margin:0 0 6px;font-size:13px;letter-spacing:2px;text-transform:uppercase;color:#1d5b47;font-weight:bold;">Moment ${i.moment_no} of 6: ${esc(i.moment)}</p>
+    body: `<p style="margin:0 0 6px;font-size:13px;letter-spacing:2px;text-transform:uppercase;color:${BRAND.spruce};font-weight:bold;">Moment ${i.moment_no} of 6: ${esc(i.moment)}</p>
 <p style="margin:0 0 18px;font-family:${DISPLAY};font-size:34px;line-height:1.05;font-weight:bold;text-transform:uppercase;color:${ink};">${esc(i.question)}</p>
-${introHtml}<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 4px;">${i.lines.map((l) => `<tr><td valign="top" style="padding:4px 10px 4px 0;color:#b45309;font-size:16px;">&#9670;</td><td style="padding:4px 0;font-size:17px;line-height:1.5;color:${ink};">${esc(l)}</td></tr>`).join('')}</table>
+${introHtml}<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 4px;">${i.lines.map((l) => `<tr><td valign="top" style="padding:4px 10px 4px 0;color:${BRAND.goldDeep};font-size:16px;">&#9670;</td><td style="padding:4px 0;font-size:17px;line-height:1.5;color:${ink};">${esc(l)}</td></tr>`).join('')}</table>
 ${button(read, `Read Issue ${i.n}`)}`,
     foot: footHtml(unsubUrl, postal, why),
   });

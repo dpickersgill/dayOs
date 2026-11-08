@@ -37,6 +37,9 @@ const SEO = require('../lib/seo');
 const GD = require('../lib/goodday');
 // The Good Day (guests round 2): the newsletter's home and its issues, one file each under src/site/good-day.
 PAGES['good-day'] = 'good-day/index';
+// The Good Day scorecard: twelve questions about the guest's day, scored on the page (lib/scorecard.js).
+PAGES['good-day/scorecard'] = 'good-day/scorecard';
+const SC = require('../lib/scorecard');
 for (const i of GD.issues()) PAGES[i.slug] = i.slug;
 Object.assign(SEO.META, GD.meta());
 const cache = new Map();
@@ -68,7 +71,7 @@ const CHEVRON = '<svg class="chev" width="12" height="12" viewBox="0 0 12 12" ar
  * Narrower screens: a Menu button opening a full-screen menu, its two buttons kept at the bottom; on phones a bar at the
  * bottom of the page holds the two things people came to do. */
 // The Resources menu: the guides, and The Good Day newsletter.
-const RESOURCES = [['resources', 'Guides and checklists', 'Printable checklists and how-to guides'], ['good-day', 'The Good Day', 'Our newsletter, every other week']];
+const RESOURCES = [['resources', 'Guides and checklists', 'Printable checklists and how-to guides'], ['good-day', 'The Good Day', 'Our newsletter, every other week'], ['good-day/scorecard', 'The Good Day scorecard', 'Score your guest\'s day in five minutes']];
 function header(current) {
   const cur = (s) => (s === current ? ' aria-current="page"' : '');
   const sols = SOLUTIONS.filter(([s]) => s !== 'ski-patrol');
@@ -80,7 +83,7 @@ function header(current) {
   const links = NAV.map(([s, t]) => (s === 'resources' ? resMenu : `<li><a class="sn-a" href="{{SITE}}/${s}"${cur(s)}>${t}</a></li>`)).join('\n        ');
   const productOn = current === 'product' || sols.some(([s]) => s === current);
   const panel = sols.map(([s, t]) => `<li><a href="{{SITE}}/${s}"${cur(s)}><b>${t}</b><span>${SOLUTION_LINES[s]}</span></a></li>`).join('\n              ');
-  const phoneLinks = [['', 'Home', '{{HOME}}'], ['product', 'Product'], ...NAV, ['good-day', 'The Good Day']].map(([s, t, href]) => `<li><a href="${href || `{{SITE}}/${s}`}"${cur(s)}>${t}</a></li>`).join('\n          ');
+  const phoneLinks = [['', 'Home', '{{HOME}}'], ['product', 'Product'], ...NAV, ['good-day', 'The Good Day'], ['good-day/scorecard', 'The Good Day scorecard']].map(([s, t, href]) => `<li><a href="${href || `{{SITE}}/${s}`}"${cur(s)}>${t}</a></li>`).join('\n          ');
   const phoneSols = sols.map(([s, t]) => `<li><a href="{{SITE}}/${s}"${cur(s)}>${t}</a></li>`).join('\n          ');
   const bar = current === 'contact' ? '' : `
 <div class="mcta"><a class="btn ghost" href="{{TRY}}">Try the demo</a><a class="btn" href="{{SITE}}/contact">Book a 20-minute walkthrough</a></div>`;
@@ -151,6 +154,7 @@ const FOOTER = `<footer class="sf">
           <li><a href="{{SITE}}/security">Security</a></li>
           <li><a href="{{SITE}}/status">Status</a></li>
           <li><a href="{{SITE}}/resources">Guides and checklists</a></li>
+          <li><a href="{{SITE}}/good-day/scorecard">The Good Day scorecard</a></li>
           <li><a href="{{SITE}}/about">About</a></li>
         </ul>
       </div>
@@ -251,6 +255,13 @@ function canonicalOrigin(req) {
 const isCopy = (req) => config.site.hosts.length > 0 && !onSite(req);
 
 /** Fill in the page's head and links for where it is being served. */
+/** The small scorecard card on Home, Product, Ski patrol and Pricing (and anywhere a page puts <!--SC:CARD-->). */
+function scorecardCard() {
+  return `<aside class="sc-card" aria-labelledby="sc-card-h">
+  <div><p class="sc-card-k">The Good Day scorecard</p><h2 id="sc-card-h" class="sc-card-t">How good is your guest's day?</h2><p class="sc-card-p">Twelve questions on tickets, lessons, lift checks, patrol, the park, staff and conditions. About five minutes, free, with a next step for each gap.</p></div>
+  <a class="btn" href="{{SITE}}/good-day/scorecard">Take the scorecard</a>
+</aside>`;
+}
 /** The Good Day's parts in any page: the sign-up card, the footer line, the six moments, the archive and what is next. */
 function fillGoodDay(html) {
   const next = GD.catalog().next;
@@ -259,6 +270,9 @@ function fillGoodDay(html) {
     .replace('<!--GD:FOOTER-->', () => GD.footerLine())
     .replace(/<!--GD:MOMENTS:([A-Za-z ]*)-->/g, (_m, on) => GD.momentStrip(on))
     .replace('<!--GD:ARCHIVE-->', () => GD.archive())
+    .replace('<!--SC:QUESTIONS-->', () => SC.questionsHtml())
+    .replace('<!--SC:BANDS-->', () => SC.bandsHtml())
+    .replace(/<!--SC:CARD-->/g, () => scorecardCard())
     .replace('<!--GD:NEXT-->', () => (next ? `<p class="gd-next"><b>Next issue: ${escHtml(next.moment)}.</b> ${escHtml(next.question)}</p>` : ''));
 }
 
@@ -325,6 +339,7 @@ const modified = (name) => { try { return fs.statSync(path.join(DIR, `${name}.ht
 const PRIORITY = { '': '1.0', product: '0.9', 'ski-patrol': '0.9', 'ski-area-risk-management': '0.9', pricing: '0.9', resources: '0.7', about: '0.6', contact: '0.7', security: '0.6', privacy: '0.2', terms: '0.2' };
 for (const [s] of SOLUTIONS) if (!PRIORITY[s]) PRIORITY[s] = '0.8';
 PRIORITY['good-day'] = '0.7';
+PRIORITY['good-day/scorecard'] = '0.7';
 PRIORITY.status = '0.3';
 for (const i of GD.issues()) PRIORITY[i.slug] = '0.6';
 for (const s of ['chairlift-inspection-checklist', 'terrain-park-inspection-checklist', 'ski-area-incident-report-guide', 'how-to-choose-ski-area-software']) PRIORITY[s] = '0.7';
@@ -403,6 +418,7 @@ Verdynt/OS runs in a web browser on counter computers, phones and tablets, with 
 - [About](${page('about')}): who Verdynt/OS is for and how it works with ski areas
 - [Pricing](${page('pricing')}): plans, add-ons and how paying works
 - [Security](${page('security')}): how guest and patient information is protected
+- [Status](${page('status')}): whether each part of Verdynt/OS is working now, with incidents and planned maintenance
 - [Contact](${page('contact')}): book a 20-minute walkthrough, or ask for a trial mountain
 
 ## Guides and checklists
@@ -417,6 +433,7 @@ Verdynt/OS runs in a web browser on counter computers, phones and tablets, with 
 
 - [The Good Day](${page('good-day')}): a newsletter for ski area owners, GMs and patrol directors, every other week. Each issue takes apart one moment of the guest's day (Plan, Arrive, Learn, Ride, Get help, Come back): the guest's question, the process behind the answer, one number to watch and a quick test.
 ${GD.issues().map((i) => `- [Issue ${i.n}: ${i.question}](${page(i.slug)}): ${i.moment}. ${i.title}. ${i.teaser}`).join('\n')}
+- [The Good Day scorecard](${page('good-day/scorecard')}): twelve questions on the guest's day (arrival and tickets, lessons, lifts and opening checks, patrol response and records, terrain park inspections, staff and scheduling, communication and conditions), scored on the page with next steps. Free, no account, nothing stored. A printable PDF is at ${origin.replace(/\/site$/, '')}/site/good-day-scorecard.pdf
 
 ## Plans (US dollars, before sales tax)
 
@@ -480,18 +497,21 @@ api.get('/site/plans', async (_req, res) => res.set('Cache-Control', 'public, ma
 const forgetPlans = () => { planCache = { at: 0, body: null }; };
 
 const contactBody = z.object({
-  kind: z.enum(['walkthrough', 'trial', 'founding', 'question', 'patrol', 'review', 'setup']).default('walkthrough'),
+  kind: z.enum(['walkthrough', 'trial', 'founding', 'question', 'patrol', 'review', 'setup', 'scorecard']).default('walkthrough'),
   name: z.string().trim().min(1).max(150), mountain: z.string().trim().min(1).max(150), role: z.string().trim().max(100).optional().default(''),
   email: z.string().trim().email().max(255), phone: z.string().trim().max(40).optional().default(''), lifts: z.string().trim().max(20).optional().default(''),
   plan_interest: z.string().trim().max(60).optional().default(''), message: z.string().trim().max(2000).optional().default(''),
   founding: z.boolean().optional().default(false), website: z.string().max(200).optional().default(''), // a field people never see: bots fill it
-});
-const KINDS = { walkthrough: 'Walkthrough request', trial: 'Trial mountain request', founding: 'Walkthrough request (Founding Mountain Program)', question: 'Question', patrol: 'Patrol only sign-up', review: 'Incident report review request', setup: 'Guided setup request' };
+  scores: z.array(z.number().int().min(0).max(2)).max(40).optional(), // the Good Day scorecard's answers, one per question
+}).refine((b) => b.kind !== 'scorecard' || SC.valid(b.scores), { message: 'Answer every question on the scorecard first.', path: ['scores'] });
+const KINDS = { walkthrough: 'Walkthrough request', trial: 'Trial mountain request', founding: 'Walkthrough request (Founding Mountain Program)', question: 'Question', patrol: 'Patrol only sign-up', review: 'Incident report review request', setup: 'Guided setup request', scorecard: 'Good Day scorecard results' };
 
 api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SITE_CONTACT_LIMIT) || 8, message: 'Too many messages from this address. Try again later, or email us.' }), validate(contactBody), async (req, res) => {
   const b = req.body;
   if (b.website) return res.status(201).json({ ok: true }); // looks sent, goes nowhere
   const ipHash = crypto.createHash('sha256').update(`${config.linkSecret}:${req.ip}`).digest('hex');
+  // Scorecard results are written here from the answers, in our own words; anything typed as a message is ignored.
+  if (b.kind === 'scorecard') b.message = SC.resultsText(b.scores);
   const [r] = await pool.query(
     'INSERT INTO site_leads (kind, name, mountain, role, email, phone, lifts, plan_interest, message, founding, ip_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [b.kind, b.name, b.mountain, b.role || null, b.email, b.phone || null, b.lifts || null, b.plan_interest || null, b.message || null, b.founding || b.kind === 'founding' ? 1 : 0, ipHash],
@@ -509,8 +529,12 @@ api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.e
       // a mountain written into the copy would let anyone make our sending domain deliver their words and links to any inbox.
       // The demo link only from the configured address, never from the request's Host.
       const tryUrl = config.site.appUrl ? `\n\nTo look around in the meantime, start a demo mountain: ${config.site.appUrl}/try` : '';
-      copy = (await mailer.sendPlatform({ to: b.email, replyTo: config.site.contactEmail, subject: 'We have your Verdynt/OS request', tag: 'site-lead-thanks',
-        text: `Hello,\n\nThank you for writing to Verdynt/OS. A person will reply within one business day${b.kind === 'trial' ? ' to set up your trial mountain' : b.kind === 'patrol' ? ' to set up your patrol, with a 14-day trial' : b.kind === 'review' ? ' with a safe way to send your 10 reports. Please take out names and identifying details first, and do not email patient records' : ' to set a time'}.${tryUrl}\n\nIf you did not write to us, you can ignore this email.\n\nVerdynt/OS` })).ok;
+      copy = (await mailer.sendPlatform(b.kind === 'scorecard' ? {
+        // Only the score and our own next steps: the same nothing-typed rule as the copy below.
+        to: b.email, replyTo: config.site.contactEmail, subject: 'Your Good Day scorecard results', tag: 'site-scorecard',
+        text: `Hello,\n\nHere are the results of the Good Day scorecard you filled in on the Verdynt/OS website.\n\n${b.message}\n\nTo see how Verdynt/OS handles any of these, book a 20-minute walkthrough: ${linkOrigin(req)}/contact?kind=walkthrough\nThe printable scorecard: ${linkOrigin(req).replace(/\/site$/, '')}/site/good-day-scorecard.pdf${tryUrl}\n\nIf you did not fill in the scorecard, you can ignore this email.\n\nVerdynt/OS`,
+      } : { to: b.email, replyTo: config.site.contactEmail, subject: 'We have your Verdynt/OS request', tag: 'site-lead-thanks',
+        text: `Hello,\n\nThank you for writing to Verdynt/OS. A person will reply${b.kind === 'trial' ? ' to set up your trial mountain' : b.kind === 'patrol' ? ' to set up your patrol, with a 14-day trial' : b.kind === 'review' ? ' with a safe way to send your 10 reports. Please take out names and identifying details first, and do not email patient records' : ' to set a time'}.${tryUrl}\n\nIf you did not write to us, you can ignore this email.\n\nVerdynt/OS` })).ok;
     }
   }
   res.status(201).json({ ok: true, copy });

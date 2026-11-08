@@ -232,7 +232,7 @@
         const out = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(out.error || 'Something went wrong');
         form.querySelectorAll('input:not([type=radio]):not([type=checkbox]), textarea').forEach((i) => { i.value = ''; });
-        show(`Sent. ${k === 'trial' ? 'We will reply within one business day to set up your trial mountain.' : k === 'review' ? 'A person will reply within one business day with a safe way to send your reports. Please don\'t email them.' : 'A person will reply within one business day.'}${out.copy ? ' A copy is on its way to your email.' : ''}`, 'ok');
+        show(`Sent. ${k === 'trial' ? 'A person will reply to set up your trial mountain.' : k === 'review' ? 'A person will reply with a safe way to send your reports. Please don\'t email them.' : 'A person will reply.'}${out.copy ? ' A copy is on its way to your email.' : ''}`, 'ok');
       } catch (err) {
         show(`${err.message}. Try again in a moment.`, 'bad');
       } finally { btn.disabled = false; }
@@ -312,5 +312,64 @@
 
   // The script is deferred, so the page is already parsed: fold the lists now, before the first paint where possible.
   chrome();
-  document.addEventListener('DOMContentLoaded', () => { switchboard(); homePlans(); pricing(); contact(); goodDay(); });
+  // ---------------------------------------------------------------- the Good Day scorecard: scored here, nothing sent unless asked
+  // The questions, next steps and bands are in the page (from src/lib/scorecard.js); this only adds them up.
+  function scorecard() {
+    const form = $('#sc-form'); if (!form) return;
+    const qs = [...form.querySelectorAll('.sc-q')];
+    const result = $('#sc-result'); const err = $('#sc-err');
+    let scores = null;
+    form.addEventListener('change', (e) => { const q = e.target.closest('.sc-q'); if (q) q.classList.remove('missing'); });
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const picked = qs.map((q) => { const c = q.querySelector('input:checked'); return c ? Number(c.value) : null; });
+      const missing = qs.filter((_q, i) => picked[i] === null);
+      qs.forEach((q, i) => q.classList.toggle('missing', picked[i] === null));
+      if (missing.length) {
+        err.hidden = false;
+        err.textContent = missing.length === 1 ? 'One question still needs an answer.' : `${missing.length} questions still need an answer.`;
+        missing[0].querySelector('input').focus();
+        return;
+      }
+      err.hidden = true;
+      scores = picked;
+      const total = scores.reduce((a, b) => a + b, 0); const max = scores.length * 2;
+      const band = [...document.querySelectorAll('#sc-bands li')].find((b) => total >= Number(b.dataset.min));
+      $('#sc-total').textContent = total; $('#sc-max').textContent = max;
+      $('#sc-band').textContent = band ? band.dataset.title : ''; $('#sc-line').textContent = band ? band.dataset.line : '';
+      const areas = [...form.querySelectorAll('.sc-area')].map((a) => {
+        const idx = qs.map((q, i) => (q.closest('.sc-area') === a ? i : -1)).filter((i) => i >= 0);
+        return { name: a.dataset.name, score: idx.reduce((t, i) => t + scores[i], 0), max: idx.length * 2 };
+      });
+      $('#sc-areas').replaceChildren(...areas.map((a) => el('li', { class: a.score * 2 <= a.max ? 'low' : null }, el('span', {}, a.name), el('b', {}, `${a.score} of ${a.max}`),
+        el('span', { class: 'sc-bar', 'aria-hidden': 'true' }, el('i', { style: `width:${Math.round((a.score / a.max) * 100)}%` })))));
+      const steps = qs.map((q, i) => ({ i, s: scores[i], area: q.closest('.sc-area').dataset.name, next: q.dataset.next })).filter((x) => x.s < 2).sort((a, b) => a.s - b.s || a.i - b.i);
+      $('#sc-steps').replaceChildren(...steps.map((x) => el('li', {}, el('b', {}, x.area), x.next)));
+      $('#sc-steps').hidden = !steps.length; $('#sc-none').hidden = steps.length > 0;
+      result.hidden = false;
+      result.focus();
+    });
+    const mail = $('#sc-mail'); const status = $('#sc-status');
+    mail.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!scores) return;
+      const v = (n) => String(mail.elements[n].value || '').trim();
+      const checks = [['name', v('name')], ['mountain', v('mountain')], ['email', /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v('email'))]];
+      let first = null;
+      for (const [n, ok] of checks) { mail.elements[n].setAttribute('aria-invalid', String(!ok)); if (!ok && !first) first = mail.elements[n]; }
+      if (first) { status.textContent = 'Add your name, mountain and email first.'; first.focus(); return; }
+      const btn = mail.querySelector('button'); btn.disabled = true;
+      try {
+        const res = await fetch('/api/v1/site/contact', { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ kind: 'scorecard', name: v('name'), mountain: v('mountain'), email: v('email'), scores, website: v('website') }) });
+        const out = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(out.error || 'Something went wrong');
+        status.textContent = out.copy ? 'Sent. Your results are on their way to your email.' : 'Thank you. We have your results, and a person will follow up.';
+      } catch (err2) {
+        status.textContent = `${err2.message}. Try again in a moment.`;
+      } finally { btn.disabled = false; status.focus(); }
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', () => { switchboard(); homePlans(); pricing(); contact(); goodDay(); scorecard(); });
 }());

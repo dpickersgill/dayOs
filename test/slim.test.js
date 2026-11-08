@@ -216,7 +216,9 @@ test('the website names the Founding Mountain Program and the Security page has 
   assert.match(await page('/contact'), /Founding Mountain Program/);
   const sec = await page('/security');
   assert.match(sec, /id="support"/);
-  for (const w of [/Hours:/, /Response time:/, /backed up every day/, /point-in-time recovery/, /60 days to download everything/]) assert.match(sec, w);
+  for (const w of [/Hours:/, /backed up every day/, /point-in-time recovery/, /download what you need before you go/]) assert.match(sec, w);
+  // 2026.11 policy review: reply times and the export window are for the Terms and Privacy policy to promise, not this page.
+  for (const w of [/Response time:/, /60 days to download/, /one business day/]) assert.doesNotMatch(sec, w);
 });
 
 test('STOP and START text replies are written to the consent record at every mountain, and only Twilio can send them', async () => {

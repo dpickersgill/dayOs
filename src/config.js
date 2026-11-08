@@ -127,9 +127,9 @@ module.exports = {
   site: {
     hosts: String(env.SITE_HOSTS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean),
     appUrl: (env.APP_URL || '').replace(/\/$/, ''),
-    // The company behind Verdynt/OS, named in the footer, Terms, Privacy and the structured data. Dan: add the legal suffix
+    // The company behind Verdynt/OS, named in the footer, Terms, Privacy and the structured data. Add the legal suffix
     // here when it is settled (for example "Verdynt Consulting Group, LLC"); every page reads it from this one place.
-    company: { name: 'Verdynt Consulting Group', place: 'Royersford, Pennsylvania', founder: 'Dan Pickersgill' },
+    company: { name: 'Verdynt Consulting Group', place: 'Pennsylvania' },
     // The public addresses on the website and in the app: sales and general questions, and help for customers. These are
     // the only place the email domain is set (runmyresort.com today): change these three lines, or set SITE_HELLO_EMAIL,
     // SITE_SUPPORT_EMAIL and SITE_CONTACT_EMAIL, when the new domain arrives.
@@ -141,10 +141,9 @@ module.exports = {
     verify: { google: env.GOOGLE_SITE_VERIFICATION || '', bing: env.BING_SITE_VERIFICATION || '' },
     // SITE_SAME_AS: the company's own profiles elsewhere (the LinkedIn page), comma-separated. Search engines use them to
     // tie the profiles to the website; a LinkedIn address is also linked from the footer.
-    // Demo emails come personally from the founder: the name they show, and optionally a verified sender address of
-    // their own (DEMO_MAIL_FROM, e.g. dan@runmyresort.com; otherwise MAIL_FROM). Replies go to hello@.
-    founderName: env.SITE_FOUNDER_NAME || 'Dan Pickersgill',
-    founderFirst: (env.SITE_FOUNDER_NAME || 'Dan Pickersgill').split(' ')[0],
+    // Demo emails come from the company: the name they show (DEMO_MAIL_NAME), and optionally a verified sender address
+    // (DEMO_MAIL_FROM, e.g. hello@runmyresort.com; otherwise MAIL_FROM). Replies go to hello@.
+    demoFromName: env.DEMO_MAIL_NAME || 'Verdynt/OS',
     demoFrom: env.DEMO_MAIL_FROM || '',
     sameAs: String(env.SITE_SAME_AS || '').split(',').map((u) => u.trim()).filter((u) => /^https:\/\/[^\s"<>]+$/.test(u)),
   },

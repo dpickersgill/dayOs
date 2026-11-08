@@ -111,7 +111,7 @@ test('the Good Day home and Issue 1 are pages of the site: its header and footer
   }
   assert.ok(issue.text.includes('alt="The ticket shop calendar for December with Saturday the 19th selected."'), 'the alt text is kept');
   assert.ok(issue.text.includes('class="gd-moments"') && issue.text.includes('<li class="on" aria-current="step"><b>1</b>Plan</li>'), 'the moments strip with Plan lit');
-  assert.ok(issue.text.includes('2026.11.7. Moment 1: Plan.') && issue.text.includes('2026.11.5. Moment 3: Learn.') && issue.text.includes('data-edit="dan"'), 'What shipped holds the real releases, marked for Dan');
+  assert.ok(issue.text.includes('2026.11.7. Moment 1: Plan.') && issue.text.includes('2026.11.5. Moment 3: Learn.') && issue.text.includes('data-edit="shipped"'), 'What shipped holds the real releases, marked for editing');
   assert.ok(!/To fill in before sending|\[Release version/.test(issue.text), 'no placeholders left');
   assert.ok(!/aria-disabled|Take the scorecard/.test(issue.text), 'the disabled scorecard button is gone');
   assert.ok(issue.text.includes('href="mailto:hello@runmyresort.com?subject='), 'Reply is a mailto');
@@ -170,6 +170,7 @@ test('sign-up is double opt-in: a confirmation link, then the welcome linking Is
   assert.equal(w.Subject, 'Welcome to The Good Day');
   assert.equal(w.MessageStream, 'broadcast');
   assert.ok(w.TextBody.includes('https://www.site.test/good-day/issue-1') && w.HtmlBody.includes('Read Issue 1'));
+  assert.ok(w.TextBody.includes('We read every reply.\n\nThe Verdynt/OS team\nVerdynt Consulting Group') && !/\bDan\b|\bI read\b/.test(w.TextBody + w.HtmlBody), 'signed by the team, not a person');
   const lu = (w.Headers || []).find((x) => x.Name === 'List-Unsubscribe');
   assert.match(lu.Value, /^<https:\/\/www\.site\.test\/good-day\/unsubscribe\/[A-Za-z0-9_-]{43}>, <mailto:/);
   assert.ok((w.Headers || []).some((x) => x.Name === 'List-Unsubscribe-Post' && x.Value === 'List-Unsubscribe=One-Click'));
@@ -284,7 +285,7 @@ test('send an issue: preview, a test, then every confirmed subscriber once; pend
   await pool.query('UPDATE goodday_settings SET postal_address = NULL WHERE id = 1');
   const noAddr = await api('POST', '/platform/goodday/send', { n: 1, confirm: 'issue-1' });
   assert.equal(noAddr.status, 400); assert.match(noAddr.body.error, /postal address/);
-  assert.equal((await api('PUT', '/platform/goodday/settings', { from_name: 'Dan at The Good Day', postal_address: 'PO Box 12, Royersford, PA 19468' })).status, 200);
+  assert.equal((await api('PUT', '/platform/goodday/settings', { from_name: 'The Good Day from Verdynt/OS', postal_address: 'PO Box 12, Royersford, PA 19468' })).status, 200);
 
   const pv = await api('POST', '/platform/goodday/preview', { n: 1, intro: 'First one. Tell me what you think.' });
   assert.equal(pv.status, 200);
@@ -310,7 +311,7 @@ test('send an issue: preview, a test, then every confirmed subscriber once; pend
     assert.equal(got.length, 1, `${x} gets it once`);
     assert.equal(got[0].Subject, 'The Good Day #1');
     assert.equal(got[0].MessageStream, 'broadcast');
-    assert.equal(got[0].From, 'Dan at The Good Day <hello@site.test>');
+    assert.equal(got[0].From, 'The Good Day from Verdynt/OS <hello@site.test>');
     assert.ok(got[0].Headers.some((h) => h.Name === 'List-Unsubscribe') && got[0].TextBody.includes('/good-day/unsubscribe/') && got[0].HtmlBody.includes('Unsubscribe</a>'));
     assert.ok(got[0].TextBody.includes('PO Box 12, Royersford, PA 19468'));
   }

@@ -152,7 +152,7 @@ function noteHtml(n, heading = 'h3') {
 /** Fills the status page's <!--STATUS--> from a snapshot. */
 function pageHtml(s) {
   const parts = s.parts.map((p) => `<li class="st-part st-${esc(p.state)}">
-      <div class="st-row"><span class="st-dot" aria-hidden="true"></span><div><h3>${esc(p.name)}</h3><p>${esc(p.about)}</p></div><b>${esc(p.word)}</b></div>
+      <div class="st-row"><span class="st-dot" aria-hidden="true"></span><div><h2 class="st-pn">${esc(p.name)}</h2><p>${esc(p.about)}</p></div><b>${esc(p.word)}</b></div>
       <ol class="st-days" aria-label="${esc(p.name)}, the last 90 days">${p.days.map((d) => `<li class="st-${esc(d.state)}" title="${esc(`${dayWord(d.date)}: ${d.state === 'ok' ? 'no incidents' : `${WORD[d.state]}. ${d.titles.join('; ')}`}`)}"><span class="vh">${esc(dayWord(d.date))}: ${esc(d.state === 'ok' ? 'no incidents' : WORD[d.state])}</span></li>`).join('')}</ol>
       <div class="st-scale" aria-hidden="true"><span>90 days ago</span><span>Today</span></div>
     </li>`).join('\n    ');
