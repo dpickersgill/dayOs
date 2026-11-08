@@ -49,7 +49,7 @@ async function instructor(first, { max = 9, kids = 1, adaptive = 0 } = {}) {
   return st.id;
 }
 const session = async (extra = {}) => ok(await call('POST', '/skischool/sessions', { token: A.owner, body: { product_id: D.group, starts_at: `${day2}T10:00`, ends_at: `${day2}T12:00`, capacity: 20, ...extra } }), 201).id;
-const book = async (sid, first, dob, extra = {}, token = T.counter) => call('POST', `/skischool/sessions/${sid}/bookings`, { token, body: { student: { first_name: first, last_name: `Fam${suffix}`, date_of_birth: dob, sex: 'female' }, sign_waiver: true, send_confirmation: false, ...extra } });
+const book = async (sid, first, dob, extra = {}, token = T.counter) => call('POST', `/skischool/sessions/${sid}/bookings`, { token, body: { student: { first_name: first, last_name: `Fam${suffix}`, date_of_birth: dob, sex: 'female' }, sign_waiver: true, waiver_signer: { name: 'Pat Parent' }, send_confirmation: false, ...extra } });
 const KID = '2018-04-04'; // 8 on day2
 const SMALL = '2021-01-10'; // 5 or 6
 const ADULT = '1980-02-02';
@@ -92,11 +92,11 @@ test('ages: the desk is warned about an adult in a kids lesson; a manager books 
   assert.match(warn.body.error, /is \d+, and this lesson is for ages 5 to 12/);
   // the counter cannot override; the student record was saved, nothing booked
   const pid = warn.body.details.person_id;
-  const counter = await call('POST', `/skischool/sessions/${sid}/bookings`, { token: T.counter, body: { person_id: pid, sign_waiver: true, override_reason: 'Parent asked', send_confirmation: false } });
+  const counter = await call('POST', `/skischool/sessions/${sid}/bookings`, { token: T.counter, body: { person_id: pid, sign_waiver: true, waiver_signer: { name: 'Pat Parent' }, override_reason: 'Parent asked', send_confirmation: false } });
   assert.equal(counter.status, 403, counter.text);
   assert.equal((await q('SELECT COUNT(*) AS n FROM lesson_bookings WHERE session_id = ?', [sid]))[0].n, 0);
   // the owner (a manager) gives a reason
-  const yes = ok(await call('POST', `/skischool/sessions/${sid}/bookings`, { token: A.owner, body: { person_id: pid, sign_waiver: true, override_reason: 'Assisting a child in the class', send_confirmation: false } }), 201);
+  const yes = ok(await call('POST', `/skischool/sessions/${sid}/bookings`, { token: A.owner, body: { person_id: pid, sign_waiver: true, waiver_signer: { name: 'Pat Parent' }, override_reason: 'Assisting a child in the class', send_confirmation: false } }), 201);
   const [b] = await q('SELECT override_reason FROM lesson_bookings WHERE id = ?', [yes.id]);
   assert.equal(b.override_reason, 'Assisting a child in the class');
   const [a] = await q("SELECT detail FROM audit_log WHERE tenant_id = ? AND action = 'age_override' ORDER BY id DESC LIMIT 1", [tid]);
@@ -147,7 +147,7 @@ test('ratios: the band sizes are settings; the desk is warned over the band, onl
   const page = ok(await call('GET', `/public/${A.slug}/booking`));
   assert.equal(page.lessons.some((l) => l.id === sid), false, 'a class at its band size is not offered online');
   // a manager adds one over with a reason; the board shows the class in red with the reason
-  ok(await call('POST', `/skischool/sessions/${sid}/bookings`, { token: A.owner, body: { person_id: third.body.details.person_id, sign_waiver: true, override_reason: 'Sibling stays with sister', send_confirmation: false } }), 201);
+  ok(await call('POST', `/skischool/sessions/${sid}/bookings`, { token: A.owner, body: { person_id: third.body.details.person_id, sign_waiver: true, waiver_signer: { name: 'Pat Parent' }, override_reason: 'Sibling stays with sister', send_confirmation: false } }), 201);
   const board = ok(await call('GET', `/skischool/safety/board?date=${day2}`, { token: T.counter }));
   assert.equal(board.sessions[sid].over_ratio, true);
   assert.match(board.sessions[sid].ratio_reason, /3 students: Ages 7 to 12 classes take 2/);
@@ -211,10 +211,10 @@ test('levels: the customer form and the public availability page use levels 1 to
   assert.ok(lv, 'a level field');
   assert.deepEqual(lv.options.map(String), ['1', '2', '3', '4', '5', '6', '7', '8', '9']);
   // a new student with a level from the roster form
-  const r = ok(await call('POST', `/skischool/sessions/${await session()}/bookings`, { token: T.counter, body: { student: { first_name: 'Lev', last_name: `El${suffix}`, date_of_birth: KID, sex: 'male', ski_level: 4 }, sign_waiver: true, send_confirmation: false } }), 201);
+  const r = ok(await call('POST', `/skischool/sessions/${await session()}/bookings`, { token: T.counter, body: { student: { first_name: 'Lev', last_name: `El${suffix}`, date_of_birth: KID, sex: 'male', ski_level: 4 }, sign_waiver: true, waiver_signer: { name: 'Pat Parent' }, send_confirmation: false } }), 201);
   assert.equal((await q('SELECT ski_level FROM people WHERE id = ?', [r.person_id]))[0].ski_level, 4);
   // an older screen still sending the old word is mapped onto the scale
-  const old = ok(await call('POST', `/skischool/sessions/${await session()}/bookings`, { token: T.counter, body: { student: { first_name: 'Old', last_name: `Word${suffix}`, date_of_birth: KID, sex: 'male', ability_level: 'intermediate' }, sign_waiver: true, send_confirmation: false } }), 201);
+  const old = ok(await call('POST', `/skischool/sessions/${await session()}/bookings`, { token: T.counter, body: { student: { first_name: 'Old', last_name: `Word${suffix}`, date_of_birth: KID, sex: 'male', ability_level: 'intermediate' }, sign_waiver: true, waiver_signer: { name: 'Pat Parent' }, send_confirmation: false } }), 201);
   assert.equal((await q('SELECT ski_level FROM people WHERE id = ?', [old.person_id]))[0].ski_level, 4);
   // the public availability page: levels from what each instructor is cleared to teach
   ok(await call('PUT', '/availability/settings', { token: A.owner, body: { public: true } }).catch(() => ({ status: 200 })));
@@ -230,7 +230,7 @@ test('pickup: the list is given at booking; only the lesson\'s instructor, the d
   // a photo needs the parent's consent
   const noConsent = await book(sid, 'Pia', KID, { contact_email: `fam.${suffix}@x.test`, pickup_adults: [{ name: 'Kate Novak', relationship: 'Mom', phone: '610-555-0142', photo: PHOTO }] });
   assert.equal(noConsent.status, 409, noConsent.text);
-  const b = ok(await call('POST', `/skischool/sessions/${sid}/bookings`, { token: T.counter, body: { person_id: noConsent.body.details ? noConsent.body.details.person_id : undefined, student: noConsent.body.details ? undefined : { first_name: 'Pia', last_name: `Fam${suffix}`, date_of_birth: KID, sex: 'female' }, sign_waiver: true, send_confirmation: false, contact_email: `fam.${suffix}@x.test`,
+  const b = ok(await call('POST', `/skischool/sessions/${sid}/bookings`, { token: T.counter, body: { person_id: noConsent.body.details ? noConsent.body.details.person_id : undefined, student: noConsent.body.details ? undefined : { first_name: 'Pia', last_name: `Fam${suffix}`, date_of_birth: KID, sex: 'female' }, sign_waiver: true, waiver_signer: { name: 'Pat Parent' }, send_confirmation: false, contact_email: `fam.${suffix}@x.test`,
     pickup_adults: [{ name: 'Kate Novak', relationship: 'Mom', phone: '610-555-0142', photo: PHOTO }, { name: 'Joe Novak', relationship: 'Grandpa' }], pickup_photo_consent: true } }), 201);
   D.pia = b.id;
   const [row] = await q('SELECT pickup FROM lesson_bookings WHERE id = ?', [b.id]);

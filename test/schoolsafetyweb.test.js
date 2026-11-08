@@ -100,7 +100,7 @@ test.before(async (t) => {
   D.sid = ok(await api('POST', '/skischool/sessions', { token: T.owner, body: { product_id: prod, starts_at: `${today}T23:00`, ends_at: `${today}T23:50`, capacity: 20, age_min: 7, age_max: 12, instructor_id: D.sam, override_reason: 'Test' } })).id;
   const yr = Number(today.slice(0, 4));
   for (let i = 0; i < 14; i++) {
-    ok(await api('POST', `/skischool/sessions/${D.sid}/bookings`, { token: T.owner, body: { student: { first_name: `Kid${String.fromCharCode(65 + i)}`, last_name: 'Test', date_of_birth: `${yr - 9}-02-02`, sex: 'male' }, sign_waiver: true, send_confirmation: false, override_reason: 'A big class for the test', pickup_adults: [{ name: 'Pat Parent', relationship: 'Mom' }] } }));
+    ok(await api('POST', `/skischool/sessions/${D.sid}/bookings`, { token: T.owner, body: { student: { first_name: `Kid${String.fromCharCode(65 + i)}`, last_name: 'Test', date_of_birth: `${yr - 9}-02-02`, sex: 'male' }, sign_waiver: true, waiver_signer: { name: 'Pat Parent' }, send_confirmation: false, override_reason: 'A big class for the test', pickup_adults: [{ name: 'Pat Parent', relationship: 'Mom' }] } }));
   }
 });
 

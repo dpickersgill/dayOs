@@ -163,7 +163,7 @@ test('pay rates not set are listed for the director; the pay ladder by level and
   assert.equal(s.missing.length, 0, 'everyone has a rate now');
   // pay lines: Ivy on the ladder with add-ons on a kids lesson; Max (CSIA 3, no ladder rung) on the default
   const kidsLesson = await lesson(P1, '09:00', '11:00', { age_min: 6, age_max: 10 });
-  ok(await book(kidsLesson, { student: adult() }), 201);
+  ok(await book(kidsLesson, { student: child(), waiver_signer: { name: 'Pat Parent' } }), 201); // a child: the lesson is for ages 6 to 10 (school safety)
   const mine = ok(await api('GET', `/skischool/pay/mine?from=${P1}&to=${P1}`, { token: T.ivy }));
   const line = mine.lines.find((l) => l.session_id === kidsLesson && l.kind === 'lesson');
   assert.equal(line.cents, 5000 + 700, 'ladder rate plus the Children\'s Specialist 2 add-on');

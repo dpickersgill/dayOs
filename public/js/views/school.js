@@ -674,7 +674,7 @@ function editInstructor(x, certs, done) {
     field('Snowboard: cleared to', capSel('snowboard_level_max', x.snowboard_level_max)),
     box('teaches_kids', x.teaches_kids, 'Teaches kids (12 and under)'),
     box('teaches_adaptive', x.teaches_adaptive, 'Teaches adaptive lessons'),
-    field('Certification level', select(PSIA, x.psia_level, { name: 'psia_level' }), 'Sets their pay on the pay ladder (Settings, Ski school, Pay ladder).'),
+    field('Certification level', select(PSIA, x.psia_level, { name: 'psia_level' }), 'Sets their pay on the pay ladder (Settings, Lessons, Pay ladder).'),
     h('fieldset', { class: 'wide stack' }, h('legend', null, 'Specialist credentials'), h('div', { class: 'row wrap' }, ...CREDS.map(([k, t]) => box(`cred_${k}`, (x.credentials || []).includes(k), t)))),
     certs.length ? h('fieldset', { class: 'wide stack' }, h('legend', null, 'Certifications'), certRows) : null), async (fd) => {
     await put(`/skischool/instructors/${x.id}/profile`, {

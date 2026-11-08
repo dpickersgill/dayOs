@@ -1361,13 +1361,13 @@ test('crm: the Customers screen adds, opens and edits a customer, with history f
   await settle();
   let dlg = document.querySelector('.overlay');
   clean(dlg, 'add customer');
-  for (const t of ['Contact', 'Address', 'Emergency contact', 'Skiing', 'Email consent', 'Street address', 'ZIP or postal code', 'Emergency contact phone', 'Ability level']) assert.ok(dlg.textContent.includes(t), `form is missing ${t}`);
+  for (const t of ['Contact', 'Address', 'Emergency contact', 'Skiing', 'Email consent', 'Street address', 'ZIP or postal code', 'Emergency contact phone', 'Ski level', 'Snowboard level']) assert.ok(dlg.textContent.includes(t), `form is missing ${t}`);
   typeInto(dlg, 'first_name', 'Carl'); typeInto(dlg, 'last_name', 'Customer'); typeInto(dlg, 'email', 'carl@example.test');
-  typeInto(dlg, 'address_line1', '9 Pine St'); typeInto(dlg, 'emergency_name', 'Cora Customer'); typeInto(dlg, 'ability_level', 'intermediate');
+  typeInto(dlg, 'address_line1', '9 Pine St'); typeInto(dlg, 'emergency_name', 'Cora Customer'); typeInto(dlg, 'ski_level', '4'); // one level scale (school safety): 1 to 9
   await submitForm(dlg.querySelector('[name=first_name]'));
   const saved = ok(await api('GET', '/people?q=Carl', { token: T.owner })).data[0];
   assert.equal(saved.address_line1, '9 Pine St');
-  assert.equal(saved.ability_level, 'intermediate');
+  assert.equal(Number(saved.ski_level), 4);
   assert.equal(document.querySelector('.overlay'), null, 'dialog closed after saving');
 
   // a customer with a purchase shows it in their history
@@ -2150,7 +2150,7 @@ test('school: every tab renders for managers, counter staff and instructors, and
   const groupsOf = (el) => [...el.querySelectorAll('.school-groups > .tabs [role=tab]')].map((t) => t.textContent);
   const viewsOf = (el) => [...el.querySelectorAll('.subtabs > .tabs [role=tab]')].map((t) => t.textContent.replace(/ \(\d+\)/, ''));
   assert.deepEqual(groupsOf(owner), ['Today', 'Bookings', 'Instructors', 'Planning'], 'four groups, not a long row');
-  assert.deepEqual(viewsOf(owner).slice(-3), ['Board', 'Check-in', 'Lineup']);
+  assert.deepEqual(viewsOf(owner).slice(-4), ['Board', 'Check-in', 'Lineup', 'Pickup']);
   await exercise(owner, 'school (owner)');
   const counter = await renderView('school', 'counter', T.counter);
   assert.ok(!groupsOf(counter).includes('Instructors') || !tabsOf(counter).includes('Payroll'), 'no payroll for the desk');
@@ -2164,6 +2164,8 @@ test('school: every tab renders for managers, counter staff and instructors, and
 
 test('school: the day board lists lessons with students, and a student opens a report card where skills are ticked off', skip(), async () => {
   const o = T.owner;
+  // the patrol pull test gave Ann a ski level (one level scale): this card starts with none
+  ok(await api('PATCH', `/people/${D.ann}`, { token: o, body: { ski_level: null, snowboard_level: null } }));
   const root = await renderView('school', 'owner', T.owner);
   await openTab(root, 'Today');
   const card = root.querySelector(`[data-session="${D.session}"]`);

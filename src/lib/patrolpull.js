@@ -10,6 +10,10 @@ const { rows, one } = require('../db');
 const { dayRange } = require('./util');
 
 const ABILITY = { first_timer: 'beginner', beginner: 'beginner', intermediate: 'intermediate', advanced: 'advanced' };
+// 2026.11.13: customers carry a level from 1 to 9 per discipline (one level scale); the old ability word is only read.
+// The patrol form's four words from a level: 1 to 3 beginner, 4 to 6 intermediate, 7 and 8 advanced, 9 expert.
+const abilityOfLevel = (n) => (!n ? null : n <= 3 ? 'beginner' : n <= 6 ? 'intermediate' : n <= 8 ? 'advanced' : 'expert');
+const abilityOf = (p) => abilityOfLevel(Number(p.discipline === 'snowboard' ? (p.snowboard_level || p.ski_level) : (p.ski_level || p.snowboard_level)) || null) || ABILITY[p.ability_level] || null;
 const ACTIVITY = { ski: 'ski', telemark: 'ski', snowboard: 'snowboard', adaptive: 'other_snow' };
 // Which ticket to report when a guest holds more than one: the most specific pass first.
 const TICKET_RANK = ['season_pass', 'multi_day', 'day_ticket', 'punch_card', 'voucher'];
@@ -32,7 +36,7 @@ function ageOn(dob, onDate) {
  * email or what the guest paid.
  */
 async function buildPull(conn, tenantId, personId, at) {
-  const p = await one(conn, 'SELECT id, first_name, last_name, date_of_birth, sex, phone, address_line1, address_line2, city, region, postal_code, height_in, weight_lb, discipline, ability_level FROM people WHERE tenant_id = ? AND id = ?', [tenantId, personId]);
+  const p = await one(conn, 'SELECT id, first_name, last_name, date_of_birth, sex, phone, address_line1, address_line2, city, region, postal_code, height_in, weight_lb, discipline, ability_level, ski_level, snowboard_level FROM people WHERE tenant_id = ? AND id = ?', [tenantId, personId]);
   if (!p) return null;
   const stamp = String(at).replace('T', ' ').padEnd(19, ':00').slice(0, 19); // 'YYYY-MM-DD HH:MM:SS'
   const day = stamp.slice(0, 10);
@@ -57,7 +61,7 @@ async function buildPull(conn, tenantId, personId, at) {
     first_name: p.first_name, last_name: p.last_name, date_of_birth: p.date_of_birth ? ymd(p.date_of_birth) : null,
     age_years: ageOn(p.date_of_birth, day), sex: p.sex, phone: p.phone,
     home_town: p.city || null,
-    activity: ACTIVITY[p.discipline] || null, ability: ABILITY[p.ability_level] || null,
+    activity: ACTIVITY[p.discipline] || null, ability: abilityOf(p),
     helmet: helmetOut ? 'yes' : null, rental_equipment: gear.length ? 'yes' : null,
   };
   const form = {};
