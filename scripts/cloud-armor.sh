@@ -29,21 +29,27 @@ WAF_RULES=(sqli-v33-stable xss-v33-stable lfi-v33-stable rfi-v33-stable rce-v33-
 
 # Every scheduled job that calls the app (summitops-daily, -guests, -lessons, -outreach and any added later) is moved
 # from one address to the other, keeping its path. A job left on the run.app address would stop silently after --lock.
+# Each job's address is changed in place through the Cloud Scheduler API (sched_patch in cloud-common.sh; gcloud's
+# update crashes). A job that cannot be moved is named, the others are still moved, and the script ends with an error.
 move_jobs() { # from to
-  local from="$1" to="$2" name uri job n=0
+  local from="$1" to="$2" name uri job n=0 failed=0
   [ -n "$from" ] && [ -n "$to" ] && [ "$from" != "$to" ] || return 0
   while read -r name uri; do
     [ -n "$uri" ] || continue
     case "$uri" in
       "$from"/*)
         job="${name##*/}"
-        gcloud scheduler jobs update http "$job" --location "$REGION" --uri "$to${uri#"$from"}" --quiet >/dev/null
-        echo "  $job now calls $to${uri#"$from"}"; n=$((n + 1)) ;;
+        if sched_target "$job" keep-key | jq -c --arg uri "$to${uri#"$from"}" '{httpTarget: (.uri = $uri)}' | sched_patch "$job" httpTarget; then
+          echo "  $job now calls $to${uri#"$from"}"; n=$((n + 1))
+        else
+          failed=$((failed + 1))
+        fi ;;
     esac
   done < <(gcloud scheduler jobs list --location "$REGION" --format='value(name,httpTarget.uri)')
   echo "  $n scheduled job(s) moved to $to."
   local left; left="$(gcloud scheduler jobs list --location "$REGION" --format='value(name,httpTarget.uri)' | grep -F "$from/" || true)"
   if [ -n "$left" ]; then echo "Warning: these jobs still call $from: $left"; fi
+  if [ "$failed" -gt 0 ]; then echo "$failed job(s) could not be moved (see above). Run this again to move them."; exit 1; fi
 }
 
 # The visitor's address (2026.11.11): the app trusts the load balancer's own address in X-Forwarded-For

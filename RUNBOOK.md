@@ -96,11 +96,10 @@ Every failure is written to the logs as one line with `"severity":"ERROR"` and a
 3. **Daily job missed:** Logging, Log-based metrics, Create a counter metric named `daily_job_finished` for
    `jsonPayload.message="daily job finished"`. Then Monitoring, Alerting, Create policy on that metric: alert when it
    is absent for 26 hours.
-4. **Give the daily job time to finish:** it can run for several minutes as mountains grow. The command that makes
-   the daily job (below, Daily schedule) gives it `--attempt-deadline=900s`. `gcloud scheduler jobs update http`
-   crashes in current gcloud, so a job made without it is deleted
-   (`gcloud scheduler jobs delete summitops-daily --location us-east1`) and made again with that command, then
-   `bash scripts/jobs-oidc.sh` is run again.
+4. **Give the daily job time to finish:** it can run for several minutes as mountains grow. `bash scripts/daily-job.sh`
+   (below, Daily schedule) gives it `--attempt-deadline=900s`, and run again it sets that on a job made without it, in
+   place. (`gcloud scheduler jobs update http` crashes in current gcloud, so the scripts change jobs through the Cloud
+   Scheduler API instead, and never delete a job to make it again.)
 5. **Budget:** Billing, Budgets and alerts, a monthly budget (for example $50) with email alerts.
 
 ## Security alerts
@@ -108,7 +107,9 @@ Every failure is written to the logs as one line with `"severity":"ERROR"` and a
 `bash scripts/security-alerts.sh` (run once from Cloud Shell, after `scripts/uptime-setup.sh`, and again after a release
 that adds an alert). It makes a log-based metric and an alert policy for each item below, sent to the same text and email
 channels. A new metric needs a few minutes before a policy can use it: if the script says "not yet", run it again 10
-minutes later. Each alert's text points here.
+minutes later. Any other problem (a missing permission, for example) is marked FAILED with Google's message; the script
+does the rest and then stops with an error, so fix what the message says and run it again. `--dry-run` lists what it
+would run and changes nothing. Each alert's text points here.
 
 | Alert | What it means | What to do |
 | --- | --- | --- |
@@ -284,14 +285,11 @@ One-time setup, in Cloud Shell:
      --update-env-vars=MAIL_FROM=patrol@yourdomain.org,PUBLIC_URL=https://summitops-api-33271059248.us-east1.run.app
    ```
 4. **Daily schedule** (7:30 am Eastern). The job signs its call with a Google ID token for the summitops-jobs account
-   (2026.11.11): no key is stored in Cloud Scheduler. Run `bash scripts/jobs-oidc.sh` once first (it makes the account
-   and tells the app to accept it), then:
+   (2026.11.11): no key is stored in Cloud Scheduler. Run:
    ```
-   gcloud scheduler jobs create http summitops-daily --location us-east1 --schedule "30 7 * * *" --time-zone "America/New_York" \
-     --uri "https://summitops-api-33271059248.us-east1.run.app/api/v1/internal/jobs/daily" --http-method POST \
-     --oidc-service-account-email summitops-jobs@summitops-510715.iam.gserviceaccount.com \
-     --oidc-token-audience "https://summitops-api-33271059248.us-east1.run.app" --attempt-deadline=900s
+   bash scripts/daily-job.sh
    ```
+   It makes the jobs account if needed, tells the app to accept it, and makes the job (or sets an existing one right).
    Check it with `gcloud scheduler jobs run summitops-daily --location us-east1`, then look at Patrol, Follow-up.
 5. **In the app**: Patrol, Follow-up, Settings. Switch follow-up on, set the name shown on the email, a mailing address, who replies go to, and the gift amounts. Leave the tax note blank until your board or accountant gives you the wording.
 6. **Stripe webhook**: the existing endpoint already receives `checkout.session.completed`, which is what records gifts.
@@ -314,7 +312,7 @@ Day to day: directors open Patrol, Follow-up to approve or skip held cases. Emai
 
 ## Demo data
 
-`node db/demo.js <slug>` fills a mountain with made-up staff, customers, products, rentals, lessons, sales, patrol cases and punches by using the app's own API. Run `node db/reset.js <slug> --yes` first for a clean start. It signs in with a temporary owner login that it deletes at the end, and it stops with a message if the mountain requires two-step sign-in.
+`node db/demo.js <slug>` fills a mountain with made-up staff, customers, products, rentals, lessons, sales, patrol cases and punches by using the app's own API. It runs after `node db/seed.js` (it uses the seed's lifts, runs, products, certifications and positions) and is safe to run again: anything already there is kept and not added a second time. The ski school gets four instructors with certifications, teaching profiles and pay rates, lessons for kids and adults on each of the next 7 days, and a six-week Saturday program. Staff get 6-digit kiosk PINs, and patrollers get a published patrol schedule for the week. Run `node db/reset.js <slug> --yes` first for a clean start. It signs in with a temporary owner login that it deletes at the end, and it stops with a message if the mountain requires two-step sign-in.
 
 ## Patrol access levels
 Upgrading needs `npm run migrate` (adds the access level column and the rules table; roster members are mapped from rank once). After deploying, sign in as the owner, open Patrol, then Access levels, and set anyone who should be Approver or Host. To undo someone's lockout, an owner or system manager can always open Access levels, since those logins are always Admin.

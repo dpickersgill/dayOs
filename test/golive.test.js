@@ -105,7 +105,7 @@ test('4: jobs-oidc.sh signs every app job through the Cloud Scheduler API, with 
     assert.equal(r.status, 0, r.out);
     assert.doesNotMatch(r.calls, /scheduler jobs update/);
     for (const j of ['daily', 'guests', 'lessons', 'outreach']) {
-      assert.match(r.calls, new RegExp(`curl -sSf -X PATCH -H @\\S+ --data-binary @- https://cloudscheduler.googleapis.com/v1/projects/summitops-510715/locations/us-east1/jobs/summitops-${j}\\?updateMask=httpTarget`));
+      assert.match(r.calls, new RegExp(`curl -sS --fail-with-body -X PATCH -H @\\S+ --data-binary @- -o \\S+ https://cloudscheduler.googleapis.com/v1/projects/summitops-510715/locations/us-east1/jobs/summitops-${j}\\?updateMask=httpTarget$`, 'm'));
       assert.match(r.out, new RegExp(`summitops-${j} now signs its calls`));
     }
     assert.doesNotMatch(r.calls, /jobs\/summitops-weekly-export\?updateMask/, 'the database export job is not the app\'s');
@@ -122,6 +122,63 @@ test('4: jobs-oidc.sh signs every app job through the Cloud Scheduler API, with 
       assert.equal(b.httpTarget.oauthToken, undefined);
       assert.deepEqual(b.httpTarget.oidcToken, { serviceAccountEmail: 'summitops-jobs@summitops-510715.iam.gserviceaccount.com', audience: 'https://summitops-api-xyz.a.run.app' });
     }
+  } finally { s.done(); }
+});
+
+// 2026.11.12 review: guests-job.sh, lessons-job.sh and outreach-setup.sh still ran `gcloud scheduler jobs update http`,
+// which crashes in current gcloud. They change a job in place through the Cloud Scheduler API (app_job, sched_patch in
+// cloud-common.sh), and make it with `gcloud scheduler jobs create http` when it is not there. daily-job.sh is new.
+const appJobs = [
+  ['scripts/guests-job.sh', [], 'summitops-guests', '*/5 * * * *', 'guests', '120s'],
+  ['scripts/lessons-job.sh', [], 'summitops-lessons', '*/5 * * * *', 'lessons', '120s'],
+  ['scripts/outreach-setup.sh', ['out@example.com'], 'summitops-outreach', '*/30 8-17 * * 1-5', 'outreach', '300s'],
+  ['scripts/daily-job.sh', [], 'summitops-daily', '30 7 * * *', 'daily', '900s'],
+];
+const liveSvc = { metadata: { annotations: {} }, spec: { template: { spec: { serviceAccountName: 'summitops-run@summitops-510715.iam.gserviceaccount.com', containers: [{ env: [] }] } } }, status: { url: 'https://summitops-api-xyz.a.run.app', latestReadyRevisionName: 'r2', traffic: [{ revisionName: 'r2', percent: 100 }] } };
+test('4b: the job scripts change an existing job in place through the Cloud Scheduler API, with the token in a private file', () => {
+  for (const [script, args, job, sched, kind, deadline] of appJobs) {
+    assert.doesNotMatch(read(script).replace(/^\s*#.*$/gm, ''), /scheduler jobs update/, script);
+    const was = JSON.stringify({ name: `projects/summitops-510715/locations/us-east1/jobs/${job}`, schedule: '0 * * * *', httpTarget: { uri: `https://old.example/api/v1/internal/jobs/${kind}`, httpMethod: 'POST', headers: { 'x-jobs-key': 'old-key', 'User-Agent': 'Google-Cloud-Scheduler', 'X-Trace': 'keep' } } });
+    const s = stub({ svc: liveSvc, cases: `  "scheduler jobs describe ${job} "*"--format=json"*) echo '${was}' ;;\n  "scheduler jobs describe"*) exit 0 ;;` });
+    try {
+      const r = s.run(script, args);
+      assert.equal(r.status, 0, `${script}: ${r.out}`);
+      assert.doesNotMatch(r.calls, /scheduler jobs (update|delete|create)/, script);
+      assert.match(r.calls, new RegExp(`^curl -sS --fail-with-body -X PATCH -H @\\S+ --data-binary @- -o \\S+ https://cloudscheduler.googleapis.com/v1/projects/summitops-510715/locations/us-east1/jobs/${job}\\?updateMask=schedule,timeZone,attemptDeadline,httpTarget$`, 'm'), script);
+      assert.doesNotMatch(r.calls.split('\n').filter((l) => l.startsWith('curl')).join('\n'), /token-abc/, 'the token is never on a command line');
+      const files = [...r.calls.matchAll(/^header file @(\S+): (\d+) (.*)$/gm)];
+      assert.ok(files.length >= 1, script);
+      for (const [, f, mode, text] of files) { assert.equal(mode, '600'); assert.match(text, /Authorization: Bearer token-abc/); assert.ok(!fs.existsSync(f), 'removed after'); }
+      const sent = r.body.split('\n').filter(Boolean).map((l) => JSON.parse(l)).pop();
+      assert.equal(sent.schedule, sched); assert.equal(sent.timeZone, 'America/New_York'); assert.equal(sent.attemptDeadline, deadline);
+      assert.equal(sent.httpTarget.uri, `https://summitops-api-xyz.a.run.app/api/v1/internal/jobs/${kind}`);
+      assert.equal(sent.httpTarget.httpMethod, 'POST');
+      assert.deepEqual(sent.httpTarget.headers, { 'X-Trace': 'keep' }, 'the old key and User-Agent are dropped, other headers kept');
+      assert.deepEqual(sent.httpTarget.oidcToken, { serviceAccountEmail: 'summitops-jobs@summitops-510715.iam.gserviceaccount.com', audience: 'https://summitops-api-xyz.a.run.app' });
+      assert.match(r.out, new RegExp(`${job} updated`));
+    } finally { s.done(); }
+  }
+});
+
+test('4c: with no job yet the scripts make it; a refused change leaves the job as it was and the script fails', () => {
+  for (const [script, args, job, sched, kind, deadline] of appJobs) {
+    const s = stub({ svc: liveSvc, cases: '  "scheduler jobs describe"*) exit 1 ;;' });
+    try {
+      const r = s.run(script, args);
+      assert.equal(r.status, 0, `${script}: ${r.out}`);
+      assert.match(r.calls, new RegExp(`^gcloud scheduler jobs create http ${job} --location us-east1 --schedule ${sched.replace(/[*]/g, '\\*')} --time-zone America/New_York --uri https://summitops-api-xyz.a.run.app/api/v1/internal/jobs/${kind} --http-method POST --oidc-service-account-email summitops-jobs@summitops-510715.iam.gserviceaccount.com --oidc-token-audience https://summitops-api-xyz.a.run.app --attempt-deadline=${deadline} --quiet$`, 'm'), script);
+      assert.doesNotMatch(r.calls, /cloudscheduler\.googleapis\.com/);
+    } finally { s.done(); }
+  }
+  const was = JSON.stringify({ httpTarget: { uri: 'https://old.example/api/v1/internal/jobs/guests', httpMethod: 'POST' } });
+  const s = stub({ svc: liveSvc, cases: `  "scheduler jobs describe"*"--format=json"*) echo '${was}' ;;`,
+    curl: `  *cloudscheduler*) for a in "$@"; do [ "$prev" = -o ] && echo '{"error":{"code":403,"message":"The caller does not have permission"}}' > "$a"; prev="$a"; done; exit 22 ;;` });
+  try {
+    const r = s.run('scripts/guests-job.sh');
+    assert.equal(r.status, 22, r.out);
+    assert.match(r.out, /Could not change summitops-guests through the Cloud Scheduler API \(curl exit 22\)\. The job is as it was\.\n    The caller does not have permission/);
+    assert.doesNotMatch(r.out, /summitops-guests updated|^Done/m);
+    assert.doesNotMatch(r.calls, /scheduler jobs (delete|create)/);
   } finally { s.done(); }
 });
 
@@ -157,7 +214,7 @@ test('6: security-alerts.sh marks an alert whose metric is still new "not yet", 
   "alpha monitoring channels list"*) printf 'projects/summitops-510715/notificationChannels/111\\tVerdynt/OS: text Dan\\n' ;;
   "alpha monitoring policies list"*) [ -f "$STUB_LOG.second" ] && printf 'p1\\tVerdynt/OS security: Stripe webhook signature refused\\n' ;;
   "logging metrics describe"*) [ -f "$STUB_LOG.second" ] || exit 1 ;;
-  "alpha monitoring policies create"*) if [ ! -f "$STUB_LOG.second" ] && grep -q 'summitops-signin-lockouts\\|summitops-exports' "\${5#--policy-from-file=}" 2>/dev/null; then echo "metric not found" >&2; exit 1; fi ;;
+  "alpha monitoring policies create"*) if [ ! -f "$STUB_LOG.second" ] && grep -q 'summitops-signin-lockouts\\|summitops-exports' "\${5#--policy-from-file=}" 2>/dev/null; then echo 'ERROR: (gcloud.alpha.monitoring.policies.create) NOT_FOUND: Cannot find metric(s) that match type = "logging.googleapis.com/user/x". If a metric was created recently, it could take up to 10 minutes to become available.' >&2; exit 1; fi ;;
   "projects get-iam-policy"*) echo '{"bindings":[]}' ;;` });
   try {
     const first = s.run('scripts/security-alerts.sh');
@@ -173,6 +230,34 @@ test('6: security-alerts.sh marks an alert whose metric is still new "not yet", 
     assert.match(second.out, /  kept: Verdynt\/OS security: Stripe webhook signature refused/);
     assert.doesNotMatch(second.out, /not yet|Run this again/);
     assert.match(second.out, /^Done\./m);
+  } finally { s.done(); }
+});
+
+test('6b: security-alerts.sh reports any other policy failure with Google\'s message and exits 1; a dry run never says "made:"', () => {
+  const s = stub({ cases: `
+  "alpha monitoring channels list"*) printf 'projects/summitops-510715/notificationChannels/111\\tVerdynt/OS: text Dan\\n' ;;
+  "logging metrics describe"*) exit 0 ;;
+  "alpha monitoring policies create"*) if grep -q 'summitops-exports' "\${5#--policy-from-file=}" 2>/dev/null; then echo 'ERROR: (gcloud.alpha.monitoring.policies.create) PERMISSION_DENIED: Permission monitoring.alertPolicies.create denied on resource' >&2; exit 1; fi ;;
+  "projects get-iam-policy"*) echo '{"bindings":[]}' ;;` });
+  try {
+    const r = s.run('scripts/security-alerts.sh');
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /  FAILED: Verdynt\/OS security: Data exports in bulk could not be made:\n    ERROR: .*PERMISSION_DENIED: Permission monitoring\.alertPolicies\.create denied/);
+    assert.doesNotMatch(r.out, /not yet/, 'a refused permission is not a new metric');
+    assert.match(r.out, /  made: Verdynt\/OS security: Server errors in a burst/, 'the others are still made');
+    assert.match(r.out, /Turned on: every read of a secret/, 'and the audit logs step still runs');
+    assert.match(r.out, /1 step\(s\) FAILED/);
+    assert.doesNotMatch(r.out, /^Done\./m);
+    // A dry run: "would run" for each metric, policy and the audit policy; nothing made, nothing changed.
+    fs.writeFileSync(path.join(s.dir, 'log'), '');
+    const dry = s.run('scripts/security-alerts.sh', ['--dry-run']);
+    assert.equal(dry.status, 0, dry.out);
+    assert.doesNotMatch(dry.out, /made:|not yet|FAILED|Turned on/);
+    assert.equal((dry.out.match(/would run: gcloud logging metrics update summitops-/g) || []).length, 8, dry.out);
+    assert.equal((dry.out.match(/would run: gcloud alpha monitoring policies create --policy-from-file=/g) || []).length, 8);
+    assert.match(dry.out, /would run: gcloud projects set-iam-policy summitops-510715/);
+    assert.match(dry.out, /^Dry run: nothing was changed\.$/m);
+    assert.doesNotMatch(dry.calls, /^gcloud (logging metrics (create|update)|alpha monitoring policies create|projects set-iam-policy)/m);
   } finally { s.done(); }
 });
 
@@ -210,7 +295,7 @@ function backupStub(failGrants) {
   return s;
 }
 
-test('8: backups-setup.sh tries the role grant again for a brand-new copy account, and replaces the weekly job', () => {
+test('8: backups-setup.sh tries the role grant again for a brand-new copy account, and changes the weekly job in place', () => {
   const sh = read('scripts/backups-setup.sh');
   assert.doesNotMatch(sh.replace(/^\s*#.*$/gm, ''), /scheduler jobs update http/, 'gcloud\'s update crashes');
   // Google knows the new account on the third try: waits 5 and 10 seconds, then goes on.
@@ -221,11 +306,16 @@ test('8: backups-setup.sh tries the role grant again for a brand-new copy accoun
     const grants = r.calls.split('\n').filter((l) => /projects add-iam-policy-binding summitops-510715 --member=serviceAccount:summitops-backup@/.test(l));
     assert.equal(grants.length, 3, r.calls);
     assert.deepEqual(r.calls.split('\n').filter((l) => l.startsWith('sleep')), ['sleep 5', 'sleep 10']);
-    // The job that is there is deleted, then made again (no update).
-    const del = r.calls.indexOf('gcloud scheduler jobs delete summitops-weekly-export --location us-east1 --quiet');
-    const make = r.calls.indexOf('gcloud scheduler jobs create http summitops-weekly-export');
-    assert.ok(del > 0 && make > del, r.calls);
-    assert.doesNotMatch(r.calls, /scheduler jobs update/);
+    // The job that is there is changed in place with one PATCH: never deleted, so there is always a weekly copy job.
+    assert.doesNotMatch(r.calls, /scheduler jobs (update|delete|create)/);
+    assert.match(r.calls, /^curl -sS --fail-with-body -X PATCH -H @\S+ --data-binary @- -o \S+ https:\/\/cloudscheduler\.googleapis\.com\/v1\/projects\/summitops-510715\/locations\/us-east1\/jobs\/summitops-weekly-export\?updateMask=schedule,timeZone,httpTarget$/m);
+    for (const [, , mode, text] of r.calls.matchAll(/^header file @(\S+): (\d+) (.*)$/gm)) { assert.equal(mode, '600'); assert.match(text, /Bearer token-abc/); }
+    assert.doesNotMatch(r.calls.split('\n').filter((l) => l.startsWith('curl')).join('\n'), /token-abc/);
+    const sent = JSON.parse(r.body.trim().split('\n').pop());
+    assert.equal(sent.schedule, '0 8 * * 2'); assert.equal(sent.timeZone, 'Etc/UTC');
+    assert.equal(sent.httpTarget.uri, 'https://sqladmin.googleapis.com/v1/projects/summitops-510715/instances/summitops-db/export');
+    assert.deepEqual(JSON.parse(Buffer.from(sent.httpTarget.body, 'base64').toString()), { exportContext: { fileType: 'SQL', uri: 'gs://summitops-510715-backups/weekly/summitops.sql.gz', databases: ['summitops'] } });
+    assert.deepEqual(sent.httpTarget.oauthToken, { serviceAccountEmail: 'summitops-backup@summitops-510715.iam.gserviceaccount.com', scope: 'https://www.googleapis.com/auth/cloud-platform' });
   } finally { s.done(); }
   // Never known: 0, 5, 10, 20, 30 seconds, then it stops and says what to do.
   const never = backupStub(99);
@@ -243,8 +333,27 @@ test('8: backups-setup.sh tries the role grant again for a brand-new copy accoun
     assert.equal(r.status, 0, r.out);
     assert.equal((r.out.match(/would run: gcloud projects add-iam-policy-binding \S+ --member=serviceAccount:summitops-backup@/g) || []).length, 1, r.out);
     assert.doesNotMatch(r.calls, /^gcloud projects add-iam-policy-binding/m);
-    assert.match(r.out, /would run: gcloud scheduler jobs delete summitops-weekly-export/);
+    assert.match(r.out, /would run: PATCH https:\/\/cloudscheduler\.googleapis\.com\/v1\/projects\/summitops-510715\/locations\/us-east1\/jobs\/summitops-weekly-export\?updateMask=schedule,timeZone,httpTarget with \{/);
+    assert.doesNotMatch(r.calls, /^curl .*cloudscheduler|scheduler jobs (delete|create)/m);
   } finally { dry.done(); }
+  // Google refuses the change: the old job is left as it was (never deleted) and the script stops with an error.
+  const refused = backupStub(0);
+  try {
+    fs.writeFileSync(path.join(refused.dir, 'curl'), fs.readFileSync(path.join(refused.dir, 'curl'), 'utf8').replace('case "$*" in\n', 'case "$*" in\n  *cloudscheduler*) exit 22 ;;\n'));
+    const r = refused.run('scripts/backups-setup.sh');
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /Could not change summitops-weekly-export through the Cloud Scheduler API \(curl exit 22\)\. The job is as it was\./);
+    assert.match(r.out, /The weekly copy job could not be changed\. It is still there with its old settings\./);
+    assert.doesNotMatch(r.calls, /scheduler jobs (delete|create)/);
+  } finally { refused.done(); }
+  // No job yet: it is made, with the JSON content type the export request needs.
+  const fresh = backupStub(0);
+  try {
+    fs.writeFileSync(path.join(fresh.dir, 'gcloud'), fs.readFileSync(path.join(fresh.dir, 'gcloud'), 'utf8').replace('"scheduler jobs describe"*) exit 0 ;;', '"scheduler jobs describe"*) exit 1 ;;'));
+    const r = fresh.run('scripts/backups-setup.sh');
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.calls, /gcloud scheduler jobs create http summitops-weekly-export --location us-east1 --schedule=0 8 \* \* 2 .*--headers=Content-Type=application\/json --oauth-service-account-email=summitops-backup@/);
+  } finally { fresh.done(); }
 });
 
 test('9: the copy account gets a custom export-only role, not Cloud SQL Viewer (which no longer allows export)', () => {

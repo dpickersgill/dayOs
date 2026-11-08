@@ -127,6 +127,11 @@ The math: each server holds at most `DB_POOL` database connections (8 on live, 4
 (`gcloud sql instances patch summitops-db --tier=db-custom-1-3840`). A server always running costs a little each month
 even when nobody uses it (Cloud Run bills an idle server at a lower rate); see Cloud Run pricing.
 
+Connections a server opens stay open while it is busy and are closed after 5 minutes idle (2026.11.12), so a burst of
+requests reuses the connections the last one opened instead of connecting to Cloud SQL again, and a connection the
+network dropped quietly is replaced before it can fail a request. The budget above counts every connection held, idle
+ones included.
+
 ### What changed so several servers agree
 
 With more than one server, anything a server kept in its own memory would differ from server to server. This is
@@ -280,7 +285,7 @@ The product website (Home, Product, the solution pages for ski patrol, lift tick
 3. **Email.** The Contact page emails `SITE_CONTACT_EMAIL` and sends the visitor a copy through Postmark, so `POSTMARK_SERVER_TOKEN` and `MAIL_FROM` must be set and the sender verified. Without email, requests still land in the console under Leads.
 4. **Prices.** The Pricing page shows the active plans and add-ons from the console (Plans and prices). The first migration adds the launch set (Lodge, Mountain, Resort and six add-ons); change them there and the website follows within a minute. Press Sync to Stripe on each before mountains pay.
 5. **Legal pages.** Privacy and Terms are plain-language starting points. Have a lawyer read them before launch, especially the governing law (Pennsylvania), the 60-day export window and the liability limit.
-6. **Moving addresses.** Point the Stripe webhooks (card payments and subscriptions) at `https://app.runmyresort.com/api/v1/stripe/webhook`, and the daily job: `gcloud scheduler jobs update http summitops-daily --location us-east1 --uri https://app.runmyresort.com/api/v1/internal/jobs/daily`.
+6. **Moving addresses.** Point the Stripe webhooks (card payments and subscriptions) at `https://app.runmyresort.com/api/v1/stripe/webhook`. The scheduled jobs (daily, guests, lessons, outreach) can keep calling the run.app address. If the app is later locked behind the load balancer, `bash scripts/cloud-armor.sh --lock` moves every one of them to the new address.
 7. **Search engines.** In [Google Search Console](https://search.google.com/search-console), add the website as a URL-prefix property (`https://www.runmyresort.com/`), choose the HTML tag check, and set its code as `GOOGLE_SITE_VERIFICATION` (same `gcloud run services update ... --update-env-vars` as above). Once verified, submit `https://www.runmyresort.com/sitemap.xml` under Sitemaps. Do the same in Bing Webmaster Tools with `BING_SITE_VERIFICATION` (it can also import from Search Console). Check the structured data with Google's Rich Results Test. If the domain is already verified as a Domain property (a DNS TXT record), skip the tag and go straight to Sitemaps.
 8. **What search engines get.** Every page has its own title, description, canonical address, link-preview card and structured data (the organisation, the software with its live prices, breadcrumbs, and each page's questions). Plans and prices are written into Home and Pricing on the server, so crawlers see the real prices. `/sitemap.xml` lists every page, `/robots.txt` keeps the app, console and API out, and `/llms.txt` is a plain summary for AI assistants. The app address (`app.runmyresort.com`) is never indexed apart from each mountain's own public pages.
 
