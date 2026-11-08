@@ -212,7 +212,8 @@ router.post(
   '/sessions/:id/bookings',
   SA.school('supervisor', 'counter'), // the desk, managers and supervisors; a plain instructor does not book or record waivers (2026.11.11)
   validate(z.object({
-    person_id: z.number().int().positive().optional(), student: studentSchema.optional(), sign_waiver: z.boolean().optional(), use_credit_id: z.number().int().positive().optional(), requested_instructor_id: z.number().int().positive().optional(),
+    person_id: z.number().int().positive().optional(), student: studentSchema.optional(), sign_waiver: z.boolean().optional(),
+    waiver_signer: z.object({ name: z.string().trim().max(200).optional(), person_id: z.number().int().positive().optional() }).optional(), use_credit_id: z.number().int().positive().optional(), requested_instructor_id: z.number().int().positive().optional(),
     ...safetyShape, send_confirmation: z.boolean().optional(),
     override_reason: z.string().trim().min(3).max(300).optional(), // a manager booking outside the ages or over the ratio (feat/school-safety)
   }).refine((b) => b.person_id || b.student, { message: 'Choose a student or enter their details' })),
@@ -228,11 +229,12 @@ router.post(
     const details = {};
     for (const k of Object.keys(safetyShape)) if (req.body[k] !== undefined) details[k] = req.body[k];
     const { bookingId } = await tx((conn) => bookStudent(conn, req, {
-      sessionId: sid, personId: who.id, details, signWaiver: Boolean(req.body.sign_waiver), useCreditId: req.body.use_credit_id || null, requestedInstructorId: req.body.requested_instructor_id || null,
+      sessionId: sid, personId: who.id, details, signWaiver: Boolean(req.body.sign_waiver), waiverSigner: req.body.waiver_signer || null, useCreditId: req.body.use_credit_id || null, requestedInstructorId: req.body.requested_instructor_id || null,
       overrideReason: req.body.override_reason || null,
     }));
     const confirmation = req.body.send_confirmation === false ? null : await sendConfirmation(pool, tenantId, bookingId, baseUrl(req));
-    res.status(201).json({ id: bookingId, session_id: sid, person_id: who.id, status: 'booked', customer: { created: who.created, matched: who.matched }, confirmation: confirmation ? { ok: confirmation.ok, to: confirmation.to || null, error: confirmation.error || null } : null });
+    const paid = await one(pool, 'SELECT unpaid FROM lesson_bookings WHERE tenant_id = ? AND id = ?', [tenantId, bookingId]);
+    res.status(201).json({ id: bookingId, session_id: sid, person_id: who.id, status: 'booked', unpaid: Boolean(paid && paid.unpaid), customer: { created: who.created, matched: who.matched }, confirmation: confirmation ? { ok: confirmation.ok, to: confirmation.to || null, error: confirmation.error || null } : null });
   },
 );
 
@@ -326,6 +328,10 @@ router.patch('/bookings/:id', requireRole(...school), validate(z.object({ status
       await conn.query('UPDATE lesson_credits SET used = GREATEST(used - 1, 0) WHERE tenant_id = ? AND id = ?', [tenantId, b.credit_id]);
       await conn.query('UPDATE lesson_bookings SET credit_id = NULL WHERE tenant_id = ? AND id = ?', [tenantId, b.id]);
     }
+    return b0;
+  }).then(async (b0) => {
+    // The last lesson of a learn to ski ladder attended: the graduate's season pass offer is made now (feat/school-pay).
+    if (req.body.status === 'attended') await require('../lib/learnladder').progress(pool, tenantId, b0.person_id).catch(() => null);
   });
   res.json({ ok: true });
 });
@@ -377,6 +383,9 @@ router.get('/sessions/:id/roster', requireRole(...school), async (req, res) => {
     r.pickup_late = r.pickup_waiting && nowLocal > plusMin(s.ends_at, SS.pickupMinutes(age, set));
     if (r.released_at) r.released_at = require('./schoolsafety').localOf(r.released_at, tz);
   }
+  // A learn to ski ladder lesson names what it includes, so the desk hands out the ticket and rental (feat/school-pay).
+  const LL = require('../lib/learnladder');
+  for (const r of data) if (r.credit_id) { const l = await LL.forCredit(pool, req.auth.tenantId, r.credit_id).catch(() => null); if (l) r.ladder = { name: l.name, includes: LL.includesWords(l) || null }; }
   // Children's allergies, medical notes and pickup people: who read them is on the audit log (2026.11.11, DP-10).
   if (show && data.length) await audit(pool, req, 'roster_view', 'lesson_sessions', s.id, { students: data.length, safety_details: data.some((r) => r.allergies || r.medical || r.pickup) });
   res.json({

@@ -645,7 +645,7 @@ async function route() {
     clear(main).append(holder);
     decorateHead(holder, key, params, mod);
     noteWork(key, params);
-    movedNote(holder, key);
+    movedNote(holder, key).catch(() => {});
     main.focus({ preventScroll: true });
   } catch (err) {
     if (my !== navToken) return;
@@ -734,9 +734,11 @@ function breadcrumb(holder, key, params) {
   return nav;
 }
 
-// For two weeks after the menus changed, apps whose setup moved into Settings say so (managers only, until dismissed).
+// For 30 days after the release that moved it (2026.11.12), apps whose setup moved into Settings say so: managers only,
+// until they dismiss it. A dismissal is kept per login on the server (/notices), so it stays gone on every device and on
+// every view of the app (feat/school-pay); this browser remembers it too, in case the server cannot be reached.
 export const MOVED_FROM = '2026-11-08';
-export const MOVED_DAYS = 14;
+export const MOVED_DAYS = 30;
 const MOVED_PAGE = { sell: 'sell', gate: 'sell', shop: 'shop', school: 'school', availability: 'school', rentals: 'rentals', waivers: 'waivers', workforce: 'workforce', patrol: 'patrol' };
 export function movedNoteDue(key, today) {
   if (!MOVED_PAGE[key]) return false;
@@ -746,14 +748,23 @@ export function movedNoteDue(key, today) {
 }
 const movedKey = () => `so.moved.${ctx.me.tenant || ''}.${ctx.me.id || ctx.me.email || ''}`;
 function movedDismissed() { try { return JSON.parse(localStorage.getItem(movedKey()) || '[]'); } catch (_) { return []; } }
-function movedNote(holder, key) {
+let serverNotices = null; // this login's dismissed notes, read once per page load
+async function noticesDismissed() {
+  if (!serverNotices) serverNotices = get('/notices').then((r) => r.dismissed || []).catch(() => []);
+  return serverNotices;
+}
+export const movedNoticeKey = (key) => `moved:${MOVED_PAGE[key] || key}`;
+async function movedNote(holder, key) {
   if (!isManager() || !movedNoteDue(key, todayStr()) || movedDismissed().includes(key)) return;
+  if ((await noticesDismissed()).includes(movedNoticeKey(key))) return;
   const head = holder.querySelector('.page-head');
-  if (!head) return;
+  if (!head || holder.querySelector('.moved-note')) return;
   const close = h('button', { type: 'button', class: 'moved-close', 'aria-label': 'Dismiss this note' }, icon('close', 16));
   const note = h('div', { class: 'moved-note', role: 'note' }, h('span', null, 'Setup for this app moved to Settings. '), h('a', { href: `#/settings/${MOVED_PAGE[key]}` }, `Open ${appName(key)} settings`), close);
   close.addEventListener('click', () => {
-    try { localStorage.setItem(movedKey(), JSON.stringify([...new Set([...movedDismissed(), key])])); } catch (_) { /* shows again next time */ }
+    try { localStorage.setItem(movedKey(), JSON.stringify([...new Set([...movedDismissed(), key])])); } catch (_) { /* the server keeps it */ }
+    serverNotices = noticesDismissed().then((list) => [...list, movedNoticeKey(key)]);
+    post('/notices/dismiss', { key: movedNoticeKey(key) }).catch(() => { /* this browser still remembers it */ });
     note.remove();
   });
   head.after(note);

@@ -3918,6 +3918,7 @@ label.check-hit { display: inline-flex; align-items: center; justify-content: ce
 @media (max-width: 640px) {
   .pickup-editor .pk-row { grid-template-columns: 1fr 1fr; }
   .pickup-editor .pk-row > :first-child { grid-column: 1 / -1; }
+}
 .pk-choice { justify-content: flex-start; }
 .pk-choice input[type="radio"] { width: 22px; height: 22px; min-height: 0; flex: none; margin: 0; }
 .pickup-names { align-items: center; gap: 8px; }
@@ -3927,3 +3928,10 @@ label.check-hit { display: inline-flex; align-items: center; justify-content: ce
 .band-rows { width: 100%; }
 .lost-strip.notice, .notice.bad { background: var(--closed-tint); border-color: var(--closed); color: var(--ink); }
 .lost-strip strong { color: var(--closed-ink); }
+
+/* feat/school-pay: setup warning, satisfaction score, add-on summary, group links */
+.pay-setup ul { margin: 0; }
+.nps-chip { white-space: nowrap; }
+.extras-summary { align-items: center; gap: 6px; }
+.link-box { width: 100%; }
+.my-score { margin: 0; }

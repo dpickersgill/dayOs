@@ -48,6 +48,7 @@ export async function showPartnerTab() {
   try { return (await get('/partner-passes/tab')).show; } catch (_) { return false; }
 }
 const queryTab = () => { try { return new URLSearchParams(location.hash.split('?')[1] || '').get('tab'); } catch (_) { return null; } };
+const queryParam = (k) => { try { return new URLSearchParams(location.hash.split('?')[1] || '').get(k); } catch (_) { return null; } };
 const queryMode = () => { try { return new URLSearchParams(location.hash.split('?')[1] || '').get('mode'); } catch (_) { return null; } };
 
 // ---------------------------------------------------------------- selling
@@ -320,6 +321,19 @@ async function sellPanel(root) {
     } catch (err) { clear(orders).append(errorBox(err)); }
   }
   await loadOrders();
+  // Take payment from a lesson roster or check-in (#/sell?pay=<booking id>, feat/school-pay): the held lesson goes in the
+  // basket for its student, and the sale picks up the unpaid booking (routes/checkout.js "adopting").
+  const payFor = queryParam('pay');
+  if (/^\d+$/.test(payFor || '')) {
+    try {
+      const b = await get(`/skischool/bookings/${payFor}/payment`);
+      if (!b.unpaid) toast(`${b.person.first_name}'s lesson is already paid for`);
+      else {
+        await add({ type: 'lesson', session_id: b.session_id, name: b.product, discipline: b.discipline, tier: b.tier || FIRST, quantity: 1, day: b.day, detail: `${fmtDate(b.starts_at)} ${fmtTime(b.starts_at)}, for ${b.person.first_name}`, student: b.person, safety_prefill: b.safety });
+        toast(`${b.product} for ${b.person.first_name} is in the basket. Press Checkout to take payment.`);
+      }
+    } catch (err) { toast(err.message || 'Could not open that lesson', 'error'); }
+  }
   return h('div', { class: 'stack' }, basketPanel0, basketPanel);
 }
 

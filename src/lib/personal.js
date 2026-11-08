@@ -59,6 +59,11 @@ const REGISTRY = [
   { table: 'lesson_requests', by: { email: ['contact_email'], phone: ['contact_phone'] }, erase: { set: { contact_name: 'Former customer', contact_email: '', contact_phone: '', note: null } }, json: ['students'] },
   { table: 'lesson_waitlist', by: { email: ['contact_email'], phone: ['contact_phone'] }, erase: { set: { contact_name: 'Former customer', contact_email: '', contact_phone: null } }, json: ['student'] },
   { table: 'lesson_baskets', by: { email: ['contact_email'] }, erase: { set: { contact_email: '' } } },
+  // School and group programs (feat/school-pay): a child on a group's roster with their parent's contact, the group's
+  // leader, and the chaperones.
+  { table: 'group_program_students', by: { person: ['person_id'], email: ['guardian_email'], phone: ['guardian_phone'] }, erase: { set: { guardian_name: 'Former customer', guardian_email: null, guardian_phone: null } } },
+  { table: 'group_programs', by: { email: ['leader_email'], phone: ['leader_phone'] }, erase: { set: { leader_name: 'Former customer', leader_email: null, leader_phone: null } } },
+  { table: 'group_program_chaperones', by: { phone: ['phone'] }, erase: { set: { name: 'Former customer', phone: '' } } },
   { table: 'private_requests', by: { email: ['contact_email'], phone: ['contact_phone'] }, erase: { set: { contact_name: 'Former customer', contact_email: '', contact_phone: '', note: null } }, json: ['students'] },
   { table: 'attendance', by: { person: ['person_id'] }, erase: { keep: KEEP_LINK } },
   { table: 'student_progress', by: { person: ['person_id'] }, erase: { set: { notes: null } } },

@@ -13,12 +13,17 @@ import * as directorPart from './school-director.js';
 import * as planPart from './school-plan.js';
 import * as staffPart from './school-staff.js';
 import * as safetyPart from './school-safety.js'; // feat/school-safety: pickup, lost child, ratios, adaptive, places
+import * as moneyPart from './school-money.js'; // feat/school-pay: training, owner reports, group programs, ladders
+import { takePayment, setupWarning, npsChip, loadNps, waiverSigner, ladderNote } from './school-money.js';
 import { drawInLessons as drawAvailability } from './availability.js';
 
-const PARTS = [lineupPart, parentsPart, payPart, directorPart, planPart, staffPart, safetyPart];
+const PARTS = [lineupPart, parentsPart, payPart, directorPart, planPart, staffPart, safetyPart, moneyPart];
 
 const DISCIPLINES = ['ski', 'snowboard', 'telemark', 'adaptive'];
-const PSIA = [['none', 'None yet'], ['level1', 'PSIA-AASI Level 1'], ['level2', 'PSIA-AASI Level 2'], ['level3', 'PSIA-AASI Level 3']];
+// Certification levels and specialist credentials (feat/school-pay): they set pay on the pay ladder.
+const PSIA = [['none', 'None yet'], ['psia1', 'PSIA-AASI Level 1'], ['psia2', 'PSIA-AASI Level 2'], ['psia3', 'PSIA-AASI Level 3'], ['psia_te', 'PSIA-AASI Trainer/Examiner'],
+  ['csia1', 'CSIA Level 1'], ['csia2', 'CSIA Level 2'], ['csia3', 'CSIA Level 3'], ['csia4', 'CSIA Level 4'], ['casi1', 'CASI Level 1'], ['casi2', 'CASI Level 2'], ['casi3', 'CASI Level 3'], ['casi4', 'CASI Level 4']];
+const CREDS = [['kids1', "Children's Specialist 1"], ['kids2', "Children's Specialist 2"], ['freestyle', 'Freestyle Specialist'], ['adaptive', 'Adaptive']];
 /** 'Levels 2 to 3, ages 5 to 8' for a lesson. */
 const ages = (s) => (s.age_min != null || s.age_max != null ? (s.age_max == null ? `ages ${s.age_min}+` : s.age_min == null ? `ages up to ${s.age_max}` : `ages ${s.age_min} to ${s.age_max}`) : 'all ages');
 const lessonWords = (s) => `${label(s.discipline)}, ${s.level_words || 'All levels'}, ${ages(s)}`;
@@ -49,9 +54,9 @@ export async function render(root) {
   // views; a group with one view shows none. The group is ?tab= in the address, the view ?view=.
   const GROUPS = [
     ['day', 'Today', ['myday', 'today', 'checkin', 'lineup', 'pickup']],
-    ['bookings', pending ? `Bookings (${pending})` : 'Bookings', ['lessons', 'requests', 'privates', 'waitlist']],
-    ['team', instructor && !schoolCan('director') ? 'My work' : 'Instructors', ['recaps', 'offers', 'mypay', 'guests', 'instructors', 'availability', 'payroll', 'hours']],
-    ['plan', 'Planning', ['season', 'fill', 'weather', 'copy', 'staffing', 'reports']],
+    ['bookings', pending ? `Bookings (${pending})` : 'Bookings', ['lessons', 'requests', 'privates', 'waitlist', 'groups']],
+    ['team', instructor && !schoolCan('director') ? 'My work' : 'Instructors', ['recaps', 'offers', 'mypay', 'guests', 'instructors', 'availability', 'payroll', 'training', 'feedback', 'hours']],
+    ['plan', 'Planning', ['season', 'fill', 'weather', 'copy', 'staffing', 'reports', 'owner']],
   ];
   const byKey = new Map(items.map((i) => [i[0], i]));
   const placed = new Set(GROUPS.flatMap((g) => g[2]));
@@ -77,7 +82,7 @@ export async function render(root) {
 export const settingsPages = {
   basics: { title: 'Confirmations', render: (panel) => basicsPage(panel) },
   levels: { title: 'Levels and skills', render: (panel) => levelsTab(panel) },
-  ...lineupPart.settingsPages, ...safetyPart.settingsPages, ...parentsPart.settingsPages, ...payPart.settingsPages, ...directorPart.settingsPages,
+  ...lineupPart.settingsPages, ...safetyPart.settingsPages, ...parentsPart.settingsPages, ...payPart.settingsPages, ...moneyPart.settingsPages, ...directorPart.settingsPages,
 };
 
 // ---------------------------------------------------------------- lessons
@@ -93,10 +98,11 @@ async function lessonsTab(root, { staff, certs, names }) {
     clear(body).append(h('p', { class: 'loading' }, 'Loading…'));
     try {
       const { data } = await get(`/skischool/sessions?from=${from.value}&to=${to.value}`);
+      const nps = await loadNps(); // directors: each instructor's score next to their lessons
       clear(body).append(data.length ? table([
         { head: 'When', cell: (s) => fmtRange(s.starts_at, s.ends_at) },
         { head: 'Lesson', cell: (s) => h('span', null, h('strong', null, s.product), h('div', { class: 'muted small' }, lessonWords(s)), pill(s), s.meeting_place ? h('div', { class: 'muted small' }, `Meet: ${s.meeting_place}`) : null) },
-        { head: 'Instructor', cell: (s) => (s.instructor_id ? s.instructor_name || names.get(s.instructor_id) || 'Assigned' : state('Needs an instructor', 'warn')) },
+        { head: 'Instructor', cell: (s) => (s.instructor_id ? h('span', null, s.instructor_name || names.get(s.instructor_id) || 'Assigned', npsChip(nps, s.instructor_id)) : state('Needs an instructor', 'warn')) },
         { head: 'Booked', num: true, cell: (s) => `${s.booked} of ${s.capacity}` },
         { head: 'Status', cell: (s) => h('span', null, state(label(s.status), s.status === 'scheduled' ? 'good' : s.status === 'cancelled' ? 'bad' : 'neutral'), s.cancel_reason ? h('div', { class: 'muted small' }, s.cancel_reason) : null) },
         { head: '', actions: true, cell: (s) => [
@@ -335,7 +341,8 @@ async function boardTab(root, { staff }) {
     try {
       const b = await get(`/skischool/board?date=${date.value}`);
       const total = b.sessions.reduce((n, s) => n + s.students.length, 0);
-      appendAll(clear(body),
+      const nps = await loadNps();
+      appendAll(clear(body), await setupWarning(), // directors: instructors with no pay rate yet
         h('p', { class: 'muted' }, `${b.sessions.length} lesson${b.sessions.length === 1 ? '' : 's'}, ${total} student${total === 1 ? '' : 's'}`, b.unassigned ? h('span', null, ' ', state(`${b.unassigned} without an instructor`, 'warn')) : null),
         b.instructors.length ? h('div', { class: 'row' }, b.instructors.map((i) => state(`${i.name}: ${i.lessons} lesson${i.lessons === 1 ? '' : 's'}, ${Math.round(i.minutes / 6) / 10} h`, 'neutral'))) : null,
         b.sessions.length ? h('div', { class: 'board' }, b.sessions.map((s) => h('article', { class: ['panel', s.instructor_id ? '' : 'attention'].join(' ').trim(), 'data-session': s.id },
@@ -343,10 +350,10 @@ async function boardTab(root, { staff }) {
           h('div', null, s.product, pill(s), h('div', { class: 'muted small' }, lessonWords(s))),
           s.delay_minutes ? h('div', null, state(`Delayed ${s.delay_minutes} min`, 'warn')) : null,
           s.meeting_place ? h('div', { class: 'muted small' }, `Meet: ${s.meeting_place}`) : null,
-          h('div', null, s.instructor ? h('strong', null, s.instructor) : state('Needs an instructor', 'warn')),
+          h('div', null, s.instructor ? h('strong', null, s.instructor) : state('Needs an instructor', 'warn'), s.instructor_id ? npsChip(nps, s.instructor_id) : null),
           s.notes ? h('p', { class: 'small' }, s.notes) : null,
           s.students.length ? h('ul', { class: 'students' }, s.students.map((x) => h('li', null, h('a', { href: '#', class: 'link', onclick: (e) => { e.preventDefault(); cardDialog(x.person_id, { onChange: load, discipline: s.discipline }); } }, `${x.first_name} ${x.last_name}`),
-            x.level ? h('span', { class: 'muted small' }, `  ${levelName(x.level, s.discipline)}`) : null, flags(x), x.unpaid ? h('span', null, ' ', state('Unpaid', 'warn')) : null, x.requested_instructor_id && x.requested_instructor_id === s.instructor_id ? h('span', null, ' ', state('Requested', 'good')) : null,
+            x.level ? h('span', { class: 'muted small' }, `  ${levelName(x.level, s.discipline)}`) : null, flags(x), x.unpaid ? h('span', null, ' ', state('Unpaid', 'warn'), ' ', takePayment(x)) : null, x.requested_instructor_id && x.requested_instructor_id === s.instructor_id ? h('span', null, ' ', state('Requested', 'good')) : null,
             x.status !== 'booked' ? h('span', { class: 'muted small' }, `  ${label(x.status)}`) : null))) : h('p', { class: 'muted small' }, 'Nobody booked yet.'),
           h('div', { class: 'row' }, seesRoster(s) ? button('Roster', () => roster(s, load), { small: true }) : null,
             can('instructor') ? button('Notes and tip', () => sessionDetails(s, load), { small: true }) : null,
@@ -431,7 +438,7 @@ async function roster(session, done) {
     if (!p) { syncConfirm(); return; }
     wslot.append(waiverPanel(p.id, session.starts_at.slice(0, 10)));
     // Fill the safety details from their last booking (or their emergency contact); staff check them with the family.
-    try { const d = await get(`/skischool/students/${p.id}/safety`); safety.fill(d); pickupEd.fill(d.pickup_adults || []); confirmBox.checked = Boolean(d.contact_email); } catch (_) { /* typed fresh */ }
+    try { const d = await get(`/skischool/students/${p.id}/safety`); safety.fill(d); pickupEd.fill(d.pickup_adults || []); signer.guardian(d.guardian); confirmBox.checked = Boolean(d.contact_email); } catch (_) { /* typed fresh */ }
     syncConfirm();
     try {
       const { data } = await get(`/skischool/credits?person_id=${p.id}`);
@@ -444,13 +451,15 @@ async function roster(session, done) {
   } });
   syncConfirm();
   const signBox = h('input', { type: 'checkbox', name: 'sign_waiver' });
-  const signRow = h('label', { class: 'check' }, signBox, ' The student has signed the season waiver (record it now if none is on file)');
+  // Who signed (feat/school-pay, as Sell records it): a student under 18 needs a parent or guardian's name.
+  const signer = waiverSigner(capture, signBox);
+  const signRow = h('div', { class: 'stack tight' }, h('label', { class: 'check' }, signBox, ' The season waiver was signed at the desk (record it now if none is on file)'), signer.el);
 
   async function load() {
     const r = await get(`/skischool/sessions/${session.id}/roster`);
     const data = r.data;
     clear(list).append(data.length ? table([
-      { head: 'Student', cell: (x) => h('span', null, h('strong', null, `${x.first_name} ${x.last_name}`), x.unpaid ? h('span', null, ' ', state('Unpaid', 'warn')) : null, x.credit_id ? h('span', null, ' ', state('Package', 'neutral')) : null,
+      { head: 'Student', cell: (x) => h('span', null, h('strong', null, `${x.first_name} ${x.last_name}`), x.unpaid ? h('span', null, ' ', state('Unpaid', 'warn'), ' ', takePayment(x)) : null, x.credit_id ? h('span', null, ' ', state('Package', 'neutral')) : null, ladderNote(x),
         flags(x), x.pickup ? h('div', { class: 'small' }, `Pickup: ${x.pickup}`) : null, safetyPart.releaseLine(x),
         x.override_reason ? h('div', { class: 'small' }, state('Booked past a warning', 'warn'), ` ${x.override_reason}`) : null,
         x.contact_phone ? h('div', { class: 'small' }, h('a', { href: `tel:${String(x.contact_phone).replace(/[^\d+]/g, '')}` }, `${x.contact_name || 'Contact'}: ${x.contact_phone}`)) : null,
@@ -473,7 +482,7 @@ async function roster(session, done) {
   }
   const book = button('Book student', async () => {
     capture.check();
-    const body = { ...capture.payload('student'), sign_waiver: signBox.checked, ...safety.read(), ...pickupEd.read(), ...(adaptiveEd ? { adaptive: adaptiveEd.read() } : {}), send_confirmation: confirmBox.checked };
+    const body = { ...capture.payload('student'), sign_waiver: signBox.checked, ...signer.read(), ...safety.read(), ...pickupEd.read(), ...(adaptiveEd ? { adaptive: adaptiveEd.read() } : {}), send_confirmation: confirmBox.checked };
     if (!body.pickup_adults.length) delete body.pickup_adults;
     if (credit && credit.value) body.use_credit_id = Number(credit.value);
     let out;
@@ -500,9 +509,9 @@ async function roster(session, done) {
       }
     }
     const sent = out.confirmation && out.confirmation.ok ? ` Confirmation sent to ${out.confirmation.to}.` : out.confirmation && out.confirmation.error ? ` The confirmation was not sent: ${out.confirmation.error}.` : '';
-    toast(`${out.customer.created ? 'Student saved and booked.' : 'Student booked.'}${sent}`);
+    toast(`${out.customer.created ? 'Student saved and booked.' : 'Student booked.'}${out.unpaid ? ' Unpaid until they pay: use Take payment.' : ''}${sent}`);
     capture.reset();
-    signBox.checked = false;
+    signBox.checked = false; signer.reset();
     safety.fill({}); pickupEd.fill([]); syncConfirm();
     clear(creditSlot); clear(wslot); credit = null;
     await load();
@@ -643,7 +652,7 @@ async function instructorsTab(root, { certs }) {
         h('div', { class: 'muted small' }, [x.disciplines.includes('snowboard') || !x.disciplines.length ? `Snowboard ${cap(x.snowboard_level_max)}` : null, x.disciplines.includes('ski') || !x.disciplines.length ? `Ski ${cap(x.ski_level_max)}` : null].filter(Boolean).join(', '))) },
       { head: 'Kids', cell: (x) => (x.teaches_kids ? 'Yes' : 'No') },
       { head: 'Adaptive', cell: (x) => (x.teaches_adaptive ? 'Yes' : 'No') },
-      { head: 'PSIA-AASI', cell: (x) => (PSIA.find((p) => p[0] === x.psia_level) || PSIA[0])[1] },
+      { head: 'Certification', cell: (x) => h('span', null, (PSIA.find((p) => p[0] === x.psia_level) || PSIA[0])[1], (x.credentials || []).length ? h('div', { class: 'muted small' }, x.credentials.map((c) => (CREDS.find((k) => k[0] === c) || [c, c])[1]).join(', ')) : null) },
       { head: 'Certifications', cell: (x) => (x.certifications.length ? x.certifications.map((c) => `${c.name}${c.expires_on ? ` (until ${fmtDate(c.expires_on)})` : ''}`).join(', ') : h('span', { class: 'muted' }, 'None')) },
       { head: '', actions: true, cell: (x) => button('Edit', () => editInstructor(x, certs, load), { small: true, label: `Edit ${x.name}` }) },
     ], teach) : empty('Nobody teaches yet. Give a staff member an instructor login under Settings, Team, or set up their teaching here.'));
@@ -665,11 +674,13 @@ function editInstructor(x, certs, done) {
     field('Snowboard: cleared to', capSel('snowboard_level_max', x.snowboard_level_max)),
     box('teaches_kids', x.teaches_kids, 'Teaches kids (12 and under)'),
     box('teaches_adaptive', x.teaches_adaptive, 'Teaches adaptive lessons'),
-    field('PSIA-AASI', select(PSIA, x.psia_level, { name: 'psia_level' })),
+    field('Certification level', select(PSIA, x.psia_level, { name: 'psia_level' }), 'Sets their pay on the pay ladder (Settings, Ski school, Pay ladder).'),
+    h('fieldset', { class: 'wide stack' }, h('legend', null, 'Specialist credentials'), h('div', { class: 'row wrap' }, ...CREDS.map(([k, t]) => box(`cred_${k}`, (x.credentials || []).includes(k), t)))),
     certs.length ? h('fieldset', { class: 'wide stack' }, h('legend', null, 'Certifications'), certRows) : null), async (fd) => {
     await put(`/skischool/instructors/${x.id}/profile`, {
       disciplines: DISCIPLINES.filter((d) => fd.get(`d_${d}`)), ski_level_max: num(fd, 'ski_level_max') || null, snowboard_level_max: num(fd, 'snowboard_level_max') || null,
       teaches_kids: Boolean(fd.get('teaches_kids')), teaches_adaptive: Boolean(fd.get('teaches_adaptive')), psia_level: val(fd, 'psia_level'),
+      credentials: CREDS.map(([k]) => k).filter((k) => fd.get(`cred_${k}`)),
     });
     for (const c of certs) {
       const want = Boolean(fd.get(`cert_${c.id}`));

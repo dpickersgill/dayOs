@@ -7,6 +7,7 @@
 // Settings, Ski school: Pay (how the school pays), Pay rates, Privates online (the lengths sold on /private/<mountain>).
 // payLine(lesson) and myDayTop(panel) are used by the instructor's My day (school-myday.js).
 import { get, post, patch, del, download } from '../api.js';
+import { setupWarning } from './school-money.js'; // feat/school-pay: instructors with no pay rate yet
 import { h, clear, ctx, can, schoolCan, isManager, table, state, input, select, field, button, toast, formDialog, dialog, val, money, toCents, centsToInput,
   todayStr, addDays, weekStart, fmtDate, fmtTime, fmtRange, label, empty, errorBox, loading, confirmDialog, fail, appendAll } from '../ui.js';
 
@@ -70,6 +71,8 @@ export async function myDayTop(panel, opts = {}) {
   panel.append(box);
   let d;
   try { d = await myDayData(opts.date || todayStr()); } catch (_) { box.remove(); return; }
+  const score = await myScore(); // feat/school-pay: their own number only
+  if (score) panel.insertBefore(score, box);
   if (!d.requests || !d.requests.length) { box.remove(); return; }
   box.append(h('h2', { class: 'pay-top-head' }, d.requests.length === 1 ? 'A private lesson is waiting for your answer' : `${d.requests.length} private lessons are waiting for your answer`),
     ...d.requests.map((r) => requestCard(r, async () => { refreshPay(); clear(box); box.remove(); await myDayTop(panel, opts); window.dispatchEvent(new CustomEvent('school:changed')); })));
@@ -98,6 +101,15 @@ function declineDialog(r, done) {
     toast('Declined');
     await done();
   }, { submitText: 'Decline' });
+}
+
+/** The instructor's own satisfaction score this season ("Families would recommend you: +62 from 14 answers"), or null. */
+let scoreCache = null;
+async function myScore() {
+  if (!myStaff()) return null;
+  try { if (!scoreCache) scoreCache = await get('/skischool/ratings/mine'); } catch (_) { return null; }
+  if (!scoreCache.count) return null;
+  return h('p', { class: 'my-score small' }, h('span', { class: 'muted' }, 'Would families recommend you: '), h('strong', null, `${scoreCache.nps > 0 ? '+' : ''}${scoreCache.nps}`), h('span', { class: 'muted' }, ` from ${plural(scoreCache.count, 'answer')} this season (-100 to 100)`));
 }
 
 // ================================================================ Privates tab
@@ -184,34 +196,47 @@ async function pickInstructor(root, onPick) {
 
 async function myPayTab(root) {
   let week = weekStart(todayStr());
+  let period = null; // the open pay period (feat/school-pay): shown first, before payroll is approved
+  let usePeriod = true;
   const body = h('div', { class: 'stack' });
   const head = h('div', { class: 'row between pay-week' });
   let staffId = await pickInstructor(root, (id) => { staffId = id; load(); });
   root.append(head, body);
   async function load() {
+    let p = { period: null, flags: [] };
+    if (staffId) { try { p = await get(`/skischool/pay/period/mine${schoolCan('director') ? `?staff_id=${staffId}` : ''}`); } catch (_) { /* the week view still works */ } }
+    period = p.period;
+    const onPeriod = usePeriod && period;
+    const from = onPeriod ? period.from : week; const to = onPeriod ? period.to : addDays(week, 6);
     clear(head).append(
-      h('strong', { class: 'pay-week-name' }, `${fmtDate(week)} to ${fmtDate(addDays(week, 6))}`),
-      h('span', { class: 'row' }, button('Previous', () => { week = addDays(week, -7); load(); }, { small: true, label: 'Previous week' }),
-        button('Next', () => { week = addDays(week, 7); load(); }, { small: true, label: 'Next week' })));
+      h('strong', { class: 'pay-week-name' }, `${onPeriod ? 'Pay period ' : ''}${fmtDate(from)} to ${fmtDate(to)}`),
+      h('span', { class: 'row' }, period ? button(onPeriod ? 'Show by week' : 'Pay period', () => { usePeriod = !onPeriod; load(); }, { small: true }) : null,
+        onPeriod ? null : button('Previous', () => { week = addDays(week, -7); load(); }, { small: true, label: 'Previous week' }),
+        onPeriod ? null : button('Next', () => { week = addDays(week, 7); load(); }, { small: true, label: 'Next week' })));
     if (!staffId) { clear(body).append(empty(schoolCan('director') ? 'Choose an instructor to see their pay.' : 'Your login is not linked to a staff record yet. Ask a manager to link it.')); return; }
     clear(body).append(loading());
     try {
-      const d = await get(`/skischool/pay/mine?from=${week}&to=${addDays(week, 6)}${schoolCan('director') ? `&staff_id=${staffId}` : ''}`);
+      const d = await get(`/skischool/pay/mine?from=${from}&to=${to}${schoolCan('director') ? `&staff_id=${staffId}` : ''}`);
+      const flagOf = (l) => p.flags.find((f) => f.line_key === l.key && String(f.work_day).slice(0, 10) === l.day);
       const pay = d.lines.filter((l) => !l.tip);
       const tips = d.lines.filter((l) => l.tip);
+      const mine = Number(staffId) === Number(myStaff());
       appendAll(clear(body),
+        onPeriod ? h('p', { class: `notice${period.approved ? '' : ' warn'} small` }, period.approved ? 'This pay period is approved. Flag a line if something is wrong: the director can take the approval back.' : 'Payroll for this period is not approved yet. Check your lines and flag anything that looks wrong.') : null,
         h('div', { class: 'pay-tiles' },
-          tile('This week', money(d.total_cents), hours(d.minutes)),
-          tile('Tips this week', money(d.tips_cents), 'Paid to you in full'),
+          tile(onPeriod ? 'This pay period' : 'This week', money(d.total_cents), hours(d.minutes)),
+          tile(onPeriod ? 'Tips this period' : 'Tips this week', money(d.tips_cents), 'Paid to you in full'),
           tile('Season to date', money(d.season.total_cents), `${hours(d.season.minutes)}, tips ${money(d.season.tips_cents)}`)),
+        mine ? await myScore() : null,
         h('p', { class: 'muted small' }, howPaid(d)),
         pay.length ? table([
           { head: 'Day', cell: (l) => (l.kind === 'clock' ? fmtDate(l.day) : `${fmtDate(l.starts_at)}, ${fmtTime(l.starts_at)}`) },
           { head: 'What', cell: (l) => h('span', null, l.title, l.note ? h('div', { class: 'muted small' }, l.note) : null) },
           { head: 'Time', num: true, cell: (l) => (l.minutes ? hours(l.minutes) : '') },
-          { head: 'Pay', num: true, cell: (l) => h('span', null, money(l.cents), l.parts.length > 1 ? h('div', { class: 'muted small' }, l.parts.map((p) => `${p.label} ${money(p.cents)}`).join(' + ')) : null, l.paid ? h('div', { class: 'small' }, state('Paid', 'good')) : null) },
-          { head: '', actions: true, cell: (l) => button('Ask', () => askDialog(l), { small: true, label: `Ask a question about ${l.title} on ${fmtDate(l.day)}` }) },
-        ], pay) : empty('No lessons or meetings this week.'),
+          { head: 'Pay', num: true, cell: (l) => h('span', null, money(l.cents), l.parts.length > 1 ? h('div', { class: 'muted small' }, l.parts.map((x) => `${x.label} ${money(x.cents)}`).join(' + ')) : null, l.paid ? h('div', { class: 'small' }, state('Paid', 'good')) : null,
+            flagOf(l) ? h('div', { class: 'small' }, state(flagOf(l).status === 'open' ? 'Flagged' : 'Answered', flagOf(l).status === 'open' ? 'warn' : 'good'), flagOf(l).answer ? h('div', { class: 'muted' }, flagOf(l).answer) : null) : null) },
+          { head: '', actions: true, cell: (l) => (mine && !flagOf(l) ? button('Flag', () => flagDialog(l, load), { small: true, label: `Flag ${l.title} on ${fmtDate(l.day)}` }) : mine ? null : button('Ask', () => askDialog(l), { small: true, label: `Ask a question about ${l.title} on ${fmtDate(l.day)}` })) },
+        ], pay) : empty(onPeriod ? 'No lessons or meetings in this pay period.' : 'No lessons or meetings this week.'),
         tips.length ? h('section', { class: 'stack' }, h('h2', null, 'Tips'), table([
           { head: 'Lesson', cell: (l) => `${fmtDate(l.starts_at)}, ${l.title.replace(/^Tip, /, '')}` },
           { head: 'Tip', num: true, cell: (l) => h('span', null, money(l.cents), l.note ? h('div', { class: 'muted small' }, l.note) : null) },
@@ -223,7 +248,18 @@ async function myPayTab(root) {
 const tile = (title, big, small) => h('div', { class: 'pay-tile' }, h('span', { class: 'muted small' }, title), h('strong', null, big), h('span', { class: 'muted small' }, small));
 function howPaid(d) {
   const mode = { per_lesson: 'Paid per lesson.', hourly: 'Paid by the hour: the time card when you clock in, otherwise the lesson time.', both: 'Paid per lesson, plus by the hour.' }[d.pay_mode] || '';
-  return `${mode}${d.lineup_paid ? ' Lineup time is paid once per start time.' : ''} Tips go to you in full and are listed apart.`;
+  return `${mode}${d.lineup_paid ? ' Lineup time is paid once per start time.' : ''} Training time is paid at your hourly rate. Tips go to you in full and are listed apart.`;
+}
+/** Flag a line before payroll (feat/school-pay): the director sees it on Payroll and answers it. */
+function flagDialog(l, done) {
+  const msg = h('textarea', { name: 'message', rows: 4, required: true, maxlength: 1000, placeholder: 'For example: I taught this lesson for two hours, not one' });
+  formDialog('Flag this pay line', h('div', { class: 'stack' }, h('p', null, `${fmtDate(l.day)}: ${l.title}, ${money(l.cents)}`), field('What is wrong', msg, 'The director sees it on Payroll before approving, and answers here.')), async (fd) => {
+    const m = val(fd, 'message');
+    if (!m || m.length < 3) throw new Error('Say what is wrong first');
+    await post('/skischool/pay/flags', { line_key: l.key, day: l.day, message: m });
+    toast('Flagged for the director');
+    await done();
+  }, { submitText: 'Flag' });
 }
 function askDialog(l) {
   const line = `${fmtDate(l.day)}: ${l.title}, ${money(l.cents)}${l.words ? ` (${l.words})` : ''}`;
@@ -294,11 +330,17 @@ async function payrollTab(root) {
     clear(body).append(loading());
     try {
       const d = await get(`/skischool/pay/payroll?from=${from.value}&to=${to.value}`);
+      let flags = [];
+      try { flags = (await get(`/skischool/pay/flags?from=${from.value}&to=${to.value}`)).data; } catch (_) { /* flags are a help */ }
+      const openFlags = (sid) => flags.filter((f) => f.staff_id === sid && f.status === 'open');
+      const warn = await setupWarning();
       const all = d.instructors;
       const approved = all.filter((g) => g.approved && !g.changed);
       const total = all.reduce((n, g) => n + g.pay_cents, 0);
       const tipsTotal = all.reduce((n, g) => n + g.tips_cents, 0);
-      appendAll(clear(body),
+      appendAll(clear(body), warn,
+        flags.some((f) => f.status === 'open') ? h('div', { class: 'notice warn stack tight' }, h('strong', null, `${plural(flags.filter((f) => f.status === 'open').length, 'line')} flagged by instructors`),
+          h('ul', { class: 'plain small' }, flags.filter((f) => f.status === 'open').map((f) => h('li', null, h('strong', null, f.name), `, ${fmtDate(f.work_day)}: ${f.line_words}. "${f.message}" `, button('Answer', () => answerFlag(f), { small: true, label: `Answer ${f.name}'s flag` }))))) : null,
         h('div', { class: 'pay-tiles' }, tile('Pay', money(total), plural(all.length, 'instructor')), tile('Tips to pass through', money(tipsTotal), 'Not part of pay'), tile('Approved', `${approved.length} of ${all.length}`, d.run && d.run.exported_at ? `Exported ${fmtDate(d.run.exported_at)}` : 'Not exported yet')),
         d.earlier ? h('p', { class: 'muted small' }, `${plural(d.earlier, 'line')} in this period were paid in an earlier export and are left out.`) : null,
         d.later ? h('p', { class: 'muted small' }, `${plural(d.later, 'line')} in this period are for lessons not over yet. Export again after they end.`) : null,
@@ -307,7 +349,7 @@ async function payrollTab(root) {
           { head: 'Hours', num: true, cell: (g) => hours(g.minutes) },
           { head: 'Pay', num: true, cell: (g) => money(g.pay_cents) },
           { head: 'Tips', num: true, cell: (g) => money(g.tips_cents) },
-          { head: 'Approved', cell: (g) => (g.changed ? state('Changed since approved', 'bad') : g.approved ? state('Approved', 'good') : state('Not yet', 'neutral')) },
+          { head: 'Approved', cell: (g) => h('span', null, g.changed ? state('Changed since approved', 'bad') : g.approved ? state('Approved', 'good') : state('Not yet', 'neutral'), openFlags(g.staff_id).length ? h('div', null, state(`${plural(openFlags(g.staff_id).length, 'flag')}`, 'warn')) : null) },
           { head: '', actions: true, cell: (g) => [
             button('Lines', () => linesDialog(g), { small: true, label: `Lines for ${g.name}` }),
             g.approved && !g.changed ? button('Unapprove', () => approve([g.staff_id], false), { small: true, label: `Unapprove ${g.name}` }) : button('Approve', () => approve([g.staff_id], true), { small: true, kind: 'primary', label: `Approve ${g.name}` }),
@@ -318,6 +360,13 @@ async function payrollTab(root) {
           button('Export CSV', () => exportIt(approved), { kind: 'primary' })) : null);
     } catch (err) { clear(body).append(errorBox(err)); }
     await drawPast();
+  }
+  function answerFlag(f) {
+    formDialog(`Answer ${f.name}`, h('div', { class: 'stack' }, h('p', null, `${fmtDate(f.work_day)}: ${f.line_words}`), h('p', null, `"${f.message}"`),
+      field('Your answer', h('textarea', { name: 'answer', rows: 3, required: true, maxlength: 1000, placeholder: 'For example: Fixed: the lesson length is now two hours' }), 'Shown to them on My pay.')), async (fd) => {
+      await post(`/skischool/pay/flags/${f.id}/answer`, { answer: val(fd, 'answer') });
+      toast('Answered'); await load();
+    }, { submitText: 'Answer' });
   }
   async function approve(ids, yes) {
     await post('/skischool/pay/payroll/approve', { from: from.value, to: to.value, staff_ids: ids, approved: yes });

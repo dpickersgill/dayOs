@@ -104,7 +104,7 @@ async function lesson(day, from, to, extra = {}) {
 let kid = 0;
 async function book(sessionId, extra = {}) {
   kid += 1;
-  return ok(await api('POST', `/skischool/sessions/${sessionId}/bookings`, { token: T.desk, body: { student: { first_name: `Kid${kid}`, last_name: `Pay${suffix}`, date_of_birth: `${year - 9}-02-02`, sex: 'female' }, sign_waiver: true, ...extra } }), 201);
+  return ok(await api('POST', `/skischool/sessions/${sessionId}/bookings`, { token: T.desk, body: { student: { first_name: `Kid${kid}`, last_name: `Pay${suffix}`, date_of_birth: `${year - 9}-02-02`, sex: 'female' }, sign_waiver: true, waiver_signer: { name: 'Pat Parent' }, ...extra } }), 201);
 }
 const myDay = async (token, date) => ok(await api('GET', `/skischool/pay/my-day?date=${date}`, { token }));
 
@@ -407,7 +407,7 @@ test('payroll: approve, export CSV with tips listed apart, mark tips paid out, n
   assert.match(ex.lines_csv, /tips \(pass-through\)","[^"]*","1 line","","15.00"/);
   assert.doesNotMatch(ex.lines_csv, /Max Other/, 'Max was not approved');
   const sum = ex.summary_csv.split('\r\n');
-  assert.equal(sum[0], '"instructor","staff_id","hours","lessons","lineup","hourly","program","request_bonus","pay_total","tips_pass_through"'.replace(/"/g, ''));
+  assert.equal(sum[0], '"instructor","staff_id","hours","lessons","lineup","training","hourly","program","credential_addons","request_bonus","pay_total","tips_pass_through"'.replace(/"/g, ''));
   assert.match(sum[1], /"Ivy Instructor".*"15.00"$/);
   assert.ok((await q("SELECT paid_out_at FROM lesson_tips WHERE tenant_id = ? AND status = 'paid'", [M.id]))[0].paid_out_at, 'tip marked paid out');
   // A longer period that overlaps does not pay Ivy's exported lines again.

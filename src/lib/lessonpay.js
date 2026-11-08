@@ -47,6 +47,71 @@ function rateFrom(rates, staffId, kind, day) {
 }
 const loadRates = (db, tenantId) => rows(db, 'SELECT staff_id, kind, cents, effective_from FROM instructor_pay_rates WHERE tenant_id = ? ORDER BY effective_from', [tenantId]);
 
+// ---- the pay ladder (feat/school-pay): a rate by certification level, and add-ons for specialist credentials.
+const CERTS = ['psia1', 'psia2', 'psia3', 'psia_te', 'csia1', 'csia2', 'csia3', 'csia4', 'casi1', 'casi2', 'casi3', 'casi4'];
+const CERT_WORDS = { none: 'None yet', psia1: 'PSIA-AASI Level 1', psia2: 'PSIA-AASI Level 2', psia3: 'PSIA-AASI Level 3', psia_te: 'PSIA-AASI Trainer/Examiner',
+  csia1: 'CSIA Level 1', csia2: 'CSIA Level 2', csia3: 'CSIA Level 3', csia4: 'CSIA Level 4', casi1: 'CASI Level 1', casi2: 'CASI Level 2', casi3: 'CASI Level 3', casi4: 'CASI Level 4' };
+const CREDENTIALS = ['kids1', 'kids2', 'freestyle', 'adaptive'];
+const CREDENTIAL_WORDS = { kids1: "Children's Specialist 1", kids2: "Children's Specialist 2", freestyle: 'Freestyle Specialist', adaptive: 'Adaptive' };
+/** The old certification values (before 2026.11.12's pay ladder) mean PSIA-AASI. */
+const certOf = (v) => ({ level1: 'psia1', level2: 'psia2', level3: 'psia3' }[v] || (CERTS.includes(v) ? v : 'none'));
+const latest = (list, day) => {
+  let r = null;
+  for (const x of list) if (String(x.effective_from).slice(0, 10) <= day && (!r || x.effective_from > r.effective_from)) r = x;
+  return r;
+};
+
+/**
+ * Everything that sets an instructor's rate: their own rates, the ladder by their certification level, and the school
+ * default, in that order (a person's own rate always wins). rate(staffId, kind, day) -> cents or null; source() says which
+ * one applied; addons(staffId, lesson, day, { minutes, hourly }) -> pay parts for credentials that fit the lesson.
+ */
+async function rateBook(db, tenantId) {
+  const own = await loadRates(db, tenantId);
+  let ladder = []; let profiles = [];
+  try {
+    ladder = await rows(db, 'SELECT rung, kind, cents, effective_from FROM school_pay_ladder WHERE tenant_id = ?', [tenantId]);
+    profiles = await rows(db, 'SELECT staff_id, psia_level, credentials FROM instructor_profiles WHERE tenant_id = ?', [tenantId]);
+  } catch (err) { if (err.code !== 'ER_NO_SUCH_TABLE' && err.code !== 'ER_BAD_FIELD_ERROR') throw err; }
+  const prof = new Map(profiles.map((p) => [Number(p.staff_id), { cert: certOf(p.psia_level), creds: String(p.credentials || '').split(',').filter(Boolean) }]));
+  const ownOf = (staffId, kind, day) => latest(own.filter((r) => r.kind === kind && r.staff_id !== null && Number(r.staff_id) === Number(staffId)), day);
+  const ladderOf = (rung, kind, day) => latest(ladder.filter((r) => r.rung === rung && r.kind === kind), day);
+  const dfltOf = (kind, day) => latest(own.filter((r) => r.kind === kind && r.staff_id === null), day);
+  function source(staffId, kind, day) {
+    const o = ownOf(staffId, kind, day);
+    if (o) return { cents: Number(o.cents), from: 'own' };
+    const p = prof.get(Number(staffId));
+    const l = p && p.cert !== 'none' ? ladderOf(p.cert, kind, day) : null;
+    if (l) return { cents: Number(l.cents), from: 'ladder', rung: p.cert };
+    const d = dfltOf(kind, day);
+    return d ? { cents: Number(d.cents), from: 'default' } : null;
+  }
+  const rate = (staffId, kind, day) => { const x = source(staffId, kind, day); return x ? x.cents : null; };
+  /** Credentials that fit the lesson: Children's Specialist (the higher one) on a lesson for under 18s, Adaptive on an adaptive lesson, Freestyle on a park or freestyle lesson. */
+  function fitting(staffId, l) {
+    const p = prof.get(Number(staffId));
+    if (!p || !p.creds.length) return [];
+    const out = [];
+    const kids = (l.age_max != null && Number(l.age_max) <= 17) || ['kids', 'teens'].includes(l.age_group);
+    if (kids && p.creds.includes('kids2')) out.push('kids2'); else if (kids && p.creds.includes('kids1')) out.push('kids1');
+    if (l.discipline === 'adaptive' && p.creds.includes('adaptive')) out.push('adaptive');
+    if (/park|freestyle|terrain/i.test(`${l.product || ''}`) && p.creds.includes('freestyle')) out.push('freestyle');
+    return out;
+  }
+  /** Add-on parts for a lesson. Not paid on a kind of line where the instructor has their own rate (their rate wins). */
+  function addons(staffId, l, day, { minutes = 0, hourly = false, format = null } = {}) {
+    const parts = [];
+    for (const c of fitting(staffId, l)) {
+      const per = ladderOf(c, 'lesson_addon', day);
+      if (per && Number(per.cents) && !(format && ownOf(staffId, format, day))) parts.push({ label: `${CREDENTIAL_WORDS[c]} add-on`, cents: Number(per.cents) });
+      const hr = hourly ? ladderOf(c, 'hourly_addon', day) : null;
+      if (hr && Number(hr.cents) && minutes && !ownOf(staffId, 'hourly', day)) parts.push({ label: `${CREDENTIAL_WORDS[c]} hourly add-on`, cents: prorate(hr.cents, minutes) });
+    }
+    return parts;
+  }
+  return { rate, source, addons, profileOf: (id) => prof.get(Number(id)) || { cert: 'none', creds: [] } };
+}
+
 /** A line's parts as words: "private 36.00 + request 6.00". */
 const wordsOf = (parts) => parts.filter((p) => p.cents).map((p) => `${p.label} ${amount(p.cents)}`).join(' + ');
 
@@ -59,14 +124,15 @@ const wordsOf = (parts) => parts.filter((p) => p.cents).map((p) => `${p.label} $
 async function lines(db, tenantId, { from, to, staffId = null, tipsMode = 'lesson' }) {
   const settings = await S.get(db, tenantId);
   const tz = (await rows(db, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId]))[0].timezone;
-  const rates = await loadRates(db, tenantId);
+  const book = await rateBook(db, tenantId);
+  const rateFor = (staff, kind, day) => book.rate(staff, kind, day);
   const mode = settings.pay_mode;
   const hourlyOn = mode === 'hourly' || mode === 'both';
   const lessonRateOn = mode === 'per_lesson' || mode === 'both';
   const who = staffId ? ' AND s.instructor_id = ?' : ' AND s.instructor_id IS NOT NULL';
   const args = staffId ? [tenantId, from, to, staffId] : [tenantId, from, to];
 
-  const lessons = await rows(db, `SELECT s.id, s.instructor_id, s.starts_at, s.ends_at, s.format, s.discipline, s.status, s.delay_minutes, pr.name AS product,
+  const lessons = await rows(db, `SELECT s.id, s.instructor_id, s.starts_at, s.ends_at, s.format, s.discipline, s.status, s.delay_minutes, s.age_max, s.age_group, pr.name AS product,
       (SELECT COUNT(*) FROM lesson_bookings b WHERE b.tenant_id = s.tenant_id AND b.session_id = s.id AND b.status <> 'cancelled') AS students,
       (SELECT COUNT(*) FROM lesson_bookings b WHERE b.tenant_id = s.tenant_id AND b.session_id = s.id AND b.status <> 'cancelled' AND b.requested_instructor_id = s.instructor_id) AS requested
     FROM lesson_sessions s JOIN products pr ON pr.tenant_id = s.tenant_id AND pr.id = s.product_id
@@ -107,19 +173,21 @@ async function lines(db, tenantId, { from, to, staffId = null, tipsMode = 'lesso
       out.push({ key: `lesson:${l.id}`, staff_id: l.instructor_id, kind: 'lesson', day, starts_at: l.starts_at, ends_at: l.ends_at, title: l.product, session_id: l.id, minutes, cents: 0, parts, words: '', note: 'No students booked, so no pay for this lesson yet.' });
       continue;
     }
-    const fmtRate = rateFrom(rates, l.instructor_id, l.format, day);
+    const fmtRate = rateFor(l.instructor_id, l.format, day);
     if (lessonRateOn) {
       if (fmtRate === null) notes.push(`No ${KIND_WORDS[l.format]} rate is set.`);
       else parts.push({ label: KIND_WORDS[l.format], cents: fmtRate });
     }
     if (hourlyOn) {
-      const hr = rateFrom(rates, l.instructor_id, 'hourly', day);
+      const hr = rateFor(l.instructor_id, 'hourly', day);
       if (isClocked(l.instructor_id, day)) notes.push('Hourly pay comes from your time card today.');
       else if (hr === null) notes.push('No hourly rate is set.');
       else { parts.push({ label: `${hoursText(minutes)} lesson time`, cents: prorate(hr, minutes) }); notes.push('Hours from the lesson time (no time card that day).'); }
       // In hourly mode, a private or semi-private rate is paid on top of the hours.
       if (mode === 'hourly' && l.format !== 'group' && fmtRate) parts.push({ label: KIND_WORDS[l.format], cents: fmtRate });
     }
+    // Specialist credential add-ons from the pay ladder (a per-lesson add-on with the lesson rate, an hourly add-on with hourly pay)
+    parts.push(...book.addons(l.instructor_id, l, day, { minutes, hourly: hourlyOn, format: lessonRateOn ? l.format : null }));
     if (Number(l.requested) > 0 && settings.request_bonus_cents > 0) parts.push({ label: 'request', cents: Number(settings.request_bonus_cents) });
     const cents = parts.reduce((n, p) => n + p.cents, 0);
     out.push({ key: `lesson:${l.id}`, staff_id: l.instructor_id, kind: 'lesson', day, starts_at: l.starts_at, ends_at: l.ends_at, title: l.product, session_id: l.id, minutes, cents, parts, words: wordsOf(parts), note: notes.join(' ') || null, requested: Number(l.requested) > 0 });
@@ -138,7 +206,7 @@ async function lines(db, tenantId, { from, to, staffId = null, tipsMode = 'lesso
       seen.add(k);
       const day = l.starts_at.slice(0, 10);
       if (hourlyOn && isClocked(l.instructor_id, day)) continue; // the time card already has it
-      const hr = rateFrom(rates, l.instructor_id, 'hourly', day);
+      const hr = rateFor(l.instructor_id, 'hourly', day);
       const cents = hr === null ? 0 : prorate(hr, settings.lineup_minutes);
       out.push({ key: `lineup:${first.replace(' ', 'T').slice(0, 16)}`, staff_id: l.instructor_id, kind: 'lineup', day, starts_at: l.starts_at, ends_at: l.starts_at, done_at: l.ends_at, title: `Lineup, ${settings.lineup_minutes} minutes`, session_id: l.id, minutes: settings.lineup_minutes, cents,
         parts: cents ? [{ label: 'lineup', cents }] : [], words: cents ? `lineup ${amount(cents)}` : '', note: hr === null ? 'No hourly rate is set, so lineup time pays nothing.' : null });
@@ -150,10 +218,10 @@ async function lines(db, tenantId, { from, to, staffId = null, tipsMode = 'lesso
     const day = m.starts_at.slice(0, 10);
     const minutes = zoneMinutes(m.starts_at, m.ends_at, tz);
     const parts = []; const notes = [];
-    const pr = rateFrom(rates, m.staff_id, 'program', day);
+    const pr = rateFor(m.staff_id, 'program', day);
     if (pr !== null) parts.push({ label: 'program meeting', cents: pr });
     if (hourlyOn) {
-      const hr = rateFrom(rates, m.staff_id, 'hourly', day);
+      const hr = rateFor(m.staff_id, 'hourly', day);
       if (isClocked(m.staff_id, day)) notes.push('Hourly pay comes from your time card today.');
       else if (hr !== null) parts.push({ label: `${hoursText(minutes)} coaching`, cents: prorate(hr, minutes) });
     }
@@ -162,13 +230,32 @@ async function lines(db, tenantId, { from, to, staffId = null, tipsMode = 'lesso
     out.push({ key: `program:${m.id}`, staff_id: m.staff_id, kind: 'program', day, starts_at: m.starts_at, ends_at: m.ends_at, title: m.program, program_session_id: m.id, minutes, cents, parts, words: wordsOf(parts), note: notes.join(' ') || null });
   }
 
+  // ---- training time (feat/school-pay): each session the director logged, for each instructor there, at the hourly
+  // rate. Not added on a day the instructor's time card is paid (the time card already has it), like lineup time.
+  let trainings = [];
+  try {
+    trainings = await rows(db, `SELECT t.id, t.title, t.starts_at, t.ends_at, a.staff_id, a.minutes FROM school_trainings t
+        JOIN school_training_staff a ON a.tenant_id = t.tenant_id AND a.training_id = t.id
+      WHERE t.tenant_id = ? AND t.status = 'held' AND DATE(t.starts_at) BETWEEN ? AND ?${staffId ? ' AND a.staff_id = ?' : ''} ORDER BY t.starts_at`, staffId ? [tenantId, from, to, staffId] : [tenantId, from, to]);
+  } catch (err) { if (err.code !== 'ER_NO_SUCH_TABLE') throw err; }
+  for (const tr of trainings) {
+    const day = tr.starts_at.slice(0, 10);
+    const minutes = tr.minutes != null ? Number(tr.minutes) : zoneMinutes(tr.starts_at, tr.ends_at, tz);
+    const clockedDay = hourlyOn && isClocked(tr.staff_id, day);
+    const hr = rateFor(tr.staff_id, 'hourly', day);
+    const cents = clockedDay || hr === null ? 0 : prorate(hr, minutes);
+    out.push({ key: `training:${tr.id}`, staff_id: tr.staff_id, kind: 'training', day, starts_at: tr.starts_at, ends_at: tr.ends_at, title: `Training: ${tr.title}, ${hoursText(minutes)}`, training_id: tr.id, minutes, cents,
+      parts: cents ? [{ label: 'training', cents }] : [], words: cents ? `training ${amount(cents)}` : '',
+      note: clockedDay ? 'Paid from your time card that day.' : hr === null ? 'No hourly rate is set, so training time pays nothing.' : null });
+  }
+
   // ---- clocked time, one line per day, for the instructors who teach in this range (the time clock is shared with
   // every other department, whose hours are paid elsewhere)
-  const teachers = new Set([...lessons.map((l) => l.instructor_id), ...meetings.map((m) => m.staff_id)]);
+  const teachers = new Set([...lessons.map((l) => l.instructor_id), ...meetings.map((m) => m.staff_id), ...trainings.map((x) => x.staff_id)]);
   for (const [k, minutes] of clocked) {
     const [sid, day] = k.split('|'); const staff = Number(sid);
     if (!teachers.has(staff) || minutes < 1) continue;
-    const hr = rateFrom(rates, staff, 'hourly', day);
+    const hr = rateFor(staff, 'hourly', day);
     const cents = hr === null ? 0 : prorate(hr, minutes);
     out.push({ key: `clock:${day}`, staff_id: staff, kind: 'clock', day, starts_at: `${day} 00:00:00`, ends_at: `${day} 00:00:00`, title: `Time card, ${hoursText(minutes)}`, minutes, cents,
       parts: cents ? [{ label: `${hoursText(minutes)} clocked`, cents }] : [], words: cents ? `${hoursText(minutes)} clocked ${amount(cents)}` : '', note: hr === null ? 'No hourly rate is set.' : null });
@@ -242,4 +329,4 @@ function forMyDay(list) {
   return out;
 }
 
-module.exports = { KINDS, KIND_WORDS, lines, byInstructor, forMyDay, rateFrom, wordsOf, amount, lineDone, minusMinutes, zoneMinutes };
+module.exports = { KINDS, KIND_WORDS, CERTS, CERT_WORDS, CREDENTIALS, CREDENTIAL_WORDS, certOf, rateBook, lines, byInstructor, forMyDay, rateFrom, wordsOf, amount, lineDone, minusMinutes, zoneMinutes };

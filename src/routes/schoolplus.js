@@ -7,7 +7,8 @@ const { pool, tx, rows, one } = require('../db');
 const { requireRole } = require('../middleware/auth');
 const SA = require('../lib/schoolaccess'); // 2026.11.9: the school director and supervisor
 const { z, validate, paramId, dateStr, todayIn } = require('../lib/util');
-const { notFound, conflict, bad } = require('../lib/errors');
+const { notFound, conflict, bad, forbidden } = require('../lib/errors');
+const PAY = require('../lib/lessonpay'); // feat/school-pay: certification levels and credentials
 const { audit } = require('../lib/audit');
 const { ensureLadder, ladder, studentCard, instructorFit, DISCIPLINES } = require('../lib/school');
 const LV = require('../lib/levels');
@@ -185,26 +186,37 @@ router.post('/instructor-fit', SA.school('supervisor'), validate(z.object({
 const csvList = (v) => (v ? String(v).split(',').filter(Boolean) : []);
 router.get('/instructors', SA.school('supervisor'), async (req, res) => {
   const { tenantId } = req.auth;
-  const data = await rows(pool, `SELECT st.id, p.first_name, p.last_name, ip.disciplines, ip.ski_level_max, ip.snowboard_level_max, ip.teaches_kids, ip.teaches_adaptive, ip.psia_level, ip.staff_id IS NOT NULL AS has_profile,
+  const data = await rows(pool, `SELECT st.id, p.first_name, p.last_name, ip.disciplines, ip.ski_level_max, ip.snowboard_level_max, ip.teaches_kids, ip.teaches_adaptive, ip.psia_level, ip.credentials, ip.staff_id IS NOT NULL AS has_profile,
       EXISTS (SELECT 1 FROM users u WHERE u.tenant_id = st.tenant_id AND u.staff_id = st.id AND u.role = 'instructor' AND u.active = 1) AS has_login
     FROM staff st JOIN people p ON p.id = st.person_id AND p.tenant_id = st.tenant_id LEFT JOIN instructor_profiles ip ON ip.tenant_id = st.tenant_id AND ip.staff_id = st.id
     WHERE st.tenant_id = ? AND st.status = 'active' ORDER BY p.first_name, p.last_name LIMIT 300`, [tenantId]);
   const certs = await rows(pool, 'SELECT sc.staff_id, c.id, c.name, sc.expires_on FROM staff_certifications sc JOIN certifications c ON c.tenant_id = sc.tenant_id AND c.id = sc.certification_id WHERE sc.tenant_id = ? ORDER BY c.name', [tenantId]);
   res.json({ data: data.map((r) => ({ ...r, name: `${r.first_name} ${r.last_name}`, teaches: Boolean(r.has_profile || r.has_login), disciplines: csvList(r.disciplines), teaches_kids: r.teaches_kids == null ? true : Boolean(r.teaches_kids), teaches_adaptive: Boolean(r.teaches_adaptive),
-    psia_level: r.psia_level || 'none', certifications: certs.filter((c) => c.staff_id === r.id).map((c) => ({ id: c.id, name: c.name, expires_on: c.expires_on })) })) });
+    psia_level: PAY.certOf(r.psia_level), cert_words: PAY.CERT_WORDS[PAY.certOf(r.psia_level)], credentials: csvList(r.credentials), certifications: certs.filter((c) => c.staff_id === r.id).map((c) => ({ id: c.id, name: c.name, expires_on: c.expires_on })) })) });
 });
 
 router.put('/instructors/:id/profile', SA.school('director'), validate(z.object({
   disciplines: z.array(z.enum(DISCIPLINES)).max(4),
   ski_level_max: z.number().int().min(1).max(9).nullable(), snowboard_level_max: z.number().int().min(1).max(9).nullable(),
-  teaches_kids: z.boolean(), teaches_adaptive: z.boolean(), psia_level: z.enum(['none', 'level1', 'level2', 'level3']),
+  teaches_kids: z.boolean(), teaches_adaptive: z.boolean(),
+  // feat/school-pay: the certification level (PSIA-AASI, CSIA, CASI; the old level1-3 still read as PSIA-AASI) and
+  // specialist credentials. Both set pay on the pay ladder (lib/lessonpay.js).
+  psia_level: z.enum(['none', 'level1', 'level2', 'level3', ...PAY.CERTS]).transform(PAY.certOf),
+  credentials: z.array(z.enum(PAY.CREDENTIALS)).max(4).optional(),
 })), async (req, res) => {
   const { tenantId } = req.auth; const b = req.body;
   const st = await one(pool, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ?', [tenantId, paramId(req)]);
   if (!st) throw notFound('Instructor');
-  await pool.query(`INSERT INTO instructor_profiles (tenant_id, staff_id, is_public, disciplines, ski_level_max, snowboard_level_max, teaches_kids, teaches_adaptive, psia_level) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?)
-    ON DUPLICATE KEY UPDATE disciplines = VALUES(disciplines), ski_level_max = VALUES(ski_level_max), snowboard_level_max = VALUES(snowboard_level_max), teaches_kids = VALUES(teaches_kids), teaches_adaptive = VALUES(teaches_adaptive), psia_level = VALUES(psia_level)`,
-  [tenantId, st.id, [...new Set(b.disciplines)].join(','), b.ski_level_max, b.snowboard_level_max, b.teaches_kids ? 1 : 0, b.teaches_adaptive ? 1 : 0, b.psia_level]);
+  // A school Director never sets what they are paid: not their own level or credentials (owners and managers can).
+  if (SA.isSchoolDirector(req) && Number(req.auth.staffId) === Number(st.id)) {
+    const now = await one(pool, 'SELECT psia_level, credentials FROM instructor_profiles WHERE tenant_id = ? AND staff_id = ?', [tenantId, st.id]);
+    const credsNow = String((now && now.credentials) || '').split(',').filter(Boolean).sort().join(',');
+    if (PAY.certOf(now && now.psia_level) !== b.psia_level || (b.credentials && [...new Set(b.credentials)].sort().join(',') !== credsNow)) throw forbidden('You cannot change your own certification level or credentials: they set your pay. Ask an owner or manager.');
+  }
+  const creds = b.credentials ? [...new Set(b.credentials)].join(',') || null : undefined;
+  await pool.query(`INSERT INTO instructor_profiles (tenant_id, staff_id, is_public, disciplines, ski_level_max, snowboard_level_max, teaches_kids, teaches_adaptive, psia_level${creds !== undefined ? ', credentials' : ''}) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?${creds !== undefined ? ', ?' : ''})
+    ON DUPLICATE KEY UPDATE disciplines = VALUES(disciplines), ski_level_max = VALUES(ski_level_max), snowboard_level_max = VALUES(snowboard_level_max), teaches_kids = VALUES(teaches_kids), teaches_adaptive = VALUES(teaches_adaptive), psia_level = VALUES(psia_level)${creds !== undefined ? ', credentials = VALUES(credentials)' : ''}`,
+  [tenantId, st.id, [...new Set(b.disciplines)].join(','), b.ski_level_max, b.snowboard_level_max, b.teaches_kids ? 1 : 0, b.teaches_adaptive ? 1 : 0, b.psia_level, ...(creds !== undefined ? [creds] : [])]);
   await audit(pool, req, 'teaching_profile', 'instructor_profiles', st.id, b);
   res.json({ ok: true });
 });

@@ -175,6 +175,7 @@ function createApp() {
   app.get('/level/:slug', page('level.html'));
   app.get('/waitlist/:slug/:token', page('waitlist.html'));
   app.get('/private/:slug', page('private.html'));
+  app.get(['/group/:slug/:token', '/group-waiver/:slug/:token'], page('group.html')); // feat/school-pay: a group's booking link, a parent's waiver
   app.get('/weather/:slug/:token', page('weather.html'));
   app.get(['/season/:slug/:token', '/season/:slug/share/:token'], page('season.html')); // a guest's day or season recap (guests round 2)
   // Fair by design (guests round 2, FAIR): the conditions guarantee, a pass on hold, a payment plan's card, a renewal, a waitlist offer.
@@ -306,6 +307,8 @@ function createApp() {
   // minute) caps one address across every mountain, so moving from mountain to mountain does not multiply the limit.
   api.use('/public', rateLimit({ name: 'public-all', windowMs: 60_000, max: Number(process.env.PUBLIC_RATE_LIMIT_ALL) || 2400 }),
     rateLimit({ name: 'public-mountain', windowMs: 60_000, max: Number(process.env.PUBLIC_RATE_LIMIT) || 600, keyOf: (req) => `${req.ip}|${String(req.path.split('/')[1] || '').toLowerCase().slice(0, 80)}` }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/lostfound').publicRouter, require('./routes/partnerpasses').publicRouter, require('./routes/patrolclaims').publicRouter, require('./routes/patrolscene').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter, require('./routes/rentalforms').publicRouter, require('./routes/schoollineup').publicRouter, require('./routes/schoolparents').publicRouter, require('./routes/schoolsafety').publicRouter, require('./routes/schoolpay').publicRouter, require('./routes/schooldirector').publicRouter, require('./routes/guestswindow').publicRouter, require('./routes/guestsaccount').publicRouter, require('./routes/guestsloyalty').publicRouter, require('./routes/guestsfair').publicRouter);
+  // feat/school-pay: the recap's 0-10 question, and a group's booking link and waivers (each checks the Ski school app is on)
+  api.use('/public', require('./routes/schoolmoney').publicRouter, require('./routes/schoolgroups').publicRouter);
   api.use(authRoutes); // login, tenants, users, me (each route applies authenticate itself where needed)
   api.use(require('./routes/security')); // passkeys, the second check, sessions, devices, PINs, terminals (each route authenticates)
   // A person's private calendar link for their phone's calendar app (2026.11.10): no sign-in, the link is the key.
@@ -356,6 +359,10 @@ function createApp() {
   api.use('/skischool', require('./routes/schoolpay').router); // instructor pay, privates by name
   api.use('/skischool', require('./routes/schooldirector').router); // copy a day, weather, staffing, reports
   api.use('/skischool', require('./routes/schoolplan').router); // 2026.11.9: the season plan, private hours, placement
+  api.use('/skischool', require('./routes/schoolmoney').router); // feat/school-pay: pay ladder, training, flags, ratings, ladders
+  api.use('/skischool', require('./routes/schoolreports').router); // feat/school-pay: owner reports
+  api.use('/skischool', require('./routes/schoolgroups').router); // feat/school-pay: school and group programs
+  api.use('/notices', require('./routes/notices')); // feat/school-pay: notes a person dismissed
   api.use('/skischool', require('./routes/schoolstaff').router); // 2026.11.9: spots that follow staff, the fill view, demand
   api.use('/skischool', require('./routes/schoolsafety').router); // feat/school-safety: pickup, lost child, ratios, adaptive, live updates, group places
   api.use('/guests', require('./routes/guests').router); // guest settings (round 2)

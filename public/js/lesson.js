@@ -100,11 +100,12 @@ function draw(v) {
 
   // ---- after the lesson: the recap, a tip, what is next
   if (v.recap) main.append(recapCard(v));
+  if (v.rating) main.append(ratingCard(v)); // feat/school-pay: would you recommend your instructor (0 to 10)
   if (v.tips) main.append(tipCard(v));
   if (v.next && (v.next.lessons.length || v.next.pack || v.next.pass)) main.append(nextCard(v));
 
   // ---- the progress card
-  if (v.progress && (v.progress.levels.length || v.progress.lessons || v.progress.recaps.length)) main.append(progressCard(v));
+  if (v.progress && (v.progress.levels.length || v.progress.lessons || v.progress.recaps.length || (v.progress.ladders || []).length)) main.append(progressCard(v));
 
   // ---- change or cancel
   if (B.status === 'booked' && L.status === 'scheduled' && !L.ended) main.append(changeCard(v));
@@ -120,6 +121,26 @@ function recapCard(v) {
     r.skills.length ? h('div', { class: 'stack tight' }, h('h3', null, 'Can do now'), h('ul', { class: 'skills' }, r.skills.map((s) => h('li', null, s)))) : null,
     r.level_words ? h('p', null, h('strong', null, 'Level now: '), r.level_words) : null,
     r.photos.length ? h('div', { class: 'photos' }, r.photos.map((id, i) => h('img', { src: `${base}/photos/${id}`, alt: `Photo ${i + 1} of ${v.student.first_name} from the lesson`, loading: 'lazy' }))) : null);
+}
+
+/** One question after the lesson, 0 to 10, with an optional comment (feat/school-pay). It can be changed. */
+function ratingCard(v) {
+  const who = v.rating.instructor || 'your instructor';
+  const msg = h('div', { role: 'status', 'aria-live': 'polite' });
+  let picked = v.rating.score ?? null;
+  const comment = h('textarea', { id: 'rate-comment', rows: 3, maxlength: 1000 }, v.rating.comment || '');
+  const buttons = [];
+  for (let n = 0; n <= 10; n += 1) buttons.push(h('button', { type: 'button', class: 'pill nps-n', 'aria-pressed': String(picked === n), 'aria-label': `${n} out of 10`, onclick: () => { picked = n; for (const b of buttons) b.setAttribute('aria-pressed', String(b === buttons[n])); } }, String(n)));
+  const send = async () => {
+    clear(msg);
+    if (picked === null) { msg.append(errorBox('Pick a number from 0 to 10 first.')); return; }
+    try { await call('POST', '/rating', { score: picked, comment: comment.value.trim() || null }); msg.append(h('p', { class: 'notice ok' }, 'Thank you. The ski school reads every answer.')); } catch (err) { msg.append(errorBox(err.message)); }
+  };
+  return h('section', { class: 'card stack', 'aria-labelledby': 'rate-h' }, h('h2', { id: 'rate-h' }, `How likely are you to recommend ${who}?`),
+    h('div', { class: 'nps-row', role: 'group', 'aria-label': '0 means not at all likely, 10 means extremely likely' }, ...buttons),
+    h('div', { class: 'nps-ends muted small' }, h('span', null, 'Not at all likely'), h('span', null, 'Extremely likely')),
+    h('div', { class: 'field' }, h('label', { for: 'rate-comment' }, 'Anything you would like to tell us? (optional)'), comment),
+    h('div', null, h('button', { type: 'button', class: 'btn primary', onclick: send }, v.rating.score !== undefined && v.rating.score !== null ? 'Update my answer' : 'Send')), msg);
 }
 
 function tipCard(v) {
@@ -160,6 +181,15 @@ function progressCard(v) {
       h('ol', { class: 'ladder', 'aria-label': `${lv.discipline} levels` }, levelList(lv.discipline).map((l) => h('li', { class: l.level === lv.level ? 'now' : l.level < lv.level ? 'past' : '' },
         h('span', { class: 'n', 'aria-hidden': 'true' }, l.level < lv.level ? '✓' : String(l.level)),
         h('span', null, `Level ${l.level}: ${l.short}`, l.level === lv.level ? ' (now)' : passed.has(l.level) ? ` (passed ${dayShort((p.passed.find((x) => x.discipline === lv.discipline && x.level === l.level) || {}).on || '2000-01-01')})` : ''))))));
+  }
+  // a learn to ski ladder: lesson 2 of 3, then the graduate's season pass offer (feat/school-pay)
+  for (const l of p.ladders || []) {
+    sec.append(h('div', { class: 'stack tight ladder-progress' }, h('h3', null, l.name),
+      h('p', null, l.graduated ? `Graduated: all ${l.lessons} lessons done.` : `Lesson ${Math.min(l.attended + 1, l.lessons)} of ${l.lessons}${l.attended ? ` (${l.attended} done)` : ''}.`, l.includes ? h('span', { class: 'muted small' }, ` Each lesson includes ${l.includes}.`) : null),
+      h('div', { class: 'ladder-bar', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(l.lessons), 'aria-valuenow': String(l.attended), 'aria-label': `${l.attended} of ${l.lessons} lessons done` },
+        ...Array.from({ length: l.lessons }, (_, i) => h('span', { class: i < l.attended ? 'done' : '' }))),
+      l.offer && l.offer.status === 'offered' ? h('div', { class: 'notice ok stack tight' }, h('strong', null, `${l.offer.percent}% off ${l.offer.pass}`),
+        h('p', null, `A graduate's offer, good until ${dayLong(l.offer.valid_to)}. Show code `, h('strong', { class: 'code' }, l.offer.code), ' at the ticket window, or use it in the online shop.')) : null));
   }
   if (!p.levels.length) sec.append(h('p', null, 'The instructor sets the level after the first lesson.'));
   if (p.skills.length) sec.append(h('div', { class: 'stack tight' }, h('h3', null, 'Skills ticked off'), h('ul', { class: 'skills' }, p.skills.slice(-12).map((s) => h('li', null, `${s.name} (${dayShort(s.on)})`)))));

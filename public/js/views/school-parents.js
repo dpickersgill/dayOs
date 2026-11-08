@@ -205,12 +205,23 @@ async function familiesSettings(panel) {
       toast('Saved');
     } catch (err) { msg.append(errorBox(err)); }
   }, { kind: 'primary' });
+  // Each lesson's add-ons sit behind a one-line summary ("Offers Day ticket and Ski rental. Change"), so the page does not
+  // list every ticket and rental under every lesson (feat/school-pay). Change opens the two pickers for that lesson only.
+  const nameOf = (list, id) => (list.find((x) => Number(x.id) === Number(id)) || {}).name || null;
   const extras = f.lesson_products.map((p) => {
     const tk = select([['', 'No lift ticket'], ...f.tickets.map((x) => [String(x.id), x.name])], String(p.ticket_product_id || ''), { 'aria-label': `Lift ticket offered with ${p.name}` });
     const rn = select([['', 'No rental'], ...f.rentals.map((x) => [String(x.id), x.name])], String(p.rental_product_id || ''), { 'aria-label': `Rental offered with ${p.name}` });
-    const go = async () => { try { await put(`/skischool/families/extras/${p.id}`, { ticket_product_id: tk.value ? Number(tk.value) : null, rental_product_id: rn.value ? Number(rn.value) : null }); toast(`${p.name} saved`); } catch (err) { fail(err); } };
+    const words = h('span', { class: 'extras-words' });
+    const pickers = h('span', { class: 'row wrap extras-pick', hidden: true }, tk, rn);
+    const change = button('Change', () => { pickers.hidden = !pickers.hidden; change.textContent = pickers.hidden ? 'Change' : 'Done'; if (!pickers.hidden) tk.focus(); }, { small: true, kind: 'link', label: `Change what is offered with ${p.name}` });
+    const say = () => {
+      const offered = [nameOf(f.tickets, tk.value), nameOf(f.rentals, rn.value)].filter(Boolean);
+      words.textContent = offered.length ? `Offers ${offered.join(' and ')}.` : 'Offers nothing extra.';
+    };
+    const go = async () => { try { await put(`/skischool/families/extras/${p.id}`, { ticket_product_id: tk.value ? Number(tk.value) : null, rental_product_id: rn.value ? Number(rn.value) : null }); say(); toast(`${p.name} saved`); } catch (err) { fail(err); } };
     tk.addEventListener('change', go); rn.addEventListener('change', go);
-    return row(p.name, h('span', { class: 'row wrap' }, tk, rn), 'Offered with this lesson on the booking page, priced by age. A rental waits in the rental shop\'s Ready to fit.', { wide: true });
+    say();
+    return row(p.name, h('span', { class: 'stack tight' }, h('span', { class: 'row wrap extras-summary' }, words, ' ', change), pickers), 'Offered with this lesson on the booking page, priced by age. A rental waits in the rental shop\'s Ready to fit.', { wide: true });
   });
   panel.append(
     row('Send recaps after lessons', t.recap_on, 'Instructors send each family a short recap and the progress card.'),

@@ -63,7 +63,7 @@ const session = async (extra = {}) => {
 };
 /** Books a child into a lesson at the counter (with a waiver) and sets their level. */
 async function bookKid(sessionId, first, level, { dob = '2016-05-01' } = {}) {
-  const r = await api('POST', `/skischool/sessions/${sessionId}/bookings`, { token: T.counter, body: { student: { first_name: first, last_name: `Kid${suffix}`, date_of_birth: dob, sex: 'male' }, sign_waiver: true } });
+  const r = await api('POST', `/skischool/sessions/${sessionId}/bookings`, { token: T.counter, body: { student: { first_name: first, last_name: `Kid${suffix}`, date_of_birth: dob, sex: 'male' }, sign_waiver: true, waiver_signer: { name: 'Pat Parent' } } });
   assert.equal(r.status, 201, r.text);
   if (level) await q('UPDATE people SET ski_level = ? WHERE id = ?', [level, r.body.person_id]);
   return r.body;
