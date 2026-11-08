@@ -83,7 +83,13 @@ function shareDialog(season, again) {
 
 /** The printable season risk report. */
 export async function renderRiskReport(root, season) {
-  const r = await get(`/patrol/risk-report${season ? `?season=${encodeURIComponent(season)}` : ''}`);
+  let r;
+  try { r = await get(`/patrol/risk-report${season ? `?season=${encodeURIComponent(season)}` : ''}`); } catch (err) {
+    // Refused (a patroller's access level) or unavailable: the page still says what it is and how to get back.
+    root.append(h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Season risk report'), h('p', { class: 'muted' }, 'The patrol director and managers prepare this report for the insurance broker.'))),
+      errorBox(err), h('p', null, h('a', { class: 'btn', href: '#/patrol/cases' }, 'Back to cases')));
+    return;
+  }
   root.append(h('div', { class: 'print-page claim-file' },
     h('div', { class: 'no-print row wrap cf-bar' }, h('a', { class: 'btn', href: '#/patrol/cases?tab=risk' }, 'Back'), button('Print or save as PDF', () => window.print(), { kind: 'primary' }),
       button('Share with your broker', () => shareDialog(r.season, async () => {}))),

@@ -1,7 +1,7 @@
 // Messages (managers): write an email or text, see who it would reach, send a test, send it, and read what happened.
 // Only people who agreed (their consent history) are ever reached, and every message carries a way to stop.
 import { get, post, put, del } from '../api.js';
-import { h, clear, table, state, input, select, field, button, toast, fail, formDialog, confirmDialog, dialog, tabs, fmtDateTime, empty, errorBox } from '../ui.js';
+import { h, clear, table, state, input, select, field, button, toast, fail, formDialog, confirmDialog, dialog, tabs, fmtDateTime, empty, errorBox, ctx } from '../ui.js';
 
 export async function render(root) {
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Messages')),
@@ -112,5 +112,5 @@ async function auto(box) {
       h('li', null, h('strong', null, 'Rental overdue. '), 'An hour after gear was due back and has not been returned.'),
       h('li', null, h('strong', null, 'Season pass ending. '), 'Fourteen days before a pass ends, with how to renew.')),
     s.email_ready ? state('Email is connected', 'good') : state('Email is not connected yet', 'warn'),
-    h('p', { class: 'muted' }, 'Reminders use the same daily schedule as patrol follow-ups. Demo mountains never send.')));
+    h('p', { class: 'muted' }, ctx.me && ctx.me.sandbox ? 'Reminders use the same daily schedule as patrol follow-ups. Demo mountains never send.' : 'Reminders use the same daily schedule as patrol follow-ups.')));
 }

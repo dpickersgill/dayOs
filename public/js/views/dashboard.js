@@ -228,7 +228,7 @@ const TILES = {
     const nums = [
       d.counts.unfilled !== undefined ? [d.counts.unfilled, d.counts.unfilled === 1 ? 'shift still unfilled today' : 'shifts still unfilled today', 'workforce'] : null,
       [d.counts.open_orders, d.counts.open_orders === 1 ? 'open work order' : 'open work orders', 'conditions'],
-      d.counts.incidents !== undefined ? [d.counts.incidents, d.counts.incidents === 1 ? 'incident open' : 'incidents open', 'patrol'] : null,
+      d.counts.incidents !== undefined ? [d.counts.incidents, d.counts.incidents === 1 ? 'case open' : 'cases open', 'patrol'] : null,
     ].filter(Boolean);
     return h('div', { class: 'mboard' },
       h('div', { class: 'mb-h' }, h('b', null, 'Morning board'), h('span', null, d.as_of ? `As of ${fmtTime(String(d.as_of).replace(' ', 'T'))}` : '')),
@@ -279,8 +279,8 @@ const TILES = {
     d.unfilled.length ? link('Fill them', 'workforce') : null),
   certs: (d) => (d.list.length ? h('ul', { class: 'bd-list' }, d.list.map((c) => h('li', null, h('span', null, h('b', null, c.name), ` ${c.certification}`), state(c.overdue ? `Expired ${fmtDate(c.expires_on)}` : fmtDate(c.expires_on), c.overdue ? 'bad' : 'warn')))) : h('p', null, state('Nothing expires in the next 30 days', 'good'))),
   patrol: (d) => h('div', { class: 'stack tight' },
-    h('div', { class: 'figures' }, big(d.active_calls, 'active calls'), big(d.open_incidents, 'open incidents')),
-    d.recent.length ? h('ul', { class: 'bd-list' }, d.recent.map((i) => h('li', null, h('span', null, `${label(i.category)} at ${i.location}`), state(label(i.severity), i.severity === 'critical' || i.severity === 'serious' ? 'bad' : 'neutral')))) : h('p', null, state('No open incidents', 'good')),
+    h('div', { class: 'figures' }, big(d.active_calls, 'active calls'), big(d.open_incidents, 'open cases')),
+    d.recent.length ? h('ul', { class: 'bd-list' }, d.recent.map((i) => h('li', null, h('span', null, `${label(i.category)} at ${i.location}`), state(label(i.severity), i.severity === 'critical' || i.severity === 'serious' ? 'bad' : 'neutral')))) : h('p', null, state('No open cases', 'good')),
     link('Open Patrol', 'patrol')),
   notes: (d, board, reload) => {
     const text = input({ placeholder: 'Leave a note for the next shift', maxlength: 1000, 'aria-label': 'New shift note' });
