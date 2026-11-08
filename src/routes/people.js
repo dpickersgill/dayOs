@@ -12,6 +12,7 @@ const { audit } = require('../lib/audit');
 const { FIELDS, COLS, personCreate, personUpdate, isBlank } = require('../lib/customers');
 const { addLink, familyOf } = require('../lib/family');
 const { recordConsent } = require('../lib/consent');
+const PX = require('../lib/patientaccess');
 const patrolaccess = require('../lib/patrolaccess');
 const who = (req) => ({ userId: req.auth.userId, name: req.auth.email || null });
 
@@ -341,14 +342,26 @@ router.get('/:id/rental-profile', requireRole(...front), async (req, res) => {
 });
 
 router.get('/:id', requireRole(...readers), patrolLookup, async (req, res) => {
-  const p = await one(pool, `SELECT ${COLS} FROM people WHERE tenant_id = ? AND id = ?`, [req.auth.tenantId, paramId(req)]);
-  if (!p) throw notFound('Person');
+  const id = paramId(req);
+  let opened = null;
   if (req.auth.role === 'patrol') {
-    // Patrol opens a guest's record only once that guest is a patient on a case; finding someone goes through search.
-    const onCase = await one(pool, 'SELECT id FROM incident_patients WHERE tenant_id = ? AND person_id = ? LIMIT 1', [req.auth.tenantId, p.id]);
-    if (!onCase) throw notFound('Person');
-    await audit(pool, req, 'lookup', 'people', p.id, { by: 'id' });
+    // Patrol opens a guest's record by id only when the guest is a patient on a case this person may open: a case they
+    // are tied to, or any case after the records check (the case rule, lib/patientaccess.js). Finding someone goes
+    // through search. Before the check, "no such person", "not a patient" and "a patient on someone else's case" all get
+    // the same answer (the records check), so trying ids one by one does not show who was a patient.
+    const cases = (await rows(pool, 'SELECT DISTINCT incident_id FROM incident_patients WHERE tenant_id = ? AND person_id = ?', [req.auth.tenantId, id])).map((r) => Number(r.incident_id));
+    const reader = await PX.caseReader(pool, req);
+    const tied = reader && cases.length ? await PX.relations(pool, req, cases) : new Map();
+    const first = cases.find((c) => tied.has(c)) || (reader && req.auth.recordsChecked ? cases[0] : undefined);
+    if (first) opened = { id: first, fresh: !tied.has(first) };
+    if (!opened) {
+      if (!req.auth.recordsChecked) throw PX.needed();
+      throw notFound('Person');
+    }
   }
+  const p = await one(pool, `SELECT ${COLS} FROM people WHERE tenant_id = ? AND id = ?`, [req.auth.tenantId, id]);
+  if (!p) throw notFound('Person');
+  if (opened) await audit(pool, req, 'lookup', 'people', p.id, { by: 'id', incident_id: opened.id, fresh: opened.fresh });
   res.json(view(req, p));
 });
 
