@@ -213,6 +213,7 @@ router.post(
   validate(z.object({
     person_id: z.number().int().positive().optional(), student: studentSchema.optional(), sign_waiver: z.boolean().optional(), use_credit_id: z.number().int().positive().optional(), requested_instructor_id: z.number().int().positive().optional(),
     ...safetyShape, send_confirmation: z.boolean().optional(),
+    override_reason: z.string().trim().min(3).max(300).optional(), // a manager booking outside the ages or over the ratio (feat/school-safety)
   }).refine((b) => b.person_id || b.student, { message: 'Choose a student or enter their details' })),
   async (req, res) => {
     const { tenantId } = req.auth;
@@ -227,6 +228,7 @@ router.post(
     for (const k of Object.keys(safetyShape)) if (req.body[k] !== undefined) details[k] = req.body[k];
     const { bookingId } = await tx((conn) => bookStudent(conn, req, {
       sessionId: sid, personId: who.id, details, signWaiver: Boolean(req.body.sign_waiver), useCreditId: req.body.use_credit_id || null, requestedInstructorId: req.body.requested_instructor_id || null,
+      overrideReason: req.body.override_reason || null,
     }));
     const confirmation = req.body.send_confirmation === false ? null : await sendConfirmation(pool, tenantId, bookingId, baseUrl(req));
     res.status(201).json({ id: bookingId, session_id: sid, person_id: who.id, status: 'booked', customer: { created: who.created, matched: who.matched }, confirmation: confirmation ? { ok: confirmation.ok, to: confirmation.to || null, error: confirmation.error || null } : null });
@@ -247,7 +249,10 @@ router.patch('/bookings/:id/safety', requireRole(...school), validate(z.object(s
     const b = await one(conn, 'SELECT b.id, b.person_id, s.instructor_id FROM lesson_bookings b JOIN lesson_sessions s ON s.tenant_id = b.tenant_id AND s.id = b.session_id WHERE b.tenant_id = ? AND b.id = ? FOR UPDATE', [tenantId, paramId(req)]);
     if (!b) throw notFound('Booking');
     if (SA.ownOnly(req) && b.instructor_id !== req.auth.staffId) throw forbidden('Instructors can only change their own lessons');
+    // The pickup list is the family's word: the desk and managers change it, not the instructor (feat/school-safety).
+    if (req.body.pickup_adults && SA.ownOnly(req)) throw forbidden('Ask the desk to change who may pick up');
     await saveDetails(conn, req, b.id, b.person_id, req.body);
+    if (req.body.pickup_adults) await require('../lib/schoolsafety').savePickup(conn, tenantId, b.id, req.body.pickup_adults, { consent: Boolean(req.body.pickup_photo_consent), via: 'desk' });
     await audit(conn, req, 'safety_details', 'lesson_bookings', b.id, { fields: Object.keys(req.body) }); // the fields changed, never the details
   });
   res.json({ ok: true });

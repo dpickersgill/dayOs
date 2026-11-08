@@ -13,7 +13,21 @@ const { audit } = require('../lib/audit');
 const router = express.Router();
 const publicRouter = express.Router();
 const DISCIPLINES = [['ski', 'Ski'], ['snowboard', 'Snowboard'], ['telemark', 'Telemark'], ['adaptive', 'Adaptive']];
-const LEVELS = [['beginner', 'Beginner'], ['intermediate', 'Intermediate'], ['advanced', 'Advanced']];
+// One level scale (feat/school-safety): the nine levels everyone else uses. Old words on a profile are read as their range.
+const LV = require('../lib/levels');
+const LEVELS = LV.list('ski').map((l) => [String(l.level), `Level ${l.level}: ${l.short}`]);
+const OLD_WORDS = { first_timer: [1, 1], beginner: [1, 3], intermediate: [4, 6], advanced: [7, 9] };
+/** The levels an instructor is listed for: up to what they are cleared to teach, else what they ticked (old words mapped). */
+function levelsOf(p) {
+  const max = Math.max(Number(p.ski_level_max) || 0, Number(p.snowboard_level_max) || 0);
+  if (max) return Array.from({ length: max }, (_, i) => String(i + 1));
+  const out = new Set();
+  for (const v of csv(p.levels)) {
+    if (OLD_WORDS[v]) for (let n = OLD_WORDS[v][0]; n <= OLD_WORDS[v][1]; n++) out.add(String(n));
+    else if (/^[1-9]$/.test(v)) out.add(v);
+  }
+  return [...out].sort((a, b) => Number(a) - Number(b));
+}
 const KEYS = (list) => list.map((x) => x[0]);
 const MAX_DAYS_AHEAD = 366;
 const timeStr = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, 'Use a time such as 09:00');
@@ -66,11 +80,11 @@ router.get('/instructors', lookers, async (req, res) => {
 router.get('/me', crew, async (req, res) => {
   const s = await target(pool, req, req.query.staff_id);
   const today = todayIn(await tz(req.auth.tenantId));
-  const p = await one(pool, 'SELECT is_public, display_name, bio, disciplines, levels FROM instructor_profiles WHERE tenant_id = ? AND staff_id = ?', [req.auth.tenantId, s.id]);
+  const p = await one(pool, 'SELECT is_public, display_name, bio, disciplines, levels, ski_level_max, snowboard_level_max FROM instructor_profiles WHERE tenant_id = ? AND staff_id = ?', [req.auth.tenantId, s.id]);
   const windows = await rows(pool, 'SELECT id, open_date, start_time, end_time, note FROM instructor_open WHERE tenant_id = ? AND staff_id = ? AND open_date >= ? ORDER BY open_date, start_time', [req.auth.tenantId, s.id, today]);
   res.json({
     staff: { id: s.id, name: s.name }, today,
-    profile: { is_public: Boolean(p && p.is_public), display_name: p ? p.display_name : null, bio: p ? p.bio : null, disciplines: p ? csv(p.disciplines) : [], levels: p ? csv(p.levels) : [], shown_as: shortName(s, p) },
+    profile: { is_public: Boolean(p && p.is_public), display_name: p ? p.display_name : null, bio: p ? p.bio : null, disciplines: p ? csv(p.disciplines) : [], levels: p ? levelsOf(p) : [], levels_from_clearance: Boolean(p && (p.ski_level_max || p.snowboard_level_max)), shown_as: shortName(s, p) },
     windows: windows.map((w) => ({ id: w.id, open_date: ymd(w.open_date), start_time: hhmm(w.start_time), end_time: hhmm(w.end_time), note: w.note })),
   });
 });
@@ -81,11 +95,11 @@ const profileSchema = z.object({
   display_name: z.string().trim().max(60).nullable().optional(),
   bio: z.string().trim().max(600).nullable().optional(),
   disciplines: z.array(z.string()).max(8).default([]),
-  levels: z.array(z.string()).max(8).default([]),
+  levels: z.array(z.string()).max(9).default([]),
 });
 router.put('/profile', crew, validate(profileSchema), async (req, res) => {
   const b = req.body;
-  if (b.disciplines.some((d) => !KEYS(DISCIPLINES).includes(d)) || b.levels.some((d) => !KEYS(LEVELS).includes(d))) throw bad('Unknown discipline or level');
+  if (b.disciplines.some((d) => !KEYS(DISCIPLINES).includes(d)) || b.levels.some((d) => !KEYS(LEVELS).includes(d) && !OLD_WORDS[d])) throw bad('Unknown discipline or level');
   if (b.is_public && !b.disciplines.length) throw bad('Choose at least one thing you teach before listing yourself publicly');
   const s = await target(pool, req, b.staff_id);
   await pool.query(`INSERT INTO instructor_profiles (tenant_id, staff_id, is_public, display_name, bio, disciplines, levels) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -162,7 +176,7 @@ publicRouter.get('/:slug/instructor-availability', async (req, res) => {
   if (!t || !t.on_) throw notFound('Availability page');
   const now = nowIn(t.timezone);
   const today = now.slice(0, 10);
-  const profs = await rows(pool, `SELECT s.id, p.first_name, p.last_name, ip.display_name, ip.bio, ip.disciplines, ip.levels FROM instructor_profiles ip
+  const profs = await rows(pool, `SELECT s.id, p.first_name, p.last_name, ip.display_name, ip.bio, ip.disciplines, ip.levels, ip.ski_level_max, ip.snowboard_level_max FROM instructor_profiles ip
     JOIN staff s ON s.tenant_id = ip.tenant_id AND s.id = ip.staff_id AND s.status = 'active' JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id
     WHERE ip.tenant_id = ? AND ip.is_public = 1`, [t.id]);
   const key = new Map(profs.map((p, i) => [p.id, `i${i + 1}`]));
@@ -177,7 +191,7 @@ publicRouter.get('/:slug/instructor-availability', async (req, res) => {
   res.set('Cache-Control', 'public, max-age=60');
   res.json({
     mountain: t.name, phone: t.phone, today,
-    instructors: profs.map((p) => ({ id: key.get(p.id), name: shortName(p, p), bio: p.bio, disciplines: csv(p.disciplines), levels: csv(p.levels) })),
+    instructors: profs.map((p) => ({ id: key.get(p.id), name: shortName(p, p), bio: p.bio, disciplines: csv(p.disciplines), levels: levelsOf(p) })),
     days: [...days].map(([date, slots]) => ({ date, slots })),
     disciplines: Object.fromEntries(DISCIPLINES), levels: Object.fromEntries(LEVELS),
   });

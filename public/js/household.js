@@ -5,13 +5,13 @@
 import { h, clear } from './ui.js';
 import { code128 } from './barcode.js';
 import { shrink } from './photo.js';
+import { levelOptions } from './levels.js';
 
 const money = (c) => (c % 100 === 0 ? `$${c / 100}` : `$${(c / 100).toFixed(2)}`);
 const dateOf = (s) => new Date(`${s}T12:00:00Z`);
 const fmtDay = (s) => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }).format(dateOf(s));
 const shortDay = (s) => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' }).format(dateOf(s));
 const addDay = (s, n) => { const d = dateOf(s); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
-const LEVELS = { first_timer: 'First time', beginner: 'Beginner', intermediate: 'Intermediate', advanced: 'Advanced' };
 
 /** The next few days to pick from: today, tomorrow, the coming Saturday and Sunday. */
 function dayChoices(today) {
@@ -146,7 +146,7 @@ function familyCard(d, acall, onChange) {
   const rows = d.members.map((m) => {
     const bits = [m.date_of_birth ? `Born ${fmtDay(m.date_of_birth)}` : 'No birthday yet',
       m.height_in ? `${m.height_in} in` : null, m.weight_lb ? `${m.weight_lb} lb` : null, m.boot_size ? `boot ${m.boot_size}` : null,
-      m.ski_level ? `ski level ${m.ski_level}` : null, m.snowboard_level ? `snowboard level ${m.snowboard_level}` : null, m.ability_level ? LEVELS[m.ability_level] : null].filter(Boolean);
+      m.ski_level ? `ski level ${m.ski_level}` : null, m.snowboard_level ? `snowboard level ${m.snowboard_level}` : null].filter(Boolean);
     const edit = h('button', { type: 'button', class: 'btn small' }, 'Edit');
     edit.addEventListener('click', () => personDialog(m, acall, onChange));
     return h('li', { class: 'hh-member' }, h('div', null, h('b', null, `${m.first_name} ${m.last_name}`),
@@ -173,9 +173,10 @@ function personDialog(m, acall, onChange) {
   const boot = inp('pd-boot', m && m.boot_size, { maxlength: 10 });
   const sel = (id, opts, v) => h('select', { id }, h('option', { value: '' }, 'Not set'), opts.map(([k, t]) => h('option', { value: k, selected: String(v ?? '') === String(k) }, t)));
   const stance = sel('pd-st', [['regular', 'Regular (left foot forward)'], ['goofy', 'Goofy (right foot forward)']], m && m.stance);
-  const ability = sel('pd-ab', Object.entries(LEVELS), m && m.ability_level);
-  const ski = sel('pd-sk', Array.from({ length: 9 }, (_, i) => [i + 1, `Level ${i + 1}`]), m && m.ski_level);
-  const board = sel('pd-sb', Array.from({ length: 9 }, (_, i) => [i + 1, `Level ${i + 1}`]), m && m.snowboard_level);
+  // one level scale (1 to 9) everywhere; an old ability word on file shows as the level it maps to
+  const oldLevel = m && m.ability_level ? { first_timer: 1, beginner: 2, intermediate: 4, advanced: 7 }[m.ability_level] : null;
+  const ski = sel('pd-sk', levelOptions('ski'), (m && m.ski_level) || (m && m.discipline !== 'snowboard' ? oldLevel : null));
+  const board = sel('pd-sb', levelOptions('snowboard'), (m && m.snowboard_level) || (m && m.discipline === 'snowboard' ? oldLevel : null));
   const adult = h('input', { type: 'checkbox', id: 'pd-adult' });
   // A second adult's email is only used once they confirm it from the email we send them (2026.11.11).
   const email = inp('pd-em', '', { type: 'email', maxlength: 255, autocomplete: 'off' });
@@ -191,7 +192,7 @@ function personDialog(m, acall, onChange) {
   const form = h('form', { class: 'stack', novalidate: true }, h('h2', { id: 'pd-h' }, m ? `${m.first_name}'s details` : 'Add someone'),
     h('div', { class: 'hh-grid' }, f('pd-f', 'First name', first), f('pd-l', 'Last name', last), f('pd-b', 'Birthday', dob, 'Sets the ticket price'),
       f('pd-h', 'Height (inches)', ht), f('pd-w', 'Weight (pounds)', wt), f('pd-boot', 'Boot or shoe size', boot), f('pd-st', 'Snowboard stance', stance),
-      f('pd-ab', 'Ability', ability), f('pd-sk', 'Ski level', ski), f('pd-sb', 'Snowboard level', board), f('pd-ph', 'Pass photo (a clear face)', photoIn)),
+      f('pd-sk', 'Ski level', ski), f('pd-sb', 'Snowboard level', board), f('pd-ph', 'Pass photo (a clear face)', photoIn)),
     m ? null : h('label', { class: 'check-row', for: 'pd-adult' }, adult, h('span', null, 'This is another adult (not a child in my care)')),
     m ? null : emailF,
     err, h('div', { class: 'row' }, close, save));
@@ -200,7 +201,7 @@ function personDialog(m, acall, onChange) {
     e.preventDefault(); err.hidden = true;
     if (!first.value.trim() || !last.value.trim()) { err.textContent = 'Add a first and last name.'; err.hidden = false; return; }
     const body = { first_name: first.value.trim(), last_name: last.value.trim(), date_of_birth: dob.value || null, height_in: num(ht), weight_lb: num(wt), boot_size: boot.value.trim() || null,
-      stance: stance.value || null, ability_level: ability.value || null, ski_level: ski.value ? Number(ski.value) : null, snowboard_level: board.value ? Number(board.value) : null, ...(photo ? { photo } : {}) };
+      stance: stance.value || null, ski_level: ski.value ? Number(ski.value) : null, snowboard_level: board.value ? Number(board.value) : null, ...(photo ? { photo } : {}) };
     try {
       if (m) await acall('PATCH', `/account/people/${m.id}`, body);
       else { if (!adult.checked && !body.date_of_birth) { err.textContent = 'Add the birthday for a child: it sets their ticket price.'; err.hidden = false; return; } const r = await acall('POST', '/account/people', { ...body, adult: adult.checked, ...(adult.checked && email.value.trim() ? { email: email.value.trim() } : {}) });

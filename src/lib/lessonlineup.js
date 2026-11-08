@@ -13,6 +13,7 @@ const { studentClash, clashWords, lockStudents, spotsLeft, moveBookingRow } = re
 const familynotify = require('./familynotify');
 const mailer = require('./mailer');
 const { audit } = require('./audit');
+const SS = require('./schoolsafety'); // feat/school-safety: class sizes by age band
 
 /** The code on a booking's confirmation and label, read by the desk's scanner: 'L' and the booking number. */
 const bookingCode = (bookingId) => `L${bookingId}`;
@@ -157,18 +158,28 @@ async function board(db, tenantId, lineupId) {
     WHERE b.tenant_id = ? AND b.session_id IN (?) AND b.status IN ('booked','attended','no_show') ORDER BY p.first_name, p.last_name`, [tenantId, sessions.map((s) => s.id)]) : [];
   const settings = await S.get(db, tenantId);
   const kids = isKids(lineup, sessions);
-  const ratio = Number(lineup.ratio) || (kids ? settings.ratio_kids : settings.ratio_adults);
+  // The class size: this lineup's own (a manager set it) or, by default, the band of the youngest student (feat/school-safety).
+  const dayAges = students.filter((x) => x.status !== 'no_show').map((x) => ageOn(x.date_of_birth, day));
+  const own = Number(lineup.ratio) || null;
+  const bandLim = sessions.length ? SS.classLimit({ ...sessions[0], age_group: lineup.age_group }, dayAges, settings) : null;
+  const ratio = own || (bandLim ? bandLim.size : (kids ? settings.ratio_kids : settings.ratio_adults));
   const tz = await tzOf(db, tenantId);
   const now = nowIn(tz);
   const shape = (x, s) => ({ booking_id: x.booking_id, session_id: x.session_id, person_id: x.person_id, first_name: x.first_name, last_name: x.last_name, status: x.status,
     checked_in: Boolean(x.checked_in_at), checked_in_via: x.checked_in_via, age: ageOn(x.date_of_birth, day), unpaid: Boolean(Number(x.unpaid)),
     level: Number(x.level) || L.personLevel(x, s.discipline) || null, placement_level: Number(x.placement_level) || null, has_allergy: Boolean(Number(x.has_allergy)), has_medical: Boolean(Number(x.has_medical)), code: bookingCode(x.booking_id) });
-  const classes = sessions.map((s, i) => ({ ...s, color: COLORS[i % COLORS.length], level_words: L.range(s.level_min, s.level_max),
-    instructor: s.instructor_id ? `${s.instructor_first || ''} ${s.instructor_last || ''}`.trim() : null,
-    students: students.filter((x) => x.session_id === s.id).map((x) => shape(x, s)) }));
+  const classes = sessions.map((s, i) => {
+    const mine = students.filter((x) => x.session_id === s.id).map((x) => shape(x, s));
+    const live = mine.filter((x) => x.status !== 'no_show');
+    const lim = own ? { size: own, label: 'This lineup' } : SS.classLimit({ ...s, age_group: lineup.age_group }, live.map((x) => x.age), settings);
+    return { ...s, color: COLORS[i % COLORS.length], level_words: L.range(s.level_min, s.level_max),
+      instructor: s.instructor_id ? `${s.instructor_first || ''} ${s.instructor_last || ''}`.trim() : null,
+      limit: lim ? lim.size : null, over_ratio: Boolean(lim && live.length > lim.size), ratio_reason: lim && live.length > lim.size ? `${live.length} students: ${lim.label} classes take ${lim.size}` : null,
+      students: mine };
+  });
   const all = classes.flatMap((c) => c.students.filter((x) => x.status !== 'no_show'));
   return {
-    lineup: { id: lineup.id, starts_at: lineup.starts_at, product: lineup.product, discipline: lineup.discipline, age_group: lineup.age_group, status: lineup.status, ratio, kids,
+    lineup: { id: lineup.id, starts_at: lineup.starts_at, product: lineup.product, discipline: lineup.discipline, age_group: lineup.age_group, status: lineup.status, ratio, kids, ratio_by_band: !own,
       locked: lineup.status === 'locked' || now >= String(lineup.starts_at).slice(0, 19), split_at: lineup.split_at },
     classes,
     counts: { students: all.length, checked_in: all.filter((x) => x.checked_in).length },
@@ -188,14 +199,14 @@ async function teachers(db, tenantId) {
 }
 
 /** Why a teacher cannot take this class, in plain words, or null. Uses CORE's rules: staffProblems and the level clearance. */
-async function teacherProblem(db, tenantId, t, { discipline, levelMax, kids, startsAt, endsAt, ignoreLessonId = null, certIds = [] }) {
+async function teacherProblem(db, tenantId, t, { discipline, levelMax, kids, startsAt, endsAt, ignoreLessonId = null, certIds = [], skipAvailability = false }) {
   if (!Number(t.has_profile)) return 'Not set up: set what they teach'; // no teaching profile: never cleared for everything
   if (!L.instructorCovers(t, discipline, levelMax)) return `Not cleared to teach Level ${levelMax}`;
   if (kids && !Number(t.teaches_kids)) return 'Does not teach kids';
   if (discipline === 'adaptive' && !Number(t.teaches_adaptive)) return 'Does not teach adaptive';
   const taught = String(t.disciplines || '').split(',').map((x) => x.trim()).filter(Boolean);
   if (taught.length && !taught.includes(discipline)) return `Does not teach ${discipline}`;
-  const p = await staffProblems(db, tenantId, { staffId: t.id, certificationIds: certIds, startsAt, endsAt, ignoreLessonId });
+  const p = await staffProblems(db, tenantId, { staffId: t.id, certificationIds: certIds, startsAt, endsAt, ignoreLessonId, skipAvailability });
   return p.length ? p[0] : null;
 }
 
@@ -227,15 +238,20 @@ async function suggestSplit(db, tenantId, lineupId, { from = 'checked_in' } = {}
   if (from === 'checked_in') students = students.filter((x) => x.checked_in);
   students.sort((a, c) => a.sortLevel - c.sortLevel || (a.age ?? 99) - (c.age ?? 99) || String(a.first_name).localeCompare(c.first_name));
   const ratio = b.lineup.ratio;
-  const n = Math.max(Math.ceil(students.length / ratio), students.length ? 1 : 0);
-  const groups = chunks(students, n);
+  // Classes by level then age, each no bigger than its youngest student's band allows (feat/school-safety), or the
+  // lineup's own size when a manager set one. More classes are added until every class fits.
+  const settings = await S.get(db, tenantId);
+  const limitOf = (g) => (b.lineup.ratio_by_band ? (SS.classLimit({ ...tmpl, age_group: b.lineup.age_group }, g.map((x) => x.age), settings) || { size: ratio }).size : ratio);
+  let n = Math.max(Math.ceil(students.length / ratio), students.length ? 1 : 0);
+  let groups = chunks(students, n);
+  while (n < students.length && groups.some((g) => g.length > limitOf(g))) { n += 1; groups = chunks(students, n); }
   const existing = [...b.classes];
   const classes = groups.map((g, i) => {
     const lv = g.map((x) => x.sortLevel);
     const ages = g.map((x) => x.age).filter((a) => a !== null && a !== undefined);
     const s = existing[i] || null;
     return { session_id: s ? s.id : null, color: COLORS[i % COLORS.length], level_min: Math.min(...lv), level_max: Math.max(...lv), age_min: ages.length ? Math.min(...ages) : null, age_max: ages.length ? Math.max(...ages) : null,
-      meeting_place: (s || tmpl).meeting_place, instructor_id: s ? s.instructor_id : null, instructor: s ? s.instructor : null, students: g.map(({ sortLevel, ...x }) => x) };
+      meeting_place: (s || tmpl).meeting_place, instructor_id: s ? s.instructor_id : null, instructor: s ? s.instructor : null, limit: limitOf(g), students: g.map(({ sortLevel, ...x }) => x) };
   });
   // classes of the lineup no longer needed stay, empty: the director can cancel them or keep them for walk-ups
   const empty = existing.slice(groups.length).map((s) => ({ session_id: s.id, color: s.color, level_min: s.level_min, level_max: s.level_max, meeting_place: s.meeting_place, instructor_id: s.instructor_id, instructor: s.instructor, students: [] }));
@@ -245,13 +261,14 @@ async function suggestSplit(db, tenantId, lineupId, { from = 'checked_in' } = {}
   const when = { discipline: b.lineup.discipline, kids: b.lineup.kids, startsAt: tmpl.starts_at, endsAt: tmpl.ends_at, certIds: tmpl.required_certification_id ? [tmpl.required_certification_id] : [] };
   const capOf = (t) => Number(b.lineup.discipline === 'snowboard' ? t.snowboard_level_max : t.ski_level_max) || 10;
   for (const c of [...classes].sort((x, y) => y.level_max - x.level_max)) {
+    // An instructor assigned to a class stays on it (feat/school-safety): the split never drops or swaps them. Anything
+    // to look at (cleared to a lower level than the new group) is a note for the director, who moves them by hand.
+    // Their availability was checked when they were assigned, so it is not asked again here.
     if (c.instructor_id) {
       const t = pool.find((x) => x.id === c.instructor_id);
-      const why = t ? await teacherProblem(db, tenantId, t, { ...when, levelMax: c.level_max, ignoreLessonId: c.session_id }) : null;
-      if (!why) continue;
-      c.instructor_problem = why;
-      taken.delete(c.instructor_id);
-      c.was_instructor = c.instructor; c.instructor_id = null; c.instructor = null;
+      const why = t ? await teacherProblem(db, tenantId, t, { ...when, levelMax: c.level_max, ignoreLessonId: c.session_id, skipAvailability: true }) : null;
+      if (why) c.instructor_note = why;
+      continue;
     }
     const fits = [];
     for (const t of pool) {
@@ -261,7 +278,7 @@ async function suggestSplit(db, tenantId, lineupId, { from = 'checked_in' } = {}
     fits.sort((x, y) => capOf(x) - capOf(y));
     if (fits.length) { c.instructor_id = fits[0].id; c.instructor = `${fits[0].first_name} ${fits[0].last_name}`; taken.add(fits[0].id); } else c.needs_instructor = true;
   }
-  return { lineup: b.lineup, from, ratio, classes, empty, left_out: leftOut };
+  return { lineup: b.lineup, from, ratio, classes, empty, left_out: leftOut, students: students.length, can_use: students.length > 0 };
 }
 
 /** Plain words for a class: "Ian's group, Level 3, meeting at the Magic Carpet". */
@@ -357,6 +374,8 @@ async function applySplit(conn, req, lineupId, classes, { isManager = false } = 
   if (!sessions.length) throw conflict('This lineup has no lessons');
   const ids = new Set(sessions.map((s) => s.id));
   const bookings = await rows(conn, "SELECT id, session_id, person_id FROM lesson_bookings WHERE tenant_id = ? AND session_id IN (?) AND status IN ('booked','attended')", [tenantId, [...ids]]);
+  // A split with nobody in it changes nothing (feat/school-safety): the board does not offer it either.
+  if (!classes.some((c) => c.booking_ids.length)) throw conflict('There is nobody to split yet. Check students in, or split everyone booked.');
   const bIds = new Set(bookings.map((x) => x.id));
   const seen = new Set();
   for (const c of classes) {
@@ -380,7 +399,10 @@ async function applySplit(conn, req, lineupId, classes, { isManager = false } = 
     const staffId = c.instructor_id === undefined ? (own ? own.instructor_id : null) : c.instructor_id;
     const levelMax = c.level_max ?? (own ? own.level_max : null);
     const cert = (own || tmpl).required_certification_id;
-    if (staffId) {
+    // The class's own instructor staying on it is not checked again (feat/school-safety: the split keeps assigned
+    // instructors); a new instructor, or one the director moved here, is checked in full.
+    const keeps = own && staffId && Number(staffId) === Number(own.instructor_id);
+    if (staffId && !keeps) {
       const t = (await teachers(conn, tenantId)).find((x) => x.id === staffId);
       if (!t) throw bad('That instructor is not an active instructor');
       const why = await teacherProblem(conn, tenantId, t, { discipline: tmpl.discipline, levelMax, kids, startsAt: tmpl.starts_at, endsAt: tmpl.ends_at, ignoreLessonId: c.session_id || null, certIds: cert ? [cert] : [] });

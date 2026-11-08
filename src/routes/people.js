@@ -9,7 +9,7 @@ const { VALID } = require('../lib/waivers');
 const { z, validate, paramId, seasonFor, todayIn } = require('../lib/util');
 const { notFound, conflict, bad, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
-const { FIELDS, COLS, personCreate, personUpdate, isBlank } = require('../lib/customers');
+const { FIELDS, COLS, personCreate, personUpdate, isBlank, mapOldLevel } = require('../lib/customers');
 const { addLink, familyOf } = require('../lib/family');
 const { recordConsent } = require('../lib/consent');
 const patrolaccess = require('../lib/patrolaccess');
@@ -353,7 +353,7 @@ router.get('/:id', requireRole(...readers), patrolLookup, async (req, res) => {
 });
 
 router.post('/', requireRole(...front), validate(personCreate), async (req, res) => {
-  const b = req.body;
+  const b = mapOldLevel(req.body); // an older screen's ability word becomes a level (feat/school-safety)
   await emailTaken(req, b.email);
   const keys = FIELDS.map((f) => f.key).concat('notes').filter((k) => k !== 'marketing_opt_in' && !isBlank(b[k]));
   const optIn = b.marketing_opt_in === true;
@@ -368,7 +368,7 @@ router.post('/', requireRole(...front), validate(personCreate), async (req, res)
 
 router.patch('/:id', requireRole(...front), validate(personUpdate), async (req, res) => {
   const id = paramId(req);
-  const b = req.body;
+  const b = mapOldLevel(req.body);
   const cur = await one(pool, `SELECT ${COLS} FROM people WHERE tenant_id = ? AND id = ?`, [req.auth.tenantId, id]);
   if (!cur) throw notFound('Person');
   if (b.email !== undefined) await emailTaken(req, b.email, id);

@@ -68,13 +68,14 @@ async function guestLessons(t, extraWhere = '', params = []) {
   const held = await F.heldSpots(pool, t.id);
   const tiers = await rows(pool, 'SELECT product_id, tier, price_cents FROM price_tiers WHERE tenant_id = ?', [t.id]);
   const extras = await F.productExtras(pool, t.id);
+  const set = await S.get(pool, t.id); // the class size by age band caps the places online (feat/school-safety)
   return sessions.map((s) => ({
     id: s.id, starts_at: s.starts_at, ends_at: s.ends_at, product: s.product, product_id: s.product_id, discipline: s.discipline, ability_level: s.ability_level, format: s.format, age_group: s.age_group, meeting_place: s.meeting_place,
     pool: s.kind === 'pool', // 2026.11.9 (Track GUEST): a pool is booked as a time; the lineup places each student in a class
     level_min: s.level_min, level_max: s.level_max, level_words: L.range(s.level_min, s.level_max), age_min: s.age_min, age_max: s.age_max, ages: F.agesWords(s.age_min, s.age_max),
     offers_ticket: Boolean((extras.get(Number(s.product_id)) || {}).ticket_product_id), offers_rental: Boolean((extras.get(Number(s.product_id)) || {}).rental_product_id),
     price_cents: s.base_price_cents, prices: tiers.filter((x) => x.product_id === s.product_id).map((x) => ({ tier: x.tier, price_cents: x.price_cents })),
-    spots_left: Math.max(s.capacity - Number(s.booked) - (held.get(Number(s.id)) || 0), 0),
+    spots_left: Math.max(require('../lib/schoolsafety').bandCap(s, set) - Number(s.booked) - (held.get(Number(s.id)) || 0), 0),
   }));
 }
 
@@ -193,6 +194,9 @@ const studentSchema = z.object({
   height_in: z.number().int().min(20).max(96).optional(),
   weight_lb: z.number().int().min(20).max(500).optional(),
   boot_size: z.string().trim().max(10).optional(),
+  // feat/school-safety: who may pick up (names, relationship, phone; photos are added on the family's lesson page) and an adaptive intake
+  pickup_adults: z.array(require('../lib/schoolsafety').pickupAdult.omit({ photo: true, id: true })).max(6).optional(),
+  adaptive: require('../lib/schoolsafety').adaptiveIntake.optional(),
 });
 const requestSchema = z.object({
   session_id: z.number().int().positive(),
@@ -229,6 +233,7 @@ router.post('/:slug/requests', validate(requestSchema), async (req, res) => {
     held += Number((await one(conn, "SELECT COUNT(*) AS n FROM lesson_waitlist WHERE tenant_id = ? AND session_id = ? AND status = 'offered' AND offer_expires_at > UTC_TIMESTAMP()", [t.id, s.id])).n); // a waitlist offer holds its spot
     if (pend.length >= MAX_PENDING_PER_LESSON) throw conflict('This lesson has a lot of requests waiting. Please call the ski school.');
     if (s.capacity - Number(n) - held < b.students.length) throw conflict(`Only ${Math.max(s.capacity - Number(n) - held, 0)} spot(s) are left in that lesson`);
+    await require('../lib/schoolsafety').onlineCheck(conn, t.id, s, b.students, { held }); // ages and the ratio by age band (feat/school-safety)
     const { total } = await one(conn, `SELECT COUNT(*) AS total FROM lesson_requests WHERE tenant_id = ? AND status IN ${HOLD}`, [t.id]);
     if (Number(total) >= MAX_PENDING_TOTAL) throw conflict('The ski school has a lot of requests waiting right now. Please call to book.');
     // Anyone under 18 is booked by an adult: the contact is the parent or guardian and must be an adult themselves.
