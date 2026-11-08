@@ -227,7 +227,7 @@ export function sectionPanel({ def, section, scope, row, editable, required, req
         const rows = [];
         const sel = new Map();
         for (const p of def.body.sided) {
-          const s = h('select', { 'aria-label': `${p.label}: left, right or both` }, h('option', { value: '' }, '—'), h('option', { value: 'L', selected: cur[p.value] === 'L' }, 'L'), h('option', { value: 'R', selected: cur[p.value] === 'R' }, 'R'), h('option', { value: 'B', selected: cur[p.value] === 'B' }, 'B'));
+          const s = h('select', { 'aria-label': `${p.label}: left, right or both` }, h('option', { value: '' }, 'Not set'), h('option', { value: 'L', selected: cur[p.value] === 'L' }, 'L'), h('option', { value: 'R', selected: cur[p.value] === 'R' }, 'R'), h('option', { value: 'B', selected: cur[p.value] === 'B' }, 'B'));
           sel.set(p.value, () => s.value || null);
           rows.push(h('div', { class: 'part' }, h('span', null, p.label), s));
         }

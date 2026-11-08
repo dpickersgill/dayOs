@@ -741,7 +741,7 @@ async function injuryReport(query = { season: seasonNow(), region: '' }) {
   if (r.empty_period) { body.append(empty('The season has no full month yet.')); return; }
   if (r.too_few_mountains) { body.append(empty(r.reason === 'rest_of_network' ? 'A region is shown on its own only when the rest of the network is none or at least 3 mountains. Otherwise the two reports together would show one or two mountains.' : `Nothing is shown until at least ${r.rules.min_mountains} mountains share${query.region ? ' in this region' : ''}. ${r.mountains.sharing} so far.`)); return; }
 
-  const fig = (value, name, note) => h('div', { class: 'figure' }, h('strong', null, value === null || value === undefined ? '—' : String(value)), h('span', null, name), note ? h('em', null, note) : null);
+  const fig = (value, name, note) => h('div', { class: 'figure' }, h('strong', null, value === null || value === undefined ? 'Not set' : String(value)), h('span', null, name), note ? h('em', null, note) : null);
   body.append(h('div', { class: 'figures' },
     fig(r.mountains.sharing, 'Mountains', `${r.mountains.named} named, ${r.mountains.anonymous} anonymous`),
     fig(r.hidden ? 'Not shown' : r.patients, 'Patients counted'),
