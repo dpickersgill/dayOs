@@ -221,7 +221,9 @@ router.get('/access-log', patrol, needs('view_access_log'), async (req, res) => 
                                  LEFT JOIN incidents i ON a.entity = 'incidents' AND i.id = a.entity_id AND i.tenant_id = a.tenant_id
                                  WHERE ${where.join(' AND ')} ORDER BY a.id DESC LIMIT ?`, [...params, limit]);
   await audit(pool, req, 'view_access_log', 'audit_log', null, { rows: data.length });
-  res.json({ data: data.map((r) => ({ id: r.id, at: r.at, action: r.action, entity: r.entity, entity_id: r.entity_id, case_number: r.season ? caseNumber(r) : null, user_id: r.user_id, user_email: r.user_email, detail: typeof r.detail === 'string' ? JSON.parse(r.detail) : r.detail })), limit });
+  // fields stay as saved (database names); field_labels are the words the case report uses for them.
+  const withLabels = (d) => (d && Array.isArray(d.fields) ? { ...d, field_labels: require('../lib/nsaar').fieldLabels(d.fields) } : d);
+  res.json({ data: data.map((r) => ({ id: r.id, at: r.at, action: r.action, entity: r.entity, entity_id: r.entity_id, case_number: r.season ? caseNumber(r) : null, user_id: r.user_id, user_email: r.user_email, detail: withLabels(typeof r.detail === 'string' ? JSON.parse(r.detail) : r.detail) })), limit });
 });
 
 // ---------------------------------------------------------------- exports (managers)
@@ -239,7 +241,7 @@ const exportSearch = async (req, data, what) => {
   if (req.query.q) await audit(pool, req, 'search', 'incidents', null, { export: what, matches: data.length, ids: data.slice(0, 50).map((r) => r.id).filter(Boolean) });
 };
 router.get('/incidents.csv', patrol, needs('reports'), stepUp('download case records'), async (req, res) => {
-  PX.searchCheck(req); // a full export is every case at once: the records check, searched or not (Dan, 2026-11-05)
+  PX.searchCheck(req, 'download'); // a full export is every case at once: the records check, searched or not (Dan, 2026-11-05)
   const { where, params } = filters(req);
   const data = await rows(
     pool,
@@ -257,7 +259,7 @@ router.get('/incidents.csv', patrol, needs('reports'), stepUp('download case rec
 
 /** One row per patient with structured fields only (no names, no free text), for injury statistics. */
 router.get('/patients.csv', patrol, needs('reports'), stepUp('download patient statistics'), async (req, res) => {
-  PX.searchCheck(req); // as incidents.csv
+  PX.searchCheck(req, 'download'); // as incidents.csv
   const { where, params } = filters(req);
   const data = await rows(
     pool,

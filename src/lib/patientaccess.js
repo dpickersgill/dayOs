@@ -35,9 +35,18 @@ const RECORDS_MINUTES = () => Number(process.env.RECORDS_CHECK_MINUTES || 30);
 const ROOT_ROLES = ['owner', 'manager'];
 const ROOT_LEVELS = ['admin', 'approver'];
 
-function needed() {
-  const err = forbidden('Confirm it is you to open this patient record');
-  err.details = { code: 'step_up_required', what: 'open this patient record', scope: 'records' };
+// reason tells the app which action asked for the check, so its prompt names that action (public/js/stepup.js):
+// open (a patient record), search (cases by name), download (every case at once), past_calls (the dispatch board).
+const REASONS = {
+  open: ['Confirm it is you to open this patient record', 'open this patient record'],
+  search: ['Searching cases by name can find a patient, so it needs a fresh check', 'search cases'],
+  download: ['A download has every case in it, so it needs a fresh check', 'download these cases'],
+  past_calls: ['Past calls can name a patient, so they need a fresh check', 'see past calls'],
+};
+function needed(reason = 'open') {
+  const [message, what] = REASONS[reason] || REASONS.open;
+  const err = forbidden(message);
+  err.details = { code: 'step_up_required', what, scope: 'records', reason: REASONS[reason] ? reason : 'open' };
   return err;
 }
 
@@ -183,9 +192,9 @@ function byChild(param, sql, { skipOther = false, allow = null } = {}) {
 /** For a read that names a case some other way (a records request's pack, the area login's report). */
 const guard = (db, req, id) => check(db, req, id);
 
-/** Searching cases can find a patient by name: it needs the fresh check, whatever the cases are. */
-function searchCheck(req) {
-  if (!req.auth.recordsChecked) throw needed();
+/** Searching cases can find a patient by name: it needs the fresh check, whatever the cases are (reason: search or download). */
+function searchCheck(req, reason = 'search') {
+  if (!req.auth.recordsChecked) throw needed(reason);
 }
 
 /** Whether this person may see cases at all (the patrol feature "See cases"; owners and managers always may). */

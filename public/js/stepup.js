@@ -8,6 +8,20 @@ import * as passkey from './passkey.js';
 
 let waiting = null; // one dialog at a time: several requests asking together share it
 
+// The records check names the action that asked for it (details.reason from lib/patientaccess.js needed()), so a search
+// is never told it is opening a record. [title, why, passkey button, what Cancel leaves]
+const RECORDS = {
+  open: ['Open a patient record', 'This patient record is not one of your cases from this shift. Confirm it is you to open it.', 'Use my passkey to open it', 'Not confirmed, so the record stays closed'],
+  search: ['Search cases', 'Searching cases by name can find a patient, so it needs a fresh check. Confirm it is you to search.', 'Use my passkey to search', 'Not confirmed, so the search was not run'],
+  download: ['Download cases', 'A download has every case in it, so it needs a fresh check. Confirm it is you to download.', 'Use my passkey to download', 'Not confirmed, so nothing was downloaded'],
+  past_calls: ['See past calls', 'Past calls can name a patient, so they need a fresh check. Confirm it is you to see them.', 'Use my passkey to see them', 'Not confirmed, so past calls stay hidden'],
+};
+export const recordsText = (reason) => RECORDS[reason] || RECORDS.open;
+const NOTE = {
+  open: 'Patient records are private. One check opens older and other people\'s cases for the next 30 minutes, and every open is on the access log.',
+  other: 'Patient records are private. One check covers searches and other people\'s cases for the next 30 minutes, and every search and open is on the access log.',
+};
+
 // details.scope 'records': the patient-record check (feat/auth-hardening). Asked in place when someone opens a case that is
 // not their own recent work; the case opens straight after. One check covers patient records for 30 minutes. Gloves in
 // mind: the passkey is one large button, first.
@@ -16,13 +30,16 @@ export function confirmItsYou(details = {}) {
   const records = details.scope === 'records';
   waiting = new Promise((resolve, reject) => {
     let done = false;
-    const finish = (ok, err) => { if (done) return; done = true; waiting = null; dlg.close(); if (ok) resolve(); else reject(err || new Error(records ? 'Not confirmed, so the record stays closed' : 'Not confirmed, so nothing was changed')); };
+    const reason = RECORDS[details.reason] ? details.reason : 'open';
+    const [title, why, passkeyLabel, cancelled] = recordsText(reason);
+    const cancel = () => { const e = new Error(records ? cancelled : 'Not confirmed, so nothing was changed'); e.code = 'step_up_cancelled'; e.reason = records ? reason : null; return e; };
+    const finish = (ok, err) => { if (done) return; done = true; waiting = null; dlg.close(); if (ok) resolve(); else reject(err || cancel()); };
     const slot = h('div');
     const body = records
-      ? h('div', { class: 'stack', 'data-step-up': 'records' }, h('p', null, 'This patient record is not one of your cases from this shift. Confirm it is you to open it.'),
-        h('p', { class: 'muted small' }, 'Patient records are private. One check opens older and other people\'s cases for the next 30 minutes, and every open is on the access log.'), slot)
+      ? h('div', { class: 'stack', 'data-step-up': 'records', 'data-reason': reason }, h('p', null, why),
+        h('p', { class: 'muted small' }, reason === 'open' ? NOTE.open : NOTE.other), slot)
       : h('div', { class: 'stack', 'data-step-up': '' }, h('p', null, `To ${details.what || 'do this'}, confirm it is you.`), h('p', { class: 'muted small' }, 'Being signed in is not enough for this. You will not be asked again for the next few minutes.'), slot);
-    const dlg = dialog(records ? 'Open a patient record' : 'Confirm it is you', body, { onClose: () => finish(false) });
+    const dlg = dialog(records ? title : 'Confirm it is you', body, { onClose: () => finish(false) });
     const scope = records ? { scope: 'records' } : {};
     (async () => {
       let opts;
@@ -35,7 +52,7 @@ export function confirmItsYou(details = {}) {
       };
       const parts = [];
       if (opts.methods.includes('passkey') && opts.passkey) {
-        const b = button(records ? 'Use my passkey to open it' : 'Use my passkey', async () => {
+        const b = button(records ? passkeyLabel : 'Use my passkey', async () => {
           clear(err);
           try {
             const fresh = b.dataset.used ? await post('/auth/step-up/options', scope) : opts; // a challenge works once

@@ -262,7 +262,8 @@ async function drawCases(box, { canAdmin } = {}) {
   function clearAll() { Object.assign(f, REMEMBER); q.value = ''; category.value = ''; severity.value = ''; from.value = ''; to.value = ''; sync(); load(); }
   function drawSummary(count) {
     const pills = active();
-    clear(summary).append(h('b', null, count == null ? 'Loading…' : `${count} case${count === 1 ? '' : 's'}`),
+    const head = count === false ? 'Search not run' : count === 'error' ? 'Could not load cases' : count == null ? 'Loading…' : `${count} case${count === 1 ? '' : 's'}`;
+    clear(summary).append(h('b', null, head),
       ...pills.map(([name, value, undo]) => h('button', { type: 'button', class: 'pill', 'aria-label': `Remove ${name} filter: ${value}`, onclick: () => { undo(); q.value = f.q; category.value = f.category; severity.value = f.severity; from.value = f.from; to.value = f.to; sync(); load(); } }, `${value} ×`)),
       ...(pills.length ? [button('Clear all', clearAll, { small: true, kind: 'ghost' })] : []));
   }
@@ -293,7 +294,21 @@ async function drawCases(box, { canAdmin } = {}) {
         }, { small: true })] : []));
       drawMore();
       clear(list).append(rowsBox, more);
-    } catch (err) { if (my === token) clear(list).append(errorBox(err)); }
+    } catch (err) {
+      if (my !== token) return;
+      // Cancelling the records check a search asks for leaves a page that still works: the search is not run, and the
+      // person can clear it (the list comes back without the check) or confirm and search again.
+      if (err && err.code === 'step_up_cancelled' && f.q.trim()) {
+        drawSummary(false);
+        const clearSearch = () => { clearTimeout(timer); f.q = ''; q.value = ''; remember(); load(); };
+        clear(list).append(h('div', { class: 'empty', 'data-search-cancelled': '' },
+          h('p', null, 'The search was not run. Searching cases by name can find a patient, so it needs a fresh check.'),
+          h('div', { class: 'row' }, button('Clear search', clearSearch, { small: true }), button('Search again', () => load(), { small: true, kind: 'primary' }))));
+        return;
+      }
+      drawSummary('error'); // the filters stay, without a count that never comes
+      clear(list).append(errorBox(err));
+    }
   }
   let timer;
   q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { f.q = q.value; remember(); load(); }, 300); });

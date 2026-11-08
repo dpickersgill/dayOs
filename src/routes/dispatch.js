@@ -116,7 +116,7 @@ router.get('/dispatch', patrol, needs('dispatch'), async (req, res) => {
   const { tenantId } = req.auth;
   const today = await todayOf(tenantId);
   const current = (!req.query.status || req.query.status === 'active') || String(req.query.date || '') === today;
-  if (!current && !req.auth.recordsChecked) throw PX.needed(); // the season's calls, or another day's
+  if (!current && !req.auth.recordsChecked) throw PX.needed('past_calls'); // the season's calls, or another day's
   const where = ['c.tenant_id = ?'];
   const params = [tenantId];
   if (req.query.status === 'active' || !req.query.status) { where.push(`c.status IN (${ACTIVE.map(() => '?').join(',')})`); params.push(...ACTIVE); }
