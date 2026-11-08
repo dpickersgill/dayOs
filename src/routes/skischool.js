@@ -14,6 +14,7 @@ const { sendConfirmation } = require('../lib/lessonconfirm');
 const { instructorFit, NOT_SET_UP } = require('../lib/school');
 const { baseUrl } = require('../lib/baseurl');
 const LS = require('../lib/lessonspots'); // 2026.11.9 Track STAFF: spots that follow staff recount after a change
+const SSAFE = require('../lib/schoolsafety'); // feat/school-safety
 
 const router = express.Router();
 const school = ['instructor', 'manager', 'counter'];
@@ -213,6 +214,7 @@ router.post(
   validate(z.object({
     person_id: z.number().int().positive().optional(), student: studentSchema.optional(), sign_waiver: z.boolean().optional(), use_credit_id: z.number().int().positive().optional(), requested_instructor_id: z.number().int().positive().optional(),
     ...safetyShape, send_confirmation: z.boolean().optional(),
+    override_reason: z.string().trim().min(3).max(300).optional(), // a manager booking outside the ages or over the ratio (feat/school-safety)
   }).refine((b) => b.person_id || b.student, { message: 'Choose a student or enter their details' })),
   async (req, res) => {
     const { tenantId } = req.auth;
@@ -227,6 +229,7 @@ router.post(
     for (const k of Object.keys(safetyShape)) if (req.body[k] !== undefined) details[k] = req.body[k];
     const { bookingId } = await tx((conn) => bookStudent(conn, req, {
       sessionId: sid, personId: who.id, details, signWaiver: Boolean(req.body.sign_waiver), useCreditId: req.body.use_credit_id || null, requestedInstructorId: req.body.requested_instructor_id || null,
+      overrideReason: req.body.override_reason || null,
     }));
     const confirmation = req.body.send_confirmation === false ? null : await sendConfirmation(pool, tenantId, bookingId, baseUrl(req));
     res.status(201).json({ id: bookingId, session_id: sid, person_id: who.id, status: 'booked', customer: { created: who.created, matched: who.matched }, confirmation: confirmation ? { ok: confirmation.ok, to: confirmation.to || null, error: confirmation.error || null } : null });
@@ -247,7 +250,10 @@ router.patch('/bookings/:id/safety', requireRole(...school), validate(z.object(s
     const b = await one(conn, 'SELECT b.id, b.person_id, s.instructor_id FROM lesson_bookings b JOIN lesson_sessions s ON s.tenant_id = b.tenant_id AND s.id = b.session_id WHERE b.tenant_id = ? AND b.id = ? FOR UPDATE', [tenantId, paramId(req)]);
     if (!b) throw notFound('Booking');
     if (SA.ownOnly(req) && b.instructor_id !== req.auth.staffId) throw forbidden('Instructors can only change their own lessons');
+    // The pickup list is the family's word: the desk and managers change it, not the instructor (feat/school-safety).
+    if (req.body.pickup_adults && SA.ownOnly(req)) throw forbidden('Ask the desk to change who may pick up');
     await saveDetails(conn, req, b.id, b.person_id, req.body);
+    if (req.body.pickup_adults) await require('../lib/schoolsafety').savePickup(conn, tenantId, b.id, req.body.pickup_adults, { consent: Boolean(req.body.pickup_photo_consent), via: 'desk' });
     await audit(conn, req, 'safety_details', 'lesson_bookings', b.id, { fields: Object.keys(req.body) }); // the fields changed, never the details
   });
   res.json({ ok: true });
@@ -343,27 +349,41 @@ const seesDetails = (req, s) => !SA.ownOnly(req) || (s && s.instructor_id === re
 const DETAIL_KEYS = ['allergies', 'medical', 'pickup', 'contact_name', 'contact_phone', 'contact_email'];
 
 router.get('/sessions/:id/roster', requireRole(...school), async (req, res) => {
-  const s = await one(pool, 'SELECT id, instructor_id, discipline FROM lesson_sessions WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, paramId(req)]);
+  const s = await one(pool, 'SELECT id, instructor_id, discipline, starts_at, ends_at, age_min, age_max, age_group FROM lesson_sessions WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, paramId(req)]);
   if (!s) throw notFound('Lesson session');
   // A plain instructor reads only the rosters of their own lessons (2026.11.11).
   if (SA.ownOnly(req) && s.instructor_id !== req.auth.staffId) throw forbidden('Instructors can only see the rosters of their own lessons');
   const data = await rows(
     pool,
     `SELECT b.id AS booking_id, b.status, b.unpaid, b.credit_id, b.instructor_notes, b.level AS booked_level, b.allergies, b.medical, b.pickup, b.contact_name, b.contact_phone, b.contact_email,
-       b.text_ok, b.photo_ok, b.checked_in_at, b.checked_in_via, b.confirmed_at, p.id AS person_id, p.first_name, p.last_name, p.date_of_birth, p.ski_level, p.snowboard_level,
+       b.text_ok, b.photo_ok, b.checked_in_at, b.checked_in_via, b.confirmed_at, b.released_at, b.released_to, b.override_reason, p.id AS person_id, p.first_name, p.last_name, p.date_of_birth, p.ski_level, p.snowboard_level,
        (SELECT level FROM student_progress sp WHERE sp.tenant_id = p.tenant_id AND sp.person_id = p.id ORDER BY sp.recorded_at DESC, sp.id DESC LIMIT 1) AS latest_level
      FROM lesson_bookings b JOIN people p ON p.id = b.person_id AND p.tenant_id = b.tenant_id
      WHERE b.tenant_id = ? AND b.session_id = ? AND b.status <> 'cancelled' ORDER BY p.last_name`,
     [req.auth.tenantId, s.id],
   );
   const show = seesDetails(req, s);
+  // Pickup (feat/school-safety): who must be released, who still waits after the lesson, and who picked up.
+  const SS = require('../lib/schoolsafety');
+  const set = await require('../lib/schoolsettings').get(pool, req.auth.tenantId);
+  const tz = (await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [req.auth.tenantId])).timezone;
+  const nowLocal = require('../lib/util').nowIn(tz);
+  const day = String(s.starts_at).slice(0, 10);
+  const plusMin = (dt, m) => new Date(Date.parse(`${String(dt).slice(0, 19).replace(' ', 'T')}Z`) + m * 60000).toISOString().slice(0, 19).replace('T', ' ');
+  for (const r of data) {
+    const age = SS.ageOn(r.date_of_birth, day);
+    r.needs_release = SS.needsRelease(age, s);
+    r.pickup_waiting = r.needs_release && !r.released_at && ['booked', 'attended'].includes(r.status) && nowLocal >= s.ends_at;
+    r.pickup_late = r.pickup_waiting && nowLocal > plusMin(s.ends_at, SS.pickupMinutes(age, set));
+    if (r.released_at) r.released_at = require('./schoolsafety').localOf(r.released_at, tz);
+  }
   // Children's allergies, medical notes and pickup people: who read them is on the audit log (2026.11.11, DP-10).
   if (show && data.length) await audit(pool, req, 'roster_view', 'lesson_sessions', s.id, { students: data.length, safety_details: data.some((r) => r.allergies || r.medical || r.pickup) });
   res.json({
     details: show,
     data: data.map((r) => {
       const out = { ...r, level: LV.personLevel(r, s.discipline) || r.booked_level || r.latest_level || null, has_allergies: Boolean(r.allergies), has_medical: Boolean(r.medical), text_ok: Boolean(r.text_ok), photo_ok: Boolean(r.photo_ok) };
-      if (!show) for (const k of [...DETAIL_KEYS, 'instructor_notes']) delete out[k];
+      if (!show) for (const k of [...DETAIL_KEYS, 'instructor_notes', 'released_to']) delete out[k];
       return out;
     }),
   });
@@ -429,6 +449,7 @@ async function myItems(tenantId, staffId, from, to, withRoster) {
     const day = String(it.starts_at).slice(0, 10);
     if (it.kind === 'lesson') {
       const students = await rows(pool, `SELECT b.id AS booking_id, b.status, b.allergies, b.medical, b.pickup, b.contact_name, b.contact_phone, b.checked_in_at, b.checked_in_via, b.instructor_notes, b.photo_ok, b.level AS booked_level, b.unpaid,
+          b.released_at, b.released_to, b.jacket_color, b.helmet_color, (SELECT COUNT(*) FROM lesson_adaptive_intake ai WHERE ai.tenant_id = b.tenant_id AND ai.booking_id = b.id) AS has_intake,
           p.id AS person_id, p.first_name, p.last_name, p.date_of_birth, p.ski_level, p.snowboard_level, p.phone, p.photo IS NOT NULL AS has_photo,
           (SELECT g.phone FROM person_links l JOIN people g ON g.tenant_id = l.tenant_id AND g.id = l.adult_id WHERE l.tenant_id = b.tenant_id AND l.member_id = b.person_id AND l.relation = 'guardian' ORDER BY g.id LIMIT 1) AS guardian_phone
         FROM lesson_bookings b JOIN people p ON p.tenant_id = b.tenant_id AND p.id = b.person_id
@@ -437,7 +458,10 @@ async function myItems(tenantId, staffId, from, to, withRoster) {
         const lvl = LV.personLevel(x, it.discipline) || x.booked_level || null;
         return { booking_id: x.booking_id, person_id: x.person_id, first_name: x.first_name, last_name: x.last_name, age: ageOn(x.date_of_birth, day), level: lvl, level_words: lvl ? LV.name(lvl, it.discipline) : null,
           has_photo: Boolean(x.has_photo), allergies: x.allergies, medical: x.medical, pickup: x.pickup, contact_name: x.contact_name, phone: x.contact_phone || x.guardian_phone || x.phone || null,
-          status: x.status, checked_in_at: x.checked_in_at, checked_in_via: x.checked_in_via, note: x.instructor_notes, photo_ok: Boolean(x.photo_ok), unpaid: Boolean(x.unpaid) };
+          status: x.status, checked_in_at: x.checked_in_at, checked_in_via: x.checked_in_via, note: x.instructor_notes, photo_ok: Boolean(x.photo_ok), unpaid: Boolean(x.unpaid),
+          // feat/school-safety: release at pickup, the colors for a lost child call, the adaptive intake
+          needs_release: SSAFE.needsRelease(ageOn(x.date_of_birth, day), it), released_to: x.released_to || null, released: Boolean(x.released_at),
+          jacket_color: x.jacket_color, helmet_color: x.helmet_color, has_intake: Boolean(Number(x.has_intake)) };
       });
     } else {
       const lvlFilter = it.levels_only && it.levels_only.length ? it.levels_only : null;
@@ -477,7 +501,7 @@ router.get('/my-day', requireRole(...school), async (req, res) => {
   const me = await one(pool, 'SELECT st.id, p.first_name, p.last_name FROM staff st JOIN people p ON p.tenant_id = st.tenant_id AND p.id = st.person_id WHERE st.tenant_id = ? AND st.id = ?', [tenantId, staffId]);
   if (!me) throw notFound('Staff member');
   res.set('Cache-Control', 'no-store');
-  res.json({ date, today: todayIn(tz), staff: { id: me.id, name: `${me.first_name} ${me.last_name}` }, items: await myItems(tenantId, staffId, date, date, true) });
+  res.json({ date, today: todayIn(tz), now: require('../lib/util').nowIn(tz), staff: { id: me.id, name: `${me.first_name} ${me.last_name}` }, items: await myItems(tenantId, staffId, date, date, true) });
 });
 /** Lessons and program meetings for My shifts: the next two weeks, without the rosters. */
 router.get('/my-schedule', requireRole(...school), async (req, res) => {

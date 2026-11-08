@@ -6,6 +6,7 @@ import { get, put } from '../api.js';
 import { h, clear, field, button, toast, formDialog, label } from '../ui.js';
 import { personPicker } from '../widgets.js';
 import { photoControl } from '../photo.js';
+import { levelOptions } from '../levels.js';
 
 let cache = null;
 export async function loadCustomerForm(force = false) {
@@ -19,6 +20,10 @@ const star = h('span', { class: 'req', 'aria-hidden': 'true' }, ' *');
 
 function control(f, value) {
   const common = { name: f.key, ...AUTOCOMPLETE_OFF };
+  if (f.type === 'select' && f.levels) {
+    // the one level scale (1 to 9), named as everywhere else in the school (feat/school-safety)
+    return h('select', common, h('option', { value: '' }, 'Not given'), ...levelOptions(f.levels).map(([v, t]) => h('option', { value: String(v), selected: value != null && String(value) === String(v) }, t)));
+  }
   if (f.type === 'select') {
     const el = h('select', common, h('option', { value: '' }, 'Not given'), ...f.options.map((o) => h('option', { value: o, selected: value === o }, label(o))));
     return el;

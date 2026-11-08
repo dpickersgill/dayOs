@@ -13,12 +13,28 @@ const kindText = { received: 'Call received', dispatched: 'Dispatched', on_scene
 // The next step a dispatcher usually takes from each status.
 const NEXT = { new: [], dispatched: [['on_scene', 'On scene']], on_scene: [['transporting', 'Transporting'], ['at_aid_room', 'At aid room']], transporting: [['at_aid_room', 'At aid room']] };
 
+/** A lost child call from the ski school (feat/school-safety): the child's photo, age, colors and class, on one tap. */
+async function lostChild(callId) {
+  try {
+    const { id } = await get(`/skischool/lost-by-call/${callId}`);
+    const r = await get(`/skischool/lost/${id}`);
+    dialog(`Lost child: ${r.first_name}`, h('div', { class: 'stack' },
+      r.photo ? h('img', { src: r.photo, alt: `Photo of ${r.first_name}`, class: 'photo-preview' }) : h('p', { class: 'muted' }, 'No photo on file.'),
+      h('dl', { class: 'facts' }, h('dt', null, 'Age'), h('dd', null, r.age != null ? String(r.age) : 'Not known'), h('dt', null, 'Jacket'), h('dd', null, r.jacket_color || 'Not given'),
+        h('dt', null, 'Helmet'), h('dd', null, r.helmet_color || 'Not given'), h('dt', null, 'Class'), h('dd', null, `${r.product}, ${fmtTime(r.starts_at)}`), h('dt', null, 'Meeting place'), h('dd', null, r.meeting_place || 'Not set'),
+        h('dt', null, 'Last known'), h('dd', null, r.last_seen || 'Not known')),
+      r.status === 'found' ? h('p', null, state(`Found by ${r.found_by} at ${r.found_where}`, 'good')) : null));
+  } catch (err) { toast(err.message, 'error'); }
+}
+const lostBits = (c) => (c.call_type === 'lost_child' ? [state('Lost child', 'bad'), button('Child\'s photo', () => lostChild(c.id), { small: true })] : []);
+
 function callCard(c, onOpen) {
   const who = c.responders.map((r) => r.callsign || `${r.first_name} ${r.last_name[0]}.`).join(', ');
   return h('article', { class: 'call-card', 'data-priority': c.priority },
     h('div', { class: 'spread' }, h('b', null, `Call ${c.call_no}`), h('span', { class: 'row' }, c.priority !== 'normal' ? state(label(c.priority), prioTone[c.priority]) : null, state(statusText[c.status], statusTone[c.status]))),
     h('div', null, h('b', null, c.location)),
     c.description ? h('div', null, c.description) : null,
+    c.call_type === 'lost_child' ? h('div', { class: 'row' }, ...lostBits(c)) : null,
     h('div', { class: 'muted' }, `${fmtTime(c.received_at)} · ${c.source === 'guest' ? 'Guest request' : label(c.source)}${c.caller_name ? ` · ${c.caller_name}` : ''}${c.caller_phone ? ` · ${c.caller_phone}` : ''}`),
     h('div', null, who ? `Responding: ${who}` : h('span', { class: 'muted' }, 'No one sent yet')),
     // Repeated guest requests from one phone or address, grouped here so a flood does not bury the board. Each is listed.
@@ -84,6 +100,7 @@ async function openCall(id, again) {
     appendAll(clear(holder),
       h('div', { class: 'spread' }, h('h2', null, `Call ${c.call_no}`), h('span', { class: 'row' }, state(label(c.priority), prioTone[c.priority]), state(statusText[c.status], statusTone[c.status]))),
       h('p', null, h('b', null, c.location), c.description ? ` · ${c.description}` : ''),
+      c.call_type === 'lost_child' ? h('div', { class: 'row' }, ...lostBits(c)) : null,
       h('p', { class: 'muted' }, `${fmtDateTime(c.received_at)} · ${c.source === 'guest' ? 'Guest request' : label(c.source)}${c.caller_name ? ` · ${c.caller_name}` : ''}${c.caller_phone ? ` · ${c.caller_phone}` : ''}`),
       whereBlock(c, live),
       h('h3', null, 'Responders'),

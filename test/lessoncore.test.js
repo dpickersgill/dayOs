@@ -70,7 +70,7 @@ test.before(async () => {
 test.after(async () => { await new Promise((r) => server.close(r)); await new Promise((r) => pm.close(r)); await pool.end(); });
 
 const lesson = (extra = {}, start = '10:00', end = '12:00') => api('POST', '/skischool/sessions', { token: A.owner, body: { product_id: D.group, starts_at: `${day}T${start}`, ends_at: `${day}T${end}`, ...extra } });
-const kid = (first, extra = {}) => ({ student: { first_name: first, last_name: 'Kidd', date_of_birth: '2017-02-02', ...extra }, sign_waiver: true });
+const kid = (first, extra = {}) => ({ student: { first_name: first, last_name: 'Kidd', date_of_birth: `${new Date().getFullYear() - 7}-02-02`, ...extra }, sign_waiver: true });
 
 test('lessons use the nine levels and ages, and say the range in words', async () => {
   const s = ok(await lesson({ level_min: 2, level_max: 3, age_min: 5, age_max: 8, meeting_place: 'Magic carpet' }), 201);
@@ -272,7 +272,7 @@ test('My day: my lessons and program meetings in time order, with the roster and
   assert.ok(a, JSON.stringify(mine.items.map((x) => x.id)));
   assert.equal(a.level_words, 'Levels 2 to 3');
   const leo = a.students.find((x) => x.person_id === D.leo);
-  assert.match(leo.allergies, /Peanuts/); assert.equal(leo.phone, '555-0100'); assert.equal(leo.age, Number(day.slice(0, 4)) - 2017 - (day.slice(5) < '02-02' ? 1 : 0));
+  assert.match(leo.allergies, /Peanuts/); assert.equal(leo.phone, '555-0100'); assert.equal(leo.age, Number(day.slice(0, 4)) - (new Date().getFullYear() - 7) - (day.slice(5) < '02-02' ? 1 : 0));
   const kimDay = addDays(day, 1);
   const kim = ok(await api('GET', `/skischool/my-day?date=${kimDay}`, { token: D.kim.token }));
   const meeting = kim.items.find((x) => x.kind === 'program');

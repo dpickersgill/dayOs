@@ -41,7 +41,7 @@ async function main() {
   }
   function drawFilters() {
     clear(filters);
-    for (const el of [chipRow('Teaches', present('disciplines'), data.disciplines, discipline, (v) => { discipline = v; }), chipRow('Level', present('levels'), data.levels, level, (v) => { level = v; })]) if (el) filters.append(el);
+    for (const el of [chipRow('Teaches', present('disciplines'), data.disciplines, discipline, (v) => { discipline = v; }), chipRow('Level', present('levels').sort((a, b) => Number(a) - Number(b)), data.levels, level, (v) => { level = v; })]) if (el) filters.append(el);
   }
   const matches = (inst) => inst && (!discipline || inst.disciplines.includes(discipline)) && (!level || inst.levels.includes(level));
   function drawList() {
@@ -63,7 +63,7 @@ async function main() {
   }
   for (const i of data.instructors) {
     cards.append(h('article', { class: 'card stack' }, h('h3', null, i.name), i.bio ? h('p', null, i.bio) : null,
-      h('div', { class: 'badges' }, ...i.disciplines.map((d) => badge(data.disciplines[d])), ...i.levels.map((l) => badge(data.levels[l], 'good')))));
+      h('div', { class: 'badges' }, ...i.disciplines.map((d) => badge(data.disciplines[d])), ...(i.levels.length ? [badge(i.levels.length === 1 ? `Level ${i.levels[0]}` : `Levels ${i.levels[0]} to ${i.levels[i.levels.length - 1]}`, 'good')] : []))));
   }
   const call = data.phone ? h('a', { class: 'call', href: `tel:${data.phone.replace(/[^\d+]/g, '')}` }, `Call ${data.phone}`) : null;
   clear(root).append(

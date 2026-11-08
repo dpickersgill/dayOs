@@ -149,7 +149,7 @@ test('lesson bookings capture the student; the customer is kept even when the bo
   const pid = noWaiver.body.details.person_id;
   assert.ok(pid, 'the saved customer is returned so the screen can retry');
   const p = (await api('GET', `/people/${pid}`, { token: T.counter })).body;
-  assert.equal(p.ability_level, 'first_timer');
+  assert.equal(p.ski_level, 1, 'the old word is saved as the level it maps to (one level scale)');
   assert.equal(p.source, 'lesson');
   const ok = await book({ person_id: pid, sign_waiver: true });
   assert.equal(ok.status, 201, ok.text);

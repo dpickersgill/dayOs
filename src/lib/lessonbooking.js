@@ -16,6 +16,7 @@ const { audit } = require('./audit');
 const { studentClash, clashWords, lockStudents, spotsLeft } = require('./lessonrules');
 const { recordConsent } = require('./consent');
 const levels = require('./levels');
+const SS = require('./schoolsafety'); // feat/school-safety: ages, ratios by age band, the pickup list, adaptive intake
 
 /** The words a family agrees to for texts and photos. */
 const TEXT_WORDS = 'Text me about this lesson: check-in, changes and the recap. Message and data rates may apply. Reply STOP to stop.';
@@ -33,6 +34,9 @@ const safetyShape = {
   text_ok: z.boolean().optional(),
   photo_ok: z.boolean().optional(),
   level: z.number().int().min(1).max(9).nullable().optional(),
+  ...SS.pickupShape, // the adults who may pick the child up (feat/school-safety)
+  adaptive: SS.adaptiveIntake.optional(), // an adaptive lesson's intake
+  jacket_color: z.string().trim().max(40).nullable().optional(), helmet_color: z.string().trim().max(40).nullable().optional(),
 };
 
 /** Why the last places cannot be sold: who holds them. */
@@ -45,7 +49,7 @@ function heldWords(sp) {
  * Books a student. opts: { sessionId, personId, details: { ...safetyShape }, signWaiver, useCreditId, requestedInstructorId }.
  * Returns { bookingId, session }. Throws 409 with words a person can act on.
  */
-async function bookStudent(conn, req, { sessionId, personId, details = {}, signWaiver = false, useCreditId = null, requestedInstructorId = null }) {
+async function bookStudent(conn, req, { sessionId, personId, details = {}, signWaiver = false, useCreditId = null, requestedInstructorId = null, overrideReason = null }) {
   const tenantId = req.auth.tenantId;
   // The student first, then the lesson (lib/lessonrules.js: the lock order every booking path keeps).
   await lockStudents(conn, tenantId, [personId]);
@@ -62,6 +66,8 @@ async function bookStudent(conn, req, { sessionId, personId, details = {}, signW
   if (!waiver) throw conflict('Student needs a signed waiver for this season before booking', { person_id: personId });
   const prior = await one(conn, 'SELECT id, status FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND person_id = ?', [tenantId, s.id, personId]);
   const already = prior && ['booked', 'attended'].includes(prior.status);
+  // Outside the lesson's ages or over its ratio by age band: a warning a manager can book past with a reason (audited).
+  const overridden = already ? null : await SS.deskCheck(conn, req, s, personId, overrideReason);
   if (!already) {
     const clash = await studentClash(conn, tenantId, personId, s.starts_at, s.ends_at, { ignoreSessionId: s.id, lock: true });
     if (clash) throw conflict(clashWords(clash), { person_id: personId, clash });
@@ -93,6 +99,9 @@ async function bookStudent(conn, req, { sessionId, personId, details = {}, signW
   const bookingId = r.insertId;
   if (creditId) await conn.query('UPDATE lesson_credits SET used = used + 1 WHERE tenant_id = ? AND id = ?', [tenantId, creditId]);
   await saveDetails(conn, req, bookingId, personId, { ...details, level });
+  if (overridden) await conn.query('UPDATE lesson_bookings SET override_reason = ? WHERE tenant_id = ? AND id = ?', [overridden, tenantId, bookingId]);
+  if (details.pickup_adults) await SS.savePickup(conn, tenantId, bookingId, details.pickup_adults, { consent: Boolean(details.pickup_photo_consent), via: 'desk' });
+  if (details.adaptive && s.discipline === 'adaptive') await SS.saveAdaptive(conn, tenantId, bookingId, details.adaptive, req.auth.userId || null);
   await audit(conn, req, 'book', 'lesson_sessions', s.id, { person_id: personId, credit_id: creditId });
   return { bookingId, session: s };
 }
@@ -103,6 +112,7 @@ async function saveDetails(conn, req, bookingId, personId, d) {
   const set = []; const vals = [];
   for (const k of SAFETY) if (d[k] !== undefined) { set.push(`${k} = ?`); vals.push(d[k] === '' ? null : d[k]); }
   for (const k of ['text_ok', 'photo_ok']) if (d[k] !== undefined) { set.push(`${k} = ?`); vals.push(d[k] ? 1 : 0); }
+  for (const k of ['jacket_color', 'helmet_color']) if (d[k] !== undefined) { set.push(`${k} = ?`); vals.push(d[k] || null); }
   if (d.level) { set.push('level = ?'); vals.push(d.level); }
   if (!set.length) return;
   const before = d.text_ok !== undefined ? await one(conn, 'SELECT text_ok FROM lesson_bookings WHERE tenant_id = ? AND id = ?', [tenantId, bookingId]) : null;
@@ -121,7 +131,7 @@ const guardianOf = (db, tenantId, personId) => one(db, `SELECT g.id, g.first_nam
  * emergency contact. Staff only (it holds children's details).
  */
 async function lastDetails(db, tenantId, personId) {
-  const last = await one(db, `SELECT allergies, medical, pickup, contact_name, contact_phone, contact_email, text_ok, photo_ok FROM lesson_bookings
+  const last = await one(db, `SELECT id, allergies, medical, pickup, contact_name, contact_phone, contact_email, text_ok, photo_ok FROM lesson_bookings
     WHERE tenant_id = ? AND person_id = ? AND (allergies IS NOT NULL OR medical IS NOT NULL OR pickup IS NOT NULL OR contact_name IS NOT NULL OR contact_phone IS NOT NULL OR contact_email IS NOT NULL)
     ORDER BY id DESC LIMIT 1`, [tenantId, personId]);
   const p = await one(db, 'SELECT emergency_name, emergency_phone, email, phone, ski_level, snowboard_level FROM people WHERE tenant_id = ? AND id = ?', [tenantId, personId]);
@@ -135,6 +145,8 @@ async function lastDetails(db, tenantId, personId) {
     contact_email: (last && last.contact_email) || (guardian && guardian.email) || p.email || null,
     text_ok: Boolean(last && last.text_ok), photo_ok: Boolean(last && last.photo_ok),
     ski_level: p.ski_level, snowboard_level: p.snowboard_level, from_last_booking: Boolean(last),
+    // the adults on the last pickup list (names only: a photo stays with the booking it was given for)
+    pickup_adults: last ? (await SS.pickupFor(db, tenantId, last.id)).map((a) => ({ name: a.name, relationship: a.relationship, phone: a.phone })) : [],
   };
 }
 

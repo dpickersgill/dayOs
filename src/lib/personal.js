@@ -54,6 +54,8 @@ const REGISTRY = [
   { table: 'lesson_bookings', by: { person: ['person_id'], email: ['contact_email'], phone: ['contact_phone'] },
     erase: { set: { allergies: null, medical: null, pickup: null, contact_name: null, contact_phone: null, contact_email: null, instructor_notes: null, placement_answers: null } } },
   { table: 'lesson_recaps', by: { person: ['person_id'] }, erase: { set: { note: null, body: null } } },
+  // feat/school-safety: an adult on a child's pickup list, found by their phone; erasing removes them and their photo
+  { table: 'lesson_pickup_adults', by: { phone: ['phone'] }, erase: 'delete' },
   { table: 'lesson_requests', by: { email: ['contact_email'], phone: ['contact_phone'] }, erase: { set: { contact_name: 'Former customer', contact_email: '', contact_phone: '', note: null } }, json: ['students'] },
   { table: 'lesson_waitlist', by: { email: ['contact_email'], phone: ['contact_phone'] }, erase: { set: { contact_name: 'Former customer', contact_email: '', contact_phone: null } }, json: ['student'] },
   { table: 'lesson_baskets', by: { email: ['contact_email'] }, erase: { set: { contact_email: '' } } },

@@ -13,6 +13,9 @@ const SEXES = ['female', 'male', 'other'];
 const STANCES = ['regular', 'goofy'];
 const SKIER_TYPES = ['1', '1.5', '2', '2.5', '3'];
 const ABILITIES = ['first_timer', 'beginner', 'intermediate', 'advanced'];
+// One level scale (feat/school-safety): the nine levels of lib/levels.js. The old four words are still read from older
+// screens and mapped onto it (first time 1, beginner 2, intermediate 4, advanced 7).
+const LEVELS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
 const SOURCES = ['window', 'online', 'phone', 'group', 'lesson', 'import', 'staff'];
 
 // key, label, group, type. `fixed` fields cannot be switched on or off by an administrator.
@@ -37,7 +40,8 @@ const FIELDS = [
   { key: 'emergency_name', label: 'Emergency contact name', group: 'emergency', type: 'text' },
   { key: 'emergency_phone', label: 'Emergency contact phone', group: 'emergency', type: 'tel' },
   { key: 'discipline', label: 'Ski or snowboard', group: 'skiing', type: 'select', options: DISCIPLINES },
-  { key: 'ability_level', label: 'Ability level', group: 'skiing', type: 'select', options: ABILITIES },
+  { key: 'ski_level', label: 'Ski level', group: 'skiing', type: 'select', options: LEVELS, levels: 'ski' },
+  { key: 'snowboard_level', label: 'Snowboard level', group: 'skiing', type: 'select', options: LEVELS, levels: 'snowboard' },
   { key: 'marketing_opt_in', label: 'Send me news and offers by email', group: 'consent', type: 'check', fixed: 'optional' },
 ];
 const BY_KEY = new Map(FIELDS.map((f) => [f.key, f]));
@@ -48,7 +52,7 @@ const SCOPES = ['ticket', 'lesson'];
 // Not a field: when set on the ticket form, a ticket sale cannot be completed without a purchaser.
 const PURCHASER_KEY = '_purchaser';
 
-const PERSON_COLUMNS = FIELDS.map((f) => f.key).concat(['marketing_opt_in_at', 'source', 'notes']);
+const PERSON_COLUMNS = FIELDS.map((f) => f.key).concat(['ability_level', 'marketing_opt_in_at', 'source', 'notes']); // ability_level: still read, no longer asked
 // Everything about a person except the photo, which is large and fetched on its own.
 const COLS = ['id', 'tenant_id', 'created_at', 'anonymised_at', 'phone_key', ...PERSON_COLUMNS].map((c) => `\`${c}\``).join(', ') + ', (photo IS NOT NULL) AS has_photo';
 
@@ -70,7 +74,9 @@ const personFields = {
   address_line1: text(255), address_line2: text(255), city: text(100), region: text(60), postal_code: text(20), country: text(60),
   emergency_name: text(150), emergency_phone: text(40),
   discipline: z.preprocess((v) => (v === '' ? null : v), z.enum(DISCIPLINES).nullable().optional()),
-  ability_level: z.preprocess((v) => (v === '' ? null : v), z.enum(ABILITIES).nullable().optional()),
+  ability_level: z.preprocess((v) => (v === '' ? null : v), z.enum(ABILITIES).nullable().optional()), // older screens: mapped onto the levels
+  ski_level: z.preprocess((v) => (v === '' ? null : v), z.coerce.number().int().min(1).max(9).nullable().optional()),
+  snowboard_level: z.preprocess((v) => (v === '' ? null : v), z.coerce.number().int().min(1).max(9).nullable().optional()),
   marketing_opt_in: z.boolean().optional(),
   notes: text(1000),
 };
@@ -137,9 +143,18 @@ async function ensureRequired(conn, tenantId, person, scope, sale) {
  * Then the mountain's mandatory fields for this kind of sale are checked against the final record.
  * Returns { id, person, created, matched }.
  */
+/** An old word ("intermediate") from an older screen becomes the level on the scale, for the discipline given. */
+function mapOldLevel(d) {
+  if (!d || isBlank(d.ability_level) || !ABILITIES.includes(d.ability_level)) return d;
+  const out = { ...d };
+  const col = d.discipline === 'snowboard' ? 'snowboard_level' : 'ski_level';
+  if (isBlank(out[col])) out[col] = { first_timer: 1, beginner: 2, intermediate: 4, advanced: 7 }[d.ability_level];
+  return out;
+}
+
 async function resolvePerson(conn, tenantId, { personId, details, scope, source, sale, fillOnly = false }) {
   const required = await requiredFor(conn, tenantId, scope);
-  const d = details || {};
+  const d = mapOldLevel(details || {});
   const supplied = Object.keys(d).filter((k) => BY_KEY.has(k) || k === 'notes' || k === 'photo');
   let person = null;
   let created = false;
@@ -208,4 +223,4 @@ async function applyDetails(conn, tenantId, person, d, mode) {
   await conn.query(`UPDATE people SET ${set.join(', ')} WHERE tenant_id = ? AND id = ?`, [...vals, tenantId, person.id]);
 }
 
-module.exports = { COLS, STANCES, SKIER_TYPES, SEXES, ageOn, FIELDS, BY_KEY, GROUPS, SCOPES, SOURCES, PURCHASER_KEY, PERSON_COLUMNS, DISCIPLINES, ABILITIES, personFields, personCreate, personUpdate, requiredFor, missingFields, ensureRequired, resolvePerson, isBlank };
+module.exports = { LEVELS, mapOldLevel, COLS, STANCES, SKIER_TYPES, SEXES, ageOn, FIELDS, BY_KEY, GROUPS, SCOPES, SOURCES, PURCHASER_KEY, PERSON_COLUMNS, DISCIPLINES, ABILITIES, personFields, personCreate, personUpdate, requiredFor, missingFields, ensureRequired, resolvePerson, isBlank };

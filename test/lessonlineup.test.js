@@ -161,7 +161,6 @@ test('the desk checks students in from the list, a search and a scan, and sees a
 
 // ---------------------------------------------------------------- the lineup and the split
 test('the lineup board groups lessons, and the split respects ratio, level, kids, clearance and availability', async () => {
-  await api('PATCH', '/skischool/settings', { token: T.manager, body: { ratio_kids: 3 } });
   D.big = await instructor('Ian', { max: 4, kids: 1, email: `ian@${A.slug}.test` });
   D.low = await instructor('Lou', { max: 2, kids: 1 });
   D.nokids = await instructor('Ned', { max: 9, kids: 0 });
@@ -172,6 +171,9 @@ test('the lineup board groups lessons, and the split respects ratio, level, kids
   await q('UPDATE lesson_sessions SET age_min = 4, age_max = 12, level_min = 1, level_max = 4 WHERE id = ?', [sid]);
   const kids = [];
   for (const [name, lv] of [['Ava', 3], ['Ben', 1], ['Cal', 2], ['Dee', 1], ['Eli', 3], ['Fay', 1], ['Gus', 2], ['Hal', 4]]) kids.push(await bookKid(sid, name, lv));
+  // class sizes are by age band (feat/school-safety): the school makes the 7 to 12 band three a class
+  const bands = (await api('GET', '/skischool/settings', { token: T.manager })).body.ratio_bands.map((b) => (b.age_min === 7 ? { ...b, size: 3 } : b));
+  assert.equal((await api('PATCH', '/skischool/settings', { token: T.manager, body: { ratio_bands: bands } })).status, 200);
   const day = await api('GET', `/skischool/lineups?date=${day2}`, { token: T.counter });
   assert.equal(day.status, 200, day.text);
   const lu = day.body.data.find((l) => l.age_group === 'kids');

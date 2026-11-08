@@ -36,6 +36,9 @@ const studentSchema = z.object({
   allergies: opt(300), medical: opt(500), pickup: opt(300),
   text_ok: z.boolean().optional(), photo_ok: z.boolean().optional(),
   placement: z.array(z.boolean()).min(1).max(3).optional(), // 2026.11.9: answers to the three placement questions (lib/placement.js)
+  // feat/school-safety: who may pick up (names, relationship, phone; photos are added on the family's lesson page) and an adaptive intake
+  pickup_adults: z.array(require('./schoolsafety').pickupAdult.omit({ photo: true, id: true })).max(6).optional(),
+  adaptive: require('./schoolsafety').adaptiveIntake.optional(),
 });
 const basketSchema = z.object({
   contact_first_name: z.string().trim().min(1).max(100),
@@ -92,6 +95,8 @@ async function create(t, b, { base, slug, waitlistId = null } = {}) {
       if (why) throw conflict(why);
       want.set(s.id, (want.get(s.id) || 0) + 1);
     }
+    // No student outside a lesson's ages, and no class over its ratio by age band (feat/school-safety).
+    for (const [id] of want) await require('./schoolsafety').onlineCheck(conn, t.id, sessions.get(id), b.items.filter((it) => it.session_id === id).map((it) => it.student));
     for (const [i, a] of b.items.entries()) {
       for (const c of b.items.slice(i + 1)) {
         if (keyOf(a.student) !== keyOf(c.student)) continue;

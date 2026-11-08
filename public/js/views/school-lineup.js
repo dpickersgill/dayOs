@@ -9,7 +9,7 @@ import { h, clear, can, schoolCan, state, input, select, field, button, toast, d
 import { code128 } from '../barcode.js';
 import { printDialog } from '../print.js';
 import { levelOptions } from '../levels.js';
-import { row, toggle, amount } from './settings-kit.js';
+import { row, toggle } from './settings-kit.js';
 
 const desk = () => can('counter') || schoolCan('supervisor');
 const store = {
@@ -62,6 +62,7 @@ async function checkinTab(root) {
     status,
     h('div', { class: 'inline-form' }, field('Day', date), field('Find', search), h('label', { class: 'check' }, autoLabel, ' Print a label at check-in')), body);
   let timer = null;
+  const openClasses = new Set(); // the classes the desk opened, kept open across refreshes
   search.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 250); });
   date.addEventListener('change', load);
 
@@ -93,12 +94,16 @@ async function checkinTab(root) {
       if (!data.length) { body.append(empty(search.value.trim() ? 'Nobody matches.' : 'No students on this day.')); return; }
       const done = data.filter((r) => r.checked_in_at).length;
       body.append(h('p', { class: 'muted' }, `${done} of ${data.length} checked in`));
-      const byTime = new Map();
-      for (const r of data) { const k = `${r.starts_at}|${r.product}`; if (!byTime.has(k)) byTime.set(k, []); byTime.get(k).push(r); }
-      for (const list of byTime.values()) {
+      // One section per class, folded on a long day (feat/school-safety): the heading carries the counts.
+      const byClass = new Map();
+      for (const r of data) { const k = r.session_id; if (!byClass.has(k)) byClass.set(k, []); byClass.get(k).push(r); }
+      const fold = data.length > 12 && !search.value.trim();
+      for (const [sid, list] of byClass) {
         const r0 = list[0];
-        body.append(h('section', { class: 'panel stack tight lu-time' },
-          h('header', { class: 'row between' }, h('h3', null, `${fmtTime(r0.starts_at)} ${r0.product}`), h('span', { class: 'muted small' }, `${list.filter((r) => r.checked_in_at).length} of ${list.length} here`)),
+        const here = list.filter((r) => r.checked_in_at).length;
+        const sec = h('details', { class: 'panel stack tight lu-time group-fold', 'data-session': sid, open: !fold || openClasses.has(sid) },
+          h('summary', { class: 'row between' }, h('span', { class: 'gf-title' }, h('strong', null, `${fmtTime(r0.starts_at)} ${r0.product}`), h('span', { class: 'muted small' }, ` ${r0.instructor_first ? `${r0.instructor_first}'s class` : 'No instructor yet'}`)),
+            h('span', { class: `gf-count${here === list.length ? ' all' : ''}` }, `${here} of ${list.length} here`)),
           h('ul', { class: 'plain lu-list' }, list.map((r) => h('li', { class: `lu-row${r.checked_in_at ? ' in' : ''}`, 'data-booking': r.booking_id },
             h('div', { class: 'lu-who' }, h('strong', null, `${r.first_name} ${r.last_name}`),
               h('span', { class: 'muted small' }, [r.age !== null ? `age ${r.age}` : null, r.student_level ? `Level ${r.student_level}` : null, r.instructor_first ? `with ${r.instructor_first}` : 'no instructor yet', r.meeting_place ? `meet at ${r.meeting_place}` : null].filter(Boolean).join(', ')),
@@ -106,7 +111,9 @@ async function checkinTab(root) {
             h('div', { class: 'lu-act' },
               r.checked_in_at ? [state(r.checked_in_via === 'link' ? 'Here (family link)' : 'Here', 'good'), button('Undo', async () => { try { await del(`/skischool/bookings/${r.booking_id}/checkin`); await load(); } catch (err) { fail(err); } }, { small: true, label: `Undo check-in for ${r.first_name}` })]
                 : button('Check in', async () => { try { const x = await post(`/skischool/bookings/${r.booking_id}/checkin`, {}); toast(`${r.first_name} checked in`); await load(); await after([x]); } catch (err) { fail(err); } }, { kind: 'primary', small: true, label: `Check in ${r.first_name} ${r.last_name}` }),
-              button('Label', () => printLabels(`booking_ids=${r.booking_id}`, `Label for ${r.first_name}`), { small: true, label: `Print a label for ${r.first_name}` })))))));
+              button('Label', () => printLabels(`booking_ids=${r.booking_id}`, `Label for ${r.first_name}`), { small: true, label: `Print a label for ${r.first_name}` }))))));
+        sec.addEventListener('toggle', () => { if (sec.open) openClasses.add(sid); else openClasses.delete(sid); });
+        body.append(sec);
       }
     } catch (err) { clear(body).append(errorBox(err)); }
   }
@@ -225,7 +232,7 @@ async function lineupTab(root) {
     const notIn = b.classes.flatMap((c) => c.students.filter((s) => !s.checked_in && s.status !== 'no_show').map((s) => ({ ...s, color: c.color })));
     appendAll(clear(head),
       h('div', { class: 'row between lu-head' },
-        h('div', null, h('h2', null, `${fmtTime(L.starts_at)} ${L.product}`), h('p', { class: 'muted' }, `${fmtDate(L.starts_at)}. ${b.counts.checked_in} of ${b.counts.students} checked in. Up to ${L.ratio} students a class${L.kids ? ' (kids)' : ''}.`,
+        h('div', null, h('h2', null, `${fmtTime(L.starts_at)} ${L.product}`), h('p', { class: 'muted' }, `${fmtDate(L.starts_at)}. ${b.counts.checked_in} of ${b.counts.students} checked in. ${L.ratio_by_band ? 'Class sizes by age band (Settings, Safety and class sizes).' : `Up to ${L.ratio} students a class for this lineup.`}`,
           L.locked ? h('span', null, ' ', state('Started: the split is locked', 'neutral')) : L.status === 'split' ? h('span', null, ' ', state('Split done', 'good')) : null)),
         h('div', { class: 'row' },
           !L.locked ? button('Suggest a split', () => suggest(), { kind: 'primary' }) : null,
@@ -233,8 +240,9 @@ async function lineupTab(root) {
           schoolCan('supervisor') ? button('Class size', () => ratioDialog(), { small: true }) : null)));
     const cols = b.classes.map((c) => {
       const list = h('ul', { class: 'plain lu-chips' }, c.students.filter((s) => s.checked_in).map((s) => studentChip(s, { onPick: studentMenu, color: c.color })));
-      const col = h('section', { class: `lu-col${c.instructor_id ? '' : ' attention'}`, 'data-session': c.id, 'aria-label': `${c.color} class` },
+      const col = h('section', { class: `lu-col${c.instructor_id ? '' : ' attention'}${c.over_ratio ? ' over-ratio' : ''}`, 'data-session': c.id, 'aria-label': `${c.color} class` },
         h('header', null, h('div', { class: 'row between' }, h('strong', null, swatch(c.color), ` ${c.color}`), h('span', { class: 'muted small' }, `${c.students.filter((s) => s.checked_in).length} here, ${c.students.length} booked of ${c.capacity}`)),
+          c.over_ratio ? h('div', { class: 'small' }, state('Over ratio', 'bad'), ` ${c.ratio_reason}`) : null,
           h('div', null, c.instructor ? h('strong', null, c.instructor) : state('Needs an instructor', 'warn')),
           h('div', { class: 'muted small' }, [c.level_words, c.meeting_place, c.origin === 'split' ? 'split off' : null].filter(Boolean).join(', '))),
         c.students.some((s) => s.checked_in) ? list : h('p', { class: 'muted small lu-empty' }, 'Nobody checked in yet. Drop a student here to move them.'));
@@ -271,11 +279,12 @@ async function lineupTab(root) {
     let teachers = [];
     appendAll(clear(head),
       h('div', { class: 'notice stack tight' }, h('strong', null, 'Suggested split'),
-        h('p', { class: 'small' }, `${all.reduce((n, c) => n + c.students.length, 0)} students in ${all.length} class${all.length === 1 ? '' : 'es'} of up to ${sg.ratio}, grouped by level then age. Move students between classes (drag, or tap a name), pick instructors, then press Use this split. Families whose child changes class are told.`),
+        sg.can_use === false ? h('p', { class: 'small' }, sg.from === 'checked_in' ? 'Nobody is checked in yet, so there is nothing to split. Check students in, or split everyone booked.' : 'Nobody is booked in this lineup, so there is nothing to split.')
+          : h('p', { class: 'small' }, `${all.reduce((n, c) => n + c.students.length, 0)} students in ${all.length} class${all.length === 1 ? '' : 'es'}, ${sg.lineup.ratio_by_band ? 'each no bigger than its youngest student\'s age band allows' : `of up to ${sg.ratio}`}, grouped by level then age. Instructors already on a class stay on it. Move students between classes (drag, or tap a name), pick instructors for new classes, then press Use this split. Families whose child changes class are told.`),
         sg.left_out.length ? h('p', { class: 'small' }, `${sg.left_out.length} not checked in yet and left out: ${sg.left_out.map((s) => s.first_name).join(', ')}.`) : null,
         h('div', { class: 'row' }, h('label', null, 'Split ', fromPick),
-          schoolCan('supervisor') ? button('Use this split', () => useSplit(), { kind: 'primary' }) : h('span', { class: 'muted small' }, 'A supervisor or manager presses Use this split.'),
-          button('Add a class', () => { all.push({ session_id: null, color: 'New', level_min: null, level_max: null, students: [], instructor_id: null, instructor: null }); drawSuggestion(); }),
+          sg.can_use === false ? null : schoolCan('supervisor') ? button('Use this split', () => useSplit(), { kind: 'primary' }) : h('span', { class: 'muted small' }, 'A supervisor or manager presses Use this split.'),
+          sg.can_use === false ? null : button('Add a class', () => { all.push({ session_id: null, color: 'New', level_min: null, level_max: null, students: [], instructor_id: null, instructor: null }); drawSuggestion(); }),
           button('Cancel', () => { suggestion = null; draw(); }))));
     const relevel = (c) => { const lv = c.students.map((s) => s.level).filter(Boolean); if (lv.length) { c.level_min = Math.min(...lv); c.level_max = Math.max(...lv); } };
     const moveIn = (id, target) => {
@@ -302,9 +311,9 @@ async function lineupTab(root) {
       teach.addEventListener('change', () => { c.instructor_id = Number(teach.value) || null; c.instructor = teach.selectedOptions[0] ? teach.selectedOptions[0].textContent : null; });
       teachers.push([teach, c]);
       const col = h('section', { class: 'lu-col suggest', 'aria-label': `Class ${i + 1}` },
-        h('header', { class: 'stack tight' }, h('div', { class: 'row between' }, h('strong', null, swatch(c.color === 'New' ? null : c.color), ` ${c.session_id ? `${c.color} class` : `New class ${i + 1}`}`), h('span', { class: 'muted small' }, `${c.students.length} of ${sg.ratio}`)),
-          c.students.length > sg.ratio ? state('Over the class size', 'warn') : null,
-          c.instructor_problem ? h('div', { class: 'small' }, state(`${c.was_instructor}: ${c.instructor_problem}`, 'warn')) : null,
+        h('header', { class: 'stack tight' }, h('div', { class: 'row between' }, h('strong', null, swatch(c.color === 'New' ? null : c.color), ` ${c.session_id ? `${c.color} class` : `New class ${i + 1}`}`), h('span', { class: 'muted small' }, `${c.students.length} of ${c.limit || sg.ratio}`)),
+          c.students.length > (c.limit || sg.ratio) ? state('Over the class size', 'bad') : null,
+          c.instructor_note ? h('div', { class: 'small' }, state(`${c.instructor} stays on this class. Check: ${c.instructor_note}`, 'warn')) : null,
           teach, h('div', { class: 'lu-levels' }, h('span', { class: 'small' }, 'Levels'), lvMin, h('span', { class: 'small' }, 'to'), lvMax)),
         c.students.length ? h('ul', { class: 'plain lu-chips' }, c.students.map((s) => studentChip(s, { onPick: pickFor }))) : h('p', { class: 'muted small lu-empty' }, 'Empty. Drop students here.'));
       dropZone(col, (id) => moveIn(id, c));
@@ -312,7 +321,7 @@ async function lineupTab(root) {
     });
     const empties = (sg.empty || []).length ? h('p', { class: 'muted small' }, `${sg.empty.length} class${sg.empty.length === 1 ? ' is' : 'es are'} not needed and stay empty: cancel them from Lessons, or keep them for walk-ups.`) : null;
     appendAll(clear(boardEl), ...cols);
-    if (empties) head.append(empties);
+    if (empties && sg.can_use !== false) head.append(empties);
     // the instructors who can take each class (free, cleared, kids): the same list for each, minus those picked elsewhere
     get('/skischool/lineup-teachers?lineup_id=' + b.lineup.id).then((r) => {
       for (const [sel, c] of teachers) {
@@ -349,19 +358,13 @@ async function lineupTab(root) {
 export const settingsPages = {
   lineup: { title: 'Check-in and lineup', who: 'manager', render: async (panel) => {
     const s = await get('/skischool/settings');
-    const kids = input({ type: 'number', min: 1, max: 20, value: s.ratio_kids, name: 'ratio_kids' });
-    const adults = input({ type: 'number', min: 1, max: 20, value: s.ratio_adults, name: 'ratio_adults' });
     const link = toggle({ checked: Boolean(s.checkin_link), name: 'checkin_link' });
     const save = button('Save', async () => {
-      const k = Number(kids.value); const a = Number(adults.value);
-      if (!(k >= 1 && k <= 20) || !(a >= 1 && a <= 20)) throw new Error('A class size is 1 to 20 students');
-      await patch('/skischool/settings', { ratio_kids: k, ratio_adults: a, checkin_link: link.checked });
+      await patch('/skischool/settings', { checkin_link: link.checked });
       toast('Saved');
     }, { kind: 'primary' });
-    // the settings page draws the card and its title; these are its rows
-    panel.append(h('p', { class: 'set-card-intro' }, 'How the 9:45 lineup splits groups, and how families check in.'),
-      row('Kids per instructor', amount(kids, 'students'), 'Class size when the lineup splits a kids lesson (ages 12 and under).'),
-      row('Adults and teens per instructor', amount(adults, 'students'), 'Class size for every other group lesson.'),
+    // the settings page draws the card and its title; these are its rows. Class sizes are by age band now (feat/school-safety).
+    panel.append(h('p', { class: 'set-card-intro' }, 'How families check in. Class sizes for the lineup split are set by age band under Safety and class sizes.'),
       row('"We\'re here" link', link, 'Families can check in from their lesson link, from 90 minutes before the lesson.'),
       h('div', { class: 'row' }, save));
   } },

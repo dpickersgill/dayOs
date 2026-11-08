@@ -147,7 +147,9 @@ async function drawMine(box, settings) {
         field('Name to show', input({ name: 'display_name', maxlength: 60, value: p.display_name || '', placeholder: p.shown_as }), 'Leave blank to show your first name and last initial.'),
         field('About you', h('textarea', { name: 'bio', rows: 4, maxlength: 600 }, p.bio || ''), 'A few sentences. No photo, phone number or email.'),
         h('fieldset', { class: 'stack' }, h('legend', null, 'What you teach'), checks('disciplines', meta.disciplines, p.disciplines)),
-        h('fieldset', { class: 'stack' }, h('legend', null, 'Levels'), checks('levels', meta.levels, p.levels)),
+        // one level scale (1 to 9): when the school set what they are cleared to teach, that is what guests see
+        p.levels_from_clearance ? h('p', { class: 'muted small' }, `Levels shown: ${p.levels.length ? `1 to ${p.levels[p.levels.length - 1]}` : 'none'}, from what the school cleared you to teach.`)
+          : h('fieldset', { class: 'stack' }, h('legend', null, 'Levels you teach'), checks('levels', meta.levels, p.levels)),
         h('p', { class: 'muted small' }, 'Guests can only see your name, bio, what you teach and the times you mark open. They cannot book or contact you from the page.')), async (fd) => {
         await put('/availability/profile', { ...(staffId ? { staff_id: staffId } : {}), is_public: fd.get('is_public') === 'on', display_name: val(fd, 'display_name'), bio: val(fd, 'bio'), disciplines: fd.getAll('disciplines'), levels: fd.getAll('levels') });
         toast('Profile saved'); await load();

@@ -16,6 +16,9 @@ const safetySchema = z.object({
   contact_name: text(150), contact_phone: text(40), contact_email: z.string().trim().email().max(255).optional().or(z.literal('')),
   text_ok: z.boolean().optional(), photo_ok: z.boolean().optional(),
   placement: z.array(z.boolean()).min(1).max(3).optional(), // 2026.11.9 (Track GUEST): "Ask 3 questions" at the window
+  // feat/school-safety: who may pick up, an adaptive lesson's intake, and a manager's reason to book past an age or ratio warning
+  ...require('./schoolsafety').pickupShape, adaptive: require('./schoolsafety').adaptiveIntake.optional(),
+  override_reason: z.string().trim().min(3).max(300).optional(),
 });
 
 /** Saves a lesson line's safety details on its booking, the level it was booked at, and a text consent when given. */
@@ -29,6 +32,10 @@ async function saveSafety(conn, req, tenantId, bookingId, personId, session, saf
     WHERE tenant_id = ? AND id = ?`, [v('allergies'), v('medical'), v('pickup'), v('contact_name') || (p && p.emergency_name) || null, v('contact_phone') || (p && p.emergency_phone) || null,
     v('contact_email'), safety.text_ok ? 1 : 0, safety.photo_ok ? 1 : 0, tenantId, bookingId]);
   if (safety.text_ok) await recordConsent(conn, tenantId, personId, 'sms', 'opted_in', 'lesson_window', { userId: req.auth.userId });
+  const SS = require('./schoolsafety');
+  if (safety.pickup_adults) await SS.savePickup(conn, tenantId, bookingId, safety.pickup_adults, { consent: Boolean(safety.pickup_photo_consent), via: 'window' });
+  if (safety.adaptive && session.discipline === 'adaptive') await SS.saveAdaptive(conn, tenantId, bookingId, safety.adaptive, req.auth.userId || null);
+  if (safety.override_reason) await conn.query('UPDATE lesson_bookings SET override_reason = ? WHERE tenant_id = ? AND id = ?', [safety.override_reason, tenantId, bookingId]);
   if (safety.placement) {
     const placed = P.place(await P.questions(conn, tenantId), session.discipline, safety.placement);
     if (placed) await conn.query('UPDATE lesson_bookings SET placement_level = ?, placement_answers = ? WHERE tenant_id = ? AND id = ?', [placed.placement_level, placed.placement_answers, tenantId, bookingId]);

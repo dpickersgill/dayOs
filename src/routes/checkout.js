@@ -555,6 +555,8 @@ async function runSale(conn, req, body, { check = false } = {}) {
       // was locked when the sale found them, before the lesson row, and lock: true reads the latest bookings)
       const clash = await studentClash(conn, tenantId, student, s.starts_at, s.ends_at, { ignoreSessionId: s.id, lock: true });
       if (clash) throw conflict(`${(personRows.get(student) || {}).first_name || 'The student'}: ${clashWords(clash)}`);
+      // outside the lesson's ages or over its ratio by age band: a manager sells it anyway with a reason (feat/school-safety)
+      if (!adopting && !p.fitChecked) { await require('../lib/schoolsafety').deskCheck(conn, req, s, student, (p.line.safety && p.line.safety.override_reason) || null); p.fitChecked = true; }
       return { s, existing, adopting };
     };
     // An activity rider: the clerk's word on the limits, old enough, and (when the attraction asks) a waiver.

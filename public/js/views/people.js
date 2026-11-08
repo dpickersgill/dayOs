@@ -2,6 +2,7 @@
 import { get, post, patch, download } from '../api.js';
 import { h, clear, can, isManager, money, table, state, input, field, button, toast, formDialog, dialog, fmtDate, fmtDateTime, label, empty, errorBox } from '../ui.js';
 import { waiverPanel } from '../widgets.js';
+import { levelName } from '../levels.js';
 import { shareButton } from '../share.js';
 import { loadCustomerForm, customerFields, customerSettingsDialog } from './customer-form.js';
 import { photoSection, familySection, duplicatesDialog, renewalsDialog, mergeDialog } from './people-extra.js';
@@ -77,7 +78,7 @@ async function detail(p, done) {
     h('dl', { class: 'cust-lines' },
       ...line('Email', fresh.email), ...line('Phone', fresh.phone), ...line('Born', fresh.date_of_birth ? fmtDate(fresh.date_of_birth) : ''),
       ...line('Address', address), ...line('Emergency contact', [fresh.emergency_name, fresh.emergency_phone].filter(Boolean).join(', ')),
-      ...line('Skiing', [fresh.discipline, fresh.ability_level].filter(Boolean).map(label).join(', ')),
+      ...line('Skiing', [fresh.discipline ? label(fresh.discipline) : null, fresh.ski_level ? `Ski ${levelName(fresh.ski_level, 'ski')}` : null, fresh.snowboard_level ? `Snowboard ${levelName(fresh.snowboard_level, 'snowboard')}` : null].filter(Boolean).join(', ')),
       ...line('Rental sizing', [fresh.height_in && `${fresh.height_in} in`, fresh.weight_lb && `${fresh.weight_lb} lb`, fresh.boot_size && `boot ${fresh.boot_size}`, fresh.stance && label(fresh.stance), fresh.skier_type && `type ${fresh.skier_type}`].filter(Boolean).join(', ')),
       ...line('First recorded', fresh.created_at ? `${fmtDate(String(fresh.created_at).slice(0, 10))}${fresh.source ? ` (${label(fresh.source)})` : ''}` : '')),
   ];
