@@ -16,7 +16,7 @@ export async function drawReview(box, me) {
     box.append(h('section', { class: 'section stack' }, h('header', null, h('h2', null, 'Waiting for review')),
       q.data.length ? table([
         { head: 'Case', cell: (r) => h('a', { href: `#/patrol/case/${r.id}` }, h('strong', null, r.case_number)) },
-        { head: 'What', cell: (r) => h('span', { class: 'stack tight' }, r.summary_hidden ? h('span', { class: 'muted' }, 'Open the case to see more') : r.summary, h('small', { class: 'muted' }, `${label(r.category)}, ${r.severity} · ${r.location}`)) },
+        { head: 'What', cell: (r) => h('span', { class: 'stack tight' }, r.summary_hidden ? h('span', { class: 'muted' }, 'Open the case to see more') : r.summary, h('small', { class: 'muted' }, `${label(r.category)}, ${label(r.severity).toLowerCase()} · ${r.location}`)) },
         { head: 'Signed off by', cell: (r) => [r.submitted_by || '', r.own ? h('small', { class: 'muted' }, ' (you: another reviewer will review it)') : null] },
         { head: 'Waiting', cell: (r) => state(waitText(r.waiting_hours), r.waiting_hours >= q.nudge_hours ? 'bad' : r.waiting_hours >= 24 ? 'warn' : 'neutral') },
         { head: '', cell: (r) => [r.escalated ? state('Escalated', 'bad') : null, r.round > 1 ? state('Signed again', 'neutral') : null] },

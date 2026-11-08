@@ -3,7 +3,7 @@
 // patient is staff or a volunteer on duty appear by themselves; anything else is added here. Only the owner and those
 // the owner names can open it, and every look is logged.
 import { get, post, patch, put, download } from '../api.js';
-import { h, clear, input, select, field, button, toast, formDialog, dialog, table, empty, errorBox, state, fmtDate, nowInput } from '../ui.js';
+import { h, clear, input, select, field, button, toast, formDialog, dialog, table, empty, errorBox, state, fmtDate, nowInput, label } from '../ui.js';
 
 const TONE = { death: 'bad', days_away: 'bad', restricted: 'warn', other_recordable: 'warn', not_recordable: 'neutral' };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -144,7 +144,7 @@ async function accessDialog(onDone) {
   const boxes = r.data.map((u) => ({ u, el: h('input', { type: 'checkbox', checked: u.granted }) }));
   formDialog('Who can see the register', h('div', { class: 'stack' },
     h('p', { class: 'muted' }, 'You, the owner, can always see it. Choose anyone else who should, such as your general manager or the person who handles workers’ comp. Every look is logged.'),
-    boxes.length ? h('div', { class: 'member-list' }, boxes.map(({ u, el }) => h('label', { class: 'chk' }, el, h('span', null, u.login, h('small', { class: 'muted' }, ` ${u.role}`))))) : empty('No other logins yet.')), async () => {
+    boxes.length ? h('div', { class: 'member-list' }, boxes.map(({ u, el }) => h('label', { class: 'chk' }, el, h('span', null, u.login, h('small', { class: 'muted' }, ` ${label(u.role)}`))))) : empty('No other logins yet.')), async () => {
     await put('/staff-injuries/access', { user_ids: boxes.filter((b) => b.el.checked).map((b) => b.u.id) });
     toast('Saved');
     await onDone();

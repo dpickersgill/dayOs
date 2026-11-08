@@ -1,6 +1,6 @@
 import { get, post, patch, put, del, download, openFile, uploadFile } from '../api.js';
 import { shareButton } from '../share.js';
-import { h, clear, isManager, table, state, input, select, field, button, toast, formDialog, confirmDialog, dialog, val, num, fmtDate, fmtDateTime, empty, fail } from '../ui.js';
+import { h, clear, isManager, table, state, input, select, field, button, toast, formDialog, confirmDialog, dialog, val, num, fmtDate, fmtDateTime, empty, fail, label } from '../ui.js';
 
 const KB = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const VIEWABLE = /^(application\/pdf|image\/(png|jpeg|gif|webp))$/;
@@ -196,7 +196,7 @@ export async function render(root, params = []) {
     dialog(`Read and accepted: ${d.title}`, [
       h('p', { class: 'muted small' }, `Version ${r.version}. ${r.waiting ? `${r.waiting} of ${r.data.length} still to accept.` : 'Everyone has accepted.'}`),
       table([
-        { head: 'Person', cell: (p) => h('span', { class: 'stack tight' }, h('strong', null, p.name), h('span', { class: 'muted small' }, `${p.email}, ${p.role}`)) },
+        { head: 'Person', cell: (p) => h('span', { class: 'stack tight' }, h('strong', null, p.name), h('span', { class: 'muted small' }, `${p.email}, ${label(p.role)}`)) },
         { head: 'Status', cell: (p) => (p.accepted_at ? state(`Accepted ${fmtDateTime(p.accepted_at)}`, 'good') : state('Not yet', 'warn')) },
       ], r.data)], { wide: true });
   }
