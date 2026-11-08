@@ -221,7 +221,7 @@ test('dashboard shows the real numbers', skip(), async () => {
   const root = await renderView('dashboard', 'owner', T.owner);
   assert.match(root.textContent, /\$65\.00/);
   assert.match(root.textContent, /unfilled shift/);
-  assert.match(root.textContent, /Wrist injury|incident/);
+  assert.match(root.textContent, /Injury at Ridge Run/); // 2026.11.13: Today says cases and names the case by what happened and where
 });
 
 test('each role sees working screens (and only screens built for it)', skip(), async () => {
@@ -818,7 +818,7 @@ test('patrol: a case opens, shows the whole report, and the sign-off buttons wor
   const buttons = (root, text) => [...root.querySelectorAll('button')].filter((b) => b.textContent.trim() === text);
   let root = await renderView('patrol', 'owner', T.owner, {}, ['case', String(c.id)]);
   clean(root, 'case');
-  for (const text of [c.case_number, 'Cam Carver', 'Medication: Ibuprofen 400 mg oral', 'Wendy Witness', 'Sprain strain, Knee', 'Draft']) assert.ok(root.textContent.includes(text), `case page is missing "${text}"`);
+  for (const text of [c.case_number, 'Cam Carver', 'Medication: Ibuprofen 400 mg oral', 'Wendy Witness', 'Sprain or strain, Knee', 'Draft']) assert.ok(root.textContent.includes(text), `case page is missing "${text}"`);
   await exercise(root, 'case page');
 
   // submitting an incomplete report is one pass: what is required is listed first, with no "Submit anyway" past it
