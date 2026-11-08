@@ -1,6 +1,115 @@
 {
   "releases": [
     {
+      "version": "2026.11.13",
+      "date": "2026-11-08",
+      "title": "Child pickup, a lost-child button, ski school pay and a cleaner menu",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "school",
+          "who": ["instructor", "counter"],
+          "text": "Child pickup: add the adults who may pick a child up when you book, with a phone and an optional photo. After the lesson, release each child to a listed adult on My day or at the desk. Someone not on the list needs a manager and a reason. The family is told who picked up.",
+          "help": "lesson-pickup"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": ["instructor", "counter"],
+          "text": "A Lost child button on My day and at the desk sends patrol a call with the child's age, jacket and helmet colors and where they were last seen. The school sees the status, and Found closes it with who, where and when.",
+          "help": "lesson-lost-child"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": ["instructor", "counter"],
+          "text": "Class sizes by age band. The desk is warned when a class is over its size or a student is outside the lesson's ages, and a manager can book anyway with a reason. Online booking stops at the size. The lineup board shows Over ratio in red.",
+          "help": "lesson-ratios"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": ["instructor"],
+          "text": "Instructors can post a short update or a photo to the class's families, and tap We're at to show where the group is on the board. Photos go only to families who said yes to photos.",
+          "help": "lesson-live-updates"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": ["counter"],
+          "text": "An adaptive lesson asks for the student's needs, equipment and extra staff when it is booked. Only the lesson's instructors, the desk and managers can read it.",
+          "help": "lesson-adaptive"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": ["counter", "instructor"],
+          "text": "Ski school pay. A booking made on the roster is unpaid until it is paid in Sell, with Take payment right on the roster. A child's waiver needs the name of the parent or guardian who signed it.",
+          "help": "lesson-checkin"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": ["instructor"],
+          "text": "The pay ladder pays each instructor by certification level, with add-ons for specialist credentials. Instructors can flag a pay line before payroll, and directors log training hours.",
+          "help": "pay-ladder"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "Learn to ski ladders: a first-timer package of 3 or 4 lessons. Checking a student in for a ladder lesson issues the included lift ticket for that day and opens the included rental, ready to fit. Graduates get a season pass offer.",
+          "help": "school-learn-ladder"
+        },
+        {
+          "kind": "new",
+          "app": "school",
+          "who": null,
+          "text": "School and group programs: a school or club books a weekly program from a private link, fills its roster, and parents sign waivers online. Families can answer a 0 to 10 question after a lesson, and owners get new reports.",
+          "help": "school-groups"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "A cleaner menu. Menus follow each person's position, so park crew see the terrain park first and the patrol director has a menu of their own. On a phone the bar starts on your start screen and page headers are shorter. Jump to also finds tabs.",
+          "help": "role-menus"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "The app uses the brand colors, with gold buttons and slate text. Times read one way everywhere, on the mountain's clock, like 10:12 AM. Buttons and check boxes are easier to press on a phone, and printed patrol cases are cleaner."
+        },
+        {
+          "kind": "fixed",
+          "app": "conditions",
+          "who": ["staff"],
+          "text": "On a phone, the lift status buttons on Mountain status no longer break words in two."
+        },
+        {
+          "kind": "improved",
+          "app": "park",
+          "who": ["staff"],
+          "text": "A terrain park feature closed after an incident stays closed until a post-incident inspection passes. A photo taken in the inspection with no signal now waits on the phone and still counts for that inspection.",
+          "help": "park-inspect"
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": ["patrol"],
+          "text": "Patrol can open a patient only on a case they may open, and dispatch keeps a responder's link to the case when they are removed.",
+          "help": "patrol-records-check"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "Erasing a customer now also clears a child's adaptive intake, pickup list, lost child description and lesson rating comment."
+        }
+      ]
+    },
+    {
       "version": "2026.11.12",
       "date": "2026-11-08",
       "title": "Protected patient records, a new menu and terrain park records",
