@@ -40,6 +40,11 @@ npm run migrate && npm test
 
 `npm test` runs every `test/*.test.js` file (API, accounts, patrol, patrol access, park, checkout, payments, finance, school, kiosk and more). `test/web.test.js` renders every screen in jsdom against the real API, opens each dialog and runs the main workflows. It is skipped, and says so, unless jsdom is installed; install it for a run with `npm i --no-save jsdom` (not added to package.json so the production install stays small).
 
+A few tests drive a real browser with Playwright (for example `test/fix10.test.js` and `test/signin10.test.js`) and are
+skipped, and say so, when it cannot be loaded. Playwright is not in package.json either. In the development workspace it
+lives at `/opt/npm-tools/node_modules`: add that folder to `NODE_PATH` (or require `/opt/npm-tools/node_modules/playwright`
+in a one-off script), and `chromium.launch()` needs no options.
+
 ## Project layout
 
 | Folder | What is in it |
