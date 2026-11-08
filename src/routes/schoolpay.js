@@ -155,11 +155,11 @@ router.patch('/pay/private-offers/:id', manager, validate(offerSchema.partial())
 // ================================================================ the instructor's day and pay
 /** What a private request would pay this instructor (the pay line shown before they accept). */
 async function requestPay(db, tenantId, staffId, r, settings) {
-  const rates = await rows(db, 'SELECT staff_id, kind, cents, effective_from FROM instructor_pay_rates WHERE tenant_id = ?', [tenantId]);
+  const book = await P.rateBook(db, tenantId); // their own rate, the pay ladder by level, then the school default
   const day = String(r.starts_at).slice(0, 10);
   const parts = [];
-  const pr = P.rateFrom(rates, staffId, 'private', day);
-  const hr = P.rateFrom(rates, staffId, 'hourly', day);
+  const pr = book.rate(staffId, 'private', day);
+  const hr = book.rate(staffId, 'hourly', day);
   if (settings.pay_mode !== 'hourly' && pr !== null) parts.push({ label: 'private', cents: pr });
   if (settings.pay_mode !== 'per_lesson' && hr !== null) parts.push({ label: `${Math.round((r.minutes / 60) * 100) / 100} h`, cents: Math.round((hr * r.minutes) / 60) });
   if (settings.pay_mode === 'hourly' && pr) parts.push({ label: 'private', cents: pr });
@@ -452,7 +452,7 @@ router.post('/pay/payroll/approve', manager, validate(z.object({ from: dateStr, 
 });
 
 const LINE_COLS = ['instructor', 'staff_id', 'kind', 'day', 'what', 'hours', 'amount', 'details'];
-const SUM_COLS = ['instructor', 'staff_id', 'hours', 'lessons', 'lineup', 'hourly', 'program', 'request_bonus', 'pay_total', 'tips_pass_through'];
+const SUM_COLS = ['instructor', 'staff_id', 'hours', 'lessons', 'lineup', 'training', 'hourly', 'program', 'credential_addons', 'request_bonus', 'pay_total', 'tips_pass_through'];
 /** The two CSV files for one export: one row per instructor per kind of line, and a summary per instructor. */
 function csvFiles(items) {
   const lineRows = []; const sums = new Map();
@@ -461,13 +461,15 @@ function csvFiles(items) {
     const k = `${it.staff_id}|${it.kind}`;
     if (!byKind.has(k)) byKind.set(k, { instructor: it.name, staff_id: it.staff_id, kind: it.kind, days: new Set(), count: 0, minutes: 0, cents: 0 });
     const g = byKind.get(k); g.days.add(it.work_day); g.count += 1; g.minutes += it.kind === 'tip' ? 0 : Number(it.minutes); g.cents += Number(it.cents);
-    if (!sums.has(it.staff_id)) sums.set(it.staff_id, { instructor: it.name, staff_id: it.staff_id, minutes: 0, lessons: 0, lineup: 0, hourly: 0, program: 0, request_bonus: 0, pay: 0, tips: 0 });
+    if (!sums.has(it.staff_id)) sums.set(it.staff_id, { instructor: it.name, staff_id: it.staff_id, minutes: 0, lessons: 0, lineup: 0, training: 0, hourly: 0, program: 0, addons: 0, request_bonus: 0, pay: 0, tips: 0 });
     const s = sums.get(it.staff_id);
     if (it.kind === 'tip') { s.tips += Number(it.cents); continue; }
     s.pay += Number(it.cents);
     for (const p of it.parts || []) {
       if (p.label === 'request') s.request_bonus += p.cents;
       else if (p.label === 'lineup') s.lineup += p.cents;
+      else if (p.label === 'training') s.training += p.cents;
+      else if (/ add-on$/.test(p.label)) s.addons += p.cents;
       else if (/ h /.test(` ${p.label} `) || /clocked|lesson time|coaching/.test(p.label)) s.hourly += p.cents;
       else if (p.label === 'program meeting') s.program += p.cents;
       else s.lessons += p.cents;
@@ -479,8 +481,8 @@ function csvFiles(items) {
       hours: g.kind === 'tip' ? '' : (g.minutes / 60).toFixed(2), amount: dollars(g.cents), details: '' });
   }
   const sumRows = [...sums.values()].map((s) => {
-    const mins = items.filter((i) => i.staff_id === s.staff_id && i.kind !== 'tip').reduce((n, i) => n + (i.kind === 'lineup' && items.some((x) => x.staff_id === s.staff_id && x.kind === 'clock' && x.work_day === i.work_day) ? 0 : Number(i.minutes)), 0);
-    return { instructor: s.instructor, staff_id: s.staff_id, hours: (mins / 60).toFixed(2), lessons: dollars(s.lessons), lineup: dollars(s.lineup), hourly: dollars(s.hourly), program: dollars(s.program), request_bonus: dollars(s.request_bonus), pay_total: dollars(s.pay), tips_pass_through: dollars(s.tips) };
+    const mins = items.filter((i) => i.staff_id === s.staff_id && i.kind !== 'tip').reduce((n, i) => n + (['lineup', 'training'].includes(i.kind) && items.some((x) => x.staff_id === s.staff_id && x.kind === 'clock' && x.work_day === i.work_day) ? 0 : Number(i.minutes)), 0);
+    return { instructor: s.instructor, staff_id: s.staff_id, hours: (mins / 60).toFixed(2), lessons: dollars(s.lessons), lineup: dollars(s.lineup), training: dollars(s.training), hourly: dollars(s.hourly), program: dollars(s.program), credential_addons: dollars(s.addons), request_bonus: dollars(s.request_bonus), pay_total: dollars(s.pay), tips_pass_through: dollars(s.tips) };
   });
   lineRows.sort((a, b) => a.instructor.localeCompare(b.instructor) || a.kind.localeCompare(b.kind));
   sumRows.sort((a, b) => a.instructor.localeCompare(b.instructor));
@@ -528,6 +530,7 @@ async function runCsv(t, runId) {
     it.parts = words ? words.split(' + ').map((w) => { const m = w.match(/^(.*) (\d+\.\d{2})$/); return m ? { label: m[1], cents: Math.round(Number(m[2]) * 100) } : null; }).filter(Boolean) : [];
     if (it.kind === 'lineup') it.parts = [{ label: 'lineup', cents: Number(it.cents) }];
     if (it.kind === 'clock') it.parts = [{ label: 'clocked', cents: Number(it.cents) }];
+    if (it.kind === 'training') it.parts = [{ label: 'training', cents: Number(it.cents) }];
   }
   return csvFiles(items);
 }

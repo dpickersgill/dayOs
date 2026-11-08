@@ -434,7 +434,8 @@ async function progressCard(db, tenantId, personId, { recapBodies = true } = {})
       LEFT JOIN program_terms pt ON pt.tenant_id = e.tenant_id AND pt.id = e.term_id
       WHERE e.tenant_id = ? AND e.person_id = ? AND e.status = 'enrolled' GROUP BY pr.id, pr.name, e.term_id ORDER BY starts_on DESC LIMIT 12`, [tenantId, personId]))
     .map((r) => ({ name: r.name, term: r.term || null, season: r.starts_on ? seasonFor(String(r.starts_on).slice(0, 10)) : null }));
-  return { first_name: p.first_name, levels, passed, skills, recaps, lessons: Number(lessons.n), programs };
+  const ladders = await require('./learnladder').progress(db, tenantId, personId); // learn to ski: lesson 2 of 3, the graduate offer (feat/school-pay)
+  return { first_name: p.first_name, levels, passed, skills, recaps, lessons: Number(lessons.n), programs, ladders };
 }
 
 /** One-tap next steps after a lesson: the next lessons that fit, a lesson pack, and after three lessons a season pass. */
@@ -513,6 +514,8 @@ async function familyView(t, b, { slug }) {
     credits: await require('./lessonweather').creditsFor(pool, t.id, b.person_id), // weather credits (Track DIRECTOR)
     texts_available: await textsOn(t.id), photos_asked: Boolean(set.recap_photos),
     policy, recap: recapOut, tips,
+    // "How likely are you to recommend your instructor?" once the lesson is over (feat/school-pay, lib/lessonratings.js)
+    rating: ended && b.instructor_id && !['cancelled', 'no_show'].includes(b.status) ? { asked: true, instructor: ins ? ins.first_name : null, ...((await require('./lessonratings').forBooking(pool, t.id, b.id)) || {}) } : null,
     next: ended ? await nextSteps(pool, t, b, { slug }) : null,
     progress: await progressCard(pool, t.id, b.person_id),
   };

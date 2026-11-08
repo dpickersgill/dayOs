@@ -10,6 +10,7 @@ import { code128 } from '../barcode.js';
 import { printDialog } from '../print.js';
 import { levelOptions } from '../levels.js';
 import { row, toggle, amount } from './settings-kit.js';
+import { takePayment } from './school-money.js'; // feat/school-pay: Take payment for an unpaid lesson
 
 const desk = () => can('counter') || schoolCan('supervisor');
 const store = {
@@ -83,7 +84,7 @@ async function checkinTab(root) {
     scan.focus();
   }
   function problems(x) {
-    return [!x.waiver_ok ? h('span', null, ' ', state('No waiver this season', 'bad')) : null, x.unpaid ? h('span', null, ' ', state('Unpaid', 'warn')) : null];
+    return [!x.waiver_ok ? h('span', null, ' ', state('No waiver this season', 'bad')) : null, x.unpaid ? h('span', null, ' ', state('Unpaid', 'warn'), ' ', takePayment(x)) : null];
   }
   async function load() {
     clear(body).append(h('p', { class: 'loading' }, 'Loading…'));

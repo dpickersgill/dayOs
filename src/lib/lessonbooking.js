@@ -8,6 +8,7 @@
 //   - a lesson package, when used, has a lesson left and is valid on the day
 //   - the safety details, the contact and the consents are saved on the booking (and a text "yes" goes in the consent ledger)
 // After the transaction commits, call lib/lessonconfirm.sendConfirmation.
+const crypto = require('crypto');
 const { ON_FILE } = require('./waivers');
 const { one } = require('../db');
 const { z, seasonFor } = require('./util');
@@ -45,7 +46,7 @@ function heldWords(sp) {
  * Books a student. opts: { sessionId, personId, details: { ...safetyShape }, signWaiver, useCreditId, requestedInstructorId }.
  * Returns { bookingId, session }. Throws 409 with words a person can act on.
  */
-async function bookStudent(conn, req, { sessionId, personId, details = {}, signWaiver = false, useCreditId = null, requestedInstructorId = null }) {
+async function bookStudent(conn, req, { sessionId, personId, details = {}, signWaiver = false, waiverSigner = null, useCreditId = null, requestedInstructorId = null }) {
   const tenantId = req.auth.tenantId;
   // The student first, then the lesson (lib/lessonrules.js: the lock order every booking path keeps).
   await lockStudents(conn, tenantId, [personId]);
@@ -54,11 +55,7 @@ async function bookStudent(conn, req, { sessionId, personId, details = {}, signW
   if (s.status !== 'scheduled') throw conflict(`Session is ${s.status}`, { person_id: personId });
   const season = seasonFor(s.starts_at.slice(0, 10));
   let waiver = await one(conn, ON_FILE, [tenantId, personId, season]);
-  if (!waiver && signWaiver) {
-    const [w] = await conn.query("INSERT INTO waivers (tenant_id, person_id, season, kind, method, recorded_by) VALUES (?, ?, ?, 'general', 'recorded_by_staff', ?)", [tenantId, personId, season, req.auth.userId || null]);
-    await audit(conn, req, 'sign_waiver', 'waivers', w.insertId, { person_id: personId, season });
-    waiver = { id: w.insertId };
-  }
+  if (!waiver && signWaiver) waiver = { id: await recordCounterWaiver(conn, req, { personId, season, day: s.starts_at.slice(0, 10), signer: waiverSigner }) };
   if (!waiver) throw conflict('Student needs a signed waiver for this season before booking', { person_id: personId });
   const prior = await one(conn, 'SELECT id, status FROM lesson_bookings WHERE tenant_id = ? AND session_id = ? AND person_id = ?', [tenantId, s.id, personId]);
   const already = prior && ['booked', 'attended'].includes(prior.status);
@@ -83,18 +80,64 @@ async function bookStudent(conn, req, { sessionId, personId, details = {}, signW
   // The level they were booked at: what staff said, else what is on file for the lesson's discipline.
   let level = details.level ?? null;
   if (!level) level = levels.personLevel(await one(conn, 'SELECT ski_level, snowboard_level FROM people WHERE tenant_id = ? AND id = ?', [tenantId, personId]), s.discipline);
-  // A canceled booking can be revived; otherwise insert.
+  // A booking made here takes no money (feat/school-pay): it is unpaid until it is paid at the desk (Sell picks up the
+  // held booking), unless a lesson package pays for it or a sale for this lesson and student is already on file.
+  const unpaid = creditId || await paidOnFile(conn, tenantId, s.id, personId) ? 0 : 1;
+  // A canceled booking can be revived; otherwise insert. Revived, it is unpaid again unless it is paid for.
   const [r] = await conn.query(
-    `INSERT INTO lesson_bookings (tenant_id, session_id, person_id, credit_id, requested_instructor_id) VALUES (?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE status = IF(status = 'cancelled', 'booked', status), credit_id = IF(status = 'booked' AND credit_id IS NULL, VALUES(credit_id), credit_id),
+    `INSERT INTO lesson_bookings (tenant_id, session_id, person_id, credit_id, requested_instructor_id, unpaid) VALUES (?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE unpaid = IF(status = 'cancelled', VALUES(unpaid), IF(VALUES(credit_id) IS NOT NULL AND status = 'booked' AND credit_id IS NULL, 0, unpaid)),
+       status = IF(status = 'cancelled', 'booked', status), credit_id = IF(status = 'booked' AND credit_id IS NULL, VALUES(credit_id), credit_id),
        requested_instructor_id = COALESCE(VALUES(requested_instructor_id), requested_instructor_id), id = LAST_INSERT_ID(id)`,
-    [tenantId, s.id, personId, creditId, requestedInstructorId ?? null],
+    [tenantId, s.id, personId, creditId, requestedInstructorId ?? null, unpaid],
   );
   const bookingId = r.insertId;
   if (creditId) await conn.query('UPDATE lesson_credits SET used = used + 1 WHERE tenant_id = ? AND id = ?', [tenantId, creditId]);
   await saveDetails(conn, req, bookingId, personId, { ...details, level });
   await audit(conn, req, 'book', 'lesson_sessions', s.id, { person_id: personId, credit_id: creditId });
   return { bookingId, session: s };
+}
+
+/**
+ * Records a season waiver signed at the desk, as Sell does (routes/checkout.js ensureWaiver): who signed it, as what, and
+ * the wording they signed (its SHA-256). A student under 18 on the lesson day needs a parent or guardian's name; an adult
+ * signs for themselves. signer: { name, person_id } (person_id: a guardian on file, optional). Returns the waiver id.
+ */
+async function recordCounterWaiver(conn, req, { personId, season, day, signer }) {
+  const tenantId = req.auth.tenantId;
+  const me = await one(conn, 'SELECT id, first_name, last_name, date_of_birth FROM people WHERE tenant_id = ? AND id = ?', [tenantId, personId]);
+  const dob = me && me.date_of_birth ? String(me.date_of_birth instanceof Date ? me.date_of_birth.toISOString() : me.date_of_birth).slice(0, 10) : null;
+  let age = null;
+  if (dob) { age = Number(day.slice(0, 4)) - Number(dob.slice(0, 4)); if (day.slice(5) < dob.slice(5)) age -= 1; }
+  const minor = age !== null && age < 18;
+  let by = null; let name = null; let relation = 'self';
+  if (minor) {
+    name = signer && String(signer.name || '').trim();
+    if (signer && signer.person_id) {
+      const g = await one(conn, `SELECT g.id, g.first_name, g.last_name FROM person_links l JOIN people g ON g.tenant_id = l.tenant_id AND g.id = l.adult_id
+        WHERE l.tenant_id = ? AND l.member_id = ? AND l.adult_id = ? AND l.relation = 'guardian'`, [tenantId, personId, signer.person_id]);
+      if (!g) throw conflict('That person is not a parent or guardian of the student on file. Type the name of the parent or guardian who signed.', { person_id: personId });
+      by = g.id; name = name || `${g.first_name} ${g.last_name}`;
+    }
+    if (!name || name.length < 3) throw conflict(`${me.first_name} is under 18: a parent or guardian must sign the waiver. Enter the name of the parent or guardian who signed.`, { person_id: personId, needs_guardian: true });
+    if (name.toLowerCase() === `${me.first_name} ${me.last_name}`.toLowerCase()) throw conflict(`${me.first_name} is under 18 and cannot sign their own waiver. Enter the parent or guardian's name.`, { person_id: personId, needs_guardian: true });
+    relation = 'guardian';
+  } else { by = me.id; name = `${me.first_name} ${me.last_name}`; }
+  const t = await one(conn, 'SELECT waiver_text FROM tenants WHERE id = ?', [tenantId]);
+  const sha = t && t.waiver_text ? crypto.createHash('sha256').update(t.waiver_text).digest('hex') : null;
+  const [w] = await conn.query("INSERT INTO waivers (tenant_id, person_id, season, kind, signed_by_person_id, signed_by_name, signer_relation, text_sha, method, recorded_by) VALUES (?, ?, ?, 'general', ?, ?, ?, ?, 'recorded_by_staff', ?)",
+    [tenantId, personId, season, by, String(name).slice(0, 200), relation, sha, req.auth.userId || null]);
+  await audit(conn, req, 'sign_waiver', 'waivers', w.insertId, { person_id: personId, season, signed_by: by, signer_relation: relation });
+  return w.insertId;
+}
+
+/** Is a sale for this student in this lesson on file (a desk order line not refunded, or a confirmed online request)? */
+async function paidOnFile(conn, tenantId, sessionId, personId) {
+  const line = await one(conn, "SELECT id FROM order_items WHERE tenant_id = ? AND session_id = ? AND person_id = ? AND line_kind = 'lesson' AND refunded_at IS NULL LIMIT 1", [tenantId, sessionId, personId]);
+  if (line) return true;
+  const req = await one(conn, `SELECT r.id FROM lesson_bookings b JOIN lesson_requests r ON r.tenant_id = b.tenant_id AND r.id = b.request_id
+    WHERE b.tenant_id = ? AND b.session_id = ? AND b.person_id = ? AND r.status = 'confirmed' AND r.order_id IS NOT NULL LIMIT 1`, [tenantId, sessionId, personId]);
+  return Boolean(req);
 }
 
 /** Saves the safety details and consents given (only the fields present). A text "yes" is written to the consent ledger. */
@@ -135,7 +178,8 @@ async function lastDetails(db, tenantId, personId) {
     contact_email: (last && last.contact_email) || (guardian && guardian.email) || p.email || null,
     text_ok: Boolean(last && last.text_ok), photo_ok: Boolean(last && last.photo_ok),
     ski_level: p.ski_level, snowboard_level: p.snowboard_level, from_last_booking: Boolean(last),
+    guardian: guardian ? { id: guardian.id, name: `${guardian.first_name} ${guardian.last_name}` } : null, // who signs a child's waiver (feat/school-pay)
   };
 }
 
-module.exports = { heldWords, bookStudent, saveDetails, lastDetails, guardianOf, safetyShape, SAFETY, TEXT_WORDS, PHOTO_WORDS };
+module.exports = { heldWords, bookStudent, paidOnFile, recordCounterWaiver, saveDetails, lastDetails, guardianOf, safetyShape, SAFETY, TEXT_WORDS, PHOTO_WORDS };
