@@ -221,7 +221,8 @@ async function drawLayout(box, list) {
       const today = isToday() ? AREA_TODAY[a.today_status] : null;
       return h('li', { class: 'park-area', 'data-area': a.id },
         h('span', null, h('b', null, a.name), h('span', { class: 'muted small' }, a.level === 'beginner' ? ` ${a.level_label}` : ` rated ${a.level_label}`), ' ', today ? state(...today) : null,
-          isToday() && a.today ? h('span', { class: 'muted small' }, a.today.action === 'open' ? ` Signed off by ${a.today.supervisor_name}, ${fmtTime(a.today.at)}` : ` ${label(a.today.reason_kind)}, ${fmtTime(a.today.at)}`) : null),
+          isToday() && a.today ? h('span', { class: 'muted small' }, a.today.action === 'open' ? ` Signed off by ${a.today.supervisor_name}, ${fmtTime(a.today.at)}` : ` ${label(a.today.reason_kind)}, ${fmtTime(a.today.at)}`) : null,
+          isToday() && (a.late_notes || []).length ? h('div', { class: 'warn-note small park-late' }, a.late_notes.join(' ')) : null),
         h('span', { class: 'row tight' },
           canEdit && isToday() && a.today_status !== 'open' ? button('Open the area', () => signOffDialog(a, data, refresh), { kind: 'primary', small: true }) : null,
           canEdit && isToday() && a.today_status === 'open' ? button('Close the area', () => closeAreaDialog(a, refresh), { small: true, kind: 'quiet-danger' }) : null,
@@ -458,7 +459,7 @@ function inspectDialog(f, list, again, { quick = false, note } = {}) {
     for (const file of [...fileIn.files]) {
       if (navigator.onLine === false) { toast('Photos need a signal. Try again when you have one.', 'warn'); break; }
       try {
-        const q = new URLSearchParams({ client_ref: `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, taken_at: nowStamp().slice(0, 16), file_name: file.name.slice(0, 200) });
+        const q = new URLSearchParams({ for: 'inspection', client_ref: `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, taken_at: nowStamp().slice(0, 16), file_name: file.name.slice(0, 200) });
         const r = await sendBytes('POST', `/park/features/${fid}/photos?${q}`, file);
         photoIds.push(r.id);
         photoList.append(h('li', null, state(`Photo ${photoIds.length} saved`, 'good'), h('span', { class: 'muted small' }, ` ${file.name}`)));
@@ -501,7 +502,8 @@ function inspectDialog(f, list, again, { quick = false, note } = {}) {
     if (offline && body.result === 'closed' && !photoIds.length && !body.no_photo_reason) body.no_photo_reason = 'No signal: photo to follow';
     if (offline && body.result === 'ok' && ['closed', 'needs_attention'].includes(status)) throw new Error('Reopening needs a photo, and photos need a signal. Keep it closed until you have one.');
     const r = await send('POST', `/park/features/${fid}/inspections`, body, { caseId: PARK_QUEUE, label: `Inspection of ${f.name}` });
-    toast(sentWord(r, body.result === 'ok' ? `${f.name}: inspected, no defects found` : `${f.name}: ${RESULT_SHORT[body.result].toLowerCase()}`), r && r.queued ? 'warn' : 'ok');
+    if (r && r.needs_post_incident) toast(`${f.name}: ${r.message}`, 'warn');
+    else toast(sentWord(r, body.result === 'ok' ? `${f.name}: inspected, no defects found` : `${f.name}: ${RESULT_SHORT[body.result].toLowerCase()}`), r && r.queued ? 'warn' : 'ok');
     await again();
   }, { submitText: quick ? 'Save: all checks OK' : 'Save inspection', wide: true });
   d.box.classList.add('park-dialog');
@@ -522,14 +524,15 @@ async function signOffDialog(a, day, again) {
     box.addEventListener('change', () => { ticks.set(k, box.checked); });
     return h('li', null, h('label', { class: 'check big-check' }, box, ` ${text}`));
   }));
-  const blockBox = blocked.length ? h('div', { class: 'error-box park-blocked', role: 'alert' }, h('b', null, `${a.name} cannot open yet. `), 'Inspect each of these today, or rope it off:',
-    h('ul', null, blocked.map((b) => h('li', null, `${b.name}: ${b.why.toLowerCase()}`)))) : h('p', { class: 'ok-note' }, 'Every feature placed here today is inspected and none is closed (or it is roped off).');
+  const blockBox = blocked.length ? h('div', { class: 'error-box park-blocked', role: 'alert' }, h('b', null, `${a.name} cannot open yet. `), `${blocked.length === 1 ? 'This feature stops' : 'These features stop'} it opening:`,
+    h('ul', null, blocked.map((b) => h('li', { 'data-feature': b.feature_id }, h('b', null, b.name), `: ${b.why}. `, h('span', null, b.todo))))) : h('p', { class: 'ok-note' }, 'Every feature placed here today passed an inspection today, or is roped off.');
   const d = formDialog(`Open ${a.name}`, h('div', { class: 'form' }, h('div', { class: 'wide' }, blockBox), h('div', { class: 'wide' }, h('h3', null, 'Before the rope comes down'), list),
     field('Supervisor', name), h('div', { class: 'wide' }, field('Notes', input({ name: 'notes', maxlength: 255 })))),
   async (fd) => {
     const body = { checklist: Object.fromEntries(ticks), supervisor_name: val(fd, 'supervisor_name'), notes: val(fd, 'notes'), at: nowStamp() };
     const r = await send('POST', `/park/areas/${a.id}/open`, body, { caseId: PARK_QUEUE, label: `Open ${a.name}` });
-    toast(sentWord(r, `${a.name} is open`)); await again();
+    if (r && r.status === 'closed') toast(r.message || `${a.name} stays closed`, 'warn'); else toast(sentWord(r, `${a.name} is open`));
+    await again();
   }, { submitText: blocked.length ? 'Open the area' : 'Sign off and open', wide: true });
   d.box.classList.add('park-dialog');
   // No override: while a feature blocks the area (checked with the server each time this opens), the button stays off.
@@ -739,6 +742,15 @@ function layoutSvg(features) {
   return root;
 }
 
+/** A time zone as people say it ("Eastern time"), not its database name. Falls back to the name when unknown. */
+function zoneName(tz) {
+  try {
+    const p = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longGeneric' }).formatToParts(new Date()).find((x) => x.type === 'timeZoneName');
+    if (p && p.value && !/^GMT/.test(p.value)) return p.value.replace(/ Time$/, ' time');
+  } catch (_) { /* unknown zone */ }
+  return tz;
+}
+
 async function drawRecord(root, list, areaId, date) {
   let r;
   try { r = await get(`/park/areas/${areaId}/record/${date}`); } catch (err) { root.append(errorBox(err)); return; }
@@ -748,11 +760,12 @@ async function drawRecord(root, list, areaId, date) {
   const plotted = live.length ? live : r.features;
   root.append(h('div', { class: 'stack park-record' },
     h('div', { class: 'page-head spread' }, h('h1', null, `${r.area.name}: day record`), h('span', { class: 'row no-print' }, h('a', { class: 'btn small', href: '#/park' }, 'Back to the park'), button('Print', () => window.print(), { kind: 'primary', small: true }))),
-    h('p', null, h('b', null, `${r.area.name}, ${fmtDateLong(date)}`), ` · Rated ${r.area.level_label} · Times are ${r.timezone}`),
+    h('p', null, h('b', null, `${r.area.name}, ${fmtDateLong(date)}`), ` · Rated ${r.area.level_label} · Times are ${zoneName(r.timezone)}`),
+    (r.late_notes || []).length ? h('div', { class: 'warn-note park-late' }, r.late_notes.join(' ')) : null,
     h('h2', null, 'Opening sign-off and closures'),
     r.days.length ? h('ul', { class: 'plain' }, r.days.map((d) => h('li', null, d.action === 'open'
       ? h('span', null, h('b', null, `Opened ${fmtTime(d.at)}`), `, signed off by ${d.supervisor_name} (login ${d.signed_by || 'unknown'}). Checked: ${(d.checklist || []).map((c) => c.label).join('; ')}.${d.reason ? ` Notes: ${d.reason}` : ''}`)
-      : h('span', null, h('b', null, `Closed ${fmtTime(d.at)}`), ` (${label(d.reason_kind)}): ${d.reason}. ${d.features_closed} feature${d.features_closed === 1 ? '' : 's'} closed, by ${d.signed_by || 'unknown'}.`)))) : h('p', { class: 'warn-note' }, 'No opening sign-off recorded for this day.'),
+      : h('span', null, h('b', null, `Closed ${fmtTime(d.at)}`), ` (${label(d.reason_kind)}): ${d.reason}. ${d.features_closed} feature${d.features_closed === 1 ? '' : 's'} closed, by ${d.signed_by || 'unknown'}.`, d.late_message ? h('span', { class: 'warn-note small' }, ` ${d.late_message}`) : null)))) : h('p', { class: 'warn-note' }, 'No opening sign-off recorded for this day.'),
     h('h2', null, 'Layout'), layoutSvg(plotted),
     h('h2', null, 'Features'),
     r.features.length ? table([
