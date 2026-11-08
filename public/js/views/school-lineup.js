@@ -259,7 +259,7 @@ async function lineupTab(root) {
   }
 
   function ratioDialog() {
-    formDialog('Class size for this lineup', h('div', { class: 'form' }, field('Students per instructor', input({ type: 'number', name: 'ratio', min: 1, max: 20, value: b.lineup.ratio }), 'Only this lineup. The school\'s usual sizes are in Settings, Ski school.')), async (fd) => {
+    formDialog('Class size for this lineup', h('div', { class: 'form' }, field('Students per instructor', input({ type: 'number', name: 'ratio', min: 1, max: 20, value: b.lineup.ratio }), 'Only this lineup. The school\'s usual sizes are in Settings, Lessons.')), async (fd) => {
       b = await patch(`/skischool/lineups/${b.lineup.id}`, { ratio: Number(val(fd, 'ratio')) || null });
       draw();
     });
