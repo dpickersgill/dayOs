@@ -62,7 +62,7 @@ function outboxStrip(again) {
     clear(box);
     box.hidden = !list.length && !offline;
     if (box.hidden) return;
-    box.append(h('div', { class: 'spread' }, h('span', null, h('b', null, offline ? 'No signal. ' : ''), waiting.length ? `${waiting.length} park entr${waiting.length === 1 ? 'y' : 'ies'} waiting to send.` : 'Inspections, pins and openings are kept on this phone and sent when the signal returns. Photos need a signal.'),
+    box.append(h('div', { class: 'spread' }, h('span', null, h('b', null, offline ? 'No signal. ' : ''), waiting.length ? `${waiting.length} park entr${waiting.length === 1 ? 'y' : 'ies'} waiting to send.` : 'Inspections, their photos, pins and openings are kept on this phone and sent when the signal returns.'),
       waiting.length && !offline ? button('Send now', async () => { const n = await flush(); toast(n ? `Sent ${n}` : 'Still no connection', n ? 'ok' : 'warn'); if (n) again(); }, { small: true }) : null));
     for (const x of refused) {
       box.append(h('div', { class: 'spread refused' }, h('span', null, h('b', null, `Not saved: ${x.label}. `), x.error),
