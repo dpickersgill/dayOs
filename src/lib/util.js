@@ -200,8 +200,19 @@ async function mapLimit(items, limit, fn) {
   return out;
 }
 
+/**
+ * The one way a time of day reads on screen and in messages: 12-hour with AM or PM ("10:58 AM").
+ * Takes a mountain wall-clock value: "HH:MM[:SS]" or "YYYY-MM-DD HH:MM[:SS]" (or with a T). Anything else comes back as is.
+ */
+function clock(v) {
+  const m = /(?:^|[T ])(\d{1,2}):(\d{2})(?::\d{2})?/.exec(String(v ?? ''));
+  if (!m) return v == null ? '' : String(v);
+  const hh = Number(m[1]);
+  return `${hh % 12 || 12}:${m[2]} ${hh < 12 ? 'AM' : 'PM'}`;
+}
+
 module.exports = {
-  canonId,
+  canonId, clock,
   mapLimit, partialOf, z, dateStr, dateTimeStr, planDateStr, planDateTimeStr, realDate, timeStr, id, tierEnum,
   validate, paramId, normDateTime, todayIn, nowIn, dayRange, utcFromLocal, localDay, localTime, addDays, weekdayOf, seasonFor, newCode, setClause,
 };
