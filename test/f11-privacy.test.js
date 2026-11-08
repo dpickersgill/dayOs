@@ -409,3 +409,51 @@ test('suspicion: a patrol login’s question to the assistant loses names, phone
   assert.match(own.question, /Mary Smith/);
   } finally { config.assistant = was; }
 });
+
+test('2026.11.13: the school safety and pay rows of a child are in the download and erased with them; a classmate keeps theirs', async () => {
+  const T = A.id; const tag = `Sx${suffix}`;
+  const [prod] = await pool.query("INSERT INTO products (tenant_id, kind, name, base_price_cents) VALUES (?, 'lesson', 'Adaptive', 5000)", [T]);
+  const [s] = await pool.query("INSERT INTO lesson_sessions (tenant_id, product_id, starts_at, ends_at, capacity) VALUES (?, ?, '2026-12-21 10:00:00', '2026-12-21 12:00:00', 8)", [T, prod.insertId]);
+  const child = async (first) => {
+    const [p] = await pool.query('INSERT INTO people (tenant_id, first_name, last_name, date_of_birth) VALUES (?,?,?,?)', [T, first, `Kid${tag}`, '2018-05-06']);
+    const [b] = await pool.query("INSERT INTO lesson_bookings (tenant_id, session_id, person_id, status, released_to, release_reason, jacket_color, helmet_color, override_reason) VALUES (?,?,?, 'attended', ?, ?, 'red', 'blue', ?)",
+      [T, s.insertId, p.insertId, `Aunt ${first}`, `Known to the desk ${first}`, `Parent asked ${first}`]);
+    const bid = b.insertId;
+    await pool.query("INSERT INTO lesson_pickup_adults (tenant_id, booking_id, name, relationship, phone) VALUES (?, ?, ?, 'aunt', '6105550000')", [T, bid, `Aunt ${first}`]);
+    await pool.query('INSERT INTO lesson_adaptive_intake (tenant_id, booking_id, needs, equipment, notes) VALUES (?, ?, ?, ?, ?)', [T, bid, `needs-${first}`, 'bi-ski', `notes-${first}`]);
+    await pool.query("INSERT INTO school_lost_children (tenant_id, booking_id, session_id, jacket_color, helmet_color, last_seen, status, reported_at) VALUES (?, ?, ?, 'red', 'blue', ?, 'found', UTC_TIMESTAMP())", [T, bid, s.insertId, `near the carpet ${first}`]);
+    await pool.query('INSERT INTO lesson_ratings (tenant_id, booking_id, session_id, score, comment) VALUES (?, ?, ?, 9, ?)', [T, bid, s.insertId, `loved it ${first}`]);
+    return { pid: p.insertId, bid, first };
+  };
+  const gone = await child(`Gone${tag}`); const stays = await child(`Stays${tag}`);
+
+  const ex = await api('GET', `/people/${gone.pid}/data-export`, { token: A.manager });
+  assert.equal(ex.status, 200);
+  const all = ex.body.all_records;
+  for (const t of ['lesson_pickup_adults', 'lesson_adaptive_intake', 'school_lost_children', 'lesson_ratings']) assert.equal(all[t] && all[t].length, 1, `export has the child's ${t}`);
+  assert.equal(all.lesson_adaptive_intake[0].notes, `notes-${gone.first}`);
+  assert.ok(!ex.text.includes(stays.first), 'nothing of the classmate');
+
+  const an = await api('POST', `/people/${gone.pid}/anonymise`, { token: A.manager, body: { confirm: true } });
+  assert.equal(an.status, 200, an.text);
+  const one = async (sql, id) => (await q(sql, [T, id]))[0];
+  assert.equal(await one('SELECT * FROM lesson_adaptive_intake WHERE tenant_id = ? AND booking_id = ?', gone.bid), undefined, 'the intake notes are gone');
+  assert.equal(await one('SELECT * FROM lesson_pickup_adults WHERE tenant_id = ? AND booking_id = ?', gone.bid), undefined, 'the pickup list is gone');
+  assert.deepEqual({ ...await one('SELECT jacket_color, helmet_color, last_seen, status FROM school_lost_children WHERE tenant_id = ? AND booking_id = ?', gone.bid) },
+    { jacket_color: null, helmet_color: null, last_seen: null, status: 'found' }, 'the lost child report stays without the description');
+  assert.deepEqual({ ...await one('SELECT score, comment FROM lesson_ratings WHERE tenant_id = ? AND booking_id = ?', gone.bid) }, { score: 9, comment: null });
+  assert.deepEqual({ ...await one('SELECT released_to, release_reason, jacket_color, helmet_color, override_reason FROM lesson_bookings WHERE tenant_id = ? AND id = ?', gone.bid) },
+    { released_to: null, release_reason: null, jacket_color: null, helmet_color: null, override_reason: null });
+  // the classmate on the same lesson is untouched
+  assert.equal((await one('SELECT notes FROM lesson_adaptive_intake WHERE tenant_id = ? AND booking_id = ?', stays.bid)).notes, `notes-${stays.first}`);
+  assert.ok(await one('SELECT id FROM lesson_pickup_adults WHERE tenant_id = ? AND booking_id = ?', stays.bid));
+  assert.equal((await one('SELECT comment FROM lesson_ratings WHERE tenant_id = ? AND booking_id = ?', stays.bid)).comment, `loved it ${stays.first}`);
+  assert.equal((await one('SELECT jacket_color FROM lesson_bookings WHERE tenant_id = ? AND id = ?', stays.bid)).jacket_color, 'red');
+});
+
+test('2026.11.13: every school, group and scorecard table is in the registry or named as not a guest', () => {
+  const { REGISTRY, NOT_GUESTS } = require('../src/lib/personal');
+  const known = new Set([...REGISTRY.map((e) => e.table), ...Object.keys(NOT_GUESTS)]);
+  for (const t of ['lesson_pickup_adults', 'lesson_adaptive_intake', 'school_lost_children', 'lesson_live_updates', 'school_group_places', 'lesson_ratings',
+    'group_programs', 'group_program_students', 'group_program_chaperones', 'group_program_handoffs', 'site_leads']) assert.ok(known.has(t), t);
+});

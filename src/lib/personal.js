@@ -5,7 +5,8 @@
 // new table with a person_id, email, phone or health column is in neither REGISTRY nor NOT_GUESTS.
 //
 // Each entry says how to find the person's rows and what erasing does to them:
-//   by:     'person_id' columns that point at people.id, and/or contact columns matched on the person's email or phone
+//   by:     'person_id' columns that point at people.id, and/or contact columns matched on the person's email or phone;
+//           booking: a lesson_bookings id column, for rows that hang off one of the person's lesson bookings (2026.11.13)
 //   erase:  { set: { column: value } } blanks identity and health; 'delete' removes the row; { keep: why } keeps it as is
 //   json:   text columns holding JSON whose names, contacts and health details are blanked on erase
 //   group:  'patrol' rows are never put in the download (a records request through patrol gives them out); the export
@@ -52,10 +53,19 @@ const REGISTRY = [
   { table: 'rental_groups', by: { email: ['leader_email'], phone: ['leader_phone'] }, erase: { set: { leader_name: null, leader_email: null, leader_phone: null } } },
   // Lessons, programs and the school: children's safety details are cleared.
   { table: 'lesson_bookings', by: { person: ['person_id'], email: ['contact_email'], phone: ['contact_phone'] },
-    erase: { set: { allergies: null, medical: null, pickup: null, contact_name: null, contact_phone: null, contact_email: null, instructor_notes: null, placement_answers: null } } },
+    erase: { set: { allergies: null, medical: null, pickup: null, contact_name: null, contact_phone: null, contact_email: null, instructor_notes: null, placement_answers: null,
+      // school safety (2026.11.13): who the child was released to and why, what they wore, and a booking-past-a-warning note
+      released_to: null, release_reason: null, jacket_color: null, helmet_color: null, override_reason: null } } },
   { table: 'lesson_recaps', by: { person: ['person_id'] }, erase: { set: { note: null, body: null } } },
-  // feat/school-safety: an adult on a child's pickup list, found by their phone; erasing removes them and their photo
-  { table: 'lesson_pickup_adults', by: { phone: ['phone'] }, erase: 'delete' },
+  // feat/school-safety: an adult on a child's pickup list, found by their phone or by the child's booking; erasing either
+  // removes the adult and their photo
+  { table: 'lesson_pickup_adults', by: { phone: ['phone'], booking: 'booking_id' }, erase: 'delete' },
+  // The adaptive intake (needs, equipment, extra staff, notes) is health information about the student: erasing deletes it.
+  { table: 'lesson_adaptive_intake', by: { booking: 'booking_id' }, erase: 'delete' },
+  // A lost child report stays as the school's safety record, without what the child wore or where they were last seen.
+  { table: 'school_lost_children', by: { booking: 'booking_id' }, erase: { set: { jacket_color: null, helmet_color: null, last_seen: null } } },
+  // The family's 0 to 10 answer stays in the school's score; the comment goes.
+  { table: 'lesson_ratings', by: { booking: 'booking_id' }, erase: { set: { comment: null } } },
   { table: 'lesson_requests', by: { email: ['contact_email'], phone: ['contact_phone'] }, erase: { set: { contact_name: 'Former customer', contact_email: '', contact_phone: '', note: null } }, json: ['students'] },
   { table: 'lesson_waitlist', by: { email: ['contact_email'], phone: ['contact_phone'] }, erase: { set: { contact_name: 'Former customer', contact_email: '', contact_phone: null } }, json: ['student'] },
   { table: 'lesson_baskets', by: { email: ['contact_email'] }, erase: { set: { contact_email: '' } } },
@@ -108,6 +118,10 @@ const NOT_GUESTS = {
   sandbox_signups: 'a demo sign-up', prospects: 'a mountain Verdynt/OS may contact', prospect_contacts: 'staff at a mountain Verdynt/OS may contact',
   outreach_sequences: 'Verdynt/OS sales email', outreach_suppress: 'Verdynt/OS sales email', morning_messages: 'a flag on an order', weekly_reports: 'a report to the mountain’s managers',
   deletion_ledger: 'the record of erasures, kept to replay after a restore', sms_held: 'texts waiting for 8 AM (deleted once sent)',
+  // 2026.11.13: school tables with no guest column, named so nobody wonders. Each is about a class, a group or staff.
+  lesson_live_updates: 'a line or photo to a whole class, deleted after 90 days', school_group_places: 'where a class is, kept for the day only',
+  group_program_handoffs: 'drop-off and pickup counts for a school group', pay_line_flags: 'an instructor asking about their own pay',
+  school_training_staff: 'staff training hours', user_notices: 'a notice a sign-in has dismissed',
 };
 
 // Columns never put in a download: secrets, signatures and payment tokens.
@@ -132,6 +146,7 @@ function whereOf(entry, who) {
   for (const c of by.person || []) { parts.push(`${q(c)} = ?`); params.push(who.id); }
   if (who.email) for (const c of by.email || []) { parts.push(`LOWER(${q(c)}) = ?`); params.push(who.email); }
   if (who.phone) for (const c of by.phone || []) { parts.push(`RIGHT(REGEXP_REPLACE(${q(c)}, '[^0-9]', ''), 10) = ?`); params.push(who.phone); }
+  if (by.booking) { parts.push(`${q(by.booking)} IN (SELECT lb.id FROM lesson_bookings lb WHERE lb.tenant_id = ${q(entry.table)}.tenant_id AND lb.person_id = ?)`); params.push(who.id); }
   if (!parts.length) return null;
   return [`(${parts.join(' OR ')})`, params];
 }
