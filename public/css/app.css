@@ -3787,3 +3787,5 @@ button.fill-day:hover { border-color: var(--line-strong); }
 .band-row > input[type="number"] { width: 5.5em !important; min-width: 0 !important; }
 .band-row > input:not([type="number"]) { width: 11em !important; min-width: 0 !important; }
 .band-rows { width: 100%; }
+.lost-strip.notice, .notice.bad { background: var(--closed-tint); border-color: var(--closed); color: var(--ink); }
+.lost-strip strong { color: var(--closed-ink); }
