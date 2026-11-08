@@ -314,7 +314,7 @@ Day to day: directors open Patrol, Follow-up to approve or skip held cases. Emai
 
 ## Demo data
 
-`node db/demo.js <slug>` fills a mountain with made-up staff, customers, products, rentals, lessons, sales, patrol cases and punches by using the app's own API. Run `node db/reset.js <slug> --yes` first for a clean start. It signs in with a temporary owner login that it deletes at the end, and it stops with a message if the mountain requires two-step sign-in.
+`node db/demo.js <slug>` fills a mountain with made-up staff, customers, products, rentals, lessons, sales, patrol cases and punches by using the app's own API. It runs after `node db/seed.js` (it uses the seed's lifts, runs, products, certifications and positions) and is safe to run again: anything already there is kept and not added a second time. The ski school gets four instructors with certifications, teaching profiles and pay rates, lessons for kids and adults on each of the next 7 days, and a six-week Saturday program. Staff get 6-digit kiosk PINs, and patrollers get a published patrol schedule for the week. Run `node db/reset.js <slug> --yes` first for a clean start. It signs in with a temporary owner login that it deletes at the end, and it stops with a message if the mountain requires two-step sign-in.
 
 ## Patrol access levels
 Upgrading needs `npm run migrate` (adds the access level column and the rules table; roster members are mapped from rank once). After deploying, sign in as the owner, open Patrol, then Access levels, and set anyone who should be Approver or Host. To undo someone's lockout, an owner or system manager can always open Access levels, since those logins are always Admin.
