@@ -12,7 +12,8 @@
 #      lockout or "too many" alert, so the sign_in_failed audit events are counted (feat/auth-hardening)
 #   8. Failed console sign-ins (more than 2 in 15 minutes): someone trying the platform console
 # What to do about each: RUNBOOK.md, "Security alerts". A new metric needs a few minutes before an alert can use it: if
-# a policy says "not yet", run this again 10 minutes later.
+# a policy says "not yet", run this again 10 minutes later. Any other failure (a missing permission, a bad filter) is
+# printed with Google's message, the script carries on with the rest, and it ends with exit status 1.
 # It also turns on Data Access audit logs for Secret Manager and Cloud SQL, so every read of a secret and every
 # database administration call is recorded by Google (Logging, Logs Explorer, "data_access").
 #   --dry-run   print what would change, change nothing
@@ -20,7 +21,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/cloud-common.sh
 DRY=""; [ "${1:-}" = --dry-run ] && DRY=1
-run() { if [ -n "$DRY" ]; then printf '  would run: %s\n' "$*"; else "$@"; fi; }
+# "would run" goes to the terminal (file descriptor 3) even where the command's own output is thrown away.
+exec 3>&1
+run() { if [ -n "$DRY" ]; then printf '  would run: %s\n' "$*" >&3; else "$@"; fi; }
 ALPHA=(gcloud alpha monitoring)
 signed_in
 
@@ -45,14 +48,20 @@ ALERTS=(
 step "Log-based metrics and alert policies"
 EXISTING="$("${ALPHA[@]}" policies list --format='value(name,displayName)' 2>/dev/null || true)"
 # A log-based metric made a moment ago can take Google up to 10 minutes before an alert policy may use it. Such an alert
-# is marked "not yet", and a second run makes it.
+# is marked "not yet", and a second run makes it. Google's words for that case (Cloud Monitoring, 2026):
+#   Cannot find metric(s) that match type = "logging.googleapis.com/user/...". If a metric was created recently, it could
+#   take up to 10 minutes to become available.
+NOT_READY='Cannot find metric\(s\) that match type|could take up to 10 minutes to become available'
 PENDING=0
+FAILED=0
 for a in "${ALERTS[@]}"; do
   IFS='|' read -r name desc filter threshold window <<< "$a"
-  if gcloud logging metrics describe "$name" >/dev/null 2>&1; then
-    run gcloud logging metrics update "$name" --description="$desc" --log-filter="$filter" --quiet >/dev/null
-  else
-    run gcloud logging metrics create "$name" --description="$desc" --log-filter="$filter" --quiet >/dev/null
+  verb=create; gcloud logging metrics describe "$name" >/dev/null 2>&1 && verb=update
+  if ! err="$(run gcloud logging metrics "$verb" "$name" --description="$desc" --log-filter="$filter" --quiet 2>&1 >/dev/null)"; then
+    echo "  FAILED: the metric $name could not be made or changed:"
+    printf '%s\n' "$err" | sed 's/^/    /'
+    FAILED=$((FAILED + 1))
+    continue
   fi
   title="Verdynt/OS security: $desc"
   if echo "$EXISTING" | grep -qF "$title"; then echo "  kept: $title"; continue; fi
@@ -75,12 +84,19 @@ for a in "${ALERTS[@]}"; do
   "documentation": { "content": "RUNBOOK.md, Security alerts, says what to do.", "mimeType": "text/markdown" }
 }
 JSON
-  # A metric made a moment ago may not be ready for a policy yet: say so, count it, and carry on (run the script again later).
-  if run "${ALPHA[@]}" policies create --policy-from-file="$file" >/dev/null 2>&1; then
+  # Only the "metric not ready yet" answer is "not yet" (run the script again later). Anything else is a real failure:
+  # Google's message is shown, and the script ends with exit status 1 after doing the rest.
+  if [ -n "$DRY" ]; then
+    run "${ALPHA[@]}" policies create --policy-from-file="$file"
+  elif err="$("${ALPHA[@]}" policies create --policy-from-file="$file" 2>&1 >/dev/null)"; then
     echo "  made: $title"
-  else
+  elif printf '%s' "$err" | grep -qiE "$NOT_READY"; then
     echo "  not yet: $title (its metric is new; Google needs up to 10 minutes)"
     PENDING=$((PENDING + 1))
+  else
+    echo "  FAILED: $title could not be made:"
+    printf '%s\n' "$err" | sed 's/^/    /'
+    FAILED=$((FAILED + 1))
   fi
   rm -f "$file"
 done
@@ -97,12 +113,23 @@ NEW="$(jq '.auditConfigs = ((.auditConfigs // []) | map(select(.service != "secr
      {"service":"cloudsql.googleapis.com","auditLogConfigs":[{"logType":"ADMIN_READ"},{"logType":"DATA_READ"},{"logType":"DATA_WRITE"}]}])' "$POLICY")"
 if [ "$(jq -S .auditConfigs "$POLICY")" != "$(echo "$NEW" | jq -S .auditConfigs)" ]; then
   echo "$NEW" > "$POLICY"
-  run gcloud projects set-iam-policy "$PROJECT" "$POLICY" --quiet >/dev/null
-  echo "  Turned on: every read of a secret and every Cloud SQL call is now in the audit logs."
+  if [ -n "$DRY" ]; then
+    run gcloud projects set-iam-policy "$PROJECT" "$POLICY" --quiet
+  elif err="$(gcloud projects set-iam-policy "$PROJECT" "$POLICY" --quiet 2>&1 >/dev/null)"; then
+    echo "  Turned on: every read of a secret and every Cloud SQL call is now in the audit logs."
+  else
+    echo "  FAILED: the audit log settings could not be changed:"
+    printf '%s\n' "$err" | sed 's/^/    /'
+    FAILED=$((FAILED + 1))
+  fi
 else
   echo "  Already on."
 fi
 rm -f "$POLICY"
 echo ""
-if [ "$PENDING" -gt 0 ]; then echo "Nearly done. The alerts made so far go to the same text and email as the uptime checks."
+if [ -n "$DRY" ]; then echo "Dry run: nothing was changed."
+elif [ "$FAILED" -gt 0 ]; then
+  echo "$FAILED step(s) FAILED (shown above with Google's message). Fix what it says, for example a missing permission, and run this again."
+  exit 1
+elif [ "$PENDING" -gt 0 ]; then echo "Nearly done. The alerts made so far go to the same text and email as the uptime checks."
 else echo "Done. Alerts go to the same text and email as the uptime checks."; fi

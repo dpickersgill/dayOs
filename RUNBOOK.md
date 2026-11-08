@@ -108,7 +108,9 @@ Every failure is written to the logs as one line with `"severity":"ERROR"` and a
 `bash scripts/security-alerts.sh` (run once from Cloud Shell, after `scripts/uptime-setup.sh`, and again after a release
 that adds an alert). It makes a log-based metric and an alert policy for each item below, sent to the same text and email
 channels. A new metric needs a few minutes before a policy can use it: if the script says "not yet", run it again 10
-minutes later. Each alert's text points here.
+minutes later. Any other problem (a missing permission, for example) is marked FAILED with Google's message; the script
+does the rest and then stops with an error, so fix what the message says and run it again. `--dry-run` lists what it
+would run and changes nothing. Each alert's text points here.
 
 | Alert | What it means | What to do |
 | --- | --- | --- |

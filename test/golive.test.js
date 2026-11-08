@@ -157,7 +157,7 @@ test('6: security-alerts.sh marks an alert whose metric is still new "not yet", 
   "alpha monitoring channels list"*) printf 'projects/summitops-510715/notificationChannels/111\\tVerdynt/OS: text Dan\\n' ;;
   "alpha monitoring policies list"*) [ -f "$STUB_LOG.second" ] && printf 'p1\\tVerdynt/OS security: Stripe webhook signature refused\\n' ;;
   "logging metrics describe"*) [ -f "$STUB_LOG.second" ] || exit 1 ;;
-  "alpha monitoring policies create"*) if [ ! -f "$STUB_LOG.second" ] && grep -q 'summitops-signin-lockouts\\|summitops-exports' "\${5#--policy-from-file=}" 2>/dev/null; then echo "metric not found" >&2; exit 1; fi ;;
+  "alpha monitoring policies create"*) if [ ! -f "$STUB_LOG.second" ] && grep -q 'summitops-signin-lockouts\\|summitops-exports' "\${5#--policy-from-file=}" 2>/dev/null; then echo 'ERROR: (gcloud.alpha.monitoring.policies.create) NOT_FOUND: Cannot find metric(s) that match type = "logging.googleapis.com/user/x". If a metric was created recently, it could take up to 10 minutes to become available.' >&2; exit 1; fi ;;
   "projects get-iam-policy"*) echo '{"bindings":[]}' ;;` });
   try {
     const first = s.run('scripts/security-alerts.sh');
@@ -173,6 +173,34 @@ test('6: security-alerts.sh marks an alert whose metric is still new "not yet", 
     assert.match(second.out, /  kept: Verdynt\/OS security: Stripe webhook signature refused/);
     assert.doesNotMatch(second.out, /not yet|Run this again/);
     assert.match(second.out, /^Done\./m);
+  } finally { s.done(); }
+});
+
+test('6b: security-alerts.sh reports any other policy failure with Google\'s message and exits 1; a dry run never says "made:"', () => {
+  const s = stub({ cases: `
+  "alpha monitoring channels list"*) printf 'projects/summitops-510715/notificationChannels/111\\tVerdynt/OS: text Dan\\n' ;;
+  "logging metrics describe"*) exit 0 ;;
+  "alpha monitoring policies create"*) if grep -q 'summitops-exports' "\${5#--policy-from-file=}" 2>/dev/null; then echo 'ERROR: (gcloud.alpha.monitoring.policies.create) PERMISSION_DENIED: Permission monitoring.alertPolicies.create denied on resource' >&2; exit 1; fi ;;
+  "projects get-iam-policy"*) echo '{"bindings":[]}' ;;` });
+  try {
+    const r = s.run('scripts/security-alerts.sh');
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /  FAILED: Verdynt\/OS security: Data exports in bulk could not be made:\n    ERROR: .*PERMISSION_DENIED: Permission monitoring\.alertPolicies\.create denied/);
+    assert.doesNotMatch(r.out, /not yet/, 'a refused permission is not a new metric');
+    assert.match(r.out, /  made: Verdynt\/OS security: Server errors in a burst/, 'the others are still made');
+    assert.match(r.out, /Turned on: every read of a secret/, 'and the audit logs step still runs');
+    assert.match(r.out, /1 step\(s\) FAILED/);
+    assert.doesNotMatch(r.out, /^Done\./m);
+    // A dry run: "would run" for each metric, policy and the audit policy; nothing made, nothing changed.
+    fs.writeFileSync(path.join(s.dir, 'log'), '');
+    const dry = s.run('scripts/security-alerts.sh', ['--dry-run']);
+    assert.equal(dry.status, 0, dry.out);
+    assert.doesNotMatch(dry.out, /made:|not yet|FAILED|Turned on/);
+    assert.equal((dry.out.match(/would run: gcloud logging metrics update summitops-/g) || []).length, 8, dry.out);
+    assert.equal((dry.out.match(/would run: gcloud alpha monitoring policies create --policy-from-file=/g) || []).length, 8);
+    assert.match(dry.out, /would run: gcloud projects set-iam-policy summitops-510715/);
+    assert.match(dry.out, /^Dry run: nothing was changed\.$/m);
+    assert.doesNotMatch(dry.calls, /^gcloud (logging metrics (create|update)|alpha monitoring policies create|projects set-iam-policy)/m);
   } finally { s.done(); }
 });
 
