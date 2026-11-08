@@ -3,6 +3,8 @@
 const mysql = require('mysql2/promise');
 const config = require('./config');
 
+const IDLE_MS = 5 * 60 * 1000;
+
 const pool = mysql.createPool({
   socketPath: config.db.socketPath,
   host: config.db.host,
@@ -14,9 +16,11 @@ const pool = mysql.createPool({
   waitForConnections: true,
   // A connection left idle is closed by us after 5 minutes, before the database or the network path can drop it quietly.
   // A quietly dropped connection fails the next query at once (seen as /readyz answering 503 in a few ms, Nov 5 and 6, 2026).
-  // One idle connection is kept warm so a quiet service still answers its first request without opening a new one.
-  maxIdle: 1,
-  idleTimeout: 5 * 60 * 1000,
+  // Every connection may stay idle for those 5 minutes (maxIdle is the whole pool), so a burst of requests reuses the
+  // connections the last burst opened. With maxIdle below the pool size, mysql2 closes the free connections above it
+  // within a second, whatever idleTimeout says, and each burst opened new connections to Cloud SQL (2026.11.12 review).
+  maxIdle: config.db.connectionLimit,
+  idleTimeout: IDLE_MS,
   enableKeepAlive: true,
   keepAliveInitialDelay: 30 * 1000,
   // Return DATE / DATETIME as plain strings so no timezone conversion happens.
@@ -28,20 +32,21 @@ const pool = mysql.createPool({
   ssl: config.db.sslOptions,
 });
 
-// With maxIdle below connectionLimit, mysql2 checks for idle connections every second on a timer that keeps Node running,
-// so a script or test that only loads this file never exited (2026.11.12). The check still runs; it just no longer holds
-// the process open. The server stays up on its own listener.
+// The 5-minute close runs on mysql2's idle check, a timer every second. mysql2 starts it only when maxIdle is below the
+// pool size, so with maxIdle equal to it the check is started here. Either way the timer must not keep Node running:
+// a script or test that only loads this file never exited (2026.11.12). It is unref'd; the server stays up on its own
+// listener.
 {
   const base = pool.pool;
   if (base && typeof base._removeIdleTimeoutConnections === 'function') {
     const schedule = base._removeIdleTimeoutConnections.bind(base);
-    base._removeIdleTimeoutConnections = () => {
-      schedule();
+    const unref = () => {
       const t = base._removeIdleTimeoutConnectionsTimer;
       if (t && typeof t.unref === 'function') t.unref();
     };
-    const t = base._removeIdleTimeoutConnectionsTimer;
-    if (t && typeof t.unref === 'function') t.unref();
+    base._removeIdleTimeoutConnections = () => { schedule(); unref(); };
+    if (!base._removeIdleTimeoutConnectionsTimer) base._removeIdleTimeoutConnections();
+    unref();
   }
 }
 

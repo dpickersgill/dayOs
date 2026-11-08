@@ -5,11 +5,41 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { pool } = require('../src/db');
 
-test('idle connections are closed by the pool before the database drops them', () => {
+test('idle connections stay up to 5 minutes, then the pool closes them before the database drops them', () => {
   const c = pool.pool.config;
-  assert.strictEqual(c.maxIdle, 1);
-  assert.ok(c.idleTimeout > 0 && c.idleTimeout <= 10 * 60 * 1000);
+  // maxIdle is the whole pool, so the 5-minute idle timeout (not a 1-second trim down to maxIdle) decides when one closes.
+  assert.strictEqual(c.maxIdle, c.connectionLimit);
+  assert.strictEqual(c.idleTimeout, 5 * 60 * 1000);
   assert.strictEqual(c.connectionConfig.enableKeepAlive, true);
+  // The idle check runs (mysql2 does not start it itself when maxIdle equals the pool size), and does not hold Node open.
+  const t = pool.pool._removeIdleTimeoutConnectionsTimer;
+  assert.ok(t, 'the idle check is running');
+  assert.strictEqual(t.hasRef(), false);
+});
+
+// 2026.11.12 review: with maxIdle 1, every connection but one was closed within about a second of a burst, so the next
+// burst connected to Cloud SQL again. Now a burst reuses the connections the last one opened.
+test('a second burst of queries reuses the connections the first burst opened', async () => {
+  const burst = () => Promise.all(Array.from({ length: 4 }, () => pool.query('SELECT CONNECTION_ID() AS id, SLEEP(0.05)').then(([r]) => r[0].id)));
+  const first = new Set(await burst());
+  assert.ok(first.size >= 2, 'the burst used several connections at once');
+  await new Promise((r) => setTimeout(r, 2500)); // longer than the 1-second idle check, twice over
+  assert.ok(pool.pool._freeConnections.length >= first.size, 'the idle connections are still open');
+  const second = await burst();
+  for (const id of second) assert.ok(first.has(id), `connection ${id} was opened again instead of reused`);
+});
+
+test('a connection idle longer than the idle timeout is closed and replaced', async () => {
+  const c = pool.pool.config;
+  const keep = c.idleTimeout;
+  const [[{ id: before }]] = await pool.query('SELECT CONNECTION_ID() AS id');
+  c.idleTimeout = 300; // stand in for 5 minutes
+  try {
+    await new Promise((r) => setTimeout(r, 2500));
+    assert.strictEqual(pool.pool._freeConnections.length, 0, 'every idle connection was closed');
+  } finally { c.idleTimeout = keep; }
+  const [[{ id: after }]] = await pool.query('SELECT CONNECTION_ID() AS id');
+  assert.notStrictEqual(after, before, 'a fresh connection took its place');
 });
 
 // This guards the retry path; a silent network drop (no reset sent) cannot be reproduced locally, so it also passes on the old code.
