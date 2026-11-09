@@ -101,7 +101,7 @@ test('the new guides are in the sitemap at 0.7, in llms.txt under Guides and che
     assert.ok(section.includes(`/site/${slug}.pdf`), `${slug} PDF in llms.txt`);
   }
   // the Resources description names the new topics
-  assert.match(require('../src/lib/seo').META.resources.description, /opening day, lost child, ski school pickup, instructor pay/);
+  assert.match(require('../src/lib/seo').META.resources.description, /ski school pickup policy, a lost child procedure, instructor pay scales, opening day/);
 });
 
 test('each new guide links its printable PDF, which is committed, served and built from the page by scripts/guide-pdfs.js', async () => {
@@ -129,5 +129,46 @@ test('each new guide links its printable PDF, which is committed, served and bui
   assert.equal((pick('ski-instructor-pay-scale').match(/<td><\/td>/g) || []).length > 40, true, 'blank rate cells');
   for (const area of ['Lifts', 'Ski patrol', 'Terrain park', 'Snowmaking and grooming', 'Ticketing and the online shop', 'Rentals', 'Ski school', 'Staff and scheduling', 'Guest communication']) {
     assert.ok(pick('ski-area-opening-day-checklist').includes(`<h3>${area} <span class="own">`), `opening day: ${area}`);
+  }
+});
+
+// ---------------------------------------------------------------- release 2026.11.14: the three SEO branches together
+test('every guide has a PDF built by the one script, linked from its page and on Resources', async () => {
+  const { GUIDES: ALL_GUIDES } = require('../src/routes/site');
+  const gen = require('../scripts/guide-pdfs');
+  assert.deepEqual([...gen.ALL].sort(), [...ALL_GUIDES].sort(), 'scripts/guide-pdfs.js builds a PDF for every guide');
+  const resources = (await onHost('/resources')).text;
+  for (const slug of ALL_GUIDES) {
+    assert.ok(fs.existsSync(path.join(ROOT, 'public', 'site', `${slug}.pdf`)), `${slug}.pdf is committed`);
+    assert.ok((await onHost(`/${slug}`)).text.includes(`href="/site/${slug}.pdf" download>Download the printable PDF</a>`), `${slug} links its PDF`);
+    assert.ok(resources.includes(`<a class="gpdf" href="/site/${slug}.pdf">Printable PDF</a>`), `${slug} PDF on Resources`);
+    assert.equal((await onHost(`/site/${slug}.pdf`)).status, 200);
+  }
+});
+
+test('the older guides link to the new ones, and every new guide has at least 3 links from other pages', async () => {
+  const has = async (from, to) => (await onHost(`/${from}`)).text.split('<main')[1].includes(`href="/${to}"`);
+  assert.ok(await has('chairlift-inspection-checklist', 'ski-area-opening-day-checklist'));
+  assert.ok(await has('ski-area-incident-report-guide', 'lost-child-procedure'));
+  assert.ok(await has('how-to-choose-ski-area-software', 'ski-instructor-pay-scale'));
+  const { PAGES } = require('../src/routes/site');
+  const mains = {};
+  for (const slug of Object.keys(PAGES)) mains[slug] = ((await onHost(`/${slug}`)).text.split('<main')[1] || '').split('</main>')[0];
+  for (const to of Object.keys(GUIDES)) {
+    const from = Object.keys(mains).filter((s) => s !== to && mains[s].includes(`href="/${to}"`));
+    assert.ok(from.length >= 3, `${to} is linked from ${from.length} pages: ${from.join(', ')}`);
+  }
+});
+
+test('every page in the sitemap has a share image of its own, and the new guides use theirs', async () => {
+  const { PAGES } = require('../src/routes/site');
+  for (const slug of Object.keys(PAGES)) {
+    const html = (await onHost(`/${slug}`)).text;
+    const img = (html.match(/<meta property="og:image" content="([^"]+)"/) || [])[1];
+    assert.ok(img && !img.endsWith('/site/img/share.png'), `/${slug} has its own og:image (${img})`);
+    assert.equal((await onHost(new URL(img).pathname)).status, 200, `${img} is served`);
+  }
+  for (const slug of Object.keys(GUIDES)) {
+    assert.match((await onHost(`/${slug}`)).text, new RegExp(`og:image" content="https://www\\.site\\.test/site/img/share/${slug}\\.png"`));
   }
 });

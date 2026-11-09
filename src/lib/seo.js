@@ -204,8 +204,9 @@ const shareSeen = new Map();
 function shareImage(slug) {
   if (!shareSeen.has(slug)) {
     const file = SHARE.fileFor(slug);
-    const own = slug in SHARE.SHARE && fs.existsSync(path.join(SHARE_DIR, `${file}.png`));
-    const t = SHARE.SHARE[slug];
+    const key = slug in SHARE.SHARE ? slug : file === 'good-day' ? 'good-day' : slug; // an issue: the newsletter's image
+    const own = key in SHARE.SHARE && fs.existsSync(path.join(SHARE_DIR, `${file}.png`));
+    const t = SHARE.SHARE[key];
     shareSeen.set(slug, own ? { path: `/site/img/share/${file}.png`, alt: `${t.headline}: ${t.sub.replace(/\.$/, '')}. Verdynt/OS` }
       : { path: '/site/img/share.png', alt: 'Verdynt/OS, resort operating system: open the mountain from one screen' });
   }

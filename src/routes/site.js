@@ -365,7 +365,7 @@ PRIORITY['good-day'] = '0.7';
 PRIORITY['good-day/scorecard'] = '0.7';
 PRIORITY.status = '0.3';
 for (const i of GD.issues()) PRIORITY[i.slug] = '0.6';
-// The guides and checklists (Resources). Each has a printable PDF at /site/<slug>.pdf; scripts/guide-pdfs.js builds the four below.
+// The guides and checklists (Resources). Each has a printable PDF at /site/<slug>.pdf, built by scripts/guide-pdfs.js (all of them).
 const GUIDES = ['chairlift-inspection-checklist', 'terrain-park-inspection-checklist', 'ski-area-incident-report-guide', 'how-to-choose-ski-area-software',
   'ski-school-pickup-policy', 'lost-child-procedure', 'ski-instructor-pay-scale', 'ski-area-opening-day-checklist'];
 for (const s of GUIDES) PRIORITY[s] = '0.7';

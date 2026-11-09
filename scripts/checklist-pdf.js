@@ -1,9 +1,11 @@
 'use strict';
 
 // Builds the printable PDF of each guide's checklist, public/site/<slug>.pdf, from the guide page itself
-// (src/site/<template>.html), so the PDF never says something the page does not. Run it after changing a guide:
-//   node scripts/checklist-pdf.js                     every guide below
-//   node scripts/checklist-pdf.js lost-child-procedure   just these
+// (src/site/<template>.html), so the PDF never says something the page does not. One command builds every guide's PDF,
+// these and the ones marked <!--PDF--> (scripts/guide-pdfs.js):
+//   node scripts/guide-pdfs.js                                 every guide
+//   node scripts/guide-pdfs.js chairlift-inspection-checklist  just these
+// (node scripts/checklist-pdf.js [slug ...] still builds only the guides listed below.)
 // Needs Playwright (Chromium). The brand fonts and the lockup are embedded from public/, so the PDF looks the same everywhere.
 //
 // To add a guide: one line in GUIDES, then a "Download the printable PDF" link on its page (href="/site/<slug>.pdf").
@@ -21,6 +23,7 @@ const GUIDES = [
   { slug: 'chairlift-inspection-checklist', template: 'guide-chairlift', sections: ['Before you start', '#checklist', 'What a good daily record'] },
   { slug: 'terrain-park-inspection-checklist', template: 'guide-terrainpark', sections: ['#checklist', 'What the daily record'] },
   { slug: 'ski-area-incident-report-guide', template: 'guide-incident', sections: ['#checklist', 'What every report should record'] },
+  { slug: 'how-to-choose-ski-area-software', template: 'guide-choosing', sections: ['What to compare', '#checklist'] },
 ];
 
 const ROOT = path.join(__dirname, '..');
@@ -106,7 +109,7 @@ async function build(browser, g) {
   return out;
 }
 
-module.exports = { GUIDES };
+module.exports = { GUIDES, build };
 
 if (require.main === module) {
   (async () => {

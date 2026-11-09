@@ -1,10 +1,13 @@
 'use strict';
 
-// Builds the printable PDFs for four guides: public/site/<slug>.pdf, from the parts of each page marked
-// <!--PDF--> ... <!--/PDF--> in src/site/guide-*.html, so the PDF never drifts from what the page says.
-// Run it after changing one of those pages:  node scripts/guide-pdfs.js   (or: node scripts/guide-pdfs.js <slug> ...)
+// Builds the printable PDF of every guide on Resources: public/site/<slug>.pdf. This is the one command for them all:
+//   node scripts/guide-pdfs.js              every guide
+//   node scripts/guide-pdfs.js <slug> ...   just these
+// The four guides below are built from the parts of each page marked <!--PDF--> ... <!--/PDF--> in src/site/guide-*.html.
+// The checklists (chairlift, terrain park, incident review, vendor questions) are built from the sections listed in
+// scripts/checklist-pdf.js. Either way the PDF never drifts from what the page says. Run it after changing a guide page.
 // Needs Playwright (Chromium). The brand fonts are embedded from public/fonts, so the PDF looks the same everywhere.
-// Follows scripts/scorecard-pdf.js. The older checklists (chairlift, terrain park) are built by scripts/checklist-pdf.js.
+// Follows scripts/scorecard-pdf.js. The Good Day scorecard has its own: scripts/scorecard-pdf.js.
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -111,11 +114,21 @@ ${sign}
 const footer = (g) => `<div style="width:100%;font-family:Helvetica,Arial,sans-serif;font-size:7pt;color:#4B6570;padding:0 14mm;display:flex;justify-content:space-between">
 <span>Verdynt/OS &middot; www.runmyresort.com/${g.slug}</span><span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span></div>`;
 
+const CHECKLISTS = require('./checklist-pdf');
+/** Every guide with a printable PDF, by slug, in the order they are built. */
+const ALL = [...CHECKLISTS.GUIDES.map((g) => g.slug), ...GUIDES.map((g) => g.slug)];
+
 async function main() {
   const want = process.argv.slice(2);
-  const list = want.length ? GUIDES.filter((g) => want.includes(g.slug)) : GUIDES;
+  const unknown = want.filter((w) => !ALL.includes(w));
+  if (unknown.length) throw new Error(`No guide PDF for: ${unknown.join(', ')}`);
+  const pick = (g) => !want.length || want.includes(g.slug);
   const browser = await pw.chromium.launch();
-  for (const g of list) {
+  for (const g of CHECKLISTS.GUIDES.filter(pick)) {
+    const out = await CHECKLISTS.build(browser, g);
+    console.log(`Wrote ${path.relative(process.cwd(), out)}`);
+  }
+  for (const g of GUIDES.filter(pick)) {
     const page = await browser.newPage();
     await page.setContent(html(g), { waitUntil: 'load' });
     await page.evaluate(() => document.fonts.ready);
@@ -129,4 +142,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch((err) => { console.error(err); process.exit(1); });
-module.exports = { GUIDES, printable };
+module.exports = { GUIDES, ALL, printable };

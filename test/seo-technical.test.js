@@ -91,7 +91,8 @@ test('each listed page has its own 1200 x 630 share image, used for og:image and
   const must = ['', 'product', 'ski-patrol', 'lift-ticket-software', 'ski-school-software', 'ski-rental-software', 'ski-waiver-software', 'lift-maintenance-software',
     'ski-area-pos', 'online-lift-ticket-sales', 'terrain-park-software', 'attraction-ticketing-software', 'ski-area-staff-scheduling', 'ski-area-risk-management', 'pricing',
     'chairlift-inspection-checklist', 'terrain-park-inspection-checklist', 'ski-area-incident-report-guide', 'how-to-choose-ski-area-software', 'resources', 'good-day',
-    'good-day/scorecard', 'ski-school-pickup-policy', 'lost-child-procedure', 'ski-instructor-pay-scale', 'ski-area-opening-day-checklist'];
+    'good-day/scorecard', 'ski-school-pickup-policy', 'lost-child-procedure', 'ski-instructor-pay-scale', 'ski-area-opening-day-checklist',
+    'about', 'security', 'contact', 'status', 'privacy', 'terms'];
   for (const slug of must) {
     assert.ok(SHARE[slug], `share words for "${slug}"`);
     const f = path.join(root, 'public', 'site', 'img', 'share', `${fileFor(slug)}.png`);
@@ -107,8 +108,9 @@ test('each listed page has its own 1200 x 630 share image, used for og:image and
     assert.match(meta(html, 'og:image:alt'), new RegExp(SHARE[slug].headline.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.equal(graphOf(html).find((g) => g['@type'] === 'WebPage').primaryImageOfPage.url, want);
   }
-  const sec = (await onHost('/security')).text;
-  assert.equal(meta(sec, 'og:image'), 'https://www.site.test/site/img/share.png', 'a page without its own image keeps the site-wide one');
+  // an issue of the Good Day uses the newsletter's image; a page with no words in lib/share.js keeps the site-wide one
+  assert.equal(meta((await onHost('/good-day/issue-1')).text, 'og:image'), 'https://www.site.test/site/img/share/good-day.png');
+  assert.equal(require('../src/lib/seo').shareImage('no-such-page').path, '/site/img/share.png', 'a page without its own image keeps the site-wide one');
   const img = await onHost('/site/img/share/ski-patrol.png');
   assert.equal(img.status, 200);
   assert.match(img.type, /image\/png/);
@@ -127,7 +129,7 @@ test('Organization has foundingDate and areaServed; the software is a BusinessAp
     assert.equal(sw.operatingSystem, 'Web browser');
   }
   const school = (await onHost('/ski-school-software')).text;
-  assert.match(meta(school, 'og:title'), /lessons that fill without the phone tag/);
+  assert.match(meta(school, 'og:title'), /Ski school software for lessons/);
   assert.match(meta(school, 'twitter:title'), /lessons/);
   assert.doesNotMatch(meta(school, 'og:title'), /sessions/);
 });

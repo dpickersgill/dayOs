@@ -11,7 +11,7 @@ const SHARE = {
   product: { kicker: SOFT, headline: 'Ski resort software', sub: 'Every part of the mountain. Run the parts you need.' },
   'ski-patrol': { kicker: SOFT, headline: 'Ski patrol software', sub: 'Write the report once, at the bedside.' },
   'lift-ticket-software': { kicker: SOFT, headline: 'Lift ticket and season pass software', sub: 'Sell it, scan it at the lift, move on.' },
-  'ski-school-software': { kicker: SOFT, headline: 'Ski school software', sub: 'Lessons that fill without the phone tag.' },
+  'ski-school-software': { kicker: SOFT, headline: 'Ski school software', sub: 'From the first booking to the last pickup.' },
   'ski-rental-software': { kicker: SOFT, headline: 'Ski rental software', sub: 'Every item out, and every item back.' },
   'ski-waiver-software': { kicker: SOFT, headline: 'Online ski waivers', sub: 'Signed on a phone before they drive up.' },
   'lift-maintenance-software': { kicker: SOFT, headline: 'Lift inspection and maintenance software', sub: "Know what's safe to open." },
@@ -31,11 +31,18 @@ const SHARE = {
   'lost-child-procedure': { kicker: GUIDE, headline: 'Lost child procedure for ski areas', sub: 'The first minutes, in order, with a drill checklist.' },
   'ski-instructor-pay-scale': { kicker: GUIDE, headline: 'How to build a ski instructor pay scale', sub: 'Levels, steps and rules your instructors can read.' },
   'ski-area-opening-day-checklist': { kicker: GUIDE, headline: 'Ski area opening day checklist', sub: 'Lifts, trails, staff and guests ready for the first chair.' },
+  about: { kicker: 'About', headline: 'Software for independent ski areas', sub: 'Verdynt/OS, from Verdynt Consulting Group.' },
+  security: { kicker: 'Security', headline: 'Guest and patient information', sub: 'How Verdynt/OS keeps it safe.' },
+  contact: { kicker: 'Contact', headline: 'See your mountain on the board', sub: 'Book a 20-minute walkthrough or a 14-day trial.' },
+  status: { kicker: 'Service status', headline: 'Is Verdynt/OS working?', sub: 'The service, checked every minute.' },
+  privacy: { kicker: 'Legal', headline: 'Privacy policy', sub: 'What Verdynt/OS collects, and why.' },
+  terms: { kicker: 'Legal', headline: 'Terms of service', sub: 'The terms for using Verdynt/OS.' },
   'good-day': { kicker: 'Newsletter', headline: 'The Good Day', sub: 'For ski area owners, GMs and patrol directors, every other week.' },
   'good-day/scorecard': { kicker: 'Free tool', headline: 'The Good Day scorecard', sub: "How good is your guest's day? Twelve questions, about five minutes." },
 };
 
-/** The image's file name for a page: "home" for Home, slashes as dashes ("good-day-scorecard"). */
-const fileFor = (slug) => (slug === '' ? 'home' : String(slug).replace(/\//g, '-'));
+/** The image's file name for a page: "home" for Home, slashes as dashes ("good-day-scorecard"). An issue of the Good Day
+ * without words of its own here uses the newsletter's image. */
+const fileFor = (slug) => (slug === '' ? 'home' : /^good-day\/issue-\d+$/.test(slug) && !(slug in SHARE) ? 'good-day' : String(slug).replace(/\//g, '-'));
 
 module.exports = { SHARE, fileFor };
