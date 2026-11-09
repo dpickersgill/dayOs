@@ -73,44 +73,95 @@ test.before(async () => {
   M.sign = await place(M, { kind: 'sign', name: 'Ridge Run', code: 'R7', trail_id: M.trail, ...off(0, 0) });
   M.tower = await place(M, { kind: 'tower', name: 'Summit Quad tower 7', code: 'S7', lift_id: M.lift, tower_no: 7, ...off(40, 0) });
   M.junction = await place(M, { kind: 'junction', name: 'Ridge Run and Bowl', code: 'J1', ...off(2000, 0) });
+  // A lodge 10 m from the test spot and a sign 580 m from it, 5 km east (help review: the nearest is named).
+  M.lodgeAt = off(0, 5000);
+  M.lodge = await place(M, { kind: 'building', name: 'Summit Lodge', code: 'L1', ...M.lodgeAt });
+  M.farSign = await place(M, { kind: 'sign', name: 'Upper Ridge', code: 'U1', ...off(0, 590, M.lodgeAt) });
+  // Two signs 60 m apart (north and south of a point), 10 km east.
+  M.gapAt = off(0, 10000);
+  M.gullyTop = await place(M, { kind: 'sign', name: 'Gully Top', code: 'G1', ...off(0, -30, M.gapAt) });
+  M.gullyBottom = await place(M, { kind: 'sign', name: 'Gully Bottom', code: 'G2', ...off(0, 30, M.gapAt) });
+  // A sign and a building the same distance from a point (20 m north and 20 m east), 15 km east.
+  M.tieAt = off(0, 15000);
+  M.tieBuilding = await place(M, { kind: 'building', name: 'Aspen Hut', code: 'AH1', ...off(20, 0, M.tieAt) });
+  M.tieSign = await place(M, { kind: 'sign', name: 'Aspen Glade', code: 'AG1', ...off(0, 20, M.tieAt) });
 });
 test.after(async () => { await new Promise((r) => server.close(r)); await pool.end(); });
 
 // ---------------------------------------------------------------- describe()
-test('describe(): a trail sign with a tower above it, in English and Spanish', async () => {
-  const at = off(0, 30);
-  const w = await P.describe(pool, M.id, at.lat, at.lng, 8);
-  assert.equal(w.text, 'Near Ridge Run, below Summit Quad tower 7, about 30 m');
-  assert.equal(w.text_es, 'Cerca de Ridge Run, debajo de la torre 7 de Summit Quad, a unos 30 m');
-  assert.equal(w.place_id, M.sign);
-  assert.equal(w.distance_m, 30);
-  assert.equal(w.confidence, 'high');
+// Through the call view's own route (GET /patrol/places/describe), as dispatch reads it.
+const words = async (at, acc) => ok(await api('GET', `/patrol/places/describe?lat=${at.lat}&lng=${at.lng}${acc === undefined ? '' : `&acc=${acc}`}`, { token: M.owner })).words;
+
+test('describe(): the nearest place, by its own distance; a tower by its lift and number, never above or below', async () => {
+  // A trail sign, and the tower 40 m north of it: 30 m east of the sign the sign is nearest (the tower is 50 m off).
+  const w = await words(off(0, 30), 8);
+  assert.equal(w.text, 'Near Ridge Run, about 30 m');
+  assert.equal(w.text_es, 'Cerca de Ridge Run, a unos 30 m');
+  assert.equal(w.place_id, M.sign); assert.equal(w.distance_m, 30); assert.equal(w.confidence, 'high');
+  // Right by the tower: named by its lift and number, with its own distance. No height data, so no "below" or "above".
+  const t = await words(off(55, 0), 8);
+  assert.equal(t.text, 'Near Summit Quad tower 7, about 15 m');
+  assert.equal(t.text_es, 'Cerca de la torre 7 de Summit Quad, a unos 15 m');
+  assert.equal(t.place_id, M.tower);
+  assert.doesNotMatch(`${w.text} ${t.text}`, /below|above/i);
 });
 
-test('describe(): a junction, rough accuracy, and nothing mapped', async () => {
+test('describe(): a lodge 10 m away is named, not a sign 580 m away', async () => {
+  const at = off(0, 10, M.lodgeAt);
+  const w = await words(at, 200); // a rough phone looks out to 600 m, so both are found
+  assert.equal(w.text, 'Near Summit Lodge, about 10 m (location rough)');
+  assert.equal(w.text_es, 'Cerca de Summit Lodge, a unos 10 m (ubicación aproximada)');
+  assert.equal(w.place_id, M.lodge);
+  assert.equal(w.distance_m, 10, 'the distance is to the place named');
+});
+
+test('describe(): between two places only when both are close and the phone is between them', async () => {
+  // Two signs 60 m apart, the phone halfway: between them, nearest first, each with its own distance.
+  const mid = off(0, 0, M.gapAt);
+  const w = await words(off(0, -5, mid), 5);
+  assert.equal(w.text, 'Between Gully Top (about 25 m) and Gully Bottom (about 35 m)');
+  assert.equal(w.text_es, 'Entre Gully Top (a unos 25 m) y Gully Bottom (a unos 35 m)');
+  assert.equal(w.place_id, M.gullyTop);
+  // Off to one side of both (the two in the same direction): only the nearest.
+  const side = await words(off(0, -70, mid), 5);
+  assert.equal(side.text, 'Near Gully Top, about 40 m');
+  // Both close, but not on either side of the phone (45 m north of the line): only the nearest.
+  const aside = await words(off(45, -5, mid), 5);
+  assert.equal(aside.text, 'Near Gully Top, about 50 m');
+});
+
+test('describe(): ties name a trail sign first, then by name', async () => {
+  // A building and a sign at the same distance: the sign.
+  const w = await words(M.tieAt, 5);
+  assert.equal(w.text, 'Near Aspen Glade, about 20 m');
+  assert.equal(w.place_id, M.tieSign);
+  // Two signs at the same distance: by name.
+  const two = P.wordsFor([{ id: 2, kind: 'sign', name: 'Zephyr', distance_m: 12.2 }, { id: 1, kind: 'sign', name: 'Birch', distance_m: 12.4 }], 5);
+  assert.equal(two.text, 'Near Birch, about 10 m');
+  assert.equal(two.place_id, 1);
+});
+
+test('describe(): rough accuracy, a junction, and far from everything ("No mapped place within 600 m")', async () => {
   const j = off(2000, 0);
   const near = off(0, 60, j);
-  const w = await P.describe(pool, M.id, near.lat, near.lng, 20);
+  const w = await words(near, 20);
   assert.equal(w.text, 'Near Ridge Run and Bowl, about 60 m');
   assert.equal(w.text_es, 'Cerca de Ridge Run and Bowl, a unos 60 m');
   assert.equal(w.confidence, 'medium', 'over 50 m from the nearest point');
   // A phone out by 150 m looks out to 450 m, and says the place is rough.
   const far = off(-300, 0, j);
-  const r = await P.describe(pool, M.id, far.lat, far.lng, 150);
+  const r = await words(far, 150);
   assert.equal(r.text, 'Near Ridge Run and Bowl, about 300 m (location rough)');
   assert.equal(r.text_es, 'Cerca de Ridge Run and Bowl, a unos 300 m (ubicación aproximada)');
   assert.equal(r.confidence, 'low');
-  // The same spot with a good fix looks only 150 m out: nothing there.
-  assert.equal(await P.describe(pool, M.id, far.lat, far.lng, 10), null);
+  // The same spot with a good fix looks only 150 m out: nothing there, and it says so.
+  const none = await words(far, 10);
+  assert.equal(none.text, 'No mapped place within 150 m'); assert.equal(none.place_id, null);
   // Never past 600 m, however rough the phone.
-  const out = off(650, 0, j);
-  assert.equal(await P.describe(pool, M.id, out.lat, out.lng, 5000), null);
-  // Nothing mapped on this mountain at all.
+  const out = await words(off(650, 0, j), 5000);
+  assert.deepEqual([out.text, out.text_es, out.place_id, out.confidence], ['No mapped place within 600 m', 'Ningún lugar marcado a menos de 600 m', null, 'none']);
+  // Nothing mapped on this mountain at all: no words.
   assert.equal(await P.describe(pool, N.id, LAT0, LNG0, 5), null);
-  // Only a tower in range: the words start from it.
-  const t = P.wordsFor([{ id: 9, kind: 'tower', lift_name: 'Summit Quad', tower_no: 3, distance_m: 12 }], 10);
-  assert.equal(t.text, 'Below Summit Quad tower 3, about 10 m');
-  assert.equal(t.text_es, 'Debajo de la torre 3 de Summit Quad, a unos 10 m');
 });
 
 test('describe() helpers: the search range scales with accuracy, and distances are rounded as patrollers say them', () => {
@@ -132,7 +183,7 @@ test('mapping needs the role: patrol Admins and Managers and managers, not patro
   is(await api('GET', '/patrol/places/export', { token: M.patT }), 403);
   // Patrol still gets a position in words for its own calls.
   const w = ok(await api('GET', `/patrol/places/describe?lat=${off(0, 30).lat}&lng=${off(0, 30).lng}&acc=8`, { token: M.patT })).words;
-  assert.equal(w.text, 'Near Ridge Run, below Summit Quad tower 7, about 30 m');
+  assert.equal(w.text, 'Near Ridge Run, about 30 m');
 });
 
 // ---------------------------------------------------------------- the GPS gate and codes
@@ -255,7 +306,7 @@ test('the call’s location panel: words, nearby places, Open in maps and when t
   const at = off(0, 30);
   const call = ok(await api('POST', '/patrol/dispatch', { token: M.patT, body: { location: 'Ridge Run', gps_lat: at.lat, gps_lng: at.lng } }));
   const w = ok(await api('GET', `/patrol/dispatch/${call.id}/where`, { token: M.patT }));
-  assert.equal(w.words.text, 'Near Ridge Run, below Summit Quad tower 7, about 30 m');
+  assert.equal(w.words.text, 'Near Ridge Run, about 30 m');
   assert.deepEqual(w.places.slice(0, 2).map((p) => p.code), ['R7', 'S7']);
   assert.equal(w.places[0].distance_m, 30);
   assert.match(w.maps_url, /^https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=39\.6/);
@@ -272,7 +323,7 @@ test('Guest needs help here: one tap from lift staff makes a call at their posit
   const at = off(5, 32);
   const r = await api('POST', '/patrol/staff-help', { token: M.liftyT, body: { lat: at.lat, lng: at.lng, accuracy_m: 9 } });
   is(r, 201);
-  assert.equal(r.body.location, 'Near Ridge Run, below Summit Quad tower 7, about 30 m');
+  assert.equal(r.body.location, 'Near Ridge Run, about 30 m');
   const c = (await pool.query('SELECT * FROM dispatch_calls WHERE tenant_id = ? AND id = ?', [M.id, r.body.id]))[0][0];
   assert.equal(c.source, 'staff'); assert.equal(c.status, 'new'); assert.equal(c.priority, 'normal');
   assert.equal(c.caller_name, 'Staff: Lou Places');
@@ -299,7 +350,7 @@ test('Guest needs help here: one tap from lift staff makes a call at their posit
   try { ok(await api('POST', `/patrol/dispatch/${c.id}/responders`, { token: M.leadT, body: { staff_id: M.pat } })); } finally { PUSH.notifyStaff = real; }
   assert.equal(pushed.length, 1);
   assert.deepEqual(pushed[0].ids, [M.pat]);
-  assert.match(pushed[0].msg.body, /^Near Ridge Run, below Summit Quad tower 7/);
+  assert.match(pushed[0].msg.body, /^Near Ridge Run, about 30 m/);
   // With a patroller on duty and no dispatcher: a staff call alerts patrol on duty at once, the same people and the same
   // way as a guest's request from the help page (2026.11.16). The alert says where, never the guest's words.
   pushed.length = 0;
@@ -319,8 +370,8 @@ test('Guest needs help here: one tap from lift staff makes a call at their posit
   assert.ok(sAlert && gAlert, JSON.stringify(pushed.map((p) => p.msg.title)));
   assert.deepEqual(sAlert.ids, [M.pat]); assert.deepEqual(gAlert.ids, sAlert.ids, 'the same people');
   assert.equal(sAlert.msg.url, gAlert.msg.url);
-  assert.match(sAlert.msg.body, /^Near Ridge Run, below Summit Quad tower 7, about 30 m\. Open the app/);
-  assert.match(gAlert.msg.body, /^Near Ridge Run, below Summit Quad tower 7/);
+  assert.match(sAlert.msg.body, /^Near Ridge Run, about 30 m\. Open the app/);
+  assert.match(gAlert.msg.body, /^Near Ridge Run, about 30 m/);
   assert.doesNotMatch(gAlert.msg.body, /knee/, 'never the guest\'s words');
   assert.equal(sAlert.msg.tag, `call-${staffCall.body.id}`);
   // No GPS: the staff member says where. Neither: refused.

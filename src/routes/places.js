@@ -359,11 +359,13 @@ router.post('/staff-help', requireRole('manager', 'staff', 'counter', 'instructo
   const tenant = await one(pool, 'SELECT id, timezone FROM tenants WHERE id = ?', [tenantId]);
   const words = hasGps ? await P.describe(pool, tenantId, b.lat, b.lng, b.accuracy_m ?? null) : null;
   const acc = b.accuracy_m === null || b.accuracy_m === undefined ? null : Math.round(b.accuracy_m);
-  const location = (words ? words.text : b.location || `Staff phone position${acc !== null ? ` (within about ${acc} m)` : ''}`).slice(0, 255);
+  const staffPos = `Staff phone position${acc !== null ? ` (within about ${acc} m)` : ''}`;
+  // A mapped place near: its words. None within range ("No mapped place within 600 m"): what staff typed, or the position.
+  const location = (words && words.place_id ? words.text : b.location || (words ? `${staffPos}. ${words.text}` : staffPos)).slice(0, 255);
   const me = req.auth.staffId ? await one(pool, 'SELECT p.first_name, p.last_name FROM staff s JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE s.tenant_id = ? AND s.id = ?', [tenantId, req.auth.staffId]) : null;
   const user = await one(pool, 'SELECT email, username FROM users WHERE tenant_id = ? AND id = ?', [tenantId, req.auth.userId]);
   const byName = me ? `${me.first_name} ${me.last_name}`.trim() : (user && (user.username || user.email)) || 'Staff';
-  const description = [b.who ? `Who: ${b.who}` : null, b.note || null, words && b.location ? `Staff said: ${b.location}` : null].filter(Boolean).join('. ').slice(0, 500) || 'Guest needs help (staff saw it)';
+  const description = [b.who ? `Who: ${b.who}` : null, b.note || null, words && words.place_id && b.location ? `Staff said: ${b.location}` : null].filter(Boolean).join('. ').slice(0, 500) || 'Guest needs help (staff saw it)';
   const { createCall, alertNewRequest } = require('./dispatch');
   const out = await createCall(tenant, { location, description, priority: 'normal', caller_name: `Staff: ${byName}`.slice(0, 100), gps_lat: hasGps ? b.lat : null, gps_lng: hasGps ? b.lng : null },
     { source: 'staff', userId: req.auth.userId, staffId: req.auth.staffId || null });
@@ -371,7 +373,7 @@ router.post('/staff-help', requireRole('manager', 'staff', 'counter', 'instructo
   const cols = await columnsOf('dispatch_calls');
   const sets = []; const vals = [];
   if (hasGps) { sets.push('located_accuracy_m = ?', 'located_at = received_at'); vals.push(acc); }
-  if (words && cols.has('place_id')) { sets.push('place_id = ?'); vals.push(words.place_id); }
+  if (words && words.place_id && cols.has('place_id')) { sets.push('place_id = ?'); vals.push(words.place_id); }
   if (words && cols.has('place_text')) { sets.push('place_text = ?'); vals.push(words.text.slice(0, 255)); }
   if (sets.length) await pool.query(`UPDATE dispatch_calls SET ${sets.join(', ')} WHERE tenant_id = ? AND id = ?`, [...vals, tenantId, out.id]);
   await audit(pool, req, 'staff_help', 'dispatch_calls', out.id, { gps: hasGps, accuracy_m: acc, confidence: words ? words.confidence : null });

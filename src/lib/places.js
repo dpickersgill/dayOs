@@ -2,7 +2,7 @@
 
 // Places patrol maps on the mountain (help/places): trail signs, lift towers, junctions, buildings. Each has a short sign
 // code ("R7") printed on a help sign, and where it is. describe() turns a phone's position into the words patrollers use
-// on the radio: "Near Ridge Run, below Summit Quad tower 7, about 30 m". No outside map service: the distance is the
+// on the radio: "Near Summit Quad tower 7, about 30 m". No outside map service: the distance is the
 // haversine over the mountain's own points, which is quick for a few thousand of them.
 const { rows, one } = require('../db');
 
@@ -74,43 +74,69 @@ function placeName(p, lang = 'en') {
   return p.name;
 }
 
-// What a guest or patroller is near, first choice first: a trail sign or junction, then anything but a tower.
-const ANCHOR = (p) => p.kind === 'sign' || p.kind === 'junction';
+// On a tie (the same distance to the meter), a trail sign or junction is named first, then the others in this order.
+const KIND_ORDER = ['sign', 'junction', 'building', 'lift_top', 'lift_bottom', 'tower', 'park_feature', 'parking', 'other'];
+const kindRank = (p) => { const i = KIND_ORDER.indexOf(p.kind); return i < 0 ? KIND_ORDER.length : i; };
+const byNearest = (a, b) => (Math.abs(a.distance_m - b.distance_m) >= 1 ? a.distance_m - b.distance_m : kindRank(a) - kindRank(b) || String(a.name || '').localeCompare(String(b.name || '')) || Number(a.id) - Number(b.id));
+// "Between X and Y" only when both are this close and the phone is roughly on the line between them.
+const BETWEEN_M = 60;
+const BETWEEN_DEG = 140;
+
+/** The angle at the phone between the directions to two places, 0 to 180 degrees (flat-earth, fine within 100 m). */
+function angleAt(here, a, b) {
+  const k = Math.cos(here.lat * Math.PI / 180);
+  const v = (p) => [(p.lat - here.lat), (p.lng - here.lng) * k];
+  const [ax, ay] = v(a); const [bx, by] = v(b);
+  const la = Math.hypot(ax, ay); const lb = Math.hypot(bx, by);
+  if (!la || !lb) return 0;
+  return Math.acos(Math.max(-1, Math.min(1, (ax * bx + ay * by) / (la * lb)))) * 180 / Math.PI;
+}
 
 /**
  * A phone's position in the words patrollers use, in English and Spanish:
- *   "Near <trail sign or junction>" (or the nearest other place), ", below <lift> tower <n>" when a tower is in range,
- *   ", about <n> m" from the nearest point, and "(location rough)" when the phone is out by more than 100 m.
- * Returns { text, text_es, place_id, distance_m, confidence }, or null when nothing is mapped near.
+ *   "Near <nearest place>, about <its own distance> m", or "Between <nearest> (about a m) and <next> (about b m)" when
+ *   both are within 60 m and the phone is between them, and "(location rough)" when the phone is out by more than 100 m.
+ * A tower is named by its lift and number ("Near Summit Quad tower 7"). With no height data the words never say above or
+ * below. When places are mapped but none is within range: "No mapped place within <range> m", with place_id null.
+ * Returns { text, text_es, place_id, distance_m, confidence }, or null when the mountain has no mapped places.
  */
 async function describe(db, tenantId, lat, lng, accuracyM) {
   lat = Number(lat); lng = Number(lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
   const acc = accuracyM === null || accuracyM === undefined || !Number.isFinite(Number(accuracyM)) ? null : Math.max(0, Number(accuracyM));
-  const found = await near(db, tenantId, lat, lng, rangeFor(acc));
-  return wordsFor(found, acc);
+  const range = rangeFor(acc);
+  const found = await near(db, tenantId, lat, lng, range);
+  if (found.length) return wordsFor(found, acc, { lat, lng });
+  if (!(await one(db, 'SELECT 1 AS x FROM mountain_places WHERE tenant_id = ? AND active = 1 LIMIT 1', [tenantId]))) return null;
+  return farWords(range);
 }
 
-/** The words from places already found (nearest first, each with distance_m). Kept apart from the query for tests. */
-function wordsFor(found, acc) {
+/** The words when places are mapped but none is within range. */
+const farWords = (range) => ({ text: `No mapped place within ${range} m`, text_es: `Ningún lugar marcado a menos de ${range} m`, place_id: null, distance_m: null, confidence: 'none' });
+
+/**
+ * The words from places already found (each with distance_m, and lat and lng for "between"). here: the phone's position.
+ * Kept apart from the query for tests.
+ */
+function wordsFor(found, acc, here = null) {
   if (!found.length) return null;
-  const nearest = found[0];
-  const anchor = found.find(ANCHOR) || found.find((p) => p.kind !== 'tower') || null;
-  const tower = found.find((p) => p.kind === 'tower' && p.lift_name && p.tower_no !== null);
-  const about = rounded(nearest.distance_m);
-  const rough = acc !== null && acc > 100;
+  const list = [...found].sort(byNearest);
+  const first = list[0];
+  const d1 = first.distance_m;
+  const name1 = placeName(first); const name1es = placeName(first, 'es');
+  const second = here && d1 <= BETWEEN_M ? list.slice(1).find((p) => p.distance_m <= BETWEEN_M && placeName(p) !== name1
+    && Number.isFinite(Number(p.lat)) && angleAt(here, first, p) >= BETWEEN_DEG) : null;
   let en; let es;
-  if (anchor) {
-    en = `Near ${placeName(anchor)}`; es = `Cerca de ${placeName(anchor, 'es')}`;
-    if (tower) { en += `, below ${placeName(tower)}`; es += `, debajo de ${placeName(tower, 'es')}`; }
+  if (second) {
+    en = `Between ${name1} (about ${rounded(d1)} m) and ${placeName(second)} (about ${rounded(second.distance_m)} m)`;
+    es = `Entre ${name1es} (a unos ${rounded(d1)} m) y ${placeName(second, 'es')} (a unos ${rounded(second.distance_m)} m)`;
   } else {
-    en = `Below ${placeName(tower)}`; es = `Debajo de ${placeName(tower, 'es')}`;
+    en = `Near ${name1}, about ${rounded(d1)} m`;
+    es = `Cerca de ${name1es}, a unos ${rounded(d1)} m`;
   }
-  en += `, about ${about} m`; es += `, a unos ${about} m`;
-  if (rough) { en += ' (location rough)'; es += ' (ubicación aproximada)'; }
-  const d = nearest.distance_m;
-  const confidence = acc !== null && acc <= 30 && d <= 50 ? 'high' : (acc === null || acc <= 100) && d <= 200 ? 'medium' : 'low';
-  return { text: en, text_es: es, place_id: Number((anchor || tower).id), distance_m: Math.round(d), confidence };
+  if (acc !== null && acc > 100) { en += ' (location rough)'; es += ' (ubicación aproximada)'; }
+  const confidence = acc !== null && acc <= 30 && d1 <= 50 ? 'high' : (acc === null || acc <= 100) && d1 <= 200 ? 'medium' : 'low';
+  return { text: en, text_es: es, place_id: Number(first.id), distance_m: Math.round(d1), confidence };
 }
 
 /** Initials of a name: "Summit Quad" -> "SQ", "Ridge Run" -> "RR". Letters and digits only. */
@@ -229,6 +255,6 @@ function parseCsv(text) {
 const undefuse = (v) => String(v ?? '').trim().replace(/^'(?=[=+\-@])/, '');
 
 module.exports = {
-  KINDS, KIND_LABEL, CODE_RE, CSV_COLS, haversine, rangeFor, rounded, normalCode, validCode, list, byCode, near, describe, wordsFor, placeName,
+  KINDS, KIND_LABEL, CODE_RE, CSV_COLS, haversine, rangeFor, rounded, normalCode, validCode, list, byCode, near, describe, wordsFor, farWords, placeName,
   suggestCode, takenCodes, initialsOf, parseCsv, undefuse, bearing, meanBearing, uphill, rotationOf, orientationOf, norm360,
 };
