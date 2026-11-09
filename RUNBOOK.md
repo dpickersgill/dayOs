@@ -325,6 +325,12 @@ Day to day: directors open Patrol, Follow-up to approve or skip held cases. Emai
 ## Patrol access levels
 Upgrading needs `npm run migrate` (adds the access level column and the rules table; roster members are mapped from rank once). After deploying, sign in as the owner, open Patrol, then Access levels, and set anyone who should be Approver or Host. To undo someone's lockout, an owner or system manager can always open Access levels, since those logins are always Admin.
 
+## Guest help page (help/guest)
+- Turn it on per mountain under Patrol, Dispatch, Guest help page. Set the patrol phone (guests see Call patrol) and the help text number (Send by text instead, answered by help/sms). Without a help text number the page shows no text option when it cannot reach us; it keeps trying and Call 911 stays on screen.
+- QR codes on signs: `/help/<mountain>?c=<sign code>` once help/places has mapped the signs, or `?loc=<place name>` until then.
+- The status page's limits per request: `HELP_ANSWER_LIMIT` (60 answers in 10 minutes), `HELP_POSITION_LIMIT` (6 positions a minute), `HELP_MESSAGE_LIMIT` (20 replies in 10 minutes), `HELP_PASS_LIMIT` (3 pass lookups in 10 minutes) and `HELP_PASS_IP_LIMIT` (10 an hour per address). Leave them as they are in production. A request itself is never refused.
+- A guest who says the page is stuck: they can call patrol or 911 from it at any time. Check the call on the board; their messages and answers are in the call's From the guest section.
+
 ## Terrain park
 Upgrading needs `npm run migrate` (creates park_areas, park_features, park_placements and park_inspections). Park crew sign in with the `staff` role; managers and owners can do everything. To make a past day editable for the crew there is no switch: a manager makes the change. `node db/reset.js <slug> --yes` also clears the park, and `node db/demo.js <slug>` loads 12 demo features placed for today.
 

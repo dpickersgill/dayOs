@@ -19,7 +19,10 @@ function langOf(header) {
 }
 
 /** help/places builds lib/places.js; until it is merged (or its table is there) the sign code and the place words are skipped. */
+let stand = null; // tests only: a stand-in for lib/places.js (usePlaces)
+const usePlaces = (lib) => { stand = lib; };
 function placesLib() {
+  if (stand) return stand;
   try {
     const p = require('./places');
     return p && typeof p.byCode === 'function' ? p : null;
@@ -114,4 +117,4 @@ function autoLocation({ place_text: placeText, gps_lat: lat, gps_lng: lng, locat
   return (parts.join('. ') || 'Not given yet (guest help page)').slice(0, 255);
 }
 
-module.exports = { langOf, placeByCode, describePlace, placesLib, answerWords, scanHintWords, passHint, meters, autoLocation, WHO, WHERE, STEEP };
+module.exports = { langOf, placeByCode, describePlace, placesLib, usePlaces, answerWords, scanHintWords, passHint, meters, autoLocation, WHO, WHERE, STEEP };

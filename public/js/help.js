@@ -112,7 +112,7 @@ async function go(kind, who) {
   const rid = hex(16);
   const line = h('p', { class: 'big-line', role: 'status', 'aria-live': 'polite' }, t('finding'));
   const fallback = h('div');
-  show(h('h1', null, t('sending')), line, h('p', { class: 'muted' }, t('allow')), fallback, h('p', null, t('stay')));
+  show(h('h1', null, t(kind === 'lost_child' ? 'lostChild' : who ? 'forOther' : 'needHelp')), line, h('p', { class: 'muted' }, t('allow')), fallback, h('p', null, t('stay')));
   const pos = await locate(8000);
   S.pos = pos ? { lat: pos.latitude, lng: pos.longitude, acc: pos.accuracy } : null;
   line.textContent = t('sending');

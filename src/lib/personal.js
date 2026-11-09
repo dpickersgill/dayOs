@@ -7,6 +7,7 @@
 // Each entry says how to find the person's rows and what erasing does to them:
 //   by:     'person_id' columns that point at people.id, and/or contact columns matched on the person's email or phone;
 //           booking: a lesson_bookings id column, for rows that hang off one of the person's lesson bookings (2026.11.13)
+//           call: a dispatch_calls id column, for rows that hang off a help request made with the person's phone (help/guest)
 //   erase:  { set: { column: value } } blanks identity and health; 'delete' removes the row; { keep: why } keeps it as is
 //   json:   text columns holding JSON whose names, contacts and health details are blanked on erase
 //   group:  'patrol' rows are never put in the download (a records request through patrol gives them out); the export
@@ -17,6 +18,7 @@ const { rows, one } = require('../db');
 const KEEP_LINK = 'Kept for the books, with no name on it once the customer record is anonymised.';
 const KEEP_WAIVER = 'A signed waiver is the mountain’s legal record of the release, so the wording, the typed name and the signature stay. The contact details, birth date and device are removed.';
 const KEEP_PATROL = 'Patrol care records are medical and legal records the mountain must keep. They are not changed. A guest can ask for a copy through a patrol records request.';
+const KEEP_DISPATCH = 'A request for patrol\u2019s help, its messages and where the phone was are kept with the patrol call, as long as the mountain keeps its dispatch records. A guest can ask for a copy through a patrol records request.';
 
 const REGISTRY = [
   // The person themselves (anonymise blanks the row; the export gives it whole, without the photo).
@@ -103,6 +105,10 @@ const REGISTRY = [
   { table: 'incident_search', group: 'patrol', by: { phone: ['phone'] }, erase: { keep: KEEP_PATROL } },
   { table: 'patrol_witness_links', group: 'patrol', by: { email: ['email'], phone: ['phone'] }, erase: { keep: KEEP_PATROL } },
   { table: 'dispatch_calls', group: 'patrol', by: { phone: ['caller_phone'] }, erase: { keep: KEEP_PATROL } },
+  // help/guest: the guest's messages with dispatch and the last 10 positions their phone sent, kept with the call (its
+  // tap answers, the pass hint and the page language are columns of dispatch_calls, above).
+  { table: 'dispatch_messages', group: 'patrol', by: { call: 'call_id' }, erase: { keep: KEEP_DISPATCH } },
+  { table: 'dispatch_positions', group: 'patrol', by: { call: 'call_id' }, erase: { keep: KEEP_DISPATCH } },
   // A patrol follow-up email: the address goes, the patrol record stays.
   { table: 'followups', group: 'patrol', by: { email: ['to_email'] }, erase: { set: { to_email: '' } } },
   // Logins and staff are never anonymised here (the route refuses); listed so the export shows them.
@@ -153,6 +159,7 @@ function whereOf(entry, who) {
   if (who.email) for (const c of by.email || []) { parts.push(`LOWER(${q(c)}) = ?`); params.push(who.email); }
   if (who.phone) for (const c of by.phone || []) { parts.push(`RIGHT(REGEXP_REPLACE(${q(c)}, '[^0-9]', ''), 10) = ?`); params.push(who.phone); }
   if (by.booking) { parts.push(`${q(by.booking)} IN (SELECT lb.id FROM lesson_bookings lb WHERE lb.tenant_id = ${q(entry.table)}.tenant_id AND lb.person_id = ?)`); params.push(who.id); }
+  if (by.call && who.phone) { parts.push(`${q(by.call)} IN (SELECT dc.id FROM dispatch_calls dc WHERE dc.tenant_id = ${q(entry.table)}.tenant_id AND RIGHT(REGEXP_REPLACE(dc.caller_phone, '[^0-9]', ''), 10) = ?)`); params.push(who.phone); }
   if (!parts.length) return null;
   return [`(${parts.join(' OR ')})`, params];
 }
@@ -269,4 +276,4 @@ const LABEL = { waivers: 'Signed waivers', waiver_signings: 'Signed waivers', re
 /** A short reference for an email in logs and the audit trail, instead of the address itself. */
 const emailRef = (email) => (email ? crypto.createHash('sha256').update(String(email).trim().toLowerCase()).digest('hex').slice(0, 16) : null);
 
-module.exports = { REGISTRY, NOT_GUESTS, exportOf, erase, identityOf, redact, emailRef, KEEP_WAIVER, KEEP_PATROL };
+module.exports = { REGISTRY, NOT_GUESTS, exportOf, erase, identityOf, redact, emailRef, KEEP_WAIVER, KEEP_PATROL, KEEP_DISPATCH };

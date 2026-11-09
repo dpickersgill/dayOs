@@ -96,6 +96,7 @@ const PUBLIC = {
   'schoollineup.js': { publicRouter: '/public' }, 'schoolparents.js': { publicRouter: '/public' }, 'schoolpay.js': { publicRouter: '/public' }, 'shop.js': { publicRouter: '/public' },
   'waivers.js': { publicRouter: '/public' },
   'schoolsafety.js': { publicRouter: '/public' }, 'schoolmoney.js': { publicRouter: '/public' }, 'schoolgroups.js': { publicRouter: '/public' },
+  'guesthelp.js': { publicRouter: '/public' }, // help/guest: the guest's status page, keyed by the mountain and the call's guest token
 };
 // Whole files, or single routers inside a file ('file.js:name'), left out of the sweep, and why.
 const EXEMPT = {
@@ -170,6 +171,21 @@ async function seedAi(M) {
   }
 }
 
+/** help/guest: a guest's request at A with answers, a reply, a message from dispatch and a position, in A-only words. */
+async function seedGuestHelp(M) {
+  await pool.query("UPDATE tenants SET guest_help_enabled = 1, guest_help_phone = '555-010-7777' WHERE id = ?", [M.id]);
+  const made = await fetch(`${base}/api/v1/public/${M.slug}/help`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-device': `isolation-device-${M.slug}`.slice(0, 60) }, body: JSON.stringify({ kind: 'help', location: `Isolation glade ${M.slug}`, gps_lat: 44.1, gps_lng: -71.2, accuracy: 25, rid: '0123456789abcdef0123456789abcdef' }) });
+  M.help = await made.json();
+  assert.equal(made.status, 201, JSON.stringify(M.help));
+  const at = (p, method, body) => fetch(`${base}/api/v1/public/${M.slug}/help/${M.help.token}${p}`, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  assert.equal((await at('', 'PATCH', { what: `Isolation guest words ${M.slug}`, tower: '7' })).status, 200);
+  assert.equal((await at('/messages', 'POST', { body: `Isolation guest reply ${M.slug}` })).status, 201);
+  assert.equal((await at('/position', 'POST', { lat: 44.1001, lng: -71.2001, accuracy: 12 })).status, 200);
+  const [[c]] = await pool.query('SELECT * FROM dispatch_calls WHERE guest_token = ?', [M.help.token]);
+  await require('../src/lib/guestmsg').toGuest(pool, c, `Isolation patrol note ${M.slug}`, null);
+  M.helpCall = c.id;
+}
+
 test.before(async () => {
   const app = createApp();
   await new Promise((r) => { server = app.listen(0, r); });
@@ -186,6 +202,7 @@ test.before(async () => {
   // The AI release's rows (2026.11.15): a pending draft waiting for approval, and a stored morning brief, each with
   // words only A's data holds, so the sweep has something to find on the new routes.
   await seedAi(A);
+  await seedGuestHelp(A);
   await loadTables();
 
   // Ids to try: a few real ones from every one of A's tables, minus any id that B legitimately owns in any table.
@@ -319,6 +336,23 @@ test('guest pages: B\'s web address with A\'s ids shows nothing of A and changes
   const after = await fingerprint(A.id);
   const diff = Object.keys(after).filter((k) => after[k] !== before[k]);
   assert.deepEqual(diff, [], 'A\'s data changed in these tables');
+});
+
+test('guest help: A\'s guest token under B\'s address finds nothing and changes nothing; dispatch at B cannot message A\'s guest', async () => {
+  const before = await fingerprint(A.id);
+  const tok = A.help.token;
+  const tries = [['GET', '', null], ['PATCH', '', { what: 'from B', bleeding: true }], ['POST', '/position', { lat: 1, lng: 1 }], ['POST', '/live-off', {}], ['POST', '/messages', { body: 'from B' }], ['POST', '/pass', { number: 'ABCD1234' }]];
+  for (const [method, p, body] of tries) {
+    const r = await call(method, `/public/${B.slug}/help/${tok}${p}`, null, body || {});
+    assert.equal(r.status, 404, `${method} ${p}: ${r.status} ${r.text.slice(0, 100)}`);
+    assert.ok(!r.text.includes(A.slug), `${method} ${p} shows A's words`);
+  }
+  for (const r of [await call('POST', `/patrol/dispatch/${A.helpCall}/messages`, B.token, { body: 'from B' }), await call('GET', `/patrol/dispatch/${A.helpCall}`, B.token)]) assert.equal(r.status, 404, r.text);
+  assert.deepEqual(await fingerprint(A.id), before, 'A\'s data changed');
+  // Control: A's address with the token is the guest's own status page.
+  const own = await call('GET', `/public/${A.slug}/help/${tok}`, null);
+  assert.equal(own.status, 200);
+  assert.match(own.text, /Isolation patrol note/);
 });
 
 test('B cannot tie its records to A\'s: a foreign id in the body is refused', async () => {
