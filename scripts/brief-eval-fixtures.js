@@ -1,11 +1,12 @@
 'use strict';
 
 // The morning brief's evaluation fixtures: realistic days at small mountains, each a mountain of its own. Shared by
-// test/evals/brief.test.js (fake model) and scripts/ai-evals-brief.js (the real model, opt-in).
+// the brief evaluations in the tests (fake model) and scripts/ai-evals-brief.js (the real model, opt-in). Kept here, not
+// with the tests, so the script needs nothing that the release leaves out (as scripts/ai-evals-conditions.js).
 const crypto = require('crypto');
-const D = require('../../src/lib/briefdata');
-const B = require('../../src/lib/brief');
-const W = require('../../src/lib/briefwrite');
+const D = require('../src/lib/briefdata');
+const B = require('../src/lib/brief');
+const W = require('../src/lib/briefwrite');
 
 let E = null; // { pool, api, ok, wx, modules }
 const setup = (env) => { E = env; };

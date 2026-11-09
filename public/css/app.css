@@ -3871,6 +3871,9 @@ label.check-hit { display: inline-flex; align-items: center; justify-content: ce
   label:not(.check-hit):has(> input[type='checkbox']), label:not(.check-hit):has(> input[type='radio']) { min-height: 44px; display: flex; align-items: center; gap: 10px; }
   label.field:has(> input[type='checkbox']), label.field:has(> input[type='radio']) { display: grid; align-content: center; }
   .seg button, .chip, .fchips button { min-height: 44px; }
+  /* Ready for you (AI release 1): written one step more specific than the card's own rules, which come later in the file. */
+  .ready-list .ready-card { padding: 14px 12px; }
+  .ready-card .ready-actions .btn { flex: 1 1 140px; }
 }
 
 /* ---------- Printing a patrol case (Care, Report and Record on paper) ----------
@@ -4022,10 +4025,7 @@ label.check-hit { display: inline-flex; align-items: center; justify-content: ce
 .cw-voice { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
 .cw-voice legend { font-weight: 700; padding: 0; margin-bottom: 4px; }
 @media (min-width: 1100px) { .ready-list { grid-template-columns: repeat(auto-fill, minmax(520px, 1fr)); } }
-@media (max-width: 600px) {
-  .ready-card { padding: 14px 12px; }
-  .ready-actions .btn { flex: 1 1 140px; }
-}
+/* Phones: the Ready for you cards' own rules are in the phone block above (one block, so its 44 px targets stay together). */
 
 /* ---------------------------------------------------------------- Morning brief (ai/brief) */
 .brief-grid { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px; align-items: start; }

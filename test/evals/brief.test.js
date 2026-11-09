@@ -23,7 +23,7 @@ const modules = require('../../src/lib/modules');
 const B = require('../../src/lib/brief');
 const D = require('../../src/lib/briefdata');
 const W = require('../../src/lib/briefwrite');
-const F = require('./brief-fixtures');
+const F = require('../../scripts/brief-eval-fixtures');
 
 let server; let base; let fake;
 const calls = []; const mail = []; const pushes = [];

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// The morning brief's evaluations against the real model (opt-in). The same 8 mountain days as test/evals/brief.test.js,
+// The morning brief's evaluations against the real model (opt-in). The same 8 mountain days as the brief evaluations in the tests,
 // written by the model named in ASSISTANT_MODEL (the small one), then checked the way a good brief must be:
 //   the assistant's text was kept (every number checked out against the facts), three summary lines, at most three
 //   actions each linking a screen the role can open, nothing from a patrol case beyond counts, no em dashes.
@@ -23,7 +23,7 @@ const KIND = { powderSaturday: 'ops', windDay: 'ops', rainDay: 'ops', slowTuesda
 async function runAll() {
   const modules = require('../src/lib/modules');
   const W = require('../src/lib/briefwrite');
-  const F = require('../test/evals/brief-fixtures');
+  const F = require('./brief-eval-fixtures');
   const { pool } = require('../src/db');
   // The fixtures' forecasts come from a stand-in weather service on this machine (only the model is real).
   const wx = new Map();

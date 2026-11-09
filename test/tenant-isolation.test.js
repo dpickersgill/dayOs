@@ -84,6 +84,8 @@ const SIGNED = {
   'schoolstaff.js': { router: '/skischool' }, 'security.js': { router: '' }, 'shop.js': { router: '/online-shop' }, 'shopadmin.js': { router: '/online-shop' }, 'skischool.js': { router: '/skischool' },
   'staffinjuries.js': { router: '/staff-injuries' }, 'team.js': { router: '/patrol' }, 'terminal.js': { router: '/terminal' }, 'waivers.js': { router: '/waivers' }, 'whatsnew.js': { router: '/whats-new' },
   'workforce.js': { router: '/workforce' }, 'workforcetime.js': { router: '/workforce' },
+  // 2026.11.15: the first AI release. Prepared actions (Ready for you) and the morning brief.
+  'ai.js': { router: '/ai' }, 'brief.js': { router: '/brief' },
 };
 const PUBLIC = {
   'assistant.js': { publicRouter: '/public' }, 'availability.js': { publicRouter: '/public' }, 'dispatch.js': { publicRouter: '/public' }, 'family.js': { publicRouter: '/public' },
@@ -148,6 +150,26 @@ async function pool8(items, fn) {
 
 const state = {};
 
+/** A pending proposal and a stored brief (operations, today and yesterday) in a mountain, with A-only words in them. */
+async function seedAi(M) {
+  const proposals = require('../src/lib/proposals');
+  for (const m of ['assistant_plus', 'conditions']) await pool.query('INSERT INTO tenant_modules (tenant_id, module, enabled) VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE enabled = 1', [M.id, m]);
+  require('../src/lib/modules').invalidate(M.id);
+  require('../src/lib/conditionswriter'); // registers the conditions draft kind
+  const [[lift]] = await pool.query('SELECT name FROM lifts WHERE tenant_id = ? ORDER BY id LIMIT 1', [M.id]);
+  M.proposal = await proposals.create(pool, { tenantId: M.id, kind: 'conditions_update', title: `Isolation draft for ${M.slug}`, summary: `Pending isolation summary ${M.slug}`,
+    preview: { note: `Isolation note ${M.slug}`, by: 'template' }, payload: { date: '2030-01-01', note: `Isolation note ${M.slug}`, send_email: false }, forRoles: ['owner', 'manager'], source: 'draft_now' });
+  const [[t]] = await pool.query('SELECT timezone FROM tenants WHERE id = ?', [M.id]);
+  const today = require('../src/lib/util').todayIn(t.timezone);
+  const body = { summary: [`Open today at ${M.slug}.`, `Isolation brief line ${M.slug}`, 'Nothing needs attention this morning.'], sections: [{ title: 'Lifts', lines: [`${lift ? lift.name : 'Lift'}: open work order (isolation ${M.slug}).`] }], actions: [] };
+  M.briefs = [];
+  for (const d of [today, require('../src/lib/util').addDays(today, -1)]) {
+    const [r] = await pool.query("INSERT INTO morning_briefs (tenant_id, sent_on, for_date, kind, data, body, source) VALUES (?, ?, ?, 'ops', ?, ?, 'template')",
+      [M.id, d, d, JSON.stringify({ mountain: M.slug, note: `Isolation facts ${M.slug}` }), JSON.stringify(body)]);
+    M.briefs.push(r.insertId);
+  }
+}
+
 test.before(async () => {
   const app = createApp();
   await new Promise((r) => { server = app.listen(0, r); });
@@ -161,6 +183,9 @@ test.before(async () => {
   const up = await call('PUT', `/documents/documents/${doc}/file`, A.token, Buffer.from('muster point is the flagpole'));
   assert.equal(up.status, 201, up.text);
   await call('PUT', `/documents/documents/${doc}/file`, A.token, Buffer.from('muster point moved to the lodge deck'));
+  // The AI release's rows (2026.11.15): a pending draft waiting for approval, and a stored morning brief, each with
+  // words only A's data holds, so the sweep has something to find on the new routes.
+  await seedAi(A);
   await loadTables();
 
   // Ids to try: a few real ones from every one of A's tables, minus any id that B legitimately owns in any table.
@@ -252,6 +277,27 @@ test('B cannot change or delete anything of A by id', async () => {
   const after = await fingerprint(A.id);
   const diff = Object.keys(after).filter((k) => after[k] !== state.before[k]);
   assert.deepEqual(diff, [], 'A\'s data changed in these tables');
+});
+
+test('the AI release: B sees none of A\'s drafts or briefs, and cannot approve or set aside A\'s draft', async () => {
+  const has = (text) => text.includes(A.slug);
+  const reads = ['/ai/proposals', '/ai/proposals?status=approved', '/ai/conditions/settings', '/brief', '/brief/prefs', '/brief/people', '/reports/forecast-data', ...A.briefs.map((id) => `/brief/${id}`)];
+  for (const p of reads) {
+    const r = await call('GET', p, B.token);
+    assert.ok(r.status !== 401, `${p}: B's login stopped working`);
+    assert.ok(!(r.status < 300 && has(r.text)), `${p} -> ${r.status} shows A's data`);
+  }
+  for (const id of A.briefs) assert.equal((await call('GET', `/brief/${id}`, B.token)).status, 404, `brief ${id}`);
+  const [[before]] = await pool.query('SELECT status FROM ai_proposals WHERE id = ?', [A.proposal]);
+  for (const what of ['approve', 'reject']) {
+    const r = await call('POST', `/ai/proposals/${A.proposal}/${what}`, B.token, {});
+    assert.equal(r.status, 404, `${what}: ${r.status} ${r.text}`);
+  }
+  const [[after]] = await pool.query('SELECT status FROM ai_proposals WHERE id = ?', [A.proposal]);
+  assert.equal(after.status, before.status); assert.equal(after.status, 'pending');
+  // Control: A's own owner sees the draft and today's brief.
+  assert.ok(has((await call('GET', '/ai/proposals', A.token)).text), 'A sees its own draft');
+  assert.ok(has((await call('GET', `/brief/${A.briefs[0]}`, A.token)).text), 'A reads its own brief');
 });
 
 // Guest pages are keyed by the mountain's web address, so B's address with A's ids must find nothing of A's.
