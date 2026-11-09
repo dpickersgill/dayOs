@@ -172,3 +172,15 @@ test('every page in the sitemap has a share image of its own, and the new guides
     assert.match((await onHost(`/${slug}`)).text, new RegExp(`og:image" content="https://www\\.site\\.test/site/img/share/${slug}\\.png"`));
   }
 });
+
+test('every page in the sitemap has a title of 30 to 65 characters and a description of 100 to 160', async () => {
+  const { PAGES } = require('../src/routes/site');
+  for (const slug of Object.keys(PAGES)) {
+    const html = (await onHost(`/${slug}`)).text;
+    const un = (s) => s.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+    const title = un(html.match(/<title>([^<]*)<\/title>/)[1]);
+    const desc = un(html.match(/<meta name="description" content="([^"]*)"/)[1]);
+    assert.ok(title.length >= 30 && title.length <= 65, `/${slug} title ${title.length}: ${title}`);
+    assert.ok(desc.length >= 100 && desc.length <= 160, `/${slug} description ${desc.length}`);
+  }
+});

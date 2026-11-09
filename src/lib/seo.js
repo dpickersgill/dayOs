@@ -171,7 +171,7 @@ const META = {
     crumb: 'Security',
   },
   status: {
-    title: 'Service Status | Verdynt/OS',
+    title: 'Service Status and Incidents | Verdynt/OS',
     description: 'Whether each part of Verdynt/OS is working right now: the app, online shop and booking pages, card payments, email and texts, with incidents and maintenance.',
     og: 'Is Verdynt/OS working?',
     crumb: 'Status',
@@ -182,8 +182,8 @@ const META = {
     og: 'See your mountain on the board',
     crumb: 'Contact',
   },
-  privacy: { title: 'Privacy Policy | Verdynt/OS', description: 'What Verdynt/OS collects, why, who it is shared with, how long it is kept, and the choices you have.', crumb: 'Privacy' },
-  terms: { title: 'Terms of Service | Verdynt/OS', description: 'The terms for using Verdynt/OS: trials, subscriptions and payment, your data, and what each side is responsible for.', crumb: 'Terms' },
+  privacy: { title: 'Privacy Policy for Verdynt/OS Ski Area Software', description: 'What Verdynt/OS collects, why, who it is shared with, how long it is kept, and the choices you have.', crumb: 'Privacy' },
+  terms: { title: 'Terms of Service for Verdynt/OS Ski Area Software', description: 'The terms for using Verdynt/OS: trials, subscriptions and payment, your data, and what each side is responsible for.', crumb: 'Terms' },
   // The Good Day scorecard (2026.11 policy and brand review): a free tool, so it carries WebApplication data too.
   'good-day/scorecard': {
     title: 'The Good Day Scorecard for Ski Areas | Verdynt/OS',
