@@ -58,7 +58,7 @@ const WORDMARK = (theme, h) => `<img class="wordmark" src="/brand/verdynt-lockup
 const NAV = [['ski-patrol', 'Ski patrol'], ['ski-area-risk-management', 'For owners'], ['pricing', 'Pricing'], ['resources', 'Resources']];
 // One line under each solution in the Product menu, from that page's own headline.
 const SOLUTION_LINES = {
-  'lift-ticket-software': 'Day tickets, season passes and the gate', 'ski-school-software': 'Lessons that fill without the phone tag',
+  'lift-ticket-software': 'Day tickets, season passes and the gate', 'ski-school-software': 'From the first booking to the last pickup',
   'ski-rental-software': 'Every item out, and every item back', 'ski-waiver-software': 'Signed before they drive up',
   'lift-maintenance-software': 'Inspections, work orders and service plans', 'ski-area-pos': 'A fast ticket window on a busy Saturday',
   'online-lift-ticket-sales': 'Your own page, selling while you sleep', 'terrain-park-software': 'Every feature, and whether it passed',
@@ -277,6 +277,11 @@ function fillGoodDay(html) {
     .replace('<!--GD:NEXT-->', () => (next ? `<p class="gd-next"><b>Next issue: ${escHtml(next.moment)}.</b> ${escHtml(next.question)}</p>` : ''));
 }
 
+// A guide's printable copy (public/site/<name>.pdf), linked under its card on Resources only once the file is there, so a
+// guide whose PDF is not built yet never links to a missing file.
+const PDF_DIR = path.join(__dirname, '..', '..', 'public', 'site');
+const pdfLink = (file) => (fs.existsSync(path.join(PDF_DIR, `${file}.pdf`)) ? `<a class="gpdf" href="/site/${file}.pdf">Printable PDF</a>` : '');
+
 async function render(req, name, slug, words = null) {
   const site = onSite(req);
   const base = site ? '' : '/site';
@@ -294,7 +299,7 @@ async function render(req, name, slug, words = null) {
     .replace('<div class="sx">', lit(name === 'contact' ? '<div class="sx">' : '<div class="sx has-mcta">'))
     .replace(/<!--HEADER:?([a-z-]*)-->/, (_m, cur) => header(cur))
     .replace('<!--FOOTER-->', lit(FOOTER));
-  html = fillGoodDay(html);
+  html = fillGoodDay(html).replace(/<!--PDF:([a-z0-9-]+)-->/g, (_m, file) => pdfLink(file));
   if (words) html = html.replace(/\{\{GD_([A-Z]+)\}\}/g, (_m, k) => words[k.toLowerCase()] ?? '');
   const out = html
     .replaceAll('{{HOME}}', lit(`${base}/`))
@@ -426,10 +431,10 @@ Verdynt/OS runs in a web browser on counter computers, phones and tablets, with 
 - [Product](${page('product')}): every app and the pages guests use
 - [Ski patrol software](${page('ski-patrol')}): patient care reports, dispatch, opening checks, the closing sweep, volunteers
 - [For owners and insurers](${page('ski-area-risk-management')}): the claim file, the documentation score, the season risk report and insurer access
-- [Lift ticket and season pass software](${page('lift-ticket-software')}): the counter, the gate, RFID cards and the online shop
-- [Ski school software](${page('ski-school-software')}): lessons, online booking and instructors
-- [Ski rental software](${page('ski-rental-software')}): rental contracts, sizing, binding records and barcoded gear
-- [Online ski waivers](${page('ski-waiver-software')}): waivers signed on a phone or counter tablet
+- [Lift ticket and season pass software](${page('lift-ticket-software')}): the counter, the gate, RFID cards and the online shop; how a busy Saturday runs, and what changes from paper tickets
+- [Ski school software](${page('ski-school-software')}): lessons and online lesson booking, class sizes by age band, pickup with authorized adults, lost child calls to patrol, guardian waivers, adaptive intake, group programs, the instructor pay ladder by PSIA-AASI, CSIA and CASI level, instructor ratings, the learn-to-ski ladder and owner reports
+- [Ski rental software](${page('ski-rental-software')}): rental contracts, guest rental forms, stations and the queue board, binding records, card deposits, group bags and scan-to-return
+- [Online ski waivers](${page('ski-waiver-software')}): waivers signed on a phone or counter tablet, guardians signing for children, the exact wording kept, the register and voids
 - [Lift inspection and maintenance software](${page('lift-maintenance-software')}): lift checks, grooming, work orders and the fleet
 - [Ski area POS](${page('ski-area-pos')}): the ticket window, card payments on a Stripe smart reader, gift cards and the till
 - [Online lift ticket sales](${page('online-lift-ticket-sales')}): the online shop, day-first pricing, daily limits and the waitlist
@@ -444,7 +449,7 @@ Verdynt/OS runs in a web browser on counter computers, phones and tablets, with 
 
 ## Guides and checklists
 
-- [Resources](${page('resources')}): free guides and printable checklists for ski areas
+- [Resources](${page('resources')}): free guides, templates and printable checklists for ski areas, grouped by ski school, lifts and park, patrol, and choosing software
 - [Chairlift daily inspection checklist](${page('chairlift-inspection-checklist')}): the pre-opening lift check and the daily record
 - [Terrain park daily inspection checklist](${page('terrain-park-inspection-checklist')}): features, landings, signs and the daily park record
 - [How to write a ski area incident report](${page('ski-area-incident-report-guide')}): what to record, what to leave out, and a review checklist (and a free review of ten of your own reports)
