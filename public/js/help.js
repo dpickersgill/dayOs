@@ -313,7 +313,7 @@ async function status(flash) {
     h('div', { class: `state st-${st.status}` }, h('span', { class: 'st-i', 'aria-hidden': 'true' }, icon), h('h1', null, t(st.status))),
     h('p', null, t('ref'), ': ', h('b', null, st.reference)),
     closed ? h('p', null, t('closedSub')) : h('p', null, t('stay')),
-    h('div', { class: 'row' }, h('a', { class: 'b b911', href: 'tel:911' }, t('call911')), phone ? h('a', { class: 'b sec', href: tel(phone) }, t('callPatrol'), h('span', { class: 'num' }, st.patrol_phone_shown || phone)) : null),
+    h('div', { class: 'row' }, h('a', { class: 'b b911', href: 'tel:911' }, t('call911')), phone ? h('a', { class: 'b sec has-num', href: tel(phone) }, h('span', null, t('callPatrol')), h('span', { class: 'num' }, st.patrol_phone_shown || phone)) : null),
     h('h2', null, t('messages')), list,
     closed ? null : h('div', { class: 'reply' }, h('label', { for: 'reply' }, t('reply')), box, h('p', { class: 'muted small' }, t('mic')),
       btn(t('send'), async () => {
