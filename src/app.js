@@ -302,6 +302,9 @@ function createApp() {
   api.use('/twilio', require('./routes/twilioinbound').router); // STOP and START replies to our texts (signed by Twilio)
   // The status page's numbers (no sign-in, nothing about any mountain). Cached for a minute on each server.
   api.get('/status', rateLimit({ windowMs: 60_000, max: 60, message: 'Too many looks, slow down' }), require('./routes/status').publicStatus);
+  // Text HELP (help/sms): Twilio posts every mountain's help-line texts here, signed. Ahead of the guest page limits, since
+  // Twilio sends from a few addresses; unsigned posts are refused at once and repeats from one phone are grouped.
+  api.use('/public', require('./routes/helpsms').publicRouter);
   // PUBLIC_RATE_LIMIT and PUBLIC_RATE_LIMIT_ALL exist so a load test on staging can raise them (DEPLOY.md).
   // Guest pages: counted per address AND mountain (2026.11.10 fix). A lodge's Wi-Fi puts every guest on one address: 600 a
   // minute for one mountain is about 100 phones each opening a guest page a minute (a page makes 3 to 6 calls), the
@@ -380,6 +383,7 @@ function createApp() {
   api.use('/patrol', patrolTeam);
   api.use('/patrol', dispatch.router);
   api.use('/patrol', require('./routes/places').router); // help/places: mapped places, sign sheets, where a caller is, staff help
+  api.use('/patrol', require('./routes/helpsms').router); // Text HELP settings and a call's texts (after dispatch: its record guard covers /dispatch/:id)
   api.use('/patrol', patrolForm);
   api.use('/patrol', patrolMap);
   api.use('/patrol', safetyRoutes);

@@ -69,11 +69,12 @@ async function createCall(tenant, b, { source, userId = null, staffId = null, se
         const date = now.slice(0, 10);
         const { n } = await one(conn, 'SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM dispatch_calls WHERE tenant_id = ? AND call_date = ?', [tenant.id, date]);
         // A guest request from a phone or address that has sent several in the last 10 minutes joins that sender's group
-        // on the board (flood_of: the first in the group). It is never refused.
+        // on the board (flood_of: the first in the group). It is never refused. Text HELP calls (source 'sms') are grouped
+        // the same way, keyed on the texting phone (lib/helpline.js).
         let floodOf = null;
         if (sender) {
           const since = new Date(Date.parse(`${now.replace(' ', 'T')}Z`) - FLOOD_WINDOW_MS).toISOString().slice(0, 19).replace('T', ' ');
-          const recent = await rows(conn, `SELECT id, flood_of, sender_hash = ? AS same_device FROM dispatch_calls WHERE tenant_id = ? AND source = 'guest' AND received_at >= ?
+          const recent = await rows(conn, `SELECT id, flood_of, sender_hash = ? AS same_device FROM dispatch_calls WHERE tenant_id = ? AND source IN ('guest','sms') AND received_at >= ?
             AND (sender_hash = ? OR ip_hash = ?) ORDER BY id`, [sender.device, tenant.id, since, sender.device, sender.ip]);
           const sameDevice = recent.filter((x) => Number(x.same_device)).length;
           if (sameDevice >= FLOOD_DEVICE || recent.length >= FLOOD_ADDRESS) {
@@ -97,7 +98,7 @@ async function createCall(tenant, b, { source, userId = null, staffId = null, se
           const [first] = await conn.query('UPDATE dispatch_calls SET flood_alerted_at = ? WHERE tenant_id = ? AND id = ? AND flood_alerted_at IS NULL', [now, tenant.id, floodOf]);
           if (sender) sender.alert = first.affectedRows ? floodOf : null;
         }
-        await conn.query("INSERT INTO dispatch_events (tenant_id, call_id, at, kind, staff_id, note, user_id) VALUES (?, ?, ?, 'received', ?, ?, ?)", [tenant.id, r.insertId, now, staffId, source === 'guest' ? 'Guest help request' : null, userId]);
+        await conn.query("INSERT INTO dispatch_events (tenant_id, call_id, at, kind, staff_id, note, user_id) VALUES (?, ?, ?, 'received', ?, ?, ?)", [tenant.id, r.insertId, now, staffId, source === 'guest' ? 'Guest help request' : source === 'sms' ? `Text HELP from ${b.caller_phone}` : null, userId]);
         return { id: r.insertId, call_no: callNo({ call_date: date, seq: n }), flood_of: floodOf };
       });
     } catch (err) {
@@ -301,6 +302,8 @@ router.post(
       await audit(conn, req, 'event', 'dispatch_calls', c.id, { kind: b.kind });
       return { status: next || c.status };
     });
+    // A call that came by text gets one closing text (lib/helpline.js). It never holds up the answer.
+    if (['closed', 'cancelled'].includes(out.status)) require('../lib/helpline').closed(tenantId, paramId(req)).catch((err) => require('../lib/jobs').logFailure({ job: 'help_sms', tenant: tenantId, message: err.message }));
     res.status(201).json(out);
   },
 );
@@ -581,4 +584,4 @@ publicRouter.post('/locate/:token', validate(z.object({ lat: z.number().min(-90)
   res.json({ ok: true, mountain: c.mountain });
 });
 
-module.exports = { router, publicRouter, createCall };
+module.exports = { router, publicRouter, createCall, callNo, senderKey }; // callNo, senderKey: Text HELP (lib/helpline.js)

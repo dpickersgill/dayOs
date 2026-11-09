@@ -109,6 +109,10 @@ const REGISTRY = [
   // tap answers, the pass hint and the page language are columns of dispatch_calls, above).
   { table: 'dispatch_messages', group: 'patrol', by: { call: 'call_id' }, erase: { keep: KEEP_DISPATCH } },
   { table: 'dispatch_positions', group: 'patrol', by: { call: 'call_id' }, erase: { keep: KEEP_DISPATCH } },
+  // help/sms: a call that came by text keeps the guest's phone, language and photo addresses with the call (dispatch
+  // retention); a STOP to a mountain's help line is kept so that line never texts the phone again.
+  { table: 'dispatch_sms_threads', group: 'patrol', by: { phone: ['phone'] }, erase: { keep: KEEP_PATROL } },
+  { table: 'dispatch_sms_optouts', by: { phone: ['phone_key'] }, erase: { keep: 'Kept so the patrol help line never texts this phone again after it texted STOP.' } },
   // A patrol follow-up email: the address goes, the patrol record stays.
   { table: 'followups', group: 'patrol', by: { email: ['to_email'] }, erase: { set: { to_email: '' } } },
   // Logins and staff are never anonymised here (the route refuses); listed so the export shows them.
@@ -135,6 +139,8 @@ const NOT_GUESTS = {
   // ai/brief: the morning brief is about the day and goes to staff; a brief and the record of who was sent it are kept 30 days.
   // help/places: trail signs, lift towers and junctions patrol mapped, with the staff login that marked each one.
   mountain_places: 'a sign, tower or junction on the mountain, never a guest',
+  // help/sms: the mountain's Text HELP number and patrol phone, a mountain setting.
+  patrol_help_lines: 'a mountain setting (its Text HELP number and patrol phone)',
   brief_prefs: 'a staff login\u2019s morning brief setting', morning_briefs: 'the day\u2019s morning brief for staff (counts, no guest names), kept 30 days', brief_sends: 'which staff were sent the morning brief, kept 30 days',
 };
 

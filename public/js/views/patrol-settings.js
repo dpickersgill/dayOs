@@ -1,8 +1,9 @@
 // Settings > Patrol > Patrol settings: the medical director and protocol version (stamped on each report at sign-off),
 // volunteer days, self sign-up for open shifts, the sweep's late alert, oxygen refill level, controlled counts,
-// avalanche work and text messages on critical calls. Each part is changed by whoever runs that part of patrol.
+// avalanche work, text messages on critical calls and Text HELP (patrol-texthelp.js). Each part is changed by whoever runs that part of patrol.
 import { get, put, post, patch, del } from '../api.js';
 import { h, clear, input, select, field, button, toast, errorBox, confirmDialog, formDialog, ctx } from '../ui.js';
+import { textHelpPanel } from './patrol-texthelp.js';
 
 const DIFFICULTY = [['green', 'Green'], ['blue', 'Blue'], ['black', 'Black'], ['double_black', 'Double black'], ['park', 'Park']];
 
@@ -69,7 +70,7 @@ export function accessSummaryPanel() {
 
 export async function drawOpsSettings(box) {
   const body = h('div', { class: 'stack' });
-  clear(box).append(body, accessSummaryPanel());
+  clear(box).append(body, textHelpPanel(), accessSummaryPanel());
   async function load() {
     try { draw(await get('/patrol/ops-settings')); } catch (err) { clear(body).append(errorBox(err)); }
   }

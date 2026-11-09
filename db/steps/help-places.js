@@ -32,9 +32,10 @@ module.exports = ({ tableExists, columnExists }) => [
   // Map orientation: a manual compass direction at the top of every map that plots GPS points (0 north up, 180 turned
   // around). NULL, the default, is automatic: the base at the bottom, worked out from the lifts or the weather points.
   ['tenants.map_rotation_deg', (c) => columnExists(c, 'tenants', 'map_rotation_deg'), 'ALTER TABLE tenants ADD COLUMN map_rotation_deg SMALLINT UNSIGNED NULL DEFAULT NULL'],
-  // Every source the column already has stays (school from 2026.11.13); 'staff' is added at the end.
+  // Every source the column already has stays (school from 2026.11.13); 'staff' is added. The list is the whole one for
+  // the release (help-sms.js writes the same list), so whichever ALTER runs last, guest, staff and sms are all kept.
   ['dispatch_calls.source staff', async (c) => columnExists(c, 'dispatch_calls', 'source') && (await c.query(
     "SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'dispatch_calls' AND column_name = 'source' AND column_type LIKE '%''staff''%'",
   ))[0].length > 0,
-  "ALTER TABLE dispatch_calls MODIFY COLUMN source ENUM('patrol','radio','phone','guest','school','staff') NOT NULL DEFAULT 'radio'"],
+  "ALTER TABLE dispatch_calls MODIFY COLUMN source ENUM('patrol','radio','phone','guest','school','staff','sms') NOT NULL DEFAULT 'radio'"],
 ];

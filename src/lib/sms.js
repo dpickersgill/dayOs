@@ -4,6 +4,7 @@
 //   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN   from the Twilio console
 //   TWILIO_FROM                             a Twilio number (+1...) or messaging service id (MG...)
 //   TWILIO_API_BASE                         only for automated tests
+// A mountain's Text HELP number (Patrol settings) uses the same account; texts on that line go from it (lib/helpline.js).
 const env = process.env;
 const { isSandbox } = require('./sandbox');
 const { logFailure } = require('./jobs');
@@ -25,7 +26,7 @@ function e164(phone) {
  * answer, on any record at the mountain with that number, is "no"; and between 9 PM and 8 AM at the mountain it is held
  * and sent at 8 AM by the 5-minute guests job ({ ok: true, held: true }).
  */
-async function send({ tenantId, to, body, promotional = false, tag = null, logId = null }) {
+async function send({ tenantId, to, body, promotional = false, tag = null, logId = null, from = null }) {
   if (!enabled()) return { ok: false, error: 'Text messages are not set up' };
   if (!tenantId) { logFailure({ job: 'sms', message: 'send without a mountain' }); return { ok: false, error: 'No mountain given' }; }
   if (await isSandbox(tenantId)) return { ok: false, error: 'Demo mountains do not send text messages' };
@@ -40,22 +41,31 @@ async function send({ tenantId, to, body, promotional = false, tag = null, logId
       return { ok: true, held: true, id: `held-${r.insertId}`, send_after: t.sendAfter };
     }
   }
-  const r = await post({ to, body });
+  // Text HELP (help/sms): a text to a guest who is texting the mountain's help line goes from the help number, so it stays
+  // in the same conversation on their phone. It is refused once they texted STOP to it, or past the per-call and hourly
+  // caps (lib/helpline.js).
+  let line = null;
+  if (!promotional && !from) {
+    line = await require('./helpline').outbound(tenantId, to);
+    if (line && line.blocked) return { ok: false, error: line.blocked, refused: true };
+  }
+  const r = await post({ to, body, from: from || (line && line.from) });
   if (!r.ok) logFailure({ job: 'sms', tenant: tenantId, message: r.error });
   return r;
 }
 
-async function post({ to: named, body: written }) {
+async function post({ to: named, body: written, from = null }) {
   // On staging, texts go to STAGING_SMS_TO, saying who they were for, or nowhere. Never to a real guest or patroller.
   let to = named; let body = written;
   if (env.STAGE === 'staging') {
     if (!env.STAGING_SMS_TO) return { ok: false, error: 'Staging sends no text messages unless STAGING_SMS_TO is set' };
     to = env.STAGING_SMS_TO; body = `[Staging, for ${named}] ${written}`;
   }
-  const number = e164(to);
+  const number = /^\+[1-9]\d{7,14}$/.test(String(to)) && from ? String(to) : e164(to); // a help-line guest may text from outside the US
   if (!number) return { ok: false, error: 'Not a number we can text' };
   const form = new URLSearchParams({ To: number, Body: body });
-  form.set(/^MG/.test(env.TWILIO_FROM) ? 'MessagingServiceSid' : 'From', env.TWILIO_FROM);
+  if (from) form.set('From', from); // a mountain's help number (Text HELP)
+  else form.set(/^MG/.test(env.TWILIO_FROM) ? 'MessagingServiceSid' : 'From', env.TWILIO_FROM);
   try {
     const res = await fetch(`${base()}/2010-04-01/Accounts/${env.TWILIO_ACCOUNT_SID}/Messages.json`, {
       method: 'POST',

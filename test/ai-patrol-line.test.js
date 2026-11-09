@@ -48,6 +48,8 @@ test('the AI files name no patrol or patient table, except the brief\'s one aggr
   assert.ok(tables.includes('incidents') && tables.includes('incident_patients') && tables.length > 15, `found ${tables.length} patrol tables`);
   // help/guest (Nov 9): a guest's messages with dispatch and their phone's positions are patrol and dispatch data too.
   for (const t of ['dispatch_calls', 'dispatch_messages', 'dispatch_positions']) assert.ok(tables.includes(t), `${t} is on the patrol line`);
+  // help/sms: Text HELP's tables are patrol and dispatch data too, and are checked like the rest.
+  for (const t of ['patrol_help_lines', 'dispatch_sms_threads', 'dispatch_sms_optouts', 'dispatch_sms_log']) assert.ok(tables.includes(t), `${t} is a patrol table`);
   for (const f of FILES) {
     let src = code(read(f));
     if (f === 'src/lib/briefdata.js') {
@@ -103,5 +105,18 @@ test('guest help requests never reach AI: no AI or assistant file names a dispat
     for (const t of dispatch) assert.ok(!new RegExp(`\\b${t}\\b`).test(src), `${f} names ${t}`);
     for (const m of src.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)) assert.doesNotMatch(m[1], /guestmsg|guesthelp|places|dispatch|sms/i, `${f} requires ${m[1]}`);
     assert.doesNotMatch(src, /last_scan_hint|guest_token|place_text/, `${f} reads a guest help column`);
+  }
+});
+
+test('help requests by text (help/sms) never reach AI: no AI file, nor the guest or staff assistant, reads them', () => {
+  const more = ['src/lib/assistant.js', 'src/lib/assistanttools.js', 'src/routes/assistant.js'].filter((f) => fs.existsSync(path.join(ROOT, f)));
+  for (const f of [...FILES, ...more]) {
+    const src = code(read(f));
+    for (const t of ['patrol_help_lines', 'dispatch_sms_threads', 'dispatch_sms_optouts', 'dispatch_sms_log', 'dispatch_messages']) assert.ok(!new RegExp(`\\b${t}\\b`).test(src), `${f} names ${t}`);
+    for (const m of src.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)) assert.doesNotMatch(m[1], /helpline|helpsms|guestmsg/, `${f} requires ${m[1]}`);
+  }
+  // And the Text HELP files call no AI.
+  for (const f of ['src/lib/helpline.js', 'src/routes/helpsms.js']) {
+    for (const m of code(read(f)).matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)) assert.doesNotMatch(m[1], /assistant|brief|proposals|conditions|storyfill|anthropic/i, `${f} requires ${m[1]}`);
   }
 });
