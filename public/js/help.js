@@ -324,7 +324,7 @@ async function status(flash) {
       store('live', 'off'); stopLive(); call('POST', `/${S.token}/live-off`).catch(() => {}); status();
     }, 'link') : null),
     closed ? btn(t('askAgain'), () => { store('token', null); store('shown', null); store('live', null); history.replaceState(null, '', location.pathname + location.search); location.reload(); }, 'sec') : null,
-    !closed && S.page && st.answered.length < 3 ? btn(t('answerMore'), () => questions(st.lost_child ? ['child_name', 'child_age', 'child_jacket', 'child_last_seen', 'phone'] : ['who', 'where', 'lift', 'steep', 'tower', 'what', 'hurt', 'pass', 'phone'].filter((k) => !st.answered.includes(k))), 'link') : null);
+    !closed && S.page && st.answered.length < 3 ? btn(t('answerMore'), () => questions((st.lost_child ? ['child_name', 'child_age', 'child_jacket', 'child_last_seen', 'phone'] : ['who', 'where', 'lift', 'steep', 'tower', 'what', 'hurt', 'pass', 'phone']).filter((k) => !st.answered.includes(k))), 'link') : null);
   if (!closed) schedule(since);
 }
 // Every 10 s, then every 30 s after 10 minutes. A reply or answer in progress is not interrupted by a redraw.

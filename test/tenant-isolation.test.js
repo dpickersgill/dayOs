@@ -5,7 +5,7 @@
 process.env.BOOTSTRAP_KEY = 'test-bootstrap-key';
 process.env.LOGIN_RATE_LIMIT = '100000';
 // The guest pages are swept too, many times a second from one address.
-for (const k of ['PUBLIC_RATE_LIMIT', 'ASSISTANT_GUEST_LIMIT', 'BOOKING_RATE_LIMIT', 'CALENDAR_FEED_RATE_LIMIT', 'GIVE_RATE_LIMIT', 'HELP_RATE_LIMIT', 'INBOX_RATE_LIMIT', 'NEXT_TIMES_RATE_LIMIT', 'RENTAL_FORM_RATE_LIMIT', 'SHOP_RATE_LIMIT', 'WAIVER_RATE_LIMIT']) process.env[k] = '1000000';
+for (const k of ['PUBLIC_RATE_LIMIT', 'PUBLIC_RATE_LIMIT_ALL', 'ASSISTANT_GUEST_LIMIT', 'BOOKING_RATE_LIMIT', 'CALENDAR_FEED_RATE_LIMIT', 'GIVE_RATE_LIMIT', 'HELP_RATE_LIMIT', 'INBOX_RATE_LIMIT', 'NEXT_TIMES_RATE_LIMIT', 'RENTAL_FORM_RATE_LIMIT', 'SHOP_RATE_LIMIT', 'WAIVER_RATE_LIMIT']) process.env[k] = '1000000';
 
 const fs = require('fs');
 const nodePath = require('path');
