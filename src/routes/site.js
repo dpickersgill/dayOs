@@ -22,7 +22,8 @@ const PAGES = {
   'ski-rental-software': 'skirental', 'ski-waiver-software': 'skiwaivers', 'lift-maintenance-software': 'liftmaintenance',
   'ski-area-pos': 'skiareapos', 'online-lift-ticket-sales': 'onlinetickets', 'terrain-park-software': 'terrainpark', 'ski-area-staff-scheduling': 'staffscheduling',
   'attraction-ticketing-software': 'attractions', resources: 'resources', 'chairlift-inspection-checklist': 'guide-chairlift', 'terrain-park-inspection-checklist': 'guide-terrainpark',
-  'ski-area-incident-report-guide': 'guide-incident', 'how-to-choose-ski-area-software': 'guide-choosing', about: 'about',
+  'ski-area-incident-report-guide': 'guide-incident', 'how-to-choose-ski-area-software': 'guide-choosing',
+  'ski-school-pickup-policy': 'guide-pickup', 'lost-child-procedure': 'guide-lostchild', 'ski-instructor-pay-scale': 'guide-payscale', 'ski-area-opening-day-checklist': 'guide-openingday', about: 'about',
   pricing: 'pricing', security: 'security', contact: 'contact', privacy: 'privacy', terms: 'terms',
   // For owners, GMs and insurers: the record, the claim file, the documentation score and the season risk report.
   'ski-area-risk-management': 'risk',
@@ -342,7 +343,10 @@ PRIORITY['good-day'] = '0.7';
 PRIORITY['good-day/scorecard'] = '0.7';
 PRIORITY.status = '0.3';
 for (const i of GD.issues()) PRIORITY[i.slug] = '0.6';
-for (const s of ['chairlift-inspection-checklist', 'terrain-park-inspection-checklist', 'ski-area-incident-report-guide', 'how-to-choose-ski-area-software']) PRIORITY[s] = '0.7';
+// The guides and checklists (Resources). Each has a printable PDF at /site/<slug>.pdf; scripts/guide-pdfs.js builds the four below.
+const GUIDES = ['chairlift-inspection-checklist', 'terrain-park-inspection-checklist', 'ski-area-incident-report-guide', 'how-to-choose-ski-area-software',
+  'ski-school-pickup-policy', 'lost-child-procedure', 'ski-instructor-pay-scale', 'ski-area-opening-day-checklist'];
+for (const s of GUIDES) PRIORITY[s] = '0.7';
 
 const pages = express.Router();
 // Never in search results: the app's sign-in, the operator console and the time clock.
@@ -428,6 +432,10 @@ Verdynt/OS runs in a web browser on counter computers, phones and tablets, with 
 - [Terrain park daily inspection checklist](${page('terrain-park-inspection-checklist')}): features, landings, signs and the daily park record
 - [How to write a ski area incident report](${page('ski-area-incident-report-guide')}): what to record, what to leave out, and a review checklist (and a free review of ten of your own reports)
 - [How to choose ski area management software](${page('how-to-choose-ski-area-software')}): when to switch, what to compare, questions for vendors
+- [Ski school child pickup and release policy (template)](${page('ski-school-pickup-policy')}): the authorized adult list, ID checks, escalation when nobody comes, release overrides, and a fill-in-the-blanks policy. Printable PDF: ${origin.replace(/\/site$/, '')}/site/ski-school-pickup-policy.pdf
+- [Lost child procedure for ski areas](${page('lost-child-procedure')}): the first 5 minutes, the next 30, the reunion, the after-action record and a drill checklist for twice a season. Printable PDF: ${origin.replace(/\/site$/, '')}/site/lost-child-procedure.pdf
+- [How to build a ski instructor pay scale](${page('ski-instructor-pay-scale')}): base rates by certification level, credential and seniority steps, private and request premiums, training pay, tips, and a blank worksheet. Printable PDF: ${origin.replace(/\/site$/, '')}/site/ski-instructor-pay-scale.pdf
+- [Ski area opening day checklist](${page('ski-area-opening-day-checklist')}): lifts, patrol, the terrain park, snowmaking and grooming, tickets, rentals, ski school, staff and guest communication, the weeks before and the morning of. Printable PDF: ${origin.replace(/\/site$/, '')}/site/ski-area-opening-day-checklist.pdf
 
 ## The Good Day newsletter
 
@@ -622,4 +630,4 @@ function goodDayPages(router) {
   });
 }
 
-module.exports = { pages, notFound, api, forgetPlans, PAGES, onSite, canonicalOrigin };
+module.exports = { pages, notFound, api, forgetPlans, PAGES, GUIDES, onSite, canonicalOrigin };

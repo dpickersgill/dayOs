@@ -92,7 +92,7 @@ const META = {
   },
   resources: {
     title: 'Ski Area Guides and Checklists | Verdynt/OS',
-    description: 'Free, printable guides and checklists for independent ski areas: chairlift and terrain park inspections, incident reports, and choosing ski area software.',
+    description: 'Free, printable guides for independent ski areas: lift and park inspections, opening day, lost child, ski school pickup, instructor pay and incident reports.',
     og: 'Guides and checklists for running a ski area',
     crumb: 'Resources',
   },
@@ -123,6 +123,34 @@ const META = {
     og: 'How to choose ski area management software',
     crumb: 'Choosing ski area software', parent: 'resources',
     article: { published: '2026-10-23', headline: 'How to choose ski area management software' },
+  },
+  'ski-school-pickup-policy': {
+    title: 'Ski School Child Pickup Policy Template | Verdynt/OS',
+    description: 'A ski school child pickup and release policy template: the authorized adult list, ID checks, what to do when nobody comes, overrides and the record to keep.',
+    og: 'Ski school child pickup and release policy (template)',
+    crumb: 'Child pickup and release policy', parent: 'resources',
+    article: { published: '2026-11-09', headline: 'Ski school child pickup and release policy (template)' },
+  },
+  'lost-child-procedure': {
+    title: 'Lost Child Procedure for Ski Areas, with Drill | Verdynt/OS',
+    description: 'A lost child procedure for ski areas: the first 5 minutes, the next 30, the reunion and the record, with a printable checklist for a drill twice a season.',
+    og: 'Lost child procedure for ski areas',
+    crumb: 'Lost child procedure', parent: 'resources',
+    article: { published: '2026-11-09', headline: 'Lost child procedure for ski areas' },
+  },
+  'ski-instructor-pay-scale': {
+    title: 'How to Build a Ski Instructor Pay Scale | Verdynt/OS',
+    description: 'Build a ski instructor pay scale: base rates by certification level, credential and seniority steps, private and request premiums, training pay and tips.',
+    og: 'How to build a ski instructor pay scale',
+    crumb: 'Ski instructor pay scale', parent: 'resources',
+    article: { published: '2026-11-09', headline: 'How to build a ski instructor pay scale' },
+  },
+  'ski-area-opening-day-checklist': {
+    title: 'Ski Area Opening Day Checklist (Printable) | Verdynt/OS',
+    description: 'A printable ski area opening day checklist for lifts, patrol, the park, grooming, tickets, rentals, ski school, staff and guests: weeks before and morning of.',
+    og: 'Ski area opening day checklist',
+    crumb: 'Opening day checklist', parent: 'resources',
+    article: { published: '2026-11-09', headline: 'Ski area opening day checklist' },
   },
   about: {
     title: 'About Verdynt/OS: Software for Independent Ski Areas',
