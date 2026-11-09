@@ -252,10 +252,13 @@ router.post('/places/import', patrol, mapping, validate(z.object({ csv: z.string
 });
 
 // ---------------------------------------------------------------- sign sheets
-/** The mountain's help number for texts, from Patrol settings, Text HELP (the one place it is kept), or null. */
+/**
+ * The number guests text and the mountain's tag, from Patrol settings, Text HELP (lib/helpline.js numbersOf): the shared
+ * Verdynt/OS number (the default) or the mountain's own, or null. Every sign prints the tagged code ("BR R7").
+ */
 async function helpNumber(tenantId) {
-  const l = await require('../lib/helpline').lineOf(pool, tenantId);
-  return (l && l.help_number) || null;
+  const n = await require('../lib/helpline').numbersOf(pool, tenantId);
+  return { number: n.number, tag: n.tag, shared: n.mode === 'shared' };
 }
 const helpUrl = (req, slug, code) => `${require('../lib/baseurl').baseUrl(req)}/help/${encodeURIComponent(slug)}?c=${encodeURIComponent(code)}`;
 
@@ -267,7 +270,8 @@ router.get('/places/signs', patrol, mapping, async (req, res) => {
   let list = await P.list(pool, tenantId);
   if (ids.length) list = list.filter((p) => ids.includes(Number(p.id)));
   if (liftId) list = list.filter((p) => Number(p.lift_id) === liftId && p.kind === 'tower').sort((a, b) => a.tower_no - b.tower_no);
-  res.json({ mountain: t.name, slug: t.slug, help_number: await helpNumber(tenantId), lift: liftId ? ((await one(pool, 'SELECT name FROM lifts WHERE tenant_id = ? AND id = ?', [tenantId, liftId])) || {}).name || null : null,
+  const hn = await helpNumber(tenantId);
+  res.json({ mountain: t.name, slug: t.slug, help_number: hn.number, help_tag: hn.tag, shared: hn.shared, lift: liftId ? ((await one(pool, 'SELECT name FROM lifts WHERE tenant_id = ? AND id = ?', [tenantId, liftId])) || {}).name || null : null,
     places: list.map((p) => ({ id: p.id, kind: p.kind, name: P.placeName(p), code: p.code, tower_no: p.tower_no, lift_name: p.lift_name, url: helpUrl(req, t.slug, p.code) })) });
 });
 

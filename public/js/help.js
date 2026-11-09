@@ -76,7 +76,9 @@ function setLang(server) {
 // offer Send by text instead.
 const CACHE = `so.help.page.${slug}`;
 function cached() { try { const v = JSON.parse(keep(CACHE) || 'null'); return v && typeof v === 'object' ? v : null; } catch (_) { return null; } }
-function cachePage(p) { keep(CACHE, JSON.stringify({ mountain: p.mountain || null, sms_number: p.sms_number || null, patrol_phone: p.patrol_phone || null, patrol_phone_shown: p.patrol_phone_shown || null })); }
+function cachePage(p) { keep(CACHE, JSON.stringify({ mountain: p.mountain || null, sms_number: p.sms_number || null, sms_tag: p.sms_tag || null, patrol_phone: p.patrol_phone || null, patrol_phone_shown: p.patrol_phone_shown || null })); }
+// The mountain's tag goes first in every text the page offers (help/shared): the shared number finds the mountain by it.
+const tagOf = () => (S.page && S.page.sms_tag) || (cached() || {}).sms_tag || null;
 
 async function start() {
   setLang(null);
@@ -97,7 +99,7 @@ async function start() {
 function offline() {
   S.redraw = offline;
   const c = cached() || {};
-  const body = smsBody({ code, place: code ? null : loc });
+  const body = smsBody({ tag: tagOf(), code, place: code ? null : loc });
   show(c.mountain ? h('p', { class: 'mtn' }, c.mountain) : null, h('h1', null, t('offTitle')), h('p', null, t('offSub')),
     btn(t('retry'), () => { show(h('p', { role: 'status' }, t('loading'))); start(); }, 'pri'),
     c.sms_number ? h('a', { class: 'b big-alt', href: smsHref(c.sms_number, body, isApple(navigator.userAgent, navigator.maxTouchPoints)) }, t('smsFallback')) : null,
@@ -110,7 +112,7 @@ function offline() {
 function notTaken(kind, who) {
   S.redraw = () => notTaken(kind, who);
   const n = S.page && S.page.sms_number;
-  const body = smsBody({ code, place: code ? null : loc, lat: S.pos && S.pos.lat, lng: S.pos && S.pos.lng, acc: S.pos && S.pos.acc, what: kind === 'lost_child' ? 'lost child' : null });
+  const body = smsBody({ tag: tagOf(), code, place: code ? null : loc, lat: S.pos && S.pos.lat, lng: S.pos && S.pos.lng, acc: S.pos && S.pos.acc, what: kind === 'lost_child' ? 'lost child' : null });
   show(h('h1', null, t('notTaken')), h('p', null, t('notTakenSub')),
     n ? h('a', { class: 'b big-alt', href: smsHref(n, body, isApple(navigator.userAgent, navigator.maxTouchPoints)) }, t('smsFallback')) : null,
     n ? h('p', { class: 'muted' }, t('smsHint')) : null,
@@ -157,7 +159,7 @@ async function go(kind, who) {
     if (done || fallback.childNodes.length) return;
     fallback.append(h('p', { class: 'warn' }, t('trying')));
     if (!S.page.sms_number) return;
-    const text = smsBody({ code, place: code ? null : loc, lat: S.pos && S.pos.lat, lng: S.pos && S.pos.lng, acc: S.pos && S.pos.acc, what: kind === 'lost_child' ? 'lost child' : null });
+    const text = smsBody({ tag: tagOf(), code, place: code ? null : loc, lat: S.pos && S.pos.lat, lng: S.pos && S.pos.lng, acc: S.pos && S.pos.acc, what: kind === 'lost_child' ? 'lost child' : null });
     fallback.append(h('a', { class: 'b big-alt', href: smsHref(S.page.sms_number, text, isApple(navigator.userAgent, navigator.maxTouchPoints)) }, t('smsFallback')), h('p', { class: 'muted' }, t('smsHint')));
   };
   const slow = setTimeout(offerText, 15000);

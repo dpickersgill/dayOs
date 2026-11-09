@@ -63,6 +63,8 @@ async function runAll() {
   const [al] = await pool.query('DELETE FROM assistant_log WHERE created_at < UTC_TIMESTAMP() - INTERVAL ? DAY LIMIT 50000', [LOG_DAYS]);
   out.message_log = ml.affectedRows; out.assistant_log = al.affectedRows;
   out.snapshots = await require('./snapshots').purge(); // forecast data, kept 3 years
+  // Texts to the shared help number: a request 30 days after it came in (its texts are on the call by then), counts after 7.
+  Object.assign(out, await require('./sharedhelp').purge());
   out.demos = await require('./sandbox').purgeExpired();
   out.due_for_deletion = await markDue();
   trail({ action: 'retention_run', actor: 'daily job', detail: JSON.stringify(out) });

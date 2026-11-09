@@ -219,11 +219,13 @@ export function t(lang, key, vars) {
 export const pickLang = (chosen, server, phone) => [chosen, server, String(phone || '').slice(0, 2).toLowerCase()].find((l) => l === 'en' || l === 'es') || 'en';
 
 /**
- * The text a guest sends when the page cannot reach patrol: "HELP <code or place> <lat>,<lng> ±<acc>m <what>".
- * The first word stays HELP in every language, so patrol's text line reads it the same way.
+ * The text a guest sends when the page cannot reach patrol: "HELP <tag> <code or place> <lat>,<lng> ±<acc>m <what>".
+ * The first word stays HELP in every language, so patrol's text line reads it the same way. The mountain's tag always
+ * comes right after HELP, even with no sign code, so a text to the shared Verdynt/OS number always reaches this mountain.
  */
-export function smsBody({ code, place, lat, lng, acc, what }) {
+export function smsBody({ tag, code, place, lat, lng, acc, what }) {
   const parts = ['HELP'];
+  if (tag && /^[A-Za-z]{1,3}$/.test(String(tag))) parts.push(String(tag).toUpperCase());
   const where = code || place;
   if (where) parts.push(String(where).replace(/\s+/g, ' ').trim().slice(0, 60));
   if (Number.isFinite(lat) && Number.isFinite(lng)) {

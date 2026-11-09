@@ -165,6 +165,13 @@ jobs.post('/guests', jobAuth, async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------- Text HELP on the shared number (Cloud Scheduler, every minute)
+// A text to the shared help number still waiting for a ski area: a second text after 3 minutes, and a last one when it
+// closes after 2 hours (lib/sharedhelp.js). Claimed per row, so overlapping runs send each once. The guests job runs it too.
+jobs.post('/help-texts', jobAuth, async (_req, res) => {
+  res.json(await stage('help_texts', () => require('../lib/sharedhelp').tick()));
+});
+
 // ---------------------------------------------------------------- the ski school (Cloud Scheduler, every 5 minutes)
 // Waitlist offers that ran out, privates the instructor did not answer in time, recaps due, weather choices.
 jobs.post('/lessons', jobAuth, async (req, res) => {

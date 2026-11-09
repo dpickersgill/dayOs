@@ -24,7 +24,7 @@ function patrolTables() {
   const names = new Set();
   for (const f of ['patrol.sql', 'patrolops.sql']) for (const m of read(`db/${f}`).matchAll(/CREATE TABLE(?: IF NOT EXISTS)?\s+`?(\w+)/gi)) names.add(m[1]);
   const all = [read('db/schema.sql'), read('db/migrate.js'), ...fs.readdirSync(path.join(db, 'steps')).map((f) => read(`db/steps/${f}`))].join('\n');
-  for (const m of all.matchAll(/CREATE TABLE(?: IF NOT EXISTS)?\s+`?(\w+)/gi)) if (/^(incident|patrol|patient|dispatch|injury|staff_injur|followup|care_|case_|mountain_places)/.test(m[1])) names.add(m[1]);
+  for (const m of all.matchAll(/CREATE TABLE(?: IF NOT EXISTS)?\s+`?(\w+)/gi)) if (/^(incident|patrol|patient|dispatch|injury|staff_injur|followup|care_|case_|mountain_places|help_pending|help_shared)/.test(m[1])) names.add(m[1]);
   names.delete('IF'); names.delete('if');
   return [...names];
 }
@@ -52,6 +52,8 @@ test('the AI files name no patrol or patient table, except the brief\'s one aggr
   for (const t of ['patrol_help_lines', 'dispatch_sms_threads', 'dispatch_sms_optouts', 'dispatch_sms_log']) assert.ok(tables.includes(t), `${t} is a patrol table`);
   // fix/help-review: the held alerts' state (counts and a call id, no words) is dispatch data too.
   assert.ok(tables.includes('dispatch_alert_state'), 'dispatch_alert_state is a patrol table');
+  // help/shared: texts to the shared help number waiting for a ski area, its STOP list and its counts.
+  for (const t of ['help_pending', 'help_shared_optouts', 'help_shared_log']) assert.ok(tables.includes(t), `${t} is a patrol table`);
   for (const f of FILES) {
     let src = code(read(f));
     if (f === 'src/lib/briefdata.js') {
@@ -101,8 +103,8 @@ test('guest help requests never reach AI: no AI or assistant file names a dispat
   // dispatch data. The brief, the drafts and the guest and staff assistant never read them.
   const files = [...FILES, 'src/lib/assistant.js', 'src/lib/assistanttools.js', 'src/routes/assistant.js'];
   // The guest help release's tables (2026.11.16): dispatch's, the places patrol mapped and the Text HELP numbers.
-  const dispatch = patrolTables().filter((t) => /^dispatch|^mountain_places$|^patrol_help_lines$/.test(t));
-  for (const t of ['dispatch_messages', 'dispatch_positions', 'mountain_places', 'patrol_help_lines', 'dispatch_sms_threads', 'dispatch_sms_optouts', 'dispatch_sms_log']) assert.ok(dispatch.includes(t), `${t} is checked`);
+  const dispatch = patrolTables().filter((t) => /^dispatch|^mountain_places$|^patrol_help_lines$|^help_pending$|^help_shared/.test(t));
+  for (const t of ['dispatch_messages', 'dispatch_positions', 'mountain_places', 'patrol_help_lines', 'dispatch_sms_threads', 'dispatch_sms_optouts', 'dispatch_sms_log', 'help_pending', 'help_shared_optouts', 'help_shared_log']) assert.ok(dispatch.includes(t), `${t} is checked`);
   assert.ok(dispatch.length >= 5, dispatch.join(', '));
   for (const f of files) {
     const src = code(read(f));
@@ -116,11 +118,11 @@ test('help requests by text (help/sms) never reach AI: no AI file, nor the guest
   const more = ['src/lib/assistant.js', 'src/lib/assistanttools.js', 'src/routes/assistant.js'].filter((f) => fs.existsSync(path.join(ROOT, f)));
   for (const f of [...FILES, ...more]) {
     const src = code(read(f));
-    for (const t of ['patrol_help_lines', 'dispatch_sms_threads', 'dispatch_sms_optouts', 'dispatch_sms_log', 'dispatch_messages']) assert.ok(!new RegExp(`\\b${t}\\b`).test(src), `${f} names ${t}`);
-    for (const m of src.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)) assert.doesNotMatch(m[1], /helpline|helpsms|guestmsg/, `${f} requires ${m[1]}`);
+    for (const t of ['patrol_help_lines', 'dispatch_sms_threads', 'dispatch_sms_optouts', 'dispatch_sms_log', 'dispatch_messages', 'help_pending', 'help_shared_optouts', 'help_shared_log']) assert.ok(!new RegExp(`\\b${t}\\b`).test(src), `${f} names ${t}`);
+    for (const m of src.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)) assert.doesNotMatch(m[1], /helpline|helpsms|guestmsg|sharedhelp/, `${f} requires ${m[1]}`);
   }
-  // And the Text HELP files call no AI.
-  for (const f of ['src/lib/helpline.js', 'src/routes/helpsms.js']) {
+  // And the Text HELP files call no AI (help/shared: the shared number's routing, which never guesses, included).
+  for (const f of ['src/lib/helpline.js', 'src/routes/helpsms.js', 'src/lib/sharedhelp.js']) {
     for (const m of code(read(f)).matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)) assert.doesNotMatch(m[1], /assistant|brief|proposals|conditions|storyfill|anthropic/i, `${f} requires ${m[1]}`);
   }
 });

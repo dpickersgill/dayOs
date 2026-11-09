@@ -122,4 +122,5 @@ async function sendHeld() {
   return out;
 }
 
-module.exports = { send, enabled, e164, phoneKey, phoneSaidNo, sendHeld };
+// post: a text from the shared Text HELP number before a mountain is known (lib/sharedhelp.js); everything else uses send.
+module.exports = { send, post, enabled, e164, phoneKey, phoneSaidNo, sendHeld };

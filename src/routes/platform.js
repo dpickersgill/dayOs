@@ -426,6 +426,7 @@ router.get('/tenants/:id', twoStepRead, async (req, res) => {
     billing: bill ? { ...bill, addons: BL.ids(bill.addons), trial_ends_on: BL.dateOf(bill.trial_ends_on), paid_until: BL.dateOf(bill.paid_until), comped: Boolean(Number(bill.comped)) } : null,
     billing_standing: await BL.standingOf(id), billing_events: billEvents, card_payments: await require('../lib/connect').state(id),
     assistant: await assistantUse(id),
+    text_help: { tag: await HL.ensureTag(pool, id), mode: HL.modeOf(await HL.lineOf(pool, id)) },
     platform_fees: await one(pool, "SELECT COUNT(*) AS payments, COALESCE(SUM(platform_fee_cents), 0) AS fee_cents, COALESCE(SUM(amount_cents), 0) AS amount_cents FROM order_payments WHERE tenant_id = ? AND processor = 'stripe' AND processor_account IS NOT NULL", [id]) });
 });
 
@@ -696,6 +697,48 @@ router.get('/releases', async (_req, res) => {
   let deploys = [];
   try { deploys = await rows(pool, 'SELECT version, build, first_started_at, last_started_at, deployed_by FROM app_deploys ORDER BY first_started_at DESC LIMIT 100'); } catch (_) { /* not migrated yet */ }
   res.json({ version: V.VERSION, build: V.BUILD, built_at: V.BUILT_AT, deploys, releases: V.RELEASES });
+});
+
+// ---------------------------------------------------------------- Text HELP: the shared number (help/shared)
+// The shared Verdynt/OS help number every mountain uses by default (lib/helpline.js sharedNumber), the texts on it still
+// waiting for a ski area (lib/sharedhelp.js), and each mountain's tag. Sending a waiting text to a mountain is an
+// emergency step: it does not wait for the mountain to be opened for changes, and it is recorded like every change.
+const HL = require('../lib/helpline');
+const SH = require('../lib/sharedhelp');
+router.get('/help-settings', async (req, res) => {
+  const fromDb = await one(pool, "SELECT value, updated_by, updated_at FROM platform_settings WHERE name = 'shared_help_number'");
+  res.json({ shared_number: await HL.sharedNumber(), saved: fromDb ? fromDb.value : null, updated_by: fromDb ? fromDb.updated_by : null, updated_at: fromDb ? fromDb.updated_at : null,
+    env_number: process.env.SHARED_HELP_NUMBER ? HL.normalNumber(process.env.SHARED_HELP_NUMBER) : null,
+    webhook_url: `${require('../lib/baseurl').baseUrl(req)}${require('./helpsms').PATH}`, texts_ready: require('../lib/sms').enabled() });
+});
+router.put('/help-settings', validate(z.object({ shared_number: z.string().trim().max(30).nullable() })), async (req, res) => {
+  const n = req.body.shared_number ? HL.normalNumber(req.body.shared_number) : null;
+  if (req.body.shared_number && !n) throw bad('The shared help number must be a full phone number, like +18885550100');
+  if (n && await one(pool, 'SELECT tenant_id FROM patrol_help_lines WHERE help_number = ?', [n])) throw bad('That number is a mountain\'s own help number. The shared number must be a number of its own.');
+  await pool.query(`INSERT INTO platform_settings (name, value, updated_by) VALUES ('shared_help_number', ?, ?)
+    ON DUPLICATE KEY UPDATE value = VALUES(value), updated_by = VALUES(updated_by)`, [n, String(req.operator || '').slice(0, 100)]);
+  HL.forgetShared();
+  await log(pool, req, null, 'shared_help_number', { number: n });
+  res.json({ ok: true, shared_number: await HL.sharedNumber() });
+});
+router.get('/help-pending', async (_req, res) => {
+  const mountains = (await SH.reachable()).map((t) => ({ id: Number(t.id), name: t.name, tag: t.help_tag }));
+  res.json({ data: await SH.waiting(), mountains });
+});
+router.post('/help-pending/:id/assign', validate(z.object({ tenant_id: z.number().int().positive() })), async (req, res) => {
+  const out = await SH.assign(paramId(req), req.body.tenant_id, req.operator || null, require('../lib/baseurl').baseUrl(req));
+  if (out.error === 'gone') throw notFound('That text is no longer waiting');
+  if (out.error === 'mountain') throw bad('That mountain cannot take calls (paused, a demo, or no Patrol app)');
+  await log(pool, req, req.body.tenant_id, 'help_text_assigned', { pending: paramId(req), call_id: out.call_id || null });
+  res.json({ ok: true, call_id: out.call_id || null, mountain: out.mountain });
+});
+router.put('/tenants/:id/help-tag', needsAccess, validate(z.object({ tag: z.string().trim().min(1).max(3) })), async (req, res) => {
+  const id = paramId(req);
+  if (!(await one(pool, 'SELECT id FROM tenants WHERE id = ?', [id]))) throw notFound('Mountain');
+  const before = await HL.ensureTag(pool, id);
+  const tag = await HL.setTag(pool, id, req.body.tag);
+  await log(pool, req, id, 'help_tag', { from: before, to: tag });
+  res.json({ ok: true, tag });
 });
 
 router.get('/audit', async (_req, res) => {

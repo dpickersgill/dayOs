@@ -14,6 +14,8 @@ async function run(kind) {
     try { out.held_texts = await require('./sms').sendHeld(); } catch (err) { out.held_texts = { error: err.message }; }
     // Guest help alerts held by their gap (a flood's next push, the "no one on duty" summary) whose timer was lost.
     try { out.help_alerts = await require('../routes/dispatch').sendDueAlerts(); } catch (err) { out.help_alerts = { error: err.message }; }
+    // Texts to the shared help number still waiting for a ski area, in case the every-minute job is not set up.
+    try { out.help_texts = await require('./sharedhelp').tick(); } catch (err) { out.help_texts = { error: err.message }; }
     // The morning conditions draft (AI Operations add-on), at each mountain's own draft time.
     try { out.conditions_writer = await require('./conditionswriter').tick(); } catch (err) { out.conditions_writer = { error: err.message }; }
   }

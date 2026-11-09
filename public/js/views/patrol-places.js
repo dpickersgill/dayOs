@@ -289,11 +289,11 @@ export async function renderSigns(root) {
 }
 
 function helpSign(p, r, size) {
-  const w = signWords({ code: p.code, mountain: r.mountain, number: r.help_number });
+  const w = signWords({ code: p.code, mountain: r.mountain, number: r.help_number, tag: r.help_tag });
   return h('article', { class: `help-sign help-sign-${size}`, 'data-code': p.code },
     h('p', { class: 'hs-ask' }, w.ask),
     qrSvg(p.url, 'hs-qr'),
-    h('p', { class: 'hs-code', 'aria-label': `Sign code ${w.code}` }, w.code),
+    h('p', { class: `hs-code${w.code.length > 6 ? ' hs-code-long' : ''}`, 'aria-label': `Sign code ${w.code}` }, w.code),
     h('p', { class: 'hs-how' }, w.how),
     h('p', { class: 'hs-911' }, w.emergency),
     h('p', { class: 'hs-mountain' }, w.mountain));
@@ -305,6 +305,6 @@ export async function renderStencil(root, liftId) {
     h('div', { class: 'row signs-tools no-print' }, h('a', { class: 'btn', href: '#/patrol/gear?tab=places' }, '‹ Places and signs'), button('Print', () => window.print(), { kind: 'primary' })),
     h('h1', { class: 'stencil-title' }, `${r.lift || 'Lift'}: tower codes`),
     h('p', { class: 'stencil-sub' }, `${r.mountain}. Paint or stick each code on its tower, facing the trail below.`),
-    r.places.length ? h('div', { class: 'stencil-grid' }, r.places.map((p) => h('div', { class: 'stencil-cell' }, h('span', { class: 'stencil-code' }, p.code), h('span', { class: 'stencil-tower' }, `Tower ${p.tower_no}`))))
+    r.places.length ? h('div', { class: 'stencil-grid' }, r.places.map((p) => h('div', { class: 'stencil-cell' }, h('span', { class: `stencil-code${(r.help_tag ? r.help_tag.length + 1 : 0) + p.code.length > 6 ? ' hs-code-long' : ''}` }, r.help_tag ? `${r.help_tag} ${p.code}` : p.code), h('span', { class: 'stencil-tower' }, `Tower ${p.tower_no}`))))
       : empty('No towers marked on this lift yet.')));
 }

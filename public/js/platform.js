@@ -148,10 +148,12 @@ async function home() {
   clear(app);
   const body = h('div', { class: 'stack' });
   const filter = input({ type: 'search', placeholder: 'Find a mountain', 'aria-label': 'Find a mountain' });
-  app.append(h('main', { class: 'platform-box wide stack' },
+  const waitingBox = h('div', { 'data-help-waiting': '' });
+  app.append(h('main', { class: 'platform-box wide stack' }, waitingBox,
     h('header', { class: 'row between' }, h('h1', null, 'Mountains'),
-      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), leadsButton(), button('Prospects', () => openProspects({ app, call, session: () => session, back: () => home(), signIn: (m) => signIn(m) }), { small: true }), button('Newsletter', () => openGoodDay({ app, call, session: () => session, back: () => home(), signIn: (m) => signIn(m) }), { small: true }), button('Status page', () => openStatus({ app, call, session: () => session, back: () => home(), signIn: (m) => signIn(m) }), { small: true }), button('Plans and prices', () => billingPlans(), { small: true }), button('Demos', () => demos(), { small: true }), button('Injury report', () => injuryReport(), { small: true }), button('Releases', () => releases(), { small: true }), button('Activity', () => activity(), { small: true }), button('Operators', () => operators(), { small: true }), me.operator ? button('My passkeys', () => myPasskeys(), { small: true }) : null, me.operator ? button('Change my password', () => myPassword(), { small: true }) : null, button('Sign out', () => signOut(), { small: true }))),
+      h('div', { class: 'row' }, button('Add a mountain', () => addMountain(), { kind: 'primary' }), leadsButton(), button('Prospects', () => openProspects({ app, call, session: () => session, back: () => home(), signIn: (m) => signIn(m) }), { small: true }), button('Newsletter', () => openGoodDay({ app, call, session: () => session, back: () => home(), signIn: (m) => signIn(m) }), { small: true }), button('Status page', () => openStatus({ app, call, session: () => session, back: () => home(), signIn: (m) => signIn(m) }), { small: true }), button('Plans and prices', () => billingPlans(), { small: true }), button('Shared help number', () => sharedHelp(), { small: true }), button('Demos', () => demos(), { small: true }), button('Injury report', () => injuryReport(), { small: true }), button('Releases', () => releases(), { small: true }), button('Activity', () => activity(), { small: true }), button('Operators', () => operators(), { small: true }), me.operator ? button('My passkeys', () => myPasskeys(), { small: true }) : null, me.operator ? button('Change my password', () => myPassword(), { small: true }) : null, button('Sign out', () => signOut(), { small: true }))),
     filter, body));
+  helpWaiting(waitingBox);
   try {
     const { data: all } = await call('GET', '/tenants');
     if (!all.length) { body.append(empty('No mountains yet.')); return; }
@@ -234,6 +236,7 @@ async function manage(id) {
     h('h3', null, 'Apps'), h('p', { class: 'hint' }, 'Changes apply within a few seconds. Turning an app off hides it and refuses its requests; its data is kept.'), list,
     h('h3', null, 'Storage'), h('p', null, `${t.storage_used_mb} MB used of ${t.storage_cap_mb} MB for document files.`),
     h('h3', null, 'Assistant'), assistantPanel(t, () => { dlg.close(); home(); manage(id); }),
+    h('h3', null, 'Text HELP'), textHelpPanel(t, () => { dlg.close(); home(); manage(id); }),
     h('h3', null, 'Owner and manager logins'), people,
     t.history.length ? h('div', { class: 'stack tight' }, h('h3', null, 'Recent changes'), ...t.history.slice(0, 8).map((x) => h('p', { class: 'small muted' }, `${String(x.at).replace('T', ' ').slice(0, 16)}  ${x.action}  ${x.detail || ''}`))) : null), { wide: true });
 }
@@ -807,4 +810,66 @@ function assistantPanel(t, done) {
     h('p', { class: 'hint' }, `Staff ${a.staff_on ? 'on' : 'off'}. Guest pages: ${a.guest_pages.length ? a.guest_pages.join(', ') : 'none'}.`),
     a.recent.length ? h('ul', { class: 'small' }, a.recent.map((r) => h('li', null, `${String(r.created_at).replace('T', ' ').slice(0, 16)} ${r.audience}${r.page ? ` on ${r.page}` : ''}: ${r.question}${r.unanswered ? ' (not answered)' : ''}${r.rating === -1 ? ' (did not help)' : ''}${r.escalated_at ? ' (passed on)' : ''}`))) : null,
     h('div', { class: 'row' }, capBtn));
+}
+
+// ---------------------------------------------------------------- Text HELP: the shared number (help/shared)
+// Texts to the shared Verdynt/OS help number that do not say which ski area yet. The guest has been asked; the operator
+// can send one to a mountain by hand when it is clear where it belongs (the call is made there, with a note). Checked
+// again every 30 seconds while the list of mountains is open.
+let waitingTimer = null;
+async function helpWaiting(box) {
+  clearTimeout(waitingTimer);
+  let r;
+  try { r = await call('GET', '/help-pending'); } catch (_) { return; }
+  clear(box);
+  if (r.data.length) {
+    box.append(h('section', { class: 'help-waiting', role: 'alert' },
+      h('h2', null, `Help texts waiting for a ski area (${r.data.length})`),
+      h('p', null, 'These texts came to the shared help number and did not say which ski area. The guest has been asked. If you can tell where one belongs, send it there: the call is made at that mountain with a note. If it is not clear, leave it: never guess.'),
+      ...r.data.map((p) => h('article', { class: 'help-waiting-item stack tight', 'data-pending': String(p.id) },
+        h('p', null, h('b', null, p.phone), ` first texted ${ago(p.created_at).toLowerCase()}`, p.lang === 'es' ? ' · Spanish' : '', p.lost_child ? ' · ' : '', p.lost_child ? badge('Lost child', 'bad') : null),
+        h('ol', { class: 'help-waiting-texts' }, ...p.texts.map((x) => h('li', null, x.body || '[no words]', x.photos ? h('span', { class: 'muted' }, ` (${x.photos} photo${x.photos === 1 ? '' : 's'})`) : null))),
+        button('Send to a mountain', () => assignPending(p, r.mountains, box), { small: true, kind: 'primary' })))));
+  }
+  waitingTimer = setTimeout(() => { if (box.isConnected) helpWaiting(box); }, 30000);
+}
+function assignPending(p, mountains, box) {
+  const pick = h('select', { name: 'tenant_id', required: true }, h('option', { value: '' }, 'Choose the ski area'),
+    ...mountains.map((m) => h('option', { value: String(m.id) }, `${m.name}${m.tag ? ` (${m.tag})` : ''}`)));
+  formDialog('Send this text to a mountain', h('div', { class: 'stack' },
+    h('p', null, `From ${p.phone}: `, h('b', null, p.texts.map((x) => x.body).join(' / '))),
+    h('p', { class: 'hint' }, 'The call is made at that mountain with every text, in order, and a note that you sent it by hand. The guest gets that mountain\'s first reply.'),
+    field('Ski area', pick)), async () => {
+    if (!pick.value) throw new Error('Choose the ski area');
+    const out = await call('POST', `/help-pending/${p.id}/assign`, { tenant_id: Number(pick.value) });
+    toast(`Sent to ${out.mountain}`);
+    helpWaiting(box);
+  }, { submitText: 'Send' });
+}
+async function sharedHelp() {
+  const s = await call('GET', '/help-settings').catch((e) => { fail(e); return null; });
+  if (!s) return;
+  const num = input({ name: 'shared_number', type: 'tel', maxlength: 30, value: s.saved || '', placeholder: '+18885550100' });
+  formDialog('Shared help number', h('div', { class: 'stack' },
+    h('p', null, 'Every mountain uses this number for Text HELP unless it switches to its own. Guests text HELP and the mountain\'s tag (HELP BR R7).'),
+    s.texts_ready ? null : h('p', null, state('Text messages are not set up (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM).', 'warn')),
+    field('Shared number', num, s.env_number ? `Blank uses SHARED_HELP_NUMBER (${s.env_number}).` : 'The toll-free number under Verdynt Consulting Group, as +1 and 10 digits.'),
+    h('p', { class: 'small' }, 'Its Messaging Service webhook: ', h('code', null, s.webhook_url)),
+    h('p', { class: 'small muted' }, `In use now: ${s.shared_number || 'none'}${s.updated_by ? `. Last set by ${s.updated_by}.` : ''} RUNBOOK.md, "Text HELP: the shared number", has the set-up.`)), async () => {
+    await call('PUT', '/help-settings', { shared_number: num.value.trim() || null });
+    toast('Saved');
+  }, { submitText: 'Save' });
+}
+function textHelpPanel(t, done) {
+  const x = t.text_help || {};
+  return h('div', { class: 'stack tight' },
+    h('p', null, `Tag ${x.tag || 'none yet'}. ${x.mode === 'own' ? 'Uses its own number.' : 'Uses the shared number.'} The tag is printed before every sign code (${x.tag || 'BR'} R7).`),
+    h('div', { class: 'row' }, button('Change the tag', () => {
+      const tag = input({ name: 'tag', maxlength: 3, value: x.tag || '', autocapitalize: 'characters' });
+      formDialog('Change the tag', h('div', { class: 'stack' }, field('Tag', tag, '1 to 3 letters, unique. Every sign shows it, so the mountain must print its signs again.')), async () => {
+        await call('PUT', `/tenants/${t.id}/help-tag`, { tag: tag.value.trim().toUpperCase() });
+        toast('Tag changed. Tell the mountain to print its signs again.');
+        done();
+      }, { submitText: 'Change' });
+    }, { small: true })));
 }

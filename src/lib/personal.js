@@ -113,6 +113,9 @@ const REGISTRY = [
   // retention); a STOP to a mountain's help line is kept so that line never texts the phone again.
   { table: 'dispatch_sms_threads', group: 'patrol', by: { phone: ['phone'] }, erase: { keep: KEEP_PATROL } },
   { table: 'dispatch_sms_optouts', by: { phone: ['phone_key'] }, erase: { keep: 'Kept so the patrol help line never texts this phone again after it texted STOP.' } },
+  // help/shared: a text to the shared help number that did not say which ski area yet. Once it reaches a mountain, the
+  // request is that mountain's (resolved_tenant) and its texts are on the call. Deleted 30 days after it came in.
+  { table: 'help_pending', tenant: 'resolved_tenant', group: 'patrol', by: { phone: ['phone'] }, erase: { keep: KEEP_DISPATCH } },
   // A patrol follow-up email: the address goes, the patrol record stays.
   { table: 'followups', group: 'patrol', by: { email: ['to_email'] }, erase: { set: { to_email: '' } } },
   // Logins and staff are never anonymised here (the route refuses); listed so the export shows them.
@@ -141,6 +144,10 @@ const NOT_GUESTS = {
   mountain_places: 'a sign, tower or junction on the mountain, never a guest',
   // help/sms: the mountain's Text HELP number and patrol phone, a mountain setting.
   patrol_help_lines: 'a mountain setting (its Text HELP number and patrol phone)',
+  // help/shared: the shared help number's STOP list and its counts, for every mountain, so held by Verdynt/OS and not one
+  // mountain's records. The counts are deleted after 7 days; a STOP is kept so the shared number never texts the phone again.
+  help_shared_optouts: 'phones that texted STOP to the shared Verdynt/OS help number (no mountain, no words)',
+  help_shared_log: 'counts of texts on the shared help number, kept 7 days (no words)',
   brief_prefs: 'a staff login\u2019s morning brief setting', morning_briefs: 'the day\u2019s morning brief for staff (counts, no guest names), kept 30 days', brief_sends: 'which staff were sent the morning brief, kept 30 days',
 };
 
@@ -200,12 +207,12 @@ async function exportOf(db, tenantId, personId) {
     if (!have.has(e.table) || e.table === 'people') continue;
     const w = whereOf(e, who); if (!w) continue;
     if (e.group === 'patrol') {
-      const r = await one(db, `SELECT COUNT(*) AS n FROM ${q(e.table)} WHERE tenant_id = ? AND ${w[0]}`, [tenantId, ...w[1]]);
+      const r = await one(db, `SELECT COUNT(*) AS n FROM ${q(e.table)} WHERE ${q(e.tenant || 'tenant_id')} = ? AND ${w[0]}`, [tenantId, ...w[1]]);
       if (Number(r.n)) patrol[e.table] = Number(r.n);
       continue;
     }
     const cols = e.columns ? e.columns.map(q).join(', ') : '*';
-    const found = await rows(db, `SELECT ${cols} FROM ${q(e.table)} WHERE tenant_id = ? AND ${w[0]} LIMIT 5000`, [tenantId, ...w[1]]);
+    const found = await rows(db, `SELECT ${cols} FROM ${q(e.table)} WHERE ${q(e.tenant || 'tenant_id')} = ? AND ${w[0]} LIMIT 5000`, [tenantId, ...w[1]]);
     if (found.length) tables[e.table] = found.map(clean);
   }
   const aw = assistantWhere(who);
@@ -250,21 +257,21 @@ async function erase(conn, tenantId, personId, who0) {
     if (!have.has(e.table) || e.table === 'people') continue;
     const w = whereOf(e, who); if (!w) continue;
     if (e.erase === 'delete') {
-      const [r] = await conn.query(`DELETE FROM ${q(e.table)} WHERE tenant_id = ? AND ${w[0]}`, [tenantId, ...w[1]]);
+      const [r] = await conn.query(`DELETE FROM ${q(e.table)} WHERE ${q(e.tenant || 'tenant_id')} = ? AND ${w[0]}`, [tenantId, ...w[1]]);
       if (r.affectedRows) changed[e.table] = r.affectedRows;
       continue;
     }
     if (e.erase.keep) {
-      const [[c]] = await conn.query(`SELECT COUNT(*) AS n FROM ${q(e.table)} WHERE tenant_id = ? AND ${w[0]}`, [tenantId, ...w[1]]);
+      const [[c]] = await conn.query(`SELECT COUNT(*) AS n FROM ${q(e.table)} WHERE ${q(e.tenant || 'tenant_id')} = ? AND ${w[0]}`, [tenantId, ...w[1]]);
       if (Number(c.n) && e.erase.keep !== KEEP_LINK && e.table !== 'consent_events') keep(e.erase.keep, e.group === 'patrol' ? 'Patrol care records' : e.table, e.table);
       continue;
     }
     if (e.json) {
-      const found = await rows(conn, `SELECT id, ${e.json.map(q).join(', ')} FROM ${q(e.table)} WHERE tenant_id = ? AND ${w[0]}`, [tenantId, ...w[1]]);
+      const found = await rows(conn, `SELECT id, ${e.json.map(q).join(', ')} FROM ${q(e.table)} WHERE ${q(e.tenant || 'tenant_id')} = ? AND ${w[0]}`, [tenantId, ...w[1]]);
       for (const r of found) for (const c of e.json) if (r[c] != null) await conn.query(`UPDATE ${q(e.table)} SET ${q(c)} = ? WHERE tenant_id = ? AND id = ?`, [redactText(r[c]), tenantId, r.id]);
     }
     const sets = Object.keys(e.erase.set);
-    const [r] = await conn.query(`UPDATE ${q(e.table)} SET ${sets.map((c) => `${q(c)} = ?`).join(', ')} WHERE tenant_id = ? AND ${w[0]}`, [...sets.map((c) => e.erase.set[c]), tenantId, ...w[1]]);
+    const [r] = await conn.query(`UPDATE ${q(e.table)} SET ${sets.map((c) => `${q(c)} = ?`).join(', ')} WHERE ${q(e.tenant || 'tenant_id')} = ? AND ${w[0]}`, [...sets.map((c) => e.erase.set[c]), tenantId, ...w[1]]);
     if (r.affectedRows) { changed[e.table] = r.affectedRows; if (e.why) keep(e.why, e.table, e.table); }
   }
   const aw = assistantWhere(who);

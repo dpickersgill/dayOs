@@ -21,6 +21,12 @@
 // call (HELP_SMS_CALL_CAP) and 300 an hour per mountain (HELP_SMS_HOURLY_CAP); a phone alert to responders at most
 // once a minute per call. Help requests and their texts are patrol data: they never go to AI.
 //
+// The shared number (help/shared): every mountain uses one shared Verdynt/OS help number by default, and any mountain can
+// switch to its own (patrol_help_lines.help_mode). On the shared number a sign's code carries the mountain's tag ("HELP BR
+// R7"), and lib/sharedhelp.js finds the mountain before the text reaches the conversation here. The conversation is the
+// same either way; the thread keeps the number the guest texted, so every reply goes from it. STOP to the shared number
+// counts for the whole shared number (help_shared_optouts), and it has an hourly cap of its own across all mountains.
+//
 // Times in dispatch_sms_* are UTC; dispatch_calls and dispatch_events keep the mountain's clock (nowIn).
 const crypto = require('crypto');
 const { pool, rows, one } = require('../db');
@@ -33,6 +39,7 @@ const WINDOW_HOURS = 2;
 const LOCATE_HOURS = 2;
 const CALL_CAP = () => Number(process.env.HELP_SMS_CALL_CAP) || 20;
 const HOUR_CAP = () => Number(process.env.HELP_SMS_HOURLY_CAP) || 300;
+const SHARED_HOUR_CAP = () => Number(process.env.HELP_SMS_SHARED_HOURLY_CAP) || 1000;
 const PUSH_GAP_S = 60;
 const MAX_PHOTOS = 20;
 
@@ -47,11 +54,13 @@ const says = (p) => { const m = String(p || '').match(/^\+1(\d{3})(\d{3})(\d{4})
 const STRINGS = {
   en: {
     first: (mountain, link) => `${mountain} ski patrol has your message. If it is life threatening, call 911. Tap this link to send your location: ${link}. Or reply with the code on the nearest sign or lift tower.`,
+    firstLost: (mountain, link) => `If it is life threatening, call 911. ${mountain} ski patrol has your message. Tap this link to send your location: ${link}. Or reply with the code on the nearest sign or lift tower.`,
     call: (phone) => ` To talk to patrol, call ${says(phone)}.`,
     closed: 'Patrol has closed your request. Reply HELP if you need patrol again.',
   },
   es: {
     first: (mountain, link) => `La patrulla de esquí de ${mountain} recibió su mensaje. Si su vida corre peligro, llame al 911. Toque este enlace para enviar su ubicación: ${link}. O responda con el código del letrero o de la torre de telesilla más cercana.`,
+    firstLost: (mountain, link) => `Si su vida corre peligro, llame al 911. La patrulla de esquí de ${mountain} recibió su mensaje. Toque este enlace para enviar su ubicación: ${link}. O responda con el código del letrero o de la torre de telesilla más cercana.`,
     call: (phone) => ` Para hablar con la patrulla, llame al ${says(phone)}.`,
     closed: 'La patrulla cerró su solicitud. Responda AYUDA si necesita a la patrulla otra vez.',
   },
@@ -141,13 +150,174 @@ function without(rest, code) {
  * (the guest page's Call patrol and the first reply to a text). Either may be null. Null when neither is set.
  */
 async function lineOf(db, tenantId) {
-  return one(db, 'SELECT help_number, patrol_phone FROM patrol_help_lines WHERE tenant_id = ?', [tenantId]);
+  return one(db, 'SELECT help_number, patrol_phone, help_mode FROM patrol_help_lines WHERE tenant_id = ?', [tenantId]);
 }
+/** A mountain's own help number: the text that reached it was sent To this number. Its mode does not matter here. */
 async function lineByNumber(number) {
   const n = normalNumber(number);
   if (!n) return null;
-  return one(pool, `SELECT l.tenant_id, l.help_number, l.patrol_phone, t.name, t.timezone, t.status FROM patrol_help_lines l JOIN tenants t ON t.id = l.tenant_id
+  return one(pool, `SELECT l.tenant_id, l.help_number, l.patrol_phone, t.name, t.timezone, t.status, t.help_tag FROM patrol_help_lines l JOIN tenants t ON t.id = l.tenant_id
     WHERE l.help_number = ?`, [n]);
+}
+/** 'own' or 'shared'. A row from before help/shared (no mode) is own when it has a help number. No row: shared. */
+const modeOf = (l) => (l && l.help_mode ? l.help_mode : l && l.help_number ? 'own' : 'shared');
+
+// ---------------------------------------------------------------- the shared number (platform setting)
+const SHARED_KEY = 'shared_help_number';
+let sharedCache = { at: 0, v: null };
+/**
+ * The shared Verdynt/OS help number (E.164), set by the platform operator in the console, else SHARED_HELP_NUMBER, else
+ * null (then a mountain on the shared number has no number for texts, and its signs say Scan this code). Cached 15 s.
+ */
+async function sharedNumber() {
+  if (Date.now() - sharedCache.at < 15000) return sharedCache.v;
+  let v = null;
+  try { const r = await one(pool, 'SELECT value FROM platform_settings WHERE name = ?', [SHARED_KEY]); v = r && r.value ? normalNumber(r.value) : null; } catch (_) { v = null; }
+  if (!v && process.env.SHARED_HELP_NUMBER) v = normalNumber(process.env.SHARED_HELP_NUMBER);
+  sharedCache = { at: Date.now(), v };
+  return v;
+}
+const forgetShared = () => { sharedCache = { at: 0, v: null }; };
+/** Is this number the shared one? */
+async function isShared(number) {
+  const s = await sharedNumber();
+  return Boolean(s && number && normalNumber(number) === s);
+}
+
+// ---------------------------------------------------------------- the mountain's tag
+// 1 to 3 letters, unique across all mountains. Never a common short word, so "HELP I fell" or "HELP my leg" never reads
+// as a tag ("I", "MY", "LEG" are refused). Suggested from the name: Blue Ridge is BR.
+const TAG_RE = /^[A-Z]{1,3}$/;
+const RESERVED = new Set(`A I O U E Y N X AM AN AS AT BE BY DO GO HE HI IF IN IS IT ME MY NO OF OH OK ON OR SO TO UP US WE YA YO
+  AL DE EL EN LA LO MI SE SI SU TE TU UN ALL AND ANY ARE ARM ASK BAD BIG BUT CAN CUT DAD DID FOR GET GOT HAD HAS HER HEY HIM HIS
+  HIT HOT HOW HRT ICE ITS KID LEG LET LOT MAN MAY MEN MOM NEW NOT NOW OFF OLD ONE OUR OUT OWN PLS PLZ PUT RUN SAT SAW SAY SEE
+  SHE SIT SON SOS THE TOO TRY TWO WAS WAY WHO WHY YES YET YOU LOL OMG WTF SKI TOP DEL LOS LAS POR QUE CON UNA UNO MAS MUY MAL HAY
+  SOY VOY VER DOS ESA ESE ETA HLP AYU PAT HEL STP END EMS CPR AED ER EMT DR MD PM AH UH UM HM ID TV NA NE NW SW SE`.split(/\s+/).filter(Boolean));
+const normalTag = (t) => String(t || '').trim().toUpperCase();
+/** Why a tag cannot be used, or null when it can. */
+function tagProblem(t) {
+  const tag = normalTag(t);
+  if (!TAG_RE.test(tag)) return 'A tag is 1 to 3 letters, like BR';
+  if (RESERVED.has(tag) || TRIGGERS[tag]) return `${tag} is a common word in a text, so it cannot be a tag. Pick other letters.`;
+  return null;
+}
+const GENERIC = new Set(['mountain', 'mountains', 'mount', 'mt', 'mtn', 'ski', 'skiing', 'area', 'resort', 'the', 'of', 'at', 'and']);
+const lettersOf = (s) => String(s || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z ]+/g, ' ').trim();
+/** A free tag from a mountain's name: its initials (Blue Ridge: BR), then longer and other forms, then any free letters. */
+function suggestTag(name, taken) {
+  const all = lettersOf(name).split(/\s+/).filter(Boolean);
+  const words = all.filter((w) => !GENERIC.has(w.toLowerCase()));
+  const use = (words.length ? words : all.length ? all : ['X']).map((w) => w.toUpperCase());
+  const tries = [];
+  const initials = use.map((w) => w[0]).join('');
+  if (use.length >= 2) tries.push(initials.slice(0, 3), initials.slice(0, 2));
+  const first = use[0]; const last = use[use.length - 1];
+  tries.push(first.slice(0, 2), first.slice(0, 3));
+  if (use.length >= 2) { for (const ch of last.slice(1)) tries.push(`${initials.slice(0, 2)}${ch}`); for (const ch of first.slice(1)) tries.push(`${first[0]}${ch}${last[0]}`); }
+  for (const ch of first.slice(2)) tries.push(`${first.slice(0, 2)}${ch}`);
+  for (const ch of first.slice(1)) tries.push(`${first[0]}${ch}`);
+  const ok = (t) => TAG_RE.test(t) && !tagProblem(t) && !taken.has(t);
+  for (const t of tries) if (ok(t)) return t;
+  const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  for (const a of A) for (const b of A) if (ok(`${first[0]}${a}${b}`)) return `${first[0]}${a}${b}`;
+  for (const a of A) for (const b of A) for (const c of A) if (ok(`${a}${b}${c}`)) return `${a}${b}${c}`;
+  return null;
+}
+/** The mountain's tag, given now from its name when it has none. A demo mountain has none (it never takes texts). */
+async function ensureTag(db, tenantId) {
+  const t = await one(db, 'SELECT name, help_tag, sandbox_expires_at FROM tenants WHERE id = ?', [tenantId]);
+  if (!t) return null;
+  if (t.help_tag) return t.help_tag;
+  if (t.sandbox_expires_at) return null;
+  for (let i = 0; i < 5; i++) {
+    const taken = new Set((await rows(db, 'SELECT help_tag FROM tenants WHERE help_tag IS NOT NULL')).map((r) => r.help_tag));
+    const tag = suggestTag(t.name, taken);
+    if (!tag) return null;
+    try {
+      await db.query('UPDATE tenants SET help_tag = ? WHERE id = ? AND help_tag IS NULL', [tag, tenantId]);
+    } catch (err) { if (err.code === 'ER_DUP_ENTRY') continue; throw err; }
+    const now = await one(db, 'SELECT help_tag FROM tenants WHERE id = ?', [tenantId]);
+    if (now && now.help_tag) return now.help_tag;
+  }
+  return null;
+}
+/** Sets the tag (platform operator or owner). Throws a 400 or 409 the screen can show. */
+async function setTag(db, tenantId, value) {
+  const { bad, conflict } = require('./errors');
+  const tag = normalTag(value);
+  const why = tagProblem(tag);
+  if (why) throw bad(why);
+  const other = await one(db, 'SELECT id FROM tenants WHERE help_tag = ? AND id <> ?', [tag, tenantId]);
+  if (other) throw conflict(`${tag} is another mountain's tag. Each mountain needs its own.`);
+  try { await db.query('UPDATE tenants SET help_tag = ? WHERE id = ?', [tag, tenantId]); } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') throw conflict(`${tag} is another mountain's tag. Each mountain needs its own.`);
+    throw err;
+  }
+  return tag;
+}
+/** A sign's code with the tag, the way it is printed: "BR R7". */
+const taggedCode = (tag, code) => (tag ? `${tag} ${code}` : String(code));
+
+/**
+ * Everything a screen, a sign or the guest page needs: { mode, number (what guests text now, or null), own_number,
+ * shared_number, patrol_phone, tag }. A demo mountain has no number (it never takes texts).
+ */
+async function numbersOf(db, tenantId) {
+  const l = await lineOf(db, tenantId);
+  const mode = modeOf(l);
+  const shared = await sharedNumber();
+  const t = await one(db, 'SELECT sandbox_expires_at FROM tenants WHERE id = ?', [tenantId]);
+  const demo = Boolean(t && t.sandbox_expires_at);
+  const tag = await ensureTag(db, tenantId);
+  const number = demo ? null : mode === 'own' ? (l && l.help_number) || null : shared;
+  return { mode, number, own_number: (l && l.help_number) || null, shared_number: shared, patrol_phone: (l && l.patrol_phone) || null, tag };
+}
+
+/**
+ * The text's lead after the trigger word: possible tags and codes. "BR R7", "BR-R7", "BR" (then anything) and "BRR7".
+ * Returns { trigger, after (the text after the trigger, trimmed), cands: [{ tag, code, end, joined }] }, where end is
+ * how much of `after` the candidate covers (tag alone, or tag and code).
+ */
+function leadOf(text) {
+  const s = String(text || '').normalize('NFKC').replace(/\s+/g, ' ').trim();
+  const t = s.match(/^([A-Za-zÁÉÍÓÚáéíóú]+)(?=$|[\s:,.!¡?-])(?:[\s:,.!¡?]|-(?![\d.]))*/);
+  let trigger = null; let after = s;
+  if (t && TRIGGERS[t[1].toUpperCase()]) { trigger = t[1]; after = s.slice(t[0].length); }
+  after = after.replace(/^[\s:,.!¡?¿#-]+/, '');
+  const cands = [];
+  const sep = after.match(/^([A-Za-z]{1,3})(?:\s*[-.]\s*|\s+)([A-Za-z0-9]{2,5})(?=$|[^A-Za-z0-9])/);
+  if (sep) cands.push({ tag: sep[1].toUpperCase(), code: sep[2].toUpperCase(), end: sep[0].length, tagEnd: sep[1].length, joined: false });
+  const alone = after.match(/^([A-Za-z]{1,3})(?=$|[^A-Za-z0-9])/);
+  if (alone && !sep) cands.push({ tag: alone[1].toUpperCase(), code: null, end: alone[0].length, tagEnd: alone[0].length, joined: false });
+  const joined = after.match(/^([A-Za-z0-9]{3,8})(?=$|[^A-Za-z0-9])/);
+  if (joined) {
+    const w = joined[1].toUpperCase();
+    for (let k = 1; k <= 3; k++) {
+      const tag = w.slice(0, k); const code = w.slice(k);
+      if (/^[A-Z]+$/.test(tag) && /^[A-Z0-9]{2,5}$/.test(code)) cands.push({ tag, code, end: joined[0].length, tagEnd: joined[0].length, joined: true });
+    }
+  }
+  return { trigger, after, cands: cands.filter((c) => !tagProblem(c.tag)) };
+}
+/** The text with the tag taken out, keeping the trigger word and the code: "HELP BR-R7 hurt" becomes "HELP R7 hurt". */
+function withoutLead(lead, cand, codeFound) {
+  const rest = lead.after.slice(codeFound || cand.joined ? cand.end : cand.tagEnd).replace(/^[\s:,.!-]+/, '');
+  return [lead.trigger, codeFound ? cand.code : null, rest].filter(Boolean).join(' ');
+}
+/**
+ * For a text that reached a mountain (its own number, or the shared number once the mountain is known): the text with the
+ * mountain's own tag taken out of the lead, so "HELP BR R7" and "HELP BRR7" read as "HELP R7". Anything else unchanged.
+ */
+async function untagFor(tenantId, tag, text) {
+  if (!tag) return text;
+  const lead = leadOf(text);
+  for (const c of lead.cands) {
+    if (c.tag !== tag) continue;
+    const found = c.code ? await require('./places').byCode(pool, tenantId, c.code) : null;
+    if (c.joined && !found && !/\d/.test(c.code)) continue;
+    return withoutLead(lead, c, Boolean(found) || c.joined);
+  }
+  return text;
 }
 
 // ---------------------------------------------------------------- notes, places, columns
@@ -190,8 +360,22 @@ async function setGps(tenantId, callId, tz, gps) {
 }
 
 // ---------------------------------------------------------------- opt-out
-async function optedOut(tenantId, key) {
+/** Has this phone texted STOP to this number? The shared number has one list for every mountain; an own number its own. */
+async function optedOut(tenantId, key, helpNumber = null) {
+  if (helpNumber && await isShared(helpNumber)) return sharedOptedOut(key);
   return Boolean(await one(pool, 'SELECT 1 AS x FROM dispatch_sms_optouts WHERE tenant_id = ? AND phone_key = ?', [tenantId, key]));
+}
+async function sharedOptedOut(key) {
+  return Boolean(await one(pool, 'SELECT 1 AS x FROM help_shared_optouts WHERE phone_key = ?', [key]));
+}
+/** Texts out on the shared number in the last hour, across every mountain and the "which ski area" replies. */
+async function sharedHourCount() {
+  const s = await sharedNumber();
+  if (!s) return 0;
+  const a = await one(pool, `SELECT COUNT(*) AS n FROM dispatch_sms_log l JOIN dispatch_sms_threads th ON th.tenant_id = l.tenant_id AND th.call_id = l.call_id
+    WHERE l.direction = 'out' AND l.at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR AND th.help_number = ?`, [s]);
+  const b = await one(pool, "SELECT COUNT(*) AS n FROM help_shared_log WHERE direction = 'out' AND at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR");
+  return Number(a.n) + Number(b.n);
 }
 
 // ---------------------------------------------------------------- the conversation
@@ -249,7 +433,12 @@ async function withPhoneLock(tenantId, key, fn) {
 async function reserve(th) {
   const tenantId = th.tenant_id; const callId = th.call_id;
   let why = null;
-  if (await optedOut(tenantId, th.phone_key)) why = STOPPED;
+  const shared = th.help_number ? await isShared(th.help_number) : false;
+  if (await optedOut(tenantId, th.phone_key, th.help_number)) why = STOPPED;
+  if (!why && shared && await sharedHourCount() >= SHARED_HOUR_CAP()) {
+    why = `The shared help number has sent ${SHARED_HOUR_CAP()} texts in the last hour, its limit. Call the guest.`;
+    logFailure({ job: 'help_sms', tenant: tenantId, message: 'shared number hourly text cap reached' });
+  }
   if (!why) {
     const h = await one(pool, "SELECT COUNT(*) AS n FROM dispatch_sms_log WHERE tenant_id = ? AND direction = 'out' AND at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR", [tenantId]);
     if (Number(h.n) >= HOUR_CAP()) { why = `The help line has sent ${HOUR_CAP()} texts in the last hour, its limit. Call the guest.`; logFailure({ job: 'help_sms', tenant: tenantId, message: 'hourly text cap reached' }); }
@@ -345,12 +534,47 @@ async function handle(line, params, base, from, key) {
       // With an open call the word goes on it too ("yes" may be an answer to patrol).
     }
     const photos = photosIn(params);
-    const area = await one(pool, 'SELECT map_lat AS lat, map_lng AS lng FROM tenants WHERE id = ?', [tenantId]).catch(() => null);
-    const p = parse(words, area && area.lat !== null && area.lng !== null ? { lat: Number(area.lat), lng: Number(area.lng) } : null);
+    const p = parse(await untagFor(tenantId, line.help_tag, words), await areaOf(tenantId));
     // A phone that texted STOP is still heard: every text is taken as a request for help. Nothing is texted to it until
     // it texts START (Twilio keeps blocking it until then, whatever we record), and the call says so.
     if (open) return followUp(line, open, p, words, photos);
     return firstText(line, from, key, p, words, photos, base);
+  });
+}
+
+/** The mountain's map point { lat, lng }, or null. */
+async function areaOf(tenantId) {
+  const area = await one(pool, 'SELECT map_lat AS lat, map_lng AS lng FROM tenants WHERE id = ?', [tenantId]).catch(() => null);
+  return area && area.lat !== null && area.lng !== null ? { lat: Number(area.lat), lng: Number(area.lng) } : null;
+}
+
+/**
+ * Texts to the shared number, once lib/sharedhelp.js knows the mountain. line: the mountain as lineByNumber gives it, with
+ * help_number set to the shared number. texts: [{ b: words, ph: photos }], oldest first: everything the guest texted while
+ * the mountain was not known. The first opens the call (or joins the phone's open call there); the rest follow in order.
+ * opt: { note (how the mountain was found, for the call), lang }. Returns what firstText or followUp returns.
+ */
+async function fromShared(line, from, key, texts, base, opt = {}) {
+  const tenantId = line.tenant_id;
+  return withPhoneLock(tenantId, key, async () => {
+    const area = await areaOf(tenantId);
+    let open = await openThread(pool, tenantId, key);
+    let out = null;
+    for (const x of texts) {
+      const words = String(x.b || '').slice(0, 1600);
+      const p = parse(await untagFor(tenantId, line.help_tag, words), area);
+      if (!open) {
+        out = await firstText(line, from, key, p, words, x.ph || [], base, opt);
+        open = await openThread(pool, tenantId, key);
+      } else {
+        const r = await followUp(line, open, p, words, x.ph || []);
+        if (!out) {
+          out = r;
+          if (opt.note) await note(pool, tenantId, open.call_id, opt.note);
+        }
+      }
+    }
+    return out || { reply: null };
   });
 }
 
@@ -386,10 +610,10 @@ async function followUp(line, th, p, words, photos) {
   return { reply: null, call_id: call.id, joined: true };
 }
 
-async function firstText(line, from, key, p, words, photos, base) {
+async function firstText(line, from, key, p, words, photos, base, opt = {}) {
   const tenantId = line.tenant_id;
   const D = require('../routes/dispatch');
-  const lang = p.trigger === 'AYUDA' || isSpanish(words) ? 'es' : 'en';
+  const lang = opt.lang || (p.trigger === 'AYUDA' || isSpanish(words) ? 'es' : 'en');
   const hit = p.codes.length ? await findCode(tenantId, p.codes) : null;
   const described = p.gps ? await require('./places').describe(pool, tenantId, p.gps.lat, p.gps.lng, p.gps.accuracy).catch(() => null) : null;
   const location = hit ? placeWords(hit.place, hit.code) : p.gps ? posWords(p.gps, described) : 'Not given yet (Text HELP)';
@@ -412,17 +636,18 @@ async function firstText(line, from, key, p, words, photos, base) {
   const text = words.trim() || (photos.length ? '[Photo]' : '');
   if (text) await require('./guestmsg').fromGuest(pool, call, text, 'sms');
   if (hit) await note(pool, tenantId, made.id, `Guest texted sign code ${hit.code}`);
+  if (opt.note) await note(pool, tenantId, made.id, opt.note);
   await addPhotos(tenantId, made.id, photos);
   // Patrol on duty hears about a new text at once, the same as a guest page request or staff's Guest needs help here
   // (a lost child always on its own; a phone's repeats rate limited per group, never silenced).
   await D.alertNewRequest(tenantId, made, location, 'sms', { lostChild: p.lostChild });
   // The reply, unless the phone has texted STOP (Twilio would refuse it) or a cap is reached.
-  const th = { tenant_id: tenantId, call_id: made.id, phone_key: key };
+  const th = { tenant_id: tenantId, call_id: made.id, phone_key: key, help_number: line.help_number };
   const ok = await reserve(th);
   if (!ok.ok) return { reply: null, call_id: made.id, created: true };
   const S = STRINGS[lang];
   const link = `${String(base).replace(/\/$/, '')}/locate/${token}`;
-  const reply = S.first(line.name, link) + (line.patrol_phone ? S.call(line.patrol_phone) : '');
+  const reply = (p.lostChild || opt.lostChild ? S.firstLost : S.first)(line.name, link) + (line.patrol_phone ? S.call(line.patrol_phone) : '');
   await note(pool, tenantId, made.id, `Texted back${lang === 'es' ? ' in Spanish' : ''}: the 911 line, a location link and a request for the sign code`);
   return { reply, call_id: made.id, created: true, lang };
 }
@@ -449,7 +674,7 @@ async function threadView(tenantId, callId) {
   let photos = [];
   try { photos = JSON.parse(th.photos || '[]'); } catch (_) { photos = []; }
   return {
-    phone: th.phone, help_number: th.help_number, lang: th.lang, opted_out: await optedOut(tenantId, th.phone_key), texts_sent: Number(th.out_count), text_cap: CALL_CAP(),
+    phone: th.phone, help_number: th.help_number, shared: await isShared(th.help_number), lang: th.lang, opted_out: await optedOut(tenantId, th.phone_key, th.help_number), texts_sent: Number(th.out_count), text_cap: CALL_CAP(),
     last_at: th.last_at, closed_text_at: th.closed_text_at, photos: photos.map((x, n) => ({ n, type: x.type, at: x.at, available: Boolean(x.url) })),
   };
 }
@@ -463,6 +688,8 @@ async function photoUrl(tenantId, callId, n) {
 }
 
 module.exports = {
-  STRINGS, TRIGGERS, CALL_CAP, HOUR_CAP, WINDOW_HOURS, LOCATE_HOURS,
+  STRINGS, TRIGGERS, CALL_CAP, HOUR_CAP, SHARED_HOUR_CAP, WINDOW_HOURS, LOCATE_HOURS, OPEN, TAG_RE, RESERVED,
   says, normalNumber, keyOf, isSpanish, parse, without, LOST_CHILD, STOPPED, lineOf, lineByNumber, outbound, reserve, inbound, closed, threadView, photoUrl, mediaOk, optedOut,
+  modeOf, sharedNumber, forgetShared, isShared, sharedOptedOut, sharedHourCount, tagProblem, suggestTag, ensureTag, setTag, taggedCode, numbersOf, leadOf, withoutLead, untagFor,
+  fromShared, areaOf, note, photosIn,
 };

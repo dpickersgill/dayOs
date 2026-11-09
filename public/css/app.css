@@ -4137,6 +4137,18 @@ label.check-hit { display: inline-flex; align-items: center; justify-content: ce
 .help-sign-tower .hs-how { font-size: 26pt; }
 .help-sign-tower .hs-911 { font-size: 32pt; padding: 6px 20px; }
 .help-sign-tower .hs-mountain { font-size: 22pt; }
+/* help/shared: a tagged code ("BRX SQT1") is longer, so it steps down a size to stay on the sign. */
+.help-sign-sticker .hs-code.hs-code-long { font-size: 40pt; }
+.help-sign-tower .hs-code.hs-code-long { font-size: 110pt; }
+.stencil-code.hs-code-long { font-size: 72pt; }
+/* help/shared: the console's banner of texts on the shared help number still waiting for a ski area. */
+.help-waiting { background: var(--warn-bg); border: 2px solid var(--warn); border-radius: var(--radius); padding: .8rem 1rem; display: flex; flex-direction: column; gap: .5rem; }
+.help-waiting h2 { margin: 0; }
+.help-waiting-item { border-top: 1px solid var(--warn); padding-top: .5rem; }
+.help-waiting-texts { margin: 0; padding-left: 1.4rem; overflow-wrap: anywhere; }
+.text-help-mode { border: 0; padding: 0; margin: 0; }
+.text-help-mode .check { align-items: flex-start; }
+.tag-input { max-width: 6rem; text-transform: uppercase; font-weight: 700; letter-spacing: 1px; }
 @media (max-width: 860px) { .help-sign-tower { transform: scale(.42); transform-origin: top center; margin-bottom: calc(-11in * .58); } }
 .stencil-title { font-family: 'Barlow Condensed', 'Atkinson Hyperlegible', system-ui, sans-serif; font-size: 2.4rem; margin: 0; }
 .stencil-sub { margin: 0; font-size: 1.1rem; }

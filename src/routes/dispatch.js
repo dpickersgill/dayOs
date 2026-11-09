@@ -422,8 +422,8 @@ async function guestBlock(c, hide) {
     require('../lib/guestmsg').list(pool, c.tenant_id, c.id),
   ]);
   const bySms = c.source === 'sms';
-  const th = bySms ? await one(pool, 'SELECT lang, phone_key FROM dispatch_sms_threads WHERE tenant_id = ? AND call_id = ?', [c.tenant_id, c.id]) : null;
-  const stopped = th ? await require('../lib/helpline').optedOut(c.tenant_id, th.phone_key) : false;
+  const th = bySms ? await one(pool, 'SELECT lang, phone_key, help_number FROM dispatch_sms_threads WHERE tenant_id = ? AND call_id = ?', [c.tenant_id, c.id]) : null;
+  const stopped = th ? await require('../lib/helpline').optedOut(c.tenant_id, th.phone_key, th.help_number) : false;
   return { by_text: bySms, who: c.who, who_text: c.who ? GH.WHO[c.who] : null, lang: c.lang || (th ? th.lang : null), answers: GH.answerWords(answers), scan_hint: GH.scanHintWords(c.last_scan_hint),
     live_off_at: c.live_off_at, positions, messages, can_text: Boolean(c.caller_phone && SMS.enabled() && !stopped), opted_out: stopped };
 }
@@ -572,14 +572,16 @@ router.post('/dispatch/:id/case', patrol, needs('dispatch'), validate(z.object({
 
 // ---------------------------------------------------------------- guest help settings
 /**
- * The numbers a guest sees, from Patrol settings, Text HELP (lib/helpline.js lineOf): patrol_phone for Call patrol and
+ * The numbers a guest sees, from Patrol settings, Text HELP (lib/helpline.js numbersOf): patrol_phone for Call patrol and
  * sms_number for Send by text instead, each with the way it is written on a sign (610-555-0100).
  */
 async function guestNumbers(tenantId) {
   const HL = require('../lib/helpline');
-  const l = (await HL.lineOf(pool, tenantId)) || {};
-  return { patrol_phone: l.patrol_phone || null, patrol_phone_shown: l.patrol_phone ? HL.says(l.patrol_phone) : null,
-    sms_number: l.help_number || null, sms_number_shown: l.help_number ? HL.says(l.help_number) : null };
+  // help/shared: the number guests text now (the shared Verdynt/OS number, or the mountain's own), and its tag, which
+  // the page's Send by text instead always puts after HELP so a text to the shared number reaches this mountain.
+  const n = await HL.numbersOf(pool, tenantId);
+  return { patrol_phone: n.patrol_phone, patrol_phone_shown: n.patrol_phone ? HL.says(n.patrol_phone) : null,
+    sms_number: n.number, sms_number_shown: n.number ? HL.says(n.number) : null, sms_tag: n.tag, sms_shared: n.mode === 'shared' };
 }
 router.get('/guest-help', patrol, needs('manage_settings'), async (req, res) => {
   const t = await one(pool, 'SELECT slug, guest_help_enabled, guest_help_message FROM tenants WHERE id = ?', [req.auth.tenantId]);

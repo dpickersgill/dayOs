@@ -8,8 +8,12 @@
 //                       PUBLIC_URL plus this path and the posted fields); anything else gets 403. A text to a number no
 //                       mountain uses, or to a mountain that is not active,
 //                       is not taken; the answer says "If this is an emergency, call 911." The answer is TwiML: the reply, or nothing.
+//                       A text to the shared Verdynt/OS help number goes to lib/sharedhelp.js, which finds the mountain.
+//   GET/POST /help-locate/:token   the shared locate page's link (a text to the shared number that did not say which ski
+//                       area): the position goes to the nearest mountain within 50 km. Keyed by the link's token only.
 // router, at /api/v1/patrol (patrol and managers):
-//   GET/PUT /text-help                   the mountain's help number and patrol phone (Patrol settings)
+//   GET/PUT /text-help                   Text HELP in Patrol settings: the shared number or the mountain's own, the own
+//                                        help number, the patrol phone, and the mountain's tag (the tag: owners only)
 //   GET /dispatch/:id/sms                the call's text conversation facts: phone, language, STOP, texts used, photos
 //   GET /dispatch/:id/sms-photo/:n       a photo the guest texted, fetched from Twilio for the signed-in viewer and
 //                                        never stored
@@ -71,12 +75,26 @@ const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 const twiml = (res, text) => res.type('text/xml').set('Cache-Control', 'no-store')
   .send(`<?xml version="1.0" encoding="UTF-8"?><Response>${text ? `<Message>${esc(text)}</Message>` : ''}</Response>`);
 
+const SH = require('../lib/sharedhelp');
+
 const NO_LINE = (body) => (HL.isSpanish(body) || /^\s*ayuda\b/i.test(body) ? 'Si es una emergencia, llame al 911. If this is an emergency, call 911.' : 'If this is an emergency, call 911.');
 const publicRouter = express.Router();
 publicRouter.post('/sms/inbound', express.urlencoded({ extended: false, limit: '64kb', parameterLimit: 200 }), async (req, res) => {
   if (!process.env.TWILIO_AUTH_TOKEN) return res.status(404).type('text/plain').send('Text messages are not set up');
   if (!signedByTwilio(req)) return res.status(403).type('text/plain').send('Not signed by Twilio');
   const b = req.body || {};
+  const to = HL.normalNumber(Array.isArray(b.To) ? b.To[0] : b.To);
+  if (to && await HL.isShared(to)) {
+    // The shared number: lib/sharedhelp.js finds the mountain (a tag, an open call, a position, or it asks).
+    const params = Object.fromEntries(Object.entries(b).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]));
+    try {
+      const out = await SH.inbound(params, config.stripe.publicUrl || `${req.protocol}://${req.get('host')}`);
+      return twiml(res, out.reply);
+    } catch (err) {
+      logFailure({ job: 'help_shared', message: err.message });
+      return res.status(500).type('text/plain').send('Try again');
+    }
+  }
   // A text to a number no mountain uses, or to a mountain that is not active, is not taken as a call (no one would see
   // it), but the sender is always told where to turn.
   const line = await HL.lineByNumber(Array.isArray(b.To) ? b.To[0] : b.To);
@@ -94,43 +112,76 @@ publicRouter.post('/sms/inbound', express.urlencoded({ extended: false, limit: '
   }
 });
 
+// The shared locate page (/help-locate/<token>): a guest whose text did not say which ski area sends their position.
+const locateBody = z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180), accuracy: z.number().min(0).max(100000).optional() });
+publicRouter.get('/help-locate/:token', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const s = await SH.locateState(String(req.params.token).replace(/(\.|%2E)+$/i, ''));
+  if (!s || s.state === 'expired') throw notFound('This link has expired');
+  res.json(s);
+});
+publicRouter.post('/help-locate/:token', validate(locateBody), async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const acc = req.body.accuracy === undefined ? null : Math.round(req.body.accuracy);
+  const out = await SH.locate(String(req.params.token).replace(/(\.|%2E)+$/i, ''), req.body.lat, req.body.lng, acc, config.stripe.publicUrl || `${req.protocol}://${req.get('host')}`);
+  if (!out) throw notFound('This link has expired');
+  res.json(out);
+});
+
 // ---------------------------------------------------------------- settings and the call's texts
 const router = express.Router();
 const patrol = requireRole('patrol', 'manager');
 const needs = (feature, message) => PA.needs(pool, feature, message);
 
 router.get('/text-help', patrol, needs('manage_settings'), async (req, res) => {
-  const l = await HL.lineOf(pool, req.auth.tenantId);
+  const n = await HL.numbersOf(pool, req.auth.tenantId);
   res.json({
-    help_number: l ? l.help_number : null, patrol_phone: l ? l.patrol_phone : null,
+    mode: n.mode, number: n.number, help_number: n.own_number, shared_number: n.shared_number, patrol_phone: n.patrol_phone,
+    tag: n.tag, can_edit_tag: req.auth.role === 'owner',
     webhook_url: `${require('../lib/baseurl').baseUrl(req)}${PATH}`, texts_ready: require('../lib/sms').enabled(),
   });
 });
 
 const numberField = z.string().trim().max(30).nullable().optional();
-router.put('/text-help', patrol, needs('manage_settings'), validate(z.object({ help_number: numberField, patrol_phone: numberField })), async (req, res) => {
+/**
+ * mode: 'shared' (the default) or 'own'. Without a mode (a client from before help/shared), a help number means own and
+ * none means shared. Clearing both numbers on the shared number removes the row (shared is the default). The
+ * tag is changed by the owner only (or the platform operator): it changes every sign, which must be printed again.
+ */
+router.put('/text-help', patrol, needs('manage_settings'), validate(z.object({ mode: z.enum(['shared', 'own']).optional(), help_number: numberField, patrol_phone: numberField, tag: z.string().trim().max(3).optional() })), async (req, res) => {
   const { tenantId } = req.auth;
   const help = req.body.help_number ? HL.normalNumber(req.body.help_number) : null;
   if (req.body.help_number && !help) throw bad('The help number must be a full phone number, like +16105550100');
   const phone = req.body.patrol_phone ? HL.normalNumber(req.body.patrol_phone) : null;
   if (req.body.patrol_phone && !phone) throw bad('The patrol phone must be a full phone number, like +16105550100');
   if (help && await require('../lib/sandbox').isSandbox(tenantId)) throw bad('Demo mountains cannot have a help number');
-  if (!help && !phone) {
+  if (help && await HL.isShared(help)) throw conflict('That is the shared Verdynt/OS help number. Choose Use the shared Verdynt/OS number instead.');
+  const mode = req.body.mode || (help ? 'own' : 'shared');
+  if (req.body.tag !== undefined) {
+    const now = await HL.ensureTag(pool, tenantId);
+    if (String(req.body.tag).toUpperCase() !== now) {
+      if (req.auth.role !== 'owner') throw forbidden('Only the owner can change the mountain\'s tag');
+      const tag = await HL.setTag(pool, tenantId, req.body.tag);
+      await audit(pool, req, 'set_help_tag', 'tenants', tenantId, { from: now, to: tag });
+    }
+  }
+  if (!help && !phone && mode === 'shared') {
     await pool.query('DELETE FROM patrol_help_lines WHERE tenant_id = ?', [tenantId]);
   } else {
-    // A patrol phone alone is fine (the guest page shows Call patrol); Text HELP is off until a help number is set.
+    // A patrol phone alone is fine (the guest page shows Call patrol). On their own number with none set, Text HELP is off.
     const taken = help ? await one(pool, 'SELECT tenant_id FROM patrol_help_lines WHERE help_number = ? AND tenant_id <> ?', [help, tenantId]) : null;
     if (taken) throw conflict('That number is already the help number of another mountain. Each mountain needs its own.');
     try {
-      await pool.query(`INSERT INTO patrol_help_lines (tenant_id, help_number, patrol_phone, updated_by) VALUES (?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE help_number = VALUES(help_number), patrol_phone = VALUES(patrol_phone), updated_by = VALUES(updated_by)`, [tenantId, help, phone, req.auth.userId]);
+      await pool.query(`INSERT INTO patrol_help_lines (tenant_id, help_number, patrol_phone, help_mode, updated_by) VALUES (?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE help_number = VALUES(help_number), patrol_phone = VALUES(patrol_phone), help_mode = VALUES(help_mode), updated_by = VALUES(updated_by)`, [tenantId, help, phone, mode, req.auth.userId]);
     } catch (err) {
       if (err.code === 'ER_DUP_ENTRY') throw conflict('That number is already the help number of another mountain. Each mountain needs its own.');
       throw err;
     }
   }
-  await audit(pool, req, 'set_text_help', 'patrol_help_lines', tenantId, { help_number: help, patrol_phone: Boolean(phone) });
-  res.json({ ok: true, help_number: help, patrol_phone: phone });
+  await audit(pool, req, 'set_text_help', 'patrol_help_lines', tenantId, { mode, help_number: help, patrol_phone: Boolean(phone) });
+  const n = await HL.numbersOf(pool, tenantId);
+  res.json({ ok: true, mode: n.mode, number: n.number, help_number: help, patrol_phone: phone, tag: n.tag });
 });
 
 async function smsCall(req) {

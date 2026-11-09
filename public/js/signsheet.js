@@ -26,12 +26,17 @@ export function qrPath(m, quiet = 4) {
 /** +16105550100 as 610-555-0100 (as the guest page and the first reply to a text write it); other numbers as given. */
 export const signNumber = (p) => { const m = String(p || '').match(/^\+1(\d{3})(\d{3})(\d{4})$/); return m ? `${m[1]}-${m[2]}-${m[3]}` : String(p || ''); };
 
-/** The sign's lines, in order. number: the mountain's help number for texts, or null (then the text line is left out). */
-export function signWords({ code, mountain, number }) {
+/**
+ * The sign's lines, in order. number: the number guests text (the shared Verdynt/OS number or the mountain's own), or
+ * null (then the text line is left out). tag: the mountain's tag. The code is printed with it ("BR R7"), so a text to the
+ * shared number reaches this mountain; on the mountain's own number the tagged code works too.
+ */
+export function signWords({ code, mountain, number, tag }) {
+  const shown = tag ? `${tag} ${code}` : String(code);
   return {
     ask: 'Need ski patrol?',
-    how: number ? `Scan, or text HELP ${code} to ${signNumber(number)}` : 'Scan this code',
-    code: String(code),
+    how: number ? `Scan, or text HELP ${shown} to ${signNumber(number)}` : 'Scan this code',
+    code: shown,
     emergency: 'Emergency? Call 911',
     mountain: String(mountain || ''),
   };

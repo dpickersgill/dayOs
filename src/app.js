@@ -153,6 +153,7 @@ function createApp() {
   // The guest help page (opened from a QR code on a trail sign). It is a static page that reads its mountain from the URL.
   // Locating a caller: the one-time link dispatch texts to a guest.
   app.get('/locate/:token', page('locate.html'));
+  app.get('/help-locate/:token', page('locate.html')); // the shared Text HELP number's locate link (lib/sharedhelp.js)
   app.get('/help/:slug', page('help.html'));
   app.get('/lost/:slug', page('lost.html'));
   app.get('/reserve/:slug', page('reserve.html'));
@@ -258,6 +259,7 @@ function createApp() {
   api.use('/users', rateLimit({ windowMs: 60_000, max: 60 }));
   // The caller-location link is open to anyone with it: 30 tries per 10 minutes per address.
   api.post('/public/locate/:token', rateLimit({ windowMs: 600_000, max: 30, message: 'Too many tries. Please call patrol.' }));
+  api.post('/public/help-locate/:token', rateLimit({ windowMs: 600_000, max: 30, message: 'Too many tries. Please call patrol.' }));
   api.post('/public/:slug/partner/:id/reserve', rateLimit({ windowMs: 600_000, max: Number(process.env.HELP_RATE_LIMIT) || 10, message: 'Too many reservations from here. Please call the mountain.' }));
   api.post('/public/:slug/lost', rateLimit({ windowMs: 600_000, max: Number(process.env.HELP_RATE_LIMIT) || 5, message: 'Too many reports from here. Please call the mountain.' }));
   // The guest help form has no address limit here: a request for help is always accepted. dispatch.js groups repeats from
