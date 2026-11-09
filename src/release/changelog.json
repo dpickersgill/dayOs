@@ -23,7 +23,7 @@
           "kind": "new",
           "app": "patrol",
           "who": ["patrol"],
-          "text": "Map your mountain: walk the hill with a phone and mark trail signs, lift towers and junctions. Each place gets a short sign code like R7. Calls then say where a guest is in the words patrollers use, such as Near Ridge Run, below Main quad tower 6, about 40 m. The call's Where panel shows a small map with the guest's last positions. Print help signs as stickers or tower signs, each with its QR code, its code, the text line and Call 911.",
+          "text": "Map your mountain: walk the hill with a phone and mark trail signs, lift towers and junctions. Each place gets a short sign code like R7. Calls then say where a guest is in the words patrollers use, such as Near Main quad tower 6, about 40 m. The call's Where panel shows a small map with the guest's last positions. Print help signs as stickers or tower signs, each with its QR code, its code, the text line and Call 911.",
           "help": "patrol-map-places"
         },
         {
