@@ -117,6 +117,7 @@ jobs.post('/daily', jobAuth, async (req, res) => {
     out.patrol_stock_flags = await stage('patrol_stock_flags', () => require('./patrolmeds').flagAll());
     out.staff_injury_notices = await stage('staff_injury_notices', () => require('../lib/staffinjury').retryDue(base)); // notices that could not be sent (2026.11.11)
     out.day_records = await stage('day_records', () => require('../lib/dayrecord').runAll());
+    out.snapshots = await stage('snapshots', () => require('../lib/snapshots').runAll()); // forecast data: presales, weather, staffing, prices (time-capped)
     out.program_reminders = await stage('program_reminders', () => require('../lib/programplus').remindAll());
     out.lessons = await stage('lessons_daily', () => require('../lib/schooltick').daily());
     out.guests = await stage('guests_daily', () => require('../lib/guesttick').daily());
