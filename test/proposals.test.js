@@ -347,11 +347,40 @@ test('the morning run drafts once a day at the mountain\'s time, only on a day o
   await writer.tick();
   const [list] = await pool.query("SELECT source FROM ai_proposals WHERE tenant_id = ? AND status = 'pending'", [T.id]);
   assert.deepEqual(list.map((x) => x.source), ['schedule'], 'once, however many runs');
+  // A time budget (2026.11.15 review): a run out of time drafts nothing more and says so; the next run carries on.
+  await pool.query("UPDATE ai_proposals SET status = 'expired' WHERE tenant_id = ? AND status = 'pending'", [T.id]);
+  await pool.query('UPDATE conditions_writer_settings SET last_drafted_on = NULL WHERE tenant_id = ?', [T.id]);
+  const spent = await writer.tick({ budgetMs: 0 });
+  assert.equal(spent.drafted, 0); assert.equal(spent.more, true);
+  assert.equal((await pool.query("SELECT COUNT(*) AS n FROM ai_proposals WHERE tenant_id = ? AND status = 'pending'", [T.id]))[0][0].n, 0);
+  const [[left]] = await pool.query('SELECT last_drafted_on FROM conditions_writer_settings WHERE tenant_id = ?', [T.id]);
+  assert.equal(left.last_drafted_on, null, 'not claimed, so the next run drafts it');
+  // A demo (sandbox) mountain is skipped, as the brief skips it.
+  await pool.query('UPDATE tenants SET sandbox_expires_at = UTC_TIMESTAMP() + INTERVAL 1 DAY WHERE id = ?', [T.id]);
+  try { await writer.tick(); } finally { await pool.query('UPDATE tenants SET sandbox_expires_at = NULL WHERE id = ?', [T.id]); }
+  assert.equal((await pool.query("SELECT COUNT(*) AS n FROM ai_proposals WHERE tenant_id = ? AND status = 'pending'", [T.id]))[0][0].n, 0, 'no draft for a demo mountain');
+  const next = await writer.tick();
+  assert.equal(next.more, false);
+  assert.equal((await pool.query("SELECT COUNT(*) AS n FROM ai_proposals WHERE tenant_id = ? AND status = 'pending'", [T.id]))[0][0].n, 1, 'the next run drafts it');
   // Off: nothing.
   ok(await api('PUT', '/ai/conditions/settings', { token: U.owner, body: { auto_on: false } }));
   await pool.query('UPDATE conditions_writer_settings SET last_drafted_on = NULL WHERE tenant_id = ?', [T.id]);
   await writer.tick();
   assert.equal((await pool.query("SELECT COUNT(*) AS n FROM ai_proposals WHERE tenant_id = ? AND status = 'pending'", [T.id]))[0][0].n, 1);
+});
+
+test('two Draft now presses at once: exactly one pending draft remains', async () => {
+  aiOff();
+  for (let round = 0; round < 6; round += 1) {
+    await Promise.all([1, 2, 3].map(() => writer.prepare(pool, T.id, { userId: U.managerId, source: 'draft_now' })));
+    const [[c]] = await pool.query("SELECT COUNT(*) AS n FROM ai_proposals WHERE tenant_id = ? AND kind = ? AND status = 'pending'", [T.id, writer.KIND]);
+    assert.equal(Number(c.n), 1, `round ${round}: one pending draft`);
+  }
+  // Through the screen too.
+  const r = await Promise.all([1, 2].map(() => api('POST', '/ai/conditions/draft', { token: U.manager })));
+  for (const x of r) assert.ok(x.status < 300, JSON.stringify(x.body));
+  const [[c]] = await pool.query("SELECT COUNT(*) AS n FROM ai_proposals WHERE tenant_id = ? AND kind = ? AND status = 'pending'", [T.id, writer.KIND]);
+  assert.equal(Number(c.n), 1);
 });
 
 test('the day\'s public note on its own: owners and managers only; lift staff and counter staff get 403', async () => {

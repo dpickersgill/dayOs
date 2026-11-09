@@ -377,7 +377,7 @@ function untilMidnight(tz) {
   return Math.max(60000, ((24 * 60 - h * 60 - m) * 60 - s) * 1000);
 }
 
-/** Gathers the facts, drafts, and saves the proposal (in place of an older pending one). Returns { id, by, reason }. */
+/** Gathers the facts, drafts, and saves the proposal in place of an older pending one, in one locked step. Returns { id, by, reason }. */
 async function prepare(db, tenantId, { userId = null, source = 'schedule' } = {}) {
   const f = await gather(db, tenantId);
   const set = await settingsOf(db, tenantId);
@@ -386,12 +386,11 @@ async function prepare(db, tenantId, { userId = null, source = 'schedule' } = {}
   const payload = { date: f.date, ...out.draft, send_email: false };
   const summary = f.status === 'closed' ? 'Closed today' : [f.lifts_total ? `${f.lifts_open} of ${f.lifts_total} lifts` : null, f.trails_total ? `${f.trails_open} of ${f.trails_total} trails` : null,
     f.new_snow_in ? `${fmtIn(f.new_snow_in)} in new` : null, f.base_in !== null ? `${fmtIn(f.base_in)} in base` : null].filter(Boolean).join(', ');
-  const id = await proposals.create(db, {
+  const id = await proposals.createReplacing({
     tenantId, kind: KIND, title: `Conditions for ${f.weekday}`, summary,
     preview: { ...payload, by: out.by, fallback: out.reason, facts: { status: f.status, lifts_open: f.lifts_open, lifts_total: f.lifts_total, trails_open: f.trails_open, trails_total: f.trails_total, new_snow_in: f.new_snow_in, base_in: f.base_in, groomed: f.groomed.length } },
     payload, forRoles: ROLES, expiresAt: new Date(Date.now() + untilMidnight(t.timezone)), source,
   });
-  await proposals.supersede(db, tenantId, KIND, id);
   return { id, by: out.by, reason: out.reason };
 }
 
@@ -405,14 +404,21 @@ async function draftNow(req) {
   return out;
 }
 
+const TICK_BUDGET_MS = () => Number(process.env.CONDITIONS_TICK_SECONDS || 120) * 1000;
+
 /**
- * The scheduled run (every 5 minutes, in the guests job): each mountain with the add-on, once a day, at or after its
- * draft time, on a day that is on its calendar. Claimed per day, so a second run or a second server does not draft twice.
+ * The scheduled run (every 5 minutes, in the guests job): each real mountain with the add-on (not a demo or sandbox, as
+ * the brief), once a day, at or after its draft time, on a day that is on its calendar. Claimed per day, so a second run
+ * or a second server does not draft twice. Stops starting new drafts after budgetMs (120 seconds unless
+ * CONDITIONS_TICK_SECONDS says otherwise): one draft is at most two model calls, so a run ends well inside the 5 minutes,
+ * and the mountains not reached are drafted by the next run (their day is not claimed yet).
  */
-async function tick() {
-  const list = await rows(pool, "SELECT id, timezone FROM tenants WHERE status = 'active' ORDER BY id");
-  const out = { drafted: 0 };
+async function tick({ budgetMs = TICK_BUDGET_MS() } = {}) {
+  const started = Date.now();
+  const list = await rows(pool, "SELECT id, timezone FROM tenants WHERE status = 'active' AND sandbox_expires_at IS NULL ORDER BY id");
+  const out = { drafted: 0, more: false };
   for (const t of list) {
+    if (Date.now() - started >= budgetMs) { out.more = true; break; }
     try {
       const on = new Set(await modulesLib.enabledKeys(t.id));
       if (!NEEDS.every((k) => on.has(k))) continue;
@@ -430,6 +436,7 @@ async function tick() {
       console.error(JSON.stringify({ severity: 'ERROR', job: 'conditions_writer', tenant: t.id, message: err.message }));
     }
   }
+  if (out.more) console.log(JSON.stringify({ severity: 'INFO', job: 'conditions_writer', message: 'time budget reached: the rest are drafted on the next run', drafted: out.drafted }));
   return out;
 }
 

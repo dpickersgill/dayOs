@@ -256,6 +256,19 @@ test('patrol busy day: yesterday\'s cases as counts by area from one query, and 
   assert.match(fn, /GROUP BY area/);
   assert.doesNotMatch(fn, /\bi\.(summary|narrative|person_id|severity|category|seq|location|form|disposition|weather|conditions)\b/);
   assert.doesNotMatch(src, /incident_(patients|injuries|vitals|treatments|events|witnesses)/, 'no patient tables anywhere in the brief');
+  // More areas than the brief names (2026.11.15 review): the total counts every case, and the rest are "Other places".
+  const many = await F.mountain('Many Runs', { day: '2026-12-20' });
+  for (let i = 1; i <= 15; i += 1) {
+    const [r] = await pool.query("INSERT INTO trails (tenant_id, name, difficulty, status) VALUES (?, ?, 'blue', 'open')", [many.id, `Run ${String(i).padStart(2, '0')}`]);
+    for (let k = 0; k < (i <= 2 ? 3 : 1); k += 1) await pool.query("INSERT INTO incidents (tenant_id, occurred_at, location, category, severity, summary, trail_id, status) VALUES (?, '2026-12-19 11:00:00', 'x', 'injury', 'minor', 'x', ?, 'open')", [many.id, r.insertId]);
+  }
+  await pool.query("INSERT INTO incidents (tenant_id, occurred_at, location, category, severity, summary, status) VALUES (?, '2026-12-19 12:00:00', 'by the lodge', 'injury', 'minor', 'x', 'open')", [many.id]);
+  const pc = await D.patrolCounts(pool, many.id, '2026-12-19');
+  assert.equal(pc.total, 3 + 3 + 13 + 1, 'every case counts');
+  assert.equal(pc.by_area.length, 12);
+  assert.equal(pc.by_area.reduce((n, a) => n + a.count, 0), pc.total, 'the lines add up to the total');
+  assert.deepEqual(pc.by_area.at(-1), { area: 'Other places', count: 5 }, 'four runs past the eleventh, and the case with no run');
+  assert.deepEqual(pc.by_area.slice(0, 2), [{ area: 'Run 01', count: 3 }, { area: 'Run 02', count: 3 }]);
   // Operations sees the same counts; the school brief none.
   assert.deepEqual((await F.facts(m, 'ops')).patrol_yesterday, data.patrol_yesterday);
   assert.equal((await F.facts(m, 'school')).patrol_yesterday, undefined);

@@ -190,4 +190,33 @@ async function supersede(db, tenantId, kind, keepId) {
   await db.query("UPDATE ai_proposals SET status = 'expired', error = 'A newer draft took its place' WHERE tenant_id = ? AND kind = ? AND status = 'pending' AND id <> ?", [tenantId, kind, keepId]);
 }
 
-module.exports = { register, kindOf, create, list, approve, reject, supersede, applyEdits, expireStale, roleAllows, LABEL, TEMPLATE_LABEL, labelFor, KINDS };
+/**
+ * Saves a proposal in place of any pending one of the same kind, as one locked step (2026.11.15 review: two Draft now
+ * presses at once could each set the other aside, leaving no pending draft). A named lock per mountain and kind, held
+ * until the insert and the set-aside are committed, so exactly one pending draft remains: the one saved last.
+ */
+async function createReplacing(opts) {
+  const { pool } = require('../db');
+  const conn = await pool.getConnection();
+  const name = `summitops_proposal_${Number(opts.tenantId)}_${String(opts.kind).slice(0, 40)}`;
+  try {
+    const [[got]] = await conn.query('SELECT GET_LOCK(?, 20) AS ok', [name]);
+    if (!Number(got.ok)) throw conflict('Another draft is being saved. Try again in a moment.');
+    try {
+      await conn.beginTransaction();
+      const id = await create(conn, opts);
+      await supersede(conn, opts.tenantId, opts.kind, id);
+      await conn.commit();
+      return id;
+    } catch (err) {
+      await conn.rollback().catch(() => {});
+      throw err;
+    } finally {
+      await conn.query('SELECT RELEASE_LOCK(?)', [name]).catch(() => {});
+    }
+  } finally {
+    conn.release();
+  }
+}
+
+module.exports = { register, kindOf, create, createReplacing, list, approve, reject, supersede, applyEdits, expireStale, roleAllows, LABEL, TEMPLATE_LABEL, labelFor, KINDS };

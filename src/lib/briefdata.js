@@ -298,11 +298,22 @@ async function shifts(db, tenantId, date, kind, modules) {
  * mountain's own place names), never the free-text location. Nothing else about a case is read: no name, age, injury,
  * story, case number or time.
  */
+const PATROL_AREAS = 12; // areas named in the brief; the rest are counted under "Other places"
+const OTHER_PLACES = 'Other places';
 async function patrolCounts(db, tenantId, day) {
-  const list = await rows(db, `SELECT COALESCE(t.name, l.name, 'Other places') AS area, COUNT(*) AS n FROM incidents i
+  const list = await rows(db, `SELECT COALESCE(t.name, l.name, '${OTHER_PLACES}') AS area, COUNT(*) AS n FROM incidents i
     LEFT JOIN trails t ON t.tenant_id = i.tenant_id AND t.id = i.trail_id LEFT JOIN lifts l ON l.tenant_id = i.tenant_id AND l.id = i.lift_id
-    WHERE i.tenant_id = ? AND i.occurred_at >= ? AND i.occurred_at < ? GROUP BY area ORDER BY n DESC, area LIMIT 12`, [tenantId, `${day} 00:00:00`, `${addDays(day, 1)} 00:00:00`]);
-  return { day, total: list.reduce((n, r) => n + Number(r.n), 0), by_area: list.map((r) => ({ area: String(r.area), count: Number(r.n) })) };
+    WHERE i.tenant_id = ? AND i.occurred_at >= ? AND i.occurred_at < ? GROUP BY area ORDER BY n DESC, area`, [tenantId, `${day} 00:00:00`, `${addDays(day, 1)} 00:00:00`]);
+  // The total counts every case (2026.11.15 review: it counted only the top 12 areas). The busiest areas are named; the
+  // rest, and cases with no run or lift, are one "Other places" line, last.
+  const total = list.reduce((n, r) => n + Number(r.n), 0);
+  const named = list.filter((r) => String(r.area) !== OTHER_PLACES);
+  const lines = named.length + (named.length < list.length ? 1 : 0); // one line per area, and one for cases with no run or lift
+  const shown = lines > PATROL_AREAS ? named.slice(0, PATROL_AREAS - 1) : named;
+  const other = total - shown.reduce((n, r) => n + Number(r.n), 0);
+  const byArea = shown.map((r) => ({ area: String(r.area), count: Number(r.n) }));
+  if (other > 0) byArea.push({ area: OTHER_PLACES, count: other });
+  return { day, total, by_area: byArea };
 }
 
 /** Refunds above normal, waitlists growing, the online shop near a daily limit. */
