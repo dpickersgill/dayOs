@@ -60,6 +60,44 @@
     </div>
   </section>
 
+  <section class="sec alt" aria-labelledby="h-day">
+    <div class="wrap">
+      <div class="sh"><h2 id="h-day">How it works on a busy Saturday.</h2><p>From the tickets sold the night before to the drawer counted at close.</p></div>
+      <ol class="steps walk">
+        <li><b>The night before, the shop sells to its limit.</b><span>Guests buy named tickets for Saturday on the <a href="{{SITE}}/online-lift-ticket-sales">online shop</a>. The day's limit counts window sales too, and when it is reached a waitlist opens.</span></li>
+        <li><b>Online buyers skip the window.</b><span>Their tickets carry a barcode and a QR code. A guest who cannot find theirs is found at will-call by email, phone or name.</span></li>
+        <li><b>The window moves fast.</b><span>Day tickets open on the quick sale, with no details asked for. A second phone walks the line in Line mode. A school group is one sale with the roster pasted in.</span></li>
+        <li><b>Problems are caught before payment.</b><span>A guest with no waiver that counts, or a day at its ticket limit, is flagged on the details step, never after the card is charged. Only a manager can sell past a limit, with a reason.</span></li>
+        <li><b>The gate checks every scan the same way.</b><span>A barcode, an RFID card tap or a paired turnstile all go through one check: valid dates, rides left, voided, blocked cards and the pass-back hold. The result shows the guest type in large letters, so an adult on a child's ticket stands out.</span></li>
+        <li><b>A lost card stops working at once.</b><span>Press Lost on the card and it is refused at every gate. The pass moves to a new card, and only a manager can unblock the old one.</span></li>
+        <li><b>Plans change, tickets move.</b><span>An unused dated ticket moves to another day at the window and keeps its code.</span></li>
+        <li><b>At close, the money adds up.</b><span>Each cashier counts their drawer blind and sees what is over or short. Unusual scans, such as one pass at two lifts too far apart, wait for a manager to review.</span></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="h-switch">
+    <div class="wrap">
+      <div class="sh"><h2 id="h-switch">What changes when you switch from paper or an older system.</h2><p>The same jobs, done with less guessing. Planning the change? Read <a href="{{SITE}}/how-to-choose-ski-area-software">how to choose ski area management software</a>.</p></div>
+      <div class="tblwrap" tabindex="0" role="region" aria-label="Comparison of paper or spreadsheet ticketing with Verdynt/OS">
+        <table class="cmp vs" style="--n:2">
+          <thead><tr><th scope="col">The job</th><th scope="col">On paper or a spreadsheet</th><th scope="col">With Verdynt/OS</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Selling a day ticket</th><td>Pre-printed tickets and a price sheet taped to the window.</td><td>Prices by guest type and date, set once. The receipt prints with a barcode and a QR code.</td></tr>
+            <tr><th scope="row">Season pass photos</th><td>A photo stapled to a form in a binder.</td><td>Taken at the window or uploaded online, and shown at the gate with the pass holder's name.</td></tr>
+            <tr><th scope="row">Checking at the lift</th><td>A glance at a sticker or a hang tag.</td><td>A scan or a card tap, checked for dates, rides left, voids and blocks, and logged with the gate it came from.</td></tr>
+            <tr><th scope="row">Shared passes</th><td>Caught only by luck.</td><td>A repeat scan inside the pass-back hold is warned, and unusual scans go to a manager's review list.</td></tr>
+            <tr><th scope="row">A lost pass</th><td>Print a new one, and the old one still works.</td><td>Lost blocks the card at every gate at once.</td></tr>
+            <tr><th scope="row">Waivers</th><td>A separate box of paper, checked by hand.</td><td>The sale shows whether each guest has a waiver that counts.</td></tr>
+            <tr><th scope="row">Busy days</th><td>Sell until the lot is full.</td><td>A daily limit that counts online and window sales together.</td></tr>
+            <tr><th scope="row">Refunds</th><td>A note in the drawer.</td><td>Every refund has a reason, and counter staff work within a refund limit.</td></tr>
+            <tr><th scope="row">Closing the day</th><td>Cash counted against a register tape.</td><td>A blind drawer count, over or short, and exports for the accountant.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
   <section class="sec alt" aria-labelledby="h-where">
     <div class="wrap">
       <div class="sh"><h2 id="h-where">Built for the window and the lift line.</h2></div>
@@ -92,8 +130,20 @@
         <details><summary>Can guests buy lift tickets online?</summary><p>Yes, with the Online shop add-on. Guests pick a day on a calendar showing that day's lowest price, then buy by card through Stripe. You can set a daily limit, and a waitlist opens when a day sells out.</p></details>
         <details><summary>How do you stop pass sharing?</summary><p>The gate stops a pass that was just used, and scan history shows when and where each pass was scanned. Season passes sold online can carry the guest's photo.</p></details>
         <details><summary>Do refunds need approval?</summary><p>Every refund needs a reason, and the reason is kept with the sale. Large refunds ask the person to confirm who they are again.</p></details>
-        <details><summary>Does it check waivers?</summary><p>Yes. Sell, Rentals, Ski school and the Gate all show whether a guest has a waiver that counts.</p></details>
+        <details><summary>Can we sell day tickets without taking every guest's details?</summary><p>Yes. A basket of day tickets, punch cards or gift cards opens on the quick sale, with no name asked for. Season passes, lessons and rentals always need the person's details. A manager can turn quick sale off.</p></details>
+        <details><summary>Do the gates keep working if the network drops?</summary><p>Paired gates and turnstiles keep a list of today's good cards and ticket codes, decide on their own, and send their scans when the network is back. Each scan is saved once, at the time it happened.</p></details>
         <details><summary>How do card payments work?</summary><p>Guests pay into your own Stripe account, and Stripe pays it out to your bank. Card numbers never touch Verdynt/OS, and Verdynt/OS never holds your money. Stripe charges its card fees to your account, and Verdynt/OS adds nothing on top.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec alt" aria-labelledby="h-guides">
+    <div class="wrap">
+      <div class="sh"><h2 id="h-guides">Guides for the ticket window and the lift.</h2></div>
+      <div class="guides">
+        <a href="{{SITE}}/ski-area-opening-day-checklist"><em>Checklist</em><b>Ski area opening day checklist</b><span>What to have ready at the window, the gate and the lifts before the first guest arrives.</span></a>
+        <a href="{{SITE}}/chairlift-inspection-checklist"><em>Lifts</em><b>Chairlift daily inspection checklist</b><span>The pre-opening check for every lift, and the daily record.</span></a>
+        <a href="{{SITE}}/how-to-choose-ski-area-software"><em>Buying software</em><b>How to choose ski area management software</b><span>When to switch, what to compare, and questions for every vendor.</span></a>
       </div>
     </div>
   </section>

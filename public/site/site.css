@@ -1158,3 +1158,22 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 .sc-status:empty{display:none}
 .sc-status{font-weight:700}
 @media print{.sc-mail,.sc-go,.gd-end,.sc-ctas{display:none!important}}
+
+/* product pages (SEO, Nov 2026): the day walk-through and the paper-or-older-system table */
+.steps.walk{max-width:54em}
+.steps.walk li:last-child{padding-bottom:0}
+table.cmp.vs{min-width:0}
+.cmp.vs th,.cmp.vs td{text-align:left;vertical-align:top;padding-left:0}
+.cmp.vs td{color:var(--ink2)}
+.cmp.vs thead th{font-size:24px}
+.cmp.vs th[scope="row"]{width:22%}
+@media (max-width:760px){
+  .cmp.vs th[scope="row"],.cmp.vs thead th:first-child{position:static;background:none;box-shadow:none;min-width:0;max-width:none;width:30%;padding-left:var(--gut)}
+  .cmp.vs th:last-child,.cmp.vs td:last-child{padding-right:var(--gut)}
+  .cmp.vs thead th{font-size:20px}
+}
+/* Resources: a guide card with its printable PDF underneath, when there is one */
+.guides .gi{display:flex;flex-direction:column;gap:10px}
+.guides .gi>a:first-child{flex:1}
+.guides a.gpdf{display:inline-flex;align-self:flex-start;gap:6px;padding:0 0 0 4px;background:none;border:0;border-radius:0;font-size:16px;font-weight:700;color:var(--link);text-decoration:underline;text-underline-offset:3px}
+.guides a.gpdf:hover{color:var(--ink)}
