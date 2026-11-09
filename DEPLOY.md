@@ -225,6 +225,9 @@ the other jobs. Safe to run again. What it does on each run:
   (with 4 minutes of its 15).
 - With no `ASSISTANT_API_KEY`, or when a mountain has used its monthly assistant allowance, the brief is made from the
   data by the template instead. It is never an error.
+- It reads today's forecast and presales snapshots (Forecast data). When the daily job has not taken them yet (it runs at
+  7:30 AM Eastern, after 6:00 AM in an Eastern mountain), the brief takes them itself, so the weather lookup happens
+  then. `SNAPSHOTS=off` stops that too; the brief then reads the weather and sales live.
 
 Check it in the logs: `"job":"morning_brief"` lines are failures for one mountain; the run's answer lists `sent`, `failed`
 and `more` (true when it stopped at its limit). A brief not sent by noon is not sent that day; the Morning brief page
