@@ -122,6 +122,7 @@ const NOT_GUESTS = {
   lesson_live_updates: 'a line or photo to a whole class, deleted after 90 days', school_group_places: 'where a class is, kept for the day only',
   group_program_handoffs: 'drop-off and pickup counts for a school group', pay_line_flags: 'an instructor asking about their own pay',
   school_training_staff: 'staff training hours', user_notices: 'a notice a sign-in has dismissed',
+  daily_snapshots: 'counts, prices and weather for a day, never a person (forecast data, kept 3 years)',
 };
 
 // Columns never put in a download: secrets, signatures and payment tokens.

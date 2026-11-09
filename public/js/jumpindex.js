@@ -92,6 +92,7 @@ export const SUB_PAGES = [
   ['money', 'Weekly report', '#/money?tab=weekly', 'weekly'],
   ['money', 'Card statement', '#/money?tab=cards', 'stripe statement'],
   ['money', 'Sales tax', '#/money?tab=tax', 'tax'],
+  ['money', 'Forecast data', '#/money?tab=forecast', 'forecast snapshots presales wind weather history'],
   ['workforce', 'Hours', '#/workforce?tab=hours', 'hours timecards approve'],
   ['workforce', 'Staff list', '#/workforce?tab=staff', 'staff people employees'],
   ['catalog', 'Guest types', '#/catalog?tab=types', 'guest types ages'],

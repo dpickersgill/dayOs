@@ -84,7 +84,7 @@ What changed in the app with this release:
 - Offline patrol notes on phones are sealed with a key made from `LINK_SECRET` and the person's login. Before rotating
   `LINK_SECRET`, make sure patrol phones have sent everything waiting, or those notes cannot be opened afterwards.
 - Close mountain (console, Manage): paused now, deleted by the daily job after the window. The console's history of it is kept.
-- The daily job also deletes website requests older than two years and sign-in records over a month old.
+- The daily job also deletes website requests older than two years, sign-in records over a month old, and forecast data snapshots older than three years.
 - Every push to GitHub runs `.github/workflows/ci.yml`: the tests, `npm audit` and CodeQL.
 
 ## Keeping an eye on it (set up once)

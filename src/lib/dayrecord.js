@@ -44,6 +44,41 @@ async function fetchWeather(lat, lng, from, to, today) {
   }
 }
 
+const HOURLY = 'temperature_2m,precipitation,snowfall,wind_speed_10m,wind_gusts_10m,weather_code';
+
+/**
+ * The hourly forecast for the next `hours` hours at one or more points ([{ role, lat, lng }]), in one request, with the
+ * hours on the mountain's clock (timeZone). Same switch, key and stand-in as fetchWeather. Returns
+ * [{ role, lat, lng, elevation_m, hourly: { time, temp_f, precip_in, snow_in, wind_mph, gust_mph, weather_code } }],
+ * or null when the lookup is off or failed. Never throws.
+ */
+async function fetchHourly(points, timeZone, { hours = 72 } = {}) {
+  if (!weatherOn() || !points.length) return null;
+  const key = process.env.OPEN_METEO_KEY || '';
+  const host = process.env.WEATHER_URL || `https://${key ? 'customer-' : ''}api.open-meteo.com`;
+  const q = new URLSearchParams({ latitude: points.map((p) => String(p.lat)).join(','), longitude: points.map((p) => String(p.lng)).join(','),
+    hourly: HOURLY, forecast_hours: String(hours), temperature_unit: 'fahrenheit', wind_speed_unit: 'mph', precipitation_unit: 'inch', timezone: timeZone || 'auto' });
+  if (key) q.set('apikey', key);
+  try {
+    const res = await fetch(`${host}/v1/forecast?${q}`, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error(`weather lookup answered ${res.status}`);
+    const body = await res.json();
+    const list = Array.isArray(body) ? body : [body]; // several points come back as a list, one as a single answer
+    if (list.length !== points.length) throw new Error('weather lookup answered for the wrong number of points');
+    return points.map((p, i) => {
+      const hr = (list[i] && list[i].hourly) || {};
+      const col = (k) => (Array.isArray(hr[k]) ? hr[k].map((v) => (v === null || v === undefined ? null : Number(v))) : []);
+      if (!Array.isArray(hr.time) || !hr.time.length) throw new Error('weather lookup answered without hours');
+      return { role: p.role, lat: p.lat, lng: p.lng, elevation_m: list[i].elevation === undefined ? null : Number(list[i].elevation),
+        hourly: { time: hr.time.map(String), temp_f: col('temperature_2m'), precip_in: col('precipitation'), snow_in: col('snowfall'),
+          wind_mph: col('wind_speed_10m'), gust_mph: col('wind_gusts_10m'), weather_code: col('weather_code') } };
+    });
+  } catch (err) {
+    console.log(JSON.stringify({ severity: 'WARNING', job: 'snapshots', message: `hourly weather lookup failed: ${err.message}` }));
+    return null;
+  }
+}
+
 const n = (v) => (v === null || v === undefined ? null : Number(v));
 
 /** Records one day for one mountain (replacing what was there), with weather already looked up (or null). */
@@ -120,4 +155,4 @@ async function list(tenantId, from, to) {
   }));
 }
 
-module.exports = { fetchWeather, recordDay, recordRange, runAll, list };
+module.exports = { fetchWeather, fetchHourly, weatherOn, recordDay, recordRange, runAll, list };

@@ -1,7 +1,7 @@
 'use strict';
 
 // What is kept, and for how long (the daily job). Old website requests go after two years, ended sign-in sessions after
-// a month, and finished demos. Each run is written to the audit trail.
+// a month, forecast data snapshots after three years, and finished demos. Each run is written to the audit trail.
 //
 // A real mountain that has closed is never deleted by the job. Once its export window passes, the job marks it due for
 // deletion and tells the operator (the console's history and its list of mountains). Deleting it is then a deliberate
@@ -61,6 +61,7 @@ async function runAll() {
   const [ml] = await pool.query('DELETE FROM message_log WHERE created_at < UTC_TIMESTAMP() - INTERVAL ? DAY LIMIT 50000', [LOG_DAYS]);
   const [al] = await pool.query('DELETE FROM assistant_log WHERE created_at < UTC_TIMESTAMP() - INTERVAL ? DAY LIMIT 50000', [LOG_DAYS]);
   out.message_log = ml.affectedRows; out.assistant_log = al.affectedRows;
+  out.snapshots = await require('./snapshots').purge(); // forecast data, kept 3 years
   out.demos = await require('./sandbox').purgeExpired();
   out.due_for_deletion = await markDue();
   trail({ action: 'retention_run', actor: 'daily job', detail: JSON.stringify(out) });

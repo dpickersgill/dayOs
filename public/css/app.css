@@ -66,6 +66,8 @@
   --surface: #ffffff;
   --surface-2: #f7f9fa;
   --panel-alt: #f4f6f8;
+  --chart-1: #2a78d6;         /* chart series 1 and 2 (Forecast data): checked for color vision and contrast on white */
+  --chart-2: #eb6834;
   --field: #ffffff;
   --info-tint: #eaf2fb;
   --sel-bg: #0e2632;
@@ -2466,6 +2468,8 @@ body:has(.tour-card) .demo-pill { display: none; }
   --surface-2: #293b46;
   --field: #1a2831;
   --panel-alt: #293b46;
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
   --spruce: #0e1a21;
   --spruce-soft: #21313b;
   --ink: #e6edf0;
@@ -3940,3 +3944,39 @@ label.check-hit { display: inline-flex; align-items: center; justify-content: ce
 .extras-summary { align-items: center; gap: 6px; }
 .link-box { width: 100%; }
 .my-score { margin: 0; }
+
+/* Money, Forecast data (money-forecast.js): two series, validated for color vision and contrast on both surfaces. */
+.fc-root { --fc-1: var(--chart-1); --fc-2: var(--chart-2); }
+.fc-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--ink-2); font-size: 0.9rem; }
+.fc-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.fc-key { display: inline-block; width: 14px; height: 8px; border-radius: var(--radius-xs); }
+.fc-key.fc-now { background: var(--fc-1); }
+.fc-key.fc-was { background: var(--fc-2); }
+.fc-key-dash { background: repeating-linear-gradient(90deg, var(--fc-2) 0 4px, transparent 4px 6px) !important; }
+.fc-bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.fc-bars li { display: grid; grid-template-columns: 96px minmax(80px, 1fr) 6.5ch; gap: 10px; align-items: center; }
+.fc-day { white-space: nowrap; }
+.fc-val { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fc-track { display: grid; gap: 2px; }
+.fc-bar { display: block; height: 8px; min-width: 2px; border-radius: 0 var(--radius-xs) var(--radius-xs) 0; }
+.fc-bar.fc-now { background: var(--fc-1); }
+.fc-bar.fc-was { background: var(--fc-2); }
+.fc-chart { width: 100%; height: auto; max-width: 720px; display: block; }
+.fc-grid { stroke: var(--line); stroke-width: 1; }
+.fc-axis { fill: var(--muted); font-size: 12px; }
+.fc-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.fc-now-stroke { stroke: var(--fc-1); }
+.fc-was-stroke { stroke: var(--fc-2); }
+.fc-dash { stroke-dasharray: 6 4; }
+.fc-dot { fill: var(--surface); stroke-width: 2; opacity: 0; }
+.fc-hit:hover .fc-dot { opacity: 1; }
+.fc-cov { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.fc-cov th, .fc-cov td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.fc-cov thead th { color: var(--quiet); font-weight: 600; }
+.fc-cov tbody th { font-weight: 400; }
+@media (max-width: 640px) {
+  .fc-bars li { grid-template-columns: 92px minmax(60px, 1fr) 6.5ch; gap: 8px; font-size: 0.9rem; }
+  .fc-cov { font-size: 0.8rem; }
+  .fc-cov th, .fc-cov td { padding: 6px 3px; }
+  .fc-cov .state { gap: 3px; }
+}
