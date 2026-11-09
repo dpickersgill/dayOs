@@ -520,7 +520,30 @@ const contactBody = z.object({
   plan_interest: z.string().trim().max(60).optional().default(''), message: z.string().trim().max(2000).optional().default(''),
   founding: z.boolean().optional().default(false), website: z.string().max(200).optional().default(''), // a field people never see: bots fill it
   scores: z.array(z.number().int().min(0).max(2)).max(40).optional(), // the Good Day scorecard's answers, one per question
+  // Where the request came from (SEO 2026.11): the page on this website the visitor was on before the form, and the other
+  // website that sent them here. Page addresses and a domain only; anything else is dropped (leadSource below).
+  source_page: z.string().trim().max(500).optional().default(''), source_ref: z.string().trim().max(500).optional().default(''),
 }).refine((b) => b.kind !== 'scorecard' || SC.valid(b.scores), { message: 'Answer every question on the scorecard first.', path: ['scores'] });
+/**
+ * The lead's source, cleaned: the page as "/slug" when it is one of the website's pages (query and fragment dropped, so
+ * nothing typed into an address is kept), and the referring site as its domain alone, never our own.
+ */
+function leadSource(req, b) {
+  let page = null;
+  try {
+    const u = new URL(b.source_page || '', 'https://x.invalid');
+    const slug = u.pathname.toLowerCase().replace(/^\/site(?=\/|$)/, '').replace(/^\/+|\/+$/g, '');
+    if (b.source_page && slug in PAGES) page = `/${slug}`;
+  } catch (_) { page = null; }
+  let ref = null;
+  try {
+    const raw = String(b.source_ref || '');
+    const host = (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? new URL(raw).hostname : raw.split(/[/?#:]/)[0]).toLowerCase().replace(/^www\./, '');
+    const ours = [...config.site.hosts, hostOf(req)].map((h) => h.replace(/^www\./, ''));
+    if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host) && host.length <= 120 && !ours.includes(host)) ref = host;
+  } catch (_) { ref = null; }
+  return { page, ref };
+}
 const KINDS = { walkthrough: 'Walkthrough request', trial: 'Trial mountain request', founding: 'Walkthrough request (Founding Mountain Program)', question: 'Question', patrol: 'Patrol only sign-up', review: 'Incident report review request', setup: 'Guided setup request', scorecard: 'Good Day scorecard results' };
 
 api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SITE_CONTACT_LIMIT) || 8, message: 'Too many messages from this address. Try again later, or email us.' }), validate(contactBody), async (req, res) => {
@@ -529,15 +552,17 @@ api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.e
   const ipHash = crypto.createHash('sha256').update(`${config.linkSecret}:${req.ip}`).digest('hex');
   // Scorecard results are written here from the answers, in our own words; anything typed as a message is ignored.
   if (b.kind === 'scorecard') b.message = SC.resultsText(b.scores);
+  const src = leadSource(req, b);
   const [r] = await pool.query(
-    'INSERT INTO site_leads (kind, name, mountain, role, email, phone, lifts, plan_interest, message, founding, ip_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [b.kind, b.name, b.mountain, b.role || null, b.email, b.phone || null, b.lifts || null, b.plan_interest || null, b.message || null, b.founding || b.kind === 'founding' ? 1 : 0, ipHash],
+    'INSERT INTO site_leads (kind, name, mountain, role, email, phone, lifts, plan_interest, message, founding, ip_hash, source_page, source_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [b.kind, b.name, b.mountain, b.role || null, b.email, b.phone || null, b.lifts || null, b.plan_interest || null, b.message || null, b.founding || b.kind === 'founding' ? 1 : 0, ipHash, src.page, src.ref],
   );
   const mailer = require('../lib/mailer');
   let copy = false;
   if (config.site.contactEmail && mailer.enabled()) {
     const lines = [`${KINDS[b.kind]} from the website`, '', `Name: ${b.name}`, `Mountain: ${b.mountain}`, b.role ? `Role: ${b.role}` : null, `Email: ${b.email}`, b.phone ? `Phone: ${b.phone}` : null,
-      b.lifts ? `Lifts: ${b.lifts}` : null, b.plan_interest ? `Interested in: ${b.plan_interest}` : null, b.founding ? 'Wants to apply for the Founding Mountain Program.' : null, b.message ? `\n${b.message}` : null,
+      b.lifts ? `Lifts: ${b.lifts}` : null, b.plan_interest ? `Interested in: ${b.plan_interest}` : null, b.founding ? 'Wants to apply for the Founding Mountain Program.' : null,
+      src.page || src.ref ? `Came from: ${[src.page ? `the ${src.page} page` : null, src.ref ? `${src.page ? 'after ' : ''}${src.ref}` : null].filter(Boolean).join(', ')}` : null, b.message ? `\n${b.message}` : null,
       '', 'Reply to this email to answer them. It is also in the console, under Leads.'].filter((x) => x !== null);
     const sent = await mailer.sendPlatform({ to: config.site.contactEmail, replyTo: b.email, subject: `${KINDS[b.kind]}: ${b.mountain}`, text: lines.join('\n'), tag: 'site-lead' });
     if (sent.ok) {
@@ -639,4 +664,4 @@ function goodDayPages(router) {
   });
 }
 
-module.exports = { pages, notFound, api, forgetPlans, PAGES, onSite, canonicalOrigin };
+module.exports = { pages, notFound, api, forgetPlans, PAGES, onSite, canonicalOrigin, leadSource };

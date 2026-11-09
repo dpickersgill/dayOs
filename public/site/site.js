@@ -197,6 +197,26 @@
     review: 'About your reports: how many incidents a season, paper or software, and who reviews them today. Please don\'t paste patient details here',
     setup: 'What you run today (ticketing, rentals, school, patrol), roughly how many customers and staff, and when you would like to go live',
   };
+  // ---------------------------------------------------------------- where a request came from (SEO 2026.11)
+  // The page on this website the visitor was on before this one, and the other website that first sent them here in this
+  // visit (its domain only), sent with the Contact form and the scorecard's "Email my results" so requests can be counted
+  // by page. Page addresses only: the query and anything after # are never kept. Kept for the visit (sessionStorage).
+  const source = (function trail() {
+    const store = (k, v) => { try { if (v === undefined) return sessionStorage.getItem(k) || ''; sessionStorage.setItem(k, v); } catch (_) { /* private mode */ } return ''; };
+    let from = ''; let ref = '';
+    try {
+      const r = document.referrer ? new URL(document.referrer) : null;
+      if (r && r.host === location.host) from = r.pathname;
+      else if (r && /^https?:$/.test(r.protocol) && !store('so.site.ref')) store('so.site.ref', r.hostname);
+    } catch (_) { /* no referrer */ }
+    if (!from) from = store('so.site.last');
+    if (from === location.pathname) from = store('so.site.prev');
+    store('so.site.prev', from);
+    store('so.site.last', location.pathname);
+    ref = store('so.site.ref');
+    return { source_page: from, source_ref: ref };
+  }());
+
   function contact() {
     const form = $('#leadform'); if (!form) return;
     const q = new URLSearchParams(location.search);
@@ -228,7 +248,7 @@
       try {
         const res = await fetch('/api/v1/site/contact', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
           kind: k, name: v('name'), mountain: v('mountain'), role: v('role'), email: v('email'), phone: v('phone'), lifts: v('lifts'), plan_interest: v('plan_interest'),
-          message: v('message'), founding: form.elements.founding.checked, website: v('website') }) });
+          message: v('message'), founding: form.elements.founding.checked, website: v('website'), ...source }) });
         const out = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(out.error || 'Something went wrong');
         form.querySelectorAll('input:not([type=radio]):not([type=checkbox]), textarea').forEach((i) => { i.value = ''; });
@@ -361,7 +381,7 @@
       const btn = mail.querySelector('button'); btn.disabled = true;
       try {
         const res = await fetch('/api/v1/site/contact', { method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ kind: 'scorecard', name: v('name'), mountain: v('mountain'), email: v('email'), scores, website: v('website') }) });
+          body: JSON.stringify({ kind: 'scorecard', name: v('name'), mountain: v('mountain'), email: v('email'), scores, website: v('website'), ...source }) });
         const out = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(out.error || 'Something went wrong');
         status.textContent = out.copy ? 'Sent. Your results are on their way to your email.' : 'Thank you. We have your results, and a person will follow up.';
