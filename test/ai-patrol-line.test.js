@@ -50,6 +50,8 @@ test('the AI files name no patrol or patient table, except the brief\'s one aggr
   for (const t of ['dispatch_calls', 'dispatch_messages', 'dispatch_positions', 'mountain_places']) assert.ok(tables.includes(t), `${t} is on the patrol line`);
   // help/sms: Text HELP's tables are patrol and dispatch data too, and are checked like the rest.
   for (const t of ['patrol_help_lines', 'dispatch_sms_threads', 'dispatch_sms_optouts', 'dispatch_sms_log']) assert.ok(tables.includes(t), `${t} is a patrol table`);
+  // fix/help-review: the held alerts' state (counts and a call id, no words) is dispatch data too.
+  assert.ok(tables.includes('dispatch_alert_state'), 'dispatch_alert_state is a patrol table');
   for (const f of FILES) {
     let src = code(read(f));
     if (f === 'src/lib/briefdata.js') {

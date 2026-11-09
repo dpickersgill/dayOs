@@ -5,4 +5,5 @@
 // migration gains a step.
 // 2026.11.16: the last step that leaves something to check is patrol_help_lines.help_number made nullable (the step after
 // it only moves values and drops two duplicate columns); the "release" row in schema_steps covers a run cut off after it.
-module.exports = { LATEST: { table: 'dispatch_calls', column: 'same_phone_of' } };
+// fix/help-review: dispatch_calls.flood_pending_at (a held flood alert), after dispatch_alert_state.
+module.exports = { LATEST: { table: 'dispatch_calls', column: 'flood_pending_at' } };

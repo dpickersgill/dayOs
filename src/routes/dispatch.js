@@ -110,52 +110,77 @@ async function createCall(tenant, b, { source, userId = null, staffId = null, se
  * alert says where, never what the guest wrote (2026.11.11 rule). Never holds up the answer to the guest.
  *   - A lost child always alerts on its own ("Lost child: patrol call ..."), in a flood or not.
  *   - A request grouped into a flood (flood_of) still alerts: at most one push per flood every 30 seconds, saying how many
- *     requests came from the same place. One that lands inside the 30 seconds is covered by a push when they are up.
- *     It is never silenced.
- *   - When the alert reaches no one (no one on duty, or no phone took it): every owner and manager gets the push, the
- *     mountain's patrol phone gets a text when one is set and texts are set up, and the call gets a "No one on duty was
- *     alerted" note, shown on the board as a red banner.
+ *     requests came from the same place. One that lands inside the 30 seconds is held (flood_pending_at on the flood's
+ *     first call) and sent when they are up. It is never silenced.
+ *   - When the alert reaches no one (no one on duty, or no phone took it), the call always gets a "No one on duty was
+ *     alerted" note (a red banner on the board), and every owner and manager gets a push and the mountain's patrol phone
+ *     a text: one summary per mountain a minute at most ("3 help requests, no one on duty was alerted"), with the patrol
+ *     phone's texts capped per hour. A lost child gets its own fallback alert at once.
+ * Held alerts are sent by whichever comes first: a timer in this process (the fast path), the next board load or guest
+ * request at that mountain, or the 5-minute guests job (sendDueAlerts). Each send is claimed with a row update, so it goes
+ * once. Worst case, when the timer is lost (a restart, or no CPU between requests) and no one opens the board: the gap
+ * (30 s for a flood, 60 s for the summary) plus up to 5 minutes for the job.
  * Returns { on_duty, sent }: patrollers signed in on duty, and their phones the alert reached.
  */
 const REQUEST_TITLE = { guest: 'Guest help', sms: 'Text HELP', staff: 'Guest needs help here' };
 const NOBODY = 'No one on duty was alerted';
+// Times are kept to the second: a strict "<" keeps every gap at least as long as set (up to a second longer).
 const FLOOD_GAP_MS = () => (Number(process.env.HELP_FLOOD_ALERT_GAP_S) || 30) * 1000;
-const floodTimers = new Map();
+const NOBODY_GAP_S = () => Number(process.env.HELP_NOBODY_GAP_S) || 60;
+const NOBODY_TEXT_CAP = () => Number(process.env.HELP_NOBODY_TEXT_HOURLY_CAP) || 20;
 const localMs = (local) => Date.parse(`${String(local).replace(' ', 'T')}Z`);
 const localAt = (msv) => new Date(msv).toISOString().slice(0, 19).replace('T', ' ');
+const tzOf = async (tenantId) => ((await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])) || {}).timezone || 'America/New_York';
+
+// The fast path for held alerts: one timer per flood or mountain. HELP_ALERT_TIMERS=off leaves it all to the durable paths.
+const timers = new Map();
+function soon(key, ms, fn) {
+  if (process.env.HELP_ALERT_TIMERS === 'off' || timers.has(key)) return;
+  const timer = setTimeout(() => { timers.delete(key); fn().catch(() => {}); }, Math.max(250, ms));
+  if (timer.unref) timer.unref();
+  timers.set(key, timer);
+}
 
 async function alertNewRequest(tenantId, out, location, source, { lostChild = false } = {}) {
   if (!out) return { on_duty: 0, sent: 0 };
   if (out.flood_of && !lostChild) return floodAlert(tenantId, Number(out.flood_of), out.id, location, source);
   const title = lostChild ? `Lost child: patrol call ${out.call_no}` : `${REQUEST_TITLE[source] || 'Guest help'}: patrol call ${out.call_no}`;
-  return sendAlert(tenantId, out.id, { title, body: `${String(location || 'Place not given yet')}. Open the app for details.`, url: '#/patrol/dispatch', tag: `call-${out.id}` });
+  return sendAlert(tenantId, out.id, { title, body: `${String(location || 'Place not given yet')}. Open the app for details.`, url: '#/patrol/dispatch', tag: `call-${out.id}` }, { lostChild });
 }
 
-/** Pushes to patrol on duty; when no phone took it, the fallback (owners and managers, the patrol phone, the note). */
-async function sendAlert(tenantId, callId, msg) {
+/** Pushes to patrol on duty; when no phone took it, the fallback (the note always, the summary at most once a minute). */
+async function sendAlert(tenantId, callId, msg, { lostChild = false } = {}) {
   const on = await OPS.onDutyIds(pool, tenantId).catch(() => []);
   const sent = on.length ? Number(await PUSH.notifyStaff(tenantId, on, msg).catch(() => 0)) || 0 : 0;
-  if (!sent) await nobodyHeard(tenantId, callId, msg).catch((err) => require('../lib/jobs').logFailure({ job: 'help_alert', tenant: tenantId, message: err.message }));
+  if (!sent) await nobodyHeard(tenantId, callId, msg, { lostChild }).catch((err) => require('../lib/jobs').logFailure({ job: 'help_alert', tenant: tenantId, message: err.message }));
   return { on_duty: on.length, sent };
 }
 
-/** One push per flood every 30 seconds; a request inside the 30 seconds is covered by a push when they are up. */
-async function floodAlert(tenantId, head, callId, location, source, tries = 0) {
-  const tz = ((await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])) || {}).timezone || 'America/New_York';
-  const now = nowIn(tz);
-  const [claim] = await pool.query('UPDATE dispatch_calls SET flood_alerted_at = ? WHERE tenant_id = ? AND id = ? AND (flood_alerted_at IS NULL OR flood_alerted_at <= ?)',
+/** One push per flood every 30 seconds. One inside the 30 seconds is held on the flood's first call (flood_pending_at). */
+async function floodAlert(tenantId, head, callId, location, source) {
+  const now = nowIn(await tzOf(tenantId));
+  const [claim] = await pool.query('UPDATE dispatch_calls SET flood_alerted_at = ?, flood_pending_at = NULL WHERE tenant_id = ? AND id = ? AND (flood_alerted_at IS NULL OR flood_alerted_at < ?)',
     [now, tenantId, head, localAt(localMs(now) - FLOOD_GAP_MS())]);
-  if (!claim.affectedRows) {
-    const key = `${tenantId}:${head}`;
-    if (!floodTimers.has(key) && tries < 5) {
-      const last = await one(pool, 'SELECT flood_alerted_at FROM dispatch_calls WHERE tenant_id = ? AND id = ?', [tenantId, head]);
-      const wait = Math.max(250, FLOOD_GAP_MS() - (localMs(now) - localMs(last && last.flood_alerted_at ? last.flood_alerted_at : now)) + 1000);
-      const timer = setTimeout(() => { floodTimers.delete(key); floodAlert(tenantId, head, callId, location, source, tries + 1).catch(() => {}); }, wait);
-      if (timer.unref) timer.unref();
-      floodTimers.set(key, timer);
-    }
-    return { on_duty: 0, sent: 0, held: true };
-  }
+  if (claim.affectedRows) return floodPush(tenantId, head, callId, location, source);
+  await pool.query('UPDATE dispatch_calls SET flood_pending_at = COALESCE(flood_pending_at, ?) WHERE tenant_id = ? AND id = ?', [now, tenantId, head]);
+  const last = await one(pool, 'SELECT flood_alerted_at FROM dispatch_calls WHERE tenant_id = ? AND id = ?', [tenantId, head]);
+  soon(`flood:${tenantId}:${head}`, FLOOD_GAP_MS() - (localMs(now) - localMs(last && last.flood_alerted_at ? last.flood_alerted_at : now)) + 1000, () => sendHeldFlood(tenantId, head));
+  return { on_duty: 0, sent: 0, held: true };
+}
+
+/** A held flood alert, when its 30 seconds are up: claimed (flood_pending_at cleared) so it goes once. Returns 1 when sent. */
+async function sendHeldFlood(tenantId, head) {
+  const now = nowIn(await tzOf(tenantId));
+  const [claim] = await pool.query(`UPDATE dispatch_calls SET flood_alerted_at = ?, flood_pending_at = NULL WHERE tenant_id = ? AND id = ? AND flood_pending_at IS NOT NULL
+    AND (flood_alerted_at IS NULL OR flood_alerted_at < ?)`, [now, tenantId, head, localAt(localMs(now) - FLOOD_GAP_MS())]);
+  if (!claim.affectedRows) return 0;
+  const latest = await one(pool, 'SELECT id, location, source FROM dispatch_calls WHERE tenant_id = ? AND flood_of = ? ORDER BY id DESC LIMIT 1', [tenantId, head]);
+  if (!latest) return 0;
+  await floodPush(tenantId, head, latest.id, latest.location, latest.source);
+  return 1;
+}
+
+async function floodPush(tenantId, head, callId, location, source) {
   const first = await one(pool, 'SELECT call_date, seq FROM dispatch_calls WHERE tenant_id = ? AND id = ?', [tenantId, head]);
   const { n } = await one(pool, 'SELECT COUNT(*) AS n FROM dispatch_calls WHERE tenant_id = ? AND flood_of = ?', [tenantId, head]);
   const more = Number(n);
@@ -165,21 +190,70 @@ async function floodAlert(tenantId, head, callId, location, source, tries = 0) {
   });
 }
 
-/** No one on duty heard the alert: every owner and manager, the patrol phone by text, and a note on the call. */
-async function nobodyHeard(tenantId, callId, msg) {
+/**
+ * No one on duty heard the alert. The call always gets the note (the board's red banner). A lost child alerts owners,
+ * managers and the patrol phone at once; anything else is counted for the mountain's summary, sent now when none went in
+ * the last minute, and otherwise held for the next one.
+ */
+async function nobodyHeard(tenantId, callId, msg, { lostChild = false } = {}) {
+  const tz = await tzOf(tenantId);
+  await pool.query("INSERT INTO dispatch_events (tenant_id, call_id, at, kind, note) VALUES (?, ?, ?, 'note', ?)", [tenantId, callId, nowIn(tz),
+    `${NOBODY}. ${lostChild ? 'Owners, managers and the patrol phone were alerted at once.' : 'Owners, managers and the patrol phone are told, in one summary a minute at most.'}`]);
+  if (lostChild) return fallback(tenantId, { ...msg, title: `No one on duty. ${msg.title}` }, { always: true });
+  await pool.query(`INSERT INTO dispatch_alert_state (tenant_id, nobody_pending, nobody_last_call) VALUES (?, 1, ?)
+    ON DUPLICATE KEY UPDATE nobody_pending = nobody_pending + 1, nobody_last_call = VALUES(nobody_last_call)`, [tenantId, callId]);
+  const out = await flushNobody(tenantId);
+  if (!out) soon(`nobody:${tenantId}`, NOBODY_GAP_S() * 1000 + 1000, () => flushNobody(tenantId));
+  return out;
+}
+
+/** The mountain's held "no one on duty" requests, as one summary, when none went in the last minute. Claimed, so once. */
+async function flushNobody(tenantId) {
+  const [claim] = await pool.query(`UPDATE dispatch_alert_state SET nobody_taken = nobody_pending, nobody_pending = 0, nobody_last_at = UTC_TIMESTAMP()
+    WHERE tenant_id = ? AND nobody_pending > 0 AND (nobody_last_at IS NULL OR nobody_last_at < UTC_TIMESTAMP() - INTERVAL ? SECOND)`, [tenantId, NOBODY_GAP_S()]);
+  if (!claim.affectedRows) return null;
+  const st = await one(pool, 'SELECT nobody_taken, nobody_last_call FROM dispatch_alert_state WHERE tenant_id = ?', [tenantId]);
+  const n = Number(st.nobody_taken);
+  const c = await one(pool, 'SELECT id, location, source, call_date, seq FROM dispatch_calls WHERE tenant_id = ? AND id = ?', [tenantId, st.nobody_last_call]);
+  const where = String((c && c.location) || 'Place not given yet');
+  const msg = n === 1 && c
+    ? { title: `No one on duty. ${REQUEST_TITLE[c.source] || 'Guest help'}: patrol call ${callNo(c)}`, body: `${where}. Open the app for details.`, url: '#/patrol/dispatch', tag: `call-${c.id}` }
+    : { title: `${n} help requests, no one on duty was alerted`, body: `Latest: ${where}. Open the dispatch board.`, url: '#/patrol/dispatch', tag: `nobody-${tenantId}` };
+  return { count: n, ...(await fallback(tenantId, msg)) };
+}
+
+/** Every owner and manager by push, and the patrol phone by text (capped per hour, except a lost child, which still counts). */
+async function fallback(tenantId, msg, { always = false } = {}) {
   const users = (await rows(pool, "SELECT id FROM users WHERE tenant_id = ? AND active = 1 AND role IN ('owner','manager')", [tenantId])).map((u) => Number(u.id));
-  const pushed = users.length ? Number(await PUSH.notifyUsers(tenantId, users, { ...msg, title: `No one on duty. ${msg.title}` }).catch(() => 0)) || 0 : 0;
+  const pushed = users.length ? Number(await PUSH.notifyUsers(tenantId, users, msg).catch(() => 0)) || 0 : 0;
   const line = await require('../lib/helpline').lineOf(pool, tenantId).catch(() => null);
   let texted = null;
   if (line && line.patrol_phone && SMS.enabled()) {
-    const r = await SMS.send({ tenantId, to: line.patrol_phone, body: `${msg.title}. ${msg.body} No one on duty got the alert.`.slice(0, 300) });
-    texted = Boolean(r.ok);
+    // The hour's count: a new hour starts the count again. texts_in_hour is set first, while texts_hour_start is the old one.
+    const fresh = 'texts_hour_start IS NULL OR texts_hour_start < UTC_TIMESTAMP() - INTERVAL 1 HOUR';
+    await pool.query('INSERT IGNORE INTO dispatch_alert_state (tenant_id) VALUES (?)', [tenantId]);
+    const [take] = await pool.query(`UPDATE dispatch_alert_state SET texts_in_hour = IF(${fresh}, 1, texts_in_hour + 1), texts_hour_start = IF(${fresh}, UTC_TIMESTAMP(), texts_hour_start)
+      WHERE tenant_id = ?${always ? '' : ` AND ((${fresh}) OR texts_in_hour < ?)`}`, always ? [tenantId] : [tenantId, NOBODY_TEXT_CAP()]);
+    if (take.affectedRows) {
+      const r = await SMS.send({ tenantId, to: line.patrol_phone, body: `${msg.title}. ${msg.body} No one on duty got the alert.`.slice(0, 300) });
+      texted = Boolean(r.ok);
+    } else texted = false;
   }
-  const tz = ((await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])) || {}).timezone || 'America/New_York';
-  const said = [`${NOBODY}.`, pushed ? `Sent to ${pushed} owner or manager phone${pushed === 1 ? '' : 's'}.` : 'No owner or manager phone took it either.',
-    texted === true ? 'Texted the patrol phone.' : texted === false ? 'The text to the patrol phone did not go.' : line && line.patrol_phone ? 'Texts are not set up, so the patrol phone was not texted.' : 'No patrol phone is set.'].join(' ');
-  await pool.query("INSERT INTO dispatch_events (tenant_id, call_id, at, kind, note) VALUES (?, ?, ?, 'note', ?)", [tenantId, callId, nowIn(tz), said]);
   return { pushed, texted };
+}
+
+/**
+ * Held alerts that are due, at one mountain (tenantId) or every mountain: held flood alerts and the "no one on duty"
+ * summary. Called by the board, a guest's request and the 5-minute guests job. Returns { floods, summaries }.
+ */
+async function sendDueAlerts(tenantId = null) {
+  const out = { floods: 0, summaries: 0 };
+  const where = tenantId ? ' AND tenant_id = ?' : '';
+  const heads = await rows(pool, `SELECT tenant_id, id FROM dispatch_calls WHERE flood_pending_at IS NOT NULL${where} LIMIT 500`, tenantId ? [tenantId] : []);
+  for (const h of heads) out.floods += await sendHeldFlood(Number(h.tenant_id), Number(h.id)).catch(() => 0);
+  const waiting = await rows(pool, `SELECT tenant_id FROM dispatch_alert_state WHERE nobody_pending > 0${where} LIMIT 500`, tenantId ? [tenantId] : []);
+  for (const w of waiting) if (await flushNobody(Number(w.tenant_id)).catch(() => null)) out.summaries += 1;
+  return out;
 }
 
 const withNo = (c) => { const out = { ...c, call_no: callNo(c) }; delete out.locate_token; delete out.sender_hash; delete out.ip_hash; delete out.guest_token; delete out.request_key; return out; };
@@ -195,6 +269,7 @@ const senderKey = (tenantId, kind, v) => require('crypto').createHmac('sha256', 
 // ---------------------------------------------------------------- the board
 router.get('/dispatch', patrol, needs('dispatch'), async (req, res) => {
   const { tenantId } = req.auth;
+  await sendDueAlerts(tenantId).catch(() => {}); // held alerts at this mountain that are due (the durable path)
   const today = await todayOf(tenantId);
   const current = (!req.query.status || req.query.status === 'active') || String(req.query.date || '') === today;
   if (!current && !req.auth.recordsChecked) throw PX.needed('past_calls'); // the season's calls, or another day's
@@ -656,6 +731,7 @@ publicRouter.post('/:slug/help', async (req, res) => {
   for (const [id, text] of notes) await pool.query("INSERT INTO dispatch_events (tenant_id, call_id, at, kind, note) VALUES (?, ?, ?, 'note', ?)", [t.id, id, now, text.slice(0, 500)]);
   // Patrol on duty hears at once (a lost child always on its own, in a flood or not). Never holds up the answer.
   alertNewRequest(t.id, out, location, 'guest', { lostChild: callType === 'lost_child' }).catch(() => {});
+  sendDueAlerts(t.id).catch(() => {}); // and any held alert at this mountain that is due
   const warning = sender.repeats >= HELP_REPEAT_WARN ? 'Patrol already has several requests from this phone. Stay where you are. If things get worse, call 911.' : undefined;
   return res.status(201).json({ ok: true, reference: out.call_no, token, status: 'received', ...(warning ? { warning } : {}) });
 });
@@ -717,4 +793,4 @@ publicRouter.post('/locate/:token', validate(z.object({ lat: z.number().min(-90)
   res.json({ ok: true, mountain: c.mountain });
 });
 
-module.exports = { router, publicRouter, createCall, callNo, senderKey, guestNumbers, alertNewRequest, relocate, cleanRequest, NOBODY }; // callNo, senderKey: Text HELP (lib/helpline.js)
+module.exports = { router, publicRouter, createCall, callNo, senderKey, guestNumbers, alertNewRequest, sendDueAlerts, relocate, cleanRequest, NOBODY }; // callNo, senderKey: Text HELP (lib/helpline.js)
