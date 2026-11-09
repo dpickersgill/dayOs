@@ -133,7 +133,7 @@ async function lockForDecision(conn, ctx, id) {
   return { row, def };
 }
 
-const DONE = { approved: 'This draft was already approved.', rejected: 'This draft was set aside.', expired: 'This draft is past its time and can no longer be approved.', failed: 'This draft was approved, but it did not go through. Draft it again.' };
+const DONE = { approved: 'This draft was already approved.', rejected: 'Someone already chose Not now for this draft.', expired: 'This draft is past its time and can no longer be approved.', failed: 'This draft was approved, but it did not go through. Draft it again.' };
 
 /**
  * Approves a proposal as the person in ctx (the request: ctx.auth, ctx.ip). Re-checks their role and apps, applies their

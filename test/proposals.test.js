@@ -409,6 +409,22 @@ function patrolTables() {
 }
 const MINE = ['src/lib/proposals.js', 'src/lib/conditionswriter.js', 'src/lib/conditionsnote.js', 'src/lib/roleallows.js', 'src/routes/ai.js'];
 
+test('words: the Not now button and its toast match, and no screen shows "(add-on)" twice', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'views', 'ai-ready.js'), 'utf8');
+  assert.match(src, /button\('Not now'/);
+  assert.match(src, /toast\('Not now\. Nothing was published or sent\.'\)/);
+  assert.doesNotMatch(src, /Set aside/);
+  const plus = modules.MODULES.find((m) => m.key === 'assistant_plus');
+  assert.equal(plus.label, 'AI Operations (add-on)');
+  const views = path.join(__dirname, '..', 'public', 'js');
+  const files = [...fs.readdirSync(views).map((f) => path.join(views, f)), ...fs.readdirSync(path.join(views, 'views')).map((f) => path.join(views, 'views', f))].filter((f) => f.endsWith('.js'));
+  for (const f of files) {
+    const text = fs.readFileSync(f, 'utf8');
+    assert.doesNotMatch(text, /\(add-on\)[^'\n]{0,40}\(add-on\)|\(add-on\)\s*add-on|add-on\)? \(add-on\)/i, `${path.basename(f)} doubles the add-on mark`);
+    assert.doesNotMatch(text, /label\s*\+\s*' \(add-on\)'|\$\{[^}]*label[^}]*\} \(add-on\)/, `${path.basename(f)} adds "(add-on)" to a label that has it`);
+  }
+});
+
 test('patient records: the proposals layer and the conditions writer never require patrol code or query patrol tables', () => {
   const tables = patrolTables();
   assert.ok(tables.includes('incidents') && tables.includes('incident_patients') && tables.length > 15, `found ${tables.length} patrol tables`);

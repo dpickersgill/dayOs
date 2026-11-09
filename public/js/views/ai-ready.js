@@ -72,7 +72,7 @@ function actions(p, card, collect, done, approvedText) {
     }
   }, { kind: 'primary' });
   const notNow = button('Not now', async () => {
-    try { await post(`/ai/proposals/${p.id}/reject`); toast('Set aside. Nothing was published or sent.'); done(card); } catch (err) { fail(err); }
+    try { await post(`/ai/proposals/${p.id}/reject`); toast('Not now. Nothing was published or sent.'); done(card); } catch (err) { fail(err); }
   });
   return h('div', { class: 'ready-actions' }, approve, notNow);
 }
