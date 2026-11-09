@@ -53,6 +53,7 @@ async function runAll() {
     check(`${fixture}: nothing from a patrol case beyond counts`, F.PATROL_SECRETS.every((x) => !words.includes(x)));
     const lines = [...w.body.summary, ...w.body.sections.flatMap((x) => [x.title, ...x.lines]), ...w.body.actions.map((x) => x.text)];
     check(`${fixture}: never tells anyone to open a lift or that one is safe to run`, !lines.some((l) => W.goAheadIn(l, W.liftNamesOf(data))));
+    check(`${fixture}: names only lifts, trails, areas and features in the facts, and no person`, !W.unknownNamesIn(w.body, data).length, W.unknownNamesIn(w.body, data).join(', '));
     const wh = data.wind_holds;
     if (wh && wh.caveat && (wh.lifts_over_limit.length || wh.lifts_near_limit.length)) check(`${fixture}: the wind line is under the wind section`, w.body.sections.some((x) => /wind|weather/i.test(x.title) && x.lines.includes(wh.caveat)));
     if (w.source === 'ai') console.log(w.body.summary.map((l) => `      ${l}`).join('\n'));

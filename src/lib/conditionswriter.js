@@ -144,27 +144,85 @@ function template(f) {
 // ---------------------------------------------------------------- the facts guard
 const WORDS = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90, hundred: 100, dozen: 12, half: 0.5 };
 const UNIT = /^(inch|inches|in|"|feet|foot|ft|lift|lifts|chair|chairs|trail|trails|run|runs|degree|degrees|mph|percent|%|of|new|more|hours?)$/i;
-const NAME_TAIL = 'Lift|Chair|Chairlift|Express|Quad|Triple|Double|Six|Six-Pack|Sixpack|Pulse|Tram|Gondola|T-Bar|Tbar|J-Bar|Poma|Carpet|Tow|Run|Trail|Glade|Glades|Bowl|Chute|Chutes|Ridge|Way|Street|Lane|Alley|Highway|Slope|Face|Woods|Traverse|Cut|Cutoff';
-const NAME_RE = new RegExp(`((?:[A-Z][\\w'’.-]*\\s+){1,3})(${NAME_TAIL})\\b`, 'g');
-const LEAD = new Set(['the', 'our', 'every', 'all', 'each', 'this', 'that', 'today', 'tonight', 'no', 'both', 'any', 'one', 'two', 'three', 'four', 'five', 'six', 'more', 'most', 'some', 'its', 'your', 'a', 'an', 'and', 'with', 'on', 'off', 'new', 'first', 'last', 'open', 'groomed', 'fresh', 'from', 'at', 'in', 'to', 'good', 'great', 'morning']);
-const GENERIC = new Set(['terrain park', 'tubing park', 'magic carpet', 'rope tow', 'beginner area']);
+const NAME_TAIL = /\b(?:Lift|Chair|Chairlift|Express|Quad|Triple|Double|Six|Six-Pack|Sixpack|Pulse|Tram|Gondola|T-Bar|Tbar|J-Bar|Poma|Carpet|Tow|Run|Trail|Glade|Glades|Bowl|Chute|Chutes|Ridge|Way|Street|Lane|Alley|Highway|Slope|Face|Woods|Traverse|Cut|Cutoff)$/;
+const NC = require('./namecheck');
 
-/** Every number the facts hold, in the forms a writer would use (9:00 is 9, 16:30 is 4 and 30). */
+/** Every number the facts hold, in the forms a writer would use (9:00 is 9, 16:30 is 4 and 30). Not the date's parts. */
 function allowedNumbers(f) {
   const out = new Set();
   const add = (v) => { if (v === null || v === undefined || v === '') return; const x = Number(v); if (!Number.isNaN(x)) { out.add(String(x)); out.add(String(Math.round(x))); } };
-  const addTime = (t) => { if (!t) return; const [h, m] = String(t).split(':').map(Number); add(h); add(h % 12 === 0 ? 12 : h % 12); if (m) add(m); add(0); };
+  // The hour as written for guests, on a 12-hour clock: "16:00" is 4 PM, so 16 is not a fact ("Lifts open at 16" is refused).
+  const addTime = (t) => { if (!t) return; const [h, m] = String(t).split(':').map(Number); add(h % 12 === 0 ? 12 : h % 12); if (m) add(m); add(0); };
   [f.new_snow_in, f.base_in, f.lifts_open, f.lifts_total, f.trails_open, f.trails_total, f.groomed.length, f.lifts.filter((l) => l.status !== 'open' && l.status !== 'closed').length].forEach(add);
   if (f.weather) [f.weather.temp_f, f.weather.wind_mph, f.weather.gust_mph].forEach(add);
   addTime(f.opens); addTime(f.closes); f.events.forEach((e) => addTime(e.time));
-  const [y, mo, d] = f.date.split('-').map(Number); add(y); add(mo); add(d);
+  // The date is not a fact to count with (2026.11.15 review: "12 inches" passed on the 12th). The date written as a date
+  // ("November 12", "Nov. 12th", "11/12") is taken out of the text by maskDate before the numbers are read.
   // numbers inside the mountain's own words: a note a manager wrote, an event's title
   for (const s of [f.day_note, ...f.events.map((e) => e.title)]) for (const m of String(s || '').matchAll(/\d+(?:\.\d+)?/g)) add(m[0]);
   return out;
 }
 
-/** Every name the facts hold (lifts, trails, events, the mountain), lower case, longest first. */
-const knownNames = (f) => [...new Set([f.mountain, ...f.lifts.map((l) => l.name), ...f.trail_names, ...f.events.map((e) => e.title)].filter(Boolean).map((s) => String(s).toLowerCase()))].sort((a, b) => b.length - a.length);
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+/** The day's own date, written as a date, blanked out: its numbers are not claims. Other dates keep their numbers. */
+function maskDate(text, date) {
+  const [y, mo, d] = String(date || '').split('-').map(Number);
+  if (!y || !mo || !d) return text;
+  const full = MONTH_NAMES[mo - 1]; const short = full.slice(0, 3); const sept = mo === 9 ? '|Sept' : '';
+  const day = `0?${d}(?:st|nd|rd|th)?`;
+  const blank = (m) => ' '.repeat(m.length);
+  return String(text)
+    .replace(new RegExp(`\\b(?:${full}|${short}${sept})\\.?\\s+${day}\\b(?:,?\\s+${y}\\b)?`, 'gi'), blank)
+    .replace(new RegExp(`\\b${day}\\s+(?:of\\s+)?(?:${full}|${short}${sept})\\b\\.?(?:,?\\s+${y}\\b)?`, 'gi'), blank)
+    .replace(new RegExp(`\\b0?${mo}/0?${d}(?:/(?:${y}|${y % 100}))?\\b`, 'g'), blank)
+    .replace(new RegExp(`\\bthe\\s+${d}(?:st|nd|rd|th)\\b`, 'gi'), blank);
+}
+
+/** Every name the facts hold (lifts, trails, events, the mountain, a manager's note), as written. */
+const knownNames = (f) => [...new Set([f.mountain, ...f.lifts.map((l) => l.name), ...f.trail_names, ...f.events.map((e) => e.title), f.day_note].filter(Boolean).map(String))];
+/** Single words allowed anywhere: the mountain's own name, and the words of a manager's note and the snow surface. */
+const knownWords = (f) => [f.mountain, f.day_note, f.surface].filter(Boolean).flatMap((s) => String(s).match(/[A-Za-z][A-Za-z'’-]*/g) || []);
+
+// What a sentence says about a lift. "Not open" and "on hold" are not open; "closes at 4 PM" is not a claim.
+const OPEN_WORD = /\b(?:open|opens|opened|opening|reopen(?:s|ed|ing)?|running|runs|run|spinning|spins|spin|turning|loading|operating|in operation)\b/i;
+const NOT_OPEN = /\b(?:closed|shut|hold|holds|held|delayed|paused|stopped|standby|(?:is|are|was|went|stays?)\s+down)\b/i;
+const NEGATED = /\b(?:not|isn't|aren't|won't|wasn't|no longer|never)\b/i;
+const claimOf = (s) => { if (!s) return null; if (NOT_OPEN.test(s)) return 'not_open'; const m = OPEN_WORD.exec(s); if (!m) return null; return NEGATED.test(s.slice(0, m.index)) ? 'not_open' : 'open'; };
+const STATUS_PHRASE = { hold: 'on hold', wind_hold: 'on wind hold', closed: 'closed' };
+const lre = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+
+/**
+ * Lifts described against their status: a lift on hold or closed called open or running, or an open lift called closed
+ * or on hold. Reads the words right after each mention (up to the end of the clause, past a list of other lifts:
+ * "Summit Quad and Big Bear are open"), a parenthesis after it, a list label before it ("Running: Summit Quad"), and a
+ * verb right before it ("spinning Summit Quad").
+ */
+function liftStatusProblems(text, f) {
+  const out = [];
+  const all = knownNames(f);
+  const liftAlt = f.lifts.map((l) => lre(l.name)).sort((a, b) => b.length - a.length).join('|');
+  for (const lift of f.lifts) {
+    if (!lift.name) continue;
+    const isOpen = lift.status === 'open';
+    // Longer names that hold this one ("Bear Run" holds "Bear") are blanked first, so only this lift is found.
+    const t = NC.maskNames(text, all.filter((n) => n.length > lift.name.length && n.toLowerCase().includes(lift.name.toLowerCase())));
+    const re = new RegExp(`(?<![A-Za-z0-9'’-])${lre(lift.name)}(?![A-Za-z0-9-])`, 'gi');
+    for (const m of t.matchAll(re)) {
+      let rest = t.slice(m.index + m[0].length);
+      if (liftAlt) rest = rest.replace(new RegExp(`^(?:\\s*(?:,|and|&|or)\\s*(?:the\\s+)?(?:${liftAlt}))+`, 'i'), '');
+      rest = rest.replace(/^['’]s\b/, '').replace(/^\s*[:\-]\s*/, ' ');
+      const paren = /^\s*\(([^)]{0,60})\)/.exec(rest);
+      const after = paren ? paren[1] : rest.split(/[.,;:!?\n()]|\b(?:and|but|while|whereas|although|though|until|once|so)\b/i)[0].slice(0, 80);
+      const head = t.slice(0, m.index).split(/[.;!?\n]/).pop();
+      const label = head.includes(':') ? head.slice(0, head.lastIndexOf(':')).split(/[,(]/).pop() : null;
+      const verb = /\b(?:spinning|running|loading|reopened|opened|open|closed|holding)\s+(?:the\s+)?$/i.exec(head.split(/[,:(]/).pop());
+      const claims = [claimOf(after), label ? claimOf(label) : null, verb ? claimOf(verb[0]) : null].filter(Boolean);
+      if (!isOpen && claims.includes('open')) out.push(`${lift.name} is ${STATUS_PHRASE[lift.status] || 'not open'}, so do not call it open or running`);
+      else if (isOpen && claims.includes('not_open')) out.push(`${lift.name} is open, so do not call it closed or on hold`);
+    }
+  }
+  return out;
+}
 
 /** Checks one draft against the facts. Returns the problems found (empty when it is fine). */
 function check(draft, f) {
@@ -174,32 +232,30 @@ function check(draft, f) {
   if (problems.length) return problems;
   if (draft.social.length > SOCIAL_MAX) problems.push(`the social post is ${draft.social.length} characters (keep it under ${SOCIAL_MAX})`);
   if (draft.note.length > NOTE_MAX) problems.push(`the note is ${draft.note.length} characters (keep it under ${NOTE_MAX})`);
+  if (/[\r\n]/.test(draft.email_subject)) problems.push('the email subject is more than one line');
   const ok = allowedNumbers(f);
   const names = knownNames(f);
-  const seenNum = new Set(); const seenName = new Set();
+  const words = knownWords(f);
+  const seen = new Set();
+  const once = (p) => { if (!seen.has(p)) { seen.add(p); problems.push(p); } };
   for (const k of fields) {
-    let text = String(draft[k]).replace(/\{(first_name|mountain)\}/g, ' ');
-    // names that are in the facts may hold numbers of their own (Chair 2, Lift 6)
-    const lower = text.toLowerCase();
-    for (const nm of names) { let i = lower.indexOf(nm); while (i >= 0) { text = text.slice(0, i) + ' '.repeat(nm.length) + text.slice(i + nm.length); i = lower.indexOf(nm, i + nm.length); } }
+    const raw = String(draft[k]).replace(/\{(first_name|mountain)\}/g, ' ');
+    if (NC.hasLink(raw)) once('links and web addresses are not allowed in the draft');
+    // names that are in the facts may hold numbers of their own (Chair 2, Lift 6), and so may today's date
+    const text = maskDate(NC.maskNames(raw, names), f.date);
     for (const m of text.matchAll(/\d+(?:[.,]\d+)?/g)) {
       const v = String(Number(m[0].replace(/,/g, '')));
-      if (!ok.has(v) && !seenNum.has(v)) { seenNum.add(v); problems.push(`the number ${m[0]} is not in the facts`); }
+      if (!ok.has(v)) once(`the number ${m[0]} is not in the facts`);
     }
     for (const m of text.matchAll(/\b([A-Za-z]+)(?:[\s-]+)([A-Za-z%"]+)/g)) {
       const w = WORDS[m[1].toLowerCase()];
       if (w === undefined || !UNIT.test(m[2])) continue;
-      const v = String(w);
-      if (!ok.has(v) && !seenNum.has(v)) { seenNum.add(v); problems.push(`the number "${m[1]}" is not in the facts`); }
+      if (!ok.has(String(w))) once(`the number "${m[1]}" is not in the facts`);
     }
-    for (const m of String(draft[k]).matchAll(NAME_RE)) {
-      const words = `${m[1]}${m[2]}`.trim().split(/\s+/);
-      while (words.length > 1 && LEAD.has(words[0].toLowerCase())) words.shift();
-      const cand = words.join(' ').toLowerCase();
-      if (words.length < 2 || GENERIC.has(cand) || seenName.has(cand)) continue;
-      if (names.some((nm) => nm.includes(cand) || cand.includes(nm))) continue;
-      seenName.add(cand); problems.push(`"${words.join(' ')}" is not a lift or trail at this mountain`);
+    for (const u of NC.unknownNames(raw, { names, words })) {
+      once(NAME_TAIL.test(u.text) ? `"${u.text}" is not a lift or trail at this mountain` : `"${u.text}" is not a name in the facts (name only the mountain, its lifts, trails and events)`);
     }
+    for (const p of liftStatusProblems(raw, f)) once(p);
   }
   return problems;
 }
@@ -248,7 +304,8 @@ function parseDraft(text) {
   try {
     const o = JSON.parse(s.slice(a, b + 1));
     const clean = (x) => (typeof x === 'string' ? x.replace(/\s*[—–]\s*/g, ', ').trim() : x);
-    return { note: clean(o.note), snow_report: clean(o.snow_report), social: clean(o.social), email_subject: clean(o.email_subject), email_body: clean(o.email_body) };
+    const line = (x) => (typeof x === 'string' ? x.replace(/[\r\n]+/g, ' ').replace(/\s{2,}/g, ' ').trim() : x); // a subject is one line: no header can be slipped in
+    return { note: clean(o.note), snow_report: clean(o.snow_report), social: clean(o.social), email_subject: line(clean(o.email_subject)), email_body: clean(o.email_body) };
   } catch (_) { return null; }
 }
 
@@ -384,7 +441,7 @@ proposals.register(KIND, {
     { key: 'note', label: 'Conditions page note', max: NOTE_MAX, required: true },
     { key: 'snow_report', label: 'Snow report', max: 3000 },
     { key: 'social', label: 'Social post', max: SOCIAL_MAX },
-    { key: 'email_subject', label: 'Email subject', max: 200 },
+    { key: 'email_subject', label: 'Email subject', max: 200, line: true },
     { key: 'email_body', label: 'Email', max: 2000 },
     { key: 'send_email', label: 'Also email passholders', type: 'boolean' },
   ],
@@ -425,4 +482,4 @@ proposals.register(KIND, {
   },
 });
 
-module.exports = { KIND, ROLES, NEEDS, gather, template, check, allowedNumbers, voiceOf, prompt, parseDraft, draftFrom, modelFor, settingsOf, saveSettings, prepare, draftNow, tick, clock, SOCIAL_MAX, NOTE_MAX };
+module.exports = { KIND, ROLES, NEEDS, gather, template, check, allowedNumbers, maskDate, liftStatusProblems, knownNames, voiceOf, prompt, parseDraft, draftFrom, modelFor, settingsOf, saveSettings, prepare, draftNow, tick, clock, SOCIAL_MAX, NOTE_MAX };

@@ -438,6 +438,34 @@ test('wind: every comparison with a lift\'s limit says it is the forecast at a p
   assert.ok(!W.template(calm).sections.flatMap((s) => s.lines).some((l) => /early warning/.test(l)));
 });
 
+// Go-aheads the guard must refuse: the four from the 2026.11.15 review, then four more ways of saying the same thing.
+const GO_AHEAD_PHRASES = [
+  'Gusts stay under the limit, so every lift should be able to run all day.',
+  '{lift} should be good to go.',
+  '{lift} looks fine for wind today.',
+  'No wind holds expected on {lift} today.',
+  '{lift} is okay for wind today.',
+  'All the chairs can probably spin through the afternoon.',
+  'Wind looks safe for every lift.',
+  'Expect no wind holds on {lift} today.',
+];
+// Lines that warn, plan or report, and are not a go-ahead.
+const NOT_GO_AHEAD = [
+  'Plan for wind holds on {lift}', '{lift} may not open if gusts build.', 'Clear the failed check on {lift} before loading', 'Check the open lift work orders',
+  'Lifts with open work orders can wait until noon.', '1 lift has no wind hold limit set.', 'Open more lesson spots for the waitlist',
+  'Wind hold limits are not set for any lift. A manager adds them under Mountain status, Maintenance, Lift inspections, Type.',
+];
+
+test('wind: the go-ahead guard refuses each paraphrase, and passes lines that warn or report', () => {
+  const lifts = ['Summit Quad', 'Big Bear'];
+  for (const lift of lifts) {
+    for (const p of GO_AHEAD_PHRASES) assert.ok(W.goAheadIn(p.replace(/\{lift\}/g, lift), lifts), p);
+    for (const p of NOT_GO_AHEAD) assert.ok(!W.goAheadIn(p.replace(/\{lift\}/g, lift), lifts), p);
+  }
+  assert.ok(W.goAheadIn('Big Bear should probably be able to spin by 10.', lifts), 'words between the modal and the verb');
+  assert.ok(W.goAheadIn('Wind is light: lifts are clear to spin.', lifts));
+});
+
 test('wind: the brief never tells anyone to open a lift or that one is safe to run', async () => {
   on();
   const m = await F.windDay();
@@ -448,6 +476,8 @@ test('wind: the brief never tells anyone to open a lift or that one is safe to r
     { summary: t.summary, actions: [{ text: 'Open Valley Double at 9', href: '#/conditions' }] },
     { summary: t.summary, sections: [{ title: 'Weather and wind', lines: ['Valley Double can run all day.'] }] },
     { summary: t.summary, sections: [{ title: 'Weather and wind', lines: ['Gusts are fine to open the lifts.'] }] },
+    // 2026.11.15 review: these passed before.
+    ...GO_AHEAD_PHRASES.map((line) => ({ summary: t.summary, sections: [{ title: 'Weather and wind', lines: [line.replace(/\{lift\}/g, W.liftNamesOf(data)[0])] }] })),
   ]) {
     replies = [reply({ sections: [], actions: [], ...bad })];
     const out = await W.write(data, { tenantId: m.id, kind: 'ops' });
@@ -465,6 +495,32 @@ test('wind: the brief never tells anyone to open a lift or that one is safe to r
   }
   assert.ok(!W.goAheadIn('Plan for wind holds on Summit Quad', ['Summit Quad']));
   assert.ok(!W.goAheadIn('Open more lesson spots for the waitlist', []));
+});
+
+test('names: the brief names only the lifts, trails, park features and areas in its facts, never a made-up place or person', async () => {
+  on();
+  const words = (b) => [...b.summary, ...b.sections.flatMap((s) => [s.title, ...s.lines]), ...b.actions.map((a) => a.text)];
+  // The template, on every fixture day and kind, passes the name check (no false alarms on our own words).
+  for (const [name, make] of Object.entries(F.ALL)) {
+    const fm = await make();
+    for (const kind of ['ops', 'patrol', 'school']) {
+      const fd = await F.facts(fm, kind);
+      assert.deepEqual(W.unknownNamesIn(W.template(fd), fd), [], `${name} ${kind}: ${JSON.stringify(words(W.template(fd)))}`);
+    }
+  }
+  const m = await F.windDay();
+  const data = await F.facts(m, 'ops');
+  const t = W.template(data);
+  const lift = W.liftNamesOf(data)[0];
+  for (const line of [`Grizzly ${lift.split(' ').pop()} Bowl is closed for the morning.`, 'Patroller John Smith will brief the crew.', 'Call Dave about the bullwheel.', 'Check the forecast at weather.example first.']) {
+    replies = [reply({ summary: t.summary, sections: [{ title: 'Weather and wind', lines: [line] }], actions: t.actions })];
+    const out = await W.write(data, { tenantId: m.id, kind: 'ops' });
+    assert.equal(out.source, 'template', line);
+    assert.ok(['names', 'facts'].includes(out.reason), line);
+  }
+  // Names that are in the facts, written as whole words, pass.
+  replies = [reply({ summary: t.summary, sections: [{ title: 'Lifts', lines: [`Plan for wind holds on ${lift}.`] }], actions: t.actions })];
+  assert.equal((await W.write(data, { tenantId: m.id, kind: 'ops' })).source, 'ai');
 });
 
 test('labels and headings: "Drafted by the assistant" only for AI briefs, and the email\'s headings in sentence case', async () => {

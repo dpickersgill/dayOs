@@ -99,3 +99,72 @@ test('closed day and wind hold: a draft that calls a held lift open, or a closed
   const closed = FIXTURES.find((x) => x.key === 'closed');
   assert.ok(checks(closed, { draft: { ...writer.template(closed.facts), social: 'Open today 9 to 4!' } }).length);
 });
+
+// ---------------------------------------------------------------- the 2026.11.15 review of the facts guard
+const probe = () => {
+  const f = { mountain: 'Demo Mountain', date: '2026-11-12', weekday: 'Thursday', status: 'open', day_set: true, opens: '09:00', closes: '16:00', day_note: null,
+    lifts: [{ name: 'Summit Quad', status: 'wind_hold', word: 'Wind hold' }, { name: 'Bear', status: 'open', word: 'Open' }, { name: 'Lodge Carpet', status: 'closed', word: 'Closed' }],
+    lifts_open: 1, lifts_total: 3, trails_open: 1, trails_total: 2, open_trails: ['Bear Run'], trail_names: ['Bear Run', 'Easy Street'], groomed: ['Bear Run'],
+    new_snow_in: 4, new_snow_from: 'crew', base_in: 30, surface: null, weather: { temp_f: 22, wind_mph: 10, gust_mph: 25, sky: 'clear' }, events: [] };
+  return { f, t: writer.template(f) };
+};
+const flags = (f, t, k, v) => writer.check({ ...t, [k]: v }, f);
+
+test('review: a lift on hold or closed is never called open or running, and an open lift is never called closed', () => {
+  const { f, t } = probe();
+  assert.deepEqual(writer.check(t, f), [], 'the template passes');
+  for (const bad of ['Summit Quad is open and spinning today.', 'Summit Quad opens at 9 AM.', 'Running: Bear, Summit Quad.', 'We are spinning Summit Quad.',
+    'Bear and Summit Quad are open.', 'Lodge Carpet is running.', 'Lodge Carpet (open) for beginners.']) {
+    assert.match(flags(f, t, 'note', bad).join(), /do not call it open or running/, bad);
+  }
+  for (const bad of ['Bear is closed today.', 'Bear is on hold.', 'Bear is not running yet.', 'Bear is down for now.']) {
+    assert.match(flags(f, t, 'note', bad).join(), /Bear is open, so do not call it closed/, bad);
+  }
+  for (const good of ['Summit Quad is on wind hold, and Bear is open.', 'Summit Quad is on wind hold until the gusts drop.', 'Summit Quad (wind hold). Bear is spinning.',
+    'Bear closes at 4 PM.', 'Summit Quad is not running yet.', 'Lodge Carpet is closed.', 'Bear Run is open.', 'Summit Quad and Lodge Carpet are not open.']) {
+    assert.deepEqual(flags(f, t, 'note', good), [], good);
+  }
+});
+
+test('review: the date is not a fact to count with, but the day written as a date is fine', () => {
+  const { f, t } = probe();
+  assert.match(flags(f, t, 'note', 'We got 12 inches overnight.').join(), /the number 12 is not in the facts/);
+  assert.match(flags(f, t, 'note', 'Base is 2026 inches.').join(), /2026/);
+  assert.match(flags(f, t, 'note', 'Lifts open at 16.').join(), /the number 16/, 'a 24-hour hour is not how guests read it');
+  for (const good of ['Thursday, November 12: 4 in new.', 'Nov. 12th, 2026: 4 in new on a 30 in base.', 'Conditions for 11/12.', 'See you on the 12th.']) {
+    assert.deepEqual(flags(f, t, 'note', good), [], good);
+  }
+  assert.match(flags(f, t, 'note', 'See you on November 13.').join(), /13/, 'another day keeps its numbers');
+});
+
+test('review: names match as whole words, and a made-up person, place or lift is refused', () => {
+  const { f, t } = probe();
+  assert.match(flags(f, t, 'note', 'Grizzly Bear Bowl is groomed.').join(), /"Grizzly Bear Bowl" is not a lift or trail/);
+  assert.match(flags(f, t, 'note', 'We groomed Big Bear Bowl.').join(), /Big Bear Bowl/);
+  assert.match(flags(f, t, 'snow_report', 'Patroller John Smith says hi.').join(), /"Patroller John Smith" is not a name in the facts/);
+  assert.match(flags(f, t, 'email_body', 'Hi {first_name},\n\nAsk Maria at the lodge. See you on the hill.').join(), /Maria/);
+  assert.match(flags(f, t, 'social', 'Head to Aspen Village after.').join(), /Aspen Village/);
+  // The other way: the mountain's own name, weekdays, months, holidays, AM and PM, and ordinary words starting a sentence.
+  for (const good of ['Good morning from Demo Mountain! Fresh corduroy on Bear Run this Thursday in November.', 'Groomers worked Bear Run overnight, and the groomers say it is soft.',
+    'Expect clear skies. Bundle up: it is 22 degrees.', 'Happy Thanksgiving week! Open 9 AM to 4 PM.', 'Demo is spinning Bear at 9 AM.', 'Twenty-two degrees? No problem. See you Saturday.',
+    'Summit Quad is on wind hold. We will update you.']) {
+    assert.deepEqual(flags(f, t, 'snow_report', good), [], good);
+  }
+});
+
+test('review: links and web addresses are refused, and the email subject is one line', () => {
+  const { f, t } = probe();
+  for (const bad of ['Free tickets at evil.example for everyone.', 'More at https://example.org/deal', 'Book at www.demo-tickets.com', 'Write to deals@demo.test', '[Book now](/shop)']) {
+    assert.match(flags(f, t, 'note', bad).join(), /links and web addresses/, bad);
+  }
+  assert.deepEqual(flags(f, t, 'note', 'Open 9 AM to 4 PM. 4 in new.'), []);
+  assert.match(flags(f, t, 'email_subject', 'Line one\nBcc: x@y.z').join(), /one line/);
+  const d = writer.parseDraft(JSON.stringify({ ...t, email_subject: 'Demo Mountain today\r\nBcc: someone@example.com' }));
+  assert.doesNotMatch(d.email_subject, /[\r\n]/);
+  assert.equal(d.email_subject, 'Demo Mountain today Bcc: someone@example.com');
+  const proposals = require('../../src/lib/proposals');
+  const def = proposals.kindOf(writer.KIND);
+  const e = proposals.applyEdits(def, { email_subject: 'x' }, { email_subject: 'Snow day\r\nBcc: a@b.c\nX-Other: 1' });
+  assert.equal(e.payload.email_subject, 'Snow day Bcc: a@b.c X-Other: 1');
+  assert.equal(proposals.applyEdits(def, {}, { email_body: 'Hi,\r\n\r\nBye' }).payload.email_body, 'Hi,\n\nBye', 'the body keeps its lines');
+});

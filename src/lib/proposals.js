@@ -27,7 +27,7 @@ const labelFor = (preview) => (preview && preview.by === 'template' ? TEMPLATE_L
  *   module: 'assistant_plus' | [..]        apps that must be on for the mountain
  *   run(db, ctx, payload)                  does the work as ctx (the approver's request); returns a small result
  *   preview(payload)                       what a card shows, when create() is not given one
- *   editable: [{ key, label, max, type }]  fields the approver may change (type 'text' or 'boolean')
+ *   editable: [{ key, label, max, type, line }]  fields the approver may change (type 'text' or 'boolean'; line: one line)
  *   check(db, ctx, payload)                optional: refuses before anything is claimed (a missing permission for one part)
  *   forViewer(db, ctx, row)                optional: extra facts for this viewer's card (may they email, how many people)
  * }
@@ -110,7 +110,8 @@ function applyEdits(def, payload, edits) {
     if (!f) throw bad(`${k} cannot be changed here`);
     if (f.type === 'boolean') { if (typeof v !== 'boolean') throw bad(`${f.label} must be yes or no`); kept[k] = v; continue; }
     if (typeof v !== 'string') throw bad(`${f.label} must be text`);
-    const t = v.replace(/\r\n/g, '\n').trim();
+    // A one-line field (an email subject) loses any CR or LF, so no header can be slipped into the message.
+    const t = f.line ? v.replace(/[\r\n]+/g, ' ').replace(/\s{2,}/g, ' ').trim() : v.replace(/\r\n/g, '\n').trim();
     if (f.required && !t) throw bad(`${f.label} cannot be empty`);
     if (f.max && t.length > f.max) throw bad(`${f.label} is too long (${f.max} characters at most)`);
     kept[k] = t;
@@ -189,4 +190,4 @@ async function supersede(db, tenantId, kind, keepId) {
   await db.query("UPDATE ai_proposals SET status = 'expired', error = 'A newer draft took its place' WHERE tenant_id = ? AND kind = ? AND status = 'pending' AND id <> ?", [tenantId, kind, keepId]);
 }
 
-module.exports = { register, kindOf, create, list, approve, reject, supersede, expireStale, roleAllows, LABEL, TEMPLATE_LABEL, labelFor, KINDS };
+module.exports = { register, kindOf, create, list, approve, reject, supersede, applyEdits, expireStale, roleAllows, LABEL, TEMPLATE_LABEL, labelFor, KINDS };

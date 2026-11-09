@@ -57,6 +57,38 @@ function unknownNumbers(body, data) {
   return bad;
 }
 
+// ---------------------------------------------------------------- the name check (shared with the conditions writer)
+const NC = require('./namecheck');
+// Screen names the template itself writes in the middle of a sentence ("under Mountain status, Maintenance, ...").
+const SCREEN_WORDS = ['Mountain status', 'Maintenance', 'Lift inspections', 'Type', 'Settings', 'Morning brief'];
+
+/** Every name the brief's facts hold: lifts, areas and trails (patrol counts), park features, lessons, departments, products, screens. */
+function factNames(d) {
+  const out = [d.mountain, d.brief, ...liftNamesOf(d), ...SCREEN_WORDS];
+  const add = (...xs) => { for (const x of xs) if (x) out.push(String(x)); };
+  if (d.patrol_yesterday) add(...d.patrol_yesterday.by_area.map((a) => a.area));
+  if (d.park) add(...(d.park.closed || []));
+  if (d.lessons) for (const c of d.lessons.classes_over_ratio || []) add(c.lesson, c.band);
+  if (d.shifts) add(...(d.shifts.by_department || []).map((x) => x.department));
+  if (d.lifts) for (const w of d.lifts.with_open_work_orders || []) add(...(w.titles || []));
+  if (d.unusual) add(...(d.unusual.shop_near_daily_limit || []).map((x) => x.what));
+  add(...(d.screens || []).map((x) => x.label));
+  if (d.wind_holds) add(d.wind_holds.caveat, d.wind_holds.gusts_from, d.wind_holds.gusts_during);
+  if (d.visitors) add(d.visitors.expected_basis);
+  return out;
+}
+
+/** The capitalized words in the brief that are not in its facts: a made-up lift, trail, place or person. */
+function unknownNamesIn(body, data) {
+  const names = factNames(data);
+  const words = [data.mountain, data.weekday, data.weather && data.weather.sky].filter(Boolean).flatMap((x) => String(x).match(/[A-Za-z][A-Za-z'’-]*/g) || []);
+  const out = [];
+  for (const w of [...body.summary, ...body.sections.flatMap((s) => [s.title, ...s.lines]), ...body.actions.map((a) => a.text)]) out.push(...NC.unknownNames(w, { names, words }).map((u) => u.text));
+  return [...new Set(out)];
+}
+
+const words0 = (body) => [...body.summary, ...body.sections.flatMap((s) => [s.title, ...s.lines]), ...body.actions.map((a) => a.text)];
+
 // ---------------------------------------------------------------- the template brief
 function weatherLine(w) {
   if (!w || w.source === 'none') return w && w.crew_snow_report ? null : 'No forecast for the mountain yet. Set its map point in Settings to get one.';
@@ -202,21 +234,32 @@ Rules:
 
 // ---------------------------------------------------------------- wind: an early warning, never a go-ahead
 const LIFT_WORDS = '(?:lifts?|chairs?|chairlifts?|doubles?|triples?|quads?|six-?packs?|express(?:es)?|gondolas?|trams?|t-?bars?|j-?bars?|pomas?|platters?|rope tows?|tows?|surface lifts?|carpets?)';
+// Words that give a go-ahead when they sit in a sentence with a lift word, a lift's name or "wind" (2026.11.15 review:
+// "Summit Quad should be good to go", "Big Bear looks fine for wind today", "No wind holds expected on Summit Quad").
+const GO_WORDS = /\b(?:fine|safe(?:ly)?|okay|ok\s+to\s+(?:run|load|open|operate|spin)|good\s+to\s+go|all\s+clear|green\s+light|no\s+(?:wind\s+)?holds?\s+(?:are\s+|is\s+)?(?:expected|likely|forecast|planned|needed|in\s+sight)|(?:expect|expecting|anticipate)\s+no\s+(?:wind\s+)?holds?)\b/i;
+// The verbs of running a lift, after "can", "should", "will be able to" and the like, with up to four words between.
+const MODAL = '(?:can|could|should|will|would|may|might|is\\s+able\\s+to|are\\s+able\\s+to|good\\s+to)';
+const RUN_VERB = '(?:run|operate|open|spin|load|turn)';
+const nameAlt = (liftNames) => liftNames.map((x) => String(x || '').trim()).filter(Boolean).map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')).sort((a, b) => b.length - a.length).join('|');
+
 /** Text that tells someone to open or run a lift, or says one is safe to run. The brief never says either. */
 function goAheadIn(text, liftNames = []) {
   const t = String(text);
   if (/\bsafe(?:ly)?\s+to\s+(?:run|open|load|operate|spin|ride)\b/i.test(t)) return true;
-  if (/\b(?:is|are|looks?|should be)\s+safe\b/i.test(t) && new RegExp(`\\b${LIFT_WORDS}\\b|wind`, 'i').test(t)) return true;
   if (/\b(?:ok|okay|fine|clear)\s+to\s+(?:run|open|load|operate|spin)\b/i.test(t)) return true;
   // "Open Valley Double", "spin up the chairs", "run every lift": a lift word within a few words of the verb.
   if (new RegExp(`\\b(?:open|run|start|load|spin(?:\\s+up)?|operate)\\s+(?:up\\s+)?(?:the\\s+|all\\s+|every\\s+)?(?:[\\w'-]+\\s+){0,3}${LIFT_WORDS}\\b(?!\\s+(?:work|checks?|inspections?|problems?|maintenance|limits?))`, 'i').test(t)) return true;
-  if (new RegExp(`\\b${LIFT_WORDS}\\s+(?:can|should|will be able to|are good to|is good to)\\s+(?:run|open|spin|operate|load)\\b`, 'i').test(t)) return true;
-  for (const name of liftNames) {
-    const n = String(name || '').trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (!n) continue;
+  const names = nameAlt(liftNames);
+  const subject = names ? `(?:${LIFT_WORDS}|${names})` : LIFT_WORDS;
+  for (const n of names ? names.split('|') : []) {
     if (new RegExp(`\\b(?:open|run|start|load|spin(?:\\s+up)?|operate)\\s+(?:up\\s+)?(?:the\\s+)?${n}\\b`, 'i').test(t)) return true;
-    if (new RegExp(`\\b${n}\\s+(?:can|should|will be able to|is good to)\\s+(?:run|open|spin|operate|load)\\b`, 'i').test(t)) return true;
   }
+  // "every lift should be able to run", "the chairs can probably spin": the subject, then a modal, then up to four words
+  // (none of them "not"), then the verb. "Summit Quad may not open" is not a go-ahead.
+  if (new RegExp(`\\b${subject}\\b[^.;:!?]{0,40}?\\b${MODAL}\\b(?:\\s+(?!not\\b|never\\b)[\\w'-]+){0,4}?\\s+${RUN_VERB}\\b`, 'i').test(t)) return true;
+  // "fine", "safe", "good to go", "no wind holds expected" in a sentence with a lift word, a lift name or "wind".
+  const near = new RegExp(`\\b(?:${LIFT_WORDS}|wind${names ? `|${names}` : ''})\\b`, 'i');
+  for (const sentence of t.split(/[.;!?\n]+/)) if (GO_WORDS.test(sentence) && near.test(sentence)) return true;
   return false;
 }
 
@@ -276,8 +319,9 @@ async function write(data, who) {
   const allowed = new Set((data.screens || []).map((s) => s.href));
   body.actions = body.actions.filter((a) => allowed.has(a.href)).slice(0, MAX_ACTIONS);
   if (unknownNumbers(body, data).length) return out('facts');
-  const words = [...body.summary, ...body.sections.flatMap((s) => [s.title, ...s.lines]), ...body.actions.map((a) => a.text)];
-  if (words.some((w) => goAheadIn(w, liftNamesOf(data)))) return out('go_ahead'); // never "open the lift" or "safe to run"
+  if (words0(body).some((w) => goAheadIn(w, liftNamesOf(data)))) return out('go_ahead'); // never "open the lift" or "safe to run"
+  if (unknownNamesIn(body, data).length) return out('names'); // a lift, trail, area or person the facts do not name
+  if (words0(body).some(NC.hasLink)) return out('facts'); // no links: the brief's own buttons go to the app's screens
   return { body: withWindCaveat(body, data), source: 'ai', reason: null, model, cost_micros: cost };
 }
 
@@ -328,4 +372,4 @@ ${b.actions.length ? `<tr><td style="padding:16px 24px 0">
   return { subject: `${tenant.name}: ${title}`, text, html };
 }
 
-module.exports = { write, template, renderEmail, parseReply, unknownNumbers, factNumbers, textNumbers, goAheadIn, liftNamesOf, withWindCaveat, AI_LABEL, TEMPLATE_LABEL, labelOf, SYSTEM };
+module.exports = { write, template, renderEmail, parseReply, unknownNumbers, unknownNamesIn, factNames, factNumbers, textNumbers, goAheadIn, liftNamesOf, withWindCaveat, AI_LABEL, TEMPLATE_LABEL, labelOf, SYSTEM };
