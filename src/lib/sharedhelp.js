@@ -32,6 +32,10 @@ const AREA_M = 50000;
 const PENDING_HOURS = 2;
 const NUDGE_MIN = 3;
 const PHONE_CAP = () => Number(process.env.HELP_PENDING_PHONE_CAP) || 6;
+// "Which ski area" replies have a budget of their own across the shared number, so a flood of texts that never name a ski
+// area can never use up the texts patrol sends on real calls (lib/helpline.js SHARED_HOUR_CAP counts those only).
+const PENDING_HOUR_CAP = () => Number(process.env.HELP_PENDING_HOURLY_CAP) || 100;
+const SURE_M = 300; // a position this close to one of a mountain's mapped places is that mountain's
 const MAX_TEXTS = 40;
 
 const STRINGS = {
@@ -39,7 +43,7 @@ const STRINGS = {
     e911: 'If it is life threatening, call 911.',
     ask: (link) => `Ski patrol: which ski area are you at? Reply with its name, or the code on the nearest sign. Or tap this link to send your location: ${link}.`,
     again: (link) => `Ski patrol: we did not find that ski area. Reply with its name, or the code on the nearest sign. Or tap this link to send your location: ${link}.`,
-    list: (names) => `Ski patrol: Reply ${names.map((n, i) => `${i + 1} for ${n}`).join(', ')}.`,
+    list: (names, link) => `Ski patrol: Reply ${names.map((n, i) => `${i + 1} for ${n}`).join(', ')}, or 0 for none of these: tell us the town or tap the location link: ${link}.`,
     nudge: (link) => `Ski patrol: We still need the ski area name. Reply with it, or the code on the nearest sign. Or tap this link to send your location: ${link}.`,
     expired: 'Ski patrol: If you still need help, call 911 or the ski area.',
   },
@@ -47,7 +51,7 @@ const STRINGS = {
     e911: 'Si su vida corre peligro, llame al 911.',
     ask: (link) => `Patrulla de esquí: ¿en qué estación de esquí está? Responda con su nombre o con el código del letrero más cercano. O toque este enlace para enviar su ubicación: ${link}.`,
     again: (link) => `Patrulla de esquí: no encontramos esa estación de esquí. Responda con su nombre o con el código del letrero más cercano. O toque este enlace para enviar su ubicación: ${link}.`,
-    list: (names) => `Patrulla de esquí: Responda ${names.map((n, i) => `${i + 1} para ${n}`).join(', ')}.`,
+    list: (names, link) => `Patrulla de esquí: Responda ${names.map((n, i) => `${i + 1} para ${n}`).join(', ')}, o 0 si no es ninguna: díganos el pueblo o toque el enlace de ubicación: ${link}.`,
     nudge: (link) => `Patrulla de esquí: Todavía necesitamos el nombre de la estación de esquí. Respóndanos con él o con el código del letrero más cercano. O toque este enlace para enviar su ubicación: ${link}.`,
     expired: 'Patrulla de esquí: Si todavía necesita ayuda, llame al 911 o a la estación de esquí.',
   },
@@ -70,42 +74,66 @@ async function reachable() {
 const lineFor = (t, shared) => ({ tenant_id: Number(t.id), help_number: shared, patrol_phone: t.patrol_phone || null, name: t.name, timezone: t.timezone, status: t.status, help_tag: t.help_tag });
 
 // ---------------------------------------------------------------- a. the tag
+const PAGE_POS = /(?<![\d.])[-+]?\d{1,2}\.\d{2,8}\s*,\s*[-+]?\d{1,3}\.\d{2,8}\s*(?:±|\+\/-|\+-)\s*\d{1,6}(?:\.\d+)?\s*m\b/;
 /**
- * The mountain a text's lead names by its tag, or null. A tag alone ("HELP BR ...") or with a code ("BR R7", "BR-R7")
- * names the mountain; a joined code ("BRR7") counts when the rest is one of its sign codes or has a digit. Two mountains
- * named at once (a joined code read two ways) is no match.
+ * What a text's lead says by a tag (a current tag, or one the mountain used before), or null:
+ *   { tenant, tag, old, code, sure, separated }.
+ * sure: the text can go straight to that mountain. It is sure when
+ *   - a separated tag is followed by a real active sign code there ("HELP BRX R7", "brx-r7"), or
+ *   - the whole text is the help word and the tag ("HELP BRX", "brx!", the help page's "HELP BRX lost child"), or
+ *   - the help page's position ("44.1,-71.2 ±20m") is in the text, within 50 km of that mountain.
+ * A joined code ("BRXR7") counts only when the code is a real active sign there; a digit is not enough. A tag followed
+ * by other words ("HELP BRX at the lodge") is not sure: the guest is asked, with that mountain first in the list.
  */
-async function byTag(text, list) {
+async function readTag(text, list) {
   const lead = HL.leadOf(text);
   if (!lead.cands.length) return null;
-  const byT = new Map(list.filter((t) => t.help_tag).map((t) => [t.help_tag, t]));
   const P = require('./places');
+  const byT = new Map(list.filter((t) => t.help_tag).map((t) => [t.help_tag, t]));
+  const byId = new Map(list.map((t) => [Number(t.id), t]));
+  const owner = async (tag) => {
+    if (byT.has(tag)) return { tenant: byT.get(tag), old: false };
+    const id = await HL.oldTagOwner(pool, tag);
+    return id && byId.has(id) ? { tenant: byId.get(id), old: true } : null;
+  };
+  const gps = HL.parse(text, null).gps;
+  const near = (t) => Boolean(gps && gps.accuracy !== null && PAGE_POS.test(lead.after) && t.map_lat !== null && t.map_lat !== undefined
+    && P.haversine(gps.lat, gps.lng, Number(t.map_lat), Number(t.map_lng)) <= AREA_M);
+  const bare = (rest) => rest.replace(PAGE_POS, ' ').replace(/\blost child\b/i, ' ').replace(/[\s\p{P}\p{S}]+/gu, '') === '';
   for (const c of lead.cands.filter((x) => !x.joined)) {
-    const t = byT.get(c.tag);
-    if (t) return { tenant: t, tag: c.tag };
+    const o = await owner(c.tag);
+    if (!o) continue;
+    const place = c.code ? await P.byCode(pool, o.tenant.id, c.code) : null;
+    const rest = lead.after.slice(place ? c.end : c.tagEnd);
+    return { tenant: o.tenant, tag: c.tag, old: o.old, code: place ? c.code : null, separated: true, sure: Boolean(place) || bare(rest) || near(o.tenant) };
   }
   const hits = [];
   for (const c of lead.cands.filter((x) => x.joined)) {
-    const t = byT.get(c.tag);
-    if (!t) continue;
-    const found = await P.byCode(pool, t.id, c.code);
-    if (found || /\d/.test(c.code)) hits.push({ tenant: t, tag: c.tag });
+    const o = await owner(c.tag);
+    if (o && await P.byCode(pool, o.tenant.id, c.code)) hits.push({ tenant: o.tenant, tag: c.tag, old: o.old, code: c.code, separated: false, sure: true });
   }
   const ids = new Set(hits.map((h) => Number(h.tenant.id)));
   if (ids.size === 1) return hits[0];
   if (ids.size > 1) logFailure({ job: 'help_shared', message: `a joined sign code matched ${ids.size} mountains' tags; asked which ski area instead` });
   return null;
 }
+const tagWords = (t) => `${t.old ? 'old sign tag' : 'tag'} (${t.tag}${t.code ? ` ${t.code}` : ''})`;
 
 // ---------------------------------------------------------------- c. a position
-/** The nearest mountain whose map point is within 50 km of gps, with any others within 50 km. null when none is. */
-function nearest(gps, list) {
+/**
+ * The mountains whose map point is within 50 km of gps, nearest first: { tenant, meters, others, ranked, sure }. sure: the
+ * nearest is under half the distance of the next one, or the position is within 300 m of one of its mapped places.
+ * Otherwise the guest is asked, with the list in order of distance. null when no mountain is within 50 km.
+ */
+async function byPosition(gps, list) {
   const P = require('./places');
   const near = list.filter((t) => t.map_lat !== null && t.map_lng !== null && t.map_lat !== undefined)
     .map((t) => ({ t, m: P.haversine(gps.lat, gps.lng, Number(t.map_lat), Number(t.map_lng)) }))
     .filter((x) => x.m <= AREA_M).sort((a, b) => a.m - b.m);
   if (!near.length) return null;
-  return { tenant: near[0].t, meters: near[0].m, others: near.slice(1).map((x) => ({ name: x.t.name, meters: x.m })) };
+  let sure = near.length === 1 || near[0].m < near[1].m / 2;
+  if (!sure) sure = (await P.near(pool, near[0].t.id, gps.lat, gps.lng, SURE_M, { limit: 1 })).length > 0;
+  return { tenant: near[0].t, meters: near[0].m, others: near.slice(1).map((x) => ({ name: x.t.name, meters: x.m })), ranked: near.slice(0, 5).map((x) => x.t), sure };
 }
 const km = (m) => `${(m / 1000).toFixed(1)} km`;
 const positionWords = (n) => `. Nearest ski area to the position: ${n.tenant.name} (${km(n.meters)})${n.others.length ? `; also within 50 km: ${n.others.slice(0, 4).map((o) => `${o.name} (${km(o.meters)})`).join(', ')}` : ''}`;
@@ -158,13 +186,26 @@ function matchName(text, list) {
   return { exact, close };
 }
 
+/**
+ * The strict name rule: { route } only when the reply is exactly one mountain's full name (once "ski area", "I'm at" and
+ * the like are gone); { list } of up to 5 when it is several mountains' full name, or part of a name, or a typo of one;
+ * null when nothing is near.
+ */
+function pickByName(text, list) {
+  const m = matchName(text, list);
+  if (m.exact.length === 1) return { route: m.exact[0].tenant };
+  const several = (m.exact.length > 1 ? m.exact : m.close).slice(0, 5).map((x) => x.tenant);
+  return several.length ? { list: several } : null;
+}
+
 // ---------------------------------------------------------------- texts out before a mountain is known
-/** May a "which ski area" text go to this phone? Not after STOP, not past 6 an hour to the phone or the shared cap. */
+/** May a "which ski area" text go to this phone? Not after STOP, not past 6 an hour to the phone or 100 an hour in all. */
 async function mayReply(key) {
   if (await HL.sharedOptedOut(key)) return false;
   const n = await one(pool, "SELECT COUNT(*) AS n FROM help_shared_log WHERE phone_key = ? AND direction = 'out' AND at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR", [key]);
   if (Number(n.n) >= PHONE_CAP()) return false;
-  if (await HL.sharedHourCount() >= HL.SHARED_HOUR_CAP()) { logFailure({ job: 'help_shared', message: 'shared number hourly text cap reached' }); return false; }
+  const all = await one(pool, "SELECT COUNT(*) AS n FROM help_shared_log WHERE direction = 'out' AND at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR");
+  if (Number(all.n) >= PENDING_HOUR_CAP()) { logFailure({ job: 'help_shared', message: 'which-ski-area replies: hourly cap reached' }); return false; }
   return true;
 }
 const countOut = (key) => pool.query("INSERT INTO help_shared_log (phone_key, direction, at) VALUES (?, 'out', UTC_TIMESTAMP())", [key]);
@@ -181,7 +222,7 @@ async function sendNow(phone, body, { counted = false } = {}) {
   if (!SMS.enabled() || !shared) return { ok: false, error: 'Text messages are not set up' };
   if (!counted) {
     const key = HL.keyOf(phone);
-    if (!(await mayReply(key))) return { ok: false, error: 'Not sent: STOP, or a cap' };
+    if (!(await mayReply(key))) return { ok: false, held: true, error: 'Not sent: STOP, or a cap' };
     await countOut(key);
   }
   const r = await SMS.post({ to: phone, body, from: shared });
@@ -229,43 +270,50 @@ async function resolve(pend, tenant, by, base, opt = {}) {
   return { ...out, tenant_id: Number(tenant.id), mountain: tenant.name, pending_id: pend.id };
 }
 
-async function newPending(from, key, words, photos, base) {
-  const p = HL.parse(words, null);
-  const lang = p.trigger === 'AYUDA' || HL.isSpanish(words) ? 'es' : 'en';
+/** Makes a pending request with its first text. */
+async function newPending(from, key, text) {
+  const p = HL.parse(text.b, null);
+  const lang = p.trigger === 'AYUDA' || HL.isSpanish(text.b) ? 'es' : 'en';
   const token = crypto.randomBytes(16).toString('hex');
-  const lost = p.lostChild ? 1 : 0;
   const [r] = await pool.query(`INSERT INTO help_pending (phone, phone_key, first_text, texts, lang, lost_child, locate_token, created_at, last_in_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`, [from, key, words || '[Photo]', JSON.stringify([{ b: words || (photos.length ? '[Photo]' : ''), ph: photos, at: stamp() }]), lang, lost, token]);
-  const reply = await replyText(key, with911(lang, STRINGS[lang].ask(linkOf(base, token)), lost));
-  return { reply, pending: r.insertId };
+    VALUES (?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`, [from, key, text.b || '[Photo]', JSON.stringify([{ ...text, at: stamp() }]), lang, p.lostChild ? 1 : 0, token]);
+  return { pend: await one(pool, 'SELECT * FROM help_pending WHERE id = ?', [r.insertId]), fresh: true };
 }
-
-/** A text from a phone whose request is pending: kept, then matched by a number from the list or by a name. */
-async function pendingText(pend, words, photos, list, base) {
+/**
+ * Adds a text to a pending request, once: a text Twilio sends again (the same MessageSid, after a failure) is not stored
+ * twice. Returns the request as it is now.
+ */
+async function addText(pend, text) {
   const texts = textsOf(pend);
-  texts.push({ b: words || (photos.length ? '[Photo]' : ''), ph: photos, at: stamp() });
-  const lost = Boolean(pend.lost_child) || HL.LOST_CHILD.test(String(words).normalize('NFKC'));
-  const lang = pend.lang === 'es' || /^\s*ayuda\b/i.test(words) ? 'es' : 'en';
-  await pool.query('UPDATE help_pending SET texts = ?, last_in_at = UTC_TIMESTAMP(), lost_child = ?, lang = ? WHERE id = ?', [JSON.stringify(texts.slice(-MAX_TEXTS)), lost ? 1 : 0, lang, pend.id]);
-  const now = { ...pend, texts: JSON.stringify(texts.slice(-MAX_TEXTS)), lost_child: lost ? 1 : 0, lang };
+  if (text.sid && texts.some((x) => x.sid === text.sid)) return pend;
+  texts.push({ ...text, at: stamp() });
+  const lost = Boolean(pend.lost_child) || HL.LOST_CHILD.test(String(text.b).normalize('NFKC'));
+  const lang = pend.lang === 'es' || /^\s*ayuda\b/i.test(text.b) ? 'es' : 'en';
+  const keep = JSON.stringify(texts.slice(-MAX_TEXTS));
+  await pool.query('UPDATE help_pending SET texts = ?, last_in_at = UTC_TIMESTAMP(), lost_child = ?, lang = ? WHERE id = ?', [keep, lost ? 1 : 0, lang, pend.id]);
+  return { ...pend, texts: keep, lost_child: lost ? 1 : 0, lang };
+}
+/** Adds mountains to the ones a waiting text may belong to (their patrol is alerted at 3 and 10 minutes). */
+async function addCandidates(pend, ids) {
+  let have = [];
+  try { have = JSON.parse(pend.candidates || '[]'); } catch (_) { have = []; }
+  const all = [...new Set([...have, ...ids.map(Number)])].slice(0, 40);
+  await pool.query('UPDATE help_pending SET candidates = ? WHERE id = ?', [JSON.stringify(all), pend.id]);
+}
+/** Replies with a numbered list (at most 5, ending with 0 for none of these) and keeps it for the number they reply. */
+async function askList(pend, tenants, base) {
+  const list = tenants.slice(0, 5);
+  await pool.query('UPDATE help_pending SET choices = ? WHERE id = ?', [JSON.stringify(list.map((t) => Number(t.id))), pend.id]);
+  await addCandidates(pend, list.map((t) => t.id));
+  const lang = pend.lang === 'es' ? 'es' : 'en';
+  const body = with911(lang, STRINGS[lang].list(list.map((t) => t.name), linkOf(base, pend.locate_token)), Boolean(pend.lost_child));
+  return { reply: await replyText(pend.phone_key, body), pending: pend.id, choices: list.length };
+}
+/** Asks which ski area (the first time) or says we did not find it (after). */
+async function askAgain(pend, base, first) {
+  const lang = pend.lang === 'es' ? 'es' : 'en';
   const S = STRINGS[lang];
-  // A number from the list we sent.
-  let choices = [];
-  try { choices = JSON.parse(pend.choices || '[]'); } catch (_) { choices = []; }
-  const n = String(words).trim().match(/^#?\s*(\d)\s*[.)!]?$/);
-  if (n && choices.length) {
-    const pick = list.find((t) => Number(t.id) === Number(choices[Number(n[1]) - 1]));
-    if (pick) return resolve(now, pick, 'name', base);
-  }
-  const m = matchName(words, list);
-  const one1 = m.exact.length === 1 ? m.exact[0] : !m.exact.length && m.close.length === 1 ? m.close[0] : null;
-  if (one1) return resolve(now, one1.tenant, 'name', base);
-  const several = (m.exact.length > 1 ? m.exact : m.close).slice(0, 5);
-  if (several.length > 1) {
-    await pool.query('UPDATE help_pending SET choices = ? WHERE id = ?', [JSON.stringify(several.map((x) => Number(x.tenant.id))), pend.id]);
-    return { reply: await replyText(pend.phone_key, with911(lang, S.list(several.map((x) => x.tenant.name)), lost)), pending: pend.id, choices: several.length };
-  }
-  return { reply: await replyText(pend.phone_key, with911(lang, S.again(linkOf(base, pend.locate_token)), lost)), pending: pend.id };
+  return { reply: await replyText(pend.phone_key, with911(lang, (first ? S.ask : S.again)(linkOf(base, pend.locate_token)), Boolean(pend.lost_child))), pending: pend.id };
 }
 
 // ---------------------------------------------------------------- a text to the shared number
@@ -306,6 +354,7 @@ async function route(params, base, from, key) {
   const intent = require('../routes/twilioinbound').intentOf(params);
   const words = String(params.Body || '').slice(0, 1600);
   const photos = HL.photosIn(params);
+  const sid = /^[A-Za-z0-9]{10,40}$/.test(String(params.MessageSid || params.SmsSid || '')) ? String(params.MessageSid || params.SmsSid) : null;
   const list = await reachable();
   const open = await openThreadOf(key, list);
   if (intent === 'stop') {
@@ -314,42 +363,66 @@ async function route(params, base, from, key) {
     if (open) await HL.note(pool, open.tenant_id, open.call_id, HL.STOPPED);
     return { reply: null, stopped: true };
   }
-  const pend = await openPending(key);
+  let pend = await openPending(key);
   if (intent === 'start') {
     const [d] = await pool.query('DELETE FROM help_shared_optouts WHERE phone_key = ?', [key]);
     if (d.affectedRows && open) await HL.note(pool, open.tenant_id, open.call_id, 'Guest texted START: patrol can text this phone again.');
     if (!open && !pend && !HELP_WORDS(words)) return { reply: null, started: Boolean(d.affectedRows) };
   }
-  const text = { b: words || (photos.length ? '[Photo]' : ''), ph: photos };
-  // a. a tag
-  const tagged = await byTag(words, list);
-  if (tagged) {
-    if (pend) return { ...(await resolve(pend, tagged.tenant, 'tag', base, { text, tag: tagged.tag })), by: 'tag' };
-    const fresh = !open || Number(open.tenant_id) !== Number(tagged.tenant.id);
-    const out = await HL.fromShared(lineFor(tagged.tenant, shared), from, key, [text], base, fresh ? { note: `Arrived on the shared number, matched by tag (${tagged.tag}) after 0 min` } : {});
+  const text = { b: words || (photos.length ? '[Photo]' : ''), ph: photos, ...(sid ? { sid } : {}) };
+  const tagged = await readTag(words, list);
+  // b. The phone's open call keeps its texts. Only a separated tag with a real sign code at another mountain moves the
+  // guest: a new call there, and both calls say so.
+  if (open) {
+    const there = list.find((x) => Number(x.id) === Number(open.tenant_id));
+    if (tagged && tagged.separated && tagged.code && Number(tagged.tenant.id) !== Number(open.tenant_id)) {
+      await HL.note(pool, open.tenant_id, open.call_id, `Guest texted another ski area's sign (${tagged.tenant.name}, ${tagged.tag} ${tagged.code}): a new call was made there. Check before closing this one.`);
+      const out = await HL.fromShared(lineFor(tagged.tenant, shared), from, key, [text], base,
+        { note: `Arrived on the shared number, matched by ${tagWords(tagged)} after 0 min. This phone also has an open call at ${there.name}.` });
+      return { ...out, tenant_id: Number(tagged.tenant.id), by: 'tag', moved_from: Number(open.tenant_id) };
+    }
+    const out = await HL.fromShared(lineFor(there, shared), from, key, [text], base, {});
+    return { ...out, tenant_id: Number(there.id), by: 'open call' };
+  }
+  // a. A sure tag.
+  if (tagged && tagged.sure) {
+    if (pend) return { ...(await resolve(pend, tagged.tenant, 'tag', base, { text, tag: `${tagged.tag}${tagged.old ? ', an old sign tag' : ''}` })), by: 'tag' };
+    const out = await HL.fromShared(lineFor(tagged.tenant, shared), from, key, [text], base, { note: `Arrived on the shared number, matched by ${tagWords(tagged)} after 0 min` });
     return { ...out, tenant_id: Number(tagged.tenant.id), by: 'tag' };
   }
-  // b. the phone's open call
-  if (open) {
-    const t = list.find((x) => Number(x.id) === Number(open.tenant_id));
-    const out = await HL.fromShared(lineFor(t, shared), from, key, [text], base, {});
-    return { ...out, tenant_id: Number(t.id), by: 'open call' };
-  }
-  // c. a position
+  // c. A sure position.
   const gps = HL.parse(words, null).gps;
-  const near = gps ? nearest(gps, list) : null;
-  if (near) {
-    const extra = positionWords(near);
-    if (pend) return { ...(await resolve(pend, near.tenant, 'position', base, { text, extra })), by: 'position' };
-    const out = await HL.fromShared(lineFor(near.tenant, shared), from, key, [text], base, { note: `Arrived on the shared number, matched by position after 0 min${extra}` });
-    return { ...out, tenant_id: Number(near.tenant.id), by: 'position' };
+  const pos = gps ? await byPosition(gps, list) : null;
+  if (pos && pos.sure) {
+    const extra = positionWords(pos);
+    if (pend) return { ...(await resolve(pend, pos.tenant, 'position', base, { text, extra })), by: 'position' };
+    const out = await HL.fromShared(lineFor(pos.tenant, shared), from, key, [text], base, { note: `Arrived on the shared number, matched by position after 0 min${extra}` });
+    return { ...out, tenant_id: Number(pos.tenant.id), by: 'position' };
   }
-  // d. still not known: ask, or keep asking. Never a guess.
-  if (pend) {
-    const out = await pendingText(pend, words, photos, list, base);
-    return { ...out, by: out.call_id ? 'name' : null };
+  // d. Not sure: the text waits, and the guest is asked. Never a guess.
+  let first = false;
+  if (pend) pend = await addText(pend, text);
+  else { ({ pend } = await newPending(from, key, text)); first = true; }
+  if (pos) await addCandidates(pend, pos.ranked.map((t) => t.id));
+  if (tagged) {
+    // A tag followed by other words: that mountain first in the list, then any the words name.
+    const named = pickByName(words, list);
+    const more = named ? (named.route ? [named.route] : named.list) : [];
+    return askList(pend, [tagged.tenant, ...more.filter((t) => Number(t.id) !== Number(tagged.tenant.id))], base);
   }
-  return newPending(from, key, words, photos, base);
+  if (pos) return askList(pend, pos.ranked, base);
+  let choices = [];
+  try { choices = JSON.parse(pend.choices || '[]'); } catch (_) { choices = []; }
+  const n = String(words).trim().match(/^#?\s*(\d)\s*[.)!]?$/);
+  if (n && choices.length) {
+    if (n[1] === '0') { await pool.query('UPDATE help_pending SET choices = NULL WHERE id = ?', [pend.id]); return askAgain(pend, base, false); }
+    const pick = list.find((t) => Number(t.id) === Number(choices[Number(n[1]) - 1]));
+    if (pick) return { ...(await resolve(pend, pick, 'name', base)), by: 'name' };
+  }
+  const named = pickByName(words, list);
+  if (named && named.route) return { ...(await resolve(pend, named.route, 'name', base)), by: 'name' };
+  if (named) return askList(pend, named.list, base);
+  return askAgain(pend, base, first);
 }
 
 // ---------------------------------------------------------------- the locate link
@@ -369,8 +442,9 @@ async function locateState(token) {
 }
 /**
  * A position from the shared locate page: the pending request goes to the nearest mountain within 50 km (and the call
- * gets the position). A request already sent to a mountain passes the position to its open call. Returns
- * { matched, mountain } or { matched: false } when no mountain is within 50 km (the request stays pending).
+ * gets the position) when it is sure (byPosition). A request already sent to a mountain passes the position to its open
+ * call. Returns { matched, mountain }; { matched: false, asked: true } when two are too close to tell (the list is texted);
+ * or { matched: false } when no mountain is within 50 km (the request stays pending).
  */
 async function locate(token, lat, lng, acc, base) {
   const p0 = await byToken(token);
@@ -392,8 +466,15 @@ async function locate(token, lat, lng, acc, base) {
       if (t && p.resolved_call_id) await place(p.resolved_tenant, p.resolved_call_id);
       return { matched: Boolean(t), mountain: t ? t.name : null };
     }
-    const near = nearest({ lat, lng }, await reachable());
+    const near = await byPosition({ lat, lng }, await reachable());
     if (!near) return { matched: false };
+    if (!near.sure) {
+      // Two ski areas too close to tell apart: the guest gets the list by text, nearest first.
+      await addCandidates(p, near.ranked.map((t) => t.id));
+      const asked = await askList(p, near.ranked, base);
+      if (asked.reply) await sendNow(p.phone, asked.reply, { counted: true });
+      return { matched: false, asked: true };
+    }
     const out = await resolve(p, near.tenant, 'position', base, { extra: `${positionWords(near)} (from the locate link)` });
     if (out.call_id) await place(near.tenant.id, out.call_id);
     if (out.reply) await sendNow(p.phone, out.reply, { counted: true });
@@ -439,6 +520,23 @@ async function tick() {
     const lang = p.lang === 'es' ? 'es' : 'en';
     const r = await sendNow(p.phone, with911(lang, STRINGS[lang].nudge(linkOf(base, p.locate_token)), Boolean(p.lost_child)));
     if (r.ok) out.nudged += 1;
+    else if (!r.held) {
+      // Twilio did not take it: tried again on the next run.
+      await pool.query('UPDATE help_pending SET nudged_at = NULL WHERE id = ?', [p.id]);
+      logFailure({ job: 'help_shared', message: `the 3-minute text to a waiting guest was not sent (${r.error}); trying again next run` });
+      out.retry = (out.retry || 0) + 1;
+    }
+  }
+  // Nobody is left unaware: at 3 and 10 minutes, every platform operator and the patrol at each ski area it may belong to.
+  for (const [col, mins] of [['alert3_at', 3], ['alert10_at', 10]]) {
+    const late = await rows(pool, `SELECT * FROM help_pending WHERE resolved_at IS NULL AND expired_at IS NULL AND ${col} IS NULL
+      AND created_at <= UTC_TIMESTAMP() - INTERVAL ${mins} MINUTE AND created_at > UTC_TIMESTAMP() - INTERVAL ${PENDING_HOURS} HOUR ORDER BY id LIMIT 200`);
+    for (const p of late) {
+      const [c] = await pool.query(`UPDATE help_pending SET ${col} = UTC_TIMESTAMP() WHERE id = ? AND ${col} IS NULL AND resolved_at IS NULL`, [p.id]);
+      if (!c.affectedRows) continue;
+      const r = await alertWaiting(p, mins, base);
+      out.alerts = (out.alerts || 0) + r.reached;
+    }
   }
   const old = await rows(pool, `SELECT * FROM help_pending WHERE resolved_at IS NULL AND expired_at IS NULL AND created_at <= UTC_TIMESTAMP() - INTERVAL ${PENDING_HOURS} HOUR ORDER BY id LIMIT 200`);
   for (const p of old) {
@@ -450,6 +548,35 @@ async function tick() {
   return out;
 }
 
+const ALERT = 'A help text is waiting to be matched to a ski area';
+/**
+ * The alert about a waiting text: an email to every active platform operator (the console has no phone alerts), and a
+ * phone alert to patrol on duty and the owners and managers at each ski area it may belong to (one offered in a list, or
+ * within 50 km of a position it sent). Never the guest's words or number. A failure to reach anyone is logged.
+ */
+async function alertWaiting(p, mins, base) {
+  let reached = 0;
+  const ops = await rows(pool, 'SELECT email FROM platform_operators WHERE active = 1').catch(() => []);
+  const mail = require('./mailer');
+  for (const o of ops) {
+    const r = await mail.sendPlatform({ to: o.email, subject: ALERT, tag: 'help-waiting',
+      text: `${ALERT}. It has waited ${mins} minutes. The guest has been asked which ski area they are at.\n\nOpen the platform console to see it and, if it is clear, send it to the right mountain: ${String(base).replace(/\/$/, '')}/platform` }).catch((e) => ({ ok: false, error: e.message }));
+    if (r && r.ok) reached += 1;
+  }
+  let ids = [];
+  try { ids = JSON.parse(p.candidates || '[]'); } catch (_) { ids = []; }
+  const push = require('./push');
+  for (const id of ids) {
+    const staff = await require('./patrolops').onDutyIds(pool, id).catch(() => []);
+    const managers = (await rows(pool, "SELECT id FROM users WHERE tenant_id = ? AND active = 1 AND role IN ('owner','manager')", [id])).map((u) => u.id);
+    const msg = { title: ALERT, body: `Waiting ${mins} minutes. It may be for your ski area. The guest has been asked; Verdynt/OS staff can see it.`, url: '#/patrol/dispatch', tag: `help-waiting-${p.id}` };
+    reached += Number(await push.notifyStaff(id, staff, msg).catch(() => 0)) || 0;
+    reached += Number(await push.notifyUsers(id, managers, msg).catch(() => 0)) || 0;
+  }
+  if (!reached) logFailure({ job: 'help_shared', message: `${ALERT} (${mins} minutes), and no operator or patrol could be alerted` });
+  return { reached };
+}
+
 /** Retention (the daily job): requests 30 days after they came in (their texts are on the call), counts after 7 days. */
 async function purge() {
   const [a] = await pool.query('DELETE FROM help_pending WHERE created_at < UTC_TIMESTAMP() - INTERVAL 30 DAY LIMIT 50000');
@@ -457,4 +584,4 @@ async function purge() {
   return { help_pending: a.affectedRows, help_shared_log: b.affectedRows };
 }
 
-module.exports = { STRINGS, inbound, reachable, byTag, nearest, matchName, nameWords, lev, locate, locateState, waiting, assign, tick, purge, linkOf, PHONE_CAP };
+module.exports = { STRINGS, inbound, reachable, readTag, byPosition, pickByName, matchName, ALERT, nameWords, lev, locate, locateState, waiting, assign, tick, purge, linkOf, PHONE_CAP };

@@ -721,11 +721,12 @@ router.put('/help-settings', validate(z.object({ shared_number: z.string().trim(
   await log(pool, req, null, 'shared_help_number', { number: n });
   res.json({ ok: true, shared_number: await HL.sharedNumber() });
 });
-router.get('/help-pending', async (_req, res) => {
+// A guest's phone and words: the same two-step sign-in as reading a mountain.
+router.get('/help-pending', twoStepRead, async (_req, res) => {
   const mountains = (await SH.reachable()).map((t) => ({ id: Number(t.id), name: t.name, tag: t.help_tag }));
   res.json({ data: await SH.waiting(), mountains });
 });
-router.post('/help-pending/:id/assign', validate(z.object({ tenant_id: z.number().int().positive() })), async (req, res) => {
+router.post('/help-pending/:id/assign', twoStepRead, validate(z.object({ tenant_id: z.number().int().positive() })), async (req, res) => {
   const out = await SH.assign(paramId(req), req.body.tenant_id, req.operator || null, require('../lib/baseurl').baseUrl(req));
   if (out.error === 'gone') throw notFound('That text is no longer waiting');
   if (out.error === 'mountain') throw bad('That mountain cannot take calls (paused, a demo, or no Patrol app)');

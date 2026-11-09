@@ -53,12 +53,14 @@ const SW = {
   en: { title: 'Ski patrol', sub: 'Press the button, then choose Allow when your phone asks to share your location. It tells patrol which ski area you are at.',
     go: 'Send my location to ski patrol', finding: 'Finding where you are…', again: 'Try again', done: (m) => `${m} ski patrol has your location`,
     doneSub: 'Stay where you are if it is safe, keep warm, and keep your phone on. If it is life threatening, call 911.',
+    asked: 'Two ski areas are close to you. We texted you a short list: reply with the number of yours.',
     nomatch: 'We could not tell which ski area you are at from your location. Reply to our text with the ski area\'s name, or call 911.',
     noGeo: 'This phone cannot share its location here. Reply to our text with the ski area\'s name.', denied: 'Location was not allowed. Press Try again and choose Allow, or reply to our text with the ski area\'s name.',
     lost: 'Your phone could not find its position. Reply to our text with the ski area\'s name.', e911: 'If it is life threatening, call 911.' },
   es: { title: 'Patrulla de esquí', sub: 'Toque el botón y elija Permitir cuando su teléfono pida compartir su ubicación. Así la patrulla sabe en qué estación de esquí está.',
     go: 'Enviar mi ubicación a la patrulla', finding: 'Buscando dónde está…', again: 'Intentar otra vez', done: (m) => `La patrulla de esquí de ${m} tiene su ubicación`,
     doneSub: 'Quédese donde está si es seguro, manténgase abrigado y deje su teléfono encendido. Si su vida corre peligro, llame al 911.',
+    asked: 'Hay dos estaciones de esquí cerca. Le enviamos una lista corta por mensaje: responda con el número de la suya.',
     nomatch: 'No pudimos saber en qué estación de esquí está por su ubicación. Responda a nuestro mensaje con el nombre de la estación, o llame al 911.',
     noGeo: 'Este teléfono no puede compartir su ubicación aquí. Responda a nuestro mensaje con el nombre de la estación.', denied: 'No se permitió la ubicación. Toque Intentar otra vez y elija Permitir, o responda con el nombre de la estación.',
     lost: 'Su teléfono no pudo encontrar su posición. Responda a nuestro mensaje con el nombre de la estación.', e911: 'Si su vida corre peligro, llame al 911.' },
@@ -80,6 +82,7 @@ function sharedPage(page) {
         const res = await fetch(api, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy }) });
         const out = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(out.error || 'Could not send');
+        if (!out.matched && out.asked) { clear(root).append(h('div', { class: 'help-done' }, h('h1', null, T.asked), h('p', null, T.e911), h('a', { class: 'btn', href: 'tel:911' }, 'Call 911'))); return; }
         if (!out.matched) { go.disabled = false; go.textContent = T.again; msg.append(h('p', { class: 'error-box', role: 'alert' }, T.nomatch)); return; }
         clear(root).append(h('div', { class: 'help-done' }, h('h1', null, T.done(out.mountain)), h('p', null, T.doneSub), h('a', { class: 'btn', href: 'tel:911' }, 'Call 911')));
       } catch (err) { go.disabled = false; go.textContent = T.again; msg.append(h('p', { class: 'error-box', role: 'alert' }, `${err.message}. ${T.e911}`)); }

@@ -185,74 +185,98 @@ async function isShared(number) {
 }
 
 // ---------------------------------------------------------------- the mountain's tag
-// 1 to 3 letters, unique across all mountains. Never a common short word, so "HELP I fell" or "HELP my leg" never reads
-// as a tag ("I", "MY", "LEG" are refused). Suggested from the name: Blue Ridge is BR.
+// 1 to 3 letters, unique across all mountains, and never used again by another mountain once retired (help_tag_history).
+// Never a word a guest might type at the start of a text: every English 1 to 3 letter word, texting short forms, Spanish
+// words, and body and ski words are refused (src/data/tag-blocklist.txt), so "HELP I fell", "help im on blue run" or
+// "help red run" never read as a tag. Suggested from the name, 3 letters by default: Blue Ridge is BRI or similar.
 const TAG_RE = /^[A-Z]{1,3}$/;
-const RESERVED = new Set(`A I O U E Y N X AM AN AS AT BE BY DO GO HE HI IF IN IS IT ME MY NO OF OH OK ON OR SO TO UP US WE YA YO
-  AL DE EL EN LA LO MI SE SI SU TE TU UN ALL AND ANY ARE ARM ASK BAD BIG BUT CAN CUT DAD DID FOR GET GOT HAD HAS HER HEY HIM HIS
-  HIT HOT HOW HRT ICE ITS KID LEG LET LOT MAN MAY MEN MOM NEW NOT NOW OFF OLD ONE OUR OUT OWN PLS PLZ PUT RUN SAT SAW SAY SEE
-  SHE SIT SON SOS THE TOO TRY TWO WAS WAY WHO WHY YES YET YOU LOL OMG WTF SKI TOP DEL LOS LAS POR QUE CON UNA UNO MAS MUY MAL HAY
-  SOY VOY VER DOS ESA ESE ETA HLP AYU PAT HEL STP END EMS CPR AED ER EMT DR MD PM AH UH UM HM ID TV NA NE NW SW SE`.split(/\s+/).filter(Boolean));
+const RESERVED = new Set(require('fs').readFileSync(require('path').join(__dirname, '..', 'data', 'tag-blocklist.txt'), 'utf8')
+  .split('\n').filter((l) => !/^\s*#/.test(l)).join(' ').toUpperCase().split(/\s+/).filter(Boolean));
 const normalTag = (t) => String(t || '').trim().toUpperCase();
 /** Why a tag cannot be used, or null when it can. */
 function tagProblem(t) {
   const tag = normalTag(t);
-  if (!TAG_RE.test(tag)) return 'A tag is 1 to 3 letters, like BR';
-  if (RESERVED.has(tag) || TRIGGERS[tag]) return `${tag} is a common word in a text, so it cannot be a tag. Pick other letters.`;
+  if (!TAG_RE.test(tag)) return 'A tag is 1 to 3 letters, like BRX';
+  if (RESERVED.has(tag) || TRIGGERS[tag]) return `${tag} is a word guests might type in a text, so it cannot be a tag. Pick other letters.`;
   return null;
 }
 const GENERIC = new Set(['mountain', 'mountains', 'mount', 'mt', 'mtn', 'ski', 'skiing', 'area', 'resort', 'the', 'of', 'at', 'and']);
-const lettersOf = (s) => String(s || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z ]+/g, ' ').trim();
-/** A free tag from a mountain's name: its initials (Blue Ridge: BR), then longer and other forms, then any free letters. */
+const lettersOf = (s) => String(s || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z ]+/g, ' ').trim();
+/** A free tag from a mountain's name, 3 letters: initials, then initials and the next letters, then any free letters. */
 function suggestTag(name, taken) {
   const all = lettersOf(name).split(/\s+/).filter(Boolean);
   const words = all.filter((w) => !GENERIC.has(w.toLowerCase()));
   const use = (words.length ? words : all.length ? all : ['X']).map((w) => w.toUpperCase());
   const tries = [];
   const initials = use.map((w) => w[0]).join('');
-  if (use.length >= 2) tries.push(initials.slice(0, 3), initials.slice(0, 2));
   const first = use[0]; const last = use[use.length - 1];
-  tries.push(first.slice(0, 2), first.slice(0, 3));
+  if (use.length >= 3) tries.push(initials.slice(0, 3));
   if (use.length >= 2) { for (const ch of last.slice(1)) tries.push(`${initials.slice(0, 2)}${ch}`); for (const ch of first.slice(1)) tries.push(`${first[0]}${ch}${last[0]}`); }
+  tries.push(first.slice(0, 3));
   for (const ch of first.slice(2)) tries.push(`${first.slice(0, 2)}${ch}`);
-  for (const ch of first.slice(1)) tries.push(`${first[0]}${ch}`);
-  const ok = (t) => TAG_RE.test(t) && !tagProblem(t) && !taken.has(t);
+  for (const a of first.slice(1)) for (const b of first.slice(2)) tries.push(`${first[0]}${a}${b}`);
+  const ok = (t) => /^[A-Z]{3}$/.test(t) && !tagProblem(t) && !taken.has(t);
   for (const t of tries) if (ok(t)) return t;
   const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   for (const a of A) for (const b of A) if (ok(`${first[0]}${a}${b}`)) return `${first[0]}${a}${b}`;
   for (const a of A) for (const b of A) for (const c of A) if (ok(`${a}${b}${c}`)) return `${a}${b}${c}`;
   return null;
 }
-/** The mountain's tag, given now from its name when it has none. A demo mountain has none (it never takes texts). */
+/** Tags in use now or used before by any mountain: never given to another. */
+async function takenTags(db) {
+  const now = (await rows(db, 'SELECT help_tag AS t FROM tenants WHERE help_tag IS NOT NULL')).map((r) => r.t);
+  const old = (await rows(db, 'SELECT tag AS t FROM help_tag_history').catch(() => [])).map((r) => r.t);
+  return new Set([...now, ...old]);
+}
+/** Keeps a retired tag: it is never given to another mountain, and a text with it still reaches this one. */
+async function retireTag(db, tenantId, tag) {
+  if (!tag) return;
+  await db.query('INSERT INTO help_tag_history (tag, tenant_id, retired_at) VALUES (?, ?, UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE retired_at = UTC_TIMESTAMP()', [tag, tenantId]);
+}
+/** The mountain that used this tag before, or null. */
+async function oldTagOwner(db, tag) {
+  const r = await one(db, 'SELECT tenant_id FROM help_tag_history WHERE tag = ?', [normalTag(tag)]).catch(() => null);
+  return r ? Number(r.tenant_id) : null;
+}
+/**
+ * The mountain's tag, given now from its name when it has none (or when the one it has became a blocked word: the old
+ * one is retired). A demo mountain has none (it never takes texts).
+ */
 async function ensureTag(db, tenantId) {
   const t = await one(db, 'SELECT name, help_tag, sandbox_expires_at FROM tenants WHERE id = ?', [tenantId]);
   if (!t) return null;
-  if (t.help_tag) return t.help_tag;
-  if (t.sandbox_expires_at) return null;
+  if (t.help_tag && !tagProblem(t.help_tag)) return t.help_tag;
+  if (t.sandbox_expires_at) return t.help_tag || null;
   for (let i = 0; i < 5; i++) {
-    const taken = new Set((await rows(db, 'SELECT help_tag FROM tenants WHERE help_tag IS NOT NULL')).map((r) => r.help_tag));
-    const tag = suggestTag(t.name, taken);
+    const tag = suggestTag(t.name, await takenTags(db));
     if (!tag) return null;
     try {
-      await db.query('UPDATE tenants SET help_tag = ? WHERE id = ? AND help_tag IS NULL', [tag, tenantId]);
+      const [u] = await db.query('UPDATE tenants SET help_tag = ? WHERE id = ? AND help_tag <=> ?', [tag, tenantId, t.help_tag]);
+      if (u.affectedRows && t.help_tag) await retireTag(db, tenantId, t.help_tag);
     } catch (err) { if (err.code === 'ER_DUP_ENTRY') continue; throw err; }
     const now = await one(db, 'SELECT help_tag FROM tenants WHERE id = ?', [tenantId]);
-    if (now && now.help_tag) return now.help_tag;
+    if (now && now.help_tag && !tagProblem(now.help_tag)) return now.help_tag;
   }
   return null;
 }
-/** Sets the tag (platform operator or owner). Throws a 400 or 409 the screen can show. */
+/** Sets the tag (platform operator or owner). The old one is retired. Throws a 400 or 409 the screen can show. */
 async function setTag(db, tenantId, value) {
   const { bad, conflict } = require('./errors');
   const tag = normalTag(value);
   const why = tagProblem(tag);
   if (why) throw bad(why);
+  const taken = `${tag} is, or was, another mountain's tag. Old signs may still show it, so it is never given to another mountain. Pick other letters.`;
   const other = await one(db, 'SELECT id FROM tenants WHERE help_tag = ? AND id <> ?', [tag, tenantId]);
-  if (other) throw conflict(`${tag} is another mountain's tag. Each mountain needs its own.`);
+  const was = await oldTagOwner(db, tag);
+  if (other || (was && was !== Number(tenantId))) throw conflict(taken);
+  const before = await one(db, 'SELECT help_tag FROM tenants WHERE id = ?', [tenantId]);
+  if (before && before.help_tag === tag) return tag;
   try { await db.query('UPDATE tenants SET help_tag = ? WHERE id = ?', [tag, tenantId]); } catch (err) {
-    if (err.code === 'ER_DUP_ENTRY') throw conflict(`${tag} is another mountain's tag. Each mountain needs its own.`);
+    if (err.code === 'ER_DUP_ENTRY') throw conflict(taken);
     throw err;
   }
+  if (before && before.help_tag) await retireTag(db, tenantId, before.help_tag);
+  if (was === Number(tenantId)) await db.query('DELETE FROM help_tag_history WHERE tag = ?', [tag]); // its own old tag, back in use
   return tag;
 }
 /** A sign's code with the tag, the way it is printed: "BR R7". */
@@ -314,7 +338,7 @@ async function untagFor(tenantId, tag, text) {
   for (const c of lead.cands) {
     if (c.tag !== tag) continue;
     const found = c.code ? await require('./places').byCode(pool, tenantId, c.code) : null;
-    if (c.joined && !found && !/\d/.test(c.code)) continue;
+    if (c.joined && !found) continue; // a joined code must be a real sign here: a digit is not enough
     return withoutLead(lead, c, Boolean(found) || c.joined);
   }
   return text;
@@ -368,14 +392,13 @@ async function optedOut(tenantId, key, helpNumber = null) {
 async function sharedOptedOut(key) {
   return Boolean(await one(pool, 'SELECT 1 AS x FROM help_shared_optouts WHERE phone_key = ?', [key]));
 }
-/** Texts out on the shared number in the last hour, across every mountain and the "which ski area" replies. */
+/** Texts out on calls from the shared number in the last hour, across every mountain. Pending replies never use these. */
 async function sharedHourCount() {
   const s = await sharedNumber();
   if (!s) return 0;
   const a = await one(pool, `SELECT COUNT(*) AS n FROM dispatch_sms_log l JOIN dispatch_sms_threads th ON th.tenant_id = l.tenant_id AND th.call_id = l.call_id
     WHERE l.direction = 'out' AND l.at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR AND th.help_number = ?`, [s]);
-  const b = await one(pool, "SELECT COUNT(*) AS n FROM help_shared_log WHERE direction = 'out' AND at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR");
-  return Number(a.n) + Number(b.n);
+  return Number(a.n); // texts on calls only: the "which ski area" replies have their own budget (lib/sharedhelp.js)
 }
 
 // ---------------------------------------------------------------- the conversation
@@ -690,6 +713,6 @@ async function photoUrl(tenantId, callId, n) {
 module.exports = {
   STRINGS, TRIGGERS, CALL_CAP, HOUR_CAP, SHARED_HOUR_CAP, WINDOW_HOURS, LOCATE_HOURS, OPEN, TAG_RE, RESERVED,
   says, normalNumber, keyOf, isSpanish, parse, without, LOST_CHILD, STOPPED, lineOf, lineByNumber, outbound, reserve, inbound, closed, threadView, photoUrl, mediaOk, optedOut,
-  modeOf, sharedNumber, forgetShared, isShared, sharedOptedOut, sharedHourCount, tagProblem, suggestTag, ensureTag, setTag, taggedCode, numbersOf, leadOf, withoutLead, untagFor,
+  modeOf, sharedNumber, forgetShared, isShared, sharedOptedOut, sharedHourCount, tagProblem, suggestTag, ensureTag, setTag, oldTagOwner, takenTags, taggedCode, numbersOf, leadOf, withoutLead, untagFor,
   fromShared, areaOf, note, photosIn,
 };

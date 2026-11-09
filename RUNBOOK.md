@@ -396,7 +396,9 @@ after 3 minutes and closes a request after 2 hours with "If you still need help,
 guests job runs it too, as a backup.)
 
 ### 6. Watch for texts waiting for a ski area
-The console's list of mountains shows **Help texts waiting for a ski area** when a guest has not said where they are. The
+At 3 and 10 minutes every platform operator gets an email, "A help text is waiting to be matched to a ski area", and
+patrol on duty and the managers at each ski area it may belong to get a phone alert. Reading the texts needs two-step
+sign-in. The console's list of mountains shows **Help texts waiting for a ski area** when a guest has not said where they are. The
 guest has been asked, and is asked again after 3 minutes. If the texts make it clear (a ski area named in a way the
 matching missed, a trail you know), choose Send to a mountain: the call is made there with every text in order and a
 note that you sent it by hand, and the guest gets that mountain's first reply. If it is not clear, leave it. Never guess.
@@ -409,8 +411,9 @@ note that you sent it by hand, and the guest gets that mountain's first reply. I
 4. Text `STOP`, then `HELP BR`: the call is made, nothing is texted back. Text `START`.
 
 ### Tags
-Each mountain's tag is 1 to 3 letters, unique, given from its name the first time it is needed (Blue Ridge: BR). Common
-short words (I, MY, LEG, SOS and others) are never tags. The owner changes it in Patrol settings, Text HELP, and the
+Each mountain's tag is 1 to 3 letters, unique, given from its name the first time it is needed, 3 letters (Blue Ridge:
+BRI or similar). No word a guest might type is ever a tag (`src/data/tag-blocklist.txt`: every English 1 to 3 letter word,
+texting short forms, Spanish words, body and ski words). A retired tag is never given to another mountain. The owner changes it in Patrol settings, Text HELP, and the
 platform operator in the console (the mountain, Text HELP, Change the tag). Changing it changes every sign and the trail
 map line: the mountain must print its signs again. A text with the old tag waits for a ski area and gets asked.
 

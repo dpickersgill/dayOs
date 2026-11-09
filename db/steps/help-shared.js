@@ -62,4 +62,15 @@ module.exports = ({ tableExists, columnExists }) => [
     KEY ix_hshared_out (direction, at),
     KEY ix_hshared_phone (phone_key, direction, at)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  // Review fixes: a retired tag is never given to another mountain, and a text with it still reaches the one that used it.
+  ['help_tag_history', (c) => tableExists(c, 'help_tag_history'), `CREATE TABLE help_tag_history (
+    tag         VARCHAR(3) NOT NULL PRIMARY KEY,
+    tenant_id   BIGINT UNSIGNED NOT NULL,
+    retired_at  DATETIME NOT NULL,
+    KEY ix_tagh_tenant (tenant_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  // The mountains a waiting text may belong to (offered in a list, or within 50 km of its position), whose patrol is
+  // alerted at 3 and 10 minutes with the platform operators; and when each alert went.
+  ['help_pending.candidates', (c) => columnExists(c, 'help_pending', 'alert10_at'),
+    'ALTER TABLE help_pending ADD COLUMN candidates VARCHAR(500) NULL, ADD COLUMN alert3_at DATETIME NULL, ADD COLUMN alert10_at DATETIME NULL'],
 ];

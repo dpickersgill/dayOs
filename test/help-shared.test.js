@@ -12,6 +12,7 @@ process.env.TWILIO_AUTH_TOKEN = 'tw-token';
 process.env.TWILIO_FROM = '+16105550000';
 process.env.PUBLIC_URL = 'https://app.verdynt.test';
 process.env.JOBS_KEY = 'jobs-key-for-tests-0123456789';
+process.env.HELP_PENDING_HOURLY_CAP = '100000'; // earlier runs' replies are in the same hour; the budget test sets its own
 const SHARED = `+1888${String(Date.now()).slice(-7)}`;
 process.env.SHARED_HELP_NUMBER = SHARED; // this process only, so test files running beside this one never see it
 
@@ -26,6 +27,7 @@ const SH = require('../src/lib/sharedhelp');
 
 let server; let base; let tw;
 const sent = [];
+const failTo = new Set(); // phones the fake Twilio refuses (a send that fails)
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const PW = 'correct-horse-battery';
 const REC = require('./helpers/records').records(() => base, () => PW);
@@ -36,7 +38,8 @@ let phoneN = (Date.now() % 1000000) * 10;
 const guestPhone = () => `+1555${String(phoneN++).padStart(7, '0').slice(-7)}`;
 let sidN = 0;
 const sid = () => `SM${suffix}${String(++sidN).padStart(6, '0')}`.padEnd(34, '0').slice(0, 34);
-let A; let B; let C; let D; let E;
+let A; let B; let C; let D; let E; let op;
+const mails = []; const alerts = [];
 
 async function api(method, p, { token, body, headers = {} } = {}) {
   const res = await fetch(`${base}/api/v1${p}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -70,7 +73,7 @@ async function freeTag() {
     const L = 'BCDFGHJKLMNPQRSTVWXZ';
     const t = Array.from({ length: 3 }, () => L[Math.floor(Math.random() * L.length)]).join('');
     if (HL.tagProblem(t)) continue;
-    if (!(await q('SELECT id FROM tenants WHERE help_tag = ?', [t])).length) return t;
+    if (!(await q('SELECT id FROM tenants WHERE help_tag = ?', [t])).length && !(await q('SELECT tag FROM help_tag_history WHERE tag = ?', [t])).length) return t;
   }
 }
 async function mountain(key, name, { lat, lng } = {}) {
@@ -95,12 +98,21 @@ test.before(async () => {
   tw = await new Promise((r) => {
     const s = http.createServer((req, res) => {
       let d = ''; req.on('data', (c) => { d += c; });
-      req.on('end', () => { sent.push({ url: req.url, ...Object.fromEntries(new URLSearchParams(d)) }); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ sid: `SM${sent.length}` })); });
+      req.on('end', () => {
+        const f = Object.fromEntries(new URLSearchParams(d));
+        res.setHeader('content-type', 'application/json');
+        if (failTo.has(f.To)) { failTo.delete(f.To); res.statusCode = 500; return res.end(JSON.stringify({ message: 'Twilio is down' })); }
+        sent.push({ url: req.url, ...f }); res.end(JSON.stringify({ sid: `SM${sent.length}` }));
+      });
     });
     s.listen(0, '127.0.0.1', () => r(s));
   });
   process.env.TWILIO_API_BASE = `http://127.0.0.1:${tw.address().port}`;
-  require('../src/lib/push').notifyStaff = async (_t, staffIds) => staffIds.length;
+  const PUSH = require('../src/lib/push');
+  PUSH.notifyStaff = async (t, staffIds, m) => { alerts.push({ t: Number(t), who: 'staff', ids: staffIds, m }); return staffIds.length; };
+  PUSH.notifyUsers = async (t, userIds, m) => { alerts.push({ t: Number(t), who: 'users', ids: userIds, m }); return userIds.length; };
+  require('../src/lib/mailer').sendPlatform = async (m) => { mails.push(m); return { ok: true }; };
+  op = await require('./helpers/platform-operator').operatorConsole(base, 'test-bootstrap-key');
   // Mountains this file made on earlier runs are paused, so their names and map points never match this run's texts.
   await pool.query("UPDATE tenants SET status = 'suspended' WHERE slug LIKE 'hshr%' AND slug NOT LIKE ?", [`%-${suffix}`]);
   A = await mountain('a', `Blue Ridge ${WORD}`, { lat: LAT0, lng: LNG0 }); A.lat = LAT0; A.lng = LNG0;
@@ -125,18 +137,20 @@ test('settings: Patrol settings default to the shared number; the tag is suggest
   assert.equal(s.mode, 'shared'); assert.equal(s.number, SHARED); assert.equal(s.shared_number, SHARED); assert.equal(s.tag, A.tag); assert.equal(s.can_edit_tag, true);
   const b = ok(await api('GET', '/patrol/text-help', { token: B.owner }));
   assert.equal(b.mode, 'own'); assert.equal(b.number, B.own);
-  // Suggested from the name: Blue Ridge is BR, then other letters when that is taken; never a common word.
-  assert.equal(HL.suggestTag('Blue Ridge', new Set()), 'BR');
-  assert.equal(HL.suggestTag('Blue Ridge Ski Area', new Set()), 'BR');
-  const second = HL.suggestTag('Blue Ridge', new Set(['BR']));
-  assert.match(second, /^[A-Z]{2,3}$/); assert.notEqual(second, 'BR');
-  assert.equal(HL.suggestTag('Mount Snow', new Set()), 'SN');
+  // Suggested from the name, 3 letters; then other letters when that is taken; never a word a guest might type.
+  const first = HL.suggestTag('Blue Ridge', new Set());
+  assert.match(first, /^BR[A-Z]$/);
+  assert.equal(HL.suggestTag('Blue Ridge Ski Area', new Set()), first);
+  const second = HL.suggestTag('Blue Ridge', new Set([first]));
+  assert.match(second, /^[A-Z]{3}$/); assert.notEqual(second, first);
+  assert.match(HL.suggestTag('Mount Snow', new Set()), /^S[A-Z]{2}$/);
+  assert.ok(!HL.tagProblem(HL.suggestTag('Mount Snow', new Set())));
   assert.ok(HL.tagProblem('MY') && HL.tagProblem('I') && HL.tagProblem('LEG') && HL.tagProblem('B1') && HL.tagProblem('ABCD'));
   // A mountain with no tag gets one from its name the first time it is needed.
   const F = C; // Pine Knob East (a sixth mountain in a minute would meet the sign-up limit)
   await pool.query('UPDATE tenants SET help_tag = NULL WHERE id = ?', [F.id]);
   const f = ok(await api('GET', '/patrol/text-help', { token: F.owner }));
-  assert.match(f.tag, /^P[A-Z]{1,2}$/);
+  assert.match(f.tag, /^P[A-Z]{2}$/);
   // Unique, and never a common word.
   assert.equal((await api('PUT', '/patrol/text-help', { token: F.owner, body: { mode: 'shared', tag: A.tag } })).status, 409);
   assert.equal((await api('PUT', '/patrol/text-help', { token: F.owner, body: { mode: 'shared', tag: 'my' } })).status, 400);
@@ -193,7 +207,7 @@ test('a tag routes, in every form: "HELP BR R7", "help br-r7", "HELP BRR7", "BR"
     assert.equal(Number(calls[0].tenant_id), Number(A.id), `${body} reaches ${A.name}`);
     assert.match(r.reply, new RegExp(`^(If it is life threatening, call 911\\. )?${A.name} ski patrol has your message|^La patrulla de esquí de ${A.name}`), body);
     if (/R7/i.test(body)) assert.equal(calls[0].location, 'Ridge Run sign (sign R7)', `${body}: the sign is found`);
-    assert.ok((await notesOf(calls[0])).some((n) => n.startsWith(`Arrived on the shared number, matched by tag (${A.tag}) after 0 min`)), body);
+    assert.ok((await notesOf(calls[0])).some((n) => new RegExp(`^Arrived on the shared number, matched by tag \\(${A.tag}( R7)?\\) after 0 min`).test(n)), body);
     const th = (await q('SELECT help_number FROM dispatch_sms_threads WHERE tenant_id = ? AND call_id = ?', [A.id, calls[0].id]))[0];
     assert.equal(th.help_number, SHARED, 'replies go from the shared number');
     if (/^AYUDA/.test(body)) assert.match(r.reply, /^La patrulla de esquí/);
@@ -305,14 +319,16 @@ test('an ambiguous name gets a numbered list, and "2" routes; a typo is matched;
   const phone = guestPhone();
   await text(phone, 'HELP');
   const r = await text(phone, `pine knob ${WORD}`);
-  assert.equal(r.reply, `Ski patrol: Reply 1 for ${C.name}, 2 for ${D.name}. If it is life threatening, call 911.`);
+  assert.equal(r.reply, `Ski patrol: Reply 1 for ${C.name}, 2 for ${D.name}, or 0 for none of these: tell us the town or tap the location link: https://app.verdynt.test/help-locate/${(await pendingOf(phone)).locate_token}. If it is life threatening, call 911.`);
   assert.equal((await callsOf(phone)).length, 0);
   await text(phone, '2');
   assert.equal(Number((await callsOf(phone))[0].tenant_id), Number(D.id));
-  // A typo.
+  // A typo is offered, never routed on its own; "1" routes.
   const typo = guestPhone();
   await text(typo, 'HELP');
-  await text(typo, `blue rdge ${WORD.toLowerCase()}`);
+  assert.match((await text(typo, `blue rdge ${WORD.toLowerCase()}`)).reply, new RegExp(`^Ski patrol: Reply 1 for ${A.name}, or 0 for none of these`));
+  assert.equal((await callsOf(typo)).length, 0);
+  await text(typo, '1');
   assert.equal(Number((await callsOf(typo))[0].tenant_id), Number(A.id));
   // No match: asked again, with the 911 line, as many times as it takes.
   const none = guestPhone();
@@ -395,7 +411,8 @@ test('the console shows the waiting texts, and the operator can send one to a mo
   const phone = guestPhone();
   await text(phone, 'HELP hurt');
   await text(phone, 'by the chairlift');
-  const w = ok(await console_('GET', '/help-pending'));
+  assert.equal((await console_('GET', '/help-pending')).status, 403, 'the platform key alone, without two-step, cannot read guests\' texts');
+  const w = ok(await op('GET', '/help-pending'));
   const mine = w.data.find((x) => x.phone === phone);
   assert.deepEqual(mine.texts.map((x) => x.body), ['HELP hurt', 'by the chairlift']);
   assert.ok(w.mountains.some((m) => m.id === Number(A.id) && m.tag === A.tag));
@@ -403,21 +420,21 @@ test('the console shows the waiting texts, and the operator can send one to a mo
   assert.equal((await api('GET', '/platform/help-pending', { token: A.owner })).status, 403);
   assert.equal((await api('POST', `/platform/help-pending/${mine.id}/assign`, { token: A.owner, body: { tenant_id: Number(A.id) } })).status, 403);
   const n = sent.length;
-  const out = ok(await console_('POST', `/help-pending/${mine.id}/assign`, { tenant_id: Number(A.id) }));
+  const out = ok(await op('POST', `/help-pending/${mine.id}/assign`, { tenant_id: Number(A.id) }));
   assert.equal(out.mountain, A.name);
   const [c] = await callsOf(phone);
   assert.equal(Number(c.tenant_id), Number(A.id));
   assert.deepEqual(await messagesOf(c), ['HELP hurt', 'by the chairlift']);
-  assert.ok((await notesOf(c)).some((x) => x.startsWith('Arrived on the shared number, assigned by hand on the platform console (key: Shared test) after 0 min')));
+  assert.ok((await notesOf(c)).some((x) => x.startsWith('Arrived on the shared number, assigned by hand on the platform console (Test Operator) after 0 min')));
   assert.match(sent.slice(n).find((s) => s.To === phone).Body, new RegExp(`^${A.name} ski patrol has your message`));
-  assert.ok(!ok(await console_('GET', '/help-pending')).data.some((x) => x.phone === phone), 'no longer waiting');
-  assert.equal((await console_('POST', `/help-pending/${mine.id}/assign`, { tenant_id: Number(B.id) })).status, 404, 'once');
+  assert.ok(!ok(await op('GET', '/help-pending')).data.some((x) => x.phone === phone), 'no longer waiting');
+  assert.equal((await op('POST', `/help-pending/${mine.id}/assign`, { tenant_id: Number(B.id) })).status, 404, 'once');
   // A paused mountain cannot be chosen.
   const p2 = guestPhone();
   await text(p2, 'HELP');
   const id2 = (await pendingOf(p2)).id;
   await pool.query("UPDATE tenants SET status = 'suspended' WHERE id = ?", [E.id]);
-  try { assert.equal((await console_('POST', `/help-pending/${id2}/assign`, { tenant_id: Number(E.id) })).status, 400); } finally { await pool.query("UPDATE tenants SET status = 'active' WHERE id = ?", [E.id]); }
+  try { assert.equal((await op('POST', `/help-pending/${id2}/assign`, { tenant_id: Number(E.id) })).status, 400); } finally { await pool.query("UPDATE tenants SET status = 'active' WHERE id = ?", [E.id]); }
 });
 
 // ---------------------------------------------------------------- STOP, caps, a paused mountain
@@ -466,8 +483,7 @@ test('caps: 6 replies an hour to a pending phone, and the shared number\'s hourl
     const [c] = await callsOf(p2);
     assert.ok((await notesOf(c)).some((x) => /^Text not sent: The shared help number has sent \d+ texts in the last hour/.test(x)));
     const p3 = guestPhone();
-    assert.equal((await text(p3, 'HELP')).reply, null, 'pending replies count too');
-    assert.ok(await pendingOf(p3));
+    assert.match((await text(p3, 'HELP')).reply, /which ski area/, 'the call budget does not hold back the which-ski-area reply: it has its own');
   } finally { if (was === undefined) delete process.env.HELP_SMS_SHARED_HOURLY_CAP; else process.env.HELP_SMS_SHARED_HOURLY_CAP = was; }
   // The per-call cap still holds on the shared number.
   assert.equal(HL.CALL_CAP(), 20);
@@ -508,7 +524,8 @@ test('the guest page shows the shared number, and its Send by text instead body 
     H.smsBody({ tag: g.sms_tag, code: null, place: null }),
     H.smsBody({ tag: g.sms_tag, code: null, place: null, lat: B.lat, lng: B.lng, acc: 20 }), // B's position: the tag wins
     H.smsBody({ tag: g.sms_tag, code: 'R7', place: null, lat: A.lat, lng: A.lng, acc: 8, what: 'lost child' }),
-    H.smsBody({ tag: g.sms_tag, code: null, place: 'Ridge Run', lat: LAT0 + 3, lng: LNG0, acc: 30 }),
+    H.smsBody({ tag: g.sms_tag, code: null, place: 'Ridge Run', lat: LAT0 + 0.01, lng: LNG0, acc: 30 }), // a place, and a position near A
+    H.smsBody({ tag: g.sms_tag, code: null, place: null, what: 'lost child' }),
   ];
   assert.equal(bodies[0], `HELP ${A.tag}`);
   assert.equal(bodies[1], `HELP ${A.tag} ${B.lat.toFixed(5)},${B.lng.toFixed(5)} ±20m`);
@@ -519,7 +536,11 @@ test('the guest page shows the shared number, and its Send by text instead body 
     assert.ok(c, body);
     assert.equal(Number(c.tenant_id), Number(A.id), body);
   }
-  // The guest page's code is printed as A's tagged code ("BR R7").
+  // The page's place words with no position are not enough on their own: the guest is asked, with A first.
+  const p = guestPhone();
+  const r = await text(p, H.smsBody({ tag: g.sms_tag, code: null, place: 'Ridge Run' }));
+  assert.match(r.reply, new RegExp(`^Ski patrol: Reply 1 for ${A.name}`));
+  assert.equal((await callsOf(p)).length, 0);
 });
 
 test('sign sheets show the number guests text and the tagged code; the QR address is unchanged', async () => {
@@ -550,7 +571,7 @@ test('reading the lead: tag forms, and the text that reaches the mountain keeps 
   assert.deepEqual(L.cands.map((c) => [c.tag, c.code, c.joined]), [['BR', 'R7', false]]);
   assert.equal(HL.withoutLead(L, L.cands[0], true), 'HELP R7 my knee');
   const J = HL.leadOf('help brr7');
-  assert.deepEqual(J.cands.map((c) => [c.tag, c.code]), [['B', 'RR7'], ['BR', 'R7']]);
+  assert.deepEqual(J.cands.map((c) => [c.tag, c.code]), [['BR', 'R7']], 'B alone is a letter, never a tag');
   assert.equal(HL.leadOf('HELP I fell').cands.length, 0);
   assert.equal(HL.leadOf('HELP my leg').cands.length, 0);
   assert.deepEqual(HL.leadOf('BR').cands.map((c) => c.tag), ['BR']);
@@ -607,4 +628,195 @@ test('the uphill compass picker: each of the 8 points turns the maps so that way
   // Back to uphill up with nothing mapped: north up until a lift is marked.
   const back = ok(await api('PUT', '/patrol/places/orientation', { token: A.owner, body: { auto: true } }));
   assert.equal(back.mode, 'north'); assert.equal(back.rotation_deg, 0);
+});
+
+// ---------------------------------------------------------------- the review (Nov 9): when unsure, ask; never a guess
+const rename = async (M, name) => { await pool.query('UPDATE tenants SET name = ? WHERE id = ?', [name, M.id]); };
+
+test('review 1: an open call keeps its texts; a joined code with a digit is not a sign; only a separated tag and a real sign at another mountain moves the guest', async () => {
+  const phone = guestPhone();
+  await text(phone, `HELP ${A.tag}`);
+  const r = await text(phone, `${B.tag}12`); // B has no sign 12: before the fix this left A's call for B
+  assert.equal(r.reply, null);
+  let calls = await callsOf(phone);
+  assert.equal(calls.length, 1); assert.equal(Number(calls[0].tenant_id), Number(A.id));
+  assert.deepEqual(await messagesOf(calls[0]), [`HELP ${A.tag}`, `${B.tag}12`]);
+  // A joined real code at B does not move it either: only a clearly separated tag does.
+  await text(phone, `${B.tag}R7`);
+  assert.equal((await callsOf(phone)).length, 1);
+  // "BRX R7", a real sign at B: a new call at B, and both calls say so.
+  await text(phone, `${B.tag} R7 now at the other hill`);
+  calls = await callsOf(phone);
+  assert.equal(calls.length, 2); assert.equal(Number(calls[1].tenant_id), Number(B.id));
+  assert.ok((await notesOf(calls[0])).some((n) => n.startsWith(`Guest texted another ski area's sign (${B.name}, ${B.tag} R7): a new call was made there.`)));
+  assert.ok((await notesOf(calls[1])).some((n) => n.includes(`This phone also has an open call at ${A.name}.`)));
+  // A joined code with a digit but no such sign never routes a first text either.
+  const p2 = guestPhone();
+  assert.match((await text(p2, `HELP ${A.tag}99`)).reply, /which ski area|Reply 1/);
+  assert.equal((await callsOf(p2)).length, 0);
+});
+
+test('review 2: a retired tag is never given to another mountain, and a text with it reaches the mountain that used it, or asks', async () => {
+  const old = A.tag; const now = await freeTag();
+  ok(await api('PUT', '/patrol/text-help', { token: A.owner, body: { mode: 'shared', tag: now, patrol_phone: '6105550100' } }));
+  try {
+    assert.equal((await q('SELECT tenant_id FROM help_tag_history WHERE tag = ?', [old]))[0].tenant_id, A.id);
+    assert.equal((await api('PUT', '/patrol/text-help', { token: C.owner, body: { mode: 'shared', tag: old } })).status, 409, 'never given to another mountain');
+    assert.equal((await console_('PUT', `/tenants/${C.id}/help-tag`, { tag: old })).status, 409);
+    assert.notEqual(HL.suggestTag(A.name, await HL.takenTags(pool)), old);
+    // An old sign: "HELP <old> R7" reaches A, with a note.
+    const p1 = guestPhone();
+    await text(p1, `HELP ${old} R7`);
+    const [c] = await callsOf(p1);
+    assert.equal(Number(c.tenant_id), Number(A.id));
+    assert.ok((await notesOf(c)).some((n) => n.startsWith(`Arrived on the shared number, matched by old sign tag (${old} R7)`)));
+    // A code that is not there: asked, with A first.
+    const p2 = guestPhone();
+    assert.match((await text(p2, `HELP ${old} R99`)).reply, new RegExp(`^Ski patrol: Reply 1 for ${A.name}`));
+    assert.equal((await callsOf(p2)).length, 0);
+  } finally {
+    ok(await api('PUT', '/patrol/text-help', { token: A.owner, body: { mode: 'shared', tag: old, patrol_phone: '6105550100' } })); // its own old tag, back
+  }
+  assert.equal((await q('SELECT COUNT(*) AS n FROM help_tag_history WHERE tag = ?', [old]))[0].n, 0);
+});
+
+test('review 3: common words are never tags, tags are 3 letters, and a lone tag before other words asks with that mountain first', async () => {
+  for (const w of ['BC', 'IM', 'ME', 'RED', 'RUN', 'HIP', 'ICY', 'IDK', 'IVE', 'OMG', 'RN', 'BF', 'GF', 'SI', 'YA', 'ES', 'EN', 'LOS', 'ARM', 'SKI', 'LOL']) assert.ok(HL.tagProblem(w), w);
+  assert.equal((await api('PUT', '/patrol/text-help', { token: C.owner, body: { mode: 'shared', tag: 'BC' } })).status, 400);
+  for (const body of ['help bc i fell', 'help im on blue run', 'HELP ME', 'help red run', 'help!', 'Help ski patrol at Big Sky']) {
+    const phone = guestPhone();
+    const r = await text(phone, body);
+    assert.equal((await callsOf(phone)).length, 0, body);
+    assert.match(r.reply, /^Ski patrol: (which ski area|Reply)/, body);
+  }
+  // A's tag, then words: asked, A first.
+  const phone = guestPhone();
+  assert.match((await text(phone, `help ${A.tag} at the lodge`)).reply, new RegExp(`^Ski patrol: Reply 1 for ${A.name}, or 0 for none of these`));
+  assert.equal((await callsOf(phone)).length, 0);
+  await text(phone, '1');
+  assert.equal(Number((await callsOf(phone))[0].tenant_id), Number(A.id));
+  // "0": none of these, asked again.
+  const p0 = guestPhone();
+  await text(p0, `help ${A.tag} at the lodge`);
+  assert.match((await text(p0, '0')).reply, /^Ski patrol: we did not find that ski area/);
+  assert.equal((await callsOf(p0)).length, 0);
+});
+
+test('review 4: a name routes only when it is the whole name; one word or a typo gets a numbered list ending with 0', async () => {
+  const names = { C: C.name, D: D.name, E: E.name };
+  await rename(C, `Killington ${WORD}`); await rename(D, `Deer Creek ${WORD}`); await rename(E, `Blue Knob ${WORD}`);
+  try {
+    for (const [reply, M] of [['killington', C], [`Bear Creek ${WORD}`, D], ['Blue Knob', E]]) {
+      const phone = guestPhone();
+      await text(phone, 'HELP');
+      const r = await text(phone, reply);
+      assert.equal((await callsOf(phone)).length, 0, `${reply} is not routed on a guess`);
+      assert.match(r.reply, new RegExp(`Reply 1 for ${M.name === C.name ? `Killington ${WORD}` : M === D ? `Deer Creek ${WORD}` : `Blue Knob ${WORD}`}.*0 for none of these: tell us the town or tap the location link`), reply);
+    }
+    // The whole name routes.
+    const phone = guestPhone();
+    await text(phone, 'HELP');
+    await text(phone, `Deer Creek ${WORD}`);
+    assert.equal(Number((await callsOf(phone))[0].tenant_id), Number(D.id));
+  } finally { await rename(C, names.C); await rename(D, names.D); await rename(E, names.E); }
+});
+
+test('review 5: a position between two ski areas 3.3 km apart asks with a list by distance; near a mapped place it routes', async () => {
+  await pool.query('UPDATE tenants SET map_lat = ? WHERE id = ?', [A.lat + 0.0297, B.id]); // 3.3 km north of A
+  const [m1] = await pool.query("INSERT INTO mountain_places (tenant_id, kind, name, code, lat, lng, accuracy_m, marked_by, marked_at, active) VALUES (?, 'sign', 'Midway sign', 'M1', ?, ?, 5, 1, UTC_TIMESTAMP(), 1)", [A.id, A.lat + 0.0144, A.lng]);
+  try {
+    const phone = guestPhone();
+    const r = await text(phone, `HELP ${(A.lat + 0.0135).toFixed(5)},${(A.lng + 0.01).toFixed(5)} ±25m`); // 1.6 km from A, 1.8 km from B
+    assert.equal((await callsOf(phone)).length, 0);
+    assert.match(r.reply, new RegExp(`^Ski patrol: Reply 1 for ${A.name}, 2 for ${B.name}, or 0 for none of these`));
+    // Within 300 m of A's Midway sign: A.
+    const p2 = guestPhone();
+    await text(p2, `HELP ${(A.lat + 0.0145).toFixed(5)},${A.lng.toFixed(5)} ±10m`);
+    assert.equal(Number((await callsOf(p2))[0].tenant_id), Number(A.id));
+    // The locate link asks the same way.
+    const p3 = guestPhone();
+    await text(p3, 'HELP');
+    const tok = (await pendingOf(p3)).locate_token;
+    const n = sent.length;
+    assert.deepEqual(ok(await api('POST', `/public/help-locate/${tok}`, { body: { lat: A.lat + 0.0135, lng: A.lng + 0.01, accuracy: 20 } })), { matched: false, asked: true });
+    assert.match(sent.slice(n).find((x) => x.To === p3).Body, new RegExp(`^Ski patrol: Reply 1 for ${A.name}, 2 for ${B.name}`));
+    assert.equal((await callsOf(p3)).length, 0);
+  } finally {
+    await pool.query('UPDATE tenants SET map_lat = ? WHERE id = ?', [B.lat, B.id]);
+    await pool.query('UPDATE mountain_places SET active = 0 WHERE id = ?', [m1.insertId]);
+  }
+});
+
+test('review 6: a waiting text alerts every operator and the patrol it may belong to at 3 and 10 minutes, with no guest words; a failed text is sent again', async () => {
+  const phone = guestPhone();
+  failTo.add(phone);
+  // A position between A and a mountain moved 3.3 km away makes both candidates.
+  await pool.query('UPDATE tenants SET map_lat = ? WHERE id = ?', [A.lat + 0.0297, B.id]);
+  try { await text(phone, `HELP my secret words ${(A.lat + 0.0135).toFixed(5)},${(A.lng + 0.01).toFixed(5)} ±25m`); } finally { await pool.query('UPDATE tenants SET map_lat = ? WHERE id = ?', [B.lat, B.id]); }
+  const p = await pendingOf(phone);
+  assert.deepEqual(JSON.parse(p.candidates).sort(), [Number(A.id), Number(B.id)].sort());
+  failTo.add(phone); // the list went out in the reply (TwiML); the 3-minute text through Twilio fails once
+  await pool.query('UPDATE help_pending SET created_at = created_at - INTERVAL 4 MINUTE WHERE id = ?', [p.id]);
+  mails.length = 0; alerts.length = 0;
+  ok(await job());
+  const opEmails = (await q('SELECT email FROM platform_operators WHERE active = 1')).map((r) => r.email);
+  assert.ok(opEmails.length >= 1);
+  const m3 = mails.filter((m) => m.subject === SH.ALERT);
+  assert.deepEqual(m3.map((m) => m.to).sort(), [...opEmails].sort(), 'every operator');
+  assert.ok(m3.every((m) => !m.text.includes('secret') && !m.text.includes(phone.slice(2))), 'no guest words or number');
+  const forA = alerts.filter((x) => x.t === Number(A.id) && x.m.tag === `help-waiting-${p.id}`);
+  const forB = alerts.filter((x) => x.t === Number(B.id) && x.m.tag === `help-waiting-${p.id}`);
+  assert.ok(forA.some((x) => x.who === 'users' && x.ids.length) && forB.length, 'owners and managers (and patrol on duty) at each candidate');
+  assert.ok(alerts.every((x) => x.m.title === SH.ALERT && !JSON.stringify(x.m).includes('secret')));
+  // The 3-minute text failed at Twilio: tried again on the next run.
+  assert.equal((await q('SELECT nudged_at FROM help_pending WHERE id = ?', [p.id]))[0].nudged_at, null);
+  mails.length = 0;
+  ok(await job());
+  assert.equal(sent.filter((x) => x.To === phone && /We still need the ski area name/.test(x.Body)).length, 1, 'sent on the retry, once');
+  assert.equal(mails.filter((m) => m.subject === SH.ALERT).length, 0, 'the 3-minute alert goes once');
+  await pool.query('UPDATE help_pending SET created_at = created_at - INTERVAL 7 MINUTE WHERE id = ?', [p.id]);
+  ok(await job());
+  assert.equal(mails.filter((m) => m.subject === SH.ALERT).length, opEmails.length, 'and again at 10 minutes');
+  assert.ok(mails.find((m) => m.subject === SH.ALERT).text.includes('waited 10 minutes'));
+});
+
+test('review 7: 25 spam texts use their own budget and never stop a real call\'s reply', async () => {
+  const wasP = process.env.HELP_PENDING_HOURLY_CAP; const wasS = process.env.HELP_SMS_SHARED_HOURLY_CAP;
+  const pend = (await q("SELECT COUNT(*) AS n FROM help_shared_log WHERE direction = 'out' AND at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR"))[0].n;
+  process.env.HELP_PENDING_HOURLY_CAP = String(Number(pend) + 10);
+  process.env.HELP_SMS_SHARED_HOURLY_CAP = String(await HL.sharedHourCount() + 1);
+  try {
+    let replies = 0;
+    for (let i = 0; i < 25; i++) if ((await text(guestPhone(), `hello ${i}`)).reply) replies += 1;
+    assert.equal(replies, 10, 'the which-ski-area budget');
+    const real = guestPhone();
+    const r = await text(real, `HELP ${A.tag} R7`);
+    assert.match(r.reply, new RegExp(`^${A.name} ski patrol has your message`), 'the call\'s reply still goes');
+  } finally { process.env.HELP_PENDING_HOURLY_CAP = wasP; if (wasS === undefined) delete process.env.HELP_SMS_SHARED_HOURLY_CAP; else process.env.HELP_SMS_SHARED_HOURLY_CAP = wasS; }
+});
+
+test('review 8: a first text that names the ski area in full goes straight there; part of a name asks with a list', async () => {
+  const phone = guestPhone();
+  const r = await text(phone, `HELP I'm at ${A.name}, hurt my wrist`);
+  assert.equal((await callsOf(phone)).length, 0, 'other words with the name: asked, not guessed');
+  assert.match(r.reply, new RegExp(`^Ski patrol: Reply 1 for ${A.name}`));
+  const p2 = guestPhone();
+  const r2 = await text(p2, `Help, I'm at ${A.name} ski area`);
+  assert.equal(Number((await callsOf(p2))[0].tenant_id), Number(A.id));
+  assert.match(r2.reply, new RegExp(`^${A.name} ski patrol has your message`));
+});
+
+test('review 10: a text Twilio sends again after a failure is stored once (MessageSid)', async () => {
+  const phone = guestPhone();
+  await text(phone, 'HELP');
+  const was = HL.sharedOptedOut;
+  let once = true;
+  HL.sharedOptedOut = async (...a) => { if (once) { once = false; throw new Error('database blip'); } return was(...a); };
+  const params = { AccountSid: 'ACtest', MessageSid: sid(), NumMedia: '0', From: phone, To: SHARED, Body: 'near the lodge' };
+  const post = () => fetch(`${base}${PATH}`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-twilio-signature': signature('tw-token', `${process.env.PUBLIC_URL}${PATH}`, params) }, body: new URLSearchParams(params).toString() });
+  try {
+    assert.equal((await post()).status, 500);
+    assert.equal((await post()).status, 200, 'the retry is taken');
+  } finally { HL.sharedOptedOut = was; }
+  assert.deepEqual(JSON.parse((await pendingOf(phone)).texts).map((x) => x.b), ['HELP', 'near the lodge']);
 });
