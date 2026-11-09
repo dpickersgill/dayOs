@@ -56,7 +56,8 @@ function presales(d) {
 
 // ---------------------------------------------------------------- today's wind, hour by hour
 function windChart(pt) {
-  const W = 640; const H = 200; const L = 36; const R = 12; const T = 12; const B = 28;
+  // Drawn at about the width it is shown, so the axis text stays readable on a phone.
+  const W = typeof window !== 'undefined' && window.innerWidth < 640 ? 360 : 640; const H = W < 640 ? 180 : 200; const L = 30; const R = 10; const T = 12; const B = 28;
   const hrs = pt.hours;
   const top = Math.max(10, Math.ceil(Math.max(...hrs.map((x) => Math.max(x.wind_mph || 0, x.gust_mph || 0))) / 10) * 10);
   const x = (i) => L + (hrs.length < 2 ? 0 : (i / (hrs.length - 1)) * (W - L - R));
@@ -94,9 +95,11 @@ function wind(d) {
 // ---------------------------------------------------------------- which days have snapshots
 function coverage(d) {
   const mark = (v) => (v === 'live' ? state('Taken', 'good') : v === 'backfilled' ? state('Rebuilt', 'neutral') : h('span', { class: 'muted' }, 'None'));
+  // A plain grid, not table(): it stays a grid on a phone instead of 14 cards.
   return h('section', { class: 'stack', 'aria-labelledby': 'fc-days' }, h('h3', { id: 'fc-days' }, 'The last 14 days'),
     h('p', { class: 'muted small' }, 'Taken: written by the daily job that morning. Rebuilt: filled in later from sales, shifts and the weather record. Prices cannot be rebuilt.'),
-    table([{ head: 'Day', cell: (x) => fmtDate(x.date) }, ...KINDS.map(([k, name]) => ({ head: name, cell: (x) => mark(x.kinds[k]) }))], d.days.slice(0, 14)));
+    h('table', { class: 'fc-cov' }, h('thead', null, h('tr', null, h('th', { scope: 'col' }, 'Day'), KINDS.map(([, name]) => h('th', { scope: 'col' }, name)))),
+      h('tbody', null, d.days.slice(0, 14).map((x) => h('tr', null, h('th', { scope: 'row' }, fmtDate(x.date)), KINDS.map(([k]) => h('td', null, mark(x.kinds[k]))))))));
 }
 
 // ---------------------------------------------------------------- weather points
