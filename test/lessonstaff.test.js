@@ -233,7 +233,8 @@ test('the fill view, Fill the gap, a shift offer taken, and the staffing target 
 
 test('the lessons job recounts, records when a lesson fills and opens again, and demand turns into suggestions', async () => {
   const M = await mountain('d');
-  const d = addDays(today, 5);
+  // Not a Saturday: a 10:00 kids lesson on a Saturday would already fill the 10:00 slot the demand check suggests below.
+  let d = addDays(today, 5); if (new Date(`${d}T12:00:00Z`).getUTCDay() === 6) d = addDays(d, 1);
   const p = await lesson(M, d, '10:00', kids, { pool: 3 });
   await q('UPDATE lesson_sessions SET capacity = 1 WHERE id = ?', [p]);
   const t = await staffPart.tick();
