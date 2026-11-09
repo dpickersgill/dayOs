@@ -114,6 +114,8 @@ test('the release zip leaves out the tests and packages, and deploy.sh and promo
   const stamp = nodePath.join(root, 'src', 'release', 'build.json');
   const made = !fs.existsSync(stamp);
   if (made) fs.writeFileSync(stamp, JSON.stringify({ version: require('../package.json').version, build: 'slimtest', built_at: new Date().toISOString() }));
+  const dates = nodePath.join(root, 'src', 'release', 'page-dates.json'); // written by the zip when missing (SEO 2026.11)
+  const hadDates = fs.existsSync(dates);
   const out = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'slim-zip-'));
   try {
     const said = execFileSync('bash', ['scripts/zip-release.sh', '--no-stamp'], { cwd: root, env: { ...process.env, ZIP_OUT_DIR: out } }).toString();
@@ -122,10 +124,11 @@ test('the release zip leaves out the tests and packages, and deploy.sh and promo
     const names = execFileSync('unzip', ['-Z1', zip]).toString().split('\n').filter(Boolean);
     assert.deepEqual(names.filter((n) => n.startsWith('test/')), []);
     assert.deepEqual(names.filter((n) => PACKAGE.test(n)), []);
-    for (const n of ['deploy.sh', 'promote.sh', 'Dockerfile', '.dockerignore', '.gcloudignore', 'package-lock.json', 'src/server.js', 'src/release/build.json', 'public/index.html']) assert.ok(names.includes(n), `${n} is in the zip`);
+    for (const n of ['deploy.sh', 'promote.sh', 'Dockerfile', '.dockerignore', '.gcloudignore', 'package-lock.json', 'src/server.js', 'src/release/build.json', 'src/release/page-dates.json', 'public/index.html']) assert.ok(names.includes(n), `${n} is in the zip`);
   } finally {
     fs.rmSync(out, { recursive: true, force: true });
     if (made) fs.rmSync(stamp);
+    if (!hadDates) fs.rmSync(dates, { force: true });
   }
 });
 

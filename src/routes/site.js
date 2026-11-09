@@ -287,7 +287,7 @@ async function render(req, name, slug, words = null) {
   const cut = noCut(plans);
   const prices = (s) => Object.entries(cut).reduce((t, [k, v]) => t.replaceAll(k, lit(v)), s.replaceAll('{{PATROL_FROM}}', lit(patrolFrom(plans))).replaceAll('{{PATROL_ADDON}}', lit(patrolAddon(plans))));
   html = prices(html);
-  const head = SEO.head({ slug: name === 'notfound' ? 'notfound' : slug, origin: canonicalOrigin(req), html, plans, verify: config.site.verify, sameAs: config.site.sameAs, noindex: isCopy(req), modified: modified(name), asset: ASSET_V });
+  const head = SEO.head({ slug: name === 'notfound' ? 'notfound' : slug, origin: canonicalOrigin(req), html, plans, verify: config.site.verify, sameAs: config.site.sameAs, noindex: isCopy(req), modified: modified(name, slug), asset: ASSET_V });
   html = fillPlans(html, plans).replace(/<!--\/?(PLANS|ADDONS)(:[a-z]+)?-->/g, '');
   html = html.replace('<!--HEAD-->', lit(head))
     .replace('<div class="sx">', lit(name === 'contact' ? '<div class="sx">' : '<div class="sx has-mcta">'))
@@ -334,8 +334,25 @@ async function send(req, res, name, slug, status = 200, words = null) {
 // two builds with different files never share it, and only a stamped build is kept a year (lib/appassets.js).
 const ASSET_V = require('../lib/appassets').SITE_V;
 
-/** When each page last changed, for the sitemap. */
-const modified = (name) => { try { return fs.statSync(path.join(DIR, `${name}.html`)).mtime.toISOString().slice(0, 10); } catch (_) { return null; } };
+/** When each page last changed, for the sitemap's lastmod and the page's dateModified: the date of the last commit that
+ * changed its template, from src/release/page-dates.json (written when the release zip is made, scripts/page-dates.js).
+ * Without that file (local copies) or for a page it does not list, the template file's own date. */
+const PAGE_DATES = path.join(__dirname, '..', 'release', 'page-dates.json');
+let pageDates = { at: -1, pages: {} };
+function datesFile() {
+  let at = 0; try { at = fs.statSync(PAGE_DATES).mtimeMs; } catch (_) { at = 0; }
+  if (at !== pageDates.at) {
+    let pages = {};
+    try { pages = at ? JSON.parse(fs.readFileSync(PAGE_DATES, 'utf8')).pages || {} : {}; } catch (_) { pages = {}; }
+    pageDates = { at, pages };
+  }
+  return pageDates.pages;
+}
+const modified = (name, slug) => {
+  const d = datesFile()[slug];
+  if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+  try { return fs.statSync(path.join(DIR, `${name}.html`)).mtime.toISOString().slice(0, 10); } catch (_) { return null; }
+};
 const PRIORITY = { '': '1.0', product: '0.9', 'ski-patrol': '0.9', 'ski-area-risk-management': '0.9', pricing: '0.9', resources: '0.7', about: '0.6', contact: '0.7', security: '0.6', privacy: '0.2', terms: '0.2' };
 for (const [s] of SOLUTIONS) if (!PRIORITY[s]) PRIORITY[s] = '0.8';
 PRIORITY['good-day'] = '0.7';
@@ -452,7 +469,7 @@ Yearly billing costs less. Pay by card, US bank account or invoice. 14 days free
 
 function sitemap(req, res) {
   const origin = canonicalOrigin(req);
-  const urls = Object.entries(PAGES).map(([slug, name]) => `  <url><loc>${origin}/${slug}</loc>${modified(name) ? `<lastmod>${modified(name)}</lastmod>` : ''}<priority>${PRIORITY[slug] || '0.5'}</priority></url>`).join('\n');
+  const urls = Object.entries(PAGES).map(([slug, name]) => [slug, modified(name, slug)]).map(([slug, d]) => `  <url><loc>${origin}/${slug}</loc>${d ? `<lastmod>${d}</lastmod>` : ''}<priority>${PRIORITY[slug] || '0.5'}</priority></url>`).join('\n');
   res.type('application/xml').set('Cache-Control', 'public, max-age=3600').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`);
 }
 
@@ -503,7 +520,30 @@ const contactBody = z.object({
   plan_interest: z.string().trim().max(60).optional().default(''), message: z.string().trim().max(2000).optional().default(''),
   founding: z.boolean().optional().default(false), website: z.string().max(200).optional().default(''), // a field people never see: bots fill it
   scores: z.array(z.number().int().min(0).max(2)).max(40).optional(), // the Good Day scorecard's answers, one per question
+  // Where the request came from (SEO 2026.11): the page on this website the visitor was on before the form, and the other
+  // website that sent them here. Page addresses and a domain only; anything else is dropped (leadSource below).
+  source_page: z.string().trim().max(500).optional().default(''), source_ref: z.string().trim().max(500).optional().default(''),
 }).refine((b) => b.kind !== 'scorecard' || SC.valid(b.scores), { message: 'Answer every question on the scorecard first.', path: ['scores'] });
+/**
+ * The lead's source, cleaned: the page as "/slug" when it is one of the website's pages (query and fragment dropped, so
+ * nothing typed into an address is kept), and the referring site as its domain alone, never our own.
+ */
+function leadSource(req, b) {
+  let page = null;
+  try {
+    const u = new URL(b.source_page || '', 'https://x.invalid');
+    const slug = u.pathname.toLowerCase().replace(/^\/site(?=\/|$)/, '').replace(/^\/+|\/+$/g, '');
+    if (b.source_page && slug in PAGES) page = `/${slug}`;
+  } catch (_) { page = null; }
+  let ref = null;
+  try {
+    const raw = String(b.source_ref || '');
+    const host = (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? new URL(raw).hostname : raw.split(/[/?#:]/)[0]).toLowerCase().replace(/^www\./, '');
+    const ours = [...config.site.hosts, hostOf(req)].map((h) => h.replace(/^www\./, ''));
+    if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host) && host.length <= 120 && !ours.includes(host)) ref = host;
+  } catch (_) { ref = null; }
+  return { page, ref };
+}
 const KINDS = { walkthrough: 'Walkthrough request', trial: 'Trial mountain request', founding: 'Walkthrough request (Founding Mountain Program)', question: 'Question', patrol: 'Patrol only sign-up', review: 'Incident report review request', setup: 'Guided setup request', scorecard: 'Good Day scorecard results' };
 
 api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SITE_CONTACT_LIMIT) || 8, message: 'Too many messages from this address. Try again later, or email us.' }), validate(contactBody), async (req, res) => {
@@ -512,15 +552,17 @@ api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.e
   const ipHash = crypto.createHash('sha256').update(`${config.linkSecret}:${req.ip}`).digest('hex');
   // Scorecard results are written here from the answers, in our own words; anything typed as a message is ignored.
   if (b.kind === 'scorecard') b.message = SC.resultsText(b.scores);
+  const src = leadSource(req, b);
   const [r] = await pool.query(
-    'INSERT INTO site_leads (kind, name, mountain, role, email, phone, lifts, plan_interest, message, founding, ip_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [b.kind, b.name, b.mountain, b.role || null, b.email, b.phone || null, b.lifts || null, b.plan_interest || null, b.message || null, b.founding || b.kind === 'founding' ? 1 : 0, ipHash],
+    'INSERT INTO site_leads (kind, name, mountain, role, email, phone, lifts, plan_interest, message, founding, ip_hash, source_page, source_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [b.kind, b.name, b.mountain, b.role || null, b.email, b.phone || null, b.lifts || null, b.plan_interest || null, b.message || null, b.founding || b.kind === 'founding' ? 1 : 0, ipHash, src.page, src.ref],
   );
   const mailer = require('../lib/mailer');
   let copy = false;
   if (config.site.contactEmail && mailer.enabled()) {
     const lines = [`${KINDS[b.kind]} from the website`, '', `Name: ${b.name}`, `Mountain: ${b.mountain}`, b.role ? `Role: ${b.role}` : null, `Email: ${b.email}`, b.phone ? `Phone: ${b.phone}` : null,
-      b.lifts ? `Lifts: ${b.lifts}` : null, b.plan_interest ? `Interested in: ${b.plan_interest}` : null, b.founding ? 'Wants to apply for the Founding Mountain Program.' : null, b.message ? `\n${b.message}` : null,
+      b.lifts ? `Lifts: ${b.lifts}` : null, b.plan_interest ? `Interested in: ${b.plan_interest}` : null, b.founding ? 'Wants to apply for the Founding Mountain Program.' : null,
+      src.page || src.ref ? `Came from: ${[src.page ? `the ${src.page} page` : null, src.ref ? `${src.page ? 'after ' : ''}${src.ref}` : null].filter(Boolean).join(', ')}` : null, b.message ? `\n${b.message}` : null,
       '', 'Reply to this email to answer them. It is also in the console, under Leads.'].filter((x) => x !== null);
     const sent = await mailer.sendPlatform({ to: config.site.contactEmail, replyTo: b.email, subject: `${KINDS[b.kind]}: ${b.mountain}`, text: lines.join('\n'), tag: 'site-lead' });
     if (sent.ok) {
@@ -622,4 +664,4 @@ function goodDayPages(router) {
   });
 }
 
-module.exports = { pages, notFound, api, forgetPlans, PAGES, onSite, canonicalOrigin };
+module.exports = { pages, notFound, api, forgetPlans, PAGES, onSite, canonicalOrigin, leadSource };

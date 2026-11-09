@@ -335,9 +335,11 @@ async function leads() {
   try { r = await call('GET', '/leads'); } catch (ex) { fail(ex); return; }
   const dlg = dialog('Leads from the website', r.data.length ? h('div', { class: 'stack' },
     h('p', { class: 'hint' }, 'Requests sent from the Contact page, newest first. Each was also emailed to SITE_CONTACT_EMAIL when email is set up.'),
+    r.by_page && r.by_page.length ? h('p', { class: 'small' }, h('b', null, 'Walkthrough and trial requests by page, last 12 months: '), r.by_page.map((x) => `${x.page || 'not known'} ${x.n}`).join(', ')) : null,
     table([
       { head: 'When', cell: (l) => dayTime(l.created_at) },
       { head: 'Who', cell: (l) => h('span', null, h('b', null, l.mountain), h('br'), `${l.name}${l.role ? `, ${l.role}` : ''}`, h('br'), h('a', { href: `mailto:${l.email}` }, l.email), l.phone ? ` ${l.phone}` : '') },
+      { head: 'From', cell: (l) => h('span', { class: 'small' }, l.source_page || h('span', { class: 'muted' }, 'Not known'), l.source_ref ? h('div', { class: 'muted' }, `via ${l.source_ref}`) : null) },
       { head: 'Wants', cell: (l) => h('span', null, LEAD_KIND[l.kind] || l.kind, l.founding && l.kind !== 'founding' ? ', Founding Mountain Program' : '', l.plan_interest ? h('span', { class: 'muted small' }, ` (${l.plan_interest})`) : null, l.lifts ? h('span', { class: 'muted small' }, `, ${l.lifts} lifts`) : null, l.message ? h('p', { class: 'small' }, l.message) : null) },
       { head: 'Status', cell: (l) => { const sel = h('select', { 'aria-label': `Status for ${l.mountain}`, style: 'min-width:9.5em' }, ...LEAD_STATUS.map(([v, t]) => { const o = h('option', { value: v }, t); o.selected = l.status === v; return o; })); sel.addEventListener('change', async () => { try { await call('PATCH', `/leads/${l.id}`, { status: sel.value }); toast('Saved.'); } catch (ex) { fail(ex); } }); return h('span', null, sel, l.slug ? h('div', { class: 'small muted' }, `Mountain: ${l.slug}`) : null, l.operator_note ? h('div', { class: 'small' }, l.operator_note) : null); } },
       { actions: true, cell: (l) => h('span', { class: 'row' }, ...[

@@ -479,10 +479,13 @@ router.use('/status', require('./status').platformRouter(log)); // the public st
 // ---------------------------------------------------------------- website leads (Contact page)
 router.get('/leads', async (req, res) => {
   const status = ['new', 'contacted', 'trial', 'won', 'lost'].includes(req.query.status) ? req.query.status : null;
-  const data = await rows(pool, `SELECT l.id, l.created_at, l.kind, l.name, l.mountain, l.role, l.email, l.phone, l.lifts, l.plan_interest, l.message, l.founding, l.status, l.operator_note, l.tenant_id, l.emailed, t.slug
+  const data = await rows(pool, `SELECT l.id, l.created_at, l.kind, l.name, l.mountain, l.role, l.email, l.phone, l.lifts, l.plan_interest, l.message, l.founding, l.status, l.operator_note, l.tenant_id, l.emailed, l.source_page, l.source_ref, t.slug
     FROM site_leads l LEFT JOIN tenants t ON t.id = l.tenant_id ${status ? 'WHERE l.status = ?' : ''} ORDER BY l.id DESC LIMIT 200`, status ? [status] : []);
   const [[c]] = await pool.query("SELECT COUNT(*) AS n FROM site_leads WHERE status = 'new'");
-  res.json({ data: data.map((l) => ({ ...l, founding: Boolean(l.founding), emailed: Boolean(l.emailed) })), new_count: Number(c.n) });
+  // Walkthrough and trial requests in the last 12 months, by the website page they came from (SEO 2026.11).
+  const byPage = await rows(pool, `SELECT COALESCE(source_page, '') AS page, COUNT(*) AS n FROM site_leads
+    WHERE kind IN ('walkthrough','trial','founding','patrol','setup') AND created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 12 MONTH) GROUP BY page ORDER BY n DESC, page LIMIT 30`);
+  res.json({ data: data.map((l) => ({ ...l, founding: Boolean(l.founding), emailed: Boolean(l.emailed) })), new_count: Number(c.n), by_page: byPage.map((x) => ({ page: x.page || null, n: Number(x.n) })) });
 });
 router.patch('/leads/:id', validate(z.object({ status: z.enum(['new', 'contacted', 'trial', 'won', 'lost']).optional(), operator_note: z.string().max(1000).nullable().optional(), tenant_id: z.number().int().positive().nullable().optional() })), async (req, res) => {
   const set = Object.entries(req.body).filter(([, v]) => v !== undefined);
