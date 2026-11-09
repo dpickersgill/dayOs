@@ -47,7 +47,7 @@ test('the AI files name no patrol or patient table, except the brief\'s one aggr
   const tables = patrolTables();
   assert.ok(tables.includes('incidents') && tables.includes('incident_patients') && tables.length > 15, `found ${tables.length} patrol tables`);
   // help/guest (Nov 9): a guest's messages with dispatch and their phone's positions are patrol and dispatch data too.
-  for (const t of ['dispatch_calls', 'dispatch_messages', 'dispatch_positions']) assert.ok(tables.includes(t), `${t} is on the patrol line`);
+  for (const t of ['dispatch_calls', 'dispatch_messages', 'dispatch_positions', 'mountain_places']) assert.ok(tables.includes(t), `${t} is on the patrol line`);
   // help/sms: Text HELP's tables are patrol and dispatch data too, and are checked like the rest.
   for (const t of ['patrol_help_lines', 'dispatch_sms_threads', 'dispatch_sms_optouts', 'dispatch_sms_log']) assert.ok(tables.includes(t), `${t} is a patrol table`);
   for (const f of FILES) {
@@ -98,7 +98,9 @@ test('guest help requests never reach AI: no AI or assistant file names a dispat
   // help/guest (Nov 9): what a guest tapped, typed or sent to dispatch, their pass hint and where their phone was are
   // dispatch data. The brief, the drafts and the guest and staff assistant never read them.
   const files = [...FILES, 'src/lib/assistant.js', 'src/lib/assistanttools.js', 'src/routes/assistant.js'];
-  const dispatch = patrolTables().filter((t) => /^dispatch/.test(t));
+  // The guest help release's tables (2026.11.16): dispatch's, the places patrol mapped and the Text HELP numbers.
+  const dispatch = patrolTables().filter((t) => /^dispatch|^mountain_places$|^patrol_help_lines$/.test(t));
+  for (const t of ['dispatch_messages', 'dispatch_positions', 'mountain_places', 'patrol_help_lines', 'dispatch_sms_threads', 'dispatch_sms_optouts', 'dispatch_sms_log']) assert.ok(dispatch.includes(t), `${t} is checked`);
   assert.ok(dispatch.length >= 5, dispatch.join(', '));
   for (const f of files) {
     const src = code(read(f));
