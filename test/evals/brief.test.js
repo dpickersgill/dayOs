@@ -391,7 +391,7 @@ test('snapshots in use: the brief reads the morning forecast (hourly gusts in th
   assert.deepEqual(wh.lifts_over_limit, [{ lift: 'Summit Quad', limit_mph: 45, gust_mph: 47 }], 'the gust in the operating hours, not the 3 AM one');
   assert.deepEqual(wh.lifts_near_limit, []);
   assert.equal(wh.gusts_from, 'summit point');
-  assert.equal(wh.gusts_during, 'operating hours, 9:00 AM to 4:00 PM');
+  assert.equal(wh.gusts_during, 'from 9:00 AM to 4:00 PM');
   assert.deepEqual(wh.gusts_by_point, [{ point: 'base point', gust_mph: 30 }, { point: 'summit point', gust_mph: 47 }]);
   assert.match(wh.caveat, /forecast at the summit point/);
   // An earlier day's snapshot is never used for today.

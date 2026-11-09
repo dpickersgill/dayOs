@@ -87,9 +87,9 @@ async function snapshot(db, tenantId, today, kind) {
 
 const POINT_NAME = { base: 'base point', summit: 'summit point', map_point: 'map point' };
 const hhmm = (t) => String(t || '').slice(11, 16);
-const WIND_CAVEAT_TAIL = 'at 10 m above the ground. The forecast smooths ridges, so wind at a lift can be stronger. This is an early warning only, not a reading at the lift.';
+const WIND_CAVEAT_TAIL = '10 m above the ground. The forecast smooths ridges, so wind at a lift can be stronger. This is an early warning only, not a reading at the lift.';
 /** The line that goes with every comparison of gusts and a lift's wind hold limit. */
-const windCaveat = (point) => `These gusts are the forecast at the ${POINT_NAME[point] || 'map point'} ${WIND_CAVEAT_TAIL}`;
+const windCaveat = (point) => `These gusts are the forecast at the ${POINT_NAME[point] || 'map point'}, ${WIND_CAVEAT_TAIL}`;
 const WIND_CAVEAT = windCaveat('map_point'); // the shape of the line, for tests and the writer
 
 /**
@@ -177,7 +177,7 @@ async function wind(db, tenantId, wp, hours) {
   if (!top) { out.note = 'No gust forecast for the day.'; return out; }
   const gust = top.gust_mph;
   out.gusts_from = POINT_NAME[top.point] || 'map point';
-  out.gusts_during = wp.window === 'open_hours' && hours ? `operating hours, ${clock(hours.open)} to ${clock(hours.close)}` : 'the whole day';
+  out.gusts_during = wp.window === 'open_hours' && hours ? `from ${clock(hours.open)} to ${clock(hours.close)}` : 'during the day';
   if (wp.points.length > 1) out.gusts_by_point = wp.points.map((p) => ({ point: POINT_NAME[p.point] || p.point, gust_mph: p.gust_mph }));
   out.caveat = windCaveat(top.point);
   for (const l of set) {

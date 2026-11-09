@@ -115,7 +115,7 @@ function template(d) {
   if (w.crew_snow_report) wx.push(`Crew snow report: ${w.crew_snow_report.new_snow_in ?? 0} in new${w.crew_snow_report.base_in != null ? `, ${w.crew_snow_report.base_in} in base` : ''}.`);
   const wh = d.wind_holds;
   if (wh) {
-    const during = wh.gusts_during ? ` during ${wh.gusts_during}` : '';
+    const during = wh.gusts_during ? ` ${wh.gusts_during}` : '';
     for (const x of wh.lifts_over_limit) wx.push(`${x.lift}: forecast gusts of ${x.gust_mph} mph${during} are at or over its ${x.limit_mph} mph wind hold limit.`);
     for (const x of wh.lifts_near_limit) wx.push(`${x.lift}: forecast gusts of ${x.gust_mph} mph${during} are close to its ${x.limit_mph} mph wind hold limit.`);
     if (wh.caveat && (wh.lifts_over_limit.length || wh.lifts_near_limit.length)) wx.push(wh.caveat);
