@@ -124,7 +124,7 @@ test('the Good Day home and Issue 1 are pages of the site: its header and footer
 test('the card is on Resources, not on Home, About or the footer, and the menu, sitemap and llms.txt list it', async () => {
   const res = await get('/site/resources');
   assert.ok(res.text.includes('class="gd-card"'), 'Resources has the card');
-  assert.ok(res.text.indexOf('class="gd-card"') < res.text.indexOf('h-check'), 'Resources: the newsletter comes first');
+  assert.ok(res.text.indexOf('class="gd-card"') < res.text.indexOf('h-school'), 'Resources: the newsletter comes first');
   for (const p of ['/site/', '/site/about']) assert.ok(!(await get(p)).text.includes('class="gd-card"'), `${p} has no card`);
   const pricing = await get('/site/pricing');
   assert.ok(!pricing.text.includes('class="sf-gd"') && !pricing.text.includes('data-gd="footer"'), 'no footer sign-up line');
