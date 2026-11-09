@@ -330,3 +330,108 @@ Upgrading needs `npm run migrate` (creates park_areas, park_features, park_place
 
 ## Upgrading to mountain operations
 This release adds new tables (grooming, snow, weather, work orders, recurring jobs, inspections, downtime, handoffs). Run `npm run migrate` against the production database before or right after deploying. It is safe to run twice. Nothing existing is changed.
+
+## Text HELP set-up (once per mountain)
+
+Guests text HELP, PATROL or AYUDA to the mountain's help number and reach patrol (FEATURES.md, Text HELP). All mountains use
+the one Twilio account that already sends Verdynt/OS texts (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`). Each mountain gets
+its own number. Plan a week per mountain, start to finish, most of it waiting for Twilio's review.
+
+**Which number: toll-free, with toll-free verification.** It is the faster and simpler path:
+
+| | Toll-free with verification (use this) | Local 10DLC number |
+| --- | --- | --- |
+| Registration | One form per number, for the mountain as the business | A customer profile and a brand for each mountain, then a campaign |
+| Typical time | Twilio reviews within about 3 business days | Profile 72 hours or more; brand minutes, or 7+ business days if reviewed by hand; campaign 5 to 10 days. About 1 to 3 weeks. |
+| Before approval | Texts in reach patrol; replies are blocked (error 30032) | Texts in reach patrol; replies are blocked (error 30034) |
+
+Verdynt/OS sends for many mountains, so under 10DLC each mountain must be its own brand under a secondary customer
+profile. Use 10DLC only if a mountain insists on a local area code.
+
+Sources: Twilio, [Toll-free verification](https://www.twilio.com/docs/messaging/compliance/toll-free) and the
+[Jan 31, 2024 change blocking pending toll-free numbers](https://twilio.com/en-us/changelog/messaging-on-u-s--toll-free-phone-numbers-pending-verification-i);
+[ISV A2P 10DLC registration guide](https://support.twilio.com/hc/en-us/articles/53502193289755-ISV-A2P-10DLC-Registration-Guide)
+and [ISV onboarding](https://www.twilio.com/docs/messaging/compliance/a2p-10dlc/onboarding-isv);
+[error 30034](https://www.twilio.com/docs/api/errors/30034);
+[campaign use case types](https://support.twilio.com/hc/en-us/articles/1260801844470-List-of-campaign-use-case-types-for-A2P-10DLC-registration).
+
+**How Twilio treats the word HELP.** HELP and INFO are carrier keywords. A text that is only that one word (any other
+word in it, as in "HELP R7", makes it an ordinary text) gets Twilio's own reply, "Reply STOP to unsubscribe. Msg&Data
+Rates May Apply.", and by default Twilio does **not** forward it to our webhook, so no call would be made. With Advanced
+Opt-Out turned on for the number's Messaging Service, Twilio forwards it (with `OptOutType=HELP`), and its HELP reply text
+can be changed. The HELP keyword itself cannot be removed. Verdynt/OS makes the call and sends its own reply with the
+location link, so a guest who texts just HELP gets two texts: Twilio's, then ours. Twilio's guide advises against a
+second reply but does not block it: check it in step 7. A phone that has texted STOP gets no HELP reply from Twilio.
+Sources: [Twilio support for opt-out keywords](https://support.twilio.com/hc/en-us/articles/223134027-Twilio-Support-for-Opt-out-Keywords-SMS-STOP-Filtering),
+[Advanced Opt-Out](https://www.twilio.com/docs/messaging/services/tutorials/advanced-opt-out),
+[Getting started with Advanced Opt-Out](https://support.twilio.com/hc/en-us/articles/360034798533),
+[OptOutType](https://support.twilio.com/hc/en-us/articles/31560110671259-How-to-Track-Opt-Out-Opt-In-and-Help-Messages-Using-the-OptOutType-Parameter).
+
+### 1. Buy the number
+Twilio console, Phone Numbers, Manage, Buy a number. Country United States, type Toll-free, with SMS and MMS. Write the
+number down as +18xx... for step 5.
+
+### 2. Make a Messaging Service for the mountain and point it at Verdynt/OS
+Messaging, Services, Create Messaging Service. Name it "<Mountain> Text HELP". Add the number to its Sender Pool.
+Under Integration choose **Send a webhook**:
+- Request URL: `https://<PUBLIC_URL host>/api/v1/public/sms/inbound`, HTTP POST. It must be exactly `PUBLIC_URL` plus
+  that path (https, the same host, no trailing slash). Verdynt/OS checks Twilio's signature over that exact address
+  and refuses anything else with 403. Patrol settings, Text HELP, "For whoever sets up Twilio" shows the address.
+- Fallback URL: the same address. A text Twilio sends twice is taken once.
+Use one service per mountain: the HELP reply text in step 3 belongs to the service, so it can name the mountain.
+
+### 3. Advanced Opt-Out and the HELP reply
+In the service, open the **Opt-Out** tab and turn on Advanced Opt-Out. Keep the STOP and START keywords as they are.
+Edit the Help section: keep HELP and INFO, and set the reply to:
+
+> <Mountain> ski patrol has your message. If it is life threatening, call 911. Patrol will text you a link to send your location. Reply STOP to stop texts.
+
+Save. Do not add PATROL or AYUDA as keywords: they must reach Verdynt/OS as ordinary texts. STOP still works as
+before: Twilio stops all texts from the number to that phone, and Verdynt/OS records it so it never tries; START undoes both.
+
+### 4. Register the number (toll-free verification)
+Submit toll-free verification for the number (the number's page in the console, or Regulatory compliance, Toll-free
+verification). The business is the mountain: its legal name, address, website and a contact there. Then:
+- Use case category: Customer Care. Monthly volume: the lowest band (a few hundred texts a season is typical).
+- Use case description: "<Mountain> ski patrol help line. Guests on the mountain text us to ask ski patrol for help.
+  Patrol dispatch replies with safety instructions, a link to share their location, and updates about their request.
+  Customer care only. No marketing."
+- Opt-in type: Via Text. Opt-in description (message flow): "Every conversation starts with the guest. They text HELP,
+  PATROL or AYUDA to the number printed on the <Mountain> trail map, ticket backs and lift tower signs: 'Need ski patrol?
+  Text HELP to <number>.' We reply only to a guest who texted us, only about their request, and stop when the request is
+  closed. Reply STOP to stop texts." Opt-in image: a photo or PDF of the trail map or ticket back showing that line.
+- Sample messages:
+  1. "<Mountain> ski patrol has your message. If it is life threatening, call 911. Tap this link to send your location: https://<PUBLIC_URL host>/locate/3f9c2a7d. Or reply with the code on the nearest sign or lift tower."
+  2. "<Mountain> ski patrol: a patroller is on the way. Stay where you are."
+  3. "Patrol has closed your request. Reply HELP if you need patrol again."
+
+Twilio reviews within about 3 business days. Until it is approved, guests' texts still reach the board but no reply
+goes out. If a mountain must use 10DLC instead: a secondary customer profile and a Standard brand for the mountain, then
+a campaign with use case **Customer Care** (or Low-volume mixed for a small mountain), the same description, sample
+messages and opt-in text, on the step 2 Messaging Service. Do not choose Emergency Services: carriers treat it as a
+special use case with extra requirements.
+
+### 5. Enter the number in Verdynt/OS
+Sign in as the mountain's owner or patrol director: Settings, Patrol, Patrol settings, Text HELP. Enter the help number,
+and the patrol phone if guests may call patrol (it is added to the first reply). Save. Each number can belong to one
+mountain only. Give the mountain the line for its trail map and ticket back from the same panel.
+
+### 6. Photos
+Twilio keeps each photo a guest texts and requires the account's key to open it. Verdynt/OS keeps only the address and
+fetches the photo when a signed-in patroller opens it ([Media resource](https://www.twilio.com/docs/messaging/api/media-resource.md)).
+Twilio keeps the photo until it is deleted in Twilio.
+
+### 7. Test it
+From a phone that is not a staff phone:
+1. Text `HELP`. Expect Twilio's HELP reply and Verdynt/OS's reply with the location link. The board shows a New call,
+   Text HELP. If only Twilio's reply arrives, check step 3 and the Twilio debugger.
+2. Text a sign code (`R7`) and then a photo. The call's place changes and Photo 1 opens.
+3. Reply from the call's Messages. It arrives from the help number.
+4. Close the call. The closing text arrives.
+5. Text `STOP` (Twilio confirms), check the call's timeline says so, then text `START`.
+6. Text `AYUDA` from a new phone: the reply is in Spanish.
+If Twilio's debugger shows error 11200 with a 403, the Request URL is not exactly `PUBLIC_URL` plus the path, or
+`TWILIO_AUTH_TOKEN` is not this account's current token. Error 30032 means the toll-free number is not verified yet.
+
+Limits (Cloud Run settings, rarely changed): `HELP_SMS_CALL_CAP` (texts out per call, default 20) and
+`HELP_SMS_HOURLY_CAP` (texts out per mountain per hour, default 300). Past either, the call's timeline says to call the guest.

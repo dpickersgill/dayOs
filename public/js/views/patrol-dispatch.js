@@ -4,6 +4,7 @@ import { get, poll, post, put, patch, del } from '../api.js';
 import { h, clear, state, input, select, field, button, toast, formDialog, dialog, table, val, num, fmtTime, fmtDateTime, fmtDate, label, empty, errorBox, appendAll } from '../ui.js';
 import { has } from './patrol-feat.js';
 import { compact } from './patrol-case.js';
+import { textHelpBlock } from './patrol-texthelp.js';
 
 const PRIORITY = ['low', 'normal', 'high', 'critical'];
 const statusTone = { new: 'bad', dispatched: 'warn', on_scene: 'warn', transporting: 'warn', closed: 'neutral', cancelled: 'neutral' };
@@ -35,7 +36,7 @@ function callCard(c, onOpen) {
     h('div', null, h('b', null, c.location)),
     c.description ? h('div', null, c.description) : null,
     c.call_type === 'lost_child' ? h('div', { class: 'row' }, ...lostBits(c)) : null,
-    h('div', { class: 'muted' }, `${fmtTime(c.received_at)} · ${c.source === 'guest' ? 'Guest request' : label(c.source)}${c.caller_name ? ` · ${c.caller_name}` : ''}${c.caller_phone ? ` · ${c.caller_phone}` : ''}`),
+    h('div', { class: 'muted' }, `${fmtTime(c.received_at)} · ${c.source === 'guest' ? 'Guest request' : c.source === 'sms' ? 'Text HELP' : label(c.source)}${c.caller_name ? ` · ${c.caller_name}` : ''}${c.caller_phone ? ` · ${c.caller_phone}` : ''}`),
     h('div', null, who ? `Responding: ${who}` : h('span', { class: 'muted' }, 'No one sent yet')),
     // Repeated guest requests from one phone or address, grouped here so a flood does not bury the board. Each is listed.
     c.repeats && c.repeats.length ? h('details', { class: 'call-repeats' },
@@ -101,7 +102,8 @@ async function openCall(id, again) {
       h('div', { class: 'spread' }, h('h2', null, `Call ${c.call_no}`), h('span', { class: 'row' }, state(label(c.priority), prioTone[c.priority]), state(statusText[c.status], statusTone[c.status]))),
       h('p', null, h('b', null, c.location), c.description ? ` · ${c.description}` : ''),
       c.call_type === 'lost_child' ? h('div', { class: 'row' }, ...lostBits(c)) : null,
-      h('p', { class: 'muted' }, `${fmtDateTime(c.received_at)} · ${c.source === 'guest' ? 'Guest request' : label(c.source)}${c.caller_name ? ` · ${c.caller_name}` : ''}${c.caller_phone ? ` · ${c.caller_phone}` : ''}`),
+      h('p', { class: 'muted' }, `${fmtDateTime(c.received_at)} · ${c.source === 'guest' ? 'Guest request' : c.source === 'sms' ? 'Text HELP' : label(c.source)}${c.caller_name ? ` · ${c.caller_name}` : ''}${c.caller_phone ? ` · ${c.caller_phone}` : ''}`),
+      c.source === 'sms' ? textHelpBlock(c) : null,
       whereBlock(c, live),
       h('h3', null, 'Responders'),
       c.responders.length ? h('ul', null, c.responders.map((r) => h('li', null, `${r.callsign ? `${r.callsign}: ` : ''}${r.first_name} ${r.last_name}`,
@@ -159,7 +161,7 @@ async function historyDialog() {
     const { data } = await get(`/patrol/dispatch?status=all${date.value ? `&date=${date.value}` : ''}`);
     clear(out).append(data.length ? table([
       { head: 'Call', cell: (c) => c.call_no }, { head: 'Received', cell: (c) => fmtDateTime(c.received_at) }, { head: 'Where', cell: (c) => c.location },
-      { head: 'Source', cell: (c) => label(c.source) }, { head: 'Status', cell: (c) => state(statusText[c.status], statusTone[c.status]) },
+      { head: 'Source', cell: (c) => (c.source === 'sms' ? 'Text HELP' : label(c.source)) }, { head: 'Status', cell: (c) => state(statusText[c.status], statusTone[c.status]) },
       { head: '', actions: true, cell: (c) => button('Open', () => openCall(c.id, load), { small: true }) },
     ], data) : empty('No calls.'));
   }

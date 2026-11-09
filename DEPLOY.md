@@ -307,6 +307,7 @@ made the account and its permissions:
 | --- | --- |
 | `POSTMARK_SERVER_TOKEN`, `MAIL_FROM` | Email (tickets, reminders, patrol follow-ups, weekly report, messages) |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | Text messages |
+| `HELP_SMS_CALL_CAP`, `HELP_SMS_HOURLY_CAP` | Text HELP: texts out per call (default 20) and per mountain per hour (default 300). Each mountain's help number is set in the app; see "Text HELP set-up" below. |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `PUBLIC_URL` | Stripe: the platform's own account (mountains' Verdynt/OS subscriptions). Its webhook sends `checkout.session.completed`, `checkout.session.expired`, `customer.subscription.*`, `invoice.*`, `charge.refunded` and `charge.dispute.*` (refunds given in the Stripe dashboard and disputes, 2026.11.11) to `/api/v1/stripe/webhook`. |
 | `STRIPE_CONNECT_WEBHOOK_SECRET` | Guest card payments (shop, lessons, date changes, patrol giving) go to each mountain's own Stripe account through Stripe Connect. This is the signing secret of the Connect webhook. See "Guest card payments (Stripe Connect)" below. |
 | `STRIPE_GUEST_FALLBACK` | Leave unset. In production a mountain takes guest card payments only once it has connected its own Stripe account. `on` would let unconnected mountains take payments into the platform's account (tests and local runs only). |
@@ -338,6 +339,18 @@ made the account and its permissions:
 | Production refuses to start (2026.11.11) | without `PUBLIC_URL` (https), with `DB_USER` unset or `root`, with a database reached over the network without `DB_SSL=true`, with a `JWT_SECRET` that is a run of a few characters, or with a `BOOTSTRAP_KEY` under 24 random characters (leave it empty to turn the key off). deploy.sh and promote.sh check the plain settings first (scripts/settings-check.sh) and set `PUBLIC_URL` to the service address when it is missing. |
 
 See RUNBOOK.md for rotating secrets, the scheduler command, the one-time security setup (`bash scripts/harden.sh`) and the security checklist.
+
+## Text HELP set-up
+
+Text HELP (2026.11.15) needs nothing new in Cloud Run: it uses `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`, and
+`PUBLIC_URL`, which must be the exact https address Twilio posts to (the webhook's signature is checked over
+`PUBLIC_URL` plus `/api/v1/public/sms/inbound`, never the Host header the load balancer passes on). The migration adds
+four tables and the `sms` call source; it is safe to run twice.
+
+Each mountain then needs its own number, registered and pointed at Verdynt/OS: RUNBOOK.md, "Text HELP set-up", has the
+steps (buy a toll-free number, a Messaging Service with the webhook, Advanced Opt-Out and the HELP reply, toll-free
+verification with the sample messages, the number in Patrol settings, and a test). Allow about a week per mountain,
+mostly Twilio's review (about 3 business days for toll-free; 1 to 3 weeks for 10DLC).
 
 ## Putting the website live
 
