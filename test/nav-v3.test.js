@@ -250,7 +250,7 @@ test('Settings and Help go back to the page that opened them; Help from Patrol, 
   assert.match(settings, /const was = backTo\(\);/);
   assert.match(settings, /href: was \? was\.hash :/);
   const help = read('public/js/views/help.js');
-  assert.match(help, /gear: \['Gear', [^\n]*'patrol-kits', 'patrol-meds', 'patrol-1111-meds', 'patrol-lifts'\]\]/);
+  assert.match(help, /gear: \['Gear', [^\n]*'patrol-kits', 'patrol-meds', 'patrol-1111-meds', 'patrol-lifts', 'patrol-map-places', 'patrol-help-signs'\]\]/);
   assert.match(help, /return was && was\.key === key \? back\(was\.hash, `Back to \$\{was\.name\}`\) : null;/);
   const ui = read('public/js/ui.js');
   assert.match(ui, /export function noteBack\(back\)/);

@@ -86,6 +86,8 @@ const SIGNED = {
   'workforce.js': { router: '/workforce' }, 'workforcetime.js': { router: '/workforce' },
   // 2026.11.15: the first AI release. Prepared actions (Ready for you) and the morning brief.
   'ai.js': { router: '/ai' }, 'brief.js': { router: '/brief' },
+  // Guest help release: mapped places, sign sheets, a call's location panel and staff help.
+  'places.js': { router: '/patrol' },
 };
 const PUBLIC = {
   'assistant.js': { publicRouter: '/public' }, 'availability.js': { publicRouter: '/public' }, 'dispatch.js': { publicRouter: '/public' }, 'family.js': { publicRouter: '/public' },
@@ -186,6 +188,12 @@ test.before(async () => {
   // The AI release's rows (2026.11.15): a pending draft waiting for approval, and a stored morning brief, each with
   // words only A's data holds, so the sweep has something to find on the new routes.
   await seedAi(A);
+  // Guest help release (help/places): mapped places with words only A has, for the new routes to be swept against.
+  const [[aLift]] = await pool.query('SELECT id, name FROM lifts WHERE tenant_id = ? ORDER BY id LIMIT 1', [A.id]);
+  for (const [kind, name, code, extra] of [['sign', `Isolation sign ${A.slug}`, 'ISA1', {}], ['tower', `Isolation tower ${A.slug}`, 'ISA2', { lift_id: aLift.id, tower_no: 4 }], ['junction', `Isolation junction ${A.slug}`, 'ISA3', {}]]) {
+    await pool.query('INSERT INTO mountain_places (tenant_id, kind, name, code, lift_id, tower_no, lat, lng, accuracy_m, marked_at) VALUES (?, ?, ?, ?, ?, ?, 44.1, -71.2, 5, NOW())',
+      [A.id, kind, name, code, extra.lift_id ?? null, extra.tower_no ?? null]);
+  }
   await loadTables();
 
   // Ids to try: a few real ones from every one of A's tables, minus any id that B legitimately owns in any table.

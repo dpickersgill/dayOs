@@ -4,6 +4,8 @@ import { get, poll, post, put, patch, del } from '../api.js';
 import { h, clear, state, input, select, field, button, toast, formDialog, dialog, table, val, num, fmtTime, fmtDateTime, fmtDate, label, empty, errorBox, appendAll } from '../ui.js';
 import { has } from './patrol-feat.js';
 import { compact } from './patrol-case.js';
+import { wherePanel } from './dispatch-where.js'; // help/places: the call's location panel
+import { bestFix } from '../gpsfix.js';
 
 const PRIORITY = ['low', 'normal', 'high', 'critical'];
 const statusTone = { new: 'bad', dispatched: 'warn', on_scene: 'warn', transporting: 'warn', closed: 'neutral', cancelled: 'neutral' };
@@ -77,13 +79,29 @@ export async function drawDispatch(box, { canLead }) {
 }
 
 function newCallDialog(again) {
+  const where = input({ name: 'location', required: true, maxlength: 255, placeholder: 'Ridge Run, below the lift' });
+  const fixNote = h('p', { class: 'muted small', role: 'status', 'aria-live': 'polite' });
+  let at = null; // the position "Use my location" found: sent with the call so its location panel can show it
+  where.addEventListener('input', () => { if (at && !where.value.trim()) at = null; });
+  // help/places: the patroller's own position, in the words patrollers use ("Near Ridge Run, below Summit Quad tower 7").
+  const useMine = button('Use my location', async () => {
+    fixNote.textContent = 'Finding your location…';
+    const f = await bestFix({ waitMs: 8000, good: 15 });
+    if (!f) { fixNote.textContent = 'No GPS fix. Type where it is instead.'; return; }
+    at = f;
+    try {
+      const { words } = await get(`/patrol/places/describe?lat=${f.lat}&lng=${f.lng}&acc=${Math.round(f.acc)}`);
+      where.value = words ? words.text : `${f.lat.toFixed(5)}, ${f.lng.toFixed(5)}`;
+      fixNote.textContent = words ? `Within about ${Math.round(f.acc)} m. Check the words and change them if you need to.` : `Within about ${Math.round(f.acc)} m. Nothing is mapped near here, so the position is used.`;
+    } catch (_) { where.value = `${f.lat.toFixed(5)}, ${f.lng.toFixed(5)}`; fixNote.textContent = `Within about ${Math.round(f.acc)} m.`; }
+  }, { small: true });
   formDialog('New call', h('div', { class: 'form' },
-    h('div', { class: 'wide' }, field('Location', input({ name: 'location', required: true, maxlength: 255, placeholder: 'Ridge Run, below the lift' }))),
+    h('div', { class: 'wide' }, field('Location', where), h('div', { class: 'row' }, useMine), fixNote),
     h('div', { class: 'wide' }, field('What is reported', input({ name: 'description', maxlength: 500 }))),
     field('Priority', select(PRIORITY.map((p) => [p, label(p)]), 'normal', { name: 'priority' })),
     field('Received by', select([['radio', 'Radio'], ['phone', 'Phone'], ['patrol', 'Patroller in person']], 'radio', { name: 'source' })),
     field('Caller name', input({ name: 'caller_name', maxlength: 100 })), field('Caller phone', input({ name: 'caller_phone', maxlength: 40 }))),
-  async (fd) => { const r = await post('/patrol/dispatch', compact({ location: val(fd, 'location'), description: val(fd, 'description'), priority: val(fd, 'priority'), source: val(fd, 'source'), caller_name: val(fd, 'caller_name'), caller_phone: val(fd, 'caller_phone') })); toast(`Call ${r.call_no} logged`); await again(); }, { submitText: 'Log call' });
+  async (fd) => { const r = await post('/patrol/dispatch', compact({ location: val(fd, 'location'), description: val(fd, 'description'), priority: val(fd, 'priority'), source: val(fd, 'source'), caller_name: val(fd, 'caller_name'), caller_phone: val(fd, 'caller_phone'), ...(at ? { gps_lat: at.lat, gps_lng: at.lng } : {}) })); toast(`Call ${r.call_no} logged`); await again(); }, { submitText: 'Log call' });
 }
 
 async function openCall(id, again) {
@@ -103,6 +121,7 @@ async function openCall(id, again) {
       c.call_type === 'lost_child' ? h('div', { class: 'row' }, ...lostBits(c)) : null,
       h('p', { class: 'muted' }, `${fmtDateTime(c.received_at)} · ${c.source === 'guest' ? 'Guest request' : label(c.source)}${c.caller_name ? ` · ${c.caller_name}` : ''}${c.caller_phone ? ` · ${c.caller_phone}` : ''}`),
       whereBlock(c, live),
+      wherePanel(id),
       h('h3', null, 'Responders'),
       c.responders.length ? h('ul', null, c.responders.map((r) => h('li', null, `${r.callsign ? `${r.callsign}: ` : ''}${r.first_name} ${r.last_name}`,
         ' ', r.acked_at ? state('On the way', 'good') : r.notified_at ? state('Alerted, not answered', 'warn') : state('No phone alert', 'neutral'), r.texted_at ? state('Texted', 'neutral') : null,

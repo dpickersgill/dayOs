@@ -8,6 +8,7 @@ import { h, clear, ctx, label, isManager } from './ui.js';
 import { icon } from './icons.js';
 import { readTerminal } from './terminal.js';
 import { subPagesFor } from './jumpindex.js';
+import { staffHelpButton } from './staffhelp.js';
 
 // Home: pinned at the top for everyone, never inside All apps or a menu.
 export const HOME = ['dashboard', 'inbox', 'calendar', 'myshifts'];
@@ -45,7 +46,7 @@ const SECTION_OF = {
   now: 'now', home: 'now', board: 'now', duty: 'now', dispatch: 'now', map: 'now', opening: 'now', sweep: 'now', avalanche: 'now', log: 'now', room: 'now',
   cases: 'cases', case: 'cases', review: 'cases', followup: 'cases', records: 'cases', release: 'cases', stats: 'cases', network: 'cases', risk: 'cases', 'risk-report': 'cases', claim: 'cases', version: 'cases', collision: 'cases', access: 'cases', refusal: 'cases', handoff: 'cases',
   people: 'people', schedule: 'people', crews: 'people', cover: 'people', posts: 'people', team: 'people', training: 'people', passport: 'people',
-  gear: 'gear', kit: 'gear', kits: 'gear', 'kit-labels': 'gear', equipment: 'gear', meds: 'gear', lifts: 'gear',
+  gear: 'gear', kit: 'gear', kits: 'gear', 'kit-labels': 'gear', equipment: 'gear', meds: 'gear', lifts: 'gear', places: 'gear', signs: 'gear', stencil: 'gear',
 };
 /** Which Patrol section a Patrol address belongs to: ['case', '12'] -> 'cases'. */
 export const patrolSection = (params = []) => SECTION_OF[params[0]] || 'now';
@@ -244,7 +245,7 @@ export function buildFrame({ views, main, signOut, menu = null, links = {} }) {
     h('div', { class: 'rail-top' },
       h('div', { class: 'brand' }, h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: '', width: '48', height: '27' }),
         h('div', { class: 'brand-text' }, h('strong', null, 'Verdynt/OS'), h('span', null, ctx.me.tenant_name))),
-      search, ask, homeNav),
+      search, ask, homeNav, staffHelpButton('nav-help-here')),
     nav, foot);
 
   /**
@@ -355,7 +356,9 @@ export function buildFrame({ views, main, signOut, menu = null, links = {} }) {
       signOutBtn.addEventListener('click', close, { capture: true });
       const sw = switchBtn('btn small');
       if (sw) sw.addEventListener('click', close, { capture: true });
-      return h('div', { class: 'sheet-body' }, searchBox,
+      const helpHere = staffHelpButton('sheet-help-here');
+      if (helpHere) helpHere.addEventListener('click', close, { capture: true });
+      return h('div', { class: 'sheet-body' }, searchBox, helpHere,
         mine.length ? h('div', { class: 'sheet-group sheet-mine' }, h('div', { class: 'sheet-grid' }, mine.map(tile))) : null,
         plan.groups.length ? h('div', { class: 'sheet-groups' }, sheetAllHead(), sheetGroups('sheet-g')) : null,
         h('div', { class: 'sheet-foot' },

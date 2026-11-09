@@ -1,4 +1,5 @@
 import { get, put, patch, post } from '../api.js';
+import { staffHelpButton } from '../staffhelp.js';
 import { LIFT_STATES } from '../liftstatus.js';
 import { h, clear, ctx, can, isManager, tabs, table, state, trailMark, input, select, field, button, toast, formDialog, val, todayStr, label, empty, errorBox, fail } from '../ui.js';
 
@@ -13,8 +14,9 @@ export async function render(root, params = []) {
   const openOrder = params[0] === 'wo' && /^\d+$/.test(params[1] || '') ? Number(params[1]) : params[0] === 'wo' && params[1] === 'new' ? 'new' : null;
   const asked = new URLSearchParams(location.hash.split('?')[1] || '').get('tab');
   if (openOrder === 'new' && location.hash.startsWith('#/conditions/wo/new')) history.replaceState(null, '', '#/conditions?tab=maint'); // a refresh does not open the form again
-  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Mountain status'),
-    h('p', { class: 'page-note' }, canSet ? 'Status, grooming, snow, maintenance and the daily report. Status changes show on your public conditions feed within a minute.' : 'You can see status here. Patrol and managers change it.')));
+  root.append(h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Mountain status'),
+    h('p', { class: 'page-note' }, canSet ? 'Status, grooming, snow, maintenance and the daily report. Status changes show on your public conditions feed within a minute.' : 'You can see status here. Patrol and managers change it.')),
+    staffHelpButton('head-help-here')));
   if (!canSet) { await drawStatus(root, false); return; }
   root.append(tabs([
     ['status', 'Status', (box) => drawStatus(box, true)],

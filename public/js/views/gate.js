@@ -9,6 +9,7 @@ import { get, post, put, patch, del } from '../api.js';
 import { h, clear, input, state, table, field, button, fmtDate, fmtDateTime, label, empty, errorBox, tabs, formDialog, confirmDialog, dialog, select, toast, val, isManager } from '../ui.js';
 import { nfcSupported, cameraSupported, listenNfc, readOneCard, scanWithCamera } from '../readers.js';
 import { gateLine } from './guest-card.js';
+import { staffHelpButton } from '../staffhelp.js';
 
 const SCAN_TEXT = {
   ok: ['Let them ride', 'good'],
@@ -36,7 +37,7 @@ export async function render(root, params = []) {
   if (params[0] === 'devices' && isManager() && location.hash.startsWith('#/gate/devices')) { location.replace('#/settings/sell'); return; }
   const items = [['scan', 'Scan', drawScan], ['cards', 'Cards', drawCards]];
   const want = items.some((i) => i[0] === params[0]) ? params[0] : 'scan';
-  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Gate'), h('p', { class: 'muted' }, 'Scan a ticket, tap a card, or type a code.')), tabs(items, want));
+  root.append(h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Gate'), h('p', { class: 'muted' }, 'Scan a ticket, tap a card, or type a code.')), staffHelpButton('head-help-here')), tabs(items, want));
 }
 
 /** Setup shown in Settings, Sell and gate (managers): gates, turnstiles and handheld readers, and how long a gate stays open. */
