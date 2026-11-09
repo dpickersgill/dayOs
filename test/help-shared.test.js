@@ -367,7 +367,9 @@ test('the job texts again after 3 minutes and closes the request after 2 hours w
   const phone = guestPhone();
   await text(phone, 'AYUDA');
   const p = await pendingOf(phone);
-  assert.equal(ok(await job()).nudged, 0, 'not yet');
+  const n0 = sent.length;
+  ok(await job());
+  assert.equal(sent.slice(n0).filter((s) => s.To === phone).length, 0, 'not yet');
   await pool.query('UPDATE help_pending SET created_at = created_at - INTERVAL 4 MINUTE WHERE id = ?', [p.id]);
   const n = sent.length;
   ok(await job());

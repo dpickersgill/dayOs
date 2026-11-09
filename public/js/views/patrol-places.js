@@ -7,7 +7,7 @@ import { get, post, patch, put, download } from '../api.js';
 import { h, svg, clear, ctx, input, select, field, button, toast, formDialog, confirmDialog, table, state, fmtDateTime, empty, errorBox, fail, label } from '../ui.js';
 import { watchFix, quality, goodEnough, MARK_MAX_M, WAIT_MS, mapsLink } from '../gpsfix.js';
 import { placeMap } from '../placemap.js';
-import { qrMatrix, qrPath, signWords, SIZES } from '../signsheet.js';
+import { qrMatrix, qrPath, signWords, signNumber, SIZES } from '../signsheet.js';
 import { norm, compassWord } from '../mapturn.js';
 
 const LIFT_KINDS = ['tower', 'lift_top', 'lift_bottom'];
@@ -290,11 +290,12 @@ export async function renderSigns(root) {
 
 function helpSign(p, r, size) {
   const w = signWords({ code: p.code, mountain: r.mountain, number: r.help_number, tag: r.help_tag });
+  const num = r.help_number ? signNumber(r.help_number) : null;
   return h('article', { class: `help-sign help-sign-${size}`, 'data-code': p.code },
     h('p', { class: 'hs-ask' }, w.ask),
     qrSvg(p.url, 'hs-qr'),
     h('p', { class: `hs-code${w.code.length > 6 ? ' hs-code-long' : ''}`, 'aria-label': `Sign code ${w.code}` }, w.code),
-    h('p', { class: 'hs-how' }, w.how),
+    h('p', { class: 'hs-how' }, num && w.how.endsWith(num) ? [w.how.slice(0, -num.length), h('span', { class: 'hs-num' }, num)] : w.how), // the number on one line
     h('p', { class: 'hs-911' }, w.emergency),
     h('p', { class: 'hs-mountain' }, w.mountain));
 }

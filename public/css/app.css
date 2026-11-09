@@ -4148,6 +4148,9 @@ label.check-hit { display: inline-flex; align-items: center; justify-content: ce
 .help-waiting-texts { margin: 0; padding-left: 1.4rem; overflow-wrap: anywhere; }
 .text-help-mode { border: 0; padding: 0; margin: 0; }
 .text-help-mode .check { align-items: flex-start; }
+.text-help-mode .mode-text { display: flex; flex-direction: column; gap: 2px; }
+.text-help-mode .mode-text .hint { font-weight: 400; }
+.help-sign .hs-num { white-space: nowrap; }
 .tag-input { max-width: 6rem; text-transform: uppercase; font-weight: 700; letter-spacing: 1px; }
 @media (max-width: 860px) { .help-sign-tower { transform: scale(.42); transform-origin: top center; margin-bottom: calc(-11in * .58); } }
 .stencil-title { font-family: 'Barlow Condensed', 'Atkinson Hyperlegible', system-ui, sans-serif; font-size: 2.4rem; margin: 0; }
