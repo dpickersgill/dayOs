@@ -4183,6 +4183,18 @@ label.check-hit { display: inline-flex; align-items: center; justify-content: ce
 .map-north text { fill: var(--ink); font-size: 11px; font-weight: 700; }
 .turn-prompt { margin: 0; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--accent-tint); border-left: 4px solid var(--accent-line); color: var(--ink); font-weight: 700; }
 .turn-panel .btn[aria-pressed='true'] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+/* Map orientation: why the base choice is greyed out, and the "which way is uphill" compass picker. */
+.turn-panel .turn-why { margin: 0; }
+.turn-panel .turn-compass { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; margin: 0; min-width: 0; }
+.turn-panel .turn-compass legend { font-weight: 700; padding: 0 4px; }
+.turn-panel .turn-compass-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.turn-panel .turn-compass-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; flex: 1 1 320px; min-width: 0; }
+.turn-panel .turn-compass-grid .btn { min-height: 48px; justify-content: center; white-space: normal; }
+.turn-panel .turn-arrow { font-size: 1.2em; font-weight: 700; }
+.turn-panel .turn-preview { color: var(--ink); flex: 0 0 auto; }
+.turn-panel .turn-saved { margin: 0; font-weight: 700; }
+.turn-panel .turn-saved:empty { display: none; }
+@media (max-width: 520px) { .turn-panel .turn-compass-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* help/guest: the call view's Guest section (what the guest tapped, and messages both ways) */
 .guest-box { border-top: 1px solid var(--line); padding-top: 12px; }

@@ -8,7 +8,7 @@ import { h, svg, clear, ctx, input, select, field, button, toast, formDialog, co
 import { watchFix, quality, goodEnough, MARK_MAX_M, WAIT_MS, mapsLink } from '../gpsfix.js';
 import { placeMap } from '../placemap.js';
 import { qrMatrix, qrPath, signWords, signNumber, SIZES } from '../signsheet.js';
-import { norm, compassWord } from '../mapturn.js';
+import { norm, compassWord, UPHILL, uphillWord, northOnScreen } from '../mapturn.js';
 
 const LIFT_KINDS = ['tower', 'lift_top', 'lift_bottom'];
 const TRAIL_KINDS = ['sign', 'junction'];
@@ -154,40 +154,98 @@ export async function drawPlaces(box) {
   const prompt = h('p', { class: 'turn-prompt', role: 'note' }, 'Mark a lift bottom and top so the map shows your mountain the way you see it from the base.');
   const turnSave = button('Save orientation', async () => {
     data.orientation = await put('/patrol/places/orientation', preview.auto ? { auto: true } : { rotation_deg: norm(preview.deg) });
-    toast('Orientation saved'); paintTurn();
+    savedNote.textContent = `Saved: ${savedWords()}`;
+    toast('Orientation saved');
+    setTimeout(paintTurn); // after the button's own busy state ends, so it shows as saved (greyed) again
   }, { kind: 'primary' });
   const backUp = button('Back to uphill up', async () => {
     data.orientation = await put('/patrol/places/orientation', { auto: true });
-    preview = { auto: true, deg: 0 }; toast('Back to uphill up'); paintTurn();
+    preview = { auto: true, deg: 0 };
+    savedNote.textContent = `Saved: ${savedWords()}`;
+    toast('Back to uphill up'); setTimeout(paintTurn);
   }, {});
+  const backHint = h('span', { class: 'muted small' }, 'North up until a lift is marked');
   const baseBtn = button('Base at the bottom (as you see it from the base)', () => { preview = { auto: true, deg: 0 }; paintTurn(); }, {});
+  // Why the base-at-the-bottom choice is greyed out when nothing is mapped yet, and how to make it work.
+  const baseWhy = h('p', { class: 'muted small turn-why' }, 'Mark one lift\u2019s bottom and top, or ',
+    h('a', { href: '#/money?tab=forecast' }, 'set the summit point in Money, Forecast data'), ', and this works itself out.');
+  // "Which way is uphill from the base?": one tap turns the maps so that way is up, and saves it as a manual setting.
+  const savedNote = h('p', { class: 'turn-saved', role: 'status', 'aria-live': 'polite' });
+  const compassBtns = UPHILL.map((u) => button([h('span', { class: 'turn-arrow', 'aria-hidden': 'true' }, u.arrow), ` ${u.label}`], async () => {
+    try {
+      data.orientation = await put('/patrol/places/orientation', { rotation_deg: u.deg });
+      preview = { auto: false, deg: u.deg };
+      savedNote.textContent = `Saved: uphill is ${u.word}`;
+      paintTurn();
+    } catch (err) { fail(err); }
+  }, { label: `Uphill is ${u.word}` }));
+  compassBtns.forEach((b, i) => b.setAttribute('data-uphill', UPHILL[i].key));
+  // A small preview: the hill drawn up the screen, with where north points once the maps are turned.
+  const needle = svg('g', {}, svg('path', { d: 'M0 -26 L6 -8 L-6 -8 Z', fill: 'currentColor' }), svg('text', { x: 0, y: -30, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 700, fill: 'currentColor' }, 'N'));
+  const turnPreview = svg('svg', { class: 'turn-preview', viewBox: '-44 -44 88 88', width: 88, height: 88, role: 'img', 'aria-label': 'Preview of the map turn' },
+    svg('circle', { cx: 0, cy: 0, r: 40, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.5, opacity: 0.5 }),
+    svg('text', { x: 0, y: 36, 'text-anchor': 'middle', 'font-size': 9, fill: 'currentColor' }, 'base'),
+    svg('text', { x: 0, y: 6, 'text-anchor': 'middle', 'font-size': 9, fill: 'currentColor' }, 'uphill \u2191'),
+    needle);
+  /** What was just saved, short: "uphill is north-west", "the top of the map faces 300°", "uphill up". */
+  function savedWords() {
+    const st = savedPreview();
+    if (st.auto) return O().uphill ? 'back to uphill up' : 'north up until a lift is marked';
+    const word = uphillWord(st.deg);
+    return word ? `uphill is ${word}` : `the top of the map faces ${norm(st.deg)}\u00b0`;
+  }
+  /** The status in plain words: automatic, set by hand with the compass, or set by hand in degrees. */
+  function statusWords() {
+    const st = preview;
+    const up = O().uphill;
+    if (st.auto) {
+      if (!up) return 'Automatic, but nothing is marked yet: north is at the top of the map until a lift is marked.';
+      const how = up.from === 'lifts' ? `the bottom and top of ${up.count} lift${up.count === 1 ? '' : 's'}` : 'the base map point and the summit point';
+      return `Automatic: uphill is ${uphillWord(up.deg) || compassWord(up.deg)} (${norm(up.deg)}\u00b0), worked out from ${how}. The base is at the bottom of the map.`;
+    }
+    const d = norm(st.deg);
+    const word = uphillWord(d);
+    return word
+      ? `Set by hand: uphill is ${word}, so ${word} is at the top of the map. It stays this way as more lifts are marked.`
+      : `Set by hand: the top of the map faces ${d}\u00b0 (about ${compassWord(d)}). It stays this way as more lifts are marked.`;
+  }
   function paintTurn() {
     work();
     const up = O().uphill;
-    const how = up ? (up.from === 'lifts' ? `worked out from the bottom and top of ${up.count} lift${up.count === 1 ? '' : 's'}` : 'worked out from the base map point and the summit weather point') : '';
-    turnNow.textContent = preview.auto
-      ? (up ? `Base at the bottom: the top of the map faces ${compassWord(turnTo)} (${turnTo}\u00b0), ${how}.` : 'North is up until uphill can be worked out.')
-      : `Turned by hand: the top of the map faces ${compassWord(turnTo)} (${turnTo}\u00b0). It stays this way as more lifts are marked.`;
-    prompt.hidden = Boolean(up);
     const saved = savedPreview();
-    turnSave.disabled = saved.auto === preview.auto && (preview.auto || norm(saved.deg) === norm(preview.deg));
+    const changed = !(saved.auto === preview.auto && (preview.auto || norm(saved.deg) === norm(preview.deg)));
+    turnNow.textContent = changed ? `Not saved yet. ${statusWords()}` : statusWords();
+    prompt.hidden = Boolean(up);
+    turnSave.disabled = !changed;
     backUp.hidden = O().mode !== 'manual';
+    backHint.hidden = backUp.hidden || Boolean(up);
     baseBtn.disabled = !up;
-    baseBtn.setAttribute('aria-pressed', String(preview.auto));
+    baseWhy.hidden = Boolean(up);
+    baseBtn.setAttribute('aria-pressed', String(Boolean(up) && preview.auto));
+    const pick = preview.auto ? null : norm(preview.deg);
+    compassBtns.forEach((b, i) => b.setAttribute('aria-pressed', String(pick === UPHILL[i].deg)));
+    const n = northOnScreen(turnTo);
+    needle.setAttribute('transform', `rotate(${Math.round(Math.atan2(n.x, -n.y) * 180 / Math.PI)})`);
     draw();
   }
-  const byHand = (d) => { preview = { auto: false, deg: norm(d) }; paintTurn(); };
+  const byHand = (d) => { preview = { auto: false, deg: norm(d) }; savedNote.textContent = ''; paintTurn(); };
   const turnCard = data.can_turn ? h('section', { class: 'panel stack turn-panel', 'data-area': 'turn' },
     h('h2', null, 'Map orientation'),
     h('p', { class: 'muted' }, 'Maps show the base at the bottom and the summit at the top, as you see the mountain from the base. Turn it by hand to match your trail map if you like. It turns every map of your mountain: this one, the call map and the terrain park map. It is only ever turned, never flipped, so left and right stay where they are on the hill.'),
     turnNow,
-    h('div', { class: 'row turn-row' },
-      baseBtn,
-      button('North up', () => byHand(0), {}),
-      button('\u21ba 15\u00b0', () => byHand(turnTo + 15), { label: 'Turn 15 degrees to the left' }),
-      button('\u21bb 15\u00b0', () => byHand(turnTo - 15), { label: 'Turn 15 degrees to the right' }),
-      button('Turn around', () => byHand(turnTo + 180), {})),
-    h('div', { class: 'row turn-row' }, turnSave, backUp)) : null;
+    h('div', { class: 'stack tight turn-base' }, baseBtn, baseWhy),
+    h('fieldset', { class: 'turn-compass stack tight' },
+      h('legend', null, 'Which way is uphill from the base?'),
+      h('p', { class: 'muted small' }, 'Stand at the base and look up the hill. Which way are you facing?'),
+      h('div', { class: 'turn-compass-row' }, h('div', { class: 'turn-compass-grid' }, compassBtns), turnPreview),
+      savedNote),
+    h('details', { class: 'turn-fine' }, h('summary', null, 'Turn by degrees'),
+      h('div', { class: 'row turn-row' },
+        button('North up', () => byHand(0), {}),
+        button('\u21ba 15\u00b0', () => byHand(turnTo + 15), { label: 'Turn 15 degrees to the left' }),
+        button('\u21bb 15\u00b0', () => byHand(turnTo - 15), { label: 'Turn 15 degrees to the right' }),
+        button('Turn around', () => byHand(turnTo + 180), {}))),
+    h('div', { class: 'row turn-row' }, turnSave, backUp, backHint)) : null;
 
   function placeDialog(p) {
     const k = select(data.kinds.map((x) => [x.key, x.label]), p.kind, { name: 'kind' });

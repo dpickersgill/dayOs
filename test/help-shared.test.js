@@ -585,3 +585,26 @@ test('tenant isolation: one mountain cannot see, route or change another\'s Text
   const board = ok(await api('GET', '/patrol/dispatch', { token: B.owner }));
   assert.ok(!JSON.stringify(board).includes(phone));
 });
+
+// ---------------------------------------------------------------- map orientation: "Which way is uphill from the base?"
+test('the uphill compass picker: each of the 8 points turns the maps so that way is up, and saves as a manual setting', async () => {
+  const T = await import('../public/js/mapturn.js');
+  assert.deepEqual(T.UPHILL.map((u) => [u.key, u.deg]), [['N', 0], ['NE', 45], ['E', 90], ['SE', 135], ['S', 180], ['SW', 225], ['W', 270], ['NW', 315]]);
+  assert.equal(T.uphillDeg('nw'), 315); assert.equal(T.uphillDeg('X'), null);
+  assert.equal(T.uphillWord(315), 'north-west'); assert.equal(T.uphillWord(-45), 'north-west'); assert.equal(T.uphillWord(100), null);
+  // Uphill is up: with uphill east (90), a point east of the base is straight up the screen.
+  for (const u of T.UPHILL) {
+    const r = Math.PI * u.deg / 180;
+    const p = T.turn(Math.sin(r) * 100, Math.cos(r) * 100, u.deg);
+    assert.ok(Math.abs(p.x) < 1e-6 && p.y < -99, `${u.key}: uphill is at the top`);
+  }
+  // What a tap sends is saved at once as a manual setting, and every map follows it.
+  for (const u of [T.UPHILL[7], T.UPHILL[2]]) {
+    const o = ok(await api('PUT', '/patrol/places/orientation', { token: A.owner, body: { rotation_deg: u.deg } }));
+    assert.equal(o.mode, 'manual'); assert.equal(o.rotation_deg, u.deg); assert.equal(o.manual_deg, u.deg);
+    assert.equal(ok(await api('GET', '/patrol/places/orientation', { token: A.owner })).rotation_deg, u.deg);
+  }
+  // Back to uphill up with nothing mapped: north up until a lift is marked.
+  const back = ok(await api('PUT', '/patrol/places/orientation', { token: A.owner, body: { auto: true } }));
+  assert.equal(back.mode, 'north'); assert.equal(back.rotation_deg, 0);
+});
