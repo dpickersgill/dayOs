@@ -2,6 +2,7 @@
 
 // Run when making a release zip: writes the git commit and the time to src/release/build.json, so the app, /version and
 // the console can say exactly which code is running. Checks that the version in package.json has a change log entry.
+// Also writes src/release/page-dates.json (scripts/page-dates.js): when each website page last changed, for the sitemap.
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
@@ -14,7 +15,9 @@ if (!log.releases.length || log.releases[0].version !== version) { console.error
 let build = 'dev';
 try { build = execSync('git rev-parse --short HEAD', { cwd: root }).toString().trim(); } catch (_) { /* not a git copy */ }
 let dirty = false;
-try { dirty = execSync('git status --porcelain -- src db public package.json ":!src/release/build.json"', { cwd: root }).toString().trim() !== ''; } catch (_) { /* not a git copy */ }
+try { dirty = execSync('git status --porcelain -- src db public package.json ":!src/release/build.json" ":!src/release/page-dates.json"', { cwd: root }).toString().trim() !== ''; } catch (_) { /* not a git copy */ }
 const out = { version, build: dirty ? `${build}+` : build, built_at: new Date().toISOString() };
 fs.writeFileSync(path.join(root, 'src', 'release', 'build.json'), `${JSON.stringify(out, null, 2)}\n`);
-console.log(`Stamped ${version} build ${out.build}${dirty ? ' (uncommitted changes: commit first for a clean build id)' : ''}`);
+const dates = require('./page-dates').write();
+require('../src/db').pool.end().catch(() => {});
+console.log(`Stamped ${version} build ${out.build}${dirty ? ' (uncommitted changes: commit first for a clean build id)' : ''}; page dates for ${dates.count} pages`);

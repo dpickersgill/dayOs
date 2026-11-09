@@ -287,7 +287,7 @@ async function render(req, name, slug, words = null) {
   const cut = noCut(plans);
   const prices = (s) => Object.entries(cut).reduce((t, [k, v]) => t.replaceAll(k, lit(v)), s.replaceAll('{{PATROL_FROM}}', lit(patrolFrom(plans))).replaceAll('{{PATROL_ADDON}}', lit(patrolAddon(plans))));
   html = prices(html);
-  const head = SEO.head({ slug: name === 'notfound' ? 'notfound' : slug, origin: canonicalOrigin(req), html, plans, verify: config.site.verify, sameAs: config.site.sameAs, noindex: isCopy(req), modified: modified(name), asset: ASSET_V });
+  const head = SEO.head({ slug: name === 'notfound' ? 'notfound' : slug, origin: canonicalOrigin(req), html, plans, verify: config.site.verify, sameAs: config.site.sameAs, noindex: isCopy(req), modified: modified(name, slug), asset: ASSET_V });
   html = fillPlans(html, plans).replace(/<!--\/?(PLANS|ADDONS)(:[a-z]+)?-->/g, '');
   html = html.replace('<!--HEAD-->', lit(head))
     .replace('<div class="sx">', lit(name === 'contact' ? '<div class="sx">' : '<div class="sx has-mcta">'))
@@ -334,8 +334,25 @@ async function send(req, res, name, slug, status = 200, words = null) {
 // two builds with different files never share it, and only a stamped build is kept a year (lib/appassets.js).
 const ASSET_V = require('../lib/appassets').SITE_V;
 
-/** When each page last changed, for the sitemap. */
-const modified = (name) => { try { return fs.statSync(path.join(DIR, `${name}.html`)).mtime.toISOString().slice(0, 10); } catch (_) { return null; } };
+/** When each page last changed, for the sitemap's lastmod and the page's dateModified: the date of the last commit that
+ * changed its template, from src/release/page-dates.json (written when the release zip is made, scripts/page-dates.js).
+ * Without that file (local copies) or for a page it does not list, the template file's own date. */
+const PAGE_DATES = path.join(__dirname, '..', 'release', 'page-dates.json');
+let pageDates = { at: -1, pages: {} };
+function datesFile() {
+  let at = 0; try { at = fs.statSync(PAGE_DATES).mtimeMs; } catch (_) { at = 0; }
+  if (at !== pageDates.at) {
+    let pages = {};
+    try { pages = at ? JSON.parse(fs.readFileSync(PAGE_DATES, 'utf8')).pages || {} : {}; } catch (_) { pages = {}; }
+    pageDates = { at, pages };
+  }
+  return pageDates.pages;
+}
+const modified = (name, slug) => {
+  const d = datesFile()[slug];
+  if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+  try { return fs.statSync(path.join(DIR, `${name}.html`)).mtime.toISOString().slice(0, 10); } catch (_) { return null; }
+};
 const PRIORITY = { '': '1.0', product: '0.9', 'ski-patrol': '0.9', 'ski-area-risk-management': '0.9', pricing: '0.9', resources: '0.7', about: '0.6', contact: '0.7', security: '0.6', privacy: '0.2', terms: '0.2' };
 for (const [s] of SOLUTIONS) if (!PRIORITY[s]) PRIORITY[s] = '0.8';
 PRIORITY['good-day'] = '0.7';
@@ -452,7 +469,7 @@ Yearly billing costs less. Pay by card, US bank account or invoice. 14 days free
 
 function sitemap(req, res) {
   const origin = canonicalOrigin(req);
-  const urls = Object.entries(PAGES).map(([slug, name]) => `  <url><loc>${origin}/${slug}</loc>${modified(name) ? `<lastmod>${modified(name)}</lastmod>` : ''}<priority>${PRIORITY[slug] || '0.5'}</priority></url>`).join('\n');
+  const urls = Object.entries(PAGES).map(([slug, name]) => [slug, modified(name, slug)]).map(([slug, d]) => `  <url><loc>${origin}/${slug}</loc>${d ? `<lastmod>${d}</lastmod>` : ''}<priority>${PRIORITY[slug] || '0.5'}</priority></url>`).join('\n');
   res.type('application/xml').set('Cache-Control', 'public, max-age=3600').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`);
 }
 
