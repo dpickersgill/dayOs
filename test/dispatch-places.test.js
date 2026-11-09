@@ -332,3 +332,126 @@ test('another mountain sees none of these places and cannot change them', async 
   const rowsOf = (list) => list.map((p) => [p.id, p.name, p.lat, p.active]).sort((a, b) => a[0] - b[0]);
   assert.deepEqual(rowsOf(await P.list(pool, M.id, { all: true })), rowsOf(mine));
 });
+
+// ---------------------------------------------------------------- map orientation
+test('uphill: the average bearing from lift bottoms to lift tops, or from the base to the summit weather point', async () => {
+  // Bearings as directions: 350 and 10 average to 0, never 180.
+  assert.equal(Math.round(P.meanBearing([350, 10])), 0);
+  assert.equal(Math.round(P.meanBearing([80, 100])), 90);
+  assert.equal(P.meanBearing([90, 270]), null, 'opposite lifts cancel out');
+  assert.equal(Math.round(P.bearing(LAT0, LNG0, off(100, 100).lat, off(100, 100).lng)), 45);
+  // The weather points first (no lift ends on N yet): base at the map point, summit 1 km due east.
+  const east = off(0, 1000);
+  await pool.query('UPDATE tenants SET map_lat = ?, map_lng = ?, wx_summit_lat = ?, wx_summit_lng = ? WHERE id = ?', [LAT0, LNG0, east.lat, east.lng, N.id]);
+  assert.deepEqual(await P.uphill(pool, N.id), { deg: 90, from: 'weather', count: 1 });
+  // Two lifts: one runs north-east (45), one north-west (315): uphill is north.
+  const lift2 = Number(ok(await api('POST', '/schedule/lifts', { token: N.owner, body: { name: 'West Double' } })).id);
+  const ends = [[N.lift, 'lift_bottom', 'NB1', off(0, 0)], [N.lift, 'lift_top', 'NT1', off(500, 500)], [lift2, 'lift_bottom', 'NB2', off(0, 0)], [lift2, 'lift_top', 'NT2', off(400, -400)]];
+  for (const [lift, kind, code, at] of ends) await place(N, { kind, name: code, code, lift_id: lift, ...at });
+  const u = await P.uphill(pool, N.id);
+  assert.equal(u.from, 'lifts'); assert.equal(u.count, 2); assert.ok(u.deg <= 1 || u.deg >= 359, `uphill ${u.deg}`);
+  // A lift with only its bottom marked does not count.
+  await place(N, { kind: 'lift_bottom', name: 'Lone bottom', code: 'NB3', lift_id: N.lift, ...off(10, 0) });
+  assert.equal((await P.uphill(pool, N.id)).count, 2);
+});
+
+test('turning the map needs the role: owners, managers and the patrol Director or Admin', async () => {
+  for (const who of ['patT', 'leadT']) is(await api('PUT', '/patrol/places/orientation', { token: M[who], body: { rotation_deg: 90 } }), 403, who);
+  is(await api('PUT', '/patrol/places/orientation', { token: M.liftyT, body: { rotation_deg: 90 } }), 403, 'lift staff');
+  is(await api('PUT', '/patrol/places/orientation', { token: M.dirT, body: { rotation_deg: 360 } }), 400, 'up to 359');
+  assert.equal(ok(await api('PUT', '/patrol/places/orientation', { token: M.dirT, body: { rotation_deg: 135 } })).rotation_deg, 135);
+  assert.equal(ok(await api('GET', '/patrol/places/orientation', { token: M.patT })).rotation_deg, 135, 'every patroller’s maps follow it');
+  assert.equal(ok(await api('GET', '/patrol/places/orientation', { token: M.patT })).can_turn, false);
+  assert.equal(ok(await api('GET', '/park/map', { token: M.liftyT })).map_rotation_deg, 135, 'the terrain park map is turned too');
+  ok(await api('PUT', '/patrol/places/orientation', { token: M.owner, body: { rotation_deg: 0 } }));
+  const a = (await pool.query("SELECT action FROM audit_log WHERE tenant_id = ? AND action = 'set_map_rotation'", [M.id]))[0];
+  assert.equal(a.length, 2);
+  assert.equal(ok(await api('GET', '/patrol/places/orientation', { token: N.owner })).mode, 'uphill', 'each mountain its own');
+  is(await api('PUT', '/patrol/places/orientation', { token: M.owner, body: {} }), 400, 'a rotation or auto');
+});
+
+test('uphill up is the default, worked out again as lift ends are marked, and a manual turn sticks until Back to uphill up', async () => {
+  ok(await api('PUT', '/patrol/places/orientation', { token: M.owner, body: { auto: true } }));
+  // No lift ends and no summit point on M: north up for now, and the mapping screen asks for a lift bottom and top.
+  let o = ok(await api('GET', '/patrol/places/orientation', { token: M.leadT }));
+  assert.deepEqual([o.mode, o.rotation_deg, o.uphill], ['north', 0, null]);
+  const mark = (kind, code, at, lift = M.lift) => api('POST', '/patrol/places', { token: M.leadT, body: { kind, lift_id: lift, code, ...at, accuracy_m: 5 } });
+  ok(await mark('lift_bottom', 'QB', off(3000, 0)));
+  assert.equal(ok(await api('GET', '/patrol/places/orientation', { token: M.leadT })).mode, 'north', 'a bottom alone is not enough');
+  ok(await mark('lift_top', 'QT', off(3500, 500))); // north-east of its bottom
+  o = ok(await api('GET', '/patrol/places/orientation', { token: M.leadT }));
+  assert.deepEqual([o.mode, o.rotation_deg], ['uphill', 45], 'base at the bottom, by default');
+  assert.equal(ok(await api('GET', '/park/map', { token: M.liftyT })).map_rotation_deg, 45);
+  // A second lift running due north: worked out again, the average of the two.
+  const lift2 = Number(ok(await api('POST', '/schedule/lifts', { token: M.owner, body: { name: 'North Double' } })).id);
+  ok(await mark('lift_bottom', 'NDB', off(3000, 100), lift2));
+  ok(await mark('lift_top', 'NDT', off(3600, 100), lift2));
+  const both = ok(await api('GET', '/patrol/places/orientation', { token: M.leadT })).rotation_deg;
+  assert.ok(both >= 22 && both <= 23, `the average of 45 and 0 is about 22.5, got ${both}`);
+  // A manual turn sticks, however many lifts are marked after it.
+  ok(await api('PUT', '/patrol/places/orientation', { token: M.dirT, body: { rotation_deg: 200 } }));
+  ok(await mark('lift_top', 'NDX', off(3600, 300), lift2));
+  o = ok(await api('GET', '/patrol/places/orientation', { token: M.leadT }));
+  assert.deepEqual([o.mode, o.rotation_deg], ['manual', 200]);
+  assert.ok(o.uphill, 'uphill is still worked out, ready for Back to uphill up');
+  // Back to uphill up.
+  o = ok(await api('PUT', '/patrol/places/orientation', { token: M.dirT, body: { auto: true } }));
+  assert.equal(o.mode, 'uphill');
+  assert.equal((await pool.query('SELECT map_rotation_deg FROM tenants WHERE id = ?', [M.id]))[0][0].map_rotation_deg, null);
+});
+
+test('the turned projection: 90, 180 and 270 degrees turn the points, never mirror them, and labels stay upright', async () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'hp-turn-'));
+  let JSDOM;
+  try { ({ JSDOM } = require('jsdom')); } catch (_) { /* below */ }
+  try {
+    fs.cpSync(nodePath.join(__dirname, '..', 'public', 'js'), nodePath.join(tmp, 'js'), { recursive: true });
+    fs.writeFileSync(nodePath.join(tmp, 'package.json'), '{"type":"module"}');
+    const T = await import(pathToFileURL(nodePath.join(tmp, 'js', 'mapturn.js')).href);
+    // 100 m east of the middle, with each direction at the top.
+    const round = (p) => ({ x: Math.round(p.x) + 0, y: Math.round(p.y) + 0 });
+    assert.deepEqual(round(T.turn(100, 0, 0)), { x: 100, y: 0 });
+    assert.deepEqual(round(T.turn(100, 0, 90)), { x: 0, y: -100 }, 'east up: east is at the top');
+    assert.deepEqual(round(T.turn(100, 0, 180)), { x: -100, y: 0 }, 'turned around: east is on the left');
+    assert.deepEqual(round(T.turn(100, 0, 270)), { x: 0, y: 100 }, 'west up: east is at the bottom');
+    for (const up of [0, 90, 180, 270, 37]) {
+      // A turn, not a mirror: walking from north to east is still clockwise on screen.
+      const n = T.turn(0, 1, up); const e = T.turn(1, 0, up);
+      assert.ok(n.x * e.y - n.y * e.x > 0, `${up}: clockwise stays clockwise`);
+      assert.deepEqual(round(T.northOnScreen(up)), round(T.turn(0, 1, up)));
+    }
+    if (!JSDOM) return;
+    const dom = new JSDOM('<!doctype html><html><body></body></html>');
+    const saved = globalThis.document;
+    globalThis.document = dom.window.document;
+    try {
+      const { placeMap } = await import(pathToFileURL(nodePath.join(tmp, 'js', 'placemap.js')).href);
+      const pts = [{ code: 'MID', kind: 'sign', ...off(0, 0) }, { code: 'EAST', kind: 'sign', ...off(0, 200) }, { code: 'NORTH', kind: 'tower', ...off(200, 0) }];
+      const at = (svgEl, code) => { const t = [...svgEl.querySelectorAll('text.pm-label')].find((x) => x.textContent === code); return { x: Number(t.getAttribute('x')), y: Number(t.getAttribute('y')), t }; };
+      for (const [up, eastIs] of [[0, 'right'], [90, 'up'], [180, 'left'], [270, 'down']]) {
+        const el = placeMap(pts, { width: 400, height: 400, rotation: up });
+        const m = at(el, 'MID'); const e = at(el, 'EAST');
+        const dx = e.x - m.x; const dy = e.y - m.y;
+        const dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
+        assert.equal(dir, eastIs, `${up} degrees: east is ${eastIs}`);
+        for (const t of el.querySelectorAll('text')) assert.ok(!t.getAttribute('transform') && !t.getAttribute('rotate'), `${up}: text "${t.textContent}" is upright`);
+        assert.equal(el.querySelector('.pm-north').getAttribute('data-up'), String(up), 'a north arrow on every map');
+      }
+    } finally { globalThis.document = saved; }
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('the call map draws the guest’s last positions when help/guest keeps them (dispatch_positions)', async (t) => {
+  const [[has]] = await pool.query("SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'dispatch_positions'");
+  if (!Number(has.n)) { t.skip('dispatch_positions comes with help/guest; this runs once the branches are together'); return; }
+  const call = ok(await api('POST', '/patrol/dispatch', { token: M.patT, body: { location: 'Trail test' } }));
+  const steps = [[0, 30, '10:00:00'], [5, 31, '10:01:00'], [80, 30, '10:02:00']];
+  for (const [n, e, time] of steps) {
+    const p = off(n, e);
+    await pool.query('INSERT INTO dispatch_positions (tenant_id, call_id, lat, lng, accuracy_m, taken_at, received_at) VALUES (?, ?, ?, ?, 8, ?, ?)', [M.id, call.id, p.lat, p.lng, `2026-11-09 ${time}`, `2026-11-09 ${time}`]);
+  }
+  const w = ok(await api('GET', `/patrol/dispatch/${call.id}/where`, { token: M.patT }));
+  assert.equal(w.trail.length, 3);
+  assert.equal(w.position.at, '2026-11-09 10:02:00');
+  assert.equal(w.last_moved_at, '2026-11-09 10:02:00', 'the 80 m step is the last move; the 5 m one is the phone wobbling');
+});

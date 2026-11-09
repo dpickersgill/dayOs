@@ -8,6 +8,7 @@ import { h, svg, clear, ctx, input, select, field, button, toast, formDialog, co
 import { watchFix, quality, goodEnough, MARK_MAX_M, WAIT_MS, mapsLink } from '../gpsfix.js';
 import { placeMap } from '../placemap.js';
 import { qrMatrix, qrPath, signWords, SIZES } from '../signsheet.js';
+import { norm, compassWord } from '../mapturn.js';
 
 const LIFT_KINDS = ['tower', 'lift_top', 'lift_bottom'];
 const TRAIL_KINDS = ['sign', 'junction'];
@@ -116,8 +117,8 @@ export async function drawPlaces(box) {
 
   function draw() {
     const active = data.data.filter((p) => p.active);
-    clear(mapBox).append(placeMap(active, { width: 640, height: 360, onPick: (p) => placeDialog(p), title: `Map of ${active.length} marked places` }),
-      h('p', { class: 'muted small' }, 'Squares are lift towers, dots are everything else. North is up. Tap a point for its details.'));
+    clear(mapBox).append(placeMap(active, { width: 640, height: 360, rotation: turnTo, onPick: (p) => placeDialog(p), title: `Map of ${active.length} marked places` }),
+      h('p', { class: 'muted small' }, `Squares are lift towers, dots are everything else. ${turnTo ? 'The red arrow points to true north.' : 'North is up.'} Tap a point for its details.`));
     const shown = data.data.filter((p) => showRetired || p.active);
     const printSel = () => { const ids = [...chosen].filter((id) => active.some((p) => p.id === id)); return ids.length ? ids : active.map((p) => p.id); };
     clear(tools).append(
@@ -138,7 +139,55 @@ export async function drawPlaces(box) {
         button('Edit', () => placeDialog(p), { small: true, label: `Edit ${p.code}` })) },
     ], shown) : empty('Nothing marked yet. Stand at a trail sign or lift tower and press Mark this spot.'));
   }
-  async function reload() { try { data = await get('/patrol/places'); draw(); } catch (err) { fail(err); } }
+  async function reload() { try { data = await get('/patrol/places'); if (turnCard) paintTurn(); else { work(); prompt.hidden = Boolean(O().uphill); draw(); } } catch (err) { fail(err); } }
+
+  // ---- Map orientation. By default the base is at the bottom and the summit at the top, as seen from the base: uphill,
+  // worked out from the marked lift ends (again as more are marked). Owners, managers and the patrol Director or Admin
+  // can turn it by hand instead; that sticks until Back to uphill up.
+  const O = () => data.orientation || { rotation_deg: 0, mode: 'north', manual_deg: null, uphill: null };
+  let preview = O().mode === 'manual' ? { auto: false, deg: O().manual_deg } : { auto: true, deg: 0 };
+  const savedPreview = () => (O().mode === 'manual' ? { auto: false, deg: O().manual_deg } : { auto: true, deg: 0 });
+  let turnTo = 0;
+  const work = () => { turnTo = preview.auto ? (O().uphill ? O().uphill.deg : 0) : norm(preview.deg); };
+  work();
+  const turnNow = h('p', { class: 'turn-now', role: 'status', 'aria-live': 'polite' });
+  const prompt = h('p', { class: 'turn-prompt', role: 'note' }, 'Mark a lift bottom and top so the map shows your mountain the way you see it from the base.');
+  const turnSave = button('Save orientation', async () => {
+    data.orientation = await put('/patrol/places/orientation', preview.auto ? { auto: true } : { rotation_deg: norm(preview.deg) });
+    toast('Orientation saved'); paintTurn();
+  }, { kind: 'primary' });
+  const backUp = button('Back to uphill up', async () => {
+    data.orientation = await put('/patrol/places/orientation', { auto: true });
+    preview = { auto: true, deg: 0 }; toast('Back to uphill up'); paintTurn();
+  }, {});
+  const baseBtn = button('Base at the bottom (as you see it from the base)', () => { preview = { auto: true, deg: 0 }; paintTurn(); }, {});
+  function paintTurn() {
+    work();
+    const up = O().uphill;
+    const how = up ? (up.from === 'lifts' ? `worked out from the bottom and top of ${up.count} lift${up.count === 1 ? '' : 's'}` : 'worked out from the base map point and the summit weather point') : '';
+    turnNow.textContent = preview.auto
+      ? (up ? `Base at the bottom: the top of the map faces ${compassWord(turnTo)} (${turnTo}\u00b0), ${how}.` : 'North is up until uphill can be worked out.')
+      : `Turned by hand: the top of the map faces ${compassWord(turnTo)} (${turnTo}\u00b0). It stays this way as more lifts are marked.`;
+    prompt.hidden = Boolean(up);
+    const saved = savedPreview();
+    turnSave.disabled = saved.auto === preview.auto && (preview.auto || norm(saved.deg) === norm(preview.deg));
+    backUp.hidden = O().mode !== 'manual';
+    baseBtn.disabled = !up;
+    baseBtn.setAttribute('aria-pressed', String(preview.auto));
+    draw();
+  }
+  const byHand = (d) => { preview = { auto: false, deg: norm(d) }; paintTurn(); };
+  const turnCard = data.can_turn ? h('section', { class: 'panel stack turn-panel', 'data-area': 'turn' },
+    h('h2', null, 'Map orientation'),
+    h('p', { class: 'muted' }, 'Maps show the base at the bottom and the summit at the top, as you see the mountain from the base. Turn it by hand to match your trail map if you like. It turns every map of your mountain: this one, the call map and the terrain park map. It is only ever turned, never flipped, so left and right stay where they are on the hill.'),
+    turnNow,
+    h('div', { class: 'row turn-row' },
+      baseBtn,
+      button('North up', () => byHand(0), {}),
+      button('\u21ba 15\u00b0', () => byHand(turnTo + 15), { label: 'Turn 15 degrees to the left' }),
+      button('\u21bb 15\u00b0', () => byHand(turnTo - 15), { label: 'Turn 15 degrees to the right' }),
+      button('Turn around', () => byHand(turnTo + 180), {})),
+    h('div', { class: 'row turn-row' }, turnSave, backUp)) : null;
 
   function placeDialog(p) {
     const k = select(data.kinds.map((x) => [x.key, x.label]), p.kind, { name: 'kind' });
@@ -206,8 +255,11 @@ export async function drawPlaces(box) {
   clear(box).append(h('div', { class: 'places-page stack' },
     h('p', { class: 'muted' }, 'Mark trail signs, lift towers and junctions. Calls then say where a caller is in the words you use on the radio, and each place gets a help sign with its code.'),
     h('div', { class: 'places-grid' }, markCard, h('section', { class: 'panel stack', 'data-area': 'map' }, h('h2', null, 'Marked places'), mapBox)),
+    turnCard,
     h('section', { class: 'panel stack', 'data-area': 'list' }, tools, listBox)));
-  draw();
+  mapBox.before(prompt);
+  prompt.hidden = Boolean(O().uphill);
+  if (turnCard) paintTurn(); else draw();
 }
 
 // ---------------------------------------------------------------- printing

@@ -2,6 +2,7 @@
 // service. Used by mapping the mountain (every point) and a call's location panel (the places near the caller, the
 // caller's accuracy circle and their last positions as a trail).
 import { svg } from './ui.js';
+import { turn, northOnScreen, norm } from './mapturn.js';
 
 const M_PER_DEG = 111320;
 
@@ -9,15 +10,18 @@ const M_PER_DEG = 111320;
  * points: [{ lat, lng, code, name, kind, id }]. opts: focus { lat, lng, acc } (the caller), trail [{ lat, lng }],
  * width/height (viewBox units), label (draw codes), onPick(point), span (meters shown at least, around the focus).
  */
-export function placeMap(points, { focus = null, trail = [], width = 360, height = 240, label = true, onPick = null, span = 0, title = 'Map of mapped places' } = {}) {
+export function placeMap(points, { focus = null, trail = [], width = 360, height = 240, label = true, onPick = null, span = 0, title = 'Map of mapped places', rotation = 0 } = {}) {
   const all = [...points, ...trail, ...(focus ? [focus] : [])].filter((p) => Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng)));
   const pad = 22;
   const el = svg('svg', { class: 'place-map', viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': title, preserveAspectRatio: 'xMidYMid meet' });
   el.append(svg('rect', { x: 0, y: 0, width, height, class: 'pm-bg' }));
   if (!all.length) { el.append(svg('text', { x: width / 2, y: height / 2, 'text-anchor': 'middle', class: 'pm-empty' }, 'Nothing marked yet')); return el; }
   const lat0 = all.reduce((s, p) => s + Number(p.lat), 0) / all.length;
+  const lng0 = all.reduce((s, p) => s + Number(p.lng), 0) / all.length;
   const k = Math.cos(lat0 * Math.PI / 180);
-  const xy = (p) => ({ x: Number(p.lng) * M_PER_DEG * k, y: -Number(p.lat) * M_PER_DEG });
+  // The mountain's orientation turns the projection itself (the points), never the text: every label stays upright.
+  const up = norm(rotation);
+  const xy = (p) => turn((Number(p.lng) - lng0) * M_PER_DEG * k, (Number(p.lat) - lat0) * M_PER_DEG, up);
   const pts = all.map(xy);
   let minX = Math.min(...pts.map((p) => p.x)); let maxX = Math.max(...pts.map((p) => p.x));
   let minY = Math.min(...pts.map((p) => p.y)); let maxY = Math.max(...pts.map((p) => p.y));
@@ -37,7 +41,13 @@ export function placeMap(points, { focus = null, trail = [], width = 360, height
   const bar = meters * scale;
   el.append(svg('g', { class: 'pm-scale' }, svg('line', { x1: 10, y1: height - 10, x2: 10 + bar, y2: height - 10 }),
     svg('text', { x: 10 + bar + 4, y: height - 6 }, meters >= 1000 ? `${meters / 1000} km` : `${meters} m`)));
-  el.append(svg('text', { x: width - 8, y: 16, 'text-anchor': 'end', class: 'pm-north' }, 'N ↑'));
+  // A north arrow on every map, pointing at true north however the map is turned.
+  const n = northOnScreen(up); const ax = width - 22; const ay = 24;
+  el.append(svg('g', { class: 'pm-north', 'data-up': String(up), role: 'img', 'aria-label': up ? `North arrow: the map is turned, north points ${up < 180 ? 'left of' : 'right of'} the top` : 'North arrow: north is up' },
+    svg('circle', { cx: ax, cy: ay, r: 15, class: 'pm-north-ring' }),
+    svg('line', { x1: ax - n.x * 9, y1: ay - n.y * 9, x2: ax + n.x * 9, y2: ay + n.y * 9, class: 'pm-north-line' }),
+    svg('circle', { cx: ax + n.x * 9, cy: ay + n.y * 9, r: 3, class: 'pm-north-tip' }),
+    svg('text', { x: ax + n.x * 9 + (n.x >= 0 ? 6 : -6), y: ay + n.y * 9 + 4 + (n.y > 0.5 ? 6 : 0), 'text-anchor': n.x >= 0 ? 'start' : 'end', class: 'pm-north-n' }, 'N')));
 
   if (focus && Number(focus.acc) > 0) { const c = at(focus); el.append(svg('circle', { cx: c.x, cy: c.y, r: Math.max(4, Number(focus.acc) * scale), class: 'pm-ring' })); }
   if (trail.length > 1) el.append(svg('polyline', { points: trail.map((p) => { const c = at(p); return `${c.x.toFixed(1)},${c.y.toFixed(1)}`; }).join(' '), class: 'pm-trail' }));

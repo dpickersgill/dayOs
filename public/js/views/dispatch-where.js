@@ -36,7 +36,7 @@ export function wherePanel(callId) {
         w.minutes_since_move !== null ? h('span', { class: 'where-moved' }, ago(w.minutes_since_move)) : null),
       scannedLine(w),
       // The places close enough to matter (the nearest few always), so the map is zoomed in on the caller.
-      placeMap(w.places.filter((x, i) => i < 3 || x.distance_m <= Math.max(250, 3 * (p.accuracy_m || 0))), { focus: { lat: p.lat, lng: p.lng, acc: p.accuracy_m || 0 }, trail: w.trail.length > 1 ? w.trail : [], width: 360, height: 220, span: 200, title: `Map: the caller and ${w.places.length} mapped places near them` }),
+      placeMap(w.places.filter((x, i) => i < 3 || x.distance_m <= Math.max(250, 3 * (p.accuracy_m || 0))), { focus: { lat: p.lat, lng: p.lng, acc: p.accuracy_m || 0 }, trail: w.trail.length > 1 ? w.trail : [], width: 360, height: 220, span: 200, rotation: w.rotation_deg || 0, title: `Map: the caller and ${w.places.length} mapped places near them` }),
       h('p', { class: 'muted small' }, w.trail.length > 1 ? `The ring is how sure the phone is; the line is its last ${w.trail.length} positions. ` : 'The ring is how sure the phone is. ',
         `${Number(p.lat).toFixed(5)}, ${Number(p.lng).toFixed(5)} `,
         h('a', { href: w.maps_url, target: '_blank', rel: 'noopener' }, 'Open in maps')),

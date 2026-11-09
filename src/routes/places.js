@@ -75,6 +75,22 @@ const gpsGate = (acc) => {
 };
 const dupCode = (err) => { if (err && err.code === 'ER_DUP_ENTRY') throw conflict('That sign code is already used on this mountain. Choose another.'); throw err; };
 
+// ---------------------------------------------------------------- map orientation
+// Who may turn the mountain's maps: owners and managers, and the patrol Director or Admin (access level Admin).
+const mayTurn = async (req) => PA.isSystemAdmin(req) || (await PA.levelOf(pool, req)) === 'admin';
+router.get('/places/orientation', patrol, async (req, res) => {
+  res.json({ ...(await P.orientationOf(pool, req.auth.tenantId)), can_turn: await mayTurn(req) });
+});
+// { rotation_deg } sets a manual turn that sticks; { auto: true } goes back to uphill up (the base at the bottom).
+router.put('/places/orientation', patrol, validate(z.object({ rotation_deg: z.number().int().min(0).max(359).optional(), auto: z.literal(true).optional() })
+  .refine((b) => (b.auto === true) !== (b.rotation_deg !== undefined), 'Send a rotation, or auto to go back to uphill up')), async (req, res) => {
+  if (!(await mayTurn(req))) throw require('../lib/errors').forbidden('Turning the map is for owners, managers and the patrol Director or Admin');
+  const before = await P.orientationOf(pool, req.auth.tenantId);
+  await pool.query('UPDATE tenants SET map_rotation_deg = ? WHERE id = ?', [req.body.auto ? null : req.body.rotation_deg, req.auth.tenantId]);
+  await audit(pool, req, 'set_map_rotation', 'tenants', req.auth.tenantId, { from: before.manual_deg, to: req.body.auto ? 'uphill' : req.body.rotation_deg });
+  res.json(await P.orientationOf(pool, req.auth.tenantId));
+});
+
 // ---------------------------------------------------------------- the list and marking
 router.get('/places', patrol, mapping, async (req, res) => {
   const { tenantId } = req.auth;
@@ -83,7 +99,8 @@ router.get('/places', patrol, mapping, async (req, res) => {
     rows(pool, 'SELECT id, name FROM lifts WHERE tenant_id = ? ORDER BY name', [tenantId]),
     rows(pool, 'SELECT id, name FROM trails WHERE tenant_id = ? ORDER BY name', [tenantId]),
   ]);
-  res.json({ data, lifts, trails, kinds: P.KINDS.map((k) => ({ key: k, label: P.KIND_LABEL[k] })), gps_max_m: GPS_MAX_M });
+  res.json({ data, lifts, trails, kinds: P.KINDS.map((k) => ({ key: k, label: P.KIND_LABEL[k] })), gps_max_m: GPS_MAX_M,
+    orientation: await P.orientationOf(pool, tenantId), can_turn: await mayTurn(req) });
 });
 
 router.post('/places/code', patrol, mapping, validate(z.object({ ...fields, except: z.number().int().positive().nullable().optional() })), async (req, res) => {
@@ -237,10 +254,12 @@ router.post('/places/import', patrol, mapping, validate(z.object({ csv: z.string
 // ---------------------------------------------------------------- sign sheets
 /** The mountain's help number for texts (help/sms adds the setting): any tenants column named help..number or help..phone. */
 async function helpNumber(tenantId) {
-  const col = await one(pool, `SELECT column_name AS c FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'tenants'
-    AND column_name REGEXP '^(guest_)?help_([a-z]+_)?(number|phone)$' ORDER BY column_name LIMIT 1`);
+  // help/guest and help/sms name it guest_help_sms (the number guests text); any other help..number or help..sms column after.
+  const cols = (await rows(pool, `SELECT column_name AS c FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'tenants'
+    AND column_name REGEXP '^(guest_)?help_([a-z]+_)?(sms|text|number)$'`)).map((r) => r.c);
+  const col = ['guest_help_sms', 'help_sms_number', 'help_text_number', 'help_number'].find((c) => cols.includes(c)) || cols.sort()[0];
   if (!col) return null;
-  const t = await one(pool, `SELECT \`${String(col.c).replace(/`/g, '')}\` AS n FROM tenants WHERE id = ?`, [tenantId]);
+  const t = await one(pool, `SELECT \`${String(col).replace(/`/g, '')}\` AS n FROM tenants WHERE id = ?`, [tenantId]);
   const n = t && t.n ? String(t.n).trim() : '';
   return n || null;
 }
@@ -276,7 +295,7 @@ async function positionTable() {
   if (!t) return null;
   const cols = await columnsOf(t.t);
   const pick = (...names) => names.find((n) => cols.has(n)) || null;
-  const m = { table: t.t, lat: pick('lat', 'gps_lat', 'latitude'), lng: pick('lng', 'gps_lng', 'longitude'), acc: pick('accuracy_m', 'accuracy'), at: pick('at', 'recorded_at', 'created_at', 'received_at'), call: pick('call_id'), id: cols.has('id') };
+  const m = { table: t.t, lat: pick('lat', 'gps_lat', 'latitude'), lng: pick('lng', 'gps_lng', 'longitude'), acc: pick('accuracy_m', 'accuracy'), at: pick('taken_at', 'at', 'recorded_at', 'created_at', 'received_at'), call: pick('call_id'), id: cols.has('id') };
   return m.lat && m.lng && m.call && cols.has('tenant_id') ? m : null;
 }
 const q = (n) => `\`${String(n).replace(/`/g, '')}\``;
@@ -323,6 +342,7 @@ router.get('/dispatch/:id/where', patrol, needs('dispatch'), async (req, res) =>
     scanned,
     last_moved_at: movedAt,
     minutes_since_move: movedAt ? minutesBetween(movedAt, now) : null,
+    rotation_deg: await P.rotationOf(pool, tenantId),
     maps_url: position ? `https://www.google.com/maps/search/?api=1&query=${position.lat},${position.lng}` : null,
   });
 });

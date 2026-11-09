@@ -146,6 +146,62 @@ async function takenCodes(db, tenantId) {
   return new Set((await rows(db, 'SELECT code FROM mountain_places WHERE tenant_id = ?', [tenantId])).map((r) => r.code));
 }
 
+// ---------------------------------------------------------------- map orientation
+// Most trail maps are drawn looking uphill, not north up. A mountain sets the compass direction at the top of its maps
+// (tenants.map_rotation_deg): every map that plots GPS points is turned by it, never mirrored.
+const norm360 = (d) => ((Math.round(Number(d)) % 360) + 360) % 360;
+
+/** The compass bearing from one point to another, 0 to 360 (0 north, 90 east). */
+function bearing(lat1, lng1, lat2, lng2) {
+  const r = Math.PI / 180;
+  const y = Math.sin((lng2 - lng1) * r) * Math.cos(lat2 * r);
+  const x = Math.cos(lat1 * r) * Math.sin(lat2 * r) - Math.sin(lat1 * r) * Math.cos(lat2 * r) * Math.cos((lng2 - lng1) * r);
+  return (Math.atan2(y, x) / r + 360) % 360;
+}
+/** The average of bearings, as directions (350 and 10 average to 0, not 180). null when they cancel out. */
+function meanBearing(list) {
+  if (!list.length) return null;
+  const r = Math.PI / 180;
+  const s = list.reduce((a, d) => a + Math.sin(d * r), 0); const c = list.reduce((a, d) => a + Math.cos(d * r), 0);
+  if (Math.hypot(s, c) < 1e-6 * list.length) return null;
+  return (Math.atan2(s, c) / r + 360) % 360;
+}
+/**
+ * Uphill: the average bearing from each lift's bottom to its top (mapped lift_bottom and lift_top places on the same lift),
+ * or else from the mountain's map point (the base) to its summit weather point. { deg, from: 'lifts'|'weather', count } or null.
+ */
+async function uphill(db, tenantId) {
+  const ends = await rows(db, "SELECT lift_id, kind, lat, lng FROM mountain_places WHERE tenant_id = ? AND active = 1 AND lift_id IS NOT NULL AND kind IN ('lift_bottom','lift_top')", [tenantId]);
+  const byLift = new Map();
+  for (const e of ends) { const k = Number(e.lift_id); if (!byLift.has(k)) byLift.set(k, {}); byLift.get(k)[e.kind] = e; }
+  const lifts = [...byLift.values()].filter((x) => x.lift_bottom && x.lift_top)
+    .map((x) => bearing(Number(x.lift_bottom.lat), Number(x.lift_bottom.lng), Number(x.lift_top.lat), Number(x.lift_top.lng)));
+  const fromLifts = meanBearing(lifts);
+  if (fromLifts !== null) return { deg: norm360(fromLifts), from: 'lifts', count: lifts.length };
+  const t = await one(db, 'SELECT * FROM tenants WHERE id = ?', [tenantId]);
+  if (t && t.map_lat !== null && t.map_lng !== null && t.wx_summit_lat !== null && t.wx_summit_lat !== undefined && t.wx_summit_lng !== null) {
+    const a = [Number(t.map_lat), Number(t.map_lng)]; const b = [Number(t.wx_summit_lat), Number(t.wx_summit_lng)];
+    if (haversine(a[0], a[1], b[0], b[1]) > 20) return { deg: norm360(bearing(a[0], a[1], b[0], b[1])), from: 'weather', count: 1 };
+  }
+  return null;
+}
+/**
+ * How this mountain's maps are turned. By default the base is at the bottom and the summit at the top, as seen standing
+ * at the base looking up: uphill, worked out again as lift ends are marked. Until it can be, north is up. A manual turn
+ * set by an admin sticks until they go back to uphill up.
+ * Returns { rotation_deg, mode: 'uphill'|'manual'|'north', manual_deg, uphill }.
+ */
+async function orientationOf(db, tenantId) {
+  const t = await one(db, 'SELECT map_rotation_deg AS d FROM tenants WHERE id = ?', [tenantId]).catch(() => null);
+  const manual = t && t.d !== null && t.d !== undefined ? norm360(t.d) : null;
+  const up = await uphill(db, tenantId);
+  if (manual !== null) return { rotation_deg: manual, mode: 'manual', manual_deg: manual, uphill: up };
+  if (up) return { rotation_deg: up.deg, mode: 'uphill', manual_deg: null, uphill: up };
+  return { rotation_deg: 0, mode: 'north', manual_deg: null, uphill: null };
+}
+/** The compass direction at the top of this mountain's maps. */
+const rotationOf = async (db, tenantId) => (await orientationOf(db, tenantId)).rotation_deg;
+
 // ---------------------------------------------------------------- CSV
 const CSV_COLS = ['kind', 'name', 'code', 'lift', 'tower', 'trail', 'lat', 'lng'];
 
@@ -174,5 +230,5 @@ const undefuse = (v) => String(v ?? '').trim().replace(/^'(?=[=+\-@])/, '');
 
 module.exports = {
   KINDS, KIND_LABEL, CODE_RE, CSV_COLS, haversine, rangeFor, rounded, normalCode, validCode, list, byCode, near, describe, wordsFor, placeName,
-  suggestCode, takenCodes, initialsOf, parseCsv, undefuse,
+  suggestCode, takenCodes, initialsOf, parseCsv, undefuse, bearing, meanBearing, uphill, rotationOf, orientationOf, norm360,
 };
