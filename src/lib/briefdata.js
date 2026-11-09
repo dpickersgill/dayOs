@@ -95,8 +95,8 @@ async function weather(db, t, date, today) {
     const wx = (await require('./dayrecord').fetchWeather(Number(t.map_lat), Number(t.map_lng), date, date, today))[date];
     if (wx) { day = { high_f: wx.high_f, low_f: wx.low_f, snow_in: wx.snowfall_in, precip_in: wx.precip_in, wind_mph: wx.wind_mph, gust_mph: wx.gust_mph, code: wx.weather_code }; source = 'forecast'; }
   }
-  // What the crew wrote down: the latest snow report and weather reading of the last day.
-  const snow = await one(db, 'SELECT new_snow_in, base_in FROM snow_readings WHERE tenant_id = ? AND trail_id IS NULL AND read_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY) ORDER BY read_at DESC, id DESC LIMIT 1', [t.id]).catch(() => null);
+  // What the crew wrote down: the latest snow report from the day before or the day itself.
+  const snow = await one(db, 'SELECT new_snow_in, base_in FROM snow_readings WHERE tenant_id = ? AND trail_id IS NULL AND read_at >= ? AND read_at < ? ORDER BY read_at DESC, id DESC LIMIT 1', [t.id, `${addDays(date, -1)} 00:00:00`, `${addDays(date, 1)} 00:00:00`]).catch(() => null);
   const out = { source: source || 'none' };
   if (day) Object.assign(out, { sky: sky(day.code), high_f: round1(num(day.high_f)), low_f: round1(num(day.low_f)), snow_in: round1(num(day.snow_in)), precip_in: round1(num(day.precip_in)), wind_mph: round1(num(day.wind_mph)), gust_mph: round1(num(day.gust_mph)) });
   if (snow && (snow.new_snow_in != null || snow.base_in != null)) out.crew_snow_report = { new_snow_in: num(snow.new_snow_in), base_in: num(snow.base_in) };

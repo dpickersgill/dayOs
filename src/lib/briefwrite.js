@@ -68,6 +68,13 @@ function weatherLine(w) {
   return parts.length ? `${parts.join(', ')}.`.replace(/^./, (c) => c.toUpperCase()) : null;
 }
 
+/** The weather in a few words, for the summary line. */
+function shortWeather(w) {
+  if (!w || w.source === 'none') return null;
+  const parts = [w.snow_in && /snow/i.test(w.sky || '') ? null : w.sky, w.snow_in ? `${w.snow_in} in of snow` : null, w.high_f != null ? `high ${deg(w.high_f)}` : null, w.gust_mph != null ? `gusts ${w.gust_mph} mph` : null].filter(Boolean);
+  return parts.length ? `${parts.join(', ')}.`.replace(/^./, (c) => c.toUpperCase()) : null;
+}
+
 function dayLine(d) {
   const when = d.hours && d.hours.open ? `, ${clock(d.hours.open)} to ${clock(d.hours.close)}` : '';
   if (d.day_before_opening) return `Opening day is tomorrow, ${fmtDay(d.date)}${when}.`;
@@ -126,7 +133,8 @@ function template(d) {
 
   if (d.lessons) {
     const s = d.lessons;
-    const v = [s.lessons ? `${plural(s.lessons, 'lesson')} booked with ${plural(s.students, 'student')}. ${plural(s.instructors_scheduled, 'instructor')} scheduled, ${s.instructors_assigned} assigned to lessons.` : 'No lessons booked yet.'];
+    const v = [s.lessons ? `${plural(s.lessons, 'lesson')} booked with ${plural(s.students, 'student')}.` : 'No lessons booked yet.',
+      `Instructors: ${s.instructors_scheduled} on the schedule, ${s.instructors_assigned} assigned to lessons.`];
     if (s.lessons_without_instructor) v.push(`${plural(s.lessons_without_instructor, 'lesson')} still ${s.lessons_without_instructor === 1 ? 'has' : 'have'} no instructor.`);
     for (const c of s.classes_over_ratio) v.push(`${c.lesson}: ${c.students} students, and ${c.band} classes take ${c.limit}.`);
     sections.push({ title: 'Lessons', lines: v });
@@ -144,7 +152,8 @@ function template(d) {
 
   if (d.shifts) {
     const s = d.shifts;
-    const v = s.shifts ? [`${plural(s.shifts, 'shift')} on the schedule. ${s.uncovered} with nobody on ${s.uncovered === 1 ? 'it' : 'them'}, ${s.not_confirmed} not confirmed.`] : ['No shifts on the schedule.'];
+    const v = !s.shifts ? ['No shifts on the schedule.'] : !s.uncovered && !s.not_confirmed ? [`${plural(s.shifts, 'shift')} on the schedule, all covered and confirmed.`]
+      : [`${plural(s.shifts, 'shift')} on the schedule: ${s.uncovered} with nobody on ${s.uncovered === 1 ? 'it' : 'them'}, ${s.not_confirmed} not confirmed.`];
     for (const x of s.by_department.filter((y) => y.uncovered || y.not_confirmed).slice(0, 4)) v.push(`${x.department}: ${x.uncovered} open, ${x.not_confirmed} not confirmed.`);
     sections.push({ title: 'Staff', lines: v });
   }
@@ -167,7 +176,7 @@ function template(d) {
     : d.lessons ? `${plural(d.lessons.lessons, 'lesson')} booked with ${plural(d.lessons.students, 'student')}, ${plural(d.lessons.instructors_scheduled, 'instructor')} scheduled.`
       : d.patrol_yesterday ? (d.patrol_yesterday.total ? `${plural(d.patrol_yesterday.total, 'patrol case')} yesterday.` : 'No patrol cases yesterday.') : (wl || 'No forecast yet.');
   const summary = [
-    `${dayLine(d)}${wl && (d.visitors || d.lessons || d.patrol_yesterday) ? ` ${wl}` : ''}`,
+    `${dayLine(d)}${shortWeather(w) && (d.visitors || d.lessons || d.patrol_yesterday) ? ` ${shortWeather(w)}` : ''}`,
     second,
     att.length ? `Needs attention: ${list(att.slice(0, 3).map((a) => a.why))}.` : 'Nothing needs attention this morning.',
   ];

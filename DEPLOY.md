@@ -200,6 +200,31 @@ checks them itself at most once a minute: the database, and whether Stripe, Post
 an open note sets its parts' state. It shows the last 90 days and never any customer data. It is linked from the
 website's footer and the Security page. `GET /api/v1/status` gives the same as JSON.
 
+## Morning brief (once, when the release with it goes live)
+
+The morning brief goes out from 6:00 AM in each mountain's own time zone. The daily job runs at 7:30 AM Eastern only,
+which is too late for every mountain, so the brief has a job of its own that runs every 15 minutes. After `promote.sh`,
+from the same folder in Cloud Shell:
+
+```bash
+bash scripts/brief-job.sh
+gcloud scheduler jobs run summitops-brief --location us-east1   # one run now, to check it answers
+```
+
+It adds (or updates) the Cloud Scheduler job `summitops-brief`, calling `POST /api/v1/internal/jobs/brief`, signed like
+the other jobs. Safe to run again. What it does on each run:
+- For each mountain where it is between 6:00 AM and noon, and the calendar says today is open (or tomorrow is opening
+  day), it makes the day's briefs (one per kind) and sends each person theirs by email, phone alert or both.
+- Each send is claimed in the database first, so a person never gets the same day's brief twice, even when runs overlap.
+- A run stops starting new sends after 100 seconds; the next run carries on. The daily job also finishes anything left
+  (with 4 minutes of its 15).
+- With no `ASSISTANT_API_KEY`, or when a mountain has used its monthly assistant allowance, the brief is made from the
+  data by the template instead. It is never an error.
+
+Check it in the logs: `"job":"morning_brief"` lines are failures for one mountain; the run's answer lists `sent`, `failed`
+and `more` (true when it stopped at its limit). A brief not sent by noon is not sent that day; the Morning brief page
+still shows it.
+
 ## Staging
 
 `bash scripts/staging-setup.sh`, once, from an unzipped release folder, creates:
