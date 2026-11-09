@@ -289,6 +289,8 @@ test('Guest needs help here: one tap from lift staff makes a call at their posit
   ok(await api('POST', `/patrol/staff-help/${c.id}/details`, { token: M.liftyT, body: { who: 'Child in a red jacket', note: 'Fell at the top' } }));
   const after = (await pool.query('SELECT description FROM dispatch_calls WHERE id = ?', [c.id]))[0][0];
   assert.equal(after.description, 'Who: Child in a red jacket. Fell at the top');
+  // Nobody signed in on duty: the call is on the board and staff are told no phone was alerted.
+  assert.equal(r.body.alerted, 0);
   // As for a radio call, the patroller a dispatcher sends gets the phone alert.
   ok(await api('POST', '/patrol/duty/sign-in', { token: M.patT, body: {} }));
   const pushed = [];
@@ -298,6 +300,29 @@ test('Guest needs help here: one tap from lift staff makes a call at their posit
   assert.equal(pushed.length, 1);
   assert.deepEqual(pushed[0].ids, [M.pat]);
   assert.match(pushed[0].msg.body, /^Near Ridge Run, below Summit Quad tower 7/);
+  // With a patroller on duty and no dispatcher: a staff call alerts patrol on duty at once, the same people and the same
+  // way as a guest's request from the help page (2026.11.16). The alert says where, never the guest's words.
+  pushed.length = 0;
+  PUSH.notifyStaff = async (tenantId, ids, msg) => { pushed.push({ tenantId, ids, msg }); return ids.length; };
+  let staffCall; let guestCall;
+  try {
+    staffCall = await api('POST', '/patrol/staff-help', { token: M.liftyT, body: { lat: at.lat, lng: at.lng, accuracy_m: 9 } });
+    is(staffCall, 201);
+    await pool.query('UPDATE tenants SET guest_help_enabled = 1 WHERE id = ?', [M.id]);
+    guestCall = await api('POST', `/public/${M.slug}/help`, { body: { kind: 'help', gps_lat: at.lat, gps_lng: at.lng, accuracy: 9, description: 'my knee hurts', rid: require('crypto').randomBytes(16).toString('hex') } });
+    is(guestCall, 201);
+    for (let i = 0; i < 40 && pushed.length < 2; i++) await new Promise((res) => setTimeout(res, 25)); // the guest's alert does not hold up its answer
+  } finally { PUSH.notifyStaff = real; }
+  assert.equal(staffCall.body.alerted, 1);
+  const sAlert = pushed.find((p) => /^Guest needs help here: patrol call /.test(p.msg.title));
+  const gAlert = pushed.find((p) => /^Guest help: patrol call /.test(p.msg.title));
+  assert.ok(sAlert && gAlert, JSON.stringify(pushed.map((p) => p.msg.title)));
+  assert.deepEqual(sAlert.ids, [M.pat]); assert.deepEqual(gAlert.ids, sAlert.ids, 'the same people');
+  assert.equal(sAlert.msg.url, gAlert.msg.url);
+  assert.match(sAlert.msg.body, /^Near Ridge Run, below Summit Quad tower 7, about 30 m\. Open the app/);
+  assert.match(gAlert.msg.body, /^Near Ridge Run, below Summit Quad tower 7/);
+  assert.doesNotMatch(gAlert.msg.body, /knee/, 'never the guest\'s words');
+  assert.equal(sAlert.msg.tag, `call-${staffCall.body.id}`);
   // No GPS: the staff member says where. Neither: refused.
   const typed = ok(await api('POST', '/patrol/staff-help', { token: M.liftyT, body: { location: 'Bottom of Summit Quad' } }));
   assert.equal(typed.location, 'Bottom of Summit Quad');

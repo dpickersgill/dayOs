@@ -55,6 +55,7 @@ export async function openStaffHelp() {
     }, { kind: 'primary' });
     say(h('p', { class: 'sh-sent', role: 'status' }, h('b', null, `Patrol has it: call ${r.call_no}.`)),
       h('p', null, h('span', { class: 'muted' }, 'Sent as: '), r.location),
+      h('p', null, r.alerted ? `Patrol on duty got a phone alert (${r.alerted}).` : 'It is on the dispatch board. No patroller is signed in on duty, so no phone was alerted: radio or call patrol too.'),
       h('p', null, 'Stay with the guest if you can. If you have a moment, say who and what happened:'),
       field('Who needs help (optional)', who), field('What happened (optional)', note),
       h('div', { class: 'row' }, add, button('Done', () => d.close())),

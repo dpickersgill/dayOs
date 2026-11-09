@@ -160,6 +160,24 @@ test('one help number: the sign sheet, the guest page and the first reply to a t
   assert.equal((await q('SELECT COUNT(*) AS n FROM patrol_help_lines WHERE tenant_id = ?', [M.id]))[0].n, 0);
 });
 
+test('a first text alerts patrol on duty at once, the same way as a guest page request or staff\'s Guest needs help here', async () => {
+  const staff = ok(await api('POST', '/workforce/staff', { token: A.owner, body: { person: { first_name: 'Duty', last_name: 'Patroller' }, status: 'active' } }), 201).id;
+  const [[t]] = await pool.query('SELECT timezone FROM tenants WHERE id = ?', [A.id]);
+  const now = require('../src/lib/util').nowIn(t.timezone);
+  await pool.query("INSERT INTO patrol_duty (tenant_id, staff_id, on_date, signed_in_at, source) VALUES (?, ?, ?, ?, 'phone')", [A.id, staff, now.slice(0, 10), now]);
+  try {
+    pushes.length = 0;
+    const phone = guestPhone();
+    await text({ From: phone, To: LINE_A, Body: 'HELP my arm hurts' });
+    const c = await latestCall(A.id, phone);
+    const alert = pushes.find((p) => p.message.tag === `call-${c.id}`);
+    assert.ok(alert, JSON.stringify(pushes.map((p) => p.message.title)));
+    assert.match(alert.message.title, /^Text HELP: patrol call /);
+    assert.ok(alert.staffIds.map(Number).includes(Number(staff)));
+    assert.doesNotMatch(`${alert.message.title} ${alert.message.body}`, /arm/, 'never the guest\'s words on a locked screen');
+  } finally { await pool.query('UPDATE patrol_duty SET signed_out_at = signed_in_at WHERE tenant_id = ? AND staff_id = ?', [A.id, staff]); }
+});
+
 // ---------------------------------------------------------------- the webhook
 test('signature: Twilio\'s documented example, a valid post, a bad one and an unsigned one', async () => {
   // https://www.twilio.com/docs/usage/security: token 12345, this address and these fields give this signature.

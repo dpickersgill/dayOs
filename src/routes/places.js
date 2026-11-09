@@ -343,8 +343,9 @@ router.get('/dispatch/:id/where', patrol, needs('dispatch'), async (req, res) =>
 
 // ---------------------------------------------------------------- Guest needs help here (staff)
 // Any staff login: lift and mountain staff, the ticket window and rentals, instructors, patrol and managers. Not the ski
-// area's read-only login. The call follows the radio call's rules: it lands on the board as New, and the patrollers a
-// dispatcher sends get their phone alert as usual.
+// area's read-only login. It lands on the board as New and alerts patrol on duty at once, the same as a guest's request
+// from the help page or by text (dispatch.js alertNewRequest), so a mountain with no full-time dispatcher still hears it.
+// The patrollers a dispatcher then sends get their phone alert as usual.
 router.post('/staff-help', requireRole('manager', 'staff', 'counter', 'instructor', 'patrol'), validate(z.object({
   lat: lat.nullable().optional(), lng: lng.nullable().optional(), accuracy_m: z.number().min(0).max(100000).nullable().optional(),
   location: z.string().trim().max(120).nullable().optional(),
@@ -363,7 +364,7 @@ router.post('/staff-help', requireRole('manager', 'staff', 'counter', 'instructo
   const user = await one(pool, 'SELECT email, username FROM users WHERE tenant_id = ? AND id = ?', [tenantId, req.auth.userId]);
   const byName = me ? `${me.first_name} ${me.last_name}`.trim() : (user && (user.username || user.email)) || 'Staff';
   const description = [b.who ? `Who: ${b.who}` : null, b.note || null, words && b.location ? `Staff said: ${b.location}` : null].filter(Boolean).join('. ').slice(0, 500) || 'Guest needs help (staff saw it)';
-  const { createCall } = require('./dispatch');
+  const { createCall, alertNewRequest } = require('./dispatch');
   const out = await createCall(tenant, { location, description, priority: 'normal', caller_name: `Staff: ${byName}`.slice(0, 100), gps_lat: hasGps ? b.lat : null, gps_lng: hasGps ? b.lng : null },
     { source: 'staff', userId: req.auth.userId, staffId: req.auth.staffId || null });
   // The position's accuracy, and the place words where help/guest keeps them.
@@ -374,7 +375,8 @@ router.post('/staff-help', requireRole('manager', 'staff', 'counter', 'instructo
   if (words && cols.has('place_text')) { sets.push('place_text = ?'); vals.push(words.text.slice(0, 255)); }
   if (sets.length) await pool.query(`UPDATE dispatch_calls SET ${sets.join(', ')} WHERE tenant_id = ? AND id = ?`, [...vals, tenantId, out.id]);
   await audit(pool, req, 'staff_help', 'dispatch_calls', out.id, { gps: hasGps, accuracy_m: acc, confidence: words ? words.confidence : null });
-  res.status(201).json({ id: out.id, call_no: out.call_no, location });
+  const alerted = await alertNewRequest(tenantId, out, location, 'staff');
+  res.status(201).json({ id: out.id, call_no: out.call_no, location, alerted });
 });
 
 /** The staff member who pressed it adds who needs help and a short note afterwards (the call is already on the board). */

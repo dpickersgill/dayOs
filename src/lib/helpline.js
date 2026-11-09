@@ -370,6 +370,8 @@ async function firstText(line, from, key, p, words, photos, base) {
   if (text) await require('./guestmsg').fromGuest(pool, call, text, 'sms');
   if (hit) await note(pool, tenantId, made.id, `Guest texted sign code ${hit.code}`);
   await addPhotos(tenantId, made.id, photos);
+  // Patrol on duty hears about a new text at once, the same as a guest page request or staff's Guest needs help here.
+  await D.alertNewRequest(tenantId, made, location, 'sms');
   if (sender.alert) {
     const on = await require('./patrolops').onDutyIds(pool, tenantId).catch(() => []);
     if (on.length) require('./push').notifyStaff(tenantId, on, { title: 'Text HELP: many requests from one phone', body: 'They are grouped on the dispatch board. Check each place listed.', url: '#/patrol/dispatch', tag: `flood-${sender.alert}` }).catch(() => {});

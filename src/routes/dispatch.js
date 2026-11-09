@@ -108,6 +108,20 @@ async function createCall(tenant, b, { source, userId = null, staffId = null, se
   }
 }
 
+/**
+ * A new request for help from a guest (the help page, Text HELP) or from staff (Guest needs help here) alerts patrol on
+ * duty at once, the same way for all three, so a mountain with no one watching the board still hears about it. The
+ * alert says where, never what the guest wrote (2026.11.11 rule). A request grouped into a flood is covered by the one
+ * flood alert, and a lost child has its own alert (both sent by the caller). Never holds up the answer to the guest.
+ */
+const REQUEST_TITLE = { guest: 'Guest help', sms: 'Text HELP', staff: 'Guest needs help here' };
+async function alertNewRequest(tenantId, out, location, source) {
+  if (!out || out.flood_of) return 0;
+  const on = await OPS.onDutyIds(pool, tenantId).catch(() => []);
+  if (!on.length) return 0;
+  return PUSH.notifyStaff(tenantId, on, { title: `${REQUEST_TITLE[source] || 'Guest help'}: patrol call ${out.call_no}`, body: `${String(location || 'Place not given yet')}. Open the app for details.`, url: '#/patrol/dispatch', tag: `call-${out.id}` }).catch(() => 0);
+}
+
 const withNo = (c) => { const out = { ...c, call_no: callNo(c) }; delete out.locate_token; delete out.sender_hash; delete out.ip_hash; delete out.guest_token; delete out.request_key; return out; };
 
 // Guest help floods: a phone sending its 3rd request in 10 minutes, or an address its 6th (several phones on one
@@ -525,6 +539,7 @@ publicRouter.post(
       const on = await OPS.onDutyIds(pool, t.id).catch(() => []);
       if (on.length) PUSH.notifyStaff(t.id, on, { title: 'Guest help: many requests from one phone', body: 'They are grouped on the dispatch board. Check each place listed.', url: '#/patrol/dispatch', tag: `flood-${sender.alert}` }).catch(() => {});
     }
+    if (callType !== 'lost_child') alertNewRequest(t.id, out, location, 'guest').catch(() => {});
     if (callType === 'lost_child' && !out.flood_of) {
       // A lost child goes to everyone on duty at once, like a critical call. Where to look, never the child's details.
       const on = await OPS.onDutyIds(pool, t.id).catch(() => []);
@@ -592,4 +607,4 @@ publicRouter.post('/locate/:token', validate(z.object({ lat: z.number().min(-90)
   res.json({ ok: true, mountain: c.mountain });
 });
 
-module.exports = { router, publicRouter, createCall, callNo, senderKey, guestNumbers }; // callNo, senderKey: Text HELP (lib/helpline.js)
+module.exports = { router, publicRouter, createCall, callNo, senderKey, guestNumbers, alertNewRequest }; // callNo, senderKey: Text HELP (lib/helpline.js)
