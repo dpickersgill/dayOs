@@ -290,7 +290,7 @@ test('Guest needs help here: one tap from lift staff makes a call at their posit
   const after = (await pool.query('SELECT description FROM dispatch_calls WHERE id = ?', [c.id]))[0][0];
   assert.equal(after.description, 'Who: Child in a red jacket. Fell at the top');
   // Nobody signed in on duty: the call is on the board and staff are told no phone was alerted.
-  assert.equal(r.body.alerted, 0);
+  assert.equal(r.body.alerted, 0); assert.equal(r.body.on_duty, 0);
   // As for a radio call, the patroller a dispatcher sends gets the phone alert.
   ok(await api('POST', '/patrol/duty/sign-in', { token: M.patT, body: {} }));
   const pushed = [];
@@ -313,7 +313,7 @@ test('Guest needs help here: one tap from lift staff makes a call at their posit
     is(guestCall, 201);
     for (let i = 0; i < 40 && pushed.length < 2; i++) await new Promise((res) => setTimeout(res, 25)); // the guest's alert does not hold up its answer
   } finally { PUSH.notifyStaff = real; }
-  assert.equal(staffCall.body.alerted, 1);
+  assert.equal(staffCall.body.alerted, 1); assert.equal(staffCall.body.on_duty, 1);
   const sAlert = pushed.find((p) => /^Guest needs help here: patrol call /.test(p.msg.title));
   const gAlert = pushed.find((p) => /^Guest help: patrol call /.test(p.msg.title));
   assert.ok(sAlert && gAlert, JSON.stringify(pushed.map((p) => p.msg.title)));

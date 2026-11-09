@@ -375,8 +375,8 @@ router.post('/staff-help', requireRole('manager', 'staff', 'counter', 'instructo
   if (words && cols.has('place_text')) { sets.push('place_text = ?'); vals.push(words.text.slice(0, 255)); }
   if (sets.length) await pool.query(`UPDATE dispatch_calls SET ${sets.join(', ')} WHERE tenant_id = ? AND id = ?`, [...vals, tenantId, out.id]);
   await audit(pool, req, 'staff_help', 'dispatch_calls', out.id, { gps: hasGps, accuracy_m: acc, confidence: words ? words.confidence : null });
-  const alerted = await alertNewRequest(tenantId, out, location, 'staff');
-  res.status(201).json({ id: out.id, call_no: out.call_no, location, alerted });
+  const alert = await alertNewRequest(tenantId, out, location, 'staff');
+  res.status(201).json({ id: out.id, call_no: out.call_no, location, on_duty: alert.on_duty, alerted: alert.sent });
 });
 
 /** The staff member who pressed it adds who needs help and a short note afterwards (the call is already on the board). */

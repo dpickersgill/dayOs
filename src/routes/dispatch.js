@@ -113,13 +113,15 @@ async function createCall(tenant, b, { source, userId = null, staffId = null, se
  * duty at once, the same way for all three, so a mountain with no one watching the board still hears about it. The
  * alert says where, never what the guest wrote (2026.11.11 rule). A request grouped into a flood is covered by the one
  * flood alert, and a lost child has its own alert (both sent by the caller). Never holds up the answer to the guest.
+ * Returns { on_duty, sent }: patrollers signed in on duty, and phones the alert reached.
  */
 const REQUEST_TITLE = { guest: 'Guest help', sms: 'Text HELP', staff: 'Guest needs help here' };
 async function alertNewRequest(tenantId, out, location, source) {
-  if (!out || out.flood_of) return 0;
+  if (!out || out.flood_of) return { on_duty: 0, sent: 0 };
   const on = await OPS.onDutyIds(pool, tenantId).catch(() => []);
-  if (!on.length) return 0;
-  return PUSH.notifyStaff(tenantId, on, { title: `${REQUEST_TITLE[source] || 'Guest help'}: patrol call ${out.call_no}`, body: `${String(location || 'Place not given yet')}. Open the app for details.`, url: '#/patrol/dispatch', tag: `call-${out.id}` }).catch(() => 0);
+  if (!on.length) return { on_duty: 0, sent: 0 };
+  const sent = await PUSH.notifyStaff(tenantId, on, { title: `${REQUEST_TITLE[source] || 'Guest help'}: patrol call ${out.call_no}`, body: `${String(location || 'Place not given yet')}. Open the app for details.`, url: '#/patrol/dispatch', tag: `call-${out.id}` }).catch(() => 0);
+  return { on_duty: on.length, sent: Number(sent) || 0 };
 }
 
 const withNo = (c) => { const out = { ...c, call_no: callNo(c) }; delete out.locate_token; delete out.sender_hash; delete out.ip_hash; delete out.guest_token; delete out.request_key; return out; };
