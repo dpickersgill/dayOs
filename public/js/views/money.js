@@ -1,13 +1,14 @@
 // Money (managers): the cash drawers, matching card payments to the processor's statement, files for the accountant,
-// and the sales tax rates.
+// the sales tax rates, and the forecast data being collected (money-forecast.js).
 import { get, post, patch, del, download } from '../api.js';
 import { h, clear, fail, money, toCents, table, state, input, select, field, button, toast, formDialog, confirmDialog, tabs, todayStr, addDays, fmtDateTime, fmtDate, label, empty, errorBox } from '../ui.js';
 import { closeSheet } from './till.js';
 import { printDialog } from '../print.js';
+import { forecastData } from './money-forecast.js';
 
 export async function render(root) {
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Money')),
-    tabs([['drawers', 'Cash drawers', drawers], ['weekly', 'Weekly report', weekly], ['online', 'Online orders', onlineOrders], ['cards', 'Card statement', cards], ['exports', 'For the accountant', exports], ['tax', 'Sales tax', tax]], 'drawers'));
+    tabs([['drawers', 'Cash drawers', drawers], ['weekly', 'Weekly report', weekly], ['online', 'Online orders', onlineOrders], ['cards', 'Card statement', cards], ['exports', 'For the accountant', exports], ['tax', 'Sales tax', tax], ['forecast', 'Forecast data', forecastData]], 'drawers'));
 }
 
 // ---------------------------------------------------------------- drawers
