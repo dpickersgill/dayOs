@@ -19,9 +19,11 @@ const when = (s) => {
 export async function render(root, params = []) {
   const openId = ONE.test(params[0] || '') ? Number(params[0]) : null;
   const listBox = h('div', { class: 'inbox-list' });
+  const readyBox = h('div', { class: 'ready-inbox-host', hidden: true }); // drafts waiting on Today (AI release 1)
+  import('./ai-ready.js').then((m) => m.inboxEntry(readyBox)).catch(() => {});
   const threadBox = h('section', { class: 'inbox-thread', 'aria-label': 'Conversation' });
   const layout = h('div', { class: `inbox${openId ? ' has-thread' : ''}` }, h('aside', { class: 'inbox-side' },
-    h('div', { class: 'row between' }, h('h2', null, 'Conversations'), button('New message', () => newConversation(), { kind: 'primary', small: true })), listBox), threadBox);
+    h('div', { class: 'row between' }, h('h2', null, 'Conversations'), button('New message', () => newConversation(), { kind: 'primary', small: true })), readyBox, listBox), threadBox);
   root.append(h('div', { class: 'page-head inbox-head' }, h('div', null, h('h1', null, 'Inbox'), h('p', { class: 'muted' }, 'Messages with your team. Use Share on a case, customer, order, asset, work order, waiver or document to send a link to it.'))), layout);
 
   let threads = [];

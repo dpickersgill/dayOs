@@ -77,11 +77,11 @@ async function assistantPage(root) {
     card('For staff', [
       row('Staff can ask the assistant how to do things', staffOn, 'The Ask button in the menu.'),
       h('p', { class: 'set-card-intro' }, a.plus
-        ? 'Assistant Plus is on: staff can also ask about today\'s numbers, lessons, programs and who is working. It only looks up what that person could already see, and never sees patient care records.'
-        : ['Assistant Plus (an add-on under ', h('a', { href: '#/settings/billing' }, 'Billing and plan'), ') adds questions about today\'s numbers, lessons, programs and who is working, and the assistant for guests.']),
+        ? 'AI Operations is on: staff can also ask about today\'s numbers, lessons, programs and who is working. It only looks up what that person could already see, and never sees patient care records. The conditions writer drafts each morning\'s update under Mountain status.'
+        : ['The AI Operations add-on (under ', h('a', { href: '#/settings/billing' }, 'Billing and plan'), ') adds Assistant Plus questions about today\'s numbers, lessons, programs and who is working, and the assistant for guests.']),
     ]),
     card('For guests', [
-      ...pages.map(([p, box]) => row(PAGE_NAMES[p] || p, box, a.plus ? 'Guests can ask on this page.' : 'Needs Assistant Plus.')),
+      ...pages.map(([p, box]) => row(PAGE_NAMES[p] || p, box, a.plus ? 'Guests can ask on this page.' : 'Needs the AI Operations add-on.')),
       row('Guest questions it cannot answer go to', contact, 'Guests give their email, and your reply goes straight to them. Blank: the owner\'s email.', { wide: true }),
     ]),
     card('This month', [

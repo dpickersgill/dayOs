@@ -195,7 +195,7 @@ function homePlansHtml(d) {
   return d.plans.map((p, i) => `<div class="plan${i === 1 ? ' feat' : ''}"><div class="sym">${sym(i, p.code)}<h3>${escHtml(p.name)}</h3></div>${p.blurb ? `<p class="who">${escHtml(p.blurb)}</p>` : ''}<div class="price"><b>${dollars(p.monthly_cents)}</b><span>per month</span></div></div>`).join('\n        ');
 }
 // A few words after the two add-on names that do not explain themselves. Kept the same as ADDON_HINTS in public/site/site.js.
-const ADDON_HINTS = { 'doc-ocr': 'scans become searchable', 'assistant-plus': 'live answers from your data' };
+const ADDON_HINTS = { 'doc-ocr': 'scans become searchable', 'assistant-plus': 'answers and drafts you approve' };
 function homeAddonsHtml(d) {
   return `<b>Add when you want them:</b>${d.addons.map((a) => `<span>${escHtml(a.name)}${ADDON_HINTS[a.code] ? ` <i>(${ADDON_HINTS[a.code]})</i>` : ''}</span>`).join('')}<a href="{{SITE}}/pricing#addons">See add-on prices</a>`;
 }

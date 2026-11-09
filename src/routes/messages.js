@@ -48,11 +48,8 @@ router.get('/campaigns', mgr, async (req, res) => {
 });
 
 router.post('/campaigns', mgr, validate(campaignBody), async (req, res) => {
-  const b = req.body;
-  const [r] = await pool.query('INSERT INTO campaigns (tenant_id, name, channel, subject, body, audience, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [req.auth.tenantId, b.name, b.channel, b.channel === 'email' ? b.subject : null, b.body, b.audience, req.auth.userId]);
-  await audit(pool, req, 'campaign_create', 'campaigns', r.insertId, { channel: b.channel, audience: b.audience });
-  res.status(201).json(await one(pool, 'SELECT * FROM campaigns WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, r.insertId]));
+  const id = await require('../lib/campaignsend').createAs(req, req.body);
+  res.status(201).json(await one(pool, 'SELECT * FROM campaigns WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, id]));
 });
 
 async function campaign(req) {
@@ -105,22 +102,7 @@ router.post('/campaigns/:id/test', mgr, validate(z.object({ phone: z.string().ma
 
 router.post('/campaigns/:id/send', mgr, validate(z.object({ confirm: z.literal(true) })), async (req, res) => {
   const c = await campaign(req);
-  const t = await tenantOf(req);
-  if (c.channel === 'email' && !mailer.enabled()) throw conflict('Email is not set up yet');
-  if (c.channel === 'sms' && !sms.enabled()) throw conflict('Text messages are not set up yet');
-  // Marketing email must carry the mountain's postal address (CAN-SPAM); refused before anything is sent.
-  if (c.channel === 'email' && !(await mailkinds.postalAddress(pool, t.id))) throw conflict(mailkinds.NO_ADDRESS);
-  // Claim it so a double click cannot send twice.
-  const [claim] = await pool.query("UPDATE campaigns SET status = 'sending' WHERE tenant_id = ? AND id = ? AND status = 'draft'", [t.id, c.id]);
-  if (!claim.affectedRows) throw conflict('This message has already been sent');
-  let result;
-  try { result = await messaging.sendCampaign(t, c, baseUrl(req)); } catch (err) {
-    await pool.query("UPDATE campaigns SET status = 'draft' WHERE tenant_id = ? AND id = ?", [t.id, c.id]);
-    throw err;
-  }
-  await pool.query("UPDATE campaigns SET status = 'sent', sent_at = NOW(), total = ?, sent = ?, failed = ?, held = ? WHERE tenant_id = ? AND id = ?", [result.total, result.sent, result.failed, result.held || 0, t.id, c.id]);
-  await audit(pool, req, 'campaign_send', 'campaigns', c.id, result);
-  res.json(result);
+  res.json(await require('../lib/campaignsend').sendAs(req, c.id, baseUrl(req)));
 });
 
 /** What was sent to one customer, for their record. */

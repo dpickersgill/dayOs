@@ -95,7 +95,7 @@
   // ---------------------------------------------------------------- plans and prices, live from the console
   let plansData = null;
   // kept the same as ADDON_HINTS in src/routes/site.js
-  const ADDON_HINTS = { 'doc-ocr': 'scans become searchable', 'assistant-plus': 'live answers from your data' };
+  const ADDON_HINTS = { 'doc-ocr': 'scans become searchable', 'assistant-plus': 'answers and drafts you approve' };
   async function loadPlans() {
     if (plansData) return plansData;
     try {

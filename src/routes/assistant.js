@@ -95,7 +95,7 @@ async function settingsView(tenantId) {
 router.get('/settings', managers, async (req, res) => res.json(await settingsView(req.auth.tenantId)));
 router.put('/settings', managers, validate(z.object({ staff_on: z.boolean(), guest_pages: z.array(z.enum(A.GUEST_PAGES)).max(4), contact_email: z.string().trim().toLowerCase().email().max(255).nullable().optional() })), async (req, res) => {
   const mods = await modulesLib.enabledKeys(req.auth.tenantId);
-  if (req.body.guest_pages.length && !mods.includes('assistant_plus')) throw new AppError(409, 'The guest assistant comes with Assistant Plus. Add it under Billing.');
+  if (req.body.guest_pages.length && !mods.includes('assistant_plus')) throw new AppError(409, 'The guest assistant comes with the AI Operations add-on. Add it under Billing.');
   await pool.query(`INSERT INTO assistant_settings (tenant_id, staff_on, guest_pages, contact_email) VALUES (?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE staff_on = VALUES(staff_on), guest_pages = VALUES(guest_pages), contact_email = VALUES(contact_email)`, [req.auth.tenantId, req.body.staff_on ? 1 : 0, req.body.guest_pages.join(','), req.body.contact_email || null]);
   res.json(await settingsView(req.auth.tenantId));
