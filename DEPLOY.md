@@ -67,7 +67,12 @@ again at 1 each month. The build is the short git commit the zip was made from.
   their mountain has. People see these in Help > What's new, and a small dot on Help tells them when there is
   something new for them.
 - Making a zip: bump the version, add the change log entry, commit, then `node scripts/stamp-build.js` (writes
-  `src/release/build.json` and refuses if the change log has no entry for this version), then zip.
+  `src/release/build.json` and refuses if the change log has no entry for this version), then zip. The stamp also writes
+  `src/release/page-dates.json`, the date each website page last changed in git, which the sitemap's lastmod reads; the
+  zip includes it. Make the zip from a git copy with full history (a shallow clone dates every page to its one commit).
+- Website pictures and PDFs are made on a computer and committed, not at deploy: after changing a page's share words
+  (`src/lib/share.js`) run `node scripts/share-images.js <page>`, and after changing a checklist guide run
+  `node scripts/checklist-pdf.js <slug>`; look at the result, then commit it.
 - The app shows the version on the sign-in screen, in the account menu and at the foot of Help. The console's
   **Releases** shows the live version, every version that has started (with who deployed it) and the full change log.
 - `deploy.sh` stops if staging is newer than this folder, and `promote.sh` stops if the live site is. To go back to an
