@@ -46,6 +46,8 @@ const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/
 test('the AI files name no patrol or patient table, except the brief\'s one aggregate count of cases', () => {
   const tables = patrolTables();
   assert.ok(tables.includes('incidents') && tables.includes('incident_patients') && tables.length > 15, `found ${tables.length} patrol tables`);
+  // help/guest (Nov 9): a guest's messages with dispatch and their phone's positions are patrol and dispatch data too.
+  for (const t of ['dispatch_calls', 'dispatch_messages', 'dispatch_positions']) assert.ok(tables.includes(t), `${t} is on the patrol line`);
   for (const f of FILES) {
     let src = code(read(f));
     if (f === 'src/lib/briefdata.js') {
@@ -88,4 +90,18 @@ test('a patrol case\'s words never reach a brief, a draft or a snapshot: the run
   const snaps = read('test/snapshots.test.js');
   assert.match(snaps, /no snapshot holds a person.s name, email, phone or id/);
   assert.match(read('test/evals/conditions.test.js'), /patient\|incident\|injur/);
+});
+
+test('guest help requests never reach AI: no AI or assistant file names a dispatch table or loads the guest help code', () => {
+  // help/guest (Nov 9): what a guest tapped, typed or sent to dispatch, their pass hint and where their phone was are
+  // dispatch data. The brief, the drafts and the guest and staff assistant never read them.
+  const files = [...FILES, 'src/lib/assistant.js', 'src/lib/assistanttools.js', 'src/routes/assistant.js'];
+  const dispatch = patrolTables().filter((t) => /^dispatch/.test(t));
+  assert.ok(dispatch.length >= 5, dispatch.join(', '));
+  for (const f of files) {
+    const src = code(read(f));
+    for (const t of dispatch) assert.ok(!new RegExp(`\\b${t}\\b`).test(src), `${f} names ${t}`);
+    for (const m of src.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)) assert.doesNotMatch(m[1], /guestmsg|guesthelp|places|dispatch|sms/i, `${f} requires ${m[1]}`);
+    assert.doesNotMatch(src, /last_scan_hint|guest_token|place_text/, `${f} reads a guest help column`);
+  }
 });

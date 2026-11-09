@@ -6,6 +6,7 @@ import { has } from './patrol-feat.js';
 import { compact } from './patrol-case.js';
 import { wherePanel } from './dispatch-where.js'; // help/places: the call's location panel
 import { bestFix } from '../gpsfix.js';
+import { guestSection, watchGuest } from './dispatch-guest.js';
 
 const PRIORITY = ['low', 'normal', 'high', 'critical'];
 const statusTone = { new: 'bad', dispatched: 'warn', on_scene: 'warn', transporting: 'warn', closed: 'neutral', cancelled: 'neutral' };
@@ -28,7 +29,8 @@ async function lostChild(callId) {
       r.status === 'found' ? h('p', null, state(`Found by ${r.found_by} at ${r.found_where}`, 'good')) : null));
   } catch (err) { toast(err.message, 'error'); }
 }
-const lostBits = (c) => (c.call_type === 'lost_child' ? [state('Lost child', 'bad'), button('Child\'s photo', () => lostChild(c.id), { small: true })] : []);
+// A guest's lost child report (help/guest) has no school record or photo: its details are in the call's Guest section.
+const lostBits = (c) => (c.call_type === 'lost_child' ? [state('Lost child', 'bad'), c.source === 'school' ? button('Child\'s photo', () => lostChild(c.id), { small: true }) : null] : []);
 
 function callCard(c, onOpen) {
   const who = c.responders.map((r) => r.callsign || `${r.first_name} ${r.last_name[0]}.`).join(', ');
@@ -107,6 +109,7 @@ function newCallDialog(again) {
 async function openCall(id, again) {
   const holder = h('div', { class: 'stack' });
   const d = dialog('Call', holder, { wide: true });
+  let stopGuest = null;
   async function draw() {
     const [c, a] = await Promise.all([get(`/patrol/dispatch/${id}`), get('/patrol/dispatch/available')]);
     const live = ['new', 'dispatched', 'on_scene', 'transporting'].includes(c.status);
@@ -114,6 +117,7 @@ async function openCall(id, again) {
     const choices = a.data.filter((p) => !sent.has(p.staff_id));
     const pick = select([['', 'Choose a patroller'], ...choices.map((p) => [p.staff_id, `${p.callsign ? `${p.callsign}: ` : ''}${p.first_name} ${p.last_name}${p.state === 'on_call' ? ' (on a call)' : ''}`])], '', { 'aria-label': 'Patroller to send' });
     const note = input({ maxlength: 500, 'aria-label': 'Note', placeholder: 'Add a note to the timeline' });
+    if (c.guest && !stopGuest) stopGuest = watchGuest(holder, id, (c.guest.messages || []).length, draw);
     const step = async (kind, text) => { await post(`/patrol/dispatch/${id}/events`, compact({ kind, note: text })); await draw(); await again(); };
     appendAll(clear(holder),
       h('div', { class: 'spread' }, h('h2', null, `Call ${c.call_no}`), h('span', { class: 'row' }, state(label(c.priority), prioTone[c.priority]), state(statusText[c.status], statusTone[c.status]))),
@@ -122,6 +126,7 @@ async function openCall(id, again) {
       h('p', { class: 'muted' }, `${fmtDateTime(c.received_at)} · ${c.source === 'guest' ? 'Guest request' : label(c.source)}${c.caller_name ? ` · ${c.caller_name}` : ''}${c.caller_phone ? ` · ${c.caller_phone}` : ''}`),
       whereBlock(c, live),
       wherePanel(id),
+      guestSection(c, draw),
       h('h3', null, 'Responders'),
       c.responders.length ? h('ul', null, c.responders.map((r) => h('li', null, `${r.callsign ? `${r.callsign}: ` : ''}${r.first_name} ${r.last_name}`,
         ' ', r.acked_at ? state('On the way', 'good') : r.notified_at ? state('Alerted, not answered', 'warn') : state('No phone alert', 'neutral'), r.texted_at ? state('Texted', 'neutral') : null,
@@ -192,10 +197,12 @@ async function guestHelpDialog() {
   const url = `${location.origin}${s.path}`;
   const on = select([['0', 'Off'], ['1', 'On']], s.enabled ? '1' : '0', { name: 'enabled' });
   formDialog('Guest help page', h('div', { class: 'form' },
-    h('p', { class: 'wide' }, 'Guests scan a QR code on a trail sign, say where they are, and the request lands on your board as a New call. It never replaces 911: the page tells guests to call 911 for emergencies.'),
-    h('p', { class: 'wide' }, 'Link for your QR codes: ', h('b', null, url), h('br'), 'Add ?loc=Ridge+Run to a sign\'s link to fill in its location.'),
-    field('Page is', on), h('div', { class: 'wide' }, field('Message to guests', input({ name: 'message', value: s.message || '', maxlength: 300, placeholder: 'Patrol phone: 555-0100' }), 'Shown above the form. Put the patrol phone number here.'))),
-  async (fd) => { await put('/patrol/guest-help', { enabled: val(fd, 'enabled') === '1', message: val(fd, 'message') }); toast('Saved'); });
+    h('p', { class: 'wide' }, 'Guests scan a QR code on a trail sign and press one button. The request lands on your board as a New call with where their phone is, and their answers follow as they tap them. It never replaces 911: every screen of the page shows Call 911.'),
+    h('p', { class: 'wide' }, 'Link for your QR codes: ', h('b', null, url), h('br'), 'Add ?c=R7 (the sign\'s code) or ?loc=Ridge+Run to a sign\'s link so the request says where the sign is.'),
+    field('Page is', on), h('div', { class: 'wide' }, field('Message to guests', input({ name: 'message', value: s.message || '', maxlength: 300 }), 'Shown on the first screen.')),
+    field('Patrol phone', input({ name: 'patrol_phone', type: 'tel', value: s.patrol_phone || '', maxlength: 30 }), 'Guests see Call patrol when this is set.'),
+    field('Help text number', input({ name: 'sms_number', type: 'tel', value: s.sms_number || '', maxlength: 30 }), 'Where Send by text instead goes when the page cannot reach patrol.')),
+  async (fd) => { await put('/patrol/guest-help', { enabled: val(fd, 'enabled') === '1', message: val(fd, 'message'), patrol_phone: val(fd, 'patrol_phone') || null, sms_number: val(fd, 'sms_number') || null }); toast('Saved'); });
 }
 
 // ---------------------------------------------------------------- training passport

@@ -4,18 +4,75 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
+  <meta name="color-scheme" content="light dark">
   <title>Ask ski patrol for help</title>
-  <link rel="stylesheet" href="/css/app.css">
+  <link rel="modulepreload" href="/js/help-strings.js">
+  <style>
+    @font-face { font-family: 'Atkinson Hyperlegible'; font-weight: 400; font-display: optional; src: url(/fonts/atkinson-hyperlegible-latin-400-normal.woff2) format('woff2'); }
+    @font-face { font-family: 'Atkinson Hyperlegible'; font-weight: 700; font-display: optional; src: url(/fonts/atkinson-hyperlegible-latin-700-normal.woff2) format('woff2'); }
+    @font-face { font-family: 'Barlow Condensed'; font-weight: 700; font-display: optional; src: url(/fonts/barlow-condensed-latin-700-normal.woff2) format('woff2'); }
+    :root { --bg: #f4f6f7; --card: #fff; --ink: #14202b; --ink2: #3c4a56; --line: #8a98a5; --slate: #1e2d3a; --spruce: #1f5a4a; --gold: #d8b672; --red: #b3261e; --red-ink: #fff; --ok: #1f6b3a; --tint: #e7efec; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0f171e; --card: #17232d; --ink: #f1f4f6; --ink2: #c4cdd4; --line: #6d7c88; --tint: #1c3029; --ok: #7fd49b; } }
+    :root[data-theme="dark"] { --bg: #0f171e; --card: #17232d; --ink: #f1f4f6; --ink2: #c4cdd4; --line: #6d7c88; --tint: #1c3029; --ok: #7fd49b; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 1.125rem/1.45 'Atkinson Hyperlegible', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; -webkit-text-size-adjust: 100%; }
+    .bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--slate); color: #fff; }
+    .bar-q { font-weight: 700; flex: 1; line-height: 1.2; }
+    main { max-width: 560px; margin: 0 auto; padding: 16px 16px 48px; }
+    h1, h2 { font-family: 'Barlow Condensed', 'Atkinson Hyperlegible', system-ui, sans-serif; line-height: 1.1; margin: 8px 0 12px; }
+    h1 { font-size: 2rem; } h2 { font-size: 1.5rem; } h1:focus, h2:focus { outline: none; }
+    p { margin: 8px 0; } .muted { color: var(--ink2); } .small { font-size: 1rem; }
+    .mtn { margin: 4px 0 0; font-weight: 700; color: var(--ink2); }
+    .b { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 56px; margin: 10px 0; padding: 12px 16px; border-radius: 12px; border: 2px solid var(--slate);
+      background: var(--card); color: var(--ink); font: inherit; font-weight: 700; text-align: center; text-decoration: none; cursor: pointer; touch-action: manipulation; }
+    .b:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+    .big { flex-direction: column; min-height: 140px; background: var(--red); border-color: var(--red); color: var(--red-ink); margin-top: 16px; }
+    .big-t { font-size: 2rem; line-height: 1.1; } .big-s { font-weight: 400; font-size: 1rem; }
+    .big-alt { background: var(--spruce); border-color: var(--spruce); color: #fff; min-height: 64px; }
+    .pri { background: var(--slate); color: #fff; }
+    .sec { background: var(--card); }
+    .b911 { width: auto; min-height: 44px; margin: 0; padding: 6px 14px; background: var(--gold); border-color: var(--gold); color: #14202b; }
+    .blang { width: auto; min-height: 44px; margin: 0; padding: 6px 12px; background: transparent; border-color: #fff; color: #fff; font-weight: 400; }
+    .skip { background: transparent; border-style: dashed; font-weight: 400; margin-top: 18px; }
+    .link { display: inline; width: auto; min-height: 44px; margin: 0; padding: 4px 0; border: 0; background: none; color: inherit; text-decoration: underline; font-weight: 700; }
+    .grid { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; margin: 12px 0; } .grid .b { margin: 0; min-height: 64px; }
+    .sym { justify-content: flex-start; text-align: left; } .sym svg { flex: none; color: #000; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .sym svg { color: #fff; } }
+    .sw { display: inline-block; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line); flex: none; }
+    .c-red { background: #c62828; } .c-orange { background: #ef6c00; } .c-yellow { background: #fbc02d; } .c-green { background: #2e7d32; } .c-blue { background: #1565c0; }
+    .c-purple { background: #6a1b9a; } .c-pink { background: #ec407a; } .c-black { background: #111; } .c-white { background: #fff; } .c-gray { background: #888; }
+    input, textarea { width: 100%; font: inherit; font-size: 1.25rem; min-height: 56px; padding: 10px 12px; border: 2px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); }
+    label { display: block; font-weight: 700; margin-top: 10px; }
+    h2 label { margin: 0; font-weight: inherit; }
+    .warn { border: 2px solid var(--red); border-radius: 12px; padding: 12px 14px; margin: 16px 0; background: var(--card); }
+    .sign, .got { background: var(--tint); border-radius: 10px; padding: 10px 12px; }
+    .got { border-left: 6px solid var(--ok); margin: 0 0 8px; }
+    .msg { font-weight: 700; }
+    .big-line { font-size: 1.375rem; font-weight: 700; }
+    .pad-out { display: block; min-height: 64px; font-size: 2.5rem; text-align: center; border: 2px solid var(--line); border-radius: 10px; background: var(--card); }
+    .keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+    .key { margin: 0; min-height: 64px; font-size: 1.75rem; } .key.small { font-size: 1rem; } .key.ok { background: var(--slate); color: #fff; font-size: 1.125rem; }
+    .yn-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+    .yn-row > span { flex: 1 1 12rem; font-weight: 700; } .yn-row > div { display: flex; gap: 8px; }
+    .yn { width: 88px; margin: 0; } .yn[aria-pressed="true"] { background: var(--slate); color: #fff; }
+    .state { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 12px; background: var(--tint); border-left: 8px solid var(--ok); margin-top: 8px; }
+    .state h1 { margin: 0; } .st-i { font-size: 2rem; font-weight: 700; } .st-closed { border-left-color: var(--line); }
+    .ok { color: var(--ok); font-weight: 700; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; } .row .b { flex: 1 1 10rem; width: auto; min-height: 56px; }
+    .msgs { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 8px; }
+    .msgs li { padding: 10px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); }
+    .msgs li.patrol { border-left: 6px solid var(--spruce); } .msgs li.you { margin-left: 24px; } .msgs b { display: block; font-size: 0.95rem; }
+    .cam-layer { position: fixed; inset: 0; z-index: 5; background: var(--bg); padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+    .cam { width: 100%; max-height: 60vh; background: #000; border-radius: 10px; }
+  </style>
 </head>
-<body class="help-body">
-  <main class="help" id="help">
-    <div class="help-alert" role="note">
-      <strong>Is this an emergency?</strong>
-      <p>If someone is not breathing, is unconscious, or is badly hurt, <b>call 911</b> or the patrol phone number now. Do not wait for a reply to this form.</p>
-    </div>
-    <p class="loading" id="help-loading">Loading…</p>
+<body>
+  <header class="bar" id="bar"><span class="bar-q">Emergency?</span><a class="b b911" href="tel:911">Call 911</a></header>
+  <main id="help">
+    <div class="warn" role="note"><strong>Is this an emergency?</strong> If someone is not breathing, is not awake, or is badly hurt, call 911 now.</div>
+    <p id="help-loading">Loading…</p>
   </main>
-  <noscript><p class="help-noscript">This form needs JavaScript. For help, call 911 or flag down a patroller.</p></noscript>
+  <noscript><p style="max-width:560px;margin:16px auto;padding:0 16px;font-weight:700">This page needs JavaScript. For help, call 911 or flag down a patroller.</p></noscript>
   <script type="module" src="/js/help.js"></script>
 </body>
 </html>

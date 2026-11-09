@@ -4165,3 +4165,13 @@ label.check-hit { display: inline-flex; align-items: center; justify-content: ce
 .map-north text { fill: var(--ink); font-size: 11px; font-weight: 700; }
 .turn-prompt { margin: 0; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--accent-tint); border-left: 4px solid var(--accent-line); color: var(--ink); font-weight: 700; }
 .turn-panel .btn[aria-pressed='true'] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+
+/* help/guest: the call view's Guest section (what the guest tapped, and messages both ways) */
+.guest-box { border-top: 1px solid var(--line); padding-top: 12px; }
+.guest-box dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+.guest-box dt { font-weight: 700; } .guest-box dd { margin: 0; }
+.guest-msgs { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.guest-msgs li { padding: 6px 10px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); }
+.guest-msgs li.from-guest { border-left: 4px solid var(--accent-line); }
+.guest-box textarea { flex: 1 1 16rem; min-height: 56px; }
+@media (max-width: 560px) { .guest-box dl { grid-template-columns: 1fr; gap: 0; } .guest-box dd { margin-bottom: 6px; } }
