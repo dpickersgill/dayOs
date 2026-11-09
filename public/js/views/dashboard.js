@@ -34,6 +34,8 @@ export async function render(root) {
   wallBtn.classList.add('wall-btn'); // hidden on a phone: a wall screen is a big screen
   bar.classList.add('dash-actions');
   bar.append(...[dayField, customize, wallBtn].filter(Boolean));
+  // The morning brief, for the people whose role gets one (it comes at 6:00 AM on open days; the page keeps 7 days).
+  get('/brief/prefs').then((p) => { if (p.eligible) bar.prepend(h('a', { class: 'btn small brief-link', href: '#/brief' }, 'Morning brief')); }).catch(() => {});
 
   async function load(quiet, timed) { // timed: the wall screen's own refresh, which is not someone using the app
     if (!quiet) clear(grid).append(loading());

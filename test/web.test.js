@@ -2422,7 +2422,7 @@ test('settings: who sees which pages', skip(), async () => {
   const pagesOf = (root) => [...root.querySelectorAll('.set-link')].map((a) => a.dataset.page);
   const owner = await renderView('settings', 'owner', T.owner);
   const all = pagesOf(owner);
-  for (const k of ['profile', 'mountain', 'team', 'shared', 'billing', 'payments', 'assistant', 'sell', 'shop', 'school']) assert.ok(all.includes(k), `owner sees ${k}`);
+  for (const k of ['profile', 'brief', 'mountain', 'team', 'shared', 'billing', 'payments', 'assistant', 'sell', 'shop', 'school']) assert.ok(all.includes(k), `owner sees ${k}`);
   assert.deepEqual([...owner.querySelectorAll('.set-group-name')].map((x) => x.textContent), ['You', 'The mountain', 'Apps']);
   assert.equal(owner.querySelector('h1').textContent, 'Your profile and sign-in', '#/settings opens your own page on a computer');
   // an Apps page shows only when it holds something: Account's own settings, or the app's settingsPages
@@ -2443,7 +2443,7 @@ test('settings: who sees which pages', skip(), async () => {
   // patrol, not an admin: their own page, and Patrol for the cards their permissions allow (a patroller who files
   // reports reads Report requirements, as they could inside Patrol before setup moved to Settings)
   const patrol = await renderView('settings', 'patrol', T.patrol);
-  assert.deepEqual(pagesOf(patrol), ['profile', 'patrol']);
+  assert.deepEqual(pagesOf(patrol), ['profile', 'brief', 'patrol'], 'a patrol login can have the morning brief (off unless turned on)');
   // Back to the app goes to the screen the person's menu opens on
   const withMenu = await renderView('settings', 'counter', T.counter, { menu: { apps: ['sell', 'inbox', 'myshifts'], start: 'sell' } });
   assert.equal(withMenu.querySelector('.set-backapp').getAttribute('href'), '#/sell');

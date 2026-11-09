@@ -305,6 +305,28 @@ The foundation for next season's demand forecast, pricing and staffing. Every mo
 - The default "best match" blends models. Over the US that is HRRR (about 3 km, updated hourly, 18 to 48 hours ahead) and GFS (about 13 km at 0.11 degrees, every 6 hours, hourly to 5 days). Open-Meteo says HRRR and NAM end in late November 2026 and are being replaced by RRFS; best match moves over without a change here, but forecasts may shift.
 - **Limits in the mountains:** a 3 to 13 km grid smooths ridges and valleys, so wind on an exposed summit or lift line is often stronger, and valley wind weaker, than the forecast. Temperature is adjusted to the point's height with a 90 m elevation model (that is the `elevation_m` kept with each point), but wind and gusts are not. Wind is at 10 meters above ground, not at lift-tower height. Not every model gives gusts (GFS 0.11 degrees does not); best match fills them from one that does. Treat it as the forecast the morning saw, to compare with what happened, not as a lift-hold signal.
 
+### Morning brief (ai/brief)
+
+A short read at 6:00 AM in the mountain's own time zone, on days the calendar says it is open and the day before opening day. In every plan; no add-on.
+
+- **Who gets which brief.** The operations brief: owners, managers and the GM (a manager login). The patrol brief: patrol logins on the roster at the Admin, Manager, Approver or Patrol level; on by default for the patrol director (roster rank Director or level Admin). The school brief: instructor logins at the Supervisor or Director level; on by default for the ski school Director. Each person turns it on or off and picks email, phone alert or both in Settings, Morning brief (`brief_prefs`). Owners and managers see everyone who can get one on the same page and turn it on or off for them. Other roles get none.
+- **What it covers.** The facts are gathered by code (`src/lib/briefdata.js`), as small JSON per kind of brief, each holding only what that role can see on screen and only for the apps the mountain has on:
+  - weather for the day (the morning's forecast snapshot when `daily_snapshots` exists, otherwise Open-Meteo for the mountain's map point) and the crew's latest snow report;
+  - wind and gusts against each lift's wind hold limit (`lifts.wind_hold_mph`, set with the lift's type in Lift inspections; "not set" when missing). Operations and patrol;
+  - tickets sold ahead for the day, and the expected visits: a simple estimate, the average visits of the same weekday on the last 4 open days of the past 4 weeks (`day_records`). Operations only;
+  - yesterday's revenue and orders. Owners and managers only;
+  - lessons booked, students, instructors scheduled and assigned, lessons with no instructor, and classes over their age band ratio. Operations and school;
+  - lifts with open work orders, a failed daily or weekly check, or a weekly check due. Operations and patrol;
+  - terrain park features closed. Operations and patrol;
+  - shifts with nobody on them and shifts not confirmed (still draft), by department: all departments for operations, Patrol for patrol, Ski school for school;
+  - yesterday's patrol cases as counts by area (the run's or lift's name, else "Other places"), from one aggregate query. Never a name, age, injury, story, case number or time. Operations and patrol;
+  - anything unusual: refunds well above a usual day, a lesson or ticket waitlist growing, the online shop at 90% or more of a daily limit.
+- **Writing.** The small model writes three summary lines, short sections and up to three suggested actions, each linking a screen the role can open (`src/lib/briefwrite.js`, through `callModel`, so the cost is logged against the mountain's monthly cap). Then the facts guard: every number in the text must appear in the facts. On a mismatch, a reply that is not the shape asked for, no AI key, the cap reached or a model error, the brief is the template made by code from the same facts. The brief says "Written by the assistant from today's data" or "Made from today's data".
+- **Delivery.** One brief per mountain, day and kind (`morning_briefs`), shared by everyone of that kind. Email through the mailer (one page, with a plain text part, tag `morning-brief`) and a phone alert through `push.js` (the summary line; it opens the brief). The Morning brief page (from Today) shows today's brief and the 7 before it. Anyone who gets a brief can turn on phone alerts from Settings, Morning brief (`/brief/alerts/*`), not only patrol logins.
+- **When.** `POST /api/v1/internal/jobs/brief` every 15 minutes (`scripts/brief-job.sh`), and a stage of the daily job that finishes what is left. Between 6:00 AM and noon local time. Each send is claimed in `brief_sends` (one row per person and day) before anything goes out, so nobody is sent the same day's brief twice, even when runs overlap. A run stops starting sends after its time budget (100 seconds; 240 inside the daily job) and the next run carries on.
+- **Kept.** Briefs and the record of who was sent them are about staff and kept 30 days (the daily job's retention stage). Listed in the personal-data register (`src/lib/personal.js`).
+- **Evaluations.** `test/evals/brief.test.js`: 8 mountain days (powder Saturday, wind day, rain, slow Tuesday, opening day, understaffed school, a lift with a failed check, a busy patrol day) with a fake model. `node scripts/ai-evals-brief.js` runs them against the real model when `ASSISTANT_API_KEY` is set.
+
 ## Ski school
 
 ### Ski school

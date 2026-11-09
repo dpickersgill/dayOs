@@ -322,6 +322,7 @@ function createApp() {
   api.use('/whats-new', whatsNew);
   api.use('/assistant', require('./routes/assistant').router);
   api.use('/ai', require('./routes/ai')); // prepared actions: drafts that wait for a person to approve them
+  api.use('/brief', require('./routes/brief').router); // the morning brief (every plan)
   api.use('/area', require('./routes/areaview')); // the ski area's read-only patrol view
   api.use('/demo-tours', rateLimit({ windowMs: 60_000, max: 120 }), demoTours.router);
   // Per person, not per address: a mountain's staff usually share one internet address. Reads (the polling) are not counted.

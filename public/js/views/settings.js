@@ -13,6 +13,7 @@ const GROUPS = { you: 'You', mountain: 'The mountain', apps: 'Apps' };
 // [key, group, name in the list and title, one line under the title, loader of the page's own module]
 const PAGES = [
   ['profile', 'you', 'Your profile and sign-in', 'Your password, passkeys and two-step sign-in, where you are signed in, and light or dark.', () => import('./settings-you.js')],
+  ['brief', 'you', 'Morning brief', 'The short read at 6:00 AM on open days: whether you get it, and by email, phone alert or both.', () => import('./settings-brief.js')],
   ['mountain', 'mountain', 'Mountain details', 'The name, phone and address on receipts, the mountain’s time zone, and the weekly report.', () => import('./settings-mountain.js')],
   ['team', 'mountain', 'Team and logins', 'Who can sign in, who must use two-step sign-in, and the menu each role sees.', () => import('./settings-team.js')],
   ['shared', 'mountain', 'Shared computers', 'Computers several people use, like the ticket window. Staff switch in with their username and PIN.', () => import('./settings-mountain.js')],
@@ -44,12 +45,16 @@ async function patrolLevel() {
   try { const m = await get('/patrol/me'); return { level: m.access_level, features: m.features || [] }; } catch (_) { return null; }
 }
 
+/** Does this person's role get a morning brief? */
+async function briefFor() { try { return (await get('/brief/prefs')).eligible; } catch (_) { return false; } }
+
 /** Which pages this person sees, in list order. who: { manager, patrolAdmin }. */
 async function visiblePages(who) {
   const apps = await import('./settings-apps.js');
   const out = [];
   for (const p of PAGES) {
     const [key, group] = p;
+    if (key === 'brief') { if (await briefFor()) out.push(p); continue; } // only for people whose role gets one
     if (group === 'you') { out.push(p); continue; }
     if (ctx.me.role === 'area') continue;
     if (group === 'mountain') { if (who.manager) out.push(p); continue; }

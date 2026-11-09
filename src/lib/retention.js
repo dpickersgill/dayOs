@@ -56,6 +56,7 @@ async function runAll() {
   out.access_ended = await require('./accessend').endSessions(pool);
   await pool.query('DELETE FROM platform_sessions_ended WHERE ends_at < UTC_TIMESTAMP()').catch(() => {}); // console sign-outs past their session's end
   // Operators' openings of a mountain that ran out are kept as history; nothing to delete.
+  out.morning_briefs = await require('./brief').purge(); // briefs and who was sent them: 30 days
   const [l] = await pool.query('DELETE FROM site_leads WHERE created_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? YEAR)', [LEAD_YEARS]);
   out.leads = l.affectedRows;
   const [ml] = await pool.query('DELETE FROM message_log WHERE created_at < UTC_TIMESTAMP() - INTERVAL ? DAY LIMIT 50000', [LOG_DAYS]);

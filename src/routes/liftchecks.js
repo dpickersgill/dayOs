@@ -81,13 +81,16 @@ router.put('/lift-templates/:type/:kind', manager, validate(z.object({ items: it
   res.json({ type, kind, ...list });
 });
 
-router.patch('/lifts/:id/type', manager, validate(z.object({ lift_type: z.enum(L.TYPE_KEYS).nullable() })), async (req, res) => {
+// The lift's type, and the gust speed at which it goes on wind hold (blank: not set; the morning brief compares it with
+// the day's forecast gusts).
+router.patch('/lifts/:id/type', manager, validate(z.object({ lift_type: z.enum(L.TYPE_KEYS).nullable(), wind_hold_mph: z.number().int().min(10).max(150).nullable().optional() })), async (req, res) => {
   const id = paramId(req); const t = req.auth.tenantId;
-  const cur = await one(pool, 'SELECT id, lift_type FROM lifts WHERE tenant_id = ? AND id = ?', [t, id]);
+  const cur = await one(pool, 'SELECT id, lift_type, wind_hold_mph FROM lifts WHERE tenant_id = ? AND id = ?', [t, id]);
   if (!cur) throw notFound('Lift');
-  await pool.query('UPDATE lifts SET lift_type = ? WHERE tenant_id = ? AND id = ?', [req.body.lift_type, t, id]);
-  await audit(pool, req, 'set_lift_type', 'lifts', id, { from: cur.lift_type, to: req.body.lift_type });
-  res.json({ id, lift_type: req.body.lift_type, lift_type_label: L.typeLabel(req.body.lift_type) });
+  const wind = req.body.wind_hold_mph === undefined ? cur.wind_hold_mph : req.body.wind_hold_mph;
+  await pool.query('UPDATE lifts SET lift_type = ?, wind_hold_mph = ? WHERE tenant_id = ? AND id = ?', [req.body.lift_type, wind, t, id]);
+  await audit(pool, req, 'set_lift_type', 'lifts', id, { from: cur.lift_type, to: req.body.lift_type, wind_hold_mph: wind });
+  res.json({ id, lift_type: req.body.lift_type, lift_type_label: L.typeLabel(req.body.lift_type), wind_hold_mph: wind == null ? null : Number(wind) });
 });
 
 // ---------------------------------------------------------------- the day
@@ -100,7 +103,7 @@ router.get('/lift-inspections/day', crew, async (req, res) => {
   const date = req.query.date ? String(req.query.date) : today;
   if (!dateStr.safeParse(date).success) throw bad('Use YYYY-MM-DD');
   const [lifts, daily, weekly, oldChecks, weeklyChecks] = await Promise.all([
-    rows(pool, 'SELECT id, name, status, lift_type FROM lifts WHERE tenant_id = ? ORDER BY name', [t]),
+    rows(pool, 'SELECT id, name, status, lift_type, wind_hold_mph FROM lifts WHERE tenant_id = ? ORDER BY name', [t]),
     rows(pool, "SELECT * FROM lift_inspections WHERE tenant_id = ? AND kind = 'daily' AND check_date = ? ORDER BY id", [t, date]),
     rows(pool, "SELECT * FROM lift_inspections WHERE tenant_id = ? AND kind = 'periodic' AND check_date <= ? AND id IN (SELECT MAX(id) FROM lift_inspections WHERE tenant_id = ? AND kind = 'periodic' AND check_date <= ? GROUP BY lift_id)", [t, date, t, date]),
     // Inspections saved with the older one-step form still count for the day.
@@ -117,7 +120,7 @@ router.get('/lift-inspections/day', crew, async (req, res) => {
     const wk = weeklyChecks.find((c) => Number(c.lift_id) === Number(l.id)) || null;
     const dailyResult = finished && (!old || new Date(finished.finished_at) >= new Date(old.checked_at)) ? finished.status : old ? old.result : null;
     return {
-      id: Number(l.id), name: l.name, status: l.status, lift_type: l.lift_type, lift_type_label: L.typeLabel(l.lift_type),
+      id: Number(l.id), name: l.name, status: l.status, lift_type: l.lift_type, lift_type_label: L.typeLabel(l.lift_type), wind_hold_mph: l.wind_hold_mph == null ? null : Number(l.wind_hold_mph),
       daily: out(latest), daily_result: dailyResult,
       weekly: out(w), weekly_result: wk ? wk.result : null, weekly_date: wk ? ymd(wk.check_date) : null,
       weekly_due: !wk || wk.result === 'fail' || daysBetween(ymd(wk.check_date), date) >= 7,

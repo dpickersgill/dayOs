@@ -124,6 +124,7 @@ jobs.post('/daily', jobAuth, async (req, res) => {
     out.retention = await stage('retention', () => require('../lib/retention').runAll());
     out.demo_emails = await stage('demo_emails', () => require('../lib/demomail').runAll(base));
     out.outreach = await stage('outreach', () => require('../lib/outreach').runDue());
+    out.morning_brief = await stage('morning_brief', () => require('../lib/brief').runDue({ base, budgetMs: 240000 })); // what the 15-minute brief job left (2026.11.14)
     out.rate_limits_removed = await stage('rate_limits_cleanup', () => require('../lib/ratestore').cleanup()); // old shared rate limit counts (2026.11.10)
     // One line per finished run: an alert on "no such line for 26 hours" tells you the job stopped.
     console.log(JSON.stringify({ severity: 'INFO', job: 'daily', message: 'daily job finished', seconds: Math.round((Date.now() - started) / 1000) }));
@@ -132,6 +133,14 @@ jobs.post('/daily', jobAuth, async (req, res) => {
     await conn.query("SELECT RELEASE_LOCK('summitops_daily_job')").catch(() => {});
     conn.release();
   }
+});
+
+// ---------------------------------------------------------------- the morning brief (Cloud Scheduler, every 15 minutes)
+// Sends each mountain's brief from 6:00 AM its own time on open days (lib/brief.js). Safe to run as often as wanted: a
+// send is claimed before it goes, and a run stops starting sends after 100 seconds; the next run carries on.
+jobs.post('/brief', jobAuth, async (req, res) => {
+  const out = await stage('morning_brief', () => require('../lib/brief').runDue({ base: baseUrl(req), budgetMs: 100000 }));
+  res.json(out);
 });
 
 // ---------------------------------------------------------------- guests (Cloud Scheduler, every 5 minutes)

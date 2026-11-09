@@ -20,6 +20,7 @@ const VIEWS = [
   // [hash, label, who may open it, loader]
   ['dashboard', 'Today', () => true, () => import('./views/dashboard.js')],
   ['inbox', 'Inbox', () => true, () => import('./views/inbox.js')],
+  ['brief', 'Morning brief', () => ctx.me.role !== 'area', () => import('./views/brief.js')], // opened from Today, the email and the phone alert
   ['sell', 'Sell', () => can('counter') || schoolCan('director'), () => import('./views/sell.js')],
   ['gate', 'Gate', () => can('counter', 'staff'), () => import('./views/gate.js')],
   ['conditions', 'Mountain status', () => true, () => import('./views/conditions.js')],
@@ -550,7 +551,7 @@ let navToken = 0;
 const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
 
 // An app the platform has turned off for this mountain is hidden for everyone, including the owner.
-const ALWAYS = ['dashboard', 'calendar', 'inbox', 'people', 'waivers', 'lostfound', 'myshifts', 'settings', 'help', 'area'];
+const ALWAYS = ['dashboard', 'brief', 'calendar', 'inbox', 'people', 'waivers', 'lostfound', 'myshifts', 'settings', 'help', 'area'];
 const appOn = (key) => ALWAYS.includes(key) || !ctx.me.modules || ctx.me.modules.includes(key);
 function visibleViews() {
   // The ski area's read-only login sees the patrol summary and its own account, nothing else.
@@ -564,7 +565,8 @@ let frame = null;
 function buildShell() {
   clear(app);
   // Instructor availability is a tab of Lessons for everyone but an instructor, so it is not a menu item for them.
-  const inMenu = visibleViews().filter(([key]) => key !== 'availability' || ownAvailability());
+  // The Morning brief is opened from Today, its email and its phone alert, so it is not a menu item.
+  const inMenu = visibleViews().filter(([key]) => key !== 'brief' && (key !== 'availability' || ownAvailability()));
   // The ski area's read-only login has a menu of its own: the patrol summary (and Help), no All apps.
   const menu = ctx.me.role === 'area' ? AREA_MENU : ctx.me.menu || null;
   frame = buildFrame({ views: inMenu.map(([key, text]) => [key, text]), main, signOut: () => signOut(), menu, links: ctx.me.menu_links || {} });

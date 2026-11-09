@@ -126,6 +126,8 @@ const NOT_GUESTS = {
   // AI release 1: drafts the assistant prepared for staff to approve (the morning conditions update: lifts, trails, snow,
   // never a guest), and the conditions writer's settings. No guest column in either.
   ai_proposals: 'a draft for staff to approve, made from the mountain\u2019s own conditions, never a guest', conditions_writer_settings: 'a mountain setting',
+  // ai/brief: the morning brief is about the day and goes to staff; a brief and the record of who was sent it are kept 30 days.
+  brief_prefs: 'a staff login\u2019s morning brief setting', morning_briefs: 'the day\u2019s morning brief for staff (counts, no guest names), kept 30 days', brief_sends: 'which staff were sent the morning brief, kept 30 days',
 };
 
 // Columns never put in a download: secrets, signatures and payment tokens.
