@@ -43,18 +43,20 @@ export function placeMap(points, { focus = null, trail = [], width = 360, height
   if (trail.length > 1) el.append(svg('polyline', { points: trail.map((p) => { const c = at(p); return `${c.x.toFixed(1)},${c.y.toFixed(1)}`; }).join(' '), class: 'pm-trail' }));
   for (const p of trail.slice(0, -1)) { const c = at(p); el.append(svg('circle', { cx: c.x, cy: c.y, r: 3, class: 'pm-trail-dot' })); }
 
+  const labels = []; // drawn last, over every mark, so a code is never hidden
   for (const p of points) {
     const c = at(p);
     const g = svg('g', { class: `pm-point pm-${p.kind || 'other'}${onPick ? ' pm-pick' : ''}`, ...(onPick ? { tabindex: '0', role: 'button', 'aria-label': `${p.code ? `${p.code}, ` : ''}${p.name || ''}` } : {}) },
       p.kind === 'tower' ? svg('rect', { x: c.x - 5, y: c.y - 5, width: 10, height: 10 }) : svg('circle', { cx: c.x, cy: c.y, r: 6 }),
       svg('title', null, `${p.code ? `${p.code}: ` : ''}${p.name || ''}`));
-    if (label && p.code) g.append(svg('text', { x: c.x + 8, y: c.y + 4, class: 'pm-label' }, p.code));
+    if (label && p.code) labels.push(svg('text', { x: c.x + 8, y: c.y + 4, class: 'pm-label', 'aria-hidden': 'true' }, p.code));
     if (onPick) {
       g.addEventListener('click', () => onPick(p));
       g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick(p); } });
     }
     el.append(g);
   }
-  if (focus) { const c = at(focus); el.append(svg('circle', { cx: c.x, cy: c.y, r: 7, class: 'pm-focus' })); }
+  if (focus) { const c = at(focus); el.append(svg('circle', { cx: c.x, cy: c.y, r: 8, class: 'pm-focus' })); }
+  el.append(...labels);
   return el;
 }

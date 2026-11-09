@@ -40,6 +40,7 @@ export async function drawPlaces(box) {
     liftRow.hidden = !LIFT_KINDS.includes(k);
     towerRow.hidden = k !== 'tower';
     trailRow.hidden = !TRAIL_KINDS.includes(k);
+    nameRow.hidden = k === 'tower'; // a tower is named by its lift and number
   }
   const body = () => ({
     kind: kind.value, name: name.value.trim() || null,
@@ -58,6 +59,7 @@ export async function drawPlaces(box) {
   for (const el of [kind, lift, trail]) el.addEventListener('change', () => { showFields(); suggest(); });
   for (const el of [tower, name]) el.addEventListener('input', () => suggest());
   showFields();
+  suggest();
 
   // GPS: the fix improves while the patroller stands there; Mark this spot opens once it is within the limit.
   let fix = null; let stop = null; let waited = null;
@@ -218,14 +220,20 @@ const query = () => new URLSearchParams(location.hash.split('?')[1] || '');
 
 export async function renderSigns(root) {
   const q = query();
-  const size = SIZES[q.get('size')] ? q.get('size') : 'sticker';
+  let size = SIZES[q.get('size')] ? q.get('size') : 'sticker';
   const ids = String(q.get('ids') || '').split(',').filter((x) => /^\d+$/.test(x));
   const r = await get(`/patrol/places/signs${ids.length ? `?ids=${ids.join(',')}` : ''}`);
-  const sizeLinks = Object.entries(SIZES).map(([k, v]) => h('a', { class: `btn${k === size ? ' primary' : ''}`, href: `#/patrol/signs?size=${k}&ids=${ids.join(',')}`, 'aria-current': k === size ? 'page' : null }, v.short));
-  root.append(h('div', { class: `signs-page signs-${size}` },
-    h('div', { class: 'row signs-tools no-print' }, h('a', { class: 'btn', href: '#/patrol/gear?tab=places' }, '‹ Places and signs'), ...sizeLinks, button('Print', () => window.print(), { kind: 'primary' }),
-      h('span', { class: 'muted small' }, `${r.places.length} sign${r.places.length === 1 ? '' : 's'}. ${r.help_number ? '' : 'No help number for texts is set, so the signs say Scan only. '}Print at 100% size.`)),
-    r.places.length ? r.places.map((p) => helpSign(p, r, size)) : empty('No places to print.')));
+  const page = h('div');
+  // The size switches on the page itself (the address keeps it, for a reload).
+  function draw() {
+    const sizeBtns = Object.entries(SIZES).map(([k, v]) => h('button', { type: 'button', class: `btn${k === size ? ' primary' : ''}`, 'aria-pressed': String(k === size), onclick: () => { size = k; history.replaceState(null, '', `#/patrol/signs?size=${k}&ids=${ids.join(',')}`); draw(); } }, v.short));
+    clear(page).append(h('div', { class: `signs-page signs-${size}` },
+      h('div', { class: 'row signs-tools no-print' }, h('a', { class: 'btn', href: '#/patrol/gear?tab=places' }, '\u2039 Places and signs'), ...sizeBtns, button('Print', () => window.print(), { kind: 'primary' }),
+        h('span', { class: 'muted small' }, `${r.places.length} sign${r.places.length === 1 ? '' : 's'}. ${r.help_number ? '' : 'No help number for texts is set, so the signs say Scan this code. '}Print at 100% size.`)),
+      ...(r.places.length ? r.places.map((p) => helpSign(p, r, size)) : [empty('No places to print.')])));
+  }
+  draw();
+  root.append(page);
 }
 
 function helpSign(p, r, size) {

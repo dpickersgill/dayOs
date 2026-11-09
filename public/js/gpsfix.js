@@ -22,15 +22,15 @@ export const goodEnough = (fix, max = MARK_MAX_M) => Boolean(fix) && Number.isFi
  * With no GPS on the device, onError is called at once.
  */
 export function watchFix(onFix, onError = () => {}) {
-  if (typeof navigator === 'undefined' || !navigator.geolocation) { onError('This device has no GPS, or the browser cannot reach it.'); return () => {}; }
+  if (typeof navigator === 'undefined' || !navigator.geolocation) { onError('This device has no GPS, or the browser cannot reach it.', -1); return () => {}; }
   let id = null;
   try {
     id = navigator.geolocation.watchPosition(
       (pos) => onFix({ lat: pos.coords.latitude, lng: pos.coords.longitude, acc: Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : 999 }),
-      (err) => onError(err && err.code === 1 ? 'Location is switched off for this site. Allow it in the browser settings.' : 'No GPS signal yet. Step into the open.'),
+      (err) => onError(err && err.code === 1 ? 'Location is switched off for this site. Allow it in the browser settings.' : 'No GPS signal yet. Step into the open.', err ? err.code : 0),
       { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 },
     );
-  } catch (_) { onError('No GPS signal yet. Step into the open.'); }
+  } catch (_) { onError('No GPS signal yet. Step into the open.', 0); }
   return () => { if (id !== null) navigator.geolocation.clearWatch(id); id = null; };
 }
 
@@ -41,7 +41,14 @@ export function bestFix({ waitMs = 8000, good = 15 } = {}) {
     let stop = () => {};
     const done = () => { clearTimeout(timer); stop(); resolve(best); };
     const timer = setTimeout(done, waitMs);
-    stop = watchFix((f) => { if (!best || f.acc < best.acc) best = f; if (f.acc <= good) done(); }, () => { if (!best) done(); });
+    // Only a refusal or no GPS at all ends the wait early; a slow or lost signal keeps trying until waitMs.
+    stop = watchFix((f) => { if (!best || f.acc < best.acc) best = f; if (f.acc <= good) done(); }, (_text, code) => { if (!best && (code === 1 || code === -1)) done(); });
+    // A one-off read too, which may take a fix the phone already has from the last few seconds.
+    const take = (f) => { if (!best || f.acc < best.acc) best = f; if (f.acc <= good) done(); };
+    try {
+      navigator.geolocation.getCurrentPosition((pos) => take({ lat: pos.coords.latitude, lng: pos.coords.longitude, acc: Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : 999 }),
+        () => {}, { enableHighAccuracy: true, maximumAge: 10000, timeout: waitMs });
+    } catch (_) { /* the watch above still runs */ }
   });
 }
 
