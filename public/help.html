@@ -11,9 +11,9 @@
     @font-face { font-family: 'Atkinson Hyperlegible'; font-weight: 400; font-display: optional; src: url(/fonts/atkinson-hyperlegible-latin-400-normal.woff2) format('woff2'); }
     @font-face { font-family: 'Atkinson Hyperlegible'; font-weight: 700; font-display: optional; src: url(/fonts/atkinson-hyperlegible-latin-700-normal.woff2) format('woff2'); }
     @font-face { font-family: 'Barlow Condensed'; font-weight: 700; font-display: optional; src: url(/fonts/barlow-condensed-latin-700-normal.woff2) format('woff2'); }
-    :root { --bg: #f4f6f7; --card: #fff; --ink: #14202b; --ink2: #3c4a56; --line: #8a98a5; --slate: #1e2d3a; --spruce: #1f5a4a; --gold: #d8b672; --red: #b3261e; --red-ink: #fff; --ok: #1f6b3a; --tint: #e7efec; }
-    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0f171e; --card: #17232d; --ink: #f1f4f6; --ink2: #c4cdd4; --line: #6d7c88; --tint: #1c3029; --ok: #7fd49b; } }
-    :root[data-theme="dark"] { --bg: #0f171e; --card: #17232d; --ink: #f1f4f6; --ink2: #c4cdd4; --line: #6d7c88; --tint: #1c3029; --ok: #7fd49b; }
+    :root { --focus: #1e2d3a; --bg: #f4f6f7; --card: #fff; --ink: #14202b; --ink2: #3c4a56; --line: #8a98a5; --slate: #1e2d3a; --spruce: #1f5a4a; --gold: #d8b672; --red: #b3261e; --red-ink: #fff; --ok: #1f6b3a; --tint: #e7efec; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --focus: #d8b672; --bg: #0f171e; --card: #17232d; --ink: #f1f4f6; --ink2: #c4cdd4; --line: #6d7c88; --tint: #1c3029; --ok: #7fd49b; } }
+    :root[data-theme="dark"] { --focus: #d8b672; --bg: #0f171e; --card: #17232d; --ink: #f1f4f6; --ink2: #c4cdd4; --line: #6d7c88; --tint: #1c3029; --ok: #7fd49b; }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--ink); font: 1.125rem/1.45 'Atkinson Hyperlegible', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; -webkit-text-size-adjust: 100%; }
     .bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--slate); color: #fff; }
@@ -25,15 +25,18 @@
     .mtn { margin: 4px 0 0; font-weight: 700; color: var(--ink2); }
     .b { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 56px; margin: 10px 0; padding: 12px 16px; border-radius: 12px; border: 2px solid var(--slate);
       background: var(--card); color: var(--ink); font: inherit; font-weight: 700; text-align: center; text-decoration: none; cursor: pointer; touch-action: manipulation; }
-    .b:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+        /* The focus ring: slate on the light page, gold on the dark one, white on the slate bar (3:1 or more on each). */
+    .b:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+    .bar .b:focus-visible { outline-color: #fff; }
     .big { flex-direction: column; min-height: 140px; background: var(--red); border-color: var(--red); color: var(--red-ink); margin-top: 16px; }
     .big-t { font-size: 2rem; line-height: 1.1; } .big-s { font-weight: 400; font-size: 1rem; }
     .big-alt { background: var(--spruce); border-color: var(--spruce); color: #fff; min-height: 64px; }
     .pri { background: var(--slate); color: #fff; }
+    .b911.wide { width: 100%; margin: 10px 0; font-size: 1.25rem; }
     .sec { background: var(--card); }
     .b.has-num { flex-direction: column; gap: 2px; } .b .num { font-size: .9em; font-weight: 400; white-space: nowrap; }
-    .b911 { width: auto; min-height: 44px; margin: 0; padding: 6px 14px; background: var(--gold); border-color: var(--gold); color: #14202b; }
-    .blang { width: auto; min-height: 44px; margin: 0; padding: 6px 12px; background: transparent; border-color: #fff; color: #fff; font-weight: 400; }
+    .b911 { width: auto; min-height: 56px; margin: 0; padding: 6px 14px; background: var(--gold); border-color: var(--gold); color: #14202b; }
+    .blang { width: auto; min-height: 56px; margin: 0; padding: 6px 12px; background: transparent; border-color: #fff; color: #fff; font-weight: 400; }
     .skip { background: transparent; border-style: dashed; font-weight: 400; margin-top: 18px; }
     .link { display: inline; width: auto; min-height: 44px; margin: 0; padding: 4px 0; border: 0; background: none; color: inherit; text-decoration: underline; font-weight: 700; }
     .grid { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; margin: 12px 0; } .grid .b { margin: 0; min-height: 64px; }

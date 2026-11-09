@@ -72,17 +72,50 @@ function setLang(server) {
 }
 
 // ---------------------------------------------------------------- 1. the first screen
+// The mountain's name and numbers from the last page that loaded, kept on the phone so a failed first load can still
+// offer Send by text instead.
+const CACHE = `so.help.page.${slug}`;
+function cached() { try { const v = JSON.parse(keep(CACHE) || 'null'); return v && typeof v === 'object' ? v : null; } catch (_) { return null; } }
+function cachePage(p) { keep(CACHE, JSON.stringify({ mountain: p.mountain || null, sms_number: p.sms_number || null, patrol_phone: p.patrol_phone || null, patrol_phone_shown: p.patrol_phone_shown || null })); }
+
 async function start() {
   setLang(null);
   const saved = (location.hash.match(/t=([0-9a-f]{32})/) || [])[1] || store('token');
   try {
     S.page = await call('GET', code ? `?c=${encodeURIComponent(code)}` : '', null, 20000);
+    cachePage(S.page);
   } catch (err) {
-    if (!saved) { setLang(null); show(h('h1', null, t('noOnline'))); return; }
+    if (!saved) { offline(); return; }
   }
   if (S.page) setLang(S.page.lang);
   if (saved) { S.token = saved; S.ref = store('ref'); status(); return; }
   home();
+}
+
+// The first load failed: try again, send by text (when the number is known from an earlier load), or call 911. Never a
+// dead end.
+function offline() {
+  S.redraw = offline;
+  const c = cached() || {};
+  const body = smsBody({ code, place: code ? null : loc });
+  show(c.mountain ? h('p', { class: 'mtn' }, c.mountain) : null, h('h1', null, t('offTitle')), h('p', null, t('offSub')),
+    btn(t('retry'), () => { show(h('p', { role: 'status' }, t('loading'))); start(); }, 'pri'),
+    c.sms_number ? h('a', { class: 'b big-alt', href: smsHref(c.sms_number, body, isApple(navigator.userAgent, navigator.maxTouchPoints)) }, t('smsFallback')) : null,
+    c.sms_number ? h('p', { class: 'muted' }, t('offText')) : null,
+    h('a', { class: 'b b911 wide', href: 'tel:911' }, t('call911')),
+    c.patrol_phone ? h('a', { class: 'b sec has-num', href: tel(c.patrol_phone) }, h('span', null, t('callPatrol')), h('span', { class: 'num' }, c.patrol_phone_shown || c.patrol_phone)) : null);
+}
+
+// The request was not taken online even with nothing optional in it: send it by text, call 911, or try again.
+function notTaken(kind, who) {
+  S.redraw = () => notTaken(kind, who);
+  const n = S.page && S.page.sms_number;
+  const body = smsBody({ code, place: code ? null : loc, lat: S.pos && S.pos.lat, lng: S.pos && S.pos.lng, acc: S.pos && S.pos.acc, what: kind === 'lost_child' ? 'lost child' : null });
+  show(h('h1', null, t('notTaken')), h('p', null, t('notTakenSub')),
+    n ? h('a', { class: 'b big-alt', href: smsHref(n, body, isApple(navigator.userAgent, navigator.maxTouchPoints)) }, t('smsFallback')) : null,
+    n ? h('p', { class: 'muted' }, t('smsHint')) : null,
+    h('a', { class: 'b b911 wide', href: 'tel:911' }, t('call911')),
+    btn(t('retry'), () => go(kind, who), 'sec'));
 }
 
 function home() {
@@ -116,10 +149,10 @@ async function go(kind, who) {
   const pos = await locate(8000);
   S.pos = pos ? { lat: pos.latitude, lng: pos.longitude, acc: pos.accuracy } : null;
   line.textContent = t('sending');
-  const body = { kind, rid, lang: S.lang, ...(who ? { who } : {}), ...(code ? { code } : {}), ...(loc && !code ? { location: loc } : {}),
+  let body = { kind, rid, lang: S.lang, ...(who ? { who } : {}), ...(code ? { code } : {}), ...(loc && !code ? { location: loc } : {}),
     ...(S.pos ? { gps_lat: S.pos.lat, gps_lng: S.pos.lng, accuracy: Math.round(S.pos.acc) } : {}) };
   // Send, and keep trying in the background. After 15 s or a failure, offer a text message too; the first to reach patrol wins.
-  let done = false; let tries = 0;
+  let done = false; let tries = 0; let minimal = false;
   const offerText = () => {
     if (done || fallback.childNodes.length) return;
     fallback.append(h('p', { class: 'warn' }, t('trying')));
@@ -136,7 +169,12 @@ async function go(kind, who) {
     } catch (err) {
       offerText();
       tries += 1;
-      if (err.status && err.status < 500 && err.status !== 429 && err.status !== 408) { done = true; clearTimeout(slow); show(h('h1', null, t('noOnline'))); return; }
+      // Refused (a 4xx that is not "too many" or "too slow"): send again at once with nothing optional in it; if that is
+      // refused too, the text message and Call 911.
+      if (err.status && err.status < 500 && err.status !== 429 && err.status !== 408) {
+        if (!minimal) { minimal = true; body = { kind, rid }; continue; }
+        done = true; clearTimeout(slow); notTaken(kind, who); return;
+      }
       await new Promise((r) => setTimeout(r, Math.min(30000, 3000 * tries)));
     }
   }
