@@ -53,7 +53,7 @@ export function guestSection(c, redraw) {
     live ? h('div', { class: 'stack' },
       h('div', { class: 'row guest-quick' }, QUICK.map(([en, sp]) => button(es ? sp : en, () => send(es ? sp : en), { small: true }))),
       h('div', { class: 'row' }, text, button('Send', () => send(text.value), { kind: 'primary' })),
-      h('p', { class: 'muted' }, g.by_text ? (g.can_text ? 'Messages are texted to the guest’s phone, from the help number.' : g.opted_out ? 'This phone texted STOP, so patrol cannot text it until it texts START or HELP. Call them.' : 'Texts are not set up. Call the guest.')
+      h('p', { class: 'muted' }, g.by_text ? (g.can_text ? 'Messages are texted to the guest’s phone, from the help number.' : g.opted_out ? 'This phone texted STOP; replies can’t be sent until it texts START. Call them instead.' : 'Texts are not set up. Call the guest.')
         : g.can_text ? 'Messages show on the guest’s page and are texted to the phone they gave.' : 'Messages show on the guest’s page while it is open.')) : null);
 }
 function appendTo(el, ...kids) { for (const k of kids) if (k) el.append(k); return el; }

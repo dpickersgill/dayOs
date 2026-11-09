@@ -15,7 +15,7 @@
 // When the call closes, one closing text goes out.
 //
 // STOP (and Twilio's other opt-out words) is recorded per mountain and phone: nothing more is texted to that phone
-// from the help line until START. A text from that phone is still taken as a call (a request for help always is).
+// from the help line until START (Twilio blocks it until then too; HELP does not undo it). A text from that phone is still taken as a call (a request for help always is).
 //
 // Limits: a phone's new calls are grouped like guest help requests (dispatch.js createCall); at most 20 texts out per
 // call (HELP_SMS_CALL_CAP) and 300 an hour per mountain (HELP_SMS_HOURLY_CAP); a phone alert to responders at most
@@ -28,6 +28,7 @@ const { nowIn } = require('./util');
 const { logFailure } = require('./jobs');
 
 const OPEN = ['new', 'dispatched', 'on_scene', 'transporting'];
+const STOPPED = 'This phone texted STOP; replies can\'t be sent until it texts START. Call them instead.';
 const WINDOW_HOURS = 2;
 const LOCATE_HOURS = 2;
 const CALL_CAP = () => Number(process.env.HELP_SMS_CALL_CAP) || 20;
@@ -248,7 +249,7 @@ async function withPhoneLock(tenantId, key, fn) {
 async function reserve(th) {
   const tenantId = th.tenant_id; const callId = th.call_id;
   let why = null;
-  if (await optedOut(tenantId, th.phone_key)) why = 'This phone texted STOP to the help line, so patrol cannot text it. Call them.';
+  if (await optedOut(tenantId, th.phone_key)) why = STOPPED;
   if (!why) {
     const h = await one(pool, "SELECT COUNT(*) AS n FROM dispatch_sms_log WHERE tenant_id = ? AND direction = 'out' AND at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR", [tenantId]);
     if (Number(h.n) >= HOUR_CAP()) { why = `The help line has sent ${HOUR_CAP()} texts in the last hour, its limit. Call the guest.`; logFailure({ job: 'help_sms', tenant: tenantId, message: 'hourly text cap reached' }); }
@@ -331,25 +332,23 @@ async function handle(line, params, base, from, key) {
     const open = await openThread(pool, tenantId, key);
     if (intent === 'stop') {
       await pool.query('INSERT IGNORE INTO dispatch_sms_optouts (tenant_id, phone_key, opted_out_at) VALUES (?, ?, UTC_TIMESTAMP())', [tenantId, key]);
-      if (open) await note(pool, tenantId, open.call_id, 'Guest texted STOP: patrol can no longer text this phone. Call them.');
+      if (open) await note(pool, tenantId, open.call_id, STOPPED);
       return { reply: null, stopped: true };
     }
+    const words = String(params.Body || '').slice(0, 1600);
     if (intent === 'start') {
+      // START (or an opt-in keyword set in Twilio, such as AYUDA or PATROL: RUNBOOK.md, Text HELP set-up step 3).
       const [d] = await pool.query('DELETE FROM dispatch_sms_optouts WHERE tenant_id = ? AND phone_key = ?', [tenantId, key]);
       if (d.affectedRows && open) await note(pool, tenantId, open.call_id, 'Guest texted START: patrol can text this phone again.');
-      if (!open) return { reply: null, started: Boolean(d.affectedRows) }; // Twilio sends its own START reply; nothing to join
+      // Nothing to join and no help word: Twilio sends its own START reply. A help word is a request for help, always.
+      if (!open && !TRIGGERS[String(words).trim().replace(/[^A-Za-zÁÉÍÓÚáéíóú]+$/g, '').toUpperCase()]) return { reply: null, started: Boolean(d.affectedRows) };
       // With an open call the word goes on it too ("yes" may be an answer to patrol).
     }
-    const words = String(params.Body || '').slice(0, 1600);
     const photos = photosIn(params);
     const area = await one(pool, 'SELECT map_lat AS lat, map_lng AS lng FROM tenants WHERE id = ?', [tenantId]).catch(() => null);
     const p = parse(words, area && area.lat !== null && area.lng !== null ? { lat: Number(area.lat), lng: Number(area.lng) } : null);
-    // A phone that texted STOP is still heard: every text is taken as a request for help. Replies go to it again only
-    // after START, or HELP (or AYUDA, PATROL) again.
-    if (p.trigger) {
-      const [d] = await pool.query('DELETE FROM dispatch_sms_optouts WHERE tenant_id = ? AND phone_key = ?', [tenantId, key]);
-      if (d.affectedRows && open) await note(pool, tenantId, open.call_id, `Guest texted ${p.trigger}: patrol can text this phone again.`);
-    }
+    // A phone that texted STOP is still heard: every text is taken as a request for help. Nothing is texted to it until
+    // it texts START (Twilio keeps blocking it until then, whatever we record), and the call says so.
     if (open) return followUp(line, open, p, words, photos);
     return firstText(line, from, key, p, words, photos, base);
   });
@@ -465,5 +464,5 @@ async function photoUrl(tenantId, callId, n) {
 
 module.exports = {
   STRINGS, TRIGGERS, CALL_CAP, HOUR_CAP, WINDOW_HOURS, LOCATE_HOURS,
-  says, normalNumber, keyOf, isSpanish, parse, without, LOST_CHILD, lineOf, lineByNumber, outbound, reserve, inbound, closed, threadView, photoUrl, mediaOk, optedOut,
+  says, normalNumber, keyOf, isSpanish, parse, without, LOST_CHILD, STOPPED, lineOf, lineByNumber, outbound, reserve, inbound, closed, threadView, photoUrl, mediaOk, optedOut,
 };

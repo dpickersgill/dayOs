@@ -68,7 +68,7 @@ async function mountain(tag) {
   const owner = await REC((await api('POST', '/auth/login', { body: { tenant: slug, email: `owner@${slug}.test`, password: PW } })).body.token);
   const id = Number((await q('SELECT id FROM tenants WHERE slug = ?', [slug]))[0].id);
   const line = `+1484${String(Date.now() + (++lineN) * 7919).slice(-7)}`;
-  const patrolPhone = `+1610555${String(9000 + lineN)}`;
+  const patrolPhone = `+1215${String(Date.now() * 7 + lineN * 104729).slice(-7)}`; // unique per run: the guests job serves every mountain
   ok(await api('PUT', '/patrol/guest-help', { token: owner, body: { enabled: true } }));
   ok(await api('PUT', '/patrol/text-help', { token: owner, body: { help_number: line, patrol_phone: patrolPhone } }));
   const ownerUser = Number((await q('SELECT id FROM users WHERE tenant_id = ? AND role = ? LIMIT 1', [id, 'owner']))[0].id);
@@ -299,6 +299,7 @@ test('Text HELP: a text that says a child is lost is a Lost child call at High, 
 
 // ---------------------------------------------------------------- 10. no one on duty
 test('no one on duty: owners and managers are alerted, the patrol phone is texted, and the board shows a red banner', async () => {
+  const A = await mountain('nod'); // a mountain of its own: the summary goes once a minute per mountain
   userPushes.length = 0;
   const before = sent.length;
   const r = ok(await help(A, { kind: 'help', rid: rid(), location: 'Bottom of the T-bar' }), 201);
@@ -331,7 +332,7 @@ test('no one on duty: owners and managers are alerted, the patrol phone is texte
 });
 
 // ---------------------------------------------------------------- minor fixes
-test('STOP never blocks a request for help; HELP again turns replies back on', async () => {
+test('STOP never blocks a request for help; replies wait for START (HELP does not undo STOP), and the call says so', async () => {
   const phone = guestPhone();
   await text({ From: phone, To: A.line, Body: 'HELP' });
   const c = await latestSms(A, phone);
@@ -341,10 +342,25 @@ test('STOP never blocks a request for help; HELP again turns replies back on', a
   const c2 = await latestSms(A, phone);
   assert.notEqual(c2.id, c.id, 'still a new request');
   assert.equal(r.reply, null, 'no reply while opted out');
+  const STOPPED = 'This phone texted STOP; replies can\'t be sent until it texts START. Call them instead.';
+  assert.ok((await notes(c2.id)).includes(`Text not sent: ${STOPPED}`), 'the call says so');
   const again = await text({ From: phone, To: A.line, Body: 'HELP please answer' });
-  assert.equal(again.reply, null, 'joins the open call (no automatic reply to a follow-up)');
-  assert.equal((await q('SELECT COUNT(*) AS n FROM dispatch_sms_optouts WHERE tenant_id = ? AND phone_key = ?', [A.id, phone.slice(2)]))[0].n, 0, 'HELP turned texts back on');
-  const out = ok(await api('POST', `/patrol/dispatch/${c2.id}/messages`, { token: A.owner, body: { body: 'We see you.' } }), 201);
+  assert.equal(again.reply, null);
+  assert.equal((await latestSms(A, phone)).id, c2.id, 'the request reaches dispatch, on its call');
+  assert.ok((await q('SELECT body FROM dispatch_messages WHERE call_id = ?', [c2.id])).some((m) => m.body === 'HELP please answer'));
+  assert.equal((await q('SELECT COUNT(*) AS n FROM dispatch_sms_optouts WHERE tenant_id = ? AND phone_key = ?', [A.id, phone.slice(2)]))[0].n, 1, 'HELP does not undo STOP: Twilio still blocks the phone');
+  const blocked = ok(await api('POST', `/patrol/dispatch/${c2.id}/messages`, { token: A.owner, body: { body: 'We see you.' } }), 201);
+  assert.equal(blocked.texted, false);
+  assert.equal(blocked.error, STOPPED);
+  const view = ok(await api('GET', `/patrol/dispatch/${c2.id}`, { token: A.owner }));
+  assert.equal(view.guest.opted_out, true); assert.equal(view.guest.can_text, false);
+  // A help word sent as an opt-in keyword (Twilio's OptOutType START, RUNBOOK step 3) clears it and is still a request.
+  ok(await api('POST', `/patrol/dispatch/${c2.id}/events`, { token: A.owner, body: { kind: 'closed' } }), 201);
+  const r3 = await text({ From: phone, To: A.line, Body: 'AYUDA', OptOutType: 'START' });
+  const c3 = await latestSms(A, phone);
+  assert.notEqual(c3.id, c2.id, 'a new request');
+  assert.match(r3.reply, /patrulla/);
+  const out = ok(await api('POST', `/patrol/dispatch/${c3.id}/messages`, { token: A.owner, body: { body: 'We see you.' } }), 201);
   assert.equal(out.texted, true);
 });
 
