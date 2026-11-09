@@ -15,9 +15,11 @@ export async function render(root) {
   const scoreHost = h('div', { class: 'docscore-host', hidden: true });
   const jobsHost = h('div', { class: 'jobs-host' });
   const comingHost = h('div', { class: 'mcal-coming-host', hidden: true }); // the Mountain calendar's next three days (2026.11.10)
+  const readyHost = h('div', { class: 'ready-host', hidden: true }); // drafts the assistant prepared, to approve (AI release 1)
   root.append(
     h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Today'), h('p', { class: 'muted', id: 'dash-sub' })), bar),
-    jobsHost, comingHost, editBar, scoreHost, wallHost);
+    jobsHost, readyHost, comingHost, editBar, scoreHost, wallHost);
+  import('./ai-ready.js').then((m) => m.readyCards(readyHost)).catch(() => {});
   import('./calendar.js').then((m) => m.comingUpCard(comingHost)).catch(() => {});
   if (!isManager()) jobButtons(jobsHost);
   docScoreCard(scoreHost);

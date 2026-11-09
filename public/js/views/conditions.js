@@ -30,7 +30,9 @@ async function drawStatus(root, canSet) {
   const lifts = h('section', { class: 'section' });
   const trails = h('section', { class: 'section' });
   const attractions = h('section', { class: 'section attr-section', hidden: true });
-  root.append(day, lifts, trails, attractions);
+  const writer = h('section', { class: 'section cw-section', hidden: true }); // the conditions writer (AI Operations add-on)
+  root.append(day, writer, lifts, trails, attractions);
+  if (canSet) import('./conditions-writer.js').then((m) => m.drawWriter(writer)).catch(() => {});
   const drawAttr = async () => { try { await (await import('./attractions.js')).drawAttractions(attractions, canSet); } catch (err) { attractions.hidden = false; clear(attractions).append(errorBox(err)); } };
   await Promise.all([drawDay(day), drawLifts(lifts, canSet), drawTrails(trails, canSet), drawAttr()]);
   if (isManager()) {
@@ -69,6 +71,15 @@ async function drawDay(box) {
         await load();
       }, { kind: 'primary' });
       body.append(h('div', { class: 'form' }, field('Status', st), field('Opens', o), field('Closes', c), field('Note for guests', n)), h('div', { class: 'row' }, save));
+    } else if (ctx.me && ctx.me.role === 'staff') {
+      // Lift staff keep today's note for guests current, with the lifts and trails (the day itself is a manager's).
+      const n = input({ name: 'notes', maxlength: 500, value: d && d.notes ? d.notes : '', placeholder: 'Shown to guests, such as "Summit Quad on wind hold"' });
+      const save = button('Save note', async () => {
+        await put(`/schedule/days/${date.value}/note`, { notes: n.value.trim() || null });
+        toast('Note saved');
+        await load();
+      });
+      body.append(h('div', { class: 'form' }, field('Note for guests', n)), h('div', { class: 'row' }, save));
     }
   }
   date.addEventListener('change', () => date.value && load().catch((e) => clear(body).append(errorBox(e))));

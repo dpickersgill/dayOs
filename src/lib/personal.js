@@ -123,6 +123,9 @@ const NOT_GUESTS = {
   group_program_handoffs: 'drop-off and pickup counts for a school group', pay_line_flags: 'an instructor asking about their own pay',
   school_training_staff: 'staff training hours', user_notices: 'a notice a sign-in has dismissed',
   daily_snapshots: 'counts, prices and weather for a day, never a person (forecast data, kept 3 years)',
+  // AI release 1: drafts the assistant prepared for staff to approve (the morning conditions update: lifts, trails, snow,
+  // never a guest), and the conditions writer's settings. No guest column in either.
+  ai_proposals: 'a draft for staff to approve, made from the mountain\u2019s own conditions, never a guest', conditions_writer_settings: 'a mountain setting',
 };
 
 // Columns never put in a download: secrets, signatures and payment tokens.
