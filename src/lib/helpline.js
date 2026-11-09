@@ -85,30 +85,47 @@ function isSpanish(text) {
 }
 
 /**
- * Reads a text: the trigger word (HELP, PATROL, AYUDA) at the start, a position ("44.27110,-71.30330 ±12m", from the
- * help page's text fallback, the ± part optional), candidate sign codes, and the rest as the description.
+ * Reads a text: the trigger word (HELP, PATROL, AYUDA) at the start, a position, candidate sign codes, and the rest as the
+ * description. area: the mountain's map point { lat, lng }, or null.
+ *
+ * A position is "lat,lng": signed numbers with 2 to 8 decimals, not part of a longer number ("1044.27110" is not one),
+ * both in range. It is taken when
+ *   - it carries the help page's accuracy ("44.27110,-71.30330 ±12m", the text fallback's own format), or
+ *   - it is within 50 km of the mountain's map point, or
+ *   - the mountain has no map point and the comma has no space ("44.2711,-71.3033").
+ * So "12.50, 7.25" (a price, a time) is not read as a position.
  */
-function parse(text) {
+const POS = /(?<![\d.])([-+]?\d{1,2}\.\d{2,8})(\s*),(\s*)([-+]?\d{1,3}\.\d{2,8})(?![\d.])(?:\s*(?:±|\+\/-|\+-)\s*(\d{1,6}(?:\.\d+)?)\s*m\b)?/g;
+const AREA_M = 50000;
+function parse(text, area = null) {
   let s = String(text || '').normalize('NFKC').replace(/\s+/g, ' ').trim();
   let trigger = null;
-  const t = s.match(/^([A-Za-zÁÉÍÓÚáéíóú]+)(?=$|[\s:,.!¡?-])[\s:,.!¡?-]*/);
+  // The word, then spaces and punctuation; a "-" that starts a number ("HELP -33.86,151.21") stays with the number.
+  const t = s.match(/^([A-Za-zÁÉÍÓÚáéíóú]+)(?=$|[\s:,.!¡?-])(?:[\s:,.!¡?]|-(?![\d.]))*/);
   if (t && TRIGGERS[t[1].toUpperCase()]) { trigger = t[1].toUpperCase(); s = s.slice(t[0].length); }
   let gps = null;
-  const g = s.match(/(-?\d{1,2}\.\d{2,8})\s*,\s*(-?\d{1,3}\.\d{2,8})(?:\s*(?:±|\+\/-|\+-)\s*(\d{1,6}(?:\.\d+)?)\s*m\b)?/);
-  if (g) {
-    const lat = Number(g[1]); const lng = Number(g[2]);
-    if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
-      gps = { lat, lng, accuracy: g[3] !== undefined ? Math.round(Number(g[3])) : null };
-      s = `${s.slice(0, g.index)} ${s.slice(g.index + g[0].length)}`.replace(/\s+/g, ' ').trim();
-    }
+  const hasArea = area && Number.isFinite(Number(area.lat)) && Number.isFinite(Number(area.lng)) && area.lat !== null && area.lng !== null;
+  for (const g of s.matchAll(POS)) {
+    const lat = Number(g[1]); const lng = Number(g[4]);
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
+    const withAcc = g[5] !== undefined;
+    const inArea = hasArea && require('./places').haversine(lat, lng, Number(area.lat), Number(area.lng)) <= AREA_M;
+    const tight = g[2] === '' && g[3] === '';
+    if (!(withAcc || inArea || (!hasArea && tight))) continue;
+    gps = { lat, lng, accuracy: withAcc ? Math.round(Number(g[5])) : null };
+    s = `${s.slice(0, g.index)} ${s.slice(g.index + g[0].length)}`.replace(/\s+/g, ' ').trim();
+    break;
   }
   const words = s.split(' ').map((w) => w.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '')).filter(Boolean);
   // A sign code is 2 to 5 letters and digits. Words with both come first; plain words only when the text is that short.
   const mixed = words.filter((w) => /^[A-Za-z0-9]{2,5}$/.test(w) && /\d/.test(w) && /[A-Za-z]/.test(w));
   const plain = words.length <= 2 ? words.filter((w) => /^[A-Za-z0-9]{2,5}$/.test(w) && !mixed.includes(w)) : [];
   const codes = [...new Set([...mixed, ...plain].map((w) => w.toUpperCase()))].slice(0, 6);
-  return { trigger, gps, codes, rest: s };
+  return { trigger, gps, codes, rest: s, lostChild: LOST_CHILD.test(String(text || '').normalize('NFKC')) };
 }
+
+/** A text that says a child is lost: the help page's fallback ("lost child"), "lost kid", "niño perdido", "perdí a mi hijo". */
+const LOST_CHILD = /(^|[^A-Za-z])(lost (child|kid)|ni[nñ][oa] perdid[oa]|perd[ií] a mi hij[oa])(?![A-Za-z])/i;
 
 /** The text without the code that matched, for the description. */
 function without(rest, code) {
@@ -147,6 +164,8 @@ async function hasPlaceCols() {
   }
   return placeCols;
 }
+/** The location line from describe(): its words when a place is near, else the position and "No mapped place ...". */
+const posWords = (gps, d) => (d && d.text ? (d.place_id ? d.text : `Phone position ${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}. ${d.text}`) : `Phone position ${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}`).slice(0, 255);
 /** Where the place is, in words patrol uses: the place's name and the code the guest gave. */
 const placeWords = (p, code) => `${p.name}${code ? ` (sign ${code})` : ''}`.slice(0, 255);
 
@@ -289,10 +308,22 @@ async function inbound(line, params, base) {
   if (!from) return { reply: null, ignored: 'no sender' };
   const key = keyOf(from);
   const sid = /^[A-Za-z0-9]{10,40}$/.test(String(params.MessageSid || params.SmsSid || '')) ? String(params.MessageSid || params.SmsSid) : null;
+  // The MessageSid is claimed first, so a text Twilio sends twice at once is taken once, and given back when handling it
+  // fails, so Twilio's retry (the fallback address) is taken and a text for help is never lost.
   if (sid) {
     const [r] = await pool.query("INSERT IGNORE INTO dispatch_sms_log (tenant_id, direction, message_sid, at) VALUES (?, 'in', ?, UTC_TIMESTAMP())", [tenantId, sid]);
     if (!r.affectedRows) return { reply: null, duplicate: true }; // Twilio sent this one already (a fallback retry)
   }
+  try {
+    return await handle(line, params, base, from, key);
+  } catch (err) {
+    if (sid) await pool.query("DELETE FROM dispatch_sms_log WHERE tenant_id = ? AND direction = 'in' AND message_sid = ?", [tenantId, sid]).catch(() => {});
+    throw err;
+  }
+}
+
+async function handle(line, params, base, from, key) {
+  const tenantId = line.tenant_id;
   // Now and then, forget the 7-day-old counts.
   if (Math.random() < 0.02) pool.query('DELETE FROM dispatch_sms_log WHERE at < UTC_TIMESTAMP() - INTERVAL 7 DAY').catch(() => {});
   const intent = require('../routes/twilioinbound').intentOf(params);
@@ -305,15 +336,20 @@ async function inbound(line, params, base) {
     }
     if (intent === 'start') {
       const [d] = await pool.query('DELETE FROM dispatch_sms_optouts WHERE tenant_id = ? AND phone_key = ?', [tenantId, key]);
-      if (d.affectedRows) {
-        if (open) await note(pool, tenantId, open.call_id, 'Guest texted START: patrol can text this phone again.');
-        return { reply: null, started: true }; // Twilio sends its own START reply
-      }
-      if (!open) return { reply: null }; // a plain "yes" or "start" with nothing to join
+      if (d.affectedRows && open) await note(pool, tenantId, open.call_id, 'Guest texted START: patrol can text this phone again.');
+      if (!open) return { reply: null, started: Boolean(d.affectedRows) }; // Twilio sends its own START reply; nothing to join
+      // With an open call the word goes on it too ("yes" may be an answer to patrol).
     }
     const words = String(params.Body || '').slice(0, 1600);
     const photos = photosIn(params);
-    const p = parse(words);
+    const area = await one(pool, 'SELECT map_lat AS lat, map_lng AS lng FROM tenants WHERE id = ?', [tenantId]).catch(() => null);
+    const p = parse(words, area && area.lat !== null && area.lng !== null ? { lat: Number(area.lat), lng: Number(area.lng) } : null);
+    // A phone that texted STOP is still heard: every text is taken as a request for help. Replies go to it again only
+    // after START, or HELP (or AYUDA, PATROL) again.
+    if (p.trigger) {
+      const [d] = await pool.query('DELETE FROM dispatch_sms_optouts WHERE tenant_id = ? AND phone_key = ?', [tenantId, key]);
+      if (d.affectedRows && open) await note(pool, tenantId, open.call_id, `Guest texted ${p.trigger}: patrol can text this phone again.`);
+    }
     if (open) return followUp(line, open, p, words, photos);
     return firstText(line, from, key, p, words, photos, base);
   });
@@ -334,10 +370,19 @@ async function followUp(line, th, p, words, photos) {
   if (p.gps) {
     await setGps(tenantId, call.id, line.timezone, p.gps);
     const d = await require('./places').describe(pool, tenantId, p.gps.lat, p.gps.lng, p.gps.accuracy).catch(() => null);
-    if (d && d.text && !hit) await setPlace(tenantId, call.id, d.place_id ? { id: d.place_id } : null, d.text.slice(0, 255));
+    if (d && d.text && !hit) await setPlace(tenantId, call.id, d.place_id ? { id: d.place_id } : null, posWords(p.gps, d));
     await note(pool, tenantId, call.id, `Guest texted their position${p.gps.accuracy !== null ? ` (within about ${p.gps.accuracy} m)` : ''}`);
   }
   await addPhotos(tenantId, call.id, photos);
+  if (p.lostChild && call.call_type !== 'lost_child') {
+    // A text that says a child is lost makes the call a Lost child call, High, and alerts patrol on duty as one.
+    await pool.query("UPDATE dispatch_calls SET call_type = 'lost_child', priority = IF(priority IN ('low','normal'), 'high', priority) WHERE tenant_id = ? AND id = ?", [tenantId, call.id]);
+    await note(pool, tenantId, call.id, 'Guest texted that a child is lost. This is now a Lost child call.');
+    const D = require('../routes/dispatch');
+    const now = await one(pool, 'SELECT * FROM dispatch_calls WHERE tenant_id = ? AND id = ?', [tenantId, call.id]);
+    await D.alertNewRequest(tenantId, { id: call.id, call_no: D.callNo(now), flood_of: null }, now.location, 'sms', { lostChild: true });
+    return { reply: null, call_id: call.id, joined: true };
+  }
   await alertNewText(tenantId, call);
   return { reply: null, call_id: call.id, joined: true };
 }
@@ -348,21 +393,20 @@ async function firstText(line, from, key, p, words, photos, base) {
   const lang = p.trigger === 'AYUDA' || isSpanish(words) ? 'es' : 'en';
   const hit = p.codes.length ? await findCode(tenantId, p.codes) : null;
   const described = p.gps ? await require('./places').describe(pool, tenantId, p.gps.lat, p.gps.lng, p.gps.accuracy).catch(() => null) : null;
-  const location = hit ? placeWords(hit.place, hit.code)
-    : described && described.text ? described.text.slice(0, 255)
-      : p.gps ? `Phone position ${p.gps.lat.toFixed(5)}, ${p.gps.lng.toFixed(5)}`
-        : 'Not given yet (Text HELP)';
+  const location = hit ? placeWords(hit.place, hit.code) : p.gps ? posWords(p.gps, described) : 'Not given yet (Text HELP)';
   const rest = without(p.rest, hit && hit.code);
   const description = (rest || (photos.length ? 'Sent a photo' : '') || null);
   // Repeats from one phone are grouped on the board like guest help requests (never refused).
   const sender = { device: D.senderKey(tenantId, 'dev', `sms:${key}`), ip: D.senderKey(tenantId, 'ip', `sms:${key}`) };
   const tenant = { id: tenantId, timezone: line.timezone };
-  const made = await D.createCall(tenant, { location, description: description ? description.slice(0, 500) : null, caller_phone: from, gps_lat: p.gps ? p.gps.lat : null, gps_lng: p.gps ? p.gps.lng : null, priority: 'normal' }, { source: 'sms', sender });
+  // A text that says a child is lost is a Lost child call at High, the same call type the help page uses.
+  const made = await D.createCall(tenant, { location, description: description ? description.slice(0, 500) : null, caller_phone: from, gps_lat: p.gps ? p.gps.lat : null, gps_lng: p.gps ? p.gps.lng : null,
+    priority: p.lostChild ? 'high' : 'normal', call_type: p.lostChild ? 'lost_child' : null }, { source: 'sms', sender });
   const token = crypto.randomBytes(16).toString('hex');
   await pool.query('UPDATE dispatch_calls SET locate_token = ?, locate_sent_at = ? WHERE tenant_id = ? AND id = ?', [token, nowIn(line.timezone), tenantId, made.id]);
   if (p.gps) await setGps(tenantId, made.id, line.timezone, p.gps);
   if (hit) await setPlace(tenantId, made.id, hit.place, location);
-  else if (described && described.text) await setPlace(tenantId, made.id, described.place_id ? { id: described.place_id } : null, location);
+  else if (p.gps && described && described.text) await setPlace(tenantId, made.id, described.place_id ? { id: described.place_id } : null, location);
   await pool.query(`INSERT INTO dispatch_sms_threads (tenant_id, call_id, phone, phone_key, help_number, lang, opened_at, last_at)
     VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`, [tenantId, made.id, from, key, line.help_number, lang]);
   const call = await one(pool, 'SELECT * FROM dispatch_calls WHERE tenant_id = ? AND id = ?', [tenantId, made.id]);
@@ -370,12 +414,9 @@ async function firstText(line, from, key, p, words, photos, base) {
   if (text) await require('./guestmsg').fromGuest(pool, call, text, 'sms');
   if (hit) await note(pool, tenantId, made.id, `Guest texted sign code ${hit.code}`);
   await addPhotos(tenantId, made.id, photos);
-  // Patrol on duty hears about a new text at once, the same as a guest page request or staff's Guest needs help here.
-  await D.alertNewRequest(tenantId, made, location, 'sms');
-  if (sender.alert) {
-    const on = await require('./patrolops').onDutyIds(pool, tenantId).catch(() => []);
-    if (on.length) require('./push').notifyStaff(tenantId, on, { title: 'Text HELP: many requests from one phone', body: 'They are grouped on the dispatch board. Check each place listed.', url: '#/patrol/dispatch', tag: `flood-${sender.alert}` }).catch(() => {});
-  }
+  // Patrol on duty hears about a new text at once, the same as a guest page request or staff's Guest needs help here
+  // (a lost child always on its own; a phone's repeats rate limited per group, never silenced).
+  await D.alertNewRequest(tenantId, made, location, 'sms', { lostChild: p.lostChild });
   // The reply, unless the phone has texted STOP (Twilio would refuse it) or a cap is reached.
   const th = { tenant_id: tenantId, call_id: made.id, phone_key: key };
   const ok = await reserve(th);
@@ -424,5 +465,5 @@ async function photoUrl(tenantId, callId, n) {
 
 module.exports = {
   STRINGS, TRIGGERS, CALL_CAP, HOUR_CAP, WINDOW_HOURS, LOCATE_HOURS,
-  says, normalNumber, keyOf, isSpanish, parse, without, lineOf, lineByNumber, outbound, reserve, inbound, closed, threadView, photoUrl, mediaOk, optedOut,
+  says, normalNumber, keyOf, isSpanish, parse, without, LOST_CHILD, lineOf, lineByNumber, outbound, reserve, inbound, closed, threadView, photoUrl, mediaOk, optedOut,
 };

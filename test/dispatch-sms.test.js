@@ -199,7 +199,7 @@ test('signature: Twilio\'s documented example, a valid post, a bad one and an un
   assert.equal((await callsOf(A.id, phone)).length, before, 'nothing refused made a call');
 });
 
-test('routing: a text goes to the mountain whose help number it was sent to; an unknown number gets 200 and is dropped', async () => {
+test('routing: a text goes to the mountain whose help number it was sent to; an unknown number is told to call 911 in an emergency', async () => {
   const phone = guestPhone();
   ok(await text({ From: phone, To: LINE_A, Body: 'HELP at A' }));
   ok(await text({ From: phone, To: LINE_B, Body: 'HELP at B' }));
@@ -209,8 +209,18 @@ test('routing: a text goes to the mountain whose help number it was sent to; an 
   const before = (await q('SELECT COUNT(*) AS n FROM dispatch_calls WHERE caller_phone = ?', [phone]))[0].n;
   const unknown = await text({ From: phone, To: '+19995550123', Body: 'HELP' });
   assert.equal(unknown.status, 200);
-  assert.equal(unknown.reply, null);
+  assert.equal(unknown.reply, 'If this is an emergency, call 911.');
   assert.equal((await q('SELECT COUNT(*) AS n FROM dispatch_calls WHERE caller_phone = ?', [phone]))[0].n, before);
+  // A mountain that is not active: the same answer, and no call.
+  const C = await mountain('susp');
+  const lineC = `+1215${String(Date.now() + 7).slice(-7)}`;
+  ok(await api('PUT', '/patrol/text-help', { token: C.owner, body: { help_number: lineC } }));
+  await q("UPDATE tenants SET status = 'suspended' WHERE id = ?", [C.id]);
+  const susp = await text({ From: phone, To: lineC, Body: 'HELP my friend fell' });
+  assert.equal(susp.status, 200);
+  assert.equal(susp.reply, 'If this is an emergency, call 911.');
+  assert.equal((await q('SELECT COUNT(*) AS n FROM dispatch_calls WHERE tenant_id = ?', [C.id]))[0].n, 0);
+  assert.match((await text({ From: phone, To: '+19995550123', Body: 'AYUDA me caí' })).reply, /^Si es una emergencia, llame al 911\./);
 });
 
 test('the first text makes a call, source sms, with the Locate caller link in the reply', async () => {
@@ -364,12 +374,14 @@ test('STOP is recorded and nothing more is texted from the help line; START turn
   assert.equal(textsTo(phone).length, before, 'not texted after STOP');
   const ev = await q('SELECT note FROM dispatch_events WHERE call_id = ? ORDER BY id', [c.id]);
   assert.ok(ev.some((e) => /texted STOP/.test(e.note || '')), 'dispatch is told to call instead');
-  // A request for help from that phone is still taken (with no reply, which Twilio would refuse).
+  // Any text from that phone is still taken as a request for help, with no reply (Twilio would refuse it).
   ok(await api('POST', `/patrol/dispatch/${c.id}/events`, { token: A.owner, body: { kind: 'closed' } }), 201);
-  const r = await text({ From: phone, To: LINE_A, Body: 'HELP please' });
+  const r = await text({ From: phone, To: LINE_A, Body: 'please my leg' });
   assert.equal(r.reply, null);
   const c2 = await latestCall(A.id, phone);
   assert.notEqual(c2.id, c.id);
+  assert.equal(c2.description, 'please my leg');
+  assert.equal((await q('SELECT COUNT(*) AS n FROM dispatch_sms_optouts WHERE tenant_id = ? AND phone_key = ?', [A.id, phone.slice(2)]))[0].n, 1, 'still opted out');
   // START (exact word, no Advanced Opt-Out field) re-enables texts.
   await text({ From: phone, To: LINE_A, Body: 'start' });
   assert.equal((await q('SELECT COUNT(*) AS n FROM dispatch_sms_optouts WHERE tenant_id = ? AND phone_key = ?', [A.id, phone.slice(2)]))[0].n, 0);

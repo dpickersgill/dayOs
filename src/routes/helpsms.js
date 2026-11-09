@@ -6,7 +6,8 @@
 //   POST /sms/inbound   Twilio's "A message comes in" webhook for every mountain's help number (form-encoded). Every
 //                       request must carry Twilio's signature (X-Twilio-Signature, made with TWILIO_AUTH_TOKEN over
 //                       PUBLIC_URL plus this path and the posted fields); anything else gets 403. A text to a number no
-//                       mountain uses gets an empty 200 and is dropped. The answer is TwiML: the reply, or nothing.
+//                       mountain uses, or to a mountain that is not active,
+//                       is not taken; the answer says "If this is an emergency, call 911." The answer is TwiML: the reply, or nothing.
 // router, at /api/v1/patrol (patrol and managers):
 //   GET/PUT /text-help                   the mountain's help number and patrol phone (Patrol settings)
 //   GET /dispatch/:id/sms                the call's text conversation facts: phone, language, STOP, texts used, photos
@@ -70,14 +71,18 @@ const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 const twiml = (res, text) => res.type('text/xml').set('Cache-Control', 'no-store')
   .send(`<?xml version="1.0" encoding="UTF-8"?><Response>${text ? `<Message>${esc(text)}</Message>` : ''}</Response>`);
 
+const NO_LINE = (body) => (HL.isSpanish(body) || /^\s*ayuda\b/i.test(body) ? 'Si es una emergencia, llame al 911. If this is an emergency, call 911.' : 'If this is an emergency, call 911.');
 const publicRouter = express.Router();
 publicRouter.post('/sms/inbound', express.urlencoded({ extended: false, limit: '64kb', parameterLimit: 200 }), async (req, res) => {
   if (!process.env.TWILIO_AUTH_TOKEN) return res.status(404).type('text/plain').send('Text messages are not set up');
   if (!signedByTwilio(req)) return res.status(403).type('text/plain').send('Not signed by Twilio');
   const b = req.body || {};
+  // A text to a number no mountain uses, or to a mountain that is not active, is not taken as a call (no one would see
+  // it), but the sender is always told where to turn.
   const line = await HL.lineByNumber(Array.isArray(b.To) ? b.To[0] : b.To);
-  if (!line) return twiml(res, null); // a number no mountain uses: nothing to do
-  if (line.status !== 'active') { logFailure({ job: 'help_sms', tenant: line.tenant_id, message: 'text to the help line of a mountain that is not active' }); return twiml(res, null); }
+  const body = String(Array.isArray(b.Body) ? b.Body[0] : b.Body || '');
+  if (!line) return twiml(res, NO_LINE(body));
+  if (line.status !== 'active') { logFailure({ job: 'help_sms', tenant: line.tenant_id, message: 'text to the help line of a mountain that is not active' }); return twiml(res, NO_LINE(body)); }
   const params = Object.fromEntries(Object.entries(b).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]));
   try {
     const out = await HL.inbound(line, params, config.stripe.publicUrl || `${req.protocol}://${req.get('host')}`);
