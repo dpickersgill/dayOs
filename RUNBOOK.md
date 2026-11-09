@@ -330,6 +330,9 @@ Upgrading needs `npm run migrate` (adds the access level column and the rules ta
 - QR codes on signs: `/help/<mountain>?c=<sign code>` once help/places has mapped the signs, or `?loc=<place name>` until then.
 - The status page's limits per request: `HELP_ANSWER_LIMIT` (60 answers in 10 minutes), `HELP_POSITION_LIMIT` (6 positions a minute), `HELP_MESSAGE_LIMIT` (20 replies in 10 minutes), `HELP_PASS_LIMIT` (3 pass lookups in 10 minutes) and `HELP_PASS_IP_LIMIT` (10 an hour per address). Leave them as they are in production. A request itself is never refused.
 - A guest who says the page is stuck: they can call patrol or 911 from it at any time. Check the call on the board; their messages and answers are in the call's From the guest section.
+- Set the patrol phone. When a new request reaches no one on duty (nobody signed in, or no phone took the alert), every owner and manager gets the push and the patrol phone gets a text; the call shows a red "No one on duty was alerted" banner on the board. Without a patrol phone or texts set up, only the push and the banner happen.
+- Requests grouped into a flood alert patrol at most once per flood every 30 seconds (`HELP_FLOOD_ALERT_GAP_S`, leave it in production). A lost child always alerts at once.
+- Upgrading needs `npm run migrate` (adds `dispatch_calls.same_phone_of`, the link from a request to an earlier one from the same phone).
 
 ## Terrain park
 Upgrading needs `npm run migrate` (creates park_areas, park_features, park_placements and park_inspections). Park crew sign in with the `staff` role; managers and owners can do everything. To make a past day editable for the crew there is no switch: a manager makes the change. `node db/reset.js <slug> --yes` also clears the park, and `node db/demo.js <slug>` loads 12 demo features placed for today.
