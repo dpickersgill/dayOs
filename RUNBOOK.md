@@ -326,7 +326,7 @@ Day to day: directors open Patrol, Follow-up to approve or skip held cases. Emai
 Upgrading needs `npm run migrate` (adds the access level column and the rules table; roster members are mapped from rank once). After deploying, sign in as the owner, open Patrol, then Access levels, and set anyone who should be Approver or Host. To undo someone's lockout, an owner or system manager can always open Access levels, since those logins are always Admin.
 
 ## Guest help page (help/guest)
-- Turn it on per mountain under Patrol, Dispatch, Guest help page. The patrol phone (guests see Call patrol) and the help number (Send by text instead, answered by Text HELP, and printed on the sign sheets) are set in one place: Settings, Patrol, Patrol settings, Text HELP. The patrol phone can be set without a help number. Without a help number the page shows no text option when it cannot reach us; it keeps trying and Call 911 stays on screen.
+- Turn it on per mountain under Patrol, Dispatch, Guest help page. The patrol phone (guests see Call patrol) and the number guests text (Send by text instead, answered by Text HELP, and printed on the sign sheets: the shared Verdynt/OS number by default, or the mountain's own) are set in one place: Settings, Patrol, Patrol settings, Text HELP. The patrol phone can be set without a help number. Send by text instead always starts with HELP and the mountain's tag, so it reaches this mountain on the shared number. With no number for texts the page shows no text option when it cannot reach us; it keeps trying and Call 911 stays on screen.
 - QR codes on signs: `/help/<mountain>?c=<sign code>` once help/places has mapped the signs, or `?loc=<place name>` until then.
 - The status page's limits per request: `HELP_ANSWER_LIMIT` (60 answers in 10 minutes), `HELP_POSITION_LIMIT` (6 positions a minute), `HELP_MESSAGE_LIMIT` (20 replies in 10 minutes), `HELP_PASS_LIMIT` (3 pass lookups in 10 minutes) and `HELP_PASS_IP_LIMIT` (10 an hour per address). Leave them as they are in production. A request itself is never refused.
 - A guest who says the page is stuck: they can call patrol or 911 from it at any time. Check the call on the board; their messages and answers are in the call's From the guest section.
@@ -341,11 +341,92 @@ Upgrading needs `npm run migrate` (creates park_areas, park_features, park_place
 ## Upgrading to mountain operations
 This release adds new tables (grooming, snow, weather, work orders, recurring jobs, inspections, downtime, handoffs). Run `npm run migrate` against the production database before or right after deploying. It is safe to run twice. Nothing existing is changed.
 
-## Text HELP set-up (once per mountain)
+## Text HELP: the shared number (once, for every mountain)
+
+Every mountain uses one shared Verdynt/OS help number for Text HELP unless it switches to its own (Patrol settings, Text
+HELP). Set it up once. Until it is set, a mountain on the shared number has no number for texts: its signs say Scan this
+code and the guest page offers no text option.
+
+How a text finds its mountain (FEATURES.md, "Text HELP: the shared number"): the mountain's tag at the start of the text
+("HELP BR R7", printed on every sign), else the phone's open call, else a position in the text within 50 km of a
+mountain's map point, else the guest is asked which ski area and the text waits. Nothing is ever routed by a guess.
+
+### 1. Buy one toll-free number under Verdynt Consulting Group
+Twilio console, Phone Numbers, Manage, Buy a number. Country United States, type Toll-free, with SMS and MMS, on the
+account that already sends Verdynt/OS texts. Write it down as +18xx... for step 5.
+
+### 2. One Messaging Service with the webhook
+Messaging, Services, Create Messaging Service. Name it "Verdynt/OS Text HELP". Add the number to its Sender Pool. Under
+Integration choose **Send a webhook**: Request URL `https://<PUBLIC_URL host>/api/v1/public/sms/inbound`, HTTP POST
+(exactly `PUBLIC_URL` plus that path), and the same address as the Fallback URL. It is the same address every mountain's
+own number uses: Verdynt/OS tells the shared number apart by the number the text was sent To.
+
+### 3. Advanced Opt-Out, with AYUDA and PATROL
+In the service, open the **Opt-Out** tab and turn on Advanced Opt-Out. Keep STOP and START. Set the Help reply to:
+
+> Ski patrol has your message. If it is life threatening, call 911. Patrol will text you to ask which ski area you are at. Reply STOP to stop texts.
+
+In the Opt-In section add AYUDA and PATROL as opt-in keywords (HELP is reserved by Twilio and cannot be added). STOP to
+the shared number counts for the whole shared number: no mountain texts that phone from it until START. Its texts still
+reach a patrol; the call says to call them.
+
+### 4. Toll-free verification
+Submit toll-free verification for the number. The business is Verdynt Consulting Group. Then:
+- Use case category: Customer Care. Monthly volume: the band that fits every mountain on the shared number together.
+- Use case description: "Customer care for ski patrol at partner ski areas. Guests at a partner ski area text us to ask
+  that ski area's patrol for help. We reply with safety instructions, ask which ski area they are at when they did not
+  say, send a link to share their location, and send updates about their request. Customer care only. No marketing."
+- Opt-in type: Via Text. Opt-in description: "Every conversation starts with the guest. They text HELP, PATROL or AYUDA
+  to the number printed on the partner ski area's trail map, ticket backs and lift tower signs: 'Need ski patrol? Text
+  HELP BR to <number>.' We reply only to a guest who texted us, only about their request, and stop when the request is
+  closed. Reply STOP to stop texts." Opt-in image: a printed sign or trail map showing that line.
+- Sample messages:
+  1. "Ski patrol: which ski area are you at? Reply with its name, or the code on the nearest sign. Or tap this link to send your location: https://<PUBLIC_URL host>/help-locate/3f9c2a7d. If it is life threatening, call 911."
+  2. "Blue Ridge ski patrol has your message. If it is life threatening, call 911. Tap this link to send your location: https://<PUBLIC_URL host>/locate/3f9c2a7d. Or reply with the code on the nearest sign or lift tower."
+  3. "Ski patrol: Reply 1 for Blue Ridge, 2 for Blue Mountain. If it is life threatening, call 911."
+  4. "Blue Ridge ski patrol: a patroller is on the way. Stay where you are."
+  5. "Patrol has closed your request. Reply HELP if you need patrol again."
+
+Until it is approved, guests' texts still reach patrol but no reply goes out.
+
+### 5. Enter it in the console, and turn on the job
+Platform console, Shared help number: enter the number and save (or set `SHARED_HELP_NUMBER` in Cloud Run; the console's
+value wins). Then run `bash scripts/help-texts-job.sh` once: it adds the every-minute job that texts a waiting guest again
+after 3 minutes and closes a request after 2 hours with "If you still need help, call 911 or the ski area." (The 5-minute
+guests job runs it too, as a backup.)
+
+### 6. Watch for texts waiting for a ski area
+The console's list of mountains shows **Help texts waiting for a ski area** when a guest has not said where they are. The
+guest has been asked, and is asked again after 3 minutes. If the texts make it clear (a ski area named in a way the
+matching missed, a trail you know), choose Send to a mountain: the call is made there with every text in order and a
+note that you sent it by hand, and the guest gets that mountain's first reply. If it is not clear, leave it. Never guess.
+
+### 7. Test it
+1. Print a sign sheet at a test mountain: the code shows the tag ("BR R7") and the shared number.
+2. Text `HELP BR R7` to the shared number: the call lands at that mountain with the sign's place.
+3. From a new phone text `HELP` alone: the reply asks which ski area. Reply with the mountain's name (a small typo is
+   fine): the call lands there with both texts. Try the link in the reply too.
+4. Text `STOP`, then `HELP BR`: the call is made, nothing is texted back. Text `START`.
+
+### Tags
+Each mountain's tag is 1 to 3 letters, unique, given from its name the first time it is needed (Blue Ridge: BR). Common
+short words (I, MY, LEG, SOS and others) are never tags. The owner changes it in Patrol settings, Text HELP, and the
+platform operator in the console (the mountain, Text HELP, Change the tag). Changing it changes every sign and the trail
+map line: the mountain must print its signs again. A text with the old tag waits for a ski area and gets asked.
+
+### How a mountain switches to its own number
+Set up the number as in "Text HELP: a mountain's own number" below (steps 1 to 4), then Patrol settings, Text HELP, choose
+**Use our own number**, enter it and save. The sign sheets, the guest page and the trail map line change to the new
+number at once: print the signs again. The tagged code keeps working on the own number, and a guest who still texts the
+shared number with the mountain's tag or name still reaches its patrol. Choosing **Use the shared Verdynt/OS number**
+again switches back; the own number is kept for later.
+
+## Text HELP: a mountain's own number (optional)
 
 Guests text HELP, PATROL or AYUDA to the mountain's help number and reach patrol (FEATURES.md, Text HELP). All mountains use
-the one Twilio account that already sends Verdynt/OS texts (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`). Each mountain gets
-its own number. Plan a week per mountain, start to finish, most of it waiting for Twilio's review.
+the one Twilio account that already sends Verdynt/OS texts (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`). Most mountains use
+the shared number above; a mountain that wants its own number gets one here. Plan a week, start to finish, most of it
+waiting for Twilio's review.
 
 **Which number: toll-free, with toll-free verification.** It is the faster and simpler path:
 
@@ -428,7 +509,8 @@ messages and opt-in text, on the step 2 Messaging Service. Do not choose Emergen
 special use case with extra requirements.
 
 ### 5. Enter the number in Verdynt/OS
-Sign in as the mountain's owner or patrol director: Settings, Patrol, Patrol settings, Text HELP. Enter the help number,
+Sign in as the mountain's owner or patrol director: Settings, Patrol, Patrol settings, Text HELP. Choose Use our own
+number and enter the help number,
 and the patrol phone if guests may call patrol (the guest help page shows it as Call patrol, and it is added to the first
 reply). Save. The sign sheets and the guest help page read the same two numbers. Each number can belong to one
 mountain only. Give the mountain the line for its trail map and ticket back from the same panel.

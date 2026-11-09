@@ -308,6 +308,8 @@ made the account and its permissions:
 | `POSTMARK_SERVER_TOKEN`, `MAIL_FROM` | Email (tickets, reminders, patrol follow-ups, weekly report, messages) |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | Text messages |
 | `HELP_SMS_CALL_CAP`, `HELP_SMS_HOURLY_CAP` | Text HELP: texts out per call (default 20) and per mountain per hour (default 300). Each mountain's help number is set in the app; see "Text HELP set-up" below. |
+| `SHARED_HELP_NUMBER` | Text HELP: the shared Verdynt/OS help number (E.164), used when the console has none saved. Every mountain uses it unless it switches to its own. |
+| `HELP_SMS_SHARED_HOURLY_CAP`, `HELP_PENDING_PHONE_CAP` | Text HELP on the shared number: texts out an hour across every mountain (default 1000), and "which ski area" replies to one phone an hour (default 6). |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `PUBLIC_URL` | Stripe: the platform's own account (mountains' Verdynt/OS subscriptions). Its webhook sends `checkout.session.completed`, `checkout.session.expired`, `customer.subscription.*`, `invoice.*`, `charge.refunded` and `charge.dispute.*` (refunds given in the Stripe dashboard and disputes, 2026.11.11) to `/api/v1/stripe/webhook`. |
 | `STRIPE_CONNECT_WEBHOOK_SECRET` | Guest card payments (shop, lessons, date changes, patrol giving) go to each mountain's own Stripe account through Stripe Connect. This is the signing secret of the Connect webhook. See "Guest card payments (Stripe Connect)" below. |
 | `STRIPE_GUEST_FALLBACK` | Leave unset. In production a mountain takes guest card payments only once it has connected its own Stripe account. `on` would let unconnected mountains take payments into the platform's account (tests and local runs only). |
@@ -347,10 +349,20 @@ Text HELP (2026.11.15) needs nothing new in Cloud Run: it uses `TWILIO_ACCOUNT_S
 `PUBLIC_URL` plus `/api/v1/public/sms/inbound`, never the Host header the load balancer passes on). The migration adds
 four tables and the `sms` call source; it is safe to run twice.
 
-Each mountain then needs its own number, registered and pointed at Verdynt/OS: RUNBOOK.md, "Text HELP set-up", has the
-steps (buy a toll-free number, a Messaging Service with the webhook, Advanced Opt-Out and the HELP reply, toll-free
-verification with the sample messages, the number in Patrol settings, and a test). Allow about a week per mountain,
-mostly Twilio's review (about 3 business days for toll-free; 1 to 3 weeks for 10DLC).
+**The shared number (help/shared), once.** Every mountain uses one shared Verdynt/OS help number by default. Set it up once:
+one toll-free number under Verdynt Consulting Group; one Messaging Service with the webhook above (as Request and
+Fallback URL); Advanced Opt-Out with AYUDA and PATROL as opt-in keywords; toll-free verification describing "customer
+care for ski patrol at partner ski areas", with sample messages that include the which-ski-area reply. Then enter it in
+the console (Shared help number) or set `SHARED_HELP_NUMBER`, and run `bash scripts/help-texts-job.sh` once for the
+every-minute job (`POST /api/v1/internal/jobs/help-texts`). RUNBOOK.md, "Text HELP: the shared number", has each step and
+the exact words. The migration step `help-shared` adds `platform_settings`, `tenants.help_tag`,
+`patrol_help_lines.help_mode`, `help_pending`, `help_shared_optouts` and `help_shared_log`; it is safe to run twice.
+
+**A mountain's own number (optional).** A mountain that wants its own number gets one registered and pointed at
+Verdynt/OS: RUNBOOK.md, "Text HELP: a mountain's own number", has the steps (buy a toll-free number, a Messaging Service
+with the webhook, Advanced Opt-Out and the HELP reply, toll-free verification with the sample messages, Use our own number
+in Patrol settings, and a test). Allow about a week, mostly Twilio's review (about 3 business days for toll-free; 1 to 3
+weeks for 10DLC). RUNBOOK.md, "How a mountain switches to its own number", covers the switch and back.
 
 ## Putting the website live
 
