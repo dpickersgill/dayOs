@@ -103,6 +103,10 @@ const REGISTRY = [
   { table: 'incident_search', group: 'patrol', by: { phone: ['phone'] }, erase: { keep: KEEP_PATROL } },
   { table: 'patrol_witness_links', group: 'patrol', by: { email: ['email'], phone: ['phone'] }, erase: { keep: KEEP_PATROL } },
   { table: 'dispatch_calls', group: 'patrol', by: { phone: ['caller_phone'] }, erase: { keep: KEEP_PATROL } },
+  // help/sms: a call that came by text keeps the guest's phone, language and photo addresses with the call (dispatch
+  // retention); a STOP to a mountain's help line is kept so that line never texts the phone again.
+  { table: 'dispatch_sms_threads', group: 'patrol', by: { phone: ['phone'] }, erase: { keep: KEEP_PATROL } },
+  { table: 'dispatch_sms_optouts', by: { phone: ['phone_key'] }, erase: { keep: 'Kept so the patrol help line never texts this phone again after it texted STOP.' } },
   // A patrol follow-up email: the address goes, the patrol record stays.
   { table: 'followups', group: 'patrol', by: { email: ['to_email'] }, erase: { set: { to_email: '' } } },
   // Logins and staff are never anonymised here (the route refuses); listed so the export shows them.
@@ -127,6 +131,8 @@ const NOT_GUESTS = {
   // never a guest), and the conditions writer's settings. No guest column in either.
   ai_proposals: 'a draft for staff to approve, made from the mountain\u2019s own conditions, never a guest', conditions_writer_settings: 'a mountain setting',
   // ai/brief: the morning brief is about the day and goes to staff; a brief and the record of who was sent it are kept 30 days.
+  // help/sms: the mountain's Text HELP number and patrol phone, a mountain setting.
+  patrol_help_lines: 'a mountain setting (its Text HELP number and patrol phone)',
   brief_prefs: 'a staff login\u2019s morning brief setting', morning_briefs: 'the day\u2019s morning brief for staff (counts, no guest names), kept 30 days', brief_sends: 'which staff were sent the morning brief, kept 30 days',
 };
 

@@ -45,6 +45,8 @@ const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/
 test('the AI files name no patrol or patient table, except the brief\'s one aggregate count of cases', () => {
   const tables = patrolTables();
   assert.ok(tables.includes('incidents') && tables.includes('incident_patients') && tables.length > 15, `found ${tables.length} patrol tables`);
+  // help/sms: Text HELP's tables are patrol and dispatch data too, and are checked like the rest.
+  for (const t of ['patrol_help_lines', 'dispatch_sms_threads', 'dispatch_sms_optouts', 'dispatch_sms_log']) assert.ok(tables.includes(t), `${t} is a patrol table`);
   for (const f of FILES) {
     let src = code(read(f));
     if (f === 'src/lib/briefdata.js') {
@@ -87,4 +89,17 @@ test('a patrol case\'s words never reach a brief, a draft or a snapshot: the run
   const snaps = read('test/snapshots.test.js');
   assert.match(snaps, /no snapshot holds a person.s name, email, phone or id/);
   assert.match(read('test/evals/conditions.test.js'), /patient\|incident\|injur/);
+});
+
+test('help requests by text (help/sms) never reach AI: no AI file, nor the guest or staff assistant, reads them', () => {
+  const more = ['src/lib/assistant.js', 'src/lib/assistanttools.js', 'src/routes/assistant.js'].filter((f) => fs.existsSync(path.join(ROOT, f)));
+  for (const f of [...FILES, ...more]) {
+    const src = code(read(f));
+    for (const t of ['patrol_help_lines', 'dispatch_sms_threads', 'dispatch_sms_optouts', 'dispatch_sms_log', 'dispatch_messages']) assert.ok(!new RegExp(`\\b${t}\\b`).test(src), `${f} names ${t}`);
+    for (const m of src.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)) assert.doesNotMatch(m[1], /helpline|helpsms|guestmsg/, `${f} requires ${m[1]}`);
+  }
+  // And the Text HELP files call no AI.
+  for (const f of ['src/lib/helpline.js', 'src/routes/helpsms.js']) {
+    for (const m of code(read(f)).matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)) assert.doesNotMatch(m[1], /assistant|brief|proposals|conditions|storyfill|anthropic/i, `${f} requires ${m[1]}`);
+  }
 });

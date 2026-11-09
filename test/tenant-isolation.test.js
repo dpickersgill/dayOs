@@ -86,6 +86,8 @@ const SIGNED = {
   'workforce.js': { router: '/workforce' }, 'workforcetime.js': { router: '/workforce' },
   // 2026.11.15: the first AI release. Prepared actions (Ready for you) and the morning brief.
   'ai.js': { router: '/ai' }, 'brief.js': { router: '/brief' },
+  // help/sms: Text HELP settings and a call's texts and photos.
+  'helpsms.js': { router: '/patrol' },
 };
 const PUBLIC = {
   'assistant.js': { publicRouter: '/public' }, 'availability.js': { publicRouter: '/public' }, 'dispatch.js': { publicRouter: '/public' }, 'family.js': { publicRouter: '/public' },
@@ -96,6 +98,8 @@ const PUBLIC = {
   'schoollineup.js': { publicRouter: '/public' }, 'schoolparents.js': { publicRouter: '/public' }, 'schoolpay.js': { publicRouter: '/public' }, 'shop.js': { publicRouter: '/public' },
   'waivers.js': { publicRouter: '/public' },
   'schoolsafety.js': { publicRouter: '/public' }, 'schoolmoney.js': { publicRouter: '/public' }, 'schoolgroups.js': { publicRouter: '/public' },
+  // help/sms: Twilio's inbound text webhook for every mountain's help number (refused without Twilio's signature).
+  'helpsms.js': { publicRouter: '/public' },
 };
 // Whole files, or single routers inside a file ('file.js:name'), left out of the sweep, and why.
 const EXEMPT = {
@@ -170,6 +174,20 @@ async function seedAi(M) {
   }
 }
 
+/** help/sms: a help number and a call that came by text, with a photo, so the sweep has A's texts to look for. */
+async function seedTextHelp(M) {
+  const [[t]] = await pool.query('SELECT timezone FROM tenants WHERE id = ?', [M.id]);
+  const now = require('../src/lib/util').nowIn(t.timezone);
+  const line = `+1484${String(M.id).padStart(7, '0').slice(-7)}`;
+  await pool.query('INSERT INTO patrol_help_lines (tenant_id, help_number, patrol_phone) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE help_number = VALUES(help_number)', [M.id, line, '+16105550100']);
+  const [[{ n }]] = await pool.query('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM dispatch_calls WHERE tenant_id = ? AND call_date = ?', [M.id, now.slice(0, 10)]);
+  const [c] = await pool.query("INSERT INTO dispatch_calls (tenant_id, call_date, seq, source, location, description, caller_phone, received_at) VALUES (?, ?, ?, 'sms', ?, ?, ?, ?)",
+    [M.id, now.slice(0, 10), n, `Isolation sign ${M.slug}`, `Isolation text help ${M.slug}`, '+16105550177', now]);
+  const media = `https://api.twilio.com/2010-04-01/Accounts/ACiso/Messages/MMiso${M.id}/Media/MEiso${M.id}`;
+  await pool.query(`INSERT INTO dispatch_sms_threads (tenant_id, call_id, phone, phone_key, help_number, lang, opened_at, last_at, photos)
+    VALUES (?, ?, '+16105550177', '6105550177', ?, 'en', UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?)`, [M.id, c.insertId, line, JSON.stringify([{ url: media, type: 'image/jpeg', at: now }])]);
+}
+
 test.before(async () => {
   const app = createApp();
   await new Promise((r) => { server = app.listen(0, r); });
@@ -186,6 +204,7 @@ test.before(async () => {
   // The AI release's rows (2026.11.15): a pending draft waiting for approval, and a stored morning brief, each with
   // words only A's data holds, so the sweep has something to find on the new routes.
   await seedAi(A);
+  await seedTextHelp(A);
   await loadTables();
 
   // Ids to try: a few real ones from every one of A's tables, minus any id that B legitimately owns in any table.
