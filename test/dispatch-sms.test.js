@@ -62,20 +62,12 @@ const callsOf = async (tenantId, phone) => q("SELECT * FROM dispatch_calls WHERE
 const textsTo = (phone) => sent.filter((s) => s.To === phone);
 const waitFor = async (fn, ms = 4000) => { const end = Date.now() + ms; for (;;) { const v = await fn(); if (v || Date.now() > end) return v; await new Promise((r) => setTimeout(r, 50)); } };
 
-/** The guest's messages on a call: help/guest's dispatch_messages once merged, the stand-in's memory before. */
-async function guestMessages(callId) {
-  const t = await q("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'dispatch_messages'");
-  if (t.length) return q('SELECT direction, channel, body FROM dispatch_messages WHERE call_id = ? ORDER BY id', [callId]);
-  return require('../src/lib/guestmsg')._log.filter((m) => m.call_id === Number(callId));
-}
-/** A sign with a code: in help/places' mountain_places once merged, in the stand-in's memory before. */
+/** The guest's messages on a call (help/guest's dispatch_messages, written through lib/guestmsg.js). */
+const guestMessages = (callId) => q('SELECT direction, channel, body FROM dispatch_messages WHERE call_id = ? ORDER BY id', [callId]);
+/** A sign with a code, in help/places' mountain_places. */
 async function addPlace(tenantId, p) {
-  const t = await q("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'mountain_places'");
-  if (t.length) {
-    const [r] = await pool.query("INSERT INTO mountain_places (tenant_id, kind, name, code, lat, lng, accuracy_m, marked_by, marked_at, active) VALUES (?, 'sign', ?, ?, ?, ?, 5, 1, UTC_TIMESTAMP(), 1)", [tenantId, p.name, p.code, p.lat, p.lng]);
-    return { id: r.insertId, ...p };
-  }
-  return require('../src/lib/places')._add(tenantId, p);
+  const [r] = await pool.query("INSERT INTO mountain_places (tenant_id, kind, name, code, lat, lng, accuracy_m, marked_by, marked_at, active) VALUES (?, 'sign', ?, ?, ?, ?, 5, 1, UTC_TIMESTAMP(), 1)", [tenantId, p.name, p.code, p.lat, p.lng]);
+  return { id: r.insertId, ...p };
 }
 
 async function mountain(tag) {
@@ -254,6 +246,7 @@ test('follow-ups join the open call as guest messages and the responders get a p
   assert.ok(alert, 'a phone alert');
   assert.deepEqual(alert.staffIds.map(Number), [Number(staff)]);
   assert.doesNotMatch(`${alert.message.title} ${alert.message.body}`, /chair 14/, 'never the guest\'s words on a locked screen');
+  assert.equal(pushes.length, 1, 'one alert for a text, not a second one from guestmsg.fromGuest');
   // A second text within the minute does not alert again.
   pushes.length = 0;
   await text({ From: phone, To: LINE_A, Body: 'cold' });
@@ -262,7 +255,7 @@ test('follow-ups join the open call as guest messages and the responders get a p
   const call = (await q('SELECT * FROM dispatch_calls WHERE id = ?', [c.id]))[0];
   await require('../src/lib/guestmsg').toGuest(pool, call, 'Patrol is on the way. Stay on the chair.', { userId: 1 });
   const out = textsTo(phone).pop();
-  assert.equal(out.Body, 'Patrol is on the way. Stay on the chair.');
+  assert.equal(out.Body, 'Mount A ski patrol: Patrol is on the way. Stay on the chair.');
   assert.equal(out.From, LINE_A, 'from the help number, so it stays in the same conversation');
   assert.equal(out.MessagingServiceSid, undefined);
   // A text Twilio delivers twice (a fallback retry) is taken once.
@@ -327,7 +320,7 @@ test('STOP is recorded and nothing more is texted from the help line; START turn
   assert.equal((await q('SELECT COUNT(*) AS n FROM dispatch_sms_optouts WHERE tenant_id = ? AND phone_key = ?', [A.id, phone.slice(2)]))[0].n, 0);
   const call2 = (await q('SELECT * FROM dispatch_calls WHERE id = ?', [c2.id]))[0];
   await require('../src/lib/guestmsg').toGuest(pool, call2, 'Patrol is coming.', { userId: 1 });
-  assert.equal(textsTo(phone).pop().Body, 'Patrol is coming.');
+  assert.equal(textsTo(phone).pop().Body, 'Mount A ski patrol: Patrol is coming.');
   // "Yes" from a phone that never opted out is an answer to patrol, not an opt-in.
   await text({ From: phone, To: LINE_A, Body: 'Yes' });
   assert.ok((await guestMessages(c2.id)).some((m) => m.body === 'Yes'));

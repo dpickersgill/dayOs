@@ -35,7 +35,7 @@ async function toGuest(db, call, body, staff) {
   const now = nowIn(tz);
   const SMS = require('./sms');
   let texted = false; let error = null;
-  if (call.caller_phone && SMS.enabled() && SMS.e164(call.caller_phone)) {
+  if (call.caller_phone && SMS.enabled() && (SMS.e164(call.caller_phone) || (call.source === 'sms' && /^\+[1-9]\d{7,14}$/.test(String(call.caller_phone))))) {
     const t = await one(db, 'SELECT name FROM tenants WHERE id = ?', [call.tenant_id]);
     const r = await SMS.send({ tenantId: call.tenant_id, to: call.caller_phone, body: `${t.name} ski patrol: ${text}`.slice(0, 600) });
     texted = Boolean(r.ok); error = r.ok ? null : r.error;
@@ -48,7 +48,8 @@ async function toGuest(db, call, body, staff) {
 /**
  * A message from the guest: from their status page (channel 'page') or a text (channel 'sms', help/sms). Saved, and
  * everyone sent to the call gets a phone alert. The alert never holds the guest's words: a locked screen shows only that
- * there is a message (2026.11.11 rule). Returns { id }.
+ * there is a message (2026.11.11 rule). A text (channel 'sms') is alerted by lib/helpline.js instead, once a minute and to
+ * patrol on duty when no one is sent yet, so a text never alerts twice. Returns { id, alerted }.
  */
 async function fromGuest(db, call, body, channel = 'page') {
   const text = clean(body);
@@ -57,6 +58,7 @@ async function fromGuest(db, call, body, channel = 'page') {
   const now = nowIn(tz);
   const [r] = await db.query('INSERT INTO dispatch_messages (tenant_id, call_id, direction, channel, body, at, delivered) VALUES (?, ?, \'from_guest\', ?, ?, ?, ?)',
     [call.tenant_id, call.id, channel === 'sms' ? 'sms' : 'page', text, now, now]);
+  if (channel === 'sms') return { id: r.insertId, alerted: 0 };
   const staff = (await rows(db, 'SELECT staff_id FROM dispatch_responders WHERE tenant_id = ? AND call_id = ?', [call.tenant_id, call.id])).map((x) => x.staff_id);
   if (staff.length) {
     await require('./push').notifyStaff(call.tenant_id, staff, { title: `Call ${callNo(call)}: message from the guest`, body: 'Open the call to read it.', url: '#/patrol/dispatch', tag: `call-${call.id}-msg` }).catch(() => {});
