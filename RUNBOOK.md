@@ -330,9 +330,10 @@ Upgrading needs `npm run migrate` (adds the access level column and the rules ta
 - QR codes on signs: `/help/<mountain>?c=<sign code>` once help/places has mapped the signs, or `?loc=<place name>` until then.
 - The status page's limits per request: `HELP_ANSWER_LIMIT` (60 answers in 10 minutes), `HELP_POSITION_LIMIT` (6 positions a minute), `HELP_MESSAGE_LIMIT` (20 replies in 10 minutes), `HELP_PASS_LIMIT` (3 pass lookups in 10 minutes) and `HELP_PASS_IP_LIMIT` (10 an hour per address). Leave them as they are in production. A request itself is never refused.
 - A guest who says the page is stuck: they can call patrol or 911 from it at any time. Check the call on the board; their messages and answers are in the call's From the guest section.
-- Set the patrol phone. When a new request reaches no one on duty (nobody signed in, or no phone took the alert), every owner and manager gets the push and the patrol phone gets a text; the call shows a red "No one on duty was alerted" banner on the board. Without a patrol phone or texts set up, only the push and the banner happen.
+- Set the patrol phone. When a new request reaches no one on duty (nobody signed in, or no phone took the alert), the call shows a red "No one on duty was alerted" banner on the board, and owners, managers (push) and the patrol phone (text) get one summary per mountain a minute at most (`HELP_NOBODY_GAP_S`), with at most 20 patrol phone texts an hour (`HELP_NOBODY_TEXT_HOURLY_CAP`). A lost child is sent at once. Without a patrol phone or texts set up, only the push and the banner happen.
 - Requests grouped into a flood alert patrol at most once per flood every 30 seconds (`HELP_FLOOD_ALERT_GAP_S`, leave it in production). A lost child always alerts at once.
-- Upgrading needs `npm run migrate` (adds `dispatch_calls.same_phone_of`, the link from a request to an earlier one from the same phone).
+- Held alerts (the next flood push, the summary) are saved and go out from the process's timer, the next board load or guest request at that mountain, or the 5-minute guests job (`summitops-guests`), once each. Worst case when the timer is lost: the gap plus 5 minutes. Keep the guests job running.
+- Upgrading needs `npm run migrate` (adds `dispatch_calls.same_phone_of`, `dispatch_alert_state` and `dispatch_calls.flood_pending_at`).
 
 ## Terrain park
 Upgrading needs `npm run migrate` (creates park_areas, park_features, park_placements and park_inspections). Park crew sign in with the `staff` role; managers and owners can do everything. To make a past day editable for the crew there is no switch: a manager makes the change. `node db/reset.js <slug> --yes` also clears the park, and `node db/demo.js <slug>` loads 12 demo features placed for today.
@@ -395,8 +396,14 @@ Edit the Help section: keep HELP and INFO, and set the reply to:
 
 > <Mountain> ski patrol has your message. If it is life threatening, call 911. Patrol will text you a link to send your location. Reply STOP to stop texts.
 
-Save. Do not add PATROL or AYUDA as keywords: they must reach Verdynt/OS as ordinary texts. STOP still works as
-before: Twilio stops all texts from the number to that phone, and Verdynt/OS records it so it never tries; START undoes both.
+Save. In the Opt-In section, add AYUDA and PATROL as opt-in keywords, so a guest who texted STOP and then texts only
+AYUDA or PATROL can get replies again. Twilio forwards an opt-in keyword to Verdynt/OS (`OptOutType=START`), which still
+makes or joins the call. HELP cannot be added: Twilio reserves "help" as a Help keyword that cannot be removed, and only
+"start" and "unstop" are reserved opt-in keywords
+([Advanced Opt-Out](https://www.twilio.com/docs/messaging/tutorials/advanced-opt-out)). So a guest who texted STOP
+gets no replies after HELP until they text START (or AYUDA or PATROL alone); their texts still reach dispatch, and the
+call says to call them. STOP still works as before: Twilio stops all texts from the number to that phone, and
+Verdynt/OS records it so it never tries; START undoes both.
 
 ### 4. Register the number (toll-free verification)
 Submit toll-free verification for the number (the number's page in the console, or Regulatory compliance, Toll-free
