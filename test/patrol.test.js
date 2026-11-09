@@ -446,7 +446,8 @@ test('guest help: off by default, then a rate-limited public request that lands 
   assert.equal(board.length, 1, 'only the real request was created');
   assert.equal(board[0].source, 'guest');
   assert.equal(board[0].status, 'new');
-  assert.equal((await api('POST', `/public/${A.slug}/help`, { body: { location: '' } })).status, 400);
+  // 2026.11.16: a help request is never refused for a missing or odd optional field; it is taken with what there is.
+  assert.equal((await api('POST', `/public/${A.slug}/help`, { body: { location: '' } })).status, 201);
   assert.equal(ok(await api('GET', `/patrol/guest-help`, { token: o })).path, `/help/${A.slug}`);
   assert.equal((await api('GET', `/public/${B.slug}/help`)).status, 404, 'another mountain is still off');
   const html = await fetch(`${base}/help/${A.slug}`);
