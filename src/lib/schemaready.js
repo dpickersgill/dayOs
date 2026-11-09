@@ -18,8 +18,9 @@ const atLeast = (have, want) => {
 /** q: a pool or a connection on the database to check. Resolves true when migrated for this version. */
 async function migrated(q, version = VERSION) {
   const { LATEST } = require('../schema');
+  // A column (with nullable: true, a column the migration made nullable), or an index.
   const [r] = LATEST.column
-    ? await q.query('SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? LIMIT 1', [LATEST.table, LATEST.column])
+    ? await q.query(`SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?${LATEST.nullable ? " AND is_nullable = 'YES'" : ''} LIMIT 1`, [LATEST.table, LATEST.column])
     : await q.query('SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? LIMIT 1', [LATEST.table, LATEST.index]);
   if (!r.length) return false;
   let rows;

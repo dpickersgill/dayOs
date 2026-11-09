@@ -128,6 +128,14 @@ test('OPS-3: /readyz and the status page need this release\'s migration to have 
   assert.equal(await migrated(pool), true, 'the test database was migrated to the end');
   assert.equal(await migrated(pool, '2999.1.1'), false, 'a later version is not migrated yet');
   assert.ok(atLeast('2026.11.11', '2026.11.10') && atLeast('2026.12.1', '2026.11.11') && !atLeast('2026.11.9', '2026.11.10'));
+  // 2026.11.16: a marker for a column the migration made nullable reads as migrated only once the column is nullable.
+  const S = require('../src/schema'); const was = S.LATEST;
+  try {
+    S.LATEST = { table: 'tenants', column: 'slug', nullable: true }; // slug stays NOT NULL
+    assert.equal(await migrated(pool), false, 'a NOT NULL column is not the nullable marker');
+    S.LATEST = { table: 'patrol_help_lines', column: 'help_number', nullable: true };
+    assert.equal(await migrated(pool), true);
+  } finally { S.LATEST = was; }
   const r = await fetch(`${base}/readyz`);
   assert.equal(r.status, 200);
   const [rows] = await pool.query("SELECT COUNT(*) AS n FROM schema_steps WHERE finished_at IS NULL AND name NOT LIKE 'release %'");

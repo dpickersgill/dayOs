@@ -1,6 +1,48 @@
 {
   "releases": [
     {
+      "version": "2026.11.16",
+      "date": "2026-11-09",
+      "title": "Guest help: one tap or a text to reach patrol, mapped places and help signs",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": ["patrol"],
+          "text": "Guest help page: a guest who needs patrol scans the QR code on a help sign and presses one large button. The request reaches your Dispatch board at once, with where their phone is, and patrol on duty gets a phone alert that says where. Then the guest taps a few short questions: who needs help, where they are, the last lift, how steep, a tower number and whether anyone is bleeding. Their page shows the request's status, your messages, and a box to reply. It works with gloves and a weak signal, in English and Spanish, and Call 911 is on every screen. Turn it on under Dispatch, Guest help page.",
+          "help": "patrol-help"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": ["patrol"],
+          "text": "Text HELP: guests text HELP (or AYUDA) to your mountain's help number. Each text lands on the Dispatch board as a New call that says Text HELP, and patrol on duty gets a phone alert. The guest gets a reply at once with the 911 line, a link to send their location, and a request for the code on the nearest sign or tower. Your messages from the call go back by text. Set the help number and your patrol phone in Settings, Patrol, Patrol settings, Text HELP. That one panel feeds the guest help page, the help signs and the first reply, so they all show the same numbers.",
+          "help": "patrol-text-help"
+        },
+        {
+          "kind": "new",
+          "app": "patrol",
+          "who": ["patrol"],
+          "text": "Map your mountain: walk the hill with a phone and mark trail signs, lift towers and junctions. Each place gets a short sign code like R7. Calls then say where a guest is in the words patrollers use, such as Near Ridge Run, below Main quad tower 6, about 40 m. The call's Where panel shows a small map with the guest's last positions. Print help signs as stickers or tower signs, each with its QR code, its code, the text line and Call 911.",
+          "help": "patrol-map-places"
+        },
+        {
+          "kind": "new",
+          "app": "conditions",
+          "who": ["staff", "counter", "instructor", "patrol"],
+          "text": "Guest needs help here: lift staff, the ticket window, rentals, instructors and patrol can press one button on Mountain status, the Gate or the menu. A call goes to patrol at your phone's position, and patrol on duty gets a phone alert at once, the same as when a guest asks from the help page or by text. You do not need someone watching the dispatch board. The screen tells you if no phone was alerted, so you know to radio patrol too.",
+          "help": "staff-help-here"
+        },
+        {
+          "kind": "improved",
+          "app": "patrol",
+          "who": ["patrol"],
+          "text": "Map orientation: maps that show places on the mountain now put the base at the bottom, the way you see the hill from the lodge. You can turn them by hand to match your trail map, and the turn sticks. It applies to the mapping screen, the call's Where map and the terrain park map. A turned map always shows a north arrow.",
+          "help": "patrol-map-turn"
+        }
+      ]
+    },
+    {
       "version": "2026.11.15",
       "date": "2026-11-09",
       "title": "The morning brief, the conditions writer and forecast data",
