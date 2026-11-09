@@ -51,7 +51,7 @@
   --disabled-bg: #f7f9fa;
   --disabled-line: #c9d0d8;
   --disabled-ink: #4a5562;
-  --focus: #e07a00;
+  --focus: #9a7630;        /* the focus ring: a darker gold, 4.2:1 on white (the brand gold is 1.9:1 there) */
   /* one radius scale */
   --radius-xs: 4px;
   --radius-sm: 6px;
@@ -4100,6 +4100,9 @@ label.check-hit { display: inline-flex; align-items: center; justify-content: ce
 .place-map .pm-focus { fill: var(--gps-dot); stroke: var(--surface); stroke-width: 2.5; }
 .place-map .pm-trail { fill: none; stroke: var(--gps-dot); stroke-width: 2; stroke-dasharray: 5 4; }
 .place-map .pm-trail-dot { fill: var(--gps-dot); fill-opacity: .55; }
+
+/* No one on duty got the alert for a new request (dispatch.js alertNewRequest): a red banner on the board and the call. */
+.nobody-banner { margin: -2px 0 8px; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--closed); color: var(--on-fill); font-weight: 400; }
 
 /* A call's location panel */
 .call-where { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; background: var(--surface); }

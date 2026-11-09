@@ -69,7 +69,7 @@ async function createCall(tenant, b, { source, userId = null, staffId = null, se
         const date = now.slice(0, 10);
         const { n } = await one(conn, 'SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM dispatch_calls WHERE tenant_id = ? AND call_date = ?', [tenant.id, date]);
         // A guest request from a phone or address that has sent several in the last 10 minutes joins that sender's group
-        // on the board (flood_of: the first in the group). It is never refused. Text HELP calls (source 'sms') are grouped
+        // on the board (flood_of: the first in the group). It is never refused, and still alerts patrol (alertNewRequest). Text HELP calls (source 'sms') are grouped
         // the same way, keyed on the texting phone (lib/helpline.js).
         let floodOf = null;
         if (sender) {
@@ -94,10 +94,6 @@ async function createCall(tenant, b, { source, userId = null, staffId = null, se
             b.gps_lat != null && b.accuracy != null ? now : null, b.gps_lat != null && b.accuracy != null ? Math.round(b.accuracy) : null,
             b.guest_token ?? null, b.place_id ?? null, b.place_text ?? null, b.who ?? null, b.lang ?? null, b.answers ? JSON.stringify(b.answers) : null, b.request_key ?? null, b.call_type ?? null],
         );
-        if (floodOf) {
-          const [first] = await conn.query('UPDATE dispatch_calls SET flood_alerted_at = ? WHERE tenant_id = ? AND id = ? AND flood_alerted_at IS NULL', [now, tenant.id, floodOf]);
-          if (sender) sender.alert = first.affectedRows ? floodOf : null;
-        }
         await conn.query("INSERT INTO dispatch_events (tenant_id, call_id, at, kind, staff_id, note, user_id) VALUES (?, ?, ?, 'received', ?, ?, ?)", [tenant.id, r.insertId, now, staffId, source === 'guest' ? 'Guest help request' : source === 'sms' ? `Text HELP from ${b.caller_phone}` : null, userId]);
         return { id: r.insertId, call_no: callNo({ call_date: date, seq: n }), flood_of: floodOf };
       });
@@ -111,17 +107,79 @@ async function createCall(tenant, b, { source, userId = null, staffId = null, se
 /**
  * A new request for help from a guest (the help page, Text HELP) or from staff (Guest needs help here) alerts patrol on
  * duty at once, the same way for all three, so a mountain with no one watching the board still hears about it. The
- * alert says where, never what the guest wrote (2026.11.11 rule). A request grouped into a flood is covered by the one
- * flood alert, and a lost child has its own alert (both sent by the caller). Never holds up the answer to the guest.
- * Returns { on_duty, sent }: patrollers signed in on duty, and phones the alert reached.
+ * alert says where, never what the guest wrote (2026.11.11 rule). Never holds up the answer to the guest.
+ *   - A lost child always alerts on its own ("Lost child: patrol call ..."), in a flood or not.
+ *   - A request grouped into a flood (flood_of) still alerts: at most one push per flood every 30 seconds, saying how many
+ *     requests came from the same place. One that lands inside the 30 seconds is covered by a push when they are up.
+ *     It is never silenced.
+ *   - When the alert reaches no one (no one on duty, or no phone took it): every owner and manager gets the push, the
+ *     mountain's patrol phone gets a text when one is set and texts are set up, and the call gets a "No one on duty was
+ *     alerted" note, shown on the board as a red banner.
+ * Returns { on_duty, sent }: patrollers signed in on duty, and their phones the alert reached.
  */
 const REQUEST_TITLE = { guest: 'Guest help', sms: 'Text HELP', staff: 'Guest needs help here' };
-async function alertNewRequest(tenantId, out, location, source) {
-  if (!out || out.flood_of) return { on_duty: 0, sent: 0 };
+const NOBODY = 'No one on duty was alerted';
+const FLOOD_GAP_MS = () => (Number(process.env.HELP_FLOOD_ALERT_GAP_S) || 30) * 1000;
+const floodTimers = new Map();
+const localMs = (local) => Date.parse(`${String(local).replace(' ', 'T')}Z`);
+const localAt = (msv) => new Date(msv).toISOString().slice(0, 19).replace('T', ' ');
+
+async function alertNewRequest(tenantId, out, location, source, { lostChild = false } = {}) {
+  if (!out) return { on_duty: 0, sent: 0 };
+  if (out.flood_of && !lostChild) return floodAlert(tenantId, Number(out.flood_of), out.id, location, source);
+  const title = lostChild ? `Lost child: patrol call ${out.call_no}` : `${REQUEST_TITLE[source] || 'Guest help'}: patrol call ${out.call_no}`;
+  return sendAlert(tenantId, out.id, { title, body: `${String(location || 'Place not given yet')}. Open the app for details.`, url: '#/patrol/dispatch', tag: `call-${out.id}` });
+}
+
+/** Pushes to patrol on duty; when no phone took it, the fallback (owners and managers, the patrol phone, the note). */
+async function sendAlert(tenantId, callId, msg) {
   const on = await OPS.onDutyIds(pool, tenantId).catch(() => []);
-  if (!on.length) return { on_duty: 0, sent: 0 };
-  const sent = await PUSH.notifyStaff(tenantId, on, { title: `${REQUEST_TITLE[source] || 'Guest help'}: patrol call ${out.call_no}`, body: `${String(location || 'Place not given yet')}. Open the app for details.`, url: '#/patrol/dispatch', tag: `call-${out.id}` }).catch(() => 0);
-  return { on_duty: on.length, sent: Number(sent) || 0 };
+  const sent = on.length ? Number(await PUSH.notifyStaff(tenantId, on, msg).catch(() => 0)) || 0 : 0;
+  if (!sent) await nobodyHeard(tenantId, callId, msg).catch((err) => require('../lib/jobs').logFailure({ job: 'help_alert', tenant: tenantId, message: err.message }));
+  return { on_duty: on.length, sent };
+}
+
+/** One push per flood every 30 seconds; a request inside the 30 seconds is covered by a push when they are up. */
+async function floodAlert(tenantId, head, callId, location, source, tries = 0) {
+  const tz = ((await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])) || {}).timezone || 'America/New_York';
+  const now = nowIn(tz);
+  const [claim] = await pool.query('UPDATE dispatch_calls SET flood_alerted_at = ? WHERE tenant_id = ? AND id = ? AND (flood_alerted_at IS NULL OR flood_alerted_at <= ?)',
+    [now, tenantId, head, localAt(localMs(now) - FLOOD_GAP_MS())]);
+  if (!claim.affectedRows) {
+    const key = `${tenantId}:${head}`;
+    if (!floodTimers.has(key) && tries < 5) {
+      const last = await one(pool, 'SELECT flood_alerted_at FROM dispatch_calls WHERE tenant_id = ? AND id = ?', [tenantId, head]);
+      const wait = Math.max(250, FLOOD_GAP_MS() - (localMs(now) - localMs(last && last.flood_alerted_at ? last.flood_alerted_at : now)) + 1000);
+      const timer = setTimeout(() => { floodTimers.delete(key); floodAlert(tenantId, head, callId, location, source, tries + 1).catch(() => {}); }, wait);
+      if (timer.unref) timer.unref();
+      floodTimers.set(key, timer);
+    }
+    return { on_duty: 0, sent: 0, held: true };
+  }
+  const first = await one(pool, 'SELECT call_date, seq FROM dispatch_calls WHERE tenant_id = ? AND id = ?', [tenantId, head]);
+  const { n } = await one(pool, 'SELECT COUNT(*) AS n FROM dispatch_calls WHERE tenant_id = ? AND flood_of = ?', [tenantId, head]);
+  const more = Number(n);
+  return sendAlert(tenantId, callId, {
+    title: `${REQUEST_TITLE[source] || 'Guest help'}: ${more} more request${more === 1 ? '' : 's'} from the same place`,
+    body: `Latest: ${String(location || 'Place not given yet')}. They are grouped under call ${first ? callNo(first) : ''} on the dispatch board.`, url: '#/patrol/dispatch', tag: `flood-${head}`,
+  });
+}
+
+/** No one on duty heard the alert: every owner and manager, the patrol phone by text, and a note on the call. */
+async function nobodyHeard(tenantId, callId, msg) {
+  const users = (await rows(pool, "SELECT id FROM users WHERE tenant_id = ? AND active = 1 AND role IN ('owner','manager')", [tenantId])).map((u) => Number(u.id));
+  const pushed = users.length ? Number(await PUSH.notifyUsers(tenantId, users, { ...msg, title: `No one on duty. ${msg.title}` }).catch(() => 0)) || 0 : 0;
+  const line = await require('../lib/helpline').lineOf(pool, tenantId).catch(() => null);
+  let texted = null;
+  if (line && line.patrol_phone && SMS.enabled()) {
+    const r = await SMS.send({ tenantId, to: line.patrol_phone, body: `${msg.title}. ${msg.body} No one on duty got the alert.`.slice(0, 300) });
+    texted = Boolean(r.ok);
+  }
+  const tz = ((await one(pool, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])) || {}).timezone || 'America/New_York';
+  const said = [`${NOBODY}.`, pushed ? `Sent to ${pushed} owner or manager phone${pushed === 1 ? '' : 's'}.` : 'No owner or manager phone took it either.',
+    texted === true ? 'Texted the patrol phone.' : texted === false ? 'The text to the patrol phone did not go.' : line && line.patrol_phone ? 'Texts are not set up, so the patrol phone was not texted.' : 'No patrol phone is set.'].join(' ');
+  await pool.query("INSERT INTO dispatch_events (tenant_id, call_id, at, kind, note) VALUES (?, ?, ?, 'note', ?)", [tenantId, callId, nowIn(tz), said]);
+  return { pushed, texted };
 }
 
 const withNo = (c) => { const out = { ...c, call_no: callNo(c) }; delete out.locate_token; delete out.sender_hash; delete out.ip_hash; delete out.guest_token; delete out.request_key; return out; };
@@ -161,12 +219,21 @@ router.get('/dispatch', patrol, needs('dispatch'), async (req, res) => {
                         WHERE r.tenant_id = ? AND r.call_id IN (?)`, [tenantId, ids])
     : [];
   const hidden = await wordsHidden(req, [...calls, ...folded]);
+  const nobody = ids.length ? new Set((await rows(pool, `SELECT DISTINCT call_id FROM dispatch_events WHERE tenant_id = ? AND call_id IN (?) AND kind = 'note' AND note LIKE ?`, [tenantId, ids, `${NOBODY}%`])).map((e) => Number(e.call_id))) : new Set();
+  const linked = await samePhoneNos(tenantId, calls);
   res.json({ data: calls.map((c0) => {
     const c = hidden(c0) ? HIDE(c0) : c0;
     const rep = folded.filter((f) => Number(f.flood_of) === Number(c.id)).map((f) => (hidden(f) ? HIDE(f) : f));
-    return { ...withNo(c), responders: responders.filter((r) => r.call_id === c.id), ...(rep.length ? { repeats: rep.map((f) => ({ id: f.id, call_no: callNo(f), location: f.location, description: f.description, received_at: f.received_at, status: f.status, gps_lat: f.gps_lat, gps_lng: f.gps_lng })) } : {}) };
+    return { ...withNo(c), responders: responders.filter((r) => r.call_id === c.id), nobody_alerted: nobody.has(Number(c.id)), same_phone_no: c.same_phone_of ? linked.get(Number(c.same_phone_of)) || null : null, ...(rep.length ? { repeats: rep.map((f) => ({ id: f.id, call_no: callNo(f), location: f.location, description: f.description, received_at: f.received_at, status: f.status, gps_lat: f.gps_lat, gps_lng: f.gps_lng })) } : {}) };
   }) });
 });
+
+/** The call numbers of the earlier calls from the same phone (same_phone_of), by id. */
+async function samePhoneNos(tenantId, calls) {
+  const ids = [...new Set(calls.filter((c) => c.same_phone_of).map((c) => Number(c.same_phone_of)))];
+  if (!ids.length) return new Map();
+  return new Map((await rows(pool, 'SELECT id, call_date, seq FROM dispatch_calls WHERE tenant_id = ? AND id IN (?)', [tenantId, ids])).map((c) => [Number(c.id), callNo(c)]));
+}
 
 /**
  * Patrollers on duty right now: signed in on Patrol (volunteers and paid alike), or clocked in on the time clock for a
@@ -255,17 +322,23 @@ router.get('/dispatch/:id', patrol, needs('dispatch'), async (req, res) => {
     c.incident_id ? one(pool, 'SELECT id, season, seq FROM incidents WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, c.incident_id]) : null,
   ]);
   const hide = (await wordsHidden(req, [c]))(c);
-  res.json({ ...withNo(hide ? HIDE(c) : c), events: hide ? events.map((e) => ({ ...e, note: null })) : events, responders, case: incident ? { id: incident.id, case_number: `${incident.season}-${String(incident.seq).padStart(4, '0')}` } : null,
+  const linked = await samePhoneNos(req.auth.tenantId, [c]);
+  const later = await rows(pool, 'SELECT id, call_date, seq FROM dispatch_calls WHERE tenant_id = ? AND same_phone_of = ? ORDER BY id LIMIT 20', [req.auth.tenantId, c.id]);
+  res.json({ ...withNo(hide ? HIDE(c) : c), events: hide ? events.map((e) => ({ ...e, note: null })) : events, responders,
+    nobody_alerted: events.some((e) => e.kind === 'note' && String(e.note || '').startsWith(NOBODY)),
+    same_phone_no: c.same_phone_of ? linked.get(Number(c.same_phone_of)) || null : null, same_phone_later: later.map((x) => ({ id: x.id, call_no: callNo(x) })), case: incident ? { id: incident.id, case_number: `${incident.season}-${String(incident.seq).padStart(4, '0')}` } : null,
     guest: await guestBlock(c, hide) });
 });
 
 /**
  * help/guest: what the guest told patrol from their phone, for the call view's Guest section: the tap answers in plain
- * words, who needs help, the page language, the pass hint, the phone's latest positions and the messages. A call whose
+ * words, who needs help, the page language, the pass hint, the phone's latest positions and the messages. A Text HELP
+ * call (source 'sms') has the same section: the guest's texts and patrol's replies, which go out by text. A call whose
  * words are hidden (it has a case this person may not open) shows none of it.
  */
+const fromGuestPhone = (c) => (c.source === 'guest' && c.guest_token) || c.source === 'sms';
 async function guestBlock(c, hide) {
-  if (c.source !== 'guest' || !c.guest_token) return null;
+  if (!fromGuestPhone(c)) return null;
   if (hide) return { hidden: true };
   let answers = {};
   try { answers = c.answers ? JSON.parse(c.answers) : {}; } catch (_) { answers = {}; }
@@ -273,14 +346,17 @@ async function guestBlock(c, hide) {
     rows(pool, 'SELECT lat, lng, accuracy_m, taken_at, received_at FROM dispatch_positions WHERE tenant_id = ? AND call_id = ? ORDER BY id DESC LIMIT 10', [c.tenant_id, c.id]),
     require('../lib/guestmsg').list(pool, c.tenant_id, c.id),
   ]);
-  return { who: c.who, who_text: c.who ? GH.WHO[c.who] : null, lang: c.lang, answers: GH.answerWords(answers), scan_hint: GH.scanHintWords(c.last_scan_hint),
-    live_off_at: c.live_off_at, positions, messages, can_text: Boolean(c.caller_phone && SMS.enabled()) };
+  const bySms = c.source === 'sms';
+  const th = bySms ? await one(pool, 'SELECT lang, phone_key FROM dispatch_sms_threads WHERE tenant_id = ? AND call_id = ?', [c.tenant_id, c.id]) : null;
+  const stopped = th ? await require('../lib/helpline').optedOut(c.tenant_id, th.phone_key) : false;
+  return { by_text: bySms, who: c.who, who_text: c.who ? GH.WHO[c.who] : null, lang: c.lang || (th ? th.lang : null), answers: GH.answerWords(answers), scan_hint: GH.scanHintWords(c.last_scan_hint),
+    live_off_at: c.live_off_at, positions, messages, can_text: Boolean(c.caller_phone && SMS.enabled() && !stopped), opted_out: stopped };
 }
 
 /** A message to the guest: on their status page, and texted when they gave a phone and texts are set up (lib/guestmsg.js). */
 router.post('/dispatch/:id/messages', patrol, needs('dispatch'), validate(z.object({ body: z.string().trim().min(1).max(1000) })), async (req, res) => {
   const c = await loadCall(pool, req.auth.tenantId, paramId(req));
-  if (c.source !== 'guest' || !c.guest_token) throw bad('Only a request from the guest help page can get messages here');
+  if (!fromGuestPhone(c)) throw bad('Only a request from the guest help page or Text HELP can get messages here');
   if (!ACTIVE.includes(c.status)) throw conflict('This call is closed');
   const out = await require('../lib/guestmsg').toGuest(pool, c, req.body.body, { userId: req.auth.userId });
   await audit(pool, req, 'message_guest', 'dispatch_calls', c.id, { texted: out.texted }); // never the words
@@ -465,92 +541,124 @@ publicRouter.get('/:slug/help', async (req, res) => {
     ...(place ? { place: { code: String(req.query.c).toUpperCase(), name: place.name } } : {}) });
 });
 
-// A retry of the same request (the same key), or the same phone again within 2 minutes, joins the call already made
-// instead of making another (help/guest). Only the new page sends a key; anything else is grouped as before (PATROL-4).
+// A retry of the same press (the same request key) joins the call it already made. The same phone pressing again within
+// 2 minutes is a new call, linked to the earlier one ("From the same phone as call ..."): it may be someone else who
+// needs help, so it never joins and never moves the earlier call. Only the new page sends a key (PATROL-4).
 const JOIN_MS = 2 * 60000;
 const GUEST_DESC = { help: 'Guest pressed I need help now.', someone: 'Guest is asking for help for someone they saw.', lost_child: 'Lost child reported by a guest. Details follow as they answer.' };
+const ACC_CAP = 5000; // meters: a phone that says it is out by more is marked rough at this
 
-publicRouter.post(
-  '/:slug/help',
-  validate(z.object({
-    location: z.string().trim().min(2).max(120).optional(), // typed, or the sign's ?loc= text
-    description: z.string().trim().max(300).optional(),
-    name: z.string().trim().max(60).optional(),
-    phone: z.string().trim().max(30).optional(),
-    gps_lat: z.number().min(-90).max(90).optional(), gps_lng: z.number().min(-180).max(180).optional(), // when the guest lets the page share where they are
-    accuracy: z.number().min(0).max(100000).optional(),
-    kind: z.enum(['help', 'lost_child']).optional(),
-    who: z.enum(['me', 'someone_with_me', 'someone_i_saw']).optional(),
-    code: z.string().trim().max(10).optional(), // the sign code from the QR (?c=R7)
-    lang: z.enum(['en', 'es']).optional(),
-    rid: z.string().regex(/^[0-9a-f]{32}$/).optional(), // the page's key for this request, the same on every retry
-    website: z.string().max(200).optional(), // hidden field: real people leave it empty, form-filling bots do not
-  })),
-  async (req, res) => {
-    const t = await one(pool, 'SELECT id, timezone, guest_help_enabled FROM tenants WHERE slug = ?', [req.params.slug]);
-    if (!t || !t.guest_help_enabled) throw notFound('Help page');
-    res.set('Cache-Control', 'no-store');
-    if (req.body.website) return res.status(202).json({ ok: true }); // pretend success, create nothing
-    const b = req.body;
-    // Always accepted: a real request for help is never refused because others sent junk. Repeats from one phone or
-    // address are grouped on the board and patrol is alerted to the flood.
-    const dev = String(req.get('x-device') || '');
-    const realDevice = /^[A-Za-z0-9_-]{16,64}$/.test(dev);
-    const ip = String(req.ip || '');
-    const sender = { ip: senderKey(t.id, 'ip', ip), device: senderKey(t.id, 'dev', realDevice ? dev : `ip:${ip}`) };
-    const kind = b.kind || 'help';
-    const callType = kind === 'lost_child' ? 'lost_child' : null;
-    const hasGps = b.gps_lat !== undefined && b.gps_lng !== undefined;
+/**
+ * The request as sent, cleaned. A help request is never refused for an optional field: anything odd is cut to size or
+ * left out (and listed in dropped, for a note on the call). Location text under 2 characters is left out; an accuracy over
+ * 5 km is capped and marked rough. Returns { b, dropped, bot }.
+ */
+function cleanRequest(raw) {
+  const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const dropped = [];
+  const given = (k) => r[k] !== undefined && r[k] !== null && r[k] !== '';
+  const str = (k, max) => (typeof r[k] === 'string' || typeof r[k] === 'number' ? String(r[k]).replace(/\s+/g, ' ').trim().slice(0, max) : '');
+  const num = (k) => { const v = typeof r[k] === 'string' && r[k].trim() !== '' ? Number(r[k]) : r[k]; return typeof v === 'number' && Number.isFinite(v) ? v : null; };
+  const b = {};
+  const text = (k, max, min = 1) => { const v = str(k, max); if (v.length >= min) b[k] = v; else if (given(k)) dropped.push(k); };
+  text('location', 120, 2); text('description', 300); text('name', 60); text('phone', 30);
+  const lat = num('gps_lat'); const lng = num('gps_lng');
+  if (lat !== null && lng !== null && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) { b.gps_lat = lat; b.gps_lng = lng; } else if (given('gps_lat') || given('gps_lng')) dropped.push('position');
+  const acc = num('accuracy');
+  if (acc !== null && acc >= 0 && b.gps_lat !== undefined) { b.accuracy = Math.min(acc, ACC_CAP); if (acc > ACC_CAP) b.rough = Math.round(acc); } else if (given('accuracy') && b.gps_lat !== undefined) dropped.push('accuracy');
+  b.kind = r.kind === 'lost_child' ? 'lost_child' : 'help';
+  if (['me', 'someone_with_me', 'someone_i_saw'].includes(r.who)) b.who = r.who; else if (given('who')) dropped.push('who');
+  const code = str('code', 10);
+  if (/^[A-Za-z0-9]{2,5}$/.test(code)) b.code = code; else if (given('code')) dropped.push('sign code');
+  if (['en', 'es'].includes(r.lang)) b.lang = r.lang;
+  const rid = str('rid', 40).toLowerCase();
+  if (/^[0-9a-f]{32}$/.test(rid)) b.rid = rid;
+  return { b, dropped, bot: typeof r.website === 'string' ? r.website.trim() !== '' : Boolean(r.website) };
+}
 
-    if (b.rid) {
-      // A retry, or the same phone pressing again: join that call. Only a phone's own id joins by phone, never an address
-      // (a lodge's Wi-Fi puts every guest on one).
-      const now = nowIn(t.timezone);
-      const since = new Date(Date.parse(`${now.replace(' ', 'T')}Z`) - JOIN_MS).toISOString().slice(0, 19).replace('T', ' ');
-      const same = (await one(pool, 'SELECT * FROM dispatch_calls WHERE tenant_id = ? AND request_key = ? ORDER BY id LIMIT 1', [t.id, b.rid]))
-        || (realDevice ? await one(pool, `SELECT * FROM dispatch_calls WHERE tenant_id = ? AND source = 'guest' AND sender_hash = ? AND guest_token IS NOT NULL
-             AND status IN ('new','dispatched','on_scene','transporting') AND received_at >= ? AND ${callType ? "call_type = 'lost_child'" : '(call_type IS NULL OR call_type <> \'lost_child\')'}
-             ORDER BY id DESC LIMIT 1`, [t.id, sender.device, since]) : null);
-      if (same) {
-        if (hasGps && (same.gps_lat === null || (b.accuracy != null && (same.located_accuracy_m === null || b.accuracy < same.located_accuracy_m)))) {
-          await pool.query('UPDATE dispatch_calls SET gps_lat = ?, gps_lng = ?, located_at = ?, located_accuracy_m = ? WHERE tenant_id = ? AND id = ?',
-            [b.gps_lat, b.gps_lng, now, b.accuracy != null ? Math.round(b.accuracy) : null, t.id, same.id]);
-        }
-        if (same.request_key !== b.rid) await pool.query("INSERT INTO dispatch_events (tenant_id, call_id, at, kind, note) VALUES (?, ?, ?, 'note', 'The guest\\'s phone asked again. It joined this call.')", [t.id, same.id, now]);
-        return res.status(200).json({ ok: true, joined: true, reference: callNo(same), token: same.guest_token, status: require('../lib/guestmsg').guestStatus(same.status) });
+/**
+ * New positions for a call (a retry that brings a better fix, or the Locate caller link): the position, and the place
+ * words worked out again. The location line follows them only when it was the words or a stand-in (never what someone
+ * typed). A lost child's line is where the child was last seen, and stays.
+ */
+async function relocate(c, lat, lng, acc, at) {
+  const near = await GH.describePlace(pool, c.tenant_id, lat, lng, acc);
+  const sets = ['gps_lat = ?', 'gps_lng = ?', 'located_at = ?', 'located_accuracy_m = ?']; const vals = [lat, lng, at, acc];
+  const words = near && near.text ? String(near.text).slice(0, 255) : null;
+  if (words) { sets.push('place_text = ?', 'place_id = ?'); vals.push(words, near.place_id || null); }
+  let a = {}; try { a = c.answers ? JSON.parse(c.answers) : {}; } catch (_) { a = {}; }
+  let location = null;
+  if (c.call_type !== 'lost_child') {
+    if (a.auto_location) location = GH.autoLocation({ place_text: words || c.place_text, gps_lat: lat, gps_lng: lng, located_accuracy_m: acc }, a);
+    else if (words && (c.location === c.place_text || /^(Not given yet|Phone position|Phone location)/.test(String(c.location || '')))) location = near.place_id ? words : `Phone position ${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}. ${words}`.slice(0, 255);
+  }
+  if (location) { sets.push('location = ?'); vals.push(location); }
+  await pool.query(`UPDATE dispatch_calls SET ${sets.join(', ')} WHERE tenant_id = ? AND id = ?`, [...vals, c.tenant_id, c.id]);
+  return { words, location };
+}
+
+publicRouter.post('/:slug/help', async (req, res) => {
+  const t = await one(pool, 'SELECT id, timezone, guest_help_enabled FROM tenants WHERE slug = ?', [req.params.slug]);
+  if (!t || !t.guest_help_enabled) throw notFound('Help page');
+  res.set('Cache-Control', 'no-store');
+  const { b, dropped, bot } = cleanRequest(req.body);
+  if (bot) return res.status(202).json({ ok: true }); // the hidden field: real people leave it empty. Pretend success, create nothing
+  // Always accepted: a real request for help is never refused because others sent junk, or for an odd optional field.
+  // Repeats from one phone or address are grouped on the board, and every one of them still alerts patrol.
+  const dev = String(req.get('x-device') || '');
+  const realDevice = /^[A-Za-z0-9_-]{16,64}$/.test(dev);
+  const ip = String(req.ip || '');
+  const sender = { ip: senderKey(t.id, 'ip', ip), device: senderKey(t.id, 'dev', realDevice ? dev : `ip:${ip}`) };
+  const kind = b.kind;
+  const callType = kind === 'lost_child' ? 'lost_child' : null;
+  const hasGps = b.gps_lat !== undefined;
+  const now = nowIn(t.timezone);
+
+  if (b.rid) {
+    // A retry of the same press: the call it made. A better position updates it, with the place words worked out again.
+    const same = await one(pool, 'SELECT * FROM dispatch_calls WHERE tenant_id = ? AND request_key = ? ORDER BY id LIMIT 1', [t.id, b.rid]);
+    if (same) {
+      if (hasGps && ACTIVE.includes(same.status) && (same.gps_lat === null || (b.accuracy != null && (same.located_accuracy_m === null || b.accuracy < same.located_accuracy_m)))) {
+        await relocate(same, b.gps_lat, b.gps_lng, b.accuracy != null ? Math.round(b.accuracy) : null, now);
       }
+      return res.status(200).json({ ok: true, joined: true, reference: callNo(same), token: same.guest_token, status: require('../lib/guestmsg').guestStatus(same.status) });
     }
+  }
+  // The same phone (its own id, never an address: a lodge's Wi-Fi puts every guest on one) within 2 minutes: linked.
+  const since = localAt(localMs(now) - JOIN_MS);
+  const earlier = realDevice ? await one(pool, `SELECT id, call_date, seq FROM dispatch_calls WHERE tenant_id = ? AND source = 'guest' AND sender_hash = ? AND guest_token IS NOT NULL
+       AND status IN ('new','dispatched','on_scene','transporting') AND received_at >= ? ORDER BY id DESC LIMIT 1`, [t.id, sender.device, since]) : null;
 
-    // Where: the sign's code (help/places), the typed or ?loc= place, the mapped place near the phone, or the phone's position.
-    const place = b.code ? await GH.placeByCode(pool, t.id, b.code) : null;
-    const near = hasGps ? await GH.describePlace(pool, t.id, b.gps_lat, b.gps_lng, b.accuracy) : null;
-    const auto = !place && !b.location;
-    const placeText = near && near.text ? String(near.text).slice(0, 255) : null;
-    const location = place ? `Sign ${String(b.code).toUpperCase()}: ${place.name}`.slice(0, 255) : b.location
-      || GH.autoLocation({ place_text: placeText, gps_lat: hasGps ? b.gps_lat : null, gps_lng: b.gps_lng, located_accuracy_m: b.accuracy != null ? Math.round(b.accuracy) : null });
-    const who = b.who || (kind === 'lost_child' ? null : undefined);
-    const token = require('crypto').randomBytes(16).toString('hex');
-    const lang = b.lang || GH.langOf(req.get('accept-language'));
-    const description = b.description || GUEST_DESC[kind === 'lost_child' ? 'lost_child' : who === 'someone_i_saw' ? 'someone' : 'help'];
-    const out = await createCall(t, {
-      location, description, caller_name: b.name, caller_phone: b.phone, gps_lat: hasGps ? b.gps_lat : null, gps_lng: hasGps ? b.gps_lng : null, accuracy: hasGps ? b.accuracy : null,
-      priority: kind === 'lost_child' ? 'high' : 'normal', call_type: callType, guest_token: token, who: who || null, lang,
-      place_id: place ? place.id : near && near.place_id ? near.place_id : null, place_text: placeText, request_key: b.rid || null, answers: auto ? { auto_location: true } : null,
-    }, { source: 'guest', sender });
-    if (sender.alert) {
-      const on = await OPS.onDutyIds(pool, t.id).catch(() => []);
-      if (on.length) PUSH.notifyStaff(t.id, on, { title: 'Guest help: many requests from one phone', body: 'They are grouped on the dispatch board. Check each place listed.', url: '#/patrol/dispatch', tag: `flood-${sender.alert}` }).catch(() => {});
-    }
-    if (callType !== 'lost_child') alertNewRequest(t.id, out, location, 'guest').catch(() => {});
-    if (callType === 'lost_child' && !out.flood_of) {
-      // A lost child goes to everyone on duty at once, like a critical call. Where to look, never the child's details.
-      const on = await OPS.onDutyIds(pool, t.id).catch(() => []);
-      if (on.length) PUSH.notifyStaff(t.id, on, { title: `Lost child: patrol call ${out.call_no}`, body: `${location}. Open the app for details.`, url: '#/patrol/dispatch', tag: `call-${out.id}` }).catch(() => {});
-    }
-    const warning = sender.repeats >= HELP_REPEAT_WARN ? 'Patrol already has several requests from this phone. Stay where you are. If things get worse, call 911.' : undefined;
-    return res.status(201).json({ ok: true, reference: out.call_no, token, status: 'received', ...(warning ? { warning } : {}) });
-  },
-);
+  // Where: the sign's code (help/places), the typed or ?loc= place, the mapped place near the phone, or the phone's position.
+  const place = b.code ? await GH.placeByCode(pool, t.id, b.code) : null;
+  const near = hasGps ? await GH.describePlace(pool, t.id, b.gps_lat, b.gps_lng, b.accuracy) : null;
+  const auto = !place && !b.location;
+  const placeText = near && near.text ? String(near.text).slice(0, 255) : null;
+  const location = place ? `Sign ${String(b.code).toUpperCase()}: ${place.name}`.slice(0, 255) : b.location
+    || GH.autoLocation({ place_text: placeText, gps_lat: hasGps ? b.gps_lat : null, gps_lng: b.gps_lng, located_accuracy_m: b.accuracy != null ? Math.round(b.accuracy) : null });
+  const who = b.who || null;
+  const token = require('crypto').randomBytes(16).toString('hex');
+  const lang = b.lang || GH.langOf(req.get('accept-language'));
+  const description = b.description || GUEST_DESC[kind === 'lost_child' ? 'lost_child' : who === 'someone_i_saw' ? 'someone' : 'help'];
+  const out = await createCall(t, {
+    location, description, caller_name: b.name, caller_phone: b.phone, gps_lat: hasGps ? b.gps_lat : null, gps_lng: hasGps ? b.gps_lng : null, accuracy: hasGps ? b.accuracy : null,
+    priority: kind === 'lost_child' ? 'high' : 'normal', call_type: callType, guest_token: token, who, lang,
+    place_id: place ? place.id : near && near.place_id ? near.place_id : null, place_text: placeText, request_key: b.rid || null, answers: auto ? { auto_location: true } : null,
+  }, { source: 'guest', sender });
+  const notes = [];
+  if (earlier) {
+    await pool.query('UPDATE dispatch_calls SET same_phone_of = ? WHERE tenant_id = ? AND id = ?', [earlier.id, t.id, out.id]);
+    notes.push([out.id, `From the same phone as call ${callNo(earlier)}, within 2 minutes. It may be someone else: check both.`]);
+    notes.push([earlier.id, `The same phone asked again: call ${out.call_no}. It is its own call.`]);
+  }
+  if (b.rough) notes.push([out.id, `The phone's location is rough: it said within ${b.rough} m.`]);
+  if (dropped.length) notes.push([out.id, `Some details from the guest's page could not be read and were left out: ${dropped.join(', ')}.`]);
+  for (const [id, text] of notes) await pool.query("INSERT INTO dispatch_events (tenant_id, call_id, at, kind, note) VALUES (?, ?, ?, 'note', ?)", [t.id, id, now, text.slice(0, 500)]);
+  // Patrol on duty hears at once (a lost child always on its own, in a flood or not). Never holds up the answer.
+  alertNewRequest(t.id, out, location, 'guest', { lostChild: callType === 'lost_child' }).catch(() => {});
+  const warning = sender.repeats >= HELP_REPEAT_WARN ? 'Patrol already has several requests from this phone. Stay where you are. If things get worse, call 911.' : undefined;
+  return res.status(201).json({ ok: true, reference: out.call_no, token, status: 'received', ...(warning ? { warning } : {}) });
+});
 
 // ---------------------------------------------------------------- locating a caller
 // A guest who cannot say where they are: dispatch texts them a one-time link, and when they tap it and allow it, their
@@ -601,7 +709,7 @@ publicRouter.post('/locate/:token', validate(z.object({ lat: z.number().min(-90)
   if (!c) throw notFound('This link has expired');
   const now = nowIn(c.timezone);
   const acc = req.body.accuracy === undefined ? null : Math.round(req.body.accuracy);
-  await pool.query('UPDATE dispatch_calls SET gps_lat = ?, gps_lng = ?, located_at = ?, located_accuracy_m = ? WHERE id = ?', [req.body.lat, req.body.lng, now, acc, c.id]);
+  await relocate(c, req.body.lat, req.body.lng, acc, now); // the place words follow the new position
   await pool.query("INSERT INTO dispatch_events (tenant_id, call_id, at, kind, note) VALUES (?, ?, ?, 'note', ?)", [c.tenant_id, c.id, now, `Caller shared their location${acc !== null ? ` (within about ${acc} m)` : ''}`]);
   // Everyone on the call sees it at once.
   const staff = (await rows(pool, 'SELECT staff_id FROM dispatch_responders WHERE tenant_id = ? AND call_id = ?', [c.tenant_id, c.id])).map((r) => r.staff_id);
@@ -609,4 +717,4 @@ publicRouter.post('/locate/:token', validate(z.object({ lat: z.number().min(-90)
   res.json({ ok: true, mountain: c.mountain });
 });
 
-module.exports = { router, publicRouter, createCall, callNo, senderKey, guestNumbers, alertNewRequest }; // callNo, senderKey: Text HELP (lib/helpline.js)
+module.exports = { router, publicRouter, createCall, callNo, senderKey, guestNumbers, alertNewRequest, relocate, cleanRequest, NOBODY }; // callNo, senderKey: Text HELP (lib/helpline.js)

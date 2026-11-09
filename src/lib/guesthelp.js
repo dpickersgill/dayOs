@@ -113,7 +113,8 @@ function autoLocation({ place_text: placeText, gps_lat: lat, gps_lng: lng, locat
   else if (a.tower) parts.push(`Lift tower ${a.tower}`);
   else if (a.lift_name) parts.push(`Last rode ${a.lift_name}`);
   if (a.where && a.where !== 'unknown') parts.push(WHERE[a.where]);
-  if (!parts.length && lat != null && lng != null) parts.push(`Phone location${acc != null ? `, within about ${acc} m` : ''}`);
+  // "No mapped place within 600 m" (help/places) is said, and the phone's position follows it.
+  if ((!parts.length || /^No mapped place/.test(String(placeText || ''))) && lat != null && lng != null) parts.push(`Phone location${acc != null ? `, within about ${acc} m` : ''}`);
   return (parts.join('. ') || 'Not given yet (guest help page)').slice(0, 255);
 }
 

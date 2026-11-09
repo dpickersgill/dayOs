@@ -179,24 +179,23 @@ test('lost child: the guest\'s report opens a Lost child call (the school\'s cal
   assert.notEqual(h1.token, l1.token);
 });
 
-test('dedupe: a retry, or the same phone again within 2 minutes, joins the same call; another phone does not', async () => {
+test('dedupe: a retry of the same press joins its call; the same phone pressing again is a new call, linked; another phone is its own', async () => {
   const dev = { 'x-device': 'dedupe-device-abcdef01' };
   const key = rid();
   const first = ok(await help(A, { kind: 'help', rid: key }, dev), 201);
   const retry = ok(await help(A, { kind: 'help', rid: key, gps_lat: 44.3, gps_lng: -71.3, accuracy: 15 }, { 'x-device': 'other-phone-entirely-01' }), 200);
   assert.equal(retry.joined, true); assert.equal(retry.token, first.token); assert.equal(retry.reference, first.reference);
   assert.equal(Number((await callOf(first.token)).gps_lat), 44.3, 'a retry with the location fills it in');
-  const again = ok(await help(A, { kind: 'help', rid: rid() }, dev), 200);
-  assert.equal(again.token, first.token, 'the same phone pressing again joins');
+  const again = ok(await help(A, { kind: 'help', rid: rid() }, dev), 201);
+  assert.notEqual(again.token, first.token, 'the same phone pressing again may be someone else: its own call');
   const c = await callOf(first.token);
-  assert.ok((await q('SELECT note FROM dispatch_events WHERE call_id = ?', [c.id])).some((e) => /asked again/.test(e.note)));
+  assert.equal(Number((await callOf(again.token)).same_phone_of), Number(c.id), 'linked to the earlier call');
+  assert.ok((await q('SELECT note FROM dispatch_events WHERE call_id = ?', [c.id])).some((e) => /same phone asked again/.test(e.note)));
   const otherPhone = ok(await help(A, { kind: 'help', rid: rid() }, { 'x-device': 'dedupe-device-abcdef02' }), 201);
   assert.notEqual(otherPhone.token, first.token);
+  assert.equal((await callOf(otherPhone.token)).same_phone_of, null);
   const noDevice = ok(await help(A, { kind: 'help', rid: rid() }), 201);
-  assert.notEqual(noDevice.token, first.token, 'without a phone id nothing joins by address (a lodge\'s Wi-Fi)');
-  // Two minutes later the same phone makes a new call.
-  await pool.query('UPDATE dispatch_calls SET received_at = received_at - INTERVAL 3 MINUTE WHERE id = ?', [c.id]);
-  assert.notEqual(ok(await help(A, { kind: 'help', rid: rid() }, dev), 201).token, first.token);
+  assert.equal((await callOf(noDevice.token)).same_phone_of, null, 'without a phone id nothing links by address (a lodge\'s Wi-Fi)');
   // B never joins A's call, even with A's key.
   const atB = ok(await help(B, { kind: 'help', rid: key }, dev), 201);
   assert.notEqual(atB.token, first.token);

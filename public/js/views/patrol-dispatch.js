@@ -33,13 +33,19 @@ async function lostChild(callId) {
 // A guest's lost child report (help/guest) has no school record or photo: its details are in the call's Guest section.
 const lostBits = (c) => (c.call_type === 'lost_child' ? [state('Lost child', 'bad'), c.source === 'school' ? button('Child\'s photo', () => lostChild(c.id), { small: true }) : null] : []);
 
+// No one on duty got the phone alert for this request (dispatch.js alertNewRequest): owners and managers were alerted
+// and the patrol phone texted instead. Red until someone is sent.
+const nobodyBanner = () => h('div', { class: 'nobody-banner', role: 'alert' }, h('b', null, 'No one on duty was alerted.'), ' Radio patrol or send someone now.');
+
 function callCard(c, onOpen) {
   const who = c.responders.map((r) => r.callsign || `${r.first_name} ${r.last_name[0]}.`).join(', ');
   return h('article', { class: 'call-card', 'data-priority': c.priority },
+    c.nobody_alerted && c.status === 'new' ? nobodyBanner() : null,
     h('div', { class: 'spread' }, h('b', null, `Call ${c.call_no}`), h('span', { class: 'row' }, c.priority !== 'normal' ? state(label(c.priority), prioTone[c.priority]) : null, state(statusText[c.status], statusTone[c.status]))),
     h('div', null, h('b', null, c.location)),
     c.description ? h('div', null, c.description) : null,
     c.call_type === 'lost_child' ? h('div', { class: 'row' }, ...lostBits(c)) : null,
+    c.same_phone_no ? h('div', null, state(`From the same phone as call ${c.same_phone_no}`, 'warn')) : null,
     h('div', { class: 'muted' }, `${fmtTime(c.received_at)} · ${c.source === 'guest' ? 'Guest request' : c.source === 'sms' ? 'Text HELP' : label(c.source)}${c.caller_name ? ` · ${c.caller_name}` : ''}${c.caller_phone ? ` · ${c.caller_phone}` : ''}`),
     h('div', null, who ? `Responding: ${who}` : h('span', { class: 'muted' }, 'No one sent yet')),
     // Repeated guest requests from one phone or address, grouped here so a flood does not bury the board. Each is listed.
@@ -86,7 +92,7 @@ function newCallDialog(again) {
   const fixNote = h('p', { class: 'muted small', role: 'status', 'aria-live': 'polite' });
   let at = null; // the position "Use my location" found: sent with the call so its location panel can show it
   where.addEventListener('input', () => { if (at && !where.value.trim()) at = null; });
-  // help/places: the patroller's own position, in the words patrollers use ("Near Ridge Run, below Summit Quad tower 7").
+  // help/places: the patroller's own position, in the words patrollers use ("Near Summit Quad tower 7, about 20 m").
   const useMine = button('Use my location', async () => {
     fixNote.textContent = 'Finding your location…';
     const f = await bestFix({ waitMs: 8000, good: 15 });
@@ -94,8 +100,8 @@ function newCallDialog(again) {
     at = f;
     try {
       const { words } = await get(`/patrol/places/describe?lat=${f.lat}&lng=${f.lng}&acc=${Math.round(f.acc)}`);
-      where.value = words ? words.text : `${f.lat.toFixed(5)}, ${f.lng.toFixed(5)}`;
-      fixNote.textContent = words ? `Within about ${Math.round(f.acc)} m. Check the words and change them if you need to.` : `Within about ${Math.round(f.acc)} m. Nothing is mapped near here, so the position is used.`;
+      where.value = words && words.place_id ? words.text : `${f.lat.toFixed(5)}, ${f.lng.toFixed(5)}`;
+      fixNote.textContent = words && words.place_id ? `Within about ${Math.round(f.acc)} m. Check the words and change them if you need to.` : `Within about ${Math.round(f.acc)} m. Nothing is mapped near here, so the position is used.`;
     } catch (_) { where.value = `${f.lat.toFixed(5)}, ${f.lng.toFixed(5)}`; fixNote.textContent = `Within about ${Math.round(f.acc)} m.`; }
   }, { small: true });
   formDialog('New call', h('div', { class: 'form' },
@@ -124,6 +130,9 @@ async function openCall(id, again) {
       h('div', { class: 'spread' }, h('h2', null, `Call ${c.call_no}`), h('span', { class: 'row' }, state(label(c.priority), prioTone[c.priority]), state(statusText[c.status], statusTone[c.status]))),
       h('p', null, h('b', null, c.location), c.description ? ` · ${c.description}` : ''),
       c.call_type === 'lost_child' ? h('div', { class: 'row' }, ...lostBits(c)) : null,
+      c.nobody_alerted && c.status === 'new' ? nobodyBanner() : null,
+      c.same_phone_no || (c.same_phone_later && c.same_phone_later.length) ? h('p', null, state([c.same_phone_no ? `From the same phone as call ${c.same_phone_no}.` : null,
+        c.same_phone_later && c.same_phone_later.length ? `The same phone asked again: call ${c.same_phone_later.map((x) => x.call_no).join(', ')}.` : null].filter(Boolean).join(' '), 'warn')) : null,
       h('p', { class: 'muted' }, `${fmtDateTime(c.received_at)} · ${c.source === 'guest' ? 'Guest request' : c.source === 'sms' ? 'Text HELP' : label(c.source)}${c.caller_name ? ` · ${c.caller_name}` : ''}${c.caller_phone ? ` · ${c.caller_phone}` : ''}`),
       c.source === 'sms' ? textHelpBlock(c) : null,
       whereBlock(c, live),

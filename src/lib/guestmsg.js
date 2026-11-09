@@ -12,6 +12,7 @@ const { nowIn } = require('./util');
 const { bad, conflict } = require('./errors');
 
 const MAX = 1000;
+const TEXT_CAP = () => Number(process.env.HELP_SMS_CALL_CAP) || 20;
 const ACTIVE = ['new', 'dispatched', 'on_scene', 'transporting'];
 
 // The call status a guest sees, in their words. Dispatch's own statuses map onto four.
@@ -35,7 +36,14 @@ async function toGuest(db, call, body, staff) {
   const now = nowIn(tz);
   const SMS = require('./sms');
   let texted = false; let error = null;
-  if (call.caller_phone && SMS.enabled() && (SMS.e164(call.caller_phone) || (call.source === 'sms' && /^\+[1-9]\d{7,14}$/.test(String(call.caller_phone))))) {
+  // A phone the guest typed on the help page gets at most 20 texts a call, like a Text HELP call (lib/helpline.js counts
+  // those). Past that, messages still show on the guest's page.
+  let capped = false;
+  if (call.source !== 'sms' && call.caller_phone && SMS.enabled()) {
+    const n = await one(db, "SELECT COUNT(*) AS n FROM dispatch_messages WHERE tenant_id = ? AND call_id = ? AND direction = 'to_guest' AND channel = 'sms'", [call.tenant_id, call.id]);
+    if (Number(n.n) >= TEXT_CAP()) { capped = true; error = `This call has had ${TEXT_CAP()} texts, the limit. The message is on the guest's page. Call the guest.`; }
+  }
+  if (!capped && call.caller_phone && SMS.enabled() && (SMS.e164(call.caller_phone) || (call.source === 'sms' && /^\+[1-9]\d{7,14}$/.test(String(call.caller_phone))))) {
     const t = await one(db, 'SELECT name FROM tenants WHERE id = ?', [call.tenant_id]);
     const r = await SMS.send({ tenantId: call.tenant_id, to: call.caller_phone, body: `${t.name} ski patrol: ${text}`.slice(0, 600) });
     texted = Boolean(r.ok); error = r.ok ? null : r.error;

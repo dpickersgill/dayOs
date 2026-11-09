@@ -36,23 +36,25 @@ export function guestSection(c, redraw) {
     if (!body.trim()) return;
     try {
       const r = await post(`/patrol/dispatch/${c.id}/messages`, { body: body.trim() });
-      toast(r.texted ? 'Sent to the guest (page and text)' : 'Sent to the guest');
+      if (g.by_text) toast(r.texted ? 'Texted to the guest' : `Not texted: ${r.error || 'texts are not set up'}. Call the guest.`, r.texted ? undefined : 'error');
+      else toast(r.texted ? 'Sent to the guest (page and text)' : r.error ? `Sent to the guest's page. Not texted: ${r.error}` : 'Sent to the guest');
       text.value = '';
       await redraw();
     } catch (err) { toast(err.message, 'error'); }
   };
   const msgs = h('ul', { class: 'guest-msgs' }, g.messages.length ? g.messages.map((m) => h('li', { class: m.direction === 'from_guest' ? 'from-guest' : 'to-guest' },
     h('span', { class: 'muted' }, `${fmtTime(m.at)} ${m.direction === 'from_guest' ? 'Guest' : 'Dispatch'}${m.channel === 'sms' ? ' (text)' : ''}: `), m.body,
-    m.direction === 'to_guest' ? h('span', { class: 'muted' }, m.delivered ? ' Seen' : ' Not seen yet') : null)) : h('li', { class: 'muted' }, 'No messages yet.'));
+    m.direction === 'to_guest' && !g.by_text ? h('span', { class: 'muted' }, m.delivered ? ' Seen' : ' Not seen yet') : null)) : h('li', { class: 'muted' }, 'No messages yet.'));
   return appendTo(box,
-    h('h3', null, 'From the guest'),
-    facts.length ? h('dl', { class: 'facts' }, facts.flatMap(([k, v]) => [h('dt', null, k), h('dd', null, v)])) : h('p', { class: 'muted' }, 'No answers yet. They appear here as the guest taps them.'),
+    h('h3', null, g.by_text ? 'Texts with the guest' : 'From the guest'),
+    g.by_text ? null : facts.length ? h('dl', { class: 'facts' }, facts.flatMap(([k, v]) => [h('dt', null, k), h('dd', null, v)])) : h('p', { class: 'muted' }, 'No answers yet. They appear here as the guest taps them.'),
     where,
     h('h3', null, 'Messages'), msgs,
     live ? h('div', { class: 'stack' },
       h('div', { class: 'row guest-quick' }, QUICK.map(([en, sp]) => button(es ? sp : en, () => send(es ? sp : en), { small: true }))),
       h('div', { class: 'row' }, text, button('Send', () => send(text.value), { kind: 'primary' })),
-      h('p', { class: 'muted' }, g.can_text ? 'Messages show on the guest’s page and are texted to the phone they gave.' : 'Messages show on the guest’s page while it is open.')) : null);
+      h('p', { class: 'muted' }, g.by_text ? (g.can_text ? 'Messages are texted to the guest’s phone, from the help number.' : g.opted_out ? 'This phone texted STOP, so patrol cannot text it until it texts START or HELP. Call them.' : 'Texts are not set up. Call the guest.')
+        : g.can_text ? 'Messages show on the guest’s page and are texted to the phone they gave.' : 'Messages show on the guest’s page while it is open.')) : null);
 }
 function appendTo(el, ...kids) { for (const k of kids) if (k) el.append(k); return el; }
 

@@ -27,6 +27,7 @@ const TOKEN = /^[0-9a-f]{32}$/;
 const KEEP_HOURS = 24; // the status page works for a day after the request
 const LIVE_HOURS = 2; // live location stops 2 hours after the request
 const TRAIL = 10; // positions kept per call
+const PHONE_CHANGES = 3; // times a guest may change the phone they gave, per request
 
 // Limits per call (the guest token), on top of the guest pages' own limit per address.
 const limit = (name, windowMs, envMax, max) => counter({ name, windowMs, max: Number(process.env[envMax]) || max });
@@ -71,7 +72,7 @@ publicRouter.get('/:slug/help/:token', async (req, res) => {
     mountain: c.mountain, reference: callNo(c), status: GM.guestStatus(c.status), lost_child: c.call_type === 'lost_child', who: c.who, lang: c.lang,
     messages: messages.map((m) => ({ id: m.id, from: m.direction === 'to_guest' ? 'patrol' : 'you', body: m.body, at: m.at })),
     ...(await require('./dispatch').guestNumbers(c.tenant_id)), live: liveOn(c),
-    answered: Object.keys(a).filter((k) => !['auto_location', 'lift_name', 'lift_not_sure'].includes(k)).concat(a.lift_not_sure ? ['lift'] : [], c.caller_phone ? ['phone'] : []),
+    answered: Object.keys(a).filter((k) => !['auto_location', 'lift_name', 'lift_not_sure', 'phone_changes'].includes(k)).concat(a.lift_not_sure ? ['lift'] : [], c.caller_phone ? ['phone'] : []),
   });
 });
 
@@ -109,7 +110,12 @@ publicRouter.patch('/:slug/help/:token', validate(answerFields), async (req, res
     }
   }
   if (b.who) sets.who = b.who;
-  if (b.phone) sets.caller_phone = b.phone;
+  // The phone patrol may text: set once, then changed at most 3 times a call (each number gets texts, up to 20 a call).
+  let phoneKept = false;
+  if (b.phone && b.phone !== c.caller_phone) {
+    if (!c.caller_phone) sets.caller_phone = b.phone;
+    else if ((Number(a.phone_changes) || 0) < PHONE_CHANGES) { sets.caller_phone = b.phone; a.phone_changes = (Number(a.phone_changes) || 0) + 1; } else phoneKept = true;
+  }
   // What happened, in the guest's words, becomes the call's description; a lost child's details make it up instead.
   if (c.call_type === 'lost_child' && ['child_name', 'child_age', 'child_jacket', 'child_last_seen', 'what'].some((k) => b[k] !== undefined)) {
     sets.description = [`Lost child (guest report)${a.child_name ? `: ${a.child_name}` : ''}${a.child_age != null ? `, age ${a.child_age}` : ''}.`, a.child_jacket ? `Jacket ${a.child_jacket}.` : null,
@@ -125,7 +131,8 @@ publicRouter.patch('/:slug/help/:token', validate(answerFields), async (req, res
   const keys = Object.keys(sets);
   await pool.query(`UPDATE dispatch_calls SET ${keys.map((k) => `\`${k}\` = ?`).join(', ')} WHERE tenant_id = ? AND id = ?`, [...keys.map((k) => sets[k]), c.tenant_id, c.id]);
   if (yes.length) await note(c, `Guest says ${yes.map((k) => URGENT[k]).join(', ')}.${sets.priority ? ` Priority raised to ${sets.priority === 'high' ? 'High' : sets.priority}.` : ''}`);
-  res.json({ ok: true });
+  if (phoneKept) await note(c, `The guest tried to change the phone number again. Kept the one they gave before (${PHONE_CHANGES} changes a request).`);
+  res.json({ ok: true, ...(phoneKept ? { phone: 'kept' } : {}) });
 });
 
 publicRouter.post('/:slug/help/:token/position', validate(z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180), accuracy: z.number().min(0).max(100000).optional(), age_s: z.number().min(0).max(3600).optional() })), async (req, res) => {
