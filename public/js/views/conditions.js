@@ -71,15 +71,6 @@ async function drawDay(box) {
         await load();
       }, { kind: 'primary' });
       body.append(h('div', { class: 'form' }, field('Status', st), field('Opens', o), field('Closes', c), field('Note for guests', n)), h('div', { class: 'row' }, save));
-    } else if (ctx.me && ctx.me.role === 'staff') {
-      // Lift staff keep today's note for guests current, with the lifts and trails (the day itself is a manager's).
-      const n = input({ name: 'notes', maxlength: 500, value: d && d.notes ? d.notes : '', placeholder: 'Shown to guests, such as "Summit Quad on wind hold"' });
-      const save = button('Save note', async () => {
-        await put(`/schedule/days/${date.value}/note`, { notes: n.value.trim() || null });
-        toast('Note saved');
-        await load();
-      });
-      body.append(h('div', { class: 'form' }, field('Note for guests', n)), h('div', { class: 'row' }, save));
     }
   }
   date.addEventListener('change', () => date.value && load().catch((e) => clear(body).append(errorBox(e))));

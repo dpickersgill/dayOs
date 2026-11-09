@@ -1,14 +1,14 @@
 // Ready for you (AI release 1): what the assistant drafted for this person to approve. Today shows a card per draft;
 // the Inbox shows how many are waiting. Nothing is published or sent until a person presses Approve, and then it is done
-// as them, with their own permissions (src/lib/proposals.js). Every draft says "Drafted by the assistant" until a person
-// changes it.
+// as them, with their own permissions (src/lib/proposals.js). A draft the assistant wrote says "Drafted by the assistant"
+// until a person changes it; one filled in by code without AI says "Filled in from today's records" (the server's label).
 import { get, post } from '../api.js';
 import { h, clear, button, toast, fail } from '../ui.js';
 
 const DRAFTED = 'Drafted by the assistant';
 const EDITED = 'Edited by you';
 const FALLBACK = {
-  no_ai: 'Filled in from today’s records. No AI was used.',
+  no_ai: 'No AI was used.',
   cap: 'This month’s assistant allowance is used, so this is the plain version from today’s records.',
   unavailable: 'The assistant could not be reached, so this is the plain version from today’s records.',
   facts: 'The assistant’s wording had a number or name that is not in your records, so this is the plain version from today’s records.',
@@ -56,7 +56,8 @@ function cardFor(p, done) {
   return p.kind === 'conditions_update' ? conditionsCard(p, done) : genericCard(p, done);
 }
 
-function labelChip() { return h('span', { class: 'ready-chip' }, DRAFTED); }
+const labelOf = (p) => p.label || DRAFTED;
+function labelChip(p) { return h('span', { class: 'ready-chip' }, labelOf(p)); }
 
 function actions(p, card, collect, done, approvedText) {
   const approve = button('Approve', async () => {
@@ -78,7 +79,7 @@ function actions(p, card, collect, done, approvedText) {
 
 function genericCard(p, done) {
   const card = h('article', { class: 'ready-card', 'aria-label': p.title });
-  card.append(h('header', null, h('h3', null, p.title), labelChip()), p.summary ? h('p', null, p.summary) : null,
+  card.append(h('header', null, h('h3', null, p.title), labelChip(p)), p.summary ? h('p', null, p.summary) : null,
     actions(p, card, null, done, () => 'Approved'));
   return card;
 }
@@ -102,7 +103,7 @@ async function copyText(el, what) {
 function conditionsCard(p, done) {
   const v = p.preview || {};
   const card = h('article', { class: 'ready-card', 'aria-label': p.title });
-  const chip = labelChip();
+  const chip = labelChip(p);
   const max = Object.fromEntries((p.editable || []).map((f) => [f.key, f.max]));
   const note = area(v.note, { rows: 3, max: max.note, label: 'Conditions page note (published on Approve)' });
   const report = area(v.snow_report, { rows: 5, max: max.snow_report, label: 'Snow report' });
@@ -115,7 +116,7 @@ function conditionsCard(p, done) {
   const fields = { note: note.el, snow_report: report.el, social: social.el, email_subject: subject, email_body: body.el };
   const original = Object.fromEntries(Object.entries(fields).map(([k, el]) => [k, el.value]));
   const changed = () => Object.entries(fields).some(([k, el]) => el.value !== original[k]);
-  for (const el of Object.values(fields)) el.addEventListener('input', () => { chip.textContent = changed() ? EDITED : DRAFTED; chip.classList.toggle('is-edited', changed()); if (el === social.el) count(); });
+  for (const el of Object.values(fields)) el.addEventListener('input', () => { chip.textContent = changed() ? EDITED : labelOf(p); chip.classList.toggle('is-edited', changed()); if (el === social.el) count(); });
 
   const viewer = p.viewer || {};
   const sendBox = h('input', { type: 'checkbox', id: nextId('rd'), disabled: !viewer.can_email });

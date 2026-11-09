@@ -211,31 +211,38 @@ test('another mountain\'s draft does not exist for you', async () => {
 // ---------------------------------------------------------------- the conditions writer
 const GOOD = { note: 'Open 9 AM to 4 PM with 4 in of new snow on a 32 in base. Summit Quad is on wind hold.', snow_report: 'Good morning! We got 4 inches overnight on a 32 inch base. Easy Rider Chair is spinning, Summit Quad is on wind hold, and Bunny Hollow was groomed. 1 of 2 lifts and 2 of 3 trails are open.', social: '4 in new at Pine Knob! Easy Rider Chair is open, Summit Quad on wind hold. Open 9 to 4.', email_subject: '4 inches of new snow today', email_body: 'Hi {first_name},\n\n4 inches fell overnight. See you on the hill.' };
 
-test('without an AI key, Draft now fills the template from the same records, and lift staff can approve it', async () => {
+test('without an AI key, Draft now fills the template from the same records, and a manager approves it', async () => {
   aiOff();
   const n = calls.length;
-  const d = ok(await api('POST', '/ai/conditions/draft', { token: U.staff }));
+  is(await api('POST', '/ai/conditions/draft', { token: U.staff }), 403, 'lift staff do not draft the public update');
+  const d = ok(await api('POST', '/ai/conditions/draft', { token: U.manager }));
   assert.equal(d.by, 'template'); assert.equal(d.reason, 'no_ai');
   assert.equal(calls.length, n, 'nothing sent to a model');
-  const p = ok(await api('GET', '/ai/proposals', { token: U.staff })).data.find((x) => x.id === d.id);
-  assert.equal(p.kind, 'conditions_update'); assert.equal(p.label, 'Drafted by the assistant');
+  assert.ok(!ok(await api('GET', '/ai/proposals', { token: U.staff })).data.some((x) => x.id === d.id), 'lift staff do not see it');
+  const p = ok(await api('GET', '/ai/proposals', { token: U.manager })).data.find((x) => x.id === d.id);
+  // No AI was used, so the card must not say the assistant drafted it.
+  assert.equal(p.kind, 'conditions_update'); assert.equal(p.label, 'Filled in from today\u2019s records');
   assert.equal(p.preview.by, 'template');
   assert.match(p.preview.note, /Open 9 AM to 4 PM\. 1 of 2 lifts and 2 of 3 trails open\. 4 in of new snow, 32 in base\. Summit Quad \(wind hold\)\. Groomed: Bunny Hollow\./);
   assert.ok(p.preview.social.length <= 280);
   assert.match(p.preview.email_body, /^Hi \{first_name\},/);
-  assert.equal(p.viewer.can_email, false, 'lift staff do not email customers');
   assert.equal(writer.check(p.preview, await writer.gather(pool, T.id)).length, 0, 'the template keeps to the facts');
   assert.ok(!ok(await api('GET', '/ai/proposals', { token: U.counter })).data.some((x) => x.id === d.id), 'counter staff do not see it');
   is(await api('POST', '/ai/conditions/draft', { token: U.counter }), 403);
   is(await api('POST', '/ai/conditions/draft', { token: U.patrol }), 403, 'patrol changes lifts, but does not draft the public update');
-  // Staff approve with an edit: the note is published on the conditions feed, as them.
-  const r = ok(await api('POST', `/ai/proposals/${d.id}/approve`, { token: U.staff, body: { edits: { note: 'Open 9 to 4. Summit Quad on wind hold for now.' } } }));
+  // Lift staff are refused (it publishes on a public page), and the draft still waits.
+  const refused = await api('POST', `/ai/proposals/${d.id}/approve`, { token: U.staff, body: { edits: { note: 'Staff wrote this' } } });
+  is(refused, 403);
+  assert.equal((await row(d.id)).status, 'pending');
+  assert.notEqual(ok(await api('GET', `/public/${slug}/conditions`)).day.notes, 'Staff wrote this');
+  // The manager approves with an edit: the note is published on the conditions feed, as them.
+  const r = ok(await api('POST', `/ai/proposals/${d.id}/approve`, { token: U.manager, body: { edits: { note: 'Open 9 to 4. Summit Quad on wind hold for now.' } } }));
   assert.deepEqual(r.result, { published: true, emailed: false });
   const feed = ok(await api('GET', `/public/${slug}/conditions`));
   assert.equal(feed.day.notes, 'Open 9 to 4. Summit Quad on wind hold for now.');
   assert.equal(feed.day.status, 'open', 'the day itself is unchanged');
   const [[a]] = await pool.query("SELECT user_id FROM audit_log WHERE tenant_id = ? AND action = 'set_day_note' ORDER BY id DESC LIMIT 1", [T.id]);
-  assert.equal(Number(a.user_id), U.staffId);
+  assert.equal(Number(a.user_id), U.managerId);
 });
 
 test('with the model: facts and the mountain\'s voice go in (numbers hidden), the cost is logged, and a good draft is kept', async () => {
@@ -303,10 +310,10 @@ test('Also email passholders: only a manager, only when ticked, through Messages
     const [oi] = await pool.query("INSERT INTO order_items (tenant_id, order_id, product_id, quantity, unit_price_cents, line_kind) VALUES (?, ?, ?, 1, 50000, 'ticket')", [T.id, or.insertId, pr.insertId]);
     await pool.query('INSERT INTO tickets (tenant_id, order_item_id, person_id, product_id, code, valid_from, valid_to) VALUES (?, ?, ?, ?, ?, ?, ?)', [T.id, oi.insertId, p.id, pr.insertId, `PC${suffix}${name}`.slice(0, 20), '2020-01-01', '2099-12-31']);
   }
-  const d = ok(await api('POST', '/ai/conditions/draft', { token: U.staff }));
-  // Lift staff cannot tick it: refused before anything is claimed, and the draft still waits.
+  const d = ok(await api('POST', '/ai/conditions/draft', { token: U.manager }));
+  // Lift staff cannot approve it at all, with or without the email: refused before anything is claimed.
   const r = await api('POST', `/ai/proposals/${d.id}/approve`, { token: U.staff, body: { edits: { send_email: true } } });
-  is(r, 403); assert.match(r.body.error, /Only managers/);
+  is(r, 403);
   assert.equal((await row(d.id)).status, 'pending');
   const forManager = ok(await api('GET', '/ai/proposals', { token: U.manager })).data.find((x) => x.id === d.id);
   assert.equal(forManager.viewer.can_email, true); assert.equal(forManager.viewer.passholders, 1);
@@ -347,10 +354,17 @@ test('the morning run drafts once a day at the mountain\'s time, only on a day o
   assert.equal((await pool.query("SELECT COUNT(*) AS n FROM ai_proposals WHERE tenant_id = ? AND status = 'pending'", [T.id]))[0][0].n, 1);
 });
 
-test('lift staff can set the day\'s public note on its own; counter staff cannot', async () => {
-  ok(await api('PUT', `/schedule/days/${T.today}/note`, { token: U.staff, body: { notes: 'Night skiing until 9' } }));
+test('the day\'s public note on its own: owners and managers only; lift staff and counter staff get 403', async () => {
+  ok(await api('PUT', `/schedule/days/${T.today}/note`, { token: U.manager, body: { notes: 'Night skiing until 9' } }));
   assert.equal(ok(await api('GET', `/public/${slug}/conditions`)).day.notes, 'Night skiing until 9');
+  ok(await api('PUT', `/schedule/days/${T.today}/note`, { token: U.owner, body: { notes: 'Night skiing until 9' } }));
+  is(await api('PUT', `/schedule/days/${T.today}/note`, { token: U.staff, body: { notes: 'Staff wrote this' } }), 403, 'it changes a public page');
   is(await api('PUT', `/schedule/days/${T.today}/note`, { token: U.counter, body: { notes: 'x' } }), 403);
+  assert.equal(ok(await api('GET', `/public/${slug}/conditions`)).day.notes, 'Night skiing until 9');
+  // The shared lib refuses too, whoever calls it.
+  await assert.rejects(require('../src/lib/conditionsnote').setNote(pool, { auth: { tenantId: T.id, userId: U.staffId, role: 'staff' } }, T.today, 'x'), (e) => e.status === 403);
+  assert.deepEqual(writer.ROLES, ['owner', 'manager']);
+  assert.deepEqual(proposals.kindOf('conditions_update').roles, ['owner', 'manager'], 'the kind is for owners and managers');
   is(await api('PUT', `/schedule/days/${T.today}`, { token: U.staff, body: { status: 'closed' } }), 403, 'the day itself stays a manager\'s');
 });
 

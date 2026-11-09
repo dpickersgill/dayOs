@@ -37,7 +37,7 @@ router.post('/conditions/draft', draftLimit, async (req, res) => {
   res.status(201).json(out);
 });
 
-router.get('/conditions/settings', requireRole('manager', 'staff'), async (req, res) => {
+router.get('/conditions/settings', requireRole('manager'), async (req, res) => {
   const on = new Set(await modulesLib.enabledKeys(req.auth.tenantId));
   res.json({ ...(await writer.settingsOf(pool, req.auth.tenantId)), available: writer.NEEDS.every((k) => on.has(k)) });
 });

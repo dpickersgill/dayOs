@@ -25,7 +25,10 @@ const proposals = require('./proposals');
 const modulesLib = require('./modules');
 
 const KIND = 'conditions_update';
-const ROLES = ['owner', 'manager', 'staff']; // staff: the lift and mountain crew who keep lifts and trails current today
+// Owners and managers only: approving publishes the note on the public conditions page (2026.11.15: lift staff no longer
+// approve it, since that widened who can change a public page). Lift staff keep the lifts and trails current; a manager
+// reads the morning draft and approves it.
+const ROLES = ['owner', 'manager'];
 const NEEDS = ['assistant_plus', 'conditions'];
 const SOCIAL_MAX = 280;
 const NOTE_MAX = 500;

@@ -4031,10 +4031,10 @@ label.check-hit { display: inline-flex; align-items: center; justify-content: ce
 .brief-grid { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px; align-items: start; }
 .brief-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 20px 22px; max-width: 760px; }
 .brief-head h2 { margin: 2px 0 12px; font-family: 'Barlow Condensed', 'Atkinson Hyperlegible', system-ui, sans-serif; font-weight: 600; font-size: 1.7rem; }
-.brief-kicker { margin: 0; color: var(--quiet); font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; }
+.brief-kicker { margin: 0; color: var(--quiet); font-size: .875rem; font-weight: 700; }
 .brief-summary { background: var(--accent-tint); border-left: 4px solid var(--accent-line); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 8px; }
 .brief-summary p { margin: 4px 0; font-size: 1.02rem; }
-.brief-sec h3, .brief-actions h3 { margin: 18px 0 4px; font-size: .95rem; text-transform: uppercase; letter-spacing: .05em; color: var(--accent-ink); border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.brief-sec h3, .brief-actions h3 { margin: 18px 0 4px; font-family: 'Barlow Condensed', 'Atkinson Hyperlegible', system-ui, sans-serif; font-size: 1.2rem; font-weight: 600; color: var(--accent-ink); border-bottom: 1px solid var(--line); padding-bottom: 4px; }
 .brief-sec ul { margin: 6px 0 0; padding-left: 20px; }
 .brief-sec li { margin: 3px 0; }
 .brief-action-list { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 8px; }

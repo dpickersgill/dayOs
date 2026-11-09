@@ -101,7 +101,7 @@ test('powder Saturday: snow and the crew report reach the brief, the AI brief is
   replies = [goodReply(data)];
   const b = await run(m, 'ops');
   assert.equal(b.source, 'ai');
-  assert.equal(b.label, 'Written by the assistant from today\'s data');
+  assert.equal(b.label, 'Drafted by the assistant');
   assert.equal(b.body.summary.length, 3);
   assert.ok(b.body.actions.length <= 3);
   for (const a of b.body.actions) assert.match(a.href, /^#\//);
@@ -138,7 +138,7 @@ test('rain: a number the facts do not hold sends the brief to the template (the 
   replies = [reply({ summary: [good.summary[0], 'Expect about 40% fewer visitors than usual.', good.summary[2]], sections: good.sections, actions: good.actions })];
   const b = await run(m, 'ops');
   assert.equal(b.source, 'template');
-  assert.equal(b.label, 'Made from today\'s data');
+  assert.equal(b.label, 'Filled in from today\u2019s records');
   const [[row]] = await pool.query('SELECT fallback_reason, cost_micros FROM morning_briefs WHERE id = ?', [b.id]);
   assert.equal(row.fallback_reason, 'facts');
   assert.ok(Number(row.cost_micros) > 0, 'the call still cost money and is still logged');
@@ -283,7 +283,8 @@ test('no duplicate sends: runs that repeat or overlap send each person one brief
   assert.deepEqual(briefs.map((x) => x.kind), ['ops', 'patrol', 'school'], 'one brief per kind, shared by everyone of that kind');
   // The emails: one page with a plain text part, the label, and links to the brief.
   const mgr = mail.slice(before).find((x) => x.To === m.emails.manager);
-  assert.match(mgr.HtmlBody, /Made from today&#39;s data|Made from today's data/);
+  assert.match(mgr.HtmlBody, /Filled in from today\u2019s records/);
+  assert.doesNotMatch(mgr.HtmlBody, /Drafted by the assistant/, 'a template brief never says the assistant drafted it');
   assert.match(mgr.TextBody, /Read it in the app: .*#\/brief/);
   assert.equal(mgr.Tag, 'morning-brief');
   // The next day is a new day.
@@ -329,7 +330,7 @@ test('settings: each person turns it on or off and picks the channel; owners and
   await B.ensure(pool, t, 'school', { sentOn: today, forDate: today, today, hours: null }, new Set(await modules.enabledKeys(m.id)));
   const page = ok(await api('GET', '/brief', { token: m.tokens.school }));
   assert.equal(page.brief.kind, 'school');
-  assert.equal(page.brief.label, 'Made from today\'s data');
+  assert.equal(page.brief.label, 'Filled in from today\u2019s records');
   const opsPage = ok(await api('GET', '/brief', { token: m.tokens.owner }));
   assert.ok(!opsPage.brief || opsPage.brief.kind === 'ops');
   assert.equal((await api('GET', `/brief/${page.brief.id}`, { token: m.tokens.owner })).status, 404, 'another kind\'s brief is not shown');
@@ -352,10 +353,170 @@ test('a lift\'s wind hold limit is set with its type, and old briefs and sends g
 });
 
 test('snapshots: read when the table and module exist, otherwise the live queries', async () => {
-  assert.deepEqual(D.dayFromForecast({ hours: [{ time: '2026-12-12T09:00', temp_f: 20, wind_mph: 10, gust_mph: 30, snow_in: 1 }, { time: '2026-12-12T13:00', temp_f: 26, wind_mph: 15, gust_mph: 41, snow_in: 2 }, { time: '2026-12-13T09:00', temp_f: 40, gust_mph: 90 }] }, '2026-12-12'),
-    { high_f: 26, low_f: 20, snow_in: 3, precip_in: null, wind_mph: 15, gust_mph: 41, code: null });
+  const plain = D.dayFromForecast({ hours: [{ time: '2026-12-12T09:00', temp_f: 20, wind_mph: 10, gust_mph: 30, snow_in: 1 }, { time: '2026-12-12T13:00', temp_f: 26, wind_mph: 15, gust_mph: 41, snow_in: 2 }, { time: '2026-12-13T09:00', temp_f: 40, gust_mph: 90 }] }, '2026-12-12');
+  assert.deepEqual({ ...plain, wind: undefined }, { high_f: 26, low_f: 20, snow_in: 3, precip_in: null, wind_mph: 15, gust_mph: 41, code: null, wind: undefined });
   assert.equal(D.ticketsFromPresales({ days: [{ date: '2026-12-12', tickets: 210 }] }, '2026-12-12'), 210);
   assert.equal(D.ticketsFromPresales({ '2026-12-12': { tickets: 5 } }, '2026-12-12'), 5);
+  // The daily job's own shape (lib/snapshots.js presalesFrom): tickets is { sold, online, by_product }.
+  assert.equal(D.ticketsFromPresales({ as_of: '2026-12-12T06:00:00Z', days: [{ date: '2026-12-12', days_ahead: 0, tickets: { sold: 412, online: 300, by_product: {} } }] }, '2026-12-12'), 412);
   D.resetSnapshotCheck();
-  assert.equal(await D.hasSnapshots(pool), false, 'not on this branch: the brief reads live');
+  assert.equal(await D.hasSnapshots(pool), true, 'ai/data is merged: the table and lib/snapshots.js are here');
+});
+
+// ---------------------------------------------------------------- 2026.11.15: snapshots, wind, labels, headings
+/** The daily job's forecast snapshot shape: base and summit, hourly, on the mountain's clock. */
+function hourlySnap(date, { base, summit }) {
+  const hrs = Array.from({ length: 24 }, (_, h) => `${date}T${String(h).padStart(2, '0')}:00`);
+  const pt = (role, gustAt) => ({ role, lat: 40, lng: -105, elevation_m: role === 'summit' ? 3400 : 2900,
+    hourly: { time: hrs, temp_f: hrs.map((_, h) => (role === 'summit' ? 10 : 20) + (h > 12 ? 4 : 0)), precip_in: hrs.map(() => 0), snow_in: hrs.map((_, h) => (h < 6 ? 0.5 : 0)),
+      wind_mph: hrs.map((_, h) => Math.round(gustAt(h) / 2)), gust_mph: hrs.map((_, h) => gustAt(h)), weather_code: hrs.map(() => 3) } });
+  return { source: 'open-meteo', resolution: 'hourly', hours: 72, timezone: 'America/New_York', units: { temp: 'F', precip: 'in', snow: 'in', wind: 'mph' }, points: [pt('base', base), pt('summit', summit)] };
+}
+
+test('snapshots in use: the brief reads the morning forecast (hourly gusts in the operating hours, at base and summit) and the presales', async () => {
+  off();
+  const S = require('../../src/lib/snapshots');
+  const m = await F.mountain('Snapshot Bowl', { day: '2026-12-19' });
+  await pool.query("INSERT INTO calendar_days (tenant_id, on_date, status, open_time, close_time) VALUES (?, '2026-12-19', 'open', '09:00:00', '16:00:00')", [m.id]);
+  await pool.query("INSERT INTO lifts (tenant_id, name, status, wind_hold_mph) VALUES (?, 'Summit Quad', 'open', 45), (?, 'Valley Double', 'open', 60)", [m.id, m.id]);
+  // Gusts of 80 at 3 AM (before opening) must not count; 47 at the summit at 11 AM does; the base stays at 30.
+  await S.save(pool, m.id, '2026-12-19', 'forecast', hourlySnap('2026-12-19', { base: () => 30, summit: (h) => (h === 3 ? 80 : h === 11 ? 47 : 35) }));
+  await S.save(pool, m.id, '2026-12-19', 'presales', { as_of: '2026-12-19T06:00:00Z', days: [{ date: '2026-12-19', days_ahead: 0, tickets: { sold: 777, online: 500, by_product: {} } }] });
+  D.resetSnapshotCheck();
+  const data = await F.facts(m, 'ops');
+  assert.equal(data.weather.source, 'snapshot');
+  assert.equal(data.visitors.presold_tickets, 777, 'tickets sold ahead come from the presales snapshot');
+  assert.equal(data.weather.gust_mph, 80, 'the day\'s weather still shows the strongest gust of the day');
+  const wh = data.wind_holds;
+  assert.deepEqual(wh.lifts_over_limit, [{ lift: 'Summit Quad', limit_mph: 45, gust_mph: 47 }], 'the gust in the operating hours, not the 3 AM one');
+  assert.deepEqual(wh.lifts_near_limit, []);
+  assert.equal(wh.gusts_from, 'summit point');
+  assert.equal(wh.gusts_during, 'operating hours, 9:00 AM to 4:00 PM');
+  assert.deepEqual(wh.gusts_by_point, [{ point: 'base point', gust_mph: 30 }, { point: 'summit point', gust_mph: 47 }]);
+  assert.match(wh.caveat, /forecast at the summit point/);
+  // An earlier day's snapshot is never used for today.
+  const m2 = await F.mountain('Stale Basin', { day: '2026-12-20' });
+  await S.save(pool, m2.id, '2026-12-19', 'presales', { days: [{ date: '2026-12-20', tickets: { sold: 999 } }] });
+  const d2 = await F.facts(m2, 'ops');
+  assert.equal(d2.visitors.presold_tickets, 0, 'yesterday\'s presales snapshot is not today\'s');
+  // The backfill's daily shape reads too (whole day, one point).
+  const bf = D.dayFromForecast({ source: 'day_record', points: [{ role: 'map_point', lat: 40, lng: -105, elevation_m: null }], days: [{ date: '2026-12-19', high_f: 30, low_f: 10, snow_in: 2, precip_in: 0.2, wind_mph: 12, gust_mph: 33, weather_code: 71 }] }, '2026-12-19', { open: '09:00', close: '16:00' });
+  assert.equal(bf.gust_mph, 33); assert.equal(bf.wind.window, 'all_day');
+});
+
+test('wind: every comparison with a lift\'s limit says it is the forecast at a point, an early warning only, and it is in the facts the model gets', async () => {
+  on();
+  const m = await F.windDay();
+  const data = await F.facts(m, 'ops');
+  const wh = data.wind_holds;
+  assert.equal(wh.caveat, D.windCaveat('map_point'));
+  assert.match(wh.caveat, /forecast at the map point/);
+  assert.match(wh.caveat, /early warning only, not a reading at the lift/);
+  // The template: the line sits in the wind section, right after the comparisons.
+  const sec = W.template(data).sections.find((s) => /wind/i.test(s.title));
+  const at = sec.lines.findIndex((l) => /wind hold limit\./.test(l) && /Summit Quad/.test(l));
+  assert.ok(at >= 0);
+  assert.equal(sec.lines[at + 1], wh.caveat);
+  // The model gets it in the facts, and the rule to keep it.
+  replies = [goodReply(data)];
+  const n = calls.length;
+  const out = await W.write(data, { tenantId: m.id, kind: 'ops' });
+  assert.equal(calls.length, n + 1);
+  const sent = calls.at(-1);
+  assert.ok(sent.messages[0].content.includes(JSON.stringify(wh.caveat)), 'the caveat is in the facts given to the model');
+  assert.match(sent.system, /never say a lift is safe to run/);
+  assert.equal(out.source, 'ai');
+  // A model brief that drops the line gets it back under its wind section.
+  const t = W.template(data);
+  const dropped = t.sections.map((s) => ({ ...s, lines: s.lines.filter((l) => l !== wh.caveat) }));
+  replies = [reply({ summary: t.summary, sections: dropped, actions: t.actions })];
+  const back = await W.write(data, { tenantId: m.id, kind: 'ops' });
+  assert.equal(back.source, 'ai');
+  assert.ok(back.body.sections.find((s) => /wind/i.test(s.title)).lines.includes(wh.caveat));
+  // No comparison, no line: a calm day does not carry it.
+  const calm = await F.facts(await F.powderSaturday(), 'ops');
+  assert.ok(!W.template(calm).sections.flatMap((s) => s.lines).some((l) => /early warning/.test(l)));
+});
+
+test('wind: the brief never tells anyone to open a lift or that one is safe to run', async () => {
+  on();
+  const m = await F.windDay();
+  const data = await F.facts(m, 'ops');
+  const t = W.template(data);
+  for (const bad of [
+    { summary: ['Open today.', 'Summit Quad is safe to run.', 'Nothing else.'] },
+    { summary: t.summary, actions: [{ text: 'Open Valley Double at 9', href: '#/conditions' }] },
+    { summary: t.summary, sections: [{ title: 'Weather and wind', lines: ['Valley Double can run all day.'] }] },
+    { summary: t.summary, sections: [{ title: 'Weather and wind', lines: ['Gusts are fine to open the lifts.'] }] },
+  ]) {
+    replies = [reply({ sections: [], actions: [], ...bad })];
+    const out = await W.write(data, { tenantId: m.id, kind: 'ops' });
+    assert.equal(out.source, 'template', JSON.stringify(bad));
+    assert.equal(out.reason, 'go_ahead');
+  }
+  // The template itself, on every fixture day and kind, never says it either.
+  for (const [name, make] of Object.entries(F.ALL)) {
+    const fm = await make();
+    for (const kind of ['ops', 'patrol']) {
+      const fd = await F.facts(fm, kind);
+      const words = (b) => [...b.summary, ...b.sections.flatMap((s) => [s.title, ...s.lines]), ...b.actions.map((a) => a.text)];
+      for (const w of words(W.template(fd))) assert.ok(!W.goAheadIn(w, W.liftNamesOf(fd)), `${name} ${kind}: ${w}`);
+    }
+  }
+  assert.ok(!W.goAheadIn('Plan for wind holds on Summit Quad', ['Summit Quad']));
+  assert.ok(!W.goAheadIn('Open more lesson spots for the waitlist', []));
+});
+
+test('labels and headings: "Drafted by the assistant" only for AI briefs, and the email\'s headings in sentence case', async () => {
+  on();
+  const m = await F.windDay();
+  const data = await F.facts(m, 'ops');
+  replies = [goodReply(data)];
+  const ai = await W.write(data, { tenantId: m.id, kind: 'ops' });
+  const tpl = { body: W.template(data), source: 'template' };
+  const tenant = { name: 'Gusty Peak' };
+  const link = 'https://app.example/#/brief?d=2026-12-13';
+  const aiMail = W.renderEmail({ ...ai, for_date: '2026-12-13', sent_on: '2026-12-13' }, tenant, link);
+  const tMail = W.renderEmail({ ...tpl, for_date: '2026-12-13', sent_on: '2026-12-13' }, tenant, link);
+  assert.match(aiMail.text, /Drafted by the assistant\./);
+  assert.doesNotMatch(tMail.text, /Drafted by the assistant/);
+  assert.match(tMail.text, /Filled in from today\u2019s records\./);
+  for (const e of [aiMail, tMail]) {
+    assert.doesNotMatch(e.html, /text-transform:\s*uppercase/i, 'no all-caps headings in the email');
+    for (const line of e.text.split('\n')) assert.ok(!(/[A-Z]{4,}/.test(line) && line === line.toUpperCase()), `all caps: ${line}`);
+    assert.match(e.text, /^Weather and wind$/m);
+    assert.match(e.text, /^Suggested$/m);
+  }
+  assert.ok(tMail.text.includes(data.wind_holds.caveat), 'the wind line is in the email too');
+  const css = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'public', 'css', 'app.css'), 'utf8');
+  for (const sel of ['.brief-kicker', '.brief-sec h3']) assert.doesNotMatch(css.split('\n').find((l) => l.startsWith(sel)), /uppercase/, `${sel} is not all caps on the page`);
+});
+
+test('plans: the brief is in every plan with no add-on, and the add-on is labeled "AI Operations (add-on)" everywhere', async () => {
+  off();
+  const plus = modules.MODULES.find((x) => x.key === 'assistant_plus');
+  assert.equal(plus.label, 'AI Operations (add-on)');
+  assert.ok(!plus.paths.some((p) => /brief/.test(p)), 'the add-on does not gate the brief');
+  // A mountain with the add-on off still gets its brief, AI-written when there is a key.
+  const m = await F.windDay();
+  assert.ok(!(await modules.enabledKeys(m.id)).includes('assistant_plus'));
+  on();
+  const data = await F.facts(m, 'ops');
+  replies = [goodReply(data)];
+  assert.equal((await W.write(data, { tenantId: m.id, kind: 'ops' })).source, 'ai');
+  off();
+  // Words people read: no stray add-on names, and the brief's help and settings say every plan.
+  const fs = require('fs'); const path = require('path'); const root = path.join(__dirname, '..', '..');
+  const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
+  const help = read('public/js/help-content.js');
+  const briefHelp = help.slice(help.indexOf("id: 'morning-brief'"), help.indexOf('\n  {', help.indexOf("id: 'morning-brief'")));
+  assert.match(briefHelp, /Every plan has it/);
+  assert.doesNotMatch(briefHelp, /add-on/i, 'the brief\'s help does not put it behind an add-on');
+  const settings = read('public/js/views/settings-brief.js');
+  assert.doesNotMatch(settings, /Assistant Plus|AI Operations(?! \(add-on\))/);
+  for (const f of ['public/js/help-content.js', 'public/js/views/settings-mountain.js', 'public/js/views/conditions-writer.js', 'public/js/views/settings-brief.js', 'public/js/views/brief.js', 'src/lib/modules.js', 'src/site/pricing.html']) {
+    const visible = read(f).split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    assert.doesNotMatch(visible, /Assistant Plus/, `${f} still names Assistant Plus`);
+  }
+  assert.match(read('public/js/views/conditions-writer.js'), /'AI Operations \(add-on\)'/);
 });

@@ -16,6 +16,10 @@ const modules = require('./modules');
 
 const KINDS = new Map();
 const LABEL = 'Drafted by the assistant';
+// A draft made without AI (no key, the month's allowance used, the model unreachable, or its wording failed the facts
+// check) was filled in by code from the mountain's records: it must not say the assistant drafted it.
+const TEMPLATE_LABEL = 'Filled in from today\u2019s records';
+const labelFor = (preview) => (preview && preview.by === 'template' ? TEMPLATE_LABEL : LABEL);
 
 /**
  * Registers a kind. def: {
@@ -70,12 +74,13 @@ async function expireStale(db, tenantId) {
 
 const isoUtc = (v) => (v ? `${(v instanceof Date ? v.toISOString() : `${String(v).replace(' ', 'T')}Z`).slice(0, 19)}Z` : null);
 
-/** What a card shows: the kind's fields the person may edit, and the label every AI-written draft carries. */
+/** What a card shows: the kind's fields the person may edit, and its label (AI drafts say "Drafted by the assistant"). */
 async function shape(db, ctx, row) {
   const def = kindOf(row.kind);
+  const preview = parse(row.preview);
   return {
     id: Number(row.id), kind: row.kind, title: row.title, summary: row.summary, status: row.status, source: row.source,
-    label: LABEL, preview: parse(row.preview), editable: def ? def.editable : [],
+    label: labelFor(preview), preview, editable: def ? def.editable : [],
     created_at: isoUtc(row.created_at), expires_at: isoUtc(row.expires_at),
     viewer: def && def.forViewer ? await def.forViewer(db, ctx, row) : {},
   };
@@ -184,4 +189,4 @@ async function supersede(db, tenantId, kind, keepId) {
   await db.query("UPDATE ai_proposals SET status = 'expired', error = 'A newer draft took its place' WHERE tenant_id = ? AND kind = ? AND status = 'pending' AND id <> ?", [tenantId, kind, keepId]);
 }
 
-module.exports = { register, kindOf, create, list, approve, reject, supersede, expireStale, roleAllows, LABEL, KINDS };
+module.exports = { register, kindOf, create, list, approve, reject, supersede, expireStale, roleAllows, LABEL, TEMPLATE_LABEL, labelFor, KINDS };

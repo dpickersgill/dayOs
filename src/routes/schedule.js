@@ -39,8 +39,8 @@ schedule.put(
   },
 );
 
-// The day's public note on its own (lib/conditionsnote.js): lift staff keep it current with the lifts and trails.
-schedule.put('/days/:date/note', requireRole('manager', 'staff'), validate(z.object({ notes: z.string().max(500).nullable() })), async (req, res) => {
+// The day's public note on its own (lib/conditionsnote.js). Owners and managers: it changes the public conditions page.
+schedule.put('/days/:date/note', requireRole('manager'), validate(z.object({ notes: z.string().max(500).nullable() })), async (req, res) => {
   res.json(await require('../lib/conditionsnote').setNote(pool, req, req.params.date, req.body.notes));
 });
 

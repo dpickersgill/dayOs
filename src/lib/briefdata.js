@@ -9,8 +9,15 @@
 // Patrol: yesterday's cases as COUNTS BY AREA from one aggregate query (patrolCounts). Never a name, age, injury, story,
 // case number or time. test/evals/brief.test.js proves the brief's input holds nothing else from patrol.
 //
-// The daily snapshots (lib/snapshots.js, table daily_snapshots) are read when they exist: the forecast and presales taken
-// that morning. Without them, the same facts come from small live queries.
+// The daily snapshots (lib/snapshots.js, table daily_snapshots) are read when they exist: the hourly forecast and the
+// presales taken that morning. The daily job takes them at 7:30 AM Eastern, after 6:00 AM in an Eastern mountain, so when
+// today's is not there yet the brief takes it (it is then kept as that day's snapshot until the daily job replaces it).
+// A snapshot from an earlier day is never used. Without one, the same facts come from small live queries.
+//
+// Wind: the gusts compared with each lift's wind hold limit are the hourly forecast gusts during the day's operating
+// hours (the calendar's open and close) at the base and summit points, the highest of them. The forecast is at 10 m and
+// smooths ridges, so it can read low at lift height: every comparison carries WIND_CAVEAT, and the brief never says a lift
+// can open or is safe to run.
 const { rows, one } = require('../db');
 const { addDays, weekdayOf, dayRange, clock } = require('./util');
 
@@ -55,41 +62,94 @@ async function hasSnapshots(db) {
 }
 const resetSnapshotCheck = () => { snapCheck = { at: 0, ok: false }; };
 
-/** The latest snapshot of a kind taken for a day, as its data, or null (none, no table, or any error). */
-async function snapshot(db, tenantId, onDate, kind) {
+/**
+ * Today's snapshot of a kind (taken on the mountain's date `today`), as its data, or null (none, no table, or any error).
+ * When today's is not there yet (the daily job runs at 7:30 AM Eastern), it is taken now. One from an earlier day is not used.
+ */
+async function snapshot(db, tenantId, today, kind) {
   if (!(await hasSnapshots(db))) return null;
+  const S = require('./snapshots');
+  const fresh = async () => { const r = await S.latest(db, tenantId, today, kind); return r && !r.stale ? r : null; };
   try {
-    const r = await require('./snapshots').latest(db, tenantId, onDate, kind);
+    let r = await fresh();
+    if (!r && String(process.env.SNAPSHOTS || 'on').toLowerCase() !== 'off') {
+      const t = await S.tenantRow(db, tenantId);
+      if (t && S.dateIn(t.timezone, new Date()) === today) { // only today's can be taken now
+        const took = await S.take(db, tenantId, kind, { tenant: t }).catch(() => null);
+        if (took && took.status === 'taken') r = await fresh();
+      }
+    }
     if (!r) return null;
     const d = r.data !== undefined ? r.data : r;
     return typeof d === 'string' ? JSON.parse(d) : d;
   } catch (_) { return null; }
 }
 
-/** The hourly forecast snapshot, boiled down to the day: { high_f, low_f, snow_in, precip_in, wind_mph, gust_mph }. */
-function dayFromForecast(snap, date) {
-  const hours = Array.isArray(snap) ? snap : (snap && (snap.hours || snap.hourly)) || [];
-  const mine = hours.filter((h) => String(h.time || h.at || '').slice(0, 10) === date);
-  if (!mine.length) return null;
-  const vals = (...keys) => mine.map((h) => num(keys.map((k) => h[k]).find((v) => v != null))).filter((v) => v != null);
+const POINT_NAME = { base: 'base point', summit: 'summit point', map_point: 'map point' };
+const hhmm = (t) => String(t || '').slice(11, 16);
+const WIND_CAVEAT_TAIL = 'at 10 m above the ground. The forecast smooths ridges, so wind at a lift can be stronger. This is an early warning only, not a reading at the lift.';
+/** The line that goes with every comparison of gusts and a lift's wind hold limit. */
+const windCaveat = (point) => `These gusts are the forecast at the ${POINT_NAME[point] || 'map point'} ${WIND_CAVEAT_TAIL}`;
+const WIND_CAVEAT = windCaveat('map_point'); // the shape of the line, for tests and the writer
+
+/**
+ * The forecast snapshot boiled down to one day: { high_f, low_f, snow_in, precip_in, wind_mph, gust_mph, code } and, for
+ * the wind holds, gusts per point during the operating hours: wind: { window: 'open_hours' | 'all_day', points: [...] }.
+ * Reads the daily job's shape ({ points: [{ role, hourly: { time: [], temp_f: [], gust_mph: [] ... } }] }), the
+ * backfill's ({ days: [...] }, daily values only) and a plain list of hours. hours: { open: 'HH:MM', close: 'HH:MM' }.
+ */
+function dayFromForecast(snap, date, hours = null) {
+  if (!snap) return null;
   const max = (a) => (a.length ? Math.max(...a) : null); const min = (a) => (a.length ? Math.min(...a) : null); const sum = (a) => (a.length ? round1(a.reduce((x, y) => x + y, 0)) : null);
-  const temps = vals('temp_f', 'temperature_f', 'temperature');
-  return { high_f: max(temps), low_f: min(temps), snow_in: sum(vals('snow_in', 'snowfall_in', 'snowfall')), precip_in: sum(vals('precip_in', 'precipitation_in', 'precipitation')),
-    wind_mph: max(vals('wind_mph', 'wind')), gust_mph: max(vals('gust_mph', 'gusts_mph', 'gust')), code: null };
+  // The backfill's daily values (what was seen, not an hourly forecast).
+  if (Array.isArray(snap.days) && !snap.hourly && !(snap.points || []).some((p) => p && p.hourly)) {
+    const d = snap.days.find((x) => String(x.date || '').slice(0, 10) === date);
+    if (!d) return null;
+    const role = ((snap.points || [])[0] || {}).role || 'map_point';
+    return { high_f: num(d.high_f), low_f: num(d.low_f), snow_in: num(d.snow_in), precip_in: num(d.precip_in), wind_mph: num(d.wind_mph), gust_mph: num(d.gust_mph), code: num(d.weather_code),
+      wind: { window: 'all_day', points: num(d.gust_mph) == null ? [] : [{ point: role, gust_mph: num(d.gust_mph) }] } };
+  }
+  // Hours per point: [{ role, hours: [{ time, temp_f, ... }] }].
+  let pts;
+  if (Array.isArray(snap.points) && snap.points.some((p) => p && p.hourly)) {
+    pts = snap.points.filter((p) => p && p.hourly && Array.isArray(p.hourly.time)).map((p) => ({ role: p.role || 'map_point',
+      hours: p.hourly.time.map((time, i) => Object.fromEntries([['time', time], ...Object.keys(p.hourly).filter((k) => k !== 'time').map((k) => [k, Array.isArray(p.hourly[k]) ? p.hourly[k][i] : null])])) }));
+  } else {
+    const list = Array.isArray(snap) ? snap : snap.hours || snap.hourly || [];
+    pts = [{ role: 'map_point', hours: Array.isArray(list) ? list : [] }];
+  }
+  for (const p of pts) p.hours = p.hours.filter((h) => String(h.time || h.at || '').slice(0, 10) === date);
+  pts = pts.filter((p) => p.hours.length);
+  if (!pts.length) return null;
+  const vals = (hrs, ...keys) => hrs.map((h) => num(keys.map((k) => h[k]).find((v) => v != null))).filter((v) => v != null);
+  // The day's weather from the lower point (the base, or the one point there is): what guests meet at the lodge.
+  const low = pts.find((p) => p.role !== 'summit') || pts[0];
+  const temps = vals(low.hours, 'temp_f', 'temperature_f', 'temperature');
+  const codes = vals(low.hours, 'weather_code', 'code');
+  // Wind holds: the hourly gusts while the lifts run (the calendar's hours), at every point; the whole day when unknown.
+  const inHours = (h) => { const t = hhmm(String(h.time || h.at || '').replace(' ', 'T')); return t >= hours.open && t < hours.close; };
+  const open = hours && hours.open && hours.close ? pts.map((p) => ({ role: p.role, hours: p.hours.filter(inHours) })) : null;
+  const useOpen = open && open.every((p) => p.hours.length);
+  const windPts = (useOpen ? open : pts).map((p) => ({ point: p.role, gust_mph: max(vals(p.hours, 'gust_mph', 'gusts_mph', 'gust')), wind_mph: max(vals(p.hours, 'wind_mph', 'wind')) })).filter((p) => p.gust_mph != null);
+  const allHours = pts.flatMap((p) => p.hours);
+  return { high_f: max(temps), low_f: min(temps), snow_in: sum(vals(low.hours, 'snow_in', 'snowfall_in', 'snowfall')), precip_in: sum(vals(low.hours, 'precip_in', 'precipitation_in', 'precipitation')),
+    wind_mph: max(vals(allHours, 'wind_mph', 'wind')), gust_mph: max(vals(allHours, 'gust_mph', 'gusts_mph', 'gust')), code: max(codes),
+    wind: { window: useOpen ? 'open_hours' : 'all_day', points: windPts.map((p) => ({ point: p.point, gust_mph: round1(p.gust_mph), wind_mph: round1(p.wind_mph) })) } };
 }
 
-/** Tickets sold so far for a day from the presales snapshot, or null. */
+/** Tickets sold so far for a day from the presales snapshot, or null. ({ days: [{ date, tickets: { sold } }] }) */
 function ticketsFromPresales(snap, date) {
   if (!snap) return null;
   const days = snap.days || snap;
   const d = Array.isArray(days) ? days.find((x) => String(x.date || x.on_date || '').slice(0, 10) === date) : days[date];
-  return d && num(d.tickets) != null ? num(d.tickets) : null;
+  if (!d || d.tickets == null) return null;
+  return typeof d.tickets === 'object' ? num(d.tickets.sold) : num(d.tickets);
 }
 
 // ---------------------------------------------------------------- the parts
-async function weather(db, t, date, today) {
+async function weather(db, t, date, today, hours) {
   const snap = await snapshot(db, t.id, today, 'forecast');
-  let day = snap ? dayFromForecast(snap, date) : null;
+  let day = snap ? dayFromForecast(snap, date, hours) : null;
   let source = day ? 'snapshot' : null;
   if (!day && t.map_lat !== null && t.map_lng !== null) {
     const wx = (await require('./dayrecord').fetchWeather(Number(t.map_lat), Number(t.map_lng), date, date, today))[date];
@@ -99,16 +159,27 @@ async function weather(db, t, date, today) {
   const snow = await one(db, 'SELECT new_snow_in, base_in FROM snow_readings WHERE tenant_id = ? AND trail_id IS NULL AND read_at >= ? AND read_at < ? ORDER BY read_at DESC, id DESC LIMIT 1', [t.id, `${addDays(date, -1)} 00:00:00`, `${addDays(date, 1)} 00:00:00`]).catch(() => null);
   const out = { source: source || 'none' };
   if (day) Object.assign(out, { sky: sky(day.code), high_f: round1(num(day.high_f)), low_f: round1(num(day.low_f)), snow_in: round1(num(day.snow_in)), precip_in: round1(num(day.precip_in)), wind_mph: round1(num(day.wind_mph)), gust_mph: round1(num(day.gust_mph)) });
+  // For the wind holds (not shown as weather): gusts per point, during the operating hours when the hourly forecast has them.
+  Object.defineProperty(out, 'windPoints', { value: day && day.wind ? day.wind : (day && num(day.gust_mph) != null ? { window: 'all_day', points: [{ point: 'map_point', gust_mph: round1(num(day.gust_mph)) }] } : null), enumerable: false });
   if (snow && (snow.new_snow_in != null || snow.base_in != null)) out.crew_snow_report = { new_snow_in: num(snow.new_snow_in), base_in: num(snow.base_in) };
   return out;
 }
 
-/** Each lift's wind hold limit against the day's gusts. */
-async function wind(db, tenantId, gust) {
+/**
+ * Each lift's wind hold limit against the forecast gusts: the highest gust at any point (base or summit) during the
+ * operating hours. wp: { window, points: [{ point, gust_mph }] } from weather(). Every comparison carries `caveat`.
+ */
+async function wind(db, tenantId, wp, hours) {
   const lifts = await rows(db, "SELECT name, wind_hold_mph FROM lifts WHERE tenant_id = ? AND status <> 'closed' ORDER BY name", [tenantId]);
   const set = lifts.filter((l) => l.wind_hold_mph != null);
   const out = { limits_set: set.length, limits_not_set: lifts.length - set.length, lifts_over_limit: [], lifts_near_limit: [] };
-  if (gust == null) { out.note = 'No gust forecast for the day.'; return out; }
+  const top = wp && wp.points.length ? wp.points.reduce((a, b) => (b.gust_mph > a.gust_mph ? b : a)) : null;
+  if (!top) { out.note = 'No gust forecast for the day.'; return out; }
+  const gust = top.gust_mph;
+  out.gusts_from = POINT_NAME[top.point] || 'map point';
+  out.gusts_during = wp.window === 'open_hours' && hours ? `operating hours, ${clock(hours.open)} to ${clock(hours.close)}` : 'the whole day';
+  if (wp.points.length > 1) out.gusts_by_point = wp.points.map((p) => ({ point: POINT_NAME[p.point] || p.point, gust_mph: p.gust_mph }));
+  out.caveat = windCaveat(top.point);
   for (const l of set) {
     const lim = Number(l.wind_hold_mph);
     if (gust >= lim) out.lifts_over_limit.push({ lift: l.name, limit_mph: lim, gust_mph: gust });
@@ -176,10 +247,11 @@ async function liftProblems(db, tenantId, date) {
     WHERE w.tenant_id = ? AND w.status IN ('open','in_progress','waiting_parts') ORDER BY l.name, FIELD(w.priority, 'urgent','high','normal','low'), w.id`, [tenantId]);
   const byLift = new Map();
   for (const w of wos) { const e = byLift.get(w.lift) || { lift: w.lift, open_work_orders: 0, titles: [] }; e.open_work_orders += 1; if (e.titles.length < 2) e.titles.push(String(w.title || '').slice(0, 80)); byLift.set(w.lift, e); }
-  // The newest signed-off daily inspection (either form) of the last two days, per lift.
+  // The newest signed-off daily inspection (either form) of the last two days, per lift. The two tables were made with
+  // different collations on some databases, so both sides of the UNION name one.
   const daily = await rows(db, `SELECT l.name AS lift, x.result, x.on_date FROM (
-      SELECT lift_id, status AS result, check_date AS on_date, finished_at AS at FROM lift_inspections WHERE tenant_id = ? AND kind = 'daily' AND status <> 'in_progress' AND check_date BETWEEN ? AND ?
-      UNION ALL SELECT lift_id, result, check_date, checked_at FROM lift_checks WHERE tenant_id = ? AND kind = 'pre_open' AND check_date BETWEEN ? AND ?) x
+      SELECT lift_id, status COLLATE utf8mb4_unicode_ci AS result, check_date AS on_date, finished_at AS at FROM lift_inspections WHERE tenant_id = ? AND kind = 'daily' AND status <> 'in_progress' AND check_date BETWEEN ? AND ?
+      UNION ALL SELECT lift_id, result COLLATE utf8mb4_unicode_ci, check_date, checked_at FROM lift_checks WHERE tenant_id = ? AND kind = 'pre_open' AND check_date BETWEEN ? AND ?) x
     JOIN lifts l ON l.tenant_id = ? AND l.id = x.lift_id ORDER BY x.at`, [tenantId, addDays(date, -2), date, tenantId, addDays(date, -2), date, tenantId]);
   const lastDaily = new Map(); for (const d of daily) lastDaily.set(d.lift, d);
   const failed = [...lastDaily.values()].filter((d) => d.result === 'fail').map((d) => ({ lift: d.lift, check: 'daily', date: ymd(d.on_date) }));
@@ -301,9 +373,9 @@ async function assemble(db, t, kind, day, modules) {
     opening_day: Boolean(day.opening_day), day_before_opening: Boolean(day.opening_tomorrow),
     hours: day.hours || null,
   };
-  data.weather = await weather(db, t, date, today);
+  data.weather = await weather(db, t, date, today, day.hours || null);
   const conditions = modules.has('conditions');
-  if (kind !== 'school' && conditions) data.wind_holds = await wind(db, t.id, data.weather.gust_mph ?? null);
+  if (kind !== 'school' && conditions) data.wind_holds = await wind(db, t.id, data.weather.windPoints, day.hours || null);
   if (kind === 'ops') data.visitors = await visits(db, t.id, date, today);
   if (kind === 'ops' && modules.has('sell')) data.revenue_yesterday = await revenue(t.id, yesterday);
   if (kind !== 'patrol' && modules.has('school')) data.lessons = await lessons(db, t.id, date);
@@ -316,4 +388,4 @@ async function assemble(db, t, kind, day, modules) {
   return data;
 }
 
-module.exports = { assemble, patrolCounts, screensFor, sky, KINDS, KIND_LABEL, WEEKDAYS, hasSnapshots, resetSnapshotCheck, dayFromForecast, ticketsFromPresales };
+module.exports = { assemble, patrolCounts, screensFor, sky, KINDS, KIND_LABEL, WEEKDAYS, hasSnapshots, resetSnapshotCheck, dayFromForecast, ticketsFromPresales, windCaveat, WIND_CAVEAT, WIND_CAVEAT_TAIL, POINT_NAME };

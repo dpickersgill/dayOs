@@ -10,8 +10,9 @@ const { pool } = require('../db');
 const { esc } = require('./format');
 const { clock } = require('./util');
 
-const AI_LABEL = 'Written by the assistant from today\'s data';
-const TEMPLATE_LABEL = 'Made from today\'s data';
+// The same labels as the drafts on Today (lib/proposals.js): "Drafted by the assistant" only when the AI wrote it.
+const AI_LABEL = 'Drafted by the assistant';
+const TEMPLATE_LABEL = 'Filled in from today\u2019s records';
 const MAX_ACTIONS = 3;
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || `${one}s`)}`;
@@ -114,8 +115,10 @@ function template(d) {
   if (w.crew_snow_report) wx.push(`Crew snow report: ${w.crew_snow_report.new_snow_in ?? 0} in new${w.crew_snow_report.base_in != null ? `, ${w.crew_snow_report.base_in} in base` : ''}.`);
   const wh = d.wind_holds;
   if (wh) {
-    for (const x of wh.lifts_over_limit) wx.push(`${x.lift}: gusts of ${x.gust_mph} mph are at or over its ${x.limit_mph} mph wind hold limit.`);
-    for (const x of wh.lifts_near_limit) wx.push(`${x.lift}: gusts of ${x.gust_mph} mph are close to its ${x.limit_mph} mph limit.`);
+    const during = wh.gusts_during ? ` during ${wh.gusts_during}` : '';
+    for (const x of wh.lifts_over_limit) wx.push(`${x.lift}: forecast gusts of ${x.gust_mph} mph${during} are at or over its ${x.limit_mph} mph wind hold limit.`);
+    for (const x of wh.lifts_near_limit) wx.push(`${x.lift}: forecast gusts of ${x.gust_mph} mph${during} are close to its ${x.limit_mph} mph wind hold limit.`);
+    if (wh.caveat && (wh.lifts_over_limit.length || wh.lifts_near_limit.length)) wx.push(wh.caveat);
     if (!wh.limits_set) wx.push('Wind hold limits are not set for any lift. A manager adds them under Mountain status, Maintenance, Lift inspections, Type.');
     else if (wh.limits_not_set) wx.push(`${plural(wh.limits_not_set, 'lift')} ${wh.limits_not_set === 1 ? 'has' : 'have'} no wind hold limit set.`);
   }
@@ -189,11 +192,49 @@ You get the day's facts as JSON. Reply with JSON only, in this shape:
 {"summary": ["line 1", "line 2", "line 3"], "sections": [{"title": "Short title", "lines": ["one short sentence", "..."]}], "actions": [{"text": "What to do, as an instruction", "href": "#/screen"}]}
 Rules:
 - summary: exactly three short lines. The day and weather; the business of the day; what needs attention.
-- sections: only for facts given, at most 6, each with 1 to 5 short lines. Keep the facts' own section names in plain words.
+- sections: only for facts given, at most 6, each with 1 to 5 short lines. Keep the facts' own section names in plain words, in sentence case ("Weather and wind", not "WEATHER AND WIND" or "Weather And Wind").
 - actions: up to 3, the most useful things to do this morning. Each href must be one of the "screens" given.
 - Use only numbers that appear in the facts, written the same way. Never work out new numbers: no totals, differences or percentages.
 - "expected_visits" is a simple estimate: call it that.
+- Wind: gusts against a lift's wind hold limit are the forecast at the base or summit point named in "gusts_from", not a reading at the lift. Put the "caveat" line, word for word, in the wind section whenever you compare gusts with a limit.
+- Never tell anyone to open, run or load a lift, and never say a lift is safe to run or fine to open. Whether a lift runs is the lift crew's call at the lift.
 - Plain US English, short sentences, no em dashes, no emojis, no names of people. Never mention patients or anything about a patrol case beyond the counts by area.`;
+
+// ---------------------------------------------------------------- wind: an early warning, never a go-ahead
+const LIFT_WORDS = '(?:lifts?|chairs?|chairlifts?|doubles?|triples?|quads?|six-?packs?|express(?:es)?|gondolas?|trams?|t-?bars?|j-?bars?|pomas?|platters?|rope tows?|tows?|surface lifts?|carpets?)';
+/** Text that tells someone to open or run a lift, or says one is safe to run. The brief never says either. */
+function goAheadIn(text, liftNames = []) {
+  const t = String(text);
+  if (/\bsafe(?:ly)?\s+to\s+(?:run|open|load|operate|spin|ride)\b/i.test(t)) return true;
+  if (/\b(?:is|are|looks?|should be)\s+safe\b/i.test(t) && new RegExp(`\\b${LIFT_WORDS}\\b|wind`, 'i').test(t)) return true;
+  if (/\b(?:ok|okay|fine|clear)\s+to\s+(?:run|open|load|operate|spin)\b/i.test(t)) return true;
+  // "Open Valley Double", "spin up the chairs", "run every lift": a lift word within a few words of the verb.
+  if (new RegExp(`\\b(?:open|run|start|load|spin(?:\\s+up)?|operate)\\s+(?:up\\s+)?(?:the\\s+|all\\s+|every\\s+)?(?:[\\w'-]+\\s+){0,3}${LIFT_WORDS}\\b(?!\\s+(?:work|checks?|inspections?|problems?|maintenance|limits?))`, 'i').test(t)) return true;
+  if (new RegExp(`\\b${LIFT_WORDS}\\s+(?:can|should|will be able to|are good to|is good to)\\s+(?:run|open|spin|operate|load)\\b`, 'i').test(t)) return true;
+  for (const name of liftNames) {
+    const n = String(name || '').trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (!n) continue;
+    if (new RegExp(`\\b(?:open|run|start|load|spin(?:\\s+up)?|operate)\\s+(?:up\\s+)?(?:the\\s+)?${n}\\b`, 'i').test(t)) return true;
+    if (new RegExp(`\\b${n}\\s+(?:can|should|will be able to|is good to)\\s+(?:run|open|spin|operate|load)\\b`, 'i').test(t)) return true;
+  }
+  return false;
+}
+
+/** Every lift named in the facts. */
+function liftNamesOf(d) {
+  const wh = d.wind_holds || {}; const l = d.lifts || {};
+  return [...new Set([...(wh.lifts_over_limit || []), ...(wh.lifts_near_limit || []), ...(l.failed_checks || []), ...(l.with_open_work_orders || [])].map((x) => x.lift).concat(l.weekly_check_due || []).filter(Boolean))];
+}
+
+/** Puts the wind caveat under the wind section whenever the brief compares gusts with a lift's limit. */
+function withWindCaveat(body, d) {
+  const wh = d.wind_holds;
+  if (!wh || !wh.caveat || !(wh.lifts_over_limit.length || wh.lifts_near_limit.length)) return body;
+  if (body.sections.some((s) => s.lines.includes(wh.caveat))) return body;
+  const sec = body.sections.find((s) => /wind/i.test(s.title)) || body.sections.find((s) => /weather/i.test(s.title));
+  if (sec) sec.lines.push(wh.caveat); else body.sections.unshift({ title: 'Wind', lines: [wh.caveat] });
+  return body;
+}
 
 function parseReply(text) {
   const s = String(text || ''); const a = s.indexOf('{'); const b = s.lastIndexOf('}');
@@ -235,7 +276,9 @@ async function write(data, who) {
   const allowed = new Set((data.screens || []).map((s) => s.href));
   body.actions = body.actions.filter((a) => allowed.has(a.href)).slice(0, MAX_ACTIONS);
   if (unknownNumbers(body, data).length) return out('facts');
-  return { body, source: 'ai', reason: null, model, cost_micros: cost };
+  const words = [...body.summary, ...body.sections.flatMap((s) => [s.title, ...s.lines]), ...body.actions.map((a) => a.text)];
+  if (words.some((w) => goAheadIn(w, liftNamesOf(data)))) return out('go_ahead'); // never "open the lift" or "safe to run"
+  return { body: withWindCaveat(body, data), source: 'ai', reason: null, model, cost_micros: cost };
 }
 
 // ---------------------------------------------------------------- email
@@ -250,8 +293,8 @@ function renderEmail(brief, tenant, link) {
   const text = [
     `${tenant.name}: ${title}`, '',
     ...b.summary, '',
-    ...b.sections.flatMap((s) => [s.title.toUpperCase(), ...s.lines.map((l) => `- ${l}`), '']),
-    ...(b.actions.length ? ['SUGGESTED', ...b.actions.map((a, i) => `${i + 1}. ${a.text}: ${screen(a.href)}`), ''] : []),
+    ...b.sections.flatMap((s) => [s.title, ...s.lines.map((l) => `- ${l}`), '']), // headings in sentence case, as written
+    ...(b.actions.length ? ['Suggested', ...b.actions.map((a, i) => `${i + 1}. ${a.text}: ${screen(a.href)}`), ''] : []),
     `${labelOf(brief.source)}.`,
     `Read it in the app: ${link}`,
     'Turn it off or choose email or phone alerts in Settings, Morning brief.',
@@ -262,7 +305,7 @@ function renderEmail(brief, tenant, link) {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#edf1f3"><tr><td align="center" style="padding:20px 10px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:10px;overflow:hidden;${f};color:#0e2632">
 <tr><td style="background:#0e2632;padding:18px 24px">
-  <div style="${h};font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#d8b672">${esc(tenant.name)}</div>
+  <div style="${h};font-size:15px;letter-spacing:.02em;color:#d8b672">${esc(tenant.name)}</div>
   <div style="${h};font-size:26px;font-weight:700;color:#ffffff;margin-top:2px">${esc(title)}</div>
 </td></tr>
 <tr><td style="padding:20px 24px 6px">
@@ -271,11 +314,11 @@ function renderEmail(brief, tenant, link) {
   </td></tr></table>
 </td></tr>
 ${b.sections.map((s) => `<tr><td style="padding:12px 24px 0">
-  <div style="${h};font-size:17px;font-weight:700;color:#1d4452;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #d3dce1;padding-bottom:4px">${esc(s.title)}</div>
+  <div style="${h};font-size:19px;font-weight:700;color:#1d4452;border-bottom:1px solid #d3dce1;padding-bottom:4px">${esc(s.title)}</div>
   <ul style="margin:6px 0 0;padding-left:18px;font-size:14px;line-height:1.5">${s.lines.map((l) => `<li style="margin:2px 0">${esc(l)}</li>`).join('')}</ul>
 </td></tr>`).join('')}
 ${b.actions.length ? `<tr><td style="padding:16px 24px 0">
-  <div style="${h};font-size:17px;font-weight:700;color:#0e2632;text-transform:uppercase;letter-spacing:.04em">Suggested</div>
+  <div style="${h};font-size:19px;font-weight:700;color:#0e2632">Suggested</div>
   ${b.actions.map((a) => `<table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:8px"><tr><td style="background:#d8b672;border-radius:6px"><a href="${esc(screen(a.href))}" style="display:inline-block;padding:9px 14px;color:#0e2632;font-weight:700;font-size:14px;text-decoration:none">${esc(a.text)}</a></td></tr></table>`).join('')}
 </td></tr>` : ''}
 <tr><td style="padding:20px 24px 22px">
@@ -285,4 +328,4 @@ ${b.actions.length ? `<tr><td style="padding:16px 24px 0">
   return { subject: `${tenant.name}: ${title}`, text, html };
 }
 
-module.exports = { write, template, renderEmail, parseReply, unknownNumbers, factNumbers, textNumbers, AI_LABEL, TEMPLATE_LABEL, labelOf, SYSTEM };
+module.exports = { write, template, renderEmail, parseReply, unknownNumbers, factNumbers, textNumbers, goAheadIn, liftNamesOf, withWindCaveat, AI_LABEL, TEMPLATE_LABEL, labelOf, SYSTEM };

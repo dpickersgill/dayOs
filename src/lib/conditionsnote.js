@@ -1,16 +1,16 @@
 'use strict';
 
 // The public note on a day (calendar_days.notes): the line guests read on the conditions feed for the mountain's website
-// ("Night skiing until 9", "Six inches overnight, groomers on every blue"). Managers set it with the rest of the day;
-// lift staff, who keep the lifts and trails current through the morning, may set the note on its own (2026.11, the
-// conditions writer: whoever approves the morning draft publishes it here, through this one function).
+// ("Night skiing until 9", "Six inches overnight, groomers on every blue"). Managers set it with the rest of the day, or
+// on its own here; the conditions writer's approved morning draft is published through this one function too. Owners and
+// managers only: it changes a public page (2026.11.15).
 const { one } = require('../db');
 const { forbidden, bad } = require('./errors');
 const { audit } = require('./audit');
 const { roleAllows } = require('./roleallows');
 const modules = require('./modules');
 
-const NOTE_ROLES = ['manager', 'staff']; // and the owner
+const NOTE_ROLES = ['manager']; // and the owner
 const MAX = 500;
 
 /** Sets the day's public note as the person in req. A day not set yet is added as closed, which is what the feed shows for it. */

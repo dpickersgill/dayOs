@@ -7,7 +7,7 @@ import { ctx, h, clear, button, toast, isManager, field, input } from '../ui.js'
 const MAX_EXAMPLES = 5;
 
 export const writerOn = () => Boolean(ctx.me && Array.isArray(ctx.me.modules) && ctx.me.modules.includes('assistant_plus') && ctx.me.modules.includes('conditions')
-  && (isManager() || ctx.me.role === 'staff'));
+  && isManager()); // owners and managers: approving publishes on the public conditions page
 
 export async function drawWriter(box) {
   if (!writerOn()) return;
@@ -17,10 +17,10 @@ export async function drawWriter(box) {
   const when = s.auto_on ? `Each morning at ${clock(s.draft_at)} a draft of the conditions note, snow report, social post and passholder email appears on Today, under Ready for you.` : 'The morning draft is off. Press Draft now when you want one.';
   const draft = button('Draft now', async () => {
     const r = await post('/ai/conditions/draft');
-    toast(r.by === 'assistant' ? 'Drafted. It is on Today, under Ready for you.' : 'Drafted from today’s records. It is on Today, under Ready for you.');
+    toast(r.by === 'assistant' ? 'Drafted. It is on Today, under Ready for you.' : 'Filled in from today’s records. It is on Today, under Ready for you.');
     location.hash = '#/dashboard';
   }, { kind: 'primary' });
-  clear(box).append(h('header', null, h('h2', null, 'Conditions writer'), h('span', { class: 'ready-chip' }, 'AI Operations')),
+  clear(box).append(h('header', null, h('h2', null, 'Conditions writer'), h('span', { class: 'ready-chip' }, 'AI Operations (add-on)')),
     h('p', { class: 'muted' }, when, ' It uses only the numbers in your records. Nothing is published or sent until someone approves it.'),
     h('div', { class: 'row wrap' }, draft, isManager() ? button('Settings', () => settingsForm(box, s)) : null));
   box.hidden = false;
