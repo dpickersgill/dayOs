@@ -88,6 +88,10 @@ function area(text, { rows = 3, max, label: lab, readonly = false }) {
   const id = nextId('rd');
   const el = h('textarea', { id, rows, maxlength: max || null, class: 'ready-text', readonly: readonly || null });
   el.value = text || '';
+  // grows with its text, so the whole draft can be read without scrolling inside the box
+  const fit = () => { if (!el.isConnected) return; el.style.height = 'auto'; el.style.height = `${el.scrollHeight + 2}px`; };
+  el.addEventListener('input', fit);
+  requestAnimationFrame(() => requestAnimationFrame(fit));
   return { el, id, field: (extra) => h('div', { class: 'ready-field' }, h('label', { for: id }, lab), el, extra || null) };
 }
 
@@ -118,7 +122,7 @@ function conditionsCard(p, done) {
   const sendRow = h('label', { class: 'ready-check', for: sendBox.id }, sendBox,
     h('span', null, h('b', null, 'Also email passholders'), h('small', null, viewer.can_email
       ? `Goes to ${viewer.passholders === 1 ? '1 current season pass holder' : `${viewer.passholders ?? 'the'} current season pass holders`} who agreed to email, with a link to stop.`
-      : viewer.email_blocked || 'Only managers send email to passholders.')));
+      : `${String(viewer.email_blocked || 'Only managers send email to passholders').replace(/\.$/, '')}.`)));
   const emailBox = h('details', { class: 'ready-email' }, h('summary', null, 'Passholder email'),
     h('div', { class: 'ready-field' }, h('label', { for: subject.id }, 'Subject'), subject), body.field(), sendRow);
 

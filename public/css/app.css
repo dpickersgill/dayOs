@@ -3971,7 +3971,8 @@ label.check-hit { display: inline-flex; align-items: center; justify-content: ce
 .ready-check span { display: flex; flex-direction: column; gap: 2px; }
 .ready-check small { color: var(--quiet); }
 .ready-actions { display: flex; flex-wrap: wrap; gap: 10px; }
-.ready-actions .btn { min-height: 44px; min-width: 120px; }
+.ready-card .btn { min-height: 44px; }
+.ready-actions .btn { min-width: 120px; }
 .ready-inbox-host { margin: 0 0 12px; }
 .ready-inbox { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 10px 12px; border: 1px solid var(--accent-line); border-radius: var(--radius); background: var(--accent-tint); color: var(--ink); text-decoration: none; }
 .ready-inbox > span:nth-child(2) { display: flex; flex-direction: column; min-width: 0; flex: 1; }
