@@ -17,10 +17,15 @@ const DAILY = 'temperature_2m_max,temperature_2m_min,snowfall_sum,precipitation_
 const RECENT_DAYS = 80; // the forecast API keeps about three months behind today; older days come from the archive
 
 const weatherOn = () => String(process.env.WEATHER || 'on').toLowerCase() !== 'off';
+const WX = require('./wxrun');
+const timeoutMs = () => Number(process.env.WEATHER_TIMEOUT_MS) || 10000; // each lookup waits at most this long
 
-/** Daily weather for a point between two dates (inclusive), as { 'YYYY-MM-DD': {...} }. Never throws: {} on any failure. */
-async function fetchWeather(lat, lng, from, to, today) {
-  if (!weatherOn() || lat === null || lng === null) return {};
+/**
+ * Daily weather for a point between two dates (inclusive), as { 'YYYY-MM-DD': {...} }. Never throws: {} on any failure.
+ * run (lib/wxrun.js): a failure counts against the run's breaker, and once it is down nothing is asked.
+ */
+async function fetchWeather(lat, lng, from, to, today, run = null) {
+  if (!weatherOn() || lat === null || lng === null || WX.down(run)) return {};
   const key = process.env.OPEN_METEO_KEY || '';
   const archive = from < addDays(today, -RECENT_DAYS);
   const host = process.env.WEATHER_URL || (archive ? `https://${key ? 'customer-' : ''}archive-api.open-meteo.com` : `https://${key ? 'customer-' : ''}api.open-meteo.com`);
@@ -28,7 +33,7 @@ async function fetchWeather(lat, lng, from, to, today) {
     temperature_unit: 'fahrenheit', wind_speed_unit: 'mph', precipitation_unit: 'inch', timezone: 'auto' });
   if (key) q.set('apikey', key);
   try {
-    const res = await fetch(`${host}/v1/${archive ? 'archive' : 'forecast'}?${q}`, { signal: AbortSignal.timeout(10000) });
+    const res = await fetch(`${host}/v1/${archive ? 'archive' : 'forecast'}?${q}`, { signal: AbortSignal.timeout(timeoutMs()) });
     if (!res.ok) throw new Error(`weather lookup answered ${res.status}`);
     const d = (await res.json()).daily || {};
     const out = {};
@@ -39,6 +44,7 @@ async function fetchWeather(lat, lng, from, to, today) {
     });
     return out;
   } catch (err) {
+    WX.failed(run);
     console.log(JSON.stringify({ severity: 'WARNING', job: 'day_records', message: `weather lookup failed: ${err.message}` }));
     return {};
   }
@@ -52,15 +58,15 @@ const HOURLY = 'temperature_2m,precipitation,snowfall,wind_speed_10m,wind_gusts_
  * [{ role, lat, lng, elevation_m, hourly: { time, temp_f, precip_in, snow_in, wind_mph, gust_mph, weather_code } }],
  * or null when the lookup is off or failed. Never throws.
  */
-async function fetchHourly(points, timeZone, { hours = 72 } = {}) {
-  if (!weatherOn() || !points.length) return null;
+async function fetchHourly(points, timeZone, { hours = 72, run = null } = {}) {
+  if (!weatherOn() || !points.length || WX.down(run)) return null;
   const key = process.env.OPEN_METEO_KEY || '';
   const host = process.env.WEATHER_URL || `https://${key ? 'customer-' : ''}api.open-meteo.com`;
   const q = new URLSearchParams({ latitude: points.map((p) => String(p.lat)).join(','), longitude: points.map((p) => String(p.lng)).join(','),
     hourly: HOURLY, forecast_hours: String(hours), temperature_unit: 'fahrenheit', wind_speed_unit: 'mph', precipitation_unit: 'inch', timezone: timeZone || 'auto' });
   if (key) q.set('apikey', key);
   try {
-    const res = await fetch(`${host}/v1/forecast?${q}`, { signal: AbortSignal.timeout(10000) });
+    const res = await fetch(`${host}/v1/forecast?${q}`, { signal: AbortSignal.timeout(timeoutMs()) });
     if (!res.ok) throw new Error(`weather lookup answered ${res.status}`);
     const body = await res.json();
     const list = Array.isArray(body) ? body : [body]; // several points come back as a list, one as a single answer
@@ -74,6 +80,7 @@ async function fetchHourly(points, timeZone, { hours = 72 } = {}) {
           wind_mph: col('wind_speed_10m'), gust_mph: col('wind_gusts_10m'), weather_code: col('weather_code') } };
     });
   } catch (err) {
+    WX.failed(run);
     console.log(JSON.stringify({ severity: 'WARNING', job: 'snapshots', message: `hourly weather lookup failed: ${err.message}` }));
     return null;
   }
@@ -115,7 +122,7 @@ async function recordDay(t, date, wx) {
 }
 
 /** Records every day from `from` to `to` (inclusive) for one mountain: one weather request per stretch. */
-async function recordRange(tenantId, from, to) {
+async function recordRange(tenantId, from, to, { run = null } = {}) {
   const t = await one(pool, 'SELECT id, timezone, map_lat, map_lng, DATE(created_at) AS since FROM tenants WHERE id = ?', [tenantId]);
   const today = todayIn(t.timezone);
   if (to >= today) to = addDays(today, -1); // only finished days
@@ -124,8 +131,8 @@ async function recordRange(tenantId, from, to) {
   // The archive and the forecast API cover different stretches; ask each for its part.
   const cut = addDays(today, -RECENT_DAYS);
   const wx = {};
-  if (from < cut) Object.assign(wx, await fetchWeather(lat, lng, from, to < cut ? to : addDays(cut, -1), today));
-  if (to >= cut) Object.assign(wx, await fetchWeather(lat, lng, from < cut ? cut : from, to, today));
+  if (from < cut) Object.assign(wx, await fetchWeather(lat, lng, from, to < cut ? to : addDays(cut, -1), today, run));
+  if (to >= cut) Object.assign(wx, await fetchWeather(lat, lng, from < cut ? cut : from, to, today, run));
   let days = 0; let weather = 0;
   for (let d = from; d <= to; d = addDays(d, 1)) {
     await recordDay(t, d, wx[d] || null);
@@ -138,11 +145,12 @@ async function recordRange(tenantId, from, to) {
  * The nightly run: the last three finished days for every real mountain (weather for the last day or two can still
  * settle). DAY_RECORDS=off skips it (the other tests run the daily job against a database of hundreds of mountains).
  */
-async function runAll({ only } = {}) {
+async function runAll({ only, run = WX.newRun() } = {}) {
   if (String(process.env.DAY_RECORDS || 'on').toLowerCase() === 'off') return { skipped: true };
+  // One weather breaker for the run: after 3 failed lookups the rest of the mountains are recorded without weather.
   return eachTenant('day_records', async (t) => {
     const today = todayIn(t.timezone);
-    return recordRange(t.id, addDays(today, -3), addDays(today, -1));
+    return recordRange(t.id, addDays(today, -3), addDays(today, -1), { run });
   }, { columns: 'id, timezone', where: `sandbox_expires_at IS NULL${only ? ` AND id = ${Number(only)}` : ''}` });
 }
 

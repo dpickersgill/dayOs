@@ -141,16 +141,17 @@ function weatherPoints(t) {
 
 class Skipped extends Error {}
 
-const WX_BREAKER = 3; // failed lookups in one run before the rest of the run stops asking (each can wait 10 seconds)
+// The weather breaker (lib/wxrun.js): after 3 failed lookups in one run the rest of the run stops asking (each can wait
+// 10 seconds). The daily job shares one run between the day records, these snapshots and the morning brief.
+const WX = require('./wxrun');
 
 async function forecast(db, t, { now, run = null }) {
   const dayrecord = require('./dayrecord');
   if (!dayrecord.weatherOn()) throw new Skipped('weather lookup is off');
   const points = weatherPoints(t);
   if (!points.length) throw new Skipped('no map point set');
-  if (run && run.wxFailed >= WX_BREAKER) throw new Error('weather service not answering: not asked again this run');
-  const got = await dayrecord.fetchHourly(points, t.timezone, { hours: FORECAST_HOURS });
-  if (!got && run) run.wxFailed += 1;
+  if (WX.down(run)) throw new Error('weather service not answering: not asked again this run');
+  const got = await dayrecord.fetchHourly(points, t.timezone, { hours: FORECAST_HOURS, run }); // a failure counts against the run
   if (!got) throw new Error('hourly weather lookup failed');
   return { source: 'open-meteo', resolution: 'hourly', hours: FORECAST_HOURS, timezone: t.timezone, as_of: now.toISOString(),
     units: { temp: 'F', precip: 'in', snow: 'in', wind: 'mph' }, points: got };
@@ -296,14 +297,14 @@ async function takeAll(db, t, { now = new Date(), kinds = KINDS, run = null } = 
  * 240 by default). Mountains not reached in time are counted and logged, and the job carries on. After 3 failed weather
  * lookups the rest of the run does not ask again. Logs how long it took.
  */
-async function runAll({ only = null, now = new Date(), budgetMs = BUDGET_MS(), concurrency = CONCURRENCY } = {}) {
+async function runAll({ only = null, now = new Date(), budgetMs = BUDGET_MS(), concurrency = CONCURRENCY, run = WX.newRun() } = {}) {
   if (String(process.env.SNAPSHOTS || 'on').toLowerCase() === 'off') return { skipped: true };
   const started = Date.now();
   const tenants = await rows(pool, `SELECT id, timezone, map_lat, map_lng, wx_summit_lat, wx_summit_lng FROM tenants
     WHERE status = 'active' AND sandbox_expires_at IS NULL${only ? ' AND id = ?' : ''} ORDER BY id`, only ? [Number(only)] : []);
   const out = { mountains: tenants.length, taken: 0, skipped: 0, failed: 0, not_reached: 0, seconds: 0 };
   let next = 0;
-  const run = { wxFailed: 0 }; // shared by this run's mountains: a weather service that is down is not waited on 500 times
+  // run: shared by this run's mountains (and the daily job's other weather stages): a service that is down is not waited on 500 times
   const worker = async () => {
     while (next < tenants.length) {
       if (Date.now() - started > budgetMs) return;

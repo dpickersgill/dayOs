@@ -232,9 +232,10 @@ test('the run stops at its time budget, counts what it did not reach, and does n
   delete process.env.SNAPSHOTS;
 });
 
-test('the daily job runs snapshots as its own stage', () => {
+test('the daily job runs snapshots as its own stage, with the job\'s one weather breaker', () => {
   const src = require('fs').readFileSync(require.resolve('../src/routes/followpublic.js'), 'utf8');
-  assert.match(src, /stage\('snapshots', \(\) => require\('\.\.\/lib\/snapshots'\)\.runAll\(\)\)/);
+  assert.match(src, /stage\('snapshots', \(\) => require\('\.\.\/lib\/snapshots'\)\.runAll\(\{ run: wx \}\)\)/);
+  assert.match(src, /const wx = require\('\.\.\/lib\/wxrun'\)\.newRun\(\);/);
 });
 
 // ---------------------------------------------------------------- the day boundary

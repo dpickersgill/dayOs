@@ -28,7 +28,8 @@ const F = require('./brief-fixtures');
 let server; let base; let fake;
 const calls = []; const mail = []; const pushes = [];
 let replies = [];
-const wx = new Map(); // latitude -> daily weather the fake forecast answers with
+const wx = new Map(); // latitude -> daily weather the fake forecast answers with ('hang': never in time)
+const wxAsked = new Map(); // latitude -> how many forecast lookups were made
 
 const DEVICE = 'test-device-0123456789abcdef';
 async function api(method, path, { token, body } = {}) {
@@ -55,7 +56,10 @@ test.before(async () => {
       res.setHeader('content-type', 'application/json');
       if (req.url.startsWith('/v1/forecast')) {
         const q = new URL(req.url, 'http://x').searchParams;
-        const w = wx.get(Number(q.get('latitude')).toFixed(3));
+        const lat = Number(q.get('latitude')).toFixed(3);
+        wxAsked.set(lat, (wxAsked.get(lat) || 0) + 1);
+        const w = wx.get(lat);
+        if (w === 'hang') { setTimeout(() => { try { res.end('{}'); } catch (_) { /* gone */ } }, 5000).unref(); return undefined; } // a weather service that does not answer
         const day = q.get('start_date');
         if (!w) return res.end(JSON.stringify({ daily: { time: [] } }));
         return res.end(JSON.stringify({ daily: { time: [day], temperature_2m_max: [w.high], temperature_2m_min: [w.low], snowfall_sum: [w.snow], precipitation_sum: [w.precip], wind_speed_10m_max: [w.wind], wind_gusts_10m_max: [w.gust], weather_code: [w.code] } }));
@@ -307,6 +311,60 @@ test('no duplicate sends: runs that repeat or overlap send each person one brief
   await pool.query('INSERT INTO brief_prefs (tenant_id, user_id, on_off, channel) VALUES (?, ?, 0, \'both\') ON DUPLICATE KEY UPDATE on_off = 0', [m.id, m.ids.manager]);
   const e = await B.runDue({ now: new Date('2026-12-17T11:30:00Z'), only: m.id });
   assert.equal(e.sent, 3);
+});
+
+test('weather hanging: one lookup per mountain for the operations, patrol and school briefs, and the run moves on within one timeout', async () => {
+  off();
+  const T = 1500;
+  process.env.WEATHER_TIMEOUT_MS = String(T);
+  try {
+    const m = await F.sendingMountain();
+    wx.set(m.lat, 'hang');
+    const t0 = Date.now();
+    const r = await B.runDue({ now: new Date('2026-12-15T11:30:00Z'), only: m.id });
+    const took = Date.now() - t0;
+    assert.equal(wxAsked.get(m.lat), 1, 'asked once, and the failure remembered for the patrol and school briefs');
+    assert.equal(r.made, 3, 'operations, patrol and school briefs made');
+    assert.ok(r.sent >= 3);
+    assert.ok(took >= T && took < 2 * T, `one timeout, not one per kind: ${took} ms`);
+    const [made] = await pool.query('SELECT kind, data FROM morning_briefs WHERE tenant_id = ? ORDER BY kind', [m.id]);
+    for (const b of made) assert.equal(JSON.parse(b.data).weather.source, 'none', b.kind);
+    // The breaker: after 3 failed lookups a run asks no more, for any mountain.
+    process.env.WEATHER_TIMEOUT_MS = '200';
+    const run = require('../../src/lib/wxrun').newRun();
+    const hung = [];
+    for (let i = 0; i < 5; i += 1) { const h = await F.mountain(`Hung ${i}`, { day: '2026-12-15' }); wx.set(h.lat, 'hang'); hung.push(h); }
+    for (const h of hung) {
+      const t = (await pool.query('SELECT * FROM tenants WHERE id = ?', [h.id]))[0][0];
+      await D.assemble(pool, t, 'ops', { date: '2026-12-15', today: '2026-12-15', hours: { open: '09:00', close: '16:00' } }, new Set(await modules.enabledKeys(h.id)), { run });
+    }
+    assert.deepEqual(hung.map((h) => wxAsked.get(h.lat) || 0), [1, 1, 1, 0, 0]);
+    assert.equal(run.wxFailed, 3);
+  } finally { delete process.env.WEATHER_TIMEOUT_MS; }
+});
+
+test('time budget: the brief checks it before the weather lookup and the model call, so a run overruns by one call at most', async () => {
+  off();
+  const m = await F.windDay();
+  const t = (await pool.query('SELECT * FROM tenants WHERE id = ?', [m.id]))[0][0];
+  const day = { sentOn: m.day, forDate: m.day, today: m.day, opening_day: false, opening_tomorrow: false, hours: { open: '09:00', close: '16:00' } };
+  const before = wxAsked.get(m.lat) || 0;
+  await assert.rejects(B.ensure(pool, t, 'ops', day, new Set(await modules.enabledKeys(m.id)), { deadline: Date.now() - 1 }), B.OutOfTime);
+  assert.equal(wxAsked.get(m.lat) || 0, before, 'no weather lookup once the time is up');
+  assert.equal((await pool.query('SELECT COUNT(*) AS n FROM morning_briefs WHERE tenant_id = ?', [m.id]))[0][0].n, 0);
+  // A run with no time left stops, says there is more, and the next run makes and sends it.
+  const s = await F.sendingMountain();
+  const now = new Date('2026-12-15T11:30:00Z');
+  const spent = await B.runDue({ now, only: s.id, budgetMs: 0 });
+  assert.equal(spent.more, true); assert.equal(spent.made, 0); assert.equal(spent.sent, 0);
+  const next = await B.runDue({ now, only: s.id });
+  assert.equal(next.made, 3); assert.equal(next.more, false);
+  // The daily job's brief stage is short (the 15-minute job does the sending), and the job shares one weather breaker.
+  const src = require('fs').readFileSync(require.resolve('../../src/routes/followpublic'), 'utf8');
+  assert.match(src, /DAILY_BRIEF_BUDGET_MS = 60000/);
+  assert.match(src, /dayrecord'\)\.runAll\(\{ run: wx \}\)/);
+  assert.match(src, /snapshots'\)\.runAll\(\{ run: wx \}\)/);
+  assert.match(src, /runDue\(\{ base, budgetMs: DAILY_BRIEF_BUDGET_MS, run: wx \}\)/);
 });
 
 test('batches: a run stops at its limit and the next run carries on without sending anyone twice', async () => {

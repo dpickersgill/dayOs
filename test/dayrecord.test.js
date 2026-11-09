@@ -99,6 +99,22 @@ test('a failed weather lookup keeps the weather already recorded', async () => {
   assert.equal(w.high_f, 28.4, 'kept'); assert.equal(w.tickets_for_day, 3, 'the rest is still recorded');
 });
 
+test('the weather breaker: a run that has had 3 failed lookups asks no more, and the day is still recorded', async () => {
+  const WX = require('../src/lib/wxrun');
+  const run = WX.newRun();
+  wxDown = true; wxCalls = [];
+  for (let i = 0; i < 4; i += 1) await dayrecord.runAll({ only: M.id, run });
+  wxDown = false;
+  assert.equal(wxCalls.length, 3, 'three failed lookups, then none');
+  assert.equal(run.wxFailed, 3);
+  assert.ok(WX.down(run));
+  const w = await dayOf(yday);
+  assert.equal(w.tickets_for_day, 3, 'recorded without asking for weather');
+  wxCalls = [];
+  await dayrecord.runAll({ only: M.id }); // a new run asks again
+  assert.equal(wxCalls.length, 1);
+});
+
 test('managers fill in the past year: older days come from the archive', async () => {
   is(await api('POST', '/ops/days/backfill', { token: M.counter, body: { days: 365 } }), 403);
   is(await api('GET', '/ops/days', { token: M.counter }), 403, 'staff do not see it');

@@ -89,6 +89,7 @@ publicRouter.post('/:slug/give', validate(giftSchema), async (req, res) => {
 });
 
 // ---------------------------------------------------------------- the daily job (Cloud Scheduler)
+const DAILY_BRIEF_BUDGET_MS = 60000; // the brief stage inside the daily job (the 15-minute brief job covers the rest)
 jobs.post('/daily', jobAuth, async (req, res) => {
   // Only one run at a time, across every server: a second call waits up to a minute for the first to finish, then is
   // turned away (each email is also claimed before sending, so even an overlap could not send twice).
@@ -116,15 +117,19 @@ jobs.post('/daily', jobAuth, async (req, res) => {
     out.patrol_short_weekend = await stage('patrol_short_weekend', () => require('./patrolcrews').shortAlertAll());
     out.patrol_stock_flags = await stage('patrol_stock_flags', () => require('./patrolmeds').flagAll());
     out.staff_injury_notices = await stage('staff_injury_notices', () => require('../lib/staffinjury').retryDue(base)); // notices that could not be sent (2026.11.11)
-    out.day_records = await stage('day_records', () => require('../lib/dayrecord').runAll());
-    out.snapshots = await stage('snapshots', () => require('../lib/snapshots').runAll()); // forecast data: presales, weather, staffing, prices (time-capped)
+    // One weather breaker for the day records, the snapshots and the brief (lib/wxrun.js): a weather service that hangs
+    // costs at most 3 lookups of 10 seconds for the whole job, not 10 seconds per mountain. Stage limits: DEPLOY.md.
+    const wx = require('../lib/wxrun').newRun();
+    out.day_records = await stage('day_records', () => require('../lib/dayrecord').runAll({ run: wx }));
+    out.snapshots = await stage('snapshots', () => require('../lib/snapshots').runAll({ run: wx })); // forecast data: presales, weather, staffing, prices (time-capped)
     out.program_reminders = await stage('program_reminders', () => require('../lib/programplus').remindAll());
     out.lessons = await stage('lessons_daily', () => require('../lib/schooltick').daily());
     out.guests = await stage('guests_daily', () => require('../lib/guesttick').daily());
     out.retention = await stage('retention', () => require('../lib/retention').runAll());
     out.demo_emails = await stage('demo_emails', () => require('../lib/demomail').runAll(base));
     out.outreach = await stage('outreach', () => require('../lib/outreach').runDue());
-    out.morning_brief = await stage('morning_brief', () => require('../lib/brief').runDue({ base, budgetMs: 240000 })); // what the 15-minute brief job left (2026.11.15)
+    // What the 15-minute brief job left (2026.11.15). That job does the sending; here 60 seconds, plus one call at most.
+    out.morning_brief = await stage('morning_brief', () => require('../lib/brief').runDue({ base, budgetMs: DAILY_BRIEF_BUDGET_MS, run: wx }));
     out.rate_limits_removed = await stage('rate_limits_cleanup', () => require('../lib/ratestore').cleanup()); // old shared rate limit counts (2026.11.10)
     // One line per finished run: an alert on "no such line for 26 hours" tells you the job stopped.
     console.log(JSON.stringify({ severity: 'INFO', job: 'daily', message: 'daily job finished', seconds: Math.round((Date.now() - started) / 1000) }));

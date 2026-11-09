@@ -20,6 +20,7 @@
 // can open or is safe to run.
 const { rows, one } = require('../db');
 const { addDays, weekdayOf, dayRange, clock } = require('./util');
+const WX = require('./wxrun');
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const KINDS = ['ops', 'patrol', 'school'];
@@ -66,7 +67,7 @@ const resetSnapshotCheck = () => { snapCheck = { at: 0, ok: false }; };
  * Today's snapshot of a kind (taken on the mountain's date `today`), as its data, or null (none, no table, or any error).
  * When today's is not there yet (the daily job runs at 7:30 AM Eastern), it is taken now. One from an earlier day is not used.
  */
-async function snapshot(db, tenantId, today, kind) {
+async function snapshot(db, tenantId, today, kind, run = null) {
   if (!(await hasSnapshots(db))) return null;
   const S = require('./snapshots');
   const fresh = async () => { const r = await S.latest(db, tenantId, today, kind); return r && !r.stale ? r : null; };
@@ -75,7 +76,7 @@ async function snapshot(db, tenantId, today, kind) {
     if (!r && String(process.env.SNAPSHOTS || 'on').toLowerCase() !== 'off') {
       const t = await S.tenantRow(db, tenantId);
       if (t && S.dateIn(t.timezone, new Date()) === today) { // only today's can be taken now
-        const took = await S.take(db, tenantId, kind, { tenant: t }).catch(() => null);
+        const took = await S.take(db, tenantId, kind, { tenant: t, run }).catch(() => null);
         if (took && took.status === 'taken') r = await fresh();
       }
     }
@@ -147,14 +148,37 @@ function ticketsFromPresales(snap, date) {
 }
 
 // ---------------------------------------------------------------- the parts
-async function weather(db, t, date, today, hours) {
-  const snap = await snapshot(db, t.id, today, 'forecast');
+/**
+ * The day's forecast for one mountain: today's forecast snapshot (taken now when the daily job has not yet), otherwise
+ * the daily forecast. At most one weather lookup: when the hourly one fails, the daily one is not tried. Returns
+ * { day, source }.
+ */
+async function forecastDay(db, t, date, today, hours, run) {
+  const before = run ? run.wxFailed : 0;
+  const snap = await snapshot(db, t.id, today, 'forecast', run);
   let day = snap ? dayFromForecast(snap, date, hours) : null;
   let source = day ? 'snapshot' : null;
-  if (!day && t.map_lat !== null && t.map_lng !== null) {
-    const wx = (await require('./dayrecord').fetchWeather(Number(t.map_lat), Number(t.map_lng), date, date, today))[date];
+  const failedNow = Boolean(run && run.wxFailed > before);
+  if (!day && !failedNow && !WX.down(run) && t.map_lat !== null && t.map_lng !== null) {
+    const wx = (await require('./dayrecord').fetchWeather(Number(t.map_lat), Number(t.map_lng), date, date, today, run))[date];
     if (wx) { day = { high_f: wx.high_f, low_f: wx.low_f, snow_in: wx.snowfall_in, precip_in: wx.precip_in, wind_mph: wx.wind_mph, gust_mph: wx.gust_mph, code: wx.weather_code }; source = 'forecast'; }
   }
+  return { day, source };
+}
+
+/**
+ * The weather part of the brief. run (lib/wxrun.js, from the brief job): the forecast is asked once per mountain and day
+ * for the run, shared by the operations, patrol and school briefs, and a failed one is remembered (2026.11.15 review: a
+ * hanging weather service made each kind wait twice). After 3 failed lookups the run does not ask again.
+ */
+async function weather(db, t, date, today, hours, run = null) {
+  let got;
+  if (run && run.forecasts) {
+    const key = `${t.id}|${date}|${hours ? `${hours.open}-${hours.close}` : ''}`;
+    if (!run.forecasts.has(key)) run.forecasts.set(key, forecastDay(db, t, date, today, hours, run).catch(() => ({ day: null, source: null })));
+    got = await run.forecasts.get(key);
+  } else got = await forecastDay(db, t, date, today, hours, null);
+  const { day, source } = got;
   // What the crew wrote down: the latest snow report from the day before or the day itself.
   const snow = await one(db, 'SELECT new_snow_in, base_in FROM snow_readings WHERE tenant_id = ? AND trail_id IS NULL AND read_at >= ? AND read_at < ? ORDER BY read_at DESC, id DESC LIMIT 1', [t.id, `${addDays(date, -1)} 00:00:00`, `${addDays(date, 1)} 00:00:00`]).catch(() => null);
   const out = { source: source || 'none' };
@@ -301,7 +325,7 @@ async function shifts(db, tenantId, date, kind, modules) {
 const PATROL_AREAS = 12; // areas named in the brief; the rest are counted under "Other places"
 const OTHER_PLACES = 'Other places';
 async function patrolCounts(db, tenantId, day) {
-  const list = await rows(db, `SELECT COALESCE(t.name, l.name, '${OTHER_PLACES}') AS area, COUNT(*) AS n FROM incidents i
+  const list = await rows(db, `SELECT COALESCE(t.name, l.name, 'Other places') AS area, COUNT(*) AS n FROM incidents i
     LEFT JOIN trails t ON t.tenant_id = i.tenant_id AND t.id = i.trail_id LEFT JOIN lifts l ON l.tenant_id = i.tenant_id AND l.id = i.lift_id
     WHERE i.tenant_id = ? AND i.occurred_at >= ? AND i.occurred_at < ? GROUP BY area ORDER BY n DESC, area`, [tenantId, `${day} 00:00:00`, `${addDays(day, 1)} 00:00:00`]);
   // The total counts every case (2026.11.15 review: it counted only the top 12 areas). The busiest areas are named; the
@@ -374,8 +398,9 @@ function screensFor(kind, modules) {
 /**
  * The brief's facts for one mountain and kind. t: the tenant row (id, name, timezone, map_lat, map_lng, online_shop,
  * online_daily_limit). day: { date, today, opening_day, opening_tomorrow, hours }. modules: Set of the apps on.
+ * run: the brief job's weather run (lib/wxrun.js), or null for a lookup of its own.
  */
-async function assemble(db, t, kind, day, modules) {
+async function assemble(db, t, kind, day, modules, { run = null } = {}) {
   if (!KINDS.includes(kind)) throw new Error(`Unknown brief kind ${kind}`);
   const { date, today } = day;
   const yesterday = addDays(date, -1);
@@ -384,7 +409,7 @@ async function assemble(db, t, kind, day, modules) {
     opening_day: Boolean(day.opening_day), day_before_opening: Boolean(day.opening_tomorrow),
     hours: day.hours || null,
   };
-  data.weather = await weather(db, t, date, today, day.hours || null);
+  data.weather = await weather(db, t, date, today, day.hours || null, run);
   const conditions = modules.has('conditions');
   if (kind !== 'school' && conditions) data.wind_holds = await wind(db, t.id, data.weather.windPoints, day.hours || null);
   if (kind === 'ops') data.visitors = await visits(db, t.id, date, today);

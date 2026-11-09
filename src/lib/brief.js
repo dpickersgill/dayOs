@@ -17,6 +17,7 @@ const { addDays } = require('./util');
 const modulesLib = require('./modules');
 const D = require('./briefdata');
 const W = require('./briefwrite');
+const WX = require('./wxrun');
 
 const SEND_AT = '06:00';
 const LATEST = '12:00'; // a brief not sent by noon is not sent that day (it would be stale); the page still has it
@@ -107,11 +108,21 @@ async function setPref(db, tenantId, userId, { on, channel }, byUserId) {
 // ---------------------------------------------------------------- the brief itself
 const TENANT_COLS = 'id, name, slug, timezone, map_lat, map_lng, online_shop, online_daily_limit, sandbox_expires_at';
 
-/** The day's brief of a kind for a mountain: made once (facts, then words), then read back. */
-async function ensure(db, t, kind, day, modules) {
+/** Thrown by ensure() when the run's time is up before a slow step: the run stops, and the next run makes the brief. */
+class OutOfTime extends Error {}
+
+/**
+ * The day's brief of a kind for a mountain: made once (facts, then words), then read back. opts.run: the job's weather run
+ * (lib/wxrun.js). opts.deadline: a time (ms) after which no slow step is started (the weather lookup in the facts, the
+ * model call), so a run overruns its budget by one call at most (2026.11.15 review).
+ */
+async function ensure(db, t, kind, day, modules, { run = null, deadline = null } = {}) {
   const have = await one(db, 'SELECT * FROM morning_briefs WHERE tenant_id = ? AND sent_on = ? AND kind = ?', [t.id, day.sentOn, kind]);
   if (have) return shape(have);
-  const data = await D.assemble(db, t, kind, { date: day.forDate, today: day.today || day.sentOn, opening_day: day.opening_day, opening_tomorrow: day.opening_tomorrow, hours: day.hours }, modules);
+  const late = () => deadline !== null && Date.now() >= deadline;
+  if (late()) throw new OutOfTime('time budget reached before the facts');
+  const data = await D.assemble(db, t, kind, { date: day.forDate, today: day.today || day.sentOn, opening_day: day.opening_day, opening_tomorrow: day.opening_tomorrow, hours: day.hours }, modules, { run });
+  if (late()) throw new OutOfTime('time budget reached before the model call');
   const w = await W.write(data, { tenantId: t.id, kind });
   await db.query('INSERT IGNORE INTO morning_briefs (tenant_id, sent_on, for_date, kind, data, body, source, fallback_reason, model, cost_micros) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [t.id, day.sentOn, day.forDate, kind, JSON.stringify(data), JSON.stringify(w.body), w.source, w.reason, w.model, w.cost_micros]);
@@ -142,10 +153,14 @@ async function deliver(t, person, brief, base) {
 /**
  * Sends what is due, everywhere. Safe to run again at any time: each person's send for a day is claimed (a unique row)
  * before anything goes out, and a claimed send is never made again. Stops starting new sends after budgetMs or maxSends,
- * and the next run carries on. now: the moment to act as (tests).
+ * and the next run carries on; ensure() checks the same deadline before its weather lookup and its model call, so a run
+ * ends at most one call (45 seconds, the model's timeout) after budgetMs. run: a weather breaker to share (lib/wxrun.js).
+ * now: the moment to act as (tests).
  */
-async function runDue({ now = new Date(), budgetMs = 100000, maxSends = 500, base = null, only = null } = {}) {
+async function runDue({ now = new Date(), budgetMs = 100000, maxSends = 500, base = null, only = null, run = null } = {}) {
   const started = Date.now();
+  const deadline = started + budgetMs;
+  const wx = run || WX.newRun(); // one weather breaker for the run (the daily job passes its own, shared with its other stages)
   const out = { mountains: 0, made: 0, sent: 0, failed: 0, more: false };
   const conn = await pool.getConnection();
   try {
@@ -166,8 +181,9 @@ async function runDue({ now = new Date(), budgetMs = 100000, maxSends = 500, bas
           if (Date.now() - started > budgetMs || out.sent + out.failed >= maxSends) { out.more = true; break; }
           if (!briefs.has(p.kind)) {
             const had = await one(pool, 'SELECT id FROM morning_briefs WHERE tenant_id = ? AND sent_on = ? AND kind = ?', [t.id, day.sentOn, p.kind]);
-            briefs.set(p.kind, await ensure(pool, t, p.kind, day, modules));
+            briefs.set(p.kind, await ensure(pool, t, p.kind, day, modules, { run: wx, deadline }));
             if (!had) out.made += 1;
+            if (Date.now() - started > budgetMs) { out.more = true; break; } // made; the next run sends it
           }
           const brief = briefs.get(p.kind);
           // The claim: a second run (or a second server) finds the row and moves on.
@@ -180,8 +196,10 @@ async function runDue({ now = new Date(), budgetMs = 100000, maxSends = 500, bas
           if (ok) out.sent += 1; else out.failed += 1;
         }
       } catch (err) {
+        if (err instanceof OutOfTime) { out.more = true; break; }
         require('./jobs').logFailure({ job: 'morning_brief', tenant: t.id, message: err.message });
       }
+      if (out.more) break;
     }
     return out;
   } finally {
@@ -203,4 +221,4 @@ async function recent(db, tenantId, kind, today) {
   return list.map(shape);
 }
 
-module.exports = { runDue, dueDay, dayFor, localNow, kindFor, people, forUser, setPref, ensure, recent, purge, shape, CHANNELS, SEND_AT, LATEST, KEEP_DAYS };
+module.exports = { runDue, OutOfTime, dueDay, dayFor, localNow, kindFor, people, forUser, setPref, ensure, recent, purge, shape, CHANNELS, SEND_AT, LATEST, KEEP_DAYS };

@@ -221,8 +221,12 @@ the other jobs. Safe to run again. What it does on each run:
 - For each mountain where it is between 6:00 AM and noon, and the calendar says today is open (or tomorrow is opening
   day), it makes the day's briefs (one per kind) and sends each person theirs by email, phone alert or both.
 - Each send is claimed in the database first, so a person never gets the same day's brief twice, even when runs overlap.
-- A run stops starting new sends after 100 seconds; the next run carries on. The daily job also finishes anything left
-  (with 4 minutes of its 15).
+- A run stops starting new sends after 100 seconds; the next run carries on. Making a brief checks the same limit
+  before its weather lookup and before its model call, so a run ends at most one call (45 seconds) late. The daily job
+  also finishes anything left, with 60 seconds of its 15 minutes.
+- Weather: each run asks for a mountain's forecast once, for all three kinds of brief, and remembers a failed lookup.
+  After 3 failed lookups (10 seconds each, `WEATHER_TIMEOUT_MS`) the run asks no more and the briefs say there is no
+  forecast. A weather service that hangs costs one run about 30 seconds, not 10 seconds per mountain and kind.
 - With no `ASSISTANT_API_KEY`, or when a mountain has used its monthly assistant allowance, the brief is made from the
   data by the template instead. It is never an error.
 - It reads today's forecast and presales snapshots (Forecast data). When the daily job has not taken them yet (it runs at
@@ -232,6 +236,33 @@ the other jobs. Safe to run again. What it does on each run:
 Check it in the logs: `"job":"morning_brief"` lines are failures for one mountain; the run's answer lists `sent`, `failed`
 and `more` (true when it stopped at its limit). A brief not sent by noon is not sent that day; the Morning brief page
 still shows it.
+
+### The daily job's time limits (2026.11.15)
+
+Cloud Scheduler gives the daily job 900 seconds (`--attempt-deadline=900s`). The stages that wait on outside services
+have limits, and they share one weather breaker for the whole job (`src/lib/wxrun.js`: after 3 failed weather lookups
+nothing in the job asks again). The worst case below is every outside service hanging until its timeout: weather
+10 seconds, the model 45 seconds.
+
+| Stage | Limit | Worst case |
+| --- | --- | --- |
+| `day_records` | The shared breaker | 3 lookups x 10 s = 30 s of waiting, then database work only |
+| `snapshots` | `SNAPSHOT_BUDGET_SECONDS` (240), checked before each mountain, 3 mountains at a time | 240 s + one mountain (10 s lookup beside its queries) = about 250 s. With the breaker already down: no waiting at all |
+| `morning_brief` | 60 s, checked before each person, and before the weather lookup and the model call in each brief | 60 s + one model call (45 s) = 105 s |
+| All AI and weather stages together | | 30 + 250 + 105 = 385 s |
+
+That leaves at least 515 s for the other 24 stages, which are database work and emails that are claimed before they
+are sent. They have no time limit of their own: each email waits at most 15 s (`MAIL_TIMEOUT_MS`), a text 15 s, a
+phone alert 8 s and a Stripe call 15 s, so a Postmark or Stripe outage on a busy morning is the one case that can still
+use up the rest. The job logs
+`"daily job finished"` with its seconds; if that line is missing for 26 hours, the alert in RUNBOOK.md fires.
+
+Before this release the same worst case was 240 s for snapshots plus, for the brief, 240 s and then up to 3 x (10 + 10) s
+of weather and a 45 s model call per mountain in progress, and 10 s per mountain for the day records.
+
+The conditions writer is not in the daily job: it runs in the guests job every 5 minutes, stops starting drafts after
+120 s (`CONDITIONS_TICK_SECONDS`), and one draft is at most two model calls, so a run ends within 210 s. Mountains not
+reached are drafted on the next run. Demo (sandbox) mountains are skipped, as for the brief.
 
 ## Staging
 
@@ -298,6 +329,8 @@ made the account and its permissions:
 | `GOOGLE_SITE_VERIFICATION`, `BING_SITE_VERIFICATION` | The ownership codes from Google Search Console and Bing Webmaster Tools (their "HTML tag" option), added to every website page. |
 | `PLATFORM_TOTP_SECRET`, `PLATFORM_ALLOW_IPS` | Two-step sign-in and an address allowlist for the platform console. See RUNBOOK.md. |
 | `OPEN_METEO_KEY`, `WEATHER` | Day by day records each mountain's weather from Open-Meteo every night. Open-Meteo's free service is for non-commercial use; once mountains are paying, buy an Open-Meteo API plan and set `OPEN_METEO_KEY` to its key. `WEATHER=off` stops the weather lookups (the rest of each day is still recorded). |
+| `WEATHER_TIMEOUT_MS` | How long one weather lookup may wait (default 10000). Day records, snapshots and the morning brief. |
+| `CONDITIONS_TICK_SECONDS` | The conditions writer's scheduled run stops starting drafts after this many seconds (default 120). |
 | `SNAPSHOTS`, `SNAPSHOT_BUDGET_SECONDS` | Forecast data: the daily job's morning snapshots (presales, the hourly weather forecast, staffing, prices). `SNAPSHOTS=off` skips them. `SNAPSHOT_BUDGET_SECONDS` (default 240) caps how long they may take; mountains not reached are logged. After the release that adds them, run `node scripts/snapshot-backfill.js` once to rebuild last season (safe to run twice). |
 | `SESSION_IDLE_MINUTES`, `LOGIN_LOCK_AFTER`, `REQUIRE_ADMIN_MFA`, `PWNED_CHECK`, `PLATFORM_KEY_SIGNIN` | Security settings, all with safe defaults: sign-out after 60 idle minutes, a 15-minute lock after 10 wrong passwords, two-step required for owners and managers in production, breached passwords refused, and the platform key off once an operator has two-step. See RUNBOOK.md, Security setup. |
 | `WEBAUTHN_RP_ID`, `WEBAUTHN_ORIGINS`, `STEP_UP_MINUTES`, `STEP_UP_REFUND_CENTS`, `TERMINAL_IDLE_MINUTES` | Passkeys and the second check. Set `WEBAUTHN_RP_ID` to your own domain (for example `runmyresort.com`) once the app is on it, before people add passkeys. Passkeys work only on `PUBLIC_URL` (the address people use) and on the addresses in `WEBAUTHN_ORIGINS`, so list any other address staff use there. See RUNBOOK.md, Tiered sign-in. |
