@@ -39,7 +39,7 @@ const META = {
   'ski-school-software': {
     title: 'Ski School Software: Lesson Booking | Verdynt/OS',
     description: 'Lesson sessions with rosters, online lesson booking and payment in English or Spanish, packages that count down, and instructors who post their own open days.',
-    og: 'Ski school software: sessions that fill without the phone tag',
+    og: 'Ski school software: lessons that fill without the phone tag',
     crumb: 'Ski school',
   },
   'ski-rental-software': {
@@ -166,6 +166,24 @@ const META = {
   notfound: { title: 'Page Not Found | Verdynt/OS', description: 'That page is not here.', noindex: true },
 };
 
+// Each page's own share image when there is one (public/site/img/share, drawn by scripts/share-images.js from lib/share.js),
+// else the site-wide share.png. Looked up once per page.
+const fs = require('node:fs');
+const path = require('node:path');
+const SHARE = require('./share');
+const SHARE_DIR = path.join(__dirname, '..', '..', 'public', 'site', 'img', 'share');
+const shareSeen = new Map();
+function shareImage(slug) {
+  if (!shareSeen.has(slug)) {
+    const file = SHARE.fileFor(slug);
+    const own = slug in SHARE.SHARE && fs.existsSync(path.join(SHARE_DIR, `${file}.png`));
+    const t = SHARE.SHARE[slug];
+    shareSeen.set(slug, own ? { path: `/site/img/share/${file}.png`, alt: `${t.headline}: ${t.sub.replace(/\.$/, '')}. Verdynt/OS` }
+      : { path: '/site/img/share.png', alt: 'Verdynt/OS, resort operating system: open the mountain from one screen' });
+  }
+  return shareSeen.get(slug);
+}
+
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const text = (html) => html.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&[a-z]+;/g, ' ').replace(/\s+/g, ' ').trim();
 const json = (o) => JSON.stringify(o).replace(/</g, '\\u003c');
@@ -197,14 +215,15 @@ function head({ slug, origin, html, plans, verify = {}, sameAs = [], noindex = f
   const from = areaPlans.length ? dollars(Math.min(...areaPlans.map((p) => p.monthly_cents))) : '$199';
   const fill = (s) => String(s || '').replaceAll('{{FROM}}', from);
   const url = `${origin}/${key === 'notfound' ? '' : slug}`;
-  const image = `${origin.replace(/\/site$/, '')}/site/img/share.png`;
+  const share = shareImage(key === 'notfound' ? '' : slug);
+  const image = `${origin.replace(/\/site$/, '')}${share.path}`;
   const title = fill(m.title); const description = fill(m.description);
   const robots = noindex || m.noindex ? 'noindex, follow' : 'index, follow, max-image-preview:large';
 
   const graph = [
     { '@type': 'Organization', '@id': `${origin}/#org`, name: 'Verdynt/OS', url: `${origin}/`, logo: `${origin.replace(/\/site$/, '')}/icons/icon-512.png`,
       // the company behind it, from config.site.company (one place, so a legal suffix is a one-line change)
-      legalName: require('../config').site.company.name,
+      legalName: require('../config').site.company.name, foundingDate: '2026', areaServed: 'US',
       address: { '@type': 'PostalAddress', addressRegion: 'PA', addressCountry: 'US' },
       description: 'Operations software for independent ski areas.', ...(sameAs.length ? { sameAs } : {}), contactPoint: [
         { '@type': 'ContactPoint', contactType: 'sales', email: require('../config').site.helloEmail, url: `${origin}/contact`, availableLanguage: ['English'] },
@@ -217,7 +236,7 @@ function head({ slug, origin, html, plans, verify = {}, sameAs = [], noindex = f
   if (SOFTWARE_PAGES.includes(key) && plans && plans.plans.length) {
     graph.push({
       '@type': 'SoftwareApplication', '@id': `${origin}/#software`, name: 'Verdynt/OS', applicationCategory: 'BusinessApplication', applicationSubCategory: 'Ski area management software',
-      operatingSystem: 'Web browser; iOS; Android', url: `${origin}/`, image, publisher: { '@id': `${origin}/#org` },
+      operatingSystem: 'Web browser', url: `${origin}/`, image, publisher: { '@id': `${origin}/#org` },
       description: 'Operations software for independent ski areas: lift inspections, ski patrol, ticket sales, waivers, rentals, ski school, staff scheduling, and attractions and activities such as ziplines, coasters and tubing.',
       featureList: FEATURES.join(', '), isAccessibleForFree: false, inLanguage: 'en-US',
       offers: { '@type': 'AggregateOffer', priceCurrency: 'USD', lowPrice: (Math.min(...plans.plans.map((p) => p.monthly_cents)) / 100).toFixed(2), highPrice: (Math.max(...plans.plans.map((p) => p.monthly_cents)) / 100).toFixed(2), offerCount: plans.plans.length,
@@ -261,11 +280,12 @@ function head({ slug, origin, html, plans, verify = {}, sameAs = [], noindex = f
     '<meta property="og:image:width" content="1200">',
     '<meta property="og:image:height" content="630">',
     '<meta property="og:image:type" content="image/png">',
-    '<meta property="og:image:alt" content="Verdynt/OS, resort operating system: open the mountain from one screen">',
+    `<meta property="og:image:alt" content="${esc(share.alt)}">`,
     '<meta name="twitter:card" content="summary_large_image">',
     `<meta name="twitter:title" content="${esc(fill(m.og || title))}">`,
     `<meta name="twitter:description" content="${esc(description)}">`,
     `<meta name="twitter:image" content="${esc(image)}">`,
+    `<meta name="twitter:image:alt" content="${esc(share.alt)}">`,
     verify.google ? `<meta name="google-site-verification" content="${esc(verify.google)}">` : null,
     verify.bing ? `<meta name="msvalidate.01" content="${esc(verify.bing)}">` : null,
     '<meta name="theme-color" content="#0e2632">',
@@ -281,4 +301,4 @@ function head({ slug, origin, html, plans, verify = {}, sameAs = [], noindex = f
   ].filter(Boolean).join('\n');
 }
 
-module.exports = { META, head, faqsOf, SOFTWARE_PAGES };
+module.exports = { META, head, faqsOf, SOFTWARE_PAGES, shareImage };

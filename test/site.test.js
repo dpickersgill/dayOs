@@ -80,7 +80,7 @@ test('on the website address, the pages are at the top, with robots, a sitemap a
   assert.ok(home.text.includes('rel="canonical" href="https://www.site.test/"'));
   assert.ok(home.text.includes('<meta name="robots" content="index, follow'));
   assert.ok(home.text.includes('<meta name="google-site-verification" content="g-verify-123">'));
-  assert.ok(home.text.includes('og:image" content="https://www.site.test/site/img/share.png"') && home.text.includes('twitter:card'));
+  assert.ok(home.text.includes('og:image" content="https://www.site.test/site/img/share/home.png"') && home.text.includes('twitter:card')); // Home's own share image (SEO 2026.11)
   // the bare address and a trailing slash send people to the one address
   const bare = await onHost('/pricing?x=1', 'site.test');
   assert.equal(bare.status, 301); assert.equal(bare.location, 'https://www.site.test/pricing?x=1');
