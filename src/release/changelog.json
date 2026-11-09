@@ -1,6 +1,41 @@
 {
   "releases": [
     {
+      "version": "2026.11.14",
+      "date": "2026-11-09",
+      "title": "Website guides and where leads come from",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "Console, Leads: a From column shows the website page each person was on before they sent the form, and the website that sent them there, when there was one. Above the list, walkthrough and trial requests from the last 12 months are counted by page.",
+          "help": null
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "Website: four new free guides, each with a printable PDF: a ski school child pickup policy template, a lost child procedure with a drill checklist, how to build a ski instructor pay scale, and an opening day checklist. The buyer's guide to choosing software has a printable PDF too.",
+          "help": null
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": "platform",
+          "text": "Website: the ski school, lift ticket, rental and waiver pages go deeper, with a busy day from start to finish, a comparison with paper, and more questions answered. Resources groups the guides by ski school, lifts and park, patrol, and choosing software, with each PDF under its guide.",
+          "help": null
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": "platform",
+          "text": "Website: each page has its own share picture for link previews, the sitemap shows the date each page last changed, and the guides and product pages link to each other. Nothing changes inside the app for mountains.",
+          "help": null
+        }
+      ]
+    },
+    {
       "version": "2026.11.13",
       "date": "2026-11-08",
       "title": "Child pickup, a lost-child button, ski school pay and a cleaner menu",
