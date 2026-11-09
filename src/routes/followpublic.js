@@ -124,7 +124,7 @@ jobs.post('/daily', jobAuth, async (req, res) => {
     out.retention = await stage('retention', () => require('../lib/retention').runAll());
     out.demo_emails = await stage('demo_emails', () => require('../lib/demomail').runAll(base));
     out.outreach = await stage('outreach', () => require('../lib/outreach').runDue());
-    out.morning_brief = await stage('morning_brief', () => require('../lib/brief').runDue({ base, budgetMs: 240000 })); // what the 15-minute brief job left (2026.11.14)
+    out.morning_brief = await stage('morning_brief', () => require('../lib/brief').runDue({ base, budgetMs: 240000 })); // what the 15-minute brief job left (2026.11.15)
     out.rate_limits_removed = await stage('rate_limits_cleanup', () => require('../lib/ratestore').cleanup()); // old shared rate limit counts (2026.11.10)
     // One line per finished run: an alert on "no such line for 26 hours" tells you the job stopped.
     console.log(JSON.stringify({ severity: 'INFO', job: 'daily', message: 'daily job finished', seconds: Math.round((Date.now() - started) / 1000) }));

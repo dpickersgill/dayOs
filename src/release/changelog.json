@@ -1,6 +1,55 @@
 {
   "releases": [
     {
+      "version": "2026.11.15",
+      "date": "2026-11-09",
+      "title": "The morning brief, the conditions writer and forecast data",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": ["patrol", "instructor"],
+          "text": "Morning brief: at 6:00 AM on days you are open, owners, managers, the patrol director and the ski school Director get a short read of the day by email, phone alert or both. It covers the weather, forecast gusts against each lift's wind hold limit, what is sold and booked, lift problems, open shifts and anything out of the ordinary. Every plan has it. Turn it on or off in Settings, Morning brief, and find the last 7 days from Today.",
+          "help": "morning-brief"
+        },
+        {
+          "kind": "new",
+          "app": "assistant_plus",
+          "who": [],
+          "text": "Conditions writer (AI Operations add-on): each morning it drafts your conditions page note, a snow report, a social post and a passholder email from today's lifts, trails, grooming and snow. An owner or manager reads it on Today under Ready for you, edits it and presses Approve. Nothing is published or sent until then.",
+          "help": "conditions-writer"
+        },
+        {
+          "kind": "new",
+          "app": "assistant_plus",
+          "who": [],
+          "text": "Ready for you on Today: what the assistant prepared waits here until you approve it, and the Inbox shows how many are waiting. A draft the assistant wrote says Drafted by the assistant. One made without AI says Filled in from today's records. Approve does it as you, with your own permissions, and Not now sets it aside.",
+          "help": "ready-for-you"
+        },
+        {
+          "kind": "new",
+          "app": "money",
+          "who": [],
+          "text": "Money, Forecast data: every morning Verdynt/OS writes down presales for the next 14 days, the hourly weather forecast at your base and summit, today's shifts and the online ticket prices, so next season's forecasts have a history to learn from. See which days are covered, sales against the same day last year, and today's wind. It holds counts, prices and weather only, never a person.",
+          "help": "money-forecast-data"
+        },
+        {
+          "kind": "improved",
+          "app": "assistant_plus",
+          "who": [],
+          "text": "Assistant Plus is now called AI Operations (add-on). It includes questions about your own day, the Questions button for guests, and the conditions writer. The assistant prepares, and a person approves before anything is published or sent. It never sees patient care records: the morning brief sees only counts of patrol cases by area.",
+          "help": "ready-for-you"
+        },
+        {
+          "kind": "improved",
+          "app": "conditions",
+          "who": [],
+          "text": "Lift inspections, Type: set each lift's wind hold limit, and the morning brief warns when forecast gusts during your open hours reach it. The forecast is for your base or summit point, so treat it as an early warning only, not a reading at the lift.",
+          "help": "morning-brief"
+        }
+      ]
+    },
+    {
       "version": "2026.11.14",
       "date": "2026-11-09",
       "title": "Website guides and where leads come from",
