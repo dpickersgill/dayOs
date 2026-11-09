@@ -202,9 +202,8 @@ async function guestHelpDialog() {
     h('p', { class: 'wide' }, 'Guests scan a QR code on a trail sign and press one button. The request lands on your board as a New call with where their phone is, and their answers follow as they tap them. It never replaces 911: every screen of the page shows Call 911.'),
     h('p', { class: 'wide' }, 'Link for your QR codes: ', h('b', null, url), h('br'), 'Add ?c=R7 (the sign\'s code) or ?loc=Ridge+Run to a sign\'s link so the request says where the sign is.'),
     field('Page is', on), h('div', { class: 'wide' }, field('Message to guests', input({ name: 'message', value: s.message || '', maxlength: 300 }), 'Shown on the first screen.')),
-    field('Patrol phone', input({ name: 'patrol_phone', type: 'tel', value: s.patrol_phone || '', maxlength: 30 }), 'Guests see Call patrol when this is set.'),
-    field('Help text number', input({ name: 'sms_number', type: 'tel', value: s.sms_number || '', maxlength: 30 }), 'Where Send by text instead goes when the page cannot reach patrol.')),
-  async (fd) => { await put('/patrol/guest-help', { enabled: val(fd, 'enabled') === '1', message: val(fd, 'message'), patrol_phone: val(fd, 'patrol_phone') || null, sms_number: val(fd, 'sms_number') || null }); toast('Saved'); });
+    h('p', { class: 'wide muted' }, 'Patrol phone (Call patrol): ', h('b', null, s.patrol_phone_shown || 'not set'), '. Number for texts (Send by text instead, and the sign sheets): ', h('b', null, s.sms_number_shown || 'not set'), '. Set both in Patrol settings, Text HELP.')),
+  async (fd) => { await put('/patrol/guest-help', { enabled: val(fd, 'enabled') === '1', message: val(fd, 'message') }); toast('Saved'); });
 }
 
 // ---------------------------------------------------------------- training passport

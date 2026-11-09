@@ -38,7 +38,8 @@ const MAX_PHOTOS = 20;
 /** The words that start a request: HELP and PATROL in English, AYUDA in Spanish. */
 const TRIGGERS = { HELP: 'en', PATROL: 'en', AYUDA: 'es' };
 
-/** A US or Canadian number the way it is written on a sign: 610-555-0100. Others as stored. */
+/** A US or Canadian number the way it is written on a sign: 610-555-0100. Others as stored. The guest page, the sign
+ * sheets and the first reply all write numbers this way (public/js/signsheet.js has the same rule). */
 const says = (p) => { const m = String(p || '').match(/^\+1(\d{3})(\d{3})(\d{4})$/); return m ? `${m[1]}-${m[2]}-${m[3]}` : String(p || ''); };
 
 // What the guest reads. Plain words; never a promise of a response time.
@@ -116,6 +117,11 @@ function without(rest, code) {
 }
 
 // ---------------------------------------------------------------- settings
+/**
+ * The mountain's two numbers, from the one place they are kept (Patrol settings, Text HELP): help_number, the number
+ * guests text (the sign sheets and the guest page's Send by text instead), and patrol_phone, the phone guests may call
+ * (the guest page's Call patrol and the first reply to a text). Either may be null. Null when neither is set.
+ */
 async function lineOf(db, tenantId) {
   return one(db, 'SELECT help_number, patrol_phone FROM patrol_help_lines WHERE tenant_id = ?', [tenantId]);
 }
@@ -416,5 +422,5 @@ async function photoUrl(tenantId, callId, n) {
 
 module.exports = {
   STRINGS, TRIGGERS, CALL_CAP, HOUR_CAP, WINDOW_HOURS, LOCATE_HOURS,
-  normalNumber, keyOf, isSpanish, parse, without, lineOf, lineByNumber, outbound, reserve, inbound, closed, threadView, photoUrl, mediaOk, optedOut,
+  says, normalNumber, keyOf, isSpanish, parse, without, lineOf, lineByNumber, outbound, reserve, inbound, closed, threadView, photoUrl, mediaOk, optedOut,
 };

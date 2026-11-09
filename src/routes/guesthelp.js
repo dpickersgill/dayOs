@@ -50,7 +50,7 @@ const ageMs = (c) => ms(nowIn(c.timezone)) - ms(c.received_at);
 async function byToken(req) {
   const token = String(req.params.token || '');
   if (!TOKEN.test(token)) throw notFound('Request');
-  const c = await one(pool, `SELECT c.*, t.name AS mountain, t.timezone, t.guest_help_phone, t.guest_help_sms FROM dispatch_calls c JOIN tenants t ON t.id = c.tenant_id
+  const c = await one(pool, `SELECT c.*, t.name AS mountain, t.timezone FROM dispatch_calls c JOIN tenants t ON t.id = c.tenant_id
     WHERE t.slug = ? AND c.guest_token = ? AND c.source = 'guest'`, [String(req.params.slug || ''), token]);
   if (!c || ageMs(c) > KEEP_HOURS * 3600000) throw notFound('Request');
   return c;
@@ -70,7 +70,7 @@ publicRouter.get('/:slug/help/:token', async (req, res) => {
   res.json({
     mountain: c.mountain, reference: callNo(c), status: GM.guestStatus(c.status), lost_child: c.call_type === 'lost_child', who: c.who, lang: c.lang,
     messages: messages.map((m) => ({ id: m.id, from: m.direction === 'to_guest' ? 'patrol' : 'you', body: m.body, at: m.at })),
-    patrol_phone: c.guest_help_phone || null, sms_number: c.guest_help_sms || null, live: liveOn(c),
+    ...(await require('./dispatch').guestNumbers(c.tenant_id)), live: liveOn(c),
     answered: Object.keys(a).filter((k) => !['auto_location', 'lift_name', 'lift_not_sure'].includes(k)).concat(a.lift_not_sure ? ['lift'] : [], c.caller_phone ? ['phone'] : []),
   });
 });

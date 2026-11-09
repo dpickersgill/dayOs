@@ -252,16 +252,10 @@ router.post('/places/import', patrol, mapping, validate(z.object({ csv: z.string
 });
 
 // ---------------------------------------------------------------- sign sheets
-/** The mountain's help number for texts (help/sms adds the setting): any tenants column named help..number or help..phone. */
+/** The mountain's help number for texts, from Patrol settings, Text HELP (the one place it is kept), or null. */
 async function helpNumber(tenantId) {
-  // help/guest and help/sms name it guest_help_sms (the number guests text); any other help..number or help..sms column after.
-  const cols = (await rows(pool, `SELECT column_name AS c FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'tenants'
-    AND column_name REGEXP '^(guest_)?help_([a-z]+_)?(sms|text|number)$'`)).map((r) => r.c);
-  const col = ['guest_help_sms', 'help_sms_number', 'help_text_number', 'help_number'].find((c) => cols.includes(c)) || cols.sort()[0];
-  if (!col) return null;
-  const t = await one(pool, `SELECT \`${String(col).replace(/`/g, '')}\` AS n FROM tenants WHERE id = ?`, [tenantId]);
-  const n = t && t.n ? String(t.n).trim() : '';
-  return n || null;
+  const l = await require('../lib/helpline').lineOf(pool, tenantId);
+  return (l && l.help_number) || null;
 }
 const helpUrl = (req, slug, code) => `${require('../lib/baseurl').baseUrl(req)}/help/${encodeURIComponent(slug)}?c=${encodeURIComponent(code)}`;
 

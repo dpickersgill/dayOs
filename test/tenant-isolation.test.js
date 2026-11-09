@@ -179,7 +179,7 @@ async function seedAi(M) {
 
 /** help/guest: a guest's request at A with answers, a reply, a message from dispatch and a position, in A-only words. */
 async function seedGuestHelp(M) {
-  await pool.query("UPDATE tenants SET guest_help_enabled = 1, guest_help_phone = '555-010-7777' WHERE id = ?", [M.id]);
+  await pool.query('UPDATE tenants SET guest_help_enabled = 1 WHERE id = ?', [M.id]);
   const made = await fetch(`${base}/api/v1/public/${M.slug}/help`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-device': `isolation-device-${M.slug}`.slice(0, 60) }, body: JSON.stringify({ kind: 'help', location: `Isolation glade ${M.slug}`, gps_lat: 44.1, gps_lng: -71.2, accuracy: 25, rid: '0123456789abcdef0123456789abcdef' }) });
   M.help = await made.json();
   assert.equal(made.status, 201, JSON.stringify(M.help));

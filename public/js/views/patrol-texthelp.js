@@ -6,8 +6,8 @@
 import { get, put, fetchBlob } from '../api.js';
 import { h, clear, appendAll, input, field, button, toast, state, dialog } from '../ui.js';
 
-/** +16105550100 as (610) 555-0100; other numbers as given. */
-export const showPhone = (p) => { const m = String(p || '').match(/^\+1(\d{3})(\d{3})(\d{4})$/); return m ? `(${m[1]}) ${m[2]}-${m[3]}` : String(p || ''); };
+/** +16105550100 as 610-555-0100, the way the signs, the guest page and the first reply write it; others as given. */
+export const showPhone = (p) => { const m = String(p || '').match(/^\+1(\d{3})(\d{3})(\d{4})$/); return m ? `${m[1]}-${m[2]}-${m[3]}` : String(p || ''); };
 
 export function textHelpPanel() {
   const box = h('section', { class: 'panel stack', 'data-panel': 'text-help', hidden: true });
@@ -15,11 +15,11 @@ export function textHelpPanel() {
     let s;
     try { s = await get('/patrol/text-help'); } catch (_) { box.hidden = true; return; } // not for this login
     const help = input({ name: 'help_number', type: 'tel', maxlength: 30, value: s.help_number || '', placeholder: '+16105550100', autocomplete: 'off' });
-    const phone = input({ name: 'patrol_phone', type: 'tel', maxlength: 30, value: s.patrol_phone || '', placeholder: '(610) 555-0100', autocomplete: 'off' });
+    const phone = input({ name: 'patrol_phone', type: 'tel', maxlength: 30, value: s.patrol_phone || '', placeholder: '610-555-0100', autocomplete: 'off' });
     const form = h('form', { class: 'stack', novalidate: true },
       h('div', { class: 'form' },
-        field('Help number', help, 'The Twilio number guests text. Leave blank to turn Text HELP off.'),
-        field('Patrol phone (optional)', phone, 'Added to the first reply: "To talk to patrol, call …"')),
+        field('Help number', help, 'The Twilio number guests text. It goes on the sign sheets and the guest help page\'s Send by text instead. Leave blank to turn Text HELP off.'),
+        field('Patrol phone (optional)', phone, 'Guests see Call patrol on the help page, and the first reply to a text says "To talk to patrol, call …".')),
       h('div', { class: 'row' }, button('Save', null, { type: 'submit', kind: 'primary', small: true })));
     form.addEventListener('submit', async (e) => {
       e.preventDefault();

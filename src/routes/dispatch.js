@@ -404,19 +404,27 @@ router.post('/dispatch/:id/case', patrol, needs('dispatch'), validate(z.object({
 });
 
 // ---------------------------------------------------------------- guest help settings
+/**
+ * The numbers a guest sees, from Patrol settings, Text HELP (lib/helpline.js lineOf): patrol_phone for Call patrol and
+ * sms_number for Send by text instead, each with the way it is written on a sign (610-555-0100).
+ */
+async function guestNumbers(tenantId) {
+  const HL = require('../lib/helpline');
+  const l = (await HL.lineOf(pool, tenantId)) || {};
+  return { patrol_phone: l.patrol_phone || null, patrol_phone_shown: l.patrol_phone ? HL.says(l.patrol_phone) : null,
+    sms_number: l.help_number || null, sms_number_shown: l.help_number ? HL.says(l.help_number) : null };
+}
 router.get('/guest-help', patrol, needs('manage_settings'), async (req, res) => {
-  const t = await one(pool, 'SELECT slug, guest_help_enabled, guest_help_message, guest_help_phone, guest_help_sms FROM tenants WHERE id = ?', [req.auth.tenantId]);
-  res.json({ enabled: Boolean(t.guest_help_enabled), message: t.guest_help_message, patrol_phone: t.guest_help_phone, sms_number: t.guest_help_sms, path: `/help/${t.slug}` });
+  const t = await one(pool, 'SELECT slug, guest_help_enabled, guest_help_message FROM tenants WHERE id = ?', [req.auth.tenantId]);
+  const n = await guestNumbers(req.auth.tenantId);
+  res.json({ enabled: Boolean(t.guest_help_enabled), message: t.guest_help_message, ...n, path: `/help/${t.slug}` });
 });
 
-// The patrol phone shows as "Call patrol" on the guest's page; the help text number is where "Send by text instead" goes
-// when the page cannot reach us (help/sms answers it).
-const phoneField = z.string().trim().max(30).regex(/^[0-9+()\-. ]*$/, 'Use digits only').nullable().optional();
-router.put('/guest-help', patrol, needs('manage_settings'), validate(z.object({ enabled: z.boolean(), message: z.string().max(300).nullable().optional(), patrol_phone: phoneField, sms_number: phoneField })), async (req, res) => {
+// The page switch and message. The patrol phone (Call patrol) and the number guests text (Send by text instead, and the
+// sign sheets) are set in one place, Patrol settings, Text HELP (/patrol/text-help), and read here.
+router.put('/guest-help', patrol, needs('manage_settings'), validate(z.object({ enabled: z.boolean(), message: z.string().max(300).nullable().optional() })), async (req, res) => {
   const b = req.body;
   const sets = ['guest_help_enabled = ?', 'guest_help_message = ?']; const vals = [b.enabled ? 1 : 0, b.message ?? null];
-  if (b.patrol_phone !== undefined) { sets.push('guest_help_phone = ?'); vals.push(b.patrol_phone || null); }
-  if (b.sms_number !== undefined) { sets.push('guest_help_sms = ?'); vals.push(b.sms_number || null); }
   await pool.query(`UPDATE tenants SET ${sets.join(', ')} WHERE id = ?`, [...vals, req.auth.tenantId]);
   await audit(pool, req, 'set_guest_help', 'tenants', req.auth.tenantId, { enabled: b.enabled });
   res.json({ ok: true });
@@ -426,7 +434,7 @@ router.put('/guest-help', patrol, needs('manage_settings'), validate(z.object({ 
 // No sign-in. Anyone with the link can send a request, so the endpoint is small, rate limited, ignores
 // anything not listed, and creates only a "new" call for patrol to review. It never returns patrol data.
 publicRouter.get('/:slug/help', async (req, res) => {
-  const t = await one(pool, 'SELECT id, name, guest_help_enabled, guest_help_message, guest_help_phone, guest_help_sms FROM tenants WHERE slug = ?', [req.params.slug]);
+  const t = await one(pool, 'SELECT id, name, guest_help_enabled, guest_help_message FROM tenants WHERE slug = ?', [req.params.slug]);
   if (!t || !t.guest_help_enabled) throw notFound('Help page');
   const [places, lifts] = await Promise.all([
     rows(pool, 'SELECT name FROM trails WHERE tenant_id = ? ORDER BY name LIMIT 200', [t.id]),
@@ -437,7 +445,7 @@ publicRouter.get('/:slug/help', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.set('Vary', 'Accept-Language');
   res.json({ mountain: t.name, message: t.guest_help_message, places: places.map((p) => p.name), lifts: lifts.map((l) => ({ id: l.id, name: l.name })),
-    patrol_phone: t.guest_help_phone || null, sms_number: t.guest_help_sms || null, lang: GH.langOf(req.get('accept-language')),
+    ...(await guestNumbers(t.id)), lang: GH.langOf(req.get('accept-language')),
     ...(place ? { place: { code: String(req.query.c).toUpperCase(), name: place.name } } : {}) });
 });
 
@@ -584,4 +592,4 @@ publicRouter.post('/locate/:token', validate(z.object({ lat: z.number().min(-90)
   res.json({ ok: true, mountain: c.mountain });
 });
 
-module.exports = { router, publicRouter, createCall, callNo, senderKey }; // callNo, senderKey: Text HELP (lib/helpline.js)
+module.exports = { router, publicRouter, createCall, callNo, senderKey, guestNumbers }; // callNo, senderKey: Text HELP (lib/helpline.js)

@@ -8,7 +8,7 @@
 //                                    whether the guest turned live location off
 //   dispatch_messages                messages between dispatch and the guest (page or text), help/sms writes through lib/guestmsg.js
 //   dispatch_positions               the last 10 positions the guest's phone sent while the page was open (kept with the call)
-//   tenants.guest_help_phone/_sms    the patrol phone guests may call, and the number guests may text for help
+// The patrol phone and the number guests text live in one place, help/sms's patrol_help_lines (Patrol settings, Text HELP).
 module.exports = ({ columnExists, tableExists }) => [
   ['dispatch_calls.guest_token', (c) => columnExists(c, 'dispatch_calls', 'guest_token'), `ALTER TABLE dispatch_calls
     ADD COLUMN guest_token CHAR(32) NULL,
@@ -49,7 +49,4 @@ module.exports = ({ columnExists, tableExists }) => [
     KEY ix_dpos_call (tenant_id, call_id, id),
     CONSTRAINT fk_dpos_call FOREIGN KEY (tenant_id, call_id) REFERENCES dispatch_calls(tenant_id, id)
   ) ENGINE=InnoDB`],
-
-  ['tenants.guest_help_phone', (c) => columnExists(c, 'tenants', 'guest_help_phone'),
-    'ALTER TABLE tenants ADD COLUMN guest_help_phone VARCHAR(30) NULL, ADD COLUMN guest_help_sms VARCHAR(30) NULL'],
 ];

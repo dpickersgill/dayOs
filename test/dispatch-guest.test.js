@@ -41,7 +41,10 @@ async function mountain(tag) {
   assert.equal(res.status, 201);
   const owner = await REC((await api('POST', '/auth/login', { body: { tenant: slug, email: `owner@${slug}.test`, password: PW } })).body.token);
   const tenantId = (await q('SELECT id FROM tenants WHERE slug = ?', [slug]))[0].id;
-  ok(await api('PUT', '/patrol/guest-help', { token: owner, body: { enabled: true, message: 'Patrol base is at the summit', patrol_phone: '555-010-0100', sms_number: '555-010-0199' } }));
+  ok(await api('PUT', '/patrol/guest-help', { token: owner, body: { enabled: true, message: 'Patrol base is at the summit' } }));
+  // The two numbers are set in one place, Patrol settings, Text HELP. The help number is unique across mountains.
+  const line = `+1484${String(tenantId).padStart(3, '0').slice(-3)}${String(Date.now()).slice(-4)}`;
+  ok(await api('PUT', '/patrol/text-help', { token: owner, body: { help_number: line, patrol_phone: '610-555-0100' } }));
   const [l] = await pool.query("INSERT INTO lifts (tenant_id, name) VALUES (?, 'Summit Quad')", [tenantId]);
   return { slug, owner, tenantId, lift: l.insertId };
 }
@@ -374,12 +377,13 @@ test('the text-message fallback: HELP, the sign or place, the position with accu
   assert.equal(H.pickLang('en', 'es', 'es-MX'), 'en');
   assert.equal(H.pickLang(null, null, 'es-AR'), 'es');
   assert.equal(H.t('es', 'qOf', { n: 2, t: 9 }), 'Pregunta 2 de 9');
-  // The page settings carry the numbers; only a manager sets them.
+  // The page settings show the numbers from Patrol settings, Text HELP (the one place they are set).
+  const line = (await q('SELECT help_number FROM patrol_help_lines WHERE tenant_id = ?', [A.tenantId]))[0].help_number;
   const s = ok(await api('GET', '/patrol/guest-help', { token: A.owner }));
-  assert.equal(s.patrol_phone, '555-010-0100'); assert.equal(s.sms_number, '555-010-0199');
-  assert.equal((await api('PUT', '/patrol/guest-help', { token: A.owner, body: { enabled: true, patrol_phone: 'call me' } })).status, 400);
+  assert.equal(s.patrol_phone, '+16105550100'); assert.equal(s.patrol_phone_shown, '610-555-0100'); assert.equal(s.sms_number, line);
+  assert.equal((await api('PUT', '/patrol/text-help', { token: A.owner, body: { help_number: line, patrol_phone: 'call me' } })).status, 400);
   const page = ok(await api('GET', `/public/${A.slug}/help`));
-  assert.equal(page.patrol_phone, '555-010-0100'); assert.equal(page.sms_number, '555-010-0199');
+  assert.equal(page.patrol_phone, '+16105550100'); assert.equal(page.patrol_phone_shown, '610-555-0100'); assert.equal(page.sms_number, line);
   assert.deepEqual(page.lifts.map((l) => l.name), ['Summit Quad']);
 });
 

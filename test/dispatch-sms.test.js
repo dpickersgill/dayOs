@@ -123,6 +123,43 @@ test('settings: the help number is E.164, unique across mountains, and can be cl
   assert.equal((await q('SELECT COUNT(*) AS n FROM patrol_help_lines WHERE tenant_id = ?', [C.id]))[0].n, 0);
 });
 
+// ---------------------------------------------------------------- one help number (2026.11.16)
+test('one help number: the sign sheet, the guest page and the first reply to a text all show the numbers set in Text HELP', async () => {
+  const M = await mountain('one');
+  const line = `+1215${String(Date.now() + 7).slice(-7)}`;
+  const shown = `${line.slice(2, 5)}-${line.slice(5, 8)}-${line.slice(8)}`;
+  // Set once, in Patrol settings, Text HELP; the guest help page's own settings take no numbers.
+  ok(await api('PUT', '/patrol/text-help', { token: M.owner, body: { help_number: shown, patrol_phone: '(610) 555-0142' } }));
+  ok(await api('PUT', '/patrol/guest-help', { token: M.owner, body: { enabled: true, message: 'Hi', patrol_phone: '111', sms_number: '222' } }));
+  const g = ok(await api('GET', '/patrol/guest-help', { token: M.owner }));
+  assert.equal(g.sms_number, line, 'the guest help settings read Text HELP, and ignore numbers sent to them');
+  assert.equal(g.patrol_phone, '+16105550142');
+  // The sign sheet.
+  await pool.query("INSERT INTO mountain_places (tenant_id, kind, name, code, lat, lng, accuracy_m, marked_at) VALUES (?, 'sign', 'One Run sign', 'OR1', 44.1, -71.2, 5, UTC_TIMESTAMP())", [M.id]);
+  const sheet = ok(await api('GET', '/patrol/places/signs', { token: M.owner }));
+  assert.equal(sheet.help_number, line);
+  const S = await import('../public/js/signsheet.js');
+  assert.equal(S.signWords({ code: 'OR1', mountain: sheet.mountain, number: sheet.help_number }).how, `Scan, or text HELP OR1 to ${shown}`);
+  // The guest page: Send by text instead goes to the same number; Call patrol shows the patrol phone, written the same way.
+  const page = ok(await api('GET', `/public/${M.slug}/help`));
+  assert.equal(page.sms_number, line); assert.equal(page.sms_number_shown, shown);
+  assert.equal(page.patrol_phone, '+16105550142'); assert.equal(page.patrol_phone_shown, '610-555-0142');
+  const made = ok(await api('POST', `/public/${M.slug}/help`, { body: { kind: 'help', location: 'One Run', rid: require('crypto').randomBytes(16).toString('hex') } }));
+  const st = ok(await api('GET', `/public/${M.slug}/help/${made.token}`));
+  assert.equal(st.sms_number, line); assert.equal(st.patrol_phone_shown, '610-555-0142');
+  // A text to that number reaches this mountain, and the first reply names the same patrol phone.
+  const r = await text({ From: guestPhone(), To: line, Body: 'HELP OR1' });
+  assert.match(r.reply, /To talk to patrol, call 610-555-0142\./);
+  assert.equal((await q("SELECT COUNT(*) AS n FROM dispatch_calls WHERE tenant_id = ? AND source = 'sms'", [M.id]))[0].n, 1);
+  // A patrol phone alone (no Text HELP): Call patrol still shows; no number for texts.
+  ok(await api('PUT', '/patrol/text-help', { token: M.owner, body: { help_number: null, patrol_phone: '610-555-0143' } }));
+  const p2 = ok(await api('GET', `/public/${M.slug}/help`));
+  assert.equal(p2.sms_number, null); assert.equal(p2.patrol_phone_shown, '610-555-0143');
+  assert.equal(ok(await api('GET', '/patrol/places/signs', { token: M.owner })).help_number, null);
+  ok(await api('PUT', '/patrol/text-help', { token: M.owner, body: { help_number: null, patrol_phone: null } }));
+  assert.equal((await q('SELECT COUNT(*) AS n FROM patrol_help_lines WHERE tenant_id = ?', [M.id]))[0].n, 0);
+});
+
 // ---------------------------------------------------------------- the webhook
 test('signature: Twilio\'s documented example, a valid post, a bad one and an unsigned one', async () => {
   // https://www.twilio.com/docs/usage/security: token 12345, this address and these fields give this signature.

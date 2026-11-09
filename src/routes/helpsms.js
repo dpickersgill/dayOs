@@ -110,10 +110,11 @@ router.put('/text-help', patrol, needs('manage_settings'), validate(z.object({ h
   const phone = req.body.patrol_phone ? HL.normalNumber(req.body.patrol_phone) : null;
   if (req.body.patrol_phone && !phone) throw bad('The patrol phone must be a full phone number, like +16105550100');
   if (help && await require('../lib/sandbox').isSandbox(tenantId)) throw bad('Demo mountains cannot have a help number');
-  if (!help) {
+  if (!help && !phone) {
     await pool.query('DELETE FROM patrol_help_lines WHERE tenant_id = ?', [tenantId]);
   } else {
-    const taken = await one(pool, 'SELECT tenant_id FROM patrol_help_lines WHERE help_number = ? AND tenant_id <> ?', [help, tenantId]);
+    // A patrol phone alone is fine (the guest page shows Call patrol); Text HELP is off until a help number is set.
+    const taken = help ? await one(pool, 'SELECT tenant_id FROM patrol_help_lines WHERE help_number = ? AND tenant_id <> ?', [help, tenantId]) : null;
     if (taken) throw conflict('That number is already the help number of another mountain. Each mountain needs its own.');
     try {
       await pool.query(`INSERT INTO patrol_help_lines (tenant_id, help_number, patrol_phone, updated_by) VALUES (?, ?, ?, ?)
