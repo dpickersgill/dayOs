@@ -175,7 +175,7 @@ test('the first text makes a call, source sms, with the Locate caller link in th
   assert.equal(c.description, 'my friend fell and cannot get up');
   assert.equal(c.location, 'Not given yet (Text HELP)');
   assert.match(c.locate_token, /^[0-9a-f]{32}$/);
-  assert.equal(r.reply, `${A.name} ski patrol has your message. If it is life threatening, call 911. Tap this link to send your location: https://app.verdynt.test/locate/${c.locate_token}. Or reply with the code on the nearest sign or lift tower. To talk to patrol, call +16105550100.`);
+  assert.equal(r.reply, `${A.name} ski patrol has your message. If it is life threatening, call 911. Tap this link to send your location: https://app.verdynt.test/locate/${c.locate_token}. Or reply with the code on the nearest sign or lift tower. To talk to patrol, call 610-555-0100.`);
   // The link is the existing Locate caller page, and it works.
   const loc = ok(await api('GET', `/public/locate/${c.locate_token}`));
   assert.equal(loc.mountain, A.name);
@@ -347,7 +347,7 @@ test('AYUDA, or a text in Spanish, gets the reply and the closing text in Spanis
   const phone = guestPhone();
   const r = await text({ From: phone, To: LINE_A, Body: 'AYUDA me caí en la pista' });
   assert.match(r.reply, new RegExp(`^La patrulla de esquí de ${A.name} recibió su mensaje\\. Si su vida corre peligro, llame al 911\\.`));
-  assert.match(r.reply, /Para hablar con la patrulla, llame al \+16105550100\.$/);
+  assert.match(r.reply, /Para hablar con la patrulla, llame al 610-555-0100\.$/);
   const c = await latestCall(A.id, phone);
   assert.equal(c.description, 'me caí en la pista');
   const p2 = guestPhone();

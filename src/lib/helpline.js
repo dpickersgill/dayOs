@@ -38,16 +38,19 @@ const MAX_PHOTOS = 20;
 /** The words that start a request: HELP and PATROL in English, AYUDA in Spanish. */
 const TRIGGERS = { HELP: 'en', PATROL: 'en', AYUDA: 'es' };
 
+/** A US or Canadian number the way it is written on a sign: 610-555-0100. Others as stored. */
+const says = (p) => { const m = String(p || '').match(/^\+1(\d{3})(\d{3})(\d{4})$/); return m ? `${m[1]}-${m[2]}-${m[3]}` : String(p || ''); };
+
 // What the guest reads. Plain words; never a promise of a response time.
 const STRINGS = {
   en: {
     first: (mountain, link) => `${mountain} ski patrol has your message. If it is life threatening, call 911. Tap this link to send your location: ${link}. Or reply with the code on the nearest sign or lift tower.`,
-    call: (phone) => ` To talk to patrol, call ${phone}.`,
+    call: (phone) => ` To talk to patrol, call ${says(phone)}.`,
     closed: 'Patrol has closed your request. Reply HELP if you need patrol again.',
   },
   es: {
     first: (mountain, link) => `La patrulla de esquí de ${mountain} recibió su mensaje. Si su vida corre peligro, llame al 911. Toque este enlace para enviar su ubicación: ${link}. O responda con el código del letrero o de la torre de telesilla más cercana.`,
-    call: (phone) => ` Para hablar con la patrulla, llame al ${phone}.`,
+    call: (phone) => ` Para hablar con la patrulla, llame al ${says(phone)}.`,
     closed: 'La patrulla cerró su solicitud. Responda AYUDA si necesita a la patrulla otra vez.',
   },
 };

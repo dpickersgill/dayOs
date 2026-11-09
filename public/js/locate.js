@@ -2,7 +2,8 @@
 // phone for its position and sends it to patrol. It shows nothing about the call except the mountain's name.
 import { h, clear } from './ui.js';
 
-const token = location.pathname.split('/').filter(Boolean)[1] || '';
+// A phone that takes the period after the link in a text (Text HELP: "...your location: <link>.") still works.
+const token = (location.pathname.split('/').filter(Boolean)[1] || '').replace(/(\.|%2E)+$/i, '');
 const root = document.getElementById('locate');
 const api = `/api/v1/public/locate/${encodeURIComponent(token)}`;
 const note = (text) => h('p', { class: 'muted' }, text);

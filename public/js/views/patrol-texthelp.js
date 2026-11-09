@@ -4,7 +4,7 @@
 //   textHelpBlock(c)  on a call that came by text: the phone, the language, STOP, texts used, and the photos the
 //                     guest sent (opened through the server, signed in; never stored).
 import { get, put, fetchBlob } from '../api.js';
-import { h, clear, input, field, button, toast, state, dialog } from '../ui.js';
+import { h, clear, appendAll, input, field, button, toast, state, dialog } from '../ui.js';
 
 /** +16105550100 as (610) 555-0100; other numbers as given. */
 export const showPhone = (p) => { const m = String(p || '').match(/^\+1(\d{3})(\d{3})(\d{4})$/); return m ? `(${m[1]}) ${m[2]}-${m[3]}` : String(p || ''); };
@@ -26,7 +26,7 @@ export function textHelpPanel() {
       try { await put('/patrol/text-help', { help_number: help.value.trim() || null, patrol_phone: phone.value.trim() || null }); toast('Saved'); await draw(); } catch (err) { toast(err.message, 'error'); }
     });
     const n = s.help_number ? showPhone(s.help_number) : '…';
-    clear(box).append(
+    appendAll(clear(box),
       h('h3', null, 'Text HELP'),
       h('p', null, 'Guests text HELP to your help number. The text lands on the dispatch board as a New call. The guest gets a reply with the 911 line and a link to send their location. Replies from dispatch go back by text.'),
       s.texts_ready ? null : h('p', null, state('Text messages are not set up for Verdynt/OS yet, so replies cannot go out.', 'warn')),
@@ -51,7 +51,7 @@ export function textHelpBlock(c) {
     try { v = await get(`/patrol/dispatch/${c.id}/sms`); } catch (err) { clear(box).append(h('p', { class: 'muted' }, err.message)); return; }
     if (!v.by_text) { box.remove(); return; }
     const photos = v.photos || [];
-    clear(box).append(
+    appendAll(clear(box),
       h('p', null, h('b', null, 'Came by text: '), showPhone(v.phone), ' ',
         v.lang === 'es' ? state('Spanish', 'neutral') : null, ' ',
         v.opted_out ? state('Texted STOP: call them', 'bad') : null),
