@@ -120,6 +120,8 @@ async function drawLayout(box, list) {
   const start = cfg.center ? { lat: cfg.center.lat, lng: cfg.center.lng, zoom: cfg.center.zoom } : US_VIEW;
   const map = makeMap(L, mapEl, cfg, start);
   removeWhenGone(mapEl, map);
+  // help/places: turned to match the mountain's trail map, when the mountain has set that (never mirrored)
+  if (cfg.map_rotation_deg) { try { (await import('../maprotate.js')).turnLeafletMap(L, map, mapEl, cfg.map_rotation_deg); } catch (_) { /* north up instead */ } }
   if (isManager()) {
     box.firstChild.append(h('div', { class: 'row' }, button('Open the map here by default', async () => {
       const c = map.getCenter();

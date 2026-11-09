@@ -7,7 +7,8 @@
 // case table any of them may name is `incidents`, and only inside patrolCounts. Three patrol tables that hold no patient
 // and no case are allowed by name, each in the file and for the reason given: the patrol roster (who gets the patrol
 // brief), patrol shifts (how many shifts are covered) and phone alert subscriptions (made with patrol; a device, never a case). Nothing else: no incident_* table, no patient, care, dispatch,
-// injury or follow-up table, and no patrol code required.
+// injury or follow-up table, and no patrol code required. The guest help release adds the places patrol maps (mountain_places,
+// lib/places.js): they place callers for dispatch, so they stay out of AI too.
 // (test/proposals.test.js, test/evals/brief.test.js and test/evals/conditions.test.js prove the same at run time.)
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -23,7 +24,7 @@ function patrolTables() {
   const names = new Set();
   for (const f of ['patrol.sql', 'patrolops.sql']) for (const m of read(`db/${f}`).matchAll(/CREATE TABLE(?: IF NOT EXISTS)?\s+`?(\w+)/gi)) names.add(m[1]);
   const all = [read('db/schema.sql'), read('db/migrate.js'), ...fs.readdirSync(path.join(db, 'steps')).map((f) => read(`db/steps/${f}`))].join('\n');
-  for (const m of all.matchAll(/CREATE TABLE(?: IF NOT EXISTS)?\s+`?(\w+)/gi)) if (/^(incident|patrol|patient|dispatch|injury|staff_injur|followup|care_|case_)/.test(m[1])) names.add(m[1]);
+  for (const m of all.matchAll(/CREATE TABLE(?: IF NOT EXISTS)?\s+`?(\w+)/gi)) if (/^(incident|patrol|patient|dispatch|injury|staff_injur|followup|care_|case_|mountain_places)/.test(m[1])) names.add(m[1]);
   names.delete('IF'); names.delete('if');
   return [...names];
 }
@@ -63,7 +64,7 @@ test('the AI files name no patrol or patient table, except the brief\'s one aggr
       if (ALLOWED[f] && ALLOWED[f][t]) continue;
       assert.ok(!new RegExp(`\\b${t}\\b`).test(src), `${f} names the patrol table ${t}`);
     }
-    for (const m of src.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)) assert.doesNotMatch(m[1], /patrol|patient|incident|care|scrub|injur|dispatch|nsaar/i, `${f} requires ${m[1]}`);
+    for (const m of src.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)) assert.doesNotMatch(m[1], /patrol|patient|incident|care|scrub|injur|dispatch|nsaar|places|staffhelp/i, `${f} requires ${m[1]}`);
   }
 });
 

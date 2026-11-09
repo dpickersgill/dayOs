@@ -131,6 +131,7 @@ function createApp() {
   app.use(/^\/api\/v1\/public\/[^/]+\/rental-form$/, express.json({ limit: '1200kb' })); // a signature for each renter on the guest rental form
   app.use('/api/v1/online-shop/brand', express.json({ limit: '1200kb' })); // logo and hero photo together
   app.use('/api/v1/platform/prospects/import', express.json({ limit: '2mb' })); // a research batch of ski areas
+  app.use('/api/v1/patrol/places/import', express.json({ limit: '1mb' })); // a mountain's places as CSV, a few thousand rows
   app.use(express.json({ limit: '400kb' })); // a customer photo is about 40 KB; a card statement a few hundred rows
 
   // The product website: its pages at /site everywhere, and at / on its own addresses (SITE_HOSTS).
@@ -377,6 +378,7 @@ function createApp() {
   api.use('/patrol', patrolPlus);
   api.use('/patrol', patrolTeam);
   api.use('/patrol', dispatch.router);
+  api.use('/patrol', require('./routes/places').router); // help/places: mapped places, sign sheets, where a caller is, staff help
   api.use('/patrol', patrolForm);
   api.use('/patrol', patrolMap);
   api.use('/patrol', safetyRoutes);

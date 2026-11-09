@@ -33,7 +33,7 @@ const PATROL_PARTS = {
   now: ['Now', 'Who is on, the calls, the map and today\u2019s checks.', ['patrol-duty', 'patrol-sweep', 'patrol-1111-sweep', 'patrol-log', 'patrol-avalanche', 'patrol-locate', 'patrol-find', 'patrol-offline', 'patrol-1111-offline']],
   cases: ['Cases', 'Every patrol report and what follows from it.', ['patrol-case', 'patrol-records-check', 'patrol-checklists', 'patrol-bedside', 'patrol-errors', 'patrol-photos', 'patrol-1111-photos', 'patrol-review', 'patrol-followup', 'patrol-records', 'patrol-1111-records', 'patrol-claim-file', 'patrol-requirements', 'patrol-conditions', 'patrol-rentals', 'patrol-staff', 'park-patrol', 'attr-patrol', 'patrol-scene', 'patrol-secure-links', 'patrol-witness-links', 'patrol-network', 'patrol-doc-score', 'patrol-risk-report', 'patrol-access-summary', 'patrol-1111-access']],
   people: ['People', 'The schedule, crews, posts, roster and training.', ['patrol-schedule', 'patrol-crews', 'patrol-cover', 'patrol-roster', 'patrol-roster-off', 'patrol-access']],
-  gear: ['Gear', 'Kits, equipment, medications and lift evacuation.', ['patrol-kits', 'patrol-meds', 'patrol-1111-meds', 'patrol-lifts']],
+  gear: ['Gear', 'Kits, equipment, medications, lift evacuation and help signs.', ['patrol-kits', 'patrol-meds', 'patrol-1111-meds', 'patrol-lifts', 'patrol-map-places', 'patrol-map-turn', 'patrol-help-signs']],
 };
 /** The back link to the page Help was opened from, when it was in this app (Patrol, Gear). */
 function backToApp(key) {

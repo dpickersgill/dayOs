@@ -91,6 +91,9 @@ export async function render(root, params = []) {
   if (params[0] === 'risk-report' && (!params[1] || /^\d{4}-\d{2}$/.test(params[1]))) { await renderRiskReport(root, params[1] || ''); return; } // the season risk report, printable
   if (params[0] === 'kit' && ONE.test(params[1] || '')) { await renderKitPage(root, Number(params[1])); return; }
   if (params[0] === 'kit-labels') { await renderKitLabels(root); return; }
+  // help/places: help signs and the tower stencil, ready to print
+  if (params[0] === 'signs') { await (await import('./patrol-places.js')).renderSigns(root); return; }
+  if (params[0] === 'stencil' && ONE.test(params[1] || '')) { await (await import('./patrol-places.js')).renderStencil(root, Number(params[1])); return; }
   const printPages = { handoff: renderHandoff, refusal: renderRefusal, takehome: renderTakehome };
   // the refusal can be signed on a case started with no signal (temporary negative ids, kept on the phone)
   if (printPages[params[0]] && (params[0] === 'refusal' ? CASE_ID : ONE).test(params[1] || '') && (params[0] === 'refusal' ? CASE_ID : ONE).test(params[2] || '')) {
@@ -147,7 +150,7 @@ const SECTION_LIST = [
   ['now', 'Now', 'Who is on, the calls, the map and today\'s checks.', ['board', 'duty', 'dispatch', 'map', 'opening', 'sweep', 'avalanche', 'log']],
   ['cases', 'Cases', 'Every patrol report, newest first, and what follows from them.', ['cases', 'review', 'followup', 'records', 'stats', 'network', 'risk', 'access']],
   ['people', 'People', 'The schedule, crews, posts, roster and training.', ['schedule', 'crews', 'cover', 'posts', 'team', 'training', 'passport']],
-  ['gear', 'Gear', 'Kits, equipment, medications and lift evacuation.', ['kits', 'equipment', 'meds', 'lifts']],
+  ['gear', 'Gear', 'Kits, equipment, medications, lift evacuation and help signs.', ['kits', 'equipment', 'meds', 'lifts', 'places']],
 ];
 export const SECTION_IDS = SECTION_LIST.map((s) => s[0]);
 /** Which section holds a tab, by its key (the same whatever the person may open). */
@@ -186,6 +189,7 @@ function pageItems(me, opts) {
     ['equipment', 'Equipment', (b) => drawEquipment(b, opts)],
     ['meds', 'Medications', drawMeds],
     ['lifts', 'Lift evacuation', drawLifts],
+    ...only('map_places', ['places', 'Places and signs', async (b) => (await import('./patrol-places.js')).drawPlaces(b)]),
     ['training', 'Training', (b) => drawTraining(b, opts)],
     ['passport', 'Skills', (b) => drawPassport(b, opts)],
     ...only('records', ['records', 'Records requests', drawRecords]),

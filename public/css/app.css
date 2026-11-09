@@ -79,6 +79,8 @@
   /* fixed colors: paper, print and dark surfaces that stay dark in both themes */
   --white: #ffffff;
   --black: #000000;
+  --sign-ink: #000000;   /* help signs print black on white in every theme (help/places) */
+  --sign-paper: #ffffff;
   --print-rule: #999999;
   --canvas: #fbfdfe;
   --on-dark-ink: #eaf3f7;
@@ -4053,3 +4055,113 @@ label.check-hit { display: inline-flex; align-items: center; justify-content: ce
   .brief-grid { grid-template-columns: minmax(0, 1fr); }
   .brief-card { padding: 16px; }
 }
+
+/* ---------------------------------------------------------------- Mountain places and help signs (help/places) */
+/* Guest needs help here: on Mountain status, the Gate and in the menu. Large, outlined in red, one hand with gloves. */
+.staff-help-btn { min-height: 56px; display: inline-flex; align-items: center; gap: 10px; padding: 8px 18px; border: 2px solid var(--closed); color: var(--closed); background: var(--surface); font-weight: 700; font-size: 1.05rem; }
+.staff-help-btn:hover { background: var(--closed-tint); }
+.staff-help-btn .sh-plus { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--closed); color: var(--on-fill); font-size: 1.3rem; line-height: 1; }
+.nav-help-here { width: calc(100% - 16px); margin: 8px 8px 0; justify-content: flex-start; font-size: .95rem; min-height: 48px; padding: 6px 12px; }
+.sheet-help-here { width: 100%; justify-content: center; margin: 8px 0 4px; }
+.staff-help .sh-status { font-size: 1.1rem; font-weight: 700; }
+.staff-help .sh-sent { font-size: 1.2rem; color: var(--open); }
+.staff-help .sh-911 { font-weight: 700; color: var(--closed); }
+@media (max-width: 860px) { .page-head > .head-help-here { width: 100%; justify-content: center; } }
+
+/* Mapping the mountain */
+.places-grid { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 960px) { .places-grid { grid-template-columns: minmax(0, 1fr); } }
+.mark-card h2 { margin: 0; }
+.mark-card .big-select, .mark-card .big-input { min-height: 52px; font-size: 1.1rem; width: 100%; }
+.mark-card .code-input { font-family: 'Barlow Condensed', 'Atkinson Hyperlegible', system-ui, sans-serif; font-weight: 700; font-size: 1.6rem; letter-spacing: 2px; text-transform: uppercase; max-width: 10rem; }
+.mark-card .mark-actions .btn { flex: 1 1 0; min-height: 56px; }
+.mark-card .mark-btn { font-size: 1.15rem; }
+.gps-line { margin: 0; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--surface-2); border-left: 4px solid var(--open); font-weight: 700; }
+.gps-line.gps-weak { border-left-color: var(--warn-line); background: var(--warn-bg); color: var(--warn-ink); }
+.check-row { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; }
+.check-row input { width: 22px; height: 22px; }
+.places-tools { flex-wrap: wrap; gap: 8px; }
+.place-code { font-family: 'Barlow Condensed', 'Atkinson Hyperlegible', system-ui, sans-serif; font-size: 1.15rem; letter-spacing: 1px; }
+.error-list { margin: 0; padding-left: 20px; color: var(--invalid); }
+.place-map { display: block; width: 100%; height: auto; max-height: 420px; border: 1px solid var(--line); border-radius: var(--radius); }
+.place-map .pm-bg { fill: var(--surface-2); }
+.place-map .pm-empty, .place-map .pm-scale text { fill: var(--quiet); font-size: 12px; }
+.place-map .pm-north-ring { fill: var(--surface); stroke: var(--line-strong); }
+.place-map .pm-north-line { stroke: var(--closed); stroke-width: 2.5; stroke-linecap: round; }
+.place-map .pm-north-tip { fill: var(--closed); }
+.place-map .pm-north-n { fill: var(--ink); font-size: 12px; font-weight: 700; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
+.place-map .pm-scale line { stroke: var(--ink); stroke-width: 2; }
+.place-map .pm-point circle, .place-map .pm-point rect { fill: var(--spruce-soft); stroke: var(--surface); stroke-width: 1.5; }
+.place-map .pm-tower rect { fill: var(--accent-line); }
+.place-map .pm-label { fill: var(--ink); font-size: 11px; font-weight: 700; paint-order: stroke; stroke: var(--surface-2); stroke-width: 3px; }
+.place-map .pm-pick { cursor: pointer; }
+.place-map .pm-pick:focus-visible circle, .place-map .pm-pick:focus-visible rect { stroke: var(--focus); stroke-width: 3; }
+.place-map .pm-ring { fill: var(--gps-ring); fill-opacity: .18; stroke: var(--gps-dot); stroke-width: 1.5; }
+.place-map .pm-focus { fill: var(--gps-dot); stroke: var(--surface); stroke-width: 2.5; }
+.place-map .pm-trail { fill: none; stroke: var(--gps-dot); stroke-width: 2; stroke-dasharray: 5 4; }
+.place-map .pm-trail-dot { fill: var(--gps-dot); fill-opacity: .55; }
+
+/* A call's location panel */
+.call-where { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; background: var(--surface); }
+.call-where h3 { margin: 0; }
+.call-where .where-words { margin: 0; font-size: 1.2rem; font-weight: 700; }
+.call-where .where-facts { gap: 6px 14px; align-items: center; }
+.call-where .where-moved { font-weight: 700; }
+.call-where .place-map { max-width: 460px; }
+
+/* Help signs: black on white, very large, nothing small. One sign to a printed page. */
+.signs-page { display: grid; gap: 24px; justify-items: center; }
+.signs-tools { justify-self: stretch; }
+.help-sign { box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: space-between; text-align: center; background: var(--sign-paper); color: var(--sign-ink); border: 6px solid var(--sign-ink); border-radius: var(--radius-md); font-family: 'Atkinson Hyperlegible', system-ui, sans-serif; break-after: page; page-break-after: always; break-inside: avoid; }
+.help-sign p { margin: 0; line-height: 1.1; }
+.help-sign .hs-ask { font-weight: 700; }
+.help-sign .hs-code { font-family: 'Barlow Condensed', 'Atkinson Hyperlegible', system-ui, sans-serif; font-weight: 700; line-height: .9; letter-spacing: 2px; }
+.help-sign .hs-how { font-weight: 700; }
+.help-sign .hs-911 { font-weight: 700; background: var(--sign-ink); color: var(--sign-paper); border-radius: var(--radius-sm); padding: 4px 12px; }
+.help-sign .hs-mountain { font-weight: 700; }
+.help-sign .hs-qr { display: block; }
+.help-sign-sticker { width: 4in; height: 4in; padding: .14in; }
+.help-sign-sticker .hs-ask { font-size: 22pt; }
+.help-sign-sticker .hs-qr { width: 1.55in; height: 1.55in; }
+.help-sign-sticker .hs-code { font-size: 54pt; }
+.help-sign-sticker .hs-how { font-size: 13pt; }
+.help-sign-sticker .hs-911 { font-size: 15pt; }
+.help-sign-sticker .hs-mountain { font-size: 12pt; }
+.help-sign-tower { width: 8.5in; height: 11in; padding: .45in; border-width: 10px; }
+.help-sign-tower .hs-ask { font-size: 48pt; }
+.help-sign-tower .hs-qr { width: 4.2in; height: 4.2in; }
+.help-sign-tower .hs-code { font-size: 150pt; }
+.help-sign-tower .hs-how { font-size: 26pt; }
+.help-sign-tower .hs-911 { font-size: 32pt; padding: 6px 20px; }
+.help-sign-tower .hs-mountain { font-size: 22pt; }
+@media (max-width: 860px) { .help-sign-tower { transform: scale(.42); transform-origin: top center; margin-bottom: calc(-11in * .58); } }
+.stencil-title { font-family: 'Barlow Condensed', 'Atkinson Hyperlegible', system-ui, sans-serif; font-size: 2.4rem; margin: 0; }
+.stencil-sub { margin: 0; font-size: 1.1rem; }
+.stencil-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(2.6in, 1fr)); gap: 12px; width: 100%; }
+.stencil-cell { display: flex; flex-direction: column; align-items: center; border: 4px solid var(--sign-ink); border-radius: var(--radius); padding: 8px; background: var(--sign-paper); color: var(--sign-ink); break-inside: avoid; }
+.stencil-code { font-family: 'Barlow Condensed', 'Atkinson Hyperlegible', system-ui, sans-serif; font-weight: 700; font-size: 96pt; line-height: .95; letter-spacing: 3px; }
+.stencil-tower { font-size: 16pt; font-weight: 700; }
+@media print {
+  .signs-page .no-print { display: none !important; }
+  .signs-page { gap: 0; }
+  .help-sign { margin: 0 auto; transform: none !important; }
+  .help-sign:last-child { break-after: auto; page-break-after: auto; }
+  .stencil-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* Map orientation (help/places): the turn panel, and a Leaflet map turned to match the trail map */
+.turn-panel .turn-row { flex-wrap: wrap; gap: 8px; }
+.turn-panel .turn-now { font-size: 1.1rem; font-weight: 700; margin: 0; }
+.map-turn-wrap { position: relative; overflow: hidden; }
+.map-turn-wrap > .leaflet-container[data-map-rotate] { position: absolute; transform-origin: 50% 50%; }
+.leaflet-container[data-map-rotate] .leaflet-marker-icon > *, .leaflet-container[data-map-rotate] .leaflet-popup-content-wrapper, .leaflet-container[data-map-rotate] .leaflet-tooltip { rotate: calc(var(--map-turn, 0deg) * -1); }
+.leaflet-container[data-map-rotate] .leaflet-popup-tip-container { display: none; }
+.map-turn-wrap > .leaflet-control-container { position: absolute; inset: 0; pointer-events: none; z-index: 800; }
+.map-turn-wrap > .leaflet-control-container .leaflet-control { pointer-events: auto; }
+.map-north { position: absolute; z-index: 801; left: 10px; bottom: 26px; width: 44px; height: 44px; border-radius: 50%; background: var(--surface); border: 1px solid var(--line-strong); display: grid; place-items: center; pointer-events: none; }
+.map-north svg { width: 34px; height: 34px; }
+.map-north line { stroke: var(--closed); stroke-width: 3; stroke-linecap: round; }
+.map-north circle { fill: var(--closed); }
+.map-north text { fill: var(--ink); font-size: 11px; font-weight: 700; }
+.turn-prompt { margin: 0; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--accent-tint); border-left: 4px solid var(--accent-line); color: var(--ink); font-weight: 700; }
+.turn-panel .btn[aria-pressed='true'] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }

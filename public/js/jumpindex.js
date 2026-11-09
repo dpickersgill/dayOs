@@ -54,6 +54,7 @@ export const SUB_PAGES = [
   ['patrol', 'Equipment', '#/patrol/gear?tab=equipment', 'equipment toboggan'],
   ['patrol', 'Medications', '#/patrol/gear?tab=meds', 'meds oxygen aed'],
   ['patrol', 'Lift evacuation', '#/patrol/gear?tab=lifts', 'lift evac evacuation rope'],
+  ['patrol', 'Places and signs', '#/patrol/gear?tab=places', 'map mountain mark spot sign code qr help signs towers junctions print stencil', feature('map_places')],
   // Lessons
   ['school', 'My day', '#/school?tab=day&view=myday', 'my lessons instructor today', (w) => w.role === 'instructor' || w.manager],
   ['school', 'Lesson board', '#/school?tab=day&view=today', 'board who teaches'],

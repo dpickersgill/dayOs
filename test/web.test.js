@@ -3485,7 +3485,7 @@ test('patrol: sections come from the address, old addresses still land, and only
   for (const k of ['settings', 'requirements', 'levels', 'admin']) assert.equal(legacyRoute(k), '#/settings/patrol');
   assert.equal(legacyRoute('case'), null, 'pages of their own are not tabs');
   // every #/patrol/<word> link in the app and in Help goes to a section, a tab, Settings or a page of its own
-  const own = ['case', 'version', 'room', 'release', 'claim', 'risk-report', 'kit', 'kit-labels', 'handoff', 'refusal', 'takehome', 'collision', 'new'];
+  const own = ['case', 'version', 'room', 'release', 'claim', 'risk-report', 'kit', 'kit-labels', 'handoff', 'refusal', 'takehome', 'collision', 'new', 'signs', 'stencil']; // help/places: the sign sheet and the tower stencil
   const files = [];
   const walk = (d) => { for (const f of fs.readdirSync(d, { withFileTypes: true })) { if (f.isDirectory()) walk(path.join(d, f.name)); else if (f.name.endsWith('.js')) files.push(path.join(d, f.name)); } };
   walk(path.join(__dirname, '..', 'public', 'js')); walk(path.join(__dirname, '..', 'src'));
