@@ -65,8 +65,10 @@ export async function drawChecks(box) {
   }
   function typeDialog(l) {
     const pick = select([['', 'Not set (standard list)'], ...meta.types.map((t) => [t.key, t.label])], l.lift_type || '', { name: 'lift_type' });
-    formDialog(`Lift type: ${l.name}`, h('div', { class: 'form' }, field('Type', pick, 'Picks the daily and weekly checklist this lift is inspected with.')), async () => {
-      await patch(`/ops/lifts/${l.id}/type`, { lift_type: pick.value || null });
+    const wind = input({ type: 'number', name: 'wind_hold_mph', min: 10, max: 150, step: 1, inputmode: 'numeric', value: l.wind_hold_mph ?? '' });
+    formDialog(`${l.name}: type and wind hold`, h('div', { class: 'form' }, field('Type', pick, 'Picks the daily and weekly checklist this lift is inspected with.'),
+      field('Wind hold at (gusts, mph)', wind, 'The gust speed at which this lift goes on wind hold. The morning brief compares it with the day\'s forecast. Leave blank if not set.')), async () => {
+      await patch(`/ops/lifts/${l.id}/type`, { lift_type: pick.value || null, wind_hold_mph: wind.value === '' ? null : Number(wind.value) });
       toast(`${l.name} saved`);
       await load();
     }, { submitText: 'Save type' });

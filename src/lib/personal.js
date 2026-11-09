@@ -122,6 +122,8 @@ const NOT_GUESTS = {
   lesson_live_updates: 'a line or photo to a whole class, deleted after 90 days', school_group_places: 'where a class is, kept for the day only',
   group_program_handoffs: 'drop-off and pickup counts for a school group', pay_line_flags: 'an instructor asking about their own pay',
   school_training_staff: 'staff training hours', user_notices: 'a notice a sign-in has dismissed',
+  // ai/brief: the morning brief is about the day and goes to staff; a brief and the record of who was sent it are kept 30 days.
+  brief_prefs: 'a staff login\u2019s morning brief setting', morning_briefs: 'the day\u2019s morning brief for staff (counts, no guest names), kept 30 days', brief_sends: 'which staff were sent the morning brief, kept 30 days',
 };
 
 // Columns never put in a download: secrets, signatures and payment tokens.

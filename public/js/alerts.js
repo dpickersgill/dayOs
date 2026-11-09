@@ -27,16 +27,17 @@ export async function status() {
   return sub && Notification.permission === 'granted' ? 'on' : 'off';
 }
 
-export async function turnOn() {
+/** base: the routes that keep the subscription (Patrol's own, or /brief/alerts for anyone who gets a morning brief). */
+export async function turnOn(base = '/patrol/alerts') {
   if (!supported()) throw new Error(isIos() && !standalone() ? 'On an iPhone, add Verdynt/OS to your Home Screen (Share, Add to Home Screen) and open it from there first.' : 'This browser cannot show alerts.');
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') throw new Error('Alerts were not allowed. You can allow them in this browser\'s site settings.');
   const reg = await registration();
-  const { key } = await get('/patrol/alerts/key');
+  const { key } = await get(`${base}/key`);
   let sub = await reg.pushManager.getSubscription();
   if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(key) });
   const json = sub.toJSON();
-  await post('/patrol/alerts/subscribe', { endpoint: json.endpoint, keys: json.keys });
+  await post(`${base}/subscribe`, { endpoint: json.endpoint, keys: json.keys });
 }
 
 export async function turnOff() {
