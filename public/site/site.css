@@ -1158,3 +1158,20 @@ table.cmp{border-collapse:separate;border-spacing:0;width:100%;font-size:17px}
 .sc-status:empty{display:none}
 .sc-status{font-weight:700}
 @media print{.sc-mail,.sc-go,.gd-end,.sc-ctas{display:none!important}}
+
+/* ---------- Guides with a template or worksheet (seo/guides): a fill-in policy with blank lines, and a rate worksheet
+   with empty cells that scrolls sideways on a phone instead of widening the page. */
+.legal .tpl{margin-top:16px;padding:18px 20px 20px;background:var(--white);border:1px dashed var(--ink2);border-radius:var(--r)}
+.legal .tpl h3{margin-top:0}
+.legal .tpl p{margin-top:10px}
+.blank{display:inline-block;min-width:9em;height:1em;border-bottom:1.5px solid var(--ink2);vertical-align:-2px}
+.blank.sm{min-width:3.5em}
+.legal .tpl-note{font-size:16px;color:var(--muted)}
+.legal ol.steps{padding-left:0;margin-top:18px}
+.legal .sheet{overflow-x:auto;margin-top:12px}
+.sheet table{width:100%;min-width:560px;border-collapse:collapse;background:var(--white);font-size:16px}
+.sheet th,.sheet td{border:1px solid var(--line2);padding:10px 12px;text-align:left;vertical-align:top}
+.sheet thead th{color:var(--ink);font-weight:700}
+.sheet tbody th{color:var(--ink);font-weight:600;width:34%}
+.sheet td{height:2.6em}
+@media print{.legal .tpl{border-color:#000}.sheet table{min-width:0}.sheet th,.sheet td{border-color:#000}.blank{border-color:#000}}
