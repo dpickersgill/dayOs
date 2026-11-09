@@ -15,6 +15,14 @@
 3. The director adds runs and lifts (Patrol, Admin, Patrol settings), imports the roster (Patrol, Team), and adds the ski area's read-only login (Account, Logins, role Ski area). That login is free.
 4. If the ski area later buys a full plan, change the plan on the same mountain: the patrol keeps everything.
 
+## Setting up a ski school on its own (School only)
+
+1. A school sign-up arrives in the console's Leads (kind School).
+2. Add the mountain in the console with the ski school's name and the director as owner, then under Billing choose the School only plan with "apply apps", so only Ski school, Documents and Instructor availability are on. The 14-day trial works as for any plan.
+3. The director sets up levels, skills and lesson products (Settings, Lessons) and lets instructors post their open dates (Availability), then adds the ski area's read-only login (Account, Logins, role Ski area). That login is free.
+4. The read-only login's Summary shows the Patrol section when the mountain also has Patrol on, the Ski school section when it has Ski school on, or both.
+5. If the ski school later buys Mountain or Resort, change the plan on the same mountain: everything it set up carries on.
+
 ## Tiered sign-in (2026.10.17)
 
 Who signs in how:
@@ -219,8 +227,8 @@ After changing a price, press **Sync to Stripe** on that row: it makes the month
   collection on those subscriptions from May to October (Stripe resumes it on November 1 by itself), and a mountain that
   signs up in the summer pays nothing until November 1. Nothing to set up: it runs with the daily job.
 - **Guided setup** is priced on the website (Pricing, Getting set up): $750 Lodge, $1,500 Mountain, $3,000 Resort,
-  $500 Patrol only, and $1,200 a day on site plus travel. Requests arrive in Leads as "Guided setup". Bill it as a one-off
-  Stripe invoice to the mountain's customer once they choose a plan.
+  $500 Patrol only, $600 School only, and $1,200 a day on site plus travel. Requests arrive in Leads as "Guided setup".
+  Bill it as a one-off Stripe invoice to the mountain's customer once they choose a plan.
 - The October 2026 review moved Resort to include Assets and fleet and Messages, and the Patrol add-on to $149 a month
   ($1,500 a year), the same as Patrol only. The migration changed them only where they were still the launch values.
 

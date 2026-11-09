@@ -25,7 +25,7 @@ function mfaRule(row) {
   if (Number(row.require_mfa)) return 'mountain';
   if (!config.requireAdminMfa || Number(row.sandbox)) return null;
   if (MANAGER_ROLES.includes(row.role)) return 'manager';
-  if (row.role === 'area') return 'area'; // reads approved patient reports
+  if (row.role === 'area') return 'area'; // reads approved patient reports, or the ski school's own students and waivers
   if (Number(row.patrol_lead)) return 'patrol_lead';
   if (row.role === 'instructor' && row.school_access === 'director') return 'school_director';
   if ((row.role === 'patrol' || Number(row.on_patrol)) && !Number(row.patrol_host) && Number(row.mfa_for_patrol ?? 1) && Number(row.patrol_mfa_due ?? 1)) return 'patrol';
@@ -43,7 +43,7 @@ const TIER_SQL = `(u.totp_enabled = 1 OR EXISTS (SELECT 1 FROM user_passkeys k W
   t.require_mfa, t.mfa_for_patrol, (t.patrol_mfa_from IS NULL OR t.patrol_mfa_from <= CURDATE()) AS patrol_mfa_due, t.patrol_mfa_from,
   (t.sandbox_expires_at IS NOT NULL) AS sandbox`;
 
-// The ski area's read-only login reaches its own sign-in settings and the patrol summary, and nothing else.
+// The ski area's read-only login reaches its own sign-in settings and the patrol or ski school summary, and nothing else.
 const AREA_PATHS = /^\/api\/v1\/(auth\/|area(\/|$)|whats-new)/;
 
 // The patrol-room screen (a leader's session turned into the room's display) reaches only these: who is on duty, signing
@@ -142,7 +142,7 @@ async function authenticate(req, _res, next) {
     return next(err);
   }
 
-  if (row.role === 'area' && !AREA_PATHS.test(path)) return next(forbidden('This login shows the patrol summary and approved reports only'));
+  if (row.role === 'area' && !AREA_PATHS.test(path)) return next(forbidden('This login shows the patrol and ski school summary, and approved patrol reports, only'));
 
   // onPatrol: this login's person is on the patrol roster, so they can use Patrol whatever their login role is.
   req.auth = {

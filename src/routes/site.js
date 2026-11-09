@@ -200,14 +200,17 @@ function homeAddonsHtml(d) {
   return `<b>Add when you want them:</b>${d.addons.map((a) => `<span>${escHtml(a.name)}${ADDON_HINTS[a.code] ? ` <i>(${ADDON_HINTS[a.code]})</i>` : ''}</span>`).join('')}<a href="{{SITE}}/pricing#addons">See add-on prices</a>`;
 }
 const PATROL_ONLY = ['Patient care reports and the report check', 'Requirements your patrol director sets', 'Dispatch and phone alerts', 'Duty, the patrol schedule and shift cover', 'Opening checks and the closing sweep', 'Medications, oxygen and AEDs', 'Records requests and legal hold', 'Documents', 'A free read-only login for the ski area'];
+// School only is three apps (Ski school, Documents, Instructor availability), so its card says what they hold for a
+// school, not just their names. No texts to families or AI lesson recaps: those stay paid add-ons either way.
+const SCHOOL_ONLY = ['Lesson sessions with rosters and capacity', 'Packages that count down as they are used', 'Online lesson booking and requests', 'Instructor availability, posted by each instructor', 'Waivers signed at home or at the counter', 'Documents', 'A free read-only login for the ski area'];
 function pricingPlansHtml(d) {
   return d.plans.map((p, i) => {
-    // "Everything in Lodge, plus" only when this plan really holds all of the one before it (Patrol only does not).
+    // "Everything in Lodge, plus" only when this plan really holds all of the one before it (Patrol and School only do not).
     const before = d.plans[i - 1];
     const prev = before && before.apps.every((a) => p.apps.some((x) => x.key === a.key)) ? before : null;
     const added = prev ? p.apps.filter((a) => !prev.apps.some((x) => x.key === a.key)) : p.apps;
-    // Patrol only is one app, so its card says what that app holds for a patrol, not just "Patrol".
-    const list = p.code === 'patrol-only' ? PATROL_ONLY.map((t) => `<li>${t}</li>`) : added.map((a) => `<li>${escHtml(a.label)}</li>`);
+    // Patrol only and School only are a few apps each, so their cards say what those apps hold, not just the app names.
+    const list = p.code === 'patrol-only' ? PATROL_ONLY.map((t) => `<li>${t}</li>`) : p.code === 'school-only' ? SCHOOL_ONLY.map((t) => `<li>${t}</li>`) : added.map((a) => `<li>${escHtml(a.label)}</li>`);
     const items = [prev ? `<li class="plus">Everything in ${escHtml(prev.name)}, plus:</li>` : '', ...list].join('');
     return `<div class="plan${i === 1 ? ' feat' : ''}"><div class="sym">${sym(i, p.code)}<h2>${escHtml(p.name)}</h2></div><p class="who">${escHtml(p.blurb)}</p>`
       + `<div class="price"><b>${p.monthly_cents ? dollars(p.monthly_cents) : 'Ask us'}</b><span>${p.monthly_cents ? 'per month' : ''}</span></div><p class="setup">Billed monthly</p>`
@@ -223,6 +226,11 @@ function patrolFrom(d) {
 function patrolAddon(d) {
   const a = d && d.addons.find((x) => x.code === 'patrol');
   return a && a.monthly_cents ? dollars(a.monthly_cents) : patrolFrom(d);
+}
+/** "$249": the School only plan's monthly price. */
+function schoolFrom(d) {
+  const p = d && d.plans.find((x) => x.code === 'school-only');
+  return p && p.monthly_cents ? dollars(p.monthly_cents) : '$249';
 }
 /**
  * The no-cut example on Pricing: what Lodge with the Online shop costs for a year, paid yearly, against booking fees on a
@@ -285,7 +293,7 @@ async function render(req, name, slug, words = null) {
   const plans = await loadPlans().catch(() => null);
   // Prices in the page's words (FAQ answers included), so the structured data says the same as the page.
   const cut = noCut(plans);
-  const prices = (s) => Object.entries(cut).reduce((t, [k, v]) => t.replaceAll(k, lit(v)), s.replaceAll('{{PATROL_FROM}}', lit(patrolFrom(plans))).replaceAll('{{PATROL_ADDON}}', lit(patrolAddon(plans))));
+  const prices = (s) => Object.entries(cut).reduce((t, [k, v]) => t.replaceAll(k, lit(v)), s.replaceAll('{{PATROL_FROM}}', lit(patrolFrom(plans))).replaceAll('{{PATROL_ADDON}}', lit(patrolAddon(plans))).replaceAll('{{SCHOOL_FROM}}', lit(schoolFrom(plans))));
   html = prices(html);
   const head = SEO.head({ slug: name === 'notfound' ? 'notfound' : slug, origin: canonicalOrigin(req), html, plans, verify: config.site.verify, sameAs: config.site.sameAs, noindex: isCopy(req), modified: modified(name), asset: ASSET_V });
   html = fillPlans(html, plans).replace(/<!--\/?(PLANS|ADDONS)(:[a-z]+)?-->/g, '');
@@ -302,6 +310,7 @@ async function render(req, name, slug, words = null) {
     .replaceAll('{{TRY}}', lit(`${config.site.appUrl}/try`))
     // the Patrol only price, from the plans the console marks active (so the website never shows an old price)
     .replaceAll('{{PATROL_FROM}}', lit(patrolFrom(plans)))
+    .replaceAll('{{SCHOOL_FROM}}', lit(schoolFrom(plans)))
     .replaceAll('{{ROOT}}', lit(origin))
     .replaceAll('{{SOCIAL}}', lit(config.site.sameAs.filter((u) => /linkedin\.com/i.test(u)).slice(0, 1).map((u) => `<a href="${escHtml(u)}" rel="me noopener">LinkedIn</a>`).join('')))
     .replaceAll('{{HELLO}}', lit(escHtml(config.site.helloEmail)))
@@ -497,14 +506,14 @@ api.get('/site/plans', async (_req, res) => res.set('Cache-Control', 'public, ma
 const forgetPlans = () => { planCache = { at: 0, body: null }; };
 
 const contactBody = z.object({
-  kind: z.enum(['walkthrough', 'trial', 'founding', 'question', 'patrol', 'review', 'setup', 'scorecard']).default('walkthrough'),
+  kind: z.enum(['walkthrough', 'trial', 'founding', 'question', 'patrol', 'school', 'review', 'setup', 'scorecard']).default('walkthrough'),
   name: z.string().trim().min(1).max(150), mountain: z.string().trim().min(1).max(150), role: z.string().trim().max(100).optional().default(''),
   email: z.string().trim().email().max(255), phone: z.string().trim().max(40).optional().default(''), lifts: z.string().trim().max(20).optional().default(''),
   plan_interest: z.string().trim().max(60).optional().default(''), message: z.string().trim().max(2000).optional().default(''),
   founding: z.boolean().optional().default(false), website: z.string().max(200).optional().default(''), // a field people never see: bots fill it
   scores: z.array(z.number().int().min(0).max(2)).max(40).optional(), // the Good Day scorecard's answers, one per question
 }).refine((b) => b.kind !== 'scorecard' || SC.valid(b.scores), { message: 'Answer every question on the scorecard first.', path: ['scores'] });
-const KINDS = { walkthrough: 'Walkthrough request', trial: 'Trial mountain request', founding: 'Walkthrough request (Founding Mountain Program)', question: 'Question', patrol: 'Patrol only sign-up', review: 'Incident report review request', setup: 'Guided setup request', scorecard: 'Good Day scorecard results' };
+const KINDS = { walkthrough: 'Walkthrough request', trial: 'Trial mountain request', founding: 'Walkthrough request (Founding Mountain Program)', question: 'Question', patrol: 'Patrol only sign-up', school: 'School only sign-up', review: 'Incident report review request', setup: 'Guided setup request', scorecard: 'Good Day scorecard results' };
 
 api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SITE_CONTACT_LIMIT) || 8, message: 'Too many messages from this address. Try again later, or email us.' }), validate(contactBody), async (req, res) => {
   const b = req.body;
@@ -534,7 +543,7 @@ api.post('/site/contact', rateLimit({ windowMs: 3_600_000, max: Number(process.e
         to: b.email, replyTo: config.site.contactEmail, subject: 'Your Good Day scorecard results', tag: 'site-scorecard',
         text: `Hello,\n\nHere are the results of the Good Day scorecard you filled in on the Verdynt/OS website.\n\n${b.message}\n\nTo see how Verdynt/OS handles any of these, book a 20-minute walkthrough: ${linkOrigin(req)}/contact?kind=walkthrough\nThe printable scorecard: ${linkOrigin(req).replace(/\/site$/, '')}/site/good-day-scorecard.pdf${tryUrl}\n\nIf you did not fill in the scorecard, you can ignore this email.\n\nVerdynt/OS`,
       } : { to: b.email, replyTo: config.site.contactEmail, subject: 'We have your Verdynt/OS request', tag: 'site-lead-thanks',
-        text: `Hello,\n\nThank you for writing to Verdynt/OS. A person will reply${b.kind === 'trial' ? ' to set up your trial mountain' : b.kind === 'patrol' ? ' to set up your patrol, with a 14-day trial' : b.kind === 'review' ? ' with a safe way to send your 10 reports. Please take out names and identifying details first, and do not email patient records' : ' to set a time'}.${tryUrl}\n\nIf you did not write to us, you can ignore this email.\n\nVerdynt/OS` })).ok;
+        text: `Hello,\n\nThank you for writing to Verdynt/OS. A person will reply${b.kind === 'trial' ? ' to set up your trial mountain' : b.kind === 'patrol' ? ' to set up your patrol, with a 14-day trial' : b.kind === 'school' ? ' to set up your ski school, with a 14-day trial' : b.kind === 'review' ? ' with a safe way to send your 10 reports. Please take out names and identifying details first, and do not email patient records' : ' to set a time'}.${tryUrl}\n\nIf you did not write to us, you can ignore this email.\n\nVerdynt/OS` })).ok;
     }
   }
   res.status(201).json({ ok: true, copy });

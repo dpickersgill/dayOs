@@ -335,7 +335,7 @@ test('content review: the from price, push alerts, BAA, no-fee promise, company,
   const pricing = await get('/site/pricing');
   assert.match(pricing.text, /<title>Pricing: Ski Area Software from \$\d+\/month/);
   const plans = (await api('GET', '/site/plans')).body.plans;
-  const area = plans.filter((p) => p.code !== 'patrol-only').map((p) => p.monthly_cents);
+  const area = plans.filter((p) => p.code !== 'patrol-only' && p.code !== 'school-only').map((p) => p.monthly_cents);
   assert.ok(pricing.text.includes(`from $${Math.round(Math.min(...area) / 100)}/month`), 'the from price leaves out Patrol only');
   const sec = await get('/site/security');
   assert.ok(sec.text.includes('An alert says only the call number and where the call is'), 'push alerts as the code sends them');
