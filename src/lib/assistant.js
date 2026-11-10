@@ -137,31 +137,61 @@ async function spentThisMonth(db, tenantId) {
 }
 
 // ---------------------------------------------------------------- the model
+/** OpenRouter's name for a model: claude-haiku-5-5 becomes anthropic/claude-haiku-5.5; a name with a slash is kept. */
+function routerModel(model) {
+  const m = String(model || '');
+  if (m.includes('/')) return m;
+  return /^claude-/.test(m) ? `anthropic/${m.replace(/-(\d+)-(\d+)$/, '-$1.$2')}` : m;
+}
+
+/**
+ * One request in the Anthropic Messages shape, to Anthropic or to OpenRouter (config.assistant.provider). The reply is
+ * the same shape either way. model is always the name the rest of the app uses (prices, the log); OpenRouter is sent
+ * its own name for it, and is told to use only the chosen companies and only ones that do not keep the data.
+ */
 async function callModel({ model, system, messages, tools: toolDefs }) {
   const c = config.assistant;
-  const body = { model, max_tokens: 900, system, messages, ...(toolDefs && toolDefs.length ? { tools: toolDefs } : {}) };
+  const viaRouter = c.provider === 'openrouter';
+  const body = { model: viaRouter ? routerModel(model) : model, max_tokens: 900, system, messages, ...(toolDefs && toolDefs.length ? { tools: toolDefs } : {}) };
+  if (viaRouter) {
+    const only = (c.routing && c.routing.only) || ['anthropic'];
+    body.provider = { data_collection: 'deny', ...(only.length ? { only } : {}) };
+  }
+  const headers = viaRouter
+    ? { 'content-type': 'application/json', authorization: `Bearer ${c.key}`, 'anthropic-version': '2023-06-01', 'x-title': 'Verdynt/OS', ...(config.site && config.site.appUrl ? { 'http-referer': config.site.appUrl } : {}) }
+    : { 'content-type': 'application/json', 'x-api-key': c.key, 'anthropic-version': '2023-06-01' };
   let res;
   try {
-    res = await fetch(`${c.apiBase}/v1/messages`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': c.key, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(body), signal: AbortSignal.timeout(45000) });
+    res = await fetch(`${c.apiBase}/v1/messages`, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(45000) });
   } catch (_) { throw new AppError(502, 'The assistant could not be reached. Try again in a moment.'); }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     const said = String((err.error && err.error.message) || '').slice(0, 300);
-    require('./jobs').logFailure({ job: 'assistant', status: res.status, model, message: said || `HTTP ${res.status}` });
+    require('./jobs').logFailure({ job: 'assistant', status: res.status, model: body.model, message: said || `HTTP ${res.status}` });
     const e = new AppError(502, `The assistant is not available right now (${res.status}).`);
-    e.reason = reasonFor(res.status, said, model);
-    lastError = { at: new Date().toISOString(), status: res.status, model, reason: e.reason, said };
+    e.reason = reasonFor(res.status, said, body.model, viaRouter);
+    lastError = { at: new Date().toISOString(), provider: viaRouter ? 'OpenRouter' : 'Anthropic', status: res.status, model: body.model, reason: e.reason, said };
     throw e;
   }
   return res.json();
 }
 
-/** The last error from Anthropic, for the operator's console. Mountains only see that the assistant is unavailable. */
+/** The last error from the AI provider, for the operator's console. Mountains only see that the assistant is unavailable. */
 let lastError = null;
 const lastFailure = () => lastError;
 
-/** What the operator can do about an error from Anthropic, in plain words. */
-function reasonFor(status, said, model) {
+/** What the operator can do about an error from Anthropic or OpenRouter, in plain words. */
+function reasonFor(status, said, model, viaRouter) {
+  if (viaRouter) {
+    if (status === 402 || /credits?/i.test(said)) return 'The assistant\'s OpenRouter account is out of credit. Add credit at openrouter.ai, Settings, Credits.';
+    if (status === 401 || /api.key|authentication|no auth/i.test(said)) return 'The assistant\'s OpenRouter key was not accepted. Set it again with scripts/assistant-key.sh.';
+    if (status === 403) return 'OpenRouter refused the request (the key\'s limit, or a moderation block). Check the key at openrouter.ai, Settings, Keys.';
+    if (status === 404 && /provider|endpoint|data policy/i.test(said)) return 'OpenRouter has no allowed provider for this model. Check OPENROUTER_PROVIDERS, and that the account\'s privacy settings allow those providers.';
+    if (status === 400 && /model/i.test(said)) return `OpenRouter does not know the model "${model}". Set ASSISTANT_MODEL to a current model name.`;
+    if (status === 404) return `OpenRouter does not know the model "${model}". Set ASSISTANT_MODEL to a current model name.`;
+    if (status === 408 || status === 429 || status >= 500) return 'OpenRouter or the model behind it is busy right now. Try again in a minute.';
+    return said ? `OpenRouter said: ${said}` : null;
+  }
   if (/credit balance/i.test(said)) return 'The assistant\'s Anthropic account is out of credit. Add credit under Billing in the Anthropic Console.';
   if (status === 401 || /api.key|x-api-key|authentication/i.test(said)) return 'The assistant\'s Anthropic key was not accepted. Set it again with scripts/assistant-key.sh.';
   if (status === 403) return 'The assistant\'s Anthropic key is not allowed to do this. Check the key\'s workspace and limits in the Anthropic Console.';
@@ -269,4 +299,4 @@ async function draftReply(row, mountain) {
   } catch (_) { return null; }
 }
 
-module.exports = { lastFailure, ask, findArticles, facts, settingsOf, spentThisMonth, costMicros, shape, GUEST_PAGES, help, draftReply, SETTING_DEFAULTS, callModel }; // callModel: also the lesson recap writer (lib/lessonrecap.js)
+module.exports = { lastFailure, ask, findArticles, facts, settingsOf, spentThisMonth, costMicros, shape, GUEST_PAGES, help, draftReply, SETTING_DEFAULTS, callModel, routerModel }; // callModel: also the lesson recap writer (lib/lessonrecap.js)

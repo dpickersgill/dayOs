@@ -85,7 +85,8 @@ module.exports = {
   stripe,
   map: { layers: mapLayers, maxZoom: mapMaxZoom },
   // Patrol "fill in from the story": off unless PATROL_AI=on and a key is set. The story holds patient health
-  // information, so turn it on only once the AI provider has signed a business associate agreement.
+  // information, so turn it on only once the AI provider has signed a business associate agreement. It always goes
+  // straight to Anthropic under that agreement, never through OpenRouter (ASSISTANT_PROVIDER does not touch it).
   patrolAi: {
     on: env.PATROL_AI === 'on' && Boolean(env.ANTHROPIC_API_KEY),
     key: env.ANTHROPIC_API_KEY || '',
@@ -94,13 +95,28 @@ module.exports = {
   },
   // The Verdynt/OS Assistant (staff and guests). Off until ASSISTANT_API_KEY is set (a plain key: it never sees patient
   // data). A small model answers how-to and setup questions; a stronger one when it looks up the mountain's data.
-  assistant: {
-    on: Boolean(env.ASSISTANT_API_KEY) && env.ASSISTANT !== 'off',
-    key: env.ASSISTANT_API_KEY || '',
-    apiBase: (env.ASSISTANT_API_BASE || env.ANTHROPIC_API_BASE || 'https://api.anthropic.com').replace(/\/$/, ''),
-    model: env.ASSISTANT_MODEL || 'claude-haiku-5-5',
-    dataModel: env.ASSISTANT_DATA_MODEL || 'claude-sonnet-5-5',
-  },
+  // The same settings serve the lesson recap writer, the support reply drafts and the sales outreach drafts.
+  //   ASSISTANT_PROVIDER     anthropic (straight to Anthropic) or openrouter (through OpenRouter, same request shape).
+  //                          Unset: openrouter when the key is an OpenRouter key (sk-or-...), otherwise anthropic.
+  //   OPENROUTER_PROVIDERS   which companies OpenRouter may send a question to, comma separated (default: anthropic,
+  //                          so the privacy page stays true). "any" lets OpenRouter pick. Either way, only providers that
+  //                          do not keep or train on the data are allowed (data_collection: deny).
+  //   ASSISTANT_MODEL / ASSISTANT_DATA_MODEL take Anthropic names (claude-haiku-5-5); with OpenRouter they become its
+  //                          names (anthropic/claude-haiku-5.5). A name with a slash (openai/...) is passed as it is.
+  assistant: (() => {
+    const key = env.ASSISTANT_API_KEY || '';
+    const provider = env.ASSISTANT_PROVIDER === 'openrouter' || (!env.ASSISTANT_PROVIDER && /^sk-or-/.test(key)) ? 'openrouter' : 'anthropic';
+    const only = String(env.OPENROUTER_PROVIDERS || 'anthropic').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+    return {
+      on: Boolean(key) && env.ASSISTANT !== 'off',
+      key,
+      provider,
+      apiBase: (env.ASSISTANT_API_BASE || (provider === 'openrouter' ? 'https://openrouter.ai/api' : env.ANTHROPIC_API_BASE || 'https://api.anthropic.com')).replace(/\/$/, ''),
+      model: env.ASSISTANT_MODEL || 'claude-haiku-5-5',
+      dataModel: env.ASSISTANT_DATA_MODEL || 'claude-sonnet-5-5',
+      routing: { only: only.includes('any') ? [] : only },
+    };
+  })(),
   port: Number(env.PORT || 8080),
   jwtSecret: env.JWT_SECRET || 'dev-only-secret-change-me-dev-only-secret',
   // Separate keys so sign-in tokens can be rotated on their own. Each falls back to JWT_SECRET, which is what was used
