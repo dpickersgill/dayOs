@@ -242,7 +242,8 @@ test('CSV round trip: the export imports back unchanged, onto this mountain or a
   const lines = csv.split('\r\n');
   assert.equal(lines[0], 'kind,name,code,lift,tower,trail,lat,lng');
   assert.ok(lines.some((l) => l.startsWith('"tower","Summit Quad tower 7","S7","Summit Quad","7","",')));
-  assert.ok(csv.includes(`"'${LNG0.toFixed(6)}"`), 'a west longitude is defused for spreadsheets, and read back below');
+  // A west longitude is a plain number, written as one (2026.11.19: only text that starts like a formula is defused).
+  assert.ok(csv.includes(`"${LNG0.toFixed(6)}"`) && !csv.includes(`"'${LNG0.toFixed(6)}"`), 'a west longitude stays a number');
   const before = (await P.list(pool, M.id)).map((p) => [p.code, p.kind, p.name, p.lat, p.lng, p.tower_no]).sort();
   // Back onto the same mountain: every row updates its place by code, nothing is added.
   const back = ok(await api('POST', '/patrol/places/import', { token: M.leadT, body: { csv } }));
