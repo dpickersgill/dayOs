@@ -1023,7 +1023,8 @@ function offerPasskey(p) {
   add.classList.add('big', 'passkey-big');
   const body = h('div', { class: 'stack', 'data-passkey-prompt': p.kind },
     h('p', { class: 'resume-lead' }, 'One touch with your fingerprint or face, and no code to type.'),
-    leader ? h('p', null, `You can see every patient record and change who can do what, so a passkey is the safest way in: nobody can phish it or guess it. Add two: one on this device, and a second on another phone or a security key, so a lost phone never locks you out. You have ${p.have} of 2.`)
+    leader && isMuni() ? h('p', null, `You can see residents' details and change who can do what, so a passkey is the safest way in: nobody can phish it or guess it. Add two: one on this device, and a second on another phone or a security key, so a lost phone never locks you out. You have ${p.have} of 2.`)
+      : leader ? h('p', null, `You can see every patient record and change who can do what, so a passkey is the safest way in: nobody can phish it or guess it. Add two: one on this device, and a second on another phone or a security key, so a lost phone never locks you out. You have ${p.have} of 2.`)
       : h('p', null, 'Patrol records are private. A passkey signs you in and opens records with one touch, even with cold hands.'),
     backupLine(p) ? h('p', { class: 'muted small', 'data-backup': '' }, backupLine(p)) : null,
     add, err, h('div', { class: 'row' }, button('Not now', later, { small: true, kind: 'quiet' })));

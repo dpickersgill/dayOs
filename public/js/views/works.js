@@ -55,7 +55,7 @@ async function drawOrders(box, status, pick) {
   const overdue = h('input', { type: 'checkbox', name: 'overdue' });
   overdue.checked = status === 'open' && hashParam('overdue') === '1';
   const body = h('div');
-  clear(box).append(h('div', { class: 'row wrap', role: 'group', 'aria-label': 'Filters' }, priority, who, source,
+  clear(box).append(h('div', { class: 'week-filter', role: 'group', 'aria-label': 'Filters' }, priority, who, source,
     status === 'open' ? h('label', { class: 'check' }, overdue, ' Overdue only') : null), body);
   async function load() {
     const q = new URLSearchParams({ status });
