@@ -562,7 +562,9 @@ test('new requests alert the chosen people by phone and Inbox, without the resid
   assert.equal(pushes[0].message.body, 'Church Street');
   const [msg] = await q("SELECT m.body, m.refs FROM chat_messages m JOIN chat_threads t ON t.tenant_id = m.tenant_id AND t.id = m.thread_id WHERE m.tenant_id = ? AND t.name = 'New resident requests' ORDER BY m.id DESC LIMIT 1", [A.id]);
   assert.match(msg.body, new RegExp(`New request ${r.body.reference}: Water leak or low pressure, Church Street\\.`));
-  for (const s of ['Morgan', '6105550166', '88']) assert.ok(!msg.body.includes(s) && !String(pushes[0].message.body).includes(s));
+  // The request's own reference is random digits (R-4881 would hold "88"), so it is taken out before looking for the house number.
+  const said = msg.body.split(r.body.reference).join('');
+  for (const s of ['Morgan', '6105550166', '88']) assert.ok(!said.includes(s) && !String(pushes[0].message.body).includes(s), `${s} in ${said}`);
   const inbox = await api('GET', '/inbox/threads', { token: T.desk.token });
   if (inbox.status === 200) assert.ok(JSON.stringify(inbox.body).includes('New resident requests'));
   // A staff member who takes the request is not alerted about their own.
@@ -604,8 +606,10 @@ test('Right-to-Know: the work order spreadsheet leaves out the house number unle
     is(plain, 200);
     assert.match(plain.headers.get('content-type'), /text\/csv/);
     assert.match(plain.headers.get('content-disposition'), /work-orders\.csv/);
-    const row = line(plain.body);
-    assert.ok(row, 'the work order is in the spreadsheet');
+    assert.ok(line(plain.body), 'the work order is in the spreadsheet');
+    // Without the request's own reference and the work order's number, which are random digits.
+    const [ref] = await q('SELECT reference FROM requests WHERE tenant_id = ? AND id = ?', [A.id, id]);
+    const row = line(plain.body).split(ref.reference).join('').replace(`"${wo}"`, '');
     assert.match(row, /Pothole: Church Street/);
     assert.ok(!row.includes('8125') && !row.includes('Dana') && !row.includes('blue house'), row);
     assert.ok(!plain.body.includes('Whitlow') && !plain.body.includes('6105550177'));

@@ -47,11 +47,20 @@ module.exports = async function trash(conn, tenantId, helpers = {}) {
   if (!sizes.length || !streets.length) return say('bulk pickup skipped: no streets or item sizes yet');
   if ((await q('SELECT id FROM bulk_bookings WHERE tenant_id = ? LIMIT 1', [tenantId])).length) return say('bulk pickup bookings already there, nothing added');
 
-  // The same numbers every time for the same borough, so a rebuilt demo looks the same.
-  let seed = Number(tenantId) * 7919 + 17;
-  const rand = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  // The same numbers every time for the same borough, so a rebuilt demo looks the same. The generator works in whole
+  // 32-bit numbers (mulberry32): the older multiply-and-add one lost its low digits in a JavaScript number, and for about
+  // one borough id in a hundred it fell into a short loop and gave the same booking reference again and again.
+  let seed = (Number(tenantId) * 7919 + 17) >>> 0;
+  const rand = () => {
+    seed = (seed + 0x6D2B79F5) >>> 0;
+    let x = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
   const pick = (list) => list[Math.floor(rand() * list.length)];
-  const ref = () => Array.from({ length: 6 }, () => ALPHABET[Math.floor(rand() * ALPHABET.length)]).join('');
+  // A reference is used once in a borough: one already given out is drawn again.
+  const given = new Set();
+  const ref = () => { for (;;) { const r = Array.from({ length: 6 }, () => ALPHABET[Math.floor(rand() * ALPHABET.length)]).join(''); if (!given.has(r)) { given.add(r); return r; } } };
   const [crew] = await q("SELECT id FROM users WHERE tenant_id = ? AND role IN ('staff','manager','owner') AND active = 1 ORDER BY FIELD(role, 'staff', 'manager', 'owner'), id LIMIT 1", [tenantId]);
   const crewId = crew ? crew.id : null;
 
