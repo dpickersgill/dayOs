@@ -40,7 +40,7 @@ module.exports = ({ tableExists, columnExists }) => [
     UNIQUE KEY uq_streets_name (tenant_id, name),
     KEY ix_streets_active (tenant_id, active, name),
     CONSTRAINT fk_streets_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ...PLANS.map(([code, name, blurb, kind, modules, monthly, sort]) => [`billing_plans ${code}`, (c) => hasPlan(c, code),
     `INSERT INTO billing_plans (code, name, blurb, kind, modules, monthly_cents, yearly_cents, sort, org_type)
      SELECT ${q(code)}, ${q(name)}, ${q(blurb)}, ${q(kind)}, ${q(modules)}, ${monthly}, ${monthly * 12}, ${sort}, 'municipality' FROM DUAL

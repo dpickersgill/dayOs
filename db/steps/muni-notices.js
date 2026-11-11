@@ -47,7 +47,7 @@ module.exports = ({ tableExists, columnExists }) => [
     CONSTRAINT fk_alert_signups_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_alert_signups_resident FOREIGN KEY (tenant_id, resident_id) REFERENCES residents(tenant_id, id),
     CONSTRAINT fk_alert_signups_street FOREIGN KEY (tenant_id, street_id) REFERENCES streets(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['alert_addresses', (c) => tableExists(c, 'alert_addresses'), `CREATE TABLE alert_addresses (
     id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id     BIGINT UNSIGNED NOT NULL,
@@ -63,7 +63,7 @@ module.exports = ({ tableExists, columnExists }) => [
     UNIQUE KEY uq_alert_addresses_addr (tenant_id, channel, addr),
     KEY ix_alert_addresses_sms (channel, addr),
     CONSTRAINT fk_alert_addresses_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['alert_consent_events', (c) => tableExists(c, 'alert_consent_events'), `CREATE TABLE alert_consent_events (
     id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id     BIGINT UNSIGNED NOT NULL,
@@ -76,7 +76,7 @@ module.exports = ({ tableExists, columnExists }) => [
     KEY ix_alert_consent_address (tenant_id, address_id, id),
     CONSTRAINT fk_alert_consent_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_alert_consent_address FOREIGN KEY (tenant_id, address_id) REFERENCES alert_addresses(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['street_notices', (c) => tableExists(c, 'street_notices'), `CREATE TABLE street_notices (
     id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id         BIGINT UNSIGNED NOT NULL,
@@ -99,7 +99,7 @@ module.exports = ({ tableExists, columnExists }) => [
     UNIQUE KEY uq_street_notices_code (tenant_id, code),
     KEY ix_street_notices_status (tenant_id, status, id),
     CONSTRAINT fk_street_notices_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['street_notice_areas', (c) => tableExists(c, 'street_notice_areas'), `CREATE TABLE street_notice_areas (
     id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id   BIGINT UNSIGNED NOT NULL,
@@ -113,7 +113,7 @@ module.exports = ({ tableExists, columnExists }) => [
     CONSTRAINT fk_street_notice_areas_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_street_notice_areas_notice FOREIGN KEY (tenant_id, notice_id) REFERENCES street_notices(tenant_id, id),
     CONSTRAINT fk_street_notice_areas_street FOREIGN KEY (tenant_id, street_id) REFERENCES streets(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['street_notice_updates', (c) => tableExists(c, 'street_notice_updates'), `CREATE TABLE street_notice_updates (
     id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id      BIGINT UNSIGNED NOT NULL,
@@ -132,7 +132,7 @@ module.exports = ({ tableExists, columnExists }) => [
     KEY ix_street_notice_updates_due (status, send_at),
     CONSTRAINT fk_street_notice_updates_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_street_notice_updates_notice FOREIGN KEY (tenant_id, notice_id) REFERENCES street_notices(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['street_notice_deliveries', (c) => tableExists(c, 'street_notice_deliveries'), `CREATE TABLE street_notice_deliveries (
     id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id     BIGINT UNSIGNED NOT NULL,
@@ -156,7 +156,7 @@ module.exports = ({ tableExists, columnExists }) => [
     CONSTRAINT fk_street_notice_deliveries_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_street_notice_deliveries_update FOREIGN KEY (tenant_id, update_id) REFERENCES street_notice_updates(tenant_id, id),
     CONSTRAINT fk_street_notice_deliveries_resident FOREIGN KEY (tenant_id, resident_id) REFERENCES residents(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['street_notice_settings', (c) => tableExists(c, 'street_notice_settings'), `CREATE TABLE street_notice_settings (
     tenant_id     BIGINT UNSIGNED NOT NULL PRIMARY KEY,
     crew_senders  VARCHAR(500) NULL,
@@ -164,7 +164,7 @@ module.exports = ({ tableExists, columnExists }) => [
     updated_by    BIGINT UNSIGNED NULL,
     updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_street_notice_settings_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   // A work order opened from an outage notice says so (the shared definition: the union of every workstream's sources).
   ['work_orders.source notice', async (c) => {
     if (!(await columnExists(c, 'work_orders', 'source'))) return true;

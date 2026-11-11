@@ -42,7 +42,7 @@ const RESIDENTS = `CREATE TABLE residents (
     KEY ix_residents_street (tenant_id, street_id),
     CONSTRAINT fk_residents_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_residents_street FOREIGN KEY (tenant_id, street_id) REFERENCES streets(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`;
+  ) ENGINE=InnoDB`;
 
 module.exports = ({ tableExists, columnExists }) => [
   ['streets.street_class', (c) => columnExists(c, 'streets', 'street_class'),
@@ -62,7 +62,7 @@ module.exports = ({ tableExists, columnExists }) => [
     KEY ix_resident_consent (tenant_id, resident_id, channel, id),
     CONSTRAINT fk_resident_consent_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_resident_consent_resident FOREIGN KEY (tenant_id, resident_id) REFERENCES residents(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['request_categories', (c) => tableExists(c, 'request_categories'), `CREATE TABLE request_categories (
     id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id      BIGINT UNSIGNED NOT NULL,
@@ -76,7 +76,7 @@ module.exports = ({ tableExists, columnExists }) => [
     UNIQUE KEY uq_request_categories_tenant_id (tenant_id, id),
     UNIQUE KEY uq_request_categories_name (tenant_id, name),
     CONSTRAINT fk_request_categories_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['request_standards', (c) => tableExists(c, 'request_standards'), `CREATE TABLE request_standards (
     id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id        BIGINT UNSIGNED NOT NULL,
@@ -90,7 +90,7 @@ module.exports = ({ tableExists, columnExists }) => [
     UNIQUE KEY uq_request_standards_key (tenant_id, category_id, street_class),
     CONSTRAINT fk_request_standards_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_request_standards_category FOREIGN KEY (tenant_id, category_id) REFERENCES request_categories(tenant_id, id) ON DELETE CASCADE
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['request_settings', (c) => tableExists(c, 'request_settings'), `CREATE TABLE request_settings (
     id                 BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id          BIGINT UNSIGNED NOT NULL,
@@ -104,7 +104,7 @@ module.exports = ({ tableExists, columnExists }) => [
     UNIQUE KEY uq_request_settings_tenant_id (tenant_id, id),
     UNIQUE KEY uq_request_settings_tenant (tenant_id),
     CONSTRAINT fk_request_settings_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['requests', (c) => tableExists(c, 'requests'), `CREATE TABLE requests (
     id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id         BIGINT UNSIGNED NOT NULL,
@@ -154,7 +154,7 @@ module.exports = ({ tableExists, columnExists }) => [
     CONSTRAINT fk_requests_street FOREIGN KEY (tenant_id, street_id) REFERENCES streets(tenant_id, id),
     CONSTRAINT fk_requests_resident FOREIGN KEY (tenant_id, resident_id) REFERENCES residents(tenant_id, id),
     CONSTRAINT fk_requests_duplicate FOREIGN KEY (tenant_id, duplicate_of) REFERENCES requests(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['request_photos', (c) => tableExists(c, 'request_photos'), `CREATE TABLE request_photos (
     id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id     BIGINT UNSIGNED NOT NULL,
@@ -177,7 +177,7 @@ module.exports = ({ tableExists, columnExists }) => [
     KEY ix_request_photos (tenant_id, request_id, stage),
     CONSTRAINT fk_request_photos_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_request_photos_request FOREIGN KEY (tenant_id, request_id) REFERENCES requests(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['request_events', (c) => tableExists(c, 'request_events'), `CREATE TABLE request_events (
     id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id     BIGINT UNSIGNED NOT NULL,
@@ -190,7 +190,7 @@ module.exports = ({ tableExists, columnExists }) => [
     KEY ix_request_events (tenant_id, request_id, id),
     CONSTRAINT fk_request_events_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_request_events_request FOREIGN KEY (tenant_id, request_id) REFERENCES requests(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['request_messages', (c) => tableExists(c, 'request_messages'), `CREATE TABLE request_messages (
     id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id     BIGINT UNSIGNED NOT NULL,
@@ -204,7 +204,7 @@ module.exports = ({ tableExists, columnExists }) => [
     KEY ix_request_messages (tenant_id, request_id, kind),
     CONSTRAINT fk_request_messages_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_request_messages_request FOREIGN KEY (tenant_id, request_id) REFERENCES requests(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   // Work order additions, exactly as the spec defines them (assets-core owns them; guarded so either may add them first).
   ['work_orders.request_id', (c) => columnExists(c, 'work_orders', 'request_id'), 'ALTER TABLE work_orders ADD COLUMN request_id BIGINT UNSIGNED NULL'],
   ['work_orders source request', (c) => typeHas(c, 'work_orders', 'source', "'request'"),

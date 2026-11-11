@@ -74,7 +74,7 @@ module.exports = ({ tableExists, columnExists }) => {
       UNIQUE KEY uq_atpacks_tenant_id (tenant_id, id),
       UNIQUE KEY uq_atpacks_pack (tenant_id, pack),
       CONSTRAINT fk_atpacks_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+    ) ENGINE=InnoDB`],
 
     ['asset_photos', (c) => tableExists(c, 'asset_photos'), `CREATE TABLE asset_photos (
       id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -101,7 +101,7 @@ module.exports = ({ tableExists, columnExists }) => {
       KEY ix_aphotos_inspection (tenant_id, inspection_id),
       CONSTRAINT fk_aphotos_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
       CONSTRAINT fk_aphotos_asset FOREIGN KEY (tenant_id, asset_id) REFERENCES ops_assets(tenant_id, id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+    ) ENGINE=InnoDB`],
 
     ['station_run_hours', (c) => tableExists(c, 'station_run_hours'), `CREATE TABLE station_run_hours (
       id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -119,7 +119,7 @@ module.exports = ({ tableExists, columnExists }) => {
       KEY ix_srh_asset (tenant_id, asset_id, item_key, read_at),
       CONSTRAINT fk_srh_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
       CONSTRAINT fk_srh_inspection FOREIGN KEY (tenant_id, inspection_id) REFERENCES asset_inspections(tenant_id, id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+    ) ENGINE=InnoDB`],
 
     ['asset_programs', (c) => tableExists(c, 'asset_programs'), `CREATE TABLE asset_programs (
       id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -141,7 +141,7 @@ module.exports = ({ tableExists, columnExists }) => {
       CONSTRAINT fk_aprog_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
       CONSTRAINT fk_aprog_template FOREIGN KEY (tenant_id, template_id) REFERENCES inspection_templates(tenant_id, id),
       CONSTRAINT fk_aprog_staff FOREIGN KEY (tenant_id, assigned_staff_id) REFERENCES staff(tenant_id, id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+    ) ENGINE=InnoDB`],
 
     ['asset_program_targets', (c) => tableExists(c, 'asset_program_targets'), `CREATE TABLE asset_program_targets (
       id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -163,6 +163,6 @@ module.exports = ({ tableExists, columnExists }) => {
       CONSTRAINT fk_aptgt_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
       CONSTRAINT fk_aptgt_program FOREIGN KEY (tenant_id, program_id) REFERENCES asset_programs(tenant_id, id),
       CONSTRAINT fk_aptgt_asset FOREIGN KEY (tenant_id, asset_id) REFERENCES ops_assets(tenant_id, id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+    ) ENGINE=InnoDB`],
   ];
 };

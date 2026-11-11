@@ -31,7 +31,7 @@ module.exports = ({ tableExists }) => [
     UNIQUE KEY uq_bulk_settings_tenant_id (tenant_id, id),
     UNIQUE KEY uq_bulk_settings_tenant (tenant_id),
     CONSTRAINT fk_bulk_settings_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
 
   ['bulk_sizes', (c) => tableExists(c, 'bulk_sizes'), `CREATE TABLE bulk_sizes (
     id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -46,7 +46,7 @@ module.exports = ({ tableExists }) => [
     UNIQUE KEY uq_bulk_sizes_tenant_id (tenant_id, id),
     KEY ix_bulk_sizes_active (tenant_id, active, sort),
     CONSTRAINT fk_bulk_sizes_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
 
   ['bulk_skip_dates', (c) => tableExists(c, 'bulk_skip_dates'), `CREATE TABLE bulk_skip_dates (
     id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -57,7 +57,7 @@ module.exports = ({ tableExists }) => [
     UNIQUE KEY uq_bulk_skip_tenant_id (tenant_id, id),
     UNIQUE KEY uq_bulk_skip_date (tenant_id, on_date),
     CONSTRAINT fk_bulk_skip_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
 
   ['bulk_bookings', (c) => tableExists(c, 'bulk_bookings'), `CREATE TABLE bulk_bookings (
     id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -118,7 +118,7 @@ module.exports = ({ tableExists }) => [
     CONSTRAINT fk_bulk_bookings_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_bulk_bookings_street FOREIGN KEY (tenant_id, street_id) REFERENCES streets(tenant_id, id),
     CONSTRAINT fk_bulk_bookings_resident FOREIGN KEY (tenant_id, resident_id) REFERENCES residents(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
 
   ['bulk_booking_items', (c) => tableExists(c, 'bulk_booking_items'), `CREATE TABLE bulk_booking_items (
     id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -133,7 +133,7 @@ module.exports = ({ tableExists }) => [
     CONSTRAINT fk_bulk_items_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_bulk_items_booking FOREIGN KEY (tenant_id, booking_id) REFERENCES bulk_bookings(tenant_id, id),
     CONSTRAINT fk_bulk_items_size FOREIGN KEY (tenant_id, size_id) REFERENCES bulk_sizes(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
 
   ['bulk_photos', (c) => tableExists(c, 'bulk_photos'), `CREATE TABLE bulk_photos (
     id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -155,5 +155,5 @@ module.exports = ({ tableExists }) => [
     KEY ix_bulk_photos_booking (tenant_id, booking_id),
     CONSTRAINT fk_bulk_photos_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_bulk_photos_booking FOREIGN KEY (tenant_id, booking_id) REFERENCES bulk_bookings(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
 ];
