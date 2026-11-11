@@ -80,7 +80,8 @@ test('a visitor gets a private demo mountain with every app on and made-up data 
   assert.equal(me.status, 200);
   assert.equal(me.body.role, 'owner'); assert.equal(me.body.tenant_name, 'Test Peak');
   assert.ok(me.body.sandbox && me.body.sandbox.expires_at, 'the app can tell it is a demo');
-  assert.deepEqual([...me.body.modules].sort(), M.MODULES.map((m) => m.key).sort(), 'every app is on, the paid add-ons too, so a visitor sees what they would buy');
+  // Every ski area app (muni release 1: the municipal apps are never on for a mountain, demo or not).
+  assert.deepEqual([...me.body.modules].sort(), M.keysFor('mountain').sort(), 'every app is on, the paid add-ons too, so a visitor sees what they would buy');
   const lifts = await api('GET', '/schedule/lifts', { token: one.body.token });
   const products = await api('GET', '/products', { token: one.body.token });
   const people = await api('GET', '/people', { token: one.body.token });
