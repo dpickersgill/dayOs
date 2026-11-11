@@ -175,7 +175,7 @@ function article(root, id) {
       a.steps && a.steps.length ? h('ol', null, a.steps.map((t) => h('li', null, t))) : null,
       a.tips && a.tips.length ? h('div', { class: 'help-tips' }, h('h2', null, 'Good to know'), h('ul', null, a.tips.map((t) => h('li', null, t)))) : null,
       related.length ? h('div', { class: 'help-related' }, h('h2', null, 'Related'), h('ul', null, related.map((r) => articleLink(r)))) : null,
-      a.app !== 'start' && appOn(a.app) ? h('p', null, h('a', { class: 'btn small', href: `#/${a.app}` }, `Open ${s.label}`)) : null),
+      a.app !== 'start' && appOn(a.app, s) ? h('p', null, h('a', { class: 'btn small', href: `#/${a.app}` }, `Open ${s.label}`)) : null),
     stuck());
 }
 

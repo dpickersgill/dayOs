@@ -144,6 +144,9 @@ const NOT_GUESTS = {
   mountain_places: 'a sign, tower or junction on the mountain, never a guest',
   // help/sms: the mountain's Text HELP number and patrol phone, a mountain setting.
   patrol_help_lines: 'a mountain setting (its Text HELP number and patrol phone)',
+  // muni release 1: a bulk pickup booking holds no contact of its own: its texts_ok and emails_ok are yes/no flags, and the
+  // resident's name, phone and email are in residents (above, in REGISTRY), which an erase blanks.
+  bulk_bookings: 'a municipality\u2019s bulk pickup stop; the resident\u2019s contact is in residents',
   brief_prefs: 'a staff login\u2019s morning brief setting', morning_briefs: 'the day\u2019s morning brief for staff (counts, no guest names), kept 30 days', brief_sends: 'which staff were sent the morning brief, kept 30 days',
 };
 

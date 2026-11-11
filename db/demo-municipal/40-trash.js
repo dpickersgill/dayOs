@@ -31,7 +31,8 @@ const addDays = (d, n) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x
 const weekday = (d) => new Date(`${d}T12:00:00Z`).getUTCDay();
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
-module.exports = async function trash(conn, tenantId) {
+module.exports = async function trash(conn, tenantId, helpers = {}) {
+  const say = (text) => { if (helpers.log) helpers.log(text); return { bulk_pickup: text }; };
   const q = async (sql, params) => (await conn.query(sql, params))[0];
   const [t] = await q('SELECT timezone FROM tenants WHERE id = ?', [tenantId]);
   const tz = (t && t.timezone) || 'America/New_York';
@@ -43,8 +44,8 @@ module.exports = async function trash(conn, tenantId) {
   }
   const sizes = await q('SELECT id, name, price_cents FROM bulk_sizes WHERE tenant_id = ? AND active = 1 ORDER BY sort, id', [tenantId]);
   const streets = await q('SELECT id, name FROM streets WHERE tenant_id = ? AND active = 1 ORDER BY name', [tenantId]);
-  if (!sizes.length || !streets.length) return { bulk_pickup: 'skipped: no streets or sizes yet' };
-  if ((await q('SELECT id FROM bulk_bookings WHERE tenant_id = ? LIMIT 1', [tenantId])).length) return { bulk_pickup: 'already there' };
+  if (!sizes.length || !streets.length) return say('bulk pickup skipped: no streets or item sizes yet');
+  if ((await q('SELECT id FROM bulk_bookings WHERE tenant_id = ? LIMIT 1', [tenantId])).length) return say('bulk pickup bookings already there, nothing added');
 
   // The same numbers every time for the same borough, so a rebuilt demo looks the same.
   let seed = Number(tenantId) * 7919 + 17;
@@ -112,5 +113,5 @@ module.exports = async function trash(conn, tenantId) {
     for (let i = 0; i < stops; i += 1) { await book(d, { past: true }); made2 += 1; }
   }
   for (let i = 0; i < 22; i += 1) await book(nextMonday, { past: false });
-  return { bulk_pickup: `${made2} past stops over ${past.length} Mondays, 22 stops on ${nextMonday}` };
+  return say(`${made2} past bulk pickup stops over ${past.length} Mondays, and 22 stops on ${nextMonday}`);
 };
