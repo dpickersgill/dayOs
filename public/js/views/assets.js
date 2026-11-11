@@ -7,12 +7,15 @@
 //   Costs       what each asset costs to keep, its book value and cost per hour or mile (managers)
 //   Settings    places, vendors, checklists and the shop labor rate (managers)
 // One asset opens on its own page (asset-page.js), which is also where a scanned QR tag lands.
+// Condition, criticality and risk (muni release 1): the Overview lists the highest risk on the register and the map, and
+// the register filters and sorts by risk. Checklists can have choices, yes or no, text, a condition score and photos.
 
 import { stepsEditor } from '../checksteps.js';
 import { get, post, patch, put, download } from '../api.js';
 import { drawMap } from './asset-map.js';
 import { h, clear, state, button, toast, formDialog, dialog, confirmDialog, field, input, select, val, num, money, toCents, centsToInput, fmtDate, label, empty, table, tabs, isManager, errorBox } from '../ui.js';
 import { renderAsset, renderLabels, assetDialog, fullMeta, STATUS, SERVICE, workOrderSheet, fmtDay, leftText } from './asset-page.js';
+import { riskState, conditionText, criticalityText } from './asset-bits.js';
 
 const PAPER = { expired: 'bad', soon: 'warn' };
 const PO_STATE = { draft: ['Draft', 'neutral'], ordered: ['Ordered', 'warn'], partial: ['Part received', 'warn'], received: ['Received', 'good'], cancelled: ['Canceled', 'neutral'] };
@@ -39,7 +42,7 @@ const assetLink = (id, text) => h('a', { href: `#/assets/a/${id}` }, text);
 
 // ---------------------------------------------------------------- overview
 async function drawOverview(box) {
-  const o = await get('/assets/overview');
+  const [o, risk] = await Promise.all([get('/assets/overview'), get('/assets/risk')]);
   const stat = (n, text, tone, href) => h(href ? 'a' : 'div', { class: `stat ${tone || ''}`.trim(), href }, h('b', null, String(n)), h('span', null, text));
   const list = (title, rows, none) => h('section', { class: 'panel stack' }, h('h2', null, title), rows.length ? h('ul', { class: 'plain rows' }, rows) : h('p', { class: 'muted' }, none));
   clear(box).append(h('div', { class: 'stack' },
@@ -57,7 +60,21 @@ async function drawOverview(box) {
     h('div', { class: 'pair' },
       list('Low stock', o.low_stock.map((p) => h('li', null, h('b', null, `${p.qty_on_hand} ${p.unit}`), ` ${p.sku} ${p.name}`, h('span', { class: 'muted small' }, ` (reorder at ${p.reorder_point})`))), 'Every part is above its reorder point.'),
       isManager() ? list('Worth considering a replacement', o.replace.map((r) => h('li', null, assetLink(r.id, `${r.name} (${r.tag})`), h('span', { class: 'muted small' }, ` ${r.reasons.join('. ')}.`))), 'Nothing is past its life or costing more than it is worth.') : null),
+    riskList(risk.data),
     isManager() && o.top_cost.length ? list('Most upkeep, last 12 months', o.top_cost.map((r) => h('li', { class: 'spread' }, assetLink(r.id, `${r.name} (${r.tag})`), h('b', null, money(r.maintenance_12)))), '') : null));
+}
+
+/** Highest risk: the top 25 on the register and the map together, by condition times criticality. */
+function riskList(data) {
+  return h('section', { class: 'panel stack', 'data-list': 'risk' }, h('h2', null, 'Highest risk'),
+    h('p', { class: 'muted small' }, 'Risk is condition (1 new to 5 failed) times criticality (1 low to 5 severe). Score assets on their page and map items in their panel.'),
+    data.length ? table([
+      { head: 'Risk', cell: (x) => riskState(x.risk) },
+      { head: 'What', cell: (x) => h('span', { class: 'stack tight' }, h('a', { href: x.href }, h('strong', null, x.name)), h('span', { class: 'muted small' }, [x.kind_label, x.tag, x.type === 'feature' ? 'on the map' : 'in the register'].filter(Boolean).join(' · '))) },
+      { head: 'Condition', cell: (x) => conditionText(x.condition_score) },
+      { head: 'Criticality', cell: (x) => criticalityText(x.criticality) },
+      { head: 'Open work', num: true, cell: (x) => (x.open_orders ? String(x.open_orders) : '') },
+    ], data) : h('p', { class: 'muted' }, 'Nothing is scored yet. Give assets and map items a condition and a criticality to see what to fix first.'));
 }
 
 // ---------------------------------------------------------------- register
@@ -67,11 +84,13 @@ async function drawRegister(box) {
   const cat = select([['', 'Every category'], ...meta.categories.map((c) => [c.value, c.label])], '', { 'aria-label': 'Category' });
   const st = select([['', 'In use'], ['needs_service', 'Needs service'], ['out_of_service', 'Out of service'], ['retired', 'Retired']], '', { 'aria-label': 'Status' });
   const loc = select([['', 'Every place'], ...meta.locations.map((l) => [l.id, l.name])], '', { 'aria-label': 'Location' });
+  const rk = select([['', 'Any risk'], ['medium', 'Medium risk or more'], ['high', 'High risk or more'], ['very_high', 'Very high risk']], '', { 'aria-label': 'Risk' });
+  const sort = select([['name', 'By name'], ['risk', 'Highest risk first']], 'name', { 'aria-label': 'Order' });
   const body = h('div');
   let shown = [];
   const labelsBtn = button('Print QR labels', () => { location.hash = `#/assets/labels/${shown.map((a) => a.id).join(',') || 'all'}`; }, { small: true });
   clear(box).append(h('div', { class: 'stack' },
-    h('div', { class: 'spread' }, h('div', { class: 'row filters' }, q, cat, st, loc), h('div', { class: 'row' }, labelsBtn, button('Add an asset', () => assetDialog(meta, null, async (out) => { location.hash = `#/assets/a/${out.id}`; }), { kind: 'primary', small: true }))),
+    h('div', { class: 'spread' }, h('div', { class: 'row filters' }, q, cat, st, loc, rk, sort), h('div', { class: 'row' }, labelsBtn, button('Add an asset', () => assetDialog(meta, null, async (out) => { location.hash = `#/assets/a/${out.id}`; }), { kind: 'primary', small: true }))),
     body));
   async function load() {
     const qs = new URLSearchParams();
@@ -79,16 +98,19 @@ async function drawRegister(box) {
     if (cat.value) qs.set('category', cat.value);
     if (st.value) qs.set('status', st.value);
     if (loc.value) qs.set('location_id', loc.value);
+    if (rk.value) qs.set('risk', rk.value);
+    if (sort.value === 'risk') qs.set('sort', 'risk');
     const { data } = await get(`/assets/register?${qs}`);
     shown = data;
     clear(body);
-    if (!data.length) { body.append(empty(q.value || cat.value || st.value || loc.value ? 'No assets match.' : 'No assets yet. Add the fleet, lift drives, snowmaking pumps and building systems you look after.')); return; }
+    if (!data.length) { body.append(empty(q.value || cat.value || st.value || loc.value || rk.value ? 'No assets match.' : 'No assets yet. Add the fleet, lift drives, snowmaking pumps and building systems you look after.')); return; }
     const worstPaper = (a) => a.papers.find((p) => p.state === 'expired') || a.papers.find((p) => p.state === 'soon');
     body.append(table([
       { head: 'Tag', cell: (a) => h('span', { class: 'tag-cell' }, a.asset_tag) },
       { head: 'Asset', cell: (a) => h('span', { class: 'stack tight' }, assetLink(a.id, h('strong', null, a.name)), h('span', { class: 'muted small' }, [(meta.kinds.find((k) => k.value === a.kind) || {}).label, a.location, a.parent && `part of ${a.parent}`].filter(Boolean).join(' · '))) },
       { head: 'Meters', cell: (a) => [a.hours ? `${n1(a.hours).toLocaleString()} h` : null, a.miles !== null ? `${n1(a.miles).toLocaleString()} mi` : null].filter(Boolean).join(' · ') },
       { head: 'Status', cell: (a) => state(STATUS[a.status][0], STATUS[a.status][1]) },
+      { head: 'Risk', cell: (a) => riskState(a.risk) || '' },
       { head: 'Service', cell: (a) => (a.service ? state(SERVICE[a.service.state][0], SERVICE[a.service.state][1]) : h('span', { class: 'muted small' }, 'No plan')) },
       { head: 'Papers', cell: (a) => { const p = worstPaper(a); return p ? state(`${p.label} ${p.state === 'expired' ? 'expired' : 'due'}`, PAPER[p.state]) : ''; } },
       { head: 'Open work', cell: (a) => (a.open_orders ? String(a.open_orders) : '') },
@@ -96,7 +118,7 @@ async function drawRegister(box) {
   }
   let timer = null;
   q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 250); });
-  for (const s of [cat, st, loc]) s.addEventListener('change', load);
+  for (const s of [cat, st, loc, rk, sort]) s.addEventListener('change', load);
   await load();
 }
 
@@ -327,6 +349,7 @@ async function drawSettings(box) {
   const pct = input({ name: 'pct', type: 'number', min: 5, max: 200, value: s.replace_pct, 'aria-label': 'Replacement threshold percent' });
   const warn = input({ name: 'warn', type: 'number', min: 1, max: 365, value: s.expiry_warn_days, 'aria-label': 'Days of warning before papers run out' });
   const kindLabel = (k) => (meta.kinds.find((x) => x.value === k) || { label: k }).label;
+  const mapKindLabel = (k) => (meta.map_kinds.find((x) => x.key === k) || { label: label(k) }).label;
   clear(box).append(h('div', { class: 'stack' },
     h('section', { class: 'panel stack' }, h('h2', null, 'Shop rules'),
       h('div', { class: 'form' }, field('Shop labor rate, per hour ($)', rate, 'Applied to time logged from now on'), field('Flag a replacement when a year of upkeep passes this % of book value', pct), field('Warn this many days before papers run out', warn)),
@@ -336,7 +359,7 @@ async function drawSettings(box) {
     h('section', { class: 'panel stack' }, h('div', { class: 'spread' }, h('h2', null, 'Vendors'), button('Add a vendor', () => vendorDialog(null, again), { small: true })),
       vendors.data.length ? h('ul', { class: 'plain rows' }, vendors.data.map((v) => h('li', { class: 'spread' }, h('span', null, h('b', null, v.name), h('span', { class: 'muted small' }, ` ${[v.contact, v.phone, v.email, v.account_no && `account ${v.account_no}`].filter(Boolean).join(' · ')}${v.active ? '' : ' · not in use'}`)), button('Edit', () => vendorDialog(v, again), { small: true, label: `Edit ${v.name}` })))) : h('p', { class: 'muted' }, 'Add the dealers and suppliers you buy parts and service from.')),
     h('section', { class: 'panel stack' }, h('div', { class: 'spread' }, h('h2', null, 'Inspection checklists'), button('Add a checklist', () => tplDialog(null, meta, again), { small: true })),
-      h('ul', { class: 'plain rows' }, meta.templates.map((t) => h('li', { class: 'spread' }, h('span', null, h('b', null, t.name), h('span', { class: 'muted small' }, ` ${t.items.length} items · ${t.kinds.length ? t.kinds.map(kindLabel).join(', ') : 'anything without its own checklist'}${t.active ? '' : ' · not in use'}`)), button('Edit', () => tplDialog(t, meta, again), { small: true, label: `Edit ${t.name}` })))))));
+      h('ul', { class: 'plain rows' }, meta.templates.map((t) => h('li', { class: 'spread' }, h('span', null, h('b', null, t.name), h('span', { class: 'muted small' }, ` ${t.items.length} items · ${[...t.kinds.map(kindLabel), ...t.map_kinds.map(mapKindLabel)].join(', ') || 'anything without its own checklist'}${t.sets_condition ? ' · sets the condition' : ''}${t.active ? '' : ' · not in use'}`)), button('Edit', () => tplDialog(t, meta, again), { small: true, label: `Edit ${t.name}` })))))));
 }
 
 function locDialog(l, all, done) {
@@ -369,18 +392,26 @@ function vendorDialog(v, done) {
 }
 
 function tplDialog(t, meta, done) {
-  const cur = t || { kinds: [], items: [] };
+  const cur = t || { kinds: [], map_kinds: [], items: [] };
   const boxes = meta.kinds.map((k) => h('label', { class: 'check' }, h('input', { type: 'checkbox', value: k.value, checked: cur.kinds.includes(k.value) }), ` ${k.label}`));
-  const ed = stepsEditor(cur.items);
+  // Map kinds this tenant has, and any the checklist already names (an add-on since turned off).
+  const mapKinds = [...meta.map_kinds, ...(cur.map_kinds || []).filter((k) => !meta.map_kinds.some((x) => x.key === k)).map((k) => ({ key: k, label: label(k) }))];
+  const mapBoxes = mapKinds.map((k) => h('label', { class: 'check' }, h('input', { type: 'checkbox', value: k.key, checked: (cur.map_kinds || []).includes(k.key) }), ` ${k.label}`));
+  const ed = stepsEditor(cur.items, { more: true });
   formDialog(t ? `Edit ${t.name}` : 'Add a checklist', h('div', { class: 'stack' },
     field('Name', input({ name: 'name', required: true, maxlength: 120, value: cur.name || '' })),
-    h('fieldset', { class: 'stack tight' }, h('legend', null, 'Steps'), h('p', { class: 'muted small' }, 'Each step is pass or fail, a reading with the range that is OK (a reading outside it fails by itself), or a date that fails as it gets close.'), ed.el),
+    h('fieldset', { class: 'stack tight' }, h('legend', null, 'Steps'), h('p', { class: 'muted small' }, 'Each step is pass or fail, a reading with the range that is OK, a date that fails as it gets close, a choice from a list, yes or no, a few words, or a condition score. A reading outside its range, a choice marked to fail, or the answer marked to fail fails by itself. Tick Needs a photo where the crew must take one.'), ed.el),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'sets_condition', checked: Boolean(cur.sets_condition) }), ' Sets the condition: the condition score given here becomes the asset\'s or map item\'s condition'),
     h('fieldset', { class: 'stack tight' }, h('legend', null, 'Used for these types (none: for anything without its own)'), h('div', { class: 'checks' }, boxes)),
+    mapBoxes.length ? h('fieldset', { class: 'stack tight' }, h('legend', null, 'Used for these map items'), h('div', { class: 'checks' }, mapBoxes)) : null,
     t ? h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'active', checked: Boolean(cur.active) }), ' In use') : null),
   async (fd) => {
     const items = ed.get();
     if (!items.length) throw new Error('Add at least one step');
-    const body = { name: val(fd, 'name'), items, kinds: boxes.map((b) => b.firstChild).filter((x) => x.checked).map((x) => x.value) };
+    const setsCondition = fd.get('sets_condition') === 'on';
+    if (setsCondition && !items.some((i) => i.type === 'condition')) throw new Error('Add a condition score step, or untick Sets the condition');
+    const body = { name: val(fd, 'name'), items, kinds: boxes.map((b) => b.firstChild).filter((x) => x.checked).map((x) => x.value),
+      map_kinds: mapBoxes.map((b) => b.firstChild).filter((x) => x.checked).map((x) => x.value), sets_condition: setsCondition };
     if (t) await patch(`/assets/templates/${t.id}`, { ...body, active: fd.get('active') === 'on' }); else await post('/assets/templates', body);
     toast('Saved'); await done();
   }, { wide: true });

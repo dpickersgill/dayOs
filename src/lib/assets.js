@@ -97,11 +97,12 @@ function lifecycle(a, c, today, replacePct = 50) {
 }
 
 // ---------------------------------------------------------------- starting checklists
-const T = (name, kinds, items) => ({ name, kinds, items: items.map(([key, label]) => ({ key, label })) });
+// A ski area gets every one; a municipality gets the ones that are not about snow (orgs).
+const T = (name, kinds, items, orgs = ['mountain', 'municipality']) => ({ name, kinds, orgs, items: items.map(([key, label]) => ({ key, label })) });
 const DEFAULT_TEMPLATES = [
   T('Vehicle pre-trip', ['truck', 'bus'], [['brakes', 'Service brakes and parking brake hold'], ['steering', 'Steering: no excess play'], ['lights', 'Headlights, brake lights, turn signals, flashers'], ['horn', 'Horn'], ['wipers', 'Wipers and washer fluid'], ['mirrors', 'Mirrors and glass clean, not cracked'], ['tires', 'Tires: tread, pressure, damage; wheels and lug nuts'], ['leaks', 'No fuel, oil or coolant leaks under the vehicle'], ['belts', 'Seat belts'], ['safety', 'Fire extinguisher, triangles and first aid kit on board'], ['gauges', 'Gauges and warning lights normal after start']]),
-  T('Groomer pre-shift', ['groomer'], [['engine', 'Engine oil and coolant level'], ['hydraulic', 'Hydraulic oil level, no leaks at hoses and fittings'], ['tracks', 'Tracks, grousers and track tension'], ['tiller', 'Tiller, comb and finisher'], ['blade', 'Blade and its pins'], ['winch', 'Winch, cable and anchor (if fitted)'], ['lights', 'Work lights and beacon'], ['cab', 'Radio, fire extinguisher and first aid kit in the cab'], ['fuel', 'Fuel for the shift'], ['warnings', 'No warning lights after start']]),
-  T('Snowmobile or UTV pre-ride', ['snowmobile', 'utv'], [['throttle', 'Throttle returns freely; brake works'], ['killswitch', 'Kill switch or tether tested'], ['lights', 'Headlight, tail and brake light'], ['steering', 'Steering and skis or wheels'], ['track', 'Track or tires: damage and tension'], ['fuel', 'Fuel and oil'], ['kit', 'Rescue kit, sled or rack secured']]),
+  T('Groomer pre-shift', ['groomer'], [['engine', 'Engine oil and coolant level'], ['hydraulic', 'Hydraulic oil level, no leaks at hoses and fittings'], ['tracks', 'Tracks, grousers and track tension'], ['tiller', 'Tiller, comb and finisher'], ['blade', 'Blade and its pins'], ['winch', 'Winch, cable and anchor (if fitted)'], ['lights', 'Work lights and beacon'], ['cab', 'Radio, fire extinguisher and first aid kit in the cab'], ['fuel', 'Fuel for the shift'], ['warnings', 'No warning lights after start']], ['mountain']),
+  T('Snowmobile or UTV pre-ride', ['snowmobile', 'utv'], [['throttle', 'Throttle returns freely; brake works'], ['killswitch', 'Kill switch or tether tested'], ['lights', 'Headlight, tail and brake light'], ['steering', 'Steering and skis or wheels'], ['track', 'Track or tires: damage and tension'], ['fuel', 'Fuel and oil'], ['kit', 'Rescue kit, sled or rack secured']], ['mountain']),
   T('Small vehicle check', ['golf_cart', 'mower', 'boat', 'loader'], [['brakes', 'Brakes'], ['steering', 'Steering'], ['tires', 'Tires or hull'], ['power', 'Battery charge or fuel'], ['lights', 'Lights and horn'], ['guards', 'Guards, covers and safety equipment']]),
   T('Facility walk-through', ['hvac', 'boiler', 'pool', 'electrical', 'kitchen', 'building', 'generator'], [['leaks', 'No visible leaks or water damage'], ['noise', 'No unusual noise, smell or vibration'], ['gauges', 'Gauges, temperatures and pressures in range'], ['guards', 'Guards, covers and panels in place'], ['fire', 'Fire extinguisher present and tagged'], ['clear', 'Area clean and access clear']]),
   T('General pre-use', [], [['condition', 'Overall condition, no damage'], ['guards', 'Guards and safety devices in place'], ['controls', 'Controls and stops work'], ['leaks', 'No leaks'], ['clean', 'Clean and ready']]),
@@ -128,10 +129,14 @@ async function ensureSettings(conn, tenantId) {
     };
     if (conn === pool) await tx(backfill); else await backfill(conn);
   }
-  const { n: tpl } = await one(conn, 'SELECT COUNT(*) AS n FROM inspection_templates WHERE tenant_id = ?', [tenantId]);
+  // The starting checklists, once: a tenant with none of its own yet (a built-in pack's checklists do not count).
+  const { n: tpl } = await one(conn, 'SELECT COUNT(*) AS n FROM inspection_templates WHERE tenant_id = ? AND pack IS NULL', [tenantId]);
   if (!Number(tpl)) {
-    for (const t of DEFAULT_TEMPLATES) await conn.query('INSERT IGNORE INTO inspection_templates (tenant_id, name, kinds, items) VALUES (?, ?, ?, ?)', [tenantId, t.name, t.kinds.join(',') || null, JSON.stringify(t.items)]);
+    const org = ((await one(conn, 'SELECT org_type FROM tenants WHERE id = ?', [tenantId])) || {}).org_type === 'municipality' ? 'municipality' : 'mountain';
+    for (const t of DEFAULT_TEMPLATES.filter((x) => x.orgs.includes(org))) await conn.query('INSERT IGNORE INTO inspection_templates (tenant_id, name, kinds, items) VALUES (?, ?, ?, ?)', [tenantId, t.name, t.kinds.join(',') || null, JSON.stringify(t.items)]);
   }
+  // A municipality's water, sewer and stormwater checklists, once each add-on is on (lib/templatepacks.js).
+  await require('./templatepacks').seed(conn, tenantId);
   return one(conn, 'SELECT * FROM asset_settings WHERE tenant_id = ?', [tenantId]);
 }
 const tagOf = (n) => `A-${String(n).padStart(4, '0')}`;

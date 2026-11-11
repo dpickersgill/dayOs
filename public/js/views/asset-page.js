@@ -2,8 +2,8 @@
 // standing next to it (log meters, fuel, run an inspection, report a problem). Opened from the register or by scanning
 // the QR tag on the machine (#/assets/tag/A-0042). Also: the label sheet, and the work order costs sheet.
 
-import { answerSheet, resultChips } from '../checksteps.js';
 import { assetMapLink } from './asset-map.js';
+import { CONDITIONS, CRITICALITIES, OWNERSHIP, conditionText, criticalityText, riskState, scoreSelect, photoStrip, runHoursTable, miniMap, inspectDialog, inspectionRows } from './asset-bits.js';
 import { get, post, patch, del } from '../api.js';
 import { h, clear, appendAll, state, button, toast, formDialog, dialog, confirmDialog, field, input, select, val, num, money, toCents, centsToInput, fmtDate, fmtDateTime, label, errorBox, empty, isManager, todayStr, ctx } from '../ui.js';
 import { qr } from '../barcode.js';
@@ -54,7 +54,7 @@ export async function renderAsset(root, id) {
       h('section', { class: 'panel asset-head' },
         h('div', { class: 'asset-title' },
           h('div', null, h('p', { class: 'asset-tag' }, a.asset_tag), h('h1', null, a.name), h('p', { class: 'muted' }, [kind, a.make_model, a.model_year].filter(Boolean).join(' · '))),
-          h('div', { class: 'asset-state' }, state(stText, stTone), a.critical ? state('Critical', 'warn') : null, shareButton('asset', a.id), assetMapLink(a.id, a.on_map > 0))),
+          h('div', { class: 'asset-state' }, state(stText, stTone), a.critical ? state('Critical', 'warn') : null, riskState(a.risk), shareButton('asset', a.id), assetMapLink(a.id, a.on_map > 0))),
         h('div', { class: 'asset-meters' },
           h('div', null, h('span', { class: 'k' }, 'Hours'), h('b', null, a.hours ? n1(a.hours).toLocaleString() : '–')),
           h('div', null, h('span', { class: 'k' }, 'Miles'), h('b', null, a.miles !== null ? n1(a.miles).toLocaleString() : '–')),
@@ -65,7 +65,7 @@ export async function renderAsset(root, id) {
           act('Inspect', () => inspectSheet(a, meta, load), '', 'inspect'),
           act('Report a problem', () => problemDialog(a, load), 'warn-btn', 'problem'))),
       urgent.length ? h('section', { class: 'panel stack attention' }, h('h2', null, 'Needs attention'), h('ul', { class: 'plain' }, urgent)) : null,
-      serviceSection(a), ordersSection(a), inspectionsSection(a), historySection(a),
+      serviceSection(a), ordersSection(a), inspectionsSection(a), runHoursSection(a), photosSection(a), historySection(a),
       partsSection(a), lifecycleSection(a), detailsSection(a), tagSection(a));
   }
 
@@ -88,11 +88,16 @@ export async function renderAsset(root, id) {
   }
 
   function inspectionsSection(a) {
-    return h('section', { class: 'panel stack' }, h('h2', null, 'Inspections'),
-      a.inspections.length ? h('ul', { class: 'plain rows' }, a.inspections.map((i) => h('li', null,
-        h('span', null, state(i.result === 'pass' ? 'Passed' : 'Failed', i.result === 'pass' ? 'good' : 'bad'), ' ', h('b', null, i.template_name), h('span', { class: 'muted small' }, ` ${fmtDateTime(i.done_at)}${i.inspector ? `, ${i.inspector}` : ''}`)),
-        i.result === 'fail' ? h('p', { class: 'small' }, i.items.filter((x) => x.result === 'fail').map((x) => `${x.label}: ${x.note}`).join('; ')) : null,
-        i.items.some((x) => x.value != null && x.result !== 'fail') ? h('p', { class: 'small muted' }, i.items.filter((x) => x.value != null && x.result !== 'fail').map((x) => `${x.label}: ${x.value}${x.unit ? ` ${x.unit}` : ''}`).join('; ')) : null))) : h('p', { class: 'muted' }, 'No inspections recorded.'));
+    return h('section', { class: 'panel stack' }, h('h2', null, 'Inspections'), inspectionRows(a.inspections));
+  }
+
+  function runHoursSection(a) {
+    if (!a.run_hours) return null;
+    return h('section', { class: 'panel stack' }, h('h2', null, 'Run hours by month'), runHoursTable(a.run_hours, `/assets/register/${a.id}/run-hours?format=csv`, `${a.asset_tag}-run-hours.csv`));
+  }
+
+  function photosSection(a) {
+    return h('details', { class: 'panel more', open: a.photos.length > 0 }, h('summary', null, `Photos (${a.photos.length})`), photoStrip(a.photos, `/assets/register/${a.id}/photos`, load));
   }
 
   function historySection(a) {
@@ -126,6 +131,9 @@ export async function renderAsset(root, id) {
   function detailsSection(a) {
     const kv = [
       ['Tag', a.asset_tag], ['Type', (meta.kinds.find((k) => k.value === a.kind) || {}).label], ['Category', (meta.categories.find((c) => c.value === a.category) || {}).label],
+      ['Condition', a.condition_score ? conditionText(a.condition_score) : null], ['Criticality', a.criticality ? criticalityText(a.criticality) : null], ['Risk', riskState(a.risk)],
+      ['Owned by', a.ownership ? (OWNERSHIP.find((o) => o[0] === a.ownership) || [null, a.ownership])[1] : null],
+      ['Material', a.material], ['Size', a.size], ['Year installed', a.installed_year],
       ['Location', a.location], ['Lift', a.lift], ['Part of', a.parent ? h('a', { href: `#/assets/a/${a.parent_id}` }, `${a.parent} (${a.parent_tag})`) : null],
       ['Make and model', a.make_model], ['Year', a.model_year], ['Serial', a.serial], ['VIN', a.vin], ['Plate', a.plate], ['Fuel', a.fuel_type && label(a.fuel_type)],
       ...a.papers.map((p) => [p.label, h('span', null, fmtDay(p.on), ' ', p.state !== 'ok' ? state(p.state === 'soon' ? 'Due soon' : label(p.state), PAPER[p.state]) : null)]),
@@ -166,6 +174,13 @@ export function assetDialog(meta, a, done) {
       field('Year', input({ name: 'model_year', type: 'number', min: 1900, max: 2100, value: cur.model_year || '' })),
       field('Status', select(Object.entries(STATUS).map(([k, [t]]) => [k, t]), cur.status || 'in_service', { name: 'status' })),
       h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'critical', checked: Boolean(cur.critical) }), ' Critical (a failure stops operations; failed checks open urgent work orders)')),
+    h('fieldset', { class: 'form' }, h('legend', null, 'Condition and risk'),
+      field('Condition', scoreSelect('condition_score', CONDITIONS, cur.condition_score), '1 is new, 5 is failed or failing'),
+      field('Criticality', scoreSelect('criticality', CRITICALITIES, cur.criticality), 'What happens if it fails: 1 little, 5 severe'),
+      field('Owned by', select([['', 'Not set'], ...OWNERSHIP], cur.ownership || '', { name: 'ownership' })),
+      field('Material', input({ name: 'material', maxlength: 40, value: cur.material || '', placeholder: 'Cast iron' })),
+      field('Size', input({ name: 'size', maxlength: 40, value: cur.size || '', placeholder: '8 in' })),
+      field('Year installed', input({ name: 'installed_year', type: 'number', min: 1800, max: 2100, value: cur.installed_year || '' }))),
     h('fieldset', { class: 'form' }, h('legend', null, 'Where'),
       field('Location', select([['', 'Not set'], ...locations.map((l) => [l.id, l.name])], cur.location_id || '', { name: 'location_id' })),
       field('Lift', select([['', 'None'], ...lifts.map((l) => [l.id, l.name])], cur.lift_id || '', { name: 'lift_id' })),
@@ -191,6 +206,7 @@ export function assetDialog(meta, a, done) {
       location_id: num(fd, 'location_id'), lift_id: num(fd, 'lift_id'), parent_id: num(fd, 'parent_id'), serial: val(fd, 'serial'), vin: val(fd, 'vin'), plate: val(fd, 'plate'), fuel_type: val(fd, 'fuel_type'),
       registration_expires: val(fd, 'registration_expires'), insurance_expires: val(fd, 'insurance_expires'), inspection_expires: val(fd, 'inspection_expires'), warranty_expires: val(fd, 'warranty_expires'), warranty_note: val(fd, 'warranty_note'),
       purchased_on: val(fd, 'purchased_on'), vendor_id: num(fd, 'vendor_id'), notes: val(fd, 'notes'),
+      condition_score: num(fd, 'condition_score'), criticality: num(fd, 'criticality'), ownership: val(fd, 'ownership'), material: val(fd, 'material'), size: val(fd, 'size'), installed_year: num(fd, 'installed_year'),
     };
     if (val(fd, 'asset_tag')) body.asset_tag = val(fd, 'asset_tag');
     if (can) {
@@ -261,46 +277,9 @@ function planDialog(a, done) {
   }, { submitText: 'Add plan' });
 }
 
-/** The checklist suited to the asset, every item answered pass, fail or N/A. A failure needs a note and opens a work order. */
+/** The checklist suited to the asset, every item answered by its kind. A failure opens a work order (asset-bits.js). */
 export function inspectSheet(a, meta, done) {
-  const active = meta.templates.filter((t) => t.active);
-  const pick = active.find((t) => t.kinds.includes(a.kind)) || active.find((t) => !t.kinds.length) || active[0];
-  if (!pick) { toast('Add a checklist under Settings first', 'error'); return; }
-  const chooser = select(active.map((t) => [t.id, t.name]), pick.id, { 'aria-label': 'Checklist' });
-  const box = h('div', { class: 'stack' });
-  const err = h('div');
-  let answers = [];
-  let sheet = null;
-  const drawItems = () => {
-    const t = active.find((x) => String(x.id) === chooser.value);
-    sheet = answerSheet(t.items, resultChips);
-    answers = sheet.answers;
-    clear(box).append(sheet.el);
-  };
-  chooser.addEventListener('change', drawItems);
-  drawItems();
-  const allPass = h('button', { type: 'button', class: 'btn small' }, 'Mark the rest as pass');
-  allPass.addEventListener('click', () => sheet.markRestPass());
-  const hours = input({ type: 'number', step: '0.1', min: 0, inputmode: 'decimal', 'aria-label': 'Hours now', placeholder: a.hours ? String(n1(a.hours)) : 'Hours now' });
-  const miles = input({ type: 'number', step: '0.1', min: 0, inputmode: 'decimal', 'aria-label': 'Miles now', placeholder: a.miles !== null && a.miles !== undefined ? String(n1(a.miles)) : 'Miles now' });
-  const save = h('button', { type: 'button', class: 'btn primary big', 'data-act': 'save-inspection' }, 'Save inspection');
-  const dlg = dialog(`Inspect: ${a.name}`, h('div', { class: 'stack ins-sheet' }, h('div', { class: 'row' }, chooser, allPass), box, h('div', { class: 'row tight' }, hours, miles), err, h('div', { class: 'footer row' }, save)), { wide: true });
-  dlg.box.classList.add('sheet');
-  save.addEventListener('click', async () => {
-    clear(err);
-    const missing = answers.filter((x) => x.missing());
-    if (missing.length) { err.append(errorBox(new Error(`Answer every item (${missing.length} left)`))); missing[0].focus(); return; }
-    const noNote = answers.filter((x) => x.needsNote());
-    if (noNote.length) { err.append(errorBox(new Error('Say what is wrong with each item that failed'))); noNote[0].focus(); return; }
-    save.disabled = true;
-    try {
-      const r = await post(`/assets/register/${a.id}/inspections`, { template_id: Number(chooser.value), items: answers.map((x) => x.get()), hours: hours.value === '' ? null : Number(hours.value), miles: miles.value === '' ? null : Number(miles.value) });
-      dlg.close();
-      toast(r.result === 'pass' ? 'Inspection passed' : 'Inspection failed: a work order was opened', r.result === 'pass' ? 'ok' : 'warn');
-      await done();
-    } catch (e) { err.append(errorBox(e)); save.disabled = false; }
-  });
-  return dlg;
+  return inspectDialog({ ...a, type: 'asset' }, meta.templates, { meters: true, photoPath: `/assets/register/${a.id}/photos`, save: (body) => post(`/assets/register/${a.id}/inspections`, body), done });
 }
 
 /**
@@ -325,12 +304,17 @@ export async function workOrderSheet(woId, a, done) {
     toast(label(status)); await refresh();
   }, { small: true, kind });
   const closed = ['done', 'cancelled'].includes(w.status);
+  // The map item it is on, on a small map.
+  const mapSlot = h('div');
+  if (w.map_feature_id) miniMap({ geometry: w.feature_geometry, points: w.feature_points, lat: w.feature_lat, lng: w.feature_lng, system: null }, { label: `Map of ${w.feature_tag || w.feature_name || w.feature_kind_label}` }).then((el) => mapSlot.append(el));
   const partSel = select([['', 'Choose a part'], ...parts.data.map((p) => [p.id, `${p.sku} ${p.name} (${p.qty_on_hand} ${p.unit} on hand)`])], '', { 'aria-label': 'Part' });
   const partQty = input({ type: 'number', min: 0, step: 'any', value: '1', 'aria-label': 'Quantity', class: 'short-num' });
   const hrs = input({ type: 'number', min: 0, step: '0.25', 'aria-label': 'Hours worked', placeholder: 'Hours', class: 'short-num' });
   const who = input({ maxlength: 100, 'aria-label': 'Who worked', placeholder: 'Who', value: (ctx.me && ctx.me.name) || '' });
   appendAll(body,
     h('p', null, state(label(w.status), w.status === 'done' ? 'good' : 'warn'), ' ', state(label(w.priority), PRIORITY[w.priority]), h('span', { class: 'muted small' }, ` ${[w.asset, w.lift, w.location, w.assignee].filter(Boolean).join(', ')}`)),
+    w.map_feature_id ? h('p', null, h('b', null, 'On the map: '), h('a', { href: `#/assets/map/f${w.map_feature_id}` }, [w.feature_kind_label, w.feature_tag || w.feature_name].filter(Boolean).join(' ')), w.program ? h('span', { class: 'muted small' }, ` From the program ${w.program}`) : null) : null,
+    w.map_feature_id ? mapSlot : null,
     w.description ? h('p', { class: 'prewrap' }, w.description) : null,
     w.resolution ? h('p', null, h('b', null, 'Done: '), w.resolution) : null,
     closed ? null : h('div', { class: 'row' }, w.status !== 'in_progress' ? st('in_progress', 'Start work') : null, w.status !== 'waiting_parts' ? st('waiting_parts', 'Waiting for parts') : null, st('done', 'Complete', 'primary')),

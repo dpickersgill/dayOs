@@ -122,11 +122,18 @@ const orderFields = {
   location: nullable(z.string().max(120)),
   assigned_staff_id: nullable(z.number().int().positive()),
   due_date: nullable(dateStr),
+  // A valve, hydrant, manhole or pipe on the asset map (muni release 1).
+  map_feature_id: nullable(z.number().int().positive()),
 };
+// The map feature a work order is on: its name or tag, kind and where it is (for the work order's mini map).
 const ORDER_SQL = `SELECT w.id, w.tenant_id, w.title, w.description, w.priority, w.status, w.asset_id, w.lift_id, w.location, w.source, w.assigned_staff_id,
-    w.due_date, w.opened_at, w.opened_by, w.completed_at, w.labor_hours, w.parts_note, w.resolution, w.pm_task_id, a.name AS asset, l.name AS lift, CONCAT(p.first_name, ' ', p.last_name) AS assignee
+    w.due_date, w.opened_at, w.opened_by, w.completed_at, w.labor_hours, w.parts_note, w.resolution, w.pm_task_id, a.name AS asset, l.name AS lift, CONCAT(p.first_name, ' ', p.last_name) AS assignee,
+    w.map_feature_id, w.program_id, w.request_id, mf.name AS feature_name, mf.tag AS feature_tag, mf.kind AS feature_kind, mf.geometry AS feature_geometry, mf.lat AS feature_lat, mf.lng AS feature_lng,
+    ap.name AS program
   FROM work_orders w
   LEFT JOIN ops_assets a ON a.tenant_id = w.tenant_id AND a.id = w.asset_id
+  LEFT JOIN map_features mf ON mf.tenant_id = w.tenant_id AND mf.id = w.map_feature_id
+  LEFT JOIN asset_programs ap ON ap.tenant_id = w.tenant_id AND ap.id = w.program_id
   LEFT JOIN lifts l ON l.tenant_id = w.tenant_id AND l.id = w.lift_id
   LEFT JOIN staff s ON s.tenant_id = w.tenant_id AND s.id = w.assigned_staff_id
   LEFT JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id`;
@@ -135,9 +142,12 @@ async function createOrder(conn, req, b, source = 'manual') {
   await mustExist(conn, 'ops_assets', req.auth.tenantId, b.asset_id, 'Equipment');
   await mustExist(conn, 'lifts', req.auth.tenantId, b.lift_id, 'Lift');
   await mustExist(conn, 'staff', req.auth.tenantId, b.assigned_staff_id, 'Staff member');
-  const [r] = await conn.query('INSERT INTO work_orders (tenant_id, title, description, priority, asset_id, lift_id, location, source, assigned_staff_id, due_date, opened_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [req.auth.tenantId, b.title, b.description ?? null, b.priority || 'normal', b.asset_id ?? null, b.lift_id ?? null, b.location ?? null, source, b.assigned_staff_id ?? null, b.due_date ?? null, req.auth.userId]);
-  await audit(conn, req, 'create', 'work_orders', r.insertId, { source });
+  await mustExist(conn, 'map_features', req.auth.tenantId, b.map_feature_id, 'Map item');
+  await mustExist(conn, 'asset_programs', req.auth.tenantId, b.program_id, 'Program');
+  const [r] = await conn.query('INSERT INTO work_orders (tenant_id, title, description, priority, asset_id, lift_id, location, source, assigned_staff_id, due_date, opened_by, map_feature_id, program_id, request_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [req.auth.tenantId, b.title, b.description ?? null, b.priority || 'normal', b.asset_id ?? null, b.lift_id ?? null, b.location ?? null, source, b.assigned_staff_id ?? null, b.due_date ?? null, req.auth.userId,
+      b.map_feature_id ?? null, b.program_id ?? null, b.request_id ?? null]);
+  await audit(conn, req, 'create', 'work_orders', r.insertId, { source, ...(b.map_feature_id ? { map_feature_id: b.map_feature_id } : {}), ...(b.program_id ? { program_id: b.program_id } : {}) });
   return r.insertId;
 }
 
@@ -149,6 +159,8 @@ router.get('/work-orders', async (req, res) => {
   else if (status !== 'all') { where.push('w.status = ?'); params.push(status); }
   if (req.query.asset_id) { where.push('w.asset_id = ?'); params.push(Number(first(req.query.asset_id))); }
   if (req.query.lift_id) { where.push('w.lift_id = ?'); params.push(Number(first(req.query.lift_id))); }
+  if (req.query.map_feature_id) { where.push('w.map_feature_id = ?'); params.push(Number(first(req.query.map_feature_id))); }
+  if (req.query.program_id) { where.push('w.program_id = ?'); params.push(Number(first(req.query.program_id))); }
   if (req.query.mine === '1' && req.auth.staffId) { where.push('w.assigned_staff_id = ?'); params.push(req.auth.staffId); }
   // Filters for the municipal Work orders screen (muni release 1): priority, who it is assigned to, where it came from, overdue.
   if (['low', 'normal', 'high', 'urgent'].includes(first(req.query.priority || ''))) { where.push('w.priority = ?'); params.push(first(req.query.priority)); }
@@ -185,6 +197,12 @@ router.get('/work-orders/:id', async (req, res) => {
   const id = paramId(req);
   const w = await one(pool, `${ORDER_SQL} WHERE w.tenant_id = ? AND w.id = ?`, [req.auth.tenantId, id]);
   if (!w) throw notFound('Work order');
+  // The map feature it is on, with its shape, for the mini map.
+  if (w.map_feature_id) {
+    const f = await one(pool, 'SELECT points FROM map_features WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, w.map_feature_id]);
+    const MF = require('../lib/mapfeatures');
+    Object.assign(w, { feature_points: f ? JSON.parse(f.points) : null, feature_lat: Number(w.feature_lat), feature_lng: Number(w.feature_lng), feature_kind_label: (MF.kindOf(w.feature_kind) || { label: w.feature_kind }).label });
+  }
   const notes = await rows(pool, "SELECT n.id, n.at, n.body, COALESCE(NULLIF(CONCAT(p.first_name, ' ', p.last_name), ' '), u.email, u.username) AS author FROM work_order_notes n LEFT JOIN users u ON u.tenant_id = n.tenant_id AND u.id = n.user_id LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id WHERE n.tenant_id = ? AND n.work_order_id = ? ORDER BY n.id", [req.auth.tenantId, id]);
   res.json({ ...w, notes });
 });
@@ -200,6 +218,7 @@ router.patch('/work-orders/:id', validate(partialOf(orderFields)), async (req, r
     await mustExist(conn, 'ops_assets', req.auth.tenantId, req.body.asset_id, 'Equipment');
     await mustExist(conn, 'lifts', req.auth.tenantId, req.body.lift_id, 'Lift');
     await mustExist(conn, 'staff', req.auth.tenantId, req.body.assigned_staff_id, 'Staff member');
+    await mustExist(conn, 'map_features', req.auth.tenantId, req.body.map_feature_id, 'Map item');
     const set = setClause(req.body, Object.keys(orderFields));
     if (!set) throw bad('No updatable fields supplied');
     const [r] = await conn.query(`UPDATE work_orders SET ${set.sql} WHERE tenant_id = ? AND id = ?`, [...set.values, req.auth.tenantId, id]);

@@ -5,6 +5,7 @@
 // Filters: priority, assigned to, where it came from, overdue. #/works?tab=done, #/works?overdue=1, #/works/12 opens one.
 import { get, post, patch, del } from '../api.js';
 import { shareButton } from '../share.js';
+import { miniMap } from './asset-bits.js';
 import { h, clear, ctx, isManager, table, state, tabs, input, select, field, button, toast, formDialog, confirmDialog, val, num, todayStr, fmtDate, fmtDateTime, empty, label, hashParam } from '../ui.js';
 
 const PRIORITY_TONE = { urgent: 'bad', high: 'warn', normal: 'neutral', low: 'neutral' };
@@ -69,7 +70,7 @@ async function drawOrders(box, status, pick) {
     const today = todayStr();
     body.append(table([
       { head: 'Priority', cell: (w) => state(label(w.priority), PRIORITY_TONE[w.priority]) },
-      { head: 'Job', cell: (w) => h('span', { class: 'stack tight' }, h('strong', null, w.title), h('span', { class: 'muted small' }, [w.asset, w.location].filter(Boolean).join(', '))) },
+      { head: 'Job', cell: (w) => h('span', { class: 'stack tight' }, h('strong', null, w.title), h('span', { class: 'muted small' }, [w.asset, w.feature_tag || w.feature_name, w.location].filter(Boolean).join(', '))) },
       { head: 'Assigned to', cell: (w) => w.assignee || h('span', { class: 'muted' }, 'Nobody yet') },
       { head: status === 'open' ? 'Due' : 'Done', cell: (w) => (status === 'open' ? (w.due_date ? h('span', null, fmtDate(w.due_date), String(w.due_date).slice(0, 10) < today ? h('span', null, ' ', state('Overdue', 'bad')) : null) : '') : (w.completed_at ? fmtDateTime(w.completed_at) : STATUS_TEXT[w.status])) },
       { head: 'Status', cell: (w) => STATUS_TEXT[w.status] || label(w.status) },
@@ -109,11 +110,16 @@ async function openOrder(id, pick, done) {
   const note = input({ placeholder: 'Add a note', maxlength: 1000, 'aria-label': 'Note' });
   const open = w.status !== 'done' && w.status !== 'cancelled';
   const act = (status, text, kind) => button(text, () => setStatus(w, status), { small: true, kind });
+  const mapSlot = h('div');
+  if (w.map_feature_id) miniMap({ geometry: w.feature_geometry, points: w.feature_points, lat: w.feature_lat, lng: w.feature_lng }, { label: 'Where it is on the map' }).then((el) => mapSlot.append(el));
   const dlg = formDialog(w.title, h('div', { class: 'stack' },
     h('div', { class: 'row between' }, h('p', null, state(STATUS_TEXT[w.status] || label(w.status), w.status === 'done' ? 'good' : 'neutral'), ' ', state(label(w.priority), PRIORITY_TONE[w.priority])), shareButton('work_order', w.id)),
     w.description ? h('p', null, w.description) : null,
     h('dl', { class: 'facts' },
       w.asset ? [h('dt', null, 'Asset'), h('dd', null, w.asset)] : null,
+      // A valve, hydrant or manhole on the asset map, and the program it came from (asset workstream, muni release 1).
+      w.map_feature_id ? [h('dt', null, 'On the map'), h('dd', null, h('a', { href: `#/assets/map/f${w.map_feature_id}` }, [w.feature_kind_label, w.feature_tag || w.feature_name].filter(Boolean).join(' ')))] : null,
+      w.program ? [h('dt', null, 'Program'), h('dd', null, h('a', { href: `#/assetprograms/${w.program_id}` }, w.program))] : null,
       w.location ? [h('dt', null, 'Where'), h('dd', null, w.location)] : null,
       [h('dt', null, 'Assigned to'), h('dd', null, w.assignee || 'Nobody yet')],
       w.due_date ? [h('dt', null, 'Due'), h('dd', null, fmtDate(w.due_date))] : null,
@@ -121,6 +127,7 @@ async function openOrder(id, pick, done) {
       [h('dt', null, 'Opened'), h('dd', null, fmtDateTime(w.opened_at))],
       w.labor_hours ? [h('dt', null, 'Labor'), h('dd', null, `${Number(w.labor_hours)} hours`)] : null,
       w.parts_note ? [h('dt', null, 'Parts'), h('dd', null, w.parts_note)] : null),
+    w.map_feature_id ? mapSlot : null,
     w.resolution ? h('p', null, h('strong', null, 'Done: '), w.resolution) : null,
     h('ul', { class: 'wo-notes' }, ...w.notes.map((n) => h('li', null, h('span', { class: 'muted small' }, `${fmtDateTime(n.at)} ${n.author || ''}`), h('span', null, n.body)))),
     h('div', { class: 'row' }, note, button('Add note', async () => { if (!note.value.trim()) return; await post(`/ops/work-orders/${id}/notes`, { body: note.value.trim() }); dlg.close(); await openOrder(id, pick, done); }, { small: true })),

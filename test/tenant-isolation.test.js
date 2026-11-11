@@ -92,6 +92,9 @@ const SIGNED = {
   'helpsms.js': { router: '/patrol' },
   // Municipal edition (muni release 1): a municipality's street list.
   'streets.js': { router: '/requests/streets' },
+  // Municipal edition (muni release 1): asset programs and asset photos, inside the Assets and fleet router.
+  'assetprograms.js': { router: '/assets/programs' }, 'assetphotos.js': { router: '/assets/photos' },
+  'utilities.js': { router: '/water' }, // the same Today card router is also mounted at /sewer and /stormwater
 };
 const PUBLIC = {
   'assistant.js': { publicRouter: '/public' }, 'availability.js': { publicRouter: '/public' }, 'dispatch.js': { publicRouter: '/public' }, 'family.js': { publicRouter: '/public' },

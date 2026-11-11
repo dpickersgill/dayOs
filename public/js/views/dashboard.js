@@ -344,6 +344,7 @@ const TILES = {
 // from GET /ops/work-orders/today. An app whose endpoint is not there yet, or fails, is left out without a word.
 export const MUNI_TODAY = [
   ['assets', '/ops/work-orders/today', () => can('staff')],
+  ['assets', '/assets/programs/today', () => can('staff')], // asset programs due this week and their progress
   ['requests', '/requests/today', () => true],
   ['requests', '/street-notices/today', () => true],
   ['solidwaste', '/solid-waste/today', () => true],
