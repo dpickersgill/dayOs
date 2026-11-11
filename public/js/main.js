@@ -65,6 +65,8 @@ const REDIRECTS = {
   partners: () => '#/sell?tab=partners',
   billing: (query) => `#/settings/billing${query ? `?${query}` : ''}`,
   availability: () => (ownAvailability() ? null : AVAILABILITY_TAB),
+  // A work order shared from the Inbox (#/conditions/wo/12) opens on a municipality's Work orders (muni release 1).
+  conditions: () => { const m = /^#\/conditions\/wo\/(\d+)/.exec(location.hash); return isMuni() && m ? `#/works/${m[1]}` : null; },
 };
 export const AVAILABILITY_TAB = '#/school?tab=team&view=availability';
 /** An instructor keeps Instructor availability as its own page (it is their own work); everyone else finds it in Lessons. */

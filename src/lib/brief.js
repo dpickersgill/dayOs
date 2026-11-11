@@ -92,6 +92,8 @@ async function people(db, tenantId, today, modules) {
 
 /** One login's brief: { kind, on, channel } or null when their role has none. */
 async function forUser(db, tenantId, userId, today) {
+  // The morning brief is a ski area's (lifts, lessons, patrol): a municipality has none yet (muni release 1).
+  if ((await modulesLib.orgTypeOf(tenantId)) === 'municipality') return null;
   const modules = new Set(await modulesLib.enabledKeys(tenantId));
   return (await people(db, tenantId, today, modules)).find((p) => p.id === Number(userId)) || null;
 }
@@ -166,7 +168,7 @@ async function runDue({ now = new Date(), budgetMs = 100000, maxSends = 500, bas
   try {
     const [[got]] = await conn.query("SELECT GET_LOCK('summitops_brief_job', 0) AS ok");
     if (!Number(got.ok)) return { ...out, busy: true };
-    const tenants = await rows(pool, `SELECT ${TENANT_COLS} FROM tenants WHERE status = 'active' AND sandbox_expires_at IS NULL${only ? ' AND id = ?' : ''} ORDER BY id`, only ? [only] : []);
+    const tenants = await rows(pool, `SELECT ${TENANT_COLS} FROM tenants WHERE status = 'active' AND sandbox_expires_at IS NULL AND org_type = 'mountain'${only ? ' AND id = ?' : ''} ORDER BY id`, only ? [only] : []);
     for (const t of tenants) {
       if (Date.now() - started > budgetMs || out.sent + out.failed >= maxSends) { out.more = true; break; }
       try {

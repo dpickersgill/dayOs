@@ -314,6 +314,8 @@ function createApp() {
     rateLimit({ name: 'public-mountain', windowMs: 60_000, max: Number(process.env.PUBLIC_RATE_LIMIT) || 600, keyOf: (req) => `${req.ip}|${String(req.path.split('/')[1] || '').toLowerCase().slice(0, 80)}` }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/guesthelp').publicRouter, require('./routes/lostfound').publicRouter, require('./routes/partnerpasses').publicRouter, require('./routes/patrolclaims').publicRouter, require('./routes/patrolscene').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter, require('./routes/rentalforms').publicRouter, require('./routes/schoollineup').publicRouter, require('./routes/schoolparents').publicRouter, require('./routes/schoolsafety').publicRouter, require('./routes/schoolpay').publicRouter, require('./routes/schooldirector').publicRouter, require('./routes/guestswindow').publicRouter, require('./routes/guestsaccount').publicRouter, require('./routes/guestsloyalty').publicRouter, require('./routes/guestsfair').publicRouter);
   // feat/school-pay: the recap's 0-10 question, and a group's booking link and waivers (each checks the Ski school app is on)
   api.use('/public', require('./routes/schoolmoney').publicRouter, require('./routes/schoolgroups').publicRouter);
+  // The municipal edition's public pages (muni release 1): the street names (publicGate: a municipality with Resident requests on).
+  api.use('/public', require('./routes/streets').publicRouter);
   api.use(authRoutes); // login, tenants, users, me (each route applies authenticate itself where needed)
   api.use(require('./routes/security')); // passkeys, the second check, sessions, devices, PINs, terminals (each route authenticates)
   // A person's private calendar link for their phone's calendar app (2026.11.10): no sign-in, the link is the key.
@@ -333,6 +335,9 @@ function createApp() {
   // Per person, not per address: a mountain's staff usually share one internet address. Reads (the polling) are not counted.
   const inboxLimit = rateLimit({ windowMs: 60_000, max: Number(process.env.INBOX_RATE_LIMIT) || 120, message: 'Too many messages, slow down', keyOf: (req) => `${req.auth.tenantId}:${req.auth.userId}` });
   api.use('/inbox', (req, res, next) => (req.method === 'GET' ? next() : inboxLimit(req, res, next)), inboxRoutes);
+  // The municipal edition (muni release 1). The street list is mounted ahead of any other /requests router, so a route
+  // like /requests/:id never reads "streets" as an id.
+  api.use('/requests/streets', require('./routes/streets').router);
   api.use('/messages', messagesRoutes.router);
   api.use('/online-shop', shopRoutes.router);
   api.use('/online-shop', shopAdmin.router);
