@@ -30,6 +30,33 @@
 3. Under Billing, pick Public Works and its add-ons, yearly. Only municipal plans are offered for a municipality, and ski plans for a ski area.
 4. The owner adds the crew (role Crew) and front desk (role Front desk) under Settings, Team and logins, imports the street list under Settings, Streets (paste one street per line), and connects Stripe under Settings, Payments for bulk pickup fees.
 
+## Street alert texts for a municipality (which number sends)
+
+Street notices, alert sign-up codes and welcome texts go through `src/lib/sms.js` on the one Twilio account that sends
+every Verdynt/OS text (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`). Which number they come from:
+
+- **By default, the shared number** (`TWILIO_FROM`, a number or a Messaging Service `MG...`). Nothing to set up per
+  municipality. Its STOP and START replies already reach `POST /api/v1/twilio/sms` (the "A message comes in" webhook,
+  see Text HELP set-up above and FEATURES.md): a STOP is written to every customer record and every municipality's alert
+  list with that phone (`alert_addresses`), so no one texts it again; START lifts only a stop that came by text. Twilio
+  itself also blocks the shared number from texting a phone after STOP, at every tenant.
+- **A number of the municipality's own** (optional, when a borough wants its alerts to come from one number residents
+  save). Buy a toll-free number on the same account, verify it the way Text HELP set-up steps 1 and 4 describe, with the
+  municipality as the business, use case category "Public Service Announcement" (or Customer Care), and sample messages
+  such as "Riverbend Borough: Water is off on Dayton Street for a water main repair. Details: https://<host>/alerts/<slug>/AB3CDE Reply STOP to stop texts."
+  Opt-in: residents sign up on `/alerts/<slug>`, confirm with a texted code and get a welcome text saying how to stop.
+  Set the number's (or its Messaging Service's) "A message comes in" webhook to `https://<PUBLIC_URL host>/api/v1/twilio/sms`,
+  never `/api/v1/public/sms/inbound` (that is the patrol help line and would take a STOP as a call for help). Then a
+  manager enters the number under Street notices, Settings, Texting number; the screen shows the webhook address too.
+  Clear it to go back to the shared number.
+
+Sending is in the background: a send writes one queued row per phone and email (`street_notice_deliveries`) and
+answers at once; the server that took the request sends them six at a time, and the 5-minute guests job
+(`/internal/jobs/guests`, `street_notices` in its answer) sends anything left and the scheduled notices that are due. A
+row a stopped server left half-sent is marked failed after 15 minutes rather than sent again. Twilio's own rate for the
+number applies on top (a toll-free number takes a few texts a second; a 2,000-resident notice takes some minutes).
+Water, boil water, sewer and street closure notices go at any hour; the others wait for 8 AM (`src/lib/quiet.js`).
+
 ## The demo borough
 
 `SEED_PASSWORD=<at least 12 characters> node db/demo-municipal.js demo-borough` makes Riverbend Borough (made up) with every municipal app on, free of charge, and prints the login (username `owner`; also `manager`, `crew1` to `crew4`, `frontdesk`, all with SEED_PASSWORD). Run it against the database you mean (DB_NAME). It is safe to run again: nothing is added twice. To start over, close and delete the tenant in the console, or use db/reset.js on a test database. Each municipal app adds its sample data in its own file in `db/demo-municipal/`.
