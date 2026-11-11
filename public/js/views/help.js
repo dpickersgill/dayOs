@@ -4,13 +4,18 @@ import { get, post, session } from '../api.js';
 import { SECTIONS, ARTICLES, articleById } from '../help-content.js';
 
 const ALWAYS_ON = ['start', 'dashboard', 'people', 'myshifts', 'settings'];
-const appOn = (key) => ALWAYS_ON.includes(key) || !ctx.me.modules || ctx.me.modules.includes(key);
+// A section's app is its key, or its module when the screen has another name (Work orders: Assets and fleet).
+const appOn = (key, s) => ALWAYS_ON.includes(key) || !ctx.me.modules || ctx.me.modules.includes((s && s.module) || key);
 const roleOk = (who) => who === null || who === undefined || can(...who);
+// The municipal edition (muni release 1): a section or article for one kind of tenant has orgs. A municipality sees only
+// the sections that apply to it; a ski area never sees a municipal one.
+const MUNI_SECTIONS = ['start', 'dashboard', 'inbox', 'myshifts', 'settings', 'documents', 'messages', 'workforce', 'assets'];
+const orgOk = (x) => (x.orgs ? x.orgs.includes(isMuni() ? 'municipality' : 'mountain') : !isMuni() || MUNI_SECTIONS.includes(x.key || x.app));
 
 const sectionOf = (key) => SECTIONS.find((s) => s.key === key);
-const sectionOpen = (s) => appOn(s.key) && roleOk(s.who);
+const sectionOpen = (s) => orgOk(s) && appOn(s.key, s) && roleOk(s.who);
 // A school director sees the ski school's manager articles too.
-const articleOpen = (a) => { const s = sectionOf(a.app); return Boolean(s) && sectionOpen(s) && (roleOk(a.who) || (a.app === 'school' && schoolCan('director'))); };
+const articleOpen = (a) => { const s = sectionOf(a.app); return Boolean(s) && sectionOpen(s) && (!a.orgs || a.orgs.includes(isMuni() ? 'municipality' : 'mountain')) && (roleOk(a.who) || (a.app === 'school' && schoolCan('director'))); };
 const visible = () => ARTICLES.filter(articleOpen);
 
 const words = (text) => String(text || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);

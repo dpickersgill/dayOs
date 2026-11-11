@@ -26,7 +26,8 @@ const TYPES = {
     titles: async (t, ids) => rows(pool, "SELECT id, name AS title, CONCAT_WS(' · ', asset_tag, make_model) AS subtitle FROM ops_assets WHERE tenant_id = ? AND id IN (?)", [t, ids]),
   },
   work_order: {
-    label: 'Work order', path: (id) => `#/conditions/wo/${id}`, module: 'conditions',
+    // Either app opens work orders (lib/modules.js): Lifts and trails, or Assets and fleet (a municipality's Work orders).
+    label: 'Work order', path: (id) => `#/conditions/wo/${id}`, module: ['conditions', 'assets'],
     allowed: async (req) => is(req, 'staff', 'manager', 'patrol'),
     titles: async (t, ids) => rows(pool, "SELECT id, title, CONCAT(UPPER(LEFT(status, 1)), REPLACE(SUBSTRING(status, 2), '_', ' '), ' · ', priority, ' priority') AS subtitle FROM work_orders WHERE tenant_id = ? AND id IN (?)", [t, ids]),
   },
@@ -79,7 +80,7 @@ async function resolve(req, refs) {
     const def = TYPES[type];
     const ids = [...idSet];
     const base = (id) => ({ type, id, label: def.label, path: def.path(id) });
-    const canOpen = (!def.module || on.has(def.module)) && await def.allowed(req);
+    const canOpen = (!def.module || [].concat(def.module).some((m) => on.has(m))) && await def.allowed(req);
     if (!canOpen) { for (const id of ids) out.set(`${type}:${id}`, { ...base(id), state: 'no_access' }); continue; }
     const found = new Map((await def.titles(t, ids, req)).map((r) => [Number(r.id), def.after ? def.after(r) : r]));
     for (const id of ids) {

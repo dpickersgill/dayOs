@@ -86,7 +86,7 @@ router.post(
     await PWR.refuseWeak(owner.password, { email: owner.email, tenantSlug: s, tenantName: name });
     const hash = await bcrypt.hash(owner.password, 12);
     const created = await tx(async (conn) => {
-      const [t] = await conn.query('INSERT INTO tenants (slug, name, timezone, org_type) VALUES (?, ?, ?, ?)', [s, name, timezone, req.body.org_type]);
+      const [t] = await conn.query('INSERT INTO tenants (slug, name, timezone, org_type, weekly_report) VALUES (?, ?, ?, ?, ?)', [s, name, timezone, req.body.org_type, req.body.org_type === 'municipality' ? 0 : 1]);
       const [p] = await conn.query('INSERT INTO people (tenant_id, first_name, last_name, email) VALUES (?, ?, ?, ?)', [t.insertId, owner.first_name, owner.last_name, owner.email]);
       const [u] = await conn.query('INSERT INTO users (tenant_id, person_id, email, username, password_hash, role) VALUES (?, ?, ?, ?, ?, ?)', [t.insertId, p.insertId, owner.email, UN.suggestUsername(owner), hash, 'owner']);
       return { tenant_id: t.insertId, user_id: u.insertId };

@@ -563,7 +563,8 @@ router.post('/tenants', validate(z.object({
   await PWR.refuseWeak(b.owner.password, { email: b.owner.email, tenantSlug: b.slug, tenantName: b.name });
   const hash = await bcrypt.hash(b.owner.password, 12);
   const created = await tx(async (conn) => {
-    const [t] = await conn.query('INSERT INTO tenants (slug, name, timezone, storage_cap_mb, org_type) VALUES (?, ?, ?, ?, ?)', [b.slug, b.name, b.timezone, b.storage_cap_mb ?? 500, b.org_type]);
+    // A municipality gets no weekly sales report (it sells no tickets): off from the start.
+    const [t] = await conn.query('INSERT INTO tenants (slug, name, timezone, storage_cap_mb, org_type, weekly_report) VALUES (?, ?, ?, ?, ?, ?)', [b.slug, b.name, b.timezone, b.storage_cap_mb ?? 500, b.org_type, b.org_type === 'municipality' ? 0 : 1]);
     const [p] = await conn.query('INSERT INTO people (tenant_id, first_name, last_name, email) VALUES (?, ?, ?, ?)', [t.insertId, b.owner.first_name, b.owner.last_name, b.owner.email]);
     await conn.query('INSERT INTO users (tenant_id, person_id, email, username, password_hash, role) VALUES (?, ?, ?, ?, ?, ?)', [t.insertId, p.insertId, b.owner.email, require('../lib/usernames').suggestUsername(b.owner), hash, 'owner']);
     const on = M.apply({}, b.modules || {}, b.org_type);

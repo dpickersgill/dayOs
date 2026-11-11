@@ -150,6 +150,11 @@ router.get('/work-orders', async (req, res) => {
   if (req.query.asset_id) { where.push('w.asset_id = ?'); params.push(Number(first(req.query.asset_id))); }
   if (req.query.lift_id) { where.push('w.lift_id = ?'); params.push(Number(first(req.query.lift_id))); }
   if (req.query.mine === '1' && req.auth.staffId) { where.push('w.assigned_staff_id = ?'); params.push(req.auth.staffId); }
+  // Filters for the municipal Work orders screen (muni release 1): priority, who it is assigned to, where it came from, overdue.
+  if (['low', 'normal', 'high', 'urgent'].includes(first(req.query.priority || ''))) { where.push('w.priority = ?'); params.push(first(req.query.priority)); }
+  if (req.query.assigned_staff_id) { if (first(req.query.assigned_staff_id) === 'none') where.push('w.assigned_staff_id IS NULL'); else { where.push('w.assigned_staff_id = ?'); params.push(Number(first(req.query.assigned_staff_id))); } }
+  if (req.query.source && /^[a-z]{2,20}$/.test(first(req.query.source))) { where.push('w.source = ?'); params.push(first(req.query.source)); }
+  if (req.query.overdue === '1') { where.push("w.status NOT IN ('done','cancelled') AND w.due_date < ?"); params.push(todayIn(await tenantTz(req.auth.tenantId))); }
   const limit = Math.min(Number(req.query.limit) || 200, 500);
   res.json({ data: await rows(pool, `${ORDER_SQL} WHERE ${where.join(' AND ')} ORDER BY FIELD(w.priority, 'urgent', 'high', 'normal', 'low'), w.opened_at DESC LIMIT ?`, [...params, limit]) });
 });
