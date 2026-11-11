@@ -174,17 +174,19 @@ async function stopAddress(db, tenantId, channel, value, source, userId = null) 
 /**
  * A STOP or START text reply, for the alert list (called by lib/residents.js applyTextReply, the one path for every
  * resident text). tenantIds: the municipalities whose own number the reply came to; none means the shared number, where a
- * STOP stops alert texts to that phone at every municipality. START lifts only a stop that came from a text reply.
+ * STOP stops alert texts to that phone at every municipality that texts from it (exceptTenantIds: those with a number of
+ * their own). START lifts only a stop that came from a text reply.
  * Returns how many municipalities changed.
  */
-async function textReply(phone, intent, { tenantIds = null } = {}) {
+async function textReply(phone, intent, { tenantIds = null, exceptTenantIds = [] } = {}) {
   const key = sms.phoneKey(phone);
   if (!key) return 0;
   const only = Array.isArray(tenantIds) && tenantIds.length ? new Set(tenantIds.map(Number)) : null;
+  const skip = new Set((exceptTenantIds || []).map(Number)); // municipalities with a number of their own, on a reply to the shared number
   const list = await rows(pool, "SELECT id, tenant_id, stopped_at, stop_source FROM alert_addresses WHERE channel = 'sms' AND addr = ?", [key]);
   // A phone that signed up nowhere yet is still recorded, at every municipality with a resident on that phone.
   const residentsAt = await rows(pool, "SELECT DISTINCT tenant_id FROM residents WHERE RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '[^0-9]', ''), 10) = ?", [key]);
-  const tenants = new Set([...list.map((r) => Number(r.tenant_id)), ...residentsAt.map((r) => Number(r.tenant_id))].filter((t) => !only || only.has(t)));
+  const tenants = new Set([...list.map((r) => Number(r.tenant_id)), ...residentsAt.map((r) => Number(r.tenant_id))].filter((t) => (!only || only.has(t)) && !skip.has(t)));
   let changed = 0;
   for (const t of tenants) {
     const a = list.find((r) => Number(r.tenant_id) === t);

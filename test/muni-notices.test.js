@@ -90,8 +90,8 @@ async function settled(M, id, token = M.token) {
 const notice = (over = {}) => ({ type: 'water_outage', title: 'Main break', sms_text: 'Water is off on Dayton Street. Back by 5 PM.', body: 'Water is off while crews repair a main.', areas: [], ...over });
 
 /** Signs a STOP or START text the way Twilio posts it. */
-async function textBack(from, word) {
-  const params = { AccountSid: 'ACtest', MessageSid: `SM${Date.now()}${Math.random()}`.slice(0, 34), From: `+1${keyOf(from)}`, To: '+16105550000', Body: word };
+async function textBack(from, word, to = '+16105550000') {
+  const params = { AccountSid: 'ACtest', MessageSid: `SM${Date.now()}${Math.random()}`.slice(0, 34), From: `+1${keyOf(from)}`, To: to, Body: word };
   const url = `${base}/api/v1/twilio/sms`;
   const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-twilio-signature': signature('tw-token', url, params) }, body: new URLSearchParams(params).toString() });
   assert.equal(res.status, 200, await res.text());
@@ -240,7 +240,7 @@ test('STOP by text and the manage link are honored before and after a send; STAR
   assert.equal(n2.preview.texts, 1, 'the phone that texted START');
   // A phone that texted STOP cannot sign up again until START.
   const again = await api('POST', `/public/${M.slug}/alerts`, { body: { street_id: st['Walnut Street'], house_number: '1', phone: keep.phone } });
-  assert.equal(again.status, 409); assert.match(again.body.error, /Text START/);
+  assert.equal(again.status, 409); assert.match(again.body.error, /^This phone has texts turned off\. Text START to [0-9-]+ to turn them back on\./, 'the same words as requests and bulk pickup');
   const ledger = await q("SELECT a.addr, e.status, e.source FROM alert_consent_events e JOIN alert_addresses a ON a.tenant_id = e.tenant_id AND a.id = e.address_id WHERE e.tenant_id = ? ORDER BY e.id", [M.id]);
   assert.ok(ledger.some((e) => e.addr === keyOf(stops.phone) && e.status === 'opted_out' && e.source === 'text_reply'));
   assert.ok(ledger.some((e) => e.addr === keyOf(stops.phone) && e.status === 'opted_in' && e.source === 'text_reply'));
@@ -480,4 +480,25 @@ test('a municipality\'s own texting number sends its alerts; without one, the sh
   ok(await api('POST', `/street-notices/${n.id}/send`, { token: M.token, body: { confirm: true } }));
   await settled(M, n.id);
   assert.equal(textsTo(r.phone).find((t) => t.Body.includes(n.code)).From, '+14845550999');
+
+  // The one STOP rule with a number of its own: a STOP texted to this municipality's number counts here only, for every
+  // kind of resident text, and the words name this number. The same phone at another municipality is not touched.
+  const other = await createMuniTenant(base, { slug: `sn-other-${suffix}` });
+  const ost = await addStreets(other.id, ['Birch Street']);
+  await signUp(other, { street: ost['Birch Street'], house: '2', phone: r.phone });
+  await textBack(r.phone, 'STOP', '+14845550999');
+  const RES = require('../src/lib/residents');
+  assert.equal(await RES.stoppedByText(pool, M.id, r.phone), true);
+  assert.equal(await RES.stoppedByText(pool, other.id, r.phone), false, 'the other municipality texts from the shared number, which was not stopped');
+  assert.equal((await q('SELECT texts_ok FROM residents WHERE tenant_id = ? AND phone = ?', [M.id, `+1${keyOf(r.phone)}`]))[0].texts_ok, 0);
+  assert.equal((await q('SELECT texts_ok FROM residents WHERE tenant_id = ? AND phone = ?', [other.id, `+1${keyOf(r.phone)}`]))[0].texts_ok, 1);
+  const again = await api('POST', `/public/${M.slug}/alerts`, { body: { street_id: st['Birch Street'], house_number: '2', phone: r.phone } });
+  assert.equal(again.status, 409);
+  assert.equal(again.body.error, 'This phone has texts turned off. Text START to 484-555-0999 to turn them back on. Then sign up again.');
+  // START to the shared number is for the other municipalities: this one stays stopped until START reaches its own number.
+  await textBack(r.phone, 'START');
+  assert.equal(await RES.stoppedByText(pool, M.id, r.phone), true);
+  await textBack(r.phone, 'START', '+14845550999');
+  assert.equal(await RES.stoppedByText(pool, M.id, r.phone), false);
+  assert.equal((await q('SELECT texts_ok FROM residents WHERE tenant_id = ? AND phone = ?', [M.id, `+1${keyOf(r.phone)}`]))[0].texts_ok, 1);
 });

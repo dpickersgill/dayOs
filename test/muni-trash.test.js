@@ -399,6 +399,37 @@ test('STOP is honored: a resident who texted STOP is not texted about a not-out 
   assert.equal(texts(before).length, 0);
 });
 
+test('the one STOP rule: ticking "text me" on a new booking does not undo a texted STOP; only a texted START does', async () => {
+  const opts = (await api('GET', '/solid-waste/options', { token: A.token })).body;
+  const D = opts.days.find((d) => d.available).date;
+  const sm = opts.sizes.find((x) => x.name === 'Small').id;
+  const book = (house) => api('POST', '/solid-waste/bookings', { token: deskA.token, body: { collection_date: D, street_id: streets[A.id][1], house_number: house, items: [{ size_id: sm, quantity: 1 }], pay: 'office_paid', ...resident(42) } });
+  // The phone that texted STOP books again and the front desk ticks that they agree to texts: no text, and the answer says why.
+  let before = sink.length;
+  const again = await book('102');
+  is(again, 201);
+  assert.equal(again.body.texts_off, 'This phone has texts turned off. Text START to 555-555-0100 to turn them back on.');
+  assert.deepEqual(again.body.sent, ['email']);
+  assert.equal(texts(before).length, 0, 'still no text');
+  const [r] = await q('SELECT r.id, r.texts_ok FROM residents r JOIN bulk_bookings b ON b.resident_id = r.id AND b.tenant_id = r.tenant_id WHERE b.id = ?', [again.body.id]);
+  assert.equal(r.texts_ok, 0, 'the box did not turn texts back on');
+  // The resident's own booking page says the same thing.
+  const tok = (await q('SELECT view_token FROM bulk_bookings WHERE id = ?', [again.body.id]))[0].view_token;
+  const page = await api('GET', `/public/${A.slug}/bulk-pickup/bookings/${tok}`);
+  is(page, 200); assert.match(page.body.texts_off, /^This phone has texts turned off\. Text START to 555-555-0100 to turn them back on\.$/);
+  // START by text turns them back on, and the next booking is confirmed by text.
+  assert.equal(await twilioReply('+16105550142', 'START'), 200);
+  assert.equal((await q('SELECT texts_ok FROM residents WHERE id = ?', [r.id]))[0].texts_ok, 1);
+  const hist = await q("SELECT status, source FROM resident_consent WHERE tenant_id = ? AND resident_id = ? AND channel = 'sms' ORDER BY id DESC LIMIT 2", [A.id, r.id]);
+  assert.deepEqual(hist.map((x) => `${x.status}/${x.source}`), ['opted_in/text_reply', 'opted_out/text_reply']);
+  before = sink.length;
+  const third = await book('104');
+  is(third, 201);
+  assert.equal(third.body.texts_off, undefined);
+  assert.ok(third.body.sent.includes('text') && texts(before).length === 1, 'texted again after START');
+  assert.equal((await api('GET', `/public/${A.slug}/bulk-pickup/bookings/${tok}`)).body.texts_off, null);
+});
+
 test('a manager decides a not-out stop: no refund, a refund, or a credit used for the next booking', async () => {
   is(await api('POST', `/solid-waste/bookings/${todayStops.yes}/decision`, { token: deskA.token, body: { decision: 'refund' } }), 403);
   is(await api('POST', `/solid-waste/bookings/${todayStops.later}/decision`, { token: A.token, body: { decision: 'refund' } }), 409, 'only a not-out or not-accepted stop');

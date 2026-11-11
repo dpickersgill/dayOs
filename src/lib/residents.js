@@ -139,7 +139,7 @@ const emailsAllowed = (resident) => Boolean(resident && Number(resident.emails_o
  * A STOP or START texted to one of our numbers (routes/twilioinbound.js), the one path for requests, bulk pickup and
  * street notices. STOP turns texts off; START turns them back on only where the last answer was a STOP by text.
  *   tenantIds: the municipalities whose own texting number the reply came to; empty or missing means the shared number,
- *   which is every municipality with that phone.
+ *   which is every municipality with that phone that texts from the shared number.
  * Each resident with the phone gets a consent row, and the phone's place on the alert list (lib/streetnotices.js) follows.
  * Returns how many records changed.
  */
@@ -147,16 +147,19 @@ async function applyTextReply(conn, phone, intent, { tenantIds = null } = {}) {
   const key = phoneKey(phone);
   if (!key || !['stop', 'start'].includes(intent)) return 0;
   const only = Array.isArray(tenantIds) && tenantIds.length ? tenantIds.map(Number) : null;
-  const list = await rows(conn, `SELECT r.tenant_id, r.id, r.texts_ok,
+  // A reply to the shared number says nothing about a municipality that texts from a number of its own.
+  const skip = only ? [] : (await rows(conn, 'SELECT tenant_id FROM street_notice_settings WHERE from_number IS NOT NULL')).map((r) => Number(r.tenant_id));
+  const all = await rows(conn, `SELECT r.tenant_id, r.id, r.texts_ok,
       (SELECT CONCAT(c.status, '|', c.source) FROM resident_consent c WHERE c.tenant_id = r.tenant_id AND c.resident_id = r.id AND c.channel = 'sms' ORDER BY c.id DESC LIMIT 1) AS latest
     FROM residents r WHERE r.phone IS NOT NULL AND REGEXP_REPLACE(r.phone, '[^0-9]', '') IN (?, ?)${only ? ' AND r.tenant_id IN (?)' : ''}`, only ? [key, `1${key}`, only] : [key, `1${key}`]);
+  const list = all.filter((r) => !skip.includes(Number(r.tenant_id)));
   let changed = 0;
   for (const r of list) {
     const [status, source] = String(r.latest || '|').split('|');
     if (intent === 'stop' && (Number(r.texts_ok) || status !== 'opted_out' || source !== 'text_reply')) { await recordConsent(conn, r.tenant_id, r.id, 'sms', false, 'text_reply'); changed += 1; }
     if (intent === 'start' && status === 'opted_out' && source === 'text_reply') { await recordConsent(conn, r.tenant_id, r.id, 'sms', true, 'text_reply'); changed += 1; }
   }
-  changed += await require('./streetnotices').textReply(key, intent, { tenantIds: only });
+  changed += await require('./streetnotices').textReply(key, intent, { tenantIds: only, exceptTenantIds: skip });
   return changed;
 }
 

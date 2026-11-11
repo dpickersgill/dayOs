@@ -231,7 +231,8 @@ test('a report with contact details: the resident is kept apart, texted only bec
   assert.match(body, new RegExp(`^${A.name}: we got your report ${r.body.reference} \\(Street light out\\)\\.`));
   assert.match(body, /Reply STOP to stop texts\.$/);
   assert.match(body, new RegExp(`/report/${A.slug}#s=${r.body.token}`));
-  assert.doesNotMatch(body, /within|hours|days/, 'no promised time');
+  // The municipality's test name and its link carry a random suffix (which can spell "days"), so they are taken out first.
+  assert.doesNotMatch(body.split(A.name).join('').replace(/https?:\/\/\S+/g, ''), /within|hours|days/, 'no promised time');
   await sleep(100);
   assert.equal(mails.filter((m) => m.To === 'jordan@example.test').length, 0, 'no email: they did not ask');
   const [row] = await q('SELECT r.updates_by_text, r.updates_by_email, x.name, x.texts_ok FROM requests r JOIN residents x ON x.tenant_id = r.tenant_id AND x.id = r.resident_id WHERE r.tenant_id = ? AND r.reference = ?', [A.id, r.body.reference]);
@@ -389,9 +390,19 @@ test('never after STOP: a STOP texted back turns texts off for the resident, and
   const again = await report(A, { category_id: catId(A, 'Pothole'), street_id: A.streets['Church Street'], phone: ph, texts_ok: true });
   is(again, 201); await sleep(150);
   assert.equal(textsTo(ph).length, n);
+  // The page says so, in the same words every municipal form uses, and START by text is the only way back.
+  assert.equal(again.body.texts_off, 'This phone has texts turned off. Text START to 610-555-0000 to turn them back on.');
+  assert.equal(r.body.texts_off, undefined, 'nothing to say before the STOP');
+  const byDesk = await api('POST', '/requests', { token: T.desk.token, body: { category_id: catId(A, 'Pothole'), street_id: A.streets['Church Street'], source: 'phone', contact: { name: 'Sam Stopped', phone: ph, texts_ok: true } } });
+  is(byDesk, 201); assert.match(byDesk.body.texts_off, /Text START to 610-555-0000/);
+  assert.equal(Number((await q('SELECT texts_ok FROM residents WHERE id = ?', [res0.id]))[0].texts_ok), 0, 'ticking the box at the front desk does not turn texts back on');
   assert.equal(await textIn(ph, 'START'), 200);
   const hist = await RES.consentHistory(pool, A.id, res0.id);
   assert.equal(hist[0].status, 'opted_in'); assert.equal(hist[0].source, 'text_reply');
+  const after = await report(A, { category_id: catId(A, 'Pothole'), street_id: A.streets['Church Street'], phone: ph, texts_ok: true });
+  is(after, 201); assert.equal(after.body.texts_off, undefined);
+  await waitFor(() => textsTo(ph).length > n);
+  assert.ok(textsTo(ph).length > n, 'texted again after START');
 });
 
 test('made safe, with its time and a photo; fixed from the Requests view completes the work order', async () => {
