@@ -692,6 +692,8 @@ router.put('/tenants/:id/modules', needsAccess, validate(z.object({ modules: z.r
     return { modules: on, not_applied: asked };
   });
   M.invalidate(id);
+  // Buildings turned on: its life-safety library is seeded now (lib/buildings.js; also done on first use, and only once).
+  if (result.modules.includes('buildings')) await require('../lib/buildings').ensureLibrary(id).catch((err) => console.warn('Buildings library not seeded yet:', err.message));
   res.json(result);
 });
 

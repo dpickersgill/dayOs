@@ -418,4 +418,6 @@ router.delete('/documents/:id', async (req, res) => {
   res.status(204).end();
 });
 
+// For apps that file a document of their own (Buildings files vendor reports and certificates here, muni release 1).
+router.files = { storeFile, scanDocument, contentMatches, TYPES, cleanName, MAX_BYTES };
 module.exports = router;

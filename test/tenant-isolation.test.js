@@ -90,6 +90,8 @@ const SIGNED = {
   'places.js': { router: '/patrol' },
   // help/sms: Text HELP settings and a call's texts and photos.
   'helpsms.js': { router: '/patrol' },
+  // muni release 1: Buildings (the life-safety calendar and binder).
+  'buildings.js': { router: '/buildings' },
 };
 const PUBLIC = {
   'assistant.js': { publicRouter: '/public' }, 'availability.js': { publicRouter: '/public' }, 'dispatch.js': { publicRouter: '/public' }, 'family.js': { publicRouter: '/public' },

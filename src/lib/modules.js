@@ -39,7 +39,7 @@ const MODULES = [
   { key: 'sewer', label: 'Sewer (add-on)', blurb: 'Sewer mains, manholes and pump stations on the asset register, with their inspections and programs.', addon: true, orgs: ['municipality'], paths: ['/sewer'] },
   { key: 'stormwater', label: 'Stormwater (add-on)', blurb: 'Inlets, outfalls and basins on the asset register, with their inspections and programs.', addon: true, orgs: ['municipality'], paths: ['/stormwater'] },
   { key: 'solidwaste', label: 'Trash and recycling (add-on)', blurb: 'Residents book and pay for bulk trash pickup online, and the crew sees each day\'s route.', addon: true, orgs: ['municipality'], paths: ['/solid-waste'] },
-  { key: 'buildings', label: 'Buildings (add-on)', blurb: 'The building inspection calendar and each permit\'s binder.', addon: true, orgs: ['municipality'], paths: ['/buildings'] },
+  { key: 'buildings', label: 'Buildings (add-on)', blurb: 'Life-safety inspections for the municipality\'s own buildings: the calendar of checks, vendor visits and certificates, staff rounds, and the binder for the insurer or fire marshal.', addon: true, orgs: ['municipality'], paths: ['/buildings'] },
 ];
 const ORG_TYPES = ['mountain', 'municipality'];
 // Every app without its own list is a ski area app.
