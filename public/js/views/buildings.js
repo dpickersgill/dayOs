@@ -203,7 +203,7 @@ async function visitDialog(buildingId, done) {
   }
   function draw() {
     const rows = cal.plans.filter((p) => (staffToo.checked || p.who === 'vendor') && (!bFilter.value || String(p.building_id) === bFilter.value));
-    clear(list).append(rows.length ? rows.map(line) : h('p', { class: 'muted' }, 'No vendor checks here. Tick "Show staff checks too" if the vendor did one of those.'));
+    clear(list).append(...(rows.length ? rows.map(line) : [h('p', { class: 'muted' }, 'No vendor checks here. Tick "Show staff checks too" if the vendor did one of those.')]));
   }
   bFilter.addEventListener('change', draw); staffToo.addEventListener('change', draw);
   draw();
