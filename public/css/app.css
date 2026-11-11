@@ -4178,3 +4178,9 @@ label.check-hit { display: inline-flex; align-items: center; justify-content: ce
 .guest-msgs li.from-guest { border-left: 4px solid var(--accent-line); }
 .guest-box textarea { flex: 1 1 16rem; min-height: 56px; }
 @media (max-width: 560px) { .guest-box dl { grid-template-columns: 1fr; gap: 0; } .guest-box dd { margin-bottom: 6px; } }
+
+/* Municipal edition (muni release 1): a work order's facts on Work orders. */
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+dl.facts dt { color: var(--quiet); }
+dl.facts dd { margin: 0; }
+@media (max-width: 560px) { dl.facts { grid-template-columns: 1fr; gap: 0; } dl.facts dd { margin-bottom: 6px; } }
