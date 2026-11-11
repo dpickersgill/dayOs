@@ -112,6 +112,7 @@ async function applyModules(conn, tenantId, b) {
   if (!plan) return null;
   const on = modulesFor(plan, all.filter((p) => ids(b.addons).includes(p.id)), org);
   for (const k of M.KEYS) await conn.query('INSERT INTO tenant_modules (tenant_id, module, enabled) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)', [tenantId, k, on.includes(k) ? 1 : 0]);
+  await require('./templatepacks').seed(conn, tenantId); // an add-on on the plan brings its built-in checklists, once
   M.invalidate(tenantId);
   return on;
 }

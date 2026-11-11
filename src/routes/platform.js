@@ -568,6 +568,7 @@ router.post('/tenants', validate(z.object({
     await conn.query('INSERT INTO users (tenant_id, person_id, email, username, password_hash, role) VALUES (?, ?, ?, ?, ?, ?)', [t.insertId, p.insertId, b.owner.email, require('../lib/usernames').suggestUsername(b.owner), hash, 'owner']);
     const on = M.apply({}, b.modules || {}, b.org_type);
     for (const k of M.KEYS) await conn.query('INSERT INTO tenant_modules (tenant_id, module, enabled) VALUES (?, ?, ?)', [t.insertId, k, on.includes(k) ? 1 : 0]);
+    await require('../lib/templatepacks').seed(conn, t.insertId); // a municipality's water, sewer and stormwater checklists
     if (b.billing === 'trial') await BL.startTrial(conn, t.insertId, { planId: b.plan_id || null, email: b.owner.email });
     else await conn.query('INSERT INTO tenant_billing (tenant_id, comped, plan_id) VALUES (?, 1, ?)', [t.insertId, b.plan_id || null]);
     await log(conn, req, t.insertId, 'create', { slug: b.slug, org_type: b.org_type, apps: on, billing: b.billing });
@@ -687,6 +688,7 @@ router.put('/tenants/:id/modules', needsAccess, validate(z.object({ modules: z.r
     const before = M.settle(want, org);
     const on = M.apply(want, req.body.modules, org);
     for (const k of M.KEYS) await conn.query('INSERT INTO tenant_modules (tenant_id, module, enabled) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)', [id, k, on.includes(k) ? 1 : 0]);
+    await require('../lib/templatepacks').seed(conn, id); // an add-on turned on brings its built-in checklists, once
     const asked = Object.keys(req.body.modules).filter((k) => on.includes(k) !== req.body.modules[k]);
     await log(conn, req, id, 'apps', { turned_on: on.filter((k) => !before.includes(k)), turned_off: before.filter((k) => !on.includes(k)) });
     return { modules: on, not_applied: asked };

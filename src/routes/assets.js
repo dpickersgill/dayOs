@@ -16,7 +16,10 @@ const { notFound, bad, conflict, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const O = require('../lib/ops');
 const A = require('../lib/assets');
+const MF = require('../lib/mapfeatures');
+const AI = require('../lib/assetinspect');
 const maintenance = require('./maintenance');
+const photos = require('./assetphotos');
 
 const router = express.Router();
 const crew = requireRole('staff', 'manager');
@@ -24,6 +27,9 @@ const manager = requireRole('manager');
 router.use(crew);
 // The asset map: points, lines and areas for what lies where (routes/assetmap.js).
 router.use('/map', require('./assetmap'));
+// Programs: one job over many assets or map features (routes/assetprograms.js), and photos (routes/assetphotos.js).
+router.use('/programs', require('./assetprograms'));
+router.use('/photos', photos);
 
 const tzOf = async (conn, tenantId) => (await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone;
 const nullable = (s) => s.nullable().optional();
@@ -40,13 +46,20 @@ async function mustExist(conn, table, tenantId, id, what) {
   if (id && !(await one(conn, `SELECT id FROM \`${table}\` WHERE tenant_id = ? AND id = ?`, [tenantId, id]))) throw notFound(what);
 }
 
+/** A checklist as the screens use it. */
+const tplOut = (t) => ({ ...t, kinds: t.kinds ? t.kinds.split(',') : [], map_kinds: t.map_kinds ? t.map_kinds.split(',') : [], items: JSON.parse(t.items), sets_condition: Boolean(t.sets_condition), active: Boolean(t.active) });
+
 router.get('/meta', async (req, res) => {
   await A.ensureSettings(pool, req.auth.tenantId);
-  const templates = await rows(pool, 'SELECT id, name, kinds, items, active FROM inspection_templates WHERE tenant_id = ? ORDER BY name', [req.auth.tenantId]);
+  const { org, on } = await require('../lib/modules').stateOf(req.auth.tenantId);
+  const templates = await rows(pool, 'SELECT id, name, kinds, map_kinds, items, active, sets_condition, pack FROM inspection_templates WHERE tenant_id = ? ORDER BY name', [req.auth.tenantId]);
   res.json({
     kinds: O.ASSET_KINDS, categories: A.CATEGORIES,
     fuel_types: ['diesel', 'gasoline', 'propane', 'electric', 'other', 'none'],
-    templates: templates.map((t) => ({ ...t, kinds: t.kinds ? t.kinds.split(',') : [], items: JSON.parse(t.items) })),
+    templates: templates.map(tplOut),
+    // Condition, criticality and risk (muni release 1), and the map kinds a checklist can be for.
+    conditions: MF.CONDITIONS, criticalities: MF.CRITICALITIES, ownership: MF.OWNERSHIP, risk_levels: MF.RISK_LEVELS.map(([min, key, label]) => ({ key, label, min })),
+    map_kinds: MF.kindsFor(org, on).map((k) => ({ key: k.key, label: k.label, geometry: k.geometry, system: k.system, group: k.group })),
     can_manage: isManager(req),
   });
 });
@@ -134,6 +147,10 @@ const assetFields = {
   warranty_expires: date, warranty_note: nullable(z.string().max(255)),
   registration_expires: date, insurance_expires: date, inspection_expires: date,
   critical: z.boolean().transform((v) => (v ? 1 : 0)).optional(),
+  // Condition (1 new to 5 failed), criticality (1 low to 5 severe), who owns it, and for pipe and plant its material, size and year.
+  condition_score: nullable(z.number().int().min(1).max(5)), criticality: nullable(z.number().int().min(1).max(5)),
+  ownership: nullable(z.enum(['own', 'authority', 'private', 'state', 'other'])),
+  material: nullable(z.string().trim().max(40)), size: nullable(z.string().trim().max(40)), installed_year: nullable(z.number().int().min(1800).max(2100)),
   hours: z.number().min(0).max(9999999).optional(), miles: z.number().min(0).max(99999999).optional(),
 };
 const COLS = Object.keys(assetFields).filter((k) => !['hours', 'miles'].includes(k));
@@ -175,7 +192,8 @@ async function plans(conn, tenantId, today, assetId) {
 const RANK = { overdue: 0, soon: 1, never: 2, ok: 3 };
 
 function shape(a, today, warn) {
-  const out = { ...a, category: A.categoryOf(a), hours: Number(a.hours), miles: num(a.miles), open_orders: Number(a.open_orders || 0) };
+  const out = { ...a, category: A.categoryOf(a), hours: Number(a.hours), miles: num(a.miles), open_orders: Number(a.open_orders || 0),
+    condition_score: num(a.condition_score), criticality: num(a.criticality), risk: MF.riskOf(a.condition_score, a.criticality) };
   for (const k of ['purchased_on', 'warranty_expires', 'registration_expires', 'insurance_expires', 'inspection_expires', 'retired_on']) out[k] = A.ymd(a[k]);
   out.papers = A.papers(out, today, warn);
   return out;
@@ -191,6 +209,9 @@ router.get('/register', async (req, res) => {
   if (req.query.q) { const q = `%${first(req.query.q).slice(0, 60)}%`; where.push('(a.name LIKE ? OR a.asset_tag LIKE ? OR a.make_model LIKE ? OR a.serial LIKE ? OR a.vin LIKE ? OR a.plate LIKE ?)'); params.push(q, q, q, q, q, q); }
   let data = (await rows(pool, `${LIST_SQL} WHERE ${where.join(' AND ')} ORDER BY a.name`, params)).map((a) => shape(a, today, settings.expiry_warn_days));
   if (req.query.category) data = data.filter((a) => a.category === first(req.query.category));
+  // risk=medium|high|very_high: that level or above; sort=risk: highest risk first (no risk last).
+  if (req.query.risk) { const min = MF.RISK_MIN[first(req.query.risk)]; if (!min) throw bad('Risk is low, medium, high or very_high'); data = data.filter((a) => a.risk && a.risk.score >= min); }
+  if (first(req.query.sort || '') === 'risk') data.sort((x, y) => (y.risk ? y.risk.score : 0) - (x.risk ? x.risk.score : 0) || x.name.localeCompare(y.name));
   const pm = await plans(pool, t, today);
   for (const a of data) {
     const mine = pm.filter((p) => p.asset_id === a.id).sort((x, y) => RANK[x.state] - RANK[y.state]);
@@ -222,7 +243,7 @@ router.get('/register/:id', async (req, res) => {
         COALESCE((SELECT SUM(l.hours * l.rate_cents) FROM work_order_labor l WHERE l.tenant_id = w.tenant_id AND l.work_order_id = w.id), 0) AS labor_cents,
         COALESCE((SELECT SUM(-m.qty * m.unit_cost_cents) FROM part_moves m WHERE m.tenant_id = w.tenant_id AND m.work_order_id = w.id AND m.kind IN ('issue','return')), 0) AS parts_cents
       FROM work_orders w WHERE w.tenant_id = ? AND w.asset_id = ? ORDER BY w.opened_at DESC, w.id DESC LIMIT 60`, [t, id]),
-    rows(pool, 'SELECT id, template_name, result, inspector, done_at, work_order_id, hours, miles, items, note FROM asset_inspections WHERE tenant_id = ? AND asset_id = ? ORDER BY done_at DESC, id DESC LIMIT 20', [t, id]),
+    rows(pool, 'SELECT id, template_name, result, inspector, done_at, work_order_id, hours, miles, items, note, program_id, condition_score FROM asset_inspections WHERE tenant_id = ? AND asset_id = ? ORDER BY done_at DESC, id DESC LIMIT 20', [t, id]),
     rows(pool, `SELECT m.at, m.kind, m.qty, m.unit_cost_cents, m.work_order_id, p.sku, p.name, p.unit FROM part_moves m JOIN parts p ON p.tenant_id = m.tenant_id AND p.id = m.part_id
       WHERE m.tenant_id = ? AND m.asset_id = ? AND m.kind IN ('issue','return') ORDER BY m.at DESC, m.id DESC LIMIT 50`, [t, id]),
     A.costs(pool, t, [id], since),
@@ -230,10 +251,14 @@ router.get('/register/:id', async (req, res) => {
   ]);
   const c = costMap.get(id);
   const see = isManager(req);
-  const onMap = await one(pool, 'SELECT COUNT(*) AS n FROM map_features WHERE tenant_id = ? AND asset_id = ?', [t, id]);
+  const [onMap, pics, hours] = await Promise.all([
+    one(pool, 'SELECT COUNT(*) AS n FROM map_features WHERE tenant_id = ? AND asset_id = ?', [t, id]),
+    photos.listFor(pool, t, { type: 'asset', id }),
+    AI.runHours(pool, t, { type: 'asset', id }),
+  ]);
   res.json({
     ...a,
-    on_map: Number(onMap.n),
+    on_map: Number(onMap.n), photos: pics, run_hours: hours.pumps.length ? hours : null,
     ...(see ? {} : { purchase_cents: undefined, salvage_cents: undefined }),
     children, meters, fuel: fuel.map((f) => ({ ...f, gallons: Number(f.gallons) })),
     // opened_at is UTC; the day it was opened is given on the mountain's clock.
@@ -348,58 +373,78 @@ router.post('/register/:id/fuel', validate(z.object({
 });
 
 // ---------------------------------------------------------------- inspections
-const tplFields = { name: z.string().trim().min(1).max(120), kinds: z.array(z.string().refine((k) => O.ASSET_KIND_KEYS.includes(k), 'Unknown type')).max(30).default([]), items: z.array(CR.stepSchema).min(1).max(60), active: z.boolean().optional() };
+// kinds: the asset types it is for; map_kinds: the map kinds it is for (a valve, a fire hydrant); sets_condition: its
+// condition score item moves the asset's or map item's condition.
+const tplFields = { name: z.string().trim().min(1).max(120), kinds: z.array(z.string().refine((k) => O.ASSET_KIND_KEYS.includes(k), 'Unknown type')).max(30).default([]),
+  map_kinds: z.array(z.string().refine((k) => MF.KIND_KEYS.includes(k), 'Unknown kind of map item')).max(30).default([]),
+  items: z.array(CR.stepSchema).min(1).max(60), active: z.boolean().optional(), sets_condition: z.boolean().optional() };
+const checkItems = (items, setsCondition) => {
+  if (new Set(items.map((i) => i.key)).size !== items.length) throw bad('Each item needs its own key');
+  if (setsCondition && !items.some((i) => i.type === 'condition')) throw bad('A checklist that sets the condition needs a condition score item');
+};
+router.get('/templates', async (req, res) => {
+  await A.ensureSettings(pool, req.auth.tenantId);
+  res.json({ data: (await rows(pool, 'SELECT id, name, kinds, map_kinds, items, active, sets_condition, pack FROM inspection_templates WHERE tenant_id = ? ORDER BY name', [req.auth.tenantId])).map(tplOut) });
+});
 router.post('/templates', manager, validate(z.object(tplFields)), async (req, res) => {
   const b = req.body;
-  if (new Set(b.items.map((i) => i.key)).size !== b.items.length) throw bad('Each item needs its own key');
+  checkItems(b.items, b.sets_condition);
   try {
-    const [r] = await pool.query('INSERT INTO inspection_templates (tenant_id, name, kinds, items) VALUES (?, ?, ?, ?)', [req.auth.tenantId, b.name, b.kinds.join(',') || null, JSON.stringify(b.items)]);
+    const [r] = await pool.query('INSERT INTO inspection_templates (tenant_id, name, kinds, map_kinds, items, sets_condition) VALUES (?, ?, ?, ?, ?, ?)',
+      [req.auth.tenantId, b.name, b.kinds.join(',') || null, b.map_kinds.join(',') || null, JSON.stringify(b.items), b.sets_condition ? 1 : 0]);
+    await audit(pool, req, 'create', 'inspection_templates', r.insertId, { name: b.name });
     res.status(201).json({ id: r.insertId });
   } catch (err) { if (err.code === 'ER_DUP_ENTRY') throw conflict('There is already a checklist with that name'); throw err; }
 });
 router.patch('/templates/:id', manager, validate(partialOf(tplFields)), async (req, res) => {
   const b = { ...req.body };
-  if (b.items && new Set(b.items.map((i) => i.key)).size !== b.items.length) throw bad('Each item needs its own key');
+  const cur = await one(pool, 'SELECT items, sets_condition FROM inspection_templates WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, paramId(req)]);
+  if (!cur) throw notFound('Checklist');
+  checkItems(b.items || JSON.parse(cur.items), b.sets_condition ?? Boolean(cur.sets_condition));
   if (b.kinds) b.kinds = b.kinds.join(',') || null;
+  if (b.map_kinds) b.map_kinds = b.map_kinds.join(',') || null;
   if (b.items) b.items = JSON.stringify(b.items);
-  const set = setClause(b, ['name', 'kinds', 'items', 'active']);
+  if (b.sets_condition !== undefined) b.sets_condition = b.sets_condition ? 1 : 0;
+  const set = setClause(b, ['name', 'kinds', 'map_kinds', 'items', 'active', 'sets_condition']);
   if (!set) throw bad('Nothing to change');
-  const [r] = await pool.query(`UPDATE inspection_templates SET ${set.sql} WHERE tenant_id = ? AND id = ?`, [...set.values, req.auth.tenantId, paramId(req)]);
-  if (!r.affectedRows) throw notFound('Checklist');
+  try {
+    const [r] = await pool.query(`UPDATE inspection_templates SET ${set.sql} WHERE tenant_id = ? AND id = ?`, [...set.values, req.auth.tenantId, paramId(req)]);
+    if (!r.affectedRows) throw notFound('Checklist');
+  } catch (err) { if (err.code === 'ER_DUP_ENTRY') throw conflict('There is already a checklist with that name'); throw err; }
+  await audit(pool, req, 'update', 'inspection_templates', paramId(req), Object.keys(req.body));
   res.json({ ok: true });
 });
 
-/** A completed checklist. Every item is answered; a failed one needs a note, opens a work order and flags the asset. */
+/**
+ * A completed checklist. Every item is answered; a failed one needs a note (or fails by its own rule), opens a work order
+ * and flags the asset. A checklist that sets the condition moves the asset's condition score (lib/assetinspect.js).
+ */
 router.post('/register/:id/inspections', validate(z.object({
   template_id: z.number().int().positive(),
   items: z.array(CR.answerSchema).min(1),
   hours: nullable(z.number().min(0).max(9999999)), miles: nullable(z.number().min(0).max(99999999)),
   inspector: nullable(z.string().max(100)), note: nullable(z.string().max(500)),
 })), async (req, res) => {
-  const id = paramId(req); const b = req.body; const t = req.auth.tenantId;
   const out = await tx(async (conn) => {
-    const a = await one(conn, 'SELECT id, name, asset_tag, status, critical FROM ops_assets WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, id]);
-    if (!a) throw notFound('Asset');
-    const tpl = await one(conn, 'SELECT * FROM inspection_templates WHERE tenant_id = ? AND id = ?', [t, b.template_id]);
-    if (!tpl) throw notFound('Checklist');
-    // Readings and dates are checked against their rules here: one outside its range fails by itself, with the reason.
-    const at = nowIn(await tzOf(conn, t));
-    let items;
-    try { items = CR.evaluateAll(JSON.parse(tpl.items), b.items, at.slice(0, 10)); } catch (e) { throw bad(e.message); }
-    const failed = items.filter((i) => i.result === 'fail');
-    for (const m of ['hours', 'miles']) if (b[m] !== null && b[m] !== undefined) await recordMeter(conn, req, id, m, b[m], 'inspection', at);
-    let woId = null;
-    if (failed.length) {
-      woId = await maintenance.createOrder(conn, req, { title: `Failed ${tpl.name.toLowerCase()}: ${a.name}`, description: failed.map((i) => `${i.label}${i.value != null ? ` (${i.value}${i.unit ? ` ${i.unit}` : ''})` : ''}: ${i.note}`).join('\n'), priority: a.critical ? 'urgent' : 'high', asset_id: id }, 'inspection');
-      if (a.status === 'in_service') await conn.query("UPDATE ops_assets SET status = 'needs_service' WHERE tenant_id = ? AND id = ?", [t, id]);
-    }
-    const who = b.inspector || (await one(conn, "SELECT COALESCE(NULLIF(CONCAT(p.first_name, ' ', p.last_name), ' '), u.email, u.username) AS n FROM users u LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id WHERE u.tenant_id = ? AND u.id = ?", [t, req.auth.userId]) || {}).n || null;
-    const [r] = await conn.query('INSERT INTO asset_inspections (tenant_id, asset_id, template_id, template_name, result, items, hours, miles, inspector, note, work_order_id, user_id, done_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [t, id, tpl.id, tpl.name, failed.length ? 'fail' : 'pass', JSON.stringify(items), b.hours ?? null, b.miles ?? null, who, b.note ?? null, woId, req.auth.userId, at]);
-    await audit(conn, req, 'inspect', 'ops_assets', id, { result: failed.length ? 'fail' : 'pass', work_order_id: woId });
-    return { id: r.insertId, result: failed.length ? 'fail' : 'pass', work_order_id: woId };
+    const target = await AI.targetOf(conn, req.auth.tenantId, { assetId: paramId(req) }, true);
+    return AI.record(conn, req, target, req.body, { recordMeter });
   });
   res.status(201).json(out);
+});
+
+// Photos of an asset (routes/assetphotos.js), and a pump station's run hours by month from its rounds.
+router.post('/register/:id/photos', photos.raw, async (req, res) => photos.upload(req, res, { type: 'asset', id: paramId(req) }));
+router.get('/register/:id/run-hours', async (req, res) => {
+  const t = req.auth.tenantId; const id = paramId(req);
+  const a = await one(pool, 'SELECT id, asset_tag FROM ops_assets WHERE tenant_id = ? AND id = ?', [t, id]);
+  if (!a) throw notFound('Asset');
+  const data = await AI.runHours(pool, t, { type: 'asset', id });
+  if (req.query.format === 'csv') {
+    await audit(pool, req, 'export', 'station_run_hours', null, { asset_id: id, months: data.months.length });
+    res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${String(a.asset_tag || `asset-${id}`).replace(/[^A-Za-z0-9-]+/g, '-')}-run-hours.csv"` }).send(AI.runHoursCsv(data));
+    return;
+  }
+  res.json(data);
 });
 
 /** Something wrong, reported from the asset page (often after scanning its tag): opens a work order. */
@@ -704,6 +749,35 @@ router.post('/purchase-orders/:id/receive', validate(z.object({ lines: z.array(z
     return status;
   });
   res.json({ status: out });
+});
+
+// ---------------------------------------------------------------- risk
+/**
+ * The highest risk on the register and the map together (condition x criticality), highest first: up to 25 (limit up to
+ * 200). Retired assets and abandoned map items are left out. Something with no condition or criticality has no risk.
+ */
+router.get('/risk', async (req, res) => {
+  const t = req.auth.tenantId;
+  const limit = Math.min(Math.max(Number(first(req.query.limit || 25)) || 25, 1), 200);
+  const { org } = await require('../lib/modules').stateOf(t);
+  const [assets, features] = await Promise.all([
+    rows(pool, `SELECT a.id, a.name, a.asset_tag, a.kind, a.status, a.condition_score, a.criticality, a.ownership,
+        (SELECT COUNT(*) FROM work_orders w WHERE w.tenant_id = a.tenant_id AND w.asset_id = a.id AND w.status NOT IN ('done','cancelled')) AS open_orders
+      FROM ops_assets a WHERE a.tenant_id = ? AND a.status <> 'retired' AND a.condition_score IS NOT NULL AND a.criticality IS NOT NULL
+      ORDER BY a.condition_score * a.criticality DESC, a.criticality DESC, a.name LIMIT ?`, [t, limit]),
+    rows(pool, `SELECT f.id, f.name, f.tag, f.kind, f.status, f.condition_score, f.criticality, f.ownership, f.lat, f.lng,
+        (SELECT COUNT(*) FROM work_orders w WHERE w.tenant_id = f.tenant_id AND w.map_feature_id = f.id AND w.status NOT IN ('done','cancelled')) AS open_orders
+      FROM map_features f WHERE f.tenant_id = ? AND f.status <> 'abandoned' AND f.condition_score IS NOT NULL AND f.criticality IS NOT NULL
+      ORDER BY f.condition_score * f.criticality DESC, f.criticality DESC, f.id LIMIT ?`, [t, limit]),
+  ]);
+  const kindLabel = (k) => (O.ASSET_KINDS.find((x) => x.value === k) || { label: k }).label;
+  const data = [
+    ...assets.map((a) => ({ ...a, type: 'asset', tag: a.asset_tag, kind_label: kindLabel(a.kind), href: `#/assets/a/${a.id}` })),
+    ...features.map((f) => { const k = MF.kindOf(f.kind) || { label: f.kind }; return { ...f, type: 'feature', name: f.name || (f.tag ? `${k.label} ${f.tag}` : k.label), kind_label: k.label, system: MF.systemFor(k, org), lat: Number(f.lat), lng: Number(f.lng), href: `#/assets/map/f${f.id}` }; }),
+  ].map((x) => ({ ...x, condition_score: Number(x.condition_score), criticality: Number(x.criticality), open_orders: Number(x.open_orders || 0), risk: MF.riskOf(x.condition_score, x.criticality) }))
+    .sort((x, y) => y.risk.score - x.risk.score || y.criticality - x.criticality || String(x.name).localeCompare(String(y.name)))
+    .slice(0, limit);
+  res.json({ data });
 });
 
 // ---------------------------------------------------------------- overview and lifecycle
